@@ -1,0 +1,20 @@
+[package]
+name = "uni-core-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "One-shot CLI over uni-core: `uni-core-cli sync`"
+
+[[bin]]
+name = "uni-core-cli"
+path = "src/main.rs"
+
+[dependencies]
+uni-core = { workspace = true }
+nostr = { workspace = true }
+tokio = { workspace = true }
+anyhow = { workspace = true }
+clap = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

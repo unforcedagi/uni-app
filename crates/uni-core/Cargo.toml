@@ -1,0 +1,27 @@
+[package]
+name = "uni-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Uni app core: Buzz relay adapter + local SQLite store (Phase 1)"
+
+[dependencies]
+buzz-ws-client = { workspace = true }
+buzz-sdk = { workspace = true }
+nostr = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+rusqlite = { workspace = true }
+uuid = { workspace = true }
+keyring = { workspace = true }
+rustls = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
+tokio-tungstenite = "0.29"
+futures-util = "0.3"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "sync"] }
