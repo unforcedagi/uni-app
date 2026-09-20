@@ -57,6 +57,7 @@ amount of live traffic inserts nothing (asserted in the live test).
 - **Membership sub `since`** is `now - 60 s` on each connect; a 44100 that arrives while disconnected is caught by the next `sync_once`/`live` discovery pass (39002), not by the sub.
 - **500-result cap**: one REQ per channel with `limit=500`; channels with more history are not paginated backwards yet.
 - **Backoff has no jitter** (deterministic for tests); add before many clients share one relay.
+- **Keychain prompts from unsigned binaries.** Once a `uni-app/nsec` entry exists, an unsigned test/debug binary that reads it triggers an interactive Keychain access prompt (it hung `cargo test` headless). Tests set `UNI_NO_KEYRING=1` so `load_keys` skips the keyring; the Tauri build must be code-signed so the entry is created and read by the same signed identity.
 
 ## Real relay run
 

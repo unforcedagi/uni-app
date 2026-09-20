@@ -67,11 +67,13 @@ pub fn load_keys(allow_ephemeral: bool) -> Result<(Keys, KeySource)> {
         }
     }
 
-    match read_keyring() {
-        Ok(Some(keys)) => return Ok((keys, KeySource::Keyring)),
-        Ok(None) => {}
-        Err(e) => {
-            tracing::warn!("keyring lookup failed ({e}); falling through");
+    if !skip_keyring() {
+        match read_keyring() {
+            Ok(Some(keys)) => return Ok((keys, KeySource::Keyring)),
+            Ok(None) => {}
+            Err(e) => {
+                tracing::warn!("keyring lookup failed ({e}); falling through");
+            }
         }
     }
 
@@ -82,6 +84,18 @@ pub fn load_keys(allow_ephemeral: bool) -> Result<(Keys, KeySource)> {
     Err(Error::Identity(format!(
         "no key found: set {ENV_NSEC}, or run `key init` to create one in the keyring ({KEYRING_SERVICE}/{KEYRING_ACCOUNT})"
     )))
+}
+
+/// Env var that disables the keyring lookup (`UNI_NO_KEYRING=1`).
+///
+/// Tests set this: an unsigned test binary reading the macOS Keychain
+/// triggers an interactive access prompt, which hangs a headless run.
+pub const ENV_NO_KEYRING: &str = "UNI_NO_KEYRING";
+
+fn skip_keyring() -> bool {
+    std::env::var(ENV_NO_KEYRING)
+        .map(|v| !v.trim().is_empty() && v.trim() != "0")
+        .unwrap_or(false)
 }
 
 fn entry() -> Result<keyring::Entry> {
@@ -145,11 +159,13 @@ mod tests {
 
     #[test]
     fn ephemeral_when_allowed_and_env_unset() {
-        // Do not touch the real keyring in tests beyond a NoEntry-style miss;
-        // `allow_ephemeral` guarantees a key comes back either way.
+        // Never touch the real keyring from a test: an unsigned test binary
+        // reading the macOS Keychain pops an interactive prompt and hangs.
         std::env::remove_var(ENV_NSEC);
+        std::env::set_var(ENV_NO_KEYRING, "1");
         let (_k, src) = load_keys(true).expect("ephemeral key");
-        assert!(matches!(src, KeySource::Ephemeral | KeySource::Keyring));
+        assert_eq!(src, KeySource::Ephemeral);
+        assert!(load_keys(false).is_err());
     }
 
     #[test]
