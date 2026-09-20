@@ -2,19 +2,29 @@
 //! `uni-core` — the Uni app's protocol core (Phase 1: Buzz read path).
 //!
 //! Modules:
-//! - [`identity`]: load the Nostr key from an env var or the macOS keyring (never logs it).
-//! - [`store`]: local SQLite store with the unified `items` table (spec §5).
-//! - [`buzz`]: relay adapter — NIP-42 auth, channel discovery, per-channel kind-9 history.
-//! - [`sync`]: one-shot orchestration: connect → discover → pull → store.
+//! - [`identity`]: load the Nostr key from an env var or the macOS keyring (never logs it);
+//!   `init_keyring_key` creates a persistent app key and returns only the pubkey.
+//! - [`store`]: local SQLite store with the unified `items` table (spec §5), a
+//!   kind-0 `profiles` cache and an FTS5 index over `items.body`.
+//! - [`buzz`]: relay adapter — NIP-42 auth, channel discovery, per-channel kind-9
+//!   history, profile fetch, and open (live) subscriptions.
+//! - [`sync`]: one-shot orchestration: connect → discover → pull → profiles → store.
+//!   A single pass is complete and idempotent (the phone's whole loop).
+//! - [`live`]: optional long-lived loop on top: open subs after EOSE, membership
+//!   notifications, reconnect with [`backoff`] and re-AUTH.
 
+pub mod backoff;
 pub mod buzz;
 pub mod identity;
+pub mod live;
 pub mod store;
 pub mod sync;
 
+pub use backoff::Backoff;
 pub use buzz::{probe, BuzzClient, ChannelInfo, ProbeReport};
-pub use identity::{load_keys, KeySource};
-pub use store::{Item, Store};
+pub use identity::{init_keyring_key, keyring_pubkey, load_keys, KeyInit, KeySource};
+pub use live::{run_live, LiveConfig, LiveEvent};
+pub use store::{Item, Profile, Store};
 pub use sync::{sync_once, SyncReport};
 
 /// Errors produced by uni-core.

@@ -3,7 +3,14 @@
 //! `items` is the unified timeline projection (spec §5): one row per Buzz
 //! event or vault note. Phase 1 writes only `source = 'buzz'` rows.
 //! `channels` caches discovery output; `sync_state` holds per-channel
-//! `since` watermarks so a re-run only pulls new history.
+//! `since` watermarks so a re-run only pulls new history; `profiles` caches
+//! kind-0 metadata for name resolution; `items_fts` is an FTS5 index over
+//! `items.body` kept in sync by triggers.
+//!
+//! Every write is idempotent (`INSERT OR IGNORE` on the `(source, ref)`
+//! primary key plus a unique index on `ref`), so a sync pass can be re-run
+//! at any time — the mobile model is connect-on-open → one full pass →
+//! disconnect.
 
 use rusqlite::{params, Connection, OptionalExtension};
 use std::path::Path;
@@ -29,6 +36,52 @@ pub struct Item {
     pub mentions_me: bool,
 }
 
+/// Cached kind-0 profile.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Profile {
+    /// Pubkey hex.
+    pub pubkey: String,
+    /// `name` field.
+    pub name: Option<String>,
+    /// `display_name` field.
+    pub display_name: Option<String>,
+    /// `picture` URL.
+    pub picture: Option<String>,
+    /// `nip05` identifier.
+    pub nip05: Option<String>,
+    /// `created_at` of the kind-0 event this row came from.
+    pub updated_at: i64,
+}
+
+impl Profile {
+    /// Parse a kind-0 event's JSON content. Unknown fields are ignored;
+    /// malformed JSON yields an empty profile (the row still records that
+    /// we fetched something, so we don't re-query every sync).
+    pub fn from_kind0(pubkey: &str, content: &str, created_at: i64) -> Self {
+        let v: serde_json::Value = serde_json::from_str(content).unwrap_or_default();
+        let s = |k: &str| {
+            v.get(k)
+                .and_then(|x| x.as_str())
+                .map(str::trim)
+                .filter(|x| !x.is_empty())
+                .map(str::to_string)
+        };
+        Self {
+            pubkey: pubkey.to_string(),
+            name: s("name"),
+            display_name: s("display_name"),
+            picture: s("picture"),
+            nip05: s("nip05"),
+            updated_at: created_at,
+        }
+    }
+
+    /// Best human label: `display_name`, else `name`, else `None`.
+    pub fn label(&self) -> Option<&str> {
+        self.display_name.as_deref().or(self.name.as_deref())
+    }
+}
+
 /// SQLite-backed store.
 pub struct Store {
     conn: Connection,
@@ -45,8 +98,10 @@ CREATE TABLE IF NOT EXISTS items (
     mentions_me INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (source, ref)
 );
+CREATE UNIQUE INDEX IF NOT EXISTS items_ref ON items(ref);
 CREATE INDEX IF NOT EXISTS items_ts ON items(ts DESC);
 CREATE INDEX IF NOT EXISTS items_channel_ts ON items(channel, ts DESC);
+CREATE INDEX IF NOT EXISTS items_author ON items(author);
 
 CREATE TABLE IF NOT EXISTS channels (
     id          TEXT PRIMARY KEY,
@@ -60,6 +115,33 @@ CREATE TABLE IF NOT EXISTS sync_state (
     channel     TEXT PRIMARY KEY,
     since       INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS profiles (
+    pubkey       TEXT PRIMARY KEY,
+    name         TEXT,
+    display_name TEXT,
+    picture      TEXT,
+    nip05        TEXT,
+    updated_at   INTEGER NOT NULL
+);
+"#;
+
+/// FTS5 external-content index over `items.body`, synced by triggers.
+/// `content_rowid` is the implicit SQLite rowid of `items`.
+const FTS_SCHEMA: &str = r#"
+CREATE VIRTUAL TABLE IF NOT EXISTS items_fts USING fts5(
+    body, content='items', content_rowid='rowid', tokenize='unicode61'
+);
+CREATE TRIGGER IF NOT EXISTS items_ai AFTER INSERT ON items BEGIN
+    INSERT INTO items_fts(rowid, body) VALUES (new.rowid, new.body);
+END;
+CREATE TRIGGER IF NOT EXISTS items_ad AFTER DELETE ON items BEGIN
+    INSERT INTO items_fts(items_fts, rowid, body) VALUES ('delete', old.rowid, old.body);
+END;
+CREATE TRIGGER IF NOT EXISTS items_au AFTER UPDATE ON items BEGIN
+    INSERT INTO items_fts(items_fts, rowid, body) VALUES ('delete', old.rowid, old.body);
+    INSERT INTO items_fts(rowid, body) VALUES (new.rowid, new.body);
+END;
 "#;
 
 impl Store {
@@ -67,14 +149,28 @@ impl Store {
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let conn = Connection::open(path)?;
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
-        conn.execute_batch(SCHEMA)?;
-        Ok(Self { conn })
+        Self::init(conn)
     }
 
     /// In-memory store (tests).
     pub fn open_in_memory() -> Result<Self> {
-        let conn = Connection::open_in_memory()?;
+        Self::init(Connection::open_in_memory()?)
+    }
+
+    fn init(conn: Connection) -> Result<Self> {
         conn.execute_batch(SCHEMA)?;
+        // If the FTS table is being created for the first time on a database
+        // that already has items (schema upgrade), rebuild the index from
+        // the content table so old rows are searchable.
+        let had_fts: bool = conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='items_fts'",
+            [],
+            |r| r.get::<_, i64>(0),
+        )? > 0;
+        conn.execute_batch(FTS_SCHEMA)?;
+        if !had_fts {
+            conn.execute("INSERT INTO items_fts(items_fts) VALUES ('rebuild')", [])?;
+        }
         Ok(Self { conn })
     }
 
@@ -116,6 +212,19 @@ impl Store {
         Ok(())
     }
 
+    /// Channel name by uuid string, if cached.
+    pub fn channel_name(&self, id: &str) -> Result<Option<String>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT name FROM channels WHERE id = ?1",
+                params![id],
+                |r| r.get::<_, Option<String>>(0),
+            )
+            .optional()?
+            .flatten())
+    }
+
     /// Per-channel `since` watermark (max `ts` seen), if any.
     pub fn since_for(&self, channel: &str) -> Result<Option<i64>> {
         Ok(self
@@ -138,6 +247,76 @@ impl Store {
         Ok(())
     }
 
+    /// Upsert a profile; a row is only replaced by a newer `updated_at`.
+    /// Returns `true` if the row was inserted or replaced.
+    pub fn upsert_profile(&self, p: &Profile) -> Result<bool> {
+        let n = self.conn.execute(
+            "INSERT INTO profiles (pubkey, name, display_name, picture, nip05, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(pubkey) DO UPDATE SET
+               name = excluded.name, display_name = excluded.display_name,
+               picture = excluded.picture, nip05 = excluded.nip05,
+               updated_at = excluded.updated_at
+             WHERE excluded.updated_at > profiles.updated_at",
+            params![
+                p.pubkey,
+                p.name,
+                p.display_name,
+                p.picture,
+                p.nip05,
+                p.updated_at
+            ],
+        )?;
+        Ok(n == 1)
+    }
+
+    /// Cached profile for `pubkey`, if any.
+    pub fn profile(&self, pubkey: &str) -> Result<Option<Profile>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT pubkey, name, display_name, picture, nip05, updated_at
+                 FROM profiles WHERE pubkey = ?1",
+                params![pubkey],
+                |r| {
+                    Ok(Profile {
+                        pubkey: r.get(0)?,
+                        name: r.get(1)?,
+                        display_name: r.get(2)?,
+                        picture: r.get(3)?,
+                        nip05: r.get(4)?,
+                        updated_at: r.get(5)?,
+                    })
+                },
+            )
+            .optional()?)
+    }
+
+    /// Human label for `pubkey`: cached `display_name` / `name`, else the
+    /// first 8 hex chars followed by `…`.
+    pub fn display_name(&self, pubkey: &str) -> Result<String> {
+        if let Some(p) = self.profile(pubkey)? {
+            if let Some(l) = p.label() {
+                return Ok(l.to_string());
+            }
+        }
+        Ok(format!("{}…", &pubkey[..8.min(pubkey.len())]))
+    }
+
+    /// Distinct item authors with no `profiles` row (candidates for a kind-0 fetch).
+    pub fn authors_without_profile(&self) -> Result<Vec<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT DISTINCT i.author FROM items i
+             LEFT JOIN profiles p ON p.pubkey = i.author
+             WHERE i.source = 'buzz' AND p.pubkey IS NULL
+             ORDER BY i.author",
+        )?;
+        let rows = stmt
+            .query_map([], |r| r.get(0))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
     /// Count items per channel for `source`.
     pub fn count_by_channel(&self, source: &str) -> Result<Vec<(String, i64)>> {
         let mut stmt = self.conn.prepare(
@@ -156,6 +335,13 @@ impl Store {
             .query_row("SELECT COUNT(*) FROM items", [], |r| r.get(0))?)
     }
 
+    /// Total profile count.
+    pub fn count_profiles(&self) -> Result<i64> {
+        Ok(self
+            .conn
+            .query_row("SELECT COUNT(*) FROM profiles", [], |r| r.get(0))?)
+    }
+
     /// Newest-first slice of the timeline.
     pub fn timeline(&self, limit: usize) -> Result<Vec<Item>> {
         let mut stmt = self.conn.prepare(
@@ -163,20 +349,53 @@ impl Store {
              FROM items ORDER BY ts DESC LIMIT ?1",
         )?;
         let rows = stmt
-            .query_map(params![limit as i64], |r| {
-                Ok(Item {
-                    source: r.get(0)?,
-                    r#ref: r.get(1)?,
-                    channel: r.get(2)?,
-                    author: r.get(3)?,
-                    ts: r.get(4)?,
-                    body: r.get(5)?,
-                    mentions_me: r.get::<_, i64>(6)? != 0,
-                })
-            })?
+            .query_map(params![limit as i64], row_to_item)?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         Ok(rows)
     }
+
+    /// Full-text search over `items.body`, best match first (bm25), then newest.
+    ///
+    /// `query` is treated literally (escaped and phrase-quoted) so user
+    /// punctuation never reaches the FTS5 parser. Words match by prefix.
+    pub fn search(&self, query: &str, limit: usize) -> Result<Vec<Item>> {
+        let q = fts_literal_query(query);
+        if q.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut stmt = self.conn.prepare(
+            "SELECT i.source, i.ref, i.channel, i.author, i.ts, i.body, i.mentions_me
+             FROM items_fts f JOIN items i ON i.rowid = f.rowid
+             WHERE items_fts MATCH ?1
+             ORDER BY bm25(items_fts), i.ts DESC LIMIT ?2",
+        )?;
+        let rows = stmt
+            .query_map(params![q, limit as i64], row_to_item)?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+}
+
+fn row_to_item(r: &rusqlite::Row<'_>) -> rusqlite::Result<Item> {
+    Ok(Item {
+        source: r.get(0)?,
+        r#ref: r.get(1)?,
+        channel: r.get(2)?,
+        author: r.get(3)?,
+        ts: r.get(4)?,
+        body: r.get(5)?,
+        mentions_me: r.get::<_, i64>(6)? != 0,
+    })
+}
+
+/// Turn free text into a safe FTS5 query: each whitespace-separated token
+/// becomes a quoted prefix term (`"tok"*`), ANDed together. Embedded double
+/// quotes are doubled per FTS5 string rules.
+pub fn fts_literal_query(text: &str) -> String {
+    text.split_whitespace()
+        .map(|t| format!("\"{}\"*", t.replace('"', "\"\"")))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 #[cfg(test)]
@@ -239,5 +458,94 @@ mod tests {
             .unwrap();
         assert_eq!(name, "Uni2");
         assert_eq!(archived, 1);
+        assert_eq!(s.channel_name("u1").unwrap().as_deref(), Some("Uni2"));
+        assert_eq!(s.channel_name("nope").unwrap(), None);
+    }
+
+    #[test]
+    fn profiles_newest_wins_and_resolve_names() {
+        let s = Store::open_in_memory().unwrap();
+        let pk = "ab".repeat(32);
+        assert_eq!(s.display_name(&pk).unwrap(), "abababab…");
+
+        let p1 = Profile::from_kind0(&pk, r#"{"name":"astra","picture":"x"}"#, 10);
+        assert!(s.upsert_profile(&p1).unwrap());
+        assert_eq!(s.display_name(&pk).unwrap(), "astra");
+
+        // Older event must not overwrite.
+        let old = Profile::from_kind0(&pk, r#"{"name":"stale"}"#, 5);
+        assert!(!s.upsert_profile(&old).unwrap());
+        assert_eq!(s.display_name(&pk).unwrap(), "astra");
+
+        // Newer with display_name wins over name.
+        let newer = Profile::from_kind0(&pk, r#"{"name":"astra","display_name":"AstraJi"}"#, 20);
+        assert!(s.upsert_profile(&newer).unwrap());
+        assert_eq!(s.display_name(&pk).unwrap(), "AstraJi");
+        assert_eq!(s.profile(&pk).unwrap().unwrap().picture, None);
+
+        // Malformed content still records a fetch.
+        let bad = Profile::from_kind0("cc", "not json", 1);
+        assert_eq!(bad.label(), None);
+        assert!(s.upsert_profile(&bad).unwrap());
+        assert_eq!(s.display_name("cc").unwrap(), "cc…");
+    }
+
+    #[test]
+    fn authors_without_profile_lists_missing_only() {
+        let s = Store::open_in_memory().unwrap();
+        let mut a = item("e1", "c1", 1);
+        a.author = "a1".into();
+        let mut b = item("e2", "c1", 2);
+        b.author = "b2".into();
+        s.upsert_item(&a).unwrap();
+        s.upsert_item(&b).unwrap();
+        assert_eq!(s.authors_without_profile().unwrap(), vec!["a1", "b2"]);
+        s.upsert_profile(&Profile::from_kind0("a1", "{}", 1))
+            .unwrap();
+        assert_eq!(s.authors_without_profile().unwrap(), vec!["b2"]);
+    }
+
+    #[test]
+    fn fts_search_matches_body_and_is_literal() {
+        let s = Store::open_in_memory().unwrap();
+        let mk = |r: &str, body: &str, ts: i64| Item {
+            body: body.into(),
+            ..item(r, "c1", ts)
+        };
+        s.upsert_item(&mk("e1", "[done] ref: pull/749 merged to next", 10))
+            .unwrap();
+        s.upsert_item(&mk("e2", "heartbeat: nothing new", 11))
+            .unwrap();
+        s.upsert_item(&mk("e3", "the PR didn't merge — eleven-day delay", 12))
+            .unwrap();
+
+        let hits = s.search("merge", 10).unwrap();
+        let refs: Vec<_> = hits.iter().map(|i| i.r#ref.as_str()).collect();
+        assert!(refs.contains(&"e1") && refs.contains(&"e3"), "{refs:?}");
+
+        // Punctuation is literal, never FTS5 syntax.
+        assert_eq!(s.search("didn't", 10).unwrap()[0].r#ref, "e3");
+        assert_eq!(s.search("eleven-day", 10).unwrap()[0].r#ref, "e3");
+        assert_eq!(s.search("\"quoted\" OR x", 10).unwrap().len(), 0);
+        assert_eq!(s.search("   ", 10).unwrap().len(), 0);
+        // Multi-token AND + prefix.
+        assert_eq!(s.search("heart noth", 10).unwrap()[0].r#ref, "e2");
+        assert_eq!(s.search("heart merged", 10).unwrap().len(), 0);
+        assert_eq!(fts_literal_query("a \"b\""), "\"a\"* \"\"\"b\"\"\"*");
+    }
+
+    #[test]
+    fn fts_rebuild_on_schema_upgrade() {
+        // Simulate a pre-FTS database: items exist, no items_fts table.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(SCHEMA).unwrap();
+        conn.execute(
+            "INSERT INTO items (source, ref, channel, author, ts, body, mentions_me)
+             VALUES ('buzz','old','c','a',1,'legacy searchable row',0)",
+            [],
+        )
+        .unwrap();
+        let s = Store::init(conn).unwrap();
+        assert_eq!(s.search("legacy", 5).unwrap().len(), 1);
     }
 }

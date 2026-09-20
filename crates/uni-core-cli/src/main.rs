@@ -1,8 +1,13 @@
 //! `uni-core-cli` — one-shot driver for uni-core.
 //!
 //! ```text
+//! uni-core-cli key init                                   create a persistent app key in the keyring
+//! uni-core-cli key show                                   print the keyring key's pubkey
 //! uni-core-cli sync [--relay wss://…] [--db path] [--ephemeral] [--auth-tag '["auth","…"]']
+//! uni-core-cli live [--relay …] [--db path] [--max-attempts N]
 //! uni-core-cli show [--db path] [--limit N]
+//! uni-core-cli search <query> [--db path] [--limit N]
+//! uni-core-cli probe [--relay …] [--ephemeral]
 //! ```
 //!
 //! The private key is read from `UNI_NSEC` or the macOS keyring (`uni-app`/`nsec`)
@@ -10,7 +15,7 @@
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use uni_core::{load_keys, sync_once, KeySource, Store};
+use uni_core::{load_keys, sync_once, Backoff, KeySource, LiveConfig, LiveEvent, Store};
 
 #[derive(Parser)]
 #[command(name = "uni-core-cli", version, about)]
@@ -21,6 +26,11 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
+    /// Manage the persistent app identity in the macOS keyring.
+    Key {
+        #[command(subcommand)]
+        cmd: KeyCmd,
+    },
     /// Connect, auth, discover channels, pull kind-9 history into SQLite, print counts.
     Sync {
         /// Relay WebSocket URL.
@@ -41,8 +51,35 @@ enum Cmd {
         #[arg(long, env = "BUZZ_AUTH_TAG", hide_env_values = true)]
         auth_tag: Option<String>,
     },
+    /// Stay connected: live subscriptions, membership notifications, reconnect with backoff.
+    Live {
+        #[arg(
+            long,
+            env = "BUZZ_RELAY_URL",
+            default_value = "wss://buzz.unforced.org"
+        )]
+        relay: String,
+        #[arg(long, default_value = "uni.db")]
+        db: String,
+        #[arg(long)]
+        ephemeral: bool,
+        #[arg(long, env = "BUZZ_AUTH_TAG", hide_env_values = true)]
+        auth_tag: Option<String>,
+        /// Give up after this many consecutive failed reconnects (default: never).
+        #[arg(long)]
+        max_attempts: Option<u32>,
+    },
     /// Print the newest N items from the local store.
     Show {
+        #[arg(long, default_value = "uni.db")]
+        db: String,
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+    },
+    /// Full-text search over stored message bodies.
+    Search {
+        /// Words to search for (matched by prefix, all must appear).
+        query: Vec<String>,
         #[arg(long, default_value = "uni.db")]
         db: String,
         #[arg(long, default_value_t = 20)]
@@ -61,6 +98,14 @@ enum Cmd {
         #[arg(long, env = "BUZZ_AUTH_TAG", hide_env_values = true)]
         auth_tag: Option<String>,
     },
+}
+
+#[derive(Subcommand)]
+enum KeyCmd {
+    /// Generate a new key and store it in the keyring (no-op if one exists). Prints the pubkey only.
+    Init,
+    /// Print the pubkey of the key in the keyring.
+    Show,
 }
 
 fn parse_auth_tag(s: Option<String>) -> Result<Option<nostr::Tag>> {
@@ -82,6 +127,25 @@ fn key_source_label(source: KeySource) -> &'static str {
     }
 }
 
+fn print_item(store: &Store, it: &uni_core::Item) -> Result<()> {
+    let body: String = it.body.chars().take(80).collect();
+    let body = body.replace('\n', " ");
+    let who = store.display_name(&it.author)?;
+    let ch = store
+        .channel_name(&it.channel)?
+        .unwrap_or_else(|| it.channel[..8.min(it.channel.len())].to_string());
+    println!(
+        "{} {} {:<12.12}{} {:<12.12} {}",
+        it.ts,
+        it.source,
+        ch,
+        if it.mentions_me { " @" } else { "  " },
+        who,
+        body
+    );
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
@@ -93,6 +157,34 @@ async fn main() -> Result<()> {
         .init();
 
     match Cli::parse().cmd {
+        Cmd::Key { cmd: KeyCmd::Init } => {
+            let ki = uni_core::init_keyring_key().context("initialising keyring key")?;
+            println!(
+                "keyring:  {}/{} ({})",
+                uni_core::identity::KEYRING_SERVICE,
+                uni_core::identity::KEYRING_ACCOUNT,
+                if ki.created {
+                    "created"
+                } else {
+                    "already existed, unchanged"
+                }
+            );
+            println!("npub:     {}", ki.npub());
+            println!("hex:      {}", ki.hex());
+            Ok(())
+        }
+        Cmd::Key { cmd: KeyCmd::Show } => match uni_core::keyring_pubkey()? {
+            Some(pk) => {
+                use nostr::nips::nip19::ToBech32;
+                println!("npub:     {}", pk.to_bech32()?);
+                println!("hex:      {}", pk.to_hex());
+                Ok(())
+            }
+            None => {
+                println!("no key in keyring; run `uni-core-cli key init`");
+                std::process::exit(1);
+            }
+        },
         Cmd::Sync {
             relay,
             db,
@@ -154,6 +246,62 @@ async fn main() -> Result<()> {
                 .filter(|i| i.mentions_me)
                 .count();
             println!("mentions_me: {mentions}");
+            println!(
+                "profiles:    requested={} stored={} cached={}",
+                report.profiles_requested,
+                report.profiles_stored,
+                store.count_profiles()?
+            );
+            Ok(())
+        }
+        Cmd::Live {
+            relay,
+            db,
+            ephemeral,
+            auth_tag,
+            max_attempts,
+        } => {
+            let (keys, source) = load_keys(ephemeral).context("loading identity")?;
+            let auth_tag = parse_auth_tag(auth_tag)?;
+            let store = Store::open(&db).context("opening store")?;
+            println!("relay:      {relay}");
+            println!("db:         {db}");
+            println!("key source: {}", key_source_label(source));
+            println!("pubkey:     {}", keys.public_key().to_hex());
+
+            let mut cfg = LiveConfig::new(relay);
+            let mut backoff = Backoff::default();
+            if let Some(n) = max_attempts {
+                backoff = backoff.with_max_attempts(n);
+            }
+            cfg.backoff = backoff;
+
+            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+            let (stop_tx, stop_rx) = tokio::sync::watch::channel(false);
+            tokio::spawn(async move {
+                let _ = tokio::signal::ctrl_c().await;
+                let _ = stop_tx.send(true);
+            });
+
+            let store_ref = &store;
+            let printer = async move {
+                while let Some(ev) = rx.recv().await {
+                    match ev {
+                        LiveEvent::Message { item, new } if new => {
+                            print!("NEW  ");
+                            let _ = print_item(store_ref, &item);
+                        }
+                        LiveEvent::Message { .. } => {}
+                        other => println!("live: {other:?}"),
+                    }
+                }
+            };
+            let runner = uni_core::run_live(cfg, &keys, auth_tag.as_ref(), &store, tx, stop_rx);
+            let (r, _) = tokio::join!(runner, printer);
+            if let Err(e) = r {
+                println!("LIVE ENDED: {e}");
+                std::process::exit(2);
+            }
             Ok(())
         }
         Cmd::Probe {
@@ -180,18 +328,18 @@ async fn main() -> Result<()> {
         Cmd::Show { db, limit } => {
             let store = Store::open(&db)?;
             for it in store.timeline(limit)? {
-                let body: String = it.body.chars().take(80).collect();
-                let body = body.replace('\n', " ");
-                println!(
-                    "{} {} {}{} {:.8} {}",
-                    it.ts,
-                    it.source,
-                    &it.channel[..8.min(it.channel.len())],
-                    if it.mentions_me { " @" } else { "  " },
-                    it.author,
-                    body
-                );
+                print_item(&store, &it)?;
             }
+            Ok(())
+        }
+        Cmd::Search { query, db, limit } => {
+            let store = Store::open(&db)?;
+            let q = query.join(" ");
+            let hits = store.search(&q, limit)?;
+            for it in &hits {
+                print_item(&store, it)?;
+            }
+            println!("{} hit(s) for {q:?}", hits.len());
             Ok(())
         }
     }

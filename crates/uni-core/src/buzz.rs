@@ -172,11 +172,113 @@ impl BuzzClient {
             .await
     }
 
+    /// Fetch kind-0 profiles for `authors` (one REQ, chunked by 100 authors).
+    /// Kind 0 is global-only on the relay (`ingest.rs::is_global_only_kind`),
+    /// so no `#h` is needed.
+    pub async fn fetch_profiles(&mut self, authors: &[PublicKey]) -> Result<Vec<Event>> {
+        let mut out = Vec::new();
+        for (i, chunk) in authors.chunks(100).enumerate() {
+            let filter = Filter::new()
+                .kind(Kind::Custom(KIND_PROFILE))
+                .authors(chunk.iter().copied());
+            let evs = self
+                .req_until_eose(&format!("profiles-{i}"), &[filter])
+                .await?;
+            out.extend(evs);
+        }
+        Ok(out)
+    }
+
+    /// Send a REQ under `sub_id` and return immediately — the subscription
+    /// stays open and its `EVENT`/`EOSE`/`CLOSED` frames arrive through
+    /// [`next_message`](Self::next_message).
+    pub async fn open_sub(&mut self, sub_id: &str, filters: &[Filter]) -> Result<()> {
+        let mut frame = vec![json!("REQ"), json!(sub_id)];
+        for f in filters {
+            frame.push(serde_json::to_value(f).expect("filter serializes"));
+        }
+        self.conn.send_raw(&serde_json::Value::Array(frame)).await?;
+        Ok(())
+    }
+
+    /// Open the live `ch-<uuid>` subscription for `channel`: `{kinds:[9],
+    /// "#h":[uuid], since?}`. Backfill since the watermark is delivered first,
+    /// then `EOSE`, then live events for as long as the connection lasts.
+    pub async fn open_channel_sub(&mut self, channel: Uuid, since: Option<u64>) -> Result<()> {
+        let h_tag = SingleLetterTag::lowercase(Alphabet::H);
+        let mut filter = Filter::new()
+            .kind(Kind::Custom(KIND_CHANNEL_MESSAGE))
+            .custom_tags(h_tag, [channel.to_string()])
+            .limit(RELAY_MAX_LIMIT as usize);
+        if let Some(s) = since {
+            filter = filter.since(Timestamp::from_secs(s));
+        }
+        self.open_sub(&channel_sub_id(channel), &[filter]).await
+    }
+
+    /// Open the global membership-notification subscription
+    /// `{kinds:[44100,44101], "#p":[me]}` (NOSTR.md "Membership
+    /// Notifications": `#p` must equal the authenticated pubkey).
+    pub async fn open_membership_sub(&mut self, since: Option<u64>) -> Result<()> {
+        let p_tag = SingleLetterTag::lowercase(Alphabet::P);
+        let mut filter = Filter::new()
+            .kinds([
+                Kind::Custom(KIND_MEMBER_ADDED),
+                Kind::Custom(KIND_MEMBER_REMOVED),
+            ])
+            .custom_tags(p_tag, [self.me.to_hex()]);
+        if let Some(s) = since {
+            filter = filter.since(Timestamp::from_secs(s));
+        }
+        self.open_sub(MEMBERSHIP_SUB_ID, &[filter]).await
+    }
+
+    /// Open a one-shot metadata lookup for `channel` under `meta-<uuid>`;
+    /// the caller CLOSEs it on EOSE.
+    pub async fn open_channel_meta_sub(&mut self, channel: Uuid) -> Result<()> {
+        let d_tag = SingleLetterTag::lowercase(Alphabet::D);
+        let filter = Filter::new()
+            .kind(Kind::Custom(KIND_NIP29_GROUP_METADATA as u16))
+            .custom_tags(d_tag, [channel.to_string()]);
+        self.open_sub(&meta_sub_id(channel), &[filter]).await
+    }
+
+    /// CLOSE a subscription.
+    pub async fn close_sub(&mut self, sub_id: &str) -> Result<()> {
+        self.conn.send_raw(&json!(["CLOSE", sub_id])).await?;
+        Ok(())
+    }
+
+    /// Next relay message, waiting up to `timeout`. A timeout surfaces as
+    /// `Error::Relay(WsClientError::Timeout)` and is not a connection failure.
+    pub async fn next_message(&mut self, timeout: Duration) -> Result<RelayMessage> {
+        Ok(self.conn.next_event(timeout).await?)
+    }
+
     /// Close the connection.
     pub async fn disconnect(self) -> Result<()> {
         self.conn.disconnect().await?;
         Ok(())
     }
+}
+
+/// Kind 0: profile metadata.
+pub const KIND_PROFILE: u16 = 0;
+/// Kind 44100: relay-signed "member added" notification.
+pub const KIND_MEMBER_ADDED: u16 = 44100;
+/// Kind 44101: relay-signed "member removed" notification.
+pub const KIND_MEMBER_REMOVED: u16 = 44101;
+/// Sub id for the global membership-notification subscription.
+pub const MEMBERSHIP_SUB_ID: &str = "membership";
+
+/// `meta-<uuid>` — one-shot channel metadata lookup opened from the live loop.
+pub fn meta_sub_id(channel: Uuid) -> String {
+    format!("meta-{channel}")
+}
+
+/// Parse a `ch-<uuid>` sub id back to its channel.
+pub fn channel_of_sub_id(sub_id: &str) -> Option<Uuid> {
+    sub_id.strip_prefix("ch-").and_then(|s| s.parse().ok())
 }
 
 /// Connection probe result (no key needed; safe to run with any relay).

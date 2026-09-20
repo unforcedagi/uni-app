@@ -6,8 +6,8 @@ no vault adapter yet.
 
 ```
 Cargo.toml                 workspace
-crates/uni-core            library: buzz adapter + SQLite store + one-shot sync
-crates/uni-core-cli        `uni-core-cli sync|probe|show`
+crates/uni-core            library: buzz adapter + SQLite store (FTS5, profiles) + one-shot sync + live loop
+crates/uni-core-cli        `uni-core-cli key init|show, sync, live, show, search, probe`
 ```
 
 Upstream Buzz crates are path dependencies on `../buzz` (`buzz-ws-client`,
@@ -17,7 +17,8 @@ Upstream Buzz crates are path dependencies on `../buzz` (`buzz-ws-client`,
 
 ```sh
 cargo build
-cargo test          # 7 unit tests + 1 end-to-end test against an in-process mock relay
+cargo test                        # 15 unit tests + 9 end-to-end tests against an in-process mock relay
+cargo clippy --all-targets -- -D warnings
 ```
 
 Toolchain proven: rustc 1.97.1 on macOS 26.3.
@@ -27,24 +28,63 @@ Toolchain proven: rustc 1.97.1 on macOS 26.3.
 | Piece | Where | Status |
 |---|---|---|
 | Identity: `UNI_NSEC` env → macOS keyring (`uni-app`/`nsec`) → `--ephemeral` throwaway | `identity.rs` | works; key is never printed or logged |
+| `key init`: generate a persistent app key into the keyring (`keyring` crate, same service/account layout as Buzz desktop), read it back, print **only** the npub/hex; no-op if one exists | `identity.rs::init_keyring_key` | works (run once on this Mac — pubkey below) |
 | WebSocket connect + NIP-42 auth (proactive `AUTH` challenge, signed kind 22242, optional NIP-OA `["auth", …]` tag) | `buzz.rs` via `buzz_ws_client::NostrWsConnection` | works against `wss://buzz.unforced.org` up to the relay's membership gate (see findings) |
 | Channel discovery: `REQ {kinds:[39002], "#p":[me]}` → `d` tags → `REQ {kinds:[39000], "#d":[…]}`, skip `archived=true` | `buzz.rs::discover_channels` (mirrors `buzz-acp/src/relay.rs:687-733`, over WS instead of `/query`) | works (mock relay e2e) |
 | Per-channel history: `REQ {kinds:[9], "#h":[uuid], since?, limit:500}` under sub id `ch-<uuid>`, collected until `EOSE`, `CLOSED` surfaced as a per-channel error | `buzz.rs::channel_history` | works (mock relay e2e) |
 | SQLite `items(source, ref, channel, author, ts, body, mentions_me)` + `channels` + `sync_state` watermarks; idempotent `INSERT OR IGNORE`; `mentions_me` from `p` tags | `store.rs`, `sync.rs` | works |
 | `uni-core-cli sync` prints per-channel fetched/new counts and totals; `probe` reports the relay's pre-auth and auth behaviour; `show` dumps the timeline | `crates/uni-core-cli` | works |
+| Incremental, idempotent `sync`: per-channel `since` = last seen `created_at`; `UNIQUE(ref)` + `INSERT OR IGNORE` so any number of re-runs converge (the phone's whole loop: connect → one pass → disconnect) | `sync.rs`, `store.rs` | works (mock: `sync_is_incremental_and_idempotent_across_new_events`) |
+| Kind-0 profile cache (`profiles` table): after history, one `{kinds:[0], authors:[…]}` REQ for authors with no row; newest `created_at` wins; `show`/`search` render `display_name`/`name`, else `hex[..8]…`; channel names resolve from `channels` | `store.rs::Profile`, `sync.rs::refresh_profiles` | works (mock: `sync_caches_profiles_and_show_resolves_names`) |
+| FTS5 over `items.body` (external-content table + triggers; rebuilt on first open of a pre-FTS db); `uni-core-cli search <words>`; literal quoting so punctuation never hits the FTS parser; prefix match, AND across words, bm25 order | `store.rs::search` | works (mock: `fts_search_over_synced_items`) |
+| Live mode (`uni-core-cli live`): after auth+discovery, one open `ch-<uuid>` REQ per channel from the watermark (backfill → `EOSE` → live), plus the global `{kinds:[44100,44101],"#p":[me]}` membership sub; a 44100 opens the new channel's sub (and a `meta-<uuid>` lookup for its name), a 44101 CLOSEs it; live kind-0 lookups for unknown authors after backfill | `live.rs` | works (mock: `live_appends_new_events_after_eose_and_stops_cleanly`, `live_membership_notification_opens_new_channel_sub`) |
+| Reconnect with exponential backoff (1 s → 60 s, ×2, reset after each successful auth) and re-AUTH (fresh challenge, fresh signed kind 22242); subs re-opened from current watermarks; `AuthFailed` (policy) is fatal, not retried; optional attempt budget | `backoff.rs`, `live.rs` | works (mock: `live_reconnects_with_backoff_and_reauths`, `live_backoff_grows_and_gives_up_when_relay_is_down`, `live_auth_rejection_is_fatal_not_retried`) |
+
+## Sync model (mobile constraint)
+
+`uni-app-mobile.md` says the phone is connect-on-open → sync → disconnect,
+never always-connected. So `sync_once` is the unit of correctness: one pass
+is complete (discovery, every channel from its watermark, missing profiles)
+and idempotent (every write is `INSERT OR IGNORE` on the event id). `live`
+is an optional layer on the same ingest path — a `sync_once` run after any
+amount of live traffic inserts nothing (asserted in the live test).
 
 ## What is stubbed / not done
 
-- **No live subscription.** `sync_once` is one-shot: REQ → EOSE → CLOSE per channel. Keeping the `ch-<uuid>` subs open for live events (and the `{kinds:[44100,44101],"#p":[me]}` membership sub) is Day 4–5 work.
-- **No reconnect/backoff**, no rate-limit gate handling (`buzz-acp` has both; not ported).
-- **No profiles (kind 0)**, no FTS5, no vault adapter, no Tauri shell.
-- **`since` is inclusive** per NIP-01, so a re-run re-fetches exactly the watermark event; it dedupes on `(source, ref)`. Fine for now; a `since+1` would risk missing same-second events.
-- **Keyring write path** is not implemented (only read). Storing the nsec is a manual/Tauri-onboarding concern.
+- **No rate-limit gate handling** (`buzz-acp` has it; not ported).
+- **No vault adapter, no Tauri shell.** Live-mode profile refresh only fires for authors with no cached row; a changed kind 0 for a known author is picked up by the next live session's lookup only if the row is missing — a periodic refresh is a Phase 2 nicety.
+- **`since` is inclusive** per NIP-01, so a re-run re-fetches exactly the watermark event; it dedupes on `ref`. Fine for now; a `since+1` would risk missing same-second events.
+- **Membership sub `since`** is `now - 60 s` on each connect; a 44100 that arrives while disconnected is caught by the next `sync_once`/`live` discovery pass (39002), not by the sub.
 - **500-result cap**: one REQ per channel with `limit=500`; channels with more history are not paginated backwards yet.
+- **Backoff has no jitter** (deterministic for tests); add before many clients share one relay.
 
 ## Real relay run
 
-The relay URL was learned from `buzz --help` (`BUZZ_RELAY_URL=wss://buzz.unforced.org`). Per the task, the run used a **freshly generated throwaway key**, never Uni's real key.
+The relay URL was learned from `buzz --help` (`BUZZ_RELAY_URL=wss://buzz.unforced.org`). Uni's own key is never read or copied.
+
+### Persistent app key (keyring)
+
+```
+$ uni-core-cli key init
+keyring:  uni-app/nsec (created)
+npub:     npub16s4xkv00asn5yn3ny5drp7r0emselt0n9l66f0x57c42pvq4herqrwdnzv
+hex:      d42a6b31efec27424e33251a30f86fcee19fadf32ff5a4bcd4f62aa0b015be46
+
+$ uni-core-cli probe            # non-ephemeral: key source = keyring
+relay:      wss://buzz.unforced.org
+key source: keyring uni-app/nsec
+pubkey:     d42a6b31efec27424e33251a30f86fcee19fadf32ff5a4bcd4f62aa0b015be46
+auth tag:   none
+proactive AUTH challenge: true
+REQ before auth:          NOTICE: auth-required: authenticate before subscribing
+NIP-42 auth result:       Authentication failed: restricted: not a relay member
+```
+
+The rejection is expected until that pubkey is added as a relay member
+(`buzz-admin add-member`); it proves the keyring → sign → AUTH path
+end-to-end. Once added, `uni-core-cli sync` / `live` need no flags.
+
+### Earlier throwaway-key run (kept for the findings)
 
 ```
 $ uni-core-cli probe --ephemeral
