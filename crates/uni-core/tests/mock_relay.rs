@@ -672,14 +672,25 @@ async fn live_appends_new_events_after_eose_and_stops_cleanly() {
         assert_eq!(store.count_items().unwrap(), 5);
 
         // Live kind-0 for the unknown author gets fetched once backfill is done.
+        // The profile sub is opened as soon as the *last* channel EOSE lands
+        // (`maybe_open_profile_sub` runs on EOSE), so its `Profiles` event
+        // races the live publish above: it may already be in `seen` (the
+        // usual order on Linux) or still be in flight (seen on macOS). Accept
+        // either — the behaviour under test is "fetched after backfill", not
+        // "fetched after the first live message".
+        let is_profiles = |e: &LiveEvent| matches!(e, LiveEvent::Profiles { .. });
         assert!(
-            wait_for(&mut rx, &mut seen, Duration::from_secs(5), |e| matches!(
-                e,
-                LiveEvent::Profiles { .. }
-            ))
-            .await,
+            seen.iter().any(is_profiles)
+                || wait_for(&mut rx, &mut seen, Duration::from_secs(5), is_profiles).await,
             "{seen:?}"
         );
+        // …and never before backfill finished.
+        let last_eose = seen
+            .iter()
+            .rposition(|e| matches!(e, LiveEvent::Eose { .. }))
+            .unwrap();
+        let first_profiles = seen.iter().position(is_profiles).unwrap();
+        assert!(first_profiles > last_eose, "{seen:?}");
         assert_eq!(
             store.display_name(&f.other.public_key().to_hex()).unwrap(),
             "AstraJi"
