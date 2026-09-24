@@ -66,11 +66,22 @@ fn get_timeline(app: tauri::AppHandle, limit: usize) -> Result<Vec<TimelineItem>
     Ok(out)
 }
 
+#[cfg(mobile)]
+mod mobile;
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(mobile)]
+    mobile::init_runtime();
+
     uni_core::init_crypto();
 
     tauri::Builder::default()
+        .setup(|_app| {
+            #[cfg(mobile)]
+            mobile::setup(_app);
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![get_timeline])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

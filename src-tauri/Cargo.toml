@@ -6,6 +6,12 @@ rust-version.workspace = true
 license.workspace = true
 description = "Uni desktop shell (Tauri 2)"
 
+# Mobile (Android/iOS) needs the app as a shared/static lib; `main.rs` stays the
+# desktop entry point. Name is `uni_app_tauri_lib` so it doesn't clash with the bin.
+[lib]
+name = "uni_app_tauri_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
 [build-dependencies]
 tauri-build = { version = "2.0", features = [] }
 
