@@ -20,6 +20,19 @@ struct MessageView {
     mentions_me: bool,
     root: Option<String>,
     parent: Option<String>,
+    /// `p`-tag recipients other than the author, with display labels, so the
+    /// UI can highlight `@Label` only where the event really tagged someone.
+    mentions: Vec<MemberView>,
+    reply_count: i64,
+    last_reply_ts: Option<i64>,
+}
+
+#[derive(Serialize)]
+struct MemberView {
+    pubkey: String,
+    name: String,
+    /// True when the name comes from a kind-0 profile (not a key prefix).
+    named: bool,
 }
 
 #[derive(Serialize)]
@@ -63,7 +76,26 @@ fn relay_url(app: &tauri::AppHandle) -> String {
 }
 
 fn view(store: &Store, message: ConversationMessage) -> Result<MessageView, String> {
+    view_with_summary(store, message, 0, None)
+}
+
+fn view_with_summary(
+    store: &Store,
+    message: ConversationMessage,
+    reply_count: i64,
+    last_reply_ts: Option<i64>,
+) -> Result<MessageView, String> {
+    let mentions = store
+        .message_mentions(&message.item.r#ref)
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .filter(|pk| *pk != message.item.author)
+        .map(|pk| member_view(store, pk))
+        .collect::<Result<Vec<_>, String>>()?;
     Ok(MessageView {
+        mentions,
+        reply_count,
+        last_reply_ts,
         author_name: store
             .display_name(&message.item.author)
             .map_err(|e| e.to_string())?,
@@ -76,6 +108,40 @@ fn view(store: &Store, message: ConversationMessage) -> Result<MessageView, Stri
         root: message.root,
         parent: message.parent,
     })
+}
+
+fn member_view(store: &Store, pubkey: String) -> Result<MemberView, String> {
+    let label = store
+        .profile(&pubkey)
+        .map_err(|e| e.to_string())?
+        .and_then(|p| p.label().map(str::to_string));
+    Ok(MemberView {
+        name: label
+            .clone()
+            .unwrap_or_else(|| pubkey[..8.min(pubkey.len())].to_string()),
+        named: label.is_some(),
+        pubkey,
+    })
+}
+
+/// Members of a joined channel (kind-39002 roster) with kind-0 names.
+#[tauri::command]
+fn get_members(app: tauri::AppHandle, channel: String) -> Result<Vec<MemberView>, String> {
+    let store = Store::open(db_path(&app)?).map_err(|e| e.to_string())?;
+    store
+        .channel_members(&channel)
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .map(|m| {
+            Ok(MemberView {
+                named: m.name.is_some(),
+                name: m
+                    .name
+                    .unwrap_or_else(|| m.pubkey[..8.min(m.pubkey.len())].to_string()),
+                pubkey: m.pubkey,
+            })
+        })
+        .collect()
 }
 
 #[tauri::command]
@@ -106,12 +172,22 @@ fn get_messages(
     root: Option<String>,
 ) -> Result<Vec<MessageView>, String> {
     let store = Store::open(db_path(&app)?).map_err(|e| e.to_string())?;
-    let rows = match root {
-        Some(id) => store.thread_messages(&channel, &id, 300),
-        None => store.room_messages(&channel, 300),
+    match root {
+        // Thread view: the root and every cached reply, chronological.
+        Some(id) => store
+            .thread_messages(&channel, &id, 300)
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .map(|m| view(&store, m))
+            .collect(),
+        // Main timeline: roots only, each with its reply summary.
+        None => store
+            .room_timeline(&channel, 300)
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .map(|t| view_with_summary(&store, t.message, t.reply_count, t.last_reply_ts))
+            .collect(),
     }
-    .map_err(|e| e.to_string())?;
-    rows.into_iter().map(|m| view(&store, m)).collect()
 }
 
 #[tauri::command]
@@ -304,6 +380,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_rooms,
             get_messages,
+            get_members,
             get_identity,
             identity_status,
             identity_forget,
