@@ -7,6 +7,34 @@ use uuid::Uuid;
 
 use crate::{buzz::BuzzClient, store::Item, sync::ingest_message, Error, Result, Store};
 
+/// The `p` tags for an outgoing message: our own key (Buzz convention), the
+/// parent's author when replying, then the explicitly bound recipients, as
+/// canonical lowercase hex with duplicates removed. Anything that is not a
+/// public key is rejected so a bad binding never publishes silently.
+pub fn mention_pubkeys(
+    me: &str,
+    parent_author: Option<&str>,
+    recipients: &[String],
+) -> Result<Vec<String>> {
+    let mut unique = HashSet::new();
+    let mut mentions = Vec::new();
+    for value in std::iter::once(me)
+        .chain(parent_author)
+        .chain(recipients.iter().map(String::as_str))
+    {
+        let pk = PublicKey::from_hex(value.trim())
+            .map_err(|_| Error::Invalid("recipient must be a public key (64 hex digits)".into()))?;
+        let canonical = pk.to_hex();
+        if unique.insert(canonical.clone()) {
+            mentions.push(canonical);
+        }
+    }
+    if mentions.len() > 50 {
+        return Err(Error::Invalid("too many recipients (max 50)".into()));
+    }
+    Ok(mentions)
+}
+
 /// Sign and publish a message. Only an accepted relay `OK` enters the store.
 /// `reply_to` must identify a cached message in the selected channel; callers
 /// retain their draft until this future succeeds. Explicit mention pubkeys are
@@ -49,22 +77,11 @@ pub async fn send_message(
     } else {
         None
     };
-    let mut unique = HashSet::new();
-    let mut mentions = Vec::new();
-    for value in std::iter::once(keys.public_key().to_hex())
-        .chain(parent.iter().map(|p| p.item.author.clone()))
-        .chain(recipients.iter().cloned())
-    {
-        let pk = PublicKey::from_hex(&value)
-            .map_err(|_| Error::Invalid("recipient must be a public key (64 hex digits)".into()))?;
-        let canonical = pk.to_hex();
-        if unique.insert(canonical.clone()) {
-            mentions.push(canonical);
-        }
-    }
-    if mentions.len() > 50 {
-        return Err(Error::Invalid("too many recipients (max 50)".into()));
-    }
+    let mentions = mention_pubkeys(
+        &keys.public_key().to_hex(),
+        parent.as_ref().map(|p| p.item.author.as_str()),
+        recipients,
+    )?;
     let mention_refs: Vec<&str> = mentions.iter().map(String::as_str).collect();
     let event = build_message(
         channel,
@@ -87,4 +104,35 @@ pub async fn send_message(
     let (_, item) = ingest_message(store, &event, &keys.public_key(), channel)?;
     store.set_since(&channel.to_string(), item.ts)?;
     Ok(item)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nostr::Keys;
+
+    #[test]
+    fn mention_pubkeys_orders_dedupes_and_canonicalizes() {
+        let me = Keys::generate().public_key().to_hex();
+        let parent = Keys::generate().public_key().to_hex();
+        let uni = Keys::generate().public_key().to_hex();
+        let got = mention_pubkeys(
+            &me,
+            Some(&parent),
+            &[uni.to_uppercase(), parent.clone(), me.clone()],
+        )
+        .unwrap();
+        assert_eq!(got, vec![me.clone(), parent, uni]);
+        assert_eq!(mention_pubkeys(&me, None, &[]).unwrap(), vec![me.clone()]);
+    }
+
+    #[test]
+    fn mention_pubkeys_rejects_names_and_too_many() {
+        let me = Keys::generate().public_key().to_hex();
+        assert!(mention_pubkeys(&me, None, &["Uni".into()]).is_err());
+        let many: Vec<String> = (0..50)
+            .map(|_| Keys::generate().public_key().to_hex())
+            .collect();
+        assert!(mention_pubkeys(&me, None, &many).is_err());
+    }
 }

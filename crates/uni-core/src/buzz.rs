@@ -47,6 +47,15 @@ pub struct ChannelInfo {
     pub archived: bool,
 }
 
+/// Discovery output: joined, non-archived channels and their rosters.
+#[derive(Debug, Clone, Default)]
+pub struct Discovery {
+    /// Channel metadata keyed by uuid.
+    pub channels: HashMap<Uuid, ChannelInfo>,
+    /// Member pubkeys (canonical hex, deduplicated, in tag order) per channel.
+    pub members: HashMap<Uuid, Vec<String>>,
+}
+
 /// An authenticated relay connection.
 pub struct BuzzClient {
     conn: NostrWsConnection,
@@ -130,6 +139,13 @@ impl BuzzClient {
 
     /// Channel discovery per `buzz-acp/src/relay.rs:687-733`.
     pub async fn discover_channels(&mut self) -> Result<HashMap<Uuid, ChannelInfo>> {
+        Ok(self.discover().await?.channels)
+    }
+
+    /// Channel discovery plus each joined channel's member roster. The
+    /// kind-39002 events that prove our membership are full roster snapshots,
+    /// so the rosters come from the same REQ at no extra cost.
+    pub async fn discover(&mut self) -> Result<Discovery> {
         let p_tag = SingleLetterTag::lowercase(Alphabet::P);
         let member_filter = Filter::new()
             .kind(Kind::Custom(KIND_NIP29_GROUP_MEMBERS as u16))
@@ -139,8 +155,9 @@ impl BuzzClient {
             .await?;
 
         let uuids = extract_member_uuids(&member_events);
+        let mut members = parse_member_rosters(&member_events);
         if uuids.is_empty() {
-            return Ok(HashMap::new());
+            return Ok(Discovery::default());
         }
 
         let d_tag = SingleLetterTag::lowercase(Alphabet::D);
@@ -149,7 +166,9 @@ impl BuzzClient {
             .custom_tags(d_tag, uuids.iter().map(|u| u.to_string()));
         let meta_events = self.req_until_eose("disc-meta", &[meta_filter]).await?;
 
-        Ok(merge_discovered_channels(uuids, &meta_events))
+        let channels = merge_discovered_channels(uuids, &meta_events);
+        members.retain(|id, _| channels.contains_key(id));
+        Ok(Discovery { channels, members })
     }
 
     /// Pull kind-9 history for one channel. `since` is exclusive-ish per NIP-01
@@ -389,6 +408,69 @@ pub fn extract_member_uuids(events: &[Event]) -> Vec<Uuid> {
     out
 }
 
+/// Member rosters from kind-39002 snapshots: `d` = channel uuid, each valid
+/// `p` tag = member. The newest snapshot per channel wins (ties: larger event
+/// id, so the choice is deterministic); invalid pubkeys are dropped.
+pub fn parse_member_rosters(events: &[Event]) -> HashMap<Uuid, Vec<String>> {
+    let mut newest: HashMap<Uuid, &Event> = HashMap::new();
+    for ev in events {
+        if ev.kind != Kind::Custom(KIND_NIP29_GROUP_MEMBERS as u16) {
+            continue;
+        }
+        let Some(ch) = ev.tags.iter().find_map(|t| {
+            let s = t.as_slice();
+            (s.first().map(String::as_str) == Some("d"))
+                .then(|| s.get(1).and_then(|v| v.parse::<Uuid>().ok()))
+                .flatten()
+        }) else {
+            continue;
+        };
+        match newest.get(&ch) {
+            Some(cur) if (cur.created_at, cur.id) >= (ev.created_at, ev.id) => {}
+            _ => {
+                newest.insert(ch, ev);
+            }
+        }
+    }
+    newest
+        .into_iter()
+        .map(|(ch, ev)| {
+            let mut out: Vec<String> = Vec::new();
+            for t in ev.tags.iter() {
+                let s = t.as_slice();
+                if s.first().map(String::as_str) != Some("p") {
+                    continue;
+                }
+                if let Some(pk) = s.get(1).and_then(|v| PublicKey::from_hex(v).ok()) {
+                    let hex = pk.to_hex();
+                    if !out.contains(&hex) {
+                        out.push(hex);
+                    }
+                }
+            }
+            (ch, out)
+        })
+        .collect()
+}
+
+/// Canonical hex pubkeys named by the event's `p` tags, deduplicated.
+pub fn p_tags(ev: &Event) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for t in ev.tags.iter() {
+        let s = t.as_slice();
+        if s.first().map(String::as_str) != Some("p") {
+            continue;
+        }
+        if let Some(pk) = s.get(1).and_then(|v| PublicKey::from_hex(v).ok()) {
+            let hex = pk.to_hex();
+            if !out.contains(&hex) {
+                out.push(hex);
+            }
+        }
+    }
+    out
+}
+
 /// Merge membership uuids with kind-39000 metadata, dropping `archived=true`
 /// channels (mirrors `buzz-acp` `merge_discovered_channels`).
 pub fn merge_discovered_channels(uuids: Vec<Uuid>, meta: &[Event]) -> HashMap<Uuid, ChannelInfo> {
@@ -538,6 +620,69 @@ mod tests {
         assert_eq!(event_channel(&ev), Some(ch));
         assert!(mentions(&ev, &me.public_key()));
         assert!(!mentions(&ev, &other.public_key()));
+    }
+
+    #[test]
+    fn member_rosters_take_newest_snapshot_and_valid_pubkeys() {
+        let relay = Keys::generate();
+        let (a, b, c) = (Keys::generate(), Keys::generate(), Keys::generate());
+        let ch = Uuid::new_v4();
+        let other = Uuid::new_v4();
+        let snap = |ts: u64, d: &Uuid, ps: Vec<String>| {
+            let mut tags = vec![Tag::parse(vec!["d".to_string(), d.to_string()]).unwrap()];
+            for p in ps {
+                tags.push(Tag::parse(vec!["p".to_string(), p]).unwrap());
+            }
+            EventBuilder::new(Kind::Custom(39002), "")
+                .tags(tags)
+                .custom_created_at(Timestamp::from_secs(ts))
+                .sign_with_keys(&relay)
+                .unwrap()
+        };
+        let events = vec![
+            snap(
+                10,
+                &ch,
+                vec![a.public_key().to_hex(), b.public_key().to_hex()],
+            ),
+            snap(
+                20,
+                &ch,
+                vec![
+                    a.public_key().to_hex().to_uppercase(),
+                    c.public_key().to_hex(),
+                    "not-a-key".into(),
+                    a.public_key().to_hex(),
+                ],
+            ),
+            snap(5, &other, vec![b.public_key().to_hex()]),
+            signed(9, vec![vec!["d", &ch.to_string()]], "noise", &relay),
+        ];
+        let rosters = parse_member_rosters(&events);
+        assert_eq!(
+            rosters[&ch],
+            vec![a.public_key().to_hex(), c.public_key().to_hex()]
+        );
+        assert_eq!(rosters[&other], vec![b.public_key().to_hex()]);
+    }
+
+    #[test]
+    fn p_tags_are_canonical_and_deduplicated() {
+        let k = Keys::generate();
+        let hex = k.public_key().to_hex();
+        let upper = hex.to_uppercase();
+        let ev = signed(
+            9,
+            vec![
+                vec!["p", &hex],
+                vec!["p", &upper],
+                vec!["p", "zz"],
+                vec!["e", &hex],
+            ],
+            "hi",
+            &k,
+        );
+        assert_eq!(p_tags(&ev), vec![hex]);
     }
 
     #[test]

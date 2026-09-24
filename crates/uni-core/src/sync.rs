@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 
 use nostr::{Event, Keys, PublicKey, Tag};
 
-use crate::buzz::{event_channel, mentions, BuzzClient, RELAY_MAX_LIMIT};
+use crate::buzz::{event_channel, mentions, p_tags, BuzzClient, RELAY_MAX_LIMIT};
 use crate::store::{Item, Profile, Store};
 use crate::Result;
 
@@ -57,6 +57,7 @@ pub fn ingest_message(
         mentions_me: mentions(ev, me),
     };
     let inserted = store.upsert_item(&item)?;
+    store.set_message_mentions(&item.r#ref, &p_tags(ev))?;
     let mut root = None;
     let mut parent = None;
     for tag in ev.tags.iter() {
@@ -135,7 +136,8 @@ pub async fn sync_once(
     let mut client = BuzzClient::connect(relay_url, keys, auth_tag).await?;
     tracing::info!(relay = relay_url, "authenticated (NIP-42)");
 
-    let channels = client.discover_channels().await?;
+    let discovery = client.discover().await?;
+    let channels = discovery.channels;
     let now = nostr::Timestamp::now().as_secs() as i64;
     for ci in channels.values() {
         store.upsert_channel(
@@ -146,6 +148,9 @@ pub async fn sync_once(
             now,
         )?;
         report.channels.insert(ci.id.to_string(), ci.name.clone());
+    }
+    for (ch, members) in &discovery.members {
+        store.replace_channel_members(&ch.to_string(), members)?;
     }
 
     let me = client.pubkey();

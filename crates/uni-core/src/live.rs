@@ -193,7 +193,8 @@ impl<'a, F: Fn(LiveEvent)> Session<'a, F> {
     async fn run(mut self, poll: Duration, stop: &mut watch::Receiver<bool>) -> Result<()> {
         // Discovery uses one-shot REQs; nothing else is open yet so no
         // live frames can be lost while they run.
-        let channels = self.client.discover_channels().await?;
+        let discovery = self.client.discover().await?;
+        let channels = discovery.channels;
         let now = nostr::Timestamp::now().as_secs() as i64;
         for ci in channels.values() {
             self.store.upsert_channel(
@@ -203,6 +204,10 @@ impl<'a, F: Fn(LiveEvent)> Session<'a, F> {
                 ci.archived,
                 now,
             )?;
+        }
+        for (ch, members) in &discovery.members {
+            self.store
+                .replace_channel_members(&ch.to_string(), members)?;
         }
         let mut ids: Vec<Uuid> = channels.keys().copied().collect();
         ids.sort();
