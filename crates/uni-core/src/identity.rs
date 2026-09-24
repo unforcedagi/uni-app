@@ -2,7 +2,10 @@
 //!
 //! Resolution order (first hit wins):
 //! 1. `UNI_NSEC` env var (hex or `nsec1…`).
-//! 2. macOS keyring entry `service = "uni-app"`, `account = "nsec"`.
+//! 2. Device keys installed in memory with [`set_device_keys`] — how the
+//!    Android app hands over the key it decrypted from Android Keystore
+//!    (the `keyring` crate has no Android backend).
+//! 3. macOS keyring entry `service = "uni-app"`, `account = "nsec"`.
 //! 3. If `allow_ephemeral` is set: a fresh throwaway key (for connection tests).
 //!
 //! [`init_keyring_key`] is the write path: it generates a new key and stores
@@ -21,6 +24,8 @@ pub enum KeySource {
     Env,
     /// macOS keyring (`uni-app` / `nsec`).
     Keyring,
+    /// Installed by the host app via [`set_device_keys`] (Android Keystore).
+    Device,
     /// Freshly generated throwaway key.
     Ephemeral,
 }
@@ -55,6 +60,27 @@ impl KeyInit {
     }
 }
 
+static DEVICE_KEYS: std::sync::Mutex<Option<Keys>> = std::sync::Mutex::new(None);
+
+/// Install the device identity for this process (e.g. decrypted from
+/// Android Keystore at startup, or just received by pairing).
+pub fn set_device_keys(keys: Keys) {
+    *DEVICE_KEYS.lock().unwrap_or_else(|e| e.into_inner()) = Some(keys);
+}
+
+/// Drop the in-memory device identity.
+pub fn clear_device_keys() {
+    *DEVICE_KEYS.lock().unwrap_or_else(|e| e.into_inner()) = None;
+}
+
+/// `true` if [`set_device_keys`] installed a key.
+pub fn has_device_keys() -> bool {
+    DEVICE_KEYS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .is_some()
+}
+
 /// Load keys per the resolution order above.
 pub fn load_keys(allow_ephemeral: bool) -> Result<(Keys, KeySource)> {
     if let Ok(v) = std::env::var(ENV_NSEC) {
@@ -65,6 +91,14 @@ pub fn load_keys(allow_ephemeral: bool) -> Result<(Keys, KeySource)> {
             })?;
             return Ok((keys, KeySource::Env));
         }
+    }
+
+    if let Some(keys) = DEVICE_KEYS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+    {
+        return Ok((keys, KeySource::Device));
     }
 
     if !skip_keyring() {
@@ -121,6 +155,34 @@ pub fn keyring_pubkey() -> Result<Option<PublicKey>> {
     Ok(read_keyring()?.map(|k| k.public_key()))
 }
 
+/// Store a paired account key in the keyring, replacing any existing entry.
+/// Returns only the public key after a read-back check.
+pub fn store_keyring_nsec(nsec: &str) -> Result<PublicKey> {
+    let keys = Keys::parse(nsec.trim()).map_err(|_| Error::Identity("not a valid nsec".into()))?;
+    let canonical = zeroize::Zeroizing::new(
+        keys.secret_key()
+            .to_bech32()
+            .map_err(|e| Error::Identity(format!("encoding key: {e}")))?,
+    );
+    entry()?
+        .set_password(&canonical)
+        .map_err(|e| Error::Identity(format!("keyring write: {e}")))?;
+    match read_keyring()? {
+        Some(k) if k.public_key() == keys.public_key() => Ok(keys.public_key()),
+        _ => Err(Error::Identity(
+            "keyring read-back did not return the key just stored".into(),
+        )),
+    }
+}
+
+/// Delete the keyring entry ("forget this device key"). Missing is fine.
+pub fn forget_keyring_key() -> Result<()> {
+    match entry()?.delete_credential() {
+        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+        Err(e) => Err(Error::Identity(format!("keyring delete: {e}"))),
+    }
+}
+
 /// Ensure a persistent app key exists in the keyring.
 ///
 /// If an entry already exists it is left as is (`created: false`); otherwise
@@ -158,13 +220,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn ephemeral_when_allowed_and_env_unset() {
+    fn ephemeral_then_device_keys() {
         // Never touch the real keyring from a test: an unsigned test binary
         // reading the macOS Keychain pops an interactive prompt and hangs.
+        // One test owns the process-global device slot to avoid races.
         std::env::remove_var(ENV_NSEC);
         std::env::set_var(ENV_NO_KEYRING, "1");
+        clear_device_keys();
         let (_k, src) = load_keys(true).expect("ephemeral key");
         assert_eq!(src, KeySource::Ephemeral);
+        assert!(load_keys(false).is_err());
+
+        let dev = Keys::generate();
+        set_device_keys(dev.clone());
+        assert!(has_device_keys());
+        let (k, src) = load_keys(false).expect("device key");
+        assert_eq!(src, KeySource::Device);
+        assert_eq!(k.public_key(), dev.public_key());
+        clear_device_keys();
+        assert!(!has_device_keys());
         assert!(load_keys(false).is_err());
     }
 

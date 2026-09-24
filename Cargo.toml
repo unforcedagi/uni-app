@@ -12,6 +12,10 @@ license = "Apache-2.0"
 # Buzz upstream crates, by path (spec §5).
 buzz-ws-client = { path = "../buzz/crates/buzz-ws-client" }
 buzz-sdk = { path = "../buzz/crates/buzz-sdk" }
+# NIP-AB device pairing state machine (pure, no I/O).
+buzz-core = { path = "../buzz/crates/buzz-core" }
+zeroize = "1.8"
+url = "2"
 
 # Must match the `nostr` version buzz pins (buzz/Cargo.toml) so types interop.
 nostr = { version = "0.44", features = ["nip44", "nip98"] }
