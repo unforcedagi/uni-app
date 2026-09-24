@@ -61,3 +61,15 @@ h1 { font-size: 22px; margin: 5px 0 0; letter-spacing: -.03em; }
 .welcome h2 { color: #e8f4f5; }
 .welcome-mark { font-size: 64px; color: #78d2d2; }
 @media (max-width: 680px) { .rooms { width: 100%; flex-basis: 100%; } .conversation { display: none; } .shell.in-room .rooms { display: none; } .shell.in-room .conversation { display: flex; } .back { display: block; } .conversation-header { padding: 5px 12px; } .message-list { padding: 12px; } .composer { padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); } .message-content { max-width: calc(100% - 46px); } }
+.pairing { min-height: 100dvh; display: grid; place-items: center; padding: calc(24px + env(safe-area-inset-top)) 20px 24px; background: radial-gradient(circle at 70% 0, #192c38, #0c1722 52%); }
+.pairing-card { width: min(520px, 100%); background: #152633; border: 1px solid #2c4654; border-radius: 18px; padding: 26px; display: flex; flex-direction: column; gap: 14px; }
+.pairing-card h1 { margin: 0; }
+.pairing-steps { margin: 0; padding-left: 20px; color: #bcd3dc; line-height: 1.6; font-size: 14px; }
+.pairing-label { display: flex; flex-direction: column; gap: 8px; color: #aacbd0; font-size: 12px; }
+.pairing-label textarea { background: #203746; border: 1px solid #395462; border-radius: 12px; color: #f4fafb; padding: 11px 13px; font-family: ui-monospace, monospace; font-size: 12px; resize: vertical; word-break: break-all; }
+.pairing-primary { min-height: 52px; font-size: 16px; }
+.pairing-secondary { background: transparent; border: 1px solid #4a6674; color: #d5eeee; border-radius: 12px; min-height: 48px; padding: 0 17px; }
+.pairing-actions { display: flex; flex-direction: column; gap: 10px; }
+.sas { font-size: 56px; font-weight: 800; letter-spacing: .08em; text-align: center; margin: 8px 0; font-variant-numeric: tabular-nums; color: #f4fafb; }
+.pairing-note { color: #91abb6; font-size: 12px; line-height: 1.5; margin: 0; }
+.settings { padding: 0 20px 12px; display: flex; flex-direction: column; gap: 8px; }

@@ -23,9 +23,21 @@ pnpm install                     # configure esbuild build approval in pnpm poli
 
 The mock relay tests cover discovery, per-channel reads, profile cache, subscriptions, reconnection, accepted and rejected sends, and thread persistence. `UNI_NO_KEYRING=1` keeps headless tests from prompting a system keychain. The Tauri shell uses the same app-data SQLite database on desktop and Android; `UNI_RELAY_URL` can override its default relay.
 
+## Pairing a device
+
+Every device uses the **same Buzz identity**. Talk to Uni receives it from Buzz desktop with NIP-AB device pairing (the app is the *target*; protocol crypto comes from `buzz-core`):
+
+1. On the computer: Buzz → Settings → **Pair mobile device**, then **Copy** the `nostrpair://…` link.
+2. Get the link onto the phone/tablet (e.g. shared clipboard, or a note to yourself), open Talk to Uni and paste it into **Pair with Buzz desktop** → **Start**.
+3. Compare the 6-digit codes. Tap **Codes match** here *and* confirm in Buzz. If they differ, tap Cancel (the source is told `sas_mismatch`).
+
+The key travels NIP-44-encrypted between ephemeral session keys over the pairing relay named in the link (session expires after 120 s). On arrival its pubkey is checked against the payload and the relay URL must be public `https`/`wss`. Storage: on **Android** it is encrypted with a non-exportable AES-256-GCM key in Android Keystore (alias `uni_identity`, in-app `KeystorePlugin.kt`); only ciphertext + IV are written, to private prefs. On **desktop** it goes to the OS keyring (`uni-app`/`nsec`). The secret is never logged or passed to JavaScript. Settings (⚙) → **Forget this device key** deletes it, along with the local cache.
+
+Driver: `crates/uni-core/src/pairing.rs`. Tests: `pairing_e2e` in `crates/uni-core/tests/mock_relay.rs` run buzz-core's source role against it.
+
 ## Release gates — not yet done
 
-**Do not treat this as an account-ready Android app.** The `keyring` crate's Android fallback is nonpersistent; phase 1 has no Keystore-backed personal-key pairing. It will show cached data offline, but cannot safely sign in as Aaron on an unprovisioned Android device. Implement/test secure on-device enrollment and relay membership before using a personal account. Do not put an nsec in the JavaScript or in an APK environment variable.
+Before using a personal account, check relay membership. Never put an nsec in the JavaScript or in an APK environment variable. The old debug-only plaintext `dev-nsec` fallback has been removed.
 
 Raw microphone audio is not a supported Buzz voice note: native MP4 packaging, signed media upload, permission and device tests are deferred. Android keyboard speech-to-text can fill the text composer now. History is bounded (500 fetched per channel per sync, 300 displayed per room/thread); older-page backfill is not implemented. No real-relay publish or Pixel/tablet smoke test is claimed by this branch.
 

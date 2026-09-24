@@ -4,12 +4,87 @@ import "./App.css";
 
 type Room = { id: string; name: string; last_message: string | null; last_ts: number | null; mentions: boolean };
 type Message = { ref: string; channel: string; author: string; author_name: string; ts: number; body: string; mentions_me: boolean; root: string | null; parent: string | null };
+type IdentityStatus = { paired: boolean; pubkey: string | null };
+type PairStep = "paste" | "connecting" | "code" | "receiving" | "done";
 type SyncResult = { pubkey: string; total_items: number; channel_errors: Record<string, string>; truncated_channels: string[] };
 
 const time = (ts: number) => new Date(ts * 1000).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 const keyFor = (channel: string, root: string | null) => `${channel}:${root ?? "room"}`;
 
+function Pairing({ onPaired }: { onPaired: (pubkey: string) => void }) {
+  const [link, setLink] = useState("");
+  const [step, setStep] = useState<PairStep>("paste");
+  const [sas, setSas] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  async function start() {
+    setError(null);
+    setStep("connecting");
+    try {
+      const r = await invoke<{ sas: string }>("pairing_start", { uri: link.trim() });
+      setSas(r.sas);
+      setStep("code");
+    } catch (e) { setError(String(e)); setStep("paste"); }
+  }
+  async function confirm() {
+    setError(null);
+    setStep("receiving");
+    try {
+      const r = await invoke<{ pubkey: string }>("pairing_confirm");
+      setLink("");
+      setStep("done");
+      onPaired(r.pubkey);
+    } catch (e) { setError(String(e)); setStep("paste"); }
+  }
+  async function cancel(codesDiffer: boolean) {
+    try { await invoke("pairing_cancel", { codesDiffer }); } catch { /* best effort */ }
+    setSas("");
+    setStep("paste");
+    if (codesDiffer) setError("Codes did not match — pairing cancelled. Start a new pairing in Buzz.");
+  }
+
+  return <main className="pairing">
+    <div className="pairing-card">
+      <span className="eyebrow">BUZZ · PERSONAL</span>
+      <h1>Pair with Buzz desktop</h1>
+      {(step === "paste" || step === "connecting") && <>
+        <ol className="pairing-steps">
+          <li>On your computer, open Buzz → Settings → <strong>Pair mobile device</strong>.</li>
+          <li>Click <strong>Copy</strong> and get the link to this device (paste it here).</li>
+          <li>Tap Start, then compare the 6-digit codes.</li>
+        </ol>
+        <label className="pairing-label">Pairing link
+          <textarea value={link} onChange={(e) => setLink(e.target.value)} rows={4} spellCheck={false} autoCapitalize="off" autoCorrect="off" placeholder="nostrpair://…" disabled={step === "connecting"} />
+        </label>
+        <button className="send pairing-primary" disabled={!link.trim().startsWith("nostrpair://") || step === "connecting"} onClick={() => void start()}>{step === "connecting" ? "Connecting…" : "Start"}</button>
+      </>}
+      {(step === "code" || step === "receiving") && <>
+        <p>Does Buzz desktop show this code?</p>
+        <p className="sas" aria-label={`Code ${sas.split("").join(" ")}`}>{sas.slice(0, 3)} {sas.slice(3)}</p>
+        <p className="pairing-note">Only continue if the codes are identical. Then confirm on Buzz desktop too.</p>
+        <div className="pairing-actions">
+          <button className="send pairing-primary" disabled={step === "receiving"} onClick={() => void confirm()}>{step === "receiving" ? "Waiting for Buzz desktop…" : "Codes match"}</button>
+          <button className="pairing-secondary" onClick={() => void cancel(step === "code")}>Cancel</button>
+        </div>
+      </>}
+      {step === "done" && <p>Paired. Loading your conversations…</p>}
+      {error && <p className="error" role="alert">{error}</p>}
+      <p className="pairing-note">Your key is sent encrypted, end to end, and stored in this device's secure keystore.</p>
+    </div>
+  </main>;
+}
+
 function App() {
+  const [paired, setPaired] = useState<boolean | null>(null);
+  useEffect(() => {
+    invoke<IdentityStatus>("identity_status").then((s) => setPaired(s.paired)).catch(() => setPaired(false));
+  }, []);
+  if (paired === null) return <main className="pairing"><p className="empty">Loading…</p></main>;
+  if (!paired) return <Pairing onPaired={() => setPaired(true)} />;
+  return <Conversations onForget={() => setPaired(false)} />;
+}
+
+function Conversations({ onForget }: { onForget: () => void }) {
   const [rooms, setRooms] = useState<Room[]>([]);
   const [channel, setChannel] = useState<string | null>(null);
   const [root, setRoot] = useState<string | null>(null);
@@ -25,6 +100,8 @@ function App() {
   const [status, setStatus] = useState("Loading cached conversations…");
   const [error, setError] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [forgetArmed, setForgetArmed] = useState(false);
   const scrollEnd = useRef<HTMLDivElement>(null);
 
   const loadRooms = useCallback(async () => {
@@ -128,11 +205,18 @@ function App() {
     finally { setSending(false); }
   }
 
+  async function forget() {
+    // Two taps instead of window.confirm (unreliable in Android WebView).
+    if (!forgetArmed) { setForgetArmed(true); return; }
+    try { await invoke("identity_forget"); onForget(); } catch (e) { setError(String(e)); }
+  }
+
   const currentRoom = rooms.find((r) => r.id === channel);
   const isThread = !!root;
   return <main className={`shell ${channel ? "in-room" : ""}`}>
     <aside className="rooms" aria-label="Conversations">
-      <header className="rooms-header"><div><span className="eyebrow">BUZZ · PERSONAL</span><h1>Talk to Uni</h1></div><button className="icon-button" onClick={() => void refresh()} disabled={busy} aria-label="Refresh conversations">↻</button></header>
+      <header className="rooms-header"><div><span className="eyebrow">BUZZ · PERSONAL</span><h1>Talk to Uni</h1></div><div><button className="icon-button" onClick={() => void refresh()} disabled={busy} aria-label="Refresh conversations">↻</button><button className="icon-button" onClick={() => { setSettingsOpen(!settingsOpen); setForgetArmed(false); }} aria-label="Settings" aria-expanded={settingsOpen}>⚙</button></div></header>
+      {settingsOpen && <div className="settings"><button className="pairing-secondary" onClick={() => void forget()}>{forgetArmed ? "Tap again to forget — you'll need to re-pair" : "Forget this device key"}</button>{forgetArmed && <button className="pairing-secondary" onClick={() => setForgetArmed(false)}>Keep key</button>}</div>}
       <p className="connection" role="status">{status}</p>
       {identity && <p className="identity" title={identity}>Signed in as {identity.slice(0, 12)}…</p>}
       {!ready && <p className="empty">Loading…</p>}
