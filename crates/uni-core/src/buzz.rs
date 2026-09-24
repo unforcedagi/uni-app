@@ -255,6 +255,11 @@ impl BuzzClient {
         Ok(self.conn.next_event(timeout).await?)
     }
 
+    /// Publish a signed event and wait for its relay acknowledgement.
+    pub async fn publish(&mut self, event: Event) -> Result<buzz_ws_client::OkResponse> {
+        Ok(self.conn.send_event(event).await?)
+    }
+
     /// Close the connection.
     pub async fn disconnect(self) -> Result<()> {
         self.conn.disconnect().await?;

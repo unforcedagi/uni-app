@@ -15,6 +15,7 @@
 
 pub mod backoff;
 pub mod buzz;
+pub mod compose;
 pub mod identity;
 pub mod live;
 pub mod store;
@@ -22,9 +23,10 @@ pub mod sync;
 
 pub use backoff::Backoff;
 pub use buzz::{probe, BuzzClient, ChannelInfo, ProbeReport};
+pub use compose::send_message;
 pub use identity::{init_keyring_key, keyring_pubkey, load_keys, KeyInit, KeySource};
 pub use live::{run_live, LiveConfig, LiveEvent};
-pub use store::{Item, Profile, Store};
+pub use store::{ConversationMessage, Item, Profile, Room, Store};
 pub use sync::{sync_once, SyncReport};
 
 /// Errors produced by uni-core.
@@ -36,6 +38,9 @@ pub enum Error {
     /// Relay closed a subscription (e.g. `restricted: …`).
     #[error("subscription {sub_id} closed by relay: {message}")]
     SubscriptionClosed { sub_id: String, message: String },
+    /// Relay declined a signed message; not stored locally.
+    #[error("relay rejected message: {0}")]
+    RelayRejected(String),
     /// SQLite failure.
     #[error("store: {0}")]
     Store(#[from] rusqlite::Error),

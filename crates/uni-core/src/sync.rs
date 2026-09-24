@@ -57,6 +57,31 @@ pub fn ingest_message(
         mentions_me: mentions(ev, me),
     };
     let inserted = store.upsert_item(&item)?;
+    let mut root = None;
+    let mut parent = None;
+    for tag in ev.tags.iter() {
+        let parts = tag.as_slice();
+        if parts.first().map(String::as_str) != Some("e") {
+            continue;
+        }
+        let Some(id) = parts
+            .get(1)
+            .filter(|id| nostr::EventId::from_hex(id).is_ok())
+        else {
+            continue;
+        };
+        match parts.get(3).map(String::as_str) {
+            Some("root") => root = Some(id.as_str()),
+            Some("reply") => parent = Some(id.as_str()),
+            _ => {}
+        }
+    }
+    if root.is_none() {
+        root = parent;
+    }
+    if parent.is_some() {
+        store.set_message_refs(&item.r#ref, root, parent)?;
+    }
     Ok((inserted, item))
 }
 
@@ -162,4 +187,34 @@ pub async fn sync_once(
     let _ = client.disconnect().await;
     report.total_items = store.count_items()?;
     Ok(report)
+}
+
+#[cfg(test)]
+mod conversation_tests {
+    use super::*;
+    use nostr::{EventBuilder, Kind, Tag};
+    #[test]
+    fn ingest_persists_nip10_root_and_parent() {
+        let store = Store::open_in_memory().unwrap();
+        let keys = Keys::generate();
+        let ch = uuid::Uuid::new_v4();
+        let root = "a".repeat(64);
+        let parent = "b".repeat(64);
+        let tags = vec![
+            Tag::parse(vec!["h", &ch.to_string()]).unwrap(),
+            Tag::parse(vec!["e", &root, "", "root"]).unwrap(),
+            Tag::parse(vec!["e", &parent, "", "reply"]).unwrap(),
+        ];
+        let ev = EventBuilder::new(Kind::Custom(9), "reply")
+            .tags(tags)
+            .sign_with_keys(&keys)
+            .unwrap();
+        ingest_message(&store, &ev, &keys.public_key(), ch).unwrap();
+        let stored = store
+            .message(&ch.to_string(), &ev.id.to_hex())
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored.root.as_deref(), Some(root.as_str()));
+        assert_eq!(stored.parent.as_deref(), Some(parent.as_str()));
+    }
 }
