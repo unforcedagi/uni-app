@@ -10,6 +10,8 @@
 //!   history, profile fetch, and open (live) subscriptions.
 //! - [`sync`]: one-shot orchestration: connect → discover → pull → profiles → store.
 //!   A single pass is complete and idempotent (the phone's whole loop).
+//! - [`pairing`]: NIP-AB target role — receive this account's key from Buzz desktop's
+//!   `nostrpair://` link (protocol crypto from `buzz_core::pairing`).
 //! - [`live`]: optional long-lived loop on top: open subs after EOSE, membership
 //!   notifications, reconnect with [`backoff`] and re-AUTH.
 
@@ -18,13 +20,17 @@ pub mod buzz;
 pub mod compose;
 pub mod identity;
 pub mod live;
+pub mod pairing;
 pub mod store;
 pub mod sync;
 
 pub use backoff::Backoff;
 pub use buzz::{probe, BuzzClient, ChannelInfo, ProbeReport};
 pub use compose::send_message;
-pub use identity::{init_keyring_key, keyring_pubkey, load_keys, KeyInit, KeySource};
+pub use identity::{
+    clear_device_keys, forget_keyring_key, has_device_keys, init_keyring_key, keyring_pubkey,
+    load_keys, set_device_keys, store_keyring_nsec, KeyInit, KeySource,
+};
 pub use live::{run_live, LiveConfig, LiveEvent};
 pub use store::{ConversationMessage, Item, Profile, Room, Store};
 pub use sync::{sync_once, SyncReport};
@@ -47,6 +53,9 @@ pub enum Error {
     /// Identity could not be loaded.
     #[error("identity: {0}")]
     Identity(String),
+    /// NIP-AB device pairing failed or was aborted.
+    #[error("pairing: {0}")]
+    Pairing(String),
     /// Bad input.
     #[error("invalid: {0}")]
     Invalid(String),

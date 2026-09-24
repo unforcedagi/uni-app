@@ -123,6 +123,7 @@ fn key_source_label(source: KeySource) -> &'static str {
     match source {
         KeySource::Env => "env UNI_NSEC",
         KeySource::Keyring => "keyring uni-app/nsec",
+        KeySource::Device => "device store (Android Keystore)",
         KeySource::Ephemeral => "EPHEMERAL (throwaway, generated now)",
     }
 }

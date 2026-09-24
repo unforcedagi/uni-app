@@ -47,6 +47,9 @@ struct MockRelay {
     connections: Mutex<u32>,
     /// Sub ids the client has CLOSEd (proves the client side of a leave).
     closed_subs: Mutex<Vec<String>>,
+    /// Pairing-relay mode: accept NIP-42 AUTH from any key (ephemeral
+    /// NIP-AB session keys are never relay members).
+    open_auth: std::sync::atomic::AtomicBool,
 }
 
 impl MockRelay {
@@ -60,7 +63,16 @@ impl MockRelay {
             auths_ok: Mutex::new(0),
             connections: Mutex::new(0),
             closed_subs: Mutex::new(Vec::new()),
+            open_auth: std::sync::atomic::AtomicBool::new(false),
         })
+    }
+
+    /// A relay behaving like the NIP-AB pairing relay: anyone may auth,
+    /// kind-24134 events are routed to live `#p` subscriptions.
+    fn pairing() -> Arc<Self> {
+        let r = Self::new(vec![], vec![], vec![]);
+        r.open_auth.store(true, std::sync::atomic::Ordering::SeqCst);
+        r
     }
 
     fn publish(&self, ev: Value) {
@@ -172,7 +184,9 @@ async fn serve(listener: TcpListener, relay: Arc<MockRelay>) {
                                 let ok_challenge = tag_values(ev, "challenge") == vec![challenge.as_str()];
                                 let (ok, reason) = if !ok_challenge {
                                     (false, "auth-required: bad challenge")
-                                } else if !relay.members.contains(&pk) {
+                                } else if !relay.members.contains(&pk)
+                                    && !relay.open_auth.load(std::sync::atomic::Ordering::SeqCst)
+                                {
                                     (false, "restricted: not a relay member")
                                 } else {
                                     authed = Some(pk.clone());
@@ -1134,4 +1148,185 @@ async fn live_membership_notification_opens_new_channel_sub() {
     };
     let (r, _) = tokio::join!(runner, driver);
     r.unwrap();
+}
+
+// ---------------------------------------------------------------------------
+// NIP-AB pairing: buzz-core's *source* role (what Buzz desktop runs) against
+// uni-core's target driver, routed through the mock relay by `#p`.
+// ---------------------------------------------------------------------------
+
+mod pairing_e2e {
+    use super::*;
+    use buzz_core::kind::KIND_PAIRING;
+    use buzz_core::pairing::{qr::encode_qr, AbortReason, PairingSession, PayloadType};
+    use buzz_ws_client::{NostrWsConnection, RelayMessage};
+    use nostr::nips::nip19::ToBech32;
+    use nostr::{EventBuilder, RelayUrl};
+    use zeroize::Zeroizing;
+
+    /// Source side (Buzz desktop), connected + subscribed; returns the link.
+    struct Source {
+        session: PairingSession,
+        conn: NostrWsConnection,
+        uri: String,
+    }
+
+    async fn source(url: &str) -> Source {
+        let (session, qr) = PairingSession::new_source(url.to_string());
+        let uri = encode_qr(&qr);
+        let mut conn = NostrWsConnection::connect(url).await.unwrap();
+        let challenge = loop {
+            if let RelayMessage::Auth { challenge } =
+                conn.next_event(Duration::from_secs(5)).await.unwrap()
+            {
+                break challenge;
+            }
+        };
+        let auth = session
+            .sign_event(EventBuilder::auth(challenge, RelayUrl::parse(url).unwrap()))
+            .unwrap();
+        conn.send_raw(&json!(["AUTH", auth])).await.unwrap();
+        let filter = json!({"kinds":[KIND_PAIRING], "#p":[session.pubkey().to_hex()]});
+        conn.send_raw(&json!(["REQ", "src", filter])).await.unwrap();
+        loop {
+            if let RelayMessage::Eose { .. } =
+                conn.next_event(Duration::from_secs(5)).await.unwrap()
+            {
+                break;
+            }
+        }
+        Source { session, conn, uri }
+    }
+
+    impl Source {
+        async fn next(&mut self) -> nostr::Event {
+            loop {
+                match self.conn.next_event(Duration::from_secs(10)).await.unwrap() {
+                    RelayMessage::Event { event, .. } => return *event,
+                    RelayMessage::Ok(ok) => assert!(ok.accepted, "relay rejected: {}", ok.message),
+                    _ => {}
+                }
+            }
+        }
+        async fn send(&mut self, ev: &nostr::Event) {
+            self.conn.send_raw(&json!(["EVENT", ev])).await.unwrap();
+        }
+        /// Wait for the target's offer; return the SAS the source displays.
+        async fn take_offer(&mut self) -> String {
+            let ev = self.next().await;
+            self.session.handle_offer(&ev).expect("valid offer")
+        }
+    }
+
+    fn identity_payload(keys: &Keys, claimed: &Keys) -> Zeroizing<String> {
+        Zeroizing::new(
+            json!({
+                "relayUrl": "https://buzz.example.com",
+                "pubkey": claimed.public_key().to_hex(),
+                "nsec": keys.secret_key().to_bech32().unwrap(),
+            })
+            .to_string(),
+        )
+    }
+
+    #[tokio::test]
+    async fn pairing_delivers_nsec_after_both_sides_confirm() {
+        let relay = MockRelay::pairing();
+        let url = relay.start().await;
+        let mut src = source(&url).await;
+        let account = Keys::generate();
+
+        let pending = uni_core::pairing::start(&src.uri).await.expect("start");
+        let source_sas = src.take_offer().await;
+        assert_eq!(pending.sas(), source_sas, "both devices show the same code");
+        assert_eq!(pending.sas().len(), 6);
+
+        // Buzz desktop user clicks "codes match": sas-confirm + payload.
+        let confirm = src.session.confirm_sas().unwrap();
+        src.send(&confirm).await;
+        let payload = src
+            .session
+            .send_payload(PayloadType::Custom, identity_payload(&account, &account))
+            .unwrap();
+        src.send(&payload).await;
+
+        let got = pending.confirm().await.expect("identity received");
+        assert_eq!(got.pubkey, account.public_key());
+        assert_eq!(
+            got.nsec.as_str(),
+            account.secret_key().to_bech32().unwrap().as_str()
+        );
+        assert_eq!(got.relay_url.as_deref(), Some("wss://buzz.example.com"));
+
+        let complete = src.next().await;
+        src.session
+            .handle_complete(&complete)
+            .expect("complete(success)");
+    }
+
+    #[tokio::test]
+    async fn target_declining_the_code_aborts_with_sas_mismatch() {
+        let relay = MockRelay::pairing();
+        let url = relay.start().await;
+        let mut src = source(&url).await;
+
+        let pending = uni_core::pairing::start(&src.uri).await.unwrap();
+        src.take_offer().await;
+        pending.cancel(true).await.unwrap();
+
+        let abort = src.next().await;
+        assert_eq!(
+            src.session.handle_abort(&abort).expect("abort from target"),
+            AbortReason::SasMismatch
+        );
+    }
+
+    #[tokio::test]
+    async fn source_declining_the_code_fails_the_target() {
+        let relay = MockRelay::pairing();
+        let url = relay.start().await;
+        let mut src = source(&url).await;
+
+        let pending = uni_core::pairing::start(&src.uri).await.unwrap();
+        src.take_offer().await;
+        let abort = src
+            .session
+            .abort(AbortReason::SasMismatch)
+            .unwrap()
+            .unwrap();
+        src.send(&abort).await;
+
+        let err = pending.confirm().await.expect_err("must not pair");
+        assert!(err.to_string().contains("cancelled"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn payload_with_mismatched_pubkey_is_rejected() {
+        let relay = MockRelay::pairing();
+        let url = relay.start().await;
+        let mut src = source(&url).await;
+        let account = Keys::generate();
+        let liar = Keys::generate();
+
+        let pending = uni_core::pairing::start(&src.uri).await.unwrap();
+        src.take_offer().await;
+        let confirm = src.session.confirm_sas().unwrap();
+        src.send(&confirm).await;
+        let payload = src
+            .session
+            .send_payload(PayloadType::Custom, identity_payload(&account, &liar))
+            .unwrap();
+        src.send(&payload).await;
+
+        let err = pending.confirm().await.expect_err("mismatch must fail");
+        assert!(err.to_string().contains("does not match"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn garbage_link_is_rejected_before_any_network() {
+        assert!(uni_core::pairing::start("nostrpair://nope").await.is_err());
+        assert!(uni_core::pairing::start("https://example.com")
+            .await
+            .is_err());
+    }
 }

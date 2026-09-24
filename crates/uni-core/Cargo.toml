@@ -9,6 +9,9 @@ description = "Uni app core: Buzz relay adapter + local SQLite store (Phase 1)"
 [dependencies]
 buzz-ws-client = { workspace = true }
 buzz-sdk = { workspace = true }
+buzz-core = { workspace = true }
+zeroize = { workspace = true }
+url = { workspace = true }
 nostr = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }

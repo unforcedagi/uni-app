@@ -4719,6 +4719,7 @@ dependencies = [
 name = "uni-core"
 version = "0.1.0"
 dependencies = [
+ "buzz-core",
  "buzz-sdk",
  "buzz-ws-client",
  "futures-util",
@@ -4733,7 +4734,9 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "tracing",
+ "url",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]
