@@ -183,6 +183,17 @@ async fn serve(listener: TcpListener, relay: Arc<MockRelay>) {
                                     .await
                                     .unwrap();
                             }
+                            "EVENT" => {
+                                let ev = &frame[1];
+                                let id = ev["id"].as_str().unwrap();
+                                let accepted = authed.as_deref() == ev["pubkey"].as_str()
+                                    && ev["content"] != "reject-me"
+                                    && serde_json::from_value::<nostr::Event>(ev.clone())
+                                        .is_ok_and(|e| e.verify().is_ok());
+                                if accepted { relay.publish(ev.clone()); }
+                                ws.send(Message::Text(json!(["OK", id, accepted,
+                                    if accepted { "" } else { "restricted: rejected" }]).to_string().into())).await.unwrap();
+                            }
                             "REQ" => {
                                 let sub = frame[1].as_str().unwrap().to_string();
                                 let Some(me) = authed.clone() else {
@@ -369,6 +380,93 @@ async fn fixture() -> Fixture {
         relay,
         url,
     }
+}
+
+#[tokio::test]
+async fn compose_publishes_and_stores_only_relay_accepted_replies() {
+    let f = fixture().await;
+    let store = Store::open_in_memory().unwrap();
+    sync_once(&f.url, &f.me, None, &store).await.unwrap();
+    let root = store
+        .room_messages(&f.ch_a.to_string(), 20)
+        .unwrap()
+        .into_iter()
+        .find(|m| m.item.body == "hello a1")
+        .unwrap();
+    let sent = tokio::time::timeout(
+        Duration::from_secs(3),
+        uni_core::send_message(
+            &f.url,
+            &f.me,
+            None,
+            &store,
+            f.ch_a,
+            "reply to Uni",
+            Some(&root.item.r#ref),
+            &[f.other.public_key().to_hex()],
+        ),
+    )
+    .await
+    .expect("relay must answer")
+    .unwrap();
+    let reply = store
+        .message(&f.ch_a.to_string(), &sent.r#ref)
+        .unwrap()
+        .unwrap();
+    assert_eq!(reply.root.as_deref(), Some(root.item.r#ref.as_str()));
+    assert_eq!(reply.parent.as_deref(), Some(root.item.r#ref.as_str()));
+    let published = f
+        .relay
+        .events
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|e| e["id"] == sent.r#ref)
+        .cloned()
+        .unwrap();
+    assert!(tag_values(&published, "h").contains(&f.ch_a.to_string().as_str()));
+    assert!(tag_values(&published, "p").contains(&f.other.public_key().to_hex().as_str()));
+    assert!(tag_values(&published, "p").contains(&f.me.public_key().to_hex().as_str()));
+    assert_eq!(store.count_items().unwrap(), 5);
+
+    let nested = uni_core::send_message(
+        &f.url,
+        &f.me,
+        None,
+        &store,
+        f.ch_a,
+        "nested reply",
+        Some(&sent.r#ref),
+        &[],
+    )
+    .await
+    .unwrap();
+    let nested_record = store
+        .message(&f.ch_a.to_string(), &nested.r#ref)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        nested_record.root.as_deref(),
+        Some(root.item.r#ref.as_str())
+    );
+    assert_eq!(nested_record.parent.as_deref(), Some(sent.r#ref.as_str()));
+    assert_eq!(
+        store
+            .thread_messages(&f.ch_a.to_string(), &root.item.r#ref, 20)
+            .unwrap()
+            .len(),
+        3
+    );
+
+    let err = tokio::time::timeout(
+        Duration::from_secs(3),
+        uni_core::send_message(&f.url, &f.me, None, &store, f.ch_a, "reject-me", None, &[]),
+    )
+    .await
+    .expect("relay must reject")
+    .unwrap_err();
+    assert!(err.to_string().contains("relay rejected"));
+    assert_eq!(store.count_items().unwrap(), 6);
 }
 
 #[tokio::test]

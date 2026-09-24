@@ -36,6 +36,24 @@ pub struct Item {
     pub mentions_me: bool,
 }
 
+/// Message and its NIP-10 conversation position.
+#[derive(Debug, Clone)]
+pub struct ConversationMessage {
+    pub item: Item,
+    pub root: Option<String>,
+    pub parent: Option<String>,
+}
+
+/// Joined room with its most recent cached message.
+#[derive(Debug, Clone)]
+pub struct Room {
+    pub id: String,
+    pub name: Option<String>,
+    pub last_message: Option<String>,
+    pub last_ts: Option<i64>,
+    pub mentions: bool,
+}
+
 /// Cached kind-0 profile.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Profile {
@@ -115,6 +133,13 @@ CREATE TABLE IF NOT EXISTS sync_state (
     channel     TEXT PRIMARY KEY,
     since       INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS message_refs (
+    ref TEXT PRIMARY KEY,
+    root TEXT,
+    parent TEXT
+);
+CREATE INDEX IF NOT EXISTS message_refs_root ON message_refs(root);
 
 CREATE TABLE IF NOT EXISTS profiles (
     pubkey       TEXT PRIMARY KEY,
@@ -342,6 +367,98 @@ impl Store {
             .query_row("SELECT COUNT(*) FROM profiles", [], |r| r.get(0))?)
     }
 
+    /// Store NIP-10 reply references after the item is inserted. An old database
+    /// with no reference rows still reads its legacy messages as roots.
+    pub fn set_message_refs(
+        &self,
+        id: &str,
+        root: Option<&str>,
+        parent: Option<&str>,
+    ) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO message_refs(ref,root,parent) VALUES (?1,?2,?3)
+             ON CONFLICT(ref) DO UPDATE SET root=excluded.root,parent=excluded.parent",
+            params![id, root, parent],
+        )?;
+        Ok(())
+    }
+
+    /// One joined room's recent messages, chronological in the returned window.
+    pub fn room_messages(&self, channel: &str, limit: usize) -> Result<Vec<ConversationMessage>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT i.source,i.ref,i.channel,i.author,i.ts,i.body,i.mentions_me,r.root,r.parent
+             FROM items i LEFT JOIN message_refs r ON r.ref=i.ref
+             WHERE i.source='buzz' AND i.channel=?1
+             ORDER BY i.ts DESC,i.ref DESC LIMIT ?2",
+        )?;
+        let mut rows = stmt
+            .query_map(params![channel, limit.min(500) as i64], row_to_message)?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        rows.reverse();
+        Ok(rows)
+    }
+
+    /// A root and its cached descendants, fenced to the same channel.
+    pub fn thread_messages(
+        &self,
+        channel: &str,
+        root: &str,
+        limit: usize,
+    ) -> Result<Vec<ConversationMessage>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT i.source,i.ref,i.channel,i.author,i.ts,i.body,i.mentions_me,r.root,r.parent
+             FROM items i LEFT JOIN message_refs r ON r.ref=i.ref
+             WHERE i.source='buzz' AND i.channel=?1 AND (i.ref=?2 OR r.root=?2)
+             ORDER BY i.ts ASC,i.ref ASC LIMIT ?3",
+        )?;
+        let rows = stmt
+            .query_map(
+                params![channel, root, limit.min(500) as i64],
+                row_to_message,
+            )?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    /// Joined channels, sorted with Uni first and the most active rooms next.
+    pub fn rooms(&self) -> Result<Vec<Room>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT c.id,c.name,
+                (SELECT body FROM items WHERE source='buzz' AND channel=c.id ORDER BY ts DESC,ref DESC LIMIT 1),
+                (SELECT ts FROM items WHERE source='buzz' AND channel=c.id ORDER BY ts DESC,ref DESC LIMIT 1),
+                EXISTS(SELECT 1 FROM items WHERE source='buzz' AND channel=c.id AND mentions_me=1)
+             FROM channels c WHERE archived=0
+             ORDER BY CASE WHEN lower(c.name)='uni' THEN 0 ELSE 1 END,
+                      (SELECT MAX(ts) FROM items WHERE source='buzz' AND channel=c.id) DESC,c.id",
+        )?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok(Room {
+                    id: r.get(0)?,
+                    name: r.get(1)?,
+                    last_message: r.get(2)?,
+                    last_ts: r.get(3)?,
+                    mentions: r.get::<_, i64>(4)? != 0,
+                })
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    /// Find an existing message in a channel, including its thread ancestry.
+    pub fn message(&self, channel: &str, id: &str) -> Result<Option<ConversationMessage>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT i.source,i.ref,i.channel,i.author,i.ts,i.body,i.mentions_me,r.root,r.parent
+             FROM items i LEFT JOIN message_refs r ON r.ref=i.ref
+             WHERE i.source='buzz' AND i.channel=?1 AND i.ref=?2",
+                params![channel, id],
+                row_to_message,
+            )
+            .optional()?)
+    }
+
     /// Newest-first slice of the timeline.
     pub fn timeline(&self, limit: usize) -> Result<Vec<Item>> {
         let mut stmt = self.conn.prepare(
@@ -374,6 +491,14 @@ impl Store {
             .collect::<std::result::Result<Vec<_>, _>>()?;
         Ok(rows)
     }
+}
+
+fn row_to_message(r: &rusqlite::Row<'_>) -> rusqlite::Result<ConversationMessage> {
+    Ok(ConversationMessage {
+        item: row_to_item(r)?,
+        root: r.get(7)?,
+        parent: r.get(8)?,
+    })
 }
 
 fn row_to_item(r: &rusqlite::Row<'_>) -> rusqlite::Result<Item> {
@@ -532,6 +657,53 @@ mod tests {
         assert_eq!(s.search("heart noth", 10).unwrap()[0].r#ref, "e2");
         assert_eq!(s.search("heart merged", 10).unwrap().len(), 0);
         assert_eq!(fts_literal_query("a \"b\""), "\"a\"* \"\"\"b\"\"\"*");
+    }
+
+    #[test]
+    fn conversation_queries_preserve_threads_and_legacy_rows() {
+        let s = Store::open_in_memory().unwrap();
+        s.upsert_channel("c1", Some("Uni"), None, false, 1).unwrap();
+        s.upsert_channel("c2", Some("Other"), None, false, 1)
+            .unwrap();
+        s.upsert_item(&item("root", "c1", 10)).unwrap();
+        s.upsert_item(&item("direct", "c1", 11)).unwrap();
+        s.upsert_item(&item("nested", "c1", 12)).unwrap();
+        s.upsert_item(&item("elsewhere", "c2", 13)).unwrap();
+        s.set_message_refs("direct", Some("root"), Some("root"))
+            .unwrap();
+        s.set_message_refs("nested", Some("root"), Some("direct"))
+            .unwrap();
+        assert_eq!(
+            s.room_messages("c1", 20)
+                .unwrap()
+                .iter()
+                .map(|m| m.item.r#ref.as_str())
+                .collect::<Vec<_>>(),
+            vec!["root", "direct", "nested"]
+        );
+        let thread = s.thread_messages("c1", "root", 20).unwrap();
+        assert_eq!(
+            thread
+                .iter()
+                .map(|m| m.item.r#ref.as_str())
+                .collect::<Vec<_>>(),
+            vec!["root", "direct", "nested"]
+        );
+        assert_eq!(thread[2].parent.as_deref(), Some("direct"));
+        s.upsert_item(&item("orphan", "c1", 14)).unwrap();
+        s.set_message_refs("orphan", Some("unfetched"), Some("unfetched"))
+            .unwrap();
+        assert_eq!(
+            s.thread_messages("c1", "unfetched", 20).unwrap()[0]
+                .item
+                .r#ref,
+            "orphan"
+        );
+        assert!(s.thread_messages("c2", "root", 20).unwrap().is_empty());
+        let rooms = s.rooms().unwrap();
+        assert_eq!(rooms[0].id, "c1");
+        assert_eq!(rooms[0].last_message.as_deref(), Some("body orphan"));
+        assert_eq!(rooms[1].id, "c2");
     }
 
     #[test]
