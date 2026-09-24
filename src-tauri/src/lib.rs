@@ -173,10 +173,20 @@ async fn post_message(
     .map_err(|e| e.to_string())?
 }
 
+#[cfg(mobile)]
+mod mobile;
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(mobile)]
+    mobile::init_runtime();
     uni_core::init_crypto();
     tauri::Builder::default()
+        .setup(|_app| {
+            #[cfg(mobile)]
+            mobile::setup(_app);
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             get_rooms,
             get_messages,
