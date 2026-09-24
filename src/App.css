@@ -73,3 +73,22 @@ h1 { font-size: 22px; margin: 5px 0 0; letter-spacing: -.03em; }
 .sas { font-size: 56px; font-weight: 800; letter-spacing: .08em; text-align: center; margin: 8px 0; font-variant-numeric: tabular-nums; color: #f4fafb; }
 .pairing-note { color: #91abb6; font-size: 12px; line-height: 1.5; margin: 0; }
 .settings { padding: 0 20px 12px; display: flex; flex-direction: column; gap: 8px; }
+.mention { color: #9fe7e3; background: rgba(106, 203, 204, .16); border-radius: 5px; padding: 0 3px; font-weight: 650; }
+.mention.mention-me { color: #0b2a30; background: #87d6d5; }
+.thread-summary { display: inline-flex; align-items: center; gap: 4px; background: #203b4b; border: 1px solid #36566a; color: #bfeef0; border-radius: 10px; font-size: 12px; padding: 6px 10px; margin: 2px 0 4px; min-height: 36px; }
+.thread-summary span { color: #93b6c3; }
+.message.thread-root .message-content { border-color: #4f8a92; }
+.thread-divider { display: flex; align-items: center; gap: 10px; color: #8fb0bd; font-size: 11px; margin: 4px 0 6px 46px; }
+.thread-divider::after { content: ""; flex: 1; border-top: 1px solid #2f4757; }
+.thread-back { background: transparent; border: 1px solid #36566a; color: #bfe3e8; border-radius: 10px; min-height: 40px; padding: 0 12px; white-space: nowrap; max-width: 40%; overflow: hidden; text-overflow: ellipsis; }
+.message-actions button { min-height: 32px; }
+.composer { position: relative; }
+.mention-picker { list-style: none; margin: 0 0 8px; padding: 6px; background: #1b3242; border: 1px solid #3c5b6b; border-radius: 14px; max-height: 280px; overflow-y: auto; }
+.mention-picker button { display: flex; align-items: center; gap: 10px; width: 100%; background: transparent; border: 0; color: #eaf5f7; text-align: left; padding: 8px 10px; min-height: 48px; border-radius: 10px; }
+.mention-picker button.active, .mention-picker button:hover { background: #2a5063; }
+.mention-picker small { margin-left: auto; color: #8fb0bd; font-family: ui-monospace, monospace; font-size: 11px; }
+.mention-name { font-weight: 650; }
+.mention-empty { color: #a8c3cc; font-size: 12px; padding: 10px; }
+.avatar.small { flex: 0 0 30px; width: 30px; height: 30px; border-radius: 10px; font-size: 13px; }
+.link { background: transparent; border: 0; color: #9bd1d7; font-size: 10px; padding: 0; text-decoration: underline; }
+@media (max-width: 680px) { .thread-back { display: none; } }

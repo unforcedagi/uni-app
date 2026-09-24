@@ -9,7 +9,9 @@
     "tauri": "tauri",
     "dev:vite": "vite",
     "build:vite": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test:mentions": "node --experimental-strip-types scripts/mentions.test.ts"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.4.1",
