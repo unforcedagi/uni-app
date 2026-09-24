@@ -884,7 +884,8 @@ mod tests {
         );
         assert_eq!(s.authors_without_profile().unwrap(), vec![c.clone()]);
         // Replacement drops members who left.
-        s.replace_channel_members("c1", std::slice::from_ref(&a)).unwrap();
+        s.replace_channel_members("c1", std::slice::from_ref(&a))
+            .unwrap();
         assert_eq!(s.channel_members("c1").unwrap().len(), 1);
         assert!(s.channel_members("c2").unwrap().is_empty());
     }
