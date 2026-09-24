@@ -324,7 +324,7 @@ async fn fixture() -> Fixture {
 
     let events = vec![
         // Membership (39002) — relay-signed, #p = me.
-        signed(&relay_keys, 39002, vec![d(ch_a), p(&me)], "", 1),
+        signed(&relay_keys, 39002, vec![d(ch_a), p(&me), p(&other)], "", 1),
         signed(&relay_keys, 39002, vec![d(ch_b), p(&me)], "", 1),
         signed(&relay_keys, 39002, vec![d(ch_archived), p(&me)], "", 1),
         signed(&relay_keys, 39002, vec![d(ch_not_mine), p(&other)], "", 1),
@@ -442,6 +442,25 @@ async fn compose_publishes_and_stores_only_relay_accepted_replies() {
     assert!(tag_values(&published, "p").contains(&f.other.public_key().to_hex().as_str()));
     assert!(tag_values(&published, "p").contains(&f.me.public_key().to_hex().as_str()));
     assert_eq!(store.count_items().unwrap(), 5);
+    // The bound recipient is recorded as a mention of the stored message.
+    assert!(store
+        .message_mentions(&sent.r#ref)
+        .unwrap()
+        .contains(&f.other.public_key().to_hex()));
+    // Roster from kind 39002, names from kind 0.
+    let members = store.channel_members(&f.ch_a.to_string()).unwrap();
+    assert_eq!(members.len(), 2);
+    assert_eq!(members[0].pubkey, f.other.public_key().to_hex());
+    assert_eq!(members[0].name.as_deref(), Some("AstraJi"));
+    assert_eq!(members[1].pubkey, f.me.public_key().to_hex());
+    // Thread replies are counted on the root and kept out of the main timeline.
+    let timeline = store.room_timeline(&f.ch_a.to_string(), 50).unwrap();
+    let root_row = timeline
+        .iter()
+        .find(|t| t.message.item.r#ref == root.item.r#ref)
+        .unwrap();
+    assert_eq!(root_row.reply_count, 1);
+    assert!(!timeline.iter().any(|t| t.message.item.r#ref == sent.r#ref));
 
     let nested = uni_core::send_message(
         &f.url,

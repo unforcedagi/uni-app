@@ -44,6 +44,24 @@ pub struct ConversationMessage {
     pub parent: Option<String>,
 }
 
+/// A main-timeline message with its thread summary.
+#[derive(Debug, Clone)]
+pub struct TimelineMessage {
+    pub message: ConversationMessage,
+    /// Cached replies whose NIP-10 root is this message.
+    pub reply_count: i64,
+    /// Newest cached reply, if any.
+    pub last_reply_ts: Option<i64>,
+}
+
+/// A channel member from the kind-39002 roster, with its cached profile label.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Member {
+    pub pubkey: String,
+    /// `display_name`, else `name`, from kind 0; `None` if unknown.
+    pub name: Option<String>,
+}
+
 /// Joined room with its most recent cached message.
 #[derive(Debug, Clone)]
 pub struct Room {
@@ -140,6 +158,18 @@ CREATE TABLE IF NOT EXISTS message_refs (
     parent TEXT
 );
 CREATE INDEX IF NOT EXISTS message_refs_root ON message_refs(root);
+
+CREATE TABLE IF NOT EXISTS channel_members (
+    channel TEXT NOT NULL,
+    pubkey  TEXT NOT NULL,
+    PRIMARY KEY (channel, pubkey)
+);
+
+CREATE TABLE IF NOT EXISTS message_mentions (
+    ref    TEXT NOT NULL,
+    pubkey TEXT NOT NULL,
+    PRIMARY KEY (ref, pubkey)
+);
 
 CREATE TABLE IF NOT EXISTS profiles (
     pubkey       TEXT PRIMARY KEY,
@@ -328,13 +358,15 @@ impl Store {
         Ok(format!("{}…", &pubkey[..8.min(pubkey.len())]))
     }
 
-    /// Distinct item authors with no `profiles` row (candidates for a kind-0 fetch).
+    /// Distinct item authors and channel members with no `profiles` row
+    /// (candidates for a kind-0 fetch).
     pub fn authors_without_profile(&self) -> Result<Vec<String>> {
         let mut stmt = self.conn.prepare(
-            "SELECT DISTINCT i.author FROM items i
-             LEFT JOIN profiles p ON p.pubkey = i.author
-             WHERE i.source = 'buzz' AND p.pubkey IS NULL
-             ORDER BY i.author",
+            "SELECT pk FROM (
+                SELECT author AS pk FROM items WHERE source = 'buzz'
+                UNION SELECT pubkey AS pk FROM channel_members
+             ) WHERE pk NOT IN (SELECT pubkey FROM profiles)
+             ORDER BY pk",
         )?;
         let rows = stmt
             .query_map([], |r| r.get(0))?
@@ -381,6 +413,106 @@ impl Store {
             params![id, root, parent],
         )?;
         Ok(())
+    }
+
+    /// Replace a channel's cached member roster (latest kind-39002 snapshot).
+    pub fn replace_channel_members(&self, channel: &str, members: &[String]) -> Result<()> {
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute(
+            "DELETE FROM channel_members WHERE channel = ?1",
+            params![channel],
+        )?;
+        for pk in members {
+            tx.execute(
+                "INSERT OR IGNORE INTO channel_members (channel, pubkey) VALUES (?1, ?2)",
+                params![channel, pk],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Cached members of `channel` with profile labels, named members first
+    /// (case-insensitive by label), then unnamed by pubkey.
+    pub fn channel_members(&self, channel: &str) -> Result<Vec<Member>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT m.pubkey, COALESCE(p.display_name, p.name)
+             FROM channel_members m LEFT JOIN profiles p ON p.pubkey = m.pubkey
+             WHERE m.channel = ?1",
+        )?;
+        let mut rows = stmt
+            .query_map(params![channel], |r| {
+                Ok(Member {
+                    pubkey: r.get(0)?,
+                    name: r.get(1)?,
+                })
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        rows.sort_by(|a, b| match (&a.name, &b.name) {
+            (Some(x), Some(y)) => x
+                .to_lowercase()
+                .cmp(&y.to_lowercase())
+                .then_with(|| a.pubkey.cmp(&b.pubkey)),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => a.pubkey.cmp(&b.pubkey),
+        });
+        Ok(rows)
+    }
+
+    /// Record the `p`-tag pubkeys of a message (replaces any previous set).
+    pub fn set_message_mentions(&self, id: &str, pubkeys: &[String]) -> Result<()> {
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute("DELETE FROM message_mentions WHERE ref = ?1", params![id])?;
+        for pk in pubkeys {
+            tx.execute(
+                "INSERT OR IGNORE INTO message_mentions (ref, pubkey) VALUES (?1, ?2)",
+                params![id, pk],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// `p`-tag pubkeys recorded for a message, sorted.
+    pub fn message_mentions(&self, id: &str) -> Result<Vec<String>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT pubkey FROM message_mentions WHERE ref = ?1 ORDER BY pubkey")?;
+        let rows = stmt
+            .query_map(params![id], |r| r.get(0))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    /// Main timeline for a room: roots and standalone messages only, each with
+    /// its thread summary. Replies whose root is cached in this room live in
+    /// the thread view; a reply whose root is not cached stays visible here so
+    /// nothing disappears. Chronological in the returned window.
+    pub fn room_timeline(&self, channel: &str, limit: usize) -> Result<Vec<TimelineMessage>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT i.source,i.ref,i.channel,i.author,i.ts,i.body,i.mentions_me,r.root,r.parent,
+                (SELECT COUNT(*) FROM message_refs x JOIN items j ON j.ref=x.ref
+                  WHERE x.root=i.ref AND j.channel=i.channel AND j.ref<>i.ref),
+                (SELECT MAX(j.ts) FROM message_refs x JOIN items j ON j.ref=x.ref
+                  WHERE x.root=i.ref AND j.channel=i.channel AND j.ref<>i.ref)
+             FROM items i LEFT JOIN message_refs r ON r.ref=i.ref
+             WHERE i.source='buzz' AND i.channel=?1
+               AND (r.root IS NULL OR r.root=i.ref
+                    OR NOT EXISTS(SELECT 1 FROM items k WHERE k.ref=r.root AND k.channel=i.channel))
+             ORDER BY i.ts DESC,i.ref DESC LIMIT ?2",
+        )?;
+        let mut rows = stmt
+            .query_map(params![channel, limit.min(500) as i64], |r| {
+                Ok(TimelineMessage {
+                    message: row_to_message(r)?,
+                    reply_count: r.get(9)?,
+                    last_reply_ts: r.get(10)?,
+                })
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        rows.reverse();
+        Ok(rows)
     }
 
     /// One joined room's recent messages, chronological in the returned window.
@@ -704,6 +836,67 @@ mod tests {
         assert_eq!(rooms[0].id, "c1");
         assert_eq!(rooms[0].last_message.as_deref(), Some("body orphan"));
         assert_eq!(rooms[1].id, "c2");
+    }
+
+    #[test]
+    fn room_timeline_hides_cached_thread_replies_and_counts_them() {
+        let s = Store::open_in_memory().unwrap();
+        s.upsert_item(&item("root", "c1", 10)).unwrap();
+        s.upsert_item(&item("plain", "c1", 11)).unwrap();
+        s.upsert_item(&item("r1", "c1", 12)).unwrap();
+        s.upsert_item(&item("r2", "c1", 15)).unwrap();
+        s.upsert_item(&item("orphan", "c1", 16)).unwrap();
+        s.set_message_refs("r1", Some("root"), Some("root"))
+            .unwrap();
+        s.set_message_refs("r2", Some("root"), Some("r1")).unwrap();
+        s.set_message_refs("orphan", Some("missing"), Some("missing"))
+            .unwrap();
+        let tl = s.room_timeline("c1", 50).unwrap();
+        let refs: Vec<_> = tl.iter().map(|t| t.message.item.r#ref.as_str()).collect();
+        assert_eq!(refs, vec!["root", "plain", "orphan"]);
+        assert_eq!(tl[0].reply_count, 2);
+        assert_eq!(tl[0].last_reply_ts, Some(15));
+        assert_eq!(tl[1].reply_count, 0);
+        assert_eq!(tl[1].last_reply_ts, None);
+        assert_eq!(tl[2].message.root.as_deref(), Some("missing"));
+    }
+
+    #[test]
+    fn channel_members_join_profiles_and_feed_profile_fetch() {
+        let s = Store::open_in_memory().unwrap();
+        let (a, b, c) = ("a".repeat(64), "b".repeat(64), "c".repeat(64));
+        s.replace_channel_members("c1", &[c.clone(), a.clone(), b.clone()])
+            .unwrap();
+        s.upsert_profile(&Profile::from_kind0(&a, r#"{"name":"zed"}"#, 1))
+            .unwrap();
+        s.upsert_profile(&Profile::from_kind0(&b, r#"{"display_name":"Uni"}"#, 1))
+            .unwrap();
+        let m = s.channel_members("c1").unwrap();
+        assert_eq!(
+            m.iter()
+                .map(|m| (m.pubkey.as_str(), m.name.as_deref()))
+                .collect::<Vec<_>>(),
+            vec![
+                (b.as_str(), Some("Uni")),
+                (a.as_str(), Some("zed")),
+                (c.as_str(), None)
+            ]
+        );
+        assert_eq!(s.authors_without_profile().unwrap(), vec![c.clone()]);
+        // Replacement drops members who left.
+        s.replace_channel_members("c1", std::slice::from_ref(&a)).unwrap();
+        assert_eq!(s.channel_members("c1").unwrap().len(), 1);
+        assert!(s.channel_members("c2").unwrap().is_empty());
+    }
+
+    #[test]
+    fn message_mentions_roundtrip() {
+        let s = Store::open_in_memory().unwrap();
+        s.set_message_mentions("e1", &["bb".into(), "aa".into(), "aa".into()])
+            .unwrap();
+        assert_eq!(s.message_mentions("e1").unwrap(), vec!["aa", "bb"]);
+        s.set_message_mentions("e1", &[]).unwrap();
+        assert!(s.message_mentions("e1").unwrap().is_empty());
     }
 
     #[test]
