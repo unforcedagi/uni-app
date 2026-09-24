@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "cargo tauri dev",
-    "build": "cargo tauri build",
-    "tauri": "cargo tauri",
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "tauri": "tauri",
     "dev:vite": "vite",
     "build:vite": "tsc && vite build",
     "preview": "vite preview"
