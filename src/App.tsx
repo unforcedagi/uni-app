@@ -6,7 +6,8 @@ import { markdownToText, parseMarkdown, type Block, type Inline } from "./markdo
 import { activeQuery, filterMembers, insertMention, memberLabels, mentionSegments, pruneBindings, resolveRecipients, type Bindings, type Member } from "./mentions";
 
 type Room = { id: string; name: string; last_message: string | null; last_ts: number | null; mentions: boolean; unread: number };
-type Message = { ref: string; channel: string; author: string; author_name: string; ts: number; body: string; mentions_me: boolean; root: string | null; parent: string | null; mentions: Member[]; reply_count: number; last_reply_ts: number | null; edited: boolean };
+type Message = { ref: string; channel: string; author: string; author_name: string; ts: number; body: string; mentions_me: boolean; root: string | null; parent: string | null; mentions: Member[]; reply_count: number; last_reply_ts: number | null; edited: boolean; reactions: Reaction[] };
+type Reaction = { emoji: string; count: number; mine: string | null };
 type LivePayload = { kind: "message" | "edit" | "delete" | "rooms" | "profiles" | "status"; channel: string | null; status: string | null; author: string | null };
 type IdentityStatus = { paired: boolean; pubkey: string | null };
 type PairStep = "paste" | "connecting" | "code" | "receiving" | "done";
@@ -15,6 +16,20 @@ type SyncResult = { pubkey: string; total_items: number; channel_errors: Record<
 const time = (ts: number) => new Date(ts * 1000).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 const HEX_KEY = /^[0-9a-f]{64}$/i;
 const keyFor = (channel: string, root: string | null) => `${channel}:${root ?? "room"}`;
+const QUICK_REACTIONS = ["👍", "❤️", "😂", "🙏", "🔥", "✦"];
+// NIP-25: "+" is a like, "-" a dislike.
+export const emojiLabel = (e: string) => e === "+" || e === "" ? "👍" : e === "-" ? "👎" : e;
+const dayKey = (ts: number) => new Date(ts * 1000).toDateString();
+function dayLabel(ts: number) {
+  const d = new Date(ts * 1000), today = new Date();
+  const y = new Date(); y.setDate(today.getDate() - 1);
+  if (d.toDateString() === today.toDateString()) return "Today";
+  if (d.toDateString() === y.toDateString()) return "Yesterday";
+  return d.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric", year: d.getFullYear() === today.getFullYear() ? undefined : "numeric" });
+}
+const clock = (ts: number) => new Date(ts * 1000).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+// Stable per-author hue for letter avatars.
+const hue = (pk: string) => parseInt(pk.slice(0, 6), 16) % 360;
 
 function Pairing({ onPaired }: { onPaired: (pubkey: string) => void }) {
   const [link, setLink] = useState("");
@@ -156,6 +171,11 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const [live, setLive] = useState<string | null>(null);
   // Bumped by live events so the open room re-reads from the local store.
   const [tick, setTick] = useState(0);
+  const [limit, setLimit] = useState(300);
+  const [older, setOlder] = useState<"idle" | "loading" | "done">("idle");
+  const [reactFor, setReactFor] = useState<string | null>(null);
+  const preserveScroll = useRef<number | null>(null);
+  const listRef = useRef<HTMLDivElement>(null);
   const channelRef = useRef<string | null>(null);
   channelRef.current = channel;
   const scrollEnd = useRef<HTMLDivElement>(null);
@@ -170,9 +190,9 @@ function Conversations({ onForget }: { onForget: () => void }) {
   }, []);
 
   const loadMessages = useCallback(async (selected: string, thread: string | null) => {
-    const rows = await invoke<Message[]>("get_messages", { channel: selected, root: thread });
+    const rows = await invoke<Message[]>("get_messages", { channel: selected, root: thread, limit });
     setMessages(rows);
-  }, []);
+  }, [limit]);
 
   const refresh = useCallback(async () => {
     if (busy) return;
@@ -228,13 +248,16 @@ function Conversations({ onForget }: { onForget: () => void }) {
   useEffect(() => {
     if (!channel) { setMessages([]); return; }
     let current = true;
-    invoke<Message[]>("get_messages", { channel, root }).then((rows) => { if (current) setMessages(rows); }).catch((e) => { if (current) setError(String(e)); });
+    invoke<Message[]>("get_messages", { channel, root, limit }).then((rows) => { if (current) setMessages(rows); }).catch((e) => { if (current) setError(String(e)); });
     // Viewing the room reads it (only while the app is actually on screen).
     if (document.visibilityState === "visible") {
       invoke("mark_read", { channel }).then(() => loadRooms()).catch(() => {});
     }
     return () => { current = false; };
-  }, [channel, root, status, tick, loadRooms]);
+  }, [channel, root, status, tick, limit, loadRooms]);
+
+  // New room: back to the default window; older pages load on demand.
+  useEffect(() => { setLimit(300); setOlder("idle"); setReactFor(null); }, [channel]);
 
   useEffect(() => {
     if (!channel) { setMembers([]); return; }
@@ -243,7 +266,38 @@ function Conversations({ onForget }: { onForget: () => void }) {
     return () => { current = false; };
   }, [channel, status]);
 
-  useEffect(() => { scrollEnd.current?.scrollIntoView({ behavior: "smooth", block: "end" }); }, [messages.length, channel, root]);
+  useEffect(() => {
+    // After prepending older history, keep the reader where they were.
+    if (preserveScroll.current !== null && listRef.current) {
+      listRef.current.scrollTop = listRef.current.scrollHeight - preserveScroll.current;
+      preserveScroll.current = null;
+      return;
+    }
+    scrollEnd.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [messages.length, channel, root]);
+
+  async function loadOlder() {
+    if (!channel || older === "loading") return;
+    setOlder("loading");
+    try {
+      const n = await invoke<number>("load_older", { channel });
+      if (n === 0) { setOlder("done"); return; }
+      if (listRef.current) preserveScroll.current = listRef.current.scrollHeight - listRef.current.scrollTop;
+      setOlder("idle");
+      setLimit((l) => l + n + 50);
+    } catch (e) { setError(String(e)); setOlder("idle"); }
+  }
+
+  async function react(m: Message, emoji: string) {
+    setReactFor(null);
+    const mine = m.reactions.find((r) => r.mine && emojiLabel(r.emoji) === emojiLabel(emoji))?.mine ?? null;
+    // Optimistic: show the change now, then re-read the store.
+    setMessages((rows) => rows.map((x) => x.ref !== m.ref ? x : { ...x, reactions: toggleLocal(x.reactions, emoji, !!mine) }));
+    try {
+      await invoke("react", { channel: m.channel, target: m.ref, emoji: mine ? m.reactions.find((r) => r.mine === mine)!.emoji : emoji, mine });
+    } catch (e) { setError(`Reaction failed: ${e}`); }
+    setTick((n) => n + 1);
+  }
 
   useEffect(() => {
     if (focusComposer.current) { focusComposer.current = false; input.current?.focus(); }
@@ -387,15 +441,33 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const threadReplies = isThread ? messages.filter((m) => m.ref !== root) : [];
   const boundNames = [...new Set(bindings.values())].map((pk) => members.find((m) => m.pubkey === pk)?.name ?? pk.slice(0, 8));
 
-  const renderMessage = (m: Message, inThread: boolean) => <article key={m.ref} className={`message ${m.author === identity ? "mine" : ""} ${m.mentions_me ? "highlight" : ""} ${inThread && m.ref === root ? "thread-root" : ""}`}>
-    <span className="message-avatar" aria-hidden="true">{m.author_name[0]?.toUpperCase() ?? "?"}</span><div className="message-content"><div className="message-meta"><strong>{m.author_name}</strong><time>{time(m.ts)}</time></div><Body body={m.body} mentions={m.mentions} me={identity} edited={m.edited} />
-      {!inThread && m.reply_count > 0 && <button className="thread-summary" onClick={() => openThread(m)} aria-label={`View thread with ${m.reply_count} ${m.reply_count === 1 ? "reply" : "replies"}`}>💬 {m.reply_count} {m.reply_count === 1 ? "reply" : "replies"}{m.last_reply_ts ? <span> · last {time(m.last_reply_ts)}</span> : null}</button>}
-      <div className="message-actions">
-        {!inThread && <button onClick={() => openThread(m)} aria-label={`Reply in thread to ${m.author_name}`}>Reply in thread</button>}
-        {inThread && m.ref !== root && <button onClick={() => { setReplyTo(m.ref); input.current?.focus(); }} aria-label={`Reply to ${m.author_name}`}>Reply</button>}
+  const renderMessage = (m: Message, inThread: boolean, prev?: Message) => {
+    const grouped = !!prev && prev.author === m.author && m.ts - prev.ts < 300 && !(inThread && prev.ref === root);
+    return <article key={m.ref} className={`message ${grouped ? "grouped" : ""} ${m.author === identity ? "mine" : ""} ${m.mentions_me ? "highlight" : ""} ${inThread && m.ref === root ? "thread-root" : ""}`}
+      onContextMenu={(e) => { e.preventDefault(); setReactFor(reactFor === m.ref ? null : m.ref); }}>
+      {grouped ? <time className="gutter-time">{clock(m.ts)}</time> : <span className="message-avatar" style={{ background: `hsl(${hue(m.author)} 45% 42%)` }} aria-hidden="true">{m.author_name[0]?.toUpperCase() ?? "?"}</span>}
+      <div className="message-content">{!grouped && <div className="message-meta"><strong>{m.author_name}</strong><time>{clock(m.ts)}</time></div>}<Body body={m.body} mentions={m.mentions} me={identity} edited={m.edited} />
+        {m.reactions.length > 0 && <div className="reactions">{m.reactions.map((r) => <button key={r.emoji} className={`pill ${r.mine ? "mine" : ""}`} onClick={() => void react(m, r.emoji)} aria-pressed={!!r.mine} aria-label={`${emojiLabel(r.emoji)} ${r.count}${r.mine ? ", you reacted; tap to remove" : "; tap to add yours"}`}>{emojiLabel(r.emoji)} <span>{r.count}</span></button>)}</div>}
+        {reactFor === m.ref && <div className="quick-react" role="toolbar" aria-label="React">{QUICK_REACTIONS.map((e) => <button key={e} onClick={() => void react(m, e)} aria-label={`React ${e}`}>{e}</button>)}</div>}
+        {!inThread && m.reply_count > 0 && <button className="thread-summary" onClick={() => openThread(m)} aria-label={`View thread with ${m.reply_count} ${m.reply_count === 1 ? "reply" : "replies"}`}>💬 {m.reply_count} {m.reply_count === 1 ? "reply" : "replies"}{m.last_reply_ts ? <span> · last {time(m.last_reply_ts)}</span> : null}</button>}
+        <div className="message-actions">
+          <button onClick={() => setReactFor(reactFor === m.ref ? null : m.ref)} aria-label={`React to ${m.author_name}`} aria-expanded={reactFor === m.ref}>React</button>
+          {!inThread && <button onClick={() => openThread(m)} aria-label={`Reply in thread to ${m.author_name}`}>Reply in thread</button>}
+          {inThread && m.ref !== root && <button onClick={() => { setReplyTo(m.ref); input.current?.focus(); }} aria-label={`Reply to ${m.author_name}`}>Reply</button>}
+        </div>
       </div>
-    </div>
-  </article>;
+    </article>;
+  };
+
+  // Day dividers + author grouping for a chronological list.
+  const renderList = (list: Message[], inThread: boolean) => list.flatMap((m, i) => {
+    const prev = list[i - 1];
+    const sameDay = !!prev && dayKey(prev.ts) === dayKey(m.ts);
+    const out: React.ReactNode[] = [];
+    if (!sameDay) out.push(<div key={`d-${m.ref}`} className="day-divider" role="separator"><span>{dayLabel(m.ts)}</span></div>);
+    out.push(renderMessage(m, inThread, sameDay ? prev : undefined));
+    return out;
+  });
 
   return <main className={`shell ${channel ? "in-room" : ""}`}>
     <aside className="rooms" aria-label="Conversations">
@@ -418,15 +490,16 @@ function Conversations({ onForget }: { onForget: () => void }) {
           <div><strong>{isThread ? "Thread" : currentRoom.name}</strong><small>{isThread ? `${threadReplies.length} ${threadReplies.length === 1 ? "reply" : "replies"} · in ${currentRoom.name}` : `Buzz conversation · ${members.length ? `${members.length} members` : "cached locally"}`}</small></div>
           <button className="icon-button" onClick={() => void refresh()} disabled={busy} aria-label="Refresh messages">↻</button>
         </header>
-        <div className="message-list" role="log" aria-label="Messages" aria-live="polite">
+        <div className="message-list" ref={listRef} role="log" aria-label="Messages" aria-live="polite">
           {isThread ? <>
             {rootMessage ? renderMessage(rootMessage, true) : messages.length > 0 && <p className="empty">Root message is not cached; showing replies we have.</p>}
             {rootMessage && <div className="thread-divider"><span>{threadReplies.length ? `${threadReplies.length} ${threadReplies.length === 1 ? "reply" : "replies"}` : "No replies yet"}</span></div>}
-            {threadReplies.map((m) => renderMessage(m, true))}
+            {renderList(threadReplies, true)}
             {messages.length === 0 && <p className="empty">Thread not in local cache. Refresh to try again.</p>}
           </> : <>
+            {messages.length > 0 && <div className="older">{older === "done" ? <span>Start of #{currentRoom.name}</span> : <button onClick={() => void loadOlder()} disabled={older === "loading"}>{older === "loading" ? "Loading older messages…" : "Load older messages"}</button>}</div>}
             {messages.length === 0 && <p className="empty">No messages in this room yet.</p>}
-            {messages.map((m) => renderMessage(m, false))}
+            {renderList(messages, false)}
           </>}
           <div ref={scrollEnd} />
         </div>
@@ -452,3 +525,14 @@ function Conversations({ onForget }: { onForget: () => void }) {
 }
 
 export default App;
+
+/** Optimistic reaction toggle on the client copy (the store re-read corrects it). */
+export function toggleLocal(rs: Reaction[], emoji: string, removing: boolean): Reaction[] {
+  const i = rs.findIndex((r) => emojiLabel(r.emoji) === emojiLabel(emoji));
+  if (removing) {
+    if (i < 0) return rs;
+    return rs[i].count <= 1 ? rs.filter((_, j) => j !== i) : rs.map((x, j) => j === i ? { ...x, count: x.count - 1, mine: null } : x);
+  }
+  if (i < 0) return [...rs, { emoji, count: 1, mine: "pending" }];
+  return rs.map((x, j) => j === i ? { ...x, count: x.count + 1, mine: "pending" } : x);
+}

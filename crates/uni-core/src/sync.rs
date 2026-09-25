@@ -135,6 +135,42 @@ pub fn ingest_channel_event(
     }
 }
 
+/// Load one page of older history for `channel` (messages strictly older
+/// than the oldest cached one, with their edits / deletions / reactions).
+/// Returns how many new messages were stored; `0` means the start of the
+/// room's history has been reached. Never moves the live `since` watermark
+/// or the read marker: older messages are history, not news.
+pub async fn sync_older(
+    relay_url: &str,
+    keys: &Keys,
+    auth_tag: Option<&Tag>,
+    store: &Store,
+    channel: uuid::Uuid,
+    limit: u64,
+) -> Result<usize> {
+    let ch = channel.to_string();
+    let Some(oldest) = store.oldest_ts(&ch)? else {
+        return Ok(0);
+    };
+    crate::init_crypto();
+    let mut client = BuzzClient::connect(relay_url, keys, auth_tag).await?;
+    // `until` is inclusive; same-second siblings of the oldest message are
+    // re-fetched and deduped by id rather than skipped.
+    let events = client
+        .channel_history_before(channel, oldest.max(0) as u64, limit)
+        .await?;
+    let me = client.pubkey();
+    let mut inserted = 0usize;
+    for ev in &events {
+        if let Ingested::Message { new: true, .. } = ingest_channel_event(store, ev, &me, channel)? {
+            inserted += 1;
+        }
+    }
+    refresh_profiles(&mut client, store).await?;
+    let _ = client.disconnect().await;
+    Ok(inserted)
+}
+
 /// Store a kind-0 event as a profile row. Returns `true` if stored/replaced.
 pub fn ingest_profile(store: &Store, ev: &Event) -> Result<bool> {
     let p = Profile::from_kind0(
