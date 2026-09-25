@@ -140,3 +140,29 @@ h1 { font-size: 22px; margin: 5px 0 0; letter-spacing: -.03em; }
 .inline-editor-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .inline-editor-actions small { color: #99b2bf; font-size: 11px; }
 .message-actions button.danger { color: #ff8a80; font-weight: 600; }
+
+/* ── Ask everything (search) ─────────────────────────────────── */
+.rooms-body { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.rooms-body[hidden] { display: none; }
+.search-view { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.search-bar { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid #263847; }
+.search-field { flex: 1; display: flex; align-items: center; gap: 8px; background: #203746; border: 1px solid #395462; border-radius: 22px; padding: 0 12px; min-height: 44px; color: #78d2d2; }
+.search-field input { flex: 1; min-width: 0; background: none; border: 0; color: #f4fafb; outline: none; }
+.search-cancel { background: transparent; border: 0; color: #9bd1d7; min-height: 44px; padding: 0 6px; }
+.search-results { overflow-y: auto; padding: 4px 12px 24px; flex: 1; }
+.search-empty, .search-none, .search-notes p { color: #a8c3cc; font-size: 13px; line-height: 1.6; }
+.search-empty { padding: 12px 8px; }
+.search-section { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: #78b4c4; margin: 16px 8px 6px; }
+.search-soon { font-size: 10px; letter-spacing: .04em; text-transform: none; background: #203b4b; border-radius: 999px; padding: 1px 8px; color: #a8c3cc; margin-left: 6px; }
+.search-group h3 { font-size: 12px; color: #d5eeee; margin: 10px 8px 4px; }
+.search-hit { display: flex; flex-direction: column; gap: 4px; width: 100%; text-align: left; background: transparent; border: 0; border-radius: 12px; color: #edf6f9; padding: 10px 8px; min-height: 48px; }
+.search-hit:hover, .search-hit:focus-visible { background: #203544; }
+.search-hit-meta { display: flex; align-items: baseline; gap: 8px; font-size: 12px; }
+.search-hit-meta strong { color: #a6e5dd; }
+.search-hit-meta time { margin-left: auto; color: #99b2bf; font-size: 10px; white-space: nowrap; }
+.search-tag { font-size: 10px; color: #93b6c3; border: 1px solid #36566a; border-radius: 999px; padding: 0 6px; }
+.search-snippet { font-size: 13px; line-height: 1.45; color: #cfe0e6; overflow-wrap: anywhere; }
+.search-snippet mark, .message.search-focus mark { background: rgba(119, 212, 210, .3); color: #fff; border-radius: 3px; padding: 0 1px; }
+.search-notes { background: #152633; border: 1px dashed #36566a; border-radius: 14px; padding: 4px 12px 12px; margin: 0 4px; }
+.search-error { padding: 0 20px; }
+.message.search-focus .message-content { box-shadow: 0 0 0 2px #77d4d2; transition: box-shadow .4s; }
