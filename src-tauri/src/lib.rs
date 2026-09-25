@@ -2,7 +2,10 @@
 use serde::Serialize;
 use std::path::PathBuf;
 use tauri::{Emitter, Manager};
-use uni_core::{send_message, sync_once, ConversationMessage, LiveConfig, LiveEvent, Store};
+use uni_core::{
+    remove_reaction, send_message, send_reaction, sync_older, sync_once, ConversationMessage,
+    LiveConfig, LiveEvent, Store,
+};
 
 // Serialize foreground refresh, send and forget so SQLite and relay
 // watermarks cannot race.
@@ -27,6 +30,16 @@ struct MessageView {
     last_reply_ts: Option<i64>,
     /// Body is the author's latest kind-40003 edit.
     edited: bool,
+    /// Live reactions grouped by emoji, in first-use order.
+    reactions: Vec<ReactionView>,
+}
+
+#[derive(Serialize)]
+struct ReactionView {
+    emoji: String,
+    count: i64,
+    /// Our own reaction event id with this emoji (tap again to undo).
+    mine: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -113,7 +126,23 @@ fn view_with_summary(
         root: message.root,
         parent: message.parent,
         edited: message.edited,
+        reactions: Vec::new(),
     })
+}
+
+/// Attach grouped reactions to a batch of message views (one query).
+fn with_reactions(store: &Store, mut views: Vec<MessageView>) -> Result<Vec<MessageView>, String> {
+    let me = uni_core::load_keys(false).ok().map(|(k, _)| k.public_key().to_hex());
+    let ids: Vec<String> = views.iter().map(|v| v.id.clone()).collect();
+    let all = store.reactions(&ids, me.as_deref()).map_err(|e| e.to_string())?;
+    for v in &mut views {
+        v.reactions = all
+            .iter()
+            .filter(|r| r.target == v.id)
+            .map(|r| ReactionView { emoji: r.emoji.clone(), count: r.count, mine: r.mine.clone() })
+            .collect();
+    }
+    Ok(views)
 }
 
 fn member_view(store: &Store, pubkey: String) -> Result<MemberView, String> {
@@ -186,24 +215,28 @@ fn get_messages(
     app: tauri::AppHandle,
     channel: String,
     root: Option<String>,
+    limit: Option<usize>,
 ) -> Result<Vec<MessageView>, String> {
+    // The UI grows `limit` as older pages are loaded.
+    let limit = limit.unwrap_or(300).clamp(1, 5000);
     let store = Store::open(db_path(&app)?).map_err(|e| e.to_string())?;
-    match root {
+    let views: Vec<MessageView> = match root {
         // Thread view: the root and every cached reply, chronological.
         Some(id) => store
-            .thread_messages(&channel, &id, 300)
+            .thread_messages(&channel, &id, limit)
             .map_err(|e| e.to_string())?
             .into_iter()
             .map(|m| view(&store, m))
-            .collect(),
+            .collect::<Result<_, _>>()?,
         // Main timeline: roots only, each with its reply summary.
         None => store
-            .room_timeline(&channel, 300)
+            .room_timeline(&channel, limit)
             .map_err(|e| e.to_string())?
             .into_iter()
             .map(|t| view_with_summary(&store, t.message, t.reply_count, t.last_reply_ts))
-            .collect(),
-    }
+            .collect::<Result<_, _>>()?,
+    };
+    with_reactions(&store, views)
 }
 
 /// The user is looking at `channel`: everything cached there is read.
@@ -532,6 +565,55 @@ async fn post_message(
     .map_err(|e| e.to_string())?
 }
 
+/// Toggle a reaction: publish `emoji` on `target`, or, when `mine` names our
+/// existing reaction with that emoji, delete it (kind 5).
+#[tauri::command]
+async fn react(
+    app: tauri::AppHandle,
+    channel: String,
+    target: String,
+    emoji: String,
+    mine: Option<String>,
+) -> Result<(), String> {
+    secure_store::ensure_loaded(&app).await?;
+    let path = db_path(&app)?;
+    let url = relay_url(&app);
+    tauri::async_runtime::spawn_blocking(move || {
+        let _gate = IO_GATE.blocking_lock();
+        let ch = channel.parse().map_err(|_| "invalid room id".to_string())?;
+        let (keys, _) = uni_core::load_keys(false).map_err(|e| e.to_string())?;
+        let store = Store::open(path).map_err(|e| e.to_string())?;
+        tauri::async_runtime::block_on(async {
+            match mine {
+                Some(id) => remove_reaction(&url, &keys, None, &store, &id).await,
+                None => send_reaction(&url, &keys, None, &store, ch, &target, &emoji).await.map(|_| ()),
+            }
+        })
+        .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Load one page of older history for `channel`. Returns new message count;
+/// 0 means the start of the room has been reached.
+#[tauri::command]
+async fn load_older(app: tauri::AppHandle, channel: String) -> Result<usize, String> {
+    secure_store::ensure_loaded(&app).await?;
+    let path = db_path(&app)?;
+    let url = relay_url(&app);
+    tauri::async_runtime::spawn_blocking(move || {
+        let _gate = IO_GATE.blocking_lock();
+        let ch = channel.parse().map_err(|_| "invalid room id".to_string())?;
+        let (keys, _) = uni_core::load_keys(false).map_err(|e| e.to_string())?;
+        let store = Store::open(path).map_err(|e| e.to_string())?;
+        tauri::async_runtime::block_on(sync_older(&url, &keys, None, &store, ch, 100))
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[cfg(mobile)]
 mod mobile;
 mod secure_store;
@@ -564,7 +646,9 @@ pub fn run() {
             mark_read,
             open_link,
             live_start,
-            live_stop
+            live_stop,
+            react,
+            load_older
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

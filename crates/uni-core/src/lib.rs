@@ -26,14 +26,16 @@ pub mod sync;
 
 pub use backoff::Backoff;
 pub use buzz::{probe, BuzzClient, ChannelInfo, Discovery, ProbeReport};
-pub use compose::{mention_pubkeys, send_message};
+pub use compose::{mention_pubkeys, remove_reaction, send_message, send_reaction};
 pub use identity::{
     clear_device_keys, forget_keyring_key, has_device_keys, init_keyring_key, keyring_pubkey,
     load_keys, set_device_keys, store_keyring_nsec, KeyInit, KeySource,
 };
 pub use live::{run_live, LiveConfig, LiveEvent};
-pub use store::{ConversationMessage, Item, Member, Profile, Room, Store, TimelineMessage};
-pub use sync::{ingest_channel_event, sync_once, Ingested, SyncReport};
+pub use store::{
+    ConversationMessage, Item, Member, Profile, Reaction, Room, Store, TimelineMessage,
+};
+pub use sync::{ingest_channel_event, sync_older, sync_once, Ingested, SyncReport};
 
 /// Errors produced by uni-core.
 #[derive(Debug, thiserror::Error)]

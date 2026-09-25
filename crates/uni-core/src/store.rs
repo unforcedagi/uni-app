@@ -64,6 +64,19 @@ pub struct Member {
     pub name: Option<String>,
 }
 
+/// One emoji's reactions on a message.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Reaction {
+    /// Target message id.
+    pub target: String,
+    /// Emoji as sent (`+` is normalised to 👍 by the UI, not here).
+    pub emoji: String,
+    /// Distinct reactors.
+    pub count: i64,
+    /// Our own live reaction event with this emoji, if any (needed to undo).
+    pub mine: Option<String>,
+}
+
 /// Joined room with its most recent cached message.
 #[derive(Debug, Clone)]
 pub struct Room {
@@ -232,6 +245,8 @@ pub const KIND_DELETION: i64 = 5;
 pub const KIND_DELETE_EVENT: i64 = 9005;
 /// Kind 40003: Buzz message edit.
 pub const KIND_EDIT: i64 = 40003;
+/// Kind 7: NIP-25 reaction (content is the emoji; `+` means a like).
+pub const KIND_REACTION: i64 = 7;
 
 /// FTS5 external-content index over `items.body`, synced by triggers.
 /// `content_rowid` is the implicit SQLite rowid of `items`.
@@ -315,7 +330,7 @@ impl Store {
         ts: i64,
         content: &str,
     ) -> Result<bool> {
-        if ![KIND_DELETION, KIND_DELETE_EVENT, KIND_EDIT].contains(&kind) {
+        if ![KIND_DELETION, KIND_DELETE_EVENT, KIND_EDIT, KIND_REACTION].contains(&kind) {
             return Err(crate::Error::Invalid(format!("not an edit/delete kind: {kind}")));
         }
         let n = self.conn.execute(
@@ -604,7 +619,7 @@ impl Store {
              ORDER BY i.ts DESC,i.ref DESC LIMIT ?2",
         )?;
         let mut rows = stmt
-            .query_map(params![channel, limit.min(500) as i64], |r| {
+            .query_map(params![channel, limit.min(5000) as i64], |r| {
                 Ok(TimelineMessage {
                     message: row_to_message(r)?,
                     reply_count: r.get(9)?,
@@ -625,7 +640,7 @@ impl Store {
              ORDER BY i.ts DESC,i.ref DESC LIMIT ?2",
         )?;
         let mut rows = stmt
-            .query_map(params![channel, limit.min(500) as i64], row_to_message)?
+            .query_map(params![channel, limit.min(5000) as i64], row_to_message)?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         rows.reverse();
         Ok(rows)
@@ -646,7 +661,7 @@ impl Store {
         )?;
         let rows = stmt
             .query_map(
-                params![channel, root, limit.min(500) as i64],
+                params![channel, root, limit.min(5000) as i64],
                 row_to_message,
             )?
             .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -691,6 +706,58 @@ impl Store {
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         Ok(rows)
+    }
+
+    /// Live reactions on `targets`, grouped by (target, emoji). A reaction
+    /// removed by a kind-5/9005 deletion is gone; one reactor counts once per
+    /// emoji however many duplicates they sent. Ordered by first use, so pills
+    /// keep a stable order as counts change.
+    pub fn reactions(&self, targets: &[String], me: Option<&str>) -> Result<Vec<Reaction>> {
+        if targets.is_empty() {
+            return Ok(Vec::new());
+        }
+        let marks = vec!["?"; targets.len()].join(",");
+        let sql = format!(
+            "SELECT target, content, COUNT(DISTINCT author), MIN(ts),
+                    MAX(CASE WHEN author = ?1 THEN id END)
+             FROM aux_events a
+             WHERE kind = 7 AND target IN ({marks})
+               AND NOT EXISTS (SELECT 1 FROM aux_events d WHERE d.target = a.id AND d.kind IN (5, 9005))
+             GROUP BY target, content
+             ORDER BY target, MIN(ts), content"
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let mut args: Vec<&dyn rusqlite::ToSql> = vec![&me];
+        args.extend(targets.iter().map(|t| t as &dyn rusqlite::ToSql));
+        let rows = stmt
+            .query_map(args.as_slice(), |r| {
+                Ok(Reaction {
+                    target: r.get(0)?,
+                    emoji: r.get(1)?,
+                    count: r.get(2)?,
+                    mine: r.get(4)?,
+                })
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    /// True when `id` is a kind-7 reaction signed by `me`.
+    pub fn is_own_reaction(&self, id: &str, me: &str) -> Result<bool> {
+        Ok(self.conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM aux_events WHERE id=?1 AND kind=7 AND author=?2)",
+            params![id, me],
+            |r| r.get::<_, i64>(0),
+        )? != 0)
+    }
+
+    /// Oldest cached message ts in a room (the paging cursor for older history).
+    pub fn oldest_ts(&self, channel: &str) -> Result<Option<i64>> {
+        Ok(self.conn.query_row(
+            "SELECT MIN(ts) FROM items WHERE source='buzz' AND channel=?1",
+            params![channel],
+            |r| r.get(0),
+        )?)
     }
 
     /// Find an existing message in a channel, including its thread ancestry.
@@ -787,6 +854,35 @@ mod tests {
             body: format!("body {r}"),
             mentions_me: false,
         }
+    }
+
+    #[test]
+    fn reactions_group_dedupe_and_honour_deletions() {
+        let s = Store::open_in_memory().unwrap();
+        s.upsert_item(&item("m1", "c1", 10)).unwrap();
+        let t = vec!["m1".to_string()];
+        s.upsert_aux("r1", 7, "m1", "bob", 11, "🔥").unwrap();
+        s.upsert_aux("r2", 7, "m1", "bob", 12, "🔥").unwrap(); // dup reactor
+        s.upsert_aux("r3", 7, "m1", "me", 13, "🔥").unwrap();
+        s.upsert_aux("r4", 7, "m1", "me", 14, "+").unwrap();
+        let r = s.reactions(&t, Some("me")).unwrap();
+        assert_eq!(
+            r.iter().map(|x| (x.emoji.as_str(), x.count, x.mine.as_deref())).collect::<Vec<_>>(),
+            vec![("🔥", 2, Some("r3")), ("+", 1, Some("r4"))]
+        );
+        s.upsert_aux("d1", 5, "r3", "me", 15, "").unwrap();
+        s.upsert_aux("d2", 5, "r4", "me", 15, "").unwrap();
+        let r = s.reactions(&t, Some("me")).unwrap();
+        assert_eq!(r.len(), 1);
+        assert_eq!((r[0].count, r[0].mine.as_deref()), (1, None));
+        assert!(s.is_own_reaction("r1", "bob").unwrap());
+        assert!(!s.is_own_reaction("r1", "me").unwrap());
+        assert!(!s.is_own_reaction("m1", "aa").unwrap());
+        // Reactions never surface as messages or unread.
+        s.ensure_read_state("c1", 0).unwrap();
+        assert_eq!(s.room_messages("c1", 50).unwrap().len(), 1);
+        assert_eq!(s.oldest_ts("c1").unwrap(), Some(10));
+        assert_eq!(s.oldest_ts("nope").unwrap(), None);
     }
 
     #[test]
@@ -1050,7 +1146,7 @@ mod tests {
         s.upsert_aux("d3", KIND_DELETION, "m3", "aa", 22, "").unwrap();
         // Duplicate is a no-op; unknown kinds rejected.
         assert!(!s.upsert_aux("d3", KIND_DELETION, "m3", "aa", 22, "").unwrap());
-        assert!(s.upsert_aux("r", 7, "m1", "aa", 1, "+").is_err());
+        assert!(s.upsert_aux("r", 1, "m1", "aa", 1, "x").is_err());
 
         let tl = s.room_timeline("c1", 50).unwrap();
         assert_eq!(tl.len(), 1);

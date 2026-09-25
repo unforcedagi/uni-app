@@ -1,7 +1,10 @@
 //! Send a kind-9 Buzz channel message after explicit room validation.
 use std::collections::HashSet;
 
-use buzz_sdk::{builders::build_message, ThreadRef};
+use buzz_sdk::{
+    builders::{build_message, build_reaction, build_remove_reaction},
+    ThreadRef,
+};
 use nostr::{EventId, Keys, PublicKey, Tag};
 use uuid::Uuid;
 
@@ -104,6 +107,84 @@ pub async fn send_message(
     let (_, item) = ingest_message(store, &event, &keys.public_key(), channel)?;
     store.set_since(&channel.to_string(), item.ts)?;
     Ok(item)
+}
+
+/// Publish a NIP-25 reaction (kind 7) to a cached message in `channel`, in
+/// Buzz desktop's exact shape (one `e` tag; the relay derives the channel from
+/// the target). Returns the reaction event id once the relay accepts it; only
+/// then is it recorded locally.
+pub async fn send_reaction(
+    relay_url: &str,
+    keys: &Keys,
+    auth_tag: Option<&Tag>,
+    store: &Store,
+    channel: Uuid,
+    target: &str,
+    emoji: &str,
+) -> Result<String> {
+    let emoji = emoji.trim();
+    if emoji.is_empty() {
+        return Err(Error::Invalid("reaction must not be empty".into()));
+    }
+    let msg = store
+        .message(&channel.to_string(), target)?
+        .ok_or_else(|| Error::Invalid("reaction target is not cached in this room".into()))?;
+    let target_id = EventId::from_hex(&msg.item.r#ref)
+        .map_err(|_| Error::Invalid("invalid reaction target".into()))?;
+    let event = build_reaction(target_id, emoji)
+        .map_err(|e| Error::Invalid(e.to_string()))?
+        .sign_with_keys(keys)
+        .map_err(|e| Error::Invalid(format!("cannot sign reaction: {e}")))?;
+    publish_aux(relay_url, keys, auth_tag, store, event, &msg.item.r#ref).await
+}
+
+/// Undo our own reaction: a kind-5 deletion of the reaction event. Refuses to
+/// delete anything that is not a reaction we signed.
+pub async fn remove_reaction(
+    relay_url: &str,
+    keys: &Keys,
+    auth_tag: Option<&Tag>,
+    store: &Store,
+    reaction_id: &str,
+) -> Result<()> {
+    let me = keys.public_key().to_hex();
+    if !store.is_own_reaction(reaction_id, &me)? {
+        return Err(Error::Invalid("not one of your reactions".into()));
+    }
+    let rid = EventId::from_hex(reaction_id)
+        .map_err(|_| Error::Invalid("invalid reaction id".into()))?;
+    let event = build_remove_reaction(rid)
+        .map_err(|e| Error::Invalid(e.to_string()))?
+        .sign_with_keys(keys)
+        .map_err(|e| Error::Invalid(format!("cannot sign deletion: {e}")))?;
+    publish_aux(relay_url, keys, auth_tag, store, event, reaction_id).await?;
+    Ok(())
+}
+
+async fn publish_aux(
+    relay_url: &str,
+    keys: &Keys,
+    auth_tag: Option<&Tag>,
+    store: &Store,
+    event: nostr::Event,
+    target: &str,
+) -> Result<String> {
+    crate::init_crypto();
+    let mut client = BuzzClient::connect(relay_url, keys, auth_tag).await?;
+    let response = client.publish(event.clone()).await?;
+    let _ = client.disconnect().await;
+    if !response.accepted {
+        return Err(Error::RelayRejected(response.message));
+    }
+    store.upsert_aux(
+        &event.id.to_hex(),
+        event.kind.as_u16() as i64,
+        target,
+        &event.pubkey.to_hex(),
+        event.created_at.as_secs() as i64,
+        &event.content,
+    )?;
+    Ok(event.id.to_hex())
 }
 
 #[cfg(test)]

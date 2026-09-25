@@ -24,7 +24,10 @@ use tokio::sync::{broadcast, mpsc, watch};
 use tokio_tungstenite::tungstenite::Message;
 use uuid::Uuid;
 
-use uni_core::{run_live, sync_once, Backoff, LiveConfig, LiveEvent, Store};
+use uni_core::{
+    remove_reaction, run_live, send_reaction, sync_older, sync_once, Backoff, LiveConfig, LiveEvent,
+    Store,
+};
 
 /// Control messages from a test to the relay.
 #[derive(Clone, Debug)]
@@ -138,6 +141,11 @@ fn matches(filter: &Value, ev: &Value) -> bool {
             return false;
         }
     }
+    if let Some(until) = filter["until"].as_u64() {
+        if ev["created_at"].as_u64().unwrap_or(0) > until {
+            return false;
+        }
+    }
     true
 }
 
@@ -246,12 +254,24 @@ async fn serve(listener: TcpListener, relay: Arc<MockRelay>) {
                                     continue;
                                 }
                                 let snapshot = relay.events.lock().unwrap().clone();
-                                for ev in &snapshot {
-                                    if filters.iter().any(|f| matches(f, ev)) {
-                                        ws.send(Message::Text(json!(["EVENT", sub, ev]).to_string().into()))
-                                            .await
-                                            .unwrap();
+                                // Per filter: the newest `limit` matches (NIP-01), deduped across filters.
+                                let mut out: Vec<&Value> = Vec::new();
+                                for f in &filters {
+                                    let mut hits: Vec<&Value> = snapshot.iter().filter(|ev| matches(f, ev)).collect();
+                                    if let Some(limit) = f["limit"].as_u64() {
+                                        hits.sort_by_key(|ev| std::cmp::Reverse(ev["created_at"].as_u64()));
+                                        hits.truncate(limit as usize);
                                     }
+                                    for ev in hits {
+                                        if !out.iter().any(|o| o["id"] == ev["id"]) {
+                                            out.push(ev);
+                                        }
+                                    }
+                                }
+                                for ev in out {
+                                    ws.send(Message::Text(json!(["EVENT", sub, ev]).to_string().into()))
+                                        .await
+                                        .unwrap();
                                 }
                                 ws.send(Message::Text(json!(["EOSE", sub]).to_string().into()))
                                     .await
@@ -538,7 +558,8 @@ async fn sync_against_mock_relay() {
         "{:?}",
         report.channel_errors
     );
-    assert_eq!(report.fetched[&f.ch_a.to_string()], 3);
+    // 3 messages + the fixture's kind-7 reaction (fetched as aux, never an item).
+    assert_eq!(report.fetched[&f.ch_a.to_string()], 4);
     assert_eq!(report.inserted[&f.ch_a.to_string()], 3);
     assert_eq!(report.fetched[&f.ch_b.to_string()], 1);
     assert_eq!(report.total_items, 4);
@@ -556,7 +577,7 @@ async fn sync_against_mock_relay() {
         .map(|i| i.body.as_str())
         .collect();
     assert_eq!(mentions, vec!["my own", "@me a2"]);
-    assert_eq!(store.since_for(&f.ch_a.to_string()).unwrap(), Some(102));
+    assert_eq!(store.since_for(&f.ch_a.to_string()).unwrap(), Some(103), "watermark includes aux (the fixture reaction at 103)");
     assert_eq!(store.since_for(&f.ch_b.to_string()).unwrap(), Some(200));
 
     // 3. Second run is incremental and idempotent.
@@ -1428,4 +1449,84 @@ async fn sync_and_live_apply_edits_and_deletions() {
     r.unwrap();
     store.mark_read(&ch).unwrap();
     assert_eq!(store.rooms_for(Some(&me_hex)).unwrap()[0].unread, 0);
+}
+
+/// Reactions: someone else's arrive on sync (grouped per emoji, duplicates
+/// from one reactor count once); ours publishes in Buzz's shape (kind 7, one
+/// `e` tag) and is undone with a kind-5 that only we can issue.
+#[tokio::test]
+async fn reactions_sync_send_and_undo() {
+    let f = fixture().await;
+    let store = Store::open_in_memory().unwrap();
+    let ch = f.ch_a.to_string();
+    let a1 = f.relay.events.lock().unwrap().iter().find(|e| e["content"] == "hello a1").unwrap()["id"]
+        .as_str().unwrap().to_string();
+    // The relay files reactions under the target's channel (`#h` matches).
+    f.relay.publish(signed(&f.other, 7, vec![h(f.ch_a), e(&a1)], "🔥", 120));
+    f.relay.publish(signed(&f.other, 7, vec![h(f.ch_a), e(&a1)], "🔥", 121));
+    sync_once(&f.url, &f.me, None, &store).await.unwrap();
+    let me_hex = f.me.public_key().to_hex();
+    let r = store.reactions(std::slice::from_ref(&a1), Some(&me_hex)).unwrap();
+    assert_eq!(r.len(), 1);
+    assert_eq!((r[0].emoji.as_str(), r[0].count, r[0].mine.is_none()), ("🔥", 1, true));
+
+    let rid = send_reaction(&f.url, &f.me, None, &store, f.ch_a, &a1, "🔥").await.unwrap();
+    let sent = f.relay.events.lock().unwrap().iter().find(|e| e["id"] == rid.as_str()).cloned().unwrap();
+    assert_eq!(sent["kind"], 7);
+    assert_eq!(tag_values(&sent, "e"), vec![a1.as_str()]);
+    let r = store.reactions(std::slice::from_ref(&a1), Some(&me_hex)).unwrap();
+    assert_eq!((r[0].count, r[0].mine.as_deref()), (2, Some(rid.as_str())));
+
+    // Can't undo someone else's reaction.
+    let theirs = f.relay.events.lock().unwrap().iter().find(|e| e["kind"] == 7 && e["pubkey"] == f.other.public_key().to_hex().as_str()).unwrap()["id"]
+        .as_str().unwrap().to_string();
+    assert!(remove_reaction(&f.url, &f.me, None, &store, &theirs).await.is_err());
+
+    remove_reaction(&f.url, &f.me, None, &store, &rid).await.unwrap();
+    let del = f.relay.events.lock().unwrap().iter().find(|e| e["kind"] == 5).cloned().unwrap();
+    assert_eq!(tag_values(&del, "e"), vec![rid.as_str()]);
+    let r = store.reactions(std::slice::from_ref(&a1), Some(&me_hex)).unwrap();
+    assert_eq!((r[0].count, r[0].mine.is_none()), (1, true));
+    // Reactions never count as messages or unread.
+    assert_eq!(store.room_timeline(&ch, 50).unwrap().len(), 3);
+}
+
+/// Older history: with a small window, sync only has the newest messages;
+/// `sync_older` pages back (with `until`) and pulls aux events for the page
+/// by `#e`, even when they are newer than the page. Read marker unaffected.
+#[tokio::test]
+async fn sync_older_pages_back_with_aux() {
+    let f = fixture().await;
+    let store = Store::open_in_memory().unwrap();
+    let ch = f.ch_b.to_string();
+    let me_hex = f.me.public_key().to_hex();
+    // First sync sees only "hello b1" (ts 200) and sets the watermark there.
+    sync_once(&f.url, &f.me, None, &store).await.unwrap();
+    assert_eq!(store.room_timeline(&ch, 500).unwrap().len(), 1);
+    // 30 older messages (ts 10..39) surface on the relay afterwards, e.g.
+    // history from before we joined; plus a much later edit of the oldest.
+    let mut first = String::new();
+    for i in 0..30u64 {
+        let ev = signed(&f.other, 9, vec![h(f.ch_b), p(&f.other)], &format!("old {i}"), 10 + i);
+        if i == 0 {
+            first = ev["id"].as_str().unwrap().to_string();
+        }
+        f.relay.publish(ev);
+    }
+    f.relay.publish(signed(&f.other, 40003, vec![h(f.ch_b), e(&first)], "old 0 (edited)", 900));
+    // Incremental sync is `since`-bounded, so it can't reach them.
+    sync_once(&f.url, &f.me, None, &store).await.unwrap();
+    assert_eq!(store.room_timeline(&ch, 500).unwrap().len(), 1);
+    let unread = |s: &Store| s.rooms_for(Some(&me_hex)).unwrap().into_iter().find(|r| r.id == ch).unwrap().unread;
+    let unread_before = unread(&store);
+
+    // `until` is inclusive, so each page re-fetches the boundary message
+    // (dedup by id): 19 new, then the remaining 11.
+    assert_eq!(sync_older(&f.url, &f.me, None, &store, f.ch_b, 20).await.unwrap(), 19);
+    assert_eq!(sync_older(&f.url, &f.me, None, &store, f.ch_b, 20).await.unwrap(), 11);
+    assert_eq!(sync_older(&f.url, &f.me, None, &store, f.ch_b, 20).await.unwrap(), 0, "start of history");
+    let tl = store.room_timeline(&ch, 500).unwrap();
+    assert_eq!(tl.len(), 31);
+    assert_eq!((tl[0].message.item.body.as_str(), tl[0].message.edited), ("old 0 (edited)", true));
+    assert_eq!(unread(&store), unread_before, "history is not news");
 }

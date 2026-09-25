@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use buzz_ws_client::{NostrWsConnection, RelayMessage};
-use nostr::{Alphabet, Event, Filter, Keys, Kind, PublicKey, SingleLetterTag, Tag, Timestamp};
+use nostr::{Alphabet, Event, EventId, Filter, Keys, Kind, PublicKey, SingleLetterTag, Tag, Timestamp};
 use serde_json::json;
 use uuid::Uuid;
 
@@ -28,9 +28,11 @@ pub use buzz_sdk::kind::{KIND_NIP29_GROUP_MEMBERS, KIND_NIP29_GROUP_METADATA};
 /// Kind 9: channel message (NIP-29 / Buzz).
 pub const KIND_CHANNEL_MESSAGE: u16 = 9;
 
-/// Kinds that modify an earlier channel message by `e` reference:
-/// NIP-09 deletion (5), Buzz delete-event (9005), Buzz edit (40003).
-pub const AUX_KINDS: [u16; 3] = [5, 9005, 40003];
+/// Kinds that modify or annotate an earlier channel message by `e` reference:
+/// NIP-09 deletion (5), NIP-25 reaction (7), Buzz delete-event (9005), Buzz
+/// edit (40003). The relay files reactions and kind-5 deletions under their
+/// target's channel, so a `#h` query returns them.
+pub const AUX_KINDS: [u16; 4] = [5, 7, 9005, 40003];
 
 /// `#h`-scoped filter for edits and deletions in `channel`. Kind 5 events
 /// carry no `h` tag of their own, but the relay files them under their
@@ -221,6 +223,43 @@ impl BuzzClient {
         let aux = channel_aux_filter(channel, since);
         self.req_until_eose(&channel_sub_id(channel), &[filter, aux])
             .await
+    }
+
+    /// Page of older kind-9 history (`created_at <= until`), plus every
+    /// edit / deletion / reaction referencing those messages by `#e` (aux
+    /// events can be much newer than their target, so a time window would
+    /// miss them). Returns messages and aux events together.
+    pub async fn channel_history_before(
+        &mut self,
+        channel: Uuid,
+        until: u64,
+        limit: u64,
+    ) -> Result<Vec<Event>> {
+        let h_tag = SingleLetterTag::lowercase(Alphabet::H);
+        let filter = Filter::new()
+            .kind(Kind::Custom(KIND_CHANNEL_MESSAGE))
+            .custom_tags(h_tag, [channel.to_string()])
+            .until(Timestamp::from_secs(until))
+            .limit(limit.min(RELAY_MAX_LIMIT) as usize);
+        let mut events = self
+            .req_until_eose(&format!("older-{channel}"), &[filter])
+            .await?;
+        let ids: Vec<EventId> = events
+            .iter()
+            .filter(|e| e.kind.as_u16() == KIND_CHANNEL_MESSAGE)
+            .map(|e| e.id)
+            .collect();
+        for (i, chunk) in ids.chunks(100).enumerate() {
+            let aux = Filter::new()
+                .kinds(AUX_KINDS.map(Kind::Custom))
+                .events(chunk.iter().copied())
+                .limit(RELAY_MAX_LIMIT as usize);
+            let got = self
+                .req_until_eose(&format!("older-aux-{i}-{channel}"), &[aux])
+                .await?;
+            events.extend(got);
+        }
+        Ok(events)
     }
 
     /// Fetch kind-0 profiles for `authors` (one REQ, chunked by 100 authors).
