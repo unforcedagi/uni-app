@@ -7,6 +7,41 @@ use uni_core::{
     LiveConfig, LiveEvent, Store,
 };
 
+/// Run blocking work (SQLite, the desktop keyring) off the async executor
+/// and off the main thread, where Tauri runs plain `fn` commands.
+async fn blocking<T, F>(f: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(f)
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Relay work that touches SQLite and relay watermarks: on a blocking
+/// thread, under [`IO_GATE`], with the account key and an open store.
+async fn relay_io<T, F>(app: &tauri::AppHandle, f: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce(&str, &nostr::Keys, &Store) -> Result<T, String> + Send + 'static,
+{
+    secure_store::ensure_loaded(app).await?;
+    let path = db_path(app)?;
+    let url = relay_url(app);
+    blocking(move || {
+        let _gate = IO_GATE.blocking_lock();
+        let (keys, _) = uni_core::load_keys(false).map_err(|e| e.to_string())?;
+        let store = Store::open(path).map_err(|e| e.to_string())?;
+        f(&url, &keys, &store)
+    })
+    .await
+}
+
+fn room_id<T: std::str::FromStr>(channel: &str) -> Result<T, String> {
+    channel.parse().map_err(|_| "invalid room id".to_string())
+}
+
 /// Run one of our own message changes (edit/delete) on the IO gate.
 async fn change_own_message(
     app: &tauri::AppHandle,
@@ -14,27 +49,20 @@ async fn change_own_message(
     target: String,
     new_body: Option<String>,
 ) -> Result<(), String> {
-    secure_store::ensure_loaded(app).await?;
-    let path = db_path(app)?;
-    let url = relay_url(app);
-    tauri::async_runtime::spawn_blocking(move || {
-        let _gate = IO_GATE.blocking_lock();
-        let ch = channel.parse().map_err(|_| "invalid room id".to_string())?;
-        let (keys, _) = uni_core::load_keys(false).map_err(|e| e.to_string())?;
-        let store = Store::open(path).map_err(|e| e.to_string())?;
+    relay_io(app, move |url, keys, store| {
+        let ch = room_id(&channel)?;
         tauri::async_runtime::block_on(async {
             match new_body {
                 Some(body) => {
-                    uni_core::edit_message(&url, &keys, None, &store, ch, &target, &body).await
+                    uni_core::edit_message(url, keys, None, store, ch, &target, &body).await
                 }
-                None => uni_core::delete_message(&url, &keys, None, &store, ch, &target).await,
+                None => uni_core::delete_message(url, keys, None, store, ch, &target).await,
             }
         })
         .map(|_| ())
         .map_err(|e| e.to_string())
     })
     .await
-    .map_err(|e| e.to_string())?
 }
 
 /// Edit one of our own messages (kind 40003, Buzz desktop's shape).
@@ -229,22 +257,24 @@ fn member_view(store: &Store, pubkey: String) -> Result<MemberView, String> {
 
 /// Members of a joined channel (kind-39002 roster) with kind-0 names.
 #[tauri::command]
-fn get_members(app: tauri::AppHandle, channel: String) -> Result<Vec<MemberView>, String> {
-    let store = Store::open(db_path(&app)?).map_err(|e| e.to_string())?;
-    store
-        .channel_members(&channel)
-        .map_err(|e| e.to_string())?
-        .into_iter()
-        .map(|m| {
-            Ok(MemberView {
+async fn get_members(app: tauri::AppHandle, channel: String) -> Result<Vec<MemberView>, String> {
+    let path = db_path(&app)?;
+    blocking(move || {
+        let store = Store::open(path).map_err(|e| e.to_string())?;
+        Ok(store
+            .channel_members(&channel)
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .map(|m| MemberView {
                 named: m.name.is_some(),
                 name: m
                     .name
                     .unwrap_or_else(|| m.pubkey[..8.min(m.pubkey.len())].to_string()),
                 pubkey: m.pubkey,
             })
-        })
-        .collect()
+            .collect())
+    })
+    .await
 }
 
 /// Our pubkey if the key is already loaded (no keystore round-trip).
@@ -256,15 +286,16 @@ fn my_pubkey() -> Option<String> {
 }
 
 #[tauri::command]
-fn get_rooms(app: tauri::AppHandle) -> Result<Vec<RoomView>, String> {
-    let store = Store::open(db_path(&app)?).map_err(|e| e.to_string())?;
-    let me = my_pubkey();
-    store
-        .rooms_for(me.as_deref())
-        .map_err(|e| e.to_string())?
-        .into_iter()
-        .map(|r| {
-            Ok(RoomView {
+async fn get_rooms(app: tauri::AppHandle) -> Result<Vec<RoomView>, String> {
+    let path = db_path(&app)?;
+    blocking(move || {
+        let store = Store::open(path).map_err(|e| e.to_string())?;
+        let me = my_pubkey();
+        Ok(store
+            .rooms_for(me.as_deref())
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .map(|r| RoomView {
                 name: r
                     .name
                     .unwrap_or_else(|| format!("Room {}", &r.id[..8.min(r.id.len())])),
@@ -274,12 +305,13 @@ fn get_rooms(app: tauri::AppHandle) -> Result<Vec<RoomView>, String> {
                 mentions: r.mentions,
                 unread: r.unread,
             })
-        })
-        .collect()
+            .collect())
+    })
+    .await
 }
 
 #[tauri::command]
-fn get_messages(
+async fn get_messages(
     app: tauri::AppHandle,
     channel: String,
     root: Option<String>,
@@ -287,24 +319,28 @@ fn get_messages(
 ) -> Result<Vec<MessageView>, String> {
     // The UI grows `limit` as older pages are loaded.
     let limit = limit.unwrap_or(300).clamp(1, 5000);
-    let store = Store::open(db_path(&app)?).map_err(|e| e.to_string())?;
-    let views: Vec<MessageView> = match root {
-        // Thread view: the root and every cached reply, chronological.
-        Some(id) => store
-            .thread_messages(&channel, &id, limit)
-            .map_err(|e| e.to_string())?
-            .into_iter()
-            .map(|m| view(&store, m))
-            .collect::<Result<_, _>>()?,
-        // Main timeline: roots only, each with its reply summary.
-        None => store
-            .room_timeline(&channel, limit)
-            .map_err(|e| e.to_string())?
-            .into_iter()
-            .map(|t| view_with_summary(&store, t.message, t.reply_count, t.last_reply_ts))
-            .collect::<Result<_, _>>()?,
-    };
-    with_reactions(&store, views)
+    let path = db_path(&app)?;
+    blocking(move || {
+        let store = Store::open(path).map_err(|e| e.to_string())?;
+        let views: Vec<MessageView> = match root {
+            // Thread view: the root and every cached reply, chronological.
+            Some(id) => store
+                .thread_messages(&channel, &id, limit)
+                .map_err(|e| e.to_string())?
+                .into_iter()
+                .map(|m| view(&store, m))
+                .collect::<Result<_, _>>()?,
+            // Main timeline: roots only, each with its reply summary.
+            None => store
+                .room_timeline(&channel, limit)
+                .map_err(|e| e.to_string())?
+                .into_iter()
+                .map(|t| view_with_summary(&store, t.message, t.reply_count, t.last_reply_ts))
+                .collect::<Result<_, _>>()?,
+        };
+        with_reactions(&store, views)
+    })
+    .await
 }
 
 #[derive(Serialize)]
@@ -326,7 +362,7 @@ async fn search(
     limit: Option<usize>,
 ) -> Result<Vec<SearchHitView>, String> {
     let path = db_path(&app)?;
-    tauri::async_runtime::spawn_blocking(move || {
+    blocking(move || {
         let store = Store::open(path).map_err(|e| e.to_string())?;
         let limit = limit.unwrap_or(60).clamp(1, 200);
         store
@@ -347,16 +383,20 @@ async fn search(
             .collect()
     })
     .await
-    .map_err(|e| e.to_string())?
 }
 
 /// The user is looking at `channel`: everything cached there is read. The
 /// new marker is synced to the user's other devices (Buzz read state) after
 /// a short debounce, off the UI path.
 #[tauri::command]
-fn mark_read(app: tauri::AppHandle, channel: String) -> Result<(), String> {
-    let store = Store::open(db_path(&app)?).map_err(|e| e.to_string())?;
-    let advanced = store.mark_read(&channel).map_err(|e| e.to_string())?;
+async fn mark_read(app: tauri::AppHandle, channel: String) -> Result<(), String> {
+    let path = db_path(&app)?;
+    let advanced = blocking(move || {
+        Store::open(path)
+            .and_then(|store| store.mark_read(&channel))
+            .map_err(|e| e.to_string())
+    })
+    .await?;
     if advanced {
         schedule_read_state_publish(&app);
     }
@@ -372,20 +412,19 @@ static READ_STATE_GEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU
 fn schedule_read_state_publish(app: &tauri::AppHandle) {
     use std::sync::atomic::Ordering;
     let generation = READ_STATE_GEN.fetch_add(1, Ordering::SeqCst) + 1;
-    let Ok(path) = db_path(app) else { return };
-    let url = relay_url(app);
-    tauri::async_runtime::spawn_blocking(move || {
-        std::thread::sleep(READ_STATE_DEBOUNCE);
+    let app = app.clone();
+    // Wait on the timer, not on a parked blocking thread: a burst of reads
+    // would otherwise hold one pool thread each for the whole window.
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(READ_STATE_DEBOUNCE).await;
         if READ_STATE_GEN.load(Ordering::SeqCst) != generation {
             return;
         }
-        let _gate = IO_GATE.blocking_lock();
-        let result = (|| -> Result<bool, String> {
-            let (keys, _) = uni_core::load_keys(false).map_err(|e| e.to_string())?;
-            let store = Store::open(path).map_err(|e| e.to_string())?;
-            tauri::async_runtime::block_on(uni_core::publish_read_state(&url, &keys, None, &store))
+        let result = relay_io(&app, |url, keys, store| {
+            tauri::async_runtime::block_on(uni_core::publish_read_state(url, keys, None, store))
                 .map_err(|e| e.to_string())
-        })();
+        })
+        .await;
         // Best effort: an unpublished marker stays dirty and goes out with
         // the next read.
         if let Err(e) = result {
@@ -579,13 +618,12 @@ struct IdentityStatus {
 async fn identity_status(app: tauri::AppHandle) -> Result<IdentityStatus, String> {
     secure_store::ensure_loaded(&app).await?;
     // Desktop may hit the OS keyring here; keep it off the async executor.
-    let pubkey = tauri::async_runtime::spawn_blocking(|| {
-        uni_core::load_keys(false)
+    let pubkey = blocking(|| {
+        Ok(uni_core::load_keys(false)
             .ok()
-            .map(|(k, _)| k.public_key().to_hex())
+            .map(|(k, _)| k.public_key().to_hex()))
     })
-    .await
-    .map_err(|e| e.to_string())?;
+    .await?;
     Ok(IdentityStatus {
         paired: pubkey.is_some(),
         pubkey,
@@ -669,18 +707,13 @@ async fn pairing_cancel(codes_differ: Option<bool>) -> Result<(), String> {
 // blocking task, with its own runtime context, then return only Send data.
 #[tauri::command]
 async fn refresh(app: tauri::AppHandle) -> Result<SyncView, String> {
-    secure_store::ensure_loaded(&app).await?;
-    let path = db_path(&app)?;
-    let url = relay_url(&app);
-    tauri::async_runtime::spawn_blocking(move || {
-        let _gate = IO_GATE.blocking_lock();
-        let (keys, _) = uni_core::load_keys(false).map_err(|e| e.to_string())?;
-        let store = Store::open(path).map_err(|e| e.to_string())?;
-        let report = tauri::async_runtime::block_on(sync_once(&url, &keys, None, &store))
+    let handle = app.clone();
+    relay_io(&app, move |url, keys, store| {
+        let report = tauri::async_runtime::block_on(sync_once(url, keys, None, store))
             .map_err(|e| e.to_string())?;
         // Retry a read-state publish that failed earlier (e.g. offline).
-        if uni_core::read_state_dirty(&store, &keys).unwrap_or(false) {
-            schedule_read_state_publish(&app);
+        if uni_core::read_state_dirty(store, keys).unwrap_or(false) {
+            schedule_read_state_publish(&handle);
         }
         Ok(SyncView {
             pubkey: report.pubkey,
@@ -695,7 +728,6 @@ async fn refresh(app: tauri::AppHandle) -> Result<SyncView, String> {
         })
     })
     .await
-    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -706,19 +738,13 @@ async fn post_message(
     reply_to: Option<String>,
     recipients: Vec<String>,
 ) -> Result<MessageView, String> {
-    secure_store::ensure_loaded(&app).await?;
-    let path = db_path(&app)?;
-    let url = relay_url(&app);
-    tauri::async_runtime::spawn_blocking(move || {
-        let _gate = IO_GATE.blocking_lock();
-        let ch = channel.parse().map_err(|_| "invalid room id".to_string())?;
-        let (keys, _) = uni_core::load_keys(false).map_err(|e| e.to_string())?;
-        let store = Store::open(path).map_err(|e| e.to_string())?;
+    relay_io(&app, move |url, keys, store| {
+        let ch = room_id(&channel)?;
         let sent = tauri::async_runtime::block_on(send_message(
-            &url,
-            &keys,
+            url,
+            keys,
             None,
-            &store,
+            store,
             ch,
             &body,
             reply_to.as_deref(),
@@ -731,13 +757,12 @@ async fn post_message(
             .ok_or_else(|| {
                 "message accepted but not found locally; refresh to recover".to_string()
             })?;
-        let v = view(&store, message)?;
-        with_reactions(&store, vec![v])?
+        let v = view(store, message)?;
+        with_reactions(store, vec![v])?
             .pop()
             .ok_or_else(|| "message view missing".to_string())
     })
     .await
-    .map_err(|e| e.to_string())?
 }
 
 /// Toggle a reaction: publish `emoji` on `target`, or, when `mine` names our
@@ -750,18 +775,12 @@ async fn react(
     emoji: String,
     mine: Option<String>,
 ) -> Result<(), String> {
-    secure_store::ensure_loaded(&app).await?;
-    let path = db_path(&app)?;
-    let url = relay_url(&app);
-    tauri::async_runtime::spawn_blocking(move || {
-        let _gate = IO_GATE.blocking_lock();
-        let ch = channel.parse().map_err(|_| "invalid room id".to_string())?;
-        let (keys, _) = uni_core::load_keys(false).map_err(|e| e.to_string())?;
-        let store = Store::open(path).map_err(|e| e.to_string())?;
+    relay_io(&app, move |url, keys, store| {
+        let ch = room_id(&channel)?;
         tauri::async_runtime::block_on(async {
             match mine {
-                Some(id) => remove_reaction(&url, &keys, None, &store, &id).await,
-                None => send_reaction(&url, &keys, None, &store, ch, &target, &emoji)
+                Some(id) => remove_reaction(url, keys, None, store, &id).await,
+                None => send_reaction(url, keys, None, store, ch, &target, &emoji)
                     .await
                     .map(|_| ()),
             }
@@ -769,26 +788,18 @@ async fn react(
         .map_err(|e| e.to_string())
     })
     .await
-    .map_err(|e| e.to_string())?
 }
 
 /// Load one page of older history for `channel`. Returns new message count;
 /// 0 means the start of the room has been reached.
 #[tauri::command]
 async fn load_older(app: tauri::AppHandle, channel: String) -> Result<usize, String> {
-    secure_store::ensure_loaded(&app).await?;
-    let path = db_path(&app)?;
-    let url = relay_url(&app);
-    tauri::async_runtime::spawn_blocking(move || {
-        let _gate = IO_GATE.blocking_lock();
-        let ch = channel.parse().map_err(|_| "invalid room id".to_string())?;
-        let (keys, _) = uni_core::load_keys(false).map_err(|e| e.to_string())?;
-        let store = Store::open(path).map_err(|e| e.to_string())?;
-        tauri::async_runtime::block_on(sync_older(&url, &keys, None, &store, ch, 100))
+    relay_io(&app, move |url, keys, store| {
+        let ch = room_id(&channel)?;
+        tauri::async_runtime::block_on(sync_older(url, keys, None, store, ch, 100))
             .map_err(|e| e.to_string())
     })
     .await
-    .map_err(|e| e.to_string())?
 }
 
 /// Media cache (`<app cache>/media/<sha256>`); the OS may evict it.
@@ -817,7 +828,7 @@ async fn media_bytes(
     let dir = media_cache_dir(&app)?;
     // No IO_GATE: this touches neither SQLite nor relay watermarks, and must
     // not queue images behind a slow sync.
-    let bytes = tauri::async_runtime::spawn_blocking(move || {
+    let bytes = blocking(move || {
         let (keys, _) = uni_core::load_keys(false).map_err(|e| e.to_string())?;
         tauri::async_runtime::block_on(uni_core::fetch_media(
             &relay,
@@ -828,8 +839,7 @@ async fn media_bytes(
         ))
         .map_err(|e| e.to_string())
     })
-    .await
-    .map_err(|e| e.to_string())??;
+    .await?;
     Ok(tauri::ipc::Response::new(bytes))
 }
 
@@ -843,7 +853,7 @@ async fn media_save(
     secure_store::ensure_loaded(&app).await?;
     let relay = relay_url(&app);
     let dir = media_cache_dir(&app)?;
-    tauri::async_runtime::spawn_blocking(move || {
+    blocking(move || {
         let (keys, _) = uni_core::load_keys(false).map_err(|e| e.to_string())?;
         let hash = uni_core::media::media_sha_from_url(&relay, &url).map_err(|e| e.to_string())?;
         tauri::async_runtime::block_on(uni_core::fetch_media(
@@ -859,7 +869,6 @@ async fn media_save(
             .map_err(|e| e.to_string())
     })
     .await
-    .map_err(|e| e.to_string())?
 }
 
 /// The relay's HTTP origin (e.g. `https://buzz.unforced.org`), so the UI can
@@ -933,7 +942,7 @@ async fn journal_flush_inner(
     let path = db_path(app)?;
     let cfg = vault_config(app);
     let _gate = JOURNAL_GATE.lock().await;
-    tauri::async_runtime::spawn_blocking(move || {
+    blocking(move || {
         let (keys, _) = uni_core::load_keys(false).map_err(|e| e.to_string())?;
         let store = Store::open(path).map_err(|e| e.to_string())?;
         let client = uni_core::parachute::VaultClient::new(cfg, keys).map_err(|e| e.to_string())?;
@@ -941,30 +950,33 @@ async fn journal_flush_inner(
             .map_err(|e| e.to_string())
     })
     .await
-    .map_err(|e| e.to_string())?
 }
 
-fn journal_queue_entry(
+async fn journal_queue_entry(
     app: &tauri::AppHandle,
     entry: JournalDraft,
     audio: Option<(Vec<u8>, String)>,
 ) -> Result<(), String> {
-    let store = Store::open(db_path(app)?).map_err(|e| e.to_string())?;
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or_default();
-    store
-        .journal_queue(
-            &entry.entry_id,
-            &entry.path,
-            &entry.content,
-            &entry.source,
-            &entry.created_at,
-            audio.as_ref().map(|(b, m)| (b.as_slice(), m.as_str())),
-            now,
-        )
-        .map_err(|e| e.to_string())
+    let path = db_path(app)?;
+    blocking(move || {
+        let store = Store::open(path).map_err(|e| e.to_string())?;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or_default();
+        store
+            .journal_queue(
+                &entry.entry_id,
+                &entry.path,
+                &entry.content,
+                &entry.source,
+                &entry.created_at,
+                audio.as_ref().map(|(b, m)| (b.as_slice(), m.as_str())),
+                now,
+            )
+            .map_err(|e| e.to_string())
+    })
+    .await
 }
 
 #[derive(serde::Deserialize)]
@@ -982,7 +994,7 @@ async fn journal_save_text(
     app: tauri::AppHandle,
     entry: JournalDraft,
 ) -> Result<uni_core::journal::FlushReport, String> {
-    journal_queue_entry(&app, entry, None)?;
+    journal_queue_entry(&app, entry, None).await?;
     journal_flush_inner(&app).await
 }
 
@@ -1012,7 +1024,11 @@ async fn journal_save_voice(
     if !mime.starts_with("audio/") {
         return Err("audio mime must be audio/*".into());
     }
-    journal_queue_entry(&app, entry, Some((bytes.clone(), mime)))?;
+    // Refuse before copying an oversized recording.
+    if bytes.is_empty() || bytes.len() > uni_core::parachute::MAX_AUDIO_BYTES {
+        return Err("audio is empty or too large".into());
+    }
+    journal_queue_entry(&app, entry, Some((bytes.clone(), mime))).await?;
     journal_flush_inner(&app).await
 }
 
@@ -1022,10 +1038,16 @@ async fn journal_flush(app: tauri::AppHandle) -> Result<uni_core::journal::Flush
 }
 
 #[tauri::command]
-fn journal_pending(app: tauri::AppHandle) -> Result<Vec<uni_core::journal::QueuedEntry>, String> {
-    Store::open(db_path(&app)?)
-        .and_then(|s| s.journal_pending())
-        .map_err(|e| e.to_string())
+async fn journal_pending(
+    app: tauri::AppHandle,
+) -> Result<Vec<uni_core::journal::QueuedEntry>, String> {
+    let path = db_path(&app)?;
+    blocking(move || {
+        Store::open(path)
+            .and_then(|s| s.journal_pending())
+            .map_err(|e| e.to_string())
+    })
+    .await
 }
 
 async fn with_vault<T, F>(app: &tauri::AppHandle, f: F) -> Result<T, String>
@@ -1035,13 +1057,12 @@ where
 {
     secure_store::ensure_loaded(app).await?;
     let cfg = vault_config(app);
-    tauri::async_runtime::spawn_blocking(move || {
+    blocking(move || {
         let (keys, _) = uni_core::load_keys(false).map_err(|e| e.to_string())?;
         let client = uni_core::parachute::VaultClient::new(cfg, keys).map_err(|e| e.to_string())?;
         f(client)
     })
     .await
-    .map_err(|e| e.to_string())?
 }
 
 /// Newest journal entries from the vault.
