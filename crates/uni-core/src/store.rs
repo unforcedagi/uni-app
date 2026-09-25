@@ -208,6 +208,21 @@ CREATE TABLE IF NOT EXISTS read_state (
     read_ts INTEGER NOT NULL
 );
 
+-- NIP-92 `imeta` attachments of a kind-9 message, in tag order.
+CREATE TABLE IF NOT EXISTS message_media (
+    ref      TEXT NOT NULL,
+    idx      INTEGER NOT NULL,
+    url      TEXT NOT NULL,
+    mime     TEXT,
+    sha256   TEXT,
+    size     INTEGER,
+    dim      TEXT,
+    blurhash TEXT,
+    alt      TEXT,
+    filename TEXT,
+    PRIMARY KEY (ref, idx)
+);
+
 CREATE TABLE IF NOT EXISTS profiles (
     pubkey       TEXT PRIMARY KEY,
     name         TEXT,
@@ -587,6 +602,51 @@ impl Store {
         }
         tx.commit()?;
         Ok(())
+    }
+
+    /// Record a message's `imeta` attachments (replaces any previous set).
+    pub fn set_message_media(&self, id: &str, media: &[crate::media::MediaRef]) -> Result<()> {
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute("DELETE FROM message_media WHERE ref = ?1", params![id])?;
+        for (i, m) in media.iter().enumerate() {
+            tx.execute(
+                "INSERT INTO message_media (ref, idx, url, mime, sha256, size, dim, blurhash, alt, filename)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                params![id, i as i64, m.url, m.mime, m.sha256, m.size, m.dim, m.blurhash, m.alt, m.filename],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Attachments of `ids`, as `(ref, media)` in tag order (one query).
+    pub fn message_media(&self, ids: &[String]) -> Result<Vec<(String, crate::media::MediaRef)>> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let marks = vec!["?"; ids.len()].join(",");
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT ref, url, mime, sha256, size, dim, blurhash, alt, filename
+             FROM message_media WHERE ref IN ({marks}) ORDER BY ref, idx"
+        ))?;
+        let rows = stmt
+            .query_map(rusqlite::params_from_iter(ids.iter()), |r| {
+                Ok((
+                    r.get(0)?,
+                    crate::media::MediaRef {
+                        url: r.get(1)?,
+                        mime: r.get(2)?,
+                        sha256: r.get(3)?,
+                        size: r.get(4)?,
+                        dim: r.get(5)?,
+                        blurhash: r.get(6)?,
+                        alt: r.get(7)?,
+                        filename: r.get(8)?,
+                    },
+                ))
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(rows)
     }
 
     /// `p`-tag pubkeys recorded for a message, sorted.
@@ -1127,6 +1187,20 @@ mod tests {
         .unwrap();
         let s = Store::init(conn).unwrap();
         assert_eq!(s.search("legacy", 5).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn message_media_table_added_to_existing_database() {
+        // A pre-media database (no message_media table) upgrades on open.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(SCHEMA).unwrap();
+        conn.execute_batch("DROP TABLE message_media").unwrap();
+        let s = Store::init(conn).unwrap();
+        let m = crate::media::MediaRef { url: "https://r/media/x".into(), ..Default::default() };
+        s.set_message_media("e1", std::slice::from_ref(&m)).unwrap();
+        assert_eq!(s.message_media(&["e1".into(), "e2".into()]).unwrap(), vec![("e1".to_string(), m)]);
+        s.set_message_media("e1", &[]).unwrap();
+        assert!(s.message_media(&["e1".into()]).unwrap().is_empty());
     }
 
     #[test]

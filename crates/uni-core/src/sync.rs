@@ -58,6 +58,10 @@ pub fn ingest_message(
     };
     let inserted = store.upsert_item(&item)?;
     store.set_message_mentions(&item.r#ref, &p_tags(ev))?;
+    let media = crate::media::parse_imeta(ev.tags.iter().map(|t| t.as_slice()));
+    if !media.is_empty() {
+        store.set_message_media(&item.r#ref, &media)?;
+    }
     let mut root = None;
     let mut parent = None;
     for tag in ev.tags.iter() {
@@ -313,5 +317,33 @@ mod conversation_tests {
             .unwrap();
         assert_eq!(stored.root.as_deref(), Some(root.as_str()));
         assert_eq!(stored.parent.as_deref(), Some(parent.as_str()));
+    }
+
+    #[test]
+    fn ingest_persists_imeta_attachments() {
+        let store = Store::open_in_memory().unwrap();
+        let keys = Keys::generate();
+        let ch = uuid::Uuid::new_v4();
+        let sha = "ab".repeat(32);
+        let url = format!("https://buzz.example/media/{sha}.jpg");
+        let tags = vec![
+            Tag::parse(vec!["h", &ch.to_string()]).unwrap(),
+            Tag::parse(vec!["imeta", &format!("url {url}"), "m image/jpeg", &format!("x {sha}"), "dim 10x20"]).unwrap(),
+            Tag::parse(vec!["imeta", "url https://buzz.example/media/notes.pdf", "m application/pdf", "filename notes.pdf"]).unwrap(),
+        ];
+        let ev = EventBuilder::new(Kind::Custom(9), format!("![image]({url})"))
+            .tags(tags)
+            .sign_with_keys(&keys)
+            .unwrap();
+        ingest_message(&store, &ev, &keys.public_key(), ch).unwrap();
+        // Re-ingesting the same event is idempotent.
+        ingest_message(&store, &ev, &keys.public_key(), ch).unwrap();
+        let media = store.message_media(&[ev.id.to_hex()]).unwrap();
+        assert_eq!(media.len(), 2);
+        assert_eq!(media[0].1.url, url);
+        assert_eq!(media[0].1.sha256.as_deref(), Some(sha.as_str()));
+        assert_eq!(media[0].1.dim.as_deref(), Some("10x20"));
+        assert_eq!(media[1].1.filename.as_deref(), Some("notes.pdf"));
+        assert_eq!(media[1].1.sha256, None);
     }
 }
