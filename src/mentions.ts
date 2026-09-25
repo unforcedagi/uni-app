@@ -23,14 +23,35 @@ export function memberLabels(members: Member[]): Map<string, string> {
   return out;
 }
 
-/** The `@query` being typed at `caret`, if any. */
-export function activeQuery(text: string, caret: number): { start: number; query: string } | null {
+/**
+ * The `@query` being typed at `caret`, if any.
+ *
+ * - `settled`: labels already chosen (bindings). An `@label` the user picked is
+ *   finished: typing after it never reopens the picker or grows it into a
+ *   longer name (`@Uni ` + `B` must not become `@Uni Bot`).
+ * - `names`: member names. A query may contain spaces only while it is still a
+ *   prefix of some multi-word name; otherwise the first space ends it.
+ */
+export function activeQuery(
+  text: string,
+  caret: number,
+  opts: { settled?: Iterable<string>; names?: Iterable<string> } = {},
+): { start: number; query: string } | null {
   const before = text.slice(0, caret);
   const at = before.lastIndexOf("@");
   if (at < 0) return null;
   if (at > 0 && !/\s|[([{"'“]/u.test(before[at - 1])) return null;
   const query = before.slice(at + 1);
   if (query.length > 40 || /[\n@]/.test(query) || /\s{2}/.test(query)) return null;
+  const lower = query.toLowerCase();
+  for (const label of opts.settled ?? []) {
+    const l = label.toLowerCase();
+    if (lower.startsWith(l) && (lower.length === l.length || !WORD.test(query[l.length]))) return null;
+  }
+  if (/\s/.test(query)) {
+    const names = [...(opts.names ?? [])].map((n) => n.toLowerCase());
+    if (!names.some((n) => n.startsWith(lower))) return null;
+  }
   return { start: at, query };
 }
 
@@ -59,9 +80,14 @@ export function insertMention(text: string, start: number, caret: number, label:
 
 type Occurrence = { start: number; end: number; label: string };
 
-/** Longest literal `@label` occurrences in `text` among `labels` (case-insensitive). */
-export function occurrences(text: string, labels: string[]): Occurrence[] {
-  const sorted = [...new Set(labels)].filter(Boolean).sort((a, b) => b.length - a.length);
+/**
+ * Longest literal `@label` occurrences in `text` among `labels`
+ * (case-insensitive). `preferred` labels (the user's picks) are tried first at
+ * each `@`, so a chosen `@Uni` followed by "Bot…" stays `@Uni`.
+ */
+export function occurrences(text: string, labels: string[], preferred: string[] = []): Occurrence[] {
+  const byLen = (xs: string[]) => [...new Set(xs)].filter(Boolean).sort((a, b) => b.length - a.length);
+  const sorted = [...byLen(preferred), ...byLen(labels)];
   const out: Occurrence[] = [];
   const lower = text.toLowerCase();
   for (let i = 0; i < text.length; i++) {
@@ -97,7 +123,7 @@ export function resolveRecipients(text: string, bindings: Bindings, members: Mem
   const candidates = [...bindings.keys(), ...members.map((m) => m.name), ...labels.values()];
   const recipients: string[] = [];
   const ambiguous: string[] = [];
-  for (const occ of occurrences(text, candidates)) {
+  for (const occ of occurrences(text, candidates, [...bindings.keys()])) {
     const bound = [...bindings.entries()].find(([l]) => l.toLowerCase() === occ.label.toLowerCase());
     let pk: string | undefined = bound?.[1];
     if (!pk) {
