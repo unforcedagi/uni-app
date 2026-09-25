@@ -25,8 +25,8 @@ use tokio_tungstenite::tungstenite::Message;
 use uuid::Uuid;
 
 use uni_core::{
-    remove_reaction, run_live, send_reaction, sync_older, sync_once, Backoff, LiveConfig, LiveEvent,
-    Store,
+    delete_message, edit_message, remove_reaction, run_live, send_reaction, sync_older, sync_once,
+    Backoff, LiveConfig, LiveEvent, Store,
 };
 
 /// Control messages from a test to the relay.
@@ -1529,4 +1529,57 @@ async fn sync_older_pages_back_with_aux() {
     assert_eq!(tl.len(), 31);
     assert_eq!((tl[0].message.item.body.as_str(), tl[0].message.edited), ("old 0 (edited)", true));
     assert_eq!(unread(&store), unread_before, "history is not news");
+}
+
+/// Editing and deleting our own messages, in Buzz desktop's exact shapes:
+/// kind 40003 `[h, e]` with the new text, and kind 5 `[h, e]` with empty
+/// content. Someone else's message is refused locally (nothing published).
+#[tokio::test]
+async fn edit_and_delete_own_messages() {
+    let f = fixture().await;
+    let store = Store::open_in_memory().unwrap();
+    let ch = f.ch_a.to_string();
+    sync_once(&f.url, &f.me, None, &store).await.unwrap();
+    let find = |content: &str| {
+        f.relay.events.lock().unwrap().iter().find(|e| e["content"] == content).unwrap()["id"]
+            .as_str().unwrap().to_string()
+    };
+    let mine = find("my own");
+    let theirs = find("hello a1");
+    let published = || f.relay.events.lock().unwrap().len();
+
+    let eid = edit_message(&f.url, &f.me, None, &store, f.ch_a, &mine, "  my own (fixed)\n ").await.unwrap();
+    let sent = f.relay.events.lock().unwrap().iter().find(|e| e["id"] == eid.as_str()).cloned().unwrap();
+    assert_eq!(sent["kind"], 40003);
+    assert_eq!(sent["content"], "my own (fixed)");
+    assert_eq!(tag_values(&sent, "h"), vec![ch.as_str()]);
+    assert_eq!(tag_values(&sent, "e"), vec![mine.as_str()]);
+    assert_eq!(sent["tags"].as_array().unwrap().len(), 2);
+    let m = store.message(&ch, &mine).unwrap().unwrap();
+    assert_eq!((m.item.body.as_str(), m.edited), ("my own (fixed)", true));
+
+    // Refused locally: someone else's message, empty text, unknown target.
+    let before = published();
+    assert!(edit_message(&f.url, &f.me, None, &store, f.ch_a, &theirs, "forged").await.is_err());
+    assert!(delete_message(&f.url, &f.me, None, &store, f.ch_a, &theirs).await.is_err());
+    assert!(edit_message(&f.url, &f.me, None, &store, f.ch_a, &mine, "   ").await.is_err());
+    assert!(delete_message(&f.url, &f.me, None, &store, f.ch_a, &"00".repeat(32)).await.is_err());
+    // Wrong room for the target is refused too.
+    assert!(delete_message(&f.url, &f.me, None, &store, f.ch_b, &mine).await.is_err());
+    assert_eq!(published(), before);
+    assert_eq!(store.message(&ch, &theirs).unwrap().unwrap().item.body, "hello a1");
+
+    let did = delete_message(&f.url, &f.me, None, &store, f.ch_a, &mine).await.unwrap();
+    let del = f.relay.events.lock().unwrap().iter().find(|e| e["id"] == did.as_str()).cloned().unwrap();
+    assert_eq!(del["kind"], 5);
+    assert_eq!(del["content"], "");
+    assert_eq!(tag_values(&del, "h"), vec![ch.as_str()]);
+    assert_eq!(tag_values(&del, "e"), vec![mine.as_str()]);
+    let tl = store.room_timeline(&ch, 50).unwrap();
+    assert!(tl.iter().all(|t| t.message.item.r#ref != mine));
+    assert_eq!(tl.len(), 2);
+    assert!(store.message(&ch, &mine).unwrap().is_none());
+    // Re-sync keeps it gone (the relay echoes our kind 5 back).
+    sync_once(&f.url, &f.me, None, &store).await.unwrap();
+    assert!(store.room_timeline(&ch, 50).unwrap().iter().all(|t| t.message.item.r#ref != mine));
 }
