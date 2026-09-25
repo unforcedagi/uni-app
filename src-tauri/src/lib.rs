@@ -721,7 +721,8 @@ async fn refresh(app: tauri::AppHandle) -> Result<SyncView, String> {
             truncated_channels: report
                 .fetched
                 .iter()
-                .filter(|(_, n)| **n >= 500)
+                // A full page means the relay may hold more than one fetch returned.
+                .filter(|(_, n)| **n as u64 >= uni_core::buzz::RELAY_MAX_LIMIT)
                 .map(|(id, _)| id.clone())
                 .collect(),
             channel_errors: report.channel_errors,
