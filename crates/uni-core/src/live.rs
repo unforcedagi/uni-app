@@ -23,8 +23,8 @@ use uuid::Uuid;
 
 use crate::backoff::Backoff;
 use crate::buzz::{
-    channel_of_sub_id, channel_sub_id, merge_discovered_channels, BuzzClient,
-    KIND_MEMBER_ADDED, KIND_MEMBER_REMOVED, KIND_PROFILE, MEMBERSHIP_SUB_ID,
+    channel_of_sub_id, channel_sub_id, merge_discovered_channels, BuzzClient, KIND_MEMBER_ADDED,
+    KIND_MEMBER_REMOVED, KIND_PROFILE, MEMBERSHIP_SUB_ID,
 };
 use crate::readstate::{apply_read_state_events, read_state_filter, READ_STATE_SUB_ID};
 use crate::store::{Item, Store};
@@ -66,7 +66,11 @@ pub enum LiveEvent {
     /// A kind-9 event was stored (`new == false` means it was a duplicate).
     Message { item: Item, new: bool },
     /// An edit or deletion for `target` in `channel` was stored.
-    Aux { channel: Uuid, target: String, kind: u16 },
+    Aux {
+        channel: Uuid,
+        target: String,
+        kind: u16,
+    },
     /// Relay refused a channel subscription.
     ChannelClosed { channel: Uuid, message: String },
     /// A kind-44100 notification added us to a channel; its sub is now open.
@@ -351,10 +355,19 @@ impl<'a, F: Fn(LiveEvent)> Session<'a, F> {
                     self.note_author(ev.pubkey)?;
                     (self.emit)(LiveEvent::Message { item, new });
                 }
-                Ingested::Aux { new, kind, target, ts } => {
+                Ingested::Aux {
+                    new,
+                    kind,
+                    target,
+                    ts,
+                } => {
                     self.store.set_since(&ch.to_string(), ts)?;
                     if new {
-                        (self.emit)(LiveEvent::Aux { channel: ch, target, kind });
+                        (self.emit)(LiveEvent::Aux {
+                            channel: ch,
+                            target,
+                            kind,
+                        });
                     }
                 }
                 Ingested::Ignored => {}
@@ -390,7 +403,8 @@ impl<'a, F: Fn(LiveEvent)> Session<'a, F> {
             return Ok(());
         }
         if sub == READ_STATE_SUB_ID {
-            let channels = apply_read_state_events(self.store, self.keys, std::slice::from_ref(&ev))?;
+            let channels =
+                apply_read_state_events(self.store, self.keys, std::slice::from_ref(&ev))?;
             if !channels.is_empty() {
                 (self.emit)(LiveEvent::ReadState { channels });
             }

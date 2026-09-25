@@ -16,7 +16,9 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use buzz_ws_client::{NostrWsConnection, RelayMessage};
-use nostr::{Alphabet, Event, EventId, Filter, Keys, Kind, PublicKey, SingleLetterTag, Tag, Timestamp};
+use nostr::{
+    Alphabet, Event, EventId, Filter, Keys, Kind, PublicKey, SingleLetterTag, Tag, Timestamp,
+};
 use serde_json::json;
 use uuid::Uuid;
 
@@ -54,7 +56,11 @@ pub fn aux_target(ev: &Event) -> Option<String> {
     ev.tags.iter().find_map(|t| {
         let s = t.as_slice();
         (s.first().map(String::as_str) == Some("e"))
-            .then(|| s.get(1).filter(|v| nostr::EventId::from_hex(v).is_ok()).cloned())
+            .then(|| {
+                s.get(1)
+                    .filter(|v| nostr::EventId::from_hex(v).is_ok())
+                    .cloned()
+            })
             .flatten()
     })
 }
@@ -304,7 +310,8 @@ impl BuzzClient {
             filter = filter.since(Timestamp::from_secs(s));
         }
         let aux = channel_aux_filter(channel, since);
-        self.open_sub(&channel_sub_id(channel), &[filter, aux]).await
+        self.open_sub(&channel_sub_id(channel), &[filter, aux])
+            .await
     }
 
     /// Open the global membership-notification subscription

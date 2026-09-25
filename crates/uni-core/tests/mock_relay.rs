@@ -577,7 +577,11 @@ async fn sync_against_mock_relay() {
         .map(|i| i.body.as_str())
         .collect();
     assert_eq!(mentions, vec!["my own", "@me a2"]);
-    assert_eq!(store.since_for(&f.ch_a.to_string()).unwrap(), Some(103), "watermark includes aux (the fixture reaction at 103)");
+    assert_eq!(
+        store.since_for(&f.ch_a.to_string()).unwrap(),
+        Some(103),
+        "watermark includes aux (the fixture reaction at 103)"
+    );
     assert_eq!(store.since_for(&f.ch_b.to_string()).unwrap(), Some(200));
 
     // 3. Second run is incremental and idempotent.
@@ -1385,7 +1389,13 @@ async fn sync_and_live_apply_edits_and_deletions() {
     let store = Store::open_in_memory().unwrap();
     let ch = f.ch_a.to_string();
     let find = |body: &str| {
-        f.relay.events.lock().unwrap().iter().find(|e| e["content"] == body).unwrap()["id"]
+        f.relay
+            .events
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|e| e["content"] == body)
+            .unwrap()["id"]
             .as_str()
             .unwrap()
             .to_string()
@@ -1393,10 +1403,23 @@ async fn sync_and_live_apply_edits_and_deletions() {
     let a1 = find("hello a1");
     let a2 = find("@me a2");
     let own = find("my own");
-    f.relay.publish(signed(&f.other, 40003, vec![h(f.ch_a), e(&a1)], "hello a1 (fixed)", 110));
+    f.relay.publish(signed(
+        &f.other,
+        40003,
+        vec![h(f.ch_a), e(&a1)],
+        "hello a1 (fixed)",
+        110,
+    ));
     // An edit by someone other than the author is not applied.
-    f.relay.publish(signed(&f.me, 40003, vec![h(f.ch_a), e(&a2)], "forged", 111));
-    f.relay.publish(signed(&f.relay_keys, 9005, vec![h(f.ch_a), e(&own)], "", 112));
+    f.relay
+        .publish(signed(&f.me, 40003, vec![h(f.ch_a), e(&a2)], "forged", 111));
+    f.relay.publish(signed(
+        &f.relay_keys,
+        9005,
+        vec![h(f.ch_a), e(&own)],
+        "",
+        112,
+    ));
 
     sync_once(&f.url, &f.me, None, &store).await.unwrap();
     let bodies = |s: &Store| -> Vec<(String, bool)> {
@@ -1425,25 +1448,65 @@ async fn sync_and_live_apply_edits_and_deletions() {
         let mut seen = Vec::new();
         let mut eose = 0;
         while eose < 2 {
-            assert!(wait_for(&mut rx, &mut seen, Duration::from_secs(5), |e| matches!(e, LiveEvent::Eose { .. })).await);
+            assert!(
+                wait_for(&mut rx, &mut seen, Duration::from_secs(5), |e| matches!(
+                    e,
+                    LiveEvent::Eose { .. }
+                ))
+                .await
+            );
             eose += 1;
         }
         let live = signed(&f.other, 9, vec![h(f.ch_a), p(&f.other)], "live one", 600);
         let live_id = live["id"].as_str().unwrap().to_string();
         f.relay.publish(live);
-        assert!(wait_for(&mut rx, &mut seen, Duration::from_secs(5), |e| matches!(e, LiveEvent::Message { new: true, .. })).await);
+        assert!(
+            wait_for(&mut rx, &mut seen, Duration::from_secs(5), |e| matches!(
+                e,
+                LiveEvent::Message { new: true, .. }
+            ))
+            .await
+        );
         assert_eq!(store.rooms_for(Some(&me_hex)).unwrap()[0].unread, 1);
 
-        f.relay.publish(signed(&f.other, 40003, vec![h(f.ch_a), e(&live_id)], "live one, edited", 601));
-        assert!(wait_for(&mut rx, &mut seen, Duration::from_secs(5), |e| matches!(e, LiveEvent::Aux { kind: 40003, .. })).await);
-        f.relay.publish(signed(&f.other, 5, vec![h(f.ch_a), e(&a2)], "", 602));
-        assert!(wait_for(&mut rx, &mut seen, Duration::from_secs(5), |e| matches!(e, LiveEvent::Aux { kind: 5, .. })).await);
+        f.relay.publish(signed(
+            &f.other,
+            40003,
+            vec![h(f.ch_a), e(&live_id)],
+            "live one, edited",
+            601,
+        ));
+        assert!(
+            wait_for(&mut rx, &mut seen, Duration::from_secs(5), |e| matches!(
+                e,
+                LiveEvent::Aux { kind: 40003, .. }
+            ))
+            .await
+        );
+        f.relay
+            .publish(signed(&f.other, 5, vec![h(f.ch_a), e(&a2)], "", 602));
+        assert!(
+            wait_for(&mut rx, &mut seen, Duration::from_secs(5), |e| matches!(
+                e,
+                LiveEvent::Aux { kind: 5, .. }
+            ))
+            .await
+        );
         assert_eq!(
             bodies(&store),
-            vec![("hello a1 (fixed)".into(), true), ("live one, edited".into(), true)]
+            vec![
+                ("hello a1 (fixed)".into(), true),
+                ("live one, edited".into(), true)
+            ]
         );
         stop_tx.send(true).unwrap();
-        assert!(wait_for(&mut rx, &mut seen, Duration::from_secs(5), |e| matches!(e, LiveEvent::Stopped { .. })).await);
+        assert!(
+            wait_for(&mut rx, &mut seen, Duration::from_secs(5), |e| matches!(
+                e,
+                LiveEvent::Stopped { .. }
+            ))
+            .await
+        );
     };
     let (r, _) = tokio::join!(runner, driver);
     r.unwrap();
@@ -1459,33 +1522,84 @@ async fn reactions_sync_send_and_undo() {
     let f = fixture().await;
     let store = Store::open_in_memory().unwrap();
     let ch = f.ch_a.to_string();
-    let a1 = f.relay.events.lock().unwrap().iter().find(|e| e["content"] == "hello a1").unwrap()["id"]
-        .as_str().unwrap().to_string();
+    let a1 = f
+        .relay
+        .events
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|e| e["content"] == "hello a1")
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
     // The relay files reactions under the target's channel (`#h` matches).
-    f.relay.publish(signed(&f.other, 7, vec![h(f.ch_a), e(&a1)], "🔥", 120));
-    f.relay.publish(signed(&f.other, 7, vec![h(f.ch_a), e(&a1)], "🔥", 121));
+    f.relay
+        .publish(signed(&f.other, 7, vec![h(f.ch_a), e(&a1)], "🔥", 120));
+    f.relay
+        .publish(signed(&f.other, 7, vec![h(f.ch_a), e(&a1)], "🔥", 121));
     sync_once(&f.url, &f.me, None, &store).await.unwrap();
     let me_hex = f.me.public_key().to_hex();
-    let r = store.reactions(std::slice::from_ref(&a1), Some(&me_hex)).unwrap();
+    let r = store
+        .reactions(std::slice::from_ref(&a1), Some(&me_hex))
+        .unwrap();
     assert_eq!(r.len(), 1);
-    assert_eq!((r[0].emoji.as_str(), r[0].count, r[0].mine.is_none()), ("🔥", 1, true));
+    assert_eq!(
+        (r[0].emoji.as_str(), r[0].count, r[0].mine.is_none()),
+        ("🔥", 1, true)
+    );
 
-    let rid = send_reaction(&f.url, &f.me, None, &store, f.ch_a, &a1, "🔥").await.unwrap();
-    let sent = f.relay.events.lock().unwrap().iter().find(|e| e["id"] == rid.as_str()).cloned().unwrap();
+    let rid = send_reaction(&f.url, &f.me, None, &store, f.ch_a, &a1, "🔥")
+        .await
+        .unwrap();
+    let sent = f
+        .relay
+        .events
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|e| e["id"] == rid.as_str())
+        .cloned()
+        .unwrap();
     assert_eq!(sent["kind"], 7);
     assert_eq!(tag_values(&sent, "e"), vec![a1.as_str()]);
-    let r = store.reactions(std::slice::from_ref(&a1), Some(&me_hex)).unwrap();
+    let r = store
+        .reactions(std::slice::from_ref(&a1), Some(&me_hex))
+        .unwrap();
     assert_eq!((r[0].count, r[0].mine.as_deref()), (2, Some(rid.as_str())));
 
     // Can't undo someone else's reaction.
-    let theirs = f.relay.events.lock().unwrap().iter().find(|e| e["kind"] == 7 && e["pubkey"] == f.other.public_key().to_hex().as_str()).unwrap()["id"]
-        .as_str().unwrap().to_string();
-    assert!(remove_reaction(&f.url, &f.me, None, &store, &theirs).await.is_err());
+    let theirs = f
+        .relay
+        .events
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|e| e["kind"] == 7 && e["pubkey"] == f.other.public_key().to_hex().as_str())
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(remove_reaction(&f.url, &f.me, None, &store, &theirs)
+        .await
+        .is_err());
 
-    remove_reaction(&f.url, &f.me, None, &store, &rid).await.unwrap();
-    let del = f.relay.events.lock().unwrap().iter().find(|e| e["kind"] == 5).cloned().unwrap();
+    remove_reaction(&f.url, &f.me, None, &store, &rid)
+        .await
+        .unwrap();
+    let del = f
+        .relay
+        .events
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|e| e["kind"] == 5)
+        .cloned()
+        .unwrap();
     assert_eq!(tag_values(&del, "e"), vec![rid.as_str()]);
-    let r = store.reactions(std::slice::from_ref(&a1), Some(&me_hex)).unwrap();
+    let r = store
+        .reactions(std::slice::from_ref(&a1), Some(&me_hex))
+        .unwrap();
     assert_eq!((r[0].count, r[0].mine.is_none()), (1, true));
     // Reactions never count as messages or unread.
     assert_eq!(store.room_timeline(&ch, 50).unwrap().len(), 3);
@@ -1507,27 +1621,65 @@ async fn sync_older_pages_back_with_aux() {
     // history from before we joined; plus a much later edit of the oldest.
     let mut first = String::new();
     for i in 0..30u64 {
-        let ev = signed(&f.other, 9, vec![h(f.ch_b), p(&f.other)], &format!("old {i}"), 10 + i);
+        let ev = signed(
+            &f.other,
+            9,
+            vec![h(f.ch_b), p(&f.other)],
+            &format!("old {i}"),
+            10 + i,
+        );
         if i == 0 {
             first = ev["id"].as_str().unwrap().to_string();
         }
         f.relay.publish(ev);
     }
-    f.relay.publish(signed(&f.other, 40003, vec![h(f.ch_b), e(&first)], "old 0 (edited)", 900));
+    f.relay.publish(signed(
+        &f.other,
+        40003,
+        vec![h(f.ch_b), e(&first)],
+        "old 0 (edited)",
+        900,
+    ));
     // Incremental sync is `since`-bounded, so it can't reach them.
     sync_once(&f.url, &f.me, None, &store).await.unwrap();
     assert_eq!(store.room_timeline(&ch, 500).unwrap().len(), 1);
-    let unread = |s: &Store| s.rooms_for(Some(&me_hex)).unwrap().into_iter().find(|r| r.id == ch).unwrap().unread;
+    let unread = |s: &Store| {
+        s.rooms_for(Some(&me_hex))
+            .unwrap()
+            .into_iter()
+            .find(|r| r.id == ch)
+            .unwrap()
+            .unread
+    };
     let unread_before = unread(&store);
 
     // `until` is inclusive, so each page re-fetches the boundary message
     // (dedup by id): 19 new, then the remaining 11.
-    assert_eq!(sync_older(&f.url, &f.me, None, &store, f.ch_b, 20).await.unwrap(), 19);
-    assert_eq!(sync_older(&f.url, &f.me, None, &store, f.ch_b, 20).await.unwrap(), 11);
-    assert_eq!(sync_older(&f.url, &f.me, None, &store, f.ch_b, 20).await.unwrap(), 0, "start of history");
+    assert_eq!(
+        sync_older(&f.url, &f.me, None, &store, f.ch_b, 20)
+            .await
+            .unwrap(),
+        19
+    );
+    assert_eq!(
+        sync_older(&f.url, &f.me, None, &store, f.ch_b, 20)
+            .await
+            .unwrap(),
+        11
+    );
+    assert_eq!(
+        sync_older(&f.url, &f.me, None, &store, f.ch_b, 20)
+            .await
+            .unwrap(),
+        0,
+        "start of history"
+    );
     let tl = store.room_timeline(&ch, 500).unwrap();
     assert_eq!(tl.len(), 31);
-    assert_eq!((tl[0].message.item.body.as_str(), tl[0].message.edited), ("old 0 (edited)", true));
+    assert_eq!(
+        (tl[0].message.item.body.as_str(), tl[0].message.edited),
+        ("old 0 (edited)", true)
+    );
     assert_eq!(unread(&store), unread_before, "history is not news");
 }
 
@@ -1541,15 +1693,41 @@ async fn edit_and_delete_own_messages() {
     let ch = f.ch_a.to_string();
     sync_once(&f.url, &f.me, None, &store).await.unwrap();
     let find = |content: &str| {
-        f.relay.events.lock().unwrap().iter().find(|e| e["content"] == content).unwrap()["id"]
-            .as_str().unwrap().to_string()
+        f.relay
+            .events
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|e| e["content"] == content)
+            .unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string()
     };
     let mine = find("my own");
     let theirs = find("hello a1");
     let published = || f.relay.events.lock().unwrap().len();
 
-    let eid = edit_message(&f.url, &f.me, None, &store, f.ch_a, &mine, "  my own (fixed)\n ").await.unwrap();
-    let sent = f.relay.events.lock().unwrap().iter().find(|e| e["id"] == eid.as_str()).cloned().unwrap();
+    let eid = edit_message(
+        &f.url,
+        &f.me,
+        None,
+        &store,
+        f.ch_a,
+        &mine,
+        "  my own (fixed)\n ",
+    )
+    .await
+    .unwrap();
+    let sent = f
+        .relay
+        .events
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|e| e["id"] == eid.as_str())
+        .cloned()
+        .unwrap();
     assert_eq!(sent["kind"], 40003);
     assert_eq!(sent["content"], "my own (fixed)");
     assert_eq!(tag_values(&sent, "h"), vec![ch.as_str()]);
@@ -1560,17 +1738,46 @@ async fn edit_and_delete_own_messages() {
 
     // Refused locally: someone else's message, empty text, unknown target.
     let before = published();
-    assert!(edit_message(&f.url, &f.me, None, &store, f.ch_a, &theirs, "forged").await.is_err());
-    assert!(delete_message(&f.url, &f.me, None, &store, f.ch_a, &theirs).await.is_err());
-    assert!(edit_message(&f.url, &f.me, None, &store, f.ch_a, &mine, "   ").await.is_err());
-    assert!(delete_message(&f.url, &f.me, None, &store, f.ch_a, &"00".repeat(32)).await.is_err());
+    assert!(
+        edit_message(&f.url, &f.me, None, &store, f.ch_a, &theirs, "forged")
+            .await
+            .is_err()
+    );
+    assert!(delete_message(&f.url, &f.me, None, &store, f.ch_a, &theirs)
+        .await
+        .is_err());
+    assert!(
+        edit_message(&f.url, &f.me, None, &store, f.ch_a, &mine, "   ")
+            .await
+            .is_err()
+    );
+    assert!(
+        delete_message(&f.url, &f.me, None, &store, f.ch_a, &"00".repeat(32))
+            .await
+            .is_err()
+    );
     // Wrong room for the target is refused too.
-    assert!(delete_message(&f.url, &f.me, None, &store, f.ch_b, &mine).await.is_err());
+    assert!(delete_message(&f.url, &f.me, None, &store, f.ch_b, &mine)
+        .await
+        .is_err());
     assert_eq!(published(), before);
-    assert_eq!(store.message(&ch, &theirs).unwrap().unwrap().item.body, "hello a1");
+    assert_eq!(
+        store.message(&ch, &theirs).unwrap().unwrap().item.body,
+        "hello a1"
+    );
 
-    let did = delete_message(&f.url, &f.me, None, &store, f.ch_a, &mine).await.unwrap();
-    let del = f.relay.events.lock().unwrap().iter().find(|e| e["id"] == did.as_str()).cloned().unwrap();
+    let did = delete_message(&f.url, &f.me, None, &store, f.ch_a, &mine)
+        .await
+        .unwrap();
+    let del = f
+        .relay
+        .events
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|e| e["id"] == did.as_str())
+        .cloned()
+        .unwrap();
     assert_eq!(del["kind"], 5);
     assert_eq!(del["content"], "");
     assert_eq!(tag_values(&del, "h"), vec![ch.as_str()]);
@@ -1581,7 +1788,12 @@ async fn edit_and_delete_own_messages() {
     assert!(store.message(&ch, &mine).unwrap().is_none());
     // Re-sync keeps it gone (the relay echoes our kind 5 back).
     sync_once(&f.url, &f.me, None, &store).await.unwrap();
-    assert!(store.room_timeline(&ch, 50).unwrap().iter().all(|t| t.message.item.r#ref != mine));
+    assert!(store
+        .room_timeline(&ch, 50)
+        .unwrap()
+        .iter()
+        .all(|t| t.message.item.r#ref != mine));
+}
 
 // ── Cross-device read state (Buzz NIP-RS, kind 30078) ─────────────────────
 
@@ -1590,11 +1802,20 @@ async fn edit_and_delete_own_messages() {
 fn desktop_read_state(keys: &Keys, slot: &str, client_id: &str, contexts: Value, ts: u64) -> Value {
     use nostr::nips::nip44;
     let blob = json!({"v": 1, "client_id": client_id, "contexts": contexts}).to_string();
-    let content = nip44::encrypt(keys.secret_key(), &keys.public_key(), blob, nip44::Version::V2).unwrap();
+    let content = nip44::encrypt(
+        keys.secret_key(),
+        &keys.public_key(),
+        blob,
+        nip44::Version::V2,
+    )
+    .unwrap();
     signed(
         keys,
         30078,
-        vec![named("d", &format!("read-state:{slot}")), named("t", "read-state")],
+        vec![
+            named("d", &format!("read-state:{slot}")),
+            named("t", "read-state"),
+        ],
         &content,
         ts,
     )
@@ -1620,10 +1841,25 @@ async fn read_state_newer_remote_clears_unread_older_never_regresses() {
     let store = Store::open_in_memory().unwrap();
     sync_once(&f.url, &f.me, None, &store).await.unwrap();
     // New messages from others after first sight: unread on this device.
-    f.relay.publish(signed(&f.other, 9, vec![h(f.ch_a), p(&f.other)], "new a", 150));
-    f.relay.publish(signed(&f.other, 9, vec![h(f.ch_b), p(&f.other)], "new b", 250));
+    f.relay.publish(signed(
+        &f.other,
+        9,
+        vec![h(f.ch_a), p(&f.other)],
+        "new a",
+        150,
+    ));
+    f.relay.publish(signed(
+        &f.other,
+        9,
+        vec![h(f.ch_b), p(&f.other)],
+        "new b",
+        250,
+    ));
     sync_once(&f.url, &f.me, None, &store).await.unwrap();
-    assert_eq!((unread(&store, &f.me, f.ch_a), unread(&store, &f.me, f.ch_b)), (1, 1));
+    assert_eq!(
+        (unread(&store, &f.me, f.ch_a), unread(&store, &f.me, f.ch_b)),
+        (1, 1)
+    );
 
     // Desktop read #a up to 150; its (older) marker for #b predates what we
     // already had. A foreign key's event is ignored (authors=[me] + pubkey check).
@@ -1635,7 +1871,13 @@ async fn read_state_newer_remote_clears_unread_older_never_regresses() {
         json!({ f.ch_a.to_string(): 150, f.ch_b.to_string(): 10, "thread:x": 999 }),
         now(),
     ));
-    f.relay.publish(desktop_read_state(&f.other, slot, "evil", json!({ f.ch_b.to_string(): 999 }), now()));
+    f.relay.publish(desktop_read_state(
+        &f.other,
+        slot,
+        "evil",
+        json!({ f.ch_b.to_string(): 999 }),
+        now(),
+    ));
     let r = sync_once(&f.url, &f.me, None, &store).await.unwrap();
     assert_eq!(r.read_state_advanced, vec![f.ch_a.to_string()]);
     assert_eq!(unread(&store, &f.me, f.ch_a), 0);
@@ -1655,16 +1897,34 @@ async fn read_state_publish_has_exact_desktop_shape() {
     sync_once(&f.url, &f.me, None, &store).await.unwrap();
     // First-sight seeds alone are never published.
     assert!(!uni_core::read_state_dirty(&store, &f.me).unwrap());
-    assert!(!uni_core::publish_read_state(&f.url, &f.me, None, &store).await.unwrap());
+    assert!(!uni_core::publish_read_state(&f.url, &f.me, None, &store)
+        .await
+        .unwrap());
 
     // Another device already read #b; we read #a here.
-    f.relay.publish(desktop_read_state(&f.me, "desk", "desktop-client", json!({ f.ch_b.to_string(): 200 }), now()));
-    f.relay.publish(signed(&f.other, 9, vec![h(f.ch_a), p(&f.other)], "new a", 150));
+    f.relay.publish(desktop_read_state(
+        &f.me,
+        "desk",
+        "desktop-client",
+        json!({ f.ch_b.to_string(): 200 }),
+        now(),
+    ));
+    f.relay.publish(signed(
+        &f.other,
+        9,
+        vec![h(f.ch_a), p(&f.other)],
+        "new a",
+        150,
+    ));
     sync_once(&f.url, &f.me, None, &store).await.unwrap();
     assert!(store.mark_read(&f.ch_a.to_string()).unwrap());
-    assert!(uni_core::publish_read_state(&f.url, &f.me, None, &store).await.unwrap());
+    assert!(uni_core::publish_read_state(&f.url, &f.me, None, &store)
+        .await
+        .unwrap());
     // Nothing changed since: no second publish.
-    assert!(!uni_core::publish_read_state(&f.url, &f.me, None, &store).await.unwrap());
+    assert!(!uni_core::publish_read_state(&f.url, &f.me, None, &store)
+        .await
+        .unwrap());
 
     let mine: Vec<Value> = f
         .relay
@@ -1681,11 +1941,23 @@ async fn read_state_publish_has_exact_desktop_shape() {
     let tags = ev["tags"].as_array().unwrap();
     assert_eq!(tags.len(), 2);
     assert_eq!(tags[0][0], "d");
-    let slot = tags[0][1].as_str().unwrap().strip_prefix("read-state:").unwrap();
-    assert!(slot.len() == 32 && slot.chars().all(|c| c.is_ascii_hexdigit()), "{slot}");
+    let slot = tags[0][1]
+        .as_str()
+        .unwrap()
+        .strip_prefix("read-state:")
+        .unwrap();
+    assert!(
+        slot.len() == 32 && slot.chars().all(|c| c.is_ascii_hexdigit()),
+        "{slot}"
+    );
     assert_eq!(tags[1], json!(["t", "read-state"]));
     assert!(ev["created_at"].as_u64().unwrap() + 5 >= now());
-    let plain = nip44::decrypt(f.me.secret_key(), &f.me.public_key(), ev["content"].as_str().unwrap()).unwrap();
+    let plain = nip44::decrypt(
+        f.me.secret_key(),
+        &f.me.public_key(),
+        ev["content"].as_str().unwrap(),
+    )
+    .unwrap();
     // Exact desktop JSON shape and key order: {"v":1,"client_id":…,"contexts":{…}}.
     assert!(plain.starts_with(r#"{"v":1,"client_id":""#), "{plain}");
     let blob: Value = serde_json::from_str(&plain).unwrap();
@@ -1711,26 +1983,75 @@ async fn live_read_state_from_desktop_arrives_in_real_time() {
         let mut seen = Vec::new();
         let mut eose = 0;
         while eose < 2 {
-            assert!(wait_for(&mut rx, &mut seen, Duration::from_secs(5), |e| matches!(e, LiveEvent::Eose { .. })).await);
+            assert!(
+                wait_for(&mut rx, &mut seen, Duration::from_secs(5), |e| matches!(
+                    e,
+                    LiveEvent::Eose { .. }
+                ))
+                .await
+            );
             eose += 1;
         }
-        f.relay.publish(signed(&f.other, 9, vec![h(f.ch_a), p(&f.other)], "new a", 150));
-        assert!(wait_for(&mut rx, &mut seen, Duration::from_secs(5), |e| matches!(e, LiveEvent::Message { new: true, .. })).await);
+        f.relay.publish(signed(
+            &f.other,
+            9,
+            vec![h(f.ch_a), p(&f.other)],
+            "new a",
+            150,
+        ));
+        assert!(
+            wait_for(&mut rx, &mut seen, Duration::from_secs(5), |e| matches!(
+                e,
+                LiveEvent::Message { new: true, .. }
+            ))
+            .await
+        );
         assert_eq!(unread(&store, &f.me, f.ch_a), 1);
-        f.relay.publish(desktop_read_state(&f.me, "desk", "desktop-client", json!({ f.ch_a.to_string(): 150 }), now()));
+        f.relay.publish(desktop_read_state(
+            &f.me,
+            "desk",
+            "desktop-client",
+            json!({ f.ch_a.to_string(): 150 }),
+            now(),
+        ));
         let ch = f.ch_a.to_string();
         assert!(
-            wait_for(&mut rx, &mut seen, Duration::from_secs(5), |e| matches!(e, LiveEvent::ReadState { channels } if channels == &vec![ch.clone()])).await,
+            wait_for(
+                &mut rx,
+                &mut seen,
+                Duration::from_secs(5),
+                |e| matches!(e, LiveEvent::ReadState { channels } if channels == &vec![ch.clone()])
+            )
+            .await,
             "{seen:?}"
         );
         assert_eq!(unread(&store, &f.me, f.ch_a), 0);
         // An older marker arriving live is a no-op (no event, no regression).
-        f.relay.publish(desktop_read_state(&f.me, "desk", "desktop-client", json!({ f.ch_a.to_string(): 1 }), now()));
+        f.relay.publish(desktop_read_state(
+            &f.me,
+            "desk",
+            "desktop-client",
+            json!({ f.ch_a.to_string(): 1 }),
+            now(),
+        ));
         tokio::time::sleep(Duration::from_millis(200)).await;
         assert_eq!(store.read_marker(&ch).unwrap(), Some(150));
         stop_tx.send(true).unwrap();
-        assert!(wait_for(&mut rx, &mut seen, Duration::from_secs(5), |e| matches!(e, LiveEvent::Stopped { .. })).await);
-        assert!(!seen.iter().filter(|e| matches!(e, LiveEvent::ReadState { .. })).nth(1).is_some(), "{seen:?}");
+        assert!(
+            wait_for(&mut rx, &mut seen, Duration::from_secs(5), |e| matches!(
+                e,
+                LiveEvent::Stopped { .. }
+            ))
+            .await
+        );
+        assert!(
+            !seen
+                .iter()
+                .filter(|e| matches!(e, LiveEvent::ReadState { .. }))
+                .nth(1)
+                .is_some(),
+            "{seen:?}"
+        );
     };
     let (r, _) = tokio::join!(runner, driver);
     r.unwrap();

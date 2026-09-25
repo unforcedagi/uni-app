@@ -13,9 +13,10 @@
     "typecheck": "tsc --noEmit",
     "test:mentions": "node --experimental-strip-types scripts/mentions.test.ts",
     "test:markdown": "node --experimental-strip-types scripts/markdown.test.ts",
-    "test": "node --experimental-strip-types scripts/mentions.test.ts && node --experimental-strip-types scripts/markdown.test.ts && node --experimental-strip-types scripts/uniActions.test.ts && node --experimental-strip-types scripts/search.test.ts && node --experimental-strip-types scripts/ownMessages.test.ts",
+    "test": "node --experimental-strip-types scripts/mentions.test.ts && node --experimental-strip-types scripts/markdown.test.ts && node --experimental-strip-types scripts/uniActions.test.ts && node --experimental-strip-types scripts/search.test.ts && node --experimental-strip-types scripts/ownMessages.test.ts && node --experimental-strip-types scripts/media.test.ts",
     "test:search": "node --experimental-strip-types scripts/search.test.ts",
-    "test:uni-actions": "node --experimental-strip-types scripts/uniActions.test.ts && node --experimental-strip-types scripts/ownMessages.test.ts"
+    "test:uni-actions": "node --experimental-strip-types scripts/uniActions.test.ts && node --experimental-strip-types scripts/ownMessages.test.ts",
+    "test:media": "node --experimental-strip-types scripts/media.test.ts"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.4.1",

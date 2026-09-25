@@ -86,7 +86,9 @@ pub fn read_state_filter(keys: &Keys) -> Filter {
         .kind(Kind::Custom(KIND_READ_STATE))
         .author(keys.public_key())
         .custom_tags(SingleLetterTag::lowercase(Alphabet::T), [READ_STATE_T_TAG])
-        .since(Timestamp::from_secs(now_secs().saturating_sub(READ_STATE_HORIZON_SECONDS)))
+        .since(Timestamp::from_secs(
+            now_secs().saturating_sub(READ_STATE_HORIZON_SECONDS),
+        ))
         .limit(READ_STATE_FETCH_LIMIT)
 }
 
@@ -196,14 +198,21 @@ fn note_created_at(store: &Store, keys: &Keys, created_at: u64) -> Result<()> {
         return Ok(());
     }
     if created_at > max_fetched_created_at(store, keys)? {
-        store.set_read_sync_meta(&meta_key(META_MAX_CREATED_AT, keys), &created_at.to_string())?;
+        store.set_read_sync_meta(
+            &meta_key(META_MAX_CREATED_AT, keys),
+            &created_at.to_string(),
+        )?;
     }
     Ok(())
 }
 
 /// Merge our own read-state events into `read_state` with `max()` per
 /// channel. Returns the channels whose marker advanced (sorted, deduped).
-pub fn apply_read_state_events(store: &Store, keys: &Keys, events: &[Event]) -> Result<Vec<String>> {
+pub fn apply_read_state_events(
+    store: &Store,
+    keys: &Keys,
+    events: &[Event],
+) -> Result<Vec<String>> {
     let (client_id, slot_id) = identity(store, keys)?;
     let mut advanced = std::collections::BTreeSet::new();
     let mut slot_taken = false;
@@ -214,7 +223,9 @@ pub fn apply_read_state_events(store: &Store, keys: &Keys, events: &[Event]) -> 
         note_created_at(store, keys, parsed.created_at)?;
         // Another client squatting on our d-tag: rotate our slot so we never
         // replace its blob (desktop `mergeEvents` conflict detection).
-        if parsed.d_tag == format!("{READ_STATE_D_TAG_PREFIX}{slot_id}") && parsed.blob.client_id != client_id {
+        if parsed.d_tag == format!("{READ_STATE_D_TAG_PREFIX}{slot_id}")
+            && parsed.blob.client_id != client_id
+        {
             slot_taken = true;
         }
         for (ctx, ts) in &parsed.blob.contexts {
@@ -224,7 +235,10 @@ pub fn apply_read_state_events(store: &Store, keys: &Keys, events: &[Event]) -> 
         }
     }
     if slot_taken {
-        store.set_read_sync_meta(&meta_key(META_SLOT_ID, keys), &uuid::Uuid::new_v4().simple().to_string())?;
+        store.set_read_sync_meta(
+            &meta_key(META_SLOT_ID, keys),
+            &uuid::Uuid::new_v4().simple().to_string(),
+        )?;
     }
     Ok(advanced.into_iter().collect())
 }
@@ -253,7 +267,10 @@ pub fn read_state_dirty(store: &Store, keys: &Keys) -> Result<bool> {
 
 /// Build and sign this client's read-state event for the current markers,
 /// or `None` if nothing changed since the last accepted publish.
-pub fn build_read_state_event(store: &Store, keys: &Keys) -> Result<Option<(Event, BTreeMap<String, u64>)>> {
+pub fn build_read_state_event(
+    store: &Store,
+    keys: &Keys,
+) -> Result<Option<(Event, BTreeMap<String, u64>)>> {
     if !read_state_dirty(store, keys)? {
         return Ok(None);
     }
@@ -271,8 +288,13 @@ pub fn build_read_state_event(store: &Store, keys: &Keys) -> Result<Option<(Even
             contexts.len()
         )));
     }
-    let content = nip44::encrypt(keys.secret_key(), &keys.public_key(), plain, nip44::Version::V2)
-        .map_err(|e| Error::Invalid(format!("nip44 encrypt: {e}")))?;
+    let content = nip44::encrypt(
+        keys.secret_key(),
+        &keys.public_key(),
+        plain,
+        nip44::Version::V2,
+    )
+    .map_err(|e| Error::Invalid(format!("nip44 encrypt: {e}")))?;
     let tag = |a: &str, b: &str| Tag::parse([a, b]).map_err(|e| Error::Invalid(e.to_string()));
     let tags = vec![
         tag("d", &format!("{READ_STATE_D_TAG_PREFIX}{slot_id}"))?,
@@ -288,7 +310,11 @@ pub fn build_read_state_event(store: &Store, keys: &Keys) -> Result<Option<(Even
 }
 
 /// Fetch our read-state events and merge them (the step `sync_once` runs).
-pub async fn fetch_read_state(client: &mut BuzzClient, keys: &Keys, store: &Store) -> Result<Vec<String>> {
+pub async fn fetch_read_state(
+    client: &mut BuzzClient,
+    keys: &Keys,
+    store: &Store,
+) -> Result<Vec<String>> {
     let events = client
         .req_until_eose("read-state-fetch", &[read_state_filter(keys)])
         .await?;
@@ -334,9 +360,18 @@ mod tests {
     use super::*;
 
     fn blob_event(keys: &Keys, d: &str, blob: &str, ts: u64) -> Event {
-        let content = nip44::encrypt(keys.secret_key(), &keys.public_key(), blob, nip44::Version::V2).unwrap();
+        let content = nip44::encrypt(
+            keys.secret_key(),
+            &keys.public_key(),
+            blob,
+            nip44::Version::V2,
+        )
+        .unwrap();
         EventBuilder::new(Kind::Custom(KIND_READ_STATE), content)
-            .tags([Tag::parse(["d", d]).unwrap(), Tag::parse(["t", "read-state"]).unwrap()])
+            .tags([
+                Tag::parse(["d", d]).unwrap(),
+                Tag::parse(["t", "read-state"]).unwrap(),
+            ])
             .custom_created_at(Timestamp::from_secs(ts))
             .sign_with_keys(keys)
             .unwrap()
@@ -346,28 +381,51 @@ mod tests {
     fn parse_validates_like_buzz() {
         let k = Keys::generate();
         let ch = uuid::Uuid::new_v4().to_string();
-        let good = format!(r#"{{"v":1,"client_id":"c","contexts":{{"{ch}":100,"thread:x":5,"bad":-1,"f":1.5}}}}"#);
+        let good = format!(
+            r#"{{"v":1,"client_id":"c","contexts":{{"{ch}":100,"thread:x":5,"bad":-1,"f":1.5}}}}"#
+        );
         let p = parse_read_state_event(&blob_event(&k, "read-state:ab", &good, 10), &k).unwrap();
         assert_eq!(p.blob.contexts.len(), 2);
         assert_eq!(p.blob.contexts[&ch], 100);
         // Wrong version, bad d-tag, someone else's key: rejected.
-        assert!(parse_read_state_event(&blob_event(&k, "read-state:ab", r#"{"v":2,"client_id":"c","contexts":{}}"#, 10), &k).is_none());
+        assert!(parse_read_state_event(
+            &blob_event(
+                &k,
+                "read-state:ab",
+                r#"{"v":2,"client_id":"c","contexts":{}}"#,
+                10
+            ),
+            &k
+        )
+        .is_none());
         assert!(parse_read_state_event(&blob_event(&k, "read-state:", &good, 10), &k).is_none());
         assert!(parse_read_state_event(&blob_event(&k, "other", &good, 10), &k).is_none());
-        assert!(parse_read_state_event(&blob_event(&k, "read-state:ab", &good, 10), &Keys::generate()).is_none());
+        assert!(parse_read_state_event(
+            &blob_event(&k, "read-state:ab", &good, 10),
+            &Keys::generate()
+        )
+        .is_none());
     }
 
     #[test]
     fn merge_is_max_and_seed_is_not_published() {
         let k = Keys::generate();
         let s = Store::open_in_memory().unwrap();
-        let (a, b) = (uuid::Uuid::new_v4().to_string(), uuid::Uuid::new_v4().to_string());
+        let (a, b) = (
+            uuid::Uuid::new_v4().to_string(),
+            uuid::Uuid::new_v4().to_string(),
+        );
         s.ensure_read_state(&a, 50).unwrap();
         s.ensure_read_state(&b, 500).unwrap();
         // Seeds are local-only.
         assert!(!read_state_dirty(&s, &k).unwrap());
         let blob = format!(r#"{{"v":1,"client_id":"desk","contexts":{{"{a}":100,"{b}":200}}}}"#);
-        let adv = apply_read_state_events(&s, &k, &[blob_event(&k, "read-state:dd", &blob, now_secs())]).unwrap();
+        let adv = apply_read_state_events(
+            &s,
+            &k,
+            &[blob_event(&k, "read-state:dd", &blob, now_secs())],
+        )
+        .unwrap();
         assert_eq!(adv, vec![a.clone()]);
         let m = s.publishable_read_markers().unwrap();
         assert_eq!((m[&a], m[&b]), (100, 500)); // b never went backwards
