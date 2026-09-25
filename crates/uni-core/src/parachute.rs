@@ -158,7 +158,7 @@ impl VaultClient {
             .body(body)
             .send()
             .await
-            .map_err(|e| Error::Vault(format!("hub unreachable: {e}")))?;
+            .map_err(|e| Error::Vault(format!("hub unreachable: {}", chain(&e))))?;
         let status = res.status();
         let text = res.text().await.map_err(|e| Error::Vault(e.to_string()))?;
         if !status.is_success() {
@@ -225,7 +225,7 @@ impl VaultClient {
             .body(bytes)
             .send()
             .await
-            .map_err(|e| Error::Vault(format!("upload failed: {e}")))?;
+            .map_err(|e| Error::Vault(format!("upload failed: {}", chain(&e))))?;
         if !res.status().is_success() {
             let code = res.status().as_u16();
             let text = res.text().await.unwrap_or_default();
@@ -344,6 +344,18 @@ fn ticket_url(origin: &str, vault: &str, ticket: &Value) -> Result<String> {
         .filter(|id| !id.is_empty() && !id.contains('/'))
         .ok_or_else(|| Error::Vault("unexpected ticket url".into()))?;
     Ok(format!("{origin}{prefix}{id}"))
+}
+
+/// An error with its causes (reqwest's Display hides DNS/TLS/connect detail).
+fn chain(e: &dyn std::error::Error) -> String {
+    let mut out = e.to_string();
+    let mut src = e.source();
+    while let Some(s) = src {
+        out.push_str(": ");
+        out.push_str(&s.to_string());
+        src = s.source();
+    }
+    out
 }
 
 fn auth_hint(status: u16, body: &str) -> String {
