@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import "./App.css";
@@ -111,7 +111,9 @@ function openLink(e: React.MouseEvent, href: string) {
   void invoke("open_link", { url: href }).catch(() => {});
 }
 
-function Body({ body, mentions, me, edited }: { body: string; mentions: Member[]; me: string | null; edited?: boolean }) {
+// Memoized: typing in the composer re-renders the room, and re-parsing
+// every message's markdown on each keystroke made input lag on the Daylight.
+const Body = memo(function Body({ body, mentions, me, edited }: { body: string; mentions: Member[]; me: string | null; edited?: boolean }) {
   const text = (v: string, key: string) => mentionSegments(v, mentions).map((seg, i) => seg.mention
     ? <span key={`${key}.${i}`} className={`mention ${seg.mention === me ? "mention-me" : ""}`} title={seg.mention}>{seg.text}</span>
     : <span key={`${key}.${i}`}>{seg.text}</span>);
@@ -143,7 +145,7 @@ function Body({ body, mentions, me, edited }: { body: string; mentions: Member[]
   });
   const tree = parseMarkdown(body);
   return <div className="md">{blocks(tree, "b")}{edited && <span className="edited" title="Edited by the author">(edited)</span>}</div>;
-}
+});
 
 type Picker = { start: number; query: string; index: number };
 
@@ -177,6 +179,11 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const [reactFor, setReactFor] = useState<string | null>(null);
   // Messages handed to Uni as notes this session (a local receipt).
   const [kept, setKept] = useState<Set<string>>(new Set());
+  // Latest bindings for syncPicker (called in the same tick as setBindings).
+  const bindingsRef = useRef<Bindings>(new Map());
+  // Message actions go through a ref so the memoized list never holds stale closures.
+  useEffect(() => { bindingsRef.current = bindings; }, [bindings]);
+  const actions = useRef({ react: (_m: Message, _e: string) => {}, toUni: (_m: Message, _a: UniAction) => {}, openThread: (_m: Message) => {}, reply: (_id: string) => {}, loadOlder: () => {} });
   const preserveScroll = useRef<number | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const channelRef = useRef<string | null>(null);
@@ -347,16 +354,15 @@ function Conversations({ onForget }: { onForget: () => void }) {
     setDraft(text);
     const key = scope();
     if (key) drafts.current.set(key, text);
-    setBindings((old) => {
-      const next = pruneBindings(text, old);
-      if (key) bindingStore.current.set(key, next);
-      return next;
-    });
+    const next = pruneBindings(text, bindingsRef.current);
+    bindingsRef.current = next;
+    if (key) bindingStore.current.set(key, next);
+    setBindings(next);
     syncPicker(text, caret);
   }
 
   function syncPicker(text: string, caret: number | null) {
-    const q = caret === null ? null : activeQuery(text, caret);
+    const q = caret === null ? null : activeQuery(text, caret, { settled: bindingsRef.current.keys(), names: members.map((m) => labels.get(m.pubkey) ?? m.name) });
     setPicker((old) => q ? { ...q, index: old && old.start === q.start ? old.index : 0 } : null);
   }
 
@@ -369,12 +375,11 @@ function Conversations({ onForget }: { onForget: () => void }) {
     const key = scope();
     setDraft(next.text);
     if (key) drafts.current.set(key, next.text);
-    setBindings((old) => {
-      const updated = new Map(pruneBindings(next.text, old));
-      updated.set(label, member.pubkey);
-      if (key) bindingStore.current.set(key, updated);
-      return updated;
-    });
+    const updated = new Map(pruneBindings(next.text, bindingsRef.current));
+    updated.set(label, member.pubkey);
+    bindingsRef.current = updated;
+    if (key) bindingStore.current.set(key, updated);
+    setBindings(updated);
     setPicker(null);
     requestAnimationFrame(() => { el?.focus(); el?.setSelectionRange(next.caret, next.caret); });
   }
@@ -482,15 +487,15 @@ function Conversations({ onForget }: { onForget: () => void }) {
       onContextMenu={(e) => { e.preventDefault(); setReactFor(reactFor === m.ref ? null : m.ref); }}>
       {grouped ? <time className="gutter-time">{clock(m.ts)}</time> : <span className="message-avatar" style={{ background: `hsl(${hue(m.author)} 45% 42%)` }} aria-hidden="true">{m.author_name[0]?.toUpperCase() ?? "?"}</span>}
       <div className="message-content">{!grouped && <div className="message-meta"><strong>{m.author_name}</strong><time>{clock(m.ts)}</time></div>}<Body body={m.body} mentions={m.mentions} me={identity} edited={m.edited} />
-        {m.reactions.length > 0 && <div className="reactions">{m.reactions.map((r) => <button key={r.emoji} className={`pill ${r.mine ? "mine" : ""}`} onClick={() => void react(m, r.emoji)} aria-pressed={!!r.mine} aria-label={`${emojiLabel(r.emoji)} ${r.count}${r.mine ? ", you reacted; tap to remove" : "; tap to add yours"}`}>{emojiLabel(r.emoji)} <span>{r.count}</span></button>)}</div>}
-        {reactFor === m.ref && <div className="quick-react" role="toolbar" aria-label="React">{QUICK_REACTIONS.map((e) => <button key={e} onClick={() => void react(m, e)} aria-label={`React ${e}`}>{e}</button>)}</div>}
-        {!inThread && m.reply_count > 0 && <button className="thread-summary" onClick={() => openThread(m)} aria-label={`View thread with ${m.reply_count} ${m.reply_count === 1 ? "reply" : "replies"}`}>💬 {m.reply_count} {m.reply_count === 1 ? "reply" : "replies"}{m.last_reply_ts ? <span> · last {time(m.last_reply_ts)}</span> : null}</button>}
+        {m.reactions.length > 0 && <div className="reactions">{m.reactions.map((r) => <button key={r.emoji} className={`pill ${r.mine ? "mine" : ""}`} onClick={() => actions.current.react(m, r.emoji)} aria-pressed={!!r.mine} aria-label={`${emojiLabel(r.emoji)} ${r.count}${r.mine ? ", you reacted; tap to remove" : "; tap to add yours"}`}>{emojiLabel(r.emoji)} <span>{r.count}</span></button>)}</div>}
+        {reactFor === m.ref && <div className="quick-react" role="toolbar" aria-label="React">{QUICK_REACTIONS.map((e) => <button key={e} onClick={() => actions.current.react(m, e)} aria-label={`React ${e}`}>{e}</button>)}</div>}
+        {!inThread && m.reply_count > 0 && <button className="thread-summary" onClick={() => actions.current.openThread(m)} aria-label={`View thread with ${m.reply_count} ${m.reply_count === 1 ? "reply" : "replies"}`}>💬 {m.reply_count} {m.reply_count === 1 ? "reply" : "replies"}{m.last_reply_ts ? <span> · last {time(m.last_reply_ts)}</span> : null}</button>}
         <div className="message-actions">
           <button onClick={() => setReactFor(reactFor === m.ref ? null : m.ref)} aria-label={`React to ${m.author_name}`} aria-expanded={reactFor === m.ref}>React</button>
-          <button onClick={() => void toUni(m, "note")} disabled={kept.has(m.ref)} aria-label={`Keep ${m.author_name}'s message as a note`}>{kept.has(m.ref) ? "✓ Sent to Uni" : "⤓ Keep"}</button>
-          <button onClick={() => void toUni(m, "ask")} aria-label={`Ask Uni about ${m.author_name}'s message`}>✦ Ask Uni</button>
-          {!inThread && <button onClick={() => openThread(m)} aria-label={`Reply in thread to ${m.author_name}`}>Reply in thread</button>}
-          {inThread && m.ref !== root && <button onClick={() => { setReplyTo(m.ref); input.current?.focus(); }} aria-label={`Reply to ${m.author_name}`}>Reply</button>}
+          <button onClick={() => actions.current.toUni(m, "note")} disabled={kept.has(m.ref)} aria-label={`Keep ${m.author_name}'s message as a note`}>{kept.has(m.ref) ? "✓ Sent to Uni" : "⤓ Keep"}</button>
+          <button onClick={() => actions.current.toUni(m, "ask")} aria-label={`Ask Uni about ${m.author_name}'s message`}>✦ Ask Uni</button>
+          {!inThread && <button onClick={() => actions.current.openThread(m)} aria-label={`Reply in thread to ${m.author_name}`}>Reply in thread</button>}
+          {inThread && m.ref !== root && <button onClick={() => actions.current.reply(m.ref)} aria-label={`Reply to ${m.author_name}`}>Reply</button>}
         </div>
       </div>
     </article>;
@@ -505,6 +510,30 @@ function Conversations({ onForget }: { onForget: () => void }) {
     out.push(renderMessage(m, inThread, sameDay ? prev : undefined));
     return out;
   });
+
+  actions.current = {
+    react: (m, e) => void react(m, e),
+    toUni: (m, a) => void toUni(m, a),
+    openThread,
+    reply: (id) => { setReplyTo(id); input.current?.focus(); },
+    loadOlder: () => void loadOlder(),
+  };
+
+  // The rendered timeline depends only on data, never on the draft, so
+  // keystrokes in the composer don't rebuild hundreds of messages.
+  const roomName = currentRoom?.name ?? "";
+  const timeline = useMemo(() => isThread ? <>
+    {rootMessage ? renderMessage(rootMessage, true) : messages.length > 0 && <p className="empty">Root message is not cached; showing replies we have.</p>}
+    {rootMessage && <div className="thread-divider"><span>{threadReplies.length ? `${threadReplies.length} ${threadReplies.length === 1 ? "reply" : "replies"}` : "No replies yet"}</span></div>}
+    {renderList(threadReplies, true)}
+    {messages.length === 0 && <p className="empty">Thread not in local cache. Refresh to try again.</p>}
+  </> : <>
+    {messages.length > 0 && <div className="older">{older === "done" ? <span>Start of #{roomName}</span> : <button onClick={() => actions.current.loadOlder()} disabled={older === "loading"}>{older === "loading" ? "Loading older messages…" : "Load older messages"}</button>}</div>}
+    {messages.length === 0 && <p className="empty">No messages in this room yet.</p>}
+    {renderList(messages, false)}
+  </>,
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  [messages, identity, reactFor, kept, root, older, roomName]);
 
   return <main className={`shell ${channel ? "in-room" : ""}`}>
     <aside className="rooms" aria-label="Conversations">
@@ -528,16 +557,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
           <button className="icon-button" onClick={() => void refresh()} disabled={busy} aria-label="Refresh messages">↻</button>
         </header>
         <div className="message-list" ref={listRef} role="log" aria-label="Messages" aria-live="polite">
-          {isThread ? <>
-            {rootMessage ? renderMessage(rootMessage, true) : messages.length > 0 && <p className="empty">Root message is not cached; showing replies we have.</p>}
-            {rootMessage && <div className="thread-divider"><span>{threadReplies.length ? `${threadReplies.length} ${threadReplies.length === 1 ? "reply" : "replies"}` : "No replies yet"}</span></div>}
-            {renderList(threadReplies, true)}
-            {messages.length === 0 && <p className="empty">Thread not in local cache. Refresh to try again.</p>}
-          </> : <>
-            {messages.length > 0 && <div className="older">{older === "done" ? <span>Start of #{currentRoom.name}</span> : <button onClick={() => void loadOlder()} disabled={older === "loading"}>{older === "loading" ? "Loading older messages…" : "Load older messages"}</button>}</div>}
-            {messages.length === 0 && <p className="empty">No messages in this room yet.</p>}
-            {renderList(messages, false)}
-          </>}
+          {timeline}
           <div ref={scrollEnd} />
         </div>
         <footer className="composer">

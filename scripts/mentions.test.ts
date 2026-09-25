@@ -50,4 +50,19 @@ assert.deepEqual(mentionSegments("ask @Uni and @Aaron", [uni]), [
 ]);
 assert.deepEqual(mentionSegments("email x@Uni", [uni]), [{ text: "email x@Uni" }]);
 
+// A picked label is settled: typing after it never reopens the picker.
+const names = members.map((m) => m.name);
+assert.equal(activeQuery("hi @Uni ", 8, { settled: ["Uni"], names }), null);
+assert.equal(activeQuery("hi @Uni B", 9, { settled: ["Uni"], names }), null);
+assert.equal(activeQuery("hi @Uni", 7, { settled: ["Uni"], names }), null);
+// ...but an unbound multi-word prefix stays open while it can still match.
+assert.deepEqual(activeQuery("hi @Uni B", 9, { names }), { start: 3, query: "Uni B" });
+// A space ends the query once no name can continue it.
+assert.equal(activeQuery("hi @Aaron please", 16, { names }), null);
+assert.equal(activeQuery("hi @Aaron ", 10, { names }), null);
+// A settled label that is only a prefix of the typed word is not settled.
+assert.deepEqual(activeQuery("@Unix", 5, { settled: ["Uni"], names }), { start: 0, query: "Unix" });
+// At send time the pick wins over a longer typed name.
+assert.deepEqual(resolveRecipients("@Uni Bot news", new Map([["Uni", k("a")]]), members), { recipients: [k("a")] });
+
 console.log("mentions.test: all assertions passed");
