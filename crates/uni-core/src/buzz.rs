@@ -28,6 +28,35 @@ pub use buzz_sdk::kind::{KIND_NIP29_GROUP_MEMBERS, KIND_NIP29_GROUP_METADATA};
 /// Kind 9: channel message (NIP-29 / Buzz).
 pub const KIND_CHANNEL_MESSAGE: u16 = 9;
 
+/// Kinds that modify an earlier channel message by `e` reference:
+/// NIP-09 deletion (5), Buzz delete-event (9005), Buzz edit (40003).
+pub const AUX_KINDS: [u16; 3] = [5, 9005, 40003];
+
+/// `#h`-scoped filter for edits and deletions in `channel`. Kind 5 events
+/// carry no `h` tag of their own, but the relay files them under their
+/// target's channel, so an `#h` query returns them.
+pub fn channel_aux_filter(channel: Uuid, since: Option<u64>) -> Filter {
+    let h_tag = SingleLetterTag::lowercase(Alphabet::H);
+    let mut f = Filter::new()
+        .kinds(AUX_KINDS.map(Kind::Custom))
+        .custom_tags(h_tag, [channel.to_string()])
+        .limit(RELAY_MAX_LIMIT as usize);
+    if let Some(s) = since {
+        f = f.since(Timestamp::from_secs(s));
+    }
+    f
+}
+
+/// First valid `e` tag: the message an edit/deletion targets.
+pub fn aux_target(ev: &Event) -> Option<String> {
+    ev.tags.iter().find_map(|t| {
+        let s = t.as_slice();
+        (s.first().map(String::as_str) == Some("e"))
+            .then(|| s.get(1).filter(|v| nostr::EventId::from_hex(v).is_ok()).cloned())
+            .flatten()
+    })
+}
+
 /// Relay-side cap on results per historical filter (ARCHITECTURE.md:161).
 pub const RELAY_MAX_LIMIT: u64 = 500;
 
@@ -187,7 +216,10 @@ impl BuzzClient {
         if let Some(s) = since {
             filter = filter.since(Timestamp::from_secs(s));
         }
-        self.req_until_eose(&channel_sub_id(channel), &[filter])
+        // Second filter: edits and deletions, so stale / retracted text is
+        // corrected on the same pass (own limit, so they never crowd out messages).
+        let aux = channel_aux_filter(channel, since);
+        self.req_until_eose(&channel_sub_id(channel), &[filter, aux])
             .await
     }
 
@@ -232,7 +264,8 @@ impl BuzzClient {
         if let Some(s) = since {
             filter = filter.since(Timestamp::from_secs(s));
         }
-        self.open_sub(&channel_sub_id(channel), &[filter]).await
+        let aux = channel_aux_filter(channel, since);
+        self.open_sub(&channel_sub_id(channel), &[filter, aux]).await
     }
 
     /// Open the global membership-notification subscription

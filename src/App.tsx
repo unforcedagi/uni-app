@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import "./App.css";
+import { markdownToText, parseMarkdown, type Block, type Inline } from "./markdown";
 import { activeQuery, filterMembers, insertMention, memberLabels, mentionSegments, pruneBindings, resolveRecipients, type Bindings, type Member } from "./mentions";
 
-type Room = { id: string; name: string; last_message: string | null; last_ts: number | null; mentions: boolean };
-type Message = { ref: string; channel: string; author: string; author_name: string; ts: number; body: string; mentions_me: boolean; root: string | null; parent: string | null; mentions: Member[]; reply_count: number; last_reply_ts: number | null };
+type Room = { id: string; name: string; last_message: string | null; last_ts: number | null; mentions: boolean; unread: number };
+type Message = { ref: string; channel: string; author: string; author_name: string; ts: number; body: string; mentions_me: boolean; root: string | null; parent: string | null; mentions: Member[]; reply_count: number; last_reply_ts: number | null; edited: boolean };
+type LivePayload = { kind: "message" | "edit" | "delete" | "rooms" | "profiles" | "status"; channel: string | null; status: string | null; author: string | null };
 type IdentityStatus = { paired: boolean; pubkey: string | null };
 type PairStep = "paste" | "connecting" | "code" | "receiving" | "done";
 type SyncResult = { pubkey: string; total_items: number; channel_errors: Record<string, string>; truncated_channels: string[] };
@@ -86,10 +89,44 @@ function App() {
   return <Conversations onForget={() => setPaired(false)} />;
 }
 
-function Body({ body, mentions, me }: { body: string; mentions: Member[]; me: string | null }) {
-  return <p>{mentionSegments(body, mentions).map((seg, i) => seg.mention
-    ? <span key={i} className={`mention ${seg.mention === me ? "mention-me" : ""}`} title={seg.mention}>{seg.text}</span>
-    : <span key={i}>{seg.text}</span>)}</p>;
+function openLink(e: React.MouseEvent, href: string) {
+  // Never navigate the app's own WebView; hand the link to the system browser.
+  e.preventDefault();
+  void invoke("open_link", { url: href }).catch(() => {});
+}
+
+function Body({ body, mentions, me, edited }: { body: string; mentions: Member[]; me: string | null; edited?: boolean }) {
+  const text = (v: string, key: string) => mentionSegments(v, mentions).map((seg, i) => seg.mention
+    ? <span key={`${key}.${i}`} className={`mention ${seg.mention === me ? "mention-me" : ""}`} title={seg.mention}>{seg.text}</span>
+    : <span key={`${key}.${i}`}>{seg.text}</span>);
+  const inline = (nodes: Inline[], key: string): React.ReactNode[] => nodes.map((n, i) => {
+    const k = `${key}.${i}`;
+    switch (n.t) {
+      case "text": return text(n.v, k);
+      case "br": return <br key={k} />;
+      case "code": return <code key={k}>{n.v}</code>;
+      case "strong": return <strong key={k}>{inline(n.c, k)}</strong>;
+      case "em": return <em key={k}>{inline(n.c, k)}</em>;
+      case "del": return <del key={k}>{inline(n.c, k)}</del>;
+      case "link": return <a key={k} href={n.href} onClick={(e) => openLink(e, n.href)} rel="noreferrer noopener">{inline(n.c, k)}</a>;
+    }
+  });
+  const blocks = (bs: Block[], key: string): React.ReactNode[] => bs.map((b, i) => {
+    const k = `${key}.${i}`;
+    switch (b.t) {
+      case "p": return <p key={k}>{inline(b.c, k)}</p>;
+      case "h": return <p key={k} className={`md-h md-h${b.level}`}>{inline(b.c, k)}</p>;
+      case "code": return <pre key={k} className="md-pre"><code>{b.v}</code></pre>;
+      case "quote": return <blockquote key={k}>{blocks(b.c, k)}</blockquote>;
+      case "hr": return <hr key={k} />;
+      case "list": {
+        const items = b.items.map((it, j) => <li key={`${k}.${j}`}>{blocks(it, `${k}.${j}`)}</li>);
+        return b.ordered ? <ol key={k} start={b.start}>{items}</ol> : <ul key={k}>{items}</ul>;
+      }
+    }
+  });
+  const tree = parseMarkdown(body);
+  return <div className="md">{blocks(tree, "b")}{edited && <span className="edited" title="Edited by the author">(edited)</span>}</div>;
 }
 
 type Picker = { start: number; query: string; index: number };
@@ -116,6 +153,11 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const [ready, setReady] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [forgetArmed, setForgetArmed] = useState(false);
+  const [live, setLive] = useState<string | null>(null);
+  // Bumped by live events so the open room re-reads from the local store.
+  const [tick, setTick] = useState(0);
+  const channelRef = useRef<string | null>(null);
+  channelRef.current = channel;
   const scrollEnd = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
   const focusComposer = useRef(false);
@@ -144,6 +186,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
       const warnings = Object.entries(result.channel_errors).map(([id, reason]) => `${id.slice(0, 8)}: ${reason}`);
       if (result.truncated_channels.length) warnings.push("Some rooms have more history than the current 500-message backfill.");
       setStatus(warnings.length ? `Synced with warnings: ${warnings.join("; ")}` : `Synced · ${result.total_items} cached messages`);
+      // Keep the socket open for push while we're in the foreground.
+      invoke<boolean>("live_start").catch((e) => setLive(`Live unavailable: ${e}`));
     } catch (e) {
       setError(String(e));
       setStatus("Offline · showing cached messages");
@@ -162,17 +206,35 @@ function Conversations({ onForget }: { onForget: () => void }) {
   }, []);
 
   useEffect(() => {
-    const onVisible = () => { if (document.visibilityState === "visible") void refresh(); };
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void refresh();
+      else { void invoke("live_stop").catch(() => {}); setLive(null); }
+    };
     document.addEventListener("visibilitychange", onVisible);
     return () => document.removeEventListener("visibilitychange", onVisible);
   }, [refresh]);
+
+  // Live push: re-read rooms (unread badges, previews) and the open room.
+  useEffect(() => {
+    const un = listen<LivePayload>("uni://live", (e) => {
+      const p = e.payload;
+      if (p.kind === "status") { setLive(p.status); return; }
+      void loadRooms().catch(() => {});
+      if (p.kind === "profiles" || !p.channel || p.channel === channelRef.current) setTick((n) => n + 1);
+    });
+    return () => { void un.then((f) => f()); };
+  }, [loadRooms]);
 
   useEffect(() => {
     if (!channel) { setMessages([]); return; }
     let current = true;
     invoke<Message[]>("get_messages", { channel, root }).then((rows) => { if (current) setMessages(rows); }).catch((e) => { if (current) setError(String(e)); });
+    // Viewing the room reads it (only while the app is actually on screen).
+    if (document.visibilityState === "visible") {
+      invoke("mark_read", { channel }).then(() => loadRooms()).catch(() => {});
+    }
     return () => { current = false; };
-  }, [channel, root, status]);
+  }, [channel, root, status, tick, loadRooms]);
 
   useEffect(() => {
     if (!channel) { setMembers([]); return; }
@@ -326,7 +388,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const boundNames = [...new Set(bindings.values())].map((pk) => members.find((m) => m.pubkey === pk)?.name ?? pk.slice(0, 8));
 
   const renderMessage = (m: Message, inThread: boolean) => <article key={m.ref} className={`message ${m.author === identity ? "mine" : ""} ${m.mentions_me ? "highlight" : ""} ${inThread && m.ref === root ? "thread-root" : ""}`}>
-    <span className="message-avatar" aria-hidden="true">{m.author_name[0]?.toUpperCase() ?? "?"}</span><div className="message-content"><div className="message-meta"><strong>{m.author_name}</strong><time>{time(m.ts)}</time></div><Body body={m.body} mentions={m.mentions} me={identity} />
+    <span className="message-avatar" aria-hidden="true">{m.author_name[0]?.toUpperCase() ?? "?"}</span><div className="message-content"><div className="message-meta"><strong>{m.author_name}</strong><time>{time(m.ts)}</time></div><Body body={m.body} mentions={m.mentions} me={identity} edited={m.edited} />
       {!inThread && m.reply_count > 0 && <button className="thread-summary" onClick={() => openThread(m)} aria-label={`View thread with ${m.reply_count} ${m.reply_count === 1 ? "reply" : "replies"}`}>💬 {m.reply_count} {m.reply_count === 1 ? "reply" : "replies"}{m.last_reply_ts ? <span> · last {time(m.last_reply_ts)}</span> : null}</button>}
       <div className="message-actions">
         {!inThread && <button onClick={() => openThread(m)} aria-label={`Reply in thread to ${m.author_name}`}>Reply in thread</button>}
@@ -339,13 +401,13 @@ function Conversations({ onForget }: { onForget: () => void }) {
     <aside className="rooms" aria-label="Conversations">
       <header className="rooms-header"><div><span className="eyebrow">BUZZ · PERSONAL</span><h1>Talk to Uni</h1></div><div><button className="icon-button" onClick={() => void refresh()} disabled={busy} aria-label="Refresh conversations">↻</button><button className="icon-button" onClick={() => { setSettingsOpen(!settingsOpen); setForgetArmed(false); }} aria-label="Settings" aria-expanded={settingsOpen}>⚙</button></div></header>
       {settingsOpen && <div className="settings"><button className="pairing-secondary" onClick={() => void forget()}>{forgetArmed ? "Tap again to forget — you'll need to re-pair" : "Forget this device key"}</button>{forgetArmed && <button className="pairing-secondary" onClick={() => setForgetArmed(false)}>Keep key</button>}</div>}
-      <p className="connection" role="status">{status}</p>
+      <p className="connection" role="status">{status}{live ? <span className={`live ${live === "Live" ? "on" : ""}`}> · {live}</span> : null}</p>
       {identity && <p className="identity" title={identity}>Signed in as {identity.slice(0, 12)}…</p>}
       {!ready && <p className="empty">Loading…</p>}
       {ready && rooms.length === 0 && <p className="empty">No joined conversations cached. Refresh to connect with your personal Buzz key.</p>}
       <nav>{rooms.map((room) => <button key={room.id} className={`room ${channel === room.id ? "selected" : ""}`} onClick={() => navigate(room.id, null)} aria-current={channel === room.id ? "page" : undefined}>
-        <span className="avatar">{room.name[0]?.toUpperCase() ?? "#"}</span><span className="room-text"><strong>{room.name}</strong><small>{room.last_message ?? "No messages yet"}</small></span>
-        <span className="room-side"><time>{room.last_ts ? time(room.last_ts) : ""}</time>{room.mentions && <span className="mention-dot" aria-label="Mentioned in this room" />}</span>
+        <span className="avatar">{room.name[0]?.toUpperCase() ?? "#"}</span><span className="room-text"><strong className={room.unread ? "unread" : ""}>{room.name}</strong><small>{room.last_message ? markdownToText(room.last_message) : "No messages yet"}</small></span>
+        <span className="room-side"><time>{room.last_ts ? time(room.last_ts) : ""}</time>{room.unread > 0 && <span className={`unread-badge ${room.mentions ? "mention" : ""}`} aria-label={`${room.unread} unread${room.mentions ? ", mentions you" : ""}`}>{room.mentions ? "@ " : ""}{room.unread > 99 ? "99+" : room.unread}</span>}</span>
       </button>)}</nav>
     </aside>
     <section className="conversation" aria-label={currentRoom ? `Conversation: ${currentRoom.name}` : "Conversation"}>

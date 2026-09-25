@@ -1,1 +1,1 @@
-{}
+{"default":{"identifier":"default","description":"Main window: core IPC (events for live updates). App commands are allowed by default; link opening goes through the app's own `open_link` command, which only accepts http(s)/mailto.","local":true,"windows":["main"],"permissions":["core:default"]}}

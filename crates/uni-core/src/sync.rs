@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 
 use nostr::{Event, Keys, PublicKey, Tag};
 
-use crate::buzz::{event_channel, mentions, p_tags, BuzzClient, RELAY_MAX_LIMIT};
+use crate::buzz::{aux_target, event_channel, mentions, p_tags, BuzzClient, AUX_KINDS, KIND_CHANNEL_MESSAGE, RELAY_MAX_LIMIT};
 use crate::store::{Item, Profile, Store};
 use crate::Result;
 
@@ -84,6 +84,55 @@ pub fn ingest_message(
         store.set_message_refs(&item.r#ref, root, parent)?;
     }
     Ok((inserted, item))
+}
+
+/// What a channel-subscription event did to the store.
+#[derive(Debug, Clone)]
+pub enum Ingested {
+    /// A kind-9 message (`new == false`: duplicate).
+    Message { new: bool, item: Item },
+    /// An edit / deletion aimed at `target` (`new == false`: duplicate).
+    Aux { new: bool, kind: u16, target: String, ts: i64 },
+    /// Some other kind, or an aux event with no valid target; ignored.
+    Ignored,
+}
+
+/// Record an edit (40003) or deletion (5 / 9005). The relay has already
+/// authorized it (edit ownership, delete permission); the store's view
+/// additionally requires an edit's signer to be the message author.
+pub fn ingest_aux(store: &Store, ev: &Event) -> Result<Ingested> {
+    let kind = ev.kind.as_u16();
+    let Some(target) = aux_target(ev) else {
+        return Ok(Ingested::Ignored);
+    };
+    let ts = ev.created_at.as_secs() as i64;
+    let new = store.upsert_aux(
+        &ev.id.to_hex(),
+        kind as i64,
+        &target,
+        &ev.pubkey.to_hex(),
+        ts,
+        &ev.content,
+    )?;
+    Ok(Ingested::Aux { new, kind, target, ts })
+}
+
+/// Route any event delivered on a `ch-<uuid>` subscription.
+pub fn ingest_channel_event(
+    store: &Store,
+    ev: &Event,
+    me: &PublicKey,
+    channel: uuid::Uuid,
+) -> Result<Ingested> {
+    let kind = ev.kind.as_u16();
+    if kind == KIND_CHANNEL_MESSAGE {
+        let (new, item) = ingest_message(store, ev, me, channel)?;
+        Ok(Ingested::Message { new, item })
+    } else if AUX_KINDS.contains(&kind) {
+        ingest_aux(store, ev)
+    } else {
+        Ok(Ingested::Ignored)
+    }
 }
 
 /// Store a kind-0 event as a profile row. Returns `true` if stored/replaced.
@@ -173,15 +222,22 @@ pub async fn sync_once(
         let mut inserted = 0usize;
         let mut max_ts: Option<i64> = since.map(|s| s as i64);
         for ev in &events {
-            let (new, item) = ingest_message(store, ev, &me, ch)?;
-            if new {
-                inserted += 1;
-            }
-            max_ts = Some(max_ts.map_or(item.ts, |m| m.max(item.ts)));
+            let ts = match ingest_channel_event(store, ev, &me, ch)? {
+                Ingested::Message { new, item } => {
+                    inserted += new as usize;
+                    item.ts
+                }
+                Ingested::Aux { ts, .. } => ts,
+                Ingested::Ignored => continue,
+            };
+            max_ts = Some(max_ts.map_or(ts, |m| m.max(ts)));
         }
         if let Some(ts) = max_ts {
             store.set_since(&ch_str, ts)?;
         }
+        // First sight of this room (or first run after upgrade): what we just
+        // backfilled counts as read; only later arrivals are unread.
+        store.ensure_read_state(&ch_str, max_ts.unwrap_or(0))?;
         report.inserted.insert(ch_str, inserted);
     }
 

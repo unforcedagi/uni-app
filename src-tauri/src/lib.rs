@@ -1,8 +1,8 @@
 //! Shared Tauri conversation bridge. Signing and relay I/O remain in Rust.
 use serde::Serialize;
 use std::path::PathBuf;
-use tauri::Manager;
-use uni_core::{send_message, sync_once, ConversationMessage, Store};
+use tauri::{Emitter, Manager};
+use uni_core::{send_message, sync_once, ConversationMessage, LiveConfig, LiveEvent, Store};
 
 // Serialize foreground refresh, send and forget so SQLite and relay
 // watermarks cannot race.
@@ -25,6 +25,8 @@ struct MessageView {
     mentions: Vec<MemberView>,
     reply_count: i64,
     last_reply_ts: Option<i64>,
+    /// Body is the author's latest kind-40003 edit.
+    edited: bool,
 }
 
 #[derive(Serialize)]
@@ -41,7 +43,10 @@ struct RoomView {
     name: String,
     last_message: Option<String>,
     last_ts: Option<i64>,
+    /// An unread message mentions us.
     mentions: bool,
+    /// Messages from others since the room was last viewed.
+    unread: i64,
 }
 
 #[derive(Serialize)]
@@ -107,6 +112,7 @@ fn view_with_summary(
         mentions_me: message.item.mentions_me,
         root: message.root,
         parent: message.parent,
+        edited: message.edited,
     })
 }
 
@@ -144,11 +150,20 @@ fn get_members(app: tauri::AppHandle, channel: String) -> Result<Vec<MemberView>
         .collect()
 }
 
+/// Our pubkey if the key is already loaded (no keystore round-trip).
+fn my_pubkey() -> Option<String> {
+    uni_core::has_device_keys()
+        .then(|| uni_core::load_keys(false).ok())
+        .flatten()
+        .map(|(k, _)| k.public_key().to_hex())
+}
+
 #[tauri::command]
 fn get_rooms(app: tauri::AppHandle) -> Result<Vec<RoomView>, String> {
     let store = Store::open(db_path(&app)?).map_err(|e| e.to_string())?;
+    let me = my_pubkey();
     store
-        .rooms()
+        .rooms_for(me.as_deref())
         .map_err(|e| e.to_string())?
         .into_iter()
         .map(|r| {
@@ -160,6 +175,7 @@ fn get_rooms(app: tauri::AppHandle) -> Result<Vec<RoomView>, String> {
                 last_message: r.last_message,
                 last_ts: r.last_ts,
                 mentions: r.mentions,
+                unread: r.unread,
             })
         })
         .collect()
@@ -188,6 +204,160 @@ fn get_messages(
             .map(|t| view_with_summary(&store, t.message, t.reply_count, t.last_reply_ts))
             .collect(),
     }
+}
+
+/// The user is looking at `channel`: everything cached there is read.
+#[tauri::command]
+fn mark_read(app: tauri::AppHandle, channel: String) -> Result<(), String> {
+    let store = Store::open(db_path(&app)?).map_err(|e| e.to_string())?;
+    store.mark_read(&channel).map_err(|e| e.to_string())
+}
+
+/// Open a link from a message in the system browser. Only web and mail links;
+/// anything else (javascript:, file:, intent:) is refused.
+#[tauri::command]
+fn open_link(app: tauri::AppHandle, url: String) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    let lower = url.trim().to_ascii_lowercase();
+    if !(lower.starts_with("https://") || lower.starts_with("http://") || lower.starts_with("mailto:")) {
+        return Err("only http(s) and mailto links can be opened".into());
+    }
+    app.opener()
+        .open_url(url.trim(), None::<&str>)
+        .map_err(|e| e.to_string())
+}
+
+// ── Live updates ─────────────────────────────────────────────────────────
+//
+// One long-lived relay connection (uni_core::run_live) while the app is in
+// the foreground. SQLite's Connection is !Send, so the loop owns a dedicated
+// OS thread with its own current-thread runtime and its own Store handle
+// (WAL + busy_timeout let foreground commands read/write alongside it). Each
+// stored change is announced to the webview as a `uni://live` event; the UI
+// re-reads from SQLite, which stays the single source of truth.
+
+static LIVE: std::sync::Mutex<Option<uni_core::live::StopSender>> = std::sync::Mutex::new(None);
+
+#[derive(Clone, Serialize)]
+struct LivePayload {
+    /// `message`, `edit`, `delete`, `rooms`, `profiles`, `status`.
+    kind: &'static str,
+    channel: Option<String>,
+    /// Connection status text for `status` events.
+    status: Option<String>,
+    /// For `message`: the author, so the UI can skip marking own sends unread.
+    author: Option<String>,
+}
+
+fn live_payload(ev: &LiveEvent) -> Option<LivePayload> {
+    let p = |kind, channel: Option<String>, status: Option<String>, author| LivePayload {
+        kind,
+        channel,
+        status,
+        author,
+    };
+    Some(match ev {
+        LiveEvent::Message { item, new: true } => p(
+            "message",
+            Some(item.channel.clone()),
+            None,
+            Some(item.author.clone()),
+        ),
+        LiveEvent::Message { new: false, .. } => return None,
+        LiveEvent::Aux { channel, kind, .. } => p(
+            if *kind == 40003 { "edit" } else { "delete" },
+            Some(channel.to_string()),
+            None,
+            None,
+        ),
+        LiveEvent::ChannelAdded { channel } | LiveEvent::ChannelRemoved { channel } => {
+            p("rooms", Some(channel.to_string()), None, None)
+        }
+        LiveEvent::Profiles { .. } => p("profiles", None, None, None),
+        LiveEvent::Connected { .. } => p("status", None, Some("Live".into()), None),
+        LiveEvent::Eose { channel } => p("rooms", Some(channel.to_string()), None, None),
+        LiveEvent::Disconnected { retry_in, .. } => p(
+            "status",
+            None,
+            Some(format!("Reconnecting in {}s…", retry_in.as_secs().max(1))),
+            None,
+        ),
+        LiveEvent::Stopped { reason } => p("status", None, Some(format!("Live stopped: {reason}")), None),
+        LiveEvent::ChannelClosed { channel, message } => p(
+            "status",
+            Some(channel.to_string()),
+            Some(format!("Room {} closed: {message}", &channel.to_string()[..8])),
+            None,
+        ),
+    })
+}
+
+/// Start the live subscription (idempotent: a running loop is left alone).
+#[tauri::command]
+async fn live_start(app: tauri::AppHandle) -> Result<bool, String> {
+    secure_store::ensure_loaded(&app).await?;
+    let path = db_path(&app)?;
+    let url = relay_url(&app);
+    let (keys, _) = uni_core::load_keys(false).map_err(|e| e.to_string())?;
+    let mut slot = LIVE.lock().map_err(|e| e.to_string())?;
+    if slot.as_ref().is_some_and(|s| !s.is_closed()) {
+        return Ok(false);
+    }
+    let (stop_tx, stop_rx) = tokio::sync::watch::channel(false);
+    *slot = Some(stop_tx);
+    drop(slot);
+    std::thread::Builder::new()
+        .name("uni-live".into())
+        .spawn(move || {
+            let rt = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+                Ok(rt) => rt,
+                Err(e) => {
+                    tracing::error!("live runtime: {e}");
+                    return;
+                }
+            };
+            rt.block_on(async move {
+                let store = match Store::open(&path) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        let _ = app.emit("uni://live", LivePayload {
+                            kind: "status",
+                            channel: None,
+                            status: Some(format!("Live unavailable: {e}")),
+                            author: None,
+                        });
+                        return;
+                    }
+                };
+                let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+                let forward_app = app.clone();
+                let forward = async move {
+                    while let Some(ev) = rx.recv().await {
+                        if let Some(payload) = live_payload(&ev) {
+                            let _ = forward_app.emit("uni://live", payload);
+                        }
+                    }
+                };
+                let runner = uni_core::run_live(LiveConfig::new(url), &keys, None, &store, tx, stop_rx);
+                let (result, _) = tokio::join!(runner, forward);
+                if let Err(e) = result {
+                    tracing::warn!("live loop ended: {e}");
+                }
+            });
+            // The stop receiver is dropped with the loop, so live_start can
+            // tell a finished loop (is_closed) from a running one.
+        })
+        .map_err(|e| e.to_string())?;
+    Ok(true)
+}
+
+/// Stop the live subscription (app backgrounded). Safe to call when stopped.
+#[tauri::command]
+fn live_stop() -> Result<(), String> {
+    if let Some(tx) = LIVE.lock().map_err(|e| e.to_string())?.take() {
+        let _ = tx.send(true);
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -225,6 +395,7 @@ async fn identity_status(app: tauri::AppHandle) -> Result<IdentityStatus, String
 #[tauri::command]
 async fn identity_forget(app: tauri::AppHandle) -> Result<(), String> {
     let _gate = IO_GATE.lock().await;
+    let _ = live_stop();
     secure_store::forget(&app).await?;
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     for f in ["uni.db", "uni.db-wal", "uni.db-shm", "relay-url"] {
@@ -372,6 +543,7 @@ pub fn run() {
     uni_core::init_crypto();
     tauri::Builder::default()
         .plugin(secure_store::init())
+        .plugin(tauri_plugin_opener::init())
         .setup(|_app| {
             #[cfg(mobile)]
             mobile::setup(_app);
@@ -388,7 +560,11 @@ pub fn run() {
             pairing_confirm,
             pairing_cancel,
             refresh,
-            post_message
+            post_message,
+            mark_read,
+            open_link,
+            live_start,
+            live_stop
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
