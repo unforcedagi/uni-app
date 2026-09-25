@@ -22,7 +22,10 @@ export function useRelayOrigin(): string | null {
 
 /** Message body minus the attachment lines rendered by <Attachments>. */
 export function attachmentBody(body: string, media: MediaRef[] | undefined, relayOrigin: string | null): string {
-  return stripAttachmentLines(body, collectAttachments(body, media ?? [], relayOrigin));
+  const renderable = collectAttachments(body, media ?? [], relayOrigin).filter((m) =>
+    !!relayMediaSha(m.url, relayOrigin) || (m.url.startsWith("https://") && attachmentKind(m) === "image"),
+  );
+  return stripAttachmentLines(body, renderable);
 }
 
 // ── Authenticated blob cache ─────────────────────────────────────────────
@@ -69,14 +72,15 @@ function useVisible<T extends Element>(): [React.RefObject<T | null>, boolean] {
   return [ref, seen];
 }
 
-function useRelayBlob(m: MediaRef, enabled: boolean): { src: string | null; error: string | null } {
+function useRelayBlob(m: MediaRef, enabled: boolean, retry = 0): { src: string | null; error: string | null } {
   const [state, setState] = useState<{ src: string | null; error: string | null }>({ src: null, error: null });
   useEffect(() => {
     if (!enabled) return;
     let live = true;
+    setState({ src: null, error: null });
     relayBlob(m).then((src) => live && setState({ src, error: null }), (e) => live && setState({ src: null, error: String(e) }));
     return () => { live = false; };
-  }, [m.url, m.sha256, enabled]);
+  }, [m.url, m.sha256, enabled, retry]);
   return state;
 }
 
@@ -100,12 +104,13 @@ function RelayImage({ m, onOpen }: { m: MediaRef; onOpen: Open }) {
 
 function RelayPlayer({ m }: { m: MediaRef }) {
   const [go, setGo] = useState(false);
-  const { src, error } = useRelayBlob(m, go);
+  const [retry, setRetry] = useState(0);
+  const { src, error } = useRelayBlob(m, go, retry);
   const kind = attachmentKind(m);
   if (src) return kind === "video"
     ? <video className="attachment-video" src={src} controls playsInline autoPlay style={boxStyle(m.dim)} />
     : <audio className="attachment-audio" src={src} controls autoPlay />;
-  return <button className="attachment-file" onClick={() => setGo(true)} disabled={go && !error}>
+  return <button className="attachment-file" onClick={() => { if (go) setRetry((n) => n + 1); else setGo(true); }} disabled={go && !error}>
     <span aria-hidden="true">{kind === "video" ? "▶" : "♪"}</span>
     <span className="attachment-name">{displayName(m)}</span>
     <small>{error ? "⚠ Failed — tap to retry" : go ? "Loading…" : [formatSize(m.size), kind === "video" ? "Play video" : "Play audio"].filter(Boolean).join(" · ")}</small>
