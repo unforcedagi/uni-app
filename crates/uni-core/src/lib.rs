@@ -1,8 +1,9 @@
 #![deny(unsafe_code)]
-//! `uni-core` — the Uni app's protocol core (Phase 1: Buzz read path).
+//! `uni-core` — the Uni app's protocol core: Buzz chat and the Parachute journal.
 //!
 //! Modules:
-//! - [`identity`]: load the Nostr key from an env var or the macOS keyring (never logs it);
+//! - [`identity`]: load the Nostr key from an env var, the host app, or the OS keyring
+//!   (never logs it);
 //!   `init_keyring_key` creates a persistent app key and returns only the pubkey.
 //! - [`store`]: local SQLite store with the unified `items` table (spec §5), a
 //!   kind-0 `profiles` cache and an FTS5 index over `items.body`.
@@ -16,6 +17,8 @@
 //! - [`live`]: optional long-lived loop on top: open subs after EOSE, membership
 //!   notifications, reconnect with [`backoff`] and re-AUTH.
 //! - [`media`]: NIP-92 `imeta` attachments and Blossom-authenticated media reads.
+//! - [`parachute`]: NIP-98-signed MCP client for the Parachute hub (journal notes).
+//! - [`journal`]: on-device outbox that sends journal entries to the vault.
 
 pub mod backoff;
 pub mod buzz;
