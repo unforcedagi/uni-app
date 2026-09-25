@@ -132,10 +132,11 @@ function RelayFile({ m }: { m: MediaRef }) {
 }
 
 function LinkImage({ url, onOpen }: { url: string; onOpen: Open }) {
+  const [ref, visible] = useVisible<HTMLButtonElement>();
   const [failed, setFailed] = useState(false);
   if (failed) return null;
-  return <button className="attachment-image" onClick={() => onOpen(url, url)} aria-label={`Open image ${url}`}>
-    <img src={url} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => setFailed(true)} />
+  return <button ref={ref} className="attachment-image" onClick={() => onOpen(url, url)} aria-label={`Open image ${url}`}>
+    {visible && <img src={url} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => setFailed(true)} />}
   </button>;
 }
 
