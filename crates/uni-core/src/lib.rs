@@ -14,12 +14,14 @@
 //!   `nostrpair://` link (protocol crypto from `buzz_core::pairing`).
 //! - [`live`]: optional long-lived loop on top: open subs after EOSE, membership
 //!   notifications, reconnect with [`backoff`] and re-AUTH.
+//! - [`media`]: NIP-92 `imeta` attachments and Blossom-authenticated media reads.
 
 pub mod backoff;
 pub mod buzz;
 pub mod compose;
 pub mod identity;
 pub mod live;
+pub mod media;
 pub mod pairing;
 pub mod store;
 pub mod sync;
@@ -32,6 +34,7 @@ pub use identity::{
     load_keys, set_device_keys, store_keyring_nsec, KeyInit, KeySource,
 };
 pub use live::{run_live, LiveConfig, LiveEvent};
+pub use media::{fetch_media, is_relay_media_url, parse_imeta, MediaRef};
 pub use store::{
     ConversationMessage, Item, Member, Profile, Reaction, Room, Store, TimelineMessage,
 };
@@ -61,6 +64,9 @@ pub enum Error {
     /// Bad input.
     #[error("invalid: {0}")]
     Invalid(String),
+    /// Media download / verification failed.
+    #[error("media: {0}")]
+    Media(String),
 }
 
 /// Result alias.
