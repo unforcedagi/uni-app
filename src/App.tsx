@@ -3,7 +3,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import "./App.css";
 import { markdownToText, parseMarkdown, type Block, type Inline } from "./markdown";
-import { findUniMember, findUniRoom, handoffText, type UniAction } from "./uniActions";
+import { findUniMember, findUniRoom, handoffText, searchHandoffText, type UniAction } from "./uniActions";
+import Search from "./Search";
 import { activeQuery, filterMembers, insertMention, memberLabels, mentionSegments, pruneBindings, resolveRecipients, type Bindings, type Member } from "./mentions";
 
 type Room = { id: string; name: string; last_message: string | null; last_ts: number | null; mentions: boolean; unread: number };
@@ -177,6 +178,10 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const [reactFor, setReactFor] = useState<string | null>(null);
   // Messages handed to Uni as notes this session (a local receipt).
   const [kept, setKept] = useState<Set<string>>(new Set());
+  const [searchOpen, setSearchOpen] = useState(false);
+  // Search result to scroll to and flash once its room/thread has loaded.
+  const [focusRef, setFocusRef] = useState<string | null>(null);
+  const focusTries = useRef(0);
   const preserveScroll = useRef<number | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const channelRef = useRef<string | null>(null);
@@ -276,8 +281,51 @@ function Conversations({ onForget }: { onForget: () => void }) {
       preserveScroll.current = null;
       return;
     }
-    scrollEnd.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    // A search jump positions the list itself (below).
+    if (!focusRef) scrollEnd.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages.length, channel, root]);
+
+  // Jump to a search hit: once its room/thread is rendered, center and flash
+  // it. If it is older than the loaded window, widen the window once.
+  useEffect(() => {
+    if (!focusRef) return;
+    // Wait until the list shows the target room (and thread), not the last one.
+    if (!messages.length || messages[0].channel !== channel) return;
+    if (root && !messages.some((m) => m.ref === root || m.root === root)) return;
+    const el = listRef.current?.querySelector<HTMLElement>(`[data-ref="${CSS.escape(focusRef)}"]`);
+    if (el) {
+      el.scrollIntoView({ block: "center" });
+      const t = setTimeout(() => setFocusRef(null), 2500);
+      return () => clearTimeout(t);
+    }
+    if (focusTries.current++ === 0 && !root) { setLimit((l) => Math.max(l, 3000)); return; }
+    setFocusRef(null);
+    setStatus("That message isn't in the loaded history of this room");
+  }, [focusRef, messages, channel, root]);
+
+  function openHit(t: { channel: string; root: string | null; focus: string }) {
+    setSearchOpen(false);
+    focusTries.current = 0;
+    navigate(t.channel, t.root);
+    setFocusRef(t.focus);
+  }
+
+  // Notes search runs on Uni's side (the app holds no vault token).
+  async function askUniSearch(query: string): Promise<boolean> {
+    setError(null);
+    const uniRoom = findUniRoom(rooms);
+    if (!uniRoom) { setError("No room named Uni is joined. Refresh, or join #Uni in Buzz."); return false; }
+    try {
+      const roster = await invoke<Member[]>("get_members", { channel: uniRoom.id });
+      const uni = findUniMember(roster);
+      if (!uni) { setError("Uni isn't in the Uni room's member list yet. Refresh to load it."); return false; }
+      const label = memberLabels(roster).get(uni.pubkey) ?? uni.name;
+      await invoke<Message>("post_message", { channel: uniRoom.id, body: searchHandoffText(query, label), replyTo: null, recipients: [uni.pubkey] });
+      setStatus("Asked Uni · results will arrive in #Uni");
+      await loadRooms();
+      return true;
+    } catch (e) { setError(`Couldn't reach Uni: ${e}`); return false; }
+  }
 
   async function loadOlder() {
     if (!channel || older === "loading") return;
@@ -478,7 +526,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
 
   const renderMessage = (m: Message, inThread: boolean, prev?: Message) => {
     const grouped = !!prev && prev.author === m.author && m.ts - prev.ts < 300 && !(inThread && prev.ref === root);
-    return <article key={m.ref} className={`message ${grouped ? "grouped" : ""} ${m.author === identity ? "mine" : ""} ${m.mentions_me ? "highlight" : ""} ${inThread && m.ref === root ? "thread-root" : ""}`}
+    return <article key={m.ref} data-ref={m.ref} className={`message ${m.ref === focusRef ? "search-focus" : ""} ${grouped ? "grouped" : ""} ${m.author === identity ? "mine" : ""} ${m.mentions_me ? "highlight" : ""} ${inThread && m.ref === root ? "thread-root" : ""}`}
       onContextMenu={(e) => { e.preventDefault(); setReactFor(reactFor === m.ref ? null : m.ref); }}>
       {grouped ? <time className="gutter-time">{clock(m.ts)}</time> : <span className="message-avatar" style={{ background: `hsl(${hue(m.author)} 45% 42%)` }} aria-hidden="true">{m.author_name[0]?.toUpperCase() ?? "?"}</span>}
       <div className="message-content">{!grouped && <div className="message-meta"><strong>{m.author_name}</strong><time>{clock(m.ts)}</time></div>}<Body body={m.body} mentions={m.mentions} me={identity} edited={m.edited} />
@@ -508,8 +556,11 @@ function Conversations({ onForget }: { onForget: () => void }) {
 
   return <main className={`shell ${channel ? "in-room" : ""}`}>
     <aside className="rooms" aria-label="Conversations">
-      <header className="rooms-header"><div><span className="eyebrow">BUZZ · PERSONAL</span><h1>Talk to Uni</h1></div><div><button className="icon-button" onClick={() => void refresh()} disabled={busy} aria-label="Refresh conversations">↻</button><button className="icon-button" onClick={() => { setSettingsOpen(!settingsOpen); setForgetArmed(false); }} aria-label="Settings" aria-expanded={settingsOpen}>⚙</button></div></header>
+      <header className="rooms-header"><div><span className="eyebrow">BUZZ · PERSONAL</span><h1>Talk to Uni</h1></div><div><button className="icon-button" onClick={() => setSearchOpen(true)} aria-label="Search messages and notes">⌕</button><button className="icon-button" onClick={() => void refresh()} disabled={busy} aria-label="Refresh conversations">↻</button><button className="icon-button" onClick={() => { setSettingsOpen(!settingsOpen); setForgetArmed(false); }} aria-label="Settings" aria-expanded={settingsOpen}>⚙</button></div></header>
       {settingsOpen && <div className="settings"><button className="pairing-secondary" onClick={() => void forget()}>{forgetArmed ? "Tap again to forget — you'll need to re-pair" : "Forget this device key"}</button>{forgetArmed && <button className="pairing-secondary" onClick={() => setForgetArmed(false)}>Keep key</button>}</div>}
+      {searchOpen && <Search onOpen={openHit} onAskUni={askUniSearch} onClose={() => setSearchOpen(false)} />}
+      {searchOpen && error && <p className="error search-error" role="alert">{error}</p>}
+      <div className="rooms-body" hidden={searchOpen}>
       <p className="connection" role="status">{status}{live ? <span className={`live ${live === "Live" ? "on" : ""}`}> · {live}</span> : null}</p>
       {identity && <p className="identity" title={identity}>Signed in as {identity.slice(0, 12)}…</p>}
       {!ready && <p className="empty">Loading…</p>}
@@ -518,6 +569,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
         <span className="avatar">{room.name[0]?.toUpperCase() ?? "#"}</span><span className="room-text"><strong className={room.unread ? "unread" : ""}>{room.name}</strong><small>{room.last_message ? markdownToText(room.last_message) : "No messages yet"}</small></span>
         <span className="room-side"><time>{room.last_ts ? time(room.last_ts) : ""}</time>{room.unread > 0 && <span className={`unread-badge ${room.mentions ? "mention" : ""}`} aria-label={`${room.unread} unread${room.mentions ? ", mentions you" : ""}`}>{room.mentions ? "@ " : ""}{room.unread > 99 ? "99+" : room.unread}</span>}</span>
       </button>)}</nav>
+      </div>
     </aside>
     <section className="conversation" aria-label={currentRoom ? `Conversation: ${currentRoom.name}` : "Conversation"}>
       {currentRoom ? <>

@@ -77,6 +77,23 @@ pub struct Reaction {
     pub mine: Option<String>,
 }
 
+/// One local search hit: the visible message, its room label, and a short
+/// excerpt with matched terms wrapped in [`SNIPPET_START`] / [`SNIPPET_END`].
+#[derive(Debug, Clone)]
+pub struct SearchHit {
+    pub message: ConversationMessage,
+    /// Cached channel name, if known.
+    pub channel_name: Option<String>,
+    /// Excerpt of the visible body (edited text when edited). Plain text plus
+    /// marker characters only — never HTML; the UI turns markers into `<mark>`.
+    pub snippet: String,
+}
+
+/// Start-of-match marker in [`SearchHit::snippet`] (Unicode private use).
+pub const SNIPPET_START: char = '\u{E000}';
+/// End-of-match marker in [`SearchHit::snippet`] (Unicode private use).
+pub const SNIPPET_END: char = '\u{E001}';
+
 /// Joined room with its most recent cached message.
 #[derive(Debug, Clone)]
 pub struct Room {
@@ -229,7 +246,8 @@ CREATE VIEW visible_items AS
 SELECT i.source, i.ref, i.channel, i.author, i.ts,
        COALESCE(e.content, i.body) AS body,
        i.mentions_me,
-       (e.content IS NOT NULL) AS edited
+       (e.content IS NOT NULL) AS edited,
+       e.id AS edit_id
 FROM items i
 LEFT JOIN aux_events e ON e.id = (
     SELECT x.id FROM aux_events x
@@ -266,6 +284,17 @@ CREATE TRIGGER IF NOT EXISTS items_au AFTER UPDATE ON items BEGIN
 END;
 "#;
 
+/// FTS5 index over kind-40003 edit text, so a message is found by what it
+/// says now (the `items_fts` row still holds the original). A plain (not
+/// external-content) table keyed by the `aux_events` rowid: only edits are
+/// indexed, and aux rows are never updated or deleted.
+const EDITS_FTS_SCHEMA: &str = r#"
+CREATE VIRTUAL TABLE IF NOT EXISTS edits_fts USING fts5(body, tokenize='unicode61');
+CREATE TRIGGER IF NOT EXISTS aux_edit_ai AFTER INSERT ON aux_events WHEN new.kind = 40003 BEGIN
+    INSERT INTO edits_fts(rowid, body) VALUES (new.rowid, new.content);
+END;
+"#;
+
 impl Store {
     /// Open (or create) the database at `path` and apply the schema.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
@@ -296,6 +325,19 @@ impl Store {
         conn.execute_batch(FTS_SCHEMA)?;
         if !had_fts {
             conn.execute("INSERT INTO items_fts(items_fts) VALUES ('rebuild')", [])?;
+        }
+        let had_edits_fts: bool = conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='edits_fts'",
+            [],
+            |r| r.get::<_, i64>(0),
+        )? > 0;
+        conn.execute_batch(EDITS_FTS_SCHEMA)?;
+        if !had_edits_fts {
+            // Upgrade: index edits that arrived before this table existed.
+            conn.execute(
+                "INSERT INTO edits_fts(rowid, body) SELECT rowid, content FROM aux_events WHERE kind = 40003",
+                [],
+            )?;
         }
         conn.execute_batch(VIEW_SCHEMA)?;
         Ok(Self { conn })
@@ -809,6 +851,54 @@ impl Store {
     }
 }
 
+impl Store {
+    /// Search what messages say *now*: a hit is a visible Buzz message (not
+    /// deleted) whose current body matches — the original text for unedited
+    /// messages, the latest authorized edit for edited ones (an edited
+    /// message is not found by words it no longer contains). Best match first
+    /// (bm25), then newest. `query` is literal (see [`fts_literal_query`]).
+    pub fn search_messages(&self, query: &str, limit: usize) -> Result<Vec<SearchHit>> {
+        let q = fts_literal_query(query);
+        let limit = limit.clamp(1, 500) as i64;
+        if q.is_empty() {
+            return Ok(Vec::new());
+        }
+        // snippet(): column 0, markers, ellipsis, ~16 tokens. Both arms select
+        // the same shape; bm25 from different indexes is close enough to
+        // interleave for a personal cache.
+        let sql = format!(
+            "SELECT * FROM (
+               SELECT v.source,v.ref,v.channel,v.author,v.ts,v.body,v.mentions_me,r.root,r.parent,v.edited,
+                      c.name, snippet(items_fts,0,'{s}','{e}','…',16) AS snip, bm25(items_fts) AS rank
+               FROM items_fts f JOIN items i ON i.rowid=f.rowid
+               JOIN visible_items v ON v.ref=i.ref AND v.edited=0
+               LEFT JOIN message_refs r ON r.ref=v.ref LEFT JOIN channels c ON c.id=v.channel
+               WHERE items_fts MATCH ?1 AND v.source='buzz'
+               UNION ALL
+               SELECT v.source,v.ref,v.channel,v.author,v.ts,v.body,v.mentions_me,r.root,r.parent,v.edited,
+                      c.name, snippet(edits_fts,0,'{s}','{e}','…',16) AS snip, bm25(edits_fts) AS rank
+               FROM edits_fts f JOIN aux_events a ON a.rowid=f.rowid
+               JOIN visible_items v ON v.edit_id=a.id
+               LEFT JOIN message_refs r ON r.ref=v.ref LEFT JOIN channels c ON c.id=v.channel
+               WHERE edits_fts MATCH ?1 AND v.source='buzz'
+             ) ORDER BY rank, ts DESC, ref DESC LIMIT ?2",
+            s = SNIPPET_START,
+            e = SNIPPET_END
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt
+            .query_map(params![q, limit], |r| {
+                Ok(SearchHit {
+                    message: row_to_message(r)?,
+                    channel_name: r.get(10)?,
+                    snippet: r.get(11)?,
+                })
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+}
+
 fn row_to_message(r: &rusqlite::Row<'_>) -> rusqlite::Result<ConversationMessage> {
     Ok(ConversationMessage {
         item: row_to_item(r)?,
@@ -1162,6 +1252,73 @@ mod tests {
         // Deleting the newest edit falls back to the previous one.
         s.upsert_aux("de2", KIND_DELETION, "e2", "aa", 50, "").unwrap();
         assert_eq!(s.room_timeline("c1", 50).unwrap()[0].message.item.body, "first edit");
+    }
+
+    #[test]
+    fn search_messages_finds_current_text_only() {
+        let s = Store::open_in_memory().unwrap();
+        s.upsert_channel("c1", Some("parachute"), None, false, 1).unwrap();
+        let mk = |r: &str, body: &str, ts: i64| Item { body: body.into(), ..item(r, "c1", ts) };
+        s.upsert_item(&mk("m1", "relay wakeups need a push proxy", 10)).unwrap();
+        s.upsert_item(&mk("m2", "unrelated lunch plans", 11)).unwrap();
+        s.upsert_item(&mk("m3", "deleted relay secret", 12)).unwrap();
+        s.upsert_item(&mk("m4", "thread reply about relay", 13)).unwrap();
+        s.set_message_refs("m4", Some("m1"), Some("m1")).unwrap();
+        s.upsert_item(&Item { channel: "c2".into(), ..mk("m5", "relay in an unnamed room", 14) }).unwrap();
+
+        // Edit m2 by its author; a hijack edit by someone else must not count.
+        s.upsert_aux("e1", KIND_EDIT, "m2", "aa", 20, "now about the fcm gateway").unwrap();
+        s.upsert_aux("ex", KIND_EDIT, "m1", "zz", 21, "hijacked zebra").unwrap();
+        s.upsert_aux("d3", KIND_DELETION, "m3", "aa", 22, "").unwrap();
+
+        let refs = |q: &str| s.search_messages(q, 20).unwrap().into_iter().map(|h| h.message.item.r#ref).collect::<Vec<_>>();
+        // Edited message: found by new text, not by the old text.
+        assert_eq!(refs("gateway"), vec!["m2"]);
+        assert!(refs("lunch").is_empty());
+        // Deleted message is never found; foreign edits are not searchable.
+        assert!(!refs("relay").contains(&"m3".to_string()));
+        assert!(refs("secret").is_empty());
+        assert!(refs("zebra").is_empty());
+        let mut r = refs("relay");
+        r.sort();
+        assert_eq!(r, vec!["m1", "m4", "m5"]);
+        // Literal query handling and blank query.
+        assert!(refs("   ").is_empty());
+        assert!(refs("\"relay\" OR lunch").is_empty());
+
+        let hits = s.search_messages("gateway", 5).unwrap();
+        let h = &hits[0];
+        assert!(h.message.edited);
+        assert_eq!(h.message.item.body, "now about the fcm gateway");
+        assert_eq!(h.channel_name.as_deref(), Some("parachute"));
+        assert_eq!(h.snippet, format!("now about the fcm {SNIPPET_START}gateway{SNIPPET_END}"));
+        // Thread position and unknown channel names come through.
+        let reply = s.search_messages("thread", 5).unwrap();
+        assert_eq!(reply[0].message.root.as_deref(), Some("m1"));
+        let unnamed = s.search_messages("unnamed", 5).unwrap();
+        assert_eq!(unnamed[0].channel_name, None);
+        // Prefix match gets the whole token marked.
+        let pre = s.search_messages("wake", 5).unwrap();
+        assert!(pre[0].snippet.contains(&format!("{SNIPPET_START}wakeups{SNIPPET_END}")), "{}", pre[0].snippet);
+
+        // Deleting the edit falls back to the original text, which is searchable again.
+        s.upsert_aux("de1", KIND_DELETION, "e1", "aa", 30, "").unwrap();
+        assert_eq!(refs("lunch"), vec!["m2"]);
+        assert!(refs("gateway").is_empty());
+    }
+
+    #[test]
+    fn edits_fts_backfills_on_upgrade() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(SCHEMA).unwrap();
+        conn.execute_batch(
+            "INSERT INTO items (source, ref, channel, author, ts, body) VALUES ('buzz','m','c','a',1,'before');
+             INSERT INTO aux_events (id, kind, target, author, ts, content) VALUES ('e',40003,'m','a',2,'after words');",
+        )
+        .unwrap();
+        let s = Store::init(conn).unwrap();
+        assert_eq!(s.search_messages("after", 5).unwrap().len(), 1);
+        assert!(s.search_messages("before", 5).unwrap().is_empty());
     }
 
     #[test]
