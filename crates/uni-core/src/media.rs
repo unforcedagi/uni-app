@@ -82,7 +82,9 @@ where
             match key {
                 "url" => m.url = val.trim().to_string(),
                 "m" => m.mime = v().map(|s| s.to_ascii_lowercase()),
-                "x" => m.sha256 = Some(val.trim().to_ascii_lowercase()).filter(|s| is_sha256_hex(s)),
+                "x" => {
+                    m.sha256 = Some(val.trim().to_ascii_lowercase()).filter(|s| is_sha256_hex(s))
+                }
                 "size" => m.size = val.trim().parse::<i64>().ok().filter(|n| *n >= 0),
                 "dim" => m.dim = v().filter(|d| parse_dim(d).is_some()),
                 "blurhash" => m.blurhash = v(),
@@ -113,7 +115,8 @@ pub fn parse_dim(dim: &str) -> Option<(u32, u32)> {
 
 /// The relay's HTTP origin for a `ws(s)://` relay URL.
 fn relay_http_origin(relay_url: &str) -> Result<url::Url> {
-    let mut u = url::Url::parse(relay_url).map_err(|e| Error::Invalid(format!("relay URL: {e}")))?;
+    let mut u =
+        url::Url::parse(relay_url).map_err(|e| Error::Invalid(format!("relay URL: {e}")))?;
     let scheme = match u.scheme() {
         "wss" | "https" => "https",
         "ws" | "http" => "http",
@@ -163,10 +166,15 @@ pub fn media_sha_from_url(relay_url: &str, url: &str) -> Result<String> {
         None => (seg, None),
     };
     let ext_ok = ext.is_none_or(|e| {
-        !e.is_empty() && e.len() <= 8 && e.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+        !e.is_empty()
+            && e.len() <= 8
+            && e.bytes()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
     });
     if !is_sha256_hex(hash) || !ext_ok {
-        return Err(Error::Invalid("media path must be sha256 or sha256.ext".into()));
+        return Err(Error::Invalid(
+            "media path must be sha256 or sha256.ext".into(),
+        ));
     }
     Ok(hash.to_string())
 }
@@ -176,15 +184,24 @@ pub fn media_sha_from_url(relay_url: &str, url: &str) -> Result<String> {
 pub fn sign_blossom_get(keys: &Keys, relay_url: &str) -> Result<String> {
     let server = buzz_core::tenant::relay_url_authority(relay_url);
     if server.is_empty() {
-        return Err(Error::Invalid("cannot derive server authority from relay URL".into()));
+        return Err(Error::Invalid(
+            "cannot derive server authority from relay URL".into(),
+        ));
     }
     let exp = (Timestamp::now().as_secs() + MEDIA_GET_AUTH_EXPIRY_SECS).to_string();
     let tag = |parts: [&str; 2]| Tag::parse(parts).map_err(|e| Error::Invalid(e.to_string()));
     let event = EventBuilder::new(Kind::from(24242), "Get media")
-        .tags([tag(["t", "get"])?, tag(["expiration", &exp])?, tag(["server", &server])?])
+        .tags([
+            tag(["t", "get"])?,
+            tag(["expiration", &exp])?,
+            tag(["server", &server])?,
+        ])
         .sign_with_keys(keys)
         .map_err(|e| Error::Invalid(format!("signing failed: {e}")))?;
-    Ok(format!("Nostr {}", URL_SAFE_NO_PAD.encode(event.as_json().as_bytes())))
+    Ok(format!(
+        "Nostr {}",
+        URL_SAFE_NO_PAD.encode(event.as_json().as_bytes())
+    ))
 }
 
 /// Lowercase hex SHA-256.
@@ -247,7 +264,9 @@ pub async fn fetch_media(
     let sha = media_sha_from_url(relay_url, url)?;
     if let Some(x) = expected_sha.filter(|x| !x.is_empty()) {
         if !x.eq_ignore_ascii_case(&sha) {
-            return Err(Error::Media("imeta hash does not match the media URL".into()));
+            return Err(Error::Media(
+                "imeta hash does not match the media URL".into(),
+            ));
         }
     }
     if let Some(bytes) = read_cached(cache_dir, &sha) {
@@ -263,7 +282,9 @@ pub async fn fetch_media(
         .map_err(|e| Error::Media(format!("request failed: {e}")))?;
     let status = resp.status();
     if status.is_redirection() {
-        return Err(Error::Media(format!("relay redirected media request ({status}); refused")));
+        return Err(Error::Media(format!(
+            "relay redirected media request ({status}); refused"
+        )));
     }
     if !status.is_success() {
         return Err(Error::Media(format!("relay answered {status}")));
@@ -283,7 +304,9 @@ pub async fn fetch_media(
         bytes.extend_from_slice(&chunk);
     }
     if sha256_hex(&bytes) != sha {
-        return Err(Error::Media("downloaded file failed its integrity check".into()));
+        return Err(Error::Media(
+            "downloaded file failed its integrity check".into(),
+        ));
     }
     // Best effort: a cache write failure still returns the verified bytes.
     if std::fs::create_dir_all(cache_dir).is_ok() {
@@ -303,7 +326,9 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     fn tags(v: &[&[&str]]) -> Vec<Vec<String>> {
-        v.iter().map(|t| t.iter().map(|s| s.to_string()).collect()).collect()
+        v.iter()
+            .map(|t| t.iter().map(|s| s.to_string()).collect())
+            .collect()
     }
     fn parse(v: &[&[&str]]) -> Vec<MediaRef> {
         let t = tags(v);
@@ -316,14 +341,32 @@ mod tests {
         let url = format!("https://buzz.example/media/{H}.png");
         let m = parse(&[
             &["h", "x"],
-            &["imeta", &format!("url {url}"), "m image/png", &format!("x {H}"), "size 1234",
-              "dim 640x480", "blurhash LEHV6nWB2y", "alt a cat on a mat", "filename cat.png", "junk"],
+            &[
+                "imeta",
+                &format!("url {url}"),
+                "m image/png",
+                &format!("x {H}"),
+                "size 1234",
+                "dim 640x480",
+                "blurhash LEHV6nWB2y",
+                "alt a cat on a mat",
+                "filename cat.png",
+                "junk",
+            ],
         ]);
-        assert_eq!(m, vec![MediaRef {
-            url, mime: Some("image/png".into()), sha256: Some(H.into()), size: Some(1234),
-            dim: Some("640x480".into()), blurhash: Some("LEHV6nWB2y".into()),
-            alt: Some("a cat on a mat".into()), filename: Some("cat.png".into()),
-        }]);
+        assert_eq!(
+            m,
+            vec![MediaRef {
+                url,
+                mime: Some("image/png".into()),
+                sha256: Some(H.into()),
+                size: Some(1234),
+                dim: Some("640x480".into()),
+                blurhash: Some("LEHV6nWB2y".into()),
+                alt: Some("a cat on a mat".into()),
+                filename: Some("cat.png".into()),
+            }]
+        );
     }
 
     #[test]
@@ -341,16 +384,34 @@ mod tests {
         assert_eq!(m[0].sha256, None);
         assert_eq!(m[1].url, "https://a/2");
         let first = parse(&[&["imeta", "url https://a/3", "x nothex", "size -3", "dim big"]]);
-        assert_eq!((first[0].sha256.as_ref(), first[0].size, first[0].dim.as_ref()), (None, None, None));
-        let many: Vec<Vec<String>> = (0..30).map(|i| vec!["imeta".into(), format!("url https://a/{i}")]).collect();
-        assert_eq!(parse_imeta(many.iter().map(Vec::as_slice)).len(), MAX_IMETA_PER_MESSAGE);
+        assert_eq!(
+            (
+                first[0].sha256.as_ref(),
+                first[0].size,
+                first[0].dim.as_ref()
+            ),
+            (None, None, None)
+        );
+        let many: Vec<Vec<String>> = (0..30)
+            .map(|i| vec!["imeta".into(), format!("url https://a/{i}")])
+            .collect();
+        assert_eq!(
+            parse_imeta(many.iter().map(Vec::as_slice)).len(),
+            MAX_IMETA_PER_MESSAGE
+        );
     }
 
     #[test]
     fn media_urls_must_be_on_the_relay_origin() {
         let relay = "wss://buzz.example";
-        assert_eq!(media_sha_from_url(relay, &format!("https://buzz.example/media/{H}.jpg")).unwrap(), H);
-        assert_eq!(media_sha_from_url(relay, &format!("https://Buzz.Example:443/media/{H}")).unwrap(), H);
+        assert_eq!(
+            media_sha_from_url(relay, &format!("https://buzz.example/media/{H}.jpg")).unwrap(),
+            H
+        );
+        assert_eq!(
+            media_sha_from_url(relay, &format!("https://Buzz.Example:443/media/{H}")).unwrap(),
+            H
+        );
         for bad in [
             format!("https://evil.example/media/{H}.jpg"),
             format!("http://buzz.example/media/{H}.jpg"),
@@ -363,13 +424,16 @@ mod tests {
         ] {
             assert!(media_sha_from_url(relay, &bad).is_err(), "{bad}");
         }
-        assert!(media_sha_from_url("ws://127.0.0.1:9", &format!("http://127.0.0.1:9/media/{H}")).is_ok());
+        assert!(
+            media_sha_from_url("ws://127.0.0.1:9", &format!("http://127.0.0.1:9/media/{H}"))
+                .is_ok()
+        );
     }
 
     fn decode_auth(header: &str) -> nostr::Event {
         let b64 = header.strip_prefix("Nostr ").unwrap();
         let json = URL_SAFE_NO_PAD.decode(b64).unwrap();
-        let ev = <Event as nostr::util::JsonUtil>::from_json(std::str::from_utf8(&json).unwrap()).unwrap();
+        let ev = nostr::Event::from_json(std::str::from_utf8(&json).unwrap()).unwrap();
         ev.verify().unwrap();
         ev
     }
@@ -385,7 +449,9 @@ mod tests {
         assert!(t.iter().any(|t| t == &["t", "get"]));
         assert!(t.iter().any(|t| t == &["server", "relay.example"]));
         assert!(!t.iter().any(|t| t[0] == "x"));
-        let exp: u64 = t.iter().find(|t| t[0] == "expiration").unwrap()[1].parse().unwrap();
+        let exp: u64 = t.iter().find(|t| t[0] == "expiration").unwrap()[1]
+            .parse()
+            .unwrap();
         let now = Timestamp::now().as_secs();
         assert!(exp > now && exp <= now + MEDIA_GET_AUTH_EXPIRY_SECS);
     }
@@ -405,16 +471,22 @@ mod tests {
                 let mut chunk = [0u8; 1024];
                 while !buf.windows(4).any(|w| w == b"\r\n\r\n") {
                     let n = sock.read(&mut chunk).await.unwrap_or(0);
-                    if n == 0 { break; }
+                    if n == 0 {
+                        break;
+                    }
                     buf.extend_from_slice(&chunk[..n]);
                 }
                 let req = String::from_utf8_lossy(&buf).to_string();
                 let auth = req.lines().find_map(|l| {
                     let (k, v) = l.split_once(':')?;
-                    k.eq_ignore_ascii_case("authorization").then(|| v.trim().to_string())
+                    k.eq_ignore_ascii_case("authorization")
+                        .then(|| v.trim().to_string())
                 });
                 let _ = tx.send(auth);
-                let head = format!("HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len());
+                let head = format!(
+                    "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
                 let _ = sock.write_all(head.as_bytes()).await;
                 let _ = sock.write_all(&body).await;
                 let _ = sock.shutdown().await;
@@ -433,26 +505,36 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let keys = Keys::generate();
 
-        let got = fetch_media(&relay, &keys, &url, Some(&sha), dir.path()).await.unwrap();
+        let got = fetch_media(&relay, &keys, &url, Some(&sha), dir.path())
+            .await
+            .unwrap();
         assert_eq!(got, body);
         let ev = decode_auth(&seen.recv().await.unwrap().expect("Authorization header"));
         assert_eq!(ev.kind, Kind::from(24242));
         assert_eq!(ev.pubkey, keys.public_key());
         let t: Vec<Vec<String>> = ev.tags.iter().map(|t| t.as_slice().to_vec()).collect();
-        assert!(t.iter().any(|t| t == &["server", format!("127.0.0.1:{port}").as_str()]));
+        assert!(t
+            .iter()
+            .any(|t| t == &["server", format!("127.0.0.1:{port}").as_str()]));
         assert_eq!(std::fs::read(dir.path().join(&sha)).unwrap(), body);
 
         // Cache hit: no second request.
-        let again = fetch_media(&relay, &keys, &url, None, dir.path()).await.unwrap();
+        let again = fetch_media(&relay, &keys, &url, None, dir.path())
+            .await
+            .unwrap();
         assert_eq!(again, body);
         assert!(seen.try_recv().is_err());
 
         // `x` that disagrees with the URL is refused before any request.
         let other = "f".repeat(64);
-        assert!(fetch_media(&relay, &keys, &url, Some(&other), dir.path()).await.is_err());
+        assert!(fetch_media(&relay, &keys, &url, Some(&other), dir.path())
+            .await
+            .is_err());
         // Auth is never sent off-relay.
         let off = format!("http://localhost:{port}/media/{sha}.png");
-        assert!(fetch_media(&relay, &keys, &off, None, dir.path()).await.is_err());
+        assert!(fetch_media(&relay, &keys, &off, None, dir.path())
+            .await
+            .is_err());
         assert!(seen.try_recv().is_err());
     }
 
@@ -462,20 +544,40 @@ mod tests {
         let relay = format!("ws://127.0.0.1:{port}");
         let dir = tempfile::tempdir().unwrap();
         let keys = Keys::generate();
-        let err = fetch_media(&relay, &keys, &format!("http://127.0.0.1:{port}/media/{H}.jpg"), None, dir.path())
-            .await
-            .unwrap_err();
+        let err = fetch_media(
+            &relay,
+            &keys,
+            &format!("http://127.0.0.1:{port}/media/{H}.jpg"),
+            None,
+            dir.path(),
+        )
+        .await
+        .unwrap_err();
         assert!(err.to_string().contains("integrity"), "{err}");
         assert!(!dir.path().join(H).exists());
 
         let (port, _seen) = serve("401 Unauthorized", b"authentication failed".to_vec()).await;
-        let err = fetch_media(&format!("ws://127.0.0.1:{port}"), &keys,
-            &format!("http://127.0.0.1:{port}/media/{H}.jpg"), None, dir.path()).await.unwrap_err();
+        let err = fetch_media(
+            &format!("ws://127.0.0.1:{port}"),
+            &keys,
+            &format!("http://127.0.0.1:{port}/media/{H}.jpg"),
+            None,
+            dir.path(),
+        )
+        .await
+        .unwrap_err();
         assert!(err.to_string().contains("401"), "{err}");
 
         let (port, _seen) = serve("302 Found", Vec::new()).await;
-        let err = fetch_media(&format!("ws://127.0.0.1:{port}"), &keys,
-            &format!("http://127.0.0.1:{port}/media/{H}.jpg"), None, dir.path()).await.unwrap_err();
+        let err = fetch_media(
+            &format!("ws://127.0.0.1:{port}"),
+            &keys,
+            &format!("http://127.0.0.1:{port}/media/{H}.jpg"),
+            None,
+            dir.path(),
+        )
+        .await
+        .unwrap_err();
         assert!(err.to_string().contains("redirect"), "{err}");
     }
 }

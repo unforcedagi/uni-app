@@ -346,7 +346,9 @@ impl Store {
         content: &str,
     ) -> Result<bool> {
         if ![KIND_DELETION, KIND_DELETE_EVENT, KIND_EDIT, KIND_REACTION].contains(&kind) {
-            return Err(crate::Error::Invalid(format!("not an edit/delete kind: {kind}")));
+            return Err(crate::Error::Invalid(format!(
+                "not an edit/delete kind: {kind}"
+            )));
         }
         let n = self.conn.execute(
             "INSERT OR IGNORE INTO aux_events (id, kind, target, author, ts, content)
@@ -927,7 +929,9 @@ mod tests {
         s.upsert_aux("r4", 7, "m1", "me", 14, "+").unwrap();
         let r = s.reactions(&t, Some("me")).unwrap();
         assert_eq!(
-            r.iter().map(|x| (x.emoji.as_str(), x.count, x.mine.as_deref())).collect::<Vec<_>>(),
+            r.iter()
+                .map(|x| (x.emoji.as_str(), x.count, x.mine.as_deref()))
+                .collect::<Vec<_>>(),
             vec![("🔥", 2, Some("r3")), ("+", 1, Some("r4"))]
         );
         s.upsert_aux("d1", 5, "r3", "me", 15, "").unwrap();
@@ -1196,9 +1200,15 @@ mod tests {
         conn.execute_batch(SCHEMA).unwrap();
         conn.execute_batch("DROP TABLE message_media").unwrap();
         let s = Store::init(conn).unwrap();
-        let m = crate::media::MediaRef { url: "https://r/media/x".into(), ..Default::default() };
+        let m = crate::media::MediaRef {
+            url: "https://r/media/x".into(),
+            ..Default::default()
+        };
         s.set_message_media("e1", std::slice::from_ref(&m)).unwrap();
-        assert_eq!(s.message_media(&["e1".into(), "e2".into()]).unwrap(), vec![("e1".to_string(), m)]);
+        assert_eq!(
+            s.message_media(&["e1".into(), "e2".into()]).unwrap(),
+            vec![("e1".to_string(), m)]
+        );
         s.set_message_media("e1", &[]).unwrap();
         assert!(s.message_media(&["e1".into()]).unwrap().is_empty());
     }
@@ -1211,31 +1221,49 @@ mod tests {
         s.upsert_item(&item("m2", "c1", 11)).unwrap();
         s.upsert_item(&item("m3", "c1", 12)).unwrap();
         // Edit arrives before an older edit: newest ts wins regardless of order.
-        s.upsert_aux("e2", KIND_EDIT, "m1", "aa", 30, "second edit").unwrap();
-        s.upsert_aux("e1", KIND_EDIT, "m1", "aa", 20, "first edit").unwrap();
+        s.upsert_aux("e2", KIND_EDIT, "m1", "aa", 30, "second edit")
+            .unwrap();
+        s.upsert_aux("e1", KIND_EDIT, "m1", "aa", 20, "first edit")
+            .unwrap();
         // An edit by someone else is ignored.
-        s.upsert_aux("ex", KIND_EDIT, "m1", "zz", 40, "hijack").unwrap();
+        s.upsert_aux("ex", KIND_EDIT, "m1", "zz", 40, "hijack")
+            .unwrap();
         // Deletions: kind 9005 and kind 5 both hide the target.
-        s.upsert_aux("d2", KIND_DELETE_EVENT, "m2", "mod", 21, "").unwrap();
-        s.upsert_aux("d3", KIND_DELETION, "m3", "aa", 22, "").unwrap();
+        s.upsert_aux("d2", KIND_DELETE_EVENT, "m2", "mod", 21, "")
+            .unwrap();
+        s.upsert_aux("d3", KIND_DELETION, "m3", "aa", 22, "")
+            .unwrap();
         // Duplicate is a no-op; unknown kinds rejected.
-        assert!(!s.upsert_aux("d3", KIND_DELETION, "m3", "aa", 22, "").unwrap());
+        assert!(!s
+            .upsert_aux("d3", KIND_DELETION, "m3", "aa", 22, "")
+            .unwrap());
         assert!(s.upsert_aux("r", 1, "m1", "aa", 1, "x").is_err());
 
         let tl = s.room_timeline("c1", 50).unwrap();
         assert_eq!(tl.len(), 1);
         assert_eq!(tl[0].message.item.body, "second edit");
         assert!(tl[0].message.edited);
-        assert!(s.room_messages("c1", 50).unwrap().iter().all(|m| m.item.r#ref == "m1"));
+        assert!(s
+            .room_messages("c1", 50)
+            .unwrap()
+            .iter()
+            .all(|m| m.item.r#ref == "m1"));
         assert!(s.message("c1", "m2").unwrap().is_none());
         // Deleted text is not searchable; edited text is still found by original (FTS indexes items).
         assert!(s.search("m3", 10).unwrap().is_empty());
         // Room preview uses the edited body.
-        assert_eq!(s.rooms().unwrap()[0].last_message.as_deref(), Some("second edit"));
+        assert_eq!(
+            s.rooms().unwrap()[0].last_message.as_deref(),
+            Some("second edit")
+        );
 
         // Deleting the newest edit falls back to the previous one.
-        s.upsert_aux("de2", KIND_DELETION, "e2", "aa", 50, "").unwrap();
-        assert_eq!(s.room_timeline("c1", 50).unwrap()[0].message.item.body, "first edit");
+        s.upsert_aux("de2", KIND_DELETION, "e2", "aa", 50, "")
+            .unwrap();
+        assert_eq!(
+            s.room_timeline("c1", 50).unwrap()[0].message.item.body,
+            "first edit"
+        );
     }
 
     #[test]
@@ -1244,16 +1272,25 @@ mod tests {
         s.upsert_item(&item("root", "c1", 10)).unwrap();
         s.upsert_item(&item("r1", "c1", 11)).unwrap();
         s.upsert_item(&item("r2", "c1", 12)).unwrap();
-        s.set_message_refs("r1", Some("root"), Some("root")).unwrap();
-        s.set_message_refs("r2", Some("root"), Some("root")).unwrap();
-        s.upsert_aux("d", KIND_DELETE_EVENT, "r2", "aa", 13, "").unwrap();
+        s.set_message_refs("r1", Some("root"), Some("root"))
+            .unwrap();
+        s.set_message_refs("r2", Some("root"), Some("root"))
+            .unwrap();
+        s.upsert_aux("d", KIND_DELETE_EVENT, "r2", "aa", 13, "")
+            .unwrap();
         let tl = s.room_timeline("c1", 50).unwrap();
         assert_eq!(tl[0].reply_count, 1);
         assert_eq!(tl[0].last_reply_ts, Some(11));
         assert_eq!(s.thread_messages("c1", "root", 50).unwrap().len(), 2);
         // Deleted root: its replies resurface in the main timeline (nothing disappears silently).
-        s.upsert_aux("dr", KIND_DELETE_EVENT, "root", "aa", 14, "").unwrap();
-        let refs: Vec<_> = s.room_timeline("c1", 50).unwrap().into_iter().map(|t| t.message.item.r#ref).collect();
+        s.upsert_aux("dr", KIND_DELETE_EVENT, "root", "aa", 14, "")
+            .unwrap();
+        let refs: Vec<_> = s
+            .room_timeline("c1", 50)
+            .unwrap()
+            .into_iter()
+            .map(|t| t.message.item.r#ref)
+            .collect();
         assert_eq!(refs, vec!["r1"]);
     }
 
@@ -1262,18 +1299,24 @@ mod tests {
         let s = Store::open_in_memory().unwrap();
         let me = "aa";
         s.upsert_channel("c1", Some("Uni"), None, false, 1).unwrap();
-        s.upsert_channel("c2", Some("Other"), None, false, 1).unwrap();
+        s.upsert_channel("c2", Some("Other"), None, false, 1)
+            .unwrap();
         s.upsert_item(&item("old", "c1", 10)).unwrap();
         // No marker yet: nothing unread.
         assert_eq!(s.rooms_for(Some(me)).unwrap()[0].unread, 0);
         s.ensure_read_state("c1", 10).unwrap();
         s.ensure_read_state("c1", 999).unwrap(); // seeding never moves an existing marker
-        let other = |r: &str, ts: i64, mention: bool| Item { author: "bb".into(), mentions_me: mention, ..item(r, "c1", ts) };
+        let other = |r: &str, ts: i64, mention: bool| Item {
+            author: "bb".into(),
+            mentions_me: mention,
+            ..item(r, "c1", ts)
+        };
         s.upsert_item(&other("n1", 11, false)).unwrap();
         s.upsert_item(&other("n2", 12, true)).unwrap();
         s.upsert_item(&other("n3", 13, false)).unwrap();
         s.upsert_item(&item("mine", "c1", 14)).unwrap(); // own message: not unread
-        s.upsert_aux("d", KIND_DELETE_EVENT, "n3", "bb", 15, "").unwrap();
+        s.upsert_aux("d", KIND_DELETE_EVENT, "n3", "bb", 15, "")
+            .unwrap();
         let r = &s.rooms_for(Some(me)).unwrap()[0];
         assert_eq!((r.id.as_str(), r.unread, r.mentions), ("c1", 2, true));
         s.mark_read("c1").unwrap();

@@ -11,7 +11,10 @@ use std::collections::BTreeMap;
 
 use nostr::{Event, Keys, PublicKey, Tag};
 
-use crate::buzz::{aux_target, event_channel, mentions, p_tags, BuzzClient, AUX_KINDS, KIND_CHANNEL_MESSAGE, RELAY_MAX_LIMIT};
+use crate::buzz::{
+    aux_target, event_channel, mentions, p_tags, BuzzClient, AUX_KINDS, KIND_CHANNEL_MESSAGE,
+    RELAY_MAX_LIMIT,
+};
 use crate::store::{Item, Profile, Store};
 use crate::Result;
 
@@ -96,7 +99,12 @@ pub enum Ingested {
     /// A kind-9 message (`new == false`: duplicate).
     Message { new: bool, item: Item },
     /// An edit / deletion aimed at `target` (`new == false`: duplicate).
-    Aux { new: bool, kind: u16, target: String, ts: i64 },
+    Aux {
+        new: bool,
+        kind: u16,
+        target: String,
+        ts: i64,
+    },
     /// Some other kind, or an aux event with no valid target; ignored.
     Ignored,
 }
@@ -118,7 +126,12 @@ pub fn ingest_aux(store: &Store, ev: &Event) -> Result<Ingested> {
         ts,
         &ev.content,
     )?;
-    Ok(Ingested::Aux { new, kind, target, ts })
+    Ok(Ingested::Aux {
+        new,
+        kind,
+        target,
+        ts,
+    })
 }
 
 /// Route any event delivered on a `ch-<uuid>` subscription.
@@ -166,7 +179,8 @@ pub async fn sync_older(
     let me = client.pubkey();
     let mut inserted = 0usize;
     for ev in &events {
-        if let Ingested::Message { new: true, .. } = ingest_channel_event(store, ev, &me, channel)? {
+        if let Ingested::Message { new: true, .. } = ingest_channel_event(store, ev, &me, channel)?
+        {
             inserted += 1;
         }
     }
@@ -328,8 +342,21 @@ mod conversation_tests {
         let url = format!("https://buzz.example/media/{sha}.jpg");
         let tags = vec![
             Tag::parse(vec!["h", &ch.to_string()]).unwrap(),
-            Tag::parse(vec!["imeta", &format!("url {url}"), "m image/jpeg", &format!("x {sha}"), "dim 10x20"]).unwrap(),
-            Tag::parse(vec!["imeta", "url https://buzz.example/media/notes.pdf", "m application/pdf", "filename notes.pdf"]).unwrap(),
+            Tag::parse(vec![
+                "imeta",
+                &format!("url {url}"),
+                "m image/jpeg",
+                &format!("x {sha}"),
+                "dim 10x20",
+            ])
+            .unwrap(),
+            Tag::parse(vec![
+                "imeta",
+                "url https://buzz.example/media/notes.pdf",
+                "m application/pdf",
+                "filename notes.pdf",
+            ])
+            .unwrap(),
         ];
         let ev = EventBuilder::new(Kind::Custom(9), format!("![image]({url})"))
             .tags(tags)
