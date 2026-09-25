@@ -220,8 +220,12 @@ pub fn cache_path(cache_dir: &Path, sha: &str) -> Result<PathBuf> {
 /// Cached bytes for `sha`, re-verified (a corrupt file is removed).
 pub fn read_cached(cache_dir: &Path, sha: &str) -> Option<Vec<u8>> {
     let path = cache_path(cache_dir, sha).ok()?;
+    if std::fs::metadata(&path).ok()?.len() > MAX_MEDIA_BYTES {
+        let _ = std::fs::remove_file(&path);
+        return None;
+    }
     let bytes = std::fs::read(&path).ok()?;
-    if sha256_hex(&bytes) == sha {
+    if bytes.len() as u64 <= MAX_MEDIA_BYTES && sha256_hex(&bytes) == sha {
         Some(bytes)
     } else {
         let _ = std::fs::remove_file(&path);
@@ -312,7 +316,11 @@ pub async fn fetch_media(
     if std::fs::create_dir_all(cache_dir).is_ok() {
         let path = cache_dir.join(&sha);
         let tmp = cache_dir.join(format!("{sha}.{}.part", uuid::Uuid::new_v4()));
-        if std::fs::write(&tmp, &bytes).is_ok() && std::fs::rename(&tmp, &path).is_err() {
+        if std::fs::write(&tmp, &bytes).is_ok() {
+            if std::fs::rename(&tmp, &path).is_err() {
+                let _ = std::fs::remove_file(&tmp);
+            }
+        } else {
             let _ = std::fs::remove_file(&tmp);
         }
     }
