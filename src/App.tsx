@@ -4,10 +4,11 @@ import { listen } from "@tauri-apps/api/event";
 import "./App.css";
 import { markdownToText, parseMarkdown, type Block, type Inline } from "./markdown";
 import { findUniMember, findUniRoom, handoffText, type UniAction } from "./uniActions";
+import { Attachments, attachmentBody, useRelayOrigin, type MediaRef } from "./Attachments";
 import { activeQuery, filterMembers, insertMention, memberLabels, mentionSegments, pruneBindings, resolveRecipients, type Bindings, type Member } from "./mentions";
 
 type Room = { id: string; name: string; last_message: string | null; last_ts: number | null; mentions: boolean; unread: number };
-type Message = { ref: string; channel: string; author: string; author_name: string; ts: number; body: string; mentions_me: boolean; root: string | null; parent: string | null; mentions: Member[]; reply_count: number; last_reply_ts: number | null; edited: boolean; reactions: Reaction[] };
+type Message = { ref: string; channel: string; author: string; author_name: string; ts: number; body: string; mentions_me: boolean; root: string | null; parent: string | null; mentions: Member[]; reply_count: number; last_reply_ts: number | null; edited: boolean; reactions: Reaction[]; media?: MediaRef[] };
 type Reaction = { emoji: string; count: number; mine: string | null };
 type LivePayload = { kind: "message" | "edit" | "delete" | "rooms" | "profiles" | "status"; channel: string | null; status: string | null; author: string | null };
 type IdentityStatus = { paired: boolean; pubkey: string | null };
@@ -173,6 +174,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   // Bumped by live events so the open room re-reads from the local store.
   const [tick, setTick] = useState(0);
   const [limit, setLimit] = useState(300);
+  const relayOrigin = useRelayOrigin();
   const [older, setOlder] = useState<"idle" | "loading" | "done">("idle");
   const [reactFor, setReactFor] = useState<string | null>(null);
   // Messages handed to Uni as notes this session (a local receipt).
@@ -481,7 +483,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
     return <article key={m.ref} className={`message ${grouped ? "grouped" : ""} ${m.author === identity ? "mine" : ""} ${m.mentions_me ? "highlight" : ""} ${inThread && m.ref === root ? "thread-root" : ""}`}
       onContextMenu={(e) => { e.preventDefault(); setReactFor(reactFor === m.ref ? null : m.ref); }}>
       {grouped ? <time className="gutter-time">{clock(m.ts)}</time> : <span className="message-avatar" style={{ background: `hsl(${hue(m.author)} 45% 42%)` }} aria-hidden="true">{m.author_name[0]?.toUpperCase() ?? "?"}</span>}
-      <div className="message-content">{!grouped && <div className="message-meta"><strong>{m.author_name}</strong><time>{clock(m.ts)}</time></div>}<Body body={m.body} mentions={m.mentions} me={identity} edited={m.edited} />
+      <div className="message-content">{!grouped && <div className="message-meta"><strong>{m.author_name}</strong><time>{clock(m.ts)}</time></div>}<Body body={attachmentBody(m.body, m.media, relayOrigin)} mentions={m.mentions} me={identity} edited={m.edited} />
+        <Attachments body={m.body} media={m.media} />
         {m.reactions.length > 0 && <div className="reactions">{m.reactions.map((r) => <button key={r.emoji} className={`pill ${r.mine ? "mine" : ""}`} onClick={() => void react(m, r.emoji)} aria-pressed={!!r.mine} aria-label={`${emojiLabel(r.emoji)} ${r.count}${r.mine ? ", you reacted; tap to remove" : "; tap to add yours"}`}>{emojiLabel(r.emoji)} <span>{r.count}</span></button>)}</div>}
         {reactFor === m.ref && <div className="quick-react" role="toolbar" aria-label="React">{QUICK_REACTIONS.map((e) => <button key={e} onClick={() => void react(m, e)} aria-label={`React ${e}`}>{e}</button>)}</div>}
         {!inThread && m.reply_count > 0 && <button className="thread-summary" onClick={() => openThread(m)} aria-label={`View thread with ${m.reply_count} ${m.reply_count === 1 ? "reply" : "replies"}`}>💬 {m.reply_count} {m.reply_count === 1 ? "reply" : "replies"}{m.last_reply_ts ? <span> · last {time(m.last_reply_ts)}</span> : null}</button>}
