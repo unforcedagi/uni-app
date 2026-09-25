@@ -15,12 +15,14 @@
 //! - [`readstate`]: cross-device read markers (Buzz NIP-RS: kind 30078, NIP-44 to self).
 //! - [`live`]: optional long-lived loop on top: open subs after EOSE, membership
 //!   notifications, reconnect with [`backoff`] and re-AUTH.
+//! - [`media`]: NIP-92 `imeta` attachments and Blossom-authenticated media reads.
 
 pub mod backoff;
 pub mod buzz;
 pub mod compose;
 pub mod identity;
 pub mod live;
+pub mod media;
 pub mod pairing;
 pub mod readstate;
 pub mod store;
@@ -36,6 +38,7 @@ pub use identity::{
     load_keys, set_device_keys, store_keyring_nsec, KeyInit, KeySource,
 };
 pub use live::{run_live, LiveConfig, LiveEvent};
+pub use media::{fetch_media, is_relay_media_url, parse_imeta, MediaRef};
 pub use readstate::{publish_read_state, read_state_dirty};
 pub use store::{
     ConversationMessage, Item, Member, Profile, Reaction, Room, SearchHit, Store, TimelineMessage,
@@ -67,6 +70,9 @@ pub enum Error {
     /// Bad input.
     #[error("invalid: {0}")]
     Invalid(String),
+    /// Media download / verification failed.
+    #[error("media: {0}")]
+    Media(String),
 }
 
 /// Result alias.

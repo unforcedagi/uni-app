@@ -83,6 +83,8 @@ struct MessageView {
     edited: bool,
     /// Live reactions grouped by emoji, in first-use order.
     reactions: Vec<ReactionView>,
+    /// NIP-92 `imeta` attachments, in tag order.
+    media: Vec<uni_core::MediaRef>,
 }
 
 #[derive(Serialize)]
@@ -178,19 +180,34 @@ fn view_with_summary(
         parent: message.parent,
         edited: message.edited,
         reactions: Vec::new(),
+        media: Vec::new(),
     })
 }
 
 /// Attach grouped reactions to a batch of message views (one query).
 fn with_reactions(store: &Store, mut views: Vec<MessageView>) -> Result<Vec<MessageView>, String> {
-    let me = uni_core::load_keys(false).ok().map(|(k, _)| k.public_key().to_hex());
+    let me = uni_core::load_keys(false)
+        .ok()
+        .map(|(k, _)| k.public_key().to_hex());
     let ids: Vec<String> = views.iter().map(|v| v.id.clone()).collect();
-    let all = store.reactions(&ids, me.as_deref()).map_err(|e| e.to_string())?;
+    let all = store
+        .reactions(&ids, me.as_deref())
+        .map_err(|e| e.to_string())?;
+    let mut media = store.message_media(&ids).map_err(|e| e.to_string())?;
     for v in &mut views {
         v.reactions = all
             .iter()
             .filter(|r| r.target == v.id)
-            .map(|r| ReactionView { emoji: r.emoji.clone(), count: r.count, mine: r.mine.clone() })
+            .map(|r| ReactionView {
+                emoji: r.emoji.clone(),
+                count: r.count,
+                mine: r.mine.clone(),
+            })
+            .collect();
+        v.media = media
+            .iter_mut()
+            .filter(|(id, _)| *id == v.id)
+            .map(|(_, m)| std::mem::take(m))
             .collect();
     }
     Ok(views)
@@ -303,7 +320,11 @@ struct SearchHitView {
 /// Local full-text search over cached Buzz messages (current text: edits
 /// applied, deletions excluded). Read-only, so no IO gate.
 #[tauri::command]
-async fn search(app: tauri::AppHandle, query: String, limit: Option<usize>) -> Result<Vec<SearchHitView>, String> {
+async fn search(
+    app: tauri::AppHandle,
+    query: String,
+    limit: Option<usize>,
+) -> Result<Vec<SearchHitView>, String> {
     let path = db_path(&app)?;
     tauri::async_runtime::spawn_blocking(move || {
         let store = Store::open(path).map_err(|e| e.to_string())?;
@@ -317,7 +338,11 @@ async fn search(app: tauri::AppHandle, query: String, limit: Option<usize>) -> R
                     let id = &h.message.item.channel;
                     format!("Room {}", &id[..8.min(id.len())])
                 });
-                Ok(SearchHitView { message: view(&store, h.message)?, channel_name, snippet: h.snippet })
+                Ok(SearchHitView {
+                    message: view(&store, h.message)?,
+                    channel_name,
+                    snippet: h.snippet,
+                })
             })
             .collect()
     })
@@ -375,7 +400,10 @@ fn schedule_read_state_publish(app: &tauri::AppHandle) {
 fn open_link(app: tauri::AppHandle, url: String) -> Result<(), String> {
     use tauri_plugin_opener::OpenerExt;
     let lower = url.trim().to_ascii_lowercase();
-    if !(lower.starts_with("https://") || lower.starts_with("http://") || lower.starts_with("mailto:")) {
+    if !(lower.starts_with("https://")
+        || lower.starts_with("http://")
+        || lower.starts_with("mailto:"))
+    {
         return Err("only http(s) and mailto links can be opened".into());
     }
     app.opener()
@@ -440,11 +468,19 @@ fn live_payload(ev: &LiveEvent) -> Option<LivePayload> {
             Some(format!("Reconnecting in {}s…", retry_in.as_secs().max(1))),
             None,
         ),
-        LiveEvent::Stopped { reason } => p("status", None, Some(format!("Live stopped: {reason}")), None),
+        LiveEvent::Stopped { reason } => p(
+            "status",
+            None,
+            Some(format!("Live stopped: {reason}")),
+            None,
+        ),
         LiveEvent::ChannelClosed { channel, message } => p(
             "status",
             Some(channel.to_string()),
-            Some(format!("Room {} closed: {message}", &channel.to_string()[..8])),
+            Some(format!(
+                "Room {} closed: {message}",
+                &channel.to_string()[..8]
+            )),
             None,
         ),
     })
@@ -467,7 +503,10 @@ async fn live_start(app: tauri::AppHandle) -> Result<bool, String> {
     std::thread::Builder::new()
         .name("uni-live".into())
         .spawn(move || {
-            let rt = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+            let rt = match tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            {
                 Ok(rt) => rt,
                 Err(e) => {
                     tracing::error!("live runtime: {e}");
@@ -478,12 +517,15 @@ async fn live_start(app: tauri::AppHandle) -> Result<bool, String> {
                 let store = match Store::open(&path) {
                     Ok(s) => s,
                     Err(e) => {
-                        let _ = app.emit("uni://live", LivePayload {
-                            kind: "status",
-                            channel: None,
-                            status: Some(format!("Live unavailable: {e}")),
-                            author: None,
-                        });
+                        let _ = app.emit(
+                            "uni://live",
+                            LivePayload {
+                                kind: "status",
+                                channel: None,
+                                status: Some(format!("Live unavailable: {e}")),
+                                author: None,
+                            },
+                        );
                         return;
                     }
                 };
@@ -496,7 +538,8 @@ async fn live_start(app: tauri::AppHandle) -> Result<bool, String> {
                         }
                     }
                 };
-                let runner = uni_core::run_live(LiveConfig::new(url), &keys, None, &store, tx, stop_rx);
+                let runner =
+                    uni_core::run_live(LiveConfig::new(url), &keys, None, &store, tx, stop_rx);
                 let (result, _) = tokio::join!(runner, forward);
                 if let Err(e) = result {
                     tracing::warn!("live loop ended: {e}");
@@ -688,7 +731,10 @@ async fn post_message(
             .ok_or_else(|| {
                 "message accepted but not found locally; refresh to recover".to_string()
             })?;
-        view(&store, message)
+        let v = view(&store, message)?;
+        with_reactions(&store, vec![v])?
+            .pop()
+            .ok_or_else(|| "message view missing".to_string())
     })
     .await
     .map_err(|e| e.to_string())?
@@ -715,7 +761,9 @@ async fn react(
         tauri::async_runtime::block_on(async {
             match mine {
                 Some(id) => remove_reaction(&url, &keys, None, &store, &id).await,
-                None => send_reaction(&url, &keys, None, &store, ch, &target, &emoji).await.map(|_| ()),
+                None => send_reaction(&url, &keys, None, &store, ch, &target, &emoji)
+                    .await
+                    .map(|_| ()),
             }
         })
         .map_err(|e| e.to_string())
@@ -741,6 +789,88 @@ async fn load_older(app: tauri::AppHandle, channel: String) -> Result<usize, Str
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// Media cache (`<app cache>/media/<sha256>`); the OS may evict it.
+fn media_cache_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| e.to_string())?
+        .join("media"))
+}
+
+/// Bytes of a relay media blob (`https://<relay>/media/<sha256>.<ext>`),
+/// fetched with Blossom `t=get` auth, SHA-256 verified against the URL and
+/// the `imeta` `x` (`sha`), and cached by hash. Returned as a raw IPC
+/// response (an `ArrayBuffer` in the webview, turned into a `blob:` URL), as
+/// Buzz desktop's `fetch_media_bytes` does: no asset-protocol scope, no
+/// base64 inflation, and the auth token never reaches the webview.
+#[tauri::command]
+async fn media_bytes(
+    app: tauri::AppHandle,
+    url: String,
+    sha: Option<String>,
+) -> Result<tauri::ipc::Response, String> {
+    secure_store::ensure_loaded(&app).await?;
+    let relay = relay_url(&app);
+    let dir = media_cache_dir(&app)?;
+    // No IO_GATE: this touches neither SQLite nor relay watermarks, and must
+    // not queue images behind a slow sync.
+    let bytes = tauri::async_runtime::spawn_blocking(move || {
+        let (keys, _) = uni_core::load_keys(false).map_err(|e| e.to_string())?;
+        tauri::async_runtime::block_on(uni_core::fetch_media(
+            &relay,
+            &keys,
+            &url,
+            sha.as_deref(),
+            &dir,
+        ))
+        .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
+/// Download a relay file to the cache and return its local path.
+#[tauri::command]
+async fn media_save(
+    app: tauri::AppHandle,
+    url: String,
+    sha: Option<String>,
+) -> Result<String, String> {
+    secure_store::ensure_loaded(&app).await?;
+    let relay = relay_url(&app);
+    let dir = media_cache_dir(&app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let (keys, _) = uni_core::load_keys(false).map_err(|e| e.to_string())?;
+        let hash = uni_core::media::media_sha_from_url(&relay, &url).map_err(|e| e.to_string())?;
+        tauri::async_runtime::block_on(uni_core::fetch_media(
+            &relay,
+            &keys,
+            &url,
+            sha.as_deref(),
+            &dir,
+        ))
+        .map_err(|e| e.to_string())?;
+        uni_core::media::cache_path(&dir, &hash)
+            .map(|p| p.to_string_lossy().into_owned())
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// The relay's HTTP origin (e.g. `https://buzz.unforced.org`), so the UI can
+/// tell relay media (authenticated fetch) from third-party image links.
+#[tauri::command]
+fn relay_origin(app: tauri::AppHandle) -> String {
+    let url = relay_url(&app);
+    url.replacen("wss://", "https://", 1)
+        .replacen("ws://", "http://", 1)
+        .trim_end_matches('/')
+        .to_string()
 }
 
 #[cfg(mobile)]
@@ -780,7 +910,10 @@ pub fn run() {
             load_older,
             edit_message,
             delete_message,
-            search
+            search,
+            media_bytes,
+            media_save,
+            relay_origin
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

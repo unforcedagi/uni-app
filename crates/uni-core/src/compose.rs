@@ -153,8 +153,8 @@ pub async fn remove_reaction(
     if !store.is_own_reaction(reaction_id, &me)? {
         return Err(Error::Invalid("not one of your reactions".into()));
     }
-    let rid = EventId::from_hex(reaction_id)
-        .map_err(|_| Error::Invalid("invalid reaction id".into()))?;
+    let rid =
+        EventId::from_hex(reaction_id).map_err(|_| Error::Invalid("invalid reaction id".into()))?;
     let event = build_remove_reaction(rid)
         .map_err(|e| Error::Invalid(e.to_string()))?
         .sign_with_keys(keys)
@@ -171,7 +171,9 @@ fn own_message(store: &Store, keys: &Keys, channel: Uuid, target: &str) -> Resul
         .message(&channel.to_string(), target)?
         .ok_or_else(|| Error::Invalid("message is not cached in this room".into()))?;
     if msg.item.author != keys.public_key().to_hex() {
-        return Err(Error::Invalid("you can only change your own messages".into()));
+        return Err(Error::Invalid(
+            "you can only change your own messages".into(),
+        ));
     }
     EventId::from_hex(&msg.item.r#ref).map_err(|_| Error::Invalid("invalid message id".into()))
 }

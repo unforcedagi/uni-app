@@ -166,3 +166,18 @@ h1 { font-size: 22px; margin: 5px 0 0; letter-spacing: -.03em; }
 .search-notes { background: #152633; border: 1px dashed #36566a; border-radius: 14px; padding: 4px 12px 12px; margin: 0 4px; }
 .search-error { padding: 0 20px; }
 .message.search-focus .message-content { box-shadow: 0 0 0 2px #77d4d2; transition: box-shadow .4s; }
+
+/* Attachments (src/Attachments.tsx) */
+.attachments { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 4px; }
+.attachment-image { display: block; padding: 0; border: 1px solid #314857; border-radius: 10px; overflow: hidden; background: #0f1e28; cursor: zoom-in; max-width: 100%; }
+.attachment-image img { display: block; max-width: 100%; max-height: 240px; width: 100%; height: 100%; object-fit: cover; }
+.attachment-image.loading { min-width: 160px; min-height: 120px; max-height: 240px; cursor: default; display: flex; align-items: center; justify-content: center; }
+.attachment-status { font-size: 12px; color: #93b6c3; padding: 8px; }
+.attachment-video { display: block; max-width: 100%; max-height: 320px; border-radius: 10px; background: #000; }
+.attachment-audio { display: block; width: min(100%, 320px); }
+.attachment-file { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; min-height: 40px; padding: 6px 12px; border: 1px solid #36566a; border-radius: 10px; background: #203b4b; color: #d9f2f3; font-size: 13px; text-align: left; }
+.attachment-file .attachment-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.attachment-file small { color: #93b6c3; white-space: nowrap; }
+.lightbox { position: fixed; inset: 0; z-index: 1000; background: rgba(0,0,0,.92); display: flex; align-items: center; justify-content: center; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+.lightbox img { max-width: 100vw; max-height: 100vh; object-fit: contain; }
+.lightbox-close { position: absolute; top: calc(env(safe-area-inset-top) + 10px); right: 12px; width: 44px; height: 44px; border-radius: 22px; border: 0; background: rgba(255,255,255,.15); color: #fff; font-size: 20px; }
