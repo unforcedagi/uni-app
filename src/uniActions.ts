@@ -48,3 +48,18 @@ export function findUniRoom<R extends { id: string; name: string }>(rooms: R[]):
 export function findUniMember<M extends { pubkey: string; name: string }>(members: M[]): M | undefined {
   return members.find((m) => m.name.trim().toLowerCase() === "uni");
 }
+
+
+const MAX_SEARCH_QUERY = 500;
+
+/**
+ * "Ask Uni" for vault search: the app holds no vault token, so a notes query
+ * is handed to Uni in #Uni, which runs the Parachute meaning search itself
+ * (see docs/ask-everything.md). Whitespace is collapsed to one line so the
+ * query can't smuggle extra paragraphs; long queries are truncated.
+ */
+export function searchHandoffText(query: string, uniLabel: string): string {
+  const q = [...query.replace(/\s+/g, " ").trim()];
+  const text = q.length > MAX_SEARCH_QUERY ? q.slice(0, MAX_SEARCH_QUERY).join("").trimEnd() + " …" : q.join("");
+  return `@${uniLabel} search my notes for: ${text}`;
+}
