@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import "./App.css";
 import { markdownToText, parseMarkdown, type Block, type Inline } from "./markdown";
+import { findUniMember, findUniRoom, handoffText, type UniAction } from "./uniActions";
 import { activeQuery, filterMembers, insertMention, memberLabels, mentionSegments, pruneBindings, resolveRecipients, type Bindings, type Member } from "./mentions";
 
 type Room = { id: string; name: string; last_message: string | null; last_ts: number | null; mentions: boolean; unread: number };
@@ -174,6 +175,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const [limit, setLimit] = useState(300);
   const [older, setOlder] = useState<"idle" | "loading" | "done">("idle");
   const [reactFor, setReactFor] = useState<string | null>(null);
+  // Messages handed to Uni as notes this session (a local receipt).
+  const [kept, setKept] = useState<Set<string>>(new Set());
   const preserveScroll = useRef<number | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const channelRef = useRef<string | null>(null);
@@ -286,6 +289,38 @@ function Conversations({ onForget }: { onForget: () => void }) {
       setOlder("idle");
       setLimit((l) => l + n + 50);
     } catch (e) { setError(String(e)); setOlder("idle"); }
+  }
+
+  // Hand a message to Uni: "note" posts straight to the Uni room (Uni files it
+  // in Parachute and replies with where it went); "ask" opens the Uni room
+  // with the quote drafted so Aaron can add his question first.
+  async function toUni(m: Message, action: UniAction) {
+    setError(null);
+    const uniRoom = findUniRoom(rooms);
+    if (!uniRoom) { setError("No room named Uni is joined. Refresh, or join #Uni in Buzz."); return; }
+    try {
+      const roster = await invoke<Member[]>("get_members", { channel: uniRoom.id });
+      const uni = findUniMember(roster);
+      if (!uni) { setError("Uni isn't in the Uni room's member list yet. Refresh to load it."); return; }
+      const label = memberLabels(roster).get(uni.pubkey) ?? uni.name;
+      const roomName = rooms.find((r) => r.id === m.channel)?.name ?? "room";
+      if (action === "note") {
+        setStatus("Handing to Uni…");
+        await invoke<Message>("post_message", { channel: uniRoom.id, body: handoffText("note", m, roomName, label), replyTo: null, recipients: [uni.pubkey] });
+        setKept((k) => new Set(k).add(m.ref));
+        setStatus("Sent to Uni · it will file the note and reply in #Uni");
+        await loadRooms();
+      } else {
+        const text = handoffText("ask", m, roomName, label, " ");
+        navigate(uniRoom.id, null);
+        // Replace navigate's restored draft: question goes after "@Uni ".
+        const prefix = `@${label} `;
+        setDraft(prefix + "\n\n" + text.slice(text.indexOf("\n\n") + 2));
+        setBindings(new Map([[label, uni.pubkey]]));
+        focusComposer.current = true;
+        setTimeout(() => { input.current?.focus(); input.current?.setSelectionRange(prefix.length, prefix.length); }, 50);
+      }
+    } catch (e) { setError(`Couldn't reach Uni: ${e}`); setStatus("Handoff failed · your message is unchanged"); }
   }
 
   async function react(m: Message, emoji: string) {
@@ -452,6 +487,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
         {!inThread && m.reply_count > 0 && <button className="thread-summary" onClick={() => openThread(m)} aria-label={`View thread with ${m.reply_count} ${m.reply_count === 1 ? "reply" : "replies"}`}>💬 {m.reply_count} {m.reply_count === 1 ? "reply" : "replies"}{m.last_reply_ts ? <span> · last {time(m.last_reply_ts)}</span> : null}</button>}
         <div className="message-actions">
           <button onClick={() => setReactFor(reactFor === m.ref ? null : m.ref)} aria-label={`React to ${m.author_name}`} aria-expanded={reactFor === m.ref}>React</button>
+          <button onClick={() => void toUni(m, "note")} disabled={kept.has(m.ref)} aria-label={`Keep ${m.author_name}'s message as a note`}>{kept.has(m.ref) ? "✓ Sent to Uni" : "⤓ Keep"}</button>
+          <button onClick={() => void toUni(m, "ask")} aria-label={`Ask Uni about ${m.author_name}'s message`}>✦ Ask Uni</button>
           {!inThread && <button onClick={() => openThread(m)} aria-label={`Reply in thread to ${m.author_name}`}>Reply in thread</button>}
           {inThread && m.ref !== root && <button onClick={() => { setReplyTo(m.ref); input.current?.focus(); }} aria-label={`Reply to ${m.author_name}`}>Reply</button>}
         </div>
