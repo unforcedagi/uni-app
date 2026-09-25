@@ -45,6 +45,9 @@ assert.equal(stripAttachmentLines(body, media), "look at this\n\nand [a link](ht
 const legacy = `||![image](${img})||\n![image](https://other.example/a.png)`;
 assert.deepEqual(collectAttachments(legacy, [], O), [ref(img, { sha256: H })]);
 assert.equal(stripAttachmentLines(legacy, collectAttachments(legacy, [], O)), "![image](https://other.example/a.png)");
+// A bare relay image URL is an authenticated preview and stays clickable.
+assert.deepEqual(collectAttachments(img, [], O), [ref(img, { sha256: H })]);
+assert.equal(stripAttachmentLines(img, collectAttachments(img, [], O)), img);
 // No attachments → body untouched.
 assert.equal(stripAttachmentLines("  hi  ", []), "  hi  ");
 

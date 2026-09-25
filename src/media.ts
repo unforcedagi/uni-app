@@ -71,7 +71,7 @@ export function formatSize(n: number | null | undefined): string {
 export function displayName(m: MediaRef): string {
   if (m.filename) return m.filename;
   const last = urlPath(m.url).split("/").pop() ?? "";
-  return last ? decodeURIComponent(last) : "file";
+  try { return last ? decodeURIComponent(last) : "file"; } catch { return last || "file"; }
 }
 
 const EMPTY: Omit<MediaRef, "url"> = { mime: null, sha256: null, size: null, dim: null, blurhash: null, alt: null, filename: null };
@@ -89,10 +89,14 @@ export function collectAttachments(body: string, media: MediaRef[], relayOrigin:
   const out = [...media];
   const seen = new Set(out.map((m) => m.url));
   for (const line of body.split(/\r?\n/)) {
-    const url = MEDIA_LINE.exec(line)?.[1];
+    // Buzz's older image markdown and plain relay image URLs both need the
+    // authenticated path. Keep the plain URL in the body as a clickable link.
+    const markdownUrl = MEDIA_LINE.exec(line)?.[1];
+    const bareUrl = line.trim().match(/^https?:\/\/\S+$/)?.[0];
+    const url = markdownUrl ?? bareUrl;
     if (!url || seen.has(url)) continue;
     const sha = relayMediaSha(url, relayOrigin);
-    if (!sha) continue;
+    if (!sha || (!markdownUrl && !IMAGE_EXT.test(urlPath(url)))) continue;
     seen.add(url);
     out.push({ ...EMPTY, url, sha256: sha });
   }
