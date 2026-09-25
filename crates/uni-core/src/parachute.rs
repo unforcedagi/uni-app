@@ -36,11 +36,22 @@ pub const MAX_AUDIO_BYTES: usize = 50 * 1024 * 1024;
 const TIMEOUT: Duration = Duration::from_secs(60);
 
 /// `Authorization` header value for one request.
+///
+/// The hub burns every event id for ~2 minutes, and `created_at` has
+/// one-second resolution, so two identical requests in the same second
+/// (e.g. polling `get_entry`) would share an id and the second would be
+/// rejected as `replayed`. A random `nonce` tag makes every id unique; the
+/// hub ignores its value (parachute-hub `docs/contracts/nip98-http-auth.md`).
 pub fn nip98_header(keys: &Keys, url: &str, method: &str, body: &[u8]) -> Result<String> {
     let tag = |parts: &[&str]| {
         Tag::parse(parts.iter().copied()).map_err(|e| Error::Invalid(e.to_string()))
     };
-    let mut tags = vec![tag(&["u", url])?, tag(&["method", &method.to_uppercase()])?];
+    let nonce = uuid::Uuid::new_v4().simple().to_string();
+    let mut tags = vec![
+        tag(&["u", url])?,
+        tag(&["method", &method.to_uppercase()])?,
+        tag(&["nonce", &nonce])?,
+    ];
     if !body.is_empty() {
         tags.push(tag(&["payload", &sha256_hex(body)])?);
     }
@@ -411,6 +422,10 @@ mod tests {
         assert!(tags.contains(&vec!["u".into(), "https://hub.example/mcp".into()]));
         assert!(tags.contains(&vec!["method".into(), "POST".into()]));
         assert!(tags.contains(&vec!["payload".into(), sha256_hex(b"{}")]));
+        // Identical requests in the same second still get distinct ids.
+        let again = decode(&nip98_header(&keys, "https://hub.example/mcp", "post", b"{}").unwrap());
+        assert!(tags.iter().any(|t| t[0] == "nonce"));
+        assert_ne!(ev.id, again.id);
         // No payload tag for an empty body (the hub rejects one).
         let ev = decode(&nip98_header(&keys, "https://hub.example/x", "GET", b"").unwrap());
         assert!(ev.tags.iter().all(|t| t.clone().to_vec()[0] != "payload"));
