@@ -1,0 +1,336 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Talk to Uni — next (prototype)</title>
+<style>
+:root{
+  --bg:#0f1c25;--panel:#15252f;--card:#1c3040;--line:#2e4555;--ink:#e9f1f5;--mute:#98afbc;
+  --uni:#77d4d2;--note:#e8c27a;--person:#b7a3f0;--proj:#8fd18a;--cap:#f09a8a;
+  --r:14px;
+}
+body.paper{ /* Daylight: reflective, high contrast, no motion */
+  --bg:#f4f1ea;--panel:#ebe7de;--card:#fffdf8;--line:#c9c2b4;--ink:#141414;--mute:#5b5750;
+  --uni:#0d6e6c;--note:#8a5a00;--person:#5a3fb3;--proj:#2f6e28;--cap:#a33a28;
+}
+body.paper *{transition:none!important;animation:none!important}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,-apple-system,"Inter",sans-serif}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+.app{display:grid;grid-template-columns:260px 1fr 340px;height:100vh;max-width:1400px;margin:0 auto}
+@media (max-width:1100px){.app{grid-template-columns:220px 1fr}.side{display:none}.side.open{display:block;position:fixed;inset:0 0 0 auto;width:min(360px,92vw);z-index:20;box-shadow:-10px 0 40px #0008}}
+@media (max-width:720px){.app{grid-template-columns:1fr}.nav{display:none}.nav.open{display:flex;position:fixed;inset:0;z-index:30}}
+.nav{background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column;padding:14px 10px;gap:4px;overflow:auto}
+.brand{padding:4px 10px 14px}.brand small{display:block;letter-spacing:.14em;font-size:10px;color:var(--mute)}.brand b{font-size:20px}
+.nav h4{margin:14px 10px 4px;font-size:10px;letter-spacing:.14em;color:var(--mute);font-weight:600}
+.nav button{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:10px;text-align:left;width:100%}
+.nav button:hover,.nav button.on{background:var(--card)}
+.nav .dot{width:8px;height:8px;border-radius:50%}
+.badge{margin-left:auto;font-size:11px;background:var(--line);border-radius:9px;padding:0 7px}
+.badge.m{background:var(--uni);color:var(--bg);font-weight:700}
+.main{display:flex;flex-direction:column;min-width:0;height:100vh}
+.top{display:flex;align-items:center;gap:10px;padding:12px 18px;border-bottom:1px solid var(--line)}
+.top h2{margin:0;font-size:17px}.top small{color:var(--mute)}
+.search{flex:1;display:flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--line);border-radius:22px;padding:7px 14px;max-width:520px;margin-left:auto}
+.search input{flex:1;background:none;border:0;color:var(--ink);font:inherit;outline:none}
+.pill{font-size:11px;border:1px solid var(--line);border-radius:10px;padding:1px 8px;color:var(--mute)}
+.icon{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;border:1px solid var(--line)}
+.filters{display:flex;gap:6px;padding:10px 18px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.filters button{border:1px solid var(--line);border-radius:16px;padding:4px 12px;font-size:13px}
+.filters button.on{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.stream{flex:1;overflow:auto;padding:14px 18px 30px}
+.day{display:flex;align-items:center;gap:10px;color:var(--mute);font-size:12px;margin:14px 0 8px}.day:after{content:"";flex:1;border-top:1px solid var(--line)}
+.item{display:flex;gap:10px;margin:8px 0;position:relative}
+.av{width:34px;height:34px;flex:none;border-radius:50%;display:grid;place-items:center;font-weight:700;font-size:14px;background:var(--line)}
+.av.uni{background:var(--uni);color:var(--bg)}
+.bubble{background:var(--card);border:1px solid var(--line);border-radius:4px var(--r) var(--r) var(--r);padding:9px 13px;max-width:680px;min-width:0}
+.meta{display:flex;gap:8px;align-items:baseline;font-size:13px}.meta time{color:var(--mute);font-size:11px}
+.src{font-size:10px;letter-spacing:.08em;text-transform:uppercase;border-radius:6px;padding:1px 6px;border:1px solid currentColor}
+.src.chat{color:var(--uni)}.src.note{color:var(--note)}.src.cap{color:var(--cap)}.src.person{color:var(--person)}.src.proj{color:var(--proj)}
+.bubble p{margin:5px 0}
+.card-note{border-left:3px solid var(--note);border-radius:var(--r)}
+.card-cap{border-left:3px solid var(--cap);border-radius:var(--r)}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+.chip{font-size:12px;border-radius:12px;padding:2px 9px;background:var(--panel);border:1px solid var(--line)}
+.chip.person{color:var(--person)}.chip.proj{color:var(--proj)}.chip.note{color:var(--note)}.chip.tag{color:var(--mute)}
+.chip:hover{border-color:var(--ink)}
+.acts{display:flex;gap:4px;margin-top:6px;opacity:.0}.item:hover .acts,.item.sel .acts{opacity:1}
+body.paper .acts{opacity:1}
+.acts button{font-size:12px;border:1px solid var(--line);border-radius:8px;padding:2px 8px;color:var(--mute)}
+.acts button:hover{color:var(--ink);border-color:var(--ink)}
+.thread{font-size:12px;color:var(--uni);margin-top:4px}
+.linked{font-size:12px;color:var(--note);margin-top:4px}
+.composer{border-top:1px solid var(--line);padding:10px 18px 14px;background:var(--bg)}
+.mode{display:flex;gap:4px;margin-bottom:8px}
+.mode button{font-size:13px;padding:4px 12px;border-radius:14px;border:1px solid var(--line)}
+.mode button.on.chat{background:var(--uni);color:var(--bg);border-color:var(--uni)}
+.mode button.on.cap{background:var(--cap);color:var(--bg);border-color:var(--cap)}
+.row{display:flex;gap:8px}
+.row textarea{flex:1;resize:none;background:var(--card);border:1px solid var(--line);border-radius:12px;color:var(--ink);font:inherit;padding:9px 12px;min-height:44px}
+.send{background:var(--uni);color:var(--bg);border-radius:12px;padding:0 18px;font-weight:700}
+.hint{font-size:12px;color:var(--mute);margin-top:6px}
+.side{background:var(--panel);border-left:1px solid var(--line);overflow:auto;padding:16px}
+.side h3{margin:0 0 2px;font-size:16px}.side .k{font-size:10px;letter-spacing:.14em;color:var(--mute)}
+.side section{margin:16px 0}.side h5{margin:0 0 6px;font-size:11px;letter-spacing:.12em;color:var(--mute)}
+.side .doc{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 12px;font-size:14px}
+.side .li{display:flex;gap:8px;padding:6px 4px;border-radius:8px;align-items:center;font-size:14px;width:100%;text-align:left}
+.side .li:hover{background:var(--card)}
+.big{width:100%;border-radius:12px;padding:10px;font-weight:700;border:1px solid var(--line);margin-top:6px}
+.big.uni{background:var(--uni);color:var(--bg);border-color:var(--uni)}
+.score{margin-left:auto;font-size:11px;color:var(--mute)}
+.why{font-size:12px;color:var(--mute);margin-top:2px}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:9px 16px;border-radius:20px;font-size:14px;opacity:0;pointer-events:none;transition:opacity .2s;z-index:50}
+.toast.on{opacity:1}
+.sheet{position:fixed;inset:0;background:#0009;display:none;place-items:end center;z-index:40}
+.sheet.on{display:grid}
+.sheet .in{background:var(--panel);border:1px solid var(--line);border-radius:18px 18px 0 0;width:min(620px,100%);padding:18px 18px 26px}
+.sheet input,.sheet textarea{width:100%;background:var(--card);border:1px solid var(--line);border-radius:10px;color:var(--ink);font:inherit;padding:8px 10px;margin:4px 0 10px}
+.sug{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.sug .chip{cursor:pointer}.sug .chip.on{background:var(--ink);color:var(--bg)}
+.banner{margin:10px 18px 0;padding:8px 12px;border-radius:10px;border:1px dashed var(--line);font-size:13px;color:var(--mute)}
+.hl{background:color-mix(in srgb,var(--uni) 25%,transparent);border-radius:3px}
+.menu{display:none}@media (max-width:720px){.menu{display:grid}}
+.proto{position:fixed;right:10px;top:10px;font-size:11px;color:var(--mute);z-index:60}
+</style>
+</head>
+<body>
+<div class="proto"><button class="pill" id="paperBtn" title="Daylight e-paper theme">◐ Daylight theme</button></div>
+<div class="app">
+  <nav class="nav" id="nav">
+    <div class="brand"><small>BUZZ × PARACHUTE</small><b>Talk to Uni</b></div>
+    <button class="on" data-view="now"><span>☀︎</span>Now<span class="badge m">3</span></button>
+    <button data-view="search"><span>✧</span>Ask everything</button>
+    <h4>CONVERSATIONS</h4>
+    <button data-view="room:uni"><span class="dot" style="background:var(--uni)"></span>Uni<span class="badge m">@ 2</span></button>
+    <button data-view="room:uni-app"><span class="dot" style="background:var(--uni)"></span>#uni-app<span class="badge">4</span></button>
+    <button data-view="room:parachute"><span class="dot" style="background:var(--uni)"></span>#parachute</button>
+    <h4>VAULT</h4>
+    <button data-view="kind:cap"><span class="dot" style="background:var(--cap)"></span>Captures<span class="badge">2</span></button>
+    <button data-view="kind:note"><span class="dot" style="background:var(--note)"></span>Notes</button>
+    <button data-view="people"><span class="dot" style="background:var(--person)"></span>People</button>
+    <button data-view="projects"><span class="dot" style="background:var(--proj)"></span>Projects</button>
+    <h4>PROJECTS</h4>
+    <button data-open="proj:uni-app"><span>▣</span>Talk to Uni app</button>
+    <button data-open="proj:daylight"><span>▣</span>Daylight setup</button>
+  </nav>
+
+  <main class="main">
+    <header class="top">
+      <button class="icon menu" id="menuBtn">☰</button>
+      <div><h2 id="title">Now</h2><small id="subtitle">Conversations and captures, one stream</small></div>
+      <label class="search"><span>✧</span><input id="q" placeholder="Ask by meaning — across chats and vault"><span class="pill">⌘K</span></label>
+    </header>
+    <div class="filters" id="filters">
+      <button class="on" data-f="all">All</button>
+      <button data-f="chat">Chats</button>
+      <button data-f="cap">Captures</button>
+      <button data-f="note">Notes</button>
+      <button data-f="me">Mentions me</button>
+    </div>
+    <div id="banner"></div>
+    <div class="stream" id="stream"></div>
+    <footer class="composer">
+      <div class="mode"><button class="on chat" data-mode="chat">💬 Message Uni</button><button class="cap" data-mode="cap">✎ Capture</button><span class="hint" id="ctx" style="margin:4px 0 0 auto"></span></div>
+      <div class="row"><textarea id="box" rows="2" placeholder="Message Uni…"></textarea><button class="send" id="sendBtn">Send</button></div>
+      <div class="hint" id="modeHint">Goes to Buzz #Uni · @ to mention · [[ to link a note</div>
+    </footer>
+  </main>
+
+  <aside class="side" id="side"></aside>
+</div>
+
+<div class="sheet" id="sheet"><div class="in" id="sheetIn"></div></div>
+<div class="toast" id="toast"></div>
+
+<script>
+// ── Fake world: Buzz messages + Parachute notes share one item model ───────
+const P = {
+  aaron:{name:"Aaron",i:"A",about:"Builds Parachute + Uni. Daylight DC-1 and Pixel 7."},
+  uni:{name:"Uni",i:"✦",about:"Aaron's agent. Lives on uni-1, talks in Buzz, remembers in Parachute."},
+  astra:{name:"AstraJi",i:"S",about:"Co-designing the vault surfaces."},
+  kai:{name:"Kai",i:"K",about:"Runs the Buzz relay."}
+};
+const PROJ = {
+  "uni-app":{name:"Talk to Uni app",status:"Tier 1a in review (PR #1)",next:["Tier 1b: reactions, images, paging","Read markers via kind 30078","Parachute bridge (this prototype)"]},
+  "daylight":{name:"Daylight setup",status:"ADB over tailnet working",next:["High-contrast theme","Voice capture without camera"]}
+};
+let items = [
+  {id:"m1",src:"chat",room:"uni",who:"uni",t:"08:02",day:"Today",body:"Good morning. Overnight: **PR #1** (Tier 1a) is open — edits/deletes applied, unread badges, markdown, live updates. APK is on the Daylight.",people:["aaron"],proj:"uni-app",me:true,thread:2},
+  {id:"c1",src:"cap",who:"aaron",t:"08:15",day:"Today",body:"Walking thought: the app shouldn't have a 'notes tab' and a 'chats tab'. It's one stream of things I said, things Uni said, and things I kept.",tags:["idea","uni-app"],proj:"uni-app"},
+  {id:"m2",src:"chat",room:"uni-app",who:"astra",t:"08:40",day:"Today",body:"If a message becomes a note, it should keep a backlink to the conversation it came from — otherwise context evaporates.",people:["astra"],proj:"uni-app"},
+  {id:"n1",src:"note",who:"uni",t:"09:05",day:"Today",title:"Buzz feature parity",body:"Matrix of Buzz desktop/mobile vs uni-app. Tier 1: edits/deletes, unread, markdown, live, media, reactions, paging, avatars.",tags:["roadmap","buzz","uni-app"],proj:"uni-app",links:["m1"]},
+  {id:"m3",src:"chat",room:"uni",who:"aaron",t:"09:20",day:"Today",body:"@Uni can you pull together what Kai said about push notifications? I think it was last week.",people:["uni","kai"],me:false},
+  {id:"m4",src:"chat",room:"uni",who:"uni",t:"09:21",day:"Today",body:"Found it by meaning, not keywords — Kai called it *\"relay wake-ups\"* in #parachute on Thursday. Summary: relay needs an FCM profile or a UnifiedPush bridge. I saved it as a note and linked it to **Talk to Uni app**.",people:["aaron","kai"],me:true,proj:"uni-app",noted:"n2"},
+  {id:"n2",src:"note",who:"uni",t:"09:21",day:"Today",title:"Push for Talk to Uni",body:"Kai (Thu, #parachute): relay wake-ups need an FCM profile on the gateway, or a UnifiedPush distributor. Daylight has no Play Services → UnifiedPush path matters.",tags:["push","android"],proj:"uni-app",people:["kai"],links:["m4"]},
+  {id:"c2",src:"cap",who:"aaron",t:"10:02",day:"Today",body:"Ask Kai whether relay wake-ups could piggyback on the Tailscale connection.",tags:["todo"],people:["kai"]},
+  {id:"m5",src:"chat",room:"parachute",who:"kai",t:"Thu",day:"Thursday",body:"Re notifications: honestly the cleanest is relay wake-ups — the relay pokes a UnifiedPush endpoint, app wakes, syncs, shows a local notification. No message content leaves the relay.",people:["kai"]},
+  {id:"n3",src:"note",who:"aaron",t:"Wed",day:"Wednesday",title:"Daylight DC-1 quirks",body:"No camera → pairing must be paste-link. Reflective screen → avoid motion, prefer strong contrast. MALI log spam is harmless.",tags:["daylight","hardware"],proj:"daylight"}
+];
+
+// ── Tiny "meaning" search: concept groups stand in for embeddings ──────────
+const CONCEPTS = [
+  ["push","notification","notifications","wake","wake-ups","fcm","unifiedpush","alert"],
+  ["note","notes","capture","vault","parachute","remember","kept","keep"],
+  ["daylight","e-paper","screen","contrast","tablet","camera"],
+  ["roadmap","tier","plan","priorities","next"],
+  ["context","backlink","conversation","came from"]
+];
+function expand(q){const w=q.toLowerCase().split(/\W+/).filter(Boolean);const out=new Set(w);for(const x of w)for(const g of CONCEPTS)if(g.some(y=>y.startsWith(x)||x.startsWith(y)))g.forEach(y=>out.add(y));return [...out]}
+function score(it,terms){const hay=((it.title||"")+" "+it.body+" "+(it.tags||[]).join(" ")).toLowerCase();let s=0;for(const t of terms)if(t.length>2&&hay.includes(t))s+=t.length>5?2:1;return s}
+
+// ── State + render ─────────────────────────────────────────────────────────
+let view="now", filter="all", mode="chat", selected=null, context=null;
+const $=s=>document.querySelector(s);
+const esc=s=>s.replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+const md=s=>esc(s).replace(/\*\*(.+?)\*\*/g,"<b>$1</b>").replace(/\*(.+?)\*/g,"<i>$1</i>").replace(/@(\w+)/g,'<span class="chip person" style="padding:0 6px">@$1</span>');
+function toast(t){const e=$("#toast");e.textContent=t;e.classList.add("on");clearTimeout(e._t);e._t=setTimeout(()=>e.classList.remove("on"),2200)}
+
+function visible(){
+  let xs=items;
+  if(view.startsWith("room:"))xs=xs.filter(i=>i.src==="chat"&&i.room===view.slice(5)||i.src!=="chat"&&(i.links||[]).some(l=>items.find(m=>m.id===l)?.room===view.slice(5)));
+  if(view.startsWith("kind:"))xs=xs.filter(i=>i.src===view.slice(5));
+  if(filter==="me")xs=xs.filter(i=>i.me);else if(filter!=="all")xs=xs.filter(i=>i.src===filter);
+  return xs;
+}
+const SRC={chat:"chat",cap:"capture",note:"note"};
+function renderItem(it,opts={}){
+  const p=P[it.who];const cls=it.src==="note"?"card-note":it.src==="cap"?"card-cap":"";
+  const chips=[...(it.people||[]).map(x=>`<button class="chip person" data-open="person:${x}">${P[x].name}</button>`),
+    it.proj?`<button class="chip proj" data-open="proj:${it.proj}">▣ ${PROJ[it.proj].name}</button>`:"",
+    ...(it.tags||[]).map(t=>`<span class="chip tag">#${t}</span>`)].join("");
+  const room=it.src==="chat"?`<span class="pill">#${it.room}</span>`:"";
+  const acts=it.src==="chat"
+    ?`<button data-act="note" data-id="${it.id}">⤓ Keep as note</button><button data-act="thread" data-id="${it.id}">↳ Reply</button><button data-act="link" data-id="${it.id}">⛓ Link to…</button>`
+    :`<button data-act="discuss" data-id="${it.id}">💬 Talk about this</button><button data-act="open" data-id="${it.id}">Open</button>`;
+  const from=(it.links||[]).map(l=>items.find(m=>m.id===l)).filter(Boolean).map(m=>`<div class="thread">↩ from ${P[m.who].name} in #${m.room} · <button data-sel="${m.id}" style="color:inherit;text-decoration:underline">jump</button></div>`).join("");
+  const noted=it.noted?`<div class="linked">⤓ kept as note: <button data-open="note:${it.noted}" style="color:inherit;text-decoration:underline">${items.find(n=>n.id===it.noted)?.title}</button></div>`:"";
+  return `<div class="item ${selected===it.id?"sel":""}" data-sel="${it.id}">
+    <div class="av ${it.who==="uni"?"uni":""}">${p.i}</div>
+    <div class="bubble ${cls}">
+      <div class="meta"><b>${p.name}</b><span class="src ${it.src}">${SRC[it.src]}</span>${room}<time>${it.t}</time>${opts.score?`<span class="score">match ${opts.score}</span>`:""}</div>
+      ${it.title?`<p style="font-weight:700;margin-bottom:0">${esc(it.title)}</p>`:""}
+      <p>${opts.hl?hl(md(it.body),opts.hl):md(it.body)}</p>
+      ${it.thread?`<div class="thread">💬 ${it.thread} replies</div>`:""}
+      ${noted}${from}
+      ${chips?`<div class="chips">${chips}</div>`:""}
+      <div class="acts">${acts}</div>
+    </div></div>`;
+}
+function hl(html,terms){for(const t of terms.filter(t=>t.length>3))html=html.replace(new RegExp(`(?![^<]*>)(${t})`,"gi"),'<span class="hl">$1</span>');return html}
+
+function render(){
+  document.querySelectorAll(".nav [data-view]").forEach(b=>b.classList.toggle("on",b.dataset.view===view));
+  document.querySelectorAll("#filters button").forEach(b=>b.classList.toggle("on",b.dataset.f===filter));
+  const titles={now:["Now","Conversations and captures, one stream"],search:["Ask everything","Meaning search across Buzz and your vault"],"kind:cap":["Captures","Things you kept — each can become a conversation"],"kind:note":["Notes","Your Parachute vault"],people:["People","Everyone across chats and notes"],projects:["Projects","Where conversations and notes gather"]};
+  const [t,s]=titles[view]||[view.replace("room:","#"),"Buzz room · related notes woven in"];
+  $("#title").textContent=t;$("#subtitle").textContent=s;
+  $("#filters").style.display=view==="search"||view==="people"||view==="projects"?"none":"flex";
+  $("#banner").innerHTML=context?`<div class="banner">💬 Talking about <b>${esc(context.title||context.body.slice(0,50))}</b> — Uni sees this note as context. <button data-act="clearctx" style="text-decoration:underline">clear</button></div>`:"";
+  const st=$("#stream");
+  if(view==="search")return renderSearch($("#q").value);
+  if(view==="people"){st.innerHTML=Object.entries(P).map(([k,p])=>`<button class="side li" data-open="person:${k}" style="background:var(--card);margin:6px 0;padding:12px;border:1px solid var(--line)"><div class="av">${p.i}</div><div><b>${p.name}</b><div class="why">${p.about}</div></div><span class="score">${items.filter(i=>i.who===k||(i.people||[]).includes(k)).length} items</span></button>`).join("");return}
+  if(view==="projects"){st.innerHTML=Object.entries(PROJ).map(([k,p])=>`<button class="side li" data-open="proj:${k}" style="background:var(--card);margin:6px 0;padding:12px;border:1px solid var(--line)"><div class="av" style="background:var(--proj);color:var(--bg)">▣</div><div><b>${p.name}</b><div class="why">${p.status}</div></div><span class="score">${items.filter(i=>i.proj===k).length} items</span></button>`).join("");return}
+  let day="",html="";
+  for(const it of visible()){if(it.day!==day){day=it.day;html+=`<div class="day">${day}</div>`}html+=renderItem(it)}
+  st.innerHTML=html||`<p class="why">Nothing here yet.</p>`;
+}
+function renderSearch(q){
+  const st=$("#stream");
+  if(!q.trim()){st.innerHTML=`<div class="why" style="padding:20px 0">Try <button class="chip" data-try="push notifications">push notifications</button> <button class="chip" data-try="what should I work on next">what should I work on next</button> <button class="chip" data-try="e-paper screen">e-paper screen</button><p>One index over Buzz messages (local SQLite + relay search) and Parachute notes (semantic). Results say where they came from and why they matched.</p></div>`;return}
+  const terms=expand(q);
+  const hits=items.map(i=>[i,score(i,terms)]).filter(x=>x[1]>0).sort((a,b)=>b[1]-a[1]);
+  const lit=q.toLowerCase().split(/\W+/).filter(w=>w.length>2);
+  const ans=hits.length?`<div class="bubble" style="max-width:none;margin-bottom:12px;border-color:var(--uni)"><div class="meta"><b>✦ Uni</b><span class="src chat">answer</span></div><p>${hits.length} things across <b>${new Set(hits.map(h=>h[0].src)).size}</b> sources. The strongest: <i>${esc(hits[0][0].title||hits[0][0].body.slice(0,90))}…</i></p><div class="acts" style="opacity:1"><button data-act="asksave" data-q="${esc(q)}">⤓ Save this answer as a note</button><button data-act="askchat" data-q="${esc(q)}">💬 Continue in #Uni</button></div></div>`:"";
+  st.innerHTML=ans+hits.map(([i,s])=>{const exact=lit.some(w=>(i.body+(i.title||"")).toLowerCase().includes(w));return renderItem(i,{score:s,hl:terms})+`<div class="why" style="margin:-4px 0 8px 44px">${exact?"matched your words":"matched by meaning — “"+terms.filter(t=>(i.body+(i.tags||[]).join(" ")).toLowerCase().includes(t)).slice(0,2).join("”, “")+"”"}</div>`}).join("")||`<p class="why">No matches.</p>`;
+}
+
+// ── Side panel: context for whatever is selected ──────────────────────────
+function side(kind,key){
+  const s=$("#side");s.classList.add("open");
+  if(kind==="person"){const p=P[key];const rel=items.filter(i=>i.who===key||(i.people||[]).includes(key));
+    s.innerHTML=`<div class="k">PERSON</div><h3>${p.name}</h3><p class="why">${p.about}</p><button class="big uni" data-act="dm" data-p="${key}">💬 Message ${p.name}</button>
+    <section><h5>RECENT TOGETHER · ${rel.length}</h5>${rel.map(i=>`<button class="li" data-sel="${i.id}"><span class="src ${i.src}">${SRC[i.src]}</span>${esc((i.title||i.body).slice(0,48))}…</button>`).join("")}</section>`}
+  if(kind==="proj"){const p=PROJ[key];const rel=items.filter(i=>i.proj===key);
+    s.innerHTML=`<div class="k">PROJECT</div><h3>${p.name}</h3><p class="why">${p.status}</p>
+    <section><h5>NEXT</h5>${p.next.map(n=>`<div class="li">☐ ${n}</div>`).join("")}</section>
+    <button class="big uni" data-act="projchat" data-p="${key}">💬 Ask Uni about this project</button>
+    <section><h5>CHATS + NOTES · ${rel.length}</h5>${rel.map(i=>`<button class="li" data-sel="${i.id}"><span class="src ${i.src}">${SRC[i.src]}</span>${esc((i.title||i.body).slice(0,44))}…</button>`).join("")}</section>`}
+  if(kind==="note"){const n=items.find(i=>i.id===key);selected=key;
+    const back=(n.links||[]).map(l=>items.find(m=>m.id===l)).filter(Boolean);
+    const disc=items.filter(i=>i.about===key);
+    s.innerHTML=`<div class="k">${n.src==="cap"?"CAPTURE":"NOTE"} · PARACHUTE</div><h3>${esc(n.title||"Capture")}</h3><div class="doc">${md(n.body)}</div>
+    <div class="chips">${(n.tags||[]).map(t=>`<span class="chip tag">#${t}</span>`).join("")}</div>
+    <button class="big uni" data-act="discuss" data-id="${key}">💬 Talk about this with Uni</button>
+    <section><h5>CAME FROM</h5>${back.length?back.map(m=>`<button class="li" data-sel="${m.id}"><span class="src chat">chat</span>${P[m.who].name} in #${m.room}</button>`).join(""):'<p class="why">Written directly in the vault.</p>'}</section>
+    <section><h5>CONVERSATIONS ABOUT IT</h5>${disc.length?disc.map(m=>`<button class="li" data-sel="${m.id}"><span class="src chat">chat</span>${esc(m.body.slice(0,40))}…</button>`).join(""):'<p class="why">None yet.</p>'}</section>
+    <section><h5>RELATED BY MEANING</h5>${items.filter(i=>i.id!==key).map(i=>[i,score(i,expand((n.title||"")+" "+n.body))]).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([i])=>`<button class="li" data-sel="${i.id}"><span class="src ${i.src}">${SRC[i.src]}</span>${esc((i.title||i.body).slice(0,40))}…</button>`).join("")}</section>`}
+  render();
+}
+
+// ── Actions: the Buzz ⇄ Parachute bridges ─────────────────────────────────
+function openSheet(html){$("#sheetIn").innerHTML=html;$("#sheet").classList.add("on")}
+function closeSheet(){$("#sheet").classList.remove("on")}
+function keepAsNote(id){
+  const m=items.find(i=>i.id===id);
+  openSheet(`<div class="k">KEEP AS NOTE · PARACHUTE</div><h3 style="margin:4px 0 10px">From ${P[m.who].name} in #${m.room}</h3>
+  <label class="why">Title</label><input id="nt" value="${esc(m.body.replace(/[*@]/g,"").slice(0,48))}">
+  <label class="why">Note</label><textarea id="nb" rows="4">${esc(m.body)}</textarea>
+  <div class="why">Uni suggests</div><div class="sug">${[...(m.people||[]).map(p=>"person:"+p),m.proj?"proj:"+m.proj:"proj:uni-app","tag:idea"].map(x=>`<span class="chip on" data-x="${x}">${x.startsWith("person")?P[x.split(":")[1]].name:x.startsWith("proj")?"▣ "+PROJ[x.split(":")[1]].name:"#"+x.split(":")[1]}</span>`).join("")}</div>
+  <div class="why">↩ The note keeps a backlink to this message, and the message shows “kept as note”.</div>
+  <button class="big uni" data-act="savenote" data-id="${id}">Save to vault</button><button class="big" data-act="close">Cancel</button>`);
+}
+function discuss(id){
+  const n=items.find(i=>i.id===id);context=n;view="room:uni";filter="all";setMode("chat");
+  $("#box").value="";$("#box").placeholder=`Ask Uni about “${n.title||"this capture"}”…`;$("#box").focus();
+  render();toast("Opened #Uni with the note as context");
+}
+function setMode(m){mode=m;document.querySelectorAll(".mode button").forEach(b=>b.classList.toggle("on",b.dataset.mode===m));
+  $("#box").placeholder=m==="chat"?"Message Uni…":"Capture a thought — Uni files it";
+  $("#modeHint").textContent=m==="chat"?"Goes to Buzz #Uni · @ to mention · [[ to link a note":"Goes to your Parachute vault · Uni suggests people, project and tags · stays private unless shared";}
+function send(){
+  const v=$("#box").value.trim();if(!v)return;
+  if(mode==="cap"){const c={id:"c"+Date.now(),src:"cap",who:"aaron",t:"now",day:"Today",body:v,tags:["inbox"]};
+    if(/kai/i.test(v))c.people=["kai"];if(/app|uni/i.test(v))c.proj="uni-app";items.push(c);toast("Captured to vault · Uni filed it under "+(c.proj?PROJ[c.proj].name:"Inbox"))}
+  else{const room=view.startsWith("room:")?view.slice(5):"uni";const m={id:"m"+Date.now(),src:"chat",room,who:"aaron",t:"now",day:"Today",body:v};if(context)m.about=context.id;items.push(m);
+    setTimeout(()=>{items.push({id:"m"+Date.now(),src:"chat",room,who:"uni",t:"now",day:"Today",me:true,about:context?.id,
+      body:context?`Looking at **${context.title||"your capture"}** with you: ${context.people?.includes("kai")?"Kai's UnifiedPush path is the one that works on the Daylight (no Play Services). Want me to ask him in #parachute and link the answer back to this note?":"I linked this conversation to the note, so it'll show up there under *Conversations about it*."}`
+      :"On it. I'll reply here, and anything worth keeping I'll offer to save to the vault."});render();$("#stream").scrollTop=1e9},700)}
+  $("#box").value="";if(view==="search"||view==="people"||view==="projects")view="now";render();$("#stream").scrollTop=1e9;
+}
+
+document.addEventListener("click",e=>{
+  const b=e.target.closest("button,[data-sel],.chip[data-x]");if(!b)return;
+  if(b.dataset.x){b.classList.toggle("on");return}
+  if(b.dataset.view){view=b.dataset.view;context=view===("room:uni")?context:null;$("#nav").classList.remove("open");if(view==="search")$("#q").focus();render();return}
+  if(b.dataset.f){filter=b.dataset.f;render();return}
+  if(b.dataset.mode){setMode(b.dataset.mode);return}
+  if(b.dataset.try){$("#q").value=b.dataset.try;view="search";render();return}
+  if(b.dataset.open){const[k,v]=b.dataset.open.split(":");side(k,v);return}
+  const a=b.dataset.act,id=b.dataset.id;
+  if(a==="note")return keepAsNote(id);
+  if(a==="discuss")return discuss(id);
+  if(a==="open")return side("note",id);
+  if(a==="close")return closeSheet();
+  if(a==="clearctx"){context=null;render();return}
+  if(a==="thread"){toast("Thread view (as in Tier 1a)");return}
+  if(a==="link"){toast("[[ picker: link this message to a note or project");return}
+  if(a==="dm"||a==="projchat"){view="room:uni";setMode("chat");$("#box").value=a==="dm"?`@${P[b.dataset.p].name} `:`What's the state of ${PROJ[b.dataset.p].name}? `;$("#box").focus();render();return}
+  if(a==="savenote"){const m=items.find(i=>i.id===id);const n={id:"n"+Date.now(),src:"note",who:"aaron",t:"now",day:"Today",title:$("#nt").value,body:$("#nb").value,links:[id],people:m.people,proj:m.proj||"uni-app",tags:["from-chat"]};items.push(n);m.noted=n.id;closeSheet();render();toast("Saved to Parachute · linked both ways");side("note",n.id);return}
+  if(a==="asksave"){const q=b.dataset.q;const n={id:"n"+Date.now(),src:"note",who:"uni",t:"now",day:"Today",title:"Q: "+q,body:"Uni's answer, with sources from chats and notes, saved for later.",tags:["answer"]};items.push(n);toast("Answer saved as a note");side("note",n.id);return}
+  if(a==="askchat"){view="room:uni";$("#box").value=b.dataset.q;setMode("chat");render();return}
+  if(b.dataset.sel){const it=items.find(i=>i.id===b.dataset.sel);selected=it.id;if(it.src!=="chat")return side("note",it.id);
+    if(!visible().includes(it)){view="room:"+it.room;filter="all"}render();document.querySelector(`.item[data-sel="${it.id}"]`)?.scrollIntoView({block:"center"});return}
+});
+$("#sheet").addEventListener("click",e=>{if(e.target.id==="sheet")closeSheet()});
+$("#q").addEventListener("input",()=>{view="search";render()});
+$("#q").addEventListener("focus",()=>{if(view!=="search"){view="search";render()}});
+$("#box").addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send()}});
+$("#sendBtn").onclick=send;
+$("#menuBtn").onclick=()=>$("#nav").classList.toggle("open");
+$("#paperBtn").onclick=()=>document.body.classList.toggle("paper");
+document.addEventListener("keydown",e=>{if((e.metaKey||e.ctrlKey)&&e.key==="k"){e.preventDefault();$("#q").focus()}});
+side("proj","uni-app");render();
+</script>
+</body>
+</html>
