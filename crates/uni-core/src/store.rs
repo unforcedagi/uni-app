@@ -264,9 +264,10 @@ CREATE TABLE IF NOT EXISTS profiles (
 /// kind-40003 edit signed by the original author (ties: larger event id). An
 /// edit that was itself deleted is ignored. Recreated on every open so its
 /// definition can evolve.
-const VIEW_SCHEMA: &str = r#"
-DROP VIEW IF EXISTS visible_items;
-CREATE VIEW visible_items AS
+/// `CREATE VIEW` text for `visible_items`. SQLite stores this text verbatim
+/// in `sqlite_master`, so [`Store::open`] only rebuilds the view when the
+/// definition changed instead of dropping it (a write) on every open.
+const VIEW_SCHEMA: &str = r#"CREATE VIEW visible_items AS
 SELECT i.source, i.ref, i.channel, i.author, i.ts,
        COALESCE(e.content, i.body) AS body,
        i.mentions_me,
@@ -363,7 +364,17 @@ impl Store {
                 [],
             )?;
         }
-        conn.execute_batch(VIEW_SCHEMA)?;
+        let view_sql: Option<String> = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type='view' AND name='visible_items'",
+                [],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if view_sql.as_deref().map(str::trim) != Some(VIEW_SCHEMA.trim().trim_end_matches(';')) {
+            conn.execute_batch("DROP VIEW IF EXISTS visible_items;")?;
+            conn.execute_batch(VIEW_SCHEMA)?;
+        }
         let has_publishable: bool = conn.query_row(
             "SELECT COUNT(*) FROM pragma_table_info('read_state') WHERE name='publishable'",
             [],
@@ -1350,6 +1361,30 @@ mod tests {
         assert_eq!(s.message_mentions("e1").unwrap(), vec!["aa", "bb"]);
         s.set_message_mentions("e1", &[]).unwrap();
         assert!(s.message_mentions("e1").unwrap().is_empty());
+    }
+
+    #[test]
+    fn reopen_does_not_rewrite_schema() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("uni.db");
+        let version = |s: &Store| -> i64 {
+            s.conn
+                .query_row("PRAGMA schema_version", [], |r| r.get(0))
+                .unwrap()
+        };
+        let first = version(&Store::open(&path).unwrap());
+        let again = Store::open(&path).unwrap();
+        assert_eq!(version(&again), first);
+        // A stale view definition is still replaced.
+        again
+            .conn
+            .execute_batch(
+                "DROP VIEW visible_items; CREATE VIEW visible_items AS SELECT 1 AS source;",
+            )
+            .unwrap();
+        drop(again);
+        let fixed = Store::open(&path).unwrap();
+        assert!(fixed.search_messages("x", 5).is_ok());
     }
 
     #[test]
