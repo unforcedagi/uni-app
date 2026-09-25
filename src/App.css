@@ -133,3 +133,10 @@ h1 { font-size: 22px; margin: 5px 0 0; letter-spacing: -.03em; }
 .older { text-align: center; margin: 6px 0 2px; font-size: 12px; color: var(--muted, #8a8f98); }
 .older button { border: 1px solid rgba(127,127,127,.3); background: none; color: inherit; border-radius: 999px; padding: 4px 12px; cursor: pointer; }
 .message-actions button:disabled { opacity: .6; cursor: default; }
+
+/* Inline editor for your own messages (src/InlineEditor.tsx). */
+.inline-editor { display: flex; flex-direction: column; gap: 6px; margin: 4px 0; }
+.inline-editor textarea { width: 100%; box-sizing: border-box; font: inherit; resize: vertical; border-radius: 8px; padding: 8px; }
+.inline-editor-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.inline-editor-actions small { color: #99b2bf; font-size: 11px; }
+.message-actions button.danger { color: #ff8a80; font-weight: 600; }

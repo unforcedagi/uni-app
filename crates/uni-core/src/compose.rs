@@ -2,7 +2,9 @@
 use std::collections::HashSet;
 
 use buzz_sdk::{
-    builders::{build_message, build_reaction, build_remove_reaction},
+    builders::{
+        build_delete_compat, build_edit, build_message, build_reaction, build_remove_reaction,
+    },
     ThreadRef,
 };
 use nostr::{EventId, Keys, PublicKey, Tag};
@@ -159,6 +161,70 @@ pub async fn remove_reaction(
         .map_err(|e| Error::Invalid(format!("cannot sign deletion: {e}")))?;
     publish_aux(relay_url, keys, auth_tag, store, event, reaction_id).await?;
     Ok(())
+}
+
+/// Look up a cached message in `channel` and require that we authored it.
+/// Buzz (and our `visible_items` view) only honours edits signed by the
+/// original author, so refusing locally avoids publishing a no-op event.
+fn own_message(store: &Store, keys: &Keys, channel: Uuid, target: &str) -> Result<EventId> {
+    let msg = store
+        .message(&channel.to_string(), target)?
+        .ok_or_else(|| Error::Invalid("message is not cached in this room".into()))?;
+    if msg.item.author != keys.public_key().to_hex() {
+        return Err(Error::Invalid("you can only change your own messages".into()));
+    }
+    EventId::from_hex(&msg.item.r#ref).map_err(|_| Error::Invalid("invalid message id".into()))
+}
+
+/// Edit one of our own messages: kind 40003 with `h` (channel) and `e`
+/// (target), content = full new text. Mirrors `buzz_sdk::builders::build_edit`
+/// (~/Code/buzz/crates/buzz-sdk/src/builders.rs), the shape Buzz desktop's
+/// `edit_message` command publishes for a plain-text edit that adds no new
+/// mentions (desktop only `p`-tags mentions newly added by the edit so a typo
+/// fix never re-wakes anyone). Recorded locally only after the relay's `OK`,
+/// so `visible_items` shows the new body at once. Returns the edit event id.
+pub async fn edit_message(
+    relay_url: &str,
+    keys: &Keys,
+    auth_tag: Option<&Tag>,
+    store: &Store,
+    channel: Uuid,
+    target: &str,
+    new_content: &str,
+) -> Result<String> {
+    let content = new_content.trim();
+    if content.is_empty() || content.len() > 64 * 1024 {
+        return Err(Error::Invalid(
+            "edit must contain text and be at most 64 KiB".into(),
+        ));
+    }
+    let target_id = own_message(store, keys, channel, target)?;
+    let event = build_edit(channel, target_id, content)
+        .map_err(|e| Error::Invalid(e.to_string()))?
+        .sign_with_keys(keys)
+        .map_err(|e| Error::Invalid(format!("cannot sign edit: {e}")))?;
+    publish_aux(relay_url, keys, auth_tag, store, event, &target_id.to_hex()).await
+}
+
+/// Delete one of our own messages exactly as Buzz desktop does
+/// (`delete_message` in ~/Code/buzz/desktop/src-tauri/src/commands/messages.rs
+/// → `build_delete_compat`): a NIP-09 kind 5 with `h` (so channel-scoped
+/// subscriptions see it) and `e` tags, empty content. Recorded locally after
+/// the relay's `OK`, which hides the message from `visible_items`.
+pub async fn delete_message(
+    relay_url: &str,
+    keys: &Keys,
+    auth_tag: Option<&Tag>,
+    store: &Store,
+    channel: Uuid,
+    target: &str,
+) -> Result<String> {
+    let target_id = own_message(store, keys, channel, target)?;
+    let event = build_delete_compat(channel, target_id)
+        .map_err(|e| Error::Invalid(e.to_string()))?
+        .sign_with_keys(keys)
+        .map_err(|e| Error::Invalid(format!("cannot sign deletion: {e}")))?;
+    publish_aux(relay_url, keys, auth_tag, store, event, &target_id.to_hex()).await
 }
 
 async fn publish_aux(
