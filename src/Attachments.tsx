@@ -23,7 +23,7 @@ export function useRelayOrigin(): string | null {
 /** Message body minus the attachment lines rendered by <Attachments>. */
 export function attachmentBody(body: string, media: MediaRef[] | undefined, relayOrigin: string | null): string {
   const renderable = collectAttachments(body, media ?? [], relayOrigin).filter((m) =>
-    !!relayMediaSha(m.url, relayOrigin) || (m.url.startsWith("https://") && attachmentKind(m) === "image"),
+    !!relayMediaSha(m.url, relayOrigin),
   );
   return stripAttachmentLines(body, renderable);
 }
@@ -43,12 +43,13 @@ async function slot<T>(f: () => Promise<T>): Promise<T> {
 }
 
 function relayBlob(m: MediaRef): Promise<string> {
-  const hit = blobs.get(m.url);
-  if (hit) { blobs.delete(m.url); blobs.set(m.url, hit); return hit; }
+  const key = `${m.url}|${m.sha256 ?? ""}`;
+  const hit = blobs.get(key);
+  if (hit) { blobs.delete(key); blobs.set(key, hit); return hit; }
   const p = slot(() => invoke<ArrayBuffer>("media_bytes", { url: m.url, sha: m.sha256 }))
     .then((buf) => URL.createObjectURL(new Blob([buf], { type: m.mime ?? "" })));
-  p.catch(() => blobs.delete(m.url));
-  blobs.set(m.url, p);
+  p.catch(() => blobs.delete(key));
+  blobs.set(key, p);
   while (blobs.size > MAX_BLOBS) {
     const [k, old] = blobs.entries().next().value!;
     blobs.delete(k);
