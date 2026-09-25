@@ -47,6 +47,16 @@ export function shareText(note: Pick<JournalNote, "path" | "content" | "created_
   return `@${uniLabel} ${head}\n\n${quoted}\n\n— ${ref}`;
 }
 
+/** A soft opening line for the journal, by time of day. */
+export function greeting(d: Date): string {
+  const h = d.getHours();
+  if (h < 5) return "Late night. What's still with you?";
+  if (h < 12) return "Good morning. What's arriving?";
+  if (h < 17) return "Good afternoon. What's here right now?";
+  if (h < 21) return "Good evening. How was the day?";
+  return "Winding down. What wants to be said?";
+}
+
 export function mmss(seconds: number): string {
   const s = Math.max(0, Math.floor(seconds));
   return `${Math.floor(s / 60)}:${pad(s % 60)}`;

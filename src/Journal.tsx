@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { entryText, mmss, newDraft, pickAudioMime, type FlushReport, type JournalNote, type QueuedEntry } from "./journal";
+import { entryText, greeting, mmss, newDraft, pickAudioMime, type FlushReport, type JournalNote, type QueuedEntry } from "./journal";
 
 type Room = { id: string; name: string };
 type VaultConfig = { hub: string; vault: string };
@@ -187,7 +187,8 @@ export default function Journal({ rooms, uniRoomId, onShare, onBack }: { rooms: 
     </header>
     {settings && cfg && <JournalSettings cfg={cfg} onSaved={(c) => { setCfg(c); setSettings(false); void load(false); }} />}
     <div className="journal-compose">
-      <textarea value={text} onChange={(e) => setText(e.target.value)} placeholder="What's here right now? Type, or tap the mic and speak." rows={4} maxLength={65536} aria-label="Journal entry"
+      <p className="journal-prompt">{greeting(new Date())}</p>
+      <textarea value={text} onChange={(e) => setText(e.target.value)} placeholder="What's here right now…" rows={4} maxLength={65536} aria-label="Journal entry"
         onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void saveText(); } }} />
       <div className="journal-actions">
         <button className={`mic ${recorder.recording ? "on" : ""}`} onClick={() => void toggleMic()} disabled={saving && !recorder.recording} aria-label={recorder.recording ? "Stop recording and save" : "Record a voice entry"}>
