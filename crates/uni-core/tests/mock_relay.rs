@@ -1530,3 +1530,156 @@ async fn sync_older_pages_back_with_aux() {
     assert_eq!((tl[0].message.item.body.as_str(), tl[0].message.edited), ("old 0 (edited)", true));
     assert_eq!(unread(&store), unread_before, "history is not news");
 }
+
+// ── Cross-device read state (Buzz NIP-RS, kind 30078) ─────────────────────
+
+/// A read-state event as Buzz desktop publishes it (`readStateManager.ts`
+/// `publishOneSlot`): NIP-44 v2 to self, `d=read-state:<slot>`, `t=read-state`.
+fn desktop_read_state(keys: &Keys, slot: &str, client_id: &str, contexts: Value, ts: u64) -> Value {
+    use nostr::nips::nip44;
+    let blob = json!({"v": 1, "client_id": client_id, "contexts": contexts}).to_string();
+    let content = nip44::encrypt(keys.secret_key(), &keys.public_key(), blob, nip44::Version::V2).unwrap();
+    signed(
+        keys,
+        30078,
+        vec![named("d", &format!("read-state:{slot}")), named("t", "read-state")],
+        &content,
+        ts,
+    )
+}
+
+fn now() -> u64 {
+    nostr::Timestamp::now().as_secs()
+}
+
+fn unread(store: &Store, me: &Keys, ch: Uuid) -> i64 {
+    store
+        .rooms_for(Some(&me.public_key().to_hex()))
+        .unwrap()
+        .into_iter()
+        .find(|r| r.id == ch.to_string())
+        .unwrap()
+        .unread
+}
+
+#[tokio::test]
+async fn read_state_newer_remote_clears_unread_older_never_regresses() {
+    let f = fixture().await;
+    let store = Store::open_in_memory().unwrap();
+    sync_once(&f.url, &f.me, None, &store).await.unwrap();
+    // New messages from others after first sight: unread on this device.
+    f.relay.publish(signed(&f.other, 9, vec![h(f.ch_a), p(&f.other)], "new a", 150));
+    f.relay.publish(signed(&f.other, 9, vec![h(f.ch_b), p(&f.other)], "new b", 250));
+    sync_once(&f.url, &f.me, None, &store).await.unwrap();
+    assert_eq!((unread(&store, &f.me, f.ch_a), unread(&store, &f.me, f.ch_b)), (1, 1));
+
+    // Desktop read #a up to 150; its (older) marker for #b predates what we
+    // already had. A foreign key's event is ignored (authors=[me] + pubkey check).
+    let slot = "0123456789abcdef0123456789abcdef";
+    f.relay.publish(desktop_read_state(
+        &f.me,
+        slot,
+        "desktop-client",
+        json!({ f.ch_a.to_string(): 150, f.ch_b.to_string(): 10, "thread:x": 999 }),
+        now(),
+    ));
+    f.relay.publish(desktop_read_state(&f.other, slot, "evil", json!({ f.ch_b.to_string(): 999 }), now()));
+    let r = sync_once(&f.url, &f.me, None, &store).await.unwrap();
+    assert_eq!(r.read_state_advanced, vec![f.ch_a.to_string()]);
+    assert_eq!(unread(&store, &f.me, f.ch_a), 0);
+    assert_eq!(unread(&store, &f.me, f.ch_b), 1);
+    assert_eq!(store.read_marker(&f.ch_b.to_string()).unwrap(), Some(200));
+
+    // Idempotent: re-sync advances nothing.
+    let r = sync_once(&f.url, &f.me, None, &store).await.unwrap();
+    assert!(r.read_state_advanced.is_empty());
+}
+
+#[tokio::test]
+async fn read_state_publish_has_exact_desktop_shape() {
+    use nostr::nips::nip44;
+    let f = fixture().await;
+    let store = Store::open_in_memory().unwrap();
+    sync_once(&f.url, &f.me, None, &store).await.unwrap();
+    // First-sight seeds alone are never published.
+    assert!(!uni_core::read_state_dirty(&store, &f.me).unwrap());
+    assert!(!uni_core::publish_read_state(&f.url, &f.me, None, &store).await.unwrap());
+
+    // Another device already read #b; we read #a here.
+    f.relay.publish(desktop_read_state(&f.me, "desk", "desktop-client", json!({ f.ch_b.to_string(): 200 }), now()));
+    f.relay.publish(signed(&f.other, 9, vec![h(f.ch_a), p(&f.other)], "new a", 150));
+    sync_once(&f.url, &f.me, None, &store).await.unwrap();
+    assert!(store.mark_read(&f.ch_a.to_string()).unwrap());
+    assert!(uni_core::publish_read_state(&f.url, &f.me, None, &store).await.unwrap());
+    // Nothing changed since: no second publish.
+    assert!(!uni_core::publish_read_state(&f.url, &f.me, None, &store).await.unwrap());
+
+    let mine: Vec<Value> = f
+        .relay
+        .events
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|e| e["kind"] == 30078 && tag_values(e, "d") != vec!["read-state:desk"])
+        .cloned()
+        .collect();
+    assert_eq!(mine.len(), 1, "{mine:?}");
+    let ev = &mine[0];
+    assert_eq!(ev["pubkey"], f.me.public_key().to_hex());
+    let tags = ev["tags"].as_array().unwrap();
+    assert_eq!(tags.len(), 2);
+    assert_eq!(tags[0][0], "d");
+    let slot = tags[0][1].as_str().unwrap().strip_prefix("read-state:").unwrap();
+    assert!(slot.len() == 32 && slot.chars().all(|c| c.is_ascii_hexdigit()), "{slot}");
+    assert_eq!(tags[1], json!(["t", "read-state"]));
+    assert!(ev["created_at"].as_u64().unwrap() + 5 >= now());
+    let plain = nip44::decrypt(f.me.secret_key(), &f.me.public_key(), ev["content"].as_str().unwrap()).unwrap();
+    // Exact desktop JSON shape and key order: {"v":1,"client_id":…,"contexts":{…}}.
+    assert!(plain.starts_with(r#"{"v":1,"client_id":""#), "{plain}");
+    let blob: Value = serde_json::from_str(&plain).unwrap();
+    assert_eq!(blob.as_object().unwrap().len(), 3);
+    assert!(Uuid::parse_str(blob["client_id"].as_str().unwrap()).is_ok());
+    assert_eq!(
+        blob["contexts"],
+        json!({ f.ch_a.to_string(): 150, f.ch_b.to_string(): 200 })
+    );
+}
+
+#[tokio::test]
+async fn live_read_state_from_desktop_arrives_in_real_time() {
+    let f = fixture().await;
+    let store = Store::open_in_memory().unwrap();
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let (stop_tx, stop_rx) = watch::channel(false);
+    let url = f.url.clone();
+    let me = f.me.clone();
+    let store_ref = &store;
+    let runner = async move { run_live(live_cfg(&url), &me, None, store_ref, tx, stop_rx).await };
+    let driver = async {
+        let mut seen = Vec::new();
+        let mut eose = 0;
+        while eose < 2 {
+            assert!(wait_for(&mut rx, &mut seen, Duration::from_secs(5), |e| matches!(e, LiveEvent::Eose { .. })).await);
+            eose += 1;
+        }
+        f.relay.publish(signed(&f.other, 9, vec![h(f.ch_a), p(&f.other)], "new a", 150));
+        assert!(wait_for(&mut rx, &mut seen, Duration::from_secs(5), |e| matches!(e, LiveEvent::Message { new: true, .. })).await);
+        assert_eq!(unread(&store, &f.me, f.ch_a), 1);
+        f.relay.publish(desktop_read_state(&f.me, "desk", "desktop-client", json!({ f.ch_a.to_string(): 150 }), now()));
+        let ch = f.ch_a.to_string();
+        assert!(
+            wait_for(&mut rx, &mut seen, Duration::from_secs(5), |e| matches!(e, LiveEvent::ReadState { channels } if channels == &vec![ch.clone()])).await,
+            "{seen:?}"
+        );
+        assert_eq!(unread(&store, &f.me, f.ch_a), 0);
+        // An older marker arriving live is a no-op (no event, no regression).
+        f.relay.publish(desktop_read_state(&f.me, "desk", "desktop-client", json!({ f.ch_a.to_string(): 1 }), now()));
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert_eq!(store.read_marker(&ch).unwrap(), Some(150));
+        stop_tx.send(true).unwrap();
+        assert!(wait_for(&mut rx, &mut seen, Duration::from_secs(5), |e| matches!(e, LiveEvent::Stopped { .. })).await);
+        assert!(!seen.iter().filter(|e| matches!(e, LiveEvent::ReadState { .. })).nth(1).is_some(), "{seen:?}");
+    };
+    let (r, _) = tokio::join!(runner, driver);
+    r.unwrap();
+}

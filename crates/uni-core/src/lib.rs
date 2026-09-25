@@ -12,6 +12,7 @@
 //!   A single pass is complete and idempotent (the phone's whole loop).
 //! - [`pairing`]: NIP-AB target role — receive this account's key from Buzz desktop's
 //!   `nostrpair://` link (protocol crypto from `buzz_core::pairing`).
+//! - [`readstate`]: cross-device read markers (Buzz NIP-RS: kind 30078, NIP-44 to self).
 //! - [`live`]: optional long-lived loop on top: open subs after EOSE, membership
 //!   notifications, reconnect with [`backoff`] and re-AUTH.
 
@@ -21,6 +22,7 @@ pub mod compose;
 pub mod identity;
 pub mod live;
 pub mod pairing;
+pub mod readstate;
 pub mod store;
 pub mod sync;
 
@@ -32,6 +34,7 @@ pub use identity::{
     load_keys, set_device_keys, store_keyring_nsec, KeyInit, KeySource,
 };
 pub use live::{run_live, LiveConfig, LiveEvent};
+pub use readstate::{publish_read_state, read_state_dirty};
 pub use store::{
     ConversationMessage, Item, Member, Profile, Reaction, Room, Store, TimelineMessage,
 };
