@@ -4,6 +4,8 @@ import { listen } from "@tauri-apps/api/event";
 import "./App.css";
 import { markdownToText, parseMarkdown, type Block, type Inline } from "./markdown";
 import { findUniMember, findUniRoom, handoffText, type UniAction } from "./uniActions";
+import { DeleteButton, InlineEditor } from "./InlineEditor";
+import { lastOwnMessage } from "./ownMessages";
 import { activeQuery, filterMembers, insertMention, memberLabels, mentionSegments, pruneBindings, resolveRecipients, type Bindings, type Member } from "./mentions";
 
 type Room = { id: string; name: string; last_message: string | null; last_ts: number | null; mentions: boolean; unread: number };
@@ -177,13 +179,15 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const [limit, setLimit] = useState(300);
   const [older, setOlder] = useState<"idle" | "loading" | "done">("idle");
   const [reactFor, setReactFor] = useState<string | null>(null);
+  // Our own message currently open in the inline editor.
+  const [editing, setEditing] = useState<string | null>(null);
   // Messages handed to Uni as notes this session (a local receipt).
   const [kept, setKept] = useState<Set<string>>(new Set());
   // Latest bindings for syncPicker (called in the same tick as setBindings).
   const bindingsRef = useRef<Bindings>(new Map());
   // Message actions go through a ref so the memoized list never holds stale closures.
   useEffect(() => { bindingsRef.current = bindings; }, [bindings]);
-  const actions = useRef({ react: (_m: Message, _e: string) => {}, toUni: (_m: Message, _a: UniAction) => {}, openThread: (_m: Message) => {}, reply: (_id: string) => {}, loadOlder: () => {} });
+  const actions = useRef({ react: (_m: Message, _e: string) => {}, toUni: (_m: Message, _a: UniAction) => {}, openThread: (_m: Message) => {}, reply: (_id: string) => {}, loadOlder: () => {}, saveEdit: (_m: Message, _b: string): Promise<void> => Promise.resolve(), cancelEdit: () => {}, deleteOwn: (_m: Message): Promise<void> => Promise.resolve() });
   const preserveScroll = useRef<number | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const channelRef = useRef<string | null>(null);
@@ -267,7 +271,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   }, [channel, root, status, tick, limit, loadRooms]);
 
   // New room: back to the default window; older pages load on demand.
-  useEffect(() => { setLimit(300); setOlder("idle"); setReactFor(null); }, [channel]);
+  useEffect(() => { setLimit(300); setOlder("idle"); setReactFor(null); setEditing(null); }, [channel]);
 
   useEffect(() => {
     if (!channel) { setMembers([]); return; }
@@ -341,6 +345,28 @@ function Conversations({ onForget }: { onForget: () => void }) {
     setTick((n) => n + 1);
   }
 
+  // Edit / delete our own messages (kind 40003 / kind 5, as Buzz desktop).
+  // Rejecting keeps the inline editor open with the text intact.
+  async function saveEdit(m: Message, body: string) {
+    setError(null);
+    try {
+      await invoke("edit_message", { channel: m.channel, target: m.ref, body });
+      setEditing(null);
+      setTick((n) => n + 1);
+      void loadRooms().catch(() => {});
+    } catch (e) { setError(`Edit failed: ${e}`); throw e; }
+  }
+  async function deleteOwn(m: Message) {
+    setError(null);
+    try {
+      await invoke("delete_message", { channel: m.channel, target: m.ref });
+      if (editing === m.ref) setEditing(null);
+      if (replyTo === m.ref) setReplyTo(null);
+      setTick((n) => n + 1);
+      void loadRooms().catch(() => {});
+    } catch (e) { setError(`Delete failed: ${e}`); }
+  }
+
   useEffect(() => {
     if (focusComposer.current) { focusComposer.current = false; input.current?.focus(); }
   }, [root]);
@@ -411,6 +437,12 @@ function Conversations({ onForget }: { onForget: () => void }) {
       }
     }
     if (picker && e.key === "Escape") { e.preventDefault(); setPicker(null); return; }
+    if (e.key === "ArrowUp" && !draft) {
+      // Slack/Buzz convention: ArrowUp in an empty composer edits your last message.
+      const last = lastOwnMessage(messages, identity);
+      if (last) { e.preventDefault(); setEditing(last.ref); }
+      return;
+    }
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(); }
   }
 
@@ -486,7 +518,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     return <article key={m.ref} className={`message ${grouped ? "grouped" : ""} ${m.author === identity ? "mine" : ""} ${m.mentions_me ? "highlight" : ""} ${inThread && m.ref === root ? "thread-root" : ""}`}
       onContextMenu={(e) => { e.preventDefault(); setReactFor(reactFor === m.ref ? null : m.ref); }}>
       {grouped ? <time className="gutter-time">{clock(m.ts)}</time> : <span className="message-avatar" style={{ background: `hsl(${hue(m.author)} 45% 42%)` }} aria-hidden="true">{m.author_name[0]?.toUpperCase() ?? "?"}</span>}
-      <div className="message-content">{!grouped && <div className="message-meta"><strong>{m.author_name}</strong><time>{clock(m.ts)}</time></div>}<Body body={m.body} mentions={m.mentions} me={identity} edited={m.edited} />
+      <div className="message-content">{!grouped && <div className="message-meta"><strong>{m.author_name}</strong><time>{clock(m.ts)}</time></div>}{editing === m.ref ? <InlineEditor key={m.ref} initial={m.body} onSave={(body) => actions.current.saveEdit(m, body)} onCancel={() => actions.current.cancelEdit()} /> : <Body body={m.body} mentions={m.mentions} me={identity} edited={m.edited} />}
         {m.reactions.length > 0 && <div className="reactions">{m.reactions.map((r) => <button key={r.emoji} className={`pill ${r.mine ? "mine" : ""}`} onClick={() => actions.current.react(m, r.emoji)} aria-pressed={!!r.mine} aria-label={`${emojiLabel(r.emoji)} ${r.count}${r.mine ? ", you reacted; tap to remove" : "; tap to add yours"}`}>{emojiLabel(r.emoji)} <span>{r.count}</span></button>)}</div>}
         {reactFor === m.ref && <div className="quick-react" role="toolbar" aria-label="React">{QUICK_REACTIONS.map((e) => <button key={e} onClick={() => actions.current.react(m, e)} aria-label={`React ${e}`}>{e}</button>)}</div>}
         {!inThread && m.reply_count > 0 && <button className="thread-summary" onClick={() => actions.current.openThread(m)} aria-label={`View thread with ${m.reply_count} ${m.reply_count === 1 ? "reply" : "replies"}`}>💬 {m.reply_count} {m.reply_count === 1 ? "reply" : "replies"}{m.last_reply_ts ? <span> · last {time(m.last_reply_ts)}</span> : null}</button>}
@@ -496,6 +528,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
           <button onClick={() => actions.current.toUni(m, "ask")} aria-label={`Ask Uni about ${m.author_name}'s message`}>✦ Ask Uni</button>
           {!inThread && <button onClick={() => actions.current.openThread(m)} aria-label={`Reply in thread to ${m.author_name}`}>Reply in thread</button>}
           {inThread && m.ref !== root && <button onClick={() => actions.current.reply(m.ref)} aria-label={`Reply to ${m.author_name}`}>Reply</button>}
+          {m.author === identity && editing !== m.ref && <button onClick={() => setEditing(m.ref)} aria-label="Edit your message">Edit</button>}
+          {m.author === identity && <DeleteButton key={`del-${m.ref}`} label="your message" onDelete={() => actions.current.deleteOwn(m)} />}
         </div>
       </div>
     </article>;
@@ -517,6 +551,9 @@ function Conversations({ onForget }: { onForget: () => void }) {
     openThread,
     reply: (id) => { setReplyTo(id); input.current?.focus(); },
     loadOlder: () => void loadOlder(),
+    saveEdit,
+    cancelEdit: () => { setEditing(null); input.current?.focus(); },
+    deleteOwn,
   };
 
   // The rendered timeline depends only on data, never on the draft, so
@@ -533,7 +570,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     {renderList(messages, false)}
   </>,
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  [messages, identity, reactFor, kept, root, older, roomName]);
+  [messages, identity, reactFor, kept, root, older, roomName, editing]);
 
   return <main className={`shell ${channel ? "in-room" : ""}`}>
     <aside className="rooms" aria-label="Conversations">

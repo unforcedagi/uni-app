@@ -7,6 +7,57 @@ use uni_core::{
     LiveConfig, LiveEvent, Store,
 };
 
+/// Run one of our own message changes (edit/delete) on the IO gate.
+async fn change_own_message(
+    app: &tauri::AppHandle,
+    channel: String,
+    target: String,
+    new_body: Option<String>,
+) -> Result<(), String> {
+    secure_store::ensure_loaded(app).await?;
+    let path = db_path(app)?;
+    let url = relay_url(app);
+    tauri::async_runtime::spawn_blocking(move || {
+        let _gate = IO_GATE.blocking_lock();
+        let ch = channel.parse().map_err(|_| "invalid room id".to_string())?;
+        let (keys, _) = uni_core::load_keys(false).map_err(|e| e.to_string())?;
+        let store = Store::open(path).map_err(|e| e.to_string())?;
+        tauri::async_runtime::block_on(async {
+            match new_body {
+                Some(body) => {
+                    uni_core::edit_message(&url, &keys, None, &store, ch, &target, &body).await
+                }
+                None => uni_core::delete_message(&url, &keys, None, &store, ch, &target).await,
+            }
+        })
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Edit one of our own messages (kind 40003, Buzz desktop's shape).
+#[tauri::command]
+async fn edit_message(
+    app: tauri::AppHandle,
+    channel: String,
+    target: String,
+    body: String,
+) -> Result<(), String> {
+    change_own_message(&app, channel, target, Some(body)).await
+}
+
+/// Delete one of our own messages (kind 5 with `h`+`e`, as Buzz desktop does).
+#[tauri::command]
+async fn delete_message(
+    app: tauri::AppHandle,
+    channel: String,
+    target: String,
+) -> Result<(), String> {
+    change_own_message(&app, channel, target, None).await
+}
+
 // Serialize foreground refresh, send and forget so SQLite and relay
 // watermarks cannot race.
 static IO_GATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
@@ -648,7 +699,9 @@ pub fn run() {
             live_start,
             live_stop,
             react,
-            load_older
+            load_older,
+            edit_message,
+            delete_message
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
