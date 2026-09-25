@@ -8,6 +8,8 @@ import { lastOwnMessage } from "./ownMessages";
 
 import { findUniMember, findUniRoom, handoffText, searchHandoffText, type UniAction } from "./uniActions";
 import Search from "./Search";
+import Journal from "./Journal";
+import { shareText, type JournalNote } from "./journal";
 import { Attachments, attachmentBody, useRelayOrigin, type MediaRef } from "./Attachments";
 import { activeQuery, filterMembers, insertMention, memberLabels, mentionSegments, pruneBindings, resolveRecipients, type Bindings, type Member } from "./mentions";
 
@@ -196,6 +198,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const [searchOpen, setSearchOpen] = useState(false);
   // Search result to scroll to and flash once its room/thread has loaded.
   const [focusRef, setFocusRef] = useState<string | null>(null);
+  const [journalOpen, setJournalOpen] = useState(false);
   const focusTries = useRef(0);
   const preserveScroll = useRef<number | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -386,6 +389,21 @@ function Conversations({ onForget }: { onForget: () => void }) {
     } catch (e) { setError(`Couldn't reach Uni: ${e}`); setStatus("Handoff failed · your message is unchanged"); }
   }
 
+  // Journal → room. To Uni: addressed and p-tagged; the entry itself stays in the vault.
+  async function shareEntry(note: JournalNote, roomId: string, toUni: boolean, vault: string) {
+    let label: string | null = null;
+    const recipients: string[] = [];
+    if (toUni) {
+      const roster = await invoke<Member[]>("get_members", { channel: roomId });
+      const uni = findUniMember(roster);
+      if (!uni) throw new Error("Uni isn't in the Uni room's member list yet. Refresh conversations.");
+      label = memberLabels(roster).get(uni.pubkey) ?? uni.name;
+      recipients.push(uni.pubkey);
+    }
+    await invoke<Message>("post_message", { channel: roomId, body: shareText(note, vault, label), replyTo: null, recipients });
+    await loadRooms();
+  }
+
   async function react(m: Message, emoji: string) {
     setReactFor(null);
     const mine = m.reactions.find((r) => r.mine && emojiLabel(r.emoji) === emojiLabel(emoji))?.mine ?? null;
@@ -502,6 +520,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     const key = scope();
     if (key) { drafts.current.set(key, draft); bindingStore.current.set(key, bindings); }
     const nextKey = nextChannel ? keyFor(nextChannel, nextRoot) : null;
+    setJournalOpen(false);
     setChannel(nextChannel);
     setRoot(nextRoot);
     setDraft(nextKey ? drafts.current.get(nextKey) ?? "" : "");
@@ -625,7 +644,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   [messages, identity, reactFor, kept, root, older, roomName, editing, focusRef, relayOrigin]);
 
-  return <main className={`shell ${channel ? "in-room" : ""}`}>
+  return <main className={`shell ${channel || journalOpen ? "in-room" : ""}`}>
     <aside className="rooms" aria-label="Conversations">
       <header className="rooms-header"><div><span className="eyebrow">BUZZ · PERSONAL</span><h1>Talk to Uni</h1></div><div><button className="icon-button" onClick={() => setSearchOpen(true)} aria-label="Search messages and notes">⌕</button><button className="icon-button" onClick={() => void refresh()} disabled={busy} aria-label="Refresh conversations">↻</button><button className="icon-button" onClick={() => { setSettingsOpen(!settingsOpen); setForgetArmed(false); }} aria-label="Settings" aria-expanded={settingsOpen}>⚙</button></div></header>
       {settingsOpen && <div className="settings"><button className="pairing-secondary" onClick={() => void forget()}>{forgetArmed ? "Tap again to forget — you'll need to re-pair" : "Forget this device key"}</button>{forgetArmed && <button className="pairing-secondary" onClick={() => setForgetArmed(false)}>Keep key</button>}</div>}
@@ -636,14 +655,18 @@ function Conversations({ onForget }: { onForget: () => void }) {
       {identity && <p className="identity" title={identity}>Signed in as {identity.slice(0, 12)}…</p>}
       {!ready && <p className="empty">Loading…</p>}
       {ready && rooms.length === 0 && <p className="empty">No joined conversations cached. Refresh to connect with your personal Buzz key.</p>}
+      <button className={`room journal-room ${journalOpen ? "selected" : ""}`} onClick={() => { navigate(null, null); setJournalOpen(true); }} aria-current={journalOpen ? "page" : undefined}>
+        <span className="avatar">✎</span><span className="room-text"><strong>Journal</strong><small>Speak or write · private to your vault</small></span>
+      </button>
       <nav>{rooms.map((room) => <button key={room.id} className={`room ${channel === room.id ? "selected" : ""}`} onClick={() => navigate(room.id, null)} aria-current={channel === room.id ? "page" : undefined}>
         <span className="avatar">{room.name[0]?.toUpperCase() ?? "#"}</span><span className="room-text"><strong className={room.unread ? "unread" : ""}>{room.name}</strong><small>{room.last_message ? markdownToText(room.last_message) : "No messages yet"}</small></span>
         <span className="room-side"><time>{room.last_ts ? time(room.last_ts) : ""}</time>{room.unread > 0 && <span className={`unread-badge ${room.mentions ? "mention" : ""}`} aria-label={`${room.unread} unread${room.mentions ? ", mentions you" : ""}`}>{room.mentions ? "@ " : ""}{room.unread > 99 ? "99+" : room.unread}</span>}</span>
       </button>)}</nav>
       </div>
     </aside>
-    <section className="conversation" aria-label={currentRoom ? `Conversation: ${currentRoom.name}` : "Conversation"}>
-      {currentRoom ? <>
+    <section className="conversation" aria-label={journalOpen ? "Journal" : currentRoom ? `Conversation: ${currentRoom.name}` : "Conversation"}>
+      {journalOpen ? <Journal rooms={rooms} uniRoomId={findUniRoom(rooms)?.id ?? null} onShare={shareEntry} onBack={() => setJournalOpen(false)} />
+      : currentRoom ? <>
         <header className="conversation-header">
           <button className="back icon-button" onClick={() => isThread ? navigate(channel, null) : navigate(null, null)} aria-label={isThread ? "Back to room" : "Back to conversations"}>‹</button>
           {isThread && <button className="thread-back" onClick={() => navigate(channel, null)} aria-label="Close thread">‹ {currentRoom.name}</button>}

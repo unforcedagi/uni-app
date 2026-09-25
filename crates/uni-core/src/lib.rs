@@ -21,9 +21,11 @@ pub mod backoff;
 pub mod buzz;
 pub mod compose;
 pub mod identity;
+pub mod journal;
 pub mod live;
 pub mod media;
 pub mod pairing;
+pub mod parachute;
 pub mod readstate;
 pub mod store;
 pub mod sync;
@@ -73,6 +75,9 @@ pub enum Error {
     /// Media download / verification failed.
     #[error("media: {0}")]
     Media(String),
+    /// Parachute vault request failed.
+    #[error("vault: {0}")]
+    Vault(String),
 }
 
 /// Result alias.
