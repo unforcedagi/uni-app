@@ -203,9 +203,18 @@ CREATE TABLE IF NOT EXISTS aux_events (
 CREATE INDEX IF NOT EXISTS aux_events_target ON aux_events(target, kind);
 
 -- Local read marker per room (newest message ts the user has seen).
+-- `publishable` (added by migration) = the user read it here or another
+-- device reported it; first-sight seeds stay local (see readstate.rs).
 CREATE TABLE IF NOT EXISTS read_state (
     channel TEXT PRIMARY KEY,
     read_ts INTEGER NOT NULL
+);
+
+-- Small key/value state for cross-device read sync (client id, slot id,
+-- newest read-state created_at, last published contexts).
+CREATE TABLE IF NOT EXISTS read_sync_meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS profiles (
@@ -298,6 +307,16 @@ impl Store {
             conn.execute("INSERT INTO items_fts(items_fts) VALUES ('rebuild')", [])?;
         }
         conn.execute_batch(VIEW_SCHEMA)?;
+        let has_publishable: bool = conn.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('read_state') WHERE name='publishable'",
+            [],
+            |r| r.get::<_, i64>(0),
+        )? > 0;
+        if !has_publishable {
+            conn.execute_batch(
+                "ALTER TABLE read_state ADD COLUMN publishable INTEGER NOT NULL DEFAULT 0",
+            )?;
+        }
         Ok(Self { conn })
     }
 
@@ -352,12 +371,76 @@ impl Store {
     }
 
     /// Mark `channel` read up to its newest cached message (never goes back).
-    pub fn mark_read(&self, channel: &str) -> Result<()> {
+    /// Returns `true` if the marker advanced (i.e. there is something new to
+    /// sync to other devices).
+    pub fn mark_read(&self, channel: &str) -> Result<bool> {
+        let before = self.read_marker(channel)?;
         self.conn.execute(
-            "INSERT INTO read_state (channel, read_ts)
-             VALUES (?1, COALESCE((SELECT MAX(ts) FROM items WHERE channel = ?1), 0))
-             ON CONFLICT(channel) DO UPDATE SET read_ts = MAX(read_ts, excluded.read_ts)",
+            "INSERT INTO read_state (channel, read_ts, publishable)
+             VALUES (?1, COALESCE((SELECT MAX(ts) FROM items WHERE channel = ?1), 0), 1)
+             ON CONFLICT(channel) DO UPDATE SET read_ts = MAX(read_ts, excluded.read_ts),
+                                                publishable = 1",
             params![channel],
+        )?;
+        Ok(self.read_marker(channel)? > before)
+    }
+
+    /// A room's read marker, if any.
+    pub fn read_marker(&self, channel: &str) -> Result<Option<i64>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT read_ts FROM read_state WHERE channel = ?1",
+                params![channel],
+                |r| r.get(0),
+            )
+            .optional()?)
+    }
+
+    /// Merge a marker reported by another device: `max()` with the local
+    /// one, never backwards; the room becomes publishable either way.
+    /// Returns `true` if the local marker advanced.
+    pub fn merge_read_marker(&self, channel: &str, ts: i64) -> Result<bool> {
+        let before = self.read_marker(channel)?;
+        self.conn.execute(
+            "INSERT INTO read_state (channel, read_ts, publishable) VALUES (?1, ?2, 1)
+             ON CONFLICT(channel) DO UPDATE SET read_ts = MAX(read_ts, excluded.read_ts),
+                                                publishable = 1",
+            params![channel, ts],
+        )?;
+        Ok(before.is_none_or(|b| ts > b))
+    }
+
+    /// Markers this device may publish (read here or reported by another
+    /// device; never first-sight seeds).
+    pub fn publishable_read_markers(&self) -> Result<std::collections::BTreeMap<String, i64>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT channel, read_ts FROM read_state WHERE publishable = 1")?;
+        let rows = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<std::result::Result<_, _>>()?;
+        Ok(rows)
+    }
+
+    /// Read-sync key/value state.
+    pub fn read_sync_meta(&self, key: &str) -> Result<Option<String>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT value FROM read_sync_meta WHERE key = ?1",
+                params![key],
+                |r| r.get(0),
+            )
+            .optional()?)
+    }
+
+    /// Set a read-sync key/value.
+    pub fn set_read_sync_meta(&self, key: &str, value: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO read_sync_meta (key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![key, value],
         )?;
         Ok(())
     }

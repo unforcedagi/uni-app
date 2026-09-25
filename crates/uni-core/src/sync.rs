@@ -34,6 +34,8 @@ pub struct SyncReport {
     pub profiles_stored: usize,
     /// Total rows in `items` after the run.
     pub total_items: i64,
+    /// Rooms whose read marker advanced from another device's read state.
+    pub read_state_advanced: Vec<String>,
 }
 
 /// Project a kind-9 event into the store. Returns `(inserted, ts)`.
@@ -275,6 +277,13 @@ pub async fn sync_once(
         // backfilled counts as read; only later arrivals are unread.
         store.ensure_read_state(&ch_str, max_ts.unwrap_or(0))?;
         report.inserted.insert(ch_str, inserted);
+    }
+
+    // Cross-device read markers (Buzz NIP-RS, kind 30078). Best effort: a
+    // failure here must not fail the message sync.
+    match crate::readstate::fetch_read_state(&mut client, keys, store).await {
+        Ok(adv) => report.read_state_advanced = adv,
+        Err(e) => tracing::warn!("read-state fetch failed: {e}"),
     }
 
     let (requested, stored) = refresh_profiles(&mut client, store).await?;

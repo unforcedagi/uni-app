@@ -290,11 +290,48 @@ fn get_messages(
     with_reactions(&store, views)
 }
 
-/// The user is looking at `channel`: everything cached there is read.
+/// The user is looking at `channel`: everything cached there is read. The
+/// new marker is synced to the user's other devices (Buzz read state) after
+/// a short debounce, off the UI path.
 #[tauri::command]
 fn mark_read(app: tauri::AppHandle, channel: String) -> Result<(), String> {
     let store = Store::open(db_path(&app)?).map_err(|e| e.to_string())?;
-    store.mark_read(&channel).map_err(|e| e.to_string())
+    let advanced = store.mark_read(&channel).map_err(|e| e.to_string())?;
+    if advanced {
+        schedule_read_state_publish(&app);
+    }
+    Ok(())
+}
+
+/// Debounce window for publishing read state (Buzz desktop uses 5 s).
+const READ_STATE_DEBOUNCE: std::time::Duration = std::time::Duration::from_secs(3);
+/// Bumped on every schedule; a waiting publisher only runs if it is still
+/// the newest, so a burst of reads produces one publish.
+static READ_STATE_GEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn schedule_read_state_publish(app: &tauri::AppHandle) {
+    use std::sync::atomic::Ordering;
+    let generation = READ_STATE_GEN.fetch_add(1, Ordering::SeqCst) + 1;
+    let Ok(path) = db_path(app) else { return };
+    let url = relay_url(app);
+    tauri::async_runtime::spawn_blocking(move || {
+        std::thread::sleep(READ_STATE_DEBOUNCE);
+        if READ_STATE_GEN.load(Ordering::SeqCst) != generation {
+            return;
+        }
+        let _gate = IO_GATE.blocking_lock();
+        let result = (|| -> Result<bool, String> {
+            let (keys, _) = uni_core::load_keys(false).map_err(|e| e.to_string())?;
+            let store = Store::open(path).map_err(|e| e.to_string())?;
+            tauri::async_runtime::block_on(uni_core::publish_read_state(&url, &keys, None, &store))
+                .map_err(|e| e.to_string())
+        })();
+        // Best effort: an unpublished marker stays dirty and goes out with
+        // the next read.
+        if let Err(e) = result {
+            tracing::warn!("read-state publish failed: {e}");
+        }
+    });
 }
 
 /// Open a link from a message in the system browser. Only web and mail links;
@@ -358,6 +395,8 @@ fn live_payload(ev: &LiveEvent) -> Option<LivePayload> {
             p("rooms", Some(channel.to_string()), None, None)
         }
         LiveEvent::Profiles { .. } => p("profiles", None, None, None),
+        // Read on another device: badges change; the UI re-reads rooms.
+        LiveEvent::ReadState { .. } => p("rooms", None, None, None),
         LiveEvent::Connected { .. } => p("status", None, Some("Live".into()), None),
         LiveEvent::Eose { channel } => p("rooms", Some(channel.to_string()), None, None),
         LiveEvent::Disconnected { retry_in, .. } => p(
@@ -561,6 +600,10 @@ async fn refresh(app: tauri::AppHandle) -> Result<SyncView, String> {
         let store = Store::open(path).map_err(|e| e.to_string())?;
         let report = tauri::async_runtime::block_on(sync_once(&url, &keys, None, &store))
             .map_err(|e| e.to_string())?;
+        // Retry a read-state publish that failed earlier (e.g. offline).
+        if uni_core::read_state_dirty(&store, &keys).unwrap_or(false) {
+            schedule_read_state_publish(&app);
+        }
         Ok(SyncView {
             pubkey: report.pubkey,
             total_items: report.total_items,

@@ -26,6 +26,7 @@ use crate::buzz::{
     channel_of_sub_id, channel_sub_id, merge_discovered_channels, BuzzClient,
     KIND_MEMBER_ADDED, KIND_MEMBER_REMOVED, KIND_PROFILE, MEMBERSHIP_SUB_ID,
 };
+use crate::readstate::{apply_read_state_events, read_state_filter, READ_STATE_SUB_ID};
 use crate::store::{Item, Store};
 use crate::sync::{ingest_channel_event, ingest_profile, Ingested};
 use crate::{Error, Result};
@@ -74,6 +75,8 @@ pub enum LiveEvent {
     ChannelRemoved { channel: Uuid },
     /// Kind-0 profiles stored.
     Profiles { stored: usize },
+    /// Another device's read state advanced these rooms' read markers.
+    ReadState { channels: Vec<String> },
     /// Connection lost; the loop will retry after `retry_in`.
     Disconnected { reason: String, retry_in: Duration },
     /// The loop is exiting (stop requested or attempts exhausted).
@@ -116,7 +119,7 @@ pub async fn run_live(
                     reconnect: connections,
                 });
                 connections += 1;
-                Session::new(client, store, &emit)
+                Session::new(client, keys, store, &emit)
                     .run(cfg.poll_timeout, &mut stop)
                     .await
             }
@@ -164,6 +167,7 @@ pub async fn run_live(
 /// One connection's worth of state.
 struct Session<'a, F: Fn(LiveEvent)> {
     client: BuzzClient,
+    keys: &'a Keys,
     store: &'a Store,
     emit: &'a F,
     me: PublicKey,
@@ -177,10 +181,11 @@ struct Session<'a, F: Fn(LiveEvent)> {
 }
 
 impl<'a, F: Fn(LiveEvent)> Session<'a, F> {
-    fn new(client: BuzzClient, store: &'a Store, emit: &'a F) -> Self {
+    fn new(client: BuzzClient, keys: &'a Keys, store: &'a Store, emit: &'a F) -> Self {
         let me = client.pubkey();
         Self {
             client,
+            keys,
             store,
             emit,
             me,
@@ -221,6 +226,12 @@ impl<'a, F: Fn(LiveEvent)> Session<'a, F> {
         // from "now" minus a minute; duplicates are harmless (idempotent).
         self.client
             .open_membership_sub(Some((now - 60).max(0) as u64))
+            .await?;
+        // Our own read-state events (Buzz desktop `startLiveSubscription`):
+        // the backfill merges what other devices published while we were
+        // away, then reads on another device arrive in real time.
+        self.client
+            .open_sub(READ_STATE_SUB_ID, &[read_state_filter(self.keys)])
             .await?;
 
         loop {
@@ -375,6 +386,13 @@ impl<'a, F: Fn(LiveEvent)> Session<'a, F> {
                     (self.emit)(LiveEvent::ChannelRemoved { channel: ch });
                 }
                 _ => {}
+            }
+            return Ok(());
+        }
+        if sub == READ_STATE_SUB_ID {
+            let channels = apply_read_state_events(self.store, self.keys, std::slice::from_ref(&ev))?;
+            if !channels.is_empty() {
+                (self.emit)(LiveEvent::ReadState { channels });
             }
             return Ok(());
         }
