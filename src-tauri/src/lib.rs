@@ -32,6 +32,8 @@ struct MessageView {
     edited: bool,
     /// Live reactions grouped by emoji, in first-use order.
     reactions: Vec<ReactionView>,
+    /// NIP-92 `imeta` attachments, in tag order.
+    media: Vec<uni_core::MediaRef>,
 }
 
 #[derive(Serialize)]
@@ -127,6 +129,7 @@ fn view_with_summary(
         parent: message.parent,
         edited: message.edited,
         reactions: Vec::new(),
+        media: Vec::new(),
     })
 }
 
@@ -135,11 +138,17 @@ fn with_reactions(store: &Store, mut views: Vec<MessageView>) -> Result<Vec<Mess
     let me = uni_core::load_keys(false).ok().map(|(k, _)| k.public_key().to_hex());
     let ids: Vec<String> = views.iter().map(|v| v.id.clone()).collect();
     let all = store.reactions(&ids, me.as_deref()).map_err(|e| e.to_string())?;
+    let mut media = store.message_media(&ids).map_err(|e| e.to_string())?;
     for v in &mut views {
         v.reactions = all
             .iter()
             .filter(|r| r.target == v.id)
             .map(|r| ReactionView { emoji: r.emoji.clone(), count: r.count, mine: r.mine.clone() })
+            .collect();
+        v.media = media
+            .iter_mut()
+            .filter(|(id, _)| *id == v.id)
+            .map(|(_, m)| std::mem::take(m))
             .collect();
     }
     Ok(views)
@@ -559,7 +568,10 @@ async fn post_message(
             .ok_or_else(|| {
                 "message accepted but not found locally; refresh to recover".to_string()
             })?;
-        view(&store, message)
+        let v = view(&store, message)?;
+        with_reactions(&store, vec![v])?
+            .pop()
+            .ok_or_else(|| "message view missing".to_string())
     })
     .await
     .map_err(|e| e.to_string())?
@@ -614,6 +626,71 @@ async fn load_older(app: tauri::AppHandle, channel: String) -> Result<usize, Str
     .map_err(|e| e.to_string())?
 }
 
+/// Media cache (`<app cache>/media/<sha256>`); the OS may evict it.
+fn media_cache_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(app.path().app_cache_dir().map_err(|e| e.to_string())?.join("media"))
+}
+
+/// Bytes of a relay media blob (`https://<relay>/media/<sha256>.<ext>`),
+/// fetched with Blossom `t=get` auth, SHA-256 verified against the URL and
+/// the `imeta` `x` (`sha`), and cached by hash. Returned as a raw IPC
+/// response (an `ArrayBuffer` in the webview, turned into a `blob:` URL), as
+/// Buzz desktop's `fetch_media_bytes` does: no asset-protocol scope, no
+/// base64 inflation, and the auth token never reaches the webview.
+#[tauri::command]
+async fn media_bytes(
+    app: tauri::AppHandle,
+    url: String,
+    sha: Option<String>,
+) -> Result<tauri::ipc::Response, String> {
+    secure_store::ensure_loaded(&app).await?;
+    let relay = relay_url(&app);
+    let dir = media_cache_dir(&app)?;
+    // No IO_GATE: this touches neither SQLite nor relay watermarks, and must
+    // not queue images behind a slow sync.
+    let bytes = tauri::async_runtime::spawn_blocking(move || {
+        let (keys, _) = uni_core::load_keys(false).map_err(|e| e.to_string())?;
+        tauri::async_runtime::block_on(uni_core::fetch_media(
+            &relay,
+            &keys,
+            &url,
+            sha.as_deref(),
+            &dir,
+        ))
+        .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
+/// Download a relay file to the cache and return its local path.
+#[tauri::command]
+async fn media_save(app: tauri::AppHandle, url: String, sha: Option<String>) -> Result<String, String> {
+    secure_store::ensure_loaded(&app).await?;
+    let relay = relay_url(&app);
+    let dir = media_cache_dir(&app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let (keys, _) = uni_core::load_keys(false).map_err(|e| e.to_string())?;
+        let hash = uni_core::media::media_sha_from_url(&relay, &url).map_err(|e| e.to_string())?;
+        tauri::async_runtime::block_on(uni_core::fetch_media(&relay, &keys, &url, sha.as_deref(), &dir))
+            .map_err(|e| e.to_string())?;
+        uni_core::media::cache_path(&dir, &hash)
+            .map(|p| p.to_string_lossy().into_owned())
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// The relay's HTTP origin (e.g. `https://buzz.unforced.org`), so the UI can
+/// tell relay media (authenticated fetch) from third-party image links.
+#[tauri::command]
+fn relay_origin(app: tauri::AppHandle) -> String {
+    let url = relay_url(&app);
+    url.replacen("wss://", "https://", 1).replacen("ws://", "http://", 1).trim_end_matches('/').to_string()
+}
+
 #[cfg(mobile)]
 mod mobile;
 mod secure_store;
@@ -648,7 +725,10 @@ pub fn run() {
             live_start,
             live_stop,
             react,
-            load_older
+            load_older,
+            media_bytes,
+            media_save,
+            relay_origin
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
