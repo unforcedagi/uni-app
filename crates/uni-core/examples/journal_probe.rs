@@ -1,5 +1,8 @@
 //! Live probe: write a text and a voice journal entry through the hub's
-//! NIP-98 door with the key in UNI_NSEC. Dev tool; points at a test vault.
+//! NIP-98 door with the key in UNI_NSEC. Dev tool: it creates real notes
+//! under `Notes/probe/` in `<vault>`, so point it at a scratch vault. With
+//! fewer than three arguments it only prints the pubkey. The secret key is
+//! never printed.
 //!
 //! UNI_NSEC=<hex> cargo run -p uni-core --example journal_probe -- <hub> <vault> <audio.webm>
 use uni_core::parachute::{NewEntry, VaultClient, VaultConfig};
@@ -7,6 +10,7 @@ use uni_core::parachute::{NewEntry, VaultClient, VaultConfig};
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
+    uni_core::init_crypto();
     let (keys, _) = uni_core::load_keys(false)?;
     println!("probe pubkey: {}", keys.public_key().to_hex());
     if args.len() < 4 {
@@ -19,7 +23,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
         keys,
     )?;
-    let now = chrono_path();
+    let now = unix_secs();
     let text = client
         .create_entry(&NewEntry {
             path: format!("Notes/probe/{now}-text"),
@@ -62,10 +66,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn chrono_path() -> String {
-    let s = std::time::SystemTime::now()
+fn unix_secs() -> u64 {
+    std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
-    format!("{s}")
+        .map(|d| d.as_secs())
+        .unwrap_or_default()
 }

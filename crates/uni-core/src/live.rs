@@ -11,7 +11,8 @@
 //! On any connection failure the loop waits per [`Backoff`] and reconnects,
 //! which re-runs NIP-42 auth (a new challenge, a new signed kind 22242) and
 //! re-opens every subscription from the current watermarks. Backoff resets
-//! after each successful auth. The phone does not use this module.
+//! after each successful auth. The app runs this loop while in the
+//! foreground (`live_start` / `live_stop`).
 
 use std::collections::BTreeSet;
 use std::time::Duration;

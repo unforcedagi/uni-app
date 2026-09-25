@@ -5,8 +5,9 @@
 //! 2. Device keys installed in memory with [`set_device_keys`] — how the
 //!    Android app hands over the key it decrypted from Android Keystore
 //!    (the `keyring` crate has no Android backend).
-//! 3. macOS keyring entry `service = "uni-app"`, `account = "nsec"`.
-//! 3. If `allow_ephemeral` is set: a fresh throwaway key (for connection tests).
+//! 3. OS keyring entry `service = "uni-app"`, `account = "nsec"` (skipped
+//!    when `UNI_NO_KEYRING` is set, as on Android).
+//! 4. If `allow_ephemeral` is set: a fresh throwaway key (for connection tests).
 //!
 //! [`init_keyring_key`] is the write path: it generates a new key and stores
 //! it in the keyring (same `keyring` crate and service/account layout Buzz
@@ -22,7 +23,7 @@ use crate::{Error, Result};
 pub enum KeySource {
     /// `UNI_NSEC` env var.
     Env,
-    /// macOS keyring (`uni-app` / `nsec`).
+    /// OS keyring (`uni-app` / `nsec`).
     Keyring,
     /// Installed by the host app via [`set_device_keys`] (Android Keystore).
     Device,
