@@ -155,33 +155,53 @@ impl Store {
             .map(|(b, m)| (b, m.unwrap_or_else(|| "audio/webm".into()))))
     }
 
-    fn journal_mark(&self, entry_id: &str, sql: &str, value: Option<&str>) -> Result<()> {
-        self.conn.execute(sql, params![entry_id, value])?;
+    /// The vault note now exists; a retry only needs the audio.
+    fn journal_set_note(&self, entry_id: &str, note_id: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE journal_outbox SET note_id = ?2 WHERE entry_id = ?1",
+            params![entry_id, note_id],
+        )?;
+        Ok(())
+    }
+
+    /// The audio is in the vault; drop the local copy.
+    fn journal_audio_sent(&self, entry_id: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE journal_outbox SET audio_sent = 1, audio = NULL WHERE entry_id = ?1",
+            [entry_id],
+        )?;
+        Ok(())
+    }
+
+    fn journal_failed(&self, entry_id: &str, error: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE journal_outbox SET attempts = attempts + 1, last_error = ?2 WHERE entry_id = ?1",
+            params![entry_id, error],
+        )?;
+        Ok(())
+    }
+
+    fn journal_remove(&self, entry_id: &str) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM journal_outbox WHERE entry_id = ?1", [entry_id])?;
         Ok(())
     }
 }
 
-/// Send every queued entry. Stops at the first network failure (the rest
-/// would fail the same way) and records the error on that entry.
+/// Send every queued entry, oldest first. Stops at the first failure (a
+/// network error would fail the rest the same way) and records the error on
+/// that entry; later entries wait behind it.
 pub async fn flush(store: &Store, client: &VaultClient) -> Result<FlushReport> {
     let mut report = FlushReport::default();
     for entry in store.journal_pending()? {
         match send_one(store, client, &entry).await {
             Ok(note_id) => {
-                store.journal_mark(
-                    &entry.entry_id,
-                    "DELETE FROM journal_outbox WHERE entry_id = ?1 AND ?2 IS NULL",
-                    None,
-                )?;
+                store.journal_remove(&entry.entry_id)?;
                 report.sent.push(note_id);
             }
             Err(e) => {
                 let msg = e.to_string();
-                store.journal_mark(
-                    &entry.entry_id,
-                    "UPDATE journal_outbox SET attempts = attempts + 1, last_error = ?2 WHERE entry_id = ?1",
-                    Some(&msg),
-                )?;
+                store.journal_failed(&entry.entry_id, &msg)?;
                 report.error = Some(msg);
                 break;
             }
@@ -216,11 +236,7 @@ async fn send_one(store: &Store, client: &VaultClient, e: &QueuedEntry) -> Resul
                 }
                 path = format!("{}-{n}", e.path);
             };
-            store.journal_mark(
-                &e.entry_id,
-                "UPDATE journal_outbox SET note_id = ?2 WHERE entry_id = ?1",
-                Some(&note.id),
-            )?;
+            store.journal_set_note(&e.entry_id, &note.id)?;
             note.id
         }
     };
@@ -235,11 +251,7 @@ async fn send_one(store: &Store, client: &VaultClient, e: &QueuedEntry) -> Resul
         client
             .upload_audio(&note_id, &format!("voice.{ext}"), &mime, bytes)
             .await?;
-        store.journal_mark(
-            &e.entry_id,
-            "UPDATE journal_outbox SET audio_sent = 1, audio = NULL WHERE entry_id = ?1 AND ?2 IS NULL",
-            None,
-        )?;
+        store.journal_audio_sent(&e.entry_id)?;
     }
     Ok(note_id)
 }
@@ -290,5 +302,27 @@ mod tests {
         assert_eq!(p[0].content, TRANSCRIPT_PENDING);
         assert!(p[0].has_audio);
         assert_eq!(s.journal_audio(ID).unwrap().unwrap().0, b"abc");
+    }
+
+    #[test]
+    fn outbox_marks_progress() {
+        let s = Store::open_in_memory().unwrap();
+        let audio: &[u8] = b"abc";
+        let path = "Notes/2026/09-25/10-00-00";
+        s.journal_queue(ID, path, "", "voice", "t", Some((audio, "audio/ogg")), 1)
+            .unwrap();
+        s.journal_failed(ID, "offline").unwrap();
+        s.journal_set_note(ID, "n1").unwrap();
+        let p = &s.journal_pending().unwrap()[0];
+        assert_eq!(
+            (p.attempts, p.last_error.as_deref(), p.note_id.as_deref()),
+            (1, Some("offline"), Some("n1"))
+        );
+        assert_eq!(s.journal_audio(ID).unwrap().unwrap().1, "audio/ogg");
+        s.journal_audio_sent(ID).unwrap();
+        assert!(s.journal_audio(ID).unwrap().is_none());
+        assert!(!s.journal_pending().unwrap()[0].has_audio);
+        s.journal_remove(ID).unwrap();
+        assert!(s.journal_pending().unwrap().is_empty());
     }
 }
