@@ -239,6 +239,41 @@ fn get_messages(
     with_reactions(&store, views)
 }
 
+#[derive(Serialize)]
+struct SearchHitView {
+    message: MessageView,
+    /// Room label (falls back like `get_rooms`).
+    channel_name: String,
+    /// Plain-text excerpt; matches are wrapped in U+E000 … U+E001. The UI
+    /// renders those as `<mark>` elements — never as HTML.
+    snippet: String,
+}
+
+/// Local full-text search over cached Buzz messages (current text: edits
+/// applied, deletions excluded). Read-only, so no IO gate.
+#[tauri::command]
+async fn search(app: tauri::AppHandle, query: String, limit: Option<usize>) -> Result<Vec<SearchHitView>, String> {
+    let path = db_path(&app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = Store::open(path).map_err(|e| e.to_string())?;
+        let limit = limit.unwrap_or(60).clamp(1, 200);
+        store
+            .search_messages(&query, limit)
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .map(|h| {
+                let channel_name = h.channel_name.unwrap_or_else(|| {
+                    let id = &h.message.item.channel;
+                    format!("Room {}", &id[..8.min(id.len())])
+                });
+                Ok(SearchHitView { message: view(&store, h.message)?, channel_name, snippet: h.snippet })
+            })
+            .collect()
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// The user is looking at `channel`: everything cached there is read.
 #[tauri::command]
 fn mark_read(app: tauri::AppHandle, channel: String) -> Result<(), String> {
@@ -648,7 +683,8 @@ pub fn run() {
             live_start,
             live_stop,
             react,
-            load_older
+            load_older,
+            search
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

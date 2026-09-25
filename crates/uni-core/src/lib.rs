@@ -33,7 +33,8 @@ pub use identity::{
 };
 pub use live::{run_live, LiveConfig, LiveEvent};
 pub use store::{
-    ConversationMessage, Item, Member, Profile, Reaction, Room, Store, TimelineMessage,
+    ConversationMessage, Item, Member, Profile, Reaction, Room, SearchHit, Store, TimelineMessage,
+    SNIPPET_END, SNIPPET_START,
 };
 pub use sync::{ingest_channel_event, sync_older, sync_once, Ingested, SyncReport};
 
