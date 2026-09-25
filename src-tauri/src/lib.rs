@@ -873,6 +873,202 @@ fn relay_origin(app: tauri::AppHandle) -> String {
         .to_string()
 }
 
+// ── Journal: entries go straight to the Parachute vault, signed per request
+// with the same key that signs Buzz messages (NIP-98). The device queues each
+// entry first, so journaling works offline and survives app restarts.
+
+const DEFAULT_HUB: &str = "https://uni-1.taildf9ce2.ts.net";
+const DEFAULT_VAULT: &str = "unforced";
+
+fn vault_config(app: &tauri::AppHandle) -> uni_core::parachute::VaultConfig {
+    let saved = app
+        .path()
+        .app_data_dir()
+        .ok()
+        .and_then(|d| std::fs::read_to_string(d.join("vault.json")).ok())
+        .and_then(|s| serde_json::from_str(&s).ok());
+    saved.unwrap_or_else(|| uni_core::parachute::VaultConfig {
+        hub: DEFAULT_HUB.into(),
+        vault: DEFAULT_VAULT.into(),
+    })
+}
+
+#[tauri::command]
+fn journal_config(app: tauri::AppHandle) -> uni_core::parachute::VaultConfig {
+    vault_config(&app)
+}
+
+#[tauri::command]
+fn journal_set_config(app: tauri::AppHandle, hub: String, vault: String) -> Result<(), String> {
+    let cfg = uni_core::parachute::VaultConfig {
+        hub: hub.trim().trim_end_matches('/').to_string(),
+        vault: vault.trim().to_string(),
+    };
+    if cfg.vault.is_empty()
+        || !cfg
+            .vault
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return Err("vault name: letters, numbers, - and _".into());
+    }
+    let keys = nostr::Keys::generate();
+    uni_core::parachute::VaultClient::new(cfg.clone(), keys).map_err(|e| e.to_string())?;
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    std::fs::write(
+        dir.join("vault.json"),
+        serde_json::to_string(&cfg).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())
+}
+
+/// Journal entries send one at a time, off the relay IO gate.
+static JOURNAL_GATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+async fn journal_flush_inner(
+    app: &tauri::AppHandle,
+) -> Result<uni_core::journal::FlushReport, String> {
+    secure_store::ensure_loaded(app).await?;
+    let path = db_path(app)?;
+    let cfg = vault_config(app);
+    let _gate = JOURNAL_GATE.lock().await;
+    tauri::async_runtime::spawn_blocking(move || {
+        let (keys, _) = uni_core::load_keys(false).map_err(|e| e.to_string())?;
+        let store = Store::open(path).map_err(|e| e.to_string())?;
+        let client = uni_core::parachute::VaultClient::new(cfg, keys).map_err(|e| e.to_string())?;
+        tauri::async_runtime::block_on(uni_core::journal::flush(&store, &client))
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+fn journal_queue_entry(
+    app: &tauri::AppHandle,
+    entry: JournalDraft,
+    audio: Option<(Vec<u8>, String)>,
+) -> Result<(), String> {
+    let store = Store::open(db_path(app)?).map_err(|e| e.to_string())?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or_default();
+    store
+        .journal_queue(
+            &entry.entry_id,
+            &entry.path,
+            &entry.content,
+            &entry.source,
+            &entry.created_at,
+            audio.as_ref().map(|(b, m)| (b.as_slice(), m.as_str())),
+            now,
+        )
+        .map_err(|e| e.to_string())
+}
+
+#[derive(serde::Deserialize)]
+struct JournalDraft {
+    entry_id: String,
+    path: String,
+    content: String,
+    source: String,
+    created_at: String,
+}
+
+/// Queue a typed entry, then try to send everything queued.
+#[tauri::command]
+async fn journal_save_text(
+    app: tauri::AppHandle,
+    entry: JournalDraft,
+) -> Result<uni_core::journal::FlushReport, String> {
+    journal_queue_entry(&app, entry, None)?;
+    journal_flush_inner(&app).await
+}
+
+/// Queue a voice entry. Body: raw audio bytes. Headers: `x-entry` (JSON
+/// draft) and `x-audio-mime`. Raw IPC keeps a minutes-long recording from
+/// being inflated into a JSON number array.
+#[tauri::command]
+async fn journal_save_voice(
+    app: tauri::AppHandle,
+    request: tauri::ipc::Request<'_>,
+) -> Result<uni_core::journal::FlushReport, String> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("expected raw audio bytes".into());
+    };
+    let header = |name: &str| {
+        request
+            .headers()
+            .get(name)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_string)
+    };
+    let entry: JournalDraft = serde_json::from_str(
+        &header("x-entry").ok_or_else(|| "missing x-entry header".to_string())?,
+    )
+    .map_err(|e| format!("bad entry: {e}"))?;
+    let mime = header("x-audio-mime").unwrap_or_else(|| "audio/webm".into());
+    if !mime.starts_with("audio/") {
+        return Err("audio mime must be audio/*".into());
+    }
+    journal_queue_entry(&app, entry, Some((bytes.clone(), mime)))?;
+    journal_flush_inner(&app).await
+}
+
+#[tauri::command]
+async fn journal_flush(app: tauri::AppHandle) -> Result<uni_core::journal::FlushReport, String> {
+    journal_flush_inner(&app).await
+}
+
+#[tauri::command]
+fn journal_pending(app: tauri::AppHandle) -> Result<Vec<uni_core::journal::QueuedEntry>, String> {
+    Store::open(db_path(&app)?)
+        .and_then(|s| s.journal_pending())
+        .map_err(|e| e.to_string())
+}
+
+async fn with_vault<T, F>(app: &tauri::AppHandle, f: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce(uni_core::parachute::VaultClient) -> Result<T, String> + Send + 'static,
+{
+    secure_store::ensure_loaded(app).await?;
+    let cfg = vault_config(app);
+    tauri::async_runtime::spawn_blocking(move || {
+        let (keys, _) = uni_core::load_keys(false).map_err(|e| e.to_string())?;
+        let client = uni_core::parachute::VaultClient::new(cfg, keys).map_err(|e| e.to_string())?;
+        f(client)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Newest journal entries from the vault.
+#[tauri::command]
+async fn journal_list(
+    app: tauri::AppHandle,
+    limit: usize,
+    offset: usize,
+) -> Result<Vec<uni_core::parachute::JournalNote>, String> {
+    with_vault(&app, move |c| {
+        tauri::async_runtime::block_on(c.list_entries(limit, offset)).map_err(|e| e.to_string())
+    })
+    .await
+}
+
+/// One entry, full content (used to watch a transcript land).
+#[tauri::command]
+async fn journal_entry(
+    app: tauri::AppHandle,
+    id: String,
+) -> Result<uni_core::parachute::JournalNote, String> {
+    with_vault(&app, move |c| {
+        tauri::async_runtime::block_on(c.get_entry(&id)).map_err(|e| e.to_string())
+    })
+    .await
+}
+
 #[cfg(mobile)]
 mod mobile;
 mod secure_store;
@@ -913,7 +1109,15 @@ pub fn run() {
             search,
             media_bytes,
             media_save,
-            relay_origin
+            relay_origin,
+            journal_config,
+            journal_set_config,
+            journal_save_text,
+            journal_save_voice,
+            journal_flush,
+            journal_pending,
+            journal_list,
+            journal_entry
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

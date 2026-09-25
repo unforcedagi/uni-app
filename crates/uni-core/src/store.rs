@@ -155,7 +155,7 @@ impl Profile {
 
 /// SQLite-backed store.
 pub struct Store {
-    conn: Connection,
+    pub(crate) conn: Connection,
 }
 
 const SCHEMA: &str = r#"
@@ -374,6 +374,7 @@ impl Store {
                 "ALTER TABLE read_state ADD COLUMN publishable INTEGER NOT NULL DEFAULT 0",
             )?;
         }
+        crate::journal::init_schema(&conn)?;
         Ok(Self { conn })
     }
 
