@@ -92,3 +92,26 @@ h1 { font-size: 22px; margin: 5px 0 0; letter-spacing: -.03em; }
 .avatar.small { flex: 0 0 30px; width: 30px; height: 30px; border-radius: 10px; font-size: 13px; }
 .link { background: transparent; border: 0; color: #9bd1d7; font-size: 10px; padding: 0; text-decoration: underline; }
 @media (max-width: 680px) { .thread-back { display: none; } }
+
+/* ── Markdown bodies ─────────────────────────────────────────── */
+.md { font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+.md > :first-child { margin-top: 6px; }
+.message-content .md p { white-space: normal; margin: 6px 0; }
+.md a { color: #8fe3e1; text-decoration: underline; text-underline-offset: 2px; }
+.md code { font-family: ui-monospace, "JetBrains Mono", monospace; font-size: 12.5px; background: #0f1e28; border: 1px solid #2b4150; border-radius: 4px; padding: 0 4px; }
+.md pre.md-pre { background: #0f1e28; border: 1px solid #2b4150; border-radius: 8px; padding: 8px 10px; overflow-x: auto; margin: 8px 0; }
+.md pre.md-pre code { background: none; border: 0; padding: 0; white-space: pre; }
+.md blockquote { margin: 6px 0; padding-left: 10px; border-left: 3px solid #3f6173; color: #bcd0da; }
+.md ul, .md ol { margin: 6px 0; padding-left: 22px; }
+.md li > p { margin: 2px 0; }
+.md hr { border: 0; border-top: 1px solid #314857; margin: 10px 0; }
+.md .md-h { font-weight: 700; margin: 10px 0 4px; }
+.md .md-h1 { font-size: 17px; } .md .md-h2 { font-size: 16px; } .md .md-h3 { font-size: 15px; }
+.edited { font-size: 11px; color: #99b2bf; margin-left: 4px; }
+
+/* ── Unread + live ───────────────────────────────────────────── */
+.room strong.unread { color: #fff; font-weight: 800; }
+.unread-badge { min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; background: #3f6173; color: #fff; font-size: 11px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
+.unread-badge.mention { background: #77d4d2; color: #0b1820; }
+.connection .live { color: #99b2bf; }
+.connection .live.on { color: #77d4d2; }

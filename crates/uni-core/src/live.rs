@@ -23,11 +23,11 @@ use uuid::Uuid;
 
 use crate::backoff::Backoff;
 use crate::buzz::{
-    channel_of_sub_id, channel_sub_id, merge_discovered_channels, BuzzClient, KIND_CHANNEL_MESSAGE,
+    channel_of_sub_id, channel_sub_id, merge_discovered_channels, BuzzClient,
     KIND_MEMBER_ADDED, KIND_MEMBER_REMOVED, KIND_PROFILE, MEMBERSHIP_SUB_ID,
 };
 use crate::store::{Item, Store};
-use crate::sync::{ingest_message, ingest_profile};
+use crate::sync::{ingest_channel_event, ingest_profile, Ingested};
 use crate::{Error, Result};
 
 /// Sub id for the live profile lookup.
@@ -64,6 +64,8 @@ pub enum LiveEvent {
     Eose { channel: Uuid },
     /// A kind-9 event was stored (`new == false` means it was a duplicate).
     Message { item: Item, new: bool },
+    /// An edit or deletion for `target` in `channel` was stored.
+    Aux { channel: Uuid, target: String, kind: u16 },
     /// Relay refused a channel subscription.
     ChannelClosed { channel: Uuid, message: String },
     /// A kind-44100 notification added us to a channel; its sub is now open.
@@ -274,6 +276,8 @@ impl<'a, F: Fn(LiveEvent)> Session<'a, F> {
             RelayMessage::Eose { subscription_id } => {
                 if let Some(ch) = channel_of_sub_id(&subscription_id) {
                     self.backfilling.remove(&ch);
+                    let seen = self.store.since_for(&ch.to_string())?.unwrap_or(0);
+                    self.store.ensure_read_state(&ch.to_string(), seen)?;
                     (self.emit)(LiveEvent::Eose { channel: ch });
                     self.maybe_open_profile_sub().await?;
                 } else if subscription_id == PROFILES_SUB_ID {
@@ -330,13 +334,20 @@ impl<'a, F: Fn(LiveEvent)> Session<'a, F> {
     async fn handle_event(&mut self, sub: &str, ev: Event) -> Result<()> {
         let kind = ev.kind.as_u16();
         if let Some(ch) = channel_of_sub_id(sub) {
-            if kind != KIND_CHANNEL_MESSAGE {
-                return Ok(());
+            match ingest_channel_event(self.store, &ev, &self.me, ch)? {
+                Ingested::Message { new, item } => {
+                    self.store.set_since(&item.channel, item.ts)?;
+                    self.note_author(ev.pubkey)?;
+                    (self.emit)(LiveEvent::Message { item, new });
+                }
+                Ingested::Aux { new, kind, target, ts } => {
+                    self.store.set_since(&ch.to_string(), ts)?;
+                    if new {
+                        (self.emit)(LiveEvent::Aux { channel: ch, target, kind });
+                    }
+                }
+                Ingested::Ignored => {}
             }
-            let (new, item) = ingest_message(self.store, &ev, &self.me, ch)?;
-            self.store.set_since(&item.channel, item.ts)?;
-            self.note_author(ev.pubkey)?;
-            (self.emit)(LiveEvent::Message { item, new });
             return Ok(());
         }
         if sub == MEMBERSHIP_SUB_ID {

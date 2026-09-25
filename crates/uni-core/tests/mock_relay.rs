@@ -1349,3 +1349,83 @@ mod pairing_e2e {
             .is_err());
     }
 }
+
+fn e(id: &str) -> Vec<String> {
+    vec!["e".to_string(), id.to_string()]
+}
+
+/// Edits (40003) and deletions (9005, and kind 5 as Buzz desktop sends it,
+/// with an `h` tag) are pulled on sync and applied: edited text replaces the
+/// original, deleted messages vanish. Then the same arrives live after EOSE,
+/// and the live loop reports it so the UI can re-render.
+#[tokio::test]
+async fn sync_and_live_apply_edits_and_deletions() {
+    let f = fixture().await;
+    let store = Store::open_in_memory().unwrap();
+    let ch = f.ch_a.to_string();
+    let find = |body: &str| {
+        f.relay.events.lock().unwrap().iter().find(|e| e["content"] == body).unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    let a1 = find("hello a1");
+    let a2 = find("@me a2");
+    let own = find("my own");
+    f.relay.publish(signed(&f.other, 40003, vec![h(f.ch_a), e(&a1)], "hello a1 (fixed)", 110));
+    // An edit by someone other than the author is not applied.
+    f.relay.publish(signed(&f.me, 40003, vec![h(f.ch_a), e(&a2)], "forged", 111));
+    f.relay.publish(signed(&f.relay_keys, 9005, vec![h(f.ch_a), e(&own)], "", 112));
+
+    sync_once(&f.url, &f.me, None, &store).await.unwrap();
+    let bodies = |s: &Store| -> Vec<(String, bool)> {
+        s.room_timeline(&ch, 50)
+            .unwrap()
+            .into_iter()
+            .map(|t| (t.message.item.body, t.message.edited))
+            .collect()
+    };
+    assert_eq!(
+        bodies(&store),
+        vec![("hello a1 (fixed)".into(), true), ("@me a2".into(), false)]
+    );
+    // Backfill seeded the read marker: nothing unread yet.
+    let me_hex = f.me.public_key().to_hex();
+    assert_eq!(store.rooms_for(Some(&me_hex)).unwrap()[0].unread, 0);
+
+    // Live: a new message, then its edit, then a kind-5 delete of a2.
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let (stop_tx, stop_rx) = watch::channel(false);
+    let url = f.url.clone();
+    let me = f.me.clone();
+    let store_ref = &store;
+    let runner = async move { run_live(live_cfg(&url), &me, None, store_ref, tx, stop_rx).await };
+    let driver = async {
+        let mut seen = Vec::new();
+        let mut eose = 0;
+        while eose < 2 {
+            assert!(wait_for(&mut rx, &mut seen, Duration::from_secs(5), |e| matches!(e, LiveEvent::Eose { .. })).await);
+            eose += 1;
+        }
+        let live = signed(&f.other, 9, vec![h(f.ch_a), p(&f.other)], "live one", 600);
+        let live_id = live["id"].as_str().unwrap().to_string();
+        f.relay.publish(live);
+        assert!(wait_for(&mut rx, &mut seen, Duration::from_secs(5), |e| matches!(e, LiveEvent::Message { new: true, .. })).await);
+        assert_eq!(store.rooms_for(Some(&me_hex)).unwrap()[0].unread, 1);
+
+        f.relay.publish(signed(&f.other, 40003, vec![h(f.ch_a), e(&live_id)], "live one, edited", 601));
+        assert!(wait_for(&mut rx, &mut seen, Duration::from_secs(5), |e| matches!(e, LiveEvent::Aux { kind: 40003, .. })).await);
+        f.relay.publish(signed(&f.other, 5, vec![h(f.ch_a), e(&a2)], "", 602));
+        assert!(wait_for(&mut rx, &mut seen, Duration::from_secs(5), |e| matches!(e, LiveEvent::Aux { kind: 5, .. })).await);
+        assert_eq!(
+            bodies(&store),
+            vec![("hello a1 (fixed)".into(), true), ("live one, edited".into(), true)]
+        );
+        stop_tx.send(true).unwrap();
+        assert!(wait_for(&mut rx, &mut seen, Duration::from_secs(5), |e| matches!(e, LiveEvent::Stopped { .. })).await);
+    };
+    let (r, _) = tokio::join!(runner, driver);
+    r.unwrap();
+    store.mark_read(&ch).unwrap();
+    assert_eq!(store.rooms_for(Some(&me_hex)).unwrap()[0].unread, 0);
+}

@@ -42,6 +42,8 @@ pub struct ConversationMessage {
     pub item: Item,
     pub root: Option<String>,
     pub parent: Option<String>,
+    /// `item.body` is the latest authorized kind-40003 edit, not the original.
+    pub edited: bool,
 }
 
 /// A main-timeline message with its thread summary.
@@ -69,7 +71,10 @@ pub struct Room {
     pub name: Option<String>,
     pub last_message: Option<String>,
     pub last_ts: Option<i64>,
+    /// Unread messages that mention us.
     pub mentions: bool,
+    /// Visible messages from others newer than the local read marker.
+    pub unread: i64,
 }
 
 /// Cached kind-0 profile.
@@ -171,6 +176,25 @@ CREATE TABLE IF NOT EXISTS message_mentions (
     PRIMARY KEY (ref, pubkey)
 );
 
+-- Edits (40003) and deletions (5 / 9005) that reference a message by `e`.
+-- Kept separately so arrival order never matters: the `visible_items` view
+-- applies them at read time, whether they came before or after the target.
+CREATE TABLE IF NOT EXISTS aux_events (
+    id      TEXT PRIMARY KEY,
+    kind    INTEGER NOT NULL,
+    target  TEXT NOT NULL,
+    author  TEXT NOT NULL,
+    ts      INTEGER NOT NULL,
+    content TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS aux_events_target ON aux_events(target, kind);
+
+-- Local read marker per room (newest message ts the user has seen).
+CREATE TABLE IF NOT EXISTS read_state (
+    channel TEXT PRIMARY KEY,
+    read_ts INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS profiles (
     pubkey       TEXT PRIMARY KEY,
     name         TEXT,
@@ -180,6 +204,34 @@ CREATE TABLE IF NOT EXISTS profiles (
     updated_at   INTEGER NOT NULL
 );
 "#;
+
+/// Timeline projection with edits and deletions applied: a deleted message
+/// (kind 5 or 9005, both relay-authorized) is absent, and `body` is the newest
+/// kind-40003 edit signed by the original author (ties: larger event id). An
+/// edit that was itself deleted is ignored. Recreated on every open so its
+/// definition can evolve.
+const VIEW_SCHEMA: &str = r#"
+DROP VIEW IF EXISTS visible_items;
+CREATE VIEW visible_items AS
+SELECT i.source, i.ref, i.channel, i.author, i.ts,
+       COALESCE(e.content, i.body) AS body,
+       i.mentions_me,
+       (e.content IS NOT NULL) AS edited
+FROM items i
+LEFT JOIN aux_events e ON e.id = (
+    SELECT x.id FROM aux_events x
+    WHERE x.target = i.ref AND x.kind = 40003 AND x.author = i.author
+      AND NOT EXISTS (SELECT 1 FROM aux_events dx WHERE dx.target = x.id AND dx.kind IN (5, 9005))
+    ORDER BY x.ts DESC, x.id DESC LIMIT 1)
+WHERE NOT EXISTS (SELECT 1 FROM aux_events d WHERE d.target = i.ref AND d.kind IN (5, 9005));
+"#;
+
+/// Kind 5: NIP-09 deletion.
+pub const KIND_DELETION: i64 = 5;
+/// Kind 9005: Buzz / NIP-29 delete-event.
+pub const KIND_DELETE_EVENT: i64 = 9005;
+/// Kind 40003: Buzz message edit.
+pub const KIND_EDIT: i64 = 40003;
 
 /// FTS5 external-content index over `items.body`, synced by triggers.
 /// `content_rowid` is the implicit SQLite rowid of `items`.
@@ -203,7 +255,11 @@ impl Store {
     /// Open (or create) the database at `path` and apply the schema.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let conn = Connection::open(path)?;
-        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
+        // busy_timeout: the live loop and a foreground refresh/send each own a
+        // connection; let a writer wait briefly instead of failing SQLITE_BUSY.
+        conn.execute_batch(
+            "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;",
+        )?;
         Self::init(conn)
     }
 
@@ -226,6 +282,7 @@ impl Store {
         if !had_fts {
             conn.execute("INSERT INTO items_fts(items_fts) VALUES ('rebuild')", [])?;
         }
+        conn.execute_batch(VIEW_SCHEMA)?;
         Ok(Self { conn })
     }
 
@@ -245,6 +302,49 @@ impl Store {
             ],
         )?;
         Ok(n == 1)
+    }
+
+    /// Record an edit / deletion event aimed at `target`. Idempotent; returns
+    /// `true` if new. Unknown kinds are rejected so the view stays honest.
+    pub fn upsert_aux(
+        &self,
+        id: &str,
+        kind: i64,
+        target: &str,
+        author: &str,
+        ts: i64,
+        content: &str,
+    ) -> Result<bool> {
+        if ![KIND_DELETION, KIND_DELETE_EVENT, KIND_EDIT].contains(&kind) {
+            return Err(crate::Error::Invalid(format!("not an edit/delete kind: {kind}")));
+        }
+        let n = self.conn.execute(
+            "INSERT OR IGNORE INTO aux_events (id, kind, target, author, ts, content)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![id, kind, target, author, ts, content],
+        )?;
+        Ok(n == 1)
+    }
+
+    /// Seed a room's read marker if it has none (first sight of the room, or
+    /// the first run after upgrading): history that predates it counts as read.
+    pub fn ensure_read_state(&self, channel: &str, ts: i64) -> Result<()> {
+        self.conn.execute(
+            "INSERT OR IGNORE INTO read_state (channel, read_ts) VALUES (?1, ?2)",
+            params![channel, ts],
+        )?;
+        Ok(())
+    }
+
+    /// Mark `channel` read up to its newest cached message (never goes back).
+    pub fn mark_read(&self, channel: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO read_state (channel, read_ts)
+             VALUES (?1, COALESCE((SELECT MAX(ts) FROM items WHERE channel = ?1), 0))
+             ON CONFLICT(channel) DO UPDATE SET read_ts = MAX(read_ts, excluded.read_ts)",
+            params![channel],
+        )?;
+        Ok(())
     }
 
     /// Upsert a discovered channel.
@@ -492,14 +592,15 @@ impl Store {
     pub fn room_timeline(&self, channel: &str, limit: usize) -> Result<Vec<TimelineMessage>> {
         let mut stmt = self.conn.prepare(
             "SELECT i.source,i.ref,i.channel,i.author,i.ts,i.body,i.mentions_me,r.root,r.parent,
-                (SELECT COUNT(*) FROM message_refs x JOIN items j ON j.ref=x.ref
+                (SELECT COUNT(*) FROM message_refs x JOIN visible_items j ON j.ref=x.ref
                   WHERE x.root=i.ref AND j.channel=i.channel AND j.ref<>i.ref),
-                (SELECT MAX(j.ts) FROM message_refs x JOIN items j ON j.ref=x.ref
-                  WHERE x.root=i.ref AND j.channel=i.channel AND j.ref<>i.ref)
-             FROM items i LEFT JOIN message_refs r ON r.ref=i.ref
+                (SELECT MAX(j.ts) FROM message_refs x JOIN visible_items j ON j.ref=x.ref
+                  WHERE x.root=i.ref AND j.channel=i.channel AND j.ref<>i.ref),
+                i.edited
+             FROM visible_items i LEFT JOIN message_refs r ON r.ref=i.ref
              WHERE i.source='buzz' AND i.channel=?1
                AND (r.root IS NULL OR r.root=i.ref
-                    OR NOT EXISTS(SELECT 1 FROM items k WHERE k.ref=r.root AND k.channel=i.channel))
+                    OR NOT EXISTS(SELECT 1 FROM visible_items k WHERE k.ref=r.root AND k.channel=i.channel))
              ORDER BY i.ts DESC,i.ref DESC LIMIT ?2",
         )?;
         let mut rows = stmt
@@ -518,8 +619,8 @@ impl Store {
     /// One joined room's recent messages, chronological in the returned window.
     pub fn room_messages(&self, channel: &str, limit: usize) -> Result<Vec<ConversationMessage>> {
         let mut stmt = self.conn.prepare(
-            "SELECT i.source,i.ref,i.channel,i.author,i.ts,i.body,i.mentions_me,r.root,r.parent
-             FROM items i LEFT JOIN message_refs r ON r.ref=i.ref
+            "SELECT i.source,i.ref,i.channel,i.author,i.ts,i.body,i.mentions_me,r.root,r.parent,i.edited
+             FROM visible_items i LEFT JOIN message_refs r ON r.ref=i.ref
              WHERE i.source='buzz' AND i.channel=?1
              ORDER BY i.ts DESC,i.ref DESC LIMIT ?2",
         )?;
@@ -538,8 +639,8 @@ impl Store {
         limit: usize,
     ) -> Result<Vec<ConversationMessage>> {
         let mut stmt = self.conn.prepare(
-            "SELECT i.source,i.ref,i.channel,i.author,i.ts,i.body,i.mentions_me,r.root,r.parent
-             FROM items i LEFT JOIN message_refs r ON r.ref=i.ref
+            "SELECT i.source,i.ref,i.channel,i.author,i.ts,i.body,i.mentions_me,r.root,r.parent,i.edited
+             FROM visible_items i LEFT JOIN message_refs r ON r.ref=i.ref
              WHERE i.source='buzz' AND i.channel=?1 AND (i.ref=?2 OR r.root=?2)
              ORDER BY i.ts ASC,i.ref ASC LIMIT ?3",
         )?;
@@ -553,24 +654,39 @@ impl Store {
     }
 
     /// Joined channels, sorted with Uni first and the most active rooms next.
+    /// No unread counts (see [`Store::rooms_for`]).
     pub fn rooms(&self) -> Result<Vec<Room>> {
+        self.rooms_for(None)
+    }
+
+    /// Joined channels with unread state relative to `me`: messages newer than
+    /// the room's read marker, not authored by `me`, that are still visible
+    /// (deleted ones never count). Thread replies count too (Buzz: thread
+    /// activity contributes). `mentions` is "an unread message mentions me".
+    /// A room with no read marker yet has nothing unread.
+    pub fn rooms_for(&self, me: Option<&str>) -> Result<Vec<Room>> {
         let mut stmt = self.conn.prepare(
             "SELECT c.id,c.name,
-                (SELECT body FROM items WHERE source='buzz' AND channel=c.id ORDER BY ts DESC,ref DESC LIMIT 1),
-                (SELECT ts FROM items WHERE source='buzz' AND channel=c.id ORDER BY ts DESC,ref DESC LIMIT 1),
-                EXISTS(SELECT 1 FROM items WHERE source='buzz' AND channel=c.id AND mentions_me=1)
-             FROM channels c WHERE archived=0
+                (SELECT body FROM visible_items WHERE source='buzz' AND channel=c.id ORDER BY ts DESC,ref DESC LIMIT 1),
+                (SELECT ts FROM visible_items WHERE source='buzz' AND channel=c.id ORDER BY ts DESC,ref DESC LIMIT 1),
+                EXISTS(SELECT 1 FROM visible_items v WHERE v.source='buzz' AND v.channel=c.id AND v.mentions_me=1
+                       AND v.ts > rs.read_ts AND v.author IS NOT ?1),
+                (SELECT COUNT(*) FROM visible_items v WHERE v.source='buzz' AND v.channel=c.id
+                       AND v.ts > rs.read_ts AND v.author IS NOT ?1)
+             FROM channels c LEFT JOIN read_state rs ON rs.channel=c.id
+             WHERE archived=0
              ORDER BY CASE WHEN lower(c.name)='uni' THEN 0 ELSE 1 END,
-                      (SELECT MAX(ts) FROM items WHERE source='buzz' AND channel=c.id) DESC,c.id",
+                      (SELECT MAX(ts) FROM visible_items WHERE source='buzz' AND channel=c.id) DESC,c.id",
         )?;
         let rows = stmt
-            .query_map([], |r| {
+            .query_map(params![me], |r| {
                 Ok(Room {
                     id: r.get(0)?,
                     name: r.get(1)?,
                     last_message: r.get(2)?,
                     last_ts: r.get(3)?,
-                    mentions: r.get::<_, i64>(4)? != 0,
+                    mentions: r.get::<_, Option<i64>>(4)?.unwrap_or(0) != 0,
+                    unread: r.get::<_, Option<i64>>(5)?.unwrap_or(0),
                 })
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -582,8 +698,8 @@ impl Store {
         Ok(self
             .conn
             .query_row(
-                "SELECT i.source,i.ref,i.channel,i.author,i.ts,i.body,i.mentions_me,r.root,r.parent
-             FROM items i LEFT JOIN message_refs r ON r.ref=i.ref
+                "SELECT i.source,i.ref,i.channel,i.author,i.ts,i.body,i.mentions_me,r.root,r.parent,i.edited
+             FROM visible_items i LEFT JOIN message_refs r ON r.ref=i.ref
              WHERE i.source='buzz' AND i.channel=?1 AND i.ref=?2",
                 params![channel, id],
                 row_to_message,
@@ -616,6 +732,7 @@ impl Store {
             "SELECT i.source, i.ref, i.channel, i.author, i.ts, i.body, i.mentions_me
              FROM items_fts f JOIN items i ON i.rowid = f.rowid
              WHERE items_fts MATCH ?1
+               AND NOT EXISTS (SELECT 1 FROM aux_events d WHERE d.target = i.ref AND d.kind IN (5, 9005))
              ORDER BY bm25(items_fts), i.ts DESC LIMIT ?2",
         )?;
         let rows = stmt
@@ -630,6 +747,7 @@ fn row_to_message(r: &rusqlite::Row<'_>) -> rusqlite::Result<ConversationMessage
         item: row_to_item(r)?,
         root: r.get(7)?,
         parent: r.get(8)?,
+        edited: r.get::<_, Option<i64>>("edited")?.unwrap_or(0) != 0,
     })
 }
 
@@ -913,5 +1031,85 @@ mod tests {
         .unwrap();
         let s = Store::init(conn).unwrap();
         assert_eq!(s.search("legacy", 5).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn edits_apply_latest_by_author_and_deletions_hide() {
+        let s = Store::open_in_memory().unwrap();
+        s.upsert_channel("c1", Some("Uni"), None, false, 1).unwrap();
+        s.upsert_item(&item("m1", "c1", 10)).unwrap(); // author "aa"
+        s.upsert_item(&item("m2", "c1", 11)).unwrap();
+        s.upsert_item(&item("m3", "c1", 12)).unwrap();
+        // Edit arrives before an older edit: newest ts wins regardless of order.
+        s.upsert_aux("e2", KIND_EDIT, "m1", "aa", 30, "second edit").unwrap();
+        s.upsert_aux("e1", KIND_EDIT, "m1", "aa", 20, "first edit").unwrap();
+        // An edit by someone else is ignored.
+        s.upsert_aux("ex", KIND_EDIT, "m1", "zz", 40, "hijack").unwrap();
+        // Deletions: kind 9005 and kind 5 both hide the target.
+        s.upsert_aux("d2", KIND_DELETE_EVENT, "m2", "mod", 21, "").unwrap();
+        s.upsert_aux("d3", KIND_DELETION, "m3", "aa", 22, "").unwrap();
+        // Duplicate is a no-op; unknown kinds rejected.
+        assert!(!s.upsert_aux("d3", KIND_DELETION, "m3", "aa", 22, "").unwrap());
+        assert!(s.upsert_aux("r", 7, "m1", "aa", 1, "+").is_err());
+
+        let tl = s.room_timeline("c1", 50).unwrap();
+        assert_eq!(tl.len(), 1);
+        assert_eq!(tl[0].message.item.body, "second edit");
+        assert!(tl[0].message.edited);
+        assert!(s.room_messages("c1", 50).unwrap().iter().all(|m| m.item.r#ref == "m1"));
+        assert!(s.message("c1", "m2").unwrap().is_none());
+        // Deleted text is not searchable; edited text is still found by original (FTS indexes items).
+        assert!(s.search("m3", 10).unwrap().is_empty());
+        // Room preview uses the edited body.
+        assert_eq!(s.rooms().unwrap()[0].last_message.as_deref(), Some("second edit"));
+
+        // Deleting the newest edit falls back to the previous one.
+        s.upsert_aux("de2", KIND_DELETION, "e2", "aa", 50, "").unwrap();
+        assert_eq!(s.room_timeline("c1", 50).unwrap()[0].message.item.body, "first edit");
+    }
+
+    #[test]
+    fn deleted_replies_leave_thread_counts() {
+        let s = Store::open_in_memory().unwrap();
+        s.upsert_item(&item("root", "c1", 10)).unwrap();
+        s.upsert_item(&item("r1", "c1", 11)).unwrap();
+        s.upsert_item(&item("r2", "c1", 12)).unwrap();
+        s.set_message_refs("r1", Some("root"), Some("root")).unwrap();
+        s.set_message_refs("r2", Some("root"), Some("root")).unwrap();
+        s.upsert_aux("d", KIND_DELETE_EVENT, "r2", "aa", 13, "").unwrap();
+        let tl = s.room_timeline("c1", 50).unwrap();
+        assert_eq!(tl[0].reply_count, 1);
+        assert_eq!(tl[0].last_reply_ts, Some(11));
+        assert_eq!(s.thread_messages("c1", "root", 50).unwrap().len(), 2);
+        // Deleted root: its replies resurface in the main timeline (nothing disappears silently).
+        s.upsert_aux("dr", KIND_DELETE_EVENT, "root", "aa", 14, "").unwrap();
+        let refs: Vec<_> = s.room_timeline("c1", 50).unwrap().into_iter().map(|t| t.message.item.r#ref).collect();
+        assert_eq!(refs, vec!["r1"]);
+    }
+
+    #[test]
+    fn unread_counts_follow_read_marker_and_skip_own_and_deleted() {
+        let s = Store::open_in_memory().unwrap();
+        let me = "aa";
+        s.upsert_channel("c1", Some("Uni"), None, false, 1).unwrap();
+        s.upsert_channel("c2", Some("Other"), None, false, 1).unwrap();
+        s.upsert_item(&item("old", "c1", 10)).unwrap();
+        // No marker yet: nothing unread.
+        assert_eq!(s.rooms_for(Some(me)).unwrap()[0].unread, 0);
+        s.ensure_read_state("c1", 10).unwrap();
+        s.ensure_read_state("c1", 999).unwrap(); // seeding never moves an existing marker
+        let other = |r: &str, ts: i64, mention: bool| Item { author: "bb".into(), mentions_me: mention, ..item(r, "c1", ts) };
+        s.upsert_item(&other("n1", 11, false)).unwrap();
+        s.upsert_item(&other("n2", 12, true)).unwrap();
+        s.upsert_item(&other("n3", 13, false)).unwrap();
+        s.upsert_item(&item("mine", "c1", 14)).unwrap(); // own message: not unread
+        s.upsert_aux("d", KIND_DELETE_EVENT, "n3", "bb", 15, "").unwrap();
+        let r = &s.rooms_for(Some(me)).unwrap()[0];
+        assert_eq!((r.id.as_str(), r.unread, r.mentions), ("c1", 2, true));
+        s.mark_read("c1").unwrap();
+        let r = &s.rooms_for(Some(me)).unwrap()[0];
+        assert_eq!((r.unread, r.mentions), (0, false));
+        // Other rooms unaffected; rooms() without identity still lists them.
+        assert_eq!(s.rooms().unwrap().len(), 2);
     }
 }

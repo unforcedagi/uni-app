@@ -33,7 +33,7 @@ pub use identity::{
 };
 pub use live::{run_live, LiveConfig, LiveEvent};
 pub use store::{ConversationMessage, Item, Member, Profile, Room, Store, TimelineMessage};
-pub use sync::{sync_once, SyncReport};
+pub use sync::{ingest_channel_event, sync_once, Ingested, SyncReport};
 
 /// Errors produced by uni-core.
 #[derive(Debug, thiserror::Error)]
