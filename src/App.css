@@ -110,7 +110,6 @@ h1 { font-family: var(--serif); font-weight: 500; font-size: 34px; line-height: 
 .room-text small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 13px; }
 .room-side { align-self: stretch; display: flex; flex-direction: column; align-items: end; justify-content: space-between; min-width: 44px; padding: 2px 0; }
 .room-side time { font-size: 11px; color: var(--muted); white-space: nowrap; }
-.mention-dot { background: var(--turquoise); width: 8px; height: 8px; border-radius: 50%; }
 .rooms-body { display: flex; flex-direction: column; min-height: 0; flex: 1; }
 .rooms-body[hidden] { display: none; }
 
@@ -147,7 +146,7 @@ h1 { font-family: var(--serif); font-weight: 500; font-size: 34px; line-height: 
 .message-content p { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; font-size: 15px; margin: 4px 0; }
 .message-actions { display: flex; flex-wrap: wrap; gap: 2px; margin: 2px 0 0 -8px; opacity: 0; max-height: 0; overflow: hidden; transition: opacity .3s var(--ease), max-height .3s var(--ease); }
 .message:hover .message-actions, .message:focus-within .message-actions { opacity: 1; max-height: 60px; }
-@media (hover: none) { .message-actions { opacity: .75; max-height: 60px; } }
+@media (hover: none) { .message-actions { opacity: .75; max-height: none; } }
 .message-actions button { background: transparent; border: 0; color: var(--muted); font-size: 12px; padding: 4px 8px; min-height: 32px; border-radius: 999px; }
 .message-actions button:hover:not(:disabled) { background: var(--accent-soft); color: var(--accent); }
 .message-actions button:disabled { opacity: .6; cursor: default; }
@@ -306,6 +305,7 @@ h1 { font-family: var(--serif); font-weight: 500; font-size: 34px; line-height: 
 .journal-actions .mic:hover:not(:disabled) { transform: translateY(-1px); }
 .journal-actions .mic.on { width: auto; min-width: 64px; padding: 0 22px; border-radius: 32px; background: var(--danger); font-size: 16px; animation: breathe 2.4s ease-in-out infinite; }
 .journal-actions .mic span { font-size: 15px; font-variant-numeric: tabular-nums; }
+.journal-prompt { margin: 0; font-family: var(--serif); font-style: italic; font-size: 19px; color: var(--text-soft); }
 .journal-status { flex: 1; font-size: 13px; color: var(--muted); min-width: 0; line-height: 1.45; }
 .journal-list { display: flex; flex-direction: column; gap: 14px; }
 .journal-entry { padding: 16px 18px 12px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow); animation: rise .45s var(--ease) both; }
@@ -325,6 +325,17 @@ h1 { font-family: var(--serif); font-weight: 500; font-size: 34px; line-height: 
 
 @media (prefers-color-scheme: dark) {
   h1 { color: var(--text); }
+}
+
+/* ── Touch: 44px minimum targets (the Daylight is touch-only) ─ */
+@media (pointer: coarse) {
+  .message-actions button, .thread-summary, .older button, .share-picker button,
+  .attachment-file, .thread-back, .address-toggle, .send, .reply-banner button { min-height: 44px; }
+  .address-toggle, .reply-banner button { min-width: 44px; }
+  .pill { min-height: 36px; padding: 4px 12px; }
+  .quick-react button { width: 44px; height: 44px; }
+  /* Always shown on touch; never clipped when the actions wrap to 2–3 rows. */
+  .message-actions, .message:hover .message-actions, .message:focus-within .message-actions { opacity: .75; max-height: none; }
 }
 
 /* ── Narrow screens: one pane at a time ────────────────────── */
