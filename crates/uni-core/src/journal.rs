@@ -188,9 +188,10 @@ impl Store {
     }
 }
 
-/// Send every queued entry, oldest first. Stops at the first failure (a
-/// network error would fail the rest the same way) and records the error on
-/// that entry; later entries wait behind it.
+/// Send every queued entry, oldest first. A failed entry records its error and
+/// stays queued for the next flush; the rest still go (one bad entry must not
+/// hold the journal hostage). Only an unreachable hub stops the pass, since it
+/// would fail every remaining entry the same way.
 pub async fn flush(store: &Store, client: &VaultClient) -> Result<FlushReport> {
     let mut report = FlushReport::default();
     for entry in store.journal_pending()? {
@@ -202,8 +203,11 @@ pub async fn flush(store: &Store, client: &VaultClient) -> Result<FlushReport> {
             Err(e) => {
                 let msg = e.to_string();
                 store.journal_failed(&entry.entry_id, &msg)?;
+                let offline = msg.contains("hub unreachable");
                 report.error = Some(msg);
-                break;
+                if offline {
+                    break;
+                }
             }
         }
     }
