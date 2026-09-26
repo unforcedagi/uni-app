@@ -77,6 +77,9 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const [live, setLive] = useState<string | null>(null);
   // Bumped by live events so the open room re-reads from the local store.
   const [tick, setTick] = useState(0);
+  // Bumped after each successful sync so the open room and roster re-read.
+  const [synced, setSynced] = useState(0);
+  const busyRef = useRef(false);
   const [limit, setLimit] = useState(300);
   const relayOrigin = useRelayOrigin();
   const [older, setOlder] = useState<"idle" | "loading" | "done">("idle");
@@ -111,13 +114,9 @@ function Conversations({ onForget }: { onForget: () => void }) {
     setReady(true);
   }, []);
 
-  const loadMessages = useCallback(async (selected: string, thread: string | null) => {
-    const rows = await invoke<Message[]>("get_messages", { channel: selected, root: thread, limit });
-    setMessages(rows);
-  }, [limit]);
-
   const refresh = useCallback(async () => {
-    if (busy) return;
+    if (busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
     setStatus("Connecting to Buzz…");
     setError(null);
@@ -128,13 +127,14 @@ function Conversations({ onForget }: { onForget: () => void }) {
       const warnings = Object.entries(result.channel_errors).map(([id, reason]) => `${id.slice(0, 8)}: ${reason}`);
       if (result.truncated_channels.length) warnings.push("Some rooms have more history than the current 500-message backfill.");
       setStatus(warnings.length ? `Synced with warnings: ${warnings.join("; ")}` : `Synced · ${result.total_items} cached messages`);
+      setSynced((n) => n + 1);
       // Keep the socket open for push while we're in the foreground.
       invoke<boolean>("live_start").catch((e) => setLive(`Live unavailable: ${e}`));
     } catch (e) {
       setError(String(e));
       setStatus("Offline · showing cached messages");
-    } finally { setBusy(false); }
-  }, [busy, loadRooms]);
+    } finally { busyRef.current = false; setBusy(false); }
+  }, [loadRooms]);
 
   useEffect(() => {
     let active = true;
@@ -176,7 +176,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       invoke("mark_read", { channel }).then(() => loadRooms()).catch(() => {});
     }
     return () => { current = false; };
-  }, [channel, root, status, tick, limit, loadRooms]);
+  }, [channel, root, synced, tick, limit, loadRooms]);
 
   // New room: back to the default window; older pages load on demand.
   useEffect(() => { setLimit(300); setOlder("idle"); setReactFor(null); setEditing(null); }, [channel]);
@@ -186,7 +186,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     let current = true;
     invoke<Member[]>("get_members", { channel }).then((rows) => { if (current) setMembers(rows); }).catch(() => { if (current) setMembers([]); });
     return () => { current = false; };
-  }, [channel, status]);
+  }, [channel, synced]);
 
   useEffect(() => {
     // After prepending older history, keep the reader where they were.
@@ -236,6 +236,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       const label = memberLabels(roster).get(uni.pubkey) ?? uni.name;
       await invoke<Message>("post_message", { channel: uniRoom.id, body: searchHandoffText(query, label), replyTo: null, recipients: [uni.pubkey] });
       setStatus("Asked Uni · results will arrive in #Uni");
+      setTick((n) => n + 1);
       await loadRooms();
       return true;
     } catch (e) { setError(`Couldn't reach Uni: ${e}`); return false; }
@@ -243,14 +244,17 @@ function Conversations({ onForget }: { onForget: () => void }) {
 
   async function loadOlder() {
     if (!channel || older === "loading") return;
+    const ch = channel;
     setOlder("loading");
     try {
-      const n = await invoke<number>("load_older", { channel });
+      const n = await invoke<number>("load_older", { channel: ch });
+      // The room changed while loading: its own reset already ran.
+      if (channelRef.current !== ch) return;
       if (n === 0) { setOlder("done"); return; }
       if (listRef.current) preserveScroll.current = listRef.current.scrollHeight - listRef.current.scrollTop;
       setOlder("idle");
       setLimit((l) => l + n + 50);
-    } catch (e) { setError(String(e)); setOlder("idle"); }
+    } catch (e) { if (channelRef.current === ch) { setError(String(e)); setOlder("idle"); } }
   }
 
   // Hand a message to Uni: "note" posts straight to the Uni room (Uni files it
@@ -271,6 +275,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
         await invoke<Message>("post_message", { channel: uniRoom.id, body: handoffText("note", m, roomName, label), replyTo: null, recipients: [uni.pubkey] });
         setKept((k) => new Set(k).add(m.ref));
         setStatus("Sent to Uni · it will file the note and reply in #Uni");
+        setTick((n) => n + 1);
         await loadRooms();
       } else {
         const text = handoffText("ask", m, roomName, label, " ");
@@ -461,7 +466,9 @@ function Conversations({ onForget }: { onForget: () => void }) {
       }
       setRawKey("");
       setReplyTo(null);
-      await loadMessages(channel, root);
+      // Re-read through the room effect, which drops the result if the
+      // user has switched rooms meanwhile.
+      setTick((n) => n + 1);
       await loadRooms();
       setStatus(recipients.length ? `Message accepted by relay · notified ${recipients.length}` : "Message accepted by relay");
     } catch (e) { setError(String(e)); }
