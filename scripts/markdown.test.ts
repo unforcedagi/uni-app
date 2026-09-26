@@ -70,4 +70,22 @@ assert.equal(markdownToText("**Done** — see [PR](https://x.y)\n- one\n- two"),
 // Robustness: pathological inputs terminate.
 for (const s of ["*".repeat(500), "[".repeat(300), "_a".repeat(300), "> ".repeat(100), "1. ".repeat(100), "`".repeat(301)]) parseMarkdown(s);
 
+// Remote-input hardening: deep nesting must not overflow the stack (a throw
+// here would crash the whole message list), and unmatched emphasis/bracket
+// runs must stay fast.
+for (const s of [">".repeat(20000) + " x", "[".repeat(5000) + "a" + "](http://x)".repeat(5000),
+  Array.from({ length: 400 }, (_, i) => " ".repeat(i * 2) + "- a").join("\n")]) {
+  parseMarkdown(s);
+  markdownToText(s);
+}
+{
+  const t0 = Date.now();
+  for (const s of ["*a ".repeat(20000), "_a ".repeat(20000), "~~a ".repeat(15000), "[a".repeat(20000)]) parseMarkdown(s);
+  assert.ok(Date.now() - t0 < 3000, `pathological emphasis took ${Date.now() - t0} ms`);
+}
+// Past the nesting cap content survives as text rather than vanishing.
+assert.ok(markdownToText(">".repeat(50) + " deep").includes("deep"));
+// Emphasis still pairs after an earlier unmatched opener of the same mark.
+assert.deepEqual(parseInline("a * b *c*"), [t("a * b "), { t: "em", c: [t("c")] }]);
+
 console.log("markdown tests passed");
