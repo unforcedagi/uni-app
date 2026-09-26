@@ -1,6 +1,8 @@
 // Journal helpers (pure, unit-tested). Entries use the Parachute app's capture
 // shape: path Notes/YYYY/MM-DD/HH-MM-SS in local time, tag `capture`.
 
+import { quote } from "./uniActions.ts";
+
 export type JournalDraft = { entry_id: string; path: string; content: string; source: "text" | "voice"; created_at: string };
 export type JournalNote = { id: string; path: string; created_at: string; content: string; source: string | null; entry_id: string | null; tags: string[]; pending: boolean };
 export type QueuedEntry = { entry_id: string; path: string; content: string; source: string; created_at: string; has_audio: boolean; note_id: string | null; attempts: number; last_error: string | null };
@@ -37,9 +39,7 @@ const MAX_SHARE = 1500;
  * plain share of the excerpt.
  */
 export function shareText(note: Pick<JournalNote, "path" | "content" | "created_at">, vault: string, uniLabel: string | null, ask = ""): string {
-  const chars = [...entryText(note.content)];
-  const body = chars.length > MAX_SHARE ? chars.slice(0, MAX_SHARE).join("").trimEnd() + " …" : chars.join("");
-  const quoted = body.split("\n").map((l) => (l ? `> ${l}` : ">")).join("\n");
+  const quoted = quote(entryText(note.content), MAX_SHARE);
   const when = new Date(note.created_at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
   const ref = `journal entry, ${when} · vault ${vault}: ${note.path}`;
   if (!uniLabel) return `${quoted}\n\n— ${ref}`;
