@@ -20,23 +20,39 @@ function useRecorder(onDone: (blob: Blob, mime: string) => void) {
   const [elapsed, setElapsed] = useState(0);
   const rec = useRef<MediaRecorder | null>(null);
   const timer = useRef<number | null>(null);
+  const starting = useRef(false);
+  // Latest callback: onstop fires long after start() ran, and must see the
+  // text typed during the recording, not the text at the moment it began.
+  const done = useRef(onDone);
+  done.current = onDone;
 
   const stopTracks = () => rec.current?.stream.getTracks().forEach((t) => t.stop());
   useEffect(() => () => { stopTracks(); if (timer.current) clearInterval(timer.current); }, []);
 
   async function start() {
+    // A second tap while the permission prompt is up would open a second
+    // stream and orphan the first (the mic would stay on).
+    if (starting.current || rec.current?.state === "recording") return;
+    starting.current = true;
+    try { await begin(); } finally { starting.current = false; }
+  }
+
+  async function begin() {
     const mime = pickAudioMime((t) => typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(t));
     const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
-    const r = new MediaRecorder(stream, mime ? { mimeType: mime, audioBitsPerSecond: 32000 } : undefined);
+    let r: MediaRecorder;
+    try { r = new MediaRecorder(stream, mime ? { mimeType: mime, audioBitsPerSecond: 32000 } : undefined); }
+    catch (e) { stream.getTracks().forEach((t) => t.stop()); throw e; }
     const chunks: Blob[] = [];
     r.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
     r.onstop = () => {
-      stopTracks();
+      r.stream.getTracks().forEach((t) => t.stop());
       const type = (r.mimeType || mime || "audio/webm");
-      onDone(new Blob(chunks, { type }), type);
+      done.current(new Blob(chunks, { type }), type);
     };
     rec.current = r;
-    r.start(1000);
+    try { r.start(1000); }
+    catch (e) { stream.getTracks().forEach((t) => t.stop()); rec.current = null; throw e; }
     const t0 = Date.now();
     setElapsed(0);
     timer.current = window.setInterval(() => setElapsed((Date.now() - t0) / 1000), 250);
@@ -64,6 +80,8 @@ export default function Journal({ rooms, uniRoomId, onShare, onBack }: { rooms: 
   const [shared, setShared] = useState<Record<string, string>>({});
   const [settings, setSettings] = useState(false);
   const watching = useRef(new Set<string>());
+  const alive = useRef(true);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
 
   const loadQueue = useCallback(async () => {
     try { setQueued(await invoke<QueuedEntry[]>("journal_pending")); } catch { /* store not ready */ }
@@ -90,9 +108,12 @@ export default function Journal({ rooms, uniRoomId, onShare, onBack }: { rooms: 
     watching.current.add(id);
     let tries = 0;
     const tick = async () => {
+      // Journal closed: stop polling (it restarts for pending entries on reopen).
+      if (!alive.current) { watching.current.delete(id); return; }
       tries++;
       try {
         const e = await invoke<JournalNote>("journal_entry", { id });
+        if (!alive.current) { watching.current.delete(id); return; }
         setEntries((old) => old.some((x) => x.id === id) ? old.map((x) => x.id === id ? e : x) : [e, ...old]);
         if (!e.pending) { watching.current.delete(id); return; }
       } catch { /* retry */ }
@@ -183,7 +204,7 @@ export default function Journal({ rooms, uniRoomId, onShare, onBack }: { rooms: 
       <button className="back icon-button" onClick={onBack} aria-label="Back to conversations">‹</button>
       <div><strong>Journal</strong><small>{cfg ? `Private · saved to vault ${cfg.vault} with your key` : "Private · your vault"}</small></div>
       <button className="icon-button" onClick={() => setSettings(!settings)} aria-label="Journal settings" aria-expanded={settings}>⚙</button>
-      <button className="icon-button" onClick={() => { void load(false); void invoke<FlushReport>("journal_flush").then((r) => afterFlush(r, "Synced")); }} disabled={loading} aria-label="Refresh journal">↻</button>
+      <button className="icon-button" onClick={() => { void load(false); void invoke<FlushReport>("journal_flush").then((r) => afterFlush(r, "Synced")).catch((e) => setError(String(e))); }} disabled={loading} aria-label="Refresh journal">↻</button>
     </header>
     {settings && cfg && <JournalSettings cfg={cfg} onSaved={(c) => { setCfg(c); setSettings(false); void load(false); }} />}
     <div className="journal-compose">
