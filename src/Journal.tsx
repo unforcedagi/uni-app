@@ -9,6 +9,8 @@ export type ShareFn = (note: JournalNote, roomId: string, toUni: boolean, vault:
 
 const PAGE = 30;
 
+const DRAFT_KEY = "uni.journal.draft";
+
 function when(iso: string) {
   const d = new Date(iso);
   return isNaN(d.getTime()) ? iso : d.toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
@@ -70,7 +72,12 @@ export default function Journal({ rooms, uniRoomId, onShare, onBack }: { rooms: 
   const [cfg, setCfg] = useState<VaultConfig | null>(null);
   const [entries, setEntries] = useState<JournalNote[]>([]);
   const [queued, setQueued] = useState<QueuedEntry[]>([]);
-  const [text, setText] = useState("");
+  // The draft outlives the Journal screen: leaving to answer a message, or the
+  // app being closed, must never lose what you were writing.
+  const [text, setText] = useState(() => localStorage.getItem(DRAFT_KEY) ?? "");
+  useEffect(() => {
+    if (text) localStorage.setItem(DRAFT_KEY, text); else localStorage.removeItem(DRAFT_KEY);
+  }, [text]);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState("");
   const [error, setError] = useState<string | null>(null);
