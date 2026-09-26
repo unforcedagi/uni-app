@@ -244,7 +244,19 @@ impl<'a, F: Fn(LiveEvent)> Session<'a, F> {
                 let _ = self.client.disconnect().await;
                 return Ok(());
             }
-            match self.client.next_message(poll).await {
+            // Wake on stop too, so `live_stop` does not wait out the poll
+            // timeout. Reading the socket is cancel-safe (a message is either
+            // returned or still queued). A dropped sender can never ask to
+            // stop, so fall back to plain polling rather than spin.
+            let next = if stop.has_changed().is_ok() {
+                tokio::select! {
+                    m = self.client.next_message(poll) => m,
+                    _ = stop.changed() => continue,
+                }
+            } else {
+                self.client.next_message(poll).await
+            };
+            match next {
                 Ok(msg) => self.handle(msg).await?,
                 Err(Error::Relay(WsClientError::Timeout)) => {
                     self.maybe_open_profile_sub().await?;
