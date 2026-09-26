@@ -104,6 +104,9 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const channelRef = useRef<string | null>(null);
   channelRef.current = channel;
   const scrollEnd = useRef<HTMLDivElement>(null);
+  const shownView = useRef<string | null>(null);
+  // Uni is notified on every message in rooms it belongs to, unless muted.
+  const [notifyUni, setNotifyUni] = useState(true);
   const input = useRef<HTMLTextAreaElement>(null);
   const focusComposer = useRef(false);
 
@@ -196,7 +199,20 @@ function Conversations({ onForget }: { onForget: () => void }) {
       return;
     }
     // A search jump positions the list itself (below).
-    if (!focusRef) scrollEnd.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    if (focusRef || !listRef.current) return;
+    // Opening a room or thread lands on the newest message at once; only new
+    // messages in the room you're already reading glide in.
+    const view = `${channel}|${root}`;
+    const opened = shownView.current !== view && messages.length > 0;
+    if (opened) shownView.current = view;
+    if (opened) {
+      const el = listRef.current;
+      el.scrollTop = el.scrollHeight;
+      // Images and fonts settle after first paint; stay pinned to the end.
+      const t = setTimeout(() => { el.scrollTop = el.scrollHeight; }, 350);
+      return () => clearTimeout(t);
+    }
+    scrollEnd.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages.length, channel, root]);
 
   // Jump to a search hit: once its room/thread is rendered, center and flash
@@ -443,6 +459,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
     const resolved = resolveRecipients(snapshot, bindings, members);
     if ("error" in resolved) { setError(resolved.error); return; }
     const recipients = [...resolved.recipients];
+    const uniHere = findUniMember(members);
+    if (notifyUni && uniHere && !recipients.includes(uniHere.pubkey)) recipients.push(uniHere.pubkey);
     const raw = rawKey.trim();
     if (raw) {
       if (!HEX_KEY.test(raw)) { setError("The advanced public key must be 64 hex characters."); return; }
@@ -583,7 +601,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
         <footer className="composer">
           {error && <p className="error" role="alert">{error}</p>}
           {replyTo && replyTo !== root && <div className="reply-banner">Replying to {messages.find((m) => m.ref === replyTo)?.author_name ?? "message"}<button onClick={() => setReplyTo(null)} aria-label="Cancel reply">×</button></div>}
-          <div className="compose-destination">{isThread ? <>Replying in thread · <strong>{currentRoom.name}</strong></> : <>Sending to <strong>{currentRoom.name}</strong></>}{boundNames.length ? ` · notifying ${boundNames.join(", ")}` : " · type @ to notify someone"}</div>
+          <div className="compose-destination">{isThread ? <>Replying in thread · <strong>{currentRoom.name}</strong></> : <>Sending to <strong>{currentRoom.name}</strong></>}{boundNames.length ? ` · notifying ${boundNames.join(", ")}` : ""}{findUniMember(members) && <> · <button className="link" onClick={() => setNotifyUni((v) => !v)} aria-pressed={notifyUni}>{notifyUni ? "Uni is listening" : "Uni muted"}</button></>}</div>
           {picker && <ul className="mention-picker" role="listbox" aria-label="Mention a member">
             {suggestions.length === 0 && <li className="mention-empty">{members.length ? `No member matches “${picker.query}”` : "No member list cached yet. Refresh to load it."}</li>}
             {suggestions.map((m, i) => <li key={m.pubkey} role="option" aria-selected={i === picker.index}>
