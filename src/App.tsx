@@ -1,8 +1,11 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import "./App.css";
-import { markdownToText, parseMarkdown, type Block, type Inline } from "./markdown";
+import { markdownToText } from "./markdown";
+import { Body } from "./MessageBody";
+import Pairing from "./Pairing";
+import { emojiLabel, toggleLocal, type Reaction } from "./reactions";
 import { DeleteButton, InlineEditor } from "./InlineEditor";
 import { lastOwnMessage } from "./ownMessages";
 
@@ -11,22 +14,18 @@ import Search from "./Search";
 import Journal from "./Journal";
 import { shareText, type JournalNote } from "./journal";
 import { Attachments, attachmentBody, useRelayOrigin, type MediaRef } from "./Attachments";
-import { activeQuery, filterMembers, insertMention, memberLabels, mentionSegments, pruneBindings, resolveRecipients, type Bindings, type Member } from "./mentions";
+import { activeQuery, filterMembers, insertMention, memberLabels, pruneBindings, resolveRecipients, type Bindings, type Member } from "./mentions";
 
 type Room = { id: string; name: string; last_message: string | null; last_ts: number | null; mentions: boolean; unread: number };
 type Message = { ref: string; channel: string; author: string; author_name: string; ts: number; body: string; mentions_me: boolean; root: string | null; parent: string | null; mentions: Member[]; reply_count: number; last_reply_ts: number | null; edited: boolean; reactions: Reaction[]; media?: MediaRef[] };
-type Reaction = { emoji: string; count: number; mine: string | null };
 type LivePayload = { kind: "message" | "edit" | "delete" | "rooms" | "profiles" | "status"; channel: string | null; status: string | null; author: string | null };
 type IdentityStatus = { paired: boolean; pubkey: string | null };
-type PairStep = "paste" | "connecting" | "code" | "receiving" | "done";
 type SyncResult = { pubkey: string; total_items: number; channel_errors: Record<string, string>; truncated_channels: string[] };
 
 const time = (ts: number) => new Date(ts * 1000).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 const HEX_KEY = /^[0-9a-f]{64}$/i;
 const keyFor = (channel: string, root: string | null) => `${channel}:${root ?? "room"}`;
 const QUICK_REACTIONS = ["👍", "❤️", "😂", "🙏", "🔥", "✦"];
-// NIP-25: "+" is a like, "-" a dislike.
-export const emojiLabel = (e: string) => e === "+" || e === "" ? "👍" : e === "-" ? "👎" : e;
 const dayKey = (ts: number) => new Date(ts * 1000).toDateString();
 function dayLabel(ts: number) {
   const d = new Date(ts * 1000), today = new Date();
@@ -39,68 +38,6 @@ const clock = (ts: number) => new Date(ts * 1000).toLocaleTimeString(undefined, 
 // Stable per-author hue for letter avatars.
 const hue = (pk: string) => parseInt(pk.slice(0, 6), 16) % 360;
 
-function Pairing({ onPaired }: { onPaired: (pubkey: string) => void }) {
-  const [link, setLink] = useState("");
-  const [step, setStep] = useState<PairStep>("paste");
-  const [sas, setSas] = useState("");
-  const [error, setError] = useState<string | null>(null);
-
-  async function start() {
-    setError(null);
-    setStep("connecting");
-    try {
-      const r = await invoke<{ sas: string }>("pairing_start", { uri: link.trim() });
-      setSas(r.sas);
-      setStep("code");
-    } catch (e) { setError(String(e)); setStep("paste"); }
-  }
-  async function confirm() {
-    setError(null);
-    setStep("receiving");
-    try {
-      const r = await invoke<{ pubkey: string }>("pairing_confirm");
-      setLink("");
-      setStep("done");
-      onPaired(r.pubkey);
-    } catch (e) { setError(String(e)); setStep("paste"); }
-  }
-  async function cancel(codesDiffer: boolean) {
-    try { await invoke("pairing_cancel", { codesDiffer }); } catch { /* best effort */ }
-    setSas("");
-    setStep("paste");
-    if (codesDiffer) setError("Codes did not match — pairing cancelled. Start a new pairing in Buzz.");
-  }
-
-  return <main className="pairing">
-    <div className="pairing-card">
-      <span className="eyebrow">Unforced</span>
-      <h1>Pair with Buzz desktop</h1>
-      {(step === "paste" || step === "connecting") && <>
-        <ol className="pairing-steps">
-          <li>On your computer, open Buzz → Settings → <strong>Pair mobile device</strong>.</li>
-          <li>Click <strong>Copy</strong> and get the link to this device (paste it here).</li>
-          <li>Tap Start, then compare the 6-digit codes.</li>
-        </ol>
-        <label className="pairing-label">Pairing link
-          <textarea value={link} onChange={(e) => setLink(e.target.value)} rows={4} spellCheck={false} autoCapitalize="off" autoCorrect="off" placeholder="nostrpair://…" disabled={step === "connecting"} />
-        </label>
-        <button className="send pairing-primary" disabled={!link.trim().startsWith("nostrpair://") || step === "connecting"} onClick={() => void start()}>{step === "connecting" ? "Connecting…" : "Start"}</button>
-      </>}
-      {(step === "code" || step === "receiving") && <>
-        <p>Does Buzz desktop show this code?</p>
-        <p className="sas" aria-label={`Code ${sas.split("").join(" ")}`}>{sas.slice(0, 3)} {sas.slice(3)}</p>
-        <p className="pairing-note">Only continue if the codes are identical. Then confirm on Buzz desktop too.</p>
-        <div className="pairing-actions">
-          <button className="send pairing-primary" disabled={step === "receiving"} onClick={() => void confirm()}>{step === "receiving" ? "Waiting for Buzz desktop…" : "Codes match"}</button>
-          <button className="pairing-secondary" onClick={() => void cancel(step === "code")}>Cancel</button>
-        </div>
-      </>}
-      {step === "done" && <p>Paired. Loading your conversations…</p>}
-      {error && <p className="error" role="alert">{error}</p>}
-      <p className="pairing-note">Your key is sent encrypted, end to end, and stored in this device's secure keystore.</p>
-    </div>
-  </main>;
-}
 
 function App() {
   const [paired, setPaired] = useState<boolean | null>(null);
@@ -112,47 +49,6 @@ function App() {
   return <Conversations onForget={() => setPaired(false)} />;
 }
 
-function openLink(e: React.MouseEvent, href: string) {
-  // Never navigate the app's own WebView; hand the link to the system browser.
-  e.preventDefault();
-  void invoke("open_link", { url: href }).catch(() => {});
-}
-
-// Memoized: typing in the composer re-renders the room, and re-parsing
-// every message's markdown on each keystroke made input lag on the Daylight.
-const Body = memo(function Body({ body, mentions, me, edited }: { body: string; mentions: Member[]; me: string | null; edited?: boolean }) {
-  const text = (v: string, key: string) => mentionSegments(v, mentions).map((seg, i) => seg.mention
-    ? <span key={`${key}.${i}`} className={`mention ${seg.mention === me ? "mention-me" : ""}`} title={seg.mention}>{seg.text}</span>
-    : <span key={`${key}.${i}`}>{seg.text}</span>);
-  const inline = (nodes: Inline[], key: string): React.ReactNode[] => nodes.map((n, i) => {
-    const k = `${key}.${i}`;
-    switch (n.t) {
-      case "text": return text(n.v, k);
-      case "br": return <br key={k} />;
-      case "code": return <code key={k}>{n.v}</code>;
-      case "strong": return <strong key={k}>{inline(n.c, k)}</strong>;
-      case "em": return <em key={k}>{inline(n.c, k)}</em>;
-      case "del": return <del key={k}>{inline(n.c, k)}</del>;
-      case "link": return <a key={k} href={n.href} onClick={(e) => openLink(e, n.href)} rel="noreferrer noopener">{inline(n.c, k)}</a>;
-    }
-  });
-  const blocks = (bs: Block[], key: string): React.ReactNode[] => bs.map((b, i) => {
-    const k = `${key}.${i}`;
-    switch (b.t) {
-      case "p": return <p key={k}>{inline(b.c, k)}</p>;
-      case "h": return <p key={k} className={`md-h md-h${b.level}`}>{inline(b.c, k)}</p>;
-      case "code": return <pre key={k} className="md-pre"><code>{b.v}</code></pre>;
-      case "quote": return <blockquote key={k}>{blocks(b.c, k)}</blockquote>;
-      case "hr": return <hr key={k} />;
-      case "list": {
-        const items = b.items.map((it, j) => <li key={`${k}.${j}`}>{blocks(it, `${k}.${j}`)}</li>);
-        return b.ordered ? <ol key={k} start={b.start}>{items}</ol> : <ul key={k}>{items}</ul>;
-      }
-    }
-  });
-  const tree = parseMarkdown(body);
-  return <div className="md">{blocks(tree, "b")}{edited && <span className="edited" title="Edited by the author">(edited)</span>}</div>;
-});
 
 type Picker = { start: number; query: string; index: number };
 
@@ -699,14 +595,3 @@ function Conversations({ onForget }: { onForget: () => void }) {
 }
 
 export default App;
-
-/** Optimistic reaction toggle on the client copy (the store re-read corrects it). */
-export function toggleLocal(rs: Reaction[], emoji: string, removing: boolean): Reaction[] {
-  const i = rs.findIndex((r) => emojiLabel(r.emoji) === emojiLabel(emoji));
-  if (removing) {
-    if (i < 0) return rs;
-    return rs[i].count <= 1 ? rs.filter((_, j) => j !== i) : rs.map((x, j) => j === i ? { ...x, count: x.count - 1, mine: null } : x);
-  }
-  if (i < 0) return [...rs, { emoji, count: 1, mine: "pending" }];
-  return rs.map((x, j) => j === i ? { ...x, count: x.count + 1, mine: "pending" } : x);
-}
