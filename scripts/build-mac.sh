@@ -14,7 +14,9 @@ git -C "$HOME/Code/buzz" fetch https://github.com/unforcedagi/buzz.git "$BUZZ_SH
 git -C "$HOME/Code/buzz" checkout -f "$BUZZ_SHA"
 cd "$REPO"
 pnpm install --frozen-lockfile
-export TAURI_SIGNING_PRIVATE_KEY_PATH="$KEY"
+export TAURI_SIGNING_PRIVATE_KEY="$(<"$KEY")"
+# The key was generated with --ci (no passphrase); set this explicitly so SSH cannot prompt.
+export TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""
 pnpm tauri build --bundles app
 APP="$REPO/target/release/bundle/macos/Uni.app"
 test -d "$APP"

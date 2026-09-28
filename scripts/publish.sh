@@ -3,6 +3,16 @@
 set -euo pipefail
 export PYTHONDONTWRITEBYTECODE=1
 cd "$(dirname "$0")/.."
+# Only one publication can mutate this checkout or the latest pointers at a time.
+mkdir -p "$HOME/.config/uni/updater"
+exec 9>"$HOME/.config/uni/updater/publish.lock"
+flock -n 9 || { echo 'A Uni release is already running' >&2; exit 1; }
+# Regenerated Tauri schemas are build outputs in this dedicated checkout.
+cleanup_generated() {
+  git restore -- src-tauri/gen/schemas
+  rm -rf src-tauri/gen/android/buildSrc/.kotlin
+}
+trap cleanup_generated EXIT
 REPO="$PWD"
 SERVE="$HOME/.local/share/uni/apk"
 MAC="uni@100.126.18.24"
@@ -74,6 +84,7 @@ python3 scripts/write-release-manifest.py "$SERVE" "$VERSION" "$SHA" "$BASE"
 curl -fsS "$BASE/mac/latest.json" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["platforms"]["darwin-aarch64"]["signature"]; print("Mac manifest:", d["version"], "signature present")'
 curl -fsS "$BASE/android/latest.json" | python3 -c 'import json,sys; d=json.load(sys.stdin); print("Android manifest:", d["version"])'
 # Only install while Uni is not foreground; wireless debugging may be offline.
+python3 scripts/connect-daylight.py || echo 'Daylight ADB discovery failed; APK is still published' >&2
 SERIAL="$(adb devices | awk '/100\.114\.25\.16:[0-9]+[[:space:]]+device/{print $1; exit}')"
 if [[ -n "$SERIAL" ]]; then
   TOP="$(timeout 10 adb -s "$SERIAL" shell dumpsys activity activities | grep topResumedActivity || true)"

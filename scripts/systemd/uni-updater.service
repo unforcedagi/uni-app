@@ -1,0 +1,9 @@
+[Unit]
+Description=Publish Uni builds when journal changes
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/bash %h/Code/uni-app-pipeline/scripts/watch-journal.sh
+TimeoutStartSec=3600
