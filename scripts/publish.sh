@@ -35,12 +35,13 @@ git push origin HEAD:journal
 git tag "uni-v$VERSION" "$SHA"
 git push origin "uni-v$VERSION"
 # The Mac's private signing key lives outside the repo; install once from uni-1.
-ssh "$MAC" 'mkdir -p ~/.config/uni/updater && chmod 700 ~/.config/uni/updater'
+ssh "$MAC" 'mkdir -p ~/.config/uni/updater ~/.local/share/uni && chmod 700 ~/.config/uni/updater'
 scp -q "$HOME/.config/uni/updater/uni.key" "$MAC:.config/uni/updater/uni.key"
+scp -q scripts/build-mac.sh "$MAC:.local/share/uni/build-mac.sh"
 ssh "$MAC" 'chmod 600 ~/.config/uni/updater/uni.key'
 mkdir -p "$TMPDIR/uni-release-$VERSION"
 STAGE="$TMPDIR/uni-release-$VERSION"
-( ssh "$MAC" "bash ~/Code/uni-app-journal/scripts/build-mac.sh '$SHA' '$BUZZ_SHA'" >"$STAGE/mac.log" 2>&1 ) & MAC_PID=$!
+( ssh "$MAC" "bash ~/.local/share/uni/build-mac.sh '$SHA' '$BUZZ_SHA'" >"$STAGE/mac.log" 2>&1 ) & MAC_PID=$!
 (
   source "$HOME/.config/uni/android.env"
   export PATH="$HOME/.cargo/bin:$PATH"
