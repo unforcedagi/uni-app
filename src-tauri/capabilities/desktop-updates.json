@@ -1,0 +1,8 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "desktop-updates",
+  "description": "Signed background updates on desktop; the updater plugin does not support mobile.",
+  "platforms": ["macOS"],
+  "windows": ["main"],
+  "permissions": ["updater:default", "process:allow-restart"]
+}
