@@ -10,7 +10,95 @@ use buzz_sdk::{
 use nostr::{EventId, Keys, PublicKey, Tag};
 use uuid::Uuid;
 
-use crate::{buzz::BuzzClient, store::Item, sync::ingest_message, Error, Result, Store};
+use crate::{
+    buzz::BuzzClient,
+    media::{media_sha_from_url, MediaRef, MAX_IMETA_PER_MESSAGE},
+    store::Item,
+    sync::ingest_message,
+    Error, Result, Store,
+};
+
+/// Buzz-compatible NIP-92 tags and markdown lines, validated before publish.
+pub fn outgoing_media(
+    relay_url: &str,
+    body: &str,
+    media: &[MediaRef],
+) -> Result<(String, Vec<Vec<String>>)> {
+    if media.len() > MAX_IMETA_PER_MESSAGE {
+        return Err(Error::Invalid("too many attachments".into()));
+    }
+    let mut content = body.to_string();
+    let mut tags = Vec::new();
+    for m in media {
+        let sha = media_sha_from_url(relay_url, &m.url)?;
+        if m.sha256.as_deref() != Some(sha.as_str()) {
+            return Err(Error::Invalid("attachment hash mismatch".into()));
+        }
+        let mime = m
+            .mime
+            .as_deref()
+            .ok_or_else(|| Error::Invalid("attachment missing MIME".into()))?;
+        if !mime.contains('/') || mime.contains([' ', '\r', '\n']) {
+            return Err(Error::Invalid("invalid attachment MIME".into()));
+        }
+        let size = m
+            .size
+            .filter(|s| *s > 0)
+            .ok_or_else(|| Error::Invalid("attachment missing size".into()))?;
+        let mut tag = vec![
+            "imeta".to_string(),
+            format!("url {}", m.url),
+            format!("m {mime}"),
+            format!("x {sha}"),
+            format!("size {size}"),
+        ];
+        if let Some(dim) = m.dim.as_deref() {
+            if crate::media::parse_dim(dim).is_none() {
+                return Err(Error::Invalid("invalid image dimensions".into()));
+            }
+            tag.push(format!("dim {dim}"));
+        }
+        if let Some(hash) = m.blurhash.as_deref() {
+            if hash.contains([' ', '\r', '\n']) {
+                return Err(Error::Invalid("invalid blurhash".into()));
+            }
+            tag.push(format!("blurhash {hash}"));
+        }
+        let filename = m.filename.as_deref().unwrap_or("file");
+        if filename.is_empty()
+            || filename.len() > 255
+            || filename.contains(['/', '\\'])
+            || filename.chars().any(char::is_control)
+        {
+            return Err(Error::Invalid("invalid attachment filename".into()));
+        }
+        tag.push(format!("filename {filename}"));
+        if mime.starts_with("image/") {
+            tag.push(format!("alt {filename}"));
+        }
+        let label = filename
+            .replace('\\', "\\\\")
+            .replace('[', "\\[")
+            .replace(']', "\\]");
+        if mime.starts_with("image/")
+            && !filename.ends_with(".agent.png")
+            && !filename.ends_with(".team.png")
+        {
+            content.push_str(&format!("\n![image]({})", m.url));
+        } else if mime.starts_with("video/") {
+            content.push_str(&format!("\n![video]({})", m.url));
+        } else {
+            content.push_str(&format!("\n[{label}]({})", m.url));
+        }
+        tags.push(tag);
+    }
+    if content.trim().is_empty() || content.len() > 64 * 1024 {
+        return Err(Error::Invalid(
+            "message must contain text or attachments and be at most 64 KiB".into(),
+        ));
+    }
+    Ok((content, tags))
+}
 
 /// The `p` tags for an outgoing message: our own key (Buzz convention), the
 /// parent's author when replying, then the explicitly bound recipients, as
@@ -56,11 +144,34 @@ pub async fn send_message(
     reply_to: Option<&str>,
     recipients: &[String],
 ) -> Result<Item> {
-    if content.trim().is_empty() || content.len() > 64 * 1024 {
-        return Err(Error::Invalid(
-            "message must contain text and be at most 64 KiB".into(),
-        ));
-    }
+    send_message_with_media(
+        relay_url,
+        keys,
+        auth_tag,
+        store,
+        channel,
+        content,
+        reply_to,
+        recipients,
+        &[],
+    )
+    .await
+}
+
+/// As `send_message`, with relay-verified attachment descriptors.
+#[allow(clippy::too_many_arguments)]
+pub async fn send_message_with_media(
+    relay_url: &str,
+    keys: &Keys,
+    auth_tag: Option<&Tag>,
+    store: &Store,
+    channel: Uuid,
+    body: &str,
+    reply_to: Option<&str>,
+    recipients: &[String],
+    media: &[MediaRef],
+) -> Result<Item> {
+    let (content, media_tags) = outgoing_media(relay_url, body, media)?;
     if !store.rooms()?.iter().any(|r| r.id == channel.to_string()) {
         return Err(Error::Invalid("select a joined room before sending".into()));
     }
@@ -90,11 +201,11 @@ pub async fn send_message(
     let mention_refs: Vec<&str> = mentions.iter().map(String::as_str).collect();
     let event = build_message(
         channel,
-        content,
+        &content,
         thread.as_ref(),
         &mention_refs,
         false,
-        &[],
+        &media_tags,
         &[],
     )
     .map_err(|e| Error::Invalid(e.to_string()))?
@@ -259,6 +370,52 @@ async fn publish_aux(
 mod tests {
     use super::*;
     use nostr::Keys;
+
+    #[test]
+    fn outgoing_imeta_matches_buzz_desktop_and_rejects_other_origins() {
+        let h = "a".repeat(64);
+        let url = format!("https://relay.example/media/{h}.png");
+        let image = MediaRef {
+            url: url.clone(),
+            mime: Some("image/png".into()),
+            sha256: Some(h.clone()),
+            size: Some(42),
+            dim: Some("8x9".into()),
+            filename: Some("pic.png".into()),
+            ..Default::default()
+        };
+        let (body, tags) =
+            outgoing_media("wss://relay.example", "hello", &[image.clone()]).unwrap();
+        assert_eq!(body, format!("hello\n![image]({url})"));
+        assert_eq!(
+            tags,
+            vec![vec![
+                "imeta",
+                &format!("url {url}"),
+                "m image/png",
+                &format!("x {h}"),
+                "size 42",
+                "dim 8x9",
+                "filename pic.png",
+                "alt pic.png"
+            ]
+            .into_iter()
+            .map(str::to_string)
+            .collect::<Vec<_>>()]
+        );
+        assert!(outgoing_media("wss://elsewhere.example", "", &[image]).is_err());
+        let pdf = MediaRef {
+            url: format!("https://relay.example/media/{h}.pdf"),
+            mime: Some("application/pdf".into()),
+            sha256: Some(h),
+            size: Some(42),
+            filename: Some("a].pdf".into()),
+            ..Default::default()
+        };
+        let (body, _) = outgoing_media("wss://relay.example", "", &[pdf]).unwrap();
+        assert!(body.starts_with("\n[a\\].pdf](https://relay.example/media/"));
+        assert!(outgoing_media("wss://relay.example", "", &[]).is_err());
+    }
 
     #[test]
     fn mention_pubkeys_orders_dedupes_and_canonicalizes() {

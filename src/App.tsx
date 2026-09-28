@@ -20,6 +20,7 @@ import { shareText, type JournalNote } from "./journalCore";
 import NoteView from "./NoteView";
 import { NoteOpener } from "./noteLinks";
 import { sameHub, type VaultRef } from "./vaultlinks";
+import { attachmentKind, formatSize } from "./media";
 import { Attachments, attachmentBody, useRelayOrigin, type MediaRef } from "./Attachments";
 import { activeQuery, filterMembers, insertMention, memberLabels, pruneBindings, resolveRecipients, type Bindings, type Member } from "./mentions";
 
@@ -28,6 +29,10 @@ type Message = { ref: string; channel: string; author: string; author_name: stri
 type LivePayload = { kind: "message" | "edit" | "delete" | "rooms" | "profiles" | "status"; channel: string | null; status: string | null; author: string | null };
 type IdentityStatus = { paired: boolean; pubkey: string | null };
 type SyncResult = { pubkey: string; total_items: number; channel_errors: Record<string, string>; truncated_channels: string[] };
+
+type PendingFile = { id: string; file: File; preview: string | null; state: "uploading" | "ready" | "error"; media?: MediaRef; error?: string };
+const MAX_FILE_BYTES = 25 * 1024 * 1024;
+const MAX_ATTACHMENTS = 20;
 
 const time = (ts: number) => new Date(ts * 1000).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 const HEX_KEY = /^[0-9a-f]{64}$/i;
@@ -68,6 +73,13 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const [identity, setIdentity] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const drafts = useRef(new Map<string, string>());
+  const [pending, setPending] = useState<PendingFile[]>([]);
+  const pendingStore = useRef(new Map<string, PendingFile[]>());
+  const activeScope = useRef<string | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+  useEffect(() => () => {
+    for (const files of pendingStore.current.values()) for (const item of files) if (item.preview) URL.revokeObjectURL(item.preview);
+  }, []);
   const [bindings, setBindings] = useState<Bindings>(new Map());
   const bindingStore = useRef(new Map<string, Bindings>());
   const [picker, setPicker] = useState<Picker | null>(null);
@@ -450,6 +462,51 @@ function Conversations({ onForget }: { onForget: () => void }) {
 
   function scope() { return channel ? keyFor(channel, root) : null; }
 
+  activeScope.current = scope();
+  function changePending(key: string, update: (items: PendingFile[]) => PendingFile[]) {
+    const next = update(pendingStore.current.get(key) ?? []);
+    pendingStore.current.set(key, next);
+    if (activeScope.current === key) setPending(next);
+  }
+  function removeFile(key: string, id: string) {
+    changePending(key, (items) => {
+      const item = items.find((x) => x.id === id);
+      if (item?.preview) URL.revokeObjectURL(item.preview);
+      return items.filter((x) => x.id !== id);
+    });
+  }
+  async function uploadFile(key: string, id: string, file: File) {
+    changePending(key, (items) => items.map((x) => x.id === id ? { ...x, state: "uploading", error: undefined } : x));
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const media = await invoke<MediaRef>("media_upload", bytes, { headers: { "x-filename": encodeURIComponent(file.name), "x-file-mime": file.type || "application/octet-stream" } });
+      changePending(key, (items) => items.map((x) => x.id === id ? { ...x, media, state: "ready" } : x));
+    } catch (e) {
+      changePending(key, (items) => items.map((x) => x.id === id ? { ...x, state: "error", error: String(e) } : x));
+    }
+  }
+  function addFiles(files: File[]) {
+    const key = scope();
+    if (!key || !files.length) return;
+    const current = pendingStore.current.get(key) ?? [];
+    const room = MAX_ATTACHMENTS - current.length;
+    if (files.length > room) setError(`Up to ${MAX_ATTACHMENTS} attachments per message.`);
+    for (const file of files.slice(0, Math.max(0, room))) {
+      if (!file.size || file.size > MAX_FILE_BYTES) { setError(`${file.name}: file is empty or exceeds 25 MB.`); continue; }
+      const id = crypto.randomUUID();
+      const preview = /^image\/(png|jpeg|gif|webp)$/.test(file.type) ? URL.createObjectURL(file) : null;
+      changePending(key, (items) => [...items, { id, file, preview, state: "uploading" }]);
+      void uploadFile(key, id, file);
+    }
+  }
+  function onPasteFiles(e: React.ClipboardEvent) {
+    const files = Array.from(e.clipboardData.files);
+    if (files.length) { e.preventDefault(); addFiles(files); }
+  }
+  function onDropFiles(e: React.DragEvent) {
+    e.preventDefault();
+    if (!sending) addFiles(Array.from(e.dataTransfer.files));
+  }
   function updateDraft(text: string, caret: number | null) {
     setDraft(text);
     const key = scope();
@@ -528,6 +585,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
     if (nextChannel !== channel || nextRoot !== root) restoredView.current = null;
     if (key) { drafts.current.set(key, draft); bindingStore.current.set(key, bindings); }
     const nextKey = nextChannel ? keyFor(nextChannel, nextRoot) : null;
+    activeScope.current = nextKey;
+    setPending(nextKey ? pendingStore.current.get(nextKey) ?? [] : []);
     setJournalOpen(false);
     setNotes([]);
     setChannel(nextChannel);
@@ -545,7 +604,12 @@ function Conversations({ onForget }: { onForget: () => void }) {
   }
 
   async function send() {
-    if (!channel || sending || !draft.trim()) return;
+    if (!channel || sending || (!draft.trim() && !pending.length)) return;
+    const files = pendingStore.current.get(keyFor(channel, root)) ?? [];
+    if (files.some((f) => f.state !== "ready" || !f.media)) {
+      setError("Wait for uploads to finish or remove failed files before sending."); return;
+    }
+    const sentIds = files.map((f) => f.id);
     const snapshot = draft;
     const key = keyFor(channel, root);
     const resolved = resolveRecipients(snapshot, bindings, members);
@@ -566,7 +630,11 @@ function Conversations({ onForget }: { onForget: () => void }) {
     setSending(true);
     setError(null);
     try {
-      await invoke<Message>("post_message", { channel, body: snapshot, replyTo: target, recipients });
+      await invoke<Message>("post_message", { channel, body: snapshot, replyTo: target, recipients, media: files.map((f) => f.media!) });
+      changePending(key, (items) => {
+        for (const item of items) if (sentIds.includes(item.id) && item.preview) URL.revokeObjectURL(item.preview);
+        return items.filter((item) => !sentIds.includes(item.id));
+      });
       // Do not erase text typed during an in-flight send or in another room.
       if (drafts.current.get(key) === snapshot || (scope() === key && draft === snapshot)) {
         setDraft((current) => current === snapshot ? "" : current);
@@ -755,7 +823,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
             <div ref={scrollEnd} />
           </div>
         </div>
-        <footer className="composer">
+        <footer className="composer" onDragOver={(e) => { if (e.dataTransfer.types.includes("Files")) e.preventDefault(); }} onDrop={onDropFiles}>
+          <input ref={fileInput} className="file-picker" type="file" multiple aria-label="Choose files to attach" onChange={(e) => { addFiles(Array.from(e.target.files ?? [])); e.target.value = ""; }} />
           {error && <p className="error" role="alert">{error}</p>}
           {replyTo && replyTo !== root && <div className="reply-banner">Replying to {messages.find((m) => m.ref === replyTo)?.author_name ?? "message"}<button onClick={() => setReplyTo(null)} aria-label="Cancel reply">×</button></div>}
           <div className="compose-destination">{isThread ? <>Replying in thread · <strong>{currentRoom.name}</strong></> : <>Sending to <strong>{currentRoom.name}</strong></>}{boundNames.length ? ` · notifying ${boundNames.join(", ")}` : ""}{findUniMember(members) && <> · <button className="link" onClick={() => setNotifyUni((v) => !v)} aria-pressed={notifyUni}>{notifyUni ? "Uni is listening" : "Uni muted"}</button></>}</div>
@@ -768,7 +837,15 @@ function Conversations({ onForget }: { onForget: () => void }) {
             </li>)}
           </ul>}
           {advancedOpen && <label className="address-label">Advanced: also notify a raw public key (64 hex characters)<input value={rawKey} onChange={(e) => setRawKey(e.target.value)} autoComplete="off" spellCheck={false} placeholder="hex pubkey" /></label>}
-          <div className="compose-row"><button className="address-toggle" onPointerDown={(e) => e.preventDefault()} onMouseDown={(e) => e.preventDefault()} onClick={startMention} aria-label="Mention someone">@</button><textarea ref={input} aria-label={`Message ${currentRoom.name}`} value={draft} onChange={(e) => updateDraft(e.target.value, e.target.selectionStart)} onSelect={(e) => syncPicker(e.currentTarget.value, e.currentTarget.selectionStart)} onBlur={() => setPicker(null)} onKeyDown={onKeyDown} maxLength={65536} rows={2} placeholder={isThread ? "Reply in thread…" : "Message Uni…"} /><button className="send" disabled={!draft.trim() || sending} onClick={() => void send()} aria-label="Send message">{sending ? "Sending…" : "Send"}</button></div>
+          {pending.length > 0 && <div className="compose-files" aria-label="Attachments">
+            {pending.map((item) => <div className={`compose-file ${item.state}`} key={item.id}>
+              {item.preview ? <img src={item.preview} alt="" /> : <span className="compose-file-icon" aria-hidden="true">{item.file.type === "application/pdf" || item.file.name.toLowerCase().endsWith(".pdf") ? "📄" : attachmentKind({ url: item.file.name, mime: item.file.type }) === "audio" ? "♪" : "📎"}</span>}
+              <span className="compose-file-info"><strong>{item.file.name}</strong><small>{formatSize(item.file.size)} · {item.state === "ready" ? "Ready" : item.state === "uploading" ? "Uploading…" : `Failed: ${item.error}`}</small>{item.state === "uploading" && <progress aria-label={`Uploading ${item.file.name}`} />}</span>
+              {item.state === "error" && <button className="compose-file-retry" onClick={() => void uploadFile(keyFor(currentRoom.id, root), item.id, item.file)} aria-label={`Retry upload ${item.file.name}`}>Retry</button>}
+              <button className="compose-file-remove" disabled={sending} onClick={() => removeFile(keyFor(currentRoom.id, root), item.id)} aria-label={`Remove ${item.file.name}`}>×</button>
+            </div>)}
+          </div>}
+          <div className="compose-row"><button className="address-toggle" onPointerDown={(e) => e.preventDefault()} onMouseDown={(e) => e.preventDefault()} onClick={startMention} aria-label="Mention someone">@</button><button className="address-toggle" onClick={() => fileInput.current?.click()} disabled={sending} aria-label="Attach files" title="Attach files">📎</button><textarea ref={input} aria-label={`Message ${currentRoom.name}`} value={draft} onChange={(e) => updateDraft(e.target.value, e.target.selectionStart)} onPaste={onPasteFiles} onSelect={(e) => syncPicker(e.currentTarget.value, e.currentTarget.selectionStart)} onBlur={() => setPicker(null)} onKeyDown={onKeyDown} maxLength={65536} rows={2} placeholder={isThread ? "Reply in thread…" : "Message Uni…"} /><button className="send" disabled={(!draft.trim() && !pending.length) || pending.some((f) => f.state !== "ready") || sending} onClick={() => void send()} aria-label="Send message">{sending ? "Sending…" : "Send"}</button></div>
           <p className="compose-hint">Enter to send · Shift+Enter for a new line · @ to mention · <button className="link" onClick={() => setAdvancedOpen(!advancedOpen)}>{advancedOpen ? "hide raw key" : "raw key…"}</button></p>
         </footer>
       </> : <div className="welcome"><span className="welcome-mark">✦</span><h2>Your conversation starts here</h2><p>Select a room to read and reply. Messages are cached for offline reading.</p></div>}

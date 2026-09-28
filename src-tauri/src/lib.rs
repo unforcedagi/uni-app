@@ -3,8 +3,8 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tauri::{Emitter, Manager};
 use uni_core::{
-    remove_reaction, send_message, send_reaction, sync_older, sync_once, ConversationMessage,
-    LiveConfig, LiveEvent, Store,
+    remove_reaction, send_message_with_media, send_reaction, sync_older, sync_once,
+    ConversationMessage, LiveConfig, LiveEvent, Store,
 };
 
 /// Run blocking work (SQLite, the desktop keyring) off the async executor
@@ -738,10 +738,11 @@ async fn post_message(
     body: String,
     reply_to: Option<String>,
     recipients: Vec<String>,
+    media: Option<Vec<uni_core::MediaRef>>,
 ) -> Result<MessageView, String> {
     relay_io(&app, move |url, keys, store| {
         let ch = room_id(&channel)?;
-        let sent = tauri::async_runtime::block_on(send_message(
+        let sent = tauri::async_runtime::block_on(send_message_with_media(
             url,
             keys,
             None,
@@ -750,6 +751,7 @@ async fn post_message(
             &body,
             reply_to.as_deref(),
             &recipients,
+            media.as_deref().unwrap_or(&[]),
         ))
         .map_err(|e| e.to_string())?;
         let message = store
@@ -844,6 +846,45 @@ async fn media_bytes(
     Ok(tauri::ipc::Response::new(bytes))
 }
 
+/// Upload a picked/pasted/dropped file via raw IPC (never a JSON byte array).
+/// `x-filename` and `x-file-mime` are display/advisory hints only.
+#[tauri::command]
+async fn media_upload(
+    app: tauri::AppHandle,
+    request: tauri::ipc::Request<'_>,
+) -> Result<uni_core::MediaRef, String> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("expected raw file bytes".into());
+    };
+    if bytes.is_empty() || bytes.len() > uni_core::media::MAX_UPLOAD_BYTES {
+        return Err("file is empty or exceeds 25 MB".into());
+    }
+    let header = |name: &str| {
+        request
+            .headers()
+            .get(name)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_string()
+    };
+    let filename = url::form_urlencoded::parse(format!("name={}", header("x-filename")).as_bytes())
+        .find(|(k, _)| k == "name")
+        .map(|(_, v)| v.into_owned())
+        .unwrap_or_default();
+    let mime = header("x-file-mime");
+    let data = bytes.clone();
+    secure_store::ensure_loaded(&app).await?;
+    let relay = relay_url(&app);
+    blocking(move || {
+        let (keys, _) = uni_core::load_keys(false).map_err(|e| e.to_string())?;
+        tauri::async_runtime::block_on(uni_core::media::upload_media(
+            &relay, &keys, data, &mime, &filename,
+        ))
+        .map_err(|e| e.to_string())
+    })
+    .await
+}
+
 /// Download a relay file to the cache and return its local path.
 #[tauri::command]
 async fn media_save(
@@ -870,6 +911,41 @@ async fn media_save(
             .map_err(|e| e.to_string())
     })
     .await
+}
+
+/// Fetch and open an attachment with the OS default file handler. Never
+/// open a remote URL directly (that would omit Blossom auth and leak identity).
+#[tauri::command]
+async fn media_open(app: tauri::AppHandle, url: String, sha: Option<String>) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    let relay = relay_url(&app);
+    uni_core::media::media_sha_from_url(&relay, &url).map_err(|e| e.to_string())?;
+    let ext = url
+        .rsplit_once('.')
+        .map(|(_, ext)| ext)
+        .filter(|ext| {
+            ext.len() <= 8
+                && ext
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+        })
+        .unwrap_or("bin")
+        .to_string();
+    let path = media_save(app.clone(), url, sha).await?;
+    let target = format!("{path}.{ext}");
+    blocking({
+        let path = path.clone();
+        let target = target.clone();
+        move || {
+            std::fs::copy(&path, &target)
+                .map(|_| ())
+                .map_err(|e| e.to_string())
+        }
+    })
+    .await?;
+    app.opener()
+        .open_path(target, None::<&str>)
+        .map_err(|e| e.to_string())
 }
 
 /// The relay's HTTP origin (e.g. `https://buzz.unforced.org`), so the UI can
@@ -1204,7 +1280,9 @@ pub fn run() {
             delete_message,
             search,
             media_bytes,
+            media_upload,
             media_save,
+            media_open,
             relay_origin,
             journal_config,
             journal_set_config,
