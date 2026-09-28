@@ -1,5 +1,5 @@
 //! Shared Tauri conversation bridge. Signing and relay I/O remain in Rust.
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tauri::{Emitter, Manager};
 use uni_core::{
@@ -1125,6 +1125,31 @@ async fn vault_note(
     .await
 }
 
+#[derive(Serialize, Deserialize)]
+struct AndroidUpdateManifest {
+    version: String,
+    url: String,
+}
+
+#[tauri::command]
+async fn android_update_manifest() -> Result<AndroidUpdateManifest, String> {
+    let response = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(12))
+        .build()
+        .map_err(|e| e.to_string())?
+        .get("https://uni-1.taildf9ce2.ts.net:8443/android/latest.json")
+        .send()
+        .await
+        .map_err(|e| e.to_string())?
+        .error_for_status()
+        .map_err(|e| e.to_string())?;
+    let manifest: AndroidUpdateManifest = response.json().await.map_err(|e| e.to_string())?;
+    if manifest.url != "https://uni-1.taildf9ce2.ts.net:8443/uni.apk" {
+        return Err("untrusted update URL".into());
+    }
+    Ok(manifest)
+}
+
 #[cfg(mobile)]
 mod mobile;
 mod secure_store;
@@ -1139,6 +1164,11 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|_app| {
+            #[cfg(desktop)]
+            {
+                _app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;
+                _app.handle().plugin(tauri_plugin_process::init())?;
+            }
             #[cfg(mobile)]
             mobile::setup(_app);
             Ok(())
@@ -1175,7 +1205,8 @@ pub fn run() {
             journal_pending,
             journal_list,
             journal_entry,
-            vault_note
+            vault_note,
+            android_update_manifest
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

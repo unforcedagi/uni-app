@@ -34,6 +34,21 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "createUpdaterArtifacts": true,
+    "macOS": {
+      "signingIdentity": "-"
+    },
+    "android": {
+      "versionCode": 10001
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDc1NkZBQUYzOUNDQzU2OTAKUldTUVZzeWM4NnB2ZFRqQ2QyVFRyK3R4VmlOeXRpUDNJclN0NkdKMnRkWUxRdFJIWVRhVXFqWjMK",
+      "endpoints": [
+        "https://uni-1.taildf9ce2.ts.net:8443/mac/latest.json"
+      ]
+    }
   }
 }
