@@ -2,6 +2,7 @@ import { memo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { parseMarkdown, type Block, type Inline } from "./markdown";
 import { mentionSegments, type Member } from "./mentions";
+import { useNoteOpener } from "./noteLinks";
 
 function openLink(e: React.MouseEvent, href: string) {
   // Never navigate the app's own WebView; hand the link to the system browser.
@@ -12,6 +13,7 @@ function openLink(e: React.MouseEvent, href: string) {
 // Memoized: typing in the composer re-renders the room, and re-parsing
 // every message's markdown on each keystroke made input lag on the Daylight.
 export const Body = memo(function Body({ body, mentions, me, edited }: { body: string; mentions: Member[]; me: string | null; edited?: boolean }) {
+  const openNote = useNoteOpener();
   const text = (v: string, key: string) => mentionSegments(v, mentions).map((seg, i) => seg.mention
     ? <span key={`${key}.${i}`} className={`mention ${seg.mention === me ? "mention-me" : ""}`} title={seg.mention}>{seg.text}</span>
     : <span key={`${key}.${i}`}>{seg.text}</span>);
@@ -25,6 +27,12 @@ export const Body = memo(function Body({ body, mentions, me, edited }: { body: s
       case "em": return <em key={k}>{inline(n.c, k)}</em>;
       case "del": return <del key={k}>{inline(n.c, k)}</del>;
       case "link": return <a key={k} href={n.href} onClick={(e) => openLink(e, n.href)} rel="noreferrer noopener">{inline(n.c, k)}</a>;
+      case "vaultlink": return <a key={k} href={n.href ?? "#"} className="note-chip" title={`${n.ref.vault}: ${n.ref.ref}`}
+        onClick={(e) => {
+          if (openNote) { e.preventDefault(); openNote(n.ref, n.href); }
+          else if (n.href) openLink(e, n.href);
+          else e.preventDefault();
+        }}><span className="note-chip-mark" aria-hidden="true">❋</span>{inline(n.c, k)}</a>;
     }
   });
   const blocks = (bs: Block[], key: string): React.ReactNode[] => bs.map((b, i) => {

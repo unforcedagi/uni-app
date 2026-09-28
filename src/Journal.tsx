@@ -5,7 +5,7 @@ import { entryText, greeting, mmss, newDraft, pickAudioMime, type FlushReport, t
 type Room = { id: string; name: string };
 type VaultConfig = { hub: string; vault: string };
 /** Post `note` to a room; `toUni` addresses Uni there. Resolves when accepted. */
-export type ShareFn = (note: JournalNote, roomId: string, toUni: boolean, vault: string) => Promise<void>;
+export type ShareFn = (note: JournalNote, roomId: string, toUni: boolean, vault: string, hub: string) => Promise<void>;
 
 const PAGE = 30;
 
@@ -197,7 +197,7 @@ export default function Journal({ rooms, uniRoomId, onShare, onBack }: { rooms: 
     setShareFor(null);
     setStatus(toUni ? "Passing to Uni…" : "Sharing…");
     try {
-      await onShare(note, roomId, toUni, cfg.vault);
+      await onShare(note, roomId, toUni, cfg.vault, cfg.hub);
       const name = rooms.find((r) => r.id === roomId)?.name ?? "room";
       setShared((s) => ({ ...s, [note.id]: toUni ? "Uni" : name }));
       setStatus(toUni ? "Passed to Uni in #Uni" : `Shared to #${name}`);

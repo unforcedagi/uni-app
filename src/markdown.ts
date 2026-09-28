@@ -6,13 +6,18 @@
 // degrades to plain text. Covers what agent replies actually use: headings,
 // paragraphs, bold/italic/strike, inline code, fenced code, block quotes,
 // ordered/unordered (nested by indent) lists, rules, [text](url) links and
-// bare URLs.
+// bare URLs. Parachute note URLs and `uni:`/`unforced:` note references
+// become `vaultlink` nodes, which open the in-app note view.
+
+import { matchShorthandAt, parseNoteUrl, parseShorthand, refLabel, SHORTHAND_VAULTS, type VaultRef } from "./vaultlinks.ts";
 
 export type Inline =
   | { t: "text"; v: string }
   | { t: "strong" | "em" | "del"; c: Inline[] }
   | { t: "code"; v: string }
   | { t: "link"; href: string; c: Inline[] }
+  /** A vault note. `href` is the original https URL (null for a shorthand ref). */
+  | { t: "vaultlink"; ref: VaultRef; href: string | null; c: Inline[] }
   | { t: "br" };
 
 export type Block =
@@ -148,14 +153,22 @@ export function parseInline(src: string, depth = 0): Inline[] {
       while (src[i + n] === "`") n++;
       const run = "`".repeat(n);
       const end = src.indexOf(run, i + run.length);
-      if (end > 0) { push({ t: "code", v: src.slice(i + run.length, end).replace(/^ (.*) $/, "$1") }); i = end + run.length; continue; }
+      if (end > 0) {
+        const v = src.slice(i + run.length, end).replace(/^ (.*) $/, "$1");
+        // `uni:System/Now` in code is how agents cite notes: make it tappable.
+        const ref = n === 1 ? parseShorthand(v) : null;
+        push(ref ? { t: "vaultlink", ref, href: null, c: [{ t: "text", v }] } : { t: "code", v });
+        i = end + run.length; continue;
+      }
       text += run; i += run.length; continue;
     }
     if (ch === "[") {
       const link = matchLink(src, i);
       if (link) {
         const href = safeHref(link.href);
-        if (href) push({ t: "link", href, c: parseInline(link.label, depth + 1) });
+        const note = href ? parseNoteUrl(href) : null;
+        if (note) push({ t: "vaultlink", ref: note, href, c: parseInline(link.label, depth + 1) });
+        else if (href) push({ t: "link", href, c: parseInline(link.label, depth + 1) });
         else out.push(...flushText(), ...parseInline(link.label, depth + 1));
         i = link.end; continue;
       }
@@ -163,7 +176,7 @@ export function parseInline(src: string, depth = 0): Inline[] {
     if (ch === "<") {
       AUTOLINK_RE.lastIndex = i;
       const m = AUTOLINK_RE.exec(src);
-      if (m) { push({ t: "link", href: m[1], c: [{ t: "text", v: m[1].replace(/^mailto:/i, "") }] }); i += m[0].length; continue; }
+      if (m) { push(urlNode(m[1], m[1].replace(/^mailto:/i, ""))); i += m[0].length; continue; }
     }
     if ((ch === "h" || ch === "H") && (i === 0 || !/[\w/]/.test(src[i - 1]))) {
       URL_RE.lastIndex = i;
@@ -173,9 +186,13 @@ export function parseInline(src: string, depth = 0): Inline[] {
         // Trailing punctuation belongs to the sentence, not the URL; keep a
         // closing paren only when the URL itself opened one.
         while (/[.,;:!?*_~]$/.test(url) || (url.endsWith(")") && count(url, "(") < count(url, ")"))) url = url.slice(0, -1);
-        push({ t: "link", href: url, c: [{ t: "text", v: url }] });
+        push(urlNode(url, url));
         i += url.length; continue;
       }
+    }
+    if (SHORTHAND_START.test(ch) && SHORTHAND_VAULTS.some((v) => src.startsWith(`${v}:`, i))) {
+      const hit = matchShorthandAt(src, i);
+      if (hit) { push({ t: "vaultlink", ref: hit.ref, href: null, c: [{ t: "text", v: src.slice(i, hit.end) }] }); i = hit.end; continue; }
     }
     const emph = matchEmphasis(src, i, depth, dead);
     if (emph) { push(emph.node); i = emph.end; continue; }
@@ -186,6 +203,14 @@ export function parseInline(src: string, depth = 0): Inline[] {
   return out;
 
   function flushText(): Inline[] { const t = text; text = ""; return t ? [{ t: "text", v: t }] : []; }
+}
+
+const SHORTHAND_START = /[a-z]/;
+
+/** A bare URL: a note URL becomes a vaultlink labelled by its vault and ref. */
+function urlNode(href: string, label: string): Inline {
+  const note = parseNoteUrl(href);
+  return note ? { t: "vaultlink", ref: note, href, c: [{ t: "text", v: refLabel(note) }] } : { t: "link", href, c: [{ t: "text", v: label }] };
 }
 
 function count(s: string, c: string) { return s.split(c).length - 1; }

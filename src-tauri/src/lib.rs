@@ -1091,6 +1091,40 @@ async fn journal_entry(
     .await
 }
 
+#[derive(Serialize)]
+struct VaultNote {
+    /// Hub origin the note was read from (for the "Open in Parachute" URL).
+    hub: String,
+    vault: String,
+    /// The vault's `Note` JSON (id, path, content, tags, metadata, links).
+    note: serde_json::Value,
+}
+
+/// One vault note for the in-app note view, read over the same NIP-98
+/// `/mcp` door as the Journal. `vault` defaults to the Journal's vault;
+/// `note_ref` is a note id or path.
+#[tauri::command]
+async fn vault_note(
+    app: tauri::AppHandle,
+    vault: Option<String>,
+    note_ref: String,
+) -> Result<VaultNote, String> {
+    let vault = vault
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| vault_config(&app).vault);
+    with_vault(&app, move |c| {
+        let note = tauri::async_runtime::block_on(c.get_note(&vault, &note_ref))
+            .map_err(|e| e.to_string())?;
+        Ok(VaultNote {
+            hub: c.origin().to_string(),
+            vault,
+            note,
+        })
+    })
+    .await
+}
+
 #[cfg(mobile)]
 mod mobile;
 mod secure_store;
@@ -1139,7 +1173,8 @@ pub fn run() {
             journal_flush,
             journal_pending,
             journal_list,
-            journal_entry
+            journal_entry,
+            vault_note
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

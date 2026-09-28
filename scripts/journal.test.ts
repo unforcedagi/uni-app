@@ -15,7 +15,7 @@ assert.equal(pickAudioMime((t) => t === "audio/webm"), "audio/webm");
 assert.equal(pickAudioMime((t) => t === "audio/mp4"), "audio/mp4");
 assert.equal(pickAudioMime(() => false), "");
 
-const note = { path: "Notes/2026/09-05/07-03-09", content: "line one\n\nline two", created_at: d.toISOString() };
+const note = { id: "01M33NQB9BK6543P4SEJ2WKFMS", path: "Notes/2026/09-05/07-03-09", content: "line one\n\nline two", created_at: d.toISOString() };
 const toUni = shareText(note, "unforced", "Uni");
 assert.ok(toUni.startsWith("@Uni here's a journal entry"));
 assert.ok(toUni.includes("> line one\n>\n> line two"));
@@ -24,6 +24,14 @@ assert.ok(shareText(note, "unforced", "Uni", "what do you notice?").startsWith("
 const plain = shareText(note, "unforced", null);
 assert.ok(plain.startsWith("> line one") && !plain.includes("@"));
 assert.ok(shareText({ ...note, content: "x".repeat(3000) }, "v", null).includes("x …"));
+// With a hub, a share is the canonical note URL, never the entry's text.
+const hub = "https://uni-1.taildf9ce2.ts.net/";
+const url = "https://uni-1.taildf9ce2.ts.net/surface/parachute/v/unforced/n/01M33NQB9BK6543P4SEJ2WKFMS";
+const linked = shareText(note, "unforced", "Uni", "", hub);
+assert.ok(linked.startsWith("@Uni here's a journal entry") && linked.endsWith(url), linked);
+assert.ok(!linked.includes("line one"));
+const linkedPlain = shareText(note, "unforced", null, "", hub);
+assert.ok(linkedPlain.startsWith("Journal entry · ") && linkedPlain.endsWith(url) && !linkedPlain.includes("line one"));
 
 assert.equal(mmss(0), "0:00");
 assert.equal(mmss(75.9), "1:15");

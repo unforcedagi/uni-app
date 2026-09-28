@@ -281,6 +281,61 @@ impl VaultClient {
             .and_then(JournalNote::from_value)
             .ok_or_else(|| Error::Vault(format!("entry not found: {id}")))
     }
+
+    /// Hub origin this client signs requests for.
+    pub fn origin(&self) -> &str {
+        &self.origin
+    }
+
+    /// One note (by id or path) from any vault this key can read, with its
+    /// links, in the vault's own `Note` JSON shape — what surface-render's
+    /// `<NoteRenderer>` takes. `vault` may differ from the journal vault.
+    pub async fn get_note(&self, vault: &str, note_ref: &str) -> Result<Value> {
+        if !valid_vault_name(vault) {
+            return Err(Error::Invalid(format!("bad vault name: {vault}")));
+        }
+        let r = note_ref.trim();
+        if r.is_empty() || r.len() > 1024 {
+            return Err(Error::Invalid(
+                "note reference must be 1..1024 bytes".into(),
+            ));
+        }
+        let v = self
+            .call(
+                "query-notes",
+                json!({ "vault": vault, "id": r, "include_links": true }),
+            )
+            .await?;
+        note_from(&v, r)
+    }
+}
+
+/// Vault names are `[A-Za-z0-9_-]+` (the hub's own rule).
+pub fn valid_vault_name(v: &str) -> bool {
+    !v.is_empty()
+        && v.len() <= 64
+        && v.chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+/// The single note in a query-notes-by-id response, or the vault's error.
+fn note_from(v: &Value, r: &str) -> Result<Value> {
+    let note = notes_in(v)
+        .into_iter()
+        .next()
+        .ok_or_else(|| Error::Vault(format!("note not found: {r}")))?;
+    if let Some(e) = note.get("error").and_then(Value::as_str) {
+        let kind = note["error_type"].as_str().unwrap_or_default();
+        return Err(Error::Vault(if kind == "not_found" {
+            format!("note not found: {r}")
+        } else {
+            format!("{e}: {r}")
+        }));
+    }
+    if !note["id"].is_string() {
+        return Err(Error::Vault(format!("note not found: {r}")));
+    }
+    Ok(note)
 }
 
 /// What the app writes for one entry.
@@ -473,6 +528,21 @@ mod tests {
         let p =
             JournalNote::from_value(&json!({"id": "b", "content": TRANSCRIPT_PENDING})).unwrap();
         assert!(p.pending);
+    }
+
+    #[test]
+    fn note_lookup_shapes() {
+        let n = json!({"id": "01M3", "path": "System/Now", "content": "hi", "links": []});
+        let fanout =
+            json!({"vaults_queried": ["uni"], "results": [{"vault": "uni", "notes": n.clone()}]});
+        assert_eq!(note_from(&fanout, "System/Now").unwrap()["id"], "01M3");
+        assert_eq!(note_from(&n, "01M3").unwrap()["path"], "System/Now");
+        let missing = json!({"results": [{"vault": "uni", "notes": {"error": "Note not found", "error_type": "not_found", "id": "X"}}]});
+        let err = note_from(&missing, "X").unwrap_err().to_string();
+        assert!(err.contains("note not found: X"), "{err}");
+        assert!(note_from(&json!([]), "X").is_err());
+        assert!(valid_vault_name("uni") && valid_vault_name("my-vault_2"));
+        assert!(!valid_vault_name("") && !valid_vault_name("../x") && !valid_vault_name("a b"));
     }
 
     #[test]

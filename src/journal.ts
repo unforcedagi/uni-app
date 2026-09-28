@@ -2,6 +2,7 @@
 // shape: path Notes/YYYY/MM-DD/HH-MM-SS in local time, tag `capture`.
 
 import { quote } from "./uniActions.ts";
+import { noteUrl } from "./vaultlinks.ts";
 
 export type JournalDraft = { entry_id: string; path: string; content: string; source: "text" | "voice"; created_at: string };
 export type JournalNote = { id: string; path: string; created_at: string; content: string; source: string | null; entry_id: string | null; tags: string[]; pending: boolean };
@@ -34,17 +35,19 @@ export function pickAudioMime(supported: (t: string) => boolean): string {
 const MAX_SHARE = 1500;
 
 /**
- * The message that passes an entry to a room. With `uniLabel` it addresses
- * Uni (who can read the full entry in the vault by path); otherwise it is a
- * plain share of the excerpt.
+ * The message that passes an entry to a room: the entry's canonical Parachute
+ * URL, not its text. The vault stays the gate: anyone who can read the vault
+ * (Uni, or Aaron in the app) opens it with a tap; anyone else sees only a
+ * link. With `uniLabel` the message addresses Uni. Without a hub (not
+ * configured) it falls back to the quoted excerpt plus a path reference.
  */
-export function shareText(note: Pick<JournalNote, "path" | "content" | "created_at">, vault: string, uniLabel: string | null, ask = ""): string {
-  const quoted = quote(entryText(note.content), MAX_SHARE);
+export function shareText(note: Pick<JournalNote, "id" | "path" | "content" | "created_at">, vault: string, uniLabel: string | null, ask = "", hub: string | null = null): string {
   const when = new Date(note.created_at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  const head = uniLabel ? `@${uniLabel} ${ask.trim() || "here's a journal entry. Take it in and reflect it back to me."}` : `Journal entry · ${when}`;
+  if (hub) return `${head}\n\n${noteUrl(hub, vault, note.id)}`;
+  const quoted = quote(entryText(note.content), MAX_SHARE);
   const ref = `journal entry, ${when} · vault ${vault}: ${note.path}`;
-  if (!uniLabel) return `${quoted}\n\n— ${ref}`;
-  const head = ask.trim() || "here's a journal entry. Take it in and reflect it back to me.";
-  return `@${uniLabel} ${head}\n\n${quoted}\n\n— ${ref}`;
+  return uniLabel ? `${head}\n\n${quoted}\n\n— ${ref}` : `${quoted}\n\n— ${ref}`;
 }
 
 /** A soft opening line for the journal, by time of day. */
