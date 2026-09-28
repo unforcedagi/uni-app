@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Publish one monotonic Uni version to Mac + Android. Run only on uni-1.
 set -euo pipefail
+export PYTHONDONTWRITEBYTECODE=1
 cd "$(dirname "$0")/.."
 REPO="$PWD"
 SERVE="$HOME/.local/share/uni/apk"
@@ -19,6 +20,8 @@ python3 scripts/test_case_collisions.py
 pnpm typecheck
 pnpm test
 cargo test --workspace
+# Tauri regenerates checked-in capability schemas during tests; these are not release inputs.
+git restore -- src-tauri/gen/schemas
 # Reserve the next patch version and Android versionCode. Both are committed together.
 python3 scripts/bump-release.py
 cargo test --workspace
