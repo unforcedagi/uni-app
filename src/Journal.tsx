@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { entryText, greeting, mmss, newDraft, pickAudioMime, type FlushReport, type JournalNote, type QueuedEntry } from "./journal";
+import { entryText, greeting, mmss, newDraft, pickAudioMime, type FlushReport, type JournalNote, type QueuedEntry } from "./journalCore";
 
 type Room = { id: string; name: string };
 type VaultConfig = { hub: string; vault: string };
