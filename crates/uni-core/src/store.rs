@@ -200,6 +200,12 @@ CREATE TABLE IF NOT EXISTS channel_members (
     PRIMARY KEY (channel, pubkey)
 );
 
+-- NIP-IA archived (retired) identities from the relay's kind:13535
+-- snapshot. They stay channel members on the relay; the app hides them.
+CREATE TABLE IF NOT EXISTS archived_identities (
+    pubkey TEXT PRIMARY KEY
+);
+
 CREATE TABLE IF NOT EXISTS message_mentions (
     ref    TEXT NOT NULL,
     pubkey TEXT NOT NULL,
@@ -703,11 +709,39 @@ impl Store {
 
     /// Cached members of `channel` with profile labels, named members first
     /// (case-insensitive by label), then unnamed by pubkey.
+    /// Replace the cached archived-identity set (the whole 13535 snapshot).
+    pub fn replace_archived(&self, pubkeys: &[String]) -> Result<()> {
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute("DELETE FROM archived_identities", [])?;
+        for pk in pubkeys {
+            tx.execute(
+                "INSERT OR IGNORE INTO archived_identities (pubkey) VALUES (?1)",
+                params![pk.to_ascii_lowercase()],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Cached archived identities, sorted.
+    pub fn archived(&self) -> Result<Vec<String>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT pubkey FROM archived_identities ORDER BY pubkey")?;
+        let rows = stmt
+            .query_map([], |r| r.get(0))?
+            .collect::<std::result::Result<Vec<String>, _>>()?;
+        Ok(rows)
+    }
+
+    /// Members of `channel`, minus archived identities (Uni and the user are
+    /// never in the archived cache; see `archive::without_protected`).
     pub fn channel_members(&self, channel: &str) -> Result<Vec<Member>> {
         let mut stmt = self.conn.prepare(
             "SELECT m.pubkey, COALESCE(p.display_name, p.name)
              FROM channel_members m LEFT JOIN profiles p ON p.pubkey = m.pubkey
-             WHERE m.channel = ?1",
+             WHERE m.channel = ?1
+               AND lower(m.pubkey) NOT IN (SELECT pubkey FROM archived_identities)",
         )?;
         let mut rows = stmt
             .query_map(params![channel], |r| {
@@ -1351,6 +1385,29 @@ mod tests {
             .unwrap();
         assert_eq!(s.channel_members("c1").unwrap().len(), 1);
         assert!(s.channel_members("c2").unwrap().is_empty());
+    }
+
+    #[test]
+    fn archived_identities_are_hidden_from_members() {
+        let s = Store::open_in_memory().unwrap();
+        let (a, b, c) = ("a".repeat(64), "b".repeat(64), "c".repeat(64));
+        s.replace_channel_members("c1", &[a.clone(), b.clone(), c.clone()])
+            .unwrap();
+        s.replace_archived(&[b.to_uppercase(), c.clone()]).unwrap();
+        assert_eq!(s.archived().unwrap(), vec![b.clone(), c.clone()]);
+        let pks = |s: &Store| {
+            s.channel_members("c1")
+                .unwrap()
+                .into_iter()
+                .map(|m| m.pubkey)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(pks(&s), vec![a.clone()]);
+        // A new snapshot (someone unarchived) replaces the whole set.
+        s.replace_archived(std::slice::from_ref(&c)).unwrap();
+        assert_eq!(pks(&s), vec![a.clone(), b.clone()]);
+        s.replace_archived(&[]).unwrap();
+        assert_eq!(pks(&s).len(), 3);
     }
 
     #[test]

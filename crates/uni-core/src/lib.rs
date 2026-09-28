@@ -20,6 +20,7 @@
 //! - [`parachute`]: NIP-98-signed MCP client for the Parachute hub (journal notes).
 //! - [`journal`]: on-device outbox that sends journal entries to the vault.
 
+pub mod archive;
 pub mod backoff;
 pub mod buzz;
 pub mod compose;

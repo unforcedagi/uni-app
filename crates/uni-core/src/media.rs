@@ -233,7 +233,7 @@ pub fn read_cached(cache_dir: &Path, sha: &str) -> Option<Vec<u8>> {
     }
 }
 
-fn http_client() -> Result<reqwest::Client> {
+pub(crate) fn http_client() -> Result<reqwest::Client> {
     // Mozilla roots (the same set tokio-tungstenite uses for the relay socket),
     // not the platform verifier: that one needs JNI setup on Android.
     let mut roots = rustls::RootCertStore::empty();

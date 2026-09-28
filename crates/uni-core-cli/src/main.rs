@@ -241,6 +241,7 @@ async fn main() -> Result<()> {
                 println!("  {ch}  {name:<20} {n}");
             }
             println!("total items: {}", report.total_items);
+            println!("archived identities hidden: {}", report.archived);
             let mentions = store
                 .timeline(10_000)?
                 .iter()
