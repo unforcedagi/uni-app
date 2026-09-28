@@ -16,7 +16,7 @@ import { approvalOpen, parseApproval } from "./approvals";
 import { findUniMember, findUniRoom, handoffText, searchHandoffText, type UniAction } from "./uniActions";
 import Search from "./Search";
 import Journal from "./Journal";
-import { shareText, type JournalNote } from "./journal";
+import { shareText, type JournalNote } from "./journalCore";
 import NoteView from "./NoteView";
 import { NoteOpener } from "./noteLinks";
 import { sameHub, type VaultRef } from "./vaultlinks";

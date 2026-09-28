@@ -1,6 +1,6 @@
 // Run: node --experimental-strip-types scripts/journal.test.ts
 import assert from "node:assert/strict";
-import { entryPath, entryText, mmss, newDraft, pickAudioMime, shareText, TRANSCRIPT_PENDING } from "../src/journal.ts";
+import { entryPath, entryText, mmss, newDraft, pickAudioMime, shareText, TRANSCRIPT_PENDING } from "../src/journalCore.ts";
 
 const d = new Date(2026, 8, 5, 7, 3, 9);
 assert.equal(entryPath(d), "Notes/2026/09-05/07-03-09");
