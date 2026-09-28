@@ -1,6 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { onBackButtonPress } from "@tauri-apps/api/app";
+import { copyText, onCopied } from "./clipboard";
+import { markFor, restoreTop, type ScrollMark } from "./noteText";
 import "./App.css";
 import { markdownToText } from "./markdown";
 import { Body } from "./MessageBody";
@@ -120,9 +123,36 @@ function Conversations({ onForget }: { onForget: () => void }) {
     });
   }, [hub]);
   const closeNote = useCallback(() => setNotes((s) => s.slice(0, -1)), []);
+  // Loaded note titles, so a nested note's Back reads "← <previous note>".
+  const [noteTitles, setNoteTitles] = useState<Record<string, string>>({});
+  const noteKey = (r: VaultRef) => `${r.vault}:${r.ref}`;
+  const rememberTitle = useCallback((key: string, t: string) => setNoteTitles((m) => m[key] === t ? m : { ...m, [key]: t }), []);
+  // "Copied" confirmation.
+  const [toast, setToast] = useState<string | null>(null);
+  useEffect(() => {
+    let t: ReturnType<typeof setTimeout> | undefined;
+    const off = onCopied((msg) => { setToast(msg); clearTimeout(t); t = setTimeout(() => setToast(null), 1600); });
+    return () => { off(); clearTimeout(t); };
+  }, []);
   const focusTries = useRef(0);
   const preserveScroll = useRef<number | null>(null);
-  const listRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement | null>(null);
+  // Scroll memory per room/thread. The list element is recreated whenever the
+  // room view remounts (Journal, welcome pane, narrow-screen back), so each
+  // new element and each newly loaded view is restored once its own messages
+  // are in: the saved spot, or the newest message when there is none.
+  const scrollMemory = useRef(new Map<string, ScrollMark>());
+  const restoredView = useRef<string | null>(null);
+  // Following the newest message: content growth (images, late layout) keeps it pinned.
+  const stickToEnd = useRef(true);
+  const [loadedView, setLoadedView] = useState<string | null>(null);
+  const [listEl, setListEl] = useState<HTMLDivElement | null>(null);
+  const setList = useCallback((el: HTMLDivElement | null) => {
+    listRef.current = el;
+    restoredView.current = null;
+    setListEl(el);
+  }, []);
+  const [stackEl, setStackEl] = useState<HTMLDivElement | null>(null);
   const channelRef = useRef<string | null>(null);
   channelRef.current = channel;
   const scrollEnd = useRef<HTMLDivElement>(null);
@@ -193,9 +223,10 @@ function Conversations({ onForget }: { onForget: () => void }) {
   }, [loadRooms]);
 
   useEffect(() => {
-    if (!channel) { setMessages([]); return; }
+    if (!channel) { setMessages([]); setLoadedView(null); return; }
     let current = true;
-    invoke<Message[]>("get_messages", { channel, root, limit }).then((rows) => { if (current) setMessages(rows); }).catch((e) => { if (current) setError(String(e)); });
+    const view = `${channel}|${root}`;
+    invoke<Message[]>("get_messages", { channel, root, limit }).then((rows) => { if (current) { setMessages(rows); setLoadedView(view); } }).catch((e) => { if (current) setError(String(e)); });
     // Viewing the room reads it (only while the app is actually on screen).
     if (document.visibilityState === "visible") {
       invoke("mark_read", { channel }).then(() => loadRooms()).catch(() => {});
@@ -213,6 +244,48 @@ function Conversations({ onForget }: { onForget: () => void }) {
     return () => { current = false; };
   }, [channel, synced]);
 
+  // Restore a (re)opened list once this view's own messages are rendered:
+  // the remembered spot, or the newest message. Runs before paint, so the
+  // list never flashes at the top.
+  const currentView = channel ? `${channel}|${root}` : null;
+  useLayoutEffect(() => {
+    const el = listEl;
+    if (!el || !currentView || loadedView !== currentView || restoredView.current === currentView) return;
+    const saved = scrollMemory.current.get(currentView);
+    el.scrollTop = restoreTop(saved, el.scrollHeight, el.clientHeight);
+    stickToEnd.current = !saved || saved.atEnd;
+    restoredView.current = currentView;
+    shownView.current = currentView;
+  }, [listEl, currentView, loadedView, messages]);
+
+  // Remember where the reader is, per view (only once that view is restored,
+  // so a half-swapped list never overwrites a good mark).
+  const gliding = useRef(0);
+  useEffect(() => {
+    const el = listEl;
+    if (!el) return;
+    const onScroll = () => {
+      const v = restoredView.current;
+      if (!v || Date.now() < gliding.current) return;
+      const mark = markFor(el.scrollTop, el.scrollHeight, el.clientHeight);
+      scrollMemory.current.set(v, mark);
+      stickToEnd.current = mark.atEnd;
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onScroll);
+  }, [listEl]);
+
+  // Images, fonts and embeds settle after first paint: while following the
+  // newest message, stay pinned to the end as the content grows.
+  useEffect(() => {
+    if (!listEl || !stackEl || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => {
+      if (stickToEnd.current && restoredView.current && preserveScroll.current === null) listEl.scrollTop = listEl.scrollHeight;
+    });
+    ro.observe(stackEl);
+    return () => ro.disconnect();
+  }, [listEl, stackEl]);
+
   useEffect(() => {
     // After prepending older history, keep the reader where they were.
     if (preserveScroll.current !== null && listRef.current) {
@@ -222,20 +295,12 @@ function Conversations({ onForget }: { onForget: () => void }) {
     }
     // A search jump positions the list itself (below).
     if (focusRef || !listRef.current) return;
-    // Opening a room or thread lands on the newest message at once; only new
-    // messages in the room you're already reading glide in.
-    const view = `${channel}|${root}`;
-    const opened = shownView.current !== view && messages.length > 0;
-    if (opened) shownView.current = view;
-    if (opened) {
-      const el = listRef.current;
-      el.scrollTop = el.scrollHeight;
-      // Images and fonts settle after first paint; stay pinned to the end.
-      const t = setTimeout(() => { el.scrollTop = el.scrollHeight; }, 350);
-      return () => clearTimeout(t);
-    }
+    // Only new messages in the view you're already reading (and following) glide in.
+    if (!currentView || restoredView.current !== currentView || loadedView !== currentView || !stickToEnd.current) return;
+    gliding.current = Date.now() + 700;
     scrollEnd.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [messages.length, channel, root]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages.length]);
 
   // Jump to a search hit: once its room/thread is rendered, center and flash
   // it. If it is older than the loaded window, widen the window once.
@@ -457,6 +522,10 @@ function Conversations({ onForget }: { onForget: () => void }) {
 
   function navigate(nextChannel: string | null, nextRoot: string | null) {
     const key = scope();
+    // Save the spot in the view we're leaving; the next view restores its own.
+    const leaving = restoredView.current, el = listRef.current;
+    if (leaving && el) scrollMemory.current.set(leaving, markFor(el.scrollTop, el.scrollHeight, el.clientHeight));
+    if (nextChannel !== channel || nextRoot !== root) restoredView.current = null;
     if (key) { drafts.current.set(key, draft); bindingStore.current.set(key, bindings); }
     const nextKey = nextChannel ? keyFor(nextChannel, nextRoot) : null;
     setJournalOpen(false);
@@ -561,7 +630,12 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const renderMessage = (m: Message, inThread: boolean, prev?: Message) => {
     const grouped = !!prev && prev.author === m.author && m.ts - prev.ts < 300 && !(inThread && prev.ref === root);
     return <article key={m.ref} data-ref={m.ref} className={`message ${m.ref === focusRef ? "search-focus" : ""} ${grouped ? "grouped" : ""} ${m.author === identity ? "mine" : ""} ${m.mentions_me ? "highlight" : ""} ${inThread && m.ref === root ? "thread-root" : ""}`}
-      onContextMenu={(e) => { e.preventDefault(); setReactFor(reactFor === m.ref ? null : m.ref); }}>
+      onContextMenu={(e) => {
+        // Touch: long-press is the system's text selection (select + copy a
+        // phrase); don't swallow it. Mouse: right-click opens quick reactions.
+        if (window.matchMedia?.("(pointer: coarse)").matches) return;
+        e.preventDefault(); setReactFor(reactFor === m.ref ? null : m.ref);
+      }}>
       {grouped ? <time className="gutter-time">{clock(m.ts)}</time> : <span className="message-avatar" style={{ background: `hsl(${150 + (hue(m.author) % 120) - 60} 22% 44%)` }} aria-hidden="true">{m.author_name[0]?.toUpperCase() ?? "?"}</span>}
       <div className="message-content">{!grouped && <div className="message-meta"><strong>{m.author_name}</strong><time>{clock(m.ts)}</time></div>}{editing === m.ref ? <InlineEditor key={m.ref} initial={m.body} onSave={(body) => actions.current.saveEdit(m, body)} onCancel={() => actions.current.cancelEdit()} /> : <Body body={attachmentBody(m.body, m.media, relayOrigin)} mentions={m.mentions} me={identity} edited={m.edited} />}
         <Attachments body={m.body} media={m.media} />
@@ -573,6 +647,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
           <button onClick={() => setReactFor(reactFor === m.ref ? null : m.ref)} aria-label={`React to ${m.author_name}`} aria-expanded={reactFor === m.ref}>React</button>
           <button onClick={() => actions.current.toUni(m, "note")} disabled={kept.has(m.ref)} aria-label={`Keep ${m.author_name}'s message as a note`}>{kept.has(m.ref) ? "✓ Sent to Uni" : "⤓ Keep"}</button>
           <button onClick={() => actions.current.toUni(m, "ask")} aria-label={`Ask Uni about ${m.author_name}'s message`}>✦ Ask Uni</button>
+          <button onClick={() => void copyText(m.body, "Copied text")} aria-label={`Copy ${m.author_name}'s message as markdown`}>⧉ Copy text</button>
           {!inThread && <button onClick={() => actions.current.openThread(m)} aria-label={`Reply in thread to ${m.author_name}`}>Reply in thread</button>}
           {inThread && m.ref !== root && <button onClick={() => actions.current.reply(m.ref)} aria-label={`Reply to ${m.author_name}`}>Reply</button>}
           {m.author === identity && editing !== m.ref && <button onClick={() => setEditing(m.ref)} aria-label="Edit your message">Edit</button>}
@@ -621,7 +696,31 @@ function Conversations({ onForget }: { onForget: () => void }) {
   [messages, identity, reactFor, kept, answered, root, older, roomName, editing, focusRef, relayOrigin]);
 
   const topNote = notes[notes.length - 1];
-  return <NoteOpener.Provider value={openNote}><main className={`shell ${channel || journalOpen || topNote ? "in-room" : ""}`}>
+  // A note opened from a chat says where Back goes: "← Uni", "← Thread", "← Journal".
+  const backTo = journalOpen ? "Journal" : currentRoom ? (isThread ? `Thread in ${currentRoom.name}` : currentRoom.name) : searchOpen ? "Search" : "Conversations";
+
+  // Android back gesture/button: step back through the app (note stack,
+  // search, thread, Journal, room) before leaving it. The listener is only
+  // registered while there is somewhere to go back to, so at the room list
+  // the system default runs (the app goes to the background, as usual).
+  const goBack = useRef<() => void>(() => {});
+  goBack.current = () => {
+    if (notes.length) { closeNote(); return; }
+    if (searchOpen) { setSearchOpen(false); return; }
+    if (journalOpen) { setJournalOpen(false); return; }
+    if (root) { navigate(channel, null); return; }
+    if (channel) navigate(null, null);
+  };
+  const canGoBack = notes.length > 0 || searchOpen || journalOpen || !!channel;
+  useEffect(() => {
+    if (!canGoBack) return;
+    let off: (() => void) | null = null, dead = false;
+    onBackButtonPress(() => goBack.current())
+      .then((l) => { if (dead) void l.unregister(); else off = () => void l.unregister(); })
+      .catch(() => { /* desktop / browser: no back button */ });
+    return () => { dead = true; off?.(); };
+  }, [canGoBack]);
+  return <NoteOpener.Provider value={openNote}><main className={`shell ${channel || journalOpen ? "in-room" : ""} ${topNote ? "note-open" : ""}`}>
     <aside className="rooms" aria-label="Conversations">
       <header className="rooms-header"><div><span className="eyebrow">Unforced</span><h1>Uni</h1></div><div><button className="icon-button" onClick={() => setSearchOpen(true)} aria-label="Search messages and notes">⌕</button><button className="icon-button" onClick={() => void refresh()} disabled={busy} aria-label="Refresh conversations">↻</button><button className="icon-button" onClick={() => { setSettingsOpen(!settingsOpen); setForgetArmed(false); }} aria-label="Settings" aria-expanded={settingsOpen}>⚙</button></div></header>
       {settingsOpen && <div className="settings"><button className="pairing-secondary" onClick={() => void forget()}>{forgetArmed ? "Tap again to forget — you'll need to re-pair" : "Forget this device key"}</button>{forgetArmed && <button className="pairing-secondary" onClick={() => setForgetArmed(false)}>Keep key</button>}</div>}
@@ -641,9 +740,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
       </button>)}</nav>
       </div>
     </aside>
-    <section className="conversation" aria-label={topNote ? "Note" : journalOpen ? "Journal" : currentRoom ? `Conversation: ${currentRoom.name}` : "Conversation"}>
-      {topNote ? <NoteView key={`${notes.length}:${topNote.vault}:${topNote.ref}`} target={topNote} hub={hub} onOpen={openNote} onBack={closeNote} depth={notes.length} />
-      : journalOpen ? <Journal rooms={rooms} uniRoomId={findUniRoom(rooms)?.id ?? null} onShare={shareEntry} onBack={() => setJournalOpen(false)} />
+    <section className="conversation" aria-label={journalOpen ? "Journal" : currentRoom ? `Conversation: ${currentRoom.name}` : "Conversation"} aria-hidden={topNote ? true : undefined}>
+      {journalOpen ? <Journal rooms={rooms} uniRoomId={findUniRoom(rooms)?.id ?? null} onShare={shareEntry} onBack={() => setJournalOpen(false)} />
       : currentRoom ? <>
         <header className="conversation-header">
           <button className="back icon-button" onClick={() => isThread ? navigate(channel, null) : navigate(null, null)} aria-label={isThread ? "Back to room" : "Back to conversations"}>‹</button>
@@ -651,9 +749,11 @@ function Conversations({ onForget }: { onForget: () => void }) {
           <div><strong>{isThread ? "Thread" : currentRoom.name}</strong><small>{isThread ? `${threadReplies.length} ${threadReplies.length === 1 ? "reply" : "replies"} · in ${currentRoom.name}` : `Buzz conversation · ${members.length ? `${members.length} members` : "cached locally"}`}</small></div>
           <button className="icon-button" onClick={() => void refresh()} disabled={busy} aria-label="Refresh messages">↻</button>
         </header>
-        <div className="message-list" ref={listRef} role="log" aria-label="Messages" aria-live="polite">
-          {timeline}
-          <div ref={scrollEnd} />
+        <div className="message-list" ref={setList} role="log" aria-label="Messages" aria-live="polite">
+          <div className="message-stack" ref={setStackEl}>
+            {timeline}
+            <div ref={scrollEnd} />
+          </div>
         </div>
         <footer className="composer">
           {error && <p className="error" role="alert">{error}</p>}
@@ -673,6 +773,14 @@ function Conversations({ onForget }: { onForget: () => void }) {
         </footer>
       </> : <div className="welcome"><span className="welcome-mark">✦</span><h2>Your conversation starts here</h2><p>Select a room to read and reply. Messages are cached for offline reading.</p></div>}
     </section>
+    {/* The note is a sheet over the chat; the chat stays mounted underneath,
+        so Back lands exactly where you were. */}
+    {topNote && <section className="note-sheet" role="dialog" aria-modal="true" aria-label="Note">
+      <NoteView key={`${notes.length}:${noteKey(topNote)}`} target={topNote} hub={hub} onOpen={openNote} onBack={closeNote}
+        backLabel={notes.length > 1 ? noteTitles[noteKey(notes[notes.length - 2])] ?? notes[notes.length - 2].ref.split("/").pop() ?? "note" : backTo}
+        onTitle={(t) => rememberTitle(noteKey(topNote), t)} />
+    </section>}
+    {toast && <div className="toast" role="status">{toast}</div>}
   </main></NoteOpener.Provider>;
 }
 

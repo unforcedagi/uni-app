@@ -333,13 +333,31 @@ h1 { font-family: var(--serif); font-weight: 500; font-size: 34px; line-height: 
 .md a.note-chip { display: inline-flex; align-items: baseline; gap: 5px; max-width: 100%; padding: 1px 10px 2px 8px; margin: 1px 0; border-radius: 999px; background: var(--accent-soft); border: 1px solid var(--line); color: var(--forest-deep); text-decoration: none; font-size: 14px; line-height: 1.5; vertical-align: baseline; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; transition: border-color .2s var(--ease), background .2s var(--ease); }
 .md a.note-chip:hover, .md a.note-chip:focus-visible { border-color: var(--accent); background: var(--highlight); }
 .note-chip-mark { color: var(--turquoise); font-size: 12px; flex: none; }
-.note-scroll { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; }
-.note-page { max-width: 720px; margin: 0 auto; padding: 22px max(20px, calc((100% - 680px) / 2)) 48px; animation: rise .35s var(--ease) both; }
-.note-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 0 0 14px; font-size: 12px; color: var(--muted); }
+/* The note is a sheet over the conversation pane; the chat stays mounted
+   (and laid out) underneath so Back returns to the same scroll position. */
+.shell { position: relative; }
+.note-sheet { position: absolute; top: 0; bottom: 0; right: 0; left: 336px; z-index: 20; display: flex; flex-direction: column; background: var(--bg); box-shadow: -1px 0 0 var(--line), -24px 0 48px -32px rgba(47, 80, 70, .35); padding-top: env(safe-area-inset-top); animation: sheet-in .32s var(--ease) both; }
+@keyframes sheet-in { from { opacity: 0; transform: translateX(18px); } to { opacity: 1; transform: none; } }
+.note-view { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.note-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 64px; padding: 8px max(14px, calc((100% - 720px) / 2)); border-bottom: 1px solid var(--line); background: var(--bg); }
+.note-back { display: inline-flex; align-items: center; gap: 10px; min-height: 52px; max-width: 70%; padding: 0 20px 0 14px; border: 1px solid var(--line-strong); border-radius: 999px; background: var(--surface); color: var(--forest-deep); font-size: 17px; font-weight: 500; box-shadow: var(--shadow); }
+.note-back:hover { border-color: var(--accent); }
+.note-back-arrow { font-size: 22px; line-height: 1; }
+.note-back-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.note-action, .note-quiet { background: transparent; border: 1px solid var(--line); color: var(--text-soft); border-radius: 999px; min-height: 44px; padding: 0 16px; font-size: 14px; white-space: nowrap; }
+.note-action:hover, .note-quiet:hover { border-color: var(--accent); color: var(--accent); }
+.note-quiet { border-color: transparent; color: var(--muted); }
+.note-scroll { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
+.note-page { max-width: 680px; margin: 0 auto; padding: 34px 24px 56px; animation: rise .35s var(--ease) both; }
+.note-title { font-family: var(--serif); font-weight: 500; font-size: 38px; line-height: 1.12; letter-spacing: -.005em; color: var(--text); margin: 0 0 10px; overflow-wrap: anywhere; }
+.note-meta-line { margin: 0 0 8px; font-size: 13px; line-height: 1.5; color: var(--muted); overflow-wrap: anywhere; letter-spacing: .01em; }
+.note-tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; font-size: 12px; }
 .note-tag { background: var(--surface-2); border: 1px solid var(--line); border-radius: 999px; padding: 1px 9px; color: var(--text-soft); }
-.note-meta time { margin-left: auto; }
-.md.note-body { font-size: 16px; line-height: 1.7; color: var(--text); }
-.note-body p { margin: 10px 0; }
+.note-page .md.note-body { margin-top: 22px; padding-top: 22px; border-top: 1px solid var(--line); }
+.md.note-body { font-size: 17px; line-height: 1.75; color: var(--text); }
+.note-body p { margin: 12px 0; }
+.note-body blockquote { font-size: 19px; }
+.note-body li { margin: 4px 0; }
 .note-body h1, .note-body h2, .note-body h3, .note-body h4, .note-body h5, .note-body h6 { font-family: var(--serif); font-weight: 500; line-height: 1.2; margin: 22px 0 8px; color: var(--text); }
 .note-body h1 { font-size: 32px; margin-top: 4px; } .note-body h2 { font-size: 25px; } .note-body h3 { font-size: 20px; font-weight: 600; } .note-body h4, .note-body h5, .note-body h6 { font-size: 17px; font-weight: 600; }
 .note-body pre { background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 10px 12px; overflow-x: auto; margin: 10px 0; }
@@ -351,7 +369,14 @@ h1 { font-family: var(--serif); font-weight: 500; font-size: 34px; line-height: 
 .note-body a.wikilink { color: var(--forest); text-decoration-color: var(--line-strong); }
 .note-body .wikilink-unresolved { color: var(--muted); text-decoration: underline dashed; text-underline-offset: 3px; }
 .note-body input[type="checkbox"] { accent-color: var(--forest); margin-right: 6px; }
-.note-footer { margin-top: 28px; padding-top: 16px; border-top: 1px solid var(--line); display: flex; justify-content: center; }
+.note-footer { margin-top: 36px; padding-top: 16px; border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+
+/* Reading text is selectable (long-press → system select/copy on touch). */
+.md, .message-content, .note-page, .journal-body { -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
+
+/* "Copied" confirmation. */
+.toast { position: fixed; left: 50%; bottom: calc(28px + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 1100; background: var(--forest-deep); color: #fffefa; border-radius: 999px; padding: 10px 20px; font-size: 14px; font-weight: 500; box-shadow: var(--shadow-lift); animation: rise .25s var(--ease) both; pointer-events: none; }
+@media (prefers-color-scheme: dark) { .toast { background: var(--accent); color: var(--accent-ink); } }
 .note-error { text-align: center; padding: 28px 12px; color: var(--text-soft); font-family: var(--serif); font-size: 18px; }
 .note-error-detail { font-family: var(--sans); font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
 
@@ -386,5 +411,8 @@ h1 { font-family: var(--serif); font-weight: 500; font-size: 34px; line-height: 
   .message-content { max-width: calc(100% - 46px); }
   .journal-compose { padding: 16px 16px 14px; }
   .journal-settings { padding: 12px 16px; }
-  .note-page { padding: 16px 18px 40px; }
+  .note-sheet { left: 0; box-shadow: none; }
+  .note-bar { padding: 6px 10px; }
+  .note-page { padding: 24px 20px 44px; }
+  .note-title { font-size: 32px; }
 }
