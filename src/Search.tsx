@@ -4,7 +4,7 @@
 // the Notes section hands the query to Uni instead. See docs/ask-everything.md.
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { groupByRoom, hitTarget, snippetSegments } from "./search";
+import { groupByRoom, hitTarget, snippetSegments } from "./searchCore";
 
 export type SearchHit = {
   message: { ref: string; channel: string; author: string; author_name: string; ts: number; body: string; root: string | null; edited: boolean };
