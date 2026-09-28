@@ -25,7 +25,7 @@ tracing = { workspace = true }
 nostr = { workspace = true }
 zeroize = { workspace = true }
 tauri-plugin-opener = "2"
-tauri-plugin-clipboard-manager = "2"
+tauri-plugin-clipboard-manager = "~2.3.3"
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]
