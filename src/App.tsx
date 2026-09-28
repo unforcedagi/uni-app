@@ -9,6 +9,7 @@ import { emojiLabel, toggleLocal, type Reaction } from "./reactions";
 import { DeleteButton, InlineEditor } from "./InlineEditor";
 import { lastOwnMessage } from "./ownMessages";
 
+import { approvalOpen, parseApproval } from "./approvals";
 import { findUniMember, findUniRoom, handoffText, searchHandoffText, type UniAction } from "./uniActions";
 import Search from "./Search";
 import Journal from "./Journal";
@@ -88,11 +89,13 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const [editing, setEditing] = useState<string | null>(null);
   // Messages handed to Uni as notes this session (a local receipt).
   const [kept, setKept] = useState<Set<string>>(new Set());
+  // Approval prompts answered from this device: message ref -> reply sent.
+  const [answered, setAnswered] = useState<Map<string, string>>(new Map());
   // Latest bindings for syncPicker (called in the same tick as setBindings).
   const bindingsRef = useRef<Bindings>(new Map());
   // Message actions go through a ref so the memoized list never holds stale closures.
   useEffect(() => { bindingsRef.current = bindings; }, [bindings]);
-  const actions = useRef({ react: (_m: Message, _e: string) => {}, toUni: (_m: Message, _a: UniAction) => {}, openThread: (_m: Message) => {}, reply: (_id: string) => {}, loadOlder: () => {}, saveEdit: (_m: Message, _b: string): Promise<void> => Promise.resolve(), cancelEdit: () => {}, deleteOwn: (_m: Message): Promise<void> => Promise.resolve() });
+  const actions = useRef({ react: (_m: Message, _e: string) => {}, toUni: (_m: Message, _a: UniAction) => {}, openThread: (_m: Message) => {}, reply: (_id: string) => {}, loadOlder: () => {}, saveEdit: (_m: Message, _b: string): Promise<void> => Promise.resolve(), cancelEdit: () => {}, deleteOwn: (_m: Message): Promise<void> => Promise.resolve(), answer: (_m: Message, _reply: string) => {} });
 
   const [searchOpen, setSearchOpen] = useState(false);
   // Search result to scroll to and flash once its room/thread has loaded.
@@ -493,6 +496,25 @@ function Conversations({ onForget }: { onForget: () => void }) {
     finally { setSending(false); }
   }
 
+  // One-tap answer to a Hermes approval prompt: post the reply text as an
+  // ordinary message in the same lane, addressed to Uni, like send() would.
+  async function answerApproval(m: Message, reply: string) {
+    if (!channel || answered.has(m.ref)) return;
+    let target: string | null = null;
+    if (root) target = messages.some((x) => x.ref === root) ? root : messages[messages.length - 1]?.ref ?? null;
+    if (root && !target) { setError("Thread not in local cache. Refresh before replying."); return; }
+    const uni = findUniMember(members);
+    setAnswered((prev) => new Map(prev).set(m.ref, reply));
+    try {
+      await invoke<Message>("post_message", { channel, body: reply, replyTo: target, recipients: uni ? [uni.pubkey] : [] });
+      setTick((n) => n + 1);
+      setStatus(`Sent ${reply}`);
+    } catch (e) {
+      setAnswered((prev) => { const next = new Map(prev); next.delete(m.ref); return next; });
+      setError(String(e));
+    }
+  }
+
   async function forget() {
     // Two taps instead of window.confirm (unreliable in Android WebView).
     if (!forgetArmed) { setForgetArmed(true); return; }
@@ -505,6 +527,17 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const threadReplies = isThread ? messages.filter((m) => m.ref !== root) : [];
   const boundNames = [...new Set(bindings.values())].map((pk) => members.find((m) => m.pubkey === pk)?.name ?? pk.slice(0, 8));
 
+  const approvalRow = (m: Message) => {
+    const prompt = parseApproval(m.body);
+    if (!prompt) return null;
+    const sent = answered.get(m.ref);
+    if (!sent && !approvalOpen(m.ts, messages, Date.now() / 1000, 1800)) return null;
+    return <div className="approval-actions" role="group" aria-label="Answer approval request">
+      {prompt.choices.map((c) => <button key={c.reply} className={`pill approval-${c.tone}`} disabled={!!sent} onClick={() => actions.current.answer(m, c.reply)} aria-label={`${c.label}: send ${c.reply}`}>{c.label}</button>)}
+      {sent && <span className="approval-sent">Sent: {sent}</span>}
+    </div>;
+  };
+
   const renderMessage = (m: Message, inThread: boolean, prev?: Message) => {
     const grouped = !!prev && prev.author === m.author && m.ts - prev.ts < 300 && !(inThread && prev.ref === root);
     return <article key={m.ref} data-ref={m.ref} className={`message ${m.ref === focusRef ? "search-focus" : ""} ${grouped ? "grouped" : ""} ${m.author === identity ? "mine" : ""} ${m.mentions_me ? "highlight" : ""} ${inThread && m.ref === root ? "thread-root" : ""}`}
@@ -512,6 +545,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       {grouped ? <time className="gutter-time">{clock(m.ts)}</time> : <span className="message-avatar" style={{ background: `hsl(${150 + (hue(m.author) % 120) - 60} 22% 44%)` }} aria-hidden="true">{m.author_name[0]?.toUpperCase() ?? "?"}</span>}
       <div className="message-content">{!grouped && <div className="message-meta"><strong>{m.author_name}</strong><time>{clock(m.ts)}</time></div>}{editing === m.ref ? <InlineEditor key={m.ref} initial={m.body} onSave={(body) => actions.current.saveEdit(m, body)} onCancel={() => actions.current.cancelEdit()} /> : <Body body={attachmentBody(m.body, m.media, relayOrigin)} mentions={m.mentions} me={identity} edited={m.edited} />}
         <Attachments body={m.body} media={m.media} />
+        {approvalRow(m)}
         {m.reactions.length > 0 && <div className="reactions">{m.reactions.map((r) => <button key={r.emoji} className={`pill ${r.mine ? "mine" : ""}`} onClick={() => actions.current.react(m, r.emoji)} aria-pressed={!!r.mine} aria-label={`${emojiLabel(r.emoji)} ${r.count}${r.mine ? ", you reacted; tap to remove" : "; tap to add yours"}`}>{emojiLabel(r.emoji)} <span>{r.count}</span></button>)}</div>}
         {reactFor === m.ref && <div className="quick-react" role="toolbar" aria-label="React">{QUICK_REACTIONS.map((e) => <button key={e} onClick={() => actions.current.react(m, e)} aria-label={`React ${e}`}>{e}</button>)}</div>}
         {!inThread && m.reply_count > 0 && <button className="thread-summary" onClick={() => actions.current.openThread(m)} aria-label={`View thread with ${m.reply_count} ${m.reply_count === 1 ? "reply" : "replies"}`}>💬 {m.reply_count} {m.reply_count === 1 ? "reply" : "replies"}{m.last_reply_ts ? <span> · last {time(m.last_reply_ts)}</span> : null}</button>}
@@ -547,6 +581,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     saveEdit,
     cancelEdit: () => { setEditing(null); input.current?.focus(); },
     deleteOwn,
+    answer: (m, reply) => void answerApproval(m, reply),
   };
 
   // The rendered timeline depends only on data, never on the draft, so
@@ -563,7 +598,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     {renderList(messages, false)}
   </>,
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  [messages, identity, reactFor, kept, root, older, roomName, editing, focusRef, relayOrigin]);
+  [messages, identity, reactFor, kept, answered, root, older, roomName, editing, focusRef, relayOrigin]);
 
   return <main className={`shell ${channel || journalOpen ? "in-room" : ""}`}>
     <aside className="rooms" aria-label="Conversations">
