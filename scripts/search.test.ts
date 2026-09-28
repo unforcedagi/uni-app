@@ -1,6 +1,6 @@
 // Run: node --experimental-strip-types scripts/search.test.ts
 import assert from "node:assert/strict";
-import { groupByRoom, hitTarget, snippetSegments, SNIPPET_END as E, SNIPPET_START as S } from "../src/search.ts";
+import { groupByRoom, hitTarget, snippetSegments, SNIPPET_END as E, SNIPPET_START as S } from "../src/searchCore.ts";
 
 assert.deepEqual(snippetSegments(`now about the ${S}fcm${E} ${S}gateway${E}`), [
   { text: "now about the ", hit: false },
