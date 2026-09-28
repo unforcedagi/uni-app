@@ -24,12 +24,14 @@ use nostr::base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use nostr::base64::Engine as _;
 use nostr::hashes::{sha256, Hash as _};
 use nostr::{EventBuilder, JsonUtil as _, Keys, Kind, Tag, Timestamp};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{Error, Result};
 
 /// Largest blob we download (Buzz desktop allows 50 MB; a phone needs less).
 pub const MAX_MEDIA_BYTES: u64 = 25 * 1024 * 1024;
+/// Upload cap keeps the raw IPC payload and Rust/relay buffers practical on mobile.
+pub const MAX_UPLOAD_BYTES: usize = 25 * 1024 * 1024;
 /// Lifetime of a `t=get` token (Buzz: `MEDIA_GET_AUTH_EXPIRY_SECS`).
 pub const MEDIA_GET_AUTH_EXPIRY_SECS: u64 = 600;
 /// Most `imeta` entries kept per message.
@@ -37,7 +39,7 @@ pub const MAX_IMETA_PER_MESSAGE: usize = 20;
 const FETCH_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// One NIP-92 attachment on a message.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MediaRef {
     pub url: String,
     /// `m`: MIME type.
@@ -202,6 +204,135 @@ pub fn sign_blossom_get(keys: &Keys, relay_url: &str) -> Result<String> {
         "Nostr {}",
         URL_SAFE_NO_PAD.encode(event.as_json().as_bytes())
     ))
+}
+
+/// Blossom BUD-02 upload authorization, scoped to this hash and relay.
+pub fn sign_blossom_upload(keys: &Keys, relay_url: &str, sha: &str) -> Result<String> {
+    if !is_sha256_hex(sha) {
+        return Err(Error::Invalid("invalid upload hash".into()));
+    }
+    let server = buzz_core::tenant::relay_url_authority(relay_url);
+    if server.is_empty() {
+        return Err(Error::Invalid("cannot derive server authority".into()));
+    }
+    let exp = (Timestamp::now().as_secs() + MEDIA_GET_AUTH_EXPIRY_SECS).to_string();
+    let tag = |parts: [&str; 2]| Tag::parse(parts).map_err(|e| Error::Invalid(e.to_string()));
+    let event = EventBuilder::new(Kind::from(24242), "Upload file")
+        .tags([
+            tag(["t", "upload"])?,
+            tag(["x", sha])?,
+            tag(["expiration", &exp])?,
+            tag(["server", &server])?,
+        ])
+        .sign_with_keys(keys)
+        .map_err(|e| Error::Media(format!("signing failed: {e}")))?;
+    Ok(format!(
+        "Nostr {}",
+        URL_SAFE_NO_PAD.encode(event.as_json().as_bytes())
+    ))
+}
+
+/// Upload raw bytes from the file picker, paste, drag/drop or future voice input.
+/// The relay sniffs the bytes and returns canonical MIME, size and dimensions;
+/// never construct imeta from untrusted browser MIME hints. No redirects may
+/// carry Blossom authorization off-origin. The legacy route only supports images.
+pub async fn upload_media(
+    relay_url: &str,
+    keys: &Keys,
+    bytes: Vec<u8>,
+    mime: &str,
+    filename: &str,
+) -> Result<MediaRef> {
+    if bytes.is_empty() || bytes.len() > MAX_UPLOAD_BYTES {
+        return Err(Error::Media("file is empty or exceeds 25 MB".into()));
+    }
+    let filename: String = filename
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(filename)
+        .trim()
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(255)
+        .collect();
+    let filename = if filename.is_empty() {
+        "file".to_string()
+    } else {
+        filename
+    };
+    let sha = sha256_hex(&bytes);
+    crate::init_crypto();
+    let auth = sign_blossom_upload(keys, relay_url, &sha)?;
+    let origin = relay_http_origin(relay_url)?;
+    let base = origin.as_str().trim_end_matches('/');
+    // The relay treats Content-Type as advisory and validates the actual bytes.
+    let hint = if mime.is_empty() || mime.contains(['\r', '\n']) {
+        "application/octet-stream"
+    } else {
+        mime
+    };
+    let client = http_client()?;
+    let mut response = client
+        .put(format!("{base}/upload"))
+        .header("Authorization", &auth)
+        .header("Content-Type", hint)
+        .header("X-SHA-256", &sha)
+        .body(bytes.clone())
+        .send()
+        .await
+        .map_err(|e| Error::Media(format!("upload failed: {e}")))?;
+    if matches!(response.status().as_u16(), 404 | 405) {
+        response = client
+            .put(format!("{base}/media/upload"))
+            .header("Authorization", &auth)
+            .header("Content-Type", hint)
+            .header("X-SHA-256", &sha)
+            .body(bytes)
+            .send()
+            .await
+            .map_err(|e| Error::Media(format!("upload failed: {e}")))?;
+    }
+    if !response.status().is_success() {
+        let status = response.status();
+        let reason = response.text().await.unwrap_or_default();
+        let brief: String = reason.chars().take(400).collect();
+        return Err(Error::Media(format!("upload rejected ({status}): {brief}")));
+    }
+    #[derive(serde::Deserialize)]
+    struct BlobDescriptor {
+        url: String,
+        sha256: String,
+        size: u64,
+        #[serde(rename = "type")]
+        mime: String,
+        dim: Option<String>,
+        blurhash: Option<String>,
+    }
+    let d: BlobDescriptor = response
+        .json()
+        .await
+        .map_err(|e| Error::Media(format!("invalid upload response: {e}")))?;
+    if d.sha256 != sha
+        || d.size == 0
+        || d.size > MAX_UPLOAD_BYTES as u64
+        || media_sha_from_url(relay_url, &d.url).ok().as_deref() != Some(&sha)
+        || !d.mime.contains('/')
+        || d.mime.contains(['\r', '\n'])
+    {
+        return Err(Error::Media(
+            "relay returned inconsistent upload metadata".into(),
+        ));
+    }
+    Ok(MediaRef {
+        url: d.url,
+        mime: Some(d.mime),
+        sha256: Some(sha),
+        size: Some(d.size as i64),
+        dim: d.dim.filter(|v| parse_dim(v).is_some()),
+        blurhash: d.blurhash,
+        alt: None,
+        filename: Some(filename),
+    })
 }
 
 /// Lowercase hex SHA-256.
@@ -462,6 +593,101 @@ mod tests {
             .unwrap();
         let now = Timestamp::now().as_secs();
         assert!(exp > now && exp <= now + MEDIA_GET_AUTH_EXPIRY_SECS);
+    }
+
+    #[test]
+    fn blossom_upload_token_is_hash_and_server_scoped() {
+        let keys = Keys::generate();
+        assert!(sign_blossom_upload(&keys, "wss://relay.example", "bad").is_err());
+        let ev = decode_auth(&sign_blossom_upload(&keys, "wss://relay.example:443", H).unwrap());
+        assert_eq!(ev.kind, Kind::from(24242));
+        assert_eq!(ev.pubkey, keys.public_key());
+        let tags: Vec<Vec<String>> = ev.tags.iter().map(|t| t.as_slice().to_vec()).collect();
+        assert!(tags.iter().any(|t| t == &["t", "upload"]));
+        assert!(tags.iter().any(|t| t == &["x", H]));
+        assert!(tags.iter().any(|t| t == &["server", "relay.example"]));
+        let exp: u64 = tags.iter().find(|t| t[0] == "expiration").unwrap()[1]
+            .parse()
+            .unwrap();
+        let now = Timestamp::now().as_secs();
+        assert!(exp > now && exp <= now + MEDIA_GET_AUTH_EXPIRY_SECS);
+        ev.verify().unwrap();
+    }
+
+    #[tokio::test]
+    async fn upload_put_sends_bud02_headers_and_uses_relay_descriptor() {
+        let data = b"%PDF-1.4\nmock".to_vec();
+        let sha = sha256_hex(&data);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let url = format!("http://127.0.0.1:{port}/media/{sha}.pdf");
+        let response = serde_json::json!({"url":url,"sha256":sha,"size":data.len(),"type":"application/pdf","uploaded":1}).to_string();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        tokio::spawn(async move {
+            let (mut sock, _) = listener.accept().await.unwrap();
+            let mut buf = Vec::new();
+            let mut chunk = [0u8; 1024];
+            while !buf.windows(4).any(|w| w == b"\r\n\r\n") {
+                let n = sock.read(&mut chunk).await.unwrap();
+                buf.extend_from_slice(&chunk[..n]);
+            }
+            let end = buf.windows(4).position(|w| w == b"\r\n\r\n").unwrap() + 4;
+            let header = String::from_utf8(buf[..end].to_vec()).unwrap();
+            let len: usize = header
+                .lines()
+                .find(|l| l.to_ascii_lowercase().starts_with("content-length:"))
+                .unwrap()
+                .split_once(':')
+                .unwrap()
+                .1
+                .trim()
+                .parse()
+                .unwrap();
+            while buf.len() - end < len {
+                let n = sock.read(&mut chunk).await.unwrap();
+                buf.extend_from_slice(&chunk[..n]);
+            }
+            tx.send((header, buf[end..end + len].to_vec())).unwrap();
+            sock.write_all(
+                format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response}",
+                    response.len()
+                )
+                .as_bytes(),
+            )
+            .await
+            .unwrap();
+        });
+        let keys = Keys::generate();
+        let media = upload_media(
+            &format!("ws://127.0.0.1:{port}"),
+            &keys,
+            data.clone(),
+            "application/pdf",
+            "../a].pdf",
+        )
+        .await
+        .unwrap();
+        assert_eq!(media.url, url);
+        assert_eq!(media.filename.as_deref(), Some("a].pdf"));
+        assert_eq!(media.mime.as_deref(), Some("application/pdf"));
+        let (head, body) = rx.await.unwrap();
+        assert_eq!(body, data);
+        assert!(head.starts_with("PUT /upload HTTP/1.1"));
+        assert!(head
+            .to_ascii_lowercase()
+            .contains(&format!("x-sha-256: {sha}")));
+        let auth = head
+            .lines()
+            .find(|l| l.to_ascii_lowercase().starts_with("authorization:"))
+            .unwrap()
+            .split_once(':')
+            .unwrap()
+            .1
+            .trim();
+        let ev = decode_auth(auth);
+        assert_eq!(ev.pubkey, keys.public_key());
+        assert!(ev.tags.iter().any(|t| t.as_slice() == ["x", &sha]));
     }
 
     /// Tiny HTTP/1.1 server: serves `status` + `body` for every request and

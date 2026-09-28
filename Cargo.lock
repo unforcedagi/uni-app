@@ -5522,6 +5522,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uni-core",
+ "url",
  "zeroize",
 ]
 

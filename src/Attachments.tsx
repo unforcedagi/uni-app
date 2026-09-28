@@ -119,16 +119,24 @@ function RelayPlayer({ m }: { m: MediaRef }) {
 }
 
 function RelayFile({ m }: { m: MediaRef }) {
-  const [state, setState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [state, setState] = useState<"idle" | "opening" | "saving" | "saved" | "error">("idle");
   const [path, setPath] = useState("");
-  const save = async () => {
-    setState("saving");
-    try { setPath(await invoke<string>("media_save", { url: m.url, sha: m.sha256 })); setState("saved"); } catch (e) { setPath(String(e)); setState("error"); }
+  const run = async (action: "opening" | "saving") => {
+    setState(action);
+    try {
+      if (action === "opening") { await invoke("media_open", { url: m.url, sha: m.sha256 }); setState("idle"); }
+      else { setPath(await invoke<string>("media_save", { url: m.url, sha: m.sha256 })); setState("saved"); }
+    } catch (e) { setPath(String(e)); setState("error"); }
   };
-  const note = { idle: formatSize(m.size) || "Download", saving: "Downloading…", saved: "✓ Saved", error: "⚠ Failed — tap to retry" }[state];
-  return <button className="attachment-file" onClick={() => void save()} disabled={state === "saving" || state === "saved"} title={path || undefined}>
-    <span aria-hidden="true">📎</span><span className="attachment-name">{displayName(m)}</span><small>{note}</small>
-  </button>;
+  const busy = state === "opening" || state === "saving";
+  const pdf = m.mime === "application/pdf" || displayName(m).toLowerCase().endsWith(".pdf");
+  return <div className="attachment-file-card" title={path || undefined}>
+    <button className="attachment-file" onClick={() => void run("opening")} disabled={busy} aria-label={`Open ${displayName(m)}`}>
+      <span aria-hidden="true">{pdf ? "📄" : "📎"}</span><span className="attachment-name">{displayName(m)}</span>
+      <small>{state === "opening" ? "Opening…" : state === "error" ? "⚠ Failed — tap to retry" : [formatSize(m.size), "Open"].filter(Boolean).join(" · ")}</small>
+    </button>
+    <button className="attachment-save" onClick={() => void run("saving")} disabled={busy || state === "saved"} aria-label={`Cache ${displayName(m)}`}>{state === "saved" ? "✓ Cached" : state === "saving" ? "Saving…" : "Save"}</button>
+  </div>;
 }
 
 function LinkImage({ url, onOpen }: { url: string; onOpen: Open }) {

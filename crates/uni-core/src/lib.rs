@@ -37,7 +37,8 @@ pub mod sync;
 pub use backoff::Backoff;
 pub use buzz::{probe, BuzzClient, ChannelInfo, Discovery, ProbeReport};
 pub use compose::{
-    delete_message, edit_message, mention_pubkeys, remove_reaction, send_message, send_reaction,
+    delete_message, edit_message, mention_pubkeys, remove_reaction, send_message,
+    send_message_with_media, send_reaction,
 };
 pub use identity::{
     clear_device_keys, forget_keyring_key, has_device_keys, init_keyring_key, keyring_pubkey,
