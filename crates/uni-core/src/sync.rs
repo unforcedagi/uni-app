@@ -39,6 +39,8 @@ pub struct SyncReport {
     pub total_items: i64,
     /// Rooms whose read marker advanced from another device's read state.
     pub read_state_advanced: Vec<String>,
+    /// Archived identities now hidden from member lists (NIP-IA 13535).
+    pub archived: usize,
 }
 
 /// Project a kind-9 event into the store. Returns `(inserted, ts)`.
@@ -222,6 +224,20 @@ pub async fn refresh_profiles(client: &mut BuzzClient, store: &Store) -> Result<
     Ok((missing.len(), stored))
 }
 
+/// Refresh the cached archived-identity set from the relay's verified
+/// kind:13535 snapshot. Returns how many identities are now hidden.
+pub async fn refresh_archived(
+    client: &mut BuzzClient,
+    relay_url: &str,
+    store: &Store,
+) -> Result<usize> {
+    let relay_self = crate::archive::fetch_relay_self(relay_url).await?;
+    let archived = crate::archive::fetch_archived(client, &relay_self).await?;
+    let archived = crate::archive::without_protected(archived, &client.pubkey().to_hex());
+    store.replace_archived(&archived)?;
+    Ok(archived.len())
+}
+
 /// Run one sync against `relay_url` into `store`.
 ///
 /// Discovery failure is fatal (returned as `Err`); a per-channel `CLOSED` is
@@ -302,6 +318,13 @@ pub async fn sync_once(
     match crate::readstate::fetch_read_state(&mut client, keys, store).await {
         Ok(adv) => report.read_state_advanced = adv,
         Err(e) => tracing::warn!("read-state fetch failed: {e}"),
+    }
+
+    // NIP-IA archived identities (retired agents). Best effort: on any
+    // failure keep the cached set rather than un-hiding or failing the sync.
+    match refresh_archived(&mut client, relay_url, store).await {
+        Ok(n) => report.archived = n,
+        Err(e) => tracing::warn!("archived-identities fetch failed: {e}"),
     }
 
     let (requested, stored) = refresh_profiles(&mut client, store).await?;
