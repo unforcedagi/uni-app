@@ -14,6 +14,9 @@ import { findUniMember, findUniRoom, handoffText, searchHandoffText, type UniAct
 import Search from "./Search";
 import Journal from "./Journal";
 import { shareText, type JournalNote } from "./journal";
+import NoteView from "./NoteView";
+import { NoteOpener } from "./noteLinks";
+import { sameHub, type VaultRef } from "./vaultlinks";
 import { Attachments, attachmentBody, useRelayOrigin, type MediaRef } from "./Attachments";
 import { activeQuery, filterMembers, insertMention, memberLabels, pruneBindings, resolveRecipients, type Bindings, type Member } from "./mentions";
 
@@ -101,6 +104,22 @@ function Conversations({ onForget }: { onForget: () => void }) {
   // Search result to scroll to and flash once its room/thread has loaded.
   const [focusRef, setFocusRef] = useState<string | null>(null);
   const [journalOpen, setJournalOpen] = useState(false);
+  // Vault notes opened from message links; the top of the stack is shown over
+  // whatever was open (room, thread or Journal) and Back pops it.
+  const [notes, setNotes] = useState<VaultRef[]>([]);
+  const [hub, setHub] = useState<string | null>(null);
+  useEffect(() => { invoke<{ hub: string }>("journal_config").then((c) => setHub(c.hub)).catch(() => {}); }, []);
+  const openNote = useCallback((ref: VaultRef, href: string | null) => {
+    // A note on some other hub isn't readable with this key: let the browser
+    // (and that hub's Parachute app) handle it.
+    if (!sameHub(ref, hub)) { if (href) void invoke("open_link", { url: href }).catch(() => {}); return; }
+    setNotes((s) => {
+      const top = s[s.length - 1];
+      if (top && top.vault === ref.vault && top.ref === ref.ref) return s;
+      return [...s.slice(-19), { hub: null, vault: ref.vault, ref: ref.ref }];
+    });
+  }, [hub]);
+  const closeNote = useCallback(() => setNotes((s) => s.slice(0, -1)), []);
   const focusTries = useRef(0);
   const preserveScroll = useRef<number | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -310,7 +329,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   }
 
   // Journal → room. To Uni: addressed and p-tagged; the entry itself stays in the vault.
-  async function shareEntry(note: JournalNote, roomId: string, toUni: boolean, vault: string) {
+  async function shareEntry(note: JournalNote, roomId: string, toUni: boolean, vault: string, journalHub: string) {
     let label: string | null = null;
     const recipients: string[] = [];
     if (toUni) {
@@ -320,7 +339,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       label = memberLabels(roster).get(uni.pubkey) ?? uni.name;
       recipients.push(uni.pubkey);
     }
-    await invoke<Message>("post_message", { channel: roomId, body: shareText(note, vault, label), replyTo: null, recipients });
+    await invoke<Message>("post_message", { channel: roomId, body: shareText(note, vault, label, "", journalHub), replyTo: null, recipients });
     await loadRooms();
   }
 
@@ -441,6 +460,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     if (key) { drafts.current.set(key, draft); bindingStore.current.set(key, bindings); }
     const nextKey = nextChannel ? keyFor(nextChannel, nextRoot) : null;
     setJournalOpen(false);
+    setNotes([]);
     setChannel(nextChannel);
     setRoot(nextRoot);
     setDraft(nextKey ? drafts.current.get(nextKey) ?? "" : "");
@@ -600,7 +620,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   [messages, identity, reactFor, kept, answered, root, older, roomName, editing, focusRef, relayOrigin]);
 
-  return <main className={`shell ${channel || journalOpen ? "in-room" : ""}`}>
+  const topNote = notes[notes.length - 1];
+  return <NoteOpener.Provider value={openNote}><main className={`shell ${channel || journalOpen || topNote ? "in-room" : ""}`}>
     <aside className="rooms" aria-label="Conversations">
       <header className="rooms-header"><div><span className="eyebrow">Unforced</span><h1>Uni</h1></div><div><button className="icon-button" onClick={() => setSearchOpen(true)} aria-label="Search messages and notes">⌕</button><button className="icon-button" onClick={() => void refresh()} disabled={busy} aria-label="Refresh conversations">↻</button><button className="icon-button" onClick={() => { setSettingsOpen(!settingsOpen); setForgetArmed(false); }} aria-label="Settings" aria-expanded={settingsOpen}>⚙</button></div></header>
       {settingsOpen && <div className="settings"><button className="pairing-secondary" onClick={() => void forget()}>{forgetArmed ? "Tap again to forget — you'll need to re-pair" : "Forget this device key"}</button>{forgetArmed && <button className="pairing-secondary" onClick={() => setForgetArmed(false)}>Keep key</button>}</div>}
@@ -620,8 +641,9 @@ function Conversations({ onForget }: { onForget: () => void }) {
       </button>)}</nav>
       </div>
     </aside>
-    <section className="conversation" aria-label={journalOpen ? "Journal" : currentRoom ? `Conversation: ${currentRoom.name}` : "Conversation"}>
-      {journalOpen ? <Journal rooms={rooms} uniRoomId={findUniRoom(rooms)?.id ?? null} onShare={shareEntry} onBack={() => setJournalOpen(false)} />
+    <section className="conversation" aria-label={topNote ? "Note" : journalOpen ? "Journal" : currentRoom ? `Conversation: ${currentRoom.name}` : "Conversation"}>
+      {topNote ? <NoteView key={`${notes.length}:${topNote.vault}:${topNote.ref}`} target={topNote} hub={hub} onOpen={openNote} onBack={closeNote} depth={notes.length} />
+      : journalOpen ? <Journal rooms={rooms} uniRoomId={findUniRoom(rooms)?.id ?? null} onShare={shareEntry} onBack={() => setJournalOpen(false)} />
       : currentRoom ? <>
         <header className="conversation-header">
           <button className="back icon-button" onClick={() => isThread ? navigate(channel, null) : navigate(null, null)} aria-label={isThread ? "Back to room" : "Back to conversations"}>‹</button>
@@ -651,7 +673,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
         </footer>
       </> : <div className="welcome"><span className="welcome-mark">✦</span><h2>Your conversation starts here</h2><p>Select a room to read and reply. Messages are cached for offline reading.</p></div>}
     </section>
-  </main>;
+  </main></NoteOpener.Provider>;
 }
 
 export default App;
