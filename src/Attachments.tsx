@@ -3,6 +3,7 @@
 // `fetch_media_bytes`) and previews of plain third-party image links.
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { pdfThumbnail } from "./pdfPreview";
 import { attachmentKind, collectAttachments, displayName, formatSize, imageLinks, parseDim, relayMediaSha, stripAttachmentLines, type MediaRef } from "./media";
 
 export type { MediaRef } from "./media";
@@ -118,6 +119,31 @@ function RelayPlayer({ m }: { m: MediaRef }) {
   </button>;
 }
 
+// PDF thumbnails keyed by url; rendered once per session.
+const pdfThumbs = new Map<string, Promise<{ src: string; pages: number }>>();
+
+function PdfThumb({ m, onOpen }: { m: MediaRef; onOpen: () => void }) {
+  const [ref, visible] = useVisible<HTMLButtonElement>();
+  const [thumb, setThumb] = useState<{ src: string; pages: number } | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    if (!visible || (m.size ?? 0) > 15 * 1024 * 1024) return;
+    let live = true;
+    let p = pdfThumbs.get(m.url);
+    if (!p) {
+      p = slot(() => invoke<ArrayBuffer>("media_bytes", { url: m.url, sha: m.sha256 })).then((buf) => pdfThumbnail(buf));
+      p.catch(() => pdfThumbs.delete(m.url));
+      pdfThumbs.set(m.url, p);
+    }
+    p.then((t) => live && setThumb(t), () => live && setFailed(true));
+    return () => { live = false; };
+  }, [visible, m.url, m.sha256, m.size]);
+  if (failed) return null;
+  return <button ref={ref} className={`attachment-pdf ${thumb ? "" : "loading"}`} onClick={onOpen} aria-label={`Open PDF ${displayName(m)}`}>
+    {thumb ? <><img src={thumb.src} alt="" /><span className="attachment-pdf-pages">{thumb.pages} {thumb.pages === 1 ? "page" : "pages"}</span></> : <span className="attachment-status">Loading preview…</span>}
+  </button>;
+}
+
 function RelayFile({ m }: { m: MediaRef }) {
   const [state, setState] = useState<"idle" | "opening" | "saving" | "saved" | "error">("idle");
   const [path, setPath] = useState("");
@@ -130,12 +156,15 @@ function RelayFile({ m }: { m: MediaRef }) {
   };
   const busy = state === "opening" || state === "saving";
   const pdf = m.mime === "application/pdf" || displayName(m).toLowerCase().endsWith(".pdf");
-  return <div className="attachment-file-card" title={path || undefined}>
+  return <div className="attachment-file-group">
+    {pdf && <PdfThumb m={m} onOpen={() => void run("opening")} />}
+    <div className="attachment-file-card" title={path || undefined}>
     <button className="attachment-file" onClick={() => void run("opening")} disabled={busy} aria-label={`Open ${displayName(m)}`}>
       <span aria-hidden="true">{pdf ? "📄" : "📎"}</span><span className="attachment-name">{displayName(m)}</span>
       <small>{state === "opening" ? "Opening…" : state === "error" ? "⚠ Failed — tap to retry" : [formatSize(m.size), "Open"].filter(Boolean).join(" · ")}</small>
     </button>
     <button className="attachment-save" onClick={() => void run("saving")} disabled={busy || state === "saved"} aria-label={`Cache ${displayName(m)}`}>{state === "saved" ? "✓ Cached" : state === "saving" ? "Saving…" : "Save"}</button>
+    </div>
   </div>;
 }
 
