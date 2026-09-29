@@ -2,6 +2,9 @@
 # Publish one monotonic Uni version to Mac + Android. Run only on uni-1.
 set -euo pipefail
 export PYTHONDONTWRITEBYTECODE=1
+# systemd user units do not set TMPDIR.
+export TMPDIR="${TMPDIR:-$HOME/.cache/uni-release}"
+mkdir -p "$TMPDIR"
 cd "$(dirname "$0")/.."
 # Only one publication can mutate this checkout or the latest pointers at a time.
 mkdir -p "$HOME/.config/uni/updater"
@@ -21,9 +24,13 @@ BASE="https://uni-1.taildf9ce2.ts.net:8443"
 [[ -z $(git status --porcelain) ]] || { echo 'Commit/clean changes before publishing' >&2; exit 1; }
 [[ $(git -C ../buzz rev-parse HEAD) == 5669fdc* ]] || { echo 'Buzz dependency moved: validate Mac sync before publishing' >&2; exit 1; }
 command -v pnpm >/dev/null
+# RESUME=1 rebuilds the already-tagged HEAD (a release whose build failed) without bumping.
+RESUME="${RESUME:-0}"
+if [[ $RESUME != 1 ]]; then
 # Integrate other agents before the version commit; never force journal.
 git fetch origin journal
 git rebase origin/journal
+fi
 pnpm install --frozen-lockfile
 python3 scripts/check-case-collisions.py
 python3 scripts/test_case_collisions.py
@@ -33,17 +40,25 @@ cargo test --workspace
 # Tauri regenerates checked-in capability schemas during tests; these are not release inputs.
 git restore -- src-tauri/gen/schemas
 # Reserve the next patch version and Android versionCode. Both are committed together.
+if [[ $RESUME != 1 ]]; then
 python3 scripts/bump-release.py
 cargo test --workspace
+fi
 VERSION="$(node -p 'require("./package.json").version')"
 CODE="$(python3 -c 'import json;print(json.load(open("src-tauri/tauri.conf.json"))["bundle"]["android"]["versionCode"])')"
+if [[ $RESUME != 1 ]]; then
 git add package.json Cargo.toml Cargo.lock src-tauri/tauri.conf.json
 git commit -m "release: Uni v$VERSION (Android $CODE)"
+fi
 SHA="$(git rev-parse HEAD)"
 BUZZ_SHA="$(git -C ../buzz rev-parse HEAD)"
+if [[ $RESUME != 1 ]]; then
 git push origin HEAD:journal
 git tag "uni-v$VERSION" "$SHA"
 git push origin "uni-v$VERSION"
+else
+[[ $(git rev-list -n1 "uni-v$VERSION") == "$SHA" ]] || { echo "RESUME: HEAD is not uni-v$VERSION" >&2; exit 1; }
+fi
 # The Mac's private signing key lives outside the repo; install once from uni-1.
 ssh "$MAC" 'mkdir -p ~/.config/uni/updater ~/.local/share/uni && chmod 700 ~/.config/uni/updater'
 scp -q "$HOME/.config/uni/updater/uni.key" "$MAC:.config/uni/updater/uni.key"
@@ -79,7 +94,11 @@ cp "$STAGE/Uni-mac-arm64.zip" "$SERVE/mac/Uni-$VERSION-mac-arm64.zip"
 cp "$APK" "$SERVE/uni.apk.tmp"
 mv "$SERVE/uni.apk.tmp" "$SERVE/uni.apk"
 GH_TAG="mac-v$VERSION-${SHA:0:7}"
-gh release create "$GH_TAG" "$STAGE/Uni-mac-arm64.zip" --repo unforcedagi/uni-app --target "$SHA" --title "Uni $VERSION for macOS (Apple Silicon)" --notes "Updater-enabled first install; ad-hoc signed. See docs/release.md." --prerelease
+if gh release view "$GH_TAG" --repo unforcedagi/uni-app >/dev/null 2>&1; then
+  gh release upload "$GH_TAG" "$STAGE/Uni-mac-arm64.zip" --repo unforcedagi/uni-app --clobber
+else
+  gh release create "$GH_TAG" "$STAGE/Uni-mac-arm64.zip" --repo unforcedagi/uni-app --target "$SHA" --title "Uni $VERSION for macOS (Apple Silicon)" --notes "Updater-enabled build; ad-hoc signed. See docs/release.md." --prerelease
+fi
 python3 scripts/write-release-manifest.py "$SERVE" "$VERSION" "$SHA" "$BASE"
 curl -fsS "$BASE/mac/latest.json" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["platforms"]["darwin-aarch64"]["signature"]; print("Mac manifest:", d["version"], "signature present")'
 curl -fsS "$BASE/android/latest.json" | python3 -c 'import json,sys; d=json.load(sys.stdin); print("Android manifest:", d["version"])'
