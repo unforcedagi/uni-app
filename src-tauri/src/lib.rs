@@ -1308,9 +1308,10 @@ struct AndroidUpdateManifest {
 
 #[tauri::command]
 async fn android_update_manifest() -> Result<AndroidUpdateManifest, String> {
-    let response = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(12))
-        .build()
+    // Bundled roots: a bare reqwest client uses the platform verifier, which
+    // fails on Android without JNI setup, so this check never succeeded there.
+    uni_core::init_crypto();
+    let response = uni_core::media::https_client_following_redirects(std::time::Duration::from_secs(12))
         .map_err(|e| e.to_string())?
         .get("https://github.com/unforcedagi/uni-app/releases/latest/download/android.json")
         .send()
