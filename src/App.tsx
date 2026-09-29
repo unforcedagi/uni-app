@@ -18,6 +18,7 @@ import Search from "./Search";
 import Journal from "./Journal";
 import { mmss, newDraft, shareText, type JournalNote } from "./journalCore";
 import { useRecorder, voiceFileName } from "./recorder";
+import { notifyMention, setUnreadBadge } from "./desktopNotify";
 import NoteView from "./NoteView";
 import { NoteOpener } from "./noteLinks";
 import { sameHub, type VaultRef } from "./vaultlinks";
@@ -27,7 +28,10 @@ import { activeQuery, filterMembers, insertMention, memberLabels, pruneBindings,
 
 type Room = { id: string; name: string; last_message: string | null; last_ts: number | null; mentions: boolean; unread: number };
 type Message = { ref: string; channel: string; author: string; author_name: string; ts: number; body: string; mentions_me: boolean; root: string | null; parent: string | null; mentions: Member[]; reply_count: number; last_reply_ts: number | null; edited: boolean; reactions: Reaction[]; media?: MediaRef[] };
-type LivePayload = { kind: "message" | "edit" | "delete" | "rooms" | "profiles" | "status"; channel: string | null; status: string | null; author: string | null };
+type LivePayload = { kind: "message" | "edit" | "delete" | "rooms" | "profiles" | "status" | "typing"; channel: string | null; status: string | null; author: string | null; root?: string | null; notify?: { author_name: string; preview: string } };
+/** Buzz desktop: an indicator lives 8 s; send at most one every 3 s. */
+const TYPING_TTL_MS = 8000;
+const TYPING_SEND_MS = 3000;
 type IdentityStatus = { paired: boolean; pubkey: string | null };
 type SyncResult = { pubkey: string; total_items: number; channel_errors: Record<string, string>; truncated_channels: string[] };
 
@@ -120,6 +124,9 @@ function Conversations({ onForget }: { onForget: () => void }) {
   // Search result to scroll to and flash once its room/thread has loaded.
   const [focusRef, setFocusRef] = useState<string | null>(null);
   const [journalOpen, setJournalOpen] = useState(false);
+  // Who is typing where: "channel|root" -> author -> expiry (ms).
+  const [typing, setTyping] = useState<Map<string, Map<string, number>>>(new Map());
+  const lastTypingSent = useRef(0);
   // Vault notes opened from message links; the top of the stack is shown over
   // whatever was open (room, thread or Journal) and Back pops it.
   const [notes, setNotes] = useState<VaultRef[]>([]);
@@ -167,6 +174,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   }, []);
   const [stackEl, setStackEl] = useState<HTMLDivElement | null>(null);
   const channelRef = useRef<string | null>(null);
+  const roomsRef = useRef<Room[]>([]);
   channelRef.current = channel;
   const scrollEnd = useRef<HTMLDivElement>(null);
   const shownView = useRef<string | null>(null);
@@ -178,6 +186,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const loadRooms = useCallback(async () => {
     const rows = await invoke<Room[]>("get_rooms");
     setRooms(rows);
+    roomsRef.current = rows;
+    setUnreadBadge(rows.reduce((n, r) => n + (r.unread || 0), 0));
     setChannel((current) => current && rows.some((r) => r.id === current) ? current : rows[0]?.id ?? null);
     setReady(true);
   }, []);
@@ -224,11 +234,37 @@ function Conversations({ onForget }: { onForget: () => void }) {
     return () => document.removeEventListener("visibilitychange", onVisible);
   }, [refresh]);
 
+  // Expire typing indicators.
+  useEffect(() => {
+    const t = window.setInterval(() => setTyping((old) => {
+      const now = Date.now(); let changed = false; const next = new Map<string, Map<string, number>>();
+      for (const [k, m] of old) { const live = new Map([...m].filter(([, exp]) => exp > now)); if (live.size !== m.size) changed = true; if (live.size) next.set(k, live); else changed = true; }
+      return changed ? next : old;
+    }), 1000);
+    return () => clearInterval(t);
+  }, []);
+
   // Live push: re-read rooms (unread badges, previews) and the open room.
   useEffect(() => {
     const un = listen<LivePayload>("uni://live", (e) => {
       const p = e.payload;
       if (p.kind === "status") { setLive(p.status); return; }
+      if (p.kind === "typing") {
+        if (!p.channel || !p.author) return;
+        const where = `${p.channel}|${p.root ?? ""}`;
+        const author = p.author;
+        setTyping((old) => { const next = new Map(old); const m = new Map(next.get(where) ?? []); m.set(author, Date.now() + TYPING_TTL_MS); next.set(where, m); return next; });
+        return;
+      }
+      if (p.kind === "message" && p.notify && p.channel) {
+        const room = roomsRef.current.find((r) => r.id === p.channel)?.name ?? "room";
+        void notifyMention({ author: p.notify.author_name, room, preview: p.notify.preview, looking: document.hasFocus() && p.channel === channelRef.current });
+      }
+      // A message from someone ends their typing indicator in that room.
+      if (p.kind === "message" && p.channel && p.author) {
+        const ch = p.channel, author = p.author;
+        setTyping((old) => { let hit = false; const next = new Map(old); for (const [k, m] of next) if (k.startsWith(`${ch}|`) && m.has(author)) { const c = new Map(m); c.delete(author); next.set(k, c); hit = true; } return hit ? next : old; });
+      }
       void loadRooms().catch(() => {});
       if (p.kind === "profiles" || !p.channel || p.channel === channelRef.current) setTick((n) => n + 1);
     });
@@ -478,6 +514,9 @@ function Conversations({ onForget }: { onForget: () => void }) {
   }, [root]);
 
   const labels = memberLabels(members);
+  const typists = [...(typing.get(`${channel}|${root ?? ""}`)?.keys() ?? [])].filter((pk) => pk !== identity);
+  const typingNames = typists.map((pk) => labels.get(pk) ?? members.find((m) => m.pubkey === pk)?.name ?? pk.slice(0, 8));
+  const typingLine = typingNames.length === 0 ? null : typingNames.length === 1 ? `${typingNames[0]} is typing…` : typingNames.length === 2 ? `${typingNames[0]} and ${typingNames[1]} are typing…` : "Several people are typing…";
   const suggestions = picker ? filterMembers(members, picker.query, identity ?? undefined) : [];
 
   function scope() { return channel ? keyFor(channel, root) : null; }
@@ -560,6 +599,11 @@ function Conversations({ onForget }: { onForget: () => void }) {
   }
   function updateDraft(text: string, caret: number | null) {
     setDraft(text);
+    const now = Date.now();
+    if (text.trim() && channel && now - lastTypingSent.current > TYPING_SEND_MS) {
+      lastTypingSent.current = now;
+      void invoke("send_typing", { channel, root: root ?? null, parent: replyTo ?? root ?? null }).catch(() => {});
+    }
     const key = scope();
     if (key) drafts.current.set(key, text);
     const next = pruneBindings(text, bindingsRef.current);
@@ -891,6 +935,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
             </li>)}
           </ul>}
           {advancedOpen && <label className="address-label">Advanced: also notify a raw public key (64 hex characters)<input value={rawKey} onChange={(e) => setRawKey(e.target.value)} autoComplete="off" spellCheck={false} placeholder="hex pubkey" /></label>}
+          {typingLine && <div className="typing-line" role="status" aria-live="polite">{typingLine}</div>}
           {pending.length > 0 && <div className="compose-files" aria-label="Attachments">
             {pending.map((item) => <div className={`compose-file ${item.state}`} key={item.id}>
               {item.preview ? <img src={item.preview} alt="" /> : <span className="compose-file-icon" aria-hidden="true">{item.file.type === "application/pdf" || item.file.name.toLowerCase().endsWith(".pdf") ? "📄" : attachmentKind({ url: item.file.name, mime: item.file.type }) === "audio" ? "♪" : "📎"}</span>}

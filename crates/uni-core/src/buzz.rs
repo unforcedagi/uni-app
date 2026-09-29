@@ -288,6 +288,16 @@ impl BuzzClient {
     /// Send a REQ under `sub_id` and return immediately — the subscription
     /// stays open and its `EVENT`/`EOSE`/`CLOSED` frames arrive through
     /// [`next_message`](Self::next_message).
+    /// Send `["EVENT", ev]` without waiting for the relay's OK (ephemeral kinds).
+    pub async fn send_event_nowait(&mut self, ev: &Event) -> Result<()> {
+        let frame = serde_json::Value::Array(vec![
+            json!("EVENT"),
+            serde_json::to_value(ev).map_err(|e| Error::Invalid(e.to_string()))?,
+        ]);
+        self.conn.send_raw(&frame).await?;
+        Ok(())
+    }
+
     pub async fn open_sub(&mut self, sub_id: &str, filters: &[Filter]) -> Result<()> {
         let mut frame = vec![json!("REQ"), json!(sub_id)];
         for f in filters {
@@ -310,7 +320,15 @@ impl BuzzClient {
             filter = filter.since(Timestamp::from_secs(s));
         }
         let aux = channel_aux_filter(channel, since);
-        self.open_sub(&channel_sub_id(channel), &[filter, aux])
+        // Typing indicators are ephemeral: only ones from the last few seconds.
+        let typing = Filter::new()
+            .kind(Kind::Custom(crate::typing::KIND_TYPING))
+            .custom_tags(h_tag, [channel.to_string()])
+            .since(Timestamp::from_secs(
+                Timestamp::now().as_secs().saturating_sub(crate::typing::TYPING_TTL_SECS),
+            ))
+            .limit(10);
+        self.open_sub(&channel_sub_id(channel), &[filter, aux, typing])
             .await
     }
 

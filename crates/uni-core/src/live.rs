@@ -27,6 +27,8 @@ use crate::buzz::{
     channel_of_sub_id, channel_sub_id, merge_discovered_channels, BuzzClient, KIND_MEMBER_ADDED,
     KIND_MEMBER_REMOVED, KIND_PROFILE, MEMBERSHIP_SUB_ID,
 };
+use std::sync::Arc;
+
 use crate::readstate::{apply_read_state_events, read_state_filter, READ_STATE_SUB_ID};
 use crate::store::{Item, Store};
 use crate::sync::{ingest_channel_event, ingest_profile, Ingested};
@@ -44,6 +46,9 @@ pub struct LiveConfig {
     pub backoff: Backoff,
     /// How long one `next_message` poll waits before checking the stop flag.
     pub poll_timeout: Duration,
+    /// Ephemeral events (typing indicators) to publish on the live socket.
+    /// Dropped while disconnected: they are only meaningful right now.
+    pub outbox: Option<Arc<tokio::sync::Mutex<mpsc::UnboundedReceiver<Event>>>>,
 }
 
 impl LiveConfig {
@@ -53,6 +58,7 @@ impl LiveConfig {
             relay_url: relay_url.into(),
             backoff: Backoff::default(),
             poll_timeout: Duration::from_secs(30),
+            outbox: None,
         }
     }
 }
@@ -78,6 +84,12 @@ pub enum LiveEvent {
     ChannelAdded { channel: Uuid },
     /// A kind-44101 notification removed us; its sub is closed.
     ChannelRemoved { channel: Uuid },
+    /// Someone is typing in `channel` (thread `root`, if any). Not stored.
+    Typing {
+        channel: Uuid,
+        author: String,
+        root: Option<String>,
+    },
     /// Kind-0 profiles stored.
     Profiles { stored: usize },
     /// Another device's read state advanced these rooms' read markers.
@@ -125,7 +137,7 @@ pub async fn run_live(
                 });
                 connections += 1;
                 Session::new(client, keys, store, &emit)
-                    .run(cfg.poll_timeout, &mut stop)
+                    .run(cfg.poll_timeout, cfg.outbox.as_deref(), &mut stop)
                     .await
             }
             Err(e) => Err(e),
@@ -202,7 +214,17 @@ impl<'a, F: Fn(LiveEvent)> Session<'a, F> {
     }
 
     /// Returns `Ok(())` only when stop was requested; any relay failure is `Err`.
-    async fn run(mut self, poll: Duration, stop: &mut watch::Receiver<bool>) -> Result<()> {
+    async fn run(
+        mut self,
+        poll: Duration,
+        outbox: Option<&tokio::sync::Mutex<mpsc::UnboundedReceiver<Event>>>,
+        stop: &mut watch::Receiver<bool>,
+    ) -> Result<()> {
+        // Typing events queued while disconnected are stale; drop them.
+        if let Some(o) = outbox {
+            let mut rx = o.lock().await;
+            while rx.try_recv().is_ok() {}
+        }
         // Discovery uses one-shot REQs; nothing else is open yet so no
         // live frames can be lost while they run.
         let discovery = self.client.discover().await?;
@@ -248,13 +270,27 @@ impl<'a, F: Fn(LiveEvent)> Session<'a, F> {
             // timeout. Reading the socket is cancel-safe (a message is either
             // returned or still queued). A dropped sender can never ask to
             // stop, so fall back to plain polling rather than spin.
-            let next = if stop.has_changed().is_ok() {
-                tokio::select! {
+            let stop_live = stop.has_changed().is_ok();
+            let next = match outbox {
+                Some(o) => {
+                    let mut rx = o.lock().await;
+                    tokio::select! {
+                        m = self.client.next_message(poll) => m,
+                        _ = stop.changed(), if stop_live => continue,
+                        Some(ev) = rx.recv() => {
+                            drop(rx);
+                            // Fire and forget, as Buzz desktop does: the relay's
+                            // OK arrives later and is ignored by `handle`.
+                            self.client.send_event_nowait(&ev).await?;
+                            continue;
+                        }
+                    }
+                }
+                None if stop_live => tokio::select! {
                     m = self.client.next_message(poll) => m,
                     _ = stop.changed() => continue,
-                }
-            } else {
-                self.client.next_message(poll).await
+                },
+                None => self.client.next_message(poll).await,
             };
             match next {
                 Ok(msg) => self.handle(msg).await?,
@@ -362,6 +398,18 @@ impl<'a, F: Fn(LiveEvent)> Session<'a, F> {
     async fn handle_event(&mut self, sub: &str, ev: Event) -> Result<()> {
         let kind = ev.kind.as_u16();
         if let Some(ch) = channel_of_sub_id(sub) {
+            if kind == crate::typing::KIND_TYPING {
+                let fresh = nostr::Timestamp::now().as_secs().saturating_sub(ev.created_at.as_secs())
+                    <= crate::typing::TYPING_TTL_SECS;
+                if ev.pubkey != self.me && fresh && ev.verify().is_ok() {
+                    (self.emit)(LiveEvent::Typing {
+                        channel: ch,
+                        author: ev.pubkey.to_hex(),
+                        root: crate::typing::typing_root(&ev),
+                    });
+                }
+                return Ok(());
+            }
             match ingest_channel_event(self.store, &ev, &self.me, ch)? {
                 Ingested::Message { new, item } => {
                     self.store.set_since(&item.channel, item.ts)?;

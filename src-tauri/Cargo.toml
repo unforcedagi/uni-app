@@ -24,6 +24,7 @@ url = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 nostr = { workspace = true }
+uuid = { workspace = true }
 zeroize = { workspace = true }
 tauri-plugin-opener = "2"
 tauri-plugin-clipboard-manager = "~2.3.3"
@@ -34,6 +35,8 @@ tracing-subscriber = { workspace = true }
 # 2.13+ pulls Tauri 2.12; stay on the Tauri 2.11 release line.
 tauri-plugin-updater = "=2.12.0"
 tauri-plugin-process = "=2.3.1"
+# Desktop only: Android stops the live socket in the background anyway.
+tauri-plugin-notification = "=2.3.3"
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]
