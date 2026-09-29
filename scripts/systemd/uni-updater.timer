@@ -1,0 +1,10 @@
+[Unit]
+Description=Check main for a new Uni release every 30 minutes
+
+[Timer]
+OnCalendar=*:0/30
+Persistent=true
+Unit=uni-updater.service
+
+[Install]
+WantedBy=timers.target
