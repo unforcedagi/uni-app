@@ -37,7 +37,8 @@
     ],
     "createUpdaterArtifacts": true,
     "macOS": {
-      "signingIdentity": "-"
+      "signingIdentity": "-",
+      "hardenedRuntime": false
     },
     "android": {
       "versionCode": 10006
