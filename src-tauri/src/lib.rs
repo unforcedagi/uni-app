@@ -667,6 +667,14 @@ fn live_stop() -> Result<(), String> {
 }
 
 #[tauri::command]
+async fn get_npub(app: tauri::AppHandle) -> Result<String, String> {
+    use nostr::nips::nip19::ToBech32;
+    secure_store::ensure_loaded(&app).await?;
+    let (keys, _) = uni_core::load_keys(false).map_err(|e| e.to_string())?;
+    keys.public_key().to_bech32().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 async fn get_identity(app: tauri::AppHandle) -> Result<String, String> {
     secure_store::ensure_loaded(&app).await?;
     uni_core::load_keys(false)
@@ -919,9 +927,7 @@ async fn media_upload(
     app: tauri::AppHandle,
     request: tauri::ipc::Request<'_>,
 ) -> Result<uni_core::MediaRef, String> {
-    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
-        return Err("expected raw file bytes".into());
-    };
+    let bytes = &ipc_bytes(&request, 100 * 1024 * 1024)?;
     if bytes.is_empty() || bytes.len() > uni_core::media::MAX_UPLOAD_BYTES {
         return Err("file is empty or exceeds 25 MB".into());
     }
@@ -951,15 +957,38 @@ async fn media_upload(
     .await
 }
 
+/// Binary IPC body. Desktop sends raw bytes; Android's WebView has no request
+/// bodies on the custom protocol, so Tauri falls back to postMessage, which
+/// JSON-encodes a Uint8Array as an array of numbers. Accept both.
+fn ipc_bytes(request: &tauri::ipc::Request<'_>, max: usize) -> Result<Vec<u8>, String> {
+    match request.body() {
+        tauri::ipc::InvokeBody::Raw(b) => {
+            if b.is_empty() || b.len() > max {
+                return Err(format!("file is empty or larger than {} MB", max / (1024 * 1024)));
+            }
+            Ok(b.clone())
+        }
+        tauri::ipc::InvokeBody::Json(serde_json::Value::Array(items)) => {
+            if items.is_empty() || items.len() > max {
+                return Err(format!("file is empty or larger than {} MB", max / (1024 * 1024)));
+            }
+            items
+                .iter()
+                .map(|v| v.as_u64().filter(|n| *n <= 255).map(|n| n as u8))
+                .collect::<Option<Vec<u8>>>()
+                .ok_or_else(|| "file bytes arrived malformed over IPC".to_string())
+        }
+        _ => Err("no file bytes received over IPC".into()),
+    }
+}
+
 /// Transcribe a voice message on uni-1. Body: raw audio; header `x-audio-mime`.
 #[tauri::command]
 async fn voice_transcribe(
     app: tauri::AppHandle,
     request: tauri::ipc::Request<'_>,
 ) -> Result<uni_core::transcribe::Transcript, String> {
-    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
-        return Err("expected raw audio bytes".into());
-    };
+    let bytes = &ipc_bytes(&request, 100 * 1024 * 1024)?;
     if bytes.is_empty() || bytes.len() > uni_core::transcribe::MAX_TRANSCRIBE_BYTES {
         return Err("recording is empty or larger than 25 MB".into());
     }
@@ -1182,9 +1211,7 @@ async fn journal_save_voice(
     app: tauri::AppHandle,
     request: tauri::ipc::Request<'_>,
 ) -> Result<uni_core::journal::FlushReport, String> {
-    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
-        return Err("expected raw audio bytes".into());
-    };
+    let bytes = &ipc_bytes(&request, 100 * 1024 * 1024)?;
     let header = |name: &str| {
         request
             .headers()
@@ -1364,6 +1391,7 @@ pub fn run() {
             get_messages,
             get_members,
             get_identity,
+            get_npub,
             identity_status,
             identity_forget,
             pairing_start,

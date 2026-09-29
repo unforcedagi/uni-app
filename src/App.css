@@ -444,3 +444,8 @@ h1 { font-family: var(--serif); font-weight: 500; font-size: 34px; line-height: 
 .address-toggle.mic.recording { color: #fff; background: #b3261e; border-color: #b3261e; font-variant-numeric: tabular-nums; }
 
 .typing-line { font-size: 0.8rem; opacity: 0.7; padding: 0 0.25rem 0.25rem; font-style: italic; }
+
+/* Upload errors: wrap instead of truncating (tap also shows the full text). */
+.compose-file.error .compose-file-info small { white-space: normal; overflow-wrap: anywhere; color: var(--danger, #b3261e); }
+.identity code { font-size: 0.85em; }
+.identity-copy { margin-left: 0.4em; background: none; border: none; cursor: pointer; opacity: 0.7; }
