@@ -3,7 +3,7 @@ members = ["crates/uni-core", "crates/uni-core-cli", "src-tauri"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.4"
+version = "0.1.5"
 edition = "2021"
 rust-version = "1.88.0"
 license = "Apache-2.0"
