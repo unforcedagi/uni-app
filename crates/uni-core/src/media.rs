@@ -365,6 +365,11 @@ pub fn read_cached(cache_dir: &Path, sha: &str) -> Option<Vec<u8>> {
 }
 
 pub(crate) fn http_client() -> Result<reqwest::Client> {
+    http_client_with_timeout(FETCH_TIMEOUT)
+}
+
+/// Same TLS and no-redirect policy as [`http_client`], with a caller timeout.
+pub(crate) fn http_client_with_timeout(timeout: Duration) -> Result<reqwest::Client> {
     // Mozilla roots (the same set tokio-tungstenite uses for the relay socket),
     // not the platform verifier: that one needs JNI setup on Android.
     let mut roots = rustls::RootCertStore::empty();
@@ -380,7 +385,7 @@ pub(crate) fn http_client() -> Result<reqwest::Client> {
     reqwest::Client::builder()
         .tls_backend_preconfigured(tls)
         .redirect(reqwest::redirect::Policy::none())
-        .timeout(FETCH_TIMEOUT)
+        .timeout(timeout)
         .build()
         .map_err(|e| Error::Media(format!("http client: {e}")))
 }

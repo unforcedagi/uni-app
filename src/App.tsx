@@ -16,11 +16,12 @@ import { approvalOpen, parseApproval } from "./approvals";
 import { findUniMember, findUniRoom, handoffText, searchHandoffText, type UniAction } from "./uniActions";
 import Search from "./Search";
 import Journal from "./Journal";
-import { shareText, type JournalNote } from "./journalCore";
+import { mmss, newDraft, shareText, type JournalNote } from "./journalCore";
+import { useRecorder, voiceFileName } from "./recorder";
 import NoteView from "./NoteView";
 import { NoteOpener } from "./noteLinks";
 import { sameHub, type VaultRef } from "./vaultlinks";
-import { attachmentKind, formatSize } from "./media";
+import { attachmentKind, collectAttachments, formatSize, stripAttachmentLines } from "./media";
 import { Attachments, attachmentBody, useRelayOrigin, type MediaRef } from "./Attachments";
 import { activeQuery, filterMembers, insertMention, memberLabels, pruneBindings, resolveRecipients, type Bindings, type Member } from "./mentions";
 
@@ -30,7 +31,7 @@ type LivePayload = { kind: "message" | "edit" | "delete" | "rooms" | "profiles" 
 type IdentityStatus = { paired: boolean; pubkey: string | null };
 type SyncResult = { pubkey: string; total_items: number; channel_errors: Record<string, string>; truncated_channels: string[] };
 
-type PendingFile = { id: string; file: File; preview: string | null; state: "uploading" | "ready" | "error"; media?: MediaRef; error?: string };
+type PendingFile = { id: string; file: File; preview: string | null; state: "uploading" | "ready" | "error"; media?: MediaRef; error?: string; voice?: "transcribing" | "done" | "failed" };
 const MAX_FILE_BYTES = 25 * 1024 * 1024;
 const MAX_ATTACHMENTS = 20;
 
@@ -113,7 +114,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const bindingsRef = useRef<Bindings>(new Map());
   // Message actions go through a ref so the memoized list never holds stale closures.
   useEffect(() => { bindingsRef.current = bindings; }, [bindings]);
-  const actions = useRef({ react: (_m: Message, _e: string) => {}, toUni: (_m: Message, _a: UniAction) => {}, openThread: (_m: Message) => {}, reply: (_id: string) => {}, loadOlder: () => {}, saveEdit: (_m: Message, _b: string): Promise<void> => Promise.resolve(), cancelEdit: () => {}, deleteOwn: (_m: Message): Promise<void> => Promise.resolve(), answer: (_m: Message, _reply: string) => {} });
+  const actions = useRef({ react: (_m: Message, _e: string) => {}, toUni: (_m: Message, _a: UniAction) => {}, openThread: (_m: Message) => {}, reply: (_id: string) => {}, loadOlder: () => {}, saveEdit: (_m: Message, _b: string): Promise<void> => Promise.resolve(), cancelEdit: () => {}, deleteOwn: (_m: Message): Promise<void> => Promise.resolve(), answer: (_m: Message, _reply: string) => {}, keepVoice: (_m: Message, _a: MediaRef) => {} });
 
   const [searchOpen, setSearchOpen] = useState(false);
   // Search result to scroll to and flash once its room/thread has loaded.
@@ -375,6 +376,25 @@ function Conversations({ onForget }: { onForget: () => void }) {
   // Hand a message to Uni: "note" posts straight to the Uni room (Uni files it
   // in Parachute and replies with where it went); "ask" opens the Uni room
   // with the quote drafted so Aaron can add his question first.
+  // A voice message goes straight to the vault: transcript plus the audio
+  // link, no round trip through Uni.
+  async function keepVoice(m: Message, audio: MediaRef) {
+    setError(null);
+    setStatus("Saving voice note…");
+    try {
+      const roomName = rooms.find((r) => r.id === m.channel)?.name ?? "room";
+      const when = new Date(m.ts * 1000);
+      const transcript = stripAttachmentLines(m.body, [audio]).trim();
+      const content = `Voice message from ${m.author_name} in #${roomName}, ${when.toLocaleString()}\n\n${transcript || "(no transcript)"}\n\n[Audio](${audio.url})`;
+      const draft = newDraft(content, "text");
+      const r = await invoke<{ sent: string[]; remaining: number; error: string | null }>("journal_save_text", { entry: draft });
+      if (!r.sent.includes(draft.entry_id)) { setKept((k) => new Set(k).add(m.ref)); setStatus(`Queued for your vault; it will save when reachable${r.error ? ` (${r.error})` : ""}`); return; }
+      setKept((k) => new Set(k).add(m.ref));
+      setStatus("Kept as a note in your vault");
+    } catch (e) {
+      setError(`Couldn't save the note: ${String(e)}`);
+    }
+  }
   async function toUni(m: Message, action: UniAction) {
     setError(null);
     const uniRoom = findUniRoom(rooms);
@@ -499,6 +519,37 @@ function Conversations({ onForget }: { onForget: () => void }) {
       void uploadFile(key, id, file);
     }
   }
+  // Voice message: record, upload the audio like any attachment, and put the
+  // uni-1 transcript into the draft so it becomes the message text.
+  const recorder = useRecorder((blob, mime) => {
+    const key = scope();
+    if (!key || !blob.size) return;
+    const file = new File([blob], voiceFileName(mime), { type: mime.split(";")[0] });
+    if (file.size > MAX_FILE_BYTES) { setError("Recording exceeds 25 MB."); return; }
+    const id = crypto.randomUUID();
+    changePending(key, (items) => [...items, { id, file, preview: null, state: "uploading", voice: "transcribing" }]);
+    void uploadFile(key, id, file);
+    void (async () => {
+      try {
+        const t = await invoke<{ text: string }>("voice_transcribe", new Uint8Array(await blob.arrayBuffer()), { headers: { "x-audio-mime": mime } });
+        const text = t.text.trim();
+        changePending(key, (items) => items.map((x) => x.id === id ? { ...x, voice: "done" } : x));
+        if (!text) return;
+        const before = drafts.current.get(key) ?? "";
+        const next = before.trim() ? `${before.trimEnd()}\n${text}` : text;
+        drafts.current.set(key, next);
+        if (activeScope.current === key) updateDraft(next, next.length);
+      } catch (e) {
+        changePending(key, (items) => items.map((x) => x.id === id ? { ...x, voice: "failed" } : x));
+        setStatus(`No transcript (${String(e).slice(0, 120)}). The voice message still sends.`);
+      }
+    })();
+  });
+  async function toggleRecording() {
+    if (recorder.recording) { recorder.stop(); return; }
+    setError(null);
+    try { await recorder.start(); } catch (e) { setError(`Microphone unavailable: ${String(e)}`); }
+  }
   function onPasteFiles(e: React.ClipboardEvent) {
     const files = Array.from(e.clipboardData.files);
     if (files.length) { e.preventDefault(); addFiles(files); }
@@ -606,7 +657,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   async function send() {
     if (!channel || sending || (!draft.trim() && !pending.length)) return;
     const files = pendingStore.current.get(keyFor(channel, root)) ?? [];
-    if (files.some((f) => f.state !== "ready" || !f.media)) {
+    if (files.some((f) => f.state !== "ready" || !f.media || f.voice === "transcribing")) {
       setError("Wait for uploads to finish or remove failed files before sending."); return;
     }
     const sentIds = files.map((f) => f.id);
@@ -695,6 +746,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     </div>;
   };
 
+  const voiceOf = (m: Message): MediaRef | undefined => collectAttachments(m.body, m.media ?? [], relayOrigin).find((x) => attachmentKind(x) === "audio");
   const renderMessage = (m: Message, inThread: boolean, prev?: Message) => {
     const grouped = !!prev && prev.author === m.author && m.ts - prev.ts < 300 && !(inThread && prev.ref === root);
     return <article key={m.ref} data-ref={m.ref} className={`message ${m.ref === focusRef ? "search-focus" : ""} ${grouped ? "grouped" : ""} ${m.author === identity ? "mine" : ""} ${m.mentions_me ? "highlight" : ""} ${inThread && m.ref === root ? "thread-root" : ""}`}
@@ -713,7 +765,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
         {!inThread && m.reply_count > 0 && <button className="thread-summary" onClick={() => actions.current.openThread(m)} aria-label={`View thread with ${m.reply_count} ${m.reply_count === 1 ? "reply" : "replies"}`}>💬 {m.reply_count} {m.reply_count === 1 ? "reply" : "replies"}{m.last_reply_ts ? <span> · last {time(m.last_reply_ts)}</span> : null}</button>}
         <div className="message-actions">
           <button onClick={() => setReactFor(reactFor === m.ref ? null : m.ref)} aria-label={`React to ${m.author_name}`} aria-expanded={reactFor === m.ref}>React</button>
-          <button onClick={() => actions.current.toUni(m, "note")} disabled={kept.has(m.ref)} aria-label={`Keep ${m.author_name}'s message as a note`}>{kept.has(m.ref) ? "✓ Sent to Uni" : "⤓ Keep"}</button>
+          {voiceOf(m) ? <button onClick={() => actions.current.keepVoice(m, voiceOf(m)!)} disabled={kept.has(m.ref)} aria-label={`Keep ${m.author_name}'s voice message as a note`}>{kept.has(m.ref) ? "✓ Kept" : "⤓ Keep as note"}</button>
+            : <button onClick={() => actions.current.toUni(m, "note")} disabled={kept.has(m.ref)} aria-label={`Keep ${m.author_name}'s message as a note`}>{kept.has(m.ref) ? "✓ Sent to Uni" : "⤓ Keep"}</button>}
           <button onClick={() => actions.current.toUni(m, "ask")} aria-label={`Ask Uni about ${m.author_name}'s message`}>✦ Ask Uni</button>
           <button onClick={() => void copyText(m.body, "Copied text")} aria-label={`Copy ${m.author_name}'s message as markdown`}>⧉ Copy text</button>
           {!inThread && <button onClick={() => actions.current.openThread(m)} aria-label={`Reply in thread to ${m.author_name}`}>Reply in thread</button>}
@@ -745,6 +798,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     cancelEdit: () => { setEditing(null); input.current?.focus(); },
     deleteOwn,
     answer: (m, reply) => void answerApproval(m, reply),
+    keepVoice: (m, audio) => void keepVoice(m, audio),
   };
 
   // The rendered timeline depends only on data, never on the draft, so
@@ -840,12 +894,12 @@ function Conversations({ onForget }: { onForget: () => void }) {
           {pending.length > 0 && <div className="compose-files" aria-label="Attachments">
             {pending.map((item) => <div className={`compose-file ${item.state}`} key={item.id}>
               {item.preview ? <img src={item.preview} alt="" /> : <span className="compose-file-icon" aria-hidden="true">{item.file.type === "application/pdf" || item.file.name.toLowerCase().endsWith(".pdf") ? "📄" : attachmentKind({ url: item.file.name, mime: item.file.type }) === "audio" ? "♪" : "📎"}</span>}
-              <span className="compose-file-info"><strong>{item.file.name}</strong><small>{formatSize(item.file.size)} · {item.state === "ready" ? "Ready" : item.state === "uploading" ? "Uploading…" : `Failed: ${item.error}`}</small>{item.state === "uploading" && <progress aria-label={`Uploading ${item.file.name}`} />}</span>
+              <span className="compose-file-info"><strong>{item.file.name}</strong><small>{formatSize(item.file.size)} · {item.state === "ready" ? "Ready" : item.state === "uploading" ? "Uploading…" : `Failed: ${item.error}`}{item.voice === "transcribing" ? " · Transcribing…" : item.voice === "failed" ? " · No transcript" : ""}</small>{item.state === "uploading" && <progress aria-label={`Uploading ${item.file.name}`} />}</span>
               {item.state === "error" && <button className="compose-file-retry" onClick={() => void uploadFile(keyFor(currentRoom.id, root), item.id, item.file)} aria-label={`Retry upload ${item.file.name}`}>Retry</button>}
               <button className="compose-file-remove" disabled={sending} onClick={() => removeFile(keyFor(currentRoom.id, root), item.id)} aria-label={`Remove ${item.file.name}`}>×</button>
             </div>)}
           </div>}
-          <div className="compose-row"><button className="address-toggle" onPointerDown={(e) => e.preventDefault()} onMouseDown={(e) => e.preventDefault()} onClick={startMention} aria-label="Mention someone">@</button><button className="address-toggle" onClick={() => fileInput.current?.click()} disabled={sending} aria-label="Attach files" title="Attach files">📎</button><textarea ref={input} aria-label={`Message ${currentRoom.name}`} value={draft} onChange={(e) => updateDraft(e.target.value, e.target.selectionStart)} onPaste={onPasteFiles} onSelect={(e) => syncPicker(e.currentTarget.value, e.currentTarget.selectionStart)} onBlur={() => setPicker(null)} onKeyDown={onKeyDown} maxLength={65536} rows={2} placeholder={isThread ? "Reply in thread…" : "Message Uni…"} /><button className="send" disabled={(!draft.trim() && !pending.length) || pending.some((f) => f.state !== "ready") || sending} onClick={() => void send()} aria-label="Send message">{sending ? "Sending…" : "Send"}</button></div>
+          <div className="compose-row"><button className="address-toggle" onPointerDown={(e) => e.preventDefault()} onMouseDown={(e) => e.preventDefault()} onClick={startMention} aria-label="Mention someone">@</button><button className="address-toggle" onClick={() => fileInput.current?.click()} disabled={sending} aria-label="Attach files" title="Attach files">📎</button><button className={`address-toggle mic ${recorder.recording ? "recording" : ""}`} onClick={() => void toggleRecording()} disabled={sending} aria-pressed={recorder.recording} aria-label={recorder.recording ? "Stop recording voice message" : "Record a voice message"} title={recorder.recording ? "Stop recording" : "Voice message"}>{recorder.recording ? `■ ${mmss(recorder.elapsed)}` : "🎙"}</button><textarea ref={input} aria-label={`Message ${currentRoom.name}`} value={draft} onChange={(e) => updateDraft(e.target.value, e.target.selectionStart)} onPaste={onPasteFiles} onSelect={(e) => syncPicker(e.currentTarget.value, e.currentTarget.selectionStart)} onBlur={() => setPicker(null)} onKeyDown={onKeyDown} maxLength={65536} rows={2} placeholder={isThread ? "Reply in thread…" : "Message Uni…"} /><button className="send" disabled={(!draft.trim() && !pending.length) || pending.some((f) => f.state !== "ready" || f.voice === "transcribing") || sending || recorder.recording} onClick={() => void send()} aria-label="Send message">{sending ? "Sending…" : "Send"}</button></div>
           <p className="compose-hint">Enter to send · Shift+Enter for a new line · @ to mention · <button className="link" onClick={() => setAdvancedOpen(!advancedOpen)}>{advancedOpen ? "hide raw key" : "raw key…"}</button></p>
         </footer>
       </> : <div className="welcome"><span className="welcome-mark">✦</span><h2>Your conversation starts here</h2><p>Select a room to read and reply. Messages are cached for offline reading.</p></div>}

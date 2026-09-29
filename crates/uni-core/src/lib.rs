@@ -33,6 +33,7 @@ pub mod parachute;
 pub mod readstate;
 pub mod store;
 pub mod sync;
+pub mod transcribe;
 
 pub use backoff::Backoff;
 pub use buzz::{probe, BuzzClient, ChannelInfo, Discovery, ProbeReport};
