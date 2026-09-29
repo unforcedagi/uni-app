@@ -1137,14 +1137,18 @@ async fn android_update_manifest() -> Result<AndroidUpdateManifest, String> {
         .timeout(std::time::Duration::from_secs(12))
         .build()
         .map_err(|e| e.to_string())?
-        .get("https://uni-1.taildf9ce2.ts.net:8443/android/latest.json")
+        .get("https://github.com/unforcedagi/uni-app/releases/latest/download/android.json")
         .send()
         .await
         .map_err(|e| e.to_string())?
         .error_for_status()
         .map_err(|e| e.to_string())?;
     let manifest: AndroidUpdateManifest = response.json().await.map_err(|e| e.to_string())?;
-    if manifest.url != "https://uni-1.taildf9ce2.ts.net:8443/uni.apk" {
+    let trusted = manifest
+        .url
+        .strip_prefix("https://github.com/unforcedagi/uni-app/releases/download/uni-v")
+        .is_some_and(|rest| rest.ends_with("/uni.apk") && !rest.contains(".."));
+    if !trusted {
         return Err("untrusted update URL".into());
     }
     Ok(manifest)

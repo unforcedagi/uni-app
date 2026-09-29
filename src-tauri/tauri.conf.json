@@ -47,7 +47,7 @@
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDc1NkZBQUYzOUNDQzU2OTAKUldTUVZzeWM4NnB2ZFRqQ2QyVFRyK3R4VmlOeXRpUDNJclN0NkdKMnRkWUxRdFJIWVRhVXFqWjMK",
       "endpoints": [
-        "https://uni-1.taildf9ce2.ts.net:8443/mac/latest.json"
+        "https://github.com/unforcedagi/uni-app/releases/latest/download/latest.json"
       ]
     }
   }
