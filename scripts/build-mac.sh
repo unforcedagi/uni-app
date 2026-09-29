@@ -18,11 +18,18 @@ pnpm install --frozen-lockfile
 export TAURI_SIGNING_PRIVATE_KEY="$(<"$KEY")"
 # The key was generated with --ci (no passphrase); set this explicitly so SSH cannot prompt.
 export TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""
-pnpm tauri build --bundles app --config "{\"version\":\"$VERSION\"}"
+# Stable self-signed identity: the Keychain's "Always allow" survives updates only when
+# every build shares one signing certificate (ad-hoc signatures change per build).
+SIGN_ID="E82AA2442F66F08F3772C9D6F7ADD877A1290125"
+SIGN_KC="$HOME/Library/Keychains/uni-signing.keychain-db"
+security unlock-keychain -p "$(<"$HOME/.config/uni/updater/macsign-keychain.pass")" "$SIGN_KC"
+security find-identity -p codesigning "$SIGN_KC" | grep -q "$SIGN_ID" || { echo 'Uni signing identity missing on Mac mini' >&2; exit 1; }
+pnpm tauri build --bundles app --config "{\"version\":\"$VERSION\",\"bundle\":{\"macOS\":{\"signingIdentity\":\"$SIGN_ID\"}}}"
 APP="$REPO/target/release/bundle/macos/Uni.app"
 test -d "$APP"
 [[ $(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist") == "$VERSION" ]]
 codesign --verify --deep --strict "$APP"
+codesign -dr - "$APP" 2>&1 | grep -qi "${SIGN_ID}" || { echo "Uni.app not signed with the stable identity" >&2; exit 1; }
 OUT="$HOME/.local/share/uni/mac-build"
 rm -rf "$OUT"; mkdir -p "$OUT"
 ditto -c -k --keepParent "$APP" "$OUT/Uni-mac-arm64.zip"
