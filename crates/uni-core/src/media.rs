@@ -370,6 +370,18 @@ pub(crate) fn http_client() -> Result<reqwest::Client> {
 
 /// Same TLS and no-redirect policy as [`http_client`], with a caller timeout.
 pub(crate) fn http_client_with_timeout(timeout: Duration) -> Result<reqwest::Client> {
+    client_with(timeout, reqwest::redirect::Policy::none())
+}
+
+/// HTTPS client with the bundled Mozilla roots that follows up to 5
+/// redirects (GitHub release downloads redirect to a CDN). Use this instead of
+/// a bare `reqwest::Client` on Android, where the platform verifier fails
+/// without JNI setup.
+pub fn https_client_following_redirects(timeout: Duration) -> Result<reqwest::Client> {
+    client_with(timeout, reqwest::redirect::Policy::limited(5))
+}
+
+fn client_with(timeout: Duration, redirect: reqwest::redirect::Policy) -> Result<reqwest::Client> {
     // Mozilla roots (the same set tokio-tungstenite uses for the relay socket),
     // not the platform verifier: that one needs JNI setup on Android.
     let mut roots = rustls::RootCertStore::empty();
@@ -384,7 +396,7 @@ pub(crate) fn http_client_with_timeout(timeout: Duration) -> Result<reqwest::Cli
         .with_no_client_auth();
     reqwest::Client::builder()
         .tls_backend_preconfigured(tls)
-        .redirect(reqwest::redirect::Policy::none())
+        .redirect(redirect)
         .timeout(timeout)
         .build()
         .map_err(|e| Error::Media(format!("http client: {e}")))
