@@ -124,6 +124,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
   // Search result to scroll to and flash once its room/thread has loaded.
   const [focusRef, setFocusRef] = useState<string | null>(null);
   const [journalOpen, setJournalOpen] = useState(false);
+  const [npub, setNpub] = useState<string | null>(null);
+  const [myName, setMyName] = useState<string | null>(null);
   // Who is typing where: "channel|root" -> author -> expiry (ms).
   const [typing, setTyping] = useState<Map<string, Map<string, number>>>(new Map());
   const lastTypingSent = useRef(0);
@@ -233,6 +235,15 @@ function Conversations({ onForget }: { onForget: () => void }) {
     document.addEventListener("visibilitychange", onVisible);
     return () => document.removeEventListener("visibilitychange", onVisible);
   }, [refresh]);
+
+  useEffect(() => {
+    if (!identity) return;
+    invoke<string>("get_npub").then(setNpub).catch(() => {});
+  }, [identity]);
+  useEffect(() => {
+    const me = members.find((m) => m.pubkey === identity);
+    if (me?.named && me.name) setMyName(me.name);
+  }, [members, identity]);
 
   // Expire typing indicators.
   useEffect(() => {
@@ -894,7 +905,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       {searchOpen && error && <p className="error search-error" role="alert">{error}</p>}
       <div className="rooms-body" hidden={searchOpen}>
       <p className="connection" role="status">{status}{live ? <span className={`live ${live === "Live" ? "on" : ""}`}> · {live}</span> : null}</p>
-      {identity && <p className="identity" title={identity}>Signed in as {identity.slice(0, 12)}…</p>}
+      {identity && <p className="identity" title={npub ?? identity}>{myName ? <>Signed in as <strong>{myName}</strong></> : <>Public key <code>{npub ? `${npub.slice(0, 14)}…${npub.slice(-6)}` : `${identity.slice(0, 12)}…`}</code></>}<button className="identity-copy" onClick={() => void copyText(npub ?? identity, "Copied public key")} aria-label="Copy your public key">⧉</button></p>}
       {!ready && <p className="empty">Loading…</p>}
       {ready && rooms.length === 0 && <p className="empty">No joined conversations cached. Refresh to connect with your personal Buzz key.</p>}
       <button className={`room journal-room ${journalOpen ? "selected" : ""}`} onClick={() => { navigate(null, null); setJournalOpen(true); }} aria-current={journalOpen ? "page" : undefined}>
@@ -939,7 +950,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
           {pending.length > 0 && <div className="compose-files" aria-label="Attachments">
             {pending.map((item) => <div className={`compose-file ${item.state}`} key={item.id}>
               {item.preview ? <img src={item.preview} alt="" /> : <span className="compose-file-icon" aria-hidden="true">{item.file.type === "application/pdf" || item.file.name.toLowerCase().endsWith(".pdf") ? "📄" : attachmentKind({ url: item.file.name, mime: item.file.type }) === "audio" ? "♪" : "📎"}</span>}
-              <span className="compose-file-info"><strong>{item.file.name}</strong><small>{formatSize(item.file.size)} · {item.state === "ready" ? "Ready" : item.state === "uploading" ? "Uploading…" : `Failed: ${item.error}`}{item.voice === "transcribing" ? " · Transcribing…" : item.voice === "failed" ? " · No transcript" : ""}</small>{item.state === "uploading" && <progress aria-label={`Uploading ${item.file.name}`} />}</span>
+              <span className="compose-file-info" onClick={() => item.error && setError(`${item.file.name}: ${item.error}`)} title={item.error ?? undefined}><strong>{item.file.name}</strong><small>{formatSize(item.file.size)} · {item.state === "ready" ? "Ready" : item.state === "uploading" ? "Uploading…" : `Failed: ${item.error}`}{item.voice === "transcribing" ? " · Transcribing…" : item.voice === "failed" ? " · No transcript" : ""}</small>{item.state === "uploading" && <progress aria-label={`Uploading ${item.file.name}`} />}</span>
               {item.state === "error" && <button className="compose-file-retry" onClick={() => void uploadFile(keyFor(currentRoom.id, root), item.id, item.file)} aria-label={`Retry upload ${item.file.name}`}>Retry</button>}
               <button className="compose-file-remove" disabled={sending} onClick={() => removeFile(keyFor(currentRoom.id, root), item.id)} aria-label={`Remove ${item.file.name}`}>×</button>
             </div>)}
