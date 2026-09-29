@@ -460,6 +460,9 @@ fn open_link(app: tauri::AppHandle, url: String) -> Result<(), String> {
 // re-reads from SQLite, which stays the single source of truth.
 
 static LIVE: std::sync::Mutex<Option<uni_core::live::StopSender>> = std::sync::Mutex::new(None);
+/// Queue of ephemeral events (typing) for the running live loop's socket.
+static OUTBOX: std::sync::Mutex<Option<tokio::sync::mpsc::UnboundedSender<nostr::Event>>> =
+    std::sync::Mutex::new(None);
 
 #[derive(Clone, Serialize)]
 struct LivePayload {
@@ -470,6 +473,19 @@ struct LivePayload {
     status: Option<String>,
     /// For `message`: the author, so the UI can skip marking own sends unread.
     author: Option<String>,
+    /// For `typing`: the thread root being typed in, if any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    root: Option<String>,
+    /// For `message`: set when it @-mentions us, with a short preview and the
+    /// author's display name, so the desktop can notify without a round trip.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    notify: Option<NotifyInfo>,
+}
+
+#[derive(Clone, Serialize)]
+struct NotifyInfo {
+    author_name: String,
+    preview: String,
 }
 
 fn live_payload(ev: &LiveEvent) -> Option<LivePayload> {
@@ -478,6 +494,8 @@ fn live_payload(ev: &LiveEvent) -> Option<LivePayload> {
         channel,
         status,
         author,
+        root: None,
+        notify: None,
     };
     Some(match ev {
         LiveEvent::Message { item, new: true } => p(
@@ -496,6 +514,14 @@ fn live_payload(ev: &LiveEvent) -> Option<LivePayload> {
         LiveEvent::ChannelAdded { channel } | LiveEvent::ChannelRemoved { channel } => {
             p("rooms", Some(channel.to_string()), None, None)
         }
+        LiveEvent::Typing {
+            channel,
+            author,
+            root,
+        } => LivePayload {
+            root: root.clone(),
+            ..p("typing", Some(channel.to_string()), None, Some(author.clone()))
+        },
         LiveEvent::Profiles { .. } => p("profiles", None, None, None),
         // Read on another device: badges change; the UI re-reads rooms.
         LiveEvent::ReadState { .. } => p("rooms", None, None, None),
@@ -563,6 +589,8 @@ async fn live_start(app: tauri::AppHandle) -> Result<bool, String> {
                                 channel: None,
                                 status: Some(format!("Live unavailable: {e}")),
                                 author: None,
+                                root: None,
+                                notify: None,
                             },
                         );
                         return;
@@ -570,15 +598,32 @@ async fn live_start(app: tauri::AppHandle) -> Result<bool, String> {
                 };
                 let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
                 let forward_app = app.clone();
+                let store_ref = &store;
                 let forward = async move {
                     while let Some(ev) = rx.recv().await {
-                        if let Some(payload) = live_payload(&ev) {
+                        if let Some(mut payload) = live_payload(&ev) {
+                            if let LiveEvent::Message { item, new: true } = &ev {
+                                if item.mentions_me {
+                                    let preview: String = item.body.chars().take(160).collect();
+                                    payload.notify = Some(NotifyInfo {
+                                        author_name: store_ref
+                                            .display_name(&item.author)
+                                            .unwrap_or_else(|_| item.author[..8].to_string()),
+                                        preview,
+                                    });
+                                }
+                            }
                             let _ = forward_app.emit("uni://live", payload);
                         }
                     }
                 };
-                let runner =
-                    uni_core::run_live(LiveConfig::new(url), &keys, None, &store, tx, stop_rx);
+                let (out_tx, out_rx) = tokio::sync::mpsc::unbounded_channel();
+                if let Ok(mut o) = OUTBOX.lock() {
+                    *o = Some(out_tx);
+                }
+                let mut cfg = LiveConfig::new(url);
+                cfg.outbox = Some(std::sync::Arc::new(tokio::sync::Mutex::new(out_rx)));
+                let runner = uni_core::run_live(cfg, &keys, None, &store, tx, stop_rx);
                 let (result, _) = tokio::join!(runner, forward);
                 if let Err(e) = result {
                     tracing::warn!("live loop ended: {e}");
@@ -589,6 +634,27 @@ async fn live_start(app: tauri::AppHandle) -> Result<bool, String> {
         })
         .map_err(|e| e.to_string())?;
     Ok(true)
+}
+
+/// Tell the room we're typing (Buzz kind 20002). Best effort, no reply: sent
+/// on the live socket when it's up, dropped otherwise.
+#[tauri::command]
+async fn send_typing(
+    app: tauri::AppHandle,
+    channel: String,
+    root: Option<String>,
+    parent: Option<String>,
+) -> Result<(), String> {
+    let Some(tx) = OUTBOX.lock().map_err(|e| e.to_string())?.clone() else {
+        return Ok(());
+    };
+    let channel: uuid::Uuid = channel.parse().map_err(|_| "invalid channel".to_string())?;
+    secure_store::ensure_loaded(&app).await?;
+    let (keys, _) = uni_core::load_keys(false).map_err(|e| e.to_string())?;
+    let ev = uni_core::typing::typing_event(&keys, channel, root.as_deref(), parent.as_deref())
+        .map_err(|e| e.to_string())?;
+    let _ = tx.send(ev);
+    Ok(())
 }
 
 /// Stop the live subscription (app backgrounded). Safe to call when stopped.
@@ -1285,6 +1351,7 @@ pub fn run() {
             {
                 _app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;
                 _app.handle().plugin(tauri_plugin_process::init())?;
+                _app.handle().plugin(tauri_plugin_notification::init())?;
             }
             #[cfg(mobile)]
             mobile::setup(_app);
@@ -1306,6 +1373,7 @@ pub fn run() {
             mark_read,
             open_link,
             live_start,
+            send_typing,
             live_stop,
             react,
             load_older,
