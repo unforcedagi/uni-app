@@ -13,6 +13,7 @@ flock -n 9 || { echo 'A Uni release is already running' >&2; exit 1; }
 # Regenerated Tauri schemas are build outputs in this dedicated checkout.
 cleanup_generated() {
   git restore -- src-tauri/gen/schemas
+  git clean -fq -- src-tauri/gen/schemas
   rm -rf src-tauri/gen/android/buildSrc/.kotlin
 }
 trap cleanup_generated EXIT
