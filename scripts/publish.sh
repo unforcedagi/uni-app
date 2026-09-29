@@ -1,77 +1,58 @@
 #!/usr/bin/env bash
-# Publish one monotonic Uni version to Mac + Android. Run only on uni-1.
+# Build the checked-out commit (must be on origin/main) and publish it as the next
+# GitHub release. Run on uni-1 only, normally via scripts/watch-main.sh.
+main() {
 set -euo pipefail
 export PYTHONDONTWRITEBYTECODE=1
 # systemd user units do not set TMPDIR.
 export TMPDIR="${TMPDIR:-$HOME/.cache/uni-release}"
 mkdir -p "$TMPDIR"
 cd "$(dirname "$0")/.."
-# Only one publication can mutate this checkout or the latest pointers at a time.
 mkdir -p "$HOME/.config/uni/updater"
 exec 9>"$HOME/.config/uni/updater/publish.lock"
 flock -n 9 || { echo 'A Uni release is already running' >&2; exit 1; }
-# Regenerated Tauri schemas are build outputs in this dedicated checkout.
+# Tauri regenerates capability schemas during builds; they are not release inputs.
 cleanup_generated() {
   git restore -- src-tauri/gen/schemas
   git clean -fq -- src-tauri/gen/schemas
   rm -rf src-tauri/gen/android/buildSrc/.kotlin
 }
 trap cleanup_generated EXIT
-REPO="$PWD"
-SERVE="$HOME/.local/share/uni/apk"
+REPO_SLUG="unforcedagi/uni-app"
 MAC="uni@100.126.18.24"
-BASE="https://uni-1.taildf9ce2.ts.net:8443"
-[[ $(git branch --show-current) == pipeline || $(git branch --show-current) == journal ]] || { echo 'Run from the dedicated pipeline or journal checkout' >&2; exit 1; }
+# Legacy bridge: 0.1.2-0.1.5 installs poll the tailnet; keep those pointers current.
+SERVE="$HOME/.local/share/uni/apk"
+LEGACY_BASE="https://uni-1.taildf9ce2.ts.net:8443"
 [[ -z $(git status --porcelain) ]] || { echo 'Commit/clean changes before publishing' >&2; exit 1; }
+git fetch --quiet origin main --tags
+SHA="$(git rev-parse HEAD)"
+git merge-base --is-ancestor "$SHA" origin/main || { echo 'HEAD is not on origin/main' >&2; exit 1; }
+if git tag --points-at "$SHA" | grep -q '^uni-v'; then echo "$SHA already released" >&2; exit 0; fi
 [[ $(git -C ../buzz rev-parse HEAD) == 5669fdc* ]] || { echo 'Buzz dependency moved: validate Mac sync before publishing' >&2; exit 1; }
-command -v pnpm >/dev/null
-# RESUME=1 rebuilds the already-tagged HEAD (a release whose build failed) without bumping.
-RESUME="${RESUME:-0}"
-if [[ $RESUME != 1 ]]; then
-# Integrate other agents before the version commit; never force journal.
-git fetch origin journal
-git rebase origin/journal
-fi
+BUZZ_SHA="$(git -C ../buzz rev-parse HEAD)"
+read -r VERSION CODE < <(python3 scripts/next-version.py)
+TAG="uni-v$VERSION"
+echo "Releasing $TAG (Android $CODE) from $SHA" >&2
 pnpm install --frozen-lockfile
 python3 scripts/check-case-collisions.py
 python3 scripts/test_case_collisions.py
 pnpm typecheck
 pnpm test
 cargo test --workspace
-# Tauri regenerates checked-in capability schemas during tests; these are not release inputs.
-git restore -- src-tauri/gen/schemas
-# Reserve the next patch version and Android versionCode. Both are committed together.
-if [[ $RESUME != 1 ]]; then
-python3 scripts/bump-release.py
-cargo test --workspace
-fi
-VERSION="$(node -p 'require("./package.json").version')"
-CODE="$(python3 -c 'import json;print(json.load(open("src-tauri/tauri.conf.json"))["bundle"]["android"]["versionCode"])')"
-if [[ $RESUME != 1 ]]; then
-git add package.json Cargo.toml Cargo.lock src-tauri/tauri.conf.json
-git commit -m "release: Uni v$VERSION (Android $CODE)"
-fi
-SHA="$(git rev-parse HEAD)"
-BUZZ_SHA="$(git -C ../buzz rev-parse HEAD)"
-if [[ $RESUME != 1 ]]; then
-git push origin HEAD:journal
-git tag "uni-v$VERSION" "$SHA"
-git push origin "uni-v$VERSION"
-else
-[[ $(git rev-list -n1 "uni-v$VERSION") == "$SHA" ]] || { echo "RESUME: HEAD is not uni-v$VERSION" >&2; exit 1; }
-fi
-# The Mac's private signing key lives outside the repo; install once from uni-1.
+cleanup_generated
+STAGE="$TMPDIR/uni-release-$VERSION"
+rm -rf "$STAGE"; mkdir -p "$STAGE"
+# The Mac's private signing key lives outside the repo; install from uni-1 each run.
 ssh "$MAC" 'mkdir -p ~/.config/uni/updater ~/.local/share/uni && chmod 700 ~/.config/uni/updater'
 scp -q "$HOME/.config/uni/updater/uni.key" "$MAC:.config/uni/updater/uni.key"
 scp -q scripts/build-mac.sh "$MAC:.local/share/uni/build-mac.sh"
 ssh "$MAC" 'chmod 600 ~/.config/uni/updater/uni.key'
-mkdir -p "$TMPDIR/uni-release-$VERSION"
-STAGE="$TMPDIR/uni-release-$VERSION"
-( ssh "$MAC" "bash ~/.local/share/uni/build-mac.sh '$SHA' '$BUZZ_SHA'" >"$STAGE/mac.log" 2>&1 ) & MAC_PID=$!
+( ssh "$MAC" "bash ~/.local/share/uni/build-mac.sh '$SHA' '$BUZZ_SHA' '$VERSION'" >"$STAGE/mac.log" 2>&1 ) & MAC_PID=$!
 (
   source "$HOME/.config/uni/android.env"
   export PATH="$HOME/.cargo/bin:$PATH"
-  pnpm tauri android build --debug --apk --target aarch64 >"$STAGE/android.log" 2>&1
+  pnpm tauri android build --debug --apk --target aarch64 \
+    --config "{\"version\":\"$VERSION\",\"bundle\":{\"android\":{\"versionCode\":$CODE}}}" >"$STAGE/android.log" 2>&1
 ) & ANDROID_PID=$!
 MAC_RESULT=0; ANDROID_RESULT=0
 wait "$MAC_PID" || MAC_RESULT=$?
@@ -82,34 +63,36 @@ if (( MAC_RESULT || ANDROID_RESULT )); then
   tail -25 "$STAGE/android.log" >&2
   exit 1
 fi
-scp -q "$MAC:.local/share/uni/mac-build/Uni-mac-arm64.zip" "$STAGE/"
-scp -q "$MAC:.local/share/uni/mac-build/Uni.app.tar.gz" "$STAGE/"
-scp -q "$MAC:.local/share/uni/mac-build/Uni.app.tar.gz.sig" "$STAGE/"
-APK="$REPO/src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk"
-test -s "$APK" && test -s "$STAGE/Uni.app.tar.gz.sig"
-# Never mutate existing assets: versioned URL and atomic latest.json pointer.
+for f in Uni-mac-arm64.zip Uni.app.tar.gz Uni.app.tar.gz.sig; do scp -q "$MAC:.local/share/uni/mac-build/$f" "$STAGE/"; done
+cp "$(pwd)/src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk" "$STAGE/uni.apk"
+BADGING="$("$HOME/Android/Sdk/build-tools/35.0.0/aapt" dump badging "$STAGE/uni.apk" | head -1)"
+[[ $BADGING == *"versionCode='$CODE'"*"versionName='$VERSION'"* ]] || { echo "APK not stamped $VERSION/$CODE: $BADGING" >&2; exit 1; }
+python3 scripts/write-release-manifest.py "$STAGE" "$VERSION" "$SHA" "$REPO_SLUG"
+# The tag is created last, so a failed build leaves nothing behind and the next tick retries.
+gh release create "$TAG" --repo "$REPO_SLUG" --target "$SHA" --latest \
+  --title "Uni $VERSION" \
+  --notes "Built from \`${SHA:0:12}\` on main. Mac: download Uni-mac-arm64.zip for a first install; installed apps update themselves. Android: uni.apk (Android versionCode $CODE)." \
+  "$STAGE/Uni-mac-arm64.zip" "$STAGE/Uni.app.tar.gz" "$STAGE/Uni.app.tar.gz.sig" \
+  "$STAGE/uni.apk" "$STAGE/latest.json" "$STAGE/android.json"
+git fetch --quiet origin --tags
+LIVE="$(curl -fsSL "https://github.com/$REPO_SLUG/releases/latest/download/latest.json" | python3 -c 'import json,sys;print(json.load(sys.stdin)["version"])')"
+[[ $LIVE == "$VERSION" ]] || { echo "GitHub latest is $LIVE, expected $VERSION" >&2; exit 1; }
+echo "GitHub releases/latest now serves $VERSION" >&2
+# Legacy tailnet bridge (atomic swaps). Remove once no device runs <= 0.1.5.
 mkdir -p "$SERVE/mac" "$SERVE/android"
-cp "$STAGE/Uni.app.tar.gz" "$SERVE/mac/Uni-$VERSION.app.tar.gz"
-cp "$STAGE/Uni.app.tar.gz.sig" "$SERVE/mac/Uni-$VERSION.app.tar.gz.sig"
-cp "$STAGE/Uni-mac-arm64.zip" "$SERVE/mac/Uni-$VERSION-mac-arm64.zip"
-cp "$APK" "$SERVE/uni.apk.tmp"
-mv "$SERVE/uni.apk.tmp" "$SERVE/uni.apk"
-GH_TAG="mac-v$VERSION-${SHA:0:7}"
-if gh release view "$GH_TAG" --repo unforcedagi/uni-app >/dev/null 2>&1; then
-  gh release upload "$GH_TAG" "$STAGE/Uni-mac-arm64.zip" --repo unforcedagi/uni-app --clobber
-else
-  gh release create "$GH_TAG" "$STAGE/Uni-mac-arm64.zip" --repo unforcedagi/uni-app --target "$SHA" --title "Uni $VERSION for macOS (Apple Silicon)" --notes "Updater-enabled build; ad-hoc signed. See docs/release.md." --prerelease
-fi
-python3 scripts/write-release-manifest.py "$SERVE" "$VERSION" "$SHA" "$BASE"
-curl -fsS "$BASE/mac/latest.json" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["platforms"]["darwin-aarch64"]["signature"]; print("Mac manifest:", d["version"], "signature present")'
-curl -fsS "$BASE/android/latest.json" | python3 -c 'import json,sys; d=json.load(sys.stdin); print("Android manifest:", d["version"])'
-# Only install while Uni is not foreground; wireless debugging may be offline.
+cp "$STAGE/uni.apk" "$SERVE/uni.apk.tmp" && mv "$SERVE/uni.apk.tmp" "$SERVE/uni.apk"
+cp "$STAGE/latest.json" "$SERVE/mac/latest.json.tmp" && mv "$SERVE/mac/latest.json.tmp" "$SERVE/mac/latest.json"
+printf '{"version": "%s", "url": "%s/uni.apk"}\n' "$VERSION" "$LEGACY_BASE" >"$SERVE/android/latest.json.tmp"
+mv "$SERVE/android/latest.json.tmp" "$SERVE/android/latest.json"
+# Zero-touch Daylight install when wireless ADB is up and Uni is not in the foreground.
 python3 scripts/connect-daylight.py || echo 'Daylight ADB discovery failed; APK is still published' >&2
 SERIAL="$(adb devices | awk '/100\.114\.25\.16:[0-9]+[[:space:]]+device/{print $1; exit}')"
 if [[ -n "$SERIAL" ]]; then
   TOP="$(timeout 10 adb -s "$SERIAL" shell dumpsys activity activities | grep topResumedActivity || true)"
   if [[ "$TOP" != *org.unforced.uni* ]]; then
-    if timeout 900 adb -s "$SERIAL" install -r "$APK"; then echo "Daylight upgraded in background"; else echo 'Daylight install failed; never uninstall; inspect signature' >&2; fi
-  else echo 'Daylight foreground: skipped disruptive ADB install; in-app banner will offer APK'; fi
-else echo 'Daylight ADB offline: published APK + in-app prompt; no uninstall'; fi
-echo "Published Uni $VERSION ($SHA), Android versionCode $CODE: $BASE/mac/latest.json $BASE/android/latest.json"
+    if timeout 900 adb -s "$SERIAL" install -r "$STAGE/uni.apk"; then echo "Daylight upgraded in background"; else echo 'Daylight install failed; never uninstall; inspect signature' >&2; fi
+  else echo 'Daylight foreground: skipped ADB install; in-app banner will offer the APK'; fi
+else echo 'Daylight ADB offline: in-app banner will offer the APK'; fi
+echo "Published $TAG ($SHA): https://github.com/$REPO_SLUG/releases/tag/$TAG"
+}
+main "$@"

@@ -1,28 +1,23 @@
 #!/usr/bin/env python3
-"""Publish signed Mac + Android update manifests by atomic pointer swap."""
+"""Write the Mac updater manifest (latest.json) and Android manifest (android.json)
+into the release stage directory; both are uploaded as GitHub release assets."""
 import json
-import os
-from pathlib import Path
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
 
-serve, version, sha, base = sys.argv[1:]
-root = Path(serve)
-sig = (root / "mac" / f"Uni-{version}.app.tar.gz.sig").read_text().strip()
+stage, version, sha, repo = sys.argv[1:]
+root = Path(stage)
+sig = (root / "Uni.app.tar.gz.sig").read_text().strip()
 assert sig and len(sig) > 50
-assert (root / "mac" / f"Uni-{version}.app.tar.gz").is_file()
-assert (root / "uni.apk").is_file()
+assert (root / "Uni.app.tar.gz").is_file() and (root / "uni.apk").is_file()
+base = f"https://github.com/{repo}/releases/download/uni-v{version}"
 mac = {
     "version": version,
     "notes": f"Uni {version} ({sha[:12]})",
     "pub_date": datetime.now(timezone.utc).isoformat(),
-    "platforms": {"darwin-aarch64": {
-        "signature": sig,
-        "url": f"{base}/mac/Uni-{version}.app.tar.gz"
-    }}
+    "platforms": {"darwin-aarch64": {"signature": sig, "url": f"{base}/Uni.app.tar.gz"}},
 }
 android = {"version": version, "url": f"{base}/uni.apk"}
-for path, data in [(root / "mac" / "latest.json", mac), (root / "android" / "latest.json", android)]:
-    tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(data, indent=2) + "\n")
-    os.replace(tmp, path)
+(root / "latest.json").write_text(json.dumps(mac, indent=2) + "\n")
+(root / "android.json").write_text(json.dumps(android, indent=2) + "\n")
