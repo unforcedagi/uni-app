@@ -885,6 +885,39 @@ async fn media_upload(
     .await
 }
 
+/// Transcribe a voice message on uni-1. Body: raw audio; header `x-audio-mime`.
+#[tauri::command]
+async fn voice_transcribe(
+    app: tauri::AppHandle,
+    request: tauri::ipc::Request<'_>,
+) -> Result<uni_core::transcribe::Transcript, String> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("expected raw audio bytes".into());
+    };
+    if bytes.is_empty() || bytes.len() > uni_core::transcribe::MAX_TRANSCRIBE_BYTES {
+        return Err("recording is empty or larger than 25 MB".into());
+    }
+    let mime = request
+        .headers()
+        .get("x-audio-mime")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("audio/webm")
+        .to_string();
+    let audio = bytes.clone();
+    secure_store::ensure_loaded(&app).await?;
+    blocking(move || {
+        let (keys, _) = uni_core::load_keys(false).map_err(|e| e.to_string())?;
+        tauri::async_runtime::block_on(uni_core::transcribe::transcribe(
+            uni_core::transcribe::TRANSCRIBE_URL,
+            &keys,
+            audio,
+            &mime,
+        ))
+        .map_err(|e| e.to_string())
+    })
+    .await
+}
+
 /// Download a relay file to the cache and return its local path.
 #[tauri::command]
 async fn media_save(
@@ -1281,6 +1314,7 @@ pub fn run() {
             search,
             media_bytes,
             media_upload,
+            voice_transcribe,
             media_save,
             media_open,
             relay_origin,

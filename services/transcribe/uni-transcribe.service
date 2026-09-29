@@ -1,0 +1,13 @@
+[Unit]
+Description=Uni voice-message transcription (faster-whisper)
+After=network-online.target
+
+[Service]
+ExecStart=%h/.local/share/uni/transcribe/venv/bin/python %h/.local/share/uni/transcribe/server.py
+Environment=HF_HUB_OFFLINE=1
+Restart=on-failure
+RestartSec=5
+Nice=5
+
+[Install]
+WantedBy=default.target
