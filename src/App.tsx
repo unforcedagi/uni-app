@@ -553,6 +553,11 @@ function Conversations({ onForget }: { onForget: () => void }) {
       changePending(key, (items) => items.map((x) => x.id === id ? { ...x, media, state: "ready" } : x));
     } catch (e) {
       changePending(key, (items) => items.map((x) => x.id === id ? { ...x, state: "error", error: String(e) } : x));
+      // The transcription request is independent. Keep its editable text and
+      // make the audio loss explicit rather than silently blocking Send.
+      if ((pendingStore.current.get(key) ?? []).some((x) => x.id === id && x.voice)) {
+        setError(`Audio upload failed: ${String(e)}. Retry the audio, or send the transcript without it.`);
+      }
     }
   }
   function addFiles(files: File[]) {
@@ -712,8 +717,9 @@ function Conversations({ onForget }: { onForget: () => void }) {
   async function send() {
     if (!channel || sending || (!draft.trim() && !pending.length)) return;
     const files = pendingStore.current.get(keyFor(channel, root)) ?? [];
-    if (files.some((f) => f.state !== "ready" || !f.media || f.voice === "transcribing")) {
-      setError("Wait for uploads to finish or remove failed files before sending."); return;
+    const failedAudio = files.filter((f) => f.voice && f.state === "error");
+    if (files.some((f) => f.voice === "transcribing" || (f.state !== "ready" && !(f.voice && f.state === "error")) || (f.state === "ready" && !f.media)) || (failedAudio.length && !draft.trim())) {
+      setError("Wait for uploads to finish, remove failed files, or send the transcript without failed audio."); return;
     }
     const sentIds = files.map((f) => f.id);
     const snapshot = draft;
@@ -736,7 +742,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     setSending(true);
     setError(null);
     try {
-      await invoke<Message>("post_message", { channel, body: snapshot, replyTo: target, recipients, media: files.map((f) => f.media!) });
+      await invoke<Message>("post_message", { channel, body: snapshot, replyTo: target, recipients, media: files.filter((f) => f.state === "ready").map((f) => f.media!) });
       changePending(key, (items) => {
         for (const item of items) if (sentIds.includes(item.id) && item.preview) URL.revokeObjectURL(item.preview);
         return items.filter((item) => !sentIds.includes(item.id));
@@ -754,7 +760,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       // user has switched rooms meanwhile.
       setTick((n) => n + 1);
       await loadRooms();
-      setStatus(recipients.length ? `Message accepted by relay · notified ${recipients.length}` : "Message accepted by relay");
+      setStatus(failedAudio.length ? `Transcript sent; ${failedAudio.length} audio recording${failedAudio.length === 1 ? " was" : "s were"} NOT attached (upload failed).` : recipients.length ? `Message accepted by relay · notified ${recipients.length}` : "Message accepted by relay");
     } catch (e) { setError(String(e)); }
     finally { setSending(false); }
   }
@@ -955,7 +961,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
               <button className="compose-file-remove" disabled={sending} onClick={() => removeFile(keyFor(currentRoom.id, root), item.id)} aria-label={`Remove ${item.file.name}`}>×</button>
             </div>)}
           </div>}
-          <div className="compose-row"><button className="address-toggle" onPointerDown={(e) => e.preventDefault()} onMouseDown={(e) => e.preventDefault()} onClick={startMention} aria-label="Mention someone">@</button><button className="address-toggle" onClick={() => fileInput.current?.click()} disabled={sending} aria-label="Attach files" title="Attach files">📎</button><button className={`address-toggle mic ${recorder.recording ? "recording" : ""}`} onClick={() => void toggleRecording()} disabled={sending} aria-pressed={recorder.recording} aria-label={recorder.recording ? "Stop recording voice message" : "Record a voice message"} title={recorder.recording ? "Stop recording" : "Voice message"}>{recorder.recording ? `■ ${mmss(recorder.elapsed)}` : "🎙"}</button><textarea ref={input} aria-label={`Message ${currentRoom.name}`} value={draft} onChange={(e) => updateDraft(e.target.value, e.target.selectionStart)} onPaste={onPasteFiles} onSelect={(e) => syncPicker(e.currentTarget.value, e.currentTarget.selectionStart)} onBlur={() => setPicker(null)} onKeyDown={onKeyDown} maxLength={65536} rows={2} placeholder={isThread ? "Reply in thread…" : "Message Uni…"} /><button className="send" disabled={(!draft.trim() && !pending.length) || pending.some((f) => f.state !== "ready" || f.voice === "transcribing") || sending || recorder.recording} onClick={() => void send()} aria-label="Send message">{sending ? "Sending…" : "Send"}</button></div>
+          <div className="compose-row"><button className="address-toggle" onPointerDown={(e) => e.preventDefault()} onMouseDown={(e) => e.preventDefault()} onClick={startMention} aria-label="Mention someone">@</button><button className="address-toggle" onClick={() => fileInput.current?.click()} disabled={sending} aria-label="Attach files" title="Attach files">📎</button><button className={`address-toggle mic ${recorder.recording ? "recording" : ""}`} onClick={() => void toggleRecording()} disabled={sending} aria-pressed={recorder.recording} aria-label={recorder.recording ? "Stop recording voice message" : "Record a voice message"} title={recorder.recording ? "Stop recording" : "Voice message"}>{recorder.recording ? `■ ${mmss(recorder.elapsed)}` : "🎙"}</button><textarea ref={input} aria-label={`Message ${currentRoom.name}`} value={draft} onChange={(e) => updateDraft(e.target.value, e.target.selectionStart)} onPaste={onPasteFiles} onSelect={(e) => syncPicker(e.currentTarget.value, e.currentTarget.selectionStart)} onBlur={() => setPicker(null)} onKeyDown={onKeyDown} maxLength={65536} rows={2} placeholder={isThread ? "Reply in thread…" : "Message Uni…"} /><button className="send" disabled={(!draft.trim() && !pending.some((f) => f.state === "ready")) || pending.some((f) => f.voice === "transcribing" || (f.state !== "ready" && !(f.voice && f.state === "error"))) || sending || recorder.recording} onClick={() => void send()} aria-label={pending.some((f) => f.voice && f.state === "error") ? "Send transcript without failed audio" : "Send message"}>{sending ? "Sending…" : pending.some((f) => f.voice && f.state === "error") ? "Send transcript" : "Send"}</button></div>
           <p className="compose-hint">Enter to send · Shift+Enter for a new line · @ to mention · <button className="link" onClick={() => setAdvancedOpen(!advancedOpen)}>{advancedOpen ? "hide raw key" : "raw key…"}</button></p>
         </footer>
       </> : <div className="welcome"><span className="welcome-mark">✦</span><h2>Your conversation starts here</h2><p>Select a room to read and reply. Messages are cached for offline reading.</p></div>}
