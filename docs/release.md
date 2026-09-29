@@ -9,7 +9,7 @@
   2. Version: `scripts/next-version.py` gives one patch above the newest `uni-v*` tag, or `package.json`'s version if that is higher (edit it to jump minor/major). Android versionCode = `1000000 + major*100000 + minor*1000 + patch`. **The pipeline never commits to the repo**; the version is stamped at build time with `tauri --config`.
   3. Builds in parallel: the Mac app on the Mac mini (`uni@100.126.18.24`, `scripts/build-mac.sh`, exact SHA) and the Android APK on uni-1.
   4. Publishes GitHub release `uni-vX.Y.Z` (marked latest) with `Uni-mac-arm64.zip`, `Uni.app.tar.gz` + `.sig`, `uni.apk`, `latest.json` (Mac updater manifest) and `android.json`. The tag is created last, so a failed build leaves nothing behind and the next tick retries.
-  5. If the Daylight's wireless ADB is up and Uni isn't in the foreground, installs the APK directly (never uninstalls).
+  5. If the wireless ADB is up on a paired device (Daylight, Pixel 7) and Uni isn't in the foreground, installs the APK directly (never uninstalls).
 - Logs: `journalctl --user -u uni-updater.service`; build logs under `~/.cache/uni-release/uni-release-<version>/`.
 - Run by hand: `bash scripts/watch-main.sh`. Pause: `systemctl --user stop uni-updater.timer`.
 
