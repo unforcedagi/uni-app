@@ -84,15 +84,15 @@ cp "$STAGE/uni.apk" "$SERVE/uni.apk.tmp" && mv "$SERVE/uni.apk.tmp" "$SERVE/uni.
 cp "$STAGE/latest.json" "$SERVE/mac/latest.json.tmp" && mv "$SERVE/mac/latest.json.tmp" "$SERVE/mac/latest.json"
 printf '{"version": "%s", "url": "%s/uni.apk"}\n' "$VERSION" "$LEGACY_BASE" >"$SERVE/android/latest.json.tmp"
 mv "$SERVE/android/latest.json.tmp" "$SERVE/android/latest.json"
-# Zero-touch Daylight install when wireless ADB is up and Uni is not in the foreground.
-python3 scripts/connect-daylight.py || echo 'Daylight ADB discovery failed; APK is still published' >&2
-SERIAL="$(adb devices | awk '/100\.114\.25\.16:[0-9]+[[:space:]]+device/{print $1; exit}')"
-if [[ -n "$SERIAL" ]]; then
+# Zero-touch install on each paired device (Daylight, Pixel 7) when wireless ADB is up
+# and Uni is not in the foreground. Never uninstalls: that would lose the device identity.
+while read -r NAME SERIAL; do
+  if [[ $SERIAL == offline ]]; then echo "$NAME: ADB offline; in-app banner will offer the APK"; continue; fi
   TOP="$(timeout 10 adb -s "$SERIAL" shell dumpsys activity activities | grep topResumedActivity || true)"
-  if [[ "$TOP" != *org.unforced.uni* ]]; then
-    if timeout 900 adb -s "$SERIAL" install -r "$STAGE/uni.apk"; then echo "Daylight upgraded in background"; else echo 'Daylight install failed; never uninstall; inspect signature' >&2; fi
-  else echo 'Daylight foreground: skipped ADB install; in-app banner will offer the APK'; fi
-else echo 'Daylight ADB offline: in-app banner will offer the APK'; fi
+  if [[ "$TOP" == *org.unforced.uni* ]]; then echo "$NAME: Uni in foreground; skipped, banner will offer the APK"; continue; fi
+  if timeout 900 adb -s "$SERIAL" install -r "$STAGE/uni.apk" </dev/null; then echo "$NAME: upgraded to $VERSION"
+  else echo "$NAME: install failed; never uninstall, inspect signature" >&2; fi
+done < <(python3 scripts/connect-devices.py || true)
 echo "Published $TAG ($SHA): https://github.com/$REPO_SLUG/releases/tag/$TAG"
 }
 main "$@"
