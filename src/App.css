@@ -433,3 +433,10 @@ h1 { font-family: var(--serif); font-weight: 500; font-size: 34px; line-height: 
   .note-page { padding: 24px 20px 44px; }
   .note-title { font-size: 32px; }
 }
+
+/* PDF first-page preview */
+.attachment-file-group { display: flex; flex-direction: column; gap: 6px; max-width: 280px; }
+.attachment-pdf { position: relative; display: block; width: 240px; min-height: 120px; padding: 0; border: 1px solid var(--border, #ddd); border-radius: 8px; background: #fff; overflow: hidden; cursor: pointer; }
+.attachment-pdf img { display: block; width: 100%; height: auto; }
+.attachment-pdf.loading { display: flex; align-items: center; justify-content: center; }
+.attachment-pdf-pages { position: absolute; right: 6px; bottom: 6px; padding: 1px 6px; border-radius: 10px; background: rgba(0,0,0,.6); color: #fff; font-size: 11px; }
