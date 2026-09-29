@@ -1179,7 +1179,7 @@ pub fn run() {
             }
             #[cfg(mobile)]
             mobile::setup(_app);
-            tracing::info!("setup complete; opening window");
+            tracing::info!(version = %_app.package_info().version, "setup complete; opening window");
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
