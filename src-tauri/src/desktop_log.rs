@@ -41,9 +41,5 @@ pub fn init() {
         tracing::error!("panic: {info}");
         default_hook(info);
     }));
-    tracing::info!(
-        version = env!("CARGO_PKG_VERSION"),
-        os = std::env::consts::OS,
-        "Uni starting"
-    );
+    tracing::info!(os = std::env::consts::OS, "Uni starting");
 }
