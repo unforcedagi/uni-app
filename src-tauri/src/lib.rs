@@ -1154,12 +1154,16 @@ async fn android_update_manifest() -> Result<AndroidUpdateManifest, String> {
     Ok(manifest)
 }
 
+#[cfg(desktop)]
+mod desktop_log;
 #[cfg(mobile)]
 mod mobile;
 mod secure_store;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(desktop)]
+    desktop_log::init();
     #[cfg(mobile)]
     mobile::init_runtime();
     uni_core::init_crypto();
@@ -1175,6 +1179,7 @@ pub fn run() {
             }
             #[cfg(mobile)]
             mobile::setup(_app);
+            tracing::info!("setup complete; opening window");
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

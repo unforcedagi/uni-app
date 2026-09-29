@@ -5520,6 +5520,7 @@ dependencies = [
  "tauri-plugin-updater",
  "tokio",
  "tracing",
+ "tracing-subscriber",
  "uni-core",
  "zeroize",
 ]
