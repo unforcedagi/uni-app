@@ -6,4 +6,4 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 ExecStart=/usr/bin/bash %h/Code/uni-app-pipeline/scripts/watch-main.sh
-TimeoutStartSec=3600
+TimeoutStartSec=10800

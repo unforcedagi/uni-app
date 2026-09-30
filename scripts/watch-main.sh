@@ -5,6 +5,9 @@ main() {
   set -euo pipefail
   export PATH="$HOME/.local/share/mise/shims:$HOME/.cargo/bin:$HOME/Android/Sdk/platform-tools:/usr/local/bin:/usr/bin:/bin"
   cd "$(dirname "$0")/.."
+  mkdir -p "$HOME/.config/uni/updater"
+  exec 9>"$HOME/.config/uni/updater/publish.lock"
+  flock -n 9 || { echo 'A Uni release is already running' >&2; exit 1; }
   git fetch --quiet origin main --tags
   local sha; sha="$(git rev-parse origin/main)"
   if git tag --points-at "$sha" | grep -q '^uni-v'; then exit 0; fi

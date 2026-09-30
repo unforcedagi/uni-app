@@ -9,7 +9,12 @@ export TMPDIR="${TMPDIR:-$HOME/.cache/uni-release}"
 mkdir -p "$TMPDIR"
 cd "$(dirname "$0")/.."
 mkdir -p "$HOME/.config/uni/updater"
-exec 9>"$HOME/.config/uni/updater/publish.lock"
+LOCK="$HOME/.config/uni/updater/publish.lock"
+# watch-main already holds fd 9 before checkout. Inherit that same lock across exec;
+# direct invocations open it here instead. flocking a second FD would conflict.
+if [[ $(readlink "/proc/$$/fd/9" 2>/dev/null || :) != "$LOCK" ]]; then
+  exec 9>"$LOCK"
+fi
 flock -n 9 || { echo 'A Uni release is already running' >&2; exit 1; }
 # Tauri regenerates capability schemas during builds; they are not release inputs.
 cleanup_generated() {

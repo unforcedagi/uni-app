@@ -1,4 +1,5 @@
 name: Uni macOS arm64 bundle
+run-name: Uni ${{ inputs.version }} (${{ inputs.release_nonce }})
 
 on:
   workflow_dispatch:
@@ -9,6 +10,10 @@ on:
         type: string
       version:
         description: Release version (X.Y.Z)
+        required: true
+        type: string
+      release_nonce:
+        description: Unique identifier for this dispatch
         required: true
         type: string
 
@@ -26,7 +31,7 @@ jobs:
     timeout-minutes: 120
     steps:
       - name: Check out exact app commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           path: uni-app
           persist-credentials: false
@@ -52,15 +57,15 @@ jobs:
           git clone --quiet https://github.com/unforcedagi/buzz.git buzz
           git -C buzz checkout --quiet "$BUZZ_SHA"
           [[ $(git -C buzz rev-parse HEAD) == "$BUZZ_SHA" ]]
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4 (peeled annotated tag)
         with:
           version: '10'
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
           cache: pnpm
           cache-dependency-path: uni-app/pnpm-lock.yaml
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master, pinned; toolchain 1.89.0 below
         with:
           toolchain: '1.89.0'
           targets: aarch64-apple-darwin
@@ -110,7 +115,7 @@ jobs:
           test -s mac-output/Uni.app.tar.gz
           test -s mac-output/Uni.app.tar.gz.sig
           echo "Bundle version $VERSION, certificate $SIGN_ID verified"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: uni-mac-arm64
           path: uni-app/mac-output/
