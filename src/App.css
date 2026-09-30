@@ -188,7 +188,7 @@ h1 { font-family: var(--serif); font-weight: 500; font-size: 34px; line-height: 
 .thread-back { background: transparent; border: 1px solid var(--line); color: var(--text-soft); border-radius: 999px; min-height: 36px; padding: 0 14px; white-space: nowrap; max-width: 40%; overflow: hidden; text-overflow: ellipsis; }
 
 /* ── Composer ──────────────────────────────────────────────── */
-.composer { position: relative; background: var(--bg); padding: 10px max(20px, calc((100% - 720px) / 2)) calc(14px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); }
+.composer { position: relative; background: var(--bg); padding: 8px max(10px, calc((100% - 720px) / 2)) calc(10px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); }
 .file-picker { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 .compose-files { display: flex; gap: 8px; overflow-x: auto; padding: 2px 2px 10px; }
 .compose-file { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; max-width: min(260px, 80vw); min-width: 160px; border: 1px solid var(--line); background: var(--surface); border-radius: 12px; padding: 5px; box-shadow: var(--shadow); }
@@ -204,16 +204,23 @@ h1 { font-family: var(--serif); font-weight: 500; font-size: 34px; line-height: 
 .compose-file-info progress { width: 100%; height: 3px; accent-color: var(--accent); }
 .compose-destination { color: var(--muted); font-size: 12px; margin: 0 0 8px 4px; }
 .compose-destination strong { color: var(--text-soft); font-weight: 500; }
-.compose-row { display: flex; align-items: flex-end; gap: 8px; background: var(--surface); border: 1px solid var(--line); border-radius: 26px; padding: 5px; box-shadow: var(--shadow); transition: border-color .25s var(--ease), box-shadow .25s var(--ease); }
+.compose-row { display: flex; align-items: flex-end; gap: 2px; background: var(--surface); border: 1px solid var(--line); border-radius: 24px; padding: 3px; box-shadow: var(--shadow); transition: border-color .25s var(--ease), box-shadow .25s var(--ease); }
 .compose-row:focus-within { border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft), var(--shadow); }
-.compose-row textarea { resize: none; min-height: 42px; max-height: 180px; background: transparent; border: 0; box-shadow: none; flex: 1; padding: 10px 6px; min-width: 0; line-height: 1.5; font-size: 15px; }
+.compose-row textarea { resize: none; min-height: 40px; max-height: calc(6 * 1.5em + 16px); overflow-y: hidden; background: transparent; border: 0; box-shadow: none; flex: 1; padding: 8px 2px; min-width: 0; line-height: 1.5; font-size: 16px; }
 .compose-row textarea:focus { box-shadow: none; }
 .compose-row textarea::placeholder, .journal-compose textarea::placeholder { color: var(--muted); opacity: .8; }
 .address-toggle { width: 42px; height: 42px; flex: none; background: transparent; color: var(--muted); border: 0; border-radius: 50%; font-size: 17px; }
 .address-toggle:hover { background: var(--accent-soft); color: var(--accent); }
 .send { background: var(--accent); border: 0; color: var(--accent-ink); font-weight: 500; border-radius: 999px; min-height: 42px; padding: 0 20px; letter-spacing: .01em; }
 .send:hover:not(:disabled) { filter: brightness(1.08); box-shadow: var(--shadow); }
-.compose-hint { color: var(--muted); font-size: 11px; margin: 8px 0 0 18px; opacity: .85; }
+.compose-icon { display: grid; place-items: center; flex: 0 0 40px; width: 40px; height: 40px; min-height: 40px; padding: 0; }
+.compose-icon svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.compose-tools { position: relative; flex: none; }
+.compose-menu { position: absolute; z-index: 50; left: 0; bottom: calc(100% + 8px); width: 200px; padding: 4px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); box-shadow: var(--shadow-lift); }
+.compose-menu button { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; padding: 8px 10px; border: 0; border-radius: 6px; background: transparent; text-align: left; font-size: 14px; }
+.compose-menu button:hover:not(:disabled), .compose-menu button:focus-visible { background: var(--accent-soft); }
+.compose-menu button span { width: 20px; text-align: center; }
+.compose-hint { color: var(--muted); font-size: 11px; margin: 6px 0 0 4px; opacity: .85; }
 .link { background: transparent; border: 0; color: var(--accent); font-size: 11px; padding: 0; text-decoration: underline; text-underline-offset: 2px; }
 .address-label { display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 12px; margin: 8px 0; }
 .address-label input { background: var(--surface); border: 1px solid var(--line); padding: 10px 12px; border-radius: var(--radius-sm); }
@@ -424,7 +431,7 @@ h1 { font-family: var(--serif); font-weight: 500; font-size: 34px; line-height: 
   .thread-back { display: none; }
   .conversation-header { padding: 6px 10px; }
   .message-list { padding: 14px 16px 24px; }
-  .composer { padding: 8px 10px calc(10px + env(safe-area-inset-bottom)); }
+  .composer { padding: 6px 6px calc(8px + env(safe-area-inset-bottom)); }
   .compose-hint { display: none; }
   .message-content { max-width: calc(100% - 46px); }
   .journal-compose { padding: 16px 16px 14px; }

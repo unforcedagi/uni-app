@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { onBackButtonPress } from "@tauri-apps/api/app";
@@ -70,6 +70,56 @@ function App() {
 
 
 type Picker = { start: number; query: string; index: number };
+
+function ComposerMenu({ onMention, onAttach, sending }: { onMention: () => void; onAttach: () => void; sending: boolean }) {
+  const [open, setOpen] = useState(false);
+  const container = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const menu = useRef<HTMLDivElement>(null);
+  const menuId = useId();
+  useEffect(() => {
+    if (!open) return;
+    menu.current?.querySelector<HTMLButtonElement>("button")?.focus();
+    const dismiss = (e: PointerEvent) => {
+      if (!container.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("pointerdown", dismiss);
+    return () => document.removeEventListener("pointerdown", dismiss);
+  }, [open]);
+  return <div className="compose-tools" ref={container}
+    onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setOpen(false); }}
+    onKeyDown={(e) => {
+      if (e.key === "Escape" && open) { e.preventDefault(); e.stopPropagation(); setOpen(false); trigger.current?.focus(); }
+    }}>
+    <button ref={trigger} className="address-toggle compose-icon" aria-label="More message options" title="More message options"
+      aria-haspopup="menu" aria-expanded={open} aria-controls={open ? menuId : undefined}
+      onClick={() => setOpen((value) => !value)}
+      onKeyDown={(e) => { if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); setOpen(true); } }}>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+    </button>
+    {open && <div ref={menu} id={menuId} className="compose-menu" role="menu" aria-label="Message options"
+      onKeyDown={(e) => {
+        const items = Array.from(e.currentTarget.querySelectorAll<HTMLButtonElement>("button:not(:disabled)"));
+        const index = items.indexOf(document.activeElement as HTMLButtonElement);
+        if (["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) {
+          e.preventDefault();
+          const next = e.key === "Home" ? 0 : e.key === "End" ? items.length - 1 : (index + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+          items[next]?.focus();
+        }
+      }}>
+      <button role="menuitem" onClick={() => { setOpen(false); onMention(); }}><span aria-hidden="true">@</span> Mention</button>
+      <button role="menuitem" disabled={sending} onClick={() => { setOpen(false); trigger.current?.focus(); onAttach(); }}><span aria-hidden="true">＋</span> Attach file/photo</button>
+    </div>}
+  </div>;
+}
+
+function resizeComposer(el: HTMLTextAreaElement) {
+  el.style.height = "auto";
+  const style = getComputedStyle(el);
+  const maxHeight = parseFloat(style.lineHeight) * 6 + parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
+  el.style.height = `${Math.min(el.scrollHeight, maxHeight)}px`;
+  el.style.overflowY = el.scrollHeight > maxHeight ? "auto" : "hidden";
+}
 
 function Conversations({ onForget }: { onForget: () => void }) {
   const [rooms, setRooms] = useState<Room[]>([]);
@@ -287,6 +337,19 @@ function Conversations({ onForget }: { onForget: () => void }) {
   // Uni is notified on every message in rooms it belongs to, unless muted.
   const [notifyUni, setNotifyUni] = useState(true);
   const input = useRef<HTMLTextAreaElement>(null);
+  const composerInput = useCallback((el: HTMLTextAreaElement | null) => {
+    input.current = el;
+    if (!el) return;
+    resizeComposer(el);
+    let width = el.getBoundingClientRect().width;
+    const observer = new ResizeObserver(() => {
+      const nextWidth = el.getBoundingClientRect().width;
+      if (nextWidth !== width) { width = nextWidth; resizeComposer(el); }
+    });
+    observer.observe(el);
+    return () => { observer.disconnect(); input.current = null; };
+  }, []);
+  useLayoutEffect(() => { if (input.current) resizeComposer(input.current); }, [draft]);
   const focusComposer = useRef(false);
 
   const loadRooms = useCallback(async () => {
@@ -1163,7 +1226,19 @@ function Conversations({ onForget }: { onForget: () => void }) {
               <button className="compose-file-remove" disabled={sending} onClick={() => removeFile(keyFor(currentRoom.id, root), item.id)} aria-label={`Remove ${item.file.name}`}>×</button>
             </div>)}
           </div>}
-          <div className="compose-row"><button className="address-toggle" onPointerDown={(e) => e.preventDefault()} onMouseDown={(e) => e.preventDefault()} onClick={startMention} aria-label="Mention someone">@</button><button className="address-toggle" onClick={() => fileInput.current?.click()} disabled={sending} aria-label="Attach files" title="Attach files">📎</button><button className={`address-toggle mic ${recorder.recording && recordingOrigin.current?.key === scope() ? "recording" : ""}`} onClick={() => void toggleRecording()} disabled={sending} aria-pressed={recorder.recording && recordingOrigin.current?.key === scope()} aria-label={recorder.recording && recordingOrigin.current?.key === scope() ? "Stop recording voice message" : "Record a voice message"} title={recorder.recording && recordingOrigin.current?.key === scope() ? "Stop recording" : "Voice message"}>{recorder.recording && recordingOrigin.current?.key === scope() ? `■ ${mmss(recorder.elapsed)}` : "🎙"}</button><textarea ref={input} aria-label={`Message ${currentRoom.name}`} value={draft} onChange={(e) => updateDraft(e.target.value, e.target.selectionStart)} onPaste={onPasteFiles} onSelect={(e) => syncPicker(e.currentTarget.value, e.currentTarget.selectionStart)} onBlur={() => setPicker(null)} onKeyDown={onKeyDown} maxLength={65536} rows={2} placeholder={isThread ? "Reply in thread…" : "Message Uni…"} /><button className="send" disabled={(!draft.trim() && !pending.some((f) => f.state === "ready")) || pending.some((f) => f.voice === "transcribing" || (f.state !== "ready" && !(f.voice && f.state === "error"))) || sending || recorder.recording} onClick={() => void send()} aria-label={pending.some((f) => f.voice && f.state === "error") ? "Send transcript without failed audio" : "Send message"}>{sending ? "Sending…" : pending.some((f) => f.voice && f.state === "error") ? "Send transcript" : "Send"}</button></div>
+          <div className="compose-row">
+            <ComposerMenu key={`${channel}:${root}`} onMention={startMention} onAttach={() => fileInput.current?.click()} sending={sending} />
+            <textarea ref={composerInput} aria-label={`Message ${currentRoom.name}`} value={draft} onChange={(e) => updateDraft(e.target.value, e.target.selectionStart)} onPaste={onPasteFiles} onSelect={(e) => syncPicker(e.currentTarget.value, e.currentTarget.selectionStart)} onBlur={() => setPicker(null)} onKeyDown={onKeyDown} maxLength={65536} rows={1} placeholder={isThread ? "Reply in thread…" : "Message Uni…"} />
+            {draft.trim() || pending.length > 0 || sending ? (
+              <button className="send compose-icon" disabled={(!draft.trim() && !pending.some((f) => f.state === "ready")) || pending.some((f) => f.voice === "transcribing" || (f.state !== "ready" && !(f.voice && f.state === "error"))) || sending || recorder.recording} onClick={() => void send()} aria-label={pending.some((f) => f.voice && f.state === "error") ? "Send transcript without failed audio" : "Send message"} title={sending ? "Sending…" : pending.some((f) => f.voice && f.state === "error") ? "Send transcript without failed audio" : "Send message"} aria-busy={sending}>
+                {sending ? <span aria-hidden="true">…</span> : <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 7-7 7 7M12 5v14" /></svg>}
+              </button>
+            ) : (
+              <button className={`address-toggle compose-icon mic ${recorder.recording && recordingOrigin.current?.key === scope() ? "recording" : ""}`} onClick={() => void toggleRecording()} disabled={sending} aria-pressed={recorder.recording && recordingOrigin.current?.key === scope()} aria-label={recorder.recording && recordingOrigin.current?.key === scope() ? "Stop recording voice message" : "Record a voice message"} title={recorder.recording && recordingOrigin.current?.key === scope() ? "Stop recording" : "Voice message"}>
+                {recorder.recording && recordingOrigin.current?.key === scope() ? <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" fill="currentColor" /></svg> : <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3" /><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8" /></svg>}
+              </button>
+            )}
+          </div>
           <p className="compose-hint">Enter to send · Shift+Enter for a new line · @ to mention · <button className="link" onClick={() => setAdvancedOpen(!advancedOpen)}>{advancedOpen ? "hide raw key" : "raw key…"}</button></p>
         </footer>
       </> : <div className="welcome"><span className="welcome-mark">✦</span><h2>Your conversation starts here</h2><p>Select a room to read and reply. Messages are cached for offline reading.</p></div>}
