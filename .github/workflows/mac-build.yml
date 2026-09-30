@@ -1,0 +1,132 @@
+name: Uni macOS arm64 bundle
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact app commit to build (must equal workflow commit)
+        required: true
+        type: string
+      version:
+        description: Release version (X.Y.Z)
+        required: true
+        type: string
+  # Temporary branch trigger enables testing before the workflow is on main.
+  push:
+    branches: [ci/hosted-mac-build]
+
+permissions:
+  contents: read
+
+env:
+  BUZZ_SHA: 5669fdc
+  SIGN_ID: E82AA2442F66F08F3772C9D6F7ADD877A1290125
+
+jobs:
+  mac:
+    runs-on: macos-15-arm64
+    environment: uni-mac-signing
+    timeout-minutes: 120
+    steps:
+      - name: Check out exact app commit
+        uses: actions/checkout@v4
+        with:
+          path: uni-app
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Validate inputs and checkout
+        id: version
+        shell: bash
+        env:
+          INPUT_SHA: ${{ inputs.source_sha }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          sha=$(git -C uni-app rev-parse HEAD)
+          if [[ "$GITHUB_EVENT_NAME" == push ]]; then
+            [[ "$GITHUB_REF" == refs/heads/ci/hosted-mac-build ]]
+            version=$(python3 -c 'import json; print(json.load(open("uni-app/package.json"))["version"])')
+          else
+            [[ "$INPUT_SHA" =~ ^[0-9a-f]{40}$ && "$INPUT_SHA" == "$sha" ]] || { echo 'source_sha must match workflow checkout'; exit 1; }
+            version=$INPUT_VERSION
+          fi
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 1
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Building $sha as $version"
+      - name: Check out pinned Buzz dependency
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --quiet https://github.com/unforcedagi/buzz.git buzz
+          git -C buzz checkout --quiet "$BUZZ_SHA"
+          [[ $(git -C buzz rev-parse --short=7 HEAD) == "$BUZZ_SHA" ]]
+      - uses: pnpm/action-setup@v4
+        with:
+          version: '10'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: uni-app/pnpm-lock.yaml
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.88.0'
+          targets: aarch64-apple-darwin
+      - name: Install frontend dependencies
+        working-directory: uni-app
+        run: pnpm install --frozen-lockfile
+      - name: Import stable signing identity and updater key
+        shell: bash
+        env:
+          MACSIGN_P12_BASE64: ${{ secrets.MACSIGN_P12_BASE64 }}
+          MACSIGN_P12_PASSWORD: ${{ secrets.MACSIGN_P12_PASSWORD }}
+          TAURI_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          [[ -n "$MACSIGN_P12_BASE64" && -n "$MACSIGN_P12_PASSWORD" && -n "$TAURI_KEY" ]] || { echo 'Missing signing secret'; exit 1; }
+          umask 077
+          kc="$RUNNER_TEMP/uni-signing.keychain-db"
+          p12="$RUNNER_TEMP/uni-signing.p12"
+          printf '%s' "$MACSIGN_P12_BASE64" | base64 --decode > "$p12"
+          security create-keychain -p '' "$kc"
+          security unlock-keychain -p '' "$kc"
+          security set-keychain-settings -lut 7200 "$kc"
+          security import "$p12" -k "$kc" -P "$MACSIGN_P12_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          rm -f "$p12"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k '' "$kc" >/dev/null
+          security list-keychains -d user -s "$kc" "$HOME/Library/Keychains/login.keychain-db"
+          security find-identity -v -p codesigning "$kc" | grep -q "$SIGN_ID"
+          printf '%s' "$TAURI_KEY" > "$RUNNER_TEMP/uni.key"
+          echo "TAURI_SIGNING_PRIVATE_KEY=$RUNNER_TEMP/uni.key" >> "$GITHUB_ENV"
+      - name: Build and verify bundle
+        working-directory: uni-app
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
+        run: |
+          set -euo pipefail
+          pnpm tauri build --bundles app --config "{\"version\":\"$VERSION\",\"bundle\":{\"macOS\":{\"signingIdentity\":\"$SIGN_ID\"}}}"
+          app=target/release/bundle/macos/Uni.app
+          [[ $(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist") == "$VERSION" ]]
+          codesign --verify --deep --strict "$app"
+          codesign -dr - "$app" 2>&1 | grep -qi "$SIGN_ID"
+          mkdir -p mac-output
+          ditto -c -k --keepParent "$app" mac-output/Uni-mac-arm64.zip
+          cp target/release/bundle/macos/Uni.app.tar.gz{,.sig} mac-output/
+          test -s mac-output/Uni-mac-arm64.zip
+          test -s mac-output/Uni.app.tar.gz
+          test -s mac-output/Uni.app.tar.gz.sig
+          echo "Bundle version $VERSION, certificate $SIGN_ID verified"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: uni-mac-arm64
+          path: uni-app/mac-output/
+          if-no-files-found: error
+          retention-days: 2
+      - name: Remove ephemeral keychain and updater key
+        if: always()
+        shell: bash
+        run: |
+          security delete-keychain "$RUNNER_TEMP/uni-signing.keychain-db" 2>/dev/null || true
+          rm -f "$RUNNER_TEMP/uni.key" "$RUNNER_TEMP/uni-signing.p12"

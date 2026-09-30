@@ -19,7 +19,6 @@ cleanup_generated() {
 }
 trap cleanup_generated EXIT
 REPO_SLUG="unforcedagi/uni-app"
-MAC="uni@100.126.18.24"
 # Legacy bridge: 0.1.2-0.1.5 installs poll the tailnet; keep those pointers current.
 SERVE="$HOME/.local/share/uni/apk"
 LEGACY_BASE="https://uni-1.taildf9ce2.ts.net:8443"
@@ -28,8 +27,7 @@ git fetch --quiet origin main --tags
 SHA="$(git rev-parse HEAD)"
 git merge-base --is-ancestor "$SHA" origin/main || { echo 'HEAD is not on origin/main' >&2; exit 1; }
 if git tag --points-at "$SHA" | grep -q '^uni-v'; then echo "$SHA already released" >&2; exit 0; fi
-[[ $(git -C ../buzz rev-parse HEAD) == 5669fdc* ]] || { echo 'Buzz dependency moved: validate Mac sync before publishing' >&2; exit 1; }
-BUZZ_SHA="$(git -C ../buzz rev-parse HEAD)"
+[[ $(git -C ../buzz rev-parse HEAD) == 5669fdc* ]] || { echo 'Buzz dependency moved: update the pinned hosted build checkout before publishing' >&2; exit 1; }
 read -r VERSION CODE < <(python3 scripts/next-version.py)
 TAG="uni-v$VERSION"
 echo "Releasing $TAG (Android $CODE) from $SHA" >&2
@@ -42,12 +40,8 @@ cargo test --workspace
 cleanup_generated
 STAGE="$TMPDIR/uni-release-$VERSION"
 rm -rf "$STAGE"; mkdir -p "$STAGE"
-# The Mac's private signing key lives outside the repo; install from uni-1 each run.
-ssh "$MAC" 'mkdir -p ~/.config/uni/updater ~/.local/share/uni && chmod 700 ~/.config/uni/updater'
-scp -q "$HOME/.config/uni/updater/uni.key" "$MAC:.config/uni/updater/uni.key"
-scp -q scripts/build-mac.sh "$MAC:.local/share/uni/build-mac.sh"
-ssh "$MAC" 'chmod 600 ~/.config/uni/updater/uni.key'
-( ssh "$MAC" "bash ~/.local/share/uni/build-mac.sh '$SHA' '$BUZZ_SHA' '$VERSION'" >"$STAGE/mac.log" 2>&1 ) & MAC_PID=$!
+# Build Android locally while the GitHub-hosted Mac runner builds the exact main commit.
+( bash scripts/build-mac-hosted.sh "$SHA" "$VERSION" "$STAGE" >"$STAGE/mac.log" 2>&1 ) & MAC_PID=$!
 (
   source "$HOME/.config/uni/android.env"
   export PATH="$HOME/.cargo/bin:$PATH"
@@ -63,7 +57,7 @@ if (( MAC_RESULT || ANDROID_RESULT )); then
   tail -25 "$STAGE/android.log" >&2
   exit 1
 fi
-for f in Uni-mac-arm64.zip Uni.app.tar.gz Uni.app.tar.gz.sig; do scp -q "$MAC:.local/share/uni/mac-build/$f" "$STAGE/"; done
+for f in Uni-mac-arm64.zip Uni.app.tar.gz Uni.app.tar.gz.sig; do test -s "$STAGE/$f"; done
 cp "$(pwd)/src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk" "$STAGE/uni.apk"
 BADGING="$("$HOME/Android/Sdk/build-tools/35.0.0/aapt" dump badging "$STAGE/uni.apk" | head -1)"
 [[ $BADGING == *"versionCode='$CODE'"*"versionName='$VERSION'"* ]] || { echo "APK not stamped $VERSION/$CODE: $BADGING" >&2; exit 1; }
