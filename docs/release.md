@@ -14,7 +14,7 @@
 - Run by hand: `bash scripts/watch-main.sh`. Pause: `systemctl --user stop uni-updater.timer`.
 
 ## Devices
-- **Mac:** first install from the latest release's `Uni-mac-arm64.zip` (unzip, move to Applications, allow once in Privacy & Security; it is ad-hoc signed, not notarized). The app checks `https://github.com/unforcedagi/uni-app/releases/latest/download/latest.json` at launch and every 6 hours, downloads and verifies the signed update, and offers **Restart**.
+- **Mac:** first install from the latest release's `Uni-mac-arm64.zip` (unzip, move to Applications, allow once in Privacy & Security; it is signed with a stable self-signed certificate, not notarized). The app checks `https://github.com/unforcedagi/uni-app/releases/latest/download/latest.json` at launch and every 6 hours, downloads and verifies the signed update, and offers **Restart**.
 - **Daylight:** the app checks `.../releases/latest/download/android.json` and shows **Download APK** for newer versions (Android requires one confirmation per install), unless the ADB path above already installed it. The APK is debug-signed with uni-1's `~/.android/debug.keystore`; keep that key or updates stop installing over the existing app.
 - Builds 0.1.2-0.1.5 poll the tailnet (`https://uni-1.taildf9ce2.ts.net:8443`); `publish.sh` keeps those pointers current until those builds are gone.
 
