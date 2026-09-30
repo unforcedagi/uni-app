@@ -70,7 +70,7 @@ jobs:
           cache-dependency-path: uni-app/pnpm-lock.yaml
       - uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: '1.88.0'
+          toolchain: '1.89.0'
           targets: aarch64-apple-darwin
       - name: Install frontend dependencies
         working-directory: uni-app
