@@ -26,7 +26,7 @@ cleanup() {
 }
 trap cleanup EXIT
 base64 -w0 "$KEY_DIR/macsign.p12" | gh secret set MACSIGN_P12_BASE64 -R "$REPO" -e "$ENVIRONMENT"
-gh secret set MACSIGN_P12_PASSWORD -R "$REPO" -e "$ENVIRONMENT" < "$KEY_DIR/macsign.pass"
+tr -d '\r\n' < "$KEY_DIR/macsign.pass" | gh secret set MACSIGN_P12_PASSWORD -R "$REPO" -e "$ENVIRONMENT"
 gh secret set TAURI_SIGNING_PRIVATE_KEY -R "$REPO" -e "$ENVIRONMENT" < "$KEY_DIR/uni.key"
 started="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 gh workflow run mac-build.yml -R "$REPO" --ref main -f source_sha="$SHA" -f version="$VERSION"
