@@ -11,15 +11,12 @@ on:
         description: Release version (X.Y.Z)
         required: true
         type: string
-  # Temporary branch trigger enables testing before the workflow is on main.
-  push:
-    branches: [ci/hosted-mac-build]
 
 permissions:
   contents: read
 
 env:
-  BUZZ_SHA: 5669fdc
+  BUZZ_SHA: 5669fdcbc13aa85b0edede555478ae11b6771e0a
   SIGN_ID: E82AA2442F66F08F3772C9D6F7ADD877A1290125
 
 jobs:
@@ -43,13 +40,8 @@ jobs:
         run: |
           set -euo pipefail
           sha=$(git -C uni-app rev-parse HEAD)
-          if [[ "$GITHUB_EVENT_NAME" == push ]]; then
-            [[ "$GITHUB_REF" == refs/heads/ci/hosted-mac-build ]]
-            version=$(python3 -c 'import json; print(json.load(open("uni-app/package.json"))["version"])')
-          else
-            [[ "$INPUT_SHA" =~ ^[0-9a-f]{40}$ && "$INPUT_SHA" == "$sha" ]] || { echo 'source_sha must match workflow checkout'; exit 1; }
-            version=$INPUT_VERSION
-          fi
+          [[ "$INPUT_SHA" =~ ^[0-9a-f]{40}$ && "$INPUT_SHA" == "$sha" ]] || { echo 'source_sha must match workflow checkout'; exit 1; }
+          version=$INPUT_VERSION
           [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 1
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "Building $sha as $version"
@@ -59,7 +51,7 @@ jobs:
           set -euo pipefail
           git clone --quiet https://github.com/unforcedagi/buzz.git buzz
           git -C buzz checkout --quiet "$BUZZ_SHA"
-          [[ $(git -C buzz rev-parse --short=7 HEAD) == "$BUZZ_SHA" ]]
+          [[ $(git -C buzz rev-parse HEAD) == "$BUZZ_SHA" ]]
       - uses: pnpm/action-setup@v4
         with:
           version: '10'
