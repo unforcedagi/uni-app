@@ -260,6 +260,7 @@ pub async fn upload_media(
     } else {
         filename
     };
+    let bytes = sanitize_image_for_upload(bytes)?;
     let sha = sha256_hex(&bytes);
     crate::init_crypto();
     let auth = sign_blossom_upload(keys, relay_url, &sha)?;
@@ -333,6 +334,94 @@ pub async fn upload_media(
         alt: None,
         filename: Some(filename),
     })
+}
+
+/// PNG ancillary chunks that affect only rendering and that the relay accepts.
+/// Everything else ancillary (eXIf, iCCP, iTXt/tEXt/zTXt, pHYs, tIME, vendor
+/// chunks such as Apple's iDOT) is a metadata channel the relay rejects.
+const PNG_KEEP_ANCILLARY: [&[u8; 4]; 11] = [
+    b"cHRM", b"gAMA", b"sBIT", b"sRGB", b"bKGD", b"hIST", b"tRNS", b"sPLT", b"acTL", b"fcTL",
+    b"fdAT",
+];
+
+/// Remove metadata from PNG structurally: keep critical chunks and the
+/// rendering/animation chunks above, drop the rest and anything after IEND.
+/// Pixels (and APNG frames) are untouched, so this is lossless and cheap even
+/// for large screenshots. Returns None when the bytes aren't a well-formed PNG.
+fn strip_png_metadata(bytes: &[u8]) -> Option<Vec<u8>> {
+    const SIG: &[u8] = b"\x89PNG\r\n\x1a\n";
+    if !bytes.starts_with(SIG) {
+        return None;
+    }
+    let mut out = Vec::with_capacity(bytes.len());
+    out.extend_from_slice(SIG);
+    let mut i = SIG.len();
+    loop {
+        let header = bytes.get(i..i + 8)?;
+        let len = u32::from_be_bytes(header[..4].try_into().ok()?) as usize;
+        let kind: &[u8; 4] = header[4..8].try_into().ok()?;
+        let end = i.checked_add(12)?.checked_add(len)?;
+        if end > bytes.len() {
+            return None;
+        }
+        let ancillary = kind[0] & 0x20 != 0;
+        if !ancillary || PNG_KEEP_ANCILLARY.contains(&kind) {
+            out.extend_from_slice(&bytes[i..end]);
+        }
+        if kind == b"IEND" {
+            return Some(out);
+        }
+        i = end;
+    }
+}
+
+/// Make an image acceptable to Buzz's relay, which refuses any upload that
+/// carries metadata (EXIF location, camera/device details, colour profiles,
+/// XMP) rather than silently storing it. Mirrors Buzz desktop's
+/// `sanitize_image_for_upload`:
+/// - PNG (incl. macOS screenshots and APNG): lossless structural strip.
+/// - JPEG / WebP: decode, bake in EXIF orientation, re-encode clean.
+/// - Anything else (GIF, audio, video, files) passes through; the relay's
+///   own validator stays the authority.
+pub fn sanitize_image_for_upload(bytes: Vec<u8>) -> Result<Vec<u8>> {
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        return strip_png_metadata(&bytes)
+            .ok_or_else(|| Error::Media("image is not a valid PNG".into()));
+    }
+    let format = if bytes.starts_with(&[0xff, 0xd8, 0xff]) {
+        image::ImageFormat::Jpeg
+    } else if bytes.len() >= 12 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WEBP" {
+        // Animated WebP would be flattened by a re-encode; leave it to the relay.
+        if bytes.windows(4).any(|w| w == b"ANIM") {
+            return Ok(bytes);
+        }
+        image::ImageFormat::WebP
+    } else {
+        return Ok(bytes);
+    };
+    use image::ImageDecoder as _;
+    let bad = |what: &str| Error::Media(format!("could not {what} while removing image metadata"));
+    let mut decoder = image::ImageReader::with_format(std::io::Cursor::new(&bytes), format)
+        .into_decoder()
+        .map_err(|_| bad("decode the image"))?;
+    decoder
+        .set_limits(image::Limits::default())
+        .map_err(|_| bad("decode an image this large"))?;
+    let orientation = decoder.orientation().map_err(|_| bad("read orientation"))?;
+    let mut img =
+        image::DynamicImage::from_decoder(decoder).map_err(|_| bad("decode the image"))?;
+    img.apply_orientation(orientation);
+    let mut out = std::io::Cursor::new(Vec::new());
+    if format == image::ImageFormat::Jpeg {
+        let enc = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 92);
+        img.to_rgb8()
+            .write_with_encoder(enc)
+            .map_err(|_| bad("re-encode the image"))?;
+    } else {
+        img.write_to(&mut out, format)
+            .map_err(|_| bad("re-encode the image"))?;
+    }
+    Ok(out.into_inner())
 }
 
 /// Lowercase hex SHA-256.
@@ -555,6 +644,87 @@ mod tests {
             parse_imeta(many.iter().map(Vec::as_slice)).len(),
             MAX_IMETA_PER_MESSAGE
         );
+    }
+
+    fn png_chunk(kind: &[u8; 4], payload: &[u8]) -> Vec<u8> {
+        let mut c = (payload.len() as u32).to_be_bytes().to_vec();
+        c.extend_from_slice(kind);
+        c.extend_from_slice(payload);
+        c.extend_from_slice(&[0; 4]); // CRC unchecked by the stripper
+        c
+    }
+
+    fn chunk_kinds(png: &[u8]) -> Vec<[u8; 4]> {
+        let mut out = vec![];
+        let mut i = 8;
+        while i + 12 <= png.len() {
+            let len = u32::from_be_bytes(png[i..i + 4].try_into().unwrap()) as usize;
+            out.push(png[i + 4..i + 8].try_into().unwrap());
+            i += 12 + len;
+        }
+        out
+    }
+
+    #[test]
+    fn mac_screenshot_png_metadata_is_stripped_losslessly() {
+        let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+        png.extend(png_chunk(b"IHDR", &[0, 0, 0, 1, 0, 0, 0, 1, 8, 2, 0, 0, 0]));
+        png.extend(png_chunk(b"sRGB", &[0]));
+        png.extend(png_chunk(b"iCCP", b"Display P3\0\0xx"));
+        png.extend(png_chunk(b"eXIf", b"MM\0*"));
+        png.extend(png_chunk(b"pHYs", &[0; 9]));
+        png.extend(png_chunk(b"iTXt", b"XML:com.adobe.xmp\0\0\0\0\0<x/>"));
+        png.extend(png_chunk(b"iDOT", &[0; 28]));
+        png.extend(png_chunk(b"IDAT", b"pixels"));
+        png.extend(png_chunk(b"tIME", &[0; 7]));
+        png.extend(png_chunk(b"IEND", b""));
+        png.extend_from_slice(b"trailing junk");
+        let out = sanitize_image_for_upload(png).unwrap();
+        assert_eq!(
+            chunk_kinds(&out),
+            vec![*b"IHDR", *b"sRGB", *b"IDAT", *b"IEND"]
+        );
+        assert!(
+            out.windows(6).any(|w| w == b"pixels"),
+            "pixel data preserved"
+        );
+        assert!(
+            out.ends_with(&png_chunk(b"IEND", b"")),
+            "nothing after IEND"
+        );
+    }
+
+    #[test]
+    fn malformed_png_is_refused_and_non_images_pass_through() {
+        let mut truncated = b"\x89PNG\r\n\x1a\n".to_vec();
+        truncated.extend(png_chunk(b"IHDR", &[0; 13]));
+        truncated.truncate(truncated.len() - 3);
+        assert!(sanitize_image_for_upload(truncated).is_err());
+        let webm = vec![0x1a, 0x45, 0xdf, 0xa3, 1, 2, 3];
+        assert_eq!(sanitize_image_for_upload(webm.clone()).unwrap(), webm);
+        let pdf = b"%PDF-1.7 hello".to_vec();
+        assert_eq!(sanitize_image_for_upload(pdf.clone()).unwrap(), pdf);
+    }
+
+    #[test]
+    fn jpeg_is_reencoded_without_exif() {
+        let img = image::RgbImage::from_pixel(3, 2, image::Rgb([200, 10, 10]));
+        let mut clean = std::io::Cursor::new(Vec::new());
+        img.write_to(&mut clean, image::ImageFormat::Jpeg).unwrap();
+        let clean = clean.into_inner();
+        // Splice an APP1/Exif segment (with a fake GPS marker) after SOI.
+        let exif = b"Exif\0\0MM\0*GPSLatitude";
+        let mut dirty = clean[..2].to_vec();
+        dirty.extend_from_slice(&[0xff, 0xe1]);
+        dirty.extend_from_slice(&((exif.len() + 2) as u16).to_be_bytes());
+        dirty.extend_from_slice(exif);
+        dirty.extend_from_slice(&clean[2..]);
+        let out = sanitize_image_for_upload(dirty).unwrap();
+        assert!(out.starts_with(&[0xff, 0xd8, 0xff]));
+        assert!(!out.windows(4).any(|w| w == b"Exif"));
+        assert!(!out.windows(11).any(|w| w == b"GPSLatitude"));
+        let decoded = image::load_from_memory(&out).unwrap();
+        assert_eq!((decoded.width(), decoded.height()), (3, 2));
     }
 
     #[test]

@@ -19,16 +19,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cache = tempfile::tempdir()?;
     for path in &args[2..] {
         let bytes = std::fs::read(path)?;
-        let name = Path::new(path).file_name().unwrap().to_string_lossy().to_string();
+        let name = Path::new(path)
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
         let media = uni_core::media::upload_media(relay, &keys, bytes.clone(), "", &name).await?;
-        let back = uni_core::media::fetch_media(relay, &keys, &media.url, media.sha256.as_deref(), cache.path()).await?;
+        let back = uni_core::media::fetch_media(
+            relay,
+            &keys,
+            &media.url,
+            media.sha256.as_deref(),
+            cache.path(),
+        )
+        .await?;
+        // Images are metadata-stripped before upload, so compare against the
+        // sanitized bytes (identical to the input for audio/files).
+        let expected = uni_core::media::sanitize_image_for_upload(bytes.clone())?;
         println!(
-            "{name}: url={} mime={:?} size={:?} dim={:?} roundtrip={}",
+            "{name}: url={} mime={:?} size={:?} dim={:?} stripped={}B roundtrip={}",
             media.url,
             media.mime,
             media.size,
             media.dim,
-            if back == bytes { "ok" } else { "MISMATCH" }
+            bytes.len() as i64 - expected.len() as i64,
+            if back == expected { "ok" } else { "MISMATCH" }
         );
     }
     Ok(())

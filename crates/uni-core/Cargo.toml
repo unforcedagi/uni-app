@@ -26,6 +26,9 @@ rustls = { workspace = true }
 # TLS: our own rustls config (ring + Mozilla roots), so no platform verifier / aws-lc.
 reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "json"] }
 webpki-roots = "1"
+# Re-encode images before upload so camera/screenshot metadata (EXIF, ICC,
+# XMP, pHYs) never reaches the relay, which rejects any metadata channel.
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
 
 [dev-dependencies]
 tempfile = "3"
