@@ -17,7 +17,7 @@ function when(iso: string) {
   return isNaN(d.getTime()) ? iso : d.toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
-export default function Journal({ rooms, uniRoomId, onShare, onBack }: { rooms: Room[]; uniRoomId: string | null; onShare: ShareFn; onBack: () => void }) {
+export default function Journal({ rooms, uniRoomId, onShare, onBack, onRecordingChange }: { rooms: Room[]; uniRoomId: string | null; onShare: ShareFn; onBack: () => void; onRecordingChange?: (recording: boolean, elapsed: number, stop: () => void) => void }) {
   const [cfg, setCfg] = useState<VaultConfig | null>(null);
   const [entries, setEntries] = useState<JournalNote[]>([]);
   const [queued, setQueued] = useState<QueuedEntry[]>([]);
@@ -132,7 +132,13 @@ export default function Journal({ rooms, uniRoomId, onShare, onBack }: { rooms: 
       if (!r.error) setStatus("Voice entry saved · transcribing on uni-1…");
     } catch (e) { setError(String(e)); setStatus("Voice entry not saved"); }
     finally { setSaving(false); }
-  });
+  }, "in the Journal");
+  const reportRecording = useRef(onRecordingChange);
+  reportRecording.current = onRecordingChange;
+  useEffect(() => {
+    reportRecording.current?.(recorder.recording, recorder.elapsed, recorder.stop);
+  }, [recorder.recording, recorder.elapsed]);
+  useEffect(() => () => reportRecording.current?.(false, 0, () => {}), []);
 
   async function toggleMic() {
     setError(null);

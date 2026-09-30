@@ -19,6 +19,7 @@ import Journal from "./Journal";
 import { mmss, newDraft, shareText, type JournalNote } from "./journalCore";
 import { useRecorder, voiceFileName } from "./recorder";
 import { UpdateSettings } from "./UpdateNotice";
+import { activeTab, closeTab, EMPTY_TABS, focusTab, nextAfterClose, openTab, restoreTabs, serializeTabs, tabForDigit, updateTab, TABS_KEY, type Tabs, type Tab, type TabTarget, type OpenMode } from "./tabs";
 import { notifyMention, setUnreadBadge } from "./desktopNotify";
 import NoteView from "./NoteView";
 import { NoteOpener } from "./noteLinks";
@@ -72,6 +73,18 @@ type Picker = { start: number; query: string; index: number };
 
 function Conversations({ onForget }: { onForget: () => void }) {
   const [rooms, setRooms] = useState<Room[]>([]);
+  const [tabs, setTabs] = useState<Tabs>(EMPTY_TABS);
+  const tabsRef = useRef<Tabs>(EMPTY_TABS);
+  const tabsReady = useRef(false);
+  // Each tab owns its own note Back stack, even while another tab is active.
+  const noteStacks = useRef(new Map<string, VaultRef[]>());
+  const notesRef = useRef<VaultRef[]>([]);
+  const [sidebarVisible, setSidebarVisible] = useState(true);
+  const pickNewTab = useRef(false);
+  const longPress = useRef<number | null>(null);
+  const longPressed = useRef(false);
+  const [journalRecording, setJournalRecording] = useState<{ elapsed: number; stop: () => void } | null>(null);
+  const journalRecordingRef = useRef(false);
   const [channel, setChannel] = useState<string | null>(null);
   const [root, setRoot] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -133,23 +146,108 @@ function Conversations({ onForget }: { onForget: () => void }) {
   // Vault notes opened from message links; the top of the stack is shown over
   // whatever was open (room, thread or Journal) and Back pops it.
   const [notes, setNotes] = useState<VaultRef[]>([]);
+  notesRef.current = notes;
   const [hub, setHub] = useState<string | null>(null);
   useEffect(() => { invoke<{ hub: string }>("journal_config").then((c) => setHub(c.hub)).catch(() => {}); }, []);
+
+  function commitTabs(next: Tabs) {
+    tabsRef.current = next;
+    setTabs(next);
+    if (tabsReady.current) { try { localStorage.setItem(TABS_KEY, serializeTabs(next)); } catch { /* private storage */ } }
+  }
+  function switchToTab(tab: Tab | null) {
+    const leaving = tabsRef.current.active;
+    if (leaving) noteStacks.current.set(leaving, notesRef.current);
+    // navigate restores scoped draft, attachments, scroll and bindings.
+    navigate(tab?.channel ?? null, tab?.root ?? null);
+    setJournalOpen(tab?.kind === "journal");
+    const stack = tab ? noteStacks.current.get(tab.id) ?? (tab.kind === "note" && tab.note ? [tab.note] : []) : [];
+    notesRef.current = stack;
+    setNotes(stack);
+    setSidebarVisible(false);
+  }
+  function focusTabById(id: string) {
+    const next = tabsRef.current.tabs.find((t) => t.id === id);
+    if (!next) return;
+    if (id !== tabsRef.current.active) switchToTab(next);
+    commitTabs(focusTab(tabsRef.current, id));
+    setSidebarVisible(false);
+  }
+  function openTarget(target: TabTarget, mode: OpenMode = "focus") {
+    // A recording's origin tab must survive the 12-tab eviction cap.
+    const originId = recordingOrigin.current?.tabId;
+    const base = originId && tabsRef.current.tabs.some((t) => t.id === originId)
+      ? { ...tabsRef.current, recent: [...tabsRef.current.recent.filter((id) => id !== originId), originId] }
+      : tabsRef.current;
+    const effectiveMode = mode === "focus" && originId === tabsRef.current.active ? "new" : mode;
+    const next = openTab(base, target, effectiveMode, () => crypto.randomUUID());
+    const tab = activeTab(next);
+    if (tab && (next.active !== tabsRef.current.active || mode === "replace")) switchToTab(tab);
+    commitTabs(next);
+    setSidebarVisible(false);
+  }
+  function closeTabById(id: string) {
+    if (recordingOrigin.current?.tabId === id && recorder.recording) {
+      setError("Stop the voice recording before closing its tab."); return;
+    }
+    if (journalRecordingRef.current && tabsRef.current.tabs.find((t) => t.id === id)?.kind === "journal") {
+      setError("Stop the Journal recording before closing its tab."); return;
+    }
+    const wasActive = tabsRef.current.active === id;
+    const next = closeTab(tabsRef.current, id);
+    if (next === tabsRef.current) return;
+    if (wasActive) switchToTab(activeTab(next));
+    noteStacks.current.delete(id);
+    commitTabs(next);
+    if (!next.tabs.length) setSidebarVisible(true);
+  }
+  function roomTarget(id: string): TabTarget {
+    return { kind: "room", channel: id, title: roomsRef.current.find((r) => r.id === id)?.name ?? "Room" };
+  }
+  const openTargetRef = useRef(openTarget);
+  const closeTabRef = useRef(closeTabById);
+  const switchToTabRef = useRef(switchToTab);
+  openTargetRef.current = openTarget;
+  closeTabRef.current = closeTabById;
+  switchToTabRef.current = switchToTab;
   const openNote = useCallback((ref: VaultRef, href: string | null) => {
     // A note on some other hub isn't readable with this key: let the browser
     // (and that hub's Parachute app) handle it.
     if (!sameHub(ref, hub)) { if (href) void invoke("open_link", { url: href }).catch(() => {}); return; }
-    setNotes((s) => {
-      const top = s[s.length - 1];
-      if (top && top.vault === ref.vault && top.ref === ref.ref) return s;
-      return [...s.slice(-19), { hub: null, vault: ref.vault, ref: ref.ref }];
-    });
+    const target = { hub: null, vault: ref.vault, ref: ref.ref };
+    const current = activeTab(tabsRef.current);
+    if (current?.kind === "note") {
+      const top = notesRef.current[notesRef.current.length - 1];
+      if (top?.vault === target.vault && top.ref === target.ref) return;
+      const stack = [...notesRef.current.slice(-19), target];
+      notesRef.current = stack;
+      noteStacks.current.set(current.id, stack);
+      setNotes(stack);
+    } else {
+      openTargetRef.current({ kind: "note", note: target, title: ref.ref.split("/").pop() || ref.ref }, "new");
+    }
   }, [hub]);
-  const closeNote = useCallback(() => setNotes((s) => s.slice(0, -1)), []);
+  const closeNote = useCallback(() => {
+    const s = notesRef.current;
+    if (s.length <= 1 && activeTab(tabsRef.current)?.kind === "note") {
+      closeTabRef.current(tabsRef.current.active!); return;
+    }
+    const stack = s.slice(0, -1);
+    notesRef.current = stack;
+    if (tabsRef.current.active) noteStacks.current.set(tabsRef.current.active, stack);
+    setNotes(stack);
+  }, []);
   // Loaded note titles, so a nested note's Back reads "← <previous note>".
   const [noteTitles, setNoteTitles] = useState<Record<string, string>>({});
   const noteKey = (r: VaultRef) => `${r.vault}:${r.ref}`;
-  const rememberTitle = useCallback((key: string, t: string) => setNoteTitles((m) => m[key] === t ? m : { ...m, [key]: t }), []);
+  const rememberTitle = useCallback((key: string, t: string) => {
+    setNoteTitles((m) => m[key] === t ? m : { ...m, [key]: t });
+    const current = activeTab(tabsRef.current);
+    if (current?.kind === "note" && notesRef.current.length && noteKey(notesRef.current[notesRef.current.length - 1]) === key) {
+      const next = updateTab(tabsRef.current, current.id, { title: t });
+      if (next !== tabsRef.current) commitTabs(next);
+    }
+  }, []);
   // "Copied" confirmation.
   const [toast, setToast] = useState<string | null>(null);
   useEffect(() => {
@@ -191,7 +289,25 @@ function Conversations({ onForget }: { onForget: () => void }) {
     setRooms(rows);
     roomsRef.current = rows;
     setUnreadBadge(rows.reduce((n, r) => n + (r.unread || 0), 0));
-    setChannel((current) => current && rows.some((r) => r.id === current) ? current : rows[0]?.id ?? null);
+    if (!tabsReady.current) {
+      tabsReady.current = true;
+      let saved: string | null = null;
+      try { saved = localStorage.getItem(TABS_KEY); } catch { /* private storage */ }
+      let next = restoreTabs(saved, rows.map((r) => r.id));
+      if (!saved && !next.tabs.length && rows[0]) next = openTab(next, { kind: "room", channel: rows[0].id, title: rows[0].name }, "new", () => crypto.randomUUID());
+      // Note stacks are reconstructed from their saved top-level tab target.
+      switchToTabRef.current(activeTab(next));
+      commitTabs(next);
+    } else {
+      // Re-sync after room membership changes: discard tabs for missing rooms.
+      const previous = tabsRef.current;
+      const next = restoreTabs(serializeTabs(previous), rows.map((r) => r.id));
+      if (next.tabs.length !== previous.tabs.length) {
+        if (next.active !== previous.active) switchToTabRef.current(activeTab(next));
+        for (const old of previous.tabs) if (!next.tabs.some((t) => t.id === old.id)) noteStacks.current.delete(old.id);
+        commitTabs(next);
+      }
+    }
     setReady(true);
   }, []);
 
@@ -384,7 +500,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   function openHit(t: { channel: string; root: string | null; focus: string }) {
     setSearchOpen(false);
     focusTries.current = 0;
-    navigate(t.channel, t.root);
+    openTarget(t.root ? { kind: "thread", channel: t.channel, root: t.root, title: `Thread · ${roomsRef.current.find((r) => r.id === t.channel)?.name ?? "Room"}` } : roomTarget(t.channel), "focus");
     setFocusRef(t.focus);
   }
 
@@ -462,10 +578,12 @@ function Conversations({ onForget }: { onForget: () => void }) {
         await loadRooms();
       } else {
         const text = handoffText("ask", m, roomName, label, " ");
-        navigate(uniRoom.id, null);
-        // Replace navigate's restored draft: question goes after "@Uni ".
+        openTarget(roomTarget(uniRoom.id), "focus");
+        // Replace the restored draft: question goes after "@Uni ".
         const prefix = `@${label} `;
-        setDraft(prefix + "\n\n" + text.slice(text.indexOf("\n\n") + 2));
+        const question = prefix + "\n\n" + text.slice(text.indexOf("\n\n") + 2);
+        setDraft(question);
+        drafts.current.set(keyFor(uniRoom.id, null), question);
         setBindings(new Map([[label, uni.pubkey]]));
         focusComposer.current = true;
         setTimeout(() => { input.current?.focus(); input.current?.setSelectionRange(prefix.length, prefix.length); }, 50);
@@ -577,8 +695,12 @@ function Conversations({ onForget }: { onForget: () => void }) {
   }
   // Voice message: record, upload the audio like any attachment, and put the
   // uni-1 transcript into the draft so it becomes the message text.
+  // The recording belongs to its starting scope, even when another tab is
+  // visible by the time MediaRecorder fires onstop / transcription finishes.
+  const recordingOrigin = useRef<{ key: string; tabId: string; title: string } | null>(null);
   const recorder = useRecorder((blob, mime) => {
-    const key = scope();
+    const key = recordingOrigin.current?.key;
+    recordingOrigin.current = null;
     if (!key || !blob.size) return;
     const file = new File([blob], voiceFileName(mime), { type: mime.split(";")[0] });
     if (file.size > MAX_FILE_BYTES) { setError("Recording exceeds 25 MB."); return; }
@@ -600,11 +722,18 @@ function Conversations({ onForget }: { onForget: () => void }) {
         setStatus(`No transcript (${String(e).slice(0, 120)}). The voice message still sends.`);
       }
     })();
-  });
+  }, `for #${rooms.find((r) => r.id === channel)?.name ?? "room"}`);
   async function toggleRecording() {
-    if (recorder.recording) { recorder.stop(); return; }
+    if (recorder.recording) {
+      if (recordingOrigin.current?.key !== scope()) { setError(`Already recording for ${recordingOrigin.current?.title ?? "another tab"}. Stop from the recording pill first.`); return; }
+      recorder.stop(); return;
+    }
+    const key = scope(), tab = activeTab(tabsRef.current);
+    if (!key || !tab) return;
     setError(null);
-    try { await recorder.start(); } catch (e) { setError(`Microphone unavailable: ${String(e)}`); }
+    recordingOrigin.current = { key, tabId: tab.id, title: tab.title };
+    try { await recorder.start(); }
+    catch (e) { recordingOrigin.current = null; setError(`Microphone unavailable: ${String(e)}`); }
   }
   function onPasteFiles(e: React.ClipboardEvent) {
     const files = Array.from(e.clipboardData.files);
@@ -712,7 +841,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
 
   function openThread(m: Message) {
     focusComposer.current = true;
-    navigate(channel, m.root && messages.some((x) => x.ref === m.root) ? m.root : m.ref);
+    const threadRoot = m.root && messages.some((x) => x.ref === m.root) ? m.root : m.ref;
+    openTarget({ kind: "thread", channel: m.channel, root: threadRoot, title: `Thread · ${roomsRef.current.find((r) => r.id === m.channel)?.name ?? "Room"}` }, "new");
   }
 
   async function send() {
@@ -880,8 +1010,9 @@ function Conversations({ onForget }: { onForget: () => void }) {
   [messages, identity, reactFor, kept, answered, root, older, roomName, editing, focusRef, relayOrigin]);
 
   const topNote = notes[notes.length - 1];
-  // A note opened from a chat says where Back goes: "← Uni", "← Thread", "← Journal".
-  const backTo = journalOpen ? "Journal" : currentRoom ? (isThread ? `Thread in ${currentRoom.name}` : currentRoom.name) : searchOpen ? "Search" : "Conversations";
+  // A top-level note Back closes its tab and returns to the last used tab.
+  const backTo = activeTab(tabs)?.kind === "note" && tabs.active ? nextAfterClose(tabs, tabs.active)?.title ?? "Conversations"
+    : journalOpen ? "Journal" : currentRoom ? (isThread ? `Thread in ${currentRoom.name}` : currentRoom.name) : searchOpen ? "Search" : "Conversations";
 
   // Android back gesture/button: step back through the app (note stack,
   // search, thread, Journal, room) before leaving it. The listener is only
@@ -891,11 +1022,36 @@ function Conversations({ onForget }: { onForget: () => void }) {
   goBack.current = () => {
     if (notes.length) { closeNote(); return; }
     if (searchOpen) { setSearchOpen(false); return; }
-    if (journalOpen) { setJournalOpen(false); return; }
-    if (root) { navigate(channel, null); return; }
-    if (channel) navigate(null, null);
+    if (root && channel) { openTarget(roomTarget(channel), "focus"); return; }
+    // On narrow screens the sidebar is a view, not a tab close.
+    setSidebarVisible(true);
   };
-  const canGoBack = notes.length > 0 || searchOpen || journalOpen || !!channel;
+  const canGoBack = notes.length > 0 || searchOpen || !sidebarVisible;
+  // Desktop tab shortcuts. On macOS the native menu owns Cmd+W; it emits
+  // uni://close-tab from Rust, so the WebView never closes the window.
+  const closeActiveRef = useRef(() => {});
+  const focusTabRef = useRef((_id: string) => {});
+  const lastClose = useRef(0);
+  closeActiveRef.current = () => {
+    // A native menu event and a WebView keydown can both report one Cmd+W.
+    if (Date.now() - lastClose.current < 120) return;
+    lastClose.current = Date.now();
+    if (tabsRef.current.active) closeTabById(tabsRef.current.active);
+  };
+  focusTabRef.current = focusTabById;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return;
+      if (e.key.toLowerCase() === "w") { e.preventDefault(); closeActiveRef.current(); }
+      else if (/^[1-9]$/.test(e.key)) {
+        const t = tabForDigit(tabsRef.current, Number(e.key));
+        if (t) { e.preventDefault(); focusTabRef.current(t.id); }
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    const un = listen("uni://close-tab", () => closeActiveRef.current());
+    return () => { window.removeEventListener("keydown", onKey); void un.then((off) => off()); };
+  }, []);
   useEffect(() => {
     if (!canGoBack) return;
     let off: (() => void) | null = null, dead = false;
@@ -904,7 +1060,31 @@ function Conversations({ onForget }: { onForget: () => void }) {
       .catch(() => { /* desktop / browser: no back button */ });
     return () => { dead = true; off?.(); };
   }, [canGoBack]);
-  return <NoteOpener.Provider value={openNote}><main className={`shell ${channel || journalOpen ? "in-room" : ""} ${topNote ? "note-open" : ""}`}>
+  const active = activeTab(tabs);
+  function startLongPress(target: TabTarget) {
+    longPressed.current = false;
+    if (longPress.current) window.clearTimeout(longPress.current);
+    longPress.current = window.setTimeout(() => {
+      longPressed.current = true;
+      pickNewTab.current = false;
+      openTarget(target, "new");
+    }, 500);
+  }
+  function endLongPress() {
+    if (longPress.current) window.clearTimeout(longPress.current);
+    longPress.current = null;
+  }
+  function sidebarClick(target: TabTarget, e: React.MouseEvent) {
+    if (longPressed.current) { longPressed.current = false; return; }
+    const asNew = pickNewTab.current || e.metaKey || e.ctrlKey;
+    pickNewTab.current = false;
+    openTarget(target, asNew ? "new" : "focus");
+  }
+  const journalTab = tabs.tabs.find((t) => t.kind === "journal");
+  const recordingTab = recordingOrigin.current;
+  const pill = recorder.recording && recordingTab ? { title: recordingTab.title, elapsed: recorder.elapsed, tabId: recordingTab.tabId, stop: recorder.stop } :
+    journalRecording && journalTab ? { title: "Journal", elapsed: journalRecording.elapsed, tabId: journalTab.id, stop: journalRecording.stop } : null;
+  return <NoteOpener.Provider value={openNote}><main className={`shell ${(!sidebarVisible && (channel || journalOpen || active?.kind === "note")) ? "in-room" : ""} ${topNote ? "note-open" : ""}`}>
     <aside className="rooms" aria-label="Conversations">
       <header className="rooms-header"><div><span className="eyebrow">Unforced</span><h1>Uni</h1></div><div><button className="icon-button" onClick={() => setSearchOpen(true)} aria-label="Search messages and notes">⌕</button><button className="icon-button" onClick={() => void refresh()} disabled={busy} aria-label="Refresh conversations">↻</button><button className="icon-button" onClick={() => { setSettingsOpen(!settingsOpen); setForgetArmed(false); }} aria-label="Settings" aria-expanded={settingsOpen}>⚙</button></div></header>
       {settingsOpen && <div className="settings"><UpdateSettings /><button className="pairing-secondary" onClick={() => void forget()}>{forgetArmed ? "Tap again to forget — you'll need to re-pair" : "Forget this device key"}</button>{forgetArmed && <button className="pairing-secondary" onClick={() => setForgetArmed(false)}>Keep key</button>}</div>}
@@ -915,21 +1095,35 @@ function Conversations({ onForget }: { onForget: () => void }) {
       {identity && <p className="identity" title={npub ?? identity}>{myName ? <>Signed in as <strong>{myName}</strong></> : <>Public key <code>{npub ? `${npub.slice(0, 14)}…${npub.slice(-6)}` : `${identity.slice(0, 12)}…`}</code></>}<button className="identity-copy" onClick={() => void copyText(npub ?? identity, "Copied public key")} aria-label="Copy your public key">⧉</button></p>}
       {!ready && <p className="empty">Loading…</p>}
       {ready && rooms.length === 0 && <p className="empty">No joined conversations cached. Refresh to connect with your personal Buzz key.</p>}
-      <button className={`room journal-room ${journalOpen ? "selected" : ""}`} onClick={() => { navigate(null, null); setJournalOpen(true); }} aria-current={journalOpen ? "page" : undefined}>
+      <button className={`room journal-room ${journalOpen ? "selected" : ""}`} onClick={(e) => sidebarClick({ kind: "journal", title: "Journal" }, e)}
+        onPointerDown={(e) => { if (e.pointerType === "touch") startLongPress({ kind: "journal", title: "Journal" }); }} onPointerUp={endLongPress} onPointerCancel={endLongPress} onPointerLeave={endLongPress}
+        aria-current={journalOpen ? "page" : undefined}>
         <span className="avatar">❋</span><span className="room-text"><strong>Journal</strong><small>Speak or write · private to your vault</small></span>
       </button>
-      <nav>{rooms.map((room) => <button key={room.id} className={`room ${channel === room.id ? "selected" : ""}`} onClick={() => navigate(room.id, null)} aria-current={channel === room.id ? "page" : undefined}>
+      <nav>{rooms.map((room) => <button key={room.id} className={`room ${channel === room.id ? "selected" : ""}`} onClick={(e) => sidebarClick(roomTarget(room.id), e)}
+        onPointerDown={(e) => { if (e.pointerType === "touch") startLongPress(roomTarget(room.id)); }} onPointerUp={endLongPress} onPointerCancel={endLongPress} onPointerLeave={endLongPress}
+        aria-current={channel === room.id ? "page" : undefined}>
         <span className="avatar">{room.name[0]?.toUpperCase() ?? "#"}</span><span className="room-text"><strong className={room.unread ? "unread" : ""}>{room.name}</strong><small>{room.last_message ? markdownToText(room.last_message) : "No messages yet"}</small></span>
         <span className="room-side"><time>{room.last_ts ? time(room.last_ts) : ""}</time>{room.unread > 0 && <span className={`unread-badge ${room.mentions ? "mention" : ""}`} aria-label={`${room.unread} unread${room.mentions ? ", mentions you" : ""}`}>{room.mentions ? "@ " : ""}{room.unread > 99 ? "99+" : room.unread}</span>}</span>
       </button>)}</nav>
       </div>
     </aside>
-    <section className="conversation" aria-label={journalOpen ? "Journal" : currentRoom ? `Conversation: ${currentRoom.name}` : "Conversation"} aria-hidden={topNote ? true : undefined}>
-      {journalOpen ? <Journal rooms={rooms} uniRoomId={findUniRoom(rooms)?.id ?? null} onShare={shareEntry} onBack={() => setJournalOpen(false)} />
+    <section className="conversation" aria-label={journalOpen ? "Journal" : currentRoom ? `Conversation: ${currentRoom.name}` : active?.kind === "note" ? "Note" : "Conversation"}>
+      <div className="tab-strip" role="tablist" aria-label="Open tabs">
+        <div className="tab-scroller">{tabs.tabs.map((t) => <div key={t.id} className={`tab-chip ${t.id === tabs.active ? "active" : ""}`} role="presentation"
+          onPointerDown={(e) => { if (e.pointerType === "touch") { longPressed.current = false; longPress.current = window.setTimeout(() => { longPressed.current = true; closeTabById(t.id); }, 600); } }}
+          onPointerUp={endLongPress} onPointerCancel={endLongPress} onPointerLeave={endLongPress}>
+          <button className="tab-title" role="tab" aria-selected={t.id === tabs.active} onClick={() => { if (longPressed.current) { longPressed.current = false; return; } focusTabById(t.id); }} title={t.title}>{t.kind === "journal" ? "❋" : t.kind === "note" ? "▤" : t.kind === "thread" ? "↳" : "#"} {t.title}</button>
+          <button className="tab-close" onClick={() => closeTabById(t.id)} aria-label={`Close ${t.title}`}>×</button>
+        </div>)}</div>
+        <button className="tab-add" onClick={() => { pickNewTab.current = true; setSearchOpen(false); setSidebarVisible(true); document.querySelector<HTMLButtonElement>(".rooms nav .room")?.focus(); }} aria-label="New tab — pick a room" title="New tab — pick a room">+</button>
+      </div>
+      {journalTab && <div className="journal-tab-content" hidden={!journalOpen}><Journal rooms={rooms} uniRoomId={findUniRoom(rooms)?.id ?? null} onShare={shareEntry} onBack={() => setSidebarVisible(true)} onRecordingChange={(on, elapsed, stop) => { journalRecordingRef.current = on; setJournalRecording(on ? { elapsed, stop } : null); }} /></div>}
+      {journalOpen ? null
       : currentRoom ? <>
         <header className="conversation-header">
-          <button className="back icon-button" onClick={() => isThread ? navigate(channel, null) : navigate(null, null)} aria-label={isThread ? "Back to room" : "Back to conversations"}>‹</button>
-          {isThread && <button className="thread-back" onClick={() => navigate(channel, null)} aria-label="Close thread">‹ {currentRoom.name}</button>}
+          <button className="back icon-button" onClick={() => isThread && channel ? openTarget(roomTarget(channel), "focus") : setSidebarVisible(true)} aria-label={isThread ? "Back to room" : "Back to conversations"}>‹</button>
+          {isThread && <button className="thread-back" onClick={() => channel && openTarget(roomTarget(channel), "focus")} aria-label="Back to room">‹ {currentRoom.name}</button>}
           <div><strong>{isThread ? "Thread" : currentRoom.name}</strong><small>{isThread ? `${threadReplies.length} ${threadReplies.length === 1 ? "reply" : "replies"} · in ${currentRoom.name}` : `Buzz conversation · ${members.length ? `${members.length} members` : "cached locally"}`}</small></div>
           <button className="icon-button" onClick={() => void refresh()} disabled={busy} aria-label="Refresh messages">↻</button>
         </header>
@@ -962,14 +1156,21 @@ function Conversations({ onForget }: { onForget: () => void }) {
               <button className="compose-file-remove" disabled={sending} onClick={() => removeFile(keyFor(currentRoom.id, root), item.id)} aria-label={`Remove ${item.file.name}`}>×</button>
             </div>)}
           </div>}
-          <div className="compose-row"><button className="address-toggle" onPointerDown={(e) => e.preventDefault()} onMouseDown={(e) => e.preventDefault()} onClick={startMention} aria-label="Mention someone">@</button><button className="address-toggle" onClick={() => fileInput.current?.click()} disabled={sending} aria-label="Attach files" title="Attach files">📎</button><button className={`address-toggle mic ${recorder.recording ? "recording" : ""}`} onClick={() => void toggleRecording()} disabled={sending} aria-pressed={recorder.recording} aria-label={recorder.recording ? "Stop recording voice message" : "Record a voice message"} title={recorder.recording ? "Stop recording" : "Voice message"}>{recorder.recording ? `■ ${mmss(recorder.elapsed)}` : "🎙"}</button><textarea ref={input} aria-label={`Message ${currentRoom.name}`} value={draft} onChange={(e) => updateDraft(e.target.value, e.target.selectionStart)} onPaste={onPasteFiles} onSelect={(e) => syncPicker(e.currentTarget.value, e.currentTarget.selectionStart)} onBlur={() => setPicker(null)} onKeyDown={onKeyDown} maxLength={65536} rows={2} placeholder={isThread ? "Reply in thread…" : "Message Uni…"} /><button className="send" disabled={(!draft.trim() && !pending.some((f) => f.state === "ready")) || pending.some((f) => f.voice === "transcribing" || (f.state !== "ready" && !(f.voice && f.state === "error"))) || sending || recorder.recording} onClick={() => void send()} aria-label={pending.some((f) => f.voice && f.state === "error") ? "Send transcript without failed audio" : "Send message"}>{sending ? "Sending…" : pending.some((f) => f.voice && f.state === "error") ? "Send transcript" : "Send"}</button></div>
+          <div className="compose-row"><button className="address-toggle" onPointerDown={(e) => e.preventDefault()} onMouseDown={(e) => e.preventDefault()} onClick={startMention} aria-label="Mention someone">@</button><button className="address-toggle" onClick={() => fileInput.current?.click()} disabled={sending} aria-label="Attach files" title="Attach files">📎</button><button className={`address-toggle mic ${recorder.recording && recordingOrigin.current?.key === scope() ? "recording" : ""}`} onClick={() => void toggleRecording()} disabled={sending} aria-pressed={recorder.recording && recordingOrigin.current?.key === scope()} aria-label={recorder.recording && recordingOrigin.current?.key === scope() ? "Stop recording voice message" : "Record a voice message"} title={recorder.recording && recordingOrigin.current?.key === scope() ? "Stop recording" : "Voice message"}>{recorder.recording && recordingOrigin.current?.key === scope() ? `■ ${mmss(recorder.elapsed)}` : "🎙"}</button><textarea ref={input} aria-label={`Message ${currentRoom.name}`} value={draft} onChange={(e) => updateDraft(e.target.value, e.target.selectionStart)} onPaste={onPasteFiles} onSelect={(e) => syncPicker(e.currentTarget.value, e.currentTarget.selectionStart)} onBlur={() => setPicker(null)} onKeyDown={onKeyDown} maxLength={65536} rows={2} placeholder={isThread ? "Reply in thread…" : "Message Uni…"} /><button className="send" disabled={(!draft.trim() && !pending.some((f) => f.state === "ready")) || pending.some((f) => f.voice === "transcribing" || (f.state !== "ready" && !(f.voice && f.state === "error"))) || sending || recorder.recording} onClick={() => void send()} aria-label={pending.some((f) => f.voice && f.state === "error") ? "Send transcript without failed audio" : "Send message"}>{sending ? "Sending…" : pending.some((f) => f.voice && f.state === "error") ? "Send transcript" : "Send"}</button></div>
           <p className="compose-hint">Enter to send · Shift+Enter for a new line · @ to mention · <button className="link" onClick={() => setAdvancedOpen(!advancedOpen)}>{advancedOpen ? "hide raw key" : "raw key…"}</button></p>
         </footer>
       </> : <div className="welcome"><span className="welcome-mark">✦</span><h2>Your conversation starts here</h2><p>Select a room to read and reply. Messages are cached for offline reading.</p></div>}
     </section>
-    {/* The note is a sheet over the chat; the chat stays mounted underneath,
-        so Back lands exactly where you were. */}
-    {topNote && <section className="note-sheet" role="dialog" aria-modal="true" aria-label="Note">
+    {pill && <div className={`recording-pill ${sidebarVisible ? "over-sidebar" : ""}`} role="status" aria-live="polite">
+      <span className="recording-dot" aria-hidden="true">●</span><span>{mmss(pill.elapsed)}</span>
+      <span className="recording-separator" aria-hidden="true">·</span>
+      <button className="recording-destination" onClick={() => focusTabById(pill.tabId)} aria-label={`Jump to recording in ${pill.title}`}>{pill.title}</button>
+      <span className="recording-separator" aria-hidden="true">·</span>
+      <button className="recording-stop" onClick={pill.stop} aria-label={`Stop recording for ${pill.title}`}>Stop</button>
+    </div>}
+    {/* The note sheet leaves the tab strip visible above it; Back pops the
+        note's own stack (or closes the tab at the first note). */}
+    {topNote && <section className="note-sheet" role="region" aria-label="Note">
       <NoteView key={`${notes.length}:${noteKey(topNote)}`} target={topNote} hub={hub} onOpen={openNote} onBack={closeNote}
         backLabel={notes.length > 1 ? noteTitles[noteKey(notes[notes.length - 2])] ?? notes[notes.length - 2].ref.split("/").pop() ?? "note" : backTo}
         onTitle={(t) => rememberTitle(noteKey(topNote), t)} />

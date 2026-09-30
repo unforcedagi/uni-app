@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { pickAudioMime } from "./journalCore";
+import { claimRecording, releaseRecording } from "./recLock";
 
 /** Voice recorder: tap to start, tap to stop. Hands back the audio blob. */
-export function useRecorder(onDone: (blob: Blob, mime: string) => void) {
+export function useRecorder(onDone: (blob: Blob, mime: string) => void, label = "voice") {
+  const token = useRef({});
   const [recording, setRecording] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const rec = useRef<MediaRecorder | null>(null);
@@ -14,14 +16,16 @@ export function useRecorder(onDone: (blob: Blob, mime: string) => void) {
   done.current = onDone;
 
   const stopTracks = () => rec.current?.stream.getTracks().forEach((t) => t.stop());
-  useEffect(() => () => { stopTracks(); if (timer.current) clearInterval(timer.current); }, []);
+  useEffect(() => () => { stopTracks(); if (timer.current) clearInterval(timer.current); releaseRecording(token.current); }, []);
 
   async function start() {
     // A second tap while the permission prompt is up would open a second
     // stream and orphan the first (the mic would stay on).
     if (starting.current || rec.current?.state === "recording") return;
     starting.current = true;
-    try { await begin(); } finally { starting.current = false; }
+    try { claimRecording(token.current, label); await begin(); }
+    catch (e) { releaseRecording(token.current); throw e; }
+    finally { starting.current = false; }
   }
 
   async function begin() {
@@ -35,7 +39,8 @@ export function useRecorder(onDone: (blob: Blob, mime: string) => void) {
     r.onstop = () => {
       r.stream.getTracks().forEach((t) => t.stop());
       const type = (r.mimeType || mime || "audio/webm");
-      done.current(new Blob(chunks, { type }), type);
+      try { done.current(new Blob(chunks, { type }), type); }
+      finally { rec.current = null; releaseRecording(token.current); }
     };
     rec.current = r;
     try { r.start(1000); }
