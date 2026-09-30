@@ -67,7 +67,7 @@ export default function Search({ onOpen, onOpenNote, onAskUni, onClose }: {
       setNoteState("searching");
       invoke<NoteHit[]>("vault_search", { query: q, limit: 20 })
         .then((rows) => { if (current) { setNotes(rows); setNoteState("done"); setNoteError(null); } })
-        .catch((e) => { if (current) { setNoteError(String(e)); setNoteState("error"); } });
+        .catch((e) => { if (current) { setNotes([]); setNoteError(String(e)); setNoteState("error"); } });
     }, NOTE_DEBOUNCE_MS);
     return () => { current = false; clearTimeout(t); };
   }, [query]);
@@ -110,7 +110,7 @@ export default function Search({ onOpen, onOpenNote, onAskUni, onClose }: {
             </button>;
           })}
         </div>)}
-        <h2 className="search-section">Notes{noteState === "searching" ? " · searching…" : noteState === "done" ? ` · ${notes.length}${notes[0]?.mode === "keyword" ? " · keyword" : ""}` : ""}</h2>
+        <h2 className="search-section">Notes{noteState === "searching" ? " · searching…" : noteState === "done" ? ` · ${notes.length}${notes.length && notes.every((n) => n.mode === "keyword") ? " · keyword" : ""}` : ""}</h2>
         {noteState === "done" && notes.length === 0 && <p className="search-none">No notes match “{q}”.</p>}
         {notes.length > 0 && <div className="search-group">
           {notes.map((n) => <button key={`${n.vault}:${n.id}`} className="search-hit" onClick={() => onOpenNote(n)}
