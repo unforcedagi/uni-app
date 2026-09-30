@@ -1,10 +1,13 @@
 // "Ask everything": one search surface. Messages come from the local SQLite
-// FTS index (current text — edits applied, deletions excluded). Notes live in
-// the Parachute vault, which this app holds no credentials for (by design), so
-// the Notes section hands the query to Uni instead. See docs/ask-everything.md.
+// FTS index (current text — edits applied, deletions excluded). Notes are
+// searched by meaning in the Parachute vault, signed with this device's Nostr
+// key (NIP-98) — the same door as the Journal. Uni is the fallback when the
+// hub can't be reached. See docs/ask-everything.md.
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { groupByRoom, hitTarget, snippetSegments } from "./searchCore";
+
+export type NoteHit = { vault: string; id: string; path: string; snippet: string; score: number | null; mode: "meaning" | "keyword" };
 
 export type SearchHit = {
   message: { ref: string; channel: string; author: string; author_name: string; ts: number; body: string; root: string | null; edited: boolean };
@@ -13,6 +16,7 @@ export type SearchHit = {
 };
 
 const DEBOUNCE_MS = 250;
+const NOTE_DEBOUNCE_MS = 450;
 const when = (ts: number) => new Date(ts * 1000).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 
 function Snippet({ text }: { text: string }) {
@@ -20,8 +24,9 @@ function Snippet({ text }: { text: string }) {
   return <>{snippetSegments(text).map((s, i) => s.hit ? <mark key={i}>{s.text}</mark> : <span key={i}>{s.text}</span>)}</>;
 }
 
-export default function Search({ onOpen, onAskUni, onClose }: {
+export default function Search({ onOpen, onOpenNote, onAskUni, onClose }: {
   onOpen: (target: { channel: string; root: string | null; focus: string }) => void;
+  onOpenNote: (hit: NoteHit) => void;
   /** Hand a notes query to Uni in #Uni; resolves true once posted. */
   onAskUni: (query: string) => Promise<boolean>;
   onClose: () => void;
@@ -32,6 +37,9 @@ export default function Search({ onOpen, onAskUni, onClose }: {
   const [error, setError] = useState<string | null>(null);
   const [asked, setAsked] = useState<string | null>(null);
   const [asking, setAsking] = useState(false);
+  const [notes, setNotes] = useState<NoteHit[]>([]);
+  const [noteState, setNoteState] = useState<"idle" | "searching" | "done" | "error">("idle");
+  const [noteError, setNoteError] = useState<string | null>(null);
   const input = useRef<HTMLInputElement>(null);
 
   useEffect(() => { input.current?.focus(); }, []);
@@ -46,6 +54,21 @@ export default function Search({ onOpen, onAskUni, onClose }: {
         .then((rows) => { if (current) { setHits(rows); setState("done"); setError(null); } })
         .catch((e) => { if (current) { setError(String(e)); setState("error"); } });
     }, DEBOUNCE_MS);
+    return () => { current = false; clearTimeout(t); };
+  }, [query]);
+
+  // Vault search is a network round-trip (embedding + fan-out), so it waits a
+  // little longer than the local index before firing.
+  useEffect(() => {
+    const q = query.trim();
+    if (!q) { setNotes([]); setNoteState("idle"); setNoteError(null); return; }
+    let current = true;
+    const t = setTimeout(() => {
+      setNoteState("searching");
+      invoke<NoteHit[]>("vault_search", { query: q, limit: 20 })
+        .then((rows) => { if (current) { setNotes(rows); setNoteState("done"); setNoteError(null); } })
+        .catch((e) => { if (current) { setNoteError(String(e)); setNoteState("error"); } });
+    }, NOTE_DEBOUNCE_MS);
     return () => { current = false; clearTimeout(t); };
   }, [query]);
 
@@ -70,7 +93,7 @@ export default function Search({ onOpen, onAskUni, onClose }: {
     <div className="search-results" aria-live="polite">
       {!q && <div className="search-empty">
         <p><strong>Ask everything.</strong> Search the messages cached on this phone — every room and thread, including edits.</p>
-        <p>Your Parachute notes are searched by meaning through Uni.</p>
+        <p>Your Parachute notes are searched by meaning, signed with your Nostr key.</p>
       </div>}
       {q && <>
         <h2 className="search-section">Messages{state === "searching" ? " · searching…" : state === "done" ? ` · ${hits.length}${hits.length >= 60 ? "+" : ""}` : ""}</h2>
@@ -87,11 +110,19 @@ export default function Search({ onOpen, onAskUni, onClose }: {
             </button>;
           })}
         </div>)}
-        <h2 className="search-section">Notes <span className="search-soon">coming soon</span></h2>
-        <div className="search-notes">
-          <p>Meaning search over your Parachute vault isn't on this device yet — the app holds no vault key. Uni can search it for you and reply in #Uni.</p>
+        <h2 className="search-section">Notes{noteState === "searching" ? " · searching…" : noteState === "done" ? ` · ${notes.length}${notes[0]?.mode === "keyword" ? " · keyword" : ""}` : ""}</h2>
+        {noteState === "done" && notes.length === 0 && <p className="search-none">No notes match “{q}”.</p>}
+        {notes.length > 0 && <div className="search-group">
+          {notes.map((n) => <button key={`${n.vault}:${n.id}`} className="search-hit" onClick={() => onOpenNote(n)}
+            aria-label={`Note ${n.path || n.id} in ${n.vault}`}>
+            <span className="search-hit-meta"><strong>{n.path.split("/").pop() || n.id}</strong><span className="search-tag">{n.vault}</span></span>
+            <span className="search-snippet">{n.path.includes("/") && <span className="search-path">{n.path.split("/").slice(0, -1).join("/")} · </span>}{n.snippet}</span>
+          </button>)}
+        </div>}
+        {noteState === "error" && <div className="search-notes">
+          <p role="alert">Couldn't reach your vault: {noteError}</p>
           <button className="send" onClick={() => void ask()} disabled={asking || asked === q}>{asked === q ? "✓ Asked Uni" : asking ? "Asking…" : "✦ Ask Uni to search my notes"}</button>
-        </div>
+        </div>}
       </>}
     </div>
   </section>;

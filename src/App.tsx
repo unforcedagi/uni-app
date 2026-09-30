@@ -509,7 +509,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     setFocusRef(t.focus);
   }
 
-  // Notes search runs on Uni's side (the app holds no vault token).
+  // Fallback when the hub is unreachable: Uni searches the vault and replies in #Uni.
   async function askUniSearch(query: string): Promise<boolean> {
     setError(null);
     const uniRoom = findUniRoom(rooms);
@@ -1095,7 +1095,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     <aside className="rooms" aria-label="Conversations">
       <header className="rooms-header"><div><span className="eyebrow">Unforced</span><h1>Uni</h1></div><div><button className="icon-button" onClick={() => setSearchOpen(true)} aria-label="Search messages and notes">⌕</button><button className="icon-button" onClick={() => void refresh()} disabled={busy} aria-label="Refresh conversations">↻</button><button className="icon-button" onClick={() => { setSettingsOpen(!settingsOpen); setForgetArmed(false); }} aria-label="Settings" aria-expanded={settingsOpen}>⚙</button></div></header>
       {settingsOpen && <div className="settings"><UpdateSettings /><button className="pairing-secondary" onClick={() => void forget()}>{forgetArmed ? "Tap again to forget — you'll need to re-pair" : "Forget this device key"}</button>{forgetArmed && <button className="pairing-secondary" onClick={() => setForgetArmed(false)}>Keep key</button>}</div>}
-      {searchOpen && <Search onOpen={openHit} onAskUni={askUniSearch} onClose={() => setSearchOpen(false)} />}
+      {searchOpen && <Search onOpen={openHit} onOpenNote={(n) => { setSearchOpen(false); openNote({ hub: null, vault: n.vault, ref: n.id }, null); }} onAskUni={askUniSearch} onClose={() => setSearchOpen(false)} />}
       {searchOpen && error && <p className="error search-error" role="alert">{error}</p>}
       <div className="rooms-body" hidden={searchOpen}>
       <p className="connection" role="status">{status}{live ? <span className={`live ${live === "Live" ? "on" : ""}`}> · {live}</span> : null}</p>

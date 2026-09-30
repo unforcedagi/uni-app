@@ -1,6 +1,6 @@
 # Ask everything — one search across Buzz and Parachute
 
-Status: **messages shipped (local FTS), notes designed (handoff to Uni for now).**
+Status: **messages shipped (local FTS); notes shipped (meaning search signed with the user's Nostr key).**
 
 The vision (see `prototype/app-next.html`, "Ask everything"): one box that searches
 what was *said* (Buzz rooms and threads) and what was *kept* (Parachute notes),
@@ -68,55 +68,30 @@ search API that we use today.
   already has the equivalent MCP `manage_token` (mint/list/revoke, 15 min–1 h, or
   up to 90 days with `long_lived`).
 
-### Today (shipped): Ask Uni
+### Shipped: search with your own Nostr key
 
-With no token, the Notes section in search results is shown as **coming soon**,
-with the button "✦ Ask Uni to search my notes". The button posts
-`@Uni search my notes for: <q>` (`uniActions.searchHandoffText`: one line, capped
-at 500 chars, `p`-tags Uni) to #Uni. Uni runs `query-notes semantic` with its own
-credentials and replies in #Uni. This is the same pattern as Keep and Ask Uni on a
-message. The privacy boundary stays where it is today: in Uni.
+The app already reaches Parachute as **you**: the Journal and note view sign each
+request with the device's Nostr key (NIP-98, kind 27235, bound to URL, method and
+body) against the hub's `/mcp` door. The hub maps the pubkey to your hub user and
+applies your vault grants. No token is minted or stored; the only secret on the
+device is the nsec, already in the secure keystore.
 
-### Later: a device read token, paired through Uni
+Search uses the same door:
 
-1. **Request.** In Settings, "Search my notes on this phone" posts a pairing request
-   to #Uni (a kind-9 addressed to Uni). It carries a one-time nonce and an X25519
-   public key generated on the device.
-2. **Consent and mint.** Uni asks Aaron in #Uni which slice to share, suggesting
-   the tags he keeps for this app (e.g. `buzz`, `uni-app`, `people`, `projects`),
-   and confirms that the app gets **read** access only. Uni then mints:
-   - `scope: vault:uni:read` only (never write/admin),
-   - `permissions.scoped_tags: [...]`, required (Uni refuses to mint an unscoped
-     device token),
-   - `long_lived: true` with a TTL of at most 30 days, and `description: "Talk to
-     Uni — <device label>"` so it shows up in the hub token list.
-3. **Deliver.** Uni seals the JWT to the device key (NIP-44 to the device pubkey,
-   or the X25519 key from step 1) and sends it back as a DM or #Uni event. The
-   token never appears in chat text. The device stores it in the same secure
-   keystore as the nsec (`secure_store`), never in SQLite or `localStorage`.
-4. **Use.** A Rust Tauri command `vault_search(q)` calls
-   `GET /notes?semantic=true&near_text=q&limit=20&include_content=false` (the
-   webview never sees the token). The token only works on the tailnet, so off the
-   tailnet the Notes section falls back to Ask Uni. Hits render as note cards
-   (title/path, preview, tags, score), and tapping one opens `parachute://` or
-   hands the note to Uni ("talk about this note").
-5. **Revoke.** "Forget vault access" in Settings deletes the token locally and asks
-   Uni to `manage_token revoke {jti}`. Uni (or the hub admin UI) can also revoke it
-   unilaterally. Expiry means Uni renews it over the same #Uni channel with no user
-   action, unless Aaron has said stop. `identity_forget` wipes it with the nsec.
-
-### Privacy boundary (non-negotiable)
-
-- **Never the `unforced` vault by default.** The device token is only ever for
-  `vault:uni:read`. Any other vault (unforced, parachute, …) needs a separate,
-  explicit request by name, and Uni asks Aaron each time.
-- Read-only and tag-scoped. There is no unscoped device token. Vault
-  `private_tags` (e.g. `capture`, `transcript`, `health`) should be set so that even
-  a mis-scoped token cannot see them.
-- One JWT per device, revocable by jti, and short enough to expire if the phone is
-  lost.
-- Queries and results stay on the device (no analytics). With Ask Uni, the query
-  is visible in #Uni, and the UI says so ("results will arrive in #Uni").
+- Tauri command `vault_search { query, vault?, limit? }` →
+  `VaultClient::search_notes` (`crates/uni-core/src/parachute.rs`) →
+  MCP `query-notes { semantic: true, near_text, include_content, content_length: 600 }`.
+  With no `vault`, the hub fans out across every vault your key can read.
+- If meaning search fails (no embedding provider, or the vault is mid-backfill with
+  an error), it retries once as keyword full-text (`search`), and the section header
+  says "keyword".
+- Hits (`NoteHit { vault, id, path, snippet, score, mode }`) render in the Notes
+  section under the messages. Tapping one opens the note in the in-app note view
+  (a tab). Snippets are plain text; nothing is parsed as HTML.
+- Access is exactly what your key has on the hub; revoke it by removing the
+  pubkey's grant (`revoke_access`) or forgetting the identity on the device.
+- If the hub is unreachable (e.g. off the tailnet), the section shows the error
+  and offers the old **"✦ Ask Uni to search my notes"** handoff to #Uni.
 
 ### Unified ranking (later)
 

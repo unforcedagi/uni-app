@@ -308,6 +308,123 @@ impl VaultClient {
             .await?;
         note_from(&v, r)
     }
+
+    /// Search notes by meaning (semantic `near_text`) across every vault this
+    /// key can read, or one `vault`. Falls back to keyword full-text search
+    /// when the hub or vault has no embedding provider. Read-only.
+    pub async fn search_notes(
+        &self,
+        vault: Option<&str>,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<NoteHit>> {
+        let q = query.trim();
+        if q.is_empty() || q.len() > 500 {
+            return Err(Error::Invalid("search must be 1..500 bytes".into()));
+        }
+        if let Some(v) = vault {
+            if !valid_vault_name(v) {
+                return Err(Error::Invalid(format!("bad vault name: {v}")));
+            }
+        }
+        let limit = limit.clamp(1, 50);
+        let mut args = json!({
+            "include_content": true,
+            "content_length": 600,
+            "include_metadata": false,
+            "limit": limit,
+        });
+        if let Some(v) = vault {
+            args["vault"] = json!(v);
+        }
+        let mut semantic = args.clone();
+        semantic["semantic"] = json!(true);
+        semantic["near_text"] = json!(q);
+        let (v, mode) = match self.call("query-notes", semantic).await {
+            Ok(v) if !notes_in(&v).is_empty() || !has_error(&v) => (v, "meaning"),
+            _ => {
+                args["search"] = json!(q);
+                (self.call("query-notes", args).await?, "keyword")
+            }
+        };
+        Ok(hits_from(&v, vault, mode, limit))
+    }
+}
+
+/// One search result for the app's Notes section.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct NoteHit {
+    pub vault: String,
+    pub id: String,
+    pub path: String,
+    pub snippet: String,
+    pub score: Option<f64>,
+    /// `"meaning"` (semantic) or `"keyword"` (full-text fallback).
+    pub mode: String,
+}
+
+fn has_error(v: &Value) -> bool {
+    v.get("error").is_some()
+        || v["results"]
+            .as_array()
+            .is_some_and(|r| !r.is_empty() && r.iter().all(|x| x.get("error").is_some()))
+}
+
+/// Hits from a single-vault or fan-out query-notes response, best first.
+fn hits_from(v: &Value, vault: Option<&str>, mode: &str, limit: usize) -> Vec<NoteHit> {
+    let mut groups: Vec<(String, Value)> = Vec::new();
+    if let Some(results) = v["results"].as_array() {
+        for r in results {
+            let name = r["vault"].as_str().unwrap_or_default().to_string();
+            groups.push((name, r["notes"].clone()));
+        }
+    } else {
+        groups.push((vault.unwrap_or_default().to_string(), v.clone()));
+    }
+    let mut hits: Vec<NoteHit> = groups
+        .into_iter()
+        .flat_map(|(name, notes)| {
+            notes_in(&notes)
+                .into_iter()
+                .filter(|n| n["id"].is_string() && n.get("error").is_none())
+                .map(move |n| NoteHit {
+                    vault: name.clone(),
+                    id: n["id"].as_str().unwrap_or_default().to_string(),
+                    path: n["path"].as_str().unwrap_or_default().to_string(),
+                    snippet: snippet(n["content"].as_str().unwrap_or_default()),
+                    score: n["score"].as_f64(),
+                    mode: mode.to_string(),
+                })
+        })
+        .collect();
+    // Scores are only comparable within one mode; both modes are higher-better.
+    hits.sort_by(|a, b| {
+        b.score
+            .unwrap_or(f64::MIN)
+            .partial_cmp(&a.score.unwrap_or(f64::MIN))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    hits.truncate(limit);
+    hits
+}
+
+/// First ~200 chars of prose, skipping front matter and heading markers.
+fn snippet(content: &str) -> String {
+    let body = content
+        .strip_prefix("---\n")
+        .and_then(|r| r.split_once("\n---\n").map(|(_, b)| b))
+        .unwrap_or(content);
+    let flat: String = body
+        .lines()
+        .map(|l| l.trim_start_matches('#').trim())
+        .filter(|l| !l.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let mut out: String = flat.chars().take(200).collect();
+    if flat.chars().count() > 200 {
+        out.push('…');
+    }
+    out
 }
 
 /// Vault names are `[A-Za-z0-9_-]+` (the hub's own rule).
@@ -457,6 +574,41 @@ fn http_client() -> Result<reqwest::Client> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn search_hits_from_fanout_are_ranked_and_labelled() {
+        let v = json!({"results": [
+            {"vault": "uni", "notes": [
+                {"id": "a", "path": "Projects/Tabs", "content": "---\nx: 1\n---\n# Tabs\nPlan body", "score": 0.4}
+            ]},
+            {"vault": "unforced", "notes": [
+                {"id": "b", "path": "Notes/B", "content": "Better match", "score": 0.8},
+                {"error": "semantic_unavailable"}
+            ]}
+        ]});
+        let hits = hits_from(&v, None, "meaning", 10);
+        assert_eq!(hits.len(), 2);
+        assert_eq!(
+            (hits[0].vault.as_str(), hits[0].id.as_str()),
+            ("unforced", "b")
+        );
+        assert_eq!(hits[1].snippet, "Tabs Plan body");
+        assert_eq!(hits[1].mode, "meaning");
+        assert!(!has_error(&v));
+        assert!(has_error(
+            &json!({"results": [{"vault": "x", "error": "no"}]})
+        ));
+    }
+
+    #[test]
+    fn search_single_vault_and_long_snippet() {
+        let long = "word ".repeat(100);
+        let v = json!([{"id": "n", "path": "P", "content": long}]);
+        let hits = hits_from(&v, Some("uni"), "keyword", 5);
+        assert_eq!(hits[0].vault, "uni");
+        assert!(hits[0].snippet.ends_with('…'));
+        assert_eq!(hits[0].snippet.chars().count(), 201);
+    }
     use nostr::Event;
 
     fn decode(header: &str) -> Event {
