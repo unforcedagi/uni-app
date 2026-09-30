@@ -12,6 +12,7 @@ type AndroidManifest = { version: string; url: string };
 // button read and drive the same state, so a download never runs twice.
 let state: UpdateState = { kind: "idle" };
 let inFlight = false;
+let manualRequested = false;
 const listeners = new Set<() => void>();
 function set(next: UpdateState) { state = next; listeners.forEach((l) => l()); }
 function subscribe(l: () => void) { listeners.add(l); return () => { listeners.delete(l); }; }
@@ -27,20 +28,27 @@ function errorText(e: unknown): string {
  *  "Up to date" and failures; the background check stays quiet about those. */
 export async function checkForUpdates(manual: boolean): Promise<void> {
   // One check at a time, and nothing to do once an update is installed.
-  if (inFlight || state.kind === "ready") return;
+  if (state.kind === "ready") return;
+  if (inFlight) {
+    // If a user clicks while a silent background check is running, promote
+    // its result to a visible manual check without starting a second request.
+    if (manual && state.kind !== "downloading") { manualRequested = true; set({ kind: "checking" }); }
+    return;
+  }
   inFlight = true;
+  manualRequested = false;
   const before = state;
   if (manual) set({ kind: "checking" });
   try {
     if (/Android/i.test(navigator.userAgent)) {
       const [current, manifest] = await Promise.all([getVersion(), invoke<AndroidManifest>("android_update_manifest")]);
       if (newerVersion(manifest.version, current)) set({ kind: "available", version: manifest.version, url: manifest.url });
-      else set(manual ? { kind: "current" } : before);
+      else set(manual || manualRequested ? { kind: "current" } : before);
     } else {
       // Dynamically loaded: the native plugin is registered on desktop only.
       const { check } = await import("@tauri-apps/plugin-updater");
       const update = await check();
-      if (!update) { set(manual ? { kind: "current" } : before); return; }
+      if (!update) { set(manual || manualRequested ? { kind: "current" } : before); return; }
       set({ kind: "downloading", received: 0, total: null });
       await update.downloadAndInstall((e) => set(onDownloadEvent(state, e)));
       set({ kind: "ready", version: update.version ?? null });
@@ -48,8 +56,8 @@ export async function checkForUpdates(manual: boolean): Promise<void> {
   } catch (e) {
     console.warn("Update check failed", e);
     // A failed download is always shown; a failed quiet check keeps what was there.
-    set(manual || state.kind === "downloading" ? { kind: "error", message: errorText(e) } : before);
-  } finally { inFlight = false; }
+    set(manual || manualRequested || state.kind === "downloading" ? { kind: "error", message: errorText(e) } : before);
+  } finally { inFlight = false; manualRequested = false; }
 }
 
 export async function restartToUpdate(): Promise<void> {
