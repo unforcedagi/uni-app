@@ -1363,6 +1363,40 @@ mod desktop_log;
 mod mobile;
 mod secure_store;
 
+#[cfg(target_os = "macos")]
+fn install_tab_menu(app: &mut tauri::App) -> tauri::Result<()> {
+    use tauri::menu::{Menu, MenuItem, WINDOW_SUBMENU_ID};
+    // The default macOS menu binds Cmd+W to Close Window in both File and
+    // Window. Replace those native actions with Close Tab so the OS does not
+    // close the app before the WebView can receive the keydown.
+    let menu = Menu::default(app.handle())?;
+    for item in menu.items()? {
+        if let Some(submenu) = item.as_submenu() {
+            if submenu.text()? == "File" {
+                let _ = submenu.remove_at(0)?; // default Close Window
+                let close = MenuItem::with_id(
+                    app.handle(),
+                    "uni-close-tab",
+                    "Close Tab",
+                    true,
+                    Some("Cmd+W"),
+                )?;
+                submenu.prepend(&close)?;
+            } else if item.id().0 == WINDOW_SUBMENU_ID {
+                let last = submenu.items()?.len().saturating_sub(1);
+                let _ = submenu.remove_at(last)?; // default Close Window
+            }
+        }
+    }
+    app.set_menu(menu)?;
+    app.on_menu_event(|handle, event| {
+        if event.id().0 == "uni-close-tab" {
+            let _ = handle.emit("uni://close-tab", ());
+        }
+    });
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[cfg(desktop)]
@@ -1375,6 +1409,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|_app| {
+            #[cfg(target_os = "macos")]
+            install_tab_menu(_app)?;
             #[cfg(desktop)]
             {
                 _app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;
