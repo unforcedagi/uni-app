@@ -113,6 +113,14 @@ export function updateTab(s: Tabs, id: string, patch: Partial<TabTarget>): Tabs 
   return changed ? { ...s, tabs } : s;
 }
 
+export function navigateNoteTab(s: Tabs, id: string, note: VaultRef, title: string): Tabs {
+  return updateTab(s, id, { note, title });
+}
+
+export function recordingTabCanClose(id: string, originTabId: string | null): boolean {
+  return originTabId !== id;
+}
+
 /** Cmd/Ctrl-1…8 pick that tab; 9 picks the last (browser convention). */
 export function tabForDigit(s: Tabs, digit: number): Tab | null {
   if (digit < 1 || digit > 9 || !s.tabs.length) return null;

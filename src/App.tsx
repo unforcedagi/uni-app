@@ -19,7 +19,7 @@ import Journal from "./Journal";
 import { mmss, newDraft, shareText, type JournalNote } from "./journalCore";
 import { useRecorder, voiceFileName } from "./recorder";
 import { UpdateSettings } from "./UpdateNotice";
-import { activeTab, closeTab, EMPTY_TABS, focusTab, nextAfterClose, openTab, restoreTabs, serializeTabs, tabForDigit, updateTab, TABS_KEY, type Tabs, type Tab, type TabTarget, type OpenMode } from "./tabs";
+import { activeTab, closeTab, EMPTY_TABS, focusTab, navigateNoteTab, nextAfterClose, openTab, recordingTabCanClose, restoreTabs, serializeTabs, tabForDigit, updateTab, TABS_KEY, type Tabs, type Tab, type TabTarget, type OpenMode } from "./tabs";
 import { notifyMention, setUnreadBadge } from "./desktopNotify";
 import NoteView from "./NoteView";
 import { NoteOpener } from "./noteLinks";
@@ -187,7 +187,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     setSidebarVisible(false);
   }
   function closeTabById(id: string) {
-    if (recordingOrigin.current?.tabId === id && recorder.recording) {
+    if (!recordingTabCanClose(id, recordingOrigin.current?.tabId ?? null)) {
       setError("Stop the voice recording before closing its tab."); return;
     }
     if (journalRecordingRef.current && tabsRef.current.tabs.find((t) => t.id === id)?.kind === "journal") {
@@ -223,10 +223,13 @@ function Conversations({ onForget }: { onForget: () => void }) {
       notesRef.current = stack;
       noteStacks.current.set(current.id, stack);
       setNotes(stack);
+      commitTabs(navigateNoteTab(tabsRef.current, current.id, target, ref.ref.split("/").pop() || ref.ref));
     } else {
       openTargetRef.current({ kind: "note", note: target, title: ref.ref.split("/").pop() || ref.ref }, "new");
     }
   }, [hub]);
+  // Loaded note titles, so a nested note's Back reads "← <previous note>".
+  const [noteTitles, setNoteTitles] = useState<Record<string, string>>({});
   const closeNote = useCallback(() => {
     const s = notesRef.current;
     if (s.length <= 1 && activeTab(tabsRef.current)?.kind === "note") {
@@ -234,11 +237,13 @@ function Conversations({ onForget }: { onForget: () => void }) {
     }
     const stack = s.slice(0, -1);
     notesRef.current = stack;
-    if (tabsRef.current.active) noteStacks.current.set(tabsRef.current.active, stack);
+    if (tabsRef.current.active) {
+      noteStacks.current.set(tabsRef.current.active, stack);
+      const previous = stack[stack.length - 1];
+      if (previous) commitTabs(navigateNoteTab(tabsRef.current, tabsRef.current.active, previous, noteTitles[`${previous.vault}:${previous.ref}`] ?? previous.ref.split("/").pop() ?? previous.ref));
+    }
     setNotes(stack);
-  }, []);
-  // Loaded note titles, so a nested note's Back reads "← <previous note>".
-  const [noteTitles, setNoteTitles] = useState<Record<string, string>>({});
+  }, [noteTitles]);
   const noteKey = (r: VaultRef) => `${r.vault}:${r.ref}`;
   const rememberTitle = useCallback((key: string, t: string) => {
     setNoteTitles((m) => m[key] === t ? m : { ...m, [key]: t });
@@ -698,10 +703,10 @@ function Conversations({ onForget }: { onForget: () => void }) {
   // The recording belongs to its starting scope, even when another tab is
   // visible by the time MediaRecorder fires onstop / transcription finishes.
   const recordingOrigin = useRef<{ key: string; tabId: string; title: string } | null>(null);
-  const recorder = useRecorder((blob, mime) => {
-    const key = recordingOrigin.current?.key;
-    recordingOrigin.current = null;
-    if (!key || !blob.size) return;
+  const recorder = useRecorder((blob, mime, origin: { key: string; tabId: string; title: string }) => {
+    if (recordingOrigin.current === origin) recordingOrigin.current = null;
+    const key = origin.key;
+    if (!blob.size) return;
     const file = new File([blob], voiceFileName(mime), { type: mime.split(";")[0] });
     if (file.size > MAX_FILE_BYTES) { setError("Recording exceeds 25 MB."); return; }
     const id = crypto.randomUUID();
@@ -724,16 +729,18 @@ function Conversations({ onForget }: { onForget: () => void }) {
     })();
   }, `for #${rooms.find((r) => r.id === channel)?.name ?? "room"}`);
   async function toggleRecording() {
-    if (recorder.recording) {
-      if (recordingOrigin.current?.key !== scope()) { setError(`Already recording for ${recordingOrigin.current?.title ?? "another tab"}. Stop from the recording pill first.`); return; }
-      recorder.stop(); return;
+    if (recordingOrigin.current) {
+      if (recordingOrigin.current.key !== scope()) { setError(`Already recording for ${recordingOrigin.current.title}. Stop from the recording pill first.`); return; }
+      if (recorder.recording) recorder.stop();
+      return;
     }
     const key = scope(), tab = activeTab(tabsRef.current);
     if (!key || !tab) return;
     setError(null);
-    recordingOrigin.current = { key, tabId: tab.id, title: tab.title };
-    try { await recorder.start(); }
-    catch (e) { recordingOrigin.current = null; setError(`Microphone unavailable: ${String(e)}`); }
+    const origin = { key, tabId: tab.id, title: tab.title };
+    recordingOrigin.current = origin;
+    try { if (!await recorder.start(origin) && recordingOrigin.current === origin) recordingOrigin.current = null; }
+    catch (e) { if (recordingOrigin.current === origin) recordingOrigin.current = null; setError(`Microphone unavailable: ${String(e)}`); }
   }
   function onPasteFiles(e: React.ClipboardEvent) {
     const files = Array.from(e.clipboardData.files);
@@ -1082,8 +1089,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
   }
   const journalTab = tabs.tabs.find((t) => t.kind === "journal");
   const recordingTab = recordingOrigin.current;
-  const pill = recorder.recording && recordingTab ? { title: recordingTab.title, elapsed: recorder.elapsed, tabId: recordingTab.tabId, stop: recorder.stop } :
-    journalRecording && journalTab ? { title: "Journal", elapsed: journalRecording.elapsed, tabId: journalTab.id, stop: journalRecording.stop } : null;
+  const pill = recordingTab && recorder.busy ? { title: recordingTab.title, elapsed: recorder.elapsed, tabId: recordingTab.tabId, stop: recorder.stop, phase: recorder.phase } :
+    journalRecording && journalTab ? { title: "Journal", elapsed: journalRecording.elapsed, tabId: journalTab.id, stop: journalRecording.stop, phase: "recording" as const } : null;
   return <NoteOpener.Provider value={openNote}><main className={`shell ${(!sidebarVisible && (channel || journalOpen || active?.kind === "note")) ? "in-room" : ""} ${topNote ? "note-open" : ""}`}>
     <aside className="rooms" aria-label="Conversations">
       <header className="rooms-header"><div><span className="eyebrow">Unforced</span><h1>Uni</h1></div><div><button className="icon-button" onClick={() => setSearchOpen(true)} aria-label="Search messages and notes">⌕</button><button className="icon-button" onClick={() => void refresh()} disabled={busy} aria-label="Refresh conversations">↻</button><button className="icon-button" onClick={() => { setSettingsOpen(!settingsOpen); setForgetArmed(false); }} aria-label="Settings" aria-expanded={settingsOpen}>⚙</button></div></header>
@@ -1162,11 +1169,11 @@ function Conversations({ onForget }: { onForget: () => void }) {
       </> : <div className="welcome"><span className="welcome-mark">✦</span><h2>Your conversation starts here</h2><p>Select a room to read and reply. Messages are cached for offline reading.</p></div>}
     </section>
     {pill && <div className={`recording-pill ${sidebarVisible ? "over-sidebar" : ""}`} role="status" aria-live="polite">
-      <span className="recording-dot" aria-hidden="true">●</span><span>{mmss(pill.elapsed)}</span>
+      <span className="recording-dot" aria-hidden="true">●</span><span>{pill.phase === "recording" ? mmss(pill.elapsed) : pill.phase === "starting" ? "Starting…" : "Finishing…"}</span>
       <span className="recording-separator" aria-hidden="true">·</span>
       <button className="recording-destination" onClick={() => focusTabById(pill.tabId)} aria-label={`Jump to recording in ${pill.title}`}>{pill.title}</button>
       <span className="recording-separator" aria-hidden="true">·</span>
-      <button className="recording-stop" onClick={pill.stop} aria-label={`Stop recording for ${pill.title}`}>Stop</button>
+      <button className="recording-stop" onClick={pill.stop} disabled={pill.phase !== "recording"} aria-label={`Stop recording for ${pill.title}`}>Stop</button>
     </div>}
     {/* The note sheet leaves the tab strip visible above it; Back pops the
         note's own stack (or closes the tab at the first note). */}
