@@ -24,7 +24,7 @@ env:
 
 jobs:
   mac:
-    runs-on: macos-15-arm64
+    runs-on: macos-15
     environment: uni-mac-signing
     timeout-minutes: 120
     steps:
@@ -87,7 +87,7 @@ jobs:
           umask 077
           kc="$RUNNER_TEMP/uni-signing.keychain-db"
           p12="$RUNNER_TEMP/uni-signing.p12"
-          printf '%s' "$MACSIGN_P12_BASE64" | base64 --decode > "$p12"
+          printf '%s' "$MACSIGN_P12_BASE64" | base64 -D > "$p12"
           security create-keychain -p '' "$kc"
           security unlock-keychain -p '' "$kc"
           security set-keychain-settings -lut 7200 "$kc"
@@ -95,7 +95,7 @@ jobs:
           rm -f "$p12"
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k '' "$kc" >/dev/null
           security list-keychains -d user -s "$kc" "$HOME/Library/Keychains/login.keychain-db"
-          security find-identity -v -p codesigning "$kc" | grep -q "$SIGN_ID"
+          security find-identity -p codesigning "$kc" | grep -q "$SIGN_ID"
           printf '%s' "$TAURI_KEY" > "$RUNNER_TEMP/uni.key"
           echo "TAURI_SIGNING_PRIVATE_KEY=$RUNNER_TEMP/uni.key" >> "$GITHUB_ENV"
       - name: Build and verify bundle
