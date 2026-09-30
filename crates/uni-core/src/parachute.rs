@@ -151,6 +151,13 @@ impl VaultClient {
     /// Call one MCP tool; returns the tool's JSON result (parsed from the
     /// first text block when it is JSON, else the text as a string).
     pub async fn call(&self, tool: &str, arguments: Value) -> Result<Value> {
+        self.rpc(tool, arguments).await?
+    }
+
+    /// Like [`call`](Self::call), but separates transport/HTTP failures
+    /// (outer `Err`: hub unreachable, auth) from the tool's own error
+    /// (inner `Err`), so callers can retry only the latter.
+    async fn rpc(&self, tool: &str, arguments: Value) -> Result<Result<Value>> {
         let url = format!("{}/mcp", self.origin);
         let body = serde_json::to_vec(&json!({
             "jsonrpc": "2.0",
@@ -177,7 +184,7 @@ impl VaultClient {
         }
         let rpc: Value =
             serde_json::from_str(&text).map_err(|e| Error::Vault(format!("bad response: {e}")))?;
-        tool_result(&rpc)
+        Ok(tool_result(&rpc))
     }
 
     /// Create a journal entry (text now, or a voice placeholder).
@@ -340,14 +347,48 @@ impl VaultClient {
         let mut semantic = args.clone();
         semantic["semantic"] = json!(true);
         semantic["near_text"] = json!(q);
-        let (v, mode) = match self.call("query-notes", semantic).await {
-            Ok(v) if !notes_in(&v).is_empty() || !has_error(&v) => (v, "meaning"),
-            _ => {
-                args["search"] = json!(q);
-                (self.call("query-notes", args).await?, "keyword")
+        // Transport/auth failures surface at once (no second 60 s wait).
+        // A tool-level error means meaning search isn't available at all:
+        // keyword-search everything instead.
+        let v = match self.rpc("query-notes", semantic).await? {
+            Ok(v) => v,
+            Err(_) => {
+                let mut kw = args.clone();
+                kw["search"] = json!(q);
+                let v = self.call("query-notes", kw).await?;
+                let hits = hits_from(&v, vault, "keyword", limit);
+                return match vault_errors(&v).into_iter().next() {
+                    Some((name, e)) if hits.is_empty() => {
+                        Err(Error::Vault(format!("{name}: {e}")))
+                    }
+                    _ => Ok(hits),
+                };
             }
         };
-        Ok(hits_from(&v, vault, mode, limit))
+        let mut hits = hits_from(&v, vault, "meaning", limit);
+        // Vaults that couldn't do meaning search (e.g. no embeddings) are
+        // keyword-searched one by one and listed after the meaning hits:
+        // the two score scales aren't comparable.
+        let mut last_err = None;
+        for (name, e) in vault_errors(&v) {
+            let mut kw = args.clone();
+            kw["vault"] = json!(name);
+            kw["search"] = json!(q);
+            match self.call("query-notes", kw).await {
+                Ok(r) => match vault_errors(&r).into_iter().next() {
+                    None => hits.extend(hits_from(&r, Some(&name), "keyword", limit)),
+                    Some(err) => last_err = Some(err),
+                },
+                Err(err) => last_err = Some((name, format!("{err} ({e})"))),
+            }
+        }
+        if hits.is_empty() {
+            if let Some((name, e)) = last_err {
+                return Err(Error::Vault(format!("{name}: {e}")));
+            }
+        }
+        hits.truncate(limit);
+        Ok(hits)
     }
 }
 
@@ -363,11 +404,18 @@ pub struct NoteHit {
     pub mode: String,
 }
 
-fn has_error(v: &Value) -> bool {
-    v.get("error").is_some()
-        || v["results"]
-            .as_array()
-            .is_some_and(|r| !r.is_empty() && r.iter().all(|x| x.get("error").is_some()))
+/// `(vault, error)` for each fan-out row (or a single response) that failed.
+fn vault_errors(v: &Value) -> Vec<(String, String)> {
+    let row = |r: &Value| {
+        r.get("error").map(|e| {
+            let msg = e.as_str().map(str::to_string).unwrap_or_else(|| e.to_string());
+            (r["vault"].as_str().unwrap_or("vault").to_string(), msg)
+        })
+    };
+    match v["results"].as_array() {
+        Some(rows) => rows.iter().filter_map(row).collect(),
+        None => row(v).into_iter().collect(),
+    }
 }
 
 /// Hits from a single-vault or fan-out query-notes response, best first.
@@ -381,9 +429,9 @@ fn hits_from(v: &Value, vault: Option<&str>, mode: &str, limit: usize) -> Vec<No
     } else {
         groups.push((vault.unwrap_or_default().to_string(), v.clone()));
     }
-    let mut hits: Vec<NoteHit> = groups
+    let per_vault: Vec<Vec<NoteHit>> = groups
         .into_iter()
-        .flat_map(|(name, notes)| {
+        .map(|(name, notes)| {
             notes_in(&notes)
                 .into_iter()
                 .filter(|n| n["id"].is_string() && n.get("error").is_none())
@@ -395,9 +443,22 @@ fn hits_from(v: &Value, vault: Option<&str>, mode: &str, limit: usize) -> Vec<No
                     score: n["score"].as_f64(),
                     mode: mode.to_string(),
                 })
+                .collect()
         })
         .collect();
-    // Scores are only comparable within one mode; both modes are higher-better.
+    if mode != "meaning" {
+        // Keyword (bm25) scores are relative to each vault's own result set:
+        // keep each vault's order and interleave them.
+        let mut hits = Vec::new();
+        let longest = per_vault.iter().map(Vec::len).max().unwrap_or(0);
+        for i in 0..longest {
+            hits.extend(per_vault.iter().filter_map(|g| g.get(i).cloned()));
+        }
+        hits.truncate(limit);
+        return hits;
+    }
+    // Cosine similarity: comparable across vaults sharing an embedding model.
+    let mut hits: Vec<NoteHit> = per_vault.into_iter().flatten().collect();
     hits.sort_by(|a, b| {
         b.score
             .unwrap_or(f64::MIN)
@@ -410,10 +471,12 @@ fn hits_from(v: &Value, vault: Option<&str>, mode: &str, limit: usize) -> Vec<No
 
 /// First ~200 chars of prose, skipping front matter and heading markers.
 fn snippet(content: &str) -> String {
-    let body = content
-        .strip_prefix("---\n")
-        .and_then(|r| r.split_once("\n---\n").map(|(_, b)| b))
-        .unwrap_or(content);
+    let content = content.replace("\r\n", "\n");
+    // Front matter: drop it, even when the 600-byte slice cut it off.
+    let body = match content.strip_prefix("---\n") {
+        Some(r) => r.split_once("\n---\n").map(|(_, b)| b).unwrap_or(""),
+        None => &content,
+    };
     let flat: String = body
         .lines()
         .map(|l| l.trim_start_matches('#').trim())
@@ -594,10 +657,11 @@ mod tests {
         );
         assert_eq!(hits[1].snippet, "Tabs Plan body");
         assert_eq!(hits[1].mode, "meaning");
-        assert!(!has_error(&v));
-        assert!(has_error(
-            &json!({"results": [{"vault": "x", "error": "no"}]})
-        ));
+        assert!(vault_errors(&v).is_empty());
+        assert_eq!(
+            vault_errors(&json!({"results": [{"vault": "x", "error": "no"}, {"vault": "y", "notes": []}]})),
+            vec![("x".to_string(), "no".to_string())]
+        );
     }
 
     #[test]
@@ -606,6 +670,14 @@ mod tests {
         let v = json!([{"id": "n", "path": "P", "content": long}]);
         let hits = hits_from(&v, Some("uni"), "keyword", 5);
         assert_eq!(hits[0].vault, "uni");
+        assert_eq!(snippet("---\r\ntitle: x\r\n---\r\nBody"), "Body");
+        assert_eq!(snippet("---\ntitle: cut off mid front"), "");
+        let kw = json!({"results": [
+            {"vault": "a", "notes": [{"id": "a1", "path": "", "content": "", "score": 1.0}, {"id": "a2", "path": "", "content": "", "score": 9.0}]},
+            {"vault": "b", "notes": [{"id": "b1", "path": "", "content": "", "score": 5.0}]}
+        ]});
+        let ids: Vec<_> = hits_from(&kw, None, "keyword", 10).into_iter().map(|h| h.id).collect();
+        assert_eq!(ids, ["a1", "b1", "a2"]);
         assert!(hits[0].snippet.ends_with('…'));
         assert_eq!(hits[0].snippet.chars().count(), 201);
     }
