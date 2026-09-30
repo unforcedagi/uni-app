@@ -143,7 +143,7 @@ export default function Journal({ rooms, uniRoomId, onShare, onBack, onRecording
   async function toggleMic() {
     setError(null);
     if (recorder.recording) { recorder.stop(); return; }
-    try { await recorder.start(); setStatus("Listening… tap ■ when you're done"); }
+    try { if (await recorder.start(undefined)) setStatus("Listening… tap ■ when you're done"); }
     catch (e) { setError(`Microphone unavailable: ${e}`); }
   }
 

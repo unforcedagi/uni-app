@@ -1,6 +1,6 @@
 // Run: node --experimental-strip-types scripts/tabs.test.ts
 import assert from "node:assert/strict";
-import { activeTab, closeTab, EMPTY_TABS, focusTab, MAX_TABS, nextAfterClose, openTab, restoreTabs, sameTarget, serializeTabs, tabForDigit, updateTab, type TabTarget, type Tabs } from "../src/tabs.ts";
+import { activeTab, closeTab, EMPTY_TABS, focusTab, MAX_TABS, navigateNoteTab, nextAfterClose, openTab, recordingTabCanClose, restoreTabs, sameTarget, serializeTabs, tabForDigit, updateTab, type TabTarget, type Tabs } from "../src/tabs.ts";
 import { claimRecording, recordingHolder, releaseRecording, RecordingBusy } from "../src/recLock.ts";
 
 let n = 0;
@@ -93,6 +93,15 @@ assert.equal(activeTab(u)?.title, "Renamed");
 assert.equal(u.active, k.active);
 assert.equal(updateTab(u, u.active!, { title: "Renamed" }), u);
 
+// Nested navigation persists the visible note; Back restores its predecessor.
+let nested = openTab(EMPTY_TABS, note("A"), "new", id);
+const nestedId = nested.active!;
+nested = navigateNoteTab(nested, nestedId, note("B").note!, "B title");
+assert.equal(activeTab(restoreTabs(serializeTabs(nested), []))?.note?.ref, "B");
+assert.equal(activeTab(nested)?.title, "B title");
+nested = navigateNoteTab(nested, nestedId, note("A").note!, "A title");
+assert.equal(activeTab(restoreTabs(serializeTabs(nested), []))?.note?.ref, "A");
+
 // Cmd-1…8 / 9 = last.
 assert.equal(tabForDigit(k, 1)?.id, k.tabs[0].id);
 assert.equal(tabForDigit(k, 9)?.id, k.tabs[k.tabs.length - 1].id);
@@ -130,6 +139,11 @@ const many = { tabs: Array.from({ length: 20 }, (_, i) => ({ id: `m${i}`, kind: 
 const trimmed = restoreTabs(JSON.stringify(many), many.tabs.map((t) => t.channel));
 assert.equal(trimmed.tabs.length, MAX_TABS);
 assert.equal(trimmed.active, "m19");
+
+// A pending mic permission or an onstop callback protects the origin too.
+assert.equal(recordingTabCanClose("origin", "origin"), false);
+assert.equal(recordingTabCanClose("other", "origin"), true);
+assert.equal(recordingTabCanClose("origin", null), true);
 
 // One recording at a time.
 const composer = {}, journalRec = {};
