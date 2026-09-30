@@ -286,6 +286,7 @@ h1 { font-family: var(--serif); font-weight: 500; font-size: 34px; line-height: 
 .search-empty, .search-none, .search-notes p { color: var(--muted); font-size: 14px; line-height: 1.6; }
 .search-empty { padding: 12px 10px; }
 .search-section { font-size: 10px; letter-spacing: .2em; text-transform: uppercase; color: var(--muted); margin: 18px 10px 6px; font-weight: 500; }
+.search-path { color: var(--muted); }
 .search-soon { font-size: 10px; letter-spacing: .02em; text-transform: none; background: var(--surface-3); border-radius: 999px; padding: 1px 8px; margin-left: 6px; }
 .search-group h3 { font-family: var(--serif); font-weight: 500; font-size: 17px; margin: 12px 10px 4px; }
 .search-hit { display: flex; flex-direction: column; gap: 4px; width: 100%; text-align: left; background: transparent; border: 0; border-radius: var(--radius-sm); padding: 10px; min-height: 48px; }

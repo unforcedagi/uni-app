@@ -1,5 +1,4 @@
-// Message → Uni handoffs. The app holds no vault credentials: "Keep as note"
-// and "Ask Uni" post a kind-9 in the Uni room that quotes the message and
+// Message → Uni handoffs. "Keep as note" and "Ask Uni" post a kind-9 in the Uni room that quotes the message and
 // carries a buzz:// deep link, p-tagging Uni. Uni (Hermes) reads the link,
 // pulls context with the Buzz CLI, and does the Parachute write itself.
 
@@ -53,9 +52,9 @@ export function findUniMember<M extends { pubkey: string; name: string }>(member
 const MAX_SEARCH_QUERY = 500;
 
 /**
- * "Ask Uni" for vault search: the app holds no vault token, so a notes query
- * is handed to Uni in #Uni, which runs the Parachute meaning search itself
- * (see docs/ask-everything.md). Whitespace is collapsed to one line so the
+ * "Ask Uni" for vault search: the fallback when the app can't reach the hub
+ * directly. The query is handed to Uni in #Uni, which runs the Parachute
+ * meaning search itself (see docs/ask-everything.md). Whitespace is collapsed to one line so the
  * query can't smuggle extra paragraphs; long queries are truncated.
  */
 export function searchHandoffText(query: string, uniLabel: string): string {

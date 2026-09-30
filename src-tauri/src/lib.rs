@@ -1327,6 +1327,30 @@ async fn vault_note(
     .await
 }
 
+/// Search Parachute notes by meaning, signed with this device's Nostr key
+/// (NIP-98) — the same door as the Journal and note view. `vault: None`
+/// searches every vault the key can read.
+#[tauri::command]
+async fn vault_search(
+    app: tauri::AppHandle,
+    query: String,
+    vault: Option<String>,
+    limit: Option<usize>,
+) -> Result<Vec<uni_core::parachute::NoteHit>, String> {
+    let vault = vault
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty());
+    with_vault(&app, move |c| {
+        tauri::async_runtime::block_on(c.search_notes(
+            vault.as_deref(),
+            &query,
+            limit.unwrap_or(20),
+        ))
+        .map_err(|e| e.to_string())
+    })
+    .await
+}
+
 #[derive(Serialize, Deserialize)]
 struct AndroidUpdateManifest {
     version: String,
@@ -1460,6 +1484,7 @@ pub fn run() {
             journal_list,
             journal_entry,
             vault_note,
+            vault_search,
             android_update_manifest
         ])
         .run(tauri::generate_context!())
