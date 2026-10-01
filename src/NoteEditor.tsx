@@ -1,21 +1,11 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { Note } from "@openparachute/surface-client";
 import { copyText } from "./clipboard";
 import { beginEdit, changeEdit, draftKey, failedSave, isDirty, savedEdit, serializeDraft, type NoteEdit } from "./noteEdit";
 
-// Keep drafts available across pane unmounts even when browser storage is full.
-const memory = new Map<string, string | null>();
-export function readDraft(vault: string, id: string): string | null {
-  const key = draftKey(vault, id);
-  if (memory.has(key)) return memory.get(key) ?? null;
-  try { return localStorage.getItem(key); } catch { return null; }
-}
-
-export function clearDraft(vault: string, id: string) {
-  memory.set(draftKey(vault, id), null);
-  try { localStorage.removeItem(draftKey(vault, id)); } catch { /* session copy is cleared */ }
-}
+import { draftWriter, settleDraft, readDraft } from "./noteDrafts";
+import { invalidatePaths } from "./vaultPaths";
 
 export default function NoteEditor({ vault, note, onSaved, onCancel, onDirty }: {
   vault: string; note: Note; onSaved: (note: Note) => void; onCancel: () => void; onDirty: (dirty: boolean) => void;
@@ -29,15 +19,27 @@ export default function NoteEditor({ vault, note, onSaved, onCancel, onDirty }: 
   const [confirm, setConfirm] = useState<"overwrite" | "cancel" | null>(null);
   const textarea = useRef<HTMLTextAreaElement>(null);
   const key = draftKey(vault, note.id);
+  const dirtyCallback = useRef(onDirty);
+  dirtyCallback.current = onDirty;
+  const writer = useMemo(() => draftWriter(key, () => {
+    if (mounted.current) setError("Draft is kept for this session only: local storage is unavailable.");
+  }), [key]);
+  const flush = writer.flush;
+  useEffect(() => {
+    window.addEventListener("beforeunload", flush);
+    return () => {
+      window.removeEventListener("beforeunload", flush);
+      flush();
+      dirtyCallback.current(!!readDraft(vault, note.id));
+    };
+  }, [key]);
   function persist(next: NoteEdit) {
     setEdit(next);
     const raw = serializeDraft(next);
-    memory.set(key, raw);
-    try { if (raw === null) localStorage.removeItem(key); else localStorage.setItem(key, raw); }
-    catch { setError("Draft is kept for this session only: local storage is unavailable."); }
+    writer.write(raw);
     onDirty(isDirty(next));
   }
-  useLayoutEffect(() => { onDirty(isDirty(edit)); }, [onDirty, edit]);
+  useLayoutEffect(() => { onDirty(!!readDraft(vault, note.id)); }, [onDirty, edit, vault, note.id]);
   useLayoutEffect(() => {
     const el = textarea.current;
     if (!el) return;
@@ -48,44 +50,48 @@ export default function NoteEditor({ vault, note, onSaved, onCancel, onDirty }: 
   }, [edit.content]);
   async function save(force = false) {
     if (saving.current) return;
+    flush();
     saving.current = true; setBusy(true); setError(null); setConfirm(null);
     try {
       const updated = await invoke<Note>("vault_save", { vault, id: note.id, content: edit.content, ifUpdatedAt: force ? null : edit.updatedAt, force });
+      invalidatePaths(vault);
       // A new pane may already be editing this note while this request finishes.
       // Never clear a newer draft when a previous pane's save resolves late.
-      if (readDraft(vault, note.id) === serializeDraft(edit)) {
-        persist(savedEdit(updated.content ?? edit.content, updated.updatedAt ?? null));
-      }
+      onDirty(settleDraft(vault, note.id, serializeDraft(edit)));
+      flush();
       if (mounted.current) onSaved(updated);
     } catch (e) { setEdit((old) => failedSave(old, String(e))); setError(String(e)); }
     finally { saving.current = false; setBusy(false); }
   }
   function cancel() {
     persist(savedEdit(note.content ?? "", note.updatedAt ?? null));
+    flush();
+    onDirty(!!readDraft(vault, note.id));
     onCancel();
   }
   async function copyAndReload() {
     if (saving.current) return;
+    flush();
     saving.current = true; setBusy(true); setError(null);
     try {
       if (!await copyText(edit.content, "Copied your draft")) { setError("Could not copy. Your draft is still here."); return; }
       const result = await invoke<{ note: Note }>("vault_note", { vault, noteRef: note.id });
-      if (readDraft(vault, note.id) === serializeDraft(edit)) {
-        persist(savedEdit(result.note.content ?? "", result.note.updatedAt ?? null));
-      }
+      onDirty(settleDraft(vault, note.id, serializeDraft(edit)));
+      flush();
       if (mounted.current) onSaved(result.note);
     } catch (e) { setError(String(e)); }
     finally { saving.current = false; setBusy(false); }
   }
   return <div className="note-editor" onKeyDown={(e) => {
-    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") { e.preventDefault(); e.stopPropagation(); void save(); }
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") { e.preventDefault(); e.stopPropagation(); if (!edit.updatedAt) setConfirm("overwrite"); else void save(); }
     if (e.key === "Escape") { e.stopPropagation(); if (!isDirty(edit) && !busy) { e.preventDefault(); cancel(); } }
   }}>
-    <div className="editor-actions"><button className="note-action" disabled={busy} onClick={() => void save()}>{busy ? "Saving…" : "Save"}</button><button className="note-action" disabled={busy} onClick={() => isDirty(edit) ? setConfirm("cancel") : cancel()}>Cancel</button></div>
+    <div className="editor-actions"><button className="note-action" disabled={busy} onClick={() => edit.updatedAt ? void save() : setConfirm("overwrite")}>{busy ? "Saving…" : "Save"}</button><button className="note-action" disabled={busy} onClick={() => isDirty(edit) ? setConfirm("cancel") : cancel()}>Cancel</button></div>
     {edit.restored && <p role="status">Restored unsaved draft</p>}
+    {!edit.updatedAt && !edit.conflict && <p role="status">This note has no revision timestamp. <button disabled={busy} onClick={() => setConfirm("overwrite")}>Overwrite</button></p>}
     {edit.conflict && <div className="note-conflict" role="alert"><p>Changed elsewhere since you opened it</p><button disabled={busy} onClick={() => void copyAndReload()}>Copy mine &amp; reload theirs</button><button disabled={busy} onClick={() => setConfirm("overwrite")}>Overwrite</button></div>}
     {confirm && <div role="alertdialog" aria-label={confirm === "overwrite" ? "Confirm overwrite" : "Discard draft"}><p>{confirm === "overwrite" ? "Overwrite the latest version with your text?" : "Discard your unsaved draft?"}</p><button disabled={busy} onClick={() => confirm === "overwrite" ? void save(true) : cancel()}>{confirm === "overwrite" ? "Confirm overwrite" : "Discard draft"}</button><button onClick={() => setConfirm(null)}>Keep editing</button></div>}
     {error && !error.startsWith("conflict:") && <p className="error" role="alert">{error}</p>}
-    <textarea ref={textarea} autoFocus aria-label="Note content" className="note-editor-text" value={edit.content} disabled={busy} spellCheck={false} onChange={(e) => persist(changeEdit(edit, e.target.value))} />
+    <textarea onBlur={flush} ref={textarea} autoFocus aria-label="Note content" className="note-editor-text" value={edit.content} disabled={busy} spellCheck={false} onChange={(e) => persist(changeEdit(edit, e.target.value))} />
   </div>;
 }

@@ -23,8 +23,11 @@ import { activeTab, closeTab, EMPTY_TABS, focusTab, navigateNoteTab, nextAfterCl
 import { notifyMention, setUnreadBadge } from "./desktopNotify";
 import NoteView from "./NoteView";
 import SurfaceModal from "./SurfaceModal";
+import { readDraft, forgetDrafts } from "./noteDrafts";
+import { invalidatePaths } from "./vaultPaths";
+import { ALIASES_KEY, resolveNote, tabHasDraft } from "./noteIdentity";
 import VaultBrowser from "./VaultBrowser";
-import { draftKey, validateNotePath } from "./noteEdit";
+import { validateNotePath } from "./noteEdit";
 import { NoteOpener } from "./noteLinks";
 import { sameHub, type VaultRef } from "./vaultlinks";
 import { attachmentKind, collectAttachments, formatSize, stripAttachmentLines } from "./media";
@@ -133,10 +136,14 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const [vaultError, setVaultError] = useState<string | null>(null);
   const [vaultRefresh, setVaultRefresh] = useState(0);
   const [searchScope, setSearchScope] = useState({ vault: "", prefix: "" });
+  const [initialAliases] = useState<Record<string, string>>(() => {
+    try { const value = JSON.parse(localStorage.getItem(ALIASES_KEY) ?? "{}"); return value && typeof value === "object" && !Array.isArray(value) ? Object.fromEntries(Object.entries(value).filter(([, v]) => typeof v === "string")) as Record<string, string> : {}; } catch { return {}; }
+  });
+  const aliases = useRef(initialAliases);
   const dirtyNotes = useRef(new Map<string, Set<string>>());
-  const [dirtyTabs, setDirtyTabs] = useState(new Set<string>());
+  const [, setDirtyTabs] = useState(new Set<string>());
   const editOnOpen = useRef(new Set<string>());
-  const [confirmation, setConfirmation] = useState<{ text: string; run: () => void } | null>(null);
+  const [confirmation, setConfirmation] = useState<{ text: string; run: () => void; notice?: string } | null>(null);
   const [creating, setCreating] = useState<{ vault: string; path: string } | null>(null);
   const [createError, setCreateError] = useState<string | null>(null);
   const [createBusy, setCreateBusy] = useState(false);
@@ -155,8 +162,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     setDirtyTabs(new Set([...dirtyNotes.current].filter(([, notes]) => notes.size).map(([id]) => id)));
   }
   function isTabDirty(tab: Tab) {
-    if (dirtyNotes.current.get(tab.id)?.size) return true;
-    try { return !!tab.note && !!localStorage.getItem(draftKey(tab.note.vault, tab.note.ref)); } catch { return false; }
+    return tabHasDraft(tab.note, tab.id === tabsRef.current.active ? notesRef.current : noteStacks.current.get(tab.id) ?? [], aliases.current, readDraft);
   }
   function requestCreate(vault: string, folder: string) {
     setCreateError(null); setCreating({ vault, path: folder ? `${folder}/` : "" });
@@ -168,8 +174,11 @@ function Conversations({ onForget }: { onForget: () => void }) {
     createLock.current = true; setCreateBusy(true); setCreateError(null);
     try {
       const note = await invoke<{ id: string; path: string }>("vault_create", { ...creating, content: "" });
+      invalidatePaths(creating.vault);
+      setToast(`Created ${note.path || note.id}`);
       editOnOpen.current.add(`${creating.vault}:${note.id}`);
-      openTarget({ kind: "note", note: { hub: null, vault: creating.vault, ref: note.id }, title: note.path }, "new");
+      openTarget({ kind: "note", note: { hub: null, vault: creating.vault, ref: note.id }, title: note.path || note.id }, "new");
+      setConfirmation((current) => current ? { ...current, notice: `Created ${note.path || note.id}.` } : null);
       setCreating(null);
     } catch (e) { setCreateError(String(e)); }
     finally { createLock.current = false; setCreateBusy(false); }
@@ -272,16 +281,16 @@ function Conversations({ onForget }: { onForget: () => void }) {
     setSidebarVisible(false);
   }
   function openTarget(target: TabTarget, mode: OpenMode = "focus", confirmed = false) {
+    if (target.note) target = { ...target, note: resolveNote(target.note, aliases.current) };
     // A recording's origin tab must survive the 12-tab eviction cap.
     const originId = recordingOrigin.current?.tabId;
-    const base = originId && tabsRef.current.tabs.some((t) => t.id === originId)
-      ? { ...tabsRef.current, recent: [...tabsRef.current.recent.filter((id) => id !== originId), originId] }
-      : tabsRef.current;
-    const effectiveMode = mode === "focus" && originId === tabsRef.current.active ? "new" : mode;
+    const pinned = new Set(tabsRef.current.tabs.filter((t) => t.id === originId || (t.kind === "journal" && journalRecordingRef.current)).map((t) => t.id));
+    const base = { ...tabsRef.current, tabs: tabsRef.current.tabs.map((t) => t.note ? { ...t, note: resolveNote(t.note, aliases.current) } : t), recent: [...tabsRef.current.recent.filter((id) => !pinned.has(id)), ...pinned] };
+    const effectiveMode = mode === "focus" && pinned.has(tabsRef.current.active ?? "") ? "new" : mode;
     const next = openTab(base, target, effectiveMode, () => crypto.randomUUID());
     const removed = tabsRef.current.tabs.filter((t) => !next.tabs.some((n) => n.id === t.id));
     if (removed.some((t) => t.id === originId || (t.kind === "journal" && journalRecordingRef.current))) {
-      setConfirmation({ text: "Stop the recording before replacing its tab.", run: () => {} }); return;
+      setError("Stop the recording before replacing its tab."); return;
     }
     if (!confirmed && removed.some(isTabDirty)) {
       setConfirmation({ text: "Close a tab with unsaved changes? Its draft will be kept on this device.", run: () => openTarget(target, mode, true) }); return;
@@ -325,11 +334,11 @@ function Conversations({ onForget }: { onForget: () => void }) {
     // A note on some other hub isn't readable with this key: let the browser
     // (and that hub's Parachute app) handle it.
     if (!sameHub(ref, hub)) { if (href) void invoke("open_link", { url: href }).catch(() => {}); return; }
-    const target = { hub: null, vault: ref.vault, ref: ref.ref };
+    const target = resolveNote({ hub: null, vault: ref.vault, ref: ref.ref }, aliases.current);
     const current = activeTab(tabsRef.current);
     if (current?.kind === "note") {
       const top = notesRef.current[notesRef.current.length - 1];
-      if (top?.vault === target.vault && top.ref === target.ref) return;
+      if (top?.vault === target.vault && resolveNote(top, aliases.current).ref === target.ref) return;
       const stack = [...notesRef.current.slice(-19), target];
       notesRef.current = stack;
       noteStacks.current.set(current.id, stack);
@@ -364,13 +373,14 @@ function Conversations({ onForget }: { onForget: () => void }) {
       if (next !== tabsRef.current) commitTabs(next);
     }
   }, []);
-  // "Copied" confirmation.
+  // Creation and clipboard notices.
   const [toast, setToast] = useState<string | null>(null);
+  useEffect(() => onCopied(setToast), []);
   useEffect(() => {
-    let t: ReturnType<typeof setTimeout> | undefined;
-    const off = onCopied((msg) => { setToast(msg); clearTimeout(t); t = setTimeout(() => setToast(null), 1600); });
-    return () => { off(); clearTimeout(t); };
-  }, []);
+    if (!toast) return;
+    const timer = setTimeout(() => setToast(null), 6000);
+    return () => clearTimeout(timer);
+  }, [toast]);
   const focusTries = useRef(0);
   const preserveScroll = useRef<number | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
@@ -1049,7 +1059,10 @@ function Conversations({ onForget }: { onForget: () => void }) {
   async function forget() {
     // Two taps instead of window.confirm (unreliable in Android WebView).
     if (!forgetArmed) { setForgetArmed(true); return; }
-    try { await invoke("identity_forget"); onForget(); } catch (e) { setError(String(e)); }
+    try { await invoke("identity_forget");
+      forgetDrafts(); invalidatePaths();
+      try { for (const key of Object.keys(localStorage)) if (key.startsWith("uni.noteDraft.v1:") || key.startsWith("uni.vaultExpanded.v1:") || key === ALIASES_KEY) localStorage.removeItem(key); } catch { /* unavailable storage */ }
+      onForget(); } catch (e) { setError(String(e)); }
   }
 
   const currentRoom = rooms.find((r) => r.id === channel);
@@ -1220,7 +1233,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     <aside className="rooms" aria-label="Conversations">
       <header className="rooms-header"><div><span className="eyebrow">Unforced</span><h1>Uni</h1></div><div><button className="icon-button" onClick={() => { setSearchScope({ vault: "", prefix: "" }); setSearchOpen(true); }} aria-label="Search messages and notes">⌕</button><button className="icon-button" onClick={() => void refresh()} disabled={busy} aria-label="Refresh conversations">↻</button><button className="icon-button" onClick={() => { setSettingsOpen(!settingsOpen); setForgetArmed(false); }} aria-label="Settings" aria-expanded={settingsOpen}>⚙</button></div></header>
       {settingsOpen && <div className="settings"><UpdateSettings /><button className="pairing-secondary" onClick={() => void forget()}>{forgetArmed ? "Tap again to forget — you'll need to re-pair" : "Forget this device key"}</button>{forgetArmed && <button className="pairing-secondary" onClick={() => setForgetArmed(false)}>Keep key</button>}</div>}
-      {searchOpen && <Search key={`${searchScope.vault}:${searchScope.prefix}`} initialVault={searchScope.vault} initialPathPrefix={searchScope.prefix} onOpen={openHit} onOpenNote={(n) => { setSearchOpen(false); openNote({ hub: null, vault: n.vault, ref: n.path || n.id }, null); }} onAskUni={askUniSearch} onClose={() => setSearchOpen(false)} />}
+      {searchOpen && <Search vaults={vaults} key={`${searchScope.vault}:${searchScope.prefix}`} initialVault={searchScope.vault} initialPathPrefix={searchScope.prefix} onOpen={openHit} onOpenNote={(n) => { setSearchOpen(false); openNote({ hub: null, vault: n.vault, ref: n.id }, null); }} onAskUni={askUniSearch} onClose={() => setSearchOpen(false)} />}
       {searchOpen && error && <p className="error search-error" role="alert">{error}</p>}
       <div className="rooms-body" hidden={searchOpen}>
       <p className="connection" role="status">{status}{live ? <span className={`live ${live === "Live" ? "on" : ""}`}> · {live}</span> : null}</p>
@@ -1249,13 +1262,13 @@ function Conversations({ onForget }: { onForget: () => void }) {
         <div className="tab-scroller">{tabs.tabs.map((t) => <div key={t.id} className={`tab-chip ${t.id === tabs.active ? "active" : ""}`} role="presentation"
           onPointerDown={(e) => { if (e.pointerType === "touch") { longPressed.current = false; longPress.current = window.setTimeout(() => { longPressed.current = true; closeTabById(t.id); }, 600); } }}
           onPointerUp={endLongPress} onPointerCancel={endLongPress} onPointerLeave={endLongPress}>
-          <button className="tab-title" role="tab" aria-selected={t.id === tabs.active} onClick={() => { if (longPressed.current) { longPressed.current = false; return; } focusTabById(t.id); }} title={t.title}>{t.kind === "journal" ? "❋" : (t.kind === "note" || t.kind === "vault") ? "▤" : t.kind === "thread" ? "↳" : "#"} {(dirtyTabs.has(t.id) || isTabDirty(t)) && <span aria-label="Unsaved changes">● </span>}{t.title}</button>
+          <button className="tab-title" role="tab" aria-selected={t.id === tabs.active} onClick={() => { if (longPressed.current) { longPressed.current = false; return; } focusTabById(t.id); }} title={t.title}>{t.kind === "journal" ? "❋" : (t.kind === "note" || t.kind === "vault") ? "▤" : t.kind === "thread" ? "↳" : "#"} {isTabDirty(t) && <span aria-label="Unsaved changes">● </span>}{t.title}</button>
           <button className="tab-close" onClick={() => closeTabById(t.id)} aria-label={`Close ${t.title}`}>×</button>
         </div>)}</div>
         <button className="tab-add" onClick={() => { pickNewTab.current = true; setSearchOpen(false); setSidebarVisible(true); document.querySelector<HTMLButtonElement>(".rooms nav .room")?.focus(); }} aria-label="New tab — pick a room" title="New tab — pick a room">+</button>
       </div>
       {journalTab && <div className="journal-tab-content" hidden={!journalOpen}><Journal rooms={rooms} uniRoomId={findUniRoom(rooms)?.id ?? null} onShare={shareEntry} onBack={() => setSidebarVisible(true)} onRecordingChange={(on, elapsed, stop) => { journalRecordingRef.current = on; setJournalRecording(on ? { elapsed, stop } : null); }} /></div>}
-      {active?.kind === "vault" && active.vault ? <VaultBrowser key={active.vault} vault={active.vault} onBack={() => setSidebarVisible(true)} onOpen={(note) => openTarget({ kind: "note", note: { hub: null, vault: active.vault!, ref: note.id }, title: note.path }, "new")} onCreate={(folder) => requestCreate(active.vault!, folder)} onSearch={(prefix) => { setSearchScope({ vault: active.vault!, prefix }); setSearchOpen(true); setSidebarVisible(true); }} />
+      {active?.kind === "vault" && active.vault ? <VaultBrowser key={active.vault} vault={active.vault} onBack={() => setSidebarVisible(true)} onOpen={(note) => openTarget({ kind: "note", note: { hub: null, vault: active.vault!, ref: note.id }, title: note.path || note.id }, "new")} onCreate={(folder) => requestCreate(active.vault!, folder)} onSearch={(prefix) => { setSearchScope({ vault: active.vault!, prefix }); setSearchOpen(true); setSidebarVisible(true); }} />
       : journalOpen ? null
       : currentRoom ? <>
         <header className="conversation-header">
@@ -1321,6 +1334,10 @@ function Conversations({ onForget }: { onForget: () => void }) {
         note's own stack (or closes the tab at the first note). */}
     {topNote && <section className="note-sheet" role="region" aria-label="Note">
       <NoteView key={`${tabs.active}:${notes.length}:${noteKey(topNote)}`} target={topNote} hub={hub} onOpen={openNote} onBack={closeNote}
+        onResolved={(id) => {
+          aliases.current[JSON.stringify([topNote.vault, topNote.ref])] = id;
+          try { localStorage.setItem(ALIASES_KEY, JSON.stringify(aliases.current)); } catch { /* session alias remains */ }
+        }}
         startEditing={editOnOpen.current.has(noteKey(topNote))}
         onDirty={(dirty) => { reportDirty(tabs.active!, noteKey(topNote), dirty); if (!dirty) editOnOpen.current.delete(noteKey(topNote)); }}
         onCreate={(folder) => requestCreate(topNote.vault, folder)}
@@ -1328,7 +1345,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
         onTitle={(t) => rememberTitle(noteKey(topNote), t)} />
     </section>}
     {creating && <SurfaceModal onCancel={() => { if (!createBusy) setCreating(null); }}><form role="dialog" aria-modal="true" aria-label="New note" onSubmit={(e) => { e.preventDefault(); void createNote(); }}><h2>New note in {creating.vault}</h2><label>Path<input autoFocus value={creating.path} disabled={createBusy} onChange={(e) => setCreating({ ...creating, path: e.target.value })} /></label>{createError && <p className="error" role="alert">{createError}</p>}<button disabled={createBusy} type="submit">{createBusy ? "Creating…" : "Create note"}</button><button disabled={createBusy} type="button" onClick={() => setCreating(null)}>Cancel</button></form></SurfaceModal>}
-    {confirmation && <SurfaceModal onCancel={() => setConfirmation(null)}><div role="alertdialog" aria-modal="true" aria-label="Confirm tab close"><p>{confirmation.text}</p><button autoFocus onClick={() => { const run = confirmation.run; setConfirmation(null); run(); }}>Continue</button><button onClick={() => setConfirmation(null)}>Cancel</button></div></SurfaceModal>}
+    {confirmation && <SurfaceModal onCancel={() => setConfirmation(null)}><div role="alertdialog" aria-modal="true" aria-label="Confirm tab close">{confirmation.notice && <p role="status">{confirmation.notice}</p>}<p>{confirmation.text}</p><button autoFocus onClick={() => { const run = confirmation.run; setConfirmation(null); run(); }}>Continue</button><button onClick={() => setConfirmation(null)}>Cancel</button></div></SurfaceModal>}
     {toast && <div className="toast" role="status">{toast}</div>}
   </main></NoteOpener.Provider>;
 }

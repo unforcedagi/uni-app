@@ -24,7 +24,8 @@ function Snippet({ text }: { text: string }) {
   return <>{snippetSegments(text).map((s, i) => s.hit ? <mark key={i}>{s.text}</mark> : <span key={i}>{s.text}</span>)}</>;
 }
 
-export default function Search({ onOpen, onOpenNote, onAskUni, onClose, initialVault = "", initialPathPrefix = "" }: {
+export default function Search({ onOpen, onOpenNote, onAskUni, onClose, vaults, initialVault = "", initialPathPrefix = "" }: {
+  vaults: string[];
   initialVault?: string;
   initialPathPrefix?: string;
   onOpen: (target: { channel: string; root: string | null; focus: string }) => void;
@@ -97,7 +98,7 @@ export default function Search({ onOpen, onOpenNote, onAskUni, onClose, initialV
     </div>
     <div className="search-filters">
       <div role="group" aria-label="Note search mode">{(["meaning", "keyword"] as const).map((m) => <button key={m} className="note-action" aria-pressed={mode === m} onClick={() => setMode(m)}>{m === "meaning" ? "Meaning" : "Keyword"}</button>)}</div>
-      <label>Vault <input value={vault} placeholder="All vaults" onChange={(e) => setVault(e.target.value)} /></label>
+      <label>Vault <select value={vault} onChange={(e) => setVault(e.target.value)}><option value="">All vaults</option>{[...new Set([...vaults, ...(initialVault ? [initialVault] : [])])].map((v) => <option key={v} value={v}>{v}</option>)}</select></label>
       <label>Path prefix <input value={pathPrefix} placeholder="Any folder" onChange={(e) => setPathPrefix(e.target.value)} /></label>
     </div>
     <div className="search-results" aria-live="polite">

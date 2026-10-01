@@ -159,7 +159,7 @@ assert.equal(recordingHolder(), "in the Journal");
 releaseRecording(journalRec);
 assert.equal(recordingHolder(), null);
 
-console.log("tabs tests passed");
+
 
 const vaultTab: TabTarget = { kind: "vault", vault: "scope-test", title: "Scope" };
 assert.ok(sameTarget(vaultTab, { ...vaultTab, title: "Renamed" }));
@@ -170,3 +170,5 @@ v = openTab(v, vaultTab, "new", id);
 assert.equal(v.tabs.length, 1);
 assert.deepEqual(restoreTabs(serializeTabs(v), []).tabs, v.tabs);
 assert.equal(restoreTabs(JSON.stringify({ tabs: [{ id: "bad", kind: "vault" }] }), []).tabs.length, 0);
+
+console.log("tabs tests passed");
