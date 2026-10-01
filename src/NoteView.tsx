@@ -1,12 +1,6 @@
-// In-app view of one Parachute vault note, rendered with Parachute's own
-// surface-render so a note looks the same here as in the Parachute app.
-// Read-only (Step 0 of "Uni app — surface architecture"): the note comes from
-// the Rust `vault_note` command over the hub's NIP-98 /mcp door; no token or
-// key reaches the WebView. Vault media (/api/storage/…) is not wired yet.
-//
-// Shown as a sheet over the chat (App keeps the chat mounted underneath, so
-// Back returns to the exact scroll position).
-
+import NoteEditor, { readDraft, clearDraft } from "./NoteEditor";
+import { editableExtension, beginEdit, isDirty } from "./noteEdit";
+import { backlinks } from "./backlinks";
 import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { NoteRenderer, type LinkComponentProps } from "@openparachute/surface-render";
@@ -16,13 +10,16 @@ import { copyText } from "./clipboard";
 import { bodyWithoutTitle, noteMeta, noteTitle } from "./noteText";
 import { noteUrl, parseNoteRoute, parseNoteUrl, wikilinkResolver, type VaultRef } from "./vaultlinks";
 
-type VaultNote = { hub: string; vault: string; note: Note };
+type VaultNote = { hub: string; vault: string; note: Note & { extension?: string } };
 
 function openExternal(url: string) {
   void invoke("open_link", { url }).catch(() => {});
 }
 
-export default function NoteView({ target, hub, onOpen, onBack, backLabel, onTitle }: {
+export default function NoteView({ target, hub, onOpen, onBack, backLabel, onTitle, startEditing = false, onDirty, onCreate }: {
+  startEditing?: boolean;
+  onDirty: (dirty: boolean) => void;
+  onCreate: (folder: string) => void;
   target: VaultRef;
   /** Configured hub origin (fallback URL when the note can't be read). */
   hub: string | null;
@@ -33,6 +30,7 @@ export default function NoteView({ target, hub, onOpen, onBack, backLabel, onTit
   /** Reports the loaded title so a deeper note can label its Back with it. */
   onTitle?: (title: string) => void;
 }) {
+  const [editing, setEditing] = useState(startEditing);
   const [data, setData] = useState<VaultNote | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -41,7 +39,13 @@ export default function NoteView({ target, hub, onOpen, onBack, backLabel, onTit
     setData(null);
     setError(null);
     invoke<VaultNote>("vault_note", { vault: target.vault, noteRef: target.ref })
-      .then((d) => { if (live) setData(d); })
+      .then((d) => { if (live) {
+        setData(d);
+        const dirty = isDirty(beginEdit(d.note.content ?? "", d.note.updatedAt ?? null, readDraft(d.vault, d.note.id)));
+        if (dirty) setEditing(true);
+        else clearDraft(d.vault, d.note.id);
+        onDirty(dirty);
+      } })
       .catch((e) => { if (live) setError(String(e)); });
     return () => { live = false; };
   }, [target.vault, target.ref]);
@@ -71,15 +75,18 @@ export default function NoteView({ target, hub, onOpen, onBack, backLabel, onTit
   // The H1 is the page title; render the rest so it isn't shown twice.
   const shown = useMemo(() => note ? { ...note, content: bodyWithoutTitle(note.content ?? "") } : null, [note]);
   const tags = note?.tags ?? [];
+  const inbound = backlinks(note?.id ?? "", note?.links);
 
   return <div className="note-view">
     <header className="note-bar">
       <button className="note-back" onClick={onBack} aria-label={`Back to ${backLabel}`}>
         <span className="note-back-arrow" aria-hidden="true">←</span><span className="note-back-label">{backLabel}</span>
       </button>
-      {note && <button className="note-action" onClick={() => void copyText(note.content ?? "", "Copied markdown")}>Copy markdown</button>}
+      {note && !editing && editableExtension(note.extension) && <button className="note-action" onClick={() => setEditing(true)}>Edit</button>}
+      {note && <button className="note-action" onClick={() => onCreate(note.path?.includes("/") ? note.path.slice(0, note.path.lastIndexOf("/")) : "")}>New note</button>}
+      {note && !editing && <button className="note-action" onClick={() => void copyText(note.content ?? "", "Copied markdown")}>Copy markdown</button>}
     </header>
-    <div className="note-scroll">
+    {note && editing ? <NoteEditor vault={data!.vault} note={note} onDirty={onDirty} onCancel={() => setEditing(false)} onSaved={(updated) => { setData({ ...data!, note: { ...data!.note, ...updated } }); setEditing(false); }} /> : <div className="note-scroll">
       <article className="note-page">
         <h1 className="note-title">{heading}</h1>
         <p className="note-meta-line">{note ? noteMeta(data!.vault, note.path, note.updatedAt ?? note.createdAt) : `${target.vault} · ${error ? "unavailable" : "opening…"}`}</p>
@@ -92,12 +99,15 @@ export default function NoteView({ target, hub, onOpen, onBack, backLabel, onTit
         </div>}
         {shown && <>
           <NoteRenderer note={shown} className="md note-body" resolve={resolve} linkComponent={Link} />
+          <details className="note-backlinks"><summary>Linked from ({inbound.length})</summary>
+            {inbound.map((link) => <button className="vault-note" key={JSON.stringify([link.id, link.relationship])} onClick={() => onOpen({ hub: null, vault: data!.vault, ref: link.id }, null)}>{link.path} <small>· {link.relationship}</small></button>)}
+          </details>
           <footer className="note-footer">
             <button className="note-quiet" onClick={() => void copyText(note!.content ?? "", "Copied markdown")}>Copy markdown</button>
             {webUrl && <button className="note-quiet" onClick={() => openExternal(webUrl)}>Open in Parachute ↗</button>}
           </footer>
         </>}
       </article>
-    </div>
+    </div>}
   </div>;
 }
