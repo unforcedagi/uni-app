@@ -30,7 +30,7 @@ export function useRecorder<Origin = void>(onDone: (blob: Blob, mime: string, or
     if (timer.current !== null) { clearInterval(timer.current); timer.current = null; }
     session.current?.stop();
   }
-  return { recording: phase === "recording", busy: phase !== "idle", phase, elapsed, start, stop };
+  return { recording: phase === "recording", busy: phase !== "idle", phase, elapsed, start, stop, isBusy: () => session.current!.phase !== "idle" };
 }
 
 /** File name for a recording, by container type. */

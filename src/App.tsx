@@ -215,6 +215,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const [replyTo, setReplyTo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [sending, setSending] = useState(false);
+  const sendingRef = useRef(false);
   const [status, setStatus] = useState("Loading cached conversations…");
   const [error, setError] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
@@ -865,6 +866,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     })();
   }, `for #${rooms.find((r) => r.id === channel)?.name ?? "room"}`);
   async function toggleRecording() {
+    if (sendingRef.current) return;
     if (recordingOrigin.current) {
       if (recordingOrigin.current.key !== scope()) { setError(`Already recording for ${recordingOrigin.current.title}. Stop from the recording pill first.`); return; }
       if (recorder.recording) recorder.stop();
@@ -989,7 +991,9 @@ function Conversations({ onForget }: { onForget: () => void }) {
   }
 
   async function send() {
-    if (!channel || sending || (!draft.trim() && !pending.length)) return;
+    // Refs/session state cover events before React commits the disabled controls.
+    if (!channel || activeScope.current !== keyFor(channel, root) || sendingRef.current ||
+        recordingOrigin.current || recorder.isBusy() || (!draft.trim() && !pending.length)) return;
     const files = pendingStore.current.get(keyFor(channel, root)) ?? [];
     const failedAudio = files.filter((f) => f.voice && f.state === "error");
     if (files.some((f) => f.voice === "transcribing" || (f.state !== "ready" && !(f.voice && f.state === "error")) || (f.state === "ready" && !f.media)) || (failedAudio.length && !draft.trim())) {
@@ -1013,6 +1017,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     let target: string | null = replyTo;
     if (!target && root) target = messages.some((m) => m.ref === root) ? root : messages[messages.length - 1]?.ref ?? null;
     if (root && !target) { setError("Thread not in local cache. Refresh before replying."); return; }
+    sendingRef.current = true;
     setSending(true);
     setError(null);
     try {
@@ -1022,21 +1027,25 @@ function Conversations({ onForget }: { onForget: () => void }) {
         return items.filter((item) => !sentIds.includes(item.id));
       });
       // Do not erase text typed during an in-flight send or in another room.
-      if (drafts.current.get(key) === snapshot || (scope() === key && draft === snapshot)) {
-        setDraft((current) => current === snapshot ? "" : current);
+      if (drafts.current.get(key) === snapshot) {
         drafts.current.set(key, "");
         bindingStore.current.set(key, new Map());
-        setBindings(new Map());
+        if (activeScope.current === key) {
+          setDraft("");
+          setBindings(new Map());
+        }
       }
-      setRawKey("");
-      setReplyTo(null);
+      if (activeScope.current === key) {
+        setRawKey("");
+        setReplyTo(null);
+      }
       // Re-read through the room effect, which drops the result if the
       // user has switched rooms meanwhile.
       setTick((n) => n + 1);
       await loadRooms();
       setStatus(failedAudio.length ? `Transcript sent; ${failedAudio.length} audio recording${failedAudio.length === 1 ? " was" : "s were"} NOT attached (upload failed).` : recipients.length ? `Message accepted by relay · notified ${recipients.length}` : "Message accepted by relay");
     } catch (e) { setError(String(e)); }
-    finally { setSending(false); }
+    finally { sendingRef.current = false; setSending(false); }
   }
 
   // One-tap answer to a Hermes approval prompt: post the reply text as an
@@ -1316,7 +1325,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
               {recorder.recording && recordingOrigin.current?.key === scope() ? <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" fill="currentColor" /></svg> : <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3" /><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8" /></svg>}
             </button>
             {(draft.trim() || pending.length > 0 || sending) && (
-              <button className="send compose-icon" disabled={(!draft.trim() && !pending.some((f) => f.state === "ready")) || pending.some((f) => f.voice === "transcribing" || (f.state !== "ready" && !(f.voice && f.state === "error"))) || sending || recorder.recording} onClick={() => void send()} aria-label={pending.some((f) => f.voice && f.state === "error") ? "Send transcript without failed audio" : "Send message"} title={sending ? "Sending…" : pending.some((f) => f.voice && f.state === "error") ? "Send transcript without failed audio" : "Send message"} aria-busy={sending}>
+              <button className="send compose-icon" disabled={(!draft.trim() && !pending.some((f) => f.state === "ready")) || pending.some((f) => f.voice === "transcribing" || (f.state !== "ready" && !(f.voice && f.state === "error"))) || sending || recorder.busy} onClick={() => void send()} aria-label={pending.some((f) => f.voice && f.state === "error") ? "Send transcript without failed audio" : "Send message"} title={sending ? "Sending…" : pending.some((f) => f.voice && f.state === "error") ? "Send transcript without failed audio" : "Send message"} aria-busy={sending}>
                 {sending ? <span aria-hidden="true">…</span> : <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 7-7 7 7M12 5v14" /></svg>}
               </button>
             )}
