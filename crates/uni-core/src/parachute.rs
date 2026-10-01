@@ -316,6 +316,76 @@ impl VaultClient {
         note_from(&v, r)
     }
 
+    /// Discover readable vaults through the same signed fan-out door.
+    pub async fn list_vaults(&self) -> Result<Vec<String>> {
+        let v = self
+            .call(
+                "query-notes",
+                json!({"limit": 1, "include_content": false, "include_metadata": false}),
+            )
+            .await?;
+        vault_names(&v)
+    }
+
+    /// Bounded, paginated path index; never downloads note bodies.
+    pub async fn list_paths(&self, vault: &str) -> Result<Vec<NotePath>> {
+        check_vault(vault)?;
+        let mut paths = Vec::new();
+        for offset in (0..20_000).step_by(500) {
+            let v = self
+                .call(
+                    "query-notes",
+                    json!({"vault": vault, "include_content": false,
+                "include_metadata": false, "limit": 500, "offset": offset, "sort": "asc"}),
+                )
+                .await?;
+            check_vault_errors(&v)?;
+            let page = notes_in(&v);
+            let count = page.len();
+            for n in page.into_iter().take(20_000 - paths.len()) {
+                paths.push(
+                    serde_json::from_value(n)
+                        .map_err(|e| Error::Vault(format!("bad path row: {e}")))?,
+                );
+            }
+            if count < 500 {
+                break;
+            }
+        }
+        Ok(paths)
+    }
+
+    pub async fn create_note(&self, vault: &str, path: &str, content: &str) -> Result<Value> {
+        check_vault(vault)?;
+        validate_note_path(path)?;
+        let v = self
+            .call(
+                "create-note",
+                json!({"vault": vault, "path": path, "content": content, "if_exists": "error"}),
+            )
+            .await?;
+        check_vault_errors(&v)?;
+        note_from(&v, path)
+    }
+
+    pub async fn save_note(
+        &self,
+        vault: &str,
+        id: &str,
+        content: &str,
+        if_updated_at: Option<&str>,
+        force: bool,
+    ) -> Result<Value> {
+        check_vault(vault)?;
+        if id.trim().is_empty() {
+            return Err(Error::Invalid("missing note id".into()));
+        }
+        let args = save_args(vault, id, content, if_updated_at, force)?;
+        let v = self.call("update-note", args).await.map_err(save_error)?;
+        check_vault_errors(&v).map_err(save_error)?;
+        note_from(&v, id).map_err(save_error)
+    }
+
     /// Search notes by meaning (semantic `near_text`) across every vault this
     /// key can read, or one `vault`. Falls back to keyword full-text search
     /// when the hub or vault has no embedding provider. Read-only.
@@ -324,6 +394,8 @@ impl VaultClient {
         vault: Option<&str>,
         query: &str,
         limit: usize,
+        mode: Option<&str>,
+        path_prefix: Option<&str>,
     ) -> Result<Vec<NoteHit>> {
         let q = query.trim();
         if q.is_empty() || q.len() > 500 {
@@ -335,18 +407,19 @@ impl VaultClient {
             }
         }
         let limit = limit.clamp(1, 50);
-        let mut args = json!({
-            "include_content": true,
-            "content_length": 600,
-            "include_metadata": false,
-            "limit": limit,
-        });
-        if let Some(v) = vault {
-            args["vault"] = json!(v);
+        let args = search_args(vault, q, limit, mode, path_prefix)?;
+        if mode == Some("keyword") {
+            let v = self.call("query-notes", args).await?;
+            let hits = hits_from(&v, vault, "keyword", limit);
+            if hits.is_empty() {
+                check_vault_errors(&v)?;
+            }
+            return Ok(hits);
         }
-        let mut semantic = args.clone();
-        semantic["semantic"] = json!(true);
-        semantic["near_text"] = json!(q);
+        let semantic = args.clone();
+        let mut args = args;
+        args.as_object_mut().unwrap().remove("semantic");
+        args.as_object_mut().unwrap().remove("near_text");
         // Transport/auth failures surface at once (no second 60 s wait).
         // A tool-level error means meaning search isn't available at all:
         // keyword-search everything instead.
@@ -358,9 +431,7 @@ impl VaultClient {
                 let v = self.call("query-notes", kw).await?;
                 let hits = hits_from(&v, vault, "keyword", limit);
                 return match vault_errors(&v).into_iter().next() {
-                    Some((name, e)) if hits.is_empty() => {
-                        Err(Error::Vault(format!("{name}: {e}")))
-                    }
+                    Some((name, e)) if hits.is_empty() => Err(Error::Vault(format!("{name}: {e}"))),
                     _ => Ok(hits),
                 };
             }
@@ -390,6 +461,131 @@ impl VaultClient {
         hits.truncate(limit);
         Ok(hits)
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct NotePath {
+    pub id: String,
+    pub path: String,
+    #[serde(rename = "updatedAt", default)]
+    pub updated_at: Option<String>,
+}
+
+fn check_vault(vault: &str) -> Result<()> {
+    if valid_vault_name(vault) {
+        Ok(())
+    } else {
+        Err(Error::Invalid("bad vault name".into()))
+    }
+}
+
+pub fn validate_note_path(path: &str) -> Result<()> {
+    if path.trim().is_empty()
+        || path.len() > 512
+        || path.starts_with('/')
+        || path.split('/').any(|s| s == ".." || s.is_empty())
+        || path.contains('\0')
+    {
+        return Err(Error::Invalid(
+            "path must be 1..512 bytes, relative, with no empty or .. segments".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn check_vault_errors(v: &Value) -> Result<()> {
+    if let Some((name, error)) = vault_errors(v).into_iter().next() {
+        return Err(Error::Vault(format!("{name}: {error}")));
+    }
+    Ok(())
+}
+
+fn vault_names(v: &Value) -> Result<Vec<String>> {
+    let mut names: Vec<String> = v["vaults_queried"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .filter(|s| valid_vault_name(s))
+        .map(str::to_string)
+        .collect();
+    names.extend(
+        v["results"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|r| r.get("error").is_none())
+            .filter_map(|r| r["vault"].as_str())
+            .filter(|s| valid_vault_name(s))
+            .map(str::to_string),
+    );
+    // A named error is not a readable vault, even if included in queried names.
+    let errors = vault_errors(v);
+    names.retain(|n| !errors.iter().any(|(failed, _)| failed == n));
+    names.sort();
+    names.dedup();
+    if names.is_empty() {
+        check_vault_errors(v)?;
+    }
+    Ok(names)
+}
+
+fn save_error(e: Error) -> Error {
+    let text = e.to_string();
+    let lower = text.to_lowercase();
+    if lower.contains("conflict") || lower.contains("updated_at") {
+        Error::Conflict(text)
+    } else {
+        e
+    }
+}
+
+fn save_args(
+    vault: &str,
+    id: &str,
+    content: &str,
+    stamp: Option<&str>,
+    force: bool,
+) -> Result<Value> {
+    let mut args = json!({"vault": vault, "id": id, "content": content});
+    if force {
+        args["force"] = json!(true);
+    } else {
+        let stamp = stamp
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| Error::Invalid("missing update timestamp; reload the note".into()))?;
+        args["if_updated_at"] = json!(stamp);
+    }
+    Ok(args)
+}
+
+fn search_args(
+    vault: Option<&str>,
+    query: &str,
+    limit: usize,
+    mode: Option<&str>,
+    prefix: Option<&str>,
+) -> Result<Value> {
+    let mut args = json!({"include_content": true, "content_length": 600, "include_metadata": false, "limit": limit.clamp(1, 50)});
+    if let Some(v) = vault {
+        args["vault"] = json!(v);
+    }
+    if let Some(p) = prefix.filter(|p| !p.is_empty()) {
+        args["path_prefix"] = json!(p);
+    }
+    match mode.unwrap_or("meaning") {
+        "keyword" => args["search"] = json!(query),
+        "meaning" => {
+            args["semantic"] = json!(true);
+            args["near_text"] = json!(query);
+        }
+        _ => {
+            return Err(Error::Invalid(
+                "search mode must be meaning or keyword".into(),
+            ))
+        }
+    }
+    Ok(args)
 }
 
 /// One search result for the app's Notes section.
@@ -780,5 +976,236 @@ mod tests {
         assert!(ticket_url("https://hub.example", "unforced", &other).is_err());
         let nested = json!({"url": "https://hub.example/vault/unforced/tickets/a/b"});
         assert!(ticket_url("https://hub.example", "unforced", &nested).is_err());
+    }
+}
+
+#[cfg(test)]
+mod surface_tests {
+    use super::*;
+
+    #[test]
+    fn search_modes_and_scope_arguments() {
+        let meaning =
+            search_args(Some("scope-test"), "hello", 100, None, Some("Projects/")).unwrap();
+        assert_eq!(meaning["semantic"], true);
+        assert_eq!(meaning["near_text"], "hello");
+        assert_eq!(meaning["path_prefix"], "Projects/");
+        assert_eq!(meaning["vault"], "scope-test");
+        assert_eq!(meaning["limit"], 50);
+        assert!(meaning.get("search").is_none());
+        let keyword = search_args(None, "hello", 0, Some("keyword"), None).unwrap();
+        assert_eq!(keyword["search"], "hello");
+        assert_eq!(keyword["limit"], 1);
+        for key in ["vault", "path_prefix", "semantic", "near_text"] {
+            assert!(keyword.get(key).is_none());
+        }
+        assert!(search_args(None, "q", 1, Some("bad"), None).is_err());
+    }
+
+    #[test]
+    fn save_concurrency_and_force_arguments() {
+        let normal = save_args("scope-test", "id", "mine", Some("t1"), false).unwrap();
+        assert_eq!(normal["if_updated_at"], "t1");
+        assert!(normal.get("force").is_none());
+        let forced = save_args("scope-test", "id", "mine", Some("stale"), true).unwrap();
+        assert_eq!(forced["force"], true);
+        assert!(forced.get("if_updated_at").is_none());
+        assert!(save_args("scope-test", "id", "mine", None, false).is_err());
+        for error in ["Conflict", "if_updated_at does not match"] {
+            assert!(save_error(Error::Vault(error.into()))
+                .to_string()
+                .starts_with("conflict:"));
+        }
+        assert!(!save_error(Error::Vault("permission denied".into()))
+            .to_string()
+            .starts_with("conflict:"));
+    }
+
+    #[test]
+    fn discovery_shapes_and_path_validation() {
+        assert_eq!(
+            vault_names(&json!({"vaults_queried": ["z", "a", "z"]})).unwrap(),
+            ["a", "z"]
+        );
+        assert_eq!(vault_names(&json!({"vaults_queried": 2, "results": [{"vault": "ok", "notes": []}, {"vault": "denied", "error": "forbidden"}]})).unwrap(), ["ok"]);
+        assert!(vault_names(&json!({"results": [{"vault": "bad", "error": "offline"}]})).is_err());
+        for path in ["", "   ", "/root", "a/../b", "a//b", "a/", "a\0b"] {
+            assert!(validate_note_path(path).is_err(), "{path}");
+        }
+        assert!(validate_note_path(&"é".repeat(257)).is_err());
+        assert!(validate_note_path(&"é".repeat(256)).is_ok());
+        assert!(validate_note_path("Probe/surface").is_ok());
+    }
+
+    // A local scripted MCP door verifies the public client, not just helpers.
+    fn server(
+        script: Vec<(&'static str, Value, Value)>,
+    ) -> (VaultClient, std::thread::JoinHandle<()>) {
+        use std::io::{BufRead, Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let hub = format!("http://{}", listener.local_addr().unwrap());
+        let handle = std::thread::spawn(move || {
+            for (tool, expected, result) in script {
+                let (mut stream, _) = listener.accept().unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
+                let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
+                let mut length = 0;
+                let mut signed = false;
+                loop {
+                    let mut line = String::new();
+                    reader.read_line(&mut line).unwrap();
+                    if line == "\r\n" || line.is_empty() {
+                        break;
+                    }
+                    let lower = line.to_lowercase();
+                    if let Some(n) = lower.strip_prefix("content-length:") {
+                        length = n.trim().parse().unwrap();
+                    }
+                    if lower.starts_with("authorization: nostr ") {
+                        signed = true;
+                    }
+                }
+                assert!(signed);
+                let mut body = vec![0; length];
+                reader.read_exact(&mut body).unwrap();
+                let body: Value = serde_json::from_slice(&body).unwrap();
+                assert_eq!(body["params"]["name"], tool);
+                assert_eq!(body["params"]["arguments"], expected);
+                let body = json!({"jsonrpc": "2.0", "id": 1, "result": {"content": [{"type": "text", "text": result.to_string()}]}}).to_string();
+                write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).unwrap();
+            }
+        });
+        let client = VaultClient::new(
+            VaultConfig {
+                hub,
+                vault: "scope-test".into(),
+            },
+            Keys::generate(),
+        )
+        .unwrap();
+        (client, handle)
+    }
+
+    #[tokio::test]
+    async fn path_pagination_and_named_fanout() {
+        crate::init_crypto();
+        let page: Vec<Value> = (0..500)
+            .map(|i| json!({"id": i.to_string(), "path": format!("P/{i}"), "updatedAt": "t1"}))
+            .collect();
+        let args = |offset| json!({"vault": "scope-test", "include_content": false, "include_metadata": false, "limit": 500, "offset": offset, "sort": "asc"});
+        let (client, handle) = server(vec![
+            (
+                "query-notes",
+                args(0),
+                json!({"results": [{"vault": "scope-test", "notes": page}]}),
+            ),
+            (
+                "query-notes",
+                args(500),
+                json!({"results": [{"vault": "scope-test", "notes": [{"id": "last", "path": "P/last", "updatedAt": "t2"}]}]}),
+            ),
+        ]);
+        let paths = client.list_paths("scope-test").await.unwrap();
+        assert_eq!(paths.len(), 501);
+        assert_eq!(paths[500].updated_at.as_deref(), Some("t2"));
+        handle.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn path_cap_and_mutation_contract() {
+        crate::init_crypto();
+        let page: Vec<Value> = (0..500)
+            .map(|i| json!({"id": i.to_string(), "path": format!("P/{i}")}))
+            .collect();
+        let script = (0..40).map(|i| (
+            "query-notes",
+            json!({"vault": "scope-test", "include_content": false, "include_metadata": false, "limit": 500, "offset": i * 500, "sort": "asc"}),
+            json!({"notes": page}),
+        )).collect();
+        let (client, handle) = server(script);
+        assert_eq!(client.list_paths("scope-test").await.unwrap().len(), 20_000);
+        handle.join().unwrap();
+
+        let note = json!({"id": "n", "path": "Probe/n", "content": "initial", "updatedAt": "t1"});
+        let (client, handle) = server(vec![
+            (
+                "create-note",
+                json!({"vault": "scope-test", "path": "Probe/n", "content": "initial", "if_exists": "error"}),
+                note.clone(),
+            ),
+            (
+                "update-note",
+                save_args("scope-test", "n", "edit", Some("t1"), false).unwrap(),
+                json!({"error": "conflict: updated_at differs"}),
+            ),
+            (
+                "update-note",
+                save_args("scope-test", "n", "edit", None, true).unwrap(),
+                json!({"id": "n", "path": "Probe/n", "content": "edit", "updatedAt": "t2"}),
+            ),
+        ]);
+        assert_eq!(
+            client
+                .create_note("scope-test", "Probe/n", "initial")
+                .await
+                .unwrap(),
+            note
+        );
+        assert!(client
+            .save_note("scope-test", "n", "edit", Some("t1"), false)
+            .await
+            .unwrap_err()
+            .to_string()
+            .starts_with("conflict:"));
+        assert_eq!(
+            client
+                .save_note("scope-test", "n", "edit", None, true)
+                .await
+                .unwrap()["updatedAt"],
+            "t2"
+        );
+        // Invalid paths and vault names must fail before any network request.
+        assert!(client
+            .create_note("scope-test", "../bad", "")
+            .await
+            .is_err());
+        assert!(client.list_paths("../bad").await.is_err());
+        handle.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn keyword_skips_semantic_and_meaning_fallback_keeps_prefix() {
+        crate::init_crypto();
+        let kw = search_args(Some("scope-test"), "hi", 5, Some("keyword"), Some("P/")).unwrap();
+        let meaning = search_args(Some("scope-test"), "hi", 5, None, Some("P/")).unwrap();
+        let result = json!({"results": [{"vault": "scope-test", "notes": [{"id": "n", "path": "P/n", "content": "hello"}]}]});
+        let (client, handle) = server(vec![
+            ("query-notes", kw.clone(), result.clone()),
+            (
+                "query-notes",
+                meaning,
+                json!({"results": [{"vault": "scope-test", "error": "semantic_unavailable"}]}),
+            ),
+            ("query-notes", kw, result),
+        ]);
+        assert_eq!(
+            client
+                .search_notes(Some("scope-test"), "hi", 5, Some("keyword"), Some("P/"))
+                .await
+                .unwrap()[0]
+                .mode,
+            "keyword"
+        );
+        assert_eq!(
+            client
+                .search_notes(Some("scope-test"), "hi", 5, None, Some("P/"))
+                .await
+                .unwrap()[0]
+                .mode,
+            "keyword"
+        );
+        handle.join().unwrap();
     }
 }

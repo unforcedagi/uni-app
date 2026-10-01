@@ -85,6 +85,9 @@ pub enum Error {
     /// Parachute vault request failed.
     #[error("vault: {0}")]
     Vault(String),
+    /// Optimistic concurrency rejected a note edit.
+    #[error("conflict: {0}")]
+    Conflict(String),
 }
 
 /// Result alias.
