@@ -516,6 +516,13 @@ h1 { font-family: var(--serif); font-weight: 500; font-size: 34px; line-height: 
 .vault-note small, .vault-heading { color: var(--muted); }
 .vault-heading { display: flex; align-items: center; justify-content: space-between; padding: 0 14px; }
 .vault-heading h2 { font-size: 14px; }
+.vault-toggle { display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: 44px; padding: 6px 14px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--muted); text-align: left; font-size: 13px; }
+.vault-toggle:hover, .vault-toggle:focus-visible { background: var(--accent-soft); color: var(--text); }
+.vault-toggle.selected { background: var(--surface); color: var(--text); }
+.vault-toggle::after { content: "⌄"; font-size: 17px; transform: rotate(-90deg); }
+.vault-toggle[aria-expanded="true"]::after { transform: none; }
+#other-vault-list { max-height: min(40dvh, 320px); overflow-y: auto; overscroll-behavior: contain; }
+#other-vault-list[hidden] { display: none; }
 .note-bar { flex-wrap: wrap; }
 .note-editor { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: auto; padding: 12px max(16px, calc((100% - 900px) / 2)); gap: 10px; }
 .editor-actions { display: flex; gap: 8px; position: sticky; top: 0; background: var(--bg); z-index: 1; padding: 4px 0; }

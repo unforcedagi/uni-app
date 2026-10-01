@@ -47,6 +47,7 @@ type SyncResult = { pubkey: string; total_items: number; channel_errors: Record<
 type PendingFile = { id: string; file: File; preview: string | null; state: "uploading" | "ready" | "error"; media?: MediaRef; error?: string; voice?: "transcribing" | "done" | "failed" };
 const MAX_FILE_BYTES = 25 * 1024 * 1024;
 const MAX_ATTACHMENTS = 20;
+const OTHER_VAULTS_KEY = "uni:other-vaults-expanded";
 
 const time = (ts: number) => new Date(ts * 1000).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 const HEX_KEY = /^[0-9a-f]{64}$/i;
@@ -139,6 +140,9 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const [vaults, setVaults] = useState<string[]>([]);
   const [vaultError, setVaultError] = useState<string | null>(null);
   const [vaultRefresh, setVaultRefresh] = useState(0);
+  const [otherVaultsExpanded, setOtherVaultsExpanded] = useState(() => {
+    try { return localStorage.getItem(OTHER_VAULTS_KEY) === "true"; } catch { return false; }
+  });
   const [searchScope, setSearchScope] = useState({ vault: "", prefix: "" });
   const [initialAliases] = useState<Record<string, string>>(() => {
     try { const value = JSON.parse(localStorage.getItem(ALIASES_KEY) ?? "{}"); return value && typeof value === "object" && !Array.isArray(value) ? Object.fromEntries(Object.entries(value).filter(([, v]) => typeof v === "string")) as Record<string, string> : {}; } catch { return {}; }
@@ -1254,6 +1258,17 @@ function Conversations({ onForget }: { onForget: () => void }) {
     openTarget(target, asNew ? "new" : "focus");
   }
   const journalTab = tabs.tabs.find((t) => t.kind === "journal");
+  const primaryVault = vaults.includes("uni") ? "uni" : null;
+  const otherVaults = vaults.filter((vault) => vault !== "uni");
+  const activeOtherVault = active?.kind === "vault" && active.vault && active.vault !== "uni" && otherVaults.includes(active.vault) ? active.vault : null;
+  function toggleOtherVaults() {
+    const next = !otherVaultsExpanded;
+    setOtherVaultsExpanded(next);
+    try { localStorage.setItem(OTHER_VAULTS_KEY, String(next)); } catch { /* Storage may be unavailable. */ }
+  }
+  const vaultRow = (vault: string) => <button key={vault} className={`room ${active?.kind === "vault" && active.vault === vault ? "selected" : ""}`} aria-label={vault}
+    aria-current={active?.kind === "vault" && active.vault === vault ? "page" : undefined}
+    onClick={() => openTarget({ kind: "vault", vault, title: vault }, "new")}><span className="avatar" aria-hidden="true">▤</span><span className="room-text"><strong>{vault}</strong></span></button>;
   const recordingTab = recordingOrigin.current;
   const pill = recordingTab && recorder.busy ? { title: recordingTab.title, elapsed: recorder.elapsed, tabId: recordingTab.tabId, stop: recorder.stop, phase: recorder.phase } :
     journalRecording && journalTab ? { title: "Journal", elapsed: journalRecording.elapsed, tabId: journalTab.id, stop: journalRecording.stop, phase: "recording" as const } : null;
@@ -1276,7 +1291,13 @@ function Conversations({ onForget }: { onForget: () => void }) {
       </button>
       <section className="vault-sidebar" aria-label="Vaults"><div className="vault-heading"><h2>Vaults</h2><button className="note-quiet" onClick={() => setVaultRefresh((n) => n + 1)}>Refresh</button></div>
         {vaultError && <p className="error" role="alert">{vaultError}</p>}
-        {vaults.map((vault) => <button key={vault} className={`room ${active?.kind === "vault" && active.vault === vault ? "selected" : ""}`} onClick={() => openTarget({ kind: "vault", vault, title: vault }, "new")}><span className="avatar">▤</span><span className="room-text"><strong>{vault}</strong></span></button>)}
+        {primaryVault && vaultRow(primaryVault)}
+        {otherVaults.length > 0 && <>
+          <button className={`vault-toggle ${activeOtherVault ? "selected" : ""}`} type="button" aria-expanded={otherVaultsExpanded} aria-controls="other-vault-list"
+            aria-label={`Other vaults (${otherVaults.length})${activeOtherVault ? `, current vault ${activeOtherVault}` : ""}`}
+            onClick={toggleOtherVaults}>Other vaults ({otherVaults.length})</button>
+          <div id="other-vault-list" hidden={!otherVaultsExpanded}>{otherVaults.map(vaultRow)}</div>
+        </>}
       </section>
       <nav>{rooms.map((room) => <button key={room.id} className={`room ${channel === room.id ? "selected" : ""}`} onClick={(e) => sidebarClick(roomTarget(room.id), e)}
         onPointerDown={(e) => { if (e.pointerType === "touch") startLongPress(roomTarget(room.id)); }} onPointerUp={endLongPress} onPointerCancel={endLongPress} onPointerLeave={endLongPress}
