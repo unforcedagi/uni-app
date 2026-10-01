@@ -49,13 +49,7 @@ sending disable it; the current recording's Stop button stays enabled. The initi
 render condition, disabled rules, and handler; the review correction below guards
 the handler and disables Send throughout every non-idle recorder phase.
 
-**Limit:** Mac is the reported failing device and remains inaccessible for native
-picker/menu reproduction. Pixel candidate **0.1.23** was physically tested, but that
-is not evidence of the Mac root cause. The initial investigation below did not
-reproduce the reported native menu failure. Chromium center
-and mobile edge taps passed even before the fix. The desktop hit-testing failure is
-proven; it must not be presented as proof of either physical device symptom's cause or resolution.
-No speculative blur or user-activation workaround was added.
+**Current device boundary:** Aaron's reported `+` failure is on the active MacBook, which we no longer access per his direction. A separate Mac mini WebKit browser run now reproduces the same two dead menu actions against the full published-source App; see the WebKit section below. This proves a WebKit failure mechanism and a regression fix in an isolated test environment, **not** behavior of the installed app on Aaron's MacBook. Chromium center taps passed before this WebKit fix, so its green results alone were insufficient.
 
 ## Regression suite
 
@@ -172,7 +166,7 @@ The earlier Rust/build/device results are historical initial-hotfix evidence, no
 new verification of this correction. Mac native picker/menu proof remains unavailable.
 
 
-## P2 re-review correction at 4c9b1ab
+## P2 re-review correction at 6b224eb
 
 Send completion compared the stored text with the submitted string. Deleting and
 retyping that same string during a held send therefore erased a new draft. Each
@@ -208,3 +202,11 @@ P2 validation:
 - `pnpm test`: all 17 test scripts passed.
 - Production Vite build in the browser harness: passed; existing large-chunk warning.
 - `git diff --check`: passed.
+
+## WebKit menu root cause and isolated regression (2026-10-01)
+
+After Aaron stopped active-Mac access, we first reran the Linux Chromium suite (34/34); it still could not reproduce centered menu clicks. Linux Playwright WebKit downloaded but could not launch with this host's ICU/libxml/flite versions. We then used the **retired Mac mini only as an isolated WebKit test runner**, copying a clean archive of candidate `6b224eb` into `~/uni-qa/composer-candidate`; it was not a source of app data or a change to Aaron's active Mac.
+
+Playwright WebKit 26.6 on macOS 26.3, running the full production App/CSS with only Tauri IPC stubbed, failed both center actions **before** the new fix: Mention left the draft `hello ` instead of `hello @`; Attach emitted no native `filechooser`. The captured sequence was `pointerdown`/`mousedown` on the intended menu button, then `focusout` on the focused menu item with **`relatedTarget=null`**, then `pointerup`/`mouseup` on the underlying DIV/FOOTER and **no button click**. React's container `onBlur` interpreted the null related target as focus leaving and unmounted the menu on mousedown. This is distinct from the Chromium edge-hit CSS regression. The same initial WebKit run also had recorder failures because the WebKit harness lacks Chromium's fake microphone device; those do not implicate the menu fix.
+
+A single scoped change, `onMouseDown={(e) => e.preventDefault()}` on the menu container, prevents that default WebKit blur until the button click. The existing document `pointerdown` outside dismiss, Escape handler, and keyboard focus behavior remain. The same two center tests turned green, and the final tracked `playwright.webkit.config.ts` menu-only suite passed **7/7** on the isolated mini (Mention, Attach native chooser/cancel/selection, keyboard, and held edge presses). On uni-1, `pnpm test:composer` passed **34/34**, `pnpm typecheck` and all 17 unit scripts passed. No message was sent, no active Mac access or app replacement occurred. This is WebKit engine regression proof, not an installed-app MacBook claim; release requires independent review and normal publication verification.

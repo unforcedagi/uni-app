@@ -104,7 +104,10 @@ function ComposerMenu({ onMention, onAttach, sending }: { onMention: () => void;
       onKeyDown={(e) => { if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); setOpen(true); } }}>
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
     </button>
+    {/* WebKit can blur the focused item with relatedTarget=null on mousedown;
+        preserve focus through click so onBlur cannot unmount the action target. */}
     {open && <div ref={menu} id={menuId} className="compose-menu" role="menu" aria-label="Message options"
+      onMouseDown={(e) => e.preventDefault()}
       onKeyDown={(e) => {
         const items = Array.from(e.currentTarget.querySelectorAll<HTMLButtonElement>("button:not(:disabled)"));
         const index = items.indexOf(document.activeElement as HTMLButtonElement);
