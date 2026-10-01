@@ -34,7 +34,7 @@ test.beforeEach(async ({ page }) => {
           case 'identity_status': return { paired: true, pubkey: 'a'.repeat(64) };
           case 'get_identity': return 'a'.repeat(64);
           case 'get_npub': return 'test';
-          case 'get_rooms': return [{ id: 'test', name: 'Test room', unread: 0 }];
+          case 'get_rooms': return [{ id: 'test', name: 'Test room', unread: 0 }, { id: 'other', name: 'Other room', unread: 0 }];
           case 'get_members': return [{ pubkey: 'b'.repeat(64), name: 'Test member' }];
           case 'get_messages': case 'vault_list': return [];
           case 'journal_config': return { hub: 'test' };
@@ -201,4 +201,117 @@ test('Send retains text and attachment payload and disables mic while sending', 
   await expect(input).toHaveValue('');
   await expect(page.locator('.compose-file')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Record a voice message', exact: true })).toBeEnabled();
+});
+
+for (const submit of ['Enter', 'Send button']) {
+  test(`Enter is blocked through recorder phases, then ${submit} sends once`, async ({ page }) => {
+    const input = page.getByRole('textbox', { name: 'Message Test room' });
+    const send = page.getByRole('button', { name: 'Send message', exact: true });
+    await input.fill('draft');
+    await page.evaluate(() => {
+      const w = window as any;
+      const getUserMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+      navigator.mediaDevices.getUserMedia = async constraints => {
+        // Exercise the synchronous start boundary before React renders starting.
+        document.querySelector('textarea')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+        await new Promise<void>(resolve => { w.allowRecording = resolve; });
+        return getUserMedia(constraints);
+      };
+      const stop = MediaRecorder.prototype.stop;
+      MediaRecorder.prototype.stop = function () {
+        const onstop = this.onstop;
+        this.onstop = event => { w.finishRecording = () => onstop?.call(this, event); };
+        stop.call(this);
+      };
+      w.holdSend = true;
+    });
+    const posts = () => page.evaluate(() => (window as any).calls.filter((c: any) => c.cmd === 'post_message'));
+    await press(page, page.getByRole('button', { name: 'Record a voice message', exact: true }));
+    await expect(send).toBeDisabled();
+    await input.press('Enter'); // starting: microphone permission/device promise is pending
+    expect(await posts()).toHaveLength(0);
+    await expect(input).toHaveValue('draft');
+    await page.evaluate(() => (window as any).allowRecording());
+    const stop = page.getByRole('button', { name: 'Stop recording voice message', exact: true });
+    await expect(stop).toBeEnabled();
+    await input.press('Enter'); // recording
+    expect(await posts()).toHaveLength(0);
+    await expect(input).toHaveValue('draft');
+    await press(page, stop);
+    await page.waitForFunction(() => !!(window as any).finishRecording);
+    await expect(send).toBeDisabled();
+    await input.press('Enter'); // finishing: native onstop completion is held
+    expect(await posts()).toHaveLength(0);
+    await expect(input).toHaveValue('draft');
+    await page.evaluate(() => (window as any).finishRecording());
+    await expect(input).toHaveValue('draft\nvoice transcript');
+    await expect(send).toBeEnabled();
+    expect(await posts()).toHaveLength(0); // Completion itself must never submit.
+    if (submit === 'Enter') await input.press('Enter');
+    else await press(page, send);
+    await input.press('Enter'); // Repeated submission while IPC is pending.
+    const calls = await posts();
+    expect(calls).toHaveLength(1);
+    expect(calls[0].args.body).toBe('draft\nvoice transcript');
+    expect(calls[0].args.media).toHaveLength(1);
+    await page.evaluate(() => (window as any).finishSend());
+    await expect(input).toHaveValue('');
+    await expect(page.locator('.compose-file')).toHaveCount(0);
+    expect(await posts()).toHaveLength(1);
+  });
+}
+
+test('Same-turn Enter submissions send once and preserve text edited during send', async ({ page }) => {
+  const input = page.getByRole('textbox', { name: 'Message Test room' });
+  await input.fill('first draft');
+  await page.evaluate(() => {
+    (window as any).holdSend = true;
+    const input = document.querySelector('textarea')!;
+    for (let i = 0; i < 2; i++) input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  });
+  expect(await page.evaluate(() => (window as any).calls.filter((c: any) => c.cmd === 'post_message'))).toHaveLength(1);
+  await input.fill('next draft');
+  await page.evaluate(() => (window as any).finishSend());
+  await expect(page.getByRole('button', { name: 'Send message', exact: true })).toBeEnabled();
+  await expect(input).toHaveValue('next draft');
+  await input.press('Enter');
+  expect(await page.evaluate(() => (window as any).calls.filter((c: any) => c.cmd === 'post_message').map((c: any) => c.args.body))).toEqual(['first draft', 'next draft']);
+  await page.evaluate(() => (window as any).finishSend());
+  await expect(input).toHaveValue('');
+});
+
+test('Recording blocks another room and send completion preserves that room draft', async ({ page }) => {
+  const input = page.getByRole('textbox', { name: 'Message Test room' });
+  const switchRoom = async (name: string) => {
+    if (test.info().project.name === 'mobile') await press(page, page.getByRole('button', { name: 'Back to conversations', exact: true }));
+    await press(page, page.locator('.rooms nav button').filter({ hasText: name }));
+  };
+  await input.fill('draft');
+  await press(page, page.getByRole('button', { name: 'Record a voice message', exact: true }));
+  await expect(page.getByRole('button', { name: 'Stop recording voice message', exact: true })).toBeEnabled();
+  await switchRoom('Other room');
+  const other = page.getByRole('textbox', { name: 'Message Other room' });
+  await other.fill('draft');
+  await other.press('Enter');
+  expect(await page.evaluate(() => (window as any).calls.filter((c: any) => c.cmd === 'post_message'))).toHaveLength(0);
+  await switchRoom('Test room');
+  await press(page, page.getByRole('button', { name: 'Stop recording voice message', exact: true }));
+  await expect(input).toHaveValue('draft\nvoice transcript');
+  await expect(page.getByRole('button', { name: 'Send message', exact: true })).toBeEnabled();
+  await page.evaluate(() => { (window as any).holdSend = true; });
+  await input.press('Enter');
+  await switchRoom('Other room');
+  // Matching text in another scope must not be mistaken for the submitted draft.
+  await other.fill('draft\nvoice transcript');
+  await page.evaluate(() => (window as any).finishSend());
+  await expect(page.getByRole('button', { name: 'Send message', exact: true })).toBeEnabled();
+  await expect(other).toHaveValue('draft\nvoice transcript');
+  await expect(page.locator('.compose-file')).toHaveCount(0);
+  await switchRoom('Test room');
+  await expect(input).toHaveValue('');
+  await expect(page.locator('.compose-file')).toHaveCount(0);
+  const calls = await page.evaluate(() => (window as any).calls.filter((c: any) => c.cmd === 'post_message'));
+  expect(calls).toHaveLength(1);
+  expect(calls[0].args.channel).toBe('test');
+  expect(calls[0].args.media).toHaveLength(1);
 });
