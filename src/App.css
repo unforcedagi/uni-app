@@ -219,6 +219,8 @@ h1 { font-family: var(--serif); font-weight: 500; font-size: 34px; line-height: 
 .compose-menu { position: absolute; z-index: 50; left: 0; bottom: calc(100% + 8px); width: 200px; padding: 4px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); box-shadow: var(--shadow-lift); }
 .compose-menu button { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; padding: 8px 10px; border: 0; border-radius: 6px; background: transparent; text-align: left; font-size: 14px; }
 .compose-menu button:hover:not(:disabled), .compose-menu button:focus-visible { background: var(--accent-soft); }
+/* Keep the pointer hit target stable through press/release at item edges. */
+.compose-menu button:active:not(:disabled) { transform: none; }
 .compose-menu button span { width: 20px; text-align: center; }
 .compose-hint { color: var(--muted); font-size: 11px; margin: 6px 0 0 4px; opacity: .85; }
 .link { background: transparent; border: 0; color: var(--accent); font-size: 11px; padding: 0; text-decoration: underline; text-underline-offset: 2px; }
