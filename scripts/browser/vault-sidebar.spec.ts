@@ -1,9 +1,15 @@
 import { test, expect, type Page } from '@playwright/test';
 
-async function boot(page: Page, fixture = 'five') {
+async function boot(page: Page, fixture = 'five', query = '') {
   await page.addInitScript(() => {
     const w = window as any;
-    const names = new URLSearchParams(location.search).get('vaultFixture') === 'without-uni'
+    const fixture = new URLSearchParams(location.search).get('vaultFixture');
+    if (new URLSearchParams(location.search).get('brokenStorage')) {
+      Storage.prototype.getItem = () => { throw new Error('denied'); };
+      Storage.prototype.setItem = () => { throw new Error('denied'); };
+    }
+    const names = fixture === 'many' ? ['uni', ...Array.from({ length: 20 }, (_, i) => `vault-${String(i + 1).padStart(2, '0')}`)]
+      : fixture === 'without-uni'
       ? ['parachute', 'unforced'] : new URLSearchParams(location.search).get('vaultFixture') === 'empty'
       ? [] : ['parachute', 'scope-test', 'unforced', 'uni', 'uni-1'];
     w.__TAURI_INTERNALS__ = {
@@ -26,7 +32,7 @@ async function boot(page: Page, fixture = 'five') {
     };
     w.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} };
   });
-  await page.goto(`/?vaultFixture=${fixture}`);
+  await page.goto(`/?vaultFixture=${fixture}${query}`);
   if (test.info().project.name === 'phone-390') await page.getByRole('button', { name: 'Back to conversations' }).click();
   await expect(page.getByRole('region', { name: 'Vaults' })).toBeVisible();
 }
@@ -62,6 +68,7 @@ for (const fixture of ['five', 'without-uni', 'empty']) {
       await expect(vaultButton(page, 'parachute')).toHaveClass(/selected/);
       await toggle.click();
       await expect(toggle).toHaveClass(/selected/);
+      await expect(toggle).toHaveAccessibleName(`Other vaults (${fixture === 'five' ? 4 : 2}), current vault parachute`);
     }
   });
 }
@@ -82,4 +89,35 @@ test('Other vault expansion survives reload and remains keyboard operable', asyn
   await page.reload();
   if (test.info().project.name === 'phone-390') await page.getByRole('button', { name: 'Back to conversations' }).click();
   await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+});
+
+test('Twenty other vaults stay reachable inside the viewport and targets are 44px', async ({ page }) => {
+  await boot(page, 'many');
+  const toggle = page.getByRole('region', { name: 'Vaults' }).getByRole('button', { name: 'Other vaults (20)' });
+  expect((await toggle.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  await toggle.click();
+  const last = vaultButton(page, 'vault-20');
+  await last.scrollIntoViewIfNeeded();
+  const box = (await last.boundingBox())!;
+  expect(box.y).toBeGreaterThanOrEqual(0);
+  expect(box.y + box.height).toBeLessThanOrEqual(page.viewportSize()!.height);
+  await last.click();
+  if (test.info().project.name === 'phone-390') await expect(page.getByRole('region', { name: 'Vault vault-20' })).toBeVisible();
+  else await expect(last).toHaveClass(/selected/);
+});
+
+test('Unavailable storage leaves vaults collapsed but operable', async ({ page }) => {
+  await boot(page, 'five', '&brokenStorage=1');
+  const toggle = page.getByRole('region', { name: 'Vaults' }).getByRole('button', { name: 'Other vaults (4)' });
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  await expect(vaultButton(page, 'uni-1')).toBeVisible();
+});
+
+test('Search still reaches every vault', async ({ page }) => {
+  await boot(page);
+  await page.getByRole('button', { name: 'Search messages and notes' }).click();
+  const options = await page.locator('select option').allTextContents();
+  for (const name of ['parachute', 'scope-test', 'unforced', 'uni', 'uni-1']) expect(options).toContain(name);
 });

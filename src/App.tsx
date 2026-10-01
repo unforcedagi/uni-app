@@ -1234,6 +1234,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const journalTab = tabs.tabs.find((t) => t.kind === "journal");
   const primaryVault = vaults.includes("uni") ? "uni" : null;
   const otherVaults = vaults.filter((vault) => vault !== "uni");
+  const activeOtherVault = active?.kind === "vault" && active.vault && active.vault !== "uni" && otherVaults.includes(active.vault) ? active.vault : null;
   function toggleOtherVaults() {
     const next = !otherVaultsExpanded;
     setOtherVaultsExpanded(next);
@@ -1266,7 +1267,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
         {vaultError && <p className="error" role="alert">{vaultError}</p>}
         {primaryVault && vaultRow(primaryVault)}
         {otherVaults.length > 0 && <>
-          <button className={`vault-toggle ${active?.kind === "vault" && active.vault !== "uni" ? "selected" : ""}`} type="button" aria-expanded={otherVaultsExpanded} aria-controls="other-vault-list"
+          <button className={`vault-toggle ${activeOtherVault ? "selected" : ""}`} type="button" aria-expanded={otherVaultsExpanded} aria-controls="other-vault-list"
+            aria-label={`Other vaults (${otherVaults.length})${activeOtherVault ? `, current vault ${activeOtherVault}` : ""}`}
             onClick={toggleOtherVaults}>Other vaults ({otherVaults.length})</button>
           <div id="other-vault-list" hidden={!otherVaultsExpanded}>{otherVaults.map(vaultRow)}</div>
         </>}
