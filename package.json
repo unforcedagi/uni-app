@@ -18,7 +18,8 @@
     "test:uni-actions": "node --experimental-strip-types scripts/uniActions.test.ts && node --experimental-strip-types scripts/ownMessages.test.ts",
     "test:media": "node --experimental-strip-types scripts/media.test.ts",
     "test:vaultlinks": "node --experimental-strip-types scripts/vaultlinks.test.ts",
-    "test:composer": "playwright test"
+    "test:composer": "playwright test",
+    "test:sidebar": "playwright test --config playwright.sidebar.config.ts"
   },
   "dependencies": {
     "@openparachute/surface-client": "0.3.7",
