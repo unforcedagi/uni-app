@@ -160,3 +160,13 @@ releaseRecording(journalRec);
 assert.equal(recordingHolder(), null);
 
 console.log("tabs tests passed");
+
+const vaultTab: TabTarget = { kind: "vault", vault: "scope-test", title: "Scope" };
+assert.ok(sameTarget(vaultTab, { ...vaultTab, title: "Renamed" }));
+assert.ok(!sameTarget(vaultTab, { ...vaultTab, vault: "other" }));
+assert.ok(!sameTarget(vaultTab, note("scope-test")));
+let v = openTab(EMPTY_TABS, vaultTab, "new", id);
+v = openTab(v, vaultTab, "new", id);
+assert.equal(v.tabs.length, 1);
+assert.deepEqual(restoreTabs(serializeTabs(v), []).tabs, v.tabs);
+assert.equal(restoreTabs(JSON.stringify({ tabs: [{ id: "bad", kind: "vault" }] }), []).tabs.length, 0);

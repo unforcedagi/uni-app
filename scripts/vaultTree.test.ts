@@ -1,0 +1,18 @@
+import assert from "node:assert/strict";
+import { buildVaultTree, restoreExpanded } from "../src/vaultTree.ts";
+const paths = ["z", "alpha", "Projects/B", "Projects", "Projects/a", "beta/X/deep", "Beta", "__proto__/safe"];
+const notes = paths.map((path) => ({ id: path, path }));
+const tree = buildVaultTree(notes);
+assert.deepEqual(tree.filter((n) => n.folder).map((n) => n.name), ["__proto__", "beta", "Projects"]);
+assert.deepEqual(tree.filter((n) => !n.folder).map((n) => n.name), ["alpha", "Beta", "z"]);
+const projects = tree.find((n) => n.name === "Projects")!;
+assert.equal(projects.note?.id, "Projects");
+assert.deepEqual(projects.children.map((n) => n.name), ["a", "B"]);
+assert.deepEqual(buildVaultTree([...notes].reverse()), tree);
+assert.equal(buildVaultTree(notes, "PROJECTS/A")[0].children[0].note?.id, "Projects/a");
+assert.equal(buildVaultTree(notes, "missing").length, 0);
+assert.deepEqual(buildVaultTree([]), []);
+assert.deepEqual([...restoreExpanded('["Projects",4,"Projects"]')], ["Projects"]);
+assert.equal(restoreExpanded("garbage").size, 0);
+assert.equal(restoreExpanded("{}").size, 0);
+console.log("vaultTree tests passed");

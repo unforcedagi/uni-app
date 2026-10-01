@@ -4,8 +4,8 @@
 
 import type { VaultRef } from "./vaultlinks.ts";
 
-export type TabKind = "room" | "thread" | "note" | "journal";
-export type Tab = { id: string; kind: TabKind; channel?: string; root?: string; note?: VaultRef; title: string };
+export type TabKind = "room" | "thread" | "note" | "journal" | "vault";
+export type Tab = { id: string; kind: TabKind; channel?: string; root?: string; note?: VaultRef; vault?: string; title: string };
 export type TabTarget = Omit<Tab, "id">;
 /** `recent`: tab ids by last activation, most recent last (drives the cap and close). */
 export type Tabs = { tabs: Tab[]; active: string | null; recent: string[] };
@@ -29,6 +29,7 @@ export function sameTarget(a: TabTarget, b: TabTarget): boolean {
   if (a.kind !== b.kind) return false;
   switch (a.kind) {
     case "journal": return true;
+    case "vault": return a.vault === b.vault;
     case "room": return a.channel === b.channel;
     case "thread": return a.channel === b.channel && a.root === b.root;
     case "note": return !!a.note && !!b.note && a.note.vault === b.note.vault && a.note.ref === b.note.ref;
@@ -131,7 +132,7 @@ export function serializeTabs(s: Tabs): string {
   return JSON.stringify({ v: 1, tabs: s.tabs, active: s.active, recent: s.recent });
 }
 
-const KINDS: TabKind[] = ["room", "thread", "note", "journal"];
+const KINDS: TabKind[] = ["room", "thread", "note", "journal", "vault"];
 const str = (x: unknown): x is string => typeof x === "string" && x.length > 0;
 
 function validTab(x: unknown): Tab | null {
@@ -141,6 +142,7 @@ function validTab(x: unknown): Tab | null {
   const title = typeof t.title === "string" ? t.title : "";
   const kind = t.kind as TabKind;
   if (kind === "journal") return { id: t.id, kind, title: title || "Journal" };
+  if (kind === "vault") return str(t.vault) ? { id: t.id, kind, vault: t.vault, title: title || t.vault } : null;
   if (kind === "note") {
     const n = t.note as Record<string, unknown> | undefined;
     if (!n || !str(n.vault) || !str(n.ref)) return null;
