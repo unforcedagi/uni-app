@@ -5,7 +5,7 @@ export default function SurfaceModal({ children, onCancel }: { children: ReactNo
   const root = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
-    const siblings = [...(root.current?.parentElement?.children ?? [])].filter((el): el is HTMLElement => el instanceof HTMLElement && el !== root.current && !el.inert);
+    const siblings = [...(root.current?.parentElement?.children ?? [])].filter((el): el is HTMLElement => el instanceof HTMLElement && el !== root.current && !el.inert && !el.classList.contains("recording-pill"));
     siblings.forEach((el) => { el.inert = true; });
     root.current?.querySelector<HTMLElement>("input, button")?.focus();
     return () => { siblings.forEach((el) => { el.inert = false; }); previous?.focus(); };
@@ -14,10 +14,10 @@ export default function SurfaceModal({ children, onCancel }: { children: ReactNo
     e.stopPropagation();
     if (e.key === "Escape") { e.preventDefault(); onCancel(); }
     if (e.key === "Tab") {
-      const controls = [...e.currentTarget.querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled), [tabindex='0']")];
-      const first = controls[0], last = controls[controls.length - 1];
-      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last?.focus(); }
-      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus(); }
+      const controls = [...e.currentTarget.querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled), [tabindex='0']"), ...document.querySelectorAll<HTMLElement>(".recording-pill button:not(:disabled)")];
+      const at = controls.indexOf(document.activeElement as HTMLElement);
+      e.preventDefault();
+      controls[(at + (e.shiftKey ? -1 : 1) + controls.length) % controls.length]?.focus();
     }
   }}>{children}</div>;
 }

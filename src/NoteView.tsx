@@ -1,4 +1,5 @@
-import NoteEditor, { readDraft, clearDraft } from "./NoteEditor";
+import NoteEditor from "./NoteEditor";
+import { readDraft, clearDraft } from "./noteDrafts";
 import { editableExtension, beginEdit, isDirty } from "./noteEdit";
 import { backlinks } from "./backlinks";
 import { useEffect, useMemo, useState } from "react";
@@ -16,7 +17,8 @@ function openExternal(url: string) {
   void invoke("open_link", { url }).catch(() => {});
 }
 
-export default function NoteView({ target, hub, onOpen, onBack, backLabel, onTitle, startEditing = false, onDirty, onCreate }: {
+export default function NoteView({ target, hub, onOpen, onBack, backLabel, onTitle, startEditing = false, onDirty, onCreate, onResolved }: {
+  onResolved: (id: string) => void;
   startEditing?: boolean;
   onDirty: (dirty: boolean) => void;
   onCreate: (folder: string) => void;
@@ -40,6 +42,7 @@ export default function NoteView({ target, hub, onOpen, onBack, backLabel, onTit
     setError(null);
     invoke<VaultNote>("vault_note", { vault: target.vault, noteRef: target.ref })
       .then((d) => { if (live) {
+        onResolved(d.note.id);
         setData(d);
         const dirty = isDirty(beginEdit(d.note.content ?? "", d.note.updatedAt ?? null, readDraft(d.vault, d.note.id)));
         if (dirty) setEditing(true);
