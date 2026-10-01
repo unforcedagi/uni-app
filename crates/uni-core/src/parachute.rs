@@ -551,20 +551,22 @@ fn save_error(e: Error) -> Error {
         Error::VaultTool {
             message,
             error_type,
-        } if error_type.as_deref() == Some("conflict") => Error::Conflict(message),
+        } if error_type.as_deref() == Some("conflict") || conflict_message(&message) => {
+            Error::Conflict(message)
+        }
         Error::Vault(message) if conflict_message(&message) => Error::Conflict(message),
         other => other,
     }
 }
 
-fn conflict_message(message: &str) -> bool {
-    let message = message
-        .strip_prefix("MCP error -")
-        .and_then(|rest| {
-            let (code, text) = rest.split_once(": ")?;
-            (!code.is_empty() && code.bytes().all(|b| b.is_ascii_digit())).then_some(text)
-        })
-        .unwrap_or(message);
+fn conflict_message(mut message: &str) -> bool {
+    while let Some(text) = message.strip_prefix("MCP error -").and_then(|rest| {
+        let (code, text) = rest.split_once(": ")?;
+        (!code.is_empty() && code.bytes().all(|b| b.is_ascii_digit())).then_some(text)
+    }) {
+        message = text;
+    }
+    let message = message.strip_prefix("[conflict] ").unwrap_or(message);
     message.starts_with("conflict: note")
 }
 
@@ -1210,14 +1212,23 @@ mod surface_tests {
             json!({"jsonrpc":"2.0","id":1,"error":{"code":-32600,"message":"precondition_required: provide if_updated_at","data":{"error_type":"precondition_required"}}}),
             json!({"http_status":409,"error":"conflict: note n has been modified", "data":{"error_type":"conflict"}}),
             json!({"jsonrpc":"2.0","id":1,"error":{"code":-32600,"message":"permission denied","data":{"error_type":"permission_denied"}}}),
+            json!({"jsonrpc":"2.0","id":1,"error":{"code":-32602,"message":"MCP error -32600: [transition_conflict] conflict: note …","data":{"error_type":"vault_error","vault":"scope-test","code":-32600}}}),
+            json!({"jsonrpc":"2.0","id":1,"error":{"code":-32602,"message":"MCP error -32602: [precondition_required] precondition required: …","data":{"error_type":"vault_error","vault":"scope-test","code":-32602}}}),
         ];
+        let error_count = errors.len();
+        for result in &errors {
+            assert!(!matches!(
+                save_error(tool_result(result).unwrap_err()),
+                Error::Conflict(_)
+            ));
+        }
         let (client, handle) = server(
             errors
                 .into_iter()
                 .map(|e| ("update-note", args.clone(), e))
                 .collect(),
         );
-        for _ in 0..3 {
+        for _ in 0..error_count {
             let error = client
                 .save_note("scope-test", "n", "edit", Some("t1"), false)
                 .await
@@ -1225,9 +1236,26 @@ mod surface_tests {
             assert!(!matches!(error, Error::Conflict(_)), "{error}");
         }
         handle.join().unwrap();
+        let live_error = json!({"jsonrpc":"2.0","id":1,"error":{"code":-32602,"message":"MCP error -32600: [conflict] conflict: note \"01M…\" has been modified (current updated_at=…, expected=…)","data":{"error_type":"vault_error","vault":"scope-test","code":-32600}}});
+        let error = tool_result(&live_error).unwrap_err();
+        assert!(matches!(
+            &error,
+            Error::VaultTool { error_type: Some(kind), .. } if kind == "vault_error"
+        ));
+        assert!(matches!(save_error(error), Error::Conflict(_)));
+        let (client, handle) = server(vec![("update-note", args, live_error)]);
+        let error = client
+            .save_note("scope-test", "n", "edit", Some("t1"), false)
+            .await
+            .unwrap_err();
+        assert!(matches!(error, Error::Conflict(_)), "{error}");
+        handle.join().unwrap();
         for message in [
             "conflict: note n has been modified",
             "MCP error -32600: conflict: note n has been modified",
+            "[conflict] conflict: note n has been modified",
+            "MCP error -32600: [conflict] conflict: note n has been modified",
+            "MCP error -32602: MCP error -32600: [conflict] conflict: note n has been modified",
         ] {
             let result =
                 json!({"result":{"isError":true,"content":[{"type":"text","text":message}]}});
@@ -1241,6 +1269,12 @@ mod surface_tests {
             "permission denied",
             "unrelated conflict",
             "MCP error -oops: conflict: note n",
+            "MCP error -: conflict: note n",
+            "MCP error -32602: MCP error -oops: conflict: note n",
+            "MCP error -32600: [transition_conflict] conflict: note …",
+            "MCP error -32602: [precondition_required] precondition required: …",
+            "[permission_denied] conflict: note n",
+            "[conflict] permission denied",
         ] {
             assert!(!matches!(
                 save_error(Error::Vault(message.into())),
