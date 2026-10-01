@@ -23,6 +23,7 @@
     "@openparachute/surface-client": "0.3.7",
     "@openparachute/surface-render": "0.3.1",
     "@tauri-apps/api": "^2.4.1",
+    "@tauri-apps/plugin-barcode-scanner": "2.4.6",
     "@tauri-apps/plugin-clipboard-manager": "2.3.2",
     "@tauri-apps/plugin-notification": "2.3.3",
     "@tauri-apps/plugin-process": "2.3.1",

@@ -136,3 +136,84 @@ pub async fn forget<R: Runtime>(_app: &AppHandle<R>) -> Result<(), String> {
 pub fn nostr_keys(secret: &str) -> Result<nostr::Keys, String> {
     nostr::Keys::parse(secret.trim()).map_err(|_| "stored key is not valid".to_string())
 }
+
+/// Every source start performs a fresh native authentication. Release builds have no bypass.
+pub async fn authenticate<R: Runtime>(
+    _app: &AppHandle<R>,
+    _id: &str,
+    _cancelled: tokio::sync::watch::Receiver<Option<bool>>,
+) -> Result<(), String> {
+    #[cfg(debug_assertions)]
+    if std::env::var("UNI_PAIR_NO_UNLOCK").as_deref() == Ok("1") {
+        return Ok(());
+    }
+    #[cfg(target_os = "android")]
+    {
+        let plugin = handle(_app)?;
+        let mut cancelled = _cancelled;
+        let authenticate = plugin.run_mobile_plugin_async::<serde_json::Value>(
+            "authenticate",
+            serde_json::json!({"reason": "Unlock to pair a device", "authenticationId": _id}),
+        );
+        tokio::select! {
+            biased;
+            _ = cancelled.changed() => {
+                let _ = plugin.run_mobile_plugin_async::<serde_json::Value>(
+                    "cancelAuthenticate", serde_json::json!({"authenticationId": _id})
+                ).await;
+                Err("Device unlock cancelled".into())
+            }
+            result = authenticate => {
+                result.map_err(|e| e.to_string())?;
+                Ok(())
+            }
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        return tauri::async_runtime::spawn_blocking(move || {
+            use objc2_foundation::{NSError, NSString};
+            use objc2_local_authentication::{LAContext, LAPolicy};
+            let context = unsafe { LAContext::new() };
+            let (send, receive) = std::sync::mpsc::sync_channel(1);
+            let reply =
+                block2::RcBlock::new(move |success: objc2::runtime::Bool, _error: *mut NSError| {
+                    let _ = send.try_send(success.as_bool());
+                });
+            // LocalAuthentication owns its system UI; creation and waiting stay off the main thread.
+            unsafe {
+                context.evaluatePolicy_localizedReason_reply(
+                    LAPolicy::DeviceOwnerAuthentication,
+                    &NSString::from_str("Unlock to pair a device"),
+                    &reply,
+                );
+            }
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+            let result = loop {
+                if _cancelled.borrow().is_some() || std::time::Instant::now() >= deadline {
+                    break Err(());
+                }
+                match receive.recv_timeout(std::time::Duration::from_millis(100)) {
+                    Ok(success) => break Ok(success),
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                    Err(_) => break Err(()),
+                }
+            };
+            unsafe {
+                context.invalidate();
+            }
+            match result {
+                Ok(true) => Ok(()),
+                Ok(false) => Err("Device unlock cancelled or failed".into()),
+                Err(_) => Err("Device unlock timed out — try again".into()),
+            }
+        })
+        .await
+        .map_err(|_| "Device unlock failed".to_string())?;
+    }
+    #[cfg(not(any(target_os = "android", target_os = "macos")))]
+    Err(
+        "Pair a device is unavailable: native device unlock is not implemented on this platform"
+            .into(),
+    )
+}
