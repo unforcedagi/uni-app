@@ -9,7 +9,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err("usage: surface_probe <hub> <vault> (normally scope-test)".into());
     }
     let vault = &args[2];
-    if !valid_vault_name(vault) || ["uni", "unforced"].contains(&vault.to_lowercase().as_str()) {
+    if !valid_vault_name(vault) || !vault.starts_with("scope-test") {
         return Err("refusing unsafe probe vault; use scope-test".into());
     }
     if std::env::var("UNI_NSEC")

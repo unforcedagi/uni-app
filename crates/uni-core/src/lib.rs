@@ -85,6 +85,12 @@ pub enum Error {
     /// Parachute vault request failed.
     #[error("vault: {0}")]
     Vault(String),
+    /// Structured MCP error, retaining the existing vault display text.
+    #[error("vault: {message}")]
+    VaultTool {
+        message: String,
+        error_type: Option<String>,
+    },
     /// Optimistic concurrency rejected a note edit.
     #[error("conflict: {0}")]
     Conflict(String),
