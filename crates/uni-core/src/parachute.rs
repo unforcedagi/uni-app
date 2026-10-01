@@ -324,7 +324,11 @@ impl VaultClient {
                 json!({"limit": 1, "include_content": false, "include_metadata": false}),
             )
             .await?;
-        vault_names(&v)
+        let mut names = vault_names(&v)?;
+        if names.is_empty() && valid_vault_name(&self.cfg.vault) {
+            names.push(self.cfg.vault.clone());
+        }
+        Ok(names)
     }
 
     /// Bounded, paginated path index; never downloads note bodies.
@@ -343,10 +347,11 @@ impl VaultClient {
             let page = notes_in(&v);
             let count = page.len();
             for n in page.into_iter().take(20_000 - paths.len()) {
-                paths.push(
-                    serde_json::from_value(n)
-                        .map_err(|e| Error::Vault(format!("bad path row: {e}")))?,
-                );
+                if let Ok(row) = serde_json::from_value::<NotePath>(n) {
+                    if !row.id.trim().is_empty() {
+                        paths.push(row);
+                    }
+                }
             }
             if count < 500 {
                 break;
@@ -381,9 +386,9 @@ impl VaultClient {
             return Err(Error::Invalid("missing note id".into()));
         }
         let args = save_args(vault, id, content, if_updated_at, force)?;
-        let v = self.call("update-note", args).await.map_err(save_error)?;
-        check_vault_errors(&v).map_err(save_error)?;
-        note_from(&v, id).map_err(save_error)
+        let v = self.rpc("update-note", args).await?.map_err(save_error)?;
+        check_vault_errors(&v)?;
+        note_from(&v, id)
     }
 
     /// Search notes by meaning (semantic `near_text`) across every vault this
@@ -466,7 +471,10 @@ impl VaultClient {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct NotePath {
     pub id: String,
-    pub path: String,
+    #[serde(default)]
+    pub path: Option<String>,
+    #[serde(default)]
+    pub extension: Option<String>,
     #[serde(rename = "updatedAt", default)]
     pub updated_at: Option<String>,
 }
@@ -479,15 +487,23 @@ fn check_vault(vault: &str) -> Result<()> {
     }
 }
 
+// ECMAScript trim whitespace, shared with the frontend's String.trim().
+fn path_whitespace(c: char) -> bool {
+    matches!(c, '\u{0009}'..='\u{000d}' | '\u{0020}' | '\u{00a0}' | '\u{1680}' | '\u{2000}'..='\u{200a}' | '\u{2028}' | '\u{2029}' | '\u{202f}' | '\u{205f}' | '\u{3000}' | '\u{feff}')
+}
+
 pub fn validate_note_path(path: &str) -> Result<()> {
-    if path.trim().is_empty()
+    if path.trim_matches(path_whitespace).is_empty()
         || path.len() > 512
         || path.starts_with('/')
-        || path.split('/').any(|s| s == ".." || s.is_empty())
-        || path.contains('\0')
+        || path
+            .split('/')
+            .any(|s| s == ".." || s == "." || s.is_empty() || s.trim_matches(path_whitespace) != s)
+        || path.contains('\\')
+        || path.chars().any(|c| c.is_ascii_control())
     {
         return Err(Error::Invalid(
-            "path must be 1..512 bytes, relative, with no empty or .. segments".into(),
+            "path must be 1..512 bytes, relative, with no empty, dot or whitespace-padded segments, backslashes or ASCII controls".into(),
         ));
     }
     Ok(())
@@ -531,13 +547,25 @@ fn vault_names(v: &Value) -> Result<Vec<String>> {
 }
 
 fn save_error(e: Error) -> Error {
-    let text = e.to_string();
-    let lower = text.to_lowercase();
-    if lower.contains("conflict") || lower.contains("updated_at") {
-        Error::Conflict(text)
-    } else {
-        e
+    match e {
+        Error::VaultTool {
+            message,
+            error_type,
+        } if error_type.as_deref() == Some("conflict") => Error::Conflict(message),
+        Error::Vault(message) if conflict_message(&message) => Error::Conflict(message),
+        other => other,
     }
+}
+
+fn conflict_message(message: &str) -> bool {
+    let message = message
+        .strip_prefix("MCP error -")
+        .and_then(|rest| {
+            let (code, text) = rest.split_once(": ")?;
+            (!code.is_empty() && code.bytes().all(|b| b.is_ascii_digit())).then_some(text)
+        })
+        .unwrap_or(message);
+    message.starts_with("conflict: note")
 }
 
 fn save_args(
@@ -604,7 +632,10 @@ pub struct NoteHit {
 fn vault_errors(v: &Value) -> Vec<(String, String)> {
     let row = |r: &Value| {
         r.get("error").map(|e| {
-            let msg = e.as_str().map(str::to_string).unwrap_or_else(|| e.to_string());
+            let msg = e
+                .as_str()
+                .map(str::to_string)
+                .unwrap_or_else(|| e.to_string());
             (r["vault"].as_str().unwrap_or("vault").to_string(), msg)
         })
     };
@@ -730,7 +761,10 @@ pub struct NewEntry {
 fn tool_result(rpc: &Value) -> Result<Value> {
     if let Some(err) = rpc.get("error") {
         let msg = err["message"].as_str().unwrap_or("tool error");
-        return Err(Error::Vault(msg.to_string()));
+        return Err(Error::VaultTool {
+            message: msg.to_string(),
+            error_type: err["data"]["error_type"].as_str().map(str::to_string),
+        });
     }
     let result = &rpc["result"];
     let text = result["content"]
@@ -855,7 +889,9 @@ mod tests {
         assert_eq!(hits[1].mode, "meaning");
         assert!(vault_errors(&v).is_empty());
         assert_eq!(
-            vault_errors(&json!({"results": [{"vault": "x", "error": "no"}, {"vault": "y", "notes": []}]})),
+            vault_errors(
+                &json!({"results": [{"vault": "x", "error": "no"}, {"vault": "y", "notes": []}]})
+            ),
             vec![("x".to_string(), "no".to_string())]
         );
     }
@@ -872,7 +908,10 @@ mod tests {
             {"vault": "a", "notes": [{"id": "a1", "path": "", "content": "", "score": 1.0}, {"id": "a2", "path": "", "content": "", "score": 9.0}]},
             {"vault": "b", "notes": [{"id": "b1", "path": "", "content": "", "score": 5.0}]}
         ]});
-        let ids: Vec<_> = hits_from(&kw, None, "keyword", 10).into_iter().map(|h| h.id).collect();
+        let ids: Vec<_> = hits_from(&kw, None, "keyword", 10)
+            .into_iter()
+            .map(|h| h.id)
+            .collect();
         assert_eq!(ids, ["a1", "b1", "a2"]);
         assert!(hits[0].snippet.ends_with('…'));
         assert_eq!(hits[0].snippet.chars().count(), 201);
@@ -1011,7 +1050,10 @@ mod surface_tests {
         assert_eq!(forced["force"], true);
         assert!(forced.get("if_updated_at").is_none());
         assert!(save_args("scope-test", "id", "mine", None, false).is_err());
-        for error in ["Conflict", "if_updated_at does not match"] {
+        for error in [
+            "conflict: note \"n\" has been modified",
+            "MCP error -32600: conflict: note n has been modified",
+        ] {
             assert!(save_error(Error::Vault(error.into()))
                 .to_string()
                 .starts_with("conflict:"));
@@ -1029,7 +1071,25 @@ mod surface_tests {
         );
         assert_eq!(vault_names(&json!({"vaults_queried": 2, "results": [{"vault": "ok", "notes": []}, {"vault": "denied", "error": "forbidden"}]})).unwrap(), ["ok"]);
         assert!(vault_names(&json!({"results": [{"vault": "bad", "error": "offline"}]})).is_err());
-        for path in ["", "   ", "/root", "a/../b", "a//b", "a/", "a\0b"] {
+        for path in [
+            "",
+            "   ",
+            "/root",
+            "a/../b",
+            "a//b",
+            "a/",
+            "a\0b",
+            "a/./b",
+            " a/b",
+            "a/b ",
+            "a/ b",
+            "a\\b",
+            "a\tb",
+            "a\nb",
+            "a\x7fb",
+            "a/\u{00a0}b",
+            "a/\u{feff}b",
+        ] {
             assert!(validate_note_path(path).is_err(), "{path}");
         }
         assert!(validate_note_path(&"é".repeat(257)).is_err());
@@ -1073,8 +1133,13 @@ mod surface_tests {
                 let body: Value = serde_json::from_slice(&body).unwrap();
                 assert_eq!(body["params"]["name"], tool);
                 assert_eq!(body["params"]["arguments"], expected);
-                let body = json!({"jsonrpc": "2.0", "id": 1, "result": {"content": [{"type": "text", "text": result.to_string()}]}}).to_string();
-                write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).unwrap();
+                let status = result["http_status"].as_u64().unwrap_or(200);
+                let body = if result.get("jsonrpc").is_some() || status != 200 {
+                    result.to_string()
+                } else {
+                    json!({"jsonrpc": "2.0", "id": 1, "result": {"content": [{"type": "text", "text": result.to_string()}]}}).to_string()
+                };
+                write!(stream, "HTTP/1.1 {status} Response\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).unwrap();
             }
         });
         let client = VaultClient::new(
@@ -1114,6 +1179,77 @@ mod surface_tests {
     }
 
     #[tokio::test]
+    async fn nullable_paths_and_empty_discovery() {
+        crate::init_crypto();
+        let (client, handle) = server(vec![
+            (
+                "query-notes",
+                json!({"vault":"scope-test","include_content":false,"include_metadata":false,"limit":500,"offset":0,"sort":"asc"}),
+                json!({"notes":[{"id":"x","path":null},{"id":"y"},{"path":"bad"},{"id":"z","path":"P/z","extension":"txt"}]}),
+            ),
+            (
+                "query-notes",
+                json!({"limit":1,"include_content":false,"include_metadata":false}),
+                json!({"results":[]}),
+            ),
+        ]);
+        let paths = client.list_paths("scope-test").await.unwrap();
+        assert_eq!(paths.len(), 3);
+        assert_eq!(paths[0].path, None);
+        assert_eq!(paths[1].path, None);
+        assert_eq!(paths[2].extension.as_deref(), Some("txt"));
+        assert_eq!(client.list_vaults().await.unwrap(), ["scope-test"]);
+        handle.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn save_errors_only_classify_actual_tool_conflicts() {
+        crate::init_crypto();
+        let args = save_args("scope-test", "n", "edit", Some("t1"), false).unwrap();
+        let errors = vec![
+            json!({"jsonrpc":"2.0","id":1,"error":{"code":-32600,"message":"precondition_required: provide if_updated_at","data":{"error_type":"precondition_required"}}}),
+            json!({"http_status":409,"error":"conflict: note n has been modified", "data":{"error_type":"conflict"}}),
+            json!({"jsonrpc":"2.0","id":1,"error":{"code":-32600,"message":"permission denied","data":{"error_type":"permission_denied"}}}),
+        ];
+        let (client, handle) = server(
+            errors
+                .into_iter()
+                .map(|e| ("update-note", args.clone(), e))
+                .collect(),
+        );
+        for _ in 0..3 {
+            let error = client
+                .save_note("scope-test", "n", "edit", Some("t1"), false)
+                .await
+                .unwrap_err();
+            assert!(!matches!(error, Error::Conflict(_)), "{error}");
+        }
+        handle.join().unwrap();
+        for message in [
+            "conflict: note n has been modified",
+            "MCP error -32600: conflict: note n has been modified",
+        ] {
+            let result =
+                json!({"result":{"isError":true,"content":[{"type":"text","text":message}]}});
+            assert!(matches!(
+                save_error(tool_result(&result).unwrap_err()),
+                Error::Conflict(_)
+            ));
+        }
+        for message in [
+            "if_updated_at required",
+            "permission denied",
+            "unrelated conflict",
+            "MCP error -oops: conflict: note n",
+        ] {
+            assert!(!matches!(
+                save_error(Error::Vault(message.into())),
+                Error::Conflict(_)
+            ));
+        }
+    }
+
+    #[tokio::test]
     async fn path_cap_and_mutation_contract() {
         crate::init_crypto();
         let page: Vec<Value> = (0..500)
@@ -1138,7 +1274,7 @@ mod surface_tests {
             (
                 "update-note",
                 save_args("scope-test", "n", "edit", Some("t1"), false).unwrap(),
-                json!({"error": "conflict: updated_at differs"}),
+                json!({"jsonrpc":"2.0", "id":1, "error":{"code":-32600,"message":"MCP error -32600: conflict: note n has been modified", "data":{"error_type":"conflict"}}}),
             ),
             (
                 "update-note",
