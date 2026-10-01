@@ -6,6 +6,17 @@ package org.unforced.uni
 // never touches disk and is never logged.
 
 import android.app.Activity
+import android.app.KeyguardManager
+import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import androidx.activity.result.ActivityResult
+import androidx.biometric.BiometricPrompt
+import androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_STRONG
+import androidx.biometric.BiometricManager.Authenticators.DEVICE_CREDENTIAL
+import androidx.core.content.ContextCompat
+import androidx.fragment.app.FragmentActivity
+import app.tauri.annotation.ActivityCallback
 import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
@@ -33,8 +44,102 @@ class NameArgs {
   lateinit var name: String
 }
 
+@InvokeArg
+class AuthenticateArgs {
+  lateinit var reason: String
+  lateinit var authenticationId: String
+}
+
+@InvokeArg
+class CancelAuthenticationArgs {
+  lateinit var authenticationId: String
+}
+
 @TauriPlugin
 class KeystorePlugin(private val activity: Activity) : Plugin(activity) {
+  private var authenticating: Invoke? = null
+  private var authenticationId: String? = null
+  private var biometric: BiometricPrompt? = null
+  private val handler = Handler(Looper.getMainLooper())
+  private val timeout = Runnable { finishAuthentication(false, "Device unlock timed out") }
+
+  private fun finishAuthentication(success: Boolean, message: String = "Device unlock cancelled") {
+    val pending = authenticating ?: return
+    authenticating = null
+    authenticationId = null
+    handler.removeCallbacks(timeout)
+    biometric?.cancelAuthentication()
+    biometric = null
+    if (success) pending.resolve() else pending.reject(message)
+  }
+
+  @Command
+  fun authenticate(invoke: Invoke) {
+    activity.runOnUiThread {
+      if (authenticating != null) {
+        invoke.reject("A device unlock is already in progress")
+        return@runOnUiThread
+      }
+      val keyguard = activity.getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
+      if (!keyguard.isDeviceSecure) {
+        invoke.reject("Set a screen lock to pair devices")
+        return@runOnUiThread
+      }
+      try {
+        val args = invoke.parseArgs(AuthenticateArgs::class.java)
+        val reason = args.reason
+        authenticationId = args.authenticationId
+        authenticating = invoke
+        handler.postDelayed(timeout, 60_000)
+        if (Build.VERSION.SDK_INT < 30) {
+          // STRONG | DEVICE_CREDENTIAL is unsupported through API 29.
+          // The OS credential intent handles PIN, pattern, and password on API 24+.
+          @Suppress("DEPRECATION")
+          val intent = keyguard.createConfirmDeviceCredentialIntent("Pair a device", reason)
+          if (intent == null) finishAuthentication(false, "Set a screen lock to pair devices")
+          else startActivityForResult(invoke, intent, "credentialResult")
+        } else {
+          val host = activity as? FragmentActivity
+          if (host == null) {
+            finishAuthentication(false, "Device unlock is unavailable")
+            return@runOnUiThread
+          }
+          val prompt = BiometricPrompt(host, ContextCompat.getMainExecutor(activity),
+            object : BiometricPrompt.AuthenticationCallback() {
+              override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                if (authenticating === invoke) finishAuthentication(true)
+              }
+              override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                if (authenticating === invoke) finishAuthentication(false, "Device unlock cancelled or failed")
+              }
+            })
+          biometric = prompt
+          prompt.authenticate(BiometricPrompt.PromptInfo.Builder()
+            .setTitle("Pair a device")
+            .setSubtitle(reason)
+            .setAllowedAuthenticators(BIOMETRIC_STRONG or DEVICE_CREDENTIAL)
+            .build())
+        }
+      } catch (_: Exception) {
+        finishAuthentication(false, "Device unlock is unavailable")
+      }
+    }
+  }
+
+  @Command
+  fun cancelAuthenticate(invoke: Invoke) {
+    activity.runOnUiThread {
+      val id = invoke.parseArgs(CancelAuthenticationArgs::class.java).authenticationId
+      if (id == authenticationId) finishAuthentication(false)
+      invoke.resolve()
+    }
+  }
+
+  @ActivityCallback
+  private fun credentialResult(invoke: Invoke, result: ActivityResult) {
+    if (authenticating === invoke) finishAuthentication(result.resultCode == Activity.RESULT_OK)
+  }
+
   private val keyAlias = "uni_identity"
   private val prefsName = "uni_keystore"
 

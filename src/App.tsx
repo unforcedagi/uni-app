@@ -18,6 +18,7 @@ import Search from "./Search";
 import Journal from "./Journal";
 import { mmss, newDraft, shareText, type JournalNote } from "./journalCore";
 import { useRecorder, voiceFileName } from "./recorder";
+import PairSource, { PairDeviceButton } from "./PairSource";
 import { UpdateSettings } from "./UpdateNotice";
 import { activeTab, closeTab, EMPTY_TABS, focusTab, navigateNoteTab, nextAfterClose, openTab, recordingTabCanClose, restoreTabs, serializeTabs, tabForDigit, updateTab, TABS_KEY, type Tabs, type Tab, type TabTarget, type OpenMode } from "./tabs";
 import { notifyMention, setUnreadBadge } from "./desktopNotify";
@@ -217,6 +218,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const [status, setStatus] = useState("Loading cached conversations…");
   const [error, setError] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
+  const [pairSourceOpen, setPairSourceOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [forgetArmed, setForgetArmed] = useState(false);
   const [live, setLive] = useState<string | null>(null);
@@ -1232,7 +1234,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
   return <NoteOpener.Provider value={openNote}><main className={`shell ${(!sidebarVisible && (channel || journalOpen || (active?.kind === "note" || active?.kind === "vault"))) ? "in-room" : ""} ${topNote ? "note-open" : ""}`}>
     <aside className="rooms" aria-label="Conversations">
       <header className="rooms-header"><div><span className="eyebrow">Unforced</span><h1>Uni</h1></div><div><button className="icon-button" onClick={() => { setSearchScope({ vault: "", prefix: "" }); setSearchOpen(true); }} aria-label="Search messages and notes">⌕</button><button className="icon-button" onClick={() => void refresh()} disabled={busy} aria-label="Refresh conversations">↻</button><button className="icon-button" onClick={() => { setSettingsOpen(!settingsOpen); setForgetArmed(false); }} aria-label="Settings" aria-expanded={settingsOpen}>⚙</button></div></header>
-      {settingsOpen && <div className="settings"><UpdateSettings /><button className="pairing-secondary" onClick={() => void forget()}>{forgetArmed ? "Tap again to forget — you'll need to re-pair" : "Forget this device key"}</button>{forgetArmed && <button className="pairing-secondary" onClick={() => setForgetArmed(false)}>Keep key</button>}</div>}
+      {pairSourceOpen && <PairSource onClose={() => setPairSourceOpen(false)} />}
+      {settingsOpen && <div className="settings"><UpdateSettings /><PairDeviceButton onOpen={() => setPairSourceOpen(true)} /><button className="pairing-secondary" onClick={() => void forget()}>{forgetArmed ? "Tap again to forget — you'll need to re-pair" : "Forget this device key"}</button>{forgetArmed && <button className="pairing-secondary" onClick={() => setForgetArmed(false)}>Keep key</button>}</div>}
       {searchOpen && <Search vaults={vaults} key={`${searchScope.vault}:${searchScope.prefix}`} initialVault={searchScope.vault} initialPathPrefix={searchScope.prefix} onOpen={openHit} onOpenNote={(n) => { setSearchOpen(false); openNote({ hub: null, vault: n.vault, ref: n.id }, null); }} onAskUni={askUniSearch} onClose={() => setSearchOpen(false)} />}
       {searchOpen && error && <p className="error search-error" role="alert">{error}</p>}
       <div className="rooms-body" hidden={searchOpen}>

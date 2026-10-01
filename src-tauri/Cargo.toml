@@ -26,6 +26,7 @@ tracing = { workspace = true }
 nostr = { workspace = true }
 uuid = { workspace = true }
 zeroize = { workspace = true }
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 tauri-plugin-opener = "2"
 tauri-plugin-clipboard-manager = "~2.3.3"
 reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "json"] }
@@ -37,6 +38,16 @@ tauri-plugin-updater = "=2.12.0"
 tauri-plugin-process = "=2.3.1"
 # Desktop only: Android stops the live socket in the background anyway.
 tauri-plugin-notification = "=2.3.3"
+
+[target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
+# Match the JavaScript scanner minor version.
+tauri-plugin-barcode-scanner = "~2.4.6"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-local-authentication = "0.3"
+objc2-foundation = "0.3"
+block2 = "0.6"
+objc2 = "0.6"
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]

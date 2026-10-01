@@ -530,3 +530,17 @@ h1 { font-family: var(--serif); font-weight: 500; font-size: 34px; line-height: 
   .note-bar { gap: 6px; }
   .note-bar .note-action { padding: 0 10px; }
 }
+
+.pair-source {
+  width: min(32rem, calc(100vw - 2rem));
+  max-height: calc(100dvh - 2rem);
+  overflow: auto;
+  padding: 1.5rem;
+  border: 2px solid currentColor;
+  border-radius: 0.75rem;
+  background: var(--bg, #fff);
+  color: var(--text, #111);
+}
+.pair-source::backdrop { background: rgb(0 0 0 / 60%); }
+.pair-source-qr { display: block; width: 100%; max-width: 384px; height: auto; margin: 1rem auto; background: #fff; }
+.pair-source button { margin: 0.25rem; }

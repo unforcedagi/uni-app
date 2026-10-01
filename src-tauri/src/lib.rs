@@ -1444,6 +1444,7 @@ async fn android_update_manifest() -> Result<AndroidUpdateManifest, String> {
 mod desktop_log;
 #[cfg(mobile)]
 mod mobile;
+mod pair_source;
 mod secure_store;
 
 #[cfg(target_os = "macos")]
@@ -1492,6 +1493,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|_app| {
+            #[cfg(mobile)]
+            _app.handle().plugin(tauri_plugin_barcode_scanner::init())?;
             #[cfg(target_os = "macos")]
             install_tab_menu(_app)?;
             #[cfg(desktop)]
@@ -1513,6 +1516,11 @@ pub fn run() {
             get_npub,
             identity_status,
             identity_forget,
+            pair_source::pair_source_available,
+            pair_source::pair_source_start,
+            pair_source::pair_source_wait_offer,
+            pair_source::pair_source_confirm,
+            pair_source::pair_source_cancel,
             pairing_start,
             pairing_confirm,
             pairing_cancel,
