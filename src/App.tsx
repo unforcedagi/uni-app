@@ -22,6 +22,9 @@ import { UpdateSettings } from "./UpdateNotice";
 import { activeTab, closeTab, EMPTY_TABS, focusTab, navigateNoteTab, nextAfterClose, openTab, recordingTabCanClose, restoreTabs, serializeTabs, tabForDigit, updateTab, TABS_KEY, type Tabs, type Tab, type TabTarget, type OpenMode } from "./tabs";
 import { notifyMention, setUnreadBadge } from "./desktopNotify";
 import NoteView from "./NoteView";
+import SurfaceModal from "./SurfaceModal";
+import VaultBrowser from "./VaultBrowser";
+import { draftKey, validateNotePath } from "./noteEdit";
 import { NoteOpener } from "./noteLinks";
 import { sameHub, type VaultRef } from "./vaultlinks";
 import { attachmentKind, collectAttachments, formatSize, stripAttachmentLines } from "./media";
@@ -126,6 +129,51 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const [tabs, setTabs] = useState<Tabs>(EMPTY_TABS);
   const tabsRef = useRef<Tabs>(EMPTY_TABS);
   const tabsReady = useRef(false);
+  const [vaults, setVaults] = useState<string[]>([]);
+  const [vaultError, setVaultError] = useState<string | null>(null);
+  const [vaultRefresh, setVaultRefresh] = useState(0);
+  const [searchScope, setSearchScope] = useState({ vault: "", prefix: "" });
+  const dirtyNotes = useRef(new Map<string, Set<string>>());
+  const [dirtyTabs, setDirtyTabs] = useState(new Set<string>());
+  const editOnOpen = useRef(new Set<string>());
+  const [confirmation, setConfirmation] = useState<{ text: string; run: () => void } | null>(null);
+  const [creating, setCreating] = useState<{ vault: string; path: string } | null>(null);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [createBusy, setCreateBusy] = useState(false);
+  const createLock = useRef(false);
+  useEffect(() => {
+    let live = true;
+    setVaultError(null);
+    invoke<string[]>("vault_list").then((names) => { if (live) setVaults(names); }).catch((e) => { if (live) setVaultError(String(e)); });
+    return () => { live = false; };
+  }, [vaultRefresh]);
+  function reportDirty(tabId: string, ref: string, dirty: boolean) {
+    const entries = dirtyNotes.current.get(tabId) ?? new Set<string>();
+    if (entries.has(ref) === dirty) return;
+    if (dirty) entries.add(ref); else entries.delete(ref);
+    dirtyNotes.current.set(tabId, entries);
+    setDirtyTabs(new Set([...dirtyNotes.current].filter(([, notes]) => notes.size).map(([id]) => id)));
+  }
+  function isTabDirty(tab: Tab) {
+    if (dirtyNotes.current.get(tab.id)?.size) return true;
+    try { return !!tab.note && !!localStorage.getItem(draftKey(tab.note.vault, tab.note.ref)); } catch { return false; }
+  }
+  function requestCreate(vault: string, folder: string) {
+    setCreateError(null); setCreating({ vault, path: folder ? `${folder}/` : "" });
+  }
+  async function createNote() {
+    if (!creating || createLock.current) return;
+    const problem = validateNotePath(creating.path);
+    if (problem) { setCreateError(problem); return; }
+    createLock.current = true; setCreateBusy(true); setCreateError(null);
+    try {
+      const note = await invoke<{ id: string; path: string }>("vault_create", { ...creating, content: "" });
+      editOnOpen.current.add(`${creating.vault}:${note.id}`);
+      openTarget({ kind: "note", note: { hub: null, vault: creating.vault, ref: note.id }, title: note.path }, "new");
+      setCreating(null);
+    } catch (e) { setCreateError(String(e)); }
+    finally { createLock.current = false; setCreateBusy(false); }
+  }
   // Each tab owns its own note Back stack, even while another tab is active.
   const noteStacks = useRef(new Map<string, VaultRef[]>());
   const notesRef = useRef<VaultRef[]>([]);
@@ -223,7 +271,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     commitTabs(focusTab(tabsRef.current, id));
     setSidebarVisible(false);
   }
-  function openTarget(target: TabTarget, mode: OpenMode = "focus") {
+  function openTarget(target: TabTarget, mode: OpenMode = "focus", confirmed = false) {
     // A recording's origin tab must survive the 12-tab eviction cap.
     const originId = recordingOrigin.current?.tabId;
     const base = originId && tabsRef.current.tabs.some((t) => t.id === originId)
@@ -231,12 +279,24 @@ function Conversations({ onForget }: { onForget: () => void }) {
       : tabsRef.current;
     const effectiveMode = mode === "focus" && originId === tabsRef.current.active ? "new" : mode;
     const next = openTab(base, target, effectiveMode, () => crypto.randomUUID());
+    const removed = tabsRef.current.tabs.filter((t) => !next.tabs.some((n) => n.id === t.id));
+    if (removed.some((t) => t.id === originId || (t.kind === "journal" && journalRecordingRef.current))) {
+      setConfirmation({ text: "Stop the recording before replacing its tab.", run: () => {} }); return;
+    }
+    if (!confirmed && removed.some(isTabDirty)) {
+      setConfirmation({ text: "Close a tab with unsaved changes? Its draft will be kept on this device.", run: () => openTarget(target, mode, true) }); return;
+    }
+    removed.forEach((t) => dirtyNotes.current.delete(t.id));
     const tab = activeTab(next);
     if (tab && (next.active !== tabsRef.current.active || mode === "replace")) switchToTab(tab);
     commitTabs(next);
     setSidebarVisible(false);
   }
-  function closeTabById(id: string) {
+  function closeTabById(id: string, confirmed = false) {
+    const closing = tabsRef.current.tabs.find((t) => t.id === id);
+    if (!confirmed && closing && isTabDirty(closing)) {
+      setConfirmation({ text: "Close this tab with unsaved changes? Its draft will be kept on this device.", run: () => closeTabById(id, true) }); return;
+    }
     if (!recordingTabCanClose(id, recordingOrigin.current?.tabId ?? null)) {
       setError("Stop the voice recording before closing its tab."); return;
     }
@@ -248,6 +308,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     if (next === tabsRef.current) return;
     if (wasActive) switchToTab(activeTab(next));
     noteStacks.current.delete(id);
+    dirtyNotes.current.delete(id);
     commitTabs(next);
     if (!next.tabs.length) setSidebarVisible(true);
   }
@@ -1103,6 +1164,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const focusTabRef = useRef((_id: string) => {});
   const lastClose = useRef(0);
   closeActiveRef.current = () => {
+    if (creating || confirmation) return;
     // A native menu event and a WebView keydown can both report one Cmd+W.
     if (Date.now() - lastClose.current < 120) return;
     lastClose.current = Date.now();
@@ -1154,11 +1216,11 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const recordingTab = recordingOrigin.current;
   const pill = recordingTab && recorder.busy ? { title: recordingTab.title, elapsed: recorder.elapsed, tabId: recordingTab.tabId, stop: recorder.stop, phase: recorder.phase } :
     journalRecording && journalTab ? { title: "Journal", elapsed: journalRecording.elapsed, tabId: journalTab.id, stop: journalRecording.stop, phase: "recording" as const } : null;
-  return <NoteOpener.Provider value={openNote}><main className={`shell ${(!sidebarVisible && (channel || journalOpen || active?.kind === "note")) ? "in-room" : ""} ${topNote ? "note-open" : ""}`}>
+  return <NoteOpener.Provider value={openNote}><main className={`shell ${(!sidebarVisible && (channel || journalOpen || (active?.kind === "note" || active?.kind === "vault"))) ? "in-room" : ""} ${topNote ? "note-open" : ""}`}>
     <aside className="rooms" aria-label="Conversations">
-      <header className="rooms-header"><div><span className="eyebrow">Unforced</span><h1>Uni</h1></div><div><button className="icon-button" onClick={() => setSearchOpen(true)} aria-label="Search messages and notes">⌕</button><button className="icon-button" onClick={() => void refresh()} disabled={busy} aria-label="Refresh conversations">↻</button><button className="icon-button" onClick={() => { setSettingsOpen(!settingsOpen); setForgetArmed(false); }} aria-label="Settings" aria-expanded={settingsOpen}>⚙</button></div></header>
+      <header className="rooms-header"><div><span className="eyebrow">Unforced</span><h1>Uni</h1></div><div><button className="icon-button" onClick={() => { setSearchScope({ vault: "", prefix: "" }); setSearchOpen(true); }} aria-label="Search messages and notes">⌕</button><button className="icon-button" onClick={() => void refresh()} disabled={busy} aria-label="Refresh conversations">↻</button><button className="icon-button" onClick={() => { setSettingsOpen(!settingsOpen); setForgetArmed(false); }} aria-label="Settings" aria-expanded={settingsOpen}>⚙</button></div></header>
       {settingsOpen && <div className="settings"><UpdateSettings /><button className="pairing-secondary" onClick={() => void forget()}>{forgetArmed ? "Tap again to forget — you'll need to re-pair" : "Forget this device key"}</button>{forgetArmed && <button className="pairing-secondary" onClick={() => setForgetArmed(false)}>Keep key</button>}</div>}
-      {searchOpen && <Search onOpen={openHit} onOpenNote={(n) => { setSearchOpen(false); openNote({ hub: null, vault: n.vault, ref: n.path || n.id }, null); }} onAskUni={askUniSearch} onClose={() => setSearchOpen(false)} />}
+      {searchOpen && <Search key={`${searchScope.vault}:${searchScope.prefix}`} initialVault={searchScope.vault} initialPathPrefix={searchScope.prefix} onOpen={openHit} onOpenNote={(n) => { setSearchOpen(false); openNote({ hub: null, vault: n.vault, ref: n.path || n.id }, null); }} onAskUni={askUniSearch} onClose={() => setSearchOpen(false)} />}
       {searchOpen && error && <p className="error search-error" role="alert">{error}</p>}
       <div className="rooms-body" hidden={searchOpen}>
       <p className="connection" role="status">{status}{live ? <span className={`live ${live === "Live" ? "on" : ""}`}> · {live}</span> : null}</p>
@@ -1170,6 +1232,10 @@ function Conversations({ onForget }: { onForget: () => void }) {
         aria-current={journalOpen ? "page" : undefined}>
         <span className="avatar">❋</span><span className="room-text"><strong>Journal</strong><small>Speak or write · private to your vault</small></span>
       </button>
+      <section className="vault-sidebar" aria-label="Vaults"><div className="vault-heading"><h2>Vaults</h2><button className="note-quiet" onClick={() => setVaultRefresh((n) => n + 1)}>Refresh</button></div>
+        {vaultError && <p className="error" role="alert">{vaultError}</p>}
+        {vaults.map((vault) => <button key={vault} className={`room ${active?.kind === "vault" && active.vault === vault ? "selected" : ""}`} onClick={() => openTarget({ kind: "vault", vault, title: vault }, "new")}><span className="avatar">▤</span><span className="room-text"><strong>{vault}</strong></span></button>)}
+      </section>
       <nav>{rooms.map((room) => <button key={room.id} className={`room ${channel === room.id ? "selected" : ""}`} onClick={(e) => sidebarClick(roomTarget(room.id), e)}
         onPointerDown={(e) => { if (e.pointerType === "touch") startLongPress(roomTarget(room.id)); }} onPointerUp={endLongPress} onPointerCancel={endLongPress} onPointerLeave={endLongPress}
         aria-current={channel === room.id ? "page" : undefined}>
@@ -1183,13 +1249,14 @@ function Conversations({ onForget }: { onForget: () => void }) {
         <div className="tab-scroller">{tabs.tabs.map((t) => <div key={t.id} className={`tab-chip ${t.id === tabs.active ? "active" : ""}`} role="presentation"
           onPointerDown={(e) => { if (e.pointerType === "touch") { longPressed.current = false; longPress.current = window.setTimeout(() => { longPressed.current = true; closeTabById(t.id); }, 600); } }}
           onPointerUp={endLongPress} onPointerCancel={endLongPress} onPointerLeave={endLongPress}>
-          <button className="tab-title" role="tab" aria-selected={t.id === tabs.active} onClick={() => { if (longPressed.current) { longPressed.current = false; return; } focusTabById(t.id); }} title={t.title}>{t.kind === "journal" ? "❋" : t.kind === "note" ? "▤" : t.kind === "thread" ? "↳" : "#"} {t.title}</button>
+          <button className="tab-title" role="tab" aria-selected={t.id === tabs.active} onClick={() => { if (longPressed.current) { longPressed.current = false; return; } focusTabById(t.id); }} title={t.title}>{t.kind === "journal" ? "❋" : (t.kind === "note" || t.kind === "vault") ? "▤" : t.kind === "thread" ? "↳" : "#"} {(dirtyTabs.has(t.id) || isTabDirty(t)) && <span aria-label="Unsaved changes">● </span>}{t.title}</button>
           <button className="tab-close" onClick={() => closeTabById(t.id)} aria-label={`Close ${t.title}`}>×</button>
         </div>)}</div>
         <button className="tab-add" onClick={() => { pickNewTab.current = true; setSearchOpen(false); setSidebarVisible(true); document.querySelector<HTMLButtonElement>(".rooms nav .room")?.focus(); }} aria-label="New tab — pick a room" title="New tab — pick a room">+</button>
       </div>
       {journalTab && <div className="journal-tab-content" hidden={!journalOpen}><Journal rooms={rooms} uniRoomId={findUniRoom(rooms)?.id ?? null} onShare={shareEntry} onBack={() => setSidebarVisible(true)} onRecordingChange={(on, elapsed, stop) => { journalRecordingRef.current = on; setJournalRecording(on ? { elapsed, stop } : null); }} /></div>}
-      {journalOpen ? null
+      {active?.kind === "vault" && active.vault ? <VaultBrowser key={active.vault} vault={active.vault} onBack={() => setSidebarVisible(true)} onOpen={(note) => openTarget({ kind: "note", note: { hub: null, vault: active.vault!, ref: note.id }, title: note.path }, "new")} onCreate={(folder) => requestCreate(active.vault!, folder)} onSearch={(prefix) => { setSearchScope({ vault: active.vault!, prefix }); setSearchOpen(true); setSidebarVisible(true); }} />
+      : journalOpen ? null
       : currentRoom ? <>
         <header className="conversation-header">
           <button className="back icon-button" onClick={() => isThread && channel ? openTarget(roomTarget(channel), "focus") : setSidebarVisible(true)} aria-label={isThread ? "Back to room" : "Back to conversations"}>‹</button>
@@ -1253,10 +1320,15 @@ function Conversations({ onForget }: { onForget: () => void }) {
     {/* The note sheet leaves the tab strip visible above it; Back pops the
         note's own stack (or closes the tab at the first note). */}
     {topNote && <section className="note-sheet" role="region" aria-label="Note">
-      <NoteView key={`${notes.length}:${noteKey(topNote)}`} target={topNote} hub={hub} onOpen={openNote} onBack={closeNote}
+      <NoteView key={`${tabs.active}:${notes.length}:${noteKey(topNote)}`} target={topNote} hub={hub} onOpen={openNote} onBack={closeNote}
+        startEditing={editOnOpen.current.has(noteKey(topNote))}
+        onDirty={(dirty) => { reportDirty(tabs.active!, noteKey(topNote), dirty); if (!dirty) editOnOpen.current.delete(noteKey(topNote)); }}
+        onCreate={(folder) => requestCreate(topNote.vault, folder)}
         backLabel={notes.length > 1 ? noteTitles[noteKey(notes[notes.length - 2])] ?? notes[notes.length - 2].ref.split("/").pop() ?? "note" : backTo}
         onTitle={(t) => rememberTitle(noteKey(topNote), t)} />
     </section>}
+    {creating && <SurfaceModal onCancel={() => { if (!createBusy) setCreating(null); }}><form role="dialog" aria-modal="true" aria-label="New note" onSubmit={(e) => { e.preventDefault(); void createNote(); }}><h2>New note in {creating.vault}</h2><label>Path<input autoFocus value={creating.path} disabled={createBusy} onChange={(e) => setCreating({ ...creating, path: e.target.value })} /></label>{createError && <p className="error" role="alert">{createError}</p>}<button disabled={createBusy} type="submit">{createBusy ? "Creating…" : "Create note"}</button><button disabled={createBusy} type="button" onClick={() => setCreating(null)}>Cancel</button></form></SurfaceModal>}
+    {confirmation && <SurfaceModal onCancel={() => setConfirmation(null)}><div role="alertdialog" aria-modal="true" aria-label="Confirm tab close"><p>{confirmation.text}</p><button autoFocus onClick={() => { const run = confirmation.run; setConfirmation(null); run(); }}>Continue</button><button onClick={() => setConfirmation(null)}>Cancel</button></div></SurfaceModal>}
     {toast && <div className="toast" role="status">{toast}</div>}
   </main></NoteOpener.Provider>;
 }

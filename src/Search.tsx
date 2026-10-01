@@ -24,13 +24,18 @@ function Snippet({ text }: { text: string }) {
   return <>{snippetSegments(text).map((s, i) => s.hit ? <mark key={i}>{s.text}</mark> : <span key={i}>{s.text}</span>)}</>;
 }
 
-export default function Search({ onOpen, onOpenNote, onAskUni, onClose }: {
+export default function Search({ onOpen, onOpenNote, onAskUni, onClose, initialVault = "", initialPathPrefix = "" }: {
+  initialVault?: string;
+  initialPathPrefix?: string;
   onOpen: (target: { channel: string; root: string | null; focus: string }) => void;
   onOpenNote: (hit: NoteHit) => void;
   /** Hand a notes query to Uni in #Uni; resolves true once posted. */
   onAskUni: (query: string) => Promise<boolean>;
   onClose: () => void;
 }) {
+  const [mode, setMode] = useState<"meaning" | "keyword">("meaning");
+  const [vault, setVault] = useState(initialVault);
+  const [pathPrefix, setPathPrefix] = useState(initialPathPrefix);
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [state, setState] = useState<"idle" | "searching" | "done" | "error">("idle");
@@ -65,12 +70,12 @@ export default function Search({ onOpen, onOpenNote, onAskUni, onClose }: {
     let current = true;
     const t = setTimeout(() => {
       setNoteState("searching");
-      invoke<NoteHit[]>("vault_search", { query: q, limit: 20 })
+      invoke<NoteHit[]>("vault_search", { query: q, limit: 20, mode, vault: vault.trim() || null, pathPrefix: pathPrefix || null })
         .then((rows) => { if (current) { setNotes(rows); setNoteState("done"); setNoteError(null); } })
         .catch((e) => { if (current) { setNotes([]); setNoteError(String(e)); setNoteState("error"); } });
     }, NOTE_DEBOUNCE_MS);
     return () => { current = false; clearTimeout(t); };
-  }, [query]);
+  }, [query, mode, vault, pathPrefix]);
 
   async function ask() {
     const q = query.trim();
@@ -89,6 +94,11 @@ export default function Search({ onOpen, onOpenNote, onAskUni, onClose }: {
           placeholder="Search messages and notes" aria-label="Search messages and notes" autoCapitalize="off" autoCorrect="off" spellCheck={false} maxLength={500} />
       </label>
       <button className="search-cancel" onClick={onClose}>Cancel</button>
+    </div>
+    <div className="search-filters">
+      <div role="group" aria-label="Note search mode">{(["meaning", "keyword"] as const).map((m) => <button key={m} className="note-action" aria-pressed={mode === m} onClick={() => setMode(m)}>{m === "meaning" ? "Meaning" : "Keyword"}</button>)}</div>
+      <label>Vault <input value={vault} placeholder="All vaults" onChange={(e) => setVault(e.target.value)} /></label>
+      <label>Path prefix <input value={pathPrefix} placeholder="Any folder" onChange={(e) => setPathPrefix(e.target.value)} /></label>
     </div>
     <div className="search-results" aria-live="polite">
       {!q && <div className="search-empty">
