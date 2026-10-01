@@ -20,7 +20,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
         keys,
     )?;
-    let hits = client.search_notes(vault.as_deref(), &query, 10).await?;
+    let hits = client
+        .search_notes(vault.as_deref(), &query, 10, None, None)
+        .await?;
     println!("{} hits", hits.len());
     for h in hits {
         println!(

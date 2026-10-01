@@ -1336,6 +1336,8 @@ async fn vault_search(
     query: String,
     vault: Option<String>,
     limit: Option<usize>,
+    mode: Option<String>,
+    path_prefix: Option<String>,
 ) -> Result<Vec<uni_core::parachute::NoteHit>, String> {
     let vault = vault
         .map(|v| v.trim().to_string())
@@ -1345,6 +1347,63 @@ async fn vault_search(
             vault.as_deref(),
             &query,
             limit.unwrap_or(20),
+            mode.as_deref(),
+            path_prefix.as_deref(),
+        ))
+        .map_err(|e| e.to_string())
+    })
+    .await
+}
+
+#[tauri::command]
+async fn vault_list(app: tauri::AppHandle) -> Result<Vec<String>, String> {
+    with_vault(&app, |c| {
+        tauri::async_runtime::block_on(c.list_vaults()).map_err(|e| e.to_string())
+    })
+    .await
+}
+
+#[tauri::command]
+async fn vault_paths(
+    app: tauri::AppHandle,
+    vault: String,
+) -> Result<Vec<uni_core::parachute::NotePath>, String> {
+    with_vault(&app, move |c| {
+        tauri::async_runtime::block_on(c.list_paths(&vault)).map_err(|e| e.to_string())
+    })
+    .await
+}
+
+#[tauri::command]
+async fn vault_create(
+    app: tauri::AppHandle,
+    vault: String,
+    path: String,
+    content: String,
+) -> Result<serde_json::Value, String> {
+    with_vault(&app, move |c| {
+        tauri::async_runtime::block_on(c.create_note(&vault, &path, &content))
+            .map_err(|e| e.to_string())
+    })
+    .await
+}
+
+#[tauri::command]
+async fn vault_save(
+    app: tauri::AppHandle,
+    vault: String,
+    id: String,
+    content: String,
+    if_updated_at: Option<String>,
+    force: Option<bool>,
+) -> Result<serde_json::Value, String> {
+    with_vault(&app, move |c| {
+        tauri::async_runtime::block_on(c.save_note(
+            &vault,
+            &id,
+            &content,
+            if_updated_at.as_deref(),
+            force.unwrap_or(false),
         ))
         .map_err(|e| e.to_string())
     })
@@ -1485,6 +1544,10 @@ pub fn run() {
             journal_entry,
             vault_note,
             vault_search,
+            vault_list,
+            vault_paths,
+            vault_create,
+            vault_save,
             android_update_manifest
         ])
         .run(tauri::generate_context!())
