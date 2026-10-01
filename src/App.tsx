@@ -200,6 +200,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const [identity, setIdentity] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const drafts = useRef(new Map<string, string>());
+  const draftRevisions = useRef(new Map<string, number>());
   const [pending, setPending] = useState<PendingFile[]>([]);
   const pendingStore = useRef(new Map<string, PendingFile[]>());
   const activeScope = useRef<string | null>(null);
@@ -725,8 +726,12 @@ function Conversations({ onForget }: { onForget: () => void }) {
         const prefix = `@${label} `;
         const question = prefix + "\n\n" + text.slice(text.indexOf("\n\n") + 2);
         setDraft(question);
-        drafts.current.set(keyFor(uniRoom.id, null), question);
-        setBindings(new Map([[label, uni.pubkey]]));
+        const key = keyFor(uniRoom.id, null);
+        editDraft(key, question);
+        const nextBindings = new Map([[label, uni.pubkey]]);
+        bindingStore.current.set(key, nextBindings);
+        bindingsRef.current = nextBindings;
+        setBindings(nextBindings);
         focusComposer.current = true;
         setTimeout(() => { input.current?.focus(); input.current?.setSelectionRange(prefix.length, prefix.length); }, 50);
       }
@@ -857,8 +862,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
         if (!text) return;
         const before = drafts.current.get(key) ?? "";
         const next = before.trim() ? `${before.trimEnd()}\n${text}` : text;
-        drafts.current.set(key, next);
         if (activeScope.current === key) updateDraft(next, next.length);
+        else editDraft(key, next);
       } catch (e) {
         changePending(key, (items) => items.map((x) => x.id === id ? { ...x, voice: "failed" } : x));
         setStatus(`No transcript (${String(e).slice(0, 120)}). The voice message still sends.`);
@@ -888,6 +893,13 @@ function Conversations({ onForget }: { onForget: () => void }) {
     e.preventDefault();
     if (!sending) addFiles(Array.from(e.dataTransfer.files));
   }
+  // Only edits advance identity. Saving/restoring a scope is not an edit, and
+  // an edit back to the submitted text must still count as a new draft.
+  function editDraft(key: string, text: string) {
+    drafts.current.set(key, text);
+    draftRevisions.current.set(key, (draftRevisions.current.get(key) ?? 0) + 1);
+  }
+
   function updateDraft(text: string, caret: number | null) {
     setDraft(text);
     const now = Date.now();
@@ -896,7 +908,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       void invoke("send_typing", { channel, root: root ?? null, parent: replyTo ?? root ?? null }).catch(() => {});
     }
     const key = scope();
-    if (key) drafts.current.set(key, text);
+    if (key) editDraft(key, text);
     const next = pruneBindings(text, bindingsRef.current);
     bindingsRef.current = next;
     if (key) bindingStore.current.set(key, next);
@@ -917,7 +929,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     const next = insertMention(draft, picker.start, caret, label);
     const key = scope();
     setDraft(next.text);
-    if (key) drafts.current.set(key, next.text);
+    if (key) editDraft(key, next.text);
     const updated = new Map(pruneBindings(next.text, bindingsRef.current));
     updated.set(label, member.pubkey);
     bindingsRef.current = updated;
@@ -1002,6 +1014,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     const sentIds = files.map((f) => f.id);
     const snapshot = draft;
     const key = keyFor(channel, root);
+    const revision = draftRevisions.current.get(key) ?? 0;
     const resolved = resolveRecipients(snapshot, bindings, members);
     if ("error" in resolved) { setError(resolved.error); return; }
     const recipients = [...resolved.recipients];
@@ -1027,12 +1040,13 @@ function Conversations({ onForget }: { onForget: () => void }) {
         return items.filter((item) => !sentIds.includes(item.id));
       });
       // Do not erase text typed during an in-flight send or in another room.
-      if (drafts.current.get(key) === snapshot) {
-        drafts.current.set(key, "");
+      if ((draftRevisions.current.get(key) ?? 0) === revision) {
+        editDraft(key, "");
         bindingStore.current.set(key, new Map());
         if (activeScope.current === key) {
           setDraft("");
-          setBindings(new Map());
+          bindingsRef.current = new Map();
+          setBindings(bindingsRef.current);
         }
       }
       if (activeScope.current === key) {
