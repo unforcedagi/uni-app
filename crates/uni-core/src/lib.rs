@@ -29,6 +29,7 @@ pub mod journal;
 pub mod live;
 pub mod media;
 pub mod pairing;
+pub mod pairing_source;
 pub mod parachute;
 pub mod readstate;
 pub mod store;
