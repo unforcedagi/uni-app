@@ -133,6 +133,36 @@ test('Keyboard menu navigation, Mention and Attach', async ({ page }) => {
   await expect(page.getByRole('menu')).toHaveCount(0);
 });
 
+// macOS WebKit (Safari/WKWebView) does not make buttons mouse-focusable: an un-prevented
+// mousedown on a button moves focus off the focused element with relatedTarget=null.
+// Linux Chromium/WebKit focus the button instead, so emulate the macOS rule here.
+async function emulateMacButtonFocus(page: Page) {
+  await page.evaluate(() => window.addEventListener('mousedown', (e) => {
+    if (e.defaultPrevented || !(e.target as HTMLElement).closest('button')) return;
+    (document.activeElement as HTMLElement | null)?.blur();
+  }));
+}
+
+for (const action of ['Mention', 'Attach file/photo']) {
+  test(`macOS button-focus model: centered ${action}`, async ({ page }) => {
+    await emulateMacButtonFocus(page);
+    const input = page.getByRole('textbox', { name: 'Message Test room' });
+    await input.fill('hello ');
+    await press(page, page.getByRole('button', { name: 'More message options' }));
+    const chooser = action.startsWith('Attach') ? page.waitForEvent('filechooser', { timeout: 2000 }).catch(() => null) : null;
+    await press(page, page.getByRole('menuitem', { name: action, exact: true }));
+    if (chooser) {
+      const result = await chooser;
+      expect(result).not.toBeNull();
+      await result!.setFiles([]);
+      await expect(input).toHaveValue('hello ');
+    } else {
+      await expect(input).toHaveValue('hello @');
+      await expect(page.getByRole('listbox', { name: 'Mention a member' })).toBeVisible();
+    }
+  });
+}
+
 for (const action of ['Mention', 'Attach file/photo']) {
   for (const probe of [false, true]) {
     test(`Edge press ${action}, transform probe=${probe}`, async ({ page }) => {
