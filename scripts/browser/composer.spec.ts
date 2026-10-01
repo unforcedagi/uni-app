@@ -261,24 +261,27 @@ for (const submit of ['Enter', 'Send button']) {
   });
 }
 
-test('Same-turn Enter submissions send once and preserve text edited during send', async ({ page }) => {
-  const input = page.getByRole('textbox', { name: 'Message Test room' });
-  await input.fill('first draft');
-  await page.evaluate(() => {
-    (window as any).holdSend = true;
-    const input = document.querySelector('textarea')!;
-    for (let i = 0; i < 2; i++) input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+for (const replacement of ['first draft', 'next draft']) {
+  test(`Same-turn Enter submissions send once and preserve replacement: ${replacement}`, async ({ page }) => {
+    const input = page.getByRole('textbox', { name: 'Message Test room' });
+    await input.fill('first draft');
+    await page.evaluate(() => {
+      (window as any).holdSend = true;
+      const input = document.querySelector('textarea')!;
+      for (let i = 0; i < 2; i++) input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    });
+    expect(await page.evaluate(() => (window as any).calls.filter((c: any) => c.cmd === 'post_message'))).toHaveLength(1);
+    await input.fill('');
+    await input.fill(replacement);
+    await page.evaluate(() => (window as any).finishSend());
+    await expect(page.getByRole('button', { name: 'Send message', exact: true })).toBeEnabled();
+    await expect(input).toHaveValue(replacement);
+    await input.press('Enter');
+    expect(await page.evaluate(() => (window as any).calls.filter((c: any) => c.cmd === 'post_message').map((c: any) => c.args.body))).toEqual(['first draft', replacement]);
+    await page.evaluate(() => (window as any).finishSend());
+    await expect(input).toHaveValue('');
   });
-  expect(await page.evaluate(() => (window as any).calls.filter((c: any) => c.cmd === 'post_message'))).toHaveLength(1);
-  await input.fill('next draft');
-  await page.evaluate(() => (window as any).finishSend());
-  await expect(page.getByRole('button', { name: 'Send message', exact: true })).toBeEnabled();
-  await expect(input).toHaveValue('next draft');
-  await input.press('Enter');
-  expect(await page.evaluate(() => (window as any).calls.filter((c: any) => c.cmd === 'post_message').map((c: any) => c.args.body))).toEqual(['first draft', 'next draft']);
-  await page.evaluate(() => (window as any).finishSend());
-  await expect(input).toHaveValue('');
-});
+}
 
 test('Recording blocks another room and send completion preserves that room draft', async ({ page }) => {
   const input = page.getByRole('textbox', { name: 'Message Test room' });
@@ -315,3 +318,54 @@ test('Recording blocks another room and send completion preserves that room draf
   expect(calls[0].args.channel).toBe('test');
   expect(calls[0].args.media).toHaveLength(1);
 });
+
+for (const replace of [false, true]) {
+  test(`Held send across room navigation preserves scoped drafts and bindings, replace=${replace}`, async ({ page }) => {
+    const switchRoom = async (name: string) => {
+      if (test.info().project.name === 'mobile') await press(page, page.getByRole('button', { name: 'Back to conversations', exact: true }));
+      await press(page, page.locator('.rooms nav button').filter({ hasText: name }));
+    };
+    const input = page.getByRole('textbox', { name: 'Message Test room' });
+    const chooseMention = async (target: Locator) => {
+      await target.fill('@Test');
+      await press(page, page.getByRole('option').getByRole('button'));
+      await expect(target).toHaveValue('@Test member ');
+      await expect(page.getByRole('listbox', { name: 'Mention a member' })).toHaveCount(0);
+    };
+    await chooseMention(input);
+    await page.evaluate(() => { (window as any).holdSend = true; });
+    await input.press('Enter');
+    if (replace) {
+      await input.fill('');
+      await chooseMention(input);
+    }
+    await switchRoom('Other room');
+    const other = page.getByRole('textbox', { name: 'Message Other room' });
+    await chooseMention(other);
+    await other.press('Enter'); // The in-flight send still owns the global send lock.
+    await switchRoom('Test room');
+    await expect(input).toHaveValue('@Test member ');
+    await switchRoom('Other room');
+    await page.evaluate(() => (window as any).finishSend());
+    await expect(page.getByRole('button', { name: 'Send message', exact: true })).toBeEnabled();
+    await expect(other).toHaveValue('@Test member ');
+    // A settled mention must stay settled after completion and scope restoration.
+    await other.press('End');
+    await expect(page.getByRole('listbox', { name: 'Mention a member' })).toHaveCount(0);
+    await switchRoom('Test room');
+    await expect(input).toHaveValue(replace ? '@Test member ' : '');
+    if (replace) {
+      await input.press('End');
+      await expect(page.getByRole('listbox', { name: 'Mention a member' })).toHaveCount(0);
+    }
+    await switchRoom('Other room');
+    await other.press('Enter');
+    const calls = await page.evaluate(() => (window as any).calls.filter((c: any) => c.cmd === 'post_message'));
+    expect(calls.map((c: any) => ({ channel: c.args.channel, body: c.args.body, recipients: c.args.recipients }))).toEqual([
+      { channel: 'test', body: '@Test member ', recipients: ['b'.repeat(64)] },
+      { channel: 'other', body: '@Test member ', recipients: ['b'.repeat(64)] },
+    ]);
+    await page.evaluate(() => (window as any).finishSend());
+    await expect(other).toHaveValue('');
+  });
+}

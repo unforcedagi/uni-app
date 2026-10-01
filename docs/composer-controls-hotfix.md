@@ -49,7 +49,10 @@ sending disable it; the current recording's Stop button stays enabled. The initi
 render condition, disabled rules, and handler; the review correction below guards
 the handler and disables Send throughout every non-idle recorder phase.
 
-**Limit:** the reported physical Pixel and Mac menu failures were not reproduced. Chromium center
+**Limit:** Mac is the reported failing device and remains inaccessible for native
+picker/menu reproduction. Pixel candidate **0.1.23** was physically tested, but that
+is not evidence of the Mac root cause. The initial investigation below did not
+reproduce the reported native menu failure. Chromium center
 and mobile edge taps passed even before the fix. The desktop hit-testing failure is
 proven; it must not be presented as proof of either physical device symptom's cause or resolution.
 No speculative blur or user-activation workaround was added.
@@ -72,7 +75,7 @@ recorder lifecycle issue is outside this hotfix.
 Recording tests use Chromium's fake media device; they do not use a physical mic.
 IPC stubs intercept every call, including post_message; no live messages are sent.
 
-## Physical devices and design note
+## Physical devices and design note (historical initial investigation)
 
 Commands actually run:
 
@@ -146,8 +149,10 @@ Send-button submission containing the draft and audio attachment. Additional cas
 cover edits during send and switching rooms during recording/send completion.
 All IPC remains stubbed; no messages are posted to a relay.
 
-Physical Pixel QA remains blocked pending unlock; Mac QA remains blocked pending
-access. The prior device-access evidence above was not rerun for this correction.
+At the time of this correction, Pixel QA was blocked pending unlock and Mac QA
+was blocked pending access. The prior device-access evidence above was not rerun
+for this correction. The later Pixel candidate 0.1.23 physical test does not
+establish a Mac root cause; Mac native picker/menu reproduction remains inaccessible.
 The desktop CSS edge fix is **not** a resolution of the reported physical-device
 symptoms: baseline center/mobile taps already passed. No speculative pointerdown
 or blur workaround was added. No push, release, install, vault edit, or secret
@@ -164,4 +169,42 @@ Correction validation:
 - `git diff --check`: passed.
 
 The earlier Rust/build/device results are historical initial-hotfix evidence, not
-new verification of this correction. Physical device proof remains unavailable.
+new verification of this correction. Mac native picker/menu proof remains unavailable.
+
+
+## P2 re-review correction at 4c9b1ab
+
+Send completion compared the stored text with the submitted string. Deleting and
+retyping that same string during a held send therefore erased a new draft. Each
+room/thread now has an edit revision, captured when sending and compared on
+completion. Only the untouched revision is cleared, together with its bindings.
+Navigation saves/restores drafts without advancing revisions, so visiting another
+room does not prevent an untouched submitted draft from clearing.
+
+All draft setters were reviewed: textarea changes, Mention insertion/selection,
+Ask Uni replacement, and the existing asynchronous transcript draft insertion use
+the revision helper. The latter is only draft bookkeeping; recording, transcription,
+and media behavior are unchanged. Ask Uni also stores its replacement bindings
+synchronously. Successful clearing resets the active binding ref as well as state.
+No sidebar, MDX, media, or voice behavior changes were made.
+
+Before the fix, the targeted production-App suite had **4 passes and 4 failures**:
+identical replacement in the active room and identical replacement restored after
+room navigation failed on both desktop and mobile Chromium. Different replacement
+and untouched-draft navigation cases passed. The tests hold mocked `post_message`,
+exercise same-turn duplicate Enter, replace text and picked mentions, restore
+room drafts, verify settled mention bindings and recipients, and explicitly send
+the surviving draft. No live `post_message` occurs.
+
+Mac remains the reported failing device and is inaccessible for native picker/menu
+reproduction. Pixel candidate 0.1.23 was physically tested, as recorded in the task
+handoff; it is not evidence of Mac root cause. No device access was retried for this
+P2 correction, and no push, release, or install was performed.
+
+P2 validation:
+
+- `pnpm test:composer`: **34 passed, 0 failed** (30.0 s).
+- `pnpm typecheck`: passed.
+- `pnpm test`: all 17 test scripts passed.
+- Production Vite build in the browser harness: passed; existing large-chunk warning.
+- `git diff --check`: passed.
