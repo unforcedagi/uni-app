@@ -39,7 +39,7 @@ pub const SESSION_TIMEOUT: Duration = Duration::from_secs(120);
 /// How long to wait for an optional NIP-42 challenge right after connecting.
 const AUTH_CHALLENGE_WAIT: Duration = Duration::from_secs(3);
 /// Sub id for the pairing subscription.
-const SUB_ID: &str = "pair";
+pub(super) const SUB_ID: &str = "pair";
 
 /// A pairing in progress: offer published, SAS known, awaiting the user.
 pub struct PendingPairing {
@@ -72,11 +72,11 @@ impl std::fmt::Debug for PairedIdentity {
     }
 }
 
-fn perr(e: PairingError) -> Error {
+pub(super) fn perr(e: PairingError) -> Error {
     Error::Pairing(e.to_string())
 }
 
-fn remaining(deadline: Instant) -> Result<Duration> {
+pub(super) fn remaining(deadline: Instant) -> Result<Duration> {
     deadline
         .checked_duration_since(Instant::now())
         .filter(|d| !d.is_zero())
@@ -85,7 +85,7 @@ fn remaining(deadline: Instant) -> Result<Duration> {
 
 /// Pairing relays must be `wss://`; plain `ws://` is accepted only for
 /// loopback (in-process tests).
-fn check_pairing_relay(url: &str) -> Result<()> {
+pub(super) fn check_pairing_relay(url: &str) -> Result<()> {
     let u = url::Url::parse(url).map_err(|e| Error::Invalid(format!("pairing relay: {e}")))?;
     let host = u.host_str().unwrap_or_default();
     match u.scheme() {
@@ -244,7 +244,7 @@ pub async fn start(uri: &str) -> Result<PendingPairing> {
 /// If the relay sends a NIP-42 challenge promptly, answer it with the
 /// ephemeral session key (so the relay accepts events that key signs).
 /// Pairing relays that don't require auth send nothing; that's fine.
-async fn maybe_auth(
+pub(super) async fn maybe_auth(
     conn: &mut NostrWsConnection,
     session: &PairingSession,
     relay: &str,
@@ -280,7 +280,7 @@ async fn maybe_auth(
 
 /// Publish without blocking on OK: the pairing relay's OK is informational
 /// and the peer's next message is what actually advances the protocol.
-async fn publish(conn: &mut NostrWsConnection, ev: &Event) -> Result<()> {
+pub(super) async fn publish(conn: &mut NostrWsConnection, ev: &Event) -> Result<()> {
     conn.send_raw(&json!(["EVENT", ev])).await?;
     Ok(())
 }
@@ -403,7 +403,7 @@ impl PendingPairing {
     }
 }
 
-fn abort_text(r: AbortReason) -> &'static str {
+pub(super) fn abort_text(r: AbortReason) -> &'static str {
     match r {
         AbortReason::SasMismatch => "codes did not match",
         AbortReason::UserDenied => "declined",
