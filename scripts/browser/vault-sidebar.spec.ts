@@ -96,8 +96,14 @@ test('Twenty other vaults stay reachable inside the viewport and targets are 44p
   const toggle = page.getByRole('region', { name: 'Vaults' }).getByRole('button', { name: 'Other vaults (20)' });
   expect((await toggle.boundingBox())!.height).toBeGreaterThanOrEqual(44);
   await toggle.click();
+  const list = page.locator('#other-vault-list');
+  // The list itself must scroll; the sidebar around it must not overflow (the shell clips it).
+  expect(await list.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
+  for (const sel of ['.rooms', '.rooms-body']) {
+    expect(await page.locator(sel).evaluate((el) => el.scrollHeight <= el.clientHeight + 1), sel).toBe(true);
+  }
+  await list.evaluate((el) => { el.scrollTop = el.scrollHeight; });
   const last = vaultButton(page, 'vault-20');
-  await last.scrollIntoViewIfNeeded();
   const box = (await last.boundingBox())!;
   expect(box.y).toBeGreaterThanOrEqual(0);
   expect(box.y + box.height).toBeLessThanOrEqual(page.viewportSize()!.height);
