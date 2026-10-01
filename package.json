@@ -17,7 +17,8 @@
     "test:search": "node --experimental-strip-types scripts/search.test.ts",
     "test:uni-actions": "node --experimental-strip-types scripts/uniActions.test.ts && node --experimental-strip-types scripts/ownMessages.test.ts",
     "test:media": "node --experimental-strip-types scripts/media.test.ts",
-    "test:vaultlinks": "node --experimental-strip-types scripts/vaultlinks.test.ts"
+    "test:vaultlinks": "node --experimental-strip-types scripts/vaultlinks.test.ts",
+    "test:composer": "playwright test"
   },
   "dependencies": {
     "@openparachute/surface-client": "0.3.7",
@@ -36,6 +37,7 @@
     "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@tauri-apps/cli": "^2.4.1",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",

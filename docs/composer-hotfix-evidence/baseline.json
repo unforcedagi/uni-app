@@ -1,0 +1,2113 @@
+{
+  "composer-Mention-touch-pointer-retains-caret-and-picker-mobile": {
+    "events": [
+      {
+        "type": "focusin",
+        "target": "TEXTAREA",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "pointerdown",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "pointerup",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "mousedown",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusout",
+        "target": "TEXTAREA",
+        "related": "<button class=\"address-toggle compose-icon\" aria-label=\"More message options\" title=\"More message options\" aria-haspopup=\"menu\" aria-expanded=\"false\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 5v14M5 12h14\"></path></svg></button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusin",
+        "target": "BUTTON",
+        "related": "<textarea aria-label=\"Message Test room\" maxlength=\"65536\" rows=\"1\" placeholder=\"Message Uni\u2026\" style=\"height: 40px; overflow-y: hidden;\">hello </textarea>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "mouseup",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "click",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusout",
+        "target": "BUTTON",
+        "related": "<button role=\"menuitem\"><span aria-hidden=\"true\">@</span> Mention</button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusin",
+        "target": "@ Mention",
+        "related": "<button class=\"address-toggle compose-icon\" aria-label=\"More message options\" title=\"More message options\" aria-haspopup=\"menu\" aria-expanded=\"true\" aria-controls=\"_r_0_\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 5v14M5 12h14\"></path></svg></button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "pointerdown",
+        "target": "@ Mention",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "pointerup",
+        "target": "@ Mention",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "mousedown",
+        "target": "@ Mention",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "mouseup",
+        "target": "@ Mention",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "click",
+        "target": "@ Mention",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusout",
+        "target": "@ Mention",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusin",
+        "target": "TEXTAREA",
+        "related": null,
+        "active": true,
+        "connected": true
+      }
+    ],
+    "draft": "hello @",
+    "picker": true,
+    "menu": false
+  },
+  "composer-Mention-touch-pointer-retains-caret-and-picker-desktop": {
+    "events": [
+      {
+        "type": "focusin",
+        "target": "TEXTAREA",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "pointerdown",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "mousedown",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusout",
+        "target": "TEXTAREA",
+        "related": "<button class=\"address-toggle compose-icon\" aria-label=\"More message options\" title=\"More message options\" aria-haspopup=\"menu\" aria-expanded=\"false\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 5v14M5 12h14\"></path></svg></button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusin",
+        "target": "BUTTON",
+        "related": "<textarea aria-label=\"Message Test room\" maxlength=\"65536\" rows=\"1\" placeholder=\"Message Uni\u2026\" style=\"height: 40px; overflow-y: hidden;\">hello </textarea>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "pointerup",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "mouseup",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "click",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusout",
+        "target": "BUTTON",
+        "related": "<button role=\"menuitem\"><span aria-hidden=\"true\">@</span> Mention</button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusin",
+        "target": "@ Mention",
+        "related": "<button class=\"address-toggle compose-icon\" aria-label=\"More message options\" title=\"More message options\" aria-haspopup=\"menu\" aria-expanded=\"true\" aria-controls=\"_r_0_\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 5v14M5 12h14\"></path></svg></button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "pointerdown",
+        "target": "@ Mention",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "mousedown",
+        "target": "@ Mention",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "pointerup",
+        "target": "@ Mention",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "mouseup",
+        "target": "@ Mention",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "click",
+        "target": "@ Mention",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusout",
+        "target": "@ Mention",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusin",
+        "target": "TEXTAREA",
+        "related": null,
+        "active": true,
+        "connected": true
+      }
+    ],
+    "draft": "hello @",
+    "picker": true,
+    "menu": false
+  },
+  "composer-Attach-opens-nati-5aad4-t-selection-adds-attachment-mobile": {
+    "events": [
+      {
+        "type": "focusin",
+        "target": "TEXTAREA",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "pointerdown",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "pointerup",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "mousedown",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusout",
+        "target": "TEXTAREA",
+        "related": "<button class=\"address-toggle compose-icon\" aria-label=\"More message options\" title=\"More message options\" aria-haspopup=\"menu\" aria-expanded=\"false\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 5v14M5 12h14\"></path></svg></button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusin",
+        "target": "BUTTON",
+        "related": "<textarea aria-label=\"Message Test room\" maxlength=\"65536\" rows=\"1\" placeholder=\"Message Uni\u2026\" style=\"height: 40px; overflow-y: hidden;\">keep me</textarea>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "mouseup",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "click",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusout",
+        "target": "BUTTON",
+        "related": "<button role=\"menuitem\"><span aria-hidden=\"true\">@</span> Mention</button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusin",
+        "target": "@ Mention",
+        "related": "<button class=\"address-toggle compose-icon\" aria-label=\"More message options\" title=\"More message options\" aria-haspopup=\"menu\" aria-expanded=\"true\" aria-controls=\"_r_0_\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 5v14M5 12h14\"></path></svg></button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "pointerdown",
+        "target": "\uff0b Attach file/photo",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "pointerup",
+        "target": "\uff0b Attach file/photo",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "mousedown",
+        "target": "\uff0b Attach file/photo",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusout",
+        "target": "@ Mention",
+        "related": "<button role=\"menuitem\"><span aria-hidden=\"true\">\uff0b</span> Attach file/photo</button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusin",
+        "target": "\uff0b Attach file/photo",
+        "related": "<button role=\"menuitem\"><span aria-hidden=\"true\">@</span> Mention</button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "mouseup",
+        "target": "\uff0b Attach file/photo",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "click",
+        "target": "\uff0b Attach file/photo",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusout",
+        "target": "\uff0b Attach file/photo",
+        "related": "<button class=\"address-toggle compose-icon\" aria-label=\"More message options\" title=\"More message options\" aria-haspopup=\"menu\" aria-expanded=\"true\" aria-controls=\"_r_0_\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 5v14M5 12h14\"></path></svg></button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusin",
+        "target": "BUTTON",
+        "related": "<button role=\"menuitem\"><span aria-hidden=\"true\">\uff0b</span> Attach file/photo</button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "click",
+        "target": "INPUT",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "pointerdown",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "pointerup",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "mousedown",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "mouseup",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "click",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusout",
+        "target": "BUTTON",
+        "related": "<button role=\"menuitem\"><span aria-hidden=\"true\">@</span> Mention</button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusin",
+        "target": "@ Mention",
+        "related": "<button class=\"address-toggle compose-icon\" aria-label=\"More message options\" title=\"More message options\" aria-haspopup=\"menu\" aria-expanded=\"true\" aria-controls=\"_r_0_\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 5v14M5 12h14\"></path></svg></button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "pointerdown",
+        "target": "\uff0b Attach file/photo",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "pointerup",
+        "target": "\uff0b Attach file/photo",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "mousedown",
+        "target": "\uff0b Attach file/photo",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusout",
+        "target": "@ Mention",
+        "related": "<button role=\"menuitem\"><span aria-hidden=\"true\">\uff0b</span> Attach file/photo</button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusin",
+        "target": "\uff0b Attach file/photo",
+        "related": "<button role=\"menuitem\"><span aria-hidden=\"true\">@</span> Mention</button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "mouseup",
+        "target": "\uff0b Attach file/photo",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "click",
+        "target": "\uff0b Attach file/photo",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusout",
+        "target": "\uff0b Attach file/photo",
+        "related": "<button class=\"address-toggle compose-icon\" aria-label=\"More message options\" title=\"More message options\" aria-haspopup=\"menu\" aria-expanded=\"true\" aria-controls=\"_r_0_\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 5v14M5 12h14\"></path></svg></button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusin",
+        "target": "BUTTON",
+        "related": "<button role=\"menuitem\"><span aria-hidden=\"true\">\uff0b</span> Attach file/photo</button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "click",
+        "target": "INPUT",
+        "related": null,
+        "active": true,
+        "connected": true
+      }
+    ],
+    "draft": "keep me",
+    "picker": false,
+    "menu": false,
+    "chooser": [
+      {
+        "multiple": true
+      },
+      {
+        "multiple": true
+      }
+    ]
+  },
+  "composer-Attach-opens-nati-5aad4-t-selection-adds-attachment-desktop": {
+    "events": [
+      {
+        "type": "focusin",
+        "target": "TEXTAREA",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "pointerdown",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "mousedown",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusout",
+        "target": "TEXTAREA",
+        "related": "<button class=\"address-toggle compose-icon\" aria-label=\"More message options\" title=\"More message options\" aria-haspopup=\"menu\" aria-expanded=\"false\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 5v14M5 12h14\"></path></svg></button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusin",
+        "target": "BUTTON",
+        "related": "<textarea aria-label=\"Message Test room\" maxlength=\"65536\" rows=\"1\" placeholder=\"Message Uni\u2026\" style=\"height: 40px; overflow-y: hidden;\">keep me</textarea>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "pointerup",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "mouseup",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "click",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusout",
+        "target": "BUTTON",
+        "related": "<button role=\"menuitem\"><span aria-hidden=\"true\">@</span> Mention</button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusin",
+        "target": "@ Mention",
+        "related": "<button class=\"address-toggle compose-icon\" aria-label=\"More message options\" title=\"More message options\" aria-haspopup=\"menu\" aria-expanded=\"true\" aria-controls=\"_r_0_\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 5v14M5 12h14\"></path></svg></button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "pointerdown",
+        "target": "\uff0b Attach file/photo",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "mousedown",
+        "target": "\uff0b Attach file/photo",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusout",
+        "target": "@ Mention",
+        "related": "<button role=\"menuitem\"><span aria-hidden=\"true\">\uff0b</span> Attach file/photo</button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusin",
+        "target": "\uff0b Attach file/photo",
+        "related": "<button role=\"menuitem\"><span aria-hidden=\"true\">@</span> Mention</button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "pointerup",
+        "target": "\uff0b Attach file/photo",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "mouseup",
+        "target": "\uff0b Attach file/photo",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "click",
+        "target": "\uff0b Attach file/photo",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusout",
+        "target": "\uff0b Attach file/photo",
+        "related": "<button class=\"address-toggle compose-icon\" aria-label=\"More message options\" title=\"More message options\" aria-haspopup=\"menu\" aria-expanded=\"true\" aria-controls=\"_r_0_\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 5v14M5 12h14\"></path></svg></button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusin",
+        "target": "BUTTON",
+        "related": "<button role=\"menuitem\"><span aria-hidden=\"true\">\uff0b</span> Attach file/photo</button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "click",
+        "target": "INPUT",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "pointerdown",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "mousedown",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "pointerup",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "mouseup",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "click",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusout",
+        "target": "BUTTON",
+        "related": "<button role=\"menuitem\"><span aria-hidden=\"true\">@</span> Mention</button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusin",
+        "target": "@ Mention",
+        "related": "<button class=\"address-toggle compose-icon\" aria-label=\"More message options\" title=\"More message options\" aria-haspopup=\"menu\" aria-expanded=\"true\" aria-controls=\"_r_0_\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 5v14M5 12h14\"></path></svg></button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "pointerdown",
+        "target": "\uff0b Attach file/photo",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "mousedown",
+        "target": "\uff0b Attach file/photo",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusout",
+        "target": "@ Mention",
+        "related": "<button role=\"menuitem\"><span aria-hidden=\"true\">\uff0b</span> Attach file/photo</button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusin",
+        "target": "\uff0b Attach file/photo",
+        "related": "<button role=\"menuitem\"><span aria-hidden=\"true\">@</span> Mention</button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "pointerup",
+        "target": "\uff0b Attach file/photo",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "mouseup",
+        "target": "\uff0b Attach file/photo",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "click",
+        "target": "\uff0b Attach file/photo",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusout",
+        "target": "\uff0b Attach file/photo",
+        "related": "<button class=\"address-toggle compose-icon\" aria-label=\"More message options\" title=\"More message options\" aria-haspopup=\"menu\" aria-expanded=\"true\" aria-controls=\"_r_0_\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 5v14M5 12h14\"></path></svg></button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusin",
+        "target": "BUTTON",
+        "related": "<button role=\"menuitem\"><span aria-hidden=\"true\">\uff0b</span> Attach file/photo</button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "click",
+        "target": "INPUT",
+        "related": null,
+        "active": true,
+        "connected": true
+      }
+    ],
+    "draft": "keep me",
+    "picker": false,
+    "menu": false,
+    "chooser": [
+      {
+        "multiple": true
+      },
+      {
+        "multiple": true
+      }
+    ]
+  },
+  "composer-Mic-coexists-with-Send-for-text-and-attachments-mobile": {
+    "events": [
+      {
+        "type": "focusin",
+        "target": "TEXTAREA",
+        "related": null,
+        "active": true,
+        "connected": true
+      }
+    ],
+    "draft": "draft",
+    "picker": false,
+    "menu": false
+  },
+  "composer-Mic-coexists-with-Send-for-text-and-attachments-desktop": {
+    "events": [
+      {
+        "type": "focusin",
+        "target": "TEXTAREA",
+        "related": null,
+        "active": true,
+        "connected": true
+      }
+    ],
+    "draft": "draft",
+    "picker": false,
+    "menu": false
+  },
+  "composer-Keyboard-menu-navigation-Mention-and-Attach-mobile": {
+    "events": [
+      {
+        "type": "focusin",
+        "target": "BUTTON",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusout",
+        "target": "BUTTON",
+        "related": "<button role=\"menuitem\"><span aria-hidden=\"true\">@</span> Mention</button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusin",
+        "target": "@ Mention",
+        "related": "<button class=\"address-toggle compose-icon\" aria-label=\"More message options\" title=\"More message options\" aria-haspopup=\"menu\" aria-expanded=\"true\" aria-controls=\"_r_0_\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 5v14M5 12h14\"></path></svg></button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "click",
+        "target": "@ Mention",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusout",
+        "target": "@ Mention",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusin",
+        "target": "TEXTAREA",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusout",
+        "target": "TEXTAREA",
+        "related": "<button class=\"address-toggle compose-icon\" aria-label=\"More message options\" title=\"More message options\" aria-haspopup=\"menu\" aria-expanded=\"false\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 5v14M5 12h14\"></path></svg></button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusin",
+        "target": "BUTTON",
+        "related": "<textarea aria-label=\"Message Test room\" maxlength=\"65536\" rows=\"1\" placeholder=\"Message Uni\u2026\" style=\"height: 40px; overflow-y: hidden;\">@</textarea>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusout",
+        "target": "BUTTON",
+        "related": "<button role=\"menuitem\"><span aria-hidden=\"true\">@</span> Mention</button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusin",
+        "target": "@ Mention",
+        "related": "<button class=\"address-toggle compose-icon\" aria-label=\"More message options\" title=\"More message options\" aria-haspopup=\"menu\" aria-expanded=\"true\" aria-controls=\"_r_0_\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 5v14M5 12h14\"></path></svg></button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusout",
+        "target": "@ Mention",
+        "related": "<button role=\"menuitem\"><span aria-hidden=\"true\">\uff0b</span> Attach file/photo</button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusin",
+        "target": "\uff0b Attach file/photo",
+        "related": "<button role=\"menuitem\"><span aria-hidden=\"true\">@</span> Mention</button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "click",
+        "target": "\uff0b Attach file/photo",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusout",
+        "target": "\uff0b Attach file/photo",
+        "related": "<button class=\"address-toggle compose-icon\" aria-label=\"More message options\" title=\"More message options\" aria-haspopup=\"menu\" aria-expanded=\"true\" aria-controls=\"_r_0_\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 5v14M5 12h14\"></path></svg></button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusin",
+        "target": "BUTTON",
+        "related": "<button role=\"menuitem\"><span aria-hidden=\"true\">\uff0b</span> Attach file/photo</button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "click",
+        "target": "INPUT",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusout",
+        "target": "BUTTON",
+        "related": "<button role=\"menuitem\"><span aria-hidden=\"true\">@</span> Mention</button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusin",
+        "target": "@ Mention",
+        "related": "<button class=\"address-toggle compose-icon\" aria-label=\"More message options\" title=\"More message options\" aria-haspopup=\"menu\" aria-expanded=\"true\" aria-controls=\"_r_0_\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 5v14M5 12h14\"></path></svg></button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusout",
+        "target": "@ Mention",
+        "related": "<button class=\"address-toggle compose-icon\" aria-label=\"More message options\" title=\"More message options\" aria-haspopup=\"menu\" aria-expanded=\"true\" aria-controls=\"_r_0_\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 5v14M5 12h14\"></path></svg></button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusin",
+        "target": "BUTTON",
+        "related": "<button role=\"menuitem\"><span aria-hidden=\"true\">@</span> Mention</button>",
+        "active": true,
+        "connected": true
+      }
+    ],
+    "draft": "@",
+    "picker": false,
+    "menu": false
+  },
+  "composer-Keyboard-menu-navigation-Mention-and-Attach-desktop": {
+    "events": [
+      {
+        "type": "focusin",
+        "target": "BUTTON",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusout",
+        "target": "BUTTON",
+        "related": "<button role=\"menuitem\"><span aria-hidden=\"true\">@</span> Mention</button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusin",
+        "target": "@ Mention",
+        "related": "<button class=\"address-toggle compose-icon\" aria-label=\"More message options\" title=\"More message options\" aria-haspopup=\"menu\" aria-expanded=\"true\" aria-controls=\"_r_0_\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 5v14M5 12h14\"></path></svg></button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "click",
+        "target": "@ Mention",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusout",
+        "target": "@ Mention",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusin",
+        "target": "TEXTAREA",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusout",
+        "target": "TEXTAREA",
+        "related": "<button class=\"address-toggle compose-icon\" aria-label=\"More message options\" title=\"More message options\" aria-haspopup=\"menu\" aria-expanded=\"false\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 5v14M5 12h14\"></path></svg></button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusin",
+        "target": "BUTTON",
+        "related": "<textarea aria-label=\"Message Test room\" maxlength=\"65536\" rows=\"1\" placeholder=\"Message Uni\u2026\" style=\"height: 40px; overflow-y: hidden;\">@</textarea>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusout",
+        "target": "BUTTON",
+        "related": "<button role=\"menuitem\"><span aria-hidden=\"true\">@</span> Mention</button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusin",
+        "target": "@ Mention",
+        "related": "<button class=\"address-toggle compose-icon\" aria-label=\"More message options\" title=\"More message options\" aria-haspopup=\"menu\" aria-expanded=\"true\" aria-controls=\"_r_0_\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 5v14M5 12h14\"></path></svg></button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusout",
+        "target": "@ Mention",
+        "related": "<button role=\"menuitem\"><span aria-hidden=\"true\">\uff0b</span> Attach file/photo</button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusin",
+        "target": "\uff0b Attach file/photo",
+        "related": "<button role=\"menuitem\"><span aria-hidden=\"true\">@</span> Mention</button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "click",
+        "target": "\uff0b Attach file/photo",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusout",
+        "target": "\uff0b Attach file/photo",
+        "related": "<button class=\"address-toggle compose-icon\" aria-label=\"More message options\" title=\"More message options\" aria-haspopup=\"menu\" aria-expanded=\"true\" aria-controls=\"_r_0_\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 5v14M5 12h14\"></path></svg></button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusin",
+        "target": "BUTTON",
+        "related": "<button role=\"menuitem\"><span aria-hidden=\"true\">\uff0b</span> Attach file/photo</button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "click",
+        "target": "INPUT",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusout",
+        "target": "BUTTON",
+        "related": "<button role=\"menuitem\"><span aria-hidden=\"true\">@</span> Mention</button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusin",
+        "target": "@ Mention",
+        "related": "<button class=\"address-toggle compose-icon\" aria-label=\"More message options\" title=\"More message options\" aria-haspopup=\"menu\" aria-expanded=\"true\" aria-controls=\"_r_0_\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 5v14M5 12h14\"></path></svg></button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusout",
+        "target": "@ Mention",
+        "related": "<button class=\"address-toggle compose-icon\" aria-label=\"More message options\" title=\"More message options\" aria-haspopup=\"menu\" aria-expanded=\"true\" aria-controls=\"_r_0_\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 5v14M5 12h14\"></path></svg></button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusin",
+        "target": "BUTTON",
+        "related": "<button role=\"menuitem\"><span aria-hidden=\"true\">@</span> Mention</button>",
+        "active": true,
+        "connected": true
+      }
+    ],
+    "draft": "@",
+    "picker": false,
+    "menu": false
+  },
+  "composer-Edge-press-Mention-transform-probe-false-mobile": {
+    "events": [
+      {
+        "type": "pointerdown",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "pointerup",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "mousedown",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusin",
+        "target": "BUTTON",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "mouseup",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "click",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusout",
+        "target": "BUTTON",
+        "related": "<button role=\"menuitem\"><span aria-hidden=\"true\">@</span> Mention</button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusin",
+        "target": "@ Mention",
+        "related": "<button class=\"address-toggle compose-icon\" aria-label=\"More message options\" title=\"More message options\" aria-haspopup=\"menu\" aria-expanded=\"true\" aria-controls=\"_r_0_\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 5v14M5 12h14\"></path></svg></button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "hit": "<button role=\"menuitem\"><span aria-hidden=\"true\">@</span> Mention</button>"
+      },
+      {
+        "type": "pointerdown",
+        "target": "@ Mention",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "pointerup",
+        "target": "@ Mention",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "mousedown",
+        "target": "@ Mention",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "mouseup",
+        "target": "@ Mention",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "click",
+        "target": "@ Mention",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusout",
+        "target": "@ Mention",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusin",
+        "target": "TEXTAREA",
+        "related": null,
+        "active": true,
+        "connected": true
+      }
+    ],
+    "draft": "@",
+    "picker": true,
+    "menu": false
+  },
+  "composer-Edge-press-Mention-transform-probe-true-mobile": {
+    "events": [
+      {
+        "type": "pointerdown",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "pointerup",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "mousedown",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusin",
+        "target": "BUTTON",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "mouseup",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "click",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusout",
+        "target": "BUTTON",
+        "related": "<button role=\"menuitem\"><span aria-hidden=\"true\">@</span> Mention</button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusin",
+        "target": "@ Mention",
+        "related": "<button class=\"address-toggle compose-icon\" aria-label=\"More message options\" title=\"More message options\" aria-haspopup=\"menu\" aria-expanded=\"true\" aria-controls=\"_r_0_\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 5v14M5 12h14\"></path></svg></button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "hit": "<button role=\"menuitem\"><span aria-hidden=\"true\">@</span> Mention</button>"
+      },
+      {
+        "type": "pointerdown",
+        "target": "@ Mention",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "pointerup",
+        "target": "@ Mention",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "mousedown",
+        "target": "@ Mention",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "mouseup",
+        "target": "@ Mention",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "click",
+        "target": "@ Mention",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusout",
+        "target": "@ Mention",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusin",
+        "target": "TEXTAREA",
+        "related": null,
+        "active": true,
+        "connected": true
+      }
+    ],
+    "draft": "@",
+    "picker": true,
+    "menu": false
+  },
+  "composer-Edge-press-Attach-file-photo-transform-probe-false-mobile": {
+    "events": [
+      {
+        "type": "pointerdown",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "pointerup",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "mousedown",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusin",
+        "target": "BUTTON",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "mouseup",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "click",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusout",
+        "target": "BUTTON",
+        "related": "<button role=\"menuitem\"><span aria-hidden=\"true\">@</span> Mention</button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusin",
+        "target": "@ Mention",
+        "related": "<button class=\"address-toggle compose-icon\" aria-label=\"More message options\" title=\"More message options\" aria-haspopup=\"menu\" aria-expanded=\"true\" aria-controls=\"_r_0_\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 5v14M5 12h14\"></path></svg></button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "hit": "<button role=\"menuitem\"><span aria-hidden=\"true\">\uff0b</span> Attach file/photo</button>"
+      },
+      {
+        "type": "pointerdown",
+        "target": "\uff0b Attach file/photo",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "pointerup",
+        "target": "\uff0b Attach file/photo",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "mousedown",
+        "target": "\uff0b Attach file/photo",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusout",
+        "target": "@ Mention",
+        "related": "<button role=\"menuitem\"><span aria-hidden=\"true\">\uff0b</span> Attach file/photo</button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusin",
+        "target": "\uff0b Attach file/photo",
+        "related": "<button role=\"menuitem\"><span aria-hidden=\"true\">@</span> Mention</button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "mouseup",
+        "target": "\uff0b Attach file/photo",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "click",
+        "target": "\uff0b Attach file/photo",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusout",
+        "target": "\uff0b Attach file/photo",
+        "related": "<button class=\"address-toggle compose-icon\" aria-label=\"More message options\" title=\"More message options\" aria-haspopup=\"menu\" aria-expanded=\"true\" aria-controls=\"_r_0_\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 5v14M5 12h14\"></path></svg></button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusin",
+        "target": "BUTTON",
+        "related": "<button role=\"menuitem\"><span aria-hidden=\"true\">\uff0b</span> Attach file/photo</button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "click",
+        "target": "INPUT",
+        "related": null,
+        "active": true,
+        "connected": true
+      }
+    ],
+    "draft": "",
+    "picker": false,
+    "menu": false
+  },
+  "composer-Edge-press-Attach-file-photo-transform-probe-true-mobile": {
+    "events": [
+      {
+        "type": "pointerdown",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "pointerup",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "mousedown",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusin",
+        "target": "BUTTON",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "mouseup",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "click",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusout",
+        "target": "BUTTON",
+        "related": "<button role=\"menuitem\"><span aria-hidden=\"true\">@</span> Mention</button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusin",
+        "target": "@ Mention",
+        "related": "<button class=\"address-toggle compose-icon\" aria-label=\"More message options\" title=\"More message options\" aria-haspopup=\"menu\" aria-expanded=\"true\" aria-controls=\"_r_0_\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 5v14M5 12h14\"></path></svg></button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "hit": "<button role=\"menuitem\"><span aria-hidden=\"true\">\uff0b</span> Attach file/photo</button>"
+      },
+      {
+        "type": "pointerdown",
+        "target": "\uff0b Attach file/photo",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "pointerup",
+        "target": "\uff0b Attach file/photo",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "mousedown",
+        "target": "\uff0b Attach file/photo",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusout",
+        "target": "@ Mention",
+        "related": "<button role=\"menuitem\"><span aria-hidden=\"true\">\uff0b</span> Attach file/photo</button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusin",
+        "target": "\uff0b Attach file/photo",
+        "related": "<button role=\"menuitem\"><span aria-hidden=\"true\">@</span> Mention</button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "mouseup",
+        "target": "\uff0b Attach file/photo",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "click",
+        "target": "\uff0b Attach file/photo",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusout",
+        "target": "\uff0b Attach file/photo",
+        "related": "<button class=\"address-toggle compose-icon\" aria-label=\"More message options\" title=\"More message options\" aria-haspopup=\"menu\" aria-expanded=\"true\" aria-controls=\"_r_0_\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 5v14M5 12h14\"></path></svg></button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusin",
+        "target": "BUTTON",
+        "related": "<button role=\"menuitem\"><span aria-hidden=\"true\">\uff0b</span> Attach file/photo</button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "click",
+        "target": "INPUT",
+        "related": null,
+        "active": true,
+        "connected": true
+      }
+    ],
+    "draft": "",
+    "picker": false,
+    "menu": false
+  },
+  "composer-Edge-press-Mention-transform-probe-false-desktop": {
+    "events": [
+      {
+        "type": "pointerdown",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "mousedown",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusin",
+        "target": "BUTTON",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "pointerup",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "mouseup",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "click",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusout",
+        "target": "BUTTON",
+        "related": "<button role=\"menuitem\"><span aria-hidden=\"true\">@</span> Mention</button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusin",
+        "target": "@ Mention",
+        "related": "<button class=\"address-toggle compose-icon\" aria-label=\"More message options\" title=\"More message options\" aria-haspopup=\"menu\" aria-expanded=\"true\" aria-controls=\"_r_0_\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 5v14M5 12h14\"></path></svg></button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "hit": "<button role=\"menuitem\"><span aria-hidden=\"true\">@</span> Mention</button>"
+      },
+      {
+        "type": "pointerdown",
+        "target": "@ Mention",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "mousedown",
+        "target": "@ Mention",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "heldHit": "<div id=\"_r_0_\" class=\"compose-menu\" role=\"menu\" aria-label=\"Message options\"><button role=\"menuitem\"><span aria-hidden=\"true\">@</span> Mention</button><button role=\"menuitem\"><span aria-hidden=\"true\">\uff0b</span> Attach file/photo</button></div>",
+        "menu": true,
+        "active": true
+      },
+      {
+        "type": "pointerup",
+        "target": "DIV",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "mouseup",
+        "target": "DIV",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "click",
+        "target": "DIV",
+        "related": null,
+        "active": true,
+        "connected": true
+      }
+    ],
+    "draft": "",
+    "picker": false,
+    "menu": true
+  },
+  "composer-Edge-press-Mention-transform-probe-true-desktop": {
+    "events": [
+      {
+        "type": "pointerdown",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "mousedown",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusin",
+        "target": "BUTTON",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "pointerup",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "mouseup",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "click",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusout",
+        "target": "BUTTON",
+        "related": "<button role=\"menuitem\"><span aria-hidden=\"true\">@</span> Mention</button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusin",
+        "target": "@ Mention",
+        "related": "<button class=\"address-toggle compose-icon\" aria-label=\"More message options\" title=\"More message options\" aria-haspopup=\"menu\" aria-expanded=\"true\" aria-controls=\"_r_0_\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 5v14M5 12h14\"></path></svg></button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "hit": "<button role=\"menuitem\"><span aria-hidden=\"true\">@</span> Mention</button>"
+      },
+      {
+        "type": "pointerdown",
+        "target": "@ Mention",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "mousedown",
+        "target": "@ Mention",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "heldHit": "<button role=\"menuitem\"><span aria-hidden=\"true\">@</span> Mention</button>",
+        "menu": true,
+        "active": true
+      },
+      {
+        "type": "pointerup",
+        "target": "@ Mention",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "mouseup",
+        "target": "@ Mention",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "click",
+        "target": "@ Mention",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusout",
+        "target": "@ Mention",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusin",
+        "target": "TEXTAREA",
+        "related": null,
+        "active": true,
+        "connected": true
+      }
+    ],
+    "draft": "@",
+    "picker": true,
+    "menu": false
+  },
+  "composer-Edge-press-Attach-file-photo-transform-probe-false-desktop": {
+    "events": [
+      {
+        "type": "pointerdown",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "mousedown",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusin",
+        "target": "BUTTON",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "pointerup",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "mouseup",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "click",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusout",
+        "target": "BUTTON",
+        "related": "<button role=\"menuitem\"><span aria-hidden=\"true\">@</span> Mention</button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusin",
+        "target": "@ Mention",
+        "related": "<button class=\"address-toggle compose-icon\" aria-label=\"More message options\" title=\"More message options\" aria-haspopup=\"menu\" aria-expanded=\"true\" aria-controls=\"_r_0_\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 5v14M5 12h14\"></path></svg></button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "hit": "<button role=\"menuitem\"><span aria-hidden=\"true\">\uff0b</span> Attach file/photo</button>"
+      },
+      {
+        "type": "pointerdown",
+        "target": "\uff0b Attach file/photo",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "mousedown",
+        "target": "\uff0b Attach file/photo",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusout",
+        "target": "@ Mention",
+        "related": "<button role=\"menuitem\"><span aria-hidden=\"true\">\uff0b</span> Attach file/photo</button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusin",
+        "target": "\uff0b Attach file/photo",
+        "related": "<button role=\"menuitem\"><span aria-hidden=\"true\">@</span> Mention</button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "heldHit": "<div id=\"_r_0_\" class=\"compose-menu\" role=\"menu\" aria-label=\"Message options\"><button role=\"menuitem\"><span aria-hidden=\"true\">@</span> Mention</button><button role=\"menuitem\"><span aria-hidden=\"true\">\uff0b</span> Attach file/photo</button></div>",
+        "menu": true,
+        "active": true
+      },
+      {
+        "type": "pointerup",
+        "target": "DIV",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "mouseup",
+        "target": "DIV",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "click",
+        "target": "DIV",
+        "related": null,
+        "active": true,
+        "connected": true
+      }
+    ],
+    "draft": "",
+    "picker": false,
+    "menu": true
+  },
+  "composer-Edge-press-Attach-file-photo-transform-probe-true-desktop": {
+    "events": [
+      {
+        "type": "pointerdown",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "mousedown",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusin",
+        "target": "BUTTON",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "pointerup",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "mouseup",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "click",
+        "target": "path",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusout",
+        "target": "BUTTON",
+        "related": "<button role=\"menuitem\"><span aria-hidden=\"true\">@</span> Mention</button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusin",
+        "target": "@ Mention",
+        "related": "<button class=\"address-toggle compose-icon\" aria-label=\"More message options\" title=\"More message options\" aria-haspopup=\"menu\" aria-expanded=\"true\" aria-controls=\"_r_0_\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 5v14M5 12h14\"></path></svg></button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "hit": "<button role=\"menuitem\"><span aria-hidden=\"true\">\uff0b</span> Attach file/photo</button>"
+      },
+      {
+        "type": "pointerdown",
+        "target": "\uff0b Attach file/photo",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "mousedown",
+        "target": "\uff0b Attach file/photo",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusout",
+        "target": "@ Mention",
+        "related": "<button role=\"menuitem\"><span aria-hidden=\"true\">\uff0b</span> Attach file/photo</button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusin",
+        "target": "\uff0b Attach file/photo",
+        "related": "<button role=\"menuitem\"><span aria-hidden=\"true\">@</span> Mention</button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "heldHit": "<button role=\"menuitem\"><span aria-hidden=\"true\">\uff0b</span> Attach file/photo</button>",
+        "menu": true,
+        "active": true
+      },
+      {
+        "type": "pointerup",
+        "target": "\uff0b Attach file/photo",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "mouseup",
+        "target": "\uff0b Attach file/photo",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "click",
+        "target": "\uff0b Attach file/photo",
+        "related": null,
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusout",
+        "target": "\uff0b Attach file/photo",
+        "related": "<button class=\"address-toggle compose-icon\" aria-label=\"More message options\" title=\"More message options\" aria-haspopup=\"menu\" aria-expanded=\"true\" aria-controls=\"_r_0_\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 5v14M5 12h14\"></path></svg></button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "focusin",
+        "target": "BUTTON",
+        "related": "<button role=\"menuitem\"><span aria-hidden=\"true\">\uff0b</span> Attach file/photo</button>",
+        "active": true,
+        "connected": true
+      },
+      {
+        "type": "click",
+        "target": "INPUT",
+        "related": null,
+        "active": true,
+        "connected": true
+      }
+    ],
+    "draft": "",
+    "picker": false,
+    "menu": false
+  }
+}
