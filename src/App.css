@@ -390,7 +390,9 @@ h1 { font-family: var(--serif); font-weight: 500; font-size: 34px; line-height: 
 .note-body pre { background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 10px 12px; overflow-x: auto; margin: 10px 0; }
 .note-body pre code { background: none; padding: 0; white-space: pre; }
 .note-body table { border-collapse: collapse; margin: 12px 0; font-size: 14px; display: block; overflow-x: auto; max-width: 100%; }
-.note-body th, .note-body td { border: 1px solid var(--line); padding: 6px 10px; text-align: left; vertical-align: top; }
+.note-body table { width: max-content; min-width: 100%; -webkit-overflow-scrolling: touch; }
+.note-body th, .note-body td { border: 1px solid var(--line); padding: 6px 10px; text-align: left; vertical-align: top; overflow-wrap: normal; word-break: normal; min-width: 4.5em; max-width: 26em; }
+.note-body th { white-space: nowrap; }
 .note-body th { background: var(--surface-2); font-weight: 600; }
 .note-body img { max-width: 100%; border-radius: var(--radius-sm); }
 .note-body a.wikilink { color: var(--forest); text-decoration-color: var(--line-strong); }
