@@ -18,6 +18,7 @@ import Search from "./Search";
 import Journal from "./Journal";
 import { mmss, newDraft, shareText, type JournalNote } from "./journalCore";
 import { useRecorder, voiceFileName } from "./recorder";
+import { attachmentBlocksSend, enterInsertsNewline } from "./composerCore";
 import PairSource, { PairDeviceButton } from "./PairSource";
 import { UpdateSettings } from "./UpdateNotice";
 import { activeTab, closeTab, EMPTY_TABS, focusTab, navigateNoteTab, nextAfterClose, openTab, recordingTabCanClose, restoreTabs, serializeTabs, tabForDigit, updateTab, TABS_KEY, type Tabs, type Tab, type TabTarget, type OpenMode } from "./tabs";
@@ -210,10 +211,18 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const draftRevisions = useRef(new Map<string, number>());
   const [pending, setPending] = useState<PendingFile[]>([]);
   const pendingStore = useRef(new Map<string, PendingFile[]>());
+  // A late transcript waits only for relay acceptance, never holds up the audio.
+  const voiceDeliveries = useRef(new Map<string, Promise<Message | null>>());
   const activeScope = useRef<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
-  useEffect(() => () => {
-    for (const files of pendingStore.current.values()) for (const item of files) if (item.preview) URL.revokeObjectURL(item.preview);
+  const voiceMounted = useRef(true);
+  useEffect(() => {
+    voiceMounted.current = true;
+    return () => {
+      voiceMounted.current = false;
+      voiceDeliveries.current.clear();
+      for (const files of pendingStore.current.values()) for (const item of files) if (item.preview) URL.revokeObjectURL(item.preview);
+    };
   }, []);
   const [bindings, setBindings] = useState<Bindings>(new Map());
   const bindingStore = useRef(new Map<string, Bindings>());
@@ -847,8 +856,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
       void uploadFile(key, id, file);
     }
   }
-  // Voice message: record, upload the audio like any attachment, and put the
-  // uni-1 transcript into the draft so it becomes the message text.
+  // Voice message: upload independently of transcription. An early transcript
+  // is editable in the draft; a late one replies to the accepted audio message.
   // The recording belongs to its starting scope, even when another tab is
   // visible by the time MediaRecorder fires onstop / transcription finishes.
   const recordingOrigin = useRef<{ key: string; tabId: string; title: string } | null>(null);
@@ -865,8 +874,24 @@ function Conversations({ onForget }: { onForget: () => void }) {
       try {
         const t = await invoke<{ text: string }>("voice_transcribe", new Uint8Array(await blob.arrayBuffer()), { headers: { "x-audio-mime": mime } });
         const text = t.text.trim();
+        if (!voiceMounted.current) return;
+        const delivery = voiceDeliveries.current.get(id);
+        const sent = delivery ? await delivery : null;
+        if (!voiceMounted.current) return;
         changePending(key, (items) => items.map((x) => x.id === id ? { ...x, voice: "done" } : x));
         if (!text) return;
+        if (sent) {
+          // Reply to the accepted audio in its original room/thread. Do not
+          // notify recipients twice or put late text in the user's next draft.
+          try {
+            await invoke<Message>("post_message", { channel: sent.channel, body: text, replyTo: sent.ref, recipients: [], media: [] });
+            setTick((n) => n + 1);
+          } catch (e) { setError(`Audio sent, but transcript reply failed: ${String(e)}. Transcript: ${text}`); }
+          return;
+        }
+        // Removed clips must not resurrect text; rejected sends keep the clip
+        // and can still use its transcript on an explicit retry.
+        if (!(pendingStore.current.get(key) ?? []).some((x) => x.id === id)) return;
         const before = drafts.current.get(key) ?? "";
         const next = before.trim() ? `${before.trimEnd()}\n${text}` : text;
         if (activeScope.current === key) updateDraft(next, next.length);
@@ -874,7 +899,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       } catch (e) {
         changePending(key, (items) => items.map((x) => x.id === id ? { ...x, voice: "failed" } : x));
         setStatus(`No transcript (${String(e).slice(0, 120)}). The voice message still sends.`);
-      }
+      } finally { voiceDeliveries.current.delete(id); }
     })();
   }, `for #${rooms.find((r) => r.id === channel)?.name ?? "room"}`);
   async function toggleRecording() {
@@ -959,6 +984,9 @@ function Conversations({ onForget }: { onForget: () => void }) {
 
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.nativeEvent.isComposing) return;
+    // Touch/mobile keyboards own Enter, including while mentions are open.
+    // Do not infer this from viewport width: a narrow desktop keeps shortcuts.
+    if (e.key === "Enter" && enterInsertsNewline(navigator.maxTouchPoints, window.matchMedia("(pointer: coarse)").matches)) return;
     if (picker && suggestions.length) {
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
@@ -1015,7 +1043,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
         recordingOrigin.current || recorder.isBusy() || (!draft.trim() && !pending.length)) return;
     const files = pendingStore.current.get(keyFor(channel, root)) ?? [];
     const failedAudio = files.filter((f) => f.voice && f.state === "error");
-    if (files.some((f) => f.voice === "transcribing" || (f.state !== "ready" && !(f.voice && f.state === "error")) || (f.state === "ready" && !f.media)) || (failedAudio.length && !draft.trim())) {
+    if (files.some(attachmentBlocksSend) || (failedAudio.length && !draft.trim())) {
       setError("Wait for uploads to finish, remove failed files, or send the transcript without failed audio."); return;
     }
     const sentIds = files.map((f) => f.id);
@@ -1040,8 +1068,15 @@ function Conversations({ onForget }: { onForget: () => void }) {
     sendingRef.current = true;
     setSending(true);
     setError(null);
+    const awaitingTranscript = files.filter((f) => f.voice === "transcribing");
+    let acceptVoice!: (message: Message | null) => void;
+    const delivery = new Promise<Message | null>((resolve) => { acceptVoice = resolve; });
+    for (const file of awaitingTranscript) voiceDeliveries.current.set(file.id, delivery);
+    let audioAccepted = false;
     try {
-      await invoke<Message>("post_message", { channel, body: snapshot, replyTo: target, recipients, media: files.filter((f) => f.state === "ready").map((f) => f.media!) });
+      const accepted = await invoke<Message>("post_message", { channel, body: snapshot, replyTo: target, recipients, media: files.filter((f) => f.state === "ready").map((f) => f.media!) });
+      audioAccepted = true;
+      acceptVoice(accepted);
       changePending(key, (items) => {
         for (const item of items) if (sentIds.includes(item.id) && item.preview) URL.revokeObjectURL(item.preview);
         return items.filter((item) => !sentIds.includes(item.id));
@@ -1065,7 +1100,13 @@ function Conversations({ onForget }: { onForget: () => void }) {
       setTick((n) => n + 1);
       await loadRooms();
       setStatus(failedAudio.length ? `Transcript sent; ${failedAudio.length} audio recording${failedAudio.length === 1 ? " was" : "s were"} NOT attached (upload failed).` : recipients.length ? `Message accepted by relay · notified ${recipients.length}` : "Message accepted by relay");
-    } catch (e) { setError(String(e)); }
+    } catch (e) {
+      if (!audioAccepted) {
+        acceptVoice(null);
+        for (const file of awaitingTranscript) voiceDeliveries.current.delete(file.id);
+      }
+      setError(String(e));
+    }
     finally { sendingRef.current = false; setSending(false); }
   }
 
@@ -1363,7 +1404,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
               {recorder.recording && recordingOrigin.current?.key === scope() ? <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" fill="currentColor" /></svg> : <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3" /><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8" /></svg>}
             </button>
             {(draft.trim() || pending.length > 0 || sending) && (
-              <button className="send compose-icon" disabled={(!draft.trim() && !pending.some((f) => f.state === "ready")) || pending.some((f) => f.voice === "transcribing" || (f.state !== "ready" && !(f.voice && f.state === "error"))) || sending || recorder.busy} onClick={() => void send()} aria-label={pending.some((f) => f.voice && f.state === "error") ? "Send transcript without failed audio" : "Send message"} title={sending ? "Sending…" : pending.some((f) => f.voice && f.state === "error") ? "Send transcript without failed audio" : "Send message"} aria-busy={sending}>
+              <button className="send compose-icon" disabled={(!draft.trim() && !pending.some((f) => f.state === "ready")) || pending.some(attachmentBlocksSend) || sending || recorder.busy} onClick={() => void send()} aria-label={pending.some((f) => f.voice && f.state === "error") ? "Send transcript without failed audio" : "Send message"} title={sending ? "Sending…" : pending.some((f) => f.voice && f.state === "error") ? "Send transcript without failed audio" : "Send message"} aria-busy={sending}>
                 {sending ? <span aria-hidden="true">…</span> : <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 7-7 7 7M12 5v14" /></svg>}
               </button>
             )}

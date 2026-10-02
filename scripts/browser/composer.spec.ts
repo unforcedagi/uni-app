@@ -39,11 +39,18 @@ test.beforeEach(async ({ page }) => {
           case 'get_messages': case 'vault_list': return [];
           case 'journal_config': return { hub: 'test' };
           case 'refresh': return { total_items: 0, channel_errors: {}, truncated_channels: [] };
-          case 'media_upload': return { url: 'https://example.invalid/test.txt', mime: 'text/plain', name: 'test.txt', size: 4 };
-          case 'voice_transcribe': return { text: 'voice transcript' };
+          case 'media_upload':
+            if (w.holdUpload) await new Promise<void>(resolve => { w.finishUpload = resolve; });
+            if (w.failUpload) throw new Error('upload rejected');
+            return { url: 'https://example.invalid/test.txt', mime: 'text/plain', name: 'test.txt', size: 4 };
+          case 'voice_transcribe':
+            if (w.holdTranscript) await new Promise<void>(resolve => { w.finishTranscript = resolve; });
+            if (w.failTranscript) throw new Error('transcription unavailable');
+            return { text: 'voice transcript' };
           case 'post_message':
             if (w.holdSend) await new Promise(resolve => { w.finishSend = resolve; });
-            return {};
+            if (w.failSend) throw new Error('relay rejected');
+            return { ref: 'audio-message-ref', channel: args.channel };
           default: return null;
         }
       },
@@ -235,8 +242,10 @@ test('Send retains text and attachment payload and disables mic while sending', 
 
 for (const submit of ['Enter', 'Send button']) {
   test(`Enter is blocked through recorder phases, then ${submit} sends once`, async ({ page }) => {
+    test.skip(test.info().project.name === 'mobile' && submit === 'Enter', 'Mobile Enter never submits');
     const input = page.getByRole('textbox', { name: 'Message Test room' });
     const send = page.getByRole('button', { name: 'Send message', exact: true });
+    const mobile = test.info().project.name === 'mobile';
     await input.fill('draft');
     await page.evaluate(() => {
       const w = window as any;
@@ -260,26 +269,30 @@ for (const submit of ['Enter', 'Send button']) {
     await expect(send).toBeDisabled();
     await input.press('Enter'); // starting: microphone permission/device promise is pending
     expect(await posts()).toHaveLength(0);
-    await expect(input).toHaveValue('draft');
+    await expect(input).toHaveValue(mobile ? 'draft\n' : 'draft');
+    if (mobile) await input.fill('draft');
     await page.evaluate(() => (window as any).allowRecording());
     const stop = page.getByRole('button', { name: 'Stop recording voice message', exact: true });
     await expect(stop).toBeEnabled();
     await input.press('Enter'); // recording
     expect(await posts()).toHaveLength(0);
-    await expect(input).toHaveValue('draft');
+    await expect(input).toHaveValue(mobile ? 'draft\n' : 'draft');
+    if (mobile) await input.fill('draft');
     await press(page, stop);
     await page.waitForFunction(() => !!(window as any).finishRecording);
     await expect(send).toBeDisabled();
     await input.press('Enter'); // finishing: native onstop completion is held
     expect(await posts()).toHaveLength(0);
-    await expect(input).toHaveValue('draft');
+    await expect(input).toHaveValue(mobile ? 'draft\n' : 'draft');
+    if (mobile) await input.fill('draft');
     await page.evaluate(() => (window as any).finishRecording());
     await expect(input).toHaveValue('draft\nvoice transcript');
     await expect(send).toBeEnabled();
     expect(await posts()).toHaveLength(0); // Completion itself must never submit.
     if (submit === 'Enter') await input.press('Enter');
     else await press(page, send);
-    await input.press('Enter'); // Repeated submission while IPC is pending.
+    if (mobile) await send.dispatchEvent('click');
+    else await input.press('Enter'); // Repeated submission while IPC is pending.
     const calls = await posts();
     expect(calls).toHaveLength(1);
     expect(calls[0].args.body).toBe('draft\nvoice transcript');
@@ -291,8 +304,140 @@ for (const submit of ['Enter', 'Send button']) {
   });
 }
 
+for (const duringSend of [false, true]) {
+  test(`Voice sends before transcription; late transcript follows original message, duringSend=${duringSend}`, async ({ page }) => {
+    const input = page.getByRole('textbox', { name: 'Message Test room' });
+    await page.evaluate(() => { (window as any).holdTranscript = true; });
+    await press(page, page.getByRole('button', { name: 'Record a voice message', exact: true }));
+    await page.waitForTimeout(300);
+    await press(page, page.getByRole('button', { name: 'Stop recording voice message', exact: true }));
+    await page.waitForFunction(() => !!(window as any).finishTranscript);
+    await expect(page.locator('.compose-file')).toContainText('Ready');
+    const send = page.getByRole('button', { name: 'Send message', exact: true });
+    await expect(send).toBeEnabled();
+    if (duringSend) await page.evaluate(() => { (window as any).holdSend = true; });
+    await press(page, send);
+    if (duringSend) {
+      await page.evaluate(() => (window as any).finishTranscript());
+      await input.fill('next draft');
+      await page.evaluate(() => { (window as any).holdSend = false; (window as any).finishSend(); });
+    } else {
+      await expect(page.locator('.compose-file')).toHaveCount(0);
+      await input.fill('next draft');
+      if (test.info().project.name === 'mobile') await press(page, page.getByRole('button', { name: 'Back to conversations', exact: true }));
+      await press(page, page.locator('.rooms nav button').filter({ hasText: 'Other room' }));
+      await page.getByRole('textbox', { name: 'Message Other room' }).fill('other draft');
+      await page.evaluate(() => (window as any).finishTranscript());
+    }
+    await expect.poll(() => page.evaluate(() => (window as any).calls.filter((c: any) => c.cmd === 'post_message').length)).toBe(2);
+    const calls = await page.evaluate(() => (window as any).calls.filter((c: any) => c.cmd === 'post_message'));
+    expect(calls[0].args.body).toBe('');
+    expect(calls[0].args.media).toHaveLength(1);
+    expect(calls[1].args).toEqual({ channel: 'test', body: 'voice transcript', replyTo: 'audio-message-ref', recipients: [], media: [] });
+    await expect(page.getByRole('textbox', { name: duringSend ? 'Message Test room' : 'Message Other room' })).toHaveValue(duringSend ? 'next draft' : 'other draft');
+  });
+}
+
+test('Late transcript never posts after forgetting the device identity', async ({ page }) => {
+  await page.evaluate(() => { (window as any).holdTranscript = true; });
+  await press(page, page.getByRole('button', { name: 'Record a voice message', exact: true }));
+  await page.waitForTimeout(300);
+  await press(page, page.getByRole('button', { name: 'Stop recording voice message', exact: true }));
+  await page.waitForFunction(() => !!(window as any).finishTranscript);
+  await expect(page.getByRole('button', { name: 'Send message', exact: true })).toBeEnabled();
+  await press(page, page.getByRole('button', { name: 'Send message', exact: true }));
+  await expect(page.locator('.compose-file')).toHaveCount(0);
+  if (test.info().project.name === 'mobile') await press(page, page.getByRole('button', { name: 'Back to conversations', exact: true }));
+  await press(page, page.getByRole('button', { name: 'Settings', exact: true }));
+  await press(page, page.getByRole('button', { name: 'Forget this device key', exact: true }));
+  await press(page, page.getByRole('button', { name: "Tap again to forget — you'll need to re-pair", exact: true }));
+  await expect(page.locator('textarea[aria-label^="Message"]')).toHaveCount(0);
+  await page.evaluate(() => (window as any).finishTranscript());
+  await page.waitForTimeout(100);
+  expect(await page.evaluate(() => (window as any).calls.filter((c: any) => c.cmd === 'post_message'))).toHaveLength(1);
+});
+
+for (const outcome of ['removed', 'rejected', 'transcription failed', 'reply failed', 'upload failed']) {
+  test(`Async voice handles ${outcome} without losing audio or polluting the draft`, async ({ page }) => {
+    const input = page.getByRole('textbox', { name: 'Message Test room' });
+    await page.evaluate(() => { const w = window as any; w.holdTranscript = true; w.holdUpload = true; });
+    await press(page, page.getByRole('button', { name: 'Record a voice message', exact: true }));
+    await page.waitForTimeout(300);
+    await press(page, page.getByRole('button', { name: 'Stop recording voice message', exact: true }));
+    await page.waitForFunction(() => !!(window as any).finishTranscript && !!(window as any).finishUpload);
+    const send = page.getByRole('button', { name: 'Send message', exact: true });
+    await expect(send).toBeDisabled(); // Only upload is a gate, even on desktop Enter.
+    await input.dispatchEvent('keydown', { key: 'Enter' });
+    expect(await page.evaluate(() => (window as any).calls.filter((c: any) => c.cmd === 'post_message'))).toHaveLength(0);
+    await page.evaluate(fail => { (window as any).failUpload = fail; (window as any).finishUpload(); }, outcome === 'upload failed');
+    if (outcome === 'upload failed') {
+      await expect(page.locator('.compose-file')).toContainText('Failed');
+      await page.evaluate(() => (window as any).finishTranscript());
+      await expect(input).toHaveValue('voice transcript');
+      await expect(page.getByRole('button', { name: 'Send transcript without failed audio', exact: true })).toBeEnabled();
+      expect(await page.evaluate(() => (window as any).calls.filter((c: any) => c.cmd === 'post_message'))).toHaveLength(0);
+      return;
+    }
+    await expect(send).toBeEnabled();
+    if (outcome === 'removed') {
+      await press(page, page.locator('.compose-file').getByRole('button', { name: 'Remove' }));
+      await input.fill('new draft');
+    } else {
+      if (outcome === 'rejected') await page.evaluate(() => { const w = window as any; w.holdSend = true; w.failSend = true; });
+      await press(page, send);
+      if (outcome !== 'rejected') await expect(page.locator('.compose-file')).toHaveCount(0);
+    }
+    await page.evaluate(outcome => {
+      const w = window as any;
+      w.failTranscript = outcome === 'transcription failed';
+      if (outcome === 'reply failed') w.failSend = true;
+      w.finishTranscript();
+      if (outcome === 'rejected') { w.holdSend = false; w.finishSend(); }
+    }, outcome);
+    if (outcome === 'rejected') {
+      await expect(input).toHaveValue('voice transcript');
+      await expect(page.locator('.compose-file')).toHaveCount(1);
+      await page.evaluate(() => { (window as any).failSend = false; });
+      await press(page, send);
+      await expect(input).toHaveValue('');
+    } else if (outcome === 'reply failed') {
+      await expect(page.locator('.error')).toContainText('Audio sent, but transcript reply failed');
+      await expect(input).toHaveValue('');
+    } else if (outcome === 'transcription failed') {
+      await expect(page.locator('.connection')).toContainText('No transcript');
+      await expect(input).toHaveValue('');
+    } else {
+      await expect(input).toHaveValue('new draft');
+      await expect(page.locator('.compose-file')).toHaveCount(0);
+    }
+    const calls = await page.evaluate(() => (window as any).calls.filter((c: any) => c.cmd === 'post_message'));
+    expect(calls).toHaveLength(outcome === 'removed' ? 0 : outcome === 'rejected' || outcome === 'reply failed' ? 2 : 1);
+  });
+}
+
+test('Mobile Enter inserts newline even with a mention picker; desktop shortcuts remain', async ({ page }) => {
+  const input = page.getByRole('textbox', { name: 'Message Test room' });
+  await input.fill('first');
+  await input.press('Shift+Enter');
+  await expect(input).toHaveValue('first\n');
+  await input.fill('first');
+  await input.press('Enter');
+  if (test.info().project.name === 'mobile') {
+    await expect(input).toHaveValue('first\n');
+    await input.fill('@Test');
+    await input.press('Enter');
+    await expect(input).toHaveValue('@Test\n');
+    expect(await page.evaluate(() => (window as any).calls.filter((c: any) => c.cmd === 'post_message'))).toHaveLength(0);
+    await input.fill('first\nsecond');
+    await press(page, page.getByRole('button', { name: 'Send message', exact: true }));
+  }
+  await expect(input).toHaveValue('');
+  expect(await page.evaluate(() => (window as any).calls.filter((c: any) => c.cmd === 'post_message').map((c: any) => c.args.body))).toEqual([test.info().project.name === 'mobile' ? 'first\nsecond' : 'first']);
+});
+
 for (const replacement of ['first draft', 'next draft']) {
   test(`Same-turn Enter submissions send once and preserve replacement: ${replacement}`, async ({ page }) => {
+    test.skip(test.info().project.name === 'mobile', 'Desktop Enter shortcut only');
     const input = page.getByRole('textbox', { name: 'Message Test room' });
     await input.fill('first draft');
     await page.evaluate(() => {
@@ -332,7 +477,7 @@ test('Recording blocks another room and send completion preserves that room draf
   await expect(input).toHaveValue('draft\nvoice transcript');
   await expect(page.getByRole('button', { name: 'Send message', exact: true })).toBeEnabled();
   await page.evaluate(() => { (window as any).holdSend = true; });
-  await input.press('Enter');
+  await press(page, page.getByRole('button', { name: 'Send message', exact: true }));
   await switchRoom('Other room');
   // Matching text in another scope must not be mistaken for the submitted draft.
   await other.fill('draft\nvoice transcript');
@@ -364,7 +509,7 @@ for (const replace of [false, true]) {
     };
     await chooseMention(input);
     await page.evaluate(() => { (window as any).holdSend = true; });
-    await input.press('Enter');
+    await press(page, page.getByRole('button', { name: 'Send message', exact: true }));
     if (replace) {
       await input.fill('');
       await chooseMention(input);
@@ -372,7 +517,7 @@ for (const replace of [false, true]) {
     await switchRoom('Other room');
     const other = page.getByRole('textbox', { name: 'Message Other room' });
     await chooseMention(other);
-    await other.press('Enter'); // The in-flight send still owns the global send lock.
+    await other.dispatchEvent('keydown', { key: 'Enter' }); // The in-flight send still owns the global send lock.
     await switchRoom('Test room');
     await expect(input).toHaveValue('@Test member ');
     await switchRoom('Other room');
@@ -389,7 +534,7 @@ for (const replace of [false, true]) {
       await expect(page.getByRole('listbox', { name: 'Mention a member' })).toHaveCount(0);
     }
     await switchRoom('Other room');
-    await other.press('Enter');
+    await press(page, page.getByRole('button', { name: 'Send message', exact: true }));
     const calls = await page.evaluate(() => (window as any).calls.filter((c: any) => c.cmd === 'post_message'));
     expect(calls.map((c: any) => ({ channel: c.args.channel, body: c.args.body, recipients: c.args.recipients }))).toEqual([
       { channel: 'test', body: '@Test member ', recipients: ['b'.repeat(64)] },
