@@ -163,7 +163,10 @@ export function parseInline(src: string, depth = 0): Inline[] {
       text += run; i += run.length; continue;
     }
     if (src.startsWith("[[", i)) {
-      const end = src.indexOf("]]", i + 2);
+      // Bound the search to the 512-char body limit: an unbounded indexOf
+      // rescans the rest of the message at every `[[` (quadratic).
+      const rel = src.slice(i + 2, i + 2 + 512 + 2).indexOf("]]");
+      const end = rel < 0 ? -1 : i + 2 + rel;
       const body = end < 0 ? "" : src.slice(i + 2, end);
       if (body && body.length <= 512 && !/[\r\n]/.test(body)) {
         const [path, alias] = body.split("|");
