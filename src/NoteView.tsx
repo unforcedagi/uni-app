@@ -5,11 +5,12 @@ import { backlinks } from "./backlinks";
 import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { NoteRenderer, type LinkComponentProps } from "@openparachute/surface-render";
+import type { NoteHit } from "./Search";
 import type { Note } from "@openparachute/surface-client";
 import { safeHref } from "./markdown";
 import { copyText } from "./clipboard";
 import { bodyWithoutTitle, noteMeta, noteTitle } from "./noteText";
-import { noteUrl, parseNoteRoute, parseNoteUrl, wikilinkResolver, type VaultRef } from "./vaultlinks";
+import { refCandidates, isNoteNotFound, noteUrl, parseNoteRoute, parseNoteUrl, wikilinkResolver, type VaultRef } from "./vaultlinks";
 
 type VaultNote = { hub: string; vault: string; note: Note & { extension?: string } };
 
@@ -17,7 +18,8 @@ function openExternal(url: string) {
   void invoke("open_link", { url }).catch(() => {});
 }
 
-export default function NoteView({ target, hub, onOpen, onBack, backLabel, onTitle, startEditing = false, onDirty, onCreate, onResolved }: {
+export default function NoteView({ target, hub, onOpen, onBack, backLabel, onTitle, startEditing = false, onDirty, onCreate, onResolved, onSearch }: {
+  onSearch: (query: string) => void;
   onResolved: (id: string) => void;
   startEditing?: boolean;
   onDirty: (dirty: boolean) => void;
@@ -36,20 +38,49 @@ export default function NoteView({ target, hub, onOpen, onBack, backLabel, onTit
   const [data, setData] = useState<VaultNote | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const [missing, setMissing] = useState(false);
+  const [hits, setHits] = useState<NoteHit[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const searchQuery = target.ref.split("/").pop() || target.ref;
+
   useEffect(() => {
     let live = true;
     setData(null);
     setError(null);
-    invoke<VaultNote>("vault_note", { vault: target.vault, noteRef: target.ref })
-      .then((d) => { if (live) {
-        onResolved(d.note.id);
-        setData(d);
-        const dirty = isDirty(beginEdit(d.note.content ?? "", d.note.updatedAt ?? null, readDraft(d.vault, d.note.id)));
-        if (dirty) setEditing(true);
-        else clearDraft(d.vault, d.note.id);
-        onDirty(dirty);
-      } })
-      .catch((e) => { if (live) setError(String(e)); });
+    setMissing(false);
+    setHits([]);
+    setSearching(false);
+    setSearchError(null);
+    async function load() {
+      const candidates = [target.ref, ...(target.recover ? refCandidates(target.ref) : [])];
+      for (const noteRef of candidates) {
+        if (!live) return;
+        try {
+          const d = await invoke<VaultNote>("vault_note", { vault: target.vault, noteRef });
+          if (!live) return;
+          onResolved(d.note.id);
+          setData(d);
+          const dirty = isDirty(beginEdit(d.note.content ?? "", d.note.updatedAt ?? null, readDraft(d.vault, d.note.id)));
+          if (dirty) setEditing(true);
+          else clearDraft(d.vault, d.note.id);
+          onDirty(dirty);
+          return;
+        } catch (e) {
+          if (!live) return;
+          if (!isNoteNotFound(e)) { setError(String(e)); return; }
+        }
+      }
+      if (!live) return;
+      setMissing(true);
+      setSearching(true);
+      try {
+        const rows = await invoke<NoteHit[]>("vault_search", { query: searchQuery, limit: 8, mode: "keyword", vault: target.vault, pathPrefix: null });
+        if (live) setHits(rows.slice(0, 8));
+      } catch (e) { if (live) setSearchError(String(e)); }
+      finally { if (live) setSearching(false); }
+    }
+    void load();
     return () => { live = false; };
   }, [target.vault, target.ref]);
 
@@ -67,7 +98,7 @@ export default function NoteView({ target, hub, onOpen, onBack, backLabel, onTit
     if (!note && !safe) return <span className={className}>{children}</span>;
     return <a href={safe ?? href} className={className} rel="noreferrer noopener" onClick={(e) => {
       e.preventDefault();
-      if (note) onOpen(note, safe);
+      if (note) onOpen(route ? { ...note, recover: true } : note, safe);
       else if (safe) openExternal(safe);
     }}>{children}</a>;
   }, [onOpen]);
@@ -92,9 +123,17 @@ export default function NoteView({ target, hub, onOpen, onBack, backLabel, onTit
     {note && editing ? <NoteEditor vault={data!.vault} note={note} onDirty={onDirty} onCancel={() => setEditing(false)} onSaved={(updated) => { setData({ ...data!, note: { ...data!.note, ...updated } }); setEditing(false); }} /> : <div className="note-scroll">
       <article className="note-page">
         <h1 className="note-title">{heading}</h1>
-        <p className="note-meta-line">{note ? noteMeta(data!.vault, note.path, note.updatedAt ?? note.createdAt) : `${target.vault} · ${error ? "unavailable" : "opening…"}`}</p>
+        <p className="note-meta-line">{note ? noteMeta(data!.vault, note.path, note.updatedAt ?? note.createdAt) : `${target.vault} · ${error || missing ? "unavailable" : "opening…"}`}</p>
         {tags.length > 0 && <p className="note-tags">{tags.map((t) => <span key={t} className="note-tag">#{t}</span>)}</p>}
-        {!data && !error && <p className="empty">Opening note…</p>}
+        {!data && !error && !missing && <p className="empty">Opening note…</p>}
+        {missing && <div className="note-error">
+          <p role="status">No note named {target.ref} in {target.vault}</p>
+          {searching && <p>Searching notes…</p>}
+          {hits.map((hit) => <button className="vault-note" key={`${hit.vault}:${hit.id}`} onClick={() => onOpen({ hub: null, vault: hit.vault, ref: hit.id }, null)}>{hit.path || hit.id}<small>{hit.snippet}</small></button>)}
+          {!searching && !hits.length && !searchError && <p>No matching notes in this vault.</p>}
+          {searchError && <p role="alert">Couldn't search this vault: {searchError}</p>}
+          <button className="pairing-secondary" onClick={() => onSearch(searchQuery)}>Search all vaults</button>
+        </div>}
         {error && <div className="note-error" role="alert">
           <p>Couldn't open this note from the app.</p>
           <p className="note-error-detail">{error}</p>

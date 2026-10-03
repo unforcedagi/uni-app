@@ -171,4 +171,10 @@ assert.equal(v.tabs.length, 1);
 assert.deepEqual(restoreTabs(serializeTabs(v), []).tabs, v.tabs);
 assert.equal(restoreTabs(JSON.stringify({ tabs: [{ id: "bad", kind: "vault" }] }), []).tabs.length, 0);
 
+
+const recoverTab = openTab(EMPTY_TABS, { kind: "note", title: "Title", note: { hub: null, vault: "unforced", ref: "Notes/Title prose", recover: true } }, "new", () => "recover");
+assert.equal(activeTab(restoreTabs(serializeTabs(recoverTab), []))?.note?.recover, true);
+const resolvedTab = updateTab(recoverTab, "recover", { note: { hub: null, vault: "unforced", ref: "01M3ZK2R6A6C62M1ANJCSQNG3M" } });
+assert.equal(activeTab(restoreTabs(serializeTabs(resolvedTab), []))?.note?.ref, "01M3ZK2R6A6C62M1ANJCSQNG3M");
+
 console.log("tabs tests passed");

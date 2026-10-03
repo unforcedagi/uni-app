@@ -146,7 +146,7 @@ function validTab(x: unknown): Tab | null {
   if (kind === "note") {
     const n = t.note as Record<string, unknown> | undefined;
     if (!n || !str(n.vault) || !str(n.ref)) return null;
-    return { id: t.id, kind, note: { hub: typeof n.hub === "string" ? n.hub : null, vault: n.vault, ref: n.ref }, title };
+    return { id: t.id, kind, note: { hub: typeof n.hub === "string" ? n.hub : null, vault: n.vault, ref: n.ref, ...(n.recover === true ? { recover: true } : {}) }, title };
   }
   if (!str(t.channel)) return null;
   if (kind === "thread") return str(t.root) ? { id: t.id, kind, channel: t.channel, root: t.root, title } : null;
