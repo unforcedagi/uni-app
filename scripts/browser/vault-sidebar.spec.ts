@@ -34,6 +34,7 @@ async function boot(page: Page, fixture = 'five', query = '') {
   });
   await page.goto(`/?vaultFixture=${fixture}${query}`);
   if (test.info().project.name === 'phone-390') await page.getByRole('button', { name: 'Back to conversations' }).click();
+  if (test.info().project.name !== 'phone-390') await page.getByRole('button', { name: 'Vault', exact: true }).click();
   await expect(page.getByRole('region', { name: 'Vaults' })).toBeVisible();
 }
 
@@ -65,6 +66,7 @@ for (const fixture of ['five', 'without-uni', 'empty']) {
     await vaultButton(page, 'parachute').click();
     if (test.info().project.name === 'phone-390') await expect(page.getByRole('region', { name: 'Vault parachute' })).toBeVisible();
     else {
+      await page.getByRole('button', { name: 'Vault', exact: true }).click();
       await expect(vaultButton(page, 'parachute')).toHaveClass(/selected/);
       await toggle.click();
       await expect(toggle).toHaveClass(/selected/);
@@ -82,12 +84,14 @@ test('Other vault expansion survives reload and remains keyboard operable', asyn
   await expect(toggle).toHaveAttribute('aria-expanded', 'true');
   await page.reload();
   if (test.info().project.name === 'phone-390') await page.getByRole('button', { name: 'Back to conversations' }).click();
+  if (test.info().project.name !== 'phone-390') await page.getByRole('button', { name: 'Vault', exact: true }).click();
   await expect(toggle).toHaveAttribute('aria-expanded', 'true');
   await toggle.focus();
   await page.keyboard.press('Space');
   await expect(toggle).toHaveAttribute('aria-expanded', 'false');
   await page.reload();
   if (test.info().project.name === 'phone-390') await page.getByRole('button', { name: 'Back to conversations' }).click();
+  if (test.info().project.name !== 'phone-390') await page.getByRole('button', { name: 'Vault', exact: true }).click();
   await expect(toggle).toHaveAttribute('aria-expanded', 'false');
 });
 
@@ -109,7 +113,10 @@ test('Twenty other vaults stay reachable inside the viewport and targets are 44p
   expect(box.y + box.height).toBeLessThanOrEqual(page.viewportSize()!.height);
   await last.click();
   if (test.info().project.name === 'phone-390') await expect(page.getByRole('region', { name: 'Vault vault-20' })).toBeVisible();
-  else await expect(last).toHaveClass(/selected/);
+  else {
+    await expect(page.getByRole('region', { name: 'Vault vault-20' })).toBeVisible();
+    await expect(page.locator('.rooms')).toBeHidden();
+  }
 });
 
 test('Unavailable storage leaves vaults collapsed but operable', async ({ page }) => {
