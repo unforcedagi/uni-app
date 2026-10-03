@@ -171,3 +171,14 @@ console.log("vaultlinks ok");
 }
 // A real wikilink still parses after the bound.
 assert.equal((parseInline("see [[Projects/Ricki/Phase 1 — work plan|the plan]] now").find((x) => x.t === "vaultlink") as any)?.ref.ref, "Projects/Ricki/Phase 1 — work plan");
+
+// ── Adversarial: recovery on a long whitespace run must not be quadratic ────
+{
+  const { refCandidates } = await import("../src/vaultlinks.ts");
+  const t0 = performance.now();
+  refCandidates("Notes/First" + " ".repeat(64000) + "second third");
+  refCandidates("Notes/First" + " ".repeat(1000) + "second third");
+  const ms = performance.now() - t0;
+  assert.ok(ms < 200, `refCandidates on a 64k-space ref took ${ms.toFixed(0)}ms`);
+  assert.deepEqual(refCandidates("Projects/Ricki/Phase 1 — work plan then more"), ["Projects/Ricki/Phase 1 — work plan then", "Projects/Ricki/Phase 1 — work plan", "Projects/Ricki/Phase 1 — work", "Projects/Ricki/Phase 1 —", "Projects/Ricki/Phase 1", "Projects/Ricki/Phase"]);
+}

@@ -154,12 +154,20 @@ export function wikilinkResolver(note: { id: string; links?: LinkRecord[] }, vau
 /** At most six shorter references, never removing the last segment's first word. */
 export function refCandidates(ref: string): string[] {
   const result: string[] = [];
+  // The vault rejects refs over 1024 bytes; and a linear backward scan (not a
+  // `\s+\S+$` regex, which is quadratic on long whitespace runs) finds the
+  // start of the whitespace before the last word.
+  if (ref.length > 1024) return result;
   let candidate = ref.trimEnd();
   const floor = candidate.lastIndexOf("/") + 1;
+  const ws = (c: string) => /\s/.test(c);
   while (result.length < 6) {
-    const boundary = /\s+\S+$/.exec(candidate);
-    if (!boundary || boundary.index <= floor) break;
-    candidate = candidate.slice(0, boundary.index).trimEnd();
+    let j = candidate.length;
+    while (j > 0 && !ws(candidate[j - 1])) j--;
+    let k = j;
+    while (k > 0 && ws(candidate[k - 1])) k--;
+    if (k === j || k <= floor) break;
+    candidate = candidate.slice(0, k);
     if (!candidate.slice(floor).trim()) break;
     result.push(candidate);
   }
