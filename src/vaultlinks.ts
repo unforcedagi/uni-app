@@ -11,18 +11,20 @@
 export type VaultRef = {
   /** Hub origin the link names (`https://…`), or null for a shorthand ref. */
   hub: string | null;
+  /** Allow bounded prose-prefix recovery for bare references and wikilinks. */
+  recover?: boolean;
   vault: string;
   /** Note id (ULID) or path. */
   ref: string;
 };
 
 /** Vault names the `<vault>:<path>` shorthand is recognised for. */
-export const SHORTHAND_VAULTS = ["uni", "unforced"] as const;
+export const SHORTHAND_VAULTS = ["uni", "unforced", "parachute", "uni-1"] as const;
 
 const VAULT_NAME = /^[A-Za-z0-9_-]{1,64}$/;
 const ULID = /^[0-9A-HJKMNP-TV-Z]{26}$/;
 // <origin>[/surface/<name>]/v/<vault>/n/<ref>[/edit][/][?…][#…]
-const NOTE_URL = /^(https?:\/\/[^/?#\s]+)(?:\/surface\/[^/?#\s]+)?\/v\/([^/?#\s]+)\/n\/([^/?#\s]+)(?:\/edit)?\/?(?:[?#]\S*)?$/i;
+const NOTE_URL = /^(https?:\/\/[^/?#\s]+)(?:\/surface\/[^/?#\s]+)?\/v\/([^/?#\s]+)\/n\/([^?#\s]+?)(?:\/edit)?\/?(?:[?#]\S*)?$/i;
 
 function decode(s: string): string | null {
   try { return decodeURIComponent(s); } catch { return null; }
@@ -55,20 +57,26 @@ export function parseShorthand(s: string, vaults: readonly string[] = SHORTHAND_
 }
 
 /**
- * Shorthand in running text: `uni:System/Now` without spaces. Matches at
+ * Shorthand in running text, including spaces. Matches at
  * `i` (which must start a word) and returns the consumed length. Trailing
  * sentence punctuation is left out.
  */
 export function matchShorthandAt(src: string, i: number, vaults: readonly string[] = SHORTHAND_VAULTS): { ref: VaultRef; end: number } | null {
   if (i > 0 && /[\w/:.@-]/.test(src[i - 1])) return null;
-  const m = /[a-z][a-z0-9_-]*:[A-Za-z0-9][^\s<>"'`()[\]]*/y;
-  m.lastIndex = i;
-  const hit = m.exec(src);
-  if (!hit) return null;
-  let text = hit[0];
-  while (/[.,;:!?*_~]$/.test(text)) text = text.slice(0, -1);
+  const head = /^[a-z][a-z0-9_-]*:/.exec(src.slice(i));
+  if (!head) return null;
+  let end = i + head[0].length;
+  let parens = 0;
+  for (; end < src.length; end++) {
+    const ch = src[end];
+    if (/[\r\n`<>"\]]/.test(ch)) break;
+    if (ch === "(") parens++;
+    if (ch === ")") { if (!parens) break; parens--; }
+    if (/[.,;:!?]/.test(ch) && (end + 1 === src.length || /\s/.test(src[end + 1]))) break;
+  }
+  const text = src.slice(i, end).trimEnd().replace(/[*_~]+$/, "").trimEnd();
   const ref = parseShorthand(text, vaults);
-  return ref ? { ref, end: i + text.length } : null;
+  return ref ? { ref: { ...ref, recover: true }, end: i + text.length } : null;
 }
 
 /** The canonical, shareable URL for a note (prefer the id: it survives renames). */
@@ -129,8 +137,32 @@ export function wikilinkResolver(note: { id: string; links?: LinkRecord[] }, vau
     }
   }
   return (target: string): { href: string; exists: boolean } => {
-    const t = target.split("#")[0].trim();
-    const id = byTarget.get(t) ?? byTarget.get(t.toLowerCase());
-    return id ? { href: noteRoute(vault, id), exists: true } : { href: noteRoute(vault, t || target), exists: false };
+    const t = target.split("|")[0].split("#")[0].trim();
+    const explicit = /^([a-z][a-z0-9_-]*):(.*)$/.exec(t);
+    if (explicit && SHORTHAND_VAULTS.includes(explicit[1] as typeof SHORTHAND_VAULTS[number])) {
+      if (explicit[1] !== vault) return { href: noteRoute(explicit[1], explicit[2]), exists: false };
+    }
+    const local = explicit && explicit[1] === vault ? explicit[2] : t;
+    const id = byTarget.get(local) ?? byTarget.get(local.toLowerCase());
+    return id ? { href: noteRoute(vault, id), exists: true } : { href: noteRoute(vault, local || target), exists: false };
   };
+}
+
+/** At most six shorter references, never removing the last segment's first word. */
+export function refCandidates(ref: string): string[] {
+  const result: string[] = [];
+  let candidate = ref.trimEnd();
+  const floor = candidate.lastIndexOf("/") + 1;
+  while (result.length < 6) {
+    const boundary = /\s+\S+$/.exec(candidate);
+    if (!boundary || boundary.index <= floor) break;
+    candidate = candidate.slice(0, boundary.index).trimEnd();
+    if (!candidate.slice(floor).trim()) break;
+    result.push(candidate);
+  }
+  return result;
+}
+
+export function isNoteNotFound(error: unknown): boolean {
+  return /\bnote not found:/.test(String(error));
 }

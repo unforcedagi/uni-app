@@ -144,6 +144,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const [otherVaultsExpanded, setOtherVaultsExpanded] = useState(() => {
     try { return localStorage.getItem(OTHER_VAULTS_KEY) === "true"; } catch { return false; }
   });
+  const [searchQuery, setSearchQuery] = useState("");
   const [searchScope, setSearchScope] = useState({ vault: "", prefix: "" });
   const [initialAliases] = useState<Record<string, string>>(() => {
     try { const value = JSON.parse(localStorage.getItem(ALIASES_KEY) ?? "{}"); return value && typeof value === "object" && !Array.isArray(value) ? Object.fromEntries(Object.entries(value).filter(([, v]) => typeof v === "string")) as Record<string, string> : {}; } catch { return {}; }
@@ -354,7 +355,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
     // A note on some other hub isn't readable with this key: let the browser
     // (and that hub's Parachute app) handle it.
     if (!sameHub(ref, hub)) { if (href) void invoke("open_link", { url: href }).catch(() => {}); return; }
-    const target = resolveNote({ hub: null, vault: ref.vault, ref: ref.ref }, aliases.current);
+    setSidebarVisible(false);
+    const target = resolveNote({ ...ref, hub: null }, aliases.current);
     const current = activeTab(tabsRef.current);
     if (current?.kind === "note") {
       const top = notesRef.current[notesRef.current.length - 1];
@@ -1315,10 +1317,10 @@ function Conversations({ onForget }: { onForget: () => void }) {
     journalRecording && journalTab ? { title: "Journal", elapsed: journalRecording.elapsed, tabId: journalTab.id, stop: journalRecording.stop, phase: "recording" as const } : null;
   return <NoteOpener.Provider value={openNote}><main className={`shell ${(!sidebarVisible && (channel || journalOpen || (active?.kind === "note" || active?.kind === "vault"))) ? "in-room" : ""} ${topNote ? "note-open" : ""}`}>
     <aside className="rooms" aria-label="Conversations">
-      <header className="rooms-header"><div><span className="eyebrow">Unforced</span><h1>Uni</h1></div><div><button className="icon-button" onClick={() => { setSearchScope({ vault: "", prefix: "" }); setSearchOpen(true); }} aria-label="Search messages and notes">⌕</button><button className="icon-button" onClick={() => void refresh()} disabled={busy} aria-label="Refresh conversations">↻</button><button className="icon-button" onClick={() => { setSettingsOpen(!settingsOpen); setForgetArmed(false); }} aria-label="Settings" aria-expanded={settingsOpen}>⚙</button></div></header>
+      <header className="rooms-header"><div><span className="eyebrow">Unforced</span><h1>Uni</h1></div><div><button className="icon-button" onClick={() => { setSearchQuery(""); setSearchScope({ vault: "", prefix: "" }); setSearchOpen(true); }} aria-label="Search messages and notes">⌕</button><button className="icon-button" onClick={() => void refresh()} disabled={busy} aria-label="Refresh conversations">↻</button><button className="icon-button" onClick={() => { setSettingsOpen(!settingsOpen); setForgetArmed(false); }} aria-label="Settings" aria-expanded={settingsOpen}>⚙</button></div></header>
       {pairSourceOpen && <PairSource onClose={() => setPairSourceOpen(false)} />}
       {settingsOpen && <div className="settings"><UpdateSettings /><PairDeviceButton onOpen={() => setPairSourceOpen(true)} /><button className="pairing-secondary" onClick={() => void forget()}>{forgetArmed ? "Tap again to forget — you'll need to re-pair" : "Forget this device key"}</button>{forgetArmed && <button className="pairing-secondary" onClick={() => setForgetArmed(false)}>Keep key</button>}</div>}
-      {searchOpen && <Search vaults={vaults} key={`${searchScope.vault}:${searchScope.prefix}`} initialVault={searchScope.vault} initialPathPrefix={searchScope.prefix} onOpen={openHit} onOpenNote={(n) => { setSearchOpen(false); openNote({ hub: null, vault: n.vault, ref: n.id }, null); }} onAskUni={askUniSearch} onClose={() => setSearchOpen(false)} />}
+      {searchOpen && <Search initialQuery={searchQuery} vaults={vaults} key={`${searchScope.vault}:${searchScope.prefix}`} initialVault={searchScope.vault} initialPathPrefix={searchScope.prefix} onOpen={openHit} onOpenNote={(n) => { setSearchOpen(false); openNote({ hub: null, vault: n.vault, ref: n.id }, null); }} onAskUni={askUniSearch} onClose={() => { setSearchOpen(false); if (topNote) setSidebarVisible(false); }} />}
       {searchOpen && error && <p className="error search-error" role="alert">{error}</p>}
       <div className="rooms-body" hidden={searchOpen}>
       <p className="connection" role="status">{status}{live ? <span className={`live ${live === "Live" ? "on" : ""}`}> · {live}</span> : null}</p>
@@ -1359,7 +1361,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
         <button className="tab-add" onClick={() => { pickNewTab.current = true; setSearchOpen(false); setSidebarVisible(true); document.querySelector<HTMLButtonElement>(".rooms nav .room")?.focus(); }} aria-label="New tab — pick a room" title="New tab — pick a room">+</button>
       </div>
       {journalTab && <div className="journal-tab-content" hidden={!journalOpen}><Journal rooms={rooms} uniRoomId={findUniRoom(rooms)?.id ?? null} onShare={shareEntry} onBack={() => setSidebarVisible(true)} onRecordingChange={(on, elapsed, stop) => { journalRecordingRef.current = on; setJournalRecording(on ? { elapsed, stop } : null); }} /></div>}
-      {active?.kind === "vault" && active.vault ? <VaultBrowser key={active.vault} vault={active.vault} onBack={() => setSidebarVisible(true)} onOpen={(note) => openTarget({ kind: "note", note: { hub: null, vault: active.vault!, ref: note.id }, title: note.path || note.id }, "new")} onCreate={(folder) => requestCreate(active.vault!, folder)} onSearch={(prefix) => { setSearchScope({ vault: active.vault!, prefix }); setSearchOpen(true); setSidebarVisible(true); }} />
+      {active?.kind === "vault" && active.vault ? <VaultBrowser key={active.vault} vault={active.vault} onBack={() => setSidebarVisible(true)} onOpen={(note) => openTarget({ kind: "note", note: { hub: null, vault: active.vault!, ref: note.id }, title: note.path || note.id }, "new")} onCreate={(folder) => requestCreate(active.vault!, folder)} onSearch={(prefix) => { setSearchQuery(""); setSearchScope({ vault: active.vault!, prefix }); setSearchOpen(true); setSidebarVisible(true); }} />
       : journalOpen ? null
       : currentRoom ? <>
         <header className="conversation-header">
@@ -1422,9 +1424,10 @@ function Conversations({ onForget }: { onForget: () => void }) {
     </div>}
     {/* The note sheet leaves the tab strip visible above it; Back pops the
         note's own stack (or closes the tab at the first note). */}
-    {topNote && <section className="note-sheet" role="region" aria-label="Note">
-      <NoteView key={`${tabs.active}:${notes.length}:${noteKey(topNote)}`} target={topNote} hub={hub} onOpen={openNote} onBack={closeNote}
+    {topNote && !searchOpen && <section className="note-sheet" role="region" aria-label="Note">
+      <NoteView key={`${tabs.active}:${notes.length}:${noteKey(topNote)}`} target={topNote} onSearch={(query) => { setSidebarVisible(true); setSearchQuery(query); setSearchScope({ vault: "", prefix: "" }); setSearchOpen(true); }} hub={hub} onOpen={openNote} onBack={closeNote}
         onResolved={(id) => {
+          if (tabsRef.current.active) commitTabs(updateTab(tabsRef.current, tabsRef.current.active, { note: { hub: null, vault: topNote.vault, ref: id } }));
           aliases.current[JSON.stringify([topNote.vault, topNote.ref])] = id;
           try { localStorage.setItem(ALIASES_KEY, JSON.stringify(aliases.current)); } catch { /* session alias remains */ }
         }}

@@ -1,10 +1,41 @@
 // Run: node --experimental-strip-types scripts/vaultlinks.test.ts
 import assert from "node:assert/strict";
 import { parseInline, parseMarkdown, type Inline } from "../src/markdown.ts";
-import { matchShorthandAt, noteRoute, noteUrl, parseNoteRoute, parseNoteUrl, parseShorthand, refLabel, sameHub, wikilinkResolver } from "../src/vaultlinks.ts";
+import { refCandidates, isNoteNotFound, SHORTHAND_VAULTS, matchShorthandAt, noteRoute, noteUrl, parseNoteRoute, parseNoteUrl, parseShorthand, refLabel, sameHub, wikilinkResolver } from "../src/vaultlinks.ts";
 
 const HUB = "https://uni-1.taildf9ce2.ts.net";
 const ID = "01M33NQB9BK6543P4SEJ2WKFMS";
+
+// T-24 real chat regressions (written before the parser fix).
+const realPaths = ["Projects/Ricki/Phase 1 — work plan", "Projects/Ecociv/Reading experience — concept", "Inbox/Sources/Karpathy — understanding LLM outputs (2026-10-02)"];
+const realMessages = [
+  "Ricki plan is at uni:Projects/Ricki/Phase 1 — work plan",
+  "ready to read in the vault, at uni:Projects/Ecociv/Reading experience — concept.\n\nIt includes:",
+  "The first one is saved at uni:Inbox/Sources/Karpathy — understanding LLM outputs (2026-10-02). Design something",
+];
+for (const [i, message] of realMessages.entries()) {
+  const links = parseInline(message).filter((n) => n.t === "vaultlink");
+  assert.equal(links[0]?.ref.ref, realPaths[i]);
+  assert.equal(parseInline(`\`uni:${realPaths[i]}\``).filter((n) => n.t === "vaultlink")[0]?.ref.ref, realPaths[i]);
+}
+for (const message of ["(see uni:Projects/Ricki/Phase 1 — work plan)", "uni:Projects/Ricki/Phase 1 — work plan, and the proposal"]) {
+  assert.equal(parseInline(message).filter((n) => n.t === "vaultlink")[0]?.ref.ref, realPaths[0]);
+}
+for (const [source, vault, ref, label] of [
+  ["[[Projects/Ricki/Proposal v1]]", "uni", "Projects/Ricki/Proposal v1", "Proposal v1"],
+  ["[[Projects/Ricki/Proposal v1|the proposal]]", "uni", "Projects/Ricki/Proposal v1", "the proposal"],
+  ["[[unforced:Notes/X#heading]]", "unforced", "Notes/X", "X"],
+]) {
+  const n = parseInline(source)[0];
+  assert.equal(n.t, "vaultlink");
+  if (n.t === "vaultlink") { assert.equal(n.ref.vault, vault); assert.equal(n.ref.ref, ref); assert.deepEqual(n.c, [{ t: "text", v: label }]); }
+}
+for (const source of ["uni:1939", "uni:hello", "a@uni:x/y", "https://x/uni:a/b"]) assert.ok(!parseInline(source).some((n) => n.t === "vaultlink"));
+assert.equal(parseInline("uni:01M3ZK2R6A6C62M1ANJCSQNG3M").filter((n) => n.t === "vaultlink")[0]?.ref.ref, "01M3ZK2R6A6C62M1ANJCSQNG3M");
+for (const path of ["Projects/Ricki/Phase%201%20%E2%80%94%20work%20plan", "Projects%2FRicki%2FProposal%20v1", "Projects/Ricki/Proposal%20v1"]) {
+  assert.equal(parseNoteUrl(`${HUB}/surface/parachute/v/uni/n/${path}`)?.ref, decodeURIComponent(path));
+  assert.equal(parseNoteUrl(`${HUB}/surface/parachute/v/uni/n/${path}/edit`)?.ref, decodeURIComponent(path));
+}
 
 // ── Canonical URLs ─────────────────────────────────────────────────────────
 assert.deepEqual(parseNoteUrl(`${HUB}/surface/parachute/v/uni/n/${ID}`), { hub: HUB, vault: "uni", ref: ID });
@@ -13,7 +44,7 @@ assert.deepEqual(parseNoteUrl(`${HUB}/v/uni/n/${ID}?x=1#h`), { hub: HUB, vault: 
 assert.deepEqual(parseNoteUrl(`${HUB}/surface/parachute/v/unforced/n/System%2FNow`), { hub: HUB, vault: "unforced", ref: "System/Now" });
 assert.equal(parseNoteUrl(`HTTPS://UNI-1.example/v/uni/n/x`)?.hub, "https://uni-1.example");
 assert.equal(parseNoteUrl(`${HUB}/surface/parachute/v/uni`), null);
-assert.equal(parseNoteUrl(`${HUB}/surface/parachute/v/uni/n/a/b`), null); // nested path segment isn't the grammar
+assert.equal(parseNoteUrl(`${HUB}/surface/parachute/v/uni/n/a/b`)?.ref, "a/b");
 assert.equal(parseNoteUrl(`${HUB}/surface/parachute/v/..%2Fx/n/a`), null); // vault name rule
 assert.equal(parseNoteUrl(`${HUB}/surface/parachute/v/uni/n/%E0%A4%A`), null); // bad escape
 assert.equal(parseNoteUrl(`javascript:alert(1)//v/uni/n/x`), null);
@@ -95,4 +126,28 @@ assert.equal(resolve("Self/Me").exists, false);
 // A hostile target can only ever become an in-app route.
 assert.ok(resolve("javascript:alert(1)").href.startsWith("#note/uni/"));
 
+
+assert.deepEqual(refCandidates("Projects/Ricki/Phase 1 — work plan extra prose"), ["Projects/Ricki/Phase 1 — work plan extra", "Projects/Ricki/Phase 1 — work plan", "Projects/Ricki/Phase 1 — work", "Projects/Ricki/Phase 1 —", "Projects/Ricki/Phase 1", "Projects/Ricki/Phase"]);
+assert.deepEqual(refCandidates("Folder with spaces/First"), []);
+assert.deepEqual(refCandidates("Folder with spaces/First second third"), ["Folder with spaces/First second", "Folder with spaces/First"]);
+assert.deepEqual(refCandidates(ID), []);
+assert.deepEqual(refCandidates("First second third"), ["First second", "First"]);
+assert.deepEqual(refCandidates("A/B   C\tD "), ["A/B   C", "A/B"]);
+assert.ok(isNoteNotFound("vault: note not found: A/B"));
+assert.ok(!isNoteNotFound("unauthorized"));
+assert.ok(!isNoteNotFound("network unavailable"));
+for (const vault of SHORTHAND_VAULTS) assert.equal(parseShorthand(`${vault}:Notes/X`)?.vault, vault);
+for (const stop of ["; ", ": ", "! ", "? ", "`", "<", ">", '"', "]", "\n"]) assert.equal(matchShorthandAt(`uni:A/B title${stop}following`, 0)?.ref.ref, "A/B title");
+assert.equal(matchShorthandAt("**uni:A/B title**", 2)?.ref.ref, "A/B title");
+assert.equal(parseInline(`[[${"x".repeat(513)}]]`)[0].t, "text");
+assert.ok(!parseInline("[[A/B\nC]]").some((n) => n.t === "vaultlink"));
+assert.deepEqual(resolve("Runbooks/Tending#Weekly|alias"), { href: noteRoute("uni", "T1"), exists: true });
+assert.deepEqual(resolve("unforced:Notes/Title with spaces#Heading|alias"), { href: noteRoute("unforced", "Notes/Title with spaces"), exists: false });
+assert.ok(!sameHub({ hub: "https://uni-2.taildf9ce2.ts.net", vault: "uni", ref: ID }, HUB));
+
+const spaced = wikilinkResolver({ id: "S", links: [{ sourceId: "S", targetNote: { id: "T", path: "Notes/Title with spaces" } }] }, "uni");
+assert.deepEqual(spaced("Notes/Title with spaces#Heading|alias"), { href: noteRoute("uni", "T"), exists: true });
+assert.deepEqual(spaced("uni:Notes/Title with spaces"), { href: noteRoute("uni", "T"), exists: true });
+assert.equal(parseInline("[[Title with spaces#Heading|alias]]").filter((n) => n.t === "vaultlink")[0]?.ref.ref, "Title with spaces");
+assert.equal(matchShorthandAt("uni:A/B dotted.title,part!word", 0)?.ref.ref, "A/B dotted.title,part!word");
 console.log("vaultlinks ok");

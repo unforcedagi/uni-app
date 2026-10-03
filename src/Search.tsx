@@ -24,8 +24,9 @@ function Snippet({ text }: { text: string }) {
   return <>{snippetSegments(text).map((s, i) => s.hit ? <mark key={i}>{s.text}</mark> : <span key={i}>{s.text}</span>)}</>;
 }
 
-export default function Search({ onOpen, onOpenNote, onAskUni, onClose, vaults, initialVault = "", initialPathPrefix = "" }: {
+export default function Search({ onOpen, onOpenNote, onAskUni, onClose, vaults, initialQuery = "", initialVault = "", initialPathPrefix = "" }: {
   vaults: string[];
+  initialQuery?: string;
   initialVault?: string;
   initialPathPrefix?: string;
   onOpen: (target: { channel: string; root: string | null; focus: string }) => void;
@@ -37,7 +38,7 @@ export default function Search({ onOpen, onOpenNote, onAskUni, onClose, vaults, 
   const [mode, setMode] = useState<"meaning" | "keyword">("meaning");
   const [vault, setVault] = useState(initialVault);
   const [pathPrefix, setPathPrefix] = useState(initialPathPrefix);
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(initialQuery);
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [state, setState] = useState<"idle" | "searching" | "done" | "error">("idle");
   const [error, setError] = useState<string | null>(null);

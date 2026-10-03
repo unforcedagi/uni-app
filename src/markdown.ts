@@ -162,6 +162,21 @@ export function parseInline(src: string, depth = 0): Inline[] {
       }
       text += run; i += run.length; continue;
     }
+    if (src.startsWith("[[", i)) {
+      const end = src.indexOf("]]", i + 2);
+      const body = end < 0 ? "" : src.slice(i + 2, end);
+      if (body && body.length <= 512 && !/[\r\n]/.test(body)) {
+        const [path, alias] = body.split("|");
+        const target = path.split("#")[0].trim();
+        const explicit = /^([a-z][a-z0-9_-]*):(.*)$/.exec(target);
+        const vault = explicit?.[1] ?? "uni";
+        const ref = explicit?.[2].trim() ?? target;
+        if (ref && SHORTHAND_VAULTS.includes(vault as typeof SHORTHAND_VAULTS[number])) {
+          push({ t: "vaultlink", ref: { hub: null, vault, ref, recover: true }, href: null, c: [{ t: "text", v: alias?.trim() || ref.split("/").pop() || ref }] });
+          i = end + 2; continue;
+        }
+      }
+    }
     if (ch === "[") {
       const link = matchLink(src, i);
       if (link) {
