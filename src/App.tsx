@@ -1,3 +1,4 @@
+import { SettingsIcon } from "./Icons";
 import { FOR_YOU_ID, FOR_YOU_OPENED_KEY, LAST_SURFACE_KEY, countRecommendations, isRecommendationNew, readLastSurface, saveLastSurface } from "./railCore";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
@@ -200,17 +201,18 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [panel, setPanel] = useState<"rooms" | "vault" | "settings" | null>(null);
   const [journalFocus, setJournalFocus] = useState(false);
-  const [forYou, setForYou] = useState({ count: 0, fresh: false });
-  async function refreshForYou(opened = false) {
+  const [forYou, setForYou] = useState({ count: 0, fresh: false, updatedAt: null as string | null });
+  const renderedForYou = useRef<string | null>(null);
+  const [forYouReload, setForYouReload] = useState(0);
+  async function refreshForYou() {
     try {
       const data = await invoke<{ note: { content?: string; updatedAt?: string } }>("vault_note", { vault: "uni", noteRef: FOR_YOU_ID });
       const updated = data.note.updatedAt ?? null;
       let last: string | null = null;
       try {
         last = localStorage.getItem(FOR_YOU_OPENED_KEY);
-        if (opened && updated) { localStorage.setItem(FOR_YOU_OPENED_KEY, updated); last = updated; }
       } catch { /* unavailable storage */ }
-      setForYou({ count: countRecommendations(data.note.content ?? ""), fresh: opened ? false : isRecommendationNew(updated, last) });
+      setForYou({ count: countRecommendations(data.note.content ?? ""), updatedAt: updated, fresh: isRecommendationNew(updated, last) });
     } catch { /* keep the last successful count while offline */ }
   }
   useEffect(() => {
@@ -226,7 +228,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   }, []);
   function openForYou() {
     openTarget({ kind: "note", note: { hub: null, vault: "uni", ref: FOR_YOU_ID }, title: "For you" });
-    void refreshForYou(true);
+    if (topNote?.vault === "uni" && topNote.ref === FOR_YOU_ID && isRecommendationNew(forYou.updatedAt, renderedForYou.current)) setForYouReload((n) => n + 1);
   }
   const pickNewTab = useRef(false);
   const longPress = useRef<number | null>(null);
@@ -1364,17 +1366,17 @@ function Conversations({ onForget }: { onForget: () => void }) {
     journalRecording && journalTab ? { title: "Journal", elapsed: journalRecording.elapsed, tabId: journalTab.id, stop: journalRecording.stop, phase: "recording" as const } : null;
   return <NoteOpener.Provider value={openNote}><main className={`shell ${(!sidebarVisible && (channel || journalOpen || (active?.kind === "note" || active?.kind === "vault"))) ? "in-room" : ""} ${topNote ? "note-open" : ""} ${panel ? `panel-open panel-${panel}` : ""} ${searchOpen ? "search-open" : ""} ${journalFocus && journalOpen ? "journal-focus" : ""}`}>
     <nav className="rail" aria-label="Main navigation">
-      <button aria-label="Uni" aria-current={!topNote && !journalOpen && channel === findUniRoom(rooms)?.id ? "page" : undefined} onClick={() => { const uni = findUniRoom(rooms); if (uni) openTarget(roomTarget(uni.id)); }}><i>✦</i><span>Uni</span></button>
-      <button aria-label="Journal" aria-current={journalOpen && !topNote ? "page" : undefined} onClick={() => openTarget({ kind: "journal", title: "Journal" })}><i>❋</i><span>Journal</span></button>
-      <button aria-label="For you" aria-current={topNote?.ref === FOR_YOU_ID ? "page" : undefined} onClick={openForYou}><i>★</i><span>For you</span><b className="rail-count">{forYou.count}</b>{forYou.fresh && <span className="rail-dot" aria-label="Updated recommendations" />}</button>
-      <button aria-label="Rooms" aria-current={!topNote && !journalOpen && channel && channel !== findUniRoom(rooms)?.id ? "page" : undefined} aria-expanded={panel === "rooms"} onClick={() => { setSearchOpen(false); setPanel(panel === "rooms" ? null : "rooms"); }}><i>☷</i><span>Rooms</span>{rooms.some((r) => r.unread > 0) && <span className="rail-dot" aria-label="Unread rooms" />}</button>
-      <button aria-label="Vault" aria-current={active?.kind === "vault" || (topNote && topNote.ref !== FOR_YOU_ID) ? "page" : undefined} aria-expanded={panel === "vault"} onClick={() => { setSearchOpen(false); setPanel(panel === "vault" ? null : "vault"); }}><i>▤</i><span>Vault</span></button>
+      <button aria-label="Uni" aria-current={!panel && !searchOpen && (!topNote && !journalOpen && channel === findUniRoom(rooms)?.id ? "page" : undefined)} onClick={() => { const uni = findUniRoom(rooms); if (uni) openTarget(roomTarget(uni.id)); }}><i>✦</i><span>Uni</span></button>
+      <button aria-label="Journal" aria-current={!panel && !searchOpen && (journalOpen && !topNote ? "page" : undefined)} onClick={() => openTarget({ kind: "journal", title: "Journal" })}><i>❋</i><span>Journal</span></button>
+      <button aria-label="For you" aria-current={!panel && !searchOpen && (topNote?.ref === FOR_YOU_ID ? "page" : undefined)} onClick={openForYou}><i>★<b className="rail-count">{forYou.count}</b>{forYou.fresh && <span className="rail-dot" aria-label="Updated recommendations" />}</i><span>For you</span></button>
+      <button aria-label="Rooms" aria-current={!panel && !searchOpen && (!topNote && !journalOpen && channel && channel !== findUniRoom(rooms)?.id ? "page" : undefined)} aria-expanded={panel === "rooms"} onClick={() => { setSearchOpen(false); setPanel(panel === "rooms" ? null : "rooms"); }}><i>☷</i><span>Rooms</span>{rooms.some((r) => r.unread > 0) && <span className="rail-dot" aria-label="Unread rooms" />}</button>
+      <button aria-label="Vault" aria-current={!panel && !searchOpen && (active?.kind === "vault" || (topNote && topNote.ref !== FOR_YOU_ID) ? "page" : undefined)} aria-expanded={panel === "vault"} onClick={() => { setSearchOpen(false); setPanel(panel === "vault" ? null : "vault"); }}><i>▤</i><span>Vault</span></button>
       <button aria-label="Search" aria-expanded={searchOpen} onClick={() => { setPanel(null); setSearchQuery(""); setSearchScope({ vault: "", prefix: "" }); setSearchOpen(true); }}><i>⌕</i><span>Search</span></button>
-      <button className="rail-settings" aria-label="Settings" onClick={() => { setSearchOpen(false); setPanel(panel === "settings" ? null : "settings"); setSettingsOpen(true); setForgetArmed(false); }}><i>⚙</i><span>Settings</span></button>
+      <button className="rail-settings" aria-label="Settings" aria-expanded={panel === "settings"} onClick={() => { setSearchOpen(false); setPanel(panel === "settings" ? null : "settings"); setSettingsOpen(true); setForgetArmed(false); }}><i><SettingsIcon /></i><span>Settings</span></button>
     </nav>
     {(panel || searchOpen) && <button className="panel-scrim" aria-label="Close navigation panel" onClick={() => { setPanel(null); setSearchOpen(false); }} />}
     <aside className="rooms" aria-label="Conversations">
-      <header className="rooms-header"><div><span className="eyebrow">Unforced</span><h1>Uni</h1></div><div><button className="icon-button" onClick={() => { setSearchQuery(""); setSearchScope({ vault: "", prefix: "" }); setSearchOpen(true); }} aria-label="Search messages and notes">⌕</button><button className="icon-button" onClick={() => void refresh()} disabled={busy} aria-label="Refresh conversations">↻</button><button className="icon-button" onClick={() => { setSettingsOpen(!settingsOpen); setForgetArmed(false); }} aria-label="Settings" aria-expanded={settingsOpen}>⚙</button></div></header>
+      <header className="rooms-header"><div><span className="eyebrow">Unforced</span><h1>Uni</h1></div><div><button className="icon-button" onClick={() => { setSearchQuery(""); setSearchScope({ vault: "", prefix: "" }); setSearchOpen(true); }} aria-label="Search messages and notes">⌕</button><button className="icon-button" onClick={() => void refresh()} disabled={busy} aria-label="Refresh conversations">↻</button><button className="icon-button" onClick={() => { setSettingsOpen(!settingsOpen); setForgetArmed(false); }} aria-label="Settings" aria-expanded={settingsOpen}><SettingsIcon /></button></div></header>
       {pairSourceOpen && <PairSource onClose={() => setPairSourceOpen(false)} />}
       {settingsOpen && <div className="settings"><UpdateSettings /><PairDeviceButton onOpen={() => setPairSourceOpen(true)} /><button className="pairing-secondary" onClick={() => void forget()}>{forgetArmed ? "Tap again to forget — you'll need to re-pair" : "Forget this device key"}</button>{forgetArmed && <button className="pairing-secondary" onClick={() => setForgetArmed(false)}>Keep key</button>}</div>}
       {searchOpen && <Search initialQuery={searchQuery} vaults={vaults} key={`${searchScope.vault}:${searchScope.prefix}`} initialVault={searchScope.vault} initialPathPrefix={searchScope.prefix} onOpen={openHit} onOpenNote={(n) => { setSearchOpen(false); openNote({ hub: null, vault: n.vault, ref: n.id }, null); }} onAskUni={askUniSearch} onClose={() => { setSearchOpen(false); if (topNote) setSidebarVisible(false); }} />}
@@ -1485,12 +1487,22 @@ function Conversations({ onForget }: { onForget: () => void }) {
     {/* The note sheet leaves the tab strip visible above it; Back pops the
         note's own stack (or closes the tab at the first note). */}
     {topNote && !searchOpen && <section className="note-sheet" role="region" aria-label="Note">
-      <NoteView key={`${tabs.active}:${notes.length}:${noteKey(topNote)}`} target={topNote} onSearch={(query) => { setSidebarVisible(true); setSearchQuery(query); setSearchScope({ vault: "", prefix: "" }); setSearchOpen(true); }} hub={hub} onOpen={openNote} onBack={closeNote}
+      <NoteView key={`${tabs.active}:${notes.length}:${noteKey(topNote)}:${topNote.ref === FOR_YOU_ID ? forYouReload : 0}`} target={topNote} onSearch={(query) => { setSidebarVisible(true); setSearchQuery(query); setSearchScope({ vault: "", prefix: "" }); setSearchOpen(true); }} hub={hub} onOpen={openNote} onBack={closeNote}
         onResolved={(id) => {
-          if (topNote.vault === "uni" && id === FOR_YOU_ID) void refreshForYou(true);
           if (tabsRef.current.active) commitTabs(updateTab(tabsRef.current, tabsRef.current.active, { note: { hub: null, vault: topNote.vault, ref: id } }));
           aliases.current[JSON.stringify([topNote.vault, topNote.ref])] = id;
           try { localStorage.setItem(ALIASES_KEY, JSON.stringify(aliases.current)); } catch { /* session alias remains */ }
+        }}
+        onRendered={(note) => {
+          if (topNote.vault !== "uni" || note.id !== FOR_YOU_ID) return;
+          const updatedAt = note.updatedAt ?? null;
+          renderedForYou.current = updatedAt;
+          if (updatedAt) {
+            try { localStorage.setItem(FOR_YOU_OPENED_KEY, updatedAt); } catch { /* unavailable storage */ }
+          }
+          setForYou((known) => isRecommendationNew(known.updatedAt, updatedAt)
+            ? { ...known, fresh: true }
+            : { count: countRecommendations(note.content ?? ""), updatedAt, fresh: false });
         }}
         startEditing={editOnOpen.current.has(noteKey(topNote))}
         onDirty={(dirty) => { reportDirty(tabs.active!, noteKey(topNote), dirty); if (!dirty) editOnOpen.current.delete(noteKey(topNote)); }}
