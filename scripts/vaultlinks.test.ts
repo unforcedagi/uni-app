@@ -160,3 +160,14 @@ console.log("vaultlinks ok");
   const ms = performance.now() - t0;
   assert.ok(ms < 1500, `40k-char shorthand line took ${ms.toFixed(0)}ms`);
 }
+
+// ── Adversarial: many unmatched `[[` must not rescan the whole message ─────
+{
+  const big = "[[a ".repeat(16000); // 64 KiB, the relay's message cap
+  const t0 = performance.now();
+  parseInline(big);
+  const ms = performance.now() - t0;
+  assert.ok(ms < 1500, `64k unmatched-wikilink line took ${ms.toFixed(0)}ms`);
+}
+// A real wikilink still parses after the bound.
+assert.equal((parseInline("see [[Projects/Ricki/Phase 1 — work plan|the plan]] now").find((x) => x.t === "vaultlink") as any)?.ref.ref, "Projects/Ricki/Phase 1 — work plan");
