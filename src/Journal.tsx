@@ -17,7 +17,7 @@ function when(iso: string) {
   return isNaN(d.getTime()) ? iso : d.toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
-export default function Journal({ rooms, uniRoomId, onShare, onBack, onRecordingChange }: { rooms: Room[]; uniRoomId: string | null; onShare: ShareFn; onBack: () => void; onRecordingChange?: (recording: boolean, elapsed: number, stop: () => void) => void }) {
+export default function Journal({ rooms, uniRoomId, onShare, onBack, onRecordingChange, focus, onFocus }: { focus: boolean; onFocus: () => void; rooms: Room[]; uniRoomId: string | null; onShare: ShareFn; onBack: () => void; onRecordingChange?: (recording: boolean, elapsed: number, stop: () => void) => void }) {
   const [cfg, setCfg] = useState<VaultConfig | null>(null);
   const [entries, setEntries] = useState<JournalNote[]>([]);
   const [queued, setQueued] = useState<QueuedEntry[]>([]);
@@ -97,8 +97,8 @@ export default function Journal({ rooms, uniRoomId, onShare, onBack, onRecording
     invoke<VaultConfig>("journal_config").then(setCfg).catch(() => {});
     void loadQueue();
     void load(false);
-    invoke<FlushReport>("journal_flush").then((r) => { if (r.sent.length) void afterFlush(r, "Queued entries"); }).catch(() => {});
-    const online = () => invoke<FlushReport>("journal_flush").then((r) => afterFlush(r, "Queued entries")).catch(() => {});
+    invoke<FlushReport>("journal_flush").then((r) => { if (r.sent.length) void afterFlush(r, "Queued journal entries"); }).catch(() => {});
+    const online = () => invoke<FlushReport>("journal_flush").then((r) => afterFlush(r, "Queued journal entries")).catch(() => {});
     window.addEventListener("online", online);
     return () => window.removeEventListener("online", online);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -114,7 +114,7 @@ export default function Journal({ rooms, uniRoomId, onShare, onBack, onRecording
     try {
       const r = await invoke<FlushReport>("journal_save_text", { entry: newDraft(body, "text") });
       setText("");
-      await afterFlush(r, "Entry");
+      await afterFlush(r, "Journal entry");
     } catch (e) { setError(String(e)); setStatus("Not saved · your text is still here"); }
     finally { setSaving(false); }
   }
@@ -122,15 +122,15 @@ export default function Journal({ rooms, uniRoomId, onShare, onBack, onRecording
   const recorder = useRecorder(async (blob, mime) => {
     if (blob.size < 200) { setStatus("Recording was empty"); return; }
     setSaving(true);
-    setStatus("Saving voice entry…");
+    setStatus("Saving journal entry…");
     const note = text.trim();
     try {
       const bytes = new Uint8Array(await blob.arrayBuffer());
       const r = await invoke<FlushReport>("journal_save_voice", bytes, { headers: { "x-entry": JSON.stringify(newDraft(note, "voice")), "x-audio-mime": mime } });
       setText("");
-      await afterFlush(r, "Voice entry");
-      if (!r.error) setStatus("Voice entry saved · transcribing on uni-1…");
-    } catch (e) { setError(String(e)); setStatus("Voice entry not saved"); }
+      await afterFlush(r, "Journal entry");
+      if (!r.error) setStatus("Journal entry saved · transcribing on uni-1…");
+    } catch (e) { setError(String(e)); setStatus("Journal entry not saved"); }
     finally { setSaving(false); }
   }, "in the Journal");
   const reportRecording = useRef(onRecordingChange);
@@ -170,11 +170,11 @@ export default function Journal({ rooms, uniRoomId, onShare, onBack, onRecording
     </header>
     {settings && cfg && <JournalSettings cfg={cfg} onSaved={(c) => { setCfg(c); setSettings(false); void load(false); }} />}
     <div className="journal-compose">
-      <p className="journal-prompt">{greeting(new Date())}</p>
+      <div className="journal-writing-heading"><p className="journal-prompt">{greeting(new Date())}</p><button className="note-action" aria-pressed={focus} onClick={onFocus}>Focus</button></div>
       <textarea value={text} onChange={(e) => setText(e.target.value)} placeholder="What's here right now…" rows={4} maxLength={65536} aria-label="Journal entry"
         onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void saveText(); } }} />
       <div className="journal-actions">
-        <button className={`mic ${recorder.recording ? "on" : ""}`} onClick={() => void toggleMic()} disabled={saving && !recorder.recording} aria-label={recorder.recording ? "Stop recording and save" : "Record a voice entry"}>
+        <button className={`mic ${recorder.recording ? "on" : ""}`} onClick={() => void toggleMic()} disabled={saving && !recorder.recording} aria-label={recorder.recording ? "Stop recording and save" : "Record a journal entry"}>
           {recorder.recording ? <>■ <span>{mmss(recorder.elapsed)}</span></> : "🎙"}
         </button>
         <span className="journal-status" role="status">{recorder.recording ? `Recording · ${mmss(recorder.elapsed)}${text.trim() ? " · your typed text is kept with it" : ""}` : status}</span>
@@ -188,13 +188,13 @@ export default function Journal({ rooms, uniRoomId, onShare, onBack, onRecording
         <p className="journal-body">{entryText(q.content) || (q.has_audio ? "Voice recording, transcribed after upload." : "")}</p>
         {q.last_error && <small className="journal-error">{q.last_error}</small>}
       </article>)}
-      {entries.length === 0 && queuedOnly.length === 0 && !loading && <p className="empty">No entries yet. Your first one is a tap away.</p>}
+      {entries.length === 0 && queuedOnly.length === 0 && !loading && <p className="empty">No journal entries yet. Your first one is a tap away.</p>}
       {entries.map((e) => <article key={e.id} className="journal-entry">
         <div className="journal-meta"><span>{e.source === "voice" ? "🎙" : e.source === "text" ? "✎" : "•"} {when(e.created_at)}</span>{shared[e.id] && <span className="queued-tag">shared · {shared[e.id]}</span>}</div>
         {e.pending ? <p className="journal-body pending">{entryText(e.content) ? <>{entryText(e.content)}<br /></> : null}<em>Transcribing…</em></p>
           : <p className="journal-body">{entryText(e.content)}</p>}
         <div className="message-actions journal-entry-actions">
-          <button onClick={() => uniRoomId && void share(e, uniRoomId, true)} disabled={!uniRoomId || e.pending} aria-label="Pass this entry to Uni">✦ Pass to Uni</button>
+          <button onClick={() => uniRoomId && void share(e, uniRoomId, true)} disabled={!uniRoomId || e.pending} aria-label="Pass this journal entry to Uni">✦ Pass to Uni</button>
           <button onClick={() => setShareFor(shareFor === e.id ? null : e.id)} disabled={e.pending} aria-expanded={shareFor === e.id}>Share to…</button>
         </div>
         {shareFor === e.id && <div className="share-picker" role="menu" aria-label="Choose a room">
@@ -202,7 +202,7 @@ export default function Journal({ rooms, uniRoomId, onShare, onBack, onRecording
           {rooms.length === 0 && <span className="empty">No rooms cached. Refresh conversations first.</span>}
         </div>}
       </article>)}
-      {more && entries.length > 0 && <div className="older"><button onClick={() => void load(true)} disabled={loading}>{loading ? "Loading…" : "Older entries"}</button></div>}
+      {more && entries.length > 0 && <div className="older"><button onClick={() => void load(true)} disabled={loading}>{loading ? "Loading…" : "Older journal entries"}</button></div>}
     </div>
   </>;
 }

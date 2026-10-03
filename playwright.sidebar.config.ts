@@ -1,5 +1,6 @@
 import { defineConfig } from '@playwright/test';
 export default defineConfig({
+  outputDir: 'test-results/sidebar',
   testDir: './scripts/browser', testMatch: 'vault-sidebar.spec.ts', reporter: 'list',
   use: { baseURL: 'http://127.0.0.1:1432' },
   projects: [

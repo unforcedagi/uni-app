@@ -23,6 +23,8 @@ async function boot(page: Page, scenario: string) {
           case 'refresh': return { total_items: 0, channel_errors: {}, truncated_channels: [] };
           case 'open_link': w.openLinks.push(args.url); return null;
           case 'vault_note':
+            // For you refreshes independently of the note under test.
+            if (args.noteRef === '01M3ZQF7EM4ADC7HEY36D3DC3B') return { vault: 'uni', note: { id: args.noteRef, content: '' } };
             w.noteCalls.push(args);
             if (scenario === 'denied') throw 'vault: unauthorized';
             if (args.noteRef === 'Notes/Work plan' || args.noteRef === 'found-id' || args.noteRef === 'Notes/Title with spaces') return { hub: 'https://uni-1.taildf9ce2.ts.net', vault: args.vault, note: { id: 'found-id', path: 'Notes/Work plan', content: scenario === 'render' && args.vault === 'uni' ? '# Work plan\n\n[[unforced:Notes/Title with spaces#Heading|the proposal]]\n\n[remote](https://other.example/surface/parachute/v/uni/n/Notes/Work%20plan)' : '# Work plan\n\nPlan body', tags: [] } };

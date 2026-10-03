@@ -325,6 +325,7 @@ for (const duringSend of [false, true]) {
       await expect(page.locator('.compose-file')).toHaveCount(0);
       await input.fill('next draft');
       if (test.info().project.name === 'mobile') await press(page, page.getByRole('button', { name: 'Back to conversations', exact: true }));
+      if (test.info().project.name !== 'mobile') await page.getByRole('button', { name: 'Rooms', exact: true }).click();
       await press(page, page.locator('.rooms nav button').filter({ hasText: 'Other room' }));
       await page.getByRole('textbox', { name: 'Message Other room' }).fill('other draft');
       await page.evaluate(() => (window as any).finishTranscript());
@@ -462,6 +463,7 @@ test('Recording blocks another room and send completion preserves that room draf
   const input = page.getByRole('textbox', { name: 'Message Test room' });
   const switchRoom = async (name: string) => {
     if (test.info().project.name === 'mobile') await press(page, page.getByRole('button', { name: 'Back to conversations', exact: true }));
+    if (test.info().project.name !== 'mobile') await page.getByRole('button', { name: 'Rooms', exact: true }).click();
     await press(page, page.locator('.rooms nav button').filter({ hasText: name }));
   };
   await input.fill('draft');
@@ -498,6 +500,7 @@ for (const replace of [false, true]) {
   test(`Held send across room navigation preserves scoped drafts and bindings, replace=${replace}`, async ({ page }) => {
     const switchRoom = async (name: string) => {
       if (test.info().project.name === 'mobile') await press(page, page.getByRole('button', { name: 'Back to conversations', exact: true }));
+      if (test.info().project.name !== 'mobile') await page.getByRole('button', { name: 'Rooms', exact: true }).click();
       await press(page, page.locator('.rooms nav button').filter({ hasText: name }));
     };
     const input = page.getByRole('textbox', { name: 'Message Test room' });

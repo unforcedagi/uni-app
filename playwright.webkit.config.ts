@@ -2,6 +2,7 @@ import { defineConfig } from '@playwright/test';
 
 // Run on a Mac/WebKit host; Chromium on Linux cannot reproduce WebKit's null-relatedTarget blur.
 export default defineConfig({
+  outputDir: 'test-results/webkit',
   testDir: './scripts/browser',
   testMatch: 'composer.spec.ts',
   grep: /Mention touch|Attach opens|Keyboard menu|Edge press/,

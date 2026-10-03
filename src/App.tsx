@@ -1,3 +1,4 @@
+import { FOR_YOU_ID, FOR_YOU_OPENED_KEY, LAST_SURFACE_KEY, countRecommendations, isRecommendationNew, readLastSurface, saveLastSurface } from "./railCore";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -197,6 +198,36 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const noteStacks = useRef(new Map<string, VaultRef[]>());
   const notesRef = useRef<VaultRef[]>([]);
   const [sidebarVisible, setSidebarVisible] = useState(true);
+  const [panel, setPanel] = useState<"rooms" | "vault" | "settings" | null>(null);
+  const [journalFocus, setJournalFocus] = useState(false);
+  const [forYou, setForYou] = useState({ count: 0, fresh: false });
+  async function refreshForYou(opened = false) {
+    try {
+      const data = await invoke<{ note: { content?: string; updatedAt?: string } }>("vault_note", { vault: "uni", noteRef: FOR_YOU_ID });
+      const updated = data.note.updatedAt ?? null;
+      let last: string | null = null;
+      try {
+        last = localStorage.getItem(FOR_YOU_OPENED_KEY);
+        if (opened && updated) { localStorage.setItem(FOR_YOU_OPENED_KEY, updated); last = updated; }
+      } catch { /* unavailable storage */ }
+      setForYou({ count: countRecommendations(data.note.content ?? ""), fresh: opened ? false : isRecommendationNew(updated, last) });
+    } catch { /* keep the last successful count while offline */ }
+  }
+  useEffect(() => {
+    void refreshForYou();
+    const visible = () => { if (document.visibilityState === "visible") void refreshForYou(); };
+    document.addEventListener("visibilitychange", visible);
+    return () => document.removeEventListener("visibilitychange", visible);
+  }, []);
+  useEffect(() => {
+    const escape = (e: KeyboardEvent) => { if (e.key === "Escape") { setJournalFocus(false); setPanel(null); } };
+    window.addEventListener("keydown", escape);
+    return () => window.removeEventListener("keydown", escape);
+  }, []);
+  function openForYou() {
+    openTarget({ kind: "note", note: { hub: null, vault: "uni", ref: FOR_YOU_ID }, title: "For you" });
+    void refreshForYou(true);
+  }
   const pickNewTab = useRef(false);
   const longPress = useRef<number | null>(null);
   const longPressed = useRef(false);
@@ -284,6 +315,11 @@ function Conversations({ onForget }: { onForget: () => void }) {
     if (tabsReady.current) { try { localStorage.setItem(TABS_KEY, serializeTabs(next)); } catch { /* private storage */ } }
   }
   function switchToTab(tab: Tab | null) {
+    setPanel(null);
+    setSearchOpen(false);
+    setJournalFocus(false);
+    if (tab?.kind === "journal") saveLastSurface(localStorage, "journal");
+    else if (tab?.kind === "room" && tab.channel === findUniRoom(roomsRef.current)?.id) saveLastSurface(localStorage, "uni");
     const leaving = tabsRef.current.active;
     if (leaving) noteStacks.current.set(leaving, notesRef.current);
     // navigate restores scoped draft, attachments, scroll and bindings.
@@ -321,6 +357,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
     if (tab && (next.active !== tabsRef.current.active || mode === "replace")) switchToTab(tab);
     commitTabs(next);
     setSidebarVisible(false);
+    setPanel(null);
+    setSearchOpen(false);
   }
   function closeTabById(id: string, confirmed = false) {
     const closing = tabsRef.current.tabs.find((t) => t.id === id);
@@ -456,6 +494,13 @@ function Conversations({ onForget }: { onForget: () => void }) {
       try { saved = localStorage.getItem(TABS_KEY); } catch { /* private storage */ }
       let next = restoreTabs(saved, rows.map((r) => r.id));
       if (!saved && !next.tabs.length && rows[0]) next = openTab(next, { kind: "room", channel: rows[0].id, title: rows[0].name }, "new", () => crypto.randomUUID());
+      let preferred: string | null = null;
+      try { preferred = localStorage.getItem(LAST_SURFACE_KEY); } catch { /* unavailable storage */ }
+      if (preferred || !saved) {
+        const uni = findUniRoom(rows) ?? rows[0];
+        const target: TabTarget | null = readLastSurface(localStorage) === "journal" ? { kind: "journal", title: "Journal" } : uni ? { kind: "room", channel: uni.id, title: uni.name } : null;
+        if (target) next = openTab(next, target, "new", () => crypto.randomUUID());
+      }
       // Note stacks are reconstructed from their saved top-level tab target.
       switchToTabRef.current(activeTab(next));
       commitTabs(next);
@@ -705,7 +750,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   // link, no round trip through Uni.
   async function keepVoice(m: Message, audio: MediaRef) {
     setError(null);
-    setStatus("Saving voice note…");
+    setStatus("Saving vault note…");
     try {
       const roomName = rooms.find((r) => r.id === m.channel)?.name ?? "room";
       const when = new Date(m.ts * 1000);
@@ -1239,6 +1284,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
   // the system default runs (the app goes to the background, as usual).
   const goBack = useRef<() => void>(() => {});
   goBack.current = () => {
+    if (journalFocus) { setJournalFocus(false); return; }
+    if (panel) { setPanel(null); return; }
     if (notes.length) { closeNote(); return; }
     if (searchOpen) { setSearchOpen(false); return; }
     if (root && channel) { openTarget(roomTarget(channel), "focus"); return; }
@@ -1315,7 +1362,17 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const recordingTab = recordingOrigin.current;
   const pill = recordingTab && recorder.busy ? { title: recordingTab.title, elapsed: recorder.elapsed, tabId: recordingTab.tabId, stop: recorder.stop, phase: recorder.phase } :
     journalRecording && journalTab ? { title: "Journal", elapsed: journalRecording.elapsed, tabId: journalTab.id, stop: journalRecording.stop, phase: "recording" as const } : null;
-  return <NoteOpener.Provider value={openNote}><main className={`shell ${(!sidebarVisible && (channel || journalOpen || (active?.kind === "note" || active?.kind === "vault"))) ? "in-room" : ""} ${topNote ? "note-open" : ""}`}>
+  return <NoteOpener.Provider value={openNote}><main className={`shell ${(!sidebarVisible && (channel || journalOpen || (active?.kind === "note" || active?.kind === "vault"))) ? "in-room" : ""} ${topNote ? "note-open" : ""} ${panel ? `panel-open panel-${panel}` : ""} ${searchOpen ? "search-open" : ""} ${journalFocus && journalOpen ? "journal-focus" : ""}`}>
+    <nav className="rail" aria-label="Main navigation">
+      <button aria-label="Uni" aria-current={!topNote && !journalOpen && channel === findUniRoom(rooms)?.id ? "page" : undefined} onClick={() => { const uni = findUniRoom(rooms); if (uni) openTarget(roomTarget(uni.id)); }}><i>✦</i><span>Uni</span></button>
+      <button aria-label="Journal" aria-current={journalOpen && !topNote ? "page" : undefined} onClick={() => openTarget({ kind: "journal", title: "Journal" })}><i>❋</i><span>Journal</span></button>
+      <button aria-label="For you" aria-current={topNote?.ref === FOR_YOU_ID ? "page" : undefined} onClick={openForYou}><i>★</i><span>For you</span><b className="rail-count">{forYou.count}</b>{forYou.fresh && <span className="rail-dot" aria-label="Updated recommendations" />}</button>
+      <button aria-label="Rooms" aria-current={!topNote && !journalOpen && channel && channel !== findUniRoom(rooms)?.id ? "page" : undefined} aria-expanded={panel === "rooms"} onClick={() => { setSearchOpen(false); setPanel(panel === "rooms" ? null : "rooms"); }}><i>☷</i><span>Rooms</span>{rooms.some((r) => r.unread > 0) && <span className="rail-dot" aria-label="Unread rooms" />}</button>
+      <button aria-label="Vault" aria-current={active?.kind === "vault" || (topNote && topNote.ref !== FOR_YOU_ID) ? "page" : undefined} aria-expanded={panel === "vault"} onClick={() => { setSearchOpen(false); setPanel(panel === "vault" ? null : "vault"); }}><i>▤</i><span>Vault</span></button>
+      <button aria-label="Search" aria-expanded={searchOpen} onClick={() => { setPanel(null); setSearchQuery(""); setSearchScope({ vault: "", prefix: "" }); setSearchOpen(true); }}><i>⌕</i><span>Search</span></button>
+      <button className="rail-settings" aria-label="Settings" onClick={() => { setSearchOpen(false); setPanel(panel === "settings" ? null : "settings"); setSettingsOpen(true); setForgetArmed(false); }}><i>⚙</i><span>Settings</span></button>
+    </nav>
+    {(panel || searchOpen) && <button className="panel-scrim" aria-label="Close navigation panel" onClick={() => { setPanel(null); setSearchOpen(false); }} />}
     <aside className="rooms" aria-label="Conversations">
       <header className="rooms-header"><div><span className="eyebrow">Unforced</span><h1>Uni</h1></div><div><button className="icon-button" onClick={() => { setSearchQuery(""); setSearchScope({ vault: "", prefix: "" }); setSearchOpen(true); }} aria-label="Search messages and notes">⌕</button><button className="icon-button" onClick={() => void refresh()} disabled={busy} aria-label="Refresh conversations">↻</button><button className="icon-button" onClick={() => { setSettingsOpen(!settingsOpen); setForgetArmed(false); }} aria-label="Settings" aria-expanded={settingsOpen}>⚙</button></div></header>
       {pairSourceOpen && <PairSource onClose={() => setPairSourceOpen(false)} />}
@@ -1327,11 +1384,14 @@ function Conversations({ onForget }: { onForget: () => void }) {
       {identity && <p className="identity" title={npub ?? identity}>{myName ? <>Signed in as <strong>{myName}</strong></> : <>Public key <code>{npub ? `${npub.slice(0, 14)}…${npub.slice(-6)}` : `${identity.slice(0, 12)}…`}</code></>}<button className="identity-copy" onClick={() => void copyText(npub ?? identity, "Copied public key")} aria-label="Copy your public key">⧉</button></p>}
       {!ready && <p className="empty">Loading…</p>}
       {ready && rooms.length === 0 && <p className="empty">No joined conversations cached. Refresh to connect with your personal Buzz key.</p>}
+      <div className="capture-shortcuts">
       <button className={`room journal-room ${journalOpen ? "selected" : ""}`} onClick={(e) => sidebarClick({ kind: "journal", title: "Journal" }, e)}
         onPointerDown={(e) => { if (e.pointerType === "touch") startLongPress({ kind: "journal", title: "Journal" }); }} onPointerUp={endLongPress} onPointerCancel={endLongPress} onPointerLeave={endLongPress}
         aria-current={journalOpen ? "page" : undefined}>
         <span className="avatar">❋</span><span className="room-text"><strong>Journal</strong><small>Speak or write · private to your vault</small></span>
       </button>
+      <button className="room for-you-room" aria-label="For you" onClick={openForYou}><span className="avatar">★</span><span className="room-text"><strong>For you</strong><small>{forYou.count} recommendations{forYou.fresh ? " · updated" : ""}</small></span></button>
+      </div>
       <section className="vault-sidebar" aria-label="Vaults"><div className="vault-heading"><h2>Vaults</h2><button className="note-quiet" onClick={() => setVaultRefresh((n) => n + 1)}>Refresh</button></div>
         {vaultError && <p className="error" role="alert">{vaultError}</p>}
         {primaryVault && vaultRow(primaryVault)}
@@ -1358,9 +1418,9 @@ function Conversations({ onForget }: { onForget: () => void }) {
           <button className="tab-title" role="tab" aria-selected={t.id === tabs.active} onClick={() => { if (longPressed.current) { longPressed.current = false; return; } focusTabById(t.id); }} title={t.title}>{t.kind === "journal" ? "❋" : (t.kind === "note" || t.kind === "vault") ? "▤" : t.kind === "thread" ? "↳" : "#"} {isTabDirty(t) && <span aria-label="Unsaved changes">● </span>}{t.title}</button>
           <button className="tab-close" onClick={() => closeTabById(t.id)} aria-label={`Close ${t.title}`}>×</button>
         </div>)}</div>
-        <button className="tab-add" onClick={() => { pickNewTab.current = true; setSearchOpen(false); setSidebarVisible(true); document.querySelector<HTMLButtonElement>(".rooms nav .room")?.focus(); }} aria-label="New tab — pick a room" title="New tab — pick a room">+</button>
+        <button className="tab-add" onClick={() => { pickNewTab.current = true; setPanel("rooms"); setSearchOpen(false); setSidebarVisible(true); document.querySelector<HTMLButtonElement>(".rooms nav .room")?.focus(); }} aria-label="New tab — pick a room" title="New tab — pick a room">+</button>
       </div>
-      {journalTab && <div className="journal-tab-content" hidden={!journalOpen}><Journal rooms={rooms} uniRoomId={findUniRoom(rooms)?.id ?? null} onShare={shareEntry} onBack={() => setSidebarVisible(true)} onRecordingChange={(on, elapsed, stop) => { journalRecordingRef.current = on; setJournalRecording(on ? { elapsed, stop } : null); }} /></div>}
+      {journalTab && <div className="journal-tab-content" hidden={!journalOpen}><Journal focus={journalFocus} onFocus={() => setJournalFocus((v) => !v)} rooms={rooms} uniRoomId={findUniRoom(rooms)?.id ?? null} onShare={shareEntry} onBack={() => setSidebarVisible(true)} onRecordingChange={(on, elapsed, stop) => { journalRecordingRef.current = on; setJournalRecording(on ? { elapsed, stop } : null); }} /></div>}
       {active?.kind === "vault" && active.vault ? <VaultBrowser key={active.vault} vault={active.vault} onBack={() => setSidebarVisible(true)} onOpen={(note) => openTarget({ kind: "note", note: { hub: null, vault: active.vault!, ref: note.id }, title: note.path || note.id }, "new")} onCreate={(folder) => requestCreate(active.vault!, folder)} onSearch={(prefix) => { setSearchQuery(""); setSearchScope({ vault: active.vault!, prefix }); setSearchOpen(true); setSidebarVisible(true); }} />
       : journalOpen ? null
       : currentRoom ? <>
@@ -1427,6 +1487,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     {topNote && !searchOpen && <section className="note-sheet" role="region" aria-label="Note">
       <NoteView key={`${tabs.active}:${notes.length}:${noteKey(topNote)}`} target={topNote} onSearch={(query) => { setSidebarVisible(true); setSearchQuery(query); setSearchScope({ vault: "", prefix: "" }); setSearchOpen(true); }} hub={hub} onOpen={openNote} onBack={closeNote}
         onResolved={(id) => {
+          if (topNote.vault === "uni" && id === FOR_YOU_ID) void refreshForYou(true);
           if (tabsRef.current.active) commitTabs(updateTab(tabsRef.current, tabsRef.current.active, { note: { hub: null, vault: topNote.vault, ref: id } }));
           aliases.current[JSON.stringify([topNote.vault, topNote.ref])] = id;
           try { localStorage.setItem(ALIASES_KEY, JSON.stringify(aliases.current)); } catch { /* session alias remains */ }
