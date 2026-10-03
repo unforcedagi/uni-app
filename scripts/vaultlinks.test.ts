@@ -151,3 +151,12 @@ assert.deepEqual(spaced("uni:Notes/Title with spaces"), { href: noteRoute("uni",
 assert.equal(parseInline("[[Title with spaces#Heading|alias]]").filter((n) => n.t === "vaultlink")[0]?.ref.ref, "Title with spaces");
 assert.equal(matchShorthandAt("uni:A/B dotted.title,part!word", 0)?.ref.ref, "A/B dotted.title,part!word");
 console.log("vaultlinks ok");
+
+// ── Adversarial: a long line of repeated refs must stay linear-ish ─────────
+{
+  const big = "uni:A/B ".repeat(5000);
+  const t0 = performance.now();
+  parseInline(big);
+  const ms = performance.now() - t0;
+  assert.ok(ms < 1500, `40k-char shorthand line took ${ms.toFixed(0)}ms`);
+}

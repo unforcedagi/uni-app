@@ -67,7 +67,10 @@ export function matchShorthandAt(src: string, i: number, vaults: readonly string
   if (!head) return null;
   let end = i + head[0].length;
   let parens = 0;
-  for (; end < src.length; end++) {
+  // parseShorthand rejects refs over 1024 chars, so never scan further: an
+  // unbounded scan made a long line of repeated refs quadratic.
+  const limit = Math.min(src.length, end + 1025);
+  for (; end < limit; end++) {
     const ch = src[end];
     if (/[\r\n`<>"\]]/.test(ch)) break;
     if (ch === "(") parens++;
