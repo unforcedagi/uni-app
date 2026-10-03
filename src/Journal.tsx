@@ -1,3 +1,4 @@
+import { SettingsIcon, MicIcon } from "./Icons";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useRecorder } from "./recorder";
@@ -165,7 +166,7 @@ export default function Journal({ rooms, uniRoomId, onShare, onBack, onRecording
     <header className="conversation-header">
       <button className="back icon-button" onClick={onBack} aria-label="Back to conversations">‹</button>
       <div><strong>Journal</strong><small>{cfg ? `Private · saved to vault ${cfg.vault} with your key` : "Private · your vault"}</small></div>
-      <button className="icon-button" onClick={() => setSettings(!settings)} aria-label="Journal settings" aria-expanded={settings}>⚙</button>
+      <button className="icon-button" onClick={() => setSettings(!settings)} aria-label="Journal settings" aria-expanded={settings}><SettingsIcon /></button>
       <button className="icon-button" onClick={() => { void load(false); void invoke<FlushReport>("journal_flush").then((r) => afterFlush(r, "Synced")).catch((e) => setError(String(e))); }} disabled={loading} aria-label="Refresh journal">↻</button>
     </header>
     {settings && cfg && <JournalSettings cfg={cfg} onSaved={(c) => { setCfg(c); setSettings(false); void load(false); }} />}
@@ -175,7 +176,7 @@ export default function Journal({ rooms, uniRoomId, onShare, onBack, onRecording
         onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void saveText(); } }} />
       <div className="journal-actions">
         <button className={`mic ${recorder.recording ? "on" : ""}`} onClick={() => void toggleMic()} disabled={saving && !recorder.recording} aria-label={recorder.recording ? "Stop recording and save" : "Record a journal entry"}>
-          {recorder.recording ? <>■ <span>{mmss(recorder.elapsed)}</span></> : "🎙"}
+          {recorder.recording ? <>■ <span>{mmss(recorder.elapsed)}</span></> : <MicIcon />}
         </button>
         <span className="journal-status" role="status">{recorder.recording ? `Recording · ${mmss(recorder.elapsed)}${text.trim() ? " · your typed text is kept with it" : ""}` : status}</span>
         <button className="send" onClick={() => void saveText()} disabled={!text.trim() || saving || recorder.recording}>{saving ? "Saving…" : "Save"}</button>
@@ -184,13 +185,13 @@ export default function Journal({ rooms, uniRoomId, onShare, onBack, onRecording
     </div>
     <div className="message-list journal-list" aria-label="Journal entries">
       {queuedOnly.map((q) => <article key={q.entry_id} className="journal-entry queued">
-        <div className="journal-meta"><span>{q.source === "voice" ? "🎙" : "✎"} {when(q.created_at)}</span><span className="queued-tag">{q.note_id ? "uploading audio…" : "on this device · not sent yet"}</span></div>
+        <div className="journal-meta"><span>{q.source === "voice" ? <MicIcon /> : "✎"} {when(q.created_at)}</span><span className="queued-tag">{q.note_id ? "uploading audio…" : "on this device · not sent yet"}</span></div>
         <p className="journal-body">{entryText(q.content) || (q.has_audio ? "Voice recording, transcribed after upload." : "")}</p>
         {q.last_error && <small className="journal-error">{q.last_error}</small>}
       </article>)}
       {entries.length === 0 && queuedOnly.length === 0 && !loading && <p className="empty">No journal entries yet. Your first one is a tap away.</p>}
       {entries.map((e) => <article key={e.id} className="journal-entry">
-        <div className="journal-meta"><span>{e.source === "voice" ? "🎙" : e.source === "text" ? "✎" : "•"} {when(e.created_at)}</span>{shared[e.id] && <span className="queued-tag">shared · {shared[e.id]}</span>}</div>
+        <div className="journal-meta"><span>{e.source === "voice" ? <MicIcon /> : e.source === "text" ? "✎" : "•"} {when(e.created_at)}</span>{shared[e.id] && <span className="queued-tag">shared · {shared[e.id]}</span>}</div>
         {e.pending ? <p className="journal-body pending">{entryText(e.content) ? <>{entryText(e.content)}<br /></> : null}<em>Transcribing…</em></p>
           : <p className="journal-body">{entryText(e.content)}</p>}
         <div className="message-actions journal-entry-actions">

@@ -18,9 +18,10 @@ function openExternal(url: string) {
   void invoke("open_link", { url }).catch(() => {});
 }
 
-export default function NoteView({ target, hub, onOpen, onBack, backLabel, onTitle, startEditing = false, onDirty, onCreate, onResolved, onSearch }: {
+export default function NoteView({ target, hub, onOpen, onBack, backLabel, onTitle, startEditing = false, onDirty, onCreate, onResolved, onRendered, onSearch }: {
   onSearch: (query: string) => void;
   onResolved: (id: string) => void;
+  onRendered?: (note: VaultNote["note"]) => void;
   startEditing?: boolean;
   onDirty: (dirty: boolean) => void;
   onCreate: (folder: string) => void;
@@ -83,6 +84,9 @@ export default function NoteView({ target, hub, onOpen, onBack, backLabel, onTit
     void load();
     return () => { live = false; };
   }, [target.vault, target.ref]);
+
+  // Report only after React commits the loaded note to the view.
+  useEffect(() => { if (data) onRendered?.(data.note); }, [data]);
 
   const origin = data?.hub ?? target.hub ?? hub;
   const webUrl = origin ? noteUrl(origin, data?.vault ?? target.vault, data?.note.id ?? target.ref) : null;

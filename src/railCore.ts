@@ -13,7 +13,8 @@ export function countRecommendations(content: string): number {
       continue;
     }
     if (match) { fence = { mark: match[1][0], length: match[1].length }; continue; }
-    if (/^[-*] /.test(line)) count++;
+    if (/^ {0,3}([-*_])(?:\s*\1){2,}\s*$/.test(line)) continue;
+    if (/^(?:[-*+]|\d{1,9}[.)])\s+/.test(line)) count++;
   }
   return count;
 }

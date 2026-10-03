@@ -42,6 +42,8 @@ test('Rail surfaces, overlay panels, focus and phone list', async ({ page }, inf
     if (!phone) {
       const dir = '/home/uni/Code/uni-sketches/t21/built';
       await mkdir(dir, { recursive: true });
+      await page.mouse.move(page.viewportSize()!.width - 10, 10);
+      await page.evaluate(async () => { await Promise.all(document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))); });
       await page.screenshot({ path: `${dir}/${info.project.name}-${name}.png` });
     }
   };
@@ -85,10 +87,15 @@ test('Rail surfaces, overlay panels, focus and phone list', async ({ page }, inf
     await rail.getByRole('button', { name: 'Rooms', exact: true }).click();
     await expect(page.locator('.rooms')).toBeVisible();
     expect((await page.locator('.conversation').boundingBox())!.x).toBe(before!.x);
+    await expect(rail.locator('[aria-current="page"], [aria-expanded="true"]')).toHaveCount(1);
+    await expect(page.locator('.capture-shortcuts')).toBeHidden();
     await shot('rooms');
     await page.locator('.rooms nav button').filter({ hasText: 'Garden' }).click();
     await expect(page.locator('.rooms')).toBeHidden();
     await expect(page.getByRole('textbox', { name: 'Message Garden' })).toBeVisible();
+    await rail.getByRole('button', { name: 'Vault', exact: true }).click();
+    await expect(rail.locator('[aria-current="page"], [aria-expanded="true"]')).toHaveCount(1);
+    await page.getByRole('button', { name: 'Close navigation panel' }).click();
     await rail.getByRole('button', { name: 'Journal', exact: true }).click();
     await page.reload();
     await expect(writing).toHaveValue('A little room to think.');
@@ -100,3 +107,53 @@ test('Rail surfaces, overlay panels, focus and phone list', async ({ page }, inf
     await expect(fy.locator('.rail-dot')).toBeVisible();
   }
 });
+
+test('Active For you renders the newer version before clearing its dot', async ({ page }, info) => {
+  test.skip(info.project.name === 'phone');
+  const fy = page.getByRole('navigation').getByRole('button', { name: 'For you', exact: true });
+  await fy.click();
+  await expect(page.locator('.note-sheet li').filter({ hasText: 'Read something slowly' })).toBeVisible();
+  await page.evaluate(() => {
+    const w = window as any;
+    w.updated = '2026-10-02T12:00:00Z';
+    w.content += '\n- A new suggestion';
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await expect(fy.locator('.rail-count')).toHaveText('4');
+  await expect(fy.locator('.rail-dot')).toBeVisible();
+  await page.evaluate(() => {
+    const w = window as any;
+    const invoke = w.__TAURI_INTERNALS__.invoke;
+    w.releaseNote = null;
+    w.__TAURI_INTERNALS__.invoke = async (cmd: string, args: any) => {
+      if (cmd === 'vault_note') await new Promise(resolve => { w.releaseNote = resolve; });
+      return invoke(cmd, args);
+    };
+  });
+  await fy.click();
+  await expect(fy.locator('.rail-dot')).toBeVisible();
+  expect(await page.evaluate(() => localStorage.getItem('uni.forYou.opened.v1'))).toBe('2026-10-01T12:00:00Z');
+  await page.waitForFunction(() => !!(window as any).releaseNote);
+  await page.evaluate(() => (window as any).releaseNote());
+  await expect(page.locator('.note-sheet li').filter({ hasText: 'A new suggestion' })).toBeVisible();
+  await expect(fy.locator('.rail-count')).toHaveText('4');
+  await expect(fy.locator('.rail-dot')).toHaveCount(0);
+  expect(await page.evaluate(() => localStorage.getItem('uni.forYou.opened.v1'))).toBe('2026-10-02T12:00:00Z');
+});
+
+for (const size of [{ width: 844, height: 390 }, { width: 1092, height: 600 }]) {
+  test(`Rail buttons fully reachable at ${size.width}×${size.height}`, async ({ page }) => {
+    await page.setViewportSize(size);
+    const rail = page.getByRole('navigation', { name: 'Main navigation' });
+    for (const button of await rail.getByRole('button').all()) {
+      await button.scrollIntoViewIfNeeded();
+      const box = (await button.boundingBox())!;
+      expect(box.height).toBeGreaterThanOrEqual(44);
+      expect(box.y).toBeGreaterThanOrEqual(0);
+      expect(box.y + box.height).toBeLessThanOrEqual(size.height);
+      const railBox = (await rail.boundingBox())!;
+      expect(box.y + box.height).toBeLessThanOrEqual(railBox.y + railBox.height);
+    }
+    if (size.height === 390) await page.screenshot({ path: '/home/uni/Code/uni-sketches/t21/built/landscape-short.png' });
+  });
+}
