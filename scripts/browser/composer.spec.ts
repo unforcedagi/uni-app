@@ -35,7 +35,9 @@ test.beforeEach(async ({ page }) => {
           case 'get_identity': return 'a'.repeat(64);
           case 'get_npub': return 'test';
           case 'get_rooms': return [{ id: 'test', name: 'Test room', unread: 0 }, { id: 'other', name: 'Other room', unread: 0 }];
-          case 'get_members': return [{ pubkey: 'b'.repeat(64), name: 'Test member' }];
+          case 'get_members':
+            if (w.holdMembers) await new Promise<void>(resolve => { w.finishMembers = resolve; });
+            return w.uniMember ? [{ pubkey: 'c'.repeat(64), name: 'Uni' }, { pubkey: 'b'.repeat(64), name: 'Test member' }] : [{ pubkey: 'b'.repeat(64), name: 'Test member' }];
           case 'get_messages': case 'vault_list': return [];
           case 'journal_config': return { hub: 'test' };
           case 'refresh': return { total_items: 0, channel_errors: {}, truncated_channels: [] };
@@ -43,10 +45,7 @@ test.beforeEach(async ({ page }) => {
             if (w.holdUpload) await new Promise<void>(resolve => { w.finishUpload = resolve; });
             if (w.failUpload) throw new Error('upload rejected');
             return { url: 'https://example.invalid/test.txt', mime: 'text/plain', name: 'test.txt', size: 4 };
-          case 'voice_transcribe':
-            if (w.holdTranscript) await new Promise<void>(resolve => { w.finishTranscript = resolve; });
-            if (w.failTranscript) throw new Error('transcription unavailable');
-            return { text: 'voice transcript' };
+          case 'voice_transcribe': throw new Error('Chat must not transcribe');
           case 'post_message':
             if (w.holdSend) await new Promise(resolve => { w.finishSend = resolve; });
             if (w.failSend) throw new Error('relay rejected');
@@ -216,8 +215,9 @@ test('Recording with text and attachment keeps Stop available and Send blocked',
   await page.waitForTimeout(300);
   await press(page, stop);
   await expect(page.getByRole('button', { name: 'Record a voice message', exact: true })).toBeEnabled();
-  await expect(input).toHaveValue('draft\nvoice transcript');
-  await expect(page.locator('.compose-file')).toHaveCount(2);
+  await expect(input).toHaveValue('draft');
+  await expect.poll(() => page.evaluate(() => (window as any).calls.filter((c: any) => c.cmd === 'post_message').length)).toBe(1);
+  await expect(page.locator('.compose-file')).toHaveCount(1);
   await expect(page.getByRole('button', { name: 'Send message', exact: true })).toBeEnabled();
 });
 
@@ -239,182 +239,6 @@ test('Send retains text and attachment payload and disables mic while sending', 
   await expect(page.locator('.compose-file')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Record a voice message', exact: true })).toBeEnabled();
 });
-
-for (const submit of ['Enter', 'Send button']) {
-  test(`Enter is blocked through recorder phases, then ${submit} sends once`, async ({ page }) => {
-    test.skip(test.info().project.name === 'mobile' && submit === 'Enter', 'Mobile Enter never submits');
-    const input = page.getByRole('textbox', { name: 'Message Test room' });
-    const send = page.getByRole('button', { name: 'Send message', exact: true });
-    const mobile = test.info().project.name === 'mobile';
-    await input.fill('draft');
-    await page.evaluate(() => {
-      const w = window as any;
-      const getUserMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
-      navigator.mediaDevices.getUserMedia = async constraints => {
-        // Exercise the synchronous start boundary before React renders starting.
-        document.querySelector('textarea')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-        await new Promise<void>(resolve => { w.allowRecording = resolve; });
-        return getUserMedia(constraints);
-      };
-      const stop = MediaRecorder.prototype.stop;
-      MediaRecorder.prototype.stop = function () {
-        const onstop = this.onstop;
-        this.onstop = event => { w.finishRecording = () => onstop?.call(this, event); };
-        stop.call(this);
-      };
-      w.holdSend = true;
-    });
-    const posts = () => page.evaluate(() => (window as any).calls.filter((c: any) => c.cmd === 'post_message'));
-    await press(page, page.getByRole('button', { name: 'Record a voice message', exact: true }));
-    await expect(send).toBeDisabled();
-    await input.press('Enter'); // starting: microphone permission/device promise is pending
-    expect(await posts()).toHaveLength(0);
-    await expect(input).toHaveValue(mobile ? 'draft\n' : 'draft');
-    if (mobile) await input.fill('draft');
-    await page.evaluate(() => (window as any).allowRecording());
-    const stop = page.getByRole('button', { name: 'Stop recording voice message', exact: true });
-    await expect(stop).toBeEnabled();
-    await input.press('Enter'); // recording
-    expect(await posts()).toHaveLength(0);
-    await expect(input).toHaveValue(mobile ? 'draft\n' : 'draft');
-    if (mobile) await input.fill('draft');
-    await press(page, stop);
-    await page.waitForFunction(() => !!(window as any).finishRecording);
-    await expect(send).toBeDisabled();
-    await input.press('Enter'); // finishing: native onstop completion is held
-    expect(await posts()).toHaveLength(0);
-    await expect(input).toHaveValue(mobile ? 'draft\n' : 'draft');
-    if (mobile) await input.fill('draft');
-    await page.evaluate(() => (window as any).finishRecording());
-    await expect(input).toHaveValue('draft\nvoice transcript');
-    await expect(send).toBeEnabled();
-    expect(await posts()).toHaveLength(0); // Completion itself must never submit.
-    if (submit === 'Enter') await input.press('Enter');
-    else await press(page, send);
-    if (mobile) await send.dispatchEvent('click');
-    else await input.press('Enter'); // Repeated submission while IPC is pending.
-    const calls = await posts();
-    expect(calls).toHaveLength(1);
-    expect(calls[0].args.body).toBe('draft\nvoice transcript');
-    expect(calls[0].args.media).toHaveLength(1);
-    await page.evaluate(() => (window as any).finishSend());
-    await expect(input).toHaveValue('');
-    await expect(page.locator('.compose-file')).toHaveCount(0);
-    expect(await posts()).toHaveLength(1);
-  });
-}
-
-for (const duringSend of [false, true]) {
-  test(`Voice sends before transcription; late transcript follows original message, duringSend=${duringSend}`, async ({ page }) => {
-    const input = page.getByRole('textbox', { name: 'Message Test room' });
-    await page.evaluate(() => { (window as any).holdTranscript = true; });
-    await press(page, page.getByRole('button', { name: 'Record a voice message', exact: true }));
-    await page.waitForTimeout(300);
-    await press(page, page.getByRole('button', { name: 'Stop recording voice message', exact: true }));
-    await page.waitForFunction(() => !!(window as any).finishTranscript);
-    await expect(page.locator('.compose-file')).toContainText('Ready');
-    const send = page.getByRole('button', { name: 'Send message', exact: true });
-    await expect(send).toBeEnabled();
-    if (duringSend) await page.evaluate(() => { (window as any).holdSend = true; });
-    await press(page, send);
-    if (duringSend) {
-      await page.evaluate(() => (window as any).finishTranscript());
-      await input.fill('next draft');
-      await page.evaluate(() => { (window as any).holdSend = false; (window as any).finishSend(); });
-    } else {
-      await expect(page.locator('.compose-file')).toHaveCount(0);
-      await input.fill('next draft');
-      if (test.info().project.name === 'mobile') await press(page, page.getByRole('button', { name: 'Back to conversations', exact: true }));
-      if (test.info().project.name !== 'mobile') await page.getByRole('button', { name: 'Rooms', exact: true }).click();
-      await press(page, page.locator('.rooms nav button').filter({ hasText: 'Other room' }));
-      await page.getByRole('textbox', { name: 'Message Other room' }).fill('other draft');
-      await page.evaluate(() => (window as any).finishTranscript());
-    }
-    await expect.poll(() => page.evaluate(() => (window as any).calls.filter((c: any) => c.cmd === 'post_message').length)).toBe(2);
-    const calls = await page.evaluate(() => (window as any).calls.filter((c: any) => c.cmd === 'post_message'));
-    expect(calls[0].args.body).toBe('');
-    expect(calls[0].args.media).toHaveLength(1);
-    expect(calls[1].args).toEqual({ channel: 'test', body: 'voice transcript', replyTo: 'audio-message-ref', recipients: [], media: [] });
-    await expect(page.getByRole('textbox', { name: duringSend ? 'Message Test room' : 'Message Other room' })).toHaveValue(duringSend ? 'next draft' : 'other draft');
-  });
-}
-
-test('Late transcript never posts after forgetting the device identity', async ({ page }) => {
-  await page.evaluate(() => { (window as any).holdTranscript = true; });
-  await press(page, page.getByRole('button', { name: 'Record a voice message', exact: true }));
-  await page.waitForTimeout(300);
-  await press(page, page.getByRole('button', { name: 'Stop recording voice message', exact: true }));
-  await page.waitForFunction(() => !!(window as any).finishTranscript);
-  await expect(page.getByRole('button', { name: 'Send message', exact: true })).toBeEnabled();
-  await press(page, page.getByRole('button', { name: 'Send message', exact: true }));
-  await expect(page.locator('.compose-file')).toHaveCount(0);
-  if (test.info().project.name === 'mobile') await press(page, page.getByRole('button', { name: 'Back to conversations', exact: true }));
-  await press(page, page.getByRole('button', { name: 'Settings', exact: true }));
-  await press(page, page.getByRole('button', { name: 'Forget this device key', exact: true }));
-  await press(page, page.getByRole('button', { name: "Tap again to forget — you'll need to re-pair", exact: true }));
-  await expect(page.locator('textarea[aria-label^="Message"]')).toHaveCount(0);
-  await page.evaluate(() => (window as any).finishTranscript());
-  await page.waitForTimeout(100);
-  expect(await page.evaluate(() => (window as any).calls.filter((c: any) => c.cmd === 'post_message'))).toHaveLength(1);
-});
-
-for (const outcome of ['removed', 'rejected', 'transcription failed', 'reply failed', 'upload failed']) {
-  test(`Async voice handles ${outcome} without losing audio or polluting the draft`, async ({ page }) => {
-    const input = page.getByRole('textbox', { name: 'Message Test room' });
-    await page.evaluate(() => { const w = window as any; w.holdTranscript = true; w.holdUpload = true; });
-    await press(page, page.getByRole('button', { name: 'Record a voice message', exact: true }));
-    await page.waitForTimeout(300);
-    await press(page, page.getByRole('button', { name: 'Stop recording voice message', exact: true }));
-    await page.waitForFunction(() => !!(window as any).finishTranscript && !!(window as any).finishUpload);
-    const send = page.getByRole('button', { name: 'Send message', exact: true });
-    await expect(send).toBeDisabled(); // Only upload is a gate, even on desktop Enter.
-    await input.dispatchEvent('keydown', { key: 'Enter' });
-    expect(await page.evaluate(() => (window as any).calls.filter((c: any) => c.cmd === 'post_message'))).toHaveLength(0);
-    await page.evaluate(fail => { (window as any).failUpload = fail; (window as any).finishUpload(); }, outcome === 'upload failed');
-    if (outcome === 'upload failed') {
-      await expect(page.locator('.compose-file')).toContainText('Failed');
-      await page.evaluate(() => (window as any).finishTranscript());
-      await expect(input).toHaveValue('voice transcript');
-      await expect(page.getByRole('button', { name: 'Send transcript without failed audio', exact: true })).toBeEnabled();
-      expect(await page.evaluate(() => (window as any).calls.filter((c: any) => c.cmd === 'post_message'))).toHaveLength(0);
-      return;
-    }
-    await expect(send).toBeEnabled();
-    if (outcome === 'removed') {
-      await press(page, page.locator('.compose-file').getByRole('button', { name: 'Remove' }));
-      await input.fill('new draft');
-    } else {
-      if (outcome === 'rejected') await page.evaluate(() => { const w = window as any; w.holdSend = true; w.failSend = true; });
-      await press(page, send);
-      if (outcome !== 'rejected') await expect(page.locator('.compose-file')).toHaveCount(0);
-    }
-    await page.evaluate(outcome => {
-      const w = window as any;
-      w.failTranscript = outcome === 'transcription failed';
-      if (outcome === 'reply failed') w.failSend = true;
-      w.finishTranscript();
-      if (outcome === 'rejected') { w.holdSend = false; w.finishSend(); }
-    }, outcome);
-    if (outcome === 'rejected') {
-      await expect(input).toHaveValue('voice transcript');
-      await expect(page.locator('.compose-file')).toHaveCount(1);
-      await page.evaluate(() => { (window as any).failSend = false; });
-      await press(page, send);
-      await expect(input).toHaveValue('');
-    } else if (outcome === 'reply failed') {
-      await expect(page.locator('.error')).toContainText('Audio sent, but transcript reply failed');
-      await expect(input).toHaveValue('');
-    } else if (outcome === 'transcription failed') {
-      await expect(page.locator('.connection')).toContainText('No transcript');
-      await expect(input).toHaveValue('');
-    } else {
-      await expect(input).toHaveValue('new draft');
-      await expect(page.locator('.compose-file')).toHaveCount(0);
-    }
-    const calls = await page.evaluate(() => (window as any).calls.filter((c: any) => c.cmd === 'post_message'));
-    expect(calls).toHaveLength(outcome === 'removed' ? 0 : outcome === 'rejected' || outcome === 'reply failed' ? 2 : 1);
-  });
-}
 
 test('Mobile Enter inserts newline even with a mention picker; desktop shortcuts remain', async ({ page }) => {
   const input = page.getByRole('textbox', { name: 'Message Test room' });
@@ -458,43 +282,6 @@ for (const replacement of ['first draft', 'next draft']) {
     await expect(input).toHaveValue('');
   });
 }
-
-test('Recording blocks another room and send completion preserves that room draft', async ({ page }) => {
-  const input = page.getByRole('textbox', { name: 'Message Test room' });
-  const switchRoom = async (name: string) => {
-    if (test.info().project.name === 'mobile') await press(page, page.getByRole('button', { name: 'Back to conversations', exact: true }));
-    if (test.info().project.name !== 'mobile') await page.getByRole('button', { name: 'Rooms', exact: true }).click();
-    await press(page, page.locator('.rooms nav button').filter({ hasText: name }));
-  };
-  await input.fill('draft');
-  await press(page, page.getByRole('button', { name: 'Record a voice message', exact: true }));
-  await expect(page.getByRole('button', { name: 'Stop recording voice message', exact: true })).toBeEnabled();
-  await switchRoom('Other room');
-  const other = page.getByRole('textbox', { name: 'Message Other room' });
-  await other.fill('draft');
-  await other.press('Enter');
-  expect(await page.evaluate(() => (window as any).calls.filter((c: any) => c.cmd === 'post_message'))).toHaveLength(0);
-  await switchRoom('Test room');
-  await press(page, page.getByRole('button', { name: 'Stop recording voice message', exact: true }));
-  await expect(input).toHaveValue('draft\nvoice transcript');
-  await expect(page.getByRole('button', { name: 'Send message', exact: true })).toBeEnabled();
-  await page.evaluate(() => { (window as any).holdSend = true; });
-  await press(page, page.getByRole('button', { name: 'Send message', exact: true }));
-  await switchRoom('Other room');
-  // Matching text in another scope must not be mistaken for the submitted draft.
-  await other.fill('draft\nvoice transcript');
-  await page.evaluate(() => (window as any).finishSend());
-  await expect(page.getByRole('button', { name: 'Send message', exact: true })).toBeEnabled();
-  await expect(other).toHaveValue('draft\nvoice transcript');
-  await expect(page.locator('.compose-file')).toHaveCount(0);
-  await switchRoom('Test room');
-  await expect(input).toHaveValue('');
-  await expect(page.locator('.compose-file')).toHaveCount(0);
-  const calls = await page.evaluate(() => (window as any).calls.filter((c: any) => c.cmd === 'post_message'));
-  expect(calls).toHaveLength(1);
-  expect(calls[0].args.channel).toBe('test');
-  expect(calls[0].args.media).toHaveLength(1);
-});
 
 for (const replace of [false, true]) {
   test(`Held send across room navigation preserves scoped drafts and bindings, replace=${replace}`, async ({ page }) => {
@@ -547,3 +334,165 @@ for (const replace of [false, true]) {
     await expect(other).toHaveValue('');
   });
 }
+
+async function recordClip(page: Page) {
+  await press(page, page.getByRole('button', { name: 'Record a voice message', exact: true }));
+  await expect(page.getByRole('button', { name: 'Stop recording voice message', exact: true })).toBeEnabled();
+  await page.waitForTimeout(300);
+  await press(page, page.getByRole('button', { name: 'Stop recording voice message', exact: true }));
+}
+const voicePosts = (page: Page) => page.evaluate(() => (window as any).calls.filter((c: any) => c.cmd === 'post_message'));
+
+test('Stop automatically sends only audio, preserves draft and never transcribes', async ({ page }) => {
+  const input = page.getByRole('textbox', { name: 'Message Test room' });
+  await input.fill('keep this draft');
+  await recordClip(page);
+  await expect.poll(async () => (await voicePosts(page)).length).toBe(1);
+  const [post] = await voicePosts(page);
+  expect(post.args).toMatchObject({ channel: 'test', body: '', replyTo: null, recipients: [] });
+  expect(post.args.media).toHaveLength(1);
+  await expect(input).toHaveValue('keep this draft');
+  await expect(page.locator('.compose-file')).toHaveCount(0);
+  await expect(page.locator('.voice-status')).toHaveText('Voice message sent');
+  expect(await page.evaluate(() => (window as any).calls.some((c: any) => c.cmd === 'voice_transcribe'))).toBe(false);
+});
+
+test('Voice upload leaves Send and a second recording usable and delivers in order', async ({ page }) => {
+  await page.getByRole('textbox', { name: 'Message Test room' }).fill('draft');
+  await page.evaluate(() => { (window as any).holdUpload = true; });
+  await recordClip(page);
+  await page.waitForFunction(() => !!(window as any).finishUpload);
+  await expect(page.getByRole('button', { name: 'Send message', exact: true })).toBeEnabled();
+  await expect(page.locator('.voice-status')).toHaveText('Sending voice message…');
+  await recordClip(page);
+  await expect(page.locator('.compose-file')).toHaveCount(2);
+  expect(await voicePosts(page)).toHaveLength(0);
+  await page.evaluate(() => { (window as any).holdUpload = false; (window as any).finishUpload(); });
+  await expect.poll(async () => (await voicePosts(page)).length).toBe(2);
+  await expect(page.locator('.compose-file')).toHaveCount(0);
+  expect((await voicePosts(page)).map((p: any) => p.args.body)).toEqual(['', '']);
+  const calls = await page.evaluate(() => (window as any).calls.filter((c: any) => ['media_upload', 'post_message'].includes(c.cmd)).map((c: any) => c.cmd));
+  expect(calls).toEqual(['media_upload', 'post_message', 'media_upload', 'post_message']);
+});
+
+for (const phase of ['recording', 'upload']) {
+  test(`Voice navigation during ${phase} posts to origin and preserves both drafts`, async ({ page }) => {
+    const input = page.getByRole('textbox', { name: 'Message Test room' });
+    await input.fill('origin draft');
+    await page.evaluate(() => { (window as any).holdUpload = true; });
+    if (phase === 'recording') {
+      await press(page, page.getByRole('button', { name: 'Record a voice message', exact: true }));
+      await expect(page.getByRole('button', { name: 'Stop recording voice message', exact: true })).toBeEnabled();
+      await page.waitForTimeout(300);
+    } else {
+      await recordClip(page);
+      await page.waitForFunction(() => !!(window as any).finishUpload);
+    }
+    await input.blur();
+    await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Rooms', exact: true }).click();
+    await page.locator('.rooms nav button').filter({ hasText: 'Other room' }).click();
+    const other = page.getByRole('textbox', { name: 'Message Other room' });
+    await other.fill('other draft');
+    if (phase === 'recording') {
+      await page.locator('.recording-stop').click();
+      await page.waitForFunction(() => !!(window as any).finishUpload);
+    }
+    await page.evaluate(() => { (window as any).holdUpload = false; (window as any).finishUpload(); });
+    await expect.poll(async () => (await voicePosts(page)).length).toBe(1);
+    expect((await voicePosts(page))[0].args.channel).toBe('test');
+    await expect(other).toHaveValue('other draft');
+    await other.blur();
+    await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Rooms', exact: true }).click();
+    await page.locator('.rooms nav button').filter({ hasText: 'Test room' }).click();
+    await expect(input).toHaveValue('origin draft');
+  });
+}
+
+for (const failure of ['Upload', 'Send']) {
+  test(`Voice ${failure} failure retains audio; repeated retry posts once`, async ({ page }) => {
+    await page.getByRole('textbox', { name: 'Message Test room' }).fill('draft');
+    await page.evaluate(failure => { (window as any)[`fail${failure}`] = true; }, failure);
+    await recordClip(page);
+    await expect(page.locator('.compose-file')).toContainText('Failed');
+    await expect(page.getByRole('button', { name: 'Send message', exact: true })).toBeEnabled();
+    await expect(page.locator('p.error').last()).toContainText('Voice message failed');
+    await page.evaluate(failure => { (window as any)[`fail${failure}`] = false; }, failure);
+    await page.locator('.compose-file-retry').evaluate((button: HTMLButtonElement) => { button.click(); button.click(); });
+    await expect(page.locator('.compose-file')).toHaveCount(0);
+    expect(await voicePosts(page)).toHaveLength(failure === 'Send' ? 2 : 1);
+    await expect(page.getByRole('textbox', { name: 'Message Test room' })).toHaveValue('draft');
+    expect(await page.evaluate(() => (window as any).calls.filter((c: any) => c.cmd === 'media_upload').length)).toBe(failure === 'Send' ? 1 : 2);
+  });
+}
+
+test('Removed voice delivery never posts', async ({ page }) => {
+  await page.evaluate(() => { (window as any).holdMembers = true; });
+  await recordClip(page);
+  await page.waitForFunction(() => !!(window as any).finishMembers);
+  await page.locator('.compose-file-remove').click();
+  await page.evaluate(() => (window as any).finishMembers());
+  await expect(page.locator('.compose-file')).toHaveCount(0);
+  await page.waitForTimeout(100);
+  expect(await voicePosts(page)).toHaveLength(0);
+});
+
+for (const notify of [true, false]) {
+  test(`Explicit thread voice keeps its root and notifies only Uni, notify=${notify}`, async ({ page }) => {
+    await page.evaluate(() => {
+      const w = window as any;
+      w.uniMember = true;
+      const invoke = w.__TAURI_INTERNALS__.invoke;
+      w.__TAURI_INTERNALS__.invoke = async (cmd: string, args: any) => {
+        if (cmd === 'get_messages') return [{ ref: 'thread-root', channel: 'test', author: 'b'.repeat(64), author_name: 'Test member', ts: 1790942400, body: 'Start a thread', root: null, parent: null, mentions: [], reply_count: 0, reactions: [] }];
+        return invoke(cmd, args);
+      };
+    });
+    await page.getByRole('button', { name: 'Refresh messages', exact: true }).click();
+    if (test.info().project.name === 'desktop') await page.locator('article.message').first().hover();
+    await page.getByRole('button', { name: 'Reply in thread to Test member', exact: true }).click();
+    await expect(page.locator('.compose-destination')).toContainText('Replying in thread');
+    if (!notify) await page.getByRole('button', { name: 'Uni is listening', exact: true }).click();
+    await page.getByRole('textbox', { name: 'Message Test room' }).fill('@Test member stays in draft');
+    await recordClip(page);
+    await expect.poll(async () => (await voicePosts(page)).length).toBe(1);
+    expect((await voicePosts(page))[0].args).toMatchObject({ channel: 'test', body: '', replyTo: 'thread-root', recipients: notify ? ['c'.repeat(64)] : [] });
+    await expect(page.getByRole('textbox', { name: 'Message Test room' })).toHaveValue('@Test member stays in draft');
+  });
+}
+
+test('Enter and repeated Stop cannot submit through recording phases', async ({ page }) => {
+  await page.evaluate(() => {
+    const w = window as any;
+    const getUserMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+    navigator.mediaDevices.getUserMedia = async constraints => {
+      document.querySelector('textarea')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      await new Promise<void>(resolve => { w.allowRecording = resolve; });
+      return getUserMedia(constraints);
+    };
+    const stop = MediaRecorder.prototype.stop;
+    MediaRecorder.prototype.stop = function () {
+      const onstop = this.onstop;
+      this.onstop = event => { w.finishRecording = () => onstop?.call(this, event); };
+      stop.call(this);
+    };
+  });
+  await press(page, page.getByRole('button', { name: 'Record a voice message', exact: true }));
+  const input = page.getByRole('textbox', { name: 'Message Test room' });
+  await input.dispatchEvent('keydown', { key: 'Enter' });
+  expect(await voicePosts(page)).toHaveLength(0);
+  await page.evaluate(() => (window as any).allowRecording());
+  const stop = page.getByRole('button', { name: 'Stop recording voice message', exact: true });
+  await expect(stop).toBeEnabled();
+  await page.waitForTimeout(300);
+  await input.dispatchEvent('keydown', { key: 'Enter' });
+  expect(await voicePosts(page)).toHaveLength(0);
+  await stop.evaluate((button: HTMLButtonElement) => { button.click(); button.click(); });
+  await page.waitForFunction(() => !!(window as any).finishRecording);
+  await input.dispatchEvent('keydown', { key: 'Enter' });
+  expect(await voicePosts(page)).toHaveLength(0);
+  await page.evaluate(() => (window as any).finishRecording());
+  await expect.poll(async () => (await voicePosts(page)).length).toBe(1);
+  await input.dispatchEvent('keydown', { key: 'Enter' });
+  await page.getByRole('button', { name: 'Send message', exact: true }).dispatchEvent('click');
+  expect(await voicePosts(page)).toHaveLength(1);
+});

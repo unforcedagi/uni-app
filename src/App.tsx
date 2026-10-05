@@ -1,4 +1,4 @@
-import { SettingsIcon } from "./Icons";
+import { SettingsIcon, UniIcon, JournalIcon, StarIcon, RoomsIcon } from "./Icons";
 import { FOR_YOU_ID, FOR_YOU_OPENED_KEY, LAST_SURFACE_KEY, countRecommendations, isRecommendationNew, readLastSurface, saveLastSurface } from "./railCore";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
@@ -20,7 +20,7 @@ import Search from "./Search";
 import Journal from "./Journal";
 import { mmss, newDraft, shareText, type JournalNote } from "./journalCore";
 import { useRecorder, voiceFileName } from "./recorder";
-import { attachmentBlocksSend, enterInsertsNewline } from "./composerCore";
+import { attachmentBlocksSend, enterInsertsNewline, manualAttachments } from "./composerCore";
 import PairSource, { PairDeviceButton } from "./PairSource";
 import { UpdateSettings } from "./UpdateNotice";
 import { activeTab, closeTab, EMPTY_TABS, focusTab, navigateNoteTab, nextAfterClose, openTab, recordingTabCanClose, restoreTabs, serializeTabs, tabForDigit, updateTab, TABS_KEY, type Tabs, type Tab, type TabTarget, type OpenMode } from "./tabs";
@@ -47,7 +47,7 @@ const TYPING_SEND_MS = 3000;
 type IdentityStatus = { paired: boolean; pubkey: string | null };
 type SyncResult = { pubkey: string; total_items: number; channel_errors: Record<string, string>; truncated_channels: string[] };
 
-type PendingFile = { id: string; file: File; preview: string | null; state: "uploading" | "ready" | "error"; media?: MediaRef; error?: string; voice?: "transcribing" | "done" | "failed" };
+type PendingFile = { id: string; file: File; preview: string | null; state: "uploading" | "ready" | "error"; media?: MediaRef; error?: string; voice?: { channel: string; replyTo: string | null; notifyUni: boolean } };
 const MAX_FILE_BYTES = 25 * 1024 * 1024;
 const MAX_ATTACHMENTS = 20;
 const OTHER_VAULTS_KEY = "uni:other-vaults-expanded";
@@ -200,6 +200,9 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const notesRef = useRef<VaultRef[]>([]);
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [panel, setPanel] = useState<"rooms" | "vault" | "settings" | null>(null);
+  const [composerFocused, setComposerFocused] = useState(false);
+  const forYouBack = useRef("Uni");
+  const forYouReturn = useRef<string | null>(null);
   const [journalFocus, setJournalFocus] = useState(false);
   const [forYou, setForYou] = useState({ count: 0, fresh: false, updatedAt: null as string | null });
   const renderedForYou = useRef<string | null>(null);
@@ -222,12 +225,18 @@ function Conversations({ onForget }: { onForget: () => void }) {
     return () => document.removeEventListener("visibilitychange", visible);
   }, []);
   useEffect(() => {
-    const escape = (e: KeyboardEvent) => { if (e.key === "Escape") { setJournalFocus(false); setPanel(null); } };
+    const escape = (e: KeyboardEvent) => { if (e.key === "Escape") { setJournalFocus(false); setPanel(null); setSearchOpen(false); } };
     window.addEventListener("keydown", escape);
     return () => window.removeEventListener("keydown", escape);
   }, []);
   function openForYou() {
-    openTarget({ kind: "note", note: { hub: null, vault: "uni", ref: FOR_YOU_ID }, title: "For you" });
+    if (topNote?.ref !== FOR_YOU_ID) {
+      const surfaces = tabsRef.current.tabs.filter((t) => t.kind === "room" || t.kind === "thread" || t.kind === "journal");
+      const previous = [...tabsRef.current.recent].reverse().map((id) => surfaces.find((t) => t.id === id)).find(Boolean);
+      forYouBack.current = previous?.title ?? "Uni";
+      forYouReturn.current = previous?.id ?? null;
+    }
+    openTarget({ kind: "note", note: { hub: null, vault: "uni", ref: FOR_YOU_ID }, title: "For you" }, "new");
     if (topNote?.vault === "uni" && topNote.ref === FOR_YOU_ID && isRecommendationNew(forYou.updatedAt, renderedForYou.current)) setForYouReload((n) => n + 1);
   }
   const pickNewTab = useRef(false);
@@ -245,8 +254,9 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const draftRevisions = useRef(new Map<string, number>());
   const [pending, setPending] = useState<PendingFile[]>([]);
   const pendingStore = useRef(new Map<string, PendingFile[]>());
-  // A late transcript waits only for relay acceptance, never holds up the audio.
-  const voiceDeliveries = useRef(new Map<string, Promise<Message | null>>());
+  const voiceQueue = useRef(Promise.resolve());
+  const voiceJobs = useRef(new Set<string>());
+  const [voiceStatus, setVoiceStatus] = useState("");
   const activeScope = useRef<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const voiceMounted = useRef(true);
@@ -254,7 +264,6 @@ function Conversations({ onForget }: { onForget: () => void }) {
     voiceMounted.current = true;
     return () => {
       voiceMounted.current = false;
-      voiceDeliveries.current.clear();
       for (const files of pendingStore.current.values()) for (const item of files) if (item.preview) URL.revokeObjectURL(item.preview);
     };
   }, []);
@@ -271,7 +280,6 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
   const [pairSourceOpen, setPairSourceOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [forgetArmed, setForgetArmed] = useState(false);
   const [live, setLive] = useState<string | null>(null);
   // Bumped by live events so the open room re-reads from the local store.
@@ -317,6 +325,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     if (tabsReady.current) { try { localStorage.setItem(TABS_KEY, serializeTabs(next)); } catch { /* private storage */ } }
   }
   function switchToTab(tab: Tab | null) {
+    setComposerFocused(false);
     setPanel(null);
     setSearchOpen(false);
     setJournalFocus(false);
@@ -884,11 +893,6 @@ function Conversations({ onForget }: { onForget: () => void }) {
       changePending(key, (items) => items.map((x) => x.id === id ? { ...x, media, state: "ready" } : x));
     } catch (e) {
       changePending(key, (items) => items.map((x) => x.id === id ? { ...x, state: "error", error: String(e) } : x));
-      // The transcription request is independent. Keep its editable text and
-      // make the audio loss explicit rather than silently blocking Send.
-      if ((pendingStore.current.get(key) ?? []).some((x) => x.id === id && x.voice)) {
-        setError(`Audio upload failed: ${String(e)}. Retry the audio, or send the transcript without it.`);
-      }
     }
   }
   function addFiles(files: File[]) {
@@ -905,51 +909,55 @@ function Conversations({ onForget }: { onForget: () => void }) {
       void uploadFile(key, id, file);
     }
   }
-  // Voice message: upload independently of transcription. An early transcript
-  // is editable in the draft; a late one replies to the accepted audio message.
-  // The recording belongs to its starting scope, even when another tab is
-  // visible by the time MediaRecorder fires onstop / transcription finishes.
-  const recordingOrigin = useRef<{ key: string; tabId: string; title: string } | null>(null);
-  const recorder = useRecorder((blob, mime, origin: { key: string; tabId: string; title: string }) => {
-    if (recordingOrigin.current === origin) recordingOrigin.current = null;
-    const key = origin.key;
-    if (!blob.size) return;
-    const file = new File([blob], voiceFileName(mime), { type: mime.split(";")[0] });
-    if (file.size > MAX_FILE_BYTES) { setError("Recording exceeds 25 MB."); return; }
-    const id = crypto.randomUUID();
-    changePending(key, (items) => [...items, { id, file, preview: null, state: "uploading", voice: "transcribing" }]);
-    void uploadFile(key, id, file);
-    void (async () => {
+  // Voice delivery owns its destination and never consumes the text draft.
+  // Serialize jobs so a second recording cannot overtake the first.
+  function queueVoice(key: string, id: string) {
+    if (voiceJobs.current.has(id)) return;
+    const clip = pendingStore.current.get(key)?.find((x) => x.id === id);
+    if (!clip?.voice) return;
+    voiceJobs.current.add(id);
+    setError(null);
+    changePending(key, (items) => items.map((x) => x.id === id ? { ...x, state: "uploading", error: undefined } : x));
+    setVoiceStatus("Sending voice message…");
+    voiceQueue.current = voiceQueue.current.then(async () => {
+      let outcome = "Voice message removed";
       try {
-        const t = await invoke<{ text: string }>("voice_transcribe", new Uint8Array(await blob.arrayBuffer()), { headers: { "x-audio-mime": mime } });
-        const text = t.text.trim();
+        if (!voiceMounted.current || !pendingStore.current.get(key)?.some((x) => x.id === id)) return;
+        if (clip.file.size > MAX_FILE_BYTES) throw new Error("Recording exceeds 25 MB.");
+        const bytes = new Uint8Array(await clip.file.arrayBuffer());
+        const media = clip.media ?? await invoke<MediaRef>("media_upload", bytes, { headers: { "x-filename": encodeURIComponent(clip.file.name), "x-file-mime": clip.file.type } });
+        changePending(key, (items) => items.map((x) => x.id === id ? { ...x, media } : x));
+        if (!voiceMounted.current || !pendingStore.current.get(key)?.some((x) => x.id === id)) return;
+        const destination = clip.voice!;
+        const roomMembers = await invoke<Member[]>("get_members", { channel: destination.channel });
+        const uni = findUniMember(roomMembers);
+        if (!voiceMounted.current || !pendingStore.current.get(key)?.some((x) => x.id === id)) return;
+        await invoke<Message>("post_message", { channel: destination.channel, body: "", replyTo: destination.replyTo, recipients: destination.notifyUni && uni ? [uni.pubkey] : [], media: [media] });
         if (!voiceMounted.current) return;
-        const delivery = voiceDeliveries.current.get(id);
-        const sent = delivery ? await delivery : null;
-        if (!voiceMounted.current) return;
-        changePending(key, (items) => items.map((x) => x.id === id ? { ...x, voice: "done" } : x));
-        if (!text) return;
-        if (sent) {
-          // Reply to the accepted audio in its original room/thread. Do not
-          // notify recipients twice or put late text in the user's next draft.
-          try {
-            await invoke<Message>("post_message", { channel: sent.channel, body: text, replyTo: sent.ref, recipients: [], media: [] });
-            setTick((n) => n + 1);
-          } catch (e) { setError(`Audio sent, but transcript reply failed: ${String(e)}. Transcript: ${text}`); }
-          return;
-        }
-        // Removed clips must not resurrect text; rejected sends keep the clip
-        // and can still use its transcript on an explicit retry.
-        if (!(pendingStore.current.get(key) ?? []).some((x) => x.id === id)) return;
-        const before = drafts.current.get(key) ?? "";
-        const next = before.trim() ? `${before.trimEnd()}\n${text}` : text;
-        if (activeScope.current === key) updateDraft(next, next.length);
-        else editDraft(key, next);
+        removeFile(key, id);
+        setTick((n) => n + 1);
+        outcome = "Voice message sent";
+        void loadRooms().catch(() => {});
       } catch (e) {
-        changePending(key, (items) => items.map((x) => x.id === id ? { ...x, voice: "failed" } : x));
-        setStatus(`No transcript (${String(e).slice(0, 120)}). The voice message still sends.`);
-      } finally { voiceDeliveries.current.delete(id); }
-    })();
+        if (!voiceMounted.current) return;
+        changePending(key, (items) => items.map((x) => x.id === id ? { ...x, state: "error", error: String(e) } : x));
+        setError(`Voice message failed: ${String(e)}. Retry or remove the recording.`);
+        outcome = "Voice message failed";
+      } finally {
+        voiceJobs.current.delete(id);
+        if (voiceMounted.current) setVoiceStatus(voiceJobs.current.size ? "Sending voice message…" : outcome);
+      }
+    });
+  }
+  type RecordingOrigin = { key: string; tabId: string; title: string; channel: string; replyTo: string | null; notifyUni: boolean };
+  const recordingOrigin = useRef<RecordingOrigin | null>(null);
+  const recorder = useRecorder((blob, mime, origin: RecordingOrigin) => {
+    if (recordingOrigin.current === origin) recordingOrigin.current = null;
+    if (!blob.size) { setError("Recording was empty. Please record again."); return; }
+    const file = new File([blob], voiceFileName(mime), { type: mime.split(";")[0] });
+    const id = crypto.randomUUID();
+    changePending(origin.key, (items) => [...items, { id, file, preview: null, state: "uploading", voice: { channel: origin.channel, replyTo: origin.replyTo, notifyUni: origin.notifyUni } }]);
+    queueVoice(origin.key, id);
   }, `for #${rooms.find((r) => r.id === channel)?.name ?? "room"}`);
   async function toggleRecording() {
     if (sendingRef.current) return;
@@ -958,10 +966,14 @@ function Conversations({ onForget }: { onForget: () => void }) {
       if (recorder.recording) recorder.stop();
       return;
     }
+    if (recorder.isBusy()) return;
     const key = scope(), tab = activeTab(tabsRef.current);
     if (!key || !tab) return;
     setError(null);
-    const origin = { key, tabId: tab.id, title: tab.title };
+    if (!channel) return;
+    const target = root ? replyTo ?? (messages.some((m) => m.ref === root) ? root : messages[messages.length - 1]?.ref ?? null) : null;
+    if (root && !target) { setError("Thread not in local cache. Refresh before replying."); return; }
+    const origin = { key, tabId: tab.id, title: tab.title, channel, replyTo: target, notifyUni };
     recordingOrigin.current = origin;
     try { if (!await recorder.start(origin) && recordingOrigin.current === origin) recordingOrigin.current = null; }
     catch (e) { if (recordingOrigin.current === origin) recordingOrigin.current = null; setError(`Microphone unavailable: ${String(e)}`); }
@@ -1090,10 +1102,9 @@ function Conversations({ onForget }: { onForget: () => void }) {
     // Refs/session state cover events before React commits the disabled controls.
     if (!channel || activeScope.current !== keyFor(channel, root) || sendingRef.current ||
         recordingOrigin.current || recorder.isBusy() || (!draft.trim() && !pending.length)) return;
-    const files = pendingStore.current.get(keyFor(channel, root)) ?? [];
-    const failedAudio = files.filter((f) => f.voice && f.state === "error");
-    if (files.some(attachmentBlocksSend) || (failedAudio.length && !draft.trim())) {
-      setError("Wait for uploads to finish, remove failed files, or send the transcript without failed audio."); return;
+    const files = manualAttachments(pendingStore.current.get(keyFor(channel, root)) ?? []);
+    if ((!draft.trim() && !files.length) || files.some(attachmentBlocksSend)) {
+      setError("Wait for uploads to finish or retry or remove failed files."); return;
     }
     const sentIds = files.map((f) => f.id);
     const snapshot = draft;
@@ -1117,15 +1128,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
     sendingRef.current = true;
     setSending(true);
     setError(null);
-    const awaitingTranscript = files.filter((f) => f.voice === "transcribing");
-    let acceptVoice!: (message: Message | null) => void;
-    const delivery = new Promise<Message | null>((resolve) => { acceptVoice = resolve; });
-    for (const file of awaitingTranscript) voiceDeliveries.current.set(file.id, delivery);
-    let audioAccepted = false;
     try {
-      const accepted = await invoke<Message>("post_message", { channel, body: snapshot, replyTo: target, recipients, media: files.filter((f) => f.state === "ready").map((f) => f.media!) });
-      audioAccepted = true;
-      acceptVoice(accepted);
+      await invoke<Message>("post_message", { channel, body: snapshot, replyTo: target, recipients, media: files.map((f) => f.media!) });
       changePending(key, (items) => {
         for (const item of items) if (sentIds.includes(item.id) && item.preview) URL.revokeObjectURL(item.preview);
         return items.filter((item) => !sentIds.includes(item.id));
@@ -1148,12 +1152,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
       // user has switched rooms meanwhile.
       setTick((n) => n + 1);
       await loadRooms();
-      setStatus(failedAudio.length ? `Transcript sent; ${failedAudio.length} audio recording${failedAudio.length === 1 ? " was" : "s were"} NOT attached (upload failed).` : recipients.length ? `Message accepted by relay · notified ${recipients.length}` : "Message accepted by relay");
+      setStatus(recipients.length ? `Message accepted by relay · notified ${recipients.length}` : "Message accepted by relay");
     } catch (e) {
-      if (!audioAccepted) {
-        acceptVoice(null);
-        for (const file of awaitingTranscript) voiceDeliveries.current.delete(file.id);
-      }
       setError(String(e));
     }
     finally { sendingRef.current = false; setSending(false); }
@@ -1288,13 +1288,13 @@ function Conversations({ onForget }: { onForget: () => void }) {
   goBack.current = () => {
     if (journalFocus) { setJournalFocus(false); return; }
     if (panel) { setPanel(null); return; }
-    if (notes.length) { closeNote(); return; }
     if (searchOpen) { setSearchOpen(false); return; }
+    if (notes.length) { closeNote(); return; }
     if (root && channel) { openTarget(roomTarget(channel), "focus"); return; }
     // On narrow screens the sidebar is a view, not a tab close.
-    setSidebarVisible(true);
+    setPanel("rooms");
   };
-  const canGoBack = notes.length > 0 || searchOpen || !sidebarVisible;
+  const canGoBack = !!panel || journalFocus || notes.length > 0 || searchOpen || !sidebarVisible;
   // Desktop tab shortcuts. On macOS the native menu owns Cmd+W; it emits
   // uni://close-tab from Rust, so the WebView never closes the window.
   const closeActiveRef = useRef(() => {});
@@ -1364,21 +1364,24 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const recordingTab = recordingOrigin.current;
   const pill = recordingTab && recorder.busy ? { title: recordingTab.title, elapsed: recorder.elapsed, tabId: recordingTab.tabId, stop: recorder.stop, phase: recorder.phase } :
     journalRecording && journalTab ? { title: "Journal", elapsed: journalRecording.elapsed, tabId: journalTab.id, stop: journalRecording.stop, phase: "recording" as const } : null;
-  return <NoteOpener.Provider value={openNote}><main className={`shell ${(!sidebarVisible && (channel || journalOpen || (active?.kind === "note" || active?.kind === "vault"))) ? "in-room" : ""} ${topNote ? "note-open" : ""} ${panel ? `panel-open panel-${panel}` : ""} ${searchOpen ? "search-open" : ""} ${journalFocus && journalOpen ? "journal-focus" : ""}`}>
+  return <NoteOpener.Provider value={openNote}><main className={`shell ${(!sidebarVisible && (channel || journalOpen || (active?.kind === "note" || active?.kind === "vault"))) ? "in-room" : ""} ${topNote ? "note-open" : ""} ${panel ? `panel-open panel-${panel}` : ""} ${searchOpen ? "search-open" : ""} ${composerFocused ? "composer-focused" : ""} ${journalFocus && journalOpen ? "journal-focus" : ""}`}>
     <nav className="rail" aria-label="Main navigation">
-      <button aria-label="Uni" aria-current={!panel && !searchOpen && (!topNote && !journalOpen && channel === findUniRoom(rooms)?.id ? "page" : undefined)} onClick={() => { const uni = findUniRoom(rooms); if (uni) openTarget(roomTarget(uni.id)); }}><i>✦</i><span>Uni</span></button>
-      <button aria-label="Journal" aria-current={!panel && !searchOpen && (journalOpen && !topNote ? "page" : undefined)} onClick={() => openTarget({ kind: "journal", title: "Journal" })}><i>❋</i><span>Journal</span></button>
-      <button aria-label="For you" aria-current={!panel && !searchOpen && (topNote?.ref === FOR_YOU_ID ? "page" : undefined)} onClick={openForYou}><i>★<b className="rail-count">{forYou.count}</b>{forYou.fresh && <span className="rail-dot" aria-label="Updated recommendations" />}</i><span>For you</span></button>
-      <button aria-label="Rooms" aria-current={!panel && !searchOpen && (!topNote && !journalOpen && channel && channel !== findUniRoom(rooms)?.id ? "page" : undefined)} aria-expanded={panel === "rooms"} onClick={() => { setSearchOpen(false); setPanel(panel === "rooms" ? null : "rooms"); }}><i>☷</i><span>Rooms</span>{rooms.some((r) => r.unread > 0) && <span className="rail-dot" aria-label="Unread rooms" />}</button>
-      <button aria-label="Vault" aria-current={!panel && !searchOpen && (active?.kind === "vault" || (topNote && topNote.ref !== FOR_YOU_ID) ? "page" : undefined)} aria-expanded={panel === "vault"} onClick={() => { setSearchOpen(false); setPanel(panel === "vault" ? null : "vault"); }}><i>▤</i><span>Vault</span></button>
-      <button aria-label="Search" aria-expanded={searchOpen} onClick={() => { setPanel(null); setSearchQuery(""); setSearchScope({ vault: "", prefix: "" }); setSearchOpen(true); }}><i>⌕</i><span>Search</span></button>
-      <button className="rail-settings" aria-label="Settings" aria-expanded={panel === "settings"} onClick={() => { setSearchOpen(false); setPanel(panel === "settings" ? null : "settings"); setSettingsOpen(true); setForgetArmed(false); }}><i><SettingsIcon /></i><span>Settings</span></button>
+      <button aria-label="Uni" aria-current={!panel && !searchOpen && (!topNote && !journalOpen && channel === findUniRoom(rooms)?.id ? "page" : undefined)} onClick={() => { const uni = findUniRoom(rooms); if (uni) openTarget(roomTarget(uni.id)); }}><i><UniIcon /></i><span>Uni</span></button>
+      <button aria-label="Journal" aria-current={!panel && !searchOpen && (journalOpen && !topNote ? "page" : undefined)} onClick={() => openTarget({ kind: "journal", title: "Journal" })}><i><JournalIcon /></i><span>Journal</span></button>
+      <button aria-label="For you" aria-current={!panel && !searchOpen && (topNote?.ref === FOR_YOU_ID ? "page" : undefined)} onClick={openForYou}><i><StarIcon /><b className="rail-count">{forYou.count}</b>{forYou.fresh && <span className="rail-dot" aria-label="Updated recommendations" />}</i><span>For you</span></button>
+      <button aria-label="Rooms" aria-current={!panel && !searchOpen && (!topNote && !journalOpen && channel && channel !== findUniRoom(rooms)?.id ? "page" : undefined)} aria-expanded={panel === "rooms"} onClick={() => { setSearchOpen(false); setPanel(panel === "rooms" ? null : "rooms"); }}><i><RoomsIcon /></i><span>Rooms</span>{rooms.some((r) => r.unread > 0) && <span className="rail-dot" aria-label="Unread rooms" />}</button>
+      <button className="rail-vault" aria-label="Vault" aria-current={!panel && !searchOpen && (active?.kind === "vault" || (topNote && topNote.ref !== FOR_YOU_ID) ? "page" : undefined)} aria-expanded={panel === "vault"} onClick={() => { setSearchOpen(false); setPanel(panel === "vault" ? null : "vault"); }}><i>▤</i><span>Vault</span></button>
+      <button className="rail-search" aria-label="Search" aria-expanded={searchOpen} onClick={() => { setPanel(null); setSearchQuery(""); setSearchScope({ vault: "", prefix: "" }); setSearchOpen(true); }}><i>⌕</i><span>Search</span></button>
+      <button className="rail-settings" aria-label="Settings" aria-expanded={panel === "settings"} onClick={() => { setSearchOpen(false); setPanel(panel === "settings" ? null : "settings"); setForgetArmed(false); }}><i><SettingsIcon /></i><span>Settings</span></button>
     </nav>
     {(panel || searchOpen) && <button className="panel-scrim" aria-label="Close navigation panel" onClick={() => { setPanel(null); setSearchOpen(false); }} />}
     <aside className="rooms" aria-label="Conversations">
-      <header className="rooms-header"><div><span className="eyebrow">Unforced</span><h1>Uni</h1></div><div><button className="icon-button" onClick={() => { setSearchQuery(""); setSearchScope({ vault: "", prefix: "" }); setSearchOpen(true); }} aria-label="Search messages and notes">⌕</button><button className="icon-button" onClick={() => void refresh()} disabled={busy} aria-label="Refresh conversations">↻</button><button className="icon-button" onClick={() => { setSettingsOpen(!settingsOpen); setForgetArmed(false); }} aria-label="Settings" aria-expanded={settingsOpen}><SettingsIcon /></button></div></header>
+      {(panel || searchOpen) && <button className="panel-close icon-button" aria-label="Close panel" onClick={() => { setPanel(null); setSearchOpen(false); }}>×</button>}
+      <div className="landscape-panel-surfaces"><button onClick={() => { const uni = findUniRoom(rooms); if (uni) openTarget(roomTarget(uni.id)); }}><UniIcon />Uni</button><button onClick={() => openTarget({ kind: "journal", title: "Journal" })}><JournalIcon />Journal</button><button onClick={openForYou}><StarIcon />For you</button><button onClick={() => { setPanel("settings"); }}><SettingsIcon />Settings</button></div>
+      <div className="phone-panel-tools"><button onClick={() => { setPanel("vault"); setSearchOpen(false); }}>Vault</button><button onClick={() => { setPanel(null); setSearchOpen(true); }}>Search</button></div>
+      <header className="rooms-header"><div><span className="eyebrow">Unforced</span><h1>Uni</h1></div><div><button className="icon-button" onClick={() => { setSearchQuery(""); setSearchScope({ vault: "", prefix: "" }); setSearchOpen(true); }} aria-label="Search messages and notes">⌕</button><button className="icon-button" onClick={() => void refresh()} disabled={busy} aria-label="Refresh conversations">↻</button><button className="icon-button" onClick={() => { setPanel(panel === "settings" ? "rooms" : "settings"); setSearchOpen(false); setForgetArmed(false); }} aria-label="Settings" aria-expanded={panel === "settings"}><SettingsIcon /></button></div></header>
       {pairSourceOpen && <PairSource onClose={() => setPairSourceOpen(false)} />}
-      {settingsOpen && <div className="settings"><UpdateSettings /><PairDeviceButton onOpen={() => setPairSourceOpen(true)} /><button className="pairing-secondary" onClick={() => void forget()}>{forgetArmed ? "Tap again to forget — you'll need to re-pair" : "Forget this device key"}</button>{forgetArmed && <button className="pairing-secondary" onClick={() => setForgetArmed(false)}>Keep key</button>}</div>}
+      {panel === "settings" && <div className="settings"><UpdateSettings /><PairDeviceButton onOpen={() => setPairSourceOpen(true)} /><button className="pairing-secondary" onClick={() => void forget()}>{forgetArmed ? "Tap again to forget — you'll need to re-pair" : "Forget this device key"}</button>{forgetArmed && <button className="pairing-secondary" onClick={() => setForgetArmed(false)}>Keep key</button>}</div>}
       {searchOpen && <Search initialQuery={searchQuery} vaults={vaults} key={`${searchScope.vault}:${searchScope.prefix}`} initialVault={searchScope.vault} initialPathPrefix={searchScope.prefix} onOpen={openHit} onOpenNote={(n) => { setSearchOpen(false); openNote({ hub: null, vault: n.vault, ref: n.id }, null); }} onAskUni={askUniSearch} onClose={() => { setSearchOpen(false); if (topNote) setSidebarVisible(false); }} />}
       {searchOpen && error && <p className="error search-error" role="alert">{error}</p>}
       <div className="rooms-body" hidden={searchOpen}>
@@ -1386,14 +1389,6 @@ function Conversations({ onForget }: { onForget: () => void }) {
       {identity && <p className="identity" title={npub ?? identity}>{myName ? <>Signed in as <strong>{myName}</strong></> : <>Public key <code>{npub ? `${npub.slice(0, 14)}…${npub.slice(-6)}` : `${identity.slice(0, 12)}…`}</code></>}<button className="identity-copy" onClick={() => void copyText(npub ?? identity, "Copied public key")} aria-label="Copy your public key">⧉</button></p>}
       {!ready && <p className="empty">Loading…</p>}
       {ready && rooms.length === 0 && <p className="empty">No joined conversations cached. Refresh to connect with your personal Buzz key.</p>}
-      <div className="capture-shortcuts">
-      <button className={`room journal-room ${journalOpen ? "selected" : ""}`} onClick={(e) => sidebarClick({ kind: "journal", title: "Journal" }, e)}
-        onPointerDown={(e) => { if (e.pointerType === "touch") startLongPress({ kind: "journal", title: "Journal" }); }} onPointerUp={endLongPress} onPointerCancel={endLongPress} onPointerLeave={endLongPress}
-        aria-current={journalOpen ? "page" : undefined}>
-        <span className="avatar">❋</span><span className="room-text"><strong>Journal</strong><small>Speak or write · private to your vault</small></span>
-      </button>
-      <button className="room for-you-room" aria-label="For you" onClick={openForYou}><span className="avatar">★</span><span className="room-text"><strong>For you</strong><small>{forYou.count} recommendations{forYou.fresh ? " · updated" : ""}</small></span></button>
-      </div>
       <section className="vault-sidebar" aria-label="Vaults"><div className="vault-heading"><h2>Vaults</h2><button className="note-quiet" onClick={() => setVaultRefresh((n) => n + 1)}>Refresh</button></div>
         {vaultError && <p className="error" role="alert">{vaultError}</p>}
         {primaryVault && vaultRow(primaryVault)}
@@ -1422,12 +1417,12 @@ function Conversations({ onForget }: { onForget: () => void }) {
         </div>)}</div>
         <button className="tab-add" onClick={() => { pickNewTab.current = true; setPanel("rooms"); setSearchOpen(false); setSidebarVisible(true); document.querySelector<HTMLButtonElement>(".rooms nav .room")?.focus(); }} aria-label="New tab — pick a room" title="New tab — pick a room">+</button>
       </div>
-      {journalTab && <div className="journal-tab-content" hidden={!journalOpen}><Journal focus={journalFocus} onFocus={() => setJournalFocus((v) => !v)} rooms={rooms} uniRoomId={findUniRoom(rooms)?.id ?? null} onShare={shareEntry} onBack={() => setSidebarVisible(true)} onRecordingChange={(on, elapsed, stop) => { journalRecordingRef.current = on; setJournalRecording(on ? { elapsed, stop } : null); }} /></div>}
-      {active?.kind === "vault" && active.vault ? <VaultBrowser key={active.vault} vault={active.vault} onBack={() => setSidebarVisible(true)} onOpen={(note) => openTarget({ kind: "note", note: { hub: null, vault: active.vault!, ref: note.id }, title: note.path || note.id }, "new")} onCreate={(folder) => requestCreate(active.vault!, folder)} onSearch={(prefix) => { setSearchQuery(""); setSearchScope({ vault: active.vault!, prefix }); setSearchOpen(true); setSidebarVisible(true); }} />
+      {journalTab && <div className="journal-tab-content" hidden={!journalOpen} onFocusCapture={(e) => { if (e.target instanceof HTMLTextAreaElement) requestAnimationFrame(() => setComposerFocused(true)); }} onBlurCapture={(e) => { const journal = e.currentTarget; requestAnimationFrame(() => setComposerFocused(journal.contains(document.activeElement) && document.activeElement instanceof HTMLTextAreaElement)); }}><Journal focus={journalFocus} onFocus={() => setJournalFocus((v) => !v)} rooms={rooms} uniRoomId={findUniRoom(rooms)?.id ?? null} onShare={shareEntry} onBack={() => setPanel("rooms")} onRecordingChange={(on, elapsed, stop) => { journalRecordingRef.current = on; setJournalRecording(on ? { elapsed, stop } : null); }} /></div>}
+      {active?.kind === "vault" && active.vault ? <VaultBrowser key={active.vault} vault={active.vault} onBack={() => setPanel("rooms")} onOpen={(note) => openTarget({ kind: "note", note: { hub: null, vault: active.vault!, ref: note.id }, title: note.path || note.id }, "new")} onCreate={(folder) => requestCreate(active.vault!, folder)} onSearch={(prefix) => { setSearchQuery(""); setSearchScope({ vault: active.vault!, prefix }); setSearchOpen(true); setSidebarVisible(true); }} />
       : journalOpen ? null
       : currentRoom ? <>
         <header className="conversation-header">
-          <button className="back icon-button" onClick={() => isThread && channel ? openTarget(roomTarget(channel), "focus") : setSidebarVisible(true)} aria-label={isThread ? "Back to room" : "Back to conversations"}>‹</button>
+          <button className="back icon-button" onClick={() => isThread && channel ? openTarget(roomTarget(channel), "focus") : setPanel("rooms")} aria-label={isThread ? "Back to room" : "Back to conversations"}>‹</button>
           {isThread && <button className="thread-back" onClick={() => channel && openTarget(roomTarget(channel), "focus")} aria-label="Back to room">‹ {currentRoom.name}</button>}
           <div><strong>{isThread ? "Thread" : currentRoom.name}</strong><small>{isThread ? `${threadReplies.length} ${threadReplies.length === 1 ? "reply" : "replies"} · in ${currentRoom.name}` : `Buzz conversation · ${members.length ? `${members.length} members` : "cached locally"}`}</small></div>
           <button className="icon-button" onClick={() => void refresh()} disabled={busy} aria-label="Refresh messages">↻</button>
@@ -1438,7 +1433,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
             <div ref={scrollEnd} />
           </div>
         </div>
-        <footer className="composer" onDragOver={(e) => { if (e.dataTransfer.types.includes("Files")) e.preventDefault(); }} onDrop={onDropFiles}>
+        <footer onFocusCapture={() => requestAnimationFrame(() => setComposerFocused(true))} onBlurCapture={(e) => { const composer = e.currentTarget; requestAnimationFrame(() => setComposerFocused(composer.contains(document.activeElement))); }} className="composer" onDragOver={(e) => { if (e.dataTransfer.types.includes("Files")) e.preventDefault(); }} onDrop={onDropFiles}>
           <input ref={fileInput} className="file-picker" type="file" multiple aria-label="Choose files to attach" onChange={(e) => { addFiles(Array.from(e.target.files ?? [])); e.target.value = ""; }} />
           {error && <p className="error" role="alert">{error}</p>}
           {replyTo && replyTo !== root && <div className="reply-banner">Replying to {messages.find((m) => m.ref === replyTo)?.author_name ?? "message"}<button onClick={() => setReplyTo(null)} aria-label="Cancel reply">×</button></div>}
@@ -1456,22 +1451,21 @@ function Conversations({ onForget }: { onForget: () => void }) {
           {pending.length > 0 && <div className="compose-files" aria-label="Attachments">
             {pending.map((item) => <div className={`compose-file ${item.state}`} key={item.id}>
               {item.preview ? <img src={item.preview} alt="" /> : <span className="compose-file-icon" aria-hidden="true">{item.file.type === "application/pdf" || item.file.name.toLowerCase().endsWith(".pdf") ? "📄" : attachmentKind({ url: item.file.name, mime: item.file.type }) === "audio" ? "♪" : "📎"}</span>}
-              <span className="compose-file-info" onClick={() => item.error && setError(`${item.file.name}: ${item.error}`)} title={item.error ?? undefined}><strong>{item.file.name}</strong><small>{formatSize(item.file.size)} · {item.state === "ready" ? "Ready" : item.state === "uploading" ? "Uploading…" : `Failed: ${item.error}`}{item.voice === "transcribing" ? " · Transcribing…" : item.voice === "failed" ? " · No transcript" : ""}</small>{item.state === "uploading" && <progress aria-label={`Uploading ${item.file.name}`} />}</span>
-              {item.state === "error" && <button className="compose-file-retry" onClick={() => void uploadFile(keyFor(currentRoom.id, root), item.id, item.file)} aria-label={`Retry upload ${item.file.name}`}>Retry</button>}
+              <span className="compose-file-info" onClick={() => item.error && setError(`${item.file.name}: ${item.error}`)} title={item.error ?? undefined}><strong>{item.file.name}</strong><small>{formatSize(item.file.size)} · {item.state === "ready" ? "Ready" : item.state === "uploading" ? "Uploading…" : `Failed: ${item.error}`}</small>{item.state === "uploading" && <progress aria-label={`Uploading ${item.file.name}`} />}</span>
+              {item.state === "error" && <button className="compose-file-retry" onClick={() => item.voice ? queueVoice(keyFor(currentRoom.id, root), item.id) : void uploadFile(keyFor(currentRoom.id, root), item.id, item.file)} aria-label={`Retry upload ${item.file.name}`}>Retry</button>}
               <button className="compose-file-remove" disabled={sending} onClick={() => removeFile(keyFor(currentRoom.id, root), item.id)} aria-label={`Remove ${item.file.name}`}>×</button>
             </div>)}
           </div>}
+          {voiceStatus && <p className="voice-status" role="status">{voiceStatus}</p>}
           <div className="compose-row">
             <ComposerMenu key={`${channel}:${root}`} onMention={startMention} onAttach={() => fileInput.current?.click()} sending={sending} />
             <textarea ref={composerInput} aria-label={`Message ${currentRoom.name}`} value={draft} onChange={(e) => updateDraft(e.target.value, e.target.selectionStart)} onPaste={onPasteFiles} onSelect={(e) => syncPicker(e.currentTarget.value, e.currentTarget.selectionStart)} onBlur={() => setPicker(null)} onKeyDown={onKeyDown} maxLength={65536} rows={1} placeholder={isThread ? "Reply in thread…" : "Message Uni…"} />
             <button className={`address-toggle compose-icon mic ${recorder.recording && recordingOrigin.current?.key === scope() ? "recording" : ""}`} onClick={() => void toggleRecording()} disabled={sending || (recorder.busy && (!recorder.recording || recordingOrigin.current?.key !== scope()))} aria-pressed={recorder.recording && recordingOrigin.current?.key === scope()} aria-label={recorder.recording && recordingOrigin.current?.key === scope() ? "Stop recording voice message" : "Record a voice message"} title={recorder.recording && recordingOrigin.current?.key === scope() ? "Stop recording" : "Voice message"}>
               {recorder.recording && recordingOrigin.current?.key === scope() ? <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" fill="currentColor" /></svg> : <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3" /><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8" /></svg>}
             </button>
-            {(draft.trim() || pending.length > 0 || sending) && (
-              <button className="send compose-icon" disabled={(!draft.trim() && !pending.some((f) => f.state === "ready")) || pending.some(attachmentBlocksSend) || sending || recorder.busy} onClick={() => void send()} aria-label={pending.some((f) => f.voice && f.state === "error") ? "Send transcript without failed audio" : "Send message"} title={sending ? "Sending…" : pending.some((f) => f.voice && f.state === "error") ? "Send transcript without failed audio" : "Send message"} aria-busy={sending}>
-                {sending ? <span aria-hidden="true">…</span> : <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 7-7 7 7M12 5v14" /></svg>}
-              </button>
-            )}
+            <button className="send compose-icon" disabled={(!draft.trim() && !pending.some((f) => !f.voice && f.state === "ready")) || manualAttachments(pending).some(attachmentBlocksSend) || sending || recorder.busy} onClick={() => void send()} aria-label="Send message" title={sending ? "Sending…" : "Send message"} aria-busy={sending}>
+              {sending ? <span aria-hidden="true">…</span> : <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 7-7 7 7M12 5v14" /></svg>}
+            </button>
           </div>
           <p className="compose-hint">Enter to send · Shift+Enter for a new line · @ to mention · <button className="link" onClick={() => setAdvancedOpen(!advancedOpen)}>{advancedOpen ? "hide raw key" : "raw key…"}</button></p>
         </footer>
@@ -1487,7 +1481,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     {/* The note sheet leaves the tab strip visible above it; Back pops the
         note's own stack (or closes the tab at the first note). */}
     {topNote && !searchOpen && <section className="note-sheet" role="region" aria-label="Note">
-      <NoteView key={`${tabs.active}:${notes.length}:${noteKey(topNote)}:${topNote.ref === FOR_YOU_ID ? forYouReload : 0}`} target={topNote} onSearch={(query) => { setSidebarVisible(true); setSearchQuery(query); setSearchScope({ vault: "", prefix: "" }); setSearchOpen(true); }} hub={hub} onOpen={openNote} onBack={closeNote}
+      <NoteView key={`${tabs.active}:${notes.length}:${noteKey(topNote)}:${topNote.ref === FOR_YOU_ID ? forYouReload : 0}`} target={topNote} onSearch={(query) => { setSidebarVisible(true); setSearchQuery(query); setSearchScope({ vault: "", prefix: "" }); setSearchOpen(true); }} hub={hub} onOpen={openNote} onBack={() => { if (topNote.ref === FOR_YOU_ID && forYouReturn.current && tabsRef.current.tabs.some((t) => t.id === forYouReturn.current)) focusTabById(forYouReturn.current); else closeNote(); }}
         onResolved={(id) => {
           if (tabsRef.current.active) commitTabs(updateTab(tabsRef.current, tabsRef.current.active, { note: { hub: null, vault: topNote.vault, ref: id } }));
           aliases.current[JSON.stringify([topNote.vault, topNote.ref])] = id;
@@ -1507,7 +1501,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
         startEditing={editOnOpen.current.has(noteKey(topNote))}
         onDirty={(dirty) => { reportDirty(tabs.active!, noteKey(topNote), dirty); if (!dirty) editOnOpen.current.delete(noteKey(topNote)); }}
         onCreate={(folder) => requestCreate(topNote.vault, folder)}
-        backLabel={notes.length > 1 ? noteTitles[noteKey(notes[notes.length - 2])] ?? notes[notes.length - 2].ref.split("/").pop() ?? "note" : backTo}
+        backLabel={topNote.ref === FOR_YOU_ID ? forYouBack.current : notes.length > 1 ? noteTitles[noteKey(notes[notes.length - 2])] ?? notes[notes.length - 2].ref.split("/").pop() ?? "note" : backTo}
         onTitle={(t) => rememberTitle(noteKey(topNote), t)} />
     </section>}
     {creating && <SurfaceModal onCancel={() => { if (!createBusy) setCreating(null); }}><form role="dialog" aria-modal="true" aria-label="New note" onSubmit={(e) => { e.preventDefault(); void createNote(); }}><h2>New note in {creating.vault}</h2><label>Path<input autoFocus value={creating.path} disabled={createBusy} onChange={(e) => setCreating({ ...creating, path: e.target.value })} /></label>{createError && <p className="error" role="alert">{createError}</p>}<button disabled={createBusy} type="submit">{createBusy ? "Creating…" : "Create note"}</button><button disabled={createBusy} type="button" onClick={() => setCreating(null)}>Cancel</button></form></SurfaceModal>}

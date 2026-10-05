@@ -1,14 +1,17 @@
-/** Audio readiness depends on upload, not transcription. Failed voice clips
- * may be omitted only by the composer's explicitly labelled transcript send. */
+/** Ordinary attachments must be uploaded before sending. */
 export function attachmentBlocksSend(file: {
   state: "uploading" | "ready" | "error";
   media?: unknown;
-  voice?: "transcribing" | "done" | "failed";
 }): boolean {
-  return (file.state !== "ready" && !(file.voice && file.state === "error")) || (file.state === "ready" && !file.media);
+  return file.state !== "ready" || !file.media;
 }
 
 /** Touch keyboards own Enter; viewport width is not a keyboard capability. */
 export function enterInsertsNewline(maxTouchPoints: number, coarsePointer: boolean): boolean {
   return maxTouchPoints > 0 || coarsePointer;
+}
+
+/** Voice deliveries must never be consumed by the draft's manual Send. */
+export function manualAttachments<T extends { voice?: unknown }>(files: T[]): T[] {
+  return files.filter((file) => !file.voice);
 }
