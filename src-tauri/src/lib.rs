@@ -1147,19 +1147,26 @@ fn relay_origin(app: tauri::AppHandle) -> String {
 // entry first, so journaling works offline and survives app restarts.
 
 const DEFAULT_HUB: &str = "https://uni-1.taildf9ce2.ts.net";
-const DEFAULT_VAULT: &str = "unforced";
+const DEFAULT_VAULT: &str = "uni";
+/// `unforced` was merged into `uni` (T-56, 2026-10-06) and is now a read-only
+/// archive, so a device still pointed at it writes to `uni` instead.
+const RETIRED_VAULT: &str = "unforced";
 
 fn vault_config(app: &tauri::AppHandle) -> uni_core::parachute::VaultConfig {
-    let saved = app
+    let saved: Option<uni_core::parachute::VaultConfig> = app
         .path()
         .app_data_dir()
         .ok()
         .and_then(|d| std::fs::read_to_string(d.join("vault.json")).ok())
         .and_then(|s| serde_json::from_str(&s).ok());
-    saved.unwrap_or_else(|| uni_core::parachute::VaultConfig {
+    let mut cfg = saved.unwrap_or_else(|| uni_core::parachute::VaultConfig {
         hub: DEFAULT_HUB.into(),
         vault: DEFAULT_VAULT.into(),
-    })
+    });
+    if cfg.vault == RETIRED_VAULT {
+        cfg.vault = DEFAULT_VAULT.into();
+    }
+    cfg
 }
 
 #[tauri::command]
