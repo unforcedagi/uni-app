@@ -1163,10 +1163,15 @@ fn vault_config(app: &tauri::AppHandle) -> uni_core::parachute::VaultConfig {
         hub: DEFAULT_HUB.into(),
         vault: DEFAULT_VAULT.into(),
     });
-    if cfg.vault == RETIRED_VAULT {
+    migrate_retired_vault(&mut cfg);
+    cfg
+}
+
+/// A saved choice of the retired `unforced` vault now means `uni`.
+fn migrate_retired_vault(cfg: &mut uni_core::parachute::VaultConfig) {
+    if cfg.vault.trim() == RETIRED_VAULT {
         cfg.vault = DEFAULT_VAULT.into();
     }
-    cfg
 }
 
 #[tauri::command]
@@ -1180,6 +1185,8 @@ fn journal_set_config(app: tauri::AppHandle, hub: String, vault: String) -> Resu
         hub: hub.trim().trim_end_matches('/').to_string(),
         vault: vault.trim().to_string(),
     };
+    let mut cfg = cfg;
+    migrate_retired_vault(&mut cfg);
     if cfg.vault.is_empty()
         || !cfg
             .vault
@@ -1624,4 +1631,37 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod vault_default_tests {
+    use super::*;
+
+    fn cfg(vault: &str) -> uni_core::parachute::VaultConfig {
+        uni_core::parachute::VaultConfig {
+            hub: DEFAULT_HUB.into(),
+            vault: vault.into(),
+        }
+    }
+
+    #[test]
+    fn default_vault_is_uni() {
+        assert_eq!(DEFAULT_VAULT, "uni");
+    }
+
+    #[test]
+    fn saved_unforced_choice_migrates_to_uni() {
+        let mut c = cfg("unforced");
+        migrate_retired_vault(&mut c);
+        assert_eq!(c.vault, "uni");
+    }
+
+    #[test]
+    fn other_saved_vaults_are_kept() {
+        for v in ["uni", "parachute", "my-vault"] {
+            let mut c = cfg(v);
+            migrate_retired_vault(&mut c);
+            assert_eq!(c.vault, v);
+        }
+    }
 }
