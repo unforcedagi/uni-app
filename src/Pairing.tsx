@@ -1,3 +1,4 @@
+import { VoiceOutbox } from "./voiceOutbox";
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
@@ -37,6 +38,7 @@ export default function Pairing({ onPaired }: { onPaired: (pubkey: string) => vo
     setError(null);
     setStep("connecting");
     try {
+      await new VoiceOutbox(() => {}).clear();
       const r = await invoke<{ sas: string }>("pairing_start", { uri });
       setSas(r.sas);
       setStep("code");
