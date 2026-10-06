@@ -68,6 +68,9 @@ pub enum Error {
     /// Relay declined a signed message; not stored locally.
     #[error("relay rejected message: {0}")]
     RelayRejected(String),
+    /// Relay confirmed delivery, but local follow-up failed. Never resend a fresh event.
+    #[error("message {event_id} accepted: {message}")]
+    Accepted { event_id: String, message: String },
     /// SQLite failure.
     #[error("store: {0}")]
     Store(#[from] rusqlite::Error),

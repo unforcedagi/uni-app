@@ -520,7 +520,12 @@ fn live_payload(ev: &LiveEvent) -> Option<LivePayload> {
             root,
         } => LivePayload {
             root: root.clone(),
-            ..p("typing", Some(channel.to_string()), None, Some(author.clone()))
+            ..p(
+                "typing",
+                Some(channel.to_string()),
+                None,
+                Some(author.clone()),
+            )
         },
         LiveEvent::Profiles { .. } => p("profiles", None, None, None),
         // Read on another device: badges change; the UI re-reads rooms.
@@ -806,6 +811,35 @@ async fn refresh(app: tauri::AppHandle) -> Result<SyncView, String> {
 }
 
 #[tauri::command]
+async fn prepare_voice_message(
+    app: tauri::AppHandle,
+    channel: String,
+    reply_to: Option<String>,
+    recipients: Vec<String>,
+    media: Vec<uni_core::MediaRef>,
+) -> Result<String, String> {
+    relay_io(&app, move |url, keys, store| {
+        let event = uni_core::compose::prepare_message(
+            url,
+            keys,
+            store,
+            room_id(&channel)?,
+            "",
+            reply_to.as_deref(),
+            &recipients,
+            &media,
+        )
+        .map_err(|e| e.to_string())?;
+        serde_json::to_string(&event).map_err(|e| e.to_string())
+    })
+    .await
+}
+
+fn accepted_error(event_id: String, message: String) -> String {
+    serde_json::json!({ "accepted": true, "eventId": event_id, "message": message }).to_string()
+}
+
+#[tauri::command]
 async fn post_message(
     app: tauri::AppHandle,
     channel: String,
@@ -813,33 +847,48 @@ async fn post_message(
     reply_to: Option<String>,
     recipients: Vec<String>,
     media: Option<Vec<uni_core::MediaRef>>,
-) -> Result<MessageView, String> {
+    signed_event: Option<String>,
+) -> Result<MessageView, serde_json::Value> {
     relay_io(&app, move |url, keys, store| {
         let ch = room_id(&channel)?;
-        let sent = tauri::async_runtime::block_on(send_message_with_media(
-            url,
-            keys,
-            None,
-            store,
-            ch,
-            &body,
-            reply_to.as_deref(),
-            &recipients,
-            media.as_deref().unwrap_or(&[]),
-        ))
-        .map_err(|e| e.to_string())?;
-        let message = store
-            .message(&channel, &sent.r#ref)
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| {
-                "message accepted but not found locally; refresh to recover".to_string()
-            })?;
-        let v = view(store, message)?;
-        with_reactions(store, vec![v])?
-            .pop()
-            .ok_or_else(|| "message view missing".to_string())
+        let sent = if let Some(json) = signed_event {
+            let event = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+            tauri::async_runtime::block_on(uni_core::compose::publish_message(
+                url, keys, None, store, ch, event,
+            ))
+        } else {
+            tauri::async_runtime::block_on(send_message_with_media(
+                url,
+                keys,
+                None,
+                store,
+                ch,
+                &body,
+                reply_to.as_deref(),
+                &recipients,
+                media.as_deref().unwrap_or(&[]),
+            ))
+        }
+        .map_err(|e| match e {
+            uni_core::Error::Accepted { event_id, message } => accepted_error(event_id, message),
+            other => other.to_string(),
+        })?;
+        (|| {
+            let message = store
+                .message(&channel, &sent.r#ref)
+                .map_err(|e| e.to_string())?
+                .ok_or_else(|| {
+                    "message accepted but not found locally; refresh to recover".to_string()
+                })?;
+            let v = view(store, message)?;
+            with_reactions(store, vec![v])?
+                .pop()
+                .ok_or_else(|| "message view missing".to_string())
+        })()
+        .map_err(|e| accepted_error(sent.r#ref, e))
     })
     .await
+    .map_err(|e| serde_json::from_str(&e).unwrap_or(serde_json::Value::String(e)))
 }
 
 /// Toggle a reaction: publish `emoji` on `target`, or, when `mine` names our
@@ -964,13 +1013,19 @@ fn ipc_bytes(request: &tauri::ipc::Request<'_>, max: usize) -> Result<Vec<u8>, S
     match request.body() {
         tauri::ipc::InvokeBody::Raw(b) => {
             if b.is_empty() || b.len() > max {
-                return Err(format!("file is empty or larger than {} MB", max / (1024 * 1024)));
+                return Err(format!(
+                    "file is empty or larger than {} MB",
+                    max / (1024 * 1024)
+                ));
             }
             Ok(b.clone())
         }
         tauri::ipc::InvokeBody::Json(serde_json::Value::Array(items)) => {
             if items.is_empty() || items.len() > max {
-                return Err(format!("file is empty or larger than {} MB", max / (1024 * 1024)));
+                return Err(format!(
+                    "file is empty or larger than {} MB",
+                    max / (1024 * 1024)
+                ));
             }
             items
                 .iter()
@@ -1421,14 +1476,15 @@ async fn android_update_manifest() -> Result<AndroidUpdateManifest, String> {
     // Bundled roots: a bare reqwest client uses the platform verifier, which
     // fails on Android without JNI setup, so this check never succeeded there.
     uni_core::init_crypto();
-    let response = uni_core::media::https_client_following_redirects(std::time::Duration::from_secs(12))
-        .map_err(|e| e.to_string())?
-        .get("https://github.com/unforcedagi/uni-app/releases/latest/download/android.json")
-        .send()
-        .await
-        .map_err(|e| e.to_string())?
-        .error_for_status()
-        .map_err(|e| e.to_string())?;
+    let response =
+        uni_core::media::https_client_following_redirects(std::time::Duration::from_secs(12))
+            .map_err(|e| e.to_string())?
+            .get("https://github.com/unforcedagi/uni-app/releases/latest/download/android.json")
+            .send()
+            .await
+            .map_err(|e| e.to_string())?
+            .error_for_status()
+            .map_err(|e| e.to_string())?;
     let manifest: AndroidUpdateManifest = response.json().await.map_err(|e| e.to_string())?;
     let trusted = manifest
         .url
@@ -1526,6 +1582,7 @@ pub fn run() {
             pairing_cancel,
             refresh,
             post_message,
+            prepare_voice_message,
             mark_read,
             open_link,
             live_start,

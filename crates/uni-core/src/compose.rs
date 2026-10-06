@@ -171,6 +171,24 @@ pub async fn send_message_with_media(
     recipients: &[String],
     media: &[MediaRef],
 ) -> Result<Item> {
+    let event = prepare_message(
+        relay_url, keys, store, channel, body, reply_to, recipients, media,
+    )?;
+    publish_message(relay_url, keys, auth_tag, store, channel, event).await
+}
+
+/// Sign once before publishing so an outbox can persist and retry the exact event.
+#[allow(clippy::too_many_arguments)]
+pub fn prepare_message(
+    relay_url: &str,
+    keys: &Keys,
+    store: &Store,
+    channel: Uuid,
+    body: &str,
+    reply_to: Option<&str>,
+    recipients: &[String],
+    media: &[MediaRef],
+) -> Result<nostr::Event> {
     let (content, media_tags) = outgoing_media(relay_url, body, media)?;
     if !store.rooms()?.iter().any(|r| r.id == channel.to_string()) {
         return Err(Error::Invalid("select a joined room before sending".into()));
@@ -211,15 +229,54 @@ pub async fn send_message_with_media(
     .map_err(|e| Error::Invalid(e.to_string()))?
     .sign_with_keys(keys)
     .map_err(|e| Error::Invalid(format!("cannot sign message: {e}")))?;
+    Ok(event)
+}
+
+/// Publish an already signed event, preserving its id on ambiguous retries.
+pub async fn publish_message(
+    relay_url: &str,
+    keys: &Keys,
+    auth_tag: Option<&Tag>,
+    store: &Store,
+    channel: Uuid,
+    event: nostr::Event,
+) -> Result<Item> {
+    event.verify().map_err(|e| Error::Invalid(e.to_string()))?;
+    if event.pubkey != keys.public_key()
+        || event.kind != nostr::Kind::Custom(9)
+        || crate::buzz::event_channel(&event) != Some(channel)
+    {
+        return Err(Error::Invalid(
+            "signed message does not match identity or room".into(),
+        ));
+    }
+    if !store.rooms()?.iter().any(|r| r.id == channel.to_string()) {
+        return Err(Error::Invalid("select a joined room before sending".into()));
+    }
     crate::init_crypto();
     let mut client = BuzzClient::connect(relay_url, keys, auth_tag).await?;
     let response = client.publish(event.clone()).await?;
     if !response.accepted {
         return Err(Error::RelayRejected(response.message));
     }
-    let (_, item) = ingest_message(store, &event, &keys.public_key(), channel)?;
-    store.set_since(&channel.to_string(), item.ts)?;
-    Ok(item)
+    finish_accepted(store, keys, channel, &event)
+}
+
+fn finish_accepted(
+    store: &Store,
+    keys: &Keys,
+    channel: Uuid,
+    event: &nostr::Event,
+) -> Result<Item> {
+    (|| {
+        let (_, item) = ingest_message(store, event, &keys.public_key(), channel)?;
+        store.set_since(&channel.to_string(), item.ts)?;
+        Ok(item)
+    })()
+    .map_err(|e: Error| Error::Accepted {
+        event_id: event.id.to_hex(),
+        message: e.to_string(),
+    })
 }
 
 /// Publish a NIP-25 reaction (kind 7) to a cached message in `channel`, in
@@ -440,5 +497,34 @@ mod tests {
             .map(|_| Keys::generate().public_key().to_hex())
             .collect();
         assert!(mention_pubkeys(&me, None, &many).is_err());
+    }
+}
+
+#[cfg(test)]
+mod delivery_tests {
+    use super::*;
+    #[test]
+    fn accepted_ingest_failure_preserves_event_id() {
+        let store = Store::open_in_memory().unwrap();
+        let keys = Keys::generate();
+        let channel = Uuid::new_v4();
+        store
+            .upsert_channel(&channel.to_string(), Some("room"), None, false, 1)
+            .unwrap();
+        let event = prepare_message(
+            "ws://localhost",
+            &keys,
+            &store,
+            channel,
+            "hello",
+            None,
+            &[],
+            &[],
+        )
+        .unwrap();
+        store.conn.execute_batch("DROP TABLE items").unwrap();
+        assert!(
+            matches!(finish_accepted(&store, &keys, channel, &event), Err(Error::Accepted { event_id, .. }) if event_id == event.id.to_hex())
+        );
     }
 }
