@@ -57,21 +57,61 @@ pub struct FlushReport {
     pub error: Option<String>,
 }
 
-/// Validate a device-built note path: `Notes/…`, plain segments only.
+/// Characters an entry title never contains (mirrors `entryTitle` in journalCore.ts).
+const PATH_FORBIDDEN: &[char] = &[
+    '\\', '[', ']', '#', '|', ':', '*', '?', '"', '<', '>', '^', '{', '}', '`', '~',
+];
+
+/// Validate a device-built note path (T-60):
+/// `Journal/YYYY/MM-DD/[HH-MM[-SS] ]<first words>`, i.e. it matches
+/// `^Journal/\d{4}/\d\d-\d\d/(\d\d-\d\d(-\d\d)? )?.+`; no `.`/`..`/empty
+/// segments, no control or forbidden characters, at most 200 characters.
 fn check_path(path: &str) -> Result<()> {
-    let ok = path.starts_with("Notes/")
-        && path.len() <= 200
-        && path
-            .split('/')
-            .all(|s| !s.is_empty() && s != "." && s != "..")
+    let digits = |s: &str| s.bytes().all(|b| b.is_ascii_digit());
+    let segs: Vec<&str> = path.split('/').collect();
+    let ok = segs.len() == 4
+        && segs[0] == "Journal"
+        && segs[1].len() == 4
+        && digits(segs[1])
+        && segs[2].len() == 5
+        && digits(&segs[2][..2])
+        && &segs[2][2..3] == "-"
+        && digits(&segs[2][3..])
+        && !matches!(segs[3], "" | "." | "..")
+        && segs[3].trim() == segs[3]
+        && path.chars().count() <= 200
         && path
             .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '-' | '_'));
+            .all(|c| !c.is_control() && !PATH_FORBIDDEN.contains(&c));
     if ok {
         Ok(())
     } else {
         Err(Error::Invalid(format!("bad journal path: {path}")))
     }
+}
+
+/// The path to use when `path` is taken by another entry: the same minute and
+/// first words, with the entry's seconds added (`HH-MM-SS`). Never a `-N`
+/// suffix. `None` when the path has no `HH-MM` stamp or seconds are unknown.
+fn clash_path(path: &str, created_at: &str) -> Option<String> {
+    let (dir, name) = path.rsplit_once('/')?;
+    let b = name.as_bytes();
+    let stamped = b.len() >= 5
+        && b[..2].iter().all(u8::is_ascii_digit)
+        && b[2] == b'-'
+        && b[3..5].iter().all(u8::is_ascii_digit)
+        && (b.len() == 5 || b[5] == b' ');
+    if !stamped {
+        return None;
+    }
+    // ISO `YYYY-MM-DDTHH:MM:SS…`; zone offsets are whole minutes, so UTC seconds
+    // equal local seconds.
+    let ss = created_at.get(17..19).filter(|s| digits_only(s))?;
+    Some(format!("{dir}/{}-{ss}{}", &name[..5], &name[5..]))
+}
+
+fn digits_only(s: &str) -> bool {
+    !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit())
 }
 
 impl Store {
@@ -220,7 +260,7 @@ async fn send_one(store: &Store, client: &VaultClient, e: &QueuedEntry) -> Resul
         Some(id) => id.clone(),
         None => {
             let mut path = e.path.clone();
-            let mut n = 1;
+            let mut with_seconds = false;
             let note = loop {
                 let note = client
                     .create_entry(&NewEntry {
@@ -234,11 +274,14 @@ async fn send_one(store: &Store, client: &VaultClient, e: &QueuedEntry) -> Resul
                 if note.entry_id.as_deref() == Some(e.entry_id.as_str()) {
                     break note;
                 }
-                n += 1;
-                if n > 9 {
-                    return Err(Error::Vault(format!("path taken: {}", e.path)));
+                // Another entry has this minute and these first words: add seconds once.
+                match (with_seconds, clash_path(&e.path, &e.created_at)) {
+                    (false, Some(p)) => {
+                        path = p;
+                        with_seconds = true;
+                    }
+                    _ => return Err(Error::Vault(format!("path taken: {path}"))),
                 }
-                path = format!("{}-{n}", e.path);
             };
             store.journal_set_note(&e.entry_id, &note.id)?;
             note.id
@@ -267,22 +310,102 @@ mod tests {
     const ID: &str = "7d6f2c1e-0a4b-4f7e-9c2d-1b3a5e7f9a0b";
 
     #[test]
+    fn check_path_accepts_journal_titles_and_rejects_the_rest() {
+        for ok in [
+            "Journal/2026/09-25/10-00",
+            "Journal/2026/09-25/10-00-07",
+            "Journal/2026/10-06/15-58 Walking by the creek this evening",
+            "Journal/2026/10-06/15-58-07 Walking, then chai",
+            "Journal/2026/10-06/Walking by the creek",
+            "Journal/2026/10-06/07-03 Café über naïve",
+        ] {
+            assert!(check_path(ok).is_ok(), "{ok}");
+        }
+        let long = format!("Journal/2026/09-25/{}", "a".repeat(190));
+        for bad in [
+            "Notes/2026/09-25/10-00-00",
+            "Journal/2026/09/2026-09-25 1000 Morning",
+            "Journal/2026/09-25/a/b",
+            "Journal/2026/09-25/",
+            "Journal/2026/09-25/..",
+            "Journal/26/09-25/x",
+            "Journal/2026/0925/x",
+            "Journal/2026/09-25/a:b",
+            "Journal/2026/09-25/a#b",
+            "Journal/2026/09-25/a\\b",
+            "Journal/2026/09-25/a\nb",
+            long.as_str(),
+        ] {
+            assert!(check_path(bad).is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn clash_adds_seconds_never_a_counter() {
+        let at = "2026-10-06T21:58:07.123Z";
+        assert_eq!(
+            clash_path("Journal/2026/10-06/15-58 Walking", at).as_deref(),
+            Some("Journal/2026/10-06/15-58-07 Walking")
+        );
+        assert_eq!(
+            clash_path("Journal/2026/10-06/15-58", at).as_deref(),
+            Some("Journal/2026/10-06/15-58-07")
+        );
+        assert_eq!(clash_path("Journal/2026/10-06/Walking", at), None);
+        assert_eq!(clash_path("Journal/2026/10-06/15-58 Walking", "t"), None);
+        let p = clash_path("Journal/2026/10-06/15-58 Walking", at).unwrap();
+        assert!(check_path(&p).is_ok());
+    }
+
+    #[test]
     fn queue_validates_and_lists() {
         let s = Store::open_in_memory().unwrap();
         assert!(s
             .journal_queue(ID, "../etc", "x", "text", "t", None, 1)
             .is_err());
         assert!(s
-            .journal_queue(ID, "Notes/2026/09-25/10-00-00", " ", "text", "t", None, 1)
+            .journal_queue(
+                ID,
+                "Journal/2026/09-25/10-00 Morning sit",
+                " ",
+                "text",
+                "t",
+                None,
+                1
+            )
             .is_err());
         assert!(s
-            .journal_queue("nope", "Notes/a", "x", "text", "t", None, 1)
+            .journal_queue(
+                "nope",
+                "Journal/2026/09-25/10-00 Morning sit",
+                "x",
+                "text",
+                "t",
+                None,
+                1
+            )
             .is_err());
-        s.journal_queue(ID, "Notes/2026/09-25/10-00-00", "hi", "text", "t", None, 1)
-            .unwrap();
+        s.journal_queue(
+            ID,
+            "Journal/2026/09-25/10-00 Morning sit",
+            "hi",
+            "text",
+            "t",
+            None,
+            1,
+        )
+        .unwrap();
         // Idempotent on entry id.
-        s.journal_queue(ID, "Notes/2026/09-25/10-00-00", "hi", "text", "t", None, 1)
-            .unwrap();
+        s.journal_queue(
+            ID,
+            "Journal/2026/09-25/10-00 Morning sit",
+            "hi",
+            "text",
+            "t",
+            None,
+            1,
+        )
+        .unwrap();
         let p = s.journal_pending().unwrap();
         assert_eq!(p.len(), 1);
         assert!(!p[0].has_audio);
@@ -294,7 +417,7 @@ mod tests {
         let audio: &[u8] = b"abc";
         s.journal_queue(
             ID,
-            "Notes/2026/09-25/10-00-00",
+            "Journal/2026/09-25/10-00 Morning sit",
             "",
             "voice",
             "t",
@@ -312,7 +435,7 @@ mod tests {
     fn outbox_marks_progress() {
         let s = Store::open_in_memory().unwrap();
         let audio: &[u8] = b"abc";
-        let path = "Notes/2026/09-25/10-00-00";
+        let path = "Journal/2026/09-25/10-00 Morning sit";
         s.journal_queue(ID, path, "", "voice", "t", Some((audio, "audio/ogg")), 1)
             .unwrap();
         s.journal_failed(ID, "offline").unwrap();
