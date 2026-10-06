@@ -7,7 +7,7 @@
 //! answers as that user: the same key that signs Buzz messages writes the
 //! vault. No token is stored on the device.
 //!
-//! Journal entries (T-60): path `Journal/YYYY/MM/YYYY-MM-DD HHMM <title>`
+//! Journal entries (T-60): path `Journal/YYYY/MM-DD/HH-MM <first words>`
 //! (local time; voice entries start untitled), tag `journal` (whose parent tag
 //! on uni-1 is `capture`, so older readers still see them), `metadata.source` =
 //! `text` | `voice`. Voice notes carry the audio as an attachment uploaded
@@ -973,7 +973,7 @@ mod tests {
 
     #[test]
     fn notes_from_every_shape() {
-        let n = json!({"id": "a", "path": "Journal/2026/10/2026-10-06 1200 hi", "content": "hi", "tags": ["journal"], "metadata": {"source": "voice"}, "createdAt": "t"});
+        let n = json!({"id": "a", "path": "Journal/2026/10-06/12-00 hi", "content": "hi", "tags": ["journal"], "metadata": {"source": "voice"}, "createdAt": "t"});
         assert_eq!(notes_in(&json!([n.clone()])).len(), 1);
         assert_eq!(notes_in(&json!({"notes": [n.clone(), n.clone()]})).len(), 2);
         assert_eq!(
