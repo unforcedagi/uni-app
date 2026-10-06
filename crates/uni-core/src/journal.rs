@@ -57,16 +57,22 @@ pub struct FlushReport {
     pub error: Option<String>,
 }
 
-/// Validate a device-built note path: `Notes/…`, plain segments only.
+/// Characters an entry title never contains (mirrors `entryTitle` in journalCore.ts).
+const PATH_FORBIDDEN: &[char] = &[
+    '\\', '[', ']', '#', '|', ':', '*', '?', '"', '<', '>', '^', '{', '}', '`', '~',
+];
+
+/// Validate a device-built note path: `Journal/…`, no empty/`.`/`..` segments,
+/// no control or forbidden characters, at most 200 characters.
 fn check_path(path: &str) -> Result<()> {
-    let ok = path.starts_with("Notes/")
-        && path.len() <= 200
+    let ok = path.starts_with("Journal/")
+        && path.chars().count() <= 200
         && path
             .split('/')
             .all(|s| !s.is_empty() && s != "." && s != "..")
         && path
             .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '-' | '_'));
+            .all(|c| !c.is_control() && !PATH_FORBIDDEN.contains(&c));
     if ok {
         Ok(())
     } else {
@@ -267,22 +273,78 @@ mod tests {
     const ID: &str = "7d6f2c1e-0a4b-4f7e-9c2d-1b3a5e7f9a0b";
 
     #[test]
+    fn check_path_accepts_journal_titles_and_rejects_the_rest() {
+        for ok in [
+            "Journal/2026/09/2026-09-25 1000",
+            "Journal/2026/09/2026-09-25 1000 Morning sit, then chai",
+            "Journal/2026/10/2026-10-06 0703 Café über naïve",
+        ] {
+            assert!(check_path(ok).is_ok(), "{ok}");
+        }
+        let long = format!("Journal/2026/09/{}", "a".repeat(190));
+        for bad in [
+            "Notes/2026/09-25/10-00-00",
+            "Journal/2026//x",
+            "Journal/../etc",
+            "Journal/2026/09/a:b",
+            "Journal/2026/09/a#b",
+            "Journal/2026/09/a\\b",
+            "Journal/2026/09/a\nb",
+            long.as_str(),
+        ] {
+            assert!(check_path(bad).is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
     fn queue_validates_and_lists() {
         let s = Store::open_in_memory().unwrap();
         assert!(s
             .journal_queue(ID, "../etc", "x", "text", "t", None, 1)
             .is_err());
         assert!(s
-            .journal_queue(ID, "Notes/2026/09-25/10-00-00", " ", "text", "t", None, 1)
+            .journal_queue(
+                ID,
+                "Journal/2026/09/2026-09-25 1000 Morning sit",
+                " ",
+                "text",
+                "t",
+                None,
+                1
+            )
             .is_err());
         assert!(s
-            .journal_queue("nope", "Notes/a", "x", "text", "t", None, 1)
+            .journal_queue(
+                "nope",
+                "Journal/2026/09/2026-09-25 1000 Morning sit",
+                "x",
+                "text",
+                "t",
+                None,
+                1
+            )
             .is_err());
-        s.journal_queue(ID, "Notes/2026/09-25/10-00-00", "hi", "text", "t", None, 1)
-            .unwrap();
+        s.journal_queue(
+            ID,
+            "Journal/2026/09/2026-09-25 1000 Morning sit",
+            "hi",
+            "text",
+            "t",
+            None,
+            1,
+        )
+        .unwrap();
         // Idempotent on entry id.
-        s.journal_queue(ID, "Notes/2026/09-25/10-00-00", "hi", "text", "t", None, 1)
-            .unwrap();
+        s.journal_queue(
+            ID,
+            "Journal/2026/09/2026-09-25 1000 Morning sit",
+            "hi",
+            "text",
+            "t",
+            None,
+            1,
+        )
+        .unwrap();
         let p = s.journal_pending().unwrap();
         assert_eq!(p.len(), 1);
         assert!(!p[0].has_audio);
@@ -294,7 +356,7 @@ mod tests {
         let audio: &[u8] = b"abc";
         s.journal_queue(
             ID,
-            "Notes/2026/09-25/10-00-00",
+            "Journal/2026/09/2026-09-25 1000 Morning sit",
             "",
             "voice",
             "t",
@@ -312,7 +374,7 @@ mod tests {
     fn outbox_marks_progress() {
         let s = Store::open_in_memory().unwrap();
         let audio: &[u8] = b"abc";
-        let path = "Notes/2026/09-25/10-00-00";
+        let path = "Journal/2026/09/2026-09-25 1000 Morning sit";
         s.journal_queue(ID, path, "", "voice", "t", Some((audio, "audio/ogg")), 1)
             .unwrap();
         s.journal_failed(ID, "offline").unwrap();

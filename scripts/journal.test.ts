@@ -1,11 +1,20 @@
 // Run: node --experimental-strip-types scripts/journal.test.ts
 import assert from "node:assert/strict";
-import { entryPath, entryText, mmss, newDraft, pickAudioMime, shareText, TRANSCRIPT_PENDING } from "../src/journalCore.ts";
+import { entryPath, entryText, entryTitle, mmss, newDraft, pickAudioMime, shareText, TRANSCRIPT_PENDING } from "../src/journalCore.ts";
 
 const d = new Date(2026, 8, 5, 7, 3, 9);
-assert.equal(entryPath(d), "Notes/2026/09-05/07-03-09");
+assert.equal(entryPath(d), "Journal/2026/09/2026-09-05 0703");
 const draft = newDraft("hi", "text", d, "id-1");
-assert.deepEqual([draft.entry_id, draft.path, draft.source], ["id-1", "Notes/2026/09-05/07-03-09", "text"]);
+assert.deepEqual([draft.entry_id, draft.path, draft.source], ["id-1", "Journal/2026/09/2026-09-05 0703 hi", "text"]);
+// Voice entries carry only the placeholder: no title until uni-1's sweep adds one.
+assert.equal(newDraft(TRANSCRIPT_PENDING, "voice", d, "v").path, "Journal/2026/09/2026-09-05 0703");
+assert.equal(entryTitle("One two three four five six seven eight nine"), "One two three four five six seven");
+assert.equal(entryTitle("## Morning: **sat** with [the chant](https://x.y/z) at www.a.b/c today!"), "Morning sat with the chant at today");
+assert.equal(entryTitle("What? a/b [c] #d |e *f \"g\" <h> ^i {j} `k` ~l \\m"), "What a b c d e f"); // 7-word cap
+assert.equal(entryTitle("See https://example.com/long/url ok..."), "See ok");
+assert.equal(entryTitle("[[Areas/Sadhana|sadhana]] notes, —"), "sadhana notes");
+assert.ok(entryTitle("Supercalifragilisticexpialidocious ".repeat(5)).length <= 60);
+assert.equal(entryTitle(""), "");
 assert.equal(draft.created_at, d.toISOString());
 
 assert.equal(entryText(`note\n\n${TRANSCRIPT_PENDING}`), "note");
