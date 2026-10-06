@@ -2,7 +2,7 @@ import type { MediaRef } from "./Attachments";
 
 export type VoiceClip = {
   id: string; key: string; file: Blob; filename: string; mime: string;
-  created: number; state: "uploading" | "error"; error?: string;
+  owner: string; relay: string; created: number; state: "uploading" | "error" | "delivered"; error?: string;
   media?: MediaRef; signedEvent?: string;
   voice: { channel: string; replyTo: string | null; notifyUni: boolean };
 };
@@ -11,6 +11,7 @@ export type VoiceClip = {
 export class VoiceOutbox {
   private database: Promise<IDBDatabase> | null = null;
   private tail: Promise<unknown> = Promise.resolve();
+  private memoryOnly = false;
   private memory = new Map<string, VoiceClip>();
   constructor(private unavailable: () => void) {}
   private db() {
@@ -25,7 +26,14 @@ export class VoiceOutbox {
   private run<T>(mode: IDBTransactionMode, action: (store: IDBObjectStore) => IDBRequest<T>, fallback: () => T): Promise<T> {
     const job = this.tail.then(async () => {
       try {
-        const db = await this.db();
+        // Only an unavailable database at startup permits memory-only delivery.
+        // Once opened, transaction failures must never silently fall back.
+        let db: IDBDatabase;
+        try { db = await this.db(); } catch {
+          this.memoryOnly = true;
+          this.unavailable();
+          return fallback();
+        }
         return await new Promise<T>((resolve, reject) => {
           const transaction = db.transaction("clips", mode);
           const request = action(transaction.objectStore("clips"));
@@ -34,20 +42,29 @@ export class VoiceOutbox {
           transaction.onerror = () => reject(transaction.error);
         });
       } catch {
-        this.unavailable();
-        return fallback();
+        throw new Error("Couldn’t save the voice note safely — Retry");
       }
     });
     this.tail = job.catch(() => {});
     return job;
   }
   async put(clip: VoiceClip) {
-    this.memory.set(clip.id, clip);
-    await this.run("readwrite", store => store.put(clip), () => clip.id);
+    try {
+      await this.run("readwrite", store => store.put(clip), () => clip.id);
+      this.memory.set(clip.id, clip);
+      return this.memoryOnly ? "memory" as const : "durable" as const;
+    } catch { return "failed" as const; }
   }
   async remove(id: string) {
-    this.memory.delete(id);
-    await this.run("readwrite", store => store.delete(id), () => undefined);
+    try {
+      await this.run("readwrite", store => store.delete(id), () => undefined);
+      this.memory.delete(id);
+      return this.memoryOnly ? "memory" as const : "durable" as const;
+    } catch { return "failed" as const; }
+  }
+  async clear() {
+    await this.run("readwrite", store => store.clear(), () => undefined);
+    this.memory.clear();
   }
   async list() {
     const clips = await this.run("readonly", store => store.getAll() as IDBRequest<VoiceClip[]>, () => [...this.memory.values()]);

@@ -33,12 +33,14 @@ test.beforeEach(async ({ page }) => {
         switch (cmd) {
           case 'identity_status': return { paired: true, pubkey: 'a'.repeat(64) };
           case 'get_identity': return 'a'.repeat(64);
+          case 'relay_origin': return 'https://example.invalid';
           case 'get_npub': return 'test';
           case 'get_rooms': return [{ id: 'test', name: 'Test room', unread: 0 }, { id: 'other', name: 'Other room', unread: 0 }];
           case 'get_members':
             if (w.holdMembers) await new Promise<void>(resolve => { w.finishMembers = resolve; });
             return w.uniMember ? [{ pubkey: 'c'.repeat(64), name: 'Uni' }, { pubkey: 'b'.repeat(64), name: 'Test member' }] : [{ pubkey: 'b'.repeat(64), name: 'Test member' }];
-          case 'get_messages': case 'vault_list': return [];
+          case 'get_messages': return w.knownMessages ?? [];
+          case 'vault_list': return [];
           case 'journal_config': return { hub: 'test' };
           case 'refresh': return { total_items: 0, channel_errors: {}, truncated_channels: [] };
           case 'media_upload':
@@ -539,13 +541,14 @@ test('Pending voice resumes once after reload in original thread', async ({ page
     const db = await new Promise<IDBDatabase>((resolve) => { const r = indexedDB.open('uni-voice-outbox', 1); r.onsuccess = () => resolve(r.result); });
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction('clips', 'readwrite');
-      tx.objectStore('clips').put({ id: 'pending', key: 'other:thread-root', file: new Blob(['audio'], { type: 'audio/webm' }), filename: 'voice.webm', mime: 'audio/webm', created: 1, state: 'uploading', signedEvent: 'persisted-signed-event', media: { url: 'https://example.invalid/audio', mime: 'audio/webm' }, voice: { channel: 'other', replyTo: 'thread-root', notifyUni: false } });
+      tx.objectStore('clips').put({ id: 'pending', key: 'other:thread-root', file: new Blob(['audio'], { type: 'audio/webm' }), filename: 'voice.webm', mime: 'audio/webm', created: 1, state: 'uploading', owner: 'a'.repeat(64), relay: 'https://example.invalid', signedEvent: 'persisted-signed-event', media: { url: 'https://example.invalid/audio', mime: 'audio/webm' }, voice: { channel: 'other', replyTo: 'thread-root', notifyUni: false } });
       tx.oncomplete = () => { db.close(); resolve(); }; tx.onerror = () => reject(tx.error);
     });
   });
   await page.reload();
   await expect.poll(async () => (await voicePosts(page)).length).toBe(1);
   expect((await voicePosts(page))[0].args).toMatchObject({ channel: 'other', replyTo: 'thread-root', signedEvent: 'persisted-signed-event' });
+  expect(await page.evaluate(() => (window as any).calls.filter((c: any) => c.cmd === 'prepare_voice_message'))).toHaveLength(0);
   await expect(page.locator('.voice-status')).toHaveText('Voice message sent');
   await page.reload();
   await expect(page.getByRole('textbox', { name: 'Message Test room' })).toBeVisible();
@@ -588,7 +591,7 @@ test('Restored pending clips preserve FIFO across rooms', async ({ page }) => {
     await new Promise<void>(resolve => {
       const tx = db.transaction('clips', 'readwrite');
       for (const [id, created, channel] of [['second', 2, 'other'], ['first', 1, 'test']] as const) {
-        tx.objectStore('clips').put({ id, key: `${channel}:room`, file: new Blob([id], { type: 'audio/webm' }), filename: `${id}.webm`, mime: 'audio/webm', created, state: 'uploading', signedEvent: id, media: { url: `https://example.invalid/${id}`, mime: 'audio/webm' }, voice: { channel, replyTo: null, notifyUni: false } });
+        tx.objectStore('clips').put({ id, key: `${channel}:room`, file: new Blob([id], { type: 'audio/webm' }), filename: `${id}.webm`, mime: 'audio/webm', created, state: 'uploading', owner: 'a'.repeat(64), relay: 'https://example.invalid', signedEvent: id, media: { url: `https://example.invalid/${id}`, mime: 'audio/webm' }, voice: { channel, replyTo: null, notifyUni: false } });
       }
       tx.oncomplete = () => { db.close(); resolve(); };
     });
@@ -611,4 +614,102 @@ test('Removing failed voice deletes durable record', async ({ page }) => {
   await expect(page.getByRole('textbox', { name: 'Message Test room' })).toBeVisible();
   await expect(page.locator('.compose-file')).toHaveCount(0);
   expect(await page.evaluate(() => sessionStorage.getItem('voicePostCount'))).toBe('1');
+});
+
+// Abort real Chromium transactions, leaving the previous durable record intact.
+async function storageFault(page: Page, fault: 'signed-put' | 'delete') {
+  await page.evaluate(fault => {
+    const w = window as any;
+    w.storageFault = fault;
+    const put = IDBObjectStore.prototype.put;
+    const del = IDBObjectStore.prototype.delete;
+    IDBObjectStore.prototype.put = function(value, key) {
+      const request = put.call(this, value, key);
+      if (this.name === 'clips' && w.storageFault === 'signed-put' && value.signedEvent) this.transaction.abort();
+      return request;
+    };
+    IDBObjectStore.prototype.delete = function(key) {
+      const request = del.call(this, key);
+      if (this.name === 'clips' && w.storageFault === 'delete') this.transaction.abort();
+      return request;
+    };
+  }, fault);
+}
+
+test('Signed event storage failure blocks publish; Retry saves the same event', async ({ page }) => {
+  await storageFault(page, 'signed-put');
+  await recordClip(page);
+  await expect(page.locator('.compose-file-retry')).toBeVisible();
+  await expect(page.locator('.compose-file')).toContainText('save the voice note safely');
+  expect(await voicePosts(page)).toHaveLength(0);
+  const prepares = await page.evaluate(() => (window as any).calls.filter((c: any) => c.cmd === 'prepare_voice_message').length);
+  await page.evaluate(() => { (window as any).storageFault = null; });
+  await page.locator('.compose-file-retry').click();
+  await expect(page.locator('.voice-status')).toHaveText('Voice message sent');
+  expect(await voicePosts(page)).toHaveLength(1);
+  expect(await page.evaluate(() => (window as any).calls.filter((c: any) => c.cmd === 'prepare_voice_message').length)).toBe(prepares);
+});
+
+test('Delete failure after delivery does not resend or show a clip on reload', async ({ page }) => {
+  await storageFault(page, 'delete');
+  await recordClip(page);
+  await expect(page.locator('.voice-status')).toHaveText('Voice message sent');
+  await page.reload();
+  await expect(page.getByRole('textbox', { name: 'Message Test room' })).toBeVisible();
+  await page.waitForTimeout(400);
+  expect(await page.evaluate(() => sessionStorage.getItem('voicePostCount'))).toBe('1');
+  await expect(page.locator('.compose-file')).toHaveCount(0);
+});
+
+async function seedForeign(page: Page, owner = 'b'.repeat(64), relay = 'https://example.invalid') {
+  await page.evaluate(async ({ owner, relay }) => {
+    const db = await new Promise<IDBDatabase>(resolve => { const r = indexedDB.open('uni-voice-outbox', 1); r.onsuccess = () => resolve(r.result); });
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction('clips', 'readwrite');
+      tx.objectStore('clips').put({ id: 'foreign', key: 'test:room', owner, relay, file: new Blob(['audio']), filename: 'foreign.webm', mime: 'audio/webm', created: 1, state: 'uploading', signedEvent: 'foreign-event', voice: { channel: 'test', replyTo: null, notifyUni: false } });
+      tx.oncomplete = () => resolve(); tx.onabort = () => reject(tx.error);
+    });
+    db.close();
+  }, { owner, relay });
+}
+for (const boundary of ['account', 'relay']) test(`Outbox ignores another ${boundary}`, async ({ page }) => {
+  await seedForeign(page, boundary === 'account' ? 'b'.repeat(64) : 'a'.repeat(64), boundary === 'relay' ? 'https://other.invalid' : 'https://example.invalid');
+  await page.reload();
+  await expect(page.getByRole('textbox', { name: 'Message Test room' })).toBeVisible();
+  await page.waitForTimeout(400);
+  expect(await voicePosts(page)).toHaveLength(0);
+  await expect(page.locator('.compose-file')).toHaveCount(0);
+});
+
+test('Forget device key clears the whole outbox', async ({ page }) => {
+  await seedForeign(page);
+  if (test.info().project.name === 'mobile') await page.getByRole('button', { name: 'Back to conversations', exact: true }).click();
+  await (test.info().project.name === 'mobile' ? page.locator('.rooms-header') : page.getByRole('navigation', { name: 'Main navigation' })).getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByRole('button', { name: 'Forget this device key', exact: true }).click();
+  await page.getByRole('button', { name: /Tap again to forget/ }).click();
+  await expect(page.locator('.pairing-card')).toBeVisible();
+  expect(await page.evaluate(async () => {
+    const db = await new Promise<IDBDatabase>(resolve => { const r = indexedDB.open('uni-voice-outbox', 1); r.onsuccess = () => resolve(r.result); });
+    return new Promise<number>(resolve => { const r = db.transaction('clips').objectStore('clips').count(); r.onsuccess = () => { resolve(r.result); db.close(); }; });
+  })).toBe(0);
+});
+
+test('Restored signed event already in local messages is removed without publishing', async ({ page }) => {
+  await seedForeign(page, 'a'.repeat(64));
+  await page.evaluate(async () => {
+    const db = await new Promise<IDBDatabase>(resolve => { const r = indexedDB.open('uni-voice-outbox', 1); r.onsuccess = () => resolve(r.result); });
+    await new Promise<void>(resolve => {
+      const tx = db.transaction('clips', 'readwrite');
+      const store = tx.objectStore('clips');
+      const r = store.get('foreign');
+      r.onsuccess = () => store.put({ ...r.result, signedEvent: JSON.stringify({ id: 'known-event' }) });
+      tx.oncomplete = () => { db.close(); resolve(); };
+    });
+  });
+  await page.addInitScript(() => { (window as any).knownMessages = [{ ref: 'known-event', channel: 'test', author: 'a'.repeat(64), author_name: 'Me', ts: 1, body: '', mentions_me: false, root: null, parent: null, mentions: [], reply_count: 0, last_reply_ts: null, edited: false, reactions: [] }]; });
+  await page.reload();
+  await expect(page.locator('.voice-status')).toHaveText('Voice message sent');
+  expect(await voicePosts(page)).toHaveLength(0);
+  expect(await page.evaluate(() => (window as any).calls.filter((c: any) => c.cmd === 'prepare_voice_message'))).toHaveLength(0);
+  await expect(page.locator('.compose-file')).toHaveCount(0);
 });

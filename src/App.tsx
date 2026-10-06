@@ -48,7 +48,7 @@ const TYPING_SEND_MS = 3000;
 type IdentityStatus = { paired: boolean; pubkey: string | null };
 type SyncResult = { pubkey: string; total_items: number; channel_errors: Record<string, string>; truncated_channels: string[] };
 
-type PendingFile = { created?: number; signedEvent?: string; id: string; file: File; preview: string | null; state: "uploading" | "ready" | "error"; media?: MediaRef; error?: string; voice?: { channel: string; replyTo: string | null; notifyUni: boolean } };
+type PendingFile = { owner?: string; relay?: string; created?: number; signedEvent?: string; id: string; file: File; preview: string | null; state: "uploading" | "ready" | "error"; media?: MediaRef; error?: string; voice?: { channel: string; replyTo: string | null; notifyUni: boolean } };
 const MAX_FILE_BYTES = 25 * 1024 * 1024;
 const MAX_ATTACHMENTS = 20;
 const OTHER_VAULTS_KEY = "uni:other-vaults-expanded";
@@ -263,14 +263,16 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const voiceOutbox = useRef(new VoiceOutbox(() => setVoiceStorageWarning("Voice storage unavailable. Recordings are kept only until this app closes.")));
   const voiceRestored = useRef<Promise<void> | null>(null);
   useEffect(() => {
-    voiceRestored.current ??= voiceOutbox.current.list().then((clips) => {
+    voiceRestored.current ??= Promise.all([voiceOutbox.current.list(), invoke<string>("get_identity"), invoke<string>("relay_origin")]).then(([records, owner, relay]) => {
+      for (const record of records) if (record.state === "delivered") void voiceOutbox.current.remove(record.id);
+      const clips = records.filter(clip => clip.owner === owner && clip.relay === relay && clip.state !== "delivered");
       for (const clip of clips) {
         voiceCreated.current = Math.max(voiceCreated.current, clip.created);
-        const item: PendingFile = { ...clip, file: new File([clip.file], clip.filename, { type: clip.mime }), preview: null };
+        const item: PendingFile = { ...clip, file: new File([clip.file], clip.filename, { type: clip.mime }), state: clip.state === "error" ? "error" : "uploading", preview: null };
         changePending(clip.key, items => items.some(x => x.id === clip.id) ? items : [...items, item]);
       }
       for (const clip of clips) if (clip.state !== "error") queueVoice(clip.key, clip.id);
-    });
+    }).catch(e => setError(String(e)));
   }, []);
   const activeScope = useRef<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -893,12 +895,16 @@ function Conversations({ onForget }: { onForget: () => void }) {
     pendingStore.current.set(key, next);
     if (activeScope.current === key) setPending(next);
   }
-  async function persistVoice(key: string, id: string) {
+  async function persistVoice(key: string, id: string, delivered = false) {
     const clip = pendingStore.current.get(key)?.find(x => x.id === id);
     if (!clip?.voice) return;
-    await voiceOutbox.current.put({ id, key, file: clip.file, filename: clip.file.name, mime: clip.file.type,
-      created: clip.created!, state: clip.state === "error" ? "error" : "uploading", error: clip.error,
+    const owner = clip.owner ?? await invoke<string>("get_identity");
+    const relay = clip.relay ?? await invoke<string>("relay_origin");
+    changePending(key, items => items.map(x => x.id === id ? { ...x, owner, relay } : x));
+    const saved = await voiceOutbox.current.put({ id, key, owner, relay, file: clip.file, filename: clip.file.name, mime: clip.file.type,
+      created: clip.created!, state: delivered ? "delivered" : clip.state === "error" ? "error" : "uploading", error: clip.error,
       media: clip.media, signedEvent: clip.signedEvent, voice: clip.voice });
+    if (saved === "failed") throw new Error("Couldn’t save the voice note safely — Retry");
   }
   function removeFile(key: string, id: string) {
     void voiceOutbox.current.remove(id);
@@ -962,8 +968,18 @@ function Conversations({ onForget }: { onForget: () => void }) {
         changePending(key, items => items.map(x => x.id === id ? { ...x, signedEvent } : x));
         await persistVoice(key, id);
         if (!voiceMounted.current || !pendingStore.current.get(key)?.some(x => x.id === id)) return;
-        try { await invoke<Message>("post_message", { ...args, signedEvent }); }
+        let known = false;
+        if (clip.signedEvent) {
+          try {
+            const eventId = JSON.parse(signedEvent).id;
+            const rows = await invoke<Message[]>("get_messages", { channel: destination.channel, root: destination.replyTo, limit: 200 });
+            known = typeof eventId === "string" && rows.some(row => row.ref === eventId || row.ref === `nostr:${eventId}`);
+          } catch { /* Re-publishing the same signed event is idempotent at the relay. */ }
+        }
+        try { if (!known) await invoke<Message>("post_message", { ...args, signedEvent }); }
         catch (e) { if (!relayAccepted(e)) throw e; }
+        // A durable tombstone survives a failed delete; deletion is also retried below.
+        await persistVoice(key, id, true).catch(() => {});
         await voiceOutbox.current.remove(id);
         if (!voiceMounted.current) return;
         removeFile(key, id);
@@ -973,7 +989,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       } catch (e) {
         if (!voiceMounted.current) return;
         changePending(key, (items) => items.map((x) => x.id === id ? { ...x, state: "error", error: String(e) } : x));
-        await persistVoice(key, id);
+        await persistVoice(key, id).catch(() => {});
         setError(`Voice message failed: ${String(e)}. Retry or remove the recording.`);
         outcome = "Voice message failed";
       } finally {
@@ -990,7 +1006,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     const file = new File([blob], voiceFileName(mime), { type: mime.split(";")[0] });
     const id = crypto.randomUUID();
     changePending(origin.key, (items) => [...items, { id, file, preview: null, state: "uploading", created: (voiceCreated.current = Math.max(Date.now(), voiceCreated.current + 1)), voice: { channel: origin.channel, replyTo: origin.replyTo, notifyUni: origin.notifyUni } }]);
-    void (async () => { await voiceRestored.current; await persistVoice(origin.key, id); if (voiceMounted.current) queueVoice(origin.key, id); })();
+    void (async () => { await voiceRestored.current; if (voiceMounted.current) queueVoice(origin.key, id); })();
   }, `for #${rooms.find((r) => r.id === channel)?.name ?? "room"}`);
   async function toggleRecording() {
     if (sendingRef.current) return;
@@ -1214,10 +1230,10 @@ function Conversations({ onForget }: { onForget: () => void }) {
   async function forget() {
     // Two taps instead of window.confirm (unreliable in Android WebView).
     if (!forgetArmed) { setForgetArmed(true); return; }
-    try { await invoke("identity_forget");
+    try { voiceMounted.current = false; await voiceQueue.current; await voiceOutbox.current.clear(); await invoke("identity_forget");
       forgetDrafts(); invalidatePaths();
       try { for (const key of Object.keys(localStorage)) if (key.startsWith("uni.noteDraft.v1:") || key.startsWith("uni.vaultExpanded.v1:") || key === ALIASES_KEY) localStorage.removeItem(key); } catch { /* unavailable storage */ }
-      onForget(); } catch (e) { setError(String(e)); }
+      onForget(); } catch (e) { voiceMounted.current = true; setError(String(e)); }
   }
 
   const currentRoom = rooms.find((r) => r.id === channel);
