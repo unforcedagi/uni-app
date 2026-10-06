@@ -1092,7 +1092,7 @@ fn relay_origin(app: tauri::AppHandle) -> String {
 // entry first, so journaling works offline and survives app restarts.
 
 const DEFAULT_HUB: &str = "https://uni-1.taildf9ce2.ts.net";
-const DEFAULT_VAULT: &str = "unforced";
+const DEFAULT_VAULT: &str = "uni"; // T-56: unforced merged into uni (2026-10-06)
 
 fn vault_config(app: &tauri::AppHandle) -> uni_core::parachute::VaultConfig {
     let saved = app
