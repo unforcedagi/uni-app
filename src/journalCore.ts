@@ -1,5 +1,5 @@
 // Journal helpers (pure, unit-tested). Entries are tagged `journal` and live at
-// `Journal/YYYY/MM/YYYY-MM-DD HHMM <title>` in local time (T-60).
+// `Journal/YYYY/MM-DD/HH-MM <first words>` in local time (T-60).
 
 import { quote } from "./uniActions.ts";
 import { noteUrl } from "./vaultlinks.ts";
@@ -15,37 +15,43 @@ const pad = (n: number) => String(n).padStart(2, "0");
 /** Characters never allowed in an entry title (mirrors uni-core `check_path`). */
 const TITLE_FORBIDDEN = /[\\/\[\]#|:*?"<>^{}`~]/g;
 
-/** Entry title: the first words (≤7 words, ≤60 chars), markdown/links/URLs
- * stripped, forbidden characters removed, trailing punctuation trimmed. */
+/** First words of an entry (T-60, same rule as uni-1's t60_journal_sweep.py):
+ * up to 7 words and 60 characters; markdown markers, embeds, links/URLs and
+ * forbidden characters removed; trailing punctuation trimmed. */
 export function entryTitle(content: string): string {
-  let t = entryText(content)
-    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")      // [text](url) / images
-    .replace(/\[\[([^\]|]*\|)?([^\]]*)\]\]/g, "$2") // [[target|alias]]
+  const text = entryText(content)
+    .replace(/^---\n[\s\S]*?\n---\n/, "")
+    .replace(/!\[\[[^\]]*\]\]/g, " ")                 // ![[embed]]
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, " ")             // ![img](url)
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")           // [text](url)
+    .replace(/\[\[([^\]|]*\|)?([^\]]*)\]\]/g, "$2")    // [[target|alias]]
     .replace(/\b(?:https?|ftp):\/\/\S+/gi, " ")
     .replace(/\bwww\.\S+/gi, " ")
-    .replace(/^\s{0,3}(?:#{1,6}\s+|>\s*|[-*+]\s+|\d+[.)]\s+)/gm, "")
-    .replace(/[*_~`]+/g, "")
+    .replace(/^\s*(?:[#>*\-+]+|\d+[.)])\s+/gm, "")
+    .replace(/\*\*|__|[*_]/g, "")
     .replace(TITLE_FORBIDDEN, " ")
-    .replace(/[\u0000-\u001f\u007f]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  t = t.split(" ").filter(Boolean).slice(0, 7).join(" ");
-  if (t.length > 60) {
-    const cut = t.slice(0, 60);
-    const sp = cut.lastIndexOf(" ");
-    t = sp > 0 ? cut.slice(0, sp) : cut;
+    .replace(/[\u0000-\u001f\u007f]/g, " ");
+  let title = "";
+  for (const w of text.split(/\s+/).filter(Boolean).slice(0, 7)) {
+    const next = title ? `${title} ${w}` : w;
+    if (next.length > 60) { if (!title) title = w.slice(0, 60); break; }
+    title = next;
   }
-  return t.replace(/[\s.,;!?'"()\-–—…]+$/u, "").trim();
+  return title.replace(/^[\s.,;'\-–—]+|[\s.,;!?'"()\-–—…]+$/gu, "");
 }
 
-/** Vault path for an entry made at `d` (local time). Voice entries have no
- * text yet, so no title; uni-1's sweep adds it once the transcript lands. */
+/** Vault path for an entry made at `d`, device local time:
+ * `Journal/YYYY/MM-DD/HH-MM <first words>`. A voice entry still transcribing
+ * has no words yet → `Journal/YYYY/MM-DD/HH-MM`; uni-1's sweep titles it.
+ * Seconds are added only on a clash, by uni-core (`clash_path`). */
 export function entryPath(d: Date, content = ""): string {
-  const y = d.getFullYear(), mo = pad(d.getMonth() + 1);
-  const base = `Journal/${y}/${mo}/${y}-${mo}-${pad(d.getDate())} ${pad(d.getHours())}${pad(d.getMinutes())}`;
+  const base = `Journal/${d.getFullYear()}/${pad(d.getMonth() + 1)}-${pad(d.getDate())}/${pad(d.getHours())}-${pad(d.getMinutes())}`;
   const title = entryTitle(content);
   return title ? `${base} ${title}` : base;
 }
+
+/** Recognises a T-60 journal entry path. */
+export const JOURNAL_PATH = /^Journal\/\d{4}\/\d\d-\d\d\/(\d\d-\d\d(-\d\d)? )?.+/;
 
 export function newDraft(content: string, source: "text" | "voice", d = new Date(), id = crypto.randomUUID()): JournalDraft {
   return { entry_id: id, path: entryPath(d, content), content, source, created_at: d.toISOString() };
