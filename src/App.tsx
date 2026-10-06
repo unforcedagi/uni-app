@@ -1,3 +1,4 @@
+import { VoiceOutbox, relayAccepted } from "./voiceOutbox";
 import { SettingsIcon, UniIcon, JournalIcon, StarIcon, RoomsIcon } from "./Icons";
 import { FOR_YOU_ID, FOR_YOU_OPENED_KEY, LAST_SURFACE_KEY, countRecommendations, isRecommendationNew, readLastSurface, saveLastSurface } from "./railCore";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -47,7 +48,7 @@ const TYPING_SEND_MS = 3000;
 type IdentityStatus = { paired: boolean; pubkey: string | null };
 type SyncResult = { pubkey: string; total_items: number; channel_errors: Record<string, string>; truncated_channels: string[] };
 
-type PendingFile = { id: string; file: File; preview: string | null; state: "uploading" | "ready" | "error"; media?: MediaRef; error?: string; voice?: { channel: string; replyTo: string | null; notifyUni: boolean } };
+type PendingFile = { created?: number; signedEvent?: string; id: string; file: File; preview: string | null; state: "uploading" | "ready" | "error"; media?: MediaRef; error?: string; voice?: { channel: string; replyTo: string | null; notifyUni: boolean } };
 const MAX_FILE_BYTES = 25 * 1024 * 1024;
 const MAX_ATTACHMENTS = 20;
 const OTHER_VAULTS_KEY = "uni:other-vaults-expanded";
@@ -255,8 +256,22 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const [pending, setPending] = useState<PendingFile[]>([]);
   const pendingStore = useRef(new Map<string, PendingFile[]>());
   const voiceQueue = useRef(Promise.resolve());
+  const voiceCreated = useRef(0);
   const voiceJobs = useRef(new Set<string>());
   const [voiceStatus, setVoiceStatus] = useState("");
+  const [voiceStorageWarning, setVoiceStorageWarning] = useState("");
+  const voiceOutbox = useRef(new VoiceOutbox(() => setVoiceStorageWarning("Voice storage unavailable. Recordings are kept only until this app closes.")));
+  const voiceRestored = useRef<Promise<void> | null>(null);
+  useEffect(() => {
+    voiceRestored.current ??= voiceOutbox.current.list().then((clips) => {
+      for (const clip of clips) {
+        voiceCreated.current = Math.max(voiceCreated.current, clip.created);
+        const item: PendingFile = { ...clip, file: new File([clip.file], clip.filename, { type: clip.mime }), preview: null };
+        changePending(clip.key, items => items.some(x => x.id === clip.id) ? items : [...items, item]);
+      }
+      for (const clip of clips) if (clip.state !== "error") queueVoice(clip.key, clip.id);
+    });
+  }, []);
   const activeScope = useRef<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const voiceMounted = useRef(true);
@@ -878,7 +893,15 @@ function Conversations({ onForget }: { onForget: () => void }) {
     pendingStore.current.set(key, next);
     if (activeScope.current === key) setPending(next);
   }
+  async function persistVoice(key: string, id: string) {
+    const clip = pendingStore.current.get(key)?.find(x => x.id === id);
+    if (!clip?.voice) return;
+    await voiceOutbox.current.put({ id, key, file: clip.file, filename: clip.file.name, mime: clip.file.type,
+      created: clip.created!, state: clip.state === "error" ? "error" : "uploading", error: clip.error,
+      media: clip.media, signedEvent: clip.signedEvent, voice: clip.voice });
+  }
   function removeFile(key: string, id: string) {
+    void voiceOutbox.current.remove(id);
     changePending(key, (items) => {
       const item = items.find((x) => x.id === id);
       if (item?.preview) URL.revokeObjectURL(item.preview);
@@ -924,15 +947,24 @@ function Conversations({ onForget }: { onForget: () => void }) {
       try {
         if (!voiceMounted.current || !pendingStore.current.get(key)?.some((x) => x.id === id)) return;
         if (clip.file.size > MAX_FILE_BYTES) throw new Error("Recording exceeds 25 MB.");
+        await persistVoice(key, id);
         const bytes = new Uint8Array(await clip.file.arrayBuffer());
         const media = clip.media ?? await invoke<MediaRef>("media_upload", bytes, { headers: { "x-filename": encodeURIComponent(clip.file.name), "x-file-mime": clip.file.type } });
         changePending(key, (items) => items.map((x) => x.id === id ? { ...x, media } : x));
         if (!voiceMounted.current || !pendingStore.current.get(key)?.some((x) => x.id === id)) return;
+        await persistVoice(key, id);
         const destination = clip.voice!;
         const roomMembers = await invoke<Member[]>("get_members", { channel: destination.channel });
         const uni = findUniMember(roomMembers);
         if (!voiceMounted.current || !pendingStore.current.get(key)?.some((x) => x.id === id)) return;
-        await invoke<Message>("post_message", { channel: destination.channel, body: "", replyTo: destination.replyTo, recipients: destination.notifyUni && uni ? [uni.pubkey] : [], media: [media] });
+        const args = { channel: destination.channel, body: "", replyTo: destination.replyTo, recipients: destination.notifyUni && uni ? [uni.pubkey] : [], media: [media] };
+        const signedEvent = clip.signedEvent ?? await invoke<string>("prepare_voice_message", args);
+        changePending(key, items => items.map(x => x.id === id ? { ...x, signedEvent } : x));
+        await persistVoice(key, id);
+        if (!voiceMounted.current || !pendingStore.current.get(key)?.some(x => x.id === id)) return;
+        try { await invoke<Message>("post_message", { ...args, signedEvent }); }
+        catch (e) { if (!relayAccepted(e)) throw e; }
+        await voiceOutbox.current.remove(id);
         if (!voiceMounted.current) return;
         removeFile(key, id);
         setTick((n) => n + 1);
@@ -941,6 +973,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       } catch (e) {
         if (!voiceMounted.current) return;
         changePending(key, (items) => items.map((x) => x.id === id ? { ...x, state: "error", error: String(e) } : x));
+        await persistVoice(key, id);
         setError(`Voice message failed: ${String(e)}. Retry or remove the recording.`);
         outcome = "Voice message failed";
       } finally {
@@ -956,8 +989,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
     if (!blob.size) { setError("Recording was empty. Please record again."); return; }
     const file = new File([blob], voiceFileName(mime), { type: mime.split(";")[0] });
     const id = crypto.randomUUID();
-    changePending(origin.key, (items) => [...items, { id, file, preview: null, state: "uploading", voice: { channel: origin.channel, replyTo: origin.replyTo, notifyUni: origin.notifyUni } }]);
-    queueVoice(origin.key, id);
+    changePending(origin.key, (items) => [...items, { id, file, preview: null, state: "uploading", created: (voiceCreated.current = Math.max(Date.now(), voiceCreated.current + 1)), voice: { channel: origin.channel, replyTo: origin.replyTo, notifyUni: origin.notifyUni } }]);
+    void (async () => { await voiceRestored.current; await persistVoice(origin.key, id); if (voiceMounted.current) queueVoice(origin.key, id); })();
   }, `for #${rooms.find((r) => r.id === channel)?.name ?? "room"}`);
   async function toggleRecording() {
     if (sendingRef.current) return;
@@ -1456,6 +1489,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
               <button className="compose-file-remove" disabled={sending} onClick={() => removeFile(keyFor(currentRoom.id, root), item.id)} aria-label={`Remove ${item.file.name}`}>×</button>
             </div>)}
           </div>}
+          {voiceStorageWarning && <p role="status">{voiceStorageWarning}</p>}
           {voiceStatus && <p className="voice-status" role="status">{voiceStatus}</p>}
           <div className="compose-row">
             <ComposerMenu key={`${channel}:${root}`} onMention={startMention} onAttach={() => fileInput.current?.click()} sending={sending} />
