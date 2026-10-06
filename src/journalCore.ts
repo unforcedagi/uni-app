@@ -1,5 +1,5 @@
-// Journal helpers (pure, unit-tested). Entries use the Parachute app's capture
-// shape: path Notes/YYYY/MM-DD/HH-MM-SS in local time, tag `capture`.
+// Journal helpers (pure, unit-tested). Entries are tagged `journal` and live at
+// `Journal/YYYY/MM/YYYY-MM-DD HHMM <title>` in local time (T-60).
 
 import { quote } from "./uniActions.ts";
 import { noteUrl } from "./vaultlinks.ts";
@@ -12,13 +12,43 @@ export type FlushReport = { sent: string[]; remaining: number; error: string | n
 export const TRANSCRIPT_PENDING = "_Transcript pending._";
 const pad = (n: number) => String(n).padStart(2, "0");
 
-/** Vault path for an entry made at `d` (local time, like the Parachute app). */
-export function entryPath(d: Date): string {
-  return `Notes/${d.getFullYear()}/${pad(d.getMonth() + 1)}-${pad(d.getDate())}/${pad(d.getHours())}-${pad(d.getMinutes())}-${pad(d.getSeconds())}`;
+/** Characters never allowed in an entry title (mirrors uni-core `check_path`). */
+const TITLE_FORBIDDEN = /[\\/\[\]#|:*?"<>^{}`~]/g;
+
+/** Entry title: the first words (≤7 words, ≤60 chars), markdown/links/URLs
+ * stripped, forbidden characters removed, trailing punctuation trimmed. */
+export function entryTitle(content: string): string {
+  let t = entryText(content)
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")      // [text](url) / images
+    .replace(/\[\[([^\]|]*\|)?([^\]]*)\]\]/g, "$2") // [[target|alias]]
+    .replace(/\b(?:https?|ftp):\/\/\S+/gi, " ")
+    .replace(/\bwww\.\S+/gi, " ")
+    .replace(/^\s{0,3}(?:#{1,6}\s+|>\s*|[-*+]\s+|\d+[.)]\s+)/gm, "")
+    .replace(/[*_~`]+/g, "")
+    .replace(TITLE_FORBIDDEN, " ")
+    .replace(/[\u0000-\u001f\u007f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  t = t.split(" ").filter(Boolean).slice(0, 7).join(" ");
+  if (t.length > 60) {
+    const cut = t.slice(0, 60);
+    const sp = cut.lastIndexOf(" ");
+    t = sp > 0 ? cut.slice(0, sp) : cut;
+  }
+  return t.replace(/[\s.,;!?'"()\-–—…]+$/u, "").trim();
+}
+
+/** Vault path for an entry made at `d` (local time). Voice entries have no
+ * text yet, so no title; uni-1's sweep adds it once the transcript lands. */
+export function entryPath(d: Date, content = ""): string {
+  const y = d.getFullYear(), mo = pad(d.getMonth() + 1);
+  const base = `Journal/${y}/${mo}/${y}-${mo}-${pad(d.getDate())} ${pad(d.getHours())}${pad(d.getMinutes())}`;
+  const title = entryTitle(content);
+  return title ? `${base} ${title}` : base;
 }
 
 export function newDraft(content: string, source: "text" | "voice", d = new Date(), id = crypto.randomUUID()): JournalDraft {
-  return { entry_id: id, path: entryPath(d), content, source, created_at: d.toISOString() };
+  return { entry_id: id, path: entryPath(d, content), content, source, created_at: d.toISOString() };
 }
 
 /** Content without the transcription placeholder, trimmed. */

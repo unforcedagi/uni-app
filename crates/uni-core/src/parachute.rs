@@ -7,9 +7,9 @@
 //! answers as that user: the same key that signs Buzz messages writes the
 //! vault. No token is stored on the device.
 //!
-//! Journal entries use the Parachute app's capture shape so everything that
-//! already reads captures (journal-router, search, Uni) sees them unchanged:
-//! path `Notes/YYYY/MM-DD/HH-MM-SS`, tag `capture`, `metadata.source` =
+//! Journal entries (T-60): path `Journal/YYYY/MM/YYYY-MM-DD HHMM <title>`
+//! (local time; voice entries start untitled), tag `journal` (whose parent tag
+//! on uni-1 is `capture`, so older readers still see them), `metadata.source` =
 //! `text` | `voice`. Voice notes carry the audio as an attachment uploaded
 //! with `transcribe: true`; the vault transcribes it on the hub box and
 //! replaces the `_Transcript pending._` placeholder.
@@ -193,7 +193,7 @@ impl VaultClient {
             "vault": self.cfg.vault,
             "content": entry.content,
             "path": entry.path,
-            "tags": ["capture"],
+            "tags": ["journal"],
             "metadata": { "source": entry.source, "client": "uni-app" },
             // A retried upload after a lost response finds the first write.
             "if_exists": "ignore",
@@ -262,7 +262,7 @@ impl VaultClient {
                 "query-notes",
                 json!({
                     "vault": self.cfg.vault,
-                    "tag": "capture",
+                    "tag": "journal",
                     "sort": "desc",
                     "limit": limit.clamp(1, 100),
                     "offset": offset,
@@ -973,7 +973,7 @@ mod tests {
 
     #[test]
     fn notes_from_every_shape() {
-        let n = json!({"id": "a", "path": "Notes/x", "content": "hi", "tags": ["capture"], "metadata": {"source": "voice"}, "createdAt": "t"});
+        let n = json!({"id": "a", "path": "Journal/2026/10/2026-10-06 1200 hi", "content": "hi", "tags": ["journal"], "metadata": {"source": "voice"}, "createdAt": "t"});
         assert_eq!(notes_in(&json!([n.clone()])).len(), 1);
         assert_eq!(notes_in(&json!({"notes": [n.clone(), n.clone()]})).len(), 2);
         assert_eq!(
