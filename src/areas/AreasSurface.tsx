@@ -1,10 +1,10 @@
 import { useMemo } from "react";
 import AreasHome, { type RoomInfo } from "./AreasHome";
 import AreaView, { type AreaActions } from "./AreaView";
-import { currentUserAgent, liveAreaApps, platformName } from "./gate";
-import { useAppVersion } from "./useAppVersion";
+import { currentUserAgent, liveAreaApps, platformName } from "../interface/selftest/gate";
+import { useAppVersion } from "../interface/selftest/useAppVersion";
 import { useAreas } from "./useAreas";
-import { useStoredSelfTest } from "./useSelfTest";
+import { useStoredSelfTest } from "../interface/selftest/useSelfTest";
 import "./areas.css";
 
 const USER_AGENT = currentUserAgent();
