@@ -2,12 +2,12 @@ import { readFileSync } from 'node:fs';
 import { expect, type Page } from '@playwright/test';
 
 const seed = (name: string) => readFileSync(new URL(`../../areas-seed/${name}.html`, import.meta.url), 'utf8');
-export const LEAK = 'http://127.0.0.1:1436/leak';
 
 // The hostile app runs every attack from inside the frame and writes what it saw into #out.
-export const HOSTILE = `<!doctype html><html><body><pre id="out">running</pre><script>
+export type Ports = { http: number; udp: number };
+export const hostileApp = (ports: Ports) => `<!doctype html><html><body><pre id="out">running</pre><script>
 (async () => {
-  const R = {}, LEAK = ${JSON.stringify(LEAK)};
+  const R = {}, LEAK = ${JSON.stringify(`http://127.0.0.1:${ports.http}/leak`)}, TURN = ${JSON.stringify(`turn:127.0.0.1:${ports.udp}`)};
   const attempt = async (k, fn) => { try { const v = await fn(); R[k] = 'LEAK:' + String(v).slice(0, 60); } catch (e) { R[k] = 'blocked:' + (e && e.name || 'error'); } };
   const settle = (make) => new Promise((res) => { const t = setTimeout(() => res('blocked:timeout'), 1500); make((v) => { clearTimeout(t); res(v); }); });
   await attempt('fetch', () => fetch(LEAK + '?fetch').then((r) => r.status));
@@ -25,6 +25,13 @@ export const HOSTILE = `<!doctype html><html><body><pre id="out">running</pre><s
   await attempt('popup', () => { const w = window.open(LEAK + '?popup'); if (!w) throw Object.assign(new Error(), { name: 'null' }); return 'opened'; });
   const frame = document.createElement('iframe'); frame.src = LEAK + '?frame'; document.body.appendChild(frame);
   R.frame = await settle((done) => { frame.onload = () => done(frame.contentWindow ? 'loaded' : 'blocked:none'); frame.onerror = () => done('blocked:error'); setTimeout(() => done('blocked:not-loaded'), 1200); });
+
+  // Quiet channels that ignore connect-src: prefetch hints, WebRTC (best effort), beacons.
+  for (const rel of ['dns-prefetch', 'preconnect', 'prefetch', 'prerender']) { const l = document.createElement('link'); l.rel = rel; l.href = LEAK.replace('/leak', '') + '/' + rel; document.head.appendChild(l); }
+  await attempt('beacon', () => { if (!navigator.sendBeacon(LEAK + '?beacon', 'x')) throw new Error('refused'); return 'queued'; });
+  R.rtc = typeof RTCPeerConnection === 'undefined' && typeof webkitRTCPeerConnection === 'undefined' ? 'blocked:absent' : 'present';
+  await attempt('rtcNew', () => { const pc = new RTCPeerConnection({ iceServers: [{ urls: TURN, username: 'SECRETUSER', credential: 'x' }] }); pc.createDataChannel('x'); return pc.createOffer().then((o) => pc.setLocalDescription(o)).then(() => 'offered'); });
+  await new Promise((r) => setTimeout(r, 1200));
 
   const replies = {};
   addEventListener('message', (e) => { const m = e.data; if (m && m.bridge === 1 && m.id) (replies[m.id] = replies[m.id] || []).push(m); });
@@ -58,22 +65,73 @@ call('area.get').then((a) => { document.getElementById('t').textContent = a.titl
 call('notes.list', { limit: 5 }).then((r) => { document.getElementById('n').textContent = r.notes.map((x) => x.title).join('|'); });
 </script></body></html>`;
 
+// A late navigation (after the frame loaded), one per vector. The listener must never see it.
+export const navApp = (vector: 'self' | 'meta' | 'anchor' | 'write', ports: Ports) => {
+  const url = `http://127.0.0.1:${ports.http}/leak?nav=${vector}`;
+  const code = {
+    self: `location.href = ${JSON.stringify(url)};`,
+    meta: `const m = document.createElement('meta'); m.httpEquiv = 'refresh'; m.content = '0;url=${url}'; document.head.appendChild(m);`,
+    anchor: `const a = document.createElement('a'); a.href = ${JSON.stringify(url)}; document.body.appendChild(a); a.click();`,
+    write: `document.open(); document.write('<meta http-equiv="refresh" content="0;url=${url}">'); document.close();`,
+  }[vector];
+  return `<!doctype html><html><body><p>nav ${vector}</p><script>addEventListener('load', () => setTimeout(() => { ${code} }, 150));</script></body></html>`;
+};
+
+// Calls the two gated methods on load (must be refused), then on every click (first allowed, then throttled).
+export const GESTURE = `<!doctype html><html><body><button id="go">go</button><button id="open">open</button><pre id="out">{}</pre><script>
+const R = {};
+const show = () => { document.getElementById('out').textContent = JSON.stringify(R); };
+const call = (method, params) => new Promise((res) => { const id = 'g' + Math.random(); const on = (e) => { const m = e.data; if (m && m.id === id) { removeEventListener('message', on); res('error' in m ? { error: m.error } : { result: m.result }); } }; addEventListener('message', on); parent.postMessage({ bridge: 1, id, method, params }, '*'); });
+(async () => {
+  R.loadCompose = await call('channel.compose', { text: 'on load' });
+  R.loadOpen = await call('note.open', { ref: 'Areas/Gesture/Alpha' });
+  show();
+})();
+document.getElementById('go').onclick = async () => { R.click1 = await call('channel.compose', { text: 'from click' }); R.click2 = await call('channel.compose', { text: 'again' }); show(); };
+document.getElementById('open').onclick = async () => { R.outOfScope = await call('note.open', { ref: 'Journal/2026/10/secret' }); show(); };
+</script></body></html>`;
+
 type Variant = 'seed' | 'test';
 
-export async function bootAreas(page: Page, variant: Variant = 'seed', opts: { selftest?: boolean; ipcLeak?: boolean } = {}) {
+export type BootOpts = {
+  selftest?: boolean; ipcLeak?: boolean;
+  ports?: Ports;
+  /** Extra area apps (an `area` note plus an html `app` note each). */
+  apps?: { name: string; html: string }[];
+  /** Test-only seam: the self-test frames get no CSP meta (needs the VITE_AREAS_TESTHOOKS build). */
+  stripCsp?: boolean;
+  /** Serve the host document without the Tauri CSP header. */
+  noHostCsp?: boolean;
+  /** `getVersion()` rejects. */
+  versionFails?: boolean;
+  /** The user agent recorded in the stored self-test pass (default: the real one). */
+  passUa?: string;
+};
+
+export async function bootAreas(page: Page, variant: Variant = 'seed', opts: BootOpts = {}) {
   const now = Math.floor(Date.now() / 1000);
   const data = {
-    now, variant, selftest: opts.selftest ?? true, ipcLeak: opts.ipcLeak ?? false, hostile: HOSTILE, benign: BENIGN, techne: seed('techne'), unforced: seed('unforced'),
+    now, variant, selftest: opts.selftest ?? true, ipcLeak: opts.ipcLeak ?? false, hostile: hostileApp(opts.ports ?? { http: 9, udp: 9 }), benign: BENIGN, techne: seed('techne'), unforced: seed('unforced'),
+    apps: opts.apps ?? [], stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null,
   };
+  if (opts.noHostCsp) {
+    await page.route((u) => new URL(u).pathname === '/', async (route) => {
+      const response = await route.fetch();
+      const headers = { ...response.headers() };
+      delete headers['content-security-policy'];
+      await route.fulfill({ response, headers });
+    });
+  }
   await page.addInitScript((d) => {
     // Simulates a webview that delivers IPC into every frame (wry/WebKitGTK or Android).
     if (d.ipcLeak) (window as any).ipc = { postMessage: () => {} };
+    if (d.stripCsp) (window as any).__areasTest = { stripCsp: true };
     // Tauri injects its internals into the main frame only (for_main_frame_only: true), so sandboxed frames never get them.
     if (window.top !== window) return;
     const w = window as any;
     w.__calls = [];
     // The live-frame gate opens for this platform and version through a stored self-test pass.
-    if (d.selftest && !localStorage.getItem('uni.areaApps.selftest.v1')) localStorage.setItem('uni.areaApps.selftest.v1', JSON.stringify({ platform: 'linux', passedAt: '2026-10-08T00:00:00Z', appVersion: 'dev' }));
+    if (d.selftest && !localStorage.getItem('uni.areaApps.selftest.v1')) localStorage.setItem('uni.areaApps.selftest.v1', JSON.stringify({ platform: 'linux', passedAt: '2026-10-08T00:00:00Z', appVersion: 'dev', userAgent: d.passUa ?? navigator.userAgent }));
     const U = 'a'.repeat(64);
     const area = (id: string, name: string, status: string, ch: string, purpose: string) => ({
       id, path: `Areas/${name}`, extension: 'md', tags: ['area'], updatedAt: '2026-10-07T12:00:00Z', createdAt: '2026-09-01T00:00:00Z',
@@ -105,6 +163,10 @@ export async function bootAreas(page: Page, variant: Variant = 'seed', opts: { s
         { id: 'n-b1', path: 'Areas/Benign/Alpha', extension: 'md', content: '# Alpha', updatedAt: '2026-10-07T00:00:00Z' },
       );
     }
+    for (const a of d.apps as { name: string; html: string }[]) {
+      notes.push(area('a-x-' + a.name, a.name, 'foreground', 'ch-techne', `An area whose app is ${a.name}.`), { id: 'app-x-' + a.name, path: `Areas/${a.name}/app`, extension: 'html', content: a.html, updatedAt: '2026-10-07T00:00:00Z' },
+        { id: 'n-x-' + a.name, path: `Areas/${a.name}/Alpha`, extension: 'md', content: '# Alpha', updatedAt: '2026-10-07T00:00:00Z' });
+    }
     const msg = (ref: string, channel: string, name: string, ago: number, body: string) => ({ ref, channel, author: name === 'Aaron' ? U : 'b'.repeat(64), author_name: name, ts: d.now - ago, body, mentions_me: false, root: null, parent: null, mentions: [], reply_count: 0, last_reply_ts: null, edited: false, reactions: [] });
     const msgs: Record<string, any[]> = {
       'ch-techne': [...[['Uni', 'Parked the font question until the frame can load web fonts.'], ['Aaron', 'Rail labels still feel tight on the phone.'], ['Uni', 'Checked contrast on meta text; muted needed a darker tone.'], ['Aaron', 'Fine. Keep the green accent.'], ['Uni', 'Sandbox self-test is wired into Settings.'], ['Aaron', 'Run it on the laptop first.']].map(([n, b], i) => msg('t0' + i, 'ch-techne', n, 86400 * (6 - i) + 7200, b)), msg('t1', 'ch-techne', 'Aaron', 86400, 'Scoping the area apps: one HTML note per area, sealed frame, bridge only.'), msg('t2', 'ch-techne', 'Uni', 5400, 'Drafted the bridge reference. Compose never sends, you stay in control.'), msg('t3', 'ch-techne', 'Aaron', 1800, 'Good. Ship Techne first, then the practice dashboard.')],
@@ -120,6 +182,7 @@ export async function bootAreas(page: Page, variant: Variant = 'seed', opts: { s
       invoke: async (cmd: string, args: any) => {
         w.__calls.push({ cmd, args });
         switch (cmd) {
+          case 'plugin:app|version': if (d.versionFails) throw 'version unavailable'; return 'dev';
           case 'identity_status': return { paired: true, pubkey: U };
           case 'get_identity': return U;
           case 'get_npub': return 'test';
