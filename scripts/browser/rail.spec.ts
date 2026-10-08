@@ -33,7 +33,7 @@ test('Rail surfaces, overlay panels, focus and phone list', async ({ page }, inf
     await expect(page.locator('.rooms')).toBeVisible();
     await page.getByRole('button', { name: 'Close panel', exact: true }).click();
     await expect(page.locator('.rooms')).toBeHidden();
-    await expect(rail.getByRole('button').filter({ visible: true })).toHaveCount(5);
+    await expect(rail.getByRole('button').filter({ visible: true })).toHaveCount(6);
   }
   await rail.getByRole('button', { name: 'Journal', exact: true }).click();
   const writing = page.getByRole('textbox', { name: 'Journal entry', exact: true });

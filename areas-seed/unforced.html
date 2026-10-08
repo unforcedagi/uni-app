@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Unforced Development — practice</title>
+<style>
+  :root { --text:#1c2622; --muted:#6f7a74; --accent:#40695b; --surface:#fffefa; --line:rgba(64,105,91,.16);
+          --sans:Inter,system-ui,sans-serif; --serif:"Cormorant Garamond",Georgia,serif; --mono:ui-monospace,monospace; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; }
+  body { color: var(--text); font: 14px/1.5 var(--sans); font-variant-numeric: tabular-nums; background: transparent; }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 22px clamp(14px, 4vw, 36px) 56px; }
+  header { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 14px; padding: 6px 0 20px; }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .mark { width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center; background: var(--accent); color: var(--surface); font: 600 22px var(--serif); }
+  h1 { margin: 0; font: 600 26px/1.1 var(--sans); letter-spacing: -.02em; }
+  .sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .stats { display: grid; gap: 12px; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 22px; }
+  .stat { position: relative; overflow: hidden; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 16px 18px 14px; }
+  .stat::after { content: ""; position: absolute; inset: auto 0 0 0; height: 4px; background: linear-gradient(90deg, var(--accent), transparent); }
+  .stat .k { font: 600 10px var(--sans); letter-spacing: .16em; text-transform: uppercase; color: var(--muted); }
+  .stat .v { font: 600 38px/1.1 var(--sans); letter-spacing: -.03em; margin-top: 6px; }
+  .stat .v small { font-size: 14px; color: var(--muted); font-weight: 500; letter-spacing: 0; margin-left: 4px; }
+  .cols { display: grid; gap: 18px; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  @media (max-width: 760px) { .cols, .stats { grid-template-columns: 1fr; } .stat .v { font-size: 30px; } }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
+  .card > h2 { margin: 0; padding: 14px 18px; font: 600 11px var(--sans); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; }
+  .feed { list-style: none; margin: 0; padding: 0; }
+  .feed li { display: grid; grid-template-columns: 34px 1fr; gap: 12px; padding: 13px 18px; border-bottom: 1px solid var(--line); }
+  .feed li:last-child { border-bottom: 0; }
+  .av { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; color: #fff; font: 600 13px var(--sans); }
+  .feed .meta { display: flex; justify-content: space-between; gap: 8px; } .feed .meta b { font-weight: 600; } .feed .meta time { color: var(--muted); font-size: 12px; }
+  .feed p { margin: 2px 0 0; color: color-mix(in srgb, var(--text) 80%, transparent); overflow-wrap: anywhere; }
+  table { width: 100%; border-collapse: collapse; }
+  td { padding: 11px 18px; border-bottom: 1px solid var(--line); } tr:last-child td { border-bottom: 0; }
+  td.when { text-align: right; color: var(--muted); font-size: 12px; white-space: nowrap; }
+  tr.row { cursor: pointer; } tr.row:hover td, tr.row:focus-visible td { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+  tr.row td:first-child { font-weight: 500; }
+  .empty { padding: 22px 18px; color: var(--muted); font: italic 17px var(--serif); }
+  .compose { padding: 14px 18px 18px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+  .chip { cursor: pointer; border: 1px solid var(--line); background: transparent; color: var(--text); border-radius: 999px; padding: 6px 12px; font: 500 12px var(--sans); }
+  .chip:hover { border-color: var(--accent); color: var(--accent); }
+  textarea { width: 100%; min-height: 84px; resize: vertical; padding: 11px 13px; font: 14px/1.5 var(--sans); color: var(--text); background: transparent; border: 1px solid var(--line); border-radius: 12px; outline: none; }
+  textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent); }
+  .send { display: flex; align-items: center; gap: 12px; margin-top: 10px; }
+  .go { white-space: nowrap; cursor: pointer; border: 0; border-radius: 10px; padding: 10px 16px; background: var(--accent); color: var(--surface); font: 600 13px var(--sans); }
+  .go:disabled { opacity: .45; cursor: default; } .hint { color: var(--muted); font-size: 12px; }
+  .wide { grid-column: 1 / -1; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand"><div class="mark" aria-hidden="true">U</div><div><h1 id="title">Unforced Development</h1><div class="sub" id="sub">Client practice</div></div></div>
+  </header>
+  <section class="stats" aria-label="At a glance">
+    <div class="stat"><div class="k">Notes in play</div><div class="v" id="s-notes">–</div></div>
+    <div class="stat"><div class="k">Messages</div><div class="v" id="s-msgs">–<small>recent</small></div></div>
+    <div class="stat"><div class="k">Last heard</div><div class="v" id="s-last">–</div></div>
+  </section>
+  <div class="cols">
+    <section class="card"><h2><span>Client pulse</span><span id="who"></span></h2><ul class="feed" id="feed"><li><span></span><span class="empty" style="padding:0">Loading…</span></li></ul></section>
+    <section class="card"><h2><span>Engagement notes</span></h2><table><tbody id="notes"><tr><td class="empty">Loading…</td></tr></tbody></table></section>
+    <section class="card wide"><h2><span>Quick word to the team</span></h2>
+      <div class="compose" id="f">
+        <div class="chips" id="chips"></div>
+        <textarea id="t" maxlength="2000" placeholder="Write a message. It lands in the room as a draft; you press Send."></textarea>
+        <div class="send"><button class="go" id="go" type="button" disabled>Draft in room</button><span class="hint" id="hint"></span></div>
+      </div>
+    </section>
+  </div>
+</div>
+<script>
+(function () {
+  var pending = {}, n = 0, $ = function (id) { return document.getElementById(id); };
+  function call(method, params) {
+    return new Promise(function (resolve, reject) {
+      var id = "u" + (++n); pending[id] = { resolve: resolve, reject: reject };
+      parent.postMessage({ bridge: 1, id: id, method: method, params: params || {} }, "*");
+      setTimeout(function () { if (pending[id]) { delete pending[id]; reject(new Error("timeout")); } }, 15000);
+    });
+  }
+  addEventListener("message", function (e) {
+    var m = e.data; if (!m || m.bridge !== 1) return;
+    if (m.event === "theme") { var r = document.documentElement.style; ["text", "muted", "accent", "surface", "line", "sans", "serif", "mono"].forEach(function (k) { if (m.data[k]) r.setProperty("--" + k, m.data[k]); }); return; }
+    var p = pending[m.id]; if (!p) return; delete pending[m.id];
+    if ("error" in m) p.reject(new Error(m.error)); else p.resolve(m.result);
+  });
+  function node(tag, cls, text) { var x = document.createElement(tag); if (cls) x.className = cls; if (text != null) x.textContent = text; return x; }
+  function ago(iso) { var d = (Date.now() - Date.parse(iso)) / 1000; if (!(d >= 0)) return "–"; if (d < 3600) return Math.max(1, Math.round(d / 60)) + "m ago"; if (d < 86400) return Math.round(d / 3600) + "h ago"; return Math.round(d / 86400) + "d ago"; }
+  function hue(s) { var h = 0; for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360; return h; }
+
+  call("area.get").then(function (a) {
+    $("title").textContent = a.title || "Unforced Development"; document.title = a.title || "";
+    $("sub").textContent = "Client practice" + (a.metadata && a.metadata.status ? " · " + a.metadata.status : "");
+  }).catch(function () {});
+
+  call("channel.recent", { limit: 20 }).then(function (r) {
+    var ul = $("feed"); ul.textContent = ""; var people = {};
+    $("s-msgs").firstChild.nodeValue = String(r.messages.length);
+    $("s-last").textContent = r.messages.length ? ago(r.messages[0].created_at) : "–";
+    if (!r.messages.length) { var li0 = node("li"); li0.appendChild(node("span")); li0.appendChild(node("span", "empty", "Nothing from the room yet.")); ul.appendChild(li0); return; }
+    r.messages.slice(0, 8).forEach(function (m) {
+      people[m.author] = 1;
+      var li = node("li"), av = node("div", "av", (m.author || "?").charAt(0).toUpperCase()), body = node("div"), meta = node("div", "meta");
+      av.style.background = "hsl(" + hue(m.author) + " 38% 40%)";
+      meta.appendChild(node("b", "", m.author)); meta.appendChild(node("time", "", ago(m.created_at)));
+      body.appendChild(meta); body.appendChild(node("p", "", m.content.length > 200 ? m.content.slice(0, 200) + "…" : m.content));
+      li.appendChild(av); li.appendChild(body); ul.appendChild(li);
+    });
+    $("who").textContent = Object.keys(people).length + " voices";
+  }).catch(function () { $("feed").textContent = ""; });
+
+  call("notes.list", { limit: 8 }).then(function (r) {
+    var tb = $("notes"); tb.textContent = ""; $("s-notes").textContent = String(r.notes.length);
+    if (!r.notes.length) { var tr0 = node("tr"), td0 = node("td", "empty", "No engagement notes yet."); tr0.appendChild(td0); tb.appendChild(tr0); return; }
+    r.notes.forEach(function (x) {
+      var tr = node("tr", "row"); tr.tabIndex = 0;
+      tr.appendChild(node("td", "", x.title)); tr.appendChild(node("td", "when", x.updatedAt ? ago(x.updatedAt) : ""));
+      var open = function () { call("note.open", { ref: x.path }).catch(function () {}); };
+      tr.addEventListener("click", open); tr.addEventListener("keydown", function (e) { if (e.key === "Enter") open(); });
+      tb.appendChild(tr);
+    });
+  }).catch(function () { $("s-notes").textContent = "–"; });
+
+  var t = $("t"), go = $("go");
+  [["Status update", "Status update: "], ["Need a decision", "Need a decision on: "], ["Share a win", "Win to share: "]].forEach(function (c) {
+    var b = node("button", "chip", c[0]); b.type = "button";
+    b.addEventListener("click", function () { t.value = c[1]; go.disabled = false; t.focus(); }); $("chips").appendChild(b);
+  });
+  t.addEventListener("input", function () { go.disabled = !t.value.trim(); });
+  go.addEventListener("click", function () {
+    if (!t.value.trim()) return; go.disabled = true;
+    call("channel.compose", { text: t.value }).then(function () { $("hint").textContent = "Drafted in the room. Press Send there."; t.value = ""; })
+      .catch(function (err) { $("hint").textContent = "Couldn't draft: " + err.message; go.disabled = false; });
+  });
+})();
+</script>
+</body>
+</html>

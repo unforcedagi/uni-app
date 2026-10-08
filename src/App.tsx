@@ -1,5 +1,6 @@
 import { VoiceOutbox, relayAccepted } from "./voiceOutbox";
-import { SettingsIcon, UniIcon, JournalIcon, StarIcon, RoomsIcon } from "./Icons";
+import { SettingsIcon, UniIcon, JournalIcon, StarIcon, RoomsIcon, AreasIcon } from "./Icons";
+import AreasSurface from "./areas/AreasSurface";
 import { FOR_YOU_ID, FOR_YOU_OPENED_KEY, LAST_SURFACE_KEY, countRecommendations, isRecommendationNew, readLastSurface, saveLastSurface } from "./railCore";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
@@ -1340,6 +1341,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     if (searchOpen) { setSearchOpen(false); return; }
     if (notes.length) { closeNote(); return; }
     if (root && channel) { openTarget(roomTarget(channel), "focus"); return; }
+    if (activeTab(tabsRef.current)?.kind === "area") { openTarget({ kind: "areas", title: "Areas" }, "replace"); return; }
     // On narrow screens the sidebar is a view, not a tab close.
     setPanel("rooms");
   };
@@ -1399,6 +1401,14 @@ function Conversations({ onForget }: { onForget: () => void }) {
     openTarget(target, asNew ? "new" : "focus");
   }
   const journalTab = tabs.tabs.find((t) => t.kind === "journal");
+  const areasOpen = active?.kind === "areas" || active?.kind === "area";
+  const areaActions = useMemo(() => ({
+    openRoom: (id: string) => openTargetRef.current(roomTarget(id), "new"),
+    openNote: (ref: string) => openNote({ hub: null, vault: "uni", ref }, null),
+    // Drafts only: the scope's draft is read when the room opens. Aaron presses Send.
+    compose: (id: string, text: string) => { const key = keyFor(id, null), old = drafts.current.get(key)?.trim(); editDraft(key, old ? `${old}\n\n${text}` : text); focusComposer.current = true; openTargetRef.current(roomTarget(id), "new"); },
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [openNote]);
   const primaryVault = vaults.includes("uni") ? "uni" : null;
   const otherVaults = vaults.filter((vault) => vault !== "uni");
   const activeOtherVault = active?.kind === "vault" && active.vault && active.vault !== "uni" && otherVaults.includes(active.vault) ? active.vault : null;
@@ -1413,10 +1423,11 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const recordingTab = recordingOrigin.current;
   const pill = recordingTab && recorder.busy ? { title: recordingTab.title, elapsed: recorder.elapsed, tabId: recordingTab.tabId, stop: recorder.stop, phase: recorder.phase } :
     journalRecording && journalTab ? { title: "Journal", elapsed: journalRecording.elapsed, tabId: journalTab.id, stop: journalRecording.stop, phase: "recording" as const } : null;
-  return <NoteOpener.Provider value={openNote}><main className={`shell ${(!sidebarVisible && (channel || journalOpen || (active?.kind === "note" || active?.kind === "vault"))) ? "in-room" : ""} ${topNote ? "note-open" : ""} ${panel ? `panel-open panel-${panel}` : ""} ${searchOpen ? "search-open" : ""} ${composerFocused ? "composer-focused" : ""} ${journalFocus && journalOpen ? "journal-focus" : ""}`}>
+  return <NoteOpener.Provider value={openNote}><main className={`shell ${(!sidebarVisible && (channel || journalOpen || areasOpen || (active?.kind === "note" || active?.kind === "vault"))) ? "in-room" : ""} ${topNote ? "note-open" : ""} ${panel ? `panel-open panel-${panel}` : ""} ${searchOpen ? "search-open" : ""} ${composerFocused ? "composer-focused" : ""} ${journalFocus && journalOpen ? "journal-focus" : ""}`}>
     <nav className="rail" aria-label="Main navigation">
       <button aria-label="Uni" aria-current={!panel && !searchOpen && (!topNote && !journalOpen && channel === findUniRoom(rooms)?.id ? "page" : undefined)} onClick={() => { const uni = findUniRoom(rooms); if (uni) openTarget(roomTarget(uni.id)); }}><i><UniIcon /></i><span>Uni</span></button>
       <button aria-label="Journal" aria-current={!panel && !searchOpen && (journalOpen && !topNote ? "page" : undefined)} onClick={() => openTarget({ kind: "journal", title: "Journal" })}><i><JournalIcon /></i><span>Journal</span></button>
+      <button aria-label="Areas" aria-current={!panel && !searchOpen && (!topNote && areasOpen ? "page" : undefined)} onClick={() => openTarget({ kind: "areas", title: "Areas" })}><i><AreasIcon /></i><span>Areas</span></button>
       <button aria-label="For you" aria-current={!panel && !searchOpen && (topNote?.ref === FOR_YOU_ID ? "page" : undefined)} onClick={openForYou}><i><StarIcon /><b className="rail-count">{forYou.count}</b>{forYou.fresh && <span className="rail-dot" aria-label="Updated recommendations" />}</i><span>For you</span></button>
       <button aria-label="Rooms" aria-current={!panel && !searchOpen && (!topNote && !journalOpen && channel && channel !== findUniRoom(rooms)?.id ? "page" : undefined)} aria-expanded={panel === "rooms"} onClick={() => { setSearchOpen(false); setPanel(panel === "rooms" ? null : "rooms"); }}><i><RoomsIcon /></i><span>Rooms</span>{rooms.some((r) => r.unread > 0) && <span className="rail-dot" aria-label="Unread rooms" />}</button>
       <button className="rail-vault" aria-label="Vault" aria-current={!panel && !searchOpen && (active?.kind === "vault" || (topNote && topNote.ref !== FOR_YOU_ID) ? "page" : undefined)} aria-expanded={panel === "vault"} onClick={() => { setSearchOpen(false); setPanel(panel === "vault" ? null : "vault"); }}><i>▤</i><span>Vault</span></button>
@@ -1426,7 +1437,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     {(panel || searchOpen) && <button className="panel-scrim" aria-label="Close navigation panel" onClick={() => { setPanel(null); setSearchOpen(false); }} />}
     <aside className="rooms" aria-label="Conversations">
       {(panel || searchOpen) && <button className="panel-close icon-button" aria-label="Close panel" onClick={() => { setPanel(null); setSearchOpen(false); }}>×</button>}
-      <div className="landscape-panel-surfaces"><button onClick={() => { const uni = findUniRoom(rooms); if (uni) openTarget(roomTarget(uni.id)); }}><UniIcon />Uni</button><button onClick={() => openTarget({ kind: "journal", title: "Journal" })}><JournalIcon />Journal</button><button onClick={openForYou}><StarIcon />For you</button><button onClick={() => { setPanel("settings"); }}><SettingsIcon />Settings</button></div>
+      <div className="landscape-panel-surfaces"><button onClick={() => { const uni = findUniRoom(rooms); if (uni) openTarget(roomTarget(uni.id)); }}><UniIcon />Uni</button><button onClick={() => openTarget({ kind: "journal", title: "Journal" })}><JournalIcon />Journal</button><button onClick={() => openTarget({ kind: "areas", title: "Areas" })}><AreasIcon />Areas</button><button onClick={openForYou}><StarIcon />For you</button><button onClick={() => { setPanel("settings"); }}><SettingsIcon />Settings</button></div>
       <div className="phone-panel-tools"><button onClick={() => { setPanel("vault"); setSearchOpen(false); }}>Vault</button><button onClick={() => { setPanel(null); setSearchOpen(true); }}>Search</button></div>
       <header className="rooms-header"><div><span className="eyebrow">Unforced</span><h1>Uni</h1></div><div><button className="icon-button" onClick={() => { setSearchQuery(""); setSearchScope({ vault: "", prefix: "" }); setSearchOpen(true); }} aria-label="Search messages and notes">⌕</button><button className="icon-button" onClick={() => void refresh()} disabled={busy} aria-label="Refresh conversations">↻</button><button className="icon-button" onClick={() => { setPanel(panel === "settings" ? "rooms" : "settings"); setSearchOpen(false); setForgetArmed(false); }} aria-label="Settings" aria-expanded={panel === "settings"}><SettingsIcon /></button></div></header>
       {pairSourceOpen && <PairSource onClose={() => setPairSourceOpen(false)} />}
@@ -1456,12 +1467,12 @@ function Conversations({ onForget }: { onForget: () => void }) {
       </button>)}</nav>
       </div>
     </aside>
-    <section className="conversation" aria-label={journalOpen ? "Journal" : currentRoom ? `Conversation: ${currentRoom.name}` : active?.kind === "note" ? "Note" : "Conversation"}>
+    <section className="conversation" aria-label={journalOpen ? "Journal" : areasOpen ? "Areas" : currentRoom ? `Conversation: ${currentRoom.name}` : active?.kind === "note" ? "Note" : "Conversation"}>
       <div className="tab-strip" role="tablist" aria-label="Open tabs">
         <div className="tab-scroller">{tabs.tabs.map((t) => <div key={t.id} className={`tab-chip ${t.id === tabs.active ? "active" : ""}`} role="presentation"
           onPointerDown={(e) => { if (e.pointerType === "touch") { longPressed.current = false; longPress.current = window.setTimeout(() => { longPressed.current = true; closeTabById(t.id); }, 600); } }}
           onPointerUp={endLongPress} onPointerCancel={endLongPress} onPointerLeave={endLongPress}>
-          <button className="tab-title" role="tab" aria-selected={t.id === tabs.active} onClick={() => { if (longPressed.current) { longPressed.current = false; return; } focusTabById(t.id); }} title={t.title}>{t.kind === "journal" ? "❋" : (t.kind === "note" || t.kind === "vault") ? "▤" : t.kind === "thread" ? "↳" : "#"} {isTabDirty(t) && <span aria-label="Unsaved changes">● </span>}{t.title}</button>
+          <button className="tab-title" role="tab" aria-selected={t.id === tabs.active} onClick={() => { if (longPressed.current) { longPressed.current = false; return; } focusTabById(t.id); }} title={t.title}>{t.kind === "journal" ? "❋" : (t.kind === "areas" || t.kind === "area") ? "◫" : (t.kind === "note" || t.kind === "vault") ? "▤" : t.kind === "thread" ? "↳" : "#"} {isTabDirty(t) && <span aria-label="Unsaved changes">● </span>}{t.title}</button>
           <button className="tab-close" onClick={() => closeTabById(t.id)} aria-label={`Close ${t.title}`}>×</button>
         </div>)}</div>
         <button className="tab-add" onClick={() => { pickNewTab.current = true; setPanel("rooms"); setSearchOpen(false); setSidebarVisible(true); document.querySelector<HTMLButtonElement>(".rooms nav .room")?.focus(); }} aria-label="New tab — pick a room" title="New tab — pick a room">+</button>
@@ -1469,6 +1480,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
       {journalTab && <div className="journal-tab-content" hidden={!journalOpen} onFocusCapture={(e) => { if (e.target instanceof HTMLTextAreaElement) requestAnimationFrame(() => setComposerFocused(true)); }} onBlurCapture={(e) => { const journal = e.currentTarget; requestAnimationFrame(() => setComposerFocused(journal.contains(document.activeElement) && document.activeElement instanceof HTMLTextAreaElement)); }}><Journal focus={journalFocus} onFocus={() => setJournalFocus((v) => !v)} rooms={rooms} uniRoomId={findUniRoom(rooms)?.id ?? null} onShare={shareEntry} onBack={() => setPanel("rooms")} onRecordingChange={(on, elapsed, stop) => { journalRecordingRef.current = on; setJournalRecording(on ? { elapsed, stop } : null); }} /></div>}
       {active?.kind === "vault" && active.vault ? <VaultBrowser key={active.vault} vault={active.vault} onBack={() => setPanel("rooms")} onOpen={(note) => openTarget({ kind: "note", note: { hub: null, vault: active.vault!, ref: note.id }, title: note.path || note.id }, "new")} onCreate={(folder) => requestCreate(active.vault!, folder)} onSearch={(prefix) => { setSearchQuery(""); setSearchScope({ vault: active.vault!, prefix }); setSearchOpen(true); setSidebarVisible(true); }} />
       : journalOpen ? null
+      : areasOpen && active ? <AreasSurface key={active.id} path={active.kind === "area" ? active.path ?? null : null} rooms={rooms} actions={areaActions}
+          onOpenArea={(path, name) => openTarget({ kind: "area", path, title: name }, "replace")} onBack={() => openTarget({ kind: "areas", title: "Areas" }, "replace")} />
       : currentRoom ? <>
         <header className="conversation-header">
           <button className="back icon-button" onClick={() => isThread && channel ? openTarget(roomTarget(channel), "focus") : setPanel("rooms")} aria-label={isThread ? "Back to room" : "Back to conversations"}>‹</button>
