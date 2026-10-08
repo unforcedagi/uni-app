@@ -109,8 +109,8 @@ export const PROBE_HTML = `<!doctype html><html><body><script>
   R.popup = await blocked(() => { if (window.open('about:blank') === null) throw new Error('blocked'); });
   R.bridge = await new Promise((res) => {
     const t = setTimeout(() => res(false), 2000);
-    addEventListener('message', (e) => { const m = e.data; if (m && m.bridge === 1 && m.id === 'probe' && m.result && m.result.title === 'selftest') { clearTimeout(t); res(true); } });
-    parent.postMessage({ bridge: 1, id: 'probe', method: 'area.get' }, '*');
+    addEventListener('message', (e) => { const m = e.data; if (m && m.uni === 1 && m.id === 'probe' && m.result && m.result.accent === 'selftest') { clearTimeout(t); res(true); } });
+    parent.postMessage({ uni: 1, id: 'probe', ns: 'theme', method: 'get', params: {} }, '*');
   });
   parent.postMessage({ probe: 1, results: R }, '*');
 })();

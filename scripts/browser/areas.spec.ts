@@ -1,6 +1,6 @@
 import { mkdir } from 'node:fs/promises';
 import { test, expect, type Page } from '@playwright/test';
-import { bootAreas, GESTURE, navApp } from './areasFixture';
+import { bootAreas, FOCUS_STEAL, navApp, SUGGEST } from './areasFixture';
 import { startListener } from './areasListener';
 
 const rail = (page: Page) => page.getByRole('navigation', { name: 'Main navigation' });
@@ -23,8 +23,8 @@ test.describe('seed apps and navigation', () => {
     await expect(card(page, 'Atlas')).toContainText('Quiet so far');
     await expect(page.getByRole('button', { name: 'Refresh areas' })).toHaveCount(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-    await mkdir('shots/t73', { recursive: true });
-    await page.screenshot({ path: `shots/t73/${info.project.name}-areas-home.png` });
+    await mkdir('shots/t74', { recursive: true });
+    await page.screenshot({ path: `shots/t74/${info.project.name}-areas-home.png` });
   });
 
   test('techne app renders from bridge data and drafts without sending', async ({ page }, info) => {
@@ -38,12 +38,19 @@ test.describe('seed apps and navigation', () => {
     await expect(f.locator('#pulse li').first()).toContainText('Aaron');
     await expect(f.locator('#notes button')).toHaveCount(3);
     await expect(f.locator('#notes button').first()).toContainText('Workbench log');
-    await mkdir('shots/t73', { recursive: true });
-    await page.screenshot({ path: `shots/t73/${info.project.name}-area-techne.png` });
-    // compose: the room opens with the text in the composer; nothing is posted
+    await mkdir('shots/t74', { recursive: true });
+    await page.screenshot({ path: `shots/t74/${info.project.name}-area-techne.png` });
+    // chat.draft is a pending suggestion in the host bar; only a tap on the host UI drafts it
     await f.locator('#t').fill('Pairing on the bridge tonight');
     await f.locator('#go').click();
+    const bar = page.locator('.suggestion-bar');
+    await expect(bar).toContainText('Techne suggests a draft for #Techne');
+    await expect(bar).toContainText('Pairing on the bridge tonight');
+    await mkdir('shots/t74', { recursive: true });
+    await page.screenshot({ path: `shots/t74/${info.project.name}-suggestion-bar.png` });
     const box = page.getByRole('textbox', { name: 'Message Techne' });
+    await expect(box, 'nothing reached a composer yet').toHaveCount(0);
+    await bar.getByRole('button', { name: 'Add to draft' }).click();
     await expect(box).toHaveValue('Pairing on the bridge tonight');
     expect(await calls(page, 'post_message')).toHaveLength(0);
     // The area tab stays open next to the room tab.
@@ -56,6 +63,9 @@ test.describe('seed apps and navigation', () => {
     await openAreas(page);
     await openArea(page, 'Techne');
     await page.frameLocator('iframe.area-frame').locator('#notes button', { hasText: 'Plan' }).click();
+    await expect(page.locator('.suggestion-bar')).toContainText('suggests opening Areas/Techne/Plan');
+    await expect(page.locator('.note-sheet'), 'a tap in the frame does not open it').toHaveCount(0);
+    await page.locator('.suggestion-bar').getByRole('button', { name: 'Open' }).click();
     await expect(page.locator('.note-sheet')).toContainText('Techne plan body');
     await page.locator('.note-back').click();
     await expect(page.locator('.area-bar-title')).toHaveText('Techne');
@@ -68,8 +78,8 @@ test.describe('seed apps and navigation', () => {
     await expect(f.locator('#s-notes')).toHaveText('3');
     await expect(f.locator('#s-msgs')).toContainText('2');
     await expect(f.locator('#feed li').first()).toContainText('Aaron');
-    await mkdir('shots/t73', { recursive: true });
-    await page.screenshot({ path: `shots/t73/${info.project.name}-area-unforced.png` });
+    await mkdir('shots/t74', { recursive: true });
+    await page.screenshot({ path: `shots/t74/${info.project.name}-area-unforced.png` });
   });
 
   test('an area without an app shows the default view', async ({ page }) => {
@@ -103,8 +113,8 @@ test.describe('dark theme', () => {
     await bootAreas(page, 'seed');
     await openAreas(page);
     await expect(card(page, 'Techne')).toBeVisible();
-    await mkdir('shots/t73', { recursive: true });
-    await page.screenshot({ path: `shots/t73/${info.project.name}-areas-home-dark.png` });
+    await mkdir('shots/t74', { recursive: true });
+    await page.screenshot({ path: `shots/t74/${info.project.name}-areas-home-dark.png` });
   });
 });
 
@@ -131,7 +141,7 @@ test.describe('sandbox self-test', () => {
     await page.getByRole('button', { name: 'Run sandbox self-test' }).click();
     await expect(page.locator('.selftest-status.pass')).toContainText('Passed', { timeout: 15000 });
     const items = page.locator('.selftest-list li');
-    expect(await items.count()).toBe(17);
+    expect(await items.count()).toBe(19);
     await expect(page.locator('.selftest-list li.fail')).toHaveCount(0);
     await expect(items.filter({ hasText: 'webkit.messageHandlers.ipc' })).toHaveClass('pass');
     await expect(items.filter({ hasText: 'window.ipc' })).toHaveClass('pass');
@@ -139,8 +149,8 @@ test.describe('sandbox self-test', () => {
     expect(pass).toMatchObject({ platform: 'linux', appVersion: 'dev' });
     expect(pass.userAgent).toBe(await page.evaluate(() => navigator.userAgent));
     expect(Date.parse(pass.passedAt)).toBeGreaterThan(0);
-    await mkdir('shots/t73', { recursive: true });
-    await page.screenshot({ path: `shots/t73/${info.project.name}-selftest.png` });
+    await mkdir('shots/t74', { recursive: true });
+    await page.screenshot({ path: `shots/t74/${info.project.name}-selftest.png` });
     // The stored pass now opens the live frame.
     await page.getByRole('button', { name: 'Close panel' }).click();
     await openAreas(page);
@@ -185,16 +195,18 @@ test.describe('hostile and benign apps', () => {
   test.beforeEach(async ({ page }) => { L = await startListener(); await bootAreas(page, 'test', { ports: L.ports }); });
   test.afterEach(async () => { await L.close(); });
 
-  test('a benign app renders using bridge data', async ({ page }) => {
+  test('a benign app renders using the contract kits', async ({ page }) => {
     await openAreas(page);
     await openArea(page, 'Benign');
     const f = page.frameLocator('iframe.area-frame');
     await expect(f.locator('#t')).toHaveText('Benign');
     await expect(f.locator('#n')).toHaveText('Alpha');
+    await expect(f.locator('#c')).toHaveText(/msgs=[1-9]/);
     await expect(f.locator('#th')).toContainText(/accent=#?\w+/);
   });
 
   test('a hostile app is contained', async ({ page }) => {
+    test.setTimeout(90000);
     const events: string[] = [];
     page.on('request', (r) => { if (r.url().includes(`:${L.ports.http}`)) events.push('request ' + r.url()); });
     page.on('requestfailed', (r) => { if (r.url().includes(`:${L.ports.http}`)) events.push('failed ' + r.url() + ' ' + r.failure()?.errorText); });
@@ -202,7 +214,7 @@ test.describe('hostile and benign apps', () => {
     await openAreas(page);
     await openArea(page, 'Hostile');
     const out = page.frameLocator('iframe.area-frame').locator('#out');
-    await expect(out).toContainText('"flood"', { timeout: 20000 });
+    await expect(out).toContainText('"flood"', { timeout: 60000 });
     const R = JSON.parse((await out.textContent())!);
 
     for (const k of ['fetch', 'xhr', 'ws', 'img', 'topRead', 'parentDoc', 'cookie', 'storage', 'eval', 'rtcNew']) expect(R[k], k).toMatch(/^blocked/);
@@ -222,36 +234,51 @@ test.describe('hostile and benign apps', () => {
     expect(page.url()).toBe(before);
     expect(await page.locator('iframe.area-frame').getAttribute('sandbox')).toBe('allow-scripts');
 
-    expect(R['bridge:unk']).toBe('unknown_method');
-    expect(R['bridge:big']).toBe('too_large');
-    expect(R['bridge:out1']).toBe('out_of_scope');
-    expect(R['bridge:out2']).toBe('out_of_scope');
-    expect(R['bridge:out3']).toBe('out_of_scope');
-    expect(R['bridge:extra']).toBe('bad_request');
-    expect(R['bridge:v2']).toBe('bad_version');
-    expect(R['bridge:longid']).toBe('none');
+    expect(R['c:unk']).toBe('unknown_namespace');
+    expect(R['c:unm']).toBe('unknown_method');
+    expect(R['c:big']).toBe('too_large');
+    expect(R['c:room']).toBe('out_of_scope');
+    expect(R['c:out1']).toBe('out_of_scope');
+    expect(R['c:out2']).toBe('out_of_scope');
+    expect(R['c:out3']).toBe('out_of_scope');
+    expect(R['c:extra']).toBe('bad_request');
+    expect(R['c:ver']).toBe('none');
+    // vault over the frame: other areas are 403 (prefix) or 404 (note), POST is 405, search/id never return Atlas
+    expect(R['c:v1']).toBe('http404');
+    expect(R['c:v2']).toBe('http403');
+    expect(R['c:v3']).toBe('http200');
+    expect(R['c:v4']).toBe('http200');
+    expect(R['c:v5']).toBe('http403');
+    expect(R['c:v6']).toBe('http405');
+    expect(R['c:v7']).toBe('http404');
+    expect(R.vaultBodies).not.toMatch(/ATLAS-SECRET|Secret/);
+    expect(R['c:longid']).toBe('none');
     expect(R.stray).toBe('none');
-    // Every incoming message counts (11 above + the flood); over the limit the bridge goes silent.
+    // Pending suggestions are capped; a flood of drafts only ever reaches the host bar.
+    expect(JSON.parse(R.suggest).filter((x: string) => x === 'result')).toHaveLength(3);
+    // Every incoming message counts; over the limit the session goes silent.
     const flood = JSON.parse(R.flood);
     expect(flood.ok).toBeGreaterThan(0);
-    expect(flood.ok).toBeLessThanOrEqual(60 - 11);
+    expect(flood.ok).toBeLessThanOrEqual(60 - 26);
     expect(flood.err, 'over the limit nothing is answered').toBe(0);
     expect(flood.none).toBeGreaterThanOrEqual(40);
-    // The out-of-scope paths never reached the vault.
+    // The out-of-scope notes were never fetched for the app's benefit: every vault_note the host made was in scope or by an id it then refused.
     const notes = (await calls(page, 'vault_note')).map((c: any) => c.args.noteRef);
-    expect(notes.filter((n: string) => /Atlas|passwd|\.\./.test(n))).toEqual([]);
+    expect(notes.filter((n: string) => /passwd|\.\./.test(n))).toEqual([]);
+    await expect(page.locator('.suggestion-bar .suggestion')).toHaveCount(3);
+    await expect(page.getByRole('textbox', { name: /Message/ })).toHaveCount(0);
     expect(await calls(page, 'post_message')).toHaveLength(0);
   });
 });
 
-const STOPPED = 'This area app tried to leave its sandbox and was stopped.';
+const STOPPED = 'This app tried to leave its sandbox and was stopped.';
 test.describe('navigation', () => {
   let L: Awaited<ReturnType<typeof startListener>>;
   test.beforeEach(async () => { L = await startListener(); });
   test.afterEach(async () => { await L.close(); });
 
-  for (const vector of ['self', 'meta', 'anchor', 'write'] as const) {
-    test(`a late ${vector} navigation is blocked by frame-src and stops the frame`, async ({ page }) => {
+  for (const vector of ['self', 'meta', 'anchor', 'write', 'parse'] as const) {
+    test(`a ${vector} navigation is blocked by frame-src and stops the frame`, async ({ page }) => {
       await bootAreas(page, 'seed', { ports: L.ports, apps: [{ name: 'Nav', html: navApp(vector, L.ports) }] });
       await openAreas(page);
       await openArea(page, 'Nav');
@@ -262,44 +289,73 @@ test.describe('navigation', () => {
     });
   }
 
-  test('with no host CSP the tripwire still unmounts the frame on a second load', async ({ page }) => {
-    // Second line of defence only: without frame-src the request itself can't be stopped.
-    await bootAreas(page, 'seed', { ports: L.ports, noHostCsp: true, apps: [{ name: 'Nav', html: navApp('self', L.ports) }] });
-    expect(await page.evaluate(() => document.querySelector('meta[http-equiv="Content-Security-Policy"]'))).toBeNull();
+  test('with no host CSP the self-test fails: a reload is not proof, only a host-seen frame-src violation is', async ({ page }) => {
+    await bootAreas(page, 'seed', { selftest: false, noHostCsp: true });
+    await openSettings(page);
+    await page.getByRole('button', { name: 'Run sandbox self-test' }).click();
+    await expect(page.locator('.selftest-status.fail')).toContainText('Failed', { timeout: 25000 });
+    const failed = (await page.locator('.selftest-list li.fail').allTextContents()).join('|');
+    for (const what of ['Self-navigation', 'Meta refresh', 'Link navigation', 'Navigation during page parse']) expect(failed).toContain(what);
+    expect(await stored(page)).toBeNull();
+  });
+
+  test('a benign #anchor link keeps the app mounted (no load tripwire to false-positive)', async ({ page }) => {
+    await bootAreas(page, 'test');
     await openAreas(page);
-    await openArea(page, 'Nav');
-    await expect(page.getByText(STOPPED)).toBeVisible({ timeout: 10000 });
-    await expect(page.locator('iframe.area-frame')).toHaveCount(0);
+    await openArea(page, 'Benign');
+    const f = page.frameLocator('iframe.area-frame');
+    await expect(f.locator('#t')).toHaveText('Benign');
+    await f.locator('#jump').click();
+    await page.waitForTimeout(500);
+    await expect(page.locator('iframe.area-frame')).toHaveCount(1);
+    await expect(page.getByText(STOPPED)).toHaveCount(0);
+    await expect(f.locator('#t')).toHaveText('Benign');
   });
 });
 
-test.describe('gestures', () => {
-  test.beforeEach(async ({ page }) => bootAreas(page, 'seed', { apps: [{ name: 'Gesture', html: GESTURE }] }));
-
-  test('compose and note.open on load are refused; a click in the frame allows a draft, once', async ({ page }) => {
+test.describe('suggestions: only a tap on host UI acts', () => {
+  test('draft and open on load are pending suggestions; nothing opens, drafts or posts until a host tap', async ({ page }) => {
+    await bootAreas(page, 'seed', { apps: [{ name: 'Suggest', html: SUGGEST }] });
     await openAreas(page);
-    await openArea(page, 'Gesture');
+    await openArea(page, 'Suggest');
     const f = page.frameLocator('iframe.area-frame');
     await expect(f.locator('#out')).toContainText('loadOpen', { timeout: 10000 });
     const R = JSON.parse((await f.locator('#out').textContent())!);
-    expect(R.loadCompose).toEqual({ error: 'needs_gesture' });
-    expect(R.loadOpen).toEqual({ error: 'needs_gesture' });
+    expect(R.loadDraft).toEqual({ result: { pending: true, room: 'ch-techne' } });
+    expect(R.loadOpen).toEqual({ result: { pending: true } });
+    const bar = page.locator('.suggestion-bar');
+    await expect(bar.locator('.suggestion')).toHaveCount(2);
     await expect(page.locator('.note-sheet')).toHaveCount(0);
-    await expect(page.locator('.tab-chip'), 'no room tab was opened on load').toHaveCount(1);
-    // A tap on the host UI is not a tap in the frame; a real click inside is.
-    await f.locator('#go').click();
-    await expect(page.getByRole('textbox', { name: 'Message Techne' })).toHaveValue('from click');
-    await expect(page.locator('.tab-chip')).toHaveCount(2);
+    await expect(page.locator('.tab-chip'), 'no room tab was opened').toHaveCount(1);
     expect(await calls(page, 'post_message')).toHaveLength(0);
+    await bar.getByRole('button', { name: 'Dismiss' }).first().click();
+    await bar.getByRole('button', { name: 'Dismiss' }).first().click();
+    await expect(bar).toHaveCount(0);
+    await expect(page.locator('.tab-chip')).toHaveCount(1);
   });
 
-  test('note.open outside Areas/<Name>/ is refused even with a gesture', async ({ page }) => {
+  test('note.open outside Areas/<Name>/ is refused', async ({ page }) => {
+    await bootAreas(page, 'seed', { apps: [{ name: 'Suggest', html: SUGGEST }] });
     await openAreas(page);
-    await openArea(page, 'Gesture');
+    await openArea(page, 'Suggest');
     const f = page.frameLocator('iframe.area-frame');
     await expect(f.locator('#out')).toContainText('loadOpen', { timeout: 10000 });
     await f.locator('#open').click();
     await expect(f.locator('#out')).toContainText('"outOfScope":{"error":"out_of_scope"}');
+    await expect(page.locator('.suggestion-bar .suggestion')).toHaveCount(2);
+  });
+
+  test('focus stealing (review 2 P2-C): tapping the area card and an app that grabs focus and keeps asking drafts nothing', async ({ page }) => {
+    await bootAreas(page, 'seed', { apps: [{ name: 'Steal', html: FOCUS_STEAL }] });
+    await openAreas(page);
+    await openArea(page, 'Steal');
+    await page.waitForTimeout(2500);
+    const tabs = await page.locator('.tab-chip').allTextContents();
+    expect(tabs.join('|')).not.toMatch(/Techne\s*$/);
+    expect(await page.locator('.tab-chip').count(), 'the view was not hijacked into a room').toBe(1);
+    await expect(page.locator('.area-bar-title')).toHaveText('Steal');
+    await expect(page.locator('.suggestion-bar .suggestion'), 'pending is capped').toHaveCount(3);
+    expect(await calls(page, 'post_message')).toHaveLength(0);
     await expect(page.locator('.note-sheet')).toHaveCount(0);
   });
 });
@@ -315,7 +371,7 @@ test.describe('listing cache', () => {
     expect((await calls(page, 'vault_paths')).length, 'visibility reloads within 30 s are skipped').toBe(n0);
     await openArea(page, 'Techne');
     await expect(page.frameLocator('iframe.area-frame').locator('#notes button')).toHaveCount(3);
-    expect((await calls(page, 'vault_paths')).length, 'the area view and notes.list reuse the cached listing').toBe(n0);
+    expect((await calls(page, 'vault_paths')).length, 'the area view and the vault module reuse the cached listing').toBe(n0);
   });
 });
 

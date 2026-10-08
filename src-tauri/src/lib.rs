@@ -1552,6 +1552,24 @@ fn install_tab_menu(app: &mut tauri::App) -> tauri::Result<()> {
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// WebRTC ignores CSP, so a sealed area app could send data out through an
+/// ICE/TURN request. WebKitGTK ships with `enable-webrtc` off; this makes that
+/// explicit so a build or distro default can't silently turn it on. The
+/// in-app sandbox self-test (src/interface/selftest) is the proof, not this call.
+#[cfg(target_os = "linux")]
+fn disable_webrtc(app: &tauri::App) {
+    use tauri::Manager;
+    use webkit2gtk::{SettingsExt, WebViewExt};
+    for (_, window) in app.webview_windows() {
+        let _ = window.with_webview(|webview| {
+            if let Some(settings) = webview.inner().settings() {
+                settings.set_enable_webrtc(false);
+                settings.set_enable_media_stream(false);
+            }
+        });
+    }
+}
+
 pub fn run() {
     #[cfg(desktop)]
     desktop_log::init();
@@ -1575,6 +1593,8 @@ pub fn run() {
             }
             #[cfg(mobile)]
             mobile::setup(_app);
+            #[cfg(target_os = "linux")]
+            disable_webrtc(_app);
             tracing::info!(version = %_app.package_info().version, "setup complete; opening window");
             Ok(())
         })

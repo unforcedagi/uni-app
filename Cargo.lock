@@ -5645,6 +5645,7 @@ dependencies = [
  "uni-core",
  "url",
  "uuid",
+ "webkit2gtk",
  "zeroize",
 ]
 
