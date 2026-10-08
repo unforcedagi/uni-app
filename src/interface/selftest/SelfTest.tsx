@@ -7,7 +7,7 @@ import ProbeFrame, { type ProbeOutcome } from "./ProbeFrame";
 import { useAppVersion } from "./useAppVersion";
 import { useStoredSelfTest } from "./useSelfTest";
 
-const TIMEOUT_MS = 20000;
+const TIMEOUT_MS = 40000;
 // The probe may only call theme.get; every other namespace fails closed (unknown).
 const STUB_ROUTER = createRouter([createThemeModule({ theme: () => ({ text: "", muted: "", accent: "selftest", surface: "", line: "", sans: "", serif: "", mono: "" }) })]);
 

@@ -20,7 +20,8 @@ export const hostileApp = (ports: Ports) => `<!doctype html><html><body><pre id=
   await attempt('parentDoc', () => parent.document.title);
   await attempt('tauri', () => typeof window.__TAURI_INTERNALS__ !== 'undefined' ? 'present' : (() => { throw Object.assign(new Error(), { name: 'absent' }); })());
   await attempt('parentTauri', () => parent.__TAURI_INTERNALS__);
-  await attempt('cookie', () => document.cookie);
+  // Chromium throws in an opaque origin; WebKit returns '' (so only a value, or a write that persists, is a leak).
+  await attempt('cookie', () => { const v = document.cookie; if (v) return v; document.cookie = 'leak=1'; if (document.cookie.indexOf('leak') >= 0) return 'persisted'; throw Object.assign(new Error(), { name: 'empty' }); });
   await attempt('storage', () => localStorage.length);
   await attempt('eval', () => eval('1+1'));
   await attempt('popup', () => { const w = window.open(LEAK + '?popup'); if (!w) throw Object.assign(new Error(), { name: 'null' }); return 'opened'; });

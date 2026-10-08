@@ -14,6 +14,6 @@ export async function startListener() {
   const ports: Ports = { http: (server.address() as { port: number }).port, udp: udp.address().port };
   return {
     ports, urls, datagrams,
-    async close() { await new Promise<void>((r) => server.close(() => r())); udp.close(); },
+    async close() { server.closeAllConnections?.(); await new Promise<void>((r) => server.close(() => r())); udp.close(); },
   };
 }
