@@ -4,8 +4,8 @@
 
 import type { VaultRef } from "./vaultlinks.ts";
 
-export type TabKind = "room" | "thread" | "note" | "journal" | "vault";
-export type Tab = { id: string; kind: TabKind; channel?: string; root?: string; note?: VaultRef; vault?: string; title: string };
+export type TabKind = "room" | "thread" | "note" | "journal" | "vault" | "areas" | "area";
+export type Tab = { id: string; kind: TabKind; channel?: string; root?: string; note?: VaultRef; vault?: string; /** `area`: the area note path, `Areas/<Name>`. */ path?: string; title: string };
 export type TabTarget = Omit<Tab, "id">;
 /** `recent`: tab ids by last activation, most recent last (drives the cap and close). */
 export type Tabs = { tabs: Tab[]; active: string | null; recent: string[] };
@@ -28,7 +28,8 @@ export type OpenMode = "focus" | "new" | "replace";
 export function sameTarget(a: TabTarget, b: TabTarget): boolean {
   if (a.kind !== b.kind) return false;
   switch (a.kind) {
-    case "journal": return true;
+    case "journal": case "areas": return true;
+    case "area": return a.path === b.path;
     case "vault": return a.vault === b.vault;
     case "room": return a.channel === b.channel;
     case "thread": return a.channel === b.channel && a.root === b.root;
@@ -132,7 +133,7 @@ export function serializeTabs(s: Tabs): string {
   return JSON.stringify({ v: 1, tabs: s.tabs, active: s.active, recent: s.recent });
 }
 
-const KINDS: TabKind[] = ["room", "thread", "note", "journal", "vault"];
+const KINDS: TabKind[] = ["room", "thread", "note", "journal", "vault", "areas", "area"];
 const str = (x: unknown): x is string => typeof x === "string" && x.length > 0;
 
 function validTab(x: unknown): Tab | null {
@@ -142,6 +143,8 @@ function validTab(x: unknown): Tab | null {
   const title = typeof t.title === "string" ? t.title : "";
   const kind = t.kind as TabKind;
   if (kind === "journal") return { id: t.id, kind, title: title || "Journal" };
+  if (kind === "areas") return { id: t.id, kind, title: title || "Areas" };
+  if (kind === "area") return typeof t.path === "string" && /^Areas\/[^/]+$/.test(t.path) ? { id: t.id, kind, path: t.path, title: title || t.path.slice(6) } : null;
   if (kind === "vault") return str(t.vault) ? { id: t.id, kind, vault: t.vault, title: title || t.vault } : null;
   if (kind === "note") {
     const n = t.note as Record<string, unknown> | undefined;

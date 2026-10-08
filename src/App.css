@@ -610,7 +610,7 @@ h1 { font-family: var(--serif); font-weight: 500; font-size: 34px; line-height: 
 @media (max-width: 599px) {
   .shell { padding-bottom: calc(56px + env(safe-area-inset-bottom)); }
   .rail { position: absolute; left: 0; right: 0; bottom: 0; width: 100%; height: calc(56px + env(safe-area-inset-bottom)); padding: 0 4px env(safe-area-inset-bottom); flex-direction: row; justify-content: space-around; border-right: 0; border-top: 1px solid var(--line); gap: 0; overflow: visible; }
-  .rail button { width: 20%; min-height: 56px; border-radius: 8px; }
+  .rail button { width: calc(100% / 6); min-height: 56px; border-radius: 8px; }
   .rail .rail-settings { margin-top: 0; }
   .rail .rail-vault, .rail .rail-search { display: none; }
   .shell.composer-focused, .shell.journal-focus { padding-bottom: 0; }
