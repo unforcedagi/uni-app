@@ -1,6 +1,7 @@
 import { mkdir } from 'node:fs/promises';
 import { test, expect, type Page } from '@playwright/test';
-import { bootAreas } from './areasFixture';
+import { bootAreas, GESTURE, navApp } from './areasFixture';
+import { startListener } from './areasListener';
 
 const rail = (page: Page) => page.getByRole('navigation', { name: 'Main navigation' });
 const openAreas = async (page: Page) => { await rail(page).getByRole('button', { name: 'Areas', exact: true }).click(); await expect(page.getByRole('heading', { name: 'Areas', level: 1 })).toBeVisible(); };
@@ -130,12 +131,13 @@ test.describe('sandbox self-test', () => {
     await page.getByRole('button', { name: 'Run sandbox self-test' }).click();
     await expect(page.locator('.selftest-status.pass')).toContainText('Passed', { timeout: 15000 });
     const items = page.locator('.selftest-list li');
-    expect(await items.count()).toBeGreaterThanOrEqual(12);
+    expect(await items.count()).toBeGreaterThanOrEqual(18);
     await expect(page.locator('.selftest-list li.fail')).toHaveCount(0);
     await expect(items.filter({ hasText: 'webkit.messageHandlers.ipc' })).toHaveClass('pass');
     await expect(items.filter({ hasText: 'window.ipc' })).toHaveClass('pass');
     const pass = JSON.parse((await stored(page))!);
     expect(pass).toMatchObject({ platform: 'linux', appVersion: 'dev' });
+    expect(pass.userAgent).toBe(await page.evaluate(() => navigator.userAgent));
     expect(Date.parse(pass.passedAt)).toBeGreaterThan(0);
     await mkdir('shots/t73', { recursive: true });
     await page.screenshot({ path: `shots/t73/${info.project.name}-selftest.png` });
@@ -179,7 +181,9 @@ test.describe('platform gate', () => {
 });
 
 test.describe('hostile and benign apps', () => {
-  test.beforeEach(async ({ page }) => bootAreas(page, 'test'));
+  let L: Awaited<ReturnType<typeof startListener>>;
+  test.beforeEach(async ({ page }) => { L = await startListener(); await bootAreas(page, 'test', { ports: L.ports }); });
+  test.afterEach(async () => { await L.close(); });
 
   test('a benign app renders using bridge data', async ({ page }) => {
     await openAreas(page);
@@ -191,27 +195,29 @@ test.describe('hostile and benign apps', () => {
   });
 
   test('a hostile app is contained', async ({ page }) => {
-    const hits: string[] = [];
-    await page.route('http://127.0.0.1:1436/**', (r) => { hits.push(r.request().url()); return r.abort(); });
     const events: string[] = [];
-    page.on('request', (r) => { if (r.url().includes(':1436')) events.push('request ' + r.url()); });
-    page.on('requestfailed', (r) => { if (r.url().includes(':1436')) events.push('failed ' + r.url() + ' ' + r.failure()?.errorText); });
+    page.on('request', (r) => { if (r.url().includes(`:${L.ports.http}`)) events.push('request ' + r.url()); });
+    page.on('requestfailed', (r) => { if (r.url().includes(`:${L.ports.http}`)) events.push('failed ' + r.url() + ' ' + r.failure()?.errorText); });
     const before = page.url();
     await openAreas(page);
     await openArea(page, 'Hostile');
     const out = page.frameLocator('iframe.area-frame').locator('#out');
-    await expect(out).toContainText('"flood"', { timeout: 15000 });
+    await expect(out).toContainText('"flood"', { timeout: 20000 });
     const R = JSON.parse((await out.textContent())!);
 
-    for (const k of ['fetch', 'xhr', 'ws', 'img', 'topRead', 'parentDoc', 'cookie', 'storage', 'eval']) expect(R[k], k).toMatch(/^blocked/);
+    for (const k of ['fetch', 'xhr', 'ws', 'img', 'topRead', 'parentDoc', 'cookie', 'storage', 'eval', 'beacon', 'rtcNew']) expect(R[k], k).toMatch(/^blocked/);
     expect(R.tauri).toBe('blocked:absent');
+    expect(R.rtc, 'WebRTC is removed before app code runs').toBe('blocked:absent');
     expect(R.parentTauri).toMatch(/^blocked/);
     expect(R.popup).toMatch(/^blocked/);
     expect(String(R.topWrite)).not.toMatch(/^LEAK/);
     // Anything the frame tried to fetch was refused by the CSP before leaving the page.
     expect(events.filter((e) => e.startsWith('request')).length).toBe(events.filter((e) => /^failed .* csp$/.test(e)).length);
     expect(events.length).toBeGreaterThan(0);
-    expect(hits, 'no request reached the network').toEqual([]);
+    // A real listener on loopback (HTTP and the TURN UDP port) saw nothing: fetch, XHR, WebSocket, image, beacon,
+    // popup, nested frame, dns-prefetch/preconnect/prefetch/prerender hints and RTCPeerConnection.
+    expect(L.urls, 'no HTTP request reached the listener').toEqual([]);
+    expect(L.datagrams, 'no UDP datagram reached the TURN port').toEqual([]);
     expect(page.url()).toBe(before);
     expect(await page.locator('iframe.area-frame').getAttribute('sandbox')).toBe('allow-scripts');
 
@@ -224,14 +230,140 @@ test.describe('hostile and benign apps', () => {
     expect(R['bridge:v2']).toBe('bad_version');
     expect(R['bridge:longid']).toBe('none');
     expect(R.stray).toBe('none');
+    // Every incoming message counts (11 above + the flood); over the limit the bridge goes silent.
     const flood = JSON.parse(R.flood);
-    expect(flood.ok).toBeLessThanOrEqual(60);
     expect(flood.ok).toBeGreaterThan(0);
-    expect(flood.ok + flood.err).toBe(100 - flood.none);
-    expect(flood.err).toBeGreaterThanOrEqual(40 - 8);
+    expect(flood.ok).toBeLessThanOrEqual(60 - 11);
+    expect(flood.err, 'over the limit nothing is answered').toBe(0);
+    expect(flood.none).toBeGreaterThanOrEqual(40);
     // The out-of-scope paths never reached the vault.
     const notes = (await calls(page, 'vault_note')).map((c: any) => c.args.noteRef);
     expect(notes.filter((n: string) => /Atlas|passwd|\.\./.test(n))).toEqual([]);
     expect(await calls(page, 'post_message')).toHaveLength(0);
+  });
+});
+
+const STOPPED = 'This area app tried to leave its sandbox and was stopped.';
+test.describe('navigation', () => {
+  let L: Awaited<ReturnType<typeof startListener>>;
+  test.beforeEach(async () => { L = await startListener(); });
+  test.afterEach(async () => { await L.close(); });
+
+  for (const vector of ['self', 'meta', 'anchor', 'write'] as const) {
+    test(`a late ${vector} navigation is blocked by frame-src and stops the frame`, async ({ page }) => {
+      await bootAreas(page, 'seed', { ports: L.ports, apps: [{ name: 'Nav', html: navApp(vector, L.ports) }] });
+      await openAreas(page);
+      await openArea(page, 'Nav');
+      await expect(page.getByText(STOPPED)).toBeVisible({ timeout: 10000 });
+      await expect(page.locator('iframe.area-frame')).toHaveCount(0);
+      await page.waitForTimeout(600);
+      expect(L.urls, 'the navigation never reached the network').toEqual([]);
+    });
+  }
+
+  test('with no host CSP the tripwire still unmounts the frame on a second load', async ({ page }) => {
+    // Second line of defence only: without frame-src the request itself can't be stopped.
+    await bootAreas(page, 'seed', { ports: L.ports, noHostCsp: true, apps: [{ name: 'Nav', html: navApp('self', L.ports) }] });
+    expect(await page.evaluate(() => document.querySelector('meta[http-equiv="Content-Security-Policy"]'))).toBeNull();
+    await openAreas(page);
+    await openArea(page, 'Nav');
+    await expect(page.getByText(STOPPED)).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('iframe.area-frame')).toHaveCount(0);
+  });
+});
+
+test.describe('gestures', () => {
+  test.beforeEach(async ({ page }) => bootAreas(page, 'seed', { apps: [{ name: 'Gesture', html: GESTURE }] }));
+
+  test('compose and note.open on load are refused; a click in the frame allows a draft, once', async ({ page }) => {
+    await openAreas(page);
+    await openArea(page, 'Gesture');
+    const f = page.frameLocator('iframe.area-frame');
+    await expect(f.locator('#out')).toContainText('loadOpen', { timeout: 10000 });
+    const R = JSON.parse((await f.locator('#out').textContent())!);
+    expect(R.loadCompose).toEqual({ error: 'needs_gesture' });
+    expect(R.loadOpen).toEqual({ error: 'needs_gesture' });
+    await expect(page.locator('.note-sheet')).toHaveCount(0);
+    await expect(page.locator('.tab-chip')).toHaveCount(2);
+    // A tap on the host UI is not a tap in the frame; a real click inside is.
+    await f.locator('#go').click();
+    await expect(page.getByRole('textbox', { name: 'Message Techne' })).toHaveValue('from click');
+    expect(await calls(page, 'post_message')).toHaveLength(0);
+  });
+
+  test('note.open outside Areas/<Name>/ is refused even with a gesture', async ({ page }) => {
+    await openAreas(page);
+    await openArea(page, 'Gesture');
+    const f = page.frameLocator('iframe.area-frame');
+    await expect(f.locator('#out')).toContainText('loadOpen', { timeout: 10000 });
+    await f.locator('#open').click();
+    await expect(f.locator('#out')).toContainText('"outOfScope":{"error":"out_of_scope"}');
+    await expect(page.locator('.note-sheet')).toHaveCount(0);
+  });
+});
+
+test.describe('listing cache', () => {
+  test('vault_paths is shared and the focus reload is debounced', async ({ page }) => {
+    await bootAreas(page, 'seed');
+    await openAreas(page);
+    await expect(card(page, 'Techne')).toBeVisible();
+    const n0 = (await calls(page, 'vault_paths')).length;
+    for (let i = 0; i < 4; i++) await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    await page.waitForTimeout(400);
+    expect((await calls(page, 'vault_paths')).length, 'visibility reloads within 30 s are skipped').toBe(n0);
+    await openArea(page, 'Techne');
+    await expect(page.frameLocator('iframe.area-frame').locator('#notes button')).toHaveCount(3);
+    expect((await calls(page, 'vault_paths')).length, 'the area view and notes.list reuse the cached listing').toBe(n0);
+  });
+});
+
+test.describe('self-test hardening', () => {
+  test('a stripped CSP fails the self-test (it needs a positive violation, not an absence of success)', async ({ page }) => {
+    await bootAreas(page, 'seed', { selftest: false, stripCsp: true });
+    await openSettings(page);
+    await page.getByRole('button', { name: 'Run sandbox self-test' }).click();
+    await expect(page.locator('.selftest-status.fail')).toContainText('Failed', { timeout: 25000 });
+    const failed = await page.locator('.selftest-list li.fail').allTextContents();
+    expect(failed.join('|')).toMatch(/fetch/);
+    expect(failed.join('|')).toMatch(/XMLHttpRequest/);
+    await expect(page.locator('.selftest-status.pass')).toHaveCount(0);
+    expect(await stored(page)).toBeNull();
+  });
+
+  test('a failed re-run clears an earlier pass', async ({ page }) => {
+    await bootAreas(page, 'seed', { selftest: true, ipcLeak: true });
+    expect(await stored(page)).not.toBeNull();
+    await openSettings(page);
+    await expect(page.locator('.selftest-status').first()).toContainText('Live area apps enabled');
+    await page.getByRole('button', { name: 'Run sandbox self-test' }).click();
+    await expect(page.locator('.selftest-status.fail')).toContainText('Failed', { timeout: 25000 });
+    expect(await stored(page)).toBeNull();
+    await expect(page.locator('.selftest-status', { hasText: 'Live area apps enabled' })).toHaveCount(0);
+  });
+
+  test('a pass recorded under another user agent does not open the gate', async ({ page }) => {
+    await bootAreas(page, 'seed', { selftest: true, passUa: 'Mozilla/5.0 (X11; Linux x86_64) WebKitGTK/0.0' });
+    await openAreas(page);
+    await openArea(page, 'Techne');
+    await expect(page.locator('iframe')).toHaveCount(0);
+  });
+
+  test('a getVersion() failure keeps the gate closed', async ({ page }) => {
+    await bootAreas(page, 'seed', { selftest: true, versionFails: true });
+    await openAreas(page);
+    await openArea(page, 'Techne');
+    await expect(page.locator('iframe')).toHaveCount(0);
+  });
+
+  test('a pass opens an already-mounted area without a remount', async ({ page }) => {
+    await bootAreas(page, 'seed', { selftest: false });
+    await openAreas(page);
+    await openArea(page, 'Techne');
+    await expect(page.locator('iframe')).toHaveCount(0);
+    await page.evaluate(() => document.querySelector('.area-view')?.setAttribute('data-keep', '1'));
+    await openSettings(page);
+    await page.getByRole('button', { name: 'Run sandbox self-test' }).click();
+    await expect(page.locator('.selftest-status.pass')).toContainText('Passed', { timeout: 25000 });
+    await expect(page.locator('.area-view[data-keep] iframe.area-frame')).toHaveCount(1);
   });
 });
