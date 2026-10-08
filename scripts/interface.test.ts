@@ -311,7 +311,7 @@ await check("chat.draft: creates a pending suggestion only — no composer, no p
   const g = { "chat.draft": ["ch-techne", "ch-two"] };
   const res = await r.call("chat", "draft", { text: "hello room" }, g);
   assert.deepEqual(res, { pending: true, room: "ch-techne" });
-  assert.deepEqual(log, [["suggest", { room: "ch-techne", text: "hello room" }]]);
+  assert.deepEqual(log, [["suggest", { kind: "draft", room: "ch-techne", text: "hello room" }]]);
   await r.call("chat", "draft", { text: "to two", room: "ch-two" }, g);
   assert.equal(log[1][1].room, "ch-two");
 });
