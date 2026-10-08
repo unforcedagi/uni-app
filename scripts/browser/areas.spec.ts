@@ -131,7 +131,7 @@ test.describe('sandbox self-test', () => {
     await page.getByRole('button', { name: 'Run sandbox self-test' }).click();
     await expect(page.locator('.selftest-status.pass')).toContainText('Passed', { timeout: 15000 });
     const items = page.locator('.selftest-list li');
-    expect(await items.count()).toBeGreaterThanOrEqual(18);
+    expect(await items.count()).toBe(17);
     await expect(page.locator('.selftest-list li.fail')).toHaveCount(0);
     await expect(items.filter({ hasText: 'webkit.messageHandlers.ipc' })).toHaveClass('pass');
     await expect(items.filter({ hasText: 'window.ipc' })).toHaveClass('pass');
@@ -205,7 +205,8 @@ test.describe('hostile and benign apps', () => {
     await expect(out).toContainText('"flood"', { timeout: 20000 });
     const R = JSON.parse((await out.textContent())!);
 
-    for (const k of ['fetch', 'xhr', 'ws', 'img', 'topRead', 'parentDoc', 'cookie', 'storage', 'eval', 'beacon', 'rtcNew']) expect(R[k], k).toMatch(/^blocked/);
+    for (const k of ['fetch', 'xhr', 'ws', 'img', 'topRead', 'parentDoc', 'cookie', 'storage', 'eval', 'rtcNew']) expect(R[k], k).toMatch(/^blocked/);
+    // sendBeacon reports "queued" even when the CSP then refuses it; the listener below is what proves nothing left.
     expect(R.tauri).toBe('blocked:absent');
     expect(R.rtc, 'WebRTC is removed before app code runs').toBe('blocked:absent');
     expect(R.parentTauri).toMatch(/^blocked/);
@@ -284,10 +285,11 @@ test.describe('gestures', () => {
     expect(R.loadCompose).toEqual({ error: 'needs_gesture' });
     expect(R.loadOpen).toEqual({ error: 'needs_gesture' });
     await expect(page.locator('.note-sheet')).toHaveCount(0);
-    await expect(page.locator('.tab-chip')).toHaveCount(2);
+    await expect(page.locator('.tab-chip'), 'no room tab was opened on load').toHaveCount(1);
     // A tap on the host UI is not a tap in the frame; a real click inside is.
     await f.locator('#go').click();
     await expect(page.getByRole('textbox', { name: 'Message Techne' })).toHaveValue('from click');
+    await expect(page.locator('.tab-chip')).toHaveCount(2);
     expect(await calls(page, 'post_message')).toHaveLength(0);
   });
 
@@ -365,5 +367,108 @@ test.describe('self-test hardening', () => {
     await page.getByRole('button', { name: 'Run sandbox self-test' }).click();
     await expect(page.locator('.selftest-status.pass')).toContainText('Passed', { timeout: 25000 });
     await expect(page.locator('.area-view[data-keep] iframe.area-frame')).toHaveCount(1);
+  });
+});
+
+// ---- design (Uni's screenshot review)
+const lum = (c: [number, number, number]) => { const f = c.map((v) => { const s = v / 255; return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4; }); return 0.2126 * f[0] + 0.7152 * f[1] + 0.0722 * f[2]; };
+const ratio = (a: [number, number, number], b: [number, number, number]) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+/** Foreground colour of `sel` against the first opaque background up its ancestors (alpha flattened onto the page). */
+const contrastOf = (page: Page, sel: string) => page.evaluate(([s]) => {
+  const parse = (v: string): [number, number, number, number] => {
+    const m = /color\(srgb ([\d.]+) ([\d.]+) ([\d.]+)(?: \/ ([\d.]+))?\)/.exec(v);
+    if (m) return [+m[1] * 255, +m[2] * 255, +m[3] * 255, m[4] === undefined ? 1 : +m[4]];
+    const n = /rgba?\(([\d.]+)[, ]+([\d.]+)[, ]+([\d.]+)(?:[,/ ]+([\d.]+))?\)/.exec(v)!;
+    return [+n[1], +n[2], +n[3], n[4] === undefined ? 1 : +n[4]];
+  };
+  const el = document.querySelector(s)!;
+  let bg: [number, number, number] = [255, 255, 255];
+  const stack: Element[] = []; for (let e: Element | null = el; e; e = e.parentElement) stack.push(e);
+  for (const e of stack.reverse()) { const c = parse(getComputedStyle(e).backgroundColor); if (c[3] > 0) bg = [0, 1, 2].map((i) => c[i] * c[3] + bg[i] * (1 - c[3])) as [number, number, number]; }
+  const f = parse(getComputedStyle(el).color);
+  return { fg: [f[0], f[1], f[2]] as [number, number, number], bg };
+}, [sel]);
+
+test.describe('design', () => {
+  test.beforeEach(async ({ page }) => bootAreas(page, 'seed'));
+
+  test('foreground cards: a straight inset rule, text aligned with background cards, elevated warm tint', async ({ page }) => {
+    await openAreas(page);
+    const fg = card(page, 'Techne'), bg = card(page, 'Atlas');
+    const edge = await fg.evaluate((el) => getComputedStyle(el).borderLeftWidth);
+    expect(edge, 'no bending border-left').toBe('1px');
+    const rule = await fg.evaluate((el) => { const s = getComputedStyle(el, '::before'); return { radius: s.borderTopLeftRadius, width: s.width, left: s.left, content: s.content }; });
+    expect(rule.radius).toBe('0px'); expect(rule.width).toBe('3px'); expect(rule.content).not.toBe('none');
+    const x = async (c: ReturnType<typeof card>) => c.locator('.area-mark').evaluate((el) => el.getBoundingClientRect().left - (el.closest('.area-card') as HTMLElement).getBoundingClientRect().left);
+    expect(await x(fg), 'text columns align across card kinds').toBe(await x(bg));
+    const tint = await fg.evaluate((el) => getComputedStyle(el).backgroundColor);
+    const plain = await bg.evaluate((el) => getComputedStyle(el).backgroundColor);
+    expect(tint).not.toBe(plain);
+  });
+
+  test('snippets clamp to two lines instead of cutting mid-word with an ellipsis on one line', async ({ page }) => {
+    await openAreas(page);
+    const style = await card(page, 'Techne').locator('.area-latest > span').first().evaluate((el) => { const s = getComputedStyle(el); return { clamp: s.webkitLineClamp, ws: s.whiteSpace }; });
+    expect(style.clamp).toBe('2');
+    expect(style.ws).not.toBe('nowrap');
+  });
+
+  test('the active rail item is a pill behind the icon, not a square tile', async ({ page }) => {
+    await openAreas(page);
+    const active = rail(page).getByRole('button', { name: 'Areas', exact: true });
+    const s = await active.evaluate((b) => { const i = b.querySelector('i')!; const a = getComputedStyle(b), c = getComputedStyle(i); return { btn: a.backgroundColor, pill: c.backgroundColor, radius: parseFloat(c.borderTopLeftRadius), h: i.getBoundingClientRect().height, w: i.getBoundingClientRect().width }; });
+    expect(s.btn).toMatch(/rgba\(0, 0, 0, 0\)|transparent/);
+    expect(s.pill).not.toMatch(/rgba\(0, 0, 0, 0\)|transparent/);
+    expect(s.radius).toBeGreaterThanOrEqual(s.h / 2);
+    expect(s.w).toBeGreaterThan(s.h);
+  });
+
+  test('phone top bar: the chip is on the 16px grid', async ({ page }, info) => {
+    test.skip(info.project.name !== 'phone', 'phone strip only');
+    await openAreas(page);
+    const box = (await page.locator('.tab-chip').first().boundingBox())!, strip = (await page.locator('.tab-strip').boundingBox())!;
+    expect(box.x - strip.x, 'left inset').toBeGreaterThanOrEqual(16);
+    expect(box.y - strip.y, 'top inset').toBeGreaterThanOrEqual(8);
+  });
+
+  test('techne: bench sits in the hero, the note card sizes to its content, the first line sits on the first rule', async ({ page }, info) => {
+    await openAreas(page);
+    await openArea(page, 'Techne');
+    const f = page.frameLocator('iframe.area-frame');
+    await expect(f.locator('#notes button')).toHaveCount(3);
+    const q = (sel: string) => f.locator(sel).first().boundingBox();
+    const bench = await q('[aria-label="Notes on the bench"]'), title = await q('#title'), pulse = await q('[aria-label="Recent pulse"]'), note = await q('[aria-label="Say something"]');
+    if (info.project.name === 'desktop') {
+      expect(bench!.y, 'bench is up in the hero').toBeLessThan(pulse!.y);
+      expect(bench!.y).toBeLessThan(title!.y + title!.height);
+      expect(bench!.x).toBeGreaterThan(title!.x + 300);
+    }
+    expect(note!.height, 'the note card does not stretch to the pulse column').toBeLessThan(pulse!.height - 100);
+    // Rule under the first text line: the rule's offset inside the textarea equals the baseline of line one.
+    const geo = await f.locator('#t').evaluate((t: HTMLTextAreaElement) => {
+      const s = getComputedStyle(t);
+      const probe = document.createElement('span'); probe.style.cssText = 'position:absolute;visibility:hidden;font:' + s.font + ';line-height:' + s.lineHeight; probe.innerHTML = 'Hx<i style="display:inline-block;width:0;height:0;vertical-align:baseline"></i>';
+      document.body.appendChild(probe); const base = (probe.querySelector('i') as HTMLElement).getBoundingClientRect().bottom - probe.getBoundingClientRect().top; probe.remove();
+      return { base, img: s.backgroundImage, size: s.backgroundSize, origin: s.backgroundOrigin, clip: s.backgroundClip, attach: s.backgroundAttachment };
+    });
+    expect(geo.attach).toMatch(/^local/);
+    expect(geo.origin, 'tiles start at the first line, not in the padding above it').toMatch(/^content-box/);
+    expect(geo.clip, 'nothing is ruled above the first line').toMatch(/^content-box/);
+    expect(geo.size).toMatch(/^100% 24px/);
+    expect(geo.img, 'rule is the 18px-19px band of each 24px line').toMatch(/18px.*18px.*19px.*19px/);
+    expect(Math.abs(geo.base - 18), 'baseline of line one is within 1px of the first rule').toBeLessThanOrEqual(1);
+  });
+
+  test.describe('dark', () => {
+    test.use({ colorScheme: 'dark' });
+    test('tiny caps and muted text are at least 4.5:1; the italic subtitle is weight 500', async ({ page }) => {
+      await bootAreas(page, 'seed');
+      await openAreas(page);
+      for (const sel of ['.areas-head .eyebrow', '.area-card.background .area-mark', '.area-card.foreground .area-mark', '.areas-head p', '.area-card.background .area-latest', '.area-card.foreground .area-latest time']) {
+        const { fg, bg } = await contrastOf(page, sel);
+        expect(ratio(fg, bg), sel).toBeGreaterThanOrEqual(4.5);
+      }
+      expect(await page.locator('.areas-head p').evaluate((el) => getComputedStyle(el).fontWeight)).toBe('500');
+    });
   });
 });

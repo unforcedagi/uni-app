@@ -2,6 +2,7 @@ import { VoiceOutbox, relayAccepted } from "./voiceOutbox";
 import { SettingsIcon, UniIcon, JournalIcon, StarIcon, RoomsIcon, AreasIcon } from "./Icons";
 import AreasSurface from "./areas/AreasSurface";
 import AreaSelfTest from "./areas/AreaSelfTest";
+import { appendDraft } from "./areas/composeDraft";
 import { FOR_YOU_ID, FOR_YOU_OPENED_KEY, LAST_SURFACE_KEY, countRecommendations, isRecommendationNew, readLastSurface, saveLastSurface } from "./railCore";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
@@ -1403,12 +1404,19 @@ function Conversations({ onForget }: { onForget: () => void }) {
   }
   const journalTab = tabs.tabs.find((t) => t.kind === "journal");
   const areasOpen = active?.kind === "areas" || active?.kind === "area";
+  // Drafts only: the scope's draft is read when the room opens. Aaron presses Send.
+  const composeInRoom = (id: string, text: string) => {
+    const key = keyFor(id, null);
+    editDraft(key, appendDraft(drafts.current.get(key), text));
+    focusComposer.current = true;
+    openTargetRef.current(roomTarget(id), "new");
+  };
+  const composeInRoomRef = useRef(composeInRoom);
+  composeInRoomRef.current = composeInRoom;
   const areaActions = useMemo(() => ({
     openRoom: (id: string) => openTargetRef.current(roomTarget(id), "new"),
     openNote: (ref: string) => openNote({ hub: null, vault: "uni", ref }, null),
-    // Drafts only: the scope's draft is read when the room opens. Aaron presses Send.
-    compose: (id: string, text: string) => { const key = keyFor(id, null), old = drafts.current.get(key)?.trim(); editDraft(key, old ? `${old}\n\n${text}` : text); focusComposer.current = true; openTargetRef.current(roomTarget(id), "new"); },
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    compose: (id: string, text: string) => composeInRoomRef.current(id, text),
   }), [openNote]);
   const primaryVault = vaults.includes("uni") ? "uni" : null;
   const otherVaults = vaults.filter((vault) => vault !== "uni");

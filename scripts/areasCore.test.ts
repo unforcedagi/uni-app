@@ -141,9 +141,10 @@ function harness(api: Partial<BridgeApi>, now = () => 0) {
   const h = harness({});
   for (let i = 0; i < 100; i++) h.bridge.handle({ bridge: 1, id: `q${i}`, method: "area.get" });
   await new Promise((r) => setTimeout(r, 5));
-  assert.equal(h.out.filter((m) => "error" in m && m.error === "rate_limited").length, 40);
+  assert.equal(h.out.length, 60, "the first 60 are answered; the rest are dropped without a reply");
+  assert.equal(h.out.filter((m) => "error" in m && m.error === "rate_limited").length, 0, "no rate_limited reply: silence");
   h.bridge.handle("junk"); h.bridge.handle({ nope: 1 });
-  assert.equal(h.out.length, 100, "unidentifiable junk gets no reply");
+  assert.equal(h.out.length, 60, "unidentifiable junk gets no reply");
 }
 {
   const h = harness({ noteGet: async () => { throw new Error("boom"); } });
@@ -161,6 +162,7 @@ function harness(api: Partial<BridgeApi>, now = () => 0) {
     getNote: async (p) => { calls.push(`get:${p}`); return { id: "n", content: "body" }; },
     getMessages: async (c) => c === "c1" ? [{ ref: "m1", author: "abcdef012345", author_name: "Aaron", ts: 100, body: "hi" }] : [{ ref: "m2", author: "feedbeefcafe", ts: 200, body: "yo" }],
     compose: (c, t) => calls.push(`compose:${c}:${t}`),
+    roomName: (c) => `room-${c}`,
     openNote: (r) => calls.push(`open:${r}`),
   });
   assert.equal((await api.noteGet("Areas/Techne/Plan") as { content: string }).content, "body");
@@ -170,9 +172,9 @@ function harness(api: Partial<BridgeApi>, now = () => 0) {
   const recent = await api.channelRecent(30) as { messages: { id: string; author: string; created_at: string }[] };
   assert.deepEqual(recent.messages.map((m) => [m.id, m.author]), [["m2", "feedbeef"], ["m1", "Aaron"]]);
   assert.equal(recent.messages[1].created_at, "1970-01-01T00:01:40.000Z");
-  assert.deepEqual(await api.channelCompose("hello"), { ok: true });
+  assert.deepEqual(await api.channelCompose("hello"), { ok: true, room: "room-c1" });
   assert.ok(calls.includes("compose:c1:hello"));
-  const none = createAreaApi({ ...a, channels: [] }, { listPaths: async () => [], getNote: async () => ({ id: "" }), getMessages: async () => [], compose: () => {}, openNote: () => {} });
+  const none = createAreaApi({ ...a, channels: [] }, { listPaths: async () => [], getNote: async () => ({ id: "" }), getMessages: async () => [], compose: () => {}, roomName: () => "", openNote: () => {} });
   await assert.rejects(none.channelCompose("x"), /no_channel/);
   assert.equal(((await api.notesList(50)) as { notes: unknown[] }).notes.length, 2);
 }
@@ -182,15 +184,17 @@ assert.equal(platformName("Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit"
 assert.equal(platformName("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/130"), "linux");
 assert.equal(platformName("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit"), "mac");
 assert.deepEqual([...LIVE_AREA_PLATFORMS], [], "no platform is proven by constant");
-const pass = { platform: "linux", passedAt: "2026-10-08T00:00:00Z", appVersion: "1.2.3" };
-assert.ok(!liveAreaApps("linux", "1.2.3", null), "no stored pass: closed");
-assert.ok(liveAreaApps("linux", "1.2.3", pass), "stored pass for platform and version: open");
-assert.ok(!liveAreaApps("linux", "1.2.4", pass), "version mismatch: closed");
-assert.ok(!liveAreaApps("android", "1.2.3", pass), "platform mismatch: closed");
-assert.ok(!liveAreaApps("linux", null, pass), "version unknown: closed");
-assert.ok(liveAreaApps("mac", "9", null, ["mac"]), "the constant still opens a platform");
+const UA = "Mozilla/5.0 (X11; Linux x86_64) WebKitGTK/2.46";
+const pass = { platform: "linux", passedAt: "2026-10-08T00:00:00Z", appVersion: "1.2.3", userAgent: UA };
+assert.ok(!liveAreaApps("linux", "1.2.3", null, UA), "no stored pass: closed");
+assert.ok(liveAreaApps("linux", "1.2.3", pass, UA), "stored pass for platform, version and webview: open");
+assert.ok(!liveAreaApps("linux", "1.2.4", pass, UA), "version mismatch: closed");
+assert.ok(!liveAreaApps("android", "1.2.3", pass, UA), "platform mismatch: closed");
+assert.ok(!liveAreaApps("linux", null, pass, UA), "version unknown: closed");
+assert.ok(!liveAreaApps("linux", "1.2.3", pass, UA + " upgraded"), "user agent mismatch: closed");
+assert.ok(liveAreaApps("mac", "9", null, "", ["mac"]), "the constant still opens a platform");
 assert.deepEqual(parseSelfTest(JSON.stringify(pass)), pass);
-for (const bad of [null, "", "{", "[]", "null", JSON.stringify({ platform: "linux" }), JSON.stringify({ ...pass, appVersion: 3 }), JSON.stringify({ ...pass, platform: "" })]) assert.equal(parseSelfTest(bad), null, String(bad));
+for (const bad of [null, "", "{", "[]", "null", JSON.stringify({ platform: "linux" }), JSON.stringify({ ...pass, appVersion: 3 }), JSON.stringify({ platform: "linux", passedAt: "x", appVersion: "1" }), JSON.stringify({ ...pass, platform: "" })]) assert.equal(parseSelfTest(bad), null, String(bad));
 
 // ---- self-test probe
 const allTrue = Object.fromEntries(PROBE_CHECKS.map((c) => [c.id, true]));
@@ -199,7 +203,7 @@ assert.ok(!evaluateProbe({ ...allTrue, windowIpc: false }).pass);
 assert.ok(!evaluateProbe({ ...allTrue, webkitIpc: "yes" }).pass, "only exactly true passes");
 assert.ok(!evaluateProbe(null).pass && !evaluateProbe({}).pass && !evaluateProbe("x").pass);
 assert.equal(evaluateProbe({ ...allTrue, fetch: false }).checks.filter((c) => !c.ok).map((c) => c.id).join(), "fetch");
-for (const id of ["webkitIpc", "windowIpc", "tauriInternals", "parentDocument", "topNavigation", "fetch"]) assert.ok(PROBE_CHECKS.some((c) => c.id === id), id);
+for (const id of ["webkitIpc", "windowIpc", "tauriInternals", "parentDocument", "topNavigation", "fetch", "webrtc", "navSelf"]) assert.ok(PROBE_CHECKS.some((c) => c.id === id), id);
 assert.match(PROBE_HTML, /webkit\.messageHandlers\.ipc/);
 assert.match(PROBE_HTML, /window\.ipc\.postMessage/);
 

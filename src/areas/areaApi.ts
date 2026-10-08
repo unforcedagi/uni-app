@@ -1,6 +1,6 @@
 // The bridge methods for one area, with their side effects injected so the
 // scoping rules are unit-testable without Tauri. Everything is read-only
-// except `compose` (draft only) and `open` (navigation).
+// except `compose` (draft only) and `open` (navigation inside the area).
 
 import { areaNotes, scopedPath, type Area, type PathRow } from "./areasCore.ts";
 import type { BridgeApi } from "./bridge.ts";
@@ -13,6 +13,8 @@ export type AreaDeps = {
   getMessages(channel: string, limit: number): Promise<RoomMessage[]>;
   /** Put `text` in the room's composer draft and show the room. Never sends. */
   compose(channel: string, text: string): void;
+  /** The display name of a room, for the compose reply. */
+  roomName(channel: string): string;
   openNote(ref: string): void;
 };
 
@@ -39,8 +41,13 @@ export function createAreaApi(area: Area, deps: AreaDeps): BridgeApi {
       const channel = area.channels[0];
       if (!channel) throw new Error("no_channel");
       deps.compose(channel, text);
+      return { ok: true, room: deps.roomName(channel) };
+    },
+    noteOpen: async (ref) => {
+      const clean = scopedPath(area.path, ref);
+      if (!clean) throw new Error("out_of_scope");
+      deps.openNote(clean);
       return { ok: true };
     },
-    noteOpen: async (ref) => { deps.openNote(ref); return { ok: true }; },
   };
 }

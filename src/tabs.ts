@@ -63,6 +63,10 @@ export function openTab(s: Tabs, target: TabTarget, mode: OpenMode, newId: () =>
   if (mode !== "replace") {
     const existing = s.tabs.find((t) => sameTarget(t, target));
     if (existing) return focusTab(s, existing.id);
+  } else if (cur && target.kind === "areas") {
+    // Back from an area to the grid: if an Areas tab already exists, close this tab and use it.
+    const existing = s.tabs.find((t) => t.id !== cur.id && sameTarget(t, target));
+    if (existing) return focusTab({ tabs: s.tabs.filter((t) => t.id !== cur.id), active: s.active, recent: s.recent.filter((x) => x !== cur.id) }, existing.id);
   }
   if (!cur) return capped({ tabs: [...s.tabs, tab], active: tab.id, recent: touch(s.recent, tab.id) });
   const at = s.tabs.indexOf(cur);

@@ -2,7 +2,7 @@
 // message data, enforces the limits and routes validated calls to `BridgeApi`.
 // AreaFrame owns the iframe and checks `event.source` before calling `handle`.
 
-import { BRIDGE_VERSION, MAX_PENDING, RateLimiter, validateRequest, type BridgeCall, type ThemeData } from "./areasCore.ts";
+import { ACTION_COOLDOWN_MS, BRIDGE_VERSION, MAX_PENDING, RateLimiter, validateRequest, type BridgeCall, type ThemeData } from "./areasCore.ts";
 
 export type BridgeMessage =
   | { bridge: 1; id: string; result: unknown }
@@ -19,29 +19,53 @@ export type BridgeApi = {
   noteOpen(ref: string): Promise<unknown>;
 };
 
+export type BridgeOptions = {
+  /** Did the user just act inside the frame? Gates `channel.compose` and `note.open`. Default: never. */
+  gesture?: () => boolean;
+};
+
 export class AreaBridge {
   private pending = 0;
+  private closed = false;
+  private lastAction: number | null = null;
   private limiter = new RateLimiter();
   private post: (m: BridgeMessage) => void;
   private api: BridgeApi;
   private now: () => number;
-  constructor(post: (m: BridgeMessage) => void, api: BridgeApi, now: () => number = Date.now) { this.post = post; this.api = api; this.now = now; }
+  private gesture: () => boolean;
+  constructor(post: (m: BridgeMessage) => void, api: BridgeApi, now: () => number = Date.now, opts: BridgeOptions = {}) {
+    this.post = post; this.api = api; this.now = now; this.gesture = opts.gesture ?? (() => false);
+  }
 
-  sendTheme(data: ThemeData) { this.post({ bridge: BRIDGE_VERSION, event: "theme", data }); }
+  sendTheme(data: ThemeData) { if (!this.closed) this.post({ bridge: BRIDGE_VERSION, event: "theme", data }); }
 
-  /** Handle one message from the frame. Unanswerable junk (no usable id) is dropped. */
+  /** Stop for good: pending calls get no reply and later messages are ignored. */
+  close(): void { this.closed = true; }
+
+  /**
+   * Handle one message from the frame. Every message, valid or not, counts
+   * against the limiter first; over the limit it is dropped without a reply.
+   * Unanswerable junk (no usable id) is dropped.
+   */
   handle(data: unknown): void {
+    if (this.closed) return;
+    const t = this.now();
+    if (!this.limiter.take(t)) return;
     const v = validateRequest(data);
-    const reply = (id: string, m: { result: unknown } | { error: string }) => this.post({ bridge: BRIDGE_VERSION, id, ...m });
+    const reply = (id: string, m: { result: unknown } | { error: string }) => { if (!this.closed) this.post({ bridge: BRIDGE_VERSION, id, ...m }); };
     if (!v.ok) { if (v.id) reply(v.id, { error: v.error }); return; }
-    if (!this.limiter.take(this.now())) { reply(v.id, { error: "rate_limited" }); return; }
+    const gated = v.call.method === "channel.compose" || v.call.method === "note.open";
+    if (gated) {
+      if (!this.gesture()) { reply(v.id, { error: "needs_gesture" }); return; }
+      if (this.lastAction !== null && t - this.lastAction < ACTION_COOLDOWN_MS) { reply(v.id, { error: "rate_limited" }); return; }
+    }
     if (this.pending >= MAX_PENDING) { reply(v.id, { error: "too_many_pending" }); return; }
+    if (gated) this.lastAction = t;
     this.pending++;
     this.dispatch(v.call)
       .then((result) => reply(v.id, { result: result ?? null }), (e) => reply(v.id, { error: e instanceof Error ? e.message.slice(0, 200) : "failed" }))
       .finally(() => { this.pending--; });
   }
-
   private dispatch(call: BridgeCall): Promise<unknown> {
     try {
       switch (call.method) {
