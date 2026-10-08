@@ -1,7 +1,7 @@
 import { defineConfig } from '@playwright/test';
 export default defineConfig({
   outputDir: 'test-results/areas',
-  testDir: './scripts/browser', testMatch: 'areas.spec.ts', reporter: 'list',
+  testDir: './scripts/browser', testMatch: /(areas|interface)\.spec\.ts/, reporter: 'list',
   use: { baseURL: 'http://127.0.0.1:1435', colorScheme: 'light', reducedMotion: 'reduce' },
   projects: [
     { name: 'phone', use: { browserName: 'chromium', viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true } },
