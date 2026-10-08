@@ -5,39 +5,40 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Unforced Development — practice</title>
 <style>
-  :root { --text:#1c2622; --muted:#6f7a74; --accent:#40695b; --surface:#fffefa; --line:rgba(64,105,91,.16);
+  :root { --text:#1c2622; --muted:#5c6862; --accent:#40695b; --surface:#fffefa; --line:rgba(64,105,91,.18); --btn:#2f5046; --btn-ink:#fff;
           --sans:Inter,system-ui,sans-serif; --serif:"Cormorant Garamond",Georgia,serif; --mono:ui-monospace,monospace; }
+  @media (prefers-color-scheme: dark) { :root { --text:#ece8de; --muted:#9aa59d; --accent:#7fb8a4; --surface:#16211d; --line:rgba(184,212,200,.18); --btn:#7fb8a4; --btn-ink:#0f1a16; } }
   * { box-sizing: border-box; }
   html, body { margin: 0; min-height: 100%; }
+  /* one type role: sans everywhere; serif only for the hero title */
   body { color: var(--text); font: 14px/1.5 var(--sans); font-variant-numeric: tabular-nums; background: transparent; }
-  .wrap { max-width: 1120px; margin: 0 auto; padding: 22px clamp(14px, 4vw, 36px) 56px; }
-  header { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 14px; padding: 6px 0 20px; }
-  .brand { display: flex; align-items: center; gap: 12px; }
-  .mark { width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center; background: var(--accent); color: var(--surface); font: 600 22px var(--serif); }
-  h1 { margin: 0; font: 600 26px/1.1 var(--sans); letter-spacing: -.02em; }
-  .sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
-  .stats { display: grid; gap: 12px; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 22px; }
-  .stat { position: relative; overflow: hidden; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 16px 18px 14px; }
-  .stat::after { content: ""; position: absolute; inset: auto 0 0 0; height: 4px; background: linear-gradient(90deg, var(--accent), transparent); }
-  .stat .k { font: 600 10px var(--sans); letter-spacing: .16em; text-transform: uppercase; color: var(--muted); }
-  .stat .v { font: 600 38px/1.1 var(--sans); letter-spacing: -.03em; margin-top: 6px; }
-  .stat .v small { font-size: 14px; color: var(--muted); font-weight: 500; letter-spacing: 0; margin-left: 4px; }
-  .cols { display: grid; gap: 18px; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
-  @media (max-width: 760px) { .cols, .stats { grid-template-columns: 1fr; } .stat .v { font-size: 30px; } }
-  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
-  .card > h2 { margin: 0; padding: 14px 18px; font: 600 11px var(--sans); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 22px clamp(14px, 4vw, 36px) calc(72px + env(safe-area-inset-bottom)); }
+  header { padding: 6px 0 16px; }
+  h1 { margin: 0; font: 500 clamp(40px, 8vw, 64px)/1 var(--serif); letter-spacing: -.02em; }
+  .sub { color: var(--muted); font-size: 13px; margin-top: 6px; }
+  .stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 18px; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; }
+  .stat { padding: 11px 16px; min-width: 0; } .stat + .stat { border-left: 1px solid var(--line); }
+  .stat .k { font: 600 10px var(--sans); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); white-space: nowrap; }
+  .stat .v { font: 600 22px/1.2 var(--sans); letter-spacing: -.02em; margin-top: 2px; white-space: nowrap; }
+  .stat .v small { font-size: 12px; color: var(--muted); font-weight: 500; letter-spacing: 0; margin-left: 4px; }
+  .cols { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  @media (max-width: 760px) { .cols { grid-template-columns: 1fr; } .stat { padding: 10px 12px; } .stat .v { font-size: 19px; } .stat .v small { display: none; } }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+  .card > h2 { margin: 0; padding: 12px 18px; font: 600 11px var(--sans); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; }
   .feed { list-style: none; margin: 0; padding: 0; }
-  .feed li { display: grid; grid-template-columns: 34px 1fr; gap: 12px; padding: 13px 18px; border-bottom: 1px solid var(--line); }
+  .feed li { display: grid; grid-template-columns: 32px 1fr; gap: 12px; padding: 12px 18px; border-bottom: 1px solid var(--line); }
   .feed li:last-child { border-bottom: 0; }
-  .av { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; color: #fff; font: 600 13px var(--sans); }
+  .av { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; color: #fff; font: 600 12px var(--sans); }
+  /* Uni is an outline, so it never reads as a filled tile */
+  .av.uni { background: transparent !important; color: var(--accent); border: 1.5px solid var(--accent); }
   .feed .meta { display: flex; justify-content: space-between; gap: 8px; } .feed .meta b { font-weight: 600; } .feed .meta time { color: var(--muted); font-size: 12px; }
-  .feed p { margin: 2px 0 0; color: color-mix(in srgb, var(--text) 80%, transparent); overflow-wrap: anywhere; }
+  .feed p { margin: 2px 0 0; color: color-mix(in srgb, var(--text) 86%, transparent); overflow-wrap: anywhere; }
   table { width: 100%; border-collapse: collapse; }
   td { padding: 11px 18px; border-bottom: 1px solid var(--line); } tr:last-child td { border-bottom: 0; }
   td.when { text-align: right; color: var(--muted); font-size: 12px; white-space: nowrap; }
   tr.row { cursor: pointer; } tr.row:hover td, tr.row:focus-visible td { background: color-mix(in srgb, var(--accent) 8%, transparent); }
   tr.row td:first-child { font-weight: 500; }
-  .empty { padding: 22px 18px; color: var(--muted); font: italic 17px var(--serif); }
+  .empty { padding: 20px 18px; color: var(--muted); font-style: italic; }
   .compose { padding: 14px 18px 18px; }
   .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
   .chip { cursor: pointer; border: 1px solid var(--line); background: transparent; color: var(--text); border-radius: 999px; padding: 6px 12px; font: 500 12px var(--sans); }
@@ -45,18 +46,16 @@
   textarea { width: 100%; min-height: 84px; resize: vertical; padding: 11px 13px; font: 14px/1.5 var(--sans); color: var(--text); background: transparent; border: 1px solid var(--line); border-radius: 12px; outline: none; }
   textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent); }
   .send { display: flex; align-items: center; gap: 12px; margin-top: 10px; }
-  .go { white-space: nowrap; cursor: pointer; border: 0; border-radius: 10px; padding: 10px 16px; background: var(--accent); color: var(--surface); font: 600 13px var(--sans); }
-  .go:disabled { opacity: .45; cursor: default; } .hint { color: var(--muted); font-size: 12px; }
+  .go { white-space: nowrap; cursor: pointer; border: 1px solid var(--btn); border-radius: 10px; padding: 10px 16px; background: var(--btn); color: var(--btn-ink); font: 600 13px var(--sans); }
+  .go:disabled { background: transparent; border-color: var(--line); color: var(--muted); cursor: default; } .hint { color: var(--muted); font-size: 12px; }
   .wide { grid-column: 1 / -1; }
 </style>
 </head>
 <body>
 <div class="wrap">
-  <header>
-    <div class="brand"><div class="mark" aria-hidden="true">U</div><div><h1 id="title">Unforced Development</h1><div class="sub" id="sub">Client practice</div></div></div>
-  </header>
+  <header><h1 id="title">Unforced Development</h1><div class="sub" id="sub">Client practice</div></header>
   <section class="stats" aria-label="At a glance">
-    <div class="stat"><div class="k">Notes in play</div><div class="v" id="s-notes">–</div></div>
+    <div class="stat"><div class="k">Notes</div><div class="v" id="s-notes">–</div></div>
     <div class="stat"><div class="k">Messages</div><div class="v" id="s-msgs">–<small>recent</small></div></div>
     <div class="stat"><div class="k">Last heard</div><div class="v" id="s-last">–</div></div>
   </section>
@@ -105,7 +104,7 @@
     r.messages.slice(0, 8).forEach(function (m) {
       people[m.author] = 1;
       var li = node("li"), av = node("div", "av", (m.author || "?").charAt(0).toUpperCase()), body = node("div"), meta = node("div", "meta");
-      av.style.background = "hsl(" + hue(m.author) + " 38% 40%)";
+      if (m.author === "Uni") av.className = "av uni"; else av.style.background = "hsl(" + hue(m.author) + " 38% 38%)";
       meta.appendChild(node("b", "", m.author)); meta.appendChild(node("time", "", ago(m.created_at)));
       body.appendChild(meta); body.appendChild(node("p", "", m.content.length > 200 ? m.content.slice(0, 200) + "…" : m.content));
       li.appendChild(av); li.appendChild(body); ul.appendChild(li);

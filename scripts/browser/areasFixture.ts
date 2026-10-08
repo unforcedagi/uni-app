@@ -60,16 +60,20 @@ call('notes.list', { limit: 5 }).then((r) => { document.getElementById('n').text
 
 type Variant = 'seed' | 'test';
 
-export async function bootAreas(page: Page, variant: Variant = 'seed') {
+export async function bootAreas(page: Page, variant: Variant = 'seed', opts: { selftest?: boolean; ipcLeak?: boolean } = {}) {
   const now = Math.floor(Date.now() / 1000);
   const data = {
-    now, variant, hostile: HOSTILE, benign: BENIGN, techne: seed('techne'), unforced: seed('unforced'),
+    now, variant, selftest: opts.selftest ?? true, ipcLeak: opts.ipcLeak ?? false, hostile: HOSTILE, benign: BENIGN, techne: seed('techne'), unforced: seed('unforced'),
   };
   await page.addInitScript((d) => {
+    // Simulates a webview that delivers IPC into every frame (wry/WebKitGTK or Android).
+    if (d.ipcLeak) (window as any).ipc = { postMessage: () => {} };
     // Tauri injects its internals into the main frame only (for_main_frame_only: true), so sandboxed frames never get them.
     if (window.top !== window) return;
     const w = window as any;
     w.__calls = [];
+    // The live-frame gate opens for this platform and version through a stored self-test pass.
+    if (d.selftest && !localStorage.getItem('uni.areaApps.selftest.v1')) localStorage.setItem('uni.areaApps.selftest.v1', JSON.stringify({ platform: 'linux', passedAt: '2026-10-08T00:00:00Z', appVersion: 'dev' }));
     const U = 'a'.repeat(64);
     const area = (id: string, name: string, status: string, ch: string, purpose: string) => ({
       id, path: `Areas/${name}`, extension: 'md', tags: ['area'], updatedAt: '2026-10-07T12:00:00Z', createdAt: '2026-09-01T00:00:00Z',
@@ -103,7 +107,7 @@ export async function bootAreas(page: Page, variant: Variant = 'seed') {
     }
     const msg = (ref: string, channel: string, name: string, ago: number, body: string) => ({ ref, channel, author: name === 'Aaron' ? U : 'b'.repeat(64), author_name: name, ts: d.now - ago, body, mentions_me: false, root: null, parent: null, mentions: [], reply_count: 0, last_reply_ts: null, edited: false, reactions: [] });
     const msgs: Record<string, any[]> = {
-      'ch-techne': [msg('t1', 'ch-techne', 'Aaron', 86400, 'Scoping the area apps: one HTML note per area, sealed frame, bridge only.'), msg('t2', 'ch-techne', 'Uni', 5400, 'Drafted the bridge reference. Compose never sends, you stay in control.'), msg('t3', 'ch-techne', 'Aaron', 1800, 'Good. Ship Techne first, then the practice dashboard.')],
+      'ch-techne': [...[['Uni', 'Parked the font question until the frame can load web fonts.'], ['Aaron', 'Rail labels still feel tight on the phone.'], ['Uni', 'Checked contrast on meta text; muted needed a darker tone.'], ['Aaron', 'Fine. Keep the green accent.'], ['Uni', 'Sandbox self-test is wired into Settings.'], ['Aaron', 'Run it on the laptop first.']].map(([n, b], i) => msg('t0' + i, 'ch-techne', n, 86400 * (6 - i) + 7200, b)), msg('t1', 'ch-techne', 'Aaron', 86400, 'Scoping the area apps: one HTML note per area, sealed frame, bridge only.'), msg('t2', 'ch-techne', 'Uni', 5400, 'Drafted the bridge reference. Compose never sends, you stay in control.'), msg('t3', 'ch-techne', 'Aaron', 1800, 'Good. Ship Techne first, then the practice dashboard.')],
       'ch-unf': [msg('u1', 'ch-unf', 'Uni', 14000, 'Two proposals are waiting on a decision about scope.'), msg('u2', 'ch-unf', 'Aaron', 600, 'I will call them Thursday.')],
       'ch-sad': [msg('s1', 'ch-sad', 'Aaron', 90000, 'Sat twenty minutes. Restless but stayed.')],
     };

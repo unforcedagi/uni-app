@@ -18,7 +18,7 @@
   --line-strong: rgba(64, 105, 91, .28);
   --text: #1c2622;
   --text-soft: #3f4a45;
-  --muted: #6f7a74;
+  --muted: #5c6862;
   --accent: var(--forest);
   --accent-soft: rgba(64, 105, 91, .10);
   --accent-ink: #fffefa;
@@ -56,7 +56,7 @@
     --line-strong: rgba(184, 212, 200, .22);
     --text: #ece8de;
     --text-soft: #c9c6bb;
-    --muted: #8f9a92;
+    --muted: #9aa59d;
     --accent: #7fb8a4;
     --accent-soft: rgba(127, 184, 164, .14);
     --accent-ink: #0f1a16;
@@ -568,9 +568,12 @@ h1 { font-family: var(--serif); font-weight: 500; font-size: 34px; line-height: 
 @media (min-width: 0px) {
   .rail { overflow-y: auto; min-height: 0; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 12px 0; width: 64px; flex: 0 0 64px; border-right: 1px solid var(--line); background: var(--surface-2); z-index: 42; }
   .rail button { position: relative; width: 52px; min-height: 56px; flex-shrink: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; border: 0; border-radius: 12px; background: transparent; color: var(--text-soft); font-size: 10px; }
-  .rail button i { position: relative; width: 28px; height: 28px; display: grid; place-items: center; font-style: normal; font-size: 22px; color: var(--forest-deep); }
+  .rail button i { position: relative; width: 28px; height: 28px; display: grid; place-items: center; font-style: normal; font-size: 22px; color: var(--text-soft); }
   .rail button:hover, .rail button[aria-current="page"], .rail button[aria-expanded="true"] { background: var(--surface); box-shadow: var(--shadow); }
+  .rail button[aria-current="page"], .rail button[aria-expanded="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 600; box-shadow: none; }
+  .rail button[aria-current="page"] i, .rail button[aria-expanded="true"] i { color: var(--accent); }
   .rail .rail-settings { margin-top: auto; }
+  .rail-count:empty { display: none; }
   .rail-count { position: absolute; right: -10px; top: -3px; min-width: 18px; height: 18px; padding: 0 4px; display: grid; place-items: center; border-radius: 9px; background: var(--forest-deep); color: #fff; font: 600 10px/1 var(--sans); }
   .rail-dot { position: absolute; top: 8px; right: 10px; width: 6px; height: 6px; border-radius: 50%; background: var(--turquoise); }
   .rail i .rail-dot { top: 0; left: 0; right: auto; }
@@ -589,6 +592,7 @@ h1 { font-family: var(--serif); font-weight: 500; font-size: 34px; line-height: 
 }
 
 .mono-icon { width: 22px; height: 22px; flex-shrink: 0; vertical-align: middle; }
+.tab-title .mono-icon { width: 14px; height: 14px; vertical-align: -2px; }
 .journal-actions .mic .mono-icon { width: 28px; height: 28px; color: #fff; }
 
 /* Navigation panels and reading surfaces at every viewport. */

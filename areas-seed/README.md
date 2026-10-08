@@ -72,3 +72,7 @@ from the host. Any unknown method is an error. Messages with no usable `id` get 
 3. Handle empty, loading and error states for every bridge call (`.catch`).
 4. Make it work at 390 px wide and at 1600 px wide.
 5. Keep compose honest: say that a draft was made, never that it was sent.
+
+## Fonts
+
+The host injects Cormorant Garamond (400–600, italic 400) and Inter (400–600) into every frame as `data:` `@font-face` rules, so `font-family: Inter` and `"Cormorant Garamond"` just work. No other web fonts can load (`font-src data:` only).

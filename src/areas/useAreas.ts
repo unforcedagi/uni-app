@@ -29,5 +29,11 @@ export function useAreas() {
     return () => { live = false; };
   }, [n]);
   const reload = useCallback(() => setN((x) => x + 1), []);
+  // Coming back to the app refreshes the grid; there is no manual refresh button.
+  useEffect(() => {
+    const visible = () => { if (document.visibilityState === "visible") setN((x) => x + 1); };
+    document.addEventListener("visibilitychange", visible);
+    return () => document.removeEventListener("visibilitychange", visible);
+  }, []);
   return { data, error, loading, reload };
 }

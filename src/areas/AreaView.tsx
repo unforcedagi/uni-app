@@ -41,13 +41,15 @@ export default function AreaView({ area, rows, live, roomName, actions, onBack }
     openNote: actions.openNote,
   }), [area, actions]);
 
-  const header = <header className="area-bar">
+  const framed = live && !!appRow && html !== null && !appError;
+  // A running app has its own hero, so the host bar drops the title (kept for screen readers).
+  const header = <header className={`area-bar ${framed ? "chromeless" : ""}`}>
     <button className="note-back" onClick={onBack} aria-label="Back to Areas"><span className="note-back-arrow" aria-hidden="true">←</span><span className="note-back-label">Areas</span></button>
-    <strong className="area-bar-title">{area.name}</strong>
+    <strong className={`area-bar-title ${framed ? "sr-only" : ""}`}>{area.name}</strong>
     <span className={`area-mark ${area.status}`}>{area.status}</span>
   </header>;
 
-  if (live && appRow && html !== null && !appError) return <div className="area-view framed">{header}<AreaFrame html={html} api={api} title={`${area.name} app`} /></div>;
+  if (framed) return <div className="area-view framed">{header}<AreaFrame html={html!} api={api} title={`${area.name} app`} /></div>;
   return <div className="area-view">{header}<DefaultArea area={area} actions={actions} roomName={roomName} pending={live && !!appRow && !appError} /></div>;
 }
 

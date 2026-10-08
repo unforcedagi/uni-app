@@ -18,6 +18,9 @@ test.describe('seed apps and navigation', () => {
     await expect(card(page, 'Techne').locator('.area-mark')).toHaveText(/Foreground/);
     await expect(card(page, 'Techne')).toContainText('Good. Ship Techne first');
     await expect(card(page, 'Relationships')).toContainText('No room linked');
+    await expect(card(page, 'Techne')).toContainText('Aaron: Good. Ship Techne first');
+    await expect(card(page, 'Atlas')).toContainText('Quiet so far');
+    await expect(page.getByRole('button', { name: 'Refresh areas' })).toHaveCount(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await mkdir('shots/t73', { recursive: true });
     await page.screenshot({ path: `shots/t73/${info.project.name}-areas-home.png` });
@@ -44,7 +47,8 @@ test.describe('seed apps and navigation', () => {
     expect(await calls(page, 'post_message')).toHaveLength(0);
     // The area tab stays open next to the room tab.
     await expect(page.locator('.tab-chip')).toHaveCount(2);
-    await expect(page.locator('.tab-chip').first()).toContainText('◫ Techne');
+    await expect(page.locator('.tab-chip').first()).toContainText('Techne');
+    await expect(page.locator('.tab-chip').first().locator('svg.mono-icon')).toHaveCount(1);
   });
 
   test('note.open uses the note sheet; Back returns to the area', async ({ page }) => {
@@ -89,6 +93,76 @@ test.describe('seed apps and navigation', () => {
     await expect(page.locator('.area-bar-title')).toHaveText('Sadhana');
     await page.locator('.area-bar .note-back').click();
     await expect(page.getByRole('heading', { name: 'Areas', level: 1 })).toBeVisible();
+  });
+});
+
+test.describe('dark theme', () => {
+  test.use({ colorScheme: 'dark' });
+  test('areas home in dark', async ({ page }, info) => {
+    await bootAreas(page, 'seed');
+    await openAreas(page);
+    await expect(card(page, 'Techne')).toBeVisible();
+    await mkdir('shots/t73', { recursive: true });
+    await page.screenshot({ path: `shots/t73/${info.project.name}-areas-home-dark.png` });
+  });
+});
+
+test.describe('rail badge', () => {
+  test('a zero For you count renders no badge', async ({ page }) => {
+    await bootAreas(page, 'seed');
+    await expect(rail(page).getByRole('button', { name: 'For you' })).toBeVisible();
+    await expect(page.locator('.rail-count')).toHaveCount(0);
+  });
+});
+
+const openSettings = async (page: Page) => { await rail(page).getByRole('button', { name: 'Settings' }).click(); await expect(page.getByRole('button', { name: 'Run sandbox self-test' })).toBeVisible(); };
+const stored = (page: Page) => page.evaluate(() => localStorage.getItem('uni.areaApps.selftest.v1'));
+
+test.describe('sandbox self-test', () => {
+  test('a pass lists every check and opens the gate for this version', async ({ page }, info) => {
+    await bootAreas(page, 'seed', { selftest: false });
+    // Gate is closed by default: an area with an app shows the default view.
+    await openAreas(page);
+    await openArea(page, 'Techne');
+    await expect(page.locator('iframe')).toHaveCount(0);
+    expect(await stored(page)).toBeNull();
+    await openSettings(page);
+    await page.getByRole('button', { name: 'Run sandbox self-test' }).click();
+    await expect(page.locator('.selftest-status.pass')).toContainText('Passed', { timeout: 15000 });
+    const items = page.locator('.selftest-list li');
+    expect(await items.count()).toBeGreaterThanOrEqual(12);
+    await expect(page.locator('.selftest-list li.fail')).toHaveCount(0);
+    await expect(items.filter({ hasText: 'webkit.messageHandlers.ipc' })).toHaveClass('pass');
+    await expect(items.filter({ hasText: 'window.ipc' })).toHaveClass('pass');
+    const pass = JSON.parse((await stored(page))!);
+    expect(pass).toMatchObject({ platform: 'linux', appVersion: 'dev' });
+    expect(Date.parse(pass.passedAt)).toBeGreaterThan(0);
+    await mkdir('shots/t73', { recursive: true });
+    await page.screenshot({ path: `shots/t73/${info.project.name}-selftest.png` });
+    // The stored pass now opens the live frame.
+    await page.getByRole('button', { name: 'Close panel' }).click();
+    await openAreas(page);
+    await openArea(page, 'Techne');
+    await expect(page.locator('iframe.area-frame')).toHaveCount(1);
+  });
+
+  test('IPC reachable from the frame fails the test and stores nothing', async ({ page }) => {
+    await bootAreas(page, 'seed', { selftest: false, ipcLeak: true });
+    await openSettings(page);
+    await page.getByRole('button', { name: 'Run sandbox self-test' }).click();
+    await expect(page.locator('.selftest-status.fail')).toContainText('Failed', { timeout: 15000 });
+    await expect(page.locator('.selftest-list li.fail')).toHaveCount(1);
+    await expect(page.locator('.selftest-list li.fail')).toContainText('window.ipc');
+    expect(await stored(page)).toBeNull();
+  });
+
+  test('a pass for another app version does not open the gate', async ({ page }) => {
+    await bootAreas(page, 'seed', { selftest: false });
+    await page.evaluate(() => localStorage.setItem('uni.areaApps.selftest.v1', JSON.stringify({ platform: 'linux', passedAt: '2026-01-01T00:00:00Z', appVersion: '0.0.1' })));
+    await page.reload();
+    await openAreas(page);
+    await openArea(page, 'Techne');
+    await expect(page.locator('iframe')).toHaveCount(0);
   });
 });
 
