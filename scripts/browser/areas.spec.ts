@@ -242,7 +242,7 @@ test.describe('hostile and benign apps', () => {
     expect(R['c:out2']).toBe('out_of_scope');
     expect(R['c:out3']).toBe('out_of_scope');
     expect(R['c:extra']).toBe('bad_request');
-    expect(R['c:ver']).toBe('none');
+    expect(R['c:ver']).toBe('bad_version');
     // vault over the frame: other areas are 403 (prefix) or 404 (note), POST is 405, search/id never return Atlas
     expect(R['c:v1']).toBe('http404');
     expect(R['c:v2']).toBe('http403');
