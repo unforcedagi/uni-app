@@ -4,7 +4,7 @@ import { NoteRenderer } from "@openparachute/surface-render";
 import AreaFrame from "./AreaFrame";
 import { createAreaApi, type RoomMessage } from "./areaApi";
 import { findAppRow, type Area, type PathRow } from "./areasCore";
-import { AREA_VAULT } from "./useAreas";
+import { AREA_VAULT, areaPaths } from "./useAreas";
 import { bodyWithoutTitle } from "../noteText";
 import { safeHref } from "../markdown";
 
@@ -34,12 +34,13 @@ export default function AreaView({ area, rows, live, roomName, actions, onBack }
   }, [live, appRow?.id]);
 
   const api = useMemo(() => createAreaApi(area, {
-    listPaths: () => invoke<PathRow[]>("vault_paths", { vault: AREA_VAULT }),
+    listPaths: () => areaPaths.get(),
     getNote: (path) => invoke<{ note: { id: string; path?: string; content?: string; updatedAt?: string } }>("vault_note", { vault: AREA_VAULT, noteRef: path }).then((d) => d.note),
     getMessages,
     compose: actions.compose,
+    roomName,
     openNote: actions.openNote,
-  }), [area, actions]);
+  }), [area, actions, roomName]);
 
   const framed = live && !!appRow && html !== null && !appError;
   // A running app has its own hero, so the host bar drops the title (kept for screen readers).

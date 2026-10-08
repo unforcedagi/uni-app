@@ -485,7 +485,7 @@ h1 { font-family: var(--serif); font-weight: 500; font-size: 34px; line-height: 
 .recording-pill.over-sidebar, .shell.note-open .recording-pill { bottom: calc(22px + env(safe-area-inset-bottom)); }
 @keyframes pulse { 50% { opacity: .45; } }
 @media (max-width: 599px) {
-  .tab-strip { flex-basis: 42px; min-height: 42px; padding: 4px 8px 0; }
+  .tab-strip { flex-basis: 48px; min-height: 48px; padding: 8px 16px 0; }
   .tab-scroller { gap: 5px; scrollbar-width: none; }
   .tab-chip { flex: 0 0 auto; min-width: 64px; max-width: 150px; border-radius: 999px; height: 32px; background: var(--surface); border-color: var(--line); }
   .tab-chip.active { background: var(--accent-soft); border-color: var(--accent); }
@@ -568,15 +568,16 @@ h1 { font-family: var(--serif); font-weight: 500; font-size: 34px; line-height: 
 @media (min-width: 0px) {
   .rail { overflow-y: auto; min-height: 0; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 12px 0; width: 64px; flex: 0 0 64px; border-right: 1px solid var(--line); background: var(--surface-2); z-index: 42; }
   .rail button { position: relative; width: 52px; min-height: 56px; flex-shrink: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; border: 0; border-radius: 12px; background: transparent; color: var(--text-soft); font-size: 10px; }
-  .rail button i { position: relative; width: 28px; height: 28px; display: grid; place-items: center; font-style: normal; font-size: 22px; color: var(--text-soft); }
+  .rail button i { position: relative; width: 48px; height: 30px; border-radius: 999px; display: grid; place-items: center; font-style: normal; font-size: 22px; color: var(--text-soft); transition: background .2s var(--ease); }
   .rail button:hover, .rail button[aria-current="page"], .rail button[aria-expanded="true"] { background: var(--surface); box-shadow: var(--shadow); }
-  .rail button[aria-current="page"], .rail button[aria-expanded="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 600; box-shadow: none; }
-  .rail button[aria-current="page"] i, .rail button[aria-expanded="true"] i { color: var(--accent); }
+  /* Active: a rounded pill behind the icon, label tinted; the button itself stays clear. */
+  .rail button[aria-current="page"], .rail button[aria-expanded="true"] { background: transparent; color: var(--accent); font-weight: 600; box-shadow: none; }
+  .rail button[aria-current="page"] i, .rail button[aria-expanded="true"] i { color: var(--accent); background: var(--accent-soft); }
   .rail .rail-settings { margin-top: auto; }
   .rail-count:empty { display: none; }
-  .rail-count { position: absolute; right: -10px; top: -3px; min-width: 18px; height: 18px; padding: 0 4px; display: grid; place-items: center; border-radius: 9px; background: var(--forest-deep); color: #fff; font: 600 10px/1 var(--sans); }
+  .rail-count { position: absolute; right: -2px; top: -4px; min-width: 18px; height: 18px; padding: 0 4px; display: grid; place-items: center; border-radius: 9px; background: var(--forest-deep); color: #fff; font: 600 10px/1 var(--sans); }
   .rail-dot { position: absolute; top: 8px; right: 10px; width: 6px; height: 6px; border-radius: 50%; background: var(--turquoise); }
-  .rail i .rail-dot { top: 0; left: 0; right: auto; }
+  .rail i .rail-dot { top: 3px; left: 11px; right: auto; }
   .rooms .capture-shortcuts { display: none; }
   .shell .rooms, .shell.in-room .rooms { display: none; position: absolute; left: 64px; top: 0; bottom: 0; width: 336px; max-width: calc(100% - 64px); z-index: 41; box-shadow: var(--shadow-lift); animation: sheet-in .25s var(--ease); }
   .shell.panel-open .rooms, .shell.search-open .rooms { display: flex; }

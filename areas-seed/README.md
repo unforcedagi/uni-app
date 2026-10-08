@@ -6,8 +6,10 @@ app release. Example apps: [`techne.html`](techne.html) (calm workbench) and
 [`unforced.html`](unforced.html) (client-practice dashboard). Start from one of them.
 
 Publish: create/update the note `Areas/<Name>/app` with `extension: html` and the file as `content`.
-It only runs on platforms in `LIVE_AREA_PLATFORMS` (`src/areas/gate.ts`); other platforms show the
-default area view (note + recent messages + Open room / Open note).
+It runs only where the in-app **sandbox self-test** has passed for this platform, app version and
+webview (Settings → Area apps → Run sandbox self-test), or where the platform is listed in
+`LIVE_AREA_PLATFORMS` (`src/areas/gate.ts`, empty by default). Anywhere else, and whenever a self-test
+fails, the area shows the default view (note + recent messages + Open room / Open note).
 
 ## The sandbox
 
@@ -19,7 +21,18 @@ default area view (note + recent messages + Open room / Open note).
   - Inline `<script>` and `<style>` only. No external scripts, styles, fonts or images (use `data:` URIs or inline SVG).
   - No `fetch`, XHR, WebSocket, `eval` or `new Function`.
   - Your own `<!doctype>` is replaced; `<html>`, `<head>`, `<body>` are fine.
+- The host app's own CSP allows only `frame-src about:`, so the frame cannot navigate itself:
+  `location = …`, `<meta http-equiv="refresh">`, a clicked `<a>` and `document.write` of a redirect
+  are all blocked. If the frame ever loads a second document, the host unmounts it and shows
+  "This area app tried to leave its sandbox and was stopped."
+- WebRTC (`RTCPeerConnection`, `RTCDataChannel`) is removed before your code runs.
 - The frame has no Tauri API and no vault access. Its only door is the bridge below.
+
+**Not fully sealed.** CSP cannot govern WebRTC, and `dns-prefetch`/`preconnect` hints are ignored by
+some engines, so those two channels are only best-effort sealed: WebRTC is removed by a script that
+code in another realm could in principle bypass (the frame has no child frames to supply one), and
+DNS hints are covered by the CSP in the engines we tested but not guaranteed everywhere. Do not
+treat the frame as safe for hostile code on a platform that has not passed the self-test.
 - Write with `textContent`, never `innerHTML`, for anything that came from a message or note.
 
 ## Bridge v1
@@ -47,22 +60,30 @@ function call(method, params) {
 | `notes.list` | `{limit?}` ≤ 50 (default 50) | `{notes:[{path, title, updatedAt}]}`, notes under `Areas/<Name>/`, newest first, the app note excluded |
 | `note.get` | `{path}` | `{path, content, updatedAt}`. Read-only. `path` must be inside `Areas/<Name>/` (no `..`, no absolute paths, no other areas) |
 | `channel.recent` | `{limit?}` ≤ 30 (default 30) | `{messages:[{id, author, content, created_at}]}`, newest first, from the area's room(s) |
-| `channel.compose` | `{text}` ≤ 2000 chars | `{ok:true}`. Opens the area's room with `text` in the composer draft (appended after any draft already there). **It never sends**: Aaron presses Send |
-| `note.open` | `{ref}` (a vault path or id) | `{ok:true}`. Opens the note in Uni's note sheet |
+| `channel.compose` | `{text}` ≤ 2000 chars | `{ok:true, room}` (`room` is the name of the room that got the draft: the area's first room). Opens that room with `text` in the composer draft (appended after any draft already there). **It never sends**: Aaron presses Send. Needs a user gesture (below) |
+| `note.open` | `{ref}`, a path inside `Areas/<Name>/` | `{ok:true}`. Opens the note in Uni's note sheet. Scoped like `note.get`; other refs give `out_of_scope`. Needs a user gesture (below) |
+
+**User gestures.** `channel.compose` and `note.open` move Aaron's view, so they work only right after he
+taps or presses a key inside your frame (the host sees focus in the frame plus a live user
+activation, about 5 seconds), and at most one of them per 3 seconds. Call them from a click or key
+handler, never on load: a call without a gesture gets `needs_gesture`, a second one inside 3 seconds
+gets `rate_limited`.
 
 Events: `{bridge:1, event:"theme", data:{text, muted, accent, surface, line, sans, serif, mono}}` arrives
 once when the frame loads (and again if the OS light/dark mode changes). Colors are CSS values, fonts are
-CSS font stacks. Put them in CSS variables with sensible defaults, as the examples do. Fonts are only the
-ones installed on the device (the frame cannot load web fonts).
+CSS font stacks. Put them in CSS variables with sensible defaults, as the examples do. The host also
+injects Cormorant Garamond and Inter (see Fonts below), so those two always work.
 
 Errors (`error` string): `bad_request`, `bad_version`, `bad_id`, `bad_params`, `unknown_method`,
-`too_large`, `rate_limited`, `too_many_pending`, `out_of_scope`, `no_channel`, or a short message
-from the host. Any unknown method is an error. Messages with no usable `id` get no reply.
+`too_large`, `rate_limited`, `too_many_pending`, `out_of_scope`, `no_channel`, `needs_gesture`, or a short
+message from the host. Any unknown method is an error. Messages with no usable `id` get no reply.
 
 ## Limits
 
 - Request ≤ 8 KB serialised; `id` 1–64 chars; only the keys `bridge`, `id`, `method`, `params`.
-- ≤ 8 requests pending at once; ≤ 60 requests per 10 seconds. Excess requests get an error reply.
+- ≤ 8 requests pending at once; ≤ 60 messages per 10 seconds, counting **every** message, valid or not.
+  Over the limit the host drops messages silently (no reply), so a flood cannot cost the host anything.
+- One `channel.compose` or `note.open` per 3 seconds, each after a user gesture.
 - Only messages from your own frame are read by the host, and only the methods above exist.
 
 ## Authoring checklist

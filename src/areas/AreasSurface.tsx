@@ -1,12 +1,14 @@
 import { useMemo } from "react";
 import AreasHome, { type RoomInfo } from "./AreasHome";
 import AreaView, { type AreaActions } from "./AreaView";
-import { liveAreaApps, platformName, readSelfTest } from "./gate";
+import { currentUserAgent, liveAreaApps, platformName } from "./gate";
 import { useAppVersion } from "./useAppVersion";
 import { useAreas } from "./useAreas";
+import { useStoredSelfTest } from "./useSelfTest";
 import "./areas.css";
 
-const PLATFORM = platformName(typeof navigator === "undefined" ? "" : navigator.userAgent);
+const USER_AGENT = currentUserAgent();
+const PLATFORM = platformName(USER_AGENT);
 
 /** The Areas tab: the grid at `{kind:"areas"}`, one area at `{kind:"area", path}`. */
 export default function AreasSurface({ path, rooms, actions, onOpenArea, onBack }: {
@@ -14,7 +16,9 @@ export default function AreasSurface({ path, rooms, actions, onOpenArea, onBack 
 }) {
   const { data, error, loading } = useAreas();
   const version = useAppVersion();
-  const live = useMemo(() => liveAreaApps(PLATFORM, version, readSelfTest()), [version]);
+  const stored = useStoredSelfTest();
+  // Live: a self-test pass (or a revoke) updates an already-open area without a remount.
+  const live = useMemo(() => liveAreaApps(PLATFORM, version, stored, USER_AGENT), [version, stored]);
   const area = path ? data?.areas.find((a) => a.path === path) : null;
   const roomName = useMemo(() => (id: string) => rooms.find((r) => r.id === id)?.name ?? "room", [rooms]);
   if (!path) return <AreasHome areas={data?.areas ?? []} rooms={rooms} loading={loading} error={error} onOpen={(a) => onOpenArea(a.path, a.name)} />;

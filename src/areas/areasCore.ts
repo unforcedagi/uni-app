@@ -103,17 +103,21 @@ export function areaNotes(rows: PathRow[], areaPath: string, limit: number): Not
 
 export const AREA_CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'";
 const CSP_META = `<meta http-equiv="Content-Security-Policy" content="${AREA_CSP}">`;
+// WebRTC ignores CSP. Before any app code runs, remove it (best effort: it cannot
+// stop code that finds another realm, but the frame has no child frames to find one in).
+const RTC_NAMES = ["RTCPeerConnection", "webkitRTCPeerConnection", "mozRTCPeerConnection", "RTCDataChannel", "RTCSessionDescription", "RTCIceCandidate"];
+const NO_RTC = `<script>(function(){var n=${JSON.stringify(RTC_NAMES)};for(var i=0;i<n.length;i++)try{Object.defineProperty(window,n[i],{value:undefined,writable:false,configurable:false})}catch(e){}})()</script>`;
 
 /**
  * The srcdoc for an area app. The CSP meta is the first thing in the document,
- * so the policy applies before any app markup or script. A leading doctype is
- * dropped (ours replaces it); the parser puts the meta in an implicit <head>
- * and merges the app's own <html>/<head> tags after it. `headExtra` (the host
- * fonts) goes after the meta.
+ * so the policy applies before any app markup or script, then a tiny host
+ * script removes WebRTC. A leading doctype is dropped (ours replaces it); the
+ * parser puts the meta in an implicit <head> and merges the app's own
+ * <html>/<head> tags after it. `headExtra` (the host fonts) goes after both.
  */
 export function buildSrcdoc(html: string, headExtra = ""): string {
   const body = html.replace(/^﻿/, "").replace(/^\s*<!doctype[^>]*>/i, "");
-  return `<!doctype html>${CSP_META}${headExtra}${body}`;
+  return `<!doctype html>${CSP_META}${NO_RTC}${headExtra}${body}`;
 }
 
 // ---------------------------------------------------------------- the bridge
@@ -124,8 +128,8 @@ export const MAX_PENDING = 8;
 export const MAX_REQUESTS = 60;
 export const RATE_WINDOW_MS = 10_000;
 export const MAX_COMPOSE = 2000;
-export const BRIDGE_METHODS = ["area.get", "notes.list", "note.get", "channel.recent", "channel.compose", "note.open"] as const;
-export type BridgeMethod = (typeof BRIDGE_METHODS)[number];
+/** At most one compose or note.open per this long, and only right after a user gesture in the frame. */
+export const ACTION_COOLDOWN_MS = 3000;
 
 export type BridgeCall =
   | { method: "area.get" }
@@ -141,6 +145,32 @@ const REQUEST_KEYS = new Set(["bridge", "id", "method", "params"]);
 const plain = (x: unknown): x is Record<string, unknown> => !!x && typeof x === "object" && !Array.isArray(x) && Object.getPrototypeOf(x) === Object.prototype;
 const hasOnly = (o: Record<string, unknown>, keys: string[]) => Object.keys(o).every((k) => keys.includes(k));
 
+/**
+ * A cheap upper bound on the JSON size of a request, walked with a budget so a
+ * huge array or string is refused without being stringified. Anything that is
+ * not plain JSON data (class instances, Maps, functions) or nests deeper than
+ * a request ever does is refused too.
+ */
+function withinBudget(x: unknown, budget: { left: number }, depth = 0): boolean {
+  if (depth > 6) return false;
+  switch (typeof x) {
+    case "string": budget.left -= x.length + 2; return budget.left >= 0;
+    case "number": case "boolean": budget.left -= 8; return budget.left >= 0;
+    case "undefined": return true;
+    case "object": {
+      if (x === null) return true;
+      if (Array.isArray(x)) {
+        for (let i = 0; i < x.length; i++) { budget.left -= 1; if (budget.left < 0 || !withinBudget(x[i], budget, depth + 1)) return false; }
+        return true;
+      }
+      if (!plain(x)) return false;
+      for (const k in x) { budget.left -= k.length + 3; if (budget.left < 0 || !withinBudget(x[k], budget, depth + 1)) return false; }
+      return true;
+    }
+    default: return false;
+  }
+}
+
 function limitOf(params: Record<string, unknown>, max: number, dflt: number): number | null {
   if (params.limit === undefined) return dflt;
   const n = params.limit;
@@ -152,8 +182,9 @@ export function validateRequest(raw: unknown): Validated {
   if (!plain(raw)) return { ok: false, id: null, error: "bad_request" };
   const id = typeof raw.id === "string" && raw.id.length >= 1 && raw.id.length <= 64 ? raw.id : null;
   const bad = (error: string): Validated => ({ ok: false, id, error });
+  if (!withinBudget(raw, { left: MAX_REQUEST_BYTES })) return bad("too_large");
   let size = Infinity;
-  try { size = JSON.stringify(raw)?.length ?? Infinity; } catch { /* cyclic or unserialisable */ }
+  try { size = JSON.stringify(raw)?.length ?? Infinity; } catch { /* unserialisable */ }
   if (size > MAX_REQUEST_BYTES) return bad("too_large");
   if (raw.bridge !== BRIDGE_VERSION) return bad("bad_version");
   if (id === null) return bad("bad_id");

@@ -227,6 +227,12 @@ await check("P3-1 compose returns the room it drafted into", async () => {
 await check("P3-5 dead exports are gone", () => {
   assert.equal((core as Any).BRIDGE_METHODS, undefined);
 });
+await check("P3-5 compose draft is appended after a blank line, never replacing", async () => {
+  const { appendDraft } = await import("../src/areas/composeDraft.ts");
+  assert.equal(appendDraft(undefined, "hi"), "hi");
+  assert.equal(appendDraft("   ", "hi"), "hi");
+  assert.equal(appendDraft("old draft ", "hi"), "old draft\n\nhi");
+});
 await check("P3-5 the production frame has no probe branch", () => {
   assert.doesNotMatch(readFileSync(new URL("../src/areas/AreaFrame.tsx", import.meta.url), "utf8"), /onProbe|probe/i);
 });
