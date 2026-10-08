@@ -1,7 +1,7 @@
 import { VoiceOutbox, relayAccepted } from "./voiceOutbox";
 import { SettingsIcon, UniIcon, JournalIcon, StarIcon, RoomsIcon, AreasIcon } from "./Icons";
 import AreasSurface from "./areas/AreasSurface";
-import AreaSelfTest from "./areas/AreaSelfTest";
+import AreaSelfTest from "./interface/selftest/SelfTest";
 import { appendDraft } from "./areas/composeDraft";
 import { FOR_YOU_ID, FOR_YOU_OPENED_KEY, LAST_SURFACE_KEY, countRecommendations, isRecommendationNew, readLastSurface, saveLastSurface } from "./railCore";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";

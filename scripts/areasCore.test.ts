@@ -1,10 +1,8 @@
 // Run: node --experimental-strip-types scripts/areasCore.test.ts
 import assert from "node:assert/strict";
-import { AREA_CSP, RateLimiter, appPathOf, areaNotes, buildSrcdoc, findAppRow, isAreaPath, parseArea, purposeOf, scopedPath, sortAreas, splitChannels, validateRequest, type Area } from "../src/areas/areasCore.ts";
-import { AreaBridge, type BridgeApi, type BridgeMessage } from "../src/areas/bridge.ts";
-import { createAreaApi } from "../src/areas/areaApi.ts";
-import { LIVE_AREA_PLATFORMS, liveAreaApps, parseSelfTest, platformName } from "../src/areas/gate.ts";
-import { evaluateProbe, PROBE_CHECKS, PROBE_HTML } from "../src/areas/probe.ts";
+import { appPathOf, findAppRow, isAreaPath, parseArea, purposeOf, sortAreas, splitChannels, type Area } from "../src/areas/areasCore.ts";
+import { LIVE_AREA_PLATFORMS, liveAreaApps, parseSelfTest, platformName } from "../src/interface/selftest/gate.ts";
+
 
 const note = (path: string, status: string, extra: object = {}) => ({
   id: `id-${path}`, path, tags: ["area"], updatedAt: "2026-10-07T10:00:00Z",
@@ -51,133 +49,7 @@ const rows = [
 assert.equal(appPathOf("Areas/Techne"), "Areas/Techne/app");
 assert.equal(findAppRow(rows, "Areas/Techne")?.id, "2");
 assert.equal(findAppRow(rows, "Areas/Atlas"), null, "app must be html");
-assert.deepEqual(areaNotes(rows, "Areas/Techne", 50).map((n) => n.path), ["Areas/Techne/Plan", "Areas/Techne/Log"]);
-assert.equal(areaNotes(rows, "Areas/Techne", 1).length, 1);
 
-// ---- path scope
-const T = "Areas/Techne";
-assert.equal(scopedPath(T, "Areas/Techne/Plan"), "Areas/Techne/Plan");
-assert.equal(scopedPath(T, "Areas/Techne/sub/deep"), "Areas/Techne/sub/deep");
-for (const bad of ["Areas/Techne/../Atlas/Secret", "Areas/Techne/..", "../Areas/Techne/x", "/Areas/Techne/x", "Areas/Atlas/Secret", "Areas/TechneX/Other",
-  "Areas/Techne", "Areas/Techne/", "Areas//Techne/x", "Areas/Techne//x", "Areas/Techne/./x", "Areas\\Techne\\x", "Areas/Techne/%2e%2e/Atlas", "Areas/Techne/x\u0000",
-  "", "Journal/2026/x", "areas/Techne/x", "/etc/passwd", "uni:Areas/Techne/x", 7, null, undefined, {}, "x".repeat(400)]) {
-  assert.equal(scopedPath(T, bad), null, `rejects ${JSON.stringify(bad)}`);
-}
-
-// ---- srcdoc: CSP first, before any app markup
-for (const html of ["<h1>hi</h1><script>1</script>", "<!doctype html><html><head><title>t</title></head><body><script>1</script></body></html>",
-  "<script>early()</script><head></head>", "<html><body>x</body></html>", "﻿<!DOCTYPE html>\n<script>x</script>"]) {
-  const doc = buildSrcdoc(html);
-  assert.ok(doc.startsWith("<!doctype html><meta http-equiv=\"Content-Security-Policy\""), doc);
-  assert.equal((doc.match(/<!doctype/gi) ?? []).length, 1, "one doctype");
-}
-for (const d of ["default-src 'none'", "script-src 'unsafe-inline'", "connect-src 'none'", "frame-src 'none'", "form-action 'none'", "base-uri 'none'", "img-src data: blob:", "font-src data:"]) assert.ok(AREA_CSP.includes(d), d);
-
-// ---- request validator
-const ok = (m: unknown) => validateRequest(m);
-assert.deepEqual(ok({ bridge: 1, id: "1", method: "area.get" }), { ok: true, id: "1", call: { method: "area.get" } });
-assert.deepEqual(ok({ bridge: 1, id: "a", method: "area.get", params: {} }), { ok: true, id: "a", call: { method: "area.get" } });
-assert.deepEqual(ok({ bridge: 1, id: "n", method: "notes.list", params: { limit: 5 } }), { ok: true, id: "n", call: { method: "notes.list", limit: 5 } });
-assert.deepEqual(ok({ bridge: 1, id: "n", method: "notes.list" }), { ok: true, id: "n", call: { method: "notes.list", limit: 50 } });
-assert.equal((ok({ bridge: 1, id: "c", method: "channel.recent" }) as { call: { limit: number } }).call.limit, 30);
-const reject = (m: unknown, error: string, id: string | null) => assert.deepEqual(ok(m), { ok: false, id, error }, String(error));
-reject(null, "bad_request", null);
-reject("str", "bad_request", null);
-reject([], "bad_request", null);
-reject({ bridge: 1, id: "", method: "area.get" }, "bad_id", null);
-reject({ bridge: 1, id: "x".repeat(65), method: "area.get" }, "bad_id", null);
-reject({ bridge: 1, id: 5, method: "area.get" }, "bad_id", null);
-reject({ bridge: 2, id: "1", method: "area.get" }, "bad_version", "1");
-reject({ id: "1", method: "area.get" }, "bad_version", "1");
-reject({ bridge: 1, id: "1", method: "area.get", extra: true }, "bad_request", "1");
-reject({ bridge: 1, id: "1" }, "bad_request", "1");
-reject({ bridge: 1, id: "1", method: "fs.read" }, "unknown_method", "1");
-reject({ bridge: 1, id: "1", method: "__proto__" }, "unknown_method", "1");
-reject({ bridge: 1, id: "1", method: "area.get", params: [] }, "bad_params", "1");
-reject({ bridge: 1, id: "1", method: "area.get", params: { x: 1 } }, "bad_params", "1");
-reject({ bridge: 1, id: "1", method: "notes.list", params: { limit: 51 } }, "bad_params", "1");
-reject({ bridge: 1, id: "1", method: "notes.list", params: { limit: 0 } }, "bad_params", "1");
-reject({ bridge: 1, id: "1", method: "notes.list", params: { limit: 1.5 } }, "bad_params", "1");
-reject({ bridge: 1, id: "1", method: "channel.recent", params: { limit: 31 } }, "bad_params", "1");
-reject({ bridge: 1, id: "1", method: "note.get", params: {} }, "bad_params", "1");
-reject({ bridge: 1, id: "1", method: "note.get", params: { path: 3 } }, "bad_params", "1");
-reject({ bridge: 1, id: "1", method: "channel.compose", params: { text: "x".repeat(2001) } }, "bad_params", "1");
-reject({ bridge: 1, id: "1", method: "channel.compose", params: { text: "  " } }, "bad_params", "1");
-reject({ bridge: 1, id: "1", method: "channel.compose", params: { text: "hi", channel: "other" } }, "bad_params", "1");
-reject({ bridge: 1, id: "1", method: "note.open", params: { ref: "" } }, "bad_params", "1");
-reject({ bridge: 1, id: "1", method: "note.get", params: { path: "x".repeat(9000) } }, "too_large", "1");
-const cyclic: Record<string, unknown> = { bridge: 1, id: "cy", method: "area.get" }; cyclic.params = cyclic;
-reject(cyclic, "too_large", "cy");
-assert.ok(ok({ bridge: 1, id: "1", method: "channel.compose", params: { text: "x".repeat(2000) } }).ok);
-class Weird { bridge = 1; id = "1"; method = "area.get"; }
-reject(new Weird(), "bad_request", null);
-
-// ---- rate limiter
-const rl = new RateLimiter(60, 10_000);
-for (let i = 0; i < 60; i++) assert.ok(rl.take(1000 + i));
-assert.ok(!rl.take(2000));
-assert.ok(rl.take(11_000 + 60), "window slides");
-
-// ---- bridge: pending cap, rate limit, errors
-function harness(api: Partial<BridgeApi>, now = () => 0) {
-  const out: BridgeMessage[] = [];
-  const full = { areaGet: async () => ({}), notesList: async () => ({}), noteGet: async () => ({}), channelRecent: async () => ({}), channelCompose: async () => ({ ok: true }), noteOpen: async () => ({ ok: true }), ...api };
-  return { out, bridge: new AreaBridge((m) => out.push(m), full, now) };
-}
-{
-  let release!: () => void;
-  const gate = new Promise<void>((r) => { release = r; });
-  const h = harness({ areaGet: async () => { await gate; return { title: "T" }; } });
-  for (let i = 0; i < 10; i++) h.bridge.handle({ bridge: 1, id: `r${i}`, method: "area.get" });
-  assert.deepEqual(h.out.map((m) => (m as { error: string }).error), ["too_many_pending", "too_many_pending"]);
-  release();
-  await new Promise((r) => setTimeout(r, 5));
-  assert.equal(h.out.filter((m) => "result" in m).length, 8);
-  h.bridge.handle({ bridge: 1, id: "after", method: "area.get" });
-  await new Promise((r) => setTimeout(r, 5));
-  assert.ok(h.out.some((m) => "id" in m && m.id === "after" && "result" in m), "pending slot freed");
-}
-{
-  const h = harness({});
-  for (let i = 0; i < 100; i++) h.bridge.handle({ bridge: 1, id: `q${i}`, method: "area.get" });
-  await new Promise((r) => setTimeout(r, 5));
-  assert.equal(h.out.length, 60, "the first 60 are answered; the rest are dropped without a reply");
-  assert.equal(h.out.filter((m) => "error" in m && m.error === "rate_limited").length, 0, "no rate_limited reply: silence");
-  h.bridge.handle("junk"); h.bridge.handle({ nope: 1 });
-  assert.equal(h.out.length, 60, "unidentifiable junk gets no reply");
-}
-{
-  const h = harness({ noteGet: async () => { throw new Error("boom"); } });
-  h.bridge.handle({ bridge: 1, id: "e", method: "note.get", params: { path: "Areas/Techne/x" } });
-  h.bridge.handle({ bridge: 1, id: "u", method: "shell.exec" });
-  await new Promise((r) => setTimeout(r, 5));
-  assert.deepEqual(h.out, [{ bridge: 1, id: "u", error: "unknown_method" }, { bridge: 1, id: "e", error: "boom" }]);
-}
-
-// ---- area api scope
-{
-  const calls: string[] = [];
-  const api = createAreaApi(a, {
-    listPaths: async () => rows,
-    getNote: async (p) => { calls.push(`get:${p}`); return { id: "n", content: "body" }; },
-    getMessages: async (c) => c === "c1" ? [{ ref: "m1", author: "abcdef012345", author_name: "Aaron", ts: 100, body: "hi" }] : [{ ref: "m2", author: "feedbeefcafe", ts: 200, body: "yo" }],
-    compose: (c, t) => calls.push(`compose:${c}:${t}`),
-    roomName: (c) => `room-${c}`,
-    openNote: (r) => calls.push(`open:${r}`),
-  });
-  assert.equal((await api.noteGet("Areas/Techne/Plan") as { content: string }).content, "body");
-  await assert.rejects(api.noteGet("Areas/Atlas/Secret"), /out_of_scope/);
-  await assert.rejects(api.noteGet("Areas/Techne/../Atlas/Secret"), /out_of_scope/);
-  assert.deepEqual(calls, ["get:Areas/Techne/Plan"], "out-of-scope reads never reach the vault");
-  const recent = await api.channelRecent(30) as { messages: { id: string; author: string; created_at: string }[] };
-  assert.deepEqual(recent.messages.map((m) => [m.id, m.author]), [["m2", "feedbeef"], ["m1", "Aaron"]]);
-  assert.equal(recent.messages[1].created_at, "1970-01-01T00:01:40.000Z");
-  assert.deepEqual(await api.channelCompose("hello"), { ok: true, room: "room-c1" });
-  assert.ok(calls.includes("compose:c1:hello"));
-  const none = createAreaApi({ ...a, channels: [] }, { listPaths: async () => [], getNote: async () => ({ id: "" }), getMessages: async () => [], compose: () => {}, roomName: () => "", openNote: () => {} });
-  await assert.rejects(none.channelCompose("x"), /no_channel/);
-  assert.equal(((await api.notesList(50)) as { notes: unknown[] }).notes.length, 2);
-}
 
 // ---- platform gate
 assert.equal(platformName("Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit"), "android");
@@ -196,17 +68,6 @@ assert.ok(liveAreaApps("mac", "9", null, "", ["mac"]), "the constant still opens
 assert.deepEqual(parseSelfTest(JSON.stringify(pass)), pass);
 for (const bad of [null, "", "{", "[]", "null", JSON.stringify({ platform: "linux" }), JSON.stringify({ ...pass, appVersion: 3 }), JSON.stringify({ platform: "linux", passedAt: "x", appVersion: "1" }), JSON.stringify({ ...pass, platform: "" })]) assert.equal(parseSelfTest(bad), null, String(bad));
 
-// ---- self-test probe
-const allTrue = Object.fromEntries(PROBE_CHECKS.map((c) => [c.id, true]));
-assert.ok(evaluateProbe(allTrue).pass);
-assert.ok(!evaluateProbe({ ...allTrue, windowIpc: false }).pass);
-assert.ok(!evaluateProbe({ ...allTrue, webkitIpc: "yes" }).pass, "only exactly true passes");
-assert.ok(!evaluateProbe(null).pass && !evaluateProbe({}).pass && !evaluateProbe("x").pass);
-assert.equal(evaluateProbe({ ...allTrue, fetch: false }).checks.filter((c) => !c.ok).map((c) => c.id).join(), "fetch");
-for (const id of ["webkitIpc", "windowIpc", "tauriInternals", "parentDocument", "topNavigation", "fetch", "webrtc", "navSelf"]) assert.ok(PROBE_CHECKS.some((c) => c.id === id), id);
-assert.match(PROBE_HTML, /webkit\.messageHandlers\.ipc/);
-assert.match(PROBE_HTML, /window\.ipc\.postMessage/);
-
 // ---- tab targets
 const { openTab, restoreTabs, serializeTabs, EMPTY_TABS, sameTarget } = await import("../src/tabs.ts");
 let n = 0; const id = () => `a${++n}`;
@@ -222,7 +83,3 @@ assert.equal(restoreTabs(JSON.stringify({ v: 1, tabs: [{ id: "x", kind: "area", 
 
 console.log("areasCore: ok");
 
-{
-  const doc = buildSrcdoc("<!doctype html><html><head></head><body>x</body></html>", "<style>FONTS</style>");
-  assert.ok(doc.indexOf("Content-Security-Policy") < doc.indexOf("FONTS") && doc.indexOf("FONTS") < doc.indexOf("<body>"), "fonts come after the CSP meta and before the app");
-}

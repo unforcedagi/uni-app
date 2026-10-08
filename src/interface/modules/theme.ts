@@ -10,3 +10,9 @@ export const THEME_VARS: [keyof ThemeData, string][] = [["text", "--text"], ["mu
 export function createThemeModule(deps: { theme(): ThemeData }): UniModule {
   return { namespace: "theme", methods: { get: { cap: null, validate: () => ({ ok: true, value: {} }), run: async () => deps.theme() } } };
 }
+
+/** Read the host's theme variables from the document (browser only). */
+export function readHostTheme(): ThemeData {
+  const css = getComputedStyle(document.documentElement);
+  return Object.fromEntries(THEME_VARS.map(([key, v]) => [key, css.getPropertyValue(v).trim()])) as ThemeData;
+}
