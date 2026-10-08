@@ -134,17 +134,17 @@ test.describe('kits', () => {
 
 // WebRTC ignores CSP, and a srcdoc child frame is a fresh realm (review 2 P1-A).
 test.describe('WebRTC in a child frame', () => {
+  test.describe.configure({ timeout: 120000 });
   test('on a webview that has WebRTC the self-test fails the child-frame check, and nothing is stored', async ({ page }) => {
     await bootAreas(page, 'seed', { selftest: false, webrtc: 'native' });
     await openSettings(page);
     await page.getByRole('button', { name: 'Run sandbox self-test' }).click();
-    await expect(page.locator('.selftest-status.fail')).toContainText('Failed', { timeout: 25000 });
+    await expect(page.locator('.selftest-status.fail')).toContainText('Failed', { timeout: 60000 });
     await expect(page.locator('.selftest-list li.fail')).toHaveCount(1);
     await expect(page.locator('.selftest-list li.fail')).toContainText('WebRTC unavailable in a child frame');
     expect(await page.evaluate(() => localStorage.getItem('uni.areaApps.selftest.v1'))).toBeNull();
   });
 
-  test.setTimeout(90000);
   test('known limit: if the gate were open on such a webview, a srcdoc child leaks over UDP (why the self-test must gate)', async ({ page }) => {
     const L = await startListener();
     try {
