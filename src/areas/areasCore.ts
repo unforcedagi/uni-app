@@ -108,11 +108,12 @@ const CSP_META = `<meta http-equiv="Content-Security-Policy" content="${AREA_CSP
  * The srcdoc for an area app. The CSP meta is the first thing in the document,
  * so the policy applies before any app markup or script. A leading doctype is
  * dropped (ours replaces it); the parser puts the meta in an implicit <head>
- * and merges the app's own <html>/<head> tags after it.
+ * and merges the app's own <html>/<head> tags after it. `headExtra` (the host
+ * fonts) goes after the meta.
  */
-export function buildSrcdoc(html: string): string {
+export function buildSrcdoc(html: string, headExtra = ""): string {
   const body = html.replace(/^﻿/, "").replace(/^\s*<!doctype[^>]*>/i, "");
-  return `<!doctype html>${CSP_META}${body}`;
+  return `<!doctype html>${CSP_META}${headExtra}${body}`;
 }
 
 // ---------------------------------------------------------------- the bridge
