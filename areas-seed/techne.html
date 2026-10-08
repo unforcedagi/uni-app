@@ -71,66 +71,55 @@
     <section class="panel" aria-label="Recent pulse"><h2>Pulse</h2><ol class="thread" id="pulse"><li class="empty">Listening…</li></ol></section>
     <section class="panel" aria-label="Say something"><h2>Leave a note for the room</h2>
       <div id="f"><textarea id="t" maxlength="2000" placeholder="What are you making?"></textarea>
-        <div class="row"><button class="go" id="go" type="button" disabled>Draft in room</button><span class="hint" id="hint">Opens the room with your words in the composer.</span></div></div>
+        <div class="row"><button class="go" id="go" type="button" disabled>Draft in room</button><span class="hint" id="hint">You'll confirm at the top before anything reaches the composer.</span></div></div>
     </section>
   </div>
 </main>
 <script>
 (function () {
-  var pending = {}, n = 0, $ = function (id) { return document.getElementById(id); };
-  function call(method, params) {
-    return new Promise(function (resolve, reject) {
-      var id = "t" + (++n); pending[id] = { resolve: resolve, reject: reject };
-      parent.postMessage({ bridge: 1, id: id, method: method, params: params || {} }, "*");
-      setTimeout(function () { if (pending[id]) { delete pending[id]; reject(new Error("timeout")); } }, 15000);
-    });
-  }
-  addEventListener("message", function (e) {
-    var m = e.data; if (!m || m.bridge !== 1) return;
-    if (m.event === "theme") { var r = document.documentElement.style; ["text", "muted", "accent", "surface", "line", "sans", "serif", "mono"].forEach(function (k) { if (m.data[k]) r.setProperty("--" + k, m.data[k]); }); return; }
-    var p = pending[m.id]; if (!p) return; delete pending[m.id];
-    if ("error" in m) p.reject(new Error(m.error)); else p.resolve(m.result);
-  });
+  var $ = function (id) { return document.getElementById(id); };
   function node(tag, cls, text) { var x = document.createElement(tag); if (cls) x.className = cls; if (text != null) x.textContent = text; return x; }
   function ago(iso) { var d = (Date.now() - Date.parse(iso)) / 1000; if (!(d >= 0)) return ""; if (d < 3600) return Math.max(1, Math.round(d / 60)) + "m"; if (d < 86400) return Math.round(d / 3600) + "h"; return Math.round(d / 86400) + "d"; }
-  function purposeOf(body) { var parts = String(body).replace(/^\s*#.*\n/, "").split(/\n\s*\n/); for (var i = 0; i < parts.length; i++) { var t = parts[i].replace(/[*_`>#]/g, "").replace(/\s+/g, " ").trim(); if (t) return t; } return ""; }
+  function leaf(path) { return String(path).split("/").pop(); }
 
-  call("area.get").then(function (a) {
+  // The interface contract: uni.ready(), uni.vault (surface-client's VaultClient), uni.chat, uni.note.
+  uni.ready().then(function (ctx) {
+    var a = ctx.area;
     $("title").textContent = a.title || "Techne"; document.title = a.title || "Techne";
-    $("purpose").textContent = purposeOf(a.body);
-    if (a.metadata && a.metadata.since) $("since").textContent = "workbench · since " + a.metadata.since;
-  }).catch(function () {});
+    $("purpose").textContent = a.purpose || "";
+    if (a.since) $("since").textContent = "workbench · since " + a.since;
 
-  call("channel.recent", { limit: 12 }).then(function (r) {
-    var ol = $("pulse"); ol.textContent = "";
-    if (!r.messages.length) { ol.appendChild(node("li", "empty", "The room is quiet.")); return; }
-    r.messages.forEach(function (m) {
-      var li = node("li"), head = node("div");
-      head.appendChild(node("span", "who", m.author)); head.appendChild(node("time", "", ago(m.created_at)));
-      li.appendChild(head); li.appendChild(node("p", "", m.content.length > 220 ? m.content.slice(0, 220) + "…" : m.content));
-      ol.appendChild(li);
-    });
-  }).catch(function () { $("pulse").textContent = ""; $("pulse").appendChild(node("li", "empty", "Couldn't reach the room.")); });
+    uni.chat.recent(12).then(function (r) {
+      var ol = $("pulse"); ol.textContent = "";
+      if (!r.messages.length) { ol.appendChild(node("li", "empty", "The room is quiet.")); return; }
+      r.messages.forEach(function (m) {
+        var li = node("li"), head = node("div");
+        head.appendChild(node("span", "who", m.author)); head.appendChild(node("time", "", ago(m.created_at)));
+        li.appendChild(head); li.appendChild(node("p", "", m.content.length > 220 ? m.content.slice(0, 220) + "…" : m.content));
+        ol.appendChild(li);
+      });
+    }).catch(function () { $("pulse").textContent = ""; $("pulse").appendChild(node("li", "empty", "Couldn't reach the room.")); });
 
-  call("notes.list", { limit: 12 }).then(function (r) {
-    var ul = $("notes"); ul.textContent = "";
-    if (!r.notes.length) { ul.appendChild(node("li", "empty", "Nothing on the bench yet.")); return; }
-    var shown = r.notes.slice(0, 5), rest = r.notes.length - shown.length;
-    if (rest > 0) { $("more").hidden = false; $("more").textContent = "+ " + rest + " more in the area"; }
-    shown.forEach(function (x) {
-      var li = node("li"), b = node("button"); b.type = "button";
-      b.appendChild(node("b", "", x.title)); b.appendChild(node("small", "", x.updatedAt ? ago(x.updatedAt) : ""));
-      b.addEventListener("click", function () { call("note.open", { ref: x.path }).catch(function () {}); });
-      li.appendChild(b); ul.appendChild(li);
-    });
-  }).catch(function () { $("notes").textContent = ""; $("notes").appendChild(node("li", "empty", "Couldn't list notes.")); });
+    uni.vault.queryNotes({ pathPrefix: "Areas/" + a.name + "/", limit: 12 }).then(function (notes) {
+      var ul = $("notes"); ul.textContent = "";
+      if (!notes.length) { ul.appendChild(node("li", "empty", "Nothing on the bench yet.")); return; }
+      var shown = notes.slice(0, 5), rest = notes.length - shown.length;
+      if (rest > 0) { $("more").hidden = false; $("more").textContent = "+ " + rest + " more in the area"; }
+      shown.forEach(function (x) {
+        var li = node("li"), b = node("button"); b.type = "button";
+        b.appendChild(node("b", "", leaf(x.path))); b.appendChild(node("small", "", x.updatedAt ? ago(x.updatedAt) : ""));
+        b.addEventListener("click", function () { uni.note.open(x.path).catch(function () {}); });
+        li.appendChild(b); ul.appendChild(li);
+      });
+    }).catch(function () { $("notes").textContent = ""; $("notes").appendChild(node("li", "empty", "Couldn't list notes.")); });
+  });
 
   var t = $("t"), go = $("go");
   t.addEventListener("input", function () { go.disabled = !t.value.trim(); });
   go.addEventListener("click", function () {
     if (!t.value.trim()) return; go.disabled = true;
-    call("channel.compose", { text: t.value }).then(function () { $("hint").textContent = "Drafted. Press Send in the room when ready."; t.value = ""; })
-      .catch(function (err) { $("hint").textContent = "Couldn't draft: " + err.message; go.disabled = false; });
+    uni.chat.draft(t.value).then(function () { $("hint").textContent = "Suggested. Tap \u201cAdd to draft\u201d at the top to put it in the room's composer."; t.value = ""; })
+      .catch(function (err) { $("hint").textContent = "Couldn't suggest: " + err.message; go.disabled = false; });
   });
 })();
 </script>

@@ -43,6 +43,10 @@ tauri-plugin-notification = "=2.3.3"
 # Match the JavaScript scanner minor version.
 tauri-plugin-barcode-scanner = "~2.4.6"
 
+[target.'cfg(target_os = "linux")'.dependencies]
+# Same major as the webkit2gtk that wry already links; only used to switch WebRTC off for sealed area apps.
+webkit2gtk = "2"
+
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-local-authentication = "0.3"
 objc2-foundation = "0.3"

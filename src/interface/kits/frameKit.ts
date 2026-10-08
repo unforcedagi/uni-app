@@ -6,7 +6,7 @@
 //   uni.chat.recent(limit) / .draft(text, room?)
 //   uni.note.open(path)
 //   uni.theme.get() / .on(cb)        → host colours; CSS vars --text, --accent… are also set on <html>
-// chat.draft and note.open only create a pending suggestion that the user must tap in the host UI.
+// In-page #anchor links scroll in place. chat.draft and note.open only create a pending suggestion that the user must tap in the host UI.
 
 export const FRAME_KIT = String.raw`(function () {
   var pending = {}, fetches = {}, n = 0, themeCbs = [], theme = null, readyRes;
@@ -54,6 +54,17 @@ export const FRAME_KIT = String.raw`(function () {
       timeout(fetches, id, rej);
     });
   }
+  // In a srcdoc frame a bare "#section" link resolves against the *host's* URL, so the browser would navigate the
+  // frame away (the host CSP blocks it, and the host would stop the app). Scroll in place instead.
+  document.addEventListener("click", function (e) {
+    var a = e.target && e.target.closest ? e.target.closest("a[href]") : null;
+    var h = a && a.getAttribute("href");
+    if (typeof h !== "string" || h.charAt(0) !== "#") return;
+    e.preventDefault();
+    var id = h.slice(1); try { id = decodeURIComponent(id); } catch (err) {}
+    var t = id ? document.getElementById(id) || document.getElementsByName(id)[0] : null;
+    if (t) t.scrollIntoView(); else if (!id) window.scrollTo(0, 0);
+  }, true);
   var uni = {
     contract: 1,
     ready: function () { return readyP; },

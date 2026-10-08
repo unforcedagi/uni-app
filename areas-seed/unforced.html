@@ -73,56 +73,46 @@
 </div>
 <script>
 (function () {
-  var pending = {}, n = 0, $ = function (id) { return document.getElementById(id); };
-  function call(method, params) {
-    return new Promise(function (resolve, reject) {
-      var id = "u" + (++n); pending[id] = { resolve: resolve, reject: reject };
-      parent.postMessage({ bridge: 1, id: id, method: method, params: params || {} }, "*");
-      setTimeout(function () { if (pending[id]) { delete pending[id]; reject(new Error("timeout")); } }, 15000);
-    });
-  }
-  addEventListener("message", function (e) {
-    var m = e.data; if (!m || m.bridge !== 1) return;
-    if (m.event === "theme") { var r = document.documentElement.style; ["text", "muted", "accent", "surface", "line", "sans", "serif", "mono"].forEach(function (k) { if (m.data[k]) r.setProperty("--" + k, m.data[k]); }); return; }
-    var p = pending[m.id]; if (!p) return; delete pending[m.id];
-    if ("error" in m) p.reject(new Error(m.error)); else p.resolve(m.result);
-  });
+  var $ = function (id) { return document.getElementById(id); };
   function node(tag, cls, text) { var x = document.createElement(tag); if (cls) x.className = cls; if (text != null) x.textContent = text; return x; }
   function ago(iso) { var d = (Date.now() - Date.parse(iso)) / 1000; if (!(d >= 0)) return "–"; if (d < 3600) return Math.max(1, Math.round(d / 60)) + "m ago"; if (d < 86400) return Math.round(d / 3600) + "h ago"; return Math.round(d / 86400) + "d ago"; }
   function hue(s) { var h = 0; for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360; return h; }
+  function leaf(path) { return String(path).split("/").pop(); }
 
-  call("area.get").then(function (a) {
+  // The interface contract: uni.ready(), uni.vault (surface-client's VaultClient), uni.chat, uni.note.
+  uni.ready().then(function (ctx) {
+    var a = ctx.area;
     $("title").textContent = a.title || "Unforced Development"; document.title = a.title || "";
-    $("sub").textContent = "Client practice" + (a.metadata && a.metadata.status ? " · " + a.metadata.status : "");
-  }).catch(function () {});
+    $("sub").textContent = "Client practice" + (a.status ? " \u00b7 " + a.status : "");
 
-  call("channel.recent", { limit: 20 }).then(function (r) {
-    var ul = $("feed"); ul.textContent = ""; var people = {};
-    $("s-msgs").firstChild.nodeValue = String(r.messages.length);
-    $("s-last").textContent = r.messages.length ? ago(r.messages[0].created_at) : "–";
-    if (!r.messages.length) { var li0 = node("li"); li0.appendChild(node("span")); li0.appendChild(node("span", "empty", "Nothing from the room yet.")); ul.appendChild(li0); return; }
-    r.messages.slice(0, 8).forEach(function (m) {
-      people[m.author] = 1;
-      var li = node("li"), av = node("div", "av", (m.author || "?").charAt(0).toUpperCase()), body = node("div"), meta = node("div", "meta");
-      if (m.author === "Uni") av.className = "av uni"; else av.style.background = "hsl(" + hue(m.author) + " 38% 38%)";
-      meta.appendChild(node("b", "", m.author)); meta.appendChild(node("time", "", ago(m.created_at)));
-      body.appendChild(meta); body.appendChild(node("p", "", m.content.length > 200 ? m.content.slice(0, 200) + "…" : m.content));
-      li.appendChild(av); li.appendChild(body); ul.appendChild(li);
-    });
-    $("who").textContent = Object.keys(people).length + " voices";
-  }).catch(function () { $("feed").textContent = ""; });
+    uni.chat.recent(20).then(function (r) {
+      var ul = $("feed"); ul.textContent = ""; var people = {};
+      $("s-msgs").firstChild.nodeValue = String(r.messages.length);
+      $("s-last").textContent = r.messages.length ? ago(r.messages[0].created_at) : "\u2013";
+      if (!r.messages.length) { var li0 = node("li"); li0.appendChild(node("span")); li0.appendChild(node("span", "empty", "Nothing from the room yet.")); ul.appendChild(li0); return; }
+      r.messages.slice(0, 8).forEach(function (m) {
+        people[m.author] = 1;
+        var li = node("li"), av = node("div", "av", (m.author || "?").charAt(0).toUpperCase()), body = node("div"), meta = node("div", "meta");
+        if (m.author === "Uni") av.className = "av uni"; else av.style.background = "hsl(" + hue(m.author) + " 38% 38%)";
+        meta.appendChild(node("b", "", m.author)); meta.appendChild(node("time", "", ago(m.created_at)));
+        body.appendChild(meta); body.appendChild(node("p", "", m.content.length > 200 ? m.content.slice(0, 200) + "\u2026" : m.content));
+        li.appendChild(av); li.appendChild(body); ul.appendChild(li);
+      });
+      $("who").textContent = Object.keys(people).length + " voices";
+    }).catch(function () { $("feed").textContent = ""; });
 
-  call("notes.list", { limit: 8 }).then(function (r) {
-    var tb = $("notes"); tb.textContent = ""; $("s-notes").textContent = String(r.notes.length);
-    if (!r.notes.length) { var tr0 = node("tr"), td0 = node("td", "empty", "No engagement notes yet."); tr0.appendChild(td0); tb.appendChild(tr0); return; }
-    r.notes.forEach(function (x) {
-      var tr = node("tr", "row"); tr.tabIndex = 0;
-      tr.appendChild(node("td", "", x.title)); tr.appendChild(node("td", "when", x.updatedAt ? ago(x.updatedAt) : ""));
-      var open = function () { call("note.open", { ref: x.path }).catch(function () {}); };
-      tr.addEventListener("click", open); tr.addEventListener("keydown", function (e) { if (e.key === "Enter") open(); });
-      tb.appendChild(tr);
-    });
-  }).catch(function () { $("s-notes").textContent = "–"; });
+    uni.vault.queryNotes({ pathPrefix: "Areas/" + a.name + "/", limit: 8 }).then(function (notes) {
+      var tb = $("notes"); tb.textContent = ""; $("s-notes").textContent = String(notes.length);
+      if (!notes.length) { var tr0 = node("tr"), td0 = node("td", "empty", "No engagement notes yet."); tr0.appendChild(td0); tb.appendChild(tr0); return; }
+      notes.forEach(function (x) {
+        var tr = node("tr", "row"); tr.tabIndex = 0;
+        tr.appendChild(node("td", "", leaf(x.path))); tr.appendChild(node("td", "when", x.updatedAt ? ago(x.updatedAt) : ""));
+        var open = function () { uni.note.open(x.path).catch(function () {}); };
+        tr.addEventListener("click", open); tr.addEventListener("keydown", function (e) { if (e.key === "Enter") open(); });
+        tb.appendChild(tr);
+      });
+    }).catch(function () { $("s-notes").textContent = "\u2013"; });
+  });
 
   var t = $("t"), go = $("go");
   [["Status update", "Status update: "], ["Need a decision", "Need a decision on: "], ["Share a win", "Win to share: "]].forEach(function (c) {
@@ -132,8 +122,8 @@
   t.addEventListener("input", function () { go.disabled = !t.value.trim(); });
   go.addEventListener("click", function () {
     if (!t.value.trim()) return; go.disabled = true;
-    call("channel.compose", { text: t.value }).then(function () { $("hint").textContent = "Drafted in the room. Press Send there."; t.value = ""; })
-      .catch(function (err) { $("hint").textContent = "Couldn't draft: " + err.message; go.disabled = false; });
+    uni.chat.draft(t.value).then(function () { $("hint").textContent = "Suggested. Tap \u201cAdd to draft\u201d at the top, then press Send in the room."; t.value = ""; })
+      .catch(function (err) { $("hint").textContent = "Couldn't suggest: " + err.message; go.disabled = false; });
   });
 })();
 </script>
