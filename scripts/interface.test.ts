@@ -446,7 +446,7 @@ await check("kits: defines uni.ready, frameFetch, chat, theme and (VaultClient o
   const src = kits.buildKitSource({ vaultClientSource: "window.__UniVC={VaultClient:function(){}};" });
   for (const n of ["uni.ready", "frameFetch", "chat", "theme", "VaultClient"]) assert.ok(src.includes(n.replace("uni.", "")), n);
   assert.ok(src.includes("pfr"), "frame-fetch envelope");
-  assert.ok(src.includes('"uni":1') || src.includes("uni:1"), "contract envelope");
+  assert.match(src, /uni:\s*1/, "contract envelope");
   assert.ok(!/userActivation|blur/.test(src), "no gesture inference");
 });
 

@@ -3,6 +3,7 @@
 // weight in its range, so three files cover the six weights the host uses.
 import cormorant from "../assets/fonts/CormorantGaramond-normal-400.woff2?inline";
 import cormorantItalic from "../assets/fonts/CormorantGaramond-italic-400.woff2?inline";
+import cormorantItalic500 from "../assets/fonts/CormorantGaramond-italic-500.woff2?inline";
 import inter from "../assets/fonts/Inter-normal-400.woff2?inline";
 
 const face = (family: string, style: string, weight: string, url: string) =>
@@ -11,5 +12,6 @@ const face = (family: string, style: string, weight: string, url: string) =>
 export const FRAME_FONT_CSS = `<style>${[
   face("Cormorant Garamond", "normal", "400 600", cormorant),
   face("Cormorant Garamond", "italic", "400", cormorantItalic),
+  face("Cormorant Garamond", "italic", "500", cormorantItalic500),
   face("Inter", "normal", "400 600", inter),
 ].join("")}</style>`;
