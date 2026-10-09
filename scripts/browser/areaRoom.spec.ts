@@ -382,6 +382,52 @@ test.describe('focus stays in the chat', () => {
   });
 });
 
+// T-75c: a polite app is never accused (Tab out of the chat is not a theft), a single theft is announced, and a theft
+// while the composer holds text stops the app at once. The theft is done from inside the frame, as an app's script would.
+const stealOnce = (page: Page) => frame(page).locator('#i').evaluate((el) => { (el as HTMLInputElement).focus(); window.focus(); }).catch(() => {}); // the host may stop the frame mid-call
+
+test.describe('focus theft: accusation and notice', () => {
+  const open = async (page: Page, name: string, html: string) => {
+    await bootAreas(page, 'seed', { granted: false, apps: [{ name, html, interface: iface([{ 'vault.read': 'area' }], 'side') }] });
+    await openArea(page, name);
+    await page.getByRole('button', { name: 'Allow' }).click();
+    await expect(frame(page).locator('#i')).toBeAttached();
+    if (!isDesktop(page)) await page.locator('.sheet-peek').click();
+    const box = composer(page, 'Techne');
+    await box.click();
+    return box;
+  };
+
+  test('a polite app is not stopped by Tab out of the composer', async ({ page }) => {
+    const box = await open(page, 'Polite', POLITE);
+    for (let i = 0; i < 4; i++) { await page.keyboard.press('Tab'); await page.waitForTimeout(60); }
+    await page.waitForTimeout(400);
+    await expect(page.locator('iframe.area-frame')).toHaveCount(1);
+    await expect(page.locator('.area-quiet').filter({ hasText: 'kept taking the keyboard' })).toHaveCount(0);
+    await expect(page.getByText('took the keyboard')).toHaveCount(0);
+    void box;
+  });
+
+  test('a single theft with an empty composer shows the notice and leaves the app running', async ({ page }) => {
+    await open(page, 'Once', POLITE);
+    await stealOnce(page);
+    await expect(page.getByRole('status').filter({ hasText: 'took the keyboard' })).toBeVisible();
+    await expect(page.locator('iframe.area-frame')).toHaveCount(1);
+  });
+
+  test('a theft while the composer has text stops the app and logs one line', async ({ page }) => {
+    const logs: string[] = [];
+    page.on('console', (m) => { if (m.text().includes('focus theft')) logs.push(m.text()); });
+    const box = await open(page, 'Once', POLITE);
+    await page.keyboard.type('hello', { delay: 10 });
+    await stealOnce(page);
+    await expect(page.locator('iframe.area-frame')).toHaveCount(0);
+    await expect(page.locator('.area-quiet').filter({ hasText: 'kept taking the keyboard' })).toBeVisible();
+    await expect(box).toHaveValue('hello');
+    expect(logs.length, 'one log line').toBe(1);
+  });
+});
+
 // T-75b P2-1: a suggestion from an interface in an area without a room still has somewhere to show.
 test.describe('suggestions without a room', () => {
   test('the bar sits above the interface when the area has no room', async ({ page }) => {

@@ -114,9 +114,17 @@ export default function AreaView({ area, rows, mode, roomName, actions, room, on
   }, [seen, room?.loaded, room?.messages, room?.id]);
   const [stoppedNote, setStoppedNote] = useState<string | null>(null);
   const stop = () => { suggestions.clear(); markStopped(area.path); bump(); };
-  const takeover = () => { setStoppedNote("This app kept taking the keyboard from the chat while you typed, so it was stopped."); stop(); };
+  const [theftNote, setTheftNote] = useState(false);
+  // First theft: say so. With text in the composer (or a repeat) the app is stopped, and the stop is logged.
+  const takeover = (stopApp: boolean) => {
+    if (!stopApp) { setTheftNote(true); return; }
+    console.warn(`uni: focus theft: stopped the app of area "${area.path}" for taking the keyboard from the chat`);
+    setTheftNote(false);
+    setStoppedNote("This app kept taking the keyboard from the chat while you typed, so it was stopped.");
+    stop();
+  };
   const revoke = () => { if (!app) return; grants.revoke(app.id); suggestions.clear(); markStopped(area.path); setDeclined(false); bump(); };
-  const start = () => { setStoppedNote(null); markStarted(area.path); bump(); };
+  const start = () => { setStoppedNote(null); setTheftNote(false); markStarted(area.path); bump(); };
   const accept = () => { if (app && keys && running) { grants.acknowledge(app.id, keys.html); bump(); } };
   const router = useMemo(() => createRouter([
     createVaultModule({
@@ -157,6 +165,7 @@ export default function AreaView({ area, rows, mode, roomName, actions, room, on
   // The suggestion bar sits directly above the chat composer; with no chat pane it stays above the interface.
   const withChat = (main: ReactNode, above: ReactNode, cls = "") => <div className={`area-view ${cls}`}>{header}
     {decision === "run-notice" && <p className="area-updated" role="status">This app was updated since you allowed it. <button className="pairing-secondary area-accept" onClick={(e) => { if (e.isTrusted) accept(); }}>Accept</button></p>}
+    {framed && theftNote && <p className="area-updated" role="status">This app took the keyboard from the chat. If it does that again it will be stopped.</p>}
     <ChatLayout framed={framed} onTheft={takeover} mode={layout} main={main} aboveMain={chatShown && room ? null : above}
       chat={layout === "side" ? <SideChat labelled={framed} room={room} hasRoom={hasRoom} above={above} label={`Chat in ${channel ? "#" + roomName(channel) : name}`} />
         : layout === "sheet" ? <ChatSheet room={room} hasRoom={hasRoom} above={above} forceOpen={pendingSuggestions} label={`Chat in ${channel ? "#" + roomName(channel) : name}`} /> : null} /></div>;
@@ -174,7 +183,7 @@ function SideChat({ room, hasRoom, above, label, labelled }: { labelled: boolean
 }
 
 /** The interface (or the default view) and the chat: side by side with a draggable divider, or a sheet over the bottom. */
-function ChatLayout({ mode, main, aboveMain, chat, framed, onTheft }: { framed: boolean; onTheft: () => void; mode: "side" | "sheet" | "hidden"; main: ReactNode; aboveMain: ReactNode; chat: ReactNode }) {
+function ChatLayout({ mode, main, aboveMain, chat, framed, onTheft }: { framed: boolean; onTheft: (stopApp: boolean) => void; mode: "side" | "sheet" | "hidden"; main: ReactNode; aboveMain: ReactNode; chat: ReactNode }) {
   const box = useRef<HTMLDivElement>(null);
   const [cw, setCw] = useState(0);
   const [stored, setStored] = useState<number | undefined>(() => { try { return parseStoredWidth(localStorage.getItem(CHAT_WIDTH_KEY)); } catch { return undefined; } });
@@ -206,22 +215,36 @@ function ChatLayout({ mode, main, aboveMain, chat, framed, onTheft }: { framed: 
   const inChat = (el: EventTarget | null) => el instanceof Element && !!el.closest(".area-chat.side, .area-chat .sheet-body");
   const guardRef = useRef(false); guardRef.current = guard;
   const lastChat = useRef<HTMLElement | null>(null);
+  const theftRef = useRef<() => void>(() => {});
   const onTheftRef = useRef(onTheft); onTheftRef.current = onTheft;
   useEffect(() => {
     if (!guard || !framed) return;
-    let retaken = -Infinity, thefts = 0;
+    let thefts = 0, lastTheft = -Infinity, lastTab = -Infinity;
+    // A theft is counted on the blur side: the host's focus has moved and document.activeElement is the iframe. Tabbing out
+    // of the document leaves it on the body or a host button, and a blur right after a Tab press is the user's own.
+    const theft = () => {
+      const now = performance.now();
+      if (!guardRef.current || now - lastTab < 200 || now - lastTheft < 100) return;
+      lastTheft = now;
+      const f = box.current?.querySelector("iframe");
+      if (!f || document.activeElement !== f) return;
+      const draft = (lastChat.current as HTMLInputElement | HTMLTextAreaElement | null)?.value ?? "";
+      thefts++;
+      onTheftRef.current(draft.trim() !== "" || thefts >= 2);
+    };
+    const tab = (e: KeyboardEvent) => { if (e.key === "Tab") lastTab = performance.now(); };
+    theftRef.current = theft;
     // The frame taking focus blurs the host window. Whether it was the frame or the user leaving the window, the composer
     // is where focus belongs, and refocusing it is harmless either way.
     const back = () => {
       const el = lastChat.current; if (!guardRef.current || !el || !el.isConnected) return;
+      theft();
       const retake = () => { window.focus(); el.focus(); };
-      retaken = performance.now(); retake(); setTimeout(() => { if (guardRef.current) retake(); }, 0);
+      retake(); setTimeout(() => { if (guardRef.current) retake(); }, 0);
     };
-    // Our own refocus came back as a window focus right after the blur: the window never really left, so the frame took it.
-    const focused = () => { if (guardRef.current && performance.now() - retaken < 150 && ++thefts >= 2) onTheftRef.current(); };
     window.addEventListener("blur", back);
-    window.addEventListener("focus", focused);
-    return () => { window.removeEventListener("blur", back); window.removeEventListener("focus", focused); };
+    window.addEventListener("keydown", tab, true);
+    return () => { window.removeEventListener("blur", back); window.removeEventListener("keydown", tab, true); theftRef.current = () => {}; };
   }, [guard, framed]);
   useLayoutEffect(() => {
     const f = box.current?.querySelector("iframe");
@@ -234,7 +257,7 @@ function ChatLayout({ mode, main, aboveMain, chat, framed, onTheft }: { framed: 
     // that is theft, not the user, so the keyboard goes straight back to the composer.
     setTimeout(() => {
       const now = document.activeElement;
-      if (guardRef.current && now instanceof HTMLIFrameElement && box.current?.contains(now)) { lastChat.current?.focus(); return; }
+      if (guardRef.current && now instanceof HTMLIFrameElement && box.current?.contains(now)) { theftRef.current(); lastChat.current?.focus(); return; }
       // Focus that left with the whole window keeps the guard: the frame must not win it back meanwhile.
       if (inChat(now) || (now === document.body && !document.hasFocus())) return;
       setGuard(false);
