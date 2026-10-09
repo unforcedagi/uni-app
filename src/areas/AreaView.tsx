@@ -39,16 +39,21 @@ const desktopQuery = `(min-width: ${DESKTOP_MIN}px)`;
 const subscribeDesktop = (f: () => void) => { const mq = window.matchMedia(desktopQuery); mq.addEventListener("change", f); return () => mq.removeEventListener("change", f); };
 const isDesktop = () => window.matchMedia(desktopQuery).matches;
 
-export default function AreaView({ area, entry, now, channel, onChannel, mode, roomName, actions, room, onBack }: {
+export default function AreaView({ area, entry, now, channel, onChannel, mode, roomName, actions, room, onBack, backLabel, crumbs, lead, kids, freshAt }: {
   area: Area; mode: GateMode | "closed"; roomName: (id: string) => string; actions: AreaActions;
   /** The area's Brief (null: Uni hasn't written one) and the time it is read against. */
   entry: AreaBrief | null; now: number;
   /** The room shown (one of the area's rooms) and the way to pick another. */
   channel: string | null; onChannel: (id: string) => void;
   /** The host's real room view for this area's room; null while it opens (or when the area has none). */
-  room: AreaRoom | null; onBack: () => void;
+  room: AreaRoom | null;
+  /** Up one level (null: this is Uni, the top) and where that goes, by name. */
+  onBack: (() => void) | null; backLabel: string;
+  /** The page around the Brief: breadcrumb, Uni's Today in place of a Brief, the children, the freshness override. */
+  crumbs?: ReactNode; lead?: ReactNode; kids?: ReactNode; freshAt?: string | null;
 }) {
-  const live = mode !== "closed";
+  // Uni itself (path "") has no app note to look up.
+  const live = mode !== "closed" && area.path !== "";
   const [app, setApp] = useState<AppNote | null>(null);
   // Brief is the default page; the sealed app (when the area has one) is the "App" tab.
   const [tab, setTab] = useState<"brief" | "app">("brief");
@@ -96,7 +101,7 @@ export default function AreaView({ area, entry, now, channel, onChannel, mode, r
   const desktop = useSyncExternalStore(subscribeDesktop, isDesktop, () => true);
   const layout = chatMode(onApp && manifest?.ok ? manifest.manifest.layout.chat : null, desktop);
   const layoutRef = useRef(layout); layoutRef.current = layout;
-  const hasRoom = area.channels.length > 0;
+  const hasRoom = area.rooms.length > 0;
   // Ask Uni: a draft in the shown room's composer (the sheet opens on a phone). Never sends.
   const [poke, setPoke] = useState(0);
   const ask = (text: string) => {
@@ -104,7 +109,7 @@ export default function AreaView({ area, entry, now, channel, onChannel, mode, r
     const r = roomRef.current;
     if (r && layoutRef.current !== "hidden" && r.id === channel) { r.compose(text); setPoke((n) => n + 1); } else actionsRef.current.compose(channel, text);
   };
-  const rooms = area.channels.length > 1 ? <RoomChips channels={area.channels} selected={channel} roomName={roomName} onPick={onChannel} /> : null;
+  const rooms = area.rooms.length > 1 ? <RoomChips channels={area.rooms} selected={channel} roomName={roomName} onPick={onChannel} /> : null;
   const suggestions = useMemo(() => createSuggestionStore({
     onAccept: (s) => {
       if (s.kind !== "draft") { actionsRef.current.openNote(s.ref); return; }
@@ -159,7 +164,7 @@ export default function AreaView({ area, entry, now, channel, onChannel, mode, r
   const idle = ready_ && granted && !running;
   // A running app has its own hero, so the host bar drops the title (kept for screen readers).
   const header = <header className={`area-bar ${framed ? "chromeless" : ""}`}>
-    <button className="note-back" onClick={onBack} aria-label="Back to Areas"><span className="note-back-arrow" aria-hidden="true">←</span><span className="note-back-label">Areas</span></button>
+    {onBack && <button className="note-back" onClick={onBack} aria-label={`Back to ${backLabel}`}><span className="note-back-arrow" aria-hidden="true">←</span><span className="note-back-label">{backLabel}</span></button>}
     <strong className={`area-bar-title ${framed ? "sr-only" : ""}`}>{name}</strong>
     {framed && mode === "approved-code" && <span className="area-mode-chip" title="On this device apps can reach the network through WebRTC, so this app is only as safe as its code. You approved this version.">Approved code</span>}
     <span className="area-bar-controls">
@@ -172,7 +177,7 @@ export default function AreaView({ area, entry, now, channel, onChannel, mode, r
         </span>
       </>}
     </span>
-    <span className={`area-mark ${area.status}`}>{area.status}</span>
+    {onBack && <span className={`area-mark ${area.status}`}>{area.kind === "project" ? "project" : area.status}</span>}
   </header>;
   const bar = <SuggestionBar store={suggestions} appName={name} roomName={roomName} />;
   const chatShown = layout !== "hidden";
@@ -191,7 +196,7 @@ export default function AreaView({ area, entry, now, channel, onChannel, mode, r
   if (framed) return withChat(<InterfaceFrame html={app!.html} title={`${name} app`} router={router} grant={grant} ready={ready} onSession={(s) => { session.current = s; }} />, bar, "framed");
   if (asking && manifest?.ok) return withChat(<GrantPrompt name={name} codeChanged={codeChanged && status === "updated"} approvedCode={mode === "approved-code"} lines={describeNeeds(manifest.manifest.needs, ctx, roomName)}
     onAllow={() => { grants.grant(app!.id, keys!.scope, keys!.html, mode === "approved-code" ? "approved-code" : "sealed"); markStarted(area.path); bump(); }} onNotNow={() => setDeclined(true)} />, null);
-  if (!onApp) return withChat(<BriefView area={area} entry={entry} now={now} canAsk={!!channel} onNote={actions.openNote} onAsk={ask} />, null);
+  if (!onApp) return withChat(<BriefView area={area} entry={entry} now={now} canAsk={!!channel} onNote={actions.openNote} onAsk={ask} crumbs={crumbs} lead={lead} kids={kids} freshAt={freshAt} />, null);
   return withChat(<AppPanel area={area} pending={!keys} onOpenApp={idle ? start : null} onRevoke={idle ? revoke : null}
     notice={manifest && !manifest.ok ? `This area's app was not opened: ${manifest.error}.` : !running ? stoppedNote : null} />, null);
 }

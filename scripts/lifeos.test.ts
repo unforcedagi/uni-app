@@ -2,9 +2,11 @@
 // Run: node --experimental-strip-types scripts/lifeos.test.ts
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { askDraft, briefMissingDraft, nowLine, parseBrief, parseToday, rankNeeds, todayNeeds, updatedLabel, inlineTokens } from "../src/areas/briefCore.ts";
+import { askDraft, briefMissingDraft, refreshDraft, nowLine, parseBrief, parseToday, rankNeeds, todayNeeds, updatedLabel, inlineTokens } from "../src/areas/briefCore.ts";
 import { createAreasCache, CACHE_KEY } from "../src/areas/areasCache.ts";
 import { pickRoom } from "../src/areas/areaLayout.ts";
+import { parseArea, parseProject, parentOf } from "../src/areas/areasCore.ts";
+import { buildTree, childrenOf, parentPath, rootNode, ROOT, trail, UNI_CHANNEL } from "../src/areas/treeCore.ts";
 
 let failed = 0;
 function check(name: string, fn: () => void) {
@@ -157,7 +159,7 @@ function memStore(init: Record<string, string> = {}) {
   const m = new Map(Object.entries(init));
   return { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => { m.set(k, v); }, removeItem: (k: string) => { m.delete(k); }, raw: m };
 }
-const DATA = { areas: [{ id: "a", path: "Areas/Techne", name: "Techne", purpose: "p", status: "foreground" as const, channels: ["c1", "c2"], since: null, title: "Techne", body: "# Techne", metadata: {}, updatedAt: null }], briefs: { Techne: { content: BRIEF, generatedAt: "2026-10-09T15:00:00Z", updatedAt: "2026-10-09T15:01:00Z" } }, today: { content: TODAY, updatedAt: "2026-10-09T15:02:00Z" } };
+const DATA = { areas: [{ id: "a", path: "Areas/Techne", name: "Techne", purpose: "p", status: "foreground" as const, channels: ["c1", "c2"], rooms: ["c1", "c2"], kind: "area" as const, parent: null, since: null, title: "Techne", body: "# Techne", metadata: {}, updatedAt: null }], briefs: { "Areas/Techne": { content: BRIEF, generatedAt: "2026-10-09T15:00:00Z", updatedAt: "2026-10-09T15:01:00Z" } }, today: { content: TODAY, updatedAt: "2026-10-09T15:02:00Z" } };
 check("cache round-trips what the home paints from", () => {
   const s = memStore(); const c = createAreasCache(s, () => NOW);
   assert.equal(c.read(), null);
@@ -168,7 +170,7 @@ check("cache round-trips what the home paints from", () => {
   assert.ok(s.raw.has(CACHE_KEY));
 });
 check("cache ignores garbage, a wrong version and a broken shape; a failing store never throws", () => {
-  for (const bad of ["{", "null", "[]", JSON.stringify({ v: 99, areas: [] }), JSON.stringify({ v: 1, areas: "x" }), JSON.stringify({ v: 1, savedAt: 1, areas: [{ nope: 1 }], briefs: {}, today: null })]) {
+  for (const bad of ["{", "null", "[]", JSON.stringify({ v: 99, areas: [] }), JSON.stringify({ v: 1, savedAt: 1, areas: [], briefs: {}, today: null }), JSON.stringify({ v: 2, areas: "x" }), JSON.stringify({ v: 2, savedAt: 1, areas: [{ nope: 1 }], briefs: {}, today: null })]) {
     assert.equal(createAreasCache(memStore({ [CACHE_KEY]: bad })).read(), null, bad);
   }
   const boom = { getItem: () => { throw new Error("denied"); }, setItem: () => { throw new Error("quota"); }, removeItem: () => {} };
@@ -195,6 +197,72 @@ check("useAreas no longer pages the whole vault", () => {
 });
 check("the Tauri side registers vault_query", () => {
   assert.match(src("../src-tauri/src/lib.rs"), /vault_query,/);
+});
+
+
+// -------------------------------------------------------------------- the tree (T-80b)
+const areaNote = (name: string, metadata: Record<string, unknown> = {}) => ({ id: `a-${name}`, path: `Areas/${name}`, tags: ["area"], content: `# ${name}\n\nAbout ${name}.`, metadata, updatedAt: "2026-10-09T10:00:00Z" });
+const projectNote = (path: string, metadata: Record<string, unknown> = {}) => ({ id: `p-${path}`, path, tags: ["project"], content: "", metadata, updatedAt: "2026-10-09T10:00:00Z" });
+const nodes = (...n: { id: string; path: string; tags: string[]; content: string; metadata: Record<string, unknown>; updatedAt: string }[]) =>
+  n.map((x) => (x.tags.includes("area") ? parseArea(x) : parseProject(x))!).filter(Boolean);
+
+check("parentOf reads a path, tolerating [[ ]], a leading slash and an extension", () => {
+  assert.equal(parentOf({ parent: "Areas/Techne" }), "Areas/Techne");
+  assert.equal(parentOf({ parent: "[[Areas/Techne|Techne]]" }), "Areas/Techne");
+  assert.equal(parentOf({ parent: " /Areas/Techne.md " }), "Areas/Techne");
+  assert.equal(parentOf({ parent: "" }), null);
+  assert.equal(parentOf({}), null);
+  assert.equal(parentOf({ parent: 7 }), null);
+});
+check("a project is a tagged note with a parent; Brief and app notes, and notes without a parent, are not nodes", () => {
+  assert.equal(parseProject(projectNote("Projects/COhere/COhere 2026", { parent: "Areas/Techne" }))?.parent, "Areas/Techne");
+  assert.equal(parseProject(projectNote("Projects/COhere/COhere 2026", {})), null);
+  assert.equal(parseProject(projectNote("Projects/X/Brief", { parent: "Areas/Techne" })), null);
+  assert.equal(parseProject({ ...projectNote("Projects/Y", { parent: "Areas/Techne" }), tags: ["note"] }), null);
+});
+check("buildTree: areas at the top, a project under its parent, foreground first", () => {
+  const t = buildTree(nodes(areaNote("Techne", { status: "foreground", channel: "t1" }), areaNote("Atlas", { channel: "a1" }),
+    projectNote("Projects/COhere/COhere 2026", { parent: "Areas/Techne", channel: "c1" })));
+  assert.deepEqual(childrenOf(t, ROOT).map((n) => n.name), ["Techne", "Atlas"]);
+  assert.deepEqual(childrenOf(t, "Areas/Techne").map((n) => n.path), ["Projects/COhere/COhere 2026"]);
+  assert.deepEqual(childrenOf(t, "Areas/Atlas"), []);
+  assert.equal(parentPath(t, "Projects/COhere/COhere 2026"), "Areas/Techne");
+  assert.equal(parentPath(t, "Areas/Techne"), ROOT);
+  assert.deepEqual(trail(t, "Projects/COhere/COhere 2026").map((n) => n.name), ["Techne", "COhere 2026"]);
+  assert.deepEqual(trail(t, "Nope"), []);
+});
+check("buildTree: a missing parent puts the node at the top level; so does naming itself", () => {
+  const t = buildTree(nodes(areaNote("Techne"), projectNote("Projects/Lost", { parent: "Areas/Gone" }), projectNote("Projects/Self", { parent: "Projects/Self" })));
+  assert.deepEqual(childrenOf(t, ROOT).map((n) => n.path).sort(), ["Areas/Techne", "Projects/Lost", "Projects/Self"]);
+});
+check("buildTree: cycles are broken at the smallest path and nothing is lost or loops", () => {
+  const t = buildTree(nodes(projectNote("Projects/B", { parent: "Projects/A" }), projectNote("Projects/A", { parent: "Projects/C" }), projectNote("Projects/C", { parent: "Projects/B" }), projectNote("Projects/D", { parent: "Projects/C" })));
+  assert.equal(t.nodes.size, 4);
+  assert.deepEqual(childrenOf(t, ROOT).map((n) => n.path), ["Projects/A"]);
+  assert.deepEqual(trail(t, "Projects/D").map((n) => n.path), ["Projects/A", "Projects/B", "Projects/C", "Projects/D"]);
+  const total = [ROOT, ...t.nodes.keys()].reduce((n, k) => n + childrenOf(t, k).length, 0);
+  assert.equal(total, 4, "every node has exactly one parent");
+});
+check("buildTree: multiple rooms are kept in order, and a child's room leaves the parent's view but not the note", () => {
+  const t = buildTree(nodes(areaNote("Techne", { channel: "t1, c1,t1" }), projectNote("Projects/COhere/COhere 2026", { parent: "Areas/Techne", channel: "c1" }), projectNote("Projects/Two", { parent: "Areas/Techne", channel: "x1, x2" })));
+  const techne = t.nodes.get("Areas/Techne")!;
+  assert.deepEqual(techne.channels, ["t1", "c1"], "the note says what it says");
+  assert.deepEqual(techne.rooms, ["t1"], "the view drops the room a child claims");
+  assert.deepEqual(t.nodes.get("Projects/Two")!.rooms, ["x1", "x2"]);
+});
+check("buildTree: a parent whose rooms are all claimed keeps them, and duplicate paths keep the newest", () => {
+  const t = buildTree(nodes(areaNote("Techne", { channel: "c1" }), projectNote("Projects/P", { parent: "Areas/Techne", channel: "c1" })));
+  assert.deepEqual(t.nodes.get("Areas/Techne")!.rooms, ["c1"]);
+  const a = { ...areaNote("Techne", { status: "foreground" }), updatedAt: "2026-10-01T00:00:00Z" }, b = { ...areaNote("Techne"), id: "newer", updatedAt: "2026-10-09T00:00:00Z" };
+  assert.equal(buildTree(nodes(a, b)).nodes.get("Areas/Techne")!.id, "newer");
+});
+check("the Uni root is a node on the Uni channel, and refresh drafts name the node and its Brief", () => {
+  const r = rootNode([UNI_CHANNEL]);
+  assert.equal(r.path, ROOT); assert.deepEqual(r.rooms, [UNI_CHANNEL]); assert.equal(UNI_CHANNEL, "1b667c1f-95c8-45e5-a7cc-1df13b7d0e2a");
+  assert.match(refreshDraft("Techne", "Areas/Techne"), /^@Uni .*Areas\/Techne\/Brief/);
+  assert.match(refreshDraft("COhere 2026", "Projects/COhere/COhere 2026"), /Projects\/COhere\/COhere 2026\/Brief/);
+  assert.match(refreshDraft("Uni", ""), /Areas\/Today/);
+  assert.match(briefMissingDraft("COhere 2026", "Projects/COhere/COhere 2026"), /Projects\/COhere\/COhere 2026\/Brief/);
 });
 
 if (failed) { console.log(`\n${failed} failed`); process.exit(1); }

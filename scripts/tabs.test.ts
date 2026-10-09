@@ -177,4 +177,22 @@ assert.equal(activeTab(restoreTabs(serializeTabs(recoverTab), []))?.note?.recove
 const resolvedTab = updateTab(recoverTab, "recover", { note: { hub: null, vault: "unforced", ref: "01M3ZK2R6A6C62M1ANJCSQNG3M" } });
 assert.equal(activeTab(restoreTabs(serializeTabs(resolvedTab), []))?.note?.ref, "01M3ZK2R6A6C62M1ANJCSQNG3M");
 
+// T-80b: Uni's home is the areas tab (with its room); a project under an area is an area tab with a deeper path.
+{
+  const raw = JSON.stringify({ v: 1, tabs: [
+    { id: "home", kind: "areas", title: "Areas", channel: "room-uni" },
+    { id: "proj", kind: "area", path: "Projects/COhere/COhere 2026", title: "COhere 2026", channel: "room-cohere" },
+    { id: "bad1", kind: "area", path: "../etc/passwd", title: "x" },
+    { id: "bad2", kind: "area", path: "/Areas/X", title: "x" },
+    { id: "bad3", kind: "area", path: "", title: "x" },
+  ], active: "proj", recent: ["home", "proj"] });
+  const restored = restoreTabs(raw, ["room-uni", "room-cohere"]);
+  assert.deepEqual(restored.tabs.map((t) => t.id), ["home", "proj"]);
+  assert.equal(restored.tabs[0].title, "Uni", "old saved tabs titled Areas now say Uni");
+  assert.equal(restored.tabs[0].channel, "room-uni");
+  assert.equal(restored.tabs[1].path, "Projects/COhere/COhere 2026");
+  assert.equal(restoreTabs(raw, []).tabs[0].channel, undefined, "a room that is gone is dropped, the tab stays");
+  assert.equal(restoreTabs(raw, []).tabs.length, 2);
+}
+
 console.log("tabs tests passed");

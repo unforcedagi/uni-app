@@ -185,4 +185,9 @@ export function askDraft(kind: AskKind, area: string, it: BriefItem): string {
   return `@Uni ${area}: ${lead}? "${it.text}"${src}`;
 }
 
-export const briefMissingDraft = (area: string) => `@Uni ${area} has no brief yet. Please write Areas/${area}/Brief from this area's rooms, journal and meetings.`;
+export const briefMissingDraft = (area: string, path = `Areas/${area}`) => `@Uni ${area} has no brief yet. Please write ${path}/Brief from this area's rooms, journal and meetings.`;
+
+/** The Refresh action: a draft asking Uni to rewrite a node's Brief (the Uni home: Today). Never sent by the app. */
+export const refreshDraft = (name: string, path: string | null) => path === null || path === ""
+  ? "@Uni Please refresh Areas/Today: what needs me, what moved, and what is quiet."
+  : `@Uni Please refresh ${name}'s brief (${path}/Brief): what is current, what needs me, and what moved since it was written.`;
