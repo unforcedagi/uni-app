@@ -472,3 +472,35 @@ test('failed project refresh retains previous projects and stale marker', async 
   await expect(page.locator('.areas-status')).toContainText("couldn't refresh: project");
   await expect(areaCard(page, 'COhere 2026')).toBeVisible();
 });
+
+ test('fresh memory stays fresh during a deferred background refresh', async ({ page }) => {
+  await bootAreas(page, 'seed');
+  await expect(areaCard(page, 'Techne')).toBeVisible();
+  await page.evaluate(() => {
+    const w = window as any, original = w.__TAURI_INTERNALS__.invoke;
+    w.__pendingAreas = [];
+    w.__TAURI_INTERNALS__.invoke = (cmd: string, args: any) => cmd === 'vault_query'
+      ? new Promise((resolve) => w.__pendingAreas.push(async () => resolve(await original(cmd, args)))) : original(cmd, args);
+  });
+  await page.clock.install(); await page.clock.fastForward(31000);
+  await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+  await expect.poll(() => page.evaluate(() => (window as any).__pendingAreas.length)).toBe(4);
+  await expect(page.locator('.areas-status')).toHaveCount(0);
+  await page.evaluate(async () => { for (const resolve of (window as any).__pendingAreas) await resolve(); });
+ });
+
+ test('forgetAreas discards an in-flight result while the hook remains mounted', async ({ page }) => {
+  await bootAreas(page, 'seed', { queryDelay: 3000 });
+  await expect.poll(async () => (await calls(page, 'vault_query')).length).toBe(4);
+  await page.evaluate(() => (window as any).__forgetAreas());
+  await page.waitForTimeout(3500);
+  expect(await page.evaluate(() => localStorage.getItem('uni.areas.cache.v2'))).toBeNull();
+  await expect(areaCard(page, 'Techne')).toHaveCount(0);
+ });
+
+ test('unresolved identity shows Signing in', async ({ page }) => {
+  await bootAreas(page, 'seed', { identityDelay: 3000 });
+  await expect(page.getByText('Signing in…', { exact: true })).toBeVisible();
+  expect(await calls(page, 'vault_query')).toHaveLength(0);
+  await expect(areaCard(page, 'Techne')).toBeVisible({ timeout: 8000 });
+ });

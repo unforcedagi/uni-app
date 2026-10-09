@@ -29,3 +29,16 @@ The tests were added before implementation and executed against the original cod
 The browser configuration is imported unchanged through a temporary wrapper that changes only the server/base URL from port 1435 to 1436, because a separate review was using 1435. It retains all four suites and both phone/desktop projects. The wrapper was removed before commit.
 
 Not run: real-device Android/WebView validation, production vault/network tests, or deployment. Browser identity/pairing and vault responses are mocked. No push is requested or performed; generated Tauri schemas are excluded from the commit.
+
+## T-80 re-review (review2)
+
+- Removed metadata ownership entirely. Briefs match only `<node path>/Brief` (with the existing `.md` normalization); Today continues to match only `Areas/Today`. Added a unit test that loads a real Techne node with only a stray metadata-tagged Brief and verifies that Techne has no Brief, and that a metadata-only Today is ignored.
+- Preserved freshness across background refreshes and in-memory remounts. Device-cache snapshots and failed refreshes remain stale; starting a refresh does not turn a fresh snapshot into a saved copy.
+- Added a deferred browser test that calls the real `forgetAreas()` while all four queries are pending, keeps the hook mounted, then verifies that the late answers neither render Techne nor repopulate device storage. The existing generation guard already passed this test. The callable seam is compiled only into the browser test build.
+- Exposed the hook's unresolved identity state and displayed neutral “Signing in…” text on Uni and missing-node pages. The browser fixture delays both `get_identity` and the initial `refresh` identity response to exercise this state.
+
+Test-first evidence: the new payload unit test failed on the metadata-only Techne Brief before the fix. The browser tests failed on fresh data showing a saved-copy label and on missing “Signing in…” text before the fixes; the race test passed against the existing guard. Logs: `/tmp/t80-review2-red.log` and `/tmp/t80-review2-green.log`. The first green attempt also exposed the fixture's second identity response; the fixture was corrected before the full suite.
+
+Validation: `npx tsc --noEmit` and `npm test` passed. The strengthened payload unit test also passed independently. Full browser results are recorded below. No Docker commands, unrelated process termination, deployment, or push were performed.
+
+- `AREAS_TEST_PORT=1447 npx playwright test --config playwright.areas.config.ts`: passed all four suites on phone and desktop — **279 passed, 7 existing skips, 0 failures** (4.2 minutes). All three new browser regressions passed on both projects. Full log: `/tmp/t80-review2-browser.log`.
