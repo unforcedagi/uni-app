@@ -131,29 +131,14 @@ export class RateLimiter {
 
 /**
  * Anything a reader cannot see: Unicode categories Cc (controls), Cf (format: bidi, zero-width, the tag
- * block U+E0000-E007F, ...), Co (private use), Cn (unassigned) and Cs (lone surrogates), plus blanks
- * that are letters or symbols (braille blank, Hangul fillers) and every variation selector.
+ * block U+E0000-E007F, ...), Co (private use), Cn (unassigned) and Cs (lone surrogates), every
+ * Default_Ignorable_Code_Point (variation selectors, Mongolian and Khmer invisibles, the Hangul fillers,
+ * ZWJ and VS16 ...), and the braille blank, which is a symbol and not ignorable.
  */
-const INVISIBLE = /[\p{Cc}\p{Cf}\p{Co}\p{Cn}\p{Cs}\u2800\u115f\u1160\u3164\uffa0\ufe00-\ufe0f\u{e0100}-\u{e01ef}]/u;
-const PICTO = /[\p{Extended_Pictographic}\u{1f3fb}-\u{1f3ff}]/u;
-const ZWJ = "\u200d", VS16 = "\ufe0f";
+const INVISIBLE = /(?![\n\t])[\p{Cc}\p{Cf}\p{Co}\p{Cn}\p{Cs}\p{Default_Ignorable_Code_Point}\u2800]/gu;
 
-/**
- * Remove every invisible code point except \n and \t. U+200D and U+FE0F survive only inside an emoji
- * sequence (ZWJ between two pictographs, VS16 right after one), so family and heart emoji keep working.
- */
-export function stripHidden(s: string): string {
-  const cps = Array.from(s);
-  const out: string[] = [];
-  for (let i = 0; i < cps.length; i++) {
-    const c = cps[i];
-    const prev = out[out.length - 1] ?? "";
-    if (c === "\n" || c === "\t" || !INVISIBLE.test(c)) out.push(c);
-    else if (c === ZWJ && (PICTO.test(prev) || prev === VS16) && PICTO.test(cps[i + 1] ?? "")) out.push(c);
-    else if (c === VS16 && PICTO.test(prev)) out.push(c);
-  }
-  return out.join("");
-}
+/** Remove every invisible code point except \n and \t. ZWJ and VS16 go too: combined emoji degrade to their parts. */
+export const stripHidden = (s: string): string => s.replace(INVISIBLE, "");
 /** True when `s` holds anything stripHidden would remove (or a Unicode line separator). */
 export const hasHidden = (s: string) => stripHidden(s) !== s || /[\u2028\u2029]/.test(s);
 

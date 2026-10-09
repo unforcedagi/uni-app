@@ -57,8 +57,8 @@
 .grant-prompt { max-width: 520px; margin: 28px auto; padding: 0 clamp(16px, 4vw, 24px); }
 .grant-prompt h2 { font-family: var(--serif); font-weight: 500; font-size: 28px; margin: 0 0 8px; }
 .grant-prompt ul { margin: 8px 0 12px; padding-left: 20px; line-height: 1.6; }
-.suggestion-bar { flex: none; display: grid; gap: 8px; padding: 10px clamp(16px, 3vw, 24px); border-bottom: 1px solid var(--line); background: var(--card-lift); }
-.suggestion { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; justify-content: space-between; }
+.suggestion-bar { flex: none; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 10px clamp(16px, 3vw, 24px); border-bottom: 1px solid var(--line); background: var(--card-lift); }
+.suggestion { min-width: 0; display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; justify-content: space-between; }
 .suggestion-text { margin: 0; flex: 1 1 240px; min-width: 0; font-size: 14px; line-height: 1.45; overflow-wrap: anywhere; }
 .suggestion-text q { color: var(--text-soft); font-style: italic; }
 .suggestion-actions { display: flex; gap: 8px; }
@@ -73,5 +73,5 @@
 .area-updated { flex: none; margin: 0; padding: 8px clamp(16px, 3vw, 24px); border-bottom: 1px solid var(--line); background: var(--card-lift); color: var(--text-soft); font-size: 13px; }
 .grant-outside { color: var(--danger); }
 .grant-name { font-style: normal; font-weight: 600; }
-.suggestion-draft { margin: 6px 0 0; padding: 8px 10px; overflow-y: auto; border-left: 3px solid var(--accent); background: var(--surface); color: var(--text-soft); font-size: 14px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+.suggestion-draft { margin: 6px 0 0; padding: 8px 10px; max-width: 100%; max-height: min(40vh, 24rem); overflow: auto; border-left: 3px solid var(--accent); background: var(--surface); color: var(--text-soft); font-size: 14px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
 .suggestion-ref { overflow-wrap: anywhere; }
