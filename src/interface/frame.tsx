@@ -22,7 +22,7 @@ export const frameSrcDoc = (html: string) => buildSrcdoc(html, { kitSource: KIT_
  * violations: the host CSP is what stops a navigation, and a violation is the
  * evidence that something tried one. The real frame stops on a violation.
  */
-export function useSealedFrame(opts: { srcDoc: string; router: Router; grant: Resolved; ready?: unknown; stopOnViolation?: boolean; onViolation?: () => void }) {
+export function useSealedFrame(opts: { srcDoc: string; router: Router; grant: Resolved; ready?: unknown; stopOnViolation?: boolean; onViolation?: () => void; onSession?: (s: Session | null) => void }) {
   const frame = useRef<HTMLIFrameElement>(null);
   const session = useRef<Session | null>(null);
   const loaded = useRef<string | null>(null);
@@ -32,6 +32,8 @@ export function useSealedFrame(opts: { srcDoc: string; router: Router; grant: Re
   readyRef.current = opts.ready;
   const onViolationRef = useRef(opts.onViolation);
   onViolationRef.current = opts.onViolation;
+  const onSessionRef = useRef(opts.onSession);
+  onSessionRef.current = opts.onSession;
   const [stopped, setStopped] = useState(false);
   // The frame gets its document only once the session is listening: a document that posts while parsing
   // (WebKit loads srcdoc synchronously on mount) would otherwise talk to nobody.
@@ -43,6 +45,7 @@ export function useSealedFrame(opts: { srcDoc: string; router: Router; grant: Re
     // targetOrigin must be "*": a sandboxed srcdoc frame's origin is opaque.
     const s = createSession({ post: (m) => frame.current?.contentWindow?.postMessage(m, "*"), router, grant });
     session.current = s;
+    onSessionRef.current?.(s);
     // The frame can finish loading before this effect runs (WebKit does): tell a late session it is ready.
     if (loaded.current === srcDoc) s.sendEvent("ready", { contract: 1, ...(readyRef.current as object), theme: readHostTheme() });
     const onMessage = (e: MessageEvent) => { if (e.source === null || e.source !== frame.current?.contentWindow) return; s.handle(e.data); };
@@ -57,7 +60,7 @@ export function useSealedFrame(opts: { srcDoc: string; router: Router; grant: Re
     const mq = window.matchMedia?.("(prefers-color-scheme: dark)");
     const retheme = () => s.sendEvent("theme", readHostTheme());
     mq?.addEventListener?.("change", retheme);
-    return () => { s.close(); window.removeEventListener("message", onMessage); document.removeEventListener("securitypolicyviolation", onViolation); mq?.removeEventListener?.("change", retheme); session.current = null; };
+    return () => { s.close(); window.removeEventListener("message", onMessage); document.removeEventListener("securitypolicyviolation", onViolation); mq?.removeEventListener?.("change", retheme); session.current = null; onSessionRef.current?.(null); };
   }, [srcDoc, router, grant, stopOnViolation]);
 
   const armedRef = useRef(armed);
@@ -72,9 +75,9 @@ export function useSealedFrame(opts: { srcDoc: string; router: Router; grant: Re
  * network, inside a host whose own CSP allows only `frame-src about:`. Its
  * only door is the contract session.
  */
-export default function InterfaceFrame({ html, title, router, grant, ready }: { html: string; title: string; router: Router; grant: Resolved; ready: unknown }) {
+export default function InterfaceFrame({ html, title, router, grant, ready, onSession }: { html: string; title: string; router: Router; grant: Resolved; ready: unknown; /** The live session (null when it ends): the host's way to push events such as chat.message. */ onSession?: (s: Session | null) => void }) {
   const srcDoc = useMemo(() => frameSrcDoc(html), [html]);
-  const { frame, stopped, onLoad, srcDoc: liveDoc } = useSealedFrame({ srcDoc, router, grant, ready, stopOnViolation: true });
+  const { frame, stopped, onLoad, srcDoc: liveDoc } = useSealedFrame({ srcDoc, router, grant, ready, stopOnViolation: true, onSession });
   if (stopped) return <p className="area-stopped" role="alert">{STOPPED_MESSAGE}</p>;
   return <iframe ref={frame} className="area-frame" title={title} sandbox="allow-scripts" referrerPolicy="no-referrer" srcDoc={liveDoc} onLoad={onLoad} />;
 }

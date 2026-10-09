@@ -4,12 +4,13 @@
 //   uni.frameFetch(url, init)        → fetch over the frame (pfr envelope), what VaultClient uses
 //   uni.VaultClient / uni.vault      → surface-client's VaultClient on frameFetch (read-only subset)
 //   uni.chat.recent(limit) / .draft(text, room?)
+//   uni.chat.onMessage(cb)           → live messages for the area's room(s), needs chat.read; returns an unsubscribe
 //   uni.note.open(path)
 //   uni.theme.get() / .on(cb)        → host colours; CSS vars --text, --accent… are also set on <html>
 // In-page #anchor links scroll in place. chat.draft and note.open only create a pending suggestion that the user must tap in the host UI.
 
 export const FRAME_KIT = String.raw`(function () {
-  var pending = {}, fetches = {}, n = 0, themeCbs = [], theme = null, readyRes;
+  var pending = {}, fetches = {}, n = 0, themeCbs = [], chatCbs = [], theme = null, readyRes;
   var readyP = new Promise(function (r) { readyRes = r; });
   function post(m) { parent.postMessage(m, "*"); }
   function timeout(table, id, rej) { setTimeout(function () { if (table[id]) { delete table[id]; rej(new Error("timeout")); } }, 20000); }
@@ -36,6 +37,7 @@ export const FRAME_KIT = String.raw`(function () {
     if (m.uni !== 1) return;
     if (m.event === "ready") { if (m.data && m.data.theme) applyTheme(m.data.theme); readyRes(m.data); return; }
     if (m.event === "theme") { applyTheme(m.data); return; }
+    if (m.event === "chat.message") { chatCbs.slice().forEach(function (f) { try { f(m.data); } catch (e) {} }); return; }
     var p = pending[m.id]; if (!p) return; delete pending[m.id];
     if (m.error) { var er = new Error(m.error.message || m.error.code); er.code = m.error.code; p.rej(er); } else p.res(m.result);
   });
@@ -72,7 +74,12 @@ export const FRAME_KIT = String.raw`(function () {
     call: call,
     chat: {
       recent: function (limit) { return call("chat", "recent", limit == null ? {} : { limit: limit }); },
-      draft: function (text, room) { var p = { text: text }; if (room != null) p.room = room; return call("chat", "draft", p); }
+      draft: function (text, room) { var p = { text: text }; if (room != null) p.room = room; return call("chat", "draft", p); },
+      onMessage: function (cb) {
+        if (typeof cb !== "function") throw new TypeError("onMessage needs a function");
+        chatCbs.push(cb);
+        return function () { var i = chatCbs.indexOf(cb); if (i >= 0) chatCbs.splice(i, 1); };
+      }
     },
     note: { open: function (ref) { return call("note", "open", { ref: ref }); } },
     theme: {

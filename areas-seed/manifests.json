@@ -1,0 +1,4 @@
+{
+  "techne": { "interface": { "contract": 1, "needs": [{ "vault.read": "area" }, { "chat.read": "area" }, { "chat.draft": "area" }], "layout": { "chat": "side" } } },
+  "unforced": { "interface": { "contract": 1, "needs": [{ "vault.read": "area" }, { "chat.read": "area" }, { "chat.draft": "area" }], "layout": { "chat": "sheet" } } }
+}

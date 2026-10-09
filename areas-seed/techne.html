@@ -36,6 +36,11 @@
   .thread li::before { content: ""; position: absolute; left: -23px; top: 6px; width: 9px; height: 9px; border-radius: 50%; background: var(--surface); border: 2px solid var(--accent); }
   .thread .who { font-weight: 600; } .thread time { margin-left: 8px; color: var(--muted); font: 11px var(--mono); }
   .thread p { margin: 2px 0 0; color: color-mix(in srgb, var(--text) 82%, transparent); overflow-wrap: anywhere; }
+  .latest { margin-top: 6px; }
+  .latest .who { font-weight: 600; } .latest time { margin-left: 8px; color: var(--muted); font: 11px var(--mono); }
+  .latest p { margin: 6px 0 0; overflow-wrap: anywhere; }
+  .latest.fresh { animation: fresh 1.2s ease-out; }
+  @keyframes fresh { from { background: color-mix(in srgb, var(--accent) 22%, var(--surface)); } }
   .empty { color: var(--muted); font: italic 18px var(--serif); }
   .tools { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
   .tools button { all: unset; box-sizing: border-box; width: 100%; cursor: pointer; display: flex; justify-content: space-between; gap: 12px; align-items: baseline;
@@ -64,6 +69,7 @@
       <span class="tag" id="since">workbench</span>
       <h1 id="title">Techne</h1>
       <p class="purpose" id="purpose"></p>
+      <section class="panel latest" id="latest" aria-label="Latest from the room"><h2 id="latest-h">Latest from #techne</h2><div id="latest-body"><span class="empty">Listening…</span></div></section>
     </div>
     <section class="panel" aria-label="Notes on the bench"><h2>On the bench</h2><ul class="tools" id="notes"><li class="empty">Clearing the bench…</li></ul><p class="more" id="more" hidden></p></section>
   </div>
@@ -83,14 +89,32 @@
   function leaf(path) { return String(path).split("/").pop(); }
 
   // The interface contract: uni.ready(), uni.vault (surface-client's VaultClient), uni.chat, uni.note.
+  function showLatest(m, fresh) {
+    var box = $("latest-body"), card = $("latest"); box.textContent = "";
+    var head = node("div"); head.appendChild(node("span", "who", m.author)); head.appendChild(node("time", "", ago(m.created_at)));
+    box.appendChild(head); box.appendChild(node("p", "", m.content.length > 220 ? m.content.slice(0, 220) + "…" : m.content));
+    if (fresh) { card.classList.remove("fresh"); void card.offsetWidth; card.classList.add("fresh"); }
+  }
+  // Live: the host pushes each new message of the room (needs chat.read), so the card and the pulse stay current.
+  uni.chat.onMessage(function (m) {
+    showLatest(m, true);
+    var ol = $("pulse"); if (ol.querySelector(".empty")) ol.textContent = "";
+    var li = node("li"), head = node("div");
+    head.appendChild(node("span", "who", m.author)); head.appendChild(node("time", "", ago(m.created_at)));
+    li.appendChild(head); li.appendChild(node("p", "", m.content.length > 220 ? m.content.slice(0, 220) + "…" : m.content));
+    ol.insertBefore(li, ol.firstChild);
+    while (ol.children.length > 12) ol.removeChild(ol.lastChild);
+  });
   uni.ready().then(function (ctx) {
     var a = ctx.area;
+    $("latest-h").textContent = "Latest from #" + String(a.name || "techne").toLowerCase();
     $("title").textContent = a.title || "Techne"; document.title = a.title || "Techne";
     $("purpose").textContent = a.purpose || "";
     if (a.since) $("since").textContent = "workbench · since " + a.since;
 
     uni.chat.recent(12).then(function (r) {
       var ol = $("pulse"); ol.textContent = "";
+      if (r.messages.length) showLatest(r.messages[0], false); else $("latest-body").textContent = "The room is quiet.";
       if (!r.messages.length) { ol.appendChild(node("li", "empty", "The room is quiet.")); return; }
       r.messages.forEach(function (m) {
         var li = node("li"), head = node("div");
