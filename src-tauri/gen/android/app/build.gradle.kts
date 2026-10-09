@@ -53,6 +53,11 @@ android {
     }
 }
 
+// T-79: RustWebView.kt and Ipc.kt in src/main/java/org/unforced/uni replace the generated wry copies.
+tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+    exclude("**/generated/RustWebView.kt", "**/generated/Ipc.kt")
+}
+
 rust {
     rootDirRel = "../../../"
 }
