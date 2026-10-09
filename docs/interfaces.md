@@ -46,6 +46,8 @@ interface:
     - vault.read: Areas/Techne/     # a folder prefix ending in "/", or "area"
     - chat.read: area               # "area" = the area's linked room(s), or a room id
     - chat.draft: area
+  layout:
+    chat: side                      # "side" | "sheet" | "hidden"; anything else is the default
 ```
 
 - No `interface` key → the default: `vault.read: area`, `chat.read: area`, `chat.draft: area`.
@@ -62,6 +64,27 @@ interface:
   below, including tag characters). A `vault.read` prefix outside the area's own folder, or a `chat.read` /
   `chat.draft` room that is not one of the area's channels, is allowed but the prompt says so in bold
   ("Read notes outside this area, in Journal/", "Read recent messages in a room outside this area, #x").
+
+## The area includes its room
+
+The area view is the interface plus the area's room chat, which is the app's own room view (message list and
+composer: the same send path, drafts and signing), not a copy. The interface never draws chat; the host does.
+
+- `interface.layout.chat` is a hint, never an error: `side` (default on a desktop, >= 900 px: beside the
+  interface with a draggable divider, width kept in `uni.area.chatWidth.v1`, at most 60% of the view),
+  `sheet` (default on a phone: a pull-up sheet over the bottom; the peek bar shows the last message and an
+  unread count, tap or drag to expand) or `hidden` (no chat; suggestions stay above the interface and *Add to
+  draft* opens the room as a tab). `side` on a phone is a sheet. The hint does not change the grant key.
+- The suggestion bar sits directly above the chat composer; *Add to draft* fills that composer. A suggestion
+  arriving while the sheet is down opens it.
+- The bar has **Open #room**, which opens the full room as a tab (the draft carries over). An area with no
+  room says "This area has no room yet".
+- The area tab remembers its room (`channel` on the tab), so the room view follows the tab.
+- **Live messages:** with `chat.read`, the host pushes `{uni:1, event:"chat.message", data:{id, author, content,
+  created_at, room}}` for each message that arrives in a granted room (not the history already there when the
+  area opened). Text is cleaned with `stripHidden` and capped like `chat.recent`; each event costs one token
+  of the request bucket and is dropped when it is empty. No `chat.read`, no event. Kit: `uni.chat.onMessage(cb)`
+  returns an unsubscribe.
 
 ## Consent
 
@@ -100,7 +123,7 @@ Frame → host, one of two envelopes; the host answers on the same `id`.
 {uni:1, id, ns, method, params?}                 → {uni:1, id, result} | {uni:1, id, error:{code, message}}
 {pfr:1, channel:"vault", id, method, path, headers, body}
                                                  → {pfr:1, channel:"vault", id, status, statusText, headers, body}
-host → frame events:  {uni:1, event:"ready"|"theme", data}
+host → frame events:  {uni:1, event:"ready"|"theme"|"chat.message", data}
 ```
 
 Exact keys only; `id` is a string of 1–64 chars; ≤ 8 KB per request (checked by a budgeted walk, never by
@@ -144,6 +167,7 @@ const ctx = await uni.ready();                 // {contract:1, area:{name,title,
 const notes = await uni.vault.queryNotes({ pathPrefix: `Areas/${ctx.area.name}/`, limit: 12 });
 const note = await uni.vault.getNote("Areas/Techne/Plan");      // null when out of scope
 const { messages } = await uni.chat.recent(12);
+const off = uni.chat.onMessage((m) => { /* {id, author, content, created_at, room}; needs chat.read */ });
 await uni.chat.draft("text");                  // → pending suggestion; the user taps in the host
 await uni.note.open("Areas/Techne/Plan");      // → pending suggestion
 uni.theme.on((t) => { /* host colours; --text, --accent… are also set on <html> */ });

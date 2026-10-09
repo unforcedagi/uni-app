@@ -48,13 +48,14 @@ test.describe('seed apps and navigation', () => {
     await expect(bar).toContainText('Pairing on the bridge tonight');
     await mkdir('shots/t74', { recursive: true });
     await page.screenshot({ path: `shots/t74/${info.project.name}-suggestion-bar.png` });
+    // The chat is right there: the suggestion lands above its composer, which stays empty until a tap.
     const box = page.getByRole('textbox', { name: 'Message Techne' });
-    await expect(box, 'nothing reached a composer yet').toHaveCount(0);
+    await expect(box, 'nothing reached the composer yet').toHaveValue('');
     await bar.getByRole('button', { name: 'Add to draft' }).click();
     await expect(box).toHaveValue('Pairing on the bridge tonight');
     expect(await calls(page, 'post_message')).toHaveLength(0);
-    // The area tab stays open next to the room tab.
-    await expect(page.locator('.tab-chip')).toHaveCount(2);
+    // No room tab: the area's own chat took it.
+    await expect(page.locator('.tab-chip')).toHaveCount(1);
     await expect(page.locator('.tab-chip').first()).toContainText('Techne');
     await expect(page.locator('.tab-chip').first().locator('svg.mono-icon')).toHaveCount(1);
   });
@@ -87,11 +88,11 @@ test.describe('seed apps and navigation', () => {
     await openArea(page, 'Sadhana');
     await expect(page.locator('iframe')).toHaveCount(0);
     await expect(page.locator('.area-default')).toContainText('Daily practice');
-    await expect(page.locator('.area-msg')).toContainText('Sat twenty minutes');
+    await expect(page.locator('.area-chat')).toContainText('Sat twenty minutes');
     await page.getByRole('button', { name: 'Open note' }).click();
     await expect(page.locator('.note-sheet')).toBeVisible();
     await page.locator('.note-back').click();
-    await page.getByRole('button', { name: 'Open room' }).click();
+    await page.getByRole('button', { name: /Open #Sadhana/ }).click();
     await expect(page.getByRole('textbox', { name: 'Message Sadhana' })).toBeVisible();
   });
 
@@ -270,7 +271,7 @@ test.describe('hostile and benign apps', () => {
     const notes = (await calls(page, 'vault_note')).map((c: any) => c.args.noteRef);
     expect(notes.filter((n: string) => /passwd|\.\./.test(n))).toEqual([]);
     await expect(page.locator('.suggestion-bar .suggestion')).toHaveCount(3);
-    await expect(page.getByRole('textbox', { name: /Message/ })).toHaveCount(0);
+    await expect(page.getByRole('textbox', { name: /Message/ }), 'no suggestion reached the composer').toHaveValue('');
     expect(await calls(page, 'post_message')).toHaveLength(0);
   });
 });

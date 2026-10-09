@@ -374,17 +374,22 @@ test.describe('P3-N3 the "updated" notice stays until Accept', () => {
   });
 });
 
+// A suggestion opens the chat sheet on a phone (the bar and the composer live in it); put it back down to reach the interface.
+const lowerSheet = async (page: Page) => { if (await page.locator('.area-chat.sheet.open').count()) await page.locator('.sheet-peek').click(); await expect(page.locator('.area-chat.sheet.open')).toHaveCount(0); };
+
 test.describe('P3-N4 pending suggestions do not survive Stop or Revoke', () => {
   test('Stop and Revoke clear the bar; Open app does not bring the old suggestion back', async ({ page }) => {
     await bootAreas(page, 'seed', { apps: [{ name: 'Drafter', html: DRAFTER }] });
     await openAreas(page); await openArea(page, 'Drafter');
     await expect(page.locator('.suggestion-draft')).toBeVisible();
     await page.getByRole('button', { name: 'Stop app' }).click();
+    await lowerSheet(page);
     await page.getByRole('button', { name: 'Open Drafter app' }).click();
     // the restarted app drafts again; the old one must not be doubled up
     await expect(page.locator('.suggestion-draft')).toHaveCount(1);
     await page.getByRole('button', { name: 'Revoke access' }).click();
     await expect(page.locator('.suggestion-bar')).toHaveCount(0);
+    await lowerSheet(page);
     await page.getByRole('button', { name: 'Allow' }).click();
     await expect(page.locator('.suggestion-draft')).toHaveCount(1);
   });

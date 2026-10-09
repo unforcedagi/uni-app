@@ -85,19 +85,32 @@
     $("title").textContent = a.title || "Unforced Development"; document.title = a.title || "";
     $("sub").textContent = "Client practice" + (a.status ? " \u00b7 " + a.status : "");
 
+    var voices = {}, count = 0;
+    function row(m) {
+      var li = node("li"), av = node("div", "av", (m.author || "?").charAt(0).toUpperCase()), body = node("div"), meta = node("div", "meta");
+      if (m.author === "Uni") av.className = "av uni"; else av.style.background = "hsl(" + hue(m.author) + " 38% 38%)";
+      meta.appendChild(node("b", "", m.author)); meta.appendChild(node("time", "", ago(m.created_at)));
+      body.appendChild(meta); body.appendChild(node("p", "", m.content.length > 200 ? m.content.slice(0, 200) + "\u2026" : m.content));
+      li.appendChild(av); li.appendChild(body);
+      return li;
+    }
+    // Live: the host pushes each new message of the room (needs chat.read).
+    uni.chat.onMessage(function (m) {
+      var ul = $("feed"); if (ul.querySelector(".empty")) ul.textContent = "";
+      ul.insertBefore(row(m), ul.firstChild);
+      while (ul.children.length > 8) ul.removeChild(ul.lastChild);
+      voices[m.author] = 1; count += 1;
+      $("s-msgs").firstChild.nodeValue = String(count);
+      $("s-last").textContent = ago(m.created_at);
+      $("who").textContent = Object.keys(voices).length + " voices";
+    });
     uni.chat.recent(20).then(function (r) {
       var ul = $("feed"); ul.textContent = ""; var people = {};
       $("s-msgs").firstChild.nodeValue = String(r.messages.length);
       $("s-last").textContent = r.messages.length ? ago(r.messages[0].created_at) : "\u2013";
       if (!r.messages.length) { var li0 = node("li"); li0.appendChild(node("span")); li0.appendChild(node("span", "empty", "Nothing from the room yet.")); ul.appendChild(li0); return; }
-      r.messages.slice(0, 8).forEach(function (m) {
-        people[m.author] = 1;
-        var li = node("li"), av = node("div", "av", (m.author || "?").charAt(0).toUpperCase()), body = node("div"), meta = node("div", "meta");
-        if (m.author === "Uni") av.className = "av uni"; else av.style.background = "hsl(" + hue(m.author) + " 38% 38%)";
-        meta.appendChild(node("b", "", m.author)); meta.appendChild(node("time", "", ago(m.created_at)));
-        body.appendChild(meta); body.appendChild(node("p", "", m.content.length > 200 ? m.content.slice(0, 200) + "\u2026" : m.content));
-        li.appendChild(av); li.appendChild(body); ul.appendChild(li);
-      });
+      r.messages.slice(0, 8).forEach(function (m) { people[m.author] = 1; ul.appendChild(row(m)); });
+      voices = people; count = r.messages.length;
       $("who").textContent = Object.keys(people).length + " voices";
     }).catch(function () { $("feed").textContent = ""; });
 

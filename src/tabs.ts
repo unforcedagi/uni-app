@@ -5,6 +5,7 @@
 import type { VaultRef } from "./vaultlinks.ts";
 
 export type TabKind = "room" | "thread" | "note" | "journal" | "vault" | "areas" | "area";
+/** `channel` on an `area` tab is the area's room: the one its chat pane shows. */
 export type Tab = { id: string; kind: TabKind; channel?: string; root?: string; note?: VaultRef; vault?: string; /** `area`: the area note path, `Areas/<Name>`. */ path?: string; title: string };
 export type TabTarget = Omit<Tab, "id">;
 /** `recent`: tab ids by last activation, most recent last (drives the cap and close). */
@@ -148,7 +149,7 @@ function validTab(x: unknown): Tab | null {
   const kind = t.kind as TabKind;
   if (kind === "journal") return { id: t.id, kind, title: title || "Journal" };
   if (kind === "areas") return { id: t.id, kind, title: title || "Areas" };
-  if (kind === "area") return typeof t.path === "string" && /^Areas\/[^/]+$/.test(t.path) ? { id: t.id, kind, path: t.path, title: title || t.path.slice(6) } : null;
+  if (kind === "area") return typeof t.path === "string" && /^Areas\/[^/]+$/.test(t.path) ? { id: t.id, kind, path: t.path, title: title || t.path.slice(6), ...(str(t.channel) ? { channel: t.channel } : {}) } : null;
   if (kind === "vault") return str(t.vault) ? { id: t.id, kind, vault: t.vault, title: title || t.vault } : null;
   if (kind === "note") {
     const n = t.note as Record<string, unknown> | undefined;
@@ -176,7 +177,8 @@ export function restoreTabs(raw: string | null, roomIds: Iterable<string>): Tabs
     if ((t.kind === "room" || t.kind === "thread") && !rooms.has(t.channel!)) continue;
     if (tabs.some((o) => sameTarget(o, t))) continue;
     seen.add(t.id);
-    tabs.push(t);
+    // An area whose room has gone keeps its tab; only the room link is dropped.
+    tabs.push(t.kind === "area" && t.channel && !rooms.has(t.channel) ? { id: t.id, kind: t.kind, path: t.path, title: t.title } : t);
   }
   const recentRaw = Array.isArray(d.recent) ? d.recent.filter((x): x is string => typeof x === "string" && seen.has(x)) : [];
   const recent = [...new Set(recentRaw)];

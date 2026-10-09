@@ -24,6 +24,12 @@ export function createSession(opts: SessionOptions) {
     /** Stop for good: in-flight calls get no reply and later messages are ignored. */
     close() { closed = true; },
     sendEvent(event: string, data: unknown) { post({ uni: 1, event, data }); },
+    /** A host-initiated event the frame did not ask for (live chat): it costs one request token, and is dropped when the bucket is empty. */
+    push(event: string, data: unknown): boolean {
+      if (closed || !requests.take(now())) return false;
+      opts.post({ uni: 1, event, data });
+      return true;
+    },
     /**
      * Handle one message from the frame. Every message, valid or not, counts
      * against the request bucket; over it, a message with a usable id still

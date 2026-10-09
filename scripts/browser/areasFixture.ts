@@ -3,6 +3,8 @@ import { expect, type Page } from '@playwright/test';
 import { defaultNeeds, grantKey, htmlHash, resolveNeeds } from '../../src/interface/manifest.ts';
 
 const seed = (name: string) => readFileSync(new URL(`../../areas-seed/${name}.html`, import.meta.url), 'utf8');
+// The seed apps' manifests (their note metadata): needs plus the chat layout hint.
+const seedMeta = JSON.parse(readFileSync(new URL('../../areas-seed/manifests.json', import.meta.url), 'utf8'));
 
 // The hostile app runs every attack from inside the frame and writes what it saw into #out.
 export type Ports = { http: number; udp: number };
@@ -156,7 +158,7 @@ export type BootOpts = {
 export async function bootAreas(page: Page, variant: Variant = 'seed', opts: BootOpts = {}) {
   const now = Math.floor(Date.now() / 1000);
   const data = {
-    now, variant, selftest: opts.selftest ?? true, ipcLeak: opts.ipcLeak ?? false, hostile: hostileApp(opts.ports ?? { http: 9, udp: 9 }), benign: BENIGN, techne: seed('techne'), unforced: seed('unforced'),
+    now, variant, selftest: opts.selftest ?? true, ipcLeak: opts.ipcLeak ?? false, hostile: hostileApp(opts.ports ?? { http: 9, udp: 9 }), benign: BENIGN, techne: seed('techne'), unforced: seed('unforced'), seedMeta,
     apps: opts.apps ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null, mode: opts.mode ?? 'sealed', grantedUnder: opts.grantedUnder ?? (opts.mode ?? 'sealed'),
   };
   // Pre-granted apps: the grant key is the SHA-256 of the RESOLVED default needs plus the app's html.
@@ -188,6 +190,8 @@ export async function bootAreas(page: Page, variant: Variant = 'seed', opts: Boo
     if (window.top !== window) return;
     const w = window as any;
     w.__calls = [];
+    w.__cbs = [];
+    w.__listeners = {};
     // The live-frame gate opens for this platform and version through a stored self-test pass.
     if (d.selftest && !localStorage.getItem('uni.areaApps.selftest.v1')) localStorage.setItem('uni.areaApps.selftest.v1', JSON.stringify({ platform: 'linux', passedAt: '2026-10-08T00:00:00Z', appVersion: 'dev', mode: d.mode, userAgent: d.passUa ?? navigator.userAgent }));
     if (d.granted && !localStorage.getItem('uni.interface.grants.v2')) {
@@ -205,8 +209,8 @@ export async function bootAreas(page: Page, variant: Variant = 'seed', opts: Boo
       area('a-atlas', 'Atlas', 'background', 'ch-atlas', 'A map of the commons: research, writing and the networks around it.'),
       area('a-rel', 'Relationships', 'background', '', 'The people I love and how I show up for them.'),
       area('a-exp', 'Expression', 'background', 'ch-exp', 'Writing, voice and making things for other people to see.'),
-      { id: 'app-techne', path: 'Areas/Techne/app', extension: 'html', content: d.techne, updatedAt: '2026-10-07T00:00:00Z' },
-      { id: 'app-unf', path: 'Areas/Unforced Development/app', extension: 'html', content: d.unforced, updatedAt: '2026-10-07T00:00:00Z' },
+      { id: 'app-techne', path: 'Areas/Techne/app', extension: 'html', content: d.techne, metadata: d.seedMeta.techne, updatedAt: '2026-10-07T00:00:00Z' },
+      { id: 'app-unf', path: 'Areas/Unforced Development/app', extension: 'html', content: d.unforced, metadata: d.seedMeta.unforced, updatedAt: '2026-10-07T00:00:00Z' },
       { id: 'n-t1', path: 'Areas/Techne/Workbench log', extension: 'md', content: '# Workbench log\n\nTechne log body', updatedAt: new Date((d.now - 7200) * 1000).toISOString() },
       { id: 'n-t2', path: 'Areas/Techne/Plan', extension: 'md', content: '# Plan\n\nTechne plan body', updatedAt: new Date((d.now - 86400 * 3) * 1000).toISOString() },
       { id: 'n-t3', path: 'Areas/Techne/Tooling decisions', extension: 'md', content: '# Tooling\n\nbody', updatedAt: new Date((d.now - 86400) * 1000).toISOString() },
@@ -237,13 +241,22 @@ export async function bootAreas(page: Page, variant: Variant = 'seed', opts: Boo
     const lastOf = (c: string) => msgs[c]?.[msgs[c].length - 1];
     const room = (id: string, name: string, unread = 0) => ({ id, name, unread, mentions: false, last_message: lastOf(id)?.body ?? null, last_ts: lastOf(id)?.ts ?? null });
     const rooms = [room('uni-room', 'Uni'), room('ch-techne', 'Techne'), room('ch-unf', 'Unforced Dev'), room('ch-sad', 'Sadhana'), room('ch-atlas', 'Atlas'), room('ch-exp', 'Expression')];
+    // A message arriving over the live socket: stored, then announced like the real `uni://live` event.
+    w.__arrive = (channel: string, name: string, body: string) => {
+      const m = msg('live' + Math.random().toString(36).slice(2, 8), channel, name, 0, body);
+      (msgs[channel] ??= []).push(m);
+      const r = rooms.find((x) => x.id === channel); if (r) { r.last_message = body; r.last_ts = m.ts; }
+      for (const h of w.__listeners['uni://live'] ?? []) w.__cbs[h]?.({ event: 'uni://live', id: 1, payload: { kind: 'message', channel, author: m.author } });
+      return m.ref;
+    };
     const rowOf = (n: any) => ({ id: n.id, path: n.path, extension: n.extension, updatedAt: n.updatedAt });
     w.__TAURI_INTERNALS__ = {
-      metadata: { currentWindow: { label: 'main' }, currentWebview: { label: 'main' } }, transformCallback: () => 1,
+      metadata: { currentWindow: { label: 'main' }, currentWebview: { label: 'main' } }, transformCallback: (cb: any) => { w.__cbs.push(cb); return w.__cbs.length - 1; },
       invoke: async (cmd: string, args: any) => {
         w.__calls.push({ cmd, args });
         switch (cmd) {
           case 'plugin:app|version': if (d.versionFails) throw 'version unavailable'; return 'dev';
+          case 'plugin:event|listen': (w.__listeners[args.event] ??= []).push(args.handler); return args.handler;
           case 'identity_status': return { paired: true, pubkey: U };
           case 'get_identity': return U;
           case 'get_npub': return 'test';

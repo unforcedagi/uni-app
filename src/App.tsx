@@ -4,7 +4,7 @@ import AreasSurface from "./areas/AreasSurface";
 import AreaSelfTest from "./interface/selftest/SelfTest";
 import { appendDraft } from "./areas/composeDraft";
 import { FOR_YOU_ID, FOR_YOU_OPENED_KEY, LAST_SURFACE_KEY, countRecommendations, isRecommendationNew, readLastSurface, saveLastSurface } from "./railCore";
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { onBackButtonPress } from "@tauri-apps/api/app";
@@ -1129,8 +1129,9 @@ function Conversations({ onForget }: { onForget: () => void }) {
     const leaving = restoredView.current, el = listRef.current;
     if (leaving && el) scrollMemory.current.set(leaving, markFor(el.scrollTop, el.scrollHeight, el.clientHeight));
     if (nextChannel !== channel || nextRoot !== root) restoredView.current = null;
-    if (key) { drafts.current.set(key, draft); bindingStore.current.set(key, bindings); }
     const nextKey = nextChannel ? keyFor(nextChannel, nextRoot) : null;
+    // Same scope again (a second tab on this room): the map already holds the live draft, and a caller may just have appended to it.
+    if (key && key !== nextKey) { drafts.current.set(key, draft); bindingStore.current.set(key, bindings); }
     activeScope.current = nextKey;
     setPending(nextKey ? pendingStore.current.get(nextKey) ?? [] : []);
     setJournalOpen(false);
@@ -1245,6 +1246,54 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const threadReplies = isThread ? messages.filter((m) => m.ref !== root) : [];
   const boundNames = [...new Set(bindings.values())].map((pk) => members.find((m) => m.pubkey === pk)?.name ?? pk.slice(0, 8));
 
+  // The room's message list and composer. The room view and an area's chat pane are this same markup, so one send path,
+  // one draft per room and one signer serve both; `above` is drawn directly over the composer (the suggestion bar).
+  const roomPane = (currentRoom: Room, above: ReactNode) => <>
+        <div className="message-list" ref={setList} role="log" aria-label="Messages" aria-live="polite">
+          <div className="message-stack" ref={setStackEl}>
+            {timeline}
+            <div ref={scrollEnd} />
+          </div>
+        </div>
+        <footer onFocusCapture={() => requestAnimationFrame(() => setComposerFocused(true))} onBlurCapture={(e) => { const composer = e.currentTarget; requestAnimationFrame(() => setComposerFocused(composer.contains(document.activeElement))); }} className="composer" onDragOver={(e) => { if (e.dataTransfer.types.includes("Files")) e.preventDefault(); }} onDrop={onDropFiles}>
+          {above}
+          <input ref={fileInput} className="file-picker" type="file" multiple aria-label="Choose files to attach" onChange={(e) => { addFiles(Array.from(e.target.files ?? [])); e.target.value = ""; }} />
+          {error && <p className="error" role="alert">{error}</p>}
+          {replyTo && replyTo !== root && <div className="reply-banner">Replying to {messages.find((m) => m.ref === replyTo)?.author_name ?? "message"}<button onClick={() => setReplyTo(null)} aria-label="Cancel reply">×</button></div>}
+          <div className="compose-destination">{isThread ? <>Replying in thread · <strong>{currentRoom.name}</strong></> : <>Sending to <strong>{currentRoom.name}</strong></>}{boundNames.length ? ` · notifying ${boundNames.join(", ")}` : ""}{findUniMember(members) && <> · <button className="link" onClick={() => setNotifyUni((v) => !v)} aria-pressed={notifyUni}>{notifyUni ? "Uni is listening" : "Uni muted"}</button></>}</div>
+          {picker && <ul className="mention-picker" role="listbox" aria-label="Mention a member">
+            {suggestions.length === 0 && <li className="mention-empty">{members.length ? `No member matches “${picker.query}”` : "No member list cached yet. Refresh to load it."}</li>}
+            {suggestions.map((m, i) => <li key={m.pubkey} role="option" aria-selected={i === picker.index}>
+              <button className={i === picker.index ? "active" : ""} onPointerDown={(e) => e.preventDefault()} onMouseDown={(e) => e.preventDefault()} onClick={() => choose(m)}>
+                <span className="avatar small">{m.name[0]?.toUpperCase() ?? "?"}</span><span className="mention-name">{labels.get(m.pubkey) ?? m.name}</span><small>{m.pubkey.slice(0, 8)}</small>
+              </button>
+            </li>)}
+          </ul>}
+          {advancedOpen && <label className="address-label">Advanced: also notify a raw public key (64 hex characters)<input value={rawKey} onChange={(e) => setRawKey(e.target.value)} autoComplete="off" spellCheck={false} placeholder="hex pubkey" /></label>}
+          {typingLine && <div className="typing-line" role="status" aria-live="polite">{typingLine}</div>}
+          {pending.length > 0 && <div className="compose-files" aria-label="Attachments">
+            {pending.map((item) => <div className={`compose-file ${item.state}`} key={item.id}>
+              {item.preview ? <img src={item.preview} alt="" /> : <span className="compose-file-icon" aria-hidden="true">{item.file.type === "application/pdf" || item.file.name.toLowerCase().endsWith(".pdf") ? "📄" : attachmentKind({ url: item.file.name, mime: item.file.type }) === "audio" ? "♪" : "📎"}</span>}
+              <span className="compose-file-info" onClick={() => item.error && setError(`${item.file.name}: ${item.error}`)} title={item.error ?? undefined}><strong>{item.file.name}</strong><small>{formatSize(item.file.size)} · {item.state === "ready" ? "Ready" : item.state === "uploading" ? "Uploading…" : `Failed: ${item.error}`}</small>{item.state === "uploading" && <progress aria-label={`Uploading ${item.file.name}`} />}</span>
+              {item.state === "error" && <button className="compose-file-retry" onClick={() => item.voice ? queueVoice(keyFor(currentRoom.id, root), item.id) : void uploadFile(keyFor(currentRoom.id, root), item.id, item.file)} aria-label={`Retry upload ${item.file.name}`}>Retry</button>}
+              <button className="compose-file-remove" disabled={sending} onClick={() => removeFile(keyFor(currentRoom.id, root), item.id)} aria-label={`Remove ${item.file.name}`}>×</button>
+            </div>)}
+          </div>}
+          {voiceStorageWarning && <p role="status">{voiceStorageWarning}</p>}
+          {voiceStatus && <p className="voice-status" role="status">{voiceStatus}</p>}
+          <div className="compose-row">
+            <ComposerMenu key={`${channel}:${root}`} onMention={startMention} onAttach={() => fileInput.current?.click()} sending={sending} />
+            <textarea ref={composerInput} aria-label={`Message ${currentRoom.name}`} value={draft} onChange={(e) => updateDraft(e.target.value, e.target.selectionStart)} onPaste={onPasteFiles} onSelect={(e) => syncPicker(e.currentTarget.value, e.currentTarget.selectionStart)} onBlur={() => setPicker(null)} onKeyDown={onKeyDown} maxLength={65536} rows={1} placeholder={isThread ? "Reply in thread…" : "Message Uni…"} />
+            <button className={`address-toggle compose-icon mic ${recorder.recording && recordingOrigin.current?.key === scope() ? "recording" : ""}`} onClick={() => void toggleRecording()} disabled={sending || (recorder.busy && (!recorder.recording || recordingOrigin.current?.key !== scope()))} aria-pressed={recorder.recording && recordingOrigin.current?.key === scope()} aria-label={recorder.recording && recordingOrigin.current?.key === scope() ? "Stop recording voice message" : "Record a voice message"} title={recorder.recording && recordingOrigin.current?.key === scope() ? "Stop recording" : "Voice message"}>
+              {recorder.recording && recordingOrigin.current?.key === scope() ? <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" fill="currentColor" /></svg> : <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3" /><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8" /></svg>}
+            </button>
+            <button className="send compose-icon" disabled={(!draft.trim() && !pending.some((f) => !f.voice && f.state === "ready")) || manualAttachments(pending).some(attachmentBlocksSend) || sending || recorder.busy} onClick={() => void send()} aria-label="Send message" title={sending ? "Sending…" : "Send message"} aria-busy={sending}>
+              {sending ? <span aria-hidden="true">…</span> : <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 7-7 7 7M12 5v14" /></svg>}
+            </button>
+          </div>
+          <p className="compose-hint">Enter to send · Shift+Enter for a new line · @ to mention · <button className="link" onClick={() => setAdvancedOpen(!advancedOpen)}>{advancedOpen ? "hide raw key" : "raw key…"}</button></p>
+        </footer>
+  </>;
   const approvalRow = (m: Message) => {
     const prompt = parseApproval(m.body);
     if (!prompt) return null;
@@ -1413,6 +1462,28 @@ function Conversations({ onForget }: { onForget: () => void }) {
   };
   const composeInRoomRef = useRef(composeInRoom);
   composeInRoomRef.current = composeInRoom;
+  // The open area's room: the active area tab carries its channel, so the room state above (messages, draft, send)
+  // is already loaded for it. Text for its composer goes straight in (after any draft; never sends).
+  const composeHere = (text: string) => {
+    const key = scope();
+    if (!key) return;
+    const next = appendDraft(drafts.current.get(key) ?? draft, text);
+    editDraft(key, next);
+    setDraft(next);
+    requestAnimationFrame(() => input.current?.focus());
+  };
+  const areaRoomFor = (id: string | null | undefined) => {
+    const room = id && channel === id && !root ? currentRoom : undefined;
+    if (!id || !room) return null;
+    return { id, messages, loaded: loadedView === `${id}|null`, me: identity, render: (above: ReactNode) => roomPane(room, above), compose: composeHere };
+  };
+  // An area learns its room from the area note; the tab remembers it, and the room view follows the tab.
+  const syncAreaRoom = (id: string | null) => {
+    const tab = activeTab(tabsRef.current);
+    if (tab?.kind !== "area") return;
+    if ((tab.channel ?? null) !== id) commitTabs(updateTab(tabsRef.current, tab.id, { channel: id ?? undefined }));
+    if ((channel ?? null) !== id || root) navigate(id, null);
+  };
   const areaActions = useMemo(() => ({
     openRoom: (id: string) => openTargetRef.current(roomTarget(id), "new"),
     openNote: (ref: string) => openNote({ hub: null, vault: "uni", ref }, null),
@@ -1434,11 +1505,11 @@ function Conversations({ onForget }: { onForget: () => void }) {
     journalRecording && journalTab ? { title: "Journal", elapsed: journalRecording.elapsed, tabId: journalTab.id, stop: journalRecording.stop, phase: "recording" as const } : null;
   return <NoteOpener.Provider value={openNote}><main className={`shell ${(!sidebarVisible && (channel || journalOpen || areasOpen || (active?.kind === "note" || active?.kind === "vault"))) ? "in-room" : ""} ${topNote ? "note-open" : ""} ${panel ? `panel-open panel-${panel}` : ""} ${searchOpen ? "search-open" : ""} ${composerFocused ? "composer-focused" : ""} ${journalFocus && journalOpen ? "journal-focus" : ""}`}>
     <nav className="rail" aria-label="Main navigation">
-      <button aria-label="Uni" aria-current={!panel && !searchOpen && (!topNote && !journalOpen && channel === findUniRoom(rooms)?.id ? "page" : undefined)} onClick={() => { const uni = findUniRoom(rooms); if (uni) openTarget(roomTarget(uni.id)); }}><i><UniIcon /></i><span>Uni</span></button>
+      <button aria-label="Uni" aria-current={!panel && !searchOpen && (!topNote && !journalOpen && !areasOpen && channel === findUniRoom(rooms)?.id ? "page" : undefined)} onClick={() => { const uni = findUniRoom(rooms); if (uni) openTarget(roomTarget(uni.id)); }}><i><UniIcon /></i><span>Uni</span></button>
       <button aria-label="Journal" aria-current={!panel && !searchOpen && (journalOpen && !topNote ? "page" : undefined)} onClick={() => openTarget({ kind: "journal", title: "Journal" })}><i><JournalIcon /></i><span>Journal</span></button>
       <button aria-label="Areas" aria-current={!panel && !searchOpen && (!topNote && areasOpen ? "page" : undefined)} onClick={() => openTarget({ kind: "areas", title: "Areas" })}><i><AreasIcon /></i><span>Areas</span></button>
       <button aria-label="For you" aria-current={!panel && !searchOpen && (topNote?.ref === FOR_YOU_ID ? "page" : undefined)} onClick={openForYou}><i><StarIcon />{forYou.count > 0 && <b className="rail-count">{forYou.count}</b>}{forYou.fresh && <span className="rail-dot" aria-label="Updated recommendations" />}</i><span>For you</span></button>
-      <button aria-label="Rooms" aria-current={!panel && !searchOpen && (!topNote && !journalOpen && channel && channel !== findUniRoom(rooms)?.id ? "page" : undefined)} aria-expanded={panel === "rooms"} onClick={() => { setSearchOpen(false); setPanel(panel === "rooms" ? null : "rooms"); }}><i><RoomsIcon /></i><span>Rooms</span>{rooms.some((r) => r.unread > 0) && <span className="rail-dot" aria-label="Unread rooms" />}</button>
+      <button aria-label="Rooms" aria-current={!panel && !searchOpen && (!topNote && !journalOpen && !areasOpen && channel && channel !== findUniRoom(rooms)?.id ? "page" : undefined)} aria-expanded={panel === "rooms"} onClick={() => { setSearchOpen(false); setPanel(panel === "rooms" ? null : "rooms"); }}><i><RoomsIcon /></i><span>Rooms</span>{rooms.some((r) => r.unread > 0) && <span className="rail-dot" aria-label="Unread rooms" />}</button>
       <button className="rail-vault" aria-label="Vault" aria-current={!panel && !searchOpen && (active?.kind === "vault" || (topNote && topNote.ref !== FOR_YOU_ID) ? "page" : undefined)} aria-expanded={panel === "vault"} onClick={() => { setSearchOpen(false); setPanel(panel === "vault" ? null : "vault"); }}><i>▤</i><span>Vault</span></button>
       <button className="rail-search" aria-label="Search" aria-expanded={searchOpen} onClick={() => { setPanel(null); setSearchQuery(""); setSearchScope({ vault: "", prefix: "" }); setSearchOpen(true); }}><i>⌕</i><span>Search</span></button>
       <button className="rail-settings" aria-label="Settings" aria-expanded={panel === "settings"} onClick={() => { setSearchOpen(false); setPanel(panel === "settings" ? null : "settings"); setForgetArmed(false); }}><i><SettingsIcon /></i><span>Settings</span></button>
@@ -1489,8 +1560,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
       {journalTab && <div className="journal-tab-content" hidden={!journalOpen} onFocusCapture={(e) => { if (e.target instanceof HTMLTextAreaElement) requestAnimationFrame(() => setComposerFocused(true)); }} onBlurCapture={(e) => { const journal = e.currentTarget; requestAnimationFrame(() => setComposerFocused(journal.contains(document.activeElement) && document.activeElement instanceof HTMLTextAreaElement)); }}><Journal focus={journalFocus} onFocus={() => setJournalFocus((v) => !v)} rooms={rooms} uniRoomId={findUniRoom(rooms)?.id ?? null} onShare={shareEntry} onBack={() => setPanel("rooms")} onRecordingChange={(on, elapsed, stop) => { journalRecordingRef.current = on; setJournalRecording(on ? { elapsed, stop } : null); }} /></div>}
       {active?.kind === "vault" && active.vault ? <VaultBrowser key={active.vault} vault={active.vault} onBack={() => setPanel("rooms")} onOpen={(note) => openTarget({ kind: "note", note: { hub: null, vault: active.vault!, ref: note.id }, title: note.path || note.id }, "new")} onCreate={(folder) => requestCreate(active.vault!, folder)} onSearch={(prefix) => { setSearchQuery(""); setSearchScope({ vault: active.vault!, prefix }); setSearchOpen(true); setSidebarVisible(true); }} />
       : journalOpen ? null
-      : areasOpen && active ? <AreasSurface key={active.id} path={active.kind === "area" ? active.path ?? null : null} rooms={rooms} actions={areaActions}
-          onOpenArea={(path, name) => openTarget({ kind: "area", path, title: name }, "replace")} onBack={() => openTarget({ kind: "areas", title: "Areas" }, "replace")} />
+      : areasOpen && active ? <AreasSurface key={active.id} path={active.kind === "area" ? active.path ?? null : null} rooms={rooms} actions={areaActions} roomFor={areaRoomFor} onRoom={syncAreaRoom}
+          onOpenArea={(path, name, room) => openTarget({ kind: "area", path, title: name, ...(room ? { channel: room } : {}) }, "replace")} onBack={() => openTarget({ kind: "areas", title: "Areas" }, "replace")} />
       : currentRoom ? <>
         <header className="conversation-header">
           <button className="back icon-button" onClick={() => isThread && channel ? openTarget(roomTarget(channel), "focus") : setPanel("rooms")} aria-label={isThread ? "Back to room" : "Back to conversations"}>‹</button>
@@ -1498,49 +1569,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
           <div><strong>{isThread ? "Thread" : currentRoom.name}</strong><small>{isThread ? `${threadReplies.length} ${threadReplies.length === 1 ? "reply" : "replies"} · in ${currentRoom.name}` : `Buzz conversation · ${members.length ? `${members.length} members` : "cached locally"}`}</small></div>
           <button className="icon-button" onClick={() => void refresh()} disabled={busy} aria-label="Refresh messages">↻</button>
         </header>
-        <div className="message-list" ref={setList} role="log" aria-label="Messages" aria-live="polite">
-          <div className="message-stack" ref={setStackEl}>
-            {timeline}
-            <div ref={scrollEnd} />
-          </div>
-        </div>
-        <footer onFocusCapture={() => requestAnimationFrame(() => setComposerFocused(true))} onBlurCapture={(e) => { const composer = e.currentTarget; requestAnimationFrame(() => setComposerFocused(composer.contains(document.activeElement))); }} className="composer" onDragOver={(e) => { if (e.dataTransfer.types.includes("Files")) e.preventDefault(); }} onDrop={onDropFiles}>
-          <input ref={fileInput} className="file-picker" type="file" multiple aria-label="Choose files to attach" onChange={(e) => { addFiles(Array.from(e.target.files ?? [])); e.target.value = ""; }} />
-          {error && <p className="error" role="alert">{error}</p>}
-          {replyTo && replyTo !== root && <div className="reply-banner">Replying to {messages.find((m) => m.ref === replyTo)?.author_name ?? "message"}<button onClick={() => setReplyTo(null)} aria-label="Cancel reply">×</button></div>}
-          <div className="compose-destination">{isThread ? <>Replying in thread · <strong>{currentRoom.name}</strong></> : <>Sending to <strong>{currentRoom.name}</strong></>}{boundNames.length ? ` · notifying ${boundNames.join(", ")}` : ""}{findUniMember(members) && <> · <button className="link" onClick={() => setNotifyUni((v) => !v)} aria-pressed={notifyUni}>{notifyUni ? "Uni is listening" : "Uni muted"}</button></>}</div>
-          {picker && <ul className="mention-picker" role="listbox" aria-label="Mention a member">
-            {suggestions.length === 0 && <li className="mention-empty">{members.length ? `No member matches “${picker.query}”` : "No member list cached yet. Refresh to load it."}</li>}
-            {suggestions.map((m, i) => <li key={m.pubkey} role="option" aria-selected={i === picker.index}>
-              <button className={i === picker.index ? "active" : ""} onPointerDown={(e) => e.preventDefault()} onMouseDown={(e) => e.preventDefault()} onClick={() => choose(m)}>
-                <span className="avatar small">{m.name[0]?.toUpperCase() ?? "?"}</span><span className="mention-name">{labels.get(m.pubkey) ?? m.name}</span><small>{m.pubkey.slice(0, 8)}</small>
-              </button>
-            </li>)}
-          </ul>}
-          {advancedOpen && <label className="address-label">Advanced: also notify a raw public key (64 hex characters)<input value={rawKey} onChange={(e) => setRawKey(e.target.value)} autoComplete="off" spellCheck={false} placeholder="hex pubkey" /></label>}
-          {typingLine && <div className="typing-line" role="status" aria-live="polite">{typingLine}</div>}
-          {pending.length > 0 && <div className="compose-files" aria-label="Attachments">
-            {pending.map((item) => <div className={`compose-file ${item.state}`} key={item.id}>
-              {item.preview ? <img src={item.preview} alt="" /> : <span className="compose-file-icon" aria-hidden="true">{item.file.type === "application/pdf" || item.file.name.toLowerCase().endsWith(".pdf") ? "📄" : attachmentKind({ url: item.file.name, mime: item.file.type }) === "audio" ? "♪" : "📎"}</span>}
-              <span className="compose-file-info" onClick={() => item.error && setError(`${item.file.name}: ${item.error}`)} title={item.error ?? undefined}><strong>{item.file.name}</strong><small>{formatSize(item.file.size)} · {item.state === "ready" ? "Ready" : item.state === "uploading" ? "Uploading…" : `Failed: ${item.error}`}</small>{item.state === "uploading" && <progress aria-label={`Uploading ${item.file.name}`} />}</span>
-              {item.state === "error" && <button className="compose-file-retry" onClick={() => item.voice ? queueVoice(keyFor(currentRoom.id, root), item.id) : void uploadFile(keyFor(currentRoom.id, root), item.id, item.file)} aria-label={`Retry upload ${item.file.name}`}>Retry</button>}
-              <button className="compose-file-remove" disabled={sending} onClick={() => removeFile(keyFor(currentRoom.id, root), item.id)} aria-label={`Remove ${item.file.name}`}>×</button>
-            </div>)}
-          </div>}
-          {voiceStorageWarning && <p role="status">{voiceStorageWarning}</p>}
-          {voiceStatus && <p className="voice-status" role="status">{voiceStatus}</p>}
-          <div className="compose-row">
-            <ComposerMenu key={`${channel}:${root}`} onMention={startMention} onAttach={() => fileInput.current?.click()} sending={sending} />
-            <textarea ref={composerInput} aria-label={`Message ${currentRoom.name}`} value={draft} onChange={(e) => updateDraft(e.target.value, e.target.selectionStart)} onPaste={onPasteFiles} onSelect={(e) => syncPicker(e.currentTarget.value, e.currentTarget.selectionStart)} onBlur={() => setPicker(null)} onKeyDown={onKeyDown} maxLength={65536} rows={1} placeholder={isThread ? "Reply in thread…" : "Message Uni…"} />
-            <button className={`address-toggle compose-icon mic ${recorder.recording && recordingOrigin.current?.key === scope() ? "recording" : ""}`} onClick={() => void toggleRecording()} disabled={sending || (recorder.busy && (!recorder.recording || recordingOrigin.current?.key !== scope()))} aria-pressed={recorder.recording && recordingOrigin.current?.key === scope()} aria-label={recorder.recording && recordingOrigin.current?.key === scope() ? "Stop recording voice message" : "Record a voice message"} title={recorder.recording && recordingOrigin.current?.key === scope() ? "Stop recording" : "Voice message"}>
-              {recorder.recording && recordingOrigin.current?.key === scope() ? <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" fill="currentColor" /></svg> : <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3" /><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8" /></svg>}
-            </button>
-            <button className="send compose-icon" disabled={(!draft.trim() && !pending.some((f) => !f.voice && f.state === "ready")) || manualAttachments(pending).some(attachmentBlocksSend) || sending || recorder.busy} onClick={() => void send()} aria-label="Send message" title={sending ? "Sending…" : "Send message"} aria-busy={sending}>
-              {sending ? <span aria-hidden="true">…</span> : <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 7-7 7 7M12 5v14" /></svg>}
-            </button>
-          </div>
-          <p className="compose-hint">Enter to send · Shift+Enter for a new line · @ to mention · <button className="link" onClick={() => setAdvancedOpen(!advancedOpen)}>{advancedOpen ? "hide raw key" : "raw key…"}</button></p>
-        </footer>
+        {roomPane(currentRoom, null)}
       </> : <div className="welcome"><span className="welcome-mark">✦</span><h2>Your conversation starts here</h2><p>Select a room to read and reply. Messages are cached for offline reading.</p></div>}
     </section>
     {pill && <div className={`recording-pill ${sidebarVisible ? "over-sidebar" : ""}`} role="status" aria-live="polite">

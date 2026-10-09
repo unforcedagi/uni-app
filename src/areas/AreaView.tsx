@@ -1,8 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { NoteRenderer } from "@openparachute/surface-render";
 import { runDecision, type GateMode } from "../interface/selftest/gate";
 import InterfaceFrame from "../interface/frame";
+import type { Session } from "../interface/session";
+import { pushChatMessage } from "../interface/modules/chatPush";
+import { ChatSheet, EmptyChat, type AreaRoom } from "./AreaChat";
+import { CHAT_WIDTH_KEY, chatMode, clampChatWidth, createSeen, DESKTOP_MIN, parseStoredWidth } from "./areaLayout";
 import GrantPrompt from "../interface/grantPrompt";
 import SuggestionBar from "../interface/consent";
 import { createGrantStore } from "../interface/grants";
@@ -33,8 +37,14 @@ export type AreaActions = {
   compose(channel: string, text: string): void;
 };
 
-export default function AreaView({ area, rows, mode, roomName, actions, onBack }: {
-  area: Area; rows: PathRow[]; mode: GateMode | "closed"; roomName: (id: string) => string; actions: AreaActions; onBack: () => void;
+const desktopQuery = `(min-width: ${DESKTOP_MIN}px)`;
+const subscribeDesktop = (f: () => void) => { const mq = window.matchMedia(desktopQuery); mq.addEventListener("change", f); return () => mq.removeEventListener("change", f); };
+const isDesktop = () => window.matchMedia(desktopQuery).matches;
+
+export default function AreaView({ area, rows, mode, roomName, actions, room, onBack }: {
+  area: Area; rows: PathRow[]; mode: GateMode | "closed"; roomName: (id: string) => string; actions: AreaActions;
+  /** The host's real room view for this area's room; null while it opens (or when the area has none). */
+  room: AreaRoom | null; onBack: () => void;
 }) {
   const appRow = useMemo(() => findAppRow(rows, area.path), [rows, area.path]);
   const live = mode !== "closed";
@@ -75,9 +85,31 @@ export default function AreaView({ area, rows, mode, roomName, actions, onBack }
   // Values that change under a running app (new room names, new action callbacks) must not recreate its session.
   const roomNameRef = useRef(roomName); roomNameRef.current = roomName;
   const actionsRef = useRef(actions); actionsRef.current = actions;
+  const roomRef = useRef(room); roomRef.current = room;
+  // Where the chat goes: the manifest's hint, else beside the interface on a desktop and a sheet on a phone.
+  const desktop = useSyncExternalStore(subscribeDesktop, isDesktop, () => true);
+  const layout = chatMode(manifest?.ok ? manifest.manifest.layout.chat : null, desktop);
+  const layoutRef = useRef(layout); layoutRef.current = layout;
+  const hasRoom = area.channels.length > 0;
   const suggestions = useMemo(() => createSuggestionStore({
-    onAccept: (s) => { if (s.kind === "draft") actionsRef.current.compose(s.room, s.text); else actionsRef.current.openNote(s.ref); },
+    onAccept: (s) => {
+      if (s.kind !== "draft") { actionsRef.current.openNote(s.ref); return; }
+      // The composer is right there: fill it. Without a visible pane (hidden hint, other room) zoom into the room as before.
+      const r = roomRef.current;
+      if (r && layoutRef.current !== "hidden" && r.id === s.room) r.compose(s.text); else actionsRef.current.compose(s.room, s.text);
+    },
   }), [area.path]);
+  const pendingSuggestions = useSyncExternalStore(suggestions.subscribe, () => suggestions.list().length, () => 0);
+
+  // Live messages: with chat.read the interface hears each new message in its room as it arrives.
+  const session = useRef<Session | null>(null);
+  const grantRef = useRef(grant); grantRef.current = grant;
+  const seen = useMemo(() => createSeen(), [area.path]);
+  useEffect(() => { seen.reset(); }, [seen, room?.id]);
+  useEffect(() => {
+    if (!room?.loaded) return;
+    for (const m of seen.fresh(room.messages)) if (session.current) pushChatMessage(session.current, grantRef.current, room.id, m);
+  }, [seen, room?.loaded, room?.messages, room?.id]);
   const stop = () => { suggestions.clear(); markStopped(area.path); bump(); };
   const revoke = () => { if (!app) return; grants.revoke(app.id); suggestions.clear(); markStopped(area.path); setDeclined(false); bump(); };
   const start = () => { markStarted(area.path); bump(); };
@@ -98,30 +130,76 @@ export default function AreaView({ area, rows, mode, roomName, actions, onBack }
   const framed = ready_ && granted && running;
   const asking = ready_ && !granted && !declined && manifest?.ok === true;
   const idle = ready_ && granted && !running;
+  const channel = area.channels[0];
   // A running app has its own hero, so the host bar drops the title (kept for screen readers).
   const header = <header className={`area-bar ${framed ? "chromeless" : ""}`}>
     <button className="note-back" onClick={onBack} aria-label="Back to Areas"><span className="note-back-arrow" aria-hidden="true">←</span><span className="note-back-label">Areas</span></button>
     <strong className={`area-bar-title ${framed ? "sr-only" : ""}`}>{name}</strong>
     {framed && mode === "approved-code" && <span className="area-mode-chip" title="On this device apps can reach the network through WebRTC, so this app is only as safe as its code. You approved this version.">Approved code</span>}
-    {framed && <span className="area-bar-controls">
-      <button className="pairing-secondary area-stop" onClick={(e) => { if (e.isTrusted) stop(); }}>Stop app</button>
-      <button className="pairing-secondary area-revoke" onClick={(e) => { if (e.isTrusted) revoke(); }}>Revoke access</button>
-    </span>}
+    <span className="area-bar-controls">
+      {channel && <button className="pairing-secondary area-zoom" onClick={() => actions.openRoom(channel)} aria-label={`Open #${roomName(channel)} as a full room`}>Open #{roomName(channel)}</button>}
+      {framed && <>
+        <button className="pairing-secondary area-stop" onClick={(e) => { if (e.isTrusted) stop(); }}>Stop app</button>
+        <button className="pairing-secondary area-revoke" onClick={(e) => { if (e.isTrusted) revoke(); }}>Revoke access</button>
+      </>}
+    </span>
     <span className={`area-mark ${area.status}`}>{area.status}</span>
   </header>;
-
-  if (framed) return <div className="area-view framed">{header}
+  const bar = <SuggestionBar store={suggestions} appName={name} roomName={roomName} />;
+  const chatShown = layout !== "hidden";
+  // The suggestion bar sits directly above the chat composer; with no chat pane it stays above the interface.
+  const withChat = (main: ReactNode, above: ReactNode, cls = "") => <div className={`area-view ${cls}`}>{header}
     {decision === "run-notice" && <p className="area-updated" role="status">This app was updated since you allowed it. <button className="pairing-secondary area-accept" onClick={(e) => { if (e.isTrusted) accept(); }}>Accept</button></p>}
-    <SuggestionBar store={suggestions} appName={name} roomName={roomName} />
-    <InterfaceFrame html={app!.html} title={`${name} app`} router={router} grant={grant} ready={ready} /></div>;
-  if (asking && manifest?.ok) return <div className="area-view">{header}<GrantPrompt name={name} codeChanged={codeChanged && status === "updated"} approvedCode={mode === "approved-code"} lines={describeNeeds(manifest.manifest.needs, ctx, roomName)}
-    onAllow={() => { grants.grant(app!.id, keys!.scope, keys!.html, mode === "approved-code" ? "approved-code" : "sealed"); markStarted(area.path); bump(); }} onNotNow={() => setDeclined(true)} /></div>;
-  return <div className="area-view">{header}<DefaultArea area={area} actions={actions} roomName={roomName} pending={live && !!appRow && !appError && !app}
+    <ChatLayout mode={layout} main={main} aboveMain={chatShown ? null : above}
+      chat={layout === "side" ? <SideChat room={room} hasRoom={hasRoom} above={above} label={`Chat in ${channel ? "#" + roomName(channel) : name}`} />
+        : layout === "sheet" ? <ChatSheet room={room} hasRoom={hasRoom} above={above} forceOpen={pendingSuggestions} label={`Chat in ${channel ? "#" + roomName(channel) : name}`} /> : null} /></div>;
+
+  if (framed) return withChat(<InterfaceFrame html={app!.html} title={`${name} app`} router={router} grant={grant} ready={ready} onSession={(s) => { session.current = s; }} />, bar, "framed");
+  if (asking && manifest?.ok) return withChat(<GrantPrompt name={name} codeChanged={codeChanged && status === "updated"} approvedCode={mode === "approved-code"} lines={describeNeeds(manifest.manifest.needs, ctx, roomName)}
+    onAllow={() => { grants.grant(app!.id, keys!.scope, keys!.html, mode === "approved-code" ? "approved-code" : "sealed"); markStarted(area.path); bump(); }} onNotNow={() => setDeclined(true)} />, null);
+  return withChat(<DefaultArea area={area} actions={actions} roomName={roomName} pending={live && !!appRow && !appError && !app} showRecent={!chatShown}
     onOpenApp={idle ? start : null} onRevoke={idle ? revoke : null}
-    notice={manifest && !manifest.ok ? `This area's app was not opened: ${manifest.error}.` : null} /></div>;
+    notice={manifest && !manifest.ok ? `This area's app was not opened: ${manifest.error}.` : null} />, null);
 }
 
-function DefaultArea({ area, actions, roomName, pending, notice, onOpenApp, onRevoke }: { area: Area; actions: AreaActions; roomName: (id: string) => string; pending: boolean; notice: string | null; onOpenApp: (() => void) | null; onRevoke: (() => void) | null }) {
+function SideChat({ room, hasRoom, above, label }: { room: AreaRoom | null; hasRoom: boolean; above: ReactNode; label: string }) {
+  return <section className="area-chat side" aria-label={label}>{room ? room.render(above) : <EmptyChat hasRoom={hasRoom} />}</section>;
+}
+
+/** The interface (or the default view) and the chat: side by side with a draggable divider, or a sheet over the bottom. */
+function ChatLayout({ mode, main, aboveMain, chat }: { mode: "side" | "sheet" | "hidden"; main: ReactNode; aboveMain: ReactNode; chat: ReactNode }) {
+  const box = useRef<HTMLDivElement>(null);
+  const [cw, setCw] = useState(0);
+  const [stored, setStored] = useState<number | undefined>(() => { try { return parseStoredWidth(localStorage.getItem(CHAT_WIDTH_KEY)); } catch { return undefined; } });
+  const [drag, setDrag] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const el = box.current; if (!el) return;
+    const measure = () => setCw(el.clientWidth);
+    measure();
+    const ro = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    ro?.observe(el);
+    return () => ro?.disconnect();
+  }, [mode]);
+  const width = clampChatWidth(drag ?? stored, cw);
+  const persist = (w: number) => { setStored(w); try { localStorage.setItem(CHAT_WIDTH_KEY, String(w)); } catch { /* private storage */ } };
+  const widthAt = (clientX: number) => { const r = box.current!.getBoundingClientRect(); return clampChatWidth(r.right - clientX, r.width); };
+  const down = (e: ReactPointerEvent<HTMLDivElement>) => { e.currentTarget.setPointerCapture(e.pointerId); setDrag(widthAt(e.clientX)); };
+  const move = (e: ReactPointerEvent<HTMLDivElement>) => { if (drag !== null) setDrag(widthAt(e.clientX)); };
+  const up = (e: ReactPointerEvent<HTMLDivElement>) => { if (drag === null) return; const w = widthAt(e.clientX); setDrag(null); persist(w); };
+  const key = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    const step = e.shiftKey ? 80 : 24;
+    if (e.key === "ArrowLeft") { e.preventDefault(); persist(clampChatWidth(width + step, cw)); }
+    else if (e.key === "ArrowRight") { e.preventDefault(); persist(clampChatWidth(width - step, cw)); }
+  };
+  return <div ref={box} className={`area-split mode-${mode} ${drag !== null ? "dragging" : ""}`} style={mode === "side" ? { "--chat-w": `${width}px` } as CSSProperties : undefined}>
+    <div className="area-main">{aboveMain}{main}</div>
+    {mode === "side" && <div className="area-divider" role="separator" aria-orientation="vertical" aria-label="Resize chat" aria-valuenow={width} aria-valuemin={0} aria-valuemax={cw} tabIndex={0}
+      onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={() => setDrag(null)} onKeyDown={key} />}
+    {chat}
+  </div>;
+}
+
+function DefaultArea({ area, actions, roomName, pending, notice, showRecent, onOpenApp, onRevoke }: { area: Area; actions: AreaActions; roomName: (id: string) => string; pending: boolean; notice: string | null; showRecent: boolean; onOpenApp: (() => void) | null; onRevoke: (() => void) | null }) {
   const [messages, setMessages] = useState<RoomMessage[] | null>(null);
   useEffect(() => {
     let on = true;
@@ -139,17 +217,16 @@ function DefaultArea({ area, actions, roomName, pending, notice, onOpenApp, onRe
       const safe = safeHref(href);
       return safe ? <a href={safe} className={className} rel="noreferrer noopener" onClick={(e) => { e.preventDefault(); void invoke("open_link", { url: safe }).catch(() => {}); }}>{children}</a> : <span className={className}>{children}</span>;
     }} />
-    <section className="area-recent" aria-label="Recent messages">
+    {showRecent && <section className="area-recent" aria-label="Recent messages">
       <h2>Recent in {channel ? roomName(channel) : "room"}</h2>
       {!channel && <p className="area-quiet">No room is linked to this area.</p>}
       {channel && messages === null && <p className="area-quiet">Loading…</p>}
       {messages?.length === 0 && <p className="area-quiet">No messages yet.</p>}
       {messages?.map((m) => <p key={m.ref} className="area-msg"><span><strong>{m.author_name || m.author.slice(0, 8)}</strong><time>{clock(m.ts)}</time></span>{m.body.slice(0, 280)}</p>)}
-    </section>
+    </section>}
     <div className="area-actions">
       {onOpenApp && <button className="suggestion-go area-open-app" onClick={(e) => { if (e.isTrusted) onOpenApp(); }}>Open {cleanText(area.name)} app</button>}
       {onRevoke && <button className="pairing-secondary area-revoke" onClick={(e) => { if (e.isTrusted) onRevoke(); }}>Revoke access</button>}
-      {channel && <button className="pairing-secondary" onClick={() => actions.openRoom(channel)}>Open room</button>}
       <button className="pairing-secondary" onClick={() => actions.openNote(area.path)}>Open note</button>
     </div>
   </article></div>;

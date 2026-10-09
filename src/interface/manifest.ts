@@ -7,7 +7,9 @@
 import { CAPABILITIES, CONTRACT_VERSION, hasHidden, plain, safePrefix, type Capability } from "./contract.ts";
 
 export type Need = { cap: Capability; scope: string };
-export type Manifest = { contract: 1; needs: Need[] };
+/** Where the host draws the area's chat: beside the interface, as a pull-up sheet, or not at all. `null` = the host's default. */
+export type ChatLayout = "side" | "sheet" | "hidden";
+export type Manifest = { contract: 1; needs: Need[]; layout: { chat: ChatLayout | null } };
 /** What the host knows about where the interface runs. */
 export type HostContext = { areaPath: string; channels: string[] };
 /** Needs resolved to concrete scopes: folder prefixes for vault.read, room ids for chat.*. */
@@ -19,6 +21,13 @@ const stripExt = (p: string) => p.replace(/\.(md|html)$/i, "");
 
 /** `area` → the area's own folder. */
 export const areaPrefix = (ctx: HostContext) => `${stripExt(ctx.areaPath)}/`;
+
+const CHAT_LAYOUTS: readonly string[] = ["side", "sheet", "hidden"];
+/** A layout hint is advice, never an error: anything unrecognised is the default. */
+function parseLayout(raw: unknown): Manifest["layout"] {
+  const chat = plain(raw) && Object.prototype.hasOwnProperty.call(raw, "chat") ? raw.chat : null;
+  return { chat: typeof chat === "string" && CHAT_LAYOUTS.includes(chat) ? (chat as ChatLayout) : null };
+}
 
 /** The needs an interface gets when its note declares none. */
 export function defaultNeeds(): Need[] {
@@ -57,7 +66,7 @@ export function parseManifest(metadata: unknown, _ctx: HostContext): ManifestRes
   const meta = plain(metadata) ? metadata : {};
   if (!("interface" in meta) || meta.interface === undefined || meta.interface === null) {
     const needs = defaultNeeds();
-    return { ok: true, manifest: { contract: CONTRACT_VERSION, needs }, defaulted: true };
+    return { ok: true, manifest: { contract: CONTRACT_VERSION, needs, layout: { chat: null } }, defaulted: true };
   }
   const raw = meta.interface;
   if (!plain(raw)) return { ok: false, error: "interface must be an object" };
@@ -74,7 +83,7 @@ export function parseManifest(metadata: unknown, _ctx: HostContext): ManifestRes
     if (scope === null) return { ok: false, error: `bad scope for ${cap}` };
     needs.push({ cap, scope });
   }
-  return { ok: true, manifest: { contract: CONTRACT_VERSION, needs }, defaulted: false };
+  return { ok: true, manifest: { contract: CONTRACT_VERSION, needs, layout: parseLayout(raw.layout) }, defaulted: false };
 }
 
 /** Resolve symbolic scopes against the host context. A cap with no resolvable scope is absent (not granted). */
