@@ -504,3 +504,31 @@ test('failed project refresh retains previous projects and stale marker', async 
   expect(await calls(page, 'vault_query')).toHaveLength(0);
   await expect(areaCard(page, 'Techne')).toBeVisible({ timeout: 8000 });
  });
+
+
+test('identity changes discard cached project bodies, including when returning to an account', async ({ page }) => {
+  await bootAreas(page, 'seed', { tree: true, briefs: true });
+  await page.evaluate(() => {
+    const w = window as any;
+    w.bodyOwner = 'a';
+    const original = w.__TAURI_INTERNALS__.invoke;
+    w.__TAURI_INTERNALS__.invoke = async (cmd: string, args: any) => {
+      const result = await original(cmd, args);
+      if (cmd === 'refresh') return { ...result, pubkey: w.bodyOwner.repeat(64) };
+      if (cmd === 'vault_note' && args.noteRef === 'p-cohere') return { ...result, note: { ...result.note, content: `${result.note.content}\n\nBody for account ${w.bodyOwner}` } };
+      return result;
+    };
+  });
+  await openAreaPage(page, 'Techne', { app: false });
+  await areaCard(page, 'COhere 2026').click();
+  const purpose = page.getByRole('region', { name: 'Project purpose' });
+  await expect(purpose).toContainText('Body for account a');
+  for (const owner of ['b', 'a']) {
+    await page.evaluate((owner) => {
+      (window as any).bodyOwner = owner;
+      document.dispatchEvent(new Event('visibilitychange'));
+    }, owner);
+    await expect(purpose).toContainText(`Body for account ${owner}`);
+  }
+  expect((await calls(page, 'vault_note')).filter((c: any) => c.args.noteRef === 'p-cohere')).toHaveLength(3);
+});

@@ -1,6 +1,7 @@
 import { VoiceOutbox, relayAccepted } from "./voiceOutbox";
 import { SettingsIcon, UniIcon, JournalIcon, StarIcon, RoomsIcon, AreasIcon } from "./Icons";
 import { forgetAreas } from "./areas/useAreas";
+import { clearProjectBodies } from "./areas/projectBody";
 import AreasSurface from "./areas/AreasSurface";
 import { UNI_CHANNEL } from "./areas/treeCore";
 import AreaSelfTest from "./interface/selftest/SelfTest";
@@ -210,7 +211,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   // Each tab owns its own note Back stack, even while another tab is active.
   const noteStacks = useRef(new Map<string, VaultRef[]>());
   const notesRef = useRef<VaultRef[]>([]);
-  const [sidebarVisible, setSidebarVisible] = useState(false);
+  const [sidebarVisible, setSidebarVisible] = useState(() => window.matchMedia("(min-width: 600px)").matches);
   const [panel, setPanel] = useState<"rooms" | "vault" | "settings" | null>(null);
   const [composerFocused, setComposerFocused] = useState(false);
   const forYouBack = useRef("Uni");
@@ -261,6 +262,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
   const [identity, setIdentity] = useState<string | null>(null);
+  useLayoutEffect(() => { clearProjectBodies(); }, [identity]);
   const [draft, setDraft] = useState("");
   const drafts = useRef(new Map<string, string>());
   const draftRevisions = useRef(new Map<string, number>());
@@ -544,6 +546,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
       }
       // Note stacks are reconstructed from their saved top-level tab target.
       switchToTabRef.current(activeTab(next));
+      // Restoring the first tab preserves the viewport-specific sidebar default.
+      setSidebarVisible(window.matchMedia("(min-width: 600px)").matches);
       commitTabs(next);
     } else {
       // Re-sync after room membership changes: discard tabs for missing rooms.

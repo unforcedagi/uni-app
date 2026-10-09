@@ -14,5 +14,28 @@ try {
   assert.equal(mod.toView(p, false).briefs['Areas/Techne'], undefined);
   assert.deepEqual(p.briefs, {}, 'metadata-only brief must not belong to Techne');
   assert.equal(p.today, null, 'Today must match its path');
+  // Project bodies must refresh without a revision, while known revisions reuse reads.
+  const bodyResult = await build({ configFile: false, logLevel: 'silent', build: { write: false, minify: false, lib: { entry: 'src/areas/projectBody.ts', formats: ['es'] }, rollupOptions: { external: ['@tauri-apps/api/core'] } } });
+  const bodyFile = new URL('../.project-body-test.mjs', import.meta.url);
+  await writeFile(bodyFile, (Array.isArray(bodyResult) ? bodyResult[0] : bodyResult).output[0].code);
+  try {
+    const bodies = await import(bodyFile.href);
+    let reads = 0;
+    (globalThis as any).window.__TAURI_INTERNALS__.invoke = async () => ({ note: { content: `body ${++reads}` } });
+    const node: { id: string; updatedAt: string | null } = { id: 'project', updatedAt: null };
+    assert.equal(await bodies.projectBody('A', node), 'body 1');
+    assert.equal(await bodies.projectBody('A', node), 'body 2');
+    node.updatedAt = 'revision-1';
+    assert.equal(await bodies.projectBody('A', node), 'body 3');
+    assert.equal(await bodies.projectBody('A', node), 'body 3');
+    assert.equal(await bodies.projectBody('B', node), 'body 4');
+    bodies.clearProjectBodies();
+    assert.equal(await bodies.projectBody('A', node), 'body 5');
+    (globalThis as any).window.__TAURI_INTERNALS__.invoke = async () => { throw new Error('offline'); };
+    bodies.clearProjectBodies();
+    await assert.rejects(bodies.projectBody('A', node), /offline/);
+    (globalThis as any).window.__TAURI_INTERNALS__.invoke = async () => ({ note: { content: 'recovered' } });
+    assert.equal(await bodies.projectBody('A', node), 'recovered');
+  } finally { await unlink(bodyFile); }
   console.log('areasPayload: ok');
 } finally { await unlink(file); delete (globalThis as any).window; }

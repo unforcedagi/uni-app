@@ -91,6 +91,7 @@ const ownerKey = (owner: CacheOwner) => JSON.stringify(owner);
 const remembered = (owner: CacheOwner) => {
   const key = ownerKey(owner);
   if (memoryOwner !== key) {
+    clearProjectBodies();
     generation++;
     payload = null; lastLoadAt = null; savedAt = null; memoryOwner = key; memoryStale = true;
   }
