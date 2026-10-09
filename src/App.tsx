@@ -27,6 +27,8 @@ import { useRecorder, voiceFileName } from "./recorder";
 import { attachmentBlocksSend, enterInsertsNewline, manualAttachments } from "./composerCore";
 import PairSource, { PairDeviceButton } from "./PairSource";
 import { UpdateSettings } from "./UpdateNotice";
+import { watchLostIpc } from "./ipcLost";
+import { currentUserAgent, platformName } from "./interface/selftest/gate";
 import { activeTab, closeTab, EMPTY_TABS, focusTab, navigateNoteTab, nextAfterClose, openTab, recordingTabCanClose, restoreTabs, serializeTabs, tabForDigit, updateTab, TABS_KEY, type Tabs, type Tab, type TabTarget, type OpenMode } from "./tabs";
 import { notifyMention, setUnreadBadge } from "./desktopNotify";
 import NoteView from "./NoteView";
@@ -467,6 +469,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   // Creation and clipboard notices.
   const [toast, setToast] = useState<string | null>(null);
   useEffect(() => onCopied(setToast), []);
+  useEffect(() => (platformName(currentUserAgent()) === "linux" ? watchLostIpc(setToast) : undefined), []);
   useEffect(() => {
     if (!toast) return;
     const timer = setTimeout(() => setToast(null), 6000);

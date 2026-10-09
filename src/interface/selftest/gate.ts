@@ -12,7 +12,8 @@ export const SELFTEST_KEY = "uni.areaApps.selftest.v1";
  * positive evidence), so only code the user has approved runs. A result with any other failure is never stored.
  */
 export type GateMode = "sealed" | "approved-code";
-export type SelfTestPass = { platform: string; passedAt: string; appVersion: string; userAgent: string; mode: GateMode };
+/** `runtime` is the wry and Tauri versions the pass was earned on (T-77b); a dependency bump changes it and forces a re-run. */
+export type SelfTestPass = { platform: string; passedAt: string; appVersion: string; userAgent: string; mode: GateMode; runtime?: string };
 export const MODE_LABEL: Record<GateMode, string> = { sealed: "Sealed", "approved-code": "Approved code only (WebRTC present)" };
 
 /** `android` is checked first: Android user agents also say Linux. */
@@ -25,9 +26,9 @@ export function parseSelfTest(raw: string | null): SelfTestPass | null {
   try {
     const v: unknown = JSON.parse(raw);
     if (!v || typeof v !== "object") return null;
-    const { platform, passedAt, appVersion, userAgent, mode = "sealed" } = v as Record<string, unknown>;
+    const { platform, passedAt, appVersion, userAgent, mode = "sealed", runtime } = v as Record<string, unknown>;
     return typeof platform === "string" && typeof passedAt === "string" && typeof appVersion === "string" && typeof userAgent === "string" && platform && appVersion && userAgent && (mode === "sealed" || mode === "approved-code")
-      ? { platform, passedAt, appVersion, userAgent, mode } : null;
+      ? { platform, passedAt, appVersion, userAgent, mode, ...(typeof runtime === "string" && runtime ? { runtime } : {}) } : null;
   } catch { return null; }
 }
 
@@ -56,16 +57,20 @@ export function clearSelfTest(): void {
 
 export const currentUserAgent = () => (typeof navigator === "undefined" ? "" : navigator.userAgent);
 
-/** `closed` unless the platform is proven in the constant (sealed), or a stored result matches this platform, app version and webview user agent. */
-export function gateMode(platform: string, appVersion: string | null, stored: SelfTestPass | null = readSelfTest(), userAgent: string = currentUserAgent(), proven: readonly string[] = LIVE_AREA_PLATFORMS): GateMode | "closed" {
+/**
+ * `closed` unless the platform is proven in the constant (sealed), or a stored result matches this platform, app version, webview user agent
+ * and, when `runtime` is passed, the wry/Tauri versions (`null` = host could not say, so closed; `undefined` = not checked).
+ */
+export function gateMode(platform: string, appVersion: string | null, stored: SelfTestPass | null = readSelfTest(), userAgent: string = currentUserAgent(), proven: readonly string[] = LIVE_AREA_PLATFORMS, runtime?: string | null): GateMode | "closed" {
   if (proven.includes(platform)) return "sealed";
   if (!stored || !appVersion || !userAgent || stored.platform !== platform || stored.appVersion !== appVersion || stored.userAgent !== userAgent) return "closed";
+  if (runtime !== undefined && (!runtime || stored.runtime !== runtime)) return "closed";
   return stored.mode === "approved-code" ? "approved-code" : stored.mode === "sealed" ? "sealed" : "closed";
 }
 
 /** Allowed iff the gate is open in either mode. */
-export function liveAreaApps(platform: string, appVersion: string | null, stored: SelfTestPass | null = readSelfTest(), userAgent: string = currentUserAgent(), proven: readonly string[] = LIVE_AREA_PLATFORMS): boolean {
-  return gateMode(platform, appVersion, stored, userAgent, proven) !== "closed";
+export function liveAreaApps(platform: string, appVersion: string | null, stored: SelfTestPass | null = readSelfTest(), userAgent: string = currentUserAgent(), proven: readonly string[] = LIVE_AREA_PLATFORMS, runtime?: string | null): boolean {
+  return gateMode(platform, appVersion, stored, userAgent, proven, runtime) !== "closed";
 }
 
 export type RunDecision = "closed" | "ask" | "ask-updated" | "run" | "run-notice";

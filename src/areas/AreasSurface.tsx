@@ -3,7 +3,7 @@ import AreasHome, { type RoomInfo } from "./AreasHome";
 import AreaView, { type AreaActions } from "./AreaView";
 import type { AreaRoom } from "./AreaChat";
 import { currentUserAgent, gateMode, platformName } from "../interface/selftest/gate";
-import { useAppVersion } from "../interface/selftest/useAppVersion";
+import { useAppVersion, useWebviewRuntime } from "../interface/selftest/useAppVersion";
 import { useAreas } from "./useAreas";
 import { markStarted } from "./appRun";
 import { useStoredSelfTest } from "../interface/selftest/useSelfTest";
@@ -23,9 +23,10 @@ export default function AreasSurface({ path, rooms, actions, roomFor, onRoom, on
 }) {
   const { data, error, loading } = useAreas();
   const version = useAppVersion();
+  const runtime = useWebviewRuntime();
   const stored = useStoredSelfTest();
   // Live: a self-test pass (or a revoke) updates an already-open area without a remount.
-  const mode = useMemo(() => gateMode(PLATFORM, version, stored, USER_AGENT), [version, stored]);
+  const mode = useMemo(() => gateMode(PLATFORM, version, stored, USER_AGENT, undefined, runtime), [version, stored, runtime]);
   const area = path ? data?.areas.find((a) => a.path === path) : null;
   const areaRoom = area?.channels[0] ?? null;
   useEffect(() => { if (area) onRoom(areaRoom); }, [area?.id, areaRoom]); // eslint-disable-line react-hooks/exhaustive-deps

@@ -4,7 +4,7 @@ import { createThemeModule } from "../modules/theme";
 import { clearSelfTest, currentUserAgent, gateMode, MODE_LABEL, platformName, storeSelfTest } from "./gate";
 import { evaluateProbe, navProbeHtml, navVerdict, NAV_STAGES, PROBE_HTML, type ProbeResult } from "./probe";
 import ProbeFrame, { type ProbeOutcome } from "./ProbeFrame";
-import { useAppVersion } from "./useAppVersion";
+import { useAppVersion, useWebviewRuntime } from "./useAppVersion";
 import { useStoredSelfTest } from "./useSelfTest";
 
 const TIMEOUT_MS = 40000;
@@ -19,6 +19,7 @@ export default function SelfTest() {
   const userAgent = currentUserAgent();
   const platform = platformName(userAgent);
   const version = useAppVersion();
+  const runtime = useWebviewRuntime();
   const stored = useStoredSelfTest();
   const [stage, setStage] = useState<number | null>(null);
   const [result, setResult] = useState<ProbeResult | null>(null);
@@ -31,7 +32,7 @@ export default function SelfTest() {
     const res = evaluateProbe(r);
     setResult(res); setStage(null);
     // A pass, or a failure of only the WebRTC checks, is recorded with its mode; anything else revokes an earlier result (a webview or sandbox regression).
-    if (res.mode !== "failed" && version) storeSelfTest({ platform, passedAt: new Date().toISOString(), appVersion: version, userAgent, mode: res.mode });
+    if (res.mode !== "failed" && version && runtime) storeSelfTest({ platform, passedAt: new Date().toISOString(), appVersion: version, userAgent, mode: res.mode, runtime });
     else clearSelfTest();
   };
   const onStage = (i: number, o: ProbeOutcome) => {
@@ -48,7 +49,7 @@ export default function SelfTest() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stage === null]);
   const running = stage !== null;
-  const mode = gateMode(platform, version, stored, userAgent);
+  const mode = gateMode(platform, version, stored, userAgent, undefined, runtime);
 
   return <div className="area-selftest">
     <span className="update-version">Area apps</span>

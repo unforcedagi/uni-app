@@ -1558,17 +1558,28 @@ fn install_tab_menu(app: &mut tauri::App) -> tauri::Result<()> {
 /// custom protocol (`scripts/ipc-protocol.js` in tauri); `window.ipc.postMessage` is only its fallback when that
 /// fetch fails. Dropping the handler leaves the fetch path working and gives no frame anything to post to.
 /// Proof: the sandbox self-test's `webkit.messageHandlers.ipc unreachable` check on the real webview (REPORT-T77).
+///
+/// Every window the app creates must call this. Today that is the config windows, covered by the loop in `setup`;
+/// any `WebviewWindowBuilder`/`add_child` added later must call it on its window too. Failure is logged, not
+/// fatal; the self-test pass is keyed on the wry/Tauri versions (`webview_runtime`) so a bump forces a re-run.
 #[cfg(target_os = "linux")]
-fn close_ipc_handler(app: &tauri::App) {
-    use tauri::Manager;
+fn close_ipc_handler(window: &tauri::WebviewWindow) {
     use webkit2gtk::{UserContentManagerExt, WebViewExt};
-    for (_, window) in app.webview_windows() {
-        let _ = window.with_webview(|webview| {
-            if let Some(manager) = webview.inner().user_content_manager() {
-                manager.unregister_script_message_handler("ipc");
-            }
-        });
+    let label = window.label().to_string();
+    let logged = label.clone();
+    if let Err(err) = window.with_webview(move |webview| match webview.inner().user_content_manager() {
+        Some(manager) => manager.unregister_script_message_handler("ipc"),
+        None => tracing::warn!(window = %label, "close_ipc_handler: webview has no user content manager; ipc handler left registered"),
+    }) {
+        tracing::warn!(window = %logged, error = %err, "close_ipc_handler: with_webview failed; ipc handler left registered");
     }
+}
+
+/// The wry and Tauri versions in this build, part of the stored sandbox self-test pass key so a dependency bump
+/// (which could move the ipc handler) forces a re-run. wry's version comes from `Cargo.lock` in build.rs.
+#[tauri::command]
+fn webview_runtime() -> String {
+    format!("wry {} tauri {}", env!("UNI_WRY_VERSION"), tauri::VERSION)
 }
 
 /// WebRTC ignores CSP, so a sealed area app could send data out through an
@@ -1618,7 +1629,12 @@ pub fn run() {
             #[cfg(target_os = "linux")]
             {
                 disable_webrtc(_app);
-                close_ipc_handler(_app);
+                {
+                    use tauri::Manager;
+                    for (_, window) in _app.webview_windows() {
+                        close_ipc_handler(&window);
+                    }
+                }
             }
             tracing::info!(version = %_app.package_info().version, "setup complete; opening window");
             Ok(())
@@ -1628,6 +1644,7 @@ pub fn run() {
             t76::t76_write,
             #[cfg(all(debug_assertions, target_os = "linux"))]
             t76::t76_read,
+            webview_runtime,
             get_rooms,
             get_messages,
             get_members,
