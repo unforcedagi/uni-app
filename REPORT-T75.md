@@ -93,3 +93,16 @@ Red state observed before the fix: composer held `"m"`, the frame heard the rest
 Notes: the worktree's `node_modules` is a symlink, so the docker run mounts it at `/uni-app-areas/node_modules`. The two Playwright configs both build into `dist`, so they must not run at the same time (a concurrent run gave spurious WebKit failures; discarded). The new focus e2e were repeated 4x per project without a flake.
 
 Needs another independent SHIP/NO-SHIP review, in particular of the P1-1 trade-off above.
+
+## Round 3 (T-75c, follow-ups from the round-2 review)
+- **P2-B (false accusation):** a theft is counted only when `document.activeElement` is the iframe at the blur, and a blur within 200 ms after a `Tab` keydown is ignored. e2e (red first, phone and desktop): a polite app, Tab x4 from the composer, the app keeps running and no notice shows. Red state observed: the iframe was gone after the Tabs.
+- **P2-A (counted on the blur side):** thefts are now counted where the host loses focus to the iframe (window blur, and the composer's focusout), not on window `focus`, so it no longer depends on the engine firing `focus` after the retake. The first theft shows "This app took the keyboard from the chat. If it does that again it will be stopped." and leaves the app running. With non-empty text in the composer the first theft stops the app; otherwise the second does. e2e: a single theft with an empty composer shows the notice and the frame stays; a theft with `hello` in the composer stops the app (composer keeps `hello`).
+- **P3-A:** a stop for focus theft writes one `console.warn` line (`uni: focus theft: stopped the app of area "<path>" ...`). No app log store exists in the repo, so nothing else is written and no vault note is created. e2e asserts exactly one line.
+- Not changed: the residual keystroke window around the first theft (the browser routes keys before the host can retake).
+
+| Gate | Result |
+|---|---|
+| `tsc --noEmit` | clean |
+| `npm test` | all ok |
+| Playwright Chromium `playwright.areas.config.ts` (phone + desktop) | 196 passed, 6 skipped, 0 failed; the new specs were also repeated 3x without a flake |
+| WebKit | **not run in this round. Still owed on the real engine**, specifically that blur-side counting stops a repeating thief there (the reviewer's P2-A item 3). |
