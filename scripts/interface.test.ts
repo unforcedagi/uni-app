@@ -680,11 +680,29 @@ await check("P2-N1: braille blank, Hangul fillers, variation selectors and U+1D1
   assert.equal(contract.cleanText("a⠀bᅟcᅠdㅤeﾠf\u{e0100}g︁h\u{1d173}i"), "abcdefghi");
   assert.equal(contract.cleanText("a　b c\td e"), "a　b c\td e");
 });
-await check("P2-N1: emoji sequences keep ZWJ and VS16; a lone ZWJ or VS16 between letters is stripped", () => {
+await check("P3-B: ZWJ and VS16 are stripped everywhere; combined emoji degrade to their parts", () => {
   const family = "👨‍👩‍👧", heart = "❤️";
-  assert.equal(contract.cleanText(`${family} ${heart}`), `${family} ${heart}`);
+  assert.equal(contract.cleanText(`${family} ${heart}`), "👨👩👧 ❤");
   assert.equal(contract.cleanText("a‍b️c"), "abc");
-  assert.equal(contract.cleanText("😀‍‍‍😀"), "😀‍😀", "a run of joiners keeps at most the one that joins two emoji");
+  assert.equal(contract.cleanText("😀‍‍‍😀"), "😀😀", "no joiner survives, so no bits can ride in one");
+  assert.equal(contract.cleanText("‍"), "", "a dangling ZWJ is stripped");
+  assert.equal(contract.cleanText("x️"), "x", "a dangling VS16 is stripped");
+  assert.equal(contract.hasHidden("👨‍👩"), true);
+  assert.equal(contract.hasHidden("❤️"), true);
+});
+await check("P3-A: every Default_Ignorable_Code_Point is stripped (property test over all of Unicode)", () => {
+  const di = /\p{Default_Ignorable_Code_Point}/u;
+  let n = 0; const bad: string[] = [];
+  for (let cp = 0; cp <= 0x10ffff; cp++) {
+    if (cp >= 0xd800 && cp <= 0xdfff) continue;
+    const c = String.fromCodePoint(cp);
+    if (!di.test(c)) continue;
+    n++;
+    if (contract.cleanText("a" + c + "b") !== "ab" || !contract.hasHidden("a" + c + "b")) bad.push(cp.toString(16));
+  }
+  assert.ok(n > 1000, "the property test really ran over the Default_Ignorable set: " + n);
+  assert.deepEqual(bad, [], "Default_Ignorable code points that survive cleanText");
+  for (const cp of [0x034f, 0x17b4, 0x17b5, 0x180b, 0x180c, 0x180d, 0x180f]) assert.equal(contract.cleanText("a" + String.fromCodePoint(cp) + "b"), "ab");
 });
 await check("P2-N1: runs of whitespace-only lines (any Unicode space, U+2028/2029 as newline) collapse to one blank line", () => {
   const c = contract.cleanText;
@@ -713,6 +731,12 @@ await check("P2-N1: docs describe the classifier and the 12-line refusal exactly
   const md = readFileSync(new URL("../docs/interfaces.md", import.meta.url), "utf8");
   assert.match(md, /12 lines/); assert.match(md, /refus/i); assert.match(md, /tag characters/i);
   assert.doesNotMatch(md, /runs of 3\+ newlines collapse/);
+});
+await check("P3: docs state the Default_Ignorable rule and that ZWJ and VS16 are always stripped", () => {
+  const md = readFileSync(new URL("../docs/interfaces.md", import.meta.url), "utf8");
+  assert.match(md, /Default_Ignorable_Code_Point/);
+  assert.doesNotMatch(md, /survive only inside an emoji/);
+  assert.doesNotMatch(md, /every variation selector/);
 });
 
 const reqSession = (t: { v: number }) => {

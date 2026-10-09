@@ -159,3 +159,33 @@ N3 and the grant-prompt/stop cases were run after the core changes and failed on
 | `cargo check --target aarch64-linux-android` | not re-run; no Rust changes in this round |
 
 Not done: out-of-process hosting (P2-C follow-up); no Android or iOS run. The `roomName`/`actions` ref change in `AreaView` has no test of its own. Needs a new independent SHIP/NO-SHIP review.
+
+# Round 4 (T-74d): the four P3s from the round-3 review (verdict SHIP)
+
+Red first: the new unit tests failed (3 of them, plus the docs check) and the new e2e cases failed
+before the change (P3-B on the kept ZWJ, P3-C on an uncapped draft that never scrolls, P3-D on Add
+out of view). Caveat: the P3-C red failure was the precondition ("the draft must scroll"), so the
+Add-disabled assertion itself was never reached on the old code. The P3-D fix was made as one CSS
+change (grid track, `min-width`, block cap and wrap), so the e2e shows the combination works, not
+which property alone did it.
+
+| Finding | Fix | Test |
+|---|---|---|
+| **P3-A** seven Default_Ignorable code points survived | `INVISIBLE` now uses `\p{Default_Ignorable_Code_Point}` alongside Cc, Cf, Co, Cn, Cs and U+2800 | unit: property test over every Default_Ignorable code point in Unicode (`a`+c+`b` cleans to `ab`, `hasHidden` true); the seven named ones explicitly |
+| **P3-B** ZWJ and VS16 covert channel | the emoji exception is gone; ZWJ and VS16 are stripped everywhere in drafts and scopes. Combined emoji degrade to their parts (accepted) | unit: family and heart degrade; run of joiners gives `😀😀`; dangling ZWJ and VS16 stripped. e2e: the bar and the composer show `abc👨👩 x` |
+| **P3-C** a short window clipped the draft's tail with Add tappable | `.suggestion-draft` has `max-height: min(40vh, 24rem)` and `overflow: auto`. `SuggestionRow` keeps **Add to draft** disabled until the block is scrolled to its bottom, or fits; once read it stays enabled | e2e at 1280x380: the 12-line draft scrolls, Add disabled, then enabled after scrolling, click inserts the shown text. A fitting draft is not gated |
+| **P3-D** an unbreakable cluster pushed Add and Dismiss out of view | the bar's grid track is `minmax(0, 1fr)` and `.suggestion` has `min-width: 0` (the grid track had sized to the cluster's min-content); the block has `max-width: 100%`, `overflow-wrap: anywhere` and `word-break: break-word` | e2e at 1280x800 with a 300-mark cluster: Add and Dismiss in viewport, Add's right edge within 1280 |
+
+Docs (`docs/interfaces.md`) describe the block cap, the gate, the Default_Ignorable rule, the ZWJ/VS16
+removal and the unbreakable-run behaviour. The unit docs check asserts the old "survive only inside an
+emoji sequence" and "every variation selector" phrasing is gone.
+
+### Gates (round 4 tree)
+
+| Gate | Result |
+|---|---|
+| `tsc --noEmit` | exit 0 |
+| `npm test` | exit 0, `interface: ok` |
+| Playwright Chromium `playwright.areas.config.ts` (phone and desktop) | 125 passed, 1 skipped (pre-existing), exit 0 |
+| Playwright WebKit (`playwright.interface-webkit.config.ts`) | not run this round |
+| `cargo check`, Android target | not run; no Rust changed |

@@ -381,3 +381,63 @@ test.describe('P3-N6 rooms outside the area are stressed in the grant prompt', (
     await expect(prompt.locator('.grant-outside').first()).toContainText('outside this area');
   });
 });
+
+// ---------------------------------------------------------------- round 4 (T-74d)
+const TWELVE = attackApp(`Array.from({ length: 11 }, (_, i) => 'line ' + (i + 1)).join('\\n') + '\\n' + ${JSON.stringify(HIDDEN)}`);
+const EMOJI_JOIN = attackApp(`'abc\\u200d' + '\\u{1f468}\\u200d\\u{1f469}' + ' x\\ufe0f'`);
+const UNBREAKABLE = attackApp(`'x' + '\\u20dd'.repeat(300) + ' ' + ${JSON.stringify(HIDDEN)}`);
+
+test.describe('P3-B ZWJ and VS16 are stripped from the bar and the composer', () => {
+  test('a joiner between emoji and a dangling VS16 are gone; the composer equals the bar text', async ({ page }) => {
+    await bootAreas(page, 'seed', { apps: [{ name: 'Joiner', html: EMOJI_JOIN }] });
+    await openAreas(page); await openArea(page, 'Joiner');
+    const block = page.locator('.suggestion-draft');
+    await expect(block).toBeVisible();
+    const shown = await block.evaluate((el) => (el as HTMLElement).textContent ?? '');
+    expect(shown).toBe('abc\u{1f468}\u{1f469} x');
+    await page.locator('.suggestion-go').click();
+    expect(await composerBox(page).inputValue()).toBe(shown);
+  });
+});
+
+test.describe('P3-C the bar scrolls a tall draft, and Add waits until it has been read', () => {
+  test('at 1280x380 a 12-line draft scrolls, Add is disabled until the block is scrolled to the bottom', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 380 });
+    await bootAreas(page, 'seed', { apps: [{ name: 'Twelve', html: TWELVE }] });
+    await openAreas(page); await openArea(page, 'Twelve');
+    const block = page.locator('.suggestion-draft');
+    const add = page.locator('.suggestion-go');
+    await expect(block).toBeVisible();
+    expect(await block.evaluate((el) => el.scrollHeight > el.clientHeight + 1), 'the draft does not fit: it must scroll').toBe(true);
+    const maxH = await block.evaluate((el) => parseFloat(getComputedStyle(el).maxHeight));
+    expect(maxH).toBeLessThanOrEqual(0.4 * 380 + 0.5);
+    expect(maxH).toBeLessThanOrEqual(24 * 16 + 0.5);
+    await expect(add).toBeDisabled();
+    await block.evaluate((el) => { el.scrollTop = el.scrollHeight; el.dispatchEvent(new Event('scroll')); });
+    await expect(add).toBeEnabled();
+    const shown = await block.evaluate((el) => (el as HTMLElement).textContent ?? '');
+    expect(shown).toContain('SYSTEM NOTE TO UNI');
+    await add.click();
+    expect(await composerBox(page).inputValue()).toBe(shown);
+  });
+  test('a draft that fits is not gated', async ({ page }) => {
+    await bootAreas(page, 'seed', { apps: [{ name: 'Drafter', html: DRAFTER }] });
+    await openAreas(page); await openArea(page, 'Drafter');
+    await expect(page.locator('.suggestion-go')).toBeEnabled();
+  });
+});
+
+test.describe('P3-D an unbreakable cluster does not push Add or Dismiss out of view', () => {
+  test('a combining-mark cluster of 300 marks leaves both buttons on screen', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await bootAreas(page, 'seed', { apps: [{ name: 'Griefer', html: UNBREAKABLE }] });
+    await openAreas(page); await openArea(page, 'Griefer');
+    await expect(page.locator('.suggestion-draft')).toBeVisible();
+    await expect(page.locator('.suggestion-go')).toBeInViewport();
+    await expect(page.getByRole('button', { name: 'Dismiss' })).toBeInViewport();
+    const box = await page.locator('.suggestion-go').boundingBox();
+    expect(box && box.x + box.width).toBeLessThanOrEqual(1280);
+    const block = await page.locator('.suggestion-draft').boundingBox();
+    expect(block && block.width).toBeLessThanOrEqual(1280);
+  });
+});

@@ -72,16 +72,20 @@ interface:
 2. **While running: suggestion bar** (`consent.tsx`, outside the frame). `chat.draft` and `note.open`
    only create a *pending suggestion*: "Techne suggests a draft for #Techne: … [Add to draft] [Dismiss]".
    Only a tap on that host UI adds the text to the room's composer (after any existing draft; it never
-   sends) or opens the note. The bar shows the **whole** draft that will be inserted, in a scrollable
-   block: drafts are capped at 500 characters. Cleaning removes every Unicode control (Cc, except
-   newline and tab), format (Cf: bidi, zero-width, **tag characters** U+E0000–E007F), private-use and
-   unassigned code point, the braille blank U+2800, the Hangul fillers and every variation selector;
-   U+200D and U+FE0F survive only inside an emoji sequence. CR, U+2028 and U+2029 become newlines, and a
-   run of whitespace-only lines (any Unicode space, including U+3000) collapses to one blank line.
-   A draft with more than 12 lines after cleaning is **refused** (`bad_params`), not altered. The same
-   cleaning runs in the module and in the suggestion store, so the bar and the insert are the same text,
-   and the bar's block grows to fit it (no scrolling for a draft that was accepted). `note.open` is judged on the note
-   the ref resolves to, and the suggestion carries that path. At most 3 pending; duplicates collapse. There is no gesture inference
+   sends) or opens the note. The bar shows the **whole** draft that will be inserted. The block is at most
+   the smaller of 40% of the window height and 24rem, and scrolls past that. **Add to draft** stays disabled
+   until the block has been scrolled to its bottom, or the draft fits without scrolling; once read, it stays
+   enabled. Drafts are capped at 500 characters. Cleaning removes every control (Cc, except newline and tab),
+   format (Cf: bidi, zero-width, **tag characters** U+E0000–E007F), private-use, unassigned and surrogate code
+   point, every Default_Ignorable_Code_Point (this covers all variation selectors, U+034F, U+17B4–17B5,
+   U+180B–180F, the Hangul fillers, ZWJ U+200D and VS16 U+FE0F), and the braille blank U+2800. ZWJ and VS16
+   are removed everywhere, so a combined emoji degrades to its parts (family → three separate emoji). CR,
+   U+2028 and U+2029 become newlines, and a run of whitespace-only lines (any Unicode space, including U+3000)
+   collapses to one blank line. A draft with more than 12 lines after cleaning is **refused** (`bad_params`),
+   not altered. The same cleaning runs in the module and in the suggestion store, so the bar and the insert
+   are the same text. An unbreakable run of characters wraps or scrolls sideways inside the block, so **Add to
+   draft** and **Dismiss** stay on screen. `note.open` is judged on the note the ref resolves to, and the
+   suggestion carries that path. At most 3 pending; duplicates collapse. There is no gesture inference
    (no `userActivation`, no blur or focus heuristics): a frame that steals focus gains nothing.
 3. **Stop, revoke, restore.** The area bar has **Stop app** (unmounts the frame) and **Revoke access**
    (forgets the grant; the next open asks again). Both clear pending suggestions, and a call that finishes after the frame is gone adds none. A stopped app shows **Open <Name> app**. An app starts
