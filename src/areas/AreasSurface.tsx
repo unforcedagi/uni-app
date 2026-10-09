@@ -1,18 +1,18 @@
-import { useEffect, useMemo } from "react";
-import AreasHome, { type RoomInfo } from "./AreasHome";
+import { useEffect, useMemo, useState } from "react";
+import TodayView, { type RoomInfo } from "./TodayView";
 import AreaView, { type AreaActions } from "./AreaView";
 import type { AreaRoom } from "./AreaChat";
 import { currentUserAgent, gateMode, platformName } from "../interface/selftest/gate";
 import { useAppVersion, useWebviewRuntime } from "../interface/selftest/useAppVersion";
 import { useAreas } from "./useAreas";
-import { markStarted } from "./appRun";
+import { pickRoom } from "./areaLayout";
 import { useStoredSelfTest } from "../interface/selftest/useSelfTest";
 import "./areas.css";
 
 const USER_AGENT = currentUserAgent();
 const PLATFORM = platformName(USER_AGENT);
 
-/** The Areas tab: the grid at `{kind:"areas"}`, one area at `{kind:"area", path}`. */
+/** The Areas tab: Today at `{kind:"areas"}`, one area at `{kind:"area", path}`. */
 export default function AreasSurface({ path, rooms, actions, roomFor, onRoom, onOpenArea, onBack }: {
   path: string | null; rooms: RoomInfo[]; actions: AreaActions;
   /** The host's room view for a room id (its messages and composer), when that room is the one loaded. */
@@ -28,11 +28,15 @@ export default function AreasSurface({ path, rooms, actions, roomFor, onRoom, on
   // Live: a self-test pass (or a revoke) updates an already-open area without a remount.
   const mode = useMemo(() => gateMode(PLATFORM, version, stored, USER_AGENT, undefined, runtime), [version, stored, runtime]);
   const area = path ? data?.areas.find((a) => a.path === path) : null;
-  const areaRoom = area?.channels[0] ?? null;
+  // Areas can have several rooms (metadata.channel is a list): the user's pick, else the first.
+  const [picked, setPicked] = useState<string | null>(null);
+  const areaRoom = area ? pickRoom(area.channels, picked) : null;
   useEffect(() => { if (area) onRoom(areaRoom); }, [area?.id, areaRoom]); // eslint-disable-line react-hooks/exhaustive-deps
   const roomName = useMemo(() => (id: string) => rooms.find((r) => r.id === id)?.name ?? "room", [rooms]);
-  if (!path) return <AreasHome areas={data?.areas ?? []} rooms={rooms} loading={loading} error={error} onOpen={(a) => { markStarted(a.path); onOpenArea(a.path, a.name, a.channels[0] ?? null); }} />;
+  const now = Date.now();
+  if (!path) return <TodayView data={data} loading={loading} error={error} now={now} onOpen={(a) => onOpenArea(a.path, a.name, pickRoom(a.channels, null))} onNote={actions.openNote}
+    onAsk={(name, text) => { const a = data?.areas.find((x) => x.name === name); const ch = a ? pickRoom(a.channels, null) : null; if (ch) actions.compose(ch, text); }} />;
   if (!area) return <div className="areas-home"><button className="note-back" onClick={onBack}><span className="note-back-arrow" aria-hidden="true">←</span><span className="note-back-label">Areas</span></button>
     <p className="empty">{loading ? "Opening area…" : error ? `Couldn't load: ${error}` : "This area no longer exists."}</p></div>;
-  return <AreaView key={area.id} area={area} rows={data!.rows} mode={mode} roomName={roomName} actions={actions} room={roomFor(areaRoom)} onBack={onBack} />;
+  return <AreaView key={area.id} area={area} entry={data!.briefs[area.name] ?? null} now={now} channel={areaRoom} onChannel={setPicked} mode={mode} roomName={roomName} actions={actions} room={roomFor(areaRoom)} onBack={onBack} />;
 }

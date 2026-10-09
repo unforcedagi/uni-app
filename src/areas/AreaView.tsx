@@ -1,12 +1,11 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type FocusEvent as ReactFocusEvent, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
-import { NoteRenderer } from "@openparachute/surface-render";
 import { runDecision, type GateMode } from "../interface/selftest/gate";
 import InterfaceFrame from "../interface/frame";
 import type { Session } from "../interface/session";
 import { pushChatMessage } from "../interface/modules/chatPush";
-import { ChatSheet, EmptyChat, type AreaRoom } from "./AreaChat";
+import { ChatSheet, EmptyChat, RoomChips, type AreaRoom } from "./AreaChat";
 import { CHAT_WIDTH_KEY, chatMode, clampChatWidth, createSeen, DESKTOP_MIN, parseStoredWidth } from "./areaLayout";
 import GrantPrompt from "../interface/grantPrompt";
 import SuggestionBar from "../interface/consent";
@@ -20,12 +19,10 @@ import { createVaultModule } from "../interface/modules/vault";
 import { createChatModule, type RoomMessage } from "../interface/modules/chat";
 import { createNoteModule } from "../interface/modules/note";
 import { createThemeModule, readHostTheme } from "../interface/modules/theme";
-import { findAppRow, type Area, type PathRow } from "./areasCore";
-import { AREA_VAULT, areaPaths } from "./useAreas";
-import { bodyWithoutTitle } from "../noteText";
-import { safeHref } from "../markdown";
+import type { Area } from "./areasCore";
+import { AREA_VAULT, areaPaths, type AreaBrief } from "./useAreas";
+import BriefView from "./BriefView";
 
-const clock = (ts: number) => new Date(ts * 1000).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 const getMessages = (channel: string, limit: number) => invoke<RoomMessage[]>("get_messages", { channel, root: null, limit });
 
 const grants = createGrantStore();
@@ -42,29 +39,36 @@ const desktopQuery = `(min-width: ${DESKTOP_MIN}px)`;
 const subscribeDesktop = (f: () => void) => { const mq = window.matchMedia(desktopQuery); mq.addEventListener("change", f); return () => mq.removeEventListener("change", f); };
 const isDesktop = () => window.matchMedia(desktopQuery).matches;
 
-export default function AreaView({ area, rows, mode, roomName, actions, room, onBack }: {
-  area: Area; rows: PathRow[]; mode: GateMode | "closed"; roomName: (id: string) => string; actions: AreaActions;
+export default function AreaView({ area, entry, now, channel, onChannel, mode, roomName, actions, room, onBack }: {
+  area: Area; mode: GateMode | "closed"; roomName: (id: string) => string; actions: AreaActions;
+  /** The area's Brief (null: Uni hasn't written one) and the time it is read against. */
+  entry: AreaBrief | null; now: number;
+  /** The room shown (one of the area's rooms) and the way to pick another. */
+  channel: string | null; onChannel: (id: string) => void;
   /** The host's real room view for this area's room; null while it opens (or when the area has none). */
   room: AreaRoom | null; onBack: () => void;
 }) {
-  const appRow = useMemo(() => findAppRow(rows, area.path), [rows, area.path]);
   const live = mode !== "closed";
   const [app, setApp] = useState<AppNote | null>(null);
-  const [appError, setAppError] = useState(false);
+  // Brief is the default page; the sealed app (when the area has one) is the "App" tab.
+  const [tab, setTab] = useState<"brief" | "app">("brief");
   const [declined, setDeclined] = useState(false);
   const [menu, setMenu] = useState(false);
   const [keys, setKeys] = useState<{ scope: string; html: string } | null>(null);
   const [, setVersion] = useState(0);
   const bump = () => setVersion((v) => v + 1);
   const name = cleanText(area.name);
+  // The app note is looked up by its path, in the background: no vault listing, and the Brief never waits for it.
   useEffect(() => {
-    setApp(null); setAppError(false); setDeclined(false);
-    if (!live || !appRow) return;
+    setApp(null); setDeclined(false);
+    if (!live) return;
     let on = true;
-    invoke<{ note: { id: string; content?: string; metadata?: unknown } }>("vault_note", { vault: AREA_VAULT, noteRef: appRow.id })
-      .then((d) => { if (on) setApp({ id: d.note.id ?? appRow.id, html: d.note.content ?? "", metadata: d.note.metadata }); }).catch(() => { if (on) setAppError(true); });
+    const get = (ref: string) => invoke<{ note: { id: string; extension?: string | null; content?: string; metadata?: unknown } }>("vault_note", { vault: AREA_VAULT, noteRef: ref });
+    get(`${area.path}/app`).catch(() => get(`${area.path}/app.html`))
+      .then((d) => { if (on && (d.note.extension ?? "html").replace(/^\./, "").toLowerCase() === "html") setApp({ id: d.note.id, html: d.note.content ?? "", metadata: d.note.metadata }); }).catch(() => {});
     return () => { on = false; };
-  }, [live, appRow?.id]);
+  }, [live, area.path]);
+  const onApp = tab === "app" && !!app;
 
   // What the app asked for (or the default), resolved against this area.
   const ctx = useMemo(() => ({ areaPath: area.path, channels: area.channels }), [area.path, area.channels]);
@@ -90,9 +94,17 @@ export default function AreaView({ area, rows, mode, roomName, actions, room, on
   const roomRef = useRef(room); roomRef.current = room;
   // Where the chat goes: the manifest's hint, else beside the interface on a desktop and a sheet on a phone.
   const desktop = useSyncExternalStore(subscribeDesktop, isDesktop, () => true);
-  const layout = chatMode(manifest?.ok ? manifest.manifest.layout.chat : null, desktop);
+  const layout = chatMode(onApp && manifest?.ok ? manifest.manifest.layout.chat : null, desktop);
   const layoutRef = useRef(layout); layoutRef.current = layout;
   const hasRoom = area.channels.length > 0;
+  // Ask Uni: a draft in the shown room's composer (the sheet opens on a phone). Never sends.
+  const [poke, setPoke] = useState(0);
+  const ask = (text: string) => {
+    if (!channel) return;
+    const r = roomRef.current;
+    if (r && layoutRef.current !== "hidden" && r.id === channel) { r.compose(text); setPoke((n) => n + 1); } else actionsRef.current.compose(channel, text);
+  };
+  const rooms = area.channels.length > 1 ? <RoomChips channels={area.channels} selected={channel} roomName={roomName} onPick={onChannel} /> : null;
   const suggestions = useMemo(() => createSuggestionStore({
     onAccept: (s) => {
       if (s.kind !== "draft") { actionsRef.current.openNote(s.ref); return; }
@@ -113,7 +125,8 @@ export default function AreaView({ area, rows, mode, roomName, actions, room, on
     for (const m of seen.fresh(room.messages)) if (session.current) pushChatMessage(session.current, grantRef.current, room.id, m);
   }, [seen, room?.loaded, room?.messages, room?.id]);
   const [stoppedNote, setStoppedNote] = useState<string | null>(null);
-  const stop = () => { suggestions.clear(); markStopped(area.path); bump(); };
+  const stoppedByUser = useRef(false);
+  const stop = () => { stoppedByUser.current = true; suggestions.clear(); markStopped(area.path); bump(); };
   const [theftNote, setTheftNote] = useState(false);
   // First theft: say so. With text in the composer (or a repeat) the app is stopped, and the stop is logged.
   const takeover = (stopApp: boolean) => {
@@ -123,8 +136,10 @@ export default function AreaView({ area, rows, mode, roomName, actions, room, on
     setStoppedNote("This app kept taking the keyboard from the chat while you typed, so it was stopped.");
     stop();
   };
-  const revoke = () => { if (!app) return; grants.revoke(app.id); suggestions.clear(); markStopped(area.path); setDeclined(false); bump(); };
-  const start = () => { setStoppedNote(null); setTheftNote(false); markStarted(area.path); bump(); };
+  const revoke = () => { if (!app) return; grants.revoke(app.id); suggestions.clear(); markStopped(area.path); stoppedByUser.current = true; setDeclined(false); bump(); };
+  const start = () => { stoppedByUser.current = false; setStoppedNote(null); setTheftNote(false); markStarted(area.path); bump(); };
+  // The App tab is the user's own press: it opens the app unless they stopped it (or it was stopped for stealing the keyboard).
+  const openAppTab = () => { setTab("app"); if (!stoppedByUser.current) markStarted(area.path); bump(); };
   const accept = () => { if (app && keys && running) { grants.acknowledge(app.id, keys.html); bump(); } };
   const router = useMemo(() => createRouter([
     createVaultModule({
@@ -138,11 +153,10 @@ export default function AreaView({ area, rows, mode, roomName, actions, room, on
   ]), [suggestions]);
   const ready = useMemo(() => ({ area: { name: area.name, title: area.title, purpose: area.purpose, status: area.status, since: typeof area.metadata.since === "string" ? area.metadata.since : null } }), [area]);
 
-  const ready_ = live && !!appRow && !!app && !appError && !!keys;
+  const ready_ = live && onApp && !!keys;
   const framed = ready_ && granted && running;
   const asking = ready_ && !granted && !declined && manifest?.ok === true;
   const idle = ready_ && granted && !running;
-  const channel = area.channels[0];
   // A running app has its own hero, so the host bar drops the title (kept for screen readers).
   const header = <header className={`area-bar ${framed ? "chromeless" : ""}`}>
     <button className="note-back" onClick={onBack} aria-label="Back to Areas"><span className="note-back-arrow" aria-hidden="true">←</span><span className="note-back-label">Areas</span></button>
@@ -163,23 +177,27 @@ export default function AreaView({ area, rows, mode, roomName, actions, room, on
   const bar = <SuggestionBar store={suggestions} appName={name} roomName={roomName} />;
   const chatShown = layout !== "hidden";
   // The suggestion bar sits directly above the chat composer; with no chat pane it stays above the interface.
-  const withChat = (main: ReactNode, above: ReactNode, cls = "") => <div className={`area-view ${cls}`}>{header}
+  const tabs = app ? <nav className="area-tabs" role="tablist" aria-label="Area views">
+    <button type="button" role="tab" id="area-tab-brief" aria-selected={tab === "brief"} className={tab === "brief" ? "on" : ""} onClick={() => setTab("brief")}>Brief</button>
+    <button type="button" role="tab" id="area-tab-app" aria-selected={tab === "app"} className={tab === "app" ? "on" : ""} onClick={(e) => { if (e.isTrusted) openAppTab(); }}>App</button>
+  </nav> : null;
+  const withChat = (main: ReactNode, above: ReactNode, cls = "") => <div className={`area-view ${cls}`}>{header}{tabs}
     {decision === "run-notice" && <p className="area-updated" role="status">This app was updated since you allowed it. <button className="pairing-secondary area-accept" onClick={(e) => { if (e.isTrusted) accept(); }}>Accept</button></p>}
     {framed && theftNote && <p className="area-updated" role="status">This app took the keyboard from the chat. If it does that again it will be stopped.</p>}
     <ChatLayout framed={framed} onTheft={takeover} mode={layout} main={main} aboveMain={chatShown && room ? null : above}
-      chat={layout === "side" ? <SideChat labelled={framed} room={room} hasRoom={hasRoom} above={above} label={`Chat in ${channel ? "#" + roomName(channel) : name}`} />
-        : layout === "sheet" ? <ChatSheet room={room} hasRoom={hasRoom} above={above} forceOpen={pendingSuggestions} label={`Chat in ${channel ? "#" + roomName(channel) : name}`} /> : null} /></div>;
+      chat={layout === "side" ? <SideChat labelled={framed} room={room} hasRoom={hasRoom} above={above} rooms={rooms} label={`Chat in ${channel ? "#" + roomName(channel) : name}`} />
+        : layout === "sheet" ? <ChatSheet room={room} hasRoom={hasRoom} above={above} rooms={rooms} forceOpen={pendingSuggestions} poke={poke} label={`Chat in ${channel ? "#" + roomName(channel) : name}`} /> : null} /></div>;
 
   if (framed) return withChat(<InterfaceFrame html={app!.html} title={`${name} app`} router={router} grant={grant} ready={ready} onSession={(s) => { session.current = s; }} />, bar, "framed");
   if (asking && manifest?.ok) return withChat(<GrantPrompt name={name} codeChanged={codeChanged && status === "updated"} approvedCode={mode === "approved-code"} lines={describeNeeds(manifest.manifest.needs, ctx, roomName)}
     onAllow={() => { grants.grant(app!.id, keys!.scope, keys!.html, mode === "approved-code" ? "approved-code" : "sealed"); markStarted(area.path); bump(); }} onNotNow={() => setDeclined(true)} />, null);
-  return withChat(<DefaultArea area={area} actions={actions} roomName={roomName} pending={live && !!appRow && !appError && !app} showRecent={!chatShown}
-    onOpenApp={idle ? start : null} onRevoke={idle ? revoke : null}
+  if (!onApp) return withChat(<BriefView area={area} entry={entry} now={now} canAsk={!!channel} onNote={actions.openNote} onAsk={ask} />, null);
+  return withChat(<AppPanel area={area} pending={!keys} onOpenApp={idle ? start : null} onRevoke={idle ? revoke : null}
     notice={manifest && !manifest.ok ? `This area's app was not opened: ${manifest.error}.` : !running ? stoppedNote : null} />, null);
 }
 
-function SideChat({ room, hasRoom, above, label, labelled }: { labelled: boolean; room: AreaRoom | null; hasRoom: boolean; above: ReactNode; label: string }) {
-  return <section className="area-chat side" aria-label={label}>{labelled && <p className="pane-label">Chat, drawn by Uni</p>}{room ? room.render(above) : <EmptyChat hasRoom={hasRoom} />}</section>;
+function SideChat({ room, hasRoom, above, rooms, label, labelled }: { labelled: boolean; room: AreaRoom | null; hasRoom: boolean; above: ReactNode; rooms: ReactNode; label: string }) {
+  return <section className="area-chat side" aria-label={label}>{labelled && <p className="pane-label">Chat, drawn by Uni</p>}{rooms}{room ? room.render(above) : <EmptyChat hasRoom={hasRoom} />}</section>;
 }
 
 /** The interface (or the default view) and the chat: side by side with a draggable divider, or a sheet over the bottom. */
@@ -280,35 +298,15 @@ function ChatLayout({ mode, main, aboveMain, chat, framed, onTheft }: { framed: 
   </div>;
 }
 
-function DefaultArea({ area, actions, roomName, pending, notice, showRecent, onOpenApp, onRevoke }: { area: Area; actions: AreaActions; roomName: (id: string) => string; pending: boolean; notice: string | null; showRecent: boolean; onOpenApp: (() => void) | null; onRevoke: (() => void) | null }) {
-  const [messages, setMessages] = useState<RoomMessage[] | null>(null);
-  useEffect(() => {
-    let on = true;
-    Promise.all(area.channels.map((c) => getMessages(c, 10).catch(() => [] as RoomMessage[])))
-      .then((l) => { if (on) setMessages(l.flat().sort((a, b) => b.ts - a.ts).slice(0, 10).reverse()); });
-    return () => { on = false; };
-  }, [area]);
-  const note = useMemo(() => ({ id: area.id, path: area.path, content: bodyWithoutTitle(area.body), tags: ["area"] }), [area]);
-  const channel = area.channels[0];
+/** The App tab when the app isn't on screen: it is loading, waiting to be opened, or was stopped. */
+function AppPanel({ area, pending, notice, onOpenApp, onRevoke }: { area: Area; pending: boolean; notice: string | null; onOpenApp: (() => void) | null; onRevoke: (() => void) | null }) {
   return <div className="area-scroll"><article className="area-default">
     <h1 className="note-title">{area.title}</h1>
     {pending && <p className="area-quiet">Opening this area's app…</p>}
     {notice && <p className="area-quiet" role="status">{notice}</p>}
-    <NoteRenderer note={note as never} className="md note-body" linkComponent={({ href, className, children }) => {
-      const safe = safeHref(href);
-      return safe ? <a href={safe} className={className} rel="noreferrer noopener" onClick={(e) => { e.preventDefault(); void invoke("open_link", { url: safe }).catch(() => {}); }}>{children}</a> : <span className={className}>{children}</span>;
-    }} />
-    {showRecent && <section className="area-recent" aria-label="Recent messages">
-      <h2>Recent in {channel ? roomName(channel) : "room"}</h2>
-      {!channel && <p className="area-quiet">No room is linked to this area.</p>}
-      {channel && messages === null && <p className="area-quiet">Loading…</p>}
-      {messages?.length === 0 && <p className="area-quiet">No messages yet.</p>}
-      {messages?.map((m) => <p key={m.ref} className="area-msg"><span><strong>{m.author_name || m.author.slice(0, 8)}</strong><time>{clock(m.ts)}</time></span>{m.body.slice(0, 280)}</p>)}
-    </section>}
     <div className="area-actions">
       {onOpenApp && <button className="suggestion-go area-open-app" onClick={(e) => { if (e.isTrusted) onOpenApp(); }}>Open {cleanText(area.name)} app</button>}
       {onRevoke && <button className="pairing-secondary area-revoke" onClick={(e) => { if (e.isTrusted) onRevoke(); }}>Revoke access</button>}
-      <button className="pairing-secondary" onClick={() => actions.openNote(area.path)}>Open note</button>
     </div>
   </article></div>;
 }

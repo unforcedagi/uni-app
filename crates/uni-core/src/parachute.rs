@@ -316,6 +316,29 @@ impl VaultClient {
         note_from(&v, r)
     }
 
+    /// Every note with `tag` in one request (inheriting descendants), content and metadata
+    /// included: the Today view reads the areas and their briefs this way instead of paging
+    /// the whole vault.
+    pub async fn query_tagged(
+        &self,
+        vault: &str,
+        tag: &str,
+        include_content: bool,
+        limit: usize,
+    ) -> Result<Vec<Value>> {
+        let v = self
+            .call(
+                "query-notes",
+                tag_query_args(vault, tag, include_content, limit)?,
+            )
+            .await?;
+        check_vault_errors(&v)?;
+        Ok(notes_in(&v)
+            .into_iter()
+            .filter(|n| n["id"].is_string())
+            .collect())
+    }
+
     /// Discover readable vaults through the same signed fan-out door.
     pub async fn list_vaults(&self) -> Result<Vec<String>> {
         let v = self
@@ -587,6 +610,22 @@ fn save_args(
         args["if_updated_at"] = json!(stamp);
     }
     Ok(args)
+}
+
+fn tag_query_args(vault: &str, tag: &str, include_content: bool, limit: usize) -> Result<Value> {
+    check_vault(vault)?;
+    if tag.is_empty()
+        || tag.len() > 64
+        || !tag
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '/'))
+    {
+        return Err(Error::Invalid(format!("bad tag: {tag}")));
+    }
+    Ok(json!({
+        "vault": vault, "tag": tag, "include_content": include_content,
+        "include_metadata": true, "limit": limit.clamp(1, 200), "sort": "asc",
+    }))
 }
 
 fn search_args(
@@ -869,6 +908,22 @@ fn http_client() -> Result<reqwest::Client> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tag_query_is_one_bounded_request_with_content_and_metadata() {
+        let a = tag_query_args("uni", "area-brief", true, 500).unwrap();
+        assert_eq!(a["vault"], "uni");
+        assert_eq!(a["tag"], "area-brief");
+        assert_eq!(a["include_content"], true);
+        assert_eq!(a["include_metadata"], true);
+        assert_eq!(a["limit"], 200, "the limit is clamped");
+        let b = tag_query_args("uni", "area", false, 0).unwrap();
+        assert_eq!(b["include_content"], false);
+        assert_eq!(b["limit"], 1);
+        assert!(tag_query_args("bad vault!", "area", true, 10).is_err());
+        assert!(tag_query_args("uni", "", true, 10).is_err());
+        assert!(tag_query_args("uni", "a b", true, 10).is_err(), "a tag is a plain word");
+    }
 
     #[test]
     fn search_hits_from_fanout_are_ranked_and_labelled() {

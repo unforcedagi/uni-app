@@ -21,15 +21,24 @@ export function EmptyChat({ hasRoom }: { hasRoom: boolean }) {
   return <p className="area-chat-empty area-quiet" role="status">{hasRoom ? "Opening the room…" : "This area has no room yet"}</p>;
 }
 
+/** Switch between an area's rooms (metadata.channel lists several). */
+export function RoomChips({ channels, selected, roomName, onPick }: { channels: readonly string[]; selected: string | null; roomName: (id: string) => string; onPick: (id: string) => void }) {
+  return <div className="room-chips" role="group" aria-label="Rooms">{channels.map((id) =>
+    <button key={id} type="button" className={`room-chip ${id === selected ? "on" : ""}`} aria-pressed={id === selected} onClick={() => onPick(id)}>#{roomName(id)}</button>)}</div>;
+}
+
 const DRAG = 30;
 
 /** Phone: the chat as a pull-up sheet. Collapsed it is a peek bar (last message, unread count). */
-export function ChatSheet({ room, hasRoom, above, forceOpen, label }: { room: AreaRoom | null; hasRoom: boolean; above: ReactNode; forceOpen: number; label: string }) {
+export function ChatSheet({ room, hasRoom, above, rooms, forceOpen, poke, label }: { room: AreaRoom | null; hasRoom: boolean; above: ReactNode; rooms: ReactNode; forceOpen: number; poke: number; label: string }) {
   const [open, setOpen] = useState(false);
   const interactive = !!room;
   // A suggestion arriving while the sheet is down opens it: the bar and the composer live inside.
   const seenForce = useRef(forceOpen);
   useEffect(() => { if (forceOpen > seenForce.current && interactive) setOpen(true); seenForce.current = forceOpen; }, [forceOpen, interactive]);
+  // A draft dropped in the composer (Ask Uni) opens the sheet the same way.
+  const seenPoke = useRef(poke);
+  useEffect(() => { if (poke > seenPoke.current && interactive) setOpen(true); seenPoke.current = poke; }, [poke, interactive]);
   const [marker, setMarker] = useState<string | null | undefined>(undefined);
   const last = room?.messages[room.messages.length - 1];
   useEffect(() => { if (room?.loaded && (open || marker === undefined)) setMarker(last?.ref ?? null); }, [room?.loaded, open, last?.ref, marker]);
@@ -55,6 +64,6 @@ export function ChatSheet({ room, hasRoom, above, forceOpen, label }: { room: Ar
       {unread > 0 && !open && <b className="peek-unread" aria-label={`${unread} unread`}>{unread > 99 ? "99+" : unread}</b>}
       <span className="peek-chevron" aria-hidden="true">{open ? "⌄" : "⌃"}</span>
     </button>
-    <div id="area-chat-body" className="sheet-body" inert={!open}>{room ? room.render(above) : null}</div>
+    <div id="area-chat-body" className="sheet-body" inert={!open}>{rooms}{room ? room.render(above) : null}</div>
   </section>;
 }
