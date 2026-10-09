@@ -34,6 +34,8 @@ export const LIMITS = {
   maxRequests: 60,
   rateWindowMs: 10_000,
   maxDraft: 500,
+  /** A draft with more lines (after cleaning) is refused, not altered. */
+  maxDraftLines: 12,
   /** Most notes a tag or content request reads; each read is charged to the limiter. */
   maxScan: 20,
   maxRecent: 30,
@@ -127,18 +129,44 @@ export class RateLimiter {
   }
 }
 
-/** Bidi controls, zero-width and other invisible format characters, and C0/C1 controls. */
-const HIDDEN = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u00ad\u034f\u061c\u115f\u1160\u17b4\u17b5\u180b-\u180e\u200b-\u200f\u202a-\u202e\u2060-\u206f\u3164\ufeff\uffa0\ufff9-\ufffb]/g;
-export const hasHidden = (s: string) => { HIDDEN.lastIndex = 0; return HIDDEN.test(s); };
+/**
+ * Anything a reader cannot see: Unicode categories Cc (controls), Cf (format: bidi, zero-width, the tag
+ * block U+E0000-E007F, ...), Co (private use), Cn (unassigned) and Cs (lone surrogates), plus blanks
+ * that are letters or symbols (braille blank, Hangul fillers) and every variation selector.
+ */
+const INVISIBLE = /[\p{Cc}\p{Cf}\p{Co}\p{Cn}\p{Cs}\u2800\u115f\u1160\u3164\uffa0\ufe00-\ufe0f\u{e0100}-\u{e01ef}]/u;
+const PICTO = /[\p{Extended_Pictographic}\u{1f3fb}-\u{1f3ff}]/u;
+const ZWJ = "\u200d", VS16 = "\ufe0f";
 
 /**
- * The one text transform for anything the host shows and then inserts: no
- * hidden characters (\n and \t stay), CRLF folded, and runs of 3+ newlines
- * collapsed to a single blank line, so nothing can be pushed out of view.
+ * Remove every invisible code point except \n and \t. U+200D and U+FE0F survive only inside an emoji
+ * sequence (ZWJ between two pictographs, VS16 right after one), so family and heart emoji keep working.
+ */
+export function stripHidden(s: string): string {
+  const cps = Array.from(s);
+  const out: string[] = [];
+  for (let i = 0; i < cps.length; i++) {
+    const c = cps[i];
+    const prev = out[out.length - 1] ?? "";
+    if (c === "\n" || c === "\t" || !INVISIBLE.test(c)) out.push(c);
+    else if (c === ZWJ && (PICTO.test(prev) || prev === VS16) && PICTO.test(cps[i + 1] ?? "")) out.push(c);
+    else if (c === VS16 && PICTO.test(prev)) out.push(c);
+  }
+  return out.join("");
+}
+/** True when `s` holds anything stripHidden would remove (or a Unicode line separator). */
+export const hasHidden = (s: string) => stripHidden(s) !== s || /[\u2028\u2029]/.test(s);
+
+/**
+ * The one text transform for anything the host shows and then inserts: CRLF, CR, U+2028/2029 and NEL
+ * become \n, invisible characters are stripped (see `stripHidden`), and a run of whitespace-only lines
+ * (any Unicode space) collapses to one blank line, so nothing can be pushed out of view.
  */
 export function cleanText(s: string): string {
-  return s.replace(/\r\n?/g, "\n").replace(HIDDEN, "").replace(/\n{3,}/g, "\n\n");
+  return stripHidden(s.replace(/\r\n?|[\u2028\u2029\u0085]/g, "\n")).replace(/\n(?:[^\S\n]*\n){2,}/g, "\n\n");
 }
+/** Number of lines in cleaned text. */
+export const lineCount = (s: string) => s.split("\n").length;
 
 /** Notes at `Areas/Foo.md` and `Areas/Foo` are the same note. */
 export const stripExt = (path: string) => path.replace(/\.(md|html)$/i, "");

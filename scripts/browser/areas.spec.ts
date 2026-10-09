@@ -260,12 +260,12 @@ test.describe('hostile and benign apps', () => {
     expect(R.stray).toBe('none');
     // Pending suggestions are capped; a flood of drafts only ever reaches the host bar.
     expect(JSON.parse(R.suggest).filter((x: string) => x === 'result')).toHaveLength(3);
-    // Every incoming message counts; over the limit the session goes silent.
+    // Every incoming message counts; over the limit each one with an id is told rate_limited, none runs.
     const flood = JSON.parse(R.flood);
     expect(flood.ok).toBeGreaterThan(0);
     expect(flood.ok).toBeLessThanOrEqual(60 - 26);
-    expect(flood.err, 'over the limit nothing is answered').toBe(0);
-    expect(flood.none).toBeGreaterThanOrEqual(40);
+    expect(flood.err, 'over the limit every message is answered with an error').toBeGreaterThanOrEqual(40);
+    expect(flood.none, 'nothing is silent').toBe(0);
     // The out-of-scope notes were never fetched for the app's benefit: every vault_note the host made was in scope or by an id it then refused.
     const notes = (await calls(page, 'vault_note')).map((c: any) => c.args.noteRef);
     expect(notes.filter((n: string) => /passwd|\.\./.test(n))).toEqual([]);

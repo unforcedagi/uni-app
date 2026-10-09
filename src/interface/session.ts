@@ -13,10 +13,12 @@ const codeOf = (e: unknown): ErrorCode => (e instanceof ContractError ? e.code :
 
 export function createSession(opts: SessionOptions) {
   const now = opts.now ?? Date.now;
-  const limiter = new RateLimiter();
+  // Two buckets: one hit per message, and one token per underlying vault read. Spent reads never silence requests.
+  const requests = new RateLimiter();
+  const reads = new RateLimiter();
   let pending = 0;
   let closed = false;
-  const ctx = { charge(n: number) { if (!limiter.take(now(), n)) throw new ContractError(ERROR_CODES.rateLimited); } };
+  const ctx = { charge(n: number) { if (!reads.take(now(), n)) throw new ContractError(ERROR_CODES.rateLimited); }, closed: () => closed };
   const post = (m: HostMessage) => { if (!closed) opts.post(m); };
   return {
     /** Stop for good: in-flight calls get no reply and later messages are ignored. */
@@ -24,16 +26,18 @@ export function createSession(opts: SessionOptions) {
     sendEvent(event: string, data: unknown) { post({ uni: 1, event, data }); },
     /**
      * Handle one message from the frame. Every message, valid or not, counts
-     * against the limiter first; over the limit it is dropped without a reply.
-     * Unanswerable junk (no usable id) is dropped.
+     * against the request bucket; over it, a message with a usable id still
+     * gets `rate_limited` (never silence). Unanswerable junk (no usable id) is dropped.
      */
     handle(data: unknown): void {
-      if (closed || !limiter.take(now())) return;
+      if (closed) return;
+      const limited = !requests.take(now());
       const env = parseEnvelope(data);
       const isPfr = !!data && typeof data === "object" && "pfr" in (data as object);
       const errorReply = (id: string, code: ErrorCode) => post(isPfr || env.kind === "pfr"
         ? errorToFrameFetchReply({ id, channel: "vault" }, code)
         : { uni: 1, id, error: { code, message: code } });
+      if (limited) { if (env.id) errorReply(env.id, ERROR_CODES.rateLimited); return; }
       if (env.kind === "bad") { if (env.id) errorReply(env.id, env.error); return; }
       if (pending >= LIMITS.maxPending) { errorReply(env.id, ERROR_CODES.tooManyPending); return; }
       pending++;

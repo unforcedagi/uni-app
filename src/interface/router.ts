@@ -15,9 +15,12 @@ export type MethodDef<T = any> = { // eslint-disable-line @typescript-eslint/no-
   scopeCheck?(scopes: Resolved, value: T): boolean;
   run(value: T, scopes: Resolved, ctx: CallCtx): Promise<unknown>;
 };
-/** Per-call host services. `charge(n)` takes n tokens from the frame's limiter and throws rate_limited when it is out. */
-export type CallCtx = { charge(n: number): void };
-const FREE: CallCtx = { charge() {} };
+/**
+ * Per-call host services. `charge(n)` takes n read tokens from the frame's read bucket and throws rate_limited
+ * when it is out. `closed()` is true once the session is gone: a module must not leave side effects then.
+ */
+export type CallCtx = { charge(n: number): void; closed(): boolean };
+const FREE: CallCtx = { charge() {}, closed: () => false };
 export type UniModule = { namespace: string; methods: Record<string, MethodDef> };
 
 export function createRouter(modules: UniModule[]) {

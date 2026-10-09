@@ -129,3 +129,33 @@ Arming the frame only after the async grant key exists exposed a latent race: in
 - No Android or iOS build or run; the entry-point fix is checked by source and `cargo check` only.
 - `src-tauri/gen/schemas` was modified by cargo and left uncommitted.
 - Needs a new independent SHIP/NO-SHIP review.
+
+## Round 3 (T-74c): fixes for the second independent review (NO-SHIP on one P2)
+
+Unit tests were written and run red first (14 failures, listed by name in the commit); the e2e specs for
+N3 and the grant-prompt/stop cases were run after the core changes and failed on the old UI.
+
+| Finding | Fix | Test |
+|---|---|---|
+| **P2-N1** tag characters and whitespace-only line runs bypass `cleanText` | The hand-written list is gone. `stripHidden` removes every code point in Cc (except `\n` `\t`), Cf (bidi, zero-width, the tag block), Co, Cn and Cs, plus U+2800, the Hangul fillers (U+115F, U+1160, U+3164, U+FFA0) and all variation selectors (FE00–FE0F, E0100–E01EF). U+200D and U+FE0F survive only inside an emoji sequence (ZWJ between two pictographs, VS16 right after one). CR, U+2028/2029 and NEL become newlines; a run of whitespace-only lines (any Unicode space, U+3000 included) collapses to one blank line. A draft over **12 lines after cleaning is refused** (`bad_params`) by the module and by the suggestion store. The bar's block no longer has a height cap, so an accepted draft is fully visible. Docs say exactly this | unit: property test over every code point in Cf, Co, Cn, U+E0000–E007F, E0100–E01EF, FE00–FE0F and the fillers (`a<c>b` cleans to `ab`, `hasHidden` true); tag smuggling; emoji ZWJ/VS16 kept and lone ones stripped; 8 whitespace/newline separators x60 collapse; 12 lines pass, 13 refused, counted after cleaning; store refuses; docs strings. e2e (Chromium): tagChars, nlSpace and U+2028+U+3000 apps: the bar block has no hidden characters, `scrollHeight <= clientHeight`, the payload is on screen, the composer equals the bar text; a 20-line draft is refused and shows nothing |
+| **P3-N7** `hasHidden` had the same gap | `hasHidden` is `stripHidden(s) !== s` (plus U+2028/2029) | the property test asserts `hasHidden` per code point; a tag-char scope is refused by `parseManifest` |
+| **P3-N2** one bucket; an exhausted bucket gave silence | Two buckets in the session: requests (1 per message) and reads (`ctx.charge`). A message over the request budget with a usable id gets `rate_limited` (a frame-fetch gets 429); only id-less junk is dropped. In `AreaView`, `roomName` and `actions` go through refs, so a rooms change does not recreate the router or the session | unit: 100 messages, 100 replies, 40 `rate_limited`; a frame-fetch gets 429; with the read bucket spent, `chat.recent` still answers and an uncached read answers 429. The hostile e2e that asserted silence now asserts every flooded message is answered. The ref change is verified by reading the code, no test |
+| **P3-N3** "updated" notice lasted one process and was consumed by an idle view | No in-memory flag. `status()` stays `updated` while the stored hash differs. The notice (with an **Accept** button, host DOM) shows whenever the app runs in that state; `grants.acknowledge` (renamed from `touch`) stores the new hash only on a tap, and only while the app is running | unit: `updated` survives repeated calls and a fresh store, `acknowledge` makes it `ok` and never creates a grant. e2e: notice survives Stop, reload and restart, Accept clears it for good; an idle view leaves the stored hash stale |
+| **P3-N4** suggestions survived Stop/Revoke; a late `note.open` still suggested | `suggestions.clear()` on Stop and Revoke. `CallCtx` has `closed()`; `chat.draft` and `note.open` do not suggest when it is true, and the session sets it on `close()` | unit: a `note.open` awaiting its resolve when the session closes adds nothing; `chat.draft` with a closed ctx adds nothing. e2e: Stop then Open app shows one suggestion, Revoke empties the bar |
+| **P3-N5** `vault_search` uncharged | One read token per granted prefix searched | unit: 30 search requests over 3 prefixes make at most 60 searches and the later ones get 429 (was 90) |
+| **P3-N6** rooms outside the area not stressed | `describeNeeds` marks a `chat.read`/`chat.draft` room that is not in `area.channels` as `outside` ("...a room outside this area, #x"); the prompt already bolds `outside` lines | unit: flags for area, own room, unknown id, other room. e2e: two bold lines with "outside this area" |
+
+### Gates (final tree)
+
+| Gate | Result |
+|---|---|
+| `tsc --noEmit` | clean |
+| `npm test` | all ok, `interface: ok` |
+| prod `vite build` | OK, 0 files contain `__areasTest` |
+| `cargo check` (src-tauri, Linux) | passes |
+| Playwright Chromium `playwright.areas.config.ts` | 117 passed, 1 skipped (pre-existing) |
+| Playwright WebKit (docker `mcr.microsoft.com/playwright:v1.63.0-noble`, `playwright.interface-webkit.config.ts`) | 58 passed, 1 skipped |
+| default / rail / screens / sidebar configs | not re-run (they do not touch the interface frame) |
+| `cargo check --target aarch64-linux-android` | not re-run; no Rust changes in this round |
+
+Not done: out-of-process hosting (P2-C follow-up); no Android or iOS run. The `roomName`/`actions` ref change in `AreaView` has no test of its own. Needs a new independent SHIP/NO-SHIP review.

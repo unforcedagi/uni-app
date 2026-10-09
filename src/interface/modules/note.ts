@@ -31,7 +31,7 @@ export function createNoteModule(deps: NoteDeps): UniModule {
           let note: { id: string; path?: string | null };
           try { note = await deps.resolve(v.ref); } catch { throw new ContractError(ERROR_CODES.outOfScope); }
           if (!inScope(scopes["vault.read"] ?? [], note.path)) throw new ContractError(ERROR_CODES.outOfScope);
-          deps.suggest({ kind: "open", ref: note.path as string });
+          if (!ctx.closed()) deps.suggest({ kind: "open", ref: note.path as string });
           return { pending: true };
         },
       },
