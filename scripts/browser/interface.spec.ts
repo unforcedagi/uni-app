@@ -139,14 +139,33 @@ test.describe('kits', () => {
 // WebRTC ignores CSP, and a srcdoc child frame is a fresh realm (review 2 P1-A).
 test.describe('WebRTC in a child frame', () => {
   test.describe.configure({ timeout: 120000 });
-  test('on a webview that has WebRTC the self-test fails the child-frame check, and nothing is stored', async ({ page }) => {
+  test('on a webview that has WebRTC only the WebRTC checks fail; the result is stored as approved-code and shown honestly', async ({ page }) => {
     await bootAreas(page, 'seed', { selftest: false, webrtc: 'native' });
     await openSettings(page);
     await page.getByRole('button', { name: 'Run sandbox self-test' }).click();
-    await expect(page.locator('.selftest-status.fail')).toContainText('Failed', { timeout: 60000 });
+    await expect(page.locator('.selftest-status.fail, .selftest-status.approved')).toContainText('Approved code only (WebRTC present)', { timeout: 60000 });
     await expect(page.locator('.selftest-list li.fail')).toHaveCount(1);
     await expect(page.locator('.selftest-list li.fail')).toContainText('WebRTC unavailable in a child frame');
+    expect(JSON.parse((await page.evaluate(() => localStorage.getItem('uni.areaApps.selftest.v1')))!).mode).toBe('approved-code');
+    await expect(page.locator('.selftest-status').first()).toContainText('Approved code only (WebRTC present)');
+  });
+  test('a sealed pass is labelled Sealed', async ({ page }) => {
+    await bootAreas(page, 'seed');
+    await openSettings(page);
+    await expect(page.locator('.selftest-status').first()).toContainText('Sealed');
+  });
+  test('WebRTC plus any other failing check keeps the gate closed and stores nothing', async ({ page }) => {
+    await bootAreas(page, 'seed', { selftest: false, webrtc: 'native', ipcLeak: true });
+    await openSettings(page);
+    await page.getByRole('button', { name: 'Run sandbox self-test' }).click();
+    await expect(page.locator('.selftest-status.fail')).toContainText('Failed', { timeout: 60000 });
+    expect(await page.locator('.selftest-list li.fail').count()).toBeGreaterThan(1);
     expect(await page.evaluate(() => localStorage.getItem('uni.areaApps.selftest.v1'))).toBeNull();
+  });
+  test('with no stored result (as after a WebRTC + other failure) no app runs, even a previously granted one', async ({ page }) => {
+    await bootAreas(page, 'seed', { selftest: false, webrtc: 'native' });
+    await openAreas(page); await openArea(page, 'Techne');
+    await expect(page.locator('iframe')).toHaveCount(0);
   });
 
   test('known limit: if the gate were open on such a webview, a srcdoc child leaks over UDP (why the self-test must gate)', async ({ page }) => {
@@ -439,5 +458,53 @@ test.describe('P3-D an unbreakable cluster does not push Add or Dismiss out of v
     expect(box && box.x + box.width).toBeLessThanOrEqual(1280);
     const block = await page.locator('.suggestion-draft').boundingBox();
     expect(block && block.width).toBeLessThanOrEqual(1280);
+  });
+});
+
+test.describe('T-74e approved-code mode', () => {
+  const BOOT = { mode: 'approved-code', webrtc: 'native' } as const;
+  test('an approved app (stored HTML hash equals the current one) runs, with no updated line', async ({ page }) => {
+    await bootAreas(page, 'seed', { ...BOOT, apps: [{ name: 'Quiet', html: QUIET }] });
+    await openAreas(page); await openArea(page, 'Quiet');
+    await expect(page.locator('iframe.area-frame')).toHaveCount(1);
+    await expect(page.locator('.area-updated')).toHaveCount(0);
+  });
+  test('edited HTML re-asks with the host line and runs nothing until Allow this version', async ({ page }) => {
+    await bootAreas(page, 'seed', { ...BOOT, apps: [{ name: 'Quiet', html: QUIET }], staleHtml: ['Quiet'] });
+    await openAreas(page); await openArea(page, 'Quiet');
+    const prompt = page.getByRole('region', { name: /Quiet is asking for access/ });
+    await expect(prompt).toContainText("This app's code changed since you allowed it. On this device apps can reach the network through WebRTC, so only code you've approved runs.");
+    await expect(page.locator('iframe')).toHaveCount(0);
+    expect(await prompt.evaluate((el) => !!el.closest('iframe'))).toBe(false);
+    await expect(prompt.getByRole('button', { name: 'Allow this version' })).toBeVisible();
+    await page.waitForTimeout(500);
+    await expect(page.locator('iframe')).toHaveCount(0);
+    await prompt.getByRole('button', { name: 'Allow this version' }).click();
+    await expect(page.locator('iframe.area-frame')).toHaveCount(1);
+    await expect(page.locator('.area-updated')).toHaveCount(0);
+    // the new hash is remembered: the next open runs without asking
+    await page.reload();
+    await openAreas(page); await openArea(page, 'Quiet');
+    await expect(page.getByRole('region', { name: /Quiet is asking for access/ })).toHaveCount(0);
+  });
+  test('Not now on a changed app runs nothing', async ({ page }) => {
+    await bootAreas(page, 'seed', { ...BOOT, apps: [{ name: 'Quiet', html: QUIET }], staleHtml: ['Quiet'] });
+    await openAreas(page); await openArea(page, 'Quiet');
+    await page.getByRole('button', { name: 'Not now' }).click();
+    await expect(page.locator('iframe')).toHaveCount(0);
+  });
+  test('a never-approved app still gets the ordinary first-open prompt, without the changed-code line', async ({ page }) => {
+    await bootAreas(page, 'seed', { ...BOOT, apps: [{ name: 'Quiet', html: QUIET }], granted: false });
+    await openAreas(page); await openArea(page, 'Quiet');
+    const prompt = page.getByRole('region', { name: /Quiet is asking for access/ });
+    await expect(prompt).toBeVisible();
+    await expect(prompt).not.toContainText('code changed since you allowed it');
+    await expect(page.locator('iframe')).toHaveCount(0);
+  });
+  test('a full-pass platform keeps today\'s behaviour: updated runs with a notice and Accept', async ({ page }) => {
+    await bootAreas(page, 'seed', { apps: [{ name: 'Quiet', html: QUIET }], staleHtml: ['Quiet'] });
+    await openAreas(page); await openArea(page, 'Quiet');
+    await expect(page.locator('iframe.area-frame')).toHaveCount(1);
+    await expect(page.locator('.area-updated')).toBeVisible();
   });
 });

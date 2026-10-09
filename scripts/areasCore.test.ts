@@ -57,7 +57,7 @@ assert.equal(platformName("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Ch
 assert.equal(platformName("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit"), "mac");
 assert.deepEqual([...LIVE_AREA_PLATFORMS], [], "no platform is proven by constant");
 const UA = "Mozilla/5.0 (X11; Linux x86_64) WebKitGTK/2.46";
-const pass = { platform: "linux", passedAt: "2026-10-08T00:00:00Z", appVersion: "1.2.3", userAgent: UA };
+const pass = { platform: "linux", passedAt: "2026-10-08T00:00:00Z", appVersion: "1.2.3", userAgent: UA, mode: "sealed" };
 assert.ok(!liveAreaApps("linux", "1.2.3", null, UA), "no stored pass: closed");
 assert.ok(liveAreaApps("linux", "1.2.3", pass, UA), "stored pass for platform, version and webview: open");
 assert.ok(!liveAreaApps("linux", "1.2.4", pass, UA), "version mismatch: closed");

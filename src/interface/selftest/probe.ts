@@ -44,13 +44,17 @@ export const NAV_STAGES = [
 export type NavVector = (typeof NAV_STAGES)[number]["vector"];
 
 export type ProbeCheck = { id: string; label: string; ok: boolean };
-export type ProbeResult = { pass: boolean; checks: ProbeCheck[] };
+/** `sealed` = all pass; `approved-code` = only WebRTC checks fail; `failed` = anything else (including no evidence). */
+export type ProbeResult = { pass: boolean; mode: "sealed" | "approved-code" | "failed"; checks: ProbeCheck[] };
+const WEBRTC_CHECKS: readonly string[] = ["webrtc", "webrtcChild"];
 
 /** A check passes only when the probe reported exactly `true`; missing means fail. */
 export function evaluateProbe(report: unknown): ProbeResult {
   const results = report && typeof report === "object" ? (report as Record<string, unknown>) : {};
   const checks = PROBE_CHECKS.map((c) => ({ ...c, ok: results[c.id] === true }));
-  return { pass: checks.every((c) => c.ok), checks };
+  const pass = checks.every((c) => c.ok);
+  const onlyWebrtc = !pass && checks.every((c) => c.ok || WEBRTC_CHECKS.includes(c.id));
+  return { pass, mode: pass ? "sealed" : onlyWebrtc ? "approved-code" : "failed", checks };
 }
 
 /**

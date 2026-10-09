@@ -24,7 +24,7 @@ await check("P1-1 tauri.conf.json sets a frame-src about: CSP (map form, only wh
 });
 // ---------------------------------------------------------------- P2-1
 const UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/605.1.15 WebKitGTK/2.46";
-const pass = { platform: "linux", passedAt: "2026-10-08T00:00:00Z", appVersion: "1.2.3", userAgent: UA };
+const pass = { platform: "linux", passedAt: "2026-10-08T00:00:00Z", appVersion: "1.2.3", userAgent: UA, mode: "sealed" };
 await check("P2-1 a stored pass needs the same userAgent", () => {
   const live = gate.liveAreaApps as Any;
   assert.equal(live("linux", "1.2.3", pass, UA, []), true);
@@ -85,6 +85,61 @@ await check("P3-5 areas tab dedupes on Back (replace of an area tab with an Area
   s = openTab(s, { kind: "areas", title: "Areas" }, "replace", id);
   assert.equal(s.tabs.filter((t) => t.kind === "areas").length, 1);
   assert.equal(s.tabs.find((t) => t.id === s.active)?.kind, "areas");
+});
+
+// ---------------------------------------------------------------- T-74e approved-code mode
+const probeMod: Any = await opt("../src/interface/selftest/probe.ts");
+const ALL_IDS: string[] = (probeMod.PROBE_CHECKS ?? []).map((c: Any) => c.id);
+const report = (failing: string[]) => Object.fromEntries(ALL_IDS.map((id) => [id, !failing.includes(id)]));
+await check("T-74e evaluateProbe mode: all pass → sealed; only WebRTC checks fail → approved-code; anything else → failed", () => {
+  assert.ok(ALL_IDS.length > 10);
+  assert.equal(probeMod.evaluateProbe(report([])).mode, "sealed");
+  assert.equal(probeMod.evaluateProbe(report(["webrtc"])).mode, "approved-code");
+  assert.equal(probeMod.evaluateProbe(report(["webrtcChild"])).mode, "approved-code");
+  assert.equal(probeMod.evaluateProbe(report(["webrtc", "webrtcChild"])).mode, "approved-code");
+  assert.equal(probeMod.evaluateProbe(report(["webrtc", "fetch"])).mode, "failed");
+  assert.equal(probeMod.evaluateProbe(report(["webrtcChild", "navParse"])).mode, "failed");
+  assert.equal(probeMod.evaluateProbe(report(["cookie"])).mode, "failed");
+  assert.equal(probeMod.evaluateProbe({}).mode, "failed", "no evidence at all");
+  // a non-WebRTC check that is missing (not reported true) is not positive evidence
+  const r = report(["webrtc"]) as Any; delete r.storage;
+  assert.equal(probeMod.evaluateProbe(r).mode, "failed");
+  const r2 = report(["webrtc"]) as Any; r2.storage = "yes";
+  assert.equal(probeMod.evaluateProbe(r2).mode, "failed", "only exactly true counts");
+  assert.equal(probeMod.evaluateProbe(report(["webrtc"])).pass, false, "approved-code is not a pass");
+});
+const UA2 = UA;
+const stored = (mode?: string) => { const { mode: _m, ...rest } = pass; return { ...rest, ...(mode ? { mode } : {}) }; }; // no mode = a record written before T-74e
+await check("T-74e gate decision table: all pass / only webrtc fails / webrtc + another fails / no result", () => {
+  const g = gate.gateMode as Any;
+  assert.equal(g("linux", "1.2.3", stored("sealed"), UA2, []), "sealed");
+  assert.equal(g("linux", "1.2.3", gate.parseSelfTest(JSON.stringify(stored())), UA2, []), "sealed", "an old stored record without a mode parses as a sealed pass");
+  assert.equal(g("linux", "1.2.3", stored(), UA2, []), "closed", "an unparsed record with no mode is not trusted");
+  assert.equal(g("linux", "1.2.3", stored("approved-code"), UA2, []), "approved-code");
+  assert.equal(g("linux", "1.2.3", null, UA2, []), "closed", "no result");
+  assert.equal(g("linux", "1.2.3", stored("approved-code"), UA2 + "x", []), "closed", "webview changed");
+  assert.equal(g("linux", "1.2.4", stored("approved-code"), UA2, []), "closed", "version changed");
+  assert.equal(g("linux", "1.2.3", stored("failed"), UA2, []), "closed", "a failed result never opens");
+  assert.equal(g("mac", "9", null, "", ["mac"]), "sealed", "the proven constant is sealed");
+  assert.equal(gate.liveAreaApps("linux", "1.2.3", stored("approved-code") as Any, UA2, []), true);
+});
+await check("T-74e parse/store keep the mode; only the two modes are accepted", () => {
+  assert.equal(gate.parseSelfTest(JSON.stringify(stored("approved-code")))?.mode, "approved-code");
+  assert.equal(gate.parseSelfTest(JSON.stringify(stored()))?.mode, "sealed");
+  assert.equal(gate.parseSelfTest(JSON.stringify(stored("failed"))), null);
+  assert.equal(gate.parseSelfTest(JSON.stringify(stored("open"))), null);
+});
+await check("T-74e run decision: approved-code runs only a status-ok app; updated re-asks; sealed keeps the notice", () => {
+  const d = (gate as Any).runDecision as Any;
+  assert.equal(d("sealed", "none"), "ask");
+  assert.equal(d("sealed", "ok"), "run");
+  assert.equal(d("sealed", "updated"), "run-notice");
+  assert.equal(d("approved-code", "none"), "ask");
+  assert.equal(d("approved-code", "ok"), "run");
+  assert.equal(d("approved-code", "updated"), "ask-updated");
+  assert.equal(d("closed", "ok"), "closed");
+  assert.equal(d("closed", "updated"), "closed");
+  assert.equal(d("closed", "none"), "closed");
 });
 
 if (failed) { console.log(`\n${failed} check(s) failed`); process.exit(1); }

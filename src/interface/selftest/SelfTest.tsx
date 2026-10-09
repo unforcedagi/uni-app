@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createRouter } from "../router";
 import { createThemeModule } from "../modules/theme";
-import { clearSelfTest, currentUserAgent, liveAreaApps, platformName, storeSelfTest } from "./gate";
+import { clearSelfTest, currentUserAgent, gateMode, MODE_LABEL, platformName, storeSelfTest } from "./gate";
 import { evaluateProbe, navProbeHtml, navVerdict, NAV_STAGES, PROBE_HTML, type ProbeResult } from "./probe";
 import ProbeFrame, { type ProbeOutcome } from "./ProbeFrame";
 import { useAppVersion } from "./useAppVersion";
@@ -30,8 +30,8 @@ export default function SelfTest() {
     run.current++;
     const res = evaluateProbe(r);
     setResult(res); setStage(null);
-    // A pass is recorded; anything else revokes an earlier one (a webview or sandbox regression).
-    if (res.pass && version) storeSelfTest({ platform, passedAt: new Date().toISOString(), appVersion: version, userAgent });
+    // A pass, or a failure of only the WebRTC checks, is recorded with its mode; anything else revokes an earlier result (a webview or sandbox regression).
+    if (res.mode !== "failed" && version) storeSelfTest({ platform, passedAt: new Date().toISOString(), appVersion: version, userAgent, mode: res.mode });
     else clearSelfTest();
   };
   const onStage = (i: number, o: ProbeOutcome) => {
@@ -48,15 +48,15 @@ export default function SelfTest() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stage === null]);
   const running = stage !== null;
-  const current = liveAreaApps(platform, version, stored, userAgent);
+  const mode = gateMode(platform, version, stored, userAgent);
 
   return <div className="area-selftest">
     <span className="update-version">Area apps</span>
-    <p className="selftest-status" role="status">{current ? `Live area apps enabled for ${platform} (self-test passed ${stored!.passedAt.slice(0, 10)}).` : stored ? "Self-test is stale for this app version, webview or platform." : "Live area apps are off until the sandbox self-test passes."}</p>
+    <p className="selftest-status" role="status">{mode !== "closed" ? `Live area apps enabled for ${platform}: ${MODE_LABEL[mode]} (self-test ${stored!.passedAt.slice(0, 10)}).` : stored ? "Self-test is stale for this app version, webview or platform." : "Live area apps are off until the sandbox self-test passes."}</p>
     <button className="pairing-secondary" disabled={running || !version} onClick={() => { report.current = {}; setTimedOut(false); setResult(null); setStage(0); }}>{running ? "Running…" : "Run sandbox self-test"}</button>
     {running && <div className="selftest-frame" aria-hidden="true"><ProbeFrame key={STAGES[stage].id} html={STAGES[stage].html} nav={STAGES[stage].nav} router={STUB_ROUTER} onDone={(o) => onStage(stage, o)} /></div>}
     {result && <>
-      <p className={`selftest-status ${result.pass ? "pass" : "fail"}`} role="status">{result.pass ? "Passed. Live area apps are now on." : timedOut ? "Failed: the probe did not finish. Live area apps are off." : "Failed. Live area apps are off."}</p>
+      <p className={`selftest-status ${result.pass ? "pass" : result.mode === "approved-code" ? "approved" : "fail"}`} role="status">{result.pass ? `Passed. Live area apps are now on: ${MODE_LABEL.sealed}.` : result.mode === "approved-code" && version ? `Only the WebRTC checks failed. ${MODE_LABEL["approved-code"]}: apps run only while the code you approved is unchanged.` : timedOut ? "Failed: the probe did not finish. Live area apps are off." : "Failed. Live area apps are off."}</p>
       <ul className="selftest-list" aria-label="Self-test checks">{result.checks.map((c) => <li key={c.id} className={c.ok ? "pass" : "fail"}><span aria-hidden="true">{c.ok ? "✓" : "✗"}</span> {c.label}<span className="sr-only">{c.ok ? " passed" : " failed"}</span></li>)}</ul>
     </>}
   </div>;
