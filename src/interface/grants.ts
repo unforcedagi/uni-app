@@ -6,7 +6,8 @@
 
 export const GRANTS_KEY = "uni.interface.grants.v2";
 type StorageLike = Pick<Storage, "getItem" | "setItem" | "removeItem">;
-type Record_ = { scope: string; html: string; grantedAt: string };
+type GrantedUnder = "sealed" | "approved-code";
+type Record_ = { scope: string; html: string; grantedAt: string; grantedUnder: GrantedUnder };
 export type GrantStatus = "none" | "ok" | "updated";
 
 export function createGrantStore(storage: StorageLike | null = typeof localStorage === "undefined" ? null : localStorage) {
@@ -19,8 +20,8 @@ export function createGrantStore(storage: StorageLike | null = typeof localStora
       const v: unknown = JSON.parse(storage?.getItem(GRANTS_KEY) ?? "{}");
       if (v && typeof v === "object" && !Array.isArray(v)) {
         for (const [k, r] of Object.entries(v as Record<string, unknown>)) {
-          const rec = r as { scope?: unknown; html?: unknown; grantedAt?: unknown } | null;
-          if (rec && typeof rec.scope === "string" && typeof rec.html === "string") parsed.set(k, { scope: rec.scope, html: rec.html, grantedAt: typeof rec.grantedAt === "string" ? rec.grantedAt : "" });
+          const rec = r as { scope?: unknown; html?: unknown; grantedAt?: unknown; grantedUnder?: unknown } | null;
+          if (rec && typeof rec.scope === "string" && typeof rec.html === "string") parsed.set(k, { scope: rec.scope, html: rec.html, grantedAt: typeof rec.grantedAt === "string" ? rec.grantedAt : "", grantedUnder: rec.grantedUnder === "approved-code" ? "approved-code" : "sealed" });
         }
       }
     } catch { parsed.clear(); }
@@ -32,7 +33,9 @@ export function createGrantStore(storage: StorageLike | null = typeof localStora
       const r = read().get(noteId);
       return !r || r.scope !== scope ? "none" : r.html === html ? "ok" : "updated";
     },
-    grant(noteId: string, scope: string, html: string): void { read().set(noteId, { scope, html, grantedAt: new Date().toISOString() }); write(); },
+    /** The gate mode the grant was made under; a record without one (or with an unknown value) counts as `sealed`. */
+    grantedUnder(noteId: string): GrantedUnder | null { return read().get(noteId)?.grantedUnder ?? null; },
+    grant(noteId: string, scope: string, html: string, mode: GrantedUnder = "sealed"): void { read().set(noteId, { scope, html, grantedAt: new Date().toISOString(), grantedUnder: mode }); write(); },
     /** The user accepted the changed HTML: remember its hash. Never creates a grant. */
     acknowledge(noteId: string, html: string): void { const r = read().get(noteId); if (r) { r.html = html; write(); } },
     revoke(noteId: string): void { read().delete(noteId); write(); },

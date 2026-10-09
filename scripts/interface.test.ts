@@ -154,6 +154,17 @@ await check("grants: status is none / ok / updated (scope hash must match; an HT
   g.acknowledge("n1", "h2"); assert.equal(g.status("n1", "s1", "h2"), "ok");
   g.revoke("n1"); assert.equal(g.status("n1", "s1", "h2"), "none");
 });
+await check("T-74f: grants record the mode they were made under; old records and unknown values count as sealed", () => {
+  const st = memStore(); const g = grants.createGrantStore(st) as any;
+  g.grant("a", "s", "h"); assert.equal(g.grantedUnder("a"), "sealed");
+  g.grant("b", "s", "h", "approved-code"); assert.equal(g.grantedUnder("b"), "approved-code");
+  assert.equal((grants.createGrantStore(st) as any).grantedUnder("b"), "approved-code", "persisted");
+  assert.equal(g.grantedUnder("none"), null);
+  st.setItem(grants.GRANTS_KEY, JSON.stringify({ o: { scope: "s", html: "h" }, w: { scope: "s", html: "h", grantedUnder: "Approved-Code" } }));
+  const g2 = grants.createGrantStore(st) as any;
+  assert.equal(g2.grantedUnder("o"), "sealed"); assert.equal(g2.grantedUnder("w"), "sealed");
+  g2.acknowledge("b", "h2"); assert.equal(g.grantedUnder("b"), "approved-code", "accepting changed html keeps the mode");
+});
 await check("grants: persists in the injected storage; corrupt, old-format or hostile storage means not granted", () => {
   const s = memStore(); grants.createGrantStore(s).grant("n1", "s1", "h1");
   assert.equal(grants.createGrantStore(s).status("n1", "s1", "h1"), "ok");

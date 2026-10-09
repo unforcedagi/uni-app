@@ -143,6 +143,8 @@ export type BootOpts = {
   stripCsp?: boolean;
   /** Names of apps whose stored grant records an OLDER html hash (the app changed since it was allowed). */
   staleHtml?: string[];
+  /** Mode recorded in the seeded grants (default: the stored self-test mode). `legacy` leaves the field out, like an old record. */
+  grantedUnder?: 'sealed' | 'approved-code' | 'legacy';
   /** Serve the host document without the Tauri CSP header. */
   noHostCsp?: boolean;
   /** `getVersion()` rejects. */
@@ -155,7 +157,7 @@ export async function bootAreas(page: Page, variant: Variant = 'seed', opts: Boo
   const now = Math.floor(Date.now() / 1000);
   const data = {
     now, variant, selftest: opts.selftest ?? true, ipcLeak: opts.ipcLeak ?? false, hostile: hostileApp(opts.ports ?? { http: 9, udp: 9 }), benign: BENIGN, techne: seed('techne'), unforced: seed('unforced'),
-    apps: opts.apps ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null, mode: opts.mode ?? 'sealed',
+    apps: opts.apps ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null, mode: opts.mode ?? 'sealed', grantedUnder: opts.grantedUnder ?? (opts.mode ?? 'sealed'),
   };
   // Pre-granted apps: the grant key is the SHA-256 of the RESOLVED default needs plus the app's html.
   const preGrant = [
@@ -189,7 +191,7 @@ export async function bootAreas(page: Page, variant: Variant = 'seed', opts: Boo
     // The live-frame gate opens for this platform and version through a stored self-test pass.
     if (d.selftest && !localStorage.getItem('uni.areaApps.selftest.v1')) localStorage.setItem('uni.areaApps.selftest.v1', JSON.stringify({ platform: 'linux', passedAt: '2026-10-08T00:00:00Z', appVersion: 'dev', mode: d.mode, userAgent: d.passUa ?? navigator.userAgent }));
     if (d.granted && !localStorage.getItem('uni.interface.grants.v2')) {
-      localStorage.setItem('uni.interface.grants.v2', JSON.stringify(Object.fromEntries(Object.entries(d.grantSeed as Record<string, { scope: string; html: string }>).map(([id, g]) => [id, { ...g, grantedAt: '2026-10-08T00:00:00Z' }]))));
+      localStorage.setItem('uni.interface.grants.v2', JSON.stringify(Object.fromEntries(Object.entries(d.grantSeed as Record<string, { scope: string; html: string }>).map(([id, g]) => [id, { ...g, ...(d.grantedUnder === 'legacy' ? {} : { grantedUnder: d.grantedUnder }), grantedAt: '2026-10-08T00:00:00Z' }]))));
     }
     const U = 'a'.repeat(64);
     const area = (id: string, name: string, status: string, ch: string, purpose: string) => ({

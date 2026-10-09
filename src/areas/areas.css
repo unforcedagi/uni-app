@@ -66,6 +66,8 @@
 .suggestion-actions .pairing-secondary { min-height: 36px; padding: 4px 14px; }
 
 /* Stop / revoke and the updated notice: host UI in the bar above the sealed frame. */
+.area-mode-chip { margin-left: auto; font-size: 12px; padding: 2px 8px; border: 1px solid currentColor; border-radius: 999px; opacity: .8; cursor: help; white-space: nowrap; }
+.area-mode-chip + .area-bar-controls { margin-left: 8px; }
 .area-bar-controls { display: flex; flex-wrap: wrap; gap: 8px; margin-left: auto; }
 .area-bar-controls .pairing-secondary { min-height: 36px; padding: 4px 12px; font-size: 13px; }
 .area-bar.chromeless { flex-wrap: wrap; }
