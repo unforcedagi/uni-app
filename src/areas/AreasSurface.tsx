@@ -15,7 +15,8 @@ const USER_AGENT = currentUserAgent();
 const PLATFORM = platformName(USER_AGENT);
 
 /** The Uni tab: Uni itself at `{kind:"areas"}` (path null), any area or project under it at `{kind:"area", path}`. One page component for all. */
-export default function AreasSurface({ path, rooms, actions, roomFor, onRoom, onOpenArea, onConversations }: {
+export default function AreasSurface({ identity, path, rooms, actions, roomFor, onRoom, onOpenArea, onConversations }: {
+  identity: string | null;
   path: string | null; rooms: RoomInfo[]; actions: AreaActions;
   /** The host's room view for a room id (its messages and composer), when that room is the one loaded. */
   roomFor: (id: string | null | undefined) => AreaRoom | null;
@@ -25,7 +26,7 @@ export default function AreasSurface({ path, rooms, actions, roomFor, onRoom, on
   onOpenArea: (areaPath: string | null, name: string, room: string | null) => void;
   onConversations: () => void;
 }) {
-  const { data, error, loading } = useAreas();
+  const { data, error, loading } = useAreas(identity);
   const version = useAppVersion();
   const runtime = useWebviewRuntime();
   const stored = useStoredSelfTest();
@@ -48,6 +49,11 @@ export default function AreasSurface({ path, rooms, actions, roomFor, onRoom, on
   const tree = data?.tree;
   const kids = tree ? childrenOf(tree, node.path) : [];
   const up = isRoot ? null : tree?.nodes.get(parentPath(tree, node.path)) ?? null;
+  const status = <>
+    {data?.stale && <p className="areas-status" role="status">{error ? `Saved copy${data.savedAt ? ` from ${new Date(data.savedAt).toLocaleString()}` : ""} · couldn't refresh: ${error}` : "Saved copy · refreshing…"}</p>}
+    {!data && error && !isRoot && <p className="note-error" role="alert">Couldn't load areas: {error}</p>}
+    {!!data?.truncated.length && <p className="areas-status" role="status">{data.truncated.join(", ")}: showing first 200 notes; more may exist.</p>}
+  </>;
   const crumbs = isRoot ? undefined : <nav className="crumbs" aria-label="Where you are">
     <button type="button" className="crumb" onClick={toUni}>Uni</button>
     {(tree ? trail(tree, node.path) : [node]).map((n, i, all) => i === all.length - 1
@@ -65,5 +71,5 @@ export default function AreasSurface({ path, rooms, actions, roomFor, onRoom, on
   const today = data?.today;
   return <AreaView key={node.id} area={node} entry={data?.briefs[node.path] ?? null} now={now} channel={nodeRoom} onChannel={setPicked} mode={mode} roomName={roomName} actions={actions}
     room={roomFor(nodeRoom)} onConversations={onConversations} onBack={isRoot ? null : () => (up ? open(up) : toUni())} backLabel={up?.name ?? "Uni"}
-    crumbs={crumbs} lead={lead} kids={cards} freshAt={isRoot ? (today ? today.generatedAt ?? today.updatedAt : null) : undefined} />;
+    crumbs={crumbs} dataStatus={status} lead={lead} kids={cards} freshAt={isRoot ? (today ? today.generatedAt ?? today.updatedAt : null) : undefined} />;
 }

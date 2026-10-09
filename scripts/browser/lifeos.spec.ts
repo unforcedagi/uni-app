@@ -83,7 +83,7 @@ test.describe('Today with no briefs', () => {
 test.describe('device cache', () => {
   const area = (id: string, name: string, status: string) => ({ id, path: `Areas/${name}`, name, purpose: 'p', status, channels: [], rooms: [], kind: 'area', parent: null, since: null, title: name, body: `# ${name}`, metadata: {}, updatedAt: null });
   const cached = JSON.stringify({
-    v: 2, savedAt: Date.now() - 3600_000, areas: [area('a-techne', 'Techne', 'foreground')],
+    v: 2, owner: { identity: 'a'.repeat(64), vault: 'uni' }, savedAt: Date.now() - 3600_000, areas: [area('a-techne', 'Techne', 'foreground')],
     briefs: { 'Areas/Techne': { content: '## Now\nFROM THE DEVICE CACHE.\n\n## Needs you\n- cached need\n', generatedAt: null, updatedAt: null } }, today: null,
   });
 
@@ -92,6 +92,7 @@ test.describe('device cache', () => {
     await page.evaluate(() => { document.documentElement.dataset.t0 = String(performance.now()); });
     await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Uni', exact: true }).click();
     await expect(areaCard(page, 'Techne')).toContainText('FROM THE DEVICE CACHE.', { timeout: 500 });
+    await expect(page.locator('.areas-status')).toContainText('Saved copy · refreshing');
     const timing = await page.evaluate(() => (window as any).__areasTiming);
     expect(timing.fromCache).toBe(true);
     expect(timing.cacheMs).toBeLessThan(500);
@@ -108,6 +109,52 @@ test.describe('device cache', () => {
     await openAreasHome(page);
     await expect(areaCard(page, 'Techne')).toContainText('FROM THE DEVICE CACHE.');
     await expect(page.getByRole('alert')).toContainText("Couldn't load areas");
+    await openAreaPage(page, 'Techne', { app: false });
+    await expect(page.locator('.areas-status')).toContainText("couldn't refresh");
+  });
+
+  for (const tag of ['area-brief', 'area-today']) test(`failed ${tag} refresh retains savedAt and labels old data`, async ({ page }) => {
+    await bootAreas(page, 'seed', { briefs: true, queryFails: [tag], deviceCache: cached });
+    await openAreasHome(page);
+    await expect(page.locator('.areas-status')).toContainText("couldn't refresh");
+    await expect(page.locator('.areas-status')).toContainText(tag);
+    expect(await page.evaluate(() => JSON.parse(localStorage.getItem('uni.areas.cache.v2')!).savedAt)).toBe(JSON.parse(cached).savedAt);
+  });
+
+  test('another account never paints the saved copy', async ({ page }) => {
+    const other = JSON.parse(cached); other.owner.identity = 'b'.repeat(64);
+    await bootAreas(page, 'seed', { queryFails: ['area'], deviceCache: JSON.stringify(other) });
+    await openAreasHome(page);
+    await expect(page.getByText('FROM THE DEVICE CACHE.', { exact: false })).toHaveCount(0);
+    await expect(areaCard(page, 'Techne')).toHaveCount(0);
+  });
+
+  test('forget then pair account B clears disk and memory before any paint', async ({ page }) => {
+    await bootAreas(page, 'seed', { briefs: true });
+    await expect(areaCard(page, 'Techne')).toBeVisible();
+    await expect.poll(() => page.evaluate(() => localStorage.getItem('uni.areas.cache.v2'))).not.toBeNull();
+    await page.evaluate(() => {
+      const w = window as any; const original = w.__TAURI_INTERNALS__.invoke;
+      w.__TAURI_INTERNALS__.invoke = async (cmd: string, args: any) => {
+        if (cmd === 'get_identity') return 'b'.repeat(64);
+        if (cmd === 'pairing_start') return { sas: '000000' };
+        if (cmd === 'pairing_confirm') return { pubkey: 'b'.repeat(64) };
+        if (cmd === 'vault_query') throw 'account B offline';
+        return original(cmd, args);
+      };
+      localStorage.setItem('uni.areas.cache.v1', 'legacy private data');
+    });
+    await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Settings', exact: true }).click();
+    await page.getByRole('button', { name: 'Forget this device key', exact: true }).click();
+    await page.getByRole('button', { name: /Tap again to forget/ }).click();
+    await expect(page.locator('.pairing-card')).toBeVisible();
+    expect(await page.evaluate(() => [localStorage.getItem('uni.areas.cache.v1'), localStorage.getItem('uni.areas.cache.v2')])).toEqual([null, null]);
+    await page.getByRole('textbox', { name: 'Pairing link' }).fill('nostrpair://test');
+    await page.getByRole('button', { name: 'Start', exact: true }).click();
+    await page.getByRole('button', { name: 'Codes match', exact: true }).click();
+    await expect(page.getByRole('alert')).toContainText('account B offline');
+    await expect(areaCard(page, 'Techne')).toHaveCount(0);
+    await expect(page.locator('.today-needs')).not.toContainText('grant');
   });
 
   test('a first load that fails says so', async ({ page }) => {
@@ -350,4 +397,26 @@ test.describe('Uni is home, areas are a tree', () => {
     await expect(page.getByRole('heading', { name: 'Uni', level: 1 })).toBeVisible();
     await expect(areaCard(page, 'Techne')).toBeVisible({ timeout: 1500 });
   });
+});
+
+test('path brief beats a newer metadata-only note; limit is visible', async ({ page }) => {
+  await bootAreas(page, 'seed', { briefs: true });
+  await page.evaluate(() => {
+    const w = window as any; const original = w.__TAURI_INTERNALS__.invoke;
+    w.__TAURI_INTERNALS__.invoke = async (cmd: string, args: any) => {
+      const result = await original(cmd, args);
+      if (cmd === 'vault_query' && args.tag === 'area-brief') return [...result, ...Array.from({ length: 200 - result.length }, (_, i) => ({ id: `stray-${i}`, path: `Notes/stray-${i}`, metadata: { area: 'Techne' }, content: '## Now\nSTRAY BRIEF', updatedAt: '2099-01-01' }))];
+      return result;
+    };
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  // Reopen after a full reload is unnecessary: trigger a refresh beyond the debounce.
+  await page.clock.install();
+  await page.clock.fastForward(31000);
+  await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+  await expect.poll(async () => (await calls(page, 'vault_query')).length).toBeGreaterThanOrEqual(8);
+  await openAreaPage(page, 'Techne', { app: false });
+  await expect(page.locator('.brief-now')).toContainText('coop paperwork');
+  await expect(page.locator('.brief-now')).not.toContainText('STRAY BRIEF');
+  await expect(page.locator('.areas-status')).toContainText('showing first 200');
 });

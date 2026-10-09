@@ -39,7 +39,7 @@ const desktopQuery = `(min-width: ${DESKTOP_MIN}px)`;
 const subscribeDesktop = (f: () => void) => { const mq = window.matchMedia(desktopQuery); mq.addEventListener("change", f); return () => mq.removeEventListener("change", f); };
 const isDesktop = () => window.matchMedia(desktopQuery).matches;
 
-export default function AreaView({ area, entry, now, channel, onChannel, mode, roomName, actions, room, onBack, backLabel, onConversations, crumbs, lead, kids, freshAt }: {
+export default function AreaView({ area, entry, now, channel, onChannel, mode, roomName, actions, room, onBack, backLabel, onConversations, crumbs, lead, kids, freshAt, dataStatus }: {
   area: Area; mode: GateMode | "closed"; roomName: (id: string) => string; actions: AreaActions;
   /** The area's Brief (null: Uni hasn't written one) and the time it is read against. */
   entry: AreaBrief | null; now: number;
@@ -52,7 +52,7 @@ export default function AreaView({ area, entry, now, channel, onChannel, mode, r
   /** Uni (the top) only: reach the conversation list where the rail is out of reach (short landscape screens). */
   onConversations?: () => void;
   /** The page around the Brief: breadcrumb, Uni's Today in place of a Brief, the children, the freshness override. */
-  crumbs?: ReactNode; lead?: ReactNode; kids?: ReactNode; freshAt?: string | null;
+  crumbs?: ReactNode; lead?: ReactNode; kids?: ReactNode; freshAt?: string | null; dataStatus?: ReactNode;
 }) {
   // Uni itself (path "") has no app note to look up.
   const live = mode !== "closed" && area.path !== "";
@@ -189,7 +189,7 @@ export default function AreaView({ area, entry, now, channel, onChannel, mode, r
     <button type="button" role="tab" id="area-tab-brief" aria-selected={tab === "brief"} className={tab === "brief" ? "on" : ""} onClick={() => setTab("brief")}>Brief</button>
     <button type="button" role="tab" id="area-tab-app" aria-selected={tab === "app"} className={tab === "app" ? "on" : ""} onClick={(e) => { if (e.isTrusted) openAppTab(); }}>App</button>
   </nav> : null;
-  const withChat = (main: ReactNode, above: ReactNode, cls = "") => <div className={`area-view ${cls}`}>{header}{tabs}
+  const withChat = (main: ReactNode, above: ReactNode, cls = "") => <div className={`area-view ${cls}`}>{header}{tabs}{dataStatus}
     {decision === "run-notice" && <p className="area-updated" role="status">This app was updated since you allowed it. <button className="pairing-secondary area-accept" onClick={(e) => { if (e.isTrusted) accept(); }}>Accept</button></p>}
     {framed && theftNote && <p className="area-updated" role="status">This app took the keyboard from the chat. If it does that again it will be stopped.</p>}
     <ChatLayout framed={framed} onTheft={takeover} mode={layout} main={main} aboveMain={chatShown && room ? null : above}
