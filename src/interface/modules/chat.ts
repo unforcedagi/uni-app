@@ -2,7 +2,7 @@
 // A draft is a pending suggestion shown by the host (consent.tsx); this module
 // has no way to touch a composer, and nothing here can post.
 
-import { cleanText, hasOnly, LIMITS, lineCount, plain } from "../contract.ts";
+import { cleanText, hasOnly, LIMITS, lineCount, plain, stripHidden } from "../contract.ts";
 import type { UniModule } from "../router.ts";
 import type { SuggestionInput } from "../suggestions.ts";
 
@@ -14,6 +14,7 @@ export type ChatDeps = {
   roomName(room: string): string;
 };
 const MAX_CONTENT = 4000;
+const MAX_AUTHOR = 80;
 
 export function createChatModule(deps: ChatDeps): UniModule {
   return {
@@ -31,7 +32,7 @@ export function createChatModule(deps: ChatDeps): UniModule {
           const rooms = scopes["chat.read"] ?? [];
           const lists = await Promise.all(rooms.map((r) => deps.getMessages(r, limit).catch(() => [] as RoomMessage[])));
           const messages = lists.flat().sort((a, b) => b.ts - a.ts).slice(0, limit).map((m) => ({
-            id: m.ref, author: m.author_name || m.author.slice(0, 8), content: m.body.slice(0, MAX_CONTENT), created_at: new Date(m.ts * 1000).toISOString(),
+            id: m.ref, author: stripHidden(m.author_name || m.author.slice(0, 8)).slice(0, MAX_AUTHOR), content: stripHidden(m.body).slice(0, MAX_CONTENT), created_at: new Date(m.ts * 1000).toISOString(),
           }));
           return { messages };
         },

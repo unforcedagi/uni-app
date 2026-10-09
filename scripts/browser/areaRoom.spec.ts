@@ -284,6 +284,8 @@ test.describe('suggestions', () => {
     await expect(page.locator('.tab-chip'), 'no room tab opened: the composer is right there').toHaveCount(1);
     // a second suggestion goes after the draft
     if (!isDesktop(page)) await page.locator('.sheet-peek').click(); // put the sheet down to reach the interface
+    // the composer holds the keyboard (inert frame under a press catcher): one press hands it back to the app
+    await page.locator('.area-catcher').click({ timeout: 1500 }).catch(() => {}); // (already gone once the sheet is down)
     await f.locator('#t').fill('second thought'); await f.locator('#go').click();
     await bar.getByRole('button', { name: 'Add to draft' }).click();
     await expect(composer(page, 'Techne')).toHaveValue('Pairing on the bridge tonight\n\nsecond thought');
@@ -323,4 +325,98 @@ test.describe('screenshots', () => {
       });
     });
   }
+});
+
+// T-75b P1-1: a running interface must not take keyboard focus from the host's chat composer and read what is typed.
+// A frame can always focus itself from inside (window.focus()); the host takes the keyboard back and stops an app that does it again.
+// The thief reports every key it hears through the host (a vault search), which is visible after the frame is gone.
+const THIEF = `<!doctype html><html><body><input id="i"><script>
+document.addEventListener('keydown', function (e) { uni.vault.queryNotes({ search: e.key }).catch(function () {}); });
+setInterval(function () { document.getElementById('i').focus(); window.focus(); }, 5);
+</script></body></html>`;
+// An app that behaves: it logs the keys it is given and never asks for focus.
+const POLITE = `<!doctype html><html><body><input id="i"><pre id="log"></pre><script>
+var log = '';
+document.addEventListener('keydown', function (e) { log += e.key; document.getElementById('log').textContent = log; });
+</script></body></html>`;
+const SECRET = 'my password is hunter2';
+const heard = async (page: Page) => (await calls(page, 'vault_search')).map((c: any) => c.args.query).join('');
+
+test.describe('focus stays in the chat', () => {
+  test('an app that keeps taking the keyboard from the composer hears nothing and is stopped', async ({ page }) => {
+    await bootAreas(page, 'seed', { granted: false, apps: [{ name: 'Thief', html: THIEF, interface: iface([{ 'vault.read': 'area' }], 'side') }] });
+    await openArea(page, 'Thief');
+    await page.getByRole('button', { name: 'Allow' }).click();
+    await expect(frame(page).locator('#i')).toBeAttached();
+    if (!isDesktop(page)) await page.locator('.sheet-peek').click();
+    const box = composer(page, 'Techne');
+    await box.click();
+    // a person needs longer than this to start typing; the app has already tried, and been caught, by then
+    await expect(page.locator('iframe.area-frame')).toHaveCount(0);
+    await expect(page.locator('.area-quiet').filter({ hasText: 'kept taking the keyboard' })).toBeVisible();
+    await page.keyboard.type(SECRET, { delay: 25 });
+    await expect(box).toHaveValue(SECRET);
+    expect(await heard(page), 'the app heard no key').toBe('');
+  });
+
+  test('a polite app: the composer keeps the keyboard while typing, and pressing on the app hands it over', async ({ page }) => {
+    await bootAreas(page, 'seed', { granted: false, apps: [{ name: 'Polite', html: POLITE, interface: iface([{ 'vault.read': 'area' }], 'side') }] });
+    await openArea(page, 'Polite');
+    await page.getByRole('button', { name: 'Allow' }).click();
+    await expect(frame(page).locator('#log')).toBeAttached();
+    if (!isDesktop(page)) await page.locator('.sheet-peek').click();
+    const box = composer(page, 'Techne');
+    await box.click();
+    await page.keyboard.type(SECRET, { delay: 10 });
+    await expect(box).toHaveValue(SECRET);
+    expect(await frame(page).locator('#log').textContent(), 'the frame heard no keys').toBe('');
+    if (!isDesktop(page)) await page.locator('.sheet-peek').click(); // put the sheet down
+    // a real press lands on the overlay above the frame (Playwright's click would refuse to hit it)
+    const fb = (await page.locator('iframe.area-frame').boundingBox())!;
+    await page.mouse.click(fb.x + 20, fb.y + 20);
+    await page.waitForTimeout(100); // a person's next key is not within a frame of the press
+    await page.keyboard.type('xyz', { delay: 25 });
+    await expect(frame(page).locator('#log')).toHaveText('xyz');
+    if (!isDesktop(page)) await page.locator('.sheet-peek').click();
+    await expect(box).toHaveValue(SECRET);
+  });
+});
+
+// T-75b P2-1: a suggestion from an interface in an area without a room still has somewhere to show.
+test.describe('suggestions without a room', () => {
+  test('the bar sits above the interface when the area has no room', async ({ page }) => {
+    const OPEN = `<!doctype html><html><body><script>uni.note.open('Areas/NoRoom/Alpha').catch(function(){});</script></body></html>`;
+    await bootAreas(page, 'seed', { granted: false, apps: [{ name: 'NoRoom', html: OPEN, channel: '', interface: iface([{ 'vault.read': 'area' }]) }] });
+    await openArea(page, 'NoRoom');
+    await page.getByRole('button', { name: 'Allow' }).click();
+    await expect(page.locator('.area-chat')).toContainText('no room yet');
+    await expect(page.locator('.suggestion-bar .suggestion')).toHaveCount(1);
+    await expect(page.locator('.suggestion-bar .suggestion')).toBeVisible();
+  });
+});
+
+test.describe('the area bar and the panes', () => {
+  test('360 px: the bar is one row; Stop and Revoke are in a menu', async ({ page }) => {
+    test.skip(isDesktop(page), 'phone only');
+    await page.setViewportSize({ width: 360, height: 740 });
+    await bootAreas(page, 'seed');
+    await openArea(page, 'Techne');
+    const bar = (await page.locator('.area-bar').boundingBox())!;
+    expect(bar.height, 'one row').toBeLessThanOrEqual(60);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(360);
+    await expect(page.getByRole('button', { name: 'Stop app' })).toBeHidden();
+    await page.getByRole('button', { name: 'App controls' }).click();
+    await expect(page.getByRole('button', { name: 'Stop app' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Revoke access' })).toBeVisible();
+    await page.getByRole('button', { name: 'Stop app' }).click();
+    await expect(page.locator('iframe.area-frame')).toHaveCount(0);
+  });
+
+  test('desktop: the panes are labelled App and Chat, drawn by Uni', async ({ page }) => {
+    test.skip(!isDesktop(page), 'desktop only');
+    await bootAreas(page, 'seed');
+    await openArea(page, 'Techne');
+    await expect(page.locator('.area-main .pane-label')).toHaveText('App');
+    await expect(page.locator('.area-chat.side .pane-label')).toHaveText('Chat, drawn by Uni');
+  });
 });

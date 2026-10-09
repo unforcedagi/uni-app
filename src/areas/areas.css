@@ -80,7 +80,9 @@
 
 /* The area's room beside (or under) the interface. The chat pane is the app's own room view: message list and composer. */
 .area-split { --peek: 56px; flex: 1; min-height: 0; display: flex; position: relative; }
-.area-main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; }
+.area-main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; position: relative; }
+.area-stage { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.area-catcher { position: absolute; inset: 0; z-index: 5; background: transparent; }
 .area-chat { min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--bg); }
 .area-chat .message-list { flex: 1; min-height: 0; }
 .area-chat-empty { margin: 0; padding: 22px 20px; text-align: center; }
@@ -112,3 +114,20 @@
 /* `clip`, not `hidden`: the room's list scrolls its end into view (also while the sheet is down), and a hidden box would scroll along. */
 .area-view, .area-split, .area-chat, .sheet-body { overflow: hidden; overflow: clip; }
 .area-view { overflow-y: clip; }
+
+/* Which side is which: the app draws inside its frame; the chat is the host's. */
+.pane-label { flex: none; margin: 0; padding: 3px 12px; font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: var(--text-soft); border-bottom: 1px solid var(--line); background: var(--card-lift); }
+/* One row on a narrow phone: Stop / Revoke move into a menu. */
+.area-menu-toggle { display: none; }
+.area-app-actions { display: contents; }
+@media (max-width: 400px) {
+  .area-bar { position: relative; flex-wrap: nowrap; gap: 6px; padding-left: 10px; padding-right: 10px; }
+  .area-bar.chromeless { flex-wrap: nowrap; }
+  .area-bar .note-back { padding: 4px 8px; }
+  .area-bar-controls { flex-wrap: nowrap; margin-left: auto; min-width: 0; gap: 6px; }
+  .area-bar-controls .area-zoom { max-width: 7.5em; }
+  .area-menu-toggle { display: inline-flex; align-items: center; min-width: 36px; justify-content: center; }
+  .area-app-actions { display: none; }
+  .area-app-actions.open { display: flex; flex-direction: column; gap: 6px; position: absolute; right: 10px; top: calc(100% + 4px); z-index: 20; padding: 8px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); box-shadow: 0 6px 24px rgba(0, 0, 0, .18); }
+  .area-bar .area-mark { display: none; }
+}
