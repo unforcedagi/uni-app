@@ -29,9 +29,22 @@ function vaultClientKit(): Plugin {
   };
 }
 
+// T-76 only (UNI_T76=1): WebKitGTK's Tauri makes `window.__TAURI_INTERNALS__` read-only, so the real-webview harness cannot
+// replace it with the Playwright fixture's mock. This build points @tauri-apps/* at `window.__T76_MOCK__` when it is set.
+function t76Mock(): Plugin {
+  return {
+    name: "t76-tauri-mock",
+    enforce: "pre",
+    transform(code, id) {
+      if (!/@tauri-apps[+/](api|plugin-[^/]+)/.test(id) || /mocks\.js/.test(id) || !code.includes("__TAURI")) return null;
+      return code.replace(/window\.__TAURI_INTERNALS__/g, "(window.__T76_MOCK__ || window.__TAURI_INTERNALS__)").replace(/window\.__TAURI_EVENT_PLUGIN_INTERNALS__/g, "(window.__T76_MOCK_EVT__ || window.__TAURI_EVENT_PLUGIN_INTERNALS__)");
+    },
+  };
+}
+
 // https://vitejs.dev/config/
 export default defineConfig(async () => ({
-  plugins: [react(), vaultClientKit()],
+  plugins: [react(), vaultClientKit(), ...(process.env.UNI_T76 === "1" ? [t76Mock()] : [])],
   clearScreen: false,
   server: {
     port: 1420,

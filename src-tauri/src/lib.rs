@@ -1512,6 +1512,8 @@ async fn android_update_manifest() -> Result<AndroidUpdateManifest, String> {
 
 #[cfg(desktop)]
 mod desktop_log;
+#[cfg(all(debug_assertions, target_os = "linux"))]
+mod t76;
 #[cfg(mobile)]
 mod mobile;
 mod pair_source;
@@ -1593,12 +1595,18 @@ pub fn run() {
             }
             #[cfg(mobile)]
             mobile::setup(_app);
+            #[cfg(all(debug_assertions, target_os = "linux"))]
+            t76::replace_window(_app)?;
             #[cfg(target_os = "linux")]
             disable_webrtc(_app);
             tracing::info!(version = %_app.package_info().version, "setup complete; opening window");
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            #[cfg(all(debug_assertions, target_os = "linux"))]
+            t76::t76_write,
+            #[cfg(all(debug_assertions, target_os = "linux"))]
+            t76::t76_read,
             get_rooms,
             get_messages,
             get_members,
