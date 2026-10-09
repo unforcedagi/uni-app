@@ -127,6 +127,8 @@ type Variant = 'seed' | 'test';
 
 export type BootOpts = {
   selftest?: boolean; ipcLeak?: boolean;
+  /** The mode of the seeded self-test record (default: a sealed pass). */
+  mode?: 'sealed' | 'approved-code';
   ports?: Ports;
   /** Extra area apps (an `area` note plus an html `app` note each). `interface` is the manifest in the app note's metadata. */
   apps?: { name: string; html: string; interface?: unknown }[];
@@ -153,7 +155,7 @@ export async function bootAreas(page: Page, variant: Variant = 'seed', opts: Boo
   const now = Math.floor(Date.now() / 1000);
   const data = {
     now, variant, selftest: opts.selftest ?? true, ipcLeak: opts.ipcLeak ?? false, hostile: hostileApp(opts.ports ?? { http: 9, udp: 9 }), benign: BENIGN, techne: seed('techne'), unforced: seed('unforced'),
-    apps: opts.apps ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null,
+    apps: opts.apps ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null, mode: opts.mode ?? 'sealed',
   };
   // Pre-granted apps: the grant key is the SHA-256 of the RESOLVED default needs plus the app's html.
   const preGrant = [
@@ -185,7 +187,7 @@ export async function bootAreas(page: Page, variant: Variant = 'seed', opts: Boo
     const w = window as any;
     w.__calls = [];
     // The live-frame gate opens for this platform and version through a stored self-test pass.
-    if (d.selftest && !localStorage.getItem('uni.areaApps.selftest.v1')) localStorage.setItem('uni.areaApps.selftest.v1', JSON.stringify({ platform: 'linux', passedAt: '2026-10-08T00:00:00Z', appVersion: 'dev', userAgent: d.passUa ?? navigator.userAgent }));
+    if (d.selftest && !localStorage.getItem('uni.areaApps.selftest.v1')) localStorage.setItem('uni.areaApps.selftest.v1', JSON.stringify({ platform: 'linux', passedAt: '2026-10-08T00:00:00Z', appVersion: 'dev', mode: d.mode, userAgent: d.passUa ?? navigator.userAgent }));
     if (d.granted && !localStorage.getItem('uni.interface.grants.v2')) {
       localStorage.setItem('uni.interface.grants.v2', JSON.stringify(Object.fromEntries(Object.entries(d.grantSeed as Record<string, { scope: string; html: string }>).map(([id, g]) => [id, { ...g, grantedAt: '2026-10-08T00:00:00Z' }]))));
     }

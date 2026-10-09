@@ -185,8 +185,9 @@ What each part really guarantees:
   probe-created child frame; constructible means fail) is what keeps the gate closed otherwise.
   - Linux (WebKitGTK): `enable-webrtc` is off by default; `src-tauri` also sets it off explicitly at
     startup (`disable_webrtc` in `lib.rs`). Compiles; behaviour on a running Tauri bundle unverified.
-  - Android WebView (Chromium) and macOS WKWebView have WebRTC: the self-test is expected to fail there,
-    so live apps stay off until a native switch exists. Not yet implemented.
+  - Android WebView (Chromium) and macOS WKWebView have WebRTC: the `webrtc` and `webrtcChild` checks fail
+    there. That is no longer a closed gate by itself: see **Approved-code mode** below. A native switch to
+    turn WebRTC off is still not implemented.
 - **In-process, so an app can freeze Uni.** The frame shares the host's renderer, so `for(;;){}`, an
   allocation loop or a DOM bomb freezes the whole app on Chromium and WebKit (reproduced in review). The
   message limiter cannot help; there is no in-process fix. Mitigations shipped: the grant prompt says so,
@@ -201,6 +202,29 @@ What each part really guarantees:
   or on `""` where a write does not persist.
 - **Consent**: the frame cannot reach the host UI. `chat.draft` and `note.open` cannot act on their own.
 
-Live apps run only where the in-app self-test (Settings → Run sandbox self-test) has passed for this
+Live apps run only where the in-app self-test (Settings → Run sandbox self-test) has a stored result for this
 platform, app version and webview user agent, or where the platform is listed in `LIVE_AREA_PLATFORMS`
-(`src/interface/selftest/gate.ts`, empty by default). A failed re-run revokes the pass.
+(`src/interface/selftest/gate.ts`, empty by default). A re-run that fails for any reason other than the two
+WebRTC checks revokes the stored result. `gateMode()` returns `sealed`, `approved-code` or `closed`.
+
+### Approved-code mode (T-74e)
+
+| Stored self-test result | Gate mode | An app runs when |
+|---|---|---|
+| every check passed (or the platform is in `LIVE_AREA_PLATFORMS`) | **Sealed** | grant status `ok`, or `updated` (runs, with the host's "updated since you allowed it" line and **Accept**) |
+| only `webrtc` / `webrtcChild` failed, every other check reported exactly `true` | **Approved code only (WebRTC present)** | grant status `ok` only |
+| WebRTC and any other check failed or went unreported, or no result, or a different version, platform or webview | closed | never |
+
+In approved-code mode an app whose HTML hash differs from the one stored at approval (status `updated`) does
+**not** run. The area shows the grant prompt again with a host-rendered line, "This app's code changed since you
+allowed it. On this device apps can reach the network through WebRTC, so only code you've approved runs.", and
+**Allow this version** / **Not now**. Nothing runs until **Allow this version** stores the new hash. A
+never-approved app gets the ordinary first-open prompt. Settings shows the mode as "Sealed" or
+"Approved code only (WebRTC present)"; the result is stored with a `mode` field (a record without one is read
+as `sealed`).
+
+**Threat accepted.** WebRTC ignores CSP, so an approved app that was itself hostile could exfiltrate over it
+(for example in TURN credentials; see above). The mode accepts that because it only ever runs code the user
+has approved, and the only apps approved are ones Aaron or Uni wrote. It does not defend against a hostile app
+the user approves, nor against a note edited and re-approved without reading it; the re-prompt on every code
+change is the control. Every other seal (CSP, no IPC, no storage, no navigation) is still required.

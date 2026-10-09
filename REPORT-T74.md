@@ -189,3 +189,42 @@ emoji sequence" and "every variation selector" phrasing is gone.
 | Playwright Chromium `playwright.areas.config.ts` (phone and desktop) | 125 passed, 1 skipped (pre-existing), exit 0 |
 | Playwright WebKit (`playwright.interface-webkit.config.ts`) | not run this round |
 | `cargo check`, Android target | not run; no Rust changed |
+
+# Round 5 (T-74e): approved-code mode
+
+Aaron approved the rule on 2026-10-09. Where the stored self-test result fails ONLY the WebRTC checks (`webrtc`,
+`webrtcChild`) and every other check reported exactly `true`, the gate opens in mode `approved-code`; any other
+failure keeps it closed as before.
+
+| Piece | Change |
+|---|---|
+| `probe.ts` | `evaluateProbe` returns `mode`: `sealed` (all pass), `approved-code` (only WebRTC fails), `failed` (anything else, including missing evidence) |
+| `gate.ts` | stored record carries `mode` (old records parse as `sealed`); `gateMode()` → `sealed`/`approved-code`/`closed`; `runDecision(mode, status)`; `liveAreaApps` is now `gateMode !== closed` |
+| `SelfTest.tsx` | stores a result for `approved-code` too; shows "Sealed" vs "Approved code only (WebRTC present)" |
+| `AreaView.tsx`, `grantPrompt.tsx` | approved-code + `updated` → grant prompt with the host line and **Allow this version** / **Not now**; sealed keeps notice + Accept |
+| `docs/interfaces.md` | the mode, the decision table, the accepted threat |
+
+Red first: all 4 new unit checks failed, and 4 e2e cases failed before the change (approved-code label after a real
+run, the Sealed label, the re-ask prompt, and Not now on a changed app). Four e2e cases passed on the old code
+(approved app runs, never-approved prompt, full-pass behaviour, WebRTC + other failure closed): they guard against
+regressions rather than prove the change.
+
+Tests: unit decision tables in `scripts/areasR3.test.ts` (all pass / only webrtc / webrtc + another / no result /
+stale version, webview / unparsed record); e2e in `scripts/browser/interface.spec.ts` (real self-test on Chromium
+→ stored `approved-code`; WebRTC + `ipcLeak` → closed, nothing stored, no frame; approved app runs; edited HTML
+re-asks with the line and runs nothing until Allow this version, then runs and is remembered across reload; Not now
+runs nothing; a full-pass platform keeps the updated notice + Accept). The existing "self-test fails on WebRTC" e2e
+was changed to the new expected outcome.
+
+Not done / caveats: no Android or macOS device run. A run in the Android WebView is the only proof the other checks
+pass there. Needs an independent SHIP/NO-SHIP review.
+
+### Gates (round 5 tree)
+
+| Gate | Result |
+|---|---|
+| `tsc --noEmit` | exit 0 |
+| `npm test` | exit 0, `interface: ok` |
+| Playwright Chromium areas config (phone + desktop; run on a temporary copy with another port because 1435 was held by another worktree's run) | 141 passed, 1 skipped (pre-existing) |
+| Playwright WebKit (docker, `playwright.interface-webkit.config.ts`) | 70 passed, 1 skipped on the second run. The first run had 1 failure, "first open asks in plain words…" at the Allow click; it passed alone and on the full rerun. Cause not identified (load from a concurrent container is a guess) |
+| `cargo check` (src-tauri, Linux) | passes; no Rust changed |

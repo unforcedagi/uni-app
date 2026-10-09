@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import AreasHome, { type RoomInfo } from "./AreasHome";
 import AreaView, { type AreaActions } from "./AreaView";
-import { currentUserAgent, liveAreaApps, platformName } from "../interface/selftest/gate";
+import { currentUserAgent, gateMode, platformName } from "../interface/selftest/gate";
 import { useAppVersion } from "../interface/selftest/useAppVersion";
 import { useAreas } from "./useAreas";
 import { markStarted } from "./appRun";
@@ -19,11 +19,11 @@ export default function AreasSurface({ path, rooms, actions, onOpenArea, onBack 
   const version = useAppVersion();
   const stored = useStoredSelfTest();
   // Live: a self-test pass (or a revoke) updates an already-open area without a remount.
-  const live = useMemo(() => liveAreaApps(PLATFORM, version, stored, USER_AGENT), [version, stored]);
+  const mode = useMemo(() => gateMode(PLATFORM, version, stored, USER_AGENT), [version, stored]);
   const area = path ? data?.areas.find((a) => a.path === path) : null;
   const roomName = useMemo(() => (id: string) => rooms.find((r) => r.id === id)?.name ?? "room", [rooms]);
   if (!path) return <AreasHome areas={data?.areas ?? []} rooms={rooms} loading={loading} error={error} onOpen={(a) => { markStarted(a.path); onOpenArea(a.path, a.name); }} />;
   if (!area) return <div className="areas-home"><button className="note-back" onClick={onBack}><span className="note-back-arrow" aria-hidden="true">←</span><span className="note-back-label">Areas</span></button>
     <p className="empty">{loading ? "Opening area…" : error ? `Couldn't load: ${error}` : "This area no longer exists."}</p></div>;
-  return <AreaView key={area.id} area={area} rows={data!.rows} live={live} roomName={roomName} actions={actions} onBack={onBack} />;
+  return <AreaView key={area.id} area={area} rows={data!.rows} mode={mode} roomName={roomName} actions={actions} onBack={onBack} />;
 }

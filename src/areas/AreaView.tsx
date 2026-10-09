@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { NoteRenderer } from "@openparachute/surface-render";
+import { runDecision, type GateMode } from "../interface/selftest/gate";
 import InterfaceFrame from "../interface/frame";
 import GrantPrompt from "../interface/grantPrompt";
 import SuggestionBar from "../interface/consent";
@@ -32,10 +33,11 @@ export type AreaActions = {
   compose(channel: string, text: string): void;
 };
 
-export default function AreaView({ area, rows, live, roomName, actions, onBack }: {
-  area: Area; rows: PathRow[]; live: boolean; roomName: (id: string) => string; actions: AreaActions; onBack: () => void;
+export default function AreaView({ area, rows, mode, roomName, actions, onBack }: {
+  area: Area; rows: PathRow[]; mode: GateMode | "closed"; roomName: (id: string) => string; actions: AreaActions; onBack: () => void;
 }) {
   const appRow = useMemo(() => findAppRow(rows, area.path), [rows, area.path]);
+  const live = mode !== "closed";
   const [app, setApp] = useState<AppNote | null>(null);
   const [appError, setAppError] = useState(false);
   const [declined, setDeclined] = useState(false);
@@ -65,8 +67,10 @@ export default function AreaView({ area, rows, live, roomName, actions, onBack }
     return () => { on = false; };
   }, [app, manifest, grant, area.path]);
   const status = app && keys ? grants.status(app.id, keys.scope, keys.html) : "none";
-  const granted = status !== "none";
-  // Only the HTML changed: it runs, and the host says so until the user taps Accept (which stores the new hash).
+  // Sealed: a changed app runs with a notice until Accept. Approved-code: it does not run; it asks again.
+  const decision = runDecision(mode, status);
+  const granted = decision === "run" || decision === "run-notice";
+  const codeChanged = decision === "ask-updated";
   const running = isStarted(area.path);
   // Values that change under a running app (new room names, new action callbacks) must not recreate its session.
   const roomNameRef = useRef(roomName); roomNameRef.current = roomName;
@@ -106,10 +110,10 @@ export default function AreaView({ area, rows, live, roomName, actions, onBack }
   </header>;
 
   if (framed) return <div className="area-view framed">{header}
-    {status === "updated" && <p className="area-updated" role="status">This app was updated since you allowed it. <button className="pairing-secondary area-accept" onClick={(e) => { if (e.isTrusted) accept(); }}>Accept</button></p>}
+    {decision === "run-notice" && <p className="area-updated" role="status">This app was updated since you allowed it. <button className="pairing-secondary area-accept" onClick={(e) => { if (e.isTrusted) accept(); }}>Accept</button></p>}
     <SuggestionBar store={suggestions} appName={name} roomName={roomName} />
     <InterfaceFrame html={app!.html} title={`${name} app`} router={router} grant={grant} ready={ready} /></div>;
-  if (asking && manifest?.ok) return <div className="area-view">{header}<GrantPrompt name={name} lines={describeNeeds(manifest.manifest.needs, ctx, roomName)}
+  if (asking && manifest?.ok) return <div className="area-view">{header}<GrantPrompt name={name} codeChanged={codeChanged} lines={describeNeeds(manifest.manifest.needs, ctx, roomName)}
     onAllow={() => { grants.grant(app!.id, keys!.scope, keys!.html); markStarted(area.path); bump(); }} onNotNow={() => setDeclined(true)} /></div>;
   return <div className="area-view">{header}<DefaultArea area={area} actions={actions} roomName={roomName} pending={live && !!appRow && !appError && !app}
     onOpenApp={idle ? start : null} onRevoke={idle ? revoke : null}
