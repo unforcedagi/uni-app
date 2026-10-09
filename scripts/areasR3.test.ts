@@ -123,6 +123,17 @@ await check("T-74e gate decision table: all pass / only webrtc fails / webrtc + 
   assert.equal(g("mac", "9", null, "", ["mac"]), "sealed", "the proven constant is sealed");
   assert.equal(gate.liveAreaApps("linux", "1.2.3", stored("approved-code") as Any, UA2, []), true);
 });
+await check("T-77b the pass key includes the wry/tauri runtime: a change closes the gate", () => {
+  const g = gate.gateMode as Any;
+  const rt = { ...stored("sealed"), runtime: "wry 0.55.1 tauri 2.11.6" };
+  assert.equal(g("linux", "1.2.3", rt, UA2, [], "wry 0.55.1 tauri 2.11.6"), "sealed");
+  assert.equal(g("linux", "1.2.3", rt, UA2, [], "wry 0.56.0 tauri 2.11.6"), "closed", "wry bumped");
+  assert.equal(g("linux", "1.2.3", rt, UA2, [], "wry 0.55.1 tauri 2.12.0"), "closed", "tauri bumped");
+  assert.equal(g("linux", "1.2.3", stored("sealed"), UA2, [], "wry 0.55.1 tauri 2.11.6"), "closed", "a pass stored without a runtime re-runs");
+  assert.equal(g("linux", "1.2.3", rt, UA2, [], null), "closed", "runtime unknown stays closed");
+  assert.equal(g("linux", "1.2.3", rt, UA2, []), "sealed", "callers that do not pass a runtime are unchanged");
+  assert.equal(gate.parseSelfTest(JSON.stringify(rt))?.runtime, "wry 0.55.1 tauri 2.11.6", "parse keeps the runtime");
+});
 await check("T-74e parse/store keep the mode; only the two modes are accepted", () => {
   assert.equal(gate.parseSelfTest(JSON.stringify(stored("approved-code")))?.mode, "approved-code");
   assert.equal(gate.parseSelfTest(JSON.stringify(stored()))?.mode, "sealed");

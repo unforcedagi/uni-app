@@ -264,3 +264,18 @@ other seal (CSP, no IPC, no storage, no navigation) is still required.
 `outerHTML`, `insertAdjacentHTML` or `document.write` with data. Use `textContent` and DOM nodes. The shipped seed
 apps contain none of these. Follow-up, not done in this round: a nonce- or hash-based `script-src` in approved-code
 mode, so inline handlers injected from data do not run (the frame CSP is still `script-src 'unsafe-inline'`).
+
+### Host CSP trade-off and guards (T-77b)
+
+The host CSP is `frame-src about:` only: `dangerousDisableAssetCspModification: ["script-src"]` stops Tauri adding
+`'self'` and inline-script hashes, because a `srcdoc` frame inherits the embedder's policy and its inline scripts
+would otherwise be blocked. The cost: the host has **no `script-src`**, and `withGlobalTauri` is on, so any HTML sink
+in `src/` would be script execution with the full Tauri command surface. Guard: `scripts/htmlSinks.test.ts` (part of
+`npm test`) fails on `dangerouslySetInnerHTML`, `.innerHTML =`, `insertAdjacentHTML`, `document.write`, `rehype-raw`,
+`allowDangerousHtml` or a `highlight=` prop anywhere in `src/` (`@openparachute/surface-render` renders `highlight`
+output as HTML). There is no allowlist entry; add one only with a written justification in that file.
+
+On Linux the webkit `ipc` message handler is removed (`close_ipc_handler`, any new window must call it) and the
+self-test pass is keyed on app version, user agent and the wry/Tauri versions (`webview_runtime`). If `ipc://` ever
+fails, Tauri's postMessage fallback throws and invokes stay dead; Uni then shows "Uni lost its connection to the app
+core. Restart Uni." (`src/ipcLost.ts`).

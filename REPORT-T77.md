@@ -170,3 +170,15 @@ Build: `UNI_T76=1 node node_modules/vite/bin/vite.js build`; `npm run tauri buil
   }
 }
 ```
+
+## Round 2 (T-77b): review follow-ups
+
+Red first, then green. Gates at the end: `tsc --noEmit` ok, `npm test` exit 0 (0 FAIL), `cargo check` in `src-tauri` ok, Playwright areas config on Chromium (port 1435 free): **196 passed, 6 skipped, 0 failed** (the skips are the viewport-conditional phone/desktop specs). Not re-run: the real-WebKitGTK harness (no Rust runtime code that the sealed-frame probe exercises changed except the logging and signature of `close_ipc_handler`).
+
+- **P2-1** `scripts/htmlSinks.test.ts`, added to `npm test`. Red: a planted `src/__plant.tsx` with `dangerouslySetInnerHTML` and `el.innerHTML =` failed it (exit 1, both named); removed, it passes (exit 0). It scans `src/` for `dangerouslySetInnerHTML`, `.innerHTML =`, `insertAdjacentHTML`, `document.write`, `rehype-raw`, `allowDangerousHtml`, `highlight=`. No existing use, so the allowlist is empty. Trade-off recorded in `docs/interfaces.md` ("Host CSP trade-off and guards").
+- **P2-2** `close_ipc_handler` now `tracing::warn!`s when `with_webview` errs or the webview has no user content manager. The stored pass gains a `runtime` field ("wry X tauri Y"), checked by `gateMode`/`liveAreaApps` through a new optional last parameter (`undefined` = not checked, `null` or a mismatch or a pass stored without one = closed). New command `webview_runtime` (wry version read from `Cargo.lock` by `build.rs`, Tauri from `tauri::VERSION`), hook `useWebviewRuntime`, used by `AreasSurface` and `SelfTest`. Unit test in `scripts/areasR3.test.ts` (red before: failed; green after). Consequence: every existing stored pass has no runtime, so each user re-runs the self-test once. The Playwright fixture now mocks `webview_runtime` and stores the matching `runtime`.
+- **P3-1** `src/ipcLost.ts`: on Linux only, the first unhandled `error`/`unhandledrejection` that is the missing `messageHandlers.ipc` TypeError shows the toast "Uni lost its connection to the app core. Restart Uni." Unit test `scripts/ipcLost.test.ts` (red before, green after) covers the message matcher, not the live event path on a real webview (not observed). One line in `docs/interfaces.md`.
+- **P3-2** `close_ipc_handler(&WebviewWindow)`, doc comment says any new window builder must call it; `setup` loops over `webview_windows()`.
+- **P3-3** `scripts/check-release-dist.sh` (deletes `dist`, `unset UNI_T76`, `npm run build:vite`, fails if `__T76_MOCK` in `dist/assets`). It uses `npm run` because `pnpm` fails in this worktree's npm-installed `node_modules`; the script is the same `tsc && vite build`. Wired in as `beforeBuildCommand` in `src-tauri/tauri.conf.json`, so every Tauri build (Linux, Mac workflow, Android in `publish.sh`) goes through it; noted in `docs/release.md`. Red: a variant that leaves `UNI_T76=1` set exited 1 with the leak message. `dist/` was then rebuilt cleanly: 0 files contain `__T76_MOCK`.
+
+Not verified: `beforeBuildCommand` through a real `tauri build` on Mac/Android (cwd assumed to be the repo root, as it is for `pnpm build:vite`).

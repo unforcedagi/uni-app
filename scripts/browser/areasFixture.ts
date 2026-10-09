@@ -193,7 +193,7 @@ export async function bootAreas(page: Page, variant: Variant = 'seed', opts: Boo
     w.__cbs = [];
     w.__listeners = {};
     // The live-frame gate opens for this platform and version through a stored self-test pass.
-    if (d.selftest && !localStorage.getItem('uni.areaApps.selftest.v1')) localStorage.setItem('uni.areaApps.selftest.v1', JSON.stringify({ platform: 'linux', passedAt: '2026-10-08T00:00:00Z', appVersion: 'dev', mode: d.mode, userAgent: d.passUa ?? navigator.userAgent }));
+    if (d.selftest && !localStorage.getItem('uni.areaApps.selftest.v1')) localStorage.setItem('uni.areaApps.selftest.v1', JSON.stringify({ platform: 'linux', passedAt: '2026-10-08T00:00:00Z', appVersion: 'dev', runtime: 'wry test tauri test', mode: d.mode, userAgent: d.passUa ?? navigator.userAgent }));
     if (d.granted && !localStorage.getItem('uni.interface.grants.v2')) {
       localStorage.setItem('uni.interface.grants.v2', JSON.stringify(Object.fromEntries(Object.entries(d.grantSeed as Record<string, { scope: string; html: string }>).map(([id, g]) => [id, { ...g, ...(d.grantedUnder === 'legacy' ? {} : { grantedUnder: d.grantedUnder }), grantedAt: '2026-10-08T00:00:00Z' }]))));
     }
@@ -255,6 +255,7 @@ export async function bootAreas(page: Page, variant: Variant = 'seed', opts: Boo
       invoke: async (cmd: string, args: any) => {
         w.__calls.push({ cmd, args });
         switch (cmd) {
+          case 'webview_runtime': return 'wry test tauri test';
           case 'plugin:app|version': if (d.versionFails) throw 'version unavailable'; return 'dev';
           case 'plugin:event|listen': (w.__listeners[args.event] ??= []).push(args.handler); return args.handler;
           case 'identity_status': return { paired: true, pubkey: U };
