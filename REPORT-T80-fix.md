@@ -42,3 +42,11 @@ Test-first evidence: the new payload unit test failed on the metadata-only Techn
 Validation: `npx tsc --noEmit` and `npm test` passed. The strengthened payload unit test also passed independently. Full browser results are recorded below. No Docker commands, unrelated process termination, deployment, or push were performed.
 
 - `AREAS_TEST_PORT=1447 npx playwright test --config playwright.areas.config.ts`: passed all four suites on phone and desktop — **279 passed, 7 existing skips, 0 failures** (4.2 minutes). All three new browser regressions passed on both projects. Full log: `/tmp/t80-review2-browser.log`.
+
+## T-80 polish
+
+- Sidebar state now starts hidden only below the existing 600px rail breakpoint. Initial tab restoration preserves that default; subsequent navigation keeps its existing behavior. Browser regressions cover 390, 599, 600, and 1280px.
+- Project bodies without `updatedAt` are never cached. Versioned bodies still reuse reads, and failed reads retry. Bodies clear on App identity changes, areas owner changes, and forget. A phone/desktop regression switches A → B → A and verifies three body reads.
+- Tree visibility uses the parsed node status alone; removed the duplicate raw metadata filter. Unit regressions cover normalized status and project-body cache behavior.
+- Validation passed: `npx tsc --noEmit`; `npm test`; `AREAS_TEST_PORT=1451 npx playwright test --config playwright.areas.config.ts` (279 passed, 7 existing skips); the new account-switch regression with the same config (2 passed); default `npx playwright test` (88 passed, 2 existing skips); sidebar config (14 passed); rail config (18 passed). Final TypeScript and unit checks also passed. Logs: `/tmp/t80-polish-{unit,areas,identity,default,sidebar,rail}.log`.
+- Browser suites were rerun sequentially after overlapping builds invalidated shared `dist` assets. The first breakpoint regression also exposed the initial-tab reset, which was fixed before the passing runs. No Docker commands, unrelated process termination, deployment, or push occurred.

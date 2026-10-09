@@ -4,6 +4,18 @@ import { bootRail } from './railFixture';
 
 test.beforeEach(async ({ page }) => bootRail(page));
 
+test('sidebar default follows the phone breakpoint', async ({ page }) => {
+  await page.addInitScript(() => localStorage.removeItem('uni.lastSurface.v1'));
+  for (const width of [390, 599, 600, 1280]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.evaluate(() => localStorage.setItem('uni.tabs.v1', JSON.stringify({ v: 1, tabs: [{ id: 'room', kind: 'room', channel: 'uni-room', title: 'Uni' }], active: 'room', recent: ['room'] })));
+    await page.reload();
+    await expect(page.getByRole('textbox', { name: 'Message Uni' })).toBeVisible();
+    if (width < 600) await expect(page.locator('.shell')).toHaveClass(/in-room/);
+    else await expect(page.locator('.shell')).not.toHaveClass(/in-room/);
+  }
+});
+
 test('Rail surfaces, overlay panels, focus and phone list', async ({ page }, info) => {
   const phone = info.project.name === 'phone';
   const rail = page.getByRole('navigation', { name: 'Main navigation' });

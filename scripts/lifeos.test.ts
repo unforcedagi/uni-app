@@ -303,5 +303,11 @@ check("archived and done nodes stay hidden for areas and projects", () => {
   }
 });
 
+check("tree uses normalized status as its source", () => {
+  const a = parseArea({ id: "a", path: "Areas/A", tags: ["area"], metadata: { status: "foreground" } })!;
+  a.metadata.status = "archived";
+  assert.equal(buildTree([a]).nodes.size, 1);
+});
+
 if (failed) { console.log(`\n${failed} failed`); process.exit(1); }
 console.log("\nall passed");
