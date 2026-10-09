@@ -100,6 +100,7 @@ export function createVaultModule(deps: VaultDeps, opts: { now?: () => number } 
       const seen = new Set<string>();
       rows = [];
       for (const p of prefixes) {
+        ctx.charge(1);
         for (const h of await deps.search(search, limit, p)) {
           if (h.path && inScope(prefixes, h.path) && !seen.has(h.id)) { seen.add(h.id); rows.push({ id: h.id, path: h.path }); }
         }

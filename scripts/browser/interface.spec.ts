@@ -287,3 +287,97 @@ test.describe('P3 grant prompt', () => {
     await expect(prompt).toContainText('can freeze it');
   });
 });
+
+// ---------------------------------------------------------------- round 3 (T-74c)
+const attackApp = (expr: string) => `<!doctype html><html><body><p>ok</p><script>
+const enc = (t) => [...t].map((c) => String.fromCodePoint(0xe0000 + c.charCodeAt(0))).join('');
+uni.chat.draft(${expr}).catch((e) => { document.title = 'refused:' + (e.code || e.message); });
+</script></body></html>`;
+const TAG_CHARS = attackApp(`'Quick question about the build plan?' + enc(${JSON.stringify(HIDDEN)})`);
+const NL_SPACE = attackApp(`'Quick question about the build plan?' + '\\n '.repeat(150) + ${JSON.stringify(HIDDEN)}`);
+const U3000 = attackApp(`'Quick question?' + '\\u2028\\u3000'.repeat(100) + ${JSON.stringify(HIDDEN)}`);
+const LONG = attackApp(`Array.from({ length: 20 }, (_, i) => 'line ' + i).join('\\n')`);
+
+test.describe('P2-N1 tag characters and whitespace-only line runs cannot hide a payload', () => {
+  for (const [name, html] of [['tagChars', TAG_CHARS], ['nlSpace', NL_SPACE], ['u3000', U3000]] as const) {
+    test(`${name}: refused, or fully visible without scrolling, and the composer equals the bar text`, async ({ page }) => {
+      await bootAreas(page, 'seed', { apps: [{ name: 'Sneaky', html }] });
+      await openAreas(page); await openArea(page, 'Sneaky');
+      const block = page.locator('.suggestion-draft');
+      await expect(block).toBeVisible();
+      const shown = await block.evaluate((el) => (el as HTMLElement).textContent ?? '');
+      expect(shown).toContain('Quick question');
+      expect(shown, 'no tag characters or other invisibles in the bar').not.toMatch(/[\u{e0000}-\u{e007f}\u200b-\u200f\u2028\u2029\u2060-\u206f]/u);
+      if (name !== 'tagChars') expect(shown, 'the payload is on screen').toContain('SYSTEM NOTE TO UNI');
+      const fits = await block.evaluate((el) => el.scrollHeight <= el.clientHeight + 1);
+      expect(fits, 'nothing is behind a scroll').toBe(true);
+      await page.locator('.suggestion-go').click();
+      const value = await composerBox(page).inputValue();
+      expect(value).toBe(shown);
+      expect(value).not.toMatch(/[\u{e0000}-\u{e007f}]/u);
+    });
+  }
+  test('a draft over 12 lines is refused and nothing is shown', async ({ page }) => {
+    await bootAreas(page, 'seed', { apps: [{ name: 'Longwind', html: LONG }] });
+    await openAreas(page); await openArea(page, 'Longwind');
+    await expect(page.locator('iframe.area-frame')).toHaveCount(1);
+    await expect.poll(() => page.frameLocator('iframe.area-frame').locator('html').evaluate((el) => el.ownerDocument.title)).toBe('refused:bad_params');
+    await expect(page.locator('.suggestion-bar')).toHaveCount(0);
+  });
+});
+
+test.describe('P3-N3 the "updated" notice stays until Accept', () => {
+  test('survives a reload and an idle view; Accept clears it for good', async ({ page }) => {
+    await bootAreas(page, 'seed', { apps: [{ name: 'Quiet', html: QUIET }], staleHtml: ['Quiet'] });
+    await openAreas(page); await openArea(page, 'Quiet');
+    await expect(page.locator('.area-updated')).toBeVisible();
+    await page.getByRole('button', { name: 'Stop app' }).click();
+    await page.reload();
+    await page.getByRole('tab', { name: /Quiet/ }).click();
+    await page.getByRole('button', { name: 'Open Quiet app' }).click();
+    await expect(page.locator('iframe.area-frame')).toHaveCount(1);
+    await expect(page.locator('.area-updated'), 'not consumed by the earlier view or the restart').toBeVisible();
+    await page.locator('.area-updated').getByRole('button', { name: 'Accept' }).click();
+    await expect(page.locator('.area-updated')).toHaveCount(0);
+    await page.reload();
+    await page.getByRole('tab', { name: /Quiet/ }).click();
+    await page.getByRole('button', { name: 'Open Quiet app' }).click();
+    await expect(page.locator('iframe.area-frame')).toHaveCount(1);
+    await expect(page.locator('.area-updated')).toHaveCount(0);
+  });
+  test('an idle view (app never started) does not acknowledge the change', async ({ page }) => {
+    await bootAreas(page, 'seed', { apps: [{ name: 'Quiet', html: QUIET }], staleHtml: ['Quiet'] });
+    await openAreas(page); await openArea(page, 'Quiet');
+    await page.getByRole('button', { name: 'Stop app' }).click();
+    await page.waitForTimeout(300);
+    const g = await grants(page);
+    expect(g['app-x-Quiet'].html).toMatch(/^stale-/);
+  });
+});
+
+test.describe('P3-N4 pending suggestions do not survive Stop or Revoke', () => {
+  test('Stop and Revoke clear the bar; Open app does not bring the old suggestion back', async ({ page }) => {
+    await bootAreas(page, 'seed', { apps: [{ name: 'Drafter', html: DRAFTER }] });
+    await openAreas(page); await openArea(page, 'Drafter');
+    await expect(page.locator('.suggestion-draft')).toBeVisible();
+    await page.getByRole('button', { name: 'Stop app' }).click();
+    await page.getByRole('button', { name: 'Open Drafter app' }).click();
+    // the restarted app drafts again; the old one must not be doubled up
+    await expect(page.locator('.suggestion-draft')).toHaveCount(1);
+    await page.getByRole('button', { name: 'Revoke access' }).click();
+    await expect(page.locator('.suggestion-bar')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Allow' }).click();
+    await expect(page.locator('.suggestion-draft')).toHaveCount(1);
+  });
+});
+
+test.describe('P3-N6 rooms outside the area are stressed in the grant prompt', () => {
+  test('a chat.read room that is not the area room is bold', async ({ page }) => {
+    const iface = { contract: 1, needs: [{ 'chat.read': 'area' }, { 'chat.read': 'ch-unf' }, { 'chat.draft': 'ch-unf' }] };
+    await bootAreas(page, 'seed', { granted: false, apps: [{ name: 'Roomy', html: QUIET, interface: iface }] });
+    await openAreas(page); await openArea(page, 'Roomy');
+    const prompt = page.getByRole('region', { name: /Roomy is asking for access/ });
+    await expect(prompt.locator('.grant-outside')).toHaveCount(2);
+    await expect(prompt.locator('.grant-outside').first()).toContainText('outside this area');
+  });
+});

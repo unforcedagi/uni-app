@@ -1,7 +1,8 @@
 // The grant store: which interface (note id) the user has allowed to run, with
 // the hash of what its needs RESOLVED to (prefixes, rooms, area) and the hash of
-// its HTML. Storage is injectable. A different resolution is `none` (ask
-// again). Only the HTML changing is `updated`: it runs, and the host says so.
+// its HTML (the hash the user last accepted). Storage is injectable. A different
+// resolution is `none` (ask again). Only the HTML changing is `updated`: it runs,
+// and the host says so until the user taps Accept (`acknowledge`), across restarts.
 
 export const GRANTS_KEY = "uni.interface.grants.v2";
 type StorageLike = Pick<Storage, "getItem" | "setItem" | "removeItem">;
@@ -32,8 +33,8 @@ export function createGrantStore(storage: StorageLike | null = typeof localStora
       return !r || r.scope !== scope ? "none" : r.html === html ? "ok" : "updated";
     },
     grant(noteId: string, scope: string, html: string): void { read().set(noteId, { scope, html, grantedAt: new Date().toISOString() }); write(); },
-    /** Record the HTML the user has now been told about, keeping the scope grant. */
-    touch(noteId: string, html: string): void { const r = read().get(noteId); if (r) { r.html = html; write(); } },
+    /** The user accepted the changed HTML: remember its hash. Never creates a grant. */
+    acknowledge(noteId: string, html: string): void { const r = read().get(noteId); if (r) { r.html = html; write(); } },
     revoke(noteId: string): void { read().delete(noteId); write(); },
   };
 }

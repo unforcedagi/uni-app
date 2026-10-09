@@ -25,7 +25,7 @@ Publish an app by creating or updating the note `Areas/<Name>/app` with `extensi
 | `manifest.ts` | parse `interface:` metadata, default needs, resolve `area`, grant key (SHA-256 of the resolved needs), plain-words description |
 | `grants.ts` | grant store: note id → hash of the RESOLVED needs + hash of the app HTML (injectable storage) |
 | `router.ts` | `createRouter(modules)`: namespace/method → handler, enforcing grant, params and scope |
-| `session.ts` | one frame's message pump: rate limit (60 tokens / 10 s; a message costs 1 and each underlying note read 1 more), 8 pending, replies |
+| `session.ts` | one frame's message pump: two rate buckets of 60 per 10 s (requests: a message costs 1; reads: each underlying note read or searched prefix costs 1), 8 pending, replies |
 | `suggestions.ts` | pending suggestions (max 3). Adding never acts; only `accept()` does |
 | `modules/vault.ts` | read-only REST subset of surface-client's `VaultClient` over the frame |
 | `modules/chat.ts`, `note.ts`, `theme.ts` | `chat.recent` / `chat.draft`, `note.open`, `theme.get` |
@@ -56,9 +56,12 @@ interface:
   ids and the area path) and the SHA-256 of the app HTML. A different resolution asks again: a granted
   app note moved into another area, or an area whose `channel` is edited, is a new question, even though
   the symbolic `area` need reads the same. An **HTML-only** change runs, and the host shows an "updated
-  since you allowed it" line in the area bar for that session (the frame cannot draw it).
-- Scopes may not contain zero-width, bidi or control characters. A `vault.read` prefix outside the area's
-  own folder is allowed but the prompt says so in bold ("Read notes outside this area, in Journal/").
+  since you allowed it" line with an **Accept** button in the area bar (the frame cannot draw it). The line
+  stays, across restarts, until the user taps Accept; only then is the new HTML hash stored.
+- Scopes and `note.open` refs may not contain any invisible character (the same classifier as drafts,
+  below, including tag characters). A `vault.read` prefix outside the area's own folder, or a `chat.read` /
+  `chat.draft` room that is not one of the area's channels, is allowed but the prompt says so in bold
+  ("Read notes outside this area, in Journal/", "Read recent messages in a room outside this area, #x").
 
 ## Consent
 
@@ -70,13 +73,18 @@ interface:
    only create a *pending suggestion*: "Techne suggests a draft for #Techne: … [Add to draft] [Dismiss]".
    Only a tap on that host UI adds the text to the room's composer (after any existing draft; it never
    sends) or opens the note. The bar shows the **whole** draft that will be inserted, in a scrollable
-   block: drafts are capped at 500 characters, hidden characters (bidi, zero-width, control except
-   newline and tab) are stripped and runs of 3+ newlines collapse to one blank line, in the module, in
-   the suggestion store and therefore in both the bar and the insert. `note.open` is judged on the note
+   block: drafts are capped at 500 characters. Cleaning removes every Unicode control (Cc, except
+   newline and tab), format (Cf: bidi, zero-width, **tag characters** U+E0000–E007F), private-use and
+   unassigned code point, the braille blank U+2800, the Hangul fillers and every variation selector;
+   U+200D and U+FE0F survive only inside an emoji sequence. CR, U+2028 and U+2029 become newlines, and a
+   run of whitespace-only lines (any Unicode space, including U+3000) collapses to one blank line.
+   A draft with more than 12 lines after cleaning is **refused** (`bad_params`), not altered. The same
+   cleaning runs in the module and in the suggestion store, so the bar and the insert are the same text,
+   and the bar's block grows to fit it (no scrolling for a draft that was accepted). `note.open` is judged on the note
    the ref resolves to, and the suggestion carries that path. At most 3 pending; duplicates collapse. There is no gesture inference
    (no `userActivation`, no blur or focus heuristics): a frame that steals focus gains nothing.
 3. **Stop, revoke, restore.** The area bar has **Stop app** (unmounts the frame) and **Revoke access**
-   (forgets the grant; the next open asks again); a stopped app shows **Open <Name> app**. An app starts
+   (forgets the grant; the next open asks again). Both clear pending suggestions, and a call that finishes after the frame is gone adds none. A stopped app shows **Open <Name> app**. An app starts
    only on a tap in the current process (the area card, **Allow**, or **Open app**): an area tab restored
    from the last launch never starts its app by itself, so a faulty app cannot freeze Uni on every launch.
 
@@ -92,7 +100,7 @@ host → frame events:  {uni:1, event:"ready"|"theme", data}
 ```
 
 Exact keys only; `id` is a string of 1–64 chars; ≤ 8 KB per request (checked by a budgeted walk, never by
-stringifying attacker data); depth ≤ 6; plain JSON only. Over the rate limit the host is silent.
+stringifying attacker data); depth ≤ 6; plain JSON only. Over the request limit a message with a usable `id` gets `rate_limited` (a frame-fetch gets 429); a message with no usable id gets no reply.
 
 **Namespaces and methods**
 
@@ -112,7 +120,7 @@ stringifying attacker data); depth ≤ 6; plain JSON only. Over the rate limit t
   `tag` and `include_content` read at most 20 in-scope notes (the Tauri vault commands expose no tag
   filter, so this is a bounded scan); `search` is scoped by prefix and its results are filtered again.
   The app note itself (`html`) is left out of lists. Reads are cached by note id for 10 s; a cache miss
-  costs one limiter token (a cache hit is free), and a request that runs out of budget answers 429.
+  costs one read token (a cache hit is free), a `search` costs one per granted prefix searched, and a request that runs out of read budget answers 429. Reads have their own bucket, so spent reads never silence other requests.
   Parameters outside the list (`offset`, `sort`, `metadata`, `include_links`, `near`, `cursor`, …) are
   `400 bad_params` rather than silently ignored; `GET /api/vault` accepts `include_stats`. This is a
   **subset** of `VaultClient`, not the whole client.

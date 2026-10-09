@@ -69,8 +69,9 @@
 .area-bar-controls { display: flex; flex-wrap: wrap; gap: 8px; margin-left: auto; }
 .area-bar-controls .pairing-secondary { min-height: 36px; padding: 4px 12px; font-size: 13px; }
 .area-bar.chromeless { flex-wrap: wrap; }
+.area-accept { min-height: 28px; margin-left: 8px; padding: 2px 10px; }
 .area-updated { flex: none; margin: 0; padding: 8px clamp(16px, 3vw, 24px); border-bottom: 1px solid var(--line); background: var(--card-lift); color: var(--text-soft); font-size: 13px; }
 .grant-outside { color: var(--danger); }
 .grant-name { font-style: normal; font-weight: 600; }
-.suggestion-draft { margin: 6px 0 0; padding: 8px 10px; max-height: 9em; overflow-y: auto; border-left: 3px solid var(--accent); background: var(--surface); color: var(--text-soft); font-size: 14px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+.suggestion-draft { margin: 6px 0 0; padding: 8px 10px; overflow-y: auto; border-left: 3px solid var(--accent); background: var(--surface); color: var(--text-soft); font-size: 14px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
 .suggestion-ref { overflow-wrap: anywhere; }

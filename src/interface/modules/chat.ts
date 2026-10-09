@@ -2,7 +2,7 @@
 // A draft is a pending suggestion shown by the host (consent.tsx); this module
 // has no way to touch a composer, and nothing here can post.
 
-import { cleanText, hasOnly, LIMITS, plain } from "../contract.ts";
+import { cleanText, hasOnly, LIMITS, lineCount, plain } from "../contract.ts";
 import type { UniModule } from "../router.ts";
 import type { SuggestionInput } from "../suggestions.ts";
 
@@ -43,14 +43,14 @@ export function createChatModule(deps: ChatDeps): UniModule {
           if (typeof p.text !== "string" || p.text.length > LIMITS.maxDraft) return { ok: false };
           // What is shown and what is inserted are the same cleaned text.
           const text = cleanText(p.text);
-          if (!text.trim()) return { ok: false };
+          if (!text.trim() || lineCount(text) > LIMITS.maxDraftLines) return { ok: false };
           if (p.room !== undefined && (typeof p.room !== "string" || !p.room || p.room.length > 100)) return { ok: false };
           return { ok: true, value: { text, room: p.room as string | undefined } };
         },
         scopeCheck: (scopes, v: { room?: string }) => { const rooms = scopes["chat.draft"] ?? []; return v.room === undefined ? rooms.length > 0 : rooms.includes(v.room); },
-        async run(v: { text: string; room?: string }, scopes) {
+        async run(v: { text: string; room?: string }, scopes, ctx) {
           const room = v.room ?? (scopes["chat.draft"] ?? [])[0];
-          deps.suggest({ kind: "draft", room, text: v.text });
+          if (!ctx.closed()) deps.suggest({ kind: "draft", room, text: v.text });
           return { pending: true, room };
         },
       },

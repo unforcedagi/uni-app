@@ -3,7 +3,7 @@
 // itself: `add` only records; only `accept` calls `onAccept`, and only host
 // UI calls `accept`.
 
-import { cleanText, ContractError, ERROR_CODES } from "./contract.ts";
+import { cleanText, ContractError, ERROR_CODES, LIMITS, lineCount } from "./contract.ts";
 
 export type SuggestionInput = { kind: "draft"; room: string; text: string } | { kind: "open"; ref: string };
 export type Suggestion = SuggestionInput & { id: string };
@@ -20,6 +20,7 @@ export function createSuggestionStore(opts: { onAccept: (s: Suggestion) => void;
     add(raw: SuggestionInput): Suggestion {
       // The bar shows, and accept inserts, exactly this cleaned text.
       const input: SuggestionInput = raw.kind === "draft" ? { ...raw, text: cleanText(raw.text) } : raw;
+      if (input.kind === "draft" && lineCount(input.text) > LIMITS.maxDraftLines) throw new ContractError(ERROR_CODES.badParams, "draft too long");
       const dup = items.find((s) => same(s, input));
       if (dup) return dup;
       if (items.length >= max) throw new ContractError(ERROR_CODES.rateLimited, "too many pending suggestions");

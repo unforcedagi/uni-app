@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { NoteRenderer } from "@openparachute/surface-render";
 import InterfaceFrame from "../interface/frame";
@@ -7,7 +7,7 @@ import SuggestionBar from "../interface/consent";
 import { createGrantStore } from "../interface/grants";
 import { describeNeeds, grantKey, htmlHash, parseManifest, resolveNeeds } from "../interface/manifest";
 import { cleanText } from "../interface/contract";
-import { clearUpdated, isStarted, markStarted, markStopped, markUpdated, wasUpdated } from "./appRun";
+import { isStarted, markStarted, markStopped } from "./appRun";
 import { createRouter } from "../interface/router";
 import { createSuggestionStore } from "../interface/suggestions";
 import { createVaultModule } from "../interface/modules/vault";
@@ -66,29 +66,28 @@ export default function AreaView({ area, rows, live, roomName, actions, onBack }
   }, [app, manifest, grant, area.path]);
   const status = app && keys ? grants.status(app.id, keys.scope, keys.html) : "none";
   const granted = status !== "none";
-  // Only the HTML changed: run it, but say so for this session.
-  useEffect(() => {
-    if (status !== "updated" || !app || !keys) return;
-    markUpdated(app.id); grants.touch(app.id, keys.html); bump();
-  }, [status, app, keys]);
+  // Only the HTML changed: it runs, and the host says so until the user taps Accept (which stores the new hash).
   const running = isStarted(area.path);
-  const stop = () => { markStopped(area.path); bump(); };
-  const revoke = () => { if (!app) return; grants.revoke(app.id); clearUpdated(app.id); markStopped(area.path); setDeclined(false); bump(); };
-  const start = () => { markStarted(area.path); bump(); };
-
+  // Values that change under a running app (new room names, new action callbacks) must not recreate its session.
+  const roomNameRef = useRef(roomName); roomNameRef.current = roomName;
+  const actionsRef = useRef(actions); actionsRef.current = actions;
   const suggestions = useMemo(() => createSuggestionStore({
-    onAccept: (s) => { if (s.kind === "draft") actions.compose(s.room, s.text); else actions.openNote(s.ref); },
-  }), [actions, area.path]);
+    onAccept: (s) => { if (s.kind === "draft") actionsRef.current.compose(s.room, s.text); else actionsRef.current.openNote(s.ref); },
+  }), [area.path]);
+  const stop = () => { suggestions.clear(); markStopped(area.path); bump(); };
+  const revoke = () => { if (!app) return; grants.revoke(app.id); suggestions.clear(); markStopped(area.path); setDeclined(false); bump(); };
+  const start = () => { markStarted(area.path); bump(); };
+  const accept = () => { if (app && keys && running) { grants.acknowledge(app.id, keys.html); bump(); } };
   const router = useMemo(() => createRouter([
     createVaultModule({
       listPaths: () => areaPaths.get(),
       getNote: (ref) => invoke<{ note: { id: string } }>("vault_note", { vault: AREA_VAULT, noteRef: ref }).then((d) => d.note),
       search: (query, limit, pathPrefix) => invoke<{ id: string; path: string; snippet: string }[]>("vault_search", { query, limit, mode: "keyword", vault: AREA_VAULT, pathPrefix }),
     }),
-    createChatModule({ getMessages, suggest: (s) => suggestions.add(s), roomName }),
+    createChatModule({ getMessages, suggest: (s) => suggestions.add(s), roomName: (id) => roomNameRef.current(id) }),
     createNoteModule({ suggest: (s) => suggestions.add(s), resolve: (ref) => invoke<{ note: { id: string; path?: string | null } }>("vault_note", { vault: AREA_VAULT, noteRef: ref }).then((d) => d.note) }),
     createThemeModule({ theme: readHostTheme }),
-  ]), [suggestions, roomName]);
+  ]), [suggestions]);
   const ready = useMemo(() => ({ area: { name: area.name, title: area.title, purpose: area.purpose, status: area.status, since: typeof area.metadata.since === "string" ? area.metadata.since : null } }), [area]);
 
   const ready_ = live && !!appRow && !!app && !appError && !!keys;
@@ -107,7 +106,7 @@ export default function AreaView({ area, rows, live, roomName, actions, onBack }
   </header>;
 
   if (framed) return <div className="area-view framed">{header}
-    {app && wasUpdated(app.id) && <p className="area-updated" role="status">This app was updated since you allowed it.</p>}
+    {status === "updated" && <p className="area-updated" role="status">This app was updated since you allowed it. <button className="pairing-secondary area-accept" onClick={(e) => { if (e.isTrusted) accept(); }}>Accept</button></p>}
     <SuggestionBar store={suggestions} appName={name} roomName={roomName} />
     <InterfaceFrame html={app!.html} title={`${name} app`} router={router} grant={grant} ready={ready} /></div>;
   if (asking && manifest?.ok) return <div className="area-view">{header}<GrantPrompt name={name} lines={describeNeeds(manifest.manifest.needs, ctx, roomName)}
