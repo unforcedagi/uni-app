@@ -135,11 +135,25 @@ await check("T-74e run decision: approved-code runs only a status-ok app; update
   assert.equal(d("sealed", "ok"), "run");
   assert.equal(d("sealed", "updated"), "run-notice");
   assert.equal(d("approved-code", "none"), "ask");
-  assert.equal(d("approved-code", "ok"), "run");
-  assert.equal(d("approved-code", "updated"), "ask-updated");
+  assert.equal(d("approved-code", "ok", "approved-code"), "run");
+  assert.equal(d("approved-code", "updated", "approved-code"), "ask-updated");
   assert.equal(d("closed", "ok"), "closed");
   assert.equal(d("closed", "updated"), "closed");
   assert.equal(d("closed", "none"), "closed");
+});
+await check("T-74f: runDecision tests sealed explicitly; an unknown mode is closed", () => {
+  const d = (gate as Any).runDecision as Any;
+  for (const m of ["bogus", undefined, null, "Sealed", "", 0, {}]) for (const st of ["none", "ok", "updated"]) assert.equal(d(m, st), "closed", `${String(m)}/${st}`);
+});
+await check("T-74f: a sealed-mode (or unrecorded) grant asks again once in approved-code mode", () => {
+  const d = (gate as Any).runDecision as Any;
+  assert.equal(d("approved-code", "ok", "sealed"), "ask-updated");
+  assert.equal(d("approved-code", "ok", undefined), "ask-updated");
+  assert.equal(d("approved-code", "ok", "approved-code"), "run");
+  assert.equal(d("approved-code", "updated", "approved-code"), "ask-updated");
+  assert.equal(d("sealed", "ok", "approved-code"), "run");
+  assert.equal(d("sealed", "ok", "sealed"), "run");
+  assert.equal(d("sealed", "updated", "sealed"), "run-notice");
 });
 
 if (failed) { console.log(`\n${failed} check(s) failed`); process.exit(1); }

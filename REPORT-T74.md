@@ -228,3 +228,25 @@ pass there. Needs an independent SHIP/NO-SHIP review.
 | Playwright Chromium areas config (phone + desktop; run on a temporary copy with another port because 1435 was held by another worktree's run) | 141 passed, 1 skipped (pre-existing) |
 | Playwright WebKit (docker, `playwright.interface-webkit.config.ts`) | 70 passed, 1 skipped on the second run. The first run had 1 failure, "first open asks in plain words…" at the Allow click; it passed alone and on the full rerun. Cause not identified (load from a concurrent container is a guess) |
 | `cargo check` (src-tauri, Linux) | passes; no Rust changed |
+
+# Round 6 (T-74f): fixes for the round-5 review
+
+| Finding | Change |
+|---|---|
+| P2-1 | `GrantPrompt` takes `approvedCode`. In approved-code mode the "sealed frame" and "can't … reach the internet" sentences are replaced by the host line "On this device apps can reach the network through WebRTC, so this app is only as safe as its code. Allow it only if you trust it." A running app shows an **Approved code** chip in the bar (title explains WebRTC); sealed mode shows no chip. |
+| P3-1 | Grant records store `grantedUnder`; `grants.grantedUnder(id)`; records without it (or unknown values) count as `sealed`. `runDecision(mode, status, grantedUnder)`: in approved-code mode a sealed-era grant is `ask-updated` (re-prompt once with the honest line, without the "code changed" claim); Allow stores `approved-code`. |
+| P3-2 | `docs/interfaces.md`: claim narrowed (approval covers the HTML, not what it does with data); app-authoring rule added (no `innerHTML`/`outerHTML`/`insertAdjacentHTML`/`document.write` with note or chat text). CSP unchanged; nonce/hash `script-src` noted as follow-up. |
+| P3-3 | `runDecision` is open only for `sealed` and `approved-code`; anything else is `closed`. |
+
+Red first: unit checks for P3-3 and P3-1 failed on the old code (`runDecision` unknown mode, three-arg decision), and the existing 2-arg approved-code decision test had to be updated to the new rule. I wrote the e2e (first-prompt wording, chip, sealed-grant re-ask, legacy-record re-ask, sealed wording unchanged) in the same step as the unit tests but did NOT run them against the old code, so their red state is not observed. The e2e fixture now seeds `grantedUnder` (default = stored mode; `legacy` omits it).
+
+### Gates (round 6 tree)
+
+| Gate | Result |
+|---|---|
+| `tsc --noEmit` | exit 0 |
+| `npm test` | exit 0, `areasR3: ok`, `interface: ok` |
+| Playwright Chromium areas config (temporary copy on port 1461; 1435 was busy) | 149 passed, 1 skipped (pre-existing) |
+| WebKit, `cargo check` | not run (no Rust changed) |
+
+Needs an independent SHIP/NO-SHIP review.

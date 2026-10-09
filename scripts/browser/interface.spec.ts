@@ -501,6 +501,44 @@ test.describe('T-74e approved-code mode', () => {
     await expect(prompt).not.toContainText('code changed since you allowed it');
     await expect(page.locator('iframe')).toHaveCount(0);
   });
+  test('T-74f: the first prompt in approved-code mode is honest about the network, and the running bar is marked', async ({ page }) => {
+    await bootAreas(page, 'seed', { ...BOOT, apps: [{ name: 'Quiet', html: QUIET }], granted: false });
+    await openAreas(page); await openArea(page, 'Quiet');
+    const prompt = page.getByRole('region', { name: /Quiet is asking for access/ });
+    await expect(prompt).toContainText('apps can reach the network through WebRTC');
+    await expect(prompt).not.toContainText('reach the internet');
+    await expect(prompt).not.toContainText('sealed');
+    await prompt.getByRole('button', { name: 'Allow', exact: true }).click();
+    await expect(page.locator('iframe.area-frame')).toHaveCount(1);
+    const chip = page.locator('.area-mode-chip');
+    await expect(chip).toHaveText('Approved code');
+    await expect(chip).toHaveAttribute('title', /WebRTC/);
+  });
+  test('T-74f: a sealed-mode first prompt keeps the sealed wording and has no chip', async ({ page }) => {
+    await bootAreas(page, 'seed', { apps: [{ name: 'Quiet', html: QUIET }], granted: false });
+    await openAreas(page); await openArea(page, 'Quiet');
+    const prompt = page.getByRole('region', { name: /Quiet is asking for access/ });
+    await expect(prompt).toContainText('reach the internet');
+    await prompt.getByRole('button', { name: 'Allow', exact: true }).click();
+    await expect(page.locator('iframe.area-frame')).toHaveCount(1);
+    await expect(page.locator('.area-mode-chip')).toHaveCount(0);
+  });
+  for (const g of ['sealed', 'legacy'] as const) {
+    test(`T-74f: a grant made under ${g === 'sealed' ? 'a sealed pass' : 'an old record (no mode)'} re-asks once in approved-code mode, with the honest line`, async ({ page }) => {
+      await bootAreas(page, 'seed', { ...BOOT, grantedUnder: g, apps: [{ name: 'Quiet', html: QUIET }] });
+      await openAreas(page); await openArea(page, 'Quiet');
+      const prompt = page.getByRole('region', { name: /Quiet is asking for access/ });
+      await expect(prompt).toContainText('apps can reach the network through WebRTC');
+      await expect(prompt).not.toContainText('reach the internet');
+      await expect(prompt).not.toContainText('code changed since you allowed it');
+      await expect(page.locator('iframe')).toHaveCount(0);
+      await prompt.getByRole('button', { name: 'Allow', exact: true }).click();
+      await expect(page.locator('iframe.area-frame')).toHaveCount(1);
+      expect((await grants(page))['app-x-Quiet']).toMatchObject({ grantedUnder: 'approved-code' });
+      await page.reload(); await openAreas(page); await openArea(page, 'Quiet');
+      await expect(page.getByRole('region', { name: /Quiet is asking for access/ })).toHaveCount(0);
+    });
+  }
   test('a full-pass platform keeps today\'s behaviour: updated runs with a notice and Accept', async ({ page }) => {
     await bootAreas(page, 'seed', { apps: [{ name: 'Quiet', html: QUIET }], staleHtml: ['Quiet'] });
     await openAreas(page); await openArea(page, 'Quiet');

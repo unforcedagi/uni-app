@@ -68,7 +68,7 @@ export default function AreaView({ area, rows, mode, roomName, actions, onBack }
   }, [app, manifest, grant, area.path]);
   const status = app && keys ? grants.status(app.id, keys.scope, keys.html) : "none";
   // Sealed: a changed app runs with a notice until Accept. Approved-code: it does not run; it asks again.
-  const decision = runDecision(mode, status);
+  const decision = runDecision(mode, status, app ? grants.grantedUnder(app.id) : null);
   const granted = decision === "run" || decision === "run-notice";
   const codeChanged = decision === "ask-updated";
   const running = isStarted(area.path);
@@ -102,6 +102,7 @@ export default function AreaView({ area, rows, mode, roomName, actions, onBack }
   const header = <header className={`area-bar ${framed ? "chromeless" : ""}`}>
     <button className="note-back" onClick={onBack} aria-label="Back to Areas"><span className="note-back-arrow" aria-hidden="true">←</span><span className="note-back-label">Areas</span></button>
     <strong className={`area-bar-title ${framed ? "sr-only" : ""}`}>{name}</strong>
+    {framed && mode === "approved-code" && <span className="area-mode-chip" title="On this device apps can reach the network through WebRTC, so this app is only as safe as its code. You approved this version.">Approved code</span>}
     {framed && <span className="area-bar-controls">
       <button className="pairing-secondary area-stop" onClick={(e) => { if (e.isTrusted) stop(); }}>Stop app</button>
       <button className="pairing-secondary area-revoke" onClick={(e) => { if (e.isTrusted) revoke(); }}>Revoke access</button>
@@ -113,8 +114,8 @@ export default function AreaView({ area, rows, mode, roomName, actions, onBack }
     {decision === "run-notice" && <p className="area-updated" role="status">This app was updated since you allowed it. <button className="pairing-secondary area-accept" onClick={(e) => { if (e.isTrusted) accept(); }}>Accept</button></p>}
     <SuggestionBar store={suggestions} appName={name} roomName={roomName} />
     <InterfaceFrame html={app!.html} title={`${name} app`} router={router} grant={grant} ready={ready} /></div>;
-  if (asking && manifest?.ok) return <div className="area-view">{header}<GrantPrompt name={name} codeChanged={codeChanged} lines={describeNeeds(manifest.manifest.needs, ctx, roomName)}
-    onAllow={() => { grants.grant(app!.id, keys!.scope, keys!.html); markStarted(area.path); bump(); }} onNotNow={() => setDeclined(true)} /></div>;
+  if (asking && manifest?.ok) return <div className="area-view">{header}<GrantPrompt name={name} codeChanged={codeChanged && status === "updated"} approvedCode={mode === "approved-code"} lines={describeNeeds(manifest.manifest.needs, ctx, roomName)}
+    onAllow={() => { grants.grant(app!.id, keys!.scope, keys!.html, mode === "approved-code" ? "approved-code" : "sealed"); markStarted(area.path); bump(); }} onNotNow={() => setDeclined(true)} /></div>;
   return <div className="area-view">{header}<DefaultArea area={area} actions={actions} roomName={roomName} pending={live && !!appRow && !appError && !app}
     onOpenApp={idle ? start : null} onRevoke={idle ? revoke : null}
     notice={manifest && !manifest.ok ? `This area's app was not opened: ${manifest.error}.` : null} /></div>;

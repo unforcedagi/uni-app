@@ -219,12 +219,24 @@ In approved-code mode an app whose HTML hash differs from the one stored at appr
 **not** run. The area shows the grant prompt again with a host-rendered line, "This app's code changed since you
 allowed it. On this device apps can reach the network through WebRTC, so only code you've approved runs.", and
 **Allow this version** / **Not now**. Nothing runs until **Allow this version** stores the new hash. A
-never-approved app gets the ordinary first-open prompt. Settings shows the mode as "Sealed" or
+never-approved app gets the first-open prompt, which in this mode drops the "sealed frame" and "can't reach the
+internet" sentences for the host line "On this device apps can reach the network through WebRTC, so this app is only as
+safe as its code. Allow it only if you trust it." A running app shows an **Approved code** chip in the host bar. The
+grant record stores `grantedUnder` (the mode it was made in; a record without it counts as `sealed`), and a grant made
+under a sealed pass asks once more in approved-code mode. `runDecision` treats only `sealed` and `approved-code` as
+open; any other value is closed. Settings shows the mode as "Sealed" or
 "Approved code only (WebRTC present)"; the result is stored with a `mode` field (a record without one is read
 as `sealed`).
 
 **Threat accepted.** WebRTC ignores CSP, so an approved app that was itself hostile could exfiltrate over it
-(for example in TURN credentials; see above). The mode accepts that because it only ever runs code the user
-has approved, and the only apps approved are ones Aaron or Uni wrote. It does not defend against a hostile app
-the user approves, nor against a note edited and re-approved without reading it; the re-prompt on every code
-change is the control. Every other seal (CSP, no IPC, no storage, no navigation) is still required.
+(for example in TURN credentials; see above). The mode accepts that because it only runs HTML the user has
+approved, and the only apps approved are ones Aaron or Uni wrote. The approval covers the app's HTML, not what the
+HTML does with data: an approved app that turns note or chat text into markup would run note- or chat-authored
+script, with WebRTC reachable, outside the hash. It does not defend against a hostile app the user approves, nor
+against a note edited and re-approved without reading it; the re-prompt on every code change is the control. Every
+other seal (CSP, no IPC, no storage, no navigation) is still required.
+
+**App-authoring rule (required in approved-code mode).** Never turn note or chat text into markup: no `innerHTML`,
+`outerHTML`, `insertAdjacentHTML` or `document.write` with data. Use `textContent` and DOM nodes. The shipped seed
+apps contain none of these. Follow-up, not done in this round: a nonce- or hash-based `script-src` in approved-code
+mode, so inline handlers injected from data do not run (the frame CSP is still `script-src 'unsafe-inline'`).
