@@ -1553,6 +1553,24 @@ fn install_tab_menu(app: &mut tauri::App) -> tauri::Result<()> {
     Ok(())
 }
 
+/// wry registers a `webkit.messageHandlers.ipc` script message handler in the default script world, which every
+/// frame of the page sees, sandboxed `srcdoc` frames included. Tauri on Linux sends invokes through the `ipc://`
+/// custom protocol (`scripts/ipc-protocol.js` in tauri); `window.ipc.postMessage` is only its fallback when that
+/// fetch fails. Dropping the handler leaves the fetch path working and gives no frame anything to post to.
+/// Proof: the sandbox self-test's `webkit.messageHandlers.ipc unreachable` check on the real webview (REPORT-T77).
+#[cfg(target_os = "linux")]
+fn close_ipc_handler(app: &tauri::App) {
+    use tauri::Manager;
+    use webkit2gtk::{UserContentManagerExt, WebViewExt};
+    for (_, window) in app.webview_windows() {
+        let _ = window.with_webview(|webview| {
+            if let Some(manager) = webview.inner().user_content_manager() {
+                manager.unregister_script_message_handler("ipc");
+            }
+        });
+    }
+}
+
 /// WebRTC ignores CSP, so a sealed area app could send data out through an
 /// ICE/TURN request. WebKitGTK ships with `enable-webrtc` off; this makes that
 /// explicit so a build or distro default can't silently turn it on. The
@@ -1598,7 +1616,10 @@ pub fn run() {
             #[cfg(all(debug_assertions, target_os = "linux"))]
             t76::replace_window(_app)?;
             #[cfg(target_os = "linux")]
-            disable_webrtc(_app);
+            {
+                disable_webrtc(_app);
+                close_ipc_handler(_app);
+            }
             tracing::info!(version = %_app.package_info().version, "setup complete; opening window");
             Ok(())
         })
