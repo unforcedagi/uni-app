@@ -28,7 +28,7 @@ export default function AreasSurface({ identity, path, rooms, actions, roomFor, 
   onConversations: () => void;
   onBackChange: (back: (() => void) | null) => void;
 }) {
-  const { data, error, loading } = useAreas(identity);
+  const { data, error, loading, signingIn } = useAreas(identity);
   const version = useAppVersion();
   const runtime = useWebviewRuntime();
   const stored = useStoredSelfTest();
@@ -63,7 +63,7 @@ export default function AreasSurface({ identity, path, rooms, actions, roomFor, 
   const open = (a: { path: string; name: string; rooms: string[] }) => onOpenArea(a.path, a.name, pickRoom(a.rooms, null));
   const toUni = () => onOpenArea(null, "Uni", uniRoom);
   if (!node) return <div className="areas-home"><button className="note-back" onClick={toUni}><span className="note-back-arrow" aria-hidden="true">←</span><span className="note-back-label">Uni</span></button>
-    <p className="empty">{loading ? "Opening area…" : error ? `Couldn't load: ${error}` : "This area no longer exists."}</p></div>;
+    <p className="empty">{signingIn ? "Signing in…" : loading ? "Opening area…" : error ? `Couldn't load: ${error}` : "This area no longer exists."}</p></div>;
   const isRoot = node.path === ROOT;
   const tree = data?.tree;
   const kids = tree ? childrenOf(tree, node.path) : [];
@@ -86,7 +86,7 @@ export default function AreasSurface({ identity, path, rooms, actions, roomFor, 
       onAsk={(name, text) => { const a = data?.areas.find((x) => x.name === name && x.kind === "area"); const ch = a ? pickRoom(a.rooms, null) : null; if (ch) actions.compose(ch, text); }} />
   </> : undefined;
   const cards = data && kids.length ? <ChildCards nodes={kids} data={data} now={now} title={isRoot ? "Areas" : `Inside ${node.name}`} onOpen={open} />
-    : isRoot && !kids.length && !error ? <p className="empty">{loading ? "Loading areas…" : "No areas yet. Tag a note `area` at Areas/<Name>."}</p> : null;
+    : isRoot && !kids.length && !error ? <p className="empty">{signingIn ? "Signing in…" : loading ? "Loading areas…" : "No areas yet. Tag a note `area` at Areas/<Name>."}</p> : null;
   const today = data?.today;
   return <AreaView key={node.id} area={body !== null ? { ...node, body } : node} projectError={bodyError} projectLoading={body === null && !bodyError} entry={data?.briefs[node.path] ?? null} now={now} channel={nodeRoom} onChannel={setPicked} mode={mode} roomName={roomName} actions={actions}
     room={roomFor(nodeRoom)} onConversations={onConversations} onBack={back} backLabel={up?.name ?? "Uni"}

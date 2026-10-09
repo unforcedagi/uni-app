@@ -15,7 +15,7 @@ export type AreasData = {
   /** Each node's Brief by node path. */
   briefs: Record<string, AreaBrief>;
   today: { today: Today; updatedAt: string | null; generatedAt: string | null } | null;
-  /** True while this is what the device remembered and the network hasn't answered yet. */
+  /** True for device-cache data or a snapshot whose refresh failed. */
   stale: boolean;
   savedAt: number | null;
   truncated: string[];
@@ -29,9 +29,8 @@ export const AREA_VAULT = "uni";
 export const areaPaths = createPathCache(() => invoke<PathRow[]>("vault_paths", { vault: AREA_VAULT }));
 
 const query = (tag: string, includeContent = true) => invoke<AreaNoteLike[]>("vault_query", { vault: AREA_VAULT, tag, includeContent, limit: 200 });
-/** The node a Brief belongs to: `<node path>/Brief`, else `metadata.area` (a name under Areas/). */
+/** A Brief belongs only to the node named by its path. */
 const pathOwner = (n: AreaNoteLike) => /^(.+)\/Brief$/.exec((n.path ?? "").replace(/\.md$/i, ""))?.[1] ?? null;
-const briefOwner = (n: AreaNoteLike) => pathOwner(n) ?? (typeof n.metadata?.area === "string" ? `Areas/${n.metadata.area}` : null);
 const newest = <T extends { updatedAt?: string | null }>(a: T | undefined, b: T) => (!a || (b.updatedAt ?? "") >= (a.updatedAt ?? "") ? b : a);
 
 /**
@@ -49,10 +48,8 @@ export async function fetchPayload(prev: AreasPayload | null = null): Promise<Ar
   if (briefs.status === "fulfilled") {
     const latest: Record<string, AreaNoteLike> = {};
     for (const n of briefs.value) {
-      const owner = briefOwner(n); if (!owner) continue;
-      const existing = latest[owner];
-      if (existing && pathOwner(existing) && !pathOwner(n)) continue;
-      latest[owner] = pathOwner(n) && existing && !pathOwner(existing) ? n : newest(existing, n);
+      const owner = pathOwner(n); if (!owner) continue;
+      latest[owner] = newest(latest[owner], n);
     }
     briefRaw = Object.fromEntries(Object.entries(latest).map(([name, n]) => [name, { content: n.content ?? "", updatedAt: n.updatedAt ?? null, generatedAt: typeof n.metadata?.generated_at === "string" ? n.metadata.generated_at : null }]));
   }
@@ -83,9 +80,10 @@ let lastLoadAt: number | null = null;
 let memoryOwner: string | null = null;
 let savedAt: number | null = null;
 let generation = 0;
+let memoryStale = true;
 export function forgetAreas() {
   generation++;
-  payload = null; lastLoadAt = null; savedAt = null; memoryOwner = null;
+  payload = null; lastLoadAt = null; savedAt = null; memoryOwner = null; memoryStale = true;
   clearProjectBodies();
   deviceCache.clear();
 }
@@ -94,7 +92,7 @@ const remembered = (owner: CacheOwner) => {
   const key = ownerKey(owner);
   if (memoryOwner !== key) {
     generation++;
-    payload = null; lastLoadAt = null; savedAt = null; memoryOwner = key;
+    payload = null; lastLoadAt = null; savedAt = null; memoryOwner = key; memoryStale = true;
   }
   if (!payload) { const c = deviceCache.read(owner); if (c) { payload = c; savedAt = c.savedAt; } }
   return payload;
@@ -106,7 +104,7 @@ const timing = (patch: Partial<Timing>) => { const w = window as unknown as { __
 
 export function useAreas(identity: string | null) {
   const owner = { identity: identity ?? "", vault: AREA_VAULT };
-  const [data, setData] = useState<AreasData | null>(() => { const p = remembered(owner); return p ? toView(p, true, savedAt) : null; });
+  const [data, setData] = useState<AreasData | null>(() => { const p = remembered(owner); return p ? toView(p, memoryStale, savedAt) : null; });
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [n, setN] = useState(0);
@@ -121,16 +119,16 @@ export function useAreas(identity: string | null) {
     }
     let live = true;
     setLoading(true); setError(null);
-    setData((d) => d ? { ...d, stale: true } : d);
     lastLoadAt = Date.now();
     fetchPayload(payload).then((p) => {
       if (!live || epoch !== generation) return;
       payload = p;
+      memoryStale = !!p.refreshError;
       if (!p.refreshError) { savedAt = Date.now(); deviceCache.write(p, owner); }
       setError(p.refreshError);
       if (n === 0) timing({ freshMs: Math.round(performance.now() - t0) });
       if (live) setData(toView(p, !!p.refreshError, savedAt));
-    }).catch((e) => { if (live && epoch === generation) { setError(String(e)); setData((d) => d ? { ...d, stale: true } : d); } })
+    }).catch((e) => { if (live && epoch === generation) { memoryStale = true; setError(String(e)); setData((d) => d ? { ...d, stale: true } : d); } })
       .finally(() => { if (live && epoch === generation) setLoading(false); });
     return () => { live = false; };
   }, [n, identity]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -140,5 +138,10 @@ export function useAreas(identity: string | null) {
     document.addEventListener("visibilitychange", visible);
     return () => document.removeEventListener("visibilitychange", visible);
   }, []);
-  return { data, error, loading };
+  return { data, error, loading: !!identity && loading, signingIn: !identity };
+}
+
+// Browser regression seam, absent from production builds.
+if (import.meta.env.VITE_AREAS_TESTHOOKS === "1") {
+  (window as unknown as { __forgetAreas: typeof forgetAreas }).__forgetAreas = forgetAreas;
 }
