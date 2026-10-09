@@ -3,6 +3,8 @@ import { expect, type Page } from '@playwright/test';
 export async function bootRail(page: Page) {
   await page.addInitScript(() => {
     const w = window as any;
+    // These suites test the room view and the chrome around it: start on a saved Uni-room tab (the app itself opens to Uni's home page).
+    if (!localStorage.getItem('uni.tabs.v1')) localStorage.setItem('uni.tabs.v1', JSON.stringify({ v: 1, tabs: [{ id: 'room', kind: 'room', channel: 'uni-room', title: 'Uni' }], active: 'room', recent: ['room'] }));
     w.updated = '2026-10-01T12:00:00Z';
     w.content = '# For you\n\n- Walk in the morning light\n  - nested\n* Make time for a quiet conversation\n```\n- code\n```\n- Read something slowly';
     w.__TAURI_INTERNALS__ = {

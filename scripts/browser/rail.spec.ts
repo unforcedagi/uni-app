@@ -33,7 +33,7 @@ test('Rail surfaces, overlay panels, focus and phone list', async ({ page }, inf
     await expect(page.locator('.rooms')).toBeVisible();
     await page.getByRole('button', { name: 'Close panel', exact: true }).click();
     await expect(page.locator('.rooms')).toBeHidden();
-    await expect(rail.getByRole('button').filter({ visible: true })).toHaveCount(6);
+    await expect(rail.getByRole('button').filter({ visible: true })).toHaveCount(5);
   }
   await rail.getByRole('button', { name: 'Journal', exact: true }).click();
   const writing = page.getByRole('textbox', { name: 'Journal entry', exact: true });
@@ -62,7 +62,7 @@ test('Rail surfaces, overlay panels, focus and phone list', async ({ page }, inf
   {
     await expect(fy.locator('.rail-dot')).toHaveCount(0);
     await rail.getByRole('button', { name: 'Uni', exact: true }).click();
-    await expect(page.getByRole('textbox', { name: 'Message Uni' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Uni', level: 1 })).toBeVisible();
     const before = await page.locator('.conversation').boundingBox();
     await rail.getByRole('button', { name: 'Rooms', exact: true }).click();
     await expect(page.locator('.rooms')).toBeVisible();
@@ -84,7 +84,7 @@ test('Rail surfaces, overlay panels, focus and phone list', async ({ page }, inf
     await expect(writing).toHaveValue('A little room to think.');
     await rail.getByRole('button', { name: 'Uni', exact: true }).click();
     await page.reload();
-    await expect(page.getByRole('textbox', { name: 'Message Uni' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Uni', level: 1 })).toBeVisible();
     await page.evaluate(() => { (window as any).updated = '2026-10-02T12:00:00Z'; (window as any).content += '\n- A new suggestion'; document.dispatchEvent(new Event('visibilitychange')); });
     await expect(fy.locator('.rail-count')).toHaveText('4');
     await expect(fy.locator('.rail-dot')).toBeVisible();

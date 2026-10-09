@@ -39,7 +39,7 @@ const desktopQuery = `(min-width: ${DESKTOP_MIN}px)`;
 const subscribeDesktop = (f: () => void) => { const mq = window.matchMedia(desktopQuery); mq.addEventListener("change", f); return () => mq.removeEventListener("change", f); };
 const isDesktop = () => window.matchMedia(desktopQuery).matches;
 
-export default function AreaView({ area, entry, now, channel, onChannel, mode, roomName, actions, room, onBack, backLabel, crumbs, lead, kids, freshAt }: {
+export default function AreaView({ area, entry, now, channel, onChannel, mode, roomName, actions, room, onBack, backLabel, onConversations, crumbs, lead, kids, freshAt }: {
   area: Area; mode: GateMode | "closed"; roomName: (id: string) => string; actions: AreaActions;
   /** The area's Brief (null: Uni hasn't written one) and the time it is read against. */
   entry: AreaBrief | null; now: number;
@@ -49,6 +49,8 @@ export default function AreaView({ area, entry, now, channel, onChannel, mode, r
   room: AreaRoom | null;
   /** Up one level (null: this is Uni, the top) and where that goes, by name. */
   onBack: (() => void) | null; backLabel: string;
+  /** Uni (the top) only: reach the conversation list where the rail is out of reach (short landscape screens). */
+  onConversations?: () => void;
   /** The page around the Brief: breadcrumb, Uni's Today in place of a Brief, the children, the freshness override. */
   crumbs?: ReactNode; lead?: ReactNode; kids?: ReactNode; freshAt?: string | null;
 }) {
@@ -164,6 +166,7 @@ export default function AreaView({ area, entry, now, channel, onChannel, mode, r
   const idle = ready_ && granted && !running;
   // A running app has its own hero, so the host bar drops the title (kept for screen readers).
   const header = <header className={`area-bar ${framed ? "chromeless" : ""}`}>
+    {!onBack && onConversations && <button className="note-back area-conversations" onClick={onConversations} aria-label="Back to conversations"><span className="note-back-arrow" aria-hidden="true">←</span><span className="note-back-label">Rooms</span></button>}
     {onBack && <button className="note-back" onClick={onBack} aria-label={`Back to ${backLabel}`}><span className="note-back-arrow" aria-hidden="true">←</span><span className="note-back-label">{backLabel}</span></button>}
     <strong className={`area-bar-title ${framed ? "sr-only" : ""}`}>{name}</strong>
     {framed && mode === "approved-code" && <span className="area-mode-chip" title="On this device apps can reach the network through WebRTC, so this app is only as safe as its code. You approved this version.">Approved code</span>}

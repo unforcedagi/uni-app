@@ -27,11 +27,14 @@ test('All reading surfaces fit the screen', async ({ page }, info) => {
     await page.screenshot({ path: `${dir}/${info.project.name}-${view}.png` });
   };
   const openPanel = async (name: 'Rooms' | 'Settings' | 'Search') => {
-    if (short || (phone && name === 'Search')) {
-      await page.getByRole('button', { name: 'Back to conversations', exact: true }).click();
+    // Uni's home has no Back-to-conversations button (it is the top): the rail reaches everything.
+    const back = page.getByRole('button', { name: 'Back to conversations', exact: true });
+    if ((short || (phone && name === 'Search')) && await back.count()) {
+      await back.click();
       if (name === 'Settings') await page.locator('.rooms-header').getByRole('button', { name: 'Settings', exact: true }).click();
       if (name === 'Search') await page.getByRole('button', { name: 'Search messages and notes' }).click();
-    } else await rail.getByRole('button', { name, exact: true }).click();
+    } else if (phone && name === 'Search') { await rail.getByRole('button', { name: 'Rooms', exact: true }).click(); await page.locator('.phone-panel-tools').getByRole('button', { name: 'Search', exact: true }).click(); }
+    else await rail.getByRole('button', { name, exact: true }).click();
   };
   for (const control of [page.getByRole('textbox', { name: 'Message Uni' }), page.getByRole('button', { name: 'Record a voice message' }), page.getByRole('button', { name: 'Send message', exact: true })]) await fits(control, true);
   expect((await page.locator('.message-list').boundingBox())!.height).toBeGreaterThan(100);

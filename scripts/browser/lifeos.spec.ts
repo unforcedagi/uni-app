@@ -275,8 +275,10 @@ test.describe('Uni is home, areas are a tree', () => {
     await page.screenshot({ path: `shots/t80b/${info.project.name}-uni-home.png` });
   });
 
-  test('Techne shows the project as a card inside it, and its own room only', async ({ page }) => {
+  test('Techne shows the project as a card inside it, and its own room only', async ({ page }, info) => {
     await openAreaPage(page, 'Techne', { app: false });
+    await mkdir('shots/t80b', { recursive: true });
+    await page.screenshot({ path: `shots/t80b/${info.project.name}-techne.png` });
     await expect(crumbs(page)).toContainText('Uni');
     await expect(crumbs(page).locator('.here')).toHaveText(/Techne/);
     const inside = page.getByRole('region', { name: 'Inside Techne' });
@@ -289,7 +291,7 @@ test.describe('Uni is home, areas are a tree', () => {
     await expect(composer(page, 'Techne')).toBeVisible();
   });
 
-  test('the child has its own page and room, a breadcrumb up, and Back goes to its parent', async ({ page }) => {
+  test('the child has its own page and room, a breadcrumb up, and Back goes to its parent', async ({ page }, info) => {
     await openAreaPage(page, 'Techne', { app: false });
     await areaCard(page, 'COhere 2026').click();
     await expect(page.locator('.area-bar-title')).toHaveText('COhere 2026');
@@ -298,6 +300,8 @@ test.describe('Uni is home, areas are a tree', () => {
     await expect(page.locator('.area-brief h1')).toHaveText('COhere 2026');
     await expect(page.locator('.brief-now')).toContainText('Venue is held for Oct 15');
     await expect(page.locator('.brief-fresh span')).toHaveText('updated 5h ago');
+    await mkdir('shots/t80b', { recursive: true });
+    await page.screenshot({ path: `shots/t80b/${info.project.name}-cohere.png` });
     await openSheet(page);
     await expect(composer(page, 'Cohere')).toBeVisible();
     await expect(page.locator('.area-chat')).toContainText('COhere schedule draft');
