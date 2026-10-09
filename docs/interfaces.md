@@ -279,3 +279,11 @@ On Linux the webkit `ipc` message handler is removed (`close_ipc_handler`, any n
 self-test pass is keyed on app version, user agent and the wry/Tauri versions (`webview_runtime`). If `ipc://` ever
 fails, Tauri's postMessage fallback throws and invokes stay dead; Uni then shows "Uni lost its connection to the app
 core. Restart Uni." (`src/ipcLost.ts`).
+
+On Android wry registers its init scripts for every frame and exposes `window.ipc` to every frame, and Tauri sends
+every invoke on Android through `window.ipc.postMessage`, so a sealed frame could call any command (T-79). The app
+ships its own `RustWebView.kt` / `Ipc.kt` / `MainFrameOnly.kt` (`src-tauri/gen/android/app/src/main/java/org/unforced/uni`):
+init scripts only for `http(s)://tauri.localhost` and behind a `window.top === window` guard, and `window.ipc`
+is a WebMessageListener for the same origins that drops anything not from the main frame. `build.rs` fails an
+Android build on any wry other than 0.55.1, because the two Kotlin files are copies of that version's templates.
+`tauri android dev` (dev server origin) is not covered.

@@ -69,7 +69,8 @@ export function navVerdict(o: { violation: boolean; loads?: number }): boolean {
 export const PROBE_HTML = `<!doctype html><html><body><script>
 (async () => {
   const R = {};
-  const blocked = async (fn) => { try { await fn(); return false; } catch (e) { return true; } };
+  // A call that neither throws nor settles is not blocked: Tauri's invoke over a reachable ipc bridge returns a promise only the host can answer (T-79).
+  const blocked = async (fn) => { try { await Promise.race([Promise.resolve(fn()), new Promise((r) => setTimeout(r, 1500))]); return false; } catch (e) { return true; } };
   // Pass only on a securitypolicyviolation for this attempt. Success, silence and the timeout all fail.
   // sendBeacon "succeeds" (returns true) even when the CSP then blocks it, so it keeps waiting for the event.
   const violated = (directive, attempt, waitAfterSuccess) => new Promise((res) => {

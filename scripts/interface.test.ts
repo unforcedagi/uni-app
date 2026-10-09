@@ -535,6 +535,17 @@ await check("selftest: the in-frame contract check speaks uni:1 to theme.get, no
   assert.match(probe.PROBE_HTML, /uni: 1, id: 'probe', ns: 'theme'/);
   assert.ok(!/bridge: 1/.test(probe.PROBE_HTML));
 });
+await check("selftest: a call that never settles is not 'blocked' and cannot hang the probe (T-79)", async () => {
+  const m = /const blocked = (async \(fn\) => \{.*?\});\n/s.exec(probe.PROBE_HTML);
+  assert.ok(m, "blocked helper found in the probe source");
+  const blocked = new Function(`return ${m[1]}`)();
+  assert.equal(await blocked(() => { throw new Error("x"); }), true, "sync throw = blocked");
+  assert.equal(await blocked(() => Promise.reject(new Error("x"))), true, "rejection = blocked");
+  assert.equal(await blocked(() => Promise.resolve(1)), false, "success = not blocked");
+  const t0 = Date.now();
+  assert.equal(await blocked(() => new Promise(() => {})), false, "never settles = not blocked");
+  assert.ok(Date.now() - t0 < 5000, "returns in bounded time");
+});
 await check("selftest: evaluateProbe fails closed on missing results", () => {
   assert.equal(probe.evaluateProbe({}).pass, false);
   assert.equal(probe.evaluateProbe(Object.fromEntries(probe.PROBE_CHECKS.map((c: Any) => [c.id, true]))).pass, true);
