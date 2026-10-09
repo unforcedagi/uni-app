@@ -22,10 +22,10 @@ Publish an app by creating or updating the note `Areas/<Name>/app` with `extensi
 | File | Role |
 |---|---|
 | `contract.ts` | version, namespaces, capabilities, error codes, limits, envelope validation, `inScope` / `safePrefix` |
-| `manifest.ts` | parse `interface:` metadata, default needs, resolve `area`, hash, plain-words description |
-| `grants.ts` | grant store keyed by note id + needs hash (injectable storage) |
+| `manifest.ts` | parse `interface:` metadata, default needs, resolve `area`, grant key (SHA-256 of the resolved needs), plain-words description |
+| `grants.ts` | grant store: note id → hash of the RESOLVED needs + hash of the app HTML (injectable storage) |
 | `router.ts` | `createRouter(modules)`: namespace/method → handler, enforcing grant, params and scope |
-| `session.ts` | one frame's message pump: rate limit (60 / 10 s, every message counts), 8 pending, replies |
+| `session.ts` | one frame's message pump: rate limit (60 tokens / 10 s; a message costs 1 and each underlying note read 1 more), 8 pending, replies |
 | `suggestions.ts` | pending suggestions (max 3). Adding never acts; only `accept()` does |
 | `modules/vault.ts` | read-only REST subset of surface-client's `VaultClient` over the frame |
 | `modules/chat.ts`, `note.ts`, `theme.ts` | `chat.recent` / `chat.draft`, `note.open`, `theme.get` |
@@ -52,19 +52,33 @@ interface:
 - `area` resolves against the host: `vault.read` → `Areas/<Name>/`; `chat.*` → the area's `channel` rooms.
 - Invalid manifests (unknown capability, `..`, `%`, backslash, no trailing `/`, > 12 needs, wrong contract
   version) never run; the area shows its default view with the reason.
-- The **hash** of the normalised needs (order-independent) keys the grant. Change the needs and the user
-  is asked again.
+- The grant is keyed by the note id, the SHA-256 of what the needs **resolve to** (folder prefixes, room
+  ids and the area path) and the SHA-256 of the app HTML. A different resolution asks again: a granted
+  app note moved into another area, or an area whose `channel` is edited, is a new question, even though
+  the symbolic `area` need reads the same. An **HTML-only** change runs, and the host shows an "updated
+  since you allowed it" line in the area bar for that session (the frame cannot draw it).
+- Scopes may not contain zero-width, bidi or control characters. A `vault.read` prefix outside the area's
+  own folder is allowed but the prompt says so in bold ("Read notes outside this area, in Journal/").
 
 ## Consent
 
 1. **First open: grant prompt** (`grantPrompt.tsx`, outside the frame). Lists the needs in plain words:
    *Read notes in Areas/Techne/ · Read recent messages in #Techne · Suggest drafts for #Techne*.
-   **Allow** stores the grant; **Not now** shows the default view and is not remembered.
+   Every sentence is the host's; the only text from the note is the area name, quoted and marked as
+   unverified. **Allow** stores the grant; **Not now** shows the default view and is not remembered.
 2. **While running: suggestion bar** (`consent.tsx`, outside the frame). `chat.draft` and `note.open`
    only create a *pending suggestion*: "Techne suggests a draft for #Techne: … [Add to draft] [Dismiss]".
    Only a tap on that host UI adds the text to the room's composer (after any existing draft; it never
-   sends) or opens the note. At most 3 pending; duplicates collapse. There is no gesture inference
+   sends) or opens the note. The bar shows the **whole** draft that will be inserted, in a scrollable
+   block: drafts are capped at 500 characters, hidden characters (bidi, zero-width, control except
+   newline and tab) are stripped and runs of 3+ newlines collapse to one blank line, in the module, in
+   the suggestion store and therefore in both the bar and the insert. `note.open` is judged on the note
+   the ref resolves to, and the suggestion carries that path. At most 3 pending; duplicates collapse. There is no gesture inference
    (no `userActivation`, no blur or focus heuristics): a frame that steals focus gains nothing.
+3. **Stop, revoke, restore.** The area bar has **Stop app** (unmounts the frame) and **Revoke access**
+   (forgets the grant; the next open asks again); a stopped app shows **Open <Name> app**. An app starts
+   only on a tap in the current process (the area card, **Allow**, or **Open app**): an area tab restored
+   from the last launch never starts its app by itself, so a faulty app cannot freeze Uni on every launch.
 
 ## Wire protocol
 
@@ -95,8 +109,13 @@ stringifying attacker data); depth ≤ 6; plain JSON only. Over the rate limit t
 - `GET /api/vault` → `{name, scope}`.
 - `GET /api/notes?path_prefix&tag&search&limit&id&path&include_content` → notes, newest first, `limit` ≤ 50.
   No `path_prefix` means the granted scope, never the vault. A `path_prefix` outside the grant is 403.
-  `tag` scans at most 100 in-scope notes; `search` is scoped by prefix and its results are filtered again.
-  The app note itself (`html`) is left out of lists.
+  `tag` and `include_content` read at most 20 in-scope notes (the Tauri vault commands expose no tag
+  filter, so this is a bounded scan); `search` is scoped by prefix and its results are filtered again.
+  The app note itself (`html`) is left out of lists. Reads are cached by note id for 10 s; a cache miss
+  costs one limiter token (a cache hit is free), and a request that runs out of budget answers 429.
+  Parameters outside the list (`offset`, `sort`, `metadata`, `include_links`, `near`, `cursor`, …) are
+  `400 bad_params` rather than silently ignored; `GET /api/vault` accepts `include_stats`. This is a
+  **subset** of `VaultClient`, not the whole client.
 - `GET /api/notes/:idOrPath` → the note, or 404.
 
 Scope is judged on the **note that comes back** (its `path` must be strictly inside a granted prefix),
@@ -156,6 +175,16 @@ What each part really guarantees:
     startup (`disable_webrtc` in `lib.rs`). Compiles; behaviour on a running Tauri bundle unverified.
   - Android WebView (Chromium) and macOS WKWebView have WebRTC: the self-test is expected to fail there,
     so live apps stay off until a native switch exists. Not yet implemented.
+- **In-process, so an app can freeze Uni.** The frame shares the host's renderer, so `for(;;){}`, an
+  allocation loop or a DOM bomb freezes the whole app on Chromium and WebKit (reproduced in review). The
+  message limiter cannot help; there is no in-process fix. Mitigations shipped: the grant prompt says so,
+  **Stop app** and **Revoke access** exist, and a restored tab never auto-starts its app. A frozen host
+  cannot be tapped, so recovery is force-quit and, on relaunch, not opening the area. **Out-of-process
+  hosting (a separate webview per app) is the follow-up** that actually fixes it.
+- **DNS**: `dns-prefetch` and `preconnect` hints are not governed by CSP on Chromium, so a hostname-based
+  DNS channel may remain. Our harness could not make those hints fire even without a CSP, so the result is
+  inconclusive, not clean. Not tested, not sealed; same follow-up (a separate webview with its own
+  network rules).
 - **Cookies**: Chromium throws in an opaque origin; WebKit returns `""`. The self-test passes on a throw,
   or on `""` where a write does not persist.
 - **Consent**: the frame cannot reach the host UI. `chat.draft` and `note.open` cannot act on their own.

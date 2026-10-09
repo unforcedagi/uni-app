@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { expect, type Page } from '@playwright/test';
-import { defaultNeeds, hashNeeds } from '../../src/interface/manifest.ts';
+import { defaultNeeds, grantKey, htmlHash, resolveNeeds } from '../../src/interface/manifest.ts';
 
 const seed = (name: string) => readFileSync(new URL(`../../areas-seed/${name}.html`, import.meta.url), 'utf8');
 
@@ -139,6 +139,8 @@ export type BootOpts = {
   granted?: boolean;
   /** Test-only seam: the self-test frames get no CSP meta (needs the VITE_AREAS_TESTHOOKS build). */
   stripCsp?: boolean;
+  /** Names of apps whose stored grant records an OLDER html hash (the app changed since it was allowed). */
+  staleHtml?: string[];
   /** Serve the host document without the Tauri CSP header. */
   noHostCsp?: boolean;
   /** `getVersion()` rejects. */
@@ -151,8 +153,19 @@ export async function bootAreas(page: Page, variant: Variant = 'seed', opts: Boo
   const now = Math.floor(Date.now() / 1000);
   const data = {
     now, variant, selftest: opts.selftest ?? true, ipcLeak: opts.ipcLeak ?? false, hostile: hostileApp(opts.ports ?? { http: 9, udp: 9 }), benign: BENIGN, techne: seed('techne'), unforced: seed('unforced'),
-    apps: opts.apps ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', defaultHash: hashNeeds(defaultNeeds()), stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null,
+    apps: opts.apps ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null,
   };
+  // Pre-granted apps: the grant key is the SHA-256 of the RESOLVED default needs plus the app's html.
+  const preGrant = [
+    { id: 'app-techne', area: 'Techne', ch: 'ch-techne', html: data.techne }, { id: 'app-unf', area: 'Unforced Development', ch: 'ch-unf', html: data.unforced },
+    { id: 'app-host', area: 'Hostile', ch: 'ch-techne', html: data.hostile }, { id: 'app-ben', area: 'Benign', ch: 'ch-techne', html: data.benign },
+    ...data.apps.map((a) => ({ id: 'app-x-' + a.name, area: a.name, ch: 'ch-techne', html: a.html })),
+  ];
+  for (const g of preGrant) {
+    const ctx = { areaPath: `Areas/${g.area}`, channels: [g.ch] };
+    const stale = (opts.staleHtml ?? []).some((n) => g.id === 'app-x-' + n);
+    data.grantSeed[g.id] = { scope: await grantKey(resolveNeeds(defaultNeeds(), ctx), ctx.areaPath), html: stale ? 'stale-' + await htmlHash(g.html) : await htmlHash(g.html) };
+  }
   if (opts.noHostCsp) {
     await page.route((u) => new URL(u).pathname === '/', async (route) => {
       const response = await route.fetch();
@@ -173,9 +186,8 @@ export async function bootAreas(page: Page, variant: Variant = 'seed', opts: Boo
     w.__calls = [];
     // The live-frame gate opens for this platform and version through a stored self-test pass.
     if (d.selftest && !localStorage.getItem('uni.areaApps.selftest.v1')) localStorage.setItem('uni.areaApps.selftest.v1', JSON.stringify({ platform: 'linux', passedAt: '2026-10-08T00:00:00Z', appVersion: 'dev', userAgent: d.passUa ?? navigator.userAgent }));
-    if (d.granted && !localStorage.getItem('uni.interface.grants.v1')) {
-      const ids = ['app-techne', 'app-unf', 'app-host', 'app-ben', ...(d.apps as { name: string }[]).map((a) => 'app-x-' + a.name)];
-      localStorage.setItem('uni.interface.grants.v1', JSON.stringify(Object.fromEntries(ids.map((id) => [id, { hash: d.defaultHash, grantedAt: '2026-10-08T00:00:00Z' }]))));
+    if (d.granted && !localStorage.getItem('uni.interface.grants.v2')) {
+      localStorage.setItem('uni.interface.grants.v2', JSON.stringify(Object.fromEntries(Object.entries(d.grantSeed as Record<string, { scope: string; html: string }>).map(([id, g]) => [id, { ...g, grantedAt: '2026-10-08T00:00:00Z' }]))));
     }
     const U = 'a'.repeat(64);
     const area = (id: string, name: string, status: string, ch: string, purpose: string) => ({

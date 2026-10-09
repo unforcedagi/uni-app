@@ -92,42 +92,78 @@ await check("manifest: rejects bad contract, unknown capability, traversal and m
   bad({ contract: 1, needs: [{ "vault.read": 5 }] });
   bad({ contract: 1, needs: Array.from({ length: 40 }, () => ({ "chat.read": "area" })) });
 });
-await check("manifest: hash is stable under reorder and changes with any need", () => {
-  const h = (needs: Any[]) => manifest.parseManifest({ interface: { contract: 1, needs } }, ctx).hash;
-  const a = h([{ "vault.read": "Areas/Techne/" }, { "chat.read": "area" }]);
-  assert.equal(a, h([{ "chat.read": "area" }, { "vault.read": "Areas/Techne/" }]));
-  assert.notEqual(a, h([{ "vault.read": "Areas/Techne/" }]));
-  assert.notEqual(a, h([{ "vault.read": "Areas/Techne/Sub/" }, { "chat.read": "area" }]));
-  assert.notEqual(a, h([{ "vault.read": "Areas/Techne/" }, { "chat.read": "area" }, { "chat.draft": "area" }]));
+await check("manifest: parseManifest no longer carries a weak hash; the grant key is SHA-256 of the RESOLVED needs", async () => {
+  const m = manifest.parseManifest(null, ctx);
+  assert.equal(m.hash, undefined);
+  const resolved = manifest.resolveNeeds(m.manifest.needs, ctx);
+  const k = await manifest.grantKey(resolved, ctx.areaPath);
+  assert.match(k, /^[0-9a-f]{64}$/);
+  assert.equal(k, await manifest.grantKey(resolved, ctx.areaPath), "stable");
+  // key order and duplicate scopes do not matter
+  const shuffled = { "chat.draft": ["ch-techne", "ch-techne"], "vault.read": ["Areas/Techne/"], "chat.read": ["ch-techne"] };
+  assert.equal(await manifest.grantKey(shuffled, ctx.areaPath), k);
+  assert.match(await manifest.htmlHash("<html>"), /^[0-9a-f]{64}$/);
+  assert.equal(await manifest.sha256Hex("abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+});
+await check("manifest: the SAME symbolic needs in a different area or room resolve to a different grant key (P2-A)", async () => {
+  const m = manifest.parseManifest(null, ctx);
+  const key = (c: Any) => manifest.grantKey(manifest.resolveNeeds(m.manifest.needs, c), c.areaPath);
+  const base = await key(ctx);
+  assert.notEqual(await key({ areaPath: "Areas/Private", channels: ["ch-techne"] }), base, "moved to another area");
+  assert.notEqual(await key({ areaPath: "Areas/Techne", channels: ["ch-private"] }), base, "channel metadata edited");
+  assert.notEqual(await key({ areaPath: "Areas/Techne", channels: ["ch-techne", "ch-private"] }), base, "extra room");
+  assert.notEqual(await key({ areaPath: "Areas/Techne", channels: [] }), base, "no room");
+  // the same explicit scopes, but the note now lives in another area (area path is part of the key)
+  const explicit = { "vault.read": ["Areas/Techne/"] };
+  assert.notEqual(await manifest.grantKey(explicit, "Areas/Techne"), await manifest.grantKey(explicit, "Areas/Other"));
+});
+await check("manifest: scopes with zero-width, bidi or control characters are refused", () => {
+  for (const scope of ["Areas/Techne\u200b/", "Areas/\u202eTechne/", "Areas/Tech\u2066ne/", "Areas/Techne\ufeff/"]) {
+    assert.equal(manifest.parseManifest({ interface: { contract: 1, needs: [{ "vault.read": scope }] } }, ctx).ok, false, JSON.stringify(scope));
+  }
+  assert.equal(manifest.parseManifest({ interface: { contract: 1, needs: [{ "chat.read": "room\u200b1" }] } }, ctx).ok, false);
 });
 await check("manifest: describeNeeds speaks plainly", () => {
   const m = manifest.parseManifest(null, ctx);
   const lines = manifest.describeNeeds(m.manifest.needs, ctx, (id: string) => (id === "ch-techne" ? "Techne" : "room"));
   assert.equal(lines.length, 3);
-  assert.match(lines[0], /read notes in Areas\/Techne\//i);
-  assert.match(lines.join("\n"), /read recent messages in #?Techne/i);
-  assert.match(lines.join("\n"), /suggest drafts for #?Techne/i);
+  assert.match(lines[0].text, /read notes in Areas\/Techne\//i);
+  const all = lines.map((l: Any) => l.text).join("\n");
+  assert.match(all, /read recent messages in #?Techne/i);
+  assert.match(all, /suggest drafts for #?Techne/i);
+  assert.ok(lines.every((l: Any) => l.outside === false));
+});
+await check("manifest: describeNeeds flags a vault prefix outside the area's own folder", () => {
+  const m = manifest.parseManifest({ interface: { contract: 1, needs: [{ "vault.read": "Journal/" }, { "vault.read": "Areas/" }, { "vault.read": "Areas/Techne/Sub/" }, { "vault.read": "Areas/TechneEvil/" }] } }, ctx);
+  const lines = manifest.describeNeeds(m.manifest.needs, ctx, () => "x");
+  assert.deepEqual(lines.map((l: Any) => l.outside), [true, true, false, true]);
+  assert.match(lines[0].text, /outside this area/i);
 });
 
 // ------------------------------------------------------------ grants
 const memStore = () => { const m = new Map<string, string>(); return { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v), removeItem: (k: string) => void m.delete(k), m }; };
-await check("grants: granted only for the same note id and needs hash", () => {
+await check("grants: status is none / ok / updated (scope hash must match; an HTML-only change is 'updated')", () => {
   const g = grants.createGrantStore(memStore());
-  assert.equal(g.isGranted("n1", "h1"), false);
-  g.grant("n1", "h1");
-  assert.equal(g.isGranted("n1", "h1"), true);
-  assert.equal(g.isGranted("n1", "h2"), false, "changed needs re-ask");
-  assert.equal(g.isGranted("n2", "h1"), false);
-  g.revoke("n1"); assert.equal(g.isGranted("n1", "h1"), false);
+  assert.equal(g.status("n1", "s1", "h1"), "none");
+  g.grant("n1", "s1", "h1");
+  assert.equal(g.status("n1", "s1", "h1"), "ok");
+  assert.equal(g.status("n1", "s2", "h1"), "none", "resolved needs changed: ask again");
+  assert.equal(g.status("n1", "s2", "h2"), "none");
+  assert.equal(g.status("n1", "s1", "h2"), "updated", "html only: run, but say so");
+  assert.equal(g.status("n2", "s1", "h1"), "none");
+  g.touch("n1", "h2"); assert.equal(g.status("n1", "s1", "h2"), "ok");
+  g.revoke("n1"); assert.equal(g.status("n1", "s1", "h2"), "none");
 });
-await check("grants: persists in the injected storage; corrupt storage means not granted", () => {
-  const s = memStore(); grants.createGrantStore(s).grant("n1", "h1");
-  assert.equal(grants.createGrantStore(s).isGranted("n1", "h1"), true);
-  const bad = memStore(); bad.setItem("uni.interface.grants.v1", "{nope"); assert.equal(grants.createGrantStore(bad).isGranted("n1", "h1"), false);
-  const arr = memStore(); arr.setItem("uni.interface.grants.v1", JSON.stringify({ n1: { hash: ["h1"] } })); assert.equal(grants.createGrantStore(arr).isGranted("n1", "h1"), false);
-  assert.equal(grants.createGrantStore(null).isGranted("n1", "h1"), false);
+await check("grants: persists in the injected storage; corrupt, old-format or hostile storage means not granted", () => {
+  const s = memStore(); grants.createGrantStore(s).grant("n1", "s1", "h1");
+  assert.equal(grants.createGrantStore(s).status("n1", "s1", "h1"), "ok");
+  const bad = memStore(); bad.setItem(grants.GRANTS_KEY, "{nope"); assert.equal(grants.createGrantStore(bad).status("n1", "s1", "h1"), "none");
+  const arr = memStore(); arr.setItem(grants.GRANTS_KEY, JSON.stringify({ n1: { scope: ["s1"], html: "h1" } })); assert.equal(grants.createGrantStore(arr).status("n1", "s1", "h1"), "none");
+  const old = memStore(); old.setItem("uni.interface.grants.v1", JSON.stringify({ n1: { hash: "s1" } })); assert.equal(grants.createGrantStore(old).status("n1", "s1", "h1"), "none", "weak v1 grants are not honoured");
+  assert.equal(grants.createGrantStore(null).status("n1", "s1", "h1"), "none");
   const throwing = { getItem() { throw new Error("x"); }, setItem() { throw new Error("x"); }, removeItem() { throw new Error("x"); } };
-  const t = grants.createGrantStore(throwing); t.grant("n1", "h1"); assert.equal(t.isGranted("n1", "h1"), true, "session fallback works, nothing persisted");
+  const t = grants.createGrantStore(throwing); t.grant("n1", "s1", "h1"); assert.equal(t.status("n1", "s1", "h1"), "ok", "session fallback works, nothing persisted");
+  const proto = grants.createGrantStore(memStore()); assert.equal(proto.status("__proto__", "s1", "h1"), "none"); assert.equal(proto.status("constructor", "s1", "h1"), "none");
 });
 
 // ------------------------------------------------------------ router
@@ -321,24 +357,35 @@ await check("chat.draft: bad text, oversize, other room and missing grant are re
   const g = { "chat.draft": ["ch-techne"] };
   const code = (p: Any, gr: Any = g) => r.call("chat", "draft", p, gr).then(() => "ok", (e: Any) => e.code);
   assert.equal(await code({ text: "" }), "bad_params"); assert.equal(await code({ text: "   " }), "bad_params");
-  assert.equal(await code({ text: "x".repeat(2001) }), "bad_params"); assert.equal(await code({ text: 5 }), "bad_params");
+  assert.equal(await code({ text: "x".repeat(501) }), "bad_params"); assert.equal(await code({ text: 5 }), "bad_params");
   assert.equal(await code({ text: "ok", room: "ch-private" }), "out_of_scope");
   assert.equal(await code({ text: "ok", extra: 1 }), "bad_params");
   assert.equal(await code({ text: "ok" }, { "chat.read": ["ch-techne"] }), "not_granted");
-  assert.equal(await code({ text: "x".repeat(2000) }), "ok");
+  assert.equal(await code({ text: "x".repeat(500) }), "ok");
   assert.equal(log.length, 1);
 });
 
 // ------------------------------------------------------------ note.open module
-await check("note.open: scoped to vault.read prefixes and only creates a pending suggestion", async () => {
+const noteResolve = async (ref: string) => { const n = NOTES.find((x) => x.id === ref || x.path === ref || x.path + ".md" === ref); if (!n) throw new Error("not found"); return { id: n.id, path: n.path }; };
+await check("note.open: scoped on the RESOLVED note, only creates a pending suggestion, for the path that was checked", async () => {
   const log: Any[] = [];
-  const r = routerMod.createRouter([noteMod.createNoteModule({ suggest: (s: Any) => { log.push(s); return { id: "s" }; } })]);
+  const r = routerMod.createRouter([noteMod.createNoteModule({ suggest: (s: Any) => { log.push(s); return { id: "s" }; }, resolve: noteResolve })]);
   assert.deepEqual(await r.call("note", "open", { ref: "Areas/Techne/Plan" }, GR), { pending: true });
   assert.deepEqual(log, [{ kind: "open", ref: "Areas/Techne/Plan" }]);
-  for (const ref of ["Areas/Atlas/Secret", "Journal/2026", "Areas/Techne/../Atlas/x", "/etc/passwd", "Areas/Techne/%2e%2e/x", "Areas/Techne/", "Areas/TechneX/Other"]) {
+  // an id of an in-scope note is fine, and the suggestion carries the checked path
+  await r.call("note", "open", { ref: "t2" }, GR);
+  assert.deepEqual(log[1], { kind: "open", ref: "Areas/Techne/Log" });
+  for (const ref of ["Areas/Atlas/Secret", "a1", "j1", "nopath", "Journal/2026", "Areas/Techne/../Atlas/x", "/etc/passwd", "Areas/Techne/%2e%2e/x", "Areas/Techne/", "Areas/TechneX/Other", "tx", "missing-id", "Areas/Techne/\u200bPlan", "Areas/Techne/Pl\u202ean"]) {
     await assert.rejects(() => r.call("note", "open", { ref }, GR), (e: Any) => e.code === "out_of_scope" || e.code === "bad_params", ref);
   }
-  assert.equal(log.length, 1);
+  assert.equal(log.length, 2);
+});
+await check("note.open: a ref that LOOKS in scope but resolves elsewhere is refused (the resolver, not the string, decides)", async () => {
+  const log: Any[] = [];
+  const evil = async () => ({ id: "a1", path: "Areas/Atlas/Secret" });
+  const r = routerMod.createRouter([noteMod.createNoteModule({ suggest: (s: Any) => { log.push(s); return {}; }, resolve: evil })]);
+  await assert.rejects(() => r.call("note", "open", { ref: "Areas/Techne/Plan" }, GR), (e: Any) => e.code === "out_of_scope");
+  assert.equal(log.length, 0);
 });
 
 // ------------------------------------------------------------ suggestions store
@@ -366,7 +413,7 @@ await check("suggestions: subscribers hear about changes; snapshot is stable bet
 // ------------------------------------------------------------ session (the host pump)
 const mkSession = (over: Any = {}) => {
   const out: Any[] = []; const log: Any[] = [];
-  const router = routerMod.createRouter([vaultMod.createVaultModule(vaultDeps(log)), chatMod.createChatModule(chatDeps(log)), noteMod.createNoteModule({ suggest: (s: Any) => { log.push(["open", s]); return { id: "x" }; } })]);
+  const router = routerMod.createRouter([vaultMod.createVaultModule(vaultDeps(log)), chatMod.createChatModule(chatDeps(log)), noteMod.createNoteModule({ suggest: (s: Any) => { log.push(["open", s]); return { id: "x" }; }, resolve: noteResolve })]);
   let t = 0;
   const s = session.createSession({ post: (m: Any) => out.push(m), router, grant: { "vault.read": ["Areas/Techne/"], "chat.read": ["ch-techne"], "chat.draft": ["ch-techne"] }, now: () => t, ...over });
   return { s, out, log, advance: (ms: number) => { t += ms; } };
@@ -482,6 +529,129 @@ await check("selftest: evaluateProbe fails closed on missing results", () => {
   assert.equal(probe.evaluateProbe(Object.fromEntries(probe.PROBE_CHECKS.map((c: Any) => [c.id, true]))).pass, true);
   const almost = Object.fromEntries(probe.PROBE_CHECKS.map((c: Any) => [c.id, true])); almost.webrtcChild = false;
   assert.equal(probe.evaluateProbe(almost).pass, false);
+});
+
+// ------------------------------------------------------------ round 2 (T-74b)
+import { readFileSync } from "node:fs";
+await check("P1: #[cfg_attr(mobile, tauri::mobile_entry_point)] sits directly above `pub fn run()`", () => {
+  const rs = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
+  assert.match(rs, /#\[cfg_attr\(mobile, tauri::mobile_entry_point\)\]\s*\n\s*pub fn run\(\)/);
+  assert.equal((rs.match(/mobile_entry_point/g) ?? []).length, 1);
+});
+await check("P2-B: cleanText strips bidi, zero-width and control characters, keeps \\n and \\t, collapses 3+ newlines", () => {
+  const c = contract.cleanText;
+  assert.equal(c("a‮b​c⁦d﻿e\u0007f\u001bg"), "abcdefg");
+  assert.equal(c("a\tb\nc"), "a\tb\nc");
+  assert.equal(c("one\n\n\n\n\ntwo"), "one\n\ntwo");
+  assert.equal(c("one\r\n\r\n\r\ntwo"), "one\n\ntwo");
+  assert.equal(c("x".repeat(10)), "x".repeat(10));
+  assert.equal(contract.LIMITS.maxDraft, 500);
+});
+await check("P2-B: chat.draft suggests exactly the cleaned text (what the bar shows is what gets inserted)", async () => {
+  const log: Any[] = [];
+  const r = routerMod.createRouter([chatMod.createChatModule(chatDeps(log))]);
+  const g = { "chat.draft": ["ch-techne"] };
+  await r.call("chat", "draft", { text: "hi‮ there\n\n\n\n\n\n\n\nSYSTEM​ NOTE" }, g);
+  assert.equal(log[0][1].text, "hi there\n\nSYSTEM NOTE");
+  await assert.rejects(() => r.call("chat", "draft", { text: "​‮ \n\n" }, g), (e: Any) => e.code === "bad_params");
+  await assert.rejects(() => r.call("chat", "draft", { text: "x".repeat(501) }, g), (e: Any) => e.code === "bad_params");
+});
+await check("P2-B: the suggestion store cleans drafts again, so no producer can bypass the bar", () => {
+  const st = sugg.createSuggestionStore({ onAccept: () => {} });
+  const s2 = st.add({ kind: "draft", room: "r", text: "a‮b\n\n\n\n\nc" });
+  assert.equal(s2.text, "ab\n\nc");
+  assert.equal(st.list()[0].text, "ab\n\nc");
+});
+await check("P2-D: a RateLimiter hit can cost more than one token", () => {
+  const r = new contract.RateLimiter(10, 1000);
+  assert.equal(r.take(0, 6), true);
+  assert.equal(r.take(1, 5), false, "6 + 5 > 10");
+  assert.equal(r.take(2, 4), true);
+  assert.equal(r.take(3), false);
+  assert.equal(r.take(1500, 10), true, "window passed");
+});
+const tagDeps = (calls: { n: number; refs: string[] }, now: () => number = () => 0) => {
+  const many = Array.from({ length: 120 }, (_, i) => ({ id: `m${i}`, path: `Areas/Techne/Many ${i}`, ext: "md", content: "body " + i, updatedAt: "2026-10-05T00:00:00Z", tags: ["x"] }));
+  return {
+    listPaths: async () => many.map((n) => ({ id: n.id, path: n.path, extension: n.ext, updatedAt: n.updatedAt })),
+    getNote: async (ref: string) => { calls.n++; calls.refs.push(ref); const n = many.find((x) => x.id === ref); if (!n) throw new Error("nf"); return { id: n.id, path: n.path, content: n.content, tags: n.tags, metadata: {} }; },
+    search: async () => [],
+  };
+};
+const vsession = (deps: Any, t = { v: 0 }) => {
+  const out: Any[] = [];
+  const router = routerMod.createRouter([vaultMod.createVaultModule(deps, { now: () => t.v })]);
+  const s = session.createSession({ post: (m: Any) => out.push(m), router, grant: { "vault.read": ["Areas/Techne/"] }, now: () => t.v });
+  return { s, out, t };
+};
+await check("P2-D: a tag scan reads at most 20 notes", async () => {
+  const calls = { n: 0, refs: [] as string[] };
+  const { s, out } = vsession(tagDeps(calls));
+  s.handle({ pfr: 1, channel: "vault", id: "a", method: "GET", path: "/api/notes?tag=nomatch&limit=1", headers: {}, body: null });
+  await tick(20);
+  assert.ok(calls.n <= 20, `getNote calls ${calls.n}`);
+  assert.equal(out[0].status, 200);
+});
+await check("P2-D: include_content reads at most 20 notes even with limit=50", async () => {
+  const calls = { n: 0, refs: [] as string[] };
+  const { s, out } = vsession(tagDeps(calls));
+  s.handle({ pfr: 1, channel: "vault", id: "a", method: "GET", path: "/api/notes?include_content=true&limit=50", headers: {}, body: null });
+  await tick(20);
+  assert.ok(calls.n <= 20, `getNote calls ${calls.n}`);
+  assert.equal(JSON.parse(out[0].body).length, 20);
+});
+await check("P2-D: each underlying getNote costs a token: 200 distinct scans make at most 60 reads per window, then 429 rate_limited", async () => {
+  const calls = { n: 0, refs: [] as string[] };
+  const t = { v: 0 };
+  const base = tagDeps(calls);
+  let q = 0;
+  // every query hits a different 20 notes, so the cache cannot hide the cost
+  const deps = { ...base, search: async () => { const o = (q++ * 20) % 100; return Array.from({ length: 20 }, (_, i) => ({ id: `m${o + i}`, path: `Areas/Techne/Many ${o + i}`, snippet: "" })); } };
+  const { s, out } = vsession(deps, t);
+  for (let i = 0; i < 200; i++) { s.handle({ pfr: 1, channel: "vault", id: "r" + i, method: "GET", path: `/api/notes?search=q${i}&include_content=true&limit=20`, headers: {}, body: null }); await tick(1); }
+  await tick(30);
+  assert.ok(calls.n <= 60, `getNote calls in one window: ${calls.n}`);
+  assert.ok(out.some((m: Any) => m.status === 429), "a request that ran out of budget answers 429 rate_limited");
+  t.v += 11_000; const before = calls.n;
+  s.handle({ pfr: 1, channel: "vault", id: "later", method: "GET", path: "/api/notes?search=zzz&include_content=true&limit=20", headers: {}, body: null });
+  await tick(20);
+  assert.ok(calls.n > before, "budget is back after the window");
+});
+await check("P2-D: 200 plain tag scans over the same notes read at most 20 (cache), not 6000", async () => {
+  const calls = { n: 0, refs: [] as string[] };
+  const { s } = vsession(tagDeps(calls));
+  for (let i = 0; i < 200; i++) { s.handle({ pfr: 1, channel: "vault", id: "r" + i, method: "GET", path: `/api/notes?tag=nomatch&limit=1`, headers: {}, body: null }); await tick(1); }
+  await tick(30);
+  assert.ok(calls.n <= 20, `getNote calls ${calls.n}`);
+});
+await check("P2-D: notes are cached for 10 s by id; a cache hit is free, and scope is still judged on the cached note", async () => {
+  const calls = { n: 0, refs: [] as string[] };
+  const t = { v: 0 };
+  const { s, out } = vsession(tagDeps(calls), t);
+  const get = async (id: string) => { s.handle({ pfr: 1, channel: "vault", id, method: "GET", path: "/api/notes/m1", headers: {}, body: null }); await tick(10); };
+  await get("a"); await get("b"); await get("c");
+  assert.equal(calls.n, 1, "three reads, one underlying getNote");
+  t.v += 11_000; await get("d");
+  assert.equal(calls.n, 2, "expired after 10 s");
+  assert.ok(out.every((m: Any) => m.status === 200));
+  const cachedOut = vsession({ ...tagDeps({ n: 0, refs: [] }), getNote: async () => ({ id: "m1", path: "Areas/Atlas/Secret", content: "S", tags: [], metadata: {} }) });
+  cachedOut.s.handle({ pfr: 1, channel: "vault", id: "x", method: "GET", path: "/api/notes/m1", headers: {}, body: null });
+  await tick(10);
+  assert.equal(cachedOut.out[0].status, 404);
+});
+await check("P3: unknown query parameters are refused with 400 bad_params, not silently ignored", async () => {
+  for (const q of ["metadata[x]=1", "offset=5", "sort=asc", "excludeTag=a", "near=x", "cursor=1", "include_links=true", "tag_match=any", "order_by=x"]) {
+    const { status, body } = await vget(`/api/notes?${q}`);
+    assert.equal(status, 400, q); assert.equal(body.error, "bad_params", q);
+  }
+  for (const q of ["path_prefix=Areas/Techne/", "tag=plan", "search=widget", "limit=3", "include_content=true", "id=t1", "path=Areas/Techne/Plan"]) assert.equal((await vget(`/api/notes?${q}`)).status, 200, q);
+  assert.equal((await vget("/api/notes/t1?include_content=true")).status, 200, "per-note include_content is part of getNote");
+  assert.equal((await vget("/api/notes/t1?bogus=1")).status, 400);
+});
+await check("P2-C: docs say in-process apps can freeze Uni and out-of-process hosting is the follow-up", () => {
+  const md = readFileSync(new URL("../docs/interfaces.md", import.meta.url), "utf8");
+  assert.match(md, /freeze/i); assert.match(md, /out-of-process/i);
+  assert.match(md, /dns-prefetch/i);
 });
 
 if (failed) { console.log(`\ninterface: ${failed} failed`); process.exit(1); }

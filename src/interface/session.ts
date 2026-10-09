@@ -16,6 +16,7 @@ export function createSession(opts: SessionOptions) {
   const limiter = new RateLimiter();
   let pending = 0;
   let closed = false;
+  const ctx = { charge(n: number) { if (!limiter.take(now(), n)) throw new ContractError(ERROR_CODES.rateLimited); } };
   const post = (m: HostMessage) => { if (!closed) opts.post(m); };
   return {
     /** Stop for good: in-flight calls get no reply and later messages are ignored. */
@@ -37,9 +38,9 @@ export function createSession(opts: SessionOptions) {
       if (pending >= LIMITS.maxPending) { errorReply(env.id, ERROR_CODES.tooManyPending); return; }
       pending++;
       const call = env.kind === "pfr"
-        ? opts.router.call("vault", "fetch", { method: env.method, path: env.path, headers: env.headers, body: env.body }, opts.grant)
+        ? opts.router.call("vault", "fetch", { method: env.method, path: env.path, headers: env.headers, body: env.body }, opts.grant, ctx)
           .then((r: FetchResult) => post(toFrameFetchReply(env, r)))
-        : opts.router.call(env.ns, env.method, env.params, opts.grant).then((result) => post({ uni: 1, id: env.id, result: result ?? null }));
+        : opts.router.call(env.ns, env.method, env.params, opts.grant, ctx).then((result) => post({ uni: 1, id: env.id, result: result ?? null }));
       call.catch((e) => errorReply(env.id, codeOf(e))).finally(() => { pending--; });
     },
   };

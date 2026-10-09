@@ -2,7 +2,7 @@
 // A draft is a pending suggestion shown by the host (consent.tsx); this module
 // has no way to touch a composer, and nothing here can post.
 
-import { hasOnly, LIMITS, plain } from "../contract.ts";
+import { cleanText, hasOnly, LIMITS, plain } from "../contract.ts";
 import type { UniModule } from "../router.ts";
 import type { SuggestionInput } from "../suggestions.ts";
 
@@ -40,9 +40,12 @@ export function createChatModule(deps: ChatDeps): UniModule {
         cap: "chat.draft",
         validate: (p: unknown) => {
           if (!plain(p) || !hasOnly(p, ["text", "room"])) return { ok: false };
-          if (typeof p.text !== "string" || !p.text.trim() || p.text.length > LIMITS.maxDraft) return { ok: false };
+          if (typeof p.text !== "string" || p.text.length > LIMITS.maxDraft) return { ok: false };
+          // What is shown and what is inserted are the same cleaned text.
+          const text = cleanText(p.text);
+          if (!text.trim()) return { ok: false };
           if (p.room !== undefined && (typeof p.room !== "string" || !p.room || p.room.length > 100)) return { ok: false };
-          return { ok: true, value: { text: p.text, room: p.room as string | undefined } };
+          return { ok: true, value: { text, room: p.room as string | undefined } };
         },
         scopeCheck: (scopes, v: { room?: string }) => { const rooms = scopes["chat.draft"] ?? []; return v.room === undefined ? rooms.length > 0 : rooms.includes(v.room); },
         async run(v: { text: string; room?: string }, scopes) {

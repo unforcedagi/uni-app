@@ -13,14 +13,17 @@ export type MethodDef<T = any> = { // eslint-disable-line @typescript-eslint/no-
   validate(params: unknown): Validated<T>;
   /** Called after validation with the granted scopes for `cap`; false → out_of_scope. */
   scopeCheck?(scopes: Resolved, value: T): boolean;
-  run(value: T, scopes: Resolved): Promise<unknown>;
+  run(value: T, scopes: Resolved, ctx: CallCtx): Promise<unknown>;
 };
+/** Per-call host services. `charge(n)` takes n tokens from the frame's limiter and throws rate_limited when it is out. */
+export type CallCtx = { charge(n: number): void };
+const FREE: CallCtx = { charge() {} };
 export type UniModule = { namespace: string; methods: Record<string, MethodDef> };
 
 export function createRouter(modules: UniModule[]) {
   const byNs = new Map(modules.map((m) => [m.namespace, m]));
   return {
-    async call(ns: string, method: string, params: unknown, grant: Resolved): Promise<any> { // eslint-disable-line @typescript-eslint/no-explicit-any
+    async call(ns: string, method: string, params: unknown, grant: Resolved, ctx: CallCtx = FREE): Promise<any> { // eslint-disable-line @typescript-eslint/no-explicit-any
       const mod = byNs.get(ns);
       if (!mod) throw new ContractError(ERROR_CODES.unknownNamespace);
       // Own properties only: "constructor", "__proto__" and friends are not methods.
@@ -30,7 +33,7 @@ export function createRouter(modules: UniModule[]) {
       const v = def.validate(params);
       if (!v.ok) throw new ContractError(ERROR_CODES.badParams);
       if (def.scopeCheck && !def.scopeCheck(grant, v.value)) throw new ContractError(ERROR_CODES.outOfScope);
-      return def.run(v.value, grant);
+      return def.run(v.value, grant, ctx);
     },
   };
 }

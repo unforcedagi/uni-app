@@ -5,7 +5,9 @@ import InterfaceFrame from "../interface/frame";
 import GrantPrompt from "../interface/grantPrompt";
 import SuggestionBar from "../interface/consent";
 import { createGrantStore } from "../interface/grants";
-import { describeNeeds, parseManifest, resolveNeeds } from "../interface/manifest";
+import { describeNeeds, grantKey, htmlHash, parseManifest, resolveNeeds } from "../interface/manifest";
+import { cleanText } from "../interface/contract";
+import { clearUpdated, isStarted, markStarted, markStopped, markUpdated, wasUpdated } from "./appRun";
 import { createRouter } from "../interface/router";
 import { createSuggestionStore } from "../interface/suggestions";
 import { createVaultModule } from "../interface/modules/vault";
@@ -37,7 +39,10 @@ export default function AreaView({ area, rows, live, roomName, actions, onBack }
   const [app, setApp] = useState<AppNote | null>(null);
   const [appError, setAppError] = useState(false);
   const [declined, setDeclined] = useState(false);
-  const [, setGrantVersion] = useState(0);
+  const [keys, setKeys] = useState<{ scope: string; html: string } | null>(null);
+  const [, setVersion] = useState(0);
+  const bump = () => setVersion((v) => v + 1);
+  const name = cleanText(area.name);
   useEffect(() => {
     setApp(null); setAppError(false); setDeclined(false);
     if (!live || !appRow) return;
@@ -50,8 +55,26 @@ export default function AreaView({ area, rows, live, roomName, actions, onBack }
   // What the app asked for (or the default), resolved against this area.
   const ctx = useMemo(() => ({ areaPath: area.path, channels: area.channels }), [area.path, area.channels]);
   const manifest = useMemo(() => (app ? parseManifest(app.metadata, ctx) : null), [app, ctx]);
-  const granted = !!app && manifest?.ok === true && grants.isGranted(app.id, manifest.hash);
   const grant = useMemo(() => (manifest?.ok ? resolveNeeds(manifest.manifest.needs, ctx) : {}), [manifest, ctx]);
+  // The grant is keyed by what the needs RESOLVE to (folder, rooms, area) and by the app's HTML.
+  useEffect(() => {
+    setKeys(null);
+    if (!app || manifest?.ok !== true) return;
+    let on = true;
+    void Promise.all([grantKey(grant, area.path), htmlHash(app.html)]).then(([scope, html]) => { if (on) setKeys({ scope, html }); });
+    return () => { on = false; };
+  }, [app, manifest, grant, area.path]);
+  const status = app && keys ? grants.status(app.id, keys.scope, keys.html) : "none";
+  const granted = status !== "none";
+  // Only the HTML changed: run it, but say so for this session.
+  useEffect(() => {
+    if (status !== "updated" || !app || !keys) return;
+    markUpdated(app.id); grants.touch(app.id, keys.html); bump();
+  }, [status, app, keys]);
+  const running = isStarted(area.path);
+  const stop = () => { markStopped(area.path); bump(); };
+  const revoke = () => { if (!app) return; grants.revoke(app.id); clearUpdated(app.id); markStopped(area.path); setDeclined(false); bump(); };
+  const start = () => { markStarted(area.path); bump(); };
 
   const suggestions = useMemo(() => createSuggestionStore({
     onAccept: (s) => { if (s.kind === "draft") actions.compose(s.room, s.text); else actions.openNote(s.ref); },
@@ -63,28 +86,38 @@ export default function AreaView({ area, rows, live, roomName, actions, onBack }
       search: (query, limit, pathPrefix) => invoke<{ id: string; path: string; snippet: string }[]>("vault_search", { query, limit, mode: "keyword", vault: AREA_VAULT, pathPrefix }),
     }),
     createChatModule({ getMessages, suggest: (s) => suggestions.add(s), roomName }),
-    createNoteModule({ suggest: (s) => suggestions.add(s) }),
+    createNoteModule({ suggest: (s) => suggestions.add(s), resolve: (ref) => invoke<{ note: { id: string; path?: string | null } }>("vault_note", { vault: AREA_VAULT, noteRef: ref }).then((d) => d.note) }),
     createThemeModule({ theme: readHostTheme }),
   ]), [suggestions, roomName]);
   const ready = useMemo(() => ({ area: { name: area.name, title: area.title, purpose: area.purpose, status: area.status, since: typeof area.metadata.since === "string" ? area.metadata.since : null } }), [area]);
 
-  const framed = live && !!appRow && !!app && !appError && granted;
-  const asking = live && !!appRow && !!app && !appError && !granted && !declined && manifest?.ok === true;
+  const ready_ = live && !!appRow && !!app && !appError && !!keys;
+  const framed = ready_ && granted && running;
+  const asking = ready_ && !granted && !declined && manifest?.ok === true;
+  const idle = ready_ && granted && !running;
   // A running app has its own hero, so the host bar drops the title (kept for screen readers).
   const header = <header className={`area-bar ${framed ? "chromeless" : ""}`}>
     <button className="note-back" onClick={onBack} aria-label="Back to Areas"><span className="note-back-arrow" aria-hidden="true">←</span><span className="note-back-label">Areas</span></button>
-    <strong className={`area-bar-title ${framed ? "sr-only" : ""}`}>{area.name}</strong>
+    <strong className={`area-bar-title ${framed ? "sr-only" : ""}`}>{name}</strong>
+    {framed && <span className="area-bar-controls">
+      <button className="pairing-secondary area-stop" onClick={(e) => { if (e.isTrusted) stop(); }}>Stop app</button>
+      <button className="pairing-secondary area-revoke" onClick={(e) => { if (e.isTrusted) revoke(); }}>Revoke access</button>
+    </span>}
     <span className={`area-mark ${area.status}`}>{area.status}</span>
   </header>;
 
-  if (framed) return <div className="area-view framed">{header}<SuggestionBar store={suggestions} appName={area.name} roomName={roomName} /><InterfaceFrame html={app!.html} title={`${area.name} app`} router={router} grant={grant} ready={ready} /></div>;
-  if (asking && manifest?.ok) return <div className="area-view">{header}<GrantPrompt name={area.name} lines={describeNeeds(manifest.manifest.needs, ctx, roomName)}
-    onAllow={() => { grants.grant(app!.id, manifest.hash); setGrantVersion((v) => v + 1); }} onNotNow={() => setDeclined(true)} /></div>;
+  if (framed) return <div className="area-view framed">{header}
+    {app && wasUpdated(app.id) && <p className="area-updated" role="status">This app was updated since you allowed it.</p>}
+    <SuggestionBar store={suggestions} appName={name} roomName={roomName} />
+    <InterfaceFrame html={app!.html} title={`${name} app`} router={router} grant={grant} ready={ready} /></div>;
+  if (asking && manifest?.ok) return <div className="area-view">{header}<GrantPrompt name={name} lines={describeNeeds(manifest.manifest.needs, ctx, roomName)}
+    onAllow={() => { grants.grant(app!.id, keys!.scope, keys!.html); markStarted(area.path); bump(); }} onNotNow={() => setDeclined(true)} /></div>;
   return <div className="area-view">{header}<DefaultArea area={area} actions={actions} roomName={roomName} pending={live && !!appRow && !appError && !app}
+    onOpenApp={idle ? start : null} onRevoke={idle ? revoke : null}
     notice={manifest && !manifest.ok ? `This area's app was not opened: ${manifest.error}.` : null} /></div>;
 }
 
-function DefaultArea({ area, actions, roomName, pending, notice }: { area: Area; actions: AreaActions; roomName: (id: string) => string; pending: boolean; notice: string | null }) {
+function DefaultArea({ area, actions, roomName, pending, notice, onOpenApp, onRevoke }: { area: Area; actions: AreaActions; roomName: (id: string) => string; pending: boolean; notice: string | null; onOpenApp: (() => void) | null; onRevoke: (() => void) | null }) {
   const [messages, setMessages] = useState<RoomMessage[] | null>(null);
   useEffect(() => {
     let on = true;
@@ -110,6 +143,8 @@ function DefaultArea({ area, actions, roomName, pending, notice }: { area: Area;
       {messages?.map((m) => <p key={m.ref} className="area-msg"><span><strong>{m.author_name || m.author.slice(0, 8)}</strong><time>{clock(m.ts)}</time></span>{m.body.slice(0, 280)}</p>)}
     </section>
     <div className="area-actions">
+      {onOpenApp && <button className="suggestion-go area-open-app" onClick={(e) => { if (e.isTrusted) onOpenApp(); }}>Open {cleanText(area.name)} app</button>}
+      {onRevoke && <button className="pairing-secondary area-revoke" onClick={(e) => { if (e.isTrusted) onRevoke(); }}>Revoke access</button>}
       {channel && <button className="pairing-secondary" onClick={() => actions.openRoom(channel)}>Open room</button>}
       <button className="pairing-secondary" onClick={() => actions.openNote(area.path)}>Open note</button>
     </div>

@@ -1,10 +1,17 @@
-/** Host-rendered first-open request: what the app needs, in plain words. Nothing runs until [Allow]. */
-export default function GrantPrompt({ name, lines, onAllow, onNotNow }: { name: string; lines: string[]; onAllow: () => void; onNotNow: () => void }) {
+import type { NeedLine } from "./manifest";
+
+/**
+ * Host-rendered first-open request. Every sentence is the host's. The only text
+ * that comes from the note is the area name, shown quoted and marked as
+ * unverified (it is the note's title, not a statement from the app).
+ * Nothing runs until [Allow].
+ */
+export default function GrantPrompt({ name, lines, updated, onAllow, onNotNow }: { name: string; lines: NeedLine[]; updated?: boolean; onAllow: () => void; onNotNow: () => void }) {
   return <section className="grant-prompt" role="region" aria-label={`${name} is asking for access`}>
-    <h2>{name} wants to run its app</h2>
-    <p className="area-quiet">It runs in a sealed frame. It would be able to:</p>
-    <ul>{lines.map((l) => <li key={l}>{l}</li>)}</ul>
-    <p className="area-quiet">It can't send messages, change notes or reach the internet.</p>
+    <h2>An app wants to run</h2>
+    <p className="area-quiet">{updated ? "It asks for different access than before. " : ""}The app in the area <q data-untrusted="true" className="grant-name">{name}</q> (a name taken from the note, not verified) would run in a sealed frame. It would be able to:</p>
+    <ul>{lines.map((l) => <li key={l.text} className={l.outside ? "grant-outside" : undefined}>{l.outside ? <strong>{l.text}</strong> : l.text}</li>)}</ul>
+    <p className="area-quiet">It can't send messages, change notes or reach the internet. It runs inside Uni, so a faulty app can freeze it; you can stop or revoke it from the bar above the app.</p>
     <div className="area-actions">
       <button className="suggestion-go" onClick={(e) => { if (e.isTrusted) onAllow(); }}>Allow</button>
       <button className="pairing-secondary" onClick={(e) => { if (e.isTrusted) onNotNow(); }}>Not now</button>

@@ -27,7 +27,7 @@ export default function ProbeFrame({ html, router, nav, onDone }: { html: string
   const doneRef = useRef(onDone);
   doneRef.current = onDone;
   const finish = (report: unknown) => { if (done.current) return; done.current = true; doneRef.current({ report, violation: violation.current }); };
-  const { frame, onLoad } = useSealedFrame({ srcDoc, router, grant: NO_GRANT, onViolation: () => { violation.current = true; } });
+  const { frame, onLoad, srcDoc: liveDoc } = useSealedFrame({ srcDoc, router, grant: NO_GRANT, onViolation: () => { violation.current = true; } });
 
   useEffect(() => {
     const onMessage = (e: MessageEvent) => {
@@ -42,5 +42,5 @@ export default function ProbeFrame({ html, router, nav, onDone }: { html: string
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nav]);
 
-  return <iframe ref={frame} className="area-frame" title="Sandbox self-test" sandbox="allow-scripts" referrerPolicy="no-referrer" srcDoc={srcDoc} onLoad={onLoad} />;
+  return <iframe ref={frame} className="area-frame" title="Sandbox self-test" sandbox="allow-scripts" referrerPolicy="no-referrer" srcDoc={liveDoc} onLoad={onLoad} />;
 }
