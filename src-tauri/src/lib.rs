@@ -1443,6 +1443,28 @@ async fn vault_paths(
     .await
 }
 
+/// Every note tagged `tag` in one request, with content and metadata: the Today view's areas,
+/// briefs and Today note.
+#[tauri::command]
+async fn vault_query(
+    app: tauri::AppHandle,
+    vault: String,
+    tag: String,
+    include_content: Option<bool>,
+    limit: Option<usize>,
+) -> Result<Vec<serde_json::Value>, String> {
+    with_vault(&app, move |c| {
+        tauri::async_runtime::block_on(c.query_tagged(
+            &vault,
+            &tag,
+            include_content.unwrap_or(true),
+            limit.unwrap_or(100),
+        ))
+        .map_err(|e| e.to_string())
+    })
+    .await
+}
+
 #[tauri::command]
 async fn vault_create(
     app: tauri::AppHandle,
@@ -1691,6 +1713,7 @@ pub fn run() {
             vault_search,
             vault_list,
             vault_paths,
+            vault_query,
             vault_create,
             vault_save,
             android_update_manifest

@@ -1,26 +1,24 @@
 import { mkdir } from 'node:fs/promises';
 import { test, expect, type Page } from '@playwright/test';
-import { bootAreas, FOCUS_STEAL, navApp, SUGGEST } from './areasFixture';
+import { areaCard, bootAreas, openAreaPage, openAreasHome, FOCUS_STEAL, navApp, SUGGEST } from './areasFixture';
 import { startListener } from './areasListener';
 
 const rail = (page: Page) => page.getByRole('navigation', { name: 'Main navigation' });
-const openAreas = async (page: Page) => { await rail(page).getByRole('button', { name: 'Areas', exact: true }).click(); await expect(page.getByRole('heading', { name: 'Areas', level: 1 })).toBeVisible(); };
-const card = (page: Page, name: string) => page.locator('.area-card', { has: page.locator('strong', { hasText: new RegExp(`^${name}$`) }) });
-const openArea = async (page: Page, name: string) => { await card(page, name).click(); await expect(page.locator('.area-bar-title')).toHaveText(name); };
+const openAreas = openAreasHome;
+const card = areaCard;
+const openArea = openAreaPage;
 const calls = (page: Page, cmd: string) => page.evaluate((c) => (window as any).__calls.filter((x: any) => x.cmd === c), cmd);
 
 test.describe('seed apps and navigation', () => {
   test.beforeEach(async ({ page }) => bootAreas(page, 'seed'));
 
-  test('home lists areas foreground first, with room pulse', async ({ page }, info) => {
+  test('home (Today) lists areas foreground first, background collapsed', async ({ page }, info) => {
     await openAreas(page);
     const names = await page.locator('.area-card strong').allTextContents();
     expect(names).toEqual(['Techne', 'Unforced Development', 'Atlas', 'Expression', 'Relationships', 'Sanctum']);
     await expect(card(page, 'Techne').locator('.area-mark')).toHaveText(/Foreground/);
-    await expect(card(page, 'Techne')).toContainText('Good. Ship Techne first');
-    await expect(card(page, 'Relationships')).toContainText('No room linked');
-    await expect(card(page, 'Techne')).toContainText('Aaron: Good. Ship Techne first');
-    await expect(card(page, 'Atlas')).toContainText('Quiet so far');
+    await expect(card(page, 'Techne')).toContainText('The craft of building');
+    await expect(card(page, 'Relationships')).toBeHidden();
     await expect(page.getByRole('button', { name: 'Refresh areas' })).toHaveCount(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await mkdir('shots/t74', { recursive: true });
@@ -83,15 +81,14 @@ test.describe('seed apps and navigation', () => {
     await page.screenshot({ path: `shots/t74/${info.project.name}-area-unforced.png` });
   });
 
-  test('an area without an app shows the default view', async ({ page }) => {
+  test('an area without an app shows the Brief page (here: not written yet) and its room', async ({ page }) => {
     await openAreas(page);
     await openArea(page, 'Sanctum');
     await expect(page.locator('iframe')).toHaveCount(0);
+    await expect(page.locator('.area-default')).toContainText("Uni hasn't written this area's brief yet");
     await expect(page.locator('.area-default')).toContainText('Daily practice');
     await expect(page.locator('.area-chat')).toContainText('Sat twenty minutes');
-    await page.getByRole('button', { name: 'Open note' }).click();
-    await expect(page.locator('.note-sheet')).toBeVisible();
-    await page.locator('.note-back').click();
+    await expect(page.getByRole('button', { name: 'Open note' }), 'no button that opens the page you are on').toHaveCount(0);
     await page.getByRole('button', { name: /Open #Sanctum/ }).click();
     await expect(page.getByRole('textbox', { name: 'Message Sanctum' })).toBeVisible();
   });
@@ -104,7 +101,7 @@ test.describe('seed apps and navigation', () => {
     await page.getByRole('tab', { name: /Sanctum/ }).click();
     await expect(page.locator('.area-bar-title')).toHaveText('Sanctum');
     await page.locator('.area-bar .note-back').click();
-    await expect(page.getByRole('heading', { name: 'Areas', level: 1 })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Today', level: 1 })).toBeVisible();
   });
 });
 
@@ -366,17 +363,18 @@ test.describe('suggestions: only a tap on host UI acts', () => {
 });
 
 test.describe('listing cache', () => {
-  test('vault_paths is shared and the focus reload is debounced', async ({ page }) => {
+  test('Today never lists the vault; the bridge shares one cached listing; the focus reload is debounced', async ({ page }) => {
     await bootAreas(page, 'seed');
     await openAreas(page);
     await expect(card(page, 'Techne')).toBeVisible();
-    const n0 = (await calls(page, 'vault_paths')).length;
+    expect((await calls(page, 'vault_paths')).length, 'the home reads three tags, not the vault').toBe(0);
+    const q0 = (await calls(page, 'vault_query')).length;
     for (let i = 0; i < 4; i++) await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
     await page.waitForTimeout(400);
-    expect((await calls(page, 'vault_paths')).length, 'visibility reloads within 30 s are skipped').toBe(n0);
+    expect((await calls(page, 'vault_query')).length, 'visibility reloads within 30 s are skipped').toBe(q0);
     await openArea(page, 'Techne');
     await expect(page.frameLocator('iframe.area-frame').locator('#notes button')).toHaveCount(3);
-    expect((await calls(page, 'vault_paths')).length, 'the area view and the vault module reuse the cached listing').toBe(n0);
+    expect((await calls(page, 'vault_paths')).length, 'the vault module lists once and reuses it').toBeLessThanOrEqual(1);
   });
 });
 
@@ -428,7 +426,9 @@ test.describe('self-test hardening', () => {
     await openSettings(page);
     await page.getByRole('button', { name: 'Run sandbox self-test' }).click();
     await expect(page.locator('.selftest-status.pass')).toContainText('Passed', { timeout: 60000 });
-    await expect(page.locator('.area-view[data-keep] iframe.area-frame')).toHaveCount(1);
+    // the pass reaches the open area without a remount: the same view now has its App tab (the app itself still waits for a tap)
+    await expect(page.locator('.area-view[data-keep]').getByRole('tab', { name: 'App' })).toHaveCount(1);
+    await expect(page.locator('iframe')).toHaveCount(0);
   });
 });
 
@@ -456,6 +456,7 @@ test.describe('design', () => {
 
   test('foreground cards: a straight inset rule, text aligned with background cards, elevated warm tint', async ({ page }) => {
     await openAreas(page);
+    await page.locator('.today-background > summary').click();
     const fg = card(page, 'Techne'), bg = card(page, 'Atlas');
     const edge = await fg.evaluate((el) => getComputedStyle(el).borderLeftWidth);
     expect(edge, 'no bending border-left').toBe('1px');
@@ -468,10 +469,10 @@ test.describe('design', () => {
     expect(tint).not.toBe(plain);
   });
 
-  test('snippets clamp to two lines instead of cutting mid-word with an ellipsis on one line', async ({ page }) => {
+  test('the Now line clamps to three lines instead of cutting mid-word with an ellipsis on one line', async ({ page }) => {
     await openAreas(page);
-    const style = await card(page, 'Techne').locator('.area-latest > span').first().evaluate((el) => { const s = getComputedStyle(el); return { clamp: s.webkitLineClamp, ws: s.whiteSpace }; });
-    expect(style.clamp).toBe('2');
+    const style = await card(page, 'Techne').locator('.area-now').evaluate((el) => { const s = getComputedStyle(el); return { clamp: s.webkitLineClamp, ws: s.whiteSpace }; });
+    expect(style.clamp).toBe('3');
     expect(style.ws).not.toBe('nowrap');
   });
 
@@ -524,9 +525,10 @@ test.describe('design', () => {
   test.describe('dark', () => {
     test.use({ colorScheme: 'dark' });
     test('tiny caps and muted text are at least 4.5:1; the italic subtitle is weight 500', async ({ page }) => {
-      await bootAreas(page, 'seed');
+      await bootAreas(page, 'seed', { briefs: true });
       await openAreas(page);
-      for (const sel of ['.areas-head .eyebrow', '.area-card.background .area-mark', '.area-card.foreground .area-mark', '.areas-head p', '.area-card.background .area-latest', '.area-card.foreground .area-latest time']) {
+      await page.locator('.today-background > summary').click();
+      for (const sel of ['.areas-head .eyebrow', '.area-card.background .area-mark', '.area-card.foreground .area-mark', '.areas-head p', '.area-card.background .area-foot', '.area-card.foreground .area-fresh']) {
         const { fg, bg } = await contrastOf(page, sel);
         expect(ratio(fg, bg), sel).toBeGreaterThanOrEqual(4.5);
       }

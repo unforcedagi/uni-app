@@ -59,3 +59,8 @@ export function unreadAfter(list: readonly { ref: string; author: string }[], ma
   const at = marker === null ? -1 : list.findIndex((m) => m.ref === marker);
   return list.slice(at + 1).filter((m) => m.author !== me).length;
 }
+
+/** The room an area shows: the user's pick when the area still has it, else the first; null for an area with no room. */
+export function pickRoom(channels: readonly string[], selected: string | null | undefined): string | null {
+  return selected && channels.includes(selected) ? selected : channels[0] ?? null;
+}

@@ -1,7 +1,7 @@
 // T-74: the interface contract end to end (grant prompt, manifests, kits, WebRTC per webview).
 import { mkdir } from 'node:fs/promises';
 import { test, expect, type Page } from '@playwright/test';
-import { bootAreas } from './areasFixture';
+import { areaCard, bootAreas, openAreaPage, openAreasHome } from './areasFixture';
 import { startListener } from './areasListener';
 // On a narrow phone Stop / Revoke live in the bar's menu.
 const appControl = async (page: Page, name: string) => {
@@ -11,8 +11,8 @@ const appControl = async (page: Page, name: string) => {
 };
 
 const rail = (page: Page) => page.getByRole('navigation', { name: 'Main navigation' });
-const openAreas = async (page: Page) => { await rail(page).getByRole('button', { name: 'Areas', exact: true }).click(); await expect(page.getByRole('heading', { name: 'Areas', level: 1 })).toBeVisible(); };
-const openArea = async (page: Page, name: string) => { await page.locator('.area-card', { has: page.locator('strong', { hasText: new RegExp(`^${name}$`) }) }).click(); await expect(page.locator('.area-bar-title')).toHaveText(name); };
+const openAreas = openAreasHome;
+const openArea = openAreaPage;
 const openSettings = async (page: Page) => { await rail(page).getByRole('button', { name: 'Settings' }).click(); await expect(page.getByRole('button', { name: 'Run sandbox self-test' })).toBeVisible(); };
 const calls = (page: Page, cmd: string) => page.evaluate((c) => (window as any).__calls.filter((x: any) => x.cmd === c), cmd);
 const grants = (page: Page) => page.evaluate(() => JSON.parse(localStorage.getItem('uni.interface.grants.v2') ?? '{}'));
@@ -67,9 +67,9 @@ test.describe('grant prompt', () => {
     await rail(page).getByRole('button', { name: 'Areas', exact: true }).click();
     await page.getByRole('tab', { name: /Techne/ }).click().catch(() => {});
     if (!(await page.locator('.area-bar-title').isVisible())) await openArea(page, 'Techne');
-    // a restored tab never starts the app by itself; one tap does
+    // a restored tab never starts the app by itself (it opens on the Brief); one tap on App does
     await expect(page.locator('iframe.area-frame')).toHaveCount(0);
-    await page.getByRole('button', { name: 'Open Techne app' }).click();
+    await page.getByRole('tab', { name: 'App', exact: true }).click();
     await expect(page.locator('iframe.area-frame')).toHaveCount(1);
     await expect(page.getByRole('region', { name: /asking for access/ })).toHaveCount(0);
   });
@@ -234,9 +234,11 @@ test.describe('P2-A the grant follows what the needs resolve to, and the app cod
     await page.evaluate(() => {
       const w = window as any; const inv = w.__TAURI_INTERNALS__.invoke;
       w.__TAURI_INTERNALS__.invoke = async (cmd: string, args: any) => {
+        // the app note is looked up by path: Atlas's path now answers with the moved note
+        if (cmd === 'vault_note' && args.noteRef === 'Areas/Atlas/app') { const m = await inv(cmd, { ...args, noteRef: 'app-x-Mover' }); return { ...m, note: { ...m.note, path: 'Areas/Atlas/app' } }; }
         const r = await inv(cmd, args);
         if (cmd === 'vault_paths') return r.map((x: any) => (x.id === 'app-x-Mover' ? { ...x, path: 'Areas/Atlas/app' } : x));
-        if (cmd === 'vault_note' && (args.noteRef === 'app-x-Mover' || args.noteRef === 'Areas/Atlas/app')) return { ...r, note: { ...r.note, path: 'Areas/Atlas/app' } };
+        if (cmd === 'vault_note' && args.noteRef === 'app-x-Mover') return { ...r, note: { ...r.note, path: 'Areas/Atlas/app' } };
         return r;
       };
     });
@@ -281,9 +283,9 @@ test.describe('P2-C stop, revoke, and no auto-start of a restored app', () => {
     await page.reload();
     await page.getByRole('tab', { name: /Quiet/ }).click();
     await expect(page.locator('.area-bar-title')).toHaveText('Quiet');
-    await expect(page.getByRole('button', { name: 'Open Quiet app' })).toBeVisible();
+    await expect(page.getByRole('tab', { name: 'App', exact: true })).toBeVisible();
     await expect(page.locator('iframe')).toHaveCount(0);
-    await page.getByRole('button', { name: 'Open Quiet app' }).click();
+    await page.getByRole('tab', { name: 'App', exact: true }).click();
     await expect(page.locator('iframe.area-frame')).toHaveCount(1);
   });
 });
@@ -359,14 +361,14 @@ test.describe('P3-N3 the "updated" notice stays until Accept', () => {
     await appControl(page, 'Stop app');
     await page.reload();
     await page.getByRole('tab', { name: /Quiet/ }).click();
-    await page.getByRole('button', { name: 'Open Quiet app' }).click();
+    await page.getByRole('tab', { name: 'App', exact: true }).click();
     await expect(page.locator('iframe.area-frame')).toHaveCount(1);
     await expect(page.locator('.area-updated'), 'not consumed by the earlier view or the restart').toBeVisible();
     await page.locator('.area-updated').getByRole('button', { name: 'Accept' }).click();
     await expect(page.locator('.area-updated')).toHaveCount(0);
     await page.reload();
     await page.getByRole('tab', { name: /Quiet/ }).click();
-    await page.getByRole('button', { name: 'Open Quiet app' }).click();
+    await page.getByRole('tab', { name: 'App', exact: true }).click();
     await expect(page.locator('iframe.area-frame')).toHaveCount(1);
     await expect(page.locator('.area-updated')).toHaveCount(0);
   });

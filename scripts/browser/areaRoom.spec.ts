@@ -2,14 +2,10 @@
 // desktop, with a pull-up sheet on a phone; live messages reach the interface; suggestions land above the composer.
 import { mkdir } from 'node:fs/promises';
 import { test, expect, type Page } from '@playwright/test';
-import { bootAreas } from './areasFixture';
+import { bootAreas, openAreaPage, openAreasHome } from './areasFixture';
 
 const rail = (page: Page) => page.getByRole('navigation', { name: 'Main navigation' });
-const openArea = async (page: Page, name: string) => {
-  await rail(page).getByRole('button', { name: 'Areas', exact: true }).click();
-  await page.locator('.area-card', { has: page.locator('strong', { hasText: new RegExp(`^${name}$`) }) }).click();
-  await expect(page.locator('.area-bar-title')).toHaveText(name);
-};
+const openArea = async (page: Page, name: string) => { await openAreasHome(page); await openAreaPage(page, name); };
 const calls = (page: Page, cmd: string) => page.evaluate((c) => (window as any).__calls.filter((x: any) => x.cmd === c), cmd);
 const arrive = (page: Page, channel: string, name: string, body: string) => page.evaluate(([c, n, b]) => (window as any).__arrive(c, n, b), [channel, name, body]);
 const isDesktop = (page: Page) => (page.viewportSize()?.width ?? 0) >= 900;

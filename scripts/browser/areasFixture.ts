@@ -143,6 +143,16 @@ export type BootOpts = {
   granted?: boolean;
   /** Test-only seam: the self-test frames get no CSP meta (needs the VITE_AREAS_TESTHOOKS build). */
   stripCsp?: boolean;
+  /** Techne lists two rooms (#techne, #cohere) like the real area. */
+  multiRoom?: boolean;
+  /** Fixture Brief notes (Techne, Unforced Development) and an `Areas/Today` note, as the briefs writer produces them. */
+  briefs?: boolean;
+  /** Every vault_query answers after this many ms (to show the device cache paint first). */
+  queryDelay?: number;
+  /** Pre-fill the device cache (localStorage) with this JSON string. */
+  deviceCache?: string;
+  /** vault_query for this tag rejects. */
+  queryFails?: string[];
   /** Names of apps whose stored grant records an OLDER html hash (the app changed since it was allowed). */
   staleHtml?: string[];
   /** Mode recorded in the seeded grants (default: the stored self-test mode). `legacy` leaves the field out, like an old record. */
@@ -159,16 +169,16 @@ export async function bootAreas(page: Page, variant: Variant = 'seed', opts: Boo
   const now = Math.floor(Date.now() / 1000);
   const data = {
     now, variant, selftest: opts.selftest ?? true, ipcLeak: opts.ipcLeak ?? false, hostile: hostileApp(opts.ports ?? { http: 9, udp: 9 }), benign: BENIGN, techne: seed('techne'), unforced: seed('unforced'), seedMeta,
-    apps: opts.apps ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null, mode: opts.mode ?? 'sealed', grantedUnder: opts.grantedUnder ?? (opts.mode ?? 'sealed'),
+    apps: opts.apps ?? [], multiRoom: !!opts.multiRoom, briefs: !!opts.briefs, queryDelay: opts.queryDelay ?? 0, deviceCache: opts.deviceCache ?? null, queryFails: opts.queryFails ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null, mode: opts.mode ?? 'sealed', grantedUnder: opts.grantedUnder ?? (opts.mode ?? 'sealed'),
   };
   // Pre-granted apps: the grant key is the SHA-256 of the RESOLVED default needs plus the app's html.
   const preGrant = [
-    { id: 'app-techne', area: 'Techne', ch: 'ch-techne', html: data.techne }, { id: 'app-unf', area: 'Unforced Development', ch: 'ch-unf', html: data.unforced },
+    { id: 'app-techne', area: 'Techne', ch: data.multiRoom ? 'ch-techne,ch-cohere' : 'ch-techne', html: data.techne }, { id: 'app-unf', area: 'Unforced Development', ch: 'ch-unf', html: data.unforced },
     { id: 'app-host', area: 'Hostile', ch: 'ch-techne', html: data.hostile }, { id: 'app-ben', area: 'Benign', ch: 'ch-techne', html: data.benign },
     ...data.apps.map((a) => ({ id: 'app-x-' + a.name, area: a.name, ch: a.channel ?? 'ch-techne', html: a.html })),
   ];
   for (const g of preGrant) {
-    const ctx = { areaPath: `Areas/${g.area}`, channels: g.ch ? [g.ch] : [] };
+    const ctx = { areaPath: `Areas/${g.area}`, channels: g.ch ? g.ch.split(',') : [] };
     const stale = (opts.staleHtml ?? []).some((n) => g.id === 'app-x-' + n);
     data.grantSeed[g.id] = { scope: await grantKey(resolveNeeds(defaultNeeds(), ctx), ctx.areaPath), html: stale ? 'stale-' + await htmlHash(g.html) : await htmlHash(g.html) };
   }
@@ -197,13 +207,14 @@ export async function bootAreas(page: Page, variant: Variant = 'seed', opts: Boo
     if (d.granted && !localStorage.getItem('uni.interface.grants.v2')) {
       localStorage.setItem('uni.interface.grants.v2', JSON.stringify(Object.fromEntries(Object.entries(d.grantSeed as Record<string, { scope: string; html: string }>).map(([id, g]) => [id, { ...g, ...(d.grantedUnder === 'legacy' ? {} : { grantedUnder: d.grantedUnder }), grantedAt: '2026-10-08T00:00:00Z' }]))));
     }
+    if (d.deviceCache && !localStorage.getItem('uni.areas.cache.v1')) localStorage.setItem('uni.areas.cache.v1', d.deviceCache);
     const U = 'a'.repeat(64);
     const area = (id: string, name: string, status: string, ch: string, purpose: string) => ({
       id, path: `Areas/${name}`, extension: 'md', tags: ['area'], updatedAt: '2026-10-07T12:00:00Z', createdAt: '2026-09-01T00:00:00Z',
       metadata: { channel: ch, status, since: '2026-01-15' }, content: `# ${name}\n\n${purpose}\n\n## Notes\n\nSee [[Areas/${name}/Plan|the plan]].`,
     });
     const notes: any[] = [
-      area('a-techne', 'Techne', 'foreground', 'ch-techne', 'The craft of building: tools, systems and the small daily practice of making things well.'),
+      area('a-techne', 'Techne', 'foreground', d.multiRoom ? 'ch-techne,ch-cohere' : 'ch-techne', 'The craft of building: tools, systems and the small daily practice of making things well.'),
       area('a-unf', 'Unforced Development', 'foreground', 'ch-unf', 'Client practice: facilitation, strategy and the long relationships that pay the bills.'),
       area('a-sad', 'Sanctum', 'background', 'ch-sad', 'Daily practice. Sitting, breath, and a slow return to what matters.'),
       area('a-atlas', 'Atlas', 'background', 'ch-atlas', 'A map of the commons: research, writing and the networks around it.'),
@@ -219,6 +230,74 @@ export async function bootAreas(page: Page, variant: Variant = 'seed', opts: Boo
       { id: 'n-u3', path: 'Areas/Unforced Development/Proposal drafts', extension: 'md', content: '# Proposals\n\nbody', updatedAt: new Date((d.now - 86400 * 2) * 1000).toISOString() },
       { id: 'n-secret', path: 'Areas/Atlas/Secret', extension: 'md', content: '# Secret\n\nATLAS-SECRET-BODY', updatedAt: '2026-10-06T00:00:00Z' },
     ];
+    if (d.briefs) {
+      const iso = (ago: number) => new Date((d.now - ago) * 1000).toISOString();
+      notes.push(
+        { id: 'br-techne', path: 'Areas/Techne/Brief', extension: 'md', tags: ['area-brief'], metadata: { area: 'Techne', generated_at: iso(3 * 3600) }, updatedAt: iso(3 * 3600), content: `# Techne brief
+
+## Now
+The coop paperwork is signed. COhere starts Oct 15 and still needs a room plan.
+
+## Needs you
+- Reply to Leonardo about the grant, due 2026-10-10 [[Areas/Techne/Plan|the plan]]
+- Decide the COhere venue by Oct 12
+
+## Moving
+- **Festival** logistics: tents ordered [[Areas/Techne/Workbench log|Workbench log]]
+
+## People
+- Leonardo, Mara
+
+## Recent
+- 10-08 Coop papers signed
+- 10-07 Room plan drafted
+
+## Quiet
+- nothing recent
+
+## Suggested next
+- Draft a reply to Leonardo
+- Ask Mara for the room plan
+` },
+        { id: 'br-unf', path: 'Areas/Unforced Development/Brief', extension: 'md', tags: ['area-brief'], metadata: { area: 'Unforced Development', generated_at: iso(86400) }, updatedAt: iso(86400), content: `## Now
+Two proposals wait on a scope decision.
+
+## Needs you
+- Send the Q4 invoice, overdue since 2026-10-05
+
+## Moving
+- nothing recent
+
+## People
+- nothing recent
+
+## Recent
+- nothing recent
+
+## Quiet
+- nothing recent
+
+## Suggested next
+- nothing recent
+` },
+        { id: 'today', path: 'Areas/Today', extension: 'md', tags: ['area-today'], metadata: {}, updatedAt: iso(2 * 3600), content: `# Today
+
+## Needs you today
+- **Techne** Reply to Leonardo about the grant, due 2026-10-10 [[Areas/Techne/Plan|the plan]]
+- **Unforced Development** Send the Q4 invoice, overdue since 2026-10-05
+
+## Moved since yesterday
+- **Techne** coop papers signed
+
+## Quiet areas
+- Sanctum
+
+## Areas
+- [[Areas/Techne/Brief|Techne]]: Coop papers signed, COhere next.
+- [[Areas/Unforced Development/Brief|Unforced Development]]: Two proposals wait on a scope decision.
+` },
+      );
+    }
     if (d.variant === 'test') {
       notes.push(
         area('a-host', 'Hostile', 'foreground', 'ch-techne', 'An area whose app attacks the host.'),
@@ -236,11 +315,12 @@ export async function bootAreas(page: Page, variant: Variant = 'seed', opts: Boo
     const msgs: Record<string, any[]> = {
       'ch-techne': [...[['Uni', 'Parked the font question until the frame can load web fonts.'], ['Aaron', 'Rail labels still feel tight on the phone.'], ['Uni', 'Checked contrast on meta text; muted needed a darker tone.'], ['Aaron', 'Fine. Keep the green accent.'], ['Uni', 'Sandbox self-test is wired into Settings.'], ['Aaron', 'Run it on the laptop first.']].map(([n, b], i) => msg('t0' + i, 'ch-techne', n, 86400 * (6 - i) + 7200, b)), msg('t1', 'ch-techne', 'Aaron', 86400, 'Scoping the area apps: one HTML note per area, sealed frame, bridge only.'), msg('t2', 'ch-techne', 'Uni', 5400, 'Drafted the bridge reference. Compose never sends, you stay in control.'), msg('t3', 'ch-techne', 'Aaron', 1800, 'Good. Ship Techne first, then the practice dashboard.')],
       'ch-unf': [msg('u1', 'ch-unf', 'Uni', 14000, 'Two proposals are waiting on a decision about scope.'), msg('u2', 'ch-unf', 'Aaron', 600, 'I will call them Thursday.')],
+      ...(d.multiRoom ? { 'ch-cohere': [msg('c1', 'ch-cohere', 'Uni', 3000, 'COhere schedule draft is in the vault.'), msg('c2', 'ch-cohere', 'Aaron', 900, 'Festival crew list needs a second pass.')] } : {}),
       'ch-sad': [msg('s1', 'ch-sad', 'Aaron', 90000, 'Sat twenty minutes. Restless but stayed.')],
     };
     const lastOf = (c: string) => msgs[c]?.[msgs[c].length - 1];
     const room = (id: string, name: string, unread = 0) => ({ id, name, unread, mentions: false, last_message: lastOf(id)?.body ?? null, last_ts: lastOf(id)?.ts ?? null });
-    const rooms = [room('uni-room', 'Uni'), room('ch-techne', 'Techne'), room('ch-unf', 'Unforced Dev'), room('ch-sad', 'Sanctum'), room('ch-atlas', 'Atlas'), room('ch-exp', 'Expression')];
+    const rooms = [room('uni-room', 'Uni'), room('ch-techne', 'Techne'), ...(d.multiRoom ? [room('ch-cohere', 'Cohere')] : []), room('ch-unf', 'Unforced Dev'), room('ch-sad', 'Sanctum'), room('ch-atlas', 'Atlas'), room('ch-exp', 'Expression')];
     // A message arriving over the live socket: stored, then announced like the real `uni://live` event.
     w.__arrive = (channel: string, name: string, body: string) => {
       const m = msg('live' + Math.random().toString(36).slice(2, 8), channel, name, 0, body);
@@ -266,6 +346,11 @@ export async function bootAreas(page: Page, variant: Variant = 'seed', opts: Boo
           case 'get_members': return [{ pubkey: U, name: 'Aaron', named: true }];
           case 'vault_paths': return notes.map(rowOf);
           case 'vault_list': return ['uni'];
+          case 'vault_query': {
+            if (d.queryDelay) await new Promise((r) => setTimeout(r, d.queryDelay));
+            if ((d.queryFails as string[]).includes(args.tag)) throw 'query failed: ' + args.tag;
+            return notes.filter((n) => (n.tags ?? []).includes(args.tag)).map((n) => ({ createdAt: '2026-09-01T00:00:00Z', metadata: {}, ...n }));
+          }
           case 'vault_note': {
             const n = notes.find((x) => x.id === args.noteRef || x.path === args.noteRef);
             if (!n) throw 'note not found: ' + args.noteRef;
@@ -284,4 +369,22 @@ export async function bootAreas(page: Page, variant: Variant = 'seed', opts: Boo
   }, data);
   await page.goto('/');
   await expect(page.getByRole('textbox', { name: 'Message Uni' })).toBeVisible();
+}
+
+const railOf = (page: Page) => page.getByRole('navigation', { name: 'Main navigation' });
+/** The Areas tab: Today is its heading. */
+export const openAreasHome = async (page: Page) => { await railOf(page).getByRole('button', { name: 'Areas', exact: true }).click(); await expect(page.getByRole('heading', { name: 'Today', level: 1 })).toBeVisible(); };
+export const areaCard = (page: Page, name: string) => page.locator('.area-card', { has: page.locator('strong', { hasText: new RegExp(`^${name}$`) }) });
+/**
+ * Opens an area from Today (expanding the background list when it must) and, when it has a sealed app, its App tab.
+ * `app: false` stays on the Brief; `true` requires the App tab; the default presses it when it shows up.
+ */
+export async function openAreaPage(page: Page, name: string, opts: { app?: boolean } = {}) {
+  const card = areaCard(page, name);
+  if (!(await card.isVisible())) await page.locator('.today-background > summary').click();
+  await card.click();
+  await expect(page.locator('.area-bar-title')).toHaveText(name);
+  if (opts.app === false) return;
+  const tab = page.getByRole('tab', { name: 'App', exact: true });
+  if (opts.app === true || (await tab.waitFor({ state: 'visible', timeout: 1500 }).then(() => true, () => false))) await tab.click();
 }
