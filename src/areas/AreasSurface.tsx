@@ -4,6 +4,7 @@ import AreaView, { type AreaActions } from "./AreaView";
 import type { AreaRoom } from "./AreaChat";
 import { currentUserAgent, gateMode, platformName } from "../interface/selftest/gate";
 import { useAppVersion, useWebviewRuntime } from "../interface/selftest/useAppVersion";
+import { projectBody } from "./projectBody";
 import { useAreas } from "./useAreas";
 import { pickRoom } from "./areaLayout";
 import { childrenOf, parentPath, ROOT, rootNode, trail, UNI_CHANNEL } from "./treeCore";
@@ -15,7 +16,7 @@ const USER_AGENT = currentUserAgent();
 const PLATFORM = platformName(USER_AGENT);
 
 /** The Uni tab: Uni itself at `{kind:"areas"}` (path null), any area or project under it at `{kind:"area", path}`. One page component for all. */
-export default function AreasSurface({ identity, path, rooms, actions, roomFor, onRoom, onOpenArea, onConversations }: {
+export default function AreasSurface({ identity, path, rooms, actions, roomFor, onRoom, onOpenArea, onConversations, onBackChange }: {
   identity: string | null;
   path: string | null; rooms: RoomInfo[]; actions: AreaActions;
   /** The host's room view for a room id (its messages and composer), when that room is the one loaded. */
@@ -25,6 +26,7 @@ export default function AreasSurface({ identity, path, rooms, actions, roomFor, 
   /** Open a node (path null: Uni) in this tab. */
   onOpenArea: (areaPath: string | null, name: string, room: string | null) => void;
   onConversations: () => void;
+  onBackChange: (back: (() => void) | null) => void;
 }) {
   const { data, error, loading } = useAreas(identity);
   const version = useAppVersion();
@@ -35,6 +37,23 @@ export default function AreasSurface({ identity, path, rooms, actions, roomFor, 
   const uniRoom = useMemo(() => (rooms.some((r) => r.id === UNI_CHANNEL) ? UNI_CHANNEL : findUniRoom(rooms)?.id ?? null), [rooms]);
   const root = useMemo(() => rootNode(uniRoom ? [uniRoom] : []), [uniRoom]);
   const node = path ? data?.tree.nodes.get(path) ?? null : root;
+  const [body, setBody] = useState<string | null>(null);
+  const [bodyError, setBodyError] = useState<string | null>(null);
+  useEffect(() => {
+    setBody(null); setBodyError(null);
+    if (!identity || node?.kind !== "project") return;
+    let live = true;
+    projectBody(identity, node).then((text) => { if (live) setBody(text); }).catch((e) => { if (live) setBodyError(String(e)); });
+    return () => { live = false; };
+  }, [identity, node?.id, node?.updatedAt]);
+  const back = path ? () => {
+    const up = data ? data.tree.nodes.get(parentPath(data.tree, path)) : null;
+    onOpenArea(up?.path ?? null, up?.name ?? "Uni", up ? pickRoom(up.rooms, null) : uniRoom);
+  } : null;
+  useEffect(() => {
+    onBackChange(back);
+    return () => onBackChange(null);
+  }, [path, data, uniRoom, onOpenArea, onBackChange]); // eslint-disable-line react-hooks/exhaustive-deps
   // A node can have several rooms (metadata.channel is a list): the user's pick, else the first.
   const [picked, setPicked] = useState<string | null>(null);
   const nodeRoom = node ? pickRoom(node.rooms, picked) : null;
@@ -69,7 +88,7 @@ export default function AreasSurface({ identity, path, rooms, actions, roomFor, 
   const cards = data && kids.length ? <ChildCards nodes={kids} data={data} now={now} title={isRoot ? "Areas" : `Inside ${node.name}`} onOpen={open} />
     : isRoot && !kids.length && !error ? <p className="empty">{loading ? "Loading areas…" : "No areas yet. Tag a note `area` at Areas/<Name>."}</p> : null;
   const today = data?.today;
-  return <AreaView key={node.id} area={node} entry={data?.briefs[node.path] ?? null} now={now} channel={nodeRoom} onChannel={setPicked} mode={mode} roomName={roomName} actions={actions}
-    room={roomFor(nodeRoom)} onConversations={onConversations} onBack={isRoot ? null : () => (up ? open(up) : toUni())} backLabel={up?.name ?? "Uni"}
+  return <AreaView key={node.id} area={body !== null ? { ...node, body } : node} projectError={bodyError} projectLoading={body === null && !bodyError} entry={data?.briefs[node.path] ?? null} now={now} channel={nodeRoom} onChannel={setPicked} mode={mode} roomName={roomName} actions={actions}
+    room={roomFor(nodeRoom)} onConversations={onConversations} onBack={back} backLabel={up?.name ?? "Uni"}
     crumbs={crumbs} dataStatus={status} lead={lead} kids={cards} freshAt={isRoot ? (today ? today.generatedAt ?? today.updatedAt : null) : undefined} />;
 }

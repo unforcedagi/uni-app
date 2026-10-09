@@ -20,7 +20,7 @@ function NodeCard({ node, data, now, onOpen }: { node: Area; data: AreasData; no
   return <button className={`area-card ${node.status} ${node.kind}`} onClick={() => onOpen(node)} aria-label={`${node.name}, ${mark.toLowerCase()}${needs ? `, ${needs} need${needs === 1 ? "s" : ""} you` : ""}`}>
     <span className={`area-mark ${node.status}`}>{mark}</span>
     <strong className="area-name">{node.name}</strong>
-    <span className="area-purpose area-now">{now_ || node.purpose || "No purpose written yet."}</span>
+    <span className="area-purpose area-now">{node.kind === "project" ? node.purpose || now_ || "No purpose written yet." : now_ || node.purpose || "No purpose written yet."}</span>
     <span className="area-foot">
       {entry ? (needs > 0 ? <b className="needs-chip">{needs} {needs === 1 ? "needs" : "need"} you</b> : <span className="area-quiet">Nothing needs you</span>) : <span className="area-quiet">No brief yet</span>}
       {kids > 0 && <span className="area-kids">{kids} inside</span>}
@@ -31,9 +31,9 @@ function NodeCard({ node, data, now, onOpen }: { node: Area; data: AreasData; no
 
 /** The next level down: foreground nodes as cards, background ones collapsed. */
 export function ChildCards({ nodes, data, now, title, onOpen }: { nodes: readonly Area[]; data: AreasData; now: number; title: string; onOpen: (a: Area) => void }) {
-  const foreground = nodes.filter((a) => a.status === "foreground" || a.kind === "project");
-  const background = nodes.filter((a) => a.status !== "foreground" && a.kind !== "project");
-  if (!nodes.length) return null;
+  const foreground = nodes.filter((a) => a.status === "foreground");
+  const background = nodes.filter((a) => a.status === "background");
+  if (!foreground.length && !background.length) return null;
   return <>
     {foreground.length > 0 && <section className="node-children" aria-label={title}><h2 className="today-h">{title}</h2><div className="areas-grid">{foreground.map((a) => <NodeCard key={a.id} node={a} data={data} now={now} onOpen={onOpen} />)}</div></section>}
     {background.length > 0 && <details className="today-background"><summary>Background areas <span className="brief-count">{background.length}</span></summary>

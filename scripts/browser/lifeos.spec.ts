@@ -113,7 +113,7 @@ test.describe('device cache', () => {
     await expect(page.locator('.areas-status')).toContainText("couldn't refresh");
   });
 
-  for (const tag of ['area-brief', 'area-today']) test(`failed ${tag} refresh retains savedAt and labels old data`, async ({ page }) => {
+  for (const tag of ['project', 'area-brief', 'area-today']) test(`failed ${tag} refresh retains savedAt and labels old data`, async ({ page }) => {
     await bootAreas(page, 'seed', { briefs: true, queryFails: [tag], deviceCache: cached });
     await openAreasHome(page);
     await expect(page.locator('.areas-status')).toContainText("couldn't refresh");
@@ -330,7 +330,7 @@ test.describe('Uni is home, areas are a tree', () => {
     await expect(crumbs(page).locator('.here')).toHaveText(/Techne/);
     const inside = page.getByRole('region', { name: 'Inside Techne' });
     await expect(inside.locator('.area-card strong')).toHaveText(['COhere 2026']);
-    await expect(inside.locator('.area-card')).toContainText('Venue is held for Oct 15');
+    await expect(inside.locator('.area-card')).toContainText('The festival purpose.');
     await expect(inside.locator('.area-card')).toContainText('1 needs you');
     // #cohere belongs to the child now: no chip for it on Techne
     await expect(page.locator('.room-chips')).toHaveCount(0);
@@ -388,7 +388,7 @@ test.describe('Uni is home, areas are a tree', () => {
     await areaCard(page, 'COhere 2026').click();
     await expect(page.locator('.brief-now')).toBeVisible();
     // only the sealed-app lookup (by path, in the background) ever asks for a note by path
-    expect((await calls(page, 'vault_note')).filter((c: any) => /\//.test(String(c.args.noteRef)) && !/\/app(\.html)?$/.test(String(c.args.noteRef)))).toHaveLength(0);
+    expect((await calls(page, 'vault_note')).filter((c: any) => c.args.noteRef === 'p-cohere')).toHaveLength(1);
   });
 
   test('after a reload the app opens on Uni again, from the device cache', async ({ page }) => {
@@ -419,4 +419,56 @@ test('path brief beats a newer metadata-only note; limit is visible', async ({ p
   await expect(page.locator('.brief-now')).toContainText('coop paperwork');
   await expect(page.locator('.brief-now')).not.toContainText('STRAY BRIEF');
   await expect(page.locator('.areas-status')).toContainText('showing first 200');
+});
+
+ test('cached home paints before room loading resolves', async ({ page }) => {
+  const a = { id: 'cached', path: 'Areas/Cached', name: 'Cached', purpose: 'Cached purpose', status: 'foreground', channels: [], rooms: [], kind: 'area', parent: null, title: 'Cached', body: '', metadata: {}, since: null, updatedAt: null };
+  await bootAreas(page, 'seed', { roomsDelay: 3000, queryDelay: 3000, deviceCache: JSON.stringify({ v: 2, owner: { identity: 'a'.repeat(64), vault: 'uni' }, savedAt: Date.now(), areas: [a], briefs: {}, today: null }) });
+  await expect(areaCard(page, 'Cached')).toBeVisible({ timeout: 700 });
+  expect(await page.evaluate(() => (window as any).__roomsResolved)).toBeUndefined();
+  await expect(page.getByText('Uni routes from here: area work goes to its room.')).toBeVisible();
+  await expect(page.locator('.area-chat')).toContainText('Uni', { timeout: 8000 });
+ });
+ test('system Back follows parent levels and project body is cached', async ({ page }) => {
+  await bootAreas(page, 'seed', { tree: true, briefs: true });
+  await openAreaPage(page, 'Techne', { app: false });
+  await areaCard(page, 'COhere 2026').click();
+  await expect(page.getByRole('region', { name: 'Project purpose' })).toContainText('The festival: venue, crew and the schedule.');
+  const back = () => page.evaluate(() => { const w = window as any; w.__cbs[w.__backHandler.id]({ message: {}, index: w.__backIndex ?? 0 }); w.__backIndex = (w.__backIndex ?? 0) + 1; });
+  await back();
+  await expect(page.locator('.area-bar-title')).toHaveText('Techne');
+  await areaCard(page, 'COhere 2026').click();
+  await expect(page.getByRole('region', { name: 'Project purpose' })).toContainText('The festival: venue, crew and the schedule.');
+  expect((await calls(page, 'vault_note')).filter((c: any) => c.args.noteRef === 'p-cohere')).toHaveLength(1);
+  await back(); await expect(page.locator('.area-bar-title')).toHaveText('Techne');
+  await back(); await expect(page.locator('.area-bar-title')).toHaveText('Uni');
+ });
+
+for (const status of ['archived', 'done', 'dormant']) test(`area and project status ${status} controls cards`, async ({ page }) => {
+  await bootAreas(page, 'seed', { tree: true, nodeStatuses: { 'a-sad': status, 'p-cohere': status } });
+  await expect(areaCard(page, 'Techne')).toBeVisible();
+  if (status === 'dormant') {
+    await expect(areaCard(page, 'Sanctum')).toBeHidden();
+    await page.locator('.today-background > summary').click();
+    await expect(areaCard(page, 'Sanctum')).toBeVisible();
+  } else await expect(areaCard(page, 'Sanctum')).toHaveCount(0);
+  await openAreaPage(page, 'Techne', { app: false });
+  if (status === 'dormant') {
+    await expect(areaCard(page, 'COhere 2026')).toBeHidden();
+    await page.locator('.today-background > summary').click();
+    await expect(areaCard(page, 'COhere 2026')).toBeVisible();
+  } else await expect(areaCard(page, 'COhere 2026')).toHaveCount(0);
+});
+test('failed project refresh retains previous projects and stale marker', async ({ page }) => {
+  await bootAreas(page, 'seed', { tree: true });
+  await openAreaPage(page, 'Techne', { app: false });
+  await expect(areaCard(page, 'COhere 2026')).toBeVisible();
+  await page.evaluate(() => {
+    const w = window as any; const original = w.__TAURI_INTERNALS__.invoke;
+    w.__TAURI_INTERNALS__.invoke = (cmd: string, args: any) => cmd === 'vault_query' && args.tag === 'project' ? Promise.reject('projects unavailable') : original(cmd, args);
+  });
+  await page.clock.install(); await page.clock.fastForward(31000);
+  await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+  await expect(page.locator('.areas-status')).toContainText("couldn't refresh: project");
+  await expect(areaCard(page, 'COhere 2026')).toBeVisible();
 });

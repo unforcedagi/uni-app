@@ -12,7 +12,7 @@ type Store = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
 const isArea = (a: unknown): a is Area => {
   const x = a as Partial<Area> | null;
-  return !!x && typeof x.id === "string" && typeof x.path === "string" && typeof x.name === "string" && (x.kind === "area" || x.kind === "project") && Array.isArray(x.channels) && (x.status === "foreground" || x.status === "background");
+  return !!x && typeof x.id === "string" && typeof x.path === "string" && typeof x.name === "string" && (x.kind === "area" || x.kind === "project") && Array.isArray(x.channels) && (["foreground", "background", "archived", "done"].includes(x.status ?? ""));
 };
 
 export function createAreasCache(store: Store | null, now: () => number = Date.now) {

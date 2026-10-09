@@ -191,3 +191,5 @@
 @media (max-height: 500px) { .area-bar .area-conversations { display: inline-flex; } }
 
 .areas-status { color: var(--muted, #777); font-size: .85rem; margin: .5rem 1rem; }
+
+.uni-router-rule { margin: 0; padding: 0.5rem 1rem; font-size: 0.8rem; }

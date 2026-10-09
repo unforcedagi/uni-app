@@ -3,7 +3,7 @@
 // message handling live in src/interface. No React, no Tauri.
 
 export const AREAS_ROOT = "Areas";
-export type AreaStatus = "foreground" | "background";
+export type AreaStatus = "foreground" | "background" | "archived" | "done";
 export type Area = {
   id: string; path: string; name: string; purpose: string; status: AreaStatus;
   channels: string[]; since: string | null; title: string; body: string;
@@ -17,6 +17,8 @@ export type Area = {
 };
 export type AreaNoteLike = { id: string; path?: string | null; content?: string | null; tags?: string[] | null; metadata?: Record<string, unknown> | null; updatedAt?: string | null };
 export type PathRow = { id: string; path: string | null; extension?: string | null; updatedAt?: string | null };
+
+export const nodeStatus = (status: unknown): AreaStatus => status === "foreground" || status === "archived" || status === "done" ? status : "background";
 
 const leaf = (path: string) => path.split("/").filter(Boolean).pop() ?? path;
 const stripExt = (path: string) => path.replace(/\.(md|html)$/i, "");
@@ -58,7 +60,7 @@ export function parseArea(note: AreaNoteLike): Area | null {
   const name = leaf(path);
   return {
     id: note.id, path, name, purpose: purposeOf(content),
-    status: metadata.status === "foreground" ? "foreground" : "background",
+    status: nodeStatus(metadata.status),
     channels: splitChannels(metadata.channel),
     since: typeof metadata.since === "string" ? metadata.since : null,
     title: titleOf(content, name), body: content, metadata, updatedAt: note.updatedAt ?? null,
@@ -82,8 +84,8 @@ export function parseProject(note: AreaNoteLike): Area | null {
   const content = note.content ?? "";
   const name = leaf(path);
   return {
-    id: note.id, path, name, purpose: purposeOf(content),
-    status: metadata.status === "foreground" ? "foreground" : "background",
+    id: note.id, path, name, purpose: typeof metadata.summary === "string" && metadata.summary.trim() ? metadata.summary.trim() : purposeOf(content),
+    status: nodeStatus(metadata.status),
     channels: splitChannels(metadata.channel),
     since: typeof metadata.since === "string" ? metadata.since : null,
     title: titleOf(content, name), body: content, metadata, updatedAt: note.updatedAt ?? null,

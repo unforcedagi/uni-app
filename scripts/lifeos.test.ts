@@ -288,5 +288,20 @@ check("the Uni root is a node on the Uni channel, and refresh drafts name the no
   assert.match(briefMissingDraft("COhere 2026", "Projects/COhere/COhere 2026"), /Projects\/COhere\/COhere 2026\/Brief/);
 });
 
+check("project summary supplies purpose with a lean query", () => {
+  const p = parseProject({ id: "p", path: "Projects/P", tags: ["project"], metadata: { parent: "Areas/A", summary: "Project purpose", status: "dormant" } });
+  assert.equal(p?.purpose, "Project purpose");
+  assert.equal(p?.status, "background");
+});
+check("archived and done nodes stay hidden for areas and projects", () => {
+  for (const status of ["archived", "done"]) {
+    const a = parseArea({ id: "a", path: "Areas/A", tags: ["area"], metadata: { status } })!;
+    const p = parseProject({ id: "p", path: "Projects/P", tags: ["project"], metadata: { status, parent: "Areas/A" } })!;
+    assert.equal(a.status, status);
+    assert.equal(p.status, status);
+    assert.equal(buildTree([a, p]).nodes.size, 0);
+  }
+});
+
 if (failed) { console.log(`\n${failed} failed`); process.exit(1); }
 console.log("\nall passed");
