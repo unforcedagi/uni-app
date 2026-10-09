@@ -189,3 +189,5 @@
 /* Uni's "back to conversations" shows only where the rail is out of reach (short landscape). */
 .area-bar .area-conversations { display: none; }
 @media (max-height: 500px) { .area-bar .area-conversations { display: inline-flex; } }
+
+.areas-status { color: var(--muted, #777); font-size: .85rem; margin: .5rem 1rem; }

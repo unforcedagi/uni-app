@@ -12,6 +12,7 @@ let failed = 0;
 function check(name: string, fn: () => void) {
   try { fn(); console.log(`ok   ${name}`); } catch (e) { failed++; console.log(`FAIL ${name}\n     ${(e as Error).message.split("\n")[0]}`); }
 }
+const OWNER = { identity: 'A', vault: 'uni' };
 const NOW = Date.parse("2026-10-09T18:00:00Z");
 
 const BRIEF = `# Techne brief
@@ -162,21 +163,36 @@ function memStore(init: Record<string, string> = {}) {
 const DATA = { areas: [{ id: "a", path: "Areas/Techne", name: "Techne", purpose: "p", status: "foreground" as const, channels: ["c1", "c2"], rooms: ["c1", "c2"], kind: "area" as const, parent: null, since: null, title: "Techne", body: "# Techne", metadata: {}, updatedAt: null }], briefs: { "Areas/Techne": { content: BRIEF, generatedAt: "2026-10-09T15:00:00Z", updatedAt: "2026-10-09T15:01:00Z" } }, today: { content: TODAY, updatedAt: "2026-10-09T15:02:00Z" } };
 check("cache round-trips what the home paints from", () => {
   const s = memStore(); const c = createAreasCache(s, () => NOW);
-  assert.equal(c.read(), null);
-  c.write(DATA);
-  const back = c.read()!;
+  assert.equal(c.read(OWNER), null);
+  c.write(DATA, OWNER);
+  const back = c.read(OWNER)!;
   assert.deepEqual(back.areas, DATA.areas); assert.deepEqual(back.briefs, DATA.briefs); assert.deepEqual(back.today, DATA.today);
   assert.equal(back.savedAt, NOW);
   assert.ok(s.raw.has(CACHE_KEY));
 });
 check("cache ignores garbage, a wrong version and a broken shape; a failing store never throws", () => {
-  for (const bad of ["{", "null", "[]", JSON.stringify({ v: 99, areas: [] }), JSON.stringify({ v: 1, savedAt: 1, areas: [], briefs: {}, today: null }), JSON.stringify({ v: 2, areas: "x" }), JSON.stringify({ v: 2, savedAt: 1, areas: [{ nope: 1 }], briefs: {}, today: null })]) {
-    assert.equal(createAreasCache(memStore({ [CACHE_KEY]: bad })).read(), null, bad);
+  for (const bad of ["{", "null", "[]", JSON.stringify({ v: 99, owner: OWNER, areas: [] }), JSON.stringify({ v: 1, owner: OWNER, savedAt: 1, areas: [], briefs: {}, today: null }), JSON.stringify({ v: 2, owner: OWNER, areas: "x" }), JSON.stringify({ v: 2, owner: OWNER, savedAt: 1, areas: [{ nope: 1 }], briefs: {}, today: null })]) {
+    assert.equal(createAreasCache(memStore({ [CACHE_KEY]: bad })).read(OWNER), null, bad);
   }
   const boom = { getItem: () => { throw new Error("denied"); }, setItem: () => { throw new Error("quota"); }, removeItem: () => {} };
   const c = createAreasCache(boom);
-  assert.equal(c.read(), null); c.write(DATA);
-  assert.equal(createAreasCache(null).read(), null);
+  assert.equal(c.read(OWNER), null); c.write(DATA, OWNER);
+  assert.equal(createAreasCache(null).read(OWNER), null);
+});
+
+check("cache refuses another identity or vault and clear forgets the device", () => {
+  const store = memStore({ "uni.areas.cache.v1": "legacy" });
+  const c = createAreasCache(store, () => NOW);
+  const a = { identity: 'A', vault: 'uni' }, b = { identity: 'B', vault: 'uni' };
+  c.write(DATA, a);
+  assert.equal(c.read(b), null);
+  assert.equal(c.read({ ...a, vault: 'other' }), null);
+  assert.ok(c.read(a));
+  c.clear();
+  assert.equal(c.read(a), null);
+  assert.equal(store.getItem("uni.areas.cache.v1"), null);
+  store.setItem(CACHE_KEY, JSON.stringify({ v: 2, savedAt: NOW, ...DATA }));
+  assert.equal(c.read(a), null, "an ownerless cache is never adopted");
 });
 
 // -------------------------------------------------------------------- room switcher
@@ -199,6 +215,13 @@ check("the Tauri side registers vault_query", () => {
   assert.match(src("../src-tauri/src/lib.rs"), /vault_query,/);
 });
 
+
+check("forget clears the areas memory and persistent cache", () => {
+  assert.match(src("../src/App.tsx").split('async function forget()')[1].split('const currentRoom')[0], /forgetAreas\(\)/);
+  const u = src("../src/areas/useAreas.ts");
+  assert.match(u, /export function forgetAreas/);
+  assert.match(u, /deviceCache.clear\(\)/);
+});
 
 // -------------------------------------------------------------------- the tree (T-80b)
 const areaNote = (name: string, metadata: Record<string, unknown> = {}) => ({ id: `a-${name}`, path: `Areas/${name}`, tags: ["area"], content: `# ${name}\n\nAbout ${name}.`, metadata, updatedAt: "2026-10-09T10:00:00Z" });

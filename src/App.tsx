@@ -1,5 +1,6 @@
 import { VoiceOutbox, relayAccepted } from "./voiceOutbox";
 import { SettingsIcon, UniIcon, JournalIcon, StarIcon, RoomsIcon, AreasIcon } from "./Icons";
+import { forgetAreas } from "./areas/useAreas";
 import AreasSurface from "./areas/AreasSurface";
 import { UNI_CHANNEL } from "./areas/treeCore";
 import AreaSelfTest from "./interface/selftest/SelfTest";
@@ -1240,7 +1241,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     // Two taps instead of window.confirm (unreliable in Android WebView).
     if (!forgetArmed) { setForgetArmed(true); return; }
     try { voiceMounted.current = false; await voiceQueue.current; await voiceOutbox.current.clear(); await invoke("identity_forget");
-      forgetDrafts(); invalidatePaths();
+      forgetDrafts(); invalidatePaths(); forgetAreas();
       try { for (const key of Object.keys(localStorage)) if (key.startsWith("uni.noteDraft.v1:") || key.startsWith("uni.vaultExpanded.v1:") || key === ALIASES_KEY) localStorage.removeItem(key); } catch { /* unavailable storage */ }
       onForget(); } catch (e) { voiceMounted.current = true; setError(String(e)); }
   }
@@ -1567,7 +1568,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       {journalTab && <div className="journal-tab-content" hidden={!journalOpen} onFocusCapture={(e) => { if (e.target instanceof HTMLTextAreaElement) requestAnimationFrame(() => setComposerFocused(true)); }} onBlurCapture={(e) => { const journal = e.currentTarget; requestAnimationFrame(() => setComposerFocused(journal.contains(document.activeElement) && document.activeElement instanceof HTMLTextAreaElement)); }}><Journal focus={journalFocus} onFocus={() => setJournalFocus((v) => !v)} rooms={rooms} uniRoomId={findUniRoom(rooms)?.id ?? null} onShare={shareEntry} onBack={() => setPanel("rooms")} onRecordingChange={(on, elapsed, stop) => { journalRecordingRef.current = on; setJournalRecording(on ? { elapsed, stop } : null); }} /></div>}
       {active?.kind === "vault" && active.vault ? <VaultBrowser key={active.vault} vault={active.vault} onBack={() => setPanel("rooms")} onOpen={(note) => openTarget({ kind: "note", note: { hub: null, vault: active.vault!, ref: note.id }, title: note.path || note.id }, "new")} onCreate={(folder) => requestCreate(active.vault!, folder)} onSearch={(prefix) => { setSearchQuery(""); setSearchScope({ vault: active.vault!, prefix }); setSearchOpen(true); setSidebarVisible(true); }} />
       : journalOpen ? null
-      : areasOpen && active ? <AreasSurface key={active.id} onConversations={() => setPanel("rooms")} path={active.kind === "area" ? active.path ?? null : null} rooms={rooms} actions={areaActions} roomFor={areaRoomFor} onRoom={syncAreaRoom}
+      : areasOpen && active ? <AreasSurface identity={identity} key={`${active.id}:${identity ?? ""}`} onConversations={() => setPanel("rooms")} path={active.kind === "area" ? active.path ?? null : null} rooms={rooms} actions={areaActions} roomFor={areaRoomFor} onRoom={syncAreaRoom}
           onOpenArea={(path, name, room) => openTarget(path === null ? { kind: "areas", title: "Uni", ...(room ? { channel: room } : {}) } : { kind: "area", path, title: name, ...(room ? { channel: room } : {}) }, "replace")} />
       : currentRoom ? <>
         <header className="conversation-header">
