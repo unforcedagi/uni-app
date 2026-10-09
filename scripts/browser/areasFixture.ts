@@ -151,6 +151,8 @@ export type BootOpts = {
   briefs?: boolean;
   /** Every vault_query answers after this many ms (to show the device cache paint first). */
   queryDelay?: number;
+  roomsDelay?: number;
+  nodeStatuses?: Record<string, string>;
   /** Pre-fill the device cache (localStorage) with this JSON string. */
   deviceCache?: string;
   /** vault_query for this tag rejects. */
@@ -171,7 +173,7 @@ export async function bootAreas(page: Page, variant: Variant = 'seed', opts: Boo
   const now = Math.floor(Date.now() / 1000);
   const data = {
     now, variant, selftest: opts.selftest ?? true, ipcLeak: opts.ipcLeak ?? false, hostile: hostileApp(opts.ports ?? { http: 9, udp: 9 }), benign: BENIGN, techne: seed('techne'), unforced: seed('unforced'), seedMeta,
-    apps: opts.apps ?? [], multiRoom: !!opts.multiRoom || !!opts.tree, tree: !!opts.tree, briefs: !!opts.briefs, queryDelay: opts.queryDelay ?? 0, deviceCache: opts.deviceCache ?? null, queryFails: opts.queryFails ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null, mode: opts.mode ?? 'sealed', grantedUnder: opts.grantedUnder ?? (opts.mode ?? 'sealed'),
+    apps: opts.apps ?? [], multiRoom: !!opts.multiRoom || !!opts.tree, tree: !!opts.tree, briefs: !!opts.briefs, queryDelay: opts.queryDelay ?? 0, roomsDelay: opts.roomsDelay ?? 0, nodeStatuses: opts.nodeStatuses ?? {}, deviceCache: opts.deviceCache ?? null, queryFails: opts.queryFails ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null, mode: opts.mode ?? 'sealed', grantedUnder: opts.grantedUnder ?? (opts.mode ?? 'sealed'),
   };
   // Pre-granted apps: the grant key is the SHA-256 of the RESOLVED default needs plus the app's html.
   const preGrant = [
@@ -303,7 +305,7 @@ Two proposals wait on a scope decision.
     if (d.tree) {
       const iso = (ago: number) => new Date((d.now - ago) * 1000).toISOString();
       notes.push(
-        { id: 'p-cohere', path: 'Projects/COhere/COhere 2026', extension: 'md', tags: ['project'], metadata: { parent: 'Areas/Techne', channel: 'ch-cohere' }, updatedAt: iso(86400), content: '# COhere 2026\n\nThe festival: venue, crew and the schedule.' },
+        { id: 'p-cohere', path: 'Projects/COhere/COhere 2026', extension: 'md', tags: ['project'], metadata: { status: 'foreground', summary: 'The festival purpose.', parent: 'Areas/Techne', channel: 'ch-cohere' }, updatedAt: iso(86400), content: '# COhere 2026\n\nThe festival: venue, crew and the schedule.' },
         { id: 'br-cohere', path: 'Projects/COhere/COhere 2026/Brief', extension: 'md', tags: ['area-brief'], metadata: { generated_at: iso(5 * 3600) }, updatedAt: iso(5 * 3600), content: '## Now\nVenue is held for Oct 15; the crew list needs a second pass.\n\n## Needs you\n- Confirm the venue deposit by Oct 12\n\n## Moving\n- nothing recent\n' },
       );
     }
@@ -338,6 +340,7 @@ Two proposals wait on a scope decision.
       for (const h of w.__listeners['uni://live'] ?? []) w.__cbs[h]?.({ event: 'uni://live', id: 1, payload: { kind: 'message', channel, author: m.author } });
       return m.ref;
     };
+    for (const n of notes) if (d.nodeStatuses[n.id]) n.metadata = { ...n.metadata, status: d.nodeStatuses[n.id] };
     const rowOf = (n: any) => ({ id: n.id, path: n.path, extension: n.extension, updatedAt: n.updatedAt });
     w.__TAURI_INTERNALS__ = {
       metadata: { currentWindow: { label: 'main' }, currentWebview: { label: 'main' } }, transformCallback: (cb: any) => { w.__cbs.push(cb); return w.__cbs.length - 1; },
@@ -346,11 +349,12 @@ Two proposals wait on a scope decision.
         switch (cmd) {
           case 'webview_runtime': return 'wry test tauri test';
           case 'plugin:app|version': if (d.versionFails) throw 'version unavailable'; return 'dev';
+          case 'plugin:app|register_listener': w.__backHandler = args.handler; return null;
           case 'plugin:event|listen': (w.__listeners[args.event] ??= []).push(args.handler); return args.handler;
           case 'identity_status': return { paired: true, pubkey: U };
           case 'get_identity': return U;
           case 'get_npub': return 'test';
-          case 'get_rooms': return rooms;
+          case 'get_rooms': if (d.roomsDelay) await new Promise((r) => setTimeout(r, d.roomsDelay)); w.__roomsResolved = true; return rooms;
           case 'get_messages': return args.root ? [] : (msgs[args.channel] ?? []).slice(-(args.limit ?? 300));
           case 'get_members': return [{ pubkey: U, name: 'Aaron', named: true }];
           case 'vault_paths': return notes.map(rowOf);
@@ -358,7 +362,7 @@ Two proposals wait on a scope decision.
           case 'vault_query': {
             if (d.queryDelay) await new Promise((r) => setTimeout(r, d.queryDelay));
             if ((d.queryFails as string[]).includes(args.tag)) throw 'query failed: ' + args.tag;
-            return notes.filter((n) => (n.tags ?? []).includes(args.tag)).map((n) => ({ createdAt: '2026-09-01T00:00:00Z', metadata: {}, ...n }));
+            return notes.filter((n) => (n.tags ?? []).includes(args.tag)).map((n) => ({ createdAt: '2026-09-01T00:00:00Z', metadata: {}, ...n, ...(args.includeContent === false ? { content: undefined } : {}) }));
           }
           case 'vault_note': {
             const n = notes.find((x) => x.id === args.noteRef || x.path === args.noteRef);

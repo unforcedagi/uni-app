@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { Body } from "../MessageBody";
 import type { ReactNode } from "react";
 import { askDraft, briefMissingDraft, refreshDraft, updatedLabel, type AskKind, type Brief, type BriefItem, type Inline } from "./briefCore";
 import type { Area } from "./areasCore";
@@ -29,7 +30,9 @@ const SECTIONS: { key: Exclude<keyof Brief, "now" | "nowTokens" | "present">; ti
  * A node's page (the Uni root, an area or a project — one component): breadcrumb, title, freshness with Refresh, then the
  * Brief (or, for Uni, `lead`: Today), then `kids`, the next level down.
  */
-export default function BriefView({ area, entry, now, canAsk, onNote, onAsk, crumbs, lead, kids, freshAt }: {
+export default function BriefView({ area, entry, now, canAsk, onNote, onAsk, crumbs, lead, kids, freshAt, projectError, projectLoading }: {
+  projectError?: string | null;
+  projectLoading?: boolean;
   area: Area; entry: AreaBrief | null; now: number; canAsk: boolean;
   onNote: (ref: string) => void;
   /** Put text in the node room's composer; never sends. */
@@ -48,9 +51,13 @@ export default function BriefView({ area, entry, now, canAsk, onNote, onAsk, cru
     {crumbs}
     <h1 className="note-title">{area.title}</h1>
     <p className="brief-fresh">{fresh && <span>{fresh}</span>}{canAsk && <button type="button" className="pairing-secondary brief-refresh" onClick={() => onAsk(refreshDraft(area.name, root ? "" : area.path))}>Refresh</button>}</p>
+    {area.kind === "project" && <section aria-label="Project purpose">
+      {area.purpose && <p className="brief-purpose">{area.purpose}</p>}
+      {area.body ? <Body body={area.body} mentions={[]} me={null} /> : projectError ? <p role="status">Couldn't load project: {projectError}</p> : <p className="area-quiet">{projectLoading ? "Opening project…" : "No project content yet."}</p>}
+    </section>}
     {lead ?? (!brief || !brief.present.length ? <section className="brief-missing" aria-label="No brief yet">
       <p>Uni hasn't written this area's brief yet.</p>
-      {area.purpose && <p className="brief-purpose">{area.purpose}</p>}
+      {area.kind !== "project" && area.purpose && <p className="brief-purpose">{area.purpose}</p>}
       {canAsk ? <button type="button" className="suggestion-go brief-write" onClick={() => onAsk(briefMissingDraft(area.name, area.path))}>Ask Uni to write it</button>
         : <p className="area-quiet">This area has no room yet, so there is nowhere to ask.</p>}
     </section> : <>

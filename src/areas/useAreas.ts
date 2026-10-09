@@ -1,3 +1,4 @@
+import { clearProjectBodies } from "./projectBody";
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { parseArea, parseProject, sortAreas, type Area, type AreaNoteLike, type PathRow } from "./areasCore";
@@ -85,6 +86,7 @@ let generation = 0;
 export function forgetAreas() {
   generation++;
   payload = null; lastLoadAt = null; savedAt = null; memoryOwner = null;
+  clearProjectBodies();
   deviceCache.clear();
 }
 const ownerKey = (owner: CacheOwner) => JSON.stringify(owner);

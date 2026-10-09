@@ -33,7 +33,7 @@ function resolveParents(nodes: Map<string, Area>): Map<string, string> {
 /** Nodes in, tree out. Duplicate paths keep the most recently updated note. */
 export function buildTree(list: readonly Area[]): Tree {
   const nodes = new Map<string, Area>();
-  for (const a of list) { const old = nodes.get(a.path); if (!old || (a.updatedAt ?? "") >= (old.updatedAt ?? "")) nodes.set(a.path, a); }
+  for (const a of list.filter((n) => n.status !== "archived" && n.status !== "done" && n.metadata.status !== "archived" && n.metadata.status !== "done")) { const old = nodes.get(a.path); if (!old || (a.updatedAt ?? "") >= (old.updatedAt ?? "")) nodes.set(a.path, a); }
   const parent = resolveParents(nodes);
   const kids = new Map<string, Area[]>();
   for (const [path, n] of nodes) { const p = parent.get(path)!; kids.set(p, [...(kids.get(p) ?? []), n]); }
