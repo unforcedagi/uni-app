@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
-import { askDraft, briefMissingDraft, updatedLabel, type AskKind, type Brief, type BriefItem, type Inline } from "./briefCore";
+import type { ReactNode } from "react";
+import { askDraft, briefMissingDraft, refreshDraft, updatedLabel, type AskKind, type Brief, type BriefItem, type Inline } from "./briefCore";
 import type { Area } from "./areasCore";
 import type { AreaBrief } from "./useAreas";
 import { safeHref } from "../markdown";
@@ -24,22 +25,33 @@ const SECTIONS: { key: Exclude<keyof Brief, "now" | "nowTokens" | "present">; ti
   { key: "suggested", title: "Suggested next", ask: "suggested" },
 ];
 
-/** The default area page: the area's Brief drawn natively (no sealed app needed). */
-export default function BriefView({ area, entry, now, canAsk, onNote, onAsk }: {
+/**
+ * A node's page (the Uni root, an area or a project — one component): breadcrumb, title, freshness with Refresh, then the
+ * Brief (or, for Uni, `lead`: Today), then `kids`, the next level down.
+ */
+export default function BriefView({ area, entry, now, canAsk, onNote, onAsk, crumbs, lead, kids, freshAt }: {
   area: Area; entry: AreaBrief | null; now: number; canAsk: boolean;
   onNote: (ref: string) => void;
-  /** Put text in the area room's composer; never sends. */
+  /** Put text in the node room's composer; never sends. */
   onAsk: (text: string) => void;
+  crumbs?: ReactNode;
+  /** Replaces the Brief (the Uni root shows Today here). */
+  lead?: ReactNode;
+  kids?: ReactNode;
+  /** When the page's source note was written (`generated_at`, else its update time); the Brief's own for a node. */
+  freshAt?: string | null;
 }) {
   const brief = entry?.brief;
-  const fresh = entry ? updatedLabel(entry.generatedAt ?? entry.updatedAt, now) : "";
+  const fresh = updatedLabel(freshAt !== undefined ? freshAt : entry ? entry.generatedAt ?? entry.updatedAt : null, now);
+  const root = area.path === "";
   return <div className="area-scroll"><article className="area-default area-brief">
+    {crumbs}
     <h1 className="note-title">{area.title}</h1>
-    {fresh && <p className="brief-fresh">{fresh}</p>}
-    {!brief || !brief.present.length ? <section className="brief-missing" aria-label="No brief yet">
+    <p className="brief-fresh">{fresh && <span>{fresh}</span>}{canAsk && <button type="button" className="pairing-secondary brief-refresh" onClick={() => onAsk(refreshDraft(area.name, root ? "" : area.path))}>Refresh</button>}</p>
+    {lead ?? (!brief || !brief.present.length ? <section className="brief-missing" aria-label="No brief yet">
       <p>Uni hasn't written this area's brief yet.</p>
       {area.purpose && <p className="brief-purpose">{area.purpose}</p>}
-      {canAsk ? <button type="button" className="suggestion-go brief-write" onClick={() => onAsk(briefMissingDraft(area.name))}>Ask Uni to write it</button>
+      {canAsk ? <button type="button" className="suggestion-go brief-write" onClick={() => onAsk(briefMissingDraft(area.name, area.path))}>Ask Uni to write it</button>
         : <p className="area-quiet">This area has no room yet, so there is nowhere to ask.</p>}
     </section> : <>
       {brief.present.includes("now") && <section className="brief-section" aria-label="Now"><h2>Now</h2><p className="brief-now"><InlineText tokens={brief.nowTokens} onNote={onNote} /></p></section>}
@@ -50,6 +62,7 @@ export default function BriefView({ area, entry, now, canAsk, onNote, onAsk }: {
           {s.ask && canAsk && <button type="button" className="pairing-secondary brief-ask" aria-label={`Ask Uni about: ${it.text}`} onClick={() => onAsk(askDraft(s.ask!, area.name, it))}>Ask Uni</button>}
         </li>)}</ul>}
       </section>)}
-    </>}
+    </>)}
+    {kids}
   </article></div>;
 }

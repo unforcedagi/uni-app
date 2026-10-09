@@ -93,7 +93,7 @@ test.describe('seed apps and navigation', () => {
     await expect(page.getByRole('textbox', { name: 'Message Sadhana' })).toBeVisible();
   });
 
-  test('area tabs restore after reload and Back goes to Areas', async ({ page }) => {
+  test('area tabs restore after reload and Back goes to Uni', async ({ page }) => {
     await openAreas(page);
     await openArea(page, 'Sadhana');
     await page.reload();
@@ -101,7 +101,7 @@ test.describe('seed apps and navigation', () => {
     await page.getByRole('tab', { name: /Sadhana/ }).click();
     await expect(page.locator('.area-bar-title')).toHaveText('Sadhana');
     await page.locator('.area-bar .note-back').click();
-    await expect(page.getByRole('heading', { name: 'Today', level: 1 })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Uni', level: 1 })).toBeVisible();
   });
 });
 
@@ -478,7 +478,7 @@ test.describe('design', () => {
 
   test('the active rail item is a pill behind the icon, not a square tile', async ({ page }) => {
     await openAreas(page);
-    const active = rail(page).getByRole('button', { name: 'Areas', exact: true });
+    const active = rail(page).getByRole('button', { name: 'Uni', exact: true });
     const s = await active.evaluate((b) => { const i = b.querySelector('i')!; const a = getComputedStyle(b), c = getComputedStyle(i); return { btn: a.backgroundColor, pill: c.backgroundColor, radius: parseFloat(c.borderTopLeftRadius), h: i.getBoundingClientRect().height, w: i.getBoundingClientRect().width }; });
     expect(s.btn).toMatch(/rgba\(0, 0, 0, 0\)|transparent/);
     expect(s.pill).not.toMatch(/rgba\(0, 0, 0, 0\)|transparent/);
@@ -524,15 +524,14 @@ test.describe('design', () => {
 
   test.describe('dark', () => {
     test.use({ colorScheme: 'dark' });
-    test('tiny caps and muted text are at least 4.5:1; the italic subtitle is weight 500', async ({ page }) => {
+    test('tiny caps and muted text are at least 4.5:1; the date line is readable', async ({ page }) => {
       await bootAreas(page, 'seed', { briefs: true });
       await openAreas(page);
       await page.locator('.today-background > summary').click();
-      for (const sel of ['.areas-head .eyebrow', '.area-card.background .area-mark', '.area-card.foreground .area-mark', '.areas-head p', '.area-card.background .area-foot', '.area-card.foreground .area-fresh']) {
+      for (const sel of ['.area-card.background .area-mark', '.area-card.foreground .area-mark', '.today-date', '.brief-fresh', '.area-card.background .area-foot', '.area-card.foreground .area-fresh']) {
         const { fg, bg } = await contrastOf(page, sel);
         expect(ratio(fg, bg), sel).toBeGreaterThanOrEqual(4.5);
       }
-      expect(await page.locator('.areas-head p').evaluate((el) => getComputedStyle(el).fontWeight)).toBe('500');
     });
   });
 });

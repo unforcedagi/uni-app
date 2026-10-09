@@ -1,16 +1,19 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { parseArea, sortAreas, type Area, type AreaNoteLike, type PathRow } from "./areasCore";
+import { parseArea, parseProject, sortAreas, type Area, type AreaNoteLike, type PathRow } from "./areasCore";
 import { parseBrief, parseToday, type Brief, type Today } from "./briefCore";
 import { deviceCache, type AreasPayload, type BriefRaw } from "./areasCache";
+import { buildTree, type Tree } from "./treeCore";
 import { createPathCache, shouldReload } from "./pathCache";
 
 export type AreaBrief = { brief: Brief; generatedAt: string | null; updatedAt: string | null };
 export type AreasData = {
+  /** Every node under Uni: areas and the projects that name a parent. */
   areas: Area[];
-  /** Each area's Brief by area name. */
+  tree: Tree;
+  /** Each node's Brief by node path. */
   briefs: Record<string, AreaBrief>;
-  today: { today: Today; updatedAt: string | null } | null;
+  today: { today: Today; updatedAt: string | null; generatedAt: string | null } | null;
   /** True while this is what the device remembered and the network hasn't answered yet. */
   stale: boolean;
 };
@@ -22,15 +25,22 @@ export const AREA_VAULT = "uni";
  */
 export const areaPaths = createPathCache(() => invoke<PathRow[]>("vault_paths", { vault: AREA_VAULT }));
 
-const query = (tag: string) => invoke<AreaNoteLike[]>("vault_query", { vault: AREA_VAULT, tag, includeContent: true, limit: 200 });
-const briefOwner = (n: AreaNoteLike) => /^Areas\/([^/]+)\/Brief$/.exec((n.path ?? "").replace(/\.md$/i, ""))?.[1] ?? (typeof n.metadata?.area === "string" ? n.metadata.area : null);
+const query = (tag: string, includeContent = true) => invoke<AreaNoteLike[]>("vault_query", { vault: AREA_VAULT, tag, includeContent, limit: 200 });
+/** The node a Brief belongs to: `<node path>/Brief`, else `metadata.area` (a name under Areas/). */
+const briefOwner = (n: AreaNoteLike) => /^(.+)\/Brief$/.exec((n.path ?? "").replace(/\.md$/i, ""))?.[1] ?? (typeof n.metadata?.area === "string" ? `Areas/${n.metadata.area}` : null);
 const newest = <T extends { updatedAt?: string | null }>(a: T | undefined, b: T) => (!a || (b.updatedAt ?? "") >= (a.updatedAt ?? "") ? b : a);
 
-/** Three tag queries in parallel (areas, briefs, Today) — never the whole vault. A missing brief or Today only blanks that part. */
+/**
+ * Four tag queries in parallel (areas, projects, briefs, Today) — never the whole vault, and no per-node fetches. Projects come
+ * without content (only their metadata names the parent). A missing brief, Today or project list only blanks that part.
+ */
 export async function fetchPayload(prev: AreasPayload | null = null): Promise<AreasPayload> {
-  const [areas, briefs, today] = await Promise.allSettled([query("area"), query("area-brief"), query("area-today")]);
+  const [areas, projects, briefs, today] = await Promise.allSettled([query("area"), query("project", false), query("area-brief"), query("area-today")]);
   if (areas.status === "rejected") throw areas.reason;
-  const parsed = sortAreas(areas.value.map(parseArea).filter((a): a is Area => !!a));
+  const found = areas.value.map(parseArea).filter((a): a is Area => !!a);
+  const kept = projects.status === "fulfilled" ? projects.value.map(parseProject).filter((a): a is Area => !!a)
+    : (prev?.areas ?? []).filter((a) => a.kind === "project");
+  const parsed = sortAreas([...found, ...kept]);
   let briefRaw: Record<string, BriefRaw> = prev?.briefs ?? {};
   if (briefs.status === "fulfilled") {
     const latest: Record<string, AreaNoteLike> = {};
@@ -40,16 +50,17 @@ export async function fetchPayload(prev: AreasPayload | null = null): Promise<Ar
   let todayRaw = prev?.today ?? null;
   if (today.status === "fulfilled") {
     const t = today.value.filter((n) => (n.path ?? "").replace(/\.md$/i, "") === "Areas/Today").reduce<AreaNoteLike | undefined>((best, n) => newest(best, n), undefined);
-    todayRaw = t ? { content: t.content ?? "", updatedAt: t.updatedAt ?? null } : null;
+    todayRaw = t ? { content: t.content ?? "", updatedAt: t.updatedAt ?? null, generatedAt: typeof t.metadata?.generated_at === "string" ? t.metadata.generated_at : null } : null;
   }
   return { areas: parsed, briefs: briefRaw, today: todayRaw };
 }
 
 export function toView(p: AreasPayload, stale: boolean): AreasData {
+  const tree = buildTree(p.areas);
   return {
-    areas: p.areas, stale,
-    briefs: Object.fromEntries(Object.entries(p.briefs).map(([name, b]) => [name, { brief: parseBrief(b.content), generatedAt: b.generatedAt, updatedAt: b.updatedAt }])),
-    today: p.today ? { today: parseToday(p.today.content), updatedAt: p.today.updatedAt } : null,
+    areas: [...tree.nodes.values()], tree, stale,
+    briefs: Object.fromEntries(Object.entries(p.briefs).map(([path, b]) => [path, { brief: parseBrief(b.content), generatedAt: b.generatedAt, updatedAt: b.updatedAt }])),
+    today: p.today ? { today: parseToday(p.today.content), updatedAt: p.today.updatedAt, generatedAt: p.today.generatedAt ?? null } : null,
   };
 }
 

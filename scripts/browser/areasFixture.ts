@@ -145,6 +145,8 @@ export type BootOpts = {
   stripCsp?: boolean;
   /** Techne lists two rooms (#techne, #cohere) like the real area. */
   multiRoom?: boolean;
+  /** A project under Techne (`Projects/COhere/COhere 2026`, parent Areas/Techne, room #cohere) with its own Brief. Implies multiRoom. */
+  tree?: boolean;
   /** Fixture Brief notes (Techne, Unforced Development) and an `Areas/Today` note, as the briefs writer produces them. */
   briefs?: boolean;
   /** Every vault_query answers after this many ms (to show the device cache paint first). */
@@ -169,7 +171,7 @@ export async function bootAreas(page: Page, variant: Variant = 'seed', opts: Boo
   const now = Math.floor(Date.now() / 1000);
   const data = {
     now, variant, selftest: opts.selftest ?? true, ipcLeak: opts.ipcLeak ?? false, hostile: hostileApp(opts.ports ?? { http: 9, udp: 9 }), benign: BENIGN, techne: seed('techne'), unforced: seed('unforced'), seedMeta,
-    apps: opts.apps ?? [], multiRoom: !!opts.multiRoom, briefs: !!opts.briefs, queryDelay: opts.queryDelay ?? 0, deviceCache: opts.deviceCache ?? null, queryFails: opts.queryFails ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null, mode: opts.mode ?? 'sealed', grantedUnder: opts.grantedUnder ?? (opts.mode ?? 'sealed'),
+    apps: opts.apps ?? [], multiRoom: !!opts.multiRoom || !!opts.tree, tree: !!opts.tree, briefs: !!opts.briefs, queryDelay: opts.queryDelay ?? 0, deviceCache: opts.deviceCache ?? null, queryFails: opts.queryFails ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null, mode: opts.mode ?? 'sealed', grantedUnder: opts.grantedUnder ?? (opts.mode ?? 'sealed'),
   };
   // Pre-granted apps: the grant key is the SHA-256 of the RESOLVED default needs plus the app's html.
   const preGrant = [
@@ -207,7 +209,7 @@ export async function bootAreas(page: Page, variant: Variant = 'seed', opts: Boo
     if (d.granted && !localStorage.getItem('uni.interface.grants.v2')) {
       localStorage.setItem('uni.interface.grants.v2', JSON.stringify(Object.fromEntries(Object.entries(d.grantSeed as Record<string, { scope: string; html: string }>).map(([id, g]) => [id, { ...g, ...(d.grantedUnder === 'legacy' ? {} : { grantedUnder: d.grantedUnder }), grantedAt: '2026-10-08T00:00:00Z' }]))));
     }
-    if (d.deviceCache && !localStorage.getItem('uni.areas.cache.v1')) localStorage.setItem('uni.areas.cache.v1', d.deviceCache);
+    if (d.deviceCache && !localStorage.getItem('uni.areas.cache.v2')) localStorage.setItem('uni.areas.cache.v2', d.deviceCache);
     const U = 'a'.repeat(64);
     const area = (id: string, name: string, status: string, ch: string, purpose: string) => ({
       id, path: `Areas/${name}`, extension: 'md', tags: ['area'], updatedAt: '2026-10-07T12:00:00Z', createdAt: '2026-09-01T00:00:00Z',
@@ -298,6 +300,13 @@ Two proposals wait on a scope decision.
 ` },
       );
     }
+    if (d.tree) {
+      const iso = (ago: number) => new Date((d.now - ago) * 1000).toISOString();
+      notes.push(
+        { id: 'p-cohere', path: 'Projects/COhere/COhere 2026', extension: 'md', tags: ['project'], metadata: { parent: 'Areas/Techne', channel: 'ch-cohere' }, updatedAt: iso(86400), content: '# COhere 2026\n\nThe festival: venue, crew and the schedule.' },
+        { id: 'br-cohere', path: 'Projects/COhere/COhere 2026/Brief', extension: 'md', tags: ['area-brief'], metadata: { generated_at: iso(5 * 3600) }, updatedAt: iso(5 * 3600), content: '## Now\nVenue is held for Oct 15; the crew list needs a second pass.\n\n## Needs you\n- Confirm the venue deposit by Oct 12\n\n## Moving\n- nothing recent\n' },
+      );
+    }
     if (d.variant === 'test') {
       notes.push(
         area('a-host', 'Hostile', 'foreground', 'ch-techne', 'An area whose app attacks the host.'),
@@ -368,12 +377,13 @@ Two proposals wait on a scope decision.
     w.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} };
   }, data);
   await page.goto('/');
-  await expect(page.getByRole('textbox', { name: 'Message Uni' })).toBeVisible();
+  // The app opens to Uni: its home page, with the Uni chat attached.
+  await expect(page.getByRole('heading', { name: 'Uni', level: 1 })).toBeVisible();
 }
 
 const railOf = (page: Page) => page.getByRole('navigation', { name: 'Main navigation' });
-/** The Areas tab: Today is its heading. */
-export const openAreasHome = async (page: Page) => { await railOf(page).getByRole('button', { name: 'Areas', exact: true }).click(); await expect(page.getByRole('heading', { name: 'Today', level: 1 })).toBeVisible(); };
+/** Uni's home page (the app opens there; the rail's Uni button comes back to it). */
+export const openAreasHome = async (page: Page) => { await railOf(page).getByRole('button', { name: 'Uni', exact: true }).click(); await expect(page.getByRole('heading', { name: 'Uni', level: 1 })).toBeVisible(); await expect(page.locator('.area-bar-title')).toHaveText('Uni'); };
 export const areaCard = (page: Page, name: string) => page.locator('.area-card', { has: page.locator('strong', { hasText: new RegExp(`^${name}$`) }) });
 /**
  * Opens an area from Today (expanding the background list when it must) and, when it has a sealed app, its App tab.

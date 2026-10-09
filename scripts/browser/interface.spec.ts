@@ -64,7 +64,7 @@ test.describe('grant prompt', () => {
     expect(Object.keys(await grants(page))).toEqual(['app-techne']);
     // and it stays allowed after a reload
     await page.reload();
-    await rail(page).getByRole('button', { name: 'Areas', exact: true }).click();
+    await rail(page).getByRole('button', { name: 'Uni', exact: true }).click();
     await page.getByRole('tab', { name: /Techne/ }).click().catch(() => {});
     if (!(await page.locator('.area-bar-title').isVisible())) await openArea(page, 'Techne');
     // a restored tab never starts the app by itself (it opens on the Brief); one tap on App does

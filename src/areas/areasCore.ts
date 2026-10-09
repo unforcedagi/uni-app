@@ -8,6 +8,12 @@ export type Area = {
   id: string; path: string; name: string; purpose: string; status: AreaStatus;
   channels: string[]; since: string | null; title: string; body: string;
   metadata: Record<string, unknown>; updatedAt: string | null;
+  /** "area": an `Areas/<Name>` note; "project": a tagged note that names its parent (`metadata.parent`). */
+  kind: "area" | "project";
+  /** The parent node's path as written in `metadata.parent` (null: a top-level node). The tree validates it. */
+  parent: string | null;
+  /** The rooms this node shows: `channels` minus the rooms its children claim. `channels` itself stays what the note says. */
+  rooms: string[];
 };
 export type AreaNoteLike = { id: string; path?: string | null; content?: string | null; tags?: string[] | null; metadata?: Record<string, unknown> | null; updatedAt?: string | null };
 export type PathRow = { id: string; path: string | null; extension?: string | null; updatedAt?: string | null };
@@ -56,6 +62,32 @@ export function parseArea(note: AreaNoteLike): Area | null {
     channels: splitChannels(metadata.channel),
     since: typeof metadata.since === "string" ? metadata.since : null,
     title: titleOf(content, name), body: content, metadata, updatedAt: note.updatedAt ?? null,
+    kind: "area", parent: parentOf(metadata), rooms: splitChannels(metadata.channel),
+  };
+}
+
+/** `metadata.parent` as a note path: `[[ ]]`, a leading slash and the extension are tolerated. */
+export function parentOf(metadata: Record<string, unknown>): string | null {
+  const raw = typeof metadata.parent === "string" ? metadata.parent : "";
+  const p = stripExt(raw.trim().replace(/^\[\[|\]\]$/g, "").split("|")[0].trim().replace(/^\/+|\/+$/g, ""));
+  return p || null;
+}
+
+/** A project note under a node: tagged `project`, with `metadata.parent`. Its Brief and app notes are not nodes. */
+export function parseProject(note: AreaNoteLike): Area | null {
+  const path = note.path ? stripExt(note.path) : "";
+  const metadata = note.metadata ?? {};
+  const parent = parentOf(metadata);
+  if (!path || !parent || !(note.tags ?? []).includes("project") || /\/(Brief|app)$/.test(path)) return null;
+  const content = note.content ?? "";
+  const name = leaf(path);
+  return {
+    id: note.id, path, name, purpose: purposeOf(content),
+    status: metadata.status === "foreground" ? "foreground" : "background",
+    channels: splitChannels(metadata.channel),
+    since: typeof metadata.since === "string" ? metadata.since : null,
+    title: titleOf(content, name), body: content, metadata, updatedAt: note.updatedAt ?? null,
+    kind: "project", parent, rooms: splitChannels(metadata.channel),
   };
 }
 
