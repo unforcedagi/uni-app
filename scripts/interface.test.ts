@@ -831,5 +831,16 @@ await check("P3-N3: 'updated' persists across status calls and a fresh store unt
   g.acknowledge("nope", "h9"); assert.equal(g.status("nope", "s1", "h9"), "none", "acknowledge never creates a grant");
 });
 
+// T-76: on WebKitGTK a navigation to a restricted port (1, 9, ...) is refused before the CSP check, so no frame-src violation
+// is ever reported and the host has no proof. The nav probes must aim at a port the engine would otherwise allow.
+const RESTRICTED_PORTS = [1, 7, 9, 11, 13, 15, 17, 19, 20, 21, 22, 23, 25, 37, 42, 43, 53, 69, 77, 79, 87, 95, 101, 102, 103, 104, 109, 110, 111, 113, 115, 117, 119, 123, 135, 137, 139, 143, 161, 179, 389, 427, 465, 512, 513, 514, 515, 526, 530, 531, 532, 540, 548, 554, 556, 563, 587, 601, 636, 989, 990, 993, 995, 1719, 1720, 1723, 2049, 3659, 4045, 5060, 5061, 6000, 6566, 6697, 10080];
+await check("probe: navigation targets use a port the engine does not refuse before the CSP", () => {
+  for (const v of ["self", "meta", "anchor", "parse"]) {
+    const ports = [...probe.navProbeHtml(v).matchAll(/127\.0\.0\.1:(\d+)/g)].map((m) => Number(m[1]));
+    assert.ok(ports.length > 0, `${v}: a loopback target`);
+    for (const p of ports) assert.ok(!RESTRICTED_PORTS.includes(p) && !(p >= 6665 && p <= 6669), `${v}: port ${p} is restricted`);
+  }
+});
+
 if (failed) { console.log(`\ninterface: ${failed} failed`); process.exit(1); }
 console.log("\ninterface: ok");

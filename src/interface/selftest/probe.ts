@@ -122,7 +122,8 @@ export const PROBE_HTML = `<!doctype html><html><body><script>
 
 /** A probe that tries one way of navigating itself: after load (self, meta, anchor) or while the page is still parsing (parse). The host judges the outcome. */
 export function navProbeHtml(vector: NavVector): string {
-  const url = "http://127.0.0.1:1/selftest-nav";
+  // Not a restricted port (1, 9, ...): WebKitGTK refuses those before the CSP check and reports no violation (T-76).
+  const url = "http://127.0.0.1:59999/selftest-nav";
   const code = {
     self: `location.href = ${JSON.stringify(url)};`,
     meta: `var m = document.createElement('meta'); m.httpEquiv = 'refresh'; m.content = '0;url=${url}'; document.head.appendChild(m);`,

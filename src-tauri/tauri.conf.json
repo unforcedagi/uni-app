@@ -24,7 +24,8 @@
     "security": {
       "csp": {
         "frame-src": "about:"
-      }
+      },
+      "dangerousDisableAssetCspModification": ["script-src"]
     }
   },
   "bundle": {
