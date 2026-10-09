@@ -25,11 +25,17 @@ export const frameSrcDoc = (html: string) => buildSrcdoc(html, { kitSource: KIT_
 export function useSealedFrame(opts: { srcDoc: string; router: Router; grant: Resolved; ready?: unknown; stopOnViolation?: boolean; onViolation?: () => void }) {
   const frame = useRef<HTMLIFrameElement>(null);
   const session = useRef<Session | null>(null);
+  const loaded = useRef<string | null>(null);
+  const srcDocRef = useRef(opts.srcDoc);
+  srcDocRef.current = opts.srcDoc;
   const readyRef = useRef(opts.ready);
   readyRef.current = opts.ready;
   const onViolationRef = useRef(opts.onViolation);
   onViolationRef.current = opts.onViolation;
   const [stopped, setStopped] = useState(false);
+  // The frame gets its document only once the session is listening: a document that posts while parsing
+  // (WebKit loads srcdoc synchronously on mount) would otherwise talk to nobody.
+  const [armed, setArmed] = useState<string | null>(null);
   const { srcDoc, router, grant, stopOnViolation } = opts;
 
   useEffect(() => {
@@ -37,6 +43,8 @@ export function useSealedFrame(opts: { srcDoc: string; router: Router; grant: Re
     // targetOrigin must be "*": a sandboxed srcdoc frame's origin is opaque.
     const s = createSession({ post: (m) => frame.current?.contentWindow?.postMessage(m, "*"), router, grant });
     session.current = s;
+    // The frame can finish loading before this effect runs (WebKit does): tell a late session it is ready.
+    if (loaded.current === srcDoc) s.sendEvent("ready", { contract: 1, ...(readyRef.current as object), theme: readHostTheme() });
     const onMessage = (e: MessageEvent) => { if (e.source === null || e.source !== frame.current?.contentWindow) return; s.handle(e.data); };
     const onViolation = (e: SecurityPolicyViolationEvent) => {
       if (!(e.effectiveDirective || e.violatedDirective || "").startsWith("frame-src")) return;
@@ -45,14 +53,17 @@ export function useSealedFrame(opts: { srcDoc: string; router: Router; grant: Re
     };
     window.addEventListener("message", onMessage);
     document.addEventListener("securitypolicyviolation", onViolation);
+    setArmed(srcDoc);
     const mq = window.matchMedia?.("(prefers-color-scheme: dark)");
     const retheme = () => s.sendEvent("theme", readHostTheme());
     mq?.addEventListener?.("change", retheme);
     return () => { s.close(); window.removeEventListener("message", onMessage); document.removeEventListener("securitypolicyviolation", onViolation); mq?.removeEventListener?.("change", retheme); session.current = null; };
   }, [srcDoc, router, grant, stopOnViolation]);
 
-  const onLoad = useCallback(() => { session.current?.sendEvent("ready", { contract: 1, ...(readyRef.current as object), theme: readHostTheme() }); }, []);
-  return { frame, stopped, onLoad };
+  const armedRef = useRef(armed);
+  armedRef.current = armed;
+  const onLoad = useCallback(() => { if (armedRef.current !== srcDocRef.current) return; loaded.current = srcDocRef.current; session.current?.sendEvent("ready", { contract: 1, ...(readyRef.current as object), theme: readHostTheme() }); }, []);
+  return { frame, stopped, onLoad, srcDoc: armed === srcDoc ? srcDoc : undefined };
 }
 
 /**
@@ -63,7 +74,7 @@ export function useSealedFrame(opts: { srcDoc: string; router: Router; grant: Re
  */
 export default function InterfaceFrame({ html, title, router, grant, ready }: { html: string; title: string; router: Router; grant: Resolved; ready: unknown }) {
   const srcDoc = useMemo(() => frameSrcDoc(html), [html]);
-  const { frame, stopped, onLoad } = useSealedFrame({ srcDoc, router, grant, ready, stopOnViolation: true });
+  const { frame, stopped, onLoad, srcDoc: liveDoc } = useSealedFrame({ srcDoc, router, grant, ready, stopOnViolation: true });
   if (stopped) return <p className="area-stopped" role="alert">{STOPPED_MESSAGE}</p>;
-  return <iframe ref={frame} className="area-frame" title={title} sandbox="allow-scripts" referrerPolicy="no-referrer" srcDoc={srcDoc} onLoad={onLoad} />;
+  return <iframe ref={frame} className="area-frame" title={title} sandbox="allow-scripts" referrerPolicy="no-referrer" srcDoc={liveDoc} onLoad={onLoad} />;
 }

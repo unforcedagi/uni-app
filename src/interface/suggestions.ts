@@ -3,7 +3,7 @@
 // itself: `add` only records; only `accept` calls `onAccept`, and only host
 // UI calls `accept`.
 
-import { ContractError, ERROR_CODES } from "./contract.ts";
+import { cleanText, ContractError, ERROR_CODES } from "./contract.ts";
 
 export type SuggestionInput = { kind: "draft"; room: string; text: string } | { kind: "open"; ref: string };
 export type Suggestion = SuggestionInput & { id: string };
@@ -17,7 +17,9 @@ export function createSuggestionStore(opts: { onAccept: (s: Suggestion) => void;
   const same = (a: SuggestionInput, b: SuggestionInput) => JSON.stringify({ ...a, id: 0 }) === JSON.stringify({ ...b, id: 0 });
   return {
     /** Record a suggestion. Duplicates collapse; more than `max` pending is refused. */
-    add(input: SuggestionInput): Suggestion {
+    add(raw: SuggestionInput): Suggestion {
+      // The bar shows, and accept inserts, exactly this cleaned text.
+      const input: SuggestionInput = raw.kind === "draft" ? { ...raw, text: cleanText(raw.text) } : raw;
       const dup = items.find((s) => same(s, input));
       if (dup) return dup;
       if (items.length >= max) throw new ContractError(ERROR_CODES.rateLimited, "too many pending suggestions");

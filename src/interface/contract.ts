@@ -33,7 +33,9 @@ export const LIMITS = {
   maxPending: 8,
   maxRequests: 60,
   rateWindowMs: 10_000,
-  maxDraft: 2000,
+  maxDraft: 500,
+  /** Most notes a tag or content request reads; each read is charged to the limiter. */
+  maxScan: 20,
   maxRecent: 30,
   maxNotes: 50,
   maxPath: 2000,
@@ -116,12 +118,26 @@ export class RateLimiter {
   private max: number;
   private windowMs: number;
   constructor(max: number = LIMITS.maxRequests, windowMs: number = LIMITS.rateWindowMs) { this.max = max; this.windowMs = windowMs; }
-  take(now: number): boolean {
+  /** Charge `cost` tokens (default 1); false when that would pass `max` in the window. */
+  take(now: number, cost = 1): boolean {
     this.hits = this.hits.filter((t) => now - t < this.windowMs);
-    if (this.hits.length >= this.max) return false;
-    this.hits.push(now);
+    if (this.hits.length + cost > this.max) return false;
+    for (let i = 0; i < cost; i++) this.hits.push(now);
     return true;
   }
+}
+
+/** Bidi controls, zero-width and other invisible format characters, and C0/C1 controls. */
+const HIDDEN = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u00ad\u034f\u061c\u115f\u1160\u17b4\u17b5\u180b-\u180e\u200b-\u200f\u202a-\u202e\u2060-\u206f\u3164\ufeff\uffa0\ufff9-\ufffb]/g;
+export const hasHidden = (s: string) => { HIDDEN.lastIndex = 0; return HIDDEN.test(s); };
+
+/**
+ * The one text transform for anything the host shows and then inserts: no
+ * hidden characters (\n and \t stay), CRLF folded, and runs of 3+ newlines
+ * collapsed to a single blank line, so nothing can be pushed out of view.
+ */
+export function cleanText(s: string): string {
+  return s.replace(/\r\n?/g, "\n").replace(HIDDEN, "").replace(/\n{3,}/g, "\n\n");
 }
 
 /** Notes at `Areas/Foo.md` and `Areas/Foo` are the same note. */

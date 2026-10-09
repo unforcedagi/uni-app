@@ -64,3 +64,13 @@
 .suggestion-actions { display: flex; gap: 8px; }
 .suggestion-go { min-height: 36px; padding: 4px 14px; border: 0; border-radius: var(--radius); background: var(--accent); color: var(--surface); font-weight: 600; cursor: pointer; }
 .suggestion-actions .pairing-secondary { min-height: 36px; padding: 4px 14px; }
+
+/* Stop / revoke and the updated notice: host UI in the bar above the sealed frame. */
+.area-bar-controls { display: flex; flex-wrap: wrap; gap: 8px; margin-left: auto; }
+.area-bar-controls .pairing-secondary { min-height: 36px; padding: 4px 12px; font-size: 13px; }
+.area-bar.chromeless { flex-wrap: wrap; }
+.area-updated { flex: none; margin: 0; padding: 8px clamp(16px, 3vw, 24px); border-bottom: 1px solid var(--line); background: var(--card-lift); color: var(--text-soft); font-size: 13px; }
+.grant-outside { color: var(--danger); }
+.grant-name { font-style: normal; font-weight: 600; }
+.suggestion-draft { margin: 6px 0 0; padding: 8px 10px; max-height: 9em; overflow-y: auto; border-left: 3px solid var(--accent); background: var(--surface); color: var(--text-soft); font-size: 14px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+.suggestion-ref { overflow-wrap: anywhere; }

@@ -1551,7 +1551,6 @@ fn install_tab_menu(app: &mut tauri::App) -> tauri::Result<()> {
     Ok(())
 }
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
 /// WebRTC ignores CSP, so a sealed area app could send data out through an
 /// ICE/TURN request. WebKitGTK ships with `enable-webrtc` off; this makes that
 /// explicit so a build or distro default can't silently turn it on. The
@@ -1570,6 +1569,7 @@ fn disable_webrtc(app: &tauri::App) {
     }
 }
 
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[cfg(desktop)]
     desktop_log::init();
