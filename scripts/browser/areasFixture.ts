@@ -133,7 +133,7 @@ export type BootOpts = {
   mode?: 'sealed' | 'approved-code';
   ports?: Ports;
   /** Extra area apps (an `area` note plus an html `app` note each). `interface` is the manifest in the app note's metadata. */
-  apps?: { name: string; html: string; interface?: unknown }[];
+  apps?: { name: string; html: string; interface?: unknown; /** The area's room (default ch-techne; '' = an area with no room). */ channel?: string }[];
   /**
    * 'off' (default) simulates a webview without WebRTC (WebKitGTK's default): no frame, child frames included, has RTCPeerConnection.
    * 'native' leaves the real browser's WebRTC in place (Chromium has it).
@@ -165,10 +165,10 @@ export async function bootAreas(page: Page, variant: Variant = 'seed', opts: Boo
   const preGrant = [
     { id: 'app-techne', area: 'Techne', ch: 'ch-techne', html: data.techne }, { id: 'app-unf', area: 'Unforced Development', ch: 'ch-unf', html: data.unforced },
     { id: 'app-host', area: 'Hostile', ch: 'ch-techne', html: data.hostile }, { id: 'app-ben', area: 'Benign', ch: 'ch-techne', html: data.benign },
-    ...data.apps.map((a) => ({ id: 'app-x-' + a.name, area: a.name, ch: 'ch-techne', html: a.html })),
+    ...data.apps.map((a) => ({ id: 'app-x-' + a.name, area: a.name, ch: a.channel ?? 'ch-techne', html: a.html })),
   ];
   for (const g of preGrant) {
-    const ctx = { areaPath: `Areas/${g.area}`, channels: [g.ch] };
+    const ctx = { areaPath: `Areas/${g.area}`, channels: g.ch ? [g.ch] : [] };
     const stale = (opts.staleHtml ?? []).some((n) => g.id === 'app-x-' + n);
     data.grantSeed[g.id] = { scope: await grantKey(resolveNeeds(defaultNeeds(), ctx), ctx.areaPath), html: stale ? 'stale-' + await htmlHash(g.html) : await htmlHash(g.html) };
   }
@@ -228,8 +228,8 @@ export async function bootAreas(page: Page, variant: Variant = 'seed', opts: Boo
         { id: 'n-b1', path: 'Areas/Benign/Alpha', extension: 'md', content: '# Alpha', updatedAt: '2026-10-07T00:00:00Z' },
       );
     }
-    for (const a of d.apps as { name: string; html: string }[]) {
-      notes.push(area('a-x-' + a.name, a.name, 'foreground', 'ch-techne', `An area whose app is ${a.name}.`), { id: 'app-x-' + a.name, path: `Areas/${a.name}/app`, extension: 'html', content: a.html, ...(a.interface ? { metadata: { interface: a.interface } } : {}), updatedAt: '2026-10-07T00:00:00Z' },
+    for (const a of d.apps as { name: string; html: string; channel?: string }[]) {
+      notes.push(area('a-x-' + a.name, a.name, 'foreground', a.channel ?? 'ch-techne', `An area whose app is ${a.name}.`), { id: 'app-x-' + a.name, path: `Areas/${a.name}/app`, extension: 'html', content: a.html, ...(a.interface ? { metadata: { interface: a.interface } } : {}), updatedAt: '2026-10-07T00:00:00Z' },
         { id: 'n-x-' + a.name, path: `Areas/${a.name}/Alpha`, extension: 'md', content: '# Alpha', updatedAt: '2026-10-07T00:00:00Z' });
     }
     const msg = (ref: string, channel: string, name: string, ago: number, body: string) => ({ ref, channel, author: name === 'Aaron' ? U : 'b'.repeat(64), author_name: name, ts: d.now - ago, body, mentions_me: false, root: null, parent: null, mentions: [], reply_count: 0, last_reply_ts: null, edited: false, reactions: [] });

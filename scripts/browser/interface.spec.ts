@@ -3,6 +3,12 @@ import { mkdir } from 'node:fs/promises';
 import { test, expect, type Page } from '@playwright/test';
 import { bootAreas } from './areasFixture';
 import { startListener } from './areasListener';
+// On a narrow phone Stop / Revoke live in the bar's menu.
+const appControl = async (page: Page, name: string) => {
+  const toggle = page.getByRole('button', { name: 'App controls' });
+  if (await toggle.isVisible()) await toggle.click();
+  await page.getByRole('button', { name }).click();
+};
 
 const rail = (page: Page) => page.getByRole('navigation', { name: 'Main navigation' });
 const openAreas = async (page: Page) => { await rail(page).getByRole('button', { name: 'Areas', exact: true }).click(); await expect(page.getByRole('heading', { name: 'Areas', level: 1 })).toBeVisible(); };
@@ -257,12 +263,12 @@ test.describe('P2-C stop, revoke, and no auto-start of a restored app', () => {
     await bootAreas(page, 'seed', { apps: [{ name: 'Quiet', html: QUIET }] });
     await openAreas(page); await openArea(page, 'Quiet');
     await expect(page.locator('iframe.area-frame')).toHaveCount(1);
-    await page.getByRole('button', { name: 'Stop app' }).click();
+    await appControl(page, 'Stop app');
     await expect(page.locator('iframe')).toHaveCount(0);
     await page.getByRole('button', { name: 'Open Quiet app' }).click();
     await expect(page.locator('iframe.area-frame')).toHaveCount(1);
     expect(Object.keys(await grants(page))).toContain('app-x-Quiet');
-    await page.getByRole('button', { name: 'Revoke access' }).click();
+    await appControl(page, 'Revoke access');
     await expect(page.locator('iframe')).toHaveCount(0);
     await expect(page.getByRole('region', { name: /Quiet is asking for access/ })).toBeVisible();
     expect(Object.keys(await grants(page))).not.toContain('app-x-Quiet');
@@ -350,7 +356,7 @@ test.describe('P3-N3 the "updated" notice stays until Accept', () => {
     await bootAreas(page, 'seed', { apps: [{ name: 'Quiet', html: QUIET }], staleHtml: ['Quiet'] });
     await openAreas(page); await openArea(page, 'Quiet');
     await expect(page.locator('.area-updated')).toBeVisible();
-    await page.getByRole('button', { name: 'Stop app' }).click();
+    await appControl(page, 'Stop app');
     await page.reload();
     await page.getByRole('tab', { name: /Quiet/ }).click();
     await page.getByRole('button', { name: 'Open Quiet app' }).click();
@@ -367,7 +373,7 @@ test.describe('P3-N3 the "updated" notice stays until Accept', () => {
   test('an idle view (app never started) does not acknowledge the change', async ({ page }) => {
     await bootAreas(page, 'seed', { apps: [{ name: 'Quiet', html: QUIET }], staleHtml: ['Quiet'] });
     await openAreas(page); await openArea(page, 'Quiet');
-    await page.getByRole('button', { name: 'Stop app' }).click();
+    await appControl(page, 'Stop app');
     await page.waitForTimeout(300);
     const g = await grants(page);
     expect(g['app-x-Quiet'].html).toMatch(/^stale-/);
@@ -382,12 +388,12 @@ test.describe('P3-N4 pending suggestions do not survive Stop or Revoke', () => {
     await bootAreas(page, 'seed', { apps: [{ name: 'Drafter', html: DRAFTER }] });
     await openAreas(page); await openArea(page, 'Drafter');
     await expect(page.locator('.suggestion-draft')).toBeVisible();
-    await page.getByRole('button', { name: 'Stop app' }).click();
+    await appControl(page, 'Stop app');
     await lowerSheet(page);
     await page.getByRole('button', { name: 'Open Drafter app' }).click();
     // the restarted app drafts again; the old one must not be doubled up
     await expect(page.locator('.suggestion-draft')).toHaveCount(1);
-    await page.getByRole('button', { name: 'Revoke access' }).click();
+    await appControl(page, 'Revoke access');
     await expect(page.locator('.suggestion-bar')).toHaveCount(0);
     await lowerSheet(page);
     await page.getByRole('button', { name: 'Allow' }).click();

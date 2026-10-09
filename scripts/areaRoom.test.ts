@@ -11,6 +11,7 @@ const kits: Any = await opt("../src/interface/kits/index.ts");
 const layout: Any = await opt("../src/areas/areaLayout.ts");
 const tabs: Any = await opt("../src/tabs.ts");
 const routerMod: Any = await opt("../src/interface/router.ts");
+const chatMod: Any = await opt("../src/interface/modules/chat.ts");
 const themeMod: Any = await opt("../src/interface/modules/theme.ts");
 
 let failed = 0;
@@ -77,6 +78,19 @@ await check("new messages: the first list is only recorded; later refs come out 
   assert.deepEqual(seen.fresh([m("old", 0), m("a", 1), m("b", 2), m("d", 4), m("c", 3)]), [], "an older page loaded later is not news");
   seen.reset(); assert.deepEqual(seen.fresh([m("z", 9)]), [], "after reset the next list is a baseline again");
 });
+await check("new messages: judged by position, not by timestamp (a slow clock or a far-future ts neither drops nor mutes live pushes)", () => {
+  const m = (ref: string, ts: number) => ({ ref, ts });
+  const a = layout.createSeen();
+  a.fresh([m("a", 1000)]);
+  assert.deepEqual(a.fresh([m("a", 1000), m("late", 990)]).map((x: Any) => x.ref), ["late"], "a sender whose clock is behind");
+  const b = layout.createSeen();
+  b.fresh([m("a", 1000), m("future", 9999999999)]);
+  assert.deepEqual(b.fresh([m("a", 1000), m("future", 9999999999), m("real", 2000)]).map((x: Any) => x.ref), ["real"], "a baseline message with a far-future ts");
+  assert.deepEqual(b.fresh([m("older", 5), m("a", 1000), m("future", 9999999999), m("real", 2000)]), [], "an older page prepended later is still not news");
+  const c = layout.createSeen();
+  assert.deepEqual(c.fresh([]), []);
+  assert.deepEqual(c.fresh([m("first", 1)]).map((x: Any) => x.ref), ["first"], "an empty room's first message is news");
+});
 await check("unread: counts others' messages after the marker; own messages do not count", () => {
   const u = layout.unreadAfter;
   const l = [{ ref: "a", author: "me" }, { ref: "b", author: "u" }, { ref: "c", author: "me" }, { ref: "d", author: "u" }];
@@ -120,6 +134,15 @@ await check("push: content and author are cleaned with stripHidden and capped li
   assert.equal(d.content.length, 4000);
   assert.equal(push.pushChatMessage(h.s, g, "ch-techne", msg({ author_name: null, author: "c".repeat(64) })), true);
   assert.equal(h.out[1].data.author, "cccccccc", "falls back to the short key, like chat.recent");
+});
+await check("chat.recent cleans content and author with stripHidden, like the pushed event", async () => {
+  const tag = String.fromCodePoint(0xe0041, 0xe0042);
+  const mod = chatMod.createChatModule({ getMessages: async () => [{ ref: "r1", author: "c".repeat(64), author_name: "Un‮i​", ts: 5, body: `a‮b​c${tag}d\n\te` + "x".repeat(5000) }], suggest: () => ({}), roomName: (id: string) => id });
+  const r = routerMod.createRouter([mod]);
+  const { messages } = await r.call("chat", "recent", { limit: 5 }, { "chat.read": ["ch-techne"] });
+  assert.equal(messages[0].author, "Uni");
+  assert.ok(messages[0].content.startsWith("abcd\n\te"), JSON.stringify(messages[0].content.slice(0, 12)));
+  assert.equal(messages[0].content.length, 4000);
 });
 await check("push: events count against the request bucket (60 per 10 s); over it nothing is posted", () => {
   const g = { "chat.read": ["ch-techne"] };
