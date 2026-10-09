@@ -3,6 +3,8 @@ import { test, expect, type Page } from '@playwright/test';
 async function boot(page: Page, fixture = 'five', query = '') {
   await page.addInitScript(() => {
     const w = window as any;
+    // These suites test the room view and the chrome around it: start on a saved Uni-room tab (the app itself opens to Uni's home page).
+    if (!localStorage.getItem('uni.tabs.v1')) localStorage.setItem('uni.tabs.v1', JSON.stringify({ v: 1, tabs: [{ id: 'room', kind: 'room', channel: 'test', title: 'Test room' }], active: 'room', recent: ['room'] }));
     const fixture = new URLSearchParams(location.search).get('vaultFixture');
     if (new URLSearchParams(location.search).get('brokenStorage')) {
       Storage.prototype.getItem = () => { throw new Error('denied'); };
@@ -33,7 +35,8 @@ async function boot(page: Page, fixture = 'five', query = '') {
     w.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} };
   });
   await page.goto(`/?vaultFixture=${fixture}${query}`);
-  if (test.info().project.name === 'phone-390') await page.getByRole('button', { name: 'Back to conversations' }).click();
+  // Broken storage cannot hold the seeded room tab, so the app opens on Uni's home: its rail has Rooms instead of a Back button.
+  if (test.info().project.name === 'phone-390') await (query.includes('brokenStorage') ? page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Rooms', exact: true }) : page.getByRole('button', { name: 'Back to conversations' })).click();
   if (test.info().project.name !== 'phone-390') await page.getByRole('button', { name: 'Vault', exact: true }).click();
   await expect(page.getByRole('region', { name: 'Vaults' })).toBeVisible();
 }
@@ -83,14 +86,16 @@ test('Other vault expansion survives reload and remains keyboard operable', asyn
   await page.keyboard.press('Enter');
   await expect(toggle).toHaveAttribute('aria-expanded', 'true');
   await page.reload();
-  if (test.info().project.name === 'phone-390') await page.getByRole('button', { name: 'Back to conversations' }).click();
+  // Broken storage cannot hold the seeded room tab, so the app opens on Uni's home: its rail has Rooms instead of a Back button.
+  if (test.info().project.name === 'phone-390') await (false ? page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Rooms', exact: true }) : page.getByRole('button', { name: 'Back to conversations' })).click();
   if (test.info().project.name !== 'phone-390') await page.getByRole('button', { name: 'Vault', exact: true }).click();
   await expect(toggle).toHaveAttribute('aria-expanded', 'true');
   await toggle.focus();
   await page.keyboard.press('Space');
   await expect(toggle).toHaveAttribute('aria-expanded', 'false');
   await page.reload();
-  if (test.info().project.name === 'phone-390') await page.getByRole('button', { name: 'Back to conversations' }).click();
+  // Broken storage cannot hold the seeded room tab, so the app opens on Uni's home: its rail has Rooms instead of a Back button.
+  if (test.info().project.name === 'phone-390') await (false ? page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Rooms', exact: true }) : page.getByRole('button', { name: 'Back to conversations' })).click();
   if (test.info().project.name !== 'phone-390') await page.getByRole('button', { name: 'Vault', exact: true }).click();
   await expect(toggle).toHaveAttribute('aria-expanded', 'false');
 });

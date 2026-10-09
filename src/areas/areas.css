@@ -186,3 +186,6 @@
 .today-moved ul { list-style: none; margin: 0; padding: 0; }
 .today-moved li { padding: 12px 0; border-top: 1px solid var(--line); }
 .today-moved li:last-child { border-bottom: 1px solid var(--line); }
+/* Uni's "back to conversations" shows only where the rail is out of reach (short landscape). */
+.area-bar .area-conversations { display: none; }
+@media (max-height: 500px) { .area-bar .area-conversations { display: inline-flex; } }

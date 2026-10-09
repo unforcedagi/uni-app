@@ -15,7 +15,7 @@ const USER_AGENT = currentUserAgent();
 const PLATFORM = platformName(USER_AGENT);
 
 /** The Uni tab: Uni itself at `{kind:"areas"}` (path null), any area or project under it at `{kind:"area", path}`. One page component for all. */
-export default function AreasSurface({ path, rooms, actions, roomFor, onRoom, onOpenArea }: {
+export default function AreasSurface({ path, rooms, actions, roomFor, onRoom, onOpenArea, onConversations }: {
   path: string | null; rooms: RoomInfo[]; actions: AreaActions;
   /** The host's room view for a room id (its messages and composer), when that room is the one loaded. */
   roomFor: (id: string | null | undefined) => AreaRoom | null;
@@ -23,6 +23,7 @@ export default function AreasSurface({ path, rooms, actions, roomFor, onRoom, on
   onRoom: (id: string | null) => void;
   /** Open a node (path null: Uni) in this tab. */
   onOpenArea: (areaPath: string | null, name: string, room: string | null) => void;
+  onConversations: () => void;
 }) {
   const { data, error, loading } = useAreas();
   const version = useAppVersion();
@@ -63,6 +64,6 @@ export default function AreasSurface({ path, rooms, actions, roomFor, onRoom, on
     : isRoot && !kids.length && !error ? <p className="empty">{loading ? "Loading areas…" : "No areas yet. Tag a note `area` at Areas/<Name>."}</p> : null;
   const today = data?.today;
   return <AreaView key={node.id} area={node} entry={data?.briefs[node.path] ?? null} now={now} channel={nodeRoom} onChannel={setPicked} mode={mode} roomName={roomName} actions={actions}
-    room={roomFor(nodeRoom)} onBack={isRoot ? null : () => (up ? open(up) : toUni())} backLabel={up?.name ?? "Uni"}
+    room={roomFor(nodeRoom)} onConversations={onConversations} onBack={isRoot ? null : () => (up ? open(up) : toUni())} backLabel={up?.name ?? "Uni"}
     crumbs={crumbs} lead={lead} kids={cards} freshAt={isRoot ? (today ? today.generatedAt ?? today.updatedAt : null) : undefined} />;
 }
