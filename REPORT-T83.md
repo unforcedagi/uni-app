@@ -31,3 +31,14 @@ Branch `feat/life-os` on top of eed701c. Committed, not pushed. `src-tauri/gen/s
 - The zoom is a grow/fade with a rect flip; it was verified for existence, length and finiteness, not by eye on a real Daylight or phone.
 - At 1200 px wide the side chat leaves the map about 750 px, still the wide layout; below 560 px stage width it is the phone layout (count line in the centre, items below).
 - Breadcrumb spacing before the current crumb ("›Techne") is pre-existing and unchanged.
+
+## Polish
+
+- Tightened phone stages: parent/leaf centres sit higher, and stages with one or two children are shorter. Up to three Needs-you items appear directly below the phone disc, each on one line with ellipsis and the full text in its title. Their space is reserved during arm placement. Freshness remains visible on phones.
+- The header action reads “Open room”, with the full room name in its title and accessible name. Breadcrumb separators have explicit spacing. Voice attachment labels strip the leading `Error: ` for display while preserving the stored error.
+- Ring placement checks bounds as well as collisions and returns no partial ring when it cannot fit every child. The stage then shows compact rows beneath the centre, grows to contain them, and omits connecting lines/tips. A separate measurement element keeps the grown height from feeding back into the base layout.
+- Zoom intent and mount history live in a ref owned by the app view instance, passed through AreasSurface; they survive node navigation without sharing state between app instances. Per-area need counts are restored in arm accessible names.
+- Removed the swallowed freshness assertion; reduced motion explicitly requires zero map animations. Phone browser assertions also check the parent/centre gap, list clearance and unclipped room button.
+- Validation: `npx tsc --noEmit` clean; `npm test` passed (360 named `ok` checks, including 209 node-map checks). Layout coverage includes 1–16 children at 358×560, 358×400, 750×700 and 1000×800, with and without parents, checking every child is present, in bounds and free of overlaps. A dense all-needs case verifies the growing fallback and reserved phone list.
+- Areas config: full run **286 passed, 4 failed, 8 skipped**; all four failures were the two old count-less arm-name assertions on phone and desktop. Updated those expectations and reran `--last-failed`: **4 passed**, yielding **290 passing tests, 8 skipped**, with no unresolved failures. Final focused node-view browser run: **13 passed, 1 skipped**. Rail config: **18 passed**.
+- Regenerated all **18 T-83 screenshots** (three nodes × three sizes × colour/grayscale). Inspected the complete contact sheet and phone images in colour and grayscale; tightened the composition again after the first inspection and confirmed the final phone layout.

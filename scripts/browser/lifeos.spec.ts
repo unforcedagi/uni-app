@@ -24,6 +24,8 @@ test.describe('Today', () => {
     expect(names).toEqual(['Techne', 'Unforced Development', 'Atlas', 'Expression', 'Relationships', 'Sadhana']);
     await expect(areaCard(page, 'Techne')).toHaveAttribute('data-mark', 'needs');
     await expect(areaCard(page, 'Unforced Development')).toHaveAttribute('data-mark', 'needs');
+    await expect(areaCard(page, 'Techne')).toHaveAccessibleName('Techne, 2 need you');
+    await expect(areaCard(page, 'Unforced Development')).toHaveAccessibleName('Unforced Development, 1 needs you');
     await expect(areaCard(page, 'Sadhana')).toHaveAttribute('data-mark', 'quiet');
     const d = async (n: string) => (await areaCard(page, n).boundingBox())!.width;
     expect(await d('Sadhana')).toBeLessThan(await d('Techne'));
@@ -311,7 +313,7 @@ test.describe('Uni is home, areas are a tree', () => {
     await expect(page.getByRole('group', { name: 'Map of Uni' })).toBeVisible();
     await expect(page.locator('.today-moved')).toContainText('coop papers signed');
     await expect(page.locator('.brief-fresh span')).toHaveText('updated 2h ago');
-    await expect(areaCard(page, 'Techne')).toHaveAttribute('aria-label', 'Techne, needs you');
+    await expect(areaCard(page, 'Techne')).toHaveAttribute('aria-label', 'Techne, 2 need you');
     // the Uni chat is the room of this page
     await openSheet(page);
     await expect(composer(page, 'Uni')).toBeVisible();
@@ -332,7 +334,7 @@ test.describe('Uni is home, areas are a tree', () => {
     await expect(crumbs(page)).toContainText('Uni');
     await expect(crumbs(page).locator('.here')).toHaveText(/Techne/);
     await expect(page.locator('.node-arm')).toHaveCount(1);
-    await expect(areaCard(page, 'COhere 2026')).toHaveAttribute('aria-label', 'COhere 2026, needs you');
+    await expect(areaCard(page, 'COhere 2026')).toHaveAttribute('aria-label', 'COhere 2026, 1 needs you');
     // #cohere belongs to the child now: no chip for it on Techne
     await expect(page.locator('.room-chips')).toHaveCount(0);
     await openSheet(page);

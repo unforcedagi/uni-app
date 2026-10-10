@@ -1,10 +1,10 @@
-// T-83: the node view's pure core — status marks, arm layout for 1..8 children, the slot registry fallback.
+// T-83: the node view's pure core — status marks, arm layout for 1..16 children, the slot registry fallback.
 // Run: node --experimental-strip-types scripts/nodeMap.test.ts
 import assert from "node:assert/strict";
 import { parseBrief } from "../src/areas/briefCore.ts";
 import { parseArea, parseProject } from "../src/areas/areasCore.ts";
 import { buildTree } from "../src/areas/treeCore.ts";
-import { aliveOf, centreLines, NO_ALIVE, armLayout, boxHitsCircle, circleBox, circlesTouch, labelWidth, markOf, metrics, overlaps, rolledMark, slotFor, tipLayout, type ArmIn, type Box } from "../src/areas/nodeMap.ts";
+import { aliveOf, centreLines, NO_ALIVE, stageLayout, armLayout, boxHitsCircle, circleBox, circlesTouch, labelWidth, markOf, metrics, overlaps, rolledMark, slotFor, tipLayout, type ArmIn, type Box } from "../src/areas/nodeMap.ts";
 
 let failed = 0;
 function check(name: string, fn: () => void) {
@@ -32,16 +32,16 @@ check("rolled mark: an arm shows what waits at its tip; briefs match by path onl
 });
 
 const NAMES = ["Techne", "Unforced Development", "Sadhana", "Atlas", "Relationships", "Expression", "Health and Home", "Money"];
-const items = (n: number): ArmIn[] => Array.from({ length: n }, (_, i) => ({ name: NAMES[i], mark: (["needs", "moving", "quiet"] as const)[i % 3], background: i >= 3 }));
+const items = (n: number): ArmIn[] => Array.from({ length: n }, (_, i) => ({ name: NAMES[i % NAMES.length], mark: (["needs", "moving", "quiet"] as const)[i % 3], background: i >= 3 }));
 
 function boxes(n: number, w: number, h: number, hasParent: boolean) {
-  const m = metrics(w, h), list = items(n), arms = armLayout(list, m, hasParent);
-  const core = { x: m.cx, y: m.cy, d: m.core }, chip = m.chip, stage: Box = { x: 0, y: 0, w, h };
+  const list = items(n), { m, arms } = stageLayout(list, metrics(w, h, false, hasParent), hasParent);
+  const core = { x: m.cx, y: m.cy, d: m.core }, chip = m.chip, stage: Box = { x: 0, y: 0, w, h: m.h };
   return { m, arms, core, chip, stage };
 }
 
-for (const [w, h, label] of [[358, 560, "390 px phone"], [820, 640, "portrait"], [1200, 680, "desktop"], [756, 560, "few children, portrait"], [358, 480, "few children, phone"]] as const) {
-  for (let n = 1; n <= (label.startsWith("few") ? 2 : 8); n++) for (const hasParent of [false, true]) {
+for (const [w, h, label] of [[358, 400, "short phone"], [750, 700, "medium"], [1000, 800, "wide"], [358, 560, "390 px phone"], [820, 640, "portrait"], [1200, 680, "desktop"], [756, 560, "few children, portrait"], [358, 480, "few children, phone"]] as const) {
+  for (let n = 1; n <= (label.startsWith("few") ? 2 : 16); n++) for (const hasParent of [false, true]) {
     check(`layout ${label}: ${n} children${hasParent ? " under a parent" : ""} — no overlap, inside the stage`, () => {
       const { m, arms, core, chip, stage } = boxes(n, w, h, hasParent);
       assert.equal(arms.length, n);
@@ -62,6 +62,26 @@ for (const [w, h, label] of [[358, 560, "390 px phone"], [820, 640, "portrait"],
     });
   }
 }
+
+check("crowded rings fall back to bounded rows; phone needs stay clear", () => {
+  for (const [w, h] of [[358, 560], [358, 400], [750, 700], [1000, 800]]) {
+    const list: ArmIn[] = Array.from({ length: 16 }, () => ({ name: "A long child name", mark: "needs", background: false }));
+    const base = metrics(w, h);
+    assert.equal(armLayout(list, base, true).length, 0);
+    const { m, arms, compact } = stageLayout(list, base, true, 3);
+    assert.ok(compact);
+    assert.equal(arms.length, 16);
+    assert.ok(m.h > h);
+    const needs: Box = { x: w * .22, y: m.cy + m.core / 2 + 12, w: w * .56, h: 57 };
+    arms.forEach((a, i) => {
+      for (const b of [circleBox(a.x, a.y, a.d), a.label]) {
+        assert.ok(b.x >= 0 && b.y >= 0 && b.x + b.w <= w && b.y + b.h <= m.h);
+        if (m.narrow) assert.ok(!overlaps(b, needs));
+        for (const other of arms.slice(i + 1)) for (const ob of [circleBox(other.x, other.y, other.d), other.label]) assert.ok(!overlaps(b, ob));
+      }
+    });
+  }
+});
 
 check("a leaf's larger centre clears the parent chip and stays inside the stage", () => {
   for (const [w, h] of [[358, 400], [756, 470], [1076, 470]]) {

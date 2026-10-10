@@ -26,10 +26,10 @@ test.describe('node view', () => {
       await expect(core(page).locator('.node-alive li').first()).toContainText('Needs you');
       await expect(core(page).locator('.node-alive li').first()).toContainText('Send the Q4 invoice');
     } else await expect(core(page).locator('.node-count')).toHaveText(/need/);
-    await expect(core(page)).toContainText(/updated \d+h ago/).catch(() => {}); // freshness shows in the centre where it fits
+    await expect(core(page)).toContainText(/updated \d+h ago/);
     // status encoded by ring style, name and a text label: Techne has needs, a project below it rolls up
     await expect(areaCard(page, 'Techne')).toHaveAttribute('data-mark', 'needs');
-    await expect(areaCard(page, 'Techne')).toHaveAttribute('aria-label', 'Techne, needs you');
+    await expect(areaCard(page, 'Techne')).toHaveAttribute('aria-label', 'Techne, 2 need you');
     await expect(areaCard(page, 'Sadhana')).toHaveAttribute('data-mark', 'quiet');
     await openSheet(page);
     await expect(composer(page, 'Uni')).toBeVisible();
@@ -41,6 +41,26 @@ test.describe('node view', () => {
     await expect(page.getByRole('heading', { name: 'Techne', level: 1 })).toBeVisible();
     await expect(page.locator('.node-chip')).toHaveAccessibleName('Zoom out to Uni');
     if (isDesktop(page)) await expect(core(page).locator('.node-alive')).toContainText('Reply to Benjamin about the grant');
+    else {
+      await expect(page.getByRole('list', { name: 'Needs you here' })).toContainText('Reply to Benjamin about the grant');
+      await expect(page.getByRole('list', { name: 'Needs you here' }).locator('li')).toHaveCount(2);
+      await expect(page.locator('.area-zoom')).toHaveText('Open room');
+      const geometry = await page.evaluate(() => {
+        const core = document.querySelector('.node-core')!.getBoundingClientRect();
+        const chip = document.querySelector('.node-chip')!.getBoundingClientRect();
+        const needs = document.querySelector('.node-phone-needs')!.getBoundingClientRect();
+        const arms = [...document.querySelectorAll('.node-arm, .node-label')].map((e) => e.getBoundingClientRect());
+        const button = document.querySelector('.area-zoom')!;
+        return { gap: core.top - chip.bottom, listBelow: needs.top > core.bottom,
+          clear: arms.every((a) => a.right <= needs.left || a.left >= needs.right || a.bottom <= needs.top || a.top >= needs.bottom),
+          buttonFits: button.scrollWidth <= button.clientWidth };
+      });
+      expect(geometry.gap).toBeGreaterThan(0);
+      expect(geometry.gap).toBeLessThan(50);
+      expect(geometry.listBelow).toBe(true);
+      expect(geometry.clear).toBe(true);
+      expect(geometry.buttonFits).toBe(true);
+    }
     await openSheet(page);
     await expect(composer(page, 'Techne')).toBeVisible();
     await closeSheet(page);
@@ -90,7 +110,8 @@ test.describe('node view', () => {
       expect(await infinite(page)).toEqual([]);
       // the zoom's own animations (the map and its parts) end within 350 ms; the chat's own message rise is older and finite
       const ends = await page.evaluate(() => document.getAnimations().filter((a) => (a.effect as KeyframeEffect).target?.closest?.('.node-stage')).map((a) => a.effect!.getComputedTiming().endTime as number));
-      expect(ends.length).toBeGreaterThan(reducedMotion === 'reduce' ? -1 : 0);
+      if (reducedMotion === 'reduce') expect(ends).toEqual([]);
+      else expect(ends.length).toBeGreaterThan(0);
       for (const e of ends) expect(e).toBeLessThanOrEqual(350);
       await expect(page.getByRole('heading', { name: 'Techne', level: 1 })).toBeVisible();
       await page.waitForTimeout(450);
