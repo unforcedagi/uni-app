@@ -44,6 +44,11 @@ test.beforeEach(async ({ page }) => {
           case 'journal_config': return { hub: 'test' };
           case 'refresh': return { total_items: 0, channel_errors: {}, truncated_channels: [] };
           case 'media_upload':
+            if (sessionStorage.getItem('connectFailures')) {
+              const remaining = Number(sessionStorage.getItem('connectFailures'));
+              sessionStorage.setItem('connectFailures', String(remaining - 1));
+              if (remaining > 0) throw new Error('upload failed: error sending request: connect');
+            }
             if (w.holdUpload) await new Promise<void>(resolve => { w.finishUpload = resolve; });
             if (w.failUpload) throw new Error('upload rejected');
             return { url: 'https://example.invalid/test.txt', mime: 'text/plain', name: 'test.txt', size: 4 };
@@ -418,7 +423,7 @@ for (const failure of ['Upload', 'Send']) {
     await page.getByRole('textbox', { name: 'Message Test room' }).fill('draft');
     await page.evaluate(failure => { (window as any)[`fail${failure}`] = true; }, failure);
     await recordClip(page);
-    await expect(page.locator('.compose-file')).toContainText('Failed');
+    await expect(page.locator('.compose-file')).toContainText('Not sent');
     await expect(page.getByRole('button', { name: 'Send message', exact: true })).toBeEnabled();
     await expect(page.locator('p.error').last()).toContainText('Voice message failed');
     await page.evaluate(failure => { (window as any)[`fail${failure}`] = false; }, failure);
@@ -517,16 +522,14 @@ test('Relay accepted local ingestion error clears clip without Retry or another 
   expect(await page.evaluate(() => sessionStorage.getItem('voicePostCount'))).toBe('1');
 });
 
-test('Failed voice survives reload with Retry and same signed event', async ({ page }) => {
+test('Failed voice retries after reload with same signed event', async ({ page }) => {
   await page.evaluate(() => { (window as any).failSend = true; });
   await recordClip(page);
   await expect(page.locator('.compose-file-retry')).toBeVisible();
   const event = (await voicePosts(page))[0].args.signedEvent;
   await expect(page.locator('.voice-status')).toHaveText('Voice message failed');
   await page.reload();
-  await expect(page.locator('.compose-file-retry')).toBeVisible();
-  expect(await page.evaluate(() => sessionStorage.getItem('voicePostCount'))).toBe('1');
-  await page.locator('.compose-file-retry').click();
+  await expect(page.locator('.voice-status')).toHaveText('Voice message sent');
   await expect(page.locator('.compose-file')).toHaveCount(0);
   expect((await voicePosts(page))[0].args.signedEvent).toBe(event);
   await page.reload();
@@ -640,7 +643,7 @@ test('Signed event storage failure blocks publish; Retry saves the same event', 
   await storageFault(page, 'signed-put');
   await recordClip(page);
   await expect(page.locator('.compose-file-retry')).toBeVisible();
-  await expect(page.locator('.compose-file')).toContainText('save the voice note safely');
+  await expect(page.locator('p.error').last()).toContainText('save the voice note safely');
   expect(await voicePosts(page)).toHaveLength(0);
   const prepares = await page.evaluate(() => (window as any).calls.filter((c: any) => c.cmd === 'prepare_voice_message').length);
   await page.evaluate(() => { (window as any).storageFault = null; });
@@ -712,4 +715,46 @@ test('Restored signed event already in local messages is removed without publish
   expect(await voicePosts(page)).toHaveLength(0);
   expect(await page.evaluate(() => (window as any).calls.filter((c: any) => c.cmd === 'prepare_voice_message'))).toHaveLength(0);
   await expect(page.locator('.compose-file')).toHaveCount(0);
+});
+
+
+test('T81 failed voice survives reload and online retries exactly once', async ({ page }) => {
+  await page.evaluate(() => sessionStorage.setItem('connectFailures', '2'));
+  await recordClip(page);
+  await expect(page.locator('.compose-file')).toContainText('Not sent — will retry');
+  await expect(page.locator('p.error').last()).toContainText("Can't reach Buzz. Is Tailscale on?");
+  await page.reload();
+  await expect(page.locator('.compose-file')).toContainText('Not sent — will retry');
+  await expect.poll(() => page.evaluate(() => sessionStorage.getItem('connectFailures'))).toBe('0');
+  await page.evaluate(() => { window.dispatchEvent(new Event('online')); window.dispatchEvent(new Event('online')); });
+  await expect(page.locator('.compose-file')).toHaveCount(0);
+  expect(await page.evaluate(() => sessionStorage.getItem('voicePostCount'))).toBe('1');
+});
+
+
+test('T81 voice backoff and foreground retries keep one job per clip', async ({ page }) => {
+  await page.clock.install({ time: new Date('2026-10-09T12:00:00Z') });
+  await page.clock.pauseAt(new Date('2026-10-09T12:00:01Z'));
+  await page.evaluate(() => { (window as any).failUpload = true; });
+  await recordClip(page);
+  await expect(page.locator('.compose-file')).toContainText('Not sent');
+  const uploads = () => page.evaluate(() => (window as any).calls.filter((c: any) => c.cmd === 'media_upload').length);
+  expect(await uploads()).toBe(1);
+  await expect(page.locator('.voice-status')).toHaveText('Voice message failed');
+  for (const [index, delay] of [15000, 30000, 60000, 120000, 300000, 300000].entries()) {
+    await page.clock.fastForward(delay - 1);
+    expect(await uploads()).toBe(index + 1);
+    await page.clock.fastForward(1);
+    await expect.poll(uploads).toBe(index + 2);
+    await expect(page.locator('.voice-status')).toHaveText('Voice message failed');
+  }
+  await page.evaluate(() => {
+    (window as any).failUpload = false;
+    document.dispatchEvent(new Event('visibilitychange'));
+    window.dispatchEvent(new Event('online'));
+  });
+  await expect(page.locator('.compose-file')).toHaveCount(0);
+  expect(await page.evaluate(() => sessionStorage.getItem('voicePostCount'))).toBe('1');
+  await page.clock.fastForward(300000);
+  expect(await uploads()).toBe(8);
 });
