@@ -1,3 +1,5 @@
+import { netError } from "./netError";
+import { voiceRetryDelay } from "./voiceRetry";
 import { VoiceOutbox, relayAccepted } from "./voiceOutbox";
 import { SettingsIcon, UniIcon, JournalIcon, StarIcon, RoomsIcon, AreasIcon } from "./Icons";
 import { forgetAreas } from "./areas/useAreas";
@@ -271,6 +273,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const voiceQueue = useRef(Promise.resolve());
   const voiceCreated = useRef(0);
   const voiceJobs = useRef(new Set<string>());
+  const voiceRetryTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const voiceRetryAttempts = useRef(new Map<string, number>());
   const [voiceStatus, setVoiceStatus] = useState("");
   const [voiceStorageWarning, setVoiceStorageWarning] = useState("");
   const voiceOutbox = useRef(new VoiceOutbox(() => setVoiceStorageWarning("Voice storage unavailable. Recordings are kept only until this app closes.")));
@@ -281,10 +285,10 @@ function Conversations({ onForget }: { onForget: () => void }) {
       const clips = records.filter(clip => clip.owner === owner && clip.relay === relay && clip.state !== "delivered");
       for (const clip of clips) {
         voiceCreated.current = Math.max(voiceCreated.current, clip.created);
-        const item: PendingFile = { ...clip, file: new File([clip.file], clip.filename, { type: clip.mime }), state: clip.state === "error" ? "error" : "uploading", preview: null };
+        const item: PendingFile = { ...clip, error: clip.error ? netError(clip.error) : undefined, file: new File([clip.file], clip.filename, { type: clip.mime }), state: clip.state === "error" ? "error" : "uploading", preview: null };
         changePending(clip.key, items => items.some(x => x.id === clip.id) ? items : [...items, item]);
       }
-      for (const clip of clips) if (clip.state !== "error") queueVoice(clip.key, clip.id);
+      for (const clip of clips) if (voiceMounted.current) queueVoice(clip.key, clip.id);
     }).catch(e => setError(String(e)));
   }, []);
   const activeScope = useRef<string | null>(null);
@@ -292,8 +296,20 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const voiceMounted = useRef(true);
   useEffect(() => {
     voiceMounted.current = true;
+    const retry = () => {
+      for (const [key, files] of pendingStore.current) {
+        for (const clip of files) if (clip.voice && clip.state === "error") queueVoice(key, clip.id);
+      }
+    };
+    const visible = () => { if (document.visibilityState === "visible") retry(); };
+    window.addEventListener("online", retry);
+    document.addEventListener("visibilitychange", visible);
     return () => {
       voiceMounted.current = false;
+      window.removeEventListener("online", retry);
+      document.removeEventListener("visibilitychange", visible);
+      for (const timer of voiceRetryTimers.current.values()) clearTimeout(timer);
+      voiceRetryTimers.current.clear();
       for (const files of pendingStore.current.values()) for (const item of files) if (item.preview) URL.revokeObjectURL(item.preview);
     };
   }, []);
@@ -924,6 +940,9 @@ function Conversations({ onForget }: { onForget: () => void }) {
     if (saved === "failed") throw new Error("Couldn’t save the voice note safely — Retry");
   }
   function removeFile(key: string, id: string) {
+    clearTimeout(voiceRetryTimers.current.get(id));
+    voiceRetryTimers.current.delete(id);
+    voiceRetryAttempts.current.delete(id);
     void voiceOutbox.current.remove(id);
     changePending(key, (items) => {
       const item = items.find((x) => x.id === id);
@@ -961,9 +980,11 @@ function Conversations({ onForget }: { onForget: () => void }) {
     if (voiceJobs.current.has(id)) return;
     const clip = pendingStore.current.get(key)?.find((x) => x.id === id);
     if (!clip?.voice) return;
+    clearTimeout(voiceRetryTimers.current.get(id));
+    voiceRetryTimers.current.delete(id);
     voiceJobs.current.add(id);
     setError(null);
-    changePending(key, (items) => items.map((x) => x.id === id ? { ...x, state: "uploading", error: undefined } : x));
+    changePending(key, (items) => items.map((x) => x.id === id ? { ...x, state: "uploading" } : x));
     setVoiceStatus("Sending voice message…");
     voiceQueue.current = voiceQueue.current.then(async () => {
       let outcome = "Voice message removed";
@@ -1005,12 +1026,20 @@ function Conversations({ onForget }: { onForget: () => void }) {
         void loadRooms().catch(() => {});
       } catch (e) {
         if (!voiceMounted.current) return;
-        changePending(key, (items) => items.map((x) => x.id === id ? { ...x, state: "error", error: String(e) } : x));
+        changePending(key, (items) => items.map((x) => x.id === id ? { ...x, state: "error", error: netError(e) } : x));
         await persistVoice(key, id).catch(() => {});
-        setError(`Voice message failed: ${String(e)}. Retry or remove the recording.`);
+        setError(`Voice message failed: ${netError(e)}`);
         outcome = "Voice message failed";
       } finally {
         voiceJobs.current.delete(id);
+        if (voiceMounted.current && pendingStore.current.get(key)?.some(x => x.id === id && x.state === "error")) {
+          const attempt = voiceRetryAttempts.current.get(id) ?? 0;
+          voiceRetryAttempts.current.set(id, attempt + 1);
+          voiceRetryTimers.current.set(id, setTimeout(() => {
+            voiceRetryTimers.current.delete(id);
+            if (voiceMounted.current) queueVoice(key, id);
+          }, voiceRetryDelay(attempt)));
+        }
         if (voiceMounted.current) setVoiceStatus(voiceJobs.current.size ? "Sending voice message…" : outcome);
       }
     });
@@ -1288,7 +1317,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
           {pending.length > 0 && <div className="compose-files" aria-label="Attachments">
             {pending.map((item) => <div className={`compose-file ${item.state}`} key={item.id}>
               {item.preview ? <img src={item.preview} alt="" /> : <span className="compose-file-icon" aria-hidden="true">{item.file.type === "application/pdf" || item.file.name.toLowerCase().endsWith(".pdf") ? "📄" : attachmentKind({ url: item.file.name, mime: item.file.type }) === "audio" ? "♪" : "📎"}</span>}
-              <span className="compose-file-info" onClick={() => item.error && setError(`${item.file.name}: ${item.error}`)} title={item.error ?? undefined}><strong>{item.file.name}</strong><small>{formatSize(item.file.size)} · {item.state === "ready" ? "Ready" : item.state === "uploading" ? "Uploading…" : `Failed: ${item.error}`}</small>{item.state === "uploading" && <progress aria-label={`Uploading ${item.file.name}`} />}</span>
+              <span className="compose-file-info" onClick={() => item.error && setError(`${item.file.name}: ${item.error}`)} title={item.error ?? undefined}><strong>{item.file.name}</strong><small>{formatSize(item.file.size)} · {item.voice && item.error ? "Not sent — will retry" : item.state === "ready" ? "Ready" : item.state === "uploading" ? "Uploading…" : `Failed: ${item.error}`}</small>{item.state === "uploading" && <progress aria-label={`Uploading ${item.file.name}`} />}</span>
               {item.state === "error" && <button className="compose-file-retry" onClick={() => item.voice ? queueVoice(keyFor(currentRoom.id, root), item.id) : void uploadFile(keyFor(currentRoom.id, root), item.id, item.file)} aria-label={`Retry upload ${item.file.name}`}>Retry</button>}
               <button className="compose-file-remove" disabled={sending} onClick={() => removeFile(keyFor(currentRoom.id, root), item.id)} aria-label={`Remove ${item.file.name}`}>×</button>
             </div>)}
