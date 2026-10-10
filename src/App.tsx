@@ -5,6 +5,7 @@ import { SettingsIcon, UniIcon, JournalIcon, StarIcon, RoomsIcon, AreasIcon } fr
 import { forgetAreas } from "./areas/useAreas";
 import { clearProjectBodies } from "./areas/projectBody";
 import AreasSurface from "./areas/AreasSurface";
+import type { ZoomState } from "./areas/NodeStage";
 import { UNI_CHANNEL } from "./areas/treeCore";
 import AreaSelfTest from "./interface/selftest/SelfTest";
 import { appendDraft } from "./areas/composeDraft";
@@ -152,6 +153,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     readLastSurface(localStorage) === "journal" ? { kind: "journal", title: "Journal" } : { kind: "areas", title: "Uni" },
     "new", () => crypto.randomUUID()));
   const tabsRef = useRef<Tabs>(tabs);
+  const nodeZoom = useRef<ZoomState>({ intent: null, everMounted: false });
   const areaBack = useRef<(() => void) | null>(null);
   const setAreaBack = useCallback((back: (() => void) | null) => { areaBack.current = back; }, []);
   const tabsReady = useRef(false);
@@ -1317,7 +1319,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
           {pending.length > 0 && <div className="compose-files" aria-label="Attachments">
             {pending.map((item) => <div className={`compose-file ${item.state}`} key={item.id}>
               {item.preview ? <img src={item.preview} alt="" /> : <span className="compose-file-icon" aria-hidden="true">{item.file.type === "application/pdf" || item.file.name.toLowerCase().endsWith(".pdf") ? "📄" : attachmentKind({ url: item.file.name, mime: item.file.type }) === "audio" ? "♪" : "📎"}</span>}
-              <span className="compose-file-info" onClick={() => item.error && setError(`${item.file.name}: ${item.voice ? netError(item.error) : item.error}`)} title={item.error ?? undefined}><strong>{item.file.name}</strong><small>{formatSize(item.file.size)} · {item.voice && item.error ? (isNetworkError(item.error) ? "Not sent — will retry" : `Not sent · ${item.error}`) : item.state === "ready" ? "Ready" : item.state === "uploading" ? "Uploading…" : `Failed: ${item.error}`}</small>{item.state === "uploading" && <progress aria-label={`Uploading ${item.file.name}`} />}</span>
+              <span className="compose-file-info" onClick={() => item.error && setError(`${item.file.name}: ${item.voice ? netError(item.error) : item.error}`)} title={item.error ?? undefined}><strong>{item.file.name}</strong><small>{formatSize(item.file.size)} · {item.voice && item.error ? (isNetworkError(item.error) ? "Not sent — will retry" : `Not sent · ${item.error.replace(/^Error:\s*/, "")}`) : item.state === "ready" ? "Ready" : item.state === "uploading" ? "Uploading…" : `Failed: ${item.error}`}</small>{item.state === "uploading" && <progress aria-label={`Uploading ${item.file.name}`} />}</span>
               {item.state === "error" && <button className="compose-file-retry" onClick={() => item.voice ? queueVoice(keyFor(currentRoom.id, root), item.id) : void uploadFile(keyFor(currentRoom.id, root), item.id, item.file)} aria-label={`Retry upload ${item.file.name}`}>Retry</button>}
               <button className="compose-file-remove" disabled={sending} onClick={() => removeFile(keyFor(currentRoom.id, root), item.id)} aria-label={`Remove ${item.file.name}`}>×</button>
             </div>)}
@@ -1605,7 +1607,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       {journalTab && <div className="journal-tab-content" hidden={!journalOpen} onFocusCapture={(e) => { if (e.target instanceof HTMLTextAreaElement) requestAnimationFrame(() => setComposerFocused(true)); }} onBlurCapture={(e) => { const journal = e.currentTarget; requestAnimationFrame(() => setComposerFocused(journal.contains(document.activeElement) && document.activeElement instanceof HTMLTextAreaElement)); }}><Journal focus={journalFocus} onFocus={() => setJournalFocus((v) => !v)} rooms={rooms} uniRoomId={findUniRoom(rooms)?.id ?? null} onShare={shareEntry} onBack={() => setPanel("rooms")} onRecordingChange={(on, elapsed, stop) => { journalRecordingRef.current = on; setJournalRecording(on ? { elapsed, stop } : null); }} /></div>}
       {active?.kind === "vault" && active.vault ? <VaultBrowser key={active.vault} vault={active.vault} onBack={() => setPanel("rooms")} onOpen={(note) => openTarget({ kind: "note", note: { hub: null, vault: active.vault!, ref: note.id }, title: note.path || note.id }, "new")} onCreate={(folder) => requestCreate(active.vault!, folder)} onSearch={(prefix) => { setSearchQuery(""); setSearchScope({ vault: active.vault!, prefix }); setSearchOpen(true); setSidebarVisible(true); }} />
       : journalOpen ? null
-      : areasOpen && active ? <AreasSurface onBackChange={setAreaBack} identity={identity} key={`${active.id}:${identity ?? ""}`} onConversations={() => setPanel("rooms")} path={active.kind === "area" ? active.path ?? null : null} rooms={rooms} actions={areaActions} roomFor={areaRoomFor} onRoom={syncAreaRoom}
+      : areasOpen && active ? <AreasSurface zoom={nodeZoom} onBackChange={setAreaBack} identity={identity} key={`${active.id}:${identity ?? ""}`} onConversations={() => setPanel("rooms")} path={active.kind === "area" ? active.path ?? null : null} rooms={rooms} actions={areaActions} roomFor={areaRoomFor} onRoom={syncAreaRoom}
           onOpenArea={(path, name, room) => openTarget(path === null ? { kind: "areas", title: "Uni", ...(room ? { channel: room } : {}) } : { kind: "area", path, title: name, ...(room ? { channel: room } : {}) }, "replace")} />
       : currentRoom ? <>
         <header className="conversation-header">

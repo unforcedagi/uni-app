@@ -173,7 +173,7 @@ export default function AreaView({ area, entry, now, channel, onChannel, mode, r
     <strong className={`area-bar-title ${framed ? "sr-only" : ""}`}>{name}</strong>
     {framed && mode === "approved-code" && <span className="area-mode-chip" title="On this device apps can reach the network through WebRTC, so this app is only as safe as its code. You approved this version.">Approved code</span>}
     <span className="area-bar-controls">
-      {channel && <button className="pairing-secondary area-zoom" onClick={() => actions.openRoom(channel)} aria-label={`Open #${roomName(channel)} as a full room`}>Open #{roomName(channel)}</button>}
+      {channel && <button className="pairing-secondary area-zoom" onClick={() => actions.openRoom(channel)} title={`Open #${roomName(channel)} as a full room`} aria-label={`Open #${roomName(channel)} as a full room`}>Open room</button>}
       {framed && <>
         <button type="button" className="pairing-secondary area-menu-toggle" aria-label="App controls" aria-haspopup="true" aria-expanded={menu} onClick={() => setMenu((v) => !v)}>⋯</button>
         <span className={`area-app-actions ${menu ? "open" : ""}`}>

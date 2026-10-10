@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { rootNeeds, TodaySections, type RoomInfo } from "./TodayView";
-import NodeStage, { type StageKid } from "./NodeStage";
+import NodeStage, { type ZoomState, type StageKid } from "./NodeStage";
 import { AreaSlot } from "./areaSlots";
 import { aliveOf, rolledMark, type Alive } from "./nodeMap";
 import { refreshDraft, updatedLabel } from "./briefCore";
@@ -20,7 +20,8 @@ const USER_AGENT = currentUserAgent();
 const PLATFORM = platformName(USER_AGENT);
 
 /** The Uni tab: Uni itself at `{kind:"areas"}` (path null), any area or project under it at `{kind:"area", path}`. One page component for all. */
-export default function AreasSurface({ identity, path, rooms, actions, roomFor, onRoom, onOpenArea, onConversations, onBackChange }: {
+export default function AreasSurface({ zoom, identity, path, rooms, actions, roomFor, onRoom, onOpenArea, onConversations, onBackChange }: {
+  zoom: React.RefObject<ZoomState>;
   identity: string | null;
   path: string | null; rooms: RoomInfo[]; actions: AreaActions;
   /** The host's room view for a room id (its messages and composer), when that room is the one loaded. */
@@ -80,8 +81,8 @@ export default function AreasSurface({ identity, path, rooms, actions, roomFor, 
   const crumbs = isRoot ? undefined : <nav className="crumbs" aria-label="Where you are">
     <button type="button" className="crumb" onClick={toUni}>Uni</button>
     {(tree ? trail(tree, node.path) : [node]).map((n, i, all) => i === all.length - 1
-      ? <span key={n.path} className="crumb here" aria-current="page"><span aria-hidden="true">›</span> {n.name}</span>
-      : <span key={n.path}><span aria-hidden="true">›</span> <button type="button" className="crumb" onClick={() => open(n)}>{n.name}</button></span>)}
+      ? <span key={n.path} className="crumb here" aria-current="page"><span className="crumb-separator" aria-hidden="true">›</span> {n.name}</span>
+      : <span key={n.path}><span className="crumb-separator" aria-hidden="true">›</span> <button type="button" className="crumb" onClick={() => open(n)}>{n.name}</button></span>)}
   </nav>;
   const lead = isRoot ? <>
     {error && <p className="note-error" role="alert">Couldn't load areas: {error}</p>}
@@ -92,12 +93,12 @@ export default function AreasSurface({ identity, path, rooms, actions, roomFor, 
   const empty = isRoot && !kids.length && !error ? <p className="empty">{signingIn ? "Signing in…" : loading ? "Loading areas…" : "No areas yet. Tag a note `area` at Areas/<Name>."}</p> : null;
   const today = data?.today;
   const entry = data?.briefs[node.path] ?? null;
-  const stageKids: StageKid[] = data && tree ? kids.map((k) => ({ node: k, mark: rolledMark(tree, data.briefs, k.path), tips: childrenOf(tree, k.path).map((c) => c.name) })) : [];
+  const stageKids: StageKid[] = data && tree ? kids.map((k) => ({ node: k, needs: data.briefs[k.path]?.brief.needsYou.length ?? 0, mark: rolledMark(tree, data.briefs, k.path), tips: childrenOf(tree, k.path).map((c) => c.name) })) : [];
   const alive: Alive = isRoot
     ? { has: !!data && (!!data.today || Object.keys(data.briefs).length > 0), needs: rootNeeds(data, now).map((n) => n.text), moving: (today?.today.moved ?? []).map((m) => m.text) }
     : aliveOf(entry);
   const freshIso = isRoot ? (today ? today.generatedAt ?? today.updatedAt : null) : entry ? entry.generatedAt ?? entry.updatedAt : null;
-  const stage = <NodeStage node={node} kids={stageKids} parent={isRoot ? null : up ?? root} alive={data ? alive : { has: false, needs: [], moving: [] }} pending={data ? null : signingIn ? "Signing in…" : loading ? "Opening…" : null}
+  const stage = <NodeStage zoom={zoom} node={node} kids={stageKids} parent={isRoot ? null : up ?? root} alive={data ? alive : { has: false, needs: [], moving: [] }} pending={data ? null : signingIn ? "Signing in…" : loading ? "Opening…" : null}
     fresh={updatedLabel(freshIso, now)} kindLabel={isRoot ? new Date(now).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" }) : node.kind === "project" ? "Project" : "Area"} count={{ needs: alive.needs.length, moving: alive.moving.length }}
     onOpen={open} onUp={back} />;
   return <AreaView key={node.id} area={body !== null ? { ...node, body } : node} projectError={bodyError} projectLoading={body === null && !bodyError} entry={data?.briefs[node.path] ?? null} now={now} channel={nodeRoom} onChannel={setPicked} mode={mode} roomName={roomName} actions={actions}

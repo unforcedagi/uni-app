@@ -53,12 +53,12 @@ export type Metrics = { w: number; h: number; narrow: boolean; cx: number; cy: n
 export const NARROW = 560;
 const NODE_D: Record<Mark, [number, number]> = { needs: [100, 58], moving: [88, 52], quiet: [76, 46] };
 
-export function metrics(w: number, h: number, leaf = false): Metrics {
+export function metrics(w: number, h: number, leaf = false, hasParent = false): Metrics {
   const narrow = w < NARROW;
   // A leaf has no arms to make room for: its centre may be larger (it carries the whole brief).
   const core = leaf ? (narrow ? 196 : 300) : narrow ? 148 : Math.round(Math.max(220, Math.min(320, h * 0.42, w * 0.32)));
   return {
-    w, h, narrow, cx: w / 2, cy: h / 2 + (narrow ? 18 : 10), core,
+    w, h, narrow, cx: w / 2, cy: narrow ? Math.min(h / 2 + 18, leaf || hasParent ? 180 : 210) : h / 2 + 10, core,
     labelW: narrow ? 96 : 190, labelH: narrow ? 32 : 24,
     chip: { x: w / 2, y: narrow ? 36 : 46, d: narrow ? 56 : 66 },
   };
@@ -71,10 +71,10 @@ export const labelWidth = (name: string, m: Pick<Metrics, "narrow" | "labelW">) 
 
 /**
  * Positions for the arms of one node. They sit on an ellipse round the centre; when the node has a parent (a chip above the
- * centre) the top is left open. Background children are smaller and one step further out. On a phone five or more children
- * alternate between two radii so neighbours never touch.
+ * centre) the top is left open. Background children are smaller. Returns an empty array if the whole ring cannot fit;
+ * stageLayout then uses rows below the map rather than placing overlapping children.
  */
-export function armLayout(items: readonly ArmIn[], m: Metrics, hasParent: boolean): Arm[] {
+export function armLayout(items: readonly ArmIn[], m: Metrics, hasParent: boolean, reserved?: Box): Arm[] {
   const n = items.length;
   const dMax = Math.max(0, ...items.map((a) => diameter(a, m.narrow)));
   const top = hasParent ? (m.narrow ? 100 : 108) : 16, bottom = m.narrow ? 14 : 20;
@@ -97,6 +97,8 @@ export function armLayout(items: readonly ArmIn[], m: Metrics, hasParent: boolea
       return { x, y, d, angle, side, label: { x: x - lw / 2, y: side === "t" ? y - d / 2 - 4 - m.labelH : y + d / 2 + 4, w: lw, h: m.labelH } };
     };
     const clear = (c: Arm) => {
+      if ([circleBox(c.x, c.y, c.d), c.label].some((b) => b.x < 0 || b.y < 0 || b.x + b.w > m.w || b.y + b.h > m.h)) return false;
+      if (reserved && (overlaps(c.label, reserved, 4) || boxHitsCircle(reserved, { x: c.x, y: c.y, d: c.d }))) return false;
       const me: Circle = { x: c.x, y: c.y, d: c.d };
       if (circlesTouch(me, core, m.narrow ? 8 : 22) || boxHitsCircle(c.label, core)) return false;
       if (chip && (circlesTouch(me, chip, 4) || boxHitsCircle(c.label, chip))) return false;
@@ -107,9 +109,27 @@ export function armLayout(items: readonly ArmIn[], m: Metrics, hasParent: boolea
     const sides: ("t" | "b")[] = autoSide === "t" ? ["t", "b"] : ["b", "t"];
     let pick: Arm | null = null;
     for (let f = start; f >= 0.4 && !pick; f -= 0.04) for (const side of sides) { const c = at(f, side); if (clear(c)) { pick = c; break; } }
-    placed.push(pick ?? at(start, autoSide));
+    if (!pick) return;
+    placed.push(pick);
   });
-  return placed;
+  return placed.length === n ? placed : [];
+}
+
+/** If the ring cannot fit every child, use rows below the map and grow the stage to contain them. */
+export function stageLayout(items: readonly ArmIn[], base: Metrics, hasParent: boolean, needsLines = 0): { m: Metrics; arms: Arm[]; compact: boolean } {
+  const reserved = base.narrow && needsLines ? { x: base.w * .22, y: base.cy + base.core / 2 + 12, w: base.w * .56, h: needsLines * 19 } : undefined;
+  const ring = armLayout(items, base, hasParent, reserved);
+  if (ring.length === items.length) return { m: base, arms: ring, compact: false };
+  const columns = Math.max(1, Math.min(items.length, Math.floor(base.w / (base.labelW + 16))));
+  const cellW = base.w / columns;
+  const rowH = Math.max(...items.map((a) => diameter(a, base.narrow))) + base.labelH + 18;
+  const start = base.cy + base.core / 2 + (base.narrow ? 100 : 28);
+  const arms = items.map((a, i): Arm => {
+    const d = diameter(a, base.narrow), x = cellW * (i % columns + .5), y = start + Math.floor(i / columns) * rowH + d / 2;
+    const lw = labelWidth(a.name, base);
+    return { x, y, d, angle: 90, side: "b", label: { x: x - lw / 2, y: y + d / 2 + 4, w: lw, h: base.labelH } };
+  });
+  return { m: { ...base, h: Math.max(base.h, start + Math.ceil(items.length / columns) * rowH) }, arms, compact: true };
 }
 
 /** Small marks at the tips of an arm (a node's own children, up to three), wide stages only. */
