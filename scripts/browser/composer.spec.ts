@@ -50,7 +50,7 @@ test.beforeEach(async ({ page }) => {
               if (remaining > 0) throw new Error('upload failed: error sending request: connect');
             }
             if (w.holdUpload) await new Promise<void>(resolve => { w.finishUpload = resolve; });
-            if (w.failUpload) throw new Error('upload rejected');
+            if (w.failUpload) throw new Error(w.uploadError ?? 'upload rejected');
             return { url: 'https://example.invalid/test.txt', mime: 'text/plain', name: 'test.txt', size: 4 };
           case 'voice_transcribe': throw new Error('Chat must not transcribe');
           case 'prepare_voice_message': return JSON.stringify({ id: args.channel + ':' + args.replyTo + ':' + crypto.randomUUID() });
@@ -58,7 +58,7 @@ test.beforeEach(async ({ page }) => {
             sessionStorage.setItem('voicePostCount', String(Number(sessionStorage.getItem('voicePostCount') ?? 0) + 1));
             if (w.acceptedError) throw { accepted: true, eventId: 'audio-message-ref', message: 'store: no such table: items' };
             if (w.holdSend) await new Promise(resolve => { w.finishSend = resolve; });
-            if (w.failSend) throw new Error('relay rejected');
+            if (w.failSend) throw new Error(w.sendError ?? 'relay rejected');
             return { ref: 'audio-message-ref', channel: args.channel };
           default: return null;
         }
@@ -523,7 +523,7 @@ test('Relay accepted local ingestion error clears clip without Retry or another 
 });
 
 test('Failed voice retries after reload with same signed event', async ({ page }) => {
-  await page.evaluate(() => { (window as any).failSend = true; });
+  await page.evaluate(() => { (window as any).failSend = true; (window as any).sendError = "connection reset"; });
   await recordClip(page);
   await expect(page.locator('.compose-file-retry')).toBeVisible();
   const event = (await voicePosts(page))[0].args.signedEvent;
@@ -719,6 +719,7 @@ test('Restored signed event already in local messages is removed without publish
 
 
 test('T81 failed voice survives reload and online retries exactly once', async ({ page }) => {
+  await page.clock.install();
   await page.evaluate(() => sessionStorage.setItem('connectFailures', '2'));
   await recordClip(page);
   await expect(page.locator('.compose-file')).toContainText('Not sent — will retry');
@@ -727,6 +728,7 @@ test('T81 failed voice survives reload and online retries exactly once', async (
   await expect(page.locator('.compose-file')).toContainText('Not sent — will retry');
   await expect.poll(() => page.evaluate(() => sessionStorage.getItem('connectFailures'))).toBe('0');
   await page.evaluate(() => { window.dispatchEvent(new Event('online')); window.dispatchEvent(new Event('online')); });
+  await page.clock.fastForward(15000);
   await expect(page.locator('.compose-file')).toHaveCount(0);
   expect(await page.evaluate(() => sessionStorage.getItem('voicePostCount'))).toBe('1');
 });
@@ -735,13 +737,15 @@ test('T81 failed voice survives reload and online retries exactly once', async (
 test('T81 voice backoff and foreground retries keep one job per clip', async ({ page }) => {
   await page.clock.install({ time: new Date('2026-10-09T12:00:00Z') });
   await page.clock.pauseAt(new Date('2026-10-09T12:00:01Z'));
-  await page.evaluate(() => { (window as any).failUpload = true; });
+  await page.evaluate(() => { (window as any).failUpload = true; (window as any).uploadError = 'connection reset'; });
   await recordClip(page);
-  await expect(page.locator('.compose-file')).toContainText('Not sent');
+  await expect(page.locator('.compose-file-info')).toHaveAttribute('title', 'Error: connection reset');
   const uploads = () => page.evaluate(() => (window as any).calls.filter((c: any) => c.cmd === 'media_upload').length);
   expect(await uploads()).toBe(1);
   await expect(page.locator('.voice-status')).toHaveText('Voice message failed');
   for (const [index, delay] of [15000, 30000, 60000, 120000, 300000, 300000].entries()) {
+    await page.evaluate(() => { window.dispatchEvent(new Event('online')); document.dispatchEvent(new Event('visibilitychange')); });
+    expect(await uploads()).toBe(index + 1);
     await page.clock.fastForward(delay - 1);
     expect(await uploads()).toBe(index + 1);
     await page.clock.fastForward(1);
@@ -753,8 +757,29 @@ test('T81 voice backoff and foreground retries keep one job per clip', async ({ 
     document.dispatchEvent(new Event('visibilitychange'));
     window.dispatchEvent(new Event('online'));
   });
+  await page.clock.fastForward(300000);
   await expect(page.locator('.compose-file')).toHaveCount(0);
   expect(await page.evaluate(() => sessionStorage.getItem('voicePostCount'))).toBe('1');
   await page.clock.fastForward(300000);
   expect(await uploads()).toBe(8);
 });
+
+for (const failure of ['upload rejected: 401 Unauthorized', 'Recording exceeds 25 MB.', 'storage failure']) {
+  test(`T81 permanent error stops automatic retries: ${failure}`, async ({ page }) => {
+    await page.clock.install();
+    await page.evaluate(error => { (window as any).failUpload = true; (window as any).uploadError = error; }, failure);
+    await recordClip(page);
+    await expect(page.locator('.voice-status')).toHaveText('Voice message failed');
+    await expect(page.locator('.compose-file')).toContainText('Not sent');
+    await expect(page.locator('.compose-file')).not.toContainText('will retry');
+    await expect(page.locator('.compose-file-info')).toHaveAttribute('title', `Error: ${failure}`);
+    await page.evaluate(() => { window.dispatchEvent(new Event('online')); document.dispatchEvent(new Event('visibilitychange')); });
+    await page.clock.fastForward(600000);
+    expect(await page.evaluate(() => (window as any).calls.filter((c: any) => c.cmd === 'media_upload').length)).toBe(1);
+    await page.reload();
+    await expect(page.locator('.compose-file-retry')).toBeVisible();
+    expect(await page.evaluate(() => (window as any).calls.filter((c: any) => c.cmd === 'media_upload').length)).toBe(0);
+    await page.locator('.compose-file-retry').click();
+    await expect(page.locator('.compose-file')).toHaveCount(0);
+  });
+}

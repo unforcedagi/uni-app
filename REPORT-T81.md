@@ -54,3 +54,38 @@ confirmed delivery and use a paused clock. Browser configs build into the same
 
 No Docker operations or unrelated process termination. Existing
 `src-tauri/gen/schemas` changes are excluded from the commit. No push.
+
+## T-81 fix1 — permanent errors and retry accounting (2026-10-09)
+
+Automatic retries (timers, online/visible events, and restored failed clips) now
+require a network-class error. Permanent failures retain manual Retry and Remove.
+The classifier matches only the seven specified whole phrases; bare `connect`,
+`dns`, and `disconnect` remain unchanged. Raw errors stay in the outbox and tray
+`title`; network failures use the friendly error dialog and “Not sent — will
+retry”, while permanent failures show “Not sent” with their real error text.
+
+Online/visible events leave a pending backoff timer alone. Only a failed network
+attempt advances its counter. Successful delivery calls `removeFile`, which
+clears both the timer and `voiceRetryAttempts` entry; the backoff browser test also
+checks that no upload occurs after delivery.
+
+Test-first evidence: the unit regression failed before implementation on
+`failed to lookup address`; the browser regression run against the unchanged
+build failed all eight mobile/desktop cases (raw network error and permanent
+failure labels). Updated browser mocks distinguish permanent and network errors.
+Permanent-error cases check timer/online/visible suppression, persistence across
+reload, raw error visibility, and successful manual Retry. The paused-clock test
+checks repeated foreground/online events before every backoff deadline.
+
+Validation:
+
+- `npx tsc --noEmit` — passed.
+- `npm test` — passed.
+- `COMPOSER_TEST_PORT=54621 npx playwright test scripts/browser/composer.spec.ts`
+  — **88 passed, 2 intentionally skipped**, mobile and desktop.
+- `git diff --check` — passed.
+
+Composer config now accepts `COMPOSER_TEST_PORT`, retaining 1420 as its default.
+The test server used a free port with strict port binding. No Docker operations
+or unrelated process termination; generated Tauri schemas remain excluded.
+Committed locally; no push.

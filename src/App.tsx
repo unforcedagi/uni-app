@@ -1,4 +1,4 @@
-import { netError } from "./netError";
+import { isNetworkError, netError } from "./netError";
 import { voiceRetryDelay } from "./voiceRetry";
 import { VoiceOutbox, relayAccepted } from "./voiceOutbox";
 import { SettingsIcon, UniIcon, JournalIcon, StarIcon, RoomsIcon, AreasIcon } from "./Icons";
@@ -285,10 +285,10 @@ function Conversations({ onForget }: { onForget: () => void }) {
       const clips = records.filter(clip => clip.owner === owner && clip.relay === relay && clip.state !== "delivered");
       for (const clip of clips) {
         voiceCreated.current = Math.max(voiceCreated.current, clip.created);
-        const item: PendingFile = { ...clip, error: clip.error ? netError(clip.error) : undefined, file: new File([clip.file], clip.filename, { type: clip.mime }), state: clip.state === "error" ? "error" : "uploading", preview: null };
+        const item: PendingFile = { ...clip, error: clip.error, file: new File([clip.file], clip.filename, { type: clip.mime }), state: clip.state === "error" ? "error" : "uploading", preview: null };
         changePending(clip.key, items => items.some(x => x.id === clip.id) ? items : [...items, item]);
       }
-      for (const clip of clips) if (voiceMounted.current) queueVoice(clip.key, clip.id);
+      for (const clip of clips) if (voiceMounted.current && (clip.state !== "error" || isNetworkError(clip.error))) queueVoice(clip.key, clip.id);
     }).catch(e => setError(String(e)));
   }, []);
   const activeScope = useRef<string | null>(null);
@@ -298,7 +298,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     voiceMounted.current = true;
     const retry = () => {
       for (const [key, files] of pendingStore.current) {
-        for (const clip of files) if (clip.voice && clip.state === "error") queueVoice(key, clip.id);
+        for (const clip of files) if (clip.voice && clip.state === "error" && isNetworkError(clip.error) && !voiceRetryTimers.current.has(clip.id)) queueVoice(key, clip.id);
       }
     };
     const visible = () => { if (document.visibilityState === "visible") retry(); };
@@ -1020,19 +1020,19 @@ function Conversations({ onForget }: { onForget: () => void }) {
         await persistVoice(key, id, true).catch(() => {});
         await voiceOutbox.current.remove(id);
         if (!voiceMounted.current) return;
-        removeFile(key, id);
+        removeFile(key, id); // Clears the retry timer and attempt count after delivery.
         setTick((n) => n + 1);
         outcome = "Voice message sent";
         void loadRooms().catch(() => {});
       } catch (e) {
         if (!voiceMounted.current) return;
-        changePending(key, (items) => items.map((x) => x.id === id ? { ...x, state: "error", error: netError(e) } : x));
+        changePending(key, (items) => items.map((x) => x.id === id ? { ...x, state: "error", error: String(e) } : x));
         await persistVoice(key, id).catch(() => {});
         setError(`Voice message failed: ${netError(e)}`);
         outcome = "Voice message failed";
       } finally {
         voiceJobs.current.delete(id);
-        if (voiceMounted.current && pendingStore.current.get(key)?.some(x => x.id === id && x.state === "error")) {
+        if (voiceMounted.current && pendingStore.current.get(key)?.some(x => x.id === id && x.state === "error" && isNetworkError(x.error))) {
           const attempt = voiceRetryAttempts.current.get(id) ?? 0;
           voiceRetryAttempts.current.set(id, attempt + 1);
           voiceRetryTimers.current.set(id, setTimeout(() => {
@@ -1317,7 +1317,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
           {pending.length > 0 && <div className="compose-files" aria-label="Attachments">
             {pending.map((item) => <div className={`compose-file ${item.state}`} key={item.id}>
               {item.preview ? <img src={item.preview} alt="" /> : <span className="compose-file-icon" aria-hidden="true">{item.file.type === "application/pdf" || item.file.name.toLowerCase().endsWith(".pdf") ? "📄" : attachmentKind({ url: item.file.name, mime: item.file.type }) === "audio" ? "♪" : "📎"}</span>}
-              <span className="compose-file-info" onClick={() => item.error && setError(`${item.file.name}: ${item.error}`)} title={item.error ?? undefined}><strong>{item.file.name}</strong><small>{formatSize(item.file.size)} · {item.voice && item.error ? "Not sent — will retry" : item.state === "ready" ? "Ready" : item.state === "uploading" ? "Uploading…" : `Failed: ${item.error}`}</small>{item.state === "uploading" && <progress aria-label={`Uploading ${item.file.name}`} />}</span>
+              <span className="compose-file-info" onClick={() => item.error && setError(`${item.file.name}: ${item.voice ? netError(item.error) : item.error}`)} title={item.error ?? undefined}><strong>{item.file.name}</strong><small>{formatSize(item.file.size)} · {item.voice && item.error ? (isNetworkError(item.error) ? "Not sent — will retry" : `Not sent · ${item.error}`) : item.state === "ready" ? "Ready" : item.state === "uploading" ? "Uploading…" : `Failed: ${item.error}`}</small>{item.state === "uploading" && <progress aria-label={`Uploading ${item.file.name}`} />}</span>
               {item.state === "error" && <button className="compose-file-retry" onClick={() => item.voice ? queueVoice(keyFor(currentRoom.id, root), item.id) : void uploadFile(keyFor(currentRoom.id, root), item.id, item.file)} aria-label={`Retry upload ${item.file.name}`}>Retry</button>}
               <button className="compose-file-remove" disabled={sending} onClick={() => removeFile(keyFor(currentRoom.id, root), item.id)} aria-label={`Remove ${item.file.name}`}>×</button>
             </div>)}
