@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { ChildCards, dateLine, TodaySections, type RoomInfo } from "./TodayView";
+import { rootNeeds, TodaySections, type RoomInfo } from "./TodayView";
+import NodeStage, { type StageKid } from "./NodeStage";
+import { AreaSlot } from "./areaSlots";
+import { aliveOf, rolledMark, type Alive } from "./nodeMap";
+import { refreshDraft, updatedLabel } from "./briefCore";
 import AreaView, { type AreaActions } from "./AreaView";
 import type { AreaRoom } from "./AreaChat";
 import { currentUserAgent, gateMode, platformName } from "../interface/selftest/gate";
@@ -80,15 +84,23 @@ export default function AreasSurface({ identity, path, rooms, actions, roomFor, 
       : <span key={n.path}><span aria-hidden="true">›</span> <button type="button" className="crumb" onClick={() => open(n)}>{n.name}</button></span>)}
   </nav>;
   const lead = isRoot ? <>
-    <p className="today-date">{dateLine(now)}</p>
     {error && <p className="note-error" role="alert">Couldn't load areas: {error}</p>}
     <TodaySections data={data} now={now} onOpen={open} onNote={actions.openNote}
       onAsk={(name, text) => { const a = data?.areas.find((x) => x.name === name && x.kind === "area"); const ch = a ? pickRoom(a.rooms, null) : null; if (ch) actions.compose(ch, text); }} />
+    {data && !data.today && !Object.keys(data.briefs).length && uniRoom && <button type="button" className="suggestion-go brief-write" onClick={() => actions.compose(uniRoom, refreshDraft("Uni", ""))}>Ask Uni to write it</button>}
   </> : undefined;
-  const cards = data && kids.length ? <ChildCards nodes={kids} data={data} now={now} title={isRoot ? "Areas" : `Inside ${node.name}`} onOpen={open} />
-    : isRoot && !kids.length && !error ? <p className="empty">{signingIn ? "Signing in…" : loading ? "Loading areas…" : "No areas yet. Tag a note `area` at Areas/<Name>."}</p> : null;
+  const empty = isRoot && !kids.length && !error ? <p className="empty">{signingIn ? "Signing in…" : loading ? "Loading areas…" : "No areas yet. Tag a note `area` at Areas/<Name>."}</p> : null;
   const today = data?.today;
+  const entry = data?.briefs[node.path] ?? null;
+  const stageKids: StageKid[] = data && tree ? kids.map((k) => ({ node: k, mark: rolledMark(tree, data.briefs, k.path), tips: childrenOf(tree, k.path).map((c) => c.name) })) : [];
+  const alive: Alive = isRoot
+    ? { has: !!data && (!!data.today || Object.keys(data.briefs).length > 0), needs: rootNeeds(data, now).map((n) => n.text), moving: (today?.today.moved ?? []).map((m) => m.text) }
+    : aliveOf(entry);
+  const freshIso = isRoot ? (today ? today.generatedAt ?? today.updatedAt : null) : entry ? entry.generatedAt ?? entry.updatedAt : null;
+  const stage = <NodeStage node={node} kids={stageKids} parent={isRoot ? null : up ?? root} alive={data ? alive : { has: false, needs: [], moving: [] }} pending={data ? null : signingIn ? "Signing in…" : loading ? "Opening…" : null}
+    fresh={updatedLabel(freshIso, now)} kindLabel={isRoot ? new Date(now).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" }) : node.kind === "project" ? "Project" : "Area"} count={{ needs: alive.needs.length, moving: alive.moving.length }}
+    onOpen={open} onUp={back} />;
   return <AreaView key={node.id} area={body !== null ? { ...node, body } : node} projectError={bodyError} projectLoading={body === null && !bodyError} entry={data?.briefs[node.path] ?? null} now={now} channel={nodeRoom} onChannel={setPicked} mode={mode} roomName={roomName} actions={actions}
     room={roomFor(nodeRoom)} onConversations={onConversations} onBack={back} backLabel={up?.name ?? "Uni"}
-    crumbs={crumbs} dataStatus={status} lead={lead} kids={cards} freshAt={isRoot ? (today ? today.generatedAt ?? today.updatedAt : null) : undefined} />;
+    crumbs={crumbs} stage={stage} slot={!isRoot && node.kind === "area" ? <AreaSlot node={node} /> : null} dataStatus={status} lead={lead} kids={empty} freshAt={isRoot ? (today ? today.generatedAt ?? today.updatedAt : null) : undefined} />;
 }

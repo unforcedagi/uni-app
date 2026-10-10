@@ -12,13 +12,12 @@ const calls = (page: Page, cmd: string) => page.evaluate((c) => (window as any).
 test.describe('seed apps and navigation', () => {
   test.beforeEach(async ({ page }) => bootAreas(page, 'seed'));
 
-  test('home (Today) lists areas foreground first, background collapsed', async ({ page }, info) => {
+  test('home is the node map: foreground areas first, background ones smaller', async ({ page }, info) => {
     await openAreas(page);
-    const names = await page.locator('.area-card strong').allTextContents();
+    const names = await page.locator('.node-arm').evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset.name));
     expect(names).toEqual(['Techne', 'Unforced Development', 'Atlas', 'Expression', 'Relationships', 'Sanctum']);
-    await expect(card(page, 'Techne').locator('.area-mark')).toHaveText(/Foreground/);
-    await expect(card(page, 'Techne')).toContainText('The craft of building');
-    await expect(card(page, 'Relationships')).toBeHidden();
+    await expect(card(page, 'Techne')).toHaveAttribute('class', /foreground/);
+    await expect(card(page, 'Relationships')).toHaveAttribute('class', /background/);
     await expect(page.getByRole('button', { name: 'Refresh areas' })).toHaveCount(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await mkdir('shots/t74', { recursive: true });
@@ -454,28 +453,6 @@ const contrastOf = (page: Page, sel: string) => page.evaluate(([s]) => {
 test.describe('design', () => {
   test.beforeEach(async ({ page }) => bootAreas(page, 'seed'));
 
-  test('foreground cards: a straight inset rule, text aligned with background cards, elevated warm tint', async ({ page }) => {
-    await openAreas(page);
-    await page.locator('.today-background > summary').click();
-    const fg = card(page, 'Techne'), bg = card(page, 'Atlas');
-    const edge = await fg.evaluate((el) => getComputedStyle(el).borderLeftWidth);
-    expect(edge, 'no bending border-left').toBe('1px');
-    const rule = await fg.evaluate((el) => { const s = getComputedStyle(el, '::before'); return { radius: s.borderTopLeftRadius, width: s.width, left: s.left, content: s.content }; });
-    expect(rule.radius).toBe('0px'); expect(rule.width).toBe('3px'); expect(rule.content).not.toBe('none');
-    const x = async (c: ReturnType<typeof card>) => c.locator('.area-mark').evaluate((el) => el.getBoundingClientRect().left - (el.closest('.area-card') as HTMLElement).getBoundingClientRect().left);
-    expect(await x(fg), 'text columns align across card kinds').toBe(await x(bg));
-    const tint = await fg.evaluate((el) => getComputedStyle(el).backgroundColor);
-    const plain = await bg.evaluate((el) => getComputedStyle(el).backgroundColor);
-    expect(tint).not.toBe(plain);
-  });
-
-  test('the Now line clamps to three lines instead of cutting mid-word with an ellipsis on one line', async ({ page }) => {
-    await openAreas(page);
-    const style = await card(page, 'Techne').locator('.area-now').evaluate((el) => { const s = getComputedStyle(el); return { clamp: s.webkitLineClamp, ws: s.whiteSpace }; });
-    expect(style.clamp).toBe('3');
-    expect(style.ws).not.toBe('nowrap');
-  });
-
   test('the active rail item is a pill behind the icon, not a square tile', async ({ page }) => {
     await openAreas(page);
     const active = rail(page).getByRole('button', { name: 'Uni', exact: true });
@@ -524,11 +501,10 @@ test.describe('design', () => {
 
   test.describe('dark', () => {
     test.use({ colorScheme: 'dark' });
-    test('tiny caps and muted text are at least 4.5:1; the date line is readable', async ({ page }) => {
+    test('tiny caps and muted text on the map are at least 4.5:1', async ({ page }) => {
       await bootAreas(page, 'seed', { briefs: true });
       await openAreas(page);
-      await page.locator('.today-background > summary').click();
-      for (const sel of ['.area-card.background .area-mark', '.area-card.foreground .area-mark', '.today-date', '.brief-fresh', '.area-card.background .area-foot', '.area-card.foreground .area-fresh']) {
+      for (const sel of ['.node-cap', '.node-fresh', '.node-label.quiet', '.brief-fresh']) {
         const { fg, bg } = await contrastOf(page, sel);
         expect(ratio(fg, bg), sel).toBeGreaterThanOrEqual(4.5);
       }

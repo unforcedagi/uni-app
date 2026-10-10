@@ -389,15 +389,14 @@ Two proposals wait on a scope decision.
 const railOf = (page: Page) => page.getByRole('navigation', { name: 'Main navigation' });
 /** Uni's home page (the app opens there; the rail's Uni button comes back to it). */
 export const openAreasHome = async (page: Page) => { await railOf(page).getByRole('button', { name: 'Uni', exact: true }).click(); await expect(page.getByRole('heading', { name: 'Uni', level: 1 })).toBeVisible(); await expect(page.locator('.area-bar-title')).toHaveText('Uni'); };
-export const areaCard = (page: Page, name: string) => page.locator('.area-card', { has: page.locator('strong', { hasText: new RegExp(`^${name}$`) }) });
+/** An arm of the node map (T-83): the button that zooms into that child. */
+export const areaCard = (page: Page, name: string) => page.locator(`.node-arm[data-name="${name}"]`);
 /**
- * Opens an area from Today (expanding the background list when it must) and, when it has a sealed app, its App tab.
+ * Opens an area from the map and, when it has a sealed app, its App tab.
  * `app: false` stays on the Brief; `true` requires the App tab; the default presses it when it shows up.
  */
 export async function openAreaPage(page: Page, name: string, opts: { app?: boolean } = {}) {
-  const card = areaCard(page, name);
-  if (!(await card.isVisible())) await page.locator('.today-background > summary').click();
-  await card.click();
+  await areaCard(page, name).click();
   await expect(page.locator('.area-bar-title')).toHaveText(name);
   if (opts.app === false) return;
   const tab = page.getByRole('tab', { name: 'App', exact: true });

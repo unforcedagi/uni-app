@@ -30,7 +30,7 @@ const SECTIONS: { key: Exclude<keyof Brief, "now" | "nowTokens" | "present">; ti
  * A node's page (the Uni root, an area or a project — one component): breadcrumb, title, freshness with Refresh, then the
  * Brief (or, for Uni, `lead`: Today), then `kids`, the next level down.
  */
-export default function BriefView({ area, entry, now, canAsk, onNote, onAsk, crumbs, lead, kids, freshAt, projectError, projectLoading }: {
+export default function BriefView({ area, entry, now, canAsk, onNote, onAsk, crumbs, stage, slot, lead, kids, freshAt, projectError, projectLoading }: {
   projectError?: string | null;
   projectLoading?: boolean;
   area: Area; entry: AreaBrief | null; now: number; canAsk: boolean;
@@ -38,6 +38,8 @@ export default function BriefView({ area, entry, now, canAsk, onNote, onAsk, cru
   /** Put text in the node room's composer; never sends. */
   onAsk: (text: string) => void;
   crumbs?: ReactNode;
+  /** The node's map (its title is the page's h1): drawn after the breadcrumb, then the area slot, then the detail below. */
+  stage?: ReactNode; slot?: ReactNode;
   /** Replaces the Brief (the Uni root shows Today here). */
   lead?: ReactNode;
   kids?: ReactNode;
@@ -47,9 +49,10 @@ export default function BriefView({ area, entry, now, canAsk, onNote, onAsk, cru
   const brief = entry?.brief;
   const fresh = updatedLabel(freshAt !== undefined ? freshAt : entry ? entry.generatedAt ?? entry.updatedAt : null, now);
   const root = area.path === "";
-  return <div className="area-scroll"><article className="area-default area-brief">
+  return <div className="area-scroll"><article className={`area-default area-brief ${stage ? "node-view" : ""}`}>
     {crumbs}
-    <h1 className="note-title">{area.title}</h1>
+    {stage ?? <h1 className="note-title">{area.title}</h1>}
+    {slot}
     <p className="brief-fresh">{fresh && <span>{fresh}</span>}{canAsk && <button type="button" className="pairing-secondary brief-refresh" onClick={() => onAsk(refreshDraft(area.name, root ? "" : area.path))}>Refresh</button>}</p>
     {area.kind === "project" && <section aria-label="Project purpose">
       {area.purpose && <p className="brief-purpose">{area.purpose}</p>}

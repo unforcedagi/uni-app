@@ -13,25 +13,22 @@ const openSheet = async (page: Page) => { if (!isDesktop(page) && await page.loc
 test.describe('Today', () => {
   test.beforeEach(async ({ page }) => bootAreas(page, 'seed', { briefs: true }));
 
-  test('needs-you first (ranked), then foreground cards with Now line, count and freshness; background collapsed', async ({ page }, info) => {
+  test('needs-you first (ranked); the map shows foreground areas, then background ones smaller, each with a status mark', async ({ page }, info) => {
     await openAreasHome(page);
     const needs = page.locator('.today-needs li');
     await expect(needs).toHaveCount(2);
     // ranked: the overdue invoice before the grant due tomorrow
     await expect(needs.nth(0)).toContainText('Send the Q4 invoice');
     await expect(needs.nth(1)).toContainText('Reply to Leonardo about the grant');
-    const names = await page.locator('.areas-grid').first().locator('.area-card strong').allTextContents();
-    expect(names).toEqual(['Techne', 'Unforced Development']);
-    const techne = areaCard(page, 'Techne');
-    await expect(techne).toContainText('The coop paperwork is signed.');
-    await expect(techne).toContainText('2 need you');
-    await expect(techne).toContainText('updated 3h ago');
-    await expect(areaCard(page, 'Unforced Development')).toContainText('1 needs you');
-    // background areas are collapsed until asked for
-    await expect(areaCard(page, 'Sanctum')).toBeHidden();
-    await page.locator('.today-background > summary').click();
-    await expect(areaCard(page, 'Sanctum')).toBeVisible();
-    await expect(areaCard(page, 'Sanctum')).toContainText('No brief yet');
+    const names = await page.locator('.node-arm').evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset.name));
+    expect(names).toEqual(['Techne', 'Unforced Development', 'Atlas', 'Expression', 'Relationships', 'Sanctum']);
+    await expect(areaCard(page, 'Techne')).toHaveAttribute('data-mark', 'needs');
+    await expect(areaCard(page, 'Unforced Development')).toHaveAttribute('data-mark', 'needs');
+    await expect(areaCard(page, 'Sanctum')).toHaveAttribute('data-mark', 'quiet');
+    const d = async (n: string) => (await areaCard(page, n).boundingBox())!.width;
+    expect(await d('Sanctum')).toBeLessThan(await d('Techne'));
+    // the centre carries the brief's freshness
+    await expect(page.locator('.node-core')).toContainText('updated 2h ago');
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await mkdir('shots/t80', { recursive: true });
     await page.screenshot({ path: `shots/t80/${info.project.name}-today.png` });
@@ -75,8 +72,12 @@ test.describe('Today with no briefs', () => {
     await bootAreas(page, 'seed');
     await openAreasHome(page);
     await expect(page.locator('.today-needs')).toContainText("Uni hasn't written Today yet.");
-    await expect(areaCard(page, 'Techne')).toContainText('The craft of building');
-    await expect(areaCard(page, 'Techne')).toContainText('No brief yet');
+    await expect(areaCard(page, 'Techne')).toHaveAttribute('data-mark', 'quiet');
+    await expect(page.locator('.node-core')).toContainText('No brief yet');
+    // the Ask-Uni action drafts in the Uni room and sends nothing
+    await page.getByRole('button', { name: 'Ask Uni to write it' }).click();
+    await expect(composer(page, 'Uni')).toHaveValue(/@Uni Please refresh Areas\/Today/);
+    expect(await calls(page, 'post_message')).toHaveLength(0);
   });
 });
 
@@ -91,13 +92,14 @@ test.describe('device cache', () => {
     await bootAreas(page, 'seed', { briefs: true, queryDelay: 1800, deviceCache: cached });
     await page.evaluate(() => { document.documentElement.dataset.t0 = String(performance.now()); });
     await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Uni', exact: true }).click();
-    await expect(areaCard(page, 'Techne')).toContainText('FROM THE DEVICE CACHE.', { timeout: 500 });
+    await expect(page.locator('.today-needs')).toContainText('cached need', { timeout: 500 });
+    await expect(areaCard(page, 'Techne')).toBeVisible();
     await expect(page.locator('.areas-status')).toContainText('Saved copy · refreshing');
     const timing = await page.evaluate(() => (window as any).__areasTiming);
     expect(timing.fromCache).toBe(true);
     expect(timing.cacheMs).toBeLessThan(500);
     // the network answers later and replaces it
-    await expect(areaCard(page, 'Techne')).toContainText('The coop paperwork is signed.', { timeout: 6000 });
+    await expect(page.locator('.today-needs')).toContainText('Send the Q4 invoice', { timeout: 6000 });
     await expect(areaCard(page, 'Unforced Development')).toBeVisible();
     const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('uni.areas.cache.v2') || 'null'));
     expect(saved.areas.map((a: any) => a.name)).toContain('Unforced Development');
@@ -107,7 +109,7 @@ test.describe('device cache', () => {
   test('a failed refresh keeps what the device remembered', async ({ page }) => {
     await bootAreas(page, 'seed', { queryFails: ['area'], deviceCache: cached });
     await openAreasHome(page);
-    await expect(areaCard(page, 'Techne')).toContainText('FROM THE DEVICE CACHE.');
+    await expect(page.locator('.today-needs')).toContainText('cached need');
     await expect(page.getByRole('alert')).toContainText("Couldn't load areas");
     await openAreaPage(page, 'Techne', { app: false });
     await expect(page.locator('.areas-status')).toContainText("couldn't refresh");
@@ -300,15 +302,16 @@ test.describe('Uni is home, areas are a tree', () => {
   test.beforeEach(async ({ page }) => bootAreas(page, 'seed', { briefs: true, tree: true }));
   const crumbs = (page: Page) => page.getByRole('navigation', { name: 'Where you are' });
 
-  test('the app opens to Uni: Needs you, Moved, the Uni chat, then the areas as cards', async ({ page }, info) => {
+  test('the app opens to Uni: Needs you, Moved, the Uni chat, and the areas as arms of the map', async ({ page }, info) => {
     await expect(page.getByRole('heading', { name: 'Uni', level: 1 })).toBeVisible();
     await expect(page.locator('.area-bar-title')).toHaveText('Uni');
     await expect(page.getByRole('button', { name: /^Back to/ })).toHaveCount(0);
     const order = await page.locator('.area-brief h2').allTextContents();
-    expect(order.slice(0, 3).map((t) => t.trim())).toEqual(['Needs you', 'Moved', 'Areas']);
+    expect(order.slice(0, 2).map((t) => t.trim())).toEqual(['Needs you', 'Moved']);
+    await expect(page.getByRole('group', { name: 'Map of Uni' })).toBeVisible();
     await expect(page.locator('.today-moved')).toContainText('coop papers signed');
     await expect(page.locator('.brief-fresh span')).toHaveText('updated 2h ago');
-    await expect(areaCard(page, 'Techne')).toContainText('1 inside');
+    await expect(areaCard(page, 'Techne')).toHaveAttribute('aria-label', 'Techne, needs you');
     // the Uni chat is the room of this page
     await openSheet(page);
     await expect(composer(page, 'Uni')).toBeVisible();
@@ -322,16 +325,14 @@ test.describe('Uni is home, areas are a tree', () => {
     await page.screenshot({ path: `shots/t80b/${info.project.name}-uni-home.png` });
   });
 
-  test('Techne shows the project as a card inside it, and its own room only', async ({ page }, info) => {
+  test('Techne shows the project as an arm inside it, and its own room only', async ({ page }, info) => {
     await openAreaPage(page, 'Techne', { app: false });
     await mkdir('shots/t80b', { recursive: true });
     await page.screenshot({ path: `shots/t80b/${info.project.name}-techne.png` });
     await expect(crumbs(page)).toContainText('Uni');
     await expect(crumbs(page).locator('.here')).toHaveText(/Techne/);
-    const inside = page.getByRole('region', { name: 'Inside Techne' });
-    await expect(inside.locator('.area-card strong')).toHaveText(['COhere 2026']);
-    await expect(inside.locator('.area-card')).toContainText('The festival purpose.');
-    await expect(inside.locator('.area-card')).toContainText('1 needs you');
+    await expect(page.locator('.node-arm')).toHaveCount(1);
+    await expect(areaCard(page, 'COhere 2026')).toHaveAttribute('aria-label', 'COhere 2026, needs you');
     // #cohere belongs to the child now: no chip for it on Techne
     await expect(page.locator('.room-chips')).toHaveCount(0);
     await openSheet(page);
@@ -447,17 +448,12 @@ test('path brief beats a newer metadata-only note; limit is visible', async ({ p
 for (const status of ['archived', 'done', 'dormant']) test(`area and project status ${status} controls cards`, async ({ page }) => {
   await bootAreas(page, 'seed', { tree: true, nodeStatuses: { 'a-sad': status, 'p-cohere': status } });
   await expect(areaCard(page, 'Techne')).toBeVisible();
-  if (status === 'dormant') {
-    await expect(areaCard(page, 'Sanctum')).toBeHidden();
-    await page.locator('.today-background > summary').click();
-    await expect(areaCard(page, 'Sanctum')).toBeVisible();
-  } else await expect(areaCard(page, 'Sanctum')).toHaveCount(0);
+  // dormant is not archived or done: background nodes stay on the map, smaller
+  if (status === 'dormant') await expect(areaCard(page, 'Sanctum')).toBeVisible();
+  else await expect(areaCard(page, 'Sanctum')).toHaveCount(0);
   await openAreaPage(page, 'Techne', { app: false });
-  if (status === 'dormant') {
-    await expect(areaCard(page, 'COhere 2026')).toBeHidden();
-    await page.locator('.today-background > summary').click();
-    await expect(areaCard(page, 'COhere 2026')).toBeVisible();
-  } else await expect(areaCard(page, 'COhere 2026')).toHaveCount(0);
+  if (status === 'dormant') await expect(areaCard(page, 'COhere 2026')).toBeVisible();
+  else await expect(areaCard(page, 'COhere 2026')).toHaveCount(0);
 });
 test('failed project refresh retains previous projects and stale marker', async ({ page }) => {
   await bootAreas(page, 'seed', { tree: true });
