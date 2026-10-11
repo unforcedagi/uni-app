@@ -17,7 +17,7 @@ const core = (page: Page) => page.locator('.node-core');
 const infinite = (page: Page) => page.evaluate(() => document.getAnimations().filter((a) => { const t = a.effect?.getComputedTiming(); return !t || t.iterations === Infinity || !Number.isFinite(t.endTime as number); }).map((a) => (a as CSSAnimation).animationName ?? a.constructor.name));
 
 test.describe('node view', () => {
-  test.beforeEach(async ({ page }) => bootAreas(page, 'seed', { briefs: true, tree: true }));
+  test.beforeEach(async ({ page }) => bootAreas(page, 'seed', { briefs: true, tree: true, pinned: true }));
 
   test('Uni at the centre: Needs you from the brief, areas as arms with status marks, the Uni room', async ({ page }) => {
     await expect(page.getByRole('heading', { name: 'Uni', level: 1 })).toBeVisible();

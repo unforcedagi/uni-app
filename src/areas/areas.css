@@ -97,6 +97,8 @@
 .area-bar-controls .area-zoom { max-width: 14em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .area-split.mode-sheet .area-main { padding-bottom: var(--peek); }
+/* Phone: the talk bar stays fully above the chat peek instead of half under it on first paint. */
+.area-split.mode-sheet .talk { position: sticky; bottom: calc(var(--peek) + 6px); z-index: 3; padding: 8px 0 2px; background: var(--bg); }
 .area-chat.sheet { position: absolute; left: 0; right: 0; bottom: 0; z-index: 6; height: min(82%, 720px); border-top: 1px solid var(--line); border-radius: 16px 16px 0 0; box-shadow: 0 -6px 24px rgba(0, 0, 0, .12); transform: translateY(calc(100% - var(--peek))); transition: transform .25s var(--ease); }
 .area-chat.sheet.open { transform: none; }
 .sheet-peek { all: unset; box-sizing: border-box; flex: none; height: var(--peek); width: 100%; display: flex; align-items: center; gap: 10px; padding: 8px 16px 0; cursor: pointer; touch-action: none; position: relative; color: var(--text); }

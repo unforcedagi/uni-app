@@ -397,6 +397,7 @@ impl VaultClient {
 
     /// One atomic compare-and-set on a metadata field (`from` must be the stored value). A stale `from` fails with
     /// a message containing `transition_conflict`; a value the tag's schema forbids with `schema_validation`.
+    /// Only `state` may be transitioned.
     pub async fn transition_note(
         &self,
         vault: &str,
@@ -406,8 +407,11 @@ impl VaultClient {
         to: Value,
     ) -> Result<Value> {
         check_vault(vault)?;
-        if id.trim().is_empty() || field.trim().is_empty() {
-            return Err(Error::Invalid("missing note id or field".into()));
+        if id.trim().is_empty() {
+            return Err(Error::Invalid("missing note id".into()));
+        }
+        if field != "state" {
+            return Err(Error::Invalid(format!("only `state` can be transitioned, not `{field}`")));
         }
         let v = self
             .call(
@@ -420,7 +424,8 @@ impl VaultClient {
         note_from(&v, id)
     }
 
-    /// Merge `metadata` into a note, guarded by the `updated_at` the caller last read.
+    /// Merge `metadata` into a note, guarded by the `updated_at` the caller last read. Only the `snoozed_until` key,
+    /// and only on notes tagged `task` or `decision` (checked against the stored note, not the caller's claim).
     pub async fn patch_metadata(
         &self,
         vault: &str,
@@ -431,6 +436,11 @@ impl VaultClient {
         check_vault(vault)?;
         if id.trim().is_empty() || if_updated_at.is_empty() || !metadata.is_object() {
             return Err(Error::Invalid("metadata patch needs an id, an object and if_updated_at".into()));
+        }
+        check_snooze_patch(&metadata)?;
+        let note = self.get_note(vault, id).await?;
+        if !has_task_tag(&note) {
+            return Err(Error::Invalid("snooze applies only to task and decision notes".into()));
         }
         let v = self
             .rpc(
@@ -892,6 +902,25 @@ pub fn valid_vault_name(v: &str) -> bool {
         && v.len() <= 64
         && v.chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+/// A snooze patch holds exactly one key, `snoozed_until`, a `YYYY-MM-DD` date or null (to clear).
+fn check_snooze_patch(metadata: &Value) -> Result<()> {
+    let obj = metadata.as_object().filter(|o| o.len() == 1 && o.contains_key("snoozed_until"));
+    let Some(obj) = obj else {
+        return Err(Error::Invalid("only `snoozed_until` can be patched".into()));
+    };
+    match &obj["snoozed_until"] {
+        Value::Null => Ok(()),
+        Value::String(d) if d.len() == 10 && d.bytes().enumerate().all(|(i, b)| if i == 4 || i == 7 { b == b'-' } else { b.is_ascii_digit() }) => Ok(()),
+        _ => Err(Error::Invalid("`snoozed_until` must be a YYYY-MM-DD date or null".into())),
+    }
+}
+
+fn has_task_tag(note: &Value) -> bool {
+    note["tags"]
+        .as_array()
+        .is_some_and(|t| t.iter().filter_map(Value::as_str).any(|t| matches!(t, "task" | "decision")))
 }
 
 /// The single note in a query-notes-by-id response, or the vault's error.
@@ -1379,6 +1408,11 @@ mod surface_tests {
                 json!({"id":"t1","path":"Tasks/T-1","updatedAt":"t2"}),
             ),
             (
+                "query-notes",
+                json!({"vault":"scope-test","id":"t1","include_links":true}),
+                json!({"notes":[{"id":"t1","path":"Tasks/T-1","tags":["task"]}]}),
+            ),
+            (
                 "update-note",
                 json!({"vault":"scope-test","id":"t1","include_content":false,"metadata":{"snoozed_until":"2026-10-11"},"if_updated_at":"t2"}),
                 json!({"id":"t1","path":"Tasks/T-1","updatedAt":"t3"}),
@@ -1399,6 +1433,42 @@ mod surface_tests {
             .patch_metadata("scope-test", "t1", json!({}), "")
             .await
             .is_err());
+        handle.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn transitions_and_patches_refuse_anything_but_state_and_snooze() {
+        crate::init_crypto();
+        // No scripted server calls: every one of these must be refused before a request is made.
+        let (client, handle) = server(vec![]);
+        for field in ["status", "tags", "node", ""] {
+            assert!(client.transition_note("scope-test", "t1", field, json!("a"), json!("b")).await.is_err(), "{field}");
+        }
+        for meta in [
+            json!({"state":"done"}),
+            json!({"snoozed_until":"2026-10-11","node":"x"}),
+            json!({"snoozed_until":"tomorrow"}),
+            json!({"snoozed_until":5}),
+            json!({}),
+        ] {
+            assert!(client.patch_metadata("scope-test", "t1", meta, "t1").await.is_err());
+        }
+        handle.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn snooze_is_refused_on_notes_that_are_not_tasks() {
+        crate::init_crypto();
+        let (client, handle) = server(vec![(
+            "query-notes",
+            json!({"vault":"scope-test","id":"j1","include_links":true}),
+            json!({"notes":[{"id":"j1","path":"Journal/x","tags":["journal"]}]}),
+        )]);
+        let err = client
+            .patch_metadata("scope-test", "j1", json!({"snoozed_until":"2026-10-11"}), "t1")
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("task and decision"));
         handle.join().unwrap();
     }
 

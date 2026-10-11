@@ -11,7 +11,7 @@ const composer = (page: Page, room: string) => page.getByRole('textbox', { name:
 const openSheet = async (page: Page) => { if (!isDesktop(page) && await page.locator('.area-chat.sheet:not(.open) .sheet-peek').count()) await page.locator('.sheet-peek').click(); };
 
 test.describe('Today', () => {
-  test.beforeEach(async ({ page }) => bootAreas(page, 'seed', { briefs: true }));
+  test.beforeEach(async ({ page }) => bootAreas(page, 'seed', { briefs: true, pinned: true }));
 
   test('needs-you first (ranked); the map shows foreground areas, then background ones smaller, each with a status mark', async ({ page }, info) => {
     await openAreasHome(page);
@@ -62,7 +62,7 @@ test.describe('Today', () => {
 
 test.describe('Today without a Today note', () => {
   test('without a Today note the needs come from the area briefs', async ({ page }) => {
-    await bootAreas(page, 'seed', { briefs: true, queryFails: ['area-today'] });
+    await bootAreas(page, 'seed', { briefs: true, pinned: true, queryFails: ['area-today'] });
     await openAreasHome(page);
     await expect(page.locator('.today-needs li')).toHaveCount(3);
     await expect(page.locator('.today-needs li').first()).toContainText('Send the Q4 invoice');

@@ -91,3 +91,20 @@ The `aggregate[group_by]=owner` request returned the same counts in all three ca
 - `npx tsc --noEmit`: clean. `npm test`: exit 0, 379 `ok` (tasks.test.ts: 18 checks incl. six new). `cargo test -p uni-core`: 83 + 22 + 1 passed (new `subtree_queries_send_the_fixed_near_shapes`); `cargo check -p uni-app-tauri`: clean.
 - Rail config: 18 passed. Areas config (`tasks.spec.ts` alone): 25 passed, 1 skipped by design.
 - Areas config, full run: 310 passed, 9 skipped, **5 failed**; composer spec: 110 passed, 3 skipped, **1 failed**. All six are the same assertion family: the seeded brief note has a need "due 2026-10-10", which is overdue on today's real date (2026-10-11) and ranks above "Send the Q4 invoice" (`lifeos.spec.ts:16`, `:64`, `nodeview.spec.ts:22`, both projects). It is clock-dependent fixture data in the Today ranking, untouched by this change (I did not run it against the pre-change commit to prove that). Fix is to make the fixture date relative to now.
+
+## T-86c review fixes
+
+Fixes for the review of 5c2c096 (SHIP with P2/P3).
+
+- **P2 write door narrowed.** `transition_note` only accepts the field `state` (anything else is refused before a request); the `vault_transition` command no longer takes a `field` and hard-codes `state`. `patch_metadata` accepts exactly one key, `snoozed_until`, as a `YYYY-MM-DD` date or null, and first reads the stored note: it must be tagged `task` or `decision`. New Rust tests: `transitions_and_patches_refuse_anything_but_state_and_snooze` (no request is made) and `snooze_is_refused_on_notes_that_are_not_tasks`; the existing task-query test now scripts the tag read.
+- **P2 schema doc.** `snoozed_until` (date) is documented on `task` and `decision` in `/home/uni/Code/uni-sketches/t84-data/TYPES.md` (that file is outside this repo and not under git). The live schema is unchanged.
+- **P3 midnight.** `useTasks` re-reads the local date on visibility and window focus and recomputes `visible`, so snoozed tasks reappear after midnight.
+- **P3 phone talk bar.** On the sheet layout `.talk` is sticky above the chat peek. New phone test `Hold to talk bar is fully above the chat peek`; it fails without the CSS and passes with it.
+- **P3 tree cap.** `useTasks` exposes `treeTruncated` and the task list shows "The tree was cut short at 200 nodes…" when the node query hits its cap. (No browser test: the fixture would need 200 node notes.)
+- **Date-dependent tests.** `bootAreas({ pinned: true })` freezes the page clock and the fixture's relative timestamps at 2026-10-09 10:00Z. Used by `lifeos.spec.ts` (both describes) and `nodeview.spec.ts`, so `lifeos.spec.ts:16`, `:64` and `nodeview.spec.ts:22` pass on any day.
+- **Flaky timing tests.** `interface.test.ts` builds the 5M-element array outside the timer and bounds the fastest of five runs (still < 100 ms); `vaultlinks.test.ts` bounds the fastest of five runs for each timing check (same limits). A quadratic regression is slow on every run, load only on some, so the assertions keep their meaning.
+
+### Final totals (T-86c)
+- `npx tsc --noEmit`: clean. `npm test`: exit 0 three times in a row, 379 `ok` each.
+- `cargo test -p uni-core`: 85 + 1 + 22 passed; `cargo check -p uni-app-tauri`: clean.
+- Areas config (full): 316 passed, 10 skipped, 0 failed. Rail config: 18 passed. Composer spec: 111 passed, 3 skipped, 0 failed.

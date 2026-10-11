@@ -1511,24 +1511,23 @@ async fn vault_subtree_tasks(
     .await
 }
 
-/// Atomic compare-and-set of one metadata field (a task's `state`).
+/// Atomic compare-and-set of a note's `state`. The field is fixed here; the webview cannot pick another.
 #[tauri::command]
 async fn vault_transition(
     app: tauri::AppHandle,
     vault: String,
     id: String,
-    field: String,
     from: serde_json::Value,
     to: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
     with_vault(&app, move |c| {
-        tauri::async_runtime::block_on(c.transition_note(&vault, &id, &field, from, to))
+        tauri::async_runtime::block_on(c.transition_note(&vault, &id, "state", from, to))
             .map_err(|e| e.to_string())
     })
     .await
 }
 
-/// Merge metadata into a note, guarded by `if_updated_at`.
+/// Merge `snoozed_until` into a task or decision, guarded by `if_updated_at` (the client refuses any other key or note).
 #[tauri::command]
 async fn vault_patch_meta(
     app: tauri::AppHandle,

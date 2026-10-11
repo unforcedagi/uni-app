@@ -187,7 +187,7 @@ await check("transition(): 200 sends a state_transition with from/to; 409 and 42
   const m = mock({ vault_transition: (a) => (a.id === "ok" ? { id: "ok", updatedAt: "T2", lastUpdatedBy: "u", lastUpdatedVia: "api" } : new Error(a.id === "stale" ? "[transition_conflict] conflict: note stale" : "[schema_validation] state is not one of")) });
   const api = createVaultTasks(m.call);
   assert.deepEqual(await api.transition("ok", "open", "done"), { ok: true, updatedAt: "T2", lastUpdatedBy: "u", lastUpdatedVia: "api" });
-  assert.deepEqual(m.log[0], { cmd: "vault_transition", args: { vault: "uni", id: "ok", field: "state", from: "open", to: "done" } });
+  assert.deepEqual(m.log[0], { cmd: "vault_transition", args: { vault: "uni", id: "ok", from: "open", to: "done" } });
   const stale = await api.transition("stale", "open", "done");
   assert.ok(!stale.ok && stale.kind === "conflict");
   const bad = await api.transition("bad", "open", "bogus" as any);

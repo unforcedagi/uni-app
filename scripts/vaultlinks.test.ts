@@ -152,21 +152,20 @@ assert.equal(parseInline("[[Title with spaces#Heading|alias]]").filter((n) => n.
 assert.equal(matchShorthandAt("uni:A/B dotted.title,part!word", 0)?.ref.ref, "A/B dotted.title,part!word");
 console.log("vaultlinks ok");
 
+// Timing under load: a quadratic regression is slow on every run, a busy machine only on some, so the fastest of five is what we bound.
+const fastest = (fn: () => void, runs = 5) => { let best = Infinity; for (let i = 0; i < runs; i++) { const t0 = performance.now(); fn(); best = Math.min(best, performance.now() - t0); } return best; };
+
 // ── Adversarial: a long line of repeated refs must stay linear-ish ─────────
 {
   const big = "uni:A/B ".repeat(5000);
-  const t0 = performance.now();
-  parseInline(big);
-  const ms = performance.now() - t0;
+  const ms = fastest(() => parseInline(big));
   assert.ok(ms < 1500, `40k-char shorthand line took ${ms.toFixed(0)}ms`);
 }
 
 // ── Adversarial: many unmatched `[[` must not rescan the whole message ─────
 {
   const big = "[[a ".repeat(16000); // 64 KiB, the relay's message cap
-  const t0 = performance.now();
-  parseInline(big);
-  const ms = performance.now() - t0;
+  const ms = fastest(() => parseInline(big));
   assert.ok(ms < 1500, `64k unmatched-wikilink line took ${ms.toFixed(0)}ms`);
 }
 // A real wikilink still parses after the bound.
@@ -175,10 +174,7 @@ assert.equal((parseInline("see [[Projects/Ricki/Phase 1 — work plan|the plan]]
 // ── Adversarial: recovery on a long whitespace run must not be quadratic ────
 {
   const { refCandidates } = await import("../src/vaultlinks.ts");
-  const t0 = performance.now();
-  refCandidates("Notes/First" + " ".repeat(64000) + "second third");
-  refCandidates("Notes/First" + " ".repeat(1000) + "second third");
-  const ms = performance.now() - t0;
+  const ms = fastest(() => { refCandidates("Notes/First" + " ".repeat(64000) + "second third"); refCandidates("Notes/First" + " ".repeat(1000) + "second third"); });
   assert.ok(ms < 200, `refCandidates on a 64k-space ref took ${ms.toFixed(0)}ms`);
   assert.deepEqual(refCandidates("Projects/Ricki/Phase 1 — work plan then more"), ["Projects/Ricki/Phase 1 — work plan then", "Projects/Ricki/Phase 1 — work plan", "Projects/Ricki/Phase 1 — work", "Projects/Ricki/Phase 1 —", "Projects/Ricki/Phase 1", "Projects/Ricki/Phase"]);
 }

@@ -5,6 +5,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { areaCard, bootAreas } from './areasFixture';
 
 const SHOTS = 'scripts/browser/__shots__/t86';
+const isDesktop = (page: Page) => (page.viewportSize()?.width ?? 0) >= 900;
 const fits = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth);
 const calls = (page: Page, cmd: string) => page.evaluate((c) => (window as any).__calls.filter((x: any) => x.cmd === c).map((x: any) => x.args), cmd);
 const rows = (page: Page) => page.locator('.task-row .task-title');
@@ -23,6 +24,15 @@ const shot = async (page: Page, name: string) => {
 
 test.describe('tasks on the node view', () => {
   test.beforeEach(async ({ page }) => { await bootAreas(page, 'seed', { briefs: true, tree: true, tasks: true }); });
+
+  test('phone: on first paint the Hold to talk bar is fully above the chat peek', async ({ page }) => {
+    test.skip(isDesktop(page), 'the chat peek is a phone layout');
+    await areaCard(page, 'Techne').click();
+    await expect(page.getByRole('heading', { name: 'Techne', level: 1 })).toBeVisible();
+    const hold = (await page.locator('.talk-hold').boundingBox())!;
+    const peek = (await page.locator('.sheet-peek').boundingBox())!;
+    expect(hold.y + hold.height).toBeLessThanOrEqual(peek.y + 1);
+  });
 
   test('Uni → Techne → COhere 2026: the right tasks, grouped You / Rooms / Others, waiting-on-you first, provenance on descendants', async ({ page }) => {
     await expect(page.locator('.work-head .brief-count')).toHaveText('9');
@@ -79,7 +89,7 @@ test.describe('tasks on the node view', () => {
     await toCohere(page);
     await page.getByRole('button', { name: 'Mark done: T-65 Sponsorship invoice draft' }).click();
     await expect(rows(page).filter({ hasText: 'T-65' })).toHaveCount(0);
-    expect(await calls(page, 'vault_transition')).toEqual([{ vault: 'uni', id: 'k3', field: 'state', from: 'open', to: 'done' }]);
+    expect(await calls(page, 'vault_transition')).toEqual([{ vault: 'uni', id: 'k3', from: 'open', to: 'done' }]);
     const undo = page.getByRole('button', { name: 'Undo' });
     await expect(undo).toBeVisible();
     await expect(page.locator('.work-head .brief-count')).toHaveText('3');
@@ -87,8 +97,8 @@ test.describe('tasks on the node view', () => {
     await undo.click();
     await expect(rows(page).filter({ hasText: 'T-65' })).toHaveCount(1);
     expect(await calls(page, 'vault_transition')).toEqual([
-      { vault: 'uni', id: 'k3', field: 'state', from: 'open', to: 'done' },
-      { vault: 'uni', id: 'k3', field: 'state', from: 'done', to: 'open' }]);
+      { vault: 'uni', id: 'k3', from: 'open', to: 'done' },
+      { vault: 'uni', id: 'k3', from: 'done', to: 'open' }]);
     await expect(page.locator('.work-head .brief-count')).toHaveText('4');
   });
 
@@ -115,11 +125,11 @@ test.describe('tasks on the node view', () => {
 
     await page.locator('.task-main', { hasText: 'T-65' }).click();
     await page.getByRole('button', { name: 'Archive' }).click();
-    expect((await calls(page, 'vault_transition')).at(-1)).toEqual({ vault: 'uni', id: 'k3', field: 'state', from: 'open', to: 'archived' });
+    expect((await calls(page, 'vault_transition')).at(-1)).toEqual({ vault: 'uni', id: 'k3', from: 'open', to: 'archived' });
     await expect(rows(page).filter({ hasText: 'T-65' })).toHaveCount(0);
     await page.getByRole('button', { name: 'Undo' }).click();
     await expect(rows(page).filter({ hasText: 'T-65' })).toHaveCount(1);
-    expect((await calls(page, 'vault_transition')).at(-1)).toEqual({ vault: 'uni', id: 'k3', field: 'state', from: 'archived', to: 'open' });
+    expect((await calls(page, 'vault_transition')).at(-1)).toEqual({ vault: 'uni', id: 'k3', from: 'archived', to: 'open' });
 
     await page.locator('.task-main', { hasText: 'T-65' }).click();
     await page.getByRole('button', { name: 'Snooze until tomorrow' }).click();

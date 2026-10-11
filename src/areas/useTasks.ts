@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { buildTaskTree, isLive, rollUp, snoozed, tasksUnder, tomorrowOf, type AnyState, type Counts, type Task, type TaskNode, type TaskTree } from "./taskCore";
+import { buildTaskTree, dayOf, isLive, rollUp, snoozed, tasksUnder, tomorrowOf, type AnyState, type Counts, type Task, type TaskNode, type TaskTree } from "./taskCore";
 import { vaultTasks } from "./vaultTasks";
 import { shouldReload } from "./pathCache";
 
@@ -28,6 +28,9 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
   const [tree, setTree] = useState<TaskTree | null>(() => scoped(owner).tree);
   const [list, setList] = useState<Task[] | null>(() => scoped(owner).tasks.get(nodePath)?.list ?? null);
   const [truncated, setTruncated] = useState(false);
+  const [treeTruncated, setTreeTruncated] = useState(() => !!scoped(owner).tree?.truncated);
+  // The local date, re-read when the window is shown or focused again: a snooze ends at midnight even if the app stayed open.
+  const [day, setDay] = useState(() => dayOf(new Date()));
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -57,7 +60,7 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
         catch { t = { ...buildTaskTree(fallback), truncated: false }; }
         mem.tree = t;
       }
-      if (live && mine === epoch.current) setTree(t);
+      if (live && mine === epoch.current) { setTree(t); setTreeTruncated(!!t.truncated); }
       const r = await vaultTasks.loadTasks(t, nodePath);
       if (!live || mine !== epoch.current || memory !== mem) return;
       mem.tasks.set(nodePath, { list: r.tasks, truncated: r.truncated });
@@ -68,14 +71,20 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
     return () => { live = false; };
   }, [identity, nodePath, n]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
-    const visible = () => { if (document.visibilityState === "visible" && shouldReload(lastLoad.current, Date.now())) refresh(); };
+    const visible = () => {
+      if (document.visibilityState !== "visible") return;
+      setDay(dayOf(new Date()));
+      if (shouldReload(lastLoad.current, Date.now())) refresh();
+    };
+    const focus = () => setDay(dayOf(new Date()));
     document.addEventListener("visibilitychange", visible);
-    return () => document.removeEventListener("visibilitychange", visible);
+    window.addEventListener("focus", focus);
+    return () => { document.removeEventListener("visibilitychange", visible); window.removeEventListener("focus", focus); };
   }, [refresh]);
   useEffect(() => () => { for (const t of timers.current.values()) clearTimeout(t); if (undoTimer.current) clearTimeout(undoTimer.current); }, []);
 
   const now = new Date();
-  const visible = useMemo(() => (list ?? []).filter((t) => isLive(t) && !gone.has(t.id) && !snoozed(t, new Date())), [list, gone, n]); // eslint-disable-line react-hooks/exhaustive-deps
+  const visible = useMemo(() => (list ?? []).filter((t) => isLive(t) && !gone.has(t.id) && !snoozed(t, new Date())), [list, gone, n, day]); // eslint-disable-line react-hooks/exhaustive-deps
   const counts: Map<string, Counts> = useMemo(() => (tree ? rollUp(tree, tasksUnder(tree, nodePath, visible)) : new Map()), [tree, nodePath, visible]);
 
   const patch = (id: string, f: (t: Task) => Task) => {
@@ -141,5 +150,5 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
     } });
   }, [nodePath]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  return { tree, tasks: visible, leaving, counts, truncated, error, loading, notice, undo, act, refresh, dismissNotice: () => setNotice(null), ready: list !== null, now };
+  return { tree, tasks: visible, leaving, counts, truncated, treeTruncated, error, loading, notice, undo, act, refresh, dismissNotice: () => setNotice(null), ready: list !== null, now };
 }

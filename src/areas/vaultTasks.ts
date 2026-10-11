@@ -80,7 +80,7 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
   /** Compare-and-set on `state`. A stale `from` is a conflict (409): the caller re-reads and says so, it never retries blind. */
   async function transition(taskId: string, from: AnyState, to: AnyState): Promise<WriteResult> {
     try {
-      const note = ((await call("vault_transition", { vault, id: taskId, field: "state", from, to })) as RawNote);
+      const note = ((await call("vault_transition", { vault, id: taskId, from, to })) as RawNote);
       return { ok: true, ...stamp(note) };
     } catch (e) {
       const message = String(e);
