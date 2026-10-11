@@ -361,6 +361,40 @@ impl VaultClient {
             .collect())
     }
 
+    /// The `node` notes at or under `root` (a node path), one request: the vault walks `parent` links inbound.
+    /// A fixed query shape, not a passthrough; the walk stops at depth 5.
+    pub async fn query_subtree_nodes(&self, vault: &str, root: &str) -> Result<Vec<Value>> {
+        let mut args = tag_query_args(vault, "node", false, 200)?;
+        args["near"] = subtree_near(root, false)?;
+        let v = self.call("query-notes", args).await?;
+        check_vault_errors(&v)?;
+        Ok(notes_in(&v).into_iter().filter(|n| n["id"].is_string()).collect())
+    }
+
+    /// Notes tagged `tag` (`task` or `decision`) in the given live `states` on `root` or any node beneath it, one request:
+    /// `near` walks `parent` inbound, then `node` inbound to the tasks. Same limits as [`query_tagged`](Self::query_tagged).
+    pub async fn query_subtree_tasks(
+        &self,
+        vault: &str,
+        tag: &str,
+        root: &str,
+        states: &[String],
+        limit: usize,
+    ) -> Result<Vec<Value>> {
+        if !matches!(tag, "task" | "decision") {
+            return Err(Error::Invalid(format!("bad tag: {tag}")));
+        }
+        if states.is_empty() || states.len() > 8 || states.iter().any(|s| !valid_state(s)) {
+            return Err(Error::Invalid("bad state filter".into()));
+        }
+        let mut args = tag_query_args(vault, tag, false, limit)?;
+        args["metadata"] = json!({"state": {"in": states}});
+        args["near"] = subtree_near(root, true)?;
+        let v = self.call("query-notes", args).await?;
+        check_vault_errors(&v)?;
+        Ok(notes_in(&v).into_iter().filter(|n| n["id"].is_string()).collect())
+    }
+
     /// One atomic compare-and-set on a metadata field (`from` must be the stored value). A stale `from` fails with
     /// a message containing `transition_conflict`; a value the tag's schema forbids with `schema_validation`.
     pub async fn transition_note(
@@ -681,6 +715,29 @@ fn save_args(
         args["if_updated_at"] = json!(stamp);
     }
     Ok(args)
+}
+
+fn valid_state(s: &str) -> bool {
+    !s.is_empty() && s.len() <= 16 && s.chars().all(|c| c.is_ascii_lowercase())
+}
+
+/// A node path is a vault path: not empty, at most 256 bytes, no control characters, no `..` segment.
+fn valid_node_path(p: &str) -> bool {
+    !p.trim().is_empty()
+        && p.len() <= 256
+        && !p.chars().any(char::is_control)
+        && !p.split('/').any(|seg| seg == "..")
+}
+
+fn subtree_near(root: &str, to_tasks: bool) -> Result<Value> {
+    if !valid_node_path(root) {
+        return Err(Error::Invalid(format!("bad node path: {root}")));
+    }
+    let mut near = json!({"note_id": root, "relationship": "parent", "direction": "inbound", "depth": 5});
+    if to_tasks {
+        near["then"] = json!({"relationship": "node", "direction": "inbound"});
+    }
+    Ok(near)
 }
 
 fn tag_query_args(vault: &str, tag: &str, include_content: bool, limit: usize) -> Result<Value> {
@@ -1342,6 +1399,37 @@ mod surface_tests {
             .patch_metadata("scope-test", "t1", json!({}), "")
             .await
             .is_err());
+        handle.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn subtree_queries_send_the_fixed_near_shapes() {
+        crate::init_crypto();
+        let base = json!({"vault":"scope-test","include_content":false,"include_metadata":true,"sort":"asc"});
+        let mut nodes = base.clone();
+        nodes["tag"] = json!("node");
+        nodes["limit"] = json!(200);
+        nodes["near"] = json!({"note_id":"Areas/Techne","relationship":"parent","direction":"inbound","depth":5});
+        let mut tasks = base.clone();
+        tasks["tag"] = json!("task");
+        tasks["limit"] = json!(200);
+        tasks["metadata"] = json!({"state":{"in":["open","doing"]}});
+        tasks["near"] = json!({"note_id":"Areas/Techne","relationship":"parent","direction":"inbound","depth":5,
+            "then":{"relationship":"node","direction":"inbound"}});
+        let (client, handle) = server(vec![
+            ("query-notes", nodes, json!({"notes":[{"id":"n1","path":"Areas/Techne"}]})),
+            ("query-notes", tasks, json!({"notes":[{"id":"t1","path":"Tasks/T-1"}]})),
+        ]);
+        let n = client.query_subtree_nodes("scope-test", "Areas/Techne").await.unwrap();
+        assert_eq!(n.len(), 1);
+        let st = vec!["open".to_string(), "doing".to_string()];
+        let t = client.query_subtree_tasks("scope-test", "task", "Areas/Techne", &st, 500).await.unwrap();
+        assert_eq!(t.len(), 1);
+        assert!(client.query_subtree_tasks("scope-test", "journal", "Areas/Techne", &st, 5).await.is_err());
+        assert!(client.query_subtree_tasks("scope-test", "task", "../x", &st, 5).await.is_err());
+        assert!(client.query_subtree_tasks("scope-test", "task", "A\nB", &st, 5).await.is_err());
+        assert!(client.query_subtree_tasks("scope-test", "task", "A", &["x y".to_string()], 5).await.is_err());
+        assert!(client.query_subtree_nodes("scope-test", "  ").await.is_err());
         handle.join().unwrap();
     }
 

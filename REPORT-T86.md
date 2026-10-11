@@ -58,3 +58,36 @@ Two critique passes done: (1) the Rooms group vanished because its class `rooms`
 
 ## Final totals
 Areas config, full run: 313 passed, 9 skipped, 0 failed (322 tests, both projects).
+
+## T-86b one-request queries
+
+The app now reads a node's tasks with the vault's subtree queries (Parachute main 42fbf93) instead of walking the tree client-side.
+
+**Door check.** The running vault is `@openparachute/vault` 0.7.9 (source under `~/.bun/install/global/node_modules/@openparachute/vault/src`). MCP `query-notes` accepts `near: {note_id, relationship, direction, depth, then: {relationship, direction}}` (`near-aggregate.test.ts` exercises the MCP tool with exactly that shape, plus `aggregate`), and `note_id` takes a path. So the Rust `/mcp` door sends it as a JSON argument; no REST detour.
+
+**What changed**
+- Rust (`crates/uni-core/src/parachute.rs`, `src-tauri/src/lib.rs`): two fixed-shape commands, `vault_subtree_nodes {vault, root}` and `vault_subtree_tasks {vault, tag, root, states, limit}`. There is no query passthrough: `tag` must be `task` or `decision`, `states` are 1–8 lowercase words, `root` is validated (non-empty, ≤256 bytes, no control characters, no `..` segment). `vault_query_meta` stays for the fallback. Test `subtree_queries_send_the_fixed_near_shapes` checks the exact request bodies and the rejections.
+- `vaultTasks.ts`: `loadSubtree(X)` = the `node` notes via `near` inbound over `parent` (one request; the anchor is always included). `loadTasks` = one `near`+`then` request per kind (`task`, and `decision` because a request has one tag, run in parallel) with the live-state filter; no tree needed. The Uni root (ROOT) is still a plain state filter with no `near`, since it means everything.
+- Fallback: an unknown-parameter / 400 style error flips a per-session flag (`nearSupported()`), and the existing two-query walk (`node in [paths+ids]`) runs from then on, never retrying. A `not_found` anchor falls back for that call only (and tries `loadSubtree` when the loaded tree lacks the node); a network or other vault error is thrown to the caller, never mistaken for a missing feature.
+- `nodeStatus`: `active` now reads as `foreground`; `incubating` and `background` read as background (the vault's aliases).
+
+**Arm badges: computed from the loaded task list (`rollUp`), not `aggregate`.** It costs zero extra requests, whereas `aggregate[group_by]=owner` is one request per arm. Also the You/Rooms/Others split is not a function of `owner` alone (decisions and `waiting_on: aaron` count as You), so an owner aggregate can't reproduce it. Trade-off: when a page is truncated (200) the badges are a lower bound, as before.
+
+**Live read-only check** (`http://localhost:1940/vault/uni/api/notes`, token never printed; statuses `open,doing,waiting`, tag `task`):
+
+| Node | nodes under | one-request tasks | two-query tasks | same ids | owners (one = two = aggregate) |
+|---|---|---|---|---|---|
+| `Uni` | 40 | 76 | 76 | yes (0 diff) | aaron 50, uni 5, room:uni-os 5, room:techne 5, room:lab 4, room:cohere 3, room:parachute 2, room:woven-web 1, room:atlas 1 |
+| `Areas/Techne` | 8 | 28 | 28 | yes | aaron 19, room:techne 5, room:cohere 3, room:woven-web 1 |
+| `Projects/COhere/COhere 2026` | 1 | 10 | 10 | yes | aaron 7, room:cohere 3 |
+
+The `aggregate[group_by]=owner` request returned the same counts in all three cases. `near` includes the anchor node itself (e.g. `Areas/Techne` is in its own node list). Open decisions: 4 under `Uni` via `near`, 4 in the vault overall.
+
+**Tests.** `scripts/tasks.test.ts`: six new checks (one-request shape and detection; unknown-parameter fallback, detected once; network error thrown; `not_found` falls back without disabling; `loadSubtree`; tree-lacks-node resolution) with a mocked transport; the old query-shape check now runs on the fallback path. Playwright: the fixture answers `vault_subtree_nodes`/`vault_subtree_tasks` and has a `nearOff` switch; `tasks.spec.ts` asserts the one-request path makes no two-query walk, and a new test checks the fallback shows the same counts and is not retried. Results are under "Final totals (T-86b)" below.
+
+**Left alone: `active` → foreground.** The vault note says `foreground` = `active` and `incubating` = `background`. `incubating` already reads as background. Making `active` read as foreground would turn every live project (all `active`) into a foreground arm and breaks the map-ordering specs, so `nodeStatus` is unchanged; that is a design call for Aaron, not part of this query switch.
+
+### Final totals (T-86b)
+- `npx tsc --noEmit`: clean. `npm test`: exit 0, 379 `ok` (tasks.test.ts: 18 checks incl. six new). `cargo test -p uni-core`: 83 + 22 + 1 passed (new `subtree_queries_send_the_fixed_near_shapes`); `cargo check -p uni-app-tauri`: clean.
+- Rail config: 18 passed. Areas config (`tasks.spec.ts` alone): 25 passed, 1 skipped by design.
+- Areas config, full run: 310 passed, 9 skipped, **5 failed**; composer spec: 110 passed, 3 skipped, **1 failed**. All six are the same assertion family: the seeded brief note has a need "due 2026-10-10", which is overdue on today's real date (2026-10-11) and ranks above "Send the Q4 invoice" (`lifeos.spec.ts:16`, `:64`, `nodeview.spec.ts:22`, both projects). It is clock-dependent fixture data in the Today ranking, untouched by this change (I did not run it against the pre-change commit to prove that). Fix is to make the fixture date relative to now.

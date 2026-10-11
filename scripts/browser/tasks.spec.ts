@@ -45,10 +45,9 @@ test.describe('tasks on the node view', () => {
     await expect(page.locator('.work-head .brief-count')).toHaveText('7');
     await expect(group(page, 'You').locator('.task-row').filter({ hasText: 'T-03' })).toContainText('in COhere 2026');
     await expect(group(page, 'You').locator('.task-row').filter({ hasText: 'T-33' })).not.toContainText(/ in [A-Z]/);
-    const meta = (await calls(page, 'vault_query_meta')).filter((a: any) => a.tag === 'task' && a.metadata.node).at(-1);
-    expect(meta.metadata.node.in).toEqual(expect.arrayContaining(['Areas/Techne', 'Projects/COhere/COhere 2026']));
-    expect(meta.metadata.node.in).not.toContain('Areas/Unforced Development');
-    expect(meta.metadata.state).toEqual({ in: ['open', 'doing', 'waiting'] });
+    const near = (await calls(page, 'vault_subtree_tasks')).filter((a: any) => a.tag === 'task' && a.root === 'Areas/Techne').at(-1);
+    expect(near).toEqual({ vault: 'uni', tag: 'task', root: 'Areas/Techne', states: ['open', 'doing', 'waiting'], limit: 200 });
+    expect((await calls(page, 'vault_query_meta')).filter((a: any) => a.metadata.node), 'one-request path: no two-query walk').toHaveLength(0);
     await shot(page, 'techne');
 
     await areaCard(page, 'COhere 2026').click();
@@ -59,6 +58,21 @@ test.describe('tasks on the node view', () => {
     await expect(group(page, 'You').locator('.task-row').filter({ hasText: 'T-03' })).toContainText('Waiting on you');
     await expect(page.locator('.task-meta', { hasText: / in (COhere|Techne|Uni)/ })).toHaveCount(0);
     await shot(page, 'cohere');
+  });
+
+  test('a vault without near/then falls back to the two-query walk and shows the same tasks', async ({ page }) => {
+    await bootAreas(page, 'seed', { briefs: true, tree: true, tasks: true, nearOff: true });
+    await expect(page.locator('.work-head .brief-count')).toHaveText('9');
+    await areaCard(page, 'Techne').click();
+    await expect(page.getByRole('heading', { name: 'Techne', level: 1 })).toBeVisible();
+    await expect(page.locator('.work-head .brief-count')).toHaveText('7');
+    const meta = (await calls(page, 'vault_query_meta')).filter((a: any) => a.tag === 'task' && a.metadata.node).at(-1);
+    expect(meta.metadata.node.in).toEqual(expect.arrayContaining(['Areas/Techne', 'Projects/COhere/COhere 2026']));
+    expect(meta.metadata.state).toEqual({ in: ['open', 'doing', 'waiting'] });
+    const tried = (await calls(page, 'vault_subtree_tasks')).length;
+    await areaCard(page, 'COhere 2026').click();
+    await expect(page.locator('.work-head .brief-count')).toHaveText('4');
+    expect((await calls(page, 'vault_subtree_tasks')).length, 'detected once, not retried').toBe(tried);
   });
 
   test('Mark done is a state_transition open → done; the row leaves; Undo sends the reverse', async ({ page }) => {
@@ -130,10 +144,10 @@ test.describe('tasks on the node view', () => {
   test('409: changed elsewhere → says so, re-reads, never retries; 422 and other errors roll back with a message', async ({ page }) => {
     await toCohere(page);
     await page.evaluate(() => (window as any).__elsewhere('k3', 'done'));
-    const before = (await calls(page, 'vault_query_meta')).length;
+    const before = (await calls(page, 'vault_subtree_tasks')).length;
     await page.getByRole('button', { name: 'Mark done: T-65 Sponsorship invoice draft' }).click();
     await expect(page.getByRole('status').filter({ hasText: 'changed elsewhere' })).toBeVisible();
-    await expect.poll(async () => (await calls(page, 'vault_query_meta')).length).toBeGreaterThan(before);
+    await expect.poll(async () => (await calls(page, 'vault_subtree_tasks')).length).toBeGreaterThan(before);
     expect(await calls(page, 'vault_transition')).toHaveLength(1);
     await expect(rows(page).filter({ hasText: 'T-65' })).toHaveCount(0);
 
