@@ -39,7 +39,7 @@ const desktopQuery = `(min-width: ${DESKTOP_MIN}px)`;
 const subscribeDesktop = (f: () => void) => { const mq = window.matchMedia(desktopQuery); mq.addEventListener("change", f); return () => mq.removeEventListener("change", f); };
 const isDesktop = () => window.matchMedia(desktopQuery).matches;
 
-export default function AreaView({ area, entry, now, channel, onChannel, mode, roomName, actions, room, onBack, backLabel, onConversations, crumbs, stage, slot, lead, kids, freshAt, dataStatus, projectError, projectLoading }: {
+export default function AreaView({ area, entry, now, channel, onChannel, mode, roomName, actions, room, onBack, backLabel, onConversations, crumbs, stage, slot, work, lead, kids, freshAt, dataStatus, projectError, projectLoading }: {
   projectError?: string | null;
   projectLoading?: boolean;
   area: Area; mode: GateMode | "closed"; roomName: (id: string) => string; actions: AreaActions;
@@ -54,7 +54,7 @@ export default function AreaView({ area, entry, now, channel, onChannel, mode, r
   /** Uni (the top) only: reach the conversation list where the rail is out of reach (short landscape screens). */
   onConversations?: () => void;
   /** The page around the Brief: breadcrumb, Uni's Today in place of a Brief, the children, the freshness override. */
-  crumbs?: ReactNode; stage?: ReactNode; slot?: ReactNode; lead?: ReactNode; kids?: ReactNode; freshAt?: string | null; dataStatus?: ReactNode;
+  crumbs?: ReactNode; stage?: ReactNode; slot?: ReactNode; work?: ReactNode; lead?: ReactNode; kids?: ReactNode; freshAt?: string | null; dataStatus?: ReactNode;
 }) {
   // Uni itself (path "") has no app note to look up.
   const live = mode !== "closed" && area.path !== "";
@@ -201,7 +201,7 @@ export default function AreaView({ area, entry, now, channel, onChannel, mode, r
   if (framed) return withChat(<InterfaceFrame html={app!.html} title={`${name} app`} router={router} grant={grant} ready={ready} onSession={(s) => { session.current = s; }} />, bar, "framed");
   if (asking && manifest?.ok) return withChat(<GrantPrompt name={name} codeChanged={codeChanged && status === "updated"} approvedCode={mode === "approved-code"} lines={describeNeeds(manifest.manifest.needs, ctx, roomName)}
     onAllow={() => { grants.grant(app!.id, keys!.scope, keys!.html, mode === "approved-code" ? "approved-code" : "sealed"); markStarted(area.path); bump(); }} onNotNow={() => setDeclined(true)} />, null);
-  if (!onApp) return withChat(<BriefView area={area} entry={entry} now={now} canAsk={!!channel} onNote={actions.openNote} onAsk={ask} crumbs={crumbs} stage={stage} slot={slot} lead={lead} kids={kids} freshAt={freshAt} projectError={projectError} projectLoading={projectLoading} />, null);
+  if (!onApp) return withChat(<BriefView area={area} entry={entry} now={now} canAsk={!!channel} onNote={actions.openNote} onAsk={ask} crumbs={crumbs} stage={stage} slot={slot} work={work} lead={lead} kids={kids} freshAt={freshAt} projectError={projectError} projectLoading={projectLoading} />, null);
   return withChat(<AppPanel area={area} pending={!keys} onOpenApp={idle ? start : null} onRevoke={idle ? revoke : null}
     notice={manifest && !manifest.ok ? `This area's app was not opened: ${manifest.error}.` : !running ? stoppedNote : null} />, null);
 }
