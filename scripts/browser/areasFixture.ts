@@ -156,6 +156,8 @@ export type BootOpts = {
   roomsDelay?: number;
   identityDelay?: number;
   nodeStatuses?: Record<string, string>;
+  /** T-86b: the vault doesn't know `near[...then]`; the subtree commands answer with an unknown-parameter error. */
+  nearOff?: boolean;
   /** Pre-fill the device cache (localStorage) with this JSON string. */
   deviceCache?: string;
   /** vault_query for this tag rejects. */
@@ -176,7 +178,7 @@ export async function bootAreas(page: Page, variant: Variant = 'seed', opts: Boo
   const now = Math.floor(Date.now() / 1000);
   const data = {
     now, variant, selftest: opts.selftest ?? true, ipcLeak: opts.ipcLeak ?? false, hostile: hostileApp(opts.ports ?? { http: 9, udp: 9 }), benign: BENIGN, techne: seed('techne'), unforced: seed('unforced'), seedMeta,
-    apps: opts.apps ?? [], multiRoom: !!opts.multiRoom || !!opts.tree, tree: !!opts.tree, tasks: !!opts.tasks, briefs: !!opts.briefs, queryDelay: opts.queryDelay ?? 0, identityDelay: opts.identityDelay ?? 0, roomsDelay: opts.roomsDelay ?? 0, nodeStatuses: opts.nodeStatuses ?? {}, deviceCache: opts.deviceCache ?? null, queryFails: opts.queryFails ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null, mode: opts.mode ?? 'sealed', grantedUnder: opts.grantedUnder ?? (opts.mode ?? 'sealed'),
+    apps: opts.apps ?? [], multiRoom: !!opts.multiRoom || !!opts.tree, tree: !!opts.tree, tasks: !!opts.tasks, briefs: !!opts.briefs, queryDelay: opts.queryDelay ?? 0, identityDelay: opts.identityDelay ?? 0, roomsDelay: opts.roomsDelay ?? 0, nodeStatuses: opts.nodeStatuses ?? {}, nearOff: !!opts.nearOff, deviceCache: opts.deviceCache ?? null, queryFails: opts.queryFails ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null, mode: opts.mode ?? 'sealed', grantedUnder: opts.grantedUnder ?? (opts.mode ?? 'sealed'),
   };
   // Pre-granted apps: the grant key is the SHA-256 of the RESOLVED default needs plus the app's html.
   const preGrant = [
@@ -393,6 +395,19 @@ Two proposals wait on a scope decision.
             if (!d.tasks) return [];
             const m = args.metadata ?? {};
             return taskNotes.filter((t) => t.tags.includes(args.tag) && (!m.node || m.node.in.includes(t.metadata.node)) && (!m.state || m.state.in.includes(t.metadata.state))).map((t) => JSON.parse(JSON.stringify(t)));
+          }
+          case 'vault_subtree_nodes': {
+            if (d.nearOff) throw 'MCP error -32602: unknown parameter: near';
+            const all = [{ id: 'uni-root', path: 'Uni', tags: ['uni', 'node'], metadata: {} }, ...notes.filter((n) => (n.tags ?? []).some((t: string) => t === 'area' || t === 'project')).map((n) => ({ ...n, tags: ['node', ...n.tags], content: undefined, metadata: { ...n.metadata, parent: n.metadata?.parent ?? 'Uni' } }))];
+            const under = new Set([args.root]); for (let grew = true; grew;) { grew = false; for (const n of all) if (!under.has(n.path) && under.has(n.metadata.parent)) { under.add(n.path); grew = true; } }
+            return all.filter((n) => under.has(n.path));
+          }
+          case 'vault_subtree_tasks': {
+            if (d.nearOff) throw 'MCP error -32602: unknown parameter: near';
+            if (!d.tasks) return [];
+            const nodes = notes.filter((n) => (n.tags ?? []).some((t: string) => t === 'area' || t === 'project')).map((n) => ({ path: n.path, parent: n.metadata?.parent ?? 'Uni' }));
+            const under = new Set([args.root]); for (let grew = true; grew;) { grew = false; for (const n of nodes) if (!under.has(n.path) && under.has(n.parent)) { under.add(n.path); grew = true; } }
+            return taskNotes.filter((t) => t.tags.includes(args.tag) && under.has(t.metadata.node) && args.states.includes(t.metadata.state)).map((t) => JSON.parse(JSON.stringify(t)));
           }
           case 'vault_transition': {
             const t = taskNotes.find((x) => x.id === args.id);

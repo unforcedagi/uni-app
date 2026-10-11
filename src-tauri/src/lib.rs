@@ -1481,6 +1481,36 @@ async fn vault_query_meta(
     .await
 }
 
+/// The `node` notes at or under one node path, in one request (the vault walks `parent` links).
+#[tauri::command]
+async fn vault_subtree_nodes(
+    app: tauri::AppHandle,
+    vault: String,
+    root: String,
+) -> Result<Vec<serde_json::Value>, String> {
+    with_vault(&app, move |c| {
+        tauri::async_runtime::block_on(c.query_subtree_nodes(&vault, &root)).map_err(|e| e.to_string())
+    })
+    .await
+}
+
+/// Live `task`/`decision` notes on one node or beneath it, in one request (`near` + `then`).
+#[tauri::command]
+async fn vault_subtree_tasks(
+    app: tauri::AppHandle,
+    vault: String,
+    tag: String,
+    root: String,
+    states: Vec<String>,
+    limit: Option<usize>,
+) -> Result<Vec<serde_json::Value>, String> {
+    with_vault(&app, move |c| {
+        tauri::async_runtime::block_on(c.query_subtree_tasks(&vault, &tag, &root, &states, limit.unwrap_or(200)))
+            .map_err(|e| e.to_string())
+    })
+    .await
+}
+
 /// Atomic compare-and-set of one metadata field (a task's `state`).
 #[tauri::command]
 async fn vault_transition(
@@ -1764,6 +1794,8 @@ pub fn run() {
             vault_paths,
             vault_query,
             vault_query_meta,
+            vault_subtree_nodes,
+            vault_subtree_tasks,
             vault_transition,
             vault_patch_meta,
             vault_create,
