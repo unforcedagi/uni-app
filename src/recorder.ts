@@ -18,8 +18,8 @@ export function useRecorder<Origin = void>(onDone: (blob: Blob, mime: string, or
     session.current?.dispose();
   }, []);
 
-  async function start(origin: Origin): Promise<boolean> {
-    const started = await session.current!.start(origin, label);
+  async function start(origin: Origin, forLabel?: string): Promise<boolean> {
+    const started = await session.current!.start(origin, forLabel ?? label);
     if (!started) return false;
     const t0 = Date.now();
     setElapsed(0);

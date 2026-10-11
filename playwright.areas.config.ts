@@ -2,8 +2,8 @@ import { defineConfig } from '@playwright/test';
 const port = Number(process.env.AREAS_TEST_PORT ?? 1435);
 export default defineConfig({
   outputDir: 'test-results/areas',
-  testDir: './scripts/browser', testMatch: /(areas|interface|areaRoom|lifeos|nodeview)\.spec\.ts/, reporter: 'list',
-  use: { baseURL: `http://127.0.0.1:${port}`, colorScheme: 'light', reducedMotion: 'reduce' },
+  testDir: './scripts/browser', testMatch: /(areas|interface|areaRoom|lifeos|nodeview|tasks)\.spec\.ts/, reporter: 'list',
+  use: { baseURL: `http://127.0.0.1:${port}`, colorScheme: 'light', reducedMotion: 'reduce', launchOptions: { args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] } },
   projects: [
     { name: 'phone', use: { browserName: 'chromium', viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true } },
     { name: 'desktop', use: { browserName: 'chromium', viewport: { width: 1600, height: 1200 } } },

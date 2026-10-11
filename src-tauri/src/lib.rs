@@ -1465,6 +1465,55 @@ async fn vault_query(
     .await
 }
 
+/// Notes with `tag` filtered by indexed metadata (no content): a node's open tasks.
+#[tauri::command]
+async fn vault_query_meta(
+    app: tauri::AppHandle,
+    vault: String,
+    tag: String,
+    metadata: serde_json::Value,
+    limit: Option<usize>,
+) -> Result<Vec<serde_json::Value>, String> {
+    with_vault(&app, move |c| {
+        tauri::async_runtime::block_on(c.query_by_metadata(&vault, &tag, metadata, limit.unwrap_or(200)))
+            .map_err(|e| e.to_string())
+    })
+    .await
+}
+
+/// Atomic compare-and-set of one metadata field (a task's `state`).
+#[tauri::command]
+async fn vault_transition(
+    app: tauri::AppHandle,
+    vault: String,
+    id: String,
+    field: String,
+    from: serde_json::Value,
+    to: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    with_vault(&app, move |c| {
+        tauri::async_runtime::block_on(c.transition_note(&vault, &id, &field, from, to))
+            .map_err(|e| e.to_string())
+    })
+    .await
+}
+
+/// Merge metadata into a note, guarded by `if_updated_at`.
+#[tauri::command]
+async fn vault_patch_meta(
+    app: tauri::AppHandle,
+    vault: String,
+    id: String,
+    metadata: serde_json::Value,
+    if_updated_at: String,
+) -> Result<serde_json::Value, String> {
+    with_vault(&app, move |c| {
+        tauri::async_runtime::block_on(c.patch_metadata(&vault, &id, metadata, &if_updated_at))
+            .map_err(|e| e.to_string())
+    })
+    .await
+}
+
 #[tauri::command]
 async fn vault_create(
     app: tauri::AppHandle,
@@ -1714,6 +1763,9 @@ pub fn run() {
             vault_list,
             vault_paths,
             vault_query,
+            vault_query_meta,
+            vault_transition,
+            vault_patch_meta,
             vault_create,
             vault_save,
             android_update_manifest

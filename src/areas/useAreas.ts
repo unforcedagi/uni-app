@@ -5,6 +5,7 @@ import { parseArea, parseProject, sortAreas, type Area, type AreaNoteLike, type 
 import { parseBrief, parseToday, type Brief, type Today } from "./briefCore";
 import { deviceCache, type AreasPayload, type BriefRaw, type CacheOwner } from "./areasCache";
 import { buildTree, type Tree } from "./treeCore";
+import { forgetTasks } from "./useTasks";
 import { createPathCache, shouldReload } from "./pathCache";
 
 export type AreaBrief = { brief: Brief; generatedAt: string | null; updatedAt: string | null };
@@ -85,6 +86,7 @@ export function forgetAreas() {
   generation++;
   payload = null; lastLoadAt = null; savedAt = null; memoryOwner = null; memoryStale = true;
   clearProjectBodies();
+  forgetTasks();
   deviceCache.clear();
 }
 const ownerKey = (owner: CacheOwner) => JSON.stringify(owner);
@@ -92,6 +94,7 @@ const remembered = (owner: CacheOwner) => {
   const key = ownerKey(owner);
   if (memoryOwner !== key) {
     clearProjectBodies();
+    forgetTasks();
     generation++;
     payload = null; lastLoadAt = null; savedAt = null; memoryOwner = key; memoryStale = true;
   }

@@ -147,6 +147,8 @@ export type BootOpts = {
   multiRoom?: boolean;
   /** A project under Techne (`Projects/COhere/COhere 2026`, parent Areas/Techne, room #cohere) with its own Brief. Implies multiRoom. */
   tree?: boolean;
+  /** T-86: `task` and `decision` notes on the nodes, answered by vault_query_meta / vault_transition / vault_patch_meta; `node` notes by vault_query. */
+  tasks?: boolean;
   /** Fixture Brief notes (Techne, Unforced Development) and an `Areas/Today` note, as the briefs writer produces them. */
   briefs?: boolean;
   /** Every vault_query answers after this many ms (to show the device cache paint first). */
@@ -174,7 +176,7 @@ export async function bootAreas(page: Page, variant: Variant = 'seed', opts: Boo
   const now = Math.floor(Date.now() / 1000);
   const data = {
     now, variant, selftest: opts.selftest ?? true, ipcLeak: opts.ipcLeak ?? false, hostile: hostileApp(opts.ports ?? { http: 9, udp: 9 }), benign: BENIGN, techne: seed('techne'), unforced: seed('unforced'), seedMeta,
-    apps: opts.apps ?? [], multiRoom: !!opts.multiRoom || !!opts.tree, tree: !!opts.tree, briefs: !!opts.briefs, queryDelay: opts.queryDelay ?? 0, identityDelay: opts.identityDelay ?? 0, roomsDelay: opts.roomsDelay ?? 0, nodeStatuses: opts.nodeStatuses ?? {}, deviceCache: opts.deviceCache ?? null, queryFails: opts.queryFails ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null, mode: opts.mode ?? 'sealed', grantedUnder: opts.grantedUnder ?? (opts.mode ?? 'sealed'),
+    apps: opts.apps ?? [], multiRoom: !!opts.multiRoom || !!opts.tree, tree: !!opts.tree, tasks: !!opts.tasks, briefs: !!opts.briefs, queryDelay: opts.queryDelay ?? 0, identityDelay: opts.identityDelay ?? 0, roomsDelay: opts.roomsDelay ?? 0, nodeStatuses: opts.nodeStatuses ?? {}, deviceCache: opts.deviceCache ?? null, queryFails: opts.queryFails ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null, mode: opts.mode ?? 'sealed', grantedUnder: opts.grantedUnder ?? (opts.mode ?? 'sealed'),
   };
   // Pre-granted apps: the grant key is the SHA-256 of the RESOLVED default needs plus the app's html.
   const preGrant = [
@@ -341,6 +343,27 @@ Two proposals wait on a scope decision.
       for (const h of w.__listeners['uni://live'] ?? []) w.__cbs[h]?.({ event: 'uni://live', id: 1, payload: { kind: 'message', channel, author: m.author } });
       return m.ref;
     };
+    if (d.tasks) for (const n of notes) { if (n.id === 'a-techne') n.metadata = { ...n.metadata, room: 'techne' }; if (n.id === 'p-cohere') n.metadata = { ...n.metadata, room: 'cohere' }; }
+    // T-86 tasks: the vault's task and decision notes (node by path), with compare-and-set transitions.
+    const T0 = '2026-10-10T08:00:00.000Z';
+    const mk = (id: string, title: string, node: string, extra: Record<string, unknown> = {}, tag = 'task') => ({ id, path: `Tasks/${title}`, extension: 'md', tags: [tag], createdAt: T0, updatedAt: T0, lastUpdatedBy: 'cdf67944-c5f2-4e42-a0d8-02ce7a95bbdb', lastUpdatedVia: 'api', metadata: { node, state: 'open', owner: 'aaron', ...extra } });
+    const C26 = 'Projects/COhere/COhere 2026';
+    const taskNotes: any[] = d.tasks ? [
+      mk('k1', 'T-03 COhere festival readiness', C26, { state: 'waiting', waiting_on: 'aaron', due: '2026-10-12', next: 'Check-in PR by Oct 12' }),
+      mk('k2', 'T-64 COhere app spec', C26, { owner: 'room:cohere', state: 'doing' }),
+      mk('k3', 'T-65 Sponsorship invoice draft', C26),
+      mk('k4', 'T-33 Casey call: book it', 'Areas/Techne'),
+      mk('k5', 'T-61 Techne vision page', 'Areas/Techne', { owner: 'person:leonardo', state: 'waiting', waiting_on: 'external' }),
+      mk('k6', 'T-80 Wire the usage guard', 'Areas/Techne', { owner: 'uni' }),
+      mk('k7', 'T-20 Send the Q4 invoice', 'Areas/Unforced Development'),
+      mk('k8', 'FY-14 FableJi remains in writing', 'Uni'),
+      mk('k9', 'T-99 Already finished', C26, { state: 'done' }),
+      mk('k10', 'T-98 Put away', 'Areas/Techne', { state: 'archived' }),
+      mk('k11', 'T-14 A snoozed one', 'Areas/Techne', { snoozed_until: '2099-01-01' }),
+      mk('dq1', 'Decide the COhere venue', C26, {}, 'decision'),
+    ] : [];
+    w.__tasks = taskNotes;
+    w.__elsewhere = (id: string, state: string) => { const t = taskNotes.find((x) => x.id === id); t.metadata.state = state; t.updatedAt = new Date().toISOString(); t.lastUpdatedVia = 'mcp'; };
     for (const n of notes) if (d.nodeStatuses[n.id]) n.metadata = { ...n.metadata, status: d.nodeStatuses[n.id] };
     const rowOf = (n: any) => ({ id: n.id, path: n.path, extension: n.extension, updatedAt: n.updatedAt });
     w.__TAURI_INTERNALS__ = {
@@ -363,8 +386,36 @@ Two proposals wait on a scope decision.
           case 'vault_query': {
             if (d.queryDelay) await new Promise((r) => setTimeout(r, d.queryDelay));
             if ((d.queryFails as string[]).includes(args.tag)) throw 'query failed: ' + args.tag;
+            if (args.tag === 'node') return [{ id: 'uni-root', path: 'Uni', extension: 'md', tags: ['uni', 'node'], updatedAt: T0, metadata: {} }, ...notes.filter((n) => (n.tags ?? []).some((t: string) => t === 'area' || t === 'project')).map((n) => ({ ...n, tags: ['node', ...n.tags], content: undefined, metadata: { ...n.metadata, parent: n.metadata?.parent ?? 'Uni' } }))];
             return notes.filter((n) => (n.tags ?? []).includes(args.tag)).map((n) => ({ createdAt: '2026-09-01T00:00:00Z', metadata: {}, ...n, ...(args.includeContent === false ? { content: undefined } : {}) }));
           }
+          case 'vault_query_meta': {
+            if (!d.tasks) return [];
+            const m = args.metadata ?? {};
+            return taskNotes.filter((t) => t.tags.includes(args.tag) && (!m.node || m.node.in.includes(t.metadata.node)) && (!m.state || m.state.in.includes(t.metadata.state))).map((t) => JSON.parse(JSON.stringify(t)));
+          }
+          case 'vault_transition': {
+            const t = taskNotes.find((x) => x.id === args.id);
+            if (w.__failNext) { const e = w.__failNext; w.__failNext = null; throw e; }
+            if (!t) throw 'note not found: ' + args.id;
+            const valid = t.tags.includes('decision') ? ['open', 'decided'] : ['open', 'doing', 'waiting', 'done', 'archived'];
+            if (t.metadata[args.field] !== args.from) throw `MCP error -32600: [transition_conflict] conflict: note ${args.id} ${args.field} is ${t.metadata[args.field]}, not ${args.from}`;
+            if (!valid.includes(args.to)) throw '[schema_validation] state is not one of ' + valid.join(',');
+            t.metadata[args.field] = args.to; t.updatedAt = new Date(Date.now() + taskNotes.length).toISOString(); t.lastUpdatedVia = 'api';
+            return JSON.parse(JSON.stringify(t));
+          }
+          case 'vault_patch_meta': {
+            const t = taskNotes.find((x) => x.id === args.id);
+            if (!t) throw 'note not found: ' + args.id;
+            if (t.updatedAt !== args.ifUpdatedAt) throw `conflict: note ${args.id} has been modified`;
+            for (const [k, v] of Object.entries(args.metadata)) { if (v === null) delete t.metadata[k]; else t.metadata[k] = v; }
+            t.updatedAt = new Date(Date.now() + taskNotes.length).toISOString();
+            return JSON.parse(JSON.stringify(t));
+          }
+          case 'media_upload': return { url: 'https://example.invalid/voice.webm', mime: 'audio/webm', name: 'voice.webm', size: 4 };
+          case 'prepare_voice_message': return JSON.stringify({ id: 'voice:' + args.channel + ':' + crypto.randomUUID() });
+          case 'post_message': { const ref = 'sent-' + w.__calls.length; if (args.body) (msgs[args.channel] ??= []).push(msg(ref, args.channel, 'Aaron', 0, args.body)); return { ref, channel: args.channel }; }
+          case 'relay_origin': return 'wss://relay.test';
           case 'vault_note': {
             const n = notes.find((x) => x.id === args.noteRef || x.path === args.noteRef);
             if (!n) throw 'note not found: ' + args.noteRef;

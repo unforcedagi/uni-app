@@ -30,7 +30,7 @@ const SECTIONS: { key: Exclude<keyof Brief, "now" | "nowTokens" | "present">; ti
  * A node's page (the Uni root, an area or a project — one component): breadcrumb, title, freshness with Refresh, then the
  * Brief (or, for Uni, `lead`: Today), then `kids`, the next level down.
  */
-export default function BriefView({ area, entry, now, canAsk, onNote, onAsk, crumbs, stage, slot, lead, kids, freshAt, projectError, projectLoading }: {
+export default function BriefView({ area, entry, now, canAsk, onNote, onAsk, crumbs, stage, slot, work, lead, kids, freshAt, projectError, projectLoading }: {
   projectError?: string | null;
   projectLoading?: boolean;
   area: Area; entry: AreaBrief | null; now: number; canAsk: boolean;
@@ -40,6 +40,8 @@ export default function BriefView({ area, entry, now, canAsk, onNote, onAsk, cru
   crumbs?: ReactNode;
   /** The node's map (its title is the page's h1): drawn after the breadcrumb, then the area slot, then the detail below. */
   stage?: ReactNode; slot?: ReactNode;
+  /** Talk to this level and what needs doing here: drawn under the map. */
+  work?: ReactNode;
   /** Replaces the Brief (the Uni root shows Today here). */
   lead?: ReactNode;
   kids?: ReactNode;
@@ -53,6 +55,7 @@ export default function BriefView({ area, entry, now, canAsk, onNote, onAsk, cru
     {crumbs}
     {stage ?? <h1 className="note-title">{area.title}</h1>}
     {slot}
+    {work}
     <p className="brief-fresh">{fresh && <span>{fresh}</span>}{canAsk && <button type="button" className="pairing-secondary brief-refresh" onClick={() => onAsk(refreshDraft(area.name, root ? "" : area.path))}>Refresh</button>}</p>
     {area.kind === "project" && <section aria-label="Project purpose">
       {area.purpose && <p className="brief-purpose">{area.purpose}</p>}

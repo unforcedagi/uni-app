@@ -39,7 +39,7 @@ test.describe('Today', () => {
   test('loads with tag queries, never the whole-vault listing', async ({ page }) => {
     await openAreasHome(page);
     await expect(areaCard(page, 'Techne')).toBeVisible();
-    const tags = (await calls(page, 'vault_query')).map((c: any) => c.args.tag).sort();
+    const tags = (await calls(page, 'vault_query')).map((c: any) => c.args.tag).filter((t: string) => t !== 'node').sort(); // T-86: the task view's own `node` tree query is separate
     expect(tags).toEqual(['area', 'area-brief', 'area-today', 'project']);
     expect(await calls(page, 'vault_paths')).toHaveLength(0);
     // and the one-note-per-area fetch is gone too
@@ -308,7 +308,7 @@ test.describe('Uni is home, areas are a tree', () => {
     await expect(page.getByRole('heading', { name: 'Uni', level: 1 })).toBeVisible();
     await expect(page.locator('.area-bar-title')).toHaveText('Uni');
     await expect(page.getByRole('button', { name: /^Back to/ })).toHaveCount(0);
-    const order = await page.locator('.area-brief h2').allTextContents();
+    const order = await page.locator('.area-brief h2:not(.work-head)').allTextContents();
     expect(order.slice(0, 2).map((t) => t.trim())).toEqual(['Needs you', 'Moved']);
     await expect(page.getByRole('group', { name: 'Map of Uni' })).toBeVisible();
     await expect(page.locator('.today-moved')).toContainText('coop papers signed');
@@ -384,7 +384,7 @@ test.describe('Uni is home, areas are a tree', () => {
 
   test('loading the tree is four tag queries and no per-node fetch', async ({ page }) => {
     await expect(areaCard(page, 'Techne')).toBeVisible();
-    const tags = (await calls(page, 'vault_query')).map((c: any) => c.args.tag).sort();
+    const tags = (await calls(page, 'vault_query')).map((c: any) => c.args.tag).filter((t: string) => t !== 'node').sort(); // T-86: the task view's own `node` tree query is separate
     expect(tags).toEqual(['area', 'area-brief', 'area-today', 'project']);
     expect(await calls(page, 'vault_paths')).toHaveLength(0);
     await openAreaPage(page, 'Techne', { app: false });
@@ -489,7 +489,7 @@ test('failed project refresh retains previous projects and stale marker', async 
 
  test('forgetAreas discards an in-flight result while the hook remains mounted', async ({ page }) => {
   await bootAreas(page, 'seed', { queryDelay: 3000 });
-  await expect.poll(async () => (await calls(page, 'vault_query')).length).toBe(4);
+  await expect.poll(async () => (await calls(page, 'vault_query')).filter((c: any) => c.args.tag !== 'node').length).toBe(4);
   await page.evaluate(() => (window as any).__forgetAreas());
   await page.waitForTimeout(3500);
   expect(await page.evaluate(() => localStorage.getItem('uni.areas.cache.v2'))).toBeNull();

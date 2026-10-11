@@ -1,4 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
+import { RecentMessages, TalkBar, TaskList, TaskSheet, UndoBar, type Talk } from "./NodeWork";
+import { useTasks } from "./useTasks";
+import { resolveRoom, type RoomNode } from "./talkCore";
+import type { Task, TaskNode } from "./taskCore";
 import { rootNeeds, TodaySections, type RoomInfo } from "./TodayView";
 import NodeStage, { type ZoomState, type StageKid } from "./NodeStage";
 import { AreaSlot } from "./areaSlots";
@@ -20,9 +24,11 @@ const USER_AGENT = currentUserAgent();
 const PLATFORM = platformName(USER_AGENT);
 
 /** The Uni tab: Uni itself at `{kind:"areas"}` (path null), any area or project under it at `{kind:"area", path}`. One page component for all. */
-export default function AreasSurface({ zoom, identity, path, rooms, actions, roomFor, onRoom, onOpenArea, onConversations, onBackChange }: {
+export default function AreasSurface({ zoom, identity, talk, path, rooms, actions, roomFor, onRoom, onOpenArea, onConversations, onBackChange }: {
   zoom: React.RefObject<ZoomState>;
   identity: string | null;
+  /** Voice and one-line notes to a room, through the app's own send and voice outbox paths. */
+  talk: Talk;
   path: string | null; rooms: RoomInfo[]; actions: AreaActions;
   /** The host's room view for a room id (its messages and composer), when that room is the one loaded. */
   roomFor: (id: string | null | undefined) => AreaRoom | null;
@@ -51,20 +57,37 @@ export default function AreasSurface({ zoom, identity, path, rooms, actions, roo
     projectBody(identity, node).then((text) => { if (live) setBody(text); }).catch((e) => { if (live) setBodyError(String(e)); });
     return () => { live = false; };
   }, [identity, node?.id, node?.updatedAt]);
+  const [sheet, setSheet] = useState<Task | null>(null);
   const back = path ? () => {
     const up = data ? data.tree.nodes.get(parentPath(data.tree, path)) : null;
     onOpenArea(up?.path ?? null, up?.name ?? "Uni", up ? pickRoom(up.rooms, null) : uniRoom);
   } : null;
   useEffect(() => {
-    onBackChange(back);
+    // Android Back closes an open task sheet before it zooms out a level.
+    onBackChange(sheet ? () => setSheet(null) : back);
     return () => onBackChange(null);
-  }, [path, data, uniRoom, onOpenArea, onBackChange]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [path, data, uniRoom, onOpenArea, onBackChange, sheet]); // eslint-disable-line react-hooks/exhaustive-deps
   // A node can have several rooms (metadata.channel is a list): the user's pick, else the first.
   const [picked, setPicked] = useState<string | null>(null);
   const nodeRoom = node ? pickRoom(node.rooms, picked) : null;
   useEffect(() => { if (node) onRoom(nodeRoom); }, [node?.id, nodeRoom]); // eslint-disable-line react-hooks/exhaustive-deps
   const roomName = useMemo(() => (id: string) => rooms.find((r) => r.id === id)?.name ?? "room", [rooms]);
   const now = Date.now();
+  const fallback = useMemo<TaskNode[]>(() => (data?.areas ?? []).map((a) => ({ id: a.id, path: a.path, name: a.name, parent: a.parent, room: typeof a.metadata.room === "string" ? a.metadata.room : null, status: a.status === "archived" || a.status === "done" ? a.status : "active", isRoot: false })), [data?.areas]);
+  const tasks = useTasks(identity, node?.path ?? "", fallback);
+  const [sentTick, setSentTick] = useState(0);
+  useEffect(() => { setSheet(null); }, [node?.path]);
+  const roomRefs = useMemo(() => rooms.map((r) => ({ id: r.id, name: r.name })), [rooms]);
+  const uniRef = useMemo(() => roomRefs.find((r) => r.id === uniRoom) ?? null, [roomRefs, uniRoom]);
+  /** A node's room: its own, else the nearest parent's, else Uni's. */
+  const roomOfNode = (p: string) => {
+    const chain: RoomNode[] = [];
+    for (let at: string | undefined = p, guard = 0; at && data?.tree.nodes.has(at) && guard < 50; at = data.tree.parent.get(at), guard++) {
+      const n = data.tree.nodes.get(at)!;
+      chain.push({ path: n.path, room: typeof n.metadata.room === "string" ? n.metadata.room : null, channels: n.rooms });
+    }
+    return resolveRoom(chain, roomRefs, uniRef);
+  };
   const open = (a: { path: string; name: string; rooms: string[] }) => onOpenArea(a.path, a.name, pickRoom(a.rooms, null));
   const toUni = () => onOpenArea(null, "Uni", uniRoom);
   if (!node) return <div className="areas-home"><button className="note-back" onClick={toUni}><span className="note-back-arrow" aria-hidden="true">←</span><span className="note-back-label">Uni</span></button>
@@ -93,7 +116,7 @@ export default function AreasSurface({ zoom, identity, path, rooms, actions, roo
   const empty = isRoot && !kids.length && !error ? <p className="empty">{signingIn ? "Signing in…" : loading ? "Loading areas…" : "No areas yet. Tag a note `area` at Areas/<Name>."}</p> : null;
   const today = data?.today;
   const entry = data?.briefs[node.path] ?? null;
-  const stageKids: StageKid[] = data && tree ? kids.map((k) => ({ node: k, needs: data.briefs[k.path]?.brief.needsYou.length ?? 0, mark: rolledMark(tree, data.briefs, k.path), tips: childrenOf(tree, k.path).map((c) => c.name) })) : [];
+  const stageKids: StageKid[] = data && tree ? kids.map((k) => ({ node: k, open: tasks.counts.get(k.path)?.total ?? 0, needs: data.briefs[k.path]?.brief.needsYou.length ?? 0, mark: rolledMark(tree, data.briefs, k.path), tips: childrenOf(tree, k.path).map((c) => c.name) })) : [];
   const alive: Alive = isRoot
     ? { has: !!data && (!!data.today || Object.keys(data.briefs).length > 0), needs: rootNeeds(data, now).map((n) => n.text), moving: (today?.today.moved ?? []).map((m) => m.text) }
     : aliveOf(entry);
@@ -101,7 +124,18 @@ export default function AreasSurface({ zoom, identity, path, rooms, actions, roo
   const stage = <NodeStage zoom={zoom} node={node} kids={stageKids} parent={isRoot ? null : up ?? root} alive={data ? alive : { has: false, needs: [], moving: [] }} pending={data ? null : signingIn ? "Signing in…" : loading ? "Opening…" : null}
     fresh={updatedLabel(freshIso, now)} kindLabel={isRoot ? new Date(now).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" }) : node.kind === "project" ? "Project" : "Area"} count={{ needs: alive.needs.length, moving: alive.moving.length }}
     onOpen={open} onUp={back} />;
-  return <AreaView key={node.id} area={body !== null ? { ...node, body } : node} projectError={bodyError} projectLoading={body === null && !bodyError} entry={data?.briefs[node.path] ?? null} now={now} channel={nodeRoom} onChannel={setPicked} mode={mode} roomName={roomName} actions={actions}
+  const target = isRoot ? uniRef : roomOfNode(node.path);
+  const nodeName = (p: string) => data?.tree.nodes.get(p)?.name ?? p.split("/").pop() ?? p;
+  const here = isRoot ? "" : node.path;
+  const work = <>
+    <TalkBar key={`${node.path}|${target?.id ?? ""}`} room={target} talk={{ ...talk, sendText: async (c, t) => { await talk.sendText(c, t); setSentTick((n) => n + 1); } }} label={node.name} />
+    <RecentMessages room={target} tick={sentTick + (roomFor(target?.id)?.messages.length ?? 0)} />
+    <TaskList tasks={tasks.tasks} leaving={tasks.leaving} here={here} nodeName={nodeName} loading={tasks.loading} ready={tasks.ready} error={tasks.error} truncated={tasks.truncated}
+      onOpen={setSheet} onAct={(t, a) => void tasks.act(t, a)} onRetry={tasks.refresh} />
+    {sheet && <TaskSheet key={sheet.id} task={sheet} here={here} nodeName={nodeName} room={roomOfNode(sheet.node) ?? target} onClose={() => setSheet(null)} onAct={(t, a) => void tasks.act(t, a)} onOpenRoom={actions.openRoom} />}
+    <UndoBar undo={tasks.undo} notice={tasks.notice} onDismiss={tasks.dismissNotice} />
+  </>;
+  return <AreaView key={node.id} work={work} area={body !== null ? { ...node, body } : node} projectError={bodyError} projectLoading={body === null && !bodyError} entry={data?.briefs[node.path] ?? null} now={now} channel={nodeRoom} onChannel={setPicked} mode={mode} roomName={roomName} actions={actions}
     room={roomFor(nodeRoom)} onConversations={onConversations} onBack={back} backLabel={up?.name ?? "Uni"}
     crumbs={crumbs} stage={stage} slot={!isRoot && node.kind === "area" ? <AreaSlot node={node} /> : null} dataStatus={status} lead={lead} kids={empty} freshAt={isRoot ? (today ? today.generatedAt ?? today.updatedAt : null) : undefined} />;
 }

@@ -1075,6 +1075,35 @@ function Conversations({ onForget }: { onForget: () => void }) {
     try { if (!await recorder.start(origin) && recordingOrigin.current === origin) recordingOrigin.current = null; }
     catch (e) { if (recordingOrigin.current === origin) recordingOrigin.current = null; setError(`Microphone unavailable: ${String(e)}`); }
   }
+  // The node view's talk bar: a voice note or one line to a level's room. Voice goes through the same durable outbox and
+  // queue as the composer's recorder (nothing else uploads); text uses the same post_message call as Send.
+  async function startVoiceFor(target: string): Promise<boolean> {
+    if (sendingRef.current || recordingOrigin.current || recorder.isBusy()) return false;
+    const tab = activeTab(tabsRef.current);
+    if (!tab) return false;
+    setError(null);
+    const origin = { key: keyFor(target, null), tabId: tab.id, title: tab.title, channel: target, replyTo: null, notifyUni };
+    recordingOrigin.current = origin;
+    try {
+      const started = await recorder.start(origin, `for #${rooms.find((r) => r.id === target)?.name ?? "room"}`);
+      if (!started && recordingOrigin.current === origin) recordingOrigin.current = null;
+      return started;
+    } catch (e) { if (recordingOrigin.current === origin) recordingOrigin.current = null; setError(`Microphone unavailable: ${String(e)}`); throw e; }
+  }
+  async function sendTextTo(target: string, body: string) {
+    const roomMembers = await invoke<Member[]>("get_members", { channel: target });
+    const uni = findUniMember(roomMembers);
+    await invoke<Message>("post_message", { channel: target, body, replyTo: null, recipients: notifyUni && uni ? [uni.pubkey] : [], media: [] });
+    setTick((n) => n + 1);
+    void loadRooms().catch(() => {});
+  }
+  const talk = {
+    sendText: sendTextTo,
+    startVoice: startVoiceFor,
+    stopVoice: () => recorder.stop(),
+    recording: recordingOrigin.current && recorder.busy ? { channel: recordingOrigin.current.channel, elapsed: recorder.elapsed, phase: recorder.phase } : null,
+    voice: (voiceStatus === "Sending voice message…" ? "sending" : voiceStatus === "Voice message sent" ? "sent" : voiceStatus === "Voice message failed" ? "failed" : "") as "" | "sending" | "sent" | "failed",
+  };
   function onPasteFiles(e: React.ClipboardEvent) {
     const files = Array.from(e.clipboardData.files);
     if (files.length) { e.preventDefault(); addFiles(files); }
@@ -1607,7 +1636,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       {journalTab && <div className="journal-tab-content" hidden={!journalOpen} onFocusCapture={(e) => { if (e.target instanceof HTMLTextAreaElement) requestAnimationFrame(() => setComposerFocused(true)); }} onBlurCapture={(e) => { const journal = e.currentTarget; requestAnimationFrame(() => setComposerFocused(journal.contains(document.activeElement) && document.activeElement instanceof HTMLTextAreaElement)); }}><Journal focus={journalFocus} onFocus={() => setJournalFocus((v) => !v)} rooms={rooms} uniRoomId={findUniRoom(rooms)?.id ?? null} onShare={shareEntry} onBack={() => setPanel("rooms")} onRecordingChange={(on, elapsed, stop) => { journalRecordingRef.current = on; setJournalRecording(on ? { elapsed, stop } : null); }} /></div>}
       {active?.kind === "vault" && active.vault ? <VaultBrowser key={active.vault} vault={active.vault} onBack={() => setPanel("rooms")} onOpen={(note) => openTarget({ kind: "note", note: { hub: null, vault: active.vault!, ref: note.id }, title: note.path || note.id }, "new")} onCreate={(folder) => requestCreate(active.vault!, folder)} onSearch={(prefix) => { setSearchQuery(""); setSearchScope({ vault: active.vault!, prefix }); setSearchOpen(true); setSidebarVisible(true); }} />
       : journalOpen ? null
-      : areasOpen && active ? <AreasSurface zoom={nodeZoom} onBackChange={setAreaBack} identity={identity} key={`${active.id}:${identity ?? ""}`} onConversations={() => setPanel("rooms")} path={active.kind === "area" ? active.path ?? null : null} rooms={rooms} actions={areaActions} roomFor={areaRoomFor} onRoom={syncAreaRoom}
+      : areasOpen && active ? <AreasSurface zoom={nodeZoom} talk={talk} onBackChange={setAreaBack} identity={identity} key={`${active.id}:${identity ?? ""}`} onConversations={() => setPanel("rooms")} path={active.kind === "area" ? active.path ?? null : null} rooms={rooms} actions={areaActions} roomFor={areaRoomFor} onRoom={syncAreaRoom}
           onOpenArea={(path, name, room) => openTarget(path === null ? { kind: "areas", title: "Uni", ...(room ? { channel: room } : {}) } : { kind: "area", path, title: name, ...(room ? { channel: room } : {}) }, "replace")} />
       : currentRoom ? <>
         <header className="conversation-header">

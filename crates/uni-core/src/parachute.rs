@@ -339,6 +339,77 @@ impl VaultClient {
             .collect())
     }
 
+    /// Notes with `tag` whose indexed metadata matches `metadata` (the vault's operator objects: `{in: [...]}`, `{eq: x}`),
+    /// without content: the task lists of a node view. Same door and limits as [`query_tagged`](Self::query_tagged).
+    pub async fn query_by_metadata(
+        &self,
+        vault: &str,
+        tag: &str,
+        metadata: Value,
+        limit: usize,
+    ) -> Result<Vec<Value>> {
+        let mut args = tag_query_args(vault, tag, false, limit)?;
+        if !metadata.is_object() {
+            return Err(Error::Invalid("metadata filter must be an object".into()));
+        }
+        args["metadata"] = metadata;
+        let v = self.call("query-notes", args).await?;
+        check_vault_errors(&v)?;
+        Ok(notes_in(&v)
+            .into_iter()
+            .filter(|n| n["id"].is_string())
+            .collect())
+    }
+
+    /// One atomic compare-and-set on a metadata field (`from` must be the stored value). A stale `from` fails with
+    /// a message containing `transition_conflict`; a value the tag's schema forbids with `schema_validation`.
+    pub async fn transition_note(
+        &self,
+        vault: &str,
+        id: &str,
+        field: &str,
+        from: Value,
+        to: Value,
+    ) -> Result<Value> {
+        check_vault(vault)?;
+        if id.trim().is_empty() || field.trim().is_empty() {
+            return Err(Error::Invalid("missing note id or field".into()));
+        }
+        let v = self
+            .call(
+                "update-note",
+                json!({"vault": vault, "id": id, "include_content": false,
+                    "state_transition": {"field": field, "from": from, "to": to}}),
+            )
+            .await?;
+        check_vault_errors(&v)?;
+        note_from(&v, id)
+    }
+
+    /// Merge `metadata` into a note, guarded by the `updated_at` the caller last read.
+    pub async fn patch_metadata(
+        &self,
+        vault: &str,
+        id: &str,
+        metadata: Value,
+        if_updated_at: &str,
+    ) -> Result<Value> {
+        check_vault(vault)?;
+        if id.trim().is_empty() || if_updated_at.is_empty() || !metadata.is_object() {
+            return Err(Error::Invalid("metadata patch needs an id, an object and if_updated_at".into()));
+        }
+        let v = self
+            .rpc(
+                "update-note",
+                json!({"vault": vault, "id": id, "metadata": metadata,
+                    "if_updated_at": if_updated_at, "include_content": false}),
+            )
+            .await?
+            .map_err(save_error)?;
+        check_vault_errors(&v)?;
+        note_from(&v, id)
+    }
+
     /// Discover readable vaults through the same signed fan-out door.
     pub async fn list_vaults(&self) -> Result<Vec<String>> {
         let v = self
@@ -1233,6 +1304,49 @@ mod surface_tests {
         assert_eq!(paths.len(), 501);
         assert_eq!(paths[500].updated_at.as_deref(), Some("t2"));
         handle.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn task_queries_and_transitions_send_the_vault_calls() {
+        crate::init_crypto();
+        let meta = json!({"node": {"in": ["Areas/Techne", "n1"]}, "state": {"in": ["open", "doing", "waiting"]}});
+        let (client, handle) = server(vec![
+            (
+                "query-notes",
+                json!({"vault":"scope-test","tag":"task","include_content":false,"include_metadata":true,"limit":200,"sort":"asc","metadata":meta}),
+                json!({"notes":[{"id":"t1","path":"Tasks/T-1","metadata":{"state":"open"}}]}),
+            ),
+            (
+                "update-note",
+                json!({"vault":"scope-test","id":"t1","include_content":false,"state_transition":{"field":"state","from":"open","to":"done"}}),
+                json!({"id":"t1","path":"Tasks/T-1","updatedAt":"t2"}),
+            ),
+            (
+                "update-note",
+                json!({"vault":"scope-test","id":"t1","include_content":false,"metadata":{"snoozed_until":"2026-10-11"},"if_updated_at":"t2"}),
+                json!({"id":"t1","path":"Tasks/T-1","updatedAt":"t3"}),
+            ),
+        ]);
+        let rows = client.query_by_metadata("scope-test", "task", meta_of(), 500).await.unwrap();
+        assert_eq!(rows.len(), 1);
+        let done = client
+            .transition_note("scope-test", "t1", "state", json!("open"), json!("done"))
+            .await
+            .unwrap();
+        assert_eq!(done["updatedAt"], "t2");
+        client
+            .patch_metadata("scope-test", "t1", json!({"snoozed_until":"2026-10-11"}), "t2")
+            .await
+            .unwrap();
+        assert!(client
+            .patch_metadata("scope-test", "t1", json!({}), "")
+            .await
+            .is_err());
+        handle.join().unwrap();
+    }
+
+    fn meta_of() -> Value {
+        json!({"node": {"in": ["Areas/Techne", "n1"]}, "state": {"in": ["open", "doing", "waiting"]}})
     }
 
     #[tokio::test]
