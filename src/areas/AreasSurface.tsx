@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { RecentMessages, TalkBar, TaskList, TaskSheet, UndoBar, type Talk } from "./NodeWork";
 import { useTasks } from "./useTasks";
-import { resolveRoom, type RoomNode } from "./talkCore";
+import { ownRoom, steward, stewardLine, type RoomNode, type Steward } from "./talkCore";
+import type { Area } from "./areasCore";
 import type { Task, TaskNode } from "./taskCore";
 import { rootNeeds, TodaySections, type RoomInfo } from "./TodayView";
 import NodeStage, { type ZoomState, type StageKid } from "./NodeStage";
@@ -15,7 +16,7 @@ import { useAppVersion, useWebviewRuntime } from "../interface/selftest/useAppVe
 import { projectBody } from "./projectBody";
 import { useAreas } from "./useAreas";
 import { pickRoom } from "./areaLayout";
-import { childrenOf, parentPath, ROOT, rootNode, trail, UNI_CHANNEL } from "./treeCore";
+import { ancestry, childrenOf, parentPath, ROOT, rootNode, trail, UNI_CHANNEL } from "./treeCore";
 import { findUniRoom } from "../uniActions";
 import { useStoredSelfTest } from "../interface/selftest/useSelfTest";
 import "./areas.css";
@@ -47,7 +48,12 @@ export default function AreasSurface({ zoom, identity, talk, path, rooms, action
   const mode = useMemo(() => gateMode(PLATFORM, version, stored, USER_AGENT, undefined, runtime), [version, stored, runtime]);
   const uniRoom = useMemo(() => (rooms.some((r) => r.id === UNI_CHANNEL) ? UNI_CHANNEL : findUniRoom(rooms)?.id ?? null), [rooms]);
   const root = useMemo(() => rootNode(uniRoom ? [uniRoom] : []), [uniRoom]);
-  const node = path ? data?.tree.nodes.get(path) ?? null : root;
+  const roomRefs = useMemo(() => rooms.map((r) => ({ id: r.id, name: r.name })), [rooms]);
+  const uniRef = useMemo(() => roomRefs.find((r) => r.id === uniRoom) ?? null, [roomRefs, uniRoom]);
+  /** A node that names its room only by `room` (no channel id) still opens that room. */
+  const withRoom = (a: Area): Area => { if (a.rooms.length) return a; const r = ownRoom({ room: typeof a.metadata.room === "string" ? a.metadata.room : null, channels: [] }, roomRefs); return r ? { ...a, rooms: [r.id] } : a; };
+  const found = path ? data?.tree.nodes.get(path) ?? null : root;
+  const node = found ? withRoom(found) : null;
   const [body, setBody] = useState<string | null>(null);
   const [bodyError, setBodyError] = useState<string | null>(null);
   useEffect(() => {
@@ -60,7 +66,7 @@ export default function AreasSurface({ zoom, identity, talk, path, rooms, action
   const [sheet, setSheet] = useState<Task | null>(null);
   const back = path ? () => {
     const up = data ? data.tree.nodes.get(parentPath(data.tree, path)) : null;
-    onOpenArea(up?.path ?? null, up?.name ?? "Uni", up ? pickRoom(up.rooms, null) : uniRoom);
+    onOpenArea(up?.path ?? null, up?.name ?? "Uni", up ? pickRoom(withRoom(up).rooms, null) : uniRoom);
   } : null;
   useEffect(() => {
     // Android Back closes an open task sheet before it zooms out a level.
@@ -77,18 +83,13 @@ export default function AreasSurface({ zoom, identity, talk, path, rooms, action
   const tasks = useTasks(identity, node?.path ?? "", fallback);
   const [sentTick, setSentTick] = useState(0);
   useEffect(() => { setSheet(null); }, [node?.path]);
-  const roomRefs = useMemo(() => rooms.map((r) => ({ id: r.id, name: r.name })), [rooms]);
-  const uniRef = useMemo(() => roomRefs.find((r) => r.id === uniRoom) ?? null, [roomRefs, uniRoom]);
-  /** A node's room: its own, else the nearest parent's, else Uni's. */
-  const roomOfNode = (p: string) => {
-    const chain: RoomNode[] = [];
-    for (let at: string | undefined = p, guard = 0; at && data?.tree.nodes.has(at) && guard < 50; at = data.tree.parent.get(at), guard++) {
-      const n = data.tree.nodes.get(at)!;
-      chain.push({ path: n.path, room: typeof n.metadata.room === "string" ? n.metadata.room : null, channels: n.rooms });
-    }
-    return resolveRoom(chain, roomRefs, uniRef);
+  /** Who stewards a node: its own room, else the nearest ancestor's, else #Uni (one rule for talk targets, "Open in #room" and the node page). */
+  const stewardOf = (p: string): Steward => {
+    const chain: RoomNode[] = data ? ancestry(data.tree, p).map((n) => ({ path: n.path, name: n.name, room: typeof n.metadata.room === "string" ? n.metadata.room : null, channels: n.rooms })) : [];
+    return steward(chain, roomRefs, uniRef);
   };
-  const open = (a: { path: string; name: string; rooms: string[] }) => onOpenArea(a.path, a.name, pickRoom(a.rooms, null));
+  const roomOfNode = (p: string) => stewardOf(p).room;
+  const open = (a: Area) => { const w = withRoom(a); onOpenArea(w.path, w.name, pickRoom(w.rooms, null)); };
   const toUni = () => onOpenArea(null, "Uni", uniRoom);
   if (!node) return <div className="areas-home"><button className="note-back" onClick={toUni}><span className="note-back-arrow" aria-hidden="true">←</span><span className="note-back-label">Uni</span></button>
     <p className="empty">{signingIn ? "Signing in…" : loading ? "Opening area…" : error ? `Couldn't load: ${error}` : "This area no longer exists."}</p></div>;
@@ -116,7 +117,7 @@ export default function AreasSurface({ zoom, identity, talk, path, rooms, action
   const empty = isRoot && !kids.length && !error ? <p className="empty">{signingIn ? "Signing in…" : loading ? "Loading areas…" : "No areas yet. Tag a note `area` at Areas/<Name>."}</p> : null;
   const today = data?.today;
   const entry = data?.briefs[node.path] ?? null;
-  const stageKids: StageKid[] = data && tree ? kids.map((k) => ({ node: k, open: tasks.counts.get(k.path)?.total ?? 0, needs: data.briefs[k.path]?.brief.needsYou.length ?? 0, mark: rolledMark(tree, data.briefs, k.path), tips: childrenOf(tree, k.path).map((c) => c.name) })) : [];
+  const stageKids: StageKid[] = data && tree ? kids.map((k) => ({ node: k, open: tasks.counts.get(k.path)?.total ?? 0, needs: data.briefs[k.path]?.brief.needsYou.length ?? 0, room: k.kind === "project" ? stewardOf(k.path).via === "own" ? stewardOf(k.path).room?.name : undefined : undefined, mark: rolledMark(tree, data.briefs, k.path), tips: childrenOf(tree, k.path).map((c) => c.name) })) : [];
   const alive: Alive = isRoot
     ? { has: !!data && (!!data.today || Object.keys(data.briefs).length > 0), needs: rootNeeds(data, now).map((n) => n.text), moving: (today?.today.moved ?? []).map((m) => m.text) }
     : aliveOf(entry);
@@ -124,11 +125,14 @@ export default function AreasSurface({ zoom, identity, talk, path, rooms, action
   const stage = <NodeStage zoom={zoom} node={node} kids={stageKids} parent={isRoot ? null : up ?? root} alive={data ? alive : { has: false, needs: [], moving: [] }} pending={data ? null : signingIn ? "Signing in…" : loading ? "Opening…" : null}
     fresh={updatedLabel(freshIso, now)} kindLabel={isRoot ? new Date(now).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" }) : node.kind === "project" ? "Project" : "Area"} count={{ needs: alive.needs.length, moving: alive.moving.length }}
     onOpen={open} onUp={back} />;
-  const target = isRoot ? uniRef : roomOfNode(node.path);
+  const stewardView: Steward = isRoot ? { room: uniRef, via: "own", from: null } : stewardOf(node.path);
+  const stewardText = stewardLine(stewardView);
+  const target = stewardView.room;
   const nodeName = (p: string) => data?.tree.nodes.get(p)?.name ?? p.split("/").pop() ?? p;
   const here = isRoot ? "" : node.path;
   const work = <>
     <TalkBar key={`${node.path}|${target?.id ?? ""}`} room={target} talk={{ ...talk, sendText: async (c, t) => { await talk.sendText(c, t); setSentTick((n) => n + 1); } }} label={node.name} />
+    {stewardText && <p className="steward" data-via={stewardView.via}>{stewardText}</p>}
     <RecentMessages room={target} tick={sentTick + (roomFor(target?.id)?.messages.length ?? 0)} />
     <TaskList tasks={tasks.tasks} leaving={tasks.leaving} here={here} nodeName={nodeName} loading={tasks.loading} ready={tasks.ready} error={tasks.error} truncated={tasks.truncated} treeTruncated={tasks.treeTruncated}
       onOpen={setSheet} onAct={(t, a) => void tasks.act(t, a)} onRetry={tasks.refresh} />

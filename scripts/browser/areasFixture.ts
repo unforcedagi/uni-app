@@ -158,6 +158,10 @@ export type BootOpts = {
   roomsDelay?: number;
   identityDelay?: number;
   nodeStatuses?: Record<string, string>;
+  /** T-88: references hold note ids (node `parent`, task `node`, node `brief`) instead of paths, the way the vault is moving. The root task stays a path, so both forms appear. */
+  ids?: boolean;
+  /** T-88: an `Areas/Boulder` area (room #boulder, which the metadata still calls #civics; the room is found by its channel id) with a project that has no room of its own. */
+  boulder?: boolean;
   /** T-86b: the vault doesn't know `near[...then]`; the subtree commands answer with an unknown-parameter error. */
   nearOff?: boolean;
   /** Pre-fill the device cache (localStorage) with this JSON string. */
@@ -182,7 +186,7 @@ export async function bootAreas(page: Page, variant: Variant = 'seed', opts: Boo
   const now = Math.floor((opts.pinned ? pinnedAt : Date.now()) / 1000);
   const data = {
     now, variant, selftest: opts.selftest ?? true, ipcLeak: opts.ipcLeak ?? false, hostile: hostileApp(opts.ports ?? { http: 9, udp: 9 }), benign: BENIGN, techne: seed('techne'), unforced: seed('unforced'), seedMeta,
-    apps: opts.apps ?? [], multiRoom: !!opts.multiRoom || !!opts.tree, tree: !!opts.tree, tasks: !!opts.tasks, briefs: !!opts.briefs, queryDelay: opts.queryDelay ?? 0, identityDelay: opts.identityDelay ?? 0, roomsDelay: opts.roomsDelay ?? 0, nodeStatuses: opts.nodeStatuses ?? {}, nearOff: !!opts.nearOff, deviceCache: opts.deviceCache ?? null, queryFails: opts.queryFails ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null, mode: opts.mode ?? 'sealed', grantedUnder: opts.grantedUnder ?? (opts.mode ?? 'sealed'),
+    apps: opts.apps ?? [], multiRoom: !!opts.multiRoom || !!opts.tree, tree: !!opts.tree, tasks: !!opts.tasks, briefs: !!opts.briefs, queryDelay: opts.queryDelay ?? 0, identityDelay: opts.identityDelay ?? 0, roomsDelay: opts.roomsDelay ?? 0, nodeStatuses: opts.nodeStatuses ?? {}, nearOff: !!opts.nearOff, ids: !!opts.ids, boulder: !!opts.boulder, deviceCache: opts.deviceCache ?? null, queryFails: opts.queryFails ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null, mode: opts.mode ?? 'sealed', grantedUnder: opts.grantedUnder ?? (opts.mode ?? 'sealed'),
   };
   // Pre-granted apps: the grant key is the SHA-256 of the RESOLVED default needs plus the app's html.
   const preGrant = [
@@ -369,6 +373,22 @@ Two proposals wait on a scope decision.
       mk('dq1', 'Decide the COhere venue', C26, {}, 'decision'),
     ] : [];
     w.__tasks = taskNotes;
+    const BOULDER = '9f5dd143-96b1-440a-ab71-812219cdfaa1';
+    if (d.boulder) {
+      const a = area('a-boulder', 'Boulder', 'foreground', BOULDER, 'Civic work in Boulder: the council, new tech and the local mail.');
+      a.metadata = { ...a.metadata, room: 'civics' };
+      notes.push(a, { id: 'p-civic', path: 'Projects/Boulder Civic Calendar', extension: 'md', tags: ['project'], metadata: { status: 'foreground', summary: 'A shared calendar of council and committee meetings.', parent: 'Areas/Boulder' }, updatedAt: '2026-10-08T00:00:00Z', content: '# Boulder Civic Calendar\n\nCouncil and committee dates in one place.' },
+        { id: 'br-boulder', path: 'Areas/Boulder/Brief', extension: 'md', tags: ['area-brief'], metadata: { generated_at: new Date((d.now - 7200) * 1000).toISOString() }, updatedAt: new Date((d.now - 7200) * 1000).toISOString(), content: '## Now\nThe council agenda is out; the calendar needs this week\'s dates.\n\n## Needs you\n- Approve the draft testimony\n\n## Moving\n- nothing recent\n' });
+      rooms.push(room(BOULDER, 'boulder'));
+      if (d.tasks) taskNotes.push(mk('b1', 'T-90 Draft council testimony', 'Areas/Boulder'), mk('b2', 'T-91 Add the November dates', 'Projects/Boulder Civic Calendar', { owner: 'room:boulder' }));
+    }
+    if (d.ids) {
+      const idOf = (ref: string) => notes.find((n) => n.path === ref)?.id ?? ref;
+      for (const n of notes) if (n.metadata?.parent) n.metadata = { ...n.metadata, parent: idOf(n.metadata.parent) };
+      for (const n of notes) { const b = notes.find((x) => x.path === n.path + '/Brief'); if (b && (n.tags ?? []).some((t: string) => t === 'area' || t === 'project')) n.metadata = { ...n.metadata, brief: b.id }; }
+      for (const t of taskNotes) if (t.metadata.node !== 'Uni') t.metadata.node = idOf(t.metadata.node);
+    }
+    const pathOf = (ref: string) => notes.find((n) => n.id === ref || n.path === ref)?.path ?? ref;
     w.__elsewhere = (id: string, state: string) => { const t = taskNotes.find((x) => x.id === id); t.metadata.state = state; t.updatedAt = new Date().toISOString(); t.lastUpdatedVia = 'mcp'; };
     for (const n of notes) if (d.nodeStatuses[n.id]) n.metadata = { ...n.metadata, status: d.nodeStatuses[n.id] };
     const rowOf = (n: any) => ({ id: n.id, path: n.path, extension: n.extension, updatedAt: n.updatedAt });
@@ -392,7 +412,7 @@ Two proposals wait on a scope decision.
           case 'vault_query': {
             if (d.queryDelay) await new Promise((r) => setTimeout(r, d.queryDelay));
             if ((d.queryFails as string[]).includes(args.tag)) throw 'query failed: ' + args.tag;
-            if (args.tag === 'node') return [{ id: 'uni-root', path: 'Uni', extension: 'md', tags: ['uni', 'node'], updatedAt: T0, metadata: {} }, ...notes.filter((n) => (n.tags ?? []).some((t: string) => t === 'area' || t === 'project')).map((n) => ({ ...n, tags: ['node', ...n.tags], content: undefined, metadata: { ...n.metadata, parent: n.metadata?.parent ?? 'Uni' } }))];
+            if (args.tag === 'node') return [{ id: 'uni-root', path: 'Uni', extension: 'md', tags: ['uni', 'node'], updatedAt: T0, metadata: {} }, ...notes.filter((n) => (n.tags ?? []).some((t: string) => t === 'area' || t === 'project')).map((n) => ({ ...n, tags: ['node', ...n.tags], content: undefined, metadata: { ...n.metadata, parent: n.metadata?.parent ?? (d.ids ? 'uni-root' : 'Uni') } }))];
             return notes.filter((n) => (n.tags ?? []).includes(args.tag)).map((n) => ({ createdAt: '2026-09-01T00:00:00Z', metadata: {}, ...n, ...(args.includeContent === false ? { content: undefined } : {}) }));
           }
           case 'vault_query_meta': {
@@ -402,16 +422,16 @@ Two proposals wait on a scope decision.
           }
           case 'vault_subtree_nodes': {
             if (d.nearOff) throw 'MCP error -32602: unknown parameter: near';
-            const all = [{ id: 'uni-root', path: 'Uni', tags: ['uni', 'node'], metadata: {} }, ...notes.filter((n) => (n.tags ?? []).some((t: string) => t === 'area' || t === 'project')).map((n) => ({ ...n, tags: ['node', ...n.tags], content: undefined, metadata: { ...n.metadata, parent: n.metadata?.parent ?? 'Uni' } }))];
-            const under = new Set([args.root]); for (let grew = true; grew;) { grew = false; for (const n of all) if (!under.has(n.path) && under.has(n.metadata.parent)) { under.add(n.path); grew = true; } }
+            const all = [{ id: 'uni-root', path: 'Uni', tags: ['uni', 'node'], metadata: {} }, ...notes.filter((n) => (n.tags ?? []).some((t: string) => t === 'area' || t === 'project')).map((n) => ({ ...n, tags: ['node', ...n.tags], content: undefined, metadata: { ...n.metadata, parent: n.metadata?.parent ?? (d.ids ? 'uni-root' : 'Uni') } }))];
+            const under = new Set([pathOf(args.root)]); for (let grew = true; grew;) { grew = false; for (const n of all) if (!under.has(n.path) && under.has(pathOf(n.metadata.parent))) { under.add(n.path); grew = true; } }
             return all.filter((n) => under.has(n.path));
           }
           case 'vault_subtree_tasks': {
             if (d.nearOff) throw 'MCP error -32602: unknown parameter: near';
             if (!d.tasks) return [];
-            const nodes = notes.filter((n) => (n.tags ?? []).some((t: string) => t === 'area' || t === 'project')).map((n) => ({ path: n.path, parent: n.metadata?.parent ?? 'Uni' }));
-            const under = new Set([args.root]); for (let grew = true; grew;) { grew = false; for (const n of nodes) if (!under.has(n.path) && under.has(n.parent)) { under.add(n.path); grew = true; } }
-            return taskNotes.filter((t) => t.tags.includes(args.tag) && under.has(t.metadata.node) && args.states.includes(t.metadata.state)).map((t) => JSON.parse(JSON.stringify(t)));
+            const nodes = notes.filter((n) => (n.tags ?? []).some((t: string) => t === 'area' || t === 'project')).map((n) => ({ path: n.path, parent: pathOf(n.metadata?.parent ?? 'Uni') }));
+            const under = new Set([pathOf(args.root)]); for (let grew = true; grew;) { grew = false; for (const n of nodes) if (!under.has(n.path) && under.has(n.parent)) { under.add(n.path); grew = true; } }
+            return taskNotes.filter((t) => t.tags.includes(args.tag) && under.has(pathOf(t.metadata.node)) && args.states.includes(t.metadata.state)).map((t) => JSON.parse(JSON.stringify(t)));
           }
           case 'vault_transition': {
             const t = taskNotes.find((x) => x.id === args.id);

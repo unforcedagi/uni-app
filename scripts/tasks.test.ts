@@ -116,8 +116,8 @@ await check("one-request path: loadTasks sends a fixed near+then shape per kind,
   const t = buildTaskTree(parseNodes(NODES).nodes);
   const { tasks } = await api.loadTasks(t, "Areas/Techne");
   assert.deepEqual(m.log.map((l) => l.cmd), ["vault_subtree_tasks", "vault_subtree_tasks"]);
-  assert.deepEqual(m.log[0].args, { vault: "uni", tag: "task", root: "Areas/Techne", states: ["open", "doing", "waiting"], limit: 200 });
-  assert.deepEqual(m.log[1].args, { vault: "uni", tag: "decision", root: "Areas/Techne", states: ["open"], limit: 200 });
+  assert.deepEqual(m.log[0].args, { vault: "uni", tag: "task", root: "a-t", states: ["open", "doing", "waiting"], limit: 200 });
+  assert.deepEqual(m.log[1].args, { vault: "uni", tag: "decision", root: "a-t", states: ["open"], limit: 200 });
   assert.deepEqual(tasks.map((x) => x.id).sort(), ["d", "t"]);
   assert.equal(api.nearSupported(), true);
   await api.loadTasks(t, ROOT); // the root is "everything": a plain state filter, no near

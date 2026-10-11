@@ -3,7 +3,7 @@ import type { Area } from "./areasCore";
 import { stageLayout, centreLines, MARK_LABEL, metrics, tipLayout, type Alive, type ArmIn, type Mark } from "./nodeMap";
 
 /** One arm of the map: a child, its status mark, and the children at its tip. */
-export type StageKid = { node: Area; mark: Mark; tips: string[]; needs: number; /** Open tasks here and beneath (rolled up). */ open?: number };
+export type StageKid = { node: Area; mark: Mark; tips: string[]; needs: number; /** The name of the room this project has of its own (a small dot on its arm). */ room?: string; /** Open tasks here and beneath (rolled up). */ open?: number };
 
 /**
  * A zoom in flight: the tap records where the tapped node and the old centre were, and the next stage (a fresh mount for
@@ -100,7 +100,8 @@ export default function NodeStage({ node, kids, parent, alive, pending, fresh, k
         return <div key={k.node.id} className="node-bloom">
           <button type="button" className={`node-arm ${k.mark} ${k.node.status}`} data-mark={k.mark} data-name={k.node.name}
             style={{ left: a.x - a.d / 2, top: a.y - a.d / 2, width: a.d, height: a.d }}
-            aria-label={`${k.node.name}, ${k.needs ? `${k.needs} need${k.needs === 1 ? "s" : ""} you` : MARK_LABEL[k.mark]}${k.open ? `, ${k.open} open` : ""}`} onClick={(e) => { remember("in", e.currentTarget); onOpen(k.node); }} />
+            aria-label={`${k.node.name}, ${k.needs ? `${k.needs} need${k.needs === 1 ? "s" : ""} you` : MARK_LABEL[k.mark]}${k.room ? `, room #${k.room}` : ""}${k.open ? `, ${k.open} open` : ""}`} onClick={(e) => { remember("in", e.currentTarget); onOpen(k.node); }} />
+          {k.room && <i className="node-room-dot" aria-hidden="true" title={`#${k.room}`} style={{ left: a.x - a.d * 0.5 + 2, top: a.y + a.d * 0.5 - 12 }} />}
           {!!k.open && <span className="node-badge" aria-hidden="true" style={{ left: a.x + a.d * 0.22, top: a.y - a.d / 2 - 6 }}>{k.open > 99 ? "99+" : k.open}</span>}
           <span className={`node-label ${k.mark} ${k.node.status} ${a.side}`} aria-hidden="true" style={{ left: a.label.x, top: a.label.y, width: a.label.w, height: a.label.h }}><span>{k.node.name}</span></span>
           {(layout?.compact ? [] : tipLayout(a, k.tips.length, m)).map((t, j) => <span key={j} className={`node-tip ${t.side}`} aria-hidden="true" style={{ left: t.x, top: t.y }}><i /><b>{k.tips[j]}</b></span>)}

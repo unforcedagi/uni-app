@@ -2,6 +2,8 @@
 // `Areas/<Name>` notes and find an area's app note. The sandbox, scoping and
 // message handling live in src/interface. No React, no Tauri.
 
+import { refKey } from "./refs.ts";
+
 export const AREAS_ROOT = "Areas";
 export type AreaStatus = "foreground" | "background" | "archived" | "done";
 export type Area = {
@@ -10,7 +12,7 @@ export type Area = {
   metadata: Record<string, unknown>; updatedAt: string | null;
   /** "area": an `Areas/<Name>` note; "project": a tagged note that names its parent (`metadata.parent`). */
   kind: "area" | "project";
-  /** The parent node's path as written in `metadata.parent` (null: a top-level node). The tree validates it. */
+  /** The parent as written in `metadata.parent`: an id, a path or a link (null: a top-level node). The tree resolves and validates it. */
   parent: string | null;
   /** The rooms this node shows: `channels` minus the rooms its children claim. `channels` itself stays what the note says. */
   rooms: string[];
@@ -68,11 +70,9 @@ export function parseArea(note: AreaNoteLike): Area | null {
   };
 }
 
-/** `metadata.parent` as a note path: `[[ ]]`, a leading slash and the extension are tolerated. */
+/** `metadata.parent` as written: a note id, a path or a `[[link]]` (the tree resolves it; see refs.ts). */
 export function parentOf(metadata: Record<string, unknown>): string | null {
-  const raw = typeof metadata.parent === "string" ? metadata.parent : "";
-  const p = stripExt(raw.trim().replace(/^\[\[|\]\]$/g, "").split("|")[0].trim().replace(/^\/+|\/+$/g, ""));
-  return p || null;
+  return refKey(metadata.parent);
 }
 
 /** A project note under a node: tagged `project`, with `metadata.parent`. Its Brief and app notes are not nodes. */
@@ -105,4 +105,17 @@ export const appPathOf = (areaPath: string) => `${stripExt(areaPath)}/app`;
 export function findAppRow(rows: PathRow[], areaPath: string): PathRow | null {
   const want = appPathOf(areaPath);
   return rows.find((r) => !!r.path && stripExt(r.path) === want && (r.extension ?? (/\.html$/i.test(r.path ?? "") ? "html" : "")).toLowerCase().replace(/^\./, "") === "html") ?? null;
+}
+
+/**
+ * The Brief a node's `brief` field points to, if it may be trusted: the reference (an id, a path or a link) must resolve to a note
+ * whose path is `<node path>/Brief` (`Areas/Today` for the Uni root, path ""). Anything else is refused, so a node cannot adopt
+ * another node's brief by naming it; the caller then keeps the Brief found by path.
+ */
+export function trustedBrief<T extends { id: string; path?: string | null }>(nodePath: string, ref: unknown, notes: readonly T[]): T | null {
+  const key = refKey(ref);
+  if (!key) return null;
+  const want = nodePath === "" ? "Areas/Today" : `${stripExt(nodePath)}/Brief`;
+  const hit = notes.find((n) => n.id === key || (!!n.path && stripExt(n.path) === key));
+  return hit && !!hit.path && stripExt(hit.path) === want ? hit : null;
 }

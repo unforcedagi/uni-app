@@ -334,7 +334,7 @@ test.describe('Uni is home, areas are a tree', () => {
     await expect(crumbs(page)).toContainText('Uni');
     await expect(crumbs(page).locator('.here')).toHaveText(/Techne/);
     await expect(page.locator('.node-arm')).toHaveCount(1);
-    await expect(areaCard(page, 'COhere 2026')).toHaveAttribute('aria-label', 'COhere 2026, 1 needs you');
+    await expect(areaCard(page, 'COhere 2026')).toHaveAttribute('aria-label', 'COhere 2026, 1 needs you, room #Cohere');
     // #cohere belongs to the child now: no chip for it on Techne
     await expect(page.locator('.room-chips')).toHaveCount(0);
     await openSheet(page);

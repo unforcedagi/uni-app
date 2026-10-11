@@ -1,7 +1,7 @@
 import { clearProjectBodies } from "./projectBody";
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { parseArea, parseProject, sortAreas, type Area, type AreaNoteLike, type PathRow } from "./areasCore";
+import { parseArea, parseProject, sortAreas, trustedBrief, type Area, type AreaNoteLike, type PathRow } from "./areasCore";
 import { parseBrief, parseToday, type Brief, type Today } from "./briefCore";
 import { deviceCache, type AreasPayload, type BriefRaw, type CacheOwner } from "./areasCache";
 import { buildTree, type Tree } from "./treeCore";
@@ -52,6 +52,8 @@ export async function fetchPayload(prev: AreasPayload | null = null): Promise<Ar
       const owner = pathOwner(n); if (!owner) continue;
       latest[owner] = newest(latest[owner], n);
     }
+    // A node whose `brief` field names its own Brief (by id) uses exactly that note; a reference to anything else is ignored.
+    for (const a of parsed) { const pinned = trustedBrief(a.path, a.metadata.brief, briefs.value); if (pinned) latest[a.path] = pinned; }
     briefRaw = Object.fromEntries(Object.entries(latest).map(([name, n]) => [name, { content: n.content ?? "", updatedAt: n.updatedAt ?? null, generatedAt: typeof n.metadata?.generated_at === "string" ? n.metadata.generated_at : null }]));
   }
   let todayRaw = prev?.today ?? null;
