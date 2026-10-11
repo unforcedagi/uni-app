@@ -52,7 +52,11 @@ await check("contract: oversize, deep and non-plain payloads are refused", () =>
   assert.equal(p({ uni: 1, id: "a", ns: "chat", method: "draft", params: deep }).kind, "bad");
   assert.equal(p({ uni: 1, id: "a", ns: "chat", method: "draft", params: { text: new Map() } }).kind, "bad");
   assert.equal(p({ uni: 1, id: "a", ns: "chat", method: "recent", params: new (class X {})() }).kind, "bad");
-  const t0 = Date.now(); p({ uni: 1, id: "a", ns: "chat", method: "recent", params: { a: new Array(5_000_000).fill(1) } }); assert.ok(Date.now() - t0 < 100);
+  // Refused without walking 5M elements. The array is built outside the timer, and the fastest of five runs is bounded (load only slows some runs).
+  const huge = { a: new Array(5_000_000).fill(1) };
+  let fastest = Infinity;
+  for (let i = 0; i < 5; i++) { const t0 = performance.now(); p({ uni: 1, id: "a", ns: "chat", method: "recent", params: huge }); fastest = Math.min(fastest, performance.now() - t0); }
+  assert.ok(fastest < 100, `oversize payload took ${fastest.toFixed(0)}ms`);
 });
 await check("contract: RateLimiter is a sliding window", () => {
   const r = new contract.RateLimiter(3, 1000);

@@ -116,9 +116,9 @@ function Meta({ t, here, nodeName }: { t: Task; here: string; nodeName: (path: s
 }
 
 /** What needs doing at this level and below, grouped You / Rooms / Others, with a one-tap check-off. */
-export function TaskList({ tasks, leaving, here, nodeName, loading, ready, error, truncated, onOpen, onAct, onRetry }: {
+export function TaskList({ tasks, leaving, here, nodeName, loading, ready, error, truncated, treeTruncated, onOpen, onAct, onRetry }: {
   tasks: readonly Task[]; leaving: ReadonlySet<string>; here: string; nodeName: (path: string) => string;
-  loading: boolean; ready: boolean; error: string | null; truncated: boolean;
+  loading: boolean; ready: boolean; error: string | null; truncated: boolean; treeTruncated?: boolean;
   onOpen: (t: Task) => void; onAct: (t: Task, a: TaskAction) => void; onRetry: () => void;
 }) {
   const [all, setAll] = useState<Record<string, boolean>>({});
@@ -143,6 +143,7 @@ export function TaskList({ tasks, leaving, here, nodeName, loading, ready, error
       </div>;
     })}
     {truncated && <p className="area-quiet" role="status">Showing the first 200; more may exist.</p>}
+    {treeTruncated && <p className="area-quiet" role="status">The tree was cut short at 200 nodes; some areas or projects may be missing.</p>}
   </section>;
 }
 

@@ -128,6 +128,8 @@ setInterval(() => { uni.chat.draft('INJECTED BY APP ' + Date.now()).catch(() => 
 type Variant = 'seed' | 'test';
 
 export type BootOpts = {
+  /** Freeze the page clock (and the fixture's relative timestamps) at the day the seeded briefs were written, so due-date ranking never depends on the real date. */
+  pinned?: boolean;
   selftest?: boolean; ipcLeak?: boolean;
   /** The mode of the seeded self-test record (default: a sealed pass). */
   mode?: 'sealed' | 'approved-code';
@@ -175,7 +177,9 @@ export type BootOpts = {
 };
 
 export async function bootAreas(page: Page, variant: Variant = 'seed', opts: BootOpts = {}) {
-  const now = Math.floor(Date.now() / 1000);
+  const pinnedAt = Date.parse('2026-10-09T10:00:00.000Z');
+  if (opts.pinned) await page.clock.setFixedTime(pinnedAt);
+  const now = Math.floor((opts.pinned ? pinnedAt : Date.now()) / 1000);
   const data = {
     now, variant, selftest: opts.selftest ?? true, ipcLeak: opts.ipcLeak ?? false, hostile: hostileApp(opts.ports ?? { http: 9, udp: 9 }), benign: BENIGN, techne: seed('techne'), unforced: seed('unforced'), seedMeta,
     apps: opts.apps ?? [], multiRoom: !!opts.multiRoom || !!opts.tree, tree: !!opts.tree, tasks: !!opts.tasks, briefs: !!opts.briefs, queryDelay: opts.queryDelay ?? 0, identityDelay: opts.identityDelay ?? 0, roomsDelay: opts.roomsDelay ?? 0, nodeStatuses: opts.nodeStatuses ?? {}, nearOff: !!opts.nearOff, deviceCache: opts.deviceCache ?? null, queryFails: opts.queryFails ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null, mode: opts.mode ?? 'sealed', grantedUnder: opts.grantedUnder ?? (opts.mode ?? 'sealed'),
@@ -414,9 +418,9 @@ Two proposals wait on a scope decision.
             if (w.__failNext) { const e = w.__failNext; w.__failNext = null; throw e; }
             if (!t) throw 'note not found: ' + args.id;
             const valid = t.tags.includes('decision') ? ['open', 'decided'] : ['open', 'doing', 'waiting', 'done', 'archived'];
-            if (t.metadata[args.field] !== args.from) throw `MCP error -32600: [transition_conflict] conflict: note ${args.id} ${args.field} is ${t.metadata[args.field]}, not ${args.from}`;
+            if (t.metadata['state'] !== args.from) throw `MCP error -32600: [transition_conflict] conflict: note ${args.id} ${'state'} is ${t.metadata['state']}, not ${args.from}`;
             if (!valid.includes(args.to)) throw '[schema_validation] state is not one of ' + valid.join(',');
-            t.metadata[args.field] = args.to; t.updatedAt = new Date(Date.now() + taskNotes.length).toISOString(); t.lastUpdatedVia = 'api';
+            t.metadata['state'] = args.to; t.updatedAt = new Date(Date.now() + taskNotes.length).toISOString(); t.lastUpdatedVia = 'api';
             return JSON.parse(JSON.stringify(t));
           }
           case 'vault_patch_meta': {
