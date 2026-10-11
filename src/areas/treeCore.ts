@@ -2,6 +2,7 @@
 // notes whose `metadata.parent` names their parent's path. Built from the notes of one tagged query and a parent index;
 // nothing here fetches.
 import { sortAreas, type Area } from "./areasCore.ts";
+import { pathResolver } from "./refs.ts";
 
 /** The Uni root's key in `children`. Never a note path. */
 export const ROOT = "";
@@ -19,7 +20,8 @@ export type Tree = {
 /** Parent links that survive: a parent that is missing, the node itself, or part of a cycle means "top level" for that link. */
 function resolveParents(nodes: Map<string, Area>): Map<string, string> {
   const parent = new Map<string, string>();
-  for (const [path, n] of nodes) parent.set(path, n.parent && n.parent !== path && nodes.has(n.parent) ? n.parent : ROOT);
+  const resolve = pathResolver([...nodes.values()]);
+  for (const [path, n] of nodes) { const p = resolve(n.parent); parent.set(path, p && p !== path && nodes.has(p) ? p : ROOT); }
   // A cycle is broken at its smallest path, so the same data always gives the same tree.
   for (const start of [...nodes.keys()].sort()) {
     const seen: string[] = [];
@@ -56,6 +58,14 @@ export function trail(tree: Tree, path: string): Area[] {
   let at: string | undefined = path;
   while (at && at !== ROOT && tree.nodes.has(at) && out.length <= tree.nodes.size) { out.unshift(tree.nodes.get(at)!); at = tree.parent.get(at); }
   return tree.nodes.has(path) ? out : [];
+}
+
+/** The node and its ancestors up to the top level, nearest first. Stops at a repeat, so bad data cannot loop. */
+export function ancestry(tree: Tree, path: string): Area[] {
+  const out: Area[] = [];
+  const seen = new Set<string>();
+  for (let at: string | undefined = path; at && at !== ROOT && !seen.has(at) && tree.nodes.has(at); at = tree.parent.get(at)) { seen.add(at); out.push(tree.nodes.get(at)!); }
+  return out;
 }
 
 /** The path a node's Back goes to: its parent, or Uni (ROOT). */

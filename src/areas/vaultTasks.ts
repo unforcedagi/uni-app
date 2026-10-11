@@ -40,7 +40,7 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
 
   /**
    * Live tasks and open decisions under `path` (ROOT: everywhere). With the vault's subtree queries, one `near` request per
-   * kind (`parent` inbound, then `node` inbound, `state in [open, doing, waiting]`). A vault that answers with an unknown-parameter
+   * kind (anchored at the node's id, else its path; `parent` inbound, then `node` inbound, `state in [open, doing, waiting]`). A vault that answers with an unknown-parameter
    * error gets the older walk instead: `node in [subtree paths and ids]`, decided once per session. `truncated` says the
    * vault returned a full page (more may exist).
    */
@@ -50,10 +50,12 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
       return { tasks: [...new Map(parsed.map((t) => [t.id, t])).values()], truncated: tasks.length >= LIMIT || decisions.length >= LIMIT };
     };
     if (path !== ROOT && nearOk !== false) {
+      // The anchor is the node's id when the tree knows it (the vault stores references as ids); the path is still accepted.
+      const root = tree.byPath.get(path)?.id ?? path;
       try {
         const [tasks, decisions] = await Promise.all([
-          call("vault_subtree_tasks", { vault, tag: "task", root: path, states: [...LIVE_STATES], limit: LIMIT }) as Promise<RawNote[]>,
-          call("vault_subtree_tasks", { vault, tag: "decision", root: path, states: ["open"], limit: LIMIT }) as Promise<RawNote[]>,
+          call("vault_subtree_tasks", { vault, tag: "task", root, states: [...LIVE_STATES], limit: LIMIT }) as Promise<RawNote[]>,
+          call("vault_subtree_tasks", { vault, tag: "decision", root, states: ["open"], limit: LIMIT }) as Promise<RawNote[]>,
         ]);
         nearOk = true;
         return finish(tasks, decisions);

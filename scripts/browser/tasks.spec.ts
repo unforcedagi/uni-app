@@ -55,8 +55,8 @@ test.describe('tasks on the node view', () => {
     await expect(page.locator('.work-head .brief-count')).toHaveText('7');
     await expect(group(page, 'You').locator('.task-row').filter({ hasText: 'T-03' })).toContainText('in COhere 2026');
     await expect(group(page, 'You').locator('.task-row').filter({ hasText: 'T-33' })).not.toContainText(/ in [A-Z]/);
-    const near = (await calls(page, 'vault_subtree_tasks')).filter((a: any) => a.tag === 'task' && a.root === 'Areas/Techne').at(-1);
-    expect(near).toEqual({ vault: 'uni', tag: 'task', root: 'Areas/Techne', states: ['open', 'doing', 'waiting'], limit: 200 });
+    const near = (await calls(page, 'vault_subtree_tasks')).filter((a: any) => a.tag === 'task' && a.root === 'a-techne').at(-1);
+    expect(near).toEqual({ vault: 'uni', tag: 'task', root: 'a-techne', states: ['open', 'doing', 'waiting'], limit: 200 });
     expect((await calls(page, 'vault_query_meta')).filter((a: any) => a.metadata.node), 'one-request path: no two-query walk').toHaveLength(0);
     await shot(page, 'techne');
 

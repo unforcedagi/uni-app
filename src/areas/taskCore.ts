@@ -1,6 +1,8 @@
 // Tasks as Parachute objects (pure, unit-tested in scripts/tasks.test.ts): parse `task` and `decision` notes, build the node tree
 // from `node` notes, take a subtree, group by owner, roll counts up the tree. Nothing here fetches.
 import { ROOT } from "./treeCore.ts";
+import { pathResolver, refKey, stripExt } from "./refs.ts";
+export { refKey };
 
 export type TaskState = "open" | "doing" | "waiting" | "done" | "archived";
 /** A decision is `open` until `decided`; it reads as a task whose closing state is `decided`. */
@@ -23,16 +25,7 @@ export type Task = {
 };
 
 const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);
-const stripExt = (p: string) => p.replace(/\.(md|html)$/i, "");
 const leaf = (p: string) => p.split("/").filter(Boolean).pop() ?? p;
-
-/** A reference field as a path-or-id key: `[[ ]]`, alias, extension and surrounding slashes are tolerated. */
-export function refKey(v: unknown): string | null {
-  const raw = str(v);
-  if (!raw) return null;
-  const k = stripExt(raw.replace(/^\[\[|\]\]$/g, "").split("|")[0].trim().replace(/^\/+|\/+$/g, ""));
-  return k || null;
-}
 
 export type TaskNode = { id: string; path: string; name: string; parent: string | null; room: string | null; status: string; isRoot: boolean };
 
@@ -62,14 +55,23 @@ export type TaskTree = {
   /** parent path (ROOT: top level) → child paths. A missing parent, self parent or a cycle means "top level" for that link. */
   children: Map<string, string[]>;
   parent: Map<string, string>;
+  /** The Uni root's path and id: a reference to either means ROOT. */
+  rootRefs: ReadonlySet<string>;
 };
 
 export function buildTaskTree(nodes: readonly TaskNode[], rootPath: string | null = null): TaskTree {
   const byPath = new Map<string, TaskNode>();
   const idPath = new Map<string, string>();
-  for (const n of nodes) { if (n.isRoot || n.path === rootPath) continue; idPath.set(n.id, n.path); if (n.status !== "archived" && n.status !== "done") byPath.set(n.path, n); }
+  const rootRefs = new Set<string>(rootPath ? [rootPath] : []);
+  for (const n of nodes) {
+    if (n.isRoot || n.path === rootPath) { rootRefs.add(n.id); rootRefs.add(n.path); continue; }
+    idPath.set(n.id, n.path);
+    if (n.status !== "archived" && n.status !== "done") byPath.set(n.path, n);
+  }
   const parent = new Map<string, string>();
-  const up = (n: TaskNode) => { const p = n.parent && (byPath.has(n.parent) ? n.parent : idPath.get(n.parent)); return p && p !== n.path && byPath.has(p) ? p : ROOT; };
+  // A parent may be written as a path, a `[[link]]` or an id; only a live node counts, anything else is the top level.
+  const resolve = pathResolver(nodes.filter((n) => !rootRefs.has(n.id)));
+  const up = (n: TaskNode) => { const p = resolve(n.parent); return p && p !== n.path && byPath.has(p) ? p : ROOT; };
   for (const n of byPath.values()) parent.set(n.path, up(n));
   for (const start of [...byPath.keys()].sort()) {
     const seen: string[] = [];
@@ -79,7 +81,7 @@ export function buildTaskTree(nodes: readonly TaskNode[], rootPath: string | nul
   }
   const children = new Map<string, string[]>();
   for (const [p, up_] of [...parent].sort((a, b) => a[0].localeCompare(b[0]))) children.set(up_, [...(children.get(up_) ?? []), p]);
-  return { byPath, idPath, children, parent };
+  return { byPath, idPath, children, parent, rootRefs };
 }
 
 /** The node and everything beneath it (paths). ROOT is every node. */
@@ -112,7 +114,7 @@ export function parseTask(n: RawNote, tree: TaskTree): Task | null {
   const valid = kind === "decision" ? ["open", "decided"] : ["open", "doing", "waiting", "done", "archived"];
   if (!state || !valid.includes(state)) return null;
   const ref = refKey(m.node);
-  const node = ref ? (tree.byPath.has(ref) ? ref : tree.idPath.get(ref) ?? ref) : ROOT;
+  const node = !ref || tree.rootRefs.has(ref) ? ROOT : tree.byPath.has(ref) ? ref : tree.idPath.get(ref) ?? ref;
   return {
     id, path, kind, title: leaf(path), node, state: state as AnyState, owner: str(m.owner) ?? "", waitingOn: str(m.waiting_on),
     due: str(m.due)?.slice(0, 10) ?? null, next: str(m.next) ?? "", room: str(m.room)?.replace(/^#/, "") ?? null,
