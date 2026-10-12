@@ -8,7 +8,7 @@ import { rootNeeds, TodaySections, type RoomInfo } from "./TodayView";
 import NodeStage, { type ZoomState, type StageKid } from "./NodeStage";
 import { AreaSlot } from "./areaSlots";
 import { aliveOf, rolledMark, type Alive } from "./nodeMap";
-import { refreshDraft, updatedLabel } from "./briefCore";
+import { askDraft, refreshDraft, updatedLabel, type Inline } from "./briefCore";
 import AreaView, { type AreaActions } from "./AreaView";
 import type { AreaRoom } from "./AreaChat";
 import { currentUserAgent, gateMode, platformName } from "../interface/selftest/gate";
@@ -19,8 +19,15 @@ import { pickRoom } from "./areaLayout";
 import { ancestry, childrenOf, parentPath, ROOT, rootNode, trail, UNI_CHANNEL } from "./treeCore";
 import { findUniRoom } from "../uniActions";
 import { useStoredSelfTest } from "../interface/selftest/useSelfTest";
+import { useHomeLayout, useWide } from "./homeLayout";
+import { roomView, treeRows, updatesBelow, type RoomView } from "./treeRooms";
+import { levelAlive } from "./treeAlive";
+import { AliveBlock, Crumbs, InsideBlock, LevelPanel, Ledger, NeedsBlock, ProjectNote, RoomBlock, RoomLine, TreeScreen, UpdatesBlock, type InsideKid } from "./TreeHome";
 import "./areas.css";
+import "./tree.css";
 
+/** Whether the phone is on Uni's own level rather than the room tree. A replace in the tab strip remounts the page, so this outlives it. */
+const rootOpenMemory = { open: false };
 const USER_AGENT = currentUserAgent();
 const PLATFORM = platformName(USER_AGENT);
 
@@ -41,6 +48,13 @@ export default function AreasSurface({ zoom, identity, talk, path, rooms, action
   onBackChange: (back: (() => void) | null) => void;
 }) {
   const { data, error, loading, signingIn } = useAreas(identity);
+  const layout = useHomeLayout();
+  const wide = useWide();
+  const treeMode = layout === "tree";
+  /** Phone: the room tree is the home and a level opens from it; Uni's own level is one tap on its row. */
+  const [rootOpen, setRootOpenState] = useState(rootOpenMemory.open);
+  const setRootOpen = (v: boolean) => { rootOpenMemory.open = v; setRootOpenState(v); };
+  const phoneTree = treeMode && !wide;
   const version = useAppVersion();
   const runtime = useWebviewRuntime();
   const stored = useStoredSelfTest();
@@ -64,19 +78,22 @@ export default function AreasSurface({ zoom, identity, talk, path, rooms, action
     return () => { live = false; };
   }, [identity, node?.id, node?.updatedAt]);
   const [sheet, setSheet] = useState<Task | null>(null);
-  const back = path ? () => {
+  const back = path ? (phoneTree ? () => { setRootOpen(false); onOpenArea(null, "Uni", uniRoom); } : () => {
     const up = data ? data.tree.nodes.get(parentPath(data.tree, path)) : null;
     onOpenArea(up?.path ?? null, up?.name ?? "Uni", up ? pickRoom(withRoom(up).rooms, null) : uniRoom);
-  } : null;
+  }) : phoneTree && rootOpen ? () => setRootOpen(false) : null;
   useEffect(() => {
     // Android Back closes an open task sheet before it zooms out a level.
     onBackChange(sheet ? () => setSheet(null) : back);
     return () => onBackChange(null);
-  }, [path, data, uniRoom, onOpenArea, onBackChange, sheet]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [path, data, uniRoom, onOpenArea, onBackChange, sheet, phoneTree, rootOpen]); // eslint-disable-line react-hooks/exhaustive-deps
   // A node can have several rooms (metadata.channel is a list): the user's pick, else the first.
   const [picked, setPicked] = useState<string | null>(null);
   const nodeRoom = node ? pickRoom(node.rooms, picked) : null;
-  useEffect(() => { if (node) onRoom(nodeRoom); }, [node?.id, nodeRoom]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The tree home talks to the steward's room (a held project's area room), so that is the one the host opens.
+  const stewardRoomId = node && data && treeMode ? roomView(data.tree, node.path, roomRefs, uniRef).target?.id ?? null : null;
+  const hostRoom = treeMode ? stewardRoomId ?? (node?.path === ROOT ? uniRoom : null) : nodeRoom;
+  useEffect(() => { if (node) onRoom(hostRoom); }, [node?.id, hostRoom]); // eslint-disable-line react-hooks/exhaustive-deps
   const roomName = useMemo(() => (id: string) => rooms.find((r) => r.id === id)?.name ?? "room", [rooms]);
   const now = Date.now();
   const fallback = useMemo<TaskNode[]>(() => (data?.areas ?? []).map((a) => ({ id: a.id, path: a.path, name: a.name, parent: a.parent, room: typeof a.metadata.room === "string" ? a.metadata.room : null, status: a.status === "archived" || a.status === "done" ? a.status : "active", isRoot: false })), [data?.areas]);
@@ -85,6 +102,11 @@ export default function AreasSurface({ zoom, identity, talk, path, rooms, action
   useEffect(() => { setSheet(null); }, [node?.path]);
   /** Who stewards a node: its own room, else the nearest ancestor's, else #Uni (one rule for talk targets, "Open in #room" and the node page). */
   const stewardOf = (p: string): Steward => {
+    if (treeMode && data) {
+      // the tree home also skips an archived room (its `room_fallback` stands in) and knows a room an ancestor shares
+      const v = roomView(data.tree, p, roomRefs, uniRef);
+      return { room: v.target, via: v.own ? "own" : v.heldBy && v.heldBy.id !== uniRef?.id ? "inherited" : "uni", from: null };
+    }
     const chain: RoomNode[] = data ? ancestry(data.tree, p).map((n) => ({ path: n.path, name: n.name, room: typeof n.metadata.room === "string" ? n.metadata.room : null, channels: n.rooms })) : [];
     return steward(chain, roomRefs, uniRef);
   };
@@ -117,7 +139,7 @@ export default function AreasSurface({ zoom, identity, talk, path, rooms, action
   const empty = isRoot && !kids.length && !error ? <p className="empty">{signingIn ? "Signing in…" : loading ? "Loading areas…" : "No areas yet. Tag a note `area` at Areas/<Name>."}</p> : null;
   const today = data?.today;
   const entry = data?.briefs[node.path] ?? null;
-  const stageKids: StageKid[] = data && tree ? kids.map((k) => ({ node: k, open: tasks.counts.get(k.path)?.total ?? 0, needs: data.briefs[k.path]?.brief.needsYou.length ?? 0, room: k.kind === "project" ? stewardOf(k.path).via === "own" ? stewardOf(k.path).room?.name : undefined : undefined, mark: rolledMark(tree, data.briefs, k.path), tips: childrenOf(tree, k.path).map((c) => c.name) })) : [];
+  const stageKids: StageKid[] = data && tree ? kids.map((k) => ({ node: k, open: tasks.counts.get(k.path)?.total ?? 0, needs: data.briefs[k.path]?.brief.needsYou.length ?? 0, room: k.kind === "project" ? treeMode ? (roomView(tree, k.path, roomRefs, uniRef).slash ?? undefined) : stewardOf(k.path).via === "own" ? stewardOf(k.path).room?.name : undefined : undefined, mark: rolledMark(tree, data.briefs, k.path), tips: childrenOf(tree, k.path).map((c) => c.name) })) : [];
   const alive: Alive = isRoot
     ? { has: !!data && (!!data.today || Object.keys(data.briefs).length > 0), needs: rootNeeds(data, now).map((n) => n.text), moving: (today?.today.moved ?? []).map((m) => m.text) }
     : aliveOf(entry);
@@ -139,7 +161,69 @@ export default function AreasSurface({ zoom, identity, talk, path, rooms, action
     {sheet && <TaskSheet key={sheet.id} task={sheet} here={here} nodeName={nodeName} room={roomOfNode(sheet.node) ?? target} onClose={() => setSheet(null)} onAct={(t, a) => void tasks.act(t, a)} onOpenRoom={actions.openRoom} />}
     <UndoBar undo={tasks.undo} notice={tasks.notice} onDismiss={tasks.dismissNotice} />
   </>;
+  // ------------------------------------------------------------------------------------------ the tree home (T-111)
+  const nowSec = Math.floor(now / 1000);
+  const rowOf = (p: string): RoomView => (tree ? roomView(tree, p, roomRefs, uniRef) : { target: uniRef, slash: null, heldBy: uniRef, own: false });
+  const needsOf = (p: string) => tasks.counts.get(p)?.you ?? 0;
+  const openOf = (p: string) => tasks.counts.get(p)?.total ?? 0;
+  const openPath = (p: string) => {
+    if (p === ROOT) { setRootOpen(true); onOpenArea(null, "Uni", uniRoom); return; }
+    const n = tree?.nodes.get(p); if (n) open(n);
+  };
+  if (treeMode && phoneTree && path === null && !rootOpen) {
+    const rows = tree ? treeRows(tree, roomRefs, uniRef) : [{ path: ROOT, name: "Uni", depth: 0, kind: "root" as const, slash: uniRef ? "uni" : null, heldBy: null, own: !!uniRef, trunk: [], last: true }];
+    const marks = new Map(rows.map((r) => [r.path, tree && data ? rolledMark(tree, data.briefs, r.path) : "quiet" as const]));
+    const needs = new Map(rows.map((r) => [r.path, needsOf(r.path)]));
+    const total = new Map(rows.map((r) => [r.path, openOf(r.path)]));
+    const you = needsOf(ROOT);
+    const summary = !data ? (signingIn ? "Signing in…" : loading ? "Opening…" : error ? `Couldn't load: ${error}` : "") : you ? `${you} need${you === 1 ? "s" : ""} you · ${openOf(ROOT)} open` : openOf(ROOT) ? `Nothing needs you · ${openOf(ROOT)} open` : "Nothing open";
+    return <div className="areas-home tree-home-wrap"><TreeScreen rows={rows} marks={marks} needs={needs} open={total} summary={summary} status={status}
+      dateLine={new Date(now).toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" })} onOpen={openPath} />
+      <UndoBar undo={tasks.undo} notice={tasks.notice} onDismiss={tasks.dismissNotice} /></div>;
+  }
+  const mark = tree && data ? rolledMark(tree, data.briefs, node.path) : "quiet";
+  const insideKids: InsideKid[] = tree && data ? kids.map((k) => ({ node: k, mark: rolledMark(tree, data.briefs, k.path), view: rowOf(k.path), needs: needsOf(k.path), open: openOf(k.path) })) : [];
+  const nodeView = rowOf(node.path);
+  const askRoom = target?.id ?? null;
+  const rootLines = isRoot ? rootNeeds(data, now).map((n) => ({ text: n.text, tokens: n.tokens, ...(n.area ? { note: n.area } : {}) })) : [];
+  const levelA = tree && data ? levelAlive({ tree, path: node.path, node, entry, briefs: data.briefs, tasks: tasks.tasks,
+    root: isRoot ? { needs: rootLines, moved: today?.today.moved ?? [], areas: kids.length, needing: new Set(rootLines.map((l) => l.note).filter(Boolean)).size } : null }) : { now: "", nowTokens: null, needs: [], moving: [], derived: false, hasBrief: false };
+  const updates = tree ? updatesBelow(tree, node.path, rooms, uniRef, nowSec) : [];
+  const trailItems = [{ path: ROOT, name: "Uni" }, ...(tree && !isRoot ? trail(tree, node.path) : isRoot ? [] : [node]).map((n) => ({ path: n.path, name: n.name }))];
+  const insideTitle = isRoot ? "Areas" : node.kind === "area" ? "Projects" : "Inside";
+  const askDraftFor = (l: { text: string; tokens: Inline[]; note?: string }) => askRoom && actions.compose(askRoom, askDraft("needsYou", isRoot && l.note ? l.note : node.name, l));
+  const sections = <>
+    <AliveBlock alive={levelA} kind={node.kind} onNote={actions.openNote} fresh={updatedLabel(freshIso, now)} onRefresh={askRoom ? () => actions.compose(askRoom, refreshDraft(node.name, isRoot ? "" : node.path)) : null} />
+    <NeedsBlock lines={levelA.needs} onNote={actions.openNote} onAsk={askRoom && !levelA.derived ? (l) => void askDraftFor(l) : null} />
+    <UpdatesBlock updates={updates} nowSec={nowSec} onOpen={openPath} />
+    <InsideBlock title={insideTitle} kids={insideKids} onOpen={open} />
+    {empty}
+    <ProjectNote area={body !== null ? { ...node, body } : node} />
+    <TaskList tasks={tasks.tasks} leaving={tasks.leaving} here={here} nodeName={nodeName} loading={tasks.loading} ready={tasks.ready} error={tasks.error} truncated={tasks.truncated} treeTruncated={tasks.treeTruncated}
+      onOpen={setSheet} onAct={(t, a) => void tasks.act(t, a)} onRetry={tasks.refresh} />
+    <RoomBlock view={nodeView} steward={stewardText} ledger={<Ledger roomId={target?.id ?? null} me={identity} nowSec={nowSec} tick={sentTick + (roomFor(target?.id)?.messages.length ?? 0)} />} />
+  </>;
+  const talkBar = <TalkBar key={`${node.path}|${target?.id ?? ""}`} room={target} talk={{ ...talk, sendText: async (c, t) => { await talk.sendText(c, t); setSentTick((n) => n + 1); } }} label={node.name} />;
+  const phoneHead = <header className="th-head phone">
+    <div className="th-toprow">
+      <button type="button" className="th-back" onClick={() => (back ? back() : undefined)} aria-label="Back to the room tree"><span aria-hidden="true">‹</span> Rooms</button>
+      <Crumbs trail={trailItems} onOpen={openPath} />
+    </div>
+    <p className="th-cap">{node.kind === "project" ? "Project" : isRoot ? new Date(now).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" }) : "Area"} {mark !== "quiet" && <span className="th-state" data-st={mark}>{mark === "needs" ? "needs you" : "moving"}</span>}</p>
+    <h1 className="note-title">{node.title}</h1>
+    <RoomLine view={nodeView} />
+  </header>;
+  const wideHead = <header className="th-head wide">
+    <Crumbs trail={trailItems} onOpen={openPath} />
+    <RoomLine view={nodeView} />
+  </header>;
+  const treeLevel = <div className={`tree-home th-level ${wide ? "wide" : "phone"}`} data-layout="tree">
+    {wide && <div className="th-stage">{stage}</div>}
+    <LevelPanel wide={wide} head={wide ? wideHead : phoneHead} foot={<>{talkBar}<UndoBar undo={tasks.undo} notice={tasks.notice} onDismiss={tasks.dismissNotice} /></>}>{sections}</LevelPanel>
+    {sheet && <TaskSheet key={sheet.id} task={sheet} here={here} nodeName={nodeName} room={roomOfNode(sheet.node) ?? target} onClose={() => setSheet(null)} onAct={(t, a) => void tasks.act(t, a)} onOpenRoom={actions.openRoom} />}
+  </div>;
+  const classicKids = layout === "classic" ? <div className="tree-home th-classic"><InsideBlock title={insideTitle} kids={insideKids} onOpen={open} />{empty}</div> : empty;
   return <AreaView key={node.id} work={work} area={body !== null ? { ...node, body } : node} projectError={bodyError} projectLoading={body === null && !bodyError} entry={data?.briefs[node.path] ?? null} now={now} channel={nodeRoom} onChannel={setPicked} mode={mode} roomName={roomName} actions={actions}
     room={roomFor(nodeRoom)} onConversations={onConversations} onBack={back} backLabel={up?.name ?? "Uni"}
-    crumbs={crumbs} stage={stage} slot={!isRoot && node.kind === "area" ? <AreaSlot node={node} /> : null} dataStatus={status} lead={lead} kids={empty} freshAt={isRoot ? (today ? today.generatedAt ?? today.updatedAt : null) : undefined} />;
+    crumbs={crumbs} stage={layout === "classic" ? undefined : stage} tree={treeMode ? <>{status}{treeLevel}</> : undefined} slot={!isRoot && node.kind === "area" && layout === "octopus" ? <AreaSlot node={node} /> : null} dataStatus={treeMode ? null : status} lead={lead} kids={classicKids} freshAt={isRoot ? (today ? today.generatedAt ?? today.updatedAt : null) : undefined} />;
 }
