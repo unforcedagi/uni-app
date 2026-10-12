@@ -1,0 +1,121 @@
+// Rooms in the tree (pure, unit-tested in scripts/treehome.test.ts): the slash name of a node's room (`boulder/cohere`), whether the
+// node owns that room or is held by an ancestor's, the archived-room fallback, and the updates the rooms below have posted.
+// Builds on stewardOf's rule (talkCore.steward): a node's own room, else the nearest ancestor's, else #Uni.
+import type { Area } from "./areasCore.ts";
+import { ancestry, ROOT, type Tree } from "./treeCore.ts";
+import { ownRoom, steward, type RoomNode, type RoomRef } from "./talkCore.ts";
+
+export const roomSlug = (name: string) => name.toLowerCase().replace(/^#/, "").trim().replace(/[\s_]+/g, "-");
+
+/** Nodes whose words and titles are never shown in a new place, only counts (the T-111 privacy rule). */
+const PRIVATE = new Set(["relationships", "sadhana"]);
+export const isPrivateNode = (tree: Tree, path: string): boolean => ancestry(tree, path).some((n) => PRIVATE.has(n.name.toLowerCase()));
+
+/**
+ * A node as the steward rule reads it. A room marked `room_status: archived|missing` is skipped: the node's `room_fallback`
+ * (a room name or id) stands in for it, and with none the walk simply continues to the ancestors.
+ */
+export function roomNodeOf(n: Area): RoomNode {
+  const room = typeof n.metadata.room === "string" ? n.metadata.room : null;
+  const status = typeof n.metadata.room_status === "string" ? n.metadata.room_status.toLowerCase() : "";
+  if (status === "archived" || status === "missing") {
+    const fb = typeof n.metadata.room_fallback === "string" ? n.metadata.room_fallback.replace(/^#/, "").trim() : "";
+    return { path: n.path, name: n.name, room: fb || null, channels: fb ? [fb] : [] };
+  }
+  return { path: n.path, name: n.name, room, channels: n.rooms };
+}
+export const fellBack = (n: Area): boolean => /^(archived|missing)$/i.test(String(n.metadata.room_status ?? ""));
+
+export type RoomView = {
+  /** Where a note to this node goes: its own room, else an ancestor's, else #Uni. */
+  target: RoomRef | null;
+  /** `boulder/cohere`: shown when the node has a room of its own. */
+  slash: string | null;
+  /** The ancestor's room that holds a node with none of its own. */
+  heldBy: RoomRef | null;
+  own: boolean;
+};
+
+/** `rooms`: every known room; `uni`: the Uni room. A node with a live room of its own that an ancestor also uses is held by that ancestor. */
+export function roomView(tree: Tree, path: string, rooms: readonly RoomRef[], uni: RoomRef | null): RoomView {
+  if (path === ROOT) return { target: uni, slash: uni ? roomSlug(uni.name) : null, heldBy: null, own: !!uni };
+  const chain = ancestry(tree, path);
+  const nodes = chain.map(roomNodeOf);
+  const s = steward(nodes, rooms, uni);
+  const mine = chain[0] ? ownRoom(nodes[0], rooms) : null;
+  const sharedWithAncestor = mine ? nodes.slice(1).some((n) => ownRoom(n, rooms)?.id === mine.id) : false;
+  // An archived room's fallback is a room the node borrows, not one it owns.
+  const own = !!mine && !sharedWithAncestor && !(chain[0] && fellBack(chain[0]));
+  if (own) {
+    // the names of the rooms on the way down, one per distinct room: area room, then project room
+    const names: string[] = [];
+    let last: string | null = null;
+    for (let i = chain.length - 1; i >= 0; i--) {
+      const r = fellBack(chain[i]) ? null : ownRoom(nodes[i], rooms);
+      if (r && r.id !== last) { names.push(roomSlug(r.name)); last = r.id; }
+    }
+    return { target: s.room, slash: names.join("/"), heldBy: null, own: true };
+  }
+  return { target: s.room, slash: null, heldBy: s.room, own: false };
+}
+
+export type RoomInfoLite = { id: string; name: string; last_message: string | null; last_ts: number | null };
+export type Update = { path: string; name: string; slash: string; ts: number; /** The newest line of the room; null for a private node (only that it was active). */ text: string | null };
+const DAY = 86_400;
+
+/**
+ * What the rooms below this node have posted in the last day: one entry per room of its own that sits under `path`
+ * (not the node's own room), newest first. Private areas contribute the time only.
+ */
+export function updatesBelow(tree: Tree, path: string, rooms: readonly RoomInfoLite[], uni: RoomRef | null, nowSec: number, windowSec = DAY): Update[] {
+  const mineRoom = roomView(tree, path, rooms, uni).target?.id ?? null;
+  const out = new Map<string, Update>();
+  const under = (p: string): boolean => { for (let at: string | undefined = tree.parent.get(p), n = 0; at !== undefined && n <= tree.nodes.size; at = tree.parent.get(at), n++) { if (at === path) return true; if (at === ROOT) return path === ROOT; } return false; };
+  for (const n of tree.nodes.values()) {
+    if (!under(n.path)) continue;
+    const v = roomView(tree, n.path, rooms, uni);
+    if (!v.own || !v.target || v.target.id === mineRoom) continue;
+    const info = rooms.find((r) => r.id === v.target!.id);
+    if (!info?.last_ts || nowSec - info.last_ts > windowSec || out.has(info.id)) continue;
+    const priv = isPrivateNode(tree, n.path);
+    out.set(info.id, { path: n.path, name: n.name, slash: v.slash ?? roomSlug(info.name), ts: info.last_ts, text: priv ? null : info.last_message });
+  }
+  return [...out.values()].sort((a, b) => b.ts - a.ts);
+}
+
+/** One row of the phone's room tree. */
+export type TreeRow = {
+  path: string; name: string; depth: number; kind: "root" | "area" | "project"; slash: string | null; heldBy: string | null; own: boolean;
+  /** For depths 1..depth-1: does the trunk at that depth carry on below this row (an ancestor with later siblings)? */
+  trunk: boolean[];
+  /** The last child of its parent: its branch ends here. */
+  last: boolean;
+};
+
+/** Uni, then every node under it by depth-first order (foreground first, then by name), with its room. */
+export function treeRows(tree: Tree, rooms: readonly RoomRef[], uni: RoomRef | null, rootName = "Uni"): TreeRow[] {
+  const rows: TreeRow[] = [{ path: ROOT, name: rootName, depth: 0, kind: "root", slash: uni ? roomSlug(uni.name) : null, heldBy: null, own: !!uni, trunk: [], last: true }];
+  const seen = new Set<string>();
+  const walk = (path: string, depth: number, trunk: boolean[]) => {
+    const kids = (tree.children.get(path) ?? []).filter((n) => !seen.has(n.path));
+    kids.forEach((n, i) => {
+      if (seen.has(n.path)) return;
+      seen.add(n.path);
+      const v = roomView(tree, n.path, rooms, uni);
+      const last = i === kids.length - 1;
+      rows.push({ path: n.path, name: n.name, depth, kind: n.kind, slash: v.slash, heldBy: v.heldBy ? roomSlug(v.heldBy.name) : null, own: v.own, trunk, last });
+      walk(n.path, depth + 1, [...trunk, !last]);
+    });
+  };
+  walk(ROOT, 1, []);
+  return rows;
+}
+
+/** "now", "5m", "3h", "2d": how long ago, for a ledger line. */
+export function agoLabel(nowSec: number, ts: number): string {
+  const s = Math.max(0, nowSec - ts);
+  if (s < 60) return "now";
+  if (s < 3600) return `${Math.floor(s / 60)}m`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h`;
+  return `${Math.floor(s / 86400)}d`;
+}
