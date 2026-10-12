@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { buildTaskTree, dayOf, isLive, rollUp, snoozed, tasksUnder, tomorrowOf, type AnyState, type Counts, type Priority, type Task, type TaskNode, type TaskTree } from "./taskCore";
+import { buildTaskTree, dayOf, isLive, rollUp, snoozed, tasksUnder, tomorrowOf, type AnyState, type Counts, type Priority, type RawNote, type Task, type TaskNode, type TaskTree } from "./taskCore";
 import { vaultTasks } from "./vaultTasks";
 import { shouldReload } from "./pathCache";
 import { useVaultProfile } from "./ProfileContext";
+import { parseDrafts, parseRuns } from "./steerCore";
 
 export type TaskAction = "done" | "archive" | "snooze";
 export type Undo = { id: string; label: string; run: () => Promise<void> };
@@ -12,10 +13,10 @@ export const LEAVE_MS = 240;
 const reduced = () => typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 
 // Memory for this session only, scoped to the signed-in identity and cleared on Forget: tasks are Aaron's private work.
-type Memory = { owner: string; tree: (TaskTree & { truncated: boolean }) | null; tasks: Map<string, { list: Task[]; truncated: boolean }>; at: number | null };
-let memory: Memory = { owner: "", tree: null, tasks: new Map(), at: null };
-export function forgetTasks() { memory = { owner: "", tree: null, tasks: new Map(), at: null }; }
-const scoped = (owner: string) => { if (memory.owner !== owner) memory = { owner, tree: null, tasks: new Map(), at: null }; return memory; };
+type Memory = { owner: string; tree: (TaskTree & { truncated: boolean }) | null; tasks: Map<string, { list: Task[]; truncated: boolean }>; at: number | null; runs: RawNote[]; drafts: RawNote[] };
+let memory: Memory = { owner: "", tree: null, tasks: new Map(), at: null, runs: [], drafts: [] };
+export function forgetTasks() { memory = { owner: "", tree: null, tasks: new Map(), at: null, runs: [], drafts: [] }; }
+const scoped = (owner: string) => { if (memory.owner !== owner) memory = { owner, tree: null, tasks: new Map(), at: null, runs: [], drafts: [] }; return memory; };
 
 const verb: Record<TaskAction, string> = { done: "mark it done", archive: "archive it", snooze: "snooze it" };
 const said: Record<TaskAction, string> = { done: "Marked done", archive: "Archived", snooze: "Snoozed until tomorrow" };
@@ -40,6 +41,9 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
   const [leaving, setLeaving] = useState<ReadonlySet<string>>(new Set());
   const [gone, setGone] = useState<ReadonlySet<string>>(new Set());
   const [n, setN] = useState(0);
+  // The dispatch ledger and the draft notes: read with the tree-wide load (the node page's Running and Drafts), empty when the vault has none.
+  const [rawRuns, setRawRuns] = useState<RawNote[]>(() => scoped(owner).runs);
+  const [rawDrafts, setRawDrafts] = useState<RawNote[]>(() => scoped(owner).drafts);
   const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastLoad = useRef<number | null>(null);
@@ -63,8 +67,9 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
         mem.tree = t;
       }
       if (live && mine === epoch.current) { setTree(t); setTreeTruncated(!!t.truncated); }
-      const r = await vaultTasks.loadTasks(t, nodePath);
+      const [r, runs, drafts] = await Promise.all([vaultTasks.loadTasks(t, nodePath), nodePath === "" ? vaultTasks.loadTagged("run") : null, nodePath === "" ? vaultTasks.loadTagged("draft") : null]);
       if (!live || mine !== epoch.current || memory !== mem) return;
+      if (runs && drafts) { mem.runs = runs; mem.drafts = drafts; setRawRuns(runs); setRawDrafts(drafts); }
       mem.tasks.set(nodePath, { list: r.tasks, truncated: r.truncated });
       setList(r.tasks); setTruncated(r.truncated); setError(null);
       // anything the server no longer lists is settled: stop hiding it by hand
@@ -88,6 +93,9 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
   const now = new Date();
   const visible = useMemo(() => (list ?? []).filter((t) => isLive(t) && !gone.has(t.id) && !snoozed(t, new Date())), [list, gone, n, day]); // eslint-disable-line react-hooks/exhaustive-deps
   const counts: Map<string, Counts> = useMemo(() => (tree ? rollUp(tree, tasksUnder(tree, nodePath, visible)) : new Map()), [tree, nodePath, visible]);
+
+  const runs = useMemo(() => (tree ? parseRuns(rawRuns, tree) : []), [tree, rawRuns]);
+  const drafts = useMemo(() => (tree ? parseDrafts(rawDrafts, tree, list ?? []) : []), [tree, rawDrafts, list]);
 
   const patch = (id: string, f: (t: Task) => Task) => {
     setList((l) => (l ? l.map((t) => (t.id === id ? f(t) : t)) : l));
@@ -179,5 +187,5 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
     } });
   }, [nodePath]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  return { tree, tasks: visible, setPriority, leaving, counts, truncated, treeTruncated, error, loading, notice, undo, act, refresh, dismissNotice: () => setNotice(null), ready: list !== null, now };
+  return { tree, tasks: visible, all: list, runs, drafts, setPriority, leaving, counts, truncated, treeTruncated, error, loading, notice, undo, act, refresh, dismissNotice: () => setNotice(null), ready: list !== null, now };
 }

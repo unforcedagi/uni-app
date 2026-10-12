@@ -27,6 +27,11 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
     return { ...buildTaskTree(nodes, rootPath), truncated: rows.length >= LIMIT };
   }
 
+  /** Every note with `tag`, metadata only (the dispatch ledger `run`, the `draft` notes). A vault with none, or one that refuses, reads as empty: these are extras on the page. */
+  async function loadTagged(tag: string): Promise<RawNote[]> {
+    try { const rows = await call("vault_query", { vault: name(), tag, includeContent: false, limit: LIMIT }); return Array.isArray(rows) ? (rows as RawNote[]) : []; } catch { return []; }
+  }
+
   // Feature detect once per session: does the vault answer `near` with `direction` and `then`? null = not yet known.
   let nearOk: boolean | null = null;
   const unsupported = (e: unknown) => /unknown|unrecogni[sz]ed|unsupported|not supported|invalid[_ ]?(param|near|query)|bad[_ ]request|\b400\b|"?then"?/i.test(String(e)) && !/not[_ ]found/i.test(String(e));
@@ -111,7 +116,7 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
   const setPriority = (taskId: string, priority: Priority | null, updatedAt: string, by: string | null = "hand") =>
     patchMeta(taskId, { priority, priority_by: priority === null ? null : by }, updatedAt);
 
-  return { loadTree, loadSubtree, loadTasks, transition, snooze, setPriority, nearSupported: () => nearOk };
+  return { loadTree, loadTagged, loadSubtree, loadTasks, transition, snooze, setPriority, nearSupported: () => nearOk };
 }
 
 export const vaultTasks = createVaultTasks();
