@@ -238,12 +238,12 @@ export default function AreasSurface({ zoom, identity, talk, path, rooms: hostRo
     </div>
     <p className="th-cap">{node.kind === "project" ? "Project" : isRoot ? new Date(now).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" }) : "Area"} {mark !== "quiet" && <span className="th-state" data-st={mark}>{mark === "needs" ? "needs you" : "moving"}</span>}</p>
     <h1 className="note-title">{node.title}</h1>
-    {chat && <RoomLine view={nodeView} />}
+    {chat && <RoomLine view={nodeView} target={target} onOpenRoom={actions.openRoom} />}
   </header>;
   const wideHead = <header className="th-head wide">
     <Crumbs trail={trailItems} onOpen={openPath} />
     {roomsMode && <h1 className="note-title">{node.title}</h1>}
-    {chat && <RoomLine view={nodeView} />}
+    {chat && <RoomLine view={nodeView} target={target} onOpenRoom={actions.openRoom} />}
   </header>;
   const treeLevel = <div className={`tree-home th-level ${wide ? "wide" : "phone"} ${roomsMode ? "th-rooms" : ""}`} data-layout={roomsMode ? "rooms" : "tree"}>
     {wide && !roomsMode && <div className="th-stage">{stage}</div>}

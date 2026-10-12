@@ -1,3 +1,4 @@
+import { nestRooms } from "./roomNesting";
 import { isNetworkError, netError } from "./netError";
 import { voiceRetryDelay } from "./voiceRetry";
 import { VoiceOutbox, relayAccepted } from "./voiceOutbox";
@@ -1623,10 +1624,10 @@ function Conversations({ onForget }: { onForget: () => void }) {
           <div id="other-vault-list" hidden={!otherVaultsExpanded}>{otherVaults.map(vaultRow)}</div>
         </>}
       </section>
-      <nav>{rooms.map((room) => <button key={room.id} className={`room ${channel === room.id ? "selected" : ""}`} onClick={(e) => sidebarClick(roomTarget(room.id), e)}
+      <nav>{nestRooms(rooms).map(({ room, label, child }) => <button key={room.id} className={`room ${child ? "child" : ""} ${channel === room.id ? "selected" : ""}`} title={child ? room.name : undefined} aria-label={child ? `#${room.name}` : undefined} onClick={(e) => sidebarClick(roomTarget(room.id), e)}
         onPointerDown={(e) => { if (e.pointerType === "touch") startLongPress(roomTarget(room.id)); }} onPointerUp={endLongPress} onPointerCancel={endLongPress} onPointerLeave={endLongPress}
         aria-current={channel === room.id ? "page" : undefined}>
-        <span className="avatar">{room.name[0]?.toUpperCase() ?? "#"}</span><span className="room-text"><strong className={room.unread ? "unread" : ""}>{room.name}</strong><small>{room.last_message ? markdownToText(room.last_message) : "No messages yet"}</small></span>
+        <span className="avatar">{label[0]?.toUpperCase() ?? "#"}</span><span className="room-text"><strong className={room.unread ? "unread" : ""}>{label}</strong><small>{room.last_message ? markdownToText(room.last_message) : "No messages yet"}</small></span>
         <span className="room-side"><time>{room.last_ts ? time(room.last_ts) : ""}</time>{room.unread > 0 && <span className={`unread-badge ${room.mentions ? "mention" : ""}`} aria-label={`${room.unread} unread${room.mentions ? ", mentions you" : ""}`}>{room.mentions ? "@ " : ""}{room.unread > 99 ? "99+" : room.unread}</span>}</span>
       </button>)}</nav>
       </div>

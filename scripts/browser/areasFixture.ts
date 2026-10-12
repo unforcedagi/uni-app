@@ -170,6 +170,8 @@ export type BootOpts = {
   layout?: 'rooms' | 'tree' | 'octopus' | 'classic' | 'unset';
   /** T-111: COhere 2026 sits under Boulder (as in the live vault) instead of Techne. Needs `tree` and `boulder`. */
   underBoulder?: boolean;
+  /** T-111 nested rooms: the Atlas area has room #atlas (the real channel ids), with #atlas/build and #atlas/teach, three projects (ATLAS, Learn Vibe Build, Atlas Institute). Needs `tree`. */
+  atlas?: boolean;
   /** T-111: a project (Priya) whose room is archived, with `room_fallback` naming the room that holds it. */
   priya?: boolean;
   /** T-111 rooms nav: Sanctum (a private area) holds tasks too. */
@@ -198,7 +200,7 @@ export async function bootAreas(page: Page, variant: Variant = 'seed', opts: Boo
   const now = Math.floor((opts.pinned ? pinnedAt : Date.now()) / 1000);
   const data = {
     profileNote: opts.profileNote ?? null, lifeVault: opts.lifeVault ?? null, now, variant, selftest: opts.selftest ?? true, ipcLeak: opts.ipcLeak ?? false, hostile: hostileApp(opts.ports ?? { http: 9, udp: 9 }), benign: BENIGN, techne: seed('techne'), unforced: seed('unforced'), seedMeta,
-    apps: opts.apps ?? [], multiRoom: !!opts.multiRoom || !!opts.tree, tree: !!opts.tree, tasks: !!opts.tasks, briefs: !!opts.briefs, queryDelay: opts.queryDelay ?? 0, identityDelay: opts.identityDelay ?? 0, roomsDelay: opts.roomsDelay ?? 0, nodeStatuses: opts.nodeStatuses ?? {}, nearOff: !!opts.nearOff, ids: !!opts.ids, boulder: !!opts.boulder, layout: opts.layout ?? 'octopus', underBoulder: !!opts.underBoulder, priya: !!opts.priya, privateTasks: !!opts.privateTasks, deviceCache: opts.deviceCache ?? null, queryFails: opts.queryFails ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null, mode: opts.mode ?? 'sealed', grantedUnder: opts.grantedUnder ?? (opts.mode ?? 'sealed'),
+    apps: opts.apps ?? [], multiRoom: !!opts.multiRoom || !!opts.tree, tree: !!opts.tree, tasks: !!opts.tasks, briefs: !!opts.briefs, queryDelay: opts.queryDelay ?? 0, identityDelay: opts.identityDelay ?? 0, roomsDelay: opts.roomsDelay ?? 0, nodeStatuses: opts.nodeStatuses ?? {}, nearOff: !!opts.nearOff, ids: !!opts.ids, boulder: !!opts.boulder, layout: opts.layout ?? 'octopus', underBoulder: !!opts.underBoulder, priya: !!opts.priya, atlas: !!opts.atlas, privateTasks: !!opts.privateTasks, deviceCache: opts.deviceCache ?? null, queryFails: opts.queryFails ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null, mode: opts.mode ?? 'sealed', grantedUnder: opts.grantedUnder ?? (opts.mode ?? 'sealed'),
   };
   // Pre-granted apps: the grant key is the SHA-256 of the RESOLVED default needs plus the app's html.
   const preGrant = [
@@ -400,6 +402,14 @@ Two proposals wait on a scope decision.
       if (d.tasks) taskNotes.push(mk('b1', 'T-90 Draft council testimony', 'Areas/Boulder'), mk('b2', 'T-91 Add the November dates', 'Projects/Boulder Civic Calendar', { owner: 'room:boulder' }));
     }
     if (d.underBoulder) { const c = notes.find((n) => n.id === 'p-cohere'); if (c) c.metadata = { ...c.metadata, parent: 'Areas/Boulder' }; }
+    if (d.atlas) {
+      const ATLAS = '4994874c-9473-49b3-9c35-4cb21e22fef9', BUILD = '7dcea809-25cd-4160-ba99-f0a56386adcb', TEACH = '024dd6b1-3283-4ad3-96a8-8dc3f31f87a4';
+      const a = notes.find((n) => n.id === 'a-atlas'); if (a) a.metadata = { ...a.metadata, channel: ATLAS, room: 'atlas' };
+      const at = rooms.findIndex((r) => r.id === 'ch-atlas'); if (at >= 0) rooms.splice(at, 1);
+      rooms.push(room(ATLAS, 'atlas'), room(BUILD, 'atlas/build'), room(TEACH, 'atlas/teach'));
+      const pr = (id: string, name: string, meta: Record<string, unknown>) => ({ id, path: `Projects/${name}`, extension: 'md', tags: ['project'], metadata: { status: 'foreground', summary: `${name}.`, parent: 'Areas/Atlas', ...meta }, updatedAt: '2026-10-08T00:00:00Z', content: `# ${name}\n\n${name}.` });
+      notes.push(pr('p-atlas', 'ATLAS', { room: 'atlas/build', channel: BUILD }), pr('p-lvb', 'Learn Vibe Build', { room: 'atlas/teach', channel: TEACH }), pr('p-ai', 'Atlas Institute', { room: 'atlas' }));
+    }
     if (d.priya) {
       notes.push({ id: 'p-priya', path: 'Projects/Priya', extension: 'md', tags: ['project'], metadata: { status: 'foreground', summary: 'Priya: the long relationship.', parent: 'Areas/Unforced Development', room: 'priya', room_status: 'archived', room_fallback: 'unforced-dev' }, updatedAt: '2026-10-08T00:00:00Z', content: '# Priya\n\nA client relationship.' });
       if (d.tasks) taskNotes.push(mk('r1', 'T-70 Priya follow-up', 'Projects/Priya'));

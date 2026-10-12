@@ -4,7 +4,8 @@
 export type RoomRef = { id: string; name: string };
 export type RoomNode = { path: string; name?: string; room: string | null; channels: readonly string[] };
 
-const slug = (s: string) => s.toLowerCase().replace(/^#/, "").replace(/[^a-z0-9]+/g, "");
+// A name with a "/" (`atlas/build`) is matched segment by segment, so `atlasbuild` or `atlas-build` never stands in for it.
+const slug = (s: string) => s.toLowerCase().replace(/^#/, "").trim().split("/").map((p) => p.replace(/[^a-z0-9]+/g, "")).join("/");
 export const roomByName = (rooms: readonly RoomRef[], name: string | null | undefined): RoomRef | null => {
   const want = name ? slug(name) : "";
   return want ? rooms.find((r) => slug(r.name) === want) ?? null : null;
