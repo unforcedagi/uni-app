@@ -27,7 +27,9 @@ export default function LifeOsSurface({ vaults, identity, ...rest }: { vaults: s
   const ready = found?.vault === chosen ? found : null;
   const profile = ready?.profile ?? (chosen === UNI_VAULT ? defaultProfile() : null);
   const pick = chooseLifeOsVault;
-  const picker = choices.length > 1 ? <label className="lifeos-vault"><span>Life OS vault</span>
+  // Decided 10-12: the uni home stays unchanged (no picker row). The picker shows here only while another vault is
+  // open, as the way back; otherwise it lives in Settings → Life OS vault.
+  const picker = choices.length > 1 && chosen !== UNI_VAULT ? <label className="lifeos-vault"><span>Life OS vault</span>
     <select value={chosen} onChange={(e) => pick(e.target.value)}>{choices.map((v) => <option key={v} value={v}>{v}</option>)}</select></label> : null;
   if (ready && !ready.hasPack) return <div className="areas-home lifeos-nopack">{picker}
     <h1>This vault has no Life OS pack</h1>
