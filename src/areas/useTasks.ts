@@ -158,22 +158,22 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
    */
   const setPriority = useCallback(async (task: Task, to: Priority) => {
     setNotice(null);
-    const prev = task.priority;
-    if (prev === to) return;
+    const prev = task.priority, prevBy = task.priorityBy;
+    if (prev === to && prevBy === "hand") return;
     if (!task.updatedAt) { setNotice("Couldn't change priority: reload the task first."); return; }
-    patch(task.id, (t) => ({ ...t, priority: to }));
+    patch(task.id, (t) => ({ ...t, priority: to, priorityBy: "hand" }));
     const r = await vaultTasks.setPriority(task.id, to, task.updatedAt);
     if (!r.ok) {
-      patch(task.id, (t) => ({ ...t, priority: prev }));
+      patch(task.id, (t) => ({ ...t, priority: prev, priorityBy: prevBy }));
       setNotice(r.kind === "conflict" ? `“${task.title}” changed elsewhere, so its priority wasn't changed. Showing the latest.` : r.kind === "invalid" ? "Couldn't change priority: the vault refused that value." : `Couldn't change priority: ${r.message.replace(/^Error:\s*/, "").slice(0, 120)}`);
       if (r.kind === "conflict") refresh();
       return;
     }
-    patch(task.id, (t) => ({ ...t, priority: to, updatedAt: r.updatedAt ?? t.updatedAt, lastUpdatedBy: r.lastUpdatedBy ?? t.lastUpdatedBy, lastUpdatedVia: r.lastUpdatedVia ?? t.lastUpdatedVia }));
+    patch(task.id, (t) => ({ ...t, priority: to, priorityBy: "hand", updatedAt: r.updatedAt ?? t.updatedAt, lastUpdatedBy: r.lastUpdatedBy ?? t.lastUpdatedBy, lastUpdatedVia: r.lastUpdatedVia ?? t.lastUpdatedVia }));
     let stamp = r.updatedAt;
     offerUndo({ id: task.id, label: `Priority: ${to}`, run: async () => {
-      const back = stamp ? await vaultTasks.setPriority(task.id, prev, stamp) : null;
-      if (back?.ok) { patch(task.id, (t) => ({ ...t, priority: prev, updatedAt: back.updatedAt ?? t.updatedAt })); setUndo(null); setNotice(null); }
+      const back = stamp ? await vaultTasks.setPriority(task.id, prev, stamp, prevBy) : null;
+      if (back?.ok) { patch(task.id, (t) => ({ ...t, priority: prev, priorityBy: prevBy, updatedAt: back.updatedAt ?? t.updatedAt })); setUndo(null); setNotice(null); }
       else { setNotice("Couldn't undo: it changed elsewhere. Showing the latest."); setUndo(null); refresh(); }
       stamp = null;
     } });

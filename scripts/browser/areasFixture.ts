@@ -375,7 +375,7 @@ Two proposals wait on a scope decision.
     const taskNotes: any[] = d.tasks ? [
       mk('k1', 'T-03 COhere festival readiness', C26, { state: 'waiting', waiting_on: 'aaron', due: '2026-10-12', next: 'Check-in PR by Oct 12', priority: 'now' }),
       mk('k2', 'T-64 COhere app spec', C26, { owner: 'room:cohere', state: 'doing' }),
-      mk('k3', 'T-65 Sponsorship invoice draft', C26, { priority: 'soon', next: 'Send to Kevin for the numbers' }),
+      mk('k3', 'T-65 Sponsorship invoice draft', C26, { priority: 'soon', priority_by: 'weigh.py 2026-10-12', next: 'Send to Kevin for the numbers' }),
       mk('k4', 'T-33 Kevin call: book it', 'Areas/Techne', { priority: 'now' }),
       mk('k5', 'T-61 Techne vision page', 'Areas/Techne', { owner: 'person:benjamin', state: 'waiting', waiting_on: 'external' }),
       mk('k6', 'T-80 Wire the usage guard', 'Areas/Techne', { owner: 'uni' }),

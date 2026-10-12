@@ -129,7 +129,7 @@ test.describe('rooms nav', () => {
     await pick.selectOption('now');
     await expect.poll(async () => (await calls(page, 'vault_patch_meta')).length).toBe(1);
     const [w] = await calls(page, 'vault_patch_meta');
-    expect(w).toMatchObject({ vault: 'uni', id: 'k3', metadata: { priority: 'now' } });
+    expect(w).toMatchObject({ vault: 'uni', id: 'k3', metadata: { priority: 'now', priority_by: 'hand' } });
     expect(typeof w.ifUpdatedAt).toBe('string');
     await expect(bucket(page, 'now').locator('.wr-row .wr-id')).toHaveText(['T-03', 'T-65']);
     await expect(bucket(page, 'soon')).toHaveCount(0);
@@ -137,7 +137,7 @@ test.describe('rooms nav', () => {
     await shot(page, 'priority-undo');
     await page.getByRole('button', { name: 'Undo' }).click();
     await expect.poll(async () => (await calls(page, 'vault_patch_meta')).length).toBe(2);
-    expect((await calls(page, 'vault_patch_meta'))[1]).toMatchObject({ id: 'k3', metadata: { priority: 'soon' } });
+    expect((await calls(page, 'vault_patch_meta'))[1]).toMatchObject({ id: 'k3', metadata: { priority: 'soon', priority_by: 'weigh.py 2026-10-12' } });
     await expect(bucket(page, 'soon').locator('.wr-row .wr-id')).toHaveText(['T-65']);
     expect(await page.evaluate(() => (window as any).__tasks.find((t: any) => t.id === 'k3').metadata.priority)).toBe('soon');
     // an unsorted task: undo clears the key again rather than inventing a value
@@ -147,7 +147,7 @@ test.describe('rooms nav', () => {
     await expect.poll(async () => (await calls(page, 'vault_patch_meta')).length).toBe(3);
     await page.getByRole('button', { name: 'Undo' }).click();
     await expect.poll(async () => (await calls(page, 'vault_patch_meta')).length).toBe(4);
-    expect((await calls(page, 'vault_patch_meta'))[3]).toMatchObject({ id: 'b1', metadata: { priority: null } });
+    expect((await calls(page, 'vault_patch_meta'))[3]).toMatchObject({ id: 'b1', metadata: { priority: null, priority_by: null } });
     expect(await page.evaluate(() => 'priority' in (window as any).__tasks.find((t: any) => t.id === 'b1').metadata)).toBe(false);
     // the five seconds run out
     await where(page).locator('.wr-prio[aria-label="Priority for T-90"]').selectOption('now');
