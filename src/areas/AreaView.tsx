@@ -20,8 +20,9 @@ import { createChatModule, type RoomMessage } from "../interface/modules/chat";
 import { createNoteModule } from "../interface/modules/note";
 import { createThemeModule, readHostTheme } from "../interface/modules/theme";
 import type { Area } from "./areasCore";
-import { AREA_VAULT, areaPaths, type AreaBrief } from "./useAreas";
+import { areaPaths, type AreaBrief } from "./useAreas";
 import BriefView from "./BriefView";
+import { useVaultProfile } from "./ProfileContext";
 
 const getMessages = (channel: string, limit: number) => invoke<RoomMessage[]>("get_messages", { channel, root: null, limit });
 
@@ -56,6 +57,7 @@ export default function AreaView({ area, entry, now, channel, onChannel, mode, r
   /** The page around the Brief: breadcrumb, Uni's Today in place of a Brief, the children, the freshness override. */
   crumbs?: ReactNode; stage?: ReactNode; slot?: ReactNode; work?: ReactNode; lead?: ReactNode; kids?: ReactNode; freshAt?: string | null; dataStatus?: ReactNode;
 }) {
+  const vaultName = useVaultProfile().vault;
   // Uni itself (path "") has no app note to look up.
   const live = mode !== "closed" && area.path !== "";
   const [app, setApp] = useState<AppNote | null>(null);
@@ -72,11 +74,11 @@ export default function AreaView({ area, entry, now, channel, onChannel, mode, r
     setApp(null); setDeclined(false);
     if (!live) return;
     let on = true;
-    const get = (ref: string) => invoke<{ note: { id: string; extension?: string | null; content?: string; metadata?: unknown } }>("vault_note", { vault: AREA_VAULT, noteRef: ref });
+    const get = (ref: string) => invoke<{ note: { id: string; extension?: string | null; content?: string; metadata?: unknown } }>("vault_note", { vault: vaultName, noteRef: ref });
     get(`${area.path}/app`).catch(() => get(`${area.path}/app.html`))
       .then((d) => { if (on && (d.note.extension ?? "html").replace(/^\./, "").toLowerCase() === "html") setApp({ id: d.note.id, html: d.note.content ?? "", metadata: d.note.metadata }); }).catch(() => {});
     return () => { on = false; };
-  }, [live, area.path]);
+  }, [live, area.path, vaultName]);
   const onApp = tab === "app" && !!app;
 
   // What the app asked for (or the default), resolved against this area.
@@ -153,11 +155,11 @@ export default function AreaView({ area, entry, now, channel, onChannel, mode, r
   const router = useMemo(() => createRouter([
     createVaultModule({
       listPaths: () => areaPaths.get(),
-      getNote: (ref) => invoke<{ note: { id: string } }>("vault_note", { vault: AREA_VAULT, noteRef: ref }).then((d) => d.note),
-      search: (query, limit, pathPrefix) => invoke<{ id: string; path: string; snippet: string }[]>("vault_search", { query, limit, mode: "keyword", vault: AREA_VAULT, pathPrefix }),
+      getNote: (ref) => invoke<{ note: { id: string } }>("vault_note", { vault: vaultName, noteRef: ref }).then((d) => d.note),
+      search: (query, limit, pathPrefix) => invoke<{ id: string; path: string; snippet: string }[]>("vault_search", { query, limit, mode: "keyword", vault: vaultName, pathPrefix }),
     }),
     createChatModule({ getMessages, suggest: (s) => suggestions.add(s), roomName: (id) => roomNameRef.current(id) }),
-    createNoteModule({ suggest: (s) => suggestions.add(s), resolve: (ref) => invoke<{ note: { id: string; path?: string | null } }>("vault_note", { vault: AREA_VAULT, noteRef: ref }).then((d) => d.note) }),
+    createNoteModule({ suggest: (s) => suggestions.add(s), resolve: (ref) => invoke<{ note: { id: string; path?: string | null } }>("vault_note", { vault: vaultName, noteRef: ref }).then((d) => d.note) }),
     createThemeModule({ theme: readHostTheme }),
   ]), [suggestions]);
   const ready = useMemo(() => ({ area: { name: area.name, title: area.title, purpose: area.purpose, status: area.status, since: typeof area.metadata.since === "string" ? area.metadata.since : null } }), [area]);

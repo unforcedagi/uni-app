@@ -7,6 +7,8 @@ import { deviceCache, type AreasPayload, type BriefRaw, type CacheOwner } from "
 import { buildTree, type Tree } from "./treeCore";
 import { forgetTasks } from "./useTasks";
 import { createPathCache, shouldReload } from "./pathCache";
+import { activeProfile } from "./profile";
+import { useVaultProfile } from "./ProfileContext";
 
 export type AreaBrief = { brief: Brief; generatedAt: string | null; updatedAt: string | null };
 export type AreasData = {
@@ -21,15 +23,14 @@ export type AreasData = {
   savedAt: number | null;
   truncated: string[];
 };
-export const AREA_VAULT = "uni";
 
 /**
- * The `uni` path listing for the sealed apps' vault bridge only (it pages the whole vault, so it is cached for 10 s
+ * The selected vault's path listing for the sealed apps' vault bridge only (it pages the whole vault, so it is cached for 10 s
  * and never runs for the Today view).
  */
-export const areaPaths = createPathCache(() => invoke<PathRow[]>("vault_paths", { vault: AREA_VAULT }));
+export const areaPaths = createPathCache(() => invoke<PathRow[]>("vault_paths", { vault: activeProfile().vault }));
 
-const query = (tag: string, includeContent = true) => invoke<AreaNoteLike[]>("vault_query", { vault: AREA_VAULT, tag, includeContent, limit: 200 });
+const query = (tag: string, includeContent = true) => invoke<AreaNoteLike[]>("vault_query", { vault: activeProfile().vault, tag, includeContent, limit: 200 });
 /** A Brief belongs only to the node named by its path. */
 const pathOwner = (n: AreaNoteLike) => /^(.+)\/Brief$/.exec((n.path ?? "").replace(/\.md$/i, ""))?.[1] ?? null;
 const newest = <T extends { updatedAt?: string | null }>(a: T | undefined, b: T) => (!a || (b.updatedAt ?? "") >= (a.updatedAt ?? "") ? b : a);
@@ -109,7 +110,8 @@ type Timing = { fromCache: boolean; cacheMs?: number; freshMs?: number };
 const timing = (patch: Partial<Timing>) => { const w = window as unknown as { __areasTiming?: Timing }; w.__areasTiming = { ...(w.__areasTiming ?? { fromCache: false }), ...patch }; };
 
 export function useAreas(identity: string | null) {
-  const owner = { identity: identity ?? "", vault: AREA_VAULT };
+  const vault = useVaultProfile().vault;
+  const owner = { identity: identity ?? "", vault };
   const [data, setData] = useState<AreasData | null>(() => { const p = remembered(owner); return p ? toView(p, memoryStale, savedAt) : null; });
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -137,7 +139,7 @@ export function useAreas(identity: string | null) {
     }).catch((e) => { if (live && epoch === generation) { memoryStale = true; setError(String(e)); setData((d) => d ? { ...d, stale: true } : d); } })
       .finally(() => { if (live && epoch === generation) setLoading(false); });
     return () => { live = false; };
-  }, [n, identity]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [n, identity, vault]); // eslint-disable-line react-hooks/exhaustive-deps
   // Coming back to the app refreshes the view (at most once per 30 s); there is no manual refresh button.
   useEffect(() => {
     const visible = () => { if (document.visibilityState === "visible" && shouldReload(lastLoadAt, Date.now())) setN((x) => x + 1); };
