@@ -132,4 +132,13 @@ check("PR6: a saved vault that left the list falls back to uni, in the shell and
   assert.equal(effectiveLifeVault("gone", ["uni", "s"]), "uni");
 });
 
+check("chat null: room:* owners group under Others (no roomOwnerPrefix), the uni profile groups them under Rooms; only buzz profiles have chat", () => {
+  const t = { owner: "room:cohere", waitingOn: null, kind: "task" as const };
+  assert.equal(groupOf(t, packProfile("s", "root")), "others");
+  assert.equal(groupOf(t, defaultProfile()), "rooms");
+  assert.equal(packProfile("s", "root").chat.provider, null);
+  assert.equal(defaultProfile().chat.provider, "buzz");
+  assert.equal(readProfileNote({ metadata: { chat: { provider: null } } })?.chat?.provider, null);
+  assert.equal(resolveProfile("uni", { chat: { provider: null } }, false).chat.provider, null);
+});
 if (failed) { console.log(`${failed} failed`); process.exit(1); } else console.log("all passed");

@@ -6,7 +6,11 @@ import { ancestry, ROOT, type Tree } from "./treeCore.ts";
 import type { BriefItem, Inline } from "./briefCore.ts";
 import type { AreaBrief } from "./useAreas.ts";
 import { groupOf, type Task } from "./taskCore.ts";
+import { activeProfile } from "./profile.ts";
 import { isPrivateNode } from "./treeRooms.ts";
+
+/** The room an owner string names (`room:cohere`), or null: a vault without room owners (roomOwnerPrefix null) has none. */
+const roomOwnerName = (owner: string): string | null => { const p = activeProfile().roomOwnerPrefix; return p && owner.startsWith(p) ? owner.slice(p.length) : null; };
 
 export type AliveLine = BriefItem & { /** Where a derived line comes from ("from Boulder's brief", "in #cohere"). */ note?: string };
 export type LevelAlive = { now: string; nowTokens: Inline[] | null; needs: AliveLine[]; moving: AliveLine[]; derived: boolean; hasBrief: boolean };
@@ -40,7 +44,7 @@ export function levelAlive(a: {
   const needs: AliveLine[] = up ? hit(up.e!.brief.needsYou).slice(0, 3).map((i) => ({ ...i, note: from })) : [];
   const moving: AliveLine[] = up ? hit(up.e!.brief.moving).slice(0, 2).map((i) => ({ ...i, note: from })) : [];
   if (!isPrivateNode(tree, path)) {
-    for (const t of a.tasks.filter((t) => groupOf(t) !== "you").slice(0, 4)) moving.push(plainLine(clip(t.title, 140), t.owner.startsWith("room:") ? `in #${t.owner.slice(5)}` : t.owner === "uni" ? "Uni" : undefined));
+    for (const t of a.tasks.filter((t) => groupOf(t) !== "you").slice(0, 4)) moving.push(plainLine(clip(t.title, 140), roomOwnerName(t.owner) ? `in #${roomOwnerName(t.owner)}` : t.owner === "uni" ? "Uni" : undefined));
   }
   const now = node.purpose ? sentences(node.purpose, 2) : "";
   return { now, nowTokens: null, needs, moving, derived: true, hasBrief: !!(now || needs.length || moving.length) };

@@ -36,7 +36,9 @@ export const Tag = ({ n, label }: { n: number; label?: string }) => <b className
 
 // ---------------------------------------------------------------------------------------------- the phone's tree
 
-export function TreeScreen({ rows, marks, needs, open, dateLine, summary, onOpen, status }: {
+export function TreeScreen({ chat = true, rows, marks, needs, open, dateLine, summary, onOpen, status }: {
+  /** false (chat.provider null): no room doors or room names. */
+  chat?: boolean;
   rows: readonly TreeRow[]; marks: ReadonlyMap<string, Mark>;
   /** Tasks that need you / are open, rolled up per node path. */
   needs: ReadonlyMap<string, number>; open: ReadonlyMap<string, number>;
@@ -54,10 +56,10 @@ export function TreeScreen({ rows, marks, needs, open, dateLine, summary, onOpen
       return <li key={r.path || "uni"} className={`th-row d${Math.min(r.depth, 4)} ${r.last ? "last" : ""}`}>
         {r.depth > 0 && <span className="th-guides" aria-hidden="true">{Array.from({ length: r.depth }, (_, i) => <span key={i} className={`th-guide ${i === r.depth - 1 ? "branch" : r.trunk[i] ? "run" : ""}`} />)}</span>}
         <button type="button" className="th-go" data-path={r.path} onClick={() => onOpen(r.path)}
-          aria-label={`${r.name}, ${r.own && r.slash ? `room #${r.slash}` : r.heldBy ? `held by #${r.heldBy}` : "no room"}${n ? `, ${n} need${n === 1 ? "s" : ""} you` : ""}${o ? `, ${o} open` : ""}`}>
+          aria-label={`${r.name}${chat ? `, ${r.own && r.slash ? `room #${r.slash}` : r.heldBy ? `held by #${r.heldBy}` : "no room"}` : ""}${n ? `, ${n} need${n === 1 ? "s" : ""} you` : ""}${o ? `, ${o} open` : ""}`}>
           <Stump mark={marks.get(r.path) ?? "quiet"} kind={r.kind} own={r.own} />
           <span className="th-name"><b>{r.name}</b>
-            <RoomDoor view={{ slash: r.slash, heldBy: r.heldBy ? { id: "", name: r.heldBy } : null, own: r.own }} className="th-rowdoor" /></span>
+            {chat && <RoomDoor view={{ slash: r.slash, heldBy: r.heldBy ? { id: "", name: r.heldBy } : null, own: r.own }} className="th-rowdoor" />}</span>
           {n > 0 ? <Tag n={n} /> : o > 0 ? <span className="th-open" aria-hidden="true">{o}</span> : null}
         </button>
       </li>;
@@ -133,14 +135,14 @@ export function UpdatesBlock({ updates, nowSec, onOpen }: { updates: readonly Up
 export type InsideKid = { node: Area; mark: Mark; view: Pick<RoomView, "slash" | "heldBy" | "own">; needs: number; open: number };
 
 /** The children: areas (from Uni) or projects (from an area), each a door to its own level. */
-export function InsideBlock({ title, kids, onOpen }: { title: string; kids: readonly InsideKid[]; onOpen: (n: Area) => void }) {
+export function InsideBlock({ chat = true, title, kids, onOpen }: { chat?: boolean; title: string; kids: readonly InsideKid[]; onOpen: (n: Area) => void }) {
   if (!kids.length) return null;
   return <Section id="inside" title={title} count={kids.length}>
     <ul className="th-kids">{kids.map((k) => <li key={k.node.path}>
       <button type="button" className="th-kid" data-name={k.node.name} onClick={() => onOpen(k.node)}
         aria-label={`${k.node.name}${k.needs ? `, ${k.needs} need you` : ""}${k.open ? `, ${k.open} open` : ""}`}>
-        <Stump mark={k.mark} kind={k.node.kind} own={k.view.own} />
-        <span className="th-kid-main"><b>{k.node.name}</b>{k.node.purpose && <em>{k.node.purpose.slice(0, 90)}</em>}<RoomDoor view={k.view} className="th-rowdoor" /></span>
+        <Stump mark={k.mark} kind={k.node.kind} own={chat ? k.view.own : undefined} />
+        <span className="th-kid-main"><b>{k.node.name}</b>{k.node.purpose && <em>{k.node.purpose.slice(0, 90)}</em>}{chat && <RoomDoor view={k.view} className="th-rowdoor" />}</span>
         {k.needs > 0 ? <Tag n={k.needs} /> : k.open > 0 ? <span className="th-open" aria-hidden="true">{k.open}</span> : null}
       </button></li>)}</ul>
   </Section>;

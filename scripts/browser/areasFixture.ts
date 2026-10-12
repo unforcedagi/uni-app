@@ -128,6 +128,10 @@ setInterval(() => { uni.chat.draft('INJECTED BY APP ' + Date.now()).catch(() => 
 type Variant = 'seed' | 'test';
 
 export type BootOpts = {
+  /** Metadata of the vault's `.parachute/life-os` profile note (e.g. `{ chat: { provider: null } }`); absent: no profile note, Uni's own profile. */
+  profileNote?: Record<string, unknown>;
+  /** Open the Life OS surface on this other vault (the fixture answers its vault calls from the uni data; no profile note = the pack defaults, chat null). */
+  lifeVault?: string;
   /** Freeze the page clock (and the fixture's relative timestamps) at the day the seeded briefs were written, so due-date ranking never depends on the real date. */
   pinned?: boolean;
   selftest?: boolean; ipcLeak?: boolean;
@@ -191,7 +195,7 @@ export async function bootAreas(page: Page, variant: Variant = 'seed', opts: Boo
   if (opts.pinned) await page.clock.setFixedTime(pinnedAt);
   const now = Math.floor((opts.pinned ? pinnedAt : Date.now()) / 1000);
   const data = {
-    now, variant, selftest: opts.selftest ?? true, ipcLeak: opts.ipcLeak ?? false, hostile: hostileApp(opts.ports ?? { http: 9, udp: 9 }), benign: BENIGN, techne: seed('techne'), unforced: seed('unforced'), seedMeta,
+    profileNote: opts.profileNote ?? null, lifeVault: opts.lifeVault ?? null, now, variant, selftest: opts.selftest ?? true, ipcLeak: opts.ipcLeak ?? false, hostile: hostileApp(opts.ports ?? { http: 9, udp: 9 }), benign: BENIGN, techne: seed('techne'), unforced: seed('unforced'), seedMeta,
     apps: opts.apps ?? [], multiRoom: !!opts.multiRoom || !!opts.tree, tree: !!opts.tree, tasks: !!opts.tasks, briefs: !!opts.briefs, queryDelay: opts.queryDelay ?? 0, identityDelay: opts.identityDelay ?? 0, roomsDelay: opts.roomsDelay ?? 0, nodeStatuses: opts.nodeStatuses ?? {}, nearOff: !!opts.nearOff, ids: !!opts.ids, boulder: !!opts.boulder, layout: opts.layout ?? 'octopus', underBoulder: !!opts.underBoulder, ricki: !!opts.ricki, deviceCache: opts.deviceCache ?? null, queryFails: opts.queryFails ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null, mode: opts.mode ?? 'sealed', grantedUnder: opts.grantedUnder ?? (opts.mode ?? 'sealed'),
   };
   // Pre-granted apps: the grant key is the SHA-256 of the RESOLVED default needs plus the app's html.
@@ -225,6 +229,7 @@ export async function bootAreas(page: Page, variant: Variant = 'seed', opts: Boo
     w.__calls = [];
     w.__cbs = [];
     w.__listeners = {};
+    if (d.lifeVault) localStorage.setItem('uni.lifeos.vault', d.lifeVault);
     if (!localStorage.getItem('uni.home.layout.v1')) localStorage.setItem('uni.home.layout.v1', d.layout);
     // The live-frame gate opens for this platform and version through a stored self-test pass.
     if (d.selftest && !localStorage.getItem('uni.areaApps.selftest.v1')) localStorage.setItem('uni.areaApps.selftest.v1', JSON.stringify({ platform: 'linux', passedAt: '2026-10-08T00:00:00Z', appVersion: 'dev', runtime: 'wry test tauri test', mode: d.mode, userAgent: d.passUa ?? navigator.userAgent }));
@@ -420,7 +425,7 @@ Two proposals wait on a scope decision.
           case 'get_messages': return args.root ? [] : (msgs[args.channel] ?? []).slice(-(args.limit ?? 300));
           case 'get_members': return [{ pubkey: U, name: 'Aaron', named: true }];
           case 'vault_paths': return notes.map(rowOf);
-          case 'vault_list': return ['uni'];
+          case 'vault_list': return d.lifeVault ? ['uni', d.lifeVault] : ['uni'];
           case 'vault_query': {
             if (d.queryDelay) await new Promise((r) => setTimeout(r, d.queryDelay));
             if ((d.queryFails as string[]).includes(args.tag)) throw 'query failed: ' + args.tag;
@@ -468,6 +473,7 @@ Two proposals wait on a scope decision.
           case 'post_message': { const ref = 'sent-' + w.__calls.length; if (args.body) (msgs[args.channel] ??= []).push(msg(ref, args.channel, 'Aaron', 0, args.body)); return { ref, channel: args.channel }; }
           case 'relay_origin': return 'wss://relay.test';
           case 'vault_note': {
+            if (d.profileNote && args.noteRef === '.parachute/life-os') return { hub: 'https://example.invalid', vault: 'uni', note: { id: 'profile-note', path: '.parachute/life-os', content: '', createdAt: '2026-09-01T00:00:00Z', tags: [], metadata: d.profileNote } };
             const n = notes.find((x) => x.id === args.noteRef || x.path === args.noteRef);
             if (!n) throw 'note not found: ' + args.noteRef;
             return { hub: 'https://example.invalid', vault: 'uni', note: { createdAt: '2026-09-01T00:00:00Z', tags: [], metadata: {}, ...n } };
