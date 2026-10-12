@@ -28,7 +28,17 @@ export type AreasData = {
  * The selected vault's path listing for the sealed apps' vault bridge only (it pages the whole vault, so it is cached for 10 s
  * and never runs for the Today view).
  */
-export const areaPaths = createPathCache(() => invoke<PathRow[]>("vault_paths", { vault: activeProfile().vault }));
+const pathCaches = new Map<string, ReturnType<typeof createPathCache<PathRow[]>>>();
+/** One cache per vault, so a vault switch never serves the previous vault's listing. */
+export const areaPaths = {
+  get(force = false): Promise<PathRow[]> {
+    const vault = activeProfile().vault;
+    let c = pathCaches.get(vault);
+    if (!c) { c = createPathCache(() => invoke<PathRow[]>("vault_paths", { vault })); pathCaches.set(vault, c); }
+    return c.get(force);
+  },
+  reset(): void { pathCaches.clear(); },
+};
 
 const query = (tag: string, includeContent = true) => invoke<AreaNoteLike[]>("vault_query", { vault: activeProfile().vault, tag, includeContent, limit: 200 });
 /** A Brief belongs only to the node named by its path. */
@@ -91,6 +101,7 @@ export function forgetAreas() {
   clearProjectBodies();
   forgetTasks();
   deviceCache.clear();
+  areaPaths.reset();
 }
 const ownerKey = (owner: CacheOwner) => JSON.stringify(owner);
 const remembered = (owner: CacheOwner) => {

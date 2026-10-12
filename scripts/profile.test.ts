@@ -50,4 +50,20 @@ check("vaultTasks: singleton follows the active profile's vault; an explicit vau
   assert.equal(activeProfile().vault, "uni");
 });
 
+check("review: the device cache keeps one slot per vault; uni keeps the original key", async () => {
+  const { createAreasCache, CACHE_KEY, cacheKeyFor } = await import("../src/areas/areasCache.ts");
+  const m = new Map<string, string>(); const store = { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v), removeItem: (k: string) => void m.delete(k), key: (i: number) => [...m.keys()][i] ?? null, get length() { return m.size; } };
+  const c = createAreasCache(store); const area = { id: "a", path: "Areas/A", name: "A", purpose: "", status: "foreground", channels: [], rooms: [], kind: "area", parent: null, since: null, title: "A", body: "", metadata: {}, updatedAt: null } as never;
+  const uni = { identity: "i", vault: "uni" }, other = { identity: "i", vault: "scratch" };
+  c.write({ areas: [area], briefs: {}, today: null }, uni);
+  c.write({ areas: [area, area], briefs: {}, today: null }, other);
+  assert.equal(cacheKeyFor("uni"), CACHE_KEY);
+  assert.equal(c.read(uni)?.areas.length, 1, "uni's slot survives opening another vault");
+  assert.equal(c.read(other)?.areas.length, 2);
+  c.clear(); assert.equal(m.size, 0, "forget clears every vault's slot");
+});
+check("review: profile note strings are capped", () => {
+  assert.equal(readProfileNote({ metadata: { me: "x".repeat(500) } })!.me!.length, 120);
+});
+
 if (failed) { console.log(`${failed} failed`); process.exit(1); } else console.log("all passed");

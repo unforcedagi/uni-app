@@ -161,7 +161,7 @@ export default function AreaView({ area, entry, now, channel, onChannel, mode, r
     createChatModule({ getMessages, suggest: (s) => suggestions.add(s), roomName: (id) => roomNameRef.current(id) }),
     createNoteModule({ suggest: (s) => suggestions.add(s), resolve: (ref) => invoke<{ note: { id: string; path?: string | null } }>("vault_note", { vault: vaultName, noteRef: ref }).then((d) => d.note) }),
     createThemeModule({ theme: readHostTheme }),
-  ]), [suggestions]);
+  ]), [suggestions, vaultName]);
   const ready = useMemo(() => ({ area: { name: area.name, title: area.title, purpose: area.purpose, status: area.status, since: typeof area.metadata.since === "string" ? area.metadata.since : null } }), [area]);
 
   const ready_ = live && onApp && !!keys;
