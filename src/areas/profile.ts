@@ -94,3 +94,6 @@ export function writeVaultChoice(store: Store | null, vault: string): void {
 export function vaultChoices(vaults: readonly string[]): string[] {
   return [...vaults].sort((a, b) => (a === UNI_VAULT ? -1 : b === UNI_VAULT ? 1 : a.localeCompare(b)));
 }
+
+/** Uni shell glue (the "For you" pin, the primary-vault row) belongs to the uni vault only. */
+export const showUniGlue = (vault: string) => vault === UNI_VAULT;

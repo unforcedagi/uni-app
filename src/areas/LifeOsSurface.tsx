@@ -6,13 +6,14 @@ import { invoke } from "@tauri-apps/api/core";
 import AreasSurface from "./AreasSurface";
 import "./lifeos.css";
 import { VaultProfileProvider } from "./ProfileContext";
-import { defaultProfile, readVaultChoice, UNI_VAULT, vaultChoices, writeVaultChoice } from "./profile";
+import { defaultProfile, UNI_VAULT, vaultChoices } from "./profile";
 import { discover, type Found } from "./discover";
+import { chooseLifeOsVault, useLifeOsVault } from "./useLifeOsVault";
 
 export { PROFILE_NOTE, discover } from "./discover";
 
 export default function LifeOsSurface({ vaults, identity, ...rest }: { vaults: string[] } & ComponentProps<typeof AreasSurface>) {
-  const [vault, setVault] = useState(() => readVaultChoice(typeof localStorage === "undefined" ? null : localStorage));
+  const vault = useLifeOsVault();
   const choices = useMemo(() => vaultChoices(vaults), [vaults]);
   // A saved choice that is no longer in the list falls back to uni (once the list is known).
   const chosen = !choices.length || choices.includes(vault) ? vault : UNI_VAULT;
@@ -25,7 +26,7 @@ export default function LifeOsSurface({ vaults, identity, ...rest }: { vaults: s
   }, [chosen, identity]);
   const ready = found?.vault === chosen ? found : null;
   const profile = ready?.profile ?? (chosen === UNI_VAULT ? defaultProfile() : null);
-  const pick = (v: string) => { writeVaultChoice(localStorage, v); setVault(v); };
+  const pick = chooseLifeOsVault;
   const picker = choices.length > 1 ? <label className="lifeos-vault"><span>Life OS vault</span>
     <select value={chosen} onChange={(e) => pick(e.target.value)}>{choices.map((v) => <option key={v} value={v}>{v}</option>)}</select></label> : null;
   if (ready && !ready.hasPack) return <div className="areas-home lifeos-nopack">{picker}

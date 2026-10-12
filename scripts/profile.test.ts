@@ -1,7 +1,7 @@
 // Life OS profile: defaults equal today's Uni values; the profile note; vault choice; the vault parameter reaching the data layer.
 // Run: node --experimental-strip-types scripts/profile.test.ts
 import assert from "node:assert/strict";
-import { defaultProfile, packProfile, readProfileNote, resolveProfile, readVaultChoice, writeVaultChoice, vaultChoices, setActiveProfile, activeProfile } from "../src/areas/profile.ts";
+import { showUniGlue, defaultProfile, packProfile, readProfileNote, resolveProfile, readVaultChoice, writeVaultChoice, vaultChoices, setActiveProfile, activeProfile } from "../src/areas/profile.ts";
 import { groupOf, parseNodes, sortTasks } from "../src/areas/taskCore.ts";
 import { nodeStatus } from "../src/areas/areasCore.ts";
 import { createAreasCache } from "../src/areas/areasCache.ts";
@@ -124,5 +124,6 @@ check("PR4: discover — uni reads only the profile note (no tag queries); other
   const f = await run("f", (cmd) => cmd === "vault_note" ? new Error("none") : new Error("offline"));
   assert.equal(f.found.hasPack, true, "a failed pack check is not 'no pack'"); assert.equal(f.found.profile.rootTag, "root", "a failed root check is not 'no root'");
 });
+check("PR6: Uni glue only for the uni vault", () => { assert.equal(showUniGlue("uni"), true); assert.equal(showUniGlue("scratch"), false); });
 
 if (failed) { console.log(`${failed} failed`); process.exit(1); } else console.log("all passed");
