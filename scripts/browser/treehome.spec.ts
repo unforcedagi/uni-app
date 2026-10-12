@@ -55,6 +55,7 @@ test.describe('tree home', () => {
       const after = (await page.locator('.th-foot').boundingBox())!;
       expect(after.y).toBe(before.y);
       expect(before.y + before.height).toBeLessThanOrEqual(page.viewportSize()!.height + 1);
+      await page.locator('.th-scroll').evaluate((e) => { e.scrollTop = 0; });
     } else {
       await expect(page.getByRole('heading', { name: 'Uni', level: 1 })).toBeVisible();
       const rows = page.locator('.th-row');
@@ -194,8 +195,8 @@ test.describe('tree home', () => {
     expect(await page.evaluate(() => document.getAnimations().length)).toBe(0);
     await page.emulateMedia({ reducedMotion: 'no-preference' });
     await page.getByRole('button', { name: 'Zoom out to Uni' }).click();
-    const anims = await page.evaluate(() => document.getAnimations().map((a) => { const t = a.effect!.getComputedTiming(); return { d: Number(t.duration), i: t.iterations, delay: Number(t.delay), on: (a.effect as KeyframeEffect).target?.className + '' }; }));
-    console.log(JSON.stringify(anims));
+    // the home's own animations (the host's off-screen room pane has one of its own when the room changes)
+    const anims = await page.evaluate(() => document.getAnimations().filter((a) => !!(a.effect as KeyframeEffect).target?.closest?.('.th-level')).map((a) => { const t = a.effect!.getComputedTiming(); return { d: Number(t.duration), i: t.iterations, delay: Number(t.delay), on: (a.effect as KeyframeEffect).target?.className + '' }; }));
     expect(anims.length).toBeGreaterThan(0);
     for (const a of anims) { expect(a.d + a.delay).toBeLessThanOrEqual(300); expect(a.i).toBe(1); }
     await here(page, 'Uni');
