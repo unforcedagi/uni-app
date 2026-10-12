@@ -69,7 +69,8 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
       if (live && mine === epoch.current) { setTree(t); setTreeTruncated(!!t.truncated); }
       const [r, runs, drafts] = await Promise.all([vaultTasks.loadTasks(t, nodePath), nodePath === "" ? vaultTasks.loadTagged("run") : null, nodePath === "" ? vaultTasks.loadTagged("draft") : null]);
       if (!live || mine !== epoch.current || memory !== mem) return;
-      if (runs && drafts) { mem.runs = runs; mem.drafts = drafts; setRawRuns(runs); setRawDrafts(drafts); }
+      if (runs) { mem.runs = runs; setRawRuns(runs); }
+      if (drafts) { mem.drafts = drafts; setRawDrafts(drafts); }
       mem.tasks.set(nodePath, { list: r.tasks, truncated: r.truncated });
       setList(r.tasks); setTruncated(r.truncated); setError(null);
       // anything the server no longer lists is settled: stop hiding it by hand
