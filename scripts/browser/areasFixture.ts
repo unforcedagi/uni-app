@@ -162,6 +162,12 @@ export type BootOpts = {
   ids?: boolean;
   /** T-88: an `Areas/Boulder` area (room #boulder, which the metadata still calls #civics; the room is found by its channel id) with a project that has no room of its own. */
   boulder?: boolean;
+  /** T-111: which home the app opens in (the setting's stored value). The older specs run on the octopus, the tree home's own spec on `tree`. */
+  layout?: 'tree' | 'octopus' | 'classic';
+  /** T-111: COhere 2026 sits under Boulder (as in the live vault) instead of Techne. Needs `tree` and `boulder`. */
+  underBoulder?: boolean;
+  /** T-111: a project (Priya) whose room is archived, with `room_fallback` naming the room that holds it. */
+  priya?: boolean;
   /** T-86b: the vault doesn't know `near[...then]`; the subtree commands answer with an unknown-parameter error. */
   nearOff?: boolean;
   /** Pre-fill the device cache (localStorage) with this JSON string. */
@@ -186,7 +192,7 @@ export async function bootAreas(page: Page, variant: Variant = 'seed', opts: Boo
   const now = Math.floor((opts.pinned ? pinnedAt : Date.now()) / 1000);
   const data = {
     now, variant, selftest: opts.selftest ?? true, ipcLeak: opts.ipcLeak ?? false, hostile: hostileApp(opts.ports ?? { http: 9, udp: 9 }), benign: BENIGN, techne: seed('techne'), unforced: seed('unforced'), seedMeta,
-    apps: opts.apps ?? [], multiRoom: !!opts.multiRoom || !!opts.tree, tree: !!opts.tree, tasks: !!opts.tasks, briefs: !!opts.briefs, queryDelay: opts.queryDelay ?? 0, identityDelay: opts.identityDelay ?? 0, roomsDelay: opts.roomsDelay ?? 0, nodeStatuses: opts.nodeStatuses ?? {}, nearOff: !!opts.nearOff, ids: !!opts.ids, boulder: !!opts.boulder, deviceCache: opts.deviceCache ?? null, queryFails: opts.queryFails ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null, mode: opts.mode ?? 'sealed', grantedUnder: opts.grantedUnder ?? (opts.mode ?? 'sealed'),
+    apps: opts.apps ?? [], multiRoom: !!opts.multiRoom || !!opts.tree, tree: !!opts.tree, tasks: !!opts.tasks, briefs: !!opts.briefs, queryDelay: opts.queryDelay ?? 0, identityDelay: opts.identityDelay ?? 0, roomsDelay: opts.roomsDelay ?? 0, nodeStatuses: opts.nodeStatuses ?? {}, nearOff: !!opts.nearOff, ids: !!opts.ids, boulder: !!opts.boulder, layout: opts.layout ?? 'octopus', underBoulder: !!opts.underBoulder, priya: !!opts.priya, deviceCache: opts.deviceCache ?? null, queryFails: opts.queryFails ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null, mode: opts.mode ?? 'sealed', grantedUnder: opts.grantedUnder ?? (opts.mode ?? 'sealed'),
   };
   // Pre-granted apps: the grant key is the SHA-256 of the RESOLVED default needs plus the app's html.
   const preGrant = [
@@ -219,6 +225,7 @@ export async function bootAreas(page: Page, variant: Variant = 'seed', opts: Boo
     w.__calls = [];
     w.__cbs = [];
     w.__listeners = {};
+    if (!localStorage.getItem('uni.home.layout.v1')) localStorage.setItem('uni.home.layout.v1', d.layout);
     // The live-frame gate opens for this platform and version through a stored self-test pass.
     if (d.selftest && !localStorage.getItem('uni.areaApps.selftest.v1')) localStorage.setItem('uni.areaApps.selftest.v1', JSON.stringify({ platform: 'linux', passedAt: '2026-10-08T00:00:00Z', appVersion: 'dev', runtime: 'wry test tauri test', mode: d.mode, userAgent: d.passUa ?? navigator.userAgent }));
     if (d.granted && !localStorage.getItem('uni.interface.grants.v2')) {
@@ -381,6 +388,11 @@ Two proposals wait on a scope decision.
         { id: 'br-boulder', path: 'Areas/Boulder/Brief', extension: 'md', tags: ['area-brief'], metadata: { generated_at: new Date((d.now - 7200) * 1000).toISOString() }, updatedAt: new Date((d.now - 7200) * 1000).toISOString(), content: '## Now\nThe council agenda is out; the calendar needs this week\'s dates.\n\n## Needs you\n- Approve the draft testimony\n\n## Moving\n- nothing recent\n' });
       rooms.push(room(BOULDER, 'boulder'));
       if (d.tasks) taskNotes.push(mk('b1', 'T-90 Draft council testimony', 'Areas/Boulder'), mk('b2', 'T-91 Add the November dates', 'Projects/Boulder Civic Calendar', { owner: 'room:boulder' }));
+    }
+    if (d.underBoulder) { const c = notes.find((n) => n.id === 'p-cohere'); if (c) c.metadata = { ...c.metadata, parent: 'Areas/Boulder' }; }
+    if (d.priya) {
+      notes.push({ id: 'p-priya', path: 'Projects/Priya', extension: 'md', tags: ['project'], metadata: { status: 'foreground', summary: 'Priya: the long relationship.', parent: 'Areas/Unforced Development', room: 'priya', room_status: 'archived', room_fallback: 'unforced-dev' }, updatedAt: '2026-10-08T00:00:00Z', content: '# Priya\n\nA client relationship.' });
+      if (d.tasks) taskNotes.push(mk('r1', 'T-70 Priya follow-up', 'Projects/Priya'));
     }
     if (d.ids) {
       const idOf = (ref: string) => notes.find((n) => n.path === ref)?.id ?? ref;
