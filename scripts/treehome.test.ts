@@ -104,4 +104,13 @@ check("alive: a node with a Brief reads it; a project with none is derived from 
   const priv = levelAlive({ tree, path: "Projects/Sit", node: tree.nodes.get("Projects/Sit")!, entry: null, briefs, tasks: [task("t3", "Sit longer", "room:sit")] });
   assert.deepEqual(priv.moving, [], "a private area gets no task-derived lines");
 });
+check("alive: with no room owners (chat null profile) a room-owned task shows no #room note; the uni profile still does", async () => {
+  const { setActiveProfile, defaultProfile, packProfile } = await import("../src/areas/profile.ts");
+  const task = { id: "t1", path: "t1", title: "Crew list pass", kind: "task" as const, node: "Projects/COhere", state: "open" as const, owner: "room:cohere", waitingOn: null, due: null, next: "", room: null, snoozedUntil: null, updatedAt: "2026-10-12T00:00:00Z" } as never;
+  const at = () => levelAlive({ tree, path: "Projects/COhere", node: tree.nodes.get("Projects/COhere")!, entry: null, briefs: {}, tasks: [task] }).moving.map((x) => x.note);
+  try {
+    setActiveProfile(packProfile("pack", "root")); assert.deepEqual(at(), [undefined]);
+    setActiveProfile(defaultProfile()); assert.deepEqual(at(), ["in #cohere"]);
+  } finally { setActiveProfile(defaultProfile()); }
+});
 if (failed) { console.log(`\n${failed} failed`); process.exit(1); }

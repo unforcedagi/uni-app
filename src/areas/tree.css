@@ -216,3 +216,5 @@
 .tree-home .undo-bar { bottom: calc(76px + 92px + env(safe-area-inset-bottom)); }
 @media (min-width: 900px) { .tree-home .undo-bar { left: auto; right: 24px; transform: none; bottom: 104px; } }
 .tree-home-wrap .undo-bar { bottom: calc(76px + 16px + env(safe-area-inset-bottom)); }
+/* no composer (chat.provider null) and nothing in the foot: no rule either */
+.th-foot:not(:has(*)) { display: none; }

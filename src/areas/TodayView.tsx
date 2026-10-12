@@ -18,7 +18,9 @@ export function rootNeeds(data: AreasData | null, now: number) {
 }
 
 /** Uni's own page: what needs you today across areas (ranked), then what moved. */
-export function TodaySections({ data, now, onOpen, onNote, onAsk }: {
+export function TodaySections({ data, now, onOpen, onNote, onAsk, canAsk = true }: {
+  /** false (chat.provider null): no Ask Uni buttons. */
+  canAsk?: boolean;
   data: AreasData | null; now: number; onOpen: (area: Area) => void; onNote: (ref: string) => void;
   /** Draft `text` in the room of the area named `area`; never sends. */
   onAsk: (area: string, text: string) => void;
@@ -28,7 +30,7 @@ export function TodaySections({ data, now, onOpen, onNote, onAsk }: {
   const foreground = useMemo(() => named.filter((a) => a.status === "foreground"), [named]);
   const needs = useMemo(() => (data ? todayNeeds(data.today?.today ?? null, Object.fromEntries(named.flatMap((a) => (data.briefs[a.path] ? [[a.name, data.briefs[a.path].brief]] : []))), foreground.map((a) => a.name), now) : []), [data, named, foreground, now]);
   const byName = (name: string | null) => named.find((a) => a.name === name) ?? null;
-  const askable = (name: string | null) => { const a = byName(name); return !!a && !!pickRoom(a.rooms, null); };
+  const askable = (name: string | null) => { if (!canAsk) return false; const a = byName(name); return !!a && !!pickRoom(a.rooms, null); };
   const moved = data?.today?.today.moved ?? [];
   return <>
     <section className="today-needs" aria-label="Needs you today">

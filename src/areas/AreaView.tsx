@@ -59,7 +59,9 @@ export default function AreaView({ area, entry, now, channel, onChannel, mode, r
   /** T-111: the tree home's level (map, panel and composer) in place of the Brief page. It brings its own navigation, chat and bar. */
   tree?: ReactNode;
 }) {
-  const vaultName = useVaultProfile().vault;
+  const profile = useVaultProfile();
+  const vaultName = profile.vault;
+  const chatOn = profile.chat.provider === "buzz";
   // Uni itself (path "") has no app note to look up.
   const live = mode !== "closed" && area.path !== "";
   const [app, setApp] = useState<AppNote | null>(null);
@@ -109,7 +111,7 @@ export default function AreaView({ area, entry, now, channel, onChannel, mode, r
   const desktop = useSyncExternalStore(subscribeDesktop, isDesktop, () => true);
   // The tree home is its own page (room, composer and navigation inside); only the App tab brings the side chat back.
   const treePage = !!tree && !onApp;
-  const layout = treePage ? "hidden" : chatMode(onApp && manifest?.ok ? manifest.manifest.layout.chat : null, desktop);
+  const layout = treePage || !chatOn ? "hidden" : chatMode(onApp && manifest?.ok ? manifest.manifest.layout.chat : null, desktop);
   const layoutRef = useRef(layout); layoutRef.current = layout;
   const hasRoom = area.rooms.length > 0;
   // Ask Uni: a draft in the shown room's composer (the sheet opens on a phone). Never sends.
@@ -162,7 +164,7 @@ export default function AreaView({ area, entry, now, channel, onChannel, mode, r
       getNote: (ref) => invoke<{ note: { id: string } }>("vault_note", { vault: vaultName, noteRef: ref }).then((d) => d.note),
       search: (query, limit, pathPrefix) => invoke<{ id: string; path: string; snippet: string }[]>("vault_search", { query, limit, mode: "keyword", vault: vaultName, pathPrefix }),
     }),
-    createChatModule({ getMessages, suggest: (s) => suggestions.add(s), roomName: (id) => roomNameRef.current(id) }),
+    createChatModule({ getMessages: chatOn ? getMessages : async () => [], suggest: (s) => suggestions.add(s), roomName: (id) => roomNameRef.current(id) }),
     createNoteModule({ suggest: (s) => suggestions.add(s), resolve: (ref) => invoke<{ note: { id: string; path?: string | null } }>("vault_note", { vault: vaultName, noteRef: ref }).then((d) => d.note) }),
     createThemeModule({ theme: readHostTheme }),
   ]), [suggestions, vaultName]);
@@ -202,7 +204,7 @@ export default function AreaView({ area, entry, now, channel, onChannel, mode, r
     {framed && theftNote && <p className="area-updated" role="status">This app took the keyboard from the chat. If it does that again it will be stopped.</p>}
     <ChatLayout framed={framed} onTheft={takeover} mode={layout} main={main} aboveMain={chatShown && room ? null : above}
       chat={layout === "side" ? <SideChat labelled={framed} room={room} hasRoom={hasRoom} above={above} rooms={rooms} label={`Chat in ${channel ? "#" + roomName(channel) : name}`} />
-        : layout === "sheet" ? <ChatSheet room={room} hasRoom={hasRoom} above={above} rooms={rooms} forceOpen={pendingSuggestions} poke={poke} label={`Chat in ${channel ? "#" + roomName(channel) : name}`} /> : null} />{area.path === "" && !treePage && <p className="area-quiet uni-router-rule">Uni routes from here: area work goes to its room.</p>}</div>;
+        : layout === "sheet" ? <ChatSheet room={room} hasRoom={hasRoom} above={above} rooms={rooms} forceOpen={pendingSuggestions} poke={poke} label={`Chat in ${channel ? "#" + roomName(channel) : name}`} /> : null} />{area.path === "" && !treePage && chatOn && <p className="area-quiet uni-router-rule">Uni routes from here: area work goes to its room.</p>}</div>;
 
   if (framed) return withChat(<InterfaceFrame html={app!.html} title={`${name} app`} router={router} grant={grant} ready={ready} onSession={(s) => { session.current = s; }} />, bar, "framed");
   if (asking && manifest?.ok) return withChat(<GrantPrompt name={name} codeChanged={codeChanged && status === "updated"} approvedCode={mode === "approved-code"} lines={describeNeeds(manifest.manifest.needs, ctx, roomName)}
