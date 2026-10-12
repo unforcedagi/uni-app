@@ -3,6 +3,8 @@ import { voiceRetryDelay } from "./voiceRetry";
 import { VoiceOutbox, relayAccepted } from "./voiceOutbox";
 import { SettingsIcon, UniIcon, JournalIcon, StarIcon, RoomsIcon, AreasIcon } from "./Icons";
 import { forgetAreas } from "./areas/useAreas";
+import { useLifeOsVault } from "./areas/useLifeOsVault";
+import { showUniGlue } from "./areas/profile";
 import { clearProjectBodies } from "./areas/projectBody";
 import AreasSurface from "./areas/LifeOsSurface";
 import type { ZoomState } from "./areas/NodeStage";
@@ -1566,9 +1568,10 @@ function Conversations({ onForget }: { onForget: () => void }) {
     openNote: (ref: string) => openNote({ hub: null, vault: "uni", ref }, null),
     compose: (id: string, text: string) => composeInRoomRef.current(id, text),
   }), [openNote]);
-  const primaryVault = vaults.includes("uni") ? "uni" : null;
-  const otherVaults = vaults.filter((vault) => vault !== "uni");
-  const activeOtherVault = active?.kind === "vault" && active.vault && active.vault !== "uni" && otherVaults.includes(active.vault) ? active.vault : null;
+  const lifeVault = useLifeOsVault(); // PR 6: the For you pin is Uni glue, shown only while the selected vault is uni
+  const primaryVault = vaults.includes(lifeVault) ? lifeVault : vaults.includes("uni") ? "uni" : null;
+  const otherVaults = vaults.filter((vault) => vault !== primaryVault);
+  const activeOtherVault = active?.kind === "vault" && active.vault && active.vault !== primaryVault && otherVaults.includes(active.vault) ? active.vault : null;
   function toggleOtherVaults() {
     const next = !otherVaultsExpanded;
     setOtherVaultsExpanded(next);
@@ -1584,7 +1587,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     <nav className="rail" aria-label="Main navigation">
       <button aria-label="Uni" aria-current={!panel && !searchOpen && (!topNote && areasOpen ? "page" : undefined)} onClick={() => openTarget(uniHome())}><i><UniIcon /></i><span>Uni</span></button>
       <button aria-label="Journal" aria-current={!panel && !searchOpen && (journalOpen && !topNote ? "page" : undefined)} onClick={() => openTarget({ kind: "journal", title: "Journal" })}><i><JournalIcon /></i><span>Journal</span></button>
-      <button aria-label="For you" aria-current={!panel && !searchOpen && (topNote?.ref === FOR_YOU_ID ? "page" : undefined)} onClick={openForYou}><i><StarIcon />{forYou.count > 0 && <b className="rail-count">{forYou.count}</b>}{forYou.fresh && <span className="rail-dot" aria-label="Updated recommendations" />}</i><span>For you</span></button>
+      {showUniGlue(lifeVault) && <button aria-label="For you" aria-current={!panel && !searchOpen && (topNote?.ref === FOR_YOU_ID ? "page" : undefined)} onClick={openForYou}><i><StarIcon />{forYou.count > 0 && <b className="rail-count">{forYou.count}</b>}{forYou.fresh && <span className="rail-dot" aria-label="Updated recommendations" />}</i><span>For you</span></button>}
       <button aria-label="Rooms" aria-current={!panel && !searchOpen && (!topNote && !journalOpen && !areasOpen && channel && channel !== findUniRoom(rooms)?.id ? "page" : undefined)} aria-expanded={panel === "rooms"} onClick={() => { setSearchOpen(false); setPanel(panel === "rooms" ? null : "rooms"); }}><i><RoomsIcon /></i><span>Rooms</span>{rooms.some((r) => r.unread > 0) && <span className="rail-dot" aria-label="Unread rooms" />}</button>
       <button className="rail-vault" aria-label="Vault" aria-current={!panel && !searchOpen && (active?.kind === "vault" || (topNote && topNote.ref !== FOR_YOU_ID) ? "page" : undefined)} aria-expanded={panel === "vault"} onClick={() => { setSearchOpen(false); setPanel(panel === "vault" ? null : "vault"); }}><i>▤</i><span>Vault</span></button>
       <button className="rail-search" aria-label="Search" aria-expanded={searchOpen} onClick={() => { setPanel(null); setSearchQuery(""); setSearchScope({ vault: "", prefix: "" }); setSearchOpen(true); }}><i>⌕</i><span>Search</span></button>
