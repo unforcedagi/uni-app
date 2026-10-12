@@ -5,6 +5,7 @@ import type { RoomMessage } from "../interface/modules/chat";
 import { groupTasks, type Task } from "./taskCore";
 import type { RoomRef } from "./talkCore";
 import type { TaskAction, Undo } from "./useTasks";
+import { activeProfile, type VaultProfile } from "./profile";
 
 const SHOW = 8;
 const HOLD_MS = 220;
@@ -103,7 +104,8 @@ export function RecentMessages({ room, tick }: { room: RoomRef | null; tick: num
   return <ul className="talk-recent" aria-label={`Latest in #${room.name}`}>{list.messages.map((m) => <li key={m.ref}><strong>{cleanText(m.author_name || m.author.slice(0, 8))}</strong> <span>{cleanText(m.body).replace(/\s+/g, " ")}</span></li>)}</ul>;
 }
 
-const OWNER = (o: string) => (o === "aaron" ? "You" : o.startsWith("room:") ? `#${o.slice(5)}` : o.startsWith("person:") ? o.slice(7) : o === "uni" ? "Uni" : o || "unassigned");
+export const ownerLabel = (o: string, p: VaultProfile = activeProfile()) => (o === p.me ? p.meLabel : p.roomOwnerPrefix && o.startsWith(p.roomOwnerPrefix) ? `#${o.slice(p.roomOwnerPrefix.length)}` : o.startsWith("person:") ? o.slice(7) : p.agentOwners.includes(o) ? o.charAt(0).toUpperCase() + o.slice(1) : o || "unassigned");
+const OWNER = (o: string) => ownerLabel(o);
 const dueText = (iso: string | null) => {
   if (!iso) return null;
   const d = new Date(`${iso}T12:00:00`);
@@ -111,7 +113,7 @@ const dueText = (iso: string | null) => {
 };
 
 function Meta({ t, here, nodeName }: { t: Task; here: string; nodeName: (path: string) => string }) {
-  const parts = [t.kind === "decision" ? "Decide" : null, t.waitingOn === "aaron" ? "Waiting on you" : t.state === "doing" ? "In progress" : t.state === "waiting" ? "Waiting" : null, dueText(t.due), t.node !== here ? `in ${nodeName(t.node)}` : null].filter(Boolean);
+  const parts = [t.kind === "decision" ? "Decide" : null, t.waitingOn === activeProfile().me ? "Waiting on you" : t.state === "doing" ? "In progress" : t.state === "waiting" ? "Waiting" : null, dueText(t.due), t.node !== here ? `in ${nodeName(t.node)}` : null].filter(Boolean);
   return parts.length ? <span className="task-meta">{parts.map((p, i) => <span key={i} className={p === "Decide" ? "task-decide" : ""}>{p}</span>)}</span> : null;
 }
 

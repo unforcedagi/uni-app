@@ -20,7 +20,8 @@ export type Area = {
 export type AreaNoteLike = { id: string; path?: string | null; content?: string | null; tags?: string[] | null; metadata?: Record<string, unknown> | null; updatedAt?: string | null };
 export type PathRow = { id: string; path: string | null; extension?: string | null; updatedAt?: string | null };
 
-export const nodeStatus = (status: unknown): AreaStatus => status === "foreground" || status === "archived" || status === "done" ? status : "background";
+/** `active` (the life-os pack) is `foreground`; `dormant` and `incubating` are background. Anything unknown is background. */
+export const nodeStatus = (status: unknown): AreaStatus => status === "active" ? "foreground" : status === "foreground" || status === "archived" || status === "done" ? status : "background";
 
 const leaf = (path: string) => path.split("/").filter(Boolean).pop() ?? path;
 const stripExt = (path: string) => path.replace(/\.(md|html)$/i, "");
