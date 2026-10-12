@@ -4,7 +4,7 @@ import { VoiceOutbox, relayAccepted } from "./voiceOutbox";
 import { SettingsIcon, UniIcon, JournalIcon, StarIcon, RoomsIcon, AreasIcon } from "./Icons";
 import { forgetAreas } from "./areas/useAreas";
 import { useLifeOsVault } from "./areas/useLifeOsVault";
-import { showUniGlue } from "./areas/profile";
+import { effectiveLifeVault, showUniGlue } from "./areas/profile";
 import { clearProjectBodies } from "./areas/projectBody";
 import AreasSurface from "./areas/LifeOsSurface";
 import type { ZoomState } from "./areas/NodeStage";
@@ -226,7 +226,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const [forYou, setForYou] = useState({ count: 0, fresh: false, updatedAt: null as string | null });
   const renderedForYou = useRef<string | null>(null);
   const [forYouReload, setForYouReload] = useState(0);
-  const lifeVault = useLifeOsVault(); // PR 6: the For you pin is Uni glue, shown (and fetched) only while the selected vault is uni
+  const lifeVault = effectiveLifeVault(useLifeOsVault(), vaults); // PR 6: the For you pin is Uni glue, shown (and fetched) only while the selected vault is uni
   async function refreshForYou() {
     if (!showUniGlue(lifeVault)) return;
     try {

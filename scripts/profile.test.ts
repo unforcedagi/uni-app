@@ -125,5 +125,11 @@ check("PR4: discover — uni reads only the profile note (no tag queries); other
   assert.equal(f.found.hasPack, true, "a failed pack check is not 'no pack'"); assert.equal(f.found.profile.rootTag, "root", "a failed root check is not 'no root'");
 });
 check("PR6: Uni glue only for the uni vault", () => { assert.equal(showUniGlue("uni"), true); assert.equal(showUniGlue("scratch"), false); });
+check("PR6: a saved vault that left the list falls back to uni, in the shell and the surface alike", async () => {
+  const { effectiveLifeVault } = await import("../src/areas/profile.ts");
+  assert.equal(effectiveLifeVault("s", []), "s", "list not loaded yet: keep the choice");
+  assert.equal(effectiveLifeVault("s", ["uni", "s"]), "s");
+  assert.equal(effectiveLifeVault("gone", ["uni", "s"]), "uni");
+});
 
 if (failed) { console.log(`${failed} failed`); process.exit(1); } else console.log("all passed");

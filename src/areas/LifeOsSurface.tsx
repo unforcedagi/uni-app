@@ -6,7 +6,7 @@ import { invoke } from "@tauri-apps/api/core";
 import AreasSurface from "./AreasSurface";
 import "./lifeos.css";
 import { VaultProfileProvider } from "./ProfileContext";
-import { defaultProfile, UNI_VAULT, vaultChoices } from "./profile";
+import { defaultProfile, effectiveLifeVault, UNI_VAULT, vaultChoices } from "./profile";
 import { discover, type Found } from "./discover";
 import { chooseLifeOsVault, useLifeOsVault } from "./useLifeOsVault";
 
@@ -16,7 +16,7 @@ export default function LifeOsSurface({ vaults, identity, ...rest }: { vaults: s
   const vault = useLifeOsVault();
   const choices = useMemo(() => vaultChoices(vaults), [vaults]);
   // A saved choice that is no longer in the list falls back to uni (once the list is known).
-  const chosen = !choices.length || choices.includes(vault) ? vault : UNI_VAULT;
+  const chosen = effectiveLifeVault(vault, choices);
   const [found, setFound] = useState<Found | null>(null);
   useEffect(() => {
     if (!identity) return;
