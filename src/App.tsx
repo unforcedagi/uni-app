@@ -226,7 +226,9 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const [forYou, setForYou] = useState({ count: 0, fresh: false, updatedAt: null as string | null });
   const renderedForYou = useRef<string | null>(null);
   const [forYouReload, setForYouReload] = useState(0);
+  const lifeVault = useLifeOsVault(); // PR 6: the For you pin is Uni glue, shown (and fetched) only while the selected vault is uni
   async function refreshForYou() {
+    if (!showUniGlue(lifeVault)) return;
     try {
       const data = await invoke<{ note: { content?: string; updatedAt?: string } }>("vault_note", { vault: "uni", noteRef: FOR_YOU_ID });
       const updated = data.note.updatedAt ?? null;
@@ -242,7 +244,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     const visible = () => { if (document.visibilityState === "visible") void refreshForYou(); };
     document.addEventListener("visibilitychange", visible);
     return () => document.removeEventListener("visibilitychange", visible);
-  }, []);
+  }, [lifeVault]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     const escape = (e: KeyboardEvent) => { if (e.key === "Escape") { setJournalFocus(false); setPanel(null); setSearchOpen(false); } };
     window.addEventListener("keydown", escape);
@@ -1568,7 +1570,6 @@ function Conversations({ onForget }: { onForget: () => void }) {
     openNote: (ref: string) => openNote({ hub: null, vault: "uni", ref }, null),
     compose: (id: string, text: string) => composeInRoomRef.current(id, text),
   }), [openNote]);
-  const lifeVault = useLifeOsVault(); // PR 6: the For you pin is Uni glue, shown only while the selected vault is uni
   const primaryVault = vaults.includes(lifeVault) ? lifeVault : vaults.includes("uni") ? "uni" : null;
   const otherVaults = vaults.filter((vault) => vault !== primaryVault);
   const activeOtherVault = active?.kind === "vault" && active.vault && active.vault !== primaryVault && otherVaults.includes(active.vault) ? active.vault : null;
