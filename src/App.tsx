@@ -11,6 +11,7 @@ import type { ZoomState } from "./areas/NodeStage";
 import { UNI_CHANNEL } from "./areas/treeCore";
 import AreaSelfTest from "./interface/selftest/SelfTest";
 import HomeLayoutSetting from "./areas/HomeLayoutSetting";
+import LifeOsVaultSetting from "./areas/LifeOsVaultSetting";
 import { appendDraft } from "./areas/composeDraft";
 import { FOR_YOU_ID, FOR_YOU_OPENED_KEY, LAST_SURFACE_KEY, countRecommendations, isRecommendationNew, readLastSurface, saveLastSurface } from "./railCore";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -1604,7 +1605,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       <div className="phone-panel-tools"><button onClick={() => { setPanel("vault"); setSearchOpen(false); }}>Vault</button><button onClick={() => { setPanel(null); setSearchOpen(true); }}>Search</button></div>
       <header className="rooms-header"><div><span className="eyebrow">Unforced</span><h1>Uni</h1></div><div><button className="icon-button" onClick={() => { setSearchQuery(""); setSearchScope({ vault: "", prefix: "" }); setSearchOpen(true); }} aria-label="Search messages and notes">⌕</button><button className="icon-button" onClick={() => void refresh()} disabled={busy} aria-label="Refresh conversations">↻</button><button className="icon-button" onClick={() => { setPanel(panel === "settings" ? "rooms" : "settings"); setSearchOpen(false); setForgetArmed(false); }} aria-label="Settings" aria-expanded={panel === "settings"}><SettingsIcon /></button></div></header>
       {pairSourceOpen && <PairSource onClose={() => setPairSourceOpen(false)} />}
-      {panel === "settings" && <div className="settings"><UpdateSettings /><HomeLayoutSetting /><AreaSelfTest /><PairDeviceButton onOpen={() => setPairSourceOpen(true)} /><button className="pairing-secondary" onClick={() => void forget()}>{forgetArmed ? "Tap again to forget — you'll need to re-pair" : "Forget this device key"}</button>{forgetArmed && <button className="pairing-secondary" onClick={() => setForgetArmed(false)}>Keep key</button>}</div>}
+      {panel === "settings" && <div className="settings"><UpdateSettings /><HomeLayoutSetting /><LifeOsVaultSetting vaults={vaults} /><AreaSelfTest /><PairDeviceButton onOpen={() => setPairSourceOpen(true)} /><button className="pairing-secondary" onClick={() => void forget()}>{forgetArmed ? "Tap again to forget — you'll need to re-pair" : "Forget this device key"}</button>{forgetArmed && <button className="pairing-secondary" onClick={() => setForgetArmed(false)}>Keep key</button>}</div>}
       {searchOpen && <Search initialQuery={searchQuery} vaults={vaults} key={`${searchScope.vault}:${searchScope.prefix}`} initialVault={searchScope.vault} initialPathPrefix={searchScope.prefix} onOpen={openHit} onOpenNote={(n) => { setSearchOpen(false); openNote({ hub: null, vault: n.vault, ref: n.id }, null); }} onAskUni={askUniSearch} onClose={() => { setSearchOpen(false); if (topNote) setSidebarVisible(false); }} />}
       {searchOpen && error && <p className="error search-error" role="alert">{error}</p>}
       <div className="rooms-body" hidden={searchOpen}>
