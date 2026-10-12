@@ -106,7 +106,10 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
   /** Snooze: `snoozed_until` (a date); `null` clears it. */
   const snooze = (taskId: string, until: string | null, updatedAt: string) => patchMeta(taskId, { snoozed_until: until }, updatedAt);
   /** Priority: now, soon or someday; `null` clears it (back to unsorted). */
-  const setPriority = (taskId: string, priority: Priority | null, updatedAt: string) => patchMeta(taskId, { priority }, updatedAt);
+  /** A priority picked in the app is a person's call: stamp `priority_by: "hand"` so weigh.py never overwrites it.
+   *  Undo passes the previous stamp back (null clears it). */
+  const setPriority = (taskId: string, priority: Priority | null, updatedAt: string, by: string | null = "hand") =>
+    patchMeta(taskId, { priority, priority_by: priority === null ? null : by }, updatedAt);
 
   return { loadTree, loadSubtree, loadTasks, transition, snooze, setPriority, nearSupported: () => nearOk };
 }

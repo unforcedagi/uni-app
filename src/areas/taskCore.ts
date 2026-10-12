@@ -30,6 +30,8 @@ export type Task = {
   snoozedUntil: string | null;
   /** null: not sorted yet (shown as `soon`). */
   priority: Priority | null;
+  /** Who set `priority`: "hand" (a person, kept by weigh.py), "weigh.py <date>" (automatic triage), or null. */
+  priorityBy: string | null;
   updatedAt: string | null; lastUpdatedBy: string | null; lastUpdatedVia: string | null;
 };
 
@@ -129,6 +131,7 @@ export function parseTask(n: RawNote, tree: TaskTree): Task | null {
     due: str(m.due)?.slice(0, 10) ?? null, next: str(m.next) ?? "", room: str(m.room)?.replace(/^#/, "") ?? null,
     snoozedUntil: str(m.snoozed_until)?.slice(0, 10) ?? null,
     priority: PRIORITIES.find((p) => p === str(m.priority)?.toLowerCase()) ?? null,
+    priorityBy: str(m.priority_by),
     updatedAt: str(n.updatedAt), lastUpdatedBy: str(n.lastUpdatedBy), lastUpdatedVia: str(n.lastUpdatedVia),
   };
 }
