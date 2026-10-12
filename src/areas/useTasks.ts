@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { buildTaskTree, dayOf, isLive, rollUp, snoozed, tasksUnder, tomorrowOf, type AnyState, type Counts, type Task, type TaskNode, type TaskTree } from "./taskCore";
+import { buildTaskTree, dayOf, isLive, rollUp, snoozed, tasksUnder, tomorrowOf, type AnyState, type Counts, type Priority, type Task, type TaskNode, type TaskTree } from "./taskCore";
 import { vaultTasks } from "./vaultTasks";
 import { shouldReload } from "./pathCache";
 import { useVaultProfile } from "./ProfileContext";
@@ -152,5 +152,32 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
     } });
   }, [nodePath]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  return { tree, tasks: visible, leaving, counts, truncated, treeTruncated, error, loading, notice, undo, act, refresh, dismissNotice: () => setNotice(null), ready: list !== null, now };
+  /**
+   * Set a task's priority: one guarded metadata merge (`vault_patch_meta` with the `updated_at` the row was read at), optimistic,
+   * with five seconds to take it back (the reverse merge, guarded by the stamp the first write returned). A conflict re-reads.
+   */
+  const setPriority = useCallback(async (task: Task, to: Priority) => {
+    setNotice(null);
+    const prev = task.priority;
+    if (prev === to) return;
+    if (!task.updatedAt) { setNotice("Couldn't change priority: reload the task first."); return; }
+    patch(task.id, (t) => ({ ...t, priority: to }));
+    const r = await vaultTasks.setPriority(task.id, to, task.updatedAt);
+    if (!r.ok) {
+      patch(task.id, (t) => ({ ...t, priority: prev }));
+      setNotice(r.kind === "conflict" ? `“${task.title}” changed elsewhere, so its priority wasn't changed. Showing the latest.` : r.kind === "invalid" ? "Couldn't change priority: the vault refused that value." : `Couldn't change priority: ${r.message.replace(/^Error:\s*/, "").slice(0, 120)}`);
+      if (r.kind === "conflict") refresh();
+      return;
+    }
+    patch(task.id, (t) => ({ ...t, priority: to, updatedAt: r.updatedAt ?? t.updatedAt, lastUpdatedBy: r.lastUpdatedBy ?? t.lastUpdatedBy, lastUpdatedVia: r.lastUpdatedVia ?? t.lastUpdatedVia }));
+    let stamp = r.updatedAt;
+    offerUndo({ id: task.id, label: `Priority: ${to}`, run: async () => {
+      const back = stamp ? await vaultTasks.setPriority(task.id, prev, stamp) : null;
+      if (back?.ok) { patch(task.id, (t) => ({ ...t, priority: prev, updatedAt: back.updatedAt ?? t.updatedAt })); setUndo(null); setNotice(null); }
+      else { setNotice("Couldn't undo: it changed elsewhere. Showing the latest."); setUndo(null); refresh(); }
+      stamp = null;
+    } });
+  }, [nodePath]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return { tree, tasks: visible, setPriority, leaving, counts, truncated, treeTruncated, error, loading, notice, undo, act, refresh, dismissNotice: () => setNotice(null), ready: list !== null, now };
 }

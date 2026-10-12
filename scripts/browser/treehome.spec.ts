@@ -205,7 +205,7 @@ test.describe('tree home', () => {
     expect(await page.evaluate(() => document.getAnimations().length)).toBe(0);
   });
 
-  test('the layout switch: Settings → Home layout, Tree by default; Octopus and Classic stay a tap away', async ({ page }) => {
+  test('the layout switch: Settings → Home layout, Map selectable; Octopus and Classic stay a tap away', async ({ page }) => {
     expect(await page.evaluate(() => localStorage.getItem('uni.home.layout.v1'))).toBe('tree');
     const setting = async (label: string) => {
       await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Settings', exact: true }).click();
@@ -226,7 +226,7 @@ test.describe('tree home', () => {
     await page.locator('.th-kid[data-name="Boulder"]').click();
     await expect(page.getByRole('heading', { name: 'Boulder', level: 1 })).toBeVisible();
     await expect(page.locator('.work-head')).toBeVisible();
-    await setting('Tree');
+    await setting('Map');
     expect(await page.evaluate(() => localStorage.getItem('uni.home.layout.v1'))).toBe('tree');
     await expect(page.locator('.tree-home').first()).toBeVisible();
     // stored on the device: the next open reads it

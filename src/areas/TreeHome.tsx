@@ -36,34 +36,47 @@ export const Tag = ({ n, label }: { n: number; label?: string }) => <b className
 
 // ---------------------------------------------------------------------------------------------- the phone's tree
 
-export function TreeScreen({ chat = true, rows, marks, needs, open, dateLine, summary, onOpen, status }: {
+/** The room tree: Uni, then every area and project beneath it as nested rows, each with its room door and what needs you. */
+export function RoomTree({ chat = true, rows, marks, needs, open, onOpen, selected }: {
+  chat?: boolean; rows: readonly TreeRow[]; marks: ReadonlyMap<string, Mark>; needs: ReadonlyMap<string, number>; open: ReadonlyMap<string, number>;
+  onOpen: (path: string) => void;
+  /** The row of the level being shown (the wide layout keeps the tree beside it). */
+  selected?: string;
+}) {
+  return <nav aria-label="Rooms and areas"><ul className="th-rows">{rows.map((r) => {
+    const n = needs.get(r.path) ?? 0, o = open.get(r.path) ?? 0;
+    return <li key={r.path || "uni"} className={`th-row d${Math.min(r.depth, 4)} ${r.last ? "last" : ""} ${selected === r.path ? "sel" : ""}`}>
+      {r.depth > 0 && <span className="th-guides" aria-hidden="true">{Array.from({ length: r.depth }, (_, i) => <span key={i} className={`th-guide ${i === r.depth - 1 ? "branch" : r.trunk[i] ? "run" : ""}`} />)}</span>}
+      <button type="button" className="th-go" data-path={r.path} aria-current={selected === r.path ? "page" : undefined} onClick={() => onOpen(r.path)}
+        aria-label={`${r.name}${chat ? `, ${r.own && r.slash ? `room #${r.slash}` : r.heldBy ? `held by #${r.heldBy}` : "no room"}` : ""}${n ? `, ${n} need${n === 1 ? "s" : ""} you` : ""}${o ? `, ${o} open` : ""}`}>
+        <Stump mark={marks.get(r.path) ?? "quiet"} kind={r.kind} own={r.own} />
+        <span className="th-name"><b>{r.name}</b>
+          {chat && <RoomDoor view={{ slash: r.slash, heldBy: r.heldBy ? { id: "", name: r.heldBy } : null, own: r.own }} className="th-rowdoor" />}</span>
+        {n > 0 ? <Tag n={n} /> : o > 0 ? <span className="th-open" aria-hidden="true">{o}</span> : null}
+      </button>
+    </li>;
+  })}</ul></nav>;
+}
+
+export function TreeScreen({ chat = true, rows, marks, needs, open, dateLine, summary, onOpen, status, selected, column }: {
   /** false (chat.provider null): no room doors or room names. */
   chat?: boolean;
   rows: readonly TreeRow[]; marks: ReadonlyMap<string, Mark>;
   /** Tasks that need you / are open, rolled up per node path. */
   needs: ReadonlyMap<string, number>; open: ReadonlyMap<string, number>;
   dateLine: string; summary: string; onOpen: (path: string) => void; status?: ReactNode;
+  selected?: string;
+  /** The left column beside a level (wide screens): no page title, the level has its own. */
+  column?: boolean;
 }) {
-  return <div className="tree-home th-phone-tree">
+  return <div className={`tree-home th-phone-tree ${column ? "th-column" : ""}`}>
     <header className="th-treehead">
       <p className="th-cap">{dateLine}</p>
-      <h1 className="note-title">Uni</h1>
+      {column ? <p className="th-colname">Rooms</p> : <h1 className="note-title">Uni</h1>}
       <p className="th-summary">{summary}</p>
     </header>
     {status}
-    <nav aria-label="Rooms and areas"><ul className="th-rows">{rows.map((r) => {
-      const n = needs.get(r.path) ?? 0, o = open.get(r.path) ?? 0;
-      return <li key={r.path || "uni"} className={`th-row d${Math.min(r.depth, 4)} ${r.last ? "last" : ""}`}>
-        {r.depth > 0 && <span className="th-guides" aria-hidden="true">{Array.from({ length: r.depth }, (_, i) => <span key={i} className={`th-guide ${i === r.depth - 1 ? "branch" : r.trunk[i] ? "run" : ""}`} />)}</span>}
-        <button type="button" className="th-go" data-path={r.path} onClick={() => onOpen(r.path)}
-          aria-label={`${r.name}${chat ? `, ${r.own && r.slash ? `room #${r.slash}` : r.heldBy ? `held by #${r.heldBy}` : "no room"}` : ""}${n ? `, ${n} need${n === 1 ? "s" : ""} you` : ""}${o ? `, ${o} open` : ""}`}>
-          <Stump mark={marks.get(r.path) ?? "quiet"} kind={r.kind} own={r.own} />
-          <span className="th-name"><b>{r.name}</b>
-            {chat && <RoomDoor view={{ slash: r.slash, heldBy: r.heldBy ? { id: "", name: r.heldBy } : null, own: r.own }} className="th-rowdoor" />}</span>
-          {n > 0 ? <Tag n={n} /> : o > 0 ? <span className="th-open" aria-hidden="true">{o}</span> : null}
-        </button>
-      </li>;
-    })}</ul></nav>
+    <RoomTree chat={chat} rows={rows} marks={marks} needs={needs} open={open} onOpen={onOpen} selected={selected} />
   </div>;
 }
 

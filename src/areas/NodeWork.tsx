@@ -106,7 +106,7 @@ export function RecentMessages({ room, tick }: { room: RoomRef | null; tick: num
 
 export const ownerLabel = (o: string, p: VaultProfile = activeProfile()) => (o === p.me ? p.meLabel : p.roomOwnerPrefix && o.startsWith(p.roomOwnerPrefix) ? `#${o.slice(p.roomOwnerPrefix.length)}` : o.startsWith("person:") ? o.slice(7) : p.agentOwners.includes(o) ? o.charAt(0).toUpperCase() + o.slice(1) : o || "unassigned");
 const OWNER = (o: string) => ownerLabel(o);
-const dueText = (iso: string | null) => {
+export const dueText = (iso: string | null) => {
   if (!iso) return null;
   const d = new Date(`${iso}T12:00:00`);
   return Number.isNaN(d.getTime()) ? iso : `due ${d.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
@@ -118,15 +118,15 @@ function Meta({ t, here, nodeName }: { t: Task; here: string; nodeName: (path: s
 }
 
 /** What needs doing at this level and below, grouped You / Rooms / Others, with a one-tap check-off. */
-export function TaskList({ tasks, leaving, here, nodeName, loading, ready, error, truncated, treeTruncated, onOpen, onAct, onRetry }: {
-  tasks: readonly Task[]; leaving: ReadonlySet<string>; here: string; nodeName: (path: string) => string;
+export function TaskList({ title = "Needs doing", tasks, leaving, here, nodeName, loading, ready, error, truncated, treeTruncated, onOpen, onAct, onRetry }: {
+  title?: string; tasks: readonly Task[]; leaving: ReadonlySet<string>; here: string; nodeName: (path: string) => string;
   loading: boolean; ready: boolean; error: string | null; truncated: boolean; treeTruncated?: boolean;
   onOpen: (t: Task) => void; onAct: (t: Task, a: TaskAction) => void; onRetry: () => void;
 }) {
   const [all, setAll] = useState<Record<string, boolean>>({});
   const groups = groupTasks(tasks);
   return <section className="work" aria-label="What needs doing here" aria-busy={loading && !ready}>
-    <h2 className="work-head">Needs doing<span className="brief-count">{tasks.length}</span></h2>
+    <h2 className="work-head">{title}<span className="brief-count">{tasks.length}</span></h2>
     {error && <p className="work-error" role="alert">Couldn't load tasks: {error.slice(0, 160)} <button type="button" className="pairing-secondary" onClick={onRetry}>Retry</button></p>}
     {!ready && !error && <p className="area-quiet" role="status">Loading tasks…</p>}
     {ready && !tasks.length && !error && <p className="area-quiet">Nothing open here.</p>}

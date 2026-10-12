@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { RecentMessages, TalkBar, TaskList, TaskSheet, UndoBar, type Talk } from "./NodeWork";
 import { useTasks } from "./useTasks";
+import WhereWeAre from "./WhereWeAre";
+import { whereWeAre } from "./whereCore";
 import { ownRoom, steward, stewardLine, type RoomNode, type Steward } from "./talkCore";
 import type { Area } from "./areasCore";
-import type { Task, TaskNode } from "./taskCore";
+import { groupOf, tasksUnder, type Task, type TaskNode } from "./taskCore";
 import { rootNeeds, TodaySections, type RoomInfo } from "./TodayView";
 import NodeStage, { type ZoomState, type StageKid } from "./NodeStage";
 import { AreaSlot } from "./areaSlots";
@@ -20,7 +22,7 @@ import { ancestry, childrenOf, parentPath, ROOT, rootNode, trail, UNI_CHANNEL } 
 import { findUniRoom } from "../uniActions";
 import { useStoredSelfTest } from "../interface/selftest/useSelfTest";
 import { useHomeLayout, useWide } from "./homeLayout";
-import { roomView, treeRows, updatesBelow, type RoomView } from "./treeRooms";
+import { isPrivateNode, roomView, treeRows, updatesBelow, type RoomView } from "./treeRooms";
 import { levelAlive } from "./treeAlive";
 import { useVaultProfile } from "./ProfileContext";
 import { AliveBlock, Crumbs, InsideBlock, LevelPanel, Ledger, NeedsBlock, ProjectNote, RoomBlock, RoomLine, TreeScreen, UpdatesBlock, type InsideKid } from "./TreeHome";
@@ -54,7 +56,9 @@ export default function AreasSurface({ zoom, identity, talk, path, rooms: hostRo
   const { data, error, loading, signingIn } = useAreas(identity);
   const layout = useHomeLayout();
   const wide = useWide();
-  const treeMode = layout === "tree";
+  /** Rooms (0.1.42): the room tree is the navigation on every screen and the panel opens on "Where we are". Map (`tree`) is the 0.1.41 home. */
+  const roomsMode = layout === "rooms";
+  const treeMode = layout === "tree" || roomsMode;
   /** Phone: the room tree is the home and a level opens from it; Uni's own level is one tap on its row. */
   const [rootOpen, setRootOpenState] = useState(rootOpenMemory.open);
   const setRootOpen = (v: boolean) => { rootOpenMemory.open = v; setRootOpenState(v); };
@@ -101,7 +105,9 @@ export default function AreasSurface({ zoom, identity, talk, path, rooms: hostRo
   const roomName = useMemo(() => (id: string) => rooms.find((r) => r.id === id)?.name ?? "room", [rooms]);
   const now = Date.now();
   const fallback = useMemo<TaskNode[]>(() => (data?.areas ?? []).map((a) => ({ id: a.id, path: a.path, name: a.name, parent: a.parent, room: typeof a.metadata.room === "string" ? a.metadata.room : null, status: a.status === "archived" || a.status === "done" ? a.status : "active", isRoot: false })), [data?.areas]);
-  const tasks = useTasks(identity, node?.path ?? "", fallback);
+  // Rooms: the whole tree's tasks are loaded once (the room tree beside the level needs every row's counts) and each level takes its subtree.
+  const tasks = useTasks(identity, roomsMode ? "" : node?.path ?? "", fallback);
+  const levelTasks = useMemo(() => (roomsMode && tasks.tree && node ? tasksUnder(tasks.tree, node.path, tasks.tasks) : tasks.tasks), [roomsMode, tasks.tree, tasks.tasks, node?.path]); // eslint-disable-line react-hooks/exhaustive-deps
   const [sentTick, setSentTick] = useState(0);
   useEffect(() => { setSheet(null); }, [node?.path]);
   /** Who stewards a node: its own room, else the nearest ancestor's, else #Uni (one rule for talk targets, "Open in #room" and the node page). */
@@ -176,15 +182,15 @@ export default function AreasSurface({ zoom, identity, talk, path, rooms: hostRo
     if (p === ROOT) { setRootOpen(true); onOpenArea(null, "Uni", uniRoom); return; }
     const n = tree?.nodes.get(p); if (n) open(n);
   };
+  const navRows = treeMode && tree ? treeRows(tree, roomRefs, uniRef) : [{ path: ROOT, name: "Uni", depth: 0, kind: "root" as const, slash: uniRef ? "uni" : null, heldBy: null, own: !!uniRef, trunk: [], last: true }];
+  const navMarks = new Map(navRows.map((r) => [r.path, tree && data ? rolledMark(tree, data.briefs, r.path) : "quiet" as const]));
+  const navNeeds = new Map(navRows.map((r) => [r.path, needsOf(r.path)]));
+  const navOpen = new Map(navRows.map((r) => [r.path, openOf(r.path)]));
+  const youAll = needsOf(ROOT);
+  const navSummary = !data ? (signingIn ? "Signing in…" : loading ? "Opening…" : error ? `Couldn't load: ${error}` : "") : youAll ? `${youAll} need${youAll === 1 ? "s" : ""} you · ${openOf(ROOT)} open` : openOf(ROOT) ? `Nothing needs you · ${openOf(ROOT)} open` : "Nothing open";
+  const navDate = new Date(now).toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" });
   if (treeMode && phoneTree && path === null && !rootOpen) {
-    const rows = tree ? treeRows(tree, roomRefs, uniRef) : [{ path: ROOT, name: "Uni", depth: 0, kind: "root" as const, slash: uniRef ? "uni" : null, heldBy: null, own: !!uniRef, trunk: [], last: true }];
-    const marks = new Map(rows.map((r) => [r.path, tree && data ? rolledMark(tree, data.briefs, r.path) : "quiet" as const]));
-    const needs = new Map(rows.map((r) => [r.path, needsOf(r.path)]));
-    const total = new Map(rows.map((r) => [r.path, openOf(r.path)]));
-    const you = needsOf(ROOT);
-    const summary = !data ? (signingIn ? "Signing in…" : loading ? "Opening…" : error ? `Couldn't load: ${error}` : "") : you ? `${you} need${you === 1 ? "s" : ""} you · ${openOf(ROOT)} open` : openOf(ROOT) ? `Nothing needs you · ${openOf(ROOT)} open` : "Nothing open";
-    return <div className="areas-home tree-home-wrap"><TreeScreen chat={chat} rows={rows} marks={marks} needs={needs} open={total} summary={summary} status={status}
-      dateLine={new Date(now).toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" })} onOpen={openPath} />
+    return <div className="areas-home tree-home-wrap"><TreeScreen chat={chat} rows={navRows} marks={navMarks} needs={navNeeds} open={navOpen} summary={navSummary} status={status} dateLine={navDate} onOpen={openPath} />
       <UndoBar undo={tasks.undo} notice={tasks.notice} onDismiss={tasks.dismissNotice} /></div>;
   }
   const mark = tree && data ? rolledMark(tree, data.briefs, node.path) : "quiet";
@@ -192,13 +198,28 @@ export default function AreasSurface({ zoom, identity, talk, path, rooms: hostRo
   const nodeView = rowOf(node.path);
   const askRoom = target?.id ?? null;
   const rootLines = isRoot ? rootNeeds(data, now).map((n) => ({ text: n.text, tokens: n.tokens, ...(n.area ? { note: n.area } : {}) })) : [];
-  const levelA = tree && data ? levelAlive({ tree, path: node.path, node, entry, briefs: data.briefs, tasks: tasks.tasks,
+  const levelA = tree && data ? levelAlive({ tree, path: node.path, node, entry, briefs: data.briefs, tasks: levelTasks,
     root: isRoot ? { needs: rootLines, moved: today?.today.moved ?? [], areas: kids.length, needing: new Set(rootLines.map((l) => l.note).filter(Boolean)).size } : null }) : { now: "", nowTokens: null, needs: [], moving: [], derived: false, hasBrief: false };
   const updates = tree && chat ? updatesBelow(tree, node.path, rooms, uniRef, nowSec) : [];
   const trailItems = [{ path: ROOT, name: "Uni" }, ...(tree && !isRoot ? trail(tree, node.path) : isRoot ? [] : [node]).map((n) => ({ path: n.path, name: n.name }))];
   const insideTitle = isRoot ? "Areas" : node.kind === "area" ? "Projects" : "Inside";
   const askDraftFor = (l: { text: string; tokens: Inline[]; note?: string }) => askRoom && actions.compose(askRoom, askDraft("needsYou", isRoot && l.note ? l.note : node.name, l));
-  const sections = <>
+  const privateLevel = !!tree && isPrivateNode(tree, node.path);
+  const where = whereWeAre({ tasks: levelTasks, hidden: (p) => !!tree && isPrivateNode(tree, p), selfPrivate: privateLevel, nowMs: now });
+  const whereLead = isRoot ? "All of it, across the areas." : node.kind === "area" ? `${node.name}, and the projects in it.` : `${node.name}.`;
+  const roomsSections = <>
+    <WhereWeAre where={where} here={here} nodeName={nodeName} leaving={tasks.leaving} nowMs={now} lead={whereLead} ready={tasks.ready}
+      onOpen={setSheet} onAct={(t, a) => void tasks.act(t, a)} onPriority={(t, p) => void tasks.setPriority(t, p)} />
+    <AliveBlock alive={{ ...levelA, needs: [] }} kind={node.kind} onNote={actions.openNote} fresh={updatedLabel(freshIso, now)} onRefresh={askRoom ? () => actions.compose(askRoom, refreshDraft(node.name, isRoot ? "" : node.path)) : null} />
+    <UpdatesBlock updates={updates} nowSec={nowSec} onOpen={openPath} />
+    <InsideBlock chat={chat} title={insideTitle} kids={insideKids} onOpen={open} />
+    {empty}
+    <ProjectNote area={body !== null ? { ...node, body } : node} />
+    <TaskList title={privateLevel ? "Needs doing" : "Other work"} tasks={privateLevel ? levelTasks : levelTasks.filter((t) => groupOf(t) !== "you")} leaving={tasks.leaving} here={here} nodeName={nodeName} loading={tasks.loading} ready={tasks.ready} error={tasks.error} truncated={tasks.truncated} treeTruncated={tasks.treeTruncated}
+      onOpen={setSheet} onAct={(t, a) => void tasks.act(t, a)} onRetry={tasks.refresh} />
+    {chat && <RoomBlock view={nodeView} steward={stewardText} ledger={<Ledger roomId={target?.id ?? null} me={identity} nowSec={nowSec} tick={sentTick + (roomFor(target?.id)?.messages.length ?? 0)} />} />}
+  </>;
+  const sections = roomsMode ? roomsSections : <>
     <AliveBlock alive={levelA} kind={node.kind} onNote={actions.openNote} fresh={updatedLabel(freshIso, now)} onRefresh={askRoom ? () => actions.compose(askRoom, refreshDraft(node.name, isRoot ? "" : node.path)) : null} />
     <NeedsBlock lines={levelA.needs} onNote={actions.openNote} onAsk={askRoom && !levelA.derived ? (l) => void askDraftFor(l) : null} />
     <UpdatesBlock updates={updates} nowSec={nowSec} onOpen={openPath} />
@@ -221,10 +242,12 @@ export default function AreasSurface({ zoom, identity, talk, path, rooms: hostRo
   </header>;
   const wideHead = <header className="th-head wide">
     <Crumbs trail={trailItems} onOpen={openPath} />
+    {roomsMode && <h1 className="note-title">{node.title}</h1>}
     {chat && <RoomLine view={nodeView} />}
   </header>;
-  const treeLevel = <div className={`tree-home th-level ${wide ? "wide" : "phone"}`} data-layout="tree">
-    {wide && <div className="th-stage">{stage}</div>}
+  const treeLevel = <div className={`tree-home th-level ${wide ? "wide" : "phone"} ${roomsMode ? "th-rooms" : ""}`} data-layout={roomsMode ? "rooms" : "tree"}>
+    {wide && !roomsMode && <div className="th-stage">{stage}</div>}
+    {wide && roomsMode && <div className="th-roomnav"><TreeScreen column chat={chat} rows={navRows} marks={navMarks} needs={navNeeds} open={navOpen} summary={navSummary} dateLine={navDate} selected={node.path} onOpen={openPath} /></div>}
     <LevelPanel wide={wide} head={wide ? wideHead : phoneHead} foot={<>{talkBar}<UndoBar undo={tasks.undo} notice={tasks.notice} onDismiss={tasks.dismissNotice} /></>}>{sections}</LevelPanel>
     {sheet && <TaskSheet key={sheet.id} task={sheet} here={here} nodeName={nodeName} room={roomOfNode(sheet.node) ?? target} onClose={() => setSheet(null)} onAct={(t, a) => void tasks.act(t, a)} onOpenRoom={actions.openRoom} />}
   </div>;

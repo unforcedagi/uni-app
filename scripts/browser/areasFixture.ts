@@ -167,11 +167,13 @@ export type BootOpts = {
   /** T-88: an `Areas/Boulder` area (room #boulder, which the metadata still calls #civics; the room is found by its channel id) with a project that has no room of its own. */
   boulder?: boolean;
   /** T-111: which home the app opens in (the setting's stored value). The older specs run on the octopus, the tree home's own spec on `tree`. */
-  layout?: 'tree' | 'octopus' | 'classic';
+  layout?: 'rooms' | 'tree' | 'octopus' | 'classic' | 'unset';
   /** T-111: COhere 2026 sits under Boulder (as in the live vault) instead of Techne. Needs `tree` and `boulder`. */
   underBoulder?: boolean;
   /** T-111: a project (Ricki) whose room is archived, with `room_fallback` naming the room that holds it. */
   ricki?: boolean;
+  /** T-111 rooms nav: Sadhana (a private area) holds tasks too. */
+  privateTasks?: boolean;
   /** T-86b: the vault doesn't know `near[...then]`; the subtree commands answer with an unknown-parameter error. */
   nearOff?: boolean;
   /** Pre-fill the device cache (localStorage) with this JSON string. */
@@ -196,7 +198,7 @@ export async function bootAreas(page: Page, variant: Variant = 'seed', opts: Boo
   const now = Math.floor((opts.pinned ? pinnedAt : Date.now()) / 1000);
   const data = {
     profileNote: opts.profileNote ?? null, lifeVault: opts.lifeVault ?? null, now, variant, selftest: opts.selftest ?? true, ipcLeak: opts.ipcLeak ?? false, hostile: hostileApp(opts.ports ?? { http: 9, udp: 9 }), benign: BENIGN, techne: seed('techne'), unforced: seed('unforced'), seedMeta,
-    apps: opts.apps ?? [], multiRoom: !!opts.multiRoom || !!opts.tree, tree: !!opts.tree, tasks: !!opts.tasks, briefs: !!opts.briefs, queryDelay: opts.queryDelay ?? 0, identityDelay: opts.identityDelay ?? 0, roomsDelay: opts.roomsDelay ?? 0, nodeStatuses: opts.nodeStatuses ?? {}, nearOff: !!opts.nearOff, ids: !!opts.ids, boulder: !!opts.boulder, layout: opts.layout ?? 'octopus', underBoulder: !!opts.underBoulder, ricki: !!opts.ricki, deviceCache: opts.deviceCache ?? null, queryFails: opts.queryFails ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null, mode: opts.mode ?? 'sealed', grantedUnder: opts.grantedUnder ?? (opts.mode ?? 'sealed'),
+    apps: opts.apps ?? [], multiRoom: !!opts.multiRoom || !!opts.tree, tree: !!opts.tree, tasks: !!opts.tasks, briefs: !!opts.briefs, queryDelay: opts.queryDelay ?? 0, identityDelay: opts.identityDelay ?? 0, roomsDelay: opts.roomsDelay ?? 0, nodeStatuses: opts.nodeStatuses ?? {}, nearOff: !!opts.nearOff, ids: !!opts.ids, boulder: !!opts.boulder, layout: opts.layout ?? 'octopus', underBoulder: !!opts.underBoulder, ricki: !!opts.ricki, privateTasks: !!opts.privateTasks, deviceCache: opts.deviceCache ?? null, queryFails: opts.queryFails ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null, mode: opts.mode ?? 'sealed', grantedUnder: opts.grantedUnder ?? (opts.mode ?? 'sealed'),
   };
   // Pre-granted apps: the grant key is the SHA-256 of the RESOLVED default needs plus the app's html.
   const preGrant = [
@@ -230,7 +232,7 @@ export async function bootAreas(page: Page, variant: Variant = 'seed', opts: Boo
     w.__cbs = [];
     w.__listeners = {};
     if (d.lifeVault) localStorage.setItem('uni.lifeos.vault', d.lifeVault);
-    if (!localStorage.getItem('uni.home.layout.v1')) localStorage.setItem('uni.home.layout.v1', d.layout);
+    if (d.layout !== 'unset' && !localStorage.getItem('uni.home.layout.v1')) localStorage.setItem('uni.home.layout.v1', d.layout);
     // The live-frame gate opens for this platform and version through a stored self-test pass.
     if (d.selftest && !localStorage.getItem('uni.areaApps.selftest.v1')) localStorage.setItem('uni.areaApps.selftest.v1', JSON.stringify({ platform: 'linux', passedAt: '2026-10-08T00:00:00Z', appVersion: 'dev', runtime: 'wry test tauri test', mode: d.mode, userAgent: d.passUa ?? navigator.userAgent }));
     if (d.granted && !localStorage.getItem('uni.interface.grants.v2')) {
@@ -371,19 +373,22 @@ Two proposals wait on a scope decision.
     const mk = (id: string, title: string, node: string, extra: Record<string, unknown> = {}, tag = 'task') => ({ id, path: `Tasks/${title}`, extension: 'md', tags: [tag], createdAt: T0, updatedAt: T0, lastUpdatedBy: 'cdf67944-c5f2-4e42-a0d8-02ce7a95bbdb', lastUpdatedVia: 'api', metadata: { node, state: 'open', owner: 'aaron', ...extra } });
     const C26 = 'Projects/COhere/COhere 2026';
     const taskNotes: any[] = d.tasks ? [
-      mk('k1', 'T-03 COhere festival readiness', C26, { state: 'waiting', waiting_on: 'aaron', due: '2026-10-12', next: 'Check-in PR by Oct 12' }),
+      mk('k1', 'T-03 COhere festival readiness', C26, { state: 'waiting', waiting_on: 'aaron', due: '2026-10-12', next: 'Check-in PR by Oct 12', priority: 'now' }),
       mk('k2', 'T-64 COhere app spec', C26, { owner: 'room:cohere', state: 'doing' }),
-      mk('k3', 'T-65 Sponsorship invoice draft', C26),
-      mk('k4', 'T-33 Kevin call: book it', 'Areas/Techne'),
+      mk('k3', 'T-65 Sponsorship invoice draft', C26, { priority: 'soon', next: 'Send to Kevin for the numbers' }),
+      mk('k4', 'T-33 Kevin call: book it', 'Areas/Techne', { priority: 'now' }),
       mk('k5', 'T-61 Techne vision page', 'Areas/Techne', { owner: 'person:benjamin', state: 'waiting', waiting_on: 'external' }),
       mk('k6', 'T-80 Wire the usage guard', 'Areas/Techne', { owner: 'uni' }),
-      mk('k7', 'T-20 Send the Q4 invoice', 'Areas/Unforced Development'),
-      mk('k8', 'FY-14 FableJi remains in writing', 'Uni'),
+      mk('k7', 'T-20 Send the Q4 invoice', 'Areas/Unforced Development', { priority: 'someday' }),
+      mk('k8', 'FY-14 FableJi remains in writing', 'Uni', { priority: 'someday' }),
       mk('k9', 'T-99 Already finished', C26, { state: 'done' }),
       mk('k10', 'T-98 Put away', 'Areas/Techne', { state: 'archived' }),
       mk('k11', 'T-14 A snoozed one', 'Areas/Techne', { snoozed_until: '2099-01-01' }),
-      mk('dq1', 'Decide the COhere venue', C26, {}, 'decision'),
+      mk('dq1', 'Decide the COhere venue', C26, { priority: 'someday' }, 'decision'),
     ] : [];
+    // T-111 rooms nav: a task in a private area (Sadhana) and tasks changed at different times, so "Where we are" has something to hide and to date.
+    if (d.tasks && d.privateTasks) taskNotes.push({ ...mk('s1', 'T-31 Sit twenty minutes daily', 'Areas/Sadhana', { priority: 'now', next: 'Before breakfast' }), updatedAt: '2026-10-09T09:00:00.000Z' }, { ...mk('s2', 'T-32 Find a teacher', 'Areas/Sadhana', { priority: 'someday' }), updatedAt: '2026-09-01T09:00:00.000Z' });
+    if (d.tasks) for (const [id, at] of [['k4', '2026-10-01T08:00:00.000Z'], ['k7', '2026-09-20T08:00:00.000Z'], ['k8', '2026-09-20T08:00:00.000Z']]) { const t = taskNotes.find((x) => x.id === id); if (t) t.updatedAt = at; }
     w.__tasks = taskNotes;
     const BOULDER = '9f5dd143-96b1-440a-ab71-812219cdfaa1';
     if (d.boulder) {

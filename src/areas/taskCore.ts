@@ -15,6 +15,12 @@ export type RawNote = {
   lastUpdatedBy?: unknown; lastUpdatedVia?: unknown;
 };
 
+/** `priority` on a task note: how soon it needs doing. Absent means unsorted, which reads as `soon`. */
+export type Priority = "now" | "soon" | "someday";
+export const PRIORITIES: readonly Priority[] = ["now", "soon", "someday"];
+export const PRIORITY_LABEL: Record<Priority, string> = { now: "Now", soon: "Soon", someday: "Someday" };
+export const priorityOf = (t: Pick<Task, "priority">): Priority => t.priority ?? "soon";
+
 export type Task = {
   id: string; path: string; title: string; kind: "task" | "decision";
   /** The node it belongs to, as a node path (ROOT for the Uni root). */
@@ -22,6 +28,8 @@ export type Task = {
   state: AnyState; owner: string; waitingOn: string | null; due: string | null; next: string; room: string | null;
   /** `YYYY-MM-DD`: hidden until that day (the state stays as it was). */
   snoozedUntil: string | null;
+  /** null: not sorted yet (shown as `soon`). */
+  priority: Priority | null;
   updatedAt: string | null; lastUpdatedBy: string | null; lastUpdatedVia: string | null;
 };
 
@@ -120,6 +128,7 @@ export function parseTask(n: RawNote, tree: TaskTree): Task | null {
     id, path, kind, title: leaf(path), node, state: state as AnyState, owner: str(m.owner) ?? "", waitingOn: str(m.waiting_on),
     due: str(m.due)?.slice(0, 10) ?? null, next: str(m.next) ?? "", room: str(m.room)?.replace(/^#/, "") ?? null,
     snoozedUntil: str(m.snoozed_until)?.slice(0, 10) ?? null,
+    priority: PRIORITIES.find((p) => p === str(m.priority)?.toLowerCase()) ?? null,
     updatedAt: str(n.updatedAt), lastUpdatedBy: str(n.lastUpdatedBy), lastUpdatedVia: str(n.lastUpdatedVia),
   };
 }
