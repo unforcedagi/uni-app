@@ -11,8 +11,9 @@
 @font-face { font-family: "FieldMono"; font-weight: 400 500; font-display: swap; src: url(./fonts/mono-400.woff2) format("woff2"); }
 @font-face { font-family: "FieldMono"; font-weight: 600 900; font-display: swap; src: url(./fonts/mono-700.woff2) format("woff2"); }
 
-.tree-home, .tree-home-wrap {
-  /* tokens: LANGUAGE.md / language.css from uni-sketches/t111-app, as of 2026-10-12 (the values match; change them here to restyle) */
+:root {
+  /* tokens: LANGUAGE.md / language.css from uni-sketches/t111-app, as of 2026-10-12 (the values match; change them here to restyle).
+     At :root since T-122: the shared widgets (task rows, sheets, talk and steer bars, undo) read them everywhere, not only inside the tree home. */
   --th-ground: #E7E1D0; --th-paper: #F3EFE3; --th-card: #FAF7EE; --th-ink: #1A1913; --th-ink2: #423F36; --th-mute: #5C584C;
   --th-ring: rgba(26, 25, 19, .09);
   --th-sap: #8A4A10; --th-sap-soft: rgba(138, 74, 16, .14); --th-hair: rgba(26, 25, 19, .30); --th-hair2: rgba(26, 25, 19, .16);
@@ -21,12 +22,10 @@
   --th-mono: "FieldMono", ui-monospace, Menlo, "DejaVu Sans Mono", monospace;
   --th-door: 22px 22px 3px 3px;
   --th-tag: polygon(0 0, calc(100% - 7px) 0, 100% 7px, 100% 100%, 0 100%);
-  /* the rest of the app's widgets (task rows, talk bar, sheets) read these names; point them at the tokens */
-  --bg: var(--th-paper); --surface: var(--th-card); --text: var(--th-ink); --text-soft: var(--th-ink2); --muted: var(--th-mute); --line: var(--th-hair2); --accent: var(--th-sap);
-  color: var(--th-ink); font-family: var(--th-sans);
 }
+.tree-home, .tree-home-wrap { color: var(--th-ink); font-family: var(--th-sans); }
 @media (prefers-color-scheme: dark) {
-  .tree-home, .tree-home-wrap {
+  :root {
     --th-ground: #15140f; --th-paper: #1c1b15; --th-card: #25231c; --th-ink: #EFE9D8; --th-ink2: #D2CCBA; --th-mute: #ACA693;
     --th-ring: rgba(239, 233, 216, .10);
     --th-sap: #E0A25A; --th-sap-soft: rgba(224, 162, 90, .16); --th-hair: rgba(239, 233, 216, .34); --th-hair2: rgba(239, 233, 216, .18);
