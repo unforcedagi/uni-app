@@ -112,4 +112,17 @@ check("PR2: the device cache accepts every status the parser can produce (active
   assert.equal(c.read(owner)?.areas.length, 2);
 });
 
+check("PR4: discover — uni reads only the profile note (no tag queries); other vaults probe node and root", async () => {
+  const { discover } = await import("../src/areas/discover.ts");
+  const run = async (vault: string, answer: (cmd: string, a: any) => unknown) => { const calls: any[] = []; const inv = async (cmd: string, a: any) => { calls.push({ cmd, ...a }); const r = answer(cmd, a); if (r instanceof Error) throw r; return r as never; }; return { found: await discover(vault, inv as never), calls }; };
+  const u = await run("uni", () => new Error("no note"));
+  assert.deepEqual(u.calls.map((c) => c.cmd), ["vault_note"]); assert.deepEqual(u.found.profile, defaultProfile()); assert.equal(u.found.hasPack, true);
+  const s = await run("s", (cmd, a) => cmd === "vault_note" ? new Error("none") : a.tag === "node" ? [1] : a.tag === "root" ? [1] : []);
+  assert.equal(s.found.profile.rootTag, "root"); assert.equal(s.found.hasPack, true); assert.equal(s.calls.filter((c) => c.cmd === "vault_query").length, 2);
+  assert.equal((await run("b", (cmd) => cmd === "vault_note" ? new Error("none") : [])).found.hasPack, false, "no node notes → no pack");
+  assert.equal((await run("b", (cmd, a) => cmd === "vault_note" ? new Error("none") : a.tag === "node" ? [] : [])).found.profile.rootTag, "uni", "no root notes → uni root");
+  const f = await run("f", (cmd) => cmd === "vault_note" ? new Error("none") : new Error("offline"));
+  assert.equal(f.found.hasPack, true, "a failed pack check is not 'no pack'"); assert.equal(f.found.profile.rootTag, "root", "a failed root check is not 'no root'");
+});
+
 if (failed) { console.log(`${failed} failed`); process.exit(1); } else console.log("all passed");
