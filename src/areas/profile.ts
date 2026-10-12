@@ -32,7 +32,7 @@ export function packProfile(vault: string, rootTag: string): VaultProfile {
   return { vault, title: "Life", rootTag, me: "me", meLabel: "You", agentOwners: ["uni", "agent"], roomOwnerPrefix: null, areaPrefix: null, briefs: { mode: "none" }, chat: { provider: null } };
 }
 
-const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);
+const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim().slice(0, 120) : null); // profile strings are labels and owner ids: capped
 
 /** A profile note's settings: JSON in `metadata`, else the first fenced block (```json or bare) in the content. Unknown or invalid fields are ignored. */
 export function readProfileNote(note: { content?: string | null; metadata?: unknown } | null | undefined): Partial<VaultProfile> | null {
