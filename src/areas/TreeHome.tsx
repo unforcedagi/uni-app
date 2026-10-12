@@ -125,7 +125,7 @@ export function UpdatesBlock({ updates, nowSec, onOpen }: { updates: readonly Up
     <ul className="th-sap">{updates.map((u) => <li key={u.path}>
       <button type="button" className="th-up" data-path={u.path} onClick={() => onOpen(u.path)} aria-label={`Update from ${u.slash}, ${agoLabel(nowSec, u.ts)}. Open ${u.name}`}>
         <span className="th-arrow" aria-hidden="true">↳</span>
-        <span className="th-up-text"><b>{u.text ? "1 update" : "Active"}</b> from <span className="th-up-room">{u.slash}</span><small>{agoLabel(nowSec, u.ts)}{u.text ? ` · ${cleanText(u.text).replace(/\s+/g, " ").slice(0, 110)}` : ""}</small></span>
+        <span className="th-up-text"><b>{u.text ? "Update" : "Active"}</b> from <span className="th-up-room">{u.slash}</span><small>{agoLabel(nowSec, u.ts)}{u.text ? ` · ${cleanText(u.text).replace(/\s+/g, " ").slice(0, 110)}` : ""}</small></span>
       </button></li>)}</ul>
   </Section>;
 }
@@ -172,9 +172,10 @@ export function Ledger({ roomId, me, tick, nowSec }: { roomId: string | null; me
     <span>{cleanText(m.body).replace(/\s+/g, " ")}</span></li>)}</ol>;
 }
 
+/** `steward`: who answers here when the node has no room of its own ("Stewarded by #boulder"); nothing to say when the room is its own. */
 export function RoomBlock({ view, ledger, steward }: { view: RoomView; ledger: ReactNode; steward: string | null }) {
   return <Section id="room" title="Room">
-    <div className="th-roomhead"><RoomDoor view={view} />{steward && <span className="th-rnote">{steward}</span>}</div>
+    <div className="th-roomhead"><RoomDoor view={view} />{!view.own && steward && <span className="th-rnote">{steward}</span>}</div>
     {ledger}
   </Section>;
 }

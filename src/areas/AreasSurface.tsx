@@ -111,7 +111,7 @@ export default function AreasSurface({ zoom, identity, talk, path, rooms, action
     return steward(chain, roomRefs, uniRef);
   };
   const roomOfNode = (p: string) => stewardOf(p).room;
-  const open = (a: Area) => { const w = withRoom(a); onOpenArea(w.path, w.name, pickRoom(w.rooms, null)); };
+  const open = (a: Area) => { setRootOpen(false); const w = withRoom(a); onOpenArea(w.path, w.name, pickRoom(w.rooms, null)); };
   const toUni = () => onOpenArea(null, "Uni", uniRoom);
   if (!node) return <div className="areas-home"><button className="note-back" onClick={toUni}><span className="note-back-arrow" aria-hidden="true">←</span><span className="note-back-label">Uni</span></button>
     <p className="empty">{signingIn ? "Signing in…" : loading ? "Opening area…" : error ? `Couldn't load: ${error}` : "This area no longer exists."}</p></div>;
@@ -139,7 +139,7 @@ export default function AreasSurface({ zoom, identity, talk, path, rooms, action
   const empty = isRoot && !kids.length && !error ? <p className="empty">{signingIn ? "Signing in…" : loading ? "Loading areas…" : "No areas yet. Tag a note `area` at Areas/<Name>."}</p> : null;
   const today = data?.today;
   const entry = data?.briefs[node.path] ?? null;
-  const stageKids: StageKid[] = data && tree ? kids.map((k) => ({ node: k, open: tasks.counts.get(k.path)?.total ?? 0, needs: data.briefs[k.path]?.brief.needsYou.length ?? 0, room: k.kind === "project" ? treeMode ? (roomView(tree, k.path, roomRefs, uniRef).slash ?? undefined) : stewardOf(k.path).via === "own" ? stewardOf(k.path).room?.name : undefined : undefined, mark: rolledMark(tree, data.briefs, k.path), tips: childrenOf(tree, k.path).map((c) => c.name) })) : [];
+  const stageKids: StageKid[] = data && tree ? kids.map((k) => ({ node: k, open: tasks.counts.get(k.path)?.total ?? 0, needs: data.briefs[k.path]?.brief.needsYou.length ?? 0, room: k.kind === "project" ? treeMode ? (roomView(tree, k.path, roomRefs, uniRef).slash ?? undefined) : stewardOf(k.path).via === "own" ? stewardOf(k.path).room?.name : undefined : undefined, mark: rolledMark(tree, data.briefs, k.path), tips: treeMode ? [] : childrenOf(tree, k.path).map((c) => c.name) })) : [];
   const alive: Alive = isRoot
     ? { has: !!data && (!!data.today || Object.keys(data.briefs).length > 0), needs: rootNeeds(data, now).map((n) => n.text), moving: (today?.today.moved ?? []).map((m) => m.text) }
     : aliveOf(entry);
