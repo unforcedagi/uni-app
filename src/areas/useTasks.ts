@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { buildTaskTree, dayOf, isLive, rollUp, snoozed, tasksUnder, tomorrowOf, type AnyState, type Counts, type Task, type TaskNode, type TaskTree } from "./taskCore";
 import { vaultTasks } from "./vaultTasks";
 import { shouldReload } from "./pathCache";
+import { useVaultProfile } from "./ProfileContext";
 
 export type TaskAction = "done" | "archive" | "snooze";
 export type Undo = { id: string; label: string; run: () => Promise<void> };
@@ -24,7 +25,8 @@ const said: Record<TaskAction, string> = { done: "Marked done", archive: "Archiv
  * reconciles it. A failed write rolls back with a message; a conflict (the task changed elsewhere) re-reads instead of retrying.
  */
 export function useTasks(identity: string | null, nodePath: string, fallback: readonly TaskNode[]) {
-  const owner = identity ?? "";
+  const vault = useVaultProfile().vault;
+  const owner = `${identity ?? ""}|${vault}`;
   const [tree, setTree] = useState<TaskTree | null>(() => scoped(owner).tree);
   const [list, setList] = useState<Task[] | null>(() => scoped(owner).tasks.get(nodePath)?.list ?? null);
   const [truncated, setTruncated] = useState(false);
@@ -69,7 +71,7 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
       setGone((g) => new Set([...g].filter((id) => r.tasks.some((x) => x.id === id && isLive(x)))));
     })().catch((e) => { if (live && mine === epoch.current) setError(String(e)); }).finally(() => { if (live && mine === epoch.current) setLoading(false); });
     return () => { live = false; };
-  }, [identity, nodePath, n]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [identity, vault, nodePath, n]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     const visible = () => {
       if (document.visibilityState !== "visible") return;
