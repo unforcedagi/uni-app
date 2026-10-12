@@ -7,7 +7,9 @@ import { splitTitle, whereWeAre } from "../src/areas/whereCore.ts";
 import { parseHomeLayout } from "../src/areas/homeLayout.ts";
 
 let failed = 0;
-async function check(name: string, fn: () => void | Promise<void>) {
+const pending: Promise<void>[] = [];
+function check(name: string, fn: () => void | Promise<void>) { pending.push(run(name, fn)); }
+async function run(name: string, fn: () => void | Promise<void>) {
   try { await fn(); console.log(`ok   ${name}`); } catch (e) { failed++; console.log(`FAIL ${name}\n     ${(e as Error).message.split("\n")[0]}`); }
 }
 const NOW = Date.parse("2026-10-12T12:00:00Z");
@@ -66,10 +68,12 @@ check("setPriority: one vault_patch_meta with the read stamp; null clears; a sta
   const sent: any[] = [];
   const api = createVaultTasks(async (cmd, args) => { sent.push({ cmd, args }); if (args.ifUpdatedAt === "stale") throw new Error("conflict: note x has been modified"); return { updatedAt: "T2" }; }, "uni");
   const ok = await api.setPriority("k3", "now", "T1");
-  assert.deepEqual(sent, [{ cmd: "vault_patch_meta", args: { vault: "uni", id: "k3", metadata: { priority: "now" }, ifUpdatedAt: "T1" } }]);
+  assert.deepEqual(sent, [{ cmd: "vault_patch_meta", args: { vault: "uni", id: "k3", metadata: { priority: "now", priority_by: "hand" }, ifUpdatedAt: "T1" } }]);
   assert.ok(ok.ok && ok.updatedAt === "T2");
   await api.setPriority("k3", null, "T2");
-  assert.deepEqual(sent[1].args.metadata, { priority: null });
+  assert.deepEqual(sent[1].args.metadata, { priority: null, priority_by: null });
+  await api.setPriority("k3", "soon", "T2", "weigh.py 2026-10-12");  // undo hands the previous stamp back
+  assert.deepEqual(sent[2].args.metadata, { priority: "soon", priority_by: "weigh.py 2026-10-12" });
   const bad = await api.setPriority("k3", "soon", "stale");
   assert.ok(!bad.ok && bad.kind === "conflict");
 });
@@ -78,4 +82,5 @@ check("layout: Rooms is the default when nothing is stored; an earlier choice of
   for (const l of ["tree", "octopus", "classic", "rooms"]) assert.equal(parseHomeLayout(l), l);
 });
 
+await Promise.all(pending);  // an async check must finish before the exit code is decided
 if (failed) { console.log(`${failed} failed`); process.exit(1); }

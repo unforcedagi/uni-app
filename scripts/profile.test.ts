@@ -8,7 +8,9 @@ import { createAreasCache } from "../src/areas/areasCache.ts";
 import { createVaultTasks } from "../src/areas/vaultTasks.ts";
 
 let failed = 0;
-async function check(name: string, fn: () => void | Promise<void>) {
+const pending: Promise<void>[] = [];
+function check(name: string, fn: () => void | Promise<void>) { pending.push(run(name, fn)); }
+async function run(name: string, fn: () => void | Promise<void>) {
   try { await fn(); console.log(`ok   ${name}`); } catch (e) { failed++; console.log(`FAIL ${name}\n     ${(e as Error).message.split("\n")[0]}`); }
 }
 
@@ -141,4 +143,5 @@ check("chat null: room:* owners group under Others (no roomOwnerPrefix), the uni
   assert.equal(readProfileNote({ metadata: { chat: { provider: null } } })?.chat?.provider, null);
   assert.equal(resolveProfile("uni", { chat: { provider: null } }, false).chat.provider, null);
 });
+await Promise.all(pending);  // an async check must finish before the exit code is decided
 if (failed) { console.log(`${failed} failed`); process.exit(1); } else console.log("all passed");
