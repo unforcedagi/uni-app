@@ -1,0 +1,4 @@
+/* Life OS vault picker and the no-pack screen (profile PR 4). */
+.lifeos-vault { display: flex; gap: 8px; align-items: center; padding: 6px 12px; font-size: 13px; color: var(--muted, #666); }
+.lifeos-vault select { font: inherit; }
+.lifeos-nopack { padding: 24px 16px; max-width: 560px; }

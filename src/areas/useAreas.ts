@@ -50,7 +50,8 @@ const newest = <T extends { updatedAt?: string | null }>(a: T | undefined, b: T)
  * without content (only their metadata names the parent). Failed optional queries retain their previous data and mark the entire snapshot stale.
  */
 export async function fetchPayload(prev: AreasPayload | null = null): Promise<AreasPayload & { refreshError: string | null }> {
-  const [areas, projects, briefs, today] = await Promise.allSettled([query("area"), query("project", false), query("area-brief"), query("area-today")]);
+  const noBriefs = activeProfile().briefs.mode === "none"; // a vault without Uni-written briefs never asks for them
+  const [areas, projects, briefs, today] = await Promise.allSettled([query("area"), query("project", false), noBriefs ? Promise.resolve([]) : query("area-brief"), noBriefs ? Promise.resolve([]) : query("area-today")]);
   if (areas.status === "rejected") throw areas.reason;
   const found = areas.value.map(parseArea).filter((a): a is Area => !!a);
   const kept = projects.status === "fulfilled" ? projects.value.map(parseProject).filter((a): a is Area => !!a)
