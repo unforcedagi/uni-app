@@ -91,8 +91,10 @@ check("PR2: me / agentOwners / room prefix drive groups and sort", () => {
   assert.equal(sortTasks([mk("b", null), mk("a", "me")])[0].title, "a");
   setActiveProfile(d);
 });
-check("PR2: pack statuses map: active is foreground, dormant and incubating are background", () => {
-  assert.equal(nodeStatus("active"), "foreground");
+check("PR2: pack statuses map (pack vaults only): active is foreground, dormant and incubating are background", () => {
+  assert.equal(nodeStatus("active"), "background", "uni (the default profile) keeps today's reading");
+  assert.equal(nodeStatus("active", true), "foreground");
+  setActiveProfile(packProfile("s", "root")); assert.equal(nodeStatus("active"), "foreground"); setActiveProfile(defaultProfile());
   assert.equal(nodeStatus("foreground"), "foreground");
   assert.equal(nodeStatus("dormant"), "background");
   assert.equal(nodeStatus("incubating"), "background");

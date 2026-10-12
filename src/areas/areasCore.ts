@@ -3,6 +3,7 @@
 // message handling live in src/interface. No React, no Tauri.
 
 import { refKey } from "./refs.ts";
+import { activeProfile, UNI_VAULT } from "./profile.ts";
 
 export const AREAS_ROOT = "Areas";
 export type AreaStatus = "foreground" | "background" | "archived" | "done";
@@ -21,7 +22,8 @@ export type AreaNoteLike = { id: string; path?: string | null; content?: string 
 export type PathRow = { id: string; path: string | null; extension?: string | null; updatedAt?: string | null };
 
 /** `active` (the life-os pack) is `foreground`; `dormant` and `incubating` are background. Anything unknown is background. */
-export const nodeStatus = (status: unknown): AreaStatus => status === "active" ? "foreground" : status === "foreground" || status === "archived" || status === "done" ? status : "background";
+/** A node's status. Pack vaults say `active` for foreground; the uni vault keeps today's reading (its live projects are `active` and stay background). */
+export const nodeStatus = (status: unknown, packStatuses: boolean = activeProfile().vault !== UNI_VAULT): AreaStatus => packStatuses && status === "active" ? "foreground" : status === "foreground" || status === "archived" || status === "done" ? status : "background";
 
 const leaf = (path: string) => path.split("/").filter(Boolean).pop() ?? path;
 const stripExt = (path: string) => path.replace(/\.(md|html)$/i, "");
