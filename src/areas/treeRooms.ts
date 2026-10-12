@@ -7,6 +7,13 @@ import { ownRoom, steward, type RoomNode, type RoomRef } from "./talkCore.ts";
 
 export const roomSlug = (name: string) => name.toLowerCase().replace(/^#/, "").trim().replace(/[\s_]+/g, "-");
 
+/** The slash name down a chain of room slugs (area first): `boulder` + `cohere` is `boulder/cohere`, but a room already named under its parent (`atlas` + `atlas/build`) is not doubled. */
+export function joinSlash(slugs: readonly string[]): string {
+  let out = "";
+  for (const s of slugs) out = !out ? s : s.startsWith(out + "/") ? s : `${out}/${s}`;
+  return out;
+}
+
 /** Nodes whose words and titles are never shown in a new place, only counts (the T-111 privacy rule). */
 const PRIVATE = new Set(["relationships", "sadhana"]);
 export const isPrivateNode = (tree: Tree, path: string): boolean => ancestry(tree, path).some((n) => PRIVATE.has(n.name.toLowerCase()));
@@ -54,7 +61,7 @@ export function roomView(tree: Tree, path: string, rooms: readonly RoomRef[], un
       const r = fellBack(chain[i]) ? null : ownRoom(nodes[i], rooms);
       if (r && r.id !== last) { names.push(roomSlug(r.name)); last = r.id; }
     }
-    return { target: s.room, slash: names.join("/"), heldBy: null, own: true };
+    return { target: s.room, slash: joinSlash(names), heldBy: null, own: true };
   }
   return { target: s.room, slash: null, heldBy: s.room, own: false };
 }

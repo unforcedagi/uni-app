@@ -3,7 +3,9 @@
 import assert from "node:assert/strict";
 import { parseArea, parseProject } from "../src/areas/areasCore.ts";
 import { buildTree, ROOT } from "../src/areas/treeCore.ts";
-import { isPrivateNode, roomSlug, roomView, treeRows, updatesBelow } from "../src/areas/treeRooms.ts";
+import { nestRooms } from "../src/roomNesting.ts";
+import { ownRoom } from "../src/areas/talkCore.ts";
+import { isPrivateNode, joinSlash, roomSlug, roomView, treeRows, updatesBelow } from "../src/areas/treeRooms.ts";
 import { levelAlive } from "../src/areas/treeAlive.ts";
 import { parseBrief } from "../src/areas/briefCore.ts";
 import { parseHomeLayout } from "../src/areas/homeLayout.ts";
@@ -112,5 +114,32 @@ check("alive: with no room owners (chat null profile) a room-owned task shows no
     setActiveProfile(packProfile("pack", "root")); assert.deepEqual(at(), [undefined]);
     setActiveProfile(defaultProfile()); assert.deepEqual(at(), ["in #cohere"]);
   } finally { setActiveProfile(defaultProfile()); }
+});
+check("slash: a project room already under the area's name is not doubled; a flat old name still is", () => {
+  const rooms = [{ id: "r-uni", name: "Uni" }, { id: "r-atl", name: "atlas" }, { id: "r-bld", name: "atlas/build" }, { id: "r-tch", name: "atlas/teach" }, { id: "r-bou", name: "boulder" }, { id: "r-coh", name: "cohere" }];
+  const t = buildTree([area("a-atl", "ATLAS", { room: "atlas" }), area("a-bou", "Boulder", { room: "boulder" }),
+    proj("p1", "ATLAS", "Areas/ATLAS", { room: "atlas/build", channel: "r-bld" }), proj("p2", "Learn Vibe Build", "Areas/ATLAS", { room: "atlas/teach" }),
+    proj("p3", "Atlas Institute", "Areas/ATLAS", { room: "atlas" }), proj("p4", "COhere", "Areas/Boulder", { room: "cohere" })]);
+  const v = (p: string) => roomView(t, p, rooms, rooms[0]);
+  assert.equal(v("Projects/ATLAS").slash, "atlas/build"); assert.equal(v("Projects/Learn Vibe Build").slash, "atlas/teach");
+  assert.equal(v("Areas/ATLAS").slash, "atlas");
+  assert.equal(v("Projects/Atlas Institute").own, false); assert.equal(v("Projects/Atlas Institute").heldBy?.name, "atlas");
+  assert.equal(v("Projects/COhere").slash, "boulder/cohere");
+  assert.equal(joinSlash(["atlas", "atlas/build"]), "atlas/build"); assert.equal(joinSlash(["atlas", "atlasx"]), "atlas/atlasx");
+});
+check("ownRoom: channel id first; a name with a slash matches exactly, never as atlasbuild or atlas-build", () => {
+  const rooms = [{ id: "7dce", name: "atlas/build" }, { id: "x1", name: "atlas-build" }, { id: "x2", name: "atlasbuild" }, { id: "a1", name: "atlas" }];
+  assert.equal(ownRoom({ room: "atlas/teach", channels: ["7dce"] }, rooms)?.id, "7dce", "the id wins over a name that matches nothing");
+  assert.equal(ownRoom({ room: "atlas/build", channels: [] }, rooms)?.id, "7dce");
+  assert.equal(ownRoom({ room: "#Atlas/Build", channels: [] }, rooms)?.id, "7dce");
+  assert.equal(ownRoom({ room: "atlas/build", channels: [] }, [{ id: "x1", name: "atlas-build" }, { id: "x2", name: "atlasbuild" }]), null);
+  assert.equal(ownRoom({ room: "atlas-build", channels: [] }, [{ id: "7dce", name: "atlas/build" }]), null);
+  assert.equal(ownRoom({ room: "atlas", channels: ["nope"] }, rooms)?.id, "a1");
+});
+check("nestRooms: children indent under their parent, parent first; orphans keep their full name; flat rooms unchanged", () => {
+  const r = (name: string) => ({ name });
+  const out = nestRooms([r("build-log"), r("atlas/build"), r("Uni"), r("atlas"), r("atlas/teach"), r("solo/child")]);
+  assert.deepEqual(out.map((o) => [o.room.name, o.label, o.child]), [["build-log", "build-log", false], ["Uni", "Uni", false], ["atlas", "atlas", false], ["atlas/build", "build", true], ["atlas/teach", "teach", true], ["solo/child", "solo/child", false]]);
+  assert.deepEqual(nestRooms([r("a"), r("b")]).map((o) => o.child), [false, false]);
 });
 if (failed) { console.log(`\n${failed} failed`); process.exit(1); }

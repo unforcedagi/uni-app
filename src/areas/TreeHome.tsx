@@ -24,7 +24,16 @@ export function RoomDoor({ view, className = "" }: { view: Pick<RoomView, "slash
 }
 
 /** The room line under a title: the door, and nothing else. */
-export const RoomLine = ({ view }: { view: Pick<RoomView, "slash" | "heldBy" | "own"> }) => <p className="th-roomline"><RoomDoor view={view} /></p>;
+export function RoomLine({ view, target, onOpenRoom }: { view: Pick<RoomView, "slash" | "heldBy" | "own">; target?: { id: string; name: string } | null; onOpenRoom?: (id: string) => void }) {
+  return <p className="th-roomline"><RoomDoor view={view} /><OpenRoom target={target} onOpenRoom={onOpenRoom} /></p>;
+}
+
+/** "Open #atlas/build": the room's chat as a tab. A node held by an ancestor's room opens that room. Nothing when there is no room to open. */
+export function OpenRoom({ target, onOpenRoom }: { target?: { id: string; name: string } | null; onOpenRoom?: (id: string) => void }) {
+  if (!target || !onOpenRoom) return null;
+  const name = target.name.replace(/^#/, "");
+  return <button type="button" className="th-link th-openroom" aria-label={`Open #${name}`} title={`Open #${name} as a chat`} onClick={() => onOpenRoom(target.id)}>Open #{name}</button>;
+}
 
 /** The node glyph: growth rings are depth, the fill is the state. Shape first, so it reads in grayscale. */
 export function Stump({ mark, kind, own }: { mark: Mark; kind: "root" | "area" | "project"; own?: boolean }) {

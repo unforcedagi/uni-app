@@ -273,3 +273,4 @@ h3.wr-h { font-weight: 400; }
 .wr-mv { all: unset; box-sizing: border-box; width: 100%; min-height: 44px; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; padding: 6px 0; cursor: pointer; }
 .wr-mv small { flex-basis: 100%; font-size: 11px; letter-spacing: .07em; text-transform: uppercase; color: var(--th-mute); }
 .wr-more, .wr-private { margin: 6px 0; font: 400 12px var(--th-mono); letter-spacing: .04em; color: var(--th-mute); }
+.th-openroom { margin-left: 4px; }
