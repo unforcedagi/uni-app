@@ -40,7 +40,8 @@ test.describe('Today', () => {
     await openAreasHome(page);
     await expect(areaCard(page, 'Techne')).toBeVisible();
     const tags = (await calls(page, 'vault_query')).map((c: any) => c.args.tag).filter((t: string) => t !== 'node').sort(); // T-86: the task view's own `node` tree query is separate
-    expect(tags).toEqual(['area', 'area-brief', 'area-today', 'project']);
+    // T-122: the node page's Running and Drafts are two more tree-wide tag queries (`run`, `draft`), read with the task tree and never per node
+    expect(tags).toEqual(['area', 'area-brief', 'area-today', 'draft', 'project', 'run']);
     expect(await calls(page, 'vault_paths')).toHaveLength(0);
     // and the one-note-per-area fetch is gone too
     expect((await calls(page, 'vault_note')).filter((c: any) => String(c.args.noteRef).startsWith('a-'))).toHaveLength(0);
@@ -382,10 +383,11 @@ test.describe('Uni is home, areas are a tree', () => {
     await page.screenshot({ path: `shots/t80b/${info.project.name}-refresh-draft.png` });
   });
 
-  test('loading the tree is four tag queries and no per-node fetch', async ({ page }) => {
+  test('loading the tree is six tag queries (four for the tree, run and draft for the node page) and no per-node fetch', async ({ page }) => {
     await expect(areaCard(page, 'Techne')).toBeVisible();
     const tags = (await calls(page, 'vault_query')).map((c: any) => c.args.tag).filter((t: string) => t !== 'node').sort(); // T-86: the task view's own `node` tree query is separate
-    expect(tags).toEqual(['area', 'area-brief', 'area-today', 'project']);
+    // T-122: the node page's Running and Drafts are two more tree-wide tag queries (`run`, `draft`), read with the task tree and never per node
+    expect(tags).toEqual(['area', 'area-brief', 'area-today', 'draft', 'project', 'run']);
     expect(await calls(page, 'vault_paths')).toHaveLength(0);
     await openAreaPage(page, 'Techne', { app: false });
     await areaCard(page, 'COhere 2026').click();
@@ -482,7 +484,7 @@ test('failed project refresh retains previous projects and stale marker', async 
   });
   await page.clock.install(); await page.clock.fastForward(31000);
   await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
-  await expect.poll(() => page.evaluate(() => (window as any).__pendingAreas.length)).toBe(4);
+  await expect.poll(() => page.evaluate(() => (window as any).__pendingAreas.length)).toBe(6); // the four area queries and the page's run and draft queries
   await expect(page.locator('.areas-status')).toHaveCount(0);
   await page.evaluate(async () => { for (const resolve of (window as any).__pendingAreas) await resolve(); });
  });

@@ -33,7 +33,7 @@
 }
 .tree-home-wrap { background: var(--th-paper); }
 .tree-home button { font-family: inherit; }
-.tree-home .th-mono, .th-cap, .th-h, .wr-h, .wr-counts dt, .wr-meta, .wr-id, .wr-mv small, .wr-prio, .th-colname, .th-fresh, .th-roomline, .th-door, .th-up small, .th-slip small, .th-line small, .th-rnote, .th-crumbs, .talk-status, .task-meta, .work-group h3 { font-family: var(--th-mono); }
+.tree-home .th-mono, .th-ctx, .chg, .run-chip, .run-what small, .logstrip, .steer-log-head, .steer-status, .steer-rec small, .th-cap, .th-h, .wr-h, .wr-counts dt, .wr-meta, .wr-id, .wr-mv small, .wr-prio, .th-colname, .th-fresh, .th-roomline, .th-door, .th-up small, .th-slip small, .th-line small, .th-rnote, .th-crumbs, .talk-status, .task-meta, .work-group h3 { font-family: var(--th-mono); }
 
 /* ------------------------------------------------------------------------------------------------- the level (wide) */
 .tree-home.th-level { flex: 1; min-height: 0; display: grid; background: var(--th-ground); }
@@ -63,7 +63,7 @@
 @media (max-aspect-ratio: 1/1) { .th-level.wide .th-panel { border-left: 0; border-top: 2px solid var(--th-ink); } }
 .th-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 14px 26px 18px; }
 .th-panel.phone .th-scroll { padding: 8px 18px 18px; }
-.th-foot { flex: none; padding: 4px 20px 10px; border-top: 1px solid var(--th-ink); background: var(--th-paper); }
+.th-foot { position: relative; flex: none; padding: 4px 20px 10px; border-top: 1px solid var(--th-ink); background: var(--th-paper); }
 .th-panel.phone .th-foot { padding: 4px 14px calc(8px + env(safe-area-inset-bottom)); }
 /* the head */
 .th-head { display: flex; flex-direction: column; gap: 2px; }
@@ -230,7 +230,7 @@
 .th-column .th-name b { font-size: 16px; }
 .th-row.sel .th-go { background: var(--th-card); box-shadow: inset 4px 0 0 var(--th-ink); }
 .th-row.sel .th-name b { text-decoration: underline; text-decoration-thickness: 1.5px; text-underline-offset: 4px; }
-.th-rooms.wide .th-scroll > * { max-width: 820px; }
+.th-scroll { container-type: inline-size; }
 .th-rooms .th-head .note-title { margin: 6px 0 2px; }
 
 /* where we are: counts, what moved, what needs you by priority */
@@ -273,3 +273,88 @@ h3.wr-h { font-weight: 400; }
 .wr-mv small { flex-basis: 100%; font-size: 11px; letter-spacing: .07em; text-transform: uppercase; color: var(--th-mute); }
 .wr-more, .wr-private { margin: 6px 0; font: 400 12px var(--th-mono); letter-spacing: .04em; color: var(--th-mute); }
 .th-openroom { margin-left: 4px; }
+
+/* ------------------------------------------------------------------------------------------------- steer (T-122) */
+/* the node page is the room's state: two columns when the panel is wide enough (a container query on the scrolling page), one when not */
+.th-ctx { margin-left: 10px; font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--th-mute); }
+.th-roomline { display: flex; flex-wrap: wrap; align-items: center; row-gap: 0; }
+.sp-cols { display: grid; grid-template-columns: minmax(0, 1fr); column-gap: 36px; align-items: start; margin-top: 4px; }
+@container (min-width: 800px) { .sp-cols { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+.sp-col { min-width: 0; }
+.sp-col > :first-child { margin-top: 0; }
+.sl { list-style: none; margin: 0; padding: 0; }
+.ss { margin-top: 8px; }
+.ss:first-child { margin-top: 0; }
+/* Running / Drafts rows */
+.run, .draft { display: flex; align-items: flex-start; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--th-hair2); }
+.run-chip { flex: none; min-width: 84px; display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; box-sizing: border-box; border: 1.5px solid var(--th-ink); background: var(--th-card); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+.run-chip i { font-style: normal; font-weight: 700; }
+.run-chip[data-state="queued"] { border-style: dashed; }
+.run-chip[data-state="running"] { border-width: 2px; }
+.run-chip[data-state="stalled"], .run-chip[data-state="failed"] { background: var(--th-ink); color: var(--th-card); }
+.run-chip[data-state="done"] { border-color: var(--th-hair); color: var(--th-ink2); }
+.run-what { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; font: 500 15px/1.35 var(--th-sans); overflow-wrap: anywhere; }
+.run-what small { flex-basis: 100%; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--th-mute); }
+.run .th-link, .draft .th-link { flex: none; }
+/* a change a steer made: the sap rule on the item's left edge, and when and what it was before. No motion beyond one 200ms fade. */
+.changed { position: relative; box-shadow: inset 4px 0 0 var(--th-sap); padding-left: 10px; background: linear-gradient(90deg, var(--th-sap-soft), transparent 70%); animation: chg-in .2s ease-out; }
+@keyframes chg-in { from { background-color: var(--th-sap-soft); } }
+.chg { display: flex; flex-direction: column; gap: 1px; margin-top: 2px; font-size: 11px; letter-spacing: .05em; text-transform: uppercase; color: var(--th-sap); font-weight: 600; }
+.wr-open { align-self: flex-start; font: 600 12px var(--th-mono); letter-spacing: .08em; text-transform: uppercase; text-decoration: underline; text-underline-offset: 3px; }
+.tree-home .task-row.changed { max-height: none; }
+/* the steering bar: a mic, a line, Steer. It replaces the talk bar on the node page. */
+.steer { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "mic line go" "st st st"; align-items: center; gap: 0 10px; margin: 6px 0 0; }
+.steer-mic { all: unset; grid-area: mic; box-sizing: border-box; width: 48px; height: 48px; display: grid; place-items: center; cursor: pointer; touch-action: none; }
+.steer-mic span { position: relative; width: 36px; height: 36px; background: var(--th-ink); box-shadow: 0 0 0 3px var(--th-paper), 0 0 0 4.5px var(--th-ink); }
+.steer-mic span::after { content: ""; position: absolute; left: 50%; top: 50%; width: 9px; height: 15px; margin: -8px 0 0 -4.5px; border-radius: 5px; background: var(--th-card); }
+.steer-mic.recording span { background: var(--th-card); box-shadow: 0 0 0 3px var(--th-ink), 0 0 0 4.5px var(--th-card), 0 0 0 9px var(--th-ink); }
+.steer-mic.recording span::after { background: var(--th-ink); }
+.steer-mic:disabled { opacity: .5; cursor: default; }
+.steer-mic:focus-visible, .steer-go:focus-visible, .logstrip:focus-visible { outline: 3px solid var(--th-ink); outline-offset: 2px; }
+.steer-line, .steer-rec { grid-area: line; min-width: 0; box-sizing: border-box; min-height: 48px; margin: 0; padding: 0 10px; border: 0; border-bottom: 2px solid var(--th-ink); border-radius: 0; background: var(--th-card); color: var(--th-ink); font: 400 17px var(--th-serif); }
+.steer-line::placeholder { color: var(--th-mute); opacity: 1; }
+.steer-line:focus-visible { outline: 3px solid var(--th-ink); outline-offset: 2px; }
+.steer-rec { display: flex; flex-direction: column; justify-content: center; font: 600 15px var(--th-sans); }
+.steer-rec small { font-size: 11px; font-weight: 400; color: var(--th-mute); }
+.steer-go { grid-area: go; min-height: 48px; min-width: 76px; padding: 0 16px; border: 0; border-radius: 0; background: var(--th-ink); color: var(--th-card); font: 700 13px var(--th-mono); letter-spacing: .08em; text-transform: uppercase; cursor: pointer; clip-path: polygon(0 0, calc(100% - 9px) 0, 100% 9px, 100% 100%, 0 100%); }
+.steer-go:disabled { opacity: .45; cursor: default; }
+.steer-status { grid-area: st; margin: 2px 0 0; font-size: 11.5px; letter-spacing: .04em; color: var(--th-ink2); }
+.steer-status:empty { display: none; }
+.steer-status.bad { color: var(--th-ink); font-weight: 700; }
+/* the Log: one line at rest ("Log · #atlas/build · 4 messages today · last 14:06"); opened it covers the page upward */
+.logstrip { all: unset; box-sizing: border-box; width: 100%; min-height: 44px; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 2px; cursor: pointer; font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--th-ink2); border-bottom: 1px solid var(--th-hair2); }
+.logstrip span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.logstrip i { font: 700 16px var(--th-mono); font-style: normal; }
+.steer-log { position: absolute; left: 0; right: 0; bottom: 100%; z-index: 20; height: min(68vh, 640px); display: flex; flex-direction: column; box-sizing: border-box; background: var(--th-paper); border-top: 2px solid var(--th-ink); box-shadow: 0 -10px 24px -14px rgba(26, 25, 19, .35); outline: none; }
+.steer-log-head { flex: none; display: flex; align-items: center; gap: 14px; padding: 4px 20px; border-bottom: 1px solid var(--th-ink); font-size: 12px; letter-spacing: .06em; text-transform: uppercase; }
+.steer-log-head div { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.steer-log-head small { color: var(--th-sap); font-weight: 700; }
+.steer-log-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+/* the room's own message list, as slips: no avatars, no bubbles, a ruled entry per message; Aaron's slip is boxed */
+.steer-log .message-list { flex: 1; min-height: 0; padding: 8px 20px 12px; }
+.steer-log .composer { display: none; }
+.steer-log .message { animation: none; display: block; padding: 8px 0 8px 14px; margin: 0; border-left: 2px solid var(--th-ink); border-bottom: 1px solid var(--th-hair2); }
+.steer-log .message-avatar, .steer-log .message .gutter-time { display: none; }
+.steer-log .message-content { max-width: none; padding: 0; }
+.steer-log .message.mine { margin: 6px 0; padding: 8px 12px; border-left-width: 6px; background: var(--th-card); box-shadow: inset 0 0 0 1px var(--th-hair2); }
+.steer-log .message.mine .message-content, .steer-log .message.highlight .message-content { padding: 0; background: none; border-radius: 0; }
+.steer-log .message-meta { font-family: var(--th-mono); gap: 10px; }
+.steer-log .message-meta strong { color: var(--th-ink); font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; }
+.steer-log .message-meta time { font-size: 11px; color: var(--th-mute); }
+.steer-log .message-content p { font: 400 16px/1.45 var(--th-serif); }
+.steer-log .message-actions button, .steer-log .thread-summary, .steer-log .pill { border-radius: 0; color: var(--th-ink2); }
+.th-panel.phone .steer-log-head { padding-inline: 14px; }
+.th-panel.phone .steer-log .message-list { padding-inline: 14px; }
+.th-panel.phone .steer-log { height: min(72vh, 640px); }
+/* the counts line: one compact row of small tags in a node page, so the state starts above the fold */
+.th-rooms .wr-counts { gap: 6px; margin: 6px 0 2px; }
+.th-rooms .wr-counts > div { min-width: 0; flex-direction: row; align-items: baseline; gap: 8px; padding: 3px 10px 4px; border-bottom-width: 3px; }
+.th-rooms .wr-counts dd { font-size: 19px; }
+.th-rooms .wr-counts .zero { border-bottom-width: 1.5px; }
+.th-rooms .wr-counts .you { padding-left: 14px; padding-right: 14px; }
+.th-rooms .th-alive { margin-top: 6px; }
+.th-rooms .th-lede { font-size: 17px; }
+.th-rooms .th-head .wr > .th-h { margin-top: 8px; }
+.th-panel.phone .steer-line { font-size: 15px; padding: 0 8px; }
+.th-panel.phone .steer-go { min-width: 64px; padding: 0 12px; }
+.th-panel.phone .steer-log .message-actions { margin-top: 0; }
