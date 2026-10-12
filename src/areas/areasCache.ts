@@ -14,7 +14,7 @@ export const cacheKeyFor = (vault: string) => (vault === "uni" ? CACHE_KEY : `${
 
 const isArea = (a: unknown): a is Area => {
   const x = a as Partial<Area> | null;
-  return !!x && typeof x.id === "string" && typeof x.path === "string" && typeof x.name === "string" && (x.kind === "area" || x.kind === "project") && Array.isArray(x.channels) && (["foreground", "background", "archived", "done"].includes(x.status ?? ""));
+  return !!x && typeof x.id === "string" && typeof x.path === "string" && typeof x.name === "string" && (x.kind === "area" || x.kind === "project") && Array.isArray(x.channels) && (["foreground", "background", "archived", "done", "active", "dormant", "incubating"].includes(x.status ?? ""));
 };
 
 export function createAreasCache(store: Store | null, now: () => number = Date.now) {

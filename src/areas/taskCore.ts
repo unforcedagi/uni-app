@@ -2,6 +2,7 @@
 // from `node` notes, take a subtree, group by owner, roll counts up the tree. Nothing here fetches.
 import { ROOT } from "./treeCore.ts";
 import { pathResolver, refKey, stripExt } from "./refs.ts";
+import { activeProfile, isAgentOwner, type VaultProfile } from "./profile.ts";
 export { refKey };
 
 export type TaskState = "open" | "doing" | "waiting" | "done" | "archived";
@@ -29,8 +30,8 @@ const leaf = (p: string) => p.split("/").filter(Boolean).pop() ?? p;
 
 export type TaskNode = { id: string; path: string; name: string; parent: string | null; room: string | null; status: string; isRoot: boolean };
 
-/** `node` notes in. The `uni` root (tag `uni`) is kept apart: its children are the top level. */
-export function parseNodes(notes: readonly RawNote[]): { nodes: TaskNode[]; rootPath: string | null } {
+/** `node` notes in. The root (the profile's `rootTag`: `uni` in Uni's vault, `root` in the pack) is kept apart: its children are the top level. */
+export function parseNodes(notes: readonly RawNote[], rootTag: string = activeProfile().rootTag): { nodes: TaskNode[]; rootPath: string | null } {
   const out = new Map<string, TaskNode>();
   let rootPath: string | null = null;
   for (const n of notes) {
@@ -38,7 +39,7 @@ export function parseNodes(notes: readonly RawNote[]): { nodes: TaskNode[]; root
     if (!id || !path) continue;
     const tags = Array.isArray(n.tags) ? n.tags : [];
     const m = (n.metadata && typeof n.metadata === "object" ? n.metadata : {}) as Record<string, unknown>;
-    const isRoot = tags.includes("uni");
+    const isRoot = tags.includes(rootTag);
     if (isRoot) rootPath = path;
     if (/\/(Brief|app)$/.test(path)) continue;
     const status = str(m.status) ?? "active";
@@ -131,14 +132,14 @@ export const snoozed = (t: Pick<Task, "snoozedUntil">, now: Date) => !!t.snoozed
 
 export type Group = "you" | "rooms" | "others";
 /** Aaron's own work and everything waiting on him; Uni and room work; other people. */
-export function groupOf(t: Pick<Task, "owner" | "waitingOn" | "kind">): Group {
-  if (t.kind === "decision" || t.owner === "aaron" || t.waitingOn === "aaron") return "you";
-  if (t.owner === "uni" || t.owner.startsWith("room:")) return "rooms";
+export function groupOf(t: Pick<Task, "owner" | "waitingOn" | "kind">, p: VaultProfile = activeProfile()): Group {
+  if (t.kind === "decision" || t.owner === p.me || t.waitingOn === p.me) return "you";
+  if (isAgentOwner(t.owner, p)) return "rooms";
   return "others";
 }
 export const GROUP_LABEL: Record<Group, string> = { you: "You", rooms: "Rooms", others: "Others" };
 
-const rank = (t: Task) => (t.waitingOn === "aaron" || t.kind === "decision" ? 0 : t.state === "doing" ? 1 : 2);
+const rank = (t: Task) => (t.waitingOn === activeProfile().me || t.kind === "decision" ? 0 : t.state === "doing" ? 1 : 2);
 /** Waiting-on-you first, then in progress, then by due date (undated last), then title. */
 export function sortTasks(list: readonly Task[]): Task[] {
   return [...list].sort((a, b) => rank(a) - rank(b) || (a.due ?? "9999").localeCompare(b.due ?? "9999") || a.title.localeCompare(b.title));

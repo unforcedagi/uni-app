@@ -2,6 +2,9 @@
 // Run: node --experimental-strip-types scripts/profile.test.ts
 import assert from "node:assert/strict";
 import { defaultProfile, packProfile, readProfileNote, resolveProfile, readVaultChoice, writeVaultChoice, vaultChoices, setActiveProfile, activeProfile } from "../src/areas/profile.ts";
+import { groupOf, parseNodes, sortTasks } from "../src/areas/taskCore.ts";
+import { nodeStatus } from "../src/areas/areasCore.ts";
+import { createAreasCache } from "../src/areas/areasCache.ts";
 import { createVaultTasks } from "../src/areas/vaultTasks.ts";
 
 let failed = 0;
@@ -64,6 +67,47 @@ check("review: the device cache keeps one slot per vault; uni keeps the original
 });
 check("review: profile note strings are capped", () => {
   assert.equal(readProfileNote({ metadata: { me: "x".repeat(500) } })!.me!.length, 120);
+});
+check("PR2: root tag follows the profile; uni default unchanged", () => {
+  const notes = [{ id: "r", path: "Life", tags: ["root", "node"] }, { id: "a", path: "Areas/A", tags: ["area", "node"], metadata: { parent: "r" } }];
+  assert.equal(parseNodes(notes, "root").rootPath, "Life");
+  assert.equal(parseNodes(notes, "uni").rootPath, null);
+  assert.equal(parseNodes([{ id: "u", path: "Uni", tags: ["uni"] }]).rootPath, "Uni");
+  setActiveProfile(packProfile("s", "root"));
+  assert.equal(parseNodes(notes).rootPath, "Life");
+  setActiveProfile(defaultProfile());
+});
+check("PR2: me / agentOwners / room prefix drive groups and sort", () => {
+  const d = defaultProfile(); const p = packProfile("s", "root");
+  assert.equal(groupOf({ owner: "aaron", waitingOn: null, kind: "task" }, d), "you");
+  assert.equal(groupOf({ owner: "me", waitingOn: null, kind: "task" }, d), "others");
+  assert.equal(groupOf({ owner: "room:x", waitingOn: null, kind: "task" }, d), "rooms");
+  assert.equal(groupOf({ owner: "me", waitingOn: null, kind: "task" }, p), "you");
+  assert.equal(groupOf({ owner: "x", waitingOn: "me", kind: "task" }, p), "you");
+  assert.equal(groupOf({ owner: "room:x", waitingOn: null, kind: "task" }, p), "others");
+  assert.equal(groupOf({ owner: "agent", waitingOn: null, kind: "task" }, p), "rooms");
+  setActiveProfile(p);
+  const mk = (title: string, waitingOn: string | null) => ({ title, waitingOn, kind: "task", state: "open", due: null }) as never;
+  assert.equal(sortTasks([mk("b", null), mk("a", "me")])[0].title, "a");
+  setActiveProfile(d);
+});
+check("PR2: pack statuses map: active is foreground, dormant and incubating are background", () => {
+  assert.equal(nodeStatus("active"), "foreground");
+  assert.equal(nodeStatus("foreground"), "foreground");
+  assert.equal(nodeStatus("dormant"), "background");
+  assert.equal(nodeStatus("incubating"), "background");
+  assert.equal(nodeStatus("archived"), "archived");
+  assert.equal(nodeStatus(undefined), "background");
+});
+check("PR2: the device cache accepts every status the parser can produce (active/dormant nodes are not rejected)", () => {
+  const m = new Map<string, string>(); const store = { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v), removeItem: (k: string) => void m.delete(k) };
+  const c = createAreasCache(store); const owner = { identity: "i", vault: "s" };
+  const area = (status: string) => ({ id: status, path: "Areas/" + status, name: status, purpose: "", status: nodeStatus(status), channels: [], since: null, title: status, body: "", metadata: {}, updatedAt: null, kind: "area", parent: null, rooms: [] }) as never;
+  c.write({ areas: ["active", "dormant", "incubating", "done"].map(area), briefs: {}, today: null }, owner);
+  assert.equal(c.read(owner)?.areas.length, 4);
+  // a raw pack status that slipped through unnormalised is also accepted
+  c.write({ areas: [{ ...(area("x") as object), status: "active" } as never, { ...(area("y") as object), status: "dormant" } as never], briefs: {}, today: null }, owner);
+  assert.equal(c.read(owner)?.areas.length, 2);
 });
 
 if (failed) { console.log(`${failed} failed`); process.exit(1); } else console.log("all passed");
