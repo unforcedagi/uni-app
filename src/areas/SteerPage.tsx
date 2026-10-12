@@ -74,11 +74,18 @@ export function useSteerEffect({ key, tasks, drafts, refresh }: { key: string; t
   useEffect(() => {
     if (!started) return;
     let n = 0;
-    const timer = setInterval(() => { refresh(); if (++n >= POLL_COUNT) clearInterval(timer); }, pollMs());
+    const timer = setInterval(() => { if (typeof document === "undefined" || document.visibilityState !== "hidden") refresh(); if (++n >= POLL_COUNT) clearInterval(timer); }, pollMs());
     return () => clearInterval(timer);
   }, [started]); // eslint-disable-line react-hooks/exhaustive-deps
   const steered = useCallback((room: RoomRef) => {
-    setState({ steer: { steerId: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, room: room.id, at: Date.now() }, tasks: latest.current.tasks ?? [], drafts: latest.current.drafts });
+    const steerId = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    setState((prev) => {
+      // A second steer inside the window keeps the first baseline (and its marks) and restarts the polling.
+      if (prev && Date.now() - prev.steer.at < POLL_COUNT * POLL_MS) return { ...prev, steer: { ...prev.steer, steerId, room: room.id } };
+      // Before the first load there is nothing to compare with: no baseline, no marks (else every recent task reads "added").
+      if (!latest.current.tasks) return prev;
+      return { steer: { steerId, room: room.id, at: Date.now() }, tasks: latest.current.tasks, drafts: latest.current.drafts };
+    });
   }, []);
   const marks = useMemo<Map<string, Mark[]>>(() => {
     if (!state) return new Map();

@@ -28,8 +28,9 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
   }
 
   /** Every note with `tag`, metadata only (the dispatch ledger `run`, the `draft` notes). A vault with none, or one that refuses, reads as empty: these are extras on the page. */
-  async function loadTagged(tag: string): Promise<RawNote[]> {
-    try { const rows = await call("vault_query", { vault: name(), tag, includeContent: false, limit: LIMIT }); return Array.isArray(rows) ? (rows as RawNote[]) : []; } catch { return []; }
+  async function loadTagged(tag: string): Promise<RawNote[] | null> {
+    // null = the read failed: the caller keeps what it had rather than wiping Running/Drafts on a transient error
+    try { const rows = await call("vault_query", { vault: name(), tag, includeContent: false, limit: LIMIT }); return Array.isArray(rows) ? (rows as RawNote[]) : []; } catch { return null; }
   }
 
   // Feature detect once per session: does the vault answer `near` with `direction` and `then`? null = not yet known.
