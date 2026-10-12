@@ -6,6 +6,8 @@ import { groupTasks, type Task } from "./taskCore";
 import type { RoomRef } from "./talkCore";
 import type { TaskAction, Undo } from "./useTasks";
 import { activeProfile, type VaultProfile } from "./profile";
+import type { Mark } from "./steerCore";
+import { Changed } from "./Changed";
 
 const SHOW = 8;
 const HOLD_MS = 220;
@@ -21,21 +23,16 @@ export type Talk = {
   voice: "" | "sending" | "sent" | "failed";
 };
 
-/** Hold to talk (a voice note to the level's room), tap to type one line. Names the room it goes to; sends nothing by itself. */
-export function TalkBar({ room, talk, label }: { room: RoomRef | null; talk: Talk; label: string }) {
-  const [typing, setTyping] = useState(false);
-  const [text, setText] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [sent, setSent] = useState<string | null>(null);
+/**
+ * Hold to talk, tap for a typed line: the press logic both the talk bar and the steering bar use. Nothing is sent from here but the
+ * voice note (the app's own outbox path); a tap calls `onTap` (the talk bar opens its line, the steering bar focuses its own).
+ */
+export function useHoldTalk(room: RoomRef | null, talk: Talk, onTap: () => void) {
   const [error, setError] = useState<string | null>(null);
-  const press = useRef<{ timer: ReturnType<typeof setTimeout> | null; started: boolean; released: boolean } | null>(null);
-  const input = useRef<HTMLInputElement>(null);
   const [wasVoice, setWasVoice] = useState(false);
+  const press = useRef<{ timer: ReturnType<typeof setTimeout> | null; started: boolean; released: boolean } | null>(null);
   const mine = !!room && talk.recording?.channel === room.id;
-  useEffect(() => { if (typing) input.current?.focus(); }, [typing]);
-  useEffect(() => { if (!sent) return; const t = setTimeout(() => setSent(null), 6000); return () => clearTimeout(t); }, [sent]);
   useEffect(() => () => { if (press.current?.timer) clearTimeout(press.current.timer); }, []);
-
   const down = () => {
     if (!room || press.current || talk.recording) return;
     setError(null);
@@ -53,32 +50,49 @@ export function TalkBar({ room, talk, label }: { room: RoomRef | null; talk: Tal
   const up = () => {
     const p = press.current; if (!p) return;
     p.released = true;
-    if (p.timer) { clearTimeout(p.timer); p.timer = null; press.current = null; setTyping(true); return; }
+    if (p.timer) { clearTimeout(p.timer); p.timer = null; press.current = null; onTap(); return; }
     press.current = null;
     if (talk.recording) talk.stopVoice();
   };
   const onKey = (e: ReactKeyboardEvent) => {
     if (e.key === " " && !e.repeat) { e.preventDefault(); down(); }
-    else if (e.key === "Enter") { e.preventDefault(); setTyping(true); }
+    else if (e.key === "Enter") { e.preventDefault(); onTap(); }
   };
   const onKeyUp = (e: ReactKeyboardEvent) => { if (e.key === " ") { e.preventDefault(); up(); } };
+  const pointer = {
+    onPointerDown: (e: ReactPointerEvent<HTMLButtonElement>) => { if (e.button !== 0) return; e.currentTarget.setPointerCapture?.(e.pointerId); down(); },
+    onPointerUp: up, onPointerCancel: up, onLostPointerCapture: up, onContextMenu: (e: { preventDefault(): void }) => e.preventDefault(), onKeyDown: onKey, onKeyUp,
+  };
+  const voiceLine = wasVoice && !mine && talk.voice === "sending" ? `Sending voice note to #${room?.name}…` : wasVoice && !mine && talk.voice === "sent" ? `Sent to #${room?.name}` : wasVoice && talk.voice === "failed" ? "Voice note not sent yet, it will retry" : null;
+  return { mine, error, setError, setWasVoice, voiceLine, pointer };
+}
+
+/** Hold to talk (a voice note to the level's room), tap to type one line. Names the room it goes to; sends nothing by itself. */
+export function TalkBar({ room, talk, label }: { room: RoomRef | null; talk: Talk; label: string }) {
+  const [typing, setTyping] = useState(false);
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [sent, setSent] = useState<string | null>(null);
+  const input = useRef<HTMLInputElement>(null);
+  const hold = useHoldTalk(room, talk, () => setTyping(true));
+  const { mine, error, setError } = hold;
+  useEffect(() => { if (typing) input.current?.focus(); }, [typing]);
+  useEffect(() => { if (!sent) return; const t = setTimeout(() => setSent(null), 6000); return () => clearTimeout(t); }, [sent]);
+
   const submit = async (e: { preventDefault(): void }) => {
     e.preventDefault();
     const body = text.trim();
     if (!room || !body || busy) return;
     setBusy(true); setError(null);
-    try { await talk.sendText(room.id, body); setText(""); setTyping(false); setWasVoice(false); setSent(`Sent to #${room.name}`); }
+    try { await talk.sendText(room.id, body); setText(""); setTyping(false); hold.setWasVoice(false); setSent(`Sent to #${room.name}`); }
     catch (err) { setError(`Couldn't send: ${String(err).replace(/^Error:\s*/, "").slice(0, 120)}`); }
     finally { setBusy(false); }
   };
-  const voiceLine = wasVoice && !mine && talk.voice === "sending" ? `Sending voice note to #${room?.name}…` : wasVoice && !mine && talk.voice === "sent" ? `Sent to #${room?.name}` : wasVoice && talk.voice === "failed" ? "Voice note not sent yet, it will retry" : null;
-  const status = error ?? sent ?? voiceLine;
+  const status = error ?? sent ?? hold.voiceLine;
   const name = room ? `#${room.name}` : "no room";
   return <section className="talk" aria-label={`Talk to ${label}`}>
     <button type="button" className={`talk-hold ${mine ? "recording" : ""}`} disabled={!room} aria-pressed={mine}
-      aria-label={mine ? `Recording for ${name}. Release to send.` : `Hold to talk to ${name}. Tap to type a note.`}
-      onPointerDown={(e: ReactPointerEvent<HTMLButtonElement>) => { if (e.button !== 0) return; e.currentTarget.setPointerCapture?.(e.pointerId); down(); }}
-      onPointerUp={up} onPointerCancel={up} onLostPointerCapture={up} onContextMenu={(e) => e.preventDefault()} onKeyDown={onKey} onKeyUp={onKeyUp}>
+      aria-label={mine ? `Recording for ${name}. Release to send.` : `Hold to talk to ${name}. Tap to type a note.`} {...hold.pointer}>
       <span className="talk-dot" aria-hidden="true" />
       <span className="talk-text">{mine ? <>Recording {mmss(talk.recording!.elapsed)} · release to send</> : <>Hold to talk</>}<small>{mine ? `to ${name}` : `${room ? `to ${name} · tap to type` : "This level has no room yet"}`}</small></span>
     </button>
@@ -118,8 +132,8 @@ function Meta({ t, here, nodeName }: { t: Task; here: string; nodeName: (path: s
 }
 
 /** What needs doing at this level and below, grouped You / Rooms / Others, with a one-tap check-off. */
-export function TaskList({ title = "Needs doing", tasks, leaving, here, nodeName, loading, ready, error, truncated, treeTruncated, onOpen, onAct, onRetry }: {
-  title?: string; tasks: readonly Task[]; leaving: ReadonlySet<string>; here: string; nodeName: (path: string) => string;
+export function TaskList({ title = "Needs doing", tasks, leaving, here, nodeName, loading, ready, error, truncated, treeTruncated, marks, nowMs = 0, onOpen, onAct, onRetry }: {
+  title?: string; marks?: ReadonlyMap<string, readonly Mark[]>; nowMs?: number; tasks: readonly Task[]; leaving: ReadonlySet<string>; here: string; nodeName: (path: string) => string;
   loading: boolean; ready: boolean; error: string | null; truncated: boolean; treeTruncated?: boolean;
   onOpen: (t: Task) => void; onAct: (t: Task, a: TaskAction) => void; onRetry: () => void;
 }) {
@@ -134,10 +148,11 @@ export function TaskList({ title = "Needs doing", tasks, leaving, here, nodeName
       const rows = all[g.group] ? g.tasks : g.tasks.slice(0, SHOW);
       return <div className={`work-group g-${g.group}`} key={g.group}>
         <h3>{g.label}<span>{g.tasks.length}</span></h3>
-        <ul>{rows.map((t) => <li key={t.id} className={`task-row ${leaving.has(t.id) ? "leaving" : ""} ${t.kind}`}>
+        <ul>{rows.map((t) => <li key={t.id} className={`task-row ${leaving.has(t.id) ? "leaving" : ""} ${t.kind} ${marks?.get(t.id)?.length ? "changed" : ""}`} data-note={t.id}>
           <button type="button" className="task-main" onClick={() => onOpen(t)}>
             <span className="task-title">{cleanText(t.title)}</span>
             <Meta t={t} here={here} nodeName={nodeName} />
+            <Changed marks={marks?.get(t.id)} nowMs={nowMs} />
           </button>
           <button type="button" className="task-check" aria-label={`${t.kind === "decision" ? "Mark decided" : "Mark done"}: ${cleanText(t.title)}`} onClick={() => onAct(t, "done")}><span aria-hidden="true" /></button>
         </li>)}</ul>

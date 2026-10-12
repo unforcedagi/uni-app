@@ -172,6 +172,8 @@ export type BootOpts = {
   underBoulder?: boolean;
   /** T-111 nested rooms: the Atlas area has room #atlas (the real channel ids), with #atlas/build and #atlas/teach, three projects (ATLAS, Learn Vibe Build, Atlas Institute). Needs `tree`. */
   atlas?: boolean;
+  /** T-122 steer: ATLAS (needs `atlas`, `tasks`) holds T-07 (due Tue 10-13), a decision, run ledger notes and draft notes, and #atlas/build has a day's messages. `window.__setDue(id, due)` moves a task as a room would. */
+  steer?: boolean;
   /** T-111: a project (Ricki) whose room is archived, with `room_fallback` naming the room that holds it. */
   ricki?: boolean;
   /** T-111 rooms nav: Sadhana (a private area) holds tasks too. */
@@ -200,7 +202,7 @@ export async function bootAreas(page: Page, variant: Variant = 'seed', opts: Boo
   const now = Math.floor((opts.pinned ? pinnedAt : Date.now()) / 1000);
   const data = {
     profileNote: opts.profileNote ?? null, lifeVault: opts.lifeVault ?? null, now, variant, selftest: opts.selftest ?? true, ipcLeak: opts.ipcLeak ?? false, hostile: hostileApp(opts.ports ?? { http: 9, udp: 9 }), benign: BENIGN, techne: seed('techne'), unforced: seed('unforced'), seedMeta,
-    apps: opts.apps ?? [], multiRoom: !!opts.multiRoom || !!opts.tree, tree: !!opts.tree, tasks: !!opts.tasks, briefs: !!opts.briefs, queryDelay: opts.queryDelay ?? 0, identityDelay: opts.identityDelay ?? 0, roomsDelay: opts.roomsDelay ?? 0, nodeStatuses: opts.nodeStatuses ?? {}, nearOff: !!opts.nearOff, ids: !!opts.ids, boulder: !!opts.boulder, layout: opts.layout ?? 'octopus', underBoulder: !!opts.underBoulder, ricki: !!opts.ricki, atlas: !!opts.atlas, privateTasks: !!opts.privateTasks, deviceCache: opts.deviceCache ?? null, queryFails: opts.queryFails ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null, mode: opts.mode ?? 'sealed', grantedUnder: opts.grantedUnder ?? (opts.mode ?? 'sealed'),
+    apps: opts.apps ?? [], multiRoom: !!opts.multiRoom || !!opts.tree, tree: !!opts.tree, tasks: !!opts.tasks, briefs: !!opts.briefs, queryDelay: opts.queryDelay ?? 0, identityDelay: opts.identityDelay ?? 0, roomsDelay: opts.roomsDelay ?? 0, nodeStatuses: opts.nodeStatuses ?? {}, nearOff: !!opts.nearOff, ids: !!opts.ids, boulder: !!opts.boulder, layout: opts.layout ?? 'octopus', underBoulder: !!opts.underBoulder, ricki: !!opts.ricki, atlas: !!opts.atlas, steer: !!opts.steer, privateTasks: !!opts.privateTasks, deviceCache: opts.deviceCache ?? null, queryFails: opts.queryFails ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null, mode: opts.mode ?? 'sealed', grantedUnder: opts.grantedUnder ?? (opts.mode ?? 'sealed'),
   };
   // Pre-granted apps: the grant key is the SHA-256 of the RESOLVED default needs plus the app's html.
   const preGrant = [
@@ -406,9 +408,22 @@ Two proposals wait on a scope decision.
       const ATLAS = '4994874c-9473-49b3-9c35-4cb21e22fef9', BUILD = '7dcea809-25cd-4160-ba99-f0a56386adcb', TEACH = '024dd6b1-3283-4ad3-96a8-8dc3f31f87a4';
       const a = notes.find((n) => n.id === 'a-atlas'); if (a) a.metadata = { ...a.metadata, channel: ATLAS, room: 'atlas' };
       const at = rooms.findIndex((r) => r.id === 'ch-atlas'); if (at >= 0) rooms.splice(at, 1);
+      if (d.steer) msgs[BUILD] = [msg('b1', BUILD, 'Aaron', 2400, 'Where are we on the SOW?'), msg('b2', BUILD, 'Uni', 2300, 'Drafting it now; T-07 is due Tuesday.'), msg('b3', BUILD, 'Uni', 1200, 'Map labels are in a branch, waiting on your look.')];
       rooms.push(room(ATLAS, 'atlas'), room(BUILD, 'atlas/build'), room(TEACH, 'atlas/teach'));
       const pr = (id: string, name: string, meta: Record<string, unknown>) => ({ id, path: `Projects/${name}`, extension: 'md', tags: ['project'], metadata: { status: 'foreground', summary: `${name}.`, parent: 'Areas/Atlas', ...meta }, updatedAt: '2026-10-08T00:00:00Z', content: `# ${name}\n\n${name}.` });
       notes.push(pr('p-atlas', 'ATLAS', { room: 'atlas/build', channel: BUILD }), pr('p-lvb', 'Learn Vibe Build', { room: 'atlas/teach', channel: TEACH }), pr('p-ai', 'Atlas Institute', { room: 'atlas' }));
+    }
+    if (d.steer && d.atlas && d.tasks) {
+      taskNotes.push(
+        mk('st7', 'T-07 SOW for the commons grant', 'Projects/ATLAS', { due: '2026-10-13', priority: 'now', next: 'Confirm scope with Kevin' }),
+        mk('st8', 'T-08 Fix the map labels', 'Projects/ATLAS', { owner: 'room:atlas/build', state: 'doing', next: 'Branch is up' }),
+        mk('st9', 'T-09 Atlas Institute site copy', 'Projects/Atlas Institute', { owner: 'uni' }),
+        mk('dq2', 'Decide the ATLAS hosting', 'Projects/ATLAS', { priority: 'soon' }, 'decision'));
+      const run = (id: string, what: string, meta: Record<string, unknown>) => ({ id, path: `Runs/${id}`, extension: 'md', tags: ['run'], createdAt: T0, updatedAt: T0, metadata: { node: 'Projects/ATLAS', what, by: 'room:atlas/build', started: new Date((d.now - 600) * 1000).toISOString(), updated: new Date((d.now - 60) * 1000).toISOString(), ...meta } });
+      const draft = (id: string, meta: Record<string, unknown>) => ({ id, path: `Drafts/${id}`, extension: 'md', tags: ['draft'], createdAt: T0, updatedAt: T0, metadata: { node: 'Projects/ATLAS', ...meta } });
+      notes.push(run('run-1', 'Draft the SOW', { task: 'T-07', state: 'running' }), run('run-2', 'Re-label the map', { task: 'T-08', state: 'queued' }), run('run-3', 'Summarise the grant call', { state: 'done', result: 'Drafts/Grant call summary' }),
+        draft('SOW commons grant', { task: 'T-07', status: 'drafting' }), draft('Grant call summary', { status: 'ready' }));
+      w.__setDue = (id: string, due: string) => { const t = taskNotes.find((x) => x.id === id); t.metadata.due = due; t.updatedAt = new Date(Date.now() + 5000).toISOString(); t.lastUpdatedVia = 'mcp'; };
     }
     if (d.ricki) {
       notes.push({ id: 'p-ricki', path: 'Projects/Ricki', extension: 'md', tags: ['project'], metadata: { status: 'foreground', summary: 'Ricki: the long relationship.', parent: 'Areas/Unforced Development', room: 'ricki', room_status: 'archived', room_fallback: 'unforced-dev' }, updatedAt: '2026-10-08T00:00:00Z', content: '# Ricki\n\nA client relationship.' });

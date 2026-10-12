@@ -10,7 +10,8 @@ const wide = (page: Page) => (page.viewportSize()?.width ?? 0) >= 900;
 const fits = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth);
 const calls = (page: Page, cmd: string) => page.evaluate((c) => (window as any).__calls.filter((x: any) => x.cmd === c).map((x: any) => x.args), cmd);
 const panel = (page: Page) => page.locator('.th-panel');
-const where = (page: Page) => panel(page).getByRole('region', { name: 'Where we are' });
+// T-122: the counts sit in the page header, Needs you and Moved this week in its left column: `where` is the whole state page
+const where = (page: Page) => panel(page).locator('.th-scroll');
 const base = { briefs: true, tree: true, tasks: true, boulder: true, underBoulder: true, ricki: true, pinned: true, privateTasks: true } as const;
 const boot = (page: Page, o: Parameters<typeof bootAreas>[2] = {}) => bootAreas(page, 'seed', { ...base, layout: 'rooms', ...o });
 const shot = async (page: Page, name: string) => {
@@ -64,8 +65,8 @@ test.describe('rooms nav', () => {
     await boot(page);
     await go(page, 'Boulder');
     await title(page, 'Boulder');
-    // Where we are is the first section of the panel
-    await expect(panel(page).locator('.th-scroll > section').first()).toHaveAttribute('aria-label', 'Where we are');
+    // Where we are (the counts) is the first section of the header
+    await expect(panel(page).locator('.th-head section').first()).toHaveAttribute('aria-label', 'Where we are');
     // Boulder's subtree: T-03 (waiting on you), T-64 (doing, a room's), T-65, the decision, T-90, T-91
     await expect(where(page).locator('.wr-counts')).toContainText(/open\s*4/);
     await expect(where(page).locator('.wr-counts')).toContainText(/doing\s*1/);
@@ -170,7 +171,6 @@ test.describe('rooms nav', () => {
     if (!wide(page)) await expect(page.locator('.th-phone-tree')).toBeVisible();
     await go(page, 'Uni');
     await title(page, 'Uni');
-    await expect(where(page)).toContainText('All of it');
     await expect(where(page).locator('.wr-counts')).toContainText(/need you\s*\d+/);
     // seen from Uni, each row says where it belongs
     await expect(where(page).locator('.wr-row', { hasText: 'T-33' })).toContainText('Techne');
@@ -196,7 +196,7 @@ test.describe('rooms nav', () => {
     await expect(where(page).locator('.wr-counts')).toContainText(/need you\s*2/);
     await expect(where(page).locator('.wr-row')).toHaveCount(0);
     await expect(where(page).getByRole('region', { name: 'Moved this week' })).toContainText(/1 changed, the last \d+[dh] ago\. Counted, not named\./);
-    await expect(where(page)).not.toContainText(/Sit twenty|Find a teacher/);
+    await expect(panel(page).locator('.sp-left')).not.toContainText(/Sit twenty|Find a teacher/);
     await shot(page, 'private');
   });
 

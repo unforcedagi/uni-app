@@ -24,8 +24,8 @@ export function RoomDoor({ view, className = "" }: { view: Pick<RoomView, "slash
 }
 
 /** The room line under a title: the door, and nothing else. */
-export function RoomLine({ view, target, onOpenRoom }: { view: Pick<RoomView, "slash" | "heldBy" | "own">; target?: { id: string; name: string } | null; onOpenRoom?: (id: string) => void }) {
-  return <p className="th-roomline"><RoomDoor view={view} /><OpenRoom target={target} onOpenRoom={onOpenRoom} /></p>;
+export function RoomLine({ view, target, onOpenRoom, context }: { view: Pick<RoomView, "slash" | "heldBy" | "own">; target?: { id: string; name: string } | null; onOpenRoom?: (id: string) => void; context?: boolean }) {
+  return <p className="th-roomline"><RoomDoor view={view} />{context && view.own && <span className="th-ctx">this node's context window</span>}<OpenRoom target={target} onOpenRoom={onOpenRoom} /></p>;
 }
 
 /** "Open #atlas/build": the room's chat as a tab. A node held by an ancestor's room opens that room. Nothing when there is no room to open. */

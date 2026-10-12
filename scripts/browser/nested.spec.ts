@@ -35,10 +35,16 @@ test.describe('nested rooms', () => {
     await expect(open).toBeVisible();
     expect((await open.boundingBox())!.height).toBeGreaterThanOrEqual(44);
     await shot(page, 'project');
+    // T-122: Open #room opens the Log over the node page, not a new tab; the room tab is "Open as tab" in the Log header
+    const tabs = await page.locator('.tab-title').count();
     await open.click();
+    const log = page.getByRole('dialog', { name: 'Log #atlas/build' });
+    await expect(log).toBeVisible();
+    await expect(page.locator('.tab-title')).toHaveCount(tabs);
+    await shot(page, 'opened');
+    await log.getByRole('button', { name: 'Open as tab' }).click();
     await expect.poll(() => page.evaluate((id) => (window as any).__calls.some((c: any) => c.args?.channel === id), BUILD)).toBe(true);
     await expect(page.locator('.tab-title', { hasText: 'atlas/build' }).or(page.locator('.tab-title', { hasText: 'build' })).first()).toBeVisible();
-    await shot(page, 'opened');
   });
 
   test('the conversation list nests build and teach under atlas', async ({ page }) => {
