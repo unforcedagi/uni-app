@@ -2,7 +2,7 @@
 // vault call: `state_transition` for state (an atomic compare-and-set), a guarded metadata merge for snooze.
 // Nothing is cached here beyond one session's memory; the node view reconciles with each server answer.
 import { invoke } from "@tauri-apps/api/core";
-import { buildTaskTree, failureKind, LIVE_STATES, nodeFilterKeys, parseNodes, parseTask, subtreePaths, type AnyState, type FailureKind, type RawNote, type Task, type TaskTree } from "./taskCore.ts";
+import { buildTaskTree, failureKind, LIVE_STATES, nodeFilterKeys, parseNodes, parseTask, subtreePaths, type AnyState, type FailureKind, type Priority, type RawNote, type Task, type TaskTree } from "./taskCore.ts";
 import { ROOT } from "./treeCore.ts";
 import { activeProfile } from "./profile.ts";
 
@@ -92,10 +92,10 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
     }
   }
 
-  /** Snooze: `snoozed_until` (a date) via a metadata merge guarded by the `updated_at` the caller read; `null` clears it. */
-  async function snooze(taskId: string, until: string | null, updatedAt: string): Promise<WriteResult> {
+  /** A metadata merge guarded by the `updated_at` the caller read (a stale stamp is a conflict); a `null` value clears its key. */
+  async function patchMeta(taskId: string, metadata: Record<string, unknown>, updatedAt: string): Promise<WriteResult> {
     try {
-      const note = await call("vault_patch_meta", { vault: name(), id: taskId, metadata: { snoozed_until: until }, ifUpdatedAt: updatedAt });
+      const note = await call("vault_patch_meta", { vault: name(), id: taskId, metadata, ifUpdatedAt: updatedAt });
       return { ok: true, ...stamp(note) };
     } catch (e) {
       const message = String(e);
@@ -103,7 +103,12 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
     }
   }
 
-  return { loadTree, loadSubtree, loadTasks, transition, snooze, nearSupported: () => nearOk };
+  /** Snooze: `snoozed_until` (a date); `null` clears it. */
+  const snooze = (taskId: string, until: string | null, updatedAt: string) => patchMeta(taskId, { snoozed_until: until }, updatedAt);
+  /** Priority: now, soon or someday; `null` clears it (back to unsorted). */
+  const setPriority = (taskId: string, priority: Priority | null, updatedAt: string) => patchMeta(taskId, { priority }, updatedAt);
+
+  return { loadTree, loadSubtree, loadTasks, transition, snooze, setPriority, nearSupported: () => nearOk };
 }
 
 export const vaultTasks = createVaultTasks();

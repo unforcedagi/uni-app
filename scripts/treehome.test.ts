@@ -89,7 +89,7 @@ check("the phone's rows: Uni, then depth-first by foreground and name, with room
   assert.ok(order.indexOf("Projects/COhere") + 1 === order.indexOf("Projects/COhere 2026"), "a child follows its parent");
 });
 check("layout setting: unknown or missing is Tree", () => {
-  assert.equal(parseHomeLayout(null), "tree"); assert.equal(parseHomeLayout("octopus"), "octopus"); assert.equal(parseHomeLayout("classic"), "classic"); assert.equal(parseHomeLayout("x"), "tree");
+  assert.equal(parseHomeLayout(null), "rooms"); assert.equal(parseHomeLayout("tree"), "tree"); assert.equal(parseHomeLayout("octopus"), "octopus"); assert.equal(parseHomeLayout("classic"), "classic"); assert.equal(parseHomeLayout("x"), "rooms");
 });
 check("alive: a node with a Brief reads it; a project with none is derived from its summary, the area brief's lines naming it, and the rooms' tasks", () => {
   const briefs = { "Areas/Boulder": { brief: parseBrief("## Now\nBoulder is mostly COhere this week.\n\n## Needs you\n- Confirm the COhere venue deposit\n- Approve the testimony\n\n## Moving\n- COhere tents ordered\n"), updatedAt: null, generatedAt: null } } as never;
