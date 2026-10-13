@@ -1,9 +1,11 @@
-// T-122: steering — the change-mark diff, Running/Drafts parsing, the bar's placeholder.
+// T-122: steering — the change-mark diff, Running/Drafts parsing, the composer placeholder and the companion's lines (T-124).
 // Run: node --experimental-strip-types scripts/steer.test.ts
 import assert from "node:assert/strict";
 import { buildTaskTree, parseNodes, parseTask, type Task } from "../src/areas/taskCore.ts";
-import { changedLine, dayLabel, diffDrafts, diffTasks, draftsUnder, marksById, parseDrafts, parseRuns, runsUnder, steerPlaceholder, valueLabel } from "../src/areas/steerCore.ts";
+import { changedLine, dayLabel, diffDrafts, diffTasks, draftsUnder, marksById, parseDrafts, parseRuns, runsUnder, valueLabel } from "../src/areas/steerCore.ts";
 import { ROOT } from "../src/areas/treeCore.ts";
+import { chatPlaceholder, firstSentence, topNeeds } from "../src/areas/simpleCore.ts";
+import { whereWeAre } from "../src/areas/whereCore.ts";
 
 let failed = 0;
 async function check(name: string, fn: () => void | Promise<void>) {
@@ -93,12 +95,28 @@ check("drafts: a status flip after the steer is marked", () => {
   const after = parseDrafts([draft("d1", { node: "Projects/ATLAS", status: "ready" }, AT + 2000)], tree);
   assert.deepEqual(diffDrafts(before, after, AT).map((m) => [m.id, m.field, m.was, m.now]), [["d1", "status", "drafting", "ready"]]);
 });
-check("placeholder: names the room; held nodes say who holds them; a task puts 'About' first", () => {
-  assert.equal(steerPlaceholder({ name: "ATLAS", slash: "atlas/build", heldBy: null }), "Steer ATLAS (#atlas/build)…");
-  assert.equal(steerPlaceholder({ name: "Atlas Institute", slash: null, heldBy: "atlas" }), "Steer Atlas Institute (held by #atlas)…");
-  assert.equal(steerPlaceholder({ name: "Atlas Institute", slash: null, heldBy: "#atlas" }), "Steer Atlas Institute (held by #atlas)…");
-  assert.equal(steerPlaceholder({ name: "ATLAS", slash: "atlas/build", heldBy: null, about: "T-07" }), "About T-07…");
-  assert.equal(steerPlaceholder({ name: "Nowhere", slash: null, heldBy: null }), "Steer Nowhere…");
+check("placeholder: names the room; a held node says whose; no room says the node", () => {
+  assert.equal(chatPlaceholder({ name: "ATLAS", slash: "atlas/build", heldBy: null }), "Message #atlas/build");
+  assert.equal(chatPlaceholder({ name: "Atlas Institute", slash: null, heldBy: "atlas" }), "Message #atlas");
+  assert.equal(chatPlaceholder({ name: "Atlas Institute", slash: null, heldBy: "#atlas" }), "Message #atlas");
+  assert.equal(chatPlaceholder({ name: "Nowhere", slash: null, heldBy: null }), "Message Nowhere");
+});
+check("companion: one sentence from the lede, cut at a word when long, links as their text", () => {
+  assert.equal(firstSentence("Draft out; waiting on Casey. Next up is the map."), "Draft out; waiting on Casey.");
+  assert.equal(firstSentence("See [[Projects/X/Note|the note]] for **scope**"), "See the note for scope");
+  assert.equal(firstSentence(""), "");
+  assert.equal(firstSentence(null), "");
+  const long = firstSentence(`${"word ".repeat(60)}end.`);
+  assert.ok(long.length <= 171 && long.endsWith("…"), long);
+});
+check("companion: at most three needs, Now first, and how many more", () => {
+  const rows = [task("t1", "Projects/ATLAS", { priority: "soon" }), task("t2", "Projects/ATLAS", { priority: "now" }), task("t3", "Projects/ATLAS", { priority: "someday" }), task("t4", "Projects/ATLAS", { priority: "now" }), task("t5", "Projects/ATLAS", { priority: "soon" })];
+  const w = whereWeAre({ tasks: rows, hidden: () => false, nowMs: AT });
+  const top = topNeeds(w);
+  assert.equal(top.rows.length, 3);
+  assert.deepEqual(top.rows.slice(0, 2).map((t) => t.priority), ["now", "now"]);
+  assert.equal(top.more, 2);
+  assert.equal(topNeeds(whereWeAre({ tasks: rows.slice(0, 2), hidden: () => false, nowMs: AT })).more, 0);
 });
 await Promise.resolve();
 if (failed) { console.log(`${failed} FAILED`); process.exit(1); }
