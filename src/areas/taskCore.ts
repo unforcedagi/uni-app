@@ -142,7 +142,7 @@ export function parseTask(n: RawNote, tree: TaskTree): Task | null {
   const ref = refKey(m.node);
   const node = !ref || tree.rootRefs.has(ref) ? ROOT : tree.byPath.has(ref) ? ref : tree.idPath.get(ref) ?? ref;
   return {
-    id, path, kind, title: leaf(path), node, state: state as AnyState, owner: str(m.owner) ?? "", waitingOn: str(m.waiting_on),
+    id, path, kind, title: leaf(path).replace(/\u2044/g, "/"), node, state: state as AnyState, owner: str(m.owner) ?? "", waitingOn: str(m.waiting_on),
     due: str(m.due)?.slice(0, 10) ?? null, next: str(m.next) ?? "", room: str(m.room)?.replace(/^#/, "") ?? null,
     snoozedUntil: str(m.snoozed_until)?.slice(0, 10) ?? null,
     priority: PRIORITIES.find((p) => p === str(m.priority)?.toLowerCase()) ?? null,

@@ -5,7 +5,8 @@ import { ancestorsOf, clampWidth, hasKids, isOpen, parseFolds, parseSidebar, rol
 import { canBack, canForward, EMPTY_HISTORY, recent, step, visit, type History } from "../src/navHistory.ts";
 import { EMPTY_TABS, isSurface, migrateLegacyTabs, persistable, restoreTabs, serializeTabs, type Tabs, type TabTarget } from "../src/tabs.ts";
 import { linkLabel, splitLinks } from "../src/areas/linkText.ts";
-import { actionableTitle, askFromContent, askOrder, dueLine, isCutTitle, isOverdue, lineBudget, rowAsk, stateLine, topNeeds, withoutCut } from "../src/areas/simpleCore.ts";
+import { createVaultTasks } from "../src/areas/vaultTasks.ts";
+import { actionableTitle, askFromContent, askLead, askOrder, dueLine, isCutTitle, isOverdue, lineBudget, rowAsk, stateLine, topNeeds, withoutCut } from "../src/areas/simpleCore.ts";
 import { splitRefs, titleOfPath } from "../src/areas/noteRefsCore.ts";
 import { readMessages, readRooms, readWho, writeMessages, writeRooms, writeWho } from "../src/chatCache.ts";
 import { isActiveRun } from "../src/areas/steerCore.ts";
@@ -175,6 +176,31 @@ check("r10 rowAsk: a cut title never keeps buttons beside a fragment", () => {
   assert.deepEqual(rowAsk("Riverside: cure window…", undefined, false, false), { text: "", openToDecide: false });
   assert.equal(withoutCut("a b..."), "a b");
 });
+check("r11 askLead: sentence case, and \"Your call:\" unless it already asks", () => {
+  assert.deepEqual(askLead("a daily calendar email to people who registered."), { text: "A daily calendar email to people who registered.", yourCall: true });
+  assert.deepEqual(askLead("Should Uni send it?"), { text: "Should Uni send it?", yourCall: false });
+  assert.deepEqual(askLead("Send it (yes?)"), { text: "Send it (yes?)", yourCall: false });
+});
+check("r11 task titles: the vault's fraction slash reads as a plain slash", () => {
+  const t = parseTask({ id: "a", path: "Tasks/T-9 Riverside cure\u2044purchase", tags: ["task"], metadata: { state: "open", node: "" } } as never, buildTaskTree([]) as never);
+  assert.equal(t?.title, "T-9 Riverside cure/purchase");
+});
+await (async () => {
+  const mem = new Map<string, string>();
+  (globalThis as any).localStorage = { getItem: (k: string) => mem.get(k) ?? null, setItem: (k: string, v: string) => void mem.set(k, v), removeItem: (k: string) => void mem.delete(k) };
+  const task = { id: "d1", kind: "decision", title: "T-1 Decision: send a daily calendar email to…", priority: "now", due: null, updatedAt: "2026-10-12T10:00:00Z", owner: "aaron", waitingOn: null } as unknown as Task;
+  let reads = 0;
+  const call = async () => { reads++; return { note: { content: "Send a daily calendar email to people who registered?" } }; };
+  const first = createVaultTasks(call, "uni"); first.setAskOwner("me|uni");
+  assert.equal((await first.loadAsks([task])).get("d1"), "Send a daily calendar email to people who registered?");
+  // the next launch (a fresh instance, same identity) paints the ask without a read; another identity does not see it
+  const next = createVaultTasks(call, "uni"); next.setAskOwner("me|uni");
+  assert.equal((await next.loadAsks([task])).size, 0); assert.equal(reads, 1);
+  next.setAskOwner("you|uni"); await next.loadAsks([task]); assert.equal(reads, 2);
+  // an edited note (new updatedAt) is read again
+  const again = createVaultTasks(call, "uni"); again.setAskOwner("you|uni"); await again.loadAsks([{ ...task, updatedAt: "2026-10-13T10:00:00Z" }]); assert.equal(reads, 3);
+  console.log("ok   r11 asks: kept on the device per identity, re-read when the note changed");
+})();
 check("r10 stateLine: one plain line, never the state and who it waits on", () => {
   const me = (w: string | null) => w === "aaron";
   assert.equal(stateLine({ kind: "task", state: "waiting", waitingOn: "aaron" }, me), "Waiting on you");

@@ -12,6 +12,7 @@ export type Call = (cmd: string, args: Record<string, unknown>) => Promise<unkno
 const LIMIT = 200;
 const ASK_READS = 40;
 const ASK_PARALLEL = 6;
+const ASK_KEEP = 150;
 
 export type WriteResult = { ok: true; updatedAt: string | null; lastUpdatedBy: string | null; lastUpdatedVia: string | null } | { ok: false; kind: FailureKind; message: string };
 
@@ -37,25 +38,39 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
     try { const rows = await call("vault_query", { vault: name(), tag, includeContent: false, limit: LIMIT }); return Array.isArray(rows) ? (rows as RawNote[]) : []; } catch { return null; }
   }
 
-  /** Full questions already read, by note id: a refresh shows them at once. */
-  const askCache = new Map<string, string>();
+  /** Full questions already read, by note id, with the note's `updatedAt` they were read at: a refresh shows them at once, and so does the next launch (kept on the device, per identity, newest 150). */
+  const askCache = new Map<string, { ask: string; at: string | null }>();
+  let askOwner = "";
+  const askKey = () => `uni.asks.v1:${askOwner}`;
+  const keepAsks = () => { try { localStorage.setItem(askKey(), JSON.stringify([...askCache].slice(-ASK_KEEP))); } catch { /* this session only */ } };
+  /** Whose asks the cache holds: another identity or vault starts clean, the same one picks up what the device kept. */
+  function setAskOwner(owner: string) {
+    if (owner === askOwner) return;
+    askOwner = owner; askCache.clear();
+    try {
+      const v = JSON.parse(localStorage.getItem(askKey()) ?? "[]");
+      if (Array.isArray(v)) for (const e of v) if (Array.isArray(e) && typeof e[0] === "string" && e[1] && typeof e[1].ask === "string") askCache.set(e[0], { ask: e[1].ask, at: typeof e[1].at === "string" ? e[1].at : null });
+    } catch { /* nothing kept */ }
+  }
+  const askFor = (t: Task) => { const c = askCache.get(t.id); return c && c.at === t.updatedAt ? c.ask : undefined; };
   /**
    * The lists carry no content, so a decision or one of the user's tasks whose title was cut short ("…") gets its full question from the first
    * line of its note (one read each, only for those; decisions, Now and the soonest due first, at most 40, six at a time). Called after the
    * list is already on screen; resolves to the new asks.
    */
   async function loadAsks(tasks: readonly Task[]): Promise<Map<string, string>> {
-    const cut = askOrder(tasks.filter((t) => !askCache.has(t.id) && (t.kind === "decision" || groupOf(t) === "you") && isCutTitle(splitTitle(t.title).rest))).slice(0, ASK_READS);
+    const cut = askOrder(tasks.filter((t) => askFor(t) === undefined && (t.kind === "decision" || groupOf(t) === "you") && isCutTitle(splitTitle(t.title).rest))).slice(0, ASK_READS);
     const asks = new Map<string, string>();
     for (let i = 0; i < cut.length; i += ASK_PARALLEL) {
       await Promise.all(cut.slice(i, i + ASK_PARALLEL).map(async (t) => {
         try {
           const r = (await call("vault_note", { vault: name(), noteRef: t.id })) as { note?: RawNote } | null;
           const ask = askFromContent(typeof r?.note?.content === "string" ? r.note.content : "");
-          if (ask) { asks.set(t.id, ask); askCache.set(t.id, ask); }
+          if (ask) { asks.set(t.id, ask); askCache.delete(t.id); askCache.set(t.id, { ask, at: t.updatedAt }); }
         } catch { /* the row opens to decide instead */ }
       }));
     }
+    if (asks.size) keepAsks();
     return asks;
   }
 
@@ -81,7 +96,7 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
   async function loadTasks(tree: TaskTree, path: string): Promise<{ tasks: Task[]; truncated: boolean }> {
     const finish = (tasks: RawNote[], decisions: RawNote[]) => {
       const parsed = [...tasks, ...decisions].map((n) => parseTask(n, tree)).filter((t): t is Task => !!t);
-      return { tasks: [...new Map(parsed.map((t) => [t.id, askCache.has(t.id) ? { ...t, ask: askCache.get(t.id)! } : t])).values()], truncated: tasks.length >= LIMIT || decisions.length >= LIMIT };
+      return { tasks: [...new Map(parsed.map((t) => [t.id, askFor(t) !== undefined ? { ...t, ask: askFor(t)! } : t])).values()], truncated: tasks.length >= LIMIT || decisions.length >= LIMIT };
     };
     if (path !== ROOT && nearOk !== false) {
       // The anchor is the node's id when the tree knows it (the vault stores references as ids); the path is still accepted.
@@ -157,7 +172,7 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
   const setPriority = (taskId: string, priority: Priority | null, updatedAt: string, by: string | null = "hand") =>
     patchMeta(taskId, { priority, priority_by: priority === null ? null : by }, updatedAt);
 
-  return { loadTree, loadTagged, loadAsks, loadSubtree, loadTasks, transition, decide, snooze, setPriority, nearSupported: () => nearOk };
+  return { setAskOwner, loadTree, loadTagged, loadAsks, loadSubtree, loadTasks, transition, decide, snooze, setPriority, nearSupported: () => nearOk };
 }
 
 export const vaultTasks = createVaultTasks();

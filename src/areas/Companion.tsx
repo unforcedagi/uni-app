@@ -9,7 +9,7 @@ import { isActiveRun, type Run } from "./steerCore";
 import type { Task } from "./taskCore";
 import { splitTitle } from "./whereCore";
 import { splitLinks } from "./linkText";
-import { actionableTitle, dueLine, isOverdue, lineBudget, rowAsk } from "./simpleCore";
+import { actionableTitle, ASK_LINES_MAX, askLead, dueLine, isOverdue, lineBudget, rowAsk } from "./simpleCore";
 
 const KEYS = { side: "uni.companion.side.v1", strip: "uni.companion.strip.v1" } as const;
 /** Below this width the side panel starts folded: the conversation gets the space. */
@@ -88,8 +88,14 @@ function NeedRow({ t, onTask, onDecide, onNote }: { t: Task; onTask: (t: Task) =
   const isDecision = t.kind === "decision";
   const next = t.next.trim();
   const due = dueLine(t.due);
-  const ask = rowAsk(askOf(full), t.ask, isDecision, !!next);
-  const text = ask.text || "Open to see what's needed";
+  const base = rowAsk(askOf(full), t.ask, isDecision, !!next);
+  const [tooLong, setTooLong] = useState(false);
+  const tooLongRef = useRef(false); tooLongRef.current = tooLong;
+  const width = useRef(0);
+  // a decision is a whole question beside its buttons, or "Open to decide" with none; a question over 4 lines is read in the sheet
+  const ask = isDecision && tooLong ? { text: "Open to decide", openToDecide: true } : base;
+  const lead = isDecision && !ask.openToDecide ? askLead(ask.text) : null;
+  const text = lead ? lead.text : ask.text || "Open to see what's needed";
   const opts = isDecision && !ask.openToDecide ? t.options : [];
   const yesno = isDecision && !ask.openToDecide && t.options.length === 0;
   const titleRef = useRef<HTMLSpanElement>(null);
@@ -97,24 +103,32 @@ function NeedRow({ t, onTask, onDecide, onNote }: { t: Task; onTask: (t: Task) =
   const [titleLines, setTitleLines] = useState(1);
   const [titleCut, setTitleCut] = useState(false);
   const [nextCut, setNextCut] = useState(false);
-  const titleMax = next || due || ask.hint ? 2 : 3;
+  // a decision's question is never clamped; an action reads to its object (up to 3 lines beside other lines, 4 alone)
+  const titleMax = isDecision ? 99 : next || due || ask.hint ? 3 : 4;
   useLayoutEffect(() => {
     const el = titleRef.current; if (!el) return;
     const measure = () => {
       const lh = parseFloat(getComputedStyle(el).lineHeight) || 20;
-      setTitleLines(Math.max(1, Math.round(el.clientHeight / lh)));
+      const lines = Math.max(1, Math.round(el.clientHeight / lh));
+      setTitleLines(lines);
+      // measured on the question itself; once it reads "Open to decide" the row is one line, so only a new width or text measures again
+      const w = Math.round(el.clientWidth);
+      if (w !== width.current) { width.current = w; setTooLong(false); }
+      else if (isDecision && !base.openToDecide && !tooLongRef.current) setTooLong(lines > ASK_LINES_MAX);
       if (!open) setTitleCut(el.scrollHeight > el.clientHeight + 1);
     };
     measure();
     const ro = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
     ro?.observe(el);
     return () => ro?.disconnect();
-  }, [text, open, titleMax]);
-  const nextLines = lineBudget(Math.min(titleLines, titleMax), !!due || !!ask.hint).next;
-  const more = open || titleCut || nextCut || (!!next && nextLines <= 0);
-  const clampStyle = open ? undefined : ({ WebkitLineClamp: titleMax, lineClamp: titleMax } as React.CSSProperties);
+  }, [text, open, titleMax, isDecision, base.openToDecide, tooLong]);
+  useLayoutEffect(() => { setTooLong(false); }, [base.text]);
+  const nextLines = lineBudget(Math.min(titleLines, titleMax), !!due || !!ask.hint, 4).next;
+  const more = open || (titleCut && !isDecision) || nextCut || (!!next && nextLines <= 0);
+  const clampStyle = open || isDecision ? undefined : ({ WebkitLineClamp: titleMax, lineClamp: titleMax } as React.CSSProperties);
   return <li className="cp-item" data-open={open ? "true" : undefined}>
     <button type="button" className={`cp-need${isDecision ? " decision" : ""}`} data-id={id ?? undefined} onClick={() => onTask(t)}>
+      {lead?.yourCall && <small className="cp-call-lead">Your call:</small>}
       <span ref={titleRef} className="cp-title" style={clampStyle}><RefText text={text} />{ask.openToDecide && <span className="cp-go" aria-hidden="true"> ›</span>}</span>
       {ask.hint && <small className="cp-detail cp-hint">{ask.hint}</small>}
       {due && <small className={`cp-detail${isOverdue(t.due) ? " overdue" : ""}`}>{due}</small>}</button>
@@ -122,7 +136,6 @@ function NeedRow({ t, onTask, onDecide, onNote }: { t: Task; onTask: (t: Task) =
     {next && <NextText text={next} onNote={onNote} lines={open ? undefined : nextLines} open={open} onOpen={setOpen} onClamp={setNextCut} />}
     {more && <button type="button" className="cp-more-next cp-row-more" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? "Less" : "More"}</button>}
     {yesno && <div className="cp-opts cp-yesno" role="group" aria-label={`Decide: ${text}`}>
-      <span className="cp-call">Your call</span>
       <button type="button" className="cp-opt" onClick={() => onDecide(t, "yes")}>Yes</button>
       <button type="button" className="cp-opt" onClick={() => onDecide(t, "no")}>No</button>
     </div>}

@@ -8,7 +8,8 @@ import type { TaskAction, Undo } from "./useTasks";
 import { activeProfile, type VaultProfile } from "./profile";
 import type { Mark } from "./steerCore";
 import { Changed } from "./Changed";
-import { stateLine } from "./simpleCore";
+import { isCutTitle, stateLine } from "./simpleCore";
+import { splitTitle } from "./whereCore";
 
 const SHOW = 8;
 const HOLD_MS = 220;
@@ -168,8 +169,10 @@ export function TaskList({ title = "Needs doing", tasks, leaving, here, nodeName
 const who = (id: string | null) => (id ? (/^[0-9a-f-]{32,}$/i.test(id) ? id.slice(0, 8) : id) : null);
 
 /** One task: what it is, who changed it last, and the four things you can do. Text only; the vault's words are never HTML. */
-export function TaskSheet({ task, here, nodeName, room, onClose, onAct, onOpenRoom }: {
+export function TaskSheet({ task, here, nodeName, room, inRoom, onClose, onAct, onOpenRoom }: {
   task: Task; here: string; nodeName: (path: string) => string; room: RoomRef | null;
+  /** The room open now: "Open in #room" is not offered for it. */
+  inRoom?: string | null;
   onClose: () => void; onAct: (t: Task, a: TaskAction) => void; onOpenRoom: (id: string) => void;
 }) {
   const box = useRef<HTMLDivElement>(null);
@@ -186,11 +189,13 @@ export function TaskSheet({ task, here, nodeName, room, onClose, onAct, onOpenRo
   };
   const go = (a: TaskAction) => { onAct(task, a); onClose(); };
   const by = who(task.lastUpdatedBy), via = task.lastUpdatedVia;
+  const { id: tid, rest } = splitTitle(task.title);
+  const heading = task.ask && isCutTitle(rest) ? `${tid ? `${tid} ` : ""}${task.ask}` : task.title; // a cut title reads whole here
   return <div className="task-sheet-wrap" onKeyDown={key}>
     <button type="button" className="task-backdrop" aria-label="Close" tabIndex={-1} onClick={onClose} />
     <div ref={box} className="task-sheet" role="dialog" aria-modal="true" aria-labelledby="task-sheet-title">
       <p className="task-kind">{task.kind === "decision" ? "Decision" : "Task"}{task.node !== here ? ` · in ${nodeName(task.node)}` : ""}</p>
-      <h2 id="task-sheet-title">{cleanText(task.title)}</h2>
+      <h2 id="task-sheet-title">{cleanText(heading)}</h2>
       {task.next && <p className="task-next">{cleanText(task.next)}</p>}
       <dl className="task-facts">
         <dt>Status</dt><dd>{stateLine(task, (w) => isMe(w), OWNER)}</dd>
@@ -202,7 +207,7 @@ export function TaskSheet({ task, here, nodeName, room, onClose, onAct, onOpenRo
         <button type="button" className="task-do primary" onClick={() => go("done")}>{task.kind === "decision" ? "Mark decided" : "Mark done"}</button>
         {task.kind === "task" && <button type="button" className="task-do" onClick={() => go("archive")}>Archive</button>}
         <button type="button" className="task-do" onClick={() => go("snooze")}>Snooze until tomorrow</button>
-        {room && <button type="button" className="task-do" onClick={() => { onOpenRoom(room.id); onClose(); }}>Open in #{room.name}</button>}
+        {room && room.id !== inRoom && <button type="button" className="task-do" onClick={() => { onOpenRoom(room.id); onClose(); }}>Open in #{room.name}</button>}
         <button type="button" className="task-do quiet" onClick={onClose}>Close</button>
       </div>
     </div>

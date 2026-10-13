@@ -1,6 +1,6 @@
 // The room tree's own state, per device (T-124 r7): which areas are folded, how wide the sidebar is, whether it is hidden.
 // Pure helpers (unit-tested in scripts/navtree.test.ts) and two tiny localStorage-backed hooks.
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 export const SIDEBAR_KEY = "uni.sidebar.v1";
 export const FOLDS_KEY = "uni.tree.folds.v1";
@@ -75,14 +75,16 @@ const read = <T,>(key: string, parse: (raw: string | null) => T): T => { try { r
 const write = (key: string, v: unknown) => { try { localStorage.setItem(key, JSON.stringify(v)); } catch { /* this session only */ } };
 
 export function useFolds(): [Folds, (path: string, open: boolean) => void, (paths: readonly string[]) => void] {
-  const [folds, setFolds] = useState<Folds>(() => read(FOLDS_KEY, parseFolds));
-  const set = useCallback((path: string, open: boolean) => setFolds((f) => { const n = { ...f, [path]: open }; write(FOLDS_KEY, n); return n; }), []);
-  /** Open these (a room was opened from elsewhere): only the ones the user had folded change. */
-  const reveal = useCallback((paths: readonly string[]) => setFolds((f) => {
-    if (!paths.some((p) => f[p] === false)) return f;
-    const n = { ...f }; for (const p of paths) if (n[p] === false) n[p] = true;
-    write(FOLDS_KEY, n); return n;
-  }), []);
+  const [saved, setSaved] = useState<Folds>(() => read(FOLDS_KEY, parseFolds));
+  // Areas opened only to show the current room: in memory, replaced at every navigation, never written to the device.
+  const [revealed, setRevealed] = useState<readonly string[]>([]);
+  const set = useCallback((path: string, open: boolean) => {
+    setRevealed((r) => (r.includes(path) ? r.filter((p) => p !== path) : r));
+    setSaved((f) => { const n = { ...f, [path]: open }; write(FOLDS_KEY, n); return n; });
+  }, []);
+  /** The areas above the open room: the ones the user had folded show it for now, and fold again when the room is left. */
+  const reveal = useCallback((paths: readonly string[]) => setRevealed(paths.length ? [...paths] : []), []);
+  const folds = useMemo(() => { const n = { ...saved }; for (const p of revealed) if (n[p] === false) n[p] = true; return n; }, [saved, revealed]);
   return [folds, set, reveal];
 }
 
