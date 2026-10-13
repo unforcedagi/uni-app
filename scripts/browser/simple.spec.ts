@@ -1059,4 +1059,17 @@ test.describe('simple', () => {
     await expect(page.getByRole('dialog')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Open in #atlas/build' })).toHaveCount(0);
   });
+
+  test('r11: after a long question turns into "Open to decide", "+N more" still sits whole above the footer', async ({ page }) => {
+    test.skip(!wide(page), 'side panel');
+    await boot(page, { crowded: true, cutDecision: true, longAsk: true, cutNoAsk: true });
+    await scope(page).locator('.th-go[aria-label^="Uni,"]').click();
+    await openCompanion(page);
+    await expect(page.locator('.cp-item .cp-opt, .cp-item .cp-hint').first()).toBeVisible();
+    await page.waitForTimeout(600); // asks arrive, rows settle
+    const more = (await page.locator('.cp-more-rows').boundingBox())!; const foot = (await page.locator('.cp-foot').boundingBox())!;
+    expect(more.y + more.height).toBeLessThanOrEqual(foot.y + 1);
+    const panel = (await page.locator('aside.cp.side').boundingBox())!;
+    for (const row of await page.locator('.cp-item').all()) { const b = (await row.boundingBox())!; expect(b.y + b.height).toBeLessThanOrEqual(foot.y + 1); expect(b.y + b.height).toBeLessThanOrEqual(panel.y + panel.height); }
+  });
 });
