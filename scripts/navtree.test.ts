@@ -169,8 +169,8 @@ check("ask: a cut title shows the first line of the note's content in full, with
 check("r10 rowAsk: a cut title never keeps buttons beside a fragment", () => {
   assert.deepEqual(rowAsk("Name the payer entity", undefined, true, false), { text: "Name the payer entity", openToDecide: false });
   assert.deepEqual(rowAsk("a daily calendar email to people who…", "a daily calendar email to people who registered. It goes to real attendees.", true, false), { text: "a daily calendar email to people who registered. It goes to real attendees.", openToDecide: false });
-  assert.deepEqual(rowAsk("a daily calendar email to people who…", undefined, true, false), { text: "Open to decide", openToDecide: true });
-  assert.deepEqual(rowAsk("a daily calendar email to people who…", "still cut too…", true, true), { text: "Open to decide", openToDecide: true });
+  assert.deepEqual(rowAsk("a daily calendar email to people who…", undefined, true, false), { text: "Open to decide", openToDecide: true, hint: "a daily calendar email to people who" });
+  assert.deepEqual(rowAsk("a daily calendar email to people who…", "still cut too…", true, true), { text: "Open to decide", openToDecide: true, hint: "a daily calendar email to people who" });
   assert.deepEqual(rowAsk("Riverside: cure window…", undefined, false, true), { text: "Riverside: cure window", openToDecide: false });
   assert.deepEqual(rowAsk("Riverside: cure window…", undefined, false, false), { text: "", openToDecide: false });
   assert.equal(withoutCut("a b..."), "a b");

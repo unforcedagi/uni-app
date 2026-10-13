@@ -511,3 +511,4 @@ h3.wr-h { font-weight: 400; }
 .cp-yesno .cp-call { margin: 0 4px 0 0; }
 .cp-need .cp-title .cp-ref, .cp-need .cp-title span { display: inline; }
 .cp-next .cp-ref, .cp-next .cp-link { display: inline; }
+.cp-hint { -webkit-line-clamp: 1; line-clamp: 1; }

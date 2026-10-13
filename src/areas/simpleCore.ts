@@ -105,11 +105,11 @@ export function askFromContent(content: string | null | undefined): string {
 export const withoutCut = (rest: string): string => rest.replace(/\s*(…|\.\.\.)\s*$/, "").trim();
 
 /** What a Needs-you row says about its ask, given what is known: the full question, a whole title, or that there is no whole question. */
-export type RowAsk = { text: string; /** a decision with no full question anywhere: open it to decide, no buttons */ openToDecide: boolean };
+export type RowAsk = { text: string; /** a decision with no full question anywhere: open it to decide, no buttons */ openToDecide: boolean; /** what is known of the question, without its cut "…" (a quiet line under "Open to decide") */ hint?: string };
 export function rowAsk(full: string, ask: string | undefined, isDecision: boolean, hasNext: boolean): RowAsk {
   if (!isCutTitle(full)) return { text: full, openToDecide: false };
   if (ask && !isCutTitle(ask)) return { text: ask, openToDecide: false };
-  if (isDecision) return { text: "Open to decide", openToDecide: true };
+  if (isDecision) return { text: "Open to decide", openToDecide: true, hint: withoutCut(full) };
   return { text: hasNext ? withoutCut(full) : "", openToDecide: false };
 }
 

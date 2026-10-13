@@ -97,7 +97,7 @@ function NeedRow({ t, onTask, onDecide, onNote }: { t: Task; onTask: (t: Task) =
   const [titleLines, setTitleLines] = useState(1);
   const [titleCut, setTitleCut] = useState(false);
   const [nextCut, setNextCut] = useState(false);
-  const titleMax = next || due ? 2 : 3;
+  const titleMax = next || due || ask.hint ? 2 : 3;
   useLayoutEffect(() => {
     const el = titleRef.current; if (!el) return;
     const measure = () => {
@@ -110,12 +110,13 @@ function NeedRow({ t, onTask, onDecide, onNote }: { t: Task; onTask: (t: Task) =
     ro?.observe(el);
     return () => ro?.disconnect();
   }, [text, open, titleMax]);
-  const nextLines = lineBudget(Math.min(titleLines, titleMax), !!due).next;
+  const nextLines = lineBudget(Math.min(titleLines, titleMax), !!due || !!ask.hint).next;
   const more = open || titleCut || nextCut || (!!next && nextLines <= 0);
   const clampStyle = open ? undefined : ({ WebkitLineClamp: titleMax, lineClamp: titleMax } as React.CSSProperties);
   return <li className="cp-item" data-open={open ? "true" : undefined}>
     <button type="button" className={`cp-need${isDecision ? " decision" : ""}`} data-id={id ?? undefined} onClick={() => onTask(t)}>
       <span ref={titleRef} className="cp-title" style={clampStyle}><RefText text={text} />{ask.openToDecide && <span className="cp-go" aria-hidden="true"> ›</span>}</span>
+      {ask.hint && <small className="cp-detail cp-hint">{ask.hint}</small>}
       {due && <small className={`cp-detail${isOverdue(t.due) ? " overdue" : ""}`}>{due}</small>}</button>
     {!next && !isDecision && !actionableTitle(text) && text !== "Open to see what's needed" && <p className="cp-open-to-see">Open to see what's needed</p>}
     {next && <NextText text={next} onNote={onNote} lines={open ? undefined : nextLines} open={open} onOpen={setOpen} onClamp={setNextCut} />}
