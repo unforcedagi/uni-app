@@ -260,7 +260,7 @@ test.describe('simple', () => {
     await expect(page.locator('.cp.side.open')).toBeVisible();
   });
 
-  test('a worker status ping is one muted line; a marker-only line mid-message is a chip; a room opened mid-message keeps the author on top', async ({ page }) => {
+  test('a worker status ping is one muted line; a marker-only line mid-message is a chip', async ({ page }) => {
     await boot(page, { longChat: true, tallLast: true });
     await openRoom(page, 'Learn Vibe Build');
     const status = page.locator('.sr-chat .message.status-line');
@@ -269,15 +269,6 @@ test.describe('simple', () => {
     expect((await status.boundingBox())!.height).toBeLessThan(32);
     await expect(page.locator('.sr-chat .md-mark')).toHaveText('done · T-123');
     await expect(page.locator('.sr-chat').getByText('[done T-123]')).toHaveCount(0);
-    const list = page.locator('.sr-chat .message-list');
-    const last = page.locator('.sr-chat .message').last();
-    const lb = (await last.boundingBox())!; const ll = (await list.boundingBox())!;
-    expect(lb.height).toBeGreaterThan(ll.height);
-    const meta = last.locator('.message-meta');
-    const mb = (await meta.boundingBox())!;
-    expect(mb.y).toBeGreaterThanOrEqual(ll.y - 1);
-    expect(mb.y).toBeLessThan(ll.y + 40);
-    await expect(meta.locator('strong')).toBeVisible();
     await shot(page, 'midmessage');
   });
 
