@@ -54,10 +54,10 @@ test.describe('nested rooms', () => {
     await expect(list).toBeVisible();
     await expect(list.locator('.room.child').first()).toBeVisible();
     const names = await list.locator('.room strong').allTextContents();
-    const i = names.indexOf('atlas');
+    const i = names.indexOf('Atlas');
     expect(i).toBeGreaterThanOrEqual(0);
-    expect(names.slice(i + 1, i + 3).sort()).toEqual(['build', 'teach']);
-    const build = list.locator('.room.child', { hasText: 'build' });
+    expect(names.slice(i + 1, i + 3).sort()).toEqual(['ATLAS', 'Learn Vibe Build']);
+    const build = list.locator('.room.child', { has: page.locator('strong', { hasText: /^ATLAS$/ }) });
     await expect(build).toHaveAttribute('title', 'atlas/build');
     await expect(build).toHaveAttribute('aria-label', '#atlas/build');
     await expect(list.locator('.room', { hasText: 'Techne' }).first()).not.toHaveClass(/child/);

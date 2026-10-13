@@ -75,9 +75,6 @@ test('All reading surfaces fit the screen', async ({ page }, info) => {
   }
   else await rail.getByRole('button', { name: 'Uni', exact: true }).click();
   await openPanel('Rooms');
-  await expect(page.locator('.identity')).toContainText('Signed in as Aaron');
-  await fits(page.locator('.identity'));
-  expect(await page.locator('.identity').evaluate(el => el.scrollHeight <= el.clientHeight)).toBe(true);
   await fits(page.getByRole('button', { name: 'Close panel', exact: true }), true);
   await shot('rooms');
   const lastRoom = page.locator('.rooms nav button').last();
@@ -86,6 +83,9 @@ test('All reading surfaces fit the screen', async ({ page }, info) => {
   await page.getByRole('button', { name: 'Close panel', exact: true }).click();
   await openPanel('Settings');
   await expect(page.locator('.settings')).toBeVisible();
+  await expect(page.locator('.identity')).toContainText('Signed in as Aaron');
+  await fits(page.locator('.identity'));
+  expect(await page.locator('.identity').evaluate(el => el.scrollHeight <= el.clientHeight)).toBe(true);
   await shot('settings');
   const forget = page.getByRole('button', { name: 'Forget this device key', exact: true });
   await forget.scrollIntoViewIfNeeded();
