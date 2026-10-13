@@ -5,7 +5,9 @@ import { ancestorsOf, clampWidth, hasKids, isOpen, parseFolds, parseSidebar, rol
 import { canBack, canForward, EMPTY_HISTORY, recent, step, visit, type History } from "../src/navHistory.ts";
 import { EMPTY_TABS, isSurface, migrateLegacyTabs, persistable, restoreTabs, serializeTabs, type Tabs, type TabTarget } from "../src/tabs.ts";
 import { linkLabel, splitLinks } from "../src/areas/linkText.ts";
-import { actionableTitle, askFromContent, isCutTitle, topNeeds } from "../src/areas/simpleCore.ts";
+import { actionableTitle, askFromContent, dueLine, isCutTitle, isOverdue, topNeeds } from "../src/areas/simpleCore.ts";
+import { splitRefs, titleOfPath } from "../src/areas/noteRefsCore.ts";
+import { readMessages, readRooms, readWho, writeMessages, writeRooms, writeWho } from "../src/chatCache.ts";
 import { isActiveRun } from "../src/areas/steerCore.ts";
 import { whereWeAre } from "../src/areas/whereCore.ts";
 import { buildTaskTree, parseNodes, parseTask, type Task } from "../src/areas/taskCore.ts";
@@ -108,7 +110,7 @@ const tree = buildTaskTree(nodes, rootPath);
 const AT = 1_000_000;
 const mk = (id: string, extra: Record<string, unknown> = {}, tags = ["task"]): Task =>
   parseTask({ id, path: `Tasks/${id} Do the thing`, tags, updatedAt: new Date(AT).toISOString(), metadata: { node: "Projects/ATLAS", state: "open", owner: "aaron", ...extra } }, tree)!;
-const feed = (tasks: Task[]) => topNeeds(whereWeAre({ tasks, hidden: () => false, nowMs: AT })).map((t) => t.id);
+const feed = (tasks: Task[], today = "2026-10-01") => topNeeds(whereWeAre({ tasks, hidden: () => false, nowMs: AT }), undefined, Infinity, today).map((t) => t.id);
 check("needs-you feed: Aaron's own (or waiting on him), Now and Soon (unsorted is Soon), open decisions; Someday is not there", () => {
   const list = [mk("soon1", { priority: "soon" }), mk("none1"), mk("now1", { priority: "now" }), mk("some1", { priority: "someday" }),
     mk("room1", { owner: "room:atlas", priority: "now" }), mk("wait1", { owner: "room:atlas", state: "waiting", waiting_on: "aaron", priority: "now" }), mk("dec1", { priority: "someday", options: ["a"] }, ["decision"])];
@@ -126,6 +128,32 @@ check("needs-you feed: an empty feed is empty; a title with words is an action, 
   assert.equal(actionableTitle("Confirm scope with Kevin"), true); assert.equal(actionableTitle("Kevin call"), true); assert.equal(actionableTitle("Taxes"), false); assert.equal(actionableTitle(""), false);
 });
 
+check("overdue: a passed due date is listed first, oldest first, with a quiet 'was due' line", () => {
+  const ids = feed([mk("n1", { priority: "now", due: "2026-10-15" }), mk("late2", { priority: "soon", due: "2026-10-12" }), mk("late1", { priority: "soon", due: "2026-10-10" }), mk("n3", { priority: "now" })], "2026-10-13");
+  assert.deepEqual(ids, ["late1", "late2", "n1", "n3"]);
+  assert.equal(isOverdue("2026-10-12", "2026-10-13"), true); assert.equal(isOverdue("2026-10-13", "2026-10-13"), false); assert.equal(isOverdue(null), false);
+  assert.match(dueLine("2026-10-12", "2026-10-13")!, /^was due /); assert.match(dueLine("2026-10-15", "2026-10-13")!, /^due /); assert.equal(dueLine(null), null);
+});
+check("note ids: uni:<ULID> and a bare ULID are picked out of text; words and short ids are not", () => {
+  const id = "01M3ZK2R6A6C62M1ANJCSQNG3M";
+  assert.deepEqual(splitRefs(`See uni:${id} and ${id}.`), [{ text: "See " }, { id }, { text: " and " }, { id }, { text: "." }]);
+  assert.deepEqual(splitRefs("Reply to T-12 about COHERENCEISNOTAULIDATALLXX"), [{ text: "Reply to T-12 about COHERENCEISNOTAULIDATALLXX" }]);
+  assert.equal(titleOfPath("Projects/Atlas/Follow-up notes"), "Follow-up notes"); assert.equal(titleOfPath(undefined), null);
+});
+check("chat cache: the newest 60 per room, per identity; rooms list; old rooms fall out", () => {
+  const mem = new Map<string, string>();
+  const st = { getItem: (k: string) => mem.get(k) ?? null, setItem: (k: string, v: string) => void mem.set(k, v), removeItem: (k: string) => void mem.delete(k) };
+  assert.equal(readWho(st), null); writeWho(st, "pk1"); assert.equal(readWho(st), "pk1");
+  const rows = Array.from({ length: 80 }, (_, i) => ({ ref: `r${i}`, ts: i }));
+  writeMessages(st, "pk1", "ch", rows);
+  const got = readMessages<{ ref: string; ts: number }>(st, "pk1", "ch")!;
+  assert.equal(got.length, 60); assert.equal(got[0].ts, 20); assert.equal(got[59].ts, 79);
+  assert.equal(readMessages(st, "pk2", "ch"), null, "another identity sees nothing"); assert.equal(readMessages(st, null, "ch"), null);
+  writeRooms(st, "pk1", [{ id: "ch" }]); assert.deepEqual(readRooms(st, "pk1"), [{ id: "ch" }]); assert.deepEqual(readRooms(st, "pk2"), []);
+  for (let i = 0; i < 30; i++) writeMessages(st, "pk1", `c${i}`, [{ ts: 1 }]);
+  assert.equal(readMessages(st, "pk1", "ch"), null, "the least recent room was dropped"); assert.ok(readMessages(st, "pk1", "c29"));
+  writeMessages(st, "pk1", "c29", []); assert.equal(readMessages(st, "pk1", "c29"), null);
+});
 check("ask: a cut title shows the first line of the note's content in full, without the label or the converted line", () => {
   assert.equal(isCutTitle("Uni adds Benya's missing feature 4, the…"), true);
   assert.equal(isCutTitle("Name the payer entity"), false);

@@ -184,6 +184,10 @@ export type BootOpts = {
   bareTask?: boolean;
   /** T-124 r8 (with tasks): a decision whose title was cut short ("…"); the full question is the first line of its content. */
   cutDecision?: boolean;
+  /** A task whose next step names a note by `uni:<ULID>` (the note exists, titled "Follow-up notes"), and one that names a note that can't be read. */
+  ulidNext?: boolean;
+  /** The COhere readiness task is overdue against the pinned clock (Oct 9): due Oct 7. */
+  pastDue?: boolean;
   /** T-124 r6 (with longChat): a worker status ping before the newest message, and a newest message taller than the list with a marker line mid-way. */
   tallLast?: boolean;
   /** T-111: a project (Ricki) whose room is archived, with `room_fallback` naming the room that holds it. */
@@ -214,7 +218,7 @@ export async function bootAreas(page: Page, variant: Variant = 'seed', opts: Boo
   const now = Math.floor((opts.pinned ? pinnedAt : Date.now()) / 1000);
   const data = {
     profileNote: opts.profileNote ?? null, lifeVault: opts.lifeVault ?? null, now, variant, selftest: opts.selftest ?? true, ipcLeak: opts.ipcLeak ?? false, hostile: hostileApp(opts.ports ?? { http: 9, udp: 9 }), benign: BENIGN, techne: seed('techne'), unforced: seed('unforced'), seedMeta,
-    apps: opts.apps ?? [], multiRoom: !!opts.multiRoom || !!opts.tree, tree: !!opts.tree, tasks: !!opts.tasks, briefs: !!opts.briefs, queryDelay: opts.queryDelay ?? 0, identityDelay: opts.identityDelay ?? 0, roomsDelay: opts.roomsDelay ?? 0, messagesDelay: opts.messagesDelay ?? 0, nodeStatuses: opts.nodeStatuses ?? {}, nearOff: !!opts.nearOff, ids: !!opts.ids, boulder: !!opts.boulder, layout: opts.layout ?? 'octopus', underBoulder: !!opts.underBoulder, ricki: !!opts.ricki, atlas: !!opts.atlas, steer: !!opts.steer, longChat: !!opts.longChat, longNext: !!opts.longNext, bareTask: !!opts.bareTask, cutDecision: !!opts.cutDecision, tallLast: !!opts.tallLast, privateTasks: !!opts.privateTasks, deviceCache: opts.deviceCache ?? null, queryFails: opts.queryFails ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null, mode: opts.mode ?? 'sealed', grantedUnder: opts.grantedUnder ?? (opts.mode ?? 'sealed'),
+    apps: opts.apps ?? [], multiRoom: !!opts.multiRoom || !!opts.tree, tree: !!opts.tree, tasks: !!opts.tasks, briefs: !!opts.briefs, queryDelay: opts.queryDelay ?? 0, identityDelay: opts.identityDelay ?? 0, roomsDelay: opts.roomsDelay ?? 0, messagesDelay: opts.messagesDelay ?? 0, nodeStatuses: opts.nodeStatuses ?? {}, nearOff: !!opts.nearOff, ids: !!opts.ids, boulder: !!opts.boulder, layout: opts.layout ?? 'octopus', underBoulder: !!opts.underBoulder, ricki: !!opts.ricki, atlas: !!opts.atlas, steer: !!opts.steer, longChat: !!opts.longChat, longNext: !!opts.longNext, bareTask: !!opts.bareTask, cutDecision: !!opts.cutDecision, ulidNext: !!opts.ulidNext, pastDue: !!opts.pastDue, tallLast: !!opts.tallLast, privateTasks: !!opts.privateTasks, deviceCache: opts.deviceCache ?? null, queryFails: opts.queryFails ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null, mode: opts.mode ?? 'sealed', grantedUnder: opts.grantedUnder ?? (opts.mode ?? 'sealed'),
   };
   // Pre-granted apps: the grant key is the SHA-256 of the RESOLVED default needs plus the app's html.
   const preGrant = [
@@ -389,7 +393,7 @@ Two proposals wait on a scope decision.
     const mk = (id: string, title: string, node: string, extra: Record<string, unknown> = {}, tag = 'task') => ({ id, path: `Tasks/${title}`, extension: 'md', tags: [tag], createdAt: T0, updatedAt: T0, lastUpdatedBy: 'cdf67944-c5f2-4e42-a0d8-02ce7a95bbdb', lastUpdatedVia: 'api', metadata: { node, state: 'open', owner: 'aaron', ...extra } });
     const C26 = 'Projects/COhere/COhere 2026';
     const taskNotes: any[] = d.tasks ? [
-      mk('k1', 'T-03 COhere festival readiness', C26, { state: 'waiting', waiting_on: 'aaron', due: '2026-10-12', next: d.longNext ? 'Try the new check-in flow at https://example.invalid/pr/12 and answer the three questions. First question: does the QR code scan on the door? Second question: is the badge printout readable from a metre away? And the third question: who carries the spare scanner on the day of the festival, and where do they stand?' : 'Check-in PR by Oct 12, see https://example.invalid/pr/12 for the diff', priority: 'now' }),
+      mk('k1', 'T-03 COhere festival readiness', C26, { state: 'waiting', waiting_on: 'aaron', due: d.pastDue ? '2026-10-07' : '2026-10-12', next: d.longNext ? 'Try the new check-in flow at https://example.invalid/pr/12 and answer the three questions. First question: does the QR code scan on the door? Second question: is the badge printout readable from a metre away? And the third question: who carries the spare scanner on the day of the festival, and where do they stand?' : 'Check-in PR by Oct 12, see https://example.invalid/pr/12 for the diff', priority: 'now' }),
       ...(d.bareTask ? [mk('k12', 'T-12 Taxes', 'Areas/Techne', { priority: 'now' })] : []),
       mk('k2', 'T-64 COhere app spec', C26, { owner: 'room:cohere', state: 'doing' }),
       mk('k3', 'T-65 Sponsorship invoice draft', C26, { priority: 'soon', priority_by: 'weigh.py 2026-10-12', next: 'Send to Kevin for the numbers' }),
@@ -402,6 +406,8 @@ Two proposals wait on a scope decision.
       mk('k10', 'T-98 Put away', 'Areas/Techne', { state: 'archived' }),
       mk('k11', 'T-14 A snoozed one', 'Areas/Techne', { snoozed_until: '2099-01-01' }),
       mk('dq1', 'Decide the COhere venue', C26, { priority: 'someday' }, 'decision'),
+      ...(d.ulidNext ? [mk('k13', 'T-13 Review the ATLAS follow-up', 'Areas/Techne', { priority: 'now', next: 'Read uni:01M3ZK2R6A6C62M1ANJCSQNG3M, then 01M3ZK2R6A6C62M1ANJCSQNG3N and reply.' }),
+        { id: '01M3ZK2R6A6C62M1ANJCSQNG3M', path: 'Projects/Atlas/Follow-up notes', content: 'x', tags: [], metadata: {}, createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-02T00:00:00Z' }] : []),
       ...(d.cutDecision ? [{ ...mk('dq9', 'Decision (default yes): Uni adds the after-event prompt to the…', C26, { priority: 'now' }, 'decision'), content: '_Converted from a task on 2026-10-01_\n\nDecision (default yes): Uni adds the after-event "were you there?" prompt to the companion on Wed. Say no to skip it.\n\nMore below.' }] : []),
     ] : [];
     // T-111 rooms nav: a task in a private area (Sadhana) and tasks changed at different times, so "Where we are" has something to hide and to date.

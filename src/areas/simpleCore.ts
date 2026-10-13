@@ -21,10 +21,22 @@ export function firstSentence(text: string | null | undefined): string {
  * caller's `Where` has already dropped those, and anything done or archived), at priority Now or Soon (unsorted counts as Soon), plus open
  * decisions; Someday is not here. Now before Soon, then by due date (undated last), then a decision before a task, then by title.
  */
-export function topNeeds(w: Where, _path?: string, max = Infinity): Task[] {
-  const rank = (t: Task) => (t.priority === "now" ? 0 : t.priority === "someday" ? 2 : 1);
+export function topNeeds(w: Where, _path?: string, max = Infinity, today = localDay()): Task[] {
+  const rank = (t: Task) => (isOverdue(t.due, today) ? -1 : t.priority === "now" ? 0 : t.priority === "someday" ? 2 : 1);
   const all = PRIORITIES.flatMap((p) => w.needs[p].rows).filter((t) => t.kind === "decision" || t.priority !== "someday");
   return all.sort((a, b) => rank(a) - rank(b) || (a.due ?? "9999").localeCompare(b.due ?? "9999") || Number(b.kind === "decision") - Number(a.kind === "decision") || a.title.localeCompare(b.title)).slice(0, max);
+}
+
+/** Today as YYYY-MM-DD, local. */
+export const localDay = (d = new Date()): string => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+/** A due date (YYYY-MM-DD) before today. */
+export const isOverdue = (due: string | null | undefined, today = localDay()): boolean => !!due && due < today;
+/** "due Oct 14", or "was due Oct 12" once it has passed. Null without a date. */
+export function dueLine(due: string | null | undefined, today = localDay()): string | null {
+  if (!due) return null;
+  const d = new Date(`${due}T12:00:00`);
+  if (Number.isNaN(d.getTime())) return due;
+  return `${isOverdue(due, today) ? "was due" : "due"} ${d.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
 }
 
 /** A title says what to do when it has words beyond its id; "T-12" or one bare word does not. */
