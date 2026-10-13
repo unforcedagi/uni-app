@@ -377,6 +377,8 @@ h3.wr-h { font-weight: 400; }
 .cp-need { all: unset; box-sizing: border-box; width: 100%; min-width: 0; min-height: 44px; display: flex; flex-direction: column; justify-content: center; gap: 1px; padding: 8px 0; border-bottom: 1px solid var(--th-hair2); cursor: pointer; }
 .cp-need:hover .cp-title { text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
 .cp-title { font: 500 15px/1.35 var(--th-sans); overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow-wrap: anywhere; }
+.cp-need.decision .cp-title { display: block; overflow: visible; }
+.cp-go { color: var(--th-mute); }
 .cp-need small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 12.5px var(--th-sans); color: var(--th-mute); }
 .cp-ago { display: block; margin-top: 4px; font: 400 12.5px var(--th-sans); color: var(--th-mute); letter-spacing: 0; }
 .cp-item { border-bottom: 1px solid var(--th-hair2); }
@@ -395,6 +397,7 @@ h3.wr-h { font-weight: 400; }
 .cp-all { all: unset; box-sizing: border-box; max-width: 100%; min-height: 40px; display: flex; align-items: center; gap: 6px; font: 500 14.5px var(--th-sans); color: var(--th-ink); cursor: pointer; }
 .cp-all-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-decoration: underline; text-underline-offset: 4px; text-decoration-thickness: 1px; }
 .cp-all-arrow { flex: none; }
+.cp-all-more { flex: none; font: 400 12.5px var(--th-sans); color: var(--th-mute); }
 /* the phone's strip */
 .cp.strip { flex: none; border-top: 1px solid var(--th-hair2); border-bottom: 1px solid var(--th-hair2); background: var(--th-paper); max-height: 62vh; overflow-y: auto; }
 .cp-line { all: unset; box-sizing: border-box; width: 100%; min-height: 46px; display: flex; align-items: center; gap: 10px; padding: 0 16px; cursor: pointer; }

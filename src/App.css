@@ -569,7 +569,7 @@ h1 { font-family: var(--serif); font-weight: 500; font-size: 34px; line-height: 
   .rail .rail-settings { margin-top: auto; }
   .rail-count:empty { display: none; }
   .rail-count { position: absolute; right: -2px; top: -4px; min-width: 18px; height: 18px; padding: 0 4px; display: grid; place-items: center; border-radius: 9px; background: var(--forest-deep); color: var(--th-card); font: 600 10px/1 var(--sans); }
-  .rail-dot { position: absolute; top: 8px; right: 10px; width: 6px; height: 6px; border-radius: 50%; background: var(--turquoise); }
+  .rail-dot { position: absolute; top: 8px; right: 10px; width: 6px; height: 6px; border-radius: 50%; background: none; box-shadow: inset 0 0 0 1.5px var(--text-soft); }
   .rail i .rail-dot { top: 3px; left: 11px; right: auto; }
   .rooms .capture-shortcuts { display: none; }
   .shell .rooms, .shell.in-room .rooms { display: none; position: absolute; left: 64px; top: 0; bottom: 0; width: 336px; max-width: calc(100% - 64px); z-index: 41; box-shadow: var(--shadow-lift); }
@@ -655,3 +655,7 @@ h1 { font-family: var(--serif); font-weight: 500; font-size: 34px; line-height: 
 }
 .room.child { width: calc(100% - 22px); margin-left: 22px; padding: 8px 12px; border-left: 2px solid var(--line); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
 .room.child .avatar { transform: scale(.85); }
+
+/* bookkeeping markers on a message ([done T-NN]) as quiet chips */
+.md-marks { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.md-mark { font-size: 11.5px; line-height: 1.5; padding: 0 8px; border-radius: 999px; color: var(--muted, #8a857c); box-shadow: inset 0 0 0 1px currentColor; opacity: .75; }

@@ -65,9 +65,10 @@ export function roomView(tree: Tree, path: string, rooms: readonly RoomRef[], un
   const nodes = chain.map(roomNodeOf);
   // A room belongs to the deepest node that names it: when a descendant claims the very room an ancestor's channel points at (Boulder -> #cohere),
   // the ancestor keeps only the room its own `room` name finds, else none.
-  if (nodes[0]) {
-    const channelRoom = ownRoom(nodes[0], rooms);
-    if (channelRoom && claimedBelow(tree, path, channelRoom.id, rooms)) nodes[0] = { ...nodes[0], channels: [] };
+  // The same goes for every ancestor on the way up, so the deepest node does not read as sharing with them (COhere under Boulder).
+  for (let i = 0; i < nodes.length; i++) {
+    const channelRoom = ownRoom(nodes[i], rooms);
+    if (channelRoom && claimedBelow(tree, chain[i].path, channelRoom.id, rooms)) nodes[i] = { ...nodes[i], channels: [] };
   }
   const s = steward(nodes, rooms, uni);
   const mine = chain[0] ? ownRoom(nodes[0], rooms) : null;
