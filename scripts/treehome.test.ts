@@ -3,7 +3,6 @@
 import assert from "node:assert/strict";
 import { parseArea, parseProject } from "../src/areas/areasCore.ts";
 import { buildTree, ROOT } from "../src/areas/treeCore.ts";
-import { nestRooms } from "../src/roomNesting.ts";
 import { ownRoom } from "../src/areas/talkCore.ts";
 import { isPrivateNode, roomSlug, roomView, treeRows, updatesBelow } from "../src/areas/treeRooms.ts";
 import { levelAlive } from "../src/areas/treeAlive.ts";
@@ -140,12 +139,6 @@ check("ownRoom: channel id first; a name with a slash matches exactly, never as 
   assert.equal(ownRoom({ room: "atlas/build", channels: [] }, [{ id: "x1", name: "atlas-build" }, { id: "x2", name: "atlasbuild" }]), null);
   assert.equal(ownRoom({ room: "atlas-build", channels: [] }, [{ id: "7dce", name: "atlas/build" }]), null);
   assert.equal(ownRoom({ room: "atlas", channels: ["nope"] }, rooms)?.id, "a1");
-});
-check("nestRooms: children indent under their parent, parent first; orphans keep their full name; flat rooms unchanged", () => {
-  const r = (name: string) => ({ name });
-  const out = nestRooms([r("build-log"), r("atlas/build"), r("Uni"), r("atlas"), r("atlas/teach"), r("solo/child")]);
-  assert.deepEqual(out.map((o) => [o.room.name, o.label, o.child]), [["build-log", "build-log", false], ["Uni", "Uni", false], ["atlas", "atlas", false], ["atlas/build", "build", true], ["atlas/teach", "teach", true], ["solo/child", "solo/child", false]]);
-  assert.deepEqual(nestRooms([r("a"), r("b")]).map((o) => o.child), [false, false]);
 });
 check("an area whose channel points at its child's room does not show that room as its own (Boulder is not #cohere)", () => {
   const t2 = buildTree([area("a-bou", "Boulder", { room: "boulder", channel: "r-coh" }), proj("p-coh", "COhere", "Areas/Boulder", { room: "cohere", channel: "r-coh" })]);

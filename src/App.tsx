@@ -1,10 +1,9 @@
-import { nestRooms } from "./roomNesting";
 import { readMessages, readRooms, readWho, writeMessages, writeRooms, writeWho } from "./chatCache";
-import { nodeOfRoom, useRoomLabels, useRoomNodes } from "./areas/roomLabels";
+import { nodeOfRoom, useRoomNodes } from "./areas/roomLabels";
 import { isNetworkError, netError } from "./netError";
 import { voiceRetryDelay } from "./voiceRetry";
 import { VoiceOutbox, relayAccepted } from "./voiceOutbox";
-import { SettingsIcon, UniIcon, JournalIcon, StarIcon, RoomsIcon } from "./Icons";
+import { SettingsIcon, UniIcon, JournalIcon, StarIcon } from "./Icons";
 import { forgetAreas } from "./areas/useAreas";
 import { useLifeOsVault } from "./areas/useLifeOsVault";
 import { effectiveLifeVault, showUniGlue } from "./areas/profile";
@@ -23,19 +22,18 @@ import { onBackButtonPress } from "@tauri-apps/api/app";
 import { copyText, onCopied } from "./clipboard";
 import { markFor, restoreTop, type ScrollMark } from "./noteText";
 import "./App.css";
-import { markdownToText } from "./markdown";
 import { Body } from "./MessageBody";
 import { isWorkerStatus } from "./chatMarkers";
 import Pairing from "./Pairing";
-import { emojiLabel, toggleLocal, type Reaction } from "./reactions";
+import { emojiLabel, type Reaction } from "./reactions";
 import { DeleteButton, InlineEditor } from "./InlineEditor";
 import { lastOwnMessage } from "./ownMessages";
 
 import { approvalOpen, parseApproval } from "./approvals";
-import { findUniMember, findUniRoom, handoffText, searchHandoffText, type UniAction } from "./uniActions";
+import { findUniMember, findUniRoom, searchHandoffText } from "./uniActions";
 import Search from "./Search";
 import Journal from "./Journal";
-import { mmss, newDraft, shareText, type JournalNote } from "./journalCore";
+import { mmss, shareText, type JournalNote } from "./journalCore";
 import { useRecorder, voiceFileName } from "./recorder";
 import { attachmentBlocksSend, enterInsertsNewline, manualAttachments } from "./composerCore";
 import PairSource, { PairDeviceButton } from "./PairSource";
@@ -55,7 +53,7 @@ import VaultBrowser from "./VaultBrowser";
 import { validateNotePath } from "./noteEdit";
 import { NoteOpener } from "./noteLinks";
 import { sameHub, type VaultRef } from "./vaultlinks";
-import { attachmentKind, collectAttachments, formatSize, stripAttachmentLines } from "./media";
+import { attachmentKind, formatSize } from "./media";
 import { Attachments, attachmentBody, useRelayOrigin, type MediaRef } from "./Attachments";
 import { activeQuery, filterMembers, insertMention, memberLabels, pruneBindings, resolveRecipients, type Bindings, type Member } from "./mentions";
 
@@ -78,7 +76,6 @@ const OTHER_VAULTS_KEY = "uni:other-vaults-expanded";
 const time = (ts: number) => new Date(ts * 1000).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 const HEX_KEY = /^[0-9a-f]{64}$/i;
 const keyFor = (channel: string, root: string | null) => `${channel}:${root ?? "room"}`;
-const QUICK_REACTIONS = ["👍", "❤️", "😂", "🙏", "🔥", "✦"];
 const dayKey = (ts: number) => new Date(ts * 1000).toDateString();
 function dayLabel(ts: number) {
   const d = new Date(ts * 1000), today = new Date();
@@ -162,13 +159,14 @@ function Conversations({ onForget }: { onForget: () => void }) {
   // The last rooms list on this device (per identity): a restored place resolves at once, before the first fetch.
   const whoRef = useRef<string | null>(readWho(localStorage));
   const [rooms, setRooms] = useState<Room[]>(() => readRooms<Room>(localStorage, whoRef.current));
-  const roomLabels = useRoomLabels();
   const [tabs, setTabs] = useState<Tabs>(() => openTab(EMPTY_TABS,
     readLastSurface(localStorage) === "journal" ? { kind: "journal", title: "Journal" } : { kind: "areas", title: "Uni" },
     "new", () => crypto.randomUUID()));
   const tabsRef = useRef<Tabs>(tabs);
   const areaBack = useRef<(() => void) | null>(null);
-  const setAreaBack = useCallback((back: (() => void) | null) => { areaBack.current = back; }, []);
+  /** Whether the open place has a Back of its own (a level up, the room tree): Android Back is the app's while it does. */
+  const [hasAreaBack, setHasAreaBack] = useState(false);
+  const setAreaBack = useCallback((back: (() => void) | null) => { areaBack.current = back; setHasAreaBack(!!back); }, []);
   const tabsReady = useRef(false);
   const [vaults, setVaults] = useState<string[]>([]);
   const [vaultError, setVaultError] = useState<string | null>(null);
@@ -229,7 +227,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const noteStacks = useRef(new Map<string, VaultRef[]>());
   const notesRef = useRef<VaultRef[]>([]);
   const [sidebarVisible, setSidebarVisible] = useState(() => window.matchMedia("(min-width: 600px)").matches);
-  const [panel, setPanel] = useState<"rooms" | "vault" | "settings" | null>(null);
+  /** `nav`: the navigation panel where the rail is out of reach (short landscape screens): the surfaces, Vault, Search and the vaults. */
+  const [panel, setPanel] = useState<"nav" | "vault" | "settings" | null>(null);
   const [composerFocused, setComposerFocused] = useState(false);
   const forYouBack = useRef("Uni");
   const forYouReturn = useRef<string | null>(null);
@@ -332,13 +331,11 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const [picker, setPicker] = useState<Picker | null>(null);
   const [rawKey, setRawKey] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [replyTo, setReplyTo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [sending, setSending] = useState(false);
   const sendingRef = useRef(false);
   const [status, setStatus] = useState("Loading cached conversations…");
   const [error, setError] = useState<string | null>(null);
-  const [ready, setReady] = useState(false);
   const [pairSourceOpen, setPairSourceOpen] = useState(false);
   const [forgetArmed, setForgetArmed] = useState(false);
   const [live, setLive] = useState<string | null>(null);
@@ -350,7 +347,6 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const [limit, setLimit] = useState(300);
   const relayOrigin = useRelayOrigin();
   const [older, setOlder] = useState<"idle" | "loading" | "done">("idle");
-  const [reactFor, setReactFor] = useState<string | null>(null);
   /** The message whose ⋯ menu is open (T-124: nothing is shown under a message by default). */
   const [menuFor, setMenuFor] = useState<string | null>(null);
   useEffect(() => {
@@ -362,15 +358,13 @@ function Conversations({ onForget }: { onForget: () => void }) {
   }, [menuFor]);
   // Our own message currently open in the inline editor.
   const [editing, setEditing] = useState<string | null>(null);
-  // Messages handed to Uni as notes this session (a local receipt).
-  const [kept, setKept] = useState<Set<string>>(new Set());
   // Approval prompts answered from this device: message ref -> reply sent.
   const [answered, setAnswered] = useState<Map<string, string>>(new Map());
   // Latest bindings for syncPicker (called in the same tick as setBindings).
   const bindingsRef = useRef<Bindings>(new Map());
   // Message actions go through a ref so the memoized list never holds stale closures.
   useEffect(() => { bindingsRef.current = bindings; }, [bindings]);
-  const actions = useRef({ react: (_m: Message, _e: string) => {}, toUni: (_m: Message, _a: UniAction) => {}, openThread: (_m: Message) => {}, reply: (_id: string) => {}, loadOlder: () => {}, saveEdit: (_m: Message, _b: string): Promise<void> => Promise.resolve(), cancelEdit: () => {}, deleteOwn: (_m: Message): Promise<void> => Promise.resolve(), answer: (_m: Message, _reply: string) => {}, keepVoice: (_m: Message, _a: MediaRef) => {} });
+  const actions = useRef({ openThread: (_m: Message) => {}, loadOlder: () => {}, saveEdit: (_m: Message, _b: string): Promise<void> => Promise.resolve(), cancelEdit: () => {}, deleteOwn: (_m: Message): Promise<void> => Promise.resolve(), answer: (_m: Message, _reply: string) => {} });
 
   const [searchOpen, setSearchOpen] = useState(false);
   // Search result to scroll to and flash once its room/thread has loaded.
@@ -574,6 +568,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
   // Following the newest message: content growth (images, late layout) keeps it pinned.
   const stickToEnd = useRef(true);
   const [loadedView, setLoadedView] = useState<string | null>(null);
+  /** The view whose messages the relay store has answered with (not just the device's kept copy): only then can a room be said to be empty. */
+  const [fetchedView, setFetchedView] = useState<string | null>(null);
   const fetchSeq = useRef(0), appliedSeq = useRef(0), viewNow = useRef<string | null>(null);
   const [listEl, setListEl] = useState<HTMLDivElement | null>(null);
   const setList = useCallback((el: HTMLDivElement | null) => {
@@ -641,7 +637,6 @@ function Conversations({ onForget }: { onForget: () => void }) {
         commitTabs(next);
       }
     }
-    setReady(true);
   }, []);
 
   const refresh = useCallback(async () => {
@@ -672,7 +667,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     // A rooms list from the last run restores the place at once; the real list follows and re-syncs it.
     if (roomsRef.current.length) void loadRooms(roomsRef.current).catch(() => {});
     loadRooms().then(() => { if (active) void refresh(); }).catch((e) => {
-      if (active) { setError(String(e)); setStatus("Could not open local conversations"); setReady(true); }
+      if (active) { setError(String(e)); setStatus("Could not open local conversations"); }
     });
     return () => { active = false; };
     // Start only once; later refreshes are explicit or visibility-driven.
@@ -748,7 +743,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       if (kept) { setMessages(kept); setLoadedView(view); }
     }
     viewNow.current = view;
-    invoke<Message[]>("get_messages", { channel, root, limit }).then((rows) => { if (viewNow.current === view && seq > appliedSeq.current) { appliedSeq.current = seq; setMessages(rows); setLoadedView(view); if (root === null) writeMessages(localStorage, whoRef.current, channel, rows); } }).catch((e) => { if (current) setError(String(e)); });
+    invoke<Message[]>("get_messages", { channel, root, limit }).then((rows) => { if (viewNow.current === view && seq > appliedSeq.current) { appliedSeq.current = seq; setMessages(rows); setLoadedView(view); setFetchedView(view); if (root === null) writeMessages(localStorage, whoRef.current, channel, rows); } }).catch((e) => { if (current) setError(String(e)); });
     // Viewing the room reads it (only while the app is actually on screen).
     if (document.visibilityState === "visible") {
       invoke("mark_read", { channel }).then(() => loadRooms()).catch(() => {});
@@ -757,7 +752,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   }, [channel, root, synced, tick, limit, loadRooms]);
 
   // New room: back to the default window; older pages load on demand.
-  useEffect(() => { setLimit(300); setOlder("idle"); setReactFor(null); setMenuFor(null); setEditing(null); }, [channel]);
+  useEffect(() => { setLimit(300); setOlder("idle"); setMenuFor(null); setEditing(null); }, [channel]);
 
   useEffect(() => {
     if (!channel) { setMembers([]); return; }
@@ -891,64 +886,6 @@ function Conversations({ onForget }: { onForget: () => void }) {
     } catch (e) { if (channelRef.current === ch) { setError(String(e)); setOlder("idle"); } }
   }
 
-  // Hand a message to Uni: "note" posts straight to the Uni room (Uni files it
-  // in Parachute and replies with where it went); "ask" opens the Uni room
-  // with the quote drafted so Aaron can add his question first.
-  // A voice message goes straight to the vault: transcript plus the audio
-  // link, no round trip through Uni.
-  async function keepVoice(m: Message, audio: MediaRef) {
-    setError(null);
-    setStatus("Saving vault note…");
-    try {
-      const roomName = rooms.find((r) => r.id === m.channel)?.name ?? "room";
-      const when = new Date(m.ts * 1000);
-      const transcript = stripAttachmentLines(m.body, [audio]).trim();
-      const content = `Voice message from ${m.author_name} in #${roomName}, ${when.toLocaleString()}\n\n${transcript || "(no transcript)"}\n\n[Audio](${audio.url})`;
-      const draft = newDraft(content, "text");
-      const r = await invoke<{ sent: string[]; remaining: number; error: string | null }>("journal_save_text", { entry: draft });
-      if (!r.sent.includes(draft.entry_id)) { setKept((k) => new Set(k).add(m.ref)); setStatus(`Queued for your vault; it will save when reachable${r.error ? ` (${r.error})` : ""}`); return; }
-      setKept((k) => new Set(k).add(m.ref));
-      setStatus("Kept as a note in your vault");
-    } catch (e) {
-      setError(`Couldn't save the note: ${String(e)}`);
-    }
-  }
-  async function toUni(m: Message, action: UniAction) {
-    setError(null);
-    const uniRoom = findUniRoom(rooms);
-    if (!uniRoom) { setError("No room named Uni is joined. Refresh, or join #Uni in Buzz."); return; }
-    try {
-      const roster = await invoke<Member[]>("get_members", { channel: uniRoom.id });
-      const uni = findUniMember(roster);
-      if (!uni) { setError("Uni isn't in the Uni room's member list yet. Refresh to load it."); return; }
-      const label = memberLabels(roster).get(uni.pubkey) ?? uni.name;
-      const roomName = rooms.find((r) => r.id === m.channel)?.name ?? "room";
-      if (action === "note") {
-        setStatus("Handing to Uni…");
-        await invoke<Message>("post_message", { channel: uniRoom.id, body: handoffText("note", m, roomName, label), replyTo: null, recipients: [uni.pubkey] });
-        setKept((k) => new Set(k).add(m.ref));
-        setStatus("Sent to Uni · it will file the note and reply in #Uni");
-        setTick((n) => n + 1);
-        await loadRooms();
-      } else {
-        const text = handoffText("ask", m, roomName, label, " ");
-        openTarget(roomTarget(uniRoom.id), "focus");
-        // Replace the restored draft: question goes after "@Uni ".
-        const prefix = `@${label} `;
-        const question = prefix + "\n\n" + text.slice(text.indexOf("\n\n") + 2);
-        setDraft(question);
-        const key = keyFor(uniRoom.id, null);
-        editDraft(key, question);
-        const nextBindings = new Map([[label, uni.pubkey]]);
-        bindingStore.current.set(key, nextBindings);
-        bindingsRef.current = nextBindings;
-        setBindings(nextBindings);
-        focusComposer.current = true;
-        setTimeout(() => { input.current?.focus(); input.current?.setSelectionRange(prefix.length, prefix.length); }, 50);
-      }
-    } catch (e) { setError(`Couldn't reach Uni: ${e}`); setStatus("Handoff failed · your message is unchanged"); }
-  }
-
   // Journal → room. To Uni: addressed and p-tagged; the entry itself stays in the vault.
   async function shareEntry(note: JournalNote, roomId: string, toUni: boolean, vault: string, journalHub: string) {
     let label: string | null = null;
@@ -962,17 +899,6 @@ function Conversations({ onForget }: { onForget: () => void }) {
     }
     await invoke<Message>("post_message", { channel: roomId, body: shareText(note, vault, label, "", journalHub), replyTo: null, recipients });
     await loadRooms();
-  }
-
-  async function react(m: Message, emoji: string) {
-    setReactFor(null);
-    const mine = m.reactions.find((r) => r.mine && emojiLabel(r.emoji) === emojiLabel(emoji))?.mine ?? null;
-    // Optimistic: show the change now, then re-read the store.
-    setMessages((rows) => rows.map((x) => x.ref !== m.ref ? x : { ...x, reactions: toggleLocal(x.reactions, emoji, !!mine) }));
-    try {
-      await invoke("react", { channel: m.channel, target: m.ref, emoji: mine ? m.reactions.find((r) => r.mine === mine)!.emoji : emoji, mine });
-    } catch (e) { setError(`Reaction failed: ${e}`); }
-    setTick((n) => n + 1);
   }
 
   // Edit / delete our own messages (kind 40003 / kind 5, as Buzz desktop).
@@ -991,7 +917,6 @@ function Conversations({ onForget }: { onForget: () => void }) {
     try {
       await invoke("delete_message", { channel: m.channel, target: m.ref });
       if (editing === m.ref) setEditing(null);
-      if (replyTo === m.ref) setReplyTo(null);
       setTick((n) => n + 1);
       void loadRooms().catch(() => {});
     } catch (e) { setError(`Delete failed: ${e}`); }
@@ -1153,7 +1078,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     if (!key || !tab) return;
     setError(null);
     if (!channel) return;
-    const target = root ? replyTo ?? (messages.some((m) => m.ref === root) ? root : messages[messages.length - 1]?.ref ?? null) : null;
+    const target = root ? (messages.some((m) => m.ref === root) ? root : messages[messages.length - 1]?.ref ?? null) : null;
     if (root && !target) { setError("Thread not in local cache. Refresh before replying."); return; }
     const origin = { key, tabId: tab.id, title: tab.title, channel, replyTo: target, notifyUni };
     recordingOrigin.current = origin;
@@ -1180,7 +1105,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     const now = Date.now();
     if (text.trim() && channel && now - lastTypingSent.current > TYPING_SEND_MS) {
       lastTypingSent.current = now;
-      void invoke("send_typing", { channel, root: root ?? null, parent: replyTo ?? root ?? null }).catch(() => {});
+      void invoke("send_typing", { channel, root: root ?? null, parent: root ?? null }).catch(() => {});
     }
     const key = scope();
     if (key) editDraft(key, text);
@@ -1271,7 +1196,6 @@ function Conversations({ onForget }: { onForget: () => void }) {
     setDraft(nextKey ? drafts.current.get(nextKey) ?? "" : "");
     setBindings(nextKey ? bindingStore.current.get(nextKey) ?? new Map() : new Map());
     setPicker(null);
-    setReplyTo(null);
     setError(null);
   }
 
@@ -1303,10 +1227,9 @@ function Conversations({ onForget }: { onForget: () => void }) {
       if (!HEX_KEY.test(raw)) { setError("The advanced public key must be 64 hex characters."); return; }
       if (!recipients.includes(raw.toLowerCase())) recipients.push(raw.toLowerCase());
     }
-    // In a thread, reply to the chosen message or to the root. If the root is
-    // not cached, reply to the newest cached message in the thread.
-    let target: string | null = replyTo;
-    if (!target && root) target = messages.some((m) => m.ref === root) ? root : messages[messages.length - 1]?.ref ?? null;
+    // In a thread, reply to the root. If the root is not cached, reply to the newest cached message in the thread.
+    let target: string | null = null;
+    if (root) target = messages.some((m) => m.ref === root) ? root : messages[messages.length - 1]?.ref ?? null;
     if (root && !target) { setError("Thread not in local cache. Refresh before replying."); return; }
     sendingRef.current = true;
     setSending(true);
@@ -1329,7 +1252,6 @@ function Conversations({ onForget }: { onForget: () => void }) {
       }
       if (activeScope.current === key) {
         setRawKey("");
-        setReplyTo(null);
       }
       // Re-read through the room effect, which drops the result if the
       // user has switched rooms meanwhile.
@@ -1389,7 +1311,6 @@ function Conversations({ onForget }: { onForget: () => void }) {
           {above}
           <input ref={fileInput} className="file-picker" type="file" multiple aria-label="Choose files to attach" onChange={(e) => { addFiles(Array.from(e.target.files ?? [])); e.target.value = ""; }} />
           {error && <p className="error" role="alert">{error}</p>}
-          {replyTo && replyTo !== root && <div className="reply-banner">Replying to {messages.find((m) => m.ref === replyTo)?.author_name ?? "message"}<button onClick={() => setReplyTo(null)} aria-label="Cancel reply">×</button></div>}
           <div className="compose-destination">{isThread ? <>Replying in thread · <strong>{currentRoom.name}</strong></> : <>Sending to <strong>{currentRoom.name}</strong></>}{boundNames.length ? ` · notifying ${boundNames.join(", ")}` : ""}{findUniMember(members) && <> · <button className="link" onClick={() => setNotifyUni((v) => !v)} aria-pressed={notifyUni}>{notifyUni ? "Uni is listening" : "Uni muted"}</button></>}</div>
           {picker && <ul className="mention-picker" role="listbox" aria-label="Mention a member">
             {suggestions.length === 0 && <li className="mention-empty">{members.length ? `No member matches “${picker.query}”` : "No member list cached yet. Refresh to load it."}</li>}
@@ -1435,35 +1356,21 @@ function Conversations({ onForget }: { onForget: () => void }) {
     </div>;
   };
 
-  const voiceOf = (m: Message): MediaRef | undefined => collectAttachments(m.body, m.media ?? [], relayOrigin).find((x) => attachmentKind(x) === "audio");
   const renderMessage = (m: Message, inThread: boolean, prev?: Message) => {
     if (isWorkerStatus(m.body) && !(inThread && m.ref === root) && editing !== m.ref) return <article key={m.ref} data-ref={m.ref} className="message status-line" title={m.body}><span className="status-line-text">{m.body}</span><time>{clock(m.ts)}</time></article>;
     const grouped = !!prev && prev.author === m.author && m.ts - prev.ts < 300 && !(inThread && prev.ref === root);
-    return <article key={m.ref} data-ref={m.ref} className={`message ${m.ref === focusRef ? "search-focus" : ""} ${grouped ? "grouped" : ""} ${m.author === identity ? "mine" : ""} ${m.mentions_me ? "highlight" : ""} ${inThread && m.ref === root ? "thread-root" : ""}`}
-      onContextMenu={(e) => {
-        // Touch: long-press is the system's text selection (select + copy a
-        // phrase); don't swallow it. Mouse: right-click opens quick reactions.
-        if (window.matchMedia?.("(pointer: coarse)").matches) return;
-        e.preventDefault(); setReactFor(reactFor === m.ref ? null : m.ref);
-      }}>
+    return <article key={m.ref} data-ref={m.ref} className={`message ${m.ref === focusRef ? "search-focus" : ""} ${grouped ? "grouped" : ""} ${m.author === identity ? "mine" : ""} ${m.mentions_me ? "highlight" : ""} ${inThread && m.ref === root ? "thread-root" : ""}`}>
       {grouped ? <time className="gutter-time">{clock(m.ts)}</time> : <span className="message-avatar" style={{ background: `hsl(${150 + (hue(m.author) % 120) - 60} 22% 44%)` }} aria-hidden="true">{m.author_name[0]?.toUpperCase() ?? "?"}</span>}
       <div className="message-content">{!grouped && <div className="message-meta"><strong>{m.author_name}</strong><time>{clock(m.ts)}</time></div>}{editing === m.ref ? <InlineEditor key={m.ref} initial={m.body} onSave={(body) => actions.current.saveEdit(m, body)} onCancel={() => actions.current.cancelEdit()} /> : <Body body={attachmentBody(m.body, m.media, relayOrigin)} mentions={m.mentions} me={identity} edited={m.edited} />}
         <Attachments body={m.body} media={m.media} />
         {approvalRow(m)}
-        {m.reactions.length > 0 && <div className="reactions">{m.reactions.map((r) => <button key={r.emoji} className={`pill ${r.mine ? "mine" : ""}`} onClick={() => actions.current.react(m, r.emoji)} aria-pressed={!!r.mine} aria-label={`${emojiLabel(r.emoji)} ${r.count}${r.mine ? ", you reacted; tap to remove" : "; tap to add yours"}`}>{emojiLabel(r.emoji)} <span>{r.count}</span></button>)}</div>}
-        {reactFor === m.ref && <div className="quick-react" role="toolbar" aria-label="React">{QUICK_REACTIONS.map((e) => <button key={e} onClick={() => actions.current.react(m, e)} aria-label={`React ${e}`}>{e}</button>)}</div>}
+        {m.reactions.length > 0 && <div className="reactions" aria-label="Reactions">{m.reactions.map((r) => <span key={r.emoji} className={`pill ${r.mine ? "mine" : ""}`} aria-label={`${emojiLabel(r.emoji)} ${r.count}${r.mine ? ", including yours" : ""}`}>{emojiLabel(r.emoji)} <span>{r.count}</span></span>)}</div>}
         {!inThread && m.reply_count > 0 && <button className="thread-summary" onClick={() => actions.current.openThread(m)} aria-label={`View thread with ${m.reply_count} ${m.reply_count === 1 ? "reply" : "replies"}`}>💬 {m.reply_count} {m.reply_count === 1 ? "reply" : "replies"}{m.last_reply_ts ? <span> · last {time(m.last_reply_ts)}</span> : null}</button>}
         <div className={`message-more ${menuFor === m.ref ? "open" : ""}`}>
-          <button className="message-more-go" onClick={() => setMenuFor(menuFor === m.ref ? null : m.ref)} aria-label={`More actions for ${m.author_name}'s message`} aria-haspopup="menu" aria-expanded={menuFor === m.ref}>⋯</button>
-          {menuFor === m.ref && <div className="message-menu" role="menu" aria-label="Message actions" onClick={(e) => { if (e.target instanceof Element && !e.target.closest(".danger, [aria-label^='Delete'], [aria-label^='Tap again']")) setMenuFor(null); }}>
-          <button role="menuitem" onClick={() => setReactFor(reactFor === m.ref ? null : m.ref)} aria-label={`React to ${m.author_name}`}>React</button>
-          {voiceOf(m) ? <button role="menuitem" onClick={() => actions.current.keepVoice(m, voiceOf(m)!)} disabled={kept.has(m.ref)} aria-label={`Keep ${m.author_name}'s voice message as a note`}>{kept.has(m.ref) ? "✓ Kept" : "Keep as note"}</button>
-            : <button role="menuitem" onClick={() => actions.current.toUni(m, "note")} disabled={kept.has(m.ref)} aria-label={`Keep ${m.author_name}'s message as a note`}>{kept.has(m.ref) ? "✓ Sent to Uni" : "Keep as note"}</button>}
-          <button role="menuitem" onClick={() => actions.current.toUni(m, "ask")} aria-label={`Ask Uni about ${m.author_name}'s message`}>Ask Uni</button>
-          <button role="menuitem" onClick={() => void copyText(m.body, "Copied text")} aria-label={`Copy ${m.author_name}'s message as markdown`}>Copy text</button>
-          {!inThread && <button role="menuitem" onClick={() => actions.current.openThread(m)} aria-label={`Reply in thread to ${m.author_name}`}>Reply in thread</button>}
-          {inThread && m.ref !== root && <button role="menuitem" onClick={() => actions.current.reply(m.ref)} aria-label={`Reply to ${m.author_name}`}>Reply</button>}
-          {m.author === identity && editing !== m.ref && <button role="menuitem" onClick={() => setEditing(m.ref)} aria-label="Edit your message">Edit</button>}
+          <button className="message-more-go" onClick={() => setMenuFor(menuFor === m.ref ? null : m.ref)} aria-label={`More actions for ${m.author_name}'s message`} aria-expanded={menuFor === m.ref}>⋯</button>
+          {menuFor === m.ref && <div className="message-menu" role="group" aria-label="Message actions" onClick={(e) => { if (e.target instanceof Element && !e.target.closest(".danger, [aria-label^='Delete'], [aria-label^='Tap again']")) setMenuFor(null); }}>
+          <button onClick={() => void copyText(m.body, "Copied text")} aria-label={`Copy ${m.author_name}'s message`}>Copy</button>
+          {m.author === identity && editing !== m.ref && <button onClick={() => setEditing(m.ref)} aria-label="Edit your message">Edit</button>}
           {m.author === identity && <DeleteButton key={`del-${m.ref}`} label="your message" onDelete={() => actions.current.deleteOwn(m)} />}
           </div>}
         </div>
@@ -1482,16 +1389,12 @@ function Conversations({ onForget }: { onForget: () => void }) {
   });
 
   actions.current = {
-    react: (m, e) => void react(m, e),
-    toUni: (m, a) => void toUni(m, a),
     openThread,
-    reply: (id) => { setReplyTo(id); input.current?.focus(); },
     loadOlder: () => void loadOlder(),
     saveEdit,
     cancelEdit: () => { setEditing(null); input.current?.focus(); },
     deleteOwn,
     answer: (m, reply) => void answerApproval(m, reply),
-    keepVoice: (m, audio) => void keepVoice(m, audio),
   };
 
   // The rendered timeline depends only on data, never on the draft, so
@@ -1501,14 +1404,15 @@ function Conversations({ onForget }: { onForget: () => void }) {
     {rootMessage ? renderMessage(rootMessage, true) : messages.length > 0 && <p className="empty">Root message is not cached; showing replies we have.</p>}
     {rootMessage && <div className="thread-divider"><span>{threadReplies.length ? `${threadReplies.length} ${threadReplies.length === 1 ? "reply" : "replies"}` : "No replies yet"}</span></div>}
     {renderList(threadReplies, true)}
-    {messages.length === 0 && <p className="empty">Thread not in local cache. Refresh to try again.</p>}
+    {messages.length === 0 && fetchedView === currentView && <p className="empty">Thread not in local cache. Refresh to try again.</p>}
   </> : <>
     {messages.length > 0 && <div className="older">{older === "done" ? <span>Start of #{roomName}</span> : <button onClick={() => actions.current.loadOlder()} disabled={older === "loading"}>{older === "loading" ? "Loading older messages…" : "Load older messages"}</button>}</div>}
-    {messages.length === 0 && (loadedView === currentView ? <p className="empty">No messages in this room yet.</p> : <p className="empty quiet" role="status" aria-label="Loading messages">Loading messages…</p>)}
+    {/* the kept copy or nothing until the store has answered: a room is never called empty before it has been read */}
+    {messages.length === 0 && fetchedView === currentView && <p className="empty">No messages in this room yet.</p>}
     {renderList(messages, false)}
   </>,
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  [messages, identity, reactFor, menuFor, kept, answered, root, older, roomName, editing, focusRef, relayOrigin, loadedView, currentView]);
+  [messages, identity, menuFor, answered, root, older, roomName, editing, focusRef, relayOrigin, fetchedView, currentView]);
 
   const topNote = notes[notes.length - 1];
   // A top-level note Back closes its tab and returns to the last used tab.
@@ -1529,13 +1433,12 @@ function Conversations({ onForget }: { onForget: () => void }) {
     if (searchOpen) { setSearchOpen(false); return; }
     if (notes.length) { closeNote(); return; }
     if (root && channel) { openTarget(roomTarget(channel), "focus"); return; }
-    const here = activeTab(tabsRef.current)?.kind;
-    // (Uni's own level on a phone, opened from the room tree, goes back to the tree the same way an area goes up.)
-    if (here === "area" || (here === "areas" && areaBack.current)) { if (areaBack.current) areaBack.current(); else openTarget(uniHome(), "replace"); return; }
-    // On narrow screens the sidebar is a view, not a tab close.
-    setPanel("rooms");
+    // A level goes up, a room on a phone goes back to the room tree (Uni's own level, opened from the tree, too); anything else goes to Uni.
+    if (areaBack.current) { areaBack.current(); return; }
+    if (activeTab(tabsRef.current)?.kind !== "areas") openTarget(uniHome(), "replace");
   };
-  const canGoBack = !!panel || journalFocus || notes.length > 0 || searchOpen || !sidebarVisible;
+  // At Uni's room tree (nothing open over it) the system's own Back runs: the app goes to the background.
+  const canGoBack = !!panel || journalFocus || notes.length > 0 || searchOpen || !!root || hasAreaBack || (!!activeTab(tabs) && activeTab(tabs)!.kind !== "areas");
   // Desktop tab shortcuts. On macOS the native menu owns Cmd+W; it emits
   // uni://close-tab from Rust, so the WebView never closes the window.
   const closeActiveRef = useRef(() => {});
@@ -1575,9 +1478,14 @@ function Conversations({ onForget }: { onForget: () => void }) {
     return () => { dead = true; off?.(); };
   }, [canGoBack]);
   const active = activeTab(tabs);
-  function sidebarClick(target: TabTarget) { openTarget(target, "focus"); }
   const journalTab = tabs.tabs.find((t) => t.kind === "journal");
   const areasOpen = active?.kind === "areas" || active?.kind === "area";
+  /** Every room opens in the room shell (tree, conversation, companion): a node's room, a room no node owns ("Other rooms"), a thread. */
+  const shellOpen = areasOpen || active?.kind === "room" || active?.kind === "thread";
+  const threadNode = active?.kind === "thread" && active.channel ? roomNodes.get(active.channel) ?? null : null;
+  const shellPath = active?.kind === "area" ? active.path ?? null : threadNode && threadNode.path !== "" ? threadNode.path : null;
+  const shellLoose = active?.kind === "room" || (active?.kind === "thread" && !threadNode) ? active.channel ?? null : null;
+  const shellThread = active?.kind === "thread" && active.channel && active.root ? { channel: active.channel, root: active.root } : null;
   // Drafts only: the scope's draft is read when the room opens. Aaron presses Send.
   const composeInRoom = (id: string, text: string) => {
     const key = keyFor(id, null);
@@ -1597,10 +1505,11 @@ function Conversations({ onForget }: { onForget: () => void }) {
     setDraft(next);
     requestAnimationFrame(() => input.current?.focus());
   };
-  const areaRoomFor = (id: string | null | undefined) => {
-    const room = id && channel === id && !root ? currentRoom : undefined;
+  /** The loaded room (or one of its threads, by root) as the shell's chat; null while another is loaded. */
+  const areaRoomFor = (id: string | null | undefined, threadRoot: string | null = null) => {
+    const room = id && channel === id && (root ?? null) === threadRoot ? currentRoom : undefined;
     if (!id || !room) return null;
-    return { id, messages, loaded: loadedView === `${id}|null`, me: identity, render: (above: ReactNode, placeholder?: string) => roomPane(room, above, placeholder), compose: composeHere };
+    return { id, messages, loaded: loadedView === `${id}|${threadRoot}`, me: identity, render: (above: ReactNode, placeholder?: string) => roomPane(room, above, placeholder), compose: composeHere };
   };
   // An area learns its room from the area note; the tab remembers it, and the room view follows the tab.
   const syncAreaRoom = (id: string | null) => {
@@ -1633,12 +1542,11 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const recordingTab = recordingOrigin.current;
   const pill = recordingTab && recorder.busy ? { title: recordingTab.title, elapsed: recorder.elapsed, tabId: recordingTab.tabId, stop: recorder.stop, phase: recorder.phase } :
     journalRecording && journalTab ? { title: "Journal", elapsed: journalRecording.elapsed, tabId: journalTab.id, stop: journalRecording.stop, phase: "recording" as const } : null;
-  return <NavContext.Provider value={navControls}><NoteOpener.Provider value={openNote}><main className={`shell ${(!sidebarVisible && (channel || journalOpen || areasOpen || (active?.kind === "note" || active?.kind === "vault"))) ? "in-room" : ""} ${topNote ? "note-open" : ""} ${panel ? `panel-open panel-${panel}` : ""} ${searchOpen ? "search-open" : ""} ${composerFocused ? "composer-focused" : ""} ${journalFocus && journalOpen ? "journal-focus" : ""}`}>
+  return <NavContext.Provider value={navControls}><NoteOpener.Provider value={openNote}><main className={`shell ${(!sidebarVisible && (channel || journalOpen || shellOpen || (active?.kind === "note" || active?.kind === "vault"))) ? "in-room" : ""} ${topNote ? "note-open" : ""} ${panel ? `panel-open panel-${panel}` : ""} ${searchOpen ? "search-open" : ""} ${composerFocused ? "composer-focused" : ""} ${journalFocus && journalOpen ? "journal-focus" : ""}`}>
     <nav className="rail" aria-label="Main navigation">
-      <button aria-label="Uni" aria-current={!panel && !searchOpen && (!topNote && areasOpen ? "page" : undefined)} onClick={() => openTarget(uniHome())}><i><UniIcon /></i><span>Uni</span></button>
+      <button aria-label="Uni" aria-current={!panel && !searchOpen && (!topNote && shellOpen ? "page" : undefined)} onClick={() => openTarget(uniHome())}><i><UniIcon /></i><span>Uni</span></button>
       <button aria-label="Journal" aria-current={!panel && !searchOpen && (journalOpen && !topNote ? "page" : undefined)} onClick={() => openTarget({ kind: "journal", title: "Journal" })}><i><JournalIcon /></i><span>Journal</span></button>
       {showUniGlue(lifeVault) && <button aria-label="For you" aria-current={!panel && !searchOpen && (topNote?.ref === FOR_YOU_ID ? "page" : undefined)} onClick={openForYou}><i><StarIcon />{forYou.fresh && <span className="rail-dot" aria-label="Updated recommendations" />}</i><span>For you</span></button>}
-      <button aria-label="Rooms" aria-current={!panel && !searchOpen && (!topNote && !journalOpen && !areasOpen && channel && channel !== findUniRoom(rooms)?.id ? "page" : undefined)} aria-expanded={panel === "rooms"} onClick={() => { setSearchOpen(false); setPanel(panel === "rooms" ? null : "rooms"); }}><i><RoomsIcon /></i><span>Rooms</span>{rooms.some((r) => r.unread > 0) && <span className="rail-dot" aria-label="Unread rooms" />}</button>
       <button className="rail-vault" aria-label="Vault" aria-current={!panel && !searchOpen && (active?.kind === "vault" || (topNote && topNote.ref !== FOR_YOU_ID) ? "page" : undefined)} aria-expanded={panel === "vault"} onClick={() => { setSearchOpen(false); setPanel(panel === "vault" ? null : "vault"); }}><i>▤</i><span>Vault</span></button>
       <button className="rail-search" aria-label="Search" aria-expanded={searchOpen} onClick={() => { setPanel(null); setSearchQuery(""); setSearchScope({ vault: "", prefix: "" }); setSearchOpen(true); }}><i>⌕</i><span>Search</span></button>
       <button className="rail-settings" aria-label="Settings" aria-expanded={panel === "settings"} onClick={() => { setSearchOpen(false); setPanel(panel === "settings" ? null : "settings"); setForgetArmed(false); }}><i><SettingsIcon /></i><span>Settings</span></button>
@@ -1648,7 +1556,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       {(panel || searchOpen) && <button className="panel-close icon-button" aria-label="Close panel" onClick={() => { setPanel(null); setSearchOpen(false); }}>×</button>}
       <div className="landscape-panel-surfaces"><button onClick={() => openTarget(uniHome())}><UniIcon />Uni</button><button onClick={() => openTarget({ kind: "journal", title: "Journal" })}><JournalIcon />Journal</button><button onClick={openForYou}><StarIcon />For you</button><button onClick={() => { setPanel("settings"); }}><SettingsIcon />Settings</button></div>
       <div className="phone-panel-tools"><button onClick={() => { setPanel("vault"); setSearchOpen(false); }}>Vault</button><button onClick={() => { setPanel(null); setSearchOpen(true); }}>Search</button></div>
-      <header className="rooms-header"><div><span className="eyebrow">Unforced</span><h1>Uni</h1></div><div><button className="icon-button" onClick={() => { setSearchQuery(""); setSearchScope({ vault: "", prefix: "" }); setSearchOpen(true); }} aria-label="Search messages and notes">⌕</button><button className="icon-button" onClick={() => void refresh()} disabled={busy} aria-label="Refresh conversations">↻</button><button className="icon-button" onClick={() => { setPanel(panel === "settings" ? "rooms" : "settings"); setSearchOpen(false); setForgetArmed(false); }} aria-label="Settings" aria-expanded={panel === "settings"}><SettingsIcon /></button></div></header>
+      <header className="rooms-header"><div><span className="eyebrow">Unforced</span><h1>Uni</h1></div><div><button className="icon-button" onClick={() => { setSearchQuery(""); setSearchScope({ vault: "", prefix: "" }); setSearchOpen(true); }} aria-label="Search messages and notes">⌕</button><button className="icon-button" onClick={() => void refresh()} disabled={busy} aria-label="Refresh conversations">↻</button><button className="icon-button" onClick={() => { setPanel(panel === "settings" ? "nav" : "settings"); setSearchOpen(false); setForgetArmed(false); }} aria-label="Settings" aria-expanded={panel === "settings"}><SettingsIcon /></button></div></header>
       {pairSourceOpen && <PairSource onClose={() => setPairSourceOpen(false)} />}
       {panel === "settings" && <div className="settings">
         <p className="connection" role="status">{status}{live ? <span className={`live ${live === "Live" ? "on" : ""}`}> · {live}</span> : null}</p>
@@ -1657,8 +1565,6 @@ function Conversations({ onForget }: { onForget: () => void }) {
       {searchOpen && <Search initialQuery={searchQuery} vaults={vaults} key={`${searchScope.vault}:${searchScope.prefix}`} initialVault={searchScope.vault} initialPathPrefix={searchScope.prefix} onOpen={openHit} onOpenNote={(n) => { setSearchOpen(false); openNote({ hub: null, vault: n.vault, ref: n.id }, null); }} onAskUni={askUniSearch} onClose={() => { setSearchOpen(false); if (topNote) setSidebarVisible(false); }} />}
       {searchOpen && error && <p className="error search-error" role="alert">{error}</p>}
       <div className="rooms-body" hidden={searchOpen}>
-      {!ready && <p className="empty">Loading…</p>}
-      {ready && rooms.length === 0 && <p className="empty">No joined conversations cached. Refresh to connect with your personal Buzz key.</p>}
       <section className="vault-sidebar" aria-label="Vaults"><div className="vault-heading"><h2>Vaults</h2><button className="note-quiet" onClick={() => setVaultRefresh((n) => n + 1)}>Refresh</button></div>
         {vaultError && <p className="error" role="alert">{vaultError}</p>}
         {primaryVault && vaultRow(primaryVault)}
@@ -1669,28 +1575,15 @@ function Conversations({ onForget }: { onForget: () => void }) {
           <div id="other-vault-list" hidden={!otherVaultsExpanded}>{otherVaults.map(vaultRow)}</div>
         </>}
       </section>
-      <nav>{nestRooms(rooms).map(({ room, label: rawLabel, child }) => { const label = roomLabels.get(room.id) ?? rawLabel; return <button key={room.id} className={`room ${child ? "child" : ""} ${channel === room.id ? "selected" : ""}`} title={child ? room.name : undefined} aria-label={child ? `#${room.name}` : undefined} onClick={() => sidebarClick(roomTarget(room.id))}
-        aria-current={channel === room.id ? "page" : undefined}>
-        <span className="avatar">{label[0]?.toUpperCase() ?? "#"}</span><span className="room-text"><strong className={room.unread ? "unread" : ""}>{label}</strong><small>{room.last_message ? markdownToText(room.last_message) : "No messages yet"}</small></span>
-        <span className="room-side"><time>{room.last_ts ? time(room.last_ts) : ""}</time>{room.unread > 0 && <span className={`unread-badge ${room.mentions ? "mention" : ""}`} aria-label={`${room.unread} unread${room.mentions ? ", mentions you" : ""}`}>{room.mentions ? "@ " : ""}{room.unread > 99 ? "99+" : room.unread}</span>}</span>
-      </button>; })}</nav>
       </div>
     </aside>
-    <section className="conversation" aria-label={journalOpen ? "Journal" : areasOpen ? "Uni" : currentRoom ? `Conversation: ${currentRoom.name}` : active?.kind === "note" ? "Note" : "Conversation"}>
-      {journalTab && <div className="journal-tab-content" hidden={!journalOpen} onFocusCapture={(e) => { if (e.target instanceof HTMLTextAreaElement) requestAnimationFrame(() => setComposerFocused(true)); }} onBlurCapture={(e) => { const journal = e.currentTarget; requestAnimationFrame(() => setComposerFocused(journal.contains(document.activeElement) && document.activeElement instanceof HTMLTextAreaElement)); }}><Journal focus={journalFocus} onFocus={() => setJournalFocus((v) => !v)} rooms={rooms} uniRoomId={findUniRoom(rooms)?.id ?? null} onShare={shareEntry} onBack={() => setPanel("rooms")} onRecordingChange={(on, elapsed, stop) => { journalRecordingRef.current = on; setJournalRecording(on ? { elapsed, stop } : null); }} /></div>}
-      {active?.kind === "vault" && active.vault ? <VaultBrowser key={active.vault} vault={active.vault} onBack={() => setPanel("rooms")} onOpen={(note) => openTarget({ kind: "note", note: { hub: null, vault: active.vault!, ref: note.id }, title: note.path || note.id }, "new")} onCreate={(folder) => requestCreate(active.vault!, folder)} onSearch={(prefix) => { setSearchQuery(""); setSearchScope({ vault: active.vault!, prefix }); setSearchOpen(true); setSidebarVisible(true); }} />
+    <section className="conversation" aria-label={journalOpen ? "Journal" : shellOpen ? "Uni" : active?.kind === "note" ? "Note" : "Conversation"}>
+      {journalTab && <div className="journal-tab-content" hidden={!journalOpen} onFocusCapture={(e) => { if (e.target instanceof HTMLTextAreaElement) requestAnimationFrame(() => setComposerFocused(true)); }} onBlurCapture={(e) => { const journal = e.currentTarget; requestAnimationFrame(() => setComposerFocused(journal.contains(document.activeElement) && document.activeElement instanceof HTMLTextAreaElement)); }}><Journal focus={journalFocus} onFocus={() => setJournalFocus((v) => !v)} rooms={rooms} uniRoomId={findUniRoom(rooms)?.id ?? null} onShare={shareEntry} onBack={() => openTarget(uniHome())} onRecordingChange={(on, elapsed, stop) => { journalRecordingRef.current = on; setJournalRecording(on ? { elapsed, stop } : null); }} /></div>}
+      {active?.kind === "vault" && active.vault ? <VaultBrowser key={active.vault} vault={active.vault} onBack={() => openTarget(uniHome())} onOpen={(note) => openTarget({ kind: "note", note: { hub: null, vault: active.vault!, ref: note.id }, title: note.path || note.id }, "new")} onCreate={(folder) => requestCreate(active.vault!, folder)} onSearch={(prefix) => { setSearchQuery(""); setSearchScope({ vault: active.vault!, prefix }); setSearchOpen(true); setSidebarVisible(true); }} />
       : journalOpen ? null
-      : areasOpen && active ? <AreasSurface roomsPending={rooms.length === 0 && synced === 0} vaults={vaults} onBackChange={setAreaBack} identity={identity} key={`${active.id}:${identity ?? ""}`} path={active.kind === "area" ? active.path ?? null : null} rooms={rooms} actions={areaActions} roomFor={areaRoomFor} onRoom={syncAreaRoom}
+      : shellOpen && active ? <AreasSurface roomsPending={rooms.length === 0 && synced === 0} vaults={vaults} onBackChange={setAreaBack} identity={identity} key={`${active.id}:${identity ?? ""}`} path={shellPath} loose={shellLoose} thread={shellThread} rooms={rooms} actions={areaActions} roomFor={areaRoomFor} onRoom={syncAreaRoom}
           onOpenArea={(path, name, room) => openTarget(path === null ? { kind: "areas", title: "Uni", ...(room ? { channel: room } : {}) } : { kind: "area", path, title: name, ...(room ? { channel: room } : {}) }, "replace")} />
-      : currentRoom ? <>
-        <header className="conversation-header">
-          <button className="back icon-button" onClick={() => isThread && channel ? openTarget(roomTarget(channel), "focus") : setPanel("rooms")} aria-label={isThread ? "Back to room" : "Back to conversations"}>‹</button>
-          {isThread && <button className="thread-back" onClick={() => channel && openTarget(roomTarget(channel), "focus")} aria-label="Back to room">‹ {currentRoom.name}</button>}
-          <div><strong>{isThread ? "Thread" : currentRoom.name}</strong><small>{isThread ? `${threadReplies.length} ${threadReplies.length === 1 ? "reply" : "replies"} · in ${currentRoom.name}` : `Buzz conversation · ${members.length ? `${members.length} members` : "cached locally"}`}</small></div>
-          <button className="icon-button" onClick={() => void refresh()} disabled={busy} aria-label="Refresh messages">↻</button>
-        </header>
-        {roomPane(currentRoom, null)}
-      </> : <div className="welcome"><span className="welcome-mark">✦</span><h2>Your conversation starts here</h2><p>Select a room to read and reply. Messages are cached for offline reading.</p></div>}
+      : <div className="welcome"><span className="welcome-mark">✦</span><h2>Your conversation starts here</h2><p>Select a room to read and reply. Messages are cached for offline reading.</p></div>}
     </section>
     {pill && <div className={`recording-pill ${sidebarVisible ? "over-sidebar" : ""}`} role="status" aria-live="polite">
       <span className="recording-dot" aria-hidden="true">●</span><span>{pill.phase === "recording" ? mmss(pill.elapsed) : pill.phase === "starting" ? "Starting…" : "Finishing…"}</span>

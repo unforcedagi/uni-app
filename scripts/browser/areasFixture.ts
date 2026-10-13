@@ -168,8 +168,12 @@ export type BootOpts = {
   ids?: boolean;
   /** T-88: an `Areas/Boulder` area (room #boulder, which the metadata still calls #civics; the room is found by its channel id) with a project that has no room of its own. */
   boulder?: boolean;
-  /** T-111: which home the app opens in (the setting's stored value). The older specs run on the octopus, the tree home's own spec on `tree`. */
-  layout?: 'rooms' | 'tree' | 'octopus' | 'classic' | 'unset';
+  /** r12: a Home layout choice saved by an older build (Map was `tree`). The setting is gone; it is stored once, before the first load, so the app's migration can be seen to drop it. */
+  savedLayout?: 'rooms' | 'tree' | 'octopus' | 'classic';
+  /** r12: a room no node owns (#garden-club, two messages): it is listed under "Other rooms". */
+  strayRoom?: boolean;
+  /** r12 (with `atlas`, `steer`): the first message in #atlas/build has a thread of two replies. */
+  thread?: boolean;
   /** T-111: COhere 2026 sits under Boulder (as in the live vault) instead of Techne. Needs `tree` and `boulder`. */
   underBoulder?: boolean;
   /** T-111 nested rooms: the Atlas area has room #atlas (the real channel ids), with #atlas/build and #atlas/teach, three projects (ATLAS, Learn Vibe Build, Atlas Institute). Needs `tree`. */
@@ -224,7 +228,7 @@ export async function bootAreas(page: Page, variant: Variant = 'seed', opts: Boo
   const now = Math.floor((opts.pinned ? pinnedAt : Date.now()) / 1000);
   const data = {
     profileNote: opts.profileNote ?? null, lifeVault: opts.lifeVault ?? null, now, variant, selftest: opts.selftest ?? true, ipcLeak: opts.ipcLeak ?? false, hostile: hostileApp(opts.ports ?? { http: 9, udp: 9 }), benign: BENIGN, techne: seed('techne'), unforced: seed('unforced'), seedMeta,
-    apps: opts.apps ?? [], multiRoom: !!opts.multiRoom || !!opts.tree, tree: !!opts.tree, tasks: !!opts.tasks, briefs: !!opts.briefs, queryDelay: opts.queryDelay ?? 0, identityDelay: opts.identityDelay ?? 0, roomsDelay: opts.roomsDelay ?? 0, messagesDelay: opts.messagesDelay ?? 0, nodeStatuses: opts.nodeStatuses ?? {}, nearOff: !!opts.nearOff, ids: !!opts.ids, boulder: !!opts.boulder, layout: opts.layout ?? 'octopus', underBoulder: !!opts.underBoulder, priya: !!opts.priya, atlas: !!opts.atlas, steer: !!opts.steer, longChat: !!opts.longChat, longNext: !!opts.longNext, bareTask: !!opts.bareTask, cutDecision: !!opts.cutDecision, cutNoAsk: !!opts.cutNoAsk, longAsk: !!opts.longAsk, crowded: !!opts.crowded, ulidNext: !!opts.ulidNext, pastDue: !!opts.pastDue, tallLast: !!opts.tallLast, privateTasks: !!opts.privateTasks, deviceCache: opts.deviceCache ?? null, queryFails: opts.queryFails ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null, mode: opts.mode ?? 'sealed', grantedUnder: opts.grantedUnder ?? (opts.mode ?? 'sealed'),
+    apps: opts.apps ?? [], multiRoom: !!opts.multiRoom || !!opts.tree, tree: !!opts.tree, tasks: !!opts.tasks, briefs: !!opts.briefs, queryDelay: opts.queryDelay ?? 0, identityDelay: opts.identityDelay ?? 0, roomsDelay: opts.roomsDelay ?? 0, messagesDelay: opts.messagesDelay ?? 0, nodeStatuses: opts.nodeStatuses ?? {}, nearOff: !!opts.nearOff, ids: !!opts.ids, boulder: !!opts.boulder, savedLayout: opts.savedLayout ?? null, strayRoom: !!opts.strayRoom, thread: !!opts.thread, underBoulder: !!opts.underBoulder, priya: !!opts.priya, atlas: !!opts.atlas, steer: !!opts.steer, longChat: !!opts.longChat, longNext: !!opts.longNext, bareTask: !!opts.bareTask, cutDecision: !!opts.cutDecision, cutNoAsk: !!opts.cutNoAsk, longAsk: !!opts.longAsk, crowded: !!opts.crowded, ulidNext: !!opts.ulidNext, pastDue: !!opts.pastDue, tallLast: !!opts.tallLast, privateTasks: !!opts.privateTasks, deviceCache: opts.deviceCache ?? null, queryFails: opts.queryFails ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null, mode: opts.mode ?? 'sealed', grantedUnder: opts.grantedUnder ?? (opts.mode ?? 'sealed'),
   };
   // Pre-granted apps: the grant key is the SHA-256 of the RESOLVED default needs plus the app's html.
   const preGrant = [
@@ -258,7 +262,7 @@ export async function bootAreas(page: Page, variant: Variant = 'seed', opts: Boo
     w.__cbs = [];
     w.__listeners = {};
     if (d.lifeVault) localStorage.setItem('uni.lifeos.vault', d.lifeVault);
-    if (d.layout !== 'unset' && !localStorage.getItem('uni.home.layout.v1')) localStorage.setItem('uni.home.layout.v1', d.layout);
+    if (d.savedLayout && !sessionStorage.getItem('test.layoutSeeded')) { localStorage.setItem('uni.home.layout.v1', d.savedLayout); sessionStorage.setItem('test.layoutSeeded', '1'); }
     // The live-frame gate opens for this platform and version through a stored self-test pass.
     if (d.selftest && !localStorage.getItem('uni.areaApps.selftest.v1')) localStorage.setItem('uni.areaApps.selftest.v1', JSON.stringify({ platform: 'linux', passedAt: '2026-10-08T00:00:00Z', appVersion: 'dev', runtime: 'wry test tauri test', mode: d.mode, userAgent: d.passUa ?? navigator.userAgent }));
     if (d.granted && !localStorage.getItem('uni.interface.grants.v2')) {
@@ -382,9 +386,11 @@ Two proposals wait on a scope decision.
       ...(d.multiRoom ? { 'ch-cohere': [msg('c1', 'ch-cohere', 'Uni', 3000, 'COhere schedule draft is in the vault.'), msg('c2', 'ch-cohere', 'Aaron', 900, 'Festival crew list needs a second pass.')] } : {}),
       'ch-sad': [msg('s1', 'ch-sad', 'Aaron', 90000, 'Sat twenty minutes. Restless but stayed.')],
     };
+    const threads: Record<string, any[]> = {};
+    if (d.strayRoom) msgs['ch-garden'] = [msg('g1', 'ch-garden', 'Uni', 7200, 'Seed order is in for the spring beds.'), msg('g2', 'ch-garden', 'Aaron', 3600, 'Thanks. Ask about the compost delivery too.')];
     const lastOf = (c: string) => msgs[c]?.[msgs[c].length - 1];
     const room = (id: string, name: string, unread = 0) => ({ id, name, unread, mentions: false, last_message: lastOf(id)?.body ?? null, last_ts: lastOf(id)?.ts ?? null });
-    const rooms = [room('uni-room', 'Uni'), room('ch-techne', 'Techne'), ...(d.multiRoom ? [room('ch-cohere', 'Cohere')] : []), room('ch-unf', 'Unforced Dev'), room('ch-sad', 'Sanctum'), room('ch-atlas', 'Atlas'), room('ch-exp', 'Expression')];
+    const rooms = [room('uni-room', 'Uni'), room('ch-techne', 'Techne'), ...(d.multiRoom ? [room('ch-cohere', 'Cohere')] : []), room('ch-unf', 'Unforced Dev'), room('ch-sad', 'Sanctum'), room('ch-atlas', 'Atlas'), room('ch-exp', 'Expression'), ...(d.strayRoom ? [room('ch-garden', 'garden-club')] : [])];
     // A message arriving over the live socket: stored, then announced like the real `uni://live` event.
     w.__arrive = (channel: string, name: string, body: string) => {
       const m = msg('live' + Math.random().toString(36).slice(2, 8), channel, name, 0, body);
@@ -440,6 +446,10 @@ Two proposals wait on a scope decision.
       const at = rooms.findIndex((r) => r.id === 'ch-atlas'); if (at >= 0) rooms.splice(at, 1);
       if (d.steer) msgs[BUILD] = [msg('b1', BUILD, 'Aaron', 2400, 'Where are we on the SOW?'), msg('b2', BUILD, 'Uni', 2300, 'Drafting it now; T-07 is due Tuesday.'), msg('b3', BUILD, 'Uni', 1200, 'Map labels are in a branch, waiting on your look.')];
       if (d.longChat) for (const ch of [BUILD, TEACH]) msgs[ch] = Array.from({ length: 60 }, (_, i) => msg(`l${i}-${ch.slice(0, 4)}`, ch, i % 3 === 0 ? 'Aaron' : 'Uni', (60 - i) * 600, d.tallLast && i === 58 ? '⏳ Working — 6 min — iteration 7' : d.tallLast && i === 59 ? Array.from({ length: 30 }, (_, k) => k === 10 ? '[done T-123]' : `Paragraph ${k + 1} of a long report, with enough words in it to take a couple of lines on a phone.`).join('\n\n') : i === 59 ? 'The newest line of this room.' : `Message number ${i + 1} in the long history of this room, long enough to take a line or two of the list.`));
+      if (d.thread && msgs[BUILD]) {
+        msgs[BUILD][0] = { ...msgs[BUILD][0], reply_count: 2, last_reply_ts: d.now - 1500 };
+        threads.b1 = [msgs[BUILD][0], { ...msg('b1r1', BUILD, 'Uni', 2000, 'The scope section is done; pricing is next.'), root: 'b1', parent: 'b1' }, { ...msg('b1r2', BUILD, 'Aaron', 1500, 'Good, send it to Casey when pricing is in.'), root: 'b1', parent: 'b1' }];
+      }
       rooms.push(room(ATLAS, 'atlas'), room(BUILD, 'atlas/build'), room(TEACH, 'atlas/teach'));
       const pr = (id: string, name: string, meta: Record<string, unknown>) => ({ id, path: `Projects/${name}`, extension: 'md', tags: ['project'], metadata: { status: 'foreground', summary: `${name}.`, parent: 'Areas/Atlas', ...meta }, updatedAt: '2026-10-08T00:00:00Z', content: `# ${name}\n\n${name}.` });
       notes.push(pr('p-atlas', 'ATLAS', { room: 'atlas/build', channel: BUILD }), pr('p-lvb', 'Learn Vibe Build', { room: 'atlas/teach', channel: TEACH }), pr('p-ai', 'Atlas Institute', { room: 'atlas' }));
@@ -489,7 +499,7 @@ Two proposals wait on a scope decision.
           case 'get_identity': if (d.identityDelay) await new Promise((r) => setTimeout(r, d.identityDelay)); return U;
           case 'get_npub': return 'test';
           case 'get_rooms': if (d.roomsDelay) await new Promise((r) => setTimeout(r, d.roomsDelay)); w.__roomsResolved = true; return rooms;
-          case 'get_messages': if (d.messagesDelay) await new Promise((r) => setTimeout(r, d.messagesDelay)); return args.root ? [] : (msgs[args.channel] ?? []).slice(-(args.limit ?? 300));
+          case 'get_messages': if (d.messagesDelay) await new Promise((r) => setTimeout(r, d.messagesDelay)); return args.root ? threads[args.root] ?? [] : (msgs[args.channel] ?? []).slice(-(args.limit ?? 300));
           case 'get_members': return [{ pubkey: U, name: 'Aaron', named: true }];
           case 'vault_paths': return notes.map(rowOf);
           case 'vault_list': return d.lifeVault ? ['uni', d.lifeVault] : ['uni'];

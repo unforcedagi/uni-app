@@ -11,7 +11,7 @@ const fits = (page: Page) => page.evaluate(() => document.documentElement.scroll
 const calls = (page: Page, cmd: string) => page.evaluate((c) => (window as any).__calls.filter((x: any) => x.cmd === c).map((x: any) => x.args), cmd);
 const infinite = (page: Page) => page.evaluate(() => document.getAnimations().filter((a) => { const t = a.effect?.getComputedTiming(); return !t || t.iterations === Infinity || !Number.isFinite(t.endTime as number); }).length);
 const panel = (page: Page) => page.locator('.th-panel');
-const boot = (page: Page, o: Parameters<typeof bootAreas>[2] = {}) => bootAreas(page, 'seed', { briefs: true, tree: true, tasks: true, boulder: true, underBoulder: true, priya: true, pinned: true, layout: 'tree', ...o });
+const boot = (page: Page, o: Parameters<typeof bootAreas>[2] = {}) => bootAreas(page, 'seed', { briefs: true, tree: true, tasks: true, boulder: true, underBoulder: true, priya: true, pinned: true, ...o });
 
 /** Open a node by name from wherever we are: an arm of the map (wide), a row of the tree or a child in the panel (phone). */
 /** r7: areas start folded; open every fold so any row can be clicked. */

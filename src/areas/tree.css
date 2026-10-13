@@ -293,6 +293,10 @@ h3.wr-h { font-weight: 400; }
 .th-row.sel .th-name b { text-decoration: none; }
 .th-row.sel .th-go::before { content: ""; position: absolute; left: 0; top: 10px; bottom: 10px; width: 3px; border-radius: 2px; background: var(--th-ink); }
 .th-go { position: relative; }
+/* "Other rooms": rooms no node owns, quiet, at the foot of the tree */
+.th-others { margin-top: 8px; }
+.th-others .th-name b, .th-other .th-name b { font-weight: 500; color: var(--th-mute); }
+.th-row.th-other.sel .th-name b { color: var(--th-ink); }
 
 /* a room is its conversation: [rooms list | the chat | the companion]. The chat is the app's own room view. */
 .tree-home.th-level.th-simple.wide { grid-template-columns: clamp(250px, 21vw, 310px) minmax(0, 1fr) 272px; }
@@ -315,6 +319,11 @@ h3.wr-h { font-weight: 400; }
 .sr .th-crumb:hover { text-decoration: underline; }
 .sr .th-crumb.here { min-height: 24px; font-weight: 400; }
 .sr .th-crumbs i { padding: 0 5px; }
+/* a thread, inside its room: a quiet line with the way back */
+.sr-thread { flex: none; display: flex; align-items: center; gap: 12px; padding: 0 max(24px, calc((100% - 720px) / 2)) 8px; border-bottom: 1px solid var(--th-hair2); font: 400 13px/1.3 var(--th-sans); color: var(--th-mute); }
+.th-simple.phone .sr-thread { padding: 0 14px 6px; }
+.sr-thread-back { all: unset; box-sizing: border-box; min-height: 44px; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; color: var(--th-ink); font-weight: 500; }
+.sr-thread-back:focus-visible { outline: 2px solid var(--th-ink); outline-offset: 2px; }
 .sr-chat { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .sr-chat .composer { padding-bottom: 10px; }
 .sr-chat .compose-hint { display: none; }
@@ -380,6 +389,7 @@ h3.wr-h { font-weight: 400; }
 .sr-chat .message-list { padding-top: 20px; -webkit-mask-image: linear-gradient(to bottom, transparent, #000 28px); mask-image: linear-gradient(to bottom, transparent, #000 28px); }
 .cp-lede { cursor: pointer; }
 .cp-lede.full .cp-stands { -webkit-line-clamp: unset; line-clamp: none; display: block; }
+.cp-lede.cp-note { cursor: default; color: var(--th-mute); }
 
 /* ------------------------------------------------------------------------------------------------- r7: a narrow, foldable sidebar */
 /* width is --th-nav-w (set by useSidebar: 180 to 360, default 220; 34px when hidden) */

@@ -27,14 +27,18 @@ export function useCompanionOpen(variant: "side" | "strip"): [boolean, (v: boole
 }
 
 
-type Props = {
+export type CompanionProps = {
   /** Where this stands: the sentence and, quietly, when it was written. Null: nothing to say. */
   stands: { text: string; ago: string } | null; ready: boolean;
+  /** Said in place of a node's state (a room no node owns: "Not filed under an area yet."); there is then no Needs you and no way deeper. */
+  note?: string | null;
   needs: readonly Task[];
   runs: readonly Run[];
   /** The node's name, so the way deeper says what it opens ("All of COhere's work"). */
   nodeName: string;
-  onTask: (t: Task) => void; onDecide: (t: Task, option: string) => void; onEverything: () => void;
+  onTask: (t: Task) => void; onDecide: (t: Task, option: string) => void;
+  /** "All of X's work" (null: none, for a room no node owns). */
+  onEverything: (() => void) | null;
   /** Opens a linked note (by id) from a title or next step. */
   onNote?: (ref: string) => void;
 };
@@ -152,7 +156,7 @@ function NeedRow({ t, onTask, onDecide, onNote }: { t: Task; onTask: (t: Task) =
  * Only whole rows are shown: in the side panel (`fit`) the rows that don't fit above the footer wait behind "+N more ›" rather than being
  * cut or faded at the panel's bottom. Every row is drawn once to be measured (before paint), then the ones that fit stay.
  */
-function NeedsList({ needs, fit, onTask, onDecide, onNote }: Pick<Props, "needs" | "onTask" | "onDecide" | "onNote"> & { fit: boolean }) {
+function NeedsList({ needs, fit, onTask, onDecide, onNote }: Pick<CompanionProps, "needs" | "onTask" | "onDecide" | "onNote"> & { fit: boolean }) {
   const [limit, setLimit] = useState(Infinity);
   const [measuring, setMeasuring] = useState(fit);
   const [all, setAll] = useState(false);
@@ -211,9 +215,10 @@ function NeedsList({ needs, fit, onTask, onDecide, onNote }: Pick<Props, "needs"
   </>;
 }
 
-function Body({ stands, ready, needs, runs, nodeName, onTask, onDecide, onEverything, onNote, fit }: Props & { fit: boolean }) {
+function Body({ stands, ready, note, needs, runs, nodeName, onTask, onDecide, onEverything, onNote, fit }: CompanionProps & { fit: boolean }) {
   const active = runs.filter(isActiveRun);
   const hiddenRuns = Math.max(0, active.length - RUNS_SHOWN);
+  if (note) return <div className="cp-body"><p className="cp-lede cp-note">{note}</p></div>;
   return <div className="cp-body">
     {!ready ? <p className="cp-lede">Loading…</p> : stands && <Stands text={stands.text} ago={stands.ago} />}
     {ready && <section aria-label="Needs you" className="cp-sec">
@@ -224,12 +229,12 @@ function Body({ stands, ready, needs, runs, nodeName, onTask, onDecide, onEveryt
       <h3 className="cp-h">Running</h3>
       <ul className="cp-list">{active.slice(0, RUNS_SHOWN).map((r) => <li key={r.id} className="cp-run" data-state={r.state}><i aria-hidden="true" /><span>{cleanText(r.what)}</span><small>{r.state}</small></li>)}</ul>
     </section>}
-    <div className="cp-foot"><button type="button" className="cp-all" onClick={onEverything}><span className="cp-all-t">{`All of ${nodeName}'s work`}</span>{hiddenRuns > 0 && <span className="cp-all-more">+{hiddenRuns} more running</span>}<span className="cp-all-arrow" aria-hidden="true">→</span></button></div>
+    {onEverything && <div className="cp-foot"><button type="button" className="cp-all" onClick={onEverything}><span className="cp-all-t">{`All of ${nodeName}'s work`}</span>{hiddenRuns > 0 && <span className="cp-all-more">+{hiddenRuns} more running</span>}<span className="cp-all-arrow" aria-hidden="true">→</span></button></div>}
   </div>;
 }
 
 /** The side panel (wide screens). `open` and `onToggle` come from `useCompanionOpen("side")`. */
-export function CompanionSide({ open, onToggle, ...p }: Props & Fold) {
+export function CompanionSide({ open, onToggle, ...p }: CompanionProps & Fold) {
   return <aside className={`cp side ${open ? "open" : "folded"}`} aria-label="Where this stands">
     {open
       ? <>
@@ -242,10 +247,10 @@ export function CompanionSide({ open, onToggle, ...p }: Props & Fold) {
 }
 
 /** The phone's strip: one line, tap to open. */
-export function CompanionStrip({ open, onToggle, ...p }: Props & Fold) {
+export function CompanionStrip({ open, onToggle, ...p }: CompanionProps & Fold) {
   return <section className={`cp strip ${open ? "open" : ""}`} aria-label="Where this stands">
     <button type="button" className="cp-line" aria-expanded={open} onClick={() => onToggle(!open)}>
-      <span className="cp-line-text" title={p.stands?.text}>{open ? "Where this stands" : p.ready ? p.stands?.text ?? "Where this stands" : "Loading…"}</span>
+      <span className="cp-line-text" title={p.stands?.text}>{open ? "Where this stands" : p.note ?? (p.ready ? p.stands?.text ?? "Where this stands" : "Loading…")}</span>
       {p.needs.length > 0 && <i className="cp-dot" role="img" aria-label="Needs you" title="Needs you" />}
       <span className="cp-chev" aria-hidden="true">{open ? "⌃" : "⌄"}</span>
     </button>

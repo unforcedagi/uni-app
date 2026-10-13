@@ -84,7 +84,8 @@ export function useFolds(): [Folds, (path: string, open: boolean) => void, (path
   }, []);
   /** The areas above the open room: the ones the user had folded show it for now, and fold again when the room is left. */
   const reveal = useCallback((paths: readonly string[]) => setRevealed(paths.length ? [...paths] : []), []);
-  const folds = useMemo(() => { const n = { ...saved }; for (const p of revealed) if (n[p] === false) n[p] = true; return n; }, [saved, revealed]);
+  // an area folded by default (no choice saved) that holds the open room is open anyway (`isOpen`); a group with no such rule ("Other rooms") needs it said
+  const folds = useMemo(() => { const n = { ...saved }; for (const p of revealed) if (n[p] !== true) n[p] = true; return n; }, [saved, revealed]);
   return [folds, set, reveal];
 }
 

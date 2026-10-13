@@ -8,7 +8,7 @@ const wide = (page: Page) => (page.viewportSize()?.width ?? 0) >= 900;
 const panel = (page: Page) => page.locator('.th-panel');
 const callsOf = (page: Page, ...cmds: string[]) => page.evaluate((c) => (window as any).__calls.filter((x: any) => c.includes(x.cmd)).map((x: any) => x.cmd + ' ' + JSON.stringify(x.args).slice(0, 100)), cmds);
 const shot = async (page: Page, name: string) => { await mkdir(SHOTS, { recursive: true }); const s = page.viewportSize()!; await page.screenshot({ path: `${SHOTS}/${name}-${s.width}x${s.height}.png` }); };
-const base = { briefs: true, tree: true, tasks: true, boulder: true, underBoulder: true, priya: true, pinned: true, layout: 'tree' } as const;
+const base = { briefs: true, tree: true, tasks: true, boulder: true, underBoulder: true, priya: true, pinned: true } as const;
 /** `note`: a uni vault whose profile note says chat null. `pack`: another vault with no profile note (the pack defaults: chat null from the first render). */
 const boot = (page: Page, mode: 'buzz' | 'note' | 'pack') => bootAreas(page, 'seed', { ...base, ...(mode === 'note' ? { profileNote: { chat: { provider: null } } } : mode === 'pack' ? { lifeVault: 'pack' } : {}) });
 

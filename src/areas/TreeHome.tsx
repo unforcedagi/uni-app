@@ -47,21 +47,30 @@ export const Tag = ({ n, label }: { n: number; label?: string }) => <b className
 
 // ---------------------------------------------------------------------------------------------- the phone's tree
 
-/**
- * The rooms list: Uni, then every area with its projects beneath. A row is the node's name; the room line under it is the room's real
- * channel name (nothing for a node with no room of its own). Areas fold: the chevron folds, the name opens. A folded row still shows
- * the dot when anything under it needs you.
- */
-export function RoomTree({ chat = true, rows, needs, onOpen, selected }: {
+/** The fold key of the "Other rooms" group (never a note path). */
+export const OTHER_ROOMS = "~other-rooms";
+export type OtherRoom = { id: string; name: string };
+export type TreeProps = {
   chat?: boolean; rows: readonly TreeRow[]; needs: ReadonlyMap<string, number>;
   onOpen: (path: string) => void;
   /** The row of the level being shown (the wide layout keeps the list beside it). */
   selected?: string;
-}) {
+  /** Rooms no node owns: a quiet "Other rooms" group at the bottom, folded unless one of them is open. */
+  others?: readonly OtherRoom[]; selectedRoom?: string; onOpenRoom?: (id: string) => void;
+};
+
+/**
+ * The rooms list: Uni, then every area with its projects beneath, then "Other rooms". A row is the node's name; the room line under it is
+ * the room's real channel name (nothing for a node with no room of its own). Areas fold: the chevron folds, the name opens. A folded row
+ * still shows the dot when anything under it needs you.
+ */
+export function RoomTree({ chat = true, rows, needs, onOpen, selected, others = [], selectedRoom, onOpenRoom }: TreeProps) {
   const [folds, setFold, reveal] = useFolds();
-  const key = ancestorsOf(rows, selected).join("\n");
+  const inOthers = !!selectedRoom && others.some((o) => o.id === selectedRoom);
+  const key = [...ancestorsOf(rows, selected), ...(inOthers ? [OTHER_ROOMS] : [])].join("\n");
   useEffect(() => { reveal(key ? key.split("\n") : []); }, [key, reveal]);
   const at = new Map(rows.map((r, i) => [r.path, i]));
+  const othersOpen = folds[OTHER_ROOMS] ?? false;
   return <nav aria-label="Rooms and areas"><ul className="th-rows">{visibleRows(rows, folds, selected).map((r) => {
     const i = at.get(r.path)!;
     const kids = hasKids(rows, i);
@@ -80,7 +89,18 @@ export function RoomTree({ chat = true, rows, needs, onOpen, selected }: {
         {dot && <i className="th-dot" title="Needs you" aria-hidden="true" />}
       </button>
     </li>;
-  })}</ul></nav>;
+  })}
+  {others.length > 0 && <li className="th-row th-others d1 has-kids" data-open={String(othersOpen)}>
+    <button type="button" className="th-fold" data-path={OTHER_ROOMS} aria-expanded={othersOpen} aria-label={`${othersOpen ? "Fold" : "Unfold"} Other rooms`} title={othersOpen ? "Fold" : "Unfold"} onClick={() => setFold(OTHER_ROOMS, !othersOpen)}><i aria-hidden="true" /></button>
+    <button type="button" className="th-go th-others-go" aria-label={`Other rooms, ${others.length} not filed under an area`} onClick={() => setFold(OTHER_ROOMS, !othersOpen)}><span className="th-name"><b>Other rooms</b></span></button>
+  </li>}
+  {othersOpen && others.map((o) => <li key={`room:${o.id}`} className={`th-row th-other d2 ${selectedRoom === o.id ? "sel" : ""}`}>
+    <span className="th-fold-gap" aria-hidden="true" />
+    <button type="button" className="th-go" data-room={o.id} aria-current={selectedRoom === o.id ? "page" : undefined} aria-label={`#${o.name}, not filed under an area`} onClick={() => onOpenRoom?.(o.id)}>
+      <span className="th-name"><b>#{o.name}</b></span>
+    </button>
+  </li>)}
+  </ul></nav>;
 }
 
 /** Recent places: never the one you are in, never one twice (by name: the same name is the same place to the reader), at most five. */
@@ -94,31 +114,26 @@ const NavButtons = ({ nav }: { nav: NavControls | null }) => nav ? <>
   <button type="button" className="th-nb" aria-label="Forward" title="Forward (Alt+→)" disabled={!nav.canForward} onClick={nav.forward}>→</button>
 </> : null;
 
-export function TreeScreen({ chat = true, rows, needs, onOpen, status, selected, column, nav, onHide }: {
-  /** false (chat.provider null): no room names. */
-  chat?: boolean;
-  rows: readonly TreeRow[];
-  /** Tasks that need you, rolled up per node path. */
-  needs: ReadonlyMap<string, number>;
-  onOpen: (path: string) => void; status?: ReactNode;
-  selected?: string;
+export function TreeScreen({ status, column, nav, onHide, ...tree }: TreeProps & {
+  status?: ReactNode;
   /** The left column beside a room (wide screens): a slim toolbar (Back, Forward, hide), the tree, then the last few places. */
   column?: boolean;
   nav?: NavControls | null; onHide?: () => void;
 }) {
+  const { rows, selected } = tree;
   return <div className={`tree-home th-phone-tree ${column ? "th-column" : ""}`}>
     {column
       ? <header className="th-toolbar"><NavButtons nav={nav ?? null} /><span className="th-tb-gap" />{onHide && <button type="button" className="th-nb" aria-label="Hide the sidebar" title="Hide the sidebar" onClick={onHide}>‹</button>}</header>
       : <header className="th-treehead"><h1 className="note-title">Uni</h1></header>}
     {status}
-    <div className="th-rows-wrap"><RoomTree chat={chat} rows={rows} needs={needs} onOpen={onOpen} selected={selected} /></div>
+    <div className="th-rows-wrap"><RoomTree {...tree} /></div>
     {column && nav && <section className="th-recent" aria-label="Recent"><h2>Recent</h2>
       <ul>{recentShown(nav.recent, rows.find((r) => r.path === selected)?.name).map((r) => <li key={r.key}><button type="button" onClick={r.go} title={r.title}>{r.title}</button></li>)}</ul></section>}
   </div>;
 }
 
 /** The left column: width set by dragging its right edge (180 to 360px, remembered), or hidden down to a thin strip. */
-export function RoomSidebar({ nav, ...tree }: { chat?: boolean; rows: readonly TreeRow[]; needs: ReadonlyMap<string, number>; onOpen: (path: string) => void; selected?: string; nav?: NavControls | null }) {
+export function RoomSidebar({ nav, ...tree }: TreeProps & { nav?: NavControls | null }) {
   const [sb, setSb] = useSidebar();
   const drag = useRef<{ x: number; w: number } | null>(null);
   if (sb.hidden) return <div className="th-roomnav hidden"><button type="button" className="th-nb" aria-label="Show the sidebar" title="Show the sidebar" onClick={() => setSb({ hidden: false })}>›</button><NavButtons nav={nav ?? null} /></div>;
