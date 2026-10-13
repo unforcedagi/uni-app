@@ -4,13 +4,13 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { cleanText } from "../interface/contract";
-import { dueText } from "./NodeWork";
+import { RefText } from "./noteRefs";
 import { isMe } from "./taskCore";
 import { isActiveRun, type Run } from "./steerCore";
 import type { Task } from "./taskCore";
 import { splitTitle } from "./whereCore";
 import { splitLinks } from "./linkText";
-import { actionableTitle, isCutTitle } from "./simpleCore";
+import { actionableTitle, isCutTitle, dueLine } from "./simpleCore";
 
 const KEYS = { side: "uni.companion.side.v1", strip: "uni.companion.strip.v1" } as const;
 /** Below this width the side panel starts folded: the conversation gets the space. */
@@ -36,6 +36,8 @@ type Props = {
   /** The node's name, so the way deeper says what it opens ("All of COhere's work"). */
   nodeName: string;
   onTask: (t: Task) => void; onDecide: (t: Task, option: string) => void; onEverything: () => void;
+  /** Opens a linked note (by id) from a title or next step. */
+  onNote?: (ref: string) => void;
 };
 /** Options shown inline on a decision; more are behind the item. */
 const OPTS_SHOWN = 3;
@@ -54,8 +56,8 @@ const isWaitingOnYou = (t: Task) => t.kind !== "decision" && isMe(t.waitingOn);
 
 const openLink = (e: React.MouseEvent, url: string) => { e.preventDefault(); void invoke("open_link", { url }).catch(() => {}); };
 
-/** A task's next step, in full: wraps up to 4 lines, then "More" opens the rest in place. Links read as their domain and stay clickable. */
-export function NextText({ text }: { text: string }) {
+/** A task's next step, in full: wraps up to 6 lines, then "More" opens the rest in place. Links read as their domain and stay clickable; note ids read as the note's title. */
+export function NextText({ text, onNote }: { text: string; onNote?: (ref: string) => void }) {
   const ref = useRef<HTMLParagraphElement>(null);
   const [open, setOpen] = useState(false);
   const [clamped, setClamped] = useState(false);
@@ -70,23 +72,9 @@ export function NextText({ text }: { text: string }) {
   return <div className="cp-next-wrap">
     <p ref={ref} className={`cp-next ${open ? "open" : ""}`}>{splitLinks(cleanText(text)).map((p, i) => "url" in p
       ? <a key={i} className="cp-link" href={p.url} title={p.url} rel="noreferrer noopener" onClick={(e) => openLink(e, p.url)}>{p.label}</a>
-      : <span key={i}>{p.text}</span>)}</p>
+      : <RefText key={i} text={p.text} onNote={onNote} />)}</p>
     {(clamped || open) && <button type="button" className="cp-more-next" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? "Less" : "More"}</button>}
   </div>;
-}
-
-/** "All of X's work", or "All work" when the name doesn't fit the line. Measured, not guessed: the long form is tried first. */
-function FootLabel({ name }: { name: string }) {
-  const ref = useRef<HTMLSpanElement>(null);
-  useLayoutEffect(() => {
-    const el = ref.current; if (!el) return;
-    const fit = () => { el.textContent = `All of ${name}'s work`; if (el.scrollWidth > el.clientWidth + 1) el.textContent = "All work"; };
-    fit();
-    const ro = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(fit);
-    ro?.observe(el.parentElement ?? el);
-    return () => ro?.disconnect();
-  }, [name]);
-  return <span ref={ref} className="cp-all-t" title={`All of ${name}'s work`} />;
 }
 
 /** The sentence clamps at 3 lines; a tap shows all of it (r6 critics: the clamp cut mid-clause). */
@@ -95,7 +83,7 @@ function Stands({ text, ago }: { text: string; ago: string }) {
   return <p className={`cp-lede ${full ? "full" : ""}`} title={full ? undefined : text} onClick={() => setFull((f) => !f)}><span className="cp-stands">{text}</span>{ago && <small className="cp-ago">{ago}</small>}</p>;
 }
 
-function Body({ stands, ready, needs, runs, nodeName, onTask, onDecide, onEverything }: Props) {
+function Body({ stands, ready, needs, runs, nodeName, onTask, onDecide, onEverything, onNote }: Props) {
   const active = runs.filter(isActiveRun);
   const hiddenRuns = Math.max(0, active.length - RUNS_SHOWN);
   return <div className="cp-body">
@@ -107,13 +95,20 @@ function Body({ stands, ready, needs, runs, nodeName, onTask, onDecide, onEveryt
         const { id, rest: full } = splitTitle(cleanText(t.title));
         const rest = isCutTitle(full) && t.ask ? t.ask : askOf(full);
         const isDecision = t.kind === "decision";
-        const meta = [isWaitingOnYou(t) ? "Waiting on you" : null, dueText(t.due)].filter(Boolean).join(" · ");
+        const meta = [isWaitingOnYou(t) ? "Waiting on you" : null, dueLine(t.due)].filter(Boolean).join(" · ");
         const next = t.next.trim();
         const opts = isDecision ? t.options : [];
         return <li key={t.id} className="cp-item">
           <button type="button" className={`cp-need${isDecision ? " decision" : ""}`} data-id={id ?? undefined} onClick={() => onTask(t)}>
-            <span className="cp-title">{rest}{isDecision && opts.length === 0 && <span className="cp-go" aria-hidden="true"> ›</span>}</span>{meta && <small className="cp-detail">{meta}</small>}</button>
-          {next ? <NextText text={next} /> : !isDecision && !actionableTitle(rest) && <p className="cp-open-to-see">Open to see what's needed</p>}
+            <span className="cp-title"><RefText text={rest} />{isDecision && opts.length === 0 && <span className="cp-go" aria-hidden="true"> ›</span>}</span>{meta && <small className="cp-detail">{meta}</small>}</button>
+          {next ? <NextText text={next} onNote={onNote} /> : !isDecision && !actionableTitle(rest) && <p className="cp-open-to-see">Open to see what's needed</p>}
+          {isDecision && opts.length === 0 && <div className="cp-yesno">
+            <p className="cp-call">Your call: yes or no</p>
+            <div className="cp-opts" role="group" aria-label={`Decide: ${rest}`}>
+              <button type="button" className="cp-opt" onClick={() => onDecide(t, "yes")}>Yes</button>
+              <button type="button" className="cp-opt" onClick={() => onDecide(t, "no")}>No</button>
+            </div>
+          </div>}
           {isDecision && opts.length > 0 && <div className="cp-opts" role="group" aria-label={`Decide: ${rest}`}>
             {opts.slice(0, OPTS_SHOWN).map((o) => <button key={o} type="button" className="cp-opt" onClick={() => onDecide(t, o)}>{cleanText(o)}</button>)}
             {opts.length > OPTS_SHOWN && <button type="button" className="cp-opt more" onClick={() => onTask(t)}>More…</button>}
@@ -125,7 +120,7 @@ function Body({ stands, ready, needs, runs, nodeName, onTask, onDecide, onEveryt
       <h3 className="cp-h">Running</h3>
       <ul className="cp-list">{active.slice(0, RUNS_SHOWN).map((r) => <li key={r.id} className="cp-run" data-state={r.state}><i aria-hidden="true" /><span>{cleanText(r.what)}</span><small>{r.state}</small></li>)}</ul>
     </section>}
-    <div className="cp-foot"><button type="button" className="cp-all" onClick={onEverything}><FootLabel name={nodeName} />{hiddenRuns > 0 && <span className="cp-all-more">+{hiddenRuns} more running</span>}<span className="cp-all-arrow" aria-hidden="true">→</span></button></div>
+    <div className="cp-foot"><button type="button" className="cp-all" onClick={onEverything}><span className="cp-all-t">{`All of ${nodeName}'s work`}</span>{hiddenRuns > 0 && <span className="cp-all-more">+{hiddenRuns} more running</span>}<span className="cp-all-arrow" aria-hidden="true">→</span></button></div>
   </div>;
 }
 

@@ -209,7 +209,7 @@ test.describe('simple', () => {
     for (const r of await page.locator('.cp-run, .cp-item').all()) { const b = (await r.boundingBox())!; expect(b.y + b.height).toBeLessThanOrEqual(foot.y + 20); }
   });
 
-  test('the "All of X\'s work" link sticks to the panel bottom, on one line, even when the panel is long and the name is long', async ({ page }) => {
+  test('the "All of X\'s work" link sticks to the panel bottom, wraps to at most two lines when the name is long', async ({ page }) => {
     test.skip(!wide(page), 'side panel');
     await page.setViewportSize({ width: 1280, height: 600 });
     await boot(page);
@@ -222,7 +222,8 @@ test.describe('simple', () => {
     expect(box.height).toBeLessThan(48);
     await page.locator('.cp-all-t').evaluate((e) => { e.textContent = "All of A very long project name that cannot possibly fit on a single line's work"; });
     const after = (await foot.boundingBox())!;
-    expect(after.height).toBeLessThan(48);
+    expect(after.height).toBeLessThan(80);
+    expect(after.y + after.height).toBeLessThanOrEqual(side.y + side.height + 1);
     expect(await page.locator('.cp-all-arrow').isVisible()).toBe(true);
     const arrow = (await page.locator('.cp-all-arrow').boundingBox())!;
     expect(arrow.x + arrow.width).toBeLessThanOrEqual(side.x + side.width);
@@ -285,7 +286,7 @@ test.describe('simple', () => {
     await shot(page, 'midmessage');
   });
 
-  test('the footer link says "All work" when the name does not fit, the long form when it does; detail lines wrap; the sentence clamps', async ({ page }) => {
+  test('the footer link keeps the long form at any width; detail lines wrap; the sentence clamps', async ({ page }) => {
     test.skip(!wide(page), 'side panel');
     await boot(page);
     await scope(page).locator('.th-go[aria-label^="Uni,"]').click();
@@ -293,7 +294,7 @@ test.describe('simple', () => {
     await expect(page.locator('.cp-all-t')).toContainText('All of');
     await page.setViewportSize({ width: 900, height: 700 });
     await page.evaluate(() => { document.querySelector('.cp.side')!.setAttribute('style', 'width:130px'); });
-    await expect.poll(() => page.locator('.cp-all-t').textContent()).toBe('All work');
+    await expect(page.locator('.cp-all-t')).toHaveText(/^All of .+'s work$/);
     await page.evaluate(() => { document.querySelector('.cp.side')!.removeAttribute('style'); });
     const lede = page.locator('.cp-stands').first();
     if (await lede.count()) expect(await lede.evaluate((e) => getComputedStyle(e).webkitLineClamp)).toBe('3');
@@ -811,5 +812,73 @@ test.describe('simple', () => {
     await expect(item.locator('.cp-title')).not.toContainText('Decision (default yes)');
     await expect(item.locator('.cp-title')).not.toContainText('Converted from');
     await expect(item.locator('.cp-title')).not.toContainText('…');
+  });
+
+  test('r9: cached messages and rooms paint, with the composer, before the first fetch answers', async ({ page }) => {
+    test.skip(!wide(page), 'sidebar column');
+    const who = 'a'.repeat(64);
+    await page.addInitScript(([who]) => {
+      localStorage.setItem('uni.cache.who.v1', who);
+      localStorage.setItem(`uni.cache.rooms.v1:${who}`, JSON.stringify([{ id: 'uni-room', name: 'Uni', last_message: 'hi', last_ts: 1, mentions: false, unread: 0 }]));
+      localStorage.setItem(`uni.cache.msgs.v1:${who}:uni-room`, JSON.stringify([{ ref: 'c1', channel: 'uni-room', author: 'bbbb', author_name: 'Uni', ts: 1760000000, body: 'Cached hello from last time', mentions_me: false, root: null, parent: null, mentions: [], reply_count: 0, last_reply_ts: null, edited: false, reactions: [] }]));
+    }, [who]);
+    await boot(page, { roomsDelay: 8000, messagesDelay: 8000 });
+    // nothing has answered yet (8 s): the conversation is already there, and the composer is live
+    await expect(page.locator('.sr-chat')).toContainText('Cached hello from last time', { timeout: 3000 });
+    await expect(page.locator('.sr-chat textarea')).toBeEnabled();
+    expect(await page.evaluate(() => (window as any).__roomsResolved ?? false)).toBe(false);
+    await expect(page.getByText('Opening the room…')).toHaveCount(0);
+  });
+
+  test('r9: a decision without options asks for a yes or no, and a tap decides through the CAS path', async ({ page }) => {
+    test.skip(!wide(page), 'side panel');
+    await boot(page, { cutDecision: true });
+    await scope(page).locator('.th-go[aria-label^="Uni,"]').click();
+    await openCompanion(page);
+    const item = page.locator('.cp-item').filter({ hasText: 'after-event' });
+    await expect(item.getByText('Your call: yes or no')).toBeVisible();
+    await expect(item.getByRole('button', { name: 'Yes' })).toBeVisible();
+    await expect(item.getByRole('button', { name: 'No', exact: true })).toBeVisible();
+    await item.getByRole('button', { name: 'Yes' }).click();
+    const [call] = await calls(page, 'vault_decide');
+    expect(call.metadata.decided).toBe('yes');
+    expect(call.from).toBe('open'); expect(call.to).toBe('decided');
+    // a decision with real options keeps them, and no yes/no
+    const opts = page.locator('.cp-item').filter({ hasText: 'hosting' });
+    if (await opts.count()) await expect(opts.getByText('Your call: yes or no')).toHaveCount(0);
+  });
+
+  test('r9: a note id in a next step reads as the note\'s title, never the id', async ({ page }) => {
+    test.skip(!wide(page), 'side panel');
+    await boot(page, { ulidNext: true });
+    await scope(page).locator('.th-go[aria-label^="Techne,"]').click();
+    await openCompanion(page);
+    const item = page.locator('.cp-item').filter({ hasText: 'ATLAS follow-up' });
+    await expect(item.getByRole('button', { name: 'Follow-up notes' })).toBeVisible();
+    await expect(item.locator('.cp-next')).toContainText('a note');
+    await expect(item.locator('.cp-next')).not.toContainText('01M3ZK2R6A6C62M1ANJCSQNG3');
+    await expect(item.locator('.cp-next')).not.toContainText('uni:');
+  });
+
+  test('r9: an overdue task stays listed, first, with a quiet "was due" line', async ({ page }) => {
+    test.skip(!wide(page), 'side panel');
+    await boot(page, { pastDue: true });
+    await scope(page).locator('.th-go[aria-label^="Uni,"]').click();
+    await openCompanion(page);
+    const first = page.locator('.cp-item').first();
+    await expect(first).toContainText('COhere festival readiness');
+    await expect(first.locator('.cp-detail')).toContainText('was due Oct 7');
+    await expect(first.locator('.cp-detail')).not.toContainText(/^due/);
+  });
+
+  test('r9: the footer always reads "All of <name>\'s work", wrapping rather than shortening', async ({ page }) => {
+    test.skip(!wide(page), 'side panel');
+    await boot(page);
+    await scope(page).locator('.th-go[aria-label^="Unforced Dev"]').first().click().catch(() => {});
+    await openCompanion(page);
+    const label = page.locator('.cp-all-t');
+    await expect(label).toHaveText(/^All of .+'s work$/);
+    await expect(label).not.toHaveText('All work');
+    expect(await label.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
   });
 });

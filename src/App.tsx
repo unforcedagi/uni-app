@@ -1,4 +1,5 @@
 import { nestRooms } from "./roomNesting";
+import { readMessages, readRooms, readWho, writeMessages, writeRooms, writeWho } from "./chatCache";
 import { nodeOfRoom, useRoomLabels, useRoomNodes } from "./areas/roomLabels";
 import { isNetworkError, netError } from "./netError";
 import { voiceRetryDelay } from "./voiceRetry";
@@ -161,7 +162,9 @@ function resizeComposer(el: HTMLTextAreaElement) {
 }
 
 function Conversations({ onForget }: { onForget: () => void }) {
-  const [rooms, setRooms] = useState<Room[]>([]);
+  // The last rooms list on this device (per identity): a restored place resolves at once, before the first fetch.
+  const whoRef = useRef<string | null>(readWho(localStorage));
+  const [rooms, setRooms] = useState<Room[]>(() => readRooms<Room>(localStorage, whoRef.current));
   const roomLabels = useRoomLabels();
   const [tabs, setTabs] = useState<Tabs>(() => openTab(EMPTY_TABS,
     readLastSurface(localStorage) === "journal" ? { kind: "journal", title: "Journal" } : { kind: "areas", title: "Uni" },
@@ -584,7 +587,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   }, []);
   const [stackEl, setStackEl] = useState<HTMLDivElement | null>(null);
   const channelRef = useRef<string | null>(null);
-  const roomsRef = useRef<Room[]>([]);
+  const roomsRef = useRef<Room[]>(rooms);
   channelRef.current = channel;
   const scrollEnd = useRef<HTMLDivElement>(null);
   const shownView = useRef<string | null>(null);
@@ -606,11 +609,11 @@ function Conversations({ onForget }: { onForget: () => void }) {
   useLayoutEffect(() => { if (input.current) resizeComposer(input.current); }, [draft]);
   const focusComposer = useRef(false);
 
-  const loadRooms = useCallback(async () => {
-    const rows = await invoke<Room[]>("get_rooms");
+  const loadRooms = useCallback(async (cached?: Room[]) => {
+    const rows = cached ?? await invoke<Room[]>("get_rooms");
     setRooms(rows);
     roomsRef.current = rows;
-    setUnreadBadge(rows.reduce((n, r) => n + (r.unread || 0), 0));
+    if (!cached) { writeRooms(localStorage, whoRef.current, rows); setUnreadBadge(rows.reduce((n, r) => n + (r.unread || 0), 0)); }
     if (!tabsReady.current) {
       tabsReady.current = true;
       // 0.1.46: no tab strip. The app reopens to the place it was last on (v2 holds just that); v1's set of tabs is ignored beyond its active surface.
@@ -670,6 +673,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
   useEffect(() => {
     let active = true;
     invoke<string>("get_identity").then((id) => { if (active) setIdentity(id); }).catch(() => {});
+    // A rooms list from the last run restores the place at once; the real list follows and re-syncs it.
+    if (roomsRef.current.length) void loadRooms(roomsRef.current).catch(() => {});
     loadRooms().then(() => { if (active) void refresh(); }).catch((e) => {
       if (active) { setError(String(e)); setStatus("Could not open local conversations"); setReady(true); }
     });
@@ -689,6 +694,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
 
   useEffect(() => {
     if (!identity) return;
+    if (whoRef.current !== identity) { whoRef.current = identity; writeWho(localStorage, identity); }
     invoke<string>("get_npub").then(setNpub).catch(() => {});
   }, [identity]);
   useEffect(() => {
@@ -740,8 +746,13 @@ function Conversations({ onForget }: { onForget: () => void }) {
     // Sync ticks re-run this effect faster than a big room loads: a result for the view still on screen is kept (the newest request wins),
     // so the room never stays blank while ticks keep cancelling its fetch.
     const seq = ++fetchSeq.current;
+    // A room opened from the cache paints its last messages now (the composer is live with them); the fetch below refreshes them.
+    if (viewNow.current !== view && root === null) {
+      const kept = readMessages<Message>(localStorage, whoRef.current, channel);
+      if (kept) { setMessages(kept); setLoadedView(view); }
+    }
     viewNow.current = view;
-    invoke<Message[]>("get_messages", { channel, root, limit }).then((rows) => { if (viewNow.current === view && seq > appliedSeq.current) { appliedSeq.current = seq; setMessages(rows); setLoadedView(view); } }).catch((e) => { if (current) setError(String(e)); });
+    invoke<Message[]>("get_messages", { channel, root, limit }).then((rows) => { if (viewNow.current === view && seq > appliedSeq.current) { appliedSeq.current = seq; setMessages(rows); setLoadedView(view); if (root === null) writeMessages(localStorage, whoRef.current, channel, rows); } }).catch((e) => { if (current) setError(String(e)); });
     // Viewing the room reads it (only while the app is actually on screen).
     if (document.visibilityState === "visible") {
       invoke("mark_read", { channel }).then(() => loadRooms()).catch(() => {});

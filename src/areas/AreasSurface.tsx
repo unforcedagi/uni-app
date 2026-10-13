@@ -288,7 +288,7 @@ export default function AreasSurface({ zoom, identity, talk, path, rooms: hostRo
   const needTop = topNeeds(where, node.path);
   const rawStands = tasks.tree?.stands.get(node.path) ?? (typeof node.metadata.stands === "string" ? { text: node.metadata.stands, at: typeof node.metadata.stands_at === "string" ? node.metadata.stands_at : null } : null);
   const stands = standsLine(rawStands, privateLevel ? [] : levelTasks, now);
-  const companionProps = { stands, ready: tasks.ready, needs: needTop, runs, nodeName: node.name, onTask: setSheet, onDecide: (t: Task, o: string) => void tasks.decide(t, o), onEverything: () => { setSheet(null); setFull(true); } };
+  const companionProps = { stands, ready: tasks.ready, needs: needTop, runs, nodeName: node.name, onTask: setSheet, onNote: actions.openNote, onDecide: (t: Task, o: string) => void tasks.decide(t, o), onEverything: () => { setSheet(null); setFull(true); } };
   const roomView_ = roomFor(target?.id);
   const placeholder = chatPlaceholder({ name: node.name, slash: nodeView.own ? nodeView.slash : null, heldBy: nodeView.heldBy ? roomSlug(nodeView.heldBy.name) : null });
   const doorText = nodeView.own && nodeView.slash ? `#${nodeView.slash}` : "";
