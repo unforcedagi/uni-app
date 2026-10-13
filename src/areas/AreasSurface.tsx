@@ -28,14 +28,14 @@ import { useStoredSelfTest } from "../interface/selftest/useSelfTest";
 import { useHomeLayout, useWide } from "./homeLayout";
 import { isPrivateNode, roomSlug, roomView, treeRows, updatesBelow, type RoomView } from "./treeRooms";
 import { levelAlive } from "./treeAlive";
-import { publishRoomLabels, roomLabelMap } from "./roomLabels";
+import { publishRoomNodes, roomNodeMap } from "./roomLabels";
+import { useNav } from "../navContext";
 import { useVaultProfile } from "./ProfileContext";
-import { AliveBlock, Crumbs, InsideBlock, LevelPanel, Ledger, NeedsBlock, ProjectNote, RoomBlock, RoomLine, TreeScreen, UpdatesBlock, type InsideKid } from "./TreeHome";
+import { AliveBlock, Crumbs, InsideBlock, LevelPanel, Ledger, NeedsBlock, ProjectNote, RoomBlock, RoomLine, RoomSidebar, TreeScreen, UpdatesBlock, type InsideKid } from "./TreeHome";
+import { rootOpenMemory } from "./rootMemory";
 import "./areas.css";
 import "./tree.css";
 
-/** Whether the phone is on Uni's own level rather than the room tree. A replace in the tab strip remounts the page, so this outlives it. */
-const rootOpenMemory = { open: false };
 const USER_AGENT = currentUserAgent();
 const PLATFORM = platformName(USER_AGENT);
 
@@ -59,6 +59,7 @@ export default function AreasSurface({ zoom, identity, talk, path, rooms: hostRo
   const chat = useVaultProfile().chat.provider === "buzz";
   const rooms = useMemo<RoomInfo[]>(() => (chat ? hostRooms : []), [chat, hostRooms]);
   const { data, error, loading, signingIn } = useAreas(identity);
+  const nav = useNav();
   const layout = useHomeLayout();
   const wide = useWide();
   /** The companion beside (wide) or above (phone) the conversation: open or folded, remembered per device. */
@@ -120,7 +121,9 @@ export default function AreasSurface({ zoom, identity, talk, path, rooms: hostRo
   /** A room's dot is its OWN node's needs-you items (T-124 r2): a parent never lights up for what its children need. Rooms mode loads the whole tree's tasks, so they can be counted per node. */
   const ownNeeds = useMemo(() => { const m = new Map<string, number>(); for (const t of tasks.tasks) if (groupOf(t) === "you") m.set(t.node, (m.get(t.node) ?? 0) + 1); return m; }, [tasks.tasks]);
   // the rooms drawer names a room as the tree does
-  useEffect(() => { if (data && treeMode && chat) publishRoomLabels(roomLabelMap(data.tree, roomRefs, uniRef)); }, [data, treeMode, chat, roomRefs, uniRef]);
+  useEffect(() => { if (data && treeMode && chat) publishRoomNodes(roomNodeMap(data.tree, roomRefs, uniRef)); }, [data, treeMode, chat, roomRefs, uniRef]);
+  // Opening a room re-reads the tasks if the copy is more than a few seconds old (the needs-you feed must not show what is already done).
+  useEffect(() => { tasks.refreshIfStale(); }, [node?.path]); // eslint-disable-line react-hooks/exhaustive-deps
   const [sentTick, setSentTick] = useState(0);
   useEffect(() => { setSheet(null); setFull(false); }, [node?.path]); // eslint-disable-line react-hooks/exhaustive-deps
   const noMarks = useMemo(() => new Map<string, Mark[]>(), []);
@@ -263,19 +266,19 @@ export default function AreasSurface({ zoom, identity, talk, path, rooms: hostRo
       <Crumbs trail={trailItems} onOpen={openPath} />
     </div>
     <p className="th-cap">{node.kind === "project" ? "Project" : isRoot ? new Date(now).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" }) : "Area"} {mark !== "quiet" && <span className="th-state" data-st={mark}>{mark === "needs" ? "needs you" : "moving"}</span>}</p>
-    <h1 className="note-title">{node.title}</h1>
+    <h1 className="note-title">{node.name}</h1>
     {chat && <RoomLine view={nodeView} target={target} onOpenRoom={roomsMode ? openRoomHere : actions.openRoom} context={roomsMode} />}
     {roomsMode && headState}
   </header>;
   const wideHead = <header className="th-head wide">
     <Crumbs trail={trailItems} onOpen={openPath} />
-    {roomsMode && <h1 className="note-title">{node.title}</h1>}
+    {roomsMode && <h1 className="note-title">{node.name}</h1>}
     {chat && <RoomLine view={nodeView} target={target} onOpenRoom={roomsMode ? openRoomHere : actions.openRoom} context={roomsMode} />}
     {roomsMode && headState}
   </header>;
   const fullLevel = <div className={`tree-home th-level ${wide ? "wide" : "phone"} ${roomsMode ? "th-rooms" : ""}`} data-layout={roomsMode ? "rooms" : "tree"}>
     {wide && !roomsMode && <div className="th-stage">{stage}</div>}
-    {wide && roomsMode && <div className="th-roomnav"><TreeScreen column chat={chat} rows={navRows} needs={navNeeds} selected={node.path} onOpen={openPath} /></div>}
+    {wide && roomsMode && <RoomSidebar chat={chat} rows={navRows} needs={navNeeds} selected={node.path} onOpen={openPath} nav={nav} />}
     <LevelPanel wide={wide} head={wide ? wideHead : phoneHead} foot={<>{roomsMode ? null : talkBar}<UndoBar undo={tasks.undo} notice={tasks.notice} onDismiss={tasks.dismissNotice} /></>}>{sections}</LevelPanel>
     {sheet && <TaskSheet key={sheet.id} task={sheet} here={here} nodeName={nodeName} room={roomOfNode(sheet.node) ?? target} onClose={() => setSheet(null)} onAct={(t, a) => void tasks.act(t, a)} onOpenRoom={roomsMode ? openRoomHere : actions.openRoom} />}
   </div>;
@@ -295,14 +298,14 @@ export default function AreasSurface({ zoom, identity, talk, path, rooms: hostRo
           {wide && !isRoot && <Crumbs trail={trailItems} onOpen={openPath} />}
           {doorText && <span className="sr-door">{doorText}</span>}
         </div>}
-        <h1 className="sr-title">{node.title}</h1>
+        <h1 className="sr-title">{node.name}</h1>
       </div>
     </header>
     {!wide && <CompanionStrip {...companionProps} open={companionOpen} onToggle={setCompanionOpen} />}
     <div className="sr-chat">{roomView_ ? roomView_.render(null, placeholder) : <p className="th-quiet" role="status">Opening the room…</p>}</div>
   </section>;
   const roomLevel = <div className={`tree-home th-level ${wide ? "wide" : "phone"} th-rooms th-simple ${wide && !companionOpen ? "folded" : ""}`} data-layout="rooms" data-view="room">
-    {wide && <div className="th-roomnav"><TreeScreen column chat={chat} rows={navRows} needs={navNeeds} selected={node.path} onOpen={openPath} /></div>}
+    {wide && <RoomSidebar chat={chat} rows={navRows} needs={navNeeds} selected={node.path} onOpen={openPath} nav={nav} />}
     {room}
     {wide && <CompanionSide {...companionProps} open={companionOpen} onToggle={setCompanionOpen} />}
     <UndoBar undo={tasks.undo} notice={tasks.notice} onDismiss={tasks.dismissNotice} />

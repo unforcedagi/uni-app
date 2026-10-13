@@ -111,16 +111,17 @@ check("companion: one sentence from the lede, cut at a word when long, links as 
 });
 const decision = (id: string, node: string, extra: Record<string, unknown> = {}, at = AT - 60_000): Task =>
   parseTask({ id, path: `Decisions/${id} Pick one`, tags: ["decision"], updatedAt: iso(at), metadata: { node, state: "open", options: ["Ship it", "Hold"], ...extra } }, tree)!;
-check("companion: at most three needs, this node's open decisions first, then Now before Soon; never a count of the rest", () => {
-  const rows = [task("t1", "Projects/ATLAS", { priority: "soon" }), task("t2", "Projects/ATLAS", { priority: "now" }), task("t3", "Projects/ATLAS", { priority: "someday" }), task("t4", "Projects/ATLAS", { priority: "now" }), task("t5", "Projects/ATLAS", { priority: "soon" })];
+check("companion feed: Now before Soon, then due date; Someday is not shown; no cap, no count of the rest", () => {
+  const rows = [task("t1", "Projects/ATLAS", { priority: "soon" }), task("t2", "Projects/ATLAS", { priority: "now" }), task("t3", "Projects/ATLAS", { priority: "someday" }), task("t4", "Projects/ATLAS", { priority: "now", due: "2026-10-12" }), task("t5", "Projects/ATLAS", { priority: "soon" })];
   const w = whereWeAre({ tasks: rows, hidden: () => false, nowMs: AT });
   const top = topNeeds(w, "Projects/ATLAS");
-  assert.equal(top.length, 3);
-  assert.deepEqual(top.slice(0, 2).map((t) => t.priority), ["now", "now"]);
+  assert.equal(top.length, 4, "someday is out; nothing is cut off");
+  assert.deepEqual(top.map((t) => t.priority), ["now", "now", "soon", "soon"]);
+  assert.equal(top[0].id, "t4", "the dated Now first");
   const d = decision("d1", "Projects/ATLAS"), far = decision("d2", "Areas/Atlas");
   const mixed = topNeeds(whereWeAre({ tasks: [...rows, far, d], hidden: () => false, nowMs: AT }), "Projects/ATLAS");
-  assert.equal(mixed[0].id, "d1", "the decision on this very node leads");
-  assert.equal(mixed.length, 3);
+  assert.equal(mixed.length, 6, "open decisions are added");
+  assert.deepEqual(mixed.slice(0, 2).map((t) => t.priority), ["now", "now"]);
   assert.equal(topNeeds(whereWeAre({ tasks: rows.slice(0, 2), hidden: () => false, nowMs: AT }), "Projects/ATLAS").length, 2);
 });
 check("decisions: options[] as labels (strings or {label}), at most four, none for a task", () => {

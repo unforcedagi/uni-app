@@ -1,21 +1,22 @@
 import { nestRooms } from "./roomNesting";
-import { useRoomLabels } from "./areas/roomLabels";
+import { nodeOfRoom, useRoomLabels, useRoomNodes } from "./areas/roomLabels";
 import { isNetworkError, netError } from "./netError";
 import { voiceRetryDelay } from "./voiceRetry";
 import { VoiceOutbox, relayAccepted } from "./voiceOutbox";
-import { SettingsIcon, UniIcon, JournalIcon, StarIcon, RoomsIcon, AreasIcon } from "./Icons";
+import { SettingsIcon, UniIcon, JournalIcon, StarIcon, RoomsIcon } from "./Icons";
 import { forgetAreas } from "./areas/useAreas";
 import { useLifeOsVault } from "./areas/useLifeOsVault";
 import { effectiveLifeVault, showUniGlue } from "./areas/profile";
 import { clearProjectBodies } from "./areas/projectBody";
 import AreasSurface from "./areas/LifeOsSurface";
+import { rootOpenMemory } from "./areas/rootMemory";
 import type { ZoomState } from "./areas/NodeStage";
 import { UNI_CHANNEL } from "./areas/treeCore";
 import AreaSelfTest from "./interface/selftest/SelfTest";
 import HomeLayoutSetting from "./areas/HomeLayoutSetting";
 import LifeOsVaultSetting from "./areas/LifeOsVaultSetting";
 import { appendDraft } from "./areas/composeDraft";
-import { FOR_YOU_ID, FOR_YOU_OPENED_KEY, LAST_SURFACE_KEY, countRecommendations, isRecommendationNew, readLastSurface, saveLastSurface } from "./railCore";
+import { FOR_YOU_ID, FOR_YOU_OPENED_KEY, countRecommendations, isRecommendationNew, readLastSurface, saveLastSurface } from "./railCore";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -42,7 +43,10 @@ import PairSource, { PairDeviceButton } from "./PairSource";
 import { UpdateSettings } from "./UpdateNotice";
 import { watchLostIpc } from "./ipcLost";
 import { currentUserAgent, platformName } from "./interface/selftest/gate";
-import { activeTab, closeTab, EMPTY_TABS, focusTab, navigateNoteTab, nextAfterClose, openTab, recordingTabCanClose, restoreTabs, serializeTabs, tabForDigit, updateTab, TABS_KEY, type Tabs, type Tab, type TabTarget, type OpenMode } from "./tabs";
+import { activeTab, closeTab, EMPTY_TABS, focusTab, isSurface, LEGACY_TABS_KEY, migrateLegacyTabs, navigateNoteTab, nextAfterClose, openTab, persistable, recordingTabCanClose, restoreTabs, serializeTabs, updateTab, TABS_KEY, type Tabs, type Tab, type TabTarget, type OpenMode } from "./tabs";
+import { canBack as histCanBack, canForward as histCanForward, EMPTY_HISTORY, recent as histRecent, step as histStep, visit as histVisit, type History } from "./navHistory";
+import { NavContext, type NavControls } from "./navContext";
+import { readHomeLayout } from "./areas/homeLayout";
 import { notifyMention, setUnreadBadge } from "./desktopNotify";
 import NoteView from "./NoteView";
 import SurfaceModal from "./SurfaceModal";
@@ -268,9 +272,6 @@ function Conversations({ onForget }: { onForget: () => void }) {
     openTarget({ kind: "note", note: { hub: null, vault: "uni", ref: FOR_YOU_ID }, title: "For you" }, "new");
     if (topNote?.vault === "uni" && topNote.ref === FOR_YOU_ID && isRecommendationNew(forYou.updatedAt, renderedForYou.current)) setForYouReload((n) => n + 1);
   }
-  const pickNewTab = useRef(false);
-  const longPress = useRef<number | null>(null);
-  const longPressed = useRef(false);
   const [journalRecording, setJournalRecording] = useState<{ elapsed: number; stop: () => void } | null>(null);
   const journalRecordingRef = useRef(false);
   const [channel, setChannel] = useState<string | null>(null);
@@ -388,10 +389,25 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const [hub, setHub] = useState<string | null>(null);
   useEffect(() => { invoke<{ hub: string }>("journal_config").then((c) => setHub(c.hub)).catch(() => {}); }, []);
 
+  // The places visited, for Back and Forward (Alt+←/→ and the sidebar's two buttons).
+  const [hist, setHist] = useState<History>(EMPTY_HISTORY);
+  const histRef = useRef<History>(EMPTY_HISTORY);
+  function pushHistory(t: Tab | TabTarget) {
+    const next = histVisit(histRef.current, t);
+    if (next !== histRef.current) { histRef.current = next; setHist(next); }
+  }
+  function goHistory(by: -1 | 1) {
+    // A note open over the place has its own Back: that comes first.
+    if (by < 0 && notesRef.current.length) { closeNoteRef.current(); return; }
+    const hop = histStep(histRef.current, by);
+    if (!hop) return;
+    histRef.current = hop.history; setHist(hop.history);
+    openTargetRef.current(hop.target, "focus", false, true);
+  }
   function commitTabs(next: Tabs) {
     tabsRef.current = next;
     setTabs(next);
-    if (tabsReady.current) { try { localStorage.setItem(TABS_KEY, serializeTabs(next)); } catch { /* private storage */ } }
+    if (tabsReady.current) { try { localStorage.setItem(TABS_KEY, serializeTabs(persistable(next))); } catch { /* private storage */ } }
   }
   function switchToTab(tab: Tab | null) {
     setComposerFocused(false);
@@ -417,8 +433,22 @@ function Conversations({ onForget }: { onForget: () => void }) {
     commitTabs(focusTab(tabsRef.current, id));
     setSidebarVisible(false);
   }
-  function openTarget(target: TabTarget, mode: OpenMode = "focus", confirmed = false) {
+  /** A room that a node owns opens as that node: one view of a room, wherever it is opened from (the tree, search, a note link, a needs-you item). */
+  function resolveTarget(target: TabTarget): TabTarget {
+    if (target.kind !== "room" || !target.channel || readHomeLayout() !== "rooms") return target;
+    const n = nodeOfRoom(target.channel);
+    if (!n) return target;
+    if (n.path === "") { rootOpenMemory.open = true; return { kind: "areas", title: "Uni", channel: target.channel }; }
+    return { kind: "area", path: n.path, title: n.name, channel: target.channel };
+  }
+  /** `fromHistory`: Back and Forward move through the places visited; they do not add to them. */
+  function openTarget(target: TabTarget, mode: OpenMode = "focus", confirmed = false, fromHistory = false) {
+    target = resolveTarget(target);
     if (target.note) target = { ...target, note: resolveNote(target.note, aliases.current) };
+    // No tab strip: a place replaces the one you were on (a second tab never shows the same room). The Journal keeps its own tab (its page and any recording stay alive), and a place opened from it goes beside it.
+    if (isSurface(target) && target.kind !== "journal" && mode === "new") mode = "focus";
+    if (target.kind === "journal") mode = "new";
+    else if (isSurface(target) && mode === "focus" && activeTab(tabsRef.current)?.kind === "journal") mode = "new";
     // A recording's origin tab must survive the 12-tab eviction cap.
     const originId = recordingOrigin.current?.tabId;
     const pinned = new Set(tabsRef.current.tabs.filter((t) => t.id === originId || (t.kind === "journal" && journalRecordingRef.current)).map((t) => t.id));
@@ -430,12 +460,13 @@ function Conversations({ onForget }: { onForget: () => void }) {
       setError("Stop the recording before replacing its tab."); return;
     }
     if (!confirmed && removed.some(isTabDirty)) {
-      setConfirmation({ text: "Close a tab with unsaved changes? Its draft will be kept on this device.", run: () => openTarget(target, mode, true) }); return;
+      setConfirmation({ text: "Leave this note with unsaved changes? Its draft will be kept on this device.", run: () => openTarget(target, mode, true, fromHistory) }); return;
     }
     removed.forEach((t) => dirtyNotes.current.delete(t.id));
     const tab = activeTab(next);
     if (tab && (next.active !== tabsRef.current.active || mode === "replace")) switchToTab(tab);
     commitTabs(next);
+    if (!fromHistory && tab) pushHistory(tab);
     setSidebarVisible(false);
     setPanel(null);
     setSearchOpen(false);
@@ -465,10 +496,19 @@ function Conversations({ onForget }: { onForget: () => void }) {
   }
   const openTargetRef = useRef(openTarget);
   const closeTabRef = useRef(closeTabById);
+  const closeNoteRef = useRef<() => void>(() => {});
   const switchToTabRef = useRef(switchToTab);
   openTargetRef.current = openTarget;
   closeTabRef.current = closeTabById;
   switchToTabRef.current = switchToTab;
+  // A plain room tab opened before the tree had loaded becomes its node's view once the tree says which node owns the room.
+  const roomNodes = useRoomNodes();
+  useEffect(() => {
+    const cur = activeTab(tabsRef.current);
+    if (cur?.kind !== "room" || !cur.channel) return;
+    const t = resolveTarget(cur);
+    if (t.kind !== "room") openTargetRef.current(t, "replace", false, true);
+  }, [roomNodes]); // eslint-disable-line react-hooks/exhaustive-deps
   const openNote = useCallback((ref: VaultRef, href: string | null) => {
     // A note on some other hub isn't readable with this key: let the browser
     // (and that hub's Parachute app) handle it.
@@ -504,6 +544,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     }
     setNotes(stack);
   }, [noteTitles]);
+  closeNoteRef.current = closeNote;
   const noteKey = (r: VaultRef) => `${r.vault}:${r.ref}`;
   const rememberTitle = useCallback((key: string, t: string) => {
     setNoteTitles((m) => m[key] === t ? m : { ...m, [key]: t });
@@ -571,23 +612,25 @@ function Conversations({ onForget }: { onForget: () => void }) {
     setUnreadBadge(rows.reduce((n, r) => n + (r.unread || 0), 0));
     if (!tabsReady.current) {
       tabsReady.current = true;
-      let saved: string | null = null;
-      try { saved = localStorage.getItem(TABS_KEY); } catch { /* private storage */ }
-      let next = restoreTabs(saved, rows.map((r) => r.id));
-      let preferred: string | null = null;
-      try { preferred = localStorage.getItem(LAST_SURFACE_KEY); } catch { /* unavailable storage */ }
-      if (preferred || !saved) {
+      // 0.1.46: no tab strip. The app reopens to the place it was last on (v2 holds just that); v1's set of tabs is ignored beyond its active surface.
+      const ids = rows.map((r) => r.id);
+      let saved: string | null = null, legacy: string | null = null;
+      try { saved = localStorage.getItem(TABS_KEY); if (!saved) legacy = localStorage.getItem(LEGACY_TABS_KEY); } catch { /* private storage */ }
+      let next = saved ? restoreTabs(saved, ids) : migrateLegacyTabs(legacy, ids);
+      if (!activeTab(next)) {
         const uni = rows.some((r) => r.id === UNI_CHANNEL) ? UNI_CHANNEL : findUniRoom(rows)?.id;
         // The app opens to Uni: its home page, with the Uni room attached as the chat. Without a Uni room (an account that has none) it opens the first room.
-        const target: TabTarget | null = readLastSurface(localStorage) === "journal" ? { kind: "journal", title: "Journal" }
+        const target: TabTarget = readLastSurface(localStorage) === "journal" ? { kind: "journal", title: "Journal" }
           : uni ? { kind: "areas", title: "Uni", channel: uni } : rows[0] ? { kind: "room", channel: rows[0].id, title: rows[0].name } : { kind: "areas", title: "Uni" };
-        if (target) next = openTab(next, target, "new", () => crypto.randomUUID());
+        next = openTab(next, target, "new", () => crypto.randomUUID());
       }
       // Note stacks are reconstructed from their saved top-level tab target.
       switchToTabRef.current(activeTab(next));
       // Restoring the first tab preserves the viewport-specific sidebar default.
       setSidebarVisible(window.matchMedia("(min-width: 600px)").matches);
       commitTabs(next);
+      const first = activeTab(next);
+      if (first) pushHistory(first);
     } else {
       // Re-sync after room membership changes: discard tabs for missing rooms.
       const previous = tabsRef.current;
@@ -1513,23 +1556,27 @@ function Conversations({ onForget }: { onForget: () => void }) {
   // Desktop tab shortcuts. On macOS the native menu owns Cmd+W; it emits
   // uni://close-tab from Rust, so the WebView never closes the window.
   const closeActiveRef = useRef(() => {});
-  const focusTabRef = useRef((_id: string) => {});
+  const goHistoryRef = useRef<(by: -1 | 1) => void>(() => {});
+  goHistoryRef.current = goHistory;
   const lastClose = useRef(0);
   closeActiveRef.current = () => {
     if (creating || confirmation) return;
     // A native menu event and a WebView keydown can both report one Cmd+W.
     if (Date.now() - lastClose.current < 120) return;
     lastClose.current = Date.now();
-    if (tabsRef.current.active) closeTabById(tabsRef.current.active);
+    // No tabs to close: Cmd+W closes what is open over the place (a note, a vault browser) and otherwise leaves the place alone.
+    const cur = activeTab(tabsRef.current);
+    if (cur && !isSurface(cur)) closeTabById(cur.id);
   };
-  focusTabRef.current = focusTabById;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return;
-      if (e.key.toLowerCase() === "w") { e.preventDefault(); closeActiveRef.current(); }
-      else if (/^[1-9]$/.test(e.key)) {
-        const t = tabForDigit(tabsRef.current, Number(e.key));
-        if (t) { e.preventDefault(); focusTabRef.current(t.id); }
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "w") { e.preventDefault(); closeActiveRef.current(); return; }
+      // Alt+← / Alt+→: Back and Forward over the places visited. In a text field on a Mac, Option+arrow moves by word, so it is left alone there.
+      if (e.altKey && !e.metaKey && !e.ctrlKey && !e.shiftKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+        const el = e.target instanceof HTMLElement ? e.target : null;
+        const typing = !!el && (el.isContentEditable || el instanceof HTMLTextAreaElement || (el instanceof HTMLInputElement && !["button", "checkbox", "radio"].includes(el.type)));
+        if (typing && /mac|iphone|ipad/i.test(navigator.platform)) return;
+        e.preventDefault(); goHistoryRef.current(e.key === "ArrowLeft" ? -1 : 1);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -1545,25 +1592,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     return () => { dead = true; off?.(); };
   }, [canGoBack]);
   const active = activeTab(tabs);
-  function startLongPress(target: TabTarget) {
-    longPressed.current = false;
-    if (longPress.current) window.clearTimeout(longPress.current);
-    longPress.current = window.setTimeout(() => {
-      longPressed.current = true;
-      pickNewTab.current = false;
-      openTarget(target, "new");
-    }, 500);
-  }
-  function endLongPress() {
-    if (longPress.current) window.clearTimeout(longPress.current);
-    longPress.current = null;
-  }
-  function sidebarClick(target: TabTarget, e: React.MouseEvent) {
-    if (longPressed.current) { longPressed.current = false; return; }
-    const asNew = pickNewTab.current || e.metaKey || e.ctrlKey;
-    pickNewTab.current = false;
-    openTarget(target, asNew ? "new" : "focus");
-  }
+  function sidebarClick(target: TabTarget) { openTarget(target, "focus"); }
   const journalTab = tabs.tabs.find((t) => t.kind === "journal");
   const areasOpen = active?.kind === "areas" || active?.kind === "area";
   // Drafts only: the scope's draft is read when the room opens. Aaron presses Send.
@@ -1613,10 +1642,15 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const vaultRow = (vault: string) => <button key={vault} className={`room ${active?.kind === "vault" && active.vault === vault ? "selected" : ""}`} aria-label={vault}
     aria-current={active?.kind === "vault" && active.vault === vault ? "page" : undefined}
     onClick={() => openTarget({ kind: "vault", vault, title: vault }, "new")}><span className="avatar" aria-hidden="true">▤</span><span className="room-text"><strong>{vault}</strong></span></button>;
+  const navControls: NavControls = {
+    canBack: histCanBack(hist) || notes.length > 0, canForward: histCanForward(hist),
+    back: () => goHistory(-1), forward: () => goHistory(1),
+    recent: histRecent(hist).map((t) => ({ key: `${t.kind}:${t.path ?? t.channel ?? ""}`, title: t.title, go: () => openTarget(t, "focus") })),
+  };
   const recordingTab = recordingOrigin.current;
   const pill = recordingTab && recorder.busy ? { title: recordingTab.title, elapsed: recorder.elapsed, tabId: recordingTab.tabId, stop: recorder.stop, phase: recorder.phase } :
     journalRecording && journalTab ? { title: "Journal", elapsed: journalRecording.elapsed, tabId: journalTab.id, stop: journalRecording.stop, phase: "recording" as const } : null;
-  return <NoteOpener.Provider value={openNote}><main className={`shell ${(!sidebarVisible && (channel || journalOpen || areasOpen || (active?.kind === "note" || active?.kind === "vault"))) ? "in-room" : ""} ${topNote ? "note-open" : ""} ${panel ? `panel-open panel-${panel}` : ""} ${searchOpen ? "search-open" : ""} ${composerFocused ? "composer-focused" : ""} ${journalFocus && journalOpen ? "journal-focus" : ""}`}>
+  return <NavContext.Provider value={navControls}><NoteOpener.Provider value={openNote}><main className={`shell ${(!sidebarVisible && (channel || journalOpen || areasOpen || (active?.kind === "note" || active?.kind === "vault"))) ? "in-room" : ""} ${topNote ? "note-open" : ""} ${panel ? `panel-open panel-${panel}` : ""} ${searchOpen ? "search-open" : ""} ${composerFocused ? "composer-focused" : ""} ${journalFocus && journalOpen ? "journal-focus" : ""}`}>
     <nav className="rail" aria-label="Main navigation">
       <button aria-label="Uni" aria-current={!panel && !searchOpen && (!topNote && areasOpen ? "page" : undefined)} onClick={() => openTarget(uniHome())}><i><UniIcon /></i><span>Uni</span></button>
       <button aria-label="Journal" aria-current={!panel && !searchOpen && (journalOpen && !topNote ? "page" : undefined)} onClick={() => openTarget({ kind: "journal", title: "Journal" })}><i><JournalIcon /></i><span>Journal</span></button>
@@ -1652,8 +1686,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
           <div id="other-vault-list" hidden={!otherVaultsExpanded}>{otherVaults.map(vaultRow)}</div>
         </>}
       </section>
-      <nav>{nestRooms(rooms).map(({ room, label: rawLabel, child }) => { const label = roomLabels.get(room.id) ?? rawLabel; return <button key={room.id} className={`room ${child ? "child" : ""} ${channel === room.id ? "selected" : ""}`} title={child ? room.name : undefined} aria-label={child ? `#${room.name}` : undefined} onClick={(e) => sidebarClick(roomTarget(room.id), e)}
-        onPointerDown={(e) => { if (e.pointerType === "touch") startLongPress(roomTarget(room.id)); }} onPointerUp={endLongPress} onPointerCancel={endLongPress} onPointerLeave={endLongPress}
+      <nav>{nestRooms(rooms).map(({ room, label: rawLabel, child }) => { const label = roomLabels.get(room.id) ?? rawLabel; return <button key={room.id} className={`room ${child ? "child" : ""} ${channel === room.id ? "selected" : ""}`} title={child ? room.name : undefined} aria-label={child ? `#${room.name}` : undefined} onClick={() => sidebarClick(roomTarget(room.id))}
         aria-current={channel === room.id ? "page" : undefined}>
         <span className="avatar">{label[0]?.toUpperCase() ?? "#"}</span><span className="room-text"><strong className={room.unread ? "unread" : ""}>{label}</strong><small>{room.last_message ? markdownToText(room.last_message) : "No messages yet"}</small></span>
         <span className="room-side"><time>{room.last_ts ? time(room.last_ts) : ""}</time>{room.unread > 0 && <span className={`unread-badge ${room.mentions ? "mention" : ""}`} aria-label={`${room.unread} unread${room.mentions ? ", mentions you" : ""}`}>{room.mentions ? "@ " : ""}{room.unread > 99 ? "99+" : room.unread}</span>}</span>
@@ -1661,15 +1694,6 @@ function Conversations({ onForget }: { onForget: () => void }) {
       </div>
     </aside>
     <section className="conversation" aria-label={journalOpen ? "Journal" : areasOpen ? "Uni" : currentRoom ? `Conversation: ${currentRoom.name}` : active?.kind === "note" ? "Note" : "Conversation"}>
-      <div className="tab-strip" role="tablist" aria-label="Open tabs">
-        <div className="tab-scroller">{tabs.tabs.map((t) => <div key={t.id} className={`tab-chip ${t.id === tabs.active ? "active" : ""}`} role="presentation"
-          onPointerDown={(e) => { if (e.pointerType === "touch") { longPressed.current = false; longPress.current = window.setTimeout(() => { longPressed.current = true; closeTabById(t.id); }, 600); } }}
-          onPointerUp={endLongPress} onPointerCancel={endLongPress} onPointerLeave={endLongPress}>
-          <button className="tab-title" role="tab" aria-selected={t.id === tabs.active} onClick={() => { if (longPressed.current) { longPressed.current = false; return; } focusTabById(t.id); }} title={t.title}>{(t.kind === "areas" || t.kind === "area") ? <><AreasIcon /> </> : t.kind === "journal" ? "❋" : (t.kind === "note" || t.kind === "vault") ? "▤" : t.kind === "thread" ? "↳" : "#"} {isTabDirty(t) && <span aria-label="Unsaved changes">● </span>}{t.title}</button>
-          <button className="tab-close" onClick={() => closeTabById(t.id)} aria-label={`Close ${t.title}`}>×</button>
-        </div>)}</div>
-        <button className="tab-add" onClick={() => { pickNewTab.current = true; setPanel("rooms"); setSearchOpen(false); setSidebarVisible(true); document.querySelector<HTMLButtonElement>(".rooms nav .room")?.focus(); }} aria-label="New tab — pick a room" title="New tab — pick a room">+</button>
-      </div>
       {journalTab && <div className="journal-tab-content" hidden={!journalOpen} onFocusCapture={(e) => { if (e.target instanceof HTMLTextAreaElement) requestAnimationFrame(() => setComposerFocused(true)); }} onBlurCapture={(e) => { const journal = e.currentTarget; requestAnimationFrame(() => setComposerFocused(journal.contains(document.activeElement) && document.activeElement instanceof HTMLTextAreaElement)); }}><Journal focus={journalFocus} onFocus={() => setJournalFocus((v) => !v)} rooms={rooms} uniRoomId={findUniRoom(rooms)?.id ?? null} onShare={shareEntry} onBack={() => setPanel("rooms")} onRecordingChange={(on, elapsed, stop) => { journalRecordingRef.current = on; setJournalRecording(on ? { elapsed, stop } : null); }} /></div>}
       {active?.kind === "vault" && active.vault ? <VaultBrowser key={active.vault} vault={active.vault} onBack={() => setPanel("rooms")} onOpen={(note) => openTarget({ kind: "note", note: { hub: null, vault: active.vault!, ref: note.id }, title: note.path || note.id }, "new")} onCreate={(folder) => requestCreate(active.vault!, folder)} onSearch={(prefix) => { setSearchQuery(""); setSearchScope({ vault: active.vault!, prefix }); setSearchOpen(true); setSidebarVisible(true); }} />
       : journalOpen ? null
@@ -1692,8 +1716,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       <span className="recording-separator" aria-hidden="true">·</span>
       <button className="recording-stop" onClick={pill.stop} disabled={pill.phase !== "recording"} aria-label={`Stop recording for ${pill.title}`}>Stop</button>
     </div>}
-    {/* The note sheet leaves the tab strip visible above it; Back pops the
-        note's own stack (or closes the tab at the first note). */}
+    {/* A note opens over the place you were in; Back pops the note's own stack (or closes it at the first note). */}
     {topNote && !searchOpen && <section className="note-sheet" role="region" aria-label="Note">
       <NoteView key={`${tabs.active}:${notes.length}:${noteKey(topNote)}:${topNote.ref === FOR_YOU_ID ? forYouReload : 0}`} target={topNote} onSearch={(query) => { setSidebarVisible(true); setSearchQuery(query); setSearchScope({ vault: "", prefix: "" }); setSearchOpen(true); }} hub={hub} onOpen={openNote} onBack={() => { if (topNote.ref === FOR_YOU_ID && forYouReturn.current && tabsRef.current.tabs.some((t) => t.id === forYouReturn.current)) focusTabById(forYouReturn.current); else closeNote(); }}
         onResolved={(id) => {
@@ -1721,7 +1744,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     {creating && <SurfaceModal onCancel={() => { if (!createBusy) setCreating(null); }}><form role="dialog" aria-modal="true" aria-label="New note" onSubmit={(e) => { e.preventDefault(); void createNote(); }}><h2>New note in {creating.vault}</h2><label>Path<input autoFocus value={creating.path} disabled={createBusy} onChange={(e) => setCreating({ ...creating, path: e.target.value })} /></label>{createError && <p className="error" role="alert">{createError}</p>}<button disabled={createBusy} type="submit">{createBusy ? "Creating…" : "Create note"}</button><button disabled={createBusy} type="button" onClick={() => setCreating(null)}>Cancel</button></form></SurfaceModal>}
     {confirmation && <SurfaceModal onCancel={() => setConfirmation(null)}><div role="alertdialog" aria-modal="true" aria-label="Confirm tab close">{confirmation.notice && <p role="status">{confirmation.notice}</p>}<p>{confirmation.text}</p><button autoFocus onClick={() => { const run = confirmation.run; setConfirmation(null); run(); }}>Continue</button><button onClick={() => setConfirmation(null)}>Cancel</button></div></SurfaceModal>}
     {toast && <div className="toast" role="status">{toast}</div>}
-  </main></NoteOpener.Provider>;
+  </main></NoteOpener.Provider></NavContext.Provider>;
 }
 
 export default App;
