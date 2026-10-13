@@ -284,6 +284,7 @@ test.describe('simple', () => {
     await page.evaluate(() => { document.querySelector('.cp.side')!.removeAttribute('style'); });
     const lede = page.locator('.cp-stands').first();
     if (await lede.count()) expect(await lede.evaluate((e) => getComputedStyle(e).webkitLineClamp)).toBe('3');
+    if (await lede.count()) { await lede.click(); expect(await lede.evaluate((e) => getComputedStyle(e).webkitLineClamp)).not.toBe('3'); await lede.click(); expect(await lede.evaluate((e) => getComputedStyle(e).webkitLineClamp)).toBe('3'); }
     for (const d of await page.locator('.cp-detail').all()) expect(await d.evaluate((e) => getComputedStyle(e).whiteSpace)).not.toBe('nowrap');
   });
 

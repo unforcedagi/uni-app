@@ -414,3 +414,5 @@ h3.wr-h { font-weight: 400; }
 
 /* the newest messages never sit cut mid-line under the room header: the top edge fades out softly */
 .sr-chat .message-list { padding-top: 20px; -webkit-mask-image: linear-gradient(to bottom, transparent, #000 28px); mask-image: linear-gradient(to bottom, transparent, #000 28px); }
+.cp-lede { cursor: pointer; }
+.cp-lede.full .cp-stands { -webkit-line-clamp: unset; line-clamp: none; display: block; }

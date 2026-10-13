@@ -75,12 +75,18 @@ function FootLabel({ name }: { name: string }) {
   return <span ref={ref} className="cp-all-t" title={`All of ${name}'s work`} />;
 }
 
+/** The sentence clamps at 3 lines; a tap shows all of it (r6 critics: the clamp cut mid-clause). */
+function Stands({ text, ago }: { text: string; ago: string }) {
+  const [full, setFull] = useState(false);
+  return <p className={`cp-lede ${full ? "full" : ""}`} title={full ? undefined : text} onClick={() => setFull((f) => !f)}><span className="cp-stands">{text}</span>{ago && <small className="cp-ago">{ago}</small>}</p>;
+}
+
 function Body({ stands, ready, needs, runs, nodeName, onTask, onDecide, onEverything }: Props) {
   const active = runs.filter((r) => ACTIVE.has(r.state));
   const hiddenRuns = Math.max(0, active.length - RUNS_SHOWN);
   const shownNeeds = needs.slice(0, needsFit(useViewportHeight()));
   return <div className="cp-body">
-    {!ready ? <p className="cp-lede">Loading…</p> : stands && <p className="cp-lede" title={stands.text}><span className="cp-stands">{stands.text}</span>{stands.ago && <small className="cp-ago">{stands.ago}</small>}</p>}
+    {!ready ? <p className="cp-lede">Loading…</p> : stands && <Stands text={stands.text} ago={stands.ago} />}
     {shownNeeds.length > 0 && <section aria-label="Needs you" className="cp-sec">
       <h3 className="cp-h">Needs you</h3>
       <ul className="cp-list">{shownNeeds.map((t) => {
