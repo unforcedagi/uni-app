@@ -23,14 +23,22 @@ const shot = async (page: Page, name: string) => {
   await page.screenshot({ path: `${file}-gray.png` });
   await tag.evaluate((n) => n.remove());
 };
+/** T-124: a room opens to its conversation; the state page is one level deeper ("Everything here"). The specs below test that page. */
+async function full(page: Page) {
+  await page.locator('.sr, .th-panel').first().waitFor();
+  if (await page.locator('.th-panel').count()) return;
+  if (await page.locator('.cp-line[aria-expanded="false"]').count()) await page.locator('.cp-line').click();
+  await page.getByRole('button', { name: /^Everything here/ }).click();
+  await page.locator('.th-panel').waitFor();
+}
 /** Open a node by name: a row of the left column (wide), or a row of the room tree / a child in the panel (phone). */
 async function go(page: Page, name: string) {
   const row = page.locator(`.th-go[aria-label="${name}"], .th-go[aria-label^="${name},"]`);
   await row.or(page.locator(`.th-kid[data-name="${name}"]`)).first().waitFor();
-  if (await row.count()) { await row.first().click(); return; }
-  await page.locator(`.th-kid[data-name="${name}"]`).click();
+  if (await row.count()) await row.first().click(); else await page.locator(`.th-kid[data-name="${name}"]`).click();
+  await full(page);
 }
-const title = (page: Page, name: string) => expect(panel(page).locator('h1')).toHaveText(name);
+const title = async (page: Page, name: string) => { await full(page); await expect(panel(page).locator('h1')).toHaveText(name); };
 const bucket = (page: Page, p: string) => where(page).locator(`.wr-bucket.p-${p}`);
 
 test.describe('rooms nav', () => {
@@ -39,7 +47,7 @@ test.describe('rooms nav', () => {
     if (wide(page)) {
       const nav = page.locator('.th-roomnav');
       await expect(nav).toBeVisible();
-      await expect(panel(page)).toBeVisible();
+      await expect(page.locator('.sr')).toBeVisible();
       await expect(page.locator('.node-stage')).toHaveCount(0);
       await title(page, 'Uni');
       await expect(nav.locator('.th-go[aria-current="page"]')).toHaveAttribute('data-path', '');
@@ -54,7 +62,7 @@ test.describe('rooms nav', () => {
     } else {
       await expect(page.locator('.th-phone-tree')).toBeVisible();
       await expect(page.locator('.th-go[aria-label^="COhere 2026,"]')).toContainText('boulder/cohere');
-      await expect(page.locator('.th-go[aria-label^="Techne,"] .th-tag')).toBeVisible();
+      await expect(page.locator('.th-go[aria-label^="Techne,"] .th-dot')).toBeVisible();
       for (const b of await page.locator('.th-go').all()) expect((await b.boundingBox())!.height).toBeGreaterThanOrEqual(44);
     }
     expect(await fits(page)).toBe(true);
