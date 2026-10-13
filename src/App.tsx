@@ -346,6 +346,15 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const relayOrigin = useRelayOrigin();
   const [older, setOlder] = useState<"idle" | "loading" | "done">("idle");
   const [reactFor, setReactFor] = useState<string | null>(null);
+  /** The message whose ⋯ menu is open (T-124: nothing is shown under a message by default). */
+  const [menuFor, setMenuFor] = useState<string | null>(null);
+  useEffect(() => {
+    if (!menuFor) return;
+    const away = (e: PointerEvent) => { if (!(e.target instanceof Element) || !e.target.closest(".message-more")) setMenuFor(null); };
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") setMenuFor(null); };
+    document.addEventListener("pointerdown", away); document.addEventListener("keydown", esc);
+    return () => { document.removeEventListener("pointerdown", away); document.removeEventListener("keydown", esc); };
+  }, [menuFor]);
   // Our own message currently open in the inline editor.
   const [editing, setEditing] = useState<string | null>(null);
   // Messages handed to Uni as notes this session (a local receipt).
@@ -688,7 +697,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   }, [channel, root, synced, tick, limit, loadRooms]);
 
   // New room: back to the default window; older pages load on demand.
-  useEffect(() => { setLimit(300); setOlder("idle"); setReactFor(null); setEditing(null); }, [channel]);
+  useEffect(() => { setLimit(300); setOlder("idle"); setReactFor(null); setMenuFor(null); setEditing(null); }, [channel]);
 
   useEffect(() => {
     if (!channel) { setMembers([]); return; }
@@ -1329,7 +1338,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
 
   // The room's message list and composer. The room view and an area's chat pane are this same markup, so one send path,
   // one draft per room and one signer serve both; `above` is drawn directly over the composer (the suggestion bar).
-  const roomPane = (currentRoom: Room, above: ReactNode) => <>
+  const roomPane = (currentRoom: Room, above: ReactNode, placeholder?: string) => <>
         <div className="message-list" ref={setList} role="log" aria-label="Messages" aria-live="polite">
           <div className="message-stack" ref={setStackEl}>
             {timeline}
@@ -1364,7 +1373,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
           {voiceStatus && <p className="voice-status" role="status">{voiceStatus}</p>}
           <div className="compose-row">
             <ComposerMenu key={`${channel}:${root}`} onMention={startMention} onAttach={() => fileInput.current?.click()} sending={sending} />
-            <textarea ref={composerInput} aria-label={`Message ${currentRoom.name}`} value={draft} onChange={(e) => updateDraft(e.target.value, e.target.selectionStart)} onPaste={onPasteFiles} onSelect={(e) => syncPicker(e.currentTarget.value, e.currentTarget.selectionStart)} onBlur={() => setPicker(null)} onKeyDown={onKeyDown} maxLength={65536} rows={1} placeholder={isThread ? "Reply in thread…" : "Message Uni…"} />
+            <textarea ref={composerInput} aria-label={`Message ${currentRoom.name}`} value={draft} onChange={(e) => updateDraft(e.target.value, e.target.selectionStart)} onPaste={onPasteFiles} onSelect={(e) => syncPicker(e.currentTarget.value, e.currentTarget.selectionStart)} onBlur={() => setPicker(null)} onKeyDown={onKeyDown} maxLength={65536} rows={1} placeholder={isThread ? "Reply in thread…" : placeholder ?? "Message Uni…"} />
             <button className={`address-toggle compose-icon mic ${recorder.recording && recordingOrigin.current?.key === scope() ? "recording" : ""}`} onClick={() => void toggleRecording()} disabled={sending || (recorder.busy && (!recorder.recording || recordingOrigin.current?.key !== scope()))} aria-pressed={recorder.recording && recordingOrigin.current?.key === scope()} aria-label={recorder.recording && recordingOrigin.current?.key === scope() ? "Stop recording voice message" : "Record a voice message"} title={recorder.recording && recordingOrigin.current?.key === scope() ? "Stop recording" : "Voice message"}>
               {recorder.recording && recordingOrigin.current?.key === scope() ? <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" fill="currentColor" /></svg> : <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3" /><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8" /></svg>}
             </button>
@@ -1403,16 +1412,19 @@ function Conversations({ onForget }: { onForget: () => void }) {
         {m.reactions.length > 0 && <div className="reactions">{m.reactions.map((r) => <button key={r.emoji} className={`pill ${r.mine ? "mine" : ""}`} onClick={() => actions.current.react(m, r.emoji)} aria-pressed={!!r.mine} aria-label={`${emojiLabel(r.emoji)} ${r.count}${r.mine ? ", you reacted; tap to remove" : "; tap to add yours"}`}>{emojiLabel(r.emoji)} <span>{r.count}</span></button>)}</div>}
         {reactFor === m.ref && <div className="quick-react" role="toolbar" aria-label="React">{QUICK_REACTIONS.map((e) => <button key={e} onClick={() => actions.current.react(m, e)} aria-label={`React ${e}`}>{e}</button>)}</div>}
         {!inThread && m.reply_count > 0 && <button className="thread-summary" onClick={() => actions.current.openThread(m)} aria-label={`View thread with ${m.reply_count} ${m.reply_count === 1 ? "reply" : "replies"}`}>💬 {m.reply_count} {m.reply_count === 1 ? "reply" : "replies"}{m.last_reply_ts ? <span> · last {time(m.last_reply_ts)}</span> : null}</button>}
-        <div className="message-actions">
-          <button onClick={() => setReactFor(reactFor === m.ref ? null : m.ref)} aria-label={`React to ${m.author_name}`} aria-expanded={reactFor === m.ref}>React</button>
-          {voiceOf(m) ? <button onClick={() => actions.current.keepVoice(m, voiceOf(m)!)} disabled={kept.has(m.ref)} aria-label={`Keep ${m.author_name}'s voice message as a note`}>{kept.has(m.ref) ? "✓ Kept" : "⤓ Keep as note"}</button>
-            : <button onClick={() => actions.current.toUni(m, "note")} disabled={kept.has(m.ref)} aria-label={`Keep ${m.author_name}'s message as a note`}>{kept.has(m.ref) ? "✓ Sent to Uni" : "⤓ Keep"}</button>}
-          <button onClick={() => actions.current.toUni(m, "ask")} aria-label={`Ask Uni about ${m.author_name}'s message`}>✦ Ask Uni</button>
-          <button onClick={() => void copyText(m.body, "Copied text")} aria-label={`Copy ${m.author_name}'s message as markdown`}>⧉ Copy text</button>
-          {!inThread && <button onClick={() => actions.current.openThread(m)} aria-label={`Reply in thread to ${m.author_name}`}>Reply in thread</button>}
-          {inThread && m.ref !== root && <button onClick={() => actions.current.reply(m.ref)} aria-label={`Reply to ${m.author_name}`}>Reply</button>}
-          {m.author === identity && editing !== m.ref && <button onClick={() => setEditing(m.ref)} aria-label="Edit your message">Edit</button>}
+        <div className={`message-more ${menuFor === m.ref ? "open" : ""}`}>
+          <button className="message-more-go" onClick={() => setMenuFor(menuFor === m.ref ? null : m.ref)} aria-label={`More actions for ${m.author_name}'s message`} aria-haspopup="menu" aria-expanded={menuFor === m.ref}>⋯</button>
+          {menuFor === m.ref && <div className="message-menu" role="menu" aria-label="Message actions" onClick={(e) => { if (e.target instanceof Element && !e.target.closest(".danger, [aria-label^='Delete'], [aria-label^='Tap again']")) setMenuFor(null); }}>
+          <button role="menuitem" onClick={() => setReactFor(reactFor === m.ref ? null : m.ref)} aria-label={`React to ${m.author_name}`}>React</button>
+          {voiceOf(m) ? <button role="menuitem" onClick={() => actions.current.keepVoice(m, voiceOf(m)!)} disabled={kept.has(m.ref)} aria-label={`Keep ${m.author_name}'s voice message as a note`}>{kept.has(m.ref) ? "✓ Kept" : "Keep as note"}</button>
+            : <button role="menuitem" onClick={() => actions.current.toUni(m, "note")} disabled={kept.has(m.ref)} aria-label={`Keep ${m.author_name}'s message as a note`}>{kept.has(m.ref) ? "✓ Sent to Uni" : "Keep as note"}</button>}
+          <button role="menuitem" onClick={() => actions.current.toUni(m, "ask")} aria-label={`Ask Uni about ${m.author_name}'s message`}>Ask Uni</button>
+          <button role="menuitem" onClick={() => void copyText(m.body, "Copied text")} aria-label={`Copy ${m.author_name}'s message as markdown`}>Copy text</button>
+          {!inThread && <button role="menuitem" onClick={() => actions.current.openThread(m)} aria-label={`Reply in thread to ${m.author_name}`}>Reply in thread</button>}
+          {inThread && m.ref !== root && <button role="menuitem" onClick={() => actions.current.reply(m.ref)} aria-label={`Reply to ${m.author_name}`}>Reply</button>}
+          {m.author === identity && editing !== m.ref && <button role="menuitem" onClick={() => setEditing(m.ref)} aria-label="Edit your message">Edit</button>}
           {m.author === identity && <DeleteButton key={`del-${m.ref}`} label="your message" onDelete={() => actions.current.deleteOwn(m)} />}
+          </div>}
         </div>
       </div>
     </article>;
@@ -1455,7 +1467,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     {renderList(messages, false)}
   </>,
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  [messages, identity, reactFor, kept, answered, root, older, roomName, editing, focusRef, relayOrigin]);
+  [messages, identity, reactFor, menuFor, kept, answered, root, older, roomName, editing, focusRef, relayOrigin]);
 
   const topNote = notes[notes.length - 1];
   // A top-level note Back closes its tab and returns to the last used tab.
@@ -1561,7 +1573,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const areaRoomFor = (id: string | null | undefined) => {
     const room = id && channel === id && !root ? currentRoom : undefined;
     if (!id || !room) return null;
-    return { id, messages, loaded: loadedView === `${id}|null`, me: identity, render: (above: ReactNode) => roomPane(room, above), compose: composeHere };
+    return { id, messages, loaded: loadedView === `${id}|null`, me: identity, render: (above: ReactNode, placeholder?: string) => roomPane(room, above, placeholder), compose: composeHere };
   };
   // An area learns its room from the area note; the tab remembers it, and the room view follows the tab.
   const syncAreaRoom = (id: string | null) => {
