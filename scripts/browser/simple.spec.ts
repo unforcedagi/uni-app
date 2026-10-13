@@ -66,7 +66,6 @@ test.describe('simple', () => {
     await expect(needs.locator('.cp-need')).toHaveCount(2);
     // the decision on this very node leads and carries its options as buttons
     await expect(needs.locator('.cp-need').first()).toContainText('Decide the ATLAS hosting');
-    await expect(needs.locator('.cp-need').first()).toContainText('Decide');
     await expect(needs.locator('.cp-opt')).toHaveText(['Self-host', 'Managed']);
     await expect(needs).toContainText('SOW for the commons grant');
     await expect(needs).toContainText('Confirm scope with Casey');
@@ -114,7 +113,7 @@ test.describe('simple', () => {
     await expect(needs.locator('.cp-need')).toHaveCount(3);
     await expect(page.locator('.cp-more')).toHaveCount(0);
     await expect(page.locator('.cp-body')).not.toContainText(/\+\d+ more/);
-    await page.getByRole('button', { name: /^Everything here/ }).click();
+    await page.getByRole('button', { name: /^All of .*'s work/ }).click();
     await expect(page.locator('.th-panel')).toBeVisible();
     await expect(page.locator('.wr-needs')).toBeVisible();
   });
@@ -144,6 +143,62 @@ test.describe('simple', () => {
     await expect(page.getByRole('status').filter({ hasText: /already decided/i })).toBeVisible();
     await expect(needs).not.toContainText('Decide the ATLAS hosting');
     await expect.poll(async () => (await calls(page, 'vault_decide')).length).toBe(1);
+  });
+
+  test('needs-you rows are one line each, raw links removed, and fit above the fold at 1280x720', async ({ page }) => {
+    test.skip(!wide(page), 'side panel');
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await boot(page);
+    await scope(page).locator('.th-go[aria-label^="Uni,"]').click();
+    await openCompanion(page);
+    const items = page.locator('.cp-body .cp-item');
+    await expect(items).toHaveCount(3);
+    await expect(page.locator('.cp-body')).not.toContainText(/https?:\/\//);
+    for (const sel of ['.cp-title', '.cp-detail']) for (const el of await page.locator(`.cp-body ${sel}`).all()) {
+      expect(await el.evaluate((e) => getComputedStyle(e).whiteSpace === 'nowrap' && e.getBoundingClientRect().height < 24)).toBeTruthy();
+    }
+    const all = await page.getByRole('button', { name: /^All of .*'s work/ }).boundingBox();
+    expect(all!.y + all!.height).toBeLessThanOrEqual(720);
+    await page.screenshot({ path: `${SHOTS}/fold-1280x720.png` }).catch(() => {});
+  });
+
+  test('a decision is a button row: its title on one line, its options as buttons', async ({ page }) => {
+    await boot(page);
+    await openRoom(page, 'ATLAS');
+    await openCompanion(page);
+    const item = page.locator('.cp-item').filter({ hasText: 'Decide the ATLAS hosting' });
+    await expect(item.locator('.cp-title')).toHaveCSS('white-space', 'nowrap');
+    await expect(item.locator('.cp-opt')).toHaveText(['Self-host', 'Managed']);
+    for (const b of await item.locator('.cp-opt').all()) expect(await b.evaluate((e) => getComputedStyle(e).backgroundColor)).not.toBe('rgba(0, 0, 0, 0)');
+  });
+
+  test('the "where this stands" row folds and unfolds the panel', async ({ page }) => {
+    test.skip(!wide(page), 'side panel');
+    await boot(page);
+    await openRoom(page, 'ATLAS');
+    await expect(page.locator('.cp.side.open')).toBeVisible();
+    const w = (await page.locator('.cp.side').boundingBox())!.width;
+    await page.getByRole('button', { name: 'Hide where this stands' }).click();
+    await expect(page.locator('.cp.side.folded')).toBeVisible();
+    expect((await page.locator('.cp.side').boundingBox())!.width).toBeLessThan(w - 150);
+    await page.getByRole('button', { name: 'Show where this stands' }).click();
+    await expect(page.locator('.cp.side.open')).toBeVisible();
+  });
+
+  test('a room with nothing owed to the user shows no empty "Needs you" heading', async ({ page }) => {
+    await boot(page);
+    await openRoom(page, 'Learn Vibe Build');
+    await openCompanion(page);
+    await expect(page.locator('.cp-h', { hasText: 'Needs you' })).toHaveCount(0);
+    await expect(page.locator('.cp-sec')).not.toHaveCount(-1);
+  });
+
+  test('the top of the conversation fades instead of cutting a line, and the panel scrolls on its own', async ({ page }) => {
+    test.skip(!wide(page), 'side panel');
+    await boot(page);
+    await openRoom(page, 'ATLAS');
+    expect(await page.locator('.sr-chat .message-list').evaluate((e) => { const c = getComputedStyle(e); return parseFloat(c.paddingTop) >= 20 && (c.maskImage || (c as any).webkitMaskImage || '').includes('gradient'); })).toBe(true);
+    expect(await page.locator('.cp.side').evaluate((e) => getComputedStyle(e).overflowY)).toBe('auto');
   });
 
   test('the fold is remembered on this device', async ({ page }) => {
@@ -197,7 +252,7 @@ test.describe('simple', () => {
     await boot(page);
     await openRoom(page, 'ATLAS');
     await openCompanion(page);
-    await page.getByRole('button', { name: /^Everything here/ }).click();
+    await page.getByRole('button', { name: /^All of .*'s work/ }).click();
     const panel = page.locator('.th-panel');
     await expect(panel).toBeVisible();
     await expect(page.locator('.th-head h1')).toHaveText('ATLAS');
@@ -215,7 +270,7 @@ test.describe('simple', () => {
     await boot(page);
     await openRoom(page, 'ATLAS');
     await openCompanion(page);
-    await page.getByRole('button', { name: /^Everything here/ }).click();
+    await page.getByRole('button', { name: /^All of .*'s work/ }).click();
     await page.locator('.wr-row[data-id="T-07"] .wr-main').click();
     await page.getByRole('button', { name: 'Open in #atlas/build' }).click();
     await expect(page.locator('.sr-chat .message')).toHaveCount(3);
@@ -252,7 +307,7 @@ test.describe('simple', () => {
   test('a node held by an ancestor\'s room says so and writes to that room', async ({ page }) => {
     await boot(page);
     await openRoom(page, 'Atlas Institute');
-    await expect(page.locator('.sr-door')).toHaveText('held by Atlas');
+    await expect(page.locator('.sr-door')).toHaveCount(0);
     await expect(page.locator('.sr-chat').getByRole('textbox', { name: /^Message / })).toHaveAttribute('placeholder', 'Message #atlas');
   });
 
@@ -261,7 +316,8 @@ test.describe('simple', () => {
     await expect(scope(page).locator('.th-tag, .th-open, .th-stump, .th-door')).toHaveCount(0);
     await expect(scope(page).locator('.th-dot').first()).toBeVisible();
     await expect(scope(page).locator('.th-go[aria-label^="ATLAS,"] .th-sub')).toHaveText('#atlas/build');
-    await expect(scope(page).locator('.th-go[aria-label^="Atlas Institute,"] .th-sub')).toHaveText('held by Atlas');
+    await expect(scope(page).locator('.th-go[aria-label^="Atlas Institute,"] .th-sub')).toHaveCount(0);
+    await expect(scope(page)).not.toContainText('held by');
     // a dot only where the room's OWN node has something that needs you: ATLAS holds T-07, its parent Atlas holds nothing itself
     await expect(scope(page).locator('.th-go[aria-label^="ATLAS,"] .th-dot')).toHaveCount(1);
     await expect(scope(page).locator('.th-go[aria-label^="Atlas,"] .th-dot')).toHaveCount(0);

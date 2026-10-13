@@ -379,7 +379,7 @@ Two proposals wait on a scope decision.
     const mk = (id: string, title: string, node: string, extra: Record<string, unknown> = {}, tag = 'task') => ({ id, path: `Tasks/${title}`, extension: 'md', tags: [tag], createdAt: T0, updatedAt: T0, lastUpdatedBy: 'cdf67944-c5f2-4e42-a0d8-02ce7a95bbdb', lastUpdatedVia: 'api', metadata: { node, state: 'open', owner: 'aaron', ...extra } });
     const C26 = 'Projects/COhere/COhere 2026';
     const taskNotes: any[] = d.tasks ? [
-      mk('k1', 'T-03 COhere festival readiness', C26, { state: 'waiting', waiting_on: 'aaron', due: '2026-10-12', next: 'Check-in PR by Oct 12', priority: 'now' }),
+      mk('k1', 'T-03 COhere festival readiness', C26, { state: 'waiting', waiting_on: 'aaron', due: '2026-10-12', next: 'Check-in PR by Oct 12, see https://example.invalid/pr/12 for the diff', priority: 'now' }),
       mk('k2', 'T-64 COhere app spec', C26, { owner: 'room:cohere', state: 'doing' }),
       mk('k3', 'T-65 Sponsorship invoice draft', C26, { priority: 'soon', priority_by: 'weigh.py 2026-10-12', next: 'Send to Casey for the numbers' }),
       mk('k4', 'T-33 Casey call: book it', 'Areas/Techne', { priority: 'now' }),

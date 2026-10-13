@@ -23,12 +23,12 @@ test.describe('nested rooms', () => {
     await expect(scope.locator('.th-go[aria-label^="ATLAS,"]')).toContainText('atlas/build');
     await expect(scope.locator('.th-go[aria-label^="ATLAS,"]')).not.toContainText('atlas/atlas');
     await expect(scope.locator('.th-go[aria-label^="Learn Vibe Build,"]')).toContainText('atlas/teach');
-    await expect(scope.locator('.th-go[aria-label^="Atlas Institute,"]')).toContainText('held by Atlas');
+    await expect(scope.locator('.th-go[aria-label^="Atlas Institute,"]')).not.toContainText('held by');
     expect(await fits(page)).toBe(true);
     await shot(page, 'tree');
     // T-124: a node held by an ancestor's room opens that room's conversation, and says whose it is
     await scope.locator('.th-go[aria-label^="Atlas Institute,"]').click();
-    await expect(page.locator('.sr-door')).toHaveText('held by Atlas');
+    await expect(page.locator('.sr-door')).toHaveCount(0);
     await expect(page.locator('.sr-chat').getByRole('textbox', { name: /^Message / })).toHaveAttribute('placeholder', 'Message #atlas');
     if (!wide(page)) await page.locator('.sr-back').click();
     await scope.locator('.th-go[aria-label^="ATLAS,"]').click();
@@ -37,7 +37,7 @@ test.describe('nested rooms', () => {
     // the conversation is in place (no new tab); "Everything here" is the node page, whose Open #room returns to it
     const tabs = await page.locator('.tab-title').count();
     if (!wide(page)) await page.locator('.cp-line').click();
-    await page.getByRole('button', { name: /^Everything here/ }).click();
+    await page.getByRole('button', { name: /^All of .*'s work/ }).click();
     const open = page.getByRole('button', { name: 'Open #atlas/build' });
     await expect(open).toBeVisible();
     expect((await open.boundingBox())!.height).toBeGreaterThanOrEqual(44);

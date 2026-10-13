@@ -28,7 +28,7 @@ async function full(page: Page) {
   await page.locator('.sr, .th-panel').first().waitFor();
   if (await page.locator('.th-panel').count()) return;
   if (await page.locator('.cp-line[aria-expanded="false"]').count()) await page.locator('.cp-line').click();
-  await page.getByRole('button', { name: /^Everything here/ }).click();
+  await page.getByRole('button', { name: /^All of .*'s work/ }).click();
   await page.locator('.th-panel').waitFor();
 }
 /** Open a node by name: a row of the left column (wide), or a row of the room tree / a child in the panel (phone). */
@@ -53,7 +53,7 @@ test.describe('rooms nav', () => {
       await expect(nav.locator('.th-go[aria-current="page"]')).toHaveAttribute('data-path', '');
       for (const n of ['Boulder', 'COhere 2026', 'Techne', 'Unforced Development']) await expect(nav.locator(`.th-go[aria-label^="${n},"]`)).toBeVisible();
       await expect(nav.locator('.th-go[aria-label^="COhere 2026,"]')).toContainText('boulder/cohere');
-      await expect(nav.locator('.th-go[aria-label^="Boulder Civic Calendar,"]')).toContainText('held by Boulder');
+      await expect(nav.locator('.th-go[aria-label^="Boulder Civic Calendar,"]')).not.toContainText('held by');
       // the column stays while the level changes, and marks the selected one
       await page.locator('.th-roomnav .th-go[aria-label^="Techne,"]').click();
       await title(page, 'Techne');

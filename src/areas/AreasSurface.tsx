@@ -283,10 +283,10 @@ export default function AreasSurface({ zoom, identity, talk, path, rooms: hostRo
   const needTop = topNeeds(where, node.path);
   const rawStands = tasks.tree?.stands.get(node.path) ?? (typeof node.metadata.stands === "string" ? { text: node.metadata.stands, at: typeof node.metadata.stands_at === "string" ? node.metadata.stands_at : null } : null);
   const stands = standsLine(rawStands, privateLevel ? [] : levelTasks, now);
-  const companionProps = { stands, ready: tasks.ready, needs: needTop, runs, onTask: setSheet, onDecide: (t: Task, o: string) => void tasks.decide(t, o), onEverything: () => { setSheet(null); setFull(true); } };
+  const companionProps = { stands, ready: tasks.ready, needs: needTop, runs, nodeName: node.name, onTask: setSheet, onDecide: (t: Task, o: string) => void tasks.decide(t, o), onEverything: () => { setSheet(null); setFull(true); } };
   const roomView_ = roomFor(target?.id);
   const placeholder = chatPlaceholder({ name: node.name, slash: nodeView.own ? nodeView.slash : null, heldBy: nodeView.heldBy ? roomSlug(nodeView.heldBy.name) : null });
-  const doorText = nodeView.own && nodeView.slash ? `#${nodeView.slash}` : nodeView.heldNode ? `held by ${nodeView.heldNode}` : nodeView.heldBy ? `held by #${roomSlug(nodeView.heldBy.name)}` : "";
+  const doorText = nodeView.own && nodeView.slash ? `#${nodeView.slash}` : "";
   const room = <section className="sr" aria-label={`Conversation: ${node.name}`}>
     <header className="sr-head">
       {!wide && <button type="button" className="sr-back" onClick={() => (back ? back() : undefined)} aria-label="Back to rooms"><span aria-hidden="true">‹</span></button>}
