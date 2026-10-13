@@ -2,7 +2,9 @@
 // on launch and on open, then refreshes in the background. Pure over a Storage so it is unit-tested; nothing here ever leaves the device.
 export const CACHE_MESSAGES = 60;
 /** Rooms whose messages are kept; the least recently written go first. */
-export const CACHE_ROOMS = 24;
+export const CACHE_ROOMS = 12;
+/** A room's entry stays under this many characters (long bot messages are big): the oldest go first. */
+export const CACHE_ROOM_CHARS = 90_000;
 const WHO = "uni.cache.who.v1";
 const ROOMS = (who: string) => `uni.cache.rooms.v1:${who}`;
 const MSGS = (who: string, channel: string) => `uni.cache.msgs.v1:${who}:${channel}`;
@@ -32,12 +34,14 @@ export function readMessages<M>(s: Store, who: string | null, channel: string): 
 export function writeMessages<M extends { ts: number }>(s: Store, who: string | null, channel: string, rows: readonly M[]) {
   if (!who) return;
   try {
-    const keep = [...rows].sort((a, b) => a.ts - b.ts).slice(-CACHE_MESSAGES);
+    let keep = [...rows].sort((a, b) => a.ts - b.ts).slice(-CACHE_MESSAGES);
+    let json = JSON.stringify(keep);
+    while (json.length > CACHE_ROOM_CHARS && keep.length > 1) { keep = keep.slice(Math.ceil(keep.length / 4)); json = JSON.stringify(keep); }
     const idx = (parse<string[]>(s.getItem(INDEX(who))) ?? []).filter((c) => c !== channel);
     if (!keep.length) { s.removeItem(MSGS(who, channel)); s.setItem(INDEX(who), JSON.stringify(idx)); return; }
     idx.push(channel);
     for (const old of idx.splice(0, Math.max(0, idx.length - CACHE_ROOMS))) s.removeItem(MSGS(who, old));
-    s.setItem(MSGS(who, channel), JSON.stringify(keep));
+    s.setItem(MSGS(who, channel), json);
     s.setItem(INDEX(who), JSON.stringify(idx));
   } catch { /* full or private storage: the cache is a convenience */ }
 }
