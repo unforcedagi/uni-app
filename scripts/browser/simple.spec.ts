@@ -115,16 +115,15 @@ test.describe('simple', () => {
     if (await lede.count()) await expect(lede).not.toHaveText('Atlas Institute.');
   });
 
-  test('every item that needs you is listed (no cap, no "+N more"); "Everything here" goes to the full page', async ({ page }) => {
+  test('every item that needs you is reachable (whole rows, the rest behind "+N more ›"); "Everything here" goes to the full page', async ({ page }) => {
     await boot(page);
     if (!wide(page)) await expect(page.locator('.th-phone-tree')).toBeVisible();
     await scope(page).locator('.th-go[aria-label^="Uni,"]').click();
     await expect(page.locator('.sr-title')).toHaveText('Uni');
     await openCompanion(page);
     const needs = page.locator('.cp-body').getByRole('region', { name: 'Needs you' });
+    if (await page.locator('.cp-more-rows').count()) await page.locator('.cp-more-rows').click();
     expect(await needs.locator('.cp-need').count()).toBeGreaterThanOrEqual(3);
-    await expect(page.locator('.cp-more')).toHaveCount(0);
-    await expect(page.locator('.cp-body')).not.toContainText(/\+\d+ more/);
     await page.getByRole('button', { name: /^All of .*'s work/ }).click();
     await expect(page.locator('.th-panel')).toBeVisible();
     await expect(page.locator('.wr-needs')).toBeVisible();
@@ -738,19 +737,18 @@ test.describe('simple', () => {
     await expect(needs.locator('.cp-item').filter({ hasText: 'Sponsorship invoice draft' }).locator('.cp-next')).toHaveText('Send to Casey for the numbers');
   });
 
-  test('r7: a long next step wraps to four lines and "More" opens it in place', async ({ page }) => {
+  test('r7: a long next step is clamped within the three lines of its row and "More" opens it in place', async ({ page }) => {
     test.skip(!wide(page), 'side panel');
     await boot(page, { longNext: true });
     await scope(page).locator('.th-go[aria-label^="Uni,"]').click();
     await openCompanion(page);
     const item = page.locator('.cp-item').filter({ hasText: 'COhere festival readiness' });
-    const next = item.locator('.cp-next');
-    const h = async () => (await next.boundingBox())!.height;
+    const h = async () => (await item.boundingBox())!.height;
     const closed = await h();
     await item.getByRole('button', { name: 'More' }).click();
     expect(await h()).toBeGreaterThan(closed + 10);
     await expect(item.getByRole('button', { name: 'Less' })).toBeVisible();
-    await expect(next).toContainText('third question');
+    await expect(item.locator('.cp-next')).toContainText('third question');
     await item.getByRole('button', { name: 'Less' }).click();
     expect(await h()).toBe(closed);
   });
@@ -836,7 +834,7 @@ test.describe('simple', () => {
     await scope(page).locator('.th-go[aria-label^="Uni,"]').click();
     await openCompanion(page);
     const item = page.locator('.cp-item').filter({ hasText: 'after-event' });
-    await expect(item.getByText('Your call: yes or no')).toBeVisible();
+    await expect(item.getByText('Your call')).toBeVisible();
     await expect(item.getByRole('button', { name: 'Yes' })).toBeVisible();
     await expect(item.getByRole('button', { name: 'No', exact: true })).toBeVisible();
     await item.getByRole('button', { name: 'Yes' }).click();
@@ -845,7 +843,7 @@ test.describe('simple', () => {
     expect(call.from).toBe('open'); expect(call.to).toBe('decided');
     // a decision with real options keeps them, and no yes/no
     const opts = page.locator('.cp-item').filter({ hasText: 'hosting' });
-    if (await opts.count()) await expect(opts.getByText('Your call: yes or no')).toHaveCount(0);
+    if (await opts.count()) await expect(opts.getByText('Your call')).toHaveCount(0);
   });
 
   test('r9: a note id in a next step reads as the note\'s title, never the id', async ({ page }) => {
@@ -880,5 +878,102 @@ test.describe('simple', () => {
     await expect(label).toHaveText(/^All of .+'s work$/);
     await expect(label).not.toHaveText('All work');
     expect(await label.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+  });
+
+  test('r10: a cut decision with no full question anywhere opens to decide, with no Yes/No beside a fragment', async ({ page }) => {
+    test.skip(!wide(page), 'side panel');
+    await boot(page, { cutNoAsk: true });
+    await scope(page).locator('.th-go[aria-label^="Uni,"]').click();
+    await openCompanion(page);
+    const item = page.locator('.cp-item').filter({ hasText: 'Open to decide' }).first();
+    await expect(item).toBeVisible();
+    await expect(item.getByRole('button', { name: 'Yes' })).toHaveCount(0);
+    await expect(item.getByRole('button', { name: 'No', exact: true })).toHaveCount(0);
+    // never Yes/No next to text ending in an ellipsis, anywhere in the panel
+    for (const row of await page.locator('.cp-item').all()) {
+      if (await row.getByRole('button', { name: 'Yes' }).count()) expect((await row.locator('.cp-title').innerText()).trim()).not.toMatch(/(…|\.\.\.)$/);
+    }
+    // and no visible row's title ends on one
+    for (const t of await page.locator('.cp-item .cp-title').allInnerTexts()) expect(t.trim()).not.toMatch(/(…|\.\.\.)$/);
+  });
+
+  test('r10: every Needs-you row is at most three lines of text, and no row is cut at the panel bottom', async ({ page }) => {
+    test.skip(!wide(page), 'side panel');
+    await boot(page, { crowded: true, cutDecision: true });
+    await scope(page).locator('.th-go[aria-label^="Uni,"]').click();
+    await openCompanion(page);
+    await expect(page.locator('.cp-item').first()).toBeVisible();
+    const panel = page.locator('aside.cp.side');
+    const foot = await page.locator('.cp-foot').boundingBox();
+    const pb = await panel.boundingBox();
+    for (const row of await page.locator('.cp-item').all()) {
+      const lines = await row.evaluate((el) => {
+        const lh = (n: Element) => parseFloat(getComputedStyle(n).lineHeight) || 20;
+        return [...el.querySelectorAll<HTMLElement>('.cp-title, .cp-detail, .cp-next')].reduce((a, n) => a + Math.round(n.getBoundingClientRect().height / lh(n)), 0);
+      });
+      expect(lines).toBeLessThanOrEqual(3);
+      const b = await row.boundingBox();
+      expect(b!.y + b!.height).toBeLessThanOrEqual(Math.min(foot!.y, pb!.y + pb!.height) + 1);
+    }
+    // the rows that don't fit wait behind "+N more ›"; a tap shows them
+    const more = page.locator('.cp-more-rows');
+    await expect(more).toHaveText(/^\+\d+ more ›$/);
+    const before = await page.locator('.cp-item').count();
+    await more.click();
+    expect(await page.locator('.cp-item').count()).toBeGreaterThan(before);
+  });
+
+  test('r10: a row clamps with More and a tap shows all of it', async ({ page }) => {
+    test.skip(!wide(page), 'side panel');
+    await boot(page, { crowded: true });
+    await scope(page).locator('.th-go[aria-label^="Uni,"]').click();
+    await openCompanion(page);
+    const row = page.locator('.cp-item').first();
+    const more = row.locator('.cp-row-more');
+    await expect(more).toHaveText('More');
+    const h = (await row.boundingBox())!.height;
+    await more.click();
+    await expect(more).toHaveText('Less');
+    expect((await row.boundingBox())!.height).toBeGreaterThan(h);
+  });
+
+  test('r10: a row says its state once: no "waiting, waiting on" in the opened item, no repeat of the row\'s label', async ({ page }) => {
+    test.skip(!wide(page), 'side panel');
+    await boot(page);
+    await scope(page).locator('.th-go[aria-label^="Uni,"]').click();
+    await openCompanion(page);
+    const row = page.locator('.cp-item').filter({ hasText: 'COhere festival readiness' }).first();
+    await row.locator('.cp-need').click();
+    const sheet = page.getByRole('dialog');
+    await expect(sheet).toBeVisible();
+    await expect(sheet).not.toContainText(/waiting, waiting on/i);
+    await expect(sheet.locator('.task-facts')).toContainText('Waiting on you');
+    expect(await sheet.getByText(/waiting on/i).count()).toBe(1);
+    await expect(row).not.toContainText('Waiting on you');
+  });
+
+  test('r10: Recent never lists the room you are in, and never a room twice', async ({ page }) => {
+    test.skip(!wide(page), 'sidebar column');
+    await boot(page);
+    const go = (n: string) => scope(page).locator(`.th-go[aria-label^="${n},"]`).first().click();
+    await go('Uni'); await go('Techne'); await go('Uni'); await go('Techne'); await go('Uni');
+    const recent = page.locator('.th-roomnav').getByRole('region', { name: 'Recent' });
+    const names = await recent.locator('button').allTextContents();
+    expect(new Set(names).size).toBe(names.length);
+    expect(names).not.toContain('Uni');
+    const h = (await recent.boundingBox())!.height;
+    await go('Techne');
+    expect((await recent.boundingBox())!.height).toBe(h);
+  });
+
+  test('r10: scrolled to the end, the sidebar\'s last row is whole and sits above Recent', async ({ page }) => {
+    test.skip(!wide(page), 'sidebar column');
+    await boot(page);
+    const wrap = page.locator('.th-column .th-rows-wrap');
+    await wrap.evaluate((el) => { el.scrollTop = el.scrollHeight; });
+    const last = page.locator('.th-column .th-row').last();
+    const lb = (await last.boundingBox())!; const wb = (await wrap.boundingBox())!; const rb = (await page.locator('.th-recent').boundingBox())!;
+    expect(lb.y + lb.height).toBeLessThanOrEqual(wb.y + wb.height + 0.5);
+    expect(lb.y + lb.height).toBeLessThanOrEqual(rb.y + 0.5);
   });
 });

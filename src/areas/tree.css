@@ -379,7 +379,6 @@ h3.wr-h { font-weight: 400; }
 .cp-need { all: unset; box-sizing: border-box; width: 100%; min-width: 0; min-height: 44px; display: flex; flex-direction: column; justify-content: center; gap: 1px; padding: 8px 0; border-bottom: 1px solid var(--th-hair2); cursor: pointer; }
 .cp-need:hover .cp-title { text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
 .cp-title { font: 500 15px/1.35 var(--th-sans); overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow-wrap: anywhere; }
-.cp-need.decision .cp-title { display: block; overflow: visible; }
 .cp-go { color: var(--th-mute); }
 .cp-need small { overflow: hidden; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; font: 400 12.5px var(--th-sans); color: var(--th-mute); }
 .cp-ago { display: block; margin-top: 4px; font: 400 12.5px var(--th-sans); color: var(--th-mute); letter-spacing: 0; }
@@ -395,7 +394,7 @@ h3.wr-h { font-weight: 400; }
 .cp-run i { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--th-ink); align-self: center; }
 .cp-run[data-state="queued"] i { background: none; box-shadow: inset 0 0 0 1.5px var(--th-ink); }
 .cp-run small { margin-left: auto; font: 400 12.5px var(--th-sans); color: var(--th-mute); }
-.cp-foot { position: sticky; bottom: 0; margin-top: auto; padding-top: 40px; padding-bottom: 12px; background: linear-gradient(to bottom, transparent, var(--th-paper) 34px); }
+.cp-foot { position: sticky; bottom: 0; margin-top: auto; padding-top: 8px; padding-bottom: 12px; background: var(--th-paper); border-top: 1px solid var(--th-hair2); }
 /* a list longer than the panel: a rule above the footer says there is more under it, and the last item ends above it */
 .cp.side.open { scroll-padding-bottom: 80px; }
 .cp-list { padding-bottom: 6px; }
@@ -472,7 +471,7 @@ h3.wr-h { font-weight: 400; }
 .th-phone-tree:not(.th-column) .th-go { min-height: 48px; }
 .th-phone-tree:not(.th-column) .th-treehead .note-title { font-size: 28px; }
 
-.th-recent { flex: none; border-top: 1px solid var(--th-hair2); padding: 6px 8px 8px 10px; }
+.th-recent { flex: none; box-sizing: border-box; height: 124px; overflow: hidden; border-top: 1px solid var(--th-hair2); padding: 6px 8px 8px 10px; }
 .th-recent h2 { margin: 0 0 2px; font: 600 10.5px/1.6 var(--th-mono); letter-spacing: .1em; text-transform: uppercase; color: var(--th-mute); }
 .th-recent ul { list-style: none; margin: 0; padding: 0; }
 .th-recent button { all: unset; box-sizing: border-box; display: block; width: 100%; padding: 2px 4px; font: 400 12.5px/1.4 var(--th-sans); color: var(--th-ink2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; border-radius: 5px; }
@@ -498,5 +497,16 @@ h3.wr-h { font-weight: 400; }
 .cp-ref:focus-visible { outline: 2px solid var(--th-ink); outline-offset: 2px; }
 .cp-detail.overdue { color: var(--th-mute); }
 /* the sidebar's last row clears the bottom edge and Recent, with a fade that says the list goes on */
-.th-column .th-rows { padding-bottom: 44px; }
-.th-column .th-rows-wrap { -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 22px), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - 22px), transparent); }
+.th-column .th-rows { padding-bottom: 16px; }
+.th-column .th-rows-wrap { -webkit-mask-image: none; mask-image: none; }
+
+/* r10: whole rows (at most three lines, then More), a quiet neutral while a note's title is read, an opaque footer instead of a fade */
+.cp-title { display: -webkit-box; }
+.cp-need .cp-detail { display: block; -webkit-line-clamp: 1; line-clamp: 1; }
+.cp-detail.overdue { color: var(--th-ink2); font-weight: 500; }
+.cp-row-more { margin-bottom: 4px; }
+.cp-more-rows { margin: 2px 0 6px; }
+.cp-ref-wait { color: var(--th-mute); }
+.cp-yesno { align-items: center; }
+.cp-yesno .cp-call { margin: 0 4px 0 0; }
+.cp-need .cp-title .cp-ref, .cp-need .cp-title span { display: inline; }

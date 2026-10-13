@@ -5,11 +5,13 @@ import { invoke } from "@tauri-apps/api/core";
 import { buildTaskTree, failureKind, groupOf, LIVE_STATES, nodeFilterKeys, parseNodes, parseTask, subtreePaths, type AnyState, type FailureKind, type Priority, type RawNote, type Task, type TaskTree } from "./taskCore.ts";
 import { ROOT } from "./treeCore.ts";
 import { splitTitle } from "./whereCore.ts";
-import { askFromContent, isCutTitle } from "./simpleCore.ts";
+import { askFromContent, askOrder, isCutTitle } from "./simpleCore.ts";
 import { activeProfile } from "./profile.ts";
 
 export type Call = (cmd: string, args: Record<string, unknown>) => Promise<unknown>;
 const LIMIT = 200;
+const ASK_READS = 40;
+const ASK_PARALLEL = 6;
 
 export type WriteResult = { ok: true; updatedAt: string | null; lastUpdatedBy: string | null; lastUpdatedVia: string | null } | { ok: false; kind: FailureKind; message: string };
 
@@ -39,18 +41,21 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
   const askCache = new Map<string, string>();
   /**
    * The lists carry no content, so a decision or one of the user's tasks whose title was cut short ("…") gets its full question from the first
-   * line of its note (one read each, at most 12, only for those). Called after the list is already on screen; resolves to the new asks.
+   * line of its note (one read each, only for those; decisions, Now and the soonest due first, at most 40, six at a time). Called after the
+   * list is already on screen; resolves to the new asks.
    */
   async function loadAsks(tasks: readonly Task[]): Promise<Map<string, string>> {
-    const cut = tasks.filter((t) => !askCache.has(t.id) && (t.kind === "decision" || groupOf(t) === "you") && isCutTitle(splitTitle(t.title).rest)).slice(0, 12);
+    const cut = askOrder(tasks.filter((t) => !askCache.has(t.id) && (t.kind === "decision" || groupOf(t) === "you") && isCutTitle(splitTitle(t.title).rest))).slice(0, ASK_READS);
     const asks = new Map<string, string>();
-    await Promise.all(cut.map(async (t) => {
-      try {
-        const r = (await call("vault_note", { vault: name(), noteRef: t.id })) as { note?: RawNote } | null;
-        const ask = askFromContent(typeof r?.note?.content === "string" ? r.note.content : "");
-        if (ask) { asks.set(t.id, ask); askCache.set(t.id, ask); }
-      } catch { /* the cut title still shows */ }
-    }));
+    for (let i = 0; i < cut.length; i += ASK_PARALLEL) {
+      await Promise.all(cut.slice(i, i + ASK_PARALLEL).map(async (t) => {
+        try {
+          const r = (await call("vault_note", { vault: name(), noteRef: t.id })) as { note?: RawNote } | null;
+          const ask = askFromContent(typeof r?.note?.content === "string" ? r.note.content : "");
+          if (ask) { asks.set(t.id, ask); askCache.set(t.id, ask); }
+        } catch { /* the row opens to decide instead */ }
+      }));
+    }
     return asks;
   }
 

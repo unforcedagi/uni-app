@@ -100,3 +100,34 @@ export function askFromContent(content: string | null | undefined): string {
   if (out.trim()) return out.trim();
   return `${plain.slice(0, ASK_MAX).replace(/\s+\S*$/, "")}…`;
 }
+
+/** A cut title without its "…": what is left reads as a plain fragment, never as a row that ends on an ellipsis. */
+export const withoutCut = (rest: string): string => rest.replace(/\s*(…|\.\.\.)\s*$/, "").trim();
+
+/** What a Needs-you row says about its ask, given what is known: the full question, a whole title, or that there is no whole question. */
+export type RowAsk = { text: string; /** a decision with no full question anywhere: open it to decide, no buttons */ openToDecide: boolean };
+export function rowAsk(full: string, ask: string | undefined, isDecision: boolean, hasNext: boolean): RowAsk {
+  if (!isCutTitle(full)) return { text: full, openToDecide: false };
+  if (ask && !isCutTitle(ask)) return { text: ask, openToDecide: false };
+  if (isDecision) return { text: "Open to decide", openToDecide: true };
+  return { text: hasNext ? withoutCut(full) : "", openToDecide: false };
+}
+
+/** One plain line for where a task stands, never both the state and who it waits on ("waiting, waiting on aaron"). */
+export function stateLine(t: { state: string; waitingOn: string | null; kind: string }, isMeFn: (who: string | null) => boolean, nameOf: (who: string) => string = (w) => w): string {
+  if (t.kind === "decision") return "Needs your decision";
+  if (isMeFn(t.waitingOn)) return "Waiting on you";
+  if (t.waitingOn) return `Waiting on ${nameOf(t.waitingOn)}`;
+  return t.state === "doing" ? "In progress" : t.state === "waiting" ? "Waiting" : "Open";
+}
+
+/** The cut-title reads that matter most go first: decisions, then Now, then the soonest due. */
+export function askOrder<T extends { kind: string; priority: string | null; due: string | null; title: string }>(tasks: readonly T[]): T[] {
+  const rank = (t: T) => (t.kind === "decision" ? 0 : t.priority === "now" ? 1 : 2);
+  return [...tasks].sort((a, b) => rank(a) - rank(b) || (a.due ?? "9999").localeCompare(b.due ?? "9999") || a.title.localeCompare(b.title));
+}
+
+/** How many text lines each part of a row may take so the whole stays within `budget` (3): title first, then the due line, then the next step. */
+export function lineBudget(titleLines: number, hasDue: boolean, budget = 3): { next: number } {
+  return { next: Math.max(0, budget - Math.min(titleLines, budget) - (hasDue ? 1 : 0)) };
+}
