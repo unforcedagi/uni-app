@@ -142,4 +142,12 @@ check("nestRooms: children indent under their parent, parent first; orphans keep
   assert.deepEqual(out.map((o) => [o.room.name, o.label, o.child]), [["build-log", "build-log", false], ["Uni", "Uni", false], ["atlas", "atlas", false], ["atlas/build", "build", true], ["atlas/teach", "teach", true], ["solo/child", "solo/child", false]]);
   assert.deepEqual(nestRooms([r("a"), r("b")]).map((o) => o.child), [false, false]);
 });
+check("an area whose channel points at its child's room does not show that room as its own (Boulder is not #cohere)", () => {
+  const t2 = buildTree([area("a-bou", "Boulder", { room: "boulder", channel: "r-coh" }), proj("p-coh", "COhere", "Areas/Boulder", { room: "cohere", channel: "r-coh" })]);
+  const b = roomView(t2, "Areas/Boulder", ROOMS, UNI);
+  assert.equal(b.slash, "boulder"); assert.equal(b.target?.id, "r-bou");
+  assert.equal(roomView(t2, "Projects/COhere", ROOMS, UNI).target?.id, "r-coh");
+  const noBoulderRoom = roomView(t2, "Areas/Boulder", ROOMS.filter((r) => r.id !== "r-bou"), UNI);
+  assert.equal(noBoulderRoom.own, false); assert.equal(noBoulderRoom.slash, null); assert.equal(noBoulderRoom.target?.id, "r-uni");
+});
 if (failed) { console.log(`\n${failed} failed`); process.exit(1); }
