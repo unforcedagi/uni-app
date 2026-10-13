@@ -57,7 +57,6 @@ test.describe('layout', () => {
     const w = await page.evaluate(() => localStorage.getItem('uni.area.chatWidth.v1'));
     // persisted across a reload and a different area
     await page.reload();
-    await page.getByRole('tab', { name: /Techne/ }).click();
     await expect(chat).toBeVisible();
     expect(Math.round((await chat.boundingBox())!.width)).toBe(Number(w));
     await mkdir('shots/t75', { recursive: true });
@@ -163,10 +162,10 @@ test.describe('the room is the real room', () => {
     await composer(page, 'Techne').fill('half a thought');
     await page.getByRole('button', { name: /Open #Techne/ }).click();
     await expect(page.locator('.conversation-header')).toContainText('Techne');
-    await expect(page.locator('.tab-chip')).toHaveCount(2);
+    await expect(page.locator('.tab-strip')).toHaveCount(0);
     await expect(composer(page, 'Techne')).toHaveValue('half a thought');
-    // the area tab is still there and still shows its chat
-    await page.getByRole('tab', { name: /Techne/ }).first().click();
+    // Back returns to the area and its chat (0.1.46: Back over the places visited)
+    await page.keyboard.press('Alt+ArrowLeft');
     await expect(page.locator('.area-bar-title')).toHaveText('Techne');
   });
 
@@ -174,7 +173,6 @@ test.describe('the room is the real room', () => {
     await bootAreas(page, 'seed');
     await openArea(page, 'Techne');
     await page.reload();
-    await page.getByRole('tab', { name: /Techne/ }).click();
     await expect(page.locator('.area-bar-title')).toHaveText('Techne');
     if (!isDesktop(page)) await page.locator('.sheet-peek').click();
     await expect(composer(page, 'Techne')).toBeVisible();
@@ -277,7 +275,7 @@ test.describe('suggestions', () => {
     await expect(composer(page, 'Techne')).toHaveValue('Pairing on the bridge tonight');
     await expect(composer(page, 'Techne')).toBeFocused();
     expect(await calls(page, 'post_message')).toHaveLength(0);
-    await expect(page.locator('.tab-chip'), 'no room tab opened: the composer is right there').toHaveCount(1);
+    await expect(page.locator('.tab-strip'), 'no room tab opened: the composer is right there').toHaveCount(0);
     // a second suggestion goes after the draft
     if (!isDesktop(page)) await page.locator('.sheet-peek').click(); // put the sheet down to reach the interface
     // the composer holds the keyboard (inert frame under a press catcher): one press hands it back to the app

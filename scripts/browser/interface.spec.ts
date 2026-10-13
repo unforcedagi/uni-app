@@ -64,9 +64,8 @@ test.describe('grant prompt', () => {
     expect(Object.keys(await grants(page))).toEqual(['app-techne']);
     // and it stays allowed after a reload
     await page.reload();
-    await rail(page).getByRole('button', { name: 'Uni', exact: true }).click();
-    await page.getByRole('tab', { name: /Techne/ }).click().catch(() => {});
-    if (!(await page.locator('.area-bar-title').isVisible())) await openArea(page, 'Techne');
+    // 0.1.46: the reload reopens the area itself
+    await expect(page.locator('.area-bar-title')).toHaveText('Techne');
     // a restored tab never starts the app by itself (it opens on the Brief); one tap on App does
     await expect(page.locator('iframe.area-frame')).toHaveCount(0);
     await page.getByRole('tab', { name: 'App', exact: true }).click();
@@ -281,7 +280,6 @@ test.describe('P2-C stop, revoke, and no auto-start of a restored app', () => {
     await openAreas(page); await openArea(page, 'Quiet');
     await expect(page.locator('iframe.area-frame')).toHaveCount(1);
     await page.reload();
-    await page.getByRole('tab', { name: /Quiet/ }).click();
     await expect(page.locator('.area-bar-title')).toHaveText('Quiet');
     await expect(page.getByRole('tab', { name: 'App', exact: true })).toBeVisible();
     await expect(page.locator('iframe')).toHaveCount(0);
@@ -360,14 +358,12 @@ test.describe('P3-N3 the "updated" notice stays until Accept', () => {
     await expect(page.locator('.area-updated')).toBeVisible();
     await appControl(page, 'Stop app');
     await page.reload();
-    await page.getByRole('tab', { name: /Quiet/ }).click();
     await page.getByRole('tab', { name: 'App', exact: true }).click();
     await expect(page.locator('iframe.area-frame')).toHaveCount(1);
     await expect(page.locator('.area-updated'), 'not consumed by the earlier view or the restart').toBeVisible();
     await page.locator('.area-updated').getByRole('button', { name: 'Accept' }).click();
     await expect(page.locator('.area-updated')).toHaveCount(0);
     await page.reload();
-    await page.getByRole('tab', { name: /Quiet/ }).click();
     await page.getByRole('tab', { name: 'App', exact: true }).click();
     await expect(page.locator('iframe.area-frame')).toHaveCount(1);
     await expect(page.locator('.area-updated')).toHaveCount(0);

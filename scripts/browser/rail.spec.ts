@@ -157,7 +157,7 @@ for (const size of [{ width: 844, height: 390 }, { width: 1092, height: 600 }]) 
   });
 }
 
-test('For you opened from a stale note returns to the reading surface', async ({ page }) => {
+test('For you opened after an old tab set (a note was active) returns to the reading surface; the note itself is not reopened (r7)', async ({ page }) => {
   await page.evaluate(() => {
     localStorage.removeItem('uni.lastSurface.v1');
     localStorage.setItem('uni.tabs.v1', JSON.stringify({ v: 1, tabs: [
@@ -166,7 +166,8 @@ test('For you opened from a stale note returns to the reading surface', async ({
     ], active: 'stale', recent: ['uni', 'stale'] }));
   });
   await page.reload();
-  await expect(page.locator('.note-title')).toBeVisible();
+  // 0.1.46: only places are restored, so the old set opens on its last place, not on the note
+  await expect(page.getByRole('textbox', { name: 'Message Uni' })).toBeVisible();
   await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'For you', exact: true }).click();
   await expect(page.locator('.note-back-label')).toHaveText('Uni');
   await page.locator('.note-back').click();

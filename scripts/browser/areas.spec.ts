@@ -52,9 +52,8 @@ test.describe('seed apps and navigation', () => {
     await expect(box).toHaveValue('Pairing on the bridge tonight');
     expect(await calls(page, 'post_message')).toHaveLength(0);
     // No room tab: the area's own chat took it.
-    await expect(page.locator('.tab-chip')).toHaveCount(1);
-    await expect(page.locator('.tab-chip').first()).toContainText('Techne');
-    await expect(page.locator('.tab-chip').first().locator('svg.mono-icon')).toHaveCount(1);
+    await expect(page.locator('.tab-strip')).toHaveCount(0);
+    await expect(page.locator('.area-bar-title')).toHaveText('Techne');
   });
 
   test('note.open uses the note sheet; Back returns to the area', async ({ page }) => {
@@ -96,8 +95,7 @@ test.describe('seed apps and navigation', () => {
     await openAreas(page);
     await openArea(page, 'Sanctum');
     await page.reload();
-    // Launch lands on Uni; the area tab itself is restored in the strip.
-    await page.getByRole('tab', { name: /Sanctum/ }).click();
+    // 0.1.46: launch reopens the place you were in.
     await expect(page.locator('.area-bar-title')).toHaveText('Sanctum');
     await page.locator('.area-bar .note-back').click();
     await expect(page.getByRole('heading', { name: 'Uni', level: 1 })).toBeVisible();
@@ -327,12 +325,12 @@ test.describe('suggestions: only a tap on host UI acts', () => {
     const bar = page.locator('.suggestion-bar');
     await expect(bar.locator('.suggestion')).toHaveCount(2);
     await expect(page.locator('.note-sheet')).toHaveCount(0);
-    await expect(page.locator('.tab-chip'), 'no room tab was opened').toHaveCount(1);
+    await expect(page.locator('.tab-strip'), 'no room tab was opened').toHaveCount(0);
     expect(await calls(page, 'post_message')).toHaveLength(0);
     await bar.getByRole('button', { name: 'Dismiss' }).first().click();
     await bar.getByRole('button', { name: 'Dismiss' }).first().click();
     await expect(bar).toHaveCount(0);
-    await expect(page.locator('.tab-chip')).toHaveCount(1);
+    await expect(page.locator('.tab-strip')).toHaveCount(0);
   });
 
   test('note.open outside Areas/<Name>/ is refused', async ({ page }) => {
@@ -351,9 +349,7 @@ test.describe('suggestions: only a tap on host UI acts', () => {
     await openAreas(page);
     await openArea(page, 'Steal');
     await page.waitForTimeout(2500);
-    const tabs = await page.locator('.tab-chip').allTextContents();
-    expect(tabs.join('|')).not.toMatch(/Techne\s*$/);
-    expect(await page.locator('.tab-chip').count(), 'the view was not hijacked into a room').toBe(1);
+    expect(await page.locator('.conversation-header').count(), 'the view was not hijacked into a room').toBe(0);
     await expect(page.locator('.area-bar-title')).toHaveText('Steal');
     await expect(page.locator('.suggestion-bar .suggestion'), 'pending is capped').toHaveCount(3);
     expect(await calls(page, 'post_message')).toHaveLength(0);
@@ -461,14 +457,6 @@ test.describe('design', () => {
     expect(s.pill).not.toMatch(/rgba\(0, 0, 0, 0\)|transparent/);
     expect(s.radius).toBeGreaterThanOrEqual(s.h / 2);
     expect(s.w).toBeGreaterThan(s.h);
-  });
-
-  test('phone top bar: the chip is on the 16px grid', async ({ page }, info) => {
-    test.skip(info.project.name !== 'phone', 'phone strip only');
-    await openAreas(page);
-    const box = (await page.locator('.tab-chip').first().boundingBox())!, strip = (await page.locator('.tab-strip').boundingBox())!;
-    expect(box.x - strip.x, 'left inset').toBeGreaterThanOrEqual(16);
-    expect(box.y - strip.y, 'top inset').toBeGreaterThanOrEqual(8);
   });
 
   test('techne: bench sits in the hero, the note card sizes to its content, the first line sits on the first rule', async ({ page }, info) => {
