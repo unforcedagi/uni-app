@@ -150,6 +150,8 @@ check("chat cache: the newest 60 per room, per identity; rooms list; old rooms f
   assert.equal(got.length, 60); assert.equal(got[0].ts, 20); assert.equal(got[59].ts, 79);
   assert.equal(readMessages(st, "pk2", "ch"), null, "another identity sees nothing"); assert.equal(readMessages(st, null, "ch"), null);
   writeRooms(st, "pk1", [{ id: "ch" }]); assert.deepEqual(readRooms(st, "pk1"), [{ id: "ch" }]); assert.deepEqual(readRooms(st, "pk2"), []);
+  const big = Array.from({ length: 60 }, (_, i) => ({ ts: i, body: "x".repeat(5000) }));
+  writeMessages(st, "pk1", "big", big); const bigGot = readMessages<{ ts: number }>(st, "pk1", "big")!; assert.ok(JSON.stringify(bigGot).length <= 90_000 && bigGot.at(-1)!.ts === 59, "a room's entry is size-capped, newest kept");
   for (let i = 0; i < 30; i++) writeMessages(st, "pk1", `c${i}`, [{ ts: 1 }]);
   assert.equal(readMessages(st, "pk1", "ch"), null, "the least recent room was dropped"); assert.ok(readMessages(st, "pk1", "c29"));
   writeMessages(st, "pk1", "c29", []); assert.equal(readMessages(st, "pk1", "c29"), null);
