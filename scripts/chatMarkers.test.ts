@@ -1,0 +1,12 @@
+import assert from "node:assert/strict";
+import { splitMarkers } from "../src/chatMarkers.ts";
+let failed = 0;
+const check = (n: string, f: () => void) => { try { f(); console.log("ok  ", n); } catch (e) { failed++; console.log("FAIL", n, e); } };
+check("none: text unchanged", () => assert.deepEqual(splitMarkers("Hello [there]\nworld"), { text: "Hello [there]\nworld", markers: [] }));
+check("trailing line", () => assert.deepEqual(splitMarkers("Shipped it.\n\n[done T-124]"), { text: "Shipped it.", markers: [{ state: "done", task: "T-124" }] }));
+check("trailing on the same line", () => assert.deepEqual(splitMarkers("Shipped it. [decision T-9]  "), { text: "Shipped it.", markers: [{ state: "decision", task: "T-9" }] }));
+check("leading", () => assert.deepEqual(splitMarkers("[blocked T-3] Waiting on keys."), { text: "Waiting on keys.", markers: [{ state: "blocked", task: "T-3" }] }));
+check("several, in order", () => assert.deepEqual(splitMarkers("Two things.\n[done T-1] [active T-2]"), { text: "Two things.", markers: [{ state: "done", task: "T-1" }, { state: "active", task: "T-2" }] }));
+check("a marker in the middle stays", () => assert.deepEqual(splitMarkers("See [done T-5] above and more"), { text: "See [done T-5] above and more", markers: [] }));
+check("only a marker", () => assert.deepEqual(splitMarkers("[done T-7]"), { text: "", markers: [{ state: "done", task: "T-7" }] }));
+if (failed) process.exit(1);

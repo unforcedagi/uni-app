@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { parseMarkdown, type Block, type Inline } from "./markdown";
 import { mentionSegments, type Member } from "./mentions";
 import { useNoteOpener } from "./noteLinks";
+import { splitMarkers } from "./chatMarkers";
 
 function openLink(e: React.MouseEvent, href: string) {
   // Never navigate the app's own WebView; hand the link to the system browser.
@@ -49,6 +50,7 @@ export const Body = memo(function Body({ body, mentions, me, edited }: { body: s
       }
     }
   });
-  const tree = parseMarkdown(body);
-  return <div className="md">{blocks(tree, "b")}{edited && <span className="edited" title="Edited by the author">(edited)</span>}</div>;
+  const split = splitMarkers(body);
+  const tree = parseMarkdown(split.text);
+  return <div className="md">{blocks(tree, "b")}{split.markers.length > 0 && <div className="md-marks">{split.markers.map((m) => <span key={`${m.state}${m.task}`} className="md-mark" data-state={m.state}>{m.state} · {m.task}</span>)}</div>}{edited && <span className="edited" title="Edited by the author">(edited)</span>}</div>;
 });

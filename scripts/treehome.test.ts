@@ -147,6 +147,8 @@ check("an area whose channel points at its child's room does not show that room 
   const b = roomView(t2, "Areas/Boulder", ROOMS, UNI);
   assert.equal(b.slash, "boulder"); assert.equal(b.target?.id, "r-bou");
   assert.equal(roomView(t2, "Projects/COhere", ROOMS, UNI).target?.id, "r-coh");
+  const c = roomView(t2, "Projects/COhere", ROOMS, UNI);
+  assert.equal(c.own, true, "COhere owns its room even though Boulder's channel names it"); assert.equal(c.slash, "boulder/cohere");
   const noBoulderRoom = roomView(t2, "Areas/Boulder", ROOMS.filter((r) => r.id !== "r-bou"), UNI);
   assert.equal(noBoulderRoom.own, false); assert.equal(noBoulderRoom.slash, null); assert.equal(noBoulderRoom.target?.id, "r-uni");
 });

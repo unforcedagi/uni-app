@@ -110,7 +110,7 @@ test.describe('simple', () => {
     await expect(page.locator('.sr-title')).toHaveText('Uni');
     await openCompanion(page);
     const needs = page.locator('.cp-body').getByRole('region', { name: 'Needs you' });
-    await expect(needs.locator('.cp-need')).toHaveCount(3);
+    expect(await needs.locator('.cp-need').count()).toBeGreaterThanOrEqual(1); expect(await needs.locator('.cp-need').count()).toBeLessThanOrEqual(3);
     await expect(page.locator('.cp-more')).toHaveCount(0);
     await expect(page.locator('.cp-body')).not.toContainText(/\+\d+ more/);
     await page.getByRole('button', { name: /^All of .*'s work/ }).click();
@@ -152,7 +152,7 @@ test.describe('simple', () => {
     await scope(page).locator('.th-go[aria-label^="Uni,"]').click();
     await openCompanion(page);
     const items = page.locator('.cp-body .cp-item');
-    await expect(items).toHaveCount(3);
+    await expect(items).toHaveCount(2);
     await expect(page.locator('.cp-body')).not.toContainText(/https?:\/\//);
     for (const el of await page.locator('.cp-body .cp-title').all()) expect(await el.evaluate((e) => e.getBoundingClientRect().height < 48)).toBeTruthy();
     for (const el of await page.locator('.cp-body .cp-detail').all()) {
@@ -171,9 +171,29 @@ test.describe('simple', () => {
     await openCompanion(page);
     const item = page.locator('.cp-item').filter({ hasText: 'Decide the ATLAS hosting' });
     await expect(item.locator('.cp-title')).toHaveText('Decide the ATLAS hosting');
-    expect(await item.locator('.cp-title').evaluate((e) => parseInt(getComputedStyle(e).webkitLineClamp || getComputedStyle(e).getPropertyValue('line-clamp') || '0'))).toBe(2);
+    expect(await item.locator('.cp-title').evaluate((e) => e.scrollHeight <= e.clientHeight + 1), 'a decision is never clipped').toBe(true);
     await expect(item.locator('.cp-opt')).toHaveText(['Self-host', 'Managed']);
     for (const b of await item.locator('.cp-opt').all()) expect(await b.evaluate((e) => getComputedStyle(e).backgroundColor)).not.toBe('rgba(0, 0, 0, 0)');
+  });
+
+  test('a decision without options has no Decide button; the row itself opens it. Running fits above the footer', async ({ page }) => {
+    test.skip(!wide(page), 'side panel');
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await boot(page);
+    await scope(page).locator('.th-go[aria-label^="Uni,"]').click();
+    await openCompanion(page);
+    await expect(page.locator('.cp-body').getByRole('button', { name: 'Decide', exact: true })).toHaveCount(0);
+    const dec = page.locator('.cp-need.decision').first();
+    if (await dec.count()) {
+      await expect(dec.locator('.cp-go')).toBeVisible();
+      expect(await dec.locator('.cp-title').evaluate((e) => e.scrollHeight <= e.clientHeight + 1)).toBe(true);
+    }
+    await openRoom(page, 'ATLAS');
+    expect(await page.locator('.cp-run').count()).toBeLessThanOrEqual(2);
+    const side = page.locator('.cp.side');
+    await side.evaluate((e) => { e.scrollTop = e.scrollHeight; });
+    const foot = (await page.locator('.cp-foot').boundingBox())!;
+    for (const r of await page.locator('.cp-run, .cp-item').all()) { const b = (await r.boundingBox())!; expect(b.y + b.height).toBeLessThanOrEqual(foot.y + 20); }
   });
 
   test('the "All of X\'s work" link sticks to the panel bottom, on one line, even when the panel is long and the name is long', async ({ page }) => {

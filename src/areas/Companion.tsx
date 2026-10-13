@@ -40,6 +40,15 @@ const OPTS_SHOWN = 3;
 const URL_RE = /https?:\/\/\S+|\bwww\.\S+/g;
 /** One line of detail: no raw links (they stay in the opened item), whitespace squeezed, no dangling separators. */
 export const plainDetail = (s: string): string => s.replace(URL_RE, "").replace(/\s+/g, " ").replace(/\s*[·,;:(\[-]+\s*$/, "").replace(/\(\s*\)/g, "").trim();
+/** Running rows shown; the rest are behind the footer link. */
+const RUNS_SHOWN = 2;
+/** Whole questions or none: how many needs-you items fit a window this tall (a decision's ask wraps in full). */
+export const needsFit = (h: number): number => (h >= 820 ? 3 : h >= 640 ? 2 : 1);
+function useViewportHeight(): number {
+  const [h, setH] = useState(() => (typeof window === "undefined" ? 900 : window.innerHeight));
+  useEffect(() => { const f = () => setH(window.innerHeight); window.addEventListener("resize", f); return () => window.removeEventListener("resize", f); }, []);
+  return h;
+}
 type Fold = { open: boolean; onToggle: (v: boolean) => void };
 
 /** The ask itself: the "Decision (default yes):" style label a decision's title carries is left to the opened item. */
@@ -54,30 +63,33 @@ function actionOf(t: Task): string | null {
 
 function Body({ stands, ready, needs, runs, nodeName, onTask, onDecide, onEverything }: Props) {
   const active = runs.filter((r) => ACTIVE.has(r.state));
+  const hiddenRuns = Math.max(0, active.length - RUNS_SHOWN);
+  const shownNeeds = needs.slice(0, needsFit(useViewportHeight()));
   return <div className="cp-body">
     {!ready ? <p className="cp-lede">Loading…</p> : stands && <p className="cp-lede">{stands.text}{stands.ago && <small className="cp-ago">{stands.ago}</small>}</p>}
-    {needs.length > 0 && <section aria-label="Needs you" className="cp-sec">
+    {shownNeeds.length > 0 && <section aria-label="Needs you" className="cp-sec">
       <h3 className="cp-h">Needs you</h3>
-      <ul className="cp-list">{needs.map((t) => {
+      <ul className="cp-list">{shownNeeds.map((t) => {
         const { id, rest: full } = splitTitle(cleanText(t.title));
         const rest = askOf(full);
         const meta = plainDetail([actionOf(t), dueText(t.due)].filter(Boolean).join(" · "));
         const opts = t.kind === "decision" ? t.options : [];
+        const isDecision = t.kind === "decision";
         return <li key={t.id} className="cp-item">
-          <button type="button" className="cp-need" data-id={id ?? undefined} onClick={() => onTask(t)}>
-            <span className="cp-title">{rest}</span>{meta && <small className="cp-detail">{meta}</small>}</button>
-          {t.kind === "decision" && <div className="cp-opts" role="group" aria-label={`Decide: ${rest}`}>
+          <button type="button" className={`cp-need${isDecision ? " decision" : ""}`} data-id={id ?? undefined} onClick={() => onTask(t)}>
+            <span className="cp-title">{rest}{isDecision && opts.length === 0 && <span className="cp-go" aria-hidden="true"> ›</span>}</span>{meta && <small className="cp-detail">{meta}</small>}</button>
+          {isDecision && opts.length > 0 && <div className="cp-opts" role="group" aria-label={`Decide: ${rest}`}>
             {opts.slice(0, OPTS_SHOWN).map((o) => <button key={o} type="button" className="cp-opt" onClick={() => onDecide(t, o)}>{cleanText(o)}</button>)}
-            {(opts.length > OPTS_SHOWN || opts.length === 0) && <button type="button" className="cp-opt more" onClick={() => onTask(t)}>{opts.length === 0 ? "Decide" : "More…"}</button>}
+            {opts.length > OPTS_SHOWN && <button type="button" className="cp-opt more" onClick={() => onTask(t)}>More…</button>}
           </div>}
         </li>;
       })}</ul>
     </section>}
     {active.length > 0 && <section aria-label="Running" className="cp-sec">
       <h3 className="cp-h">Running</h3>
-      <ul className="cp-list">{active.map((r) => <li key={r.id} className="cp-run" data-state={r.state}><i aria-hidden="true" /><span>{cleanText(r.what)}</span><small>{r.state}</small></li>)}</ul>
+      <ul className="cp-list">{active.slice(0, RUNS_SHOWN).map((r) => <li key={r.id} className="cp-run" data-state={r.state}><i aria-hidden="true" /><span>{cleanText(r.what)}</span><small>{r.state}</small></li>)}</ul>
     </section>}
-    <div className="cp-foot"><button type="button" className="cp-all" onClick={onEverything}><span className="cp-all-t">All of {nodeName}'s work</span><span className="cp-all-arrow" aria-hidden="true">→</span></button></div>
+    <div className="cp-foot"><button type="button" className="cp-all" onClick={onEverything}><span className="cp-all-t">All of {nodeName}'s work</span>{hiddenRuns > 0 && <span className="cp-all-more">+{hiddenRuns} more running</span>}<span className="cp-all-arrow" aria-hidden="true">→</span></button></div>
   </div>;
 }
 
