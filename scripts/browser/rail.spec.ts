@@ -67,7 +67,7 @@ test('Rail surfaces, overlay panels, focus and phone list', async ({ page }, inf
   await page.getByRole('button', { name: 'Focus' }).click();
   await page.getByRole('button', { name: 'Focus' }).click();
   const fy = rail.getByRole('button', { name: 'For you', exact: true });
-  await expect(fy.locator('.rail-count')).toHaveText('3'); await expect(fy.locator('.rail-dot')).toBeVisible();
+  await expect(fy.locator('.rail-count')).toHaveCount(0); await expect(fy.locator('.rail-dot')).toBeVisible();
   await fy.click();
   await expect(page.locator('.note-title')).toHaveText('For you');
   await shot('for-you');
@@ -98,7 +98,7 @@ test('Rail surfaces, overlay panels, focus and phone list', async ({ page }, inf
     await page.reload();
     await expect(page.getByRole('heading', { name: 'Uni', level: 1 })).toBeVisible();
     await page.evaluate(() => { (window as any).updated = '2026-10-02T12:00:00Z'; (window as any).content += '\n- A new suggestion'; document.dispatchEvent(new Event('visibilitychange')); });
-    await expect(fy.locator('.rail-count')).toHaveText('4');
+    await expect(fy.locator('.rail-count')).toHaveCount(0);
     await expect(fy.locator('.rail-dot')).toBeVisible();
   }
 });
@@ -113,7 +113,7 @@ test('Active For you renders the newer version before clearing its dot', async (
     w.content += '\n- A new suggestion';
     document.dispatchEvent(new Event('visibilitychange'));
   });
-  await expect(fy.locator('.rail-count')).toHaveText('4');
+  await expect(fy.locator('.rail-count')).toHaveCount(0);
   await expect(fy.locator('.rail-dot')).toBeVisible();
   await page.evaluate(() => {
     const w = window as any;
@@ -130,7 +130,7 @@ test('Active For you renders the newer version before clearing its dot', async (
   await page.waitForFunction(() => !!(window as any).releaseNote);
   await page.evaluate(() => (window as any).releaseNote());
   await expect(page.locator('.note-sheet li').filter({ hasText: 'A new suggestion' })).toBeVisible();
-  await expect(fy.locator('.rail-count')).toHaveText('4');
+  await expect(fy.locator('.rail-count')).toHaveCount(0);
   await expect(fy.locator('.rail-dot')).toHaveCount(0);
   expect(await page.evaluate(() => localStorage.getItem('uni.forYou.opened.v1'))).toBe('2026-10-02T12:00:00Z');
 });
