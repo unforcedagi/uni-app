@@ -174,6 +174,8 @@ export type BootOpts = {
   atlas?: boolean;
   /** T-122 steer: ATLAS (needs `atlas`, `tasks`) holds T-07 (due Tue 10-13), a decision, run ledger notes and draft notes, and #atlas/build has a day's messages. `window.__setDue(id, due)` moves a task as a room would. */
   steer?: boolean;
+  /** T-124 r2: #atlas/build and #atlas/teach hold sixty messages each, so a room has history to open at the end of. */
+  longChat?: boolean;
   /** T-111: a project (Ricki) whose room is archived, with `room_fallback` naming the room that holds it. */
   ricki?: boolean;
   /** T-111 rooms nav: Sadhana (a private area) holds tasks too. */
@@ -202,7 +204,7 @@ export async function bootAreas(page: Page, variant: Variant = 'seed', opts: Boo
   const now = Math.floor((opts.pinned ? pinnedAt : Date.now()) / 1000);
   const data = {
     profileNote: opts.profileNote ?? null, lifeVault: opts.lifeVault ?? null, now, variant, selftest: opts.selftest ?? true, ipcLeak: opts.ipcLeak ?? false, hostile: hostileApp(opts.ports ?? { http: 9, udp: 9 }), benign: BENIGN, techne: seed('techne'), unforced: seed('unforced'), seedMeta,
-    apps: opts.apps ?? [], multiRoom: !!opts.multiRoom || !!opts.tree, tree: !!opts.tree, tasks: !!opts.tasks, briefs: !!opts.briefs, queryDelay: opts.queryDelay ?? 0, identityDelay: opts.identityDelay ?? 0, roomsDelay: opts.roomsDelay ?? 0, nodeStatuses: opts.nodeStatuses ?? {}, nearOff: !!opts.nearOff, ids: !!opts.ids, boulder: !!opts.boulder, layout: opts.layout ?? 'octopus', underBoulder: !!opts.underBoulder, ricki: !!opts.ricki, atlas: !!opts.atlas, steer: !!opts.steer, privateTasks: !!opts.privateTasks, deviceCache: opts.deviceCache ?? null, queryFails: opts.queryFails ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null, mode: opts.mode ?? 'sealed', grantedUnder: opts.grantedUnder ?? (opts.mode ?? 'sealed'),
+    apps: opts.apps ?? [], multiRoom: !!opts.multiRoom || !!opts.tree, tree: !!opts.tree, tasks: !!opts.tasks, briefs: !!opts.briefs, queryDelay: opts.queryDelay ?? 0, identityDelay: opts.identityDelay ?? 0, roomsDelay: opts.roomsDelay ?? 0, nodeStatuses: opts.nodeStatuses ?? {}, nearOff: !!opts.nearOff, ids: !!opts.ids, boulder: !!opts.boulder, layout: opts.layout ?? 'octopus', underBoulder: !!opts.underBoulder, ricki: !!opts.ricki, atlas: !!opts.atlas, steer: !!opts.steer, longChat: !!opts.longChat, longChat: !!opts.longChat, privateTasks: !!opts.privateTasks, deviceCache: opts.deviceCache ?? null, queryFails: opts.queryFails ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null, mode: opts.mode ?? 'sealed', grantedUnder: opts.grantedUnder ?? (opts.mode ?? 'sealed'),
   };
   // Pre-granted apps: the grant key is the SHA-256 of the RESOLVED default needs plus the app's html.
   const preGrant = [
@@ -409,6 +411,7 @@ Two proposals wait on a scope decision.
       const a = notes.find((n) => n.id === 'a-atlas'); if (a) a.metadata = { ...a.metadata, channel: ATLAS, room: 'atlas' };
       const at = rooms.findIndex((r) => r.id === 'ch-atlas'); if (at >= 0) rooms.splice(at, 1);
       if (d.steer) msgs[BUILD] = [msg('b1', BUILD, 'Aaron', 2400, 'Where are we on the SOW?'), msg('b2', BUILD, 'Uni', 2300, 'Drafting it now; T-07 is due Tuesday.'), msg('b3', BUILD, 'Uni', 1200, 'Map labels are in a branch, waiting on your look.')];
+      if (d.longChat) for (const ch of [BUILD, TEACH]) msgs[ch] = Array.from({ length: 60 }, (_, i) => msg(`l${i}-${ch.slice(0, 4)}`, ch, i % 3 === 0 ? 'Aaron' : 'Uni', (60 - i) * 600, i === 59 ? 'The newest line of this room.' : `Message number ${i + 1} in the long history of this room, long enough to take a line or two of the list.`));
       rooms.push(room(ATLAS, 'atlas'), room(BUILD, 'atlas/build'), room(TEACH, 'atlas/teach'));
       const pr = (id: string, name: string, meta: Record<string, unknown>) => ({ id, path: `Projects/${name}`, extension: 'md', tags: ['project'], metadata: { status: 'foreground', summary: `${name}.`, parent: 'Areas/Atlas', ...meta }, updatedAt: '2026-10-08T00:00:00Z', content: `# ${name}\n\n${name}.` });
       notes.push(pr('p-atlas', 'ATLAS', { room: 'atlas/build', channel: BUILD }), pr('p-lvb', 'Learn Vibe Build', { room: 'atlas/teach', channel: TEACH }), pr('p-ai', 'Atlas Institute', { room: 'atlas' }));
@@ -418,11 +421,14 @@ Two proposals wait on a scope decision.
         mk('st7', 'T-07 SOW for the commons grant', 'Projects/ATLAS', { due: '2026-10-13', priority: 'now', next: 'Confirm scope with Kevin' }),
         mk('st8', 'T-08 Fix the map labels', 'Projects/ATLAS', { owner: 'room:atlas/build', state: 'doing', next: 'Branch is up' }),
         mk('st9', 'T-09 Atlas Institute site copy', 'Projects/Atlas Institute', { owner: 'uni' }),
-        mk('dq2', 'Decide the ATLAS hosting', 'Projects/ATLAS', { priority: 'soon' }, 'decision'));
+        mk('dq2', 'Decide the ATLAS hosting', 'Projects/ATLAS', { priority: 'soon', options: ['Self-host', 'Managed'] }, 'decision'));
       const run = (id: string, what: string, meta: Record<string, unknown>) => ({ id, path: `Runs/${id}`, extension: 'md', tags: ['run'], createdAt: T0, updatedAt: T0, metadata: { node: 'Projects/ATLAS', what, by: 'room:atlas/build', started: new Date((d.now - 600) * 1000).toISOString(), updated: new Date((d.now - 60) * 1000).toISOString(), ...meta } });
       const draft = (id: string, meta: Record<string, unknown>) => ({ id, path: `Drafts/${id}`, extension: 'md', tags: ['draft'], createdAt: T0, updatedAt: T0, metadata: { node: 'Projects/ATLAS', ...meta } });
-      notes.push(run('run-1', 'Draft the SOW', { task: 'T-07', state: 'running' }), run('run-2', 'Re-label the map', { task: 'T-08', state: 'queued' }), run('run-3', 'Summarise the grant call', { state: 'done', result: 'Drafts/Grant call summary' }),
+      // run-1 is the T-125 shape (summary, worker, started_at), the rest are the 0.1.44 ledger
+      notes.push({ id: 'run-1', path: 'Runs/scratch-atlas-sow', extension: 'md', tags: ['run'], createdAt: T0, updatedAt: T0, metadata: { node: 'Projects/ATLAS', task: 'T-07', state: 'running', summary: 'Draft the SOW', worker: 'sonnet', room: '#atlas/build', started_at: new Date((d.now - 600) * 1000).toISOString() } }, run('run-2', 'Re-label the map', { task: 'T-08', state: 'queued' }), run('run-3', 'Summarise the grant call', { state: 'done', result: 'Drafts/Grant call summary' }),
         draft('SOW commons grant', { task: 'T-07', status: 'drafting' }), draft('Grant call summary', { status: 'ready' }));
+      for (const [id, text] of [['p-atlas', 'The SOW is drafted and waits on Kevin. The map comes next.'], ['a-atlas', 'Atlas is mostly the grant this week.'], ['p-lvb', 'Cohort two starts Oct 15; grading briefs are queued.']]) { const n = notes.find((x) => x.id === id); if (n) n.metadata = { ...n.metadata, stands: text, stands_at: new Date((d.now - 2 * 86400) * 1000).toISOString() }; }
+      w.__decideElsewhere = (id: string) => { const t = taskNotes.find((x) => x.id === id); t.metadata.state = 'decided'; t.updatedAt = new Date(Date.now() + 9000).toISOString(); };
       w.__setDue = (id: string, due: string) => { const t = taskNotes.find((x) => x.id === id); t.metadata.due = due; t.updatedAt = new Date(Date.now() + 5000).toISOString(); t.lastUpdatedVia = 'mcp'; };
     }
     if (d.ricki) {
@@ -459,7 +465,7 @@ Two proposals wait on a scope decision.
           case 'vault_query': {
             if (d.queryDelay) await new Promise((r) => setTimeout(r, d.queryDelay));
             if ((d.queryFails as string[]).includes(args.tag)) throw 'query failed: ' + args.tag;
-            if (args.tag === 'node') return [{ id: 'uni-root', path: 'Uni', extension: 'md', tags: ['uni', 'node'], updatedAt: T0, metadata: {} }, ...notes.filter((n) => (n.tags ?? []).some((t: string) => t === 'area' || t === 'project')).map((n) => ({ ...n, tags: ['node', ...n.tags], content: undefined, metadata: { ...n.metadata, parent: n.metadata?.parent ?? (d.ids ? 'uni-root' : 'Uni') } }))];
+            if (args.tag === 'node') return [{ id: 'uni-root', path: 'Uni', extension: 'md', tags: ['uni', 'node'], updatedAt: T0, metadata: d.steer ? { stands: 'Atlas and COhere are moving; the usage guard is quiet.', stands_at: new Date((d.now - 86400) * 1000).toISOString() } : {} }, ...notes.filter((n) => (n.tags ?? []).some((t: string) => t === 'area' || t === 'project')).map((n) => ({ ...n, tags: ['node', ...n.tags], content: undefined, metadata: { ...n.metadata, parent: n.metadata?.parent ?? (d.ids ? 'uni-root' : 'Uni') } }))];
             return notes.filter((n) => (n.tags ?? []).includes(args.tag)).map((n) => ({ createdAt: '2026-09-01T00:00:00Z', metadata: {}, ...n, ...(args.includeContent === false ? { content: undefined } : {}) }));
           }
           case 'vault_query_meta': {
@@ -488,6 +494,15 @@ Two proposals wait on a scope decision.
             if (t.metadata['state'] !== args.from) throw `MCP error -32600: [transition_conflict] conflict: note ${args.id} ${'state'} is ${t.metadata['state']}, not ${args.from}`;
             if (!valid.includes(args.to)) throw '[schema_validation] state is not one of ' + valid.join(',');
             t.metadata['state'] = args.to; t.updatedAt = new Date(Date.now() + taskNotes.length).toISOString(); t.lastUpdatedVia = 'api';
+            return JSON.parse(JSON.stringify(t));
+          }
+          case 'vault_decide': {
+            const t = taskNotes.find((x) => x.id === args.id);
+            if (!t || !t.tags.includes('decision')) throw 'note not found: ' + args.id;
+            if (t.metadata['state'] !== args.from) throw `MCP error -32600: [transition_conflict] conflict: note ${args.id} state is ${t.metadata['state']}, not ${args.from}`;
+            const keys = Object.keys(args.metadata ?? {}).sort().join();
+            if (keys !== 'decided,decided_at,decided_by') throw 'invalid decision metadata: ' + keys;
+            t.metadata['state'] = args.to; Object.assign(t.metadata, args.metadata); t.updatedAt = new Date(Date.now() + taskNotes.length).toISOString(); t.lastUpdatedVia = 'api';
             return JSON.parse(JSON.stringify(t));
           }
           case 'vault_patch_meta': {

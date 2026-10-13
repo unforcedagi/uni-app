@@ -23,12 +23,12 @@ test.describe('nested rooms', () => {
     await expect(scope.locator('.th-go[aria-label^="ATLAS,"]')).toContainText('atlas/build');
     await expect(scope.locator('.th-go[aria-label^="ATLAS,"]')).not.toContainText('atlas/atlas');
     await expect(scope.locator('.th-go[aria-label^="Learn Vibe Build,"]')).toContainText('atlas/teach');
-    await expect(scope.locator('.th-go[aria-label^="Atlas Institute,"]')).toContainText('held by #atlas');
+    await expect(scope.locator('.th-go[aria-label^="Atlas Institute,"]')).toContainText('held by Atlas');
     expect(await fits(page)).toBe(true);
     await shot(page, 'tree');
     // T-124: a node held by an ancestor's room opens that room's conversation, and says whose it is
     await scope.locator('.th-go[aria-label^="Atlas Institute,"]').click();
-    await expect(page.locator('.sr-door')).toHaveText('held by #atlas');
+    await expect(page.locator('.sr-door')).toHaveText('held by Atlas');
     await expect(page.locator('.sr-chat').getByRole('textbox', { name: /^Message / })).toHaveAttribute('placeholder', 'Message #atlas');
     if (!wide(page)) await page.locator('.sr-back').click();
     await scope.locator('.th-go[aria-label^="ATLAS,"]').click();

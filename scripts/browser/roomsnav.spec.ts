@@ -53,7 +53,7 @@ test.describe('rooms nav', () => {
       await expect(nav.locator('.th-go[aria-current="page"]')).toHaveAttribute('data-path', '');
       for (const n of ['Boulder', 'COhere 2026', 'Techne', 'Unforced Development']) await expect(nav.locator(`.th-go[aria-label^="${n},"]`)).toBeVisible();
       await expect(nav.locator('.th-go[aria-label^="COhere 2026,"]')).toContainText('boulder/cohere');
-      await expect(nav.locator('.th-go[aria-label^="Boulder Civic Calendar,"]')).toContainText('held by #boulder');
+      await expect(nav.locator('.th-go[aria-label^="Boulder Civic Calendar,"]')).toContainText('held by Boulder');
       // the column stays while the level changes, and marks the selected one
       await page.locator('.th-roomnav .th-go[aria-label^="Techne,"]').click();
       await title(page, 'Techne');
