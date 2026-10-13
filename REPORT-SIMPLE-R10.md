@@ -22,5 +22,5 @@ My first build lacked `custom-protocol` and the app showed "Could not connect to
 - Not re-run: the other Playwright configs (treehome, roomsnav, nested, chatoptional, sidebar, rail, legacy). `vault-links` and the phone-landscape `screens` spec are known failing and untouched.
 
 ## Watch
-- Companion still has no cache ("Loading…" on a cold start). In a cold walk the Needs-you rows from the previous run's memory painted at once.
+- Companion still has no cache ("Loading…" on a cold start).
 - The note-title store is localStorage on the device (ids to titles only, no content).
