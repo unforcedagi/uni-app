@@ -120,7 +120,10 @@ h1 { font-family: var(--serif); font-weight: 500; font-size: 34px; line-height: 
 .message.mine .message-content, .message.highlight .message-content { border-radius: 4px var(--radius) var(--radius) var(--radius); padding: 8px 14px 6px; }
 .message.mine .message-content { background: var(--mine); }
 .message.highlight .message-content { background: var(--highlight); }
-.message-meta { display: flex; gap: 10px; align-items: baseline; }
+.message-meta { display: flex; gap: 10px; align-items: baseline; position: sticky; top: 0; z-index: 1; padding: 2px 0; background: var(--bg); }
+.message.status-line { padding: 2px 0; gap: 10px; align-items: baseline; font-size: 12.5px; color: var(--muted); opacity: .8; }
+.status-line-text { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.message.status-line time { flex: none; font-size: 11px; }
 .message-meta strong { color: var(--accent); font-size: 14px; font-weight: 600; }
 .message-meta time { color: var(--muted); font-size: 11px; }
 .message-content p { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; font-size: 15px; margin: 4px 0; }

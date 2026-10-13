@@ -25,6 +25,7 @@ import { markFor, restoreTop, type ScrollMark } from "./noteText";
 import "./App.css";
 import { markdownToText } from "./markdown";
 import { Body } from "./MessageBody";
+import { isWorkerStatus } from "./chatMarkers";
 import Pairing from "./Pairing";
 import { emojiLabel, toggleLocal, type Reaction } from "./reactions";
 import { DeleteButton, InlineEditor } from "./InlineEditor";
@@ -1410,6 +1411,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
 
   const voiceOf = (m: Message): MediaRef | undefined => collectAttachments(m.body, m.media ?? [], relayOrigin).find((x) => attachmentKind(x) === "audio");
   const renderMessage = (m: Message, inThread: boolean, prev?: Message) => {
+    if (isWorkerStatus(m.body) && !(inThread && m.ref === root) && editing !== m.ref) return <article key={m.ref} data-ref={m.ref} className="message status-line" title={m.body}><span className="status-line-text">{m.body}</span><time>{clock(m.ts)}</time></article>;
     const grouped = !!prev && prev.author === m.author && m.ts - prev.ts < 300 && !(inThread && prev.ref === root);
     return <article key={m.ref} data-ref={m.ref} className={`message ${m.ref === focusRef ? "search-focus" : ""} ${grouped ? "grouped" : ""} ${m.author === identity ? "mine" : ""} ${m.mentions_me ? "highlight" : ""} ${inThread && m.ref === root ? "thread-root" : ""}`}
       onContextMenu={(e) => {

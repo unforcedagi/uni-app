@@ -1,7 +1,7 @@
 // T-124: the room's quiet companion. Not a page: one sentence on where the room stands, at most three things that need the user, and what is
 // running (only when something is). Desktop: a side panel that folds to a thin rail. Phone: a one-line strip at the top of the room that opens
 // downward. Each item opens its task sheet; "Everything here" goes one level deeper, to the full node page. The fold is remembered per device.
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { cleanText } from "../interface/contract";
 import { dueText } from "./NodeWork";
 import { isMe } from "./taskCore";
@@ -61,12 +61,26 @@ function actionOf(t: Task): string | null {
   return t.next || null;
 }
 
+/** "All of X's work", or "All work" when the name doesn't fit the line. Measured, not guessed: the long form is tried first. */
+function FootLabel({ name }: { name: string }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  useLayoutEffect(() => {
+    const el = ref.current; if (!el) return;
+    const fit = () => { el.textContent = `All of ${name}'s work`; if (el.scrollWidth > el.clientWidth + 1) el.textContent = "All work"; };
+    fit();
+    const ro = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(fit);
+    ro?.observe(el.parentElement ?? el);
+    return () => ro?.disconnect();
+  }, [name]);
+  return <span ref={ref} className="cp-all-t" title={`All of ${name}'s work`} />;
+}
+
 function Body({ stands, ready, needs, runs, nodeName, onTask, onDecide, onEverything }: Props) {
   const active = runs.filter((r) => ACTIVE.has(r.state));
   const hiddenRuns = Math.max(0, active.length - RUNS_SHOWN);
   const shownNeeds = needs.slice(0, needsFit(useViewportHeight()));
   return <div className="cp-body">
-    {!ready ? <p className="cp-lede">Loading…</p> : stands && <p className="cp-lede">{stands.text}{stands.ago && <small className="cp-ago">{stands.ago}</small>}</p>}
+    {!ready ? <p className="cp-lede">Loading…</p> : stands && <p className="cp-lede" title={stands.text}><span className="cp-stands">{stands.text}</span>{stands.ago && <small className="cp-ago">{stands.ago}</small>}</p>}
     {shownNeeds.length > 0 && <section aria-label="Needs you" className="cp-sec">
       <h3 className="cp-h">Needs you</h3>
       <ul className="cp-list">{shownNeeds.map((t) => {
@@ -89,7 +103,7 @@ function Body({ stands, ready, needs, runs, nodeName, onTask, onDecide, onEveryt
       <h3 className="cp-h">Running</h3>
       <ul className="cp-list">{active.slice(0, RUNS_SHOWN).map((r) => <li key={r.id} className="cp-run" data-state={r.state}><i aria-hidden="true" /><span>{cleanText(r.what)}</span><small>{r.state}</small></li>)}</ul>
     </section>}
-    <div className="cp-foot"><button type="button" className="cp-all" onClick={onEverything}><span className="cp-all-t">All of {nodeName}'s work</span>{hiddenRuns > 0 && <span className="cp-all-more">+{hiddenRuns} more running</span>}<span className="cp-all-arrow" aria-hidden="true">→</span></button></div>
+    <div className="cp-foot"><button type="button" className="cp-all" onClick={onEverything}><FootLabel name={nodeName} />{hiddenRuns > 0 && <span className="cp-all-more">+{hiddenRuns} more running</span>}<span className="cp-all-arrow" aria-hidden="true">→</span></button></div>
   </div>;
 }
 
@@ -110,7 +124,7 @@ export function CompanionSide({ open, onToggle, ...p }: Props & Fold) {
 export function CompanionStrip({ open, onToggle, ...p }: Props & Fold) {
   return <section className={`cp strip ${open ? "open" : ""}`} aria-label="Where this stands">
     <button type="button" className="cp-line" aria-expanded={open} onClick={() => onToggle(!open)}>
-      <span className="cp-line-text">{open ? "Where this stands" : p.ready ? p.stands?.text ?? "Where this stands" : "Loading…"}</span>
+      <span className="cp-line-text" title={p.stands?.text}>{open ? "Where this stands" : p.ready ? p.stands?.text ?? "Where this stands" : "Loading…"}</span>
       {p.needs.length > 0 && <i className="cp-dot" role="img" aria-label="Needs you" title="Needs you" />}
       <span className="cp-chev" aria-hidden="true">{open ? "⌃" : "⌄"}</span>
     </button>

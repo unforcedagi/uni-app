@@ -260,6 +260,42 @@ test.describe('simple', () => {
     await expect(page.locator('.cp.side.open')).toBeVisible();
   });
 
+  test('a worker status ping is one muted line; a marker-only line mid-message is a chip; a room opened mid-message keeps the author on top', async ({ page }) => {
+    await boot(page, { longChat: true, tallLast: true });
+    await openRoom(page, 'Learn Vibe Build');
+    const status = page.locator('.sr-chat .message.status-line');
+    await expect(status).toHaveCount(1);
+    await expect(status).toHaveAttribute('title', '⏳ Working — 6 min — iteration 7');
+    expect((await status.boundingBox())!.height).toBeLessThan(32);
+    await expect(page.locator('.sr-chat .md-mark')).toHaveText('done · T-123');
+    await expect(page.locator('.sr-chat').getByText('[done T-123]')).toHaveCount(0);
+    const list = page.locator('.sr-chat .message-list');
+    const last = page.locator('.sr-chat .message').last();
+    const lb = (await last.boundingBox())!; const ll = (await list.boundingBox())!;
+    expect(lb.height).toBeGreaterThan(ll.height);
+    const meta = last.locator('.message-meta');
+    const mb = (await meta.boundingBox())!;
+    expect(mb.y).toBeGreaterThanOrEqual(ll.y - 1);
+    expect(mb.y).toBeLessThan(ll.y + 40);
+    await expect(meta.locator('strong')).toBeVisible();
+    await shot(page, 'midmessage');
+  });
+
+  test('the footer link says "All work" when the name does not fit, the long form when it does; detail lines wrap; the sentence clamps', async ({ page }) => {
+    test.skip(!wide(page), 'side panel');
+    await boot(page);
+    await scope(page).locator('.th-go[aria-label^="Uni,"]').click();
+    await openCompanion(page);
+    await expect(page.locator('.cp-all-t')).toContainText('All of');
+    await page.setViewportSize({ width: 900, height: 700 });
+    await page.evaluate(() => { document.querySelector('.cp.side')!.setAttribute('style', 'width:130px'); });
+    await expect.poll(() => page.locator('.cp-all-t').textContent()).toBe('All work');
+    await page.evaluate(() => { document.querySelector('.cp.side')!.removeAttribute('style'); });
+    const lede = page.locator('.cp-stands').first();
+    if (await lede.count()) expect(await lede.evaluate((e) => getComputedStyle(e).webkitLineClamp)).toBe('3');
+    for (const d of await page.locator('.cp-detail').all()) expect(await d.evaluate((e) => getComputedStyle(e).whiteSpace)).not.toBe('nowrap');
+  });
+
   test('a room never says "No messages" while its first fetch is pending; a confirmed empty room does', async ({ page }) => {
     await boot(page, { messagesDelay: 1200 });
     await openRoom(page, 'Learn Vibe Build');

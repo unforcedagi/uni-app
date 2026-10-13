@@ -371,6 +371,7 @@ h3.wr-h { font-weight: 400; }
 .cp-dot { display: inline-block; flex: none; width: 9px; height: 9px; border-radius: 50%; background: var(--th-sap); }
 .cp-unfold .cp-dot { position: absolute; right: 4px; top: 4px; }
 .cp-lede { margin: 0; font: 400 16px/1.4 var(--th-serif); letter-spacing: -.003em; color: var(--th-ink); }
+.cp-stands { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; overflow-wrap: anywhere; }
 .cp-sec { margin-top: 16px; }
 .cp-h { margin: 0 0 4px; font: 600 13px/1.3 var(--th-sans); color: var(--th-mute); }
 .cp-list { list-style: none; margin: 0; padding: 0; }
@@ -379,7 +380,7 @@ h3.wr-h { font-weight: 400; }
 .cp-title { font: 500 15px/1.35 var(--th-sans); overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow-wrap: anywhere; }
 .cp-need.decision .cp-title { display: block; overflow: visible; }
 .cp-go { color: var(--th-mute); }
-.cp-need small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 12.5px var(--th-sans); color: var(--th-mute); }
+.cp-need small { overflow: hidden; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; font: 400 12.5px var(--th-sans); color: var(--th-mute); }
 .cp-ago { display: block; margin-top: 4px; font: 400 12.5px var(--th-sans); color: var(--th-mute); letter-spacing: 0; }
 .cp-item { border-bottom: 1px solid var(--th-hair2); }
 .cp-item .cp-need { border-bottom: 0; }
@@ -395,7 +396,7 @@ h3.wr-h { font-weight: 400; }
 .cp-run small { margin-left: auto; font: 400 12.5px var(--th-sans); color: var(--th-mute); }
 .cp-foot { position: sticky; bottom: 0; margin-top: auto; padding-top: 22px; padding-bottom: 12px; background: linear-gradient(to bottom, transparent, var(--th-paper) 18px); }
 .cp-all { all: unset; box-sizing: border-box; max-width: 100%; min-height: 40px; display: flex; align-items: center; gap: 6px; font: 500 14.5px var(--th-sans); color: var(--th-ink); cursor: pointer; }
-.cp-all-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-decoration: underline; text-underline-offset: 4px; text-decoration-thickness: 1px; }
+.cp-all-t { min-width: 0; overflow: hidden; white-space: nowrap; text-decoration: underline; text-underline-offset: 4px; text-decoration-thickness: 1px; }
 .cp-all-arrow { flex: none; }
 .cp-all-more { flex: none; font: 400 12.5px var(--th-sans); color: var(--th-mute); }
 /* the phone's strip */
