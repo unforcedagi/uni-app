@@ -54,12 +54,11 @@ export function RoomTree({ chat = true, rows, needs, onOpen, selected }: {
 }) {
   return <nav aria-label="Rooms and areas"><ul className="th-rows">{rows.map((r) => {
     const n = needs.get(r.path) ?? 0;
-    const held = r.heldNode ? `held by ${r.heldNode}` : r.heldBy ? `held by #${r.heldBy}` : "";
-    const sub = !chat ? "" : r.own && r.slash ? `#${r.slash}` : held;
+    const sub = chat && r.own && r.slash ? `#${r.slash}` : "";
     return <li key={r.path || "uni"} className={`th-row d${Math.min(r.depth, 4)} ${r.last ? "last" : ""} ${selected === r.path ? "sel" : ""}`}>
       {r.depth > 0 && <span className="th-guides" aria-hidden="true">{Array.from({ length: r.depth }, (_, i) => <span key={i} className={`th-guide ${i === r.depth - 1 ? "branch" : r.trunk[i] ? "run" : ""}`} />)}</span>}
       <button type="button" className="th-go" data-path={r.path} aria-current={selected === r.path ? "page" : undefined} onClick={() => onOpen(r.path)}
-        aria-label={`${r.name}${chat ? `, ${r.own && r.slash ? `room #${r.slash}` : held || "no room"}` : ""}${n ? `, ${n} need${n === 1 ? "s" : ""} you` : ""}`}>
+        aria-label={`${r.name}${chat ? `, ${sub ? `room ${sub}` : "no channel of its own"}` : ""}${n ? `, ${n} need${n === 1 ? "s" : ""} you` : ""}`}>
         <span className="th-name"><b>{r.name}</b>{sub && <small className="th-sub">{sub}</small>}</span>
         {n > 0 && <i className="th-dot" aria-hidden="true" />}
       </button>

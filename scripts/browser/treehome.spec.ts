@@ -64,7 +64,7 @@ test.describe('tree home', () => {
       const x = async (n: string) => (await page.locator(`.th-go[aria-label^="${n},"] .th-name`).boundingBox())!.x;
       expect(await x('COhere 2026')).toBeGreaterThan(await x('Boulder'));
       await expect(page.locator('.th-go[aria-label^="COhere 2026,"]')).toContainText('boulder/cohere');
-      await expect(page.locator('.th-go[aria-label^="Boulder Civic Calendar,"]')).toContainText('held by Boulder');
+      await expect(page.locator('.th-go[aria-label^="Boulder Civic Calendar,"]')).not.toContainText('held by');
       await expect(page.locator('.th-go[aria-label^="Techne,"]')).toHaveAttribute('aria-label', /2 need you|need/);
       await expect(page.locator('.th-go[aria-label^="Techne,"] .th-dot')).toBeVisible();
       for (const b of await page.locator('.th-go').all()) expect((await b.boundingBox())!.height).toBeGreaterThanOrEqual(44);
