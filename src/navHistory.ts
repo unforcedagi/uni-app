@@ -25,14 +25,30 @@ export const step = (h: History, by: -1 | 1): { history: History; target: TabTar
   const i = h.index + by;
   return i < 0 || i >= h.entries.length ? null : { history: { ...h, index: i }, target: h.entries[i] };
 };
-/** The latest distinct places before this one, newest first (at most five), for the sidebar's Recent list. */
-export function recent(h: History, max = RECENT_SHOWN): TabTarget[] {
+/** A place's identity (r12): Uni, an area or project by path, a room by id, a thread by its root. Never its name: two projects may share one. */
+export function placeKey(t: TabTarget): string {
+  switch (t.kind) {
+    case "areas": return "uni";
+    case "area": return `area:${t.path ?? ""}`;
+    case "thread": return `thread:${t.channel ?? ""}:${t.root ?? ""}`;
+    case "room": return `room:${t.channel ?? ""}`;
+    default: return t.kind;
+  }
+}
+
+/**
+ * The latest distinct places before this one, newest first (at most five), for the sidebar's Recent list. Places are told apart by
+ * `keyOf` (by default `placeKey`; the app maps a room a node owns to that node, so Uni opened as its room before the tree loaded is Uni).
+ */
+export function recent(h: History, max = RECENT_SHOWN, keyOf: (t: TabTarget) => string = placeKey): TabTarget[] {
   const out: TabTarget[] = [];
   const cur = h.entries[h.index];
+  const seen = new Set<string>(cur ? [keyOf(cur)] : []);
   for (let i = h.entries.length - 1; i >= 0 && out.length < max; i--) {
     const e = h.entries[i];
-    // The same name is the same place to the reader (Uni opened as a room before the tree loaded, then as the node): never list the current place or one twice.
-    if ((cur && (sameTarget(cur, e) || cur.title === e.title)) || out.some((o) => sameTarget(o, e) || o.title === e.title)) continue;
+    const k = keyOf(e);
+    if (seen.has(k)) continue;
+    seen.add(k);
     out.push(e);
   }
   return out;

@@ -992,6 +992,7 @@ test.describe('simple', () => {
   test('r10: scrolled to the end, the sidebar\'s last row is whole and sits above Recent', async ({ page }) => {
     test.skip(!wide(page), 'sidebar column');
     await boot(page);
+    await openRoom(page, 'ATLAS'); await openRoom(page, 'Uni'); // Recent shows once there is somewhere to go back to
     const wrap = page.locator('.th-column .th-rows-wrap');
     await wrap.evaluate((el) => { el.scrollTop = el.scrollHeight; });
     const last = page.locator('.th-column .th-row').last();
@@ -1280,5 +1281,50 @@ test.describe('simple', () => {
     expect(await page.locator('.cp-item').count()).toBeLessThanOrEqual(3);
     await expect(page.locator('.cp-more-rows')).toHaveCount(0);
     await expect(page.getByRole('button', { name: /^All of Uni's work/ })).toBeVisible();
+  });
+
+  test('r12: "Uni listening" is a small visible switch in the composer; muted, a message does not notify Uni', async ({ page }) => {
+    await boot(page, { uniMember: true });
+    await openRoom(page, 'ATLAS');
+    const sw = page.locator('.sr-chat').getByRole('button', { name: /^Uni is listening/ });
+    await expect(sw).toBeVisible();
+    await expect(sw).toHaveText('Uni listening');
+    await expect(sw).toHaveAttribute('aria-pressed', 'true');
+    await sw.click();
+    const muted = page.locator('.sr-chat').getByRole('button', { name: /^Uni is muted/ });
+    await expect(muted).toHaveText('Uni muted');
+    await page.locator('.sr-chat').getByRole('textbox', { name: /^Message / }).fill('Just a note to myself.');
+    await page.locator('.sr-chat').getByRole('button', { name: 'Send message' }).click();
+    await expect.poll(async () => (await calls(page, 'post_message')).length).toBe(1);
+    expect((await calls(page, 'post_message'))[0].recipients).toEqual([]);
+    expect(await fits(page)).toBe(true);
+  });
+
+  test('r12: Recent tells places apart by id; where two share a name, each says where it sits', async ({ page }) => {
+    test.skip(!wide(page), 'sidebar column');
+    await boot(page, { twins: true });
+    const nav = scope(page);
+    await unfoldAll(page);
+    await nav.locator('.th-row:has(.th-go[aria-label^="Techne,"]) ~ .th-row .th-go[aria-label^="Workshop,"]').first().click();
+    await expect(page.locator('.sr-title, .note-title').first()).toHaveText('Workshop');
+    await nav.locator('.th-row:has(.th-go[aria-label^="Atlas,"]) ~ .th-row .th-go[aria-label^="Workshop,"]').first().click();
+    await nav.locator('.th-go[aria-label^="Uni,"]').click();
+    const recent = nav.getByRole('region', { name: 'Recent' }).getByRole('button');
+    await expect(recent.filter({ hasText: /^Workshop/ })).toHaveText(['Workshop · Atlas', 'Workshop · Techne']);
+  });
+
+  test('r12: with the tree taller than the column, Recent keeps to three places and never takes the tree\'s room', async ({ page }) => {
+    test.skip(!wide(page), 'sidebar column');
+    await page.setViewportSize({ width: 1280, height: 480 });
+    await boot(page);
+    const nav = scope(page);
+    for (const name of ['ATLAS', 'Learn Vibe Build', 'Techne', 'Atlas Institute', 'Unforced Development', 'Uni']) await openRoom(page, name);
+    const items = nav.getByRole('region', { name: 'Recent' }).getByRole('listitem');
+    await unfoldAll(page);
+    await expect.poll(() => nav.locator('.th-rows-wrap').evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
+    await expect(items).toHaveCount(3);
+    // folded again, the tree fits: up to five
+    for (let i = 0; i < 12 && await nav.locator('.th-fold[aria-expanded="true"]').count(); i++) await nav.locator('.th-fold[aria-expanded="true"]').first().click();
+    await expect(items).toHaveCount(5);
   });
 });

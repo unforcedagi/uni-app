@@ -1,6 +1,7 @@
 // The room tree's own state, per device (T-124 r7): which areas are folded, how wide the sidebar is, whether it is hidden.
 // Pure helpers (unit-tested in scripts/navtree.test.ts) and two tiny localStorage-backed hooks.
 import { useCallback, useEffect, useMemo, useState } from "react";
+import type { NavRecent } from "../navContext.ts";
 
 export const SIDEBAR_KEY = "uni.sidebar.v1";
 export const FOLDS_KEY = "uni.tree.folds.v1";
@@ -69,6 +70,30 @@ export function rolledNeeds(rows: readonly FoldRow[], needs: ReadonlyMap<string,
   let n = needs.get(rows[i].path) ?? 0;
   for (let j = i + 1; j < rows.length && rows[j].depth > rows[i].depth; j++) n += needs.get(rows[j].path) ?? 0;
   return n;
+}
+
+
+/** Recent's height with five places: the tree is "tight" when its rows would not fit beside that, and Recent then keeps to three. */
+export const RECENT_FULL_PX = 124;
+
+/**
+ * The recent places as the sidebar shows them (pure): the app's list (never the place you are in, each place once, told apart by id), at most
+ * `max`. A name two shown places share (or the open place's) says where each sits: its parent in the tree, or "Other rooms".
+ */
+export function recentLabels(recent: readonly NavRecent[], rows: readonly (FoldRow & { name: string })[], here: string | null, max: number): { r: NavRecent; label: string }[] {
+  const shown = recent.slice(0, max);
+  const k = (t: string) => t.trim().toLowerCase();
+  const count = new Map<string, number>();
+  for (const t of [...shown.map((r) => r.title), ...(here ? [here] : [])]) count.set(k(t), (count.get(k(t)) ?? 0) + 1);
+  const parentOf = (path: string) => {
+    const i = rows.findIndex((r) => r.path === path);
+    for (let j = i - 1; i > 0 && j >= 0; j--) if (rows[j].depth < rows[i].depth) return rows[j].name;
+    return null;
+  };
+  return shown.map((r) => {
+    const where = (count.get(k(r.title)) ?? 0) > 1 ? (r.path ? parentOf(r.path) : r.room ? "Other rooms" : null) : null;
+    return { r, label: where ? `${r.title} · ${where}` : r.title };
+  });
 }
 
 const read = <T,>(key: string, parse: (raw: string | null) => T): T => { try { return parse(localStorage.getItem(key)); } catch { return parse(null); } };
