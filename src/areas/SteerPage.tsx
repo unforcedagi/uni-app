@@ -10,7 +10,7 @@ import type { Draft, Mark, Run } from "./steerCore";
 
 // ---------------------------------------------------------------------------------------------- Running and Drafts
 
-const STATE_MARK: Record<Run["state"], string> = { queued: "◌", running: "●", stalled: "▲", done: "✓", failed: "✕" };
+const STATE_MARK: Record<Run["state"], string> = { queued: "◌", running: "●", stalled: "▲", blocked: "▲", decision: "◆", done: "✓", failed: "✕" };
 
 /** The dispatch ledger under this node. Nothing at all when there are no runs. */
 export function RunSection({ runs, nowMs, onOpenNote }: { runs: readonly Run[]; nowMs: number; onOpenNote: (ref: string) => void }) {

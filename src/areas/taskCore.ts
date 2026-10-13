@@ -33,12 +33,14 @@ export type Task = {
   /** Who set `priority`: "hand" (a person, kept by weigh.py), "weigh.py <date>" (automatic triage), or null. */
   priorityBy: string | null;
   updatedAt: string | null; lastUpdatedBy: string | null; lastUpdatedVia: string | null;
+  /** An open decision's choices (`options[]`), as the labels to show; empty for a task or a decision with none. */
+  options: string[];
 };
 
 const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);
 const leaf = (p: string) => p.split("/").filter(Boolean).pop() ?? p;
 
-export type TaskNode = { id: string; path: string; name: string; parent: string | null; room: string | null; status: string; isRoot: boolean };
+export type TaskNode = { id: string; path: string; name: string; parent: string | null; room: string | null; status: string; isRoot: boolean; /** `metadata.stands` (where it stands, one sentence) and `stands_at` (when it was written). */ stands?: string | null; standsAt?: string | null };
 
 /** `node` notes in. The root (the profile's `rootTag`: `uni` in Uni's vault, `root` in the pack) is kept apart: its children are the top level. */
 export function parseNodes(notes: readonly RawNote[], rootTag: string = activeProfile().rootTag): { nodes: TaskNode[]; rootPath: string | null } {
@@ -53,7 +55,7 @@ export function parseNodes(notes: readonly RawNote[], rootTag: string = activePr
     if (isRoot) rootPath = path;
     if (/\/(Brief|app)$/.test(path)) continue;
     const status = str(m.status) ?? "active";
-    out.set(path, { id, path, name: leaf(path), parent: refKey(m.parent), room: str(m.room)?.replace(/^#/, "") ?? null, status, isRoot });
+    out.set(path, { id, path, name: leaf(path), parent: refKey(m.parent), room: str(m.room)?.replace(/^#/, "") ?? null, status, isRoot, stands: str(m.stands), standsAt: str(m.stands_at) });
   }
   return { nodes: [...out.values()], rootPath };
 }
@@ -68,13 +70,17 @@ export type TaskTree = {
   parent: Map<string, string>;
   /** The Uni root's path and id: a reference to either means ROOT. */
   rootRefs: ReadonlySet<string>;
+  /** `metadata.stands` by node path (ROOT: Uni), with `stands_at` when it was written. */
+  stands: ReadonlyMap<string, { text: string; at: string | null }>;
 };
 
 export function buildTaskTree(nodes: readonly TaskNode[], rootPath: string | null = null): TaskTree {
   const byPath = new Map<string, TaskNode>();
   const idPath = new Map<string, string>();
   const rootRefs = new Set<string>(rootPath ? [rootPath] : []);
+  const stands = new Map<string, { text: string; at: string | null }>();
   for (const n of nodes) {
+    if (n.stands) stands.set(n.isRoot || n.path === rootPath ? ROOT : n.path, { text: n.stands, at: n.standsAt ?? null });
     if (n.isRoot || n.path === rootPath) { rootRefs.add(n.id); rootRefs.add(n.path); continue; }
     idPath.set(n.id, n.path);
     if (n.status !== "archived" && n.status !== "done") byPath.set(n.path, n);
@@ -92,7 +98,7 @@ export function buildTaskTree(nodes: readonly TaskNode[], rootPath: string | nul
   }
   const children = new Map<string, string[]>();
   for (const [p, up_] of [...parent].sort((a, b) => a[0].localeCompare(b[0]))) children.set(up_, [...(children.get(up_) ?? []), p]);
-  return { byPath, idPath, children, parent, rootRefs };
+  return { byPath, idPath, children, parent, rootRefs, stands };
 }
 
 /** The node and everything beneath it (paths). ROOT is every node. */
@@ -116,6 +122,13 @@ export function nodeFilterKeys(tree: TaskTree, paths: readonly string[]): string
   return [...new Set(paths.flatMap((p) => [p, ...(ids.get(p) ? [ids.get(p)!] : [])]))];
 }
 
+/** A decision's `options[]`: strings, or objects with a `label`, `title` or `name`. Anything else is skipped. */
+export function optionsOf(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  const out = v.map((o) => str(o) ?? (o && typeof o === "object" ? str((o as Record<string, unknown>).label) ?? str((o as Record<string, unknown>).title) ?? str((o as Record<string, unknown>).name) : null)).filter((x): x is string => !!x);
+  return [...new Set(out)].slice(0, 4);
+}
+
 export function parseTask(n: RawNote, tree: TaskTree): Task | null {
   const id = str(n.id), path = str(n.path) && stripExt(str(n.path)!);
   if (!id || !path) return null;
@@ -133,6 +146,7 @@ export function parseTask(n: RawNote, tree: TaskTree): Task | null {
     priority: PRIORITIES.find((p) => p === str(m.priority)?.toLowerCase()) ?? null,
     priorityBy: str(m.priority_by),
     updatedAt: str(n.updatedAt), lastUpdatedBy: str(n.lastUpdatedBy), lastUpdatedVia: str(n.lastUpdatedVia),
+    options: kind === "decision" ? optionsOf(m.options) : [],
   };
 }
 

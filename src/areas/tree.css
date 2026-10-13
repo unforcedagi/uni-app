@@ -333,7 +333,7 @@ h3.wr-h { font-weight: 400; }
 .th-go { position: relative; }
 
 /* a room is its conversation: [rooms list | the chat | the companion]. The chat is the app's own room view. */
-.tree-home.th-level.th-simple.wide { grid-template-columns: clamp(250px, 21vw, 310px) minmax(0, 1fr) 320px; }
+.tree-home.th-level.th-simple.wide { grid-template-columns: clamp(250px, 21vw, 310px) minmax(0, 1fr) 272px; }
 .tree-home.th-level.th-simple.wide.folded { grid-template-columns: clamp(250px, 21vw, 310px) minmax(0, 1fr) 48px; }
 .tree-home.th-level.th-simple { background: var(--bg); }
 .th-simple .th-roomnav { border-right: 1px solid var(--th-hair2); background: var(--th-paper); }
@@ -358,7 +358,7 @@ h3.wr-h { font-weight: 400; }
 
 /* the companion */
 .cp { color: var(--th-ink); font-family: var(--th-sans); }
-.cp.side { min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; border-left: 1px solid var(--th-hair2); background: var(--th-paper); padding: 0 20px 24px; }
+.cp.side { min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; border-left: 1px solid var(--th-hair2); background: var(--th-paper); padding: 0 18px 24px; }
 .cp.side.folded { padding: 0; }
 .cp-top { display: flex; align-items: center; justify-content: space-between; min-height: 56px; font: 500 13px var(--th-sans); color: var(--th-mute); }
 .cp-fold, .cp-unfold { all: unset; box-sizing: border-box; display: grid; place-items: center; width: 40px; height: 40px; font: 400 24px/1 var(--th-sans); cursor: pointer; color: var(--th-ink2); border-radius: 50%; }
@@ -367,7 +367,7 @@ h3.wr-h { font-weight: 400; }
 .cp-unfold { position: relative; margin: 8px; }
 .cp-dot { display: inline-block; flex: none; width: 9px; height: 9px; border-radius: 50%; background: var(--th-sap); }
 .cp-unfold .cp-dot { position: absolute; right: 4px; top: 4px; }
-.cp-lede { margin: 2px 0 0; font: 400 19px/1.45 var(--th-serif); letter-spacing: -.003em; color: var(--th-ink); }
+.cp-lede { margin: 2px 0 0; font: 400 17.5px/1.45 var(--th-serif); letter-spacing: -.003em; color: var(--th-ink); }
 .cp-sec { margin-top: 24px; }
 .cp-h { margin: 0 0 4px; font: 600 13px/1.3 var(--th-sans); color: var(--th-mute); }
 .cp-list { list-style: none; margin: 0; padding: 0; }
@@ -375,6 +375,13 @@ h3.wr-h { font-weight: 400; }
 .cp-need:hover .cp-title { text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
 .cp-title { font: 500 15.5px/1.35 var(--th-sans); overflow-wrap: anywhere; }
 .cp-need small { font: 400 12.5px var(--th-sans); color: var(--th-mute); }
+.cp-ago { display: block; margin-top: 4px; font: 400 12.5px var(--th-sans); color: var(--th-mute); letter-spacing: 0; }
+.cp-item { border-bottom: 1px solid var(--th-hair2); }
+.cp-item .cp-need { border-bottom: 0; }
+.cp-opts { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 0 10px; }
+.cp-opt { all: unset; box-sizing: border-box; min-height: 34px; display: inline-flex; align-items: center; padding: 0 12px; border-radius: 999px; box-shadow: inset 0 0 0 1px var(--th-ink2); font: 500 13.5px var(--th-sans); color: var(--th-ink); cursor: pointer; }
+.cp-opt:hover { background: var(--th-ring); }
+.cp-opt:focus-visible { outline: 2px solid var(--th-ink); outline-offset: 2px; }
 .cp-more { all: unset; box-sizing: border-box; min-height: 40px; display: inline-flex; align-items: center; font: 500 14px var(--th-sans); color: var(--th-ink2); cursor: pointer; text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
 .cp-run { display: flex; align-items: baseline; gap: 10px; padding: 7px 0; font: 400 15px/1.35 var(--th-sans); }
 .cp-run i { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--th-ink); align-self: center; }

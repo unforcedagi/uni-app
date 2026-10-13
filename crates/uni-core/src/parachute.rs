@@ -424,6 +424,30 @@ impl VaultClient {
         note_from(&v, id)
     }
 
+    /// Decide an open decision in one atomic update: `state` open -> decided (a stale `from` fails with
+    /// `transition_conflict`) and the `decided`, `decided_at`, `decided_by` metadata, nothing else. Only notes tagged
+    /// `decision` (checked against the stored note).
+    pub async fn decide_note(&self, vault: &str, id: &str, from: Value, to: Value, metadata: Value) -> Result<Value> {
+        check_vault(vault)?;
+        if id.trim().is_empty() {
+            return Err(Error::Invalid("missing note id".into()));
+        }
+        check_decide_patch(&metadata)?;
+        let note = self.get_note(vault, id).await?;
+        if !note["tags"].as_array().is_some_and(|t| t.iter().filter_map(Value::as_str).any(|t| t == "decision")) {
+            return Err(Error::Invalid("only decision notes can be decided".into()));
+        }
+        let v = self
+            .call(
+                "update-note",
+                json!({"vault": vault, "id": id, "include_content": false, "metadata": metadata,
+                    "state_transition": {"field": "state", "from": from, "to": to}}),
+            )
+            .await?;
+        check_vault_errors(&v)?;
+        note_from(&v, id)
+    }
+
     /// Merge `metadata` into a note, guarded by the `updated_at` the caller last read. Only the `snoozed_until` key,
     /// and only on notes tagged `task` or `decision` (checked against the stored note, not the caller's claim).
     pub async fn patch_metadata(
@@ -914,6 +938,18 @@ fn check_snooze_patch(metadata: &Value) -> Result<()> {
         Value::Null => Ok(()),
         Value::String(d) if d.len() == 10 && d.bytes().enumerate().all(|(i, b)| if i == 4 || i == 7 { b == b'-' } else { b.is_ascii_digit() }) => Ok(()),
         _ => Err(Error::Invalid("`snoozed_until` must be a YYYY-MM-DD date or null".into())),
+    }
+}
+
+fn check_decide_patch(metadata: &Value) -> Result<()> {
+    let obj = metadata.as_object().filter(|o| !o.is_empty() && o.keys().all(|k| matches!(k.as_str(), "decided" | "decided_at" | "decided_by")));
+    let Some(obj) = obj else {
+        return Err(Error::Invalid("a decision takes only `decided`, `decided_at` and `decided_by`".into()));
+    };
+    if obj.values().all(|v| v.as_str().is_some_and(|s| !s.trim().is_empty() && s.len() <= 500)) {
+        Ok(())
+    } else {
+        Err(Error::Invalid("`decided`, `decided_at` and `decided_by` must be short strings".into()))
     }
 }
 

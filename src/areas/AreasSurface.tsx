@@ -5,7 +5,7 @@ import { MovedBlock, NeedsYou, WhereCounts } from "./WhereWeAre";
 import { DraftSection, RunSection } from "./SteerPage";
 import { draftsUnder, runsUnder, type Mark } from "./steerCore";
 import { CompanionSide, CompanionStrip, useCompanionOpen } from "./Companion";
-import { chatPlaceholder, firstSentence, topNeeds } from "./simpleCore";
+import { chatPlaceholder, standsLine, topNeeds } from "./simpleCore";
 import { whereWeAre } from "./whereCore";
 import { ownRoom, steward, stewardLine, type RoomNode, type Steward } from "./talkCore";
 import type { Area } from "./areasCore";
@@ -28,6 +28,7 @@ import { useStoredSelfTest } from "../interface/selftest/useSelfTest";
 import { useHomeLayout, useWide } from "./homeLayout";
 import { isPrivateNode, roomSlug, roomView, treeRows, updatesBelow, type RoomView } from "./treeRooms";
 import { levelAlive } from "./treeAlive";
+import { publishRoomLabels, roomLabelMap } from "./roomLabels";
 import { useVaultProfile } from "./ProfileContext";
 import { AliveBlock, Crumbs, InsideBlock, LevelPanel, Ledger, NeedsBlock, ProjectNote, RoomBlock, RoomLine, TreeScreen, UpdatesBlock, type InsideKid } from "./TreeHome";
 import "./areas.css";
@@ -116,6 +117,10 @@ export default function AreasSurface({ zoom, identity, talk, path, rooms: hostRo
   // Rooms: the whole tree's tasks are loaded once (the room tree beside the level needs every row's counts) and each level takes its subtree.
   const tasks = useTasks(identity, roomsMode ? "" : node?.path ?? "", fallback);
   const levelTasks = useMemo(() => (roomsMode && tasks.tree && node ? tasksUnder(tasks.tree, node.path, tasks.tasks) : tasks.tasks), [roomsMode, tasks.tree, tasks.tasks, node?.path]); // eslint-disable-line react-hooks/exhaustive-deps
+  /** A room's dot is its OWN node's needs-you items (T-124 r2): a parent never lights up for what its children need. Rooms mode loads the whole tree's tasks, so they can be counted per node. */
+  const ownNeeds = useMemo(() => { const m = new Map<string, number>(); for (const t of tasks.tasks) if (groupOf(t) === "you") m.set(t.node, (m.get(t.node) ?? 0) + 1); return m; }, [tasks.tasks]);
+  // the rooms drawer names a room as the tree does
+  useEffect(() => { if (data && treeMode && chat) publishRoomLabels(roomLabelMap(data.tree, roomRefs, uniRef)); }, [data, treeMode, chat, roomRefs, uniRef]);
   const [sentTick, setSentTick] = useState(0);
   useEffect(() => { setSheet(null); setFull(false); }, [node?.path]); // eslint-disable-line react-hooks/exhaustive-deps
   const noMarks = useMemo(() => new Map<string, Mark[]>(), []);
@@ -184,14 +189,14 @@ export default function AreasSurface({ zoom, identity, talk, path, rooms: hostRo
   </>;
   // ------------------------------------------------------------------------------------------ the tree home (T-111)
   const nowSec = Math.floor(now / 1000);
-  const rowOf = (p: string): RoomView => (tree ? roomView(tree, p, roomRefs, uniRef) : { target: uniRef, slash: null, heldBy: uniRef, own: false });
-  const needsOf = (p: string) => tasks.counts.get(p)?.you ?? 0;
+  const rowOf = (p: string): RoomView => (tree ? roomView(tree, p, roomRefs, uniRef) : { target: uniRef, slash: null, heldBy: uniRef, own: false, heldNode: null });
+  const needsOf = (p: string) => (roomsMode ? ownNeeds.get(p) ?? 0 : tasks.counts.get(p)?.you ?? 0);
   const openOf = (p: string) => tasks.counts.get(p)?.total ?? 0;
   const openPath = (p: string) => {
     if (p === ROOT) { setRootOpen(true); onOpenArea(null, "Uni", uniRoom); return; }
     const n = tree?.nodes.get(p); if (n) open(n);
   };
-  const navRows = treeMode && tree ? treeRows(tree, roomRefs, uniRef) : [{ path: ROOT, name: "Uni", depth: 0, kind: "root" as const, slash: uniRef ? "uni" : null, heldBy: null, own: !!uniRef, trunk: [], last: true }];
+  const navRows = treeMode && tree ? treeRows(tree, roomRefs, uniRef) : [{ path: ROOT, name: "Uni", depth: 0, kind: "root" as const, slash: uniRef ? "uni" : null, heldBy: null, heldNode: null, own: !!uniRef, trunk: [], last: true }];
   const navNeeds = new Map(navRows.map((r) => [r.path, needsOf(r.path)]));
   if (treeMode && phoneTree && path === null && !rootOpen) {
     return <div className="areas-home tree-home-wrap"><TreeScreen chat={chat} rows={navRows} needs={navNeeds} status={status} onOpen={openPath} />
@@ -275,12 +280,13 @@ export default function AreasSurface({ zoom, identity, talk, path, rooms: hostRo
     {sheet && <TaskSheet key={sheet.id} task={sheet} here={here} nodeName={nodeName} room={roomOfNode(sheet.node) ?? target} onClose={() => setSheet(null)} onAct={(t, a) => void tasks.act(t, a)} onOpenRoom={roomsMode ? openRoomHere : actions.openRoom} />}
   </div>;
   // ------------------------------------------------------------------------------------------ the room (T-124): the conversation, with the state as a quiet companion
-  const needTop = topNeeds(where);
-  const lede = firstSentence(levelA.now) || (levelA.hasBrief ? "Quiet here." : "Nothing written about this room yet.");
-  const companionProps = { lede, ready: tasks.ready, needs: needTop.rows, more: needTop.more, runs, onTask: setSheet, onEverything: () => { setSheet(null); setFull(true); } };
+  const needTop = topNeeds(where, node.path);
+  const rawStands = tasks.tree?.stands.get(node.path) ?? (typeof node.metadata.stands === "string" ? { text: node.metadata.stands, at: typeof node.metadata.stands_at === "string" ? node.metadata.stands_at : null } : null);
+  const stands = standsLine(rawStands, privateLevel ? [] : levelTasks, now);
+  const companionProps = { stands, ready: tasks.ready, needs: needTop, runs, onTask: setSheet, onDecide: (t: Task, o: string) => void tasks.decide(t, o), onEverything: () => { setSheet(null); setFull(true); } };
   const roomView_ = roomFor(target?.id);
   const placeholder = chatPlaceholder({ name: node.name, slash: nodeView.own ? nodeView.slash : null, heldBy: nodeView.heldBy ? roomSlug(nodeView.heldBy.name) : null });
-  const doorText = nodeView.own && nodeView.slash ? `#${nodeView.slash}` : nodeView.heldBy ? `held by #${roomSlug(nodeView.heldBy.name)}` : "";
+  const doorText = nodeView.own && nodeView.slash ? `#${nodeView.slash}` : nodeView.heldNode ? `held by ${nodeView.heldNode}` : nodeView.heldBy ? `held by #${roomSlug(nodeView.heldBy.name)}` : "";
   const room = <section className="sr" aria-label={`Conversation: ${node.name}`}>
     <header className="sr-head">
       {!wide && <button type="button" className="sr-back" onClick={() => (back ? back() : undefined)} aria-label="Back to rooms"><span aria-hidden="true">‹</span></button>}

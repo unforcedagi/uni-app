@@ -41,11 +41,13 @@ export type RoomView = {
   /** The ancestor's room that holds a node with none of its own. */
   heldBy: RoomRef | null;
   own: boolean;
+  /** The name of the node whose room holds this one (`Boulder`), so a held row never reads as the room's own. */
+  heldNode: string | null;
 };
 
 /** `rooms`: every known room; `uni`: the Uni room. A node with a live room of its own that an ancestor also uses is held by that ancestor. */
 export function roomView(tree: Tree, path: string, rooms: readonly RoomRef[], uni: RoomRef | null): RoomView {
-  if (path === ROOT) return { target: uni, slash: uni ? roomSlug(uni.name) : null, heldBy: null, own: !!uni };
+  if (path === ROOT) return { target: uni, slash: uni ? roomSlug(uni.name) : null, heldBy: null, own: !!uni, heldNode: null };
   const chain = ancestry(tree, path);
   const nodes = chain.map(roomNodeOf);
   const s = steward(nodes, rooms, uni);
@@ -61,9 +63,10 @@ export function roomView(tree: Tree, path: string, rooms: readonly RoomRef[], un
       const r = fellBack(chain[i]) ? null : ownRoom(nodes[i], rooms);
       if (r && r.id !== last) { names.push(roomSlug(r.name)); last = r.id; }
     }
-    return { target: s.room, slash: joinSlash(names), heldBy: null, own: true };
+    return { target: s.room, slash: joinSlash(names), heldBy: null, own: true, heldNode: null };
   }
-  return { target: s.room, slash: null, heldBy: s.room, own: false };
+  const holder = s.room ? nodes.slice(1).find((n) => ownRoom(n, rooms)?.id === s.room!.id) : undefined;
+  return { target: s.room, slash: null, heldBy: s.room, own: false, heldNode: holder?.name ?? (s.room && s.room.id === uni?.id ? "Uni" : null) };
 }
 
 export type RoomInfoLite = { id: string; name: string; last_message: string | null; last_ts: number | null };
@@ -92,7 +95,7 @@ export function updatesBelow(tree: Tree, path: string, rooms: readonly RoomInfoL
 
 /** One row of the phone's room tree. */
 export type TreeRow = {
-  path: string; name: string; depth: number; kind: "root" | "area" | "project"; slash: string | null; heldBy: string | null; own: boolean;
+  path: string; name: string; depth: number; kind: "root" | "area" | "project"; slash: string | null; heldBy: string | null; heldNode: string | null; own: boolean;
   /** For depths 1..depth-1: does the trunk at that depth carry on below this row (an ancestor with later siblings)? */
   trunk: boolean[];
   /** The last child of its parent: its branch ends here. */
@@ -101,7 +104,7 @@ export type TreeRow = {
 
 /** Uni, then every node under it by depth-first order (foreground first, then by name), with its room. */
 export function treeRows(tree: Tree, rooms: readonly RoomRef[], uni: RoomRef | null, rootName = "Uni"): TreeRow[] {
-  const rows: TreeRow[] = [{ path: ROOT, name: rootName, depth: 0, kind: "root", slash: uni ? roomSlug(uni.name) : null, heldBy: null, own: !!uni, trunk: [], last: true }];
+  const rows: TreeRow[] = [{ path: ROOT, name: rootName, depth: 0, kind: "root", slash: uni ? roomSlug(uni.name) : null, heldBy: null, heldNode: null, own: !!uni, trunk: [], last: true }];
   const seen = new Set<string>();
   const walk = (path: string, depth: number, trunk: boolean[]) => {
     const kids = (tree.children.get(path) ?? []).filter((n) => !seen.has(n.path));
@@ -110,7 +113,7 @@ export function treeRows(tree: Tree, rooms: readonly RoomRef[], uni: RoomRef | n
       seen.add(n.path);
       const v = roomView(tree, n.path, rooms, uni);
       const last = i === kids.length - 1;
-      rows.push({ path: n.path, name: n.name, depth, kind: n.kind, slash: v.slash, heldBy: v.heldBy ? roomSlug(v.heldBy.name) : null, own: v.own, trunk, last });
+      rows.push({ path: n.path, name: n.name, depth, kind: n.kind, slash: v.slash, heldBy: v.heldBy ? roomSlug(v.heldBy.name) : null, heldNode: v.heldNode, own: v.own, trunk, last });
       walk(n.path, depth + 1, [...trunk, !last]);
     });
   };

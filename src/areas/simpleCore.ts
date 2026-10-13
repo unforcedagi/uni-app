@@ -17,10 +17,44 @@ export function firstSentence(text: string | null | undefined): string {
   return `${cut}…`;
 }
 
-/** What needs the user, Now first, and how many more there are than shown. */
-export function topNeeds(w: Where, max = NEEDS_SHOWN): { rows: Task[]; more: number } {
+/**
+ * What needs the user, at most `max`: the open decisions on this very node first (they carry option buttons), then everything else by
+ * priority (Now, Soon, Someday). No count of the rest: "Everything here" is the way to the rest.
+ */
+export function topNeeds(w: Where, path: string, max = NEEDS_SHOWN): Task[] {
   const all = PRIORITIES.flatMap((p) => w.needs[p].rows);
-  return { rows: all.slice(0, max), more: Math.max(0, w.you - Math.min(max, all.length)) };
+  const own = all.filter((t) => t.kind === "decision" && t.node === path);
+  return [...own, ...all.filter((t) => !own.includes(t))].slice(0, max);
+}
+
+/** How long ago, quietly: "today", "yesterday", "3 days ago", "2 weeks ago", else the month and day. Empty for a missing or future time. */
+export function quietAgo(iso: string | null | undefined, nowMs: number): string {
+  const t = iso ? Date.parse(iso) : NaN;
+  if (Number.isNaN(t) || t > nowMs + 60_000) return "";
+  const days = Math.floor((nowMs - t) / 86_400_000);
+  if (days < 1) return "today";
+  if (days === 1) return "yesterday";
+  if (days < 14) return `${days} days ago`;
+  if (days < 60) return `${Math.floor(days / 7)} weeks ago`;
+  return new Date(t).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+type Recent = Pick<Task, "title" | "state" | "kind" | "updatedAt" | "options">;
+const plainTitle = (t: string) => t.replace(/^T-\d+\s+/, "");
+
+/**
+ * Where the room stands, in one sentence and never a count. The node's own `stands` (with `stands_at` as a quiet time); without it the
+ * newest decision, else the newest task change, in plain words; else nothing.
+ */
+export function standsLine(stands: { text: string; at: string | null } | null | undefined, tasks: readonly Recent[], nowMs: number): { text: string; ago: string } | null {
+  const text = firstSentence(stands?.text);
+  if (text) return { text, ago: quietAgo(stands?.at, nowMs) };
+  const stamped = tasks.filter((t) => t.updatedAt && !Number.isNaN(Date.parse(t.updatedAt))).sort((a, b) => Date.parse(b.updatedAt!) - Date.parse(a.updatedAt!));
+  const pick = stamped.find((t) => t.kind === "decision") ?? stamped[0];
+  if (!pick) return null;
+  const what = plainTitle(pick.title);
+  const line = pick.kind === "decision" ? `Waiting on a decision: ${what}.` : pick.state === "doing" ? `${what} is underway.` : pick.state === "waiting" ? `${what} is waiting.` : `Latest: ${what}.`;
+  return { text: line, ago: quietAgo(pick.updatedAt, nowMs) };
 }
 
 /** `Message #atlas/build`; a node held by a room says whose (`Message #atlas`); no room, the node's name. */

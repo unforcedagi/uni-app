@@ -98,6 +98,20 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
     }
   }
 
+  /**
+   * Decide an open decision: one update that sets `state` open -> decided (compare-and-set) and writes `decided`, `decided_at`,
+   * `decided_by`. A decision someone else already decided is a conflict: the caller says so and re-reads, it never retries.
+   */
+  async function decide(taskId: string, option: string, by: string, at: string = new Date().toISOString()): Promise<WriteResult> {
+    try {
+      const note = await call("vault_decide", { vault: name(), id: taskId, from: "open", to: "decided", metadata: { decided: option, decided_at: at, decided_by: by } });
+      return { ok: true, ...stamp(note) };
+    } catch (e) {
+      const message = String(e);
+      return { ok: false, kind: failureKind(message), message };
+    }
+  }
+
   /** A metadata merge guarded by the `updated_at` the caller read (a stale stamp is a conflict); a `null` value clears its key. */
   async function patchMeta(taskId: string, metadata: Record<string, unknown>, updatedAt: string): Promise<WriteResult> {
     try {
@@ -117,7 +131,7 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
   const setPriority = (taskId: string, priority: Priority | null, updatedAt: string, by: string | null = "hand") =>
     patchMeta(taskId, { priority, priority_by: priority === null ? null : by }, updatedAt);
 
-  return { loadTree, loadTagged, loadSubtree, loadTasks, transition, snooze, setPriority, nearSupported: () => nearOk };
+  return { loadTree, loadTagged, loadSubtree, loadTasks, transition, decide, snooze, setPriority, nearSupported: () => nearOk };
 }
 
 export const vaultTasks = createVaultTasks();
