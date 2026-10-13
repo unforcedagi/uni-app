@@ -12,7 +12,7 @@ export const LIVE_STATES: readonly TaskState[] = ["open", "doing", "waiting"];
 
 export type RawNote = {
   id?: unknown; path?: unknown; tags?: unknown; metadata?: unknown; updatedAt?: unknown;
-  lastUpdatedBy?: unknown; lastUpdatedVia?: unknown;
+  lastUpdatedBy?: unknown; lastUpdatedVia?: unknown; content?: unknown;
 };
 
 /** `priority` on a task note: how soon it needs doing. Absent means unsorted, which reads as `soon`. */
@@ -35,6 +35,8 @@ export type Task = {
   updatedAt: string | null; lastUpdatedBy: string | null; lastUpdatedVia: string | null;
   /** An open decision's choices (`options[]`), as the labels to show; empty for a task or a decision with none. */
   options: string[];
+  /** The full question when the title was cut short ("…"): the first line of the note's content, loaded for those only. */
+  ask?: string;
 };
 
 const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);

@@ -5,7 +5,7 @@ import { Changed } from "./Changed";
 import { ownerLabel } from "./NodeWork";
 import { agoLabel } from "./treeRooms";
 import { refKey } from "./refs";
-import type { Draft, Mark, Run } from "./steerCore";
+import { isActiveRun, type Draft, type Mark, type Run } from "./steerCore";
 
 
 // ---------------------------------------------------------------------------------------------- Running and Drafts
@@ -14,9 +14,10 @@ const STATE_MARK: Record<Run["state"], string> = { queued: "◌", running: "●"
 
 /** The dispatch ledger under this node. Nothing at all when there are no runs. */
 export function RunSection({ runs, nowMs, onOpenNote }: { runs: readonly Run[]; nowMs: number; onOpenNote: (ref: string) => void }) {
+  runs = runs.filter(isActiveRun);
   if (!runs.length) return null;
   const nowSec = Math.floor(nowMs / 1000);
-  return <section className="ss ss-run" aria-label="Running"><h3 className="wr-h"><span>Running</span><em>{runs.filter((r) => r.state !== "done" && r.state !== "failed").length}</em></h3>
+  return <section className="ss ss-run" aria-label="Running"><h3 className="wr-h"><span>Running</span><em>{runs.length}</em></h3>
     <ul className="sl">{runs.map((r) => {
       const at = Date.parse(r.updated ?? "");
       return <li key={r.id} className="run" data-state={r.state}>

@@ -575,6 +575,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   // Following the newest message: content growth (images, late layout) keeps it pinned.
   const stickToEnd = useRef(true);
   const [loadedView, setLoadedView] = useState<string | null>(null);
+  const fetchSeq = useRef(0), appliedSeq = useRef(0), viewNow = useRef<string | null>(null);
   const [listEl, setListEl] = useState<HTMLDivElement | null>(null);
   const setList = useCallback((el: HTMLDivElement | null) => {
     listRef.current = el;
@@ -733,10 +734,14 @@ function Conversations({ onForget }: { onForget: () => void }) {
   }, [loadRooms]);
 
   useEffect(() => {
-    if (!channel) { setMessages([]); setLoadedView(null); return; }
+    if (!channel) { viewNow.current = null; setMessages([]); setLoadedView(null); return; }
     let current = true;
     const view = `${channel}|${root}`;
-    invoke<Message[]>("get_messages", { channel, root, limit }).then((rows) => { if (current) { setMessages(rows); setLoadedView(view); } }).catch((e) => { if (current) setError(String(e)); });
+    // Sync ticks re-run this effect faster than a big room loads: a result for the view still on screen is kept (the newest request wins),
+    // so the room never stays blank while ticks keep cancelling its fetch.
+    const seq = ++fetchSeq.current;
+    viewNow.current = view;
+    invoke<Message[]>("get_messages", { channel, root, limit }).then((rows) => { if (viewNow.current === view && seq > appliedSeq.current) { appliedSeq.current = seq; setMessages(rows); setLoadedView(view); } }).catch((e) => { if (current) setError(String(e)); });
     // Viewing the room reads it (only while the app is actually on screen).
     if (document.visibilityState === "visible") {
       invoke("mark_read", { channel }).then(() => loadRooms()).catch(() => {});
@@ -1521,7 +1526,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     {messages.length === 0 && <p className="empty">Thread not in local cache. Refresh to try again.</p>}
   </> : <>
     {messages.length > 0 && <div className="older">{older === "done" ? <span>Start of #{roomName}</span> : <button onClick={() => actions.current.loadOlder()} disabled={older === "loading"}>{older === "loading" ? "Loading older messages…" : "Load older messages"}</button>}</div>}
-    {messages.length === 0 && (loadedView === currentView ? <p className="empty">No messages in this room yet.</p> : <p className="empty quiet" role="status" aria-label="Loading messages"> </p>)}
+    {messages.length === 0 && (loadedView === currentView ? <p className="empty">No messages in this room yet.</p> : <p className="empty quiet" role="status" aria-label="Loading messages">Loading messages…</p>)}
     {renderList(messages, false)}
   </>,
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1697,7 +1702,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       {journalTab && <div className="journal-tab-content" hidden={!journalOpen} onFocusCapture={(e) => { if (e.target instanceof HTMLTextAreaElement) requestAnimationFrame(() => setComposerFocused(true)); }} onBlurCapture={(e) => { const journal = e.currentTarget; requestAnimationFrame(() => setComposerFocused(journal.contains(document.activeElement) && document.activeElement instanceof HTMLTextAreaElement)); }}><Journal focus={journalFocus} onFocus={() => setJournalFocus((v) => !v)} rooms={rooms} uniRoomId={findUniRoom(rooms)?.id ?? null} onShare={shareEntry} onBack={() => setPanel("rooms")} onRecordingChange={(on, elapsed, stop) => { journalRecordingRef.current = on; setJournalRecording(on ? { elapsed, stop } : null); }} /></div>}
       {active?.kind === "vault" && active.vault ? <VaultBrowser key={active.vault} vault={active.vault} onBack={() => setPanel("rooms")} onOpen={(note) => openTarget({ kind: "note", note: { hub: null, vault: active.vault!, ref: note.id }, title: note.path || note.id }, "new")} onCreate={(folder) => requestCreate(active.vault!, folder)} onSearch={(prefix) => { setSearchQuery(""); setSearchScope({ vault: active.vault!, prefix }); setSearchOpen(true); setSidebarVisible(true); }} />
       : journalOpen ? null
-      : areasOpen && active ? <AreasSurface vaults={vaults} zoom={nodeZoom} talk={talk} onBackChange={setAreaBack} identity={identity} key={`${active.id}:${identity ?? ""}`} onConversations={() => setPanel("rooms")} path={active.kind === "area" ? active.path ?? null : null} rooms={rooms} actions={areaActions} roomFor={areaRoomFor} onRoom={syncAreaRoom}
+      : areasOpen && active ? <AreasSurface roomsPending={rooms.length === 0 && synced === 0} vaults={vaults} zoom={nodeZoom} talk={talk} onBackChange={setAreaBack} identity={identity} key={`${active.id}:${identity ?? ""}`} onConversations={() => setPanel("rooms")} path={active.kind === "area" ? active.path ?? null : null} rooms={rooms} actions={areaActions} roomFor={areaRoomFor} onRoom={syncAreaRoom}
           onOpenArea={(path, name, room) => openTarget(path === null ? { kind: "areas", title: "Uni", ...(room ? { channel: room } : {}) } : { kind: "area", path, title: name, ...(room ? { channel: room } : {}) }, "replace")} />
       : currentRoom ? <>
         <header className="conversation-header">

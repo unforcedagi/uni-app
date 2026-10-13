@@ -127,6 +127,9 @@ export function parseDrafts(notes: readonly RawNote[], tree: TaskTree, tasks: re
   return out;
 }
 
+/** A run that is still going: finished ones (done, failed) are history and are not listed as running. */
+export const isActiveRun = (r: Pick<Run, "state">): boolean => r.state !== "done" && r.state !== "failed";
+
 const under = (tree: TaskTree, path: string) => (path === ROOT ? null : new Set(subtreePaths(tree, path)));
 /** The runs on a node and beneath it (ROOT: all), the active ones first (running, stalled, queued), then the finished, newest first. */
 export function runsUnder(tree: TaskTree, path: string, runs: readonly Run[]): Run[] {
