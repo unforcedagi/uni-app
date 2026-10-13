@@ -105,6 +105,7 @@ function NeedRow({ t, onTask, onDecide, onNote }: { t: Task; onTask: (t: Task) =
   const [nextCut, setNextCut] = useState(false);
   // a decision's question is never clamped; an action reads to its object (up to 3 lines beside other lines, 4 alone)
   const titleMax = isDecision ? 99 : next || due || ask.hint ? 3 : 4;
+  useLayoutEffect(() => { setTooLong(false); }, [base.text]);
   useLayoutEffect(() => {
     const el = titleRef.current; if (!el) return;
     const measure = () => {
@@ -113,8 +114,9 @@ function NeedRow({ t, onTask, onDecide, onNote }: { t: Task; onTask: (t: Task) =
       setTitleLines(lines);
       // measured on the question itself; once it reads "Open to decide" the row is one line, so only a new width or text measures again
       const w = Math.round(el.clientWidth);
-      if (w !== width.current) { width.current = w; setTooLong(false); }
-      else if (isDecision && !base.openToDecide && !tooLongRef.current) setTooLong(lines > ASK_LINES_MAX);
+      const moved = w !== width.current; width.current = w;
+      if (moved && tooLongRef.current) { setTooLong(false); return; }
+      if (isDecision && !base.openToDecide && !tooLongRef.current) setTooLong(lines > ASK_LINES_MAX);
       if (!open) setTitleCut(el.scrollHeight > el.clientHeight + 1);
     };
     measure();
@@ -122,7 +124,6 @@ function NeedRow({ t, onTask, onDecide, onNote }: { t: Task; onTask: (t: Task) =
     ro?.observe(el);
     return () => ro?.disconnect();
   }, [text, open, titleMax, isDecision, base.openToDecide, tooLong]);
-  useLayoutEffect(() => { setTooLong(false); }, [base.text]);
   const nextLines = lineBudget(Math.min(titleLines, titleMax), !!due || !!ask.hint, 4).next;
   const more = open || (titleCut && !isDecision) || nextCut || (!!next && nextLines <= 0);
   const clampStyle = open || isDecision ? undefined : ({ WebkitLineClamp: titleMax, lineClamp: titleMax } as React.CSSProperties);

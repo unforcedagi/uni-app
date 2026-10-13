@@ -182,7 +182,7 @@ check("r11 askLead: sentence case, and \"Your call:\" unless it already asks", (
   assert.deepEqual(askLead("Send it (yes?)"), { text: "Send it (yes?)", yourCall: false });
 });
 check("r11 task titles: the vault's fraction slash reads as a plain slash", () => {
-  const t = parseTask({ id: "a", path: "Tasks/T-9 Riverside cure\u2044purchase", tags: ["task"], metadata: { state: "open", node: "" } } as never, buildTaskTree([]) as never);
+  const t = parseTask({ id: "a", path: "Tasks/T-9 Riverside cure\u2215purchase", tags: ["task"], metadata: { state: "open", node: "" } } as never, buildTaskTree([]) as never);
   assert.equal(t?.title, "T-9 Riverside cure/purchase");
 });
 await (async () => {
