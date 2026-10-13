@@ -77,6 +77,14 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
       if (drafts) { mem.drafts = drafts; setRawDrafts(drafts); }
       mem.tasks.set(nodePath, { list: r.tasks, truncated: r.truncated });
       setList(r.tasks); setTruncated(r.truncated); setError(null);
+      // a cut title's full question arrives a moment later, without holding the list back
+      void vaultTasks.loadAsks(r.tasks).then((asks) => {
+        if (!asks.size || !live || mine !== epoch.current || memory !== mem) return;
+        const withAsk = (l: Task[] | null) => l && l.map((t) => (asks.has(t.id) ? { ...t, ask: asks.get(t.id)! } : t));
+        const merged = r.tasks.map((t) => (asks.has(t.id) ? { ...t, ask: asks.get(t.id)! } : t));
+        mem.tasks.set(nodePath, { list: merged, truncated: r.truncated });
+        setList((cur) => withAsk(cur));
+      }).catch(() => {});
       // anything the server no longer lists is settled: stop hiding it by hand
       setGone((g) => new Set([...g].filter((id) => r.tasks.some((x) => x.id === id && isLive(x)))));
     })().catch((e) => { if (live && mine === epoch.current) setError(String(e)); }).finally(() => { if (live && mine === epoch.current) setLoading(false); });
