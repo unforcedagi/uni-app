@@ -5,7 +5,7 @@ import { parseArea, parseProject } from "../src/areas/areasCore.ts";
 import { buildTree, ROOT } from "../src/areas/treeCore.ts";
 import { nestRooms } from "../src/roomNesting.ts";
 import { ownRoom } from "../src/areas/talkCore.ts";
-import { isPrivateNode, joinSlash, roomSlug, roomView, treeRows, updatesBelow } from "../src/areas/treeRooms.ts";
+import { isPrivateNode, roomSlug, roomView, treeRows, updatesBelow } from "../src/areas/treeRooms.ts";
 import { levelAlive } from "../src/areas/treeAlive.ts";
 import { parseBrief } from "../src/areas/briefCore.ts";
 import { parseHomeLayout } from "../src/areas/homeLayout.ts";
@@ -36,11 +36,11 @@ const tree = buildTree([
 ]);
 
 check("slug: lower case, spaces to dashes", () => { assert.equal(roomSlug("Boulder New Tech"), "boulder-new-tech"); assert.equal(roomSlug("#Cohere"), "cohere"); });
-check("an area with a room shows it flat; a project nests under its area's room: boulder/cohere", () => {
+check("an area with a room shows it flat; a project shows its own room's real name: #cohere", () => {
   assert.deepEqual(roomView(tree, "Areas/Boulder", ROOMS, UNI), { target: ROOMS[1], slash: "boulder", heldBy: null, own: true, heldNode: null });
   const v = roomView(tree, "Projects/COhere", ROOMS, UNI);
-  assert.equal(v.slash, "boulder/cohere"); assert.equal(v.target?.id, "r-coh"); assert.equal(v.own, true);
-  assert.equal(roomView(tree, "Projects/New Tech", ROOMS, UNI).slash, "boulder/boulder-new-tech");
+  assert.equal(v.slash, "cohere"); assert.equal(v.target?.id, "r-coh"); assert.equal(v.own, true);
+  assert.equal(roomView(tree, "Projects/New Tech", ROOMS, UNI).slash, "boulder-new-tech");
 });
 check("a project with no room is held by its area's room, and talk goes there", () => {
   const v = roomView(tree, "Projects/Civic", ROOMS, UNI);
@@ -65,9 +65,9 @@ check("updates from below: rooms of their own under the node, active within a da
   const now = 1_000_000;
   const rooms = [{ id: "r-uni", name: "Uni", last_message: "x", last_ts: now - 10 }, { id: "r-bou", name: "boulder", last_message: "own room line", last_ts: now - 5 }, { id: "r-coh", name: "cohere", last_message: "venue held", last_ts: now - 3600 }, { id: "r-nt", name: "Boulder New Tech", last_message: "old news", last_ts: now - 3 * 86400 }, { id: "r-ufd", name: "Unforced Dev", last_message: "invoice sent", last_ts: now - 600 }, { id: "r-sad", name: "Sadhana", last_message: "sat twenty minutes", last_ts: now - 7200 }, ...[]];
   const b = updatesBelow(tree, "Areas/Boulder", rooms, UNI, now);
-  assert.deepEqual(b.map((u) => [u.slash, u.text]), [["boulder/cohere", "venue held"]]);
+  assert.deepEqual(b.map((u) => [u.slash, u.text]), [["cohere", "venue held"]]);
   const all = updatesBelow(tree, ROOT, rooms, UNI, now);
-  assert.deepEqual(all.map((u) => u.slash), ["boulder", "unforced-dev", "boulder/cohere", "sadhana"], "newest first");
+  assert.deepEqual(all.map((u) => u.slash), ["boulder", "unforced-dev", "cohere", "sadhana"], "newest first");
   assert.ok(all.some((u) => u.slash === "unforced-dev"), "an area's own room counts for Uni");
   assert.ok(!all.some((u) => u.slash.includes("new-tech")), "older than a day is left out");
 });
@@ -84,7 +84,7 @@ check("the phone's rows: Uni, then depth-first by foreground and name, with room
   assert.equal(rows[0].path, ROOT); assert.equal(rows[0].depth, 0);
   const ri = (p: string) => rows.find((r) => r.path === p)!;
   assert.equal(ri("Areas/Boulder").depth, 1);
-  assert.equal(ri("Projects/COhere").depth, 2); assert.equal(ri("Projects/COhere").slash, "boulder/cohere");
+  assert.equal(ri("Projects/COhere").depth, 2); assert.equal(ri("Projects/COhere").slash, "cohere");
   assert.equal(ri("Projects/COhere 2026").depth, 3); assert.equal(ri("Projects/COhere 2026").heldBy, "cohere");
   assert.equal(ri("Projects/Civic").heldBy, "boulder");
   const order = rows.map((r) => r.path);
@@ -115,7 +115,7 @@ check("alive: with no room owners (chat null profile) a room-owned task shows no
     setActiveProfile(defaultProfile()); assert.deepEqual(at(), ["in #cohere"]);
   } finally { setActiveProfile(defaultProfile()); }
 });
-check("slash: a project room already under the area's name is not doubled; a flat old name still is", () => {
+check("slash: a room line is the room's real name (atlas/build is a channel name; cohere is not boulder/cohere)", () => {
   const rooms = [{ id: "r-uni", name: "Uni" }, { id: "r-atl", name: "atlas" }, { id: "r-bld", name: "atlas/build" }, { id: "r-tch", name: "atlas/teach" }, { id: "r-bou", name: "boulder" }, { id: "r-coh", name: "cohere" }];
   const t = buildTree([area("a-atl", "ATLAS", { room: "atlas" }), area("a-bou", "Boulder", { room: "boulder" }),
     proj("p1", "ATLAS", "Areas/ATLAS", { room: "atlas/build", channel: "r-bld" }), proj("p2", "Learn Vibe Build", "Areas/ATLAS", { room: "atlas/teach" }),
@@ -124,8 +124,7 @@ check("slash: a project room already under the area's name is not doubled; a fla
   assert.equal(v("Projects/ATLAS").slash, "atlas/build"); assert.equal(v("Projects/Learn Vibe Build").slash, "atlas/teach");
   assert.equal(v("Areas/ATLAS").slash, "atlas");
   assert.equal(v("Projects/Atlas Institute").own, false); assert.equal(v("Projects/Atlas Institute").heldBy?.name, "atlas");
-  assert.equal(v("Projects/COhere").slash, "boulder/cohere");
-  assert.equal(joinSlash(["atlas", "atlas/build"]), "atlas/build"); assert.equal(joinSlash(["atlas", "atlasx"]), "atlas/atlasx");
+  assert.equal(v("Projects/COhere").slash, "cohere", "the channel name, never a path built from the tree");
 });
 check("ownRoom: channel id first; a name with a slash matches exactly, never as atlasbuild or atlas-build", () => {
   const rooms = [{ id: "7dce", name: "atlas/build" }, { id: "x1", name: "atlas-build" }, { id: "x2", name: "atlasbuild" }, { id: "a1", name: "atlas" }];
@@ -148,7 +147,7 @@ check("an area whose channel points at its child's room does not show that room 
   assert.equal(b.slash, "boulder"); assert.equal(b.target?.id, "r-bou");
   assert.equal(roomView(t2, "Projects/COhere", ROOMS, UNI).target?.id, "r-coh");
   const c = roomView(t2, "Projects/COhere", ROOMS, UNI);
-  assert.equal(c.own, true, "COhere owns its room even though Boulder's channel names it"); assert.equal(c.slash, "boulder/cohere");
+  assert.equal(c.own, true, "COhere owns its room even though Boulder's channel names it"); assert.equal(c.slash, "cohere");
   const noBoulderRoom = roomView(t2, "Areas/Boulder", ROOMS.filter((r) => r.id !== "r-bou"), UNI);
   assert.equal(noBoulderRoom.own, false); assert.equal(noBoulderRoom.slash, null); assert.equal(noBoulderRoom.target?.id, "r-uni");
 });
