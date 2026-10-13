@@ -8,7 +8,7 @@ import { ownRoom } from "../src/areas/talkCore.ts";
 import { isPrivateNode, roomSlug, roomView, treeRows, updatesBelow } from "../src/areas/treeRooms.ts";
 import { levelAlive } from "../src/areas/treeAlive.ts";
 import { parseBrief } from "../src/areas/briefCore.ts";
-import { parseHomeLayout } from "../src/areas/homeLayout.ts";
+import { HOME_LAYOUT_KEY, migrateHomeLayout } from "../src/areas/homeLayout.ts";
 
 let failed = 0;
 function check(name: string, fn: () => void) {
@@ -90,8 +90,14 @@ check("the phone's rows: Uni, then depth-first by foreground and name, with room
   const order = rows.map((r) => r.path);
   assert.ok(order.indexOf("Projects/COhere") + 1 === order.indexOf("Projects/COhere 2026"), "a child follows its parent");
 });
-check("layout setting: unknown or missing is Tree", () => {
-  assert.equal(parseHomeLayout(null), "rooms"); assert.equal(parseHomeLayout("tree"), "tree"); assert.equal(parseHomeLayout("octopus"), "octopus"); assert.equal(parseHomeLayout("classic"), "classic"); assert.equal(parseHomeLayout("x"), "rooms");
+check("layout setting (r12): a saved Map, Octopus or Classic choice is dropped once; the room layout is all there is", () => {
+  for (const was of ["tree", "octopus", "classic", "rooms"]) {
+    const m = new Map([[HOME_LAYOUT_KEY, was]]);
+    const st = { getItem: (k: string) => m.get(k) ?? null, removeItem: (k: string) => { m.delete(k); } };
+    assert.equal(migrateHomeLayout(st), was); assert.equal(m.has(HOME_LAYOUT_KEY), false);
+    assert.equal(migrateHomeLayout(st), null, "the second start finds nothing to migrate");
+  }
+  assert.equal(migrateHomeLayout(null), null);
 });
 check("alive: a node with a Brief reads it; a project with none is derived from its summary, the area brief's lines naming it, and the rooms' tasks", () => {
   const briefs = { "Areas/Boulder": { brief: parseBrief("## Now\nBoulder is mostly COhere this week.\n\n## Needs you\n- Confirm the COhere venue deposit\n- Approve the testimony\n\n## Moving\n- COhere tents ordered\n"), updatedAt: null, generatedAt: null } } as never;

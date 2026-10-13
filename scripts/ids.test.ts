@@ -5,7 +5,7 @@ import { buildTaskTree, parseNodes, parseTask, rollUp, subtreePaths, nodeFilterK
 import { isUlid, pathResolver, refKey } from "../src/areas/refs.ts";
 import { parseArea, parseProject, trustedBrief } from "../src/areas/areasCore.ts";
 import { ancestry, buildTree, ROOT, parentPath } from "../src/areas/treeCore.ts";
-import { ownRoom, steward, stewardLine, type RoomNode } from "../src/areas/talkCore.ts";
+import { ownRoom, steward, type RoomNode } from "../src/areas/talkCore.ts";
 import { createVaultTasks } from "../src/areas/vaultTasks.ts";
 
 let failed = 0;
@@ -105,13 +105,12 @@ const rn = (path: string, room: string | null, channels: string[] = []): RoomNod
 
 await check("steward: own room, inherited from the nearest ancestor, else #Uni", () => {
   const own = steward([rn("P/Cohere", "cohere"), rn("A/Techne", "techne")], rooms, uni);
-  assert.deepEqual([own.room?.id, own.via, stewardLine(own)], ["r-cohere", "own", "Room #cohere"]);
+  assert.deepEqual([own.room?.id, own.via], ["r-cohere", "own"]);
   const inh = steward([rn("P/Priya", null), rn("A/Techne", "techne")], rooms, uni);
-  assert.deepEqual([inh.room?.id, inh.via, inh.from?.path, stewardLine(inh)], ["r-techne", "inherited", "A/Techne", "Stewarded by #techne"]);
+  assert.deepEqual([inh.room?.id, inh.via, inh.from?.path], ["r-techne", "inherited", "A/Techne"]);
   const top = steward([rn("P/Loose", null)], rooms, uni);
-  assert.deepEqual([top.room?.id, top.via, stewardLine(top)], ["r-uni", "uni", "Stewarded by #Uni"]);
+  assert.deepEqual([top.room?.id, top.via], ["r-uni", "uni"]);
   assert.deepEqual(steward([], rooms, null), { room: null, via: "uni", from: null });
-  assert.equal(stewardLine(steward([], rooms, null)), null);
 });
 
 await check("steward: a room that does not exist is skipped (not a dead end); channel ids beat names; a renamed room still resolves by id", () => {

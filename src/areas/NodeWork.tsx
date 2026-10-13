@@ -1,7 +1,5 @@
-import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { cleanText } from "../interface/contract";
-import type { RoomMessage } from "../interface/modules/chat";
 import { groupTasks, isMe, type Task } from "./taskCore";
 import type { RoomRef } from "./talkCore";
 import type { TaskAction, Undo } from "./useTasks";
@@ -12,113 +10,6 @@ import { isCutTitle, stateLine } from "./simpleCore";
 import { splitTitle } from "./whereCore";
 
 const SHOW = 8;
-const HOLD_MS = 220;
-const mmss = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
-
-/** What the host gives the talk bar: the app's own send and voice paths (the durable outbox), nothing else. */
-export type Talk = {
-  sendText(channel: string, text: string): Promise<void>;
-  startVoice(channel: string): Promise<boolean>;
-  stopVoice(): void;
-  recording: { channel: string; elapsed: number; phase: string } | null;
-  /** The last voice note's delivery: "" idle, sending, sent, failed (kept in the outbox and retried). */
-  voice: "" | "sending" | "sent" | "failed";
-};
-
-/**
- * Hold to talk, tap for a typed line: the press logic both the talk bar and the steering bar use. Nothing is sent from here but the
- * voice note (the app's own outbox path); a tap calls `onTap` (the talk bar opens its line, the steering bar focuses its own).
- */
-export function useHoldTalk(room: RoomRef | null, talk: Talk, onTap: () => void) {
-  const [error, setError] = useState<string | null>(null);
-  const [wasVoice, setWasVoice] = useState(false);
-  const press = useRef<{ timer: ReturnType<typeof setTimeout> | null; started: boolean; released: boolean } | null>(null);
-  const mine = !!room && talk.recording?.channel === room.id;
-  useEffect(() => () => { if (press.current?.timer) clearTimeout(press.current.timer); }, []);
-  const down = () => {
-    if (!room || press.current || talk.recording) return;
-    setError(null);
-    const p = { timer: null as ReturnType<typeof setTimeout> | null, started: false, released: false };
-    press.current = p;
-    p.timer = setTimeout(async () => {
-      p.timer = null; p.started = true; setWasVoice(true);
-      try {
-        const ok = await talk.startVoice(room.id);
-        if (!ok) setError("Couldn't start recording.");
-        else if (p.released) talk.stopVoice();
-      } catch (e) { setError(`Microphone unavailable: ${String(e)}`); }
-    }, HOLD_MS);
-  };
-  const up = () => {
-    const p = press.current; if (!p) return;
-    p.released = true;
-    if (p.timer) { clearTimeout(p.timer); p.timer = null; press.current = null; onTap(); return; }
-    press.current = null;
-    if (talk.recording) talk.stopVoice();
-  };
-  const onKey = (e: ReactKeyboardEvent) => {
-    if (e.key === " " && !e.repeat) { e.preventDefault(); down(); }
-    else if (e.key === "Enter") { e.preventDefault(); onTap(); }
-  };
-  const onKeyUp = (e: ReactKeyboardEvent) => { if (e.key === " ") { e.preventDefault(); up(); } };
-  const pointer = {
-    onPointerDown: (e: ReactPointerEvent<HTMLButtonElement>) => { if (e.button !== 0) return; e.currentTarget.setPointerCapture?.(e.pointerId); down(); },
-    onPointerUp: up, onPointerCancel: up, onLostPointerCapture: up, onContextMenu: (e: { preventDefault(): void }) => e.preventDefault(), onKeyDown: onKey, onKeyUp,
-  };
-  const voiceLine = wasVoice && !mine && talk.voice === "sending" ? `Sending voice note to #${room?.name}…` : wasVoice && !mine && talk.voice === "sent" ? `Sent to #${room?.name}` : wasVoice && talk.voice === "failed" ? "Voice note not sent yet, it will retry" : null;
-  return { mine, error, setError, setWasVoice, voiceLine, pointer };
-}
-
-/** Hold to talk (a voice note to the level's room), tap to type one line. Names the room it goes to; sends nothing by itself. */
-export function TalkBar({ room, talk, label }: { room: RoomRef | null; talk: Talk; label: string }) {
-  const [typing, setTyping] = useState(false);
-  const [text, setText] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [sent, setSent] = useState<string | null>(null);
-  const input = useRef<HTMLInputElement>(null);
-  const hold = useHoldTalk(room, talk, () => setTyping(true));
-  const { mine, error, setError } = hold;
-  useEffect(() => { if (typing) input.current?.focus(); }, [typing]);
-  useEffect(() => { if (!sent) return; const t = setTimeout(() => setSent(null), 6000); return () => clearTimeout(t); }, [sent]);
-
-  const submit = async (e: { preventDefault(): void }) => {
-    e.preventDefault();
-    const body = text.trim();
-    if (!room || !body || busy) return;
-    setBusy(true); setError(null);
-    try { await talk.sendText(room.id, body); setText(""); setTyping(false); hold.setWasVoice(false); setSent(`Sent to #${room.name}`); }
-    catch (err) { setError(`Couldn't send: ${String(err).replace(/^Error:\s*/, "").slice(0, 120)}`); }
-    finally { setBusy(false); }
-  };
-  const status = error ?? sent ?? hold.voiceLine;
-  const name = room ? `#${room.name}` : "no room";
-  return <section className="talk" aria-label={`Talk to ${label}`}>
-    <button type="button" className={`talk-hold ${mine ? "recording" : ""}`} disabled={!room} aria-pressed={mine}
-      aria-label={mine ? `Recording for ${name}. Release to send.` : `Hold to talk to ${name}. Tap to type a note.`} {...hold.pointer}>
-      <span className="talk-dot" aria-hidden="true" />
-      <span className="talk-text">{mine ? <>Recording {mmss(talk.recording!.elapsed)} · release to send</> : <>Hold to talk</>}<small>{mine ? `to ${name}` : `${room ? `to ${name} · tap to type` : "This level has no room yet"}`}</small></span>
-    </button>
-    {typing && room && <form className="talk-form" onSubmit={submit}>
-      <input ref={input} value={text} onChange={(e) => setText(e.target.value)} maxLength={500} aria-label={`Note to ${name}`} placeholder={`One line to ${name}…`} enterKeyHint="send" disabled={busy} />
-      <button type="submit" className="suggestion-go" disabled={busy || !text.trim()}>Send</button>
-      <button type="button" className="pairing-secondary" onClick={() => { setTyping(false); setText(""); }}>Cancel</button>
-    </form>}
-    <p className={`talk-status ${error ? "bad" : ""}`} role={error ? "alert" : "status"} aria-live="polite">{status}</p>
-  </section>;
-}
-
-/** The last two messages of a room, as text. */
-export function RecentMessages({ room, tick }: { room: RoomRef | null; tick: number }) {
-  const [list, setList] = useState<{ room: string; messages: RoomMessage[] } | null>(null);
-  useEffect(() => {
-    if (!room) return;
-    let live = true;
-    invoke<RoomMessage[]>("get_messages", { channel: room.id, root: null, limit: 2 }).then((m) => { if (live) setList({ room: room.id, messages: m.slice(-2) }); }).catch(() => { if (live) setList({ room: room.id, messages: [] }); });
-    return () => { live = false; };
-  }, [room?.id, tick]); // eslint-disable-line react-hooks/exhaustive-deps
-  if (!room || !list || list.room !== room.id || !list.messages.length) return null;
-  return <ul className="talk-recent" aria-label={`Latest in #${room.name}`}>{list.messages.map((m) => <li key={m.ref}><strong>{cleanText(m.author_name || m.author.slice(0, 8))}</strong> <span>{cleanText(m.body).replace(/\s+/g, " ")}</span></li>)}</ul>;
-}
 
 export const ownerLabel = (o: string, p: VaultProfile = activeProfile()) => (o === p.me ? p.meLabel : p.roomOwnerPrefix && o.startsWith(p.roomOwnerPrefix) ? `#${o.slice(p.roomOwnerPrefix.length)}` : o.startsWith("person:") ? o.slice(7) : p.agentOwners.includes(o) ? o.charAt(0).toUpperCase() + o.slice(1) : o || "unassigned");
 const OWNER = (o: string) => ownerLabel(o);
