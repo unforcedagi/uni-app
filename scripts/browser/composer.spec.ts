@@ -460,7 +460,8 @@ for (const notify of [true, false]) {
     });
     await page.getByRole('button', { name: 'Refresh messages', exact: true }).click();
     if (test.info().project.name === 'desktop') await page.locator('article.message').first().hover();
-    await page.getByRole('button', { name: 'Reply in thread to Test member', exact: true }).click();
+    await page.getByRole('button', { name: "More actions for Test member's message", exact: true }).click();
+    await page.getByRole('menuitem', { name: 'Reply in thread to Test member', exact: true }).click();
     await expect(page.locator('.compose-destination')).toContainText('Replying in thread');
     if (!notify) await page.getByRole('button', { name: 'Uni is listening', exact: true }).click();
     await page.getByRole('textbox', { name: 'Message Test room' }).fill('@Test member stays in draft');
