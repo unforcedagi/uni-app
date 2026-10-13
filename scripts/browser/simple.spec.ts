@@ -730,6 +730,7 @@ test.describe('simple', () => {
     await expect(needs).not.toContainText('Put away'); // archived
     await expect(needs).not.toContainText('A snoozed one'); // snoozed
     await expect(needs).not.toContainText('Wire the usage guard'); // Uni's, not Aaron's
+    if (await page.locator('.cp-more-rows').count()) await page.locator('.cp-more-rows').click(); // a small window keeps the later rows behind "+N more"
     // Now before Soon
     const order = await needs.locator('.cp-need').evaluateAll((els) => els.map((e) => e.textContent ?? ''));
     expect(order.findIndex((t) => t.includes('COhere festival readiness'))).toBeLessThan(order.findIndex((t) => t.includes('Sponsorship invoice draft')));

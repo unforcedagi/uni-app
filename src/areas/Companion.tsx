@@ -176,25 +176,30 @@ function NeedsList({ needs, fit, onTask, onDecide, onNote }: Pick<Props, "needs"
     if (!list || !scroller || !body) { setMeasuring(false); return; }
     const rows = [...list.children] as HTMLElement[];
     // room for the list = the panel minus everything that is not the list (heading, sentence, runs, footer) minus the "+N more" line
-    const budget = scroller.clientHeight - (body.scrollHeight - list.offsetHeight) - 40;
+    // with every row drawn: no overflow means they all fit. Otherwise the body has its natural height, and the panel's own bar sits outside it
+    const top = scroller.querySelector<HTMLElement>(".cp-top")?.offsetHeight ?? 0;
+    const fits = scroller.scrollHeight <= scroller.clientHeight + 1;
+    const budget = scroller.clientHeight - top - (body.scrollHeight - list.offsetHeight) - 40;
     let used = 0; let n = 0;
-    for (const r of rows) { if (n > 0 && used + r.offsetHeight > budget) break; used += r.offsetHeight; n++; }
-    setLimit(n >= rows.length ? Infinity : n);
+    for (const r of fits ? [] : rows) { if (n > 0 && used + r.offsetHeight > budget) break; used += r.offsetHeight; n++; }
+    setLimit(fits || n >= rows.length ? Infinity : n);
     if (settled.current !== key) remeasured.current = 0;
     settled.current = key;
     setMeasuring(false);
   }, [measuring, fit]); // eslint-disable-line react-hooks/exhaustive-deps
   // a row can change height after it was measured (a question that turns out too long for four lines becomes "Open to decide"):
-  // if the panel then overflows, measure again (at most three times per list, so this settles)
+  // if the panel then overflows, measure again (a few times in a row at most, so this settles)
   useLayoutEffect(() => {
     const list = listRef.current; const scroller = list?.closest(".cp.side") as HTMLElement | null;
     if (!fit || !list || !scroller || measuring || all || typeof ResizeObserver === "undefined") return;
     const check = () => {
-      if (settled.current !== key || remeasured.current >= 3 || list.querySelector("[data-open]")) return;
-      if (scroller.scrollHeight > scroller.clientHeight + 1) { remeasured.current++; setLimit(Infinity); setMeasuring(true); }
+      if (settled.current !== key || list.querySelector("[data-open]")) return;
+      if (scroller.scrollHeight <= scroller.clientHeight + 1) { remeasured.current = 0; return; }
+      if (remeasured.current < 6) { remeasured.current++; setLimit(Infinity); setMeasuring(true); }
     };
     const ro = new ResizeObserver(check);
     ro.observe(list);
+    const body = list.closest(".cp-body"); if (body) ro.observe(body); // the sentence or the footer can change height too
     check();
     return () => ro.disconnect();
   }, [fit, measuring, all, limit, needs.length, key]);
