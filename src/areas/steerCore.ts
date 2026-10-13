@@ -1,5 +1,5 @@
 // "Steer, don't chat" (T-122, pure, unit-tested in scripts/steer.test.ts): what a steer changed (the diff between the load before it and
-// the load after), the Running ledger and Drafts read from their notes, and the steering bar's placeholder. Nothing here fetches.
+// the load after), the Running ledger and Drafts read from their notes. Nothing here fetches.
 import { ROOT } from "./treeCore.ts";
 import { refKey, stripExt } from "./refs.ts";
 import { subtreePaths, type RawNote, type Task, type TaskTree } from "./taskCore.ts";
@@ -7,16 +7,6 @@ import { subtreePaths, type RawNote, type Task, type TaskTree } from "./taskCore
 const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);
 const meta = (n: RawNote) => (n.metadata && typeof n.metadata === "object" ? n.metadata : {}) as Record<string, unknown>;
 const leaf = (p: string) => p.split("/").filter(Boolean).pop() ?? p;
-
-// ---------------------------------------------------------------------------------------------- the placeholder
-
-/** `Steer ATLAS (#atlas/build)…`, `Steer Atlas Institute (held by #atlas)…`, or `About T-07…` when the Log was opened from a task. */
-export function steerPlaceholder(a: { name: string; slash: string | null; heldBy: string | null; about?: string | null }): string {
-  if (a.about) return `About ${a.about}…`;
-  if (a.slash) return `Steer ${a.name} (#${a.slash})…`;
-  if (a.heldBy) return `Steer ${a.name} (held by #${a.heldBy.replace(/^#/, "")})…`;
-  return `Steer ${a.name}…`;
-}
 
 // ---------------------------------------------------------------------------------------------- the effect of a steer
 

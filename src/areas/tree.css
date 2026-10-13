@@ -33,7 +33,7 @@
 }
 .tree-home-wrap { background: var(--th-paper); }
 .tree-home button { font-family: inherit; }
-.tree-home .th-mono, .th-ctx, .chg, .run-chip, .run-what small, .logstrip, .steer-log-head, .steer-status, .steer-rec small, .th-cap, .th-h, .wr-h, .wr-counts dt, .wr-meta, .wr-id, .wr-mv small, .wr-prio, .th-colname, .th-fresh, .th-roomline, .th-door, .th-up small, .th-slip small, .th-line small, .th-rnote, .th-crumbs, .talk-status, .task-meta, .work-group h3 { font-family: var(--th-mono); }
+.tree-home .th-mono, .th-ctx, .chg, .run-chip, .run-what small, .th-cap, .th-h, .wr-h, .wr-counts dt, .wr-meta, .wr-id, .wr-mv small, .wr-prio, .th-colname, .th-fresh, .th-roomline, .th-door, .th-up small, .th-slip small, .th-line small, .th-rnote, .th-crumbs, .talk-status, .task-meta, .work-group h3 { font-family: var(--th-mono); }
 
 /* ------------------------------------------------------------------------------------------------- the level (wide) */
 .tree-home.th-level { flex: 1; min-height: 0; display: grid; background: var(--th-ground); }
@@ -302,50 +302,6 @@ h3.wr-h { font-weight: 400; }
 .chg { display: flex; flex-direction: column; gap: 1px; margin-top: 2px; font-size: 11px; letter-spacing: .05em; text-transform: uppercase; color: var(--th-sap); font-weight: 600; }
 .wr-open { align-self: flex-start; font: 600 12px var(--th-mono); letter-spacing: .08em; text-transform: uppercase; text-decoration: underline; text-underline-offset: 3px; }
 .tree-home .task-row.changed { max-height: none; }
-/* the steering bar: a mic, a line, Steer. It replaces the talk bar on the node page. */
-.steer { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "mic line go" "st st st"; align-items: center; gap: 0 10px; margin: 6px 0 0; }
-.steer-mic { all: unset; grid-area: mic; box-sizing: border-box; width: 48px; height: 48px; display: grid; place-items: center; cursor: pointer; touch-action: none; }
-.steer-mic span { position: relative; width: 36px; height: 36px; background: var(--th-ink); box-shadow: 0 0 0 3px var(--th-paper), 0 0 0 4.5px var(--th-ink); }
-.steer-mic span::after { content: ""; position: absolute; left: 50%; top: 50%; width: 9px; height: 15px; margin: -8px 0 0 -4.5px; border-radius: 5px; background: var(--th-card); }
-.steer-mic.recording span { background: var(--th-card); box-shadow: 0 0 0 3px var(--th-ink), 0 0 0 4.5px var(--th-card), 0 0 0 9px var(--th-ink); }
-.steer-mic.recording span::after { background: var(--th-ink); }
-.steer-mic:disabled { opacity: .5; cursor: default; }
-.steer-mic:focus-visible, .steer-go:focus-visible, .logstrip:focus-visible { outline: 3px solid var(--th-ink); outline-offset: 2px; }
-.steer-line, .steer-rec { grid-area: line; min-width: 0; box-sizing: border-box; min-height: 48px; margin: 0; padding: 0 10px; border: 0; border-bottom: 2px solid var(--th-ink); border-radius: 0; background: var(--th-card); color: var(--th-ink); font: 400 17px var(--th-serif); }
-.steer-line::placeholder { color: var(--th-mute); opacity: 1; }
-.steer-line:focus-visible { outline: 3px solid var(--th-ink); outline-offset: 2px; }
-.steer-rec { display: flex; flex-direction: column; justify-content: center; font: 600 15px var(--th-sans); }
-.steer-rec small { font-size: 11px; font-weight: 400; color: var(--th-mute); }
-.steer-go { grid-area: go; min-height: 48px; min-width: 76px; padding: 0 16px; border: 0; border-radius: 0; background: var(--th-ink); color: var(--th-card); font: 700 13px var(--th-mono); letter-spacing: .08em; text-transform: uppercase; cursor: pointer; clip-path: polygon(0 0, calc(100% - 9px) 0, 100% 9px, 100% 100%, 0 100%); }
-.steer-go:disabled { opacity: .45; cursor: default; }
-.steer-status { grid-area: st; margin: 2px 0 0; font-size: 11.5px; letter-spacing: .04em; color: var(--th-ink2); }
-.steer-status:empty { display: none; }
-.steer-status.bad { color: var(--th-ink); font-weight: 700; }
-/* the Log: one line at rest ("Log · #atlas/build · 4 messages today · last 14:06"); opened it covers the page upward */
-.logstrip { all: unset; box-sizing: border-box; width: 100%; min-height: 44px; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 2px; cursor: pointer; font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--th-ink2); border-bottom: 1px solid var(--th-hair2); }
-.logstrip span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.logstrip i { font: 700 16px var(--th-mono); font-style: normal; }
-.steer-log { position: absolute; left: 0; right: 0; bottom: 100%; z-index: 20; height: min(68vh, 640px); display: flex; flex-direction: column; box-sizing: border-box; background: var(--th-paper); border-top: 2px solid var(--th-ink); box-shadow: 0 -10px 24px -14px rgba(26, 25, 19, .35); outline: none; }
-.steer-log-head { flex: none; display: flex; align-items: center; gap: 14px; padding: 4px 20px; border-bottom: 1px solid var(--th-ink); font-size: 12px; letter-spacing: .06em; text-transform: uppercase; }
-.steer-log-head div { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.steer-log-head small { color: var(--th-sap); font-weight: 700; }
-.steer-log-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-/* the room's own message list, as slips: no avatars, no bubbles, a ruled entry per message; Aaron's slip is boxed */
-.steer-log .message-list { flex: 1; min-height: 0; padding: 8px 20px 12px; }
-.steer-log .composer { display: none; }
-.steer-log .message { animation: none; display: block; padding: 8px 0 8px 14px; margin: 0; border-left: 2px solid var(--th-ink); border-bottom: 1px solid var(--th-hair2); }
-.steer-log .message-avatar, .steer-log .message .gutter-time { display: none; }
-.steer-log .message-content { max-width: none; padding: 0; }
-.steer-log .message.mine { margin: 6px 0; padding: 8px 12px; border-left-width: 6px; background: var(--th-card); box-shadow: inset 0 0 0 1px var(--th-hair2); }
-.steer-log .message.mine .message-content, .steer-log .message.highlight .message-content { padding: 0; background: none; border-radius: 0; }
-.steer-log .message-meta { font-family: var(--th-mono); gap: 10px; }
-.steer-log .message-meta strong { color: var(--th-ink); font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; }
-.steer-log .message-meta time { font-size: 11px; color: var(--th-mute); }
-.steer-log .message-content p { font: 400 16px/1.45 var(--th-serif); }
-.steer-log .message-actions button, .steer-log .thread-summary, .steer-log .pill { border-radius: 0; color: var(--th-ink2); }
-.th-panel.phone .steer-log-head { padding-inline: 14px; }
-.th-panel.phone .steer-log .message-list { padding-inline: 14px; }
-.th-panel.phone .steer-log { height: min(72vh, 640px); }
 /* the counts line: one compact row of small tags in a node page, so the state starts above the fold */
 .th-rooms .wr-counts { gap: 6px; margin: 6px 0 2px; }
 .th-rooms .wr-counts > div { min-width: 0; flex-direction: row; align-items: baseline; gap: 8px; padding: 3px 10px 4px; border-bottom-width: 3px; }
@@ -355,6 +311,85 @@ h3.wr-h { font-weight: 400; }
 .th-rooms .th-alive { margin-top: 6px; }
 .th-rooms .th-lede { font-size: 17px; }
 .th-rooms .th-head .wr > .th-h { margin-top: 8px; }
-.th-panel.phone .steer-line { font-size: 15px; padding: 0 8px; }
-.th-panel.phone .steer-go { min-width: 64px; padding: 0 12px; }
-.th-panel.phone .steer-log .message-actions { margin-top: 0; }
+
+/* ------------------------------------------------------------------------------------------------- simple first (T-124) */
+/* the rooms list: a name, its room in small type, one quiet dot for "needs you". Nesting is the trunk and ticks. */
+.th-treehead { padding: 20px 20px 6px; border-bottom: 0; }
+.th-treehead .note-title, .th-colname { margin: 0; font: 600 28px/1.1 var(--th-serif); letter-spacing: -.015em; text-transform: none; }
+.th-column .th-treehead { padding: 22px 20px 8px; }
+.th-rows { padding: 6px 12px 16px 8px; }
+.th-row { min-height: 52px; }
+.th-go { min-height: 52px; gap: 8px; padding: 6px 10px 6px 4px; border-radius: 10px; }
+.th-go:hover, .th-go:active { background: var(--th-ring); }
+.th-name { gap: 1px; }
+.th-name b { font: 600 17px/1.25 var(--th-serif); }
+.th-row.d0 .th-name b { font-size: 18px; font-weight: 650; }
+.th-sub { font: 400 12.5px/1.3 var(--th-sans); color: var(--th-mute); }
+.th-dot { flex: none; width: 9px; height: 9px; margin-right: 6px; border-radius: 50%; background: var(--th-sap); }
+.th-guide.run::before, .th-guide.branch::before, .th-guide.branch::after { border-color: var(--th-hair2); }
+.th-row.sel .th-go { background: var(--th-card); box-shadow: none; }
+.th-row.sel .th-name b { text-decoration: none; }
+.th-row.sel .th-go::before { content: ""; position: absolute; left: 0; top: 10px; bottom: 10px; width: 3px; border-radius: 2px; background: var(--th-ink); }
+.th-go { position: relative; }
+
+/* a room is its conversation: [rooms list | the chat | the companion]. The chat is the app's own room view. */
+.tree-home.th-level.th-simple.wide { grid-template-columns: clamp(250px, 21vw, 310px) minmax(0, 1fr) 320px; }
+.tree-home.th-level.th-simple.wide.folded { grid-template-columns: clamp(250px, 21vw, 310px) minmax(0, 1fr) 48px; }
+.tree-home.th-level.th-simple { background: var(--bg); }
+.th-simple .th-roomnav { border-right: 1px solid var(--th-hair2); background: var(--th-paper); }
+.sr { min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--bg); }
+.sr-head { flex: none; display: flex; align-items: center; gap: 4px; padding: 16px max(24px, calc((100% - 720px) / 2)) 10px; }
+.th-simple.phone .sr-head { padding: 6px 14px 8px 4px; }
+.sr-titles { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.sr-title { margin: 0; font: 600 26px/1.15 var(--th-serif); letter-spacing: -.015em; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.th-simple.phone .sr-title { font-size: 22px; }
+.sr-door { margin: 0; font: 400 13px/1.3 var(--th-sans); color: var(--th-mute); }
+.sr-back { all: unset; box-sizing: border-box; flex: none; width: 44px; height: 44px; display: grid; place-items: center; font: 400 30px/1 var(--th-sans); cursor: pointer; color: var(--th-ink); }
+.sr-back:focus-visible { outline: 2px solid var(--th-ink); outline-offset: -4px; }
+.sr .th-crumbs { font: 400 12.5px var(--th-sans); letter-spacing: 0; color: var(--th-mute); }
+.sr .th-crumb { font: 400 12.5px/1 var(--th-sans); min-height: 24px; min-width: 0; text-decoration: none; color: var(--th-mute); }
+.sr .th-crumb:hover { text-decoration: underline; }
+.sr .th-crumb.here { min-height: 24px; font-weight: 400; }
+.sr .th-crumbs i { padding: 0 5px; }
+.sr-chat { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.sr-chat .composer { padding-bottom: 10px; }
+.sr-chat .compose-hint { display: none; }
+.th-simple.phone .sr-chat .message-list { padding-inline: 14px; }
+
+/* the companion */
+.cp { color: var(--th-ink); font-family: var(--th-sans); }
+.cp.side { min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; border-left: 1px solid var(--th-hair2); background: var(--th-paper); padding: 0 20px 24px; }
+.cp.side.folded { padding: 0; }
+.cp-top { display: flex; align-items: center; justify-content: space-between; min-height: 56px; font: 500 13px var(--th-sans); color: var(--th-mute); }
+.cp-fold, .cp-unfold { all: unset; box-sizing: border-box; display: grid; place-items: center; width: 40px; height: 40px; font: 400 24px/1 var(--th-sans); cursor: pointer; color: var(--th-ink2); border-radius: 50%; }
+.cp-fold:hover, .cp-unfold:hover { background: var(--th-ring); }
+.cp-fold:focus-visible, .cp-unfold:focus-visible, .cp-need:focus-visible, .cp-all:focus-visible, .cp-more:focus-visible, .cp-line:focus-visible { outline: 2px solid var(--th-ink); outline-offset: 2px; }
+.cp-unfold { position: relative; margin: 8px; }
+.cp-dot { display: inline-block; flex: none; width: 9px; height: 9px; border-radius: 50%; background: var(--th-sap); }
+.cp-unfold .cp-dot { position: absolute; right: 4px; top: 4px; }
+.cp-lede { margin: 2px 0 0; font: 400 19px/1.45 var(--th-serif); letter-spacing: -.003em; color: var(--th-ink); }
+.cp-sec { margin-top: 24px; }
+.cp-h { margin: 0 0 4px; font: 600 13px/1.3 var(--th-sans); color: var(--th-mute); }
+.cp-list { list-style: none; margin: 0; padding: 0; }
+.cp-need { all: unset; box-sizing: border-box; width: 100%; min-height: 48px; display: flex; flex-direction: column; justify-content: center; gap: 1px; padding: 8px 0; border-bottom: 1px solid var(--th-hair2); cursor: pointer; }
+.cp-need:hover .cp-title { text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
+.cp-title { font: 500 15.5px/1.35 var(--th-sans); overflow-wrap: anywhere; }
+.cp-need small { font: 400 12.5px var(--th-sans); color: var(--th-mute); }
+.cp-more { all: unset; box-sizing: border-box; min-height: 40px; display: inline-flex; align-items: center; font: 500 14px var(--th-sans); color: var(--th-ink2); cursor: pointer; text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
+.cp-run { display: flex; align-items: baseline; gap: 10px; padding: 7px 0; font: 400 15px/1.35 var(--th-sans); }
+.cp-run i { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--th-ink); align-self: center; }
+.cp-run[data-state="queued"] i { background: none; box-shadow: inset 0 0 0 1.5px var(--th-ink); }
+.cp-run small { margin-left: auto; font: 400 12.5px var(--th-sans); color: var(--th-mute); }
+.cp-all { all: unset; box-sizing: border-box; margin-top: 22px; min-height: 44px; display: inline-flex; align-items: center; gap: 6px; font: 500 14.5px var(--th-sans); color: var(--th-ink); cursor: pointer; text-decoration: underline; text-underline-offset: 4px; text-decoration-thickness: 1px; }
+/* the phone's strip */
+.cp.strip { flex: none; border-top: 1px solid var(--th-hair2); border-bottom: 1px solid var(--th-hair2); background: var(--th-paper); max-height: 62vh; overflow-y: auto; }
+.cp-line { all: unset; box-sizing: border-box; width: 100%; min-height: 46px; display: flex; align-items: center; gap: 10px; padding: 0 16px; cursor: pointer; }
+.cp-line-text { flex: 1; min-width: 0; font: 400 15px/1.3 var(--th-serif); color: var(--th-ink2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cp-chev { flex: none; width: 20px; text-align: center; font: 400 14px var(--th-sans); color: var(--th-mute); }
+.cp.strip .cp-body { padding: 0 16px 18px; }
+.cp.strip.open .cp-line-text { font: 500 13px var(--th-sans); color: var(--th-mute); }
+/* the full node page's way back to the conversation sits where its room line is */
+@media (prefers-reduced-motion: reduce) { .cp *, .sr * { transition: none !important; animation: none !important; } }
+/* the chat as part of the same look: graphite avatars (no per-author hue), no destination line (the placeholder names the room) */
+.message-avatar, .avatar { background: var(--th-ink2) !important; color: var(--th-card); }
+.sr-chat .compose-destination { display: none; }
