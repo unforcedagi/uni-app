@@ -4,7 +4,7 @@
 import { useEffect, useState } from "react";
 import { cleanText } from "../interface/contract";
 import { dueText } from "./NodeWork";
-import { activeProfile } from "./profile";
+import { isMe } from "./taskCore";
 import type { Run } from "./steerCore";
 import type { Task } from "./taskCore";
 import { splitTitle } from "./whereCore";
@@ -42,10 +42,13 @@ const URL_RE = /https?:\/\/\S+|\bwww\.\S+/g;
 export const plainDetail = (s: string): string => s.replace(URL_RE, "").replace(/\s+/g, " ").replace(/\s*[·,;:(\[-]+\s*$/, "").replace(/\(\s*\)/g, "").trim();
 type Fold = { open: boolean; onToggle: (v: boolean) => void };
 
+/** The ask itself: the "Decision (default yes):" style label a decision's title carries is left to the opened item. */
+export const askOf = (rest: string): string => { const t = plainDetail(rest) || rest; return t.replace(/^decision\s*(\([^)]*\))?\s*[:\-–—]\s*/i, "").trim() || t; };
+
 /** What Aaron does with it: a decision is decided, a task waiting on him says so, else its next step. */
 function actionOf(t: Task): string | null {
   if (t.kind === "decision") return null;
-  if (t.waitingOn === activeProfile().me) return t.next ? `Waiting on you · ${t.next}` : "Waiting on you";
+  if (isMe(t.waitingOn)) return t.next ? `Waiting on you · ${t.next}` : "Waiting on you";
   return t.next || null;
 }
 
@@ -56,13 +59,14 @@ function Body({ stands, ready, needs, runs, nodeName, onTask, onDecide, onEveryt
     {needs.length > 0 && <section aria-label="Needs you" className="cp-sec">
       <h3 className="cp-h">Needs you</h3>
       <ul className="cp-list">{needs.map((t) => {
-        const { id, rest } = splitTitle(cleanText(t.title));
+        const { id, rest: full } = splitTitle(cleanText(t.title));
+        const rest = askOf(full);
         const meta = plainDetail([actionOf(t), dueText(t.due)].filter(Boolean).join(" · "));
         const opts = t.kind === "decision" ? t.options : [];
         return <li key={t.id} className="cp-item">
           <button type="button" className="cp-need" data-id={id ?? undefined} onClick={() => onTask(t)}>
-            <span className="cp-title">{plainDetail(rest) || rest}</span>{meta && <small className="cp-detail">{meta}</small>}</button>
-          {t.kind === "decision" && <div className="cp-opts" role="group" aria-label={`Decide: ${plainDetail(rest) || rest}`}>
+            <span className="cp-title">{rest}</span>{meta && <small className="cp-detail">{meta}</small>}</button>
+          {t.kind === "decision" && <div className="cp-opts" role="group" aria-label={`Decide: ${rest}`}>
             {opts.slice(0, OPTS_SHOWN).map((o) => <button key={o} type="button" className="cp-opt" onClick={() => onDecide(t, o)}>{cleanText(o)}</button>)}
             {(opts.length > OPTS_SHOWN || opts.length === 0) && <button type="button" className="cp-opt more" onClick={() => onTask(t)}>{opts.length === 0 ? "Decide" : "More…"}</button>}
           </div>}
@@ -73,7 +77,7 @@ function Body({ stands, ready, needs, runs, nodeName, onTask, onDecide, onEveryt
       <h3 className="cp-h">Running</h3>
       <ul className="cp-list">{active.map((r) => <li key={r.id} className="cp-run" data-state={r.state}><i aria-hidden="true" /><span>{cleanText(r.what)}</span><small>{r.state}</small></li>)}</ul>
     </section>}
-    <button type="button" className="cp-all" onClick={onEverything}>All of {nodeName}'s work <span aria-hidden="true">→</span></button>
+    <div className="cp-foot"><button type="button" className="cp-all" onClick={onEverything}><span className="cp-all-t">All of {nodeName}'s work</span><span className="cp-all-arrow" aria-hidden="true">→</span></button></div>
   </div>;
 }
 
@@ -82,11 +86,11 @@ export function CompanionSide({ open, onToggle, ...p }: Props & Fold) {
   return <aside className={`cp side ${open ? "open" : "folded"}`} aria-label="Where this stands">
     {open
       ? <>
-        <button type="button" className="cp-top" aria-expanded="true" aria-label="Hide where this stands" onClick={() => onToggle(false)}><span>Where this stands</span><span className="cp-fold" aria-hidden="true">›</span></button>
+        <button type="button" className="cp-top" aria-expanded="true" aria-label="Hide where this stands" title="Hide where this stands" onClick={() => onToggle(false)}><span>Where this stands</span><span className="cp-fold" aria-hidden="true">›</span></button>
         <Body {...p} />
       </>
-      : <button type="button" className="cp-unfold" aria-expanded="false" aria-label="Show where this stands" onClick={() => onToggle(true)}>
-        <span aria-hidden="true">‹</span>{p.needs.length > 0 && <i className="cp-dot" aria-label="Needs you" />}</button>}
+      : <button type="button" className="cp-unfold" aria-expanded="false" aria-label="Show where this stands" title="Show where this stands" onClick={() => onToggle(true)}>
+        <span aria-hidden="true">‹</span>{p.needs.length > 0 && <i className="cp-dot" role="img" aria-label="Needs you" title="Needs you" />}</button>}
   </aside>;
 }
 
@@ -95,7 +99,7 @@ export function CompanionStrip({ open, onToggle, ...p }: Props & Fold) {
   return <section className={`cp strip ${open ? "open" : ""}`} aria-label="Where this stands">
     <button type="button" className="cp-line" aria-expanded={open} onClick={() => onToggle(!open)}>
       <span className="cp-line-text">{open ? "Where this stands" : p.ready ? p.stands?.text ?? "Where this stands" : "Loading…"}</span>
-      {p.needs.length > 0 && <i className="cp-dot" aria-label="Needs you" />}
+      {p.needs.length > 0 && <i className="cp-dot" role="img" aria-label="Needs you" title="Needs you" />}
       <span className="cp-chev" aria-hidden="true">{open ? "⌃" : "⌄"}</span>
     </button>
     {open && <Body {...p} />}

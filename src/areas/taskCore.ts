@@ -156,16 +156,19 @@ export const dayOf = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1)
 export const tomorrowOf = (now: Date) => dayOf(new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1));
 export const snoozed = (t: Pick<Task, "snoozedUntil">, now: Date) => !!t.snoozedUntil && t.snoozedUntil > dayOf(now);
 
+/** Whether an `owner` / `waiting_on` field names the user: `aaron`, `Aaron`, `@aaron` or `person:aaron`. A field value only, never free text. */
+export const isMe = (v: string | null | undefined, p: VaultProfile = activeProfile()): boolean => !!v && v.trim().toLowerCase().replace(/^(person:|@)/, "") === p.me.toLowerCase();
+
 export type Group = "you" | "rooms" | "others";
 /** Aaron's own work and everything waiting on him; Uni and room work; other people. */
 export function groupOf(t: Pick<Task, "owner" | "waitingOn" | "kind">, p: VaultProfile = activeProfile()): Group {
-  if (t.kind === "decision" || t.owner === p.me || t.waitingOn === p.me) return "you";
+  if (t.kind === "decision" || isMe(t.owner, p) || isMe(t.waitingOn, p)) return "you";
   if (isAgentOwner(t.owner, p)) return "rooms";
   return "others";
 }
 export const GROUP_LABEL: Record<Group, string> = { you: "You", rooms: "Rooms", others: "Others" };
 
-const rank = (t: Task) => (t.waitingOn === activeProfile().me || t.kind === "decision" ? 0 : t.state === "doing" ? 1 : 2);
+const rank = (t: Task) => (isMe(t.waitingOn) || t.kind === "decision" ? 0 : t.state === "doing" ? 1 : 2);
 /** Waiting-on-you first, then in progress, then by due date (undated last), then title. */
 export function sortTasks(list: readonly Task[]): Task[] {
   return [...list].sort((a, b) => rank(a) - rank(b) || (a.due ?? "9999").localeCompare(b.due ?? "9999") || a.title.localeCompare(b.title));

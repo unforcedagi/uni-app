@@ -343,7 +343,9 @@ h3.wr-h { font-weight: 400; }
 .sr-titles { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .sr-title { margin: 0; font: 600 26px/1.15 var(--th-serif); letter-spacing: -.015em; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .th-simple.phone .sr-title { font-size: 22px; }
-.sr-door { margin: 0; font: 400 13px/1.3 var(--th-sans); color: var(--th-mute); }
+.sr-meta { min-width: 0; display: flex; align-items: center; gap: 10px; min-height: 24px; }
+.sr-door { flex: none; margin: 0; font: 400 12.5px/1.3 var(--th-sans); color: var(--th-mute); }
+.sr-meta .th-crumbs + .sr-door::before { content: "·"; margin-right: 10px; }
 .sr-back { all: unset; box-sizing: border-box; flex: none; width: 44px; height: 44px; display: grid; place-items: center; font: 400 30px/1 var(--th-sans); cursor: pointer; color: var(--th-ink); }
 .sr-back:focus-visible { outline: 2px solid var(--th-ink); outline-offset: -4px; }
 .sr .th-crumbs { font: 400 12.5px var(--th-sans); letter-spacing: 0; color: var(--th-mute); }
@@ -358,8 +360,8 @@ h3.wr-h { font-weight: 400; }
 
 /* the companion */
 .cp { color: var(--th-ink); font-family: var(--th-sans); }
-.cp.side { min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; border-left: 1px solid var(--th-hair2); background: var(--th-paper); padding: 0 18px 40px; scroll-padding-bottom: 40px; }
-.cp.side.open { -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent); }
+.cp.side { min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; border-left: 1px solid var(--th-hair2); background: var(--th-paper); padding: 0 18px; display: flex; flex-direction: column; }
+.cp.side.open > .cp-body { flex: 1; display: flex; flex-direction: column; }
 .cp.side.folded { padding: 0; }
 .cp-top { all: unset; box-sizing: border-box; width: 100%; cursor: pointer; display: flex; align-items: center; justify-content: space-between; min-height: 56px; font: 500 13px var(--th-sans); color: var(--th-mute); }
 .cp-fold, .cp-unfold { all: unset; box-sizing: border-box; display: grid; place-items: center; width: 40px; height: 40px; font: 400 24px/1 var(--th-sans); cursor: pointer; color: var(--th-ink2); border-radius: 50%; }
@@ -374,7 +376,7 @@ h3.wr-h { font-weight: 400; }
 .cp-list { list-style: none; margin: 0; padding: 0; }
 .cp-need { all: unset; box-sizing: border-box; width: 100%; min-width: 0; min-height: 44px; display: flex; flex-direction: column; justify-content: center; gap: 1px; padding: 8px 0; border-bottom: 1px solid var(--th-hair2); cursor: pointer; }
 .cp-need:hover .cp-title { text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
-.cp-title { font: 500 15px/1.35 var(--th-sans); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cp-title { font: 500 15px/1.35 var(--th-sans); overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow-wrap: anywhere; }
 .cp-need small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 12.5px var(--th-sans); color: var(--th-mute); }
 .cp-ago { display: block; margin-top: 4px; font: 400 12.5px var(--th-sans); color: var(--th-mute); letter-spacing: 0; }
 .cp-item { border-bottom: 1px solid var(--th-hair2); }
@@ -389,7 +391,10 @@ h3.wr-h { font-weight: 400; }
 .cp-run i { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--th-ink); align-self: center; }
 .cp-run[data-state="queued"] i { background: none; box-shadow: inset 0 0 0 1.5px var(--th-ink); }
 .cp-run small { margin-left: auto; font: 400 12.5px var(--th-sans); color: var(--th-mute); }
-.cp-all { all: unset; box-sizing: border-box; margin-top: 12px; min-height: 40px; display: inline-flex; align-items: center; gap: 6px; font: 500 14.5px var(--th-sans); color: var(--th-ink); cursor: pointer; text-decoration: underline; text-underline-offset: 4px; text-decoration-thickness: 1px; }
+.cp-foot { position: sticky; bottom: 0; margin-top: auto; padding-top: 22px; padding-bottom: 12px; background: linear-gradient(to bottom, transparent, var(--th-paper) 18px); }
+.cp-all { all: unset; box-sizing: border-box; max-width: 100%; min-height: 40px; display: flex; align-items: center; gap: 6px; font: 500 14.5px var(--th-sans); color: var(--th-ink); cursor: pointer; }
+.cp-all-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-decoration: underline; text-underline-offset: 4px; text-decoration-thickness: 1px; }
+.cp-all-arrow { flex: none; }
 /* the phone's strip */
 .cp.strip { flex: none; border-top: 1px solid var(--th-hair2); border-bottom: 1px solid var(--th-hair2); background: var(--th-paper); max-height: 62vh; overflow-y: auto; }
 .cp-line { all: unset; box-sizing: border-box; width: 100%; min-height: 46px; display: flex; align-items: center; gap: 10px; padding: 0 16px; cursor: pointer; }

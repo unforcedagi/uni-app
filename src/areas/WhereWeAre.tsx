@@ -6,8 +6,7 @@ import { useState } from "react";
 import { cleanText } from "../interface/contract";
 import { agoLabel } from "./treeRooms";
 import { dueText } from "./NodeWork";
-import { activeProfile } from "./profile";
-import { PRIORITIES, PRIORITY_LABEL, priorityOf, type Priority, type Task } from "./taskCore";
+import { isMe, PRIORITIES, PRIORITY_LABEL, priorityOf, type Priority, type Task } from "./taskCore";
 import type { Where } from "./whereCore";
 import { splitTitle } from "./whereCore";
 import type { Mark } from "./steerCore";
@@ -29,7 +28,7 @@ function Row({ t, here, nodeName, leaving, marks, nowMs, onOpen, onAct, onPriori
   onOpen: (t: Task) => void; onAct: (t: Task, a: "done") => void; onPriority: (t: Task, p: Priority) => void;
 }) {
   const { id, rest } = splitTitle(cleanText(t.title));
-  const meta = [t.kind === "decision" ? "Decide" : null, t.waitingOn === activeProfile().me ? "Waiting on you" : t.state === "doing" ? "In progress" : t.state === "waiting" ? "Waiting" : null, dueText(t.due), t.node !== here ? nodeName(t.node) : null].filter(Boolean);
+  const meta = [t.kind === "decision" ? "Decide" : null, isMe(t.waitingOn) ? "Waiting on you" : t.state === "doing" ? "In progress" : t.state === "waiting" ? "Waiting" : null, dueText(t.due), t.node !== here ? nodeName(t.node) : null].filter(Boolean);
   return <li className={`wr-row ${leaving ? "leaving" : ""} ${marks?.length ? "changed" : ""}`} data-id={id ?? undefined}>
     <button type="button" className="wr-main" onClick={() => onOpen(t)}>
       <span className="wr-line">{id && <b className="wr-id">{id}</b>}<span className="wr-title">{rest}</span></span>

@@ -291,9 +291,11 @@ export default function AreasSurface({ zoom, identity, talk, path, rooms: hostRo
     <header className="sr-head">
       {!wide && <button type="button" className="sr-back" onClick={() => (back ? back() : undefined)} aria-label="Back to rooms"><span aria-hidden="true">‹</span></button>}
       <div className="sr-titles">
-        {wide && !isRoot && <Crumbs trail={trailItems} onOpen={openPath} />}
+        {(doorText || (wide && !isRoot)) && <div className="sr-meta">
+          {wide && !isRoot && <Crumbs trail={trailItems} onOpen={openPath} />}
+          {doorText && <span className="sr-door">{doorText}</span>}
+        </div>}
         <h1 className="sr-title">{node.title}</h1>
-        {doorText && <p className="sr-door">{doorText}</p>}
       </div>
     </header>
     {!wide && <CompanionStrip {...companionProps} open={companionOpen} onToggle={setCompanionOpen} />}

@@ -60,7 +60,7 @@ export function RoomTree({ chat = true, rows, needs, onOpen, selected }: {
       <button type="button" className="th-go" data-path={r.path} aria-current={selected === r.path ? "page" : undefined} onClick={() => onOpen(r.path)}
         aria-label={`${r.name}${chat ? `, ${sub ? `room ${sub}` : "no channel of its own"}` : ""}${n ? `, ${n} need${n === 1 ? "s" : ""} you` : ""}`}>
         <span className="th-name"><b>{r.name}</b>{sub && <small className="th-sub">{sub}</small>}</span>
-        {n > 0 && <i className="th-dot" aria-hidden="true" />}
+        {n > 0 && <i className="th-dot" title="Needs you" aria-hidden="true" />}
       </button>
     </li>;
   })}</ul></nav>;

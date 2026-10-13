@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, 
 import { invoke } from "@tauri-apps/api/core";
 import { cleanText } from "../interface/contract";
 import type { RoomMessage } from "../interface/modules/chat";
-import { groupTasks, type Task } from "./taskCore";
+import { groupTasks, isMe, type Task } from "./taskCore";
 import type { RoomRef } from "./talkCore";
 import type { TaskAction, Undo } from "./useTasks";
 import { activeProfile, type VaultProfile } from "./profile";
@@ -127,7 +127,7 @@ export const dueText = (iso: string | null) => {
 };
 
 function Meta({ t, here, nodeName }: { t: Task; here: string; nodeName: (path: string) => string }) {
-  const parts = [t.kind === "decision" ? "Decide" : null, t.waitingOn === activeProfile().me ? "Waiting on you" : t.state === "doing" ? "In progress" : t.state === "waiting" ? "Waiting" : null, dueText(t.due), t.node !== here ? `in ${nodeName(t.node)}` : null].filter(Boolean);
+  const parts = [t.kind === "decision" ? "Decide" : null, isMe(t.waitingOn) ? "Waiting on you" : t.state === "doing" ? "In progress" : t.state === "waiting" ? "Waiting" : null, dueText(t.due), t.node !== here ? `in ${nodeName(t.node)}` : null].filter(Boolean);
   return parts.length ? <span className="task-meta">{parts.map((p, i) => <span key={i} className={p === "Decide" ? "task-decide" : ""}>{p}</span>)}</span> : null;
 }
 

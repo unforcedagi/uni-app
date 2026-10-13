@@ -154,11 +154,14 @@ test.describe('simple', () => {
     const items = page.locator('.cp-body .cp-item');
     await expect(items).toHaveCount(3);
     await expect(page.locator('.cp-body')).not.toContainText(/https?:\/\//);
-    for (const sel of ['.cp-title', '.cp-detail']) for (const el of await page.locator(`.cp-body ${sel}`).all()) {
+    for (const el of await page.locator('.cp-body .cp-title').all()) expect(await el.evaluate((e) => e.getBoundingClientRect().height < 48)).toBeTruthy();
+    for (const el of await page.locator('.cp-body .cp-detail').all()) {
       expect(await el.evaluate((e) => getComputedStyle(e).whiteSpace === 'nowrap' && e.getBoundingClientRect().height < 24)).toBeTruthy();
     }
-    const all = await page.getByRole('button', { name: /^All of .*'s work/ }).boundingBox();
+    const link = page.getByRole('button', { name: /^All of .*'s work/ });
+    const all = await link.boundingBox();
     expect(all!.y + all!.height).toBeLessThanOrEqual(720);
+    expect(all!.height).toBeLessThan(48);
     await page.screenshot({ path: `${SHOTS}/fold-1280x720.png` }).catch(() => {});
   });
 
@@ -167,9 +170,61 @@ test.describe('simple', () => {
     await openRoom(page, 'ATLAS');
     await openCompanion(page);
     const item = page.locator('.cp-item').filter({ hasText: 'Decide the ATLAS hosting' });
-    await expect(item.locator('.cp-title')).toHaveCSS('white-space', 'nowrap');
+    await expect(item.locator('.cp-title')).toHaveText('Decide the ATLAS hosting');
+    expect(await item.locator('.cp-title').evaluate((e) => parseInt(getComputedStyle(e).webkitLineClamp || getComputedStyle(e).getPropertyValue('line-clamp') || '0'))).toBe(2);
     await expect(item.locator('.cp-opt')).toHaveText(['Self-host', 'Managed']);
     for (const b of await item.locator('.cp-opt').all()) expect(await b.evaluate((e) => getComputedStyle(e).backgroundColor)).not.toBe('rgba(0, 0, 0, 0)');
+  });
+
+  test('the "All of X\'s work" link sticks to the panel bottom, on one line, even when the panel is long and the name is long', async ({ page }) => {
+    test.skip(!wide(page), 'side panel');
+    await page.setViewportSize({ width: 1280, height: 600 });
+    await boot(page);
+    await scope(page).locator('.th-go[aria-label^="Uni,"]').click();
+    await openCompanion(page);
+    const foot = page.locator('.cp-all');
+    const side = (await page.locator('.cp.side').boundingBox())!;
+    const box = (await foot.boundingBox())!;
+    expect(box.y + box.height).toBeLessThanOrEqual(side.y + side.height + 1);
+    expect(box.height).toBeLessThan(48);
+    await page.locator('.cp-all-t').evaluate((e) => { e.textContent = "All of A very long project name that cannot possibly fit on a single line's work"; });
+    const after = (await foot.boundingBox())!;
+    expect(after.height).toBeLessThan(48);
+    expect(await page.locator('.cp-all-arrow').isVisible()).toBe(true);
+    const arrow = (await page.locator('.cp-all-arrow').boundingBox())!;
+    expect(arrow.x + arrow.width).toBeLessThanOrEqual(side.x + side.width);
+  });
+
+  test('the quiet marks say what they are', async ({ page }) => {
+    await boot(page);
+    await openRoom(page, 'ATLAS');
+    if (wide(page)) {
+      await expect(page.getByRole('button', { name: 'Hide where this stands' })).toHaveAttribute('title', 'Hide where this stands');
+      await page.getByRole('button', { name: 'Hide where this stands' }).click();
+      await expect(page.getByRole('button', { name: 'Show where this stands' })).toHaveAttribute('title', 'Show where this stands');
+      await expect(page.locator('.cp-unfold .cp-dot')).toHaveAttribute('title', 'Needs you');
+    } else await expect(page.locator('.cp-line .cp-dot')).toHaveAttribute('title', 'Needs you');
+    if (wide(page)) await expect(scope(page).locator('.th-dot').first()).toHaveAttribute('title', 'Needs you');
+  });
+
+  test('a decision titled "Decision (default yes): …" shows only the ask; the opened item keeps the full title', async ({ page }) => {
+    await boot(page);
+    await openRoom(page, 'ATLAS');
+    await openCompanion(page);
+    await expect(page.locator('.cp-body')).not.toContainText(/Decision \(/);
+    await page.locator('.cp-item').filter({ hasText: 'Decide the ATLAS hosting' }).locator('.cp-need').click();
+    await expect(page.getByRole('dialog').or(page.locator('.sheet, .task-sheet')).first()).toContainText('Decision (default yes)');
+  });
+
+  test('teaching lists what waits on the user: a room task waiting on them, and their own; not what waits on someone else', async ({ page }) => {
+    await boot(page);
+    await openRoom(page, 'Learn Vibe Build');
+    await openCompanion(page);
+    const needs = page.getByRole('region', { name: 'Needs you' });
+    await expect(needs.locator('.cp-item')).toHaveCount(2);
+    await expect(needs).toContainText('Canvas Week 7 brief draft');
+    await expect(needs).toContainText('Grade the Week 6 reflections');
+    await expect(needs).not.toContainText('Final brief');
   });
 
   test('the "where this stands" row folds and unfolds the panel', async ({ page }) => {
@@ -201,7 +256,7 @@ test.describe('simple', () => {
 
   test('a room with nothing owed to the user shows no empty "Needs you" heading', async ({ page }) => {
     await boot(page);
-    await openRoom(page, 'Learn Vibe Build');
+    await openRoom(page, 'Atlas Institute');
     await openCompanion(page);
     await expect(page.locator('.cp-h', { hasText: 'Needs you' })).toHaveCount(0);
     await expect(page.locator('.cp-sec')).not.toHaveCount(-1);
