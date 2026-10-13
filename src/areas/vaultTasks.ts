@@ -10,9 +10,46 @@ import { activeProfile } from "./profile.ts";
 
 export type Call = (cmd: string, args: Record<string, unknown>) => Promise<unknown>;
 const LIMIT = 200;
+/** A list longer than this many pages (2000 notes) is read no further and said to be incomplete. */
+const MAX_PAGES = 10;
+
+/**
+ * Read a list page by page (200 at a time) until a short page. `complete` only when that last page came back short: a list that stops at
+ * MAX_PAGES, or a vault that ignores `offset` (a page with nothing new), is incomplete, never taken for the whole.
+ */
+export async function allPages(page: (offset: number) => Promise<RawNote[]>): Promise<{ rows: RawNote[]; complete: boolean }> {
+  const rows: RawNote[] = []; const seen = new Set<string>();
+  for (let i = 0; i < MAX_PAGES; i++) {
+    const got = await page(i * LIMIT);
+    let fresh = 0;
+    for (const r of Array.isArray(got) ? got : []) {
+      const id = typeof r.id === "string" ? r.id : null;
+      if (id && seen.has(id)) continue;
+      if (id) seen.add(id);
+      rows.push(r); fresh++;
+    }
+    if (!Array.isArray(got) || got.length < LIMIT) return { rows, complete: true };
+    if (!fresh) return { rows, complete: false };
+  }
+  return { rows, complete: false };
+}
 const ASK_READS = 40;
 const ASK_PARALLEL = 6;
 const ASK_KEEP = 150;
+
+const WRITER_KEY = "uni.tasks.writer.v1";
+/** Who this app writes as in the vault (the `lastUpdatedBy` its own writes come back with), so a task changed from here can say "you". */
+export const ownWriter = (): string | null => { try { return localStorage.getItem(WRITER_KEY); } catch { return null; } };
+/** Who changed a task last, in words: "you" for this app's own writes, "Uni" for a write through the vault's MCP door; null when the app can't tell (never an id). */
+export function changedBy(t: Pick<Task, "lastUpdatedBy" | "lastUpdatedVia">, me: string | null = ownWriter()): string | null {
+  if (me && t.lastUpdatedBy === me) return "you";
+  return t.lastUpdatedVia === "mcp" ? "Uni" : null;
+}
+const ok = (note: unknown): WriteResult => {
+  const st = stamp(note);
+  if (st.lastUpdatedBy) try { localStorage.setItem(WRITER_KEY, st.lastUpdatedBy); } catch { /* this session only */ }
+  return { ok: true, ...st };
+};
 
 export type WriteResult = { ok: true; updatedAt: string | null; lastUpdatedBy: string | null; lastUpdatedVia: string | null } | { ok: false; kind: FailureKind; message: string };
 
@@ -27,15 +64,15 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
   const name = () => (typeof vaultOf === "function" ? vaultOf() : vaultOf);
   /** The whole tree, metadata only: every `node` note (areas, projects, the Uni root). */
   async function loadTree(): Promise<TaskTree & { truncated: boolean }> {
-    const rows = (await call("vault_query", { vault: name(), tag: "node", includeContent: false, limit: LIMIT })) as RawNote[];
+    const { rows, complete } = await allPages((offset) => call("vault_query", { vault: name(), tag: "node", includeContent: false, limit: LIMIT, ...(offset ? { offset } : {}) }) as Promise<RawNote[]>);
     const { nodes, rootPath } = parseNodes(rows);
-    return { ...buildTaskTree(nodes, rootPath), truncated: rows.length >= LIMIT };
+    return { ...buildTaskTree(nodes, rootPath), truncated: !complete };
   }
 
   /** Every note with `tag`, metadata only (the dispatch ledger `run`, the `draft` notes). A vault with none, or one that refuses, reads as empty: these are extras on the page. */
   async function loadTagged(tag: string): Promise<RawNote[] | null> {
     // null = the read failed: the caller keeps what it had rather than wiping Running/Drafts on a transient error
-    try { const rows = await call("vault_query", { vault: name(), tag, includeContent: false, limit: LIMIT }); return Array.isArray(rows) ? (rows as RawNote[]) : []; } catch { return null; }
+    try { return (await allPages((offset) => call("vault_query", { vault: name(), tag, includeContent: false, limit: LIMIT, ...(offset ? { offset } : {}) }) as Promise<RawNote[]>)).rows; } catch { return null; }
   }
 
   /** Full questions already read, by note id, with the note's `updatedAt` they were read at: a refresh shows them at once, and so does the next launch (kept on the device, per identity, newest 150). */
@@ -94,9 +131,9 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
    * vault returned a full page (more may exist).
    */
   async function loadTasks(tree: TaskTree, path: string): Promise<{ tasks: Task[]; truncated: boolean }> {
-    const finish = (tasks: RawNote[], decisions: RawNote[]) => {
+    const finish = (tasks: RawNote[], decisions: RawNote[], cut = tasks.length >= LIMIT || decisions.length >= LIMIT) => {
       const parsed = [...tasks, ...decisions].map((n) => parseTask(n, tree)).filter((t): t is Task => !!t);
-      return { tasks: [...new Map(parsed.map((t) => [t.id, askFor(t) !== undefined ? { ...t, ask: askFor(t)! } : t])).values()], truncated: tasks.length >= LIMIT || decisions.length >= LIMIT };
+      return { tasks: [...new Map(parsed.map((t) => [t.id, askFor(t) !== undefined ? { ...t, ask: askFor(t)! } : t])).values()], truncated: cut };
     };
     if (path !== ROOT && nearOk !== false) {
       // The anchor is the node's id when the tree knows it (the vault stores references as ids); the path is still accepted.
@@ -121,18 +158,19 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
       if (!keys?.length) return { tasks: [], truncated: false };
     }
     const where = keys ? { node: { in: keys } } : {};
+    // past the first 200: every page is read before the list is taken for the whole
     const [tasks, decisions] = await Promise.all([
-      call("vault_query_meta", { vault: name(), tag: "task", metadata: { ...where, state: { in: [...LIVE_STATES] } }, limit: LIMIT }) as Promise<RawNote[]>,
-      call("vault_query_meta", { vault: name(), tag: "decision", metadata: { ...where, state: { in: ["open"] } }, limit: LIMIT }) as Promise<RawNote[]>,
+      allPages((offset) => call("vault_query_meta", { vault: name(), tag: "task", metadata: { ...where, state: { in: [...LIVE_STATES] } }, limit: LIMIT, ...(offset ? { offset } : {}) }) as Promise<RawNote[]>),
+      allPages((offset) => call("vault_query_meta", { vault: name(), tag: "decision", metadata: { ...where, state: { in: ["open"] } }, limit: LIMIT, ...(offset ? { offset } : {}) }) as Promise<RawNote[]>),
     ]);
-    return finish(tasks, decisions);
+    return finish(tasks.rows, decisions.rows, !tasks.complete || !decisions.complete);
   }
 
   /** Compare-and-set on `state`. A stale `from` is a conflict (409): the caller re-reads and says so, it never retries blind. */
   async function transition(taskId: string, from: AnyState, to: AnyState): Promise<WriteResult> {
     try {
       const note = ((await call("vault_transition", { vault: name(), id: taskId, from, to })) as RawNote);
-      return { ok: true, ...stamp(note) };
+      return ok(note);
     } catch (e) {
       const message = String(e);
       return { ok: false, kind: failureKind(message), message };
@@ -146,7 +184,7 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
   async function decide(taskId: string, option: string, by: string, at: string = new Date().toISOString()): Promise<WriteResult> {
     try {
       const note = await call("vault_decide", { vault: name(), id: taskId, from: "open", to: "decided", metadata: { decided: option, decided_at: at, decided_by: by } });
-      return { ok: true, ...stamp(note) };
+      return ok(note);
     } catch (e) {
       const message = String(e);
       return { ok: false, kind: failureKind(message), message };
@@ -157,7 +195,7 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
   async function patchMeta(taskId: string, metadata: Record<string, unknown>, updatedAt: string): Promise<WriteResult> {
     try {
       const note = await call("vault_patch_meta", { vault: name(), id: taskId, metadata, ifUpdatedAt: updatedAt });
-      return { ok: true, ...stamp(note) };
+      return ok(note);
     } catch (e) {
       const message = String(e);
       return { ok: false, kind: failureKind(message), message };

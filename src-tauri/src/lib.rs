@@ -1427,13 +1427,15 @@ async fn vault_query(
     tag: String,
     include_content: Option<bool>,
     limit: Option<usize>,
+    offset: Option<usize>,
 ) -> Result<Vec<serde_json::Value>, String> {
     with_vault(&app, move |c| {
-        tauri::async_runtime::block_on(c.query_tagged(
+        tauri::async_runtime::block_on(c.query_tagged_at(
             &vault,
             &tag,
             include_content.unwrap_or(true),
             limit.unwrap_or(100),
+            offset.unwrap_or(0),
         ))
         .map_err(|e| e.to_string())
     })
@@ -1448,9 +1450,10 @@ async fn vault_query_meta(
     tag: String,
     metadata: serde_json::Value,
     limit: Option<usize>,
+    offset: Option<usize>,
 ) -> Result<Vec<serde_json::Value>, String> {
     with_vault(&app, move |c| {
-        tauri::async_runtime::block_on(c.query_by_metadata(&vault, &tag, metadata, limit.unwrap_or(200)))
+        tauri::async_runtime::block_on(c.query_by_metadata_at(&vault, &tag, metadata, limit.unwrap_or(200), offset.unwrap_or(0)))
             .map_err(|e| e.to_string())
     })
     .await

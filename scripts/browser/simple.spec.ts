@@ -285,7 +285,7 @@ test.describe('simple', () => {
     await shot(page, 'midmessage');
   });
 
-  test('the footer link keeps the long form at any width; detail lines wrap; the sentence clamps', async ({ page }) => {
+  test('the footer link keeps the long form at any width; detail lines wrap; the sentence clamps on screen and More shows it whole', async ({ page }) => {
     test.skip(!wide(page), 'side panel');
     await boot(page);
     await scope(page).locator('.th-go[aria-label^="Uni,"]').click();
@@ -294,10 +294,18 @@ test.describe('simple', () => {
     await page.setViewportSize({ width: 900, height: 700 });
     await page.evaluate(() => { document.querySelector('.cp.side')!.setAttribute('style', 'width:130px'); });
     await expect(page.locator('.cp-all-t')).toHaveText(/^All of .+'s work$/);
-    await page.evaluate(() => { document.querySelector('.cp.side')!.removeAttribute('style'); });
+    // narrow, the sentence runs past three lines: clamped on screen only, with a real button that shows it whole
     const lede = page.locator('.cp-stands').first();
-    if (await lede.count()) expect(await lede.evaluate((e) => getComputedStyle(e).webkitLineClamp)).toBe('3');
-    if (await lede.count()) { await lede.click(); expect(await lede.evaluate((e) => getComputedStyle(e).webkitLineClamp)).not.toBe('3'); await lede.click(); expect(await lede.evaluate((e) => getComputedStyle(e).webkitLineClamp)).toBe('3'); }
+    expect(await lede.evaluate((e) => getComputedStyle(e).webkitLineClamp)).toBe('3');
+    await expect(lede).toHaveText('Atlas and COhere are moving; the usage guard is quiet.'); // the whole text is in the page, not cut at 170
+    const more = page.locator('.cp-stands-more');
+    await expect(more).toBeVisible();
+    await more.focus(); await page.keyboard.press('Enter');
+    await expect(more).toHaveAttribute('aria-expanded', 'true');
+    expect(await lede.evaluate((e) => getComputedStyle(e).webkitLineClamp)).not.toBe('3');
+    await more.click();
+    expect(await lede.evaluate((e) => getComputedStyle(e).webkitLineClamp)).toBe('3');
+    await page.evaluate(() => { document.querySelector('.cp.side')!.removeAttribute('style'); });
     for (const d of await page.locator('.cp-detail').all()) expect(await d.evaluate((e) => getComputedStyle(e).whiteSpace)).not.toBe('nowrap');
   });
 
@@ -720,15 +728,13 @@ test.describe('simple', () => {
     await expect(page.locator('.tab-strip')).toHaveCount(0);
   });
 
-  test('r7: needs you is the feed: Aaron\'s own, Now and Soon, not snoozed, plus decisions; someday and done are not there; an empty room says so', async ({ page }) => {
+  test('r7: needs you is the feed: Aaron\'s own, Now and Soon, not snoozed, plus decisions; someday and done are not there', async ({ page }) => {
     await boot(page);
-    await scope(page).locator('.th-go[aria-label^="Uni,"]').click();
+    await openRoom(page, 'Techne');
     await openCompanion(page);
     const needs = page.getByRole('region', { name: 'Needs you' });
     await expect(needs).toContainText('COhere festival readiness'); // waiting on aaron, now
     await expect(needs).toContainText('Casey call: book it'); // now
-    await expect(needs).not.toContainText('Send the Q4 invoice'); // someday
-    await expect(needs).not.toContainText('FableJi'); // someday
     await expect(needs).not.toContainText('Already finished'); // done
     await expect(needs).not.toContainText('Put away'); // archived
     await expect(needs).not.toContainText('A snoozed one'); // snoozed
@@ -739,6 +745,11 @@ test.describe('simple', () => {
     expect(order.findIndex((t) => t.includes('COhere festival readiness'))).toBeLessThan(order.findIndex((t) => t.includes('Sponsorship invoice draft')));
     // the next step is shown in full, below the action
     await expect(needs.locator('.cp-item').filter({ hasText: 'Sponsorship invoice draft' }).locator('.cp-next')).toHaveText('Send to Casey for the numbers');
+    // Someday is never in Needs you, in any room
+    await openRoom(page, 'Unforced Development');
+    await openCompanion(page);
+    await expect(needs).not.toContainText('Send the Q4 invoice');
+    await expect(needs).toContainText('Nothing needs you here.');
   });
 
   test('r7: a long next step is clamped within the three lines of its row and "More" opens it in place', async ({ page }) => {
@@ -884,38 +895,46 @@ test.describe('simple', () => {
     expect(await label.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
   });
 
-  test('r10: a cut decision with no full question anywhere opens to decide, with no Yes/No beside a fragment', async ({ page }) => {
-    test.skip(!wide(page), 'side panel');
+  test('r12: a decision with no whole question anywhere reads "Open to see the question ›": no fragment, no buttons; its sheet opens the note', async ({ page }) => {
     await boot(page, { cutNoAsk: true });
-    await scope(page).locator('.th-go[aria-label^="Uni,"]').click();
+    await openRoom(page, 'Techne');
     await openCompanion(page);
-    const item = page.locator('.cp-item').filter({ hasText: 'Open to decide' }).first();
+    if (await page.locator('.cp-more-rows').count()) await page.locator('.cp-more-rows').click();
+    const item = page.locator('.cp-item').filter({ hasText: 'Open to see the question' }).first();
     await expect(item).toBeVisible();
-    await expect(item.getByRole('button', { name: 'Yes' })).toHaveCount(0);
-    await expect(item.getByRole('button', { name: 'No', exact: true })).toHaveCount(0);
-    // never Yes/No next to text ending in an ellipsis, anywhere in the panel
+    await expect(item.locator('.cp-title')).toHaveText('Open to see the question ›');
+    await expect(item.locator('.cp-hint')).toHaveCount(0);
+    await expect(item.getByRole('button', { name: /^(Yes|No)$/ })).toHaveCount(0);
+    await expect(page.locator('.cp-item').filter({ hasText: 'Open to decide' })).toHaveCount(0);
+    // never Yes/No next to text ending in an ellipsis, and no visible title ends on one
     for (const row of await page.locator('.cp-item').all()) {
       if (await row.getByRole('button', { name: 'Yes' }).count()) expect((await row.locator('.cp-title').innerText()).trim()).not.toMatch(/(…|\.\.\.)$/);
     }
-    // and no visible row's title ends on one
     for (const t of await page.locator('.cp-item .cp-title').allInnerTexts()) expect(t.trim()).not.toMatch(/(…|\.\.\.)$/);
+    await item.locator('.cp-need').click();
+    const sheet = page.getByRole('dialog');
+    await expect(sheet.getByRole('button', { name: 'Open the note' })).toBeVisible();
+    await expect(sheet.getByRole('group', { name: /^Decide:/ }).getByRole('button')).toHaveText(['Yes', 'No']);
+    await expect(sheet.getByRole('button', { name: /Mark decided/ })).toHaveCount(0);
   });
 
-  test('r10: every Needs-you row is at most four lines of text, and no row is cut at the panel bottom', async ({ page }) => {
+  test('r10: every action row is at most four lines, a decision is its whole question, and no row is cut at the panel bottom', async ({ page }) => {
     test.skip(!wide(page), 'side panel');
     await boot(page, { crowded: true, cutDecision: true, ulidNext: true });
-    await scope(page).locator('.th-go[aria-label^="Uni,"]').click();
+    await openRoom(page, 'Techne');
     await openCompanion(page);
     await expect(page.locator('.cp-item').first()).toBeVisible();
     const panel = page.locator('aside.cp.side');
     const foot = await page.locator('.cp-foot').boundingBox();
     const pb = await panel.boundingBox();
     for (const row of await page.locator('.cp-item').all()) {
+      const decision = await row.locator('.cp-need.decision').count();
       const lines = await row.evaluate((el) => {
         const lh = (n: Element) => parseFloat(getComputedStyle(n).lineHeight) || 20;
         return [...el.querySelectorAll<HTMLElement>('.cp-title, .cp-detail, .cp-next')].reduce((a, n) => a + Math.round(n.getBoundingClientRect().height / lh(n)), 0);
       });
-      expect(lines).toBeLessThanOrEqual(4); // an action reads to its object: up to four lines
+      if (decision) expect(await row.locator('.cp-title').evaluate((el) => el.scrollHeight <= el.clientHeight + 1)).toBe(true); // never clamped
+      else expect(lines).toBeLessThanOrEqual(4); // an action reads to its object: up to four lines
       const b = await row.boundingBox();
       expect(b!.y + b!.height).toBeLessThanOrEqual(Math.min(foot!.y, pb!.y + pb!.height) + 1);
     }
@@ -981,35 +1000,33 @@ test.describe('simple', () => {
     expect(lb.y + lb.height).toBeLessThanOrEqual(rb.y + 0.5);
   });
 
-  test('r11: a decision row is a whole question beside its buttons, or "Open to decide" with none', async ({ page }) => {
+  test('r12: a decision row is its whole question, unclamped, with its buttons; only with no question anywhere is it "Open to see the question"', async ({ page }) => {
     test.skip(!wide(page), 'side panel');
     await boot(page, { cutDecision: true, longAsk: true, cutNoAsk: true });
-    await scope(page).locator('.th-go[aria-label^="Uni,"]').click();
+    await openRoom(page, 'Techne');
     await openCompanion(page);
     await expect(page.locator('.cp-item').first()).toBeVisible();
-    const rows = await page.locator('.cp-item').all();
+    await page.waitForTimeout(600); // asks arrive, rows settle
+    if (await page.locator('.cp-more-rows').count()) await page.locator('.cp-more-rows').click();
     let whole = 0; let open = 0;
-    for (const row of rows) {
+    for (const row of await page.locator('.cp-item').all()) {
       if (!await row.locator('.cp-need.decision').count()) continue;
-      const buttons = await row.getByRole('button', { name: /^(Yes|No)$/ }).count();
+      const answers = await row.getByRole('group', { name: /^Decide:/ }).getByRole('button').count();
       const title = row.locator('.cp-title');
-      if ((await title.innerText()).includes('Open to decide')) { open++; expect(buttons).toBe(0); continue; }
-      if (!buttons && !(await row.locator('.cp-opt').count())) continue;
+      if ((await title.innerText()).includes('Open to see the question')) { open++; expect(answers).toBe(0); continue; }
       whole++;
+      expect(answers).toBeGreaterThan(0);
       const t = (await title.innerText()).trim();
       expect(t).toMatch(/^[A-Z0-9"“]/); // starts with the ask, sentence-cased
       expect(t).not.toMatch(/(…|\.\.\.)$/);
-      const m = await title.evaluate((el) => ({ full: el.scrollHeight <= el.clientHeight + 1, lines: Math.round(el.clientHeight / parseFloat(getComputedStyle(el).lineHeight)) }));
-      expect(m.full).toBe(true); expect(m.lines).toBeLessThanOrEqual(4);
+      expect(await title.evaluate((el) => el.scrollHeight <= el.clientHeight + 1 && getComputedStyle(el).webkitLineClamp !== '2')).toBe(true);
       if (!t.endsWith('?')) await expect(row.locator('.cp-call-lead')).toHaveText('Your call:');
     }
     expect(whole).toBeGreaterThan(0); expect(open).toBeGreaterThan(0);
-    // the long question is whole in the sheet
-    if (await page.locator('.cp-more-rows').count()) await page.locator('.cp-more-rows').click();
-    const long = page.locator('.cp-item').filter({ hasText: 'Open to decide' }).filter({ hasText: 'venue contract' }).first(); // too long for four lines: a quiet first line, no buttons
-    await expect(long.getByRole('button', { name: /^(Yes|No)$/ })).toHaveCount(0);
-    await long.locator('.cp-need').click();
-    await expect(page.getByRole('dialog')).toContainText('catering exclusivity clause');
+    // the long question reads whole in the row itself, beside its buttons
+    const long = page.locator('.cp-item').filter({ hasText: 'catering exclusivity clause' }).first();
+    await expect(long.getByRole('button', { name: /^(Yes|No)$/ })).toHaveCount(2);
+    await expect(page.locator('.cp-item').filter({ hasText: 'Open to decide' })).toHaveCount(0);
   });
 
   test('r11: asks kept on the device paint on the first render, before any note is read', async ({ page }) => {
@@ -1064,12 +1081,12 @@ test.describe('simple', () => {
     await expect(page.getByRole('button', { name: 'Open in #atlas/build' })).toHaveCount(0);
   });
 
-  test('r11: after a long question turns into "Open to decide", "+N more" still sits whole above the footer', async ({ page }) => {
+  test('r11: with long whole questions, "+N more" still sits whole above the footer', async ({ page }) => {
     test.skip(!wide(page), 'side panel');
     await boot(page, { crowded: true, cutDecision: true, longAsk: true, cutNoAsk: true });
-    await scope(page).locator('.th-go[aria-label^="Uni,"]').click();
+    await openRoom(page, 'Techne');
     await openCompanion(page);
-    await expect(page.locator('.cp-item .cp-opt, .cp-item .cp-hint').first()).toBeVisible();
+    await expect(page.locator('.cp-item .cp-opt').first()).toBeVisible();
     await page.waitForTimeout(600); // asks arrive, rows settle
     const more = (await page.locator('.cp-more-rows').boundingBox())!; const foot = (await page.locator('.cp-foot').boundingBox())!;
     expect(more.y + more.height).toBeLessThanOrEqual(foot.y + 1);
@@ -1140,5 +1157,128 @@ test.describe('simple', () => {
     await expect(page.locator('[data-view="room"]')).toBeVisible();
     await expect(page.locator('.sr-chat')).toContainText('Map labels are in a branch');
     expect(await fits(page)).toBe(true);
+  });
+
+  test('r12: a decision is closed only by an answer: the sheet answers it with the companion\'s control; no "Mark decided", no decision checkbox', async ({ page }) => {
+    await boot(page);
+    await openRoom(page, 'ATLAS');
+    await openCompanion(page);
+    const row = page.locator('.cp-item').filter({ hasText: 'Decide the ATLAS hosting' });
+    await expect(row.getByRole('group', { name: /^Decide:/ }).getByRole('button')).toHaveText(['Self-host', 'Managed']);
+    await row.locator('.cp-need').click();
+    const sheet = page.getByRole('dialog');
+    await expect(sheet.locator('h2')).toHaveText('Decide the ATLAS hosting');
+    await expect(sheet.getByRole('button', { name: /Mark decided|Mark done|Archive/ })).toHaveCount(0);
+    const answer = sheet.getByRole('group', { name: /^Decide:/ });
+    await expect(answer.getByRole('button')).toHaveText(['Self-host', 'Managed']);
+    await answer.getByRole('button', { name: 'Managed' }).click();
+    await expect(sheet).toHaveCount(0);
+    const decided = await calls(page, 'vault_decide');
+    expect(decided).toHaveLength(1);
+    expect(decided[0]).toMatchObject({ from: 'open', to: 'decided', metadata: { decided: 'Managed' } });
+    expect(await calls(page, 'vault_transition')).toHaveLength(0);
+    await expect(page.locator('.cp-item').filter({ hasText: 'Decide the ATLAS hosting' })).toHaveCount(0);
+  });
+
+  test('r12: on the work page a decision row carries the same answers, never a check-off', async ({ page }) => {
+    await boot(page);
+    await openRoom(page, 'ATLAS');
+    await openCompanion(page);
+    await page.getByRole('button', { name: /^All of .*'s work/ }).click();
+    const wrow = page.locator('.wr-row').filter({ hasText: 'Decide the ATLAS hosting' });
+    await expect(wrow.getByRole('group', { name: /^Decide:/ }).getByRole('button')).toHaveText(['Self-host', 'Managed']);
+    await expect(wrow.locator('.task-check')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /^Mark decided/ })).toHaveCount(0);
+  });
+
+  test('r12: the task sheet leads with the action and its linked next step; no raw ids, hashes or "via api"; the bookkeeping is behind Details, in words', async ({ page }) => {
+    await boot(page, { ulidNext: true });
+    await openRoom(page, 'Techne');
+    await openCompanion(page);
+    if (await page.locator('.cp-more-rows').count()) await page.locator('.cp-more-rows').click();
+    await page.locator('.cp-item').filter({ hasText: 'Review the ATLAS follow-up' }).locator('.cp-need').click();
+    const sheet = page.getByRole('dialog');
+    await expect(sheet.locator('h2')).toHaveText('Review the ATLAS follow-up');
+    await expect(sheet.locator('.task-next')).toContainText('Follow-up notes'); // the note id reads as its title
+    await expect(sheet).not.toContainText(/T-13|cdf67944|via api|Changed by|01M3ZK2R6A6C62M1ANJCSQNG3M/, { useInnerText: true });
+    const details = sheet.locator('details.task-details');
+    await expect(details).not.toHaveAttribute('open', '');
+    await details.locator('summary').click();
+    await expect(details).toContainText('Task T-13');
+    await expect(details).toContainText(/Last changed, /);
+    await expect(details).not.toContainText(/cdf67944|api/);
+    // after this device writes to a task, it says "by you"
+    await sheet.getByRole('button', { name: 'Snooze until tomorrow' }).click();
+    await page.getByRole('button', { name: 'Undo' }).click();
+    await expect(page.getByRole('button', { name: 'Undo' })).toHaveCount(0);
+    await page.locator('.cp-item').filter({ hasText: 'Review the ATLAS follow-up' }).locator('.cp-need').click();
+    await page.getByRole('dialog').locator('details.task-details summary').click();
+    await expect(page.getByRole('dialog').locator('details.task-details')).toContainText(/Last changed by you, /);
+  });
+
+  test('r12: a failed first load says "Couldn\'t load. Retry", never an endless Loading; a failed refresh keeps the rows with a quiet Retry', async ({ page }) => {
+    await boot(page, { queryFails: ['task'] });
+    await openRoom(page, 'ATLAS');
+    await openCompanion(page);
+    const body = page.locator('.cp-body');
+    await expect(body.getByRole('alert')).toContainText("Couldn't load.");
+    await expect(body).not.toContainText('Loading…');
+    if (wide(page)) await expect(scope(page).locator('.th-load.bad')).toContainText("Couldn't load what needs you");
+    await page.evaluate(() => { (window as any).__queryFails = []; });
+    await body.getByRole('button', { name: 'Retry' }).click();
+    await expect(page.locator('.cp-item').filter({ hasText: 'SOW for the commons grant' })).toBeVisible();
+    await expect(page.locator('.th-load')).toHaveCount(0);
+    // a refresh that fails a minute later: the rows stay, with when they were read and a Retry
+    await page.evaluate(() => { (window as any).__queryFails = ['task']; });
+    await page.clock.setFixedTime(Date.parse('2026-10-09T10:02:00.000Z'));
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    const stale = page.locator('.cp-stale');
+    await expect(stale).toContainText("Couldn't refresh");
+    await expect(page.locator('.cp-item').filter({ hasText: 'SOW for the commons grant' })).toBeVisible();
+    if (wide(page)) await expect(scope(page).locator('.th-load')).toContainText("Couldn't refresh what needs you");
+    await page.evaluate(() => { (window as any).__queryFails = []; });
+    await stale.getByRole('button', { name: 'Retry' }).click();
+    await expect(stale).toHaveCount(0);
+  });
+
+  test('r12: a list past 200 is read page by page before it is taken for the whole', async ({ page }) => {
+    await boot(page, { manyTasks: 230 });
+    await openRoom(page, 'Techne');
+    await openCompanion(page);
+    await expect(page.getByRole('region', { name: 'Needs you' })).toContainText('Casey call: book it'); // the 231st task and after: page two
+    const offsets = (await calls(page, 'vault_query_meta')).filter((a: any) => a.tag === 'task').map((a: any) => a.offset ?? 0);
+    expect(offsets).toContain(200);
+    await expect(page.locator('.cp-stale')).toHaveCount(0);
+  });
+
+  test('r12: the tree\'s dots are the companion\'s Needs you: no dot for Someday or someone else\'s; a folded area\'s dot is a ring that says "something inside"', async ({ page }) => {
+    test.skip(!wide(page), 'sidebar column');
+    await boot(page);
+    const nav = scope(page);
+    await nav.locator('.th-row.d1').first().waitFor();
+    // Unforced Development holds only a Someday task: no dot (r11 lit it)
+    await expect(nav.locator('.th-go[aria-label^="Unforced Development,"] .th-dot')).toHaveCount(0);
+    // folded Atlas: ATLAS inside needs you
+    const atlas = nav.locator('.th-go[aria-label^="Atlas,"]');
+    await expect(atlas.locator('.th-dot.inside')).toHaveAttribute('title', 'Something inside needs you');
+    await expect(atlas).toHaveAttribute('aria-label', /something inside needs you/);
+    // every row's dot agrees with its own room's companion
+    await unfoldAll(page);
+    for (const [name, lit] of [['ATLAS', true], ['Atlas Institute', false], ['Unforced Development', false], ['Learn Vibe Build', true]] as const) {
+      await expect(nav.locator(`.th-go[aria-label^="${name},"] .th-dot:not(.inside)`)).toHaveCount(lit ? 1 : 0);
+      await openRoom(page, name);
+      await openCompanion(page);
+      if (lit) await expect(page.locator('.cp-item').first()).toBeVisible(); else await expect(page.locator('.cp-none')).toHaveText('Nothing needs you here.');
+    }
+  });
+
+  test('r12: Uni\'s own panel is Uni\'s items plus at most three from the areas, with no "+N more"', async ({ page }) => {
+    await boot(page, { crowded: true });
+    await scope(page).locator('.th-go[aria-label^="Uni,"]').click();
+    await openCompanion(page);
+    await expect(page.locator('.cp-item').first()).toBeVisible();
+    expect(await page.locator('.cp-item').count()).toBeLessThanOrEqual(3);
+    await expect(page.locator('.cp-more-rows')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /^All of Uni's work/ })).toBeVisible();
   });
 });

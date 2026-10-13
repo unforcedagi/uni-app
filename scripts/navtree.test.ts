@@ -6,7 +6,7 @@ import { canBack, canForward, EMPTY_HISTORY, recent, step, visit, type History }
 import { EMPTY_TABS, isSurface, migrateLegacyTabs, persistable, restoreTabs, serializeTabs, type Tabs, type TabTarget } from "../src/tabs.ts";
 import { linkLabel, splitLinks } from "../src/areas/linkText.ts";
 import { createVaultTasks } from "../src/areas/vaultTasks.ts";
-import { actionableTitle, askFromContent, askLead, askOrder, dueLine, isCutTitle, isOverdue, lineBudget, rowAsk, stateLine, topNeeds, withoutCut } from "../src/areas/simpleCore.ts";
+import { actionableTitle, askFromContent, askLead, askOrder, dueLine, isCutTitle, isOverdue, lineBudget, needsByNode, needsYou, rowAsk, stateLine, topNeeds, uniNeeds, withoutCut } from "../src/areas/simpleCore.ts";
 import { splitRefs, titleOfPath } from "../src/areas/noteRefsCore.ts";
 import { readMessages, readRooms, readWho, writeMessages, writeRooms, writeWho } from "../src/chatCache.ts";
 import { isActiveRun } from "../src/areas/steerCore.ts";
@@ -120,6 +120,20 @@ check("needs-you feed: Aaron's own (or waiting on him), Now and Soon (unsorted i
   assert.ok(ids.includes("wait1") && ids.includes("none1") && ids.includes("dec1"));
   assert.equal(ids.indexOf("dec1"), ids.length - 1, "a someday decision sorts last");
 });
+check("r12 dots and the companion share one rule: Now, Soon and decisions of Aaron's, never Someday; a node's dot is its own", () => {
+  const list = [mk("soon1", { priority: "soon" }), mk("some1", { priority: "someday" }), mk("room1", { owner: "room:atlas", priority: "now" }),
+    mk("dec1", { priority: "someday", options: ["a"] }, ["decision"]), mk("done1", { state: "done", priority: "now" }), mk("up1", { node: "Areas/Atlas", priority: "someday" })];
+  assert.deepEqual(list.filter(needsYou).map((t) => t.id), ["soon1", "dec1"]);
+  assert.deepEqual([...needsByNode(list)], [["Projects/ATLAS", 2]], "Someday lights nothing; a parent never lights for a child");
+  assert.deepEqual(feed(list).sort(), list.filter(needsYou).map((t) => t.id).sort(), "the companion lists exactly what the dots count");
+});
+check("r12 Uni's own panel: Uni's own items, then at most three from the areas; the rest is in All of Uni's work", () => {
+  const own = (id: string) => ({ ...mk(id, { priority: "now" }), node: "" });
+  const area = (id: string) => mk(id, { priority: "now" });
+  const out = uniNeeds([area("a1"), own("u1"), area("a2"), area("a3"), area("a4"), own("u2"), area("a5")]);
+  assert.deepEqual(out.map((t) => t.id), ["u1", "u2", "a1", "a2", "a3"]);
+  assert.deepEqual(uniNeeds([area("a1")]).map((t) => t.id), ["a1"]);
+});
 check("needs-you feed: done and archived never appear; Now before Soon, then due date (undated last)", () => {
   const ids = feed([mk("d", { state: "done", priority: "now" }), mk("ar", { state: "archived" }), mk("s1", { priority: "soon", due: "2026-10-12" }), mk("n2", { priority: "now", due: "2026-10-20" }), mk("n1", { priority: "now", due: "2026-10-15" }), mk("n3", { priority: "now" })]);
   assert.deepEqual(ids, ["n1", "n2", "n3", "s1"]);
@@ -167,11 +181,11 @@ check("ask: a cut title shows the first line of the note's content in full, with
   const long = "First sentence here. " + "Second sentence that goes on and on. ".repeat(12);
   assert.ok(askFromContent(long).endsWith("here.") || askFromContent(long).length <= 280);
 });
-check("r10 rowAsk: a cut title never keeps buttons beside a fragment", () => {
+check("r12 rowAsk: a cut title never keeps buttons beside a fragment; with no whole question anywhere, 'Open to see the question' and no fragment", () => {
   assert.deepEqual(rowAsk("Name the payer entity", undefined, true, false), { text: "Name the payer entity", openToDecide: false });
   assert.deepEqual(rowAsk("a daily calendar email to people who…", "a daily calendar email to people who registered. It goes to real attendees.", true, false), { text: "a daily calendar email to people who registered. It goes to real attendees.", openToDecide: false });
-  assert.deepEqual(rowAsk("a daily calendar email to people who…", undefined, true, false), { text: "Open to decide", openToDecide: true, hint: "a daily calendar email to people who" });
-  assert.deepEqual(rowAsk("a daily calendar email to people who…", "still cut too…", true, true), { text: "Open to decide", openToDecide: true, hint: "a daily calendar email to people who" });
+  assert.deepEqual(rowAsk("a daily calendar email to people who…", undefined, true, false), { text: "Open to see the question", openToDecide: true });
+  assert.deepEqual(rowAsk("a daily calendar email to people who…", "still cut too…", true, true), { text: "Open to see the question", openToDecide: true });
   assert.deepEqual(rowAsk("Riverside: cure window…", undefined, false, true), { text: "Riverside: cure window", openToDecide: false });
   assert.deepEqual(rowAsk("Riverside: cure window…", undefined, false, false), { text: "", openToDecide: false });
   assert.equal(withoutCut("a b..."), "a b");

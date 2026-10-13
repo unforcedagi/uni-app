@@ -4,8 +4,8 @@ import { useTasks } from "./useTasks";
 import { MovedBlock, NeedsYou, WhereCounts } from "./WhereWeAre";
 import { DraftSection, RunSection } from "./SteerPage";
 import { draftsUnder, runsUnder, type Mark } from "./steerCore";
-import { CompanionSide, CompanionStrip, useCompanionOpen, type CompanionProps } from "./Companion";
-import { chatPlaceholder, standsLine, topNeeds } from "./simpleCore";
+import { CompanionSide, CompanionStrip, useCompanionOpen, type CompanionProps, type TaskLoad } from "./Companion";
+import { chatPlaceholder, needsByNode, needsYou, standsLine, topNeeds, uniNeeds } from "./simpleCore";
 import { whereWeAre } from "./whereCore";
 import { ownRoom, type Steward } from "./talkCore";
 import type { Area } from "./areasCore";
@@ -122,8 +122,11 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   // The whole tree's tasks are loaded once (the room tree beside the room needs every row's dot) and each level takes its subtree.
   const tasks = useTasks(identity, "", fallback);
   const levelTasks = useMemo(() => (tasks.tree && node ? tasksUnder(tasks.tree, node.path, tasks.tasks) : tasks.tasks), [tasks.tree, tasks.tasks, node?.path]); // eslint-disable-line react-hooks/exhaustive-deps
-  /** A room's dot is its OWN node's needs-you items (T-124 r2): a parent never lights up for what its children need. The whole tree's tasks are loaded, so they can be counted per node. */
-  const ownNeeds = useMemo(() => { const m = new Map<string, number>(); for (const t of tasks.tasks) if (groupOf(t) === "you") m.set(t.node, (m.get(t.node) ?? 0) + 1); return m; }, [tasks.tasks]);
+  /** A room's dot is its OWN node's needs-you items (T-124 r2): a parent never lights up for what its children need. The whole tree's tasks are
+   *  loaded, so they can be counted per node, by the companion's own rule (r12: Now, Soon and decisions; never Someday). */
+  const ownNeeds = useMemo(() => needsByNode(tasks.tasks), [tasks.tasks]);
+  /** The task list's health, for the companion and the tree. */
+  const load: TaskLoad = { error: tasks.error, refreshing: tasks.refreshing, lastOk: tasks.lastOk, complete: tasks.complete, retry: tasks.refresh };
   // opening a room anywhere opens its node's one view
   const owned = useMemo(() => (data && chat ? roomNodeMap(data.tree, roomRefs, uniRef) : null), [data, chat, roomRefs, uniRef]);
   useEffect(() => { if (owned) publishRoomNodes(owned); }, [owned]);
@@ -139,6 +142,7 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
     return { room: v.target, via: v.own ? "own" : v.heldBy && v.heldBy.id !== uniRef?.id ? "inherited" : "uni", from: null };
   };
   const roomOfNode = (p: string) => stewardOf(p).room;
+  const decide = (t: Task, o: string) => void tasks.decide(t, o);
   const open = (a: Area) => { setRootOpen(false); const w = withRoom(a); onOpenArea(w.path, w.name, pickRoom(w.rooms, null)); };
   const toUni = () => onOpenArea(null, "Uni", uniRoom);
   const openPath = (p: string) => {
@@ -147,7 +151,7 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   };
   const navRows = data ? treeRows(data.tree, roomRefs, uniRef) : [{ path: ROOT, name: "Uni", depth: 0, kind: "root" as const, slash: uniRef ? "uni" : null, heldBy: null, heldNode: null, own: !!uniRef, trunk: [], last: true }];
   const navNeeds = new Map(navRows.map((r) => [r.path, ownNeeds.get(r.path) ?? 0]));
-  const treeProps = { chat, rows: navRows, needs: navNeeds, onOpen: openPath, others, onOpenRoom: actions.openRoom };
+  const treeProps = { chat, rows: navRows, needs: navNeeds, onOpen: openPath, others, onOpenRoom: actions.openRoom, load, needsReady: tasks.ready };
   /**
    * The room itself: a header (title, the room's own name, where it sits), the conversation, and the companion beside it (wide) or as a
    * strip above it (phone). A thread shows inside it, with a way back to the room.
@@ -235,7 +239,7 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   const sections = <div className="sp-cols">
     <div className="sp-col sp-left">
       <NeedsYou where={where} here={here} nodeName={nodeName} leaving={tasks.leaving} marks={noMarks} nowMs={nowMs}
-        onOpen={setSheet} onAct={(t, a) => void tasks.act(t, a)} onPriority={(t, p) => void tasks.setPriority(t, p)} />
+        onOpen={setSheet} onAct={(t, a) => void tasks.act(t, a)} onDecide={decide} onPriority={(t, p) => void tasks.setPriority(t, p)} />
       <MovedBlock where={where} here={here} nodeName={nodeName} nowMs={nowMs} onOpen={setSheet} />
       <UpdatesBlock updates={updates} nowSec={nowSec} onOpen={openPath} />
       <InsideBlock chat={chat} title={insideTitle} kids={insideKids} onOpen={open} />
@@ -245,7 +249,7 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
       <RunSection runs={runs} nowMs={nowMs} onOpenNote={actions.openNote} />
       <DraftSection drafts={drafts} marks={noMarks} nowMs={nowMs} onOpenNote={actions.openNote} />
       <TaskList title="Tasks" tasks={otherWork} marks={noMarks} nowMs={nowMs} leaving={tasks.leaving} here={here} nodeName={nodeName} loading={tasks.loading} ready={tasks.ready} error={tasks.error} truncated={tasks.truncated} treeTruncated={tasks.treeTruncated}
-        onOpen={setSheet} onAct={(t, a) => void tasks.act(t, a)} onRetry={tasks.refresh} />
+        onOpen={setSheet} onAct={(t, a) => void tasks.act(t, a)} onDecide={decide} onRetry={tasks.refresh} />
       <ProjectNote area={body !== null ? { ...node, body } : node} />
     </div>
   </div>;
@@ -265,17 +269,22 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
     {chat && <RoomLine view={nodeView} target={target} onOpenRoom={openRoomHere} context />}
     {headState}
   </header>;
-  const sheetView = sheet && <TaskSheet key={sheet.id} task={sheet} here={here} nodeName={nodeName} room={roomOfNode(sheet.node) ?? target} inRoom={target?.id} onClose={() => setSheet(null)} onAct={(t, a) => void tasks.act(t, a)} onOpenRoom={openRoomHere} />;
+  const sheetView = sheet && <TaskSheet key={sheet.id} task={sheet} here={here} nodeName={nodeName} room={roomOfNode(sheet.node) ?? target} inRoom={target?.id} onClose={() => setSheet(null)}
+    onAct={(t, a) => void tasks.act(t, a)} onDecide={decide} onNote={actions.openNote} onOpenRoom={openRoomHere} />;
   const fullLevel = <div className={`tree-home th-level ${wide ? "wide" : "phone"} th-rooms`} data-layout="rooms">
     {wide && <RoomSidebar {...treeProps} selected={node.path} nav={nav} />}
     <LevelPanel wide={wide} head={wide ? wideHead : phoneHead} foot={<UndoBar undo={tasks.undo} notice={tasks.notice} onDismiss={tasks.dismissNotice} />}>{sections}</LevelPanel>
     {sheetView}
   </div>;
   // ------------------------------------------------------------------------------------------ the room (T-124): the conversation, with the state as a quiet companion
-  const needTop = topNeeds(where, node.path);
+  // the companion's list, by the same rule as the dots; Uni's own panel keeps to Uni's own items and the three most urgent from the areas
+  const needAll = topNeeds(where, node.path);
+  const needTop = isRoot ? uniNeeds(needAll) : needAll;
+  /** Items here that need you but sit in a private area (never named here): counted, so the list never reads as all there is. */
+  const privateNeeds = Math.max(0, levelTasks.filter(needsYou).length - needAll.length);
   const rawStands = tasks.tree?.stands.get(node.path) ?? (typeof node.metadata.stands === "string" ? { text: node.metadata.stands, at: typeof node.metadata.stands_at === "string" ? node.metadata.stands_at : null } : null);
   const stands = standsLine(rawStands, privateLevel ? [] : levelTasks, now);
-  const companionProps: CompanionProps = { stands, ready: tasks.ready, needs: needTop, runs, nodeName: node.name, onTask: setSheet, onNote: actions.openNote, onDecide: (t: Task, o: string) => void tasks.decide(t, o), onEverything: () => { setSheet(null); setFull(true); } };
+  const companionProps: CompanionProps = { stands, ready: tasks.ready, load, hidden: privateNeeds, noMore: isRoot, needs: needTop, runs, nodeName: node.name, onTask: setSheet, onNote: actions.openNote, onDecide: decide, onEverything: () => { setSheet(null); setFull(true); } };
   const placeholder = chatPlaceholder({ name: node.name, slash: nodeView.own ? nodeView.slash : null, heldBy: nodeView.heldBy ? roomSlug(nodeView.heldBy.name) : null });
   const roomLevel = shell({ title: node.name, door: nodeView.own && nodeView.slash ? `#${nodeView.slash}` : "", crumbs: wide && !isRoot ? <Crumbs trail={trailItems} onOpen={openPath} /> : null, back,
     companion: companionProps, chatRoom: thread ? roomFor(thread.channel, thread.root) : roomFor(target?.id), placeholder, selected: node.path, sheet: sheetView });
