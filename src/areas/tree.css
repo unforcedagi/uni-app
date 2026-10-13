@@ -512,3 +512,7 @@ h3.wr-h { font-weight: 400; }
 .cp-need .cp-title .cp-ref, .cp-need .cp-title span { display: inline; }
 .cp-next .cp-ref, .cp-next .cp-link { display: inline; }
 .cp-hint { -webkit-line-clamp: 1; line-clamp: 1; }
+
+/* r11: a decision's question is shown whole (never clamped), led by "Your call:" when it is not phrased as a question */
+.cp-need.decision .cp-title, .cp-item[data-open] .cp-title { -webkit-line-clamp: unset; line-clamp: none; overflow: visible; display: block; }
+.cp-call-lead { display: block; margin: 0 0 2px; font: 500 12px/1.3 var(--th-sans); color: var(--th-ink2); }

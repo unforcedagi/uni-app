@@ -189,7 +189,7 @@ export default function AreasSurface({ zoom, identity, talk, path, rooms: hostRo
     </>}
     <TaskList tasks={tasks.tasks} leaving={tasks.leaving} here={here} nodeName={nodeName} loading={tasks.loading} ready={tasks.ready} error={tasks.error} truncated={tasks.truncated} treeTruncated={tasks.treeTruncated}
       onOpen={setSheet} onAct={(t, a) => void tasks.act(t, a)} onRetry={tasks.refresh} />
-    {sheet && <TaskSheet key={sheet.id} task={sheet} here={here} nodeName={nodeName} room={roomOfNode(sheet.node) ?? target} onClose={() => setSheet(null)} onAct={(t, a) => void tasks.act(t, a)} onOpenRoom={actions.openRoom} />}
+    {sheet && <TaskSheet key={sheet.id} task={sheet} here={here} nodeName={nodeName} room={roomOfNode(sheet.node) ?? target} inRoom={target?.id} onClose={() => setSheet(null)} onAct={(t, a) => void tasks.act(t, a)} onOpenRoom={actions.openRoom} />}
     <UndoBar undo={tasks.undo} notice={tasks.notice} onDismiss={tasks.dismissNotice} />
   </>;
   // ------------------------------------------------------------------------------------------ the tree home (T-111)
@@ -282,7 +282,7 @@ export default function AreasSurface({ zoom, identity, talk, path, rooms: hostRo
     {wide && !roomsMode && <div className="th-stage">{stage}</div>}
     {wide && roomsMode && <RoomSidebar chat={chat} rows={navRows} needs={navNeeds} selected={node.path} onOpen={openPath} nav={nav} />}
     <LevelPanel wide={wide} head={wide ? wideHead : phoneHead} foot={<>{roomsMode ? null : talkBar}<UndoBar undo={tasks.undo} notice={tasks.notice} onDismiss={tasks.dismissNotice} /></>}>{sections}</LevelPanel>
-    {sheet && <TaskSheet key={sheet.id} task={sheet} here={here} nodeName={nodeName} room={roomOfNode(sheet.node) ?? target} onClose={() => setSheet(null)} onAct={(t, a) => void tasks.act(t, a)} onOpenRoom={roomsMode ? openRoomHere : actions.openRoom} />}
+    {sheet && <TaskSheet key={sheet.id} task={sheet} here={here} nodeName={nodeName} room={roomOfNode(sheet.node) ?? target} inRoom={target?.id} onClose={() => setSheet(null)} onAct={(t, a) => void tasks.act(t, a)} onOpenRoom={roomsMode ? openRoomHere : actions.openRoom} />}
   </div>;
   // ------------------------------------------------------------------------------------------ the room (T-124): the conversation, with the state as a quiet companion
   const needTop = topNeeds(where, node.path);
@@ -311,7 +311,7 @@ export default function AreasSurface({ zoom, identity, talk, path, rooms: hostRo
     {room}
     {wide && <CompanionSide {...companionProps} open={companionOpen} onToggle={setCompanionOpen} />}
     <UndoBar undo={tasks.undo} notice={tasks.notice} onDismiss={tasks.dismissNotice} />
-    {sheet && <TaskSheet key={sheet.id} task={sheet} here={here} nodeName={nodeName} room={roomOfNode(sheet.node) ?? target} onClose={() => setSheet(null)} onAct={(t, a) => void tasks.act(t, a)} onOpenRoom={openRoomHere} />}
+    {sheet && <TaskSheet key={sheet.id} task={sheet} here={here} nodeName={nodeName} room={roomOfNode(sheet.node) ?? target} inRoom={target?.id} onClose={() => setSheet(null)} onAct={(t, a) => void tasks.act(t, a)} onOpenRoom={openRoomHere} />}
   </div>;
   const treeLevel = roomsMode && chat && (target || roomsPending) && !full ? roomLevel : fullLevel;
   const classicKids = layout === "classic" ? <div className="tree-home th-classic"><InsideBlock chat={chat} title={insideTitle} kids={insideKids} onOpen={open} />{empty}</div> : empty;

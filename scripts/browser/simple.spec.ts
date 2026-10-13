@@ -399,7 +399,7 @@ test.describe('simple', () => {
 
   test('the task sheet\'s "Open in #room" returns to the conversation', async ({ page }) => {
     await boot(page);
-    await openRoom(page, 'ATLAS');
+    await openRoom(page, 'Atlas'); // another room than the task's own
     await openCompanion(page);
     await page.getByRole('button', { name: /^All of .*'s work/ }).click();
     await page.locator('.wr-row[data-id="T-07"] .wr-main').click();
@@ -843,7 +843,7 @@ test.describe('simple', () => {
     expect(call.from).toBe('open'); expect(call.to).toBe('decided');
     // a decision with real options keeps them, and no yes/no
     const opts = page.locator('.cp-item').filter({ hasText: 'hosting' });
-    if (await opts.count()) await expect(opts.getByText('Your call')).toHaveCount(0);
+    if (await opts.count()) await expect(opts.getByRole('button', { name: 'Yes' })).toHaveCount(0);
   });
 
   test('r9: a note id in a next step reads as the note\'s title, never the id', async ({ page }) => {
@@ -897,7 +897,7 @@ test.describe('simple', () => {
     for (const t of await page.locator('.cp-item .cp-title').allInnerTexts()) expect(t.trim()).not.toMatch(/(…|\.\.\.)$/);
   });
 
-  test('r10: every Needs-you row is at most three lines of text, and no row is cut at the panel bottom', async ({ page }) => {
+  test('r10: every Needs-you row is at most four lines of text, and no row is cut at the panel bottom', async ({ page }) => {
     test.skip(!wide(page), 'side panel');
     await boot(page, { crowded: true, cutDecision: true, ulidNext: true });
     await scope(page).locator('.th-go[aria-label^="Uni,"]').click();
@@ -911,7 +911,7 @@ test.describe('simple', () => {
         const lh = (n: Element) => parseFloat(getComputedStyle(n).lineHeight) || 20;
         return [...el.querySelectorAll<HTMLElement>('.cp-title, .cp-detail, .cp-next')].reduce((a, n) => a + Math.round(n.getBoundingClientRect().height / lh(n)), 0);
       });
-      expect(lines).toBeLessThanOrEqual(3);
+      expect(lines).toBeLessThanOrEqual(4); // an action reads to its object: up to four lines
       const b = await row.boundingBox();
       expect(b!.y + b!.height).toBeLessThanOrEqual(Math.min(foot!.y, pb!.y + pb!.height) + 1);
     }
@@ -928,8 +928,8 @@ test.describe('simple', () => {
     await boot(page, { crowded: true });
     await scope(page).locator('.th-go[aria-label^="Uni,"]').click();
     await openCompanion(page);
-    const row = page.locator('.cp-item').first();
-    const more = row.locator('.cp-row-more');
+    const more = page.locator('.cp-item .cp-row-more').first(); // the first row that doesn't fit its lines
+    const row = page.locator('.cp-item').filter({ has: page.locator('.cp-row-more') }).first();
     await expect(more).toHaveText('More');
     const h = (await row.boundingBox())!.height;
     await more.click();
@@ -975,5 +975,87 @@ test.describe('simple', () => {
     const lb = (await last.boundingBox())!; const wb = (await wrap.boundingBox())!; const rb = (await page.locator('.th-recent').boundingBox())!;
     expect(lb.y + lb.height).toBeLessThanOrEqual(wb.y + wb.height + 0.5);
     expect(lb.y + lb.height).toBeLessThanOrEqual(rb.y + 0.5);
+  });
+
+  test('r11: a decision row is a whole question beside its buttons, or "Open to decide" with none', async ({ page }) => {
+    test.skip(!wide(page), 'side panel');
+    await boot(page, { cutDecision: true, longAsk: true, cutNoAsk: true });
+    await scope(page).locator('.th-go[aria-label^="Uni,"]').click();
+    await openCompanion(page);
+    await expect(page.locator('.cp-item').first()).toBeVisible();
+    const rows = await page.locator('.cp-item').all();
+    let whole = 0; let open = 0;
+    for (const row of rows) {
+      if (!await row.locator('.cp-need.decision').count()) continue;
+      const buttons = await row.getByRole('button', { name: /^(Yes|No)$/ }).count();
+      const title = row.locator('.cp-title');
+      if ((await title.innerText()).includes('Open to decide')) { open++; expect(buttons).toBe(0); continue; }
+      if (!buttons && !(await row.locator('.cp-opt').count())) continue;
+      whole++;
+      const t = (await title.innerText()).trim();
+      expect(t).toMatch(/^[A-Z0-9"“]/); // starts with the ask, sentence-cased
+      expect(t).not.toMatch(/(…|\.\.\.)$/);
+      const m = await title.evaluate((el) => ({ full: el.scrollHeight <= el.clientHeight + 1, lines: Math.round(el.clientHeight / parseFloat(getComputedStyle(el).lineHeight)) }));
+      expect(m.full).toBe(true); expect(m.lines).toBeLessThanOrEqual(4);
+      if (!t.endsWith('?')) await expect(row.locator('.cp-call-lead')).toHaveText('Your call:');
+    }
+    expect(whole).toBeGreaterThan(0); expect(open).toBeGreaterThan(0);
+    // the long question is whole in the sheet
+    if (await page.locator('.cp-more-rows').count()) await page.locator('.cp-more-rows').click();
+    const long = page.locator('.cp-item').filter({ hasText: 'Open to decide' }).filter({ hasNot: page.locator('.cp-hint') }).first(); // too long for four lines: no fragment either
+    await long.locator('.cp-need').click();
+    await expect(page.getByRole('dialog')).toContainText('catering exclusivity clause');
+  });
+
+  test('r11: asks kept on the device paint on the first render, before any note is read', async ({ page }) => {
+    test.skip(!wide(page), 'side panel');
+    const who = 'a'.repeat(64);
+    await page.addInitScript((w) => {
+      localStorage.setItem(`uni.asks.v1:${w}|uni`, JSON.stringify([['dq9', { ask: 'Should Uni add the after-event prompt on Wednesday?', at: '2026-10-10T08:00:00.000Z' }]]));
+    }, who);
+    await boot(page, { cutDecision: true, queryDelay: 0 });
+    await scope(page).locator('.th-go[aria-label^="Uni,"]').click();
+    await openCompanion(page);
+    const item = page.locator('.cp-item').filter({ hasText: 'after-event prompt' });
+    await expect(item.getByRole('button', { name: 'Yes' })).toBeVisible();
+    await expect(item.locator('.cp-title')).toHaveText('Should Uni add the after-event prompt on Wednesday?');
+    expect((await calls(page, 'vault_note')).filter((a: any) => a.noteRef === 'dq9')).toHaveLength(0);
+  });
+
+  test('r11: an area revealed for the open room folds again on leaving; one the user opened stays open', async ({ page }) => {
+    test.skip(!wide(page), 'sidebar column');
+    await boot(page);
+    const nav = scope(page);
+    await expect(nav.locator('.th-row .th-go').first()).toBeVisible();
+    // Aaron folds Atlas, with ATLAS the open room: the choice is kept
+    await nav.locator('.th-fold[data-path="Areas/Atlas"]').click();
+    await nav.locator('.th-go[aria-label^="ATLAS,"]').click();
+    await nav.locator('.th-fold[data-path="Areas/Atlas"]').click();
+    await expect(nav.locator('.th-go[aria-label^="ATLAS,"]')).toHaveCount(0);
+    expect(await page.evaluate(() => JSON.parse(localStorage.getItem('uni.tree.folds.v1')!)['Areas/Atlas'])).toBe(false);
+    // the app reopens on ATLAS: Atlas shows it for now
+    await page.reload();
+    await expect(page.locator('.sr-title')).toHaveText('ATLAS');
+    await expect(nav.locator('.th-go[aria-label^="ATLAS,"]')).toBeVisible();
+    // leaving folds it again, and nothing was written to the device
+    await nav.locator('.th-go[aria-label^="Uni,"]').click();
+    await expect(page.locator('.sr-title')).toHaveText('Uni');
+    await expect(nav.locator('.th-go[aria-label^="ATLAS,"]')).toHaveCount(0);
+    expect(await page.evaluate(() => JSON.parse(localStorage.getItem('uni.tree.folds.v1')!)['Areas/Atlas'])).toBe(false);
+    // an area Aaron opens himself stays open after he leaves
+    await nav.locator('.th-fold[data-path="Areas/Atlas"]').click();
+    await nav.locator('.th-go[aria-label^="Techne,"]').click();
+    await expect(nav.locator('.th-go[aria-label^="ATLAS,"]')).toBeVisible();
+    expect(await page.evaluate(() => JSON.parse(localStorage.getItem('uni.tree.folds.v1')!)['Areas/Atlas'])).toBe(true);
+  });
+
+  test('r11: "Open in #room" is not offered inside that room', async ({ page }) => {
+    await boot(page);
+    await openRoom(page, 'ATLAS');
+    await openCompanion(page);
+    await page.getByRole('button', { name: /^All of .*'s work/ }).click();
+    await page.locator('.wr-row[data-id="T-07"] .wr-main').click();
+    await expect(page.getByRole('dialog')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Open in #atlas/build' })).toHaveCount(0);
   });
 });

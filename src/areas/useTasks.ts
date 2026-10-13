@@ -61,6 +61,7 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
     const mine = ++epoch.current;
     let live = true;
     setList(mem.tasks.get(nodePath)?.list ?? null);
+    vaultTasks.setAskOwner(owner);
     setLoading(true);
     lastLoad.current = Date.now();
     (async () => {

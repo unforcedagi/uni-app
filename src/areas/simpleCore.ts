@@ -113,6 +113,15 @@ export function rowAsk(full: string, ask: string | undefined, isDecision: boolea
   return { text: hasNext ? withoutCut(full) : "", openToDecide: false };
 }
 
+/** A decision's ask as a question: sentence-cased, and "Your call:" above it when the stored ask does not end in "?". */
+export function askLead(text: string): { text: string; yourCall: boolean } {
+  const t = text.trim();
+  const cased = t ? t[0].toLocaleUpperCase() + t.slice(1) : t;
+  return { text: cased, yourCall: !!cased && !/\?["')\]]*$/.test(cased) };
+}
+/** A decision's question runs longer than this many lines: it is not shown inline, "Open to decide" opens it whole in the sheet. */
+export const ASK_LINES_MAX = 4;
+
 /** One plain line for where a task stands, never both the state and who it waits on ("waiting, waiting on aaron"). */
 export function stateLine(t: { state: string; waitingOn: string | null; kind: string }, isMeFn: (who: string | null) => boolean, nameOf: (who: string) => string = (w) => w): string {
   if (t.kind === "decision") return "Needs your decision";
