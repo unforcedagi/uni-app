@@ -5,7 +5,7 @@ import { ancestorsOf, clampWidth, hasKids, isOpen, parseFolds, parseSidebar, rol
 import { canBack, canForward, EMPTY_HISTORY, recent, step, visit, type History } from "../src/navHistory.ts";
 import { EMPTY_TABS, isSurface, migrateLegacyTabs, persistable, restoreTabs, serializeTabs, type Tabs, type TabTarget } from "../src/tabs.ts";
 import { linkLabel, splitLinks } from "../src/areas/linkText.ts";
-import { actionableTitle, askFromContent, dueLine, isCutTitle, isOverdue, topNeeds } from "../src/areas/simpleCore.ts";
+import { actionableTitle, askFromContent, askOrder, dueLine, isCutTitle, isOverdue, lineBudget, rowAsk, stateLine, topNeeds, withoutCut } from "../src/areas/simpleCore.ts";
 import { splitRefs, titleOfPath } from "../src/areas/noteRefsCore.ts";
 import { readMessages, readRooms, readWho, writeMessages, writeRooms, writeWho } from "../src/chatCache.ts";
 import { isActiveRun } from "../src/areas/steerCore.ts";
@@ -165,6 +165,28 @@ check("ask: a cut title shows the first line of the note's content in full, with
   assert.equal(askFromContent("_Converted from x_"), "");
   const long = "First sentence here. " + "Second sentence that goes on and on. ".repeat(12);
   assert.ok(askFromContent(long).endsWith("here.") || askFromContent(long).length <= 280);
+});
+check("r10 rowAsk: a cut title never keeps buttons beside a fragment", () => {
+  assert.deepEqual(rowAsk("Name the payer entity", undefined, true, false), { text: "Name the payer entity", openToDecide: false });
+  assert.deepEqual(rowAsk("a daily calendar email to people who…", "a daily calendar email to people who registered. It goes to real attendees.", true, false), { text: "a daily calendar email to people who registered. It goes to real attendees.", openToDecide: false });
+  assert.deepEqual(rowAsk("a daily calendar email to people who…", undefined, true, false), { text: "Open to decide", openToDecide: true });
+  assert.deepEqual(rowAsk("a daily calendar email to people who…", "still cut too…", true, true), { text: "Open to decide", openToDecide: true });
+  assert.deepEqual(rowAsk("Riverside: cure window…", undefined, false, true), { text: "Riverside: cure window", openToDecide: false });
+  assert.deepEqual(rowAsk("Riverside: cure window…", undefined, false, false), { text: "", openToDecide: false });
+  assert.equal(withoutCut("a b..."), "a b");
+});
+check("r10 stateLine: one plain line, never the state and who it waits on", () => {
+  const me = (w: string | null) => w === "aaron";
+  assert.equal(stateLine({ kind: "task", state: "waiting", waitingOn: "aaron" }, me), "Waiting on you");
+  assert.equal(stateLine({ kind: "task", state: "waiting", waitingOn: "miranda" }, me), "Waiting on miranda");
+  assert.equal(stateLine({ kind: "task", state: "doing", waitingOn: null }, me), "In progress");
+  assert.equal(stateLine({ kind: "decision", state: "open", waitingOn: null }, me), "Needs your decision");
+  assert.ok(!/waiting, waiting/i.test(stateLine({ kind: "task", state: "waiting", waitingOn: "aaron" }, me)));
+});
+check("r10 askOrder and lineBudget", () => {
+  const t = (title: string, kind = "task", priority: string | null = null, due: string | null = null) => ({ title, kind, priority, due });
+  assert.deepEqual(askOrder([t("b"), t("a", "task", "now"), t("c", "decision")]).map((x) => x.title), ["c", "a", "b"]);
+  assert.equal(lineBudget(2, false).next, 1); assert.equal(lineBudget(2, true).next, 0); assert.equal(lineBudget(1, true).next, 1); assert.equal(lineBudget(3, false).next, 0);
 });
 check("recent: never the current place, and a name is listed once", () => {
   let h: History = EMPTY_HISTORY;

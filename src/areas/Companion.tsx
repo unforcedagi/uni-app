@@ -5,12 +5,11 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { cleanText } from "../interface/contract";
 import { RefText } from "./noteRefs";
-import { isMe } from "./taskCore";
 import { isActiveRun, type Run } from "./steerCore";
 import type { Task } from "./taskCore";
 import { splitTitle } from "./whereCore";
 import { splitLinks } from "./linkText";
-import { actionableTitle, isCutTitle, dueLine } from "./simpleCore";
+import { actionableTitle, dueLine, isOverdue, lineBudget, rowAsk } from "./simpleCore";
 
 const KEYS = { side: "uni.companion.side.v1", strip: "uni.companion.strip.v1" } as const;
 /** Below this width the side panel starts folded: the conversation gets the space. */
@@ -51,29 +50,29 @@ type Fold = { open: boolean; onToggle: (v: boolean) => void };
 /** The ask itself: the "Decision (default yes):" style label a decision's title carries is left to the opened item. */
 export const askOf = (rest: string): string => { const t = plainDetail(rest) || rest; return t.replace(/^decision\s*(\([^)]*\))?\s*[:\-–—]\s*/i, "").trim() || t; };
 
-/** Why it is Aaron's, when the title and next step don't say: waiting on him. */
-const isWaitingOnYou = (t: Task) => t.kind !== "decision" && isMe(t.waitingOn);
-
 const openLink = (e: React.MouseEvent, url: string) => { e.preventDefault(); void invoke("open_link", { url }).catch(() => {}); };
 
 /** A task's next step, in full: wraps up to 6 lines, then "More" opens the rest in place. Links read as their domain and stay clickable; note ids read as the note's title. */
-export function NextText({ text, onNote }: { text: string; onNote?: (ref: string) => void }) {
+export function NextText({ text, onNote, lines, open: openProp, onOpen, onClamp }: { text: string; onNote?: (ref: string) => void; lines?: number; open?: boolean; onOpen?: (v: boolean) => void; onClamp?: (v: boolean) => void }) {
   const ref = useRef<HTMLParagraphElement>(null);
-  const [open, setOpen] = useState(false);
+  const [openOwn, setOpenOwn] = useState(false);
+  const open = openProp ?? openOwn;
+  const setOpen = onOpen ?? setOpenOwn;
   const [clamped, setClamped] = useState(false);
   useLayoutEffect(() => {
     const el = ref.current; if (!el) return;
-    const measure = () => { if (!open) setClamped(el.scrollHeight > el.clientHeight + 1); };
+    const measure = () => { if (!open) { const c = el.scrollHeight > el.clientHeight + 1; setClamped(c); onClamp?.(c); } };
     measure();
     const ro = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
     ro?.observe(el);
     return () => ro?.disconnect();
-  }, [text, open]);
+  }, [text, open, lines]);
+  if (lines !== undefined && lines <= 0 && !open) return null;
   return <div className="cp-next-wrap">
-    <p ref={ref} className={`cp-next ${open ? "open" : ""}`}>{splitLinks(cleanText(text)).map((p, i) => "url" in p
+    <p ref={ref} className={`cp-next ${open ? "open" : ""}`} style={!open && lines !== undefined ? { WebkitLineClamp: lines, lineClamp: lines } as React.CSSProperties : undefined}>{splitLinks(cleanText(text)).map((p, i) => "url" in p
       ? <a key={i} className="cp-link" href={p.url} title={p.url} rel="noreferrer noopener" onClick={(e) => openLink(e, p.url)}>{p.label}</a>
       : <RefText key={i} text={p.text} onNote={onNote} />)}</p>
-    {(clamped || open) && <button type="button" className="cp-more-next" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? "Less" : "More"}</button>}
+    {!onOpen && (clamped || open) && <button type="button" className="cp-more-next" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? "Less" : "More"}</button>}
   </div>;
 }
 
@@ -83,38 +82,104 @@ function Stands({ text, ago }: { text: string; ago: string }) {
   return <p className={`cp-lede ${full ? "full" : ""}`} title={full ? undefined : text} onClick={() => setFull((f) => !f)}><span className="cp-stands">{text}</span>{ago && <small className="cp-ago">{ago}</small>}</p>;
 }
 
-function Body({ stands, ready, needs, runs, nodeName, onTask, onDecide, onEverything, onNote }: Props) {
+/** A Needs-you row: at most three lines of text (the ask, then when it was due, then the next step), action first; a tap on More shows all of it. */
+function NeedRow({ t, onTask, onDecide, onNote }: { t: Task; onTask: (t: Task) => void; onDecide: (t: Task, option: string) => void; onNote?: (ref: string) => void }) {
+  const { id, rest: full } = splitTitle(cleanText(t.title));
+  const isDecision = t.kind === "decision";
+  const next = t.next.trim();
+  const due = dueLine(t.due);
+  const ask = rowAsk(askOf(full), t.ask, isDecision, !!next);
+  const text = ask.text || "Open to see what's needed";
+  const opts = isDecision && !ask.openToDecide ? t.options : [];
+  const yesno = isDecision && !ask.openToDecide && t.options.length === 0;
+  const titleRef = useRef<HTMLSpanElement>(null);
+  const [open, setOpen] = useState(false);
+  const [titleLines, setTitleLines] = useState(1);
+  const [titleCut, setTitleCut] = useState(false);
+  const [nextCut, setNextCut] = useState(false);
+  const titleMax = next || due ? 2 : 3;
+  useLayoutEffect(() => {
+    const el = titleRef.current; if (!el) return;
+    const measure = () => {
+      const lh = parseFloat(getComputedStyle(el).lineHeight) || 20;
+      setTitleLines(Math.max(1, Math.round(el.clientHeight / lh)));
+      if (!open) setTitleCut(el.scrollHeight > el.clientHeight + 1);
+    };
+    measure();
+    const ro = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    ro?.observe(el);
+    return () => ro?.disconnect();
+  }, [text, open, titleMax]);
+  const nextLines = lineBudget(Math.min(titleLines, titleMax), !!due).next;
+  const more = open || titleCut || nextCut || (!!next && nextLines <= 0);
+  const clampStyle = open ? undefined : ({ WebkitLineClamp: titleMax, lineClamp: titleMax } as React.CSSProperties);
+  return <li className="cp-item" data-open={open ? "true" : undefined}>
+    <button type="button" className={`cp-need${isDecision ? " decision" : ""}`} data-id={id ?? undefined} onClick={() => onTask(t)}>
+      <span ref={titleRef} className="cp-title" style={clampStyle}><RefText text={text} />{ask.openToDecide && <span className="cp-go" aria-hidden="true"> ›</span>}</span>
+      {due && <small className={`cp-detail${isOverdue(t.due) ? " overdue" : ""}`}>{due}</small>}</button>
+    {!next && !isDecision && !actionableTitle(text) && text !== "Open to see what's needed" && <p className="cp-open-to-see">Open to see what's needed</p>}
+    {next && <NextText text={next} onNote={onNote} lines={open ? undefined : nextLines} open={open} onOpen={setOpen} onClamp={setNextCut} />}
+    {more && <button type="button" className="cp-more-next cp-row-more" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? "Less" : "More"}</button>}
+    {yesno && <div className="cp-opts cp-yesno" role="group" aria-label={`Decide: ${text}`}>
+      <span className="cp-call">Your call</span>
+      <button type="button" className="cp-opt" onClick={() => onDecide(t, "yes")}>Yes</button>
+      <button type="button" className="cp-opt" onClick={() => onDecide(t, "no")}>No</button>
+    </div>}
+    {opts.length > 0 && <div className="cp-opts" role="group" aria-label={`Decide: ${text}`}>
+      {opts.slice(0, OPTS_SHOWN).map((o) => <button key={o} type="button" className="cp-opt" onClick={() => onDecide(t, o)}>{cleanText(o)}</button>)}
+      {opts.length > OPTS_SHOWN && <button type="button" className="cp-opt more" onClick={() => onTask(t)}>More…</button>}
+    </div>}
+  </li>;
+}
+
+/**
+ * Only whole rows are shown: in the side panel (`fit`) the rows that don't fit above the footer wait behind "+N more ›" rather than being
+ * cut or faded at the panel's bottom. Every row is drawn once to be measured (before paint), then the ones that fit stay.
+ */
+function NeedsList({ needs, fit, onTask, onDecide, onNote }: Pick<Props, "needs" | "onTask" | "onDecide" | "onNote"> & { fit: boolean }) {
+  const [limit, setLimit] = useState(Infinity);
+  const [measuring, setMeasuring] = useState(fit);
+  const [all, setAll] = useState(false);
+  const [size, setSize] = useState("");
+  const listRef = useRef<HTMLUListElement>(null);
+  const key = needs.map((t) => `${t.id}\n${t.ask ?? ""}\n${t.next}`).join("\u0000");
+  useLayoutEffect(() => {
+    const scroller = listRef.current?.closest(".cp.side") as HTMLElement | null;
+    if (!fit || !scroller) return;
+    const ro = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => setSize(`${scroller.clientWidth}x${scroller.clientHeight}`));
+    ro?.observe(scroller);
+    setSize(`${scroller.clientWidth}x${scroller.clientHeight}`);
+    return () => ro?.disconnect();
+  }, [fit]);
+  useLayoutEffect(() => { if (fit) { setAll(false); setLimit(Infinity); setMeasuring(true); } }, [fit, key, size]);
+  useLayoutEffect(() => {
+    if (!fit || !measuring) return;
+    const list = listRef.current; const scroller = list?.closest(".cp.side") as HTMLElement | null; const body = list?.closest(".cp-body") as HTMLElement | null;
+    if (!list || !scroller || !body) { setMeasuring(false); return; }
+    const rows = [...list.children] as HTMLElement[];
+    // room for the list = the panel minus everything that is not the list (heading, sentence, runs, footer) minus the "+N more" line
+    const budget = scroller.clientHeight - (body.scrollHeight - list.offsetHeight) - 40;
+    let used = 0; let n = 0;
+    for (const r of rows) { if (n > 0 && used + r.offsetHeight > budget) break; used += r.offsetHeight; n++; }
+    setLimit(n >= rows.length ? Infinity : n);
+    setMeasuring(false);
+  }, [measuring, fit]);
+  const shown = fit && !measuring && !all ? needs.slice(0, limit) : needs;
+  const hidden = needs.length - shown.length;
+  return <>
+    <ul ref={listRef} className="cp-list">{shown.map((t) => <NeedRow key={t.id} t={t} onTask={onTask} onDecide={onDecide} onNote={onNote} />)}</ul>
+    {hidden > 0 && <button type="button" className="cp-more cp-more-rows" onClick={() => setAll(true)}>+{hidden} more ›</button>}
+  </>;
+}
+
+function Body({ stands, ready, needs, runs, nodeName, onTask, onDecide, onEverything, onNote, fit }: Props & { fit: boolean }) {
   const active = runs.filter(isActiveRun);
   const hiddenRuns = Math.max(0, active.length - RUNS_SHOWN);
   return <div className="cp-body">
     {!ready ? <p className="cp-lede">Loading…</p> : stands && <Stands text={stands.text} ago={stands.ago} />}
     {ready && <section aria-label="Needs you" className="cp-sec">
       <h3 className="cp-h">Needs you</h3>
-      {needs.length === 0 ? <p className="cp-none">Nothing needs you here.</p>
-      : <ul className="cp-list">{needs.map((t) => {
-        const { id, rest: full } = splitTitle(cleanText(t.title));
-        const rest = isCutTitle(full) && t.ask ? t.ask : askOf(full);
-        const isDecision = t.kind === "decision";
-        const meta = [isWaitingOnYou(t) ? "Waiting on you" : null, dueLine(t.due)].filter(Boolean).join(" · ");
-        const next = t.next.trim();
-        const opts = isDecision ? t.options : [];
-        return <li key={t.id} className="cp-item">
-          <button type="button" className={`cp-need${isDecision ? " decision" : ""}`} data-id={id ?? undefined} onClick={() => onTask(t)}>
-            <span className="cp-title"><RefText text={rest} />{isDecision && opts.length === 0 && <span className="cp-go" aria-hidden="true"> ›</span>}</span>{meta && <small className="cp-detail">{meta}</small>}</button>
-          {next ? <NextText text={next} onNote={onNote} /> : !isDecision && !actionableTitle(rest) && <p className="cp-open-to-see">Open to see what's needed</p>}
-          {isDecision && opts.length === 0 && <div className="cp-yesno">
-            <p className="cp-call">Your call: yes or no</p>
-            <div className="cp-opts" role="group" aria-label={`Decide: ${rest}`}>
-              <button type="button" className="cp-opt" onClick={() => onDecide(t, "yes")}>Yes</button>
-              <button type="button" className="cp-opt" onClick={() => onDecide(t, "no")}>No</button>
-            </div>
-          </div>}
-          {isDecision && opts.length > 0 && <div className="cp-opts" role="group" aria-label={`Decide: ${rest}`}>
-            {opts.slice(0, OPTS_SHOWN).map((o) => <button key={o} type="button" className="cp-opt" onClick={() => onDecide(t, o)}>{cleanText(o)}</button>)}
-            {opts.length > OPTS_SHOWN && <button type="button" className="cp-opt more" onClick={() => onTask(t)}>More…</button>}
-          </div>}
-        </li>;
-      })}</ul>}
+      {needs.length === 0 ? <p className="cp-none">Nothing needs you here.</p> : <NeedsList needs={needs} fit={fit} onTask={onTask} onDecide={onDecide} onNote={onNote} />}
     </section>}
     {active.length > 0 && <section aria-label="Running" className="cp-sec">
       <h3 className="cp-h">Running</h3>
@@ -130,7 +195,7 @@ export function CompanionSide({ open, onToggle, ...p }: Props & Fold) {
     {open
       ? <>
         <button type="button" className="cp-top" aria-expanded="true" aria-label="Hide where this stands" title="Hide where this stands" onClick={() => onToggle(false)}><span>Where this stands</span><span className="cp-fold" aria-hidden="true">›</span></button>
-        <Body {...p} />
+        <Body {...p} fit />
       </>
       : <button type="button" className="cp-unfold" aria-expanded="false" aria-label="Show where this stands" title="Show where this stands" onClick={() => onToggle(true)}>
         <span aria-hidden="true">‹</span>{p.needs.length > 0 && <i className="cp-dot" role="img" aria-label="Needs you" title="Needs you" />}</button>}
@@ -145,6 +210,6 @@ export function CompanionStrip({ open, onToggle, ...p }: Props & Fold) {
       {p.needs.length > 0 && <i className="cp-dot" role="img" aria-label="Needs you" title="Needs you" />}
       <span className="cp-chev" aria-hidden="true">{open ? "⌃" : "⌄"}</span>
     </button>
-    {open && <Body {...p} />}
+    {open && <Body {...p} fit={false} />}
   </section>;
 }

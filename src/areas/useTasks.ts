@@ -5,6 +5,7 @@ import { shouldReload } from "./pathCache";
 import { useVaultProfile } from "./ProfileContext";
 import { parseDrafts, parseRuns } from "./steerCore";
 import { activeProfile } from "./profile";
+import { warmTitles } from "./noteRefs";
 
 export type TaskAction = "done" | "archive" | "snooze";
 export type Undo = { id: string; label: string; run: () => Promise<void> };
@@ -77,6 +78,7 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
       if (drafts) { mem.drafts = drafts; setRawDrafts(drafts); }
       mem.tasks.set(nodePath, { list: r.tasks, truncated: r.truncated });
       setList(r.tasks); setTruncated(r.truncated); setError(null);
+      warmTitles(r.tasks.flatMap((t) => [t.title, t.next]));
       // a cut title's full question arrives a moment later, without holding the list back
       void vaultTasks.loadAsks(r.tasks).then((asks) => {
         if (!asks.size || !live || mine !== epoch.current || memory !== mem) return;

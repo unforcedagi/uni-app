@@ -83,6 +83,12 @@ export function RoomTree({ chat = true, rows, needs, onOpen, selected }: {
   })}</ul></nav>;
 }
 
+/** Recent places: never the one you are in, never one twice (by name: the same name is the same place to the reader), at most five. */
+export function recentShown<T extends { title: string }>(recent: readonly T[], here?: string | null, max = 5): T[] {
+  const seen = new Set<string>(here ? [here.trim().toLowerCase()] : []);
+  return recent.filter((r) => { const k = r.title.trim().toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; }).slice(0, max);
+}
+
 const NavButtons = ({ nav }: { nav: NavControls | null }) => nav ? <>
   <button type="button" className="th-nb" aria-label="Back" title="Back (Alt+←)" disabled={!nav.canBack} onClick={nav.back}>←</button>
   <button type="button" className="th-nb" aria-label="Forward" title="Forward (Alt+→)" disabled={!nav.canForward} onClick={nav.forward}>→</button>
@@ -106,8 +112,8 @@ export function TreeScreen({ chat = true, rows, needs, onOpen, status, selected,
       : <header className="th-treehead"><h1 className="note-title">Uni</h1></header>}
     {status}
     <div className="th-rows-wrap"><RoomTree chat={chat} rows={rows} needs={needs} onOpen={onOpen} selected={selected} /></div>
-    {column && !!nav?.recent.length && <section className="th-recent" aria-label="Recent"><h2>Recent</h2>
-      <ul>{nav.recent.map((r) => <li key={r.key}><button type="button" onClick={r.go} title={r.title}>{r.title}</button></li>)}</ul></section>}
+    {column && nav && <section className="th-recent" aria-label="Recent"><h2>Recent</h2>
+      <ul>{recentShown(nav.recent, rows.find((r) => r.path === selected)?.name).map((r) => <li key={r.key}><button type="button" onClick={r.go} title={r.title}>{r.title}</button></li>)}</ul></section>}
   </div>;
 }
 

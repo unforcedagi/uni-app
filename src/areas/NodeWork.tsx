@@ -8,6 +8,7 @@ import type { TaskAction, Undo } from "./useTasks";
 import { activeProfile, type VaultProfile } from "./profile";
 import type { Mark } from "./steerCore";
 import { Changed } from "./Changed";
+import { stateLine } from "./simpleCore";
 
 const SHOW = 8;
 const HOLD_MS = 220;
@@ -192,8 +193,8 @@ export function TaskSheet({ task, here, nodeName, room, onClose, onAct, onOpenRo
       <h2 id="task-sheet-title">{cleanText(task.title)}</h2>
       {task.next && <p className="task-next">{cleanText(task.next)}</p>}
       <dl className="task-facts">
-        <dt>Owner</dt><dd>{OWNER(task.owner)}</dd>
-        <dt>State</dt><dd>{task.state}{task.waitingOn ? `, waiting on ${task.waitingOn}` : ""}</dd>
+        <dt>Status</dt><dd>{stateLine(task, (w) => isMe(w), OWNER)}</dd>
+        {!isMe(task.owner) && !isMe(task.waitingOn) && <><dt>With</dt><dd>{OWNER(task.owner)}</dd></>}
         {task.due && <><dt>Due</dt><dd>{task.due}</dd></>}
       </dl>
       {(by || via) && <p className="task-by">Changed by {by ?? "unknown"}{via ? ` via ${via}` : ""}</p>}

@@ -1661,7 +1661,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const navControls: NavControls = {
     canBack: histCanBack(hist) || notes.length > 0, canForward: histCanForward(hist),
     back: () => goHistory(-1), forward: () => goHistory(1),
-    recent: histRecent(hist).map((t) => ({ key: `${t.kind}:${t.path ?? t.channel ?? ""}`, title: t.title, go: () => openTarget(t, "focus") })),
+    recent: histRecent(hist).filter((t) => !active || t.title.trim().toLowerCase() !== active.title.trim().toLowerCase()).map((t) => ({ key: `${t.kind}:${t.path ?? t.channel ?? ""}`, title: t.title, go: () => openTarget(t, "focus") })),
   };
   const recordingTab = recordingOrigin.current;
   const pill = recordingTab && recorder.busy ? { title: recordingTab.title, elapsed: recorder.elapsed, tabId: recordingTab.tabId, stop: recorder.stop, phase: recorder.phase } :
