@@ -45,11 +45,30 @@ export type RoomView = {
   heldNode: string | null;
 };
 
+/** Whether a node beneath `path` names `roomId` as its own room. */
+function claimedBelow(tree: Tree, path: string, roomId: string, rooms: readonly RoomRef[]): boolean {
+  const stack = [...(tree.children.get(path) ?? [])]; const seen = new Set<string>();
+  while (stack.length) {
+    const n = stack.pop()!;
+    if (seen.has(n.path)) continue;
+    seen.add(n.path);
+    if (ownRoom(roomNodeOf(n), rooms)?.id === roomId) return true;
+    stack.push(...(tree.children.get(n.path) ?? []));
+  }
+  return false;
+}
+
 /** `rooms`: every known room; `uni`: the Uni room. A node with a live room of its own that an ancestor also uses is held by that ancestor. */
 export function roomView(tree: Tree, path: string, rooms: readonly RoomRef[], uni: RoomRef | null): RoomView {
   if (path === ROOT) return { target: uni, slash: uni ? roomSlug(uni.name) : null, heldBy: null, own: !!uni, heldNode: null };
   const chain = ancestry(tree, path);
   const nodes = chain.map(roomNodeOf);
+  // A room belongs to the deepest node that names it: when a descendant claims the very room an ancestor's channel points at (Boulder -> #cohere),
+  // the ancestor keeps only the room its own `room` name finds, else none.
+  if (nodes[0]) {
+    const channelRoom = ownRoom(nodes[0], rooms);
+    if (channelRoom && claimedBelow(tree, path, channelRoom.id, rooms)) nodes[0] = { ...nodes[0], channels: [] };
+  }
   const s = steward(nodes, rooms, uni);
   const mine = chain[0] ? ownRoom(nodes[0], rooms) : null;
   const sharedWithAncestor = mine ? nodes.slice(1).some((n) => ownRoom(n, rooms)?.id === mine.id) : false;
