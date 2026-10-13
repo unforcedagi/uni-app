@@ -13,7 +13,7 @@ const panel = (page: Page) => page.locator('.th-panel');
 // T-122: the counts sit in the page header, Needs you and Moved this week in its left column: `where` is the whole state page
 const where = (page: Page) => panel(page).locator('.th-scroll');
 const base = { briefs: true, tree: true, tasks: true, boulder: true, underBoulder: true, ricki: true, pinned: true, privateTasks: true } as const;
-const boot = (page: Page, o: Parameters<typeof bootAreas>[2] = {}) => bootAreas(page, 'seed', { ...base, layout: 'rooms', ...o });
+const boot = (page: Page, o: Parameters<typeof bootAreas>[2] = {}) => bootAreas(page, 'seed', { ...base, ...o });
 const shot = async (page: Page, name: string) => {
   await mkdir(SHOTS, { recursive: true });
   const s = page.viewportSize()!;
@@ -215,20 +215,6 @@ test.describe('rooms nav', () => {
     await expect(where(page).getByRole('region', { name: 'Moved this week' })).toContainText(/1 changed, the last \d+[dh] ago\. Counted, not named\./);
     await expect(panel(page).locator('.sp-left')).not.toContainText(/Sit twenty|Find a teacher/);
     await shot(page, 'private');
-  });
-
-  test('Rooms is the default when nothing was chosen; Map, Octopus and Classic stay in Settings', async ({ page }) => {
-    await boot(page, { layout: 'unset' });
-    await expect(page.locator(wide(page) ? '.th-roomnav' : '.th-phone-tree')).toBeVisible();
-    await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Settings', exact: true }).click();
-    await expect(page.getByRole('radio', { name: /^Rooms/ })).toBeChecked();
-    for (const l of ['Map', 'Octopus', 'Classic']) await expect(page.getByRole('radio', { name: new RegExp(`^${l}`) })).toBeVisible();
-    // an earlier explicit choice of the Map stands
-    await page.getByRole('radio', { name: /^Map/ }).check();
-    expect(await page.evaluate(() => localStorage.getItem('uni.home.layout.v1'))).toBe('tree');
-    await page.reload();
-    if (wide(page)) await expect(page.locator('.th-stage .node-stage').first()).toBeVisible();
-    await expect(page.locator('.th-roomnav')).toHaveCount(0);
   });
 
   test('chat.provider null: the tree, Where we are and the priority control work with no room or Buzz surface', async ({ page }) => {

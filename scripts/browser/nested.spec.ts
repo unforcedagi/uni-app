@@ -13,7 +13,7 @@ const shot = async (page: Page, name: string) => {
   const s = page.viewportSize()!;
   await page.screenshot({ path: `${SHOTS}/${name}-${s.width}x${s.height}.png` });
 };
-const boot = (page: Page) => bootAreas(page, 'seed', { briefs: true, tree: true, tasks: true, atlas: true, pinned: true, layout: 'rooms' });
+const boot = (page: Page) => bootAreas(page, 'seed', { briefs: true, tree: true, tasks: true, atlas: true, pinned: true });
 
 test.describe('nested rooms', () => {
   test('the tree names the project rooms under atlas without doubling, and the Open action opens that room', async ({ page }) => {

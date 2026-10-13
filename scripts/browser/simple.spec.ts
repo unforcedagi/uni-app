@@ -22,7 +22,7 @@ const shot = async (page: Page, name: string) => {
   }
   await page.emulateMedia({ colorScheme: 'light' });
 };
-const base = { briefs: true, tree: true, tasks: true, atlas: true, steer: true, pinned: true, layout: 'rooms' } as const;
+const base = { briefs: true, tree: true, tasks: true, atlas: true, steer: true, pinned: true } as const;
 const boot = (page: Page, extra: Parameters<typeof bootAreas>[2] = {}) => bootAreas(page, 'seed', { ...base, ...extra });
 const scope = (page: Page) => (wide(page) ? page.locator('.th-roomnav') : page.locator('.th-phone-tree'));
 /** Open a room from the rooms list (phone: back to the list first when a room is open). */
@@ -358,24 +358,33 @@ test.describe('simple', () => {
     }
   });
 
-  test('nothing under a message; its actions are in a ⋯ menu', async ({ page }) => {
+  test('nothing under a message; its ⋯ holds only Copy (and Edit and Delete on your own); no reactions are made from the app', async ({ page }) => {
     await boot(page);
     await openRoom(page, 'ATLAS');
     const first = page.locator('.sr-chat .message').first();
     await expect(page.locator('.sr-chat .message-actions')).toHaveCount(0);
-    await expect(page.getByRole('button', { name: /^(⤓ )?Keep/ })).toHaveCount(0);
-    await expect(page.getByRole('button', { name: /Ask Uni about|Copy .* message|Reply in thread/ })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /^(⤓ )?Keep|Ask Uni about|Reply in thread|React/ })).toHaveCount(0);
     // the ⋯ is on the message's edge and quiet (hidden until hover with a mouse)
     const more = first.getByRole('button', { name: /^More actions for/ });
     if (wide(page)) await expect(more).toHaveCSS('opacity', '0'); else expect(Number(await more.evaluate((e) => getComputedStyle(e).opacity))).toBeLessThan(0.6);
     await first.hover();
     await more.click();
-    const menu = page.getByRole('menu', { name: 'Message actions' });
+    const menu = page.getByRole('group', { name: 'Message actions' });
     await expect(menu).toBeVisible();
-    for (const n of [/React to/, /Keep .* as a note/, /Ask Uni about/, /Copy .* as markdown/, /Reply in thread to/]) await expect(menu.getByRole('menuitem', { name: n })).toBeVisible();
+    // Aaron's own message (the first one): Copy, Edit, Delete and nothing else; no menu roles that promise arrow keys
+    await expect(menu.getByRole('button')).toHaveText(['Copy', 'Edit', /Delete/]);
+    await expect(page.getByRole('menuitem')).toHaveCount(0);
     await shot(page, 'menu');
     await page.keyboard.press('Escape');
     await expect(menu).toHaveCount(0);
+    // someone else's message: Copy only
+    const theirs = page.locator('.sr-chat .message').nth(1);
+    await theirs.hover();
+    await theirs.getByRole('button', { name: /^More actions for/ }).click();
+    await expect(page.getByRole('group', { name: 'Message actions' }).getByRole('button')).toHaveText(['Copy']);
+    await page.keyboard.press('Escape');
+    // a right-click is the browser's own: no quick-reaction bar
+    if (wide(page)) { await first.click({ button: 'right' }); await expect(page.locator('.quick-react')).toHaveCount(0); await page.keyboard.press('Escape'); }
     expect(await fits(page)).toBe(true);
   });
 
@@ -461,7 +470,7 @@ test.describe('simple', () => {
     await shot(page, 'rooms');
   });
 
-  test('one look: the journal, settings and a room opened from the drawer read as the same app (shots, light and dark)', async ({ page }) => {
+  test('one look: the journal, settings and a room read as the same app; Settings has no layout picker (shots, light and dark)', async ({ page }) => {
     await boot(page);
     const rail = page.getByRole('navigation', { name: 'Main navigation' });
     await rail.getByRole('button', { name: 'Journal' }).click();
@@ -469,12 +478,13 @@ test.describe('simple', () => {
     await shot(page, 'journal');
     await rail.getByRole('button', { name: 'Settings' }).click();
     await expect(page.locator('.settings')).toBeVisible();
+    // r12: one layout. No Home layout picker, no Map, Octopus or Classic anywhere
+    await expect(page.locator('.settings')).not.toContainText(/Home layout|Octopus|Classic|Map \(/);
+    await expect(page.getByRole('radio')).toHaveCount(0);
     await shot(page, 'settings');
     if (await page.locator('.panel-close').count()) await page.locator('.panel-close').first().click();
-    await rail.getByRole('button', { name: 'Rooms' }).click();
-    await page.locator('.rooms nav .room', { has: page.locator('strong', { hasText: /^ATLAS$/ }) }).click();
-    // from the drawer, a node's room opens as that node: the same view as from the tree
-    await expect(page.locator('.sr-title')).toHaveText('ATLAS');
+    await rail.getByRole('button', { name: 'Uni', exact: true }).click();
+    await openRoom(page, 'ATLAS');
     await expect(page.locator('.sr-door')).toHaveText('#atlas/build');
     await expect(page.locator('.message').first()).toBeVisible();
     await shot(page, 'plain-room');
@@ -542,20 +552,15 @@ test.describe('simple', () => {
     await expect.poll(atEnd).toBeLessThan(6);
   });
 
-  test('the rooms drawer uses the tree\'s names; sync and sign-in status live in Settings', async ({ page }) => {
+  test('r12: no rooms drawer: the rail has no Rooms, the tree is the only list of rooms; sync and sign-in status live in Settings', async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'no-preference' });
     await boot(page);
     const rail = page.getByRole('navigation', { name: 'Main navigation' });
-    await rail.getByRole('button', { name: 'Rooms' }).click();
-    const drawer = page.locator('aside.rooms');
-    await expect(drawer.locator('nav .room strong', { hasText: 'Learn Vibe Build' })).toBeVisible();
-    await expect(drawer.locator('nav .room strong', { hasText: /^teach$/ })).toHaveCount(0);
-    await expect(drawer.locator('nav .room strong', { hasText: /^ATLAS$/ })).toBeVisible();
-    await expect(drawer.locator('.connection, .identity')).toHaveCount(0);
-    // no slide: the drawer and the conversation do not animate
-    await expect(drawer).toHaveCSS('animation-name', 'none');
+    await expect(rail.getByRole('button', { name: 'Rooms' })).toHaveCount(0);
+    // every place the rail offers, on a phone too (Vault and Search are on the rail now that Rooms is gone)
+    for (const n of ['Uni', 'Journal', 'Vault', 'Search', 'Settings']) await expect(rail.getByRole('button', { name: n, exact: true })).toBeVisible();
+    await expect(page.locator('aside.rooms .room-text small')).toHaveCount(0); // no avatar list with previews
     await expect(page.locator('section.conversation')).toHaveCSS('animation-name', 'none');
-    if (!wide(page)) await page.locator('.panel-close').first().click();
     await rail.getByRole('button', { name: 'Settings' }).click();
     await expect(page.locator('.settings .connection')).toBeVisible();
     await expect(page.locator('.settings .identity')).toBeVisible();
@@ -573,7 +578,6 @@ test.describe('simple', () => {
   });
 
   // ---------------------------------------------------------------------------------------------- r7: one model, one navigation
-  const roomsDrawer = (page: Page) => page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Rooms' });
 
   test('r7: no tab strip anywhere; the tree is the navigation', async ({ page }) => {
     await boot(page);
@@ -584,16 +588,15 @@ test.describe('simple', () => {
     await expect(page.locator('.tab-strip, .tab-chip, [role="tablist"]')).toHaveCount(0);
   });
 
-  test('r7: a room reads the same from the tree and from the rooms list (one view per room)', async ({ page }) => {
-    test.skip(!wide(page), 'rooms list drawer');
+  test('r7: a room reads the same from the tree and from Recent (one view per room)', async ({ page }) => {
+    test.skip(!wide(page), 'sidebar column');
     await boot(page);
     const view = async () => ({ title: await page.locator('.sr-title').textContent(), door: await page.locator('.sr-door').textContent(), crumbs: await page.locator('.sr .th-crumbs').textContent(),
       placeholder: await page.locator('.sr-chat').getByRole('textbox', { name: /^Message / }).getAttribute('placeholder'), companion: await page.locator('.cp.side').count(), conversation: await page.locator('.conversation-header').count() });
     await openRoom(page, 'ATLAS');
     const fromTree = await view();
     await openRoom(page, 'Learn Vibe Build');
-    await roomsDrawer(page).click();
-    await page.locator('.rooms nav .room', { has: page.locator('strong', { hasText: /^ATLAS$/ }) }).click();
+    await page.locator('.th-roomnav').getByRole('region', { name: 'Recent' }).getByRole('button', { name: /^ATLAS/ }).click();
     await expect(page.locator('.sr-title')).toHaveText('ATLAS');
     expect(await view()).toEqual(fromTree);
     expect(fromTree.conversation).toBe(0);
@@ -1072,5 +1075,70 @@ test.describe('simple', () => {
     expect(more.y + more.height).toBeLessThanOrEqual(foot.y + 1);
     const panel = (await page.locator('aside.cp.side').boundingBox())!;
     for (const row of await page.locator('.cp-item').all()) { const b = (await row.boundingBox())!; expect(b.y + b.height).toBeLessThanOrEqual(foot.y + 1); expect(b.y + b.height).toBeLessThanOrEqual(panel.y + panel.height); }
+  });
+
+  // ---------------------------------------------------------------------------------------------- r12: one app
+  test('r12: a saved Map, Octopus or Classic choice opens the room layout, and the setting is dropped', async ({ page }) => {
+    await boot(page, { savedLayout: 'tree' });
+    await expect(scope(page)).toBeVisible();
+    await expect(page.locator('.node-stage, .th-stage, .th-classic')).toHaveCount(0);
+    expect(await page.evaluate(() => localStorage.getItem('uni.home.layout.v1'))).toBeNull();
+    await openRoom(page, 'ATLAS');
+    await expect(page.locator('[data-view="room"] .sr-chat .message').first()).toBeVisible();
+    await page.reload();
+    await expect(scope(page).or(page.locator('.sr-title')).first()).toBeVisible();
+    expect(await page.evaluate(() => localStorage.getItem('uni.home.layout.v1'))).toBeNull();
+  });
+
+  test('r12: a room no node owns is under "Other rooms" (folded) and opens in the same room shell', async ({ page }) => {
+    await boot(page, { strayRoom: true });
+    const nav = scope(page);
+    await nav.locator('.th-row.d1').first().waitFor();
+    const group = nav.locator('.th-others');
+    await expect(group).toBeVisible();
+    await expect(group.locator('.th-fold')).toHaveAttribute('aria-expanded', 'false');
+    // the rooms the tree already shows (Techne, atlas/build, …) are not repeated; only the unfiled one is listed
+    await group.locator('.th-fold').click();
+    await expect(nav.locator('.th-other .th-go')).toHaveText(['#garden-club']);
+    await nav.locator('.th-other .th-go').click();
+    // the room shell: header, the conversation with its composer, and the companion saying it is not filed
+    await expect(page.locator('.sr-title')).toHaveText('#garden-club');
+    await expect(page.locator('.sr-chat')).toContainText('Seed order is in for the spring beds.');
+    await expect(page.locator('.sr-chat').getByRole('textbox', { name: /^Message / })).toBeVisible();
+    await expect(page.locator('.conversation-header')).toHaveCount(0);
+    await openCompanion(page);
+    await expect(companion(page)).toContainText('Not filed under an area yet.');
+    await expect(companion(page).getByRole('button', { name: /^All of/ })).toHaveCount(0);
+    if (wide(page)) await expect(nav.locator('.th-other.sel .th-go')).toHaveAttribute('aria-current', 'page');
+    // Aaron folds it; reopening the room from Recent shows it again for now, and leaving folds it back (like an area)
+    if (wide(page)) {
+      await nav.locator('.th-others .th-fold').click();
+      await expect(nav.locator('.th-other')).toHaveCount(0);
+      await nav.locator('.th-go[aria-label^="Uni,"]').click();
+      await nav.getByRole('region', { name: 'Recent' }).getByRole('button', { name: /garden-club/ }).click();
+      await expect(nav.locator('.th-other.sel')).toBeVisible();
+      await nav.locator('.th-go[aria-label^="Uni,"]').click();
+      await expect(nav.locator('.th-other')).toHaveCount(0);
+    }
+    expect(await fits(page)).toBe(true);
+    await shot(page, 'other-room');
+  });
+
+  test('r12: a thread opens inside its room\'s shell, with the way back', async ({ page }) => {
+    await boot(page, { thread: true });
+    await openRoom(page, 'ATLAS');
+    await page.locator('.sr-chat .thread-summary').first().click();
+    const shell = page.locator('[data-view="thread"]');
+    await expect(shell).toBeVisible();
+    await expect(page.locator('.sr-title')).toHaveText('ATLAS');
+    await expect(page.locator('.sr-thread')).toContainText('Thread · 2 replies');
+    await expect(page.locator('.sr-chat')).toContainText('The scope section is done; pricing is next.');
+    await expect(page.locator('.sr-chat').getByRole('textbox')).toHaveAttribute('placeholder', 'Reply in thread…');
+    await expect(page.locator('.conversation-header')).toHaveCount(0);
+    if (wide(page)) { await expect(page.locator('.cp.side')).toBeVisible(); await expect(scope(page).locator('.th-row.sel .th-go')).toHaveAttribute('aria-label', /^ATLAS,/); }
+    await page.getByRole('button', { name: 'Back to the room' }).click();
+    await expect(page.locator('[data-view="room"]')).toBeVisible();
+    await expect(page.locator('.sr-chat')).toContainText('Map labels are in a branch');
+    expect(await fits(page)).toBe(true);
   });
 });

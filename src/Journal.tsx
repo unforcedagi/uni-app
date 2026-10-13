@@ -164,7 +164,7 @@ export default function Journal({ rooms, uniRoomId, onShare, onBack, onRecording
 
   return <>
     <header className="conversation-header">
-      <button className="back icon-button" onClick={onBack} aria-label="Back to conversations">‹</button>
+      <button className="back icon-button" onClick={onBack} aria-label="Back to Uni">‹</button>
       <div><strong>Journal</strong><small>{cfg ? `Private · saved to vault ${cfg.vault} with your key` : "Private · your vault"}</small></div>
       <button className="icon-button" onClick={() => setSettings(!settings)} aria-label="Journal settings" aria-expanded={settings}><SettingsIcon /></button>
       <button className="icon-button" onClick={() => { void load(false); void invoke<FlushReport>("journal_flush").then((r) => afterFlush(r, "Synced")).catch((e) => setError(String(e))); }} disabled={loading} aria-label="Refresh journal">↻</button>

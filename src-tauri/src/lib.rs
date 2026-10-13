@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tauri::{Emitter, Manager};
 use uni_core::{
-    remove_reaction, send_message_with_media, send_reaction, sync_older, sync_once,
+    send_message_with_media, sync_older, sync_once,
     ConversationMessage, LiveConfig, LiveEvent, Store,
 };
 
@@ -891,31 +891,6 @@ async fn post_message(
     .map_err(|e| serde_json::from_str(&e).unwrap_or(serde_json::Value::String(e)))
 }
 
-/// Toggle a reaction: publish `emoji` on `target`, or, when `mine` names our
-/// existing reaction with that emoji, delete it (kind 5).
-#[tauri::command]
-async fn react(
-    app: tauri::AppHandle,
-    channel: String,
-    target: String,
-    emoji: String,
-    mine: Option<String>,
-) -> Result<(), String> {
-    relay_io(&app, move |url, keys, store| {
-        let ch = room_id(&channel)?;
-        tauri::async_runtime::block_on(async {
-            match mine {
-                Some(id) => remove_reaction(url, keys, None, store, &id).await,
-                None => send_reaction(url, keys, None, store, ch, &target, &emoji)
-                    .await
-                    .map(|_| ()),
-            }
-        })
-        .map_err(|e| e.to_string())
-    })
-    .await
-}
-
 /// Load one page of older history for `channel`. Returns new message count;
 /// 0 means the start of the room has been reached.
 #[tauri::command]
@@ -1785,7 +1760,6 @@ pub fn run() {
             live_start,
             send_typing,
             live_stop,
-            react,
             load_older,
             edit_message,
             delete_message,
