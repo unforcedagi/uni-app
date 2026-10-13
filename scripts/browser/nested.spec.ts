@@ -19,6 +19,7 @@ test.describe('nested rooms', () => {
   test('the tree names the project rooms under atlas without doubling, and the Open action opens that room', async ({ page }) => {
     await boot(page);
     const scope = wide(page) ? page.locator('.th-roomnav') : page.locator('.th-phone-tree');
+    for (let i = 0; i < 12; i++) { await scope.locator('.th-row.d1').first().waitFor(); const f = scope.locator('.th-fold[aria-expanded="false"]'); if (!await f.count()) break; await f.first().click(); }
     await expect(scope.locator('.th-go[aria-label^="Atlas,"]')).toContainText('atlas');
     await expect(scope.locator('.th-go[aria-label^="ATLAS,"]')).toContainText('atlas/build');
     await expect(scope.locator('.th-go[aria-label^="ATLAS,"]')).not.toContainText('atlas/atlas');

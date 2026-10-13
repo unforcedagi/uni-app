@@ -14,11 +14,19 @@ const panel = (page: Page) => page.locator('.th-panel');
 const boot = (page: Page, o: Parameters<typeof bootAreas>[2] = {}) => bootAreas(page, 'seed', { briefs: true, tree: true, tasks: true, boulder: true, underBoulder: true, ricki: true, pinned: true, layout: 'tree', ...o });
 
 /** Open a node by name from wherever we are: an arm of the map (wide), a row of the tree or a child in the panel (phone). */
+/** r7: areas start folded; open every fold so any row can be clicked. */
+async function unfoldTree(page: Page) {
+  const tree = page.locator('.th-roomnav, .th-phone-tree').first();
+  if (!await tree.count()) return;
+  await tree.locator('.th-row.d1').first().waitFor().catch(() => {});
+  for (let i = 0; i < 12; i++) { const f = tree.locator('.th-fold[aria-expanded="false"]'); if (!await f.count()) return; await f.first().click(); }
+}
 async function openNode(page: Page, name: string) {
   const arm = areaCard(page, name);
   if (wide(page) && await arm.count()) { await arm.click(); return; }
   const kid = page.locator(`.th-kid[data-name="${name}"]`);
   if (await kid.count()) { await kid.click(); return; }
+  await unfoldTree(page);
   await page.getByRole('button', { name: new RegExp(`^${name},`) }).first().click();
 }
 const here = async (page: Page, name: string) => {
@@ -58,12 +66,13 @@ test.describe('tree home', () => {
       await page.locator('.th-scroll').evaluate((e) => { e.scrollTop = 0; });
     } else {
       await expect(page.getByRole('heading', { name: 'Uni', level: 1 })).toBeVisible();
+      await unfoldTree(page);
       const rows = page.locator('.th-row');
       await expect(rows.first()).toContainText('Uni');
       // indented by depth: Boulder (area) < COhere 2026 (project) < nothing deeper here
       const x = async (n: string) => (await page.locator(`.th-go[aria-label^="${n},"] .th-name`).boundingBox())!.x;
       expect(await x('COhere 2026')).toBeGreaterThan(await x('Boulder'));
-      await expect(page.locator('.th-go[aria-label^="COhere 2026,"]')).toContainText('boulder/cohere');
+      await expect(page.locator('.th-go[aria-label^="COhere 2026,"]')).toContainText('cohere');
       await expect(page.locator('.th-go[aria-label^="Boulder Civic Calendar,"]')).not.toContainText('held by');
       await expect(page.locator('.th-go[aria-label^="Techne,"]')).toHaveAttribute('aria-label', /2 need you|need/);
       await expect(page.locator('.th-go[aria-label^="Techne,"] .th-dot')).toBeVisible();
@@ -81,12 +90,12 @@ test.describe('tree home', () => {
     await expect(panel(page).getByRole('region', { name: 'What is alive here' })).toContainText('council agenda is out');
     await expect(panel(page).locator('.th-door').first()).toHaveText('boulder');
     // rooms below: COhere's room posted within the day, shown as sap climbing the tree
-    await expect(panel(page).getByRole('region', { name: 'From the rooms below' })).toContainText('boulder/cohere');
+    await expect(panel(page).getByRole('region', { name: 'From the rooms below' })).toContainText('cohere');
     await expect(panel(page).getByRole('region', { name: 'From the rooms below' })).toContainText('Festival crew list needs a second pass');
     await shot(page, 'boulder');
     await openNode(page, 'COhere 2026');
     await here(page, 'COhere 2026');
-    await expect(panel(page).locator('.th-roomline .th-door')).toHaveText('boulder/cohere');
+    await expect(panel(page).locator('.th-roomline .th-door')).toHaveText('cohere');
     await expect(panel(page).getByRole('region', { name: 'What is alive here' })).toContainText('Venue is held for Oct 15');
     await expect(panel(page).getByRole('region', { name: 'Needs you' })).toContainText('Confirm the venue deposit');
     await expect(panel(page).locator('.work-head .brief-count')).toHaveText('4');

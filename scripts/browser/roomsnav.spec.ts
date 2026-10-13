@@ -32,7 +32,15 @@ async function full(page: Page) {
   await page.locator('.th-panel').waitFor();
 }
 /** Open a node by name: a row of the left column (wide), or a row of the room tree / a child in the panel (phone). */
+/** r7: areas start folded; open every fold so any row can be clicked. */
+async function unfoldTree(page: Page) {
+  const tree = page.locator('.th-roomnav, .th-phone-tree').first();
+  if (!await tree.count()) return;
+  await tree.locator('.th-row.d1').first().waitFor().catch(() => {});
+  for (let i = 0; i < 12; i++) { const f = tree.locator('.th-fold[aria-expanded="false"]'); if (!await f.count()) return; await f.first().click(); }
+}
 async function go(page: Page, name: string) {
+  await unfoldTree(page);
   const row = page.locator(`.th-go[aria-label="${name}"], .th-go[aria-label^="${name},"]`);
   await row.or(page.locator(`.th-kid[data-name="${name}"]`)).first().waitFor();
   if (await row.count()) await row.first().click(); else await page.locator(`.th-kid[data-name="${name}"]`).click();
@@ -44,6 +52,7 @@ const bucket = (page: Page, p: string) => where(page).locator(`.wr-bucket.p-${p}
 test.describe('rooms nav', () => {
   test('the room tree is the home on both screens: a column beside the panel on Daylight, the home on the phone', async ({ page }) => {
     await boot(page);
+    await unfoldTree(page);
     if (wide(page)) {
       const nav = page.locator('.th-roomnav');
       await expect(nav).toBeVisible();
@@ -52,7 +61,7 @@ test.describe('rooms nav', () => {
       await title(page, 'Uni');
       await expect(nav.locator('.th-go[aria-current="page"]')).toHaveAttribute('data-path', '');
       for (const n of ['Boulder', 'COhere 2026', 'Techne', 'Unforced Development']) await expect(nav.locator(`.th-go[aria-label^="${n},"]`)).toBeVisible();
-      await expect(nav.locator('.th-go[aria-label^="COhere 2026,"]')).toContainText('boulder/cohere');
+      await expect(nav.locator('.th-go[aria-label^="COhere 2026,"]')).toContainText('#cohere');
       await expect(nav.locator('.th-go[aria-label^="Boulder Civic Calendar,"]')).not.toContainText('held by');
       // the column stays while the level changes, and marks the selected one
       await page.locator('.th-roomnav .th-go[aria-label^="Techne,"]').click();
@@ -61,7 +70,7 @@ test.describe('rooms nav', () => {
       await expect(nav.locator('.th-go[aria-current="page"]')).toHaveAttribute('aria-label', /^Techne,/);
     } else {
       await expect(page.locator('.th-phone-tree')).toBeVisible();
-      await expect(page.locator('.th-go[aria-label^="COhere 2026,"]')).toContainText('boulder/cohere');
+      await expect(page.locator('.th-go[aria-label^="COhere 2026,"]')).toContainText('#cohere');
       await expect(page.locator('.th-go[aria-label^="Techne,"] .th-dot')).toBeVisible();
       for (const b of await page.locator('.th-go').all()) expect((await b.boundingBox())!.height).toBeGreaterThanOrEqual(44);
     }
@@ -92,7 +101,7 @@ test.describe('rooms nav', () => {
     await expect(bucket(page, 'now').locator('.wr-row', { hasText: 'T-03' })).toContainText(/due Oct 12/);
     await expect(bucket(page, 'soon').locator('.wr-row', { hasText: 'T-65' })).not.toContainText('COhere 2026');
     await expect(bucket(page, 'soon').locator('.wr-row', { hasText: 'T-65' })).toContainText('Send to Kevin for the numbers');
-    await expect(panel(page).locator('.th-roomline .th-door')).toHaveText('boulder/cohere');
+    await expect(panel(page).locator('.th-roomline .th-door')).toHaveText('cohere');
     await shot(page, 'cohere');
     expect(await fits(page)).toBe(true);
   });
