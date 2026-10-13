@@ -516,3 +516,5 @@ h3.wr-h { font-weight: 400; }
 /* r11: a decision's question is shown whole (never clamped), led by "Your call:" when it is not phrased as a question */
 .cp-need.decision .cp-title, .cp-item[data-open] .cp-title { -webkit-line-clamp: unset; line-clamp: none; overflow: visible; display: block; }
 .cp-call-lead { display: block; margin: 0 0 2px; font: 500 12px/1.3 var(--th-sans); color: var(--th-ink2); }
+/* the first words of a question that opens in the sheet: two quiet lines at most */
+.cp-need .cp-hint { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
