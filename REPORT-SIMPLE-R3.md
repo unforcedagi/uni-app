@@ -21,4 +21,4 @@ Polish only, on `feat/simple` from 05ae1cd. Nothing pushed. Design unchanged.
 ## Not done / caveats
 - Not run in the real Tauri app, and the r2c walk screenshots were not regenerated; the checks are Playwright against the fixture.
 - Fit-at-1280x720 is measured on the fixture's Uni room; a real room with long decision options wrapping to several rows could still push the link down (the panel then scrolls).
-- The Buzz rooms drawer (narrow screens) still labels held rooms as before; only the tree rows and header changed.
+- I did not check the Buzz rooms drawer (narrow screens) for "held by" text; I changed only the tree rows and the room header.
