@@ -69,7 +69,7 @@ export function NextText({ text, onNote, lines, open: openProp, onOpen, onClamp 
   }, [text, open, lines]);
   if (lines !== undefined && lines <= 0 && !open) return null;
   return <div className="cp-next-wrap">
-    <p ref={ref} className={`cp-next ${open ? "open" : ""}`} style={!open && lines !== undefined ? { WebkitLineClamp: lines, lineClamp: lines } as React.CSSProperties : undefined}>{splitLinks(cleanText(text)).map((p, i) => "url" in p
+    <p ref={ref} className={`cp-next ${open ? "open" : ""}`} style={!open && lines !== undefined ? { WebkitLineClamp: lines, lineClamp: lines, maxHeight: `${(lines * 13.5 * 1.45).toFixed(2)}px` } as React.CSSProperties : undefined}>{splitLinks(cleanText(text)).map((p, i) => "url" in p
       ? <a key={i} className="cp-link" href={p.url} title={p.url} rel="noreferrer noopener" onClick={(e) => openLink(e, p.url)}>{p.label}</a>
       : <RefText key={i} text={p.text} onNote={onNote} />)}</p>
     {!onOpen && (clamped || open) && <button type="button" className="cp-more-next" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? "Less" : "More"}</button>}

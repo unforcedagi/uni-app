@@ -899,7 +899,7 @@ test.describe('simple', () => {
 
   test('r10: every Needs-you row is at most three lines of text, and no row is cut at the panel bottom', async ({ page }) => {
     test.skip(!wide(page), 'side panel');
-    await boot(page, { crowded: true, cutDecision: true });
+    await boot(page, { crowded: true, cutDecision: true, ulidNext: true });
     await scope(page).locator('.th-go[aria-label^="Uni,"]').click();
     await openCompanion(page);
     await expect(page.locator('.cp-item').first()).toBeVisible();
