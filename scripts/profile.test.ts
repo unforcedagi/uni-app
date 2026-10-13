@@ -84,6 +84,9 @@ check("PR2: me / agentOwners / room prefix drive groups and sort", () => {
   assert.equal(groupOf({ owner: "aaron", waitingOn: null, kind: "task" }, d), "you");
   assert.equal(groupOf({ owner: "me", waitingOn: null, kind: "task" }, d), "others");
   assert.equal(groupOf({ owner: "room:x", waitingOn: null, kind: "task" }, d), "rooms");
+  assert.equal(groupOf({ owner: "room:atlas/teach", waitingOn: "Aaron", kind: "task" }, d), "you");
+  assert.equal(groupOf({ owner: "room:atlas/teach", waitingOn: "person:aaron", kind: "task" }, d), "you");
+  assert.equal(groupOf({ owner: "room:atlas/teach", waitingOn: "external", kind: "task" }, d), "rooms");
   assert.equal(groupOf({ owner: "me", waitingOn: null, kind: "task" }, p), "you");
   assert.equal(groupOf({ owner: "x", waitingOn: "me", kind: "task" }, p), "you");
   assert.equal(groupOf({ owner: "room:x", waitingOn: null, kind: "task" }, p), "others");

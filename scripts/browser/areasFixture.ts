@@ -423,7 +423,10 @@ Two proposals wait on a scope decision.
         mk('st7', 'T-07 SOW for the commons grant', 'Projects/ATLAS', { due: '2026-10-13', priority: 'now', next: 'Confirm scope with Casey' }),
         mk('st8', 'T-08 Fix the map labels', 'Projects/ATLAS', { owner: 'room:atlas/build', state: 'doing', next: 'Branch is up' }),
         mk('st9', 'T-09 Atlas Institute site copy', 'Projects/Atlas Institute', { owner: 'uni' }),
-        mk('dq2', 'Decide the ATLAS hosting', 'Projects/ATLAS', { priority: 'soon', options: ['Self-host', 'Managed'] }, 'decision'));
+        mk('st10', 'T-128 Canvas Week 7 brief draft', 'Projects/Learn Vibe Build', { owner: 'room:atlas/teach', state: 'waiting', waiting_on: 'aaron', next: 'Your OK on the draft', due: '2026-10-14' }),
+        mk('st11', 'T-120 Grade the Week 6 reflections', 'Projects/Learn Vibe Build', { owner: 'aaron', due: '2026-10-15' }),
+        mk('st12', 'T-121 Final brief', 'Projects/Learn Vibe Build', { owner: 'room:atlas/teach', state: 'waiting', waiting_on: 'external' }),
+        mk('dq2', 'Decision (default yes): Decide the ATLAS hosting', 'Projects/ATLAS', { priority: 'soon', options: ['Self-host', 'Managed'] }, 'decision'));
       const run = (id: string, what: string, meta: Record<string, unknown>) => ({ id, path: `Runs/${id}`, extension: 'md', tags: ['run'], createdAt: T0, updatedAt: T0, metadata: { node: 'Projects/ATLAS', what, by: 'room:atlas/build', started: new Date((d.now - 600) * 1000).toISOString(), updated: new Date((d.now - 60) * 1000).toISOString(), ...meta } });
       const draft = (id: string, meta: Record<string, unknown>) => ({ id, path: `Drafts/${id}`, extension: 'md', tags: ['draft'], createdAt: T0, updatedAt: T0, metadata: { node: 'Projects/ATLAS', ...meta } });
       // run-1 is the T-125 shape (summary, worker, started_at), the rest are the 0.1.44 ledger
