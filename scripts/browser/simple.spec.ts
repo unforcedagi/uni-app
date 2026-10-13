@@ -1002,7 +1002,8 @@ test.describe('simple', () => {
     expect(whole).toBeGreaterThan(0); expect(open).toBeGreaterThan(0);
     // the long question is whole in the sheet
     if (await page.locator('.cp-more-rows').count()) await page.locator('.cp-more-rows').click();
-    const long = page.locator('.cp-item').filter({ hasText: 'Open to decide' }).filter({ hasNot: page.locator('.cp-hint') }).first(); // too long for four lines: no fragment either
+    const long = page.locator('.cp-item').filter({ hasText: 'Open to decide' }).filter({ hasText: 'venue contract' }).first(); // too long for four lines: a quiet first line, no buttons
+    await expect(long.getByRole('button', { name: /^(Yes|No)$/ })).toHaveCount(0);
     await long.locator('.cp-need').click();
     await expect(page.getByRole('dialog')).toContainText('catering exclusivity clause');
   });

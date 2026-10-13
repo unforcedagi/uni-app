@@ -93,7 +93,7 @@ function NeedRow({ t, onTask, onDecide, onNote }: { t: Task; onTask: (t: Task) =
   const tooLongRef = useRef(false); tooLongRef.current = tooLong;
   const width = useRef(0);
   // a decision is a whole question beside its buttons, or "Open to decide" with none; a question over 4 lines is read in the sheet
-  const ask = isDecision && tooLong ? { text: "Open to decide", openToDecide: true } : base;
+  const ask = isDecision && tooLong ? { text: "Open to decide", openToDecide: true, hint: askLead(base.text).text } : base;
   const lead = isDecision && !ask.openToDecide ? askLead(ask.text) : null;
   const text = lead ? lead.text : ask.text || "Open to see what's needed";
   const opts = isDecision && !ask.openToDecide ? t.options : [];
