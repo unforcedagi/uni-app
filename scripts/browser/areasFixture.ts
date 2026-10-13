@@ -178,6 +178,10 @@ export type BootOpts = {
   steer?: boolean;
   /** T-124 r2: #atlas/build and #atlas/teach hold sixty messages each, so a room has history to open at the end of. */
   longChat?: boolean;
+  /** T-124 r7: T-03's next step is long (three questions and a link): it wraps to four lines with a "More". */
+  longNext?: boolean;
+  /** T-124 r7 (with tasks): a task of Aaron's with a one-word title and no next step. */
+  bareTask?: boolean;
   /** T-124 r6 (with longChat): a worker status ping before the newest message, and a newest message taller than the list with a marker line mid-way. */
   tallLast?: boolean;
   /** T-111: a project (Priya) whose room is archived, with `room_fallback` naming the room that holds it. */
@@ -208,7 +212,7 @@ export async function bootAreas(page: Page, variant: Variant = 'seed', opts: Boo
   const now = Math.floor((opts.pinned ? pinnedAt : Date.now()) / 1000);
   const data = {
     profileNote: opts.profileNote ?? null, lifeVault: opts.lifeVault ?? null, now, variant, selftest: opts.selftest ?? true, ipcLeak: opts.ipcLeak ?? false, hostile: hostileApp(opts.ports ?? { http: 9, udp: 9 }), benign: BENIGN, techne: seed('techne'), unforced: seed('unforced'), seedMeta,
-    apps: opts.apps ?? [], multiRoom: !!opts.multiRoom || !!opts.tree, tree: !!opts.tree, tasks: !!opts.tasks, briefs: !!opts.briefs, queryDelay: opts.queryDelay ?? 0, identityDelay: opts.identityDelay ?? 0, roomsDelay: opts.roomsDelay ?? 0, messagesDelay: opts.messagesDelay ?? 0, nodeStatuses: opts.nodeStatuses ?? {}, nearOff: !!opts.nearOff, ids: !!opts.ids, boulder: !!opts.boulder, layout: opts.layout ?? 'octopus', underBoulder: !!opts.underBoulder, priya: !!opts.priya, atlas: !!opts.atlas, steer: !!opts.steer, longChat: !!opts.longChat, tallLast: !!opts.tallLast, privateTasks: !!opts.privateTasks, deviceCache: opts.deviceCache ?? null, queryFails: opts.queryFails ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null, mode: opts.mode ?? 'sealed', grantedUnder: opts.grantedUnder ?? (opts.mode ?? 'sealed'),
+    apps: opts.apps ?? [], multiRoom: !!opts.multiRoom || !!opts.tree, tree: !!opts.tree, tasks: !!opts.tasks, briefs: !!opts.briefs, queryDelay: opts.queryDelay ?? 0, identityDelay: opts.identityDelay ?? 0, roomsDelay: opts.roomsDelay ?? 0, messagesDelay: opts.messagesDelay ?? 0, nodeStatuses: opts.nodeStatuses ?? {}, nearOff: !!opts.nearOff, ids: !!opts.ids, boulder: !!opts.boulder, layout: opts.layout ?? 'octopus', underBoulder: !!opts.underBoulder, priya: !!opts.priya, atlas: !!opts.atlas, steer: !!opts.steer, longChat: !!opts.longChat, longNext: !!opts.longNext, bareTask: !!opts.bareTask, tallLast: !!opts.tallLast, privateTasks: !!opts.privateTasks, deviceCache: opts.deviceCache ?? null, queryFails: opts.queryFails ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null, mode: opts.mode ?? 'sealed', grantedUnder: opts.grantedUnder ?? (opts.mode ?? 'sealed'),
   };
   // Pre-granted apps: the grant key is the SHA-256 of the RESOLVED default needs plus the app's html.
   const preGrant = [
@@ -383,7 +387,8 @@ Two proposals wait on a scope decision.
     const mk = (id: string, title: string, node: string, extra: Record<string, unknown> = {}, tag = 'task') => ({ id, path: `Tasks/${title}`, extension: 'md', tags: [tag], createdAt: T0, updatedAt: T0, lastUpdatedBy: 'cdf67944-c5f2-4e42-a0d8-02ce7a95bbdb', lastUpdatedVia: 'api', metadata: { node, state: 'open', owner: 'aaron', ...extra } });
     const C26 = 'Projects/COhere/COhere 2026';
     const taskNotes: any[] = d.tasks ? [
-      mk('k1', 'T-03 COhere festival readiness', C26, { state: 'waiting', waiting_on: 'aaron', due: '2026-10-12', next: 'Check-in PR by Oct 12, see https://example.invalid/pr/12 for the diff', priority: 'now' }),
+      mk('k1', 'T-03 COhere festival readiness', C26, { state: 'waiting', waiting_on: 'aaron', due: '2026-10-12', next: d.longNext ? 'Try the new check-in flow at https://example.invalid/pr/12 and answer the three questions. First question: does the QR code scan on the door? Second question: is the badge printout readable from a metre away? And the third question: who carries the spare scanner on the day of the festival, and where do they stand?' : 'Check-in PR by Oct 12, see https://example.invalid/pr/12 for the diff', priority: 'now' }),
+      ...(d.bareTask ? [mk('k12', 'T-12 Taxes', 'Areas/Techne', { priority: 'now' })] : []),
       mk('k2', 'T-64 COhere app spec', C26, { owner: 'room:cohere', state: 'doing' }),
       mk('k3', 'T-65 Sponsorship invoice draft', C26, { priority: 'soon', priority_by: 'weigh.py 2026-10-12', next: 'Send to Casey for the numbers' }),
       mk('k4', 'T-33 Casey call: book it', 'Areas/Techne', { priority: 'now' }),

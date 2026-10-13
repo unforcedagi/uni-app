@@ -27,9 +27,19 @@ const boot = (page: Page, extra: Parameters<typeof bootAreas>[2] = {}) => bootAr
 const scope = (page: Page) => (wide(page) ? page.locator('.th-roomnav') : page.locator('.th-phone-tree'));
 /** Open a room from the rooms list (phone: back to the list first when a room is open). */
 async function openRoom(page: Page, name: string) {
-  if (!wide(page) && await page.locator('.sr-back').count()) await page.locator('.sr-back').click();
+  if (!wide(page)) { await page.locator('.sr-back, .th-phone-tree').first().waitFor(); if (await page.locator('.sr-back').count()) await page.locator('.sr-back').click(); }
+  await unfoldAll(page);
   await scope(page).locator(`.th-go[aria-label^="${name},"]`).click();
   await expect(page.locator('.sr-title')).toHaveText(name);
+}
+/** Areas start folded (all but the one holding the open room): open every fold so any row can be clicked. */
+async function unfoldAll(page: Page) {
+  await scope(page).locator('.th-row.d1').first().waitFor(); // the tree has loaded
+  for (let i = 0; i < 12; i++) {
+    const f = scope(page).locator('.th-fold[aria-expanded="false"]');
+    if (!await f.count()) return;
+    await f.first().click();
+  }
 }
 const companion = (page: Page) => page.getByRole('region', { name: 'Where this stands' }).or(page.getByRole('complementary', { name: 'Where this stands' }));
 /** The phone's strip opens on a tap; the side panel is open already. */
@@ -65,7 +75,9 @@ test.describe('simple', () => {
     const needs = cp.getByRole('region', { name: 'Needs you' });
     await expect(needs.locator('.cp-need')).toHaveCount(2);
     // the decision on this very node leads and carries its options as buttons
-    await expect(needs.locator('.cp-need').first()).toContainText('Decide the ATLAS hosting');
+    // Now before Soon: the dated Now task first, then the decision (Soon), which carries its options as buttons
+    await expect(needs.locator('.cp-need').first()).toContainText('SOW for the commons grant');
+    await expect(needs.locator('.cp-need').nth(1)).toContainText('Decide the ATLAS hosting');
     await expect(needs.locator('.cp-opt')).toHaveText(['Self-host', 'Managed']);
     await expect(needs).toContainText('SOW for the commons grant');
     await expect(needs).toContainText('Confirm scope with Casey');
@@ -103,14 +115,14 @@ test.describe('simple', () => {
     if (await lede.count()) await expect(lede).not.toHaveText('Atlas Institute.');
   });
 
-  test('at most three need you, no "+N more"; "Everything here" goes to the full page', async ({ page }) => {
+  test('every item that needs you is listed (no cap, no "+N more"); "Everything here" goes to the full page', async ({ page }) => {
     await boot(page);
     if (!wide(page)) await expect(page.locator('.th-phone-tree')).toBeVisible();
     await scope(page).locator('.th-go[aria-label^="Uni,"]').click();
     await expect(page.locator('.sr-title')).toHaveText('Uni');
     await openCompanion(page);
     const needs = page.locator('.cp-body').getByRole('region', { name: 'Needs you' });
-    expect(await needs.locator('.cp-need').count()).toBeGreaterThanOrEqual(1); expect(await needs.locator('.cp-need').count()).toBeLessThanOrEqual(3);
+    expect(await needs.locator('.cp-need').count()).toBeGreaterThanOrEqual(3);
     await expect(page.locator('.cp-more')).toHaveCount(0);
     await expect(page.locator('.cp-body')).not.toContainText(/\+\d+ more/);
     await page.getByRole('button', { name: /^All of .*'s work/ }).click();
@@ -145,20 +157,21 @@ test.describe('simple', () => {
     await expect.poll(async () => (await calls(page, 'vault_decide')).length).toBe(1);
   });
 
-  test('needs-you rows are one line each, raw links removed, and fit above the fold at 1280x720', async ({ page }) => {
+  test('needs-you rows: the action, then its next step in full; raw links become short link text; the foot stays on screen at 1280x720', async ({ page }) => {
     test.skip(!wide(page), 'side panel');
     await page.setViewportSize({ width: 1280, height: 720 });
     await boot(page);
     await scope(page).locator('.th-go[aria-label^="Uni,"]').click();
     await openCompanion(page);
-    const items = page.locator('.cp-body .cp-item');
-    await expect(items).toHaveCount(2);
+    expect(await page.locator('.cp-body .cp-item').count()).toBeGreaterThanOrEqual(2);
     await expect(page.locator('.cp-body')).not.toContainText(/https?:\/\//);
+    const item = page.locator('.cp-item').filter({ hasText: 'COhere festival readiness' });
+    await expect(item.locator('.cp-next')).toContainText('Check-in PR by Oct 12, see example.invalid for the diff');
+    await expect(item.locator('.cp-link')).toHaveText('example.invalid');
+    await expect(item.locator('.cp-link')).toHaveAttribute('href', 'https://example.invalid/pr/12');
     for (const el of await page.locator('.cp-body .cp-title').all()) expect(await el.evaluate((e) => e.getBoundingClientRect().height < 48)).toBeTruthy();
-    for (const el of await page.locator('.cp-body .cp-detail').all()) {
-      expect(await el.evaluate((e) => getComputedStyle(e).whiteSpace === 'nowrap' && e.getBoundingClientRect().height < 24)).toBeTruthy();
-    }
     const link = page.getByRole('button', { name: /^All of .*'s work/ });
+    await page.locator('.cp.side').evaluate((e) => { e.scrollTop = e.scrollHeight; });
     const all = await link.boundingBox();
     expect(all!.y + all!.height).toBeLessThanOrEqual(720);
     expect(all!.height).toBeLessThan(48);
@@ -183,7 +196,7 @@ test.describe('simple', () => {
     await scope(page).locator('.th-go[aria-label^="Uni,"]').click();
     await openCompanion(page);
     await expect(page.locator('.cp-body').getByRole('button', { name: 'Decide', exact: true })).toHaveCount(0);
-    const dec = page.locator('.cp-need.decision').first();
+    const dec = page.locator('.cp-item').filter({ hasText: 'Decide the COhere venue' }).locator('.cp-need.decision');
     if (await dec.count()) {
       await expect(dec.locator('.cp-go')).toBeVisible();
       expect(await dec.locator('.cp-title').evaluate((e) => e.scrollHeight <= e.clientHeight + 1)).toBe(true);
@@ -302,12 +315,13 @@ test.describe('simple', () => {
     await expect(none).toHaveCount(0);
   });
 
-  test('a room with nothing owed to the user shows no empty "Needs you" heading', async ({ page }) => {
+  test('a room with nothing owed to the user says so, quietly', async ({ page }) => {
     await boot(page);
     await openRoom(page, 'Atlas Institute');
     await openCompanion(page);
-    await expect(page.locator('.cp-h', { hasText: 'Needs you' })).toHaveCount(0);
-    await expect(page.locator('.cp-sec')).not.toHaveCount(-1);
+    await expect(page.locator('.cp-h', { hasText: 'Needs you' })).toHaveCount(1);
+    await expect(page.locator('.cp-none')).toHaveText('Nothing needs you here.');
+    await expect(page.locator('.cp-need')).toHaveCount(0);
   });
 
   test('the top of the conversation fades instead of cutting a line, and the panel scrolls on its own', async ({ page }) => {
@@ -407,6 +421,7 @@ test.describe('simple', () => {
 
   test('nested rooms still nest, and jumping to a child and back works', async ({ page }) => {
     await boot(page);
+    await unfoldAll(page);
     const rows = scope(page).locator('.th-row');
     expect(await rows.evaluateAll((els) => els.map((e) => [e.querySelector('b')?.textContent, [...e.classList].find((c) => /^d\d$/.test(c))]))).toEqual(expect.arrayContaining([['Atlas', 'd1'], ['ATLAS', 'd2'], ['Learn Vibe Build', 'd2'], ['Techne', 'd1'], ['COhere 2026', 'd2']]));
     await openRoom(page, 'ATLAS');
@@ -432,6 +447,9 @@ test.describe('simple', () => {
     await boot(page);
     await expect(scope(page).locator('.th-tag, .th-open, .th-stump, .th-door')).toHaveCount(0);
     await expect(scope(page).locator('.th-dot').first()).toBeVisible();
+    // folded, an area still shows the dot for what is under it
+    await expect(scope(page).locator('.th-go[aria-label^="Atlas,"] .th-dot')).toHaveCount(1);
+    await unfoldAll(page);
     await expect(scope(page).locator('.th-go[aria-label^="ATLAS,"] .th-sub')).toHaveText('#atlas/build');
     await expect(scope(page).locator('.th-go[aria-label^="Atlas Institute,"] .th-sub')).toHaveCount(0);
     await expect(scope(page)).not.toContainText('held by');
@@ -443,7 +461,7 @@ test.describe('simple', () => {
     await shot(page, 'rooms');
   });
 
-  test('one look: the journal, settings and the plain room tab read as the same app (shots, light and dark)', async ({ page }) => {
+  test('one look: the journal, settings and a room opened from the drawer read as the same app (shots, light and dark)', async ({ page }) => {
     await boot(page);
     const rail = page.getByRole('navigation', { name: 'Main navigation' });
     await rail.getByRole('button', { name: 'Journal' }).click();
@@ -455,7 +473,9 @@ test.describe('simple', () => {
     if (await page.locator('.panel-close').count()) await page.locator('.panel-close').first().click();
     await rail.getByRole('button', { name: 'Rooms' }).click();
     await page.locator('.rooms nav .room', { has: page.locator('strong', { hasText: /^ATLAS$/ }) }).click();
-    await expect(page.locator('.conversation-header')).toContainText('atlas/build');
+    // from the drawer, a node's room opens as that node: the same view as from the tree
+    await expect(page.locator('.sr-title')).toHaveText('ATLAS');
+    await expect(page.locator('.sr-door')).toHaveText('#atlas/build');
     await expect(page.locator('.message').first()).toBeVisible();
     await shot(page, 'plain-room');
     expect(await fits(page)).toBe(true);
@@ -463,7 +483,8 @@ test.describe('simple', () => {
 
   test('chat off (profile chat.provider null): the full node page, no composer, no room', async ({ page }) => {
     await boot(page, { profileNote: { chat: { provider: null } } });
-    if (!wide(page)) await scope(page).locator('.th-go[aria-label^="ATLAS"]').click(); else await scope(page).locator('.th-go[aria-label^="ATLAS"]').click();
+    await unfoldAll(page);
+    await scope(page).locator('.th-go[aria-label^="ATLAS"]').click();
     await expect(page.locator('.th-panel').getByRole('region', { name: 'Needs you' })).toContainText('T-07');
     await expect(page.locator('.sr, .cp, .composer, .th-door, .th-ctx, .talk, .sr-door')).toHaveCount(0);
     await expect(page.getByRole('button', { name: /Open #|Hold to talk/ })).toHaveCount(0);
@@ -549,5 +570,196 @@ test.describe('simple', () => {
     await expect(page.locator('aside.rooms')).toBeHidden();
     await expect(page.locator('.sr-head, .th-phone-tree').first()).toBeVisible();
     await expect(page.locator('.sr-head, .th-phone-tree').first()).toHaveCSS('animation-name', 'none');
+  });
+
+  // ---------------------------------------------------------------------------------------------- r7: one model, one navigation
+  const roomsDrawer = (page: Page) => page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Rooms' });
+
+  test('r7: no tab strip anywhere; the tree is the navigation', async ({ page }) => {
+    await boot(page);
+    await openRoom(page, 'ATLAS');
+    await expect(page.locator('.tab-strip, .tab-chip, [role="tablist"], .tab-add')).toHaveCount(0);
+    await expect(page.getByRole('tab')).toHaveCount(0);
+    await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Journal' }).click();
+    await expect(page.locator('.tab-strip, .tab-chip, [role="tablist"]')).toHaveCount(0);
+  });
+
+  test('r7: a room reads the same from the tree and from the rooms list (one view per room)', async ({ page }) => {
+    test.skip(!wide(page), 'rooms list drawer');
+    await boot(page);
+    const view = async () => ({ title: await page.locator('.sr-title').textContent(), door: await page.locator('.sr-door').textContent(), crumbs: await page.locator('.sr .th-crumbs').textContent(),
+      placeholder: await page.locator('.sr-chat').getByRole('textbox', { name: /^Message / }).getAttribute('placeholder'), companion: await page.locator('.cp.side').count(), conversation: await page.locator('.conversation-header').count() });
+    await openRoom(page, 'ATLAS');
+    const fromTree = await view();
+    await openRoom(page, 'Learn Vibe Build');
+    await roomsDrawer(page).click();
+    await page.locator('.rooms nav .room', { has: page.locator('strong', { hasText: /^ATLAS$/ }) }).click();
+    await expect(page.locator('.sr-title')).toHaveText('ATLAS');
+    expect(await view()).toEqual(fromTree);
+    expect(fromTree.conversation).toBe(0);
+    expect(fromTree.companion).toBe(1);
+    // the sidebar followed: the open room is the selected row
+    await expect(scope(page).locator('.th-row.sel .th-go')).toHaveAttribute('aria-label', /^ATLAS,/);
+  });
+
+  test('r7: a room line is the room\'s real name; no constructed slash path in the DOM', async ({ page }) => {
+    await boot(page, { multiRoom: true });
+    await unfoldAll(page);
+    await expect(page.locator('body')).not.toContainText('boulder/cohere');
+    await expect(scope(page).locator('.th-go[aria-label^="COhere"] .th-sub').first()).toHaveText('#cohere');
+    await expect(scope(page).locator('.th-go[aria-label^="ATLAS,"] .th-sub')).toHaveText('#atlas/build');
+    await scope(page).locator('.th-go[aria-label^="COhere"]').first().click();
+    await expect(page.locator('.sr-door')).toHaveText('#cohere');
+    await expect(page.locator('.sr-chat').getByRole('textbox', { name: /^Message / })).toHaveAttribute('placeholder', 'Message #cohere');
+    await expect(page.locator('body')).not.toContainText('boulder/cohere');
+    if (wide(page)) await expect(page.locator('.sr .th-crumbs')).toHaveText(/Uni\s*›\s*Techne\s*›\s*COhere/);
+  });
+
+  test('r7: areas fold with a chevron; the choice is remembered; the name opens the room, the chevron only folds; a folded area keeps its dot', async ({ page }) => {
+    test.skip(!wide(page), 'sidebar column');
+    await boot(page);
+    const nav = scope(page);
+    // default: folded, except the area holding the open room (Uni is open: no area holds it)
+    await expect(nav.locator('.th-row.d2')).toHaveCount(0);
+    await expect(nav.locator('.th-fold[aria-expanded="false"]').first()).toBeVisible();
+    // a folded area shows the dot for what is under it
+    await expect(nav.locator('.th-go[aria-label^="Atlas,"] .th-dot')).toHaveCount(1);
+    await nav.locator('.th-fold[data-path="Areas/Atlas"]').click();
+    await expect(nav.locator('.th-go[aria-label^="ATLAS,"]')).toBeVisible();
+    await expect(page.locator('.sr-title')).toHaveText('Uni'); // the chevron did not open the room
+    await expect(nav.locator('.th-go[aria-label^="Atlas,"] .th-dot')).toHaveCount(0);
+    await nav.locator('.th-go[aria-label^="Atlas,"]').click(); // the name opens it
+    await expect(page.locator('.sr-title')).toHaveText('Atlas');
+    // remembered per device
+    await page.reload();
+    await expect(page.locator('.sr-title')).toHaveText('Atlas');
+    await expect(nav.locator('.th-go[aria-label^="ATLAS,"]')).toBeVisible();
+    await nav.locator('.th-fold[data-path="Areas/Atlas"]').click();
+    await expect(nav.locator('.th-go[aria-label^="ATLAS,"]')).toHaveCount(0);
+    await page.reload();
+    await expect(page.locator('.th-row .th-go').first()).toBeVisible();
+    await expect(nav.locator('.th-go[aria-label^="ATLAS,"]')).toHaveCount(0);
+    // another area, opened from elsewhere, is revealed
+    await nav.locator('.th-go[aria-label^="Techne,"]').click();
+    await expect(page.locator('.sr-title')).toHaveText('Techne');
+  });
+
+  test('r7: the sidebar is narrow, resizes by dragging (180 to 360, remembered) and hides', async ({ page }) => {
+    test.skip(!wide(page), 'sidebar column');
+    await boot(page);
+    const nav = page.locator('.th-roomnav');
+    const width = async () => Math.round((await nav.boundingBox())!.width);
+    expect(await width()).toBeLessThanOrEqual(222);
+    expect(await width()).toBeGreaterThanOrEqual(218);
+    await expect(nav.locator('.th-colname')).toHaveCount(0); // no big "Rooms" heading
+    const handle = nav.getByRole('separator', { name: 'Resize the sidebar' });
+    const box = (await handle.boundingBox())!;
+    await page.mouse.move(box.x + box.width / 2, box.y + 200);
+    await page.mouse.down(); await page.mouse.move(box.x + 500, box.y + 200, { steps: 4 }); await page.mouse.up();
+    expect(await width()).toBe(360); // clamped at the max
+    const b2 = (await handle.boundingBox())!;
+    await page.mouse.move(b2.x + b2.width / 2, b2.y + 200);
+    await page.mouse.down(); await page.mouse.move(b2.x - 500, b2.y + 200, { steps: 4 }); await page.mouse.up();
+    expect(await width()).toBe(180); // and at the min
+    await handle.focus(); await page.keyboard.press('ArrowRight');
+    expect(await width()).toBe(196);
+    await page.reload();
+    await expect(page.locator('.th-roomnav')).toBeVisible();
+    expect(await width()).toBe(196);
+    // hide down to a strip, and bring it back
+    await nav.getByRole('button', { name: 'Hide the sidebar' }).click();
+    expect(await width()).toBeLessThanOrEqual(40);
+    await expect(nav.locator('.th-go')).toHaveCount(0);
+    await page.reload();
+    expect(await width()).toBeLessThanOrEqual(40);
+    await page.locator('.th-roomnav').getByRole('button', { name: 'Show the sidebar' }).click();
+    expect(await width()).toBe(196);
+    // about 20 rows fit at 720px once every area is open
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await unfoldAll(page);
+    const rows = await nav.locator('.th-row').count();
+    const fit = await nav.locator('.th-rows-wrap').evaluate((e) => e.scrollHeight <= e.clientHeight + 1 ? e.querySelectorAll('.th-row').length : Math.floor(e.clientHeight / (e.scrollHeight / e.querySelectorAll('.th-row').length)));
+    expect(Math.min(rows, fit)).toBeGreaterThanOrEqual(Math.min(rows, 18));
+  });
+
+  test('r7: Back and Forward over the places visited (Alt+←/→ and the two buttons), with a short Recent list', async ({ page }) => {
+    test.skip(!wide(page), 'sidebar column');
+    await boot(page);
+    await openRoom(page, 'ATLAS');
+    await openRoom(page, 'Learn Vibe Build');
+    const nav = page.locator('.th-roomnav');
+    await expect(nav.getByRole('button', { name: 'Forward' })).toBeDisabled();
+    await nav.getByRole('button', { name: 'Back' }).click();
+    await expect(page.locator('.sr-title')).toHaveText('ATLAS');
+    await page.keyboard.press('Alt+ArrowRight');
+    await expect(page.locator('.sr-title')).toHaveText('Learn Vibe Build');
+    await page.keyboard.press('Alt+ArrowLeft');
+    await page.keyboard.press('Alt+ArrowLeft');
+    await expect(page.locator('.sr-title')).toHaveText('Uni');
+    await expect(nav.getByRole('button', { name: 'Back' })).toBeDisabled();
+    await expect(nav.getByRole('button', { name: 'Forward' })).toBeEnabled();
+    const recent = nav.getByRole('region', { name: 'Recent' });
+    await expect(recent.locator('button')).toHaveText(['Learn Vibe Build', 'ATLAS']);
+    await recent.getByRole('button', { name: 'ATLAS' }).click();
+    await expect(page.locator('.sr-title')).toHaveText('ATLAS');
+  });
+
+  test('r7: the app reopens to the room you were in; an old uni.tabs.v1 set is ignored beyond its active room', async ({ page }) => {
+    test.skip(!wide(page), 'sidebar column');
+    await boot(page);
+    await openRoom(page, 'ATLAS');
+    await page.reload();
+    await expect(page.locator('.sr-title')).toHaveText('ATLAS');
+    expect(await page.evaluate(() => localStorage.getItem('uni.tabs.v2'))).toContain('Projects/ATLAS');
+    await page.evaluate(() => { localStorage.removeItem('uni.tabs.v2'); localStorage.setItem('uni.tabs.v1', JSON.stringify({ v: 1, tabs: [{ id: 'a', kind: 'area', path: 'Areas/Techne', title: 'Techne' }, { id: 'b', kind: 'areas', title: 'Uni' }, { id: 'c', kind: 'journal', title: 'Journal' }], active: 'a', recent: ['b', 'a'] })); });
+    await page.reload();
+    await expect(page.locator('.sr-title')).toHaveText('Techne');
+    await expect(page.locator('.tab-strip')).toHaveCount(0);
+  });
+
+  test('r7: needs you is the feed: Aaron\'s own, Now and Soon, not snoozed, plus decisions; someday and done are not there; an empty room says so', async ({ page }) => {
+    await boot(page);
+    await scope(page).locator('.th-go[aria-label^="Uni,"]').click();
+    await openCompanion(page);
+    const needs = page.getByRole('region', { name: 'Needs you' });
+    await expect(needs).toContainText('COhere festival readiness'); // waiting on aaron, now
+    await expect(needs).toContainText('Casey call: book it'); // now
+    await expect(needs).not.toContainText('Send the Q4 invoice'); // someday
+    await expect(needs).not.toContainText('FableJi'); // someday
+    await expect(needs).not.toContainText('Already finished'); // done
+    await expect(needs).not.toContainText('Put away'); // archived
+    await expect(needs).not.toContainText('A snoozed one'); // snoozed
+    await expect(needs).not.toContainText('Wire the usage guard'); // Uni's, not Aaron's
+    // Now before Soon
+    const order = await needs.locator('.cp-need').evaluateAll((els) => els.map((e) => e.textContent ?? ''));
+    expect(order.findIndex((t) => t.includes('COhere festival readiness'))).toBeLessThan(order.findIndex((t) => t.includes('Sponsorship invoice draft')));
+    // the next step is shown in full, below the action
+    await expect(needs.locator('.cp-item').filter({ hasText: 'Sponsorship invoice draft' }).locator('.cp-next')).toHaveText('Send to Casey for the numbers');
+  });
+
+  test('r7: a long next step wraps to four lines and "More" opens it in place', async ({ page }) => {
+    test.skip(!wide(page), 'side panel');
+    await boot(page, { longNext: true });
+    await scope(page).locator('.th-go[aria-label^="Uni,"]').click();
+    await openCompanion(page);
+    const item = page.locator('.cp-item').filter({ hasText: 'COhere festival readiness' });
+    const next = item.locator('.cp-next');
+    const h = async () => (await next.boundingBox())!.height;
+    const closed = await h();
+    await item.getByRole('button', { name: 'More' }).click();
+    expect(await h()).toBeGreaterThan(closed + 10);
+    await expect(item.getByRole('button', { name: 'Less' })).toBeVisible();
+    await expect(next).toContainText('third question');
+    await item.getByRole('button', { name: 'Less' }).click();
+    expect(await h()).toBe(closed);
+  });
+
+  test('r7: opening a task without a title worth reading or a next step says to open it', async ({ page }) => {
+    test.skip(!wide(page), 'side panel');
+    await boot(page, { bareTask: true });
+    await scope(page).locator('.th-go[aria-label^="Uni,"]').click();
+    await openCompanion(page);
+    const item = page.locator('.cp-item').filter({ hasText: 'Taxes' });
+    await expect(item.locator('.cp-open-to-see')).toHaveText("Open to see what's needed");
   });
 });
