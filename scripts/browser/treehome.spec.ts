@@ -66,7 +66,7 @@ test.describe('tree home', () => {
       await expect(page.locator('.th-go[aria-label^="COhere 2026,"]')).toContainText('boulder/cohere');
       await expect(page.locator('.th-go[aria-label^="Boulder Civic Calendar,"]')).toContainText('held by #boulder');
       await expect(page.locator('.th-go[aria-label^="Techne,"]')).toHaveAttribute('aria-label', /2 need you|need/);
-      await expect(page.locator('.th-go[aria-label^="Techne,"] .th-tag')).toBeVisible();
+      await expect(page.locator('.th-go[aria-label^="Techne,"] .th-dot')).toBeVisible();
       for (const b of await page.locator('.th-go').all()) expect((await b.boundingBox())!.height).toBeGreaterThanOrEqual(44);
     }
     expect(await fits(page)).toBe(true);

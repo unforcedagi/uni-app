@@ -26,25 +26,25 @@ test.describe('nested rooms', () => {
     await expect(scope.locator('.th-go[aria-label^="Atlas Institute,"]')).toContainText('held by #atlas');
     expect(await fits(page)).toBe(true);
     await shot(page, 'tree');
-    // a node held by an ancestor's room opens the holding room
+    // T-124: a node held by an ancestor's room opens that room's conversation, and says whose it is
     await scope.locator('.th-go[aria-label^="Atlas Institute,"]').click();
-    await expect(page.getByRole('button', { name: 'Open #atlas', exact: true })).toBeVisible();
-    if (!wide(page)) await page.locator('.th-back').click();
+    await expect(page.locator('.sr-door')).toHaveText('held by #atlas');
+    await expect(page.locator('.sr-chat').getByRole('textbox', { name: /^Message / })).toHaveAttribute('placeholder', 'Message #atlas');
+    if (!wide(page)) await page.locator('.sr-back').click();
     await scope.locator('.th-go[aria-label^="ATLAS,"]').click();
+    await expect(page.locator('.sr-door')).toHaveText('#atlas/build');
+    await shot(page, 'project');
+    // the conversation is in place (no new tab); "Everything here" is the node page, whose Open #room returns to it
+    const tabs = await page.locator('.tab-title').count();
+    if (!wide(page)) await page.locator('.cp-line').click();
+    await page.getByRole('button', { name: /^Everything here/ }).click();
     const open = page.getByRole('button', { name: 'Open #atlas/build' });
     await expect(open).toBeVisible();
     expect((await open.boundingBox())!.height).toBeGreaterThanOrEqual(44);
-    await shot(page, 'project');
-    // T-122: Open #room opens the Log over the node page, not a new tab; the room tab is "Open as tab" in the Log header
-    const tabs = await page.locator('.tab-title').count();
     await open.click();
-    const log = page.getByRole('dialog', { name: 'Log #atlas/build' });
-    await expect(log).toBeVisible();
+    await expect(page.locator('.sr-chat')).toBeVisible();
     await expect(page.locator('.tab-title')).toHaveCount(tabs);
     await shot(page, 'opened');
-    await log.getByRole('button', { name: 'Open as tab' }).click();
-    await expect.poll(() => page.evaluate((id) => (window as any).__calls.some((c: any) => c.args?.channel === id), BUILD)).toBe(true);
-    await expect(page.locator('.tab-title', { hasText: 'atlas/build' }).or(page.locator('.tab-title', { hasText: 'build' })).first()).toBeVisible();
   });
 
   test('the conversation list nests build and teach under atlas', async ({ page }) => {

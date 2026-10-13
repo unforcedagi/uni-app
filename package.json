@@ -24,7 +24,7 @@
     "test:chatoptional": "playwright test --config playwright.chatoptional.config.ts",
     "test:treehome": "playwright test --config playwright.treehome.config.ts",
     "test:roomsnav": "playwright test --config playwright.roomsnav.config.ts",
-    "test:steer": "playwright test --config playwright.steer.config.ts",
+    "test:simple": "playwright test --config playwright.simple.config.ts",
     "test:sidebar": "playwright test --config playwright.sidebar.config.ts"
   },
   "dependencies": {
