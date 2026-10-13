@@ -437,13 +437,9 @@ impl VaultClient {
         if !note["tags"].as_array().is_some_and(|t| t.iter().filter_map(Value::as_str).any(|t| t == "decision")) {
             return Err(Error::Invalid("only decision notes can be decided".into()));
         }
-        let v = self
-            .call(
-                "update-note",
-                json!({"vault": vault, "id": id, "include_content": false, "metadata": metadata,
-                    "state_transition": {"field": "state", "from": from, "to": to}}),
-            )
-            .await?;
+        let stamp = note["updatedAt"].as_str().unwrap_or_default();
+        let args = decide_args(vault, id, &from, &to, metadata, stamp)?;
+        let v = self.call("update-note", args).await?;
         check_vault_errors(&v)?;
         note_from(&v, id)
     }
@@ -941,6 +937,20 @@ fn check_snooze_patch(metadata: &Value) -> Result<()> {
     }
 }
 
+/// The update-note arguments for deciding: only `open` -> `decided`, the checked metadata, and the stamp just read
+/// (the vault requires `if_updated_at` when metadata rides with a state transition).
+fn decide_args(vault: &str, id: &str, from: &Value, to: &Value, metadata: Value, if_updated_at: &str) -> Result<Value> {
+    if from.as_str() != Some("open") || to.as_str() != Some("decided") {
+        return Err(Error::Invalid("a decision can only go from open to decided".into()));
+    }
+    if if_updated_at.is_empty() {
+        return Err(Error::Invalid("deciding needs the note's updatedAt".into()));
+    }
+    Ok(json!({"vault": vault, "id": id, "include_content": false, "metadata": metadata,
+        "if_updated_at": if_updated_at,
+        "state_transition": {"field": "state", "from": "open", "to": "decided"}}))
+}
+
 fn check_decide_patch(metadata: &Value) -> Result<()> {
     let obj = metadata.as_object().filter(|o| !o.is_empty() && o.keys().all(|k| matches!(k.as_str(), "decided" | "decided_at" | "decided_by")));
     let Some(obj) = obj else {
@@ -1100,6 +1110,19 @@ fn http_client() -> Result<reqwest::Client> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn decide_args_carry_the_stamp_and_pin_the_transition() {
+        let md = json!({"decided": "yes", "decided_at": "2026-10-13T08:00:00Z", "decided_by": "aaron"});
+        let a = decide_args("uni", "N1", &json!("open"), &json!("decided"), md.clone(), "2026-10-13T07:00:00.000Z").unwrap();
+        assert_eq!(a["if_updated_at"], "2026-10-13T07:00:00.000Z");
+        assert_eq!(a["state_transition"], json!({"field": "state", "from": "open", "to": "decided"}));
+        assert_eq!(a["metadata"], md);
+        assert!(a.get("force").is_none());
+        assert!(decide_args("uni", "N1", &json!("open"), &json!("decided"), md.clone(), "").is_err());
+        assert!(decide_args("uni", "N1", &json!("open"), &json!("archived"), md.clone(), "x").is_err());
+        assert!(decide_args("uni", "N1", &json!("decided"), &json!("open"), md, "x").is_err());
+    }
+
     use super::*;
 
     #[test]
