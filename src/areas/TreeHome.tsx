@@ -1,7 +1,7 @@
 // T-111: the tree home. Wide screens (Daylight, tablets): the map with a level panel beside it. Phones: a room tree, then a level.
 // The panel reads like a page (the C layout of the prototypes): what is alive, what needs you, updates from the rooms below, what is
 // inside, the other tasks, then the room, with the composer pinned under it. Styling is in tree.css (the Field Book tokens).
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { cleanText } from "../interface/contract";
 import type { RoomMessage } from "../interface/modules/chat";
@@ -11,6 +11,8 @@ import type { Area } from "./areasCore";
 import type { AliveLine, LevelAlive } from "./treeAlive";
 import { agoLabel, type RoomView, type TreeRow, type Update } from "./treeRooms";
 import type { Mark } from "./nodeMap";
+import type { NavControls } from "../navContext";
+import { ancestorsOf, hasKids, isOpen, rolledNeeds, SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN, useFolds, useSidebar, visibleRows } from "./sidebarState";
 
 const CAP = 3;
 
@@ -45,28 +47,48 @@ export const Tag = ({ n, label }: { n: number; label?: string }) => <b className
 
 // ---------------------------------------------------------------------------------------------- the phone's tree
 
-/** The rooms list: Uni, then every area and project beneath it, nested. A row is a name, its room in small type, and one quiet dot when something needs you. */
+/**
+ * The rooms list: Uni, then every area with its projects beneath. A row is the node's name; the room line under it is the room's real
+ * channel name (nothing for a node with no room of its own). Areas fold: the chevron folds, the name opens. A folded row still shows
+ * the dot when anything under it needs you.
+ */
 export function RoomTree({ chat = true, rows, needs, onOpen, selected }: {
   chat?: boolean; rows: readonly TreeRow[]; needs: ReadonlyMap<string, number>;
   onOpen: (path: string) => void;
   /** The row of the level being shown (the wide layout keeps the list beside it). */
   selected?: string;
 }) {
-  return <nav aria-label="Rooms and areas"><ul className="th-rows">{rows.map((r) => {
+  const [folds, setFold, reveal] = useFolds();
+  const key = ancestorsOf(rows, selected).join("\n");
+  useEffect(() => { reveal(key ? key.split("\n") : []); }, [key, reveal]);
+  const at = new Map(rows.map((r, i) => [r.path, i]));
+  return <nav aria-label="Rooms and areas"><ul className="th-rows">{visibleRows(rows, folds, selected).map((r) => {
+    const i = at.get(r.path)!;
+    const kids = hasKids(rows, i);
+    const open = !kids || isOpen(rows, folds, selected, r.path);
     const n = needs.get(r.path) ?? 0;
+    const dot = n > 0 || (!open && rolledNeeds(rows, needs, i) > 0);
     const sub = chat && r.own && r.slash ? `#${r.slash}` : "";
-    return <li key={r.path || "uni"} className={`th-row d${Math.min(r.depth, 4)} ${r.last ? "last" : ""} ${selected === r.path ? "sel" : ""}`}>
-      {r.depth > 0 && <span className="th-guides" aria-hidden="true">{Array.from({ length: r.depth }, (_, i) => <span key={i} className={`th-guide ${i === r.depth - 1 ? "branch" : r.trunk[i] ? "run" : ""}`} />)}</span>}
-      <button type="button" className="th-go" data-path={r.path} aria-current={selected === r.path ? "page" : undefined} onClick={() => onOpen(r.path)}
-        aria-label={`${r.name}${chat ? `, ${sub ? `room ${sub}` : "no channel of its own"}` : ""}${n ? `, ${n} need${n === 1 ? "s" : ""} you` : ""}`}>
+    const heldBy = chat && !r.own && r.heldBy ? `in #${r.heldBy}` : "";
+    return <li key={r.path || "uni"} className={`th-row d${Math.min(r.depth, 4)} ${selected === r.path ? "sel" : ""} ${kids ? "has-kids" : ""}`} data-open={kids ? String(open) : undefined}>
+      {r.depth > 0 && (kids
+        ? <button type="button" className="th-fold" data-path={r.path} aria-expanded={open} aria-label={`${open ? "Fold" : "Unfold"} ${r.name}`} title={open ? "Fold" : "Unfold"} onClick={() => setFold(r.path, !open)}><i aria-hidden="true" /></button>
+        : <span className="th-fold-gap" aria-hidden="true" />)}
+      <button type="button" className="th-go" data-path={r.path} aria-current={selected === r.path ? "page" : undefined} onClick={() => onOpen(r.path)} title={heldBy || undefined}
+        aria-label={`${r.name}${chat ? `, ${sub ? `room ${sub}` : "no channel of its own"}` : ""}${dot ? `, ${n ? `${n} need${n === 1 ? "s" : ""} you` : "something under it needs you"}` : ""}`}>
         <span className="th-name"><b>{r.name}</b>{sub && <small className="th-sub">{sub}</small>}</span>
-        {n > 0 && <i className="th-dot" title="Needs you" aria-hidden="true" />}
+        {dot && <i className="th-dot" title="Needs you" aria-hidden="true" />}
       </button>
     </li>;
   })}</ul></nav>;
 }
 
-export function TreeScreen({ chat = true, rows, needs, onOpen, status, selected, column }: {
+const NavButtons = ({ nav }: { nav: NavControls | null }) => nav ? <>
+  <button type="button" className="th-nb" aria-label="Back" title="Back (Alt+←)" disabled={!nav.canBack} onClick={nav.back}>←</button>
+  <button type="button" className="th-nb" aria-label="Forward" title="Forward (Alt+→)" disabled={!nav.canForward} onClick={nav.forward}>→</button>
+</> : null;
+
+export function TreeScreen({ chat = true, rows, needs, onOpen, status, selected, column, nav, onHide }: {
   /** false (chat.provider null): no room names. */
   chat?: boolean;
   rows: readonly TreeRow[];
@@ -74,13 +96,34 @@ export function TreeScreen({ chat = true, rows, needs, onOpen, status, selected,
   needs: ReadonlyMap<string, number>;
   onOpen: (path: string) => void; status?: ReactNode;
   selected?: string;
-  /** The left column beside a room (wide screens). */
+  /** The left column beside a room (wide screens): a slim toolbar (Back, Forward, hide), the tree, then the last few places. */
   column?: boolean;
+  nav?: NavControls | null; onHide?: () => void;
 }) {
   return <div className={`tree-home th-phone-tree ${column ? "th-column" : ""}`}>
-    <header className="th-treehead"><h1 className={column ? "th-colname" : "note-title"}>{column ? "Rooms" : "Uni"}</h1></header>
+    {column
+      ? <header className="th-toolbar"><NavButtons nav={nav ?? null} /><span className="th-tb-gap" />{onHide && <button type="button" className="th-nb" aria-label="Hide the sidebar" title="Hide the sidebar" onClick={onHide}>‹</button>}</header>
+      : <header className="th-treehead"><h1 className="note-title">Uni</h1></header>}
     {status}
-    <RoomTree chat={chat} rows={rows} needs={needs} onOpen={onOpen} selected={selected} />
+    <div className="th-rows-wrap"><RoomTree chat={chat} rows={rows} needs={needs} onOpen={onOpen} selected={selected} /></div>
+    {column && !!nav?.recent.length && <section className="th-recent" aria-label="Recent"><h2>Recent</h2>
+      <ul>{nav.recent.map((r) => <li key={r.key}><button type="button" onClick={r.go} title={r.title}>{r.title}</button></li>)}</ul></section>}
+  </div>;
+}
+
+/** The left column: width set by dragging its right edge (180 to 360px, remembered), or hidden down to a thin strip. */
+export function RoomSidebar({ nav, ...tree }: { chat?: boolean; rows: readonly TreeRow[]; needs: ReadonlyMap<string, number>; onOpen: (path: string) => void; selected?: string; nav?: NavControls | null }) {
+  const [sb, setSb] = useSidebar();
+  const drag = useRef<{ x: number; w: number } | null>(null);
+  if (sb.hidden) return <div className="th-roomnav hidden"><button type="button" className="th-nb" aria-label="Show the sidebar" title="Show the sidebar" onClick={() => setSb({ hidden: false })}>›</button><NavButtons nav={nav ?? null} /></div>;
+  return <div className="th-roomnav" data-width={sb.width}>
+    <TreeScreen column {...tree} nav={nav} onHide={() => setSb({ hidden: true })} />
+    <div className="th-resize" role="separator" aria-orientation="vertical" aria-label="Resize the sidebar" aria-valuemin={SIDEBAR_MIN} aria-valuemax={SIDEBAR_MAX} aria-valuenow={sb.width} tabIndex={0}
+      onPointerDown={(e) => { drag.current = { x: e.clientX, w: sb.width }; e.currentTarget.setPointerCapture(e.pointerId); }}
+      onPointerMove={(e) => { if (drag.current) setSb({ width: drag.current.w + e.clientX - drag.current.x }); }}
+      onPointerUp={() => { drag.current = null; }} onPointerCancel={() => { drag.current = null; }}
+      onDoubleClick={() => setSb({ width: SIDEBAR_DEFAULT })}
+      onKeyDown={(e) => { if (e.key === "ArrowLeft" || e.key === "ArrowRight") { e.preventDefault(); setSb({ width: sb.width + (e.key === "ArrowRight" ? 16 : -16) }); } }} />
   </div>;
 }
 

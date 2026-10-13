@@ -3,7 +3,6 @@
 import { PRIORITIES, type Task } from "./taskCore.ts";
 import type { Where } from "./whereCore.ts";
 
-export const NEEDS_SHOWN = 3;
 const LEDE_MAX = 170;
 
 /** The first sentence of the level's lede, as plain text, cut at a word when it runs long. */
@@ -18,13 +17,19 @@ export function firstSentence(text: string | null | undefined): string {
 }
 
 /**
- * What needs the user, at most `max`: the open decisions on this very node first (they carry option buttons), then everything else by
- * priority (Now, Soon, Someday). No count of the rest: "Everything here" is the way to the rest.
+ * The needs-you feed (T-124 r7): only what the user must do. Their tasks (owner, or waiting on them) that are live and not snoozed (the
+ * caller's `Where` has already dropped those, and anything done or archived), at priority Now or Soon (unsorted counts as Soon), plus open
+ * decisions; Someday is not here. Now before Soon, then by due date (undated last), then a decision before a task, then by title.
  */
-export function topNeeds(w: Where, path: string, max = NEEDS_SHOWN): Task[] {
-  const all = PRIORITIES.flatMap((p) => w.needs[p].rows);
-  const own = all.filter((t) => t.kind === "decision" && t.node === path);
-  return [...own, ...all.filter((t) => !own.includes(t))].slice(0, max);
+export function topNeeds(w: Where, _path?: string, max = Infinity): Task[] {
+  const rank = (t: Task) => (t.priority === "now" ? 0 : t.priority === "someday" ? 2 : 1);
+  const all = PRIORITIES.flatMap((p) => w.needs[p].rows).filter((t) => t.kind === "decision" || t.priority !== "someday");
+  return all.sort((a, b) => rank(a) - rank(b) || (a.due ?? "9999").localeCompare(b.due ?? "9999") || Number(b.kind === "decision") - Number(a.kind === "decision") || a.title.localeCompare(b.title)).slice(0, max);
+}
+
+/** A title says what to do when it has words beyond its id; "T-12" or one bare word does not. */
+export function actionableTitle(rest: string): boolean {
+  return rest.trim().split(/\s+/).filter(Boolean).length >= 2;
 }
 
 /** How long ago, quietly: "today", "yesterday", "3 days ago", "2 weeks ago", else the month and day. Empty for a missing or future time. */

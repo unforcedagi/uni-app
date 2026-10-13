@@ -12,7 +12,9 @@ export type TabTarget = Omit<Tab, "id">;
 export type Tabs = { tabs: Tab[]; active: string | null; recent: string[] };
 
 export const MAX_TABS = 12;
-export const TABS_KEY = "uni.tabs.v1";
+/** 0.1.46: no tab strip; the saved set is the surface you were on (v2). The v1 key is read once, for its active surface. */
+export const TABS_KEY = "uni.tabs.v2";
+export const LEGACY_TABS_KEY = "uni.tabs.v1";
 export const EMPTY_TABS: Tabs = { tabs: [], active: null, recent: [] };
 
 /**
@@ -186,4 +188,24 @@ export function restoreTabs(raw: string | null, roomIds: Iterable<string>): Tabs
   let active = typeof d.active === "string" && seen.has(d.active) ? d.active : null;
   if (!active) active = recent[recent.length - 1] ?? tabs[0]?.id ?? null;
   return capped({ tabs, active, recent: active ? touch(recent, active) : recent });
+}
+
+/** Kinds that are a place you can be (a room, Uni, an area, a thread, the Journal). A note or a vault browser is something opened over one. */
+export const isSurface = (t: Pick<Tab, "kind">): boolean => t.kind !== "note" && t.kind !== "vault";
+
+/** What to save: the surfaces only, so a note or a vault browser is never what the app reopens to. */
+export function persistable(s: Tabs): Tabs {
+  const tabs = s.tabs.filter(isSurface);
+  const ids = new Set(tabs.map((t) => t.id));
+  const recent = s.recent.filter((id) => ids.has(id));
+  const active = s.active && ids.has(s.active) ? s.active : recent[recent.length - 1] ?? tabs[0]?.id ?? null;
+  return { tabs, active, recent };
+}
+
+/** `uni.tabs.v1` (0.1.45 and earlier kept a strip of tabs): ignore the set, open the one that was active, when it is a surface. */
+export function migrateLegacyTabs(raw: string | null, roomIds: Iterable<string>): Tabs {
+  const old = restoreTabs(raw, roomIds);
+  const cur = activeTab(old);
+  const hit = cur && isSurface(cur) ? cur : [...old.recent].reverse().map((id) => old.tabs.find((t) => t.id === id)).find((t) => !!t && isSurface(t)) ?? null;
+  return hit ? { tabs: [hit], active: hit.id, recent: [hit.id] } : EMPTY_TABS;
 }

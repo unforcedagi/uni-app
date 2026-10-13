@@ -34,13 +34,13 @@ export type FoldRow = { path: string; depth: number };
 /** Whether row `i` has children (the next row is deeper). */
 export const hasKids = (rows: readonly FoldRow[], i: number): boolean => i + 1 < rows.length && rows[i + 1].depth > rows[i].depth;
 
-/** The paths from the top to `selected` (exclusive): the rows that must be open for it to show. */
+/** The areas and projects above `selected`, nearest first: the rows that must be open for it to show (Uni, the top row, is always open). */
 export function ancestorsOf(rows: readonly FoldRow[], selected: string | undefined): string[] {
   const i = rows.findIndex((r) => r.path === selected);
   if (i < 0) return [];
   const out: string[] = [];
   let d = rows[i].depth;
-  for (let j = i - 1; j >= 0 && d > 0; j--) if (rows[j].depth < d) { out.push(rows[j].path); d = rows[j].depth; }
+  for (let j = i - 1; j >= 0 && d > 0; j--) if (rows[j].depth < d) { if (rows[j].depth > 0) out.push(rows[j].path); d = rows[j].depth; }
   return out;
 }
 
@@ -89,6 +89,6 @@ export function useFolds(): [Folds, (path: string, open: boolean) => void, (path
 export function useSidebar(): [SidebarState, (s: Partial<SidebarState>) => void] {
   const [state, setState] = useState<SidebarState>(() => read(SIDEBAR_KEY, parseSidebar));
   const update = useCallback((s: Partial<SidebarState>) => setState((c) => { const n = { ...c, ...s, width: clampWidth(s.width ?? c.width) }; write(SIDEBAR_KEY, n); return n; }), []);
-  useEffect(() => { document.documentElement.style.setProperty("--th-nav-w", `${state.hidden ? 0 : state.width}px`); }, [state]);
+  useEffect(() => { document.documentElement.style.setProperty("--th-nav-w", `${state.hidden ? 34 : state.width}px`); }, [state]);
   return [state, update];
 }

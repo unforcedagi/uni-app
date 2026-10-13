@@ -2,12 +2,15 @@
 // running (only when something is). Desktop: a side panel that folds to a thin rail. Phone: a one-line strip at the top of the room that opens
 // downward. Each item opens its task sheet; "Everything here" goes one level deeper, to the full node page. The fold is remembered per device.
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { cleanText } from "../interface/contract";
 import { dueText } from "./NodeWork";
 import { isMe } from "./taskCore";
 import type { Run } from "./steerCore";
 import type { Task } from "./taskCore";
 import { splitTitle } from "./whereCore";
+import { splitLinks } from "./linkText";
+import { actionableTitle } from "./simpleCore";
 
 const KEYS = { side: "uni.companion.side.v1", strip: "uni.companion.strip.v1" } as const;
 /** Below this width the side panel starts folded: the conversation gets the space. */
@@ -42,23 +45,35 @@ const URL_RE = /https?:\/\/\S+|\bwww\.\S+/g;
 export const plainDetail = (s: string): string => s.replace(URL_RE, "").replace(/\s+/g, " ").replace(/\s*[·,;:(\[-]+\s*$/, "").replace(/\(\s*\)/g, "").trim();
 /** Running rows shown; the rest are behind the footer link. */
 const RUNS_SHOWN = 2;
-/** Whole questions or none: how many needs-you items fit a window this tall (a decision's ask wraps in full). */
-export const needsFit = (h: number): number => (h >= 820 ? 3 : h >= 640 ? 2 : 1);
-function useViewportHeight(): number {
-  const [h, setH] = useState(() => (typeof window === "undefined" ? 900 : window.innerHeight));
-  useEffect(() => { const f = () => setH(window.innerHeight); window.addEventListener("resize", f); return () => window.removeEventListener("resize", f); }, []);
-  return h;
-}
 type Fold = { open: boolean; onToggle: (v: boolean) => void };
 
 /** The ask itself: the "Decision (default yes):" style label a decision's title carries is left to the opened item. */
 export const askOf = (rest: string): string => { const t = plainDetail(rest) || rest; return t.replace(/^decision\s*(\([^)]*\))?\s*[:\-–—]\s*/i, "").trim() || t; };
 
-/** What Aaron does with it: a decision is decided, a task waiting on him says so, else its next step. */
-function actionOf(t: Task): string | null {
-  if (t.kind === "decision") return null;
-  if (isMe(t.waitingOn)) return t.next ? `Waiting on you · ${t.next}` : "Waiting on you";
-  return t.next || null;
+/** Why it is Aaron's, when the title and next step don't say: waiting on him. */
+const isWaitingOnYou = (t: Task) => t.kind !== "decision" && isMe(t.waitingOn);
+
+const openLink = (e: React.MouseEvent, url: string) => { e.preventDefault(); void invoke("open_link", { url }).catch(() => {}); };
+
+/** A task's next step, in full: wraps up to 4 lines, then "More" opens the rest in place. Links read as their domain and stay clickable. */
+export function NextText({ text }: { text: string }) {
+  const ref = useRef<HTMLParagraphElement>(null);
+  const [open, setOpen] = useState(false);
+  const [clamped, setClamped] = useState(false);
+  useLayoutEffect(() => {
+    const el = ref.current; if (!el) return;
+    const measure = () => { if (!open) setClamped(el.scrollHeight > el.clientHeight + 1); };
+    measure();
+    const ro = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    ro?.observe(el);
+    return () => ro?.disconnect();
+  }, [text, open]);
+  return <div className="cp-next-wrap">
+    <p ref={ref} className={`cp-next ${open ? "open" : ""}`}>{splitLinks(cleanText(text)).map((p, i) => "url" in p
+      ? <a key={i} className="cp-link" href={p.url} title={p.url} rel="noreferrer noopener" onClick={(e) => openLink(e, p.url)}>{p.label}</a>
+      : <span key={i}>{p.text}</span>)}</p>
+    {(clamped || open) && <button type="button" className="cp-more-next" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? "Less" : "More"}</button>}
+  </div>;
 }
 
 /** "All of X's work", or "All work" when the name doesn't fit the line. Measured, not guessed: the long form is tried first. */
@@ -84,26 +99,28 @@ function Stands({ text, ago }: { text: string; ago: string }) {
 function Body({ stands, ready, needs, runs, nodeName, onTask, onDecide, onEverything }: Props) {
   const active = runs.filter((r) => ACTIVE.has(r.state));
   const hiddenRuns = Math.max(0, active.length - RUNS_SHOWN);
-  const shownNeeds = needs.slice(0, needsFit(useViewportHeight()));
   return <div className="cp-body">
     {!ready ? <p className="cp-lede">Loading…</p> : stands && <Stands text={stands.text} ago={stands.ago} />}
-    {shownNeeds.length > 0 && <section aria-label="Needs you" className="cp-sec">
+    {ready && <section aria-label="Needs you" className="cp-sec">
       <h3 className="cp-h">Needs you</h3>
-      <ul className="cp-list">{shownNeeds.map((t) => {
+      {needs.length === 0 ? <p className="cp-none">Nothing needs you here.</p>
+      : <ul className="cp-list">{needs.map((t) => {
         const { id, rest: full } = splitTitle(cleanText(t.title));
         const rest = askOf(full);
-        const meta = plainDetail([actionOf(t), dueText(t.due)].filter(Boolean).join(" · "));
-        const opts = t.kind === "decision" ? t.options : [];
         const isDecision = t.kind === "decision";
+        const meta = [isWaitingOnYou(t) ? "Waiting on you" : null, dueText(t.due)].filter(Boolean).join(" · ");
+        const next = t.next.trim();
+        const opts = isDecision ? t.options : [];
         return <li key={t.id} className="cp-item">
           <button type="button" className={`cp-need${isDecision ? " decision" : ""}`} data-id={id ?? undefined} onClick={() => onTask(t)}>
             <span className="cp-title">{rest}{isDecision && opts.length === 0 && <span className="cp-go" aria-hidden="true"> ›</span>}</span>{meta && <small className="cp-detail">{meta}</small>}</button>
+          {next ? <NextText text={next} /> : !isDecision && !actionableTitle(rest) && <p className="cp-open-to-see">Open to see what's needed</p>}
           {isDecision && opts.length > 0 && <div className="cp-opts" role="group" aria-label={`Decide: ${rest}`}>
             {opts.slice(0, OPTS_SHOWN).map((o) => <button key={o} type="button" className="cp-opt" onClick={() => onDecide(t, o)}>{cleanText(o)}</button>)}
             {opts.length > OPTS_SHOWN && <button type="button" className="cp-opt more" onClick={() => onTask(t)}>More…</button>}
           </div>}
         </li>;
-      })}</ul>
+      })}</ul>}
     </section>}
     {active.length > 0 && <section aria-label="Running" className="cp-sec">
       <h3 className="cp-h">Running</h3>

@@ -9,6 +9,9 @@ import { activeProfile } from "./profile";
 export type TaskAction = "done" | "archive" | "snooze";
 export type Undo = { id: string; label: string; run: () => Promise<void> };
 export const UNDO_MS = 5000;
+/** How often an open window re-reads the tasks, and how stale a list may be when the window or a room is opened. */
+export const POLL_MS = 60_000;
+export const FOCUS_GAP_MS = 10_000;
 /** One finite exit animation; none when the user prefers reduced motion. */
 export const LEAVE_MS = 240;
 const reduced = () => typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
@@ -85,11 +88,16 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
       setDay(dayOf(new Date()));
       if (shouldReload(lastLoad.current, Date.now())) refresh();
     };
-    const focus = () => setDay(dayOf(new Date()));
+    // Coming back to the window re-reads what is stale; and while it stays open the list is re-read every minute, so a task finished
+    // elsewhere (Uni in the vault, another device) leaves the needs-you feed on its own.
+    const focus = () => { setDay(dayOf(new Date())); if (shouldReload(lastLoad.current, Date.now(), FOCUS_GAP_MS)) refresh(); };
+    const tick = setInterval(() => { if (document.visibilityState === "visible" && shouldReload(lastLoad.current, Date.now(), POLL_MS - 1000)) refresh(); }, POLL_MS);
     document.addEventListener("visibilitychange", visible);
     window.addEventListener("focus", focus);
-    return () => { document.removeEventListener("visibilitychange", visible); window.removeEventListener("focus", focus); };
+    return () => { clearInterval(tick); document.removeEventListener("visibilitychange", visible); window.removeEventListener("focus", focus); };
   }, [refresh]);
+  /** Re-read when the last read is older than `gapMs` (a room was opened: its list must not be a stale copy). */
+  const refreshIfStale = useCallback((gapMs = FOCUS_GAP_MS) => { if (shouldReload(lastLoad.current, Date.now(), gapMs)) refresh(); }, [refresh]);
   useEffect(() => () => { for (const t of timers.current.values()) clearTimeout(t); if (undoTimer.current) clearTimeout(undoTimer.current); }, []);
 
   const now = new Date();
@@ -200,5 +208,5 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
     } });
   }, [nodePath]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  return { tree, tasks: visible, all: list, runs, drafts, setPriority, decide, leaving, counts, truncated, treeTruncated, error, loading, notice, undo, act, refresh, dismissNotice: () => setNotice(null), ready: list !== null, now };
+  return { tree, tasks: visible, all: list, runs, drafts, setPriority, decide, leaving, counts, truncated, treeTruncated, error, loading, notice, undo, act, refresh, refreshIfStale, dismissNotice: () => setNotice(null), ready: list !== null, now };
 }
