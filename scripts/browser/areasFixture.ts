@@ -178,6 +178,8 @@ export type BootOpts = {
   steer?: boolean;
   /** T-124 r2: #atlas/build and #atlas/teach hold sixty messages each, so a room has history to open at the end of. */
   longChat?: boolean;
+  /** T-124 r6 (with longChat): a worker status ping before the newest message, and a newest message taller than the list with a marker line mid-way. */
+  tallLast?: boolean;
   /** T-111: a project (Priya) whose room is archived, with `room_fallback` naming the room that holds it. */
   priya?: boolean;
   /** T-111 rooms nav: Sanctum (a private area) holds tasks too. */
@@ -206,7 +208,7 @@ export async function bootAreas(page: Page, variant: Variant = 'seed', opts: Boo
   const now = Math.floor((opts.pinned ? pinnedAt : Date.now()) / 1000);
   const data = {
     profileNote: opts.profileNote ?? null, lifeVault: opts.lifeVault ?? null, now, variant, selftest: opts.selftest ?? true, ipcLeak: opts.ipcLeak ?? false, hostile: hostileApp(opts.ports ?? { http: 9, udp: 9 }), benign: BENIGN, techne: seed('techne'), unforced: seed('unforced'), seedMeta,
-    apps: opts.apps ?? [], multiRoom: !!opts.multiRoom || !!opts.tree, tree: !!opts.tree, tasks: !!opts.tasks, briefs: !!opts.briefs, queryDelay: opts.queryDelay ?? 0, identityDelay: opts.identityDelay ?? 0, roomsDelay: opts.roomsDelay ?? 0, messagesDelay: opts.messagesDelay ?? 0, nodeStatuses: opts.nodeStatuses ?? {}, nearOff: !!opts.nearOff, ids: !!opts.ids, boulder: !!opts.boulder, layout: opts.layout ?? 'octopus', underBoulder: !!opts.underBoulder, priya: !!opts.priya, atlas: !!opts.atlas, steer: !!opts.steer, longChat: !!opts.longChat, longChat: !!opts.longChat, privateTasks: !!opts.privateTasks, deviceCache: opts.deviceCache ?? null, queryFails: opts.queryFails ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null, mode: opts.mode ?? 'sealed', grantedUnder: opts.grantedUnder ?? (opts.mode ?? 'sealed'),
+    apps: opts.apps ?? [], multiRoom: !!opts.multiRoom || !!opts.tree, tree: !!opts.tree, tasks: !!opts.tasks, briefs: !!opts.briefs, queryDelay: opts.queryDelay ?? 0, identityDelay: opts.identityDelay ?? 0, roomsDelay: opts.roomsDelay ?? 0, messagesDelay: opts.messagesDelay ?? 0, nodeStatuses: opts.nodeStatuses ?? {}, nearOff: !!opts.nearOff, ids: !!opts.ids, boulder: !!opts.boulder, layout: opts.layout ?? 'octopus', underBoulder: !!opts.underBoulder, priya: !!opts.priya, atlas: !!opts.atlas, steer: !!opts.steer, longChat: !!opts.longChat, tallLast: !!opts.tallLast, privateTasks: !!opts.privateTasks, deviceCache: opts.deviceCache ?? null, queryFails: opts.queryFails ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null, mode: opts.mode ?? 'sealed', grantedUnder: opts.grantedUnder ?? (opts.mode ?? 'sealed'),
   };
   // Pre-granted apps: the grant key is the SHA-256 of the RESOLVED default needs plus the app's html.
   const preGrant = [
@@ -413,7 +415,7 @@ Two proposals wait on a scope decision.
       const a = notes.find((n) => n.id === 'a-atlas'); if (a) a.metadata = { ...a.metadata, channel: ATLAS, room: 'atlas' };
       const at = rooms.findIndex((r) => r.id === 'ch-atlas'); if (at >= 0) rooms.splice(at, 1);
       if (d.steer) msgs[BUILD] = [msg('b1', BUILD, 'Aaron', 2400, 'Where are we on the SOW?'), msg('b2', BUILD, 'Uni', 2300, 'Drafting it now; T-07 is due Tuesday.'), msg('b3', BUILD, 'Uni', 1200, 'Map labels are in a branch, waiting on your look.')];
-      if (d.longChat) for (const ch of [BUILD, TEACH]) msgs[ch] = Array.from({ length: 60 }, (_, i) => msg(`l${i}-${ch.slice(0, 4)}`, ch, i % 3 === 0 ? 'Aaron' : 'Uni', (60 - i) * 600, i === 59 ? 'The newest line of this room.' : `Message number ${i + 1} in the long history of this room, long enough to take a line or two of the list.`));
+      if (d.longChat) for (const ch of [BUILD, TEACH]) msgs[ch] = Array.from({ length: 60 }, (_, i) => msg(`l${i}-${ch.slice(0, 4)}`, ch, i % 3 === 0 ? 'Aaron' : 'Uni', (60 - i) * 600, d.tallLast && i === 58 ? '⏳ Working — 6 min — iteration 7' : d.tallLast && i === 59 ? Array.from({ length: 30 }, (_, k) => k === 10 ? '[done T-123]' : `Paragraph ${k + 1} of a long report, with enough words in it to take a couple of lines on a phone.`).join('\n\n') : i === 59 ? 'The newest line of this room.' : `Message number ${i + 1} in the long history of this room, long enough to take a line or two of the list.`));
       rooms.push(room(ATLAS, 'atlas'), room(BUILD, 'atlas/build'), room(TEACH, 'atlas/teach'));
       const pr = (id: string, name: string, meta: Record<string, unknown>) => ({ id, path: `Projects/${name}`, extension: 'md', tags: ['project'], metadata: { status: 'foreground', summary: `${name}.`, parent: 'Areas/Atlas', ...meta }, updatedAt: '2026-10-08T00:00:00Z', content: `# ${name}\n\n${name}.` });
       notes.push(pr('p-atlas', 'ATLAS', { room: 'atlas/build', channel: BUILD }), pr('p-lvb', 'Learn Vibe Build', { room: 'atlas/teach', channel: TEACH }), pr('p-ai', 'Atlas Institute', { room: 'atlas' }));
