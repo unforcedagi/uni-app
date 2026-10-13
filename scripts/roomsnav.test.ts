@@ -4,7 +4,6 @@ import assert from "node:assert/strict";
 import { buildTaskTree, parseNodes, parseTask, priorityOf, type Task } from "../src/areas/taskCore.ts";
 import { createVaultTasks } from "../src/areas/vaultTasks.ts";
 import { splitTitle, whereWeAre } from "../src/areas/whereCore.ts";
-import { parseHomeLayout } from "../src/areas/homeLayout.ts";
 
 let failed = 0;
 const pending: Promise<void>[] = [];
@@ -76,10 +75,6 @@ check("setPriority: one vault_patch_meta with the read stamp; null clears; a sta
   assert.deepEqual(sent[2].args.metadata, { priority: "soon", priority_by: "weigh.py 2026-10-12" });
   const bad = await api.setPriority("k3", "soon", "stale");
   assert.ok(!bad.ok && bad.kind === "conflict");
-});
-check("layout: Rooms is the default when nothing is stored; an earlier choice of tree/octopus/classic stands", () => {
-  assert.equal(parseHomeLayout(null), "rooms"); assert.equal(parseHomeLayout("garbage"), "rooms");
-  for (const l of ["tree", "octopus", "classic", "rooms"]) assert.equal(parseHomeLayout(l), l);
 });
 
 await Promise.all(pending);  // an async check must finish before the exit code is decided

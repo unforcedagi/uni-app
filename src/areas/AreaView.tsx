@@ -20,8 +20,7 @@ import { createChatModule, type RoomMessage } from "../interface/modules/chat";
 import { createNoteModule } from "../interface/modules/note";
 import { createThemeModule, readHostTheme } from "../interface/modules/theme";
 import type { Area } from "./areasCore";
-import { areaPaths, type AreaBrief } from "./useAreas";
-import BriefView from "./BriefView";
+import { areaPaths } from "./useAreas";
 import { useVaultProfile } from "./ProfileContext";
 
 const getMessages = (channel: string, limit: number) => invoke<RoomMessage[]>("get_messages", { channel, root: null, limit });
@@ -40,24 +39,16 @@ const desktopQuery = `(min-width: ${DESKTOP_MIN}px)`;
 const subscribeDesktop = (f: () => void) => { const mq = window.matchMedia(desktopQuery); mq.addEventListener("change", f); return () => mq.removeEventListener("change", f); };
 const isDesktop = () => window.matchMedia(desktopQuery).matches;
 
-export default function AreaView({ area, entry, now, channel, onChannel, mode, roomName, actions, room, onBack, backLabel, onConversations, crumbs, stage, slot, work, lead, kids, freshAt, dataStatus, tree, projectError, projectLoading }: {
-  projectError?: string | null;
-  projectLoading?: boolean;
+export default function AreaView({ area, channel, onChannel, mode, roomName, actions, room, onBack, backLabel, tree }: {
   area: Area; mode: GateMode | "closed"; roomName: (id: string) => string; actions: AreaActions;
-  /** The area's Brief (null: Uni hasn't written one) and the time it is read against. */
-  entry: AreaBrief | null; now: number;
   /** The room shown (one of the area's rooms) and the way to pick another. */
   channel: string | null; onChannel: (id: string) => void;
   /** The host's real room view for this area's room; null while it opens (or when the area has none). */
   room: AreaRoom | null;
   /** Up one level (null: this is Uni, the top) and where that goes, by name. */
   onBack: (() => void) | null; backLabel: string;
-  /** Uni (the top) only: reach the conversation list where the rail is out of reach (short landscape screens). */
-  onConversations?: () => void;
-  /** The page around the Brief: breadcrumb, Uni's Today in place of a Brief, the children, the freshness override. */
-  crumbs?: ReactNode; stage?: ReactNode; slot?: ReactNode; work?: ReactNode; lead?: ReactNode; kids?: ReactNode; freshAt?: string | null; dataStatus?: ReactNode;
-  /** T-111: the tree home's level (map, panel and composer) in place of the Brief page. It brings its own navigation, chat and bar. */
-  tree?: ReactNode;
+  /** The room shell (tree, conversation, companion): the page itself. Only the area's App tab replaces it. */
+  tree: ReactNode;
 }) {
   const profile = useVaultProfile();
   const vaultName = profile.vault;
@@ -110,17 +101,10 @@ export default function AreaView({ area, entry, now, channel, onChannel, mode, r
   // Where the chat goes: the manifest's hint, else beside the interface on a desktop and a sheet on a phone.
   const desktop = useSyncExternalStore(subscribeDesktop, isDesktop, () => true);
   // The tree home is its own page (room, composer and navigation inside); only the App tab brings the side chat back.
-  const treePage = !!tree && !onApp;
+  const treePage = !onApp;
   const layout = treePage || !chatOn ? "hidden" : chatMode(onApp && manifest?.ok ? manifest.manifest.layout.chat : null, desktop);
   const layoutRef = useRef(layout); layoutRef.current = layout;
   const hasRoom = area.rooms.length > 0;
-  // Ask Uni: a draft in the shown room's composer (the sheet opens on a phone). Never sends.
-  const [poke, setPoke] = useState(0);
-  const ask = (text: string) => {
-    if (!channel) return;
-    const r = roomRef.current;
-    if (r && layoutRef.current !== "hidden" && r.id === channel) { r.compose(text); setPoke((n) => n + 1); } else actionsRef.current.compose(channel, text);
-  };
   const rooms = area.rooms.length > 1 ? <RoomChips channels={area.rooms} selected={channel} roomName={roomName} onPick={onChannel} /> : null;
   const suggestions = useMemo(() => createSuggestionStore({
     onAccept: (s) => {
@@ -176,7 +160,6 @@ export default function AreaView({ area, entry, now, channel, onChannel, mode, r
   const idle = ready_ && granted && !running;
   // A running app has its own hero, so the host bar drops the title (kept for screen readers).
   const header = treePage ? null : <header className={`area-bar ${framed ? "chromeless" : ""}`}>
-    {!onBack && onConversations && <button className="note-back area-conversations" onClick={onConversations} aria-label="Back to conversations"><span className="note-back-arrow" aria-hidden="true">←</span><span className="note-back-label">Rooms</span></button>}
     {onBack && <button className="note-back" onClick={onBack} aria-label={`Back to ${backLabel}`}><span className="note-back-arrow" aria-hidden="true">←</span><span className="note-back-label">{backLabel}</span></button>}
     <strong className={`area-bar-title ${framed ? "sr-only" : ""}`}>{name}</strong>
     {framed && mode === "approved-code" && <span className="area-mode-chip" title="On this device apps can reach the network through WebRTC, so this app is only as safe as its code. You approved this version.">Approved code</span>}
@@ -199,17 +182,17 @@ export default function AreaView({ area, entry, now, channel, onChannel, mode, r
     <button type="button" role="tab" id="area-tab-brief" aria-selected={tab === "brief"} className={tab === "brief" ? "on" : ""} onClick={() => setTab("brief")}>Brief</button>
     <button type="button" role="tab" id="area-tab-app" aria-selected={tab === "app"} className={tab === "app" ? "on" : ""} onClick={(e) => { if (e.isTrusted) openAppTab(); }}>App</button>
   </nav> : null;
-  const withChat = (main: ReactNode, above: ReactNode, cls = "") => <div className={`area-view ${cls} ${treePage ? "tree-page" : ""}`}>{header}{tabs}{dataStatus}
+  const withChat = (main: ReactNode, above: ReactNode, cls = "") => <div className={`area-view ${cls} ${treePage ? "tree-page" : ""}`}>{header}{tabs}
     {decision === "run-notice" && <p className="area-updated" role="status">This app was updated since you allowed it. <button className="pairing-secondary area-accept" onClick={(e) => { if (e.isTrusted) accept(); }}>Accept</button></p>}
     {framed && theftNote && <p className="area-updated" role="status">This app took the keyboard from the chat. If it does that again it will be stopped.</p>}
     <ChatLayout framed={framed} onTheft={takeover} mode={layout} main={main} aboveMain={chatShown && room ? null : above}
       chat={layout === "side" ? <SideChat labelled={framed} room={room} hasRoom={hasRoom} above={above} rooms={rooms} label={`Chat in ${channel ? "#" + roomName(channel) : name}`} />
-        : layout === "sheet" ? <ChatSheet room={room} hasRoom={hasRoom} above={above} rooms={rooms} forceOpen={pendingSuggestions} poke={poke} label={`Chat in ${channel ? "#" + roomName(channel) : name}`} /> : null} />{area.path === "" && !treePage && chatOn && <p className="area-quiet uni-router-rule">Uni routes from here: area work goes to its room.</p>}</div>;
+        : layout === "sheet" ? <ChatSheet room={room} hasRoom={hasRoom} above={above} rooms={rooms} forceOpen={pendingSuggestions} label={`Chat in ${channel ? "#" + roomName(channel) : name}`} /> : null} /></div>;
 
   if (framed) return withChat(<InterfaceFrame html={app!.html} title={`${name} app`} router={router} grant={grant} ready={ready} onSession={(s) => { session.current = s; }} />, bar, "framed");
   if (asking && manifest?.ok) return withChat(<GrantPrompt name={name} codeChanged={codeChanged && status === "updated"} approvedCode={mode === "approved-code"} lines={describeNeeds(manifest.manifest.needs, ctx, roomName)}
     onAllow={() => { grants.grant(app!.id, keys!.scope, keys!.html, mode === "approved-code" ? "approved-code" : "sealed"); markStarted(area.path); bump(); }} onNotNow={() => setDeclined(true)} />, null);
-  if (!onApp) return withChat(tree ?? <BriefView area={area} entry={entry} now={now} canAsk={!!channel} onNote={actions.openNote} onAsk={ask} crumbs={crumbs} stage={stage} slot={slot} work={work} lead={lead} kids={kids} freshAt={freshAt} projectError={projectError} projectLoading={projectLoading} />, null);
+  if (!onApp) return withChat(tree, null);
   return withChat(<AppPanel area={area} pending={!keys} onOpenApp={idle ? start : null} onRevoke={idle ? revoke : null}
     notice={manifest && !manifest.ok ? `This area's app was not opened: ${manifest.error}.` : !running ? stoppedNote : null} />, null);
 }

@@ -30,15 +30,13 @@ export function RoomChips({ channels, selected, roomName, onPick }: { channels: 
 const DRAG = 30;
 
 /** Phone: the chat as a pull-up sheet. Collapsed it is a peek bar (last message, unread count). */
-export function ChatSheet({ room, hasRoom, above, rooms, forceOpen, poke, label }: { room: AreaRoom | null; hasRoom: boolean; above: ReactNode; rooms: ReactNode; forceOpen: number; poke: number; label: string }) {
+export function ChatSheet({ room, hasRoom, above, rooms, forceOpen, label }: { room: AreaRoom | null; hasRoom: boolean; above: ReactNode; rooms: ReactNode; forceOpen: number; label: string }) {
   const [open, setOpen] = useState(false);
   const interactive = !!room;
   // A suggestion arriving while the sheet is down opens it: the bar and the composer live inside.
   const seenForce = useRef(forceOpen);
   useEffect(() => { if (forceOpen > seenForce.current && interactive) setOpen(true); seenForce.current = forceOpen; }, [forceOpen, interactive]);
   // A draft dropped in the composer (Ask Uni) opens the sheet the same way.
-  const seenPoke = useRef(poke);
-  useEffect(() => { if (poke > seenPoke.current && interactive) setOpen(true); seenPoke.current = poke; }, [poke, interactive]);
   const [marker, setMarker] = useState<string | null | undefined>(undefined);
   const last = room?.messages[room.messages.length - 1];
   useEffect(() => { if (room?.loaded && (open || marker === undefined)) setMarker(last?.ref ?? null); }, [room?.loaded, open, last?.ref, marker]);

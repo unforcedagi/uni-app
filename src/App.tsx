@@ -11,10 +11,8 @@ import { effectiveLifeVault, showUniGlue } from "./areas/profile";
 import { clearProjectBodies } from "./areas/projectBody";
 import AreasSurface from "./areas/LifeOsSurface";
 import { rootOpenMemory } from "./areas/rootMemory";
-import type { ZoomState } from "./areas/NodeStage";
 import { UNI_CHANNEL } from "./areas/treeCore";
 import AreaSelfTest from "./interface/selftest/SelfTest";
-import HomeLayoutSetting from "./areas/HomeLayoutSetting";
 import LifeOsVaultSetting from "./areas/LifeOsVaultSetting";
 import { appendDraft } from "./areas/composeDraft";
 import { FOR_YOU_ID, FOR_YOU_OPENED_KEY, countRecommendations, isRecommendationNew, readLastSurface, saveLastSurface } from "./railCore";
@@ -47,7 +45,6 @@ import { currentUserAgent, platformName } from "./interface/selftest/gate";
 import { activeTab, closeTab, EMPTY_TABS, focusTab, isSurface, LEGACY_TABS_KEY, migrateLegacyTabs, navigateNoteTab, nextAfterClose, openTab, persistable, recordingTabCanClose, restoreTabs, serializeTabs, updateTab, TABS_KEY, type Tabs, type Tab, type TabTarget, type OpenMode } from "./tabs";
 import { canBack as histCanBack, canForward as histCanForward, EMPTY_HISTORY, recent as histRecent, step as histStep, visit as histVisit, type History } from "./navHistory";
 import { NavContext, type NavControls } from "./navContext";
-import { readHomeLayout } from "./areas/homeLayout";
 import { notifyMention, setUnreadBadge } from "./desktopNotify";
 import NoteView from "./NoteView";
 import SurfaceModal from "./SurfaceModal";
@@ -170,7 +167,6 @@ function Conversations({ onForget }: { onForget: () => void }) {
     readLastSurface(localStorage) === "journal" ? { kind: "journal", title: "Journal" } : { kind: "areas", title: "Uni" },
     "new", () => crypto.randomUUID()));
   const tabsRef = useRef<Tabs>(tabs);
-  const nodeZoom = useRef<ZoomState>({ intent: null, everMounted: false });
   const areaBack = useRef<(() => void) | null>(null);
   const setAreaBack = useCallback((back: (() => void) | null) => { areaBack.current = back; }, []);
   const tabsReady = useRef(false);
@@ -438,7 +434,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   }
   /** A room that a node owns opens as that node: one view of a room, wherever it is opened from (the tree, search, a note link, a needs-you item). */
   function resolveTarget(target: TabTarget): TabTarget {
-    if (target.kind !== "room" || !target.channel || readHomeLayout() !== "rooms") return target;
+    if (target.kind !== "room" || !target.channel) return target;
     const n = nodeOfRoom(target.channel);
     if (!n) return target;
     if (n.path === "") { rootOpenMemory.open = true; return { kind: "areas", title: "Uni", channel: target.channel }; }
@@ -1164,35 +1160,6 @@ function Conversations({ onForget }: { onForget: () => void }) {
     try { if (!await recorder.start(origin) && recordingOrigin.current === origin) recordingOrigin.current = null; }
     catch (e) { if (recordingOrigin.current === origin) recordingOrigin.current = null; setError(`Microphone unavailable: ${String(e)}`); }
   }
-  // The node view's talk bar: a voice note or one line to a level's room. Voice goes through the same durable outbox and
-  // queue as the composer's recorder (nothing else uploads); text uses the same post_message call as Send.
-  async function startVoiceFor(target: string): Promise<boolean> {
-    if (sendingRef.current || recordingOrigin.current || recorder.isBusy()) return false;
-    const tab = activeTab(tabsRef.current);
-    if (!tab) return false;
-    setError(null);
-    const origin = { key: keyFor(target, null), tabId: tab.id, title: tab.title, channel: target, replyTo: null, notifyUni };
-    recordingOrigin.current = origin;
-    try {
-      const started = await recorder.start(origin, `for #${rooms.find((r) => r.id === target)?.name ?? "room"}`);
-      if (!started && recordingOrigin.current === origin) recordingOrigin.current = null;
-      return started;
-    } catch (e) { if (recordingOrigin.current === origin) recordingOrigin.current = null; setError(`Microphone unavailable: ${String(e)}`); throw e; }
-  }
-  async function sendTextTo(target: string, body: string) {
-    const roomMembers = await invoke<Member[]>("get_members", { channel: target });
-    const uni = findUniMember(roomMembers);
-    await invoke<Message>("post_message", { channel: target, body, replyTo: null, recipients: notifyUni && uni ? [uni.pubkey] : [], media: [] });
-    setTick((n) => n + 1);
-    void loadRooms().catch(() => {});
-  }
-  const talk = {
-    sendText: sendTextTo,
-    startVoice: startVoiceFor,
-    stopVoice: () => recorder.stop(),
-    recording: recordingOrigin.current && recorder.busy ? { channel: recordingOrigin.current.channel, elapsed: recorder.elapsed, phase: recorder.phase } : null,
-    voice: (voiceStatus === "Sending voice message…" ? "sending" : voiceStatus === "Voice message sent" ? "sent" : voiceStatus === "Voice message failed" ? "failed" : "") as "" | "sending" | "sent" | "failed",
-  };
   function onPasteFiles(e: React.ClipboardEvent) {
     const files = Array.from(e.clipboardData.files);
     if (files.length) { e.preventDefault(); addFiles(files); }
@@ -1686,7 +1653,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       {panel === "settings" && <div className="settings">
         <p className="connection" role="status">{status}{live ? <span className={`live ${live === "Live" ? "on" : ""}`}> · {live}</span> : null}</p>
       {identity && <p className="identity" title={npub ?? identity}>{myName ? <>Signed in as <strong>{myName}</strong></> : <>Public key <code>{npub ? `${npub.slice(0, 14)}…${npub.slice(-6)}` : `${identity.slice(0, 12)}…`}</code></>}<button className="identity-copy" onClick={() => void copyText(npub ?? identity, "Copied public key")} aria-label="Copy your public key">⧉</button></p>}
-        <UpdateSettings /><HomeLayoutSetting /><LifeOsVaultSetting vaults={vaults} /><AreaSelfTest /><PairDeviceButton onOpen={() => setPairSourceOpen(true)} /><button className="pairing-secondary" onClick={() => void forget()}>{forgetArmed ? "Tap again to forget — you'll need to re-pair" : "Forget this device key"}</button>{forgetArmed && <button className="pairing-secondary" onClick={() => setForgetArmed(false)}>Keep key</button>}</div>}
+        <UpdateSettings /><LifeOsVaultSetting vaults={vaults} /><AreaSelfTest /><PairDeviceButton onOpen={() => setPairSourceOpen(true)} /><button className="pairing-secondary" onClick={() => void forget()}>{forgetArmed ? "Tap again to forget — you'll need to re-pair" : "Forget this device key"}</button>{forgetArmed && <button className="pairing-secondary" onClick={() => setForgetArmed(false)}>Keep key</button>}</div>}
       {searchOpen && <Search initialQuery={searchQuery} vaults={vaults} key={`${searchScope.vault}:${searchScope.prefix}`} initialVault={searchScope.vault} initialPathPrefix={searchScope.prefix} onOpen={openHit} onOpenNote={(n) => { setSearchOpen(false); openNote({ hub: null, vault: n.vault, ref: n.id }, null); }} onAskUni={askUniSearch} onClose={() => { setSearchOpen(false); if (topNote) setSidebarVisible(false); }} />}
       {searchOpen && error && <p className="error search-error" role="alert">{error}</p>}
       <div className="rooms-body" hidden={searchOpen}>
@@ -1713,7 +1680,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       {journalTab && <div className="journal-tab-content" hidden={!journalOpen} onFocusCapture={(e) => { if (e.target instanceof HTMLTextAreaElement) requestAnimationFrame(() => setComposerFocused(true)); }} onBlurCapture={(e) => { const journal = e.currentTarget; requestAnimationFrame(() => setComposerFocused(journal.contains(document.activeElement) && document.activeElement instanceof HTMLTextAreaElement)); }}><Journal focus={journalFocus} onFocus={() => setJournalFocus((v) => !v)} rooms={rooms} uniRoomId={findUniRoom(rooms)?.id ?? null} onShare={shareEntry} onBack={() => setPanel("rooms")} onRecordingChange={(on, elapsed, stop) => { journalRecordingRef.current = on; setJournalRecording(on ? { elapsed, stop } : null); }} /></div>}
       {active?.kind === "vault" && active.vault ? <VaultBrowser key={active.vault} vault={active.vault} onBack={() => setPanel("rooms")} onOpen={(note) => openTarget({ kind: "note", note: { hub: null, vault: active.vault!, ref: note.id }, title: note.path || note.id }, "new")} onCreate={(folder) => requestCreate(active.vault!, folder)} onSearch={(prefix) => { setSearchQuery(""); setSearchScope({ vault: active.vault!, prefix }); setSearchOpen(true); setSidebarVisible(true); }} />
       : journalOpen ? null
-      : areasOpen && active ? <AreasSurface roomsPending={rooms.length === 0 && synced === 0} vaults={vaults} zoom={nodeZoom} talk={talk} onBackChange={setAreaBack} identity={identity} key={`${active.id}:${identity ?? ""}`} onConversations={() => setPanel("rooms")} path={active.kind === "area" ? active.path ?? null : null} rooms={rooms} actions={areaActions} roomFor={areaRoomFor} onRoom={syncAreaRoom}
+      : areasOpen && active ? <AreasSurface roomsPending={rooms.length === 0 && synced === 0} vaults={vaults} onBackChange={setAreaBack} identity={identity} key={`${active.id}:${identity ?? ""}`} path={active.kind === "area" ? active.path ?? null : null} rooms={rooms} actions={areaActions} roomFor={areaRoomFor} onRoom={syncAreaRoom}
           onOpenArea={(path, name, room) => openTarget(path === null ? { kind: "areas", title: "Uni", ...(room ? { channel: room } : {}) } : { kind: "area", path, title: name, ...(room ? { channel: room } : {}) }, "replace")} />
       : currentRoom ? <>
         <header className="conversation-header">

@@ -2,7 +2,7 @@
 // Run: node --experimental-strip-types scripts/lifeos.test.ts
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { askDraft, briefMissingDraft, refreshDraft, nowLine, parseBrief, parseToday, rankNeeds, todayNeeds, updatedLabel, inlineTokens } from "../src/areas/briefCore.ts";
+import { refreshDraft, nowLine, parseBrief, parseToday, rankNeeds, todayNeeds, updatedLabel, inlineTokens } from "../src/areas/briefCore.ts";
 import { createAreasCache, CACHE_KEY } from "../src/areas/areasCache.ts";
 import { pickRoom } from "../src/areas/areaLayout.ts";
 import { parseArea, parseProject, parentOf } from "../src/areas/areasCore.ts";
@@ -142,19 +142,6 @@ check("updatedLabel: freshness in words", () => {
   assert.equal(updatedLabel(new Date(NOW + 60_000).toISOString(), NOW), "updated just now", "clock skew never says the future");
 });
 
-check("Ask-Uni drafts reference the item and the area, and never look like a sent message", () => {
-  const item = parseBrief(BRIEF).needsYou[0];
-  const d = askDraft("needsYou", "Techne", item);
-  assert.match(d, /@Uni/);
-  assert.match(d, /Techne/);
-  assert.ok(d.includes(item.text));
-  const s = askDraft("suggested", "Techne", parseBrief(BRIEF).suggested[0]);
-  assert.match(s, /draft|do this|take this/i);
-  assert.ok(s.includes("Draft a reply to Benjamin"));
-  const w = briefMissingDraft("Techne");
-  assert.match(w, /@Uni/); assert.ok(w.includes("Areas/Techne/Brief"));
-});
-
 // -------------------------------------------------------------------- device cache
 function memStore(init: Record<string, string> = {}) {
   const m = new Map(Object.entries(init));
@@ -285,7 +272,6 @@ check("the Uni root is a node on the Uni channel, and refresh drafts name the no
   assert.match(refreshDraft("Techne", "Areas/Techne"), /^@Uni .*Areas\/Techne\/Brief/);
   assert.match(refreshDraft("COhere 2026", "Projects/COhere/COhere 2026"), /Projects\/COhere\/COhere 2026\/Brief/);
   assert.match(refreshDraft("Uni", ""), /Areas\/Today/);
-  assert.match(briefMissingDraft("COhere 2026", "Projects/COhere/COhere 2026"), /Projects\/COhere\/COhere 2026\/Brief/);
 });
 
 check("project summary supplies purpose with a lean query", () => {

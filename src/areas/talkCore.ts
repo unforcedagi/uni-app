@@ -30,9 +30,3 @@ export function steward(chain: readonly RoomNode[], rooms: readonly RoomRef[], u
 }
 
 export const resolveRoom = (chain: readonly RoomNode[], rooms: readonly RoomRef[], uni: RoomRef | null): RoomRef | null => steward(chain, rooms, uni).room;
-
-/** The line on a node page: which room stewards it. */
-export function stewardLine(s: Steward): string | null {
-  if (!s.room) return null;
-  return s.via === "own" ? `Room #${s.room.name}` : `Stewarded by #${s.room.name}`;
-}

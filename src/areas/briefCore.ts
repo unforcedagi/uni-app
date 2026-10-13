@@ -175,18 +175,6 @@ export function updatedLabel(iso: string | null | undefined, now: number): strin
   return `updated ${Math.floor(s / (7 * 86400))}w ago`;
 }
 
-// --------------------------------------------------------------------------- Ask Uni (drafts only; the user taps send)
-export type AskKind = "needsYou" | "moving" | "suggested";
-
-export function askDraft(kind: AskKind, area: string, it: BriefItem): string {
-  const sources = it.tokens.filter((t): t is Extract<Inline, { t: "link" }> => t.t === "link").map((t) => t.target);
-  const src = sources.length ? ` (source: ${sources.join(", ")})` : "";
-  const lead = kind === "suggested" ? "please go ahead and draft this" : kind === "moving" ? "where does this stand, and what is next" : "I need to deal with this, what do you suggest and can you draft it";
-  return `@Uni ${area}: ${lead}? "${it.text}"${src}`;
-}
-
-export const briefMissingDraft = (area: string, path = `Areas/${area}`) => `@Uni ${area} has no brief yet. Please write ${path}/Brief from this area's rooms, journal and meetings.`;
-
 /** The Refresh action: a draft asking Uni to rewrite a node's Brief (the Uni home: Today). Never sent by the app. */
 export const refreshDraft = (name: string, path: string | null) => path === null || path === ""
   ? "@Uni Please refresh Areas/Today: what needs me, what moved, and what is quiet."

@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { cleanText } from "../interface/contract";
 import type { RoomMessage } from "../interface/modules/chat";
-import { InlineText } from "./BriefView";
+import { InlineText } from "./InlineText";
 import { Body } from "../MessageBody";
 import type { Area } from "./areasCore";
 import type { AliveLine, LevelAlive } from "./treeAlive";
