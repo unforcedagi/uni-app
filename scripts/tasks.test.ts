@@ -2,7 +2,7 @@
 // Run: node --experimental-strip-types scripts/tasks.test.ts
 import assert from "node:assert/strict";
 import { buildTaskTree, dayOf, failureKind, groupOf, groupTasks, parseNodes, parseTask, rollUp, snoozed, subtreePaths, tasksUnder, tomorrowOf, nodeFilterKeys, type Task } from "../src/areas/taskCore.ts";
-import { createVaultTasks } from "../src/areas/vaultTasks.ts";
+import { allPages, changedBy, createVaultTasks } from "../src/areas/vaultTasks.ts";
 import { ROOT } from "../src/areas/treeCore.ts";
 import { resolveRoom, roomByName } from "../src/areas/talkCore.ts";
 
@@ -224,6 +224,32 @@ await check("talk target: the node's `room` name, else its channel ids, else the
   assert.equal(resolveRoom([{ path: "P/C", room: "gone", channels: ["x"] }, { path: "A/T", room: "techne", channels: [] }], rooms, uni)?.id, "r-techne");
   assert.equal(resolveRoom([{ path: "P/C", room: null, channels: [] }], rooms, uni)?.id, "r-uni");
   assert.equal(resolveRoom([], rooms, null), null);
+});
+
+await check("r12 paging: a list is read 200 at a time until a short page; a vault that ignores offset, or 10 full pages, is never called complete", async () => {
+  const rows = Array.from({ length: 450 }, (_, i) => ({ id: `n${i}` }));
+  const asked: number[] = [];
+  const all = await allPages(async (offset) => { asked.push(offset); return rows.slice(offset, offset + 200); });
+  assert.deepEqual(asked, [0, 200, 400]); assert.equal(all.rows.length, 450); assert.equal(all.complete, true);
+  const exact = await allPages(async (offset) => rows.slice(0, 400).slice(offset, offset + 200));
+  assert.equal(exact.rows.length, 400); assert.equal(exact.complete, true, "an empty last page ends it");
+  const deaf = await allPages(async () => rows.slice(0, 200));
+  assert.equal(deaf.rows.length, 200); assert.equal(deaf.complete, false, "the same page twice: offset is not honoured");
+  const huge = await allPages(async (offset) => Array.from({ length: 200 }, (_, i) => ({ id: `h${offset + i}` })));
+  assert.equal(huge.rows.length, 2000); assert.equal(huge.complete, false);
+});
+await check("r12 the root list pages past 200 tasks and says when it could not read them all", async () => {
+  const many = Array.from({ length: 230 }, (_, i) => ({ id: `t${i}`, path: `Tasks/T-${i}`, tags: ["task"], metadata: { node: "Areas/Techne", state: "open", owner: "aaron" } }));
+  const calls: Record<string, unknown>[] = [];
+  const api = createVaultTasks(async (cmd, args) => { calls.push({ cmd, ...args }); if (cmd !== "vault_query_meta") return []; const o = (args.offset as number) ?? 0; return args.tag === "task" ? many.slice(o, o + (args.limit as number)) : []; }, "uni");
+  const r = await api.loadTasks(tree, ROOT);
+  assert.equal(r.tasks.length, 230); assert.equal(r.truncated, false);
+  assert.deepEqual(calls.filter((c) => c.tag === "task").map((c) => c.offset ?? 0), [0, 200]);
+});
+await check("r12 who changed a task, in words: you (this app's writes), Uni (through MCP), else nobody named; never an id", () => {
+  assert.equal(changedBy({ lastUpdatedBy: "abc", lastUpdatedVia: "api" }, "abc"), "you");
+  assert.equal(changedBy({ lastUpdatedBy: "zzz", lastUpdatedVia: "mcp" }, "abc"), "Uni");
+  assert.equal(changedBy({ lastUpdatedBy: "cdf67944-c5f2-4e42-a0d8-02ce7a95bbdb", lastUpdatedVia: "api" }, null), null);
 });
 
 if (failed) { console.log(`${failed} failed`); process.exit(1); }

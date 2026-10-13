@@ -174,6 +174,8 @@ export type BootOpts = {
   strayRoom?: boolean;
   /** r12 (with `atlas`, `steer`): the first message in #atlas/build has a thread of two replies. */
   thread?: boolean;
+  /** r12 (with `tasks`): this many more open tasks, owned by a room (none are Aaron's), listed before the rest: the list runs past one page of 200. */
+  manyTasks?: number;
   /** T-111: COhere 2026 sits under Boulder (as in the live vault) instead of Techne. Needs `tree` and `boulder`. */
   underBoulder?: boolean;
   /** T-111 nested rooms: the Atlas area has room #atlas (the real channel ids), with #atlas/build and #atlas/teach, three projects (ATLAS, Learn Vibe Build, Atlas Institute). Needs `tree`. */
@@ -228,7 +230,7 @@ export async function bootAreas(page: Page, variant: Variant = 'seed', opts: Boo
   const now = Math.floor((opts.pinned ? pinnedAt : Date.now()) / 1000);
   const data = {
     profileNote: opts.profileNote ?? null, lifeVault: opts.lifeVault ?? null, now, variant, selftest: opts.selftest ?? true, ipcLeak: opts.ipcLeak ?? false, hostile: hostileApp(opts.ports ?? { http: 9, udp: 9 }), benign: BENIGN, techne: seed('techne'), unforced: seed('unforced'), seedMeta,
-    apps: opts.apps ?? [], multiRoom: !!opts.multiRoom || !!opts.tree, tree: !!opts.tree, tasks: !!opts.tasks, briefs: !!opts.briefs, queryDelay: opts.queryDelay ?? 0, identityDelay: opts.identityDelay ?? 0, roomsDelay: opts.roomsDelay ?? 0, messagesDelay: opts.messagesDelay ?? 0, nodeStatuses: opts.nodeStatuses ?? {}, nearOff: !!opts.nearOff, ids: !!opts.ids, boulder: !!opts.boulder, savedLayout: opts.savedLayout ?? null, strayRoom: !!opts.strayRoom, thread: !!opts.thread, underBoulder: !!opts.underBoulder, ricki: !!opts.ricki, atlas: !!opts.atlas, steer: !!opts.steer, longChat: !!opts.longChat, longNext: !!opts.longNext, bareTask: !!opts.bareTask, cutDecision: !!opts.cutDecision, cutNoAsk: !!opts.cutNoAsk, longAsk: !!opts.longAsk, crowded: !!opts.crowded, ulidNext: !!opts.ulidNext, pastDue: !!opts.pastDue, tallLast: !!opts.tallLast, privateTasks: !!opts.privateTasks, deviceCache: opts.deviceCache ?? null, queryFails: opts.queryFails ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null, mode: opts.mode ?? 'sealed', grantedUnder: opts.grantedUnder ?? (opts.mode ?? 'sealed'),
+    apps: opts.apps ?? [], multiRoom: !!opts.multiRoom || !!opts.tree, tree: !!opts.tree, tasks: !!opts.tasks, briefs: !!opts.briefs, queryDelay: opts.queryDelay ?? 0, identityDelay: opts.identityDelay ?? 0, roomsDelay: opts.roomsDelay ?? 0, messagesDelay: opts.messagesDelay ?? 0, nodeStatuses: opts.nodeStatuses ?? {}, nearOff: !!opts.nearOff, ids: !!opts.ids, boulder: !!opts.boulder, savedLayout: opts.savedLayout ?? null, strayRoom: !!opts.strayRoom, thread: !!opts.thread, manyTasks: opts.manyTasks ?? 0, underBoulder: !!opts.underBoulder, ricki: !!opts.ricki, atlas: !!opts.atlas, steer: !!opts.steer, longChat: !!opts.longChat, longNext: !!opts.longNext, bareTask: !!opts.bareTask, cutDecision: !!opts.cutDecision, cutNoAsk: !!opts.cutNoAsk, longAsk: !!opts.longAsk, crowded: !!opts.crowded, ulidNext: !!opts.ulidNext, pastDue: !!opts.pastDue, tallLast: !!opts.tallLast, privateTasks: !!opts.privateTasks, deviceCache: opts.deviceCache ?? null, queryFails: opts.queryFails ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null, mode: opts.mode ?? 'sealed', grantedUnder: opts.grantedUnder ?? (opts.mode ?? 'sealed'),
   };
   // Pre-granted apps: the grant key is the SHA-256 of the RESOLVED default needs plus the app's html.
   const preGrant = [
@@ -429,7 +431,10 @@ Two proposals wait on a scope decision.
     // T-111 rooms nav: a task in a private area (Sadhana) and tasks changed at different times, so "Where we are" has something to hide and to date.
     if (d.tasks && d.privateTasks) taskNotes.push({ ...mk('s1', 'T-31 Sit twenty minutes daily', 'Areas/Sadhana', { priority: 'now', next: 'Before breakfast' }), updatedAt: '2026-10-09T09:00:00.000Z' }, { ...mk('s2', 'T-32 Find a teacher', 'Areas/Sadhana', { priority: 'someday' }), updatedAt: '2026-09-01T09:00:00.000Z' });
     if (d.tasks) for (const [id, at] of [['k4', '2026-10-01T08:00:00.000Z'], ['k7', '2026-09-20T08:00:00.000Z'], ['k8', '2026-09-20T08:00:00.000Z']]) { const t = taskNotes.find((x) => x.id === id); if (t) t.updatedAt = at; }
+    if (d.tasks && d.manyTasks) taskNotes.unshift(...Array.from({ length: d.manyTasks }, (_, i) => mk(`many${i}`, `T-${500 + i} Crew task ${i + 1}`, 'Areas/Techne', { owner: 'room:techne' })));
     w.__tasks = taskNotes;
+    // a tag whose read fails; tests change it while the app runs (a refresh that fails, then a Retry that works)
+    w.__queryFails = [...d.queryFails];
     const BOULDER = '9f5dd143-96b1-440a-ab71-812219cdfaa1';
     if (d.boulder) {
       const a = area('a-boulder', 'Boulder', 'foreground', BOULDER, 'Civic work in Boulder: the council, new tech and the local mail.');
@@ -505,14 +510,17 @@ Two proposals wait on a scope decision.
           case 'vault_list': return d.lifeVault ? ['uni', d.lifeVault] : ['uni'];
           case 'vault_query': {
             if (d.queryDelay) await new Promise((r) => setTimeout(r, d.queryDelay));
-            if ((d.queryFails as string[]).includes(args.tag)) throw 'query failed: ' + args.tag;
+            if ((w.__queryFails as string[]).includes(args.tag)) throw 'query failed: ' + args.tag;
             if (args.tag === 'node') return [{ id: 'uni-root', path: 'Uni', extension: 'md', tags: ['uni', 'node'], updatedAt: T0, metadata: d.steer ? { stands: 'Atlas and COhere are moving; the usage guard is quiet.', stands_at: new Date((d.now - 86400) * 1000).toISOString() } : {} }, ...notes.filter((n) => (n.tags ?? []).some((t: string) => t === 'area' || t === 'project')).map((n) => ({ ...n, tags: ['node', ...n.tags], content: undefined, metadata: { ...n.metadata, parent: n.metadata?.parent ?? (d.ids ? 'uni-root' : 'Uni') } }))];
             return notes.filter((n) => (n.tags ?? []).includes(args.tag)).map((n) => ({ createdAt: '2026-09-01T00:00:00Z', metadata: {}, ...n, ...(args.includeContent === false ? { content: undefined } : {}) }));
           }
           case 'vault_query_meta': {
             if (!d.tasks) return [];
+            if ((w.__queryFails as string[]).includes(args.tag)) throw 'query failed: ' + args.tag;
             const m = args.metadata ?? {};
-            return taskNotes.filter((t) => t.tags.includes(args.tag) && (!m.node || m.node.in.includes(t.metadata.node)) && (!m.state || m.state.in.includes(t.metadata.state))).map((t) => JSON.parse(JSON.stringify(t)));
+            const hits = taskNotes.filter((t) => t.tags.includes(args.tag) && (!m.node || m.node.in.includes(t.metadata.node)) && (!m.state || m.state.in.includes(t.metadata.state)));
+            // one page, as the vault answers: `limit` from `offset`
+            return hits.slice(args.offset ?? 0, (args.offset ?? 0) + (args.limit ?? 200)).map((t) => JSON.parse(JSON.stringify(t)));
           }
           case 'vault_subtree_nodes': {
             if (d.nearOff) throw 'MCP error -32602: unknown parameter: near';
@@ -534,7 +542,7 @@ Two proposals wait on a scope decision.
             const valid = t.tags.includes('decision') ? ['open', 'decided'] : ['open', 'doing', 'waiting', 'done', 'archived'];
             if (t.metadata['state'] !== args.from) throw `MCP error -32600: [transition_conflict] conflict: note ${args.id} ${'state'} is ${t.metadata['state']}, not ${args.from}`;
             if (!valid.includes(args.to)) throw '[schema_validation] state is not one of ' + valid.join(',');
-            t.metadata['state'] = args.to; t.updatedAt = new Date(Date.now() + taskNotes.length).toISOString(); t.lastUpdatedVia = 'api';
+            t.metadata['state'] = args.to; t.updatedAt = new Date(Date.now() + taskNotes.length).toISOString(); t.lastUpdatedVia = 'api'; t.lastUpdatedBy = 'app-writer';
             return JSON.parse(JSON.stringify(t));
           }
           case 'vault_decide': {
@@ -543,7 +551,7 @@ Two proposals wait on a scope decision.
             if (t.metadata['state'] !== args.from) throw `MCP error -32600: [transition_conflict] conflict: note ${args.id} state is ${t.metadata['state']}, not ${args.from}`;
             const keys = Object.keys(args.metadata ?? {}).sort().join();
             if (keys !== 'decided,decided_at,decided_by') throw 'invalid decision metadata: ' + keys;
-            t.metadata['state'] = args.to; Object.assign(t.metadata, args.metadata); t.updatedAt = new Date(Date.now() + taskNotes.length).toISOString(); t.lastUpdatedVia = 'api';
+            t.metadata['state'] = args.to; Object.assign(t.metadata, args.metadata); t.updatedAt = new Date(Date.now() + taskNotes.length).toISOString(); t.lastUpdatedVia = 'api'; t.lastUpdatedBy = 'app-writer';
             return JSON.parse(JSON.stringify(t));
           }
           case 'vault_patch_meta': {
@@ -551,7 +559,7 @@ Two proposals wait on a scope decision.
             if (!t) throw 'note not found: ' + args.id;
             if (t.updatedAt !== args.ifUpdatedAt) throw `conflict: note ${args.id} has been modified`;
             for (const [k, v] of Object.entries(args.metadata)) { if (v === null) delete t.metadata[k]; else t.metadata[k] = v; }
-            t.updatedAt = new Date(Date.now() + taskNotes.length).toISOString();
+            t.updatedAt = new Date(Date.now() + taskNotes.length).toISOString(); t.lastUpdatedBy = 'app-writer';
             return JSON.parse(JSON.stringify(t));
           }
           case 'media_upload': return { url: 'https://example.invalid/voice.webm', mime: 'audio/webm', name: 'voice.webm', size: 4 };

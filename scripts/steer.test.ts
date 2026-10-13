@@ -101,13 +101,14 @@ check("placeholder: names the room; a held node says whose; no room says the nod
   assert.equal(chatPlaceholder({ name: "Atlas Institute", slash: null, heldBy: "#atlas" }), "Message #atlas");
   assert.equal(chatPlaceholder({ name: "Nowhere", slash: null, heldBy: null }), "Message Nowhere");
 });
-check("companion: one sentence from the lede, cut at a word when long, links as their text", () => {
+check("companion: one sentence from the lede, whole however long (r12: clamped on screen, never cut), links as their text", () => {
   assert.equal(firstSentence("Draft out; waiting on Kevin. Next up is the map."), "Draft out; waiting on Kevin.");
   assert.equal(firstSentence("See [[Projects/X/Note|the note]] for **scope**"), "See the note for scope");
   assert.equal(firstSentence(""), "");
   assert.equal(firstSentence(null), "");
-  const long = firstSentence(`${"word ".repeat(60)}end.`);
-  assert.ok(long.length <= 171 && long.endsWith("…"), long);
+  const long = firstSentence(`${"word ".repeat(60)}end. More.`);
+  assert.equal(long, `${"word ".repeat(60)}end.`);
+  assert.ok(!long.includes("…"));
 });
 const decision = (id: string, node: string, extra: Record<string, unknown> = {}, at = AT - 60_000): Task =>
   parseTask({ id, path: `Decisions/${id} Pick one`, tags: ["decision"], updatedAt: iso(at), metadata: { node, state: "open", options: ["Ship it", "Hold"], ...extra } }, tree)!;

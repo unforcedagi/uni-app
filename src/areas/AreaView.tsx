@@ -56,7 +56,7 @@ export default function AreaView({ area, channel, onChannel, mode, roomName, act
   // Uni itself (path "") has no app note to look up.
   const live = mode !== "closed" && area.path !== "";
   const [app, setApp] = useState<AppNote | null>(null);
-  // Brief is the default page; the sealed app (when the area has one) is the "App" tab.
+  // The room is the default page; the sealed app (when the area has one) is the "App" tab.
   const [tab, setTab] = useState<"brief" | "app">("brief");
   const [declined, setDeclined] = useState(false);
   const [menu, setMenu] = useState(false);
@@ -64,7 +64,7 @@ export default function AreaView({ area, channel, onChannel, mode, roomName, act
   const [, setVersion] = useState(0);
   const bump = () => setVersion((v) => v + 1);
   const name = cleanText(area.name);
-  // The app note is looked up by its path, in the background: no vault listing, and the Brief never waits for it.
+  // The app note is looked up by its path, in the background: no vault listing, and the room never waits for it.
   useEffect(() => {
     setApp(null); setDeclined(false);
     if (!live) return;
@@ -179,7 +179,7 @@ export default function AreaView({ area, channel, onChannel, mode, roomName, act
   const chatShown = layout !== "hidden";
   // The suggestion bar sits directly above the chat composer; with no chat pane it stays above the interface.
   const tabs = app ? <nav className="area-tabs" role="tablist" aria-label="Area views">
-    <button type="button" role="tab" id="area-tab-brief" aria-selected={tab === "brief"} className={tab === "brief" ? "on" : ""} onClick={() => setTab("brief")}>Brief</button>
+    <button type="button" role="tab" id="area-tab-brief" aria-selected={tab === "brief"} className={tab === "brief" ? "on" : ""} onClick={() => setTab("brief")}>Room</button>
     <button type="button" role="tab" id="area-tab-app" aria-selected={tab === "app"} className={tab === "app" ? "on" : ""} onClick={(e) => { if (e.isTrusted) openAppTab(); }}>App</button>
   </nav> : null;
   const withChat = (main: ReactNode, above: ReactNode, cls = "") => <div className={`area-view ${cls} ${treePage ? "tree-page" : ""}`}>{header}{tabs}

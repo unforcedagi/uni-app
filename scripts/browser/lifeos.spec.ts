@@ -244,12 +244,12 @@ test.describe('App tab', () => {
     await openAreasHome(page);
     await openAreaPage(page, 'Techne', { app: false });
     const tabs = page.getByRole('tablist', { name: 'Area views' });
-    await expect(tabs.getByRole('tab', { name: 'Brief' })).toHaveAttribute('aria-selected', 'true');
+    await expect(tabs.getByRole('tab', { name: 'Room' })).toHaveAttribute('aria-selected', 'true');
     await expect(page.locator('iframe.area-frame')).toHaveCount(0);
     await tabs.getByRole('tab', { name: 'App' }).click();
     await expect(page.locator('iframe.area-frame')).toHaveCount(1);
     await expect(page.frameLocator('iframe.area-frame').locator('#title')).toHaveText('Techne');
-    await tabs.getByRole('tab', { name: 'Brief' }).click();
+    await tabs.getByRole('tab', { name: 'Room' }).click();
     await expect(page.locator('iframe.area-frame')).toHaveCount(0);
     await expect(page.locator('.area-brief h1')).toHaveText('Techne');
   });

@@ -6,8 +6,10 @@ import type { TaskAction, Undo } from "./useTasks";
 import { activeProfile, type VaultProfile } from "./profile";
 import type { Mark } from "./steerCore";
 import { Changed } from "./Changed";
-import { isCutTitle, stateLine } from "./simpleCore";
+import { stateLine } from "./simpleCore";
 import { splitTitle } from "./whereCore";
+import { DecisionAnswer, NextText, decisionAsk } from "./Companion";
+import { changedBy } from "./vaultTasks";
 
 const SHOW = 8;
 
@@ -25,10 +27,10 @@ function Meta({ t, here, nodeName }: { t: Task; here: string; nodeName: (path: s
 }
 
 /** What needs doing at this level and below, grouped You / Rooms / Others, with a one-tap check-off. */
-export function TaskList({ title = "Needs doing", tasks, leaving, here, nodeName, loading, ready, error, truncated, treeTruncated, marks, nowMs = 0, onOpen, onAct, onRetry }: {
+export function TaskList({ title = "Needs doing", tasks, leaving, here, nodeName, loading, ready, error, truncated, treeTruncated, marks, nowMs = 0, onOpen, onAct, onDecide, onRetry }: {
   title?: string; marks?: ReadonlyMap<string, readonly Mark[]>; nowMs?: number; tasks: readonly Task[]; leaving: ReadonlySet<string>; here: string; nodeName: (path: string) => string;
   loading: boolean; ready: boolean; error: string | null; truncated: boolean; treeTruncated?: boolean;
-  onOpen: (t: Task) => void; onAct: (t: Task, a: TaskAction) => void; onRetry: () => void;
+  onOpen: (t: Task) => void; onAct: (t: Task, a: TaskAction) => void; onDecide: (t: Task, option: string) => void; onRetry: () => void;
 }) {
   const [all, setAll] = useState<Record<string, boolean>>({});
   const groups = groupTasks(tasks);
@@ -41,14 +43,16 @@ export function TaskList({ title = "Needs doing", tasks, leaving, here, nodeName
       const rows = all[g.group] ? g.tasks : g.tasks.slice(0, SHOW);
       return <div className={`work-group g-${g.group}`} key={g.group}>
         <h3>{g.label}<span>{g.tasks.length}</span></h3>
-        <ul>{rows.map((t) => <li key={t.id} className={`task-row ${leaving.has(t.id) ? "leaving" : ""} ${t.kind} ${marks?.get(t.id)?.length ? "changed" : ""}`} data-note={t.id}>
+        <ul>{rows.map((t) => { const dq = t.kind === "decision" ? decisionAsk(t) : null; return <li key={t.id} className={`task-row ${leaving.has(t.id) ? "leaving" : ""} ${t.kind} ${marks?.get(t.id)?.length ? "changed" : ""}`} data-note={t.id}>
           <button type="button" className="task-main" onClick={() => onOpen(t)}>
-            <span className="task-title">{cleanText(t.title)}</span>
+            <span className="task-title">{dq ? dq.text : cleanText(t.title)}</span>
             <Meta t={t} here={here} nodeName={nodeName} />
             <Changed marks={marks?.get(t.id)} nowMs={nowMs} />
           </button>
-          <button type="button" className="task-check" aria-label={`${t.kind === "decision" ? "Mark decided" : "Mark done"}: ${cleanText(t.title)}`} onClick={() => onAct(t, "done")}><span aria-hidden="true" /></button>
-        </li>)}</ul>
+          {/* a decision is closed by its answer, never by a check */}
+          {dq ? dq.answerable && <DecisionAnswer t={t} label={dq.text} onDecide={onDecide} max={3} onMore={() => onOpen(t)} className="task-row-answer" />
+            : <button type="button" className="task-check" aria-label={`Mark done: ${cleanText(t.title)}`} onClick={() => onAct(t, "done")}><span aria-hidden="true" /></button>}
+        </li>; })}</ul>
         {g.tasks.length > SHOW && <button type="button" className="work-more" onClick={() => setAll((a) => ({ ...a, [g.group]: !a[g.group] }))}>{all[g.group] ? "Show fewer" : `Show ${g.tasks.length - SHOW} more`}</button>}
       </div>;
     })}
@@ -57,50 +61,66 @@ export function TaskList({ title = "Needs doing", tasks, leaving, here, nodeName
   </section>;
 }
 
-const who = (id: string | null) => (id ? (/^[0-9a-f-]{32,}$/i.test(id) ? id.slice(0, 8) : id) : null);
+const when = (iso: string | null) => { const d = iso ? new Date(iso) : null; return d && !Number.isNaN(d.getTime()) ? d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : null; };
 
-/** One task: what it is, who changed it last, and the four things you can do. Text only; the vault's words are never HTML. */
-export function TaskSheet({ task, here, nodeName, room, inRoom, onClose, onAct, onOpenRoom }: {
+/**
+ * One task: what to do (the whole action or question, its next step with links resolved), then what you can do. A decision is answered here
+ * with the same control as the companion; nothing else closes it. The bookkeeping (its id, who changed it last) is behind "Details", in words.
+ */
+export function TaskSheet({ task, here, nodeName, room, inRoom, onClose, onAct, onDecide, onNote, onOpenRoom }: {
   task: Task; here: string; nodeName: (path: string) => string; room: RoomRef | null;
   /** The room open now: "Open in #room" is not offered for it. */
   inRoom?: string | null;
-  onClose: () => void; onAct: (t: Task, a: TaskAction) => void; onOpenRoom: (id: string) => void;
+  onClose: () => void; onAct: (t: Task, a: TaskAction) => void; onDecide: (t: Task, option: string) => void; onOpenRoom: (id: string) => void;
+  /** Open a note (a link in the next step; the task's own note when its question is not whole anywhere else). */
+  onNote: (ref: string) => void;
 }) {
   const box = useRef<HTMLDivElement>(null);
   const opener = useRef<Element | null>(typeof document === "undefined" ? null : document.activeElement);
-  useEffect(() => { box.current?.querySelector<HTMLElement>("button.task-do")?.focus(); const back = opener.current as HTMLElement | null; return () => { if (back?.isConnected) back.focus(); }; }, []);
+  useEffect(() => { box.current?.querySelector<HTMLElement>("button.task-do, .task-answer button")?.focus(); const back = opener.current as HTMLElement | null; return () => { if (back?.isConnected) back.focus(); }; }, []);
   const key = (e: ReactKeyboardEvent) => {
     if (e.key === "Escape") { e.stopPropagation(); onClose(); }
     if (e.key === "Tab") {
-      const f = [...box.current!.querySelectorAll<HTMLElement>("button:not(:disabled)")];
+      const f = [...box.current!.querySelectorAll<HTMLElement>("button:not(:disabled), summary, a[href]")];
       if (!f.length) return;
       if (e.shiftKey && document.activeElement === f[0]) { e.preventDefault(); f[f.length - 1].focus(); }
       else if (!e.shiftKey && document.activeElement === f[f.length - 1]) { e.preventDefault(); f[0].focus(); }
     }
   };
   const go = (a: TaskAction) => { onAct(task, a); onClose(); };
-  const by = who(task.lastUpdatedBy), via = task.lastUpdatedVia;
-  const { id: tid, rest } = splitTitle(task.title);
-  const heading = task.ask && isCutTitle(rest) ? `${tid ? `${tid} ` : ""}${task.ask}` : task.title; // a cut title reads whole here
+  const decision = task.kind === "decision";
+  const { id: tid, rest } = splitTitle(cleanText(task.title));
+  const dq = decision ? decisionAsk(task) : null;
+  const heading = dq ? (dq.answerable ? dq.text : rest) : rest; // never the bare id; a decision with no whole question shows what it has, and its note
+  /** "default yes": what a decision's title says happens without an answer, kept here though the row shows only the ask. */
+  const dflt = decision ? /^decision\s*\(([^)]*)\)/i.exec(rest)?.[1]?.trim() ?? null : null;
+  const by = changedBy(task);
+  const at = when(task.updatedAt);
   return <div className="task-sheet-wrap" onKeyDown={key}>
     <button type="button" className="task-backdrop" aria-label="Close" tabIndex={-1} onClick={onClose} />
     <div ref={box} className="task-sheet" role="dialog" aria-modal="true" aria-labelledby="task-sheet-title">
-      <p className="task-kind">{task.kind === "decision" ? "Decision" : "Task"}{task.node !== here ? ` · in ${nodeName(task.node)}` : ""}</p>
-      <h2 id="task-sheet-title">{cleanText(heading)}</h2>
-      {task.next && <p className="task-next">{cleanText(task.next)}</p>}
+      <p className="task-kind">{decision ? `Decision${dflt ? ` (${dflt})` : ""}` : "Task"}{task.node !== here ? ` · in ${nodeName(task.node)}` : ""}</p>
+      {dq?.yourCall && <small className="cp-call-lead">Your call:</small>}
+      <h2 id="task-sheet-title">{heading}</h2>
+      {dq && !dq.answerable && <p className="task-next">The whole question is in its note. <button type="button" className="task-link" onClick={() => onNote(task.id)}>Open the note</button></p>}
+      {task.next && <div className="task-next"><NextText text={task.next} onNote={onNote} /></div>}
+      {decision && <DecisionAnswer t={task} label={heading} onDecide={(t, o) => { onDecide(t, o); onClose(); }} className="task-answer" />}
       <dl className="task-facts">
         <dt>Status</dt><dd>{stateLine(task, (w) => isMe(w), OWNER)}</dd>
         {!isMe(task.owner) && !isMe(task.waitingOn) && <><dt>With</dt><dd>{OWNER(task.owner)}</dd></>}
         {task.due && <><dt>Due</dt><dd>{task.due}</dd></>}
       </dl>
-      {(by || via) && <p className="task-by">Changed by {by ?? "unknown"}{via ? ` via ${via}` : ""}</p>}
       <div className="task-actions">
-        <button type="button" className="task-do primary" onClick={() => go("done")}>{task.kind === "decision" ? "Mark decided" : "Mark done"}</button>
-        {task.kind === "task" && <button type="button" className="task-do" onClick={() => go("archive")}>Archive</button>}
+        {!decision && <button type="button" className="task-do primary" onClick={() => go("done")}>Mark done</button>}
+        {!decision && <button type="button" className="task-do" onClick={() => go("archive")}>Archive</button>}
         <button type="button" className="task-do" onClick={() => go("snooze")}>Snooze until tomorrow</button>
         {room && room.id !== inRoom && <button type="button" className="task-do" onClick={() => { onOpenRoom(room.id); onClose(); }}>Open in #{room.name}</button>}
         <button type="button" className="task-do quiet" onClick={onClose}>Close</button>
       </div>
+      {(tid || at) && <details className="task-details"><summary>Details</summary>
+        {tid && <p>{decision ? "Decision" : "Task"} {tid}</p>}
+        {at && <p>Last changed{by ? ` by ${by}` : ""}, {at}</p>}
+      </details>}
     </div>
   </div>;
 }

@@ -11,6 +11,7 @@ import type { Where } from "./whereCore";
 import { splitTitle } from "./whereCore";
 import type { Mark } from "./steerCore";
 import { Changed } from "./Changed";
+import { DecisionAnswer, decisionAsk } from "./Companion";
 
 const SHOW = 8;
 
@@ -22,12 +23,15 @@ export function PriorityPick({ task, onPick }: { task: Task; onPick: (t: Task, p
   </select>;
 }
 
-/** A task as a row: T-NN, title, next step, due and where it belongs (when seen from above), the priority, the check-off. */
-function Row({ t, here, nodeName, leaving, marks, nowMs, onOpen, onAct, onPriority }: {
+/** A task as a row: T-NN, title, next step, due and where it belongs (when seen from above), the priority, the check-off. A decision is its
+ *  whole question with its answers instead of a check: it is closed only by one. */
+function Row({ t, here, nodeName, leaving, marks, nowMs, onOpen, onAct, onDecide, onPriority }: {
   t: Task; here: string; nodeName: (p: string) => string; leaving: boolean; marks?: readonly Mark[]; nowMs: number;
-  onOpen: (t: Task) => void; onAct: (t: Task, a: "done") => void; onPriority: (t: Task, p: Priority) => void;
+  onOpen: (t: Task) => void; onAct: (t: Task, a: "done") => void; onDecide: (t: Task, option: string) => void; onPriority: (t: Task, p: Priority) => void;
 }) {
-  const { id, rest } = splitTitle(cleanText(t.title));
+  const { id, rest: raw } = splitTitle(cleanText(t.title));
+  const dq = t.kind === "decision" ? decisionAsk(t) : null;
+  const rest = dq ? dq.text : raw;
   const meta = [t.kind === "decision" ? "Decide" : null, isMe(t.waitingOn) ? "Waiting on you" : t.state === "doing" ? "In progress" : t.state === "waiting" ? "Waiting" : null, dueText(t.due), t.node !== here ? nodeName(t.node) : null].filter(Boolean);
   return <li className={`wr-row ${leaving ? "leaving" : ""} ${marks?.length ? "changed" : ""}`} data-id={id ?? undefined}>
     <button type="button" className="wr-main" onClick={() => onOpen(t)}>
@@ -35,14 +39,14 @@ function Row({ t, here, nodeName, leaving, marks, nowMs, onOpen, onAct, onPriori
       {t.next && <span className="wr-next">{cleanText(t.next)}</span>}
       {meta.length > 0 && <span className="wr-meta">{meta.map((m, i) => <span key={i}>{m}</span>)}</span>}
       <Changed marks={marks} nowMs={nowMs} />
-      {t.kind === "decision" && <span className="wr-open" aria-hidden="true">Open</span>}
     </button>
     <PriorityPick task={t} onPick={onPriority} />
-    <button type="button" className="task-check" aria-label={`${t.kind === "decision" ? "Mark decided" : "Mark done"}: ${cleanText(t.title)}`} onClick={() => onAct(t, "done")}><span aria-hidden="true" /></button>
+    {dq ? dq.answerable && <DecisionAnswer t={t} label={dq.text} onDecide={onDecide} max={3} onMore={() => onOpen(t)} className="wr-answer" />
+      : <button type="button" className="task-check" aria-label={`Mark done: ${cleanText(t.title)}`} onClick={() => onAct(t, "done")}><span aria-hidden="true" /></button>}
   </li>;
 }
 
-function Bucket({ p, rows, count, ...rest }: { p: Priority; rows: readonly Task[]; count: number; here: string; nodeName: (p: string) => string; leaving: ReadonlySet<string>; marks: ReadonlyMap<string, readonly Mark[]>; nowMs: number; onOpen: (t: Task) => void; onAct: (t: Task, a: "done") => void; onPriority: (t: Task, p: Priority) => void }) {
+function Bucket({ p, rows, count, ...rest }: { p: Priority; rows: readonly Task[]; count: number; here: string; nodeName: (p: string) => string; leaving: ReadonlySet<string>; marks: ReadonlyMap<string, readonly Mark[]>; nowMs: number; onOpen: (t: Task) => void; onAct: (t: Task, a: "done") => void; onDecide: (t: Task, option: string) => void; onPriority: (t: Task, p: Priority) => void }) {
   const [all, setAll] = useState(false);
   const [open, setOpen] = useState(p !== "someday");
   const shown = all ? rows : rows.slice(0, SHOW);
@@ -52,7 +56,7 @@ function Bucket({ p, rows, count, ...rest }: { p: Priority; rows: readonly Task[
       ? <button type="button" className="wr-h wr-fold" aria-expanded={open} aria-controls="wr-someday" onClick={() => setOpen(!open)}><span>{PRIORITY_LABEL[p]}</span><em>{count}</em><i aria-hidden="true">{open ? "–" : "+"}</i></button>
       : <h3 className="wr-h"><span>{PRIORITY_LABEL[p]}</span><em>{count}</em></h3>}
     {open && <div id={p === "someday" ? "wr-someday" : undefined}>
-      <ul className="wr-rows">{shown.map((t) => <Row key={t.id} t={t} leaving={rest.leaving.has(t.id)} marks={rest.marks.get(t.id)} nowMs={rest.nowMs} here={rest.here} nodeName={rest.nodeName} onOpen={rest.onOpen} onAct={rest.onAct} onPriority={rest.onPriority} />)}</ul>
+      <ul className="wr-rows">{shown.map((t) => <Row key={t.id} t={t} leaving={rest.leaving.has(t.id)} marks={rest.marks.get(t.id)} nowMs={rest.nowMs} here={rest.here} nodeName={rest.nodeName} onOpen={rest.onOpen} onAct={rest.onAct} onDecide={rest.onDecide} onPriority={rest.onPriority} />)}</ul>
       {rows.length > SHOW && <button type="button" className="th-link" onClick={() => setAll(!all)}>{all ? "Show fewer" : `Show ${rows.length - SHOW} more`}</button>}
       {hidden > 0 && <p className="wr-private">{hidden} more in private areas, counted not named.</p>}
     </div>}
@@ -85,14 +89,14 @@ export function MovedBlock({ where: w, here, nodeName, nowMs, onOpen }: { where:
   </section>;
 }
 
-/** What needs the user, Now / Soon / Someday. Decisions are rows too: read-only here, Open shows the task sheet. */
-export function NeedsYou({ where: w, here, nodeName, leaving, marks, nowMs, onOpen, onAct, onPriority }: {
+/** What needs the user, Now / Soon / Someday. Decisions are rows too, answered in place with the same control as the companion. */
+export function NeedsYou({ where: w, here, nodeName, leaving, marks, nowMs, onOpen, onAct, onDecide, onPriority }: {
   where: Where; here: string; nodeName: (p: string) => string; leaving: ReadonlySet<string>; marks: ReadonlyMap<string, readonly Mark[]>; nowMs: number;
-  onOpen: (t: Task) => void; onAct: (t: Task, a: "done") => void; onPriority: (t: Task, p: Priority) => void;
+  onOpen: (t: Task) => void; onAct: (t: Task, a: "done") => void; onDecide: (t: Task, option: string) => void; onPriority: (t: Task, p: Priority) => void;
 }) {
   return <section className="wr-needs" aria-label="Needs you">
     <h3 className="wr-h wr-needs-h"><span>Needs you</span><em>{w.you}</em></h3>
     {w.you === 0 ? <p className="th-quiet">Nothing needs you here.</p>
-      : PRIORITIES.filter((p) => w.needs[p].count > 0).map((p) => <Bucket key={p} p={p} rows={w.needs[p].rows} count={w.needs[p].count} here={here} nodeName={nodeName} leaving={leaving} marks={marks} nowMs={nowMs} onOpen={onOpen} onAct={onAct} onPriority={onPriority} />)}
+      : PRIORITIES.filter((p) => w.needs[p].count > 0).map((p) => <Bucket key={p} p={p} rows={w.needs[p].rows} count={w.needs[p].count} here={here} nodeName={nodeName} leaving={leaving} marks={marks} nowMs={nowMs} onOpen={onOpen} onAct={onAct} onDecide={onDecide} onPriority={onPriority} />)}
   </section>;
 }

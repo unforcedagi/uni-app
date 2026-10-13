@@ -13,6 +13,7 @@ import { agoLabel, type RoomView, type TreeRow, type Update } from "./treeRooms"
 import type { Mark } from "./nodeMap";
 import type { NavControls } from "../navContext";
 import { ancestorsOf, hasKids, isOpen, rolledNeeds, SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN, useFolds, useSidebar, visibleRows } from "./sidebarState";
+import type { TaskLoad } from "./Companion";
 
 const CAP = 3;
 
@@ -57,7 +58,15 @@ export type TreeProps = {
   selected?: string;
   /** Rooms no node owns: a quiet "Other rooms" group at the bottom, folded unless one of them is open. */
   others?: readonly OtherRoom[]; selectedRoom?: string; onOpenRoom?: (id: string) => void;
+  /** Whether the dots can be trusted: a failed first load says so (no dots at all), a failed refresh keeps them with a quiet Retry. */
+  load?: TaskLoad; needsReady?: boolean;
 };
+
+/** The dots' health above the tree: never a silent blank when the task list could not be read. */
+function LoadLine({ load, ready }: { load?: TaskLoad; ready?: boolean }) {
+  if (!load?.error) return null;
+  return <p className={`th-load ${ready ? "" : "bad"}`} role={ready ? "status" : "alert"}>{ready ? "Couldn't refresh what needs you" : "Couldn't load what needs you"} · <button type="button" className="th-link" onClick={load.retry}>Retry</button></p>;
+}
 
 /**
  * The rooms list: Uni, then every area with its projects beneath, then "Other rooms". A row is the node's name; the room line under it is
@@ -76,7 +85,10 @@ export function RoomTree({ chat = true, rows, needs, onOpen, selected, others = 
     const kids = hasKids(rows, i);
     const open = !kids || isOpen(rows, folds, selected, r.path);
     const n = needs.get(r.path) ?? 0;
-    const dot = n > 0 || (!open && rolledNeeds(rows, needs, i) > 0);
+    // a folded area's dot is what is inside it; an open one shows its own only (its rows below carry theirs)
+    const inside = !open && rolledNeeds(rows, needs, i) - n > 0;
+    const dot = n > 0 || inside;
+    const dotTitle = n > 0 ? (inside ? "Needs you, and so does something inside" : "Needs you") : "Something inside needs you";
     const sub = chat && r.own && r.slash ? `#${r.slash}` : "";
     const heldBy = chat && !r.own && r.heldBy ? `in #${r.heldBy}` : "";
     return <li key={r.path || "uni"} className={`th-row d${Math.min(r.depth, 4)} ${selected === r.path ? "sel" : ""} ${kids ? "has-kids" : ""}`} data-open={kids ? String(open) : undefined}>
@@ -84,9 +96,9 @@ export function RoomTree({ chat = true, rows, needs, onOpen, selected, others = 
         ? <button type="button" className="th-fold" data-path={r.path} aria-expanded={open} aria-label={`${open ? "Fold" : "Unfold"} ${r.name}`} title={open ? "Fold" : "Unfold"} onClick={() => setFold(r.path, !open)}><i aria-hidden="true" /></button>
         : <span className="th-fold-gap" aria-hidden="true" />)}
       <button type="button" className="th-go" data-path={r.path} aria-current={selected === r.path ? "page" : undefined} onClick={() => onOpen(r.path)} title={heldBy || undefined}
-        aria-label={`${r.name}${chat ? `, ${sub ? `room ${sub}` : "no channel of its own"}` : ""}${dot ? `, ${n ? `${n} need${n === 1 ? "s" : ""} you` : "something under it needs you"}` : ""}`}>
+        aria-label={`${r.name}${chat ? `, ${sub ? `room ${sub}` : "no channel of its own"}` : ""}${dot ? `, ${n ? `${n} need${n === 1 ? "s" : ""} you` : "something inside needs you"}` : ""}`}>
         <span className="th-name"><b>{r.name}</b>{sub && <small className="th-sub">{sub}</small>}</span>
-        {dot && <i className="th-dot" title="Needs you" aria-hidden="true" />}
+        {dot && <i className={`th-dot ${n > 0 ? "" : "inside"}`} title={dotTitle} aria-hidden="true" />}
       </button>
     </li>;
   })}
@@ -126,6 +138,7 @@ export function TreeScreen({ status, column, nav, onHide, ...tree }: TreeProps &
       ? <header className="th-toolbar"><NavButtons nav={nav ?? null} /><span className="th-tb-gap" />{onHide && <button type="button" className="th-nb" aria-label="Hide the sidebar" title="Hide the sidebar" onClick={onHide}>‹</button>}</header>
       : <header className="th-treehead"><h1 className="note-title">Uni</h1></header>}
     {status}
+    <LoadLine load={tree.load} ready={tree.needsReady} />
     <div className="th-rows-wrap"><RoomTree {...tree} /></div>
     {column && nav && <section className="th-recent" aria-label="Recent"><h2>Recent</h2>
       <ul>{recentShown(nav.recent, rows.find((r) => r.path === selected)?.name).map((r) => <li key={r.key}><button type="button" onClick={r.go} title={r.title}>{r.title}</button></li>)}</ul></section>}

@@ -1,19 +1,37 @@
 // T-124 "Simple first" (pure, unit-tested in scripts/steer.test.ts): what the room's quiet companion says. One sentence for where
 // the room stands, at most three things that need the user (Now first), the chat composer's placeholder.
-import { PRIORITIES, type Task } from "./taskCore.ts";
+import { groupOf, PRIORITIES, type Task } from "./taskCore.ts";
 import type { Where } from "./whereCore.ts";
+import { ROOT } from "./treeCore.ts";
 
-const LEDE_MAX = 170;
-
-/** The first sentence of the level's lede, as plain text, cut at a word when it runs long. */
+/** The first sentence of the level's lede, as plain text and whole (a long one is clamped on screen, never cut here: it opens in full). */
 export function firstSentence(text: string | null | undefined): string {
   const plain = (text ?? "").replace(/\[\[([^\]|]*\|)?([^\]]*)\]\]/g, "$2").replace(/[*_`#>]/g, "").replace(/\s+/g, " ").trim();
   if (!plain) return "";
   const m = /^.*?[.!?](?=\s|$)/.exec(plain);
-  const one = m ? m[0] : plain;
-  if (one.length <= LEDE_MAX) return one;
-  const cut = one.slice(0, LEDE_MAX).replace(/\s+\S*$/, "");
-  return `${cut}…`;
+  return m ? m[0] : plain;
+}
+
+/**
+ * Whether a task belongs in Needs you: the companion's list and the tree's dots use this one rule (r12). The user's own (owner, or waiting
+ * on them) at Now or Soon (unsorted is Soon), and every open decision; live, never Someday. Snoozed and finished tasks are dropped before.
+ */
+export function needsYou(t: Pick<Task, "kind" | "owner" | "waitingOn" | "priority" | "state">): boolean {
+  if (t.state !== "open" && t.state !== "doing" && t.state !== "waiting") return false;
+  return groupOf(t) === "you" && (t.kind === "decision" || t.priority !== "someday");
+}
+
+/** How many items under each node path need you there (the node's own, never its children's): the tree's dots. */
+export function needsByNode(tasks: readonly Task[]): Map<string, number> {
+  const m = new Map<string, number>();
+  for (const t of tasks) if (needsYou(t)) m.set(t.node, (m.get(t.node) ?? 0) + 1);
+  return m;
+}
+
+/** Uni's own panel (r12): what is Uni's own, then at most `fromAreas` from the areas by urgency; the rest is in "All of Uni's work". */
+export function uniNeeds(feed: readonly Task[], fromAreas = 3): Task[] {
+  const own = feed.filter((t) => t.node === ROOT);
+  return [...own, ...feed.filter((t) => t.node !== ROOT).slice(0, fromAreas)];
 }
 
 /**
@@ -23,7 +41,7 @@ export function firstSentence(text: string | null | undefined): string {
  */
 export function topNeeds(w: Where, _path?: string, max = Infinity, today = localDay()): Task[] {
   const rank = (t: Task) => (isOverdue(t.due, today) ? -1 : t.priority === "now" ? 0 : t.priority === "someday" ? 2 : 1);
-  const all = PRIORITIES.flatMap((p) => w.needs[p].rows).filter((t) => t.kind === "decision" || t.priority !== "someday");
+  const all = PRIORITIES.flatMap((p) => w.needs[p].rows).filter(needsYou);
   return all.sort((a, b) => rank(a) - rank(b) || (a.due ?? "9999").localeCompare(b.due ?? "9999") || Number(b.kind === "decision") - Number(a.kind === "decision") || a.title.localeCompare(b.title)).slice(0, max);
 }
 
@@ -105,11 +123,12 @@ export function askFromContent(content: string | null | undefined): string {
 export const withoutCut = (rest: string): string => rest.replace(/\s*(…|\.\.\.)\s*$/, "").trim();
 
 /** What a Needs-you row says about its ask, given what is known: the full question, a whole title, or that there is no whole question. */
-export type RowAsk = { text: string; /** a decision with no full question anywhere: open it to decide, no buttons */ openToDecide: boolean; /** what is known of the question, without its cut "…" (a quiet line under "Open to decide") */ hint?: string };
+export type RowAsk = { text: string; /** a decision with no full question anywhere: open it to see the question, no buttons and no fragment */ openToDecide: boolean };
+export const OPEN_TO_SEE = "Open to see the question";
 export function rowAsk(full: string, ask: string | undefined, isDecision: boolean, hasNext: boolean): RowAsk {
   if (!isCutTitle(full)) return { text: full, openToDecide: false };
   if (ask && !isCutTitle(ask)) return { text: ask, openToDecide: false };
-  if (isDecision) return { text: "Open to decide", openToDecide: true, hint: withoutCut(full) };
+  if (isDecision) return { text: OPEN_TO_SEE, openToDecide: true };
   return { text: hasNext ? withoutCut(full) : "", openToDecide: false };
 }
 
@@ -119,8 +138,6 @@ export function askLead(text: string): { text: string; yourCall: boolean } {
   const cased = t ? t[0].toLocaleUpperCase() + t.slice(1) : t;
   return { text: cased, yourCall: !!cased && !/\?["')\]]*$/.test(cased) };
 }
-/** A decision's question runs longer than this many lines: it is not shown inline, "Open to decide" opens it whole in the sheet. */
-export const ASK_LINES_MAX = 4;
 
 /** One plain line for where a task stands, never both the state and who it waits on ("waiting, waiting on aaron"). */
 export function stateLine(t: { state: string; waitingOn: string | null; kind: string }, isMeFn: (who: string | null) => boolean, nameOf: (who: string) => string = (w) => w): string {

@@ -326,11 +326,20 @@ impl VaultClient {
         include_content: bool,
         limit: usize,
     ) -> Result<Vec<Value>> {
+        self.query_tagged_at(vault, tag, include_content, limit, 0).await
+    }
+
+    /// One page of [`query_tagged`](Self::query_tagged): the notes after the first `offset` (in the same ascending order).
+    pub async fn query_tagged_at(
+        &self,
+        vault: &str,
+        tag: &str,
+        include_content: bool,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<Value>> {
         let v = self
-            .call(
-                "query-notes",
-                tag_query_args(vault, tag, include_content, limit)?,
-            )
+            .call("query-notes", paged(tag_query_args(vault, tag, include_content, limit)?, offset))
             .await?;
         check_vault_errors(&v)?;
         Ok(notes_in(&v)
@@ -348,7 +357,20 @@ impl VaultClient {
         metadata: Value,
         limit: usize,
     ) -> Result<Vec<Value>> {
-        let mut args = tag_query_args(vault, tag, false, limit)?;
+        self.query_by_metadata_at(vault, tag, metadata, limit, 0).await
+    }
+
+    /// One page of [`query_by_metadata`](Self::query_by_metadata): the matches after the first `offset`. A list longer than one
+    /// page (200) is read page by page, so a task list is never taken for complete when it was cut.
+    pub async fn query_by_metadata_at(
+        &self,
+        vault: &str,
+        tag: &str,
+        metadata: Value,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<Value>> {
+        let mut args = paged(tag_query_args(vault, tag, false, limit)?, offset);
         if !metadata.is_object() {
             return Err(Error::Invalid("metadata filter must be an object".into()));
         }
@@ -768,6 +790,14 @@ fn subtree_near(root: &str, to_tasks: bool) -> Result<Value> {
         near["then"] = json!({"relationship": "node", "direction": "inbound"});
     }
     Ok(near)
+}
+
+/// `offset` on a list query; none for the first page, so the first request is unchanged.
+fn paged(mut args: Value, offset: usize) -> Value {
+    if offset > 0 {
+        args["offset"] = json!(offset);
+    }
+    args
 }
 
 fn tag_query_args(vault: &str, tag: &str, include_content: bool, limit: usize) -> Result<Value> {
@@ -1492,6 +1522,28 @@ mod surface_tests {
             .patch_metadata("scope-test", "t1", json!({}), "")
             .await
             .is_err());
+        handle.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_second_page_asks_for_the_notes_after_the_first() {
+        crate::init_crypto();
+        let meta = json!({"state": {"in": ["open"]}});
+        let (client, handle) = server(vec![
+            (
+                "query-notes",
+                json!({"vault":"scope-test","tag":"decision","include_content":false,"include_metadata":true,"limit":200,"sort":"asc","metadata":meta,"offset":200}),
+                json!({"notes":[{"id":"d201","path":"Tasks/D-201","metadata":{"state":"open"}}]}),
+            ),
+            (
+                "query-notes",
+                json!({"vault":"scope-test","tag":"node","include_content":false,"include_metadata":true,"limit":200,"sort":"asc","offset":400}),
+                json!({"notes":[]}),
+            ),
+        ]);
+        let rows = client.query_by_metadata_at("scope-test", "decision", meta.clone(), 200, 200).await.unwrap();
+        assert_eq!(rows.len(), 1);
+        assert!(client.query_tagged_at("scope-test", "node", false, 200, 400).await.unwrap().is_empty());
         handle.join().unwrap();
     }
 

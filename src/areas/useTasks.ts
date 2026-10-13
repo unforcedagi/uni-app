@@ -35,12 +35,14 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
   const owner = `${identity ?? ""}|${vault}`;
   const [tree, setTree] = useState<TaskTree | null>(() => scoped(owner).tree);
   const [list, setList] = useState<Task[] | null>(() => scoped(owner).tasks.get(nodePath)?.list ?? null);
-  const [truncated, setTruncated] = useState(false);
+  const [truncated, setTruncated] = useState(() => !!scoped(owner).tasks.get(nodePath)?.truncated);
   const [treeTruncated, setTreeTruncated] = useState(() => !!scoped(owner).tree?.truncated);
   // The local date, re-read when the window is shown or focused again: a snooze ends at midnight even if the app stayed open.
   const [day, setDay] = useState(() => dayOf(new Date()));
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  /** When the list last read cleanly (ms): a failed refresh says how old the rows it keeps are. */
+  const [lastOk, setLastOk] = useState<number | null>(() => scoped(owner).at);
   const [notice, setNotice] = useState<string | null>(null);
   const [undo, setUndo] = useState<Undo | null>(null);
   const [leaving, setLeaving] = useState<ReadonlySet<string>>(new Set());
@@ -78,7 +80,8 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
       if (runs) { mem.runs = runs; setRawRuns(runs); }
       if (drafts) { mem.drafts = drafts; setRawDrafts(drafts); }
       mem.tasks.set(nodePath, { list: r.tasks, truncated: r.truncated });
-      setList(r.tasks); setTruncated(r.truncated); setError(null);
+      mem.at = Date.now();
+      setList(r.tasks); setTruncated(r.truncated); setError(null); setLastOk(mem.at);
       warmTitles(r.tasks.flatMap((t) => [t.title, t.next]));
       // a cut title's full question arrives a moment later, without holding the list back
       void vaultTasks.loadAsks(r.tasks).then((asks) => {
@@ -163,6 +166,8 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
 
   const act = useCallback(async (task: Task, action: TaskAction) => {
     setNotice(null);
+    // a decision is closed only by recording an answer (decide); it can be snoozed, never checked off or put away without one
+    if (task.kind === "decision" && action !== "snooze") { setNotice("A decision is closed by answering it."); return; }
     if (action === "snooze") {
       if (!task.updatedAt) { setNotice("Couldn't snooze: reload the task first."); return; }
       const until = tomorrowOf(new Date());
@@ -180,7 +185,7 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
       return;
     }
     const from = task.state;
-    const to: AnyState = action === "archive" ? "archived" : task.kind === "decision" ? "decided" : "done";
+    const to: AnyState = action === "archive" ? "archived" : "done";
     hide(task.id);
     const r = await vaultTasks.transition(task.id, from, to);
     if (!r.ok) { fail(task, action, r); return; }
@@ -219,5 +224,10 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
     } });
   }, [nodePath]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  return { tree, tasks: visible, all: list, runs, drafts, setPriority, decide, leaving, counts, truncated, treeTruncated, error, loading, notice, undo, act, refresh, refreshIfStale, dismissNotice: () => setNotice(null), ready: list !== null, now };
+  return { tree, tasks: visible, all: list, runs, drafts, setPriority, decide, leaving, counts, truncated, treeTruncated, error, loading, notice, undo, act, refresh, refreshIfStale, dismissNotice: () => setNotice(null), ready: list !== null, now,
+    /** A re-read is under way while rows are on screen. */
+    refreshing: loading && list !== null,
+    lastOk,
+    /** Every page of the list (and of the tree) was read: nothing is missing from it. */
+    complete: !truncated && !treeTruncated };
 }
