@@ -1476,11 +1476,11 @@ function Conversations({ onForget }: { onForget: () => void }) {
     {messages.length === 0 && <p className="empty">Thread not in local cache. Refresh to try again.</p>}
   </> : <>
     {messages.length > 0 && <div className="older">{older === "done" ? <span>Start of #{roomName}</span> : <button onClick={() => actions.current.loadOlder()} disabled={older === "loading"}>{older === "loading" ? "Loading older messages…" : "Load older messages"}</button>}</div>}
-    {messages.length === 0 && <p className="empty">No messages in this room yet.</p>}
+    {messages.length === 0 && (loadedView === currentView ? <p className="empty">No messages in this room yet.</p> : <p className="empty quiet" role="status" aria-label="Loading messages"> </p>)}
     {renderList(messages, false)}
   </>,
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  [messages, identity, reactFor, menuFor, kept, answered, root, older, roomName, editing, focusRef, relayOrigin]);
+  [messages, identity, reactFor, menuFor, kept, answered, root, older, roomName, editing, focusRef, relayOrigin, loadedView, currentView]);
 
   const topNote = notes[notes.length - 1];
   // A top-level note Back closes its tab and returns to the last used tab.

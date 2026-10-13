@@ -160,6 +160,8 @@ export type BootOpts = {
   /** Every vault_query answers after this many ms (to show the device cache paint first). */
   queryDelay?: number;
   roomsDelay?: number;
+  /** ms before a room's messages resolve (the first-fetch race). */
+  messagesDelay?: number;
   identityDelay?: number;
   nodeStatuses?: Record<string, string>;
   /** T-88: references hold note ids (node `parent`, task `node`, node `brief`) instead of paths, the way the vault is moving. The root task stays a path, so both forms appear. */
@@ -204,7 +206,7 @@ export async function bootAreas(page: Page, variant: Variant = 'seed', opts: Boo
   const now = Math.floor((opts.pinned ? pinnedAt : Date.now()) / 1000);
   const data = {
     profileNote: opts.profileNote ?? null, lifeVault: opts.lifeVault ?? null, now, variant, selftest: opts.selftest ?? true, ipcLeak: opts.ipcLeak ?? false, hostile: hostileApp(opts.ports ?? { http: 9, udp: 9 }), benign: BENIGN, techne: seed('techne'), unforced: seed('unforced'), seedMeta,
-    apps: opts.apps ?? [], multiRoom: !!opts.multiRoom || !!opts.tree, tree: !!opts.tree, tasks: !!opts.tasks, briefs: !!opts.briefs, queryDelay: opts.queryDelay ?? 0, identityDelay: opts.identityDelay ?? 0, roomsDelay: opts.roomsDelay ?? 0, nodeStatuses: opts.nodeStatuses ?? {}, nearOff: !!opts.nearOff, ids: !!opts.ids, boulder: !!opts.boulder, layout: opts.layout ?? 'octopus', underBoulder: !!opts.underBoulder, ricki: !!opts.ricki, atlas: !!opts.atlas, steer: !!opts.steer, longChat: !!opts.longChat, longChat: !!opts.longChat, privateTasks: !!opts.privateTasks, deviceCache: opts.deviceCache ?? null, queryFails: opts.queryFails ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null, mode: opts.mode ?? 'sealed', grantedUnder: opts.grantedUnder ?? (opts.mode ?? 'sealed'),
+    apps: opts.apps ?? [], multiRoom: !!opts.multiRoom || !!opts.tree, tree: !!opts.tree, tasks: !!opts.tasks, briefs: !!opts.briefs, queryDelay: opts.queryDelay ?? 0, identityDelay: opts.identityDelay ?? 0, roomsDelay: opts.roomsDelay ?? 0, messagesDelay: opts.messagesDelay ?? 0, nodeStatuses: opts.nodeStatuses ?? {}, nearOff: !!opts.nearOff, ids: !!opts.ids, boulder: !!opts.boulder, layout: opts.layout ?? 'octopus', underBoulder: !!opts.underBoulder, ricki: !!opts.ricki, atlas: !!opts.atlas, steer: !!opts.steer, longChat: !!opts.longChat, longChat: !!opts.longChat, privateTasks: !!opts.privateTasks, deviceCache: opts.deviceCache ?? null, queryFails: opts.queryFails ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null, mode: opts.mode ?? 'sealed', grantedUnder: opts.grantedUnder ?? (opts.mode ?? 'sealed'),
   };
   // Pre-granted apps: the grant key is the SHA-256 of the RESOLVED default needs plus the app's html.
   const preGrant = [
@@ -458,7 +460,7 @@ Two proposals wait on a scope decision.
           case 'get_identity': if (d.identityDelay) await new Promise((r) => setTimeout(r, d.identityDelay)); return U;
           case 'get_npub': return 'test';
           case 'get_rooms': if (d.roomsDelay) await new Promise((r) => setTimeout(r, d.roomsDelay)); w.__roomsResolved = true; return rooms;
-          case 'get_messages': return args.root ? [] : (msgs[args.channel] ?? []).slice(-(args.limit ?? 300));
+          case 'get_messages': if (d.messagesDelay) await new Promise((r) => setTimeout(r, d.messagesDelay)); return args.root ? [] : (msgs[args.channel] ?? []).slice(-(args.limit ?? 300));
           case 'get_members': return [{ pubkey: U, name: 'Aaron', named: true }];
           case 'vault_paths': return notes.map(rowOf);
           case 'vault_list': return d.lifeVault ? ['uni', d.lifeVault] : ['uni'];
