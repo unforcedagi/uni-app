@@ -1,4 +1,5 @@
 import { nestRooms } from "./roomNesting";
+import { useRoomLabels } from "./areas/roomLabels";
 import { isNetworkError, netError } from "./netError";
 import { voiceRetryDelay } from "./voiceRetry";
 import { VoiceOutbox, relayAccepted } from "./voiceOutbox";
@@ -61,6 +62,8 @@ type LivePayload = { kind: "message" | "edit" | "delete" | "rooms" | "profiles" 
 /** Buzz desktop: an indicator lives 8 s; send at most one every 3 s. */
 const TYPING_TTL_MS = 8000;
 const TYPING_SEND_MS = 3000;
+/** How long a freshly opened room holds the newest message against late layout (images, older pages). */
+const SETTLE_MS = 1500;
 type IdentityStatus = { paired: boolean; pubkey: string | null };
 type SyncResult = { pubkey: string; total_items: number; channel_errors: Record<string, string>; truncated_channels: string[] };
 
@@ -154,6 +157,7 @@ function resizeComposer(el: HTMLTextAreaElement) {
 
 function Conversations({ onForget }: { onForget: () => void }) {
   const [rooms, setRooms] = useState<Room[]>([]);
+  const roomLabels = useRoomLabels();
   const [tabs, setTabs] = useState<Tabs>(() => openTab(EMPTY_TABS,
     readLastSurface(localStorage) === "journal" ? { kind: "journal", title: "Journal" } : { kind: "areas", title: "Uni" },
     "new", () => crypto.randomUUID()));
@@ -713,9 +717,11 @@ function Conversations({ onForget }: { onForget: () => void }) {
   useLayoutEffect(() => {
     const el = listEl;
     if (!el || !currentView || loadedView !== currentView || restoredView.current === currentView) return;
-    const saved = scrollMemory.current.get(currentView);
-    el.scrollTop = restoreTop(saved, el.scrollHeight, el.clientHeight);
-    stickToEnd.current = !saved || saved.atEnd;
+    // T-124 r2: a room always opens at its latest message (no remembered spot), and stays there while images and older pages settle
+    // in, until the reader scrolls on purpose.
+    el.scrollTop = restoreTop(undefined, el.scrollHeight, el.clientHeight);
+    stickToEnd.current = true;
+    settleUntil.current = Date.now() + SETTLE_MS;
     restoredView.current = currentView;
     shownView.current = currentView;
   }, [listEl, currentView, loadedView, messages]);
@@ -723,18 +729,24 @@ function Conversations({ onForget }: { onForget: () => void }) {
   // Remember where the reader is, per view (only once that view is restored,
   // so a half-swapped list never overwrites a good mark).
   const gliding = useRef(0);
+  const settleUntil = useRef(0);
   useEffect(() => {
     const el = listEl;
     if (!el) return;
+    const onUser = () => { settleUntil.current = 0; };
     const onScroll = () => {
       const v = restoredView.current;
       if (!v || Date.now() < gliding.current) return;
+      // Still settling after the open: a scroll that is not the reader's own is layout (older rows, images) moving the list. Stay at the end.
+      if (Date.now() < settleUntil.current) { if (el.scrollHeight - el.scrollTop - el.clientHeight > 1) el.scrollTop = el.scrollHeight; return; }
       const mark = markFor(el.scrollTop, el.scrollHeight, el.clientHeight);
       scrollMemory.current.set(v, mark);
       stickToEnd.current = mark.atEnd;
     };
     el.addEventListener("scroll", onScroll, { passive: true });
-    return () => el.removeEventListener("scroll", onScroll);
+    const inputs = ["wheel", "touchstart", "keydown", "pointerdown"] as const;
+    for (const t of inputs) el.addEventListener(t, onUser, { passive: true });
+    return () => { el.removeEventListener("scroll", onScroll); for (const t of inputs) el.removeEventListener(t, onUser); };
   }, [listEl]);
 
   // Images, fonts and embeds settle after first paint: while following the
@@ -817,6 +829,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       if (channelRef.current !== ch) return;
       if (n === 0) { setOlder("done"); return; }
       if (listRef.current) preserveScroll.current = listRef.current.scrollHeight - listRef.current.scrollTop;
+      settleUntil.current = 0;
       setOlder("idle");
       setLimit((l) => l + n + 50);
     } catch (e) { if (channelRef.current === ch) { setError(String(e)); setOlder("idle"); } }
@@ -1605,7 +1618,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     <nav className="rail" aria-label="Main navigation">
       <button aria-label="Uni" aria-current={!panel && !searchOpen && (!topNote && areasOpen ? "page" : undefined)} onClick={() => openTarget(uniHome())}><i><UniIcon /></i><span>Uni</span></button>
       <button aria-label="Journal" aria-current={!panel && !searchOpen && (journalOpen && !topNote ? "page" : undefined)} onClick={() => openTarget({ kind: "journal", title: "Journal" })}><i><JournalIcon /></i><span>Journal</span></button>
-      {showUniGlue(lifeVault) && <button aria-label="For you" aria-current={!panel && !searchOpen && (topNote?.ref === FOR_YOU_ID ? "page" : undefined)} onClick={openForYou}><i><StarIcon />{forYou.count > 0 && <b className="rail-count">{forYou.count}</b>}{forYou.fresh && <span className="rail-dot" aria-label="Updated recommendations" />}</i><span>For you</span></button>}
+      {showUniGlue(lifeVault) && <button aria-label="For you" aria-current={!panel && !searchOpen && (topNote?.ref === FOR_YOU_ID ? "page" : undefined)} onClick={openForYou}><i><StarIcon />{(forYou.fresh || forYou.count > 0) && <span className="rail-dot" aria-label={forYou.fresh ? "Updated recommendations" : "Recommendations"} />}</i><span>For you</span></button>}
       <button aria-label="Rooms" aria-current={!panel && !searchOpen && (!topNote && !journalOpen && !areasOpen && channel && channel !== findUniRoom(rooms)?.id ? "page" : undefined)} aria-expanded={panel === "rooms"} onClick={() => { setSearchOpen(false); setPanel(panel === "rooms" ? null : "rooms"); }}><i><RoomsIcon /></i><span>Rooms</span>{rooms.some((r) => r.unread > 0) && <span className="rail-dot" aria-label="Unread rooms" />}</button>
       <button className="rail-vault" aria-label="Vault" aria-current={!panel && !searchOpen && (active?.kind === "vault" || (topNote && topNote.ref !== FOR_YOU_ID) ? "page" : undefined)} aria-expanded={panel === "vault"} onClick={() => { setSearchOpen(false); setPanel(panel === "vault" ? null : "vault"); }}><i>▤</i><span>Vault</span></button>
       <button className="rail-search" aria-label="Search" aria-expanded={searchOpen} onClick={() => { setPanel(null); setSearchQuery(""); setSearchScope({ vault: "", prefix: "" }); setSearchOpen(true); }}><i>⌕</i><span>Search</span></button>
@@ -1618,12 +1631,13 @@ function Conversations({ onForget }: { onForget: () => void }) {
       <div className="phone-panel-tools"><button onClick={() => { setPanel("vault"); setSearchOpen(false); }}>Vault</button><button onClick={() => { setPanel(null); setSearchOpen(true); }}>Search</button></div>
       <header className="rooms-header"><div><span className="eyebrow">Unforced</span><h1>Uni</h1></div><div><button className="icon-button" onClick={() => { setSearchQuery(""); setSearchScope({ vault: "", prefix: "" }); setSearchOpen(true); }} aria-label="Search messages and notes">⌕</button><button className="icon-button" onClick={() => void refresh()} disabled={busy} aria-label="Refresh conversations">↻</button><button className="icon-button" onClick={() => { setPanel(panel === "settings" ? "rooms" : "settings"); setSearchOpen(false); setForgetArmed(false); }} aria-label="Settings" aria-expanded={panel === "settings"}><SettingsIcon /></button></div></header>
       {pairSourceOpen && <PairSource onClose={() => setPairSourceOpen(false)} />}
-      {panel === "settings" && <div className="settings"><UpdateSettings /><HomeLayoutSetting /><LifeOsVaultSetting vaults={vaults} /><AreaSelfTest /><PairDeviceButton onOpen={() => setPairSourceOpen(true)} /><button className="pairing-secondary" onClick={() => void forget()}>{forgetArmed ? "Tap again to forget — you'll need to re-pair" : "Forget this device key"}</button>{forgetArmed && <button className="pairing-secondary" onClick={() => setForgetArmed(false)}>Keep key</button>}</div>}
+      {panel === "settings" && <div className="settings">
+        <p className="connection" role="status">{status}{live ? <span className={`live ${live === "Live" ? "on" : ""}`}> · {live}</span> : null}</p>
+      {identity && <p className="identity" title={npub ?? identity}>{myName ? <>Signed in as <strong>{myName}</strong></> : <>Public key <code>{npub ? `${npub.slice(0, 14)}…${npub.slice(-6)}` : `${identity.slice(0, 12)}…`}</code></>}<button className="identity-copy" onClick={() => void copyText(npub ?? identity, "Copied public key")} aria-label="Copy your public key">⧉</button></p>}
+        <UpdateSettings /><HomeLayoutSetting /><LifeOsVaultSetting vaults={vaults} /><AreaSelfTest /><PairDeviceButton onOpen={() => setPairSourceOpen(true)} /><button className="pairing-secondary" onClick={() => void forget()}>{forgetArmed ? "Tap again to forget — you'll need to re-pair" : "Forget this device key"}</button>{forgetArmed && <button className="pairing-secondary" onClick={() => setForgetArmed(false)}>Keep key</button>}</div>}
       {searchOpen && <Search initialQuery={searchQuery} vaults={vaults} key={`${searchScope.vault}:${searchScope.prefix}`} initialVault={searchScope.vault} initialPathPrefix={searchScope.prefix} onOpen={openHit} onOpenNote={(n) => { setSearchOpen(false); openNote({ hub: null, vault: n.vault, ref: n.id }, null); }} onAskUni={askUniSearch} onClose={() => { setSearchOpen(false); if (topNote) setSidebarVisible(false); }} />}
       {searchOpen && error && <p className="error search-error" role="alert">{error}</p>}
       <div className="rooms-body" hidden={searchOpen}>
-      <p className="connection" role="status">{status}{live ? <span className={`live ${live === "Live" ? "on" : ""}`}> · {live}</span> : null}</p>
-      {identity && <p className="identity" title={npub ?? identity}>{myName ? <>Signed in as <strong>{myName}</strong></> : <>Public key <code>{npub ? `${npub.slice(0, 14)}…${npub.slice(-6)}` : `${identity.slice(0, 12)}…`}</code></>}<button className="identity-copy" onClick={() => void copyText(npub ?? identity, "Copied public key")} aria-label="Copy your public key">⧉</button></p>}
       {!ready && <p className="empty">Loading…</p>}
       {ready && rooms.length === 0 && <p className="empty">No joined conversations cached. Refresh to connect with your personal Buzz key.</p>}
       <section className="vault-sidebar" aria-label="Vaults"><div className="vault-heading"><h2>Vaults</h2><button className="note-quiet" onClick={() => setVaultRefresh((n) => n + 1)}>Refresh</button></div>
@@ -1636,12 +1650,12 @@ function Conversations({ onForget }: { onForget: () => void }) {
           <div id="other-vault-list" hidden={!otherVaultsExpanded}>{otherVaults.map(vaultRow)}</div>
         </>}
       </section>
-      <nav>{nestRooms(rooms).map(({ room, label, child }) => <button key={room.id} className={`room ${child ? "child" : ""} ${channel === room.id ? "selected" : ""}`} title={child ? room.name : undefined} aria-label={child ? `#${room.name}` : undefined} onClick={(e) => sidebarClick(roomTarget(room.id), e)}
+      <nav>{nestRooms(rooms).map(({ room, label: rawLabel, child }) => { const label = roomLabels.get(room.id) ?? rawLabel; return <button key={room.id} className={`room ${child ? "child" : ""} ${channel === room.id ? "selected" : ""}`} title={child ? room.name : undefined} aria-label={child ? `#${room.name}` : undefined} onClick={(e) => sidebarClick(roomTarget(room.id), e)}
         onPointerDown={(e) => { if (e.pointerType === "touch") startLongPress(roomTarget(room.id)); }} onPointerUp={endLongPress} onPointerCancel={endLongPress} onPointerLeave={endLongPress}
         aria-current={channel === room.id ? "page" : undefined}>
         <span className="avatar">{label[0]?.toUpperCase() ?? "#"}</span><span className="room-text"><strong className={room.unread ? "unread" : ""}>{label}</strong><small>{room.last_message ? markdownToText(room.last_message) : "No messages yet"}</small></span>
         <span className="room-side"><time>{room.last_ts ? time(room.last_ts) : ""}</time>{room.unread > 0 && <span className={`unread-badge ${room.mentions ? "mention" : ""}`} aria-label={`${room.unread} unread${room.mentions ? ", mentions you" : ""}`}>{room.mentions ? "@ " : ""}{room.unread > 99 ? "99+" : room.unread}</span>}</span>
-      </button>)}</nav>
+      </button>; })}</nav>
       </div>
     </aside>
     <section className="conversation" aria-label={journalOpen ? "Journal" : areasOpen ? "Uni" : currentRoom ? `Conversation: ${currentRoom.name}` : active?.kind === "note" ? "Note" : "Conversation"}>

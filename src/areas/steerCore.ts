@@ -77,10 +77,11 @@ export function marksById(marks: readonly Mark[]): Map<string, Mark[]> {
 
 // ---------------------------------------------------------------------------------------------- Running and Drafts
 
-export const RUN_STATES = ["queued", "running", "stalled", "done", "failed"] as const;
+/** The 0.1.44 ledger (queued, running, stalled, done, failed) and the T-125 run notes (running, done, blocked, decision, failed). */
+export const RUN_STATES = ["queued", "running", "stalled", "blocked", "decision", "done", "failed"] as const;
 export type RunState = (typeof RUN_STATES)[number];
 /** One line of the T-118 dispatch ledger (`run` notes). */
-export type Run = { id: string; path: string; node: string; task: string | null; what: string; by: string; state: RunState; started: string | null; updated: string | null; result: string | null };
+export type Run = { id: string; path: string; node: string; task: string | null; what: string; by: string; state: RunState; started: string | null; updated: string | null; result: string | null; room: string | null };
 export type DraftStatus = "drafting" | "ready";
 export type Draft = { id: string; path: string; title: string; node: string; task: string | null; status: DraftStatus; updatedAt: string | null };
 
@@ -101,7 +102,10 @@ export function parseRuns(notes: readonly RawNote[], tree: TaskTree): Run[] {
     const state = str(m.state)?.toLowerCase();
     const node = nodePath(tree, m.node);
     if (!state || !(RUN_STATES as readonly string[]).includes(state) || node === null) continue;
-    out.push({ id, path, node, task: str(m.task), what: str(m.what) ?? leaf(path), by: str(m.by) ?? "", state: state as RunState, started: str(m.started), updated: str(m.updated) ?? str(n.updatedAt), result: str(m.result) });
+    // T-125 run notes: `summary`, `worker`, `started_at`, `ended_at`. The 0.1.44 ledger: `what`, `by`, `started`, `updated`. Never the note's path.
+    const task = str(m.task);
+    out.push({ id, path, node, task, what: str(m.summary) ?? str(m.what) ?? (task ? `Working on ${task}` : "Working on it"), by: str(m.worker) ?? str(m.by) ?? "", state: state as RunState,
+      started: str(m.started_at) ?? str(m.started), updated: str(m.ended_at) ?? str(m.updated) ?? str(n.updatedAt), result: str(m.result), room: str(m.room)?.replace(/^#/, "") ?? null });
   }
   return out;
 }
@@ -127,7 +131,7 @@ const under = (tree: TaskTree, path: string) => (path === ROOT ? null : new Set(
 /** The runs on a node and beneath it (ROOT: all), the active ones first (running, stalled, queued), then the finished, newest first. */
 export function runsUnder(tree: TaskTree, path: string, runs: readonly Run[]): Run[] {
   const set = under(tree, path);
-  const rank: Record<RunState, number> = { running: 0, stalled: 1, queued: 2, failed: 3, done: 4 };
+  const rank: Record<RunState, number> = { running: 0, blocked: 1, stalled: 2, queued: 3, decision: 4, failed: 5, done: 6 };
   return runs.filter((r) => !set || set.has(r.node)).sort((a, b) => rank[a.state] - rank[b.state] || (b.updated ?? "").localeCompare(a.updated ?? ""));
 }
 export function draftsUnder(tree: TaskTree, path: string, drafts: readonly Draft[]): Draft[] {

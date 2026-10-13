@@ -1527,6 +1527,23 @@ async fn vault_transition(
     .await
 }
 
+/// Decide an open decision: the `state` compare-and-set and the `decided*` metadata in one update (the client refuses any other key or note).
+#[tauri::command]
+async fn vault_decide(
+    app: tauri::AppHandle,
+    vault: String,
+    id: String,
+    from: serde_json::Value,
+    to: serde_json::Value,
+    metadata: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    with_vault(&app, move |c| {
+        tauri::async_runtime::block_on(c.decide_note(&vault, &id, from, to, metadata))
+            .map_err(|e| e.to_string())
+    })
+    .await
+}
+
 /// Merge `snoozed_until` into a task or decision, guarded by `if_updated_at` (the client refuses any other key or note).
 #[tauri::command]
 async fn vault_patch_meta(
@@ -1797,6 +1814,7 @@ pub fn run() {
             vault_subtree_tasks,
             vault_transition,
             vault_patch_meta,
+            vault_decide,
             vault_create,
             vault_save,
             android_update_manifest

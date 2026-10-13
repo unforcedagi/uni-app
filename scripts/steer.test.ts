@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { buildTaskTree, parseNodes, parseTask, type Task } from "../src/areas/taskCore.ts";
 import { changedLine, dayLabel, diffDrafts, diffTasks, draftsUnder, marksById, parseDrafts, parseRuns, runsUnder, valueLabel } from "../src/areas/steerCore.ts";
 import { ROOT } from "../src/areas/treeCore.ts";
-import { chatPlaceholder, firstSentence, topNeeds } from "../src/areas/simpleCore.ts";
+import { chatPlaceholder, firstSentence, quietAgo, standsLine, topNeeds } from "../src/areas/simpleCore.ts";
 import { whereWeAre } from "../src/areas/whereCore.ts";
 
 let failed = 0;
@@ -109,14 +109,63 @@ check("companion: one sentence from the lede, cut at a word when long, links as 
   const long = firstSentence(`${"word ".repeat(60)}end.`);
   assert.ok(long.length <= 171 && long.endsWith("…"), long);
 });
-check("companion: at most three needs, Now first, and how many more", () => {
+const decision = (id: string, node: string, extra: Record<string, unknown> = {}, at = AT - 60_000): Task =>
+  parseTask({ id, path: `Decisions/${id} Pick one`, tags: ["decision"], updatedAt: iso(at), metadata: { node, state: "open", options: ["Ship it", "Hold"], ...extra } }, tree)!;
+check("companion: at most three needs, this node's open decisions first, then Now before Soon; never a count of the rest", () => {
   const rows = [task("t1", "Projects/ATLAS", { priority: "soon" }), task("t2", "Projects/ATLAS", { priority: "now" }), task("t3", "Projects/ATLAS", { priority: "someday" }), task("t4", "Projects/ATLAS", { priority: "now" }), task("t5", "Projects/ATLAS", { priority: "soon" })];
   const w = whereWeAre({ tasks: rows, hidden: () => false, nowMs: AT });
-  const top = topNeeds(w);
-  assert.equal(top.rows.length, 3);
-  assert.deepEqual(top.rows.slice(0, 2).map((t) => t.priority), ["now", "now"]);
-  assert.equal(top.more, 2);
-  assert.equal(topNeeds(whereWeAre({ tasks: rows.slice(0, 2), hidden: () => false, nowMs: AT })).more, 0);
+  const top = topNeeds(w, "Projects/ATLAS");
+  assert.equal(top.length, 3);
+  assert.deepEqual(top.slice(0, 2).map((t) => t.priority), ["now", "now"]);
+  const d = decision("d1", "Projects/ATLAS"), far = decision("d2", "Areas/Atlas");
+  const mixed = topNeeds(whereWeAre({ tasks: [...rows, far, d], hidden: () => false, nowMs: AT }), "Projects/ATLAS");
+  assert.equal(mixed[0].id, "d1", "the decision on this very node leads");
+  assert.equal(mixed.length, 3);
+  assert.equal(topNeeds(whereWeAre({ tasks: rows.slice(0, 2), hidden: () => false, nowMs: AT }), "Projects/ATLAS").length, 2);
+});
+check("decisions: options[] as labels (strings or {label}), at most four, none for a task", () => {
+  assert.deepEqual(decision("d1", "Projects/ATLAS").options, ["Ship it", "Hold"]);
+  assert.deepEqual(decision("d3", "Projects/ATLAS", { options: [{ label: "A" }, "B", "B", 7, { title: "C" }, "D", "E"] }).options, ["A", "B", "C", "D"]);
+  assert.deepEqual(decision("d4", "Projects/ATLAS", { options: "nope" }).options, []);
+  assert.deepEqual(task("t9", "Projects/ATLAS", { options: ["x"] }).options, []);
+});
+check("stands: the node's own sentence with a quiet time; never a count or the description", () => {
+  const now = Date.parse("2026-10-13T12:00:00Z");
+  assert.deepEqual(standsLine({ text: "Cohort two opens Oct 15. Grading is next.", at: "2026-10-12T08:00:00Z" }, [], now), { text: "Cohort two opens Oct 15.", ago: "yesterday" });
+  assert.deepEqual(standsLine({ text: "Quiet week.", at: null }, [], now), { text: "Quiet week.", ago: "" });
+  assert.equal(standsLine(null, [], now), null);
+  assert.equal(standsLine({ text: "  ", at: null }, [], now), null);
+  const d = decision("T-11", "Projects/ATLAS", {}, Date.parse("2026-10-10T00:00:00Z"));
+  const t = task("T-12", "Projects/ATLAS", { state: "doing" }, Date.parse("2026-10-12T00:00:00Z"));
+  assert.equal(standsLine(null, [t, d], now)?.text, "Waiting on a decision: Pick one.");
+  assert.equal(standsLine(null, [t], now)?.text, "Title is underway.");
+  assert.equal(quietAgo("2026-10-13T08:00:00Z", now), "today");
+  assert.equal(quietAgo("2026-10-10T08:00:00Z", now), "3 days ago");
+  assert.equal(quietAgo("2026-09-20T08:00:00Z", now), "3 weeks ago");
+  assert.equal(quietAgo("garbage", now), "");
+});
+check("stands: read from the node notes, including Uni's own", () => {
+  const withStands = parseNodes([{ id: "u", path: "Uni", tags: ["uni"], metadata: { stands: "All quiet.", stands_at: "2026-10-12T00:00:00Z" } }, { id: "a", path: "Areas/Atlas", tags: ["area"], metadata: { parent: "Uni", stands: "Atlas is moving." } }, { id: "b", path: "Areas/B", tags: ["area"], metadata: { parent: "Uni" } }]);
+  const t2 = buildTaskTree(withStands.nodes, withStands.rootPath);
+  assert.deepEqual(t2.stands.get(ROOT), { text: "All quiet.", at: "2026-10-12T00:00:00Z" });
+  assert.deepEqual(t2.stands.get("Areas/Atlas"), { text: "Atlas is moving.", at: null });
+  assert.equal(t2.stands.has("Areas/B"), false);
+});
+check("runs: the T-125 run notes (summary, worker, started_at, state decision/blocked) and never the note's path", () => {
+  const r = parseRuns([
+    { id: "n1", path: "Runs/scratch-cohere-ecology", updatedAt: iso(AT), metadata: { node: "Projects/ATLAS", state: "running", summary: "Writing the Canvas Week 7 brief", worker: "sonnet", room: "#atlas/build", started_at: iso(AT - 5000) } },
+    { id: "n2", path: "Runs/scratch-no-summary", updatedAt: iso(AT), metadata: { node: "Projects/ATLAS", state: "blocked" } },
+    { id: "n3", path: "Runs/done-one", updatedAt: iso(AT), metadata: { node: "Projects/ATLAS", state: "decision", task: "T-07", ended_at: iso(AT) } },
+  ], tree);
+  assert.deepEqual(r.map((x) => x.state), ["running", "blocked", "decision"]);
+  assert.equal(r[0].what, "Writing the Canvas Week 7 brief");
+  assert.equal(r[0].by, "sonnet");
+  assert.equal(r[0].room, "atlas/build");
+  assert.equal(r[0].started, iso(AT - 5000));
+  assert.equal(r[1].what, "Working on it");
+  assert.equal(r[2].what, "Working on T-07");
+  for (const x of r) assert.ok(!/scratch|Runs\//.test(x.what), x.what);
+  assert.deepEqual(runsUnder(tree, ROOT, r).map((x) => x.id), ["n1", "n2", "n3"]);
 });
 await Promise.resolve();
 if (failed) { console.log(`${failed} FAILED`); process.exit(1); }

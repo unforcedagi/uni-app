@@ -4,6 +4,7 @@ import { vaultTasks } from "./vaultTasks";
 import { shouldReload } from "./pathCache";
 import { useVaultProfile } from "./ProfileContext";
 import { parseDrafts, parseRuns } from "./steerCore";
+import { activeProfile } from "./profile";
 
 export type TaskAction = "done" | "archive" | "snooze";
 export type Undo = { id: string; label: string; run: () => Promise<void> };
@@ -130,6 +131,17 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
     if (r.kind === "conflict") refresh();
   };
 
+  /** One tap on a decision's option. A conflict (already decided elsewhere) says so and re-reads. There is no undo: a decision is a decision. */
+  const decide = useCallback(async (task: Task, option: string) => {
+    setNotice(null);
+    hide(task.id);
+    const r = await vaultTasks.decide(task.id, option, activeProfile().me);
+    if (r.ok) { refresh(); return; }
+    restore(task.id);
+    setNotice(r.kind === "conflict" ? "Already decided. Showing the latest." : r.kind === "invalid" ? "Couldn't decide: the vault refused that value." : `Couldn't decide: ${r.message.replace(/^Error:\s*/, "").slice(0, 120)}`);
+    if (r.kind === "conflict") refresh();
+  }, [nodePath]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const act = useCallback(async (task: Task, action: TaskAction) => {
     setNotice(null);
     if (action === "snooze") {
@@ -188,5 +200,5 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
     } });
   }, [nodePath]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  return { tree, tasks: visible, all: list, runs, drafts, setPriority, leaving, counts, truncated, treeTruncated, error, loading, notice, undo, act, refresh, dismissNotice: () => setNotice(null), ready: list !== null, now };
+  return { tree, tasks: visible, all: list, runs, drafts, setPriority, decide, leaving, counts, truncated, treeTruncated, error, loading, notice, undo, act, refresh, dismissNotice: () => setNotice(null), ready: list !== null, now };
 }

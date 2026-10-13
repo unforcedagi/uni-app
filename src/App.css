@@ -101,7 +101,7 @@ h1 { font-family: var(--serif); font-weight: 500; font-size: 34px; line-height: 
 .journal-room .room-text strong { font-family: var(--serif); font-size: 21px; font-weight: 500; }
 
 /* ── Conversation ──────────────────────────────────────────── */
-.conversation { flex: 1; display: flex; flex-direction: column; min-width: 0; background: var(--bg); padding-top: env(safe-area-inset-top); animation: fade .35s var(--ease); }
+.conversation { flex: 1; display: flex; flex-direction: column; min-width: 0; background: var(--bg); padding-top: env(safe-area-inset-top); }
 .conversation-header { min-height: 68px; border-bottom: 1px solid var(--line); background: var(--bg); display: flex; align-items: center; gap: 10px; padding: 8px max(20px, calc((100% - 760px) / 2)); }
 .conversation-header div { display: flex; flex: 1; flex-direction: column; gap: 2px; min-width: 0; }
 .conversation-header strong { font-family: var(--serif); font-size: 24px; font-weight: 500; line-height: 1.1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -114,7 +114,7 @@ h1 { font-family: var(--serif); font-weight: 500; font-size: 34px; line-height: 
 .empty { padding: 28px 24px; color: var(--muted); line-height: 1.6; text-align: center; font-family: var(--serif); font-style: italic; font-size: 17px; }
 
 /* ── Messages ──────────────────────────────────────────────── */
-.message { position: relative; display: flex; gap: 14px; padding: 12px 0 6px; animation: rise .4s var(--ease) both; }
+.message { position: relative; display: flex; gap: 14px; padding: 12px 0 6px; }
 .message-avatar { flex-basis: 34px; width: 34px; height: 34px; font-size: 16px; }
 .message-content { max-width: min(92%, 640px); min-width: 0; padding: 0 2px; }
 .message.mine .message-content, .message.highlight .message-content { border-radius: 4px var(--radius) var(--radius) var(--radius); padding: 8px 14px 6px; }
@@ -354,7 +354,7 @@ h1 { font-family: var(--serif); font-weight: 500; font-size: 34px; line-height: 
 /* The note is a sheet over the conversation pane; the chat stays mounted
    (and laid out) underneath so Back returns to the same scroll position. */
 .shell { position: relative; }
-.note-sheet { position: absolute; top: 0; bottom: 0; right: 0; left: 336px; z-index: 20; display: flex; flex-direction: column; background: var(--bg); box-shadow: -1px 0 0 var(--line), -24px 0 48px -32px rgba(47, 80, 70, .35); padding-top: env(safe-area-inset-top); animation: sheet-in .32s var(--ease) both; }
+.note-sheet { position: absolute; top: 0; bottom: 0; right: 0; left: 336px; z-index: 20; display: flex; flex-direction: column; background: var(--bg); box-shadow: -1px 0 0 var(--line), -24px 0 48px -32px rgba(47, 80, 70, .35); padding-top: env(safe-area-inset-top); }
 @keyframes sheet-in { from { opacity: 0; transform: translateX(18px); } to { opacity: 1; transform: none; } }
 .note-view { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .note-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 64px; padding: 8px max(14px, calc((100% - 720px) / 2)); border-bottom: 1px solid var(--line); background: var(--bg); }
@@ -572,7 +572,7 @@ h1 { font-family: var(--serif); font-weight: 500; font-size: 34px; line-height: 
   .rail-dot { position: absolute; top: 8px; right: 10px; width: 6px; height: 6px; border-radius: 50%; background: var(--turquoise); }
   .rail i .rail-dot { top: 3px; left: 11px; right: auto; }
   .rooms .capture-shortcuts { display: none; }
-  .shell .rooms, .shell.in-room .rooms { display: none; position: absolute; left: 64px; top: 0; bottom: 0; width: 336px; max-width: calc(100% - 64px); z-index: 41; box-shadow: var(--shadow-lift); animation: sheet-in .25s var(--ease); }
+  .shell .rooms, .shell.in-room .rooms { display: none; position: absolute; left: 64px; top: 0; bottom: 0; width: 336px; max-width: calc(100% - 64px); z-index: 41; box-shadow: var(--shadow-lift); }
   .shell.panel-open .rooms, .shell.search-open .rooms { display: flex; }
   .panel-scrim { display: block; position: absolute; inset: 0 0 0 64px; background: rgba(28,38,34,.18); border: 0; z-index: 40; }
   .shell .conversation { display: flex; }
@@ -613,7 +613,7 @@ h1 { font-family: var(--serif); font-weight: 500; font-size: 34px; line-height: 
   .rail .rail-vault, .rail .rail-search { display: none; }
   .shell.composer-focused, .shell.journal-focus { padding-bottom: 0; }
   .shell.composer-focused .rail { display: none; }
-  .shell .rooms, .shell.in-room .rooms { left: 0; width: 100%; max-width: 100%; bottom: 0; z-index: 50; border-right: 0; animation: phone-sheet-in .25s var(--ease); }
+  .shell .rooms, .shell.in-room .rooms { left: 0; width: 100%; max-width: 100%; bottom: 0; z-index: 50; border-right: 0; }
   .shell .conversation { display: flex; }
   .back { display: grid; }
   .panel-scrim { inset: 0; }

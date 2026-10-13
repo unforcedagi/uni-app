@@ -37,7 +37,7 @@ const tree = buildTree([
 
 check("slug: lower case, spaces to dashes", () => { assert.equal(roomSlug("Boulder New Tech"), "boulder-new-tech"); assert.equal(roomSlug("#Cohere"), "cohere"); });
 check("an area with a room shows it flat; a project nests under its area's room: boulder/cohere", () => {
-  assert.deepEqual(roomView(tree, "Areas/Boulder", ROOMS, UNI), { target: ROOMS[1], slash: "boulder", heldBy: null, own: true });
+  assert.deepEqual(roomView(tree, "Areas/Boulder", ROOMS, UNI), { target: ROOMS[1], slash: "boulder", heldBy: null, own: true, heldNode: null });
   const v = roomView(tree, "Projects/COhere", ROOMS, UNI);
   assert.equal(v.slash, "boulder/cohere"); assert.equal(v.target?.id, "r-coh"); assert.equal(v.own, true);
   assert.equal(roomView(tree, "Projects/New Tech", ROOMS, UNI).slash, "boulder/boulder-new-tech");
@@ -59,7 +59,7 @@ check("an archived room is skipped: no fallback means held by the ancestor; a fa
 check("an area with no room anywhere is held by #Uni", () => {
   const v = roomView(tree, "Areas/Relationships", ROOMS, UNI);
   assert.equal(v.own, false); assert.equal(v.heldBy?.id, "r-uni"); assert.equal(v.target?.id, "r-uni");
-  assert.deepEqual(roomView(tree, ROOT, ROOMS, UNI), { target: UNI, slash: "uni", heldBy: null, own: true });
+  assert.deepEqual(roomView(tree, ROOT, ROOMS, UNI), { target: UNI, slash: "uni", heldBy: null, own: true, heldNode: null });
 });
 check("updates from below: rooms of their own under the node, active within a day, newest first, not its own room", () => {
   const now = 1_000_000;
