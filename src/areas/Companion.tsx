@@ -114,7 +114,8 @@ function NeedRow({ t, onTask, onDecide, onNote }: { t: Task; onTask: (t: Task) =
       setTitleLines(lines);
       // measured on the question itself; once it reads "Open to decide" the row is one line, so only a new width or text measures again
       const w = Math.round(el.clientWidth);
-      const moved = w !== width.current; width.current = w;
+      // a scrollbar appearing or leaving moves the width by a few px: that must not flip the row back and forth
+      const moved = Math.abs(w - width.current) > 40; if (moved || !width.current) width.current = w;
       if (moved && tooLongRef.current) { setTooLong(false); return; }
       if (isDecision && !base.openToDecide && !tooLongRef.current) setTooLong(lines > ASK_LINES_MAX);
       if (!open) setTitleCut(el.scrollHeight > el.clientHeight + 1);
