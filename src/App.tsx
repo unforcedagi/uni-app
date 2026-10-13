@@ -41,7 +41,7 @@ import { UpdateSettings } from "./UpdateNotice";
 import { watchLostIpc } from "./ipcLost";
 import { currentUserAgent, platformName } from "./interface/selftest/gate";
 import { activeTab, closeTab, EMPTY_TABS, focusTab, isSurface, LEGACY_TABS_KEY, migrateLegacyTabs, navigateNoteTab, nextAfterClose, openTab, persistable, recordingTabCanClose, restoreTabs, serializeTabs, updateTab, TABS_KEY, type Tabs, type Tab, type TabTarget, type OpenMode } from "./tabs";
-import { canBack as histCanBack, canForward as histCanForward, EMPTY_HISTORY, recent as histRecent, step as histStep, visit as histVisit, type History } from "./navHistory";
+import { canBack as histCanBack, canForward as histCanForward, EMPTY_HISTORY, placeKey, RECENT_SHOWN, recent as histRecent, step as histStep, visit as histVisit, type History } from "./navHistory";
 import { NavContext, type NavControls } from "./navContext";
 import { notifyMention, setUnreadBadge } from "./desktopNotify";
 import NoteView from "./NoteView";
@@ -1296,10 +1296,10 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const isThread = !!root;
   const rootMessage = isThread ? messages.find((m) => m.ref === root) : undefined;
   const threadReplies = isThread ? messages.filter((m) => m.ref !== root) : [];
-  const boundNames = [...new Set(bindings.values())].map((pk) => members.find((m) => m.pubkey === pk)?.name ?? pk.slice(0, 8));
 
   // The room's message list and composer. The room view and an area's chat pane are this same markup, so one send path,
   // one draft per room and one signer serve both; `above` is drawn directly over the composer (the suggestion bar).
+  const uniInRoom = !!findUniMember(members);
   const roomPane = (currentRoom: Room, above: ReactNode, placeholder?: string) => <>
         <div className="message-list" ref={setList} role="log" aria-label="Messages" aria-live="polite">
           <div className="message-stack" ref={setStackEl}>
@@ -1311,7 +1311,6 @@ function Conversations({ onForget }: { onForget: () => void }) {
           {above}
           <input ref={fileInput} className="file-picker" type="file" multiple aria-label="Choose files to attach" onChange={(e) => { addFiles(Array.from(e.target.files ?? [])); e.target.value = ""; }} />
           {error && <p className="error" role="alert">{error}</p>}
-          <div className="compose-destination">{isThread ? <>Replying in thread · <strong>{currentRoom.name}</strong></> : <>Sending to <strong>{currentRoom.name}</strong></>}{boundNames.length ? ` · notifying ${boundNames.join(", ")}` : ""}{findUniMember(members) && <> · <button className="link" onClick={() => setNotifyUni((v) => !v)} aria-pressed={notifyUni}>{notifyUni ? "Uni is listening" : "Uni muted"}</button></>}</div>
           {picker && <ul className="mention-picker" role="listbox" aria-label="Mention a member">
             {suggestions.length === 0 && <li className="mention-empty">{members.length ? `No member matches “${picker.query}”` : "No member list cached yet. Refresh to load it."}</li>}
             {suggestions.map((m, i) => <li key={m.pubkey} role="option" aria-selected={i === picker.index}>
@@ -1335,6 +1334,9 @@ function Conversations({ onForget }: { onForget: () => void }) {
           <div className="compose-row">
             <ComposerMenu key={`${channel}:${root}`} onMention={startMention} onAttach={() => fileInput.current?.click()} sending={sending} />
             <textarea ref={composerInput} aria-label={`Message ${currentRoom.name}`} value={draft} onChange={(e) => updateDraft(e.target.value, e.target.selectionStart)} onPaste={onPasteFiles} onSelect={(e) => syncPicker(e.currentTarget.value, e.currentTarget.selectionStart)} onBlur={() => setPicker(null)} onKeyDown={onKeyDown} maxLength={65536} rows={1} placeholder={isThread ? "Reply in thread…" : placeholder ?? "Message Uni…"} />
+            {/* Uni hears every message in a room it is in, unless muted here: a small, visible switch (it was hidden with the old destination line) */}
+            {uniInRoom && <button type="button" className={`compose-uni ${notifyUni ? "on" : ""}`} aria-pressed={notifyUni} onClick={() => setNotifyUni((v) => !v)}
+              aria-label={notifyUni ? "Uni is listening. Mute Uni for your messages" : "Uni is muted. Let Uni listen again"} title={notifyUni ? "Uni hears what you send here. Tap to mute." : "Uni is muted: your messages don't notify Uni. Tap to let Uni listen."}>{notifyUni ? "Uni listening" : "Uni muted"}</button>}
             <button className={`address-toggle compose-icon mic ${recorder.recording && recordingOrigin.current?.key === scope() ? "recording" : ""}`} onClick={() => void toggleRecording()} disabled={sending || (recorder.busy && (!recorder.recording || recordingOrigin.current?.key !== scope()))} aria-pressed={recorder.recording && recordingOrigin.current?.key === scope()} aria-label={recorder.recording && recordingOrigin.current?.key === scope() ? "Stop recording voice message" : "Record a voice message"} title={recorder.recording && recordingOrigin.current?.key === scope() ? "Stop recording" : "Voice message"}>
               {recorder.recording && recordingOrigin.current?.key === scope() ? <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" fill="currentColor" /></svg> : <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3" /><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8" /></svg>}
             </button>
@@ -1534,10 +1536,12 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const vaultRow = (vault: string) => <button key={vault} className={`room ${active?.kind === "vault" && active.vault === vault ? "selected" : ""}`} aria-label={vault}
     aria-current={active?.kind === "vault" && active.vault === vault ? "page" : undefined}
     onClick={() => openTarget({ kind: "vault", vault, title: vault }, "new")}><span className="avatar" aria-hidden="true">▤</span><span className="room-text"><strong>{vault}</strong></span></button>;
+  /** A place's identity: a room a node owns is that node (Uni's room, opened before the tree loaded, is Uni). */
+  const placeOf = (t: TabTarget): string => { const n = t.kind === "room" && t.channel ? roomNodes.get(t.channel) : null; return n ? (n.path === "" ? "uni" : `area:${n.path}`) : placeKey(t); };
   const navControls: NavControls = {
     canBack: histCanBack(hist) || notes.length > 0, canForward: histCanForward(hist),
     back: () => goHistory(-1), forward: () => goHistory(1),
-    recent: histRecent(hist).filter((t) => !active || t.title.trim().toLowerCase() !== active.title.trim().toLowerCase()).map((t) => ({ key: `${t.kind}:${t.path ?? t.channel ?? ""}`, title: t.title, go: () => openTarget(t, "focus") })),
+    recent: histRecent(hist, RECENT_SHOWN, placeOf).filter((t) => !active || placeOf(t) !== placeOf(active)).map((t) => ({ key: placeOf(t), title: t.title, path: t.kind === "area" ? t.path ?? null : null, room: t.kind === "room" ? t.channel ?? null : null, go: () => openTarget(t, "focus") })),
   };
   const recordingTab = recordingOrigin.current;
   const pill = recordingTab && recorder.busy ? { title: recordingTab.title, elapsed: recorder.elapsed, tabId: recordingTab.tabId, stop: recorder.stop, phase: recorder.phase } :

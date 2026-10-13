@@ -1,7 +1,7 @@
 // T-111: the tree home. Wide screens (Daylight, tablets): the map with a level panel beside it. Phones: a room tree, then a level.
 // The panel reads like a page (the C layout of the prototypes): what is alive, what needs you, updates from the rooms below, what is
 // inside, the other tasks, then the room, with the composer pinned under it. Styling is in tree.css (the Field Book tokens).
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { cleanText } from "../interface/contract";
 import type { RoomMessage } from "../interface/modules/chat";
@@ -12,7 +12,7 @@ import type { AliveLine, LevelAlive } from "./treeAlive";
 import { agoLabel, type RoomView, type TreeRow, type Update } from "./treeRooms";
 import type { Mark } from "./nodeMap";
 import type { NavControls } from "../navContext";
-import { ancestorsOf, hasKids, isOpen, rolledNeeds, SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN, useFolds, useSidebar, visibleRows } from "./sidebarState";
+import { ancestorsOf, hasKids, isOpen, recentLabels, RECENT_FULL_PX, rolledNeeds, SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN, useFolds, useSidebar, visibleRows } from "./sidebarState";
 import type { TaskLoad } from "./Companion";
 
 const CAP = 3;
@@ -115,12 +115,6 @@ export function RoomTree({ chat = true, rows, needs, onOpen, selected, others = 
   </ul></nav>;
 }
 
-/** Recent places: never the one you are in, never one twice (by name: the same name is the same place to the reader), at most five. */
-export function recentShown<T extends { title: string }>(recent: readonly T[], here?: string | null, max = 5): T[] {
-  const seen = new Set<string>(here ? [here.trim().toLowerCase()] : []);
-  return recent.filter((r) => { const k = r.title.trim().toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; }).slice(0, max);
-}
-
 const NavButtons = ({ nav }: { nav: NavControls | null }) => nav ? <>
   <button type="button" className="th-nb" aria-label="Back" title="Back (Alt+←)" disabled={!nav.canBack} onClick={nav.back}>←</button>
   <button type="button" className="th-nb" aria-label="Forward" title="Forward (Alt+→)" disabled={!nav.canForward} onClick={nav.forward}>→</button>
@@ -132,16 +126,32 @@ export function TreeScreen({ status, column, nav, onHide, ...tree }: TreeProps &
   column?: boolean;
   nav?: NavControls | null; onHide?: () => void;
 }) {
-  const { rows, selected } = tree;
-  return <div className={`tree-home th-phone-tree ${column ? "th-column" : ""}`}>
+  const { rows, selected, others, selectedRoom } = tree;
+  // the tree may scroll, but Recent never takes its room: with the tree's rows taller than what is left beside five places, Recent shows three
+  const box = useRef<HTMLDivElement>(null);
+  const [tight, setTight] = useState(false);
+  useLayoutEffect(() => {
+    const root = box.current; const wrap = root?.querySelector<HTMLElement>(".th-rows-wrap"); const list = wrap?.firstElementChild as HTMLElement | null;
+    if (!column || !root || !wrap || !list || typeof ResizeObserver === "undefined") return;
+    const measure = () => {
+      const fixed = [...root.children].filter((c) => c !== wrap && !c.classList.contains("th-recent")).reduce((a, c) => a + (c as HTMLElement).offsetHeight, 0);
+      setTight(list.offsetHeight > root.clientHeight - fixed - RECENT_FULL_PX);
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(root); ro.observe(list);
+    return () => ro.disconnect();
+  }, [column]);
+  const here = selectedRoom ? others?.find((o) => o.id === selectedRoom)?.name ?? null : rows.find((r) => r.path === selected)?.name ?? null;
+  return <div ref={box} className={`tree-home th-phone-tree ${column ? "th-column" : ""}`}>
     {column
       ? <header className="th-toolbar"><NavButtons nav={nav ?? null} /><span className="th-tb-gap" />{onHide && <button type="button" className="th-nb" aria-label="Hide the sidebar" title="Hide the sidebar" onClick={onHide}>‹</button>}</header>
       : <header className="th-treehead"><h1 className="note-title">Uni</h1></header>}
     {status}
     <LoadLine load={tree.load} ready={tree.needsReady} />
     <div className="th-rows-wrap"><RoomTree {...tree} /></div>
-    {column && nav && <section className="th-recent" aria-label="Recent"><h2>Recent</h2>
-      <ul>{recentShown(nav.recent, rows.find((r) => r.path === selected)?.name).map((r) => <li key={r.key}><button type="button" onClick={r.go} title={r.title}>{r.title}</button></li>)}</ul></section>}
+    {column && nav && nav.recent.length > 0 && <section className={`th-recent ${tight ? "tight" : ""}`} aria-label="Recent"><h2>Recent</h2>
+      <ul>{recentLabels(nav.recent, rows, here, tight ? 3 : 5).map(({ r, label }) => <li key={r.key}><button type="button" onClick={r.go} title={label}>{label}</button></li>)}</ul></section>}
   </div>;
 }
 

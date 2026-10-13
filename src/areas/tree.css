@@ -383,7 +383,6 @@ h3.wr-h { font-weight: 400; }
 @media (prefers-reduced-motion: reduce) { .cp *, .sr * { transition: none !important; animation: none !important; } }
 /* the chat as part of the same look: graphite avatars (no per-author hue), no destination line (the placeholder names the room) */
 .message-avatar, .avatar { background: var(--th-ink2) !important; color: var(--th-card); }
-.sr-chat .compose-destination { display: none; }
 
 /* the newest messages never sit cut mid-line under the room header: the top edge fades out softly */
 .sr-chat .message-list { padding-top: 20px; -webkit-mask-image: linear-gradient(to bottom, transparent, #000 28px); mask-image: linear-gradient(to bottom, transparent, #000 28px); }
@@ -442,7 +441,7 @@ h3.wr-h { font-weight: 400; }
 .th-phone-tree:not(.th-column) .th-go { min-height: 48px; }
 .th-phone-tree:not(.th-column) .th-treehead .note-title { font-size: 28px; }
 
-.th-recent { flex: none; box-sizing: border-box; height: 124px; overflow: hidden; border-top: 1px solid var(--th-hair2); padding: 6px 8px 8px 10px; }
+.th-recent { flex: none; box-sizing: border-box; max-height: 124px; overflow: hidden; border-top: 1px solid var(--th-hair2); padding: 6px 8px 8px 10px; }
 .th-recent h2 { margin: 0 0 2px; font: 600 10.5px/1.6 var(--th-mono); letter-spacing: .1em; text-transform: uppercase; color: var(--th-mute); }
 .th-recent ul { list-style: none; margin: 0; padding: 0; }
 .th-recent button { all: unset; box-sizing: border-box; display: block; width: 100%; padding: 2px 4px; font: 400 12.5px/1.4 var(--th-sans); color: var(--th-ink2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; border-radius: 5px; }

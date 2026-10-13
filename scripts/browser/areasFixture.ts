@@ -174,6 +174,10 @@ export type BootOpts = {
   strayRoom?: boolean;
   /** r12 (with `atlas`, `steer`): the first message in #atlas/build has a thread of two replies. */
   thread?: boolean;
+  /** r12 (with `atlas`): two projects named "Workshop", one under Techne and one under Atlas, neither with a room of its own. */
+  twins?: boolean;
+  /** r12: Uni is a member of every room (the composer's "Uni listening" switch shows). */
+  uniMember?: boolean;
   /** r12 (with `tasks`): this many more open tasks, owned by a room (none are Aaron's), listed before the rest: the list runs past one page of 200. */
   manyTasks?: number;
   /** T-111: COhere 2026 sits under Boulder (as in the live vault) instead of Techne. Needs `tree` and `boulder`. */
@@ -230,7 +234,7 @@ export async function bootAreas(page: Page, variant: Variant = 'seed', opts: Boo
   const now = Math.floor((opts.pinned ? pinnedAt : Date.now()) / 1000);
   const data = {
     profileNote: opts.profileNote ?? null, lifeVault: opts.lifeVault ?? null, now, variant, selftest: opts.selftest ?? true, ipcLeak: opts.ipcLeak ?? false, hostile: hostileApp(opts.ports ?? { http: 9, udp: 9 }), benign: BENIGN, techne: seed('techne'), unforced: seed('unforced'), seedMeta,
-    apps: opts.apps ?? [], multiRoom: !!opts.multiRoom || !!opts.tree, tree: !!opts.tree, tasks: !!opts.tasks, briefs: !!opts.briefs, queryDelay: opts.queryDelay ?? 0, identityDelay: opts.identityDelay ?? 0, roomsDelay: opts.roomsDelay ?? 0, messagesDelay: opts.messagesDelay ?? 0, nodeStatuses: opts.nodeStatuses ?? {}, nearOff: !!opts.nearOff, ids: !!opts.ids, boulder: !!opts.boulder, savedLayout: opts.savedLayout ?? null, strayRoom: !!opts.strayRoom, thread: !!opts.thread, manyTasks: opts.manyTasks ?? 0, underBoulder: !!opts.underBoulder, ricki: !!opts.ricki, atlas: !!opts.atlas, steer: !!opts.steer, longChat: !!opts.longChat, longNext: !!opts.longNext, bareTask: !!opts.bareTask, cutDecision: !!opts.cutDecision, cutNoAsk: !!opts.cutNoAsk, longAsk: !!opts.longAsk, crowded: !!opts.crowded, ulidNext: !!opts.ulidNext, pastDue: !!opts.pastDue, tallLast: !!opts.tallLast, privateTasks: !!opts.privateTasks, deviceCache: opts.deviceCache ?? null, queryFails: opts.queryFails ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null, mode: opts.mode ?? 'sealed', grantedUnder: opts.grantedUnder ?? (opts.mode ?? 'sealed'),
+    apps: opts.apps ?? [], multiRoom: !!opts.multiRoom || !!opts.tree, tree: !!opts.tree, tasks: !!opts.tasks, briefs: !!opts.briefs, queryDelay: opts.queryDelay ?? 0, identityDelay: opts.identityDelay ?? 0, roomsDelay: opts.roomsDelay ?? 0, messagesDelay: opts.messagesDelay ?? 0, nodeStatuses: opts.nodeStatuses ?? {}, nearOff: !!opts.nearOff, ids: !!opts.ids, boulder: !!opts.boulder, savedLayout: opts.savedLayout ?? null, strayRoom: !!opts.strayRoom, thread: !!opts.thread, manyTasks: opts.manyTasks ?? 0, uniMember: !!opts.uniMember, twins: !!opts.twins, underBoulder: !!opts.underBoulder, ricki: !!opts.ricki, atlas: !!opts.atlas, steer: !!opts.steer, longChat: !!opts.longChat, longNext: !!opts.longNext, bareTask: !!opts.bareTask, cutDecision: !!opts.cutDecision, cutNoAsk: !!opts.cutNoAsk, longAsk: !!opts.longAsk, crowded: !!opts.crowded, ulidNext: !!opts.ulidNext, pastDue: !!opts.pastDue, tallLast: !!opts.tallLast, privateTasks: !!opts.privateTasks, deviceCache: opts.deviceCache ?? null, queryFails: opts.queryFails ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null, mode: opts.mode ?? 'sealed', grantedUnder: opts.grantedUnder ?? (opts.mode ?? 'sealed'),
   };
   // Pre-granted apps: the grant key is the SHA-256 of the RESOLVED default needs plus the app's html.
   const preGrant = [
@@ -458,6 +462,7 @@ Two proposals wait on a scope decision.
       rooms.push(room(ATLAS, 'atlas'), room(BUILD, 'atlas/build'), room(TEACH, 'atlas/teach'));
       const pr = (id: string, name: string, meta: Record<string, unknown>) => ({ id, path: `Projects/${name}`, extension: 'md', tags: ['project'], metadata: { status: 'foreground', summary: `${name}.`, parent: 'Areas/Atlas', ...meta }, updatedAt: '2026-10-08T00:00:00Z', content: `# ${name}\n\n${name}.` });
       notes.push(pr('p-atlas', 'ATLAS', { room: 'atlas/build', channel: BUILD }), pr('p-lvb', 'Learn Vibe Build', { room: 'atlas/teach', channel: TEACH }), pr('p-ai', 'Atlas Institute', { room: 'atlas' }));
+      if (d.twins) notes.push(pr('p-ws-a', 'Atlas/Workshop', {}), { ...pr('p-ws-t', 'Techne/Workshop', {}), metadata: { status: 'foreground', summary: 'Workshop.', parent: 'Areas/Techne' } });
     }
     if (d.steer && d.atlas && d.tasks) {
       taskNotes.push(
@@ -505,7 +510,7 @@ Two proposals wait on a scope decision.
           case 'get_npub': return 'test';
           case 'get_rooms': if (d.roomsDelay) await new Promise((r) => setTimeout(r, d.roomsDelay)); w.__roomsResolved = true; return rooms;
           case 'get_messages': if (d.messagesDelay) await new Promise((r) => setTimeout(r, d.messagesDelay)); return args.root ? threads[args.root] ?? [] : (msgs[args.channel] ?? []).slice(-(args.limit ?? 300));
-          case 'get_members': return [{ pubkey: U, name: 'Aaron', named: true }];
+          case 'get_members': return [{ pubkey: U, name: 'Aaron', named: true }, ...(d.uniMember ? [{ pubkey: 'c'.repeat(64), name: 'Uni', named: true }] : [])];
           case 'vault_paths': return notes.map(rowOf);
           case 'vault_list': return d.lifeVault ? ['uni', d.lifeVault] : ['uni'];
           case 'vault_query': {
