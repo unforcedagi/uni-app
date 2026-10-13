@@ -1,4 +1,4 @@
-// Rooms in the tree (pure, unit-tested in scripts/treehome.test.ts): the slash name of a node's room (`boulder/cohere`), whether the
+// Rooms in the tree (pure, unit-tested in scripts/treehome.test.ts): the real name of a node's room (`cohere`, `atlas/build`), whether the
 // node owns that room or is held by an ancestor's, the archived-room fallback, and the updates the rooms below have posted.
 // Builds on stewardOf's rule (talkCore.steward): a node's own room, else the nearest ancestor's, else #Uni.
 import type { Area } from "./areasCore.ts";
@@ -6,13 +6,6 @@ import { ancestry, ROOT, type Tree } from "./treeCore.ts";
 import { ownRoom, steward, type RoomNode, type RoomRef } from "./talkCore.ts";
 
 export const roomSlug = (name: string) => name.toLowerCase().replace(/^#/, "").trim().replace(/[\s_]+/g, "-");
-
-/** The slash name down a chain of room slugs (area first): `boulder` + `cohere` is `boulder/cohere`, but a room already named under its parent (`atlas` + `atlas/build`) is not doubled. */
-export function joinSlash(slugs: readonly string[]): string {
-  let out = "";
-  for (const s of slugs) out = !out ? s : s.startsWith(out + "/") ? s : `${out}/${s}`;
-  return out;
-}
 
 /** Nodes whose words and titles are never shown in a new place, only counts (the T-111 privacy rule). */
 const PRIVATE = new Set(["relationships", "sanctum"]);
@@ -36,7 +29,7 @@ export const fellBack = (n: Area): boolean => /^(archived|missing)$/i.test(Strin
 export type RoomView = {
   /** Where a note to this node goes: its own room, else an ancestor's, else #Uni. */
   target: RoomRef | null;
-  /** `boulder/cohere`: shown when the node has a room of its own. */
+  /** The room's own name (`cohere`, `atlas/build`): shown when the node has a room of its own. */
   slash: string | null;
   /** The ancestor's room that holds a node with none of its own. */
   heldBy: RoomRef | null;
@@ -75,16 +68,8 @@ export function roomView(tree: Tree, path: string, rooms: readonly RoomRef[], un
   const sharedWithAncestor = mine ? nodes.slice(1).some((n) => ownRoom(n, rooms)?.id === mine.id) : false;
   // An archived room's fallback is a room the node borrows, not one it owns.
   const own = !!mine && !sharedWithAncestor && !(chain[0] && fellBack(chain[0]));
-  if (own) {
-    // the names of the rooms on the way down, one per distinct room: area room, then project room
-    const names: string[] = [];
-    let last: string | null = null;
-    for (let i = chain.length - 1; i >= 0; i--) {
-      const r = fellBack(chain[i]) ? null : ownRoom(nodes[i], rooms);
-      if (r && r.id !== last) { names.push(roomSlug(r.name)); last = r.id; }
-    }
-    return { target: s.room, slash: joinSlash(names), heldBy: null, own: true, heldNode: null };
-  }
+  // A node's room line is the room's own name (`cohere`, `atlas/build`), exactly as the rooms list has it: never a path built from the tree.
+  if (own) return { target: s.room, slash: s.room ? roomSlug(s.room.name) : null, heldBy: null, own: true, heldNode: null };
   const holder = s.room ? nodes.slice(1).find((n) => ownRoom(n, rooms)?.id === s.room!.id) : undefined;
   return { target: s.room, slash: null, heldBy: s.room, own: false, heldNode: holder?.name ?? (s.room && s.room.id === uni?.id ? "Uni" : null) };
 }
