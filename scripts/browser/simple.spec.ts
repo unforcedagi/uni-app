@@ -185,6 +185,20 @@ test.describe('simple', () => {
     await expect(page.locator('.cp.side.open')).toBeVisible();
   });
 
+  test('a room never says "No messages" while its first fetch is pending; a confirmed empty room does', async ({ page }) => {
+    await boot(page, { messagesDelay: 1200 });
+    await openRoom(page, 'Learn Vibe Build');
+    const none = page.locator('.sr-chat').getByText('No messages in this room yet.');
+    await page.waitForTimeout(500);
+    await expect(none).toHaveCount(0);
+    await expect(none).toBeVisible({ timeout: 4000 });
+    await openRoom(page, 'ATLAS');
+    await page.waitForTimeout(500);
+    await expect(none).toHaveCount(0);
+    await expect(page.locator('.sr-chat .message')).toHaveCount(3, { timeout: 4000 });
+    await expect(none).toHaveCount(0);
+  });
+
   test('a room with nothing owed to the user shows no empty "Needs you" heading', async ({ page }) => {
     await boot(page);
     await openRoom(page, 'Learn Vibe Build');
