@@ -31,7 +31,8 @@ export function recent(h: History, max = RECENT_SHOWN): TabTarget[] {
   const cur = h.entries[h.index];
   for (let i = h.entries.length - 1; i >= 0 && out.length < max; i--) {
     const e = h.entries[i];
-    if ((cur && sameTarget(cur, e)) || out.some((o) => sameTarget(o, e))) continue;
+    // The same name is the same place to the reader (Uni opened as a room before the tree loaded, then as the node): never list the current place or one twice.
+    if ((cur && (sameTarget(cur, e) || cur.title === e.title)) || out.some((o) => sameTarget(o, e) || o.title === e.title)) continue;
     out.push(e);
   }
   return out;

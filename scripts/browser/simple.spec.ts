@@ -762,4 +762,54 @@ test.describe('simple', () => {
     const item = page.locator('.cp-item').filter({ hasText: 'Taxes' });
     await expect(item.locator('.cp-open-to-see')).toHaveText("Open to see what's needed");
   });
+
+  test('r8: a room opened by Back, Forward or Recent shows its messages, not a blank chat', async ({ page }) => {
+    test.skip(!wide(page), 'sidebar column');
+    await boot(page, { longChat: true });
+    await openRoom(page, 'ATLAS');
+    await expect(page.locator('.sr-chat .message').first()).toBeVisible();
+    await openRoom(page, 'Learn Vibe Build');
+    await expect(page.locator('.sr-chat .message').first()).toBeVisible();
+    const nav = page.locator('.th-roomnav');
+    await nav.getByRole('button', { name: 'Back' }).click();
+    await expect(page.locator('.sr-title')).toHaveText('ATLAS');
+    await expect(page.locator('.sr-chat .message').first()).toBeVisible();
+    await nav.getByRole('button', { name: 'Forward' }).click();
+    await expect(page.locator('.sr-title')).toHaveText('Learn Vibe Build');
+    await expect(page.locator('.sr-chat .message').first()).toBeVisible();
+    await nav.getByRole('region', { name: 'Recent' }).getByRole('button', { name: 'ATLAS' }).click();
+    await expect(page.locator('.sr-title')).toHaveText('ATLAS');
+    await expect(page.locator('.sr-chat .message').first()).toBeVisible();
+    await expect(page.locator('.sr-chat [aria-label="Loading messages"]')).toHaveCount(0);
+  });
+
+  test('r8: Uni opens as its chat room even when the rooms list arrives late; Recent never lists the current place or one twice', async ({ page }) => {
+    test.skip(!wide(page), 'sidebar column');
+    await boot(page, { roomsDelay: 1500 });
+    await scope(page).locator('.th-go[aria-label^="Uni"]').first().click();
+    // no dashboard while the rooms load: the room, then its conversation and the companion
+    await expect(page.locator('.sr-title')).toHaveText('Uni');
+    await expect(page.locator('[data-view="room"]')).toBeVisible();
+    await expect(page.getByText('no room', { exact: true })).toHaveCount(0);
+    await expect(page.locator('.sr-door')).toHaveText('#uni', { timeout: 8000 });
+    await expect(page.locator('.sr-chat textarea')).toBeVisible();
+    await expect(page.getByText('Opening the room…')).toHaveCount(0);
+    await expect(companion(page)).toBeVisible();
+    const recent = page.locator('.th-roomnav').getByRole('region', { name: 'Recent' });
+    const names = await recent.locator('button').allTextContents();
+    expect(new Set(names).size).toBe(names.length);
+    expect(names).not.toContain('Uni');
+  });
+
+  test('r8: a decision whose title was cut short shows the full question from its note', async ({ page }) => {
+    test.skip(!wide(page), 'side panel');
+    await boot(page, { cutDecision: true });
+    await scope(page).locator('.th-go[aria-label^="Uni,"]').click();
+    await openCompanion(page);
+    const item = page.locator('.cp-item').filter({ hasText: 'after-event' });
+    await expect(item.locator('.cp-title')).toContainText('Uni adds the after-event "were you there?" prompt to the companion on Wed. Say no to skip it.');
+    await expect(item.locator('.cp-title')).not.toContainText('Decision (default yes)');
+    await expect(item.locator('.cp-title')).not.toContainText('Converted from');
+    await expect(item.locator('.cp-title')).not.toContainText('…');
+  });
 });

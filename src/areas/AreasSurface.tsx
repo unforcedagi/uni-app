@@ -40,12 +40,14 @@ const USER_AGENT = currentUserAgent();
 const PLATFORM = platformName(USER_AGENT);
 
 /** The Uni tab: Uni itself at `{kind:"areas"}` (path null), any area or project under it at `{kind:"area", path}`. One page component for all. */
-export default function AreasSurface({ zoom, identity, talk, path, rooms: hostRooms, actions, roomFor, onRoom, onOpenArea, onConversations, onBackChange }: {
+export default function AreasSurface({ zoom, identity, talk, path, rooms: hostRooms, roomsPending = false, actions, roomFor, onRoom, onOpenArea, onConversations, onBackChange }: {
   zoom: React.RefObject<ZoomState>;
   identity: string | null;
   /** Voice and one-line notes to a room, through the app's own send and voice outbox paths. */
   talk: Talk;
   path: string | null; rooms: RoomInfo[]; actions: AreaActions;
+  /** The rooms list has not arrived yet (a fresh start): a room place waits for it instead of showing a page with "no room". */
+  roomsPending?: boolean;
   /** The host's room view for a room id (its messages and composer), when that room is the one loaded. */
   roomFor: (id: string | null | undefined) => AreaRoom | null;
   /** The open node's room (null: none), so the host can load it. */
@@ -311,7 +313,7 @@ export default function AreasSurface({ zoom, identity, talk, path, rooms: hostRo
     <UndoBar undo={tasks.undo} notice={tasks.notice} onDismiss={tasks.dismissNotice} />
     {sheet && <TaskSheet key={sheet.id} task={sheet} here={here} nodeName={nodeName} room={roomOfNode(sheet.node) ?? target} onClose={() => setSheet(null)} onAct={(t, a) => void tasks.act(t, a)} onOpenRoom={openRoomHere} />}
   </div>;
-  const treeLevel = roomsMode && chat && target && !full ? roomLevel : fullLevel;
+  const treeLevel = roomsMode && chat && (target || roomsPending) && !full ? roomLevel : fullLevel;
   const classicKids = layout === "classic" ? <div className="tree-home th-classic"><InsideBlock chat={chat} title={insideTitle} kids={insideKids} onOpen={open} />{empty}</div> : empty;
   return <AreaView key={node.id} work={work} area={body !== null ? { ...node, body } : node} projectError={bodyError} projectLoading={body === null && !bodyError} entry={data?.briefs[node.path] ?? null} now={now} channel={nodeRoom} onChannel={setPicked} mode={mode} roomName={roomName} actions={actions}
     room={roomFor(nodeRoom)} onConversations={onConversations} onBack={back} backLabel={up?.name ?? "Uni"}

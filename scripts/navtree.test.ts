@@ -5,7 +5,8 @@ import { ancestorsOf, clampWidth, hasKids, isOpen, parseFolds, parseSidebar, rol
 import { canBack, canForward, EMPTY_HISTORY, recent, step, visit, type History } from "../src/navHistory.ts";
 import { EMPTY_TABS, isSurface, migrateLegacyTabs, persistable, restoreTabs, serializeTabs, type Tabs, type TabTarget } from "../src/tabs.ts";
 import { linkLabel, splitLinks } from "../src/areas/linkText.ts";
-import { actionableTitle, topNeeds } from "../src/areas/simpleCore.ts";
+import { actionableTitle, askFromContent, isCutTitle, topNeeds } from "../src/areas/simpleCore.ts";
+import { isActiveRun } from "../src/areas/steerCore.ts";
 import { whereWeAre } from "../src/areas/whereCore.ts";
 import { buildTaskTree, parseNodes, parseTask, type Task } from "../src/areas/taskCore.ts";
 
@@ -123,5 +124,31 @@ check("needs-you feed: done and archived never appear; Now before Soon, then due
 check("needs-you feed: an empty feed is empty; a title with words is an action, a bare id is not", () => {
   assert.deepEqual(feed([]), []);
   assert.equal(actionableTitle("Confirm scope with Kevin"), true); assert.equal(actionableTitle("Kevin call"), true); assert.equal(actionableTitle("Taxes"), false); assert.equal(actionableTitle(""), false);
+});
+
+check("ask: a cut title shows the first line of the note's content in full, without the label or the converted line", () => {
+  assert.equal(isCutTitle("Uni adds Benya's missing feature 4, the…"), true);
+  assert.equal(isCutTitle("Name the payer entity"), false);
+  const content = `_Converted from a task on 2026-10-01_\n\nDecision (default yes): Uni adds Benya's missing feature #4, the after-event "were you there? one takeaway" prompt, to the companion on Wed. Say no to skip it.\n\nMore detail below.`;
+  assert.equal(askFromContent(content), `Uni adds Benya's missing feature #4, the after-event "were you there? one takeaway" prompt, to the companion on Wed. Say no to skip it.`);
+  assert.equal(askFromContent(""), "");
+  assert.equal(askFromContent("_Converted from x_"), "");
+  const long = "First sentence here. " + "Second sentence that goes on and on. ".repeat(12);
+  assert.ok(askFromContent(long).endsWith("here.") || askFromContent(long).length <= 280);
+});
+check("recent: never the current place, and a name is listed once", () => {
+  let h: History = EMPTY_HISTORY;
+  h = visit(h, { kind: "room", channel: "uni-ch", title: "Uni" });
+  h = visit(h, { kind: "areas", title: "Uni" });
+  h = visit(h, { kind: "area", path: "A", title: "Atlas" });
+  h = visit(h, { kind: "areas", title: "Uni" });
+  assert.deepEqual(recent(h).map((t) => t.title), ["Atlas"]);
+});
+check("runs: only the ones still going are running", () => {
+  assert.equal(isActiveRun({ state: "running" }), true);
+  assert.equal(isActiveRun({ state: "blocked" }), true);
+  assert.equal(isActiveRun({ state: "decision" }), true);
+  assert.equal(isActiveRun({ state: "done" }), false);
+  assert.equal(isActiveRun({ state: "failed" }), false);
 });
 if (failed) { console.log(`\n${failed} failed`); process.exit(1); }

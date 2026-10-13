@@ -182,6 +182,8 @@ export type BootOpts = {
   longNext?: boolean;
   /** T-124 r7 (with tasks): a task of Aaron's with a one-word title and no next step. */
   bareTask?: boolean;
+  /** T-124 r8 (with tasks): a decision whose title was cut short ("…"); the full question is the first line of its content. */
+  cutDecision?: boolean;
   /** T-124 r6 (with longChat): a worker status ping before the newest message, and a newest message taller than the list with a marker line mid-way. */
   tallLast?: boolean;
   /** T-111: a project (Ricki) whose room is archived, with `room_fallback` naming the room that holds it. */
@@ -212,7 +214,7 @@ export async function bootAreas(page: Page, variant: Variant = 'seed', opts: Boo
   const now = Math.floor((opts.pinned ? pinnedAt : Date.now()) / 1000);
   const data = {
     profileNote: opts.profileNote ?? null, lifeVault: opts.lifeVault ?? null, now, variant, selftest: opts.selftest ?? true, ipcLeak: opts.ipcLeak ?? false, hostile: hostileApp(opts.ports ?? { http: 9, udp: 9 }), benign: BENIGN, techne: seed('techne'), unforced: seed('unforced'), seedMeta,
-    apps: opts.apps ?? [], multiRoom: !!opts.multiRoom || !!opts.tree, tree: !!opts.tree, tasks: !!opts.tasks, briefs: !!opts.briefs, queryDelay: opts.queryDelay ?? 0, identityDelay: opts.identityDelay ?? 0, roomsDelay: opts.roomsDelay ?? 0, messagesDelay: opts.messagesDelay ?? 0, nodeStatuses: opts.nodeStatuses ?? {}, nearOff: !!opts.nearOff, ids: !!opts.ids, boulder: !!opts.boulder, layout: opts.layout ?? 'octopus', underBoulder: !!opts.underBoulder, ricki: !!opts.ricki, atlas: !!opts.atlas, steer: !!opts.steer, longChat: !!opts.longChat, longNext: !!opts.longNext, bareTask: !!opts.bareTask, tallLast: !!opts.tallLast, privateTasks: !!opts.privateTasks, deviceCache: opts.deviceCache ?? null, queryFails: opts.queryFails ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null, mode: opts.mode ?? 'sealed', grantedUnder: opts.grantedUnder ?? (opts.mode ?? 'sealed'),
+    apps: opts.apps ?? [], multiRoom: !!opts.multiRoom || !!opts.tree, tree: !!opts.tree, tasks: !!opts.tasks, briefs: !!opts.briefs, queryDelay: opts.queryDelay ?? 0, identityDelay: opts.identityDelay ?? 0, roomsDelay: opts.roomsDelay ?? 0, messagesDelay: opts.messagesDelay ?? 0, nodeStatuses: opts.nodeStatuses ?? {}, nearOff: !!opts.nearOff, ids: !!opts.ids, boulder: !!opts.boulder, layout: opts.layout ?? 'octopus', underBoulder: !!opts.underBoulder, ricki: !!opts.ricki, atlas: !!opts.atlas, steer: !!opts.steer, longChat: !!opts.longChat, longNext: !!opts.longNext, bareTask: !!opts.bareTask, cutDecision: !!opts.cutDecision, tallLast: !!opts.tallLast, privateTasks: !!opts.privateTasks, deviceCache: opts.deviceCache ?? null, queryFails: opts.queryFails ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null, mode: opts.mode ?? 'sealed', grantedUnder: opts.grantedUnder ?? (opts.mode ?? 'sealed'),
   };
   // Pre-granted apps: the grant key is the SHA-256 of the RESOLVED default needs plus the app's html.
   const preGrant = [
@@ -400,6 +402,7 @@ Two proposals wait on a scope decision.
       mk('k10', 'T-98 Put away', 'Areas/Techne', { state: 'archived' }),
       mk('k11', 'T-14 A snoozed one', 'Areas/Techne', { snoozed_until: '2099-01-01' }),
       mk('dq1', 'Decide the COhere venue', C26, { priority: 'someday' }, 'decision'),
+      ...(d.cutDecision ? [{ ...mk('dq9', 'Decision (default yes): Uni adds the after-event prompt to the…', C26, { priority: 'now' }, 'decision'), content: '_Converted from a task on 2026-10-01_\n\nDecision (default yes): Uni adds the after-event "were you there?" prompt to the companion on Wed. Say no to skip it.\n\nMore below.' }] : []),
     ] : [];
     // T-111 rooms nav: a task in a private area (Sadhana) and tasks changed at different times, so "Where we are" has something to hide and to date.
     if (d.tasks && d.privateTasks) taskNotes.push({ ...mk('s1', 'T-31 Sit twenty minutes daily', 'Areas/Sadhana', { priority: 'now', next: 'Before breakfast' }), updatedAt: '2026-10-09T09:00:00.000Z' }, { ...mk('s2', 'T-32 Find a teacher', 'Areas/Sadhana', { priority: 'someday' }), updatedAt: '2026-09-01T09:00:00.000Z' });
@@ -531,7 +534,7 @@ Two proposals wait on a scope decision.
           case 'relay_origin': return 'wss://relay.test';
           case 'vault_note': {
             if (d.profileNote && args.noteRef === '.parachute/life-os') return { hub: 'https://example.invalid', vault: 'uni', note: { id: 'profile-note', path: '.parachute/life-os', content: '', createdAt: '2026-09-01T00:00:00Z', tags: [], metadata: d.profileNote } };
-            const n = notes.find((x) => x.id === args.noteRef || x.path === args.noteRef);
+            const n = [...notes, ...(w.__tasks ?? [])].find((x) => x.id === args.noteRef || x.path === args.noteRef);
             if (!n) throw 'note not found: ' + args.noteRef;
             return { hub: 'https://example.invalid', vault: 'uni', note: { createdAt: '2026-09-01T00:00:00Z', tags: [], metadata: {}, ...n } };
           }

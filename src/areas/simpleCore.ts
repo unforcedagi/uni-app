@@ -68,3 +68,23 @@ export function chatPlaceholder(a: { name: string; slash: string | null; heldBy:
   if (a.heldBy) return `Message #${a.heldBy.replace(/^#/, "")}`;
   return `Message ${a.name}`;
 }
+
+/** A title that was cut short on the way into the vault ("…", "..."), so the real question is in the note's content. */
+export const isCutTitle = (rest: string): boolean => /(…|\.\.\.)\s*$/.test(rest.trim());
+
+const ASK_MAX = 280;
+/**
+ * The full question of a decision (or task) whose title is cut: the first real line of its content, without `_Converted from …_` lines or
+ * the "Decision (default yes):" label, kept to whole sentences (the first one or two) and at most 280 characters. "" when there is nothing.
+ */
+export function askFromContent(content: string | null | undefined): string {
+  const line = (content ?? "").split(/\r?\n/).map((l) => l.trim()).find((l) => l && !/^_?converted from\b/i.test(l.replace(/^[*_>\s]+/, "")) && !/^#{1,6}\s/.test(l) && !/^---+$/.test(l));
+  if (!line) return "";
+  const plain = line.replace(/\[\[([^\]|]*\|)?([^\]]*)\]\]/g, "$2").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/[*_`>]/g, "").replace(/^decision\s*(\([^)]*\))?\s*[:\-–—]\s*/i, "").replace(/\s+/g, " ").trim();
+  if (plain.length <= ASK_MAX) return plain;
+  const sentences = plain.match(/[^.!?]+[.!?]+(?=\s|$)/g) ?? [];
+  let out = "";
+  for (const sen of sentences) { if ((out + sen).length > ASK_MAX) break; out = `${out}${sen}`.replace(/\s*$/, " "); }
+  if (out.trim()) return out.trim();
+  return `${plain.slice(0, ASK_MAX).replace(/\s+\S*$/, "")}…`;
+}

@@ -2,8 +2,10 @@
 // vault call: `state_transition` for state (an atomic compare-and-set), a guarded metadata merge for snooze.
 // Nothing is cached here beyond one session's memory; the node view reconciles with each server answer.
 import { invoke } from "@tauri-apps/api/core";
-import { buildTaskTree, failureKind, LIVE_STATES, nodeFilterKeys, parseNodes, parseTask, subtreePaths, type AnyState, type FailureKind, type Priority, type RawNote, type Task, type TaskTree } from "./taskCore.ts";
+import { buildTaskTree, failureKind, groupOf, LIVE_STATES, nodeFilterKeys, parseNodes, parseTask, subtreePaths, type AnyState, type FailureKind, type Priority, type RawNote, type Task, type TaskTree } from "./taskCore.ts";
 import { ROOT } from "./treeCore.ts";
+import { splitTitle } from "./whereCore.ts";
+import { askFromContent, isCutTitle } from "./simpleCore.ts";
 import { activeProfile } from "./profile.ts";
 
 export type Call = (cmd: string, args: Record<string, unknown>) => Promise<unknown>;
@@ -33,6 +35,21 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
     try { const rows = await call("vault_query", { vault: name(), tag, includeContent: false, limit: LIMIT }); return Array.isArray(rows) ? (rows as RawNote[]) : []; } catch { return null; }
   }
 
+  /** The lists carry no content, so a decision or one of the user's tasks whose title was cut short ("…") gets its full question from the first line of its note (one read each, only then, at most 12). */
+  async function withAsks(tasks: Task[]): Promise<Task[]> {
+    const cut = tasks.filter((t) => (t.kind === "decision" || groupOf(t) === "you") && isCutTitle(splitTitle(t.title).rest)).slice(0, 12);
+    if (!cut.length) return tasks;
+    const asks = new Map<string, string>();
+    await Promise.all(cut.map(async (t) => {
+      try {
+        const r = (await call("vault_note", { vault: name(), noteRef: t.id })) as { note?: RawNote } | null;
+        const ask = askFromContent(typeof r?.note?.content === "string" ? r.note.content : "");
+        if (ask) asks.set(t.id, ask);
+      } catch { /* the cut title still shows */ }
+    }));
+    return tasks.map((t) => (asks.has(t.id) ? { ...t, ask: asks.get(t.id)! } : t));
+  }
+
   // Feature detect once per session: does the vault answer `near` with `direction` and `then`? null = not yet known.
   let nearOk: boolean | null = null;
   const unsupported = (e: unknown) => /unknown|unrecogni[sz]ed|unsupported|not supported|invalid[_ ]?(param|near|query)|bad[_ ]request|\b400\b|"?then"?/i.test(String(e)) && !/not[_ ]found/i.test(String(e));
@@ -53,9 +70,9 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
    * vault returned a full page (more may exist).
    */
   async function loadTasks(tree: TaskTree, path: string): Promise<{ tasks: Task[]; truncated: boolean }> {
-    const finish = (tasks: RawNote[], decisions: RawNote[]) => {
+    const finish = async (tasks: RawNote[], decisions: RawNote[]) => {
       const parsed = [...tasks, ...decisions].map((n) => parseTask(n, tree)).filter((t): t is Task => !!t);
-      return { tasks: [...new Map(parsed.map((t) => [t.id, t])).values()], truncated: tasks.length >= LIMIT || decisions.length >= LIMIT };
+      return { tasks: await withAsks([...new Map(parsed.map((t) => [t.id, t])).values()]), truncated: tasks.length >= LIMIT || decisions.length >= LIMIT };
     };
     if (path !== ROOT && nearOk !== false) {
       // The anchor is the node's id when the tree knows it (the vault stores references as ids); the path is still accepted.
@@ -66,7 +83,7 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
           call("vault_subtree_tasks", { vault: name(), tag: "decision", root, states: ["open"], limit: LIMIT }) as Promise<RawNote[]>,
         ]);
         nearOk = true;
-        return finish(tasks, decisions);
+        return await finish(tasks, decisions);
       } catch (e) {
         if (unsupported(e) && nearOk === null) nearOk = false;
         else if (!missing(e)) throw e; // a network or vault failure is the caller's to show; only "can't do this" falls back
@@ -84,7 +101,7 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
       call("vault_query_meta", { vault: name(), tag: "task", metadata: { ...where, state: { in: [...LIVE_STATES] } }, limit: LIMIT }) as Promise<RawNote[]>,
       call("vault_query_meta", { vault: name(), tag: "decision", metadata: { ...where, state: { in: ["open"] } }, limit: LIMIT }) as Promise<RawNote[]>,
     ]);
-    return finish(tasks, decisions);
+    return await finish(tasks, decisions);
   }
 
   /** Compare-and-set on `state`. A stale `from` is a conflict (409): the caller re-reads and says so, it never retries blind. */

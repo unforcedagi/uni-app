@@ -6,11 +6,11 @@ import { invoke } from "@tauri-apps/api/core";
 import { cleanText } from "../interface/contract";
 import { dueText } from "./NodeWork";
 import { isMe } from "./taskCore";
-import type { Run } from "./steerCore";
+import { isActiveRun, type Run } from "./steerCore";
 import type { Task } from "./taskCore";
 import { splitTitle } from "./whereCore";
 import { splitLinks } from "./linkText";
-import { actionableTitle } from "./simpleCore";
+import { actionableTitle, isCutTitle } from "./simpleCore";
 
 const KEYS = { side: "uni.companion.side.v1", strip: "uni.companion.strip.v1" } as const;
 /** Below this width the side panel starts folded: the conversation gets the space. */
@@ -27,7 +27,6 @@ export function useCompanionOpen(variant: "side" | "strip"): [boolean, (v: boole
   return [open, (v) => { setOpen(v); try { localStorage.setItem(key, v ? "1" : "0"); } catch { /* this session only */ } }];
 }
 
-const ACTIVE: ReadonlySet<Run["state"]> = new Set(["queued", "running", "stalled", "blocked"]);
 
 type Props = {
   /** Where this stands: the sentence and, quietly, when it was written. Null: nothing to say. */
@@ -97,7 +96,7 @@ function Stands({ text, ago }: { text: string; ago: string }) {
 }
 
 function Body({ stands, ready, needs, runs, nodeName, onTask, onDecide, onEverything }: Props) {
-  const active = runs.filter((r) => ACTIVE.has(r.state));
+  const active = runs.filter(isActiveRun);
   const hiddenRuns = Math.max(0, active.length - RUNS_SHOWN);
   return <div className="cp-body">
     {!ready ? <p className="cp-lede">Loading…</p> : stands && <Stands text={stands.text} ago={stands.ago} />}
@@ -106,7 +105,7 @@ function Body({ stands, ready, needs, runs, nodeName, onTask, onDecide, onEveryt
       {needs.length === 0 ? <p className="cp-none">Nothing needs you here.</p>
       : <ul className="cp-list">{needs.map((t) => {
         const { id, rest: full } = splitTitle(cleanText(t.title));
-        const rest = askOf(full);
+        const rest = isCutTitle(full) && t.ask ? t.ask : askOf(full);
         const isDecision = t.kind === "decision";
         const meta = [isWaitingOnYou(t) ? "Waiting on you" : null, dueText(t.due)].filter(Boolean).join(" · ");
         const next = t.next.trim();
