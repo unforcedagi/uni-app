@@ -664,3 +664,14 @@
 .task-detail p:last-child { margin-bottom: 0; }
 .task-movedon { color: var(--th-ink2); }
 .task-record { overflow-wrap: anywhere; }
+
+/* r23 (both critics): no ellipsis in Needs you. A row's clamp cuts at a whole line (lines wrap on words), never drawing "…": a height of
+   `--lines` lines instead of -webkit-line-clamp, which always draws one. */
+.cp-item .cp-title:not(.cp-lead), .cp-item .cp-need small, .cp-item .cp-next { display: block; -webkit-line-clamp: unset; line-clamp: none; overflow: hidden; }
+.cp-item .cp-title:not(.cp-lead) { max-height: calc(var(--lines, 2) * 1.35em); }
+.cp-need.decision .cp-title, .cp-item[data-open] .cp-title { max-height: none; }
+.cp-item .cp-need small { line-height: 1.35; max-height: calc(var(--lines, 2) * 1.35em); }
+.cp-item .cp-need small.cp-detail { --lines: 1; }
+.cp-item .cp-need .cp-sub, .cp-item .cp-need small.cp-asked-line { max-height: none; }
+.cp-item .cp-next { max-height: calc(var(--lines, 6) * 1.45em); }
+.cp-item .cp-next.open { max-height: none; overflow: visible; }
