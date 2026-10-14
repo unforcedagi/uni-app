@@ -378,7 +378,10 @@ export function NeedsList({ needs, fit, onTask, onDecide, onNote, onMore, extra 
   const listRef = useRef<HTMLUListElement>(null);
   const settled = useRef(""); // the list the last measurement was made for
   const remeasured = useRef(0);
+  const grown = useRef(0);
+  const grownFor = useRef("");
   const key = needs.map((t) => `${t.id}\n${t.ask ?? ""}\n${t.next}`).join("\u0000");
+  if (grownFor.current !== key) { grownFor.current = key; grown.current = 0; }
   useLayoutEffect(() => {
     const scroller = listRef.current?.closest(".cp-fit") as HTMLElement | null;
     if (!fit || !scroller) return;
@@ -416,7 +419,15 @@ export function NeedsList({ needs, fit, onTask, onDecide, onNote, onMore, extra 
     if (!fit || !list || !scroller || measuring || all || typeof ResizeObserver === "undefined") return;
     const check = () => {
       if (settled.current !== key || list.querySelector("[data-open]")) return;
-      if (scroller.scrollHeight <= scroller.clientHeight + 1) { remeasured.current = 0; return; }
+      if (scroller.scrollHeight <= scroller.clientHeight + 1) {
+        remeasured.current = 0;
+        // r18: room came free after the rows were measured (the sentence above was cut to its three lines, a title arrived shorter): measure
+        // again so the rows that now fit show, a few times per list at most
+        const room = scroller.clientHeight - scroller.scrollHeight;
+        const nextRow = Number.isFinite(limit) && limit < needs.length;
+        if (nextRow && room > 48 && grown.current < 3) { grown.current++; setLimit(Infinity); setMeasuring(true); }
+        return;
+      }
       if (remeasured.current < 6) { remeasured.current++; setLimit(Infinity); setMeasuring(true); }
       // still over after measuring again (a row's height settles only once it is the last one shown): one row fewer, until it fits (r14)
       else if (Number.isFinite(limit) && limit > (keepOne ? 1 : 0)) setLimit(limit - 1);
