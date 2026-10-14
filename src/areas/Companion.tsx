@@ -13,7 +13,7 @@ import { isActiveRun, type Run } from "./steerCore";
 import { ownerLabel, type Task } from "./taskCore";
 import { taskTitle } from "./whereCore";
 import { splitLinks } from "./linkText";
-import { actionableTitle, answerChoices, answerLabel, askLead, askPreview, checkLine, CHECK_FAILED, DANGLING, decideLine, stripRoom, decisionQuestion, dueLine, fitsRow, isOverdue, lineBudget, missingLine, OPEN_TASK, OPEN_TO_ANSWER, privateLabel, actionOf, rowAction, rowSubParts, standsHeading, titleSays, titleWords, TIDY_LINE, toTidy, unknownDecision, waitsLine, waitsOnMe, withHosts, withoutCut, rowAsk, type Choice, type NeedsFeed, type PrivateNeed, type RowAction, type Support } from "./simpleCore";
+import { actionableTitle, answerChoices, answerLabel, askLead, askPreview, checkLine, CHECK_FAILED, DANGLING, decideLine, stripRoom, decisionQuestion, dueLine, fitsRow, isOverdue, lineBudget, missingLine, OPEN_TASK, OPEN_TO_ANSWER, privateLabel, actionOf, rowAction, stepsLine, withoutBrackets, rowSubParts, standsHeading, titleSays, titleWords, TIDY_LINE, toTidy, unknownDecision, waitsLine, waitsOnMe, withHosts, withoutCut, rowAsk, type Choice, type NeedsFeed, type PrivateNeed, type RowAction, type Support } from "./simpleCore";
 import { requestRecheck } from "./useTasks";
 
 const KEYS = { side: "uni.companion.side.v1", sideNarrow: "uni.companion.side.narrow.v1", strip: "uni.companion.strip.v1" } as const;
@@ -591,7 +591,11 @@ function Body({ stands, ready, note, load, feed, rest = 0, moreTitle = null, onP
 export function waitingLine(feed: NeedsFeed): string | null {
   if (!feed.total) return null;
   const first = feed.rows.map((t) => rowLead(t)).find((r) => r.mode !== "checking" && r.mode !== "unavailable");
-  return `Needs you · ${feed.total}${first ? `: ${first.yourCall ? `Your call: ${first.text}` : first.text}` : ""}`;
+  // r21: one line can't hold every action whole: an action of two steps says so ("2 steps: Look at …, then …"), never step 1 as the whole
+  // job; brackets are left to the row; a long host reads as its first part, as in a row
+  const a = first?.action;
+  const text = a ? withHosts(a.steps.length > 1 ? stepsLine(a.steps) : withoutBrackets(a.text)).replace(/\b([\w-]+)(?:\.[\w-]+){2,}\b/g, (h) => rowLinkLabel(h)) : first?.text;
+  return `Needs you · ${feed.total}${first ? `: ${first.yourCall ? `Your call: ${text}` : text}` : ""}`;
 }
 
 /** The side panel (wide screens). `open` and `onToggle` come from `useCompanionOpen("side")`. */
