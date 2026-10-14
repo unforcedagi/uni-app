@@ -46,7 +46,7 @@ async function go(page: Page, name: string) {
   if (await row.count()) await row.first().click(); else await page.locator(`.th-kid[data-name="${name}"]`).click();
   await full(page);
 }
-const title = async (page: Page, name: string) => { await full(page); await expect(page.locator('.sr-title')).toHaveText(name); };
+const title = async (page: Page, name: string) => { await full(page); await expect.poll(async () => [await page.locator('.sr').first().getAttribute('data-node').catch(() => null), await page.locator('.sr-title').first().textContent().catch(() => null)]).toContain(name); // r15: a borrowed room's heading is the room; the place is data-node };
 const row = (page: Page, id: string) => work(page).locator('.cp-item').filter({ has: page.locator(`.cp-need[data-id="${id}"]`) });
 const needs = (page: Page) => work(page).getByRole('region', { name: 'Needs you' });
 /** r14: priority is under the sheet's Details. */
