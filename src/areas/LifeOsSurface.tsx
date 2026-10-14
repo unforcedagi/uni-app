@@ -11,6 +11,7 @@ import { discover, type Found } from "./discover";
 import { chooseLifeOsVault, useLifeOsVault } from "./useLifeOsVault";
 import { UNI_CHANNEL } from "./treeCore";
 import { findUniRoom } from "../uniActions";
+import { SLOW_MS } from "./useTasks";
 
 export { PROFILE_NOTE, discover } from "./discover";
 
@@ -28,6 +29,8 @@ export default function LifeOsSurface({ vaults, identity, ...rest }: { vaults: s
     return () => { live = false; };
   }, [chosen, identity, tries]);
   const ready = found?.vault === chosen ? found : null;
+  const [slow, setSlow] = useState(false);
+  useEffect(() => { setSlow(false); if (ready) return; const t = setTimeout(() => setSlow(true), SLOW_MS); return () => clearTimeout(t); }, [chosen, tries, !!ready]); // eslint-disable-line react-hooks/exhaustive-deps
   const profile = ready?.profile ?? (chosen === UNI_VAULT ? defaultProfile() : null);
   const pick = chooseLifeOsVault;
   // Decided 10-12: the uni home stays unchanged (no picker row). The picker shows here only while another vault is
@@ -45,6 +48,11 @@ export default function LifeOsSurface({ vaults, identity, ...rest }: { vaults: s
       {choices.includes(UNI_VAULT) && <button type="button" className="task-do" onClick={() => pick(UNI_VAULT)}>Back to Uni's vault</button>}
     </p>
     <details className="settings-dev"><summary>Developer</summary><p className="settings-dev-line">No <code>node</code> notes. Install the Life OS pack: <code>parachute-vault packs add life-os</code></p></details></div>;
-  if (!profile) return <div className="areas-home lifeos-nopack">{picker}<p className="empty">{identity ? "Opening vault…" : "Signing in…"}</p></div>;
+  // r19 (Codex 9): never an endless "Opening vault…": past SLOW_MS it says so, with Retry and the way back to Uni's vault
+  if (!profile) return <div className="areas-home lifeos-nopack">{picker}{slow && identity
+    ? <><p className="empty" role="status">Still opening “{chosen}”.</p><p className="sr-missing-go">
+      <button type="button" className="task-do primary" onClick={() => { setFound(null); setTries((n) => n + 1); }}>Retry</button>
+      {choices.includes(UNI_VAULT) && chosen !== UNI_VAULT && <button type="button" className="task-do" onClick={() => pick(UNI_VAULT)}>Back to Uni's vault</button>}</p></>
+    : <p className="empty">{identity ? "Opening vault…" : "Signing in…"}</p>}</div>;
   return <VaultProfileProvider profile={profile}>{picker}<AreasSurface key={chosen} identity={identity} {...rest} /></VaultProfileProvider>;
 }

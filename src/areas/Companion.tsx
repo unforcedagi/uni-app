@@ -309,10 +309,9 @@ export function NeedRow({ t, onTask, onDecide, onNote, meta, compact = false }: 
   const text = r.text;
   const sup = isDecision ? null : supportOf(t);
   const titleRef = useRef<HTMLElement>(null);
-  const [open, setOpen] = useState(false);
+  /** r19 (Codex 7): rows never open in place (the sheet shows all of a request); kept as a constant for the clamps below. */
+  const open = false;
   const [titleLines, setTitleLines] = useState(1);
-  const [titleCut, setTitleCut] = useState(false);
-  const [nextCut, setNextCut] = useState(false);
   // r16: an action reads whole up to four lines (the panel shows fewer rows rather than cutting an instruction); a title reads to its object
   // (up to 3 lines beside other lines, 4 alone); a decision's question is never clamped, its preview is two lines of whole words.
   // r18: in the companion an action is three lines at most, and a long "Your call" or "Check" two
@@ -324,18 +323,16 @@ export function NeedRow({ t, onTask, onDecide, onNote, meta, compact = false }: 
     const measure = () => {
       const lh = parseFloat(getComputedStyle(el).lineHeight) || 20;
       setTitleLines(Math.max(1, Math.round(el.clientHeight / lh)));
-      if (!open && !r.lead && !clampMode) setTitleCut(el.scrollHeight > el.clientHeight + 1); // a lead's own clamp says when it cut
     };
     measure();
     const ro = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
     ro?.observe(el);
     return () => ro?.disconnect();
-  }, [text, open, titleMax]);
+  }, [text, titleMax]);
   // the next step shows under a title; a row that leads with it does not repeat it, and a row whose step isn't checked (or is doubted, or is
   // Uni's to tidy) never shows it (r19)
   const showNext = !!next && !r.lead && r.mode === "title";
   const nextLines = compact ? Math.min(1, lineBudget(Math.min(titleLines, titleMax), !!due, 4).next) : lineBudget(Math.min(titleLines, titleMax), !!due, 4).next;
-  const more = !compact && (open || (titleCut && !isDecision && !clampMode) || (showNext && (nextCut || nextLines <= 0)));
   const clampStyle = open || isDecision ? undefined : ({ WebkitLineClamp: titleMax, lineClamp: titleMax } as React.CSSProperties);
   const meta_ = <>{r.under && <SmallLine className="cp-under" text={r.under} />}
     {due && <small className={`cp-detail${isOverdue(t.due) ? " overdue" : ""}`}>{due}</small>}
@@ -346,7 +343,7 @@ export function NeedRow({ t, onTask, onDecide, onNote, meta, compact = false }: 
       // the action leads, its links and linked notes still open (outside the row's button); a tap on its words opens the sheet like the row
       // r15: full lines that end on a whole word ("…" then More), never a cut inside a word, a link or a note's title
       ? <><WordClamp elRef={titleRef as React.RefObject<HTMLParagraphElement | null>} className="cp-title cp-lead" tokens={stepTokens(next, vault, onNote)} textKey={`${vault}\n${next}`} lines={titleMax} open={open}
-          onCut={setTitleCut} onClick={(e) => { if (!(e.target as Element).closest("a, button")) onTask(t); }} />
+          onCut={() => {}} onClick={(e) => { if (!(e.target as Element).closest("a, button")) onTask(t); }} />
         <button type="button" className="cp-need cp-need-under" data-id={id ?? undefined} aria-label={[text, r.under, due, meta].filter(Boolean).join(". ")} onClick={() => onTask(t)}>{meta_}</button></>
       : <button type="button" className={`cp-need${isDecision ? " decision" : ""}`} data-id={id ?? undefined} data-mode={r.mode} aria-busy={r.mode === "checking" || undefined} aria-label={r.yourCall ? `Your call: ${text}` : undefined} onClick={() => onTask(t)}>
         {r.yourCall && <small className="cp-call-lead">Your call:</small>}
@@ -359,8 +356,8 @@ export function NeedRow({ t, onTask, onDecide, onNote, meta, compact = false }: 
     {!next && !isDecision && r.mode === "title" && !actionableTitle(text) && text !== "Open to see what's needed" && <p className="cp-open-to-see">Open to see what's needed</p>}
     {/* r19: the read failed: not "nothing there", and not the action either */}
     {r.mode === "unavailable" && <p className="cp-checkfail" role="status">{CHECK_FAILED} · <button type="button" className="cp-retry" onClick={requestRecheck}>Retry</button></p>}
-    {showNext && <NextText text={next} vault={vault} onNote={onNote} lines={open ? undefined : nextLines} open={open} onOpen={setOpen} onClamp={setNextCut} />}
-    {more && <button type="button" className="cp-more-next cp-row-more" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? "Less" : "More"}</button>}
+    {/* r19 (Codex 7): one way to see all of a request, in the companion and the work view alike: the row opens its sheet, never More in place */}
+    {showNext && <div className="cp-next-tap" onClick={(e) => { if (!(e.target as Element).closest("a, button")) onTask(t); }}><NextText text={next} vault={vault} onNote={onNote} lines={nextLines} open={false} onOpen={() => onTask(t)} /></div>}
     {/* r18: "Answer N questions" only from an explicit list; an unclear source opens the note; a closed one is the row itself ("Check: …") */}
     {sup?.kind === "list" ? <button type="button" className="cp-open-decide cp-rest cp-questions" onClick={() => onTask(t)}>{answerLabel(sup.items.length)}<span aria-hidden="true"> ›</span></button>
       : sup?.kind === "unclear" ? <button type="button" className="cp-open-decide cp-rest cp-questions" onClick={() => openSource(sup.from ?? { vault, id: t.id })}>{OPEN_TO_ANSWER}<span aria-hidden="true"> ›</span></button>

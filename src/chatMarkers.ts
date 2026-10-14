@@ -29,7 +29,9 @@ export function splitMarkers(body: string): { text: string; markers: Marker[] } 
 export const isWorkerStatus = (body: string): boolean => /^\s*⏳\s*Working\s*[—–-]\s*\d+\s*(?:min|mins|minutes|m|s|sec|secs|h)\b[^\n]*$/i.test(body);
 
 /** Uni's maintenance notes to itself ("Self-improvement review: Skill 'client-site-copy' patched."): bookkeeping, shown as one muted line (r17). */
-export const isMaintenance = (body: string): boolean => /^\W{0,4}(?:self-improvement review|skill review|memory review)\s*[:—–-]/i.test(body) && body.trim().split("\n").length <= 3;
+export const isMaintenance = (body: string): boolean => /^\W{0,4}(?:self-improvement review|skill review|memory review|usage(?:[- ]band)?[- ]guard|cron ?job|cronjob)\b[^\n]{0,40}?[:—–-]/i.test(body);
+/** r19 (Codex 10): Uni's upkeep is not conversation: it folds into one closed line ("Uni's upkeep · 3:26 AM"), whatever its length. */
+export const UPKEEP_LABEL = "Uni's upkeep";
 
 /** A progress ping older than this (seconds) is no longer news (r18). */
 export const STATUS_STALE_S = 3600;
