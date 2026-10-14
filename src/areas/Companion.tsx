@@ -579,7 +579,7 @@ export function CompanionSide({ open, onToggle, ...p }: CompanionProps & Fold) {
  * its height for the conversation (the rows that fit are whole, the rest behind "+N more"); otherwise, and for "+N more", it opens as a sheet
  * over the room. Never a sliver: what doesn't fit whole waits behind a way in.
  */
-export function CompanionStrip({ open, onToggle, ...p }: CompanionProps & Fold) {
+export function CompanionStrip({ open, onToggle, onSheet, ...p }: CompanionProps & Fold & { /** r20 (Codex 5): the sheet's close, while it is open, so the shell's Back closes it first */ onSheet?: (close: (() => void) | null) => void }) {
   const ref = useRef<HTMLElement>(null);
   const sheetRef = useRef<HTMLDivElement>(null);
   const [place, setPlace] = useState<ReturnType<typeof stripRoom> | null>(null);
@@ -611,8 +611,10 @@ export function CompanionStrip({ open, onToggle, ...p }: CompanionProps & Fold) 
     // dialog contract (focus in, Tab kept inside, the room under it inert, Escape on the window when it is the top dialog)
     const line = el?.querySelector<HTMLElement>(".cp-line") ?? null;
     const box = sheetRef.current; const layer = box?.closest(".cp-sheet-wrap") as HTMLElement | null;
-    return box ? openDialog(box, () => closeRef.current(), { root: layer, initial: box, opener: line }) : undefined;
-  }, [asSheet]);
+    onSheet?.(() => closeRef.current());
+    const off = box ? openDialog(box, () => closeRef.current(), { root: layer, initial: box, opener: line }) : undefined;
+    return () => { off?.(); onSheet?.(null); };
+  }, [asSheet]); // eslint-disable-line react-hooks/exhaustive-deps
   const heading = standsHeading(p.scope, p.ready ? p.stands?.ago : null);
   // r18: folded, the line is the sentence cut on a whole word (never "underway ac…"); open, it is the dated heading. r19: when anything needs
   // the user, the folded line says what is waiting first ("Needs you · 2: Say go on the deploy…"), never only a dot behind a chevron

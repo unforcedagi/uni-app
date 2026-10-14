@@ -3169,6 +3169,18 @@ test.describe('r20', () => {
     });
   }
 
+  test('P2 (Codex 5) the narrow companion\'s sheet is a foreground surface: Back closes it first, and the place stays', async ({ page }) => {
+    await page.setViewportSize({ width: 740, height: 360 });
+    await boot(page);
+    await openRoom(page, 'ATLAS');
+    await page.locator('.cp.strip .cp-line').click();
+    await expect(page.locator('.cp-sheet')).toBeVisible();
+    await page.keyboard.press('Alt+ArrowLeft');
+    await expect(page.locator('.cp-sheet')).toHaveCount(0);
+    await expect(page.locator('.sr')).toHaveAttribute('data-node', 'ATLAS');
+    expect(await page.evaluate(() => document.querySelectorAll('[inert]').length)).toBe(0);
+  });
+
   for (const size of [{ width: 740, height: 360 }, { width: 920, height: 360 }]) {
     test(`P2 the sheet's foot fits at ${size.width}×${size.height}: "Snooze until tomorrow" sits in the scrolling body above the footer, never behind or below it`, async ({ page }) => {
       await page.setViewportSize(size);
