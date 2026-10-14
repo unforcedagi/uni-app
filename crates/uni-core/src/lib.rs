@@ -44,8 +44,8 @@ pub use compose::{
     send_message_with_media, send_reaction,
 };
 pub use identity::{
-    clear_device_keys, forget_keyring_key, has_device_keys, init_keyring_key, keyring_pubkey,
-    load_keys, set_device_keys, store_keyring_nsec, KeyInit, KeySource,
+    clear_device_keys, forget_keyring_key, has_device_keys, init_keyring_key, key_status,
+    keyring_pubkey, load_keys, set_device_keys, store_keyring_nsec, KeyInit, KeySource,
 };
 pub use live::{run_live, LiveConfig, LiveEvent};
 pub use media::{fetch_media, is_relay_media_url, parse_imeta, MediaRef};
