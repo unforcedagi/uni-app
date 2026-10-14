@@ -3464,6 +3464,22 @@ test.describe('r21', () => {
     await expect(page.getByText('Couldn\'t search messages just now.')).toHaveCount(0);
   });
 
+  test('P2 (Codex 3, part) Recent is kept in a short drawer (740×360): one line of places under the tree, and a place picked there lands on its chat', async ({ page }) => {
+    await page.setViewportSize({ width: 740, height: 360 });
+    await boot(page);
+    await openRoom(page, 'ATLAS');
+    await openRoom(page, 'Techne');
+    await page.getByRole('button', { name: 'Places' }).click();
+    const drawer = page.getByRole('dialog', { name: 'Rooms and places' });
+    const recent = drawer.getByRole('region', { name: 'Recent' });
+    await expect(recent).toBeVisible();
+    await expect(recent.getByRole('button').first()).toBeInViewport({ ratio: 1 });
+    await recent.getByRole('button', { name: /ATLAS/ }).click();
+    await expect(page.locator('.sr')).toHaveAttribute('data-node', 'ATLAS');
+    await expect(page.locator('.sr-chat')).toBeVisible();
+    await expect(drawer).toHaveCount(0);
+  });
+
   test('the 800×600 sheet has a margin and its whole border', async ({ page }) => {
     await page.setViewportSize({ width: 800, height: 600 });
     await boot(page);

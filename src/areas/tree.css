@@ -545,12 +545,17 @@
   .th-drawer .th-recent button { min-height: 44px; display: flex; align-items: center; }
   .th-drawer .th-nb { width: 44px; height: 44px; }
 }
-/* a short screen (r14): the drawer is wider so the places fit one line without scrolling, and Recent steps aside so the tree keeps the height */
+/* a short screen (r14): the drawer is wider so the places fit one line without scrolling. r21 (Codex 3): Recent is kept, as one line of places
+   under the tree (it no longer steps aside), so going back to a place means the same at every size */
 @media (max-height: 499px) {
   .th-drawer { width: min(520px, 92vw); }
   .th-drawer .th-places { flex-wrap: wrap; overflow: visible; gap: 4px; padding: 6px 8px 2px; }
   .th-drawer .th-place { flex: none; padding: 0 12px; font-size: 13.5px; }
-  .th-drawer .th-recent { display: none; }
+  .th-drawer .th-recent { display: flex; align-items: center; gap: 8px; max-height: none; padding: 4px 8px 6px; }
+  .th-drawer .th-recent h2 { flex: none; margin: 0; }
+  .th-drawer .th-recent ul { display: flex; gap: 4px; min-width: 0; overflow-x: auto; }
+  .th-drawer .th-recent li { flex: none; max-width: 160px; }
+  .th-drawer .th-recent button { min-height: 40px; padding: 0 10px; border: 1px solid var(--th-hair2); border-radius: 999px; }
 }
 /* r14: a row leads with its action; its title (the event or project) is a quiet line under it. A long decision opens to decide. */
 .cp-need .cp-under { display: block; color: var(--th-mute); overflow-wrap: break-word; }
