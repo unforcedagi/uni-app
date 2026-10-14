@@ -1496,7 +1496,16 @@ function Conversations({ onForget }: { onForget: () => void }) {
   };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "w") { e.preventDefault(); closeActiveRef.current(); return; }
+      // r23 (Codex 8): on macOS Cmd+W is the native menu's Close Window, never the page's. Elsewhere Ctrl+W acts on the foreground: an open
+      // dialog (a task or companion sheet) closes as Escape closes it; otherwise the note or vault view over the place closes
+      if (e.key.toLowerCase() === "w" && !e.altKey && !e.shiftKey && (e.metaKey || e.ctrlKey)) {
+        if (/mac|iphone|ipad/i.test(navigator.platform)) return;
+        if (!e.ctrlKey) return;
+        e.preventDefault();
+        const dialog = [...document.querySelectorAll<HTMLElement>('[role="dialog"][aria-modal="true"]')].pop();
+        if (dialog) { (dialog.contains(document.activeElement) ? document.activeElement as HTMLElement : dialog).dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })); return; }
+        closeActiveRef.current(); return;
+      }
       // Alt+← / Alt+→: Back and Forward over the places visited. In a text field on a Mac, Option+arrow moves by word, so it is left alone there.
       if (e.altKey && !e.metaKey && !e.ctrlKey && !e.shiftKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
         const el = e.target instanceof HTMLElement ? e.target : null;
