@@ -18,7 +18,7 @@ function when(iso: string) {
   return isNaN(d.getTime()) ? iso : d.toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
-export default function Journal({ rooms, uniRoomId, onShare, onBack, onRecordingChange, focus, onFocus }: { focus: boolean; onFocus: () => void; rooms: Room[]; uniRoomId: string | null; onShare: ShareFn; onBack: () => void; onRecordingChange?: (recording: boolean, elapsed: number, stop: () => void) => void }) {
+export default function Journal({ rooms, uniRoomId, onShare, onBack, backTo = "Uni", onRecordingChange, focus, onFocus }: { focus: boolean; onFocus: () => void; rooms: Room[]; uniRoomId: string | null; onShare: ShareFn; onBack: () => void; /** r22: the place Back returns to */ backTo?: string; onRecordingChange?: (recording: boolean, elapsed: number, stop: () => void) => void }) {
   const [cfg, setCfg] = useState<VaultConfig | null>(null);
   const [entries, setEntries] = useState<JournalNote[]>([]);
   const [queued, setQueued] = useState<QueuedEntry[]>([]);
@@ -166,7 +166,7 @@ export default function Journal({ rooms, uniRoomId, onShare, onBack, onRecording
 
   return <>
     <header className="conversation-header">
-      <button className="back icon-button" onClick={onBack} aria-label="Back to Uni">‹</button>
+      <button className="back icon-button" onClick={onBack} aria-label={`Back to ${backTo}`} title={`Back to ${backTo}`}>‹</button>
       <div><strong>Journal</strong><small>{cfg ? `Private · saved to vault ${cfg.vault} with your key` : "Private · your vault"}</small></div>
       <button className="icon-button" onClick={() => setSettings(!settings)} aria-label="Journal settings" aria-expanded={settings}><SettingsIcon /></button>
       <button className="icon-button" onClick={() => { void load(false); void invoke<FlushReport>("journal_flush").then((r) => afterFlush(r, "Synced")).catch((e) => setError(String(e))); }} disabled={loading} aria-label="Refresh journal">↻</button>

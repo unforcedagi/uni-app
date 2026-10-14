@@ -4,9 +4,9 @@ import { buildVaultTree, restoreExpanded, type NotePath, type VaultTree } from "
 
 import { cachedPaths, loadPaths, invalidatePaths, watchPaths } from "./vaultPaths";
 
-export default function VaultBrowser({ vault, onOpen, onCreate, onSearch, onBack }: {
+export default function VaultBrowser({ vault, onOpen, onCreate, onSearch, onBack, backTo = "Uni" }: {
   vault: string; onOpen: (note: NotePath) => void; onCreate: (folder: string) => void;
-  onSearch: (prefix: string) => void; onBack: () => void;
+  onSearch: (prefix: string) => void; onBack: () => void; /** r22 (Codex 2): the place Back returns to, named on the button */ backTo?: string;
 }) {
   const [paths, setPaths] = useState<NotePath[]>(() => cachedPaths(vault) ?? []);
   const [filter, setFilter] = useState("");
@@ -57,7 +57,7 @@ export default function VaultBrowser({ vault, onOpen, onCreate, onSearch, onBack
   }
   const renderedTree = rows(tree);
   return <section className="vault-browser" aria-label={`Vault ${vault}`}>
-    <header className="note-bar"><button className="note-action" onClick={onBack}>← Vaults</button><strong>{vault}</strong><button className="note-action" disabled={loading} onClick={() => invalidatePaths(vault)}>Refresh</button></header>
+    <header className="note-bar"><button className="note-action" onClick={onBack}>← {backTo}</button><strong>{vault}</strong><button className="note-action" disabled={loading} onClick={() => invalidatePaths(vault)}>Refresh</button></header>
     <div className="vault-toolbar"><input type="search" aria-label="Filter paths" placeholder="Filter paths" value={filter} onChange={(e) => setFilter(e.target.value)} />{actions("")}</div>
     <div className="vault-scroll">{loading && <p role="status">Loading paths…</p>}{error && <p className="error" role="alert">{error}</p>}
       {paths.length >= 20_000 && <p>Showing the first 20,000 notes. Use folder search for more.</p>}

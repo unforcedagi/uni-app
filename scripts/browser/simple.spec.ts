@@ -1653,10 +1653,12 @@ test.describe('simple', () => {
     await drawer.getByRole('button', { name: 'Journal', exact: true }).click();
     await expect(page.getByRole('textbox', { name: 'Journal entry', exact: true })).toBeVisible();
     expect(await fits(page)).toBe(true);
-    // and from the Journal (not a room) its own Back goes to Uni, where the places are again; also when the app reopens on the Journal
+    // and from the Journal (not a room) its own Back goes where it was opened from (r22, Codex 2: ATLAS here), where the places are again; when
+    // the app reopens on the Journal, to Uni
     for (const reopen of [false, true]) {
       if (reopen) { await page.reload(); await expect(page.getByRole('textbox', { name: 'Journal entry', exact: true })).toBeVisible(); await page.waitForTimeout(1500); }
-      await page.getByRole('button', { name: 'Back to Uni' }).click();
+      await page.getByRole('button', { name: reopen ? 'Back to Uni' : 'Back to ATLAS' }).click();
+      if (!reopen) await expect(page.locator('.sr-title')).toHaveText('ATLAS');
       await expect(page.getByRole('textbox', { name: 'Journal entry', exact: true })).toBeHidden();
       await expect(page.locator('.sr-drawer, .th-places-short .th-places').first()).toBeVisible();
       if (!reopen) { await page.locator('.sr-drawer, .th-places-short .th-places').first().waitFor(); if (await page.locator('.sr-drawer').isVisible()) await page.locator('.sr-drawer').click(); await page.locator('.th-places:visible').getByRole('button', { name: 'Journal', exact: true }).click(); }
@@ -3541,5 +3543,152 @@ test.describe('r21', () => {
     expect(border.bottom).toBeGreaterThan(0);
     expect(border.radius).toBeGreaterThan(0);
     await page.screenshot({ path: `${SHOTS}/r21-sheet-800x600.png` }).catch(() => {});
+  });
+});
+
+test.describe('r22', () => {
+  const refresh = async (page: Page, at: string) => { await page.clock.setFixedTime(Date.parse(at)); await page.evaluate(() => window.dispatchEvent(new Event('focus'))); };
+  const add = (page: Page, n: { id: string; title: string; node: string; tag?: string; meta?: Record<string, unknown>; content?: string; path?: string; updatedAt?: string }) => page.evaluate((x) => {
+    (window as any).__tasks.push({ id: x.id, path: x.path ?? `${x.tag === 'decision' ? 'Decisions' : 'Tasks'}/${x.title}`, extension: 'md', tags: x.tag === 'none' ? [] : [x.tag ?? 'task'], createdAt: '2026-10-10T08:00:00.000Z', updatedAt: x.updatedAt ?? new Date(Date.now() + 3000).toISOString(), lastUpdatedBy: 'u', lastUpdatedVia: 'mcp', content: x.content ?? x.title, metadata: x.tag === 'none' ? (x.meta ?? {}) : { node: x.node, state: 'open', owner: 'aaron', ...(x.meta ?? {}) } });
+  }, n);
+  const sheetOf = (page: Page) => page.getByRole('dialog').filter({ has: page.locator('.task-kind') });
+  const openWork = async (page: Page) => { await openCompanion(page); await page.getByRole('button', { name: /^All of .*'s work/ }).click(); await expect(page.locator('.sr-work')).toBeVisible(); };
+  const leadText = (row: ReturnType<Page['locator']>) => row.locator('.cp-lead').evaluate((el) => (el as HTMLElement).innerText.replace(/\s+/g, ' ').trim());
+  /** The real steps from the scratch copy (10-14), and every verb phrase the row must say (both critics, r21). */
+  const ROWS = [
+    { id: 'at', title: 'T-129 Send the ATLAS Oct 12 follow-up email', next: 'Edit and send the ATLAS follow-up to Mark and Michael from your account; fill the opening, sign-off and next-review date.', has: ['Edit and send the ATLAS follow-up', 'to Mark and Michael from your account', 'fill the opening, sign-off and next-review date'] },
+    { id: 'ww', title: 'T-67 Woven Web handoff note for Eileen', next: 'Review the Woven Web handoff draft, fill the unknowns, then talk with Eileen yourself.', has: ['Review the Woven Web handoff draft', 'fill the unknowns', 'then talk with Eileen yourself'] },
+    { id: 'st', title: 'T-113 Companion Today redesign + integrated PWA install flow (3…', next: 'Look at https://cohere-signup-staging.example-workers.invalid/?look=ecology on phone, then forward #cohere\'s \'For Eileen\' block (posted 10-13)', has: ['Look at cohere-signup-staging on phone', 'then forward #cohere\'s \'For Eileen\' block (posted 10-13)'] },
+    { id: 'pay', title: 'T-65 $10k COhere sponsorship invoice draft', next: 'Tell Uni who pays (Techne or Gitcoin Foundation) and how: crypto or ACH/Stripe, plus Woven Web\'s legal details.', has: ['Tell Uni who pays (Techne or Gitcoin Foundation)', 'and how: crypto or ACH/Stripe, plus Woven Web\'s legal details'] },
+    { id: 'co', title: 'T-90 COhere opens Oct 15', next: 'Wed 10-14: say go on prod deploy of #38 + #58; Eileen signs off the copy/photos before/after (posting today); yes/no on add-only DB…', has: ['Say go on prod deploy of #38 + #58'], due: '2026-10-14' },
+  ];
+  const seed = async (page: Page, node = 'Projects/ATLAS') => {
+    for (const r of ROWS) await add(page, { id: r.id, title: r.title, node, updatedAt: '2026-10-11T18:00:00.000Z', meta: { priority: 'now', next: r.next, ...(r.due ? { due: r.due } : {}) } });
+    await refresh(page, '2026-10-14T09:00:00.000Z');
+  };
+  const assertWhole = async (row: ReturnType<Page['locator']>, r: (typeof ROWS)[number]) => {
+    const t = await leadText(row);
+    for (const h of r.has) expect(t, `${r.title}: "${t}" lacks "${h}"`).toContain(h);
+    // never "then …", never an ellipsis, never clamped
+    expect(t, r.title).not.toMatch(/…|\.\.\.|then\s*…/);
+    const clamp = await row.locator('.cp-lead').evaluate((el) => { const s = getComputedStyle(el); return { clamp: s.webkitLineClamp, over: el.scrollHeight > el.clientHeight + 1 }; });
+    expect(clamp.over, `${r.title} overflows its row`).toBe(false);
+    expect(['none', '', 'unset'].includes(clamp.clamp), `${r.title}: line clamp ${clamp.clamp}`).toBe(true);
+  };
+
+  test('rows say the whole job (both critics): staging, Woven Web, ATLAS ("…fill the opening, sign-off and next-review date") and who pays hold every verb phrase, with no "…", at 236px and in the work view', async ({ page }) => {
+    await boot(page);
+    await seed(page);
+    await openRoom(page, 'ATLAS');
+    await openWork(page);
+    for (const narrow of [false, true]) {
+      if (narrow) await narrowWork(page);
+      for (const r of ROWS) await assertWhole(page.locator('.sr-work section[aria-label="Needs you"] .cp-item').filter({ hasText: r.has[0].slice(0, 20) }), r);
+    }
+    // the side panel: whole rows, at least two, then "Show N more" for what doesn't fit
+    if (wide(page)) {
+      await page.getByRole('button', { name: /Back to chat/ }).click();
+      const body = page.locator('aside.cp.side .cp-body');
+      const rows = body.locator('section[aria-label="Needs you"] .cp-item');
+      await expect(rows.first()).toBeVisible();
+      const n = await rows.count();
+      expect(n).toBeGreaterThanOrEqual(2);
+      for (const row of await rows.all()) { const t = await leadText(row).catch(() => ''); const r = ROWS.find((x) => t.includes(x.has[0].slice(0, 20))); if (r) await assertWhole(row, r); }
+      if (n < ROWS.length) await expect(body.locator('.cp-more')).toHaveText(`Show ${ROWS.length - n} more`);
+    }
+  });
+
+  test('the folded strip says step 1 and how many there are, never "then …"', async ({ page }) => {
+    test.skip(wide(page) && treeBeside(page), 'the strip is below 900px');
+    await boot(page);
+    await add(page, { id: 'st', title: ROWS[2].title, node: 'Projects/ATLAS', meta: { priority: 'now', due: '2026-10-13', next: ROWS[2].next } });
+    await refresh(page, '2026-10-14T09:00:00.000Z');
+    await openRoom(page, 'ATLAS');
+    const line = page.locator('.cp.strip .cp-line-text');
+    await expect(line).toContainText(/Needs you · \d+: Look at cohere-signup-staging on phone \(step 1 of 2\)/);
+    await expect(line).not.toContainText('then …');
+  });
+
+  test('a request shows its age: "asked Oct 11" on the row and the sheet; when the room\'s chat is more than a day newer, the sheet says the chat has moved on (and nothing is hidden)', async ({ page }) => {
+    await boot(page);
+    await seed(page);
+    await add(page, { id: 'fresh', title: 'T-200 A fresh placeholder request', node: 'Projects/ATLAS', updatedAt: new Date(Date.now() + 5000).toISOString(), meta: { priority: 'now', next: 'Send the placeholder note to Kevin' } });
+    await refresh(page, '2026-10-14T09:00:00.000Z');
+    await openRoom(page, 'ATLAS');
+    await openWork(page);
+    const co = page.locator('.sr-work .cp-item').filter({ hasText: 'Say go on prod deploy' });
+    await expect(co.locator('.cp-under')).toHaveAttribute('title', 'COhere opens Oct 15 · due today · asked Oct 11');
+    await expect(co.locator('.cp-lead')).toHaveText('Say go on prod deploy of #38 + #58');
+    await co.locator('.cp-need').click();
+    const sheet = sheetOf(page);
+    await expect(sheet.locator('h2')).toHaveText('Say go on prod deploy of #38 + #58');
+    await expect(sheet.locator('.task-asked')).toContainText('Asked Oct 11');
+    // ATLAS's chat has messages from today: more than a day newer than Oct 11
+    await expect(sheet.locator('.task-movedon')).toHaveText('Chat has moved on since this was asked · open the chat');
+    // the request is still there, with its own action
+    await expect(sheet.getByRole('button', { name: /^Say it in #/ })).toBeVisible();
+    await sheet.getByRole('button', { name: 'Close' }).click();
+    // a request newer than the chat's last message has no cue
+    const fresh = page.locator('.sr-work .cp-item').filter({ hasText: 'Send the placeholder note' });
+    await expect(fresh.locator('.cp-under')).toHaveAttribute('title', /asked /);
+    await fresh.locator('.cp-need').click();
+    await expect(sheetOf(page).locator('.task-asked')).toBeVisible();
+    await expect(sheetOf(page).locator('.task-movedon')).toHaveCount(0);
+    await sheetOf(page).getByRole('button', { name: 'Close' }).click();
+    // "open the chat" goes to the room's conversation
+    await co.locator('.cp-need').click();
+    await sheetOf(page).getByRole('button', { name: 'open the chat' }).click();
+    await expect(sheetOf(page)).toHaveCount(0);
+    await expect(page.locator('.sr-chat')).toBeVisible();
+  });
+
+  test('the sheet says the request once: the steps are the body, the record title is in Details, and the step\'s link is its button ("Open cohere-signup-staging"), the primary action of a "look at" request', async ({ page }) => {
+    await boot(page);
+    await seed(page);
+    await openRoom(page, 'ATLAS');
+    await openWork(page);
+    await page.locator('.sr-work .cp-item').filter({ hasText: 'Look at cohere-signup-staging' }).locator('.cp-need').click();
+    const sheet = sheetOf(page);
+    await expect(sheet.locator('h2')).toHaveText('2 steps');
+    await expect(sheet.locator('.task-steps li').nth(0)).toContainText('Look at cohere-signup-staging.example-workers.invalid on phone');
+    await expect(sheet.locator('.task-steps li').nth(1)).toHaveText('Forward #cohere\'s \'For Eileen\' block (posted 10-13)');
+    const open = sheet.locator('.task-steps li').nth(0).getByRole('button', { name: 'Open cohere-signup-staging' });
+    await expect(open).toBeVisible();
+    await expect(open).toHaveClass(/primary/);
+    await expect(sheet.locator('.task-do.primary')).toHaveCount(1);
+    await expect(sheet.getByRole('button', { name: 'I did this' })).not.toHaveClass(/primary/);
+    // said once: no title line under the steps, no second copy of the step; the record's title is in Details
+    await expect(sheet.locator('.task-sub, .task-next a.cp-link')).toHaveCount(0);
+    const text = await sheet.evaluate((el) => (el as HTMLElement).innerText);
+    expect(text.split('Forward #cohere').length - 1).toBe(1);
+    expect(text).not.toContain('Companion Today redesign');
+    await sheet.locator('.task-details summary').click();
+    await expect(sheet.locator('.task-record')).toHaveText(/^Task T-113: Companion Today redesign/);
+    // the link opens (nothing is written)
+    await open.click();
+    await expect.poll(async () => (await calls(page, 'open_link')).length).toBeGreaterThan(0);
+    expect(await calls(page, 'vault_transition')).toHaveLength(0);
+  });
+
+  test('private areas show the action, not the content: "In Sadhana: …" for a short work imperative, else "In Sadhana: 1 thing for you · open Sadhana"; never the item\'s other words', async ({ page }) => {
+    await page.addInitScript(() => {
+      const w = window as any;
+      w.__sawPrivate = false;
+      new MutationObserver(() => { if (/Placeholder memory|placeholder week/.test(document.body?.innerText ?? '')) w.__sawPrivate = true; }).observe(document, { subtree: true, childList: true, characterData: true });
+    });
+    await boot(page, { privateTasks: true });
+    await add(page, { id: 'pa', title: 'T-301 Placeholder memory note', node: 'Areas/Sadhana', meta: { priority: 'now', next: 'Book the placeholder appointment' } });
+    await add(page, { id: 'pb', title: 'T-302 Placeholder memory of the week', node: 'Areas/Sadhana', meta: { priority: 'now', next: 'Placeholder feeling about the placeholder week' } });
+    await refresh(page, '2026-10-14T09:00:00.000Z');
+    await openRoom(page, 'Uni');
+    await openWork(page);
+    const priv = page.locator('.sr-work .cp-private-item');
+    await expect(priv).toHaveText(['In Sadhana: Book the placeholder appointment', 'In Sadhana: 2 more things for you · open Sadhana']);
+    await expect(page.locator('.sr-work')).not.toContainText(/Sit twenty minutes|Before breakfast|Placeholder memory|placeholder week/);
+    expect(await page.evaluate(() => (window as any).__sawPrivate)).toBe(false);
+    await page.screenshot({ path: `${SHOTS}/r22-private-${page.viewportSize()?.width}.png` }).catch(() => {});
+    // each opens the area, where its items are ordinary rows with their sheets
+    await priv.first().locator('button').click();
+    await expect(page.locator('.sr-title')).toHaveText('Sadhana');
   });
 });
