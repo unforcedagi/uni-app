@@ -216,7 +216,8 @@ export const fitsRow = (q: string): boolean => q.length <= ROW_ASK_MAX;
  */
 export function decisionQuestion(rest: string, ask: string | undefined, askAt: string | null | undefined, updatedAt: string | null): string | null {
   if (!isCutTitle(rest)) { const t = rest.replace(/\s+/g, " ").trim(); return t.replace(/^decision\s*(\([^)]*\))?\s*[:\-–—]\s*/i, "").trim() || t || null; }
-  if (ask && updatedAt && askAt === updatedAt) return ask;
+  // an ask that is itself cut (the note repeats the cut title) is no whole question either
+  if (ask && !isCutTitle(ask) && updatedAt && askAt === updatedAt) return ask;
   return null;
 }
 
@@ -228,7 +229,7 @@ export type RowAsk = { text: string; /** a decision with no full question anywhe
 export const OPEN_TO_SEE = "Open to see the question";
 export function rowAsk(full: string, ask: string | undefined, isDecision: boolean, hasNext: boolean): RowAsk {
   if (!isCutTitle(full)) return { text: full, openToDecide: false };
-  if (ask) return { text: ask, openToDecide: false };
+  if (ask && !isCutTitle(ask)) return { text: ask, openToDecide: false };
   if (isDecision) return { text: OPEN_TO_SEE, openToDecide: true };
   return { text: hasNext ? withoutCut(full) : "", openToDecide: false };
 }

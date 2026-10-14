@@ -200,6 +200,8 @@ export type BootOpts = {
   cutDecision?: boolean;
   /** r11 (with tasks): a decision with a cut title whose full question is long (over four lines in the side panel). */
   longAsk?: boolean;
+  /** r14: a decision whose whole question (its note's first paragraph) is longer than a row shows: a preview opens to decide. */
+  previewAsk?: boolean;
   /** r10 (with tasks): a decision with a cut title whose note holds no full question either (its first line is cut too), and one long enough to need the 3-line clamp. */
   cutNoAsk?: boolean;
   /** r10 (with tasks): many tasks that need the user, with long next steps, so the panel can't hold them all. */
@@ -238,7 +240,7 @@ export async function bootAreas(page: Page, variant: Variant = 'seed', opts: Boo
   const now = Math.floor((opts.pinned ? pinnedAt : Date.now()) / 1000);
   const data = {
     profileNote: opts.profileNote ?? null, lifeVault: opts.lifeVault ?? null, now, variant, selftest: opts.selftest ?? true, ipcLeak: opts.ipcLeak ?? false, hostile: hostileApp(opts.ports ?? { http: 9, udp: 9 }), benign: BENIGN, techne: seed('techne'), unforced: seed('unforced'), seedMeta,
-    apps: opts.apps ?? [], multiRoom: !!opts.multiRoom || !!opts.tree, tree: !!opts.tree, tasks: !!opts.tasks, briefs: !!opts.briefs, queryDelay: opts.queryDelay ?? 0, identityDelay: opts.identityDelay ?? 0, identityFails: opts.identityFails ?? 0, roomsDelay: opts.roomsDelay ?? 0, messagesDelay: opts.messagesDelay ?? 0, nodeStatuses: opts.nodeStatuses ?? {}, nearOff: !!opts.nearOff, ids: !!opts.ids, boulder: !!opts.boulder, savedLayout: opts.savedLayout ?? null, strayRoom: !!opts.strayRoom, thread: !!opts.thread, manyTasks: opts.manyTasks ?? 0, uniMember: !!opts.uniMember, twins: !!opts.twins, underBoulder: !!opts.underBoulder, ricki: !!opts.ricki, atlas: !!opts.atlas, steer: !!opts.steer, longChat: !!opts.longChat, longNext: !!opts.longNext, bareTask: !!opts.bareTask, cutDecision: !!opts.cutDecision, cutNoAsk: !!opts.cutNoAsk, longAsk: !!opts.longAsk, crowded: !!opts.crowded, ulidNext: !!opts.ulidNext, pastDue: !!opts.pastDue, tallLast: !!opts.tallLast, privateTasks: !!opts.privateTasks, deviceCache: opts.deviceCache ?? null, queryFails: opts.queryFails ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null, mode: opts.mode ?? 'sealed', grantedUnder: opts.grantedUnder ?? (opts.mode ?? 'sealed'),
+    apps: opts.apps ?? [], multiRoom: !!opts.multiRoom || !!opts.tree, tree: !!opts.tree, tasks: !!opts.tasks, briefs: !!opts.briefs, queryDelay: opts.queryDelay ?? 0, identityDelay: opts.identityDelay ?? 0, identityFails: opts.identityFails ?? 0, roomsDelay: opts.roomsDelay ?? 0, messagesDelay: opts.messagesDelay ?? 0, nodeStatuses: opts.nodeStatuses ?? {}, nearOff: !!opts.nearOff, ids: !!opts.ids, boulder: !!opts.boulder, savedLayout: opts.savedLayout ?? null, strayRoom: !!opts.strayRoom, thread: !!opts.thread, manyTasks: opts.manyTasks ?? 0, uniMember: !!opts.uniMember, twins: !!opts.twins, underBoulder: !!opts.underBoulder, ricki: !!opts.ricki, atlas: !!opts.atlas, steer: !!opts.steer, longChat: !!opts.longChat, longNext: !!opts.longNext, bareTask: !!opts.bareTask, cutDecision: !!opts.cutDecision, cutNoAsk: !!opts.cutNoAsk, longAsk: !!opts.longAsk, previewAsk: !!opts.previewAsk, crowded: !!opts.crowded, ulidNext: !!opts.ulidNext, pastDue: !!opts.pastDue, tallLast: !!opts.tallLast, privateTasks: !!opts.privateTasks, deviceCache: opts.deviceCache ?? null, queryFails: opts.queryFails ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null, mode: opts.mode ?? 'sealed', grantedUnder: opts.grantedUnder ?? (opts.mode ?? 'sealed'),
   };
   // Pre-granted apps: the grant key is the SHA-256 of the RESOLVED default needs plus the app's html.
   const preGrant = [
@@ -433,6 +435,7 @@ Two proposals wait on a scope decision.
       ...(d.cutNoAsk ? [{ ...mk('dq8', 'Decision (needs your yes): a daily calendar email to people who…', C26, { priority: 'now' }, 'decision'), content: 'Decision (needs your yes): a daily calendar email to people who…' },
         mk('dq7', 'Decision: the long one that needs a longer ask than most', C26, { priority: 'now' }, 'decision')] : []),
       ...(d.crowded ? Array.from({ length: 7 }, (_, i) => mk(`cr${i}`, `Send the follow-up note number ${i + 1} to the whole organizing group`, C26, { priority: 'now', next: 'Edit the draft, check the dates against the calendar, and send it from the shared inbox. Then post the link in the room and tell the team it went out so nobody sends it twice.' })) : []),
+      ...(d.previewAsk ? [{ ...mk('dq11', 'Decision (needs your yes): sign the riverside barn contract this…', C26, { priority: 'now' }, 'decision'), content: 'Decision (needs your yes): Sign the riverside barn contract this week. It holds the date for the autumn gathering. The deposit is 1,200 dollars and comes back if we cancel by November 1. The insurance rider names the barn\'s own insurer, which the board has not seen. If the board objects to that insurer, we lose the date unless the barn names ours instead, which it will only do for an extra fee of 400 dollars.\n\nMore below.' }] : []),
       ...(d.longAsk ? [{ ...mk('dq10', 'Decision (needs your yes): the venue contract with the riverside barn for the…', C26, { priority: 'now' }, 'decision'), content: 'Decision (needs your yes): the venue contract with the riverside barn for the autumn gathering, including the deposit, the cancellation terms, the insurance rider, the parking plan, the noise curfew and the catering exclusivity clause, signed this week so the date is held.' }] : []),
       ...(d.cutDecision ? [{ ...mk('dq9', 'Decision (default yes): Uni adds the after-event prompt to the…', C26, { priority: 'now' }, 'decision'), content: '_Converted from a task on 2026-10-01_\n\nDecision (default yes): Uni adds the after-event "were you there?" prompt to the companion on Wed. Say no to skip it.\n\nMore below.' }] : []),
     ] : [];
@@ -486,6 +489,8 @@ Two proposals wait on a scope decision.
       w.__decideElsewhere = (id: string) => { const t = taskNotes.find((x) => x.id === id); t.metadata.state = 'decided'; t.updatedAt = new Date(Date.now() + 9000).toISOString(); };
       /** r13: change a task as Uni would through MCP (metadata merged, optionally a new title or state). */
       w.__setTask = (id: string, meta: Record<string, unknown>, title?: string) => { const t = taskNotes.find((x) => x.id === id); Object.assign(t.metadata, meta); if (title) t.path = t.path.replace(/[^/]*$/, title); t.updatedAt = new Date(Date.now() + 5000).toISOString(); t.lastUpdatedVia = 'mcp'; };
+      /** r14: Uni rewrites a task's note (its question): new content, a new revision. */
+      w.__setContent = (id: string, content: string) => { const t = taskNotes.find((x) => x.id === id); t.content = content; t.updatedAt = new Date(Date.now() + 7000).toISOString(); t.lastUpdatedVia = 'mcp'; };
       w.__setDue = (id: string, due: string) => { const t = taskNotes.find((x) => x.id === id); t.metadata.due = due; t.updatedAt = new Date(Date.now() + 5000).toISOString(); t.lastUpdatedVia = 'mcp'; };
     }
     if (d.ricki) {
@@ -531,7 +536,9 @@ Two proposals wait on a scope decision.
             const m = args.metadata ?? {};
             const hits = taskNotes.filter((t) => t.tags.includes(args.tag) && (!m.node || m.node.in.includes(t.metadata.node)) && (!m.state || m.state.in.includes(t.metadata.state)));
             // one page, as the vault answers: `limit` from `offset`
-            return hits.slice(args.offset ?? 0, (args.offset ?? 0) + (args.limit ?? 200)).map((t) => JSON.parse(JSON.stringify(t)));
+            // r14: `__ignoreOffset` is a vault that ignores `offset` (every page the first): the list can't be read whole
+            const from = w.__ignoreOffset ? 0 : args.offset ?? 0;
+            return hits.slice(from, from + (args.limit ?? 200)).map((t) => JSON.parse(JSON.stringify(t)));
           }
           case 'vault_subtree_nodes': {
             if (d.nearOff) throw 'MCP error -32602: unknown parameter: near';
@@ -560,6 +567,8 @@ Two proposals wait on a scope decision.
             const t = taskNotes.find((x) => x.id === args.id);
             if (!t || !t.tags.includes('decision')) throw 'note not found: ' + args.id;
             if (t.metadata['state'] !== args.from) throw `MCP error -32600: [transition_conflict] conflict: note ${args.id} state is ${t.metadata['state']}, not ${args.from}`;
+            // r14: the answer is written against the revision whose question was shown
+            if (!args.ifUpdatedAt || args.ifUpdatedAt !== t.updatedAt) throw `conflict: note ${args.id} has been modified since its question was read`;
             const keys = Object.keys(args.metadata ?? {}).sort().join();
             if (keys !== 'decided,decided_at,decided_by') throw 'invalid decision metadata: ' + keys;
             t.metadata['state'] = args.to; Object.assign(t.metadata, args.metadata); t.updatedAt = new Date(Date.now() + taskNotes.length).toISOString(); t.lastUpdatedVia = 'api'; t.lastUpdatedBy = 'app-writer';

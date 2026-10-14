@@ -240,12 +240,14 @@ check("r14 decisionQuestion: the title when whole; a cut title's ask only at the
   assert.equal(decisionQuestion("Send a daily calendar email to…", "Send a daily calendar email to people who registered?", "r1", "r2"), null, "an ask read at another revision is not this row's");
   assert.equal(decisionQuestion("Send a daily calendar email to…", "Send it?", null, null), null, "no revision, no question");
   assert.equal(decisionQuestion("Send a daily calendar email to…", undefined, undefined, "r1"), null);
+  assert.equal(decisionQuestion("Send a daily calendar email to…", "Send a daily calendar email to…", "r1", "r1"), null, "a note that repeats the cut title has no whole question");
   assert.equal(fitsRow("x".repeat(ROW_ASK_MAX)), true); assert.equal(fitsRow("x".repeat(ROW_ASK_MAX + 1)), false);
 });
 check("r12 rowAsk: a cut title never keeps buttons beside a fragment; with no whole question anywhere, 'Open to see the question' and no fragment", () => {
   assert.deepEqual(rowAsk("Name the payer entity", undefined, true, false), { text: "Name the payer entity", openToDecide: false });
   assert.deepEqual(rowAsk("a daily calendar email to people who…", "a daily calendar email to people who registered. It goes to real attendees.", true, false), { text: "a daily calendar email to people who registered. It goes to real attendees.", openToDecide: false });
   assert.deepEqual(rowAsk("a daily calendar email to people who…", undefined, true, false), { text: "Open to see the question", openToDecide: true });
+  assert.deepEqual(rowAsk("a daily calendar email to people who…", "still cut too…", true, true), { text: "Open to see the question", openToDecide: true });
   assert.deepEqual(rowAsk("Riverside: cure window…", undefined, false, true), { text: "Riverside: cure window", openToDecide: false });
   assert.deepEqual(rowAsk("Riverside: cure window…", undefined, false, false), { text: "", openToDecide: false });
   assert.equal(withoutCut("a b..."), "a b");
