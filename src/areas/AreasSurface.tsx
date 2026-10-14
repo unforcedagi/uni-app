@@ -132,6 +132,8 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   const [drawer, setDrawer] = useState(false);
   /** The area's app, as a view inside the shell (r14): Back (every kind) closes it, like the work view. */
   const [appOpen, setAppOpen] = useState(false);
+  /** r20 (Codex 5): the narrow companion's sheet is a foreground surface like the task sheet: every Back closes it first. */
+  const [stripSheet, setStripSheet] = useState<{ close: () => void } | null>(null);
   const toTree = () => { setRootOpen(false); onOpenArea(null, "Uni", uniRoom); };
   const back = loose ? (treeHome ? toTree : null) : path ? (treeHome ? toTree : () => {
     const up = data ? data.tree.nodes.get(parentPath(data.tree, path)) : null;
@@ -141,13 +143,14 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   const workOver = work && chat;
   // the drawer is closed by every Back first (r14), its own Back button excepted (that one goes back a place as it closes)
   const overlay: Overlay | null = sheetId ? { close: closeSheet, modal: true, history: false }
+    : stripSheet ? { close: stripSheet.close, modal: true, history: false }
     : drawer ? { close: () => setDrawer(false), modal: false, history: true }
     : appOpen ? { close: () => setAppOpen(false), modal: false, history: true }
     : workOver ? { close: () => setWork(false), modal: false, history: true } : null;
-  const overlayKey = `${sheetId ? "sheet" : ""}${drawer ? "drawer" : ""}${appOpen ? "app" : ""}${workOver ? "work" : ""}`;
+  const overlayKey = `${sheetId ? "sheet" : ""}${stripSheet ? "strip" : ""}${drawer ? "drawer" : ""}${appOpen ? "app" : ""}${workOver ? "work" : ""}`;
   useEffect(() => {
     // Android Back closes what is over the place before it zooms out a level.
-    onBackChange(sheetId ? closeSheet : drawer ? () => setDrawer(false) : appOpen ? () => setAppOpen(false) : workOver ? () => setWork(false) : back);
+    onBackChange(sheetId ? closeSheet : stripSheet ? stripSheet.close : drawer ? () => setDrawer(false) : appOpen ? () => setAppOpen(false) : workOver ? () => setWork(false) : back);
     return () => onBackChange(null);
   }, [path, loose, data, uniRoom, onOpenArea, onBackChange, overlayKey, phoneTree, treeHome, rootOpen]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
@@ -262,7 +265,7 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
         {o.workBar}
         {/* below 900px the tree (and its health line) is in the drawer: the room says it itself, outside the drawer (r14); the work view has its own */}
         {stripCompanion && o.companion && !o.main && tasks.ready && <LoadHealth load={load} ready count={o.companion.feed.total} className="sr-health" />}
-        {stripCompanion && o.companion && !o.main && <CompanionStrip {...o.companion} open={companionOpen} onToggle={setCompanionOpen} />}
+        {stripCompanion && o.companion && !o.main && <CompanionStrip {...o.companion} open={companionOpen} onToggle={setCompanionOpen} onSheet={(close) => setStripSheet(close ? { close } : null)} />}
         {o.main ? <div className="sr-work">{o.main}</div>
           : <div className="sr-chat">{o.chatRoom ? o.chatRoom.render(null, o.placeholder) : <p className="th-quiet" role="status">Opening the room…</p>}</div>}
       </section>
