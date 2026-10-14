@@ -21,11 +21,18 @@ const reading = new Set<string>();
 const listeners = new Set<() => void>();
 const subscribe = (f: () => void) => { listeners.add(f); return () => { listeners.delete(f); }; };
 
+/** Title reads in flight at once (r16): a room full of note links queues its reads instead of crowding out the task list's. */
+const PARALLEL = 4;
+let inFlight = 0;
+const waiting: (() => void)[] = [];
+const slot = () => (inFlight < PARALLEL ? (inFlight++, Promise.resolve()) : new Promise<void>((go) => waiting.push(() => { inFlight++; go(); })));
+const release = () => { inFlight--; waiting.shift()?.(); };
+
 function load(r: NoteRef) {
   const k = refKey(r);
   if (reading.has(k) || !shouldRead(titles.get(k), Date.now(), seen.has(k))) return;
   seen.add(k); reading.add(k);
-  invoke<{ note?: { path?: string; updatedAt?: string } } | null>("vault_note", { vault: r.vault, noteRef: r.id })
+  slot().then(() => invoke<{ note?: { path?: string; updatedAt?: string } } | null>("vault_note", { vault: r.vault, noteRef: r.id }).finally(release))
     .then((n) => ({ title: titleOfPath(n?.note?.path), at: typeof n?.note?.updatedAt === "string" ? n.note.updatedAt : null }), () => null)
     .then((read) => {
       const prev = titles.get(k);

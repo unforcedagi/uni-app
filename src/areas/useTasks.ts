@@ -6,8 +6,12 @@ import { useVaultProfile } from "./ProfileContext";
 import { parseDrafts, parseRuns } from "./steerCore";
 import { activeProfile } from "./profile";
 import { warmTitles } from "./noteRefs";
+import { savedTasks } from "./savedTasks";
+import type { FailureKind } from "./taskCore";
 
 export type TaskAction = "done" | "archive" | "snooze";
+/** What a write came to (r16): the sheet waits for it, and on a conflict stays open with the latest copy. */
+export type ActResult = { ok: true } | { ok: false; kind: FailureKind | "refused"; message: string };
 export type Undo = { id: string; label: string; run: () => Promise<void> };
 export const UNDO_MS = 5000;
 /** How often an open window re-reads the tasks, and how stale a list may be when the window or a room is opened. */
@@ -15,13 +19,24 @@ export const POLL_MS = 60_000;
 export const FOCUS_GAP_MS = 10_000;
 /** One finite exit animation; none when the user prefers reduced motion. */
 export const LEAVE_MS = 240;
+/** A load still running after this long says so, with Retry (r16): never an endless "Loading…". */
+export const SLOW_MS = 8000;
+/** The test build may shorten it (`window.__slowMs`); never in a release build. */
+const slowMs = (): number => (import.meta.env?.VITE_AREAS_TESTHOOKS === "1" && typeof window !== "undefined" && Number((window as unknown as { __slowMs?: number }).__slowMs)) || SLOW_MS;
 const reduced = () => typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 
 // Memory for this session only, scoped to the signed-in identity and cleared on Forget: tasks are Aaron's private work.
-type Memory = { owner: string; tree: (TaskTree & { truncated: boolean }) | null; tasks: Map<string, { list: Task[]; truncated: boolean }>; at: number | null; runs: RawNote[]; drafts: RawNote[] };
-let memory: Memory = { owner: "", tree: null, tasks: new Map(), at: null, runs: [], drafts: [] };
-export function forgetTasks() { memory = { owner: "", tree: null, tasks: new Map(), at: null, runs: [], drafts: [] }; }
-const scoped = (owner: string) => { if (memory.owner !== owner) memory = { owner, tree: null, tasks: new Map(), at: null, runs: [], drafts: [] }; return memory; };
+/** Running and Drafts' own read (r16): read yet, the last failure, when they last read cleanly. */
+export type Activity = { ready: boolean; error: string | null; lastOk: number | null };
+type Memory = { owner: string; tree: (TaskTree & { truncated: boolean }) | null; tasks: Map<string, { list: Task[]; truncated: boolean }>; at: number | null; runs: RawNote[]; drafts: RawNote[]; activity: Activity };
+const fresh = (owner: string): Memory => ({ owner, tree: null, tasks: new Map(), at: null, runs: [], drafts: [], activity: { ready: false, error: null, lastOk: null } });
+let memory: Memory = fresh("");
+export function forgetTasks() { memory = fresh(""); }
+/** Forget on the device too (the user's Forget): the saved list goes with the key. */
+export function forgetSavedTasks() { forgetTasks(); savedTasks.clear(); }
+/** The list kept on the device for this identity and vault (r16), for Uni's level (the whole tree's list). */
+const savedFor = (owner: string, nodePath: string) => (nodePath === "" ? savedTasks.read(owner) : null);
+const scoped = (owner: string) => { if (memory.owner !== owner) memory = fresh(owner); return memory; };
 
 const verb: Record<TaskAction, string> = { done: "mark it done", archive: "archive it", snooze: "snooze it" };
 const said: Record<TaskAction, string> = { done: "Marked done", archive: "Archived", snooze: "Snoozed until tomorrow" };
@@ -33,10 +48,16 @@ const said: Record<TaskAction, string> = { done: "Marked done", archive: "Archiv
 export function useTasks(identity: string | null, nodePath: string, fallback: readonly TaskNode[]) {
   const vault = useVaultProfile().vault;
   const owner = `${identity ?? ""}|${vault}`;
-  const [tree, setTree] = useState<TaskTree | null>(() => scoped(owner).tree);
-  const [list, setList] = useState<Task[] | null>(() => scoped(owner).tasks.get(nodePath)?.list ?? null);
-  const [truncated, setTruncated] = useState(() => !!scoped(owner).tasks.get(nodePath)?.truncated);
-  const [treeTruncated, setTreeTruncated] = useState(() => !!scoped(owner).tree?.truncated);
+  // r16: memory first (this session), else the list kept on the device, painted at once with its age while it is read again
+  const [initial] = useState(() => { const m = scoped(owner); return m.tasks.has(nodePath) ? null : savedFor(owner, nodePath); });
+  const [tree, setTree] = useState<TaskTree | null>(() => scoped(owner).tree ?? initial?.tree ?? null);
+  const [list, setList] = useState<Task[] | null>(() => scoped(owner).tasks.get(nodePath)?.list ?? initial?.list ?? null);
+  const [truncated, setTruncated] = useState(() => !!(scoped(owner).tasks.get(nodePath)?.truncated ?? initial?.truncated));
+  const [treeTruncated, setTreeTruncated] = useState(() => !!(scoped(owner).tree?.truncated ?? initial?.tree.truncated));
+  /** When the rows on screen are the device's copy, not yet read this session: when that copy was read (ms). */
+  const [savedAt, setSavedAt] = useState<number | null>(() => initial?.at ?? null);
+  /** The current load has run past SLOW_MS (r16): say so, with Retry. */
+  const [slow, setSlow] = useState(false);
   // The local date, re-read when the window is shown or focused again: a snooze ends at midnight even if the app stayed open.
   const [day, setDay] = useState(() => dayOf(new Date()));
   const [error, setError] = useState<string | null>(null);
@@ -44,7 +65,7 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
   const [treeError, setTreeError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   /** When the list last read cleanly (ms): a failed refresh says how old the rows it keeps are. */
-  const [lastOk, setLastOk] = useState<number | null>(() => scoped(owner).at);
+  const [lastOk, setLastOk] = useState<number | null>(() => scoped(owner).at ?? initial?.at ?? null);
   const [notice, setNotice] = useState<string | null>(null);
   const [undo, setUndo] = useState<Undo | null>(null);
   const [leaving, setLeaving] = useState<ReadonlySet<string>>(new Set());
@@ -53,6 +74,8 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
   // The dispatch ledger and the draft notes: read with the tree-wide load (the node page's Running and Drafts), empty when the vault has none.
   const [rawRuns, setRawRuns] = useState<RawNote[]>(() => scoped(owner).runs);
   const [rawDrafts, setRawDrafts] = useState<RawNote[]>(() => scoped(owner).drafts);
+  /** Running and Drafts are read on their own (r16), so the list never waits for them; whether they were read, and when. */
+  const [activity, setActivity] = useState<Activity>(() => scoped(owner).activity);
   const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastLoad = useRef<number | null>(null);
@@ -64,36 +87,53 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
     const mem = scoped(owner);
     const mine = ++epoch.current;
     let live = true;
-    setList(mem.tasks.get(nodePath)?.list ?? null);
+    const current = () => live && mine === epoch.current;
+    // memory, else the device's copy (r16): the rows show at once with their age and the read below replaces them
+    const kept = mem.tasks.get(nodePath) ?? null;
+    const saved = kept ? null : savedFor(owner, nodePath);
+    setList(kept?.list ?? saved?.list ?? null);
+    if (saved) { setTree((t) => t ?? saved.tree); setTruncated(saved.truncated); setLastOk((l) => l ?? saved.at); }
+    setActivity(mem.activity);
+    setSavedAt(kept || mem.at !== null ? null : saved?.at ?? null);
     vaultTasks.setAskOwner(owner);
-    setLoading(true);
+    setLoading(true); setSlow(false);
+    const slowTimer = setTimeout(() => { if (current()) setSlow(true); }, slowMs());
     lastLoad.current = Date.now();
+    // The tree is re-read with every refresh (r13), so a project filed or moved meanwhile is placed right. `node` notes are the tree; if the
+    // vault has none yet, the app's own tree (areas and projects) stands in. A failed read keeps the last good tree, or the app's own, and
+    // says so: it is never kept as if it had been read.
+    const treeP: Promise<TaskTree & { truncated: boolean }> = vaultTasks.loadTree().then((loaded) => {
+      const t = loaded.byPath.size || !fallback.length ? loaded : { ...buildTaskTree(fallback), truncated: false };
+      mem.tree = t;
+      if (current()) { setTreeError(null); setTree(t); setTreeTruncated(!!t.truncated); }
+      return t;
+    }, (e) => {
+      const t = mem.tree ?? saved?.tree ?? { ...buildTaskTree(fallback), truncated: false };
+      if (current()) { setTreeError(String(e)); setTree(t); setTreeTruncated(!!t.truncated); }
+      return t;
+    });
+    // Running and Drafts (Uni's level reads them for the whole tree): their own reads, never holding the list back (r16). A failed read keeps
+    // what was read before and says so; with nothing read yet the work view says it couldn't check, never "nothing is moving".
+    if (nodePath === "") {
+      void Promise.all([vaultTasks.loadTagged("run"), vaultTasks.loadTagged("draft")]).then(([runs, drafts]) => {
+        if (!current() || memory !== mem) return;
+        if (runs) { mem.runs = runs; setRawRuns(runs); }
+        if (drafts) { mem.drafts = drafts; setRawDrafts(drafts); }
+        mem.activity = runs && drafts ? { ready: true, error: null, lastOk: Date.now() } : { ...mem.activity, error: "Couldn't check what's running" };
+        setActivity(mem.activity);
+      });
+    }
     (async () => {
-      // The tree is re-read with every refresh (r13), so a project filed or moved meanwhile is placed right. `node` notes are the tree; if the
-      // vault has none yet, the app's own tree (areas and projects) stands in. A failed read keeps the last good tree, or the app's own, and
-      // says so: it is never kept as if it had been read.
-      let t: TaskTree & { truncated: boolean };
-      try {
-        const loaded = await vaultTasks.loadTree();
-        t = loaded.byPath.size || !fallback.length ? loaded : { ...buildTaskTree(fallback), truncated: false };
-        mem.tree = t;
-        if (live && mine === epoch.current) setTreeError(null);
-      } catch (e) {
-        t = mem.tree ?? { ...buildTaskTree(fallback), truncated: false };
-        if (live && mine === epoch.current) setTreeError(String(e));
-      }
-      if (live && mine === epoch.current) { setTree(t); setTreeTruncated(!!t.truncated); }
-      const [r, runs, drafts] = await Promise.all([vaultTasks.loadTasks(t, nodePath), nodePath === "" ? vaultTasks.loadTagged("run") : null, nodePath === "" ? vaultTasks.loadTagged("draft") : null]);
-      if (!live || mine !== epoch.current || memory !== mem) return;
-      if (runs) { mem.runs = runs; setRawRuns(runs); }
-      if (drafts) { mem.drafts = drafts; setRawDrafts(drafts); }
+      const r = await vaultTasks.loadTasks(treeP, nodePath);
+      if (!current() || memory !== mem) return;
       mem.tasks.set(nodePath, { list: r.tasks, truncated: r.truncated });
       mem.at = Date.now();
-      setList(r.tasks); setTruncated(r.truncated); setError(null); setLastOk(mem.at);
+      setList(r.tasks); setTruncated(r.truncated); setError(null); setLastOk(mem.at); setSavedAt(null);
+      if (nodePath === "") { const t = mem.tree; if (t) savedTasks.write(owner, { at: mem.at, tree: t, list: r.tasks, truncated: r.truncated }); }
       warmTitles(r.tasks.flatMap((t) => [t.title, t.next]), vault);
       // a cut title's full question arrives a moment later, without holding the list back
       void vaultTasks.loadAsks(r.tasks).then((asks) => {
-        if (!asks.size || !live || mine !== epoch.current || memory !== mem) return;
+        if (!asks.size || !current() || memory !== mem) return;
         // each ask keeps the revision it was read at; a row shows it as its question only at that revision (decisionAsk)
         const one = (t: Task) => { const a = asks.get(t.id); return a ? { ...t, ask: a.ask, askAt: a.at } : t; };
         const withAsk = (l: Task[] | null) => l && l.map(one);
@@ -103,8 +143,8 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
       }).catch(() => {});
       // anything the server no longer lists is settled: stop hiding it by hand
       setGone((g) => new Set([...g].filter((id) => r.tasks.some((x) => x.id === id && isLive(x)))));
-    })().catch((e) => { if (live && mine === epoch.current) setError(String(e)); }).finally(() => { if (live && mine === epoch.current) setLoading(false); });
-    return () => { live = false; };
+    })().catch((e) => { if (current()) setError(String(e)); }).finally(() => { clearTimeout(slowTimer); if (current()) { setLoading(false); setSlow(false); } });
+    return () => { live = false; clearTimeout(slowTimer); };
   }, [identity, vault, nodePath, n]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     const visible = () => {
@@ -178,16 +218,33 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
     if (r.kind === "conflict") refresh();
   }, [nodePath]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const act = useCallback(async (task: Task, action: TaskAction) => {
+  /**
+   * Done, Archive or Snooze. Every one is written against the revision the user saw (r16): "I did this" and Archive send the task's `updatedAt`
+   * with the state compare-and-set, in one update, so a task whose instruction changed since can't be closed blind; Undo is guarded by the
+   * revision the first write returned. From the sheet (`sheet`), the row stays until the write succeeds and a conflict is the sheet's to say
+   * ("This changed since you opened it"); from elsewhere the row leaves at once and comes back with a notice.
+   */
+  const act = useCallback(async (task: Task, action: TaskAction, opts: { sheet?: boolean } = {}): Promise<ActResult> => {
     setNotice(null);
     // a decision is closed only by recording an answer (decide); it can be snoozed, never checked off or put away without one
-    if (task.kind === "decision" && action !== "snooze") { setNotice("A decision is closed by answering it."); return; }
+    if (task.kind === "decision" && action !== "snooze") { const message = "A decision is closed by answering it."; setNotice(message); return { ok: false, kind: "refused", message }; }
+    if (!task.updatedAt) {
+      const message = `Couldn't ${verb[action]}: reload the task first.`;
+      if (!opts.sheet) setNotice(message);
+      refresh();
+      return { ok: false, kind: "conflict", message };
+    }
+    const failed = (r: { ok: false; kind: FailureKind; message: string }): ActResult => {
+      if (opts.sheet) { if (r.kind === "conflict") refresh(); else setNotice(`Couldn't ${verb[action]}: ${r.message.replace(/^Error:\s*/, "").slice(0, 120)}`); }
+      else fail(task, action, r);
+      return r;
+    };
+    if (!opts.sheet) hide(task.id);
     if (action === "snooze") {
-      if (!task.updatedAt) { setNotice("Couldn't snooze: reload the task first."); return; }
       const until = tomorrowOf(new Date());
-      hide(task.id);
       const r = await vaultTasks.snooze(task.id, until, task.updatedAt);
-      if (!r.ok) { fail(task, action, r); return; }
+      if (!r.ok) return failed(r);
+      if (opts.sheet) hide(task.id);
       patch(task.id, (t) => ({ ...t, snoozedUntil: until, updatedAt: r.updatedAt ?? t.updatedAt, lastUpdatedBy: r.lastUpdatedBy ?? t.lastUpdatedBy, lastUpdatedVia: r.lastUpdatedVia ?? t.lastUpdatedVia }));
       let stamp = r.updatedAt;
       offerUndo({ id: task.id, label: said.snooze, run: async () => {
@@ -196,19 +253,23 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
         else { setNotice("Couldn't undo: it changed elsewhere. Showing the latest."); setUndo(null); refresh(); }
         stamp = null;
       } });
-      return;
+      return { ok: true };
     }
     const from = task.state;
     const to: AnyState = action === "archive" ? "archived" : "done";
-    hide(task.id);
-    const r = await vaultTasks.transition(task.id, from, to);
-    if (!r.ok) { fail(task, action, r); return; }
+    const r = await vaultTasks.transition(task.id, from, to, task.updatedAt);
+    if (!r.ok) return failed(r);
+    if (opts.sheet) hide(task.id);
+    patch(task.id, (t) => ({ ...t, state: to, updatedAt: r.updatedAt ?? t.updatedAt, lastUpdatedBy: r.lastUpdatedBy ?? t.lastUpdatedBy, lastUpdatedVia: r.lastUpdatedVia ?? t.lastUpdatedVia }));
+    // Undo is the reverse compare-and-set, guarded by the revision this write returned: if anyone changed it since, it fails like any other conflict
+    let stamp = r.updatedAt;
     offerUndo({ id: task.id, label: said[action], run: async () => {
-      // Undo is the reverse compare-and-set; if someone else moved it meanwhile it fails like any other conflict.
-      const back = await vaultTasks.transition(task.id, to, from);
-      if (back.ok) { restore(task.id); setUndo(null); setNotice(null); refresh(); }
-      else { setNotice(back.kind === "conflict" ? "Couldn't undo: it changed elsewhere. Showing the latest." : `Couldn't undo: ${back.message.slice(0, 120)}`); setUndo(null); refresh(); }
+      const back = stamp ? await vaultTasks.transition(task.id, to, from, stamp) : null;
+      stamp = null;
+      if (back?.ok) { patch(task.id, (t) => ({ ...t, state: from, updatedAt: back.updatedAt ?? t.updatedAt })); restore(task.id); setUndo(null); setNotice(null); refresh(); }
+      else { setNotice(!back || back.kind === "conflict" ? "Couldn't undo: it changed elsewhere. Showing the latest." : `Couldn't undo: ${back.message.slice(0, 120)}`); setUndo(null); refresh(); }
     } });
+    return { ok: true };
   }, [nodePath]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /**
@@ -239,6 +300,12 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
   }, [nodePath]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return { tree, tasks: visible, all: list, runs, drafts, setPriority, decide, leaving, counts, truncated, treeTruncated, error, treeError, loading, notice, undo, act, refresh, refreshIfStale, dismissNotice: () => setNotice(null), ready: list !== null, now,
+    /** The rows are the device's copy from this moment (ms), not yet read again this session (r16). */
+    savedAt,
+    /** The current read has run past SLOW_MS: "Still loading · Retry" (r16). */
+    slow: loading && slow,
+    /** Running and Drafts: read yet, the last failure, when they last read cleanly. */
+    activity,
     /** A re-read is under way while rows are on screen. */
     refreshing: loading && list !== null,
     lastOk,

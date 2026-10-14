@@ -3,10 +3,10 @@ import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent }
 import { cleanText } from "../interface/contract";
 import { isMe, PRIORITIES, PRIORITY_LABEL, priorityOf, type Priority, type Task } from "./taskCore";
 import type { RoomRef } from "./talkCore";
-import type { TaskAction, Undo } from "./useTasks";
+import type { ActResult, TaskAction, Undo } from "./useTasks";
 import { activeProfile, type VaultProfile } from "./profile";
 import { actionLead, dueLine, sayText, stateLine } from "./simpleCore";
-import { splitTitle } from "./whereCore";
+import { taskTitle } from "./whereCore";
 import { DecisionAnswer, NextText, decisionAsk, plainDetail } from "./Companion";
 import { RefText } from "./noteRefs";
 import { splitRefs, type NoteRef } from "./noteRefsCore";
@@ -32,7 +32,8 @@ export function TaskSheet({ task, gone = false, here, nodeName, room, inRoom, on
   task: Task; gone?: boolean; here: string; nodeName: (path: string) => string; room: RoomRef | null;
   /** The room open now: "Open in #room" is not offered for it. */
   inRoom?: string | null;
-  onClose: () => void; onAct: (t: Task, a: TaskAction) => void; onDecide: (t: Task, option: string) => void; onOpenRoom: (id: string) => void;
+  /** A write against the revision shown (r16): the sheet waits for it, closes on success, and on a conflict stays with the latest copy. */
+  onClose: () => void; onAct: (t: Task, a: TaskAction) => Promise<ActResult> | void; onDecide: (t: Task, option: string) => void; onOpenRoom: (id: string) => void;
   /** Open a note in its vault (a link in the next step; the task's own note when its question is not whole anywhere else). */
   onNote: (ref: NoteRef) => void;
   /** Put words in a room's composer (never sends). */
@@ -49,12 +50,23 @@ export function TaskSheet({ task, gone = false, here, nodeName, room, inRoom, on
     if (e.key === "Escape") { e.stopPropagation(); onClose(); }
     trapTab(e, box.current); // r15: only reachable controls (never the closed Details' priority buttons)
   };
-  const go = (a: TaskAction) => { onAct(task, a); onClose(); };
+  /** The write under way, and whether the last one met a newer revision (r16): the sheet then shows the latest copy and says so. */
+  const [busy, setBusy] = useState<TaskAction | null>(null);
+  const [changed, setChanged] = useState(false);
+  const go = async (a: TaskAction) => {
+    if (busy) return;
+    setBusy(a); setChanged(false);
+    const r = await onAct(task, a);
+    setBusy(null);
+    if (!r || r.ok) onClose();
+    else if (r.kind === "conflict") { setChanged(true); box.current?.focus(); }
+    else onClose(); // the undo bar says what went wrong
+  };
   /** The task's own vault (r15): its note and the notes its step links are read and opened there. */
   const profileVault = useVaultProfile().vault;
   const vault = task.vault ?? profileVault;
   const decision = task.kind === "decision";
-  const { id: tid, rest } = splitTitle(cleanText(task.title));
+  const { id: tid, rest } = taskTitle(cleanText(task.title));
   // r14: a cut question not known at this revision is read from its note here, keyed by the note and its revision: a new revision drops the
   // old question at once, and the answers sit only beside a question read at the revision they will be written against
   const rev = `${task.id}@${task.updatedAt ?? ""}`;
@@ -96,9 +108,11 @@ export function TaskSheet({ task, gone = false, here, nodeName, room, inRoom, on
       <h2 id="task-sheet-title">{lead && !dq ? <RefText text={plainDetail(lead) || lead} vault={vault} /> : heading}</h2>
       {lead && <p className="task-sub">{rest}</p>}
       {gone && <p className="task-gone" role="status">This is no longer open: it was done, decided or changed elsewhere.</p>}
+      {changed && !gone && <p className="task-gone task-changed" role="alert">This changed since you opened it. Nothing was saved; this is the latest.</p>}
       {dq && !dq.answerable && !reading && <p className="task-next"><button type="button" className="task-link" onClick={() => { onClose(); onNote({ vault, id: task.id }); }}>Open the note to read the question ›</button></p>}
       {/* the step itself, with its links to open, when the lead had to drop them (a URL, a linked note) or when it is not an action */}
       {task.next && (!lead || linky(task.next)) && <div className="task-next"><NextText text={task.next} vault={vault} onNote={(r) => { onClose(); onNote(r); }} /></div>}
+      {task.nextCut && <p className="task-next task-cut">This step was cut short when it was written. <button type="button" className="task-link" onClick={() => { onClose(); onNote({ vault, id: task.id }); }}>Open the note ›</button></p>}
       {!gone && dq?.answerable && <DecisionAnswer t={task} label={heading} onDecide={(t, o) => { onDecide(t, o); onClose(); }} className="task-answer" />}
       <dl className="task-facts">
         <dt>Status</dt><dd>{stateLine(task, (w) => isMe(w), OWNER)}</dd>
@@ -107,9 +121,9 @@ export function TaskSheet({ task, gone = false, here, nodeName, room, inRoom, on
       </dl>
       <div className="task-actions">
         {primary === "say" && <button type="button" className="task-do primary" onClick={sayIn!}>Say it in #{room!.name.replace(/^#/, "")} ›</button>}
-        {!gone && !decision && <button type="button" className={`task-do${primary === "done" ? " primary" : ""}`} onClick={() => go("done")}>I did this</button>}
-        {!gone && !decision && <button type="button" className="task-do" onClick={() => go("archive")}>Archive</button>}
-        {!gone && <button type="button" className="task-do" onClick={() => go("snooze")}>Snooze until tomorrow</button>}
+        {!gone && !decision && <button type="button" className={`task-do${primary === "done" ? " primary" : ""}`} aria-busy={busy === "done" || undefined} disabled={!!busy} onClick={() => void go("done")}>{busy === "done" ? "Saving…" : "I did this"}</button>}
+        {!gone && !decision && <button type="button" className="task-do" aria-busy={busy === "archive" || undefined} disabled={!!busy} onClick={() => void go("archive")}>{busy === "archive" ? "Archiving…" : "Archive"}</button>}
+        {!gone && <button type="button" className="task-do" aria-busy={busy === "snooze" || undefined} disabled={!!busy} onClick={() => void go("snooze")}>{busy === "snooze" ? "Snoozing…" : "Snooze until tomorrow"}</button>}
         {!sayIn && room && room.id !== inRoom && <button type="button" className="task-do quiet" onClick={() => { onOpenRoom(room.id); onClose(); }}>Open in #{room.name.replace(/^#/, "")}</button>}
         <button type="button" className="task-do quiet" onClick={onClose}>Close</button>
       </div>

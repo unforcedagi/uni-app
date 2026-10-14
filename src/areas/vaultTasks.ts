@@ -4,8 +4,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { buildTaskTree, failureKind, groupOf, LIVE_STATES, nodeFilterKeys, parseNodes, parseTask, subtreePaths, type AnyState, type FailureKind, type Priority, type RawNote, type Task, type TaskTree } from "./taskCore.ts";
 import { ROOT } from "./treeCore.ts";
-import { splitTitle } from "./whereCore.ts";
-import { askFromContent, askOrder, isCutTitle, isListLine } from "./simpleCore.ts";
+import { taskTitle } from "./whereCore.ts";
+import { askFromContent, askOrder, isListLine, stepText } from "./simpleCore.ts";
 import { activeProfile } from "./profile.ts";
 
 export type Call = (cmd: string, args: Record<string, unknown>) => Promise<unknown>;
@@ -100,7 +100,8 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
    */
   async function loadAsks(tasks: readonly Task[]): Promise<Map<string, { ask: string; at: string | null }>> {
     const asks = new Map<string, { ask: string; at: string | null }>();
-    const want = tasks.filter((t) => (t.kind === "decision" || groupOf(t) === "you") && isCutTitle(splitTitle(t.title).rest));
+    // r16: a title whose "(preview: …" tail was dropped also has its question in the note
+    const want = tasks.filter((t) => { const tt = taskTitle(t.title); return (t.kind === "decision" || groupOf(t) === "you") && (tt.cut || tt.previewed); });
     for (const t of want) { const a = askFor(t); if (a !== undefined) asks.set(t.id, { ask: a, at: t.updatedAt }); }
     const cut = askOrder(want.filter((t) => !asks.has(t.id))).slice(0, ASK_READS);
     let fresh = 0;
@@ -137,13 +138,17 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
    * error gets the older walk instead: `node in [subtree paths and ids]`, decided once per session. `truncated` says the
    * vault returned a full page (more may exist).
    */
-  async function loadTasks(tree: TaskTree, path: string): Promise<{ tasks: Task[]; truncated: boolean }> {
-    const finish = (tasks: RawNote[], decisions: RawNote[], cut = tasks.length >= LIMIT || decisions.length >= LIMIT) => {
+  async function loadTasks(treeIn: TaskTree | Promise<TaskTree>, path: string): Promise<{ tasks: Task[]; truncated: boolean }> {
+    // r16: everywhere (ROOT) the reads need no tree, so they start at once and the tree (read alongside) only places the rows at the end
+    const finish = async (tasks: RawNote[], decisions: RawNote[], cut = tasks.length >= LIMIT || decisions.length >= LIMIT) => {
       const vault = name();
-      const parsed = [...tasks, ...decisions].map((n) => parseTask(n, tree)).filter((t): t is Task => !!t).map((t) => ({ ...t, vault }));
-      return { tasks: [...new Map(parsed.map((t) => [t.id, withAsk(t)])).values()], truncated: cut };
+      const t = await treeIn;
+      // r16: a step cut at the writer's 140 characters reads as cut ("…"), never as a phrase left hanging
+      const parsed = [...tasks, ...decisions].map((n) => parseTask(n, t)).filter((x): x is Task => !!x).map((x) => { const st = stepText(x.next); return { ...x, vault, next: st.text, ...(st.cut ? { nextCut: true } : {}) }; });
+      return { tasks: [...new Map(parsed.map((x) => [x.id, withAsk(x)])).values()], truncated: cut };
     };
-    if (path !== ROOT && nearOk !== false) {
+    const tree = path === ROOT ? null : await treeIn;
+    if (tree && nearOk !== false) {
       // The anchor is the node's id when the tree knows it (the vault stores references as ids); the path is still accepted.
       const root = tree.byPath.get(path)?.id ?? path;
       try {
@@ -159,7 +164,7 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
       }
     }
     let keys: string[] | null = null;
-    if (path !== ROOT) {
+    if (tree) {
       const known = subtreePaths(tree, path);
       if (known.length) keys = nodeFilterKeys(tree, known);
       else if (nearOk !== false) { try { const s = await loadSubtree(path); keys = [...s.paths, ...s.ids]; } catch { /* no such subtree */ } }
@@ -174,10 +179,15 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
     return finish(tasks.rows, decisions.rows, !tasks.complete || !decisions.complete);
   }
 
-  /** Compare-and-set on `state`. A stale `from` is a conflict (409): the caller re-reads and says so, it never retries blind. */
-  async function transition(taskId: string, from: AnyState, to: AnyState): Promise<WriteResult> {
+  /**
+   * Compare-and-set on `state`, guarded by `ifUpdatedAt` (r16): the revision whose instruction the user saw, checked in the same update. A stale
+   * `from`, or a task changed since that revision (a rewritten step, even with the state unchanged), is a conflict: the caller re-reads and
+   * says so, it never retries blind.
+   */
+  async function transition(taskId: string, from: AnyState, to: AnyState, ifUpdatedAt: string): Promise<WriteResult> {
+    if (!ifUpdatedAt) return { ok: false, kind: "conflict", message: "no revision: reload the task first" };
     try {
-      const note = ((await call("vault_transition", { vault: name(), id: taskId, from, to })) as RawNote);
+      const note = ((await call("vault_transition", { vault: name(), id: taskId, from, to, ifUpdatedAt })) as RawNote);
       return ok(note);
     } catch (e) {
       const message = String(e);
