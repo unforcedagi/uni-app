@@ -22,7 +22,7 @@ export const LEAVE_MS = 240;
 /** A load still running after this long says so, with Retry (r16): never an endless "Loading…". */
 export const SLOW_MS = 8000;
 /** The test build may shorten it (`window.__slowMs`); never in a release build. */
-const slowMs = (): number => (import.meta.env?.VITE_AREAS_TESTHOOKS === "1" && typeof window !== "undefined" && Number((window as unknown as { __slowMs?: number }).__slowMs)) || SLOW_MS;
+const slowMs = (): number => (import.meta.env.VITE_AREAS_TESTHOOKS === "1" && typeof window !== "undefined" && Number((window as unknown as { __slowMs?: number }).__slowMs)) || SLOW_MS;
 const reduced = () => typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 
 // Memory for this session only, scoped to the signed-in identity and cleared on Forget: tasks are Aaron's private work.
