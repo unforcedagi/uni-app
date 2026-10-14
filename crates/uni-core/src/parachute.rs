@@ -417,9 +417,10 @@ impl VaultClient {
         Ok(notes_in(&v).into_iter().filter(|n| n["id"].is_string()).collect())
     }
 
-    /// One atomic compare-and-set on a metadata field (`from` must be the stored value). A stale `from` fails with
-    /// a message containing `transition_conflict`; a value the tag's schema forbids with `schema_validation`.
-    /// Only `state` may be transitioned.
+    /// One atomic compare-and-set on a metadata field (`from` must be the stored value), guarded by the revision the
+    /// user saw (`if_updated_at`, r16): a stale `from` fails with `transition_conflict`, a note changed since that
+    /// revision (a new instruction, even with the state unchanged) with `conflict:`; a value the tag's schema forbids
+    /// with `schema_validation`. Only `state` may be transitioned.
     pub async fn transition_note(
         &self,
         vault: &str,
@@ -427,21 +428,11 @@ impl VaultClient {
         field: &str,
         from: Value,
         to: Value,
+        if_updated_at: &str,
     ) -> Result<Value> {
         check_vault(vault)?;
-        if id.trim().is_empty() {
-            return Err(Error::Invalid("missing note id".into()));
-        }
-        if field != "state" {
-            return Err(Error::Invalid(format!("only `state` can be transitioned, not `{field}`")));
-        }
-        let v = self
-            .call(
-                "update-note",
-                json!({"vault": vault, "id": id, "include_content": false,
-                    "state_transition": {"field": field, "from": from, "to": to}}),
-            )
-            .await?;
+        let args = transition_args(vault, id, field, &from, &to, if_updated_at)?;
+        let v = self.call("update-note", args).await?;
         check_vault_errors(&v)?;
         note_from(&v, id)
     }
@@ -970,6 +961,22 @@ fn check_snooze_patch(metadata: &Value) -> Result<()> {
     }
 }
 
+/// The update-note arguments for a state change (r16): the compare-and-set on `state` and the revision whose
+/// instruction the user saw, in one conditional update (the vault checks both or writes nothing).
+fn transition_args(vault: &str, id: &str, field: &str, from: &Value, to: &Value, if_updated_at: &str) -> Result<Value> {
+    if id.trim().is_empty() {
+        return Err(Error::Invalid("missing note id".into()));
+    }
+    if field != "state" {
+        return Err(Error::Invalid(format!("only `state` can be transitioned, not `{field}`")));
+    }
+    if if_updated_at.trim().is_empty() {
+        return Err(Error::Invalid("a state change needs the updatedAt the user saw".into()));
+    }
+    Ok(json!({"vault": vault, "id": id, "include_content": false, "if_updated_at": if_updated_at,
+        "state_transition": {"field": field, "from": from, "to": to}}))
+}
+
 /// The update-note arguments for deciding: only `open` -> `decided`, the checked metadata, and the stamp just read
 /// (the vault requires `if_updated_at` when metadata rides with a state transition).
 fn decide_args(vault: &str, id: &str, from: &Value, to: &Value, metadata: Value, if_updated_at: &str) -> Result<Value> {
@@ -1143,6 +1150,22 @@ fn http_client() -> Result<reqwest::Client> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn transition_args_carry_the_revision_with_the_compare_and_set() {
+        // r16: "I did this", Archive and Undo send exactly this: the state compare-and-set and the revision, one update
+        let a = transition_args("uni", "T1", "state", &json!("waiting"), &json!("done"), "2026-10-14T07:00:00.000Z").unwrap();
+        assert_eq!(a, json!({"vault": "uni", "id": "T1", "include_content": false, "if_updated_at": "2026-10-14T07:00:00.000Z",
+            "state_transition": {"field": "state", "from": "waiting", "to": "done"}}));
+        assert!(a.get("force").is_none() && a.get("metadata").is_none());
+        let undo = transition_args("uni", "T1", "state", &json!("done"), &json!("waiting"), "2026-10-14T07:00:01.000Z").unwrap();
+        assert_eq!(undo["if_updated_at"], "2026-10-14T07:00:01.000Z");
+        assert_eq!(undo["state_transition"], json!({"field": "state", "from": "done", "to": "waiting"}));
+        assert!(transition_args("uni", "T1", "state", &json!("open"), &json!("done"), "").is_err());
+        assert!(transition_args("uni", "T1", "state", &json!("open"), &json!("done"), "  ").is_err());
+        assert!(transition_args("uni", "T1", "status", &json!("open"), &json!("done"), "x").is_err());
+        assert!(transition_args("uni", " ", "state", &json!("open"), &json!("done"), "x").is_err());
+    }
+
     #[test]
     fn decide_args_carry_the_stamp_and_pin_the_transition() {
         let md = json!({"decided": "yes", "decided_at": "2026-10-13T08:00:00Z", "decided_by": "aaron"});
@@ -1496,7 +1519,7 @@ mod surface_tests {
             ),
             (
                 "update-note",
-                json!({"vault":"scope-test","id":"t1","include_content":false,"state_transition":{"field":"state","from":"open","to":"done"}}),
+                json!({"vault":"scope-test","id":"t1","include_content":false,"if_updated_at":"t1","state_transition":{"field":"state","from":"open","to":"done"}}),
                 json!({"id":"t1","path":"Tasks/T-1","updatedAt":"t2"}),
             ),
             (
@@ -1513,7 +1536,7 @@ mod surface_tests {
         let rows = client.query_by_metadata("scope-test", "task", meta_of(), 500).await.unwrap();
         assert_eq!(rows.len(), 1);
         let done = client
-            .transition_note("scope-test", "t1", "state", json!("open"), json!("done"))
+            .transition_note("scope-test", "t1", "state", json!("open"), json!("done"), "t1")
             .await
             .unwrap();
         assert_eq!(done["updatedAt"], "t2");
@@ -1586,8 +1609,10 @@ mod surface_tests {
         // No scripted server calls: every one of these must be refused before a request is made.
         let (client, handle) = server(vec![]);
         for field in ["status", "tags", "node", ""] {
-            assert!(client.transition_note("scope-test", "t1", field, json!("a"), json!("b")).await.is_err(), "{field}");
+            assert!(client.transition_note("scope-test", "t1", field, json!("a"), json!("b"), "t1").await.is_err(), "{field}");
         }
+        // r16: a state change without the revision the user saw is refused before any request
+        assert!(client.transition_note("scope-test", "t1", "state", json!("open"), json!("done"), "").await.is_err());
         for meta in [
             json!({"state":"done"}),
             json!({"snoozed_until":"2026-10-11","node":"x"}),

@@ -1490,7 +1490,8 @@ async fn vault_subtree_tasks(
     .await
 }
 
-/// Atomic compare-and-set of a note's `state`. The field is fixed here; the webview cannot pick another.
+/// Atomic compare-and-set of a note's `state`, guarded by the revision the user saw (`if_updated_at`, r16). The field is
+/// fixed here; the webview cannot pick another.
 #[tauri::command]
 async fn vault_transition(
     app: tauri::AppHandle,
@@ -1498,9 +1499,10 @@ async fn vault_transition(
     id: String,
     from: serde_json::Value,
     to: serde_json::Value,
+    if_updated_at: String,
 ) -> Result<serde_json::Value, String> {
     with_vault(&app, move |c| {
-        tauri::async_runtime::block_on(c.transition_note(&vault, &id, "state", from, to))
+        tauri::async_runtime::block_on(c.transition_note(&vault, &id, "state", from, to, &if_updated_at))
             .map_err(|e| e.to_string())
     })
     .await
