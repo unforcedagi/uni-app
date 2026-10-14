@@ -604,11 +604,28 @@ export function NeedsList({ needs: owed, pending = [], fit, onTask, onDecide, on
 
 function Body({ stands, ready, note, load, feed, rest = 0, moreTitle = null, onPrivate, runs, nodeName, onTask, onDecide, onEverything, onNote, placeOf, fit, hideHealth = false, onMore, keepOne = false }: CompanionProps & { fit: boolean; hideHealth?: boolean; onMore?: () => void; keepOne?: boolean }) {
   const active = runs.filter(isActiveRun);
-  const hiddenRuns = Math.max(0, active.length - RUNS_SHOWN);
+  /** r24 (Sonnet): in the side panel a Running row is whole above the footer or it waits behind "+N more running": one fewer until the last fits */
+  const [runCap, setRunCap] = useState(RUNS_SHOWN);
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+  useLayoutEffect(() => { setRunCap(RUNS_SHOWN); }, [active.length, fit]);
+  useLayoutEffect(() => {
+    const b = bodyRef.current; const sc = b?.closest(".cp-fit") as HTMLElement | null;
+    if (!fit || !b || !sc || typeof ResizeObserver === "undefined") return;
+    const check = () => {
+      const runs = b.querySelectorAll<HTMLElement>(".cp-run"); const foot = b.querySelector<HTMLElement>(".cp-foot");
+      const last = runs[runs.length - 1]; if (!last || !foot || sc.scrollTop > 0) return;
+      const over = sc.scrollHeight > sc.clientHeight + 1 && last.getBoundingClientRect().bottom > foot.getBoundingClientRect().top + 0.5;
+      if (over) setRunCap((c) => Math.max(0, Math.min(c, runs.length) - 1));
+    };
+    const ro = new ResizeObserver(check); ro.observe(b); ro.observe(sc); check();
+    return () => ro.disconnect();
+  }, [fit, runCap, active.length, feed.rows.length]);
+  const runsShown = fit ? Math.min(RUNS_SHOWN, runCap) : RUNS_SHOWN;
+  const hiddenRuns = Math.max(0, active.length - runsShown);
   if (note) return <div className="cp-body"><p className="cp-lede cp-note">{note}</p></div>;
   // below 900px the room shows the list's health itself, outside the strip (r14)
   const health = !hideHealth && <LoadHealth load={load} ready={ready} count={feed.total} />;
-  return <div className="cp-body">
+  return <div className="cp-body" ref={bodyRef}>
     {!ready ? (load?.error || load?.slow ? <LoadHealth load={load} ready={false} /> : <p className="cp-lede">Loading…</p>) : stands && <><Stands text={stands.text} />{stands.calm && <p className="cp-calm">{stands.calm}</p>}</>}
     {ready && <section aria-label="Needs you" className="cp-sec" aria-busy={load?.refreshing || undefined}>
       <h3 className="cp-h">Needs you</h3>
@@ -619,9 +636,9 @@ function Body({ stands, ready, note, load, feed, rest = 0, moreTitle = null, onP
       {feed.total === 0 && !feed.pending?.length && <p className="cp-none">Nothing needs you here.</p>}
       {health}
     </section>}
-    {active.length > 0 && <section aria-label="Running" className="cp-sec">
+    {active.length > 0 && runsShown > 0 && <section aria-label="Running" className="cp-sec">
       <h3 className="cp-h">Running</h3>
-      <ul className="cp-list">{active.slice(0, RUNS_SHOWN).map((r) => <li key={r.id} className="cp-run" data-state={r.state}><i aria-hidden="true" /><span>{cleanText(r.what)}</span><small>{r.state}</small></li>)}</ul>
+      <ul className="cp-list">{active.slice(0, runsShown).map((r) => <li key={r.id} className="cp-run" data-state={r.state}><i aria-hidden="true" /><span>{cleanText(r.what)}</span><small>{r.state}</small></li>)}</ul>
     </section>}
     {onEverything && <div className="cp-foot"><button type="button" className="cp-all" onClick={onEverything}><span className="cp-all-t">{`All of ${nodeName}'s work`}</span>{hiddenRuns > 0 && <span className="cp-all-more">+{hiddenRuns} more running</span>}<span className="cp-all-arrow" aria-hidden="true">→</span></button></div>}
   </div>;
