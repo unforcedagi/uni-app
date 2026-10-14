@@ -375,6 +375,7 @@
 .th-roomnav.hidden { align-items: center; gap: 4px; padding: 6px 0; }
 .th-roomnav > .th-column { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; padding: 0; }
 .th-column .th-rows-wrap { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.th-column .th-rows-wrap[data-more] { -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 22px), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - 22px), transparent); }
 .th-toolbar { flex: none; display: flex; align-items: center; gap: 2px; padding: 4px 6px; }
 .th-tb-gap { flex: 1; }
 .th-nb { all: unset; box-sizing: border-box; width: 26px; height: 26px; display: grid; place-items: center; border-radius: 6px; font: 400 15px/1 var(--th-sans); color: var(--th-mute); cursor: pointer; }
@@ -616,6 +617,10 @@
 .task-sheet { padding-bottom: 0; }
 .task-sheet::after { display: none; }
 .task-sheet .task-foot { margin-top: 12px; }
+/* r23: the sheet is a column: its body scrolls in its own region and the footer sits under it, never over it (920×360, 740×360) */
+.task-sheet { display: flex; flex-direction: column; overflow: hidden; }
+.task-sheet .task-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; margin: 0 -22px; padding: 0 22px 2px; overscroll-behavior: contain; }
+.task-sheet .task-foot { position: static; flex: none; margin-top: 0; }
 @media (max-height: 520px) {
   .task-sheet { padding-top: 14px; }
   .task-sheet h2 { font-size: 18px; }
@@ -664,5 +669,8 @@
 .task-steps li .task-step-links { margin: 6px 0 2px; }
 .task-do.task-step-open { min-height: 40px; }
 .task-asked { margin: 0 0 10px; font-size: 13.5px; color: var(--th-mute); }
+.task-detail { margin: 0 0 10px; padding: 8px 10px; border-left: 2px solid var(--th-line, rgba(0,0,0,.12)); color: var(--th-ink2); font-size: 14.5px; overflow-wrap: anywhere; }
+.task-detail p { margin: 0 0 6px; white-space: pre-line; }
+.task-detail p:last-child { margin-bottom: 0; }
 .task-movedon { color: var(--th-ink2); }
 .task-record { overflow-wrap: anywhere; }

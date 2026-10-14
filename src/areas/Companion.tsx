@@ -1,7 +1,7 @@
 // T-124: the room's quiet companion. Not a page: one sentence on where the room stands, at most three things that need the user, and what is
 // running (only when something is). Desktop: a side panel that folds to a thin rail. Phone: a one-line strip at the top of the room that opens
 // downward. Each item opens its task sheet; "Everything here" goes one level deeper, to the full node page. The fold is remembered per device.
-import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { cleanText } from "../interface/contract";
 import { RefName, RefText } from "./noteRefs";
@@ -13,7 +13,7 @@ import { isActiveRun, type Run } from "./steerCore";
 import { ownerLabel, type Task } from "./taskCore";
 import { taskTitle } from "./whereCore";
 import { splitLinks } from "./linkText";
-import { actionableTitle, answerChoices, answerLabel, askLead, askPreview, checkLine, CHECK_FAILED, DANGLING, decideLine, stripRoom, decisionQuestion, dueLine, fitsRow, isOverdue, lineBudget, missingLine, OPEN_TASK, OPEN_TO_ANSWER, privateActionLabel, privateRestLabel, askedLine, firstOfSteps, actionOf, rowAction, withoutBrackets, rowSubParts, standsHeading, titleSays, titleWords, TIDY_LINE, toTidy, unknownDecision, waitsLine, waitsOnMe, withHosts, withoutCut, rowAsk, type Choice, type NeedsFeed, type PrivateNeed, type RowAction, type Support } from "./simpleCore";
+import { actionableTitle, answerChoices, answerLabel, askLead, askPreview, checkLine, CHECK_FAILED, DANGLING, decideLine, stripRoom, decisionQuestion, dueLine, fitsRow, isOverdue, lineBudget, missingLine, OPEN_TASK, OPEN_TO_ANSWER, privateActionLabel, privateRestLabel, askedLine, requestDate, pointsNowhere, firstOfSteps, actionOf, rowAction, withoutBrackets, rowSubParts, standsHeading, titleSays, titleWords, TIDY_LINE, toTidy, unknownDecision, waitsLine, waitsOnMe, withHosts, withoutCut, rowAsk, withoutRawIds, clauseForms, type Choice, type NeedsFeed, type PrivateNeed, type RowAction, type Support } from "./simpleCore";
 import { requestRecheck } from "./useTasks";
 
 const KEYS = { side: "uni.companion.side.v1", sideNarrow: "uni.companion.side.narrow.v1", strip: "uni.companion.strip.v1" } as const;
@@ -150,8 +150,8 @@ const DANGLING_WORD = DANGLING;
 const wordTokens = (text: string) => text.split(/\s+/).filter(Boolean).map((w, i) => ({ node: w, space: i > 0 }));
 
 /**
- * Text clamped at `lines` lines that ends on a whole word (r15): every line full, then "…" after the last word that fits, never inside a
- * word, a link or a note's title. Drawn whole once to measure (before paint), then cut; a new width or text measures again.
+ * Text clamped at `lines` lines that ends on a whole word (r15): every line full up to the last word that fits, never inside a word, a link
+ * or a note's title. r23 (both critics): no "…" after it. Drawn whole once to measure (before paint), then cut; a new width or text measures again.
  */
 function WordClamp({ tokens, lines, open, textKey, onCut, elRef, className, onClick, tag = "p", title, keep = 0, data }: { tokens: { node: React.ReactNode; space: boolean }[]; lines: number; open: boolean; textKey: string; title?: string;
   /** data-* attributes for the element */
@@ -172,14 +172,12 @@ function WordClamp({ tokens, lines, open, textKey, onCut, elRef, className, onCl
     const box = el.getBoundingClientRect();
     const top = box.top + (parseFloat(cs.paddingTop) || 0);
     const right = box.right - (parseFloat(cs.paddingRight) || 0);
-    const room = (parseFloat(cs.fontSize) || 15) * 1.1; // the "…" after the last word
     const lineOf = (y: number) => Math.floor((y - top + 1) / lh);
     const last = (w: HTMLElement) => { const r = w.getClientRects(); return r[r.length - 1] ?? w.getBoundingClientRect(); };
     let k = 0;
     while (k < words.length && lineOf(last(words[k]).top) < lines) k++;
     if (k >= words.length) { onCut(false); return; }
-    // the "…" must fit after the last word kept, on the last line
-    while (k > 1 && lineOf(last(words[k - 1]).top) === lines - 1 && last(words[k - 1]).right + room > right) k--;
+    while (k > 1 && lineOf(last(words[k - 1]).top) === lines - 1 && last(words[k - 1]).right > right + 1) k--;
     // r17: never end on a hanging word ("…to the …") or a word that only leads into the rest ("Dominic: …")
     const plain = (i: number) => (typeof tokens[i]?.node === "string" ? (tokens[i].node as string) : null);
     while (k > 1 && plain(k - 1) !== null && (DANGLING_WORD.test(plain(k - 1)!.replace(/[,;:(\[–—-]+$/, "")) || /^[,;:–—&+·•|/-]+$/.test(plain(k - 1)!))) k--;
@@ -204,7 +202,6 @@ function WordClamp({ tokens, lines, open, textKey, onCut, elRef, className, onCl
   const Tag = tag;
   return <Tag ref={elRef} className={className} title={title} {...data} data-cut={cut !== null && !open ? "true" : undefined} onClick={onClick}>
     {shown.map((t, i) => <span key={i}>{i > 0 && t.space ? " " : ""}<span className="wc-w">{t.node}</span></span>)}
-    {cut !== null && !open && <span className="wc-more" aria-hidden="true">…</span>}
   </Tag>;
 }
 
@@ -218,15 +215,32 @@ function ActionLine({ forms, vault, elRef }: { forms: { text: string; keep: stri
 }
 
 /**
- * The whole sentence, clamped at 3 lines on screen only and cut on a whole word (r18, never "underway ac…"); "More" (a real button) shows all
- * of it. Its date is in the heading ("Where this stands · 2 days ago"), not under it.
+ * Where this stands (r23, both critics): the node's sentence without raw ids (run numbers, hashes, long links), whole when it fits three
+ * lines, else the longest form that ends on a clause ("…; prod waits…" → "Staging has the D2 one-app…."), never cut inside one and never
+ * with "…". "More" (a real button) shows the whole. Its date is in the heading ("Where this stands · 2 days ago"), not under it.
  */
 function Stands({ text }: { text: string }) {
+  const clean = useMemo(() => withoutRawIds(text), [text]);
+  const forms = useMemo(() => clauseForms(clean), [clean]);
   const [full, setFull] = useState(false);
-  const [cut, setCut] = useState(false);
+  const [form, setForm] = useState(0);
+  const [width, setWidth] = useState(0);
   const ref = useRef<HTMLParagraphElement | null>(null);
+  useLayoutEffect(() => { setForm(0); }, [clean, width]);
+  useLayoutEffect(() => {
+    const el = ref.current; if (!el || full) return;
+    const lh = parseFloat(getComputedStyle(el).lineHeight) || 22;
+    if (el.scrollHeight > lh * 3 + 2 && form < forms.length - 1) setForm(form + 1);
+  });
+  useLayoutEffect(() => {
+    const el = ref.current; if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => { const w = Math.round(el.clientWidth); setWidth((cur) => (cur === w ? cur : w)); });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const cut = !full && form > 0;
   return <div className={`cp-lede ${full ? "full" : ""}`}>
-    <WordClamp elRef={ref} className="cp-stands" tokens={wordTokens(text)} textKey={text} lines={3} open={full} onCut={setCut} onClick={() => {}} />
+    <p ref={ref} className="cp-stands" data-cut={cut ? "true" : undefined}>{full ? clean : forms[form]}</p>
     {(cut || full) && <button type="button" className="cp-more-next cp-stands-more" aria-expanded={full} onClick={() => setFull(!full)}>{full ? "Less" : "More"}</button>}</div>;
 }
 
@@ -355,7 +369,9 @@ export function rowLead(t: Task, area: string | null = null): RowLead {
   // r17: someone else's task that waits on the user leads with what it asks of them; the task itself is the quiet line under it
   const theirs = waitsOnMe(t);
   // r20: the action, never the stored sentence: its first clause, the date label and the notes after it left to the subtitle and the sheet
-  const action = rowAction(next) ?? (theirs && next ? actionOf(next) : null);
+  // r23: a step that points at words nobody stored ("…the message below") asks the room for them: "Ask #techne for the message"
+  const nowhere = pointsNowhere(t);
+  const action = rowAction(nowhere ?? next) ?? (theirs && next ? actionOf(next) : null);
   if (action) {
     // r17: someone else's task says whose it is (and the task, when its title says something the action doesn't)
     const from = `From ${ownerLabel(t.owner)}`;
@@ -436,7 +452,8 @@ export function NeedRow({ t, onTask, meta, compact = false, area = null }: { t: 
   const clampStyle = isDecision ? undefined : ({ WebkitLineClamp: titleMax, lineClamp: titleMax } as React.CSSProperties);
   // r20: an action row's subtitle carries its due cue ("COhere opens Oct 15 · due today"); other rows keep the due line of their own
   // r22 (Codex P1): every Needs-you row says when it was asked ("asked Oct 11"), from the record's last change; never on a row that isn't the user's
-  const asked = meta ? null : askedLine(t.updatedAt);
+  // r23 (Codex P1): when it was asked ("asked Oct 6") or, with no request time, added ("added Oct 11"); never the record's last change
+  const asked = meta ? null : askedLine(requestDate(t));
   const when_ = r.sub ? [r.sub.when, asked].filter(Boolean).join(" · ") : null;
   const meta_ = <>{r.sub ? (<span ref={subRef} className="cp-under cp-sub" data-wrapped={subWrapped || undefined} title={[r.sub.where, when_].filter(Boolean).join(" · ")}>{r.sub.where && <FitLine className="cp-sub-where" text={r.sub.where} fallback={r.sub.short ?? null} onHide={setWhereHidden} />}
       {when_ && <span className={`cp-sub-when${isOverdue(t.due) ? " overdue" : ""}`}>{r.sub.where && !whereHidden && !subWrapped ? " · " : ""}{when_}</span>}</span>)
@@ -678,7 +695,7 @@ export function CompanionStrip({ open, onToggle, onSheet, ...p }: CompanionProps
   const heading = standsHeading(p.scope, p.ready ? p.stands?.ago : null);
   // r18: folded, the line is the sentence cut on a whole word (never "underway ac…"); open, it is the dated heading. r19: when anything needs
   // the user, the folded line says what is waiting first ("Needs you · 2: Say go on the deploy…"), never only a dot behind a chevron
-  const folded = p.note ?? (p.ready ? waitingLine(p.feed) ?? p.stands?.text ?? "Where this stands" : p.load?.error ? "Couldn't load" : p.load?.slow ? "Still loading" : "Loading…");
+  const folded = p.note ?? (p.ready ? waitingLine(p.feed) ?? (p.stands ? withoutRawIds(p.stands.text) : null) ?? "Where this stands" : p.load?.error ? "Couldn't load" : p.load?.slow ? "Still loading" : "Loading…");
   const lineRef = useRef<HTMLParagraphElement | null>(null);
   const lineTokens = [...(p.scope ? [{ node: <b className="cp-scope">{`${p.scope}:`}</b>, space: false }] : []), ...wordTokens(folded).map((w, i) => (i === 0 && p.scope ? { ...w, space: true } : w))];
   const label = <span className="cp-line-text" title={p.stands?.text}>{open ? heading

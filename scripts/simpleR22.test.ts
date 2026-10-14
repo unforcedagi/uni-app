@@ -49,12 +49,13 @@ check("past 160 characters an action is shortened with words: brackets first, th
   assert.equal(firstOfSteps(rowAction(STAGING)!.steps), "Look at https://cohere-signup-staging.unforced.workers.dev/?look=ecology on phone (step 1 of 2)");
 });
 
-check("a request shows its age: \"asked Oct 11\", or today; the chat has moved on when it is more than a day newer", () => {
-  assert.equal(askedLine("2026-10-11T18:00:00.000Z", "2026-10-14"), "asked Oct 11");
-  assert.equal(askedLine("2026-10-13T18:00:00.000Z", "2026-10-14"), "asked Oct 13");
-  assert.equal(askedLine(`2026-10-14T12:00:00`, "2026-10-14"), "asked today");
+check("a request shows its age: \"asked Oct 11\", or today; the chat has moved on when it is more than a day newer (r23: from the request's own date)", () => {
+  const at = (x: string) => ({ at: x, kind: "asked" as const });
+  assert.equal(askedLine(at("2026-10-11T18:00:00.000Z"), "2026-10-14"), "asked Oct 11");
+  assert.equal(askedLine(at("2026-10-13T18:00:00.000Z"), "2026-10-14"), "asked Oct 13");
+  assert.equal(askedLine(at(`2026-10-14T12:00:00`), "2026-10-14"), "asked today");
   assert.equal(askedLine(null), null);
-  const asked = "2026-10-11T18:00:00.000Z";
+  const asked = at("2026-10-11T18:00:00.000Z");
   assert.equal(chatMovedOn(asked, Date.parse("2026-10-13T09:00:00Z") / 1000), true);
   assert.equal(chatMovedOn(asked, Date.parse("2026-10-12T09:00:00Z") / 1000), false);
   assert.equal(chatMovedOn(asked, null), false);
