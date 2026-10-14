@@ -210,15 +210,16 @@ test('failed project refresh retains previous projects and stale marker', async 
   });
   await page.clock.install(); await page.clock.fastForward(31000);
   await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
-  // r13: the four area queries and the task tree's (re-read with every refresh; the run and draft reads follow it)
-  await expect.poll(() => page.evaluate(() => (window as any).__pendingAreas.length)).toBe(5);
+  // r13: the four area queries and the task tree's (re-read with every refresh); r16: the run and draft reads start beside it
+  await expect.poll(() => page.evaluate(() => (window as any).__pendingAreas.length)).toBe(7);
   await expect(page.locator('.areas-status')).toHaveCount(0);
   await page.evaluate(async () => { for (const resolve of (window as any).__pendingAreas) await resolve(); });
  });
 
  test('forgetAreas discards an in-flight result while the hook remains mounted', async ({ page }) => {
   await bootAreas(page, 'seed', { queryDelay: 3000 });
-  await expect.poll(async () => (await calls(page, 'vault_query')).filter((c: any) => c.args.tag !== 'node').length).toBe(4);
+  // the four area queries (the task tree's node, run and draft reads are the task list's)
+  await expect.poll(async () => (await calls(page, 'vault_query')).filter((c: any) => !['node', 'run', 'draft'].includes(c.args.tag)).length).toBe(4);
   await page.evaluate(() => (window as any).__forgetAreas());
   await page.waitForTimeout(3500);
   expect(await page.evaluate(() => localStorage.getItem('uni.areas.cache.v2'))).toBeNull();

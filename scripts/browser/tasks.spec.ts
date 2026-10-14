@@ -49,11 +49,12 @@ test.describe('tasks in the work view', () => {
 
     await openTask(page, 'T-65');
     await page.getByRole('button', { name: 'Archive' }).click();
-    expect((await calls(page, 'vault_transition')).at(-1)).toEqual({ vault: 'uni', id: 'k3', from: 'open', to: 'archived' });
+    // r16: written against the revision shown
+    expect((await calls(page, 'vault_transition')).at(-1)).toEqual({ vault: 'uni', id: 'k3', from: 'open', to: 'archived', ifUpdatedAt: expect.any(String) });
     await expect(row(page, 'T-65')).toHaveCount(0);
     await page.getByRole('button', { name: 'Undo' }).click();
     await expect(row(page, 'T-65')).toHaveCount(1);
-    expect((await calls(page, 'vault_transition')).at(-1)).toEqual({ vault: 'uni', id: 'k3', from: 'archived', to: 'open' });
+    expect((await calls(page, 'vault_transition')).at(-1)).toEqual({ vault: 'uni', id: 'k3', from: 'archived', to: 'open', ifUpdatedAt: expect.any(String) });
 
     await openTask(page, 'T-65');
     await page.getByRole('button', { name: 'Snooze until tomorrow' }).click();
@@ -82,9 +83,11 @@ test.describe('tasks in the work view', () => {
     const before = (await calls(page, 'vault_query_meta')).length;
     await openTask(page, 'T-65');
     await page.getByRole('dialog').getByRole('button', { name: 'I did this' }).click();
-    await expect(page.getByRole('status').filter({ hasText: 'changed elsewhere' })).toBeVisible();
+    // r16: the sheet stays, says it changed, and re-reads: the task is now done elsewhere, so the sheet says it is no longer open
+    await expect(page.getByRole('dialog').locator('.task-gone')).toBeVisible();
     await expect.poll(async () => (await calls(page, 'vault_query_meta')).length).toBeGreaterThan(before);
     expect(await calls(page, 'vault_transition')).toHaveLength(1);
+    await page.getByRole('dialog').getByRole('button', { name: 'Close' }).last().click();
     await expect(row(page, 'T-65')).toHaveCount(0);
 
     await page.evaluate(() => { (window as any).__failNext = '[schema_validation] state is not one of open,doing'; });

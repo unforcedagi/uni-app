@@ -235,7 +235,7 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
       return { ok: false, kind: "conflict", message };
     }
     const failed = (r: { ok: false; kind: FailureKind; message: string }): ActResult => {
-      if (opts.sheet) { if (r.kind === "conflict") refresh(); else setNotice(`Couldn't ${verb[action]}: ${r.message.replace(/^Error:\s*/, "").slice(0, 120)}`); }
+      if (opts.sheet) { if (r.kind === "conflict") refresh(); else setNotice(r.kind === "invalid" ? `Couldn't ${verb[action]}: the vault refused that value.` : `Couldn't ${verb[action]}: ${r.message.replace(/^Error:\s*/, "").slice(0, 120)}`); }
       else fail(task, action, r);
       return r;
     };

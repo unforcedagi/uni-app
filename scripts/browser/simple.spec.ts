@@ -2018,7 +2018,8 @@ test.describe('r16', () => {
     await expect(wv.getByText('Nothing is moving here right now.')).toHaveCount(0);
   });
 
-  test('a load that runs long says "Still loading · Retry", and Retry reads again; the next launch paints the saved list at once with its age', async ({ page }) => {
+  test('a load that runs long says "Still loading · Retry", and Retry reads again; the next launch paints the saved list at once with its age', async ({ page }, info) => {
+    test.skip(!['mac', 'mac-small', 'phone'].includes(info.project.name), 'needs the test-hooks build (window.__slowMs): the simple config');
     await page.addInitScript(() => { (window as any).__slowMs = 400; if (!sessionStorage.getItem('r16-second')) (window as any).__tasksDelay = 60_000; });
     await boot(page);
     await openRoom(page, 'ATLAS');
