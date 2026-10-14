@@ -3480,6 +3480,25 @@ test.describe('r21', () => {
     await expect(drawer).toHaveCount(0);
   });
 
+  test('P2 (Codex 4) one owner for Escape: pairing opened over Settings closes first, then Settings', async ({ page }) => {
+    test.skip(!wide(page), 'the rail');
+    await page.addInitScript(() => { (window as any).__pairAvailable = true; });
+    await boot(page);
+    const rail = page.getByRole('navigation', { name: 'Main navigation' });
+    await rail.getByRole('button', { name: 'Settings', exact: true }).click();
+    const settings = page.getByRole('dialog', { name: 'Settings' });
+    await expect(settings).toBeVisible();
+    await settings.getByRole('button', { name: 'Pair a device' }).click();
+    const pair = page.locator('dialog.pair-source');
+    await expect(pair).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(pair).toHaveCount(0);
+    await expect(settings).toBeVisible();
+    expect(await calls(page, 'pair_source_cancel')).not.toHaveLength(0);
+    await page.keyboard.press('Escape');
+    await expect(settings).toHaveCount(0);
+  });
+
   test('the 800×600 sheet has a margin and its whole border', async ({ page }) => {
     await page.setViewportSize({ width: 800, height: 600 });
     await boot(page);

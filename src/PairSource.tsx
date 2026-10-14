@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { openDialog } from "./areas/focusTrap";
 
 type Step = "unlock" | "waiting" | "code" | "sending" | "done" | "error";
 
@@ -15,6 +16,9 @@ export default function PairSource({ onClose }: { onClose: () => void }) {
   const link = useRef("");
   const finished = useRef(false);
   const dialog = useRef<HTMLDialogElement>(null);
+  /** r21 (Codex 4): Escape belongs to the top dialog: this one, opened over Settings, cancels pairing and never closes Settings first */
+  const closeRef = useRef<() => void>(() => {});
+  closeRef.current = () => { void cancel(); };
 
   useEffect(() => {
     // A separate generation for every mount also handles React StrictMode cleanup.
@@ -24,6 +28,7 @@ export default function PairSource({ onClose }: { onClose: () => void }) {
     let active = true;
     let ticker: ReturnType<typeof setInterval> | undefined;
     dialog.current?.showModal();
+    const off = dialog.current ? openDialog(dialog.current, () => closeRef.current()) : undefined;
     const cancel = () => invoke("pair_source_cancel", { sessionId: id, codesDiffer: false }).catch(() => {});
     void (async () => {
       try {
@@ -68,6 +73,7 @@ export default function PairSource({ onClose }: { onClose: () => void }) {
     })();
     return () => {
       active = false;
+      off?.();
       clearInterval(ticker);
       link.current = "";
       void cancel();
