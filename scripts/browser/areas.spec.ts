@@ -94,7 +94,7 @@ test.describe('seed apps and navigation', () => {
     await page.reload();
     // 0.1.46: launch reopens the place you were in.
     await expect(page.locator('.sr-title')).toHaveText('Sadhana');
-    if (await page.locator('.sr-back').count()) await page.locator('.sr-back').click(); else await card(page, 'Uni').click();
+    if (await page.locator('.sr-drawer').count()) await page.locator('.sr-drawer').click(); else await card(page, 'Uni').click();
     await expect(page.getByRole('heading', { name: 'Uni', level: 1 })).toBeVisible();
   });
 });
@@ -118,7 +118,8 @@ test.describe('rail badge', () => {
   });
 });
 
-const openSettings = async (page: Page) => { await rail(page).getByRole('button', { name: 'Settings' }).click(); await expect(page.getByRole('button', { name: 'Run sandbox self-test' })).toBeVisible(); };
+// r13: the self-test sits under Settings → Developer
+const openSettings = async (page: Page) => { await rail(page).getByRole('button', { name: 'Settings' }).click(); await page.locator('.settings-dev > summary').click(); await expect(page.getByRole('button', { name: 'Run sandbox self-test' })).toBeVisible(); };
 const stored = (page: Page) => page.evaluate(() => localStorage.getItem('uni.areaApps.selftest.v1'));
 
 test.describe('sandbox self-test', () => {

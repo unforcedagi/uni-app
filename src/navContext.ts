@@ -3,6 +3,8 @@ import { createContext, useContext } from "react";
 
 /** A recent place: its identity (`placeKey`), its name, and for an area or project its path, so a name two places share can show where each sits. */
 export type NavRecent = { key: string; title: string; path?: string | null; room?: string | null; go: () => void };
-export type NavControls = { canBack: boolean; canForward: boolean; back: () => void; forward: () => void; recent: readonly NavRecent[] };
+/** One of the app's own places (Journal, Vault, Search, Settings): where the rail is out of reach, the room's drawer offers them. */
+export type NavPlace = { label: string; go: () => void };
+export type NavControls = { canBack: boolean; canForward: boolean; back: () => void; forward: () => void; recent: readonly NavRecent[]; places?: readonly NavPlace[] };
 export const NavContext = createContext<NavControls | null>(null);
 export const useNav = (): NavControls | null => useContext(NavContext);

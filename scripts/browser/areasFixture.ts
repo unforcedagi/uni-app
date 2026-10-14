@@ -163,6 +163,10 @@ export type BootOpts = {
   /** ms before a room's messages resolve (the first-fetch race). */
   messagesDelay?: number;
   identityDelay?: number;
+  /** r13: `identity_status` rejects this many times (a key that exists but could not be read), then answers. */
+  identityFails?: number;
+  /** Don't wait for the Uni home to show (a boot that is meant to stop short of it). */
+  noWait?: boolean;
   nodeStatuses?: Record<string, string>;
   /** T-88: references hold note ids (node `parent`, task `node`, node `brief`) instead of paths, the way the vault is moving. The root task stays a path, so both forms appear. */
   ids?: boolean;
@@ -234,7 +238,7 @@ export async function bootAreas(page: Page, variant: Variant = 'seed', opts: Boo
   const now = Math.floor((opts.pinned ? pinnedAt : Date.now()) / 1000);
   const data = {
     profileNote: opts.profileNote ?? null, lifeVault: opts.lifeVault ?? null, now, variant, selftest: opts.selftest ?? true, ipcLeak: opts.ipcLeak ?? false, hostile: hostileApp(opts.ports ?? { http: 9, udp: 9 }), benign: BENIGN, techne: seed('techne'), unforced: seed('unforced'), seedMeta,
-    apps: opts.apps ?? [], multiRoom: !!opts.multiRoom || !!opts.tree, tree: !!opts.tree, tasks: !!opts.tasks, briefs: !!opts.briefs, queryDelay: opts.queryDelay ?? 0, identityDelay: opts.identityDelay ?? 0, roomsDelay: opts.roomsDelay ?? 0, messagesDelay: opts.messagesDelay ?? 0, nodeStatuses: opts.nodeStatuses ?? {}, nearOff: !!opts.nearOff, ids: !!opts.ids, boulder: !!opts.boulder, savedLayout: opts.savedLayout ?? null, strayRoom: !!opts.strayRoom, thread: !!opts.thread, manyTasks: opts.manyTasks ?? 0, uniMember: !!opts.uniMember, twins: !!opts.twins, underBoulder: !!opts.underBoulder, ricki: !!opts.ricki, atlas: !!opts.atlas, steer: !!opts.steer, longChat: !!opts.longChat, longNext: !!opts.longNext, bareTask: !!opts.bareTask, cutDecision: !!opts.cutDecision, cutNoAsk: !!opts.cutNoAsk, longAsk: !!opts.longAsk, crowded: !!opts.crowded, ulidNext: !!opts.ulidNext, pastDue: !!opts.pastDue, tallLast: !!opts.tallLast, privateTasks: !!opts.privateTasks, deviceCache: opts.deviceCache ?? null, queryFails: opts.queryFails ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null, mode: opts.mode ?? 'sealed', grantedUnder: opts.grantedUnder ?? (opts.mode ?? 'sealed'),
+    apps: opts.apps ?? [], multiRoom: !!opts.multiRoom || !!opts.tree, tree: !!opts.tree, tasks: !!opts.tasks, briefs: !!opts.briefs, queryDelay: opts.queryDelay ?? 0, identityDelay: opts.identityDelay ?? 0, identityFails: opts.identityFails ?? 0, roomsDelay: opts.roomsDelay ?? 0, messagesDelay: opts.messagesDelay ?? 0, nodeStatuses: opts.nodeStatuses ?? {}, nearOff: !!opts.nearOff, ids: !!opts.ids, boulder: !!opts.boulder, savedLayout: opts.savedLayout ?? null, strayRoom: !!opts.strayRoom, thread: !!opts.thread, manyTasks: opts.manyTasks ?? 0, uniMember: !!opts.uniMember, twins: !!opts.twins, underBoulder: !!opts.underBoulder, ricki: !!opts.ricki, atlas: !!opts.atlas, steer: !!opts.steer, longChat: !!opts.longChat, longNext: !!opts.longNext, bareTask: !!opts.bareTask, cutDecision: !!opts.cutDecision, cutNoAsk: !!opts.cutNoAsk, longAsk: !!opts.longAsk, crowded: !!opts.crowded, ulidNext: !!opts.ulidNext, pastDue: !!opts.pastDue, tallLast: !!opts.tallLast, privateTasks: !!opts.privateTasks, deviceCache: opts.deviceCache ?? null, queryFails: opts.queryFails ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null, mode: opts.mode ?? 'sealed', grantedUnder: opts.grantedUnder ?? (opts.mode ?? 'sealed'),
   };
   // Pre-granted apps: the grant key is the SHA-256 of the RESOLVED default needs plus the app's html.
   const preGrant = [
@@ -480,6 +484,8 @@ Two proposals wait on a scope decision.
         draft('SOW commons grant', { task: 'T-07', status: 'drafting' }), draft('Grant call summary', { status: 'ready' }));
       for (const [id, text] of [['p-atlas', 'The SOW is drafted and waits on Kevin. The map comes next.'], ['a-atlas', 'Atlas is mostly the grant this week.'], ['p-lvb', 'Cohort two starts Oct 15; grading briefs are queued.']]) { const n = notes.find((x) => x.id === id); if (n) n.metadata = { ...n.metadata, stands: text, stands_at: new Date((d.now - 2 * 86400) * 1000).toISOString() }; }
       w.__decideElsewhere = (id: string) => { const t = taskNotes.find((x) => x.id === id); t.metadata.state = 'decided'; t.updatedAt = new Date(Date.now() + 9000).toISOString(); };
+      /** r13: change a task as Uni would through MCP (metadata merged, optionally a new title or state). */
+      w.__setTask = (id: string, meta: Record<string, unknown>, title?: string) => { const t = taskNotes.find((x) => x.id === id); Object.assign(t.metadata, meta); if (title) t.path = t.path.replace(/[^/]*$/, title); t.updatedAt = new Date(Date.now() + 5000).toISOString(); t.lastUpdatedVia = 'mcp'; };
       w.__setDue = (id: string, due: string) => { const t = taskNotes.find((x) => x.id === id); t.metadata.due = due; t.updatedAt = new Date(Date.now() + 5000).toISOString(); t.lastUpdatedVia = 'mcp'; };
     }
     if (d.ricki) {
@@ -505,7 +511,7 @@ Two proposals wait on a scope decision.
           case 'plugin:app|version': if (d.versionFails) throw 'version unavailable'; return 'dev';
           case 'plugin:app|register_listener': w.__backHandler = args.handler; return null;
           case 'plugin:event|listen': (w.__listeners[args.event] ??= []).push(args.handler); return args.handler;
-          case 'identity_status': return { paired: true, pubkey: U };
+          case 'identity_status': if ((w.__identityFails = (w.__identityFails ?? d.identityFails) - 1) >= 0) throw 'keyring: platform failure'; return { paired: true, pubkey: U };
           case 'get_identity': if (d.identityDelay) await new Promise((r) => setTimeout(r, d.identityDelay)); return U;
           case 'get_npub': return 'test';
           case 'get_rooms': if (d.roomsDelay) await new Promise((r) => setTimeout(r, d.roomsDelay)); w.__roomsResolved = true; return rooms;
@@ -589,6 +595,7 @@ Two proposals wait on a scope decision.
     w.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} };
   }, data);
   await page.goto('/');
+  if (opts.noWait) return;
   // The app opens to Uni: its home page, with the Uni chat attached.
   await expect(page.getByRole('heading', { name: 'Uni', level: 1 })).toBeVisible();
 }
@@ -604,7 +611,7 @@ export const areaCard = (page: Page, name: string) => page.locator(isWide(page) 
  * `app: false` stays in the room; `true` requires the App tab; the default presses it when it shows up.
  */
 export async function openAreaPage(page: Page, name: string, opts: { app?: boolean } = {}) {
-  if (!isWide(page)) { const back = page.locator('.sr-back, .note-back[aria-label^="Back to"]').first(); if (await back.count() && !(await page.locator('.th-phone-tree').count())) await back.click(); }
+  if (!isWide(page)) { const back = page.locator('.sr-drawer, .note-back[aria-label^="Back to"]').first(); if (await back.count() && !(await page.locator('.th-phone-tree').count())) await back.click(); }
   await areaCard(page, name).click();
   await expect(page.locator('.sr-title').or(page.locator('.area-bar-title')).first()).toHaveText(name);
   if (opts.app === false) return;

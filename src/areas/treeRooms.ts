@@ -5,11 +5,17 @@ import type { Area } from "./areasCore.ts";
 import { ancestry, ROOT, type Tree } from "./treeCore.ts";
 import { ownRoom, steward, type RoomNode, type RoomRef } from "./talkCore.ts";
 
-export const roomSlug = (name: string) => name.toLowerCase().replace(/^#/, "").trim().replace(/[\s_]+/g, "-");
+/** A room as the app writes it after "#": its real channel name, exactly (r13: never lowercased or re-spaced), without a leading "#". */
+export const roomSlug = (name: string) => name.trim().replace(/^#/, "");
 
 /** Nodes whose words and titles are never shown in a new place, only counts (the T-111 privacy rule). */
 const PRIVATE = new Set(["relationships", "sadhana"]);
 export const isPrivateNode = (tree: Tree, path: string): boolean => ancestry(tree, path).some((n) => PRIVATE.has(n.name.toLowerCase()));
+/** The private area a node sits in (the outermost one, itself included), or null: the feed names private items by this place only. */
+export function privateRoot(tree: Tree, path: string): { path: string; name: string } | null {
+  const hit = ancestry(tree, path).filter((n) => PRIVATE.has(n.name.toLowerCase())).pop();
+  return hit ? { path: hit.path, name: hit.name } : null;
+}
 
 /**
  * A node as the steward rule reads it. A room marked `room_status: archived|missing` is skipped: the node's `room_fallback`
@@ -72,30 +78,6 @@ export function roomView(tree: Tree, path: string, rooms: readonly RoomRef[], un
   if (own) return { target: s.room, slash: s.room ? roomSlug(s.room.name) : null, heldBy: null, own: true, heldNode: null };
   const holder = s.room ? nodes.slice(1).find((n) => ownRoom(n, rooms)?.id === s.room!.id) : undefined;
   return { target: s.room, slash: null, heldBy: s.room, own: false, heldNode: holder?.name ?? (s.room && s.room.id === uni?.id ? "Uni" : null) };
-}
-
-export type RoomInfoLite = { id: string; name: string; last_message: string | null; last_ts: number | null };
-export type Update = { path: string; name: string; slash: string; ts: number; /** The newest line of the room; null for a private node (only that it was active). */ text: string | null };
-const DAY = 86_400;
-
-/**
- * What the rooms below this node have posted in the last day: one entry per room of its own that sits under `path`
- * (not the node's own room), newest first. Private areas contribute the time only.
- */
-export function updatesBelow(tree: Tree, path: string, rooms: readonly RoomInfoLite[], uni: RoomRef | null, nowSec: number, windowSec = DAY): Update[] {
-  const mineRoom = roomView(tree, path, rooms, uni).target?.id ?? null;
-  const out = new Map<string, Update>();
-  const under = (p: string): boolean => { for (let at: string | undefined = tree.parent.get(p), n = 0; at !== undefined && n <= tree.nodes.size; at = tree.parent.get(at), n++) { if (at === path) return true; if (at === ROOT) return path === ROOT; } return false; };
-  for (const n of tree.nodes.values()) {
-    if (!under(n.path)) continue;
-    const v = roomView(tree, n.path, rooms, uni);
-    if (!v.own || !v.target || v.target.id === mineRoom) continue;
-    const info = rooms.find((r) => r.id === v.target!.id);
-    if (!info?.last_ts || nowSec - info.last_ts > windowSec || out.has(info.id)) continue;
-    const priv = isPrivateNode(tree, n.path);
-    out.set(info.id, { path: n.path, name: n.name, slash: v.slash ?? roomSlug(info.name), ts: info.last_ts, text: priv ? null : info.last_message });
-  }
-  return [...out.values()].sort((a, b) => b.ts - a.ts);
 }
 
 /** One row of the phone's room tree. */

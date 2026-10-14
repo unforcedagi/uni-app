@@ -130,7 +130,7 @@ export default function Journal({ rooms, uniRoomId, onShare, onBack, onRecording
       const r = await invoke<FlushReport>("journal_save_voice", bytes, { headers: { "x-entry": JSON.stringify(newDraft(note, "voice")), "x-audio-mime": mime } });
       setText("");
       await afterFlush(r, "Journal entry");
-      if (!r.error) setStatus("Journal entry saved · transcribing on uni-1…");
+      if (!r.error) setStatus("Journal entry saved · transcribing…");
     } catch (e) { setError(String(e)); setStatus("Journal entry not saved"); }
     finally { setSaving(false); }
   }, "in the Journal");

@@ -75,7 +75,7 @@ test('Rail surfaces, overlay panels, focus; rooms are in the tree (r12: no Rooms
     await expect(page.getByRole('heading', { name: 'Uni', level: 1 })).toBeVisible();
     // a room no node owns is under "Other rooms" in the tree, and opens in the room shell
     const narrow = page.viewportSize()!.width < 900;
-    if (narrow && await page.locator('.sr-back').count()) await page.locator('.sr-back').click();
+    if (narrow && await page.locator('.sr-drawer').count()) await page.locator('.sr-drawer').click();
     const tree = page.locator(narrow ? '.th-phone-tree' : '.th-roomnav');
     await tree.locator('.th-others .th-fold').click();
     await tree.locator('.th-other .th-go').filter({ hasText: '#garden' }).click();

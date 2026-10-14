@@ -31,7 +31,7 @@ test.describe('nested rooms', () => {
     await scope.locator('.th-go[aria-label^="Atlas Institute,"]').click();
     await expect(page.locator('.sr-door')).toHaveCount(0);
     await expect(page.locator('.sr-chat').getByRole('textbox', { name: /^Message / })).toHaveAttribute('placeholder', 'Message #atlas');
-    if (!wide(page)) await page.locator('.sr-back').click();
+    if (!wide(page)) await page.locator('.sr-drawer').click();
     await scope.locator('.th-go[aria-label^="ATLAS,"]').click();
     await expect(page.locator('.sr-door')).toHaveText('#atlas/build');
     await shot(page, 'project');

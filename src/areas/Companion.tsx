@@ -9,21 +9,30 @@ import { isActiveRun, type Run } from "./steerCore";
 import type { Task } from "./taskCore";
 import { splitTitle } from "./whereCore";
 import { splitLinks } from "./linkText";
-import { actionableTitle, askLead, dueLine, isOverdue, lineBudget, rowAsk } from "./simpleCore";
+import { actionableTitle, askLead, dueLine, isOverdue, lineBudget, privateLabel, rowAsk, type NeedsFeed, type PrivateNeed } from "./simpleCore";
 
-const KEYS = { side: "uni.companion.side.v1", strip: "uni.companion.strip.v1" } as const;
+const KEYS = { side: "uni.companion.side.v1", sideNarrow: "uni.companion.side.narrow.v1", strip: "uni.companion.strip.v1" } as const;
 /** Below this width the side panel starts folded: the conversation gets the space. */
 export const SIDE_OPEN_MIN = 1100;
 const read = (key: string, open: boolean): boolean => { try { const v = localStorage.getItem(key); return v === null ? open : v === "1"; } catch { return open; } };
-
-const defaultOpen = (variant: "side" | "strip") => variant === "side" && (typeof window === "undefined" || window.innerWidth >= SIDE_OPEN_MIN);
+const roomy = () => typeof window === "undefined" || window.innerWidth >= SIDE_OPEN_MIN;
+/** The side panel keeps one choice per width class (r13): at 1100px and over it opens unless folded there; under 1100px it is folded unless
+ *  opened there. A window resized across 1100px takes that width's choice, so a panel open on a wide window folds when it narrows. */
+const keyFor = (variant: "side" | "strip") => (variant === "strip" ? KEYS.strip : roomy() ? KEYS.side : KEYS.sideNarrow);
+const choice = (variant: "side" | "strip") => read(keyFor(variant), variant === "side" && roomy());
 
 /** Whether the companion is open on this device: open by default beside the chat on a wide window (folded under 1100px), folded by default as a phone strip. */
 export function useCompanionOpen(variant: "side" | "strip"): [boolean, (v: boolean) => void] {
-  const key = KEYS[variant];
-  const [open, setOpen] = useState(() => read(key, defaultOpen(variant)));
-  useEffect(() => { setOpen(read(key, defaultOpen(variant))); }, [key, variant]);
-  return [open, (v) => { setOpen(v); try { localStorage.setItem(key, v ? "1" : "0"); } catch { /* this session only */ } }];
+  const [open, setOpen] = useState(() => choice(variant));
+  useEffect(() => {
+    setOpen(choice(variant));
+    if (variant !== "side" || typeof window === "undefined") return;
+    const mq = window.matchMedia(`(min-width: ${SIDE_OPEN_MIN}px)`);
+    const cross = () => setOpen(choice(variant));
+    mq.addEventListener("change", cross);
+    return () => mq.removeEventListener("change", cross);
+  }, [variant]);
+  return [open, (v) => { setOpen(v); try { localStorage.setItem(keyFor(variant), v ? "1" : "0"); } catch { /* this session only */ } }];
 }
 
 
@@ -34,9 +43,12 @@ export type CompanionProps = {
   note?: string | null;
   /** The task list's health: a failed first load (never an endless "Loading…"), a failed refresh (the rows stay), and whether every page was read. */
   load?: TaskLoad;
-  /** Items here that need you but may not be named (a private area), counted. */
-  hidden?: number;
-  needs: readonly Task[];
+  /** What needs you here, by the one rule: the rows shown, the private items (named by place only) and the total every surface agrees on. */
+  feed: NeedsFeed;
+  /** Uni's panel: how many more from the areas wait in "All of Uni's work" ("+N in areas ›"). */
+  rest?: number;
+  /** Open a private item's place (its area) or, at its own level, its note. */
+  onPrivate?: (open: PrivateNeed["open"]) => void;
   runs: readonly Run[];
   /** The node's name, so the way deeper says what it opens ("All of COhere's work"). */
   nodeName: string;
@@ -46,7 +58,7 @@ export type CompanionProps = {
   /** Opens a linked note (by id) from a title or next step. */
   onNote?: (ref: string) => void;
 };
-export type TaskLoad = { error: string | null; refreshing: boolean; lastOk: number | null; complete: boolean; retry: () => void };
+export type TaskLoad = { error: string | null; /** The task tree (the nodes) could not be read: the list may be placed wrongly. */ treeError?: string | null; refreshing: boolean; lastOk: number | null; complete: boolean; retry: () => void };
 
 /** Options shown inline on a decision; more are behind the item. */
 const OPTS_SHOWN = 3;
@@ -127,7 +139,9 @@ export function DecisionAnswer({ t, label, onDecide, max = Infinity, onMore, cla
 }
 
 /** A Needs-you row: the ask, then when it was due, then the next step, action first; a tap on More shows all of it. A decision is its whole question with its answers. */
-function NeedRow({ t, onTask, onDecide, onNote }: { t: Task; onTask: (t: Task) => void; onDecide: (t: Task, option: string) => void; onNote?: (ref: string) => void }) {
+export function NeedRow({ t, onTask, onDecide, onNote, meta }: { t: Task; onTask: (t: Task) => void; onDecide: (t: Task, option: string) => void; onNote?: (ref: string) => void;
+  /** A quiet line on where it stands, for a row that is not the user's ("With Kevin · in progress"; the work view's In motion and Later). */
+  meta?: string | null }) {
   const { id, rest: full } = splitTitle(cleanText(t.title));
   const isDecision = t.kind === "decision";
   const next = t.next.trim();
@@ -163,7 +177,8 @@ function NeedRow({ t, onTask, onDecide, onNote }: { t: Task; onTask: (t: Task) =
     <button type="button" className={`cp-need${isDecision ? " decision" : ""}`} data-id={id ?? undefined} onClick={() => onTask(t)}>
       {lead?.yourCall && <small className="cp-call-lead">Your call:</small>}
       <span ref={titleRef} className="cp-title" style={clampStyle}><RefText text={text} />{ask.openToDecide && <span className="cp-go" aria-hidden="true"> ›</span>}</span>
-      {due && <small className={`cp-detail${isOverdue(t.due) ? " overdue" : ""}`}>{due}</small>}</button>
+      {due && <small className={`cp-detail${isOverdue(t.due) ? " overdue" : ""}`}>{due}</small>}
+      {meta && <small className="cp-detail cp-meta">{meta}</small>}</button>
     {!next && !isDecision && !actionableTitle(text) && text !== "Open to see what's needed" && <p className="cp-open-to-see">Open to see what's needed</p>}
     {next && <NextText text={next} onNote={onNote} lines={open ? undefined : nextLines} open={open} onOpen={setOpen} onClamp={setNextCut} />}
     {more && <button type="button" className="cp-more-next cp-row-more" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? "Less" : "More"}</button>}
@@ -171,11 +186,17 @@ function NeedRow({ t, onTask, onDecide, onNote }: { t: Task; onTask: (t: Task) =
   </li>;
 }
 
+/** A private item, named by its place only, with where to open it (r13: counted and reachable, never silently left out). */
+export function PrivateRow({ p, onPrivate }: { p: PrivateNeed; onPrivate?: (open: PrivateNeed["open"]) => void }) {
+  return <li className="cp-item cp-private-item"><button type="button" className="cp-need cp-private" onClick={() => onPrivate?.(p.open)}>
+    <span className="cp-title">{privateLabel(p)} · open<span className="cp-go" aria-hidden="true"> ›</span></span></button></li>;
+}
+
 /**
  * Only whole rows are shown: in the side panel (`fit`) the rows that don't fit above the footer wait behind "+N more ›" rather than being
  * cut or faded at the panel's bottom. Every row is drawn once to be measured (before paint), then the ones that fit stay.
  */
-function NeedsList({ needs, fit, onTask, onDecide, onNote }: Pick<CompanionProps, "needs" | "onTask" | "onDecide" | "onNote"> & { fit: boolean }) {
+export function NeedsList({ needs, fit, onTask, onDecide, onNote }: Pick<CompanionProps, "onTask" | "onDecide" | "onNote"> & { needs: readonly Task[]; fit: boolean }) {
   const [limit, setLimit] = useState(Infinity);
   const [measuring, setMeasuring] = useState(fit);
   const [all, setAll] = useState(false);
@@ -236,7 +257,7 @@ function NeedsList({ needs, fit, onTask, onDecide, onNote }: Pick<CompanionProps
 
 const clock = (ms: number) => new Date(ms).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 
-function Body({ stands, ready, note, load, hidden = 0, needs, runs, nodeName, onTask, onDecide, onEverything, onNote, fit }: CompanionProps & { fit: boolean }) {
+function Body({ stands, ready, note, load, feed, rest = 0, onPrivate, runs, nodeName, onTask, onDecide, onEverything, onNote, fit }: CompanionProps & { fit: boolean }) {
   const active = runs.filter(isActiveRun);
   const hiddenRuns = Math.max(0, active.length - RUNS_SHOWN);
   if (note) return <div className="cp-body"><p className="cp-lede cp-note">{note}</p></div>;
@@ -245,10 +266,13 @@ function Body({ stands, ready, note, load, hidden = 0, needs, runs, nodeName, on
     {!ready ? (load?.error ? <p className="cp-lede cp-failed" role="alert">Couldn't load. {retry}</p> : <p className="cp-lede">Loading…</p>) : stands && <Stands text={stands.text} ago={stands.ago} />}
     {ready && <section aria-label="Needs you" className="cp-sec" aria-busy={load?.refreshing || undefined}>
       <h3 className="cp-h">Needs you</h3>
-      {needs.length > 0 ? <NeedsList needs={needs} fit={fit} onTask={onTask} onDecide={onDecide} onNote={onNote} /> : !hidden && <p className="cp-none">Nothing needs you here.</p>}
-      {hidden > 0 && <p className="cp-none cp-private">{hidden} {needs.length ? "more " : ""}{hidden === 1 ? "needs" : "need"} you here, counted but not named (private).</p>}
+      {feed.rows.length > 0 && <NeedsList needs={feed.rows} fit={fit} onTask={onTask} onDecide={onDecide} onNote={onNote} />}
+      {feed.privates.length > 0 && <ul className="cp-list cp-privates">{feed.privates.map((p) => <PrivateRow key={p.key} p={p} onPrivate={onPrivate} />)}</ul>}
+      {rest > 0 && onEverything && <button type="button" className="cp-more cp-more-areas" onClick={onEverything}>+{rest} in areas ›</button>}
+      {feed.total === 0 && <p className="cp-none">Nothing needs you here.</p>}
       {load?.error && <p className="cp-stale" role="status">Couldn't refresh{load.lastOk ? ` (as of ${clock(load.lastOk)})` : ""} · {retry}</p>}
       {load && !load.error && !load.complete && <p className="cp-stale" role="status">More work exists than the app could read; some may not be listed.</p>}
+      {load?.treeError && !load.error && <p className="cp-stale" role="status">Couldn't read where tasks belong; some may be under the wrong place · {retry}</p>}
     </section>}
     {active.length > 0 && <section aria-label="Running" className="cp-sec">
       <h3 className="cp-h">Running</h3>
@@ -267,7 +291,7 @@ export function CompanionSide({ open, onToggle, ...p }: CompanionProps & Fold) {
         <Body {...p} fit />
       </>
       : <button type="button" className="cp-unfold" aria-expanded="false" aria-label="Show where this stands" title="Show where this stands" onClick={() => onToggle(true)}>
-        <span aria-hidden="true">‹</span>{p.needs.length > 0 && <i className="cp-dot" role="img" aria-label="Needs you" title="Needs you" />}</button>}
+        <span aria-hidden="true">‹</span>{p.feed.total > 0 && <i className="cp-dot" role="img" aria-label="Needs you" title="Needs you" />}</button>}
   </aside>;
 }
 
@@ -276,7 +300,7 @@ export function CompanionStrip({ open, onToggle, ...p }: CompanionProps & Fold) 
   return <section className={`cp strip ${open ? "open" : ""}`} aria-label="Where this stands">
     <button type="button" className="cp-line" aria-expanded={open} onClick={() => onToggle(!open)}>
       <span className="cp-line-text" title={p.stands?.text}>{open ? "Where this stands" : p.note ?? (p.ready ? p.stands?.text ?? "Where this stands" : p.load?.error ? "Couldn't load" : "Loading…")}</span>
-      {p.needs.length > 0 && <i className="cp-dot" role="img" aria-label="Needs you" title="Needs you" />}
+      {p.feed.total > 0 && <i className="cp-dot" role="img" aria-label="Needs you" title="Needs you" />}
       <span className="cp-chev" aria-hidden="true">{open ? "⌃" : "⌄"}</span>
     </button>
     {open && <Body {...p} fit={false} />}

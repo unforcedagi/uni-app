@@ -14,7 +14,7 @@ const infinite = (page: Page) => page.evaluate(() => document.getAnimations().fi
 const tree = (page: Page) => page.locator(isDesktop(page) ? '.th-roomnav' : '.th-phone-tree');
 /** A node's work page, from its room in the tree. */
 async function workPage(page: Page, name: string) {
-  if (!isDesktop(page) && await page.locator('.sr-back, .th-back').count()) await page.locator('.sr-back, .th-back').first().click();
+  if (!isDesktop(page) && await page.locator('.sr-drawer, .th-back').count()) await page.locator('.sr-drawer, .th-back').first().click();
   await tree(page).locator('.th-row.d1').first().waitFor();
   for (let i = 0; i < 12; i++) { const f = tree(page).locator('.th-fold[aria-expanded="false"]'); if (!await f.count()) break; await f.first().click(); }
   await areaCard(page, name).click();
