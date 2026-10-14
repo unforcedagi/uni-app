@@ -578,7 +578,9 @@ h1 { font-family: var(--serif); font-weight: 500; font-size: 34px; line-height: 
   .rail .rail-settings { margin-top: 0; }
   .shell.composer-focused, .shell.journal-focus { padding-bottom: 0; }
   .shell.composer-focused .rail { display: none; }
-  .shell .rooms, .shell.in-room .rooms { left: 0; width: 100%; max-width: 100%; bottom: 0; z-index: 50; border-right: 0; }
+  /* r14: a utility panel stops above the bottom rail, so the app's places stay in reach while it is open */
+  .shell .rooms, .shell.in-room .rooms { left: 0; width: 100%; max-width: 100%; bottom: calc(56px + env(safe-area-inset-bottom)); z-index: 50; border-right: 0; }
+  .shell.composer-focused .rooms, .shell.rail-off .rooms { bottom: 0; }
   .shell .conversation { display: flex; }
   .back { display: grid; }
   .panel-scrim { inset: 0; }
