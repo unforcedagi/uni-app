@@ -96,7 +96,7 @@ export default function Search({ onOpen, onOpenNote, onAskUni, onClose, vaults, 
     <div className="search-bar">
       <label className="search-field"><span aria-hidden="true">✧</span>
         <input ref={input} type="search" value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Escape") onClose(); }}
-          placeholder="Search conversations and notes" aria-label="Search conversations and notes" autoCapitalize="off" autoCorrect="off" spellCheck={false} maxLength={500} />
+          placeholder="Conversations and notes" aria-label="Search conversations and notes" autoCapitalize="off" autoCorrect="off" spellCheck={false} maxLength={500} />
       </label>
     </div>
     <details className="search-narrow" open={narrowed || undefined}>
