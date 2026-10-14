@@ -1562,7 +1562,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
     // r15: a note opens in the vault its reference names (the task's, the area's), the same vault its title was read from
     openNote: (r: NoteRef) => openNote({ hub: null, vault: r.vault, ref: r.id }, null),
     compose: (id: string, text: string) => composeInRoomRef.current(id, text),
-  }), [openNote]);
+    retryRooms: () => { void loadRooms().catch(() => {}); },
+  }), [openNote, loadRooms]);
   const primaryVault = vaults.includes(lifeVault) ? lifeVault : vaults.includes("uni") ? "uni" : null;
   const otherVaults = vaults.filter((vault) => vault !== primaryVault);
   const activeOtherVault = active?.kind === "vault" && active.vault && active.vault !== primaryVault && otherVaults.includes(active.vault) ? active.vault : null;

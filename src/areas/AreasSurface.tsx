@@ -43,7 +43,9 @@ const PLATFORM = platformName(USER_AGENT);
 export const UNFILED = "Not filed under an area yet.";
 
 /** What the host does for the shell: as an area app's actions, except that a note is opened in its own vault (r15). */
-export type ShellActions = Omit<AreaActions, "openNote"> & { openNote(ref: NoteRef): void };
+export type ShellActions = Omit<AreaActions, "openNote"> & { openNote(ref: NoteRef): void;
+  /** r21 (Codex 9): read the rooms list again (a conversation slow to open before its room is known) */
+  retryRooms?: () => void };
 
 /**
  * What is open over the place (the task sheet, the work view, the drawer): Android Back closes it first. `modal` (the sheet) holds Alt+arrow
@@ -51,6 +53,22 @@ export type ShellActions = Omit<AreaActions, "openNote"> & { openNote(ref: NoteR
  * whose own Back button goes back).
  */
 export type Overlay = { close: () => void; modal: boolean; history: boolean };
+
+/** After this long a conversation still opening says so, with a way to try again (r21, Codex 9). */
+const CHAT_SLOW_MS = 8000;
+/**
+ * The conversation's place while it opens (r21, Codex 9): a quiet chat, shaped like the one coming (an empty conversation and its composer's
+ * line, greyed), never a status panel beside an empty column. Past 8 seconds it says it is still opening, with Retry.
+ */
+function ChatWait({ placeholder, retry }: { placeholder: string; retry: (() => void) | null }) {
+  const [slow, setSlow] = useState(false);
+  const [tries, setTries] = useState(0);
+  useEffect(() => { const t = setTimeout(() => setSlow(true), CHAT_SLOW_MS); return () => clearTimeout(t); }, [tries]);
+  return <div className="sr-chat-wait" aria-busy="true">
+    <p className="sr-chat-wait-line" role="status">{slow ? <>Still opening the conversation{retry && <> · <button type="button" className="cp-retry" onClick={() => { setSlow(false); setTries(tries + 1); retry(); }}>Retry</button></>}</> : "Opening the conversation…"}</p>
+    <div className="sr-chat-wait-composer" aria-hidden="true">{placeholder}</div>
+  </div>;
+}
 
 /**
  * The room shell: Uni itself at `{kind:"areas"}` (path null), any area or project under it at `{kind:"area", path}`, a room no node owns
@@ -245,7 +263,9 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
     /** A node in a borrowed room (r20): the node stays the heading, and this line says where it talks ("Chat in #Uni · no room of its own yet"). */
     context?: string; node?: string; crumbs: ReactNode; companion: CompanionProps | null; chatRoom: AreaRoom | null; placeholder: string; selected?: string; selectedRoom?: string; sheet: ReactNode; main?: ReactNode; workBar?: ReactNode;
     /** The area's app, opened from the header (r14): it shows as a view in this shell. */
-    openApp?: ((e: React.MouseEvent) => void) | null; appOpen?: boolean }) => {
+    openApp?: ((e: React.MouseEvent) => void) | null; appOpen?: boolean;
+    /** r21 (Codex 9): open the conversation again when it is slow to arrive */
+    retryChat?: (() => void) | null }) => {
     const replies = thread && o.chatRoom?.loaded ? o.chatRoom.messages.filter((m) => m.ref !== thread.root).length : null;
     const view = o.main ? "work" : thread ? "thread" : "room";
     return <div className={`tree-home th-level ${wide ? "wide" : "phone"} th-rooms th-simple ${wide && (!o.companion || o.main || stripCompanion) ? "solo" : wide && !companionOpen ? "folded" : ""}`} data-layout="rooms" data-view={view}>
@@ -267,7 +287,7 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
         {stripCompanion && o.companion && !o.main && tasks.ready && <LoadHealth load={load} ready count={o.companion.feed.total} className="sr-health" />}
         {stripCompanion && o.companion && !o.main && <CompanionStrip {...o.companion} open={companionOpen} onToggle={setCompanionOpen} onSheet={(close) => setStripSheet(close ? { close } : null)} />}
         {o.main ? <div className="sr-work">{o.main}</div>
-          : <div className="sr-chat">{o.chatRoom ? o.chatRoom.render(null, o.placeholder) : <p className="th-quiet" role="status">Opening the room…</p>}</div>}
+          : <div className="sr-chat" data-chat={o.chatRoom ? "open" : "waiting"}>{o.chatRoom ? o.chatRoom.render(null, o.placeholder) : <ChatWait placeholder={o.placeholder} retry={o.retryChat ?? null} />}</div>}
       </section>
       {!stripCompanion && o.companion && !o.main && <CompanionSide {...o.companion} open={companionOpen} onToggle={setCompanionOpen} />}
       {placesDrawer && drawer && <div className="th-drawer-wrap">
@@ -287,7 +307,7 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
     const info = rooms.find((r) => r.id === loose);
     const title = info ? `#${info.name.replace(/^#/, "")}` : "Room";
     const companion: CompanionProps = { stands: null, ready: !!data, note: data ? UNFILED : null, feed: { rows: [], privates: [], total: 0 }, runs: [], nodeName: title, onTask: () => {}, onNote: actions.openNote, onDecide: () => {}, onEverything: null };
-    return frame(shell({ title, door: "", crumbs: null, companion, chatRoom: roomFor(loose, thread?.root ?? null), placeholder: `Message ${title}`, selectedRoom: loose, sheet: null }));
+    return frame(shell({ title, door: "", crumbs: null, companion, chatRoom: roomFor(loose, thread?.root ?? null), placeholder: `Message ${title}`, selectedRoom: loose, sheet: null, retryChat: () => actions.openRoom(loose) }));
   }
   // r15: an area that can't be shown (gone, or the areas couldn't be read) stays inside the room shell: the tree (or Places), a heading that
   // says what happened, and the ways on: Retry, Back, Uni
@@ -393,7 +413,7 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   const door = !chat ? "" : nodeView.own && nodeView.slash ? `#${nodeView.slash.replace(/^#/, "")}` : "";
   // the area's app, when open, is the view in the chat's place (r14); otherwise the work view when it is open, else the conversation
   const roomLevel = (app: AppView | null, openApp: ((e: React.MouseEvent) => void) | null) => shell({ title: node.name, door, context: app || workOpen ? undefined : context, node: node.name, crumbs,
-    companion: chat ? companionProps : null, chatRoom: thread ? roomFor(thread.channel, thread.root) : roomFor(target?.id), placeholder, selected: node.path, sheet: sheetView,
+    companion: chat ? companionProps : null, chatRoom: thread ? roomFor(thread.channel, thread.root) : roomFor(target?.id), placeholder, selected: node.path, sheet: sheetView, retryChat: target?.id ? () => actions.openRoom(target.id) : actions.retryRooms ?? null,
     main: app ? app.main : workOpen ? workMain : undefined, workBar: app ? app.bar : workBar, openApp, appOpen: !!app });
   return <AreaView key={node.id} area={body !== null ? { ...node, body } : node} mode={mode} roomName={roomName} actions={appActions}
     room={roomFor(nodeRoom)} open={appOpen} onOpen={setAppOpen} render={(app, openApp) => frame(<>{status}{roomLevel(app, openApp)}</>)} />;
