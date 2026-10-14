@@ -888,7 +888,7 @@ test.describe('simple', () => {
     await expect(page.getByText('no room', { exact: true })).toHaveCount(0);
     await expect(page.locator('.sr-door')).toHaveText('#Uni', { timeout: 8000 });
     await expect(page.locator('.sr-chat textarea')).toBeVisible();
-    await expect(page.getByText('Opening the room…')).toHaveCount(0);
+    await expect(page.locator('.sr-chat-wait')).toHaveCount(0);
     await expect(companion(page)).toBeVisible();
     const recent = page.locator('.th-roomnav').getByRole('region', { name: 'Recent' });
     const names = await recent.locator('button').allTextContents();
@@ -923,7 +923,7 @@ test.describe('simple', () => {
     await expect(page.locator('.sr-chat')).toContainText('Cached hello from last time', { timeout: 3000 });
     await expect(page.locator('.sr-chat textarea')).toBeEnabled();
     expect(await page.evaluate(() => (window as any).__roomsResolved ?? false)).toBe(false);
-    await expect(page.getByText('Opening the room…')).toHaveCount(0);
+    await expect(page.locator('.sr-chat-wait')).toHaveCount(0);
   });
 
   test('r9/r18: a decision without options is "Your call", answered in words in its sheet through the CAS path; never buttons built from its wording', async ({ page }) => {
@@ -3426,6 +3426,21 @@ test.describe('r21', () => {
     const menu = list.getByRole('group', { name: 'Entry actions' });
     await expect(menu.getByRole('button')).toHaveText(['Pass to Uni', 'Share to a room…']);
     expect(await calls(page, 'journal_share')).toHaveLength(0);
+  });
+
+  test('P2 (Codex 9) a cold launch shows a quiet chat while the conversation opens (never a status panel), and says so past 8 s with Retry', async ({ page }) => {
+    // (an upright phone launches on the tree; its landscape launches on the chat, as every other size does)
+    if (!wide(page)) await page.setViewportSize({ width: 740, height: 360 });
+    await boot(page, { roomsDelay: 9500 });
+    const chat = page.locator('.sr-chat');
+    await expect(chat).toHaveAttribute('data-chat', 'waiting');
+    await expect(chat.locator('.sr-chat-wait-line')).toHaveText('Opening the conversation…');
+    // (the room's name once the rooms list says it)
+    await expect(chat.locator('.sr-chat-wait-composer')).toHaveText(/^Message #?Uni$/);
+    await expect(page.getByText('Opening the room…')).toHaveCount(0);
+    await expect(chat.locator('.sr-chat-wait-line')).toHaveText('Still opening the conversation · Retry', { timeout: 10_000 });
+    await expect(chat).toHaveAttribute('data-chat', 'open', { timeout: 10_000 });
+    await expect(chat.locator('textarea')).toBeVisible();
   });
 
   test('the 800×600 sheet has a margin and its whole border', async ({ page }) => {
