@@ -3620,6 +3620,7 @@ test.describe('r22', () => {
     await boot(page);
     // Techne's room has messages up to Oct 9 (the fixture's pinned time); these requests were set on Oct 6
     await seed(page, 'Areas/Techne', '2026-10-06T18:00:00.000Z');
+    await page.evaluate(() => (window as any).__arrive('ch-techne', 'Uni', 'Prod deploy of #38 is staged and waiting.', 3600));
     await add(page, { id: 'fresh', title: 'T-200 A fresh placeholder request', node: 'Areas/Techne', meta: { priority: 'now', next: 'Send the placeholder note to Casey', asked: new Date(Date.now() + 5000).toISOString() } });
     await refresh(page, '2026-10-14T09:00:00.000Z');
     await openRoom(page, 'Techne');
@@ -3632,7 +3633,7 @@ test.describe('r22', () => {
     await expect(sheet.locator('h2')).toHaveText('Say go on prod deploy of #38 + #58');
     await expect(sheet.locator('.task-asked')).toContainText('Asked Oct 6');
     // Techne's chat has messages from Oct 9: more than a day newer than Oct 6
-    await expect(sheet.locator('.task-movedon')).toHaveText('Chat has moved on since this was asked');
+    await expect(sheet.locator('.task-movedon')).toHaveText(/^#techne has talked about #38 since this was asked$/i);
     // the request is still there; r23: its "Say it" follows "Check in #techne first"
     await expect(sheet.getByRole('button', { name: /^Say it in #/ })).toBeVisible();
     await sheet.getByRole('button', { name: 'Close' }).click();
@@ -3729,13 +3730,14 @@ test.describe('r23', () => {
     await added.locator('.cp-need').click();
     await expect(sheetOf(page).locator('.task-asked')).toContainText('Added Oct 6');
     await expect(sheetOf(page).locator('.task-asked')).toHaveAttribute('data-kind', 'added');
-    // and the moved-on cue is from the same date, in the same words
-    await expect(sheetOf(page).locator('.task-movedon')).toHaveText('Chat has moved on since this was added');
+    // r24: "Send the plan to Casey" isn't room-directed or an approval, and the chat hasn't talked about it: no cue
+    await expect(sheetOf(page).locator('.task-movedon')).toHaveCount(0);
   });
 
   test('an approval can\'t outlive its moment (Codex P1): with the chat moved on, "Check in #room first" leads and "Say it" follows; a fresh request keeps "Say it" first', async ({ page }) => {
     await boot(page);
     // Techne's chat has messages up to Oct 9; this request was asked on Oct 6
+    await page.evaluate(() => (window as any).__arrive('ch-techne', 'Uni', 'The placeholder deploy is ready whenever you are.', 3600));
     await add(page, { id: 'go', title: 'T-303 Placeholder deploy', node: 'Areas/Techne', meta: { next: 'Say go on the placeholder deploy', asked: '2026-10-06T18:00:00.000Z' } });
     await add(page, { id: 'go2', title: 'T-304 Placeholder fresh deploy', node: 'Areas/Techne', meta: { next: 'Say go on the fresh placeholder deploy', asked: new Date(Date.now() + 5000).toISOString() } });
     await refresh(page, '2026-10-14T09:00:00.000Z');
@@ -3743,7 +3745,7 @@ test.describe('r23', () => {
     await openWork(page);
     await rowOf(page, 'Say go on the placeholder deploy').locator('.cp-need').click();
     const sheet = sheetOf(page);
-    await expect(sheet.locator('.task-movedon')).toHaveText('Chat has moved on since this was asked');
+    await expect(sheet.locator('.task-movedon')).toHaveText(/^#techne has talked about (?:placeholder deploy|deploy placeholder) since this was asked$/i);
     const primary = sheet.locator('.task-do.primary');
     await expect(primary).toHaveCount(1);
     await expect(primary).toHaveText(/^Check in #.+ first$/);

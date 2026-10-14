@@ -3,7 +3,7 @@ import { TaskSheet, UndoBar, ownerLabel } from "./NodeWork";
 import { useTasks } from "./useTasks";
 import { draftsUnder, runsUnder } from "./steerCore";
 import { CompanionSide, CompanionStrip, useCompanionOpen, type CompanionProps, type TaskLoad } from "./Companion";
-import { chatPlaceholder, isMine, needsByRow, needsFeed, needsYou, privateNote, standsHeading, standsLine, stateLine, uniPanel, type PrivateNeed } from "./simpleCore";
+import { chatPlaceholder, isMine, needsByRow, needsFeed, needsYou, privateNote, standsHeading, nothingWaiting, standsLine, stateLine, uniPanel, type PrivateNeed } from "./simpleCore";
 import { ownRoom, type Steward } from "./talkCore";
 import type { Area } from "./areasCore";
 import { isMe, priorityOf, tasksUnder, type Task, type TaskNode } from "./taskCore";
@@ -375,7 +375,9 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   const rawStands = tasks.tree?.stands.get(node.path) ?? (typeof node.metadata.stands === "string" ? { text: node.metadata.stands, at: typeof node.metadata.stands_at === "string" ? node.metadata.stands_at : null } : briefStands);
   /** A vault with no areas yet: Uni says how to start, in plain words (r13), instead of a tag and a path to type. */
   const noAreas = isRoot && !!tree && !error && childrenOf(tree, ROOT).length === 0;
-  const stands = noAreas ? { text: "No areas yet. Tell Uni here what you want to look after, and it will set up your first area.", ago: "" } : standsLine(rawStands, levelTasks.filter((t) => !hidden(t.node)), now);
+  const stands0 = noAreas ? { text: "No areas yet. Tell Uni here what you want to look after, and it will set up your first area.", ago: "" } : standsLine(rawStands, levelTasks.filter((t) => !hidden(t.node)), now);
+  /** r24 (Codex P1 1): a stored summary that says something waits on the user, with nothing open for them here: a quiet line says so (the text stays) */
+  const stands = stands0 && !noAreas ? { ...stands0, calm: nothingWaiting(rawStands?.text, feed.total + feed.privates.length, rawStands?.at) } : stands0;
   /** The room's composer when it is the one here, else that room's (opened, filled in, never sent). */
   const sayIn = (roomId: string, text: string) => { closeSheet(); setWork(false); const here = roomFor(roomId); if (here) here.compose(text); else actions.compose(roomId, text); };
   /** From the work view or the sheet, "Open #room" for this room is the conversation: it goes back to it. Another room opens as a tab. */
@@ -386,7 +388,7 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   const sheetGone = !!sheetId && (!live || !(live.state === "open" || live.state === "doing" || live.state === "waiting") || (tasks.ready && !tasks.tasks.some((t) => t.id === sheetId) && !tasks.leaving.has(sheetId)));
   /** r18: a draft note written for the task (its `task` field names it): its text is the message the sheet copies. */
   const draftOf = (t: Task) => { const tid = taskTitle(t.title).id?.toUpperCase(); const d = tid ? tasks.drafts.find((x) => x.task?.toUpperCase() === tid) : null; return d ? { vault: t.vault ?? profile.vault, id: d.id } : null; };
-  const sheetView = sheetTask && <TaskSheet key={sheetTask.id} task={sheetTask} gone={sheetGone} here={here} nodeName={nodeName} room={roomOfNode(sheetTask.node) ?? target} inRoom={target?.id} chatLastTs={rooms.find((r) => r.id === (roomOfNode(sheetTask.node) ?? target)?.id)?.last_ts ?? null} onClose={closeSheet}
+  const sheetView = sheetTask && <TaskSheet key={sheetTask.id} task={sheetTask} gone={sheetGone} here={here} nodeName={nodeName} room={roomOfNode(sheetTask.node) ?? target} inRoom={target?.id} onClose={closeSheet}
     draft={draftOf(sheetTask)}
     onAct={(t, a) => tasks.act(t, a, { sheet: true })} onDecide={(t, o) => tasks.decide(t, o)} onNote={actions.openNote} onOpenRoom={openRoomHere} onSay={chat ? sayIn : undefined} onPriority={(t, p) => void tasks.setPriority(t, p)} onStale={tasks.refresh} />;
   /** r20: a row's area when it is shown outside it (Uni's list holds every area's): its subtitle names it when its title can't say where it is. */

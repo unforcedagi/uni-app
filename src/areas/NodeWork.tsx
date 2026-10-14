@@ -4,7 +4,7 @@ import { cleanText } from "../interface/contract";
 import { isMe, ownerLabel, PRIORITIES, PRIORITY_LABEL, priorityOf, type Priority, type Task } from "./taskCore";
 import type { RoomRef } from "./talkCore";
 import type { ActResult, TaskAction, Undo } from "./useTasks";
-import { actionLead, actionOf, askedLine, chatMovedOn, movedOnText, pointsAt, pointsNowhere, quotedMessage, requestDate, withoutCut, answerLabel, answerText, ANSWER_MAX, checkLine, CHECK_FAILED, CHECKING, cutWords, dueLine, hostOf, withHosts, missingLine, OPEN_TASK, OPEN_TO_ANSWER, stateLine, stepAudience, TIDY_SAYS, toTidy, unknownDecision, waitsLine, waitsOnMe } from "./simpleCore";
+import { actionLead, actionOf, askedLine, chatAbout, checkInCue, unresolvedBlock, isApprovalRequest, requestKeys, type ChatHit, pointsAt, pointsNowhere, quotedMessage, requestDate, withoutCut, answerLabel, answerText, ANSWER_MAX, checkLine, CHECK_FAILED, CHECKING, cutWords, dueLine, hostOf, withHosts, missingLine, OPEN_TASK, OPEN_TO_ANSWER, stateLine, stepAudience, TIDY_SAYS, toTidy, unknownDecision, waitsLine, waitsOnMe } from "./simpleCore";
 import { requestRecheck } from "./useTasks";
 import { taskTitle } from "./whereCore";
 import { DecisionAnswer, NextText, decisionAsk, rowLinkLabel, supportOf } from "./Companion";
@@ -37,10 +37,9 @@ const linksIn = (text: string): string[] => [...text.matchAll(URLS)].map((m) => 
 /** A step that asks the user to look at or open something (r22): its link is the step's own action. */
 const LOOK = /^(?:look|open|view|visit|see|check|try|watch|read|test)\b/i;
 
-export function TaskSheet({ task, gone = false, here, nodeName, room, inRoom, chatLastTs = null, onClose, onAct, onDecide, onNote, onOpenRoom, onSay, onPriority, onStale, draft = null }: {
+export function TaskSheet({ task, gone = false, here, nodeName, room, inRoom, onClose, onAct, onDecide, onNote, onOpenRoom, onSay, onPriority, onStale, draft = null }: {
   task: Task; gone?: boolean; here: string; nodeName: (path: string) => string; room: RoomRef | null;
   /** r22 (Codex P1): the room's last message time (seconds), from the rooms list: a chat more than a day newer than the request is cued. */
-  chatLastTs?: number | null;
   /** The room open now: "Open in #room" is not offered for it. */
   inRoom?: string | null;
   /** A write against the revision shown (r16): the sheet waits for it, closes on success, and on a conflict stays with the latest copy. */
@@ -177,11 +176,21 @@ export function TaskSheet({ task, gone = false, here, nodeName, room, inRoom, ch
   /** r22 (Codex 7): a link in a step is a button in that step ("Open cohere-signup-staging"); for a "look at / open" step it is the primary action */
   const firstStep = steps ? steps.steps[0] : act?.text ?? "";
   const lookOpen = !gone && !!act && LOOK.test(firstStep.trim()) && linksIn(firstStep).length > 0;
-  /** r23 (Codex P1): a room-directed request whose chat has moved on can't outlive its moment: "Check in #room first" leads, "Say it" follows */
+  /** r24 (Codex P1 2): the cue shows only for a room-directed or approval request whose room has talked about it since it was asked/added */
   const reqAt = requestDate(task);
   const asked = askedLine(reqAt);
-  const movedOn = !gone && !!room && chatMovedOn(reqAt, chatLastTs);
-  const primary = primary0 === "say" && movedOn ? "check" : primary0 === "done" && lookOpen ? "open" : primary0;
+  const approval = isApprovalRequest(task, !!say);
+  const [hit, setHit] = useState<ChatHit | null>(null);
+  useEffect(() => {
+    setHit(null);
+    if (gone || !room || !reqAt || !approval) return;
+    let live = true;
+    invoke("get_messages", { channel: room.id, root: null, limit: 200 }).then((r) => { if (live && Array.isArray(r)) setHit(chatAbout(reqAt, r as { ref?: string; ts: number; body: string }[], requestKeys(task))); }).catch(() => {});
+    return () => { live = false; };
+  }, [task.id, task.updatedAt, room?.id, gone, approval, reqAt?.at]); // eslint-disable-line react-hooks/exhaustive-deps
+  const blockGap = unresolvedBlock(task.next, task.detail);
+  const movedOn = !gone && !unsure && !!room && !!hit;
+  const primary = movedOn ? "check" : primary0 === "done" && lookOpen ? "open" : primary0;
   const stepLinks = (text: string, first: boolean) => {
     const ls = linksIn(text);
     return ls.length ? <span className="task-step-links">{ls.map((u, i) => <button key={i} type="button" className={`task-do task-step-open${first && i === 0 && primary === "open" ? " primary" : ""}`} title={u} onClick={() => openOut(u)}>Open {rowLinkLabel(hostOf(u))}</button>)}</span> : null;
@@ -199,7 +208,7 @@ export function TaskSheet({ task, gone = false, here, nodeName, room, inRoom, ch
       <div className="task-body">
       <p className="task-kind">{decision ? `Decision${dflt ? ` (${dflt})` : ""}` : "Task"}{task.node !== here ? ` · in ${nodeName(task.node)}` : ""}</p>
       {/* r23: when it was asked, and whether the chat has moved on, first: a short window never scrolls it out of sight */}
-      {asked && <p className="task-asked" data-asked={reqAt?.at ?? undefined} data-kind={reqAt?.kind}>{capFirst(asked)}{movedOn && <> · <span className="task-movedon">{movedOnText(reqAt!)}</span></>}</p>}
+      {asked && <p className="task-asked" data-asked={reqAt?.at ?? undefined} data-kind={reqAt?.kind}>{capFirst(asked)}{movedOn && <> · <span className="task-movedon" data-key={hit!.key}>{checkInCue(room!.name, hit!.key, reqAt!)}</span></>}</p>}
       {dq?.answerable && dq.yourCall && !unsure && <small className="cp-call-lead">Your call:</small>}
       {/* r21: a step of more than one part ("A, then B") is listed, numbered, under how many steps it is */}
       <h2 id="task-sheet-title">{steps ? `${steps.steps.length} steps` : act ? <RefText text={withHosts(act.text)} vault={vault} onNote={(r) => { onClose(); onNote(r); }} /> : heading}</h2>
@@ -207,7 +216,8 @@ export function TaskSheet({ task, gone = false, here, nodeName, room, inRoom, ch
       {steps && <ol className="task-steps">{steps.steps.map((x, i) => <li key={i}><RefText text={withHosts(capFirst(x))} vault={vault} onNote={(r) => { onClose(); onNote(r); }} />{stepLinks(x, i === 0)}</li>)}</ol>}
       {act?.rest && <p className="task-next task-steps-rest"><RefText text={withHosts(capFirst(act.rest))} vault={vault} onNote={(r) => { onClose(); onNote(r); }} />{stepLinks(act.rest, false)}</p>}
       {/* r23: the content the ask carries (`detail`: the message, the questions, the draft), as stored */}
-      {!unsure && task.detail && <div className="task-detail">{task.detail.split(/\n\s*\n/).map((para, i) => <p key={i}><DetailText text={para.trim()} vault={vault} onNote={(r) => { onClose(); onNote(r); }} /></p>)}</div>}
+      {!unsure && task.detail && blockGap && <p className="task-detail task-block-gap">{room ? <button type="button" className="task-link" onClick={() => { onOpenRoom(room.id); onClose(); }}>Open #{(blockGap.room ?? room.name).replace(/^#/, "")} to find the '{blockGap.name}' block ›</button> : <>Find the '{blockGap.name}' block{blockGap.room ? ` in #${blockGap.room}` : ""}</>}</p>}
+      {!unsure && task.detail && !blockGap && <div className="task-detail">{task.detail.split(/\n\s*\n/).map((para, i) => <p key={i}><DetailText text={para.trim()} vault={vault} onNote={(r) => { onClose(); onNote(r); }} /></p>)}</div>}
       {/* r22 (Codex 7): the record's title is in Details; here only where it is the subject (a check, a wait, a missing note) */}
       {(check || checking || waits || missing || (unavailable && decision)) && <p className="task-sub" title={sub !== rest ? rest : undefined}>{sub}</p>}
       {/* r19: why nothing is asserted yet */}
@@ -273,7 +283,7 @@ export function TaskSheet({ task, gone = false, here, nodeName, room, inRoom, ch
         {primary === "note" && <button type="button" className="task-do primary" onClick={() => { onClose(); onNote({ vault, id: task.id }); }}>Open the note</button>}
         {primary === "source" && <button type="button" className="task-do primary" onClick={() => { const f = (check ?? waits)!.from; onClose(); onNote({ vault: f.vault, id: f.id }); }}>Open the note</button>}
         {primary === "check" && <button type="button" className="task-do primary" onClick={() => { onOpenRoom(room!.id); onClose(); }}>Check in #{room!.name.replace(/^#/, "")} first</button>}
-        {(primary === "say" || primary === "check") && <button type="button" className={`task-do${primary === "say" ? " primary" : ""}`} onClick={sayIn!}>Say it in #{room!.name.replace(/^#/, "")} ›</button>}
+        {sayIn && (primary === "say" || primary === "check") && <button type="button" className={`task-do${primary === "say" ? " primary" : ""}`} onClick={sayIn}>Say it in #{room!.name.replace(/^#/, "")} ›</button>}
         {primary === "askroom" && <button type="button" className="task-do primary" onClick={askRoom!}>Ask in #{room!.name.replace(/^#/, "")} ›</button>}
         {primary === "message" && <button type="button" className="task-do primary" aria-live="polite" onClick={() => void copyText(message!, "Copied the message").then((ok) => { if (ok) setCopied(true); })}>{copied ? "Copied" : "Copy the message"}</button>}
         {dest && (primary === "dest" || primary === "message") && <button type="button" className={`task-do${primary === "dest" ? " primary" : ""}`} onClick={() => openOut(dest.href)}>{dest.label} ›</button>}

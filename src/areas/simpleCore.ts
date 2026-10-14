@@ -419,6 +419,59 @@ export const MOVED_ON = "Chat has moved on since this was asked";
 export const movedOnText = (w: AskedWhen): string => (w.kind === "asked" ? MOVED_ON : "Chat has moved on since this was added");
 
 /**
+ * r24 (Codex P1 2, Sonnet line 5): "moved on" means something only when the room has talked about THIS request since it was asked. The
+ * request must be room-directed or an approval; the chat counts only when a message after the request names its task id, a `#NN` number from
+ * its step, or two of the step's distinctive words.
+ */
+const KEY_STOP = new Set("about after again also back before being both check could from have here into just like make more need next onto only other over same some that then there these they this those through very want were what when where which while will with without would your their them been done does each first last must still such than well".split(" "));
+export type RequestKeys = { ids: string[]; words: string[] };
+export function requestKeys(t: { title?: string | null; next?: string | null }): RequestKeys {
+  const title = t.title ?? "";
+  const next = t.next ?? "";
+  const ids = new Set<string>();
+  const tid = /\bT-\d+\b/i.exec(title)?.[0];
+  if (tid) ids.add(tid.toUpperCase());
+  for (const m of `${next} ${title}`.matchAll(/(?:^|[^\w&])#(\d{1,5})\b/g)) ids.add(`#${m[1]}`);
+  const words = [...new Set((next.toLowerCase().match(/[a-z][a-z-]{3,}/g) ?? []).filter((w) => !KEY_STOP.has(w) && !/^(?:say|tell|reply|ask|send|copy|approve|approval|message|room|chat)$/.test(w)))];
+  return { ids: [...ids], words };
+}
+/** A request spoken to the room or asking for an approval: "Say …", "Tell Uni …", "Approve …", "go/no-go", a decision. */
+export function isApprovalRequest(t: { kind?: string; next?: string | null }, audienceIsRoom: boolean): boolean {
+  return t.kind === "decision" || audienceIsRoom || /^\s*(?:approve|say|reply)\b|\bgo\s*\/\s*no[- ]?go\b|\bgo or no\b/i.test(t.next ?? "");
+}
+export type RoomMsg = { ref?: string; ts: number; body: string };
+export type ChatHit = { key: string; ref: string | null; ts: number };
+/** The first message after the request (`ts` in seconds) that mentions its key terms, or null. */
+export function chatAbout(w: AskedWhen | null | undefined, msgs: readonly RoomMsg[], keys: RequestKeys): ChatHit | null {
+  if (!w || !(keys.ids.length || keys.words.length)) return null;
+  const day = /^\d{4}-\d{2}-\d{2}$/.test(w.at.trim());
+  const from = day ? new Date(`${w.at.trim()}T23:59:59`).getTime() : stampMs(w.at);
+  if (!Number.isFinite(from)) return null;
+  for (const m of [...msgs].sort((a, b) => a.ts - b.ts)) {
+    if (!(m.ts * 1000 > from)) continue;
+    const body = m.body.toLowerCase();
+    const id = keys.ids.find((k) => (k.startsWith("#") ? new RegExp(`(^|[^\\w&])${k.toLowerCase()}\\b`) : new RegExp(`\\b${k.toLowerCase()}\\b`)).test(body));
+    if (id) return { key: id, ref: m.ref ?? null, ts: m.ts };
+    const hit = keys.words.filter((k) => body.includes(k));
+    if (hit.length >= 2) return { key: hit.slice(0, 2).join(" "), ref: m.ref ?? null, ts: m.ts };
+  }
+  return null;
+}
+export const checkInCue = (room: string, key: string, w: AskedWhen): string => `#${room.replace(/^#/, "")} has talked about ${key} since this was ${w.kind === "asked" ? "asked" : "added"}`;
+
+/**
+ * r24 (Codex P1 1): the stored "Where this stands" says something waits on Aaron while the node has no open Needs-you item: the app adds a quiet
+ * line under it and leaves the stored text alone (the room rewrites it).
+ */
+export const WAITS_ON_ME = /\bwaits?\s+on\s+aaron\b|\baaron['’]s\s+(?:go|ok|okay|ask|call|ans|decision|approval|sign-?off)\b|\bneeds?\s+aaron\b|\bfor\s+aaron\s+to\b|\bawaiting\s+aaron\b/i;
+export const nothingWaiting = (stands: string | null | undefined, open: number, updated: string | null | undefined): string | null => {
+  if (open > 0 || !stands || !WAITS_ON_ME.test(stands)) return null;
+  const ms = stampMs(updated ?? "");
+  const d = Number.isFinite(ms) ? new Date(ms).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : null;
+  return `Nothing is waiting on you here now${d ? ` · this summary is from ${d}` : ""}`;
+};
+
+/**
  * A step that sends words it doesn't carry (r23, both critics): "Send Ryan the deploy-access message below", "Forward the draft", "Send the
  * message". Only a sending step counts ("Your OK on the draft" or "Edit the draft, …" asks something else of a draft that exists).
  * `noun`: what it points at, for "Ask #room for the message".
@@ -439,6 +492,22 @@ export function pointsNowhere(t: Pick<Task, "next" | "room"> & Partial<Pick<Task
   if (!p || t.detail || t.message || t.hasDraft) return null;
   if (/https?:\/\/|\[\[|\buni:|\b[0-9A-HJKMNP-TV-Z]{26}\b/.test(t.next)) return null;
   return `Ask ${room ? `#${room.replace(/^#/, "")}` : "Uni"} for the ${p.noun}`;
+}
+/**
+ * r24 (Sonnet line 5): a step that names a block ("#cohere's 'For Harper' block") has inline text only when that text came from the block it
+ * names (the detail carries its name). Returns the block's name and the room it names (or null), when the stored detail isn't that block.
+ */
+export function unresolvedBlock(next: string | null | undefined, detail: string | null | undefined): { name: string; room: string | null } | null {
+  const m = /(?:^|[\s(])(?:#([\w./-]*\w)['’]s\s+)?["“‘']([^"”’']{2,60})["”’']\s+block\b/i.exec(next ?? "");
+  if (!m) return null;
+  const name = m[2].trim();
+  if (detail && detail.toLowerCase().includes(name.toLowerCase())) return null;
+  return { name, room: m[1] ?? null };
+}
+/** r24 (both critics): a row can't point "below" at words that are in its card: "Send Ryan the deploy-access message below" reads "…message (in the card)". */
+export function belowInCard(next: string, t: Partial<Pick<Task, "detail" | "message" | "hasDraft">>): string {
+  if (!pointsAt(next) || !(t.detail || t.message || t.hasDraft)) return next;
+  return next.replace(/\b(message|draft|text|block|note)\s+below\b/i, "$1 (in the card)").replace(/\s+below\b/i, " (in the card)");
 }
 /** The message in a task's `detail`, when it quotes one ("Send this to Ryan: 'Hey Ryan, …'"): the quoted words, whole. */
 export function quotedMessage(detail: string | null | undefined): string | null {
