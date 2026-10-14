@@ -128,7 +128,8 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   /** The task list's health, for the companion and the tree. */
   const load: TaskLoad = { error: tasks.error, refreshing: tasks.refreshing, lastOk: tasks.lastOk, complete: tasks.complete, retry: tasks.refresh };
   // opening a room anywhere opens its node's one view
-  const owned = useMemo(() => (data && chat ? roomNodeMap(data.tree, roomRefs, uniRef) : null), [data, chat, roomRefs, uniRef]);
+  // with the areas unreadable (an error, not a load still under way) only Uni's room is known to be owned: every other room stays reachable as "Other rooms"
+  const owned = useMemo(() => (!chat ? null : data ? roomNodeMap(data.tree, roomRefs, uniRef) : error && !loading ? new Map(uniRef ? [[uniRef.id, { name: "Uni", path: ROOT }]] : []) : null), [data, chat, error, loading, roomRefs, uniRef]);
   useEffect(() => { if (owned) publishRoomNodes(owned); }, [owned]);
   /** "Other rooms": every room no node owns (not Uni's), by name. Known only once the tree is: before that, nothing is listed as unfiled. */
   const others = useMemo(() => (owned ? roomRefs.filter((r) => !owned.has(r.id) && r.id !== uniRoom).sort((a, b) => a.name.localeCompare(b.name)) : []), [owned, roomRefs, uniRoom]);
@@ -192,8 +193,9 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   const tree = data?.tree;
   const kids = tree ? childrenOf(tree, node.path) : [];
   const status = <>
+    {signingIn && !data && <p className="areas-status" role="status">Signing in…</p>}
     {data?.stale && <p className="areas-status" role="status">{error ? `Saved copy${data.savedAt ? ` from ${new Date(data.savedAt).toLocaleString()}` : ""} · couldn't refresh: ${error}` : "Saved copy · refreshing…"}</p>}
-    {!data && error && !isRoot && <p className="note-error" role="alert">Couldn't load areas: {error}</p>}
+    {!data && error && <p className="note-error" role="alert">Couldn't load areas: {error}</p>}
     {!!data?.truncated.length && <p className="areas-status" role="status">{data.truncated.join(", ")}: showing first 200 notes; more may exist.</p>}
   </>;
   const empty = isRoot && !kids.length && !error ? <p className="empty">{signingIn ? "Signing in…" : loading ? "Loading areas…" : "No areas yet. Tag a note `area` at Areas/<Name>."}</p> : null;
@@ -284,7 +286,7 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   const privateNeeds = Math.max(0, levelTasks.filter(needsYou).length - needAll.length);
   const rawStands = tasks.tree?.stands.get(node.path) ?? (typeof node.metadata.stands === "string" ? { text: node.metadata.stands, at: typeof node.metadata.stands_at === "string" ? node.metadata.stands_at : null } : null);
   const stands = standsLine(rawStands, privateLevel ? [] : levelTasks, now);
-  const companionProps: CompanionProps = { stands, ready: tasks.ready, load, hidden: privateNeeds, noMore: isRoot, needs: needTop, runs, nodeName: node.name, onTask: setSheet, onNote: actions.openNote, onDecide: decide, onEverything: () => { setSheet(null); setFull(true); } };
+  const companionProps: CompanionProps = { stands, ready: tasks.ready, load, hidden: privateNeeds, needs: needTop, runs, nodeName: node.name, onTask: setSheet, onNote: actions.openNote, onDecide: decide, onEverything: () => { setSheet(null); setFull(true); } };
   const placeholder = chatPlaceholder({ name: node.name, slash: nodeView.own ? nodeView.slash : null, heldBy: nodeView.heldBy ? roomSlug(nodeView.heldBy.name) : null });
   const roomLevel = shell({ title: node.name, door: nodeView.own && nodeView.slash ? `#${nodeView.slash}` : "", crumbs: wide && !isRoot ? <Crumbs trail={trailItems} onOpen={openPath} /> : null, back,
     companion: companionProps, chatRoom: thread ? roomFor(thread.channel, thread.root) : roomFor(target?.id), placeholder, selected: node.path, sheet: sheetView });

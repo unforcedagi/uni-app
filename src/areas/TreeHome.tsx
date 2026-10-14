@@ -1,15 +1,12 @@
-// T-111: the tree home. Wide screens (Daylight, tablets): the map with a level panel beside it. Phones: a room tree, then a level.
-// The panel reads like a page (the C layout of the prototypes): what is alive, what needs you, updates from the rooms below, what is
-// inside, the other tasks, then the room, with the composer pinned under it. Styling is in tree.css (the Field Book tokens).
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { invoke } from "@tauri-apps/api/core";
+// T-111, r12: the room tree (beside the room on wide screens, the home on a phone) and the pieces of a node's full work page.
+// Styling is in tree.css (the Field Book tokens).
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { cleanText } from "../interface/contract";
-import type { RoomMessage } from "../interface/modules/chat";
 import { InlineText } from "./InlineText";
 import { Body } from "../MessageBody";
 import type { Area } from "./areasCore";
 import type { AliveLine, LevelAlive } from "./treeAlive";
-import { agoLabel, type RoomView, type TreeRow, type Update } from "./treeRooms";
+import { agoLabel, roomSlug, type RoomView, type TreeRow, type Update } from "./treeRooms";
 import type { Mark } from "./nodeMap";
 import type { NavControls } from "../navContext";
 import { ancestorsOf, hasKids, isOpen, recentLabels, RECENT_FULL_PX, rolledNeeds, SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN, useFolds, useSidebar, visibleRows } from "./sidebarState";
@@ -108,8 +105,8 @@ export function RoomTree({ chat = true, rows, needs, onOpen, selected, others = 
   </li>}
   {othersOpen && others.map((o) => <li key={`room:${o.id}`} className={`th-row th-other d2 ${selectedRoom === o.id ? "sel" : ""}`}>
     <span className="th-fold-gap" aria-hidden="true" />
-    <button type="button" className="th-go" data-room={o.id} aria-current={selectedRoom === o.id ? "page" : undefined} aria-label={`#${o.name}, not filed under an area`} onClick={() => onOpenRoom?.(o.id)}>
-      <span className="th-name"><b>#{o.name}</b></span>
+    <button type="button" className="th-go" data-room={o.id} aria-current={selectedRoom === o.id ? "page" : undefined} aria-label={`#${roomSlug(o.name)}, not filed under an area`} onClick={() => onOpenRoom?.(o.id)}>
+      <span className="th-name"><b>#{roomSlug(o.name)}</b></span>
     </button>
   </li>)}
   </ul></nav>;
@@ -207,21 +204,10 @@ export function AliveBlock({ alive, onNote, kind, fresh, onRefresh }: { alive: L
   </section>;
 }
 
-function Line({ l, onNote, ask, onAsk }: { l: AliveLine; onNote: (ref: string) => void; ask?: boolean; onAsk?: (l: AliveLine) => void }) {
+function Line({ l, onNote }: { l: AliveLine; onNote: (ref: string) => void }) {
   return <li className="th-line"><i className="th-k" aria-hidden="true" />
     <span className="th-line-text"><InlineText tokens={l.tokens} onNote={onNote} />{l.note && <small>{l.note}</small>}</span>
-    {ask && onAsk && <button type="button" className="th-link th-ask" aria-label={`Ask Uni about: ${l.text}`} onClick={() => onAsk(l)}>Ask Uni</button>}
   </li>;
-}
-
-export function NeedsBlock({ lines, onNote, onAsk }: { lines: readonly AliveLine[]; onNote: (ref: string) => void; onAsk: ((l: AliveLine) => void) | null }) {
-  const [all, setAll] = useState(false);
-  if (!lines.length) return null;
-  const shown = all ? lines : lines.slice(0, CAP);
-  return <Section id="needs" title="Needs you" count={lines.length}>
-    <ul className="th-lines needs">{shown.map((l, i) => <Line key={i} l={l} onNote={onNote} ask={!!onAsk} onAsk={onAsk ?? undefined} />)}</ul>
-    {lines.length > CAP && <button type="button" className="th-link" onClick={() => setAll(!all)}>{all ? "Show fewer" : `Show ${lines.length - CAP} more`}</button>}
-  </Section>;
 }
 
 /** "↳ 3 updates from boulder/cohere": what the rooms below posted in the last day, as sap climbing the tree. */
@@ -256,32 +242,4 @@ export function InsideBlock({ chat = true, title, kids, onOpen }: { chat?: boole
 export function ProjectNote({ area }: { area: Area }) {
   if (area.kind !== "project" || !area.body) return null;
   return <details className="th-note"><summary>Project note</summary><Body body={area.body} mentions={[]} me={null} /></details>;
-}
-
-// ---------------------------------------------------------------------------------------------- the room
-
-/** The room's latest lines as ledger slips (not bubbles). Fetches itself; `tick` refetches (a message arrived or was sent). */
-export function Ledger({ roomId, me, tick, nowSec }: { roomId: string | null; me: string | null; tick: number; nowSec: number }) {
-  const [list, setList] = useState<{ room: string; messages: RoomMessage[] } | null>(null);
-  useEffect(() => {
-    if (!roomId) return;
-    let live = true;
-    invoke<RoomMessage[]>("get_messages", { channel: roomId, root: null, limit: 12 }).then((m) => { if (live) setList({ room: roomId, messages: m.slice(-8) }); }).catch(() => { if (live) setList({ room: roomId, messages: [] }); });
-    return () => { live = false; };
-  }, [roomId, tick]);
-  const messages = useMemo(() => (list && list.room === roomId ? list.messages : []), [list, roomId]);
-  if (!roomId) return <p className="th-quiet">No room to show.</p>;
-  if (!list || list.room !== roomId) return <p className="th-quiet" role="status">Opening the room…</p>;
-  if (!messages.length) return <p className="th-quiet">Nothing said here yet.</p>;
-  return <ol className="th-ledger" aria-label="Latest in the room">{messages.map((m) => <li key={m.ref} className={`th-slip ${me && m.author === me ? "me" : ""}`}>
-    <small>{cleanText(m.author_name || m.author.slice(0, 8))} · {agoLabel(nowSec, m.ts)}</small>
-    <span>{cleanText(m.body).replace(/\s+/g, " ")}</span></li>)}</ol>;
-}
-
-/** `steward`: who answers here when the node has no room of its own ("Stewarded by #boulder"); nothing to say when the room is its own. */
-export function RoomBlock({ view, ledger, steward }: { view: RoomView; ledger: ReactNode; steward: string | null }) {
-  return <Section id="room" title="Room">
-    <div className="th-roomhead"><RoomDoor view={view} />{!view.own && steward && <span className="th-rnote">{steward}</span>}</div>
-    {ledger}
-  </Section>;
 }

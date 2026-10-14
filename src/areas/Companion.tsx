@@ -36,8 +36,6 @@ export type CompanionProps = {
   load?: TaskLoad;
   /** Items here that need you but may not be named (a private area), counted. */
   hidden?: number;
-  /** No "+N more" (Uni's own panel: the rest is in "All of Uni's work"). */
-  noMore?: boolean;
   needs: readonly Task[];
   runs: readonly Run[];
   /** The node's name, so the way deeper says what it opens ("All of COhere's work"). */
@@ -177,7 +175,7 @@ function NeedRow({ t, onTask, onDecide, onNote }: { t: Task; onTask: (t: Task) =
  * Only whole rows are shown: in the side panel (`fit`) the rows that don't fit above the footer wait behind "+N more ›" rather than being
  * cut or faded at the panel's bottom. Every row is drawn once to be measured (before paint), then the ones that fit stay.
  */
-function NeedsList({ needs, fit, noMore, onTask, onDecide, onNote }: Pick<CompanionProps, "needs" | "onTask" | "onDecide" | "onNote" | "noMore"> & { fit: boolean }) {
+function NeedsList({ needs, fit, onTask, onDecide, onNote }: Pick<CompanionProps, "needs" | "onTask" | "onDecide" | "onNote"> & { fit: boolean }) {
   const [limit, setLimit] = useState(Infinity);
   const [measuring, setMeasuring] = useState(fit);
   const [all, setAll] = useState(false);
@@ -232,13 +230,13 @@ function NeedsList({ needs, fit, noMore, onTask, onDecide, onNote }: Pick<Compan
   const hidden = needs.length - shown.length;
   return <>
     <ul ref={listRef} className="cp-list">{shown.map((t) => <NeedRow key={t.id} t={t} onTask={onTask} onDecide={onDecide} onNote={onNote} />)}</ul>
-    {hidden > 0 && !noMore && <button type="button" className="cp-more cp-more-rows" onClick={() => setAll(true)}>+{hidden} more ›</button>}
+    {hidden > 0 && <button type="button" className="cp-more cp-more-rows" onClick={() => setAll(true)}>+{hidden} more ›</button>}
   </>;
 }
 
 const clock = (ms: number) => new Date(ms).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 
-function Body({ stands, ready, note, load, hidden = 0, noMore, needs, runs, nodeName, onTask, onDecide, onEverything, onNote, fit }: CompanionProps & { fit: boolean }) {
+function Body({ stands, ready, note, load, hidden = 0, needs, runs, nodeName, onTask, onDecide, onEverything, onNote, fit }: CompanionProps & { fit: boolean }) {
   const active = runs.filter(isActiveRun);
   const hiddenRuns = Math.max(0, active.length - RUNS_SHOWN);
   if (note) return <div className="cp-body"><p className="cp-lede cp-note">{note}</p></div>;
@@ -247,7 +245,7 @@ function Body({ stands, ready, note, load, hidden = 0, noMore, needs, runs, node
     {!ready ? (load?.error ? <p className="cp-lede cp-failed" role="alert">Couldn't load. {retry}</p> : <p className="cp-lede">Loading…</p>) : stands && <Stands text={stands.text} ago={stands.ago} />}
     {ready && <section aria-label="Needs you" className="cp-sec" aria-busy={load?.refreshing || undefined}>
       <h3 className="cp-h">Needs you</h3>
-      {needs.length > 0 ? <NeedsList needs={needs} fit={fit} noMore={noMore} onTask={onTask} onDecide={onDecide} onNote={onNote} /> : !hidden && <p className="cp-none">Nothing needs you here.</p>}
+      {needs.length > 0 ? <NeedsList needs={needs} fit={fit} onTask={onTask} onDecide={onDecide} onNote={onNote} /> : !hidden && <p className="cp-none">Nothing needs you here.</p>}
       {hidden > 0 && <p className="cp-none cp-private">{hidden} {needs.length ? "more " : ""}{hidden === 1 ? "needs" : "need"} you here, counted but not named (private).</p>}
       {load?.error && <p className="cp-stale" role="status">Couldn't refresh{load.lastOk ? ` (as of ${clock(load.lastOk)})` : ""} · {retry}</p>}
       {load && !load.error && !load.complete && <p className="cp-stale" role="status">More work exists than the app could read; some may not be listed.</p>}

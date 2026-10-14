@@ -1,4 +1,4 @@
-// T-111 nested rooms: ATLAS → ATLAS (atlas/build), Learn Vibe Build (atlas/teach), Atlas Institute (held by #atlas); the Open #room action; the nested conversation list.
+// T-111 nested rooms: ATLAS → ATLAS (atlas/build), Learn Vibe Build (atlas/teach), Atlas Institute (held by #atlas); the Open #room action; no second room list (r12).
 // Run: NESTED_TEST_PORT=5681 npx playwright test --config playwright.nested.config.ts
 import { mkdir } from 'node:fs/promises';
 import { test, expect, type Page } from '@playwright/test';
@@ -48,20 +48,13 @@ test.describe('nested rooms', () => {
     await shot(page, 'opened');
   });
 
-  test('the conversation list nests build and teach under atlas', async ({ page }) => {
+  test('r12: build and teach are only rooms of the tree (no separate conversation list); a room only a node owns is never an "Other room"', async ({ page }) => {
     await boot(page);
-    await page.getByRole('button', { name: 'Rooms', exact: true }).click();
-    const list = page.locator('.rooms nav');
-    await expect(list).toBeVisible();
-    await expect(list.locator('.room.child').first()).toBeVisible();
-    const names = await list.locator('.room strong').allTextContents();
-    const i = names.indexOf('Atlas');
-    expect(i).toBeGreaterThanOrEqual(0);
-    expect(names.slice(i + 1, i + 3).sort()).toEqual(['ATLAS', 'Learn Vibe Build']);
-    const build = list.locator('.room.child', { has: page.locator('strong', { hasText: /^ATLAS$/ }) });
-    await expect(build).toHaveAttribute('title', 'atlas/build');
-    await expect(build).toHaveAttribute('aria-label', '#atlas/build');
-    await expect(list.locator('.room', { hasText: 'Techne' }).first()).not.toHaveClass(/child/);
+    await expect(page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Rooms', exact: true })).toHaveCount(0);
+    await expect(page.locator('.rooms nav .room')).toHaveCount(0);
+    const scope = wide(page) ? page.locator('.th-roomnav') : page.locator('.th-phone-tree');
+    for (let i = 0; i < 12; i++) { await scope.locator('.th-row.d1').first().waitFor(); const f = scope.locator('.th-fold[aria-expanded="false"]'); if (!await f.count()) break; await f.first().click(); }
+    for (const t of await scope.locator('.th-other .th-go').allInnerTexts()) expect(t).not.toMatch(/atlas/);
     await shot(page, 'list');
   });
 });

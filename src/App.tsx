@@ -446,7 +446,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
     const originId = recordingOrigin.current?.tabId;
     const pinned = new Set(tabsRef.current.tabs.filter((t) => t.id === originId || (t.kind === "journal" && journalRecordingRef.current)).map((t) => t.id));
     const base = { ...tabsRef.current, tabs: tabsRef.current.tabs.map((t) => t.note ? { ...t, note: resolveNote(t.note, aliases.current) } : t), recent: [...tabsRef.current.recent.filter((id) => !pinned.has(id)), ...pinned] };
-    const effectiveMode = mode === "focus" && pinned.has(tabsRef.current.active ?? "") ? "new" : mode;
+    // a recording's tab is never replaced: going elsewhere (a row of the tree, a phone's Back to the tree) opens beside it
+    const effectiveMode = (mode === "focus" || mode === "replace") && pinned.has(tabsRef.current.active ?? "") ? "new" : mode;
     const next = openTab(base, target, effectiveMode, () => crypto.randomUUID());
     const removed = tabsRef.current.tabs.filter((t) => !next.tabs.some((n) => n.id === t.id));
     if (removed.some((t) => t.id === originId || (t.kind === "journal" && journalRecordingRef.current))) {
