@@ -9,7 +9,7 @@ import type { Area } from "./areasCore";
 import { groupOf, isMe, priorityOf, tasksUnder, type Task, type TaskNode } from "./taskCore";
 import type { RoomInfo } from "./TodayView";
 import { refreshDraft, updatedLabel } from "./briefCore";
-import AreaView, { type AreaActions } from "./AreaView";
+import AreaView, { type AppView, type AreaActions } from "./AreaView";
 import type { AreaRoom } from "./AreaChat";
 import { currentUserAgent, gateMode, platformName } from "../interface/selftest/gate";
 import { useAppVersion, useWebviewRuntime } from "../interface/selftest/useAppVersion";
@@ -110,6 +110,8 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   const [work, setWork] = useState(false);
   /** Below 900px: the tree, Back/Forward, Recent and the app's places, in a drawer opened from the room's header. */
   const [drawer, setDrawer] = useState(false);
+  /** The area's app, as a view inside the shell (r14): Back (every kind) closes it, like the work view. */
+  const [appOpen, setAppOpen] = useState(false);
   const toTree = () => { setRootOpen(false); onOpenArea(null, "Uni", uniRoom); };
   const back = loose ? (phoneTree ? toTree : null) : path ? (phoneTree ? toTree : () => {
     const up = data ? data.tree.nodes.get(parentPath(data.tree, path)) : null;
@@ -120,17 +122,18 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   // the drawer is closed by every Back first (r14), its own Back button excepted (that one goes back a place as it closes)
   const overlay: Overlay | null = sheetId ? { close: closeSheet, modal: true, history: false }
     : drawer ? { close: () => setDrawer(false), modal: false, history: true }
+    : appOpen ? { close: () => setAppOpen(false), modal: false, history: true }
     : workOver ? { close: () => setWork(false), modal: false, history: true } : null;
-  const overlayKey = `${sheetId ? "sheet" : ""}${drawer ? "drawer" : ""}${workOver ? "work" : ""}`;
+  const overlayKey = `${sheetId ? "sheet" : ""}${drawer ? "drawer" : ""}${appOpen ? "app" : ""}${workOver ? "work" : ""}`;
   useEffect(() => {
     // Android Back closes what is over the place before it zooms out a level.
-    onBackChange(sheetId ? closeSheet : drawer ? () => setDrawer(false) : workOver ? () => setWork(false) : back);
+    onBackChange(sheetId ? closeSheet : drawer ? () => setDrawer(false) : appOpen ? () => setAppOpen(false) : workOver ? () => setWork(false) : back);
     return () => onBackChange(null);
   }, [path, loose, data, uniRoom, onOpenArea, onBackChange, overlayKey, phoneTree, rootOpen]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     onOverlayChange?.(overlay);
     // Escape closes the drawer or the work view (the sheet handles its own)
-    const esc = (e: KeyboardEvent) => { if (e.key !== "Escape" || !overlay || overlay.modal || e.defaultPrevented) return; if (drawer) setDrawer(false); else setWork(false); };
+    const esc = (e: KeyboardEvent) => { if (e.key !== "Escape" || !overlay || overlay.modal || e.defaultPrevented) return; if (drawer) setDrawer(false); else if (appOpen) setAppOpen(false); else setWork(false); };
     if (overlay && !overlay.modal) window.addEventListener("keydown", esc);
     return () => { window.removeEventListener("keydown", esc); };
   }, [overlayKey]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -165,9 +168,8 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
     projectBody(identity, node).then((text) => { if (live) setBody(text); }).catch(() => {});
     return () => { live = false; };
   }, [identity, node?.id, node?.updatedAt, workShown]); // eslint-disable-line react-hooks/exhaustive-deps
-  // A node can have several rooms (metadata.channel is a list): the user's pick, else the first.
-  const [picked, setPicked] = useState<string | null>(null);
-  const nodeRoom = node ? pickRoom(node.rooms, picked) : null;
+  // A node can have several rooms (metadata.channel is a list): its app hears the first.
+  const nodeRoom = node ? pickRoom(node.rooms, null) : null;
   // The room shown is the steward's room (a held project's area room), so that is the one the host opens.
   const stewardRoomId = node && data ? roomView(data.tree, node.path, roomRefs, uniRef).target?.id ?? null : null;
   const hostRoom = !chat ? null : stewardRoomId ?? (node?.path === ROOT ? uniRoom : null);
@@ -189,7 +191,7 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   const others = useMemo(() => (owned ? roomRefs.filter((r) => !owned.has(r.id) && r.id !== uniRoom).sort((a, b) => a.name.localeCompare(b.name)) : []), [owned, roomRefs, uniRoom]);
   // Opening a room re-reads the tasks if the copy is more than a few seconds old (the needs-you feed must not show what is already done).
   useEffect(() => { tasks.refreshIfStale(); }, [node?.path]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { setSheetId(null); setWork(false); setDrawer(false); }, [node?.path, loose, thread?.root]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setSheetId(null); setWork(false); setDrawer(false); setAppOpen(false); }, [node?.path, loose, thread?.root]); // eslint-disable-line react-hooks/exhaustive-deps
   /** Who stewards a node: its own room, else the nearest ancestor's (an archived room's `room_fallback` stands in), else #Uni. */
   const stewardOf = (p: string): Steward => {
     const v = data ? roomView(data.tree, p, roomRefs, uniRef) : { target: uniRef, own: false, heldBy: uniRef };
@@ -219,7 +221,9 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
    * The room itself: a header (title, the room's own name, where it sits), the conversation, and the companion beside it (wide) or as a
    * strip above it (phone). A thread or the work view shows inside it, with a way back to the room.
    */
-  const shell = (o: { title: string; door: string; crumbs: ReactNode; companion: CompanionProps | null; chatRoom: AreaRoom | null; placeholder: string; selected?: string; selectedRoom?: string; sheet: ReactNode; main?: ReactNode; workBar?: ReactNode }) => {
+  const shell = (o: { title: string; door: string; crumbs: ReactNode; companion: CompanionProps | null; chatRoom: AreaRoom | null; placeholder: string; selected?: string; selectedRoom?: string; sheet: ReactNode; main?: ReactNode; workBar?: ReactNode;
+    /** The area's app, opened from the header (r14): it shows as a view in this shell. */
+    openApp?: ((e: React.MouseEvent) => void) | null; appOpen?: boolean }) => {
     const replies = thread && o.chatRoom?.loaded ? o.chatRoom.messages.filter((m) => m.ref !== thread.root).length : null;
     const view = o.main ? "work" : thread ? "thread" : "room";
     return <div className={`tree-home th-level ${wide ? "wide" : "phone"} th-rooms th-simple ${wide && (!o.companion || o.main) ? "solo" : wide && !companionOpen ? "folded" : ""}`} data-layout="rooms" data-view={view}>
@@ -231,12 +235,13 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
             {(o.door || o.crumbs) && <div className="sr-meta">{o.crumbs}{o.door && <span className="sr-door">{o.door}</span>}</div>}
             <h1 className="sr-title">{o.title}</h1>
           </div>
+          {o.openApp && !o.appOpen && <button type="button" className="sr-app" aria-label={`Open the ${o.title} app`} onClick={o.openApp}>App ›</button>}
         </header>
         {thread && !o.main && <div className="sr-thread"><button type="button" className="sr-thread-back" onClick={() => actions.openRoom(thread.channel)}><span aria-hidden="true">‹</span> Back to the room</button>
           <span className="sr-thread-label">Thread{replies !== null ? ` · ${replies} ${replies === 1 ? "reply" : "replies"}` : ""}</span></div>}
         {o.workBar}
         {/* below 900px the tree (and its health line) is in the drawer: the room says it itself, outside the drawer (r14); the work view has its own */}
-        {!wide && o.companion && !o.main && <LoadHealth load={load} ready={tasks.ready} className="sr-health" />}
+        {!wide && o.companion && !o.main && tasks.ready && <LoadHealth load={load} ready className="sr-health" />}
         {!wide && o.companion && !o.main && <CompanionStrip {...o.companion} open={companionOpen} onToggle={setCompanionOpen} />}
         {o.main ? <div className="sr-work">{o.main}</div>
           : <div className="sr-chat">{o.chatRoom ? o.chatRoom.render(null, o.placeholder) : <p className="th-quiet" role="status">Opening the room…</p>}</div>}
@@ -336,9 +341,10 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   const crumbs = !isRoot ? <Crumbs trail={trailItems} onOpen={openPath} compact={!wide} /> : null;
   /** The room's channel, once (r14): its own (`#cohere`), or the room it borrows, said plainly ("Conversation in #boulder"). */
   const door = !chat ? "" : nodeView.own && nodeView.slash ? `#${nodeView.slash.replace(/^#/, "")}` : nodeView.heldBy && !isRoot ? `Conversation in #${roomSlug(nodeView.heldBy.name)}` : "";
-  const roomLevel = shell({ title: node.name, door, crumbs,
+  // the area's app, when open, is the view in the chat's place (r14); otherwise the work view when it is open, else the conversation
+  const roomLevel = (app: AppView | null, openApp: ((e: React.MouseEvent) => void) | null) => shell({ title: node.name, door, crumbs,
     companion: chat ? companionProps : null, chatRoom: thread ? roomFor(thread.channel, thread.root) : roomFor(target?.id), placeholder, selected: node.path, sheet: sheetView,
-    main: workOpen ? workMain : undefined, workBar });
-  return <AreaView key={node.id} area={body !== null ? { ...node, body } : node} channel={nodeRoom} onChannel={setPicked} mode={mode} roomName={roomName} actions={actions}
-    room={roomFor(nodeRoom)} onBack={back} backLabel={tree?.nodes.get(parentPath(tree, node.path))?.name ?? "Uni"} tree={<>{status}{roomLevel}</>} />;
+    main: app ? app.main : workOpen ? workMain : undefined, workBar: app ? app.bar : workBar, openApp, appOpen: !!app });
+  return <AreaView key={node.id} area={body !== null ? { ...node, body } : node} mode={mode} roomName={roomName} actions={actions}
+    room={roomFor(nodeRoom)} open={appOpen} onOpen={setAppOpen} render={(app, openApp) => frame(<>{status}{roomLevel(app, openApp)}</>)} />;
 }

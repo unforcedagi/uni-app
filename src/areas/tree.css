@@ -575,8 +575,7 @@ h3.wr-h { font-weight: 400; }
   .th-drawer .th-recent { display: none; }
 }
 /* r14: a row leads with its action; its title (the event or project) is a quiet line under it. A long decision opens to decide. */
-.cp-need .cp-under { color: var(--th-mute); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.cp-item[data-open] .cp-need .cp-under { white-space: normal; }
+.cp-need .cp-under { display: block; color: var(--th-mute); overflow-wrap: anywhere; }
 .cp-open-decide { font: 500 13px/1.4 var(--th-sans); color: var(--th-ink2); }
 /* r14: the task list's health, one component everywhere */
 .lh { margin: 0; }
@@ -586,3 +585,15 @@ h3.wr-h { font-weight: 400; }
 .th-column .lh, .th-phone-tree .lh { flex: none; margin: 2px 12px 4px; }
 .sr-health { flex: none; padding: 4px 16px 0; border-bottom: 1px solid var(--th-hair2); }
 .wv .lh { margin: 0 0 12px; }
+/* r14: an area's app is a view inside the room shell, opened from the header */
+.sr-app { all: unset; box-sizing: border-box; flex: none; margin-left: auto; align-self: center; min-height: 32px; padding: 0 12px; display: inline-flex; align-items: center; border: 1px solid var(--th-hair2); border-radius: 999px; font: 500 13px var(--th-sans); color: var(--th-ink); cursor: pointer; }
+.sr-app:focus-visible { outline: 2px solid var(--th-ink); outline-offset: 2px; }
+@media (pointer: coarse) { .sr-app { min-height: 44px; } }
+.sr-work:has(> .area-app) { overflow: hidden; display: flex; flex-direction: column; }
+.area-app { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.sr-appbar .area-bar-controls { margin-left: auto; position: relative; }
+.cp-lead { margin: 0; padding: 8px 0 1px; cursor: pointer; }
+.cp-lead:hover { text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
+.cp-item[data-open] .cp-lead { -webkit-line-clamp: unset; line-clamp: none; overflow: visible; display: block; }
+.cp-need.cp-need-under { min-height: 0; padding-top: 0; }
+.cp-need.cp-need-under:empty { display: none; }

@@ -173,7 +173,7 @@ export function NeedRow({ t, onTask, onDecide, onNote, meta }: { t: Task; onTask
   const due = dueLine(t.due);
   const r = rowLead(t);
   const text = r.text;
-  const titleRef = useRef<HTMLSpanElement>(null);
+  const titleRef = useRef<HTMLElement>(null);
   const [open, setOpen] = useState(false);
   const [titleLines, setTitleLines] = useState(1);
   const [titleCut, setTitleCut] = useState(false);
@@ -197,14 +197,22 @@ export function NeedRow({ t, onTask, onDecide, onNote, meta }: { t: Task; onTask
   const nextLines = lineBudget(Math.min(titleLines, titleMax), !!due, 4).next;
   const more = open || (titleCut && !isDecision) || (showNext && (nextCut || nextLines <= 0));
   const clampStyle = open || isDecision ? undefined : ({ WebkitLineClamp: titleMax, lineClamp: titleMax } as React.CSSProperties);
+  const meta_ = <>{r.under && <small className="cp-under">{r.under}</small>}
+    {due && <small className={`cp-detail${isOverdue(t.due) ? " overdue" : ""}`}>{due}</small>}
+    {meta && <small className="cp-detail cp-meta">{meta}</small>}</>;
   return <li className="cp-item" data-open={open ? "true" : undefined} data-lead={r.lead ? "action" : undefined}>
-    <button type="button" className={`cp-need${isDecision ? " decision" : ""}`} data-id={id ?? undefined} onClick={() => onTask(t)}>
-      {r.yourCall && <small className="cp-call-lead">Your call:</small>}
-      <span ref={titleRef} className="cp-title" style={clampStyle}><RefText text={text} />{r.go === "" && <span className="cp-go" aria-hidden="true"> ›</span>}</span>
-      {r.go && <span className="cp-open-decide">{r.go}<span aria-hidden="true"> ›</span></span>}
-      {r.under && <small className="cp-detail cp-under">{r.under}</small>}
-      {due && <small className={`cp-detail${isOverdue(t.due) ? " overdue" : ""}`}>{due}</small>}
-      {meta && <small className="cp-detail cp-meta">{meta}</small>}</button>
+    {r.lead
+      // the action leads, its links and linked notes still open (outside the row's button); a tap on its words opens the sheet like the row
+      ? <><p ref={titleRef as React.RefObject<HTMLParagraphElement | null>} className="cp-title cp-lead" style={clampStyle} onClick={(e) => { if (!(e.target as Element).closest("a, button")) onTask(t); }}>
+          {splitLinks(cleanText(next)).map((p, i) => "url" in p
+            ? <a key={i} className="cp-link" href={p.url} title={p.url} rel="noreferrer noopener" onClick={(e) => openLink(e, p.url)}>{p.label}</a>
+            : <RefText key={i} text={i === 0 ? p.text.replace(/^\s*\S/, (c) => c.toLocaleUpperCase()) : p.text} onNote={onNote} />)}</p>
+        <button type="button" className="cp-need cp-need-under" data-id={id ?? undefined} aria-label={[text, r.under, due, meta].filter(Boolean).join(". ")} onClick={() => onTask(t)}>{meta_}</button></>
+      : <button type="button" className={`cp-need${isDecision ? " decision" : ""}`} data-id={id ?? undefined} onClick={() => onTask(t)}>
+        {r.yourCall && <small className="cp-call-lead">Your call:</small>}
+        <span ref={titleRef} className="cp-title" style={clampStyle}><RefText text={text} />{r.go === "" && <span className="cp-go" aria-hidden="true"> ›</span>}</span>
+        {r.go && <span className="cp-open-decide">{r.go}<span aria-hidden="true"> ›</span></span>}
+        {meta_}</button>}
     {!next && !isDecision && !actionableTitle(text) && text !== "Open to see what's needed" && <p className="cp-open-to-see">Open to see what's needed</p>}
     {showNext && <NextText text={next} onNote={onNote} lines={open ? undefined : nextLines} open={open} onOpen={setOpen} onClamp={setNextCut} />}
     {more && <button type="button" className="cp-more-next cp-row-more" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? "Less" : "More"}</button>}
@@ -291,7 +299,7 @@ function Body({ stands, ready, note, load, feed, rest = 0, onPrivate, runs, node
   // below 900px the room shows the list's health itself, outside the strip (r14)
   const health = !hideHealth && <LoadHealth load={load} ready={ready} />;
   return <div className="cp-body">
-    {!ready ? (load?.error ? health : <p className="cp-lede">Loading…</p>) : stands && <Stands text={stands.text} ago={stands.ago} />}
+    {!ready ? (load?.error ? <LoadHealth load={load} ready={false} /> : <p className="cp-lede">Loading…</p>) : stands && <Stands text={stands.text} ago={stands.ago} />}
     {ready && <section aria-label="Needs you" className="cp-sec" aria-busy={load?.refreshing || undefined}>
       <h3 className="cp-h">Needs you</h3>
       {feed.rows.length > 0 && <NeedsList needs={feed.rows} fit={fit} onTask={onTask} onDecide={onDecide} onNote={onNote} />}

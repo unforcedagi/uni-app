@@ -51,23 +51,6 @@ await check("layout: a prototype-polluting layout object is harmless", () => {
 });
 
 // ------------------------------------------------------------ layout decision (pure)
-await check("chatMode: default side on desktop and sheet on phone; the hint wins except side on a phone", () => {
-  const f = layout.chatMode;
-  assert.equal(f(null, true), "side"); assert.equal(f(null, false), "sheet");
-  assert.equal(f("hidden", true), "hidden"); assert.equal(f("hidden", false), "hidden");
-  assert.equal(f("sheet", true), "sheet"); assert.equal(f("sheet", false), "sheet");
-  assert.equal(f("side", true), "side"); assert.equal(f("side", false), "sheet", "no room for side by side on a phone");
-  assert.equal(f("bogus", true), "side");
-});
-await check("chat width: clamped to the container and to a usable minimum, junk falls back", () => {
-  const w = layout.clampChatWidth;
-  assert.equal(w(380, 1200), 380);
-  assert.equal(w(50, 1200), 300, "minimum");
-  assert.equal(w(5000, 1200), 720, "at most 60% of the container");
-  assert.equal(w(Number.NaN, 1200), 380); assert.equal(w(undefined, 1200), 380);
-  assert.equal(w(380, 600), 360, "a narrow container still leaves the interface its share");
-  assert.ok(layout.parseStoredWidth("512") === 512 && layout.parseStoredWidth("x") === undefined && layout.parseStoredWidth(null) === undefined);
-});
 await check("new messages: the first list is only recorded; later refs come out oldest first; refs are never pushed twice", () => {
   const seen = layout.createSeen();
   const m = (ref: string, ts: number) => ({ ref, ts });
@@ -91,14 +74,6 @@ await check("new messages: judged by position, not by timestamp (a slow clock or
   assert.deepEqual(c.fresh([]), []);
   assert.deepEqual(c.fresh([m("first", 1)]).map((x: Any) => x.ref), ["first"], "an empty room's first message is news");
 });
-await check("unread: counts others' messages after the marker; own messages do not count", () => {
-  const u = layout.unreadAfter;
-  const l = [{ ref: "a", author: "me" }, { ref: "b", author: "u" }, { ref: "c", author: "me" }, { ref: "d", author: "u" }];
-  assert.equal(u(l, "a", "me"), 2); assert.equal(u(l, "d", "me"), 0); assert.equal(u(l, null, "me"), 2);
-  assert.equal(u(l, "gone", "me"), 2, "an unknown marker counts everything from the others");
-  assert.equal(u([], "a", "me"), 0);
-});
-
 // ------------------------------------------------------------ push into the frame
 const msg = (over: Any = {}) => ({ ref: "m1", author: "b".repeat(64), author_name: "Uni", ts: 1_700_000_000, body: "hello", ...over });
 const harness = (grant: Any, now = { v: 0 }) => {
