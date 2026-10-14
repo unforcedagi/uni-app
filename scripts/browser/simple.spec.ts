@@ -3410,6 +3410,24 @@ test.describe('r21', () => {
     await expect(sheetOf(page)).toBeVisible();
   });
 
+  test('P2 (Codex 6) the Journal has no action strip under every entry: one menu per entry, as in the chat', async ({ page }) => {
+    await page.addInitScript(() => { (window as any).__journal = [1, 2, 3].map((i) => ({ id: `j${i}`, path: `Journal/2026/10-1${i}/09-00 Test entry ${i}`, created_at: `2026-10-1${i}T15:00:00Z`, content: `A test entry, number ${i}.`, source: 'text', entry_id: null, tags: ['journal'], pending: false })); });
+    if (!wide(page)) await page.setViewportSize({ width: 740, height: 360 });
+    await boot(page);
+    const nav = wide(page) ? page.getByRole('navigation', { name: 'Main navigation' }) : null;
+    if (nav) await nav.getByRole('button', { name: 'Journal' }).click();
+    else { await page.getByRole('button', { name: 'Places' }).click(); await page.getByRole('dialog', { name: 'Rooms and places' }).getByRole('button', { name: 'Journal', exact: true }).click(); }
+    const list = page.locator('.journal-list');
+    await expect(list.locator('.journal-entry')).toHaveCount(3);
+    await expect(list.getByRole('button', { name: /Pass (this journal entry )?to Uni|Share to/ })).toHaveCount(0);
+    await expect(list.locator('.journal-entry-actions')).toHaveCount(0);
+    await expect(list.getByRole('button', { name: 'More for this entry' })).toHaveCount(3);
+    await list.getByRole('button', { name: 'More for this entry' }).first().click();
+    const menu = list.getByRole('group', { name: 'Entry actions' });
+    await expect(menu.getByRole('button')).toHaveText(['Pass to Uni', 'Share to a room…']);
+    expect(await calls(page, 'journal_share')).toHaveLength(0);
+  });
+
   test('the 800×600 sheet has a margin and its whole border', async ({ page }) => {
     await page.setViewportSize({ width: 800, height: 600 });
     await boot(page);
