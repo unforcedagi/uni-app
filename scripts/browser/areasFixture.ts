@@ -626,7 +626,8 @@ export const areaCard = (page: Page, name: string) => page.locator(isWide(page) 
 export async function openAreaPage(page: Page, name: string, opts: { app?: boolean } = {}) {
   if (!isWide(page)) { const back = page.locator('.sr-drawer, .note-back[aria-label^="Back to"]').first(); if (await back.count() && !(await page.locator('.th-phone-tree').count())) await back.click(); }
   await areaCard(page, name).click();
-  await expect(page.locator('.sr-title').or(page.locator('.area-bar-title')).first()).toHaveText(name);
+  // r15: a node in a borrowed room is headed by the room; the place opened is the shell's data-node
+  await expect.poll(async () => [await page.locator('.sr').first().getAttribute('data-node').catch(() => null), await page.locator('.sr-title').or(page.locator('.area-bar-title')).first().textContent().catch(() => null)]).toContain(name);
   if (opts.app === false) return;
   // r14: the app opens from the room's header ("App ›") as a view inside the room shell
   const tab = page.locator('.sr-app');
