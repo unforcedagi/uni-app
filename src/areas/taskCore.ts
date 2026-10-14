@@ -55,6 +55,8 @@ export type Task = {
   dependsOn?: string[];
   /** r19: a structured `questions` field: the questions themselves, so no note has to be read for them. */
   questions?: string[];
+  /** r20: reading the note for its question failed (a decision whose title was cut): it is not owed until read ("Couldn't check · Retry"). */
+  askFailed?: boolean;
   /** r19: what reading its supporting notes came to, as of now (set by the list, never stored): see `checkOf`. */
   check?: import("./simpleCore.ts").Check | null;
 };

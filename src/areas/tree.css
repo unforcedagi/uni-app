@@ -606,6 +606,10 @@
 /* the task sheet's actions are its footer: in view however short the window, the sheet's text scrolling above them */
 .task-sheet .task-foot { position: sticky; bottom: 0; z-index: 1; margin: 0 -22px; padding: 10px 22px calc(12px + env(safe-area-inset-bottom)); background: var(--th-paper); border-top: 1px solid var(--th-hair2); }
 .task-sheet { max-height: min(88vh, calc(100dvh - 12px)); }
+/* r20: the footer is the sheet's last child and sits on its bottom edge: nothing after it to scroll behind it */
+.task-sheet { padding-bottom: 0; }
+.task-sheet::after { display: none; }
+.task-sheet .task-foot { margin-top: 12px; }
 @media (max-height: 520px) {
   .task-sheet { padding-top: 14px; }
   .task-sheet h2 { font-size: 18px; }
@@ -616,6 +620,12 @@
 .cp-checkfail { margin: 0; padding: 0 0 8px; font: 400 12.5px/1.4 var(--th-sans); color: var(--th-ink); }
 .cp-item[data-mode="checking"] .cp-title { color: var(--th-ink2); font-style: italic; }
 .wv-tidy .wv-h { color: var(--th-mute); }
+/* r20: Uni's tidying is one quiet line; opened, its records are titles only, read-only (nothing to act on, nothing counted) */
+.wv-tidy-line { all: unset; box-sizing: border-box; min-height: 32px; display: inline-flex; align-items: center; font: 400 13px/1.4 var(--th-sans); color: var(--th-mute); cursor: pointer; }
+.wv-tidy-line:hover { color: var(--th-ink2); text-decoration: underline; text-underline-offset: 3px; }
+.wv-tidy-line:focus-visible { outline: 2px solid var(--th-ink); outline-offset: 2px; }
+.wv-tidy-list { margin: 2px 0 0; padding: 0 0 0 1.1em; font: 400 13px/1.5 var(--th-sans); color: var(--th-mute); }
+.wv-tidy-list li { margin: 2px 0; }
 /* a decision's answers sit at the top of the sheet's footer (its primary action), whole rows, wrapping */
 .task-sheet .task-foot .task-answer, .task-sheet .task-foot .task-answer-box { flex-basis: 100%; margin: 0; padding: 0 0 4px; }
 @media (max-height: 520px) {

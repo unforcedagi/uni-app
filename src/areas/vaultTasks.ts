@@ -5,7 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { buildTaskTree, failureKind, groupOf, LIVE_STATES, nodeFilterKeys, parseNodes, parseTask, subtreePaths, type AnyState, type FailureKind, type Priority, type RawNote, type Task, type TaskTree } from "./taskCore.ts";
 import { ROOT } from "./treeCore.ts";
 import { taskTitle } from "./whereCore.ts";
-import { askFromContent, askOrder, closedBy, hasDeps, isListLine, linkedRefs, needsYou, questionCount, questionsFrom, stepText, taskDeps, type Assessed, type CheckRecord, type CheckState, type SourceRef, type SourceStamp } from "./simpleCore.ts";
+import { askFromContent, askOrder, closedBy, hasDeps, isListLine, linkedRefs, questionCount, questionsFrom, refName, stepText, taskDeps, wouldNeedYou, type Assessed, type CheckRecord, type CheckState, type SourceRef, type SourceStamp } from "./simpleCore.ts";
 
 /** A supporting note couldn't be read (r19): the row says "Couldn't check · Retry", never "nothing there". */
 export class Unavailable extends Error {}
@@ -36,9 +36,22 @@ export async function allPages(page: (offset: number) => Promise<RawNote[]>): Pr
   }
   return { rows, complete: false };
 }
-const ASK_READS = 40;
+/** Reads of supporting notes and questions run this many at a time (r20: bounded in concurrency, never in coverage: the whole queue is read). */
 const ASK_PARALLEL = 6;
 const ASK_KEEP = 150;
+
+/** The record a sheet has open (r20): its reads go first in every queue. */
+let urgent: string | null = null;
+/** Put this task's reads first (its sheet is open); null: none. */
+export const prioritize = (id: string | null) => { urgent = id; };
+/** Run `f` over every item, `n` at a time, the open sheet's first whenever it is still waiting (r20). */
+export async function pool<T extends { id: string }>(items: readonly T[], n: number, f: (t: T) => Promise<void>): Promise<void> {
+  const queue = [...items];
+  const take = () => { const i = urgent ? queue.findIndex((x) => x.id === urgent) : -1; return queue.splice(i >= 0 ? i : 0, 1)[0]; };
+  await Promise.all(Array.from({ length: Math.min(n, queue.length) }, async () => { while (queue.length) await f(take()); }));
+}
+/** A question read for a decision (r20): the words found ("" when the note holds none) at the revision read, or the read failed. */
+export type AskRead = { ask: string; at: string | null; failed?: boolean };
 
 const WRITER_KEY = "uni.tasks.writer.v1";
 /** Who this app writes as in the vault (the `lastUpdatedBy` its own writes come back with), so a task changed from here can say "you". */
@@ -101,23 +114,27 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
    * paragraph of its note (one read each, only for those; decisions, Now and the soonest due first, at most 40, six at a time). Each ask comes
    * with the note's `updatedAt` it was read at (r14): it belongs to the row only at that revision. Called after the list is on screen.
    */
-  async function loadAsks(tasks: readonly Task[]): Promise<Map<string, { ask: string; at: string | null }>> {
-    const asks = new Map<string, { ask: string; at: string | null }>();
+  async function loadAsks(tasks: readonly Task[], onEach?: (id: string, a: AskRead) => void): Promise<Map<string, AskRead>> {
+    const asks = new Map<string, AskRead>();
     // r16: a title whose "(preview: …" tail was dropped also has its question in the note
     const want = tasks.filter((t) => { const tt = taskTitle(t.title); return (t.kind === "decision" || groupOf(t) === "you") && (tt.cut || tt.previewed); });
     for (const t of want) { const a = askFor(t); if (a !== undefined) asks.set(t.id, { ask: a, at: t.updatedAt }); }
-    const cut = askOrder(want.filter((t) => !asks.has(t.id))).slice(0, ASK_READS);
+    // r20: every one is read (a decision not read is not owed, so none may be left out), six at a time, an open sheet's first
+    const cut = askOrder(want.filter((t) => !asks.has(t.id)));
     let fresh = 0;
-    for (let i = 0; i < cut.length; i += ASK_PARALLEL) {
-      await Promise.all(cut.slice(i, i + ASK_PARALLEL).map(async (t) => {
-        try {
-          const r = (await call("vault_note", { vault: name(), noteRef: t.id })) as { note?: RawNote } | null;
-          const ask = askFromContent(typeof r?.note?.content === "string" ? r.note.content : "");
-          const at = typeof r?.note?.updatedAt === "string" ? r.note.updatedAt : null;
-          if (ask) { asks.set(t.id, { ask, at }); askCache.delete(t.id); askCache.set(t.id, { ask, at }); fresh++; }
-        } catch { /* the row opens to decide instead */ }
-      }));
-    }
+    await pool(cut, ASK_PARALLEL, async (t) => {
+      let a: AskRead;
+      try {
+        const r = (await call("vault_note", { vault: name(), noteRef: t.id })) as { note?: RawNote } | null;
+        const ask = askFromContent(typeof r?.note?.content === "string" ? r.note.content : "");
+        const at = typeof r?.note?.updatedAt === "string" ? r.note.updatedAt : null;
+        // r20: a note with no question in it is read too ("" at its revision): it is classified, not left checking
+        a = { ask, at }; askCache.delete(t.id); askCache.set(t.id, { ask, at }); fresh++;
+      } catch {
+        a = { ask: "", at: null, failed: true };
+      }
+      asks.set(t.id, a); onEach?.(t.id, a);
+    });
     if (fresh) keepAsks();
     return asks;
   }
@@ -265,13 +282,17 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
     const done = (result: Assessed) => ({ result, sources });
     // the notes it stands on, read together
     const firm = deps.refs.map((r) => ({ ...r, vault: r.vault ?? home }));
-    const notes = await Promise.all(firm.map((r) => read(r.vault, r.id)));
+    const notes: (RawNote | null)[] = new Array(firm.length).fill(null);
+    await pool(firm.map((r, i) => ({ ...r, id: r.id, i })), ASK_PARALLEL, async (r) => { notes[r.i] = await read(r.vault, r.id); });
     for (let i = 0; i < firm.length; i++) {
-      const n = notes[i]; if (!n) continue;
+      const n = notes[i];
+      // r20: a note it stands on that the vault doesn't have is unresolved: never read past as if it were clear
+      if (!n) return done({ kind: "missing", ref: refName({ vault: firm[i].vault === home ? null : firm[i].vault, id: firm[i].id }) });
       const how = closedBy(meta(n));
       if (how && firm[i].role !== "after") return done({ kind: "closed", how, from: named(firm[i].vault, n) });
       if (!how && firm[i].role === "after") return done({ kind: "waits", from: named(firm[i].vault, n) });
     }
+    if (t.kind === "decision") return done({ kind: "ok" });
     const want = wantIn !== undefined && wantIn !== null ? wantIn : t.questions?.length ? null : questionCount(t.next);
     if (t.questions?.length) {
       const q = questionsFrom("", questionCount(t.next), { questions: t.questions });
@@ -334,10 +355,10 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
   async function loadChecks(tasks: readonly Task[], keysOf: (t: Task) => readonly string[], onEach?: (id: string, s: CheckState) => void): Promise<Map<string, CheckState>> {
     checksLoaded();
     const out = new Map<string, CheckState>();
-    const todo = tasks.filter((t) => t.kind === "task" && needsYou(t) && hasDeps(taskDeps(t))).slice(0, ASK_READS);
+    // r20: every record that would need the user and stands on a note, decisions too, the whole queue (six at a time, an open sheet's first)
+    const todo = tasks.filter((t) => wouldNeedYou(t) && hasDeps(taskDeps(t)));
     let kept = false;
-    for (let i = 0; i < todo.length; i += ASK_PARALLEL) {
-      await Promise.all(todo.slice(i, i + ASK_PARALLEL).map(async (t) => {
+    await pool(todo, ASK_PARALLEL, async (t) => {
         let s: CheckState;
         // verified as of when the reads began (a read that started earlier never outranks one that started later)
         const started = Date.now();
@@ -351,8 +372,7 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
           s = { rec: checkCache.get(t.id) ?? null, failedAt: started };
         }
         out.set(t.id, s); onEach?.(t.id, s);
-      }));
-    }
+    });
     if (kept) keepChecks();
     return out;
   }
@@ -362,7 +382,7 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
     askCache.clear(); checkCache.clear(); askOwner = ""; checkOwner = "\u0000";
     try { for (let i = localStorage.length - 1; i >= 0; i--) { const k = localStorage.key(i); if (k && /^uni\.(asks|checks|support)\.v\d+:/.test(k)) localStorage.removeItem(k); } } catch { /* nothing kept */ }
   }
-  return { forgetKept, setAskOwner, loadTree, loadTagged, loadAsks, loadSubtree, loadTasks, loadSupport, assessTask, loadChecks, cachedChecks, transition, decide, snooze, setPriority, nearSupported: () => nearOk };
+  return { prioritize, forgetKept, setAskOwner, loadTree, loadTagged, loadAsks, loadSubtree, loadTasks, loadSupport, assessTask, loadChecks, cachedChecks, transition, decide, snooze, setPriority, nearSupported: () => nearOk };
 }
 
 export const vaultTasks = createVaultTasks();

@@ -2,7 +2,7 @@
 // Titles are real ones from the refreshed scratch copy (10-14); steps are written in the same shapes, never copied from a note's body.
 // Run: node --experimental-strip-types scripts/simpleR19.test.ts
 import assert from "node:assert/strict";
-import { CHECK_TTL, checkOf, needsFeed, needsYou, stepAudience, taskDeps, tidyReason, tidyRequest, toTidy, withHosts, wouldNeedYou } from "../src/areas/simpleCore.ts";
+import { CHECK_TTL, checkOf, needsFeed, needsYou, stepAudience, taskDeps, tidyReason, toTidy, withHosts, wouldNeedYou } from "../src/areas/simpleCore.ts";
 import { buildTaskTree, parseNodes, parseTask, type Task } from "../src/areas/taskCore.ts";
 import { createVaultTasks } from "../src/areas/vaultTasks.ts";
 
@@ -95,9 +95,9 @@ await check("P1-2 a read fails and then recovers: unavailable (never 'nothing th
   const up = (await vt.loadChecks([t], () => [])).get("t13")!;
   assert.equal(up.failedAt, null);
   assert.deepEqual(checkOf(t, up, Date.now()), { kind: "closed", how: "closed", from: { vault: "uni", id: PLAN, title: "Cutover plan — unforced.dev" } });
-  // a note that doesn't exist is an answer, not a failure: nothing there to doubt
+  // a note that doesn't exist is an answer, not a failure (r20: an unresolved one, "Couldn't find …", never all clear)
   const gone = task("g", "T-25 Pope's AI encyclical: novel public reading experiment", { next: "Send the permission email (draft uni:01M3ZZXEXFNHRJV8KWHAGZZ1KQ)." });
-  assert.deepEqual((await vt.loadChecks([gone], () => [])).get("g")!.rec!.result, { kind: "ok" });
+  assert.deepEqual((await vt.loadChecks([gone], () => [])).get("g")!.rec!.result, { kind: "missing", ref: "01M3ZZXEXF…" });
 });
 
 await check("P1-2 one slow note doesn't hold the others: each task's check lands as it is read", async () => {
@@ -200,12 +200,7 @@ await check("P1-3 tidy records leave Needs you and its count, and are listed apa
   assert.equal(needsFeed(priv, () => ({ path: "Areas/Sadhana", name: "Sadhana" })).tidy!.length, 0);
 });
 
-await check("P1-3 \"Ask Uni to fix this record\" says what to fix, by the task's id, and is never the action itself", () => {
-  const f = task("f", "T-111 Fractal flow test: real work in area rooms, check updates…", { next: "Fractal flow test: a; b" });
-  assert.equal(tidyRequest(f, "outline"), "Please fix T-111 (Fractal flow test: real work in area rooms, check updates): it is a list of notes, not one step you can finish. Rewrite it as one action I can finish, with a clear end, or close it.");
-  const m = task("m", "Mail: approve a test week, not an immediate cutover", {}, "decision");
-  assert.equal(tidyRequest(m, "proposal"), "Please fix decision “Mail: approve a test week, not an immediate cutover”: it states a proposal but asks me nothing. Add the question and its options (tasks.py decide new), or close it if it no longer needs me.");
-});
+// r20: "Ask Uni to fix this record" is gone (Uni's tidying stays Uni's): see simpleR20.test.ts
 
 await check("found in the real app: a sheet heading keeps a link as its host, and a room named as where a block is isn't who the step speaks to", () => {
   assert.equal(withHosts("Look at https://cohere-signup-staging.unforced.workers.dev/?look=ecology on phone, then forward #cohere's 'For Eileen' block"), "Look at cohere-signup-staging.unforced.workers.dev on phone, then forward #cohere's 'For Eileen' block");

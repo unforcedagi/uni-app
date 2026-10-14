@@ -19,9 +19,22 @@ export const waitsOnMe = (t: Pick<Task, "owner" | "waitingOn">): boolean => isMe
  * the user's own tasks, and (r17) any task whose `waiting_on` names the user whatever its owner, at Now or Soon (unsorted is Soon); live,
  * never Someday. A room's or Uni's own drafting that waits on no one is not theirs (r16). Snoozed and finished tasks are dropped before.
  */
-export function needsYou(t: Pick<Task, "kind" | "owner" | "waitingOn" | "priority" | "state"> & Partial<Pick<Task, "title" | "next" | "options" | "ask" | "askAt" | "updatedAt">>): boolean {
-  // r19: a record that isn't a real request is Uni's to tidy, listed apart and never counted here
-  return wouldNeedYou(t) && !tidyReason(t);
+export function needsYou(t: Pick<Task, "kind" | "owner" | "waitingOn" | "priority" | "state"> & Partial<Pick<Task, "title" | "next" | "options" | "ask" | "askAt" | "updatedAt" | "askFailed" | "check">>): boolean {
+  // r19: a record that isn't a real request is Uni's to tidy, listed apart and never counted here. r20: nor is a decision not read yet
+  return wouldNeedYou(t) && !tidyReason(t) && !unknownDecision(t);
+}
+/**
+ * A decision whose full record isn't read yet (r20, Codex P1-2): its title was cut and its note's question isn't read at this revision, the
+ * read failed, or the notes it stands on (`source`, `depends_on`) are still being read. It is "Checking what's needed…": not owed, not in the
+ * count or the dots, and never "Decide: …", until it is classified (a request, or Uni's to tidy).
+ */
+export function unknownDecision(t: Partial<Pick<Task, "kind" | "title" | "ask" | "askAt" | "updatedAt" | "askFailed" | "check">>): boolean {
+  if (t.kind !== "decision" || typeof t.title !== "string") return false;
+  if (t.askFailed) return true;
+  if (t.check && (t.check.kind === "checking" || t.check.kind === "unavailable")) return true;
+  const tt = taskTitle(t.title);
+  if (!(tt.cut || tt.previewed)) return false;
+  return !(typeof t.ask === "string" && !!t.updatedAt && t.askAt === t.updatedAt);
 }
 /** The r12 rule before r19's tidy check: open decisions, the user's own tasks and tasks waiting on them, at Now or Soon. */
 export function wouldNeedYou(t: Pick<Task, "kind" | "owner" | "waitingOn" | "priority" | "state">): boolean {
@@ -72,7 +85,9 @@ export type PrivateNeed = { key: string; count: number; place: string; open: { p
 /** Needs you at one level, the one list every surface reads (r13): the companion, "+N in areas", the dots and the work view add up to `total`. */
 export type NeedsFeed = { rows: Task[]; privates: PrivateNeed[]; total: number;
   /** r19: records Uni has to tidy (not real requests yet), outside private areas; never in `total`. */
-  tidy?: Task[] };
+  tidy?: Task[];
+  /** r20: decisions not read yet ("Checking what's needed…"), outside private areas: shown after the rows, never in `total` or the dots. */
+  pending?: Task[] };
 
 /** Now before Soon (overdue first), then by due date (undated last), then a decision before a task, then by title. */
 export function rankNeeds(list: readonly Task[], today = localDay()): Task[] {
@@ -95,8 +110,10 @@ export function needsFeed(tasks: readonly Task[], privateOf: (node: string) => P
     const g = by.get(p.path);
     if (g) g.count++; else by.set(p.path, { key: p.path, count: 1, place: p.name, open: { path: p.path } });
   }
-  const tidy = tasks.filter((t) => toTidy(t) && (!privateOf(t.node) || privateOf(t.node)?.path === self?.path));
-  return { rows, privates: [...by.values()], total: all.length, tidy };
+  const here = (t: Task) => !privateOf(t.node) || privateOf(t.node)?.path === self?.path;
+  const tidy = tasks.filter((t) => toTidy(t) && here(t));
+  const pending = rankNeeds(tasks.filter((t) => wouldNeedYou(t) && unknownDecision(t) && here(t)), today);
+  return { rows, privates: [...by.values()], total: all.length, tidy, pending };
 }
 
 /** Rows Uni's own panel shows (r17): the rest, private items included, are one "N more ›" to the work view. */
@@ -111,7 +128,9 @@ export function uniPanel(feed: NeedsFeed, max = UNI_ROWS): NeedsFeed & { rest: n
   const areas = feed.rows.filter((t) => t.node !== ROOT);
   const rows = [...own, ...areas].slice(0, max);
   const privateCount = feed.privates.reduce((n, p) => n + p.count, 0);
-  return { rows, privates: [], total: feed.total, rest: Math.max(0, feed.total - rows.length), privateCount };
+  // r20: a decision still being read fills a row only where nothing owed is left to show; it is never counted
+  const pending = (feed.pending ?? []).slice(0, Math.max(0, max - rows.length));
+  return { rows, privates: [], total: feed.total, rest: Math.max(0, feed.total - rows.length), privateCount, pending };
 }
 /** "Includes 1 in a private area": the "N more ›" link's tooltip, when private items are folded into its count. */
 export const privateNote = (n: number): string | null => (n <= 0 ? null : n === 1 ? "Includes 1 item in a private area" : `Includes ${n} items in private areas`);
@@ -121,11 +140,27 @@ export function privateLabel(p: Pick<PrivateNeed, "count" | "place">): string {
   return `${p.place}: ${p.count} for you`;
 }
 
-const ACTION_VERBS = /^(say|reply|tell|answer|send|edit|approve|confirm|review|decide|sign|pay|call|email|write|read|pick|choose|check|book|schedule|draft|merge|deploy|ship|test|ask|give|post|share|record|update|fix|add|set|move|file|submit|finish|meet|join|buy|order|cancel|renew|follow|try|look|go|let|ping|invite|publish|upload|run|print|prepare|bring|forward|accept|decline|reject)(?=[\s:,]|$)/i;
-/** A next step that names something to do ("Say go to deploy #38 + #58"), not a status ("Waiting on Kevin"): the task sheet leads with it. */
+const ACTION_VERBS = /^(say|reply|tell|answer|send|edit|approve|confirm|review|decide|sign|pay|call|email|write|read|pick|choose|check|book|schedule|draft|merge|deploy|ship|test|ask|give|post|share|record|update|fix|add|set|move|file|submit|finish|meet|join|buy|order|cancel|renew|follow|try|look|go|let|ping|invite|publish|upload|run|print|prepare|bring|forward|accept|decline|reject|ok|okay|listen|watch|talk|grade|fill|keep|archive|close|change)(?=[\s:,]|$)/i;
+/**
+ * A date or time a step starts with as its label (r20): "Wed 10-14:", "10-05 09:04:", "Oct 14 —", "2026-10-14:", "Today:". A row never leads with
+ * it: the action leads, and the date is the due cue (or, with no due date, the subtitle).
+ */
+const DATE_PREFIX = /^(?:(?:(?:mon|tue|tues|wed|thu|thur|thurs|fri|sat|sun)(?:day|nesday|sday|urday)?\.?,?\s+)?(?:\d{4}-\d{2}-\d{2}|\d{1,2}[-/]\d{1,2}(?:[-/]\d{2,4})?|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+\d{1,2})|(?:mon|tue|tues|wed|thu|thur|thurs|fri|sat|sun)(?:day|nesday|sday|urday)?|today|tonight|tomorrow|this week)(?:,?\s+\d{1,2}[:.]\d{2})?\s*(?::|\s[—–-])\s+(?=\S)/i;
+/** The step without a leading date label ("Wed 10-14: say go…" → "say go…"), and the label. */
+export function datePrefix(step: string): { prefix: string | null; rest: string } {
+  const m = DATE_PREFIX.exec(step);
+  return m ? { prefix: m[0].replace(/\s*(?::|[—–-])\s*$/, "").trim(), rest: step.slice(m[0].length) } : { prefix: null, rest: step };
+}
+/** A step as plain words: markdown emphasis dropped, but an underscore inside a word kept ("BV_CHAT_ENABLED"). */
+const plainStep = (next: string | null | undefined): string => (next ?? "").replace(/[*`>]/g, "").replace(/(^|[\s(])_+|_+(?=[\s).,;:!?]|$)/g, "$1").replace(/\s+/g, " ").trim();
+/** A step written as a label that asks ("Production go: gateway deploy, merge #55"): the label names what is asked for (r20). */
+const ASKING_LABEL = /^([^:;]{3,40}):\s+\S/;
+const labelAsks = (step: string): boolean => { const m = ASKING_LABEL.exec(step); return !!m && /\b(?:go|ok|okay|yes|no|approve|approval|sign[- ]?off|decide|decision|pick|choose|review|confirm|answer|reply|call)\b/i.test(m[1]); };
+/** A next step that names something to do ("Say go to deploy #38 + #58"), not a status ("Waiting on Kevin"): the task sheet leads with it.
+ *  r20: a leading date label is not the action ("Wed 10-14: say go…" leads with "Say go…"); a label that asks ("Production go: …") is one. */
 export function actionLead(next: string | null | undefined): string | null {
-  const t = (next ?? "").replace(/[*_`>]/g, "").replace(/\s+/g, " ").trim();
-  if (!t || !ACTION_VERBS.test(t)) return null;
+  const t = datePrefix(plainStep(next)).rest;
+  if (!t || (!ACTION_VERBS.test(t) && !labelAsks(t))) return null;
   return t[0].toLocaleUpperCase() + t.slice(1);
 }
 /**
@@ -146,7 +181,8 @@ const slugOf = (s: string | null | undefined) => (s ?? "").trim().replace(/^#/, 
 /** A recipient written as a name ("to Christian", "Christian the…", "Benya + Eileen"): a capitalised word that is not Uni, the room or a channel. */
 const namesPerson = (rest: string) => /^(?:to\s+|with\s+)?(?!uni\b|main\b|the\b|this\b|everyone\b|#)\p{Lu}[\p{L}'’.-]*/u.test(rest);
 export function stepAudience(next: string | null | undefined, room: string | null = null): Audience | null {
-  const step = (next ?? "").replace(/[*_`>]/g, "").replace(/\s+/g, " ").trim();
+  // r20: a leading date label ("Wed 10-14: say go…") is not who the step speaks to
+  const step = datePrefix((next ?? "").replace(/[*_`>]/g, "").replace(/\s+/g, " ").trim()).rest;
   if (!step) return null;
   const here = slugOf(room);
   // r19: a room named as where something is ("#cohere's 'For Eileen' block") is not who the step speaks to
@@ -158,7 +194,8 @@ export function stepAudience(next: string | null | undefined, room: string | nul
   const roomWord = !!m && /^(?:go|yes|no|ok|okay|stop|wait|done|hold|ship it|start\b|["“'‘])/i.test(m[1]);
   if (m && (roomWord || !/\bto\s+\p{Lu}[\p{L}'’.-]*(?:\s|$|[,.])/u.test(m[1].replace(/\bto\s+(?:uni|the room)\b/gi, "")))) {
     const rest = m[1].replace(/^(?:with\s+|to\s+(?:the\s+)?room\s+)/i, "");
-    return { kind: "room", text: QUESTION_WORD.test(rest) ? "" : capFirst(unquote(rest)) };
+    // r20: the words to say are the step's first clause ("Go on prod deploy of #38 + #58"), never the notes after it ("; Eileen signs off…")
+    return { kind: "room", text: QUESTION_WORD.test(rest) ? "" : capFirst(unquote(firstClause(rest))) };
   }
   // "Tell Uni …", "Tell the room …", "Ask Uni to …", "Reply to Uni …"
   m = /^(?:tell|ask|reply to|answer|message|ping)\s+(uni|main|the room|this room|the channel|everyone here)\b[\s:,-]*(?:to\s+|that\s+)?(.*)$/i.exec(step);
@@ -319,6 +356,8 @@ export const isOverdue = (due: string | null | undefined, today = localDay()): b
 /** "due Oct 14", or "was due Oct 12" once it has passed. Null without a date. */
 export function dueLine(due: string | null | undefined, today = localDay()): string | null {
   if (!due) return null;
+  // r20: the cue a row leads its subtitle with reads as the day it is
+  if (due.slice(0, 10) === today) return "due today";
   const d = new Date(`${due}T12:00:00`);
   if (Number.isNaN(d.getTime())) return due;
   return `${isOverdue(due, today) ? "was due" : "due"} ${d.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
@@ -558,19 +597,21 @@ export function stripRoom(m: { room: number; above: number; line: number; compos
 export type DepRef = LinkRef & { role: "step" | "source" | "after" };
 export type TaskDeps = { refs: DepRef[]; questions: number | null };
 export function taskDeps(t: Pick<Task, "id" | "kind" | "next"> & { sourceRef?: string | null; dependsOn?: readonly string[]; questions?: readonly string[] }): TaskDeps {
-  if (t.kind !== "task") return { refs: [], questions: null };
   const out: DepRef[] = [];
   const add = (r: LinkRef, role: DepRef["role"]) => { if (r.id !== t.id && !out.some((o) => o.id === r.id && o.vault === r.vault)) out.push({ ...r, role }); };
-  for (const r of linkedRefs(t.next)) add(r, "step");
+  // r20: a decision has the same contract for what it stands on (`source`, `depends_on`); its question is read on its own (`unknownDecision`)
+  if (t.kind === "task") for (const r of linkedRefs(t.next)) add(r, "step");
   for (const r of linkedRefs(t.sourceRef ?? "")) add(r, "source");
   for (const d of t.dependsOn ?? []) for (const r of linkedRefs(d)) add(r, "after");
-  const q = questionCount(t.next);
-  return { refs: out.slice(0, 6), questions: q !== null && !t.questions?.length ? q : null };
+  // r20: every reference is read (never the first six only): the reads are bounded in how many run at once, not in how many there are
+  const q = t.kind === "task" ? questionCount(t.next) : null;
+  return { refs: out, questions: q !== null && !t.questions?.length ? q : null };
 }
 export const hasDeps = (d: TaskDeps): boolean => d.refs.length > 0 || d.questions !== null;
 
-/** What reading a task's supporting notes came to (r19): its source state (`Support`), all clear (`ok`), or a `depends_on` note still open. */
-export type Assessed = Support | { kind: "ok" } | { kind: "waits"; from: SourceRef };
+/** What reading a task's supporting notes came to (r19): its source state (`Support`), all clear (`ok`), or a `depends_on` note still open.
+ *  r20: `missing`: a note it stands on isn't in the vault ("Couldn't find “Cutover plan” · Open the task"): unresolved, never all clear. */
+export type Assessed = Support | { kind: "ok" } | { kind: "waits"; from: SourceRef } | { kind: "missing"; ref: string };
 /** One note read for it, at the revision read: the record says which revisions it stands on. */
 export type SourceStamp = { vault: string; id: string; rev: string | null };
 /**
@@ -599,6 +640,11 @@ export const CHECKING = "Checking what's needed…";
 export const CHECK_FAILED = "Couldn't check";
 /** "Waits on “Mail plan v2” first": a `depends_on` note that is still open (r19). */
 export const waitsLine = (s: Extract<Assessed, { kind: "waits" }>): string => `Waits on “${s.from.title}” first`;
+/** How a reference that can't be found is named (r20): a path by its last part, an id as written (its vault, the first characters). */
+export const refName = (r: LinkRef): string => (/^[0-9A-HJKMNP-TV-Z]{26}$/.test(r.id) ? `${r.vault ? `${r.vault}:` : ""}${r.id.slice(0, 10)}…` : `“${r.id.split("/").filter(Boolean).pop() ?? r.id}”`);
+/** "Couldn't find “Cutover plan”": a note a task or decision stands on that the vault doesn't have (r20). */
+export const missingLine = (s: Extract<Assessed, { kind: "missing" }>): string => `Couldn't find ${s.ref}`;
+export const OPEN_TASK = "Open the task";
 
 /**
  * Records that aren't real requests (r19, P1-3): a Needs-you item that names no concrete action Aaron can finish. Conservative and tested on
@@ -650,11 +696,90 @@ export const TIDY_SAYS: Record<TidyReason, string> = {
   status: "Its step says the work is over, but the record is still open.",
   proposal: "This states a proposal but asks you nothing: it has no question and no options to pick.",
 };
-/** The request "Ask Uni to fix this record" types in the owning room (never sent). */
-export function tidyRequest(t: Pick<Task, "kind" | "title">, why: TidyReason): string {
+
+// ------------------------------------------------------------------------------------------------- r20
+/** Where a step's first clause ends (r20): ";", a spaced dash, " then ", ": " or a sentence's end, the first after `from`. */
+const CLAUSE_END = /;|\s[—–-]\s|,?\s+then\s|:\s|[.!?](?=\s|$)/gi;
+/** Words that end a verb phrase's object ("Edit and send the ATLAS follow-up | to Mark…"): a preposition or a joining word. */
+const OBJECT_END = /^(?:to|from|with|in|on|at|for|by|about|before|after|via|into|onto|over|under|through|if|when|so|because|then|and|or|but|while|until|unless|once|as|than|per)$/i;
+/** A word that belongs to the verb before its object ("Look at", "Reply to", "Follow up", "Sign off"). */
+const PARTICLE = /^(?:at|to|up|out|off|back|over|through|in|on)$/i;
+/**
+ * The verb phrase a step leads with (r20): the verb (or two joined, "Edit and send", "Approve or change"), a particle ("Look at"), and its object
+ * up to the first preposition, joining word, bracket or comma ("Tell Uni who pays", "Edit and send the ATLAS follow-up"). A row never cuts inside
+ * it. At most eight words.
+ */
+export function verbPhrase(action: string): string {
+  // a label ("Production go:", "Reply:") is part of the phrase, with the verb phrase after it
+  const lab = /^([^:;]{1,40}):\s+(\S.*)$/.exec(action);
+  if (lab && ((labelAsks(action) && !ACTION_VERBS.test(lab[1])) || (/^\S+$/.test(lab[1]) && ACTION_VERBS.test(lab[1])))) return `${lab[1]}: ${verbPhrase(lab[2])}`.replace(/[,;:.]+$/, "");
+  const words = action.split(" ").filter(Boolean);
+  if (!words.length) return "";
+  const out = [words[0]];
+  let i = 1;
+  if (words[i] && /^(?:and|or)$/i.test(words[i]) && words[i + 1] && ACTION_VERBS.test(words[i + 1])) { out.push(words[i], words[i + 1]); i += 2; }
+  if (words[i] && PARTICLE.test(words[i]) && words[i + 1]) { out.push(words[i]); i++; }
+  for (; i < words.length && out.length < 8; i++) {
+    const w = words[i];
+    if (/^[([{]/.test(w) || OBJECT_END.test(w)) break;
+    if (/[,;:]$/.test(w)) { out.push(w.replace(/[,;:]+$/, "")); break; }
+    out.push(w);
+  }
+  return out.join(" ").replace(/[,;:.]+$/, "");
+}
+/** A text's first clause (r20): up to the first ";", spaced dash, " then ", ": " or sentence end at or after `from`; a cut inside "(…)" backs up
+ *  to before the bracket. Trailing separators are dropped. */
+export function firstClause(text: string, from = 0): string {
+  const t = text.replace(/\s+/g, " ").trim();
+  CLAUSE_END.lastIndex = Math.max(0, from);
+  let m: RegExpExecArray | null;
+  let at = t.length;
+  while ((m = CLAUSE_END.exec(t))) {
+    // a sentence end inside a word or a number ("unforced.dev", "v1.2") was skipped by the lookahead; "e.g." and "i.e." are not ends
+    if (/^[.!?]$/.test(m[0]) && /\b(?:e\.g|i\.e|etc|vs|approx|incl)$/i.test(t.slice(0, m.index))) continue;
+    at = m[0] === "." || m[0] === "!" || m[0] === "?" ? m.index + 1 : m.index;
+    break;
+  }
+  let out = t.slice(0, at);
+  const open = out.lastIndexOf("(");
+  if (open > from && out.indexOf(")", open) < 0) out = out.slice(0, open);
+  return out.replace(/[\s,;:—–-]+$/, "").trim();
+}
+/**
+ * What a row leads with (r20, both critics): the action, never the stored sentence. A leading date label is dropped (it is the due cue, or the
+ * subtitle); then the verb phrase and its object, to the end of the first clause ("Review the Woven Web handoff draft, fill the unknowns" — "then
+ * talk with Eileen yourself" is the sheet's). `verb`: the part a two-line row never cuts. `rest`: what the sheet keeps. Null: not an action.
+ */
+export type RowAction = { text: string; verb: string; rest: string; prefix: string | null };
+export function rowAction(next: string | null | undefined): RowAction | null {
+  const lead = actionLead(next);
+  if (!lead) return null;
+  const { prefix } = datePrefix(plainStep(next));
+  const verb = verbPhrase(lead);
+  const text = firstClause(lead, Math.min(verb.length, lead.length));
+  const kept = text.length >= verb.length ? text : verb;
+  return { text: kept, verb, rest: lead.slice(kept.length).replace(/^[\s,;:—–-]+/, "").trim(), prefix };
+}
+const sig = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}\s-]/gu, " ").split(/\s+/).filter((w) => w.length > 2 && !/^(?:the|and|for|with|from|your|this|that|into|onto)$/.test(w));
+/** Whether a title mostly says again what the action says ("Send the ATLAS Oct 12 follow-up email" under "Edit and send the ATLAS follow-up…"). */
+export function repeats(title: string, action: string): boolean {
+  const a = new Set(sig(action).map((w) => w.replace(/s$/, "")));
+  const t = sig(title).map((w) => w.replace(/s$/, ""));
+  if (!t.length) return true;
+  return t.filter((w) => a.has(w)).length / t.length >= 0.5;
+}
+/** A title short and whole enough to say where an action belongs ("COhere opens Oct 15"); a long or cut one is vague. */
+export const SUB_TITLE_MAX = 40;
+/**
+ * A row's subtitle (r20): the due cue ("due today", "was due Oct 13"; else the step's date label), after where it belongs: the task's own title
+ * when it is short, whole and says something the action doesn't, else its area when the row is shown outside it. Never a cut or vague title
+ * ("Companion Today redesign…"), never one that repeats the action. Null: nothing to add.
+ */
+export function rowSub(t: Pick<Task, "title" | "due">, action: RowAction, area: string | null = null, today = localDay()): string | null {
   const tt = taskTitle(t.title);
-  const name = tt.id ? `${tt.id} (${cutWords(withoutCut(tt.rest), 80)})` : `“${cutWords(withoutCut(tt.rest), 80)}”`;
-  return t.kind === "decision"
-    ? `Please fix decision ${name}: it states a proposal but asks me nothing. Add the question and its options (tasks.py decide new), or close it if it no longer needs me.`
-    : `Please fix ${name}: ${TIDY_SAYS[why].replace(/^This record is|^This is/, "it is").replace(/^Its step/, "its step").replace(/\.$/, "")}. Rewrite it as one action I can finish, with a clear end, or close it.`;
+  const title = tt.rest.replace(/\s+/g, " ").trim();
+  const whole = !tt.cut && !tt.previewed && title.length <= SUB_TITLE_MAX && !repeats(title, action.text);
+  const where = whole ? title : area;
+  const when = dueLine(t.due, today) ?? action.prefix;
+  return [where, when].filter(Boolean).join(" · ") || null;
 }

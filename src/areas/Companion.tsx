@@ -13,7 +13,7 @@ import { isActiveRun, type Run } from "./steerCore";
 import { ownerLabel, type Task } from "./taskCore";
 import { taskTitle } from "./whereCore";
 import { splitLinks } from "./linkText";
-import { actionableTitle, actionLead, answerChoices, answerLabel, askLead, askPreview, checkLine, CHECK_FAILED, CHECKING, DANGLING, decideLine, stripRoom, decisionQuestion, dueLine, fitsRow, isOverdue, lineBudget, OPEN_TO_ANSWER, privateLabel, standsHeading, TIDY_LINE, toTidy, waitsLine, waitsOnMe, withHosts, withoutCut, rowAsk, type Choice, type NeedsFeed, type PrivateNeed, type Support } from "./simpleCore";
+import { actionableTitle, answerChoices, answerLabel, askLead, askPreview, checkLine, CHECK_FAILED, CHECKING, DANGLING, decideLine, stripRoom, decisionQuestion, dueLine, firstClause, fitsRow, isOverdue, lineBudget, missingLine, OPEN_TASK, OPEN_TO_ANSWER, privateLabel, rowAction, rowSub, standsHeading, TIDY_LINE, toTidy, unknownDecision, verbPhrase, waitsLine, waitsOnMe, withHosts, withoutCut, rowAsk, type Choice, type NeedsFeed, type PrivateNeed, type RowAction, type Support } from "./simpleCore";
 import { requestRecheck } from "./useTasks";
 
 const KEYS = { side: "uni.companion.side.v1", sideNarrow: "uni.companion.side.narrow.v1", strip: "uni.companion.strip.v1" } as const;
@@ -76,13 +76,15 @@ export type CompanionProps = {
   onEverything: (() => void) | null;
   /** Opens a linked note (in its own vault) from a title or next step. */
   onNote?: (ref: NoteRef) => void;
+  /** r20: the area a row belongs to when it is shown outside it (its subtitle names it); null inside it. */
+  placeOf?: (t: Task) => string | null;
 };
 export type TaskLoad = { error: string | null; /** The task tree (the nodes) could not be read: the list may be placed wrongly. */ treeError?: string | null; refreshing: boolean; lastOk: number | null; complete: boolean; retry: () => void;
   /** The rows are the device's copy from this moment, being read again (r16). */ savedAt?: number | null;
   /** The read has run past 8 seconds (r16): "Still loading · Retry". */ slow?: boolean };
 
-/** Lines an action leads with before "…" and More (r16: 4, so an instruction reads whole at the side panel's 236px; r15 had 2). */
-export const ACTION_LINES = 4;
+/** Lines an action leads with before "…" (r20: two, built from the action's first clause so what is cut is the object, never the verb). */
+export const ACTION_LINES = 2;
 /** Options shown inline on a decision; more are behind the item. */
 const OPTS_SHOWN = 3;
 const URL_RE = /https?:\/\/\S+|\bwww\.\S+/g;
@@ -148,7 +150,9 @@ const wordTokens = (text: string) => text.split(/\s+/).filter(Boolean).map((w, i
  * Text clamped at `lines` lines that ends on a whole word (r15): every line full, then "…" after the last word that fits, never inside a
  * word, a link or a note's title. Drawn whole once to measure (before paint), then cut; a new width or text measures again.
  */
-function WordClamp({ tokens, lines, open, textKey, onCut, elRef, className, onClick, tag = "p", title }: { tokens: { node: React.ReactNode; space: boolean }[]; lines: number; open: boolean; textKey: string; title?: string;
+function WordClamp({ tokens, lines, open, textKey, onCut, elRef, className, onClick, tag = "p", title, keep = 0 }: { tokens: { node: React.ReactNode; space: boolean }[]; lines: number; open: boolean; textKey: string; title?: string;
+  /** r20: the first `keep` tokens (a row's verb phrase) are never cut: a cut falls inside the object, after them */
+  keep?: number;
   onCut: (cut: boolean) => void; elRef: React.RefObject<HTMLParagraphElement | null>; className: string; onClick: (e: React.MouseEvent) => void; /** "span" inside a button */ tag?: "p" | "span" }) {
   const [cut, setCut] = useState<number | null>(null);
   const [width, setWidth] = useState(0);
@@ -174,6 +178,9 @@ function WordClamp({ tokens, lines, open, textKey, onCut, elRef, className, onCl
     // r17: never end on a hanging word ("…to the …") or a word that only leads into the rest ("Michael: …")
     const plain = (i: number) => (typeof tokens[i]?.node === "string" ? (tokens[i].node as string) : null);
     while (k > 1 && plain(k - 1) !== null && (DANGLING_WORD.test(plain(k - 1)!.replace(/[,;:(\[–—-]+$/, "")) || /^[,;:–—&+·•|/-]+$/.test(plain(k - 1)!))) k--;
+    // r20: never inside the verb phrase ("Edit and send the ATLAS follow-up"): the cut keeps it whole, and the verb
+    k = Math.max(k, Math.min(keep, words.length));
+    if (k >= words.length) { onCut(false); return; }
     setCut(Math.max(1, k)); onCut(true);
   });
   useLayoutEffect(() => {
@@ -253,19 +260,38 @@ export function DecisionAnswer({ t, label, onDecide, max = Infinity, onMore, cla
 /** A task's question source (r18), as its current check found it (r19: `check`, set by the list; null when it stands on no note or isn't read). */
 export const supportOf = (t: Pick<Task, "check">): Support | null => (t.check && (t.check.kind === "list" || t.check.kind === "closed" || t.check.kind === "unclear") ? t.check : null);
 
-export type RowMode = "answers" | "preview" | "call" | "decide" | "lead" | "title" | "check" | "checking" | "unavailable" | "waits" | "tidy";
+export type RowMode = "answers" | "preview" | "call" | "decide" | "lead" | "title" | "check" | "checking" | "unavailable" | "waits" | "tidy" | "missing";
+export type RowLead = { text: string; under: string | null; go: string | null; answers: boolean; yourCall: boolean; lead: boolean; mode: RowMode;
+  /** r20: a row that leads with an action: the action (its first clause), the verb phrase a cut never enters, and its subtitle (with the due cue) */
+  action?: RowAction | null };
 /** What a Needs-you row leads with (r14), the same in the companion, the work view and the sheet: a task's action when its next step names one
  *  (the title, its event or project, is a quiet line under it); a decision's whole question; else the title. r16: a decision whose question is
- *  too long for a row is its first two lines of words and "Open to decide ›" (`preview`); one with no whole question known is "Decide: <first
- *  words> ›" (`decide`). r18: a decision with no stored options is "Your call: <question> ›" (`call`), answered in words in its sheet; a task
+ *  too long for a row is its first two lines of words and "Open to decide" (`preview`); one with no whole question known is "Decide: <first
+ *  words>" (`decide`). r18: a decision with no stored options is "Your call: <question>" (`call`), answered in words in its sheet; a task
  *  whose source note is closed is "Check: … is closed — still needed?" (`check`), never its extracted action. r19: a task whose supporting notes
  *  aren't read yet is "Checking what's needed…" (`checking`), one whose read failed shows its title and "Couldn't check · Retry"
  *  (`unavailable`), one whose `depends_on` note is open "Waits on “…” first" (`waits`); none asserts the action. A record Uni has to tidy
- *  (`tidy`) is its title with why, never an action. The title is the shared clean one. */
-export function rowLead(t: Task): { text: string; under: string | null; go: string | null; answers: boolean; yourCall: boolean; lead: boolean; mode: RowMode } {
+ *  (`tidy`) is its title with why, never an action. r20: a decision whose question isn't read yet is "Checking what's needed…" too, never
+ *  "Decide: …"; a note it stands on that can't be found is "Couldn't find … · Open the task" (`missing`); a decision has the same contract for
+ *  what it stands on as a task. An action row leads with the action's first clause (`rowAction`), its subtitle the title or area and the due
+ *  cue (`rowSub`). `area`: the row's area when it is shown outside it. */
+export function rowLead(t: Task, area: string | null = null): RowLead {
   const tt = taskTitle(cleanText(t.title));
   const full = tt.rest;
   const next = t.next.trim();
+  const ck = t.check ?? null;
+  const words = withoutCut(askOf(full)) || full;
+  const quiet = (text: string, under: string | null, mode: RowMode): RowLead => ({ text, under, go: mode === "check" || mode === "waits" || mode === "missing" ? "" : null, answers: false, yourCall: false, lead: false, mode });
+  // r20: nothing is owed until it is known: a decision whose record isn't read yet (or couldn't be) asserts nothing
+  if (t.kind === "decision" && (t.askFailed || ck?.kind === "unavailable")) return quiet(words, null, "unavailable");
+  if (t.kind === "decision" && unknownDecision(t)) return quiet(CHECKING, words, "checking");
+  const ask = rowAsk(askOf(full), t.ask, false, !!next, tt.cut);
+  if (ck?.kind === "checking") return quiet(CHECKING, ask.text || null, "checking");
+  if (ck?.kind === "unavailable") return quiet(ask.text || "This task", null, "unavailable");
+  // r20: a missing note it stands on is unresolved: no action, no "I did this"; the way on is the task itself
+  if (ck?.kind === "missing") return quiet(`${missingLine(ck)} · ${OPEN_TASK}`, t.kind === "decision" ? words : ask.text || null, "missing");
+  if (ck?.kind === "closed") return quiet(checkLine(ck), t.kind === "decision" ? words : ask.text || null, "check");
+  if (ck?.kind === "waits") return quiet(waitsLine(ck), t.kind === "decision" ? words : ask.text || null, "waits");
   const why = toTidy(t);
   if (why) return { text: t.kind === "decision" ? decisionAsk(t).text : askOf(full), under: TIDY_LINE[why], go: "", answers: false, yourCall: false, lead: false, mode: "tidy" };
   if (t.kind === "decision") {
@@ -275,19 +301,16 @@ export function rowLead(t: Task): { text: string; under: string | null; go: stri
     if (!dq.fits) return { text: dq.preview, under: null, go: "Open to decide", answers: false, yourCall: dq.yourCall, lead: false, mode: "preview" };
     return { text: dq.text, under: null, go: null, answers: true, yourCall: dq.yourCall, lead: false, mode: "answers" };
   }
-  const ask = rowAsk(askOf(full), t.ask, false, !!next, tt.cut);
-  const ck = t.check ?? null;
-  if (ck?.kind === "checking") return { text: CHECKING, under: ask.text || null, go: null, answers: false, yourCall: false, lead: false, mode: "checking" };
-  if (ck?.kind === "unavailable") return { text: ask.text || "This task", under: null, go: null, answers: false, yourCall: false, lead: false, mode: "unavailable" };
-  if (ck?.kind === "closed") return { text: checkLine(ck), under: ask.text || null, go: "", answers: false, yourCall: false, lead: false, mode: "check" };
-  if (ck?.kind === "waits") return { text: waitsLine(ck), under: ask.text || null, go: "", answers: false, yourCall: false, lead: false, mode: "waits" };
   // r17: someone else's task that waits on the user leads with what it asks of them; the task itself is the quiet line under it
   const theirs = waitsOnMe(t);
-  const context = theirs ? [`From ${ownerLabel(t.owner)}`, ask.text || null].filter(Boolean).join(" · ") : null;
-  const action = actionLead(next) ?? (theirs && next ? next : null);
-  // r19: a link in the action reads as its host ("Look at cohere-signup-staging.unforced.workers.dev on phone"), never a gap where it was
-  if (action) return { text: plainDetail(withHosts(action)) || action, under: context ?? (ask.text || null), go: null, answers: false, yourCall: false, lead: true, mode: "lead" };
-  return { text: ask.text || "Open to see what's needed", under: context && theirs ? `From ${ownerLabel(t.owner)}` : null, go: null, answers: false, yourCall: false, lead: false, mode: "title" };
+  // r20: the action, never the stored sentence: its first clause, the date label and the notes after it left to the subtitle and the sheet
+  const action = rowAction(next) ?? (theirs && next ? (() => { const c = firstClause(next); return { text: c, verb: verbPhrase(c), rest: next.slice(c.length).trim(), prefix: null }; })() : null);
+  if (action) {
+    const sub = theirs ? [`From ${ownerLabel(t.owner)}`, dueLine(t.due) ?? action.prefix].filter(Boolean).join(" · ") : rowSub(t, action, area);
+    // r19: a link in the action reads as its host ("Look at cohere-signup-staging.unforced.workers.dev on phone"), never a gap where it was
+    return { text: plainDetail(withHosts(action.text)) || action.text, under: sub, go: null, answers: false, yourCall: false, lead: true, mode: "lead", action };
+  }
+  return { text: ask.text || "Open to see what's needed", under: null, go: null, answers: false, yourCall: false, lead: false, mode: "title" };
 }
 
 /**
@@ -296,9 +319,11 @@ export function rowLead(t: Task): { text: string; under: string | null; go: stri
  * its stored options when it fits; a longer one shows a preview and "Open to decide ›"; one with no options is "Your call: <question> ›".
  * `compact` (the companion, r18): no per-row More, at most three lines of action and one of step; the row opens its sheet.
  */
-export function NeedRow({ t, onTask, onDecide, onNote, meta, compact = false }: { t: Task; onTask: (t: Task) => void; onDecide: (t: Task, option: string) => void; onNote?: (ref: NoteRef) => void;
+export function NeedRow({ t, onTask, onDecide, onNote, meta, compact = false, area = null }: { t: Task; onTask: (t: Task) => void; onDecide: (t: Task, option: string) => void; onNote?: (ref: NoteRef) => void;
   /** A quiet line on where it stands, for a row that is not the user's ("With Kevin · in progress"; the work view's In motion and Later). */
-  meta?: string | null; compact?: boolean }) {
+  meta?: string | null; compact?: boolean;
+  /** r20: the row's area when it is shown outside it: an action row's subtitle names it when its title can't say where it belongs. */
+  area?: string | null }) {
   const { id } = taskTitle(cleanText(t.title));
   const isDecision = t.kind === "decision";
   const next = t.next.trim();
@@ -306,7 +331,7 @@ export function NeedRow({ t, onTask, onDecide, onNote, meta, compact = false }: 
   /** The task's own vault: its linked notes are read and opened there (r15). */
   const profileVault = useVaultProfile().vault;
   const vault = t.vault ?? profileVault;
-  const r = rowLead(t);
+  const r = rowLead(t, area);
   const text = r.text;
   const sup = isDecision ? null : supportOf(t);
   const titleRef = useRef<HTMLElement>(null);
@@ -316,9 +341,10 @@ export function NeedRow({ t, onTask, onDecide, onNote, meta, compact = false }: 
   // r16: an action reads whole up to four lines (the panel shows fewer rows rather than cutting an instruction); a title reads to its object
   // (up to 3 lines beside other lines, 4 alone); a decision's question is never clamped, its preview is two lines of whole words.
   // r18: in the companion an action is three lines at most, and a long "Your call" or "Check" two
-  const quietMode = r.mode === "check" || r.mode === "waits" || r.mode === "tidy";
+  const quietMode = r.mode === "check" || r.mode === "waits" || r.mode === "tidy" || r.mode === "missing";
   const clampMode = r.mode === "preview" || ((r.mode === "call" || quietMode) && compact);
-  const titleMax = isDecision ? (r.mode === "preview" || ((r.mode === "call" || r.mode === "tidy") && compact) ? 2 : 99) : r.lead ? (compact ? 3 : ACTION_LINES) : quietMode ? (compact ? 2 : 99) : next || due ? 3 : 4;
+  // r20: an action is two lines everywhere, the companion and the work view alike; what it cuts is the object, never the verb phrase
+  const titleMax = r.lead ? ACTION_LINES : isDecision ? (r.mode === "preview" || ((r.mode === "call" || r.mode === "tidy" || quietMode) && compact) ? 2 : 99) : quietMode ? (compact ? 2 : 99) : next || due ? 3 : 4;
   useLayoutEffect(() => {
     const el = titleRef.current; if (!el) return;
     const measure = () => {
@@ -335,24 +361,26 @@ export function NeedRow({ t, onTask, onDecide, onNote, meta, compact = false }: 
   const showNext = !!next && !r.lead && r.mode === "title";
   const nextLines = compact ? Math.min(1, lineBudget(Math.min(titleLines, titleMax), !!due, 4).next) : lineBudget(Math.min(titleLines, titleMax), !!due, 4).next;
   const clampStyle = open || isDecision ? undefined : ({ WebkitLineClamp: titleMax, lineClamp: titleMax } as React.CSSProperties);
-  const meta_ = <>{r.under && <SmallLine className="cp-under" text={r.under} />}
-    {due && <small className={`cp-detail${isOverdue(t.due) ? " overdue" : ""}`}>{due}</small>}
+  // r20: an action row's subtitle carries its due cue ("COhere opens Oct 15 · due today"); other rows keep the due line of their own
+  const meta_ = <>{r.under && <SmallLine className={`cp-under${r.lead && isOverdue(t.due) ? " overdue" : ""}`} text={r.under} />}
+    {due && !r.lead && <small className={`cp-detail${isOverdue(t.due) ? " overdue" : ""}`}>{due}</small>}
     {meta && <SmallLine className="cp-detail cp-meta" text={meta} />}</>;
   const openSource = (ref: { vault: string; id: string }) => (onNote ? onNote(ref) : onTask(t));
   return <li className="cp-item" data-open={open ? "true" : undefined} data-lead={r.lead ? "action" : undefined} data-mode={r.mode}>
     {r.lead
       // the action leads, its links and linked notes still open (outside the row's button); a tap on its words opens the sheet like the row
       // r15: full lines that end on a whole word ("…" then More), never a cut inside a word, a link or a note's title
-      ? <><WordClamp elRef={titleRef as React.RefObject<HTMLParagraphElement | null>} className="cp-title cp-lead" tokens={stepTokens(next, vault, onNote)} textKey={`${vault}\n${next}`} lines={titleMax} open={open}
-          onCut={() => {}} onClick={(e) => { if (!(e.target as Element).closest("a, button")) onTask(t); }} />
+      ? <><WordClamp elRef={titleRef as React.RefObject<HTMLParagraphElement | null>} className="cp-title cp-lead" tokens={stepTokens(r.action?.text ?? next, vault, onNote)} textKey={`${vault}\n${r.action?.text ?? next}`} lines={titleMax} open={open}
+          keep={r.action ? r.action.verb.split(" ").filter(Boolean).length : 0} onCut={() => {}} onClick={(e) => { if (!(e.target as Element).closest("a, button")) onTask(t); }} />
         <button type="button" className="cp-need cp-need-under" data-id={id ?? undefined} aria-label={[text, r.under, due, meta].filter(Boolean).join(". ")} onClick={() => onTask(t)}>{meta_}</button></>
       : <button type="button" className={`cp-need${isDecision ? " decision" : ""}`} data-id={id ?? undefined} data-mode={r.mode} aria-busy={r.mode === "checking" || undefined} aria-label={r.yourCall ? `Your call: ${text}` : undefined} onClick={() => onTask(t)}>
         {r.yourCall && <small className="cp-call-lead">Your call:</small>}
         {clampMode
           // r16: a question too long for a row: whole words, then "Open to decide ›" (r18: the companion's "Your call"/"Check" lines too)
-          ? <span className="cp-title-wrap"><WordClamp elRef={titleRef as React.RefObject<HTMLParagraphElement | null>} className="cp-title cp-preview" tokens={wordTokens(withoutCut(text))} textKey={text} lines={titleMax} open={false} onCut={() => {}} onClick={() => {}} tag="span" />{r.go === "" && !compact && <span className="cp-go" aria-hidden="true"> ›</span>}</span>
-          : <span ref={titleRef} className="cp-title" style={clampStyle}><RefText text={text} vault={vault} />{r.go === "" && !compact && <span className="cp-go" aria-hidden="true"> ›</span>}</span>}
-        {r.go && <span className="cp-open-decide">{r.go}<span aria-hidden="true"> ›</span></span>}
+          ? <span className="cp-title-wrap"><WordClamp elRef={titleRef as React.RefObject<HTMLParagraphElement | null>} className="cp-title cp-preview" tokens={wordTokens(withoutCut(text))} textKey={text} lines={titleMax} open={false} onCut={() => {}} onClick={() => {}} tag="span" /></span>
+          // r20: no "›" on any row: the whole row opens its sheet, in the companion and the work view alike
+          : <span ref={titleRef} className="cp-title" style={clampStyle}><RefText text={text} vault={vault} /></span>}
+        {r.go && <span className="cp-open-decide">{r.go}</span>}
         {meta_}</button>}
     {!next && !isDecision && r.mode === "title" && !actionableTitle(text) && text !== "Open to see what's needed" && <p className="cp-open-to-see">Open to see what's needed</p>}
     {/* r19: the read failed: not "nothing there", and not the action either */}
@@ -377,11 +405,14 @@ export function PrivateRow({ p, onPrivate }: { p: PrivateNeed; onPrivate?: (open
  * Only whole rows are shown: in the side panel (`fit`) the rows that don't fit above the footer wait behind "+N more ›" rather than being
  * cut or faded at the panel's bottom. Every row is drawn once to be measured (before paint), then the ones that fit stay.
  */
-export function NeedsList({ needs, fit, onTask, onDecide, onNote, onMore, extra = 0, moreTitle = null, keepOne = false }: Pick<CompanionProps, "onTask" | "onDecide" | "onNote"> & { needs: readonly Task[]; fit: boolean; /** "+N more" opens elsewhere (the strip's sheet) instead of in place */ onMore?: () => void;
+export function NeedsList({ needs: owed, pending = [], fit, onTask, onDecide, onNote, placeOf, onMore, extra = 0, moreTitle = null, keepOne = false }: Pick<CompanionProps, "onTask" | "onDecide" | "onNote" | "placeOf"> & { needs: readonly Task[]; fit: boolean; /** "+N more" opens elsewhere (the strip's sheet) instead of in place */ onMore?: () => void;
+  /** r20: decisions still being read: shown after the rows that are owed, never counted in "+N more" */
+  pending?: readonly Task[];
   /** The phone's inline strip always shows its first row (its body was sized to the room left beside the conversation). */
   keepOne?: boolean;
   /** r17, Uni's panel: items past these rows (private ones included): they and any row that doesn't fit are one "N more ›" (`onMore`, the work view). */
   extra?: number; moreTitle?: string | null }) {
+  const needs = pending.length ? [...owed, ...pending] : owed;
   const [limit, setLimit] = useState(Infinity);
   const [measuring, setMeasuring] = useState(fit);
   const [all, setAll] = useState(false);
@@ -453,16 +484,17 @@ export function NeedsList({ needs, fit, onTask, onDecide, onNote, onMore, extra 
     return () => ro.disconnect();
   }, [fit, measuring, all, limit, needs.length, key]);
   const shown = fit && !measuring && !all ? needs.slice(0, limit) : needs;
-  const hidden = needs.length - shown.length;
+  // r20: only what is owed counts in "+N more"; a decision still being read is never a count
+  const hidden = Math.max(0, owed.length - Math.min(shown.length, owed.length));
   return <>
-    <ul ref={listRef} className="cp-list">{shown.map((t) => <NeedRow key={t.id} t={t} onTask={onTask} onDecide={onDecide} onNote={onNote} compact />)}</ul>
+    <ul ref={listRef} className="cp-list">{shown.map((t) => <NeedRow key={t.id} t={t} onTask={onTask} onDecide={onDecide} onNote={onNote} area={placeOf?.(t) ?? null} compact />)}</ul>
     {extra > 0
       ? <button type="button" className="cp-more cp-more-rows cp-more-all" title={moreTitle ?? undefined} onClick={() => onMore?.()}>{hidden + extra} more ›</button>
       : hidden > 0 && <button type="button" className="cp-more cp-more-rows" onClick={() => (onMore ? onMore() : setAll(true))}>+{hidden} more ›</button>}
   </>;
 }
 
-function Body({ stands, ready, note, load, feed, rest = 0, moreTitle = null, onPrivate, runs, nodeName, onTask, onDecide, onEverything, onNote, fit, hideHealth = false, onMore, keepOne = false }: CompanionProps & { fit: boolean; hideHealth?: boolean; onMore?: () => void; keepOne?: boolean }) {
+function Body({ stands, ready, note, load, feed, rest = 0, moreTitle = null, onPrivate, runs, nodeName, onTask, onDecide, onEverything, onNote, placeOf, fit, hideHealth = false, onMore, keepOne = false }: CompanionProps & { fit: boolean; hideHealth?: boolean; onMore?: () => void; keepOne?: boolean }) {
   const active = runs.filter(isActiveRun);
   const hiddenRuns = Math.max(0, active.length - RUNS_SHOWN);
   if (note) return <div className="cp-body"><p className="cp-lede cp-note">{note}</p></div>;
@@ -473,10 +505,10 @@ function Body({ stands, ready, note, load, feed, rest = 0, moreTitle = null, onP
     {ready && <section aria-label="Needs you" className="cp-sec" aria-busy={load?.refreshing || undefined}>
       <h3 className="cp-h">Needs you</h3>
       {/* r17: Uni's panel is at most three rows and one "N more ›" (private items folded in) to the work view, which keeps the full list */}
-      {feed.rows.length > 0 && <NeedsList needs={feed.rows} fit={fit} onTask={onTask} onDecide={onDecide} onNote={onNote} onMore={rest > 0 && onEverything ? onEverything : onMore} extra={onEverything ? rest : 0} moreTitle={moreTitle} keepOne={keepOne} />}
+      {(feed.rows.length > 0 || !!feed.pending?.length) && <NeedsList needs={feed.rows} pending={feed.pending} fit={fit} onTask={onTask} onDecide={onDecide} onNote={onNote} placeOf={placeOf} onMore={rest > 0 && onEverything ? onEverything : onMore} extra={onEverything ? rest : 0} moreTitle={moreTitle} keepOne={keepOne} />}
       {feed.rows.length === 0 && rest > 0 && onEverything && <button type="button" className="cp-more cp-more-rows cp-more-all" title={moreTitle ?? undefined} onClick={onEverything}>{rest} more ›</button>}
       {feed.privates.length > 0 && <ul className="cp-list cp-privates">{feed.privates.map((p) => <PrivateRow key={p.key} p={p} onPrivate={onPrivate} />)}</ul>}
-      {feed.total === 0 && <p className="cp-none">Nothing needs you here.</p>}
+      {feed.total === 0 && !feed.pending?.length && <p className="cp-none">Nothing needs you here.</p>}
       {health}
     </section>}
     {active.length > 0 && <section aria-label="Running" className="cp-sec">
@@ -491,7 +523,7 @@ function Body({ stands, ready, note, load, feed, rest = 0, moreTitle = null, onP
  *  is known (never one still being checked); the count is the feed's own total. Null when nothing needs them. */
 export function waitingLine(feed: NeedsFeed): string | null {
   if (!feed.total) return null;
-  const first = feed.rows.map(rowLead).find((r) => r.mode !== "checking" && r.mode !== "unavailable");
+  const first = feed.rows.map((t) => rowLead(t)).find((r) => r.mode !== "checking" && r.mode !== "unavailable");
   return `Needs you · ${feed.total}${first ? `: ${first.yourCall ? `Your call: ${first.text}` : first.text}` : ""}`;
 }
 
