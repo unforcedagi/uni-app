@@ -1,7 +1,7 @@
 /* T-111: the tree home. One stylesheet, one set of tokens (`--th-*`): swap the values in `.tree-home` to restyle the whole home.
    The tokens and signature objects are the Field Book language from uni-sketches/t111-app (language.css): bone paper, graphite ink, one
    dry ochre ("sap") for things climbing the tree, everything shape-coded first so it reads in grayscale on the Daylight.
-   Objects: .th-stump (a node: rings are depth, fill is state) · .th-tag (needs you: a hang tag) · .th-door (a room: an arch; dashed = held)
+   Objects: .th-tag (needs you: a hang tag) · .th-door (a room: an arch; dashed = held)
    · .th-sap (an update climbing) · .th-slip (a message in the room's ledger) · .th-guides (nesting: a trunk with branch ticks).
    Motion: none of its own. The map's one zoom (NodeStage, <= 300 ms) is the only transition; reduced motion drops it. */
 @font-face { font-family: "Fraunces"; font-weight: 400; font-display: swap; src: url(./fonts/fraunces-400.woff2) format("woff2"); }
@@ -51,8 +51,6 @@
 /* the head */
 .th-head { display: flex; flex-direction: column; gap: 2px; }
 .th-head.phone { padding: 0 0 6px; }
-.th-toprow { display: flex; flex-wrap: wrap; align-items: center; column-gap: 14px; }
-.th-toprow .th-back { padding-right: 14px; border-right: 1.5px solid var(--th-hair); }
 .th-back { all: unset; box-sizing: border-box; align-self: flex-start; min-height: 44px; display: inline-flex; align-items: center; gap: 6px; padding: 0 2px; font: 600 15px/1 var(--th-sans); text-decoration: underline; text-underline-offset: 4px; text-decoration-thickness: 1px; cursor: pointer; }
 .th-back:focus-visible, .th-crumb:focus-visible, .th-go:focus-visible, .th-kid:focus-visible, .th-up:focus-visible, .th-link:focus-visible { outline: 3px solid var(--th-ink); outline-offset: 2px; }
 .th-crumbs { display: flex; flex-wrap: wrap; align-items: center; font-size: 12.5px; letter-spacing: .02em; }
@@ -75,14 +73,6 @@
 .th-tag { display: inline-grid; place-items: center; position: relative; flex: none; min-width: 28px; height: 26px; padding: 0 8px 0 15px; background: var(--th-ink); color: var(--th-card); clip-path: var(--th-tag); font: 700 12.5px/1 var(--th-mono); }
 .th-tag::before { content: ""; position: absolute; left: 5px; top: 50%; width: 5px; height: 5px; margin-top: -2.5px; border-radius: 50%; background: var(--th-card); }
 .th-open { flex: none; min-width: 26px; height: 24px; padding: 0 6px; box-sizing: border-box; display: inline-grid; place-items: center; border: 1.5px solid var(--th-ink); border-radius: 12px; background: var(--th-card); font: 700 12px/1 var(--th-mono); }
-.th-stump { --out: none; position: relative; flex: none; display: inline-grid; place-items: center; box-sizing: border-box; width: 22px; height: 22px; border: 2px solid var(--th-ink); border-radius: 50%; background: var(--th-card); box-shadow: var(--out); margin: 4px 8px 4px 6px; }
-.th-stump[data-d="0"] { --out: 0 0 0 3px var(--th-paper), 0 0 0 4.5px var(--th-ink), 0 0 0 7.5px var(--th-paper), 0 0 0 9px var(--th-ink); }
-.th-stump[data-d="1"] { --out: 0 0 0 3px var(--th-paper), 0 0 0 4.5px var(--th-ink); }
-.th-stump[data-st="needs"] { background: var(--th-ink); }
-.th-stump[data-st="needs"]::after { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--th-card); }
-.th-stump[data-st="moving"]::after { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--th-ink); }
-.th-stump[data-st="quiet"] { border-style: dotted; }
-.th-stump.held { opacity: .85; }
 
 /* section heads: a label, then a rule that ends in a ring with the count */
 .th-sec, .th-alive, .tree-home .work { margin-top: 24px; }

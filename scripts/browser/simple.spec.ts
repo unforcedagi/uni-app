@@ -3839,6 +3839,23 @@ test.describe('r23', () => {
     await expect(lines).toHaveCount(1);
   });
 
+  test('Ctrl+W acts on the foreground (Codex 8): an open sheet closes as Escape closes it, and the place stays; Cmd+W is left to the native menu', async ({ page }) => {
+    await boot(page);
+    await add(page, { id: 'w1', title: 'T-309 Placeholder close', node: 'Areas/Techne', meta: { next: 'Send the placeholder note to Kevin' } });
+    await refresh(page, '2026-10-14T09:00:00.000Z');
+    await openRoom(page, 'Techne');
+    await openWork(page);
+    await rowOf(page, 'placeholder note to Kevin').locator('.cp-need').click();
+    await expect(sheetOf(page)).toBeVisible();
+    await page.keyboard.press('Control+w');
+    await expect(sheetOf(page)).toHaveCount(0);
+    await expect(page.locator('.sr-work')).toBeVisible();
+    // Meta+W alone (not macOS here) does nothing in the page
+    await rowOf(page, 'placeholder note to Kevin').locator('.cp-need').click();
+    await page.keyboard.press('Meta+w');
+    await expect(sheetOf(page)).toBeVisible();
+  });
+
   test('Recent never overlaps the area list: the tree scrolls in its own region above Recent, its last line fading while rows run on (1280×720)', async ({ page }) => {
     test.skip(!wide(page), 'the sidebar');
     await page.setViewportSize({ width: 1280, height: 720 });
