@@ -19,7 +19,7 @@ async function workPage(page: Page, name: string) {
   if (!isDesktop(page) && await page.locator('.cp-line[aria-expanded="false"]').count()) await page.locator('.cp-line').click();
   await page.getByRole('button', { name: /^All of .*'s work/ }).click();
   await expect(page.locator('.sr-work')).toBeVisible();
-  await expect.poll(async () => [await page.locator('.sr').first().getAttribute('data-node').catch(() => null), await page.locator('.sr-title').first().textContent().catch(() => null)]).toContain(name); // r15: a borrowed room's heading is the room; the place is data-node
+  await expect.poll(async () => [await page.locator('.sr').first().getAttribute('data-node').catch(() => null), await page.locator('.sr-title').first().textContent().catch(() => null)]).toContain(name); /* r15: a borrowed room's heading is the room; the place is data-node */
 }
 
 test.describe('device cache', () => {
