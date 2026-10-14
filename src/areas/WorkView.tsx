@@ -6,7 +6,7 @@ import { useState, type ReactNode } from "react";
 import { cleanText } from "../interface/contract";
 import { NeedRow, PrivateRow } from "./Companion";
 import { isActiveRun, type Draft, type Run } from "./steerCore";
-import { wholeWords, type NeedsFeed, type PrivateNeed } from "./simpleCore";
+import { titleWords, type NeedsFeed, type PrivateNeed } from "./simpleCore";
 import type { TaskLoad } from "./Companion";
 import { asOf, countLabel, countText, LoadHealth } from "./LoadHealth";
 import type { Task } from "./taskCore";
@@ -38,10 +38,7 @@ export type WorkViewProps = {
 };
 
 /** A record Uni is tidying, by its title as words (r20): no "Decision (default yes):" label, no cut tail ("…feature 4, the"). */
-export const tidyTitle = (t: Task): string => {
-  const words = wholeWords(cleanText(taskTitle(t.title).rest).replace(/^decision\s*(\([^)]*\))?\s*[:\-–—]\s*/i, "")) || cleanText(t.title);
-  return words[0].toLocaleUpperCase() + words.slice(1);
-};
+export const tidyTitle = (t: Task): string => titleWords(cleanText(taskTitle(t.title).rest)) || cleanText(t.title);
 
 export function WorkView(p: WorkViewProps) {
   const [laterOpen, setLaterOpen] = useState(false);
