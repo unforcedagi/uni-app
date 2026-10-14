@@ -2302,7 +2302,7 @@ test.describe('r17', () => {
     // r18: small print is one line of whole words (never ending on "·"), the whole of it in its title
     // r20: and the due cue, which is never cut
     await expect(room.locator('.cp-under')).toHaveAttribute('title', /^From #atlas\/teach · Canvas Week 7 brief draft(?: · (?:was )?due \w+ \d+)? · asked \w+ \d+$/);
-    expect((await room.locator('.cp-under').innerText()).replace(/\s+/g, ' ').trim()).toMatch(/^From #atlas\/teach(?: · Canvas[\p{L}\d ]*)?…?(?: · (?:was )?due \w+ \d+)?(?: · asked \w+ \d+)?$/u);
+    expect((await room.locator('.cp-under').innerText()).replace(/\s+/g, ' ').trim()).toMatch(/^From #atlas\/teach(?: · Canvas[\p{L}\d ]*)?…?(?:(?: ·)? (?:(?:was )?due \w+ \d+ · )?asked \w+ \d+)?$/u); // r22: a wrapped date line has no " · "
     expect((await room.locator('.cp-under').innerText()).trim()).not.toMatch(/·\s*…$/);
     const uni = needs.locator('.cp-item').filter({ hasText: 'Pick the lead story' });
     await expect(uni.locator('.cp-under')).toHaveAttribute('title', /^From Uni · Newsletter W42 draft · asked \w+( \d+)?$/); // r22: and when it was asked
