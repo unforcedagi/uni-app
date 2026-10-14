@@ -97,7 +97,8 @@ test.describe('stewardship', () => {
 
   test('a project without a room is stewarded by its ancestor, and its tasks open that room', async ({ page }) => {
     await open(page, 'Boulder Civic Calendar');
-    await expect(door(page)).toHaveCount(0);
+    // r14: the header says whose conversation it is
+    await expect(door(page)).toHaveText('Conversation in #boulder');
     await expect(composer(page)).toHaveAttribute('placeholder', 'Message #boulder');
     // seen from Uni, its task offers its steward's room
     await open(page, 'Uni');

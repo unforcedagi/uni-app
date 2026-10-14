@@ -193,7 +193,7 @@ export function NeedRow({ t, onTask, onDecide, onNote, meta }: { t: Task; onTask
     return () => ro?.disconnect();
   }, [text, open, titleMax]);
   // the next step shows under a title; a row that leads with it does not repeat it
-  const showNext = !!next && !r.lead && !isDecision;
+  const showNext = !!next && !r.lead;
   const nextLines = lineBudget(Math.min(titleLines, titleMax), !!due, 4).next;
   const more = open || (titleCut && !isDecision) || (showNext && (nextCut || nextLines <= 0));
   const clampStyle = open || isDecision ? undefined : ({ WebkitLineClamp: titleMax, lineClamp: titleMax } as React.CSSProperties);
@@ -277,6 +277,8 @@ export function NeedsList({ needs, fit, onTask, onDecide, onNote }: Pick<Compani
       if (settled.current !== key || list.querySelector("[data-open]")) return;
       if (scroller.scrollHeight <= scroller.clientHeight + 1) { remeasured.current = 0; return; }
       if (remeasured.current < 6) { remeasured.current++; setLimit(Infinity); setMeasuring(true); }
+      // still over after measuring again (a row's height settles only once it is the last one shown): one row fewer, until it fits (r14)
+      else if (Number.isFinite(limit) && limit > 1) setLimit(limit - 1);
     };
     const ro = new ResizeObserver(check);
     ro.observe(list);

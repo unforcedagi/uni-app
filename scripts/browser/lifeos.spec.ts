@@ -105,19 +105,22 @@ test.describe('device cache', () => {
 });
 
 test.describe('App tab', () => {
-  test('an area with a sealed app has Room (default) and App tabs; the app runs only on the App tab', async ({ page }) => {
+  test('an area with a sealed app opens to its room; "App ›" in the header shows the app inside the room shell, and Back to chat returns', async ({ page }) => {
     await bootAreas(page, 'seed', { briefs: true });
     await openAreasHome(page);
     await openAreaPage(page, 'Techne', { app: false });
-    const tabs = page.getByRole('tablist', { name: 'Area views' });
-    await expect(tabs.getByRole('tab', { name: 'Room' })).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator('.sr-chat')).toBeVisible();
     await expect(page.locator('iframe.area-frame')).toHaveCount(0);
-    await tabs.getByRole('tab', { name: 'App' }).click();
-    await expect(page.locator('iframe.area-frame')).toHaveCount(1);
+    await page.locator('.sr-app').click();
+    await expect(page.locator('.sr-work iframe.area-frame')).toHaveCount(1);
     await expect(page.frameLocator('iframe.area-frame').locator('#title')).toHaveText('Techne');
-    await tabs.getByRole('tab', { name: 'Room' }).click();
-    await expect(page.locator('iframe.area-frame')).toHaveCount(0);
+    // r14: the same shell: its header and the tree stay; no tabs, no second chat
     await expect(page.locator('.sr-title')).toHaveText('Techne');
+    await expect(page.locator('.area-tabs, .area-chat, .area-bar')).toHaveCount(0);
+    await expect(page.locator('.sr-appbar')).toContainText('Techne app');
+    await page.getByRole('button', { name: 'Back to chat' }).click();
+    await expect(page.locator('iframe.area-frame')).toHaveCount(0);
+    await expect(page.locator('.sr-chat')).toBeVisible();
   });
 
   test('an area without an app has no tabs', async ({ page }) => {

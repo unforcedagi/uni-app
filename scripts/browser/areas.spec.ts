@@ -44,15 +44,14 @@ test.describe('seed apps and navigation', () => {
     await expect(bar).toContainText('Pairing on the bridge tonight');
     await mkdir('shots/t74', { recursive: true });
     await page.screenshot({ path: `shots/t74/${info.project.name}-suggestion-bar.png` });
-    // The chat is right there: the suggestion lands above its composer, which stays empty until a tap.
-    const box = page.getByRole('textbox', { name: 'Message Techne' });
-    await expect(box, 'nothing reached the composer yet').toHaveValue('');
+    // r14: the app is a view in the room shell: the composer is the room's own, back in the chat, and only a tap fills it
+    await expect(page.locator('.sr-chat')).toHaveCount(0);
     await bar.getByRole('button', { name: 'Add to draft' }).click();
+    const box = page.getByRole('textbox', { name: 'Message Techne' });
     await expect(box).toHaveValue('Pairing on the bridge tonight');
     expect(await calls(page, 'post_message')).toHaveLength(0);
-    // No room tab: the area's own chat took it.
     await expect(page.locator('.tab-strip')).toHaveCount(0);
-    await expect(page.locator('.area-bar-title')).toHaveText('Techne');
+    await expect(page.locator('.sr-title')).toHaveText('Techne');
   });
 
   test('note.open uses the note sheet; Back returns to the area', async ({ page }) => {
@@ -78,11 +77,11 @@ test.describe('seed apps and navigation', () => {
     await page.screenshot({ path: `shots/t74/${info.project.name}-area-unforced.png` });
   });
 
-  test('an area without an app opens to its room, with no App tab', async ({ page }) => {
+  test('an area without an app opens to its room, with no App button', async ({ page }) => {
     await openAreas(page);
     await openArea(page, 'Sanctum');
     await expect(page.locator('iframe')).toHaveCount(0);
-    await expect(page.getByRole('tab')).toHaveCount(0);
+    await expect(page.locator('.sr-app')).toHaveCount(0);
     await expect(page.locator('.sr-title')).toHaveText('Sanctum');
     await expect(page.locator('.sr-chat')).toContainText('Sat twenty minutes');
     await expect(page.getByRole('textbox', { name: 'Message Sanctum' })).toBeVisible();
@@ -181,7 +180,7 @@ test.describe('platform gate', () => {
     await openAreas(page);
     await openArea(page, 'Techne');
     await expect(page.locator('iframe')).toHaveCount(0);
-    await expect(page.getByRole('tab', { name: 'App' })).toHaveCount(0);
+    await expect(page.locator('.sr-app')).toHaveCount(0);
     await expect(page.locator('.sr-title')).toHaveText('Techne');
     expect(await calls(page, 'vault_note').then((c: any[]) => c.filter((x) => x.args.noteRef === 'app-techne'))).toHaveLength(0);
   });
@@ -266,6 +265,7 @@ test.describe('hostile and benign apps', () => {
     const notes = (await calls(page, 'vault_note')).map((c: any) => c.args.noteRef);
     expect(notes.filter((n: string) => /passwd|\.\./.test(n))).toEqual([]);
     await expect(page.locator('.suggestion-bar .suggestion')).toHaveCount(3);
+    await page.getByRole('button', { name: 'Back to chat' }).click();
     await expect(page.getByRole('textbox', { name: /Message/ }), 'no suggestion reached the composer').toHaveValue('');
     expect(await calls(page, 'post_message')).toHaveLength(0);
   });
@@ -418,12 +418,12 @@ test.describe('self-test hardening', () => {
     await openAreas(page);
     await openArea(page, 'Techne');
     await expect(page.locator('iframe')).toHaveCount(0);
-    await page.evaluate(() => document.querySelector('.area-view')?.setAttribute('data-keep', '1'));
+    await page.evaluate(() => document.querySelector('.sr')?.setAttribute('data-keep', '1'));
     await openSettings(page);
     await page.getByRole('button', { name: 'Run sandbox self-test' }).click();
     await expect(page.locator('.selftest-status.pass')).toContainText('Passed', { timeout: 60000 });
-    // the pass reaches the open area without a remount: the same view now has its App tab (the app itself still waits for a tap)
-    await expect(page.locator('.area-view[data-keep]').getByRole('tab', { name: 'App' })).toHaveCount(1);
+    // the pass reaches the open area without a remount: the same room now has its App button (the app itself still waits for a tap)
+    await expect(page.locator('.sr[data-keep] .sr-app')).toHaveCount(1);
     await expect(page.locator('iframe')).toHaveCount(0);
   });
 });
