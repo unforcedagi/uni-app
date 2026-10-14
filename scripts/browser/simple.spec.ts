@@ -2427,6 +2427,24 @@ test.describe('r17', () => {
     }
   });
 
+  test('920×360 with the side panel open: no row is cut at the panel\'s foot; what doesn\'t fit whole waits behind "+N more"', async ({ page }) => {
+    test.skip(!wide(page), 'the side panel');
+    await page.addInitScript(() => { localStorage.setItem('uni.companion.side.narrow.v1', '1'); localStorage.removeItem('uni.tabs.v2'); localStorage.removeItem('uni.lastRoom.v1'); });
+    await page.setViewportSize({ width: 920, height: 360 });
+    await boot(page, { crowded: true, longNext: true, pastDue: true });
+    await openRoom(page, 'COhere 2026');
+    const side = page.locator('.cp.side.open');
+    await expect(side).toBeVisible();
+    // the first row is the overdue one with a four-line step: at these heights it doesn't fit whole under the sentence
+    for (const h of [360, 330, 300]) {
+      await page.setViewportSize({ width: 920, height: h });
+      await page.waitForTimeout(600);
+      const cut = await side.evaluate((el) => { const foot = el.querySelector('.cp-foot')!.getBoundingClientRect().top; return [...el.querySelectorAll('.cp-list > .cp-item')].filter((r) => { const b = r.getBoundingClientRect(); return b.height > 0 && b.bottom > foot + 1; }).length; });
+      expect(cut, `${h}px`).toBe(0);
+      await expect(side.locator('.cp-more-rows')).toBeVisible();
+    }
+  });
+
   test('a cut action ends on a whole word with a clean ellipsis, never on a colon', async ({ page }) => {
     await boot(page);
     await openRoom(page, 'ATLAS');

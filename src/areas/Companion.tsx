@@ -386,7 +386,8 @@ export function NeedsList({ needs, fit, onTask, onDecide, onNote, onMore, extra 
     const fits = scroller.scrollHeight <= scroller.clientHeight + 1;
     const budget = scroller.clientHeight - top - (body.scrollHeight - list.offsetHeight) - 40;
     let used = 0; let n = 0;
-    for (const r of fits ? [] : rows) { if (n > 0 && used + r.offsetHeight > budget) break; used += r.offsetHeight; n++; }
+    // r17: not even the first row is kept when it doesn't fit whole (a 360px-tall window): it waits behind "+N more" too, never a sliver
+    for (const r of fits ? [] : rows) { if (used + r.offsetHeight > budget) break; used += r.offsetHeight; n++; }
     setLimit(fits || n >= rows.length ? Infinity : n);
     if (settled.current !== key) remeasured.current = 0;
     settled.current = key;
@@ -402,7 +403,7 @@ export function NeedsList({ needs, fit, onTask, onDecide, onNote, onMore, extra 
       if (scroller.scrollHeight <= scroller.clientHeight + 1) { remeasured.current = 0; return; }
       if (remeasured.current < 6) { remeasured.current++; setLimit(Infinity); setMeasuring(true); }
       // still over after measuring again (a row's height settles only once it is the last one shown): one row fewer, until it fits (r14)
-      else if (Number.isFinite(limit) && limit > 1) setLimit(limit - 1);
+      else if (Number.isFinite(limit) && limit > 0) setLimit(limit - 1);
     };
     const ro = new ResizeObserver(check);
     ro.observe(list);
