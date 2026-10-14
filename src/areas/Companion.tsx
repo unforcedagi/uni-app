@@ -370,7 +370,7 @@ export function rowLead(t: Task, area: string | null = null): RowLead {
   const theirs = waitsOnMe(t);
   // r20: the action, never the stored sentence: its first clause, the date label and the notes after it left to the subtitle and the sheet
   // r23: a step that points at words nobody stored ("…the message below") asks the room for them: "Ask #techne for the message"
-  const nowhere = pointsNowhere(t);
+  const nowhere = pointsNowhere(t, t.stewardRoom ?? t.room);
   const action = rowAction(nowhere ?? next) ?? (theirs && next ? actionOf(next) : null);
   if (action) {
     // r17: someone else's task says whose it is (and the task, when its title says something the action doesn't)

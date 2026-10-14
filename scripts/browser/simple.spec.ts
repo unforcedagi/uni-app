@@ -2753,7 +2753,8 @@ test.describe('r19', () => {
     await openWork(page);
     await expect(row13(page)).toHaveAttribute('data-mode', 'checking');
     await expect(row13(page)).not.toContainText('Approve or change');
-    await expect(page.locator('.sr-work .cp-item').filter({ hasText: 'deploy-access' })).toHaveAttribute('data-mode', 'lead');
+    // r23: "Send Ryan the deploy-access message." with no message stored asks the room for it
+    await expect(page.locator('.sr-work .cp-item').filter({ hasText: /^\s*Ask #\S+ for the message/ })).toHaveAttribute('data-mode', 'lead');
   });
 
   test('P1-2 the source closes while the task stays unchanged: the next list read re-checks it and the row becomes a Check', async ({ page }) => {

@@ -360,7 +360,9 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   /** A private area's words are never shown outside it: not in Uni's panel, a parent's list, runs, drafts or the stands line. */
   const hidden = (p: string) => { const r = privateOf(p); return !!r && r.path !== selfPrivate?.path; };
   // ------------------------------------------------------------------------------------------ Needs you: one feed, one count (r13)
-  const feed = needsFeed(levelTasks, privateOf, selfPrivate);
+  // r23: each row knows the room that stewards it, as its sheet does ("Ask #techne for the message")
+  const drafted = new Set(tasks.drafts.map((d) => d.task?.toUpperCase()).filter(Boolean));
+  const feed = needsFeed(levelTasks.map((t) => ({ ...t, stewardRoom: roomOfNode(t.node)?.name ?? null, hasDraft: drafted.has(taskTitle(t.title).id?.toUpperCase()) })), privateOf, selfPrivate);
   const panel = isRoot ? uniPanel(feed) : { ...feed, rest: 0, privateCount: 0 };
   const taskTree = tasks.tree;
   const runs = taskTree ? runsUnder(taskTree, here, tasks.runs).filter((r) => !hidden(r.node)) : [];

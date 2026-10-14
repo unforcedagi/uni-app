@@ -434,9 +434,9 @@ export function pointsAt(next: string): { noun: "message" | "draft" } | null {
  * A step that points at words nobody stored (r23): "…the deploy-access message below" with no `detail`, `message` or `draft`, and no link
  * to a note that holds them. The row then asks the room for them: "Ask #techne for the message". Null when the words travel with it.
  */
-export function pointsNowhere(t: Pick<Task, "next" | "room"> & Partial<Pick<Task, "detail" | "message">>, room: string | null = t.room): string | null {
+export function pointsNowhere(t: Pick<Task, "next" | "room"> & Partial<Pick<Task, "detail" | "message" | "hasDraft">>, room: string | null = t.room): string | null {
   const p = pointsAt(t.next);
-  if (!p || t.detail || t.message) return null;
+  if (!p || t.detail || t.message || t.hasDraft) return null;
   if (/https?:\/\/|\[\[|\buni:|\b[0-9A-HJKMNP-TV-Z]{26}\b/.test(t.next)) return null;
   return `Ask ${room ? `#${room.replace(/^#/, "")}` : "Uni"} for the ${p.noun}`;
 }
