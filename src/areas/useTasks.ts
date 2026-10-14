@@ -6,7 +6,7 @@ import { shouldReload } from "./pathCache";
 import { useVaultProfile } from "./ProfileContext";
 import { parseDrafts, parseRuns } from "./steerCore";
 import { activeProfile } from "./profile";
-import { warmTitles } from "./noteRefs";
+import { forgetTitles, setTitleOwner, warmTitles } from "./noteRefs";
 import { savedTasks } from "./savedTasks";
 import type { FailureKind } from "./taskCore";
 
@@ -34,7 +34,7 @@ const fresh = (owner: string): Memory => ({ owner, tree: null, tasks: new Map(),
 let memory: Memory = fresh("");
 export function forgetTasks() { memory = fresh(""); }
 /** Forget on the device too (the user's Forget): the saved list goes with the key. */
-export function forgetSavedTasks() { forgetTasks(); savedTasks.clear(); }
+export function forgetSavedTasks() { forgetTasks(); savedTasks.clear(); forgetTitles(); }
 /** The list kept on the device for this identity and vault (r16), for Uni's level (the whole tree's list). */
 const savedFor = (owner: string, nodePath: string) => (nodePath === "" ? savedTasks.read(owner) : null);
 const scoped = (owner: string) => { if (memory.owner !== owner) memory = fresh(owner); return memory; };
@@ -81,6 +81,8 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
   const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastLoad = useRef<number | null>(null);
   const epoch = useRef(0);
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const refresh = useCallback(() => setN((x) => x + 1), []);
 
   useEffect(() => {
@@ -97,6 +99,7 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
     setActivity(mem.activity);
     setSavedAt(kept || mem.at !== null ? null : saved?.at ?? null);
     vaultTasks.setAskOwner(owner);
+    setTitleOwner(identity);
     setLoading(true); setSlow(false);
     const slowTimer = setTimeout(() => { if (current()) setSlow(true); }, slowMs());
     lastLoad.current = Date.now();
@@ -145,7 +148,8 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
       // r18: where each row's questions come from (an explicit list, a closed source, or neither), also a moment later; kept per revision
       const keysOf = (t: Task) => (t.node !== ROOT && mem.tree ? nodeFilterKeys(mem.tree, [t.node]) : []);
       void vaultTasks.loadSupports(r.tasks, keysOf).then((found) => {
-        if (!found.size || !current() || memory !== mem) return;
+        // keyed by revision, so safe to apply even when a newer read has started meanwhile (it would otherwise wait for the next one)
+        if (!found.size || !mounted.current || memory !== mem) return;
         const one = (t: Task) => { const f = found.get(t.id); return f && f.at === t.updatedAt ? { ...t, support: f.support, supportAt: f.at } : t; };
         const kept = mem.tasks.get(nodePath);
         if (kept) mem.tasks.set(nodePath, { ...kept, list: kept.list.map(one) });

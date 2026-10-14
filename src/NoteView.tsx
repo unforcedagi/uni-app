@@ -40,6 +40,8 @@ export default function NoteView({ target, hub, onOpen, onBack, backLabel, onTit
   const [error, setError] = useState<string | null>(null);
 
   const [missing, setMissing] = useState(false);
+  /** r18: Retry reads the note again in place (a failed read is no dead end). */
+  const [attempt, setAttempt] = useState(0);
   const [hits, setHits] = useState<NoteHit[]>([]);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
@@ -83,7 +85,7 @@ export default function NoteView({ target, hub, onOpen, onBack, backLabel, onTit
     }
     void load();
     return () => { live = false; };
-  }, [target.vault, target.ref]);
+  }, [target.vault, target.ref, attempt]);
 
   // Report only after React commits the loaded note to the view.
   useEffect(() => { if (data) onRendered?.(data.note); }, [data]);
@@ -138,10 +140,14 @@ export default function NoteView({ target, hub, onOpen, onBack, backLabel, onTit
           {searchError && <p role="alert">Couldn't search this vault: {searchError}</p>}
           <button className="pairing-secondary" onClick={() => onSearch(searchQuery)}>Search all vaults</button>
         </div>}
+        {/* r18: a failed read says so in words, with Retry and the way back; the technical reason and the web route are details */}
         {error && <div className="note-error" role="alert">
-          <p>Couldn't open this note from the app.</p>
-          <p className="note-error-detail">{error}</p>
-          {webUrl && <button className="pairing-secondary" onClick={() => openExternal(webUrl)}>Open in Parachute ↗</button>}
+          <p>Couldn't open this note just now.</p>
+          <p className="note-error-go"><button className="task-do primary" onClick={() => setAttempt((n) => n + 1)}>Retry</button><button className="task-do quiet" onClick={onBack}>Back to {backLabel}</button></p>
+          <details className="note-error-more"><summary>Details</summary>
+            <p className="note-error-detail">{error}</p>
+            {webUrl && <button className="pairing-secondary" onClick={() => openExternal(webUrl)}>Open in Parachute ↗</button>}
+          </details>
         </div>}
         {shown && <>
           <NoteRenderer note={shown} className="md note-body" resolve={resolve} linkComponent={Link} />
@@ -149,7 +155,6 @@ export default function NoteView({ target, hub, onOpen, onBack, backLabel, onTit
             {inbound.map((link) => <button className="vault-note" key={JSON.stringify([link.id, link.relationship])} onClick={() => onOpen({ hub: null, vault: data!.vault, ref: link.id }, null)}>{link.path} <small>· {link.relationship}</small></button>)}
           </details>
           <footer className="note-footer">
-            <button className="note-quiet" onClick={() => void copyText(note!.content ?? "", "Copied markdown")}>Copy markdown</button>
             {webUrl && <button className="note-quiet" onClick={() => openExternal(webUrl)}>Open in Parachute ↗</button>}
           </footer>
         </>}

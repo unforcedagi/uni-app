@@ -401,6 +401,8 @@ h1 { font-family: var(--serif); font-weight: 500; font-size: 34px; line-height: 
 @media (prefers-color-scheme: dark) { .toast { background: var(--accent); color: var(--accent-ink); } }
 .note-error { text-align: center; padding: 28px 12px; color: var(--text-soft); font-family: var(--serif); font-size: 18px; }
 .note-error-detail { font-family: var(--sans); font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+.note-error-go { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; font-family: var(--sans); font-size: 15px; }
+.note-error-more { margin-top: 10px; font-family: var(--sans); font-size: 13px; }
 
 @media (prefers-color-scheme: dark) {
   h1 { color: var(--text); }

@@ -147,7 +147,7 @@ const wordTokens = (text: string) => text.split(/\s+/).filter(Boolean).map((w, i
  * Text clamped at `lines` lines that ends on a whole word (r15): every line full, then "…" after the last word that fits, never inside a
  * word, a link or a note's title. Drawn whole once to measure (before paint), then cut; a new width or text measures again.
  */
-function WordClamp({ tokens, lines, open, textKey, onCut, elRef, className, onClick, tag = "p" }: { tokens: { node: React.ReactNode; space: boolean }[]; lines: number; open: boolean; textKey: string;
+function WordClamp({ tokens, lines, open, textKey, onCut, elRef, className, onClick, tag = "p", title }: { tokens: { node: React.ReactNode; space: boolean }[]; lines: number; open: boolean; textKey: string; title?: string;
   onCut: (cut: boolean) => void; elRef: React.RefObject<HTMLParagraphElement | null>; className: string; onClick: (e: React.MouseEvent) => void; /** "span" inside a button */ tag?: "p" | "span" }) {
   const [cut, setCut] = useState<number | null>(null);
   const [width, setWidth] = useState(0);
@@ -172,7 +172,7 @@ function WordClamp({ tokens, lines, open, textKey, onCut, elRef, className, onCl
     while (k > 1 && lineOf(last(words[k - 1]).top) === lines - 1 && last(words[k - 1]).right + room > right) k--;
     // r17: never end on a hanging word ("…to the …") or a word that only leads into the rest ("Dominic: …")
     const plain = (i: number) => (typeof tokens[i]?.node === "string" ? (tokens[i].node as string) : null);
-    while (k > 1 && plain(k - 1) !== null && (DANGLING_WORD.test(plain(k - 1)!.replace(/[,;:(\[–—-]+$/, "")) || /^[,;:–—&+-]+$/.test(plain(k - 1)!))) k--;
+    while (k > 1 && plain(k - 1) !== null && (DANGLING_WORD.test(plain(k - 1)!.replace(/[,;:(\[–—-]+$/, "")) || /^[,;:–—&+·•|/-]+$/.test(plain(k - 1)!))) k--;
     setCut(Math.max(1, k)); onCut(true);
   });
   useLayoutEffect(() => {
@@ -189,7 +189,7 @@ function WordClamp({ tokens, lines, open, textKey, onCut, elRef, className, onCl
   }, [cut, open, lines]); // eslint-disable-line react-hooks/exhaustive-deps
   const shown = open || cut === null ? tokens : tokens.slice(0, cut).map((t, i, a) => (i === a.length - 1 && typeof t.node === "string" ? { ...t, node: t.node.replace(/[\s,;:(\[–—-]+$/, "") || t.node } : t));
   const Tag = tag;
-  return <Tag ref={elRef} className={className} data-cut={cut !== null && !open ? "true" : undefined} onClick={onClick}>
+  return <Tag ref={elRef} className={className} title={title} data-cut={cut !== null && !open ? "true" : undefined} onClick={onClick}>
     {shown.map((t, i) => <span key={i}>{i > 0 && t.space ? " " : ""}<span className="wc-w">{t.node}</span></span>)}
     {cut !== null && !open && <span className="wc-more" aria-hidden="true">…</span>}
   </Tag>;
@@ -211,7 +211,7 @@ function Stands({ text }: { text: string }) {
 /** One line of small print under a row (r18): whole words, then "…"; never a second line. */
 function SmallLine({ text, className }: { text: string; className: string }) {
   const ref = useRef<HTMLParagraphElement | null>(null);
-  return <WordClamp elRef={ref} className={className} tokens={wordTokens(text)} textKey={text} lines={1} open={false} onCut={() => {}} onClick={() => {}} tag="span" />;
+  return <WordClamp title={text} elRef={ref} className={className} tokens={wordTokens(text)} textKey={text} lines={1} open={false} onCut={() => {}} onClick={() => {}} tag="span" />;
 }
 
 /**
