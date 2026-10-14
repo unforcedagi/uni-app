@@ -3499,6 +3499,17 @@ test.describe('r21', () => {
     await expect(settings).toHaveCount(0);
   });
 
+  test('the folded strip never shows step 1 as the whole job: "Needs you · N: 2 steps: Look at cohere-signup-staging on phone, then …" (found in the real app at 800×600)', async ({ page }) => {
+    await page.setViewportSize({ width: 800, height: 600 });
+    await boot(page);
+    await add(page, { id: 'st', title: 'T-113 Companion Today redesign', node: 'Projects/ATLAS', meta: { priority: 'now', due: '2026-10-01', next: 'Look at https://cohere-signup-staging.example-workers.invalid/?look=ecology on phone, then forward #cohere\'s \'For Harper\' block (posted 10-13)' } });
+    await refresh(page, '2026-10-14T09:00:00.000Z');
+    await openRoom(page, 'ATLAS');
+    const line = page.locator('.cp.strip .cp-line-text');
+    await expect(line).toContainText(/^Needs you · \d+: 2 steps: Look at cohere-signup-staging/);
+    await expect(line).not.toContainText('example-workers.invalid');
+  });
+
   test('the 800×600 sheet has a margin and its whole border', async ({ page }) => {
     await page.setViewportSize({ width: 800, height: 600 });
     await boot(page);
