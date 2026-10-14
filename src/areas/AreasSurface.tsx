@@ -340,7 +340,11 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   const runs = taskTree ? runsUnder(taskTree, here, tasks.runs).filter((r) => !hidden(r.node)) : [];
   const drafts = taskTree ? draftsUnder(taskTree, here, tasks.drafts).filter((d) => !hidden(d.node)) : [];
   const openPrivate = (o: PrivateNeed["open"]) => { closeSheet(); setWork(false); openPath(o.path); };
-  const rawStands = tasks.tree?.stands.get(node.path) ?? (typeof node.metadata.stands === "string" ? { text: node.metadata.stands, at: typeof node.metadata.stands_at === "string" ? node.metadata.stands_at : null } : null);
+  // r18: one summary for the companion and the work view: the node's `stands`, else its brief's "Now" (with the brief's own time), else the
+  // newest change it names (standsLine)
+  const brief = !isRoot ? data?.briefs[node.path] ?? null : null;
+  const briefStands = brief?.brief.now ? { text: brief.brief.now, at: brief.generatedAt ?? brief.updatedAt ?? null } : null;
+  const rawStands = tasks.tree?.stands.get(node.path) ?? (typeof node.metadata.stands === "string" ? { text: node.metadata.stands, at: typeof node.metadata.stands_at === "string" ? node.metadata.stands_at : null } : briefStands);
   /** A vault with no areas yet: Uni says how to start, in plain words (r13), instead of a tag and a path to type. */
   const noAreas = isRoot && !!tree && !error && childrenOf(tree, ROOT).length === 0;
   const stands = noAreas ? { text: "No areas yet. Tell Uni here what you want to look after, and it will set up your first area.", ago: "" } : standsLine(rawStands, levelTasks.filter((t) => !hidden(t.node)), now);
