@@ -32,3 +32,11 @@ export const useRailHidden = (): boolean => useSyncExternalStore(subscribeRail, 
 export const SHORT_TREE_QUERY = "(max-height: 399.98px)";
 const subscribeShortTree = (f: () => void) => { const mq = window.matchMedia(SHORT_TREE_QUERY); mq.addEventListener("change", f); return () => mq.removeEventListener("change", f); };
 export const useShortTree = (): boolean => useSyncExternalStore(subscribeShortTree, () => window.matchMedia(SHORT_TREE_QUERY).matches, () => false);
+
+/**
+ * A phone held upright (r20): under 600px wide. Only there is the room tree a full-screen home; at any other size where the sidebar is hidden
+ * (800×600, 740×360) launch and room changes land on the chat, and Places is a drawer you open from the room's header.
+ */
+export const UPRIGHT_PHONE_QUERY = "(max-width: 599.98px)";
+const subscribeUpright = (f: () => void) => { const mq = window.matchMedia(UPRIGHT_PHONE_QUERY); mq.addEventListener("change", f); return () => mq.removeEventListener("change", f); };
+export const useUprightPhone = (): boolean => useSyncExternalStore(subscribeUpright, () => window.matchMedia(UPRIGHT_PHONE_QUERY).matches, () => false);

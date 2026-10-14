@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { buildTaskTree, dayOf, isLive, nodeFilterKeys, rollUp, snoozed, tasksUnder, tomorrowOf, type AnyState, type Counts, type Priority, type RawNote, type Task, type TaskNode, type TaskTree } from "./taskCore";
-import { vaultTasks } from "./vaultTasks";
+import { vaultTasks, type AskRead } from "./vaultTasks";
 import { ROOT } from "./treeCore";
 import { shouldReload } from "./pathCache";
 import { useVaultProfile } from "./ProfileContext";
@@ -8,7 +8,7 @@ import { parseDrafts, parseRuns } from "./steerCore";
 import { activeProfile } from "./profile";
 import { forgetTitles, setTitleOwner, warmTitles } from "./noteRefs";
 import { savedTasks } from "./savedTasks";
-import { checkOf, needsYou, type CheckState } from "./simpleCore";
+import { checkOf, wouldNeedYou, type CheckState } from "./simpleCore";
 import type { FailureKind } from "./taskCore";
 
 export type TaskAction = "done" | "archive" | "snooze";
@@ -145,16 +145,17 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
       setList(r.tasks); setTruncated(r.truncated); setError(null); setLastOk(mem.at); setSavedAt(null);
       if (nodePath === "") { const t = mem.tree; if (t) savedTasks.write(owner, { at: mem.at, tree: t, list: r.tasks, truncated: r.truncated }); }
       warmTitles(r.tasks.flatMap((t) => [t.title, t.next]), vault);
-      // a cut title's full question arrives a moment later, without holding the list back
-      void vaultTasks.loadAsks(r.tasks).then((asks) => {
-        if (!asks.size || !current() || memory !== mem) return;
+      // a cut title's full question arrives a moment later, without holding the list back. r20: each lands as it is read (a decision not read
+      // yet is "Checking what's needed…" and not owed), and a failed read says so ("Couldn't check · Retry"), never "Decide: …"
+      const landAsk = (id: string, a: AskRead) => {
+        if (!current() || memory !== mem) return;
         // each ask keeps the revision it was read at; a row shows it as its question only at that revision (decisionAsk)
-        const one = (t: Task) => { const a = asks.get(t.id); return a ? { ...t, ask: a.ask, askAt: a.at } : t; };
-        const withAsk = (l: Task[] | null) => l && l.map(one);
+        const one = (t: Task): Task => (t.id !== id ? t : a.failed ? (t.askAt === t.updatedAt && t.ask !== undefined ? t : { ...t, askFailed: true }) : { ...t, ask: a.ask, askAt: a.at, askFailed: undefined });
         const merged = (mem.tasks.get(nodePath)?.list ?? r.tasks).map(one);
         mem.tasks.set(nodePath, { list: merged, truncated: r.truncated });
-        setList((cur) => withAsk(cur));
-      }).catch(() => {});
+        setList((cur) => cur && cur.map(one));
+      };
+      void vaultTasks.loadAsks(r.tasks, landAsk).catch(() => {});
       // r19: what each Needs-you row stands on (the notes its step links, its source, its questions), read again on every list read, a moment
       // after the list is on screen; until a row's notes are read it says "Checking what's needed…" and asserts no action
       const keysOf = (t: Task) => (t.node !== ROOT && mem.tree ? nodeFilterKeys(mem.tree, [t.node]) : []);
@@ -204,7 +205,7 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
 
   const now = new Date();
   /** r19: each row with its check as of this render (a check past CHECK_TTL reads as checking again; only Needs-you rows are checked). */
-  const checked = useMemo(() => { const at = Date.now(); return list && list.map((t) => (needsYou(t) ? { ...t, check: checkOf(t, checks.get(t.id), at) } : t)); }, [list, checks, n, day]); // eslint-disable-line react-hooks/exhaustive-deps
+  const checked = useMemo(() => { const at = Date.now(); return list && list.map((t) => (wouldNeedYou(t) ? { ...t, check: checkOf(t, checks.get(t.id), at) } : t)); }, [list, checks, n, day]); // eslint-disable-line react-hooks/exhaustive-deps
   const visible = useMemo(() => (checked ?? []).filter((t) => isLive(t) && !gone.has(t.id) && !snoozed(t, new Date())), [checked, gone, n, day]); // eslint-disable-line react-hooks/exhaustive-deps
   const counts: Map<string, Counts> = useMemo(() => (tree ? rollUp(tree, tasksUnder(tree, nodePath, visible)) : new Map()), [tree, nodePath, visible]);
 

@@ -18,7 +18,7 @@ import { pickRoom } from "./areaLayout";
 import { childrenOf, parentPath, ROOT, rootNode, trail, UNI_CHANNEL } from "./treeCore";
 import { findUniRoom } from "../uniActions";
 import { useStoredSelfTest } from "../interface/selftest/useSelfTest";
-import { useRailHidden, useShortTree, useWide } from "./homeLayout";
+import { useRailHidden, useShortTree, useUprightPhone, useWide } from "./homeLayout";
 import { isPrivateNode, privateRoot, roomSlug, roomView, treeRows } from "./treeRooms";
 import { publishRoomNodes, roomNodeMap } from "./roomLabels";
 import { useNav, type NavControls } from "../navContext";
@@ -103,8 +103,9 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   const setRootOpen = (v: boolean) => { rootOpenMemory.open = v; setRootOpenState(v); };
   const phoneTree = !wide;
   /** The tree as a full-screen home (a phone held upright). A short window (the rail hidden: 740×360) opens on the room instead, with Places in
-   *  its header (r15): the tree is the drawer there. */
-  const treeHome = phoneTree && !railHidden;
+   *  its header (r15): the tree is the drawer there. r20: so does every size that isn't an upright phone (800×600 opened on the tree). */
+  const upright = useUprightPhone();
+  const treeHome = phoneTree && !railHidden && upright;
   const version = useAppVersion();
   const runtime = useWebviewRuntime();
   const stored = useStoredSelfTest();
@@ -148,7 +149,7 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
     // Android Back closes what is over the place before it zooms out a level.
     onBackChange(sheetId ? closeSheet : drawer ? () => setDrawer(false) : appOpen ? () => setAppOpen(false) : workOver ? () => setWork(false) : back);
     return () => onBackChange(null);
-  }, [path, loose, data, uniRoom, onOpenArea, onBackChange, overlayKey, phoneTree, rootOpen]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [path, loose, data, uniRoom, onOpenArea, onBackChange, overlayKey, phoneTree, treeHome, rootOpen]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     onOverlayChange?.(overlay);
     // Escape closes the drawer or the work view (the sheet handles its own)
@@ -358,7 +359,9 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   const sheetView = sheetTask && <TaskSheet key={sheetTask.id} task={sheetTask} gone={sheetGone} here={here} nodeName={nodeName} room={roomOfNode(sheetTask.node) ?? target} inRoom={target?.id} onClose={closeSheet}
     draft={draftOf(sheetTask)}
     onAct={(t, a) => tasks.act(t, a, { sheet: true })} onDecide={(t, o) => tasks.decide(t, o)} onNote={actions.openNote} onOpenRoom={openRoomHere} onSay={chat ? sayIn : undefined} onPriority={(t, p) => void tasks.setPriority(t, p)} onStale={tasks.refresh} />;
-  const companionProps: CompanionProps = { stands, ready: tasks.ready, load, feed: panel, rest: panel.rest, moreTitle: privateNote(panel.privateCount), onPrivate: openPrivate, runs, nodeName: node.name, scope: borrowed ? node.name : null, onTask: openSheet, onNote: actions.openNote, onDecide: decide, onEverything: () => { closeSheet(); setWork(true); } };
+  /** r20: a row's area when it is shown outside it (Uni's list holds every area's): its subtitle names it when its title can't say where it is. */
+  const placeOf = (t: Task) => (t.node !== here ? nodeName(t.node) : null);
+  const companionProps: CompanionProps = { stands, ready: tasks.ready, load, feed: panel, rest: panel.rest, moreTitle: privateNote(panel.privateCount), onPrivate: openPrivate, runs, nodeName: node.name, scope: borrowed ? node.name : null, onTask: openSheet, onNote: actions.openNote, onDecide: decide, placeOf, onEverything: () => { closeSheet(); setWork(true); } };
   const placeholder = chatPlaceholder({ name: node.name, slash: nodeView.own ? nodeView.slash : null, heldBy: nodeView.heldBy ? nodeView.heldBy.name : null });
   // ------------------------------------------------------------------------------------------ the work view (r13)
   const mineLive = isMine;
@@ -376,7 +379,7 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   </div> : null;
   const foot = node.kind === "project" && body ? <details className="th-note wv-note"><summary>Project note</summary><Body body={body} mentions={[]} me={null} /></details> : null;
   const workMain = <WorkView nodeName={node.name} feed={feed} others={othersHere} later={later} runs={runs} drafts={drafts} privateOther={privateOther} ready={tasks.ready} load={load} activity={tasks.activity}
-    onTask={openSheet} onDecide={decide} onNote={actions.openNote} onPrivate={openPrivate} top={top} foot={foot} />;
+    onTask={openSheet} onDecide={decide} onNote={actions.openNote} onPrivate={openPrivate} placeOf={placeOf} top={top} foot={foot} />;
   const workOpen = work || !chat || noRoom;
   const workBar = workOpen ? <div className="sr-thread sr-workbar">{chat && !noRoom && <button type="button" className="sr-thread-back sr-work-back" onClick={() => setWork(false)}><span aria-hidden="true">‹</span> Back to chat</button>}
     <span className="sr-thread-label">{`All of ${node.name}'s work`}</span></div> : null;
