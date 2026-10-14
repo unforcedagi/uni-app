@@ -470,7 +470,7 @@ export function CompanionStrip({ open, onToggle, ...p }: CompanionProps & Fold) 
     setTop(el && room ? Math.max(0, Math.round(el.getBoundingClientRect().top - room.getBoundingClientRect().top)) : 0);
     const opener = document.activeElement as HTMLElement | null;
     sheetRef.current?.focus();
-    // Escape on the window, as the drawer does (WebKitGTK delivered it there, not to the sheet's own handler, in the r16 walk)
+    // Escape on the window, as the drawer does (r16: the walk harness can't send Escape, so this is checked with a dispatched key)
     const esc = (e: KeyboardEvent) => { if (e.key === "Escape" && !e.defaultPrevented && !document.querySelector(".task-sheet-wrap")) { e.preventDefault(); closeRef.current(); } };
     window.addEventListener("keydown", esc);
     return () => { window.removeEventListener("keydown", esc); if (opener?.isConnected) opener.focus(); };
