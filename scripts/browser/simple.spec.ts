@@ -3510,6 +3510,21 @@ test.describe('r21', () => {
     await expect(line).not.toContainText('example-workers.invalid');
   });
 
+  test('privacy never waits on the areas (found in the real app, cold at 800×600): a private area\'s item is never a row before the areas are read', async ({ page }) => {
+    await page.addInitScript(() => {
+      const w = window as any;
+      w.__tagDelay = { area: 6000, project: 6000 };
+      w.__sawPrivate = false;
+      new MutationObserver(() => { if (/Sit twenty minutes|Before breakfast/.test(document.body?.innerText ?? '')) w.__sawPrivate = true; }).observe(document, { subtree: true, childList: true, characterData: true });
+    });
+    if (!wide(page)) await page.setViewportSize({ width: 740, height: 360 });
+    await boot(page, { privateTasks: true });
+    await openWork(page);
+    await expect(page.locator('.sr-work .cp-private')).toHaveText('Sadhana: 1 for you', { timeout: 15_000 });
+    await page.waitForTimeout(6500);
+    expect(await page.evaluate(() => (window as any).__sawPrivate)).toBe(false);
+  });
+
   test('the 800×600 sheet has a margin and its whole border', async ({ page }) => {
     await page.setViewportSize({ width: 800, height: 600 });
     await boot(page);
