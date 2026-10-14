@@ -354,7 +354,12 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
     return out;
   }
 
-  return { setAskOwner, loadTree, loadTagged, loadAsks, loadSubtree, loadTasks, loadSupport, assessTask, loadChecks, cachedChecks, transition, decide, snooze, setPriority, nearSupported: () => nearOk };
+  /** Forget (r19): every identity's kept questions and checks go from the device (and r18's per-task source cache), with this session's. */
+  function forgetKept() {
+    askCache.clear(); checkCache.clear(); askOwner = ""; checkOwner = "\u0000";
+    try { for (let i = localStorage.length - 1; i >= 0; i--) { const k = localStorage.key(i); if (k && /^uni\.(asks|checks|support)\.v\d+:/.test(k)) localStorage.removeItem(k); } } catch { /* nothing kept */ }
+  }
+  return { forgetKept, setAskOwner, loadTree, loadTagged, loadAsks, loadSubtree, loadTasks, loadSupport, assessTask, loadChecks, cachedChecks, transition, decide, snooze, setPriority, nearSupported: () => nearOk };
 }
 
 export const vaultTasks = createVaultTasks();

@@ -2867,10 +2867,13 @@ test.describe('r19', () => {
   test('at 920×360 the folded companion still says what is waiting: "Needs you · N: <first request>" on the strip', async ({ page }) => {
     await page.setViewportSize({ width: 920, height: 360 });
     await boot(page);
+    // the first request (overdue) has a link in its step: the line says its host, never a gap where the link was (found in the real app)
+    await add(page, { id: 'look', title: 'T-113 Companion Today redesign', node: 'Projects/ATLAS', meta: { priority: 'now', due: '2026-10-01', next: 'Look at https://staging.example.invalid/?look=ecology on phone' } });
+    await refresh(page, '2026-10-09T10:01:00.000Z');
     await openRoom(page, 'ATLAS');
     const line = page.locator('.cp.strip .cp-line');
     await expect(line).toHaveAttribute('aria-expanded', 'false');
-    await expect(line.locator('.cp-line-text')).toHaveText(/^Needs you · \d+: \S/);
+    await expect(line.locator('.cp-line-text')).toHaveText(/^Needs you · \d+: Look at staging\.example\.invalid on phone/);
     await expect(page.locator('.cp.side')).toHaveCount(0);
   });
 
@@ -2911,6 +2914,23 @@ test.describe('r19', () => {
     await expect(upkeep.locator('summary')).toContainText("Uni's upkeep");
     await expect(upkeep.locator('.status-past-body')).toBeHidden();
     await expect(page.locator('.sr-chat .message:not(.status-line)').filter({ hasText: 'Self-improvement review' })).toHaveCount(0);
+  });
+
+  test('Forget takes the device\'s kept checks and questions with it', async ({ page }) => {
+    test.skip(!wide(page), 'Settings from the rail');
+    await boot(page);
+    await mailTask(page);
+    await refresh(page, '2026-10-09T10:01:00.000Z');
+    await openRoom(page, 'ATLAS');
+    await openWork(page);
+    await expect(row13(page)).toHaveAttribute('data-mode', 'lead');
+    await expect.poll(() => page.evaluate(() => Object.keys(localStorage).some((k) => k.startsWith('uni.checks.v1:')))).toBe(true);
+    await page.evaluate(() => localStorage.setItem('uni.support.v1:old|uni', '[]'));
+    await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Settings', exact: true }).click();
+    await page.getByRole('button', { name: 'Forget this device key', exact: true }).click();
+    await page.getByRole('button', { name: /Tap again to forget/ }).click();
+    await expect(page.locator('.pairing-card')).toBeVisible();
+    expect(await page.evaluate(() => Object.keys(localStorage).filter((k) => /^uni\.(checks|asks|support)\./.test(k)))).toEqual([]);
   });
 
   test('Back means one thing: it closes the open sheet first, then goes back a place', async ({ page }) => {

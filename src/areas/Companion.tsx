@@ -13,7 +13,7 @@ import { isActiveRun, type Run } from "./steerCore";
 import { ownerLabel, type Task } from "./taskCore";
 import { taskTitle } from "./whereCore";
 import { splitLinks } from "./linkText";
-import { actionableTitle, actionLead, answerChoices, answerLabel, askLead, askPreview, checkLine, CHECK_FAILED, CHECKING, DANGLING, decideLine, stripRoom, decisionQuestion, dueLine, fitsRow, isOverdue, lineBudget, OPEN_TO_ANSWER, privateLabel, standsHeading, TIDY_LINE, toTidy, waitsLine, waitsOnMe, withoutCut, rowAsk, type Choice, type NeedsFeed, type PrivateNeed, type Support } from "./simpleCore";
+import { actionableTitle, actionLead, answerChoices, answerLabel, askLead, askPreview, checkLine, CHECK_FAILED, CHECKING, DANGLING, decideLine, stripRoom, decisionQuestion, dueLine, fitsRow, isOverdue, lineBudget, OPEN_TO_ANSWER, privateLabel, standsHeading, TIDY_LINE, toTidy, waitsLine, waitsOnMe, withHosts, withoutCut, rowAsk, type Choice, type NeedsFeed, type PrivateNeed, type Support } from "./simpleCore";
 import { requestRecheck } from "./useTasks";
 
 const KEYS = { side: "uni.companion.side.v1", sideNarrow: "uni.companion.side.narrow.v1", strip: "uni.companion.strip.v1" } as const;
@@ -285,7 +285,8 @@ export function rowLead(t: Task): { text: string; under: string | null; go: stri
   const theirs = waitsOnMe(t);
   const context = theirs ? [`From ${ownerLabel(t.owner)}`, ask.text || null].filter(Boolean).join(" · ") : null;
   const action = actionLead(next) ?? (theirs && next ? next : null);
-  if (action) return { text: plainDetail(action) || action, under: context ?? (ask.text || null), go: null, answers: false, yourCall: false, lead: true, mode: "lead" };
+  // r19: a link in the action reads as its host ("Look at cohere-signup-staging.unforced.workers.dev on phone"), never a gap where it was
+  if (action) return { text: plainDetail(withHosts(action)) || action, under: context ?? (ask.text || null), go: null, answers: false, yourCall: false, lead: true, mode: "lead" };
   return { text: ask.text || "Open to see what's needed", under: context && theirs ? `From ${ownerLabel(t.owner)}` : null, go: null, answers: false, yourCall: false, lead: false, mode: "title" };
 }
 

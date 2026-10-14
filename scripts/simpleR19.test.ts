@@ -2,7 +2,7 @@
 // Titles are real ones from the refreshed scratch copy (10-14); steps are written in the same shapes, never copied from a note's body.
 // Run: node --experimental-strip-types scripts/simpleR19.test.ts
 import assert from "node:assert/strict";
-import { CHECK_TTL, checkOf, needsFeed, needsYou, taskDeps, tidyReason, tidyRequest, toTidy, wouldNeedYou, type CheckState } from "../src/areas/simpleCore.ts";
+import { CHECK_TTL, checkOf, needsFeed, needsYou, stepAudience, taskDeps, tidyReason, tidyRequest, toTidy, withHosts, wouldNeedYou } from "../src/areas/simpleCore.ts";
 import { buildTaskTree, parseNodes, parseTask, type Task } from "../src/areas/taskCore.ts";
 import { createVaultTasks } from "../src/areas/vaultTasks.ts";
 
@@ -185,6 +185,12 @@ await check("P1-3 \"Ask Uni to fix this record\" says what to fix, by the task's
   assert.equal(tidyRequest(f, "outline"), "Please fix T-111 (Fractal flow test: real work in area rooms, check updates): it is a list of notes, not one step you can finish. Rewrite it as one action I can finish, with a clear end, or close it.");
   const m = task("m", "Mail: approve a test week, not an immediate cutover", {}, "decision");
   assert.equal(tidyRequest(m, "proposal"), "Please fix decision “Mail: approve a test week, not an immediate cutover”: it states a proposal but asks me nothing. Add the question and its options (tasks.py decide new), or close it if it no longer needs me.");
+});
+
+await check("found in the real app: a sheet heading keeps a link as its host, and a room named as where a block is isn't who the step speaks to", () => {
+  assert.equal(withHosts("Look at https://cohere-signup-staging.unforced.workers.dev/?look=ecology on phone, then forward #cohere's 'For Harper' block"), "Look at cohere-signup-staging.unforced.workers.dev on phone, then forward #cohere's 'For Harper' block");
+  assert.equal(stepAudience("Look at the staging link on phone, then forward #cohere's 'For Harper' block (posted 10-13)", "cohere"), null);
+  assert.deepEqual(stepAudience("Answer the 7 questions in #cohere", "cohere"), { kind: "room", text: "" });
 });
 
 if (failed) { console.log(`\n${failed} failed`); process.exit(1); }

@@ -149,7 +149,8 @@ export function stepAudience(next: string | null | undefined, room: string | nul
   const step = (next ?? "").replace(/[*_`>]/g, "").replace(/\s+/g, " ").trim();
   if (!step) return null;
   const here = slugOf(room);
-  const named = [...step.matchAll(/(?:^|\s)#([\w./-]*\w)/g)].map((m) => m[1].toLowerCase());
+  // r19: a room named as where something is ("#cohere's 'For Harper' block") is not who the step speaks to
+  const named = [...step.matchAll(/(?:^|\s)#([\w./-]*\w)(?!['’]s\b)/g)].map((m) => m[1].toLowerCase());
   const quoted = /["“'‘]([^"”'’]{1,120})["”'’]/.exec(step)?.[1] ?? "";
   // "Say …": for the room, unless it is said to a named person ("Say thanks to Mark")
   let m = /^say\b[\s:,-]*(.*)$/i.exec(step);
@@ -180,6 +181,9 @@ export function stepAudience(next: string | null | undefined, room: string | nul
   }
   return null;
 }
+/** r19: a text with each web address written as its host ("Look at cohere-signup-staging.unforced.workers.dev on phone"): a heading never
+ *  drops a link and leaves a gap ("Look at  on phone"). */
+export const withHosts = (text: string): string => text.replace(/https?:\/\/[^\s)]+|\bwww\.[^\s)]+/g, (u) => hostOf(/^www\./.test(u) ? `https://${u}` : u.replace(/[.,;:]+$/, ""))).replace(/\s+/g, " ").trim();
 export const hostOf = (url: string) => { try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return "the link"; } };
 /** What a room-directed step would put in the room's composer (never sent). Kept for the r13 callers: the room's words, else null. */
 export function sayText(lead: string | null, room: string | null = null): string | null {
