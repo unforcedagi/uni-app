@@ -47,6 +47,8 @@ export default function Search({ onOpen, onOpenNote, onAskUni, onClose, vaults, 
   const [notes, setNotes] = useState<NoteHit[]>([]);
   const [noteState, setNoteState] = useState<"idle" | "searching" | "done" | "error">("idle");
   const [noteError, setNoteError] = useState<string | null>(null);
+  /** r21 (Codex 7): Retry after a failed search runs both searches again */
+  const [retry, setRetry] = useState(0);
   const input = useRef<HTMLInputElement>(null);
 
   useEffect(() => { input.current?.focus(); }, []);
@@ -62,7 +64,7 @@ export default function Search({ onOpen, onOpenNote, onAskUni, onClose, vaults, 
         .catch((e) => { if (current) { setError(String(e)); setState("error"); } });
     }, DEBOUNCE_MS);
     return () => { current = false; clearTimeout(t); };
-  }, [query]);
+  }, [query, retry]);
 
   // Vault search is a network round-trip (embedding + fan-out), so it waits a
   // little longer than the local index before firing.
@@ -77,7 +79,7 @@ export default function Search({ onOpen, onOpenNote, onAskUni, onClose, vaults, 
         .catch((e) => { if (current) { setNotes([]); setNoteError(String(e)); setNoteState("error"); } });
     }, NOTE_DEBOUNCE_MS);
     return () => { current = false; clearTimeout(t); };
-  }, [query, mode, vault, pathPrefix]);
+  }, [query, mode, vault, pathPrefix, retry]);
 
   async function ask() {
     const q = query.trim();
@@ -112,7 +114,9 @@ export default function Search({ onOpen, onOpenNote, onAskUni, onClose, vaults, 
       </div>}
       {q && <>
         <h2 className="search-section">Messages{state === "searching" ? " · searching…" : state === "done" ? ` · ${hits.length}${hits.length >= 60 ? "+" : ""}` : ""}</h2>
-        {state === "error" && <p className="error" role="alert">{error}</p>}
+        {/* r21 (Codex 7): a failed search says so in words, with Retry; the technical reason is a detail */}
+        {state === "error" && <div className="note-error" role="alert"><p>Couldn't search messages just now. <button type="button" className="cp-retry" onClick={() => setRetry((n) => n + 1)}>Retry</button></p>
+          {error && <details className="note-error-more"><summary>Details</summary><p className="note-error-detail">{error}</p></details>}</div>}
         {state === "done" && hits.length === 0 && <p className="search-none">No messages match “{q}”. Only conversations already on this device are searched; older history may not be here yet.</p>}
         {groups.map((g) => <div key={g.channel} className="search-group">
           <h3>#{g.name}</h3>
@@ -135,7 +139,8 @@ export default function Search({ onOpen, onOpenNote, onAskUni, onClose, vaults, 
           </button>)}
         </div>}
         {noteState === "error" && <div className="search-notes">
-          <p role="alert">Couldn't reach your vault: {noteError}</p>
+          <p role="alert">Couldn't reach your vault just now. <button type="button" className="cp-retry" onClick={() => setRetry((n) => n + 1)}>Retry</button></p>
+          {noteError && <details className="note-error-more"><summary>Details</summary><p className="note-error-detail">{noteError}</p></details>}
           <button className="send" onClick={() => void ask()} disabled={asking || asked === q}>{asked === q ? "✓ Asked Uni" : asking ? "Asking…" : "✦ Ask Uni to search my notes"}</button>
         </div>}
       </>}

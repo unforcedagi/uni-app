@@ -610,7 +610,9 @@ Two proposals wait on a scope decision.
             return { hub: 'https://example.invalid', vault: args.vault ?? 'uni', note: { createdAt: '2026-09-01T00:00:00Z', tags: [], metadata: {}, ...n } };
           }
           case 'journal_config': return { hub: 'https://example.invalid', vault: 'uni' };
-          case 'vault_search': return notes.filter((n) => (n.content ?? '').toLowerCase().includes(String(args.query).toLowerCase()) && (!args.pathPrefix || (n.path ?? '').startsWith(args.pathPrefix))).slice(0, args.limit ?? 20).map((n) => ({ vault: 'uni', id: n.id, path: n.path, snippet: String(n.content).slice(0, 60), score: null, mode: 'keyword' }));
+          // r21: a spec may make both searches fail (__searchFails)
+          case 'search': if (w.__searchFails) throw 'search index: io error (os error 5)'; return [];
+          case 'vault_search': if (w.__searchFails) throw 'vault search: 502 Bad Gateway'; return notes.filter((n) => (n.content ?? '').toLowerCase().includes(String(args.query).toLowerCase()) && (!args.pathPrefix || (n.path ?? '').startsWith(args.pathPrefix))).slice(0, args.limit ?? 20).map((n) => ({ vault: 'uni', id: n.id, path: n.path, snippet: String(n.content).slice(0, 60), score: null, mode: 'keyword' }));
           // r21: a spec may seed journal entries (fiction, never real journal content)
           case 'journal_list': return (w.__journal ?? []).slice(args.offset ?? 0, (args.offset ?? 0) + (args.limit ?? 50));
           case 'journal_pending': case 'search_messages': return [];
