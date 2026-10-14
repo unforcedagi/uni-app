@@ -1504,7 +1504,7 @@ test.describe('simple', () => {
       if (await later.count()) { await expect(later.locator('.wv-fold')).toHaveAttribute('aria-expanded', 'false'); await expect(page.locator('section[aria-label="Needs you"]')).not.toContainText(/Send the Q4 invoice|Find a teacher/); }
       await page.getByRole('button', { name: 'Back to chat' }).click();
     }
-    // r14/r17: from Uni's work view a private area is one line, "Sadhana: N for you ›", opening that area (the panel folds it into "N more"); inside it, its items are ordinary rows
+    // r14/r17: from Uni's work view a private area is one line, "Sadhana: N for you" (r21: no "›"), opening that area (the panel folds it into "N more"); inside it, its items are ordinary rows
     await openRoom(page, 'Uni');
     await openCompanion(page);
     await expect(page.locator('.cp-body .cp-privates')).toHaveCount(0);
