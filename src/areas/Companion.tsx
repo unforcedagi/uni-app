@@ -1,7 +1,7 @@
 // T-124: the room's quiet companion. Not a page: one sentence on where the room stands, at most three things that need the user, and what is
 // running (only when something is). Desktop: a side panel that folds to a thin rail. Phone: a one-line strip at the top of the room that opens
 // downward. Each item opens its task sheet; "Everything here" goes one level deeper, to the full node page. The fold is remembered per device.
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { cleanText } from "../interface/contract";
 import { RefName, RefText } from "./noteRefs";
@@ -13,7 +13,7 @@ import { isActiveRun, type Run } from "./steerCore";
 import { ownerLabel, type Task } from "./taskCore";
 import { taskTitle } from "./whereCore";
 import { splitLinks } from "./linkText";
-import { actionableTitle, answerChoices, answerLabel, askLead, askPreview, checkLine, CHECK_FAILED, DANGLING, decideLine, stripRoom, decisionQuestion, dueLine, fitsRow, isOverdue, lineBudget, missingLine, OPEN_TASK, OPEN_TO_ANSWER, privateLabel, actionOf, rowAction, stepsLine, withoutBrackets, rowSubParts, standsHeading, titleSays, titleWords, TIDY_LINE, toTidy, unknownDecision, waitsLine, waitsOnMe, withHosts, withoutCut, rowAsk, type Choice, type NeedsFeed, type PrivateNeed, type RowAction, type Support } from "./simpleCore";
+import { actionableTitle, answerChoices, answerLabel, askLead, askPreview, checkLine, CHECK_FAILED, DANGLING, decideLine, stripRoom, decisionQuestion, dueLine, fitsRow, isOverdue, lineBudget, missingLine, OPEN_TASK, OPEN_TO_ANSWER, privateActionLabel, privateRestLabel, askedLine, firstOfSteps, actionOf, rowAction, withoutBrackets, rowSubParts, standsHeading, titleSays, titleWords, TIDY_LINE, toTidy, unknownDecision, waitsLine, waitsOnMe, withHosts, withoutCut, rowAsk, type Choice, type NeedsFeed, type PrivateNeed, type RowAction, type Support } from "./simpleCore";
 import { requestRecheck } from "./useTasks";
 
 const KEYS = { side: "uni.companion.side.v1", sideNarrow: "uni.companion.side.narrow.v1", strip: "uni.companion.strip.v1" } as const;
@@ -84,7 +84,7 @@ export type TaskLoad = { error: string | null; /** The task tree (the nodes) cou
   /** The read has run past 8 seconds (r16): "Still loading · Retry". */ slow?: boolean };
 
 /** Lines an action may take (r21: the whole action; a third line rather than cut its object). */
-export const ACTION_LINES = 3;
+export const ACTION_LINES = 99;
 const URL_RE = /https?:\/\/\S+|\bwww\.\S+/g;
 /** One line of detail: no raw links (they stay in the opened item), whitespace squeezed, no dangling separators. */
 export const plainDetail = (s: string): string => s.replace(URL_RE, "").replace(/\s+/g, " ").replace(/\s*[·,;:(\[-]+\s*$/, "").replace(/\(\s*\)/g, "").trim();
@@ -217,12 +217,12 @@ function WordClamp({ tokens: tokens0, lines, open, textKey, onCut, elRef, classN
 }
 
 /**
- * A row's action (r21, both critics): the first of its forms that fits `lines` whole (the whole action; without its brackets; "2 steps: A, then
- * …"), measured before paint and again when the row's width changes. Only when none fits is the last form cut, and never inside its `keep`.
+ * A row's action (r22, both critics): the whole action, every step ("A, then B") and every verb phrase, wrapping to as many lines as it needs:
+ * no clamp, no "then …", no ellipsis. An action past `ROW_ACTION_MAX` characters was already shortened with words (`rowForm`).
  */
-function ActionLine({ forms, vault, lines, textKey, elRef }: { forms: { text: string; keep: string }[]; vault: string; lines: number; textKey: string; elRef: React.RefObject<HTMLParagraphElement | null> }) {
-  const alts = forms.map((f) => ({ tokens: stepTokens(f.text, vault, undefined, true), keep: f.keep.split(" ").filter(Boolean).length }));
-  return <WordClamp elRef={elRef} className="cp-title cp-lead" tag="span" tokens={alts[0].tokens} alts={alts} textKey={textKey} lines={lines} open={false} onCut={() => {}} onClick={() => {}} />;
+function ActionLine({ forms, vault, elRef }: { forms: { text: string; keep: string }[]; vault: string; elRef: React.RefObject<HTMLParagraphElement | null> }) {
+  const tokens = stepTokens(forms[0].text, vault, undefined, true);
+  return <span ref={elRef} className="cp-title cp-lead" data-form="0">{tokens.map((t, i) => <Fragment key={i}>{t.space ? " " : ""}{t.node}</Fragment>)}</span>;
 }
 
 /**
@@ -425,21 +425,24 @@ export function NeedRow({ t, onTask, meta, compact = false, area = null }: { t: 
   const nextLines = compact ? Math.min(1, lineBudget(Math.min(titleLines, titleMax), !!due, 4).next) : lineBudget(Math.min(titleLines, titleMax), !!due, 4).next;
   const clampStyle = isDecision ? undefined : ({ WebkitLineClamp: titleMax, lineClamp: titleMax } as React.CSSProperties);
   // r20: an action row's subtitle carries its due cue ("COhere opens Oct 15 · due today"); other rows keep the due line of their own
-  const meta_ = <>{r.sub ? (r.under && <span className="cp-under cp-sub" title={r.under}>{r.sub.where && <FitLine className="cp-sub-where" text={r.sub.where} fallback={r.sub.short ?? null} onHide={setWhereHidden} />}
-      {r.sub.when && <span className={`cp-sub-when${isOverdue(t.due) ? " overdue" : ""}`}>{r.sub.where && !whereHidden ? " · " : ""}{r.sub.when}</span>}</span>)
+  // r22 (Codex P1): every Needs-you row says when it was asked ("asked Oct 11"), from the record's last change; never on a row that isn't the user's
+  const asked = meta ? null : askedLine(t.updatedAt);
+  const when_ = r.sub ? [r.sub.when, asked].filter(Boolean).join(" · ") : null;
+  const meta_ = <>{r.sub ? (<span className="cp-under cp-sub" title={[r.sub.where, when_].filter(Boolean).join(" · ")}>{r.sub.where && <FitLine className="cp-sub-where" text={r.sub.where} fallback={r.sub.short ?? null} onHide={setWhereHidden} />}
+      {when_ && <span className={`cp-sub-when${isOverdue(t.due) ? " overdue" : ""}`}>{r.sub.where && !whereHidden ? " · " : ""}{when_}</span>}</span>)
     : r.under && <SmallLine className="cp-under" text={r.under} />}
-    {due && !r.lead && <small className={`cp-detail${isOverdue(t.due) ? " overdue" : ""}`}>{due}</small>}
+    {!r.lead && (due || asked) && <small className={`cp-detail cp-asked-line${isOverdue(t.due) ? " overdue" : ""}`}>{[due, asked].filter(Boolean).join(" · ")}</small>}
     {meta && <SmallLine className="cp-detail cp-meta" text={meta} />}</>;
   // r21 (Codex 10): one target per visible request: the whole row is one button that opens its sheet (its links and notes open there).
   // r21 (P1-1): a row whose check failed retries as it opens, so its "Retry" is what the tap does
   const open_ = () => { if (r.mode === "unavailable") requestRecheck(); onTask(t); };
-  const label = r.lead ? [r.action?.text ? plainDetail(withHosts(r.action.text)) : text, r.under, meta].filter(Boolean).join(". ") : r.yourCall ? `Your call: ${text}` : undefined;
+  const label = r.lead ? [r.action?.text ? plainDetail(withHosts(r.action.text)) : text, r.sub ? [r.sub.where, when_].filter(Boolean).join(" · ") : r.under, meta].filter(Boolean).join(". ") : r.yourCall ? `Your call: ${text}` : undefined;
   return <li className="cp-item" data-lead={r.lead ? "action" : undefined} data-mode={r.mode}>
     <button type="button" className={`cp-need${isDecision ? " decision" : ""}${r.lead ? " cp-need-lead" : ""}`} data-id={id ?? undefined} data-mode={r.mode} aria-busy={r.mode === "checking" || undefined} aria-label={label} onClick={open_}>
       {r.yourCall && <small className="cp-call-lead">Your call:</small>}
       {r.lead
         // r21: the whole action, a third line before its object is cut; "2 steps: A, then …" when two steps don't fit
-        ? <ActionLine elRef={titleRef as React.RefObject<HTMLParagraphElement | null>} forms={r.action?.forms.length ? r.action.forms : [{ text: next, keep: "" }]} vault={vault} lines={titleMax} textKey={`${vault}\n${next}`} />
+        ? <ActionLine elRef={titleRef as React.RefObject<HTMLParagraphElement | null>} forms={r.action?.forms.length ? r.action.forms : [{ text: next, keep: "" }]} vault={vault} />
         : clampMode
           // r16: a question too long for a row: whole words, then "Open to decide" (r18: the companion's "Your call"/"Check" lines too)
           ? <span className="cp-title-wrap"><WordClamp elRef={titleRef as React.RefObject<HTMLParagraphElement | null>} className="cp-title cp-preview" tokens={wordTokens(withoutCut(text))} textKey={text} lines={titleMax} open={false} onCut={() => {}} onClick={() => {}} tag="span" /></span>
@@ -459,10 +462,18 @@ export function NeedRow({ t, onTask, meta, compact = false, area = null }: { t: 
   </li>;
 }
 
-/** A private area's items, from outside it (r14): "Sanctum: 2 for you", opening that area. Never a title. r21: no "›" on any row. */
+/**
+ * A private area's items, from outside it (r22, both critics): each item whose step is a short work imperative is its own row, "In Sanctum: Book
+ * the dentist" (its verb and object only); the rest, whose words may be personal, are one plain row, "In Sanctum: 1 thing for you · open
+ * Sanctum". Every row opens that area, where its items are ordinary rows with their sheets. Never a title, never "›".
+ */
 export function PrivateRow({ p, onPrivate }: { p: PrivateNeed; onPrivate?: (open: PrivateNeed["open"]) => void }) {
-  return <li className="cp-item cp-private-item"><button type="button" className="cp-need cp-private" onClick={() => onPrivate?.(p.open)}>
-    <span className="cp-title">{privateLabel(p)}</span></button></li>;
+  return <>
+    {(p.actions ?? []).map((a, i) => <li key={`a${i}`} className="cp-item cp-private-item" data-private="action"><button type="button" className="cp-need cp-private" onClick={() => onPrivate?.(p.open)}>
+      <span className="cp-title">{privateActionLabel(p.place, a)}</span></button></li>)}
+    {(p.others ?? p.count) > 0 && <li className="cp-item cp-private-item" data-private="count"><button type="button" className="cp-need cp-private" onClick={() => onPrivate?.(p.open)}>
+      <span className="cp-title">{privateRestLabel({ place: p.place, others: p.others ?? p.count, actions: p.actions ?? [] })}</span></button></li>}
+  </>;
 }
 
 /** r21: "Show 15 more": a link row says what it does, with no "›". */
@@ -518,7 +529,9 @@ export function NeedsList({ needs: owed, pending = [], fit, onTask, onDecide, on
     const budget = scroller.clientHeight - top - (body.scrollHeight - list.offsetHeight) - 40;
     let used = 0; let n = 0;
     // r17: not even the first row is kept when it doesn't fit whole (a 360px-tall window): it waits behind "+N more" too, never a sliver
-    for (const r of fits ? [] : rows) { if ((n > 0 || !keepOne) && used + r.offsetHeight > budget) break; used += r.offsetHeight; n++; }
+    // r22 (both critics): rows are whole actions now, so fewer may fit: at least two are kept (the panel scrolls), one in the phone's strip
+    const keepMin = keepOne ? 1 : 2;
+    for (const r of fits ? [] : rows) { if (n >= keepMin && used + r.offsetHeight > budget) break; used += r.offsetHeight; n++; }
     setLimit(fits || n >= rows.length ? Infinity : n);
     if (settled.current !== key) remeasured.current = 0;
     settled.current = key;
@@ -542,7 +555,7 @@ export function NeedsList({ needs: owed, pending = [], fit, onTask, onDecide, on
       }
       if (remeasured.current < 6) { remeasured.current++; setLimit(Infinity); setMeasuring(true); }
       // still over after measuring again (a row's height settles only once it is the last one shown): one row fewer, until it fits (r14)
-      else if (Number.isFinite(limit) && limit > (keepOne ? 1 : 0)) setLimit(limit - 1);
+      else if (Number.isFinite(limit) && limit > (keepOne ? 1 : 2)) setLimit(limit - 1);
     };
     const ro = new ResizeObserver(check);
     ro.observe(list);
@@ -594,7 +607,7 @@ export function waitingLine(feed: NeedsFeed): string | null {
   // r21: one line can't hold every action whole: an action of two steps says so ("2 steps: Look at …, then …"), never step 1 as the whole
   // job; brackets are left to the row; a long host reads as its first part, as in a row
   const a = first?.action;
-  const text = a ? withHosts(a.steps.length > 1 ? stepsLine(a.steps) : withoutBrackets(a.text)).replace(/\b([\w-]+)(?:\.[\w-]+){2,}\b/g, (h) => rowLinkLabel(h)) : first?.text;
+  const text = a ? withHosts(a.steps.length > 1 ? firstOfSteps(a.steps) : withoutBrackets(a.text)).replace(/\b([\w-]+)(?:\.[\w-]+){2,}\b/g, (h) => rowLinkLabel(h)) : first?.text;
   return `Needs you · ${feed.total}${first ? `: ${first.yourCall ? `Your call: ${text}` : text}` : ""}`;
 }
 

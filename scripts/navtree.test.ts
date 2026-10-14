@@ -144,7 +144,8 @@ check("r13 one feed, one count: private items are counted and named by place onl
   const priv = (n: string) => (n.startsWith("Areas/Sanctum") ? { path: "Areas/Sanctum", name: "Sanctum" } : null);
   const f = needsFeed(list, priv);
   assert.deepEqual(f.rows.map((t) => t.id), ["n1", "dec1"]);
-  assert.deepEqual(f.privates, [{ key: "Areas/Sanctum", count: 2, place: "Sanctum", open: { path: "Areas/Sanctum" } }]);
+  // r22: each item's short action, or (as here, no action) one "N things for you" line; still by place, never a title
+  assert.deepEqual(f.privates.map(({ actions: _a, others: _o, ...p }) => p), [{ key: "Areas/Sanctum", count: 2, place: "Sanctum", open: { path: "Areas/Sanctum" } }]);
   assert.equal(f.total, 4, "two named, two private; never Someday or someone else's");
   assert.equal(f.total, list.filter(needsYou).length);
   assert.equal(privateLabel(f.privates[0]), "Sanctum: 2 for you");
@@ -153,7 +154,7 @@ check("r13 one feed, one count: private items are counted and named by place onl
   const priv2 = (n: string) => priv(n) ?? (n.startsWith("Areas/Health") ? { path: "Areas/Health", name: "Health" } : null);
   const self = needsFeed([...list.filter((t) => t.node.startsWith("Areas/Sanctum")), other], priv2, { path: "Areas/Sanctum", name: "Sanctum" });
   assert.deepEqual(self.rows.map((t) => t.id), ["p1", "p2"]);
-  assert.deepEqual(self.privates, [{ key: "Areas/Health", count: 1, place: "Health", open: { path: "Areas/Health" } }]);
+  assert.deepEqual(self.privates.map(({ actions: _a, others: _o, ...p }) => p), [{ key: "Areas/Health", count: 1, place: "Health", open: { path: "Areas/Health" } }]);
   assert.equal(self.total, 3);
 });
 check("r13/r17 Uni's panel: at most three rows, Uni's own first, and one count of the rest that adds up", () => {

@@ -658,3 +658,10 @@
 .sr-chat-wait { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .sr-chat-wait-line { flex: 1; margin: 0; padding: 28px 24px; text-align: center; font: 400 13.5px/1.4 var(--th-sans); color: var(--th-mute); }
 .sr-chat-wait-composer { margin: 8px max(10px, calc((100% - 720px) / 2)) 10px; padding: 11px 16px; border: 1px solid var(--th-hair2); border-radius: 24px; font: 400 15px/1.5 var(--th-sans); color: var(--th-mute); opacity: .7; }
+/* r22 (Codex 7): a link in a step is a button in that step; (Codex P1) when it was asked, and a quiet cue when the chat has moved on */
+.task-step-links { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 4px; }
+.task-steps li .task-step-links { margin: 6px 0 2px; }
+.task-do.task-step-open { min-height: 40px; }
+.task-asked { margin: 0 0 10px; font-size: 13.5px; color: var(--th-mute); }
+.task-movedon { color: var(--th-ink2); }
+.task-record { overflow-wrap: anywhere; }

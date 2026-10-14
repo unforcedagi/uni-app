@@ -81,7 +81,11 @@ export type PrivatePlace = { path: string; name: string };
  * Items that need you in a private area, seen from outside it (r14): one line per private area, "Sanctum: 2 for you ›", opening that area.
  * Inside the area Aaron opened himself, its items are ordinary rows. They always count.
  */
-export type PrivateNeed = { key: string; count: number; place: string; open: { path: string } };
+export type PrivateNeed = { key: string; count: number; place: string; open: { path: string };
+  /** r22: each item's action as its verb and object only ("Book the dentist"), when it is a short work imperative; never its other words */
+  actions: string[];
+  /** r22: the items whose text reads as personal (no work verb, or longer than a short imperative): one "N things for you" line */
+  others: number };
 /** Needs you at one level, the one list every surface reads (r13): the companion, "+N in areas", the dots and the work view add up to `total`. */
 export type NeedsFeed = { rows: Task[]; privates: PrivateNeed[]; total: number;
   /** r19: records Uni has to tidy (not real requests yet), outside private areas; never in `total`. */
@@ -107,8 +111,11 @@ export function needsFeed(tasks: readonly Task[], privateOf: (node: string) => P
   for (const t of all) {
     const p = privateOf(t.node);
     if (!p || (self && p.path === self.path)) { rows.push(t); continue; }
-    const g = by.get(p.path);
-    if (g) g.count++; else by.set(p.path, { key: p.path, count: 1, place: p.name, open: { path: p.path } });
+    const g = by.get(p.path) ?? { key: p.path, count: 0, place: p.name, open: { path: p.path }, actions: [], others: 0 };
+    by.set(p.path, g);
+    g.count++;
+    const a = privateAction(t);
+    if (a) g.actions.push(a); else g.others++;
   }
   const here = (t: Task) => !privateOf(t.node) || privateOf(t.node)?.path === self?.path;
   const tidy = tasks.filter((t) => toTidy(t) && here(t));
@@ -138,6 +145,31 @@ export const privateNote = (n: number): string | null => (n <= 0 ? null : n === 
 /** "Sanctum: 2 for you": a private area's items, from outside it, by place and count only (r14). */
 export function privateLabel(p: Pick<PrivateNeed, "count" | "place">): string {
   return `${p.place}: ${p.count} for you`;
+}
+/** A short imperative (r22): one step, at most this many words, and no longer than `PRIVATE_ACTION_MAX` characters. */
+export const PRIVATE_ACTION_WORDS = 7;
+export const PRIVATE_ACTION_MAX = 48;
+/**
+ * What a private area's item shows outside it (r22, both critics): its action's verb and object only ("Book the dentist"), when its step is a
+ * short work imperative: a work verb, one step, a few words. Null when the text reads as personal (no work verb, a decision, or longer than a
+ * short imperative): it is then counted in "In Sanctum: 1 thing for you · open Sanctum", with none of its words.
+ */
+export function privateAction(t: Pick<Task, "kind" | "next">): string | null {
+  if (t.kind !== "task") return null;
+  const a = rowAction(t.next);
+  if (!a || a.steps.length > 1 || a.prefix) return null;
+  const text = withoutBrackets(a.text);
+  if (/https?:\/\/|\bwww\.|\[\[|\buni:/i.test(text)) return null;
+  if (text.length > PRIVATE_ACTION_MAX || text.split(" ").filter(Boolean).length > PRIVATE_ACTION_WORDS) return null;
+  const v = verbPhrase(text);
+  return v ? capFirst(v) : null;
+}
+/** A private item's row outside its area (r22): "In Sanctum: Book the dentist". */
+export const privateActionLabel = (place: string, action: string): string => `In ${place}: ${action}`;
+/** The private items with no action shown (r22): "In Sanctum: 1 thing for you · open Sanctum" ("1 more thing" beside shown actions). */
+export function privateRestLabel(p: Pick<PrivateNeed, "place" | "others" | "actions">): string {
+  const more = p.actions.length ? " more" : "";
+  return `In ${p.place}: ${p.others} ${more ? "more " : ""}${p.others === 1 ? "thing" : "things"} for you · open ${p.place}`;
 }
 
 const ACTION_VERBS = /^(say|reply|tell|answer|send|edit|approve|confirm|review|decide|sign|pay|call|email|write|read|pick|choose|check|book|schedule|draft|merge|deploy|ship|test|ask|give|post|share|record|update|fix|add|set|move|file|submit|finish|meet|join|buy|order|cancel|renew|follow|try|look|go|let|ping|invite|publish|upload|run|print|prepare|bring|forward|accept|decline|reject|ok|okay|listen|watch|talk|grade|fill|keep|archive|close|change)(?=[\s:,]|$)/i;
@@ -352,6 +384,27 @@ export function topNeeds(w: Where, _path?: string, max = Infinity, today = local
 /** Today as YYYY-MM-DD, local. */
 export const localDay = (d = new Date()): string => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 /** A due date (YYYY-MM-DD) before today. */
+/**
+ * When a request was set or last changed (r22, Codex P1): "asked today", "asked yesterday", "asked Oct 11". From the record's last change, the
+ * only time the app has for it. Null: no time known.
+ */
+export function askedLine(iso: string | null | undefined, today = localDay()): string | null {
+  const ms = stampMs(iso);
+  if (!Number.isFinite(ms)) return null;
+  const d = new Date(ms);
+  const day = localDay(d);
+  if (day === today) return "asked today";
+  const y = new Date(`${today}T12:00:00`); y.setDate(y.getDate() - 1);
+  if (day === localDay(y)) return "asked yesterday";
+  return `asked ${d.toLocaleDateString("en-US", { month: "short", day: "numeric", ...(day.slice(0, 4) !== today.slice(0, 4) ? { year: "numeric" } : {}) })}`;
+}
+/** The room's chat has moved on (r22, Codex P1): its last message is more than a day newer than the request. `lastTs` in seconds, as the rooms list has it. */
+export const MOVED_ON_MS = 24 * 3600_000;
+export function chatMovedOn(asked: string | null | undefined, lastTs: number | null | undefined): boolean {
+  const ms = stampMs(asked);
+  return Number.isFinite(ms) && typeof lastTs === "number" && Number.isFinite(lastTs) && lastTs * 1000 - ms > MOVED_ON_MS;
+}
+export const MOVED_ON = "Chat has moved on since this was asked";
 export const isOverdue = (due: string | null | undefined, today = localDay()): boolean => !!due && due < today;
 /** "due Oct 14", or "was due Oct 12" once it has passed. Null without a date. */
 export function dueLine(due: string | null | undefined, today = localDay()): string | null {
@@ -782,6 +835,9 @@ function actionEnd(t: string): number {
       if (/^;\s*(?:and\s+)?then\s/i.test(after)) continue;
       const f = FIRST_CLAUSE.exec(after);
       if (f && ACTION_VERBS.test(f[1].trim())) { i += f[0].length - 1; continue; }
+      // r22 (both critics): "…from your account; fill the opening, sign-off and next-review date" is the user's too: a clause that leads with
+      // a work verb stays in the action ("; Harper signs off…", "; yes/no on…" are context, the sheet's)
+      if (ACTION_VERBS.test(after.slice(1).trim())) continue;
       return i;
     }
     if (/^\s[—–-]\s/.test(after) || /^,?\s+because\s/i.test(after)) return i;
@@ -807,6 +863,18 @@ function stepsOf(region: string): string[] {
 export const withoutBrackets = (t: string): string => { const d = depths(t); let out = ""; for (let i = 0; i < t.length; i++) if (d[i] === 0 && t[i] !== ")" && t[i] !== "]") out += t[i]; return out.replace(/\s+([,;:.!?])/g, "$1").replace(/\s+/g, " ").trim(); };
 /** The row's form for more than one step that doesn't fit whole (r21): "2 steps: A, then …". */
 export const stepsLine = (steps: readonly string[]): string => `${steps.length} steps: ${withoutBrackets(steps[0])}, then …`;
+/** r22: past this many characters (links read as their hosts) a row's action is shortened with words, never with an ellipsis. */
+export const ROW_ACTION_MAX = 160;
+/** A row's action (r22): the whole action; when longer than `ROW_ACTION_MAX`, without its brackets, then with each link as "the link". */
+export function rowForm(text: string): string {
+  const len = (t: string) => withHosts(t).length;
+  if (len(text) <= ROW_ACTION_MAX) return text;
+  const a = withoutBrackets(text);
+  if (len(a) <= ROW_ACTION_MAX) return a;
+  return a.replace(/https?:\/\/[^\s)]+|\bwww\.[^\s)]+/g, "the link").replace(/\s+/g, " ").trim();
+}
+/** The folded strip's one line for an action of more than one step (r22): step 1 and how many there are, never "then …". */
+export const firstOfSteps = (steps: readonly string[]): string => `${withoutBrackets(steps[0])} (step 1 of ${steps.length})`;
 export function rowAction(next: string | null | undefined): RowAction | null {
   const lead = actionLead(next);
   if (!lead) return null;
@@ -822,9 +890,11 @@ export function actionOf(lead: string, prefix: string | null = null): RowAction 
   const add = (f: string, keep: string) => { if (f && !forms.some((x) => x.text === f)) forms.push({ text: f, keep }); };
   // what a cut never enters: the verb phrase and the rest of its first clause ("Send the SOW to Casey when convenient", never "…to Mark…")
   const main = (t: string) => { const v = verbPhrase(t); const c = firstClause(t, Math.min(v.length, t.length)); return c.length >= v.length ? c : v; };
-  add(text, main(text));
-  add(withoutBrackets(text), main(withoutBrackets(text)));
-  if (steps.length > 1) add(stepsLine(steps), `${steps.length} steps: ${main(withoutBrackets(steps[0]))}`);
+  // r22 (both critics): one form, the whole action, every step ("A, then B") and every verb phrase; never clamped, never "then …". Past
+  // `ROW_ACTION_MAX` characters it is shortened with words: its brackets, then its links' addresses, go to the sheet
+  void main;
+  const f = rowForm(text);
+  add(f, f);
   return { text, verb, rest: lead.slice(text.length).replace(/^[\s.,;:—–-]+/, "").trim(), prefix, steps, forms };
 }
 const sig = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}\s-]/gu, " ").split(/\s+/).filter((w) => w.length > 2 && !/^(?:the|and|for|with|from|your|this|that|into|onto)$/.test(w));
