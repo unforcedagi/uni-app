@@ -13,7 +13,7 @@ import { isActiveRun, type Run } from "./steerCore";
 import { ownerLabel, type Task } from "./taskCore";
 import { taskTitle } from "./whereCore";
 import { splitLinks } from "./linkText";
-import { actionableTitle, answerChoices, answerLabel, askLead, askPreview, checkLine, CHECK_FAILED, CHECKING, DANGLING, decideLine, stripRoom, decisionQuestion, dueLine, firstClause, fitsRow, isOverdue, lineBudget, missingLine, OPEN_TASK, OPEN_TO_ANSWER, privateLabel, rowAction, rowSub, standsHeading, TIDY_LINE, toTidy, unknownDecision, verbPhrase, waitsLine, waitsOnMe, withHosts, withoutCut, rowAsk, type Choice, type NeedsFeed, type PrivateNeed, type RowAction, type Support } from "./simpleCore";
+import { actionableTitle, answerChoices, answerLabel, askLead, askPreview, checkLine, CHECK_FAILED, CHECKING, DANGLING, decideLine, stripRoom, decisionQuestion, dueLine, firstClause, fitsRow, isOverdue, lineBudget, missingLine, OPEN_TASK, OPEN_TO_ANSWER, privateLabel, rowAction, rowSubParts, standsHeading, titleSays, TIDY_LINE, toTidy, unknownDecision, verbPhrase, waitsLine, waitsOnMe, withHosts, withoutCut, rowAsk, type Choice, type NeedsFeed, type PrivateNeed, type RowAction, type Support } from "./simpleCore";
 import { requestRecheck } from "./useTasks";
 
 const KEYS = { side: "uni.companion.side.v1", sideNarrow: "uni.companion.side.narrow.v1", strip: "uni.companion.strip.v1" } as const;
@@ -223,6 +223,35 @@ function SmallLine({ text, className }: { text: string; className: string }) {
 }
 
 /**
+ * Where a row belongs, beside its due cue (r20): whole on one line, or not at all. A subtitle cut short is vague ("SOW…"), so one that doesn't
+ * fit beside the cue is dropped (the sheet has it); it is measured again when the row's width changes.
+ */
+function FitLine({ text, fallback = null, className, onHide }: { text: string; /** a shorter form to try when the whole doesn't fit ("From #atlas/teach") */ fallback?: string | null; className: string; onHide: (hidden: boolean) => void }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  /** which form shows: the whole, the shorter one, or none */
+  const [shown, setShown] = useState<"full" | "short" | "none">("full");
+  useLayoutEffect(() => {
+    const el = ref.current; const box = el?.parentElement; if (!el || !box) return;
+    const [full, short] = [el.querySelector<HTMLElement>(".fit-full"), el.querySelector<HTMLElement>(".fit-short")];
+    const fits = (form: HTMLElement | null) => { if (!form) return false; el.hidden = false; if (full) full.hidden = form !== full; if (short) short.hidden = form !== short; return el.scrollWidth <= el.clientWidth + 1; };
+    const check = () => {
+      const pick = fits(full) ? "full" : fits(short) ? "short" : "none";
+      // the DOM is left as React will draw it
+      el.hidden = pick === "none"; if (full) full.hidden = pick !== "full"; if (short) short.hidden = pick !== "short";
+      setShown(pick); onHide(pick === "none");
+    };
+    check();
+    const ro = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => check());
+    ro?.observe(box);
+    return () => ro?.disconnect();
+  }, [text, fallback]); // eslint-disable-line react-hooks/exhaustive-deps
+  return <span ref={ref} className={className} hidden={shown === "none"} title={text}>
+    <span className="fit-full" hidden={shown !== "full"}>{text}</span>
+    {fallback && <span className="fit-short" hidden={shown !== "short"}>{fallback}</span>}
+  </span>;
+}
+
+/**
  * A decision's question as every surface shows it (r14): its whole question (the title when not cut, else the ask read from its note at the
  * row's own revision), sentence-cased, with "Your call:" when it does not ask. `answerable`: the whole question is known; `fits`: it fits a
  * row, so a row may show it beside its answers (a longer one shows `preview` and opens to decide). With no whole question, nothing to answer.
@@ -262,8 +291,9 @@ export const supportOf = (t: Pick<Task, "check">): Support | null => (t.check &&
 
 export type RowMode = "answers" | "preview" | "call" | "decide" | "lead" | "title" | "check" | "checking" | "unavailable" | "waits" | "tidy" | "missing";
 export type RowLead = { text: string; under: string | null; go: string | null; answers: boolean; yourCall: boolean; lead: boolean; mode: RowMode;
-  /** r20: a row that leads with an action: the action (its first clause), the verb phrase a cut never enters, and its subtitle (with the due cue) */
-  action?: RowAction | null };
+  /** r20: a row that leads with an action: the action (its first clause), the verb phrase a cut never enters, and its subtitle's two parts:
+   *  where it belongs (cut to one line if it must) and the due cue (never cut) */
+  action?: RowAction | null; sub?: { where: string | null; when: string | null; /** a shorter "where" ("From #atlas/teach") */ short?: string | null } };
 /** What a Needs-you row leads with (r14), the same in the companion, the work view and the sheet: a task's action when its next step names one
  *  (the title, its event or project, is a quiet line under it); a decision's whole question; else the title. r16: a decision whose question is
  *  too long for a row is its first two lines of words and "Open to decide" (`preview`); one with no whole question known is "Decide: <first
@@ -306,9 +336,11 @@ export function rowLead(t: Task, area: string | null = null): RowLead {
   // r20: the action, never the stored sentence: its first clause, the date label and the notes after it left to the subtitle and the sheet
   const action = rowAction(next) ?? (theirs && next ? (() => { const c = firstClause(next); return { text: c, verb: verbPhrase(c), rest: next.slice(c.length).trim(), prefix: null }; })() : null);
   if (action) {
-    const sub = theirs ? [`From ${ownerLabel(t.owner)}`, dueLine(t.due) ?? action.prefix].filter(Boolean).join(" · ") : rowSub(t, action, area);
+    // r17: someone else's task says whose it is (and the task, when its title says something the action doesn't)
+    const from = `From ${ownerLabel(t.owner)}`;
+    const sub = theirs ? { where: [from, titleSays(t.title, action.text)].filter(Boolean).join(" · "), short: from, when: dueLine(t.due) ?? action.prefix } : rowSubParts(t, action, area);
     // r19: a link in the action reads as its host ("Look at cohere-signup-staging.unforced.workers.dev on phone"), never a gap where it was
-    return { text: plainDetail(withHosts(action.text)) || action.text, under: sub, go: null, answers: false, yourCall: false, lead: true, mode: "lead", action };
+    return { text: plainDetail(withHosts(action.text)) || action.text, under: [sub.where, sub.when].filter(Boolean).join(" · ") || null, go: null, answers: false, yourCall: false, lead: true, mode: "lead", action, sub };
   }
   return { text: ask.text || "Open to see what's needed", under: null, go: null, answers: false, yourCall: false, lead: false, mode: "title" };
 }
@@ -338,6 +370,8 @@ export function NeedRow({ t, onTask, onDecide, onNote, meta, compact = false, ar
   /** r19 (Codex 7): rows never open in place (the sheet shows all of a request); kept as a constant for the clamps below. */
   const open = false;
   const [titleLines, setTitleLines] = useState(1);
+  /** r20: the subtitle's "where" didn't fit whole beside the due cue, so it is dropped (never cut short) */
+  const [whereHidden, setWhereHidden] = useState(false);
   // r16: an action reads whole up to four lines (the panel shows fewer rows rather than cutting an instruction); a title reads to its object
   // (up to 3 lines beside other lines, 4 alone); a decision's question is never clamped, its preview is two lines of whole words.
   // r18: in the companion an action is three lines at most, and a long "Your call" or "Check" two
@@ -362,7 +396,9 @@ export function NeedRow({ t, onTask, onDecide, onNote, meta, compact = false, ar
   const nextLines = compact ? Math.min(1, lineBudget(Math.min(titleLines, titleMax), !!due, 4).next) : lineBudget(Math.min(titleLines, titleMax), !!due, 4).next;
   const clampStyle = open || isDecision ? undefined : ({ WebkitLineClamp: titleMax, lineClamp: titleMax } as React.CSSProperties);
   // r20: an action row's subtitle carries its due cue ("COhere opens Oct 15 · due today"); other rows keep the due line of their own
-  const meta_ = <>{r.under && <SmallLine className={`cp-under${r.lead && isOverdue(t.due) ? " overdue" : ""}`} text={r.under} />}
+  const meta_ = <>{r.sub ? (r.under && <span className="cp-under cp-sub" title={r.under}>{r.sub.where && <FitLine className="cp-sub-where" text={r.sub.where} fallback={r.sub.short ?? null} onHide={setWhereHidden} />}
+      {r.sub.when && <span className={`cp-sub-when${isOverdue(t.due) ? " overdue" : ""}`}>{r.sub.where && !whereHidden ? " · " : ""}{r.sub.when}</span>}</span>)
+    : r.under && <SmallLine className="cp-under" text={r.under} />}
     {due && !r.lead && <small className={`cp-detail${isOverdue(t.due) ? " overdue" : ""}`}>{due}</small>}
     {meta && <SmallLine className="cp-detail cp-meta" text={meta} />}</>;
   const openSource = (ref: { vault: string; id: string }) => (onNote ? onNote(ref) : onTask(t));

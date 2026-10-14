@@ -776,10 +776,17 @@ export const SUB_TITLE_MAX = 40;
  * ("Companion Today redesign…"), never one that repeats the action. Null: nothing to add.
  */
 export function rowSub(t: Pick<Task, "title" | "due">, action: RowAction, area: string | null = null, today = localDay()): string | null {
-  const tt = taskTitle(t.title);
-  const title = tt.rest.replace(/\s+/g, " ").trim();
-  const whole = !tt.cut && !tt.previewed && title.length <= SUB_TITLE_MAX && !repeats(title, action.text);
-  const where = whole ? title : area;
-  const when = dueLine(t.due, today) ?? action.prefix;
+  const { where, when } = rowSubParts(t, action, area, today);
   return [where, when].filter(Boolean).join(" · ") || null;
+}
+/** The subtitle's two parts (r20): where it belongs (a row may cut this) and the due cue (a row never cuts it). */
+export function rowSubParts(t: Pick<Task, "title" | "due">, action: RowAction, area: string | null = null, today = localDay()): { where: string | null; when: string | null } {
+  const where = titleSays(t.title, action.text) ?? area;
+  return { where, when: dueLine(t.due, today) ?? action.prefix };
+}
+/** A task's title when it is short, whole and says something its action doesn't (r20): else null. */
+export function titleSays(raw: string, action: string): string | null {
+  const tt = taskTitle(raw);
+  const title = tt.rest.replace(/\s+/g, " ").trim();
+  return title && !tt.cut && title.length <= SUB_TITLE_MAX && !repeats(title, action) ? title : null;
 }
