@@ -598,3 +598,21 @@
 }
 /* r18: a linked note that couldn't be read just now keeps its last title, quietly marked */
 .cp-ref-off { text-decoration-style: dotted; opacity: .75; }
+/* ------------------------------------------------------------------------------------------------- r19 */
+/* a decision's stored options wrap inside the panel, whole, at every width: never clipped at its edge (was nowrap + ellipsis) */
+.cp-opt { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; text-align: left; line-height: 1.3; padding: 6px 12px; max-width: 100%; }
+.cp-opts { min-width: 0; max-width: 100%; }
+.task-answer .cp-opt { padding: 10px 18px; }
+/* the task sheet's actions are its footer: in view however short the window, the sheet's text scrolling above them */
+.task-sheet .task-foot { position: sticky; bottom: 0; z-index: 1; margin: 0 -22px; padding: 10px 22px calc(12px + env(safe-area-inset-bottom)); background: var(--th-paper); border-top: 1px solid var(--th-hair2); }
+.task-sheet { max-height: min(88vh, calc(100dvh - 12px)); }
+@media (max-height: 520px) {
+  .task-sheet { padding-top: 14px; }
+  .task-sheet h2 { font-size: 18px; }
+  .task-sheet .task-foot { flex-direction: row; flex-wrap: wrap; gap: 6px; padding-top: 8px; padding-bottom: calc(8px + env(safe-area-inset-bottom)); }
+  .task-sheet .task-foot .task-do { flex: 1 1 auto; width: auto; min-height: 40px; padding: 0 14px; }
+}
+/* a row whose supporting notes couldn't be read: not its action, and not "nothing there" */
+.cp-checkfail { margin: 0; padding: 0 0 8px; font: 400 12.5px/1.4 var(--th-sans); color: var(--th-ink); }
+.cp-item[data-mode="checking"] .cp-title { color: var(--th-ink2); font-style: italic; }
+.wv-tidy .wv-h { color: var(--th-mute); }

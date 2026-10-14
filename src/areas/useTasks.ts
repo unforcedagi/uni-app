@@ -8,6 +8,7 @@ import { parseDrafts, parseRuns } from "./steerCore";
 import { activeProfile } from "./profile";
 import { forgetTitles, setTitleOwner, warmTitles } from "./noteRefs";
 import { savedTasks } from "./savedTasks";
+import { checkOf, needsYou, type CheckState } from "./simpleCore";
 import type { FailureKind } from "./taskCore";
 
 export type TaskAction = "done" | "archive" | "snooze";
@@ -20,6 +21,9 @@ export const POLL_MS = 60_000;
 export const FOCUS_GAP_MS = 10_000;
 /** One finite exit animation; none when the user prefers reduced motion. */
 export const LEAVE_MS = 240;
+/** r19: the event a row's or a sheet's Retry sends ("Couldn't check · Retry"): every open list reads its sources again. */
+export const RECHECK = "uni:recheck";
+export const requestRecheck = () => { try { window.dispatchEvent(new Event(RECHECK)); } catch { /* no window */ } };
 /** A load still running after this long says so, with Retry (r16): never an endless "Loading…". */
 export const SLOW_MS = 8000;
 /** The test build may shorten it (`window.__slowMs`); never in a release build. */
@@ -29,8 +33,10 @@ const reduced = () => typeof window !== "undefined" && !!window.matchMedia?.("(p
 // Memory for this session only, scoped to the signed-in identity and cleared on Forget: tasks are Aaron's private work.
 /** Running and Drafts' own read (r16): read yet, the last failure, when they last read cleanly. */
 export type Activity = { ready: boolean; error: string | null; lastOk: number | null };
-type Memory = { owner: string; tree: (TaskTree & { truncated: boolean }) | null; tasks: Map<string, { list: Task[]; truncated: boolean }>; at: number | null; runs: RawNote[]; drafts: RawNote[]; activity: Activity };
-const fresh = (owner: string): Memory => ({ owner, tree: null, tasks: new Map(), at: null, runs: [], drafts: [], activity: { ready: false, error: null, lastOk: null } });
+type Memory = { owner: string; tree: (TaskTree & { truncated: boolean }) | null; tasks: Map<string, { list: Task[]; truncated: boolean }>; at: number | null; runs: RawNote[]; drafts: RawNote[]; activity: Activity;
+  /** r19: each task's check of its supporting notes (seeded from what the device verified, read again on every list read). */
+  checks: Map<string, CheckState> | null };
+const fresh = (owner: string): Memory => ({ owner, tree: null, tasks: new Map(), at: null, runs: [], drafts: [], activity: { ready: false, error: null, lastOk: null }, checks: null });
 let memory: Memory = fresh("");
 export function forgetTasks() { memory = fresh(""); }
 /** Forget on the device too (the user's Forget): the saved list goes with the key. */
@@ -77,6 +83,8 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
   const [rawDrafts, setRawDrafts] = useState<RawNote[]>(() => scoped(owner).drafts);
   /** Running and Drafts are read on their own (r16), so the list never waits for them; whether they were read, and when. */
   const [activity, setActivity] = useState<Activity>(() => scoped(owner).activity);
+  /** r19: each task's check of the notes it stands on (see `checkOf`). */
+  const [checks, setChecks] = useState<Map<string, CheckState>>(() => scoped(owner).checks ?? new Map());
   const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastLoad = useRef<number | null>(null);
@@ -99,6 +107,8 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
     setActivity(mem.activity);
     setSavedAt(kept || mem.at !== null ? null : saved?.at ?? null);
     vaultTasks.setAskOwner(owner);
+    if (!mem.checks) mem.checks = vaultTasks.cachedChecks();
+    setChecks(mem.checks);
     setTitleOwner(identity);
     setLoading(true); setSlow(false);
     const slowTimer = setTimeout(() => { if (current()) setSlow(true); }, slowMs());
@@ -145,16 +155,16 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
         mem.tasks.set(nodePath, { list: merged, truncated: r.truncated });
         setList((cur) => withAsk(cur));
       }).catch(() => {});
-      // r18: where each row's questions come from (an explicit list, a closed source, or neither), also a moment later; kept per revision
+      // r19: what each Needs-you row stands on (the notes its step links, its source, its questions), read again on every list read, a moment
+      // after the list is on screen; until a row's notes are read it says "Checking what's needed…" and asserts no action
       const keysOf = (t: Task) => (t.node !== ROOT && mem.tree ? nodeFilterKeys(mem.tree, [t.node]) : []);
-      void vaultTasks.loadSupports(r.tasks, keysOf).then((found) => {
-        // keyed by revision, so safe to apply even when a newer read has started meanwhile (it would otherwise wait for the next one)
-        if (!found.size || !mounted.current || memory !== mem) return;
-        const one = (t: Task) => { const f = found.get(t.id); return f && f.at === t.updatedAt ? { ...t, support: f.support, supportAt: f.at } : t; };
-        const kept = mem.tasks.get(nodePath);
-        if (kept) mem.tasks.set(nodePath, { ...kept, list: kept.list.map(one) });
-        setList((cur) => cur && cur.map(one));
-      }).catch(() => {});
+      const land = (id: string, s: CheckState) => {
+        // a check is kept by the notes it read and when, so it lands even when a newer list read has started meanwhile
+        if (!mounted.current || memory !== mem) return;
+        mem.checks = new Map(mem.checks).set(id, s);
+        setChecks(mem.checks);
+      };
+      void vaultTasks.loadChecks(r.tasks, keysOf, land).catch(() => {});
       // anything the server no longer lists is settled: stop hiding it by hand
       setGone((g) => new Set([...g].filter((id) => r.tasks.some((x) => x.id === id && isLive(x)))));
     })().catch((e) => { if (current()) setError(String(e)); }).finally(() => { clearTimeout(slowTimer); if (current()) { setLoading(false); setSlow(false); } });
@@ -174,12 +184,24 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
     window.addEventListener("focus", focus);
     return () => { clearInterval(tick); document.removeEventListener("visibilitychange", visible); window.removeEventListener("focus", focus); };
   }, [refresh]);
+  // r19: "Couldn't check · Retry" on a row or a sheet: the failed checks read as checking again, and the list (and every source) is read again
+  useEffect(() => {
+    const again = () => {
+      const mem = memory;
+      if (mem.checks) { mem.checks = new Map([...mem.checks].map(([id, c]) => [id, c.failedAt ? { ...c, failedAt: null } : c])); setChecks(mem.checks); }
+      refresh();
+    };
+    window.addEventListener(RECHECK, again);
+    return () => window.removeEventListener(RECHECK, again);
+  }, [refresh]);
   /** Re-read when the last read is older than `gapMs` (a room was opened: its list must not be a stale copy). */
   const refreshIfStale = useCallback((gapMs = FOCUS_GAP_MS) => { if (shouldReload(lastLoad.current, Date.now(), gapMs)) refresh(); }, [refresh]);
   useEffect(() => () => { for (const t of timers.current.values()) clearTimeout(t); if (undoTimer.current) clearTimeout(undoTimer.current); }, []);
 
   const now = new Date();
-  const visible = useMemo(() => (list ?? []).filter((t) => isLive(t) && !gone.has(t.id) && !snoozed(t, new Date())), [list, gone, n, day]); // eslint-disable-line react-hooks/exhaustive-deps
+  /** r19: each row with its check as of this render (a check past CHECK_TTL reads as checking again; only Needs-you rows are checked). */
+  const checked = useMemo(() => { const at = Date.now(); return list && list.map((t) => (needsYou(t) ? { ...t, check: checkOf(t, checks.get(t.id), at) } : t)); }, [list, checks, n, day]); // eslint-disable-line react-hooks/exhaustive-deps
+  const visible = useMemo(() => (checked ?? []).filter((t) => isLive(t) && !gone.has(t.id) && !snoozed(t, new Date())), [checked, gone, n, day]); // eslint-disable-line react-hooks/exhaustive-deps
   const counts: Map<string, Counts> = useMemo(() => (tree ? rollUp(tree, tasksUnder(tree, nodePath, visible)) : new Map()), [tree, nodePath, visible]);
 
   const runs = useMemo(() => (tree ? parseRuns(rawRuns, tree) : []), [tree, rawRuns]);
@@ -315,7 +337,7 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
     } });
   }, [nodePath]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  return { tree, tasks: visible, all: list, runs, drafts, setPriority, decide, leaving, counts, truncated, treeTruncated, error, treeError, loading, notice, undo, act, refresh, refreshIfStale, dismissNotice: () => setNotice(null), ready: list !== null, now,
+  return { tree, tasks: visible, all: checked, runs, drafts, setPriority, decide, leaving, counts, truncated, treeTruncated, error, treeError, loading, notice, undo, act, refresh, refreshIfStale, dismissNotice: () => setNotice(null), ready: list !== null, now,
     /** The rows are the device's copy from this moment (ms), not yet read again this session (r16). */
     savedAt,
     /** The current read has run past SLOW_MS: "Still loading · Retry" (r16). */

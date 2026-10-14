@@ -19,10 +19,17 @@ export const waitsOnMe = (t: Pick<Task, "owner" | "waitingOn">): boolean => isMe
  * the user's own tasks, and (r17) any task whose `waiting_on` names the user whatever its owner, at Now or Soon (unsorted is Soon); live,
  * never Someday. A room's or Uni's own drafting that waits on no one is not theirs (r16). Snoozed and finished tasks are dropped before.
  */
-export function needsYou(t: Pick<Task, "kind" | "owner" | "waitingOn" | "priority" | "state">): boolean {
+export function needsYou(t: Pick<Task, "kind" | "owner" | "waitingOn" | "priority" | "state"> & Partial<Pick<Task, "title" | "next" | "options" | "ask" | "askAt" | "updatedAt">>): boolean {
+  // r19: a record that isn't a real request is Uni's to tidy, listed apart and never counted here
+  return wouldNeedYou(t) && !tidyReason(t);
+}
+/** The r12 rule before r19's tidy check: open decisions, the user's own tasks and tasks waiting on them, at Now or Soon. */
+export function wouldNeedYou(t: Pick<Task, "kind" | "owner" | "waitingOn" | "priority" | "state">): boolean {
   if (t.state !== "open" && t.state !== "doing" && t.state !== "waiting") return false;
   return t.kind === "decision" || ((isMe(t.owner) || isMe(t.waitingOn)) && t.priority !== "someday");
 }
+/** A record the user would be asked for that Uni has to tidy first (r19): the work view's "Uni needs to tidy these (N)". */
+export const toTidy = (t: Task): TidyReason | null => (wouldNeedYou(t) ? tidyReason(t) : null);
 /** The user's own: an open decision, a task they own, or one that waits on them (r17). Everything else here is someone else's, in In motion. */
 export const isMine = (t: Pick<Task, "kind" | "owner" | "waitingOn">): boolean => t.kind === "decision" || isMe(t.owner) || isMe(t.waitingOn);
 
@@ -63,7 +70,9 @@ export type PrivatePlace = { path: string; name: string };
  */
 export type PrivateNeed = { key: string; count: number; place: string; open: { path: string } };
 /** Needs you at one level, the one list every surface reads (r13): the companion, "+N in areas", the dots and the work view add up to `total`. */
-export type NeedsFeed = { rows: Task[]; privates: PrivateNeed[]; total: number };
+export type NeedsFeed = { rows: Task[]; privates: PrivateNeed[]; total: number;
+  /** r19: records Uni has to tidy (not real requests yet), outside private areas; never in `total`. */
+  tidy?: Task[] };
 
 /** Now before Soon (overdue first), then by due date (undated last), then a decision before a task, then by title. */
 export function rankNeeds(list: readonly Task[], today = localDay()): Task[] {
@@ -86,7 +95,8 @@ export function needsFeed(tasks: readonly Task[], privateOf: (node: string) => P
     const g = by.get(p.path);
     if (g) g.count++; else by.set(p.path, { key: p.path, count: 1, place: p.name, open: { path: p.path } });
   }
-  return { rows, privates: [...by.values()], total: all.length };
+  const tidy = tasks.filter((t) => toTidy(t) && (!privateOf(t.node) || privateOf(t.node)?.path === self?.path));
+  return { rows, privates: [...by.values()], total: all.length, tidy };
 }
 
 /** Rows Uni's own panel shows (r17): the rest, private items included, are one "N more ›" to the work view. */
@@ -531,4 +541,116 @@ export const STRIP_MIN_BODY = 200;
 export function stripRoom(m: { room: number; above: number; line: number; composer: number }): { mode: "inline"; body: number } | { mode: "sheet" } {
   const body = Math.floor(m.room - m.above - m.line - m.composer - CONVERSATION_SHARE * m.room);
   return body >= STRIP_MIN_BODY ? { mode: "inline", body } : { mode: "sheet" };
+}
+
+// ------------------------------------------------------------------------------------------------- r19
+/**
+ * What a task's action stands on (r19), modelled explicitly: notes its step links (`uni:<ULID>`, a bare id, `[[Path]]`), its `source` when
+ * that names a note (a provenance string such as "Aaron/Tasks#T-21" or "tasks.py new" names none), and its `depends_on`. A step that asks for
+ * answers (`questions`: the count) also needs its own note, where the questions are, unless its `questions` field already holds them. Until
+ * every one of these is read, the row and the sheet say "Checking what's needed…" and assert no action. Decisions have none here: a decision's
+ * question is read on its own (`decisionAsk`).
+ */
+export type DepRef = LinkRef & { role: "step" | "source" | "after" };
+export type TaskDeps = { refs: DepRef[]; questions: number | null };
+export function taskDeps(t: Pick<Task, "id" | "kind" | "next"> & { sourceRef?: string | null; dependsOn?: readonly string[]; questions?: readonly string[] }): TaskDeps {
+  if (t.kind !== "task") return { refs: [], questions: null };
+  const out: DepRef[] = [];
+  const add = (r: LinkRef, role: DepRef["role"]) => { if (r.id !== t.id && !out.some((o) => o.id === r.id && o.vault === r.vault)) out.push({ ...r, role }); };
+  for (const r of linkedRefs(t.next)) add(r, "step");
+  for (const r of linkedRefs(t.sourceRef ?? "")) add(r, "source");
+  for (const d of t.dependsOn ?? []) for (const r of linkedRefs(d)) add(r, "after");
+  const q = questionCount(t.next);
+  return { refs: out.slice(0, 6), questions: q !== null && !t.questions?.length ? q : null };
+}
+export const hasDeps = (d: TaskDeps): boolean => d.refs.length > 0 || d.questions !== null;
+
+/** What reading a task's supporting notes came to (r19): its source state (`Support`), all clear (`ok`), or a `depends_on` note still open. */
+export type Assessed = Support | { kind: "ok" } | { kind: "waits"; from: SourceRef };
+/** One note read for it, at the revision read: the record says which revisions it stands on. */
+export type SourceStamp = { vault: string; id: string; rev: string | null };
+/**
+ * A check of a task's supporting notes (r19), kept by the sources it read ({vault, id, revision}) and when it was verified, never by the task's
+ * revision alone: every list refresh reads the sources again, so a source that closes while the task stays unchanged is seen. `taskRev`: the
+ * task revision it was made for (a rewritten task may stand on other notes).
+ */
+export type CheckRecord = { taskRev: string | null; at: number; result: Assessed; sources: SourceStamp[] };
+/** Where a task's check stands: the last good record (if any), and when the last read failed (cleared by a good read). */
+export type CheckState = { rec: CheckRecord | null; failedAt: number | null };
+/** A check is trusted this long after it was verified; past it the row is "Checking what's needed…" (or "Couldn't check") until read again. */
+export const CHECK_TTL = 30 * 60_000;
+/**
+ * What a row shows about its supporting notes (r19). `checking`: not read yet (or the last check expired) and no failure: no action is
+ * asserted. `unavailable`: the read failed (not "read but ambiguous", which is `unclear`): "Couldn't check · Retry". Otherwise the record's
+ * result. Null: the task stands on no note, so there is nothing to check.
+ */
+export type Check = { kind: "checking" } | { kind: "unavailable" } | Assessed;
+export function checkOf(t: Parameters<typeof taskDeps>[0] & Pick<Task, "updatedAt">, state: CheckState | undefined, nowMs: number): Check | null {
+  if (!hasDeps(taskDeps(t))) return null;
+  const rec = state?.rec;
+  if (rec && rec.taskRev === t.updatedAt && nowMs - rec.at < CHECK_TTL && nowMs >= rec.at - 60_000) return rec.result;
+  return state?.failedAt ? { kind: "unavailable" } : { kind: "checking" };
+}
+export const CHECKING = "Checking what's needed…";
+export const CHECK_FAILED = "Couldn't check";
+/** "Waits on “Mail plan v2” first": a `depends_on` note that is still open (r19). */
+export const waitsLine = (s: Extract<Assessed, { kind: "waits" }>): string => `Waits on “${s.from.title}” first`;
+
+/**
+ * Records that aren't real requests (r19, P1-3): a Needs-you item that names no concrete action Aaron can finish. Conservative and tested on
+ * real titles; when unsure, null (the item stays in Needs you). tasks.py (T-131) already refuses such records, so these are legacy ones.
+ * - `outline`: a labelled list of notes ("Fractal flow test: real work in area rooms, check updates propagate up; nested room names; …"): a
+ *   label that asks nothing, then two or more ";" parts, none of which starts with an action.
+ * - `machinery`: Uni's own upkeep shown as a request ("Run /restart … loads the uni-relay hook … [done|blocked|decision] markers").
+ * - `status`: a step that says the work is over ("Superseded: …", "Done …") on a record still open.
+ * - `proposal`: a decision with no stored options whose whole question asks nothing ("Decision (needs your yes): a daily calendar email…").
+ *   A cut title whose question isn't read yet is unsure: kept.
+ */
+export type TidyReason = "outline" | "machinery" | "status" | "proposal";
+const PART_ACTION = /^(?:say|ok|okay|yes|no|go|listen|watch|look|approve|sign|confirm|decide|pick|choose|answer|reply|tell|send|review|check|merge|deploy|ship|read|call|email|write|forward|pay|book|schedule|give|put|share|post|record|fill|talk|meet|test|try|open|grade|draft)\b/i;
+const ASKS_IN_LABEL = /\b(?:go|ok|okay|yes|no|approve|approval|sign[- ]?off|decide|decision|pick|choose|review|confirm|answer|reply|call)\b/i;
+export function tidyReason(t: Partial<Pick<Task, "kind" | "title" | "next" | "options" | "ask" | "askAt" | "updatedAt">>): TidyReason | null {
+  if (typeof t.title !== "string") return null;
+  if (t.kind === "decision") {
+    if (!Array.isArray(t.options) || t.options.length) return null;
+    const tt = taskTitle(t.title);
+    const q = decisionQuestion(tt.rest, t.ask, t.askAt, t.updatedAt ?? null, tt.cut || tt.previewed);
+    if (!q) return null; // its question isn't known yet: unsure, so it stays
+    // a "?" inside a quote ("the “were you there?” prompt") asks nothing of the user; a request to decide ("Decide the COhere venue", "Which
+    // hours…", "Whether to…") asks, even without one
+    if (/^(?:decide|choose|pick|which|whether|what|who|when|where|how|should|shall)\b/i.test(q.trim())) return null;
+    return /\?/.test(q.replace(/["“][^"”]*["”]/g, "")) ? null : "proposal";
+  }
+  if (t.kind !== "task" || typeof t.next !== "string") return null;
+  const step = t.next.replace(/[*_`>]/g, "").replace(/\s+/g, " ").trim();
+  if (!step) return null;
+  if (/^(?:superseded|obsolete|no longer (?:needed|an ask)|done|closed|merged into)\b\s*[:.,;—–-]/i.test(step)) return "status";
+  if (/^run\s+\/[a-z][\w-]*/i.test(step) || /\[(?:done|blocked|decision)(?:\|(?:done|blocked|decision))+\]/i.test(step)) return "machinery";
+  const m = /^([^:;]{3,60}):\s+(.+)$/.exec(step);
+  if (m && !ACTION_VERBS.test(step) && !PART_ACTION.test(step) && !ASKS_IN_LABEL.test(m[1])) {
+    const parts = m[2].split(/\s*;\s*/).filter(Boolean);
+    if (parts.length >= 2 && !parts.some((p) => ACTION_VERBS.test(p) || PART_ACTION.test(p))) return "outline";
+  }
+  return null;
+}
+/** What the work view's quiet line under a record to tidy says, and the sheet's sentence (r19). */
+export const TIDY_LINE: Record<TidyReason, string> = {
+  outline: "Notes, not one step you can finish",
+  machinery: "Uni's own upkeep, not yours",
+  status: "Says it's finished, but still open",
+  proposal: "States a proposal, asks nothing",
+};
+export const TIDY_SAYS: Record<TidyReason, string> = {
+  outline: "This record is a list of notes, not one step you can finish.",
+  machinery: "This is Uni's own upkeep shown as a request; nothing here is yours to do.",
+  status: "Its step says the work is over, but the record is still open.",
+  proposal: "This states a proposal but asks you nothing: it has no question and no options to pick.",
+};
+/** The request "Ask Uni to fix this record" types in the owning room (never sent). */
+export function tidyRequest(t: Pick<Task, "kind" | "title">, why: TidyReason): string {
+  const tt = taskTitle(t.title);
+  const name = tt.id ? `${tt.id} (${cutWords(withoutCut(tt.rest), 80)})` : `“${cutWords(withoutCut(tt.rest), 80)}”`;
+  return t.kind === "decision"
+    ? `Please fix decision ${name}: it states a proposal but asks me nothing. Add the question and its options (tasks.py decide new), or close it if it no longer needs me.`
+    : `Please fix ${name}: ${TIDY_SAYS[why].replace(/^This record is|^This is/, "it is").replace(/^Its step/, "its step").replace(/\.$/, "")}. Rewrite it as one action I can finish, with a clear end, or close it.`;
 }
