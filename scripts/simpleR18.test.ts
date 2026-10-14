@@ -105,7 +105,8 @@ await check("P1-3 a vault-prefixed id resolves in its own vault, a bare one in t
   ]);
   const s = await vt.loadSupport({ id: "t26", title: "T-26 Refresh", next: `Answer the 2 questions in parachute:${id}`, vault: "uni" }, [], 2);
   assert.deepEqual(s, { kind: "list", items: ["Reader?", "Scope?"], from: { vault: "parachute", id, title: "Questions for Aaron" } });
-  assert.deepEqual(seen.filter((c) => c.cmd === "vault_note").map((c) => [c.vault, c.ref]), [["uni", "t26"], ["parachute", id]]);
+  // r19: the notes a step links are read first (they are what it stands on), each once; then its own note
+  assert.deepEqual(seen.filter((c) => c.cmd === "vault_note").map((c) => [c.vault, c.ref]), [["parachute", id], ["uni", "t26"]]);
 });
 
 await check("Copy: a person's step leads with a destination only when it is written as one; the message comes from a stored field", () => {

@@ -16,6 +16,7 @@ import type { NoteRef } from "./areas/noteRefsCore";
 import AreaSelfTest from "./interface/selftest/SelfTest";
 import LifeOsVaultSetting from "./areas/LifeOsVaultSetting";
 import { appendDraft } from "./areas/composeDraft";
+import { openDialog } from "./areas/focusTrap";
 import { FOR_YOU_ID, FOR_YOU_OPENED_KEY, countRecommendations, isRecommendationNew, readLastSurface, saveLastSurface } from "./railCore";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
@@ -380,6 +381,16 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const actions = useRef({ openThread: (_m: Message) => {}, loadOlder: () => {}, saveEdit: (_m: Message, _b: string): Promise<void> => Promise.resolve(), cancelEdit: () => {}, deleteOwn: (_m: Message): Promise<void> => Promise.resolve() });
 
   const [searchOpen, setSearchOpen] = useState(false);
+  // r19: Search, Settings and Vault keep the one dialog contract the sheets and Places keep: focus in, Tab kept inside, what is under them inert
+  // (the rail, which switches them, and their scrim excepted), Escape closes them, and focus goes back to what opened them
+  const panelBox = useRef<HTMLElement>(null);
+  const railRef = useRef<HTMLElement>(null);
+  const utilityOpen = !!panel || searchOpen;
+  useEffect(() => {
+    const box = panelBox.current;
+    if (!utilityOpen || !box) return;
+    return openDialog(box, () => { setPanel(null); setSearchOpen(false); }, { keep: [railRef.current, box.parentElement?.querySelector(".panel-scrim") ?? null], initial: box });
+  }, [utilityOpen]);
   // Search result to scroll to and flash once its room/thread has loaded.
   const [focusRef, setFocusRef] = useState<string | null>(null);
   const [journalOpen, setJournalOpen] = useState(activeTab(tabs)?.kind === "journal");
@@ -403,12 +414,13 @@ function Conversations({ onForget }: { onForget: () => void }) {
     if (next !== histRef.current) { histRef.current = next; setHist(next); }
   }
   function goHistory(by: -1 | 1, pastOverlay = false) {
-    // A note open over the place has its own Back: that comes first. A task sheet holds history while it is open (Escape closes it);
-    // the work view and the drawer close before Back changes places (`pastOverlay`: the drawer's own Back, pressed as it closes).
+    // A note open over the place has its own Back: that comes first. Then whatever is in front closes (the task sheet, the drawer, the work
+    // view) before Back changes places (`pastOverlay`: the drawer's own Back, pressed as it closes); Forward never closes anything.
     if (by < 0 && notesRef.current.length) { closeNoteRef.current(); return; }
     const over = pastOverlay ? null : overlayRef.current;
+    // r19 (Codex 4): every Back closes what is in front first, a task sheet too (it used to swallow history Back), then follows the visits
+    if (by < 0 && over) { over.close(); return; }
     if (over?.modal) return;
-    if (by < 0 && over?.history) { over.close(); return; }
     const hop = histStep(histRef.current, by);
     if (!hop) return;
     histRef.current = hop.history; setHist(hop.history);
@@ -1573,7 +1585,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const pill = recordingTab && recorder.busy ? { title: recordingTab.title, elapsed: recorder.elapsed, tabId: recordingTab.tabId, stop: recorder.stop, phase: recorder.phase } :
     journalRecording && journalTab ? { title: "Journal", elapsed: journalRecording.elapsed, tabId: journalTab.id, stop: journalRecording.stop, phase: "recording" as const } : null;
   return <NavContext.Provider value={navControls}><NoteOpener.Provider value={openNote}><main className={`shell ${(!sidebarVisible && (channel || journalOpen || shellOpen || (active?.kind === "note" || active?.kind === "vault"))) ? "in-room" : ""} ${topNote ? "note-open" : ""} ${panel ? `panel-open panel-${panel}` : ""} ${searchOpen ? "search-open" : ""} ${composerFocused ? "composer-focused" : ""} ${journalFocus && journalOpen ? "journal-focus" : ""} ${railHidden ? "rail-off" : ""}`}>
-    <nav className="rail" aria-label="Main navigation">
+    <nav ref={railRef} className="rail" aria-label="Main navigation">
       <button aria-label="Uni" aria-current={!panel && !searchOpen && (!topNote && shellOpen ? "page" : undefined)} onClick={() => openTarget(uniHome())}><i><UniIcon /></i><span>Uni</span></button>
       <button aria-label="Journal" aria-current={!panel && !searchOpen && (journalOpen && !topNote ? "page" : undefined)} onClick={() => openTarget({ kind: "journal", title: "Journal" })}><i><JournalIcon /></i><span>Journal</span></button>
       {showUniGlue(lifeVault) && <button aria-label="For you" aria-current={!panel && !searchOpen && (topNote?.ref === FOR_YOU_ID ? "page" : undefined)} onClick={openForYou}><i><StarIcon />{forYou.fresh && <span className="rail-dot" aria-label="Updated recommendations" />}</i><span>For you</span></button>}
@@ -1583,7 +1595,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     </nav>
     {(panel || searchOpen) && <button className="panel-scrim" aria-label="Close navigation panel" onClick={() => { setPanel(null); setSearchOpen(false); }} />}
     {/* r14: one utility-panel frame for Settings, Search and Vault: the destination's title and Close, nothing else */}
-    <aside className="rooms" aria-label={panelTitle}>
+    <aside ref={panelBox} className="rooms" aria-label={panelTitle} {...(panel || searchOpen ? { role: "dialog", "aria-modal": true, tabIndex: -1 } : {})}>
       {(panel || searchOpen) && <header className="panel-head"><h1>{panelTitle}</h1><button className="panel-close icon-button" aria-label="Close panel" title="Close" onClick={() => { setPanel(null); setSearchOpen(false); }}>×</button></header>}
       {pairSourceOpen && <PairSource onClose={() => setPairSourceOpen(false)} />}
       {panel === "settings" && <div className="settings">

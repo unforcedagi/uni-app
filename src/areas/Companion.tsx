@@ -8,12 +8,13 @@ import { RefName, RefText } from "./noteRefs";
 import { splitRefs, type NoteRef } from "./noteRefsCore";
 import { useVaultProfile } from "./ProfileContext";
 import { LoadHealth } from "./LoadHealth";
-import { trapTab } from "./focusTrap";
+import { openDialog } from "./focusTrap";
 import { isActiveRun, type Run } from "./steerCore";
 import { ownerLabel, type Task } from "./taskCore";
 import { taskTitle } from "./whereCore";
 import { splitLinks } from "./linkText";
-import { actionableTitle, actionLead, answerChoices, answerLabel, askLead, askPreview, checkLine, DANGLING, decideLine, stripRoom, decisionQuestion, dueLine, fitsRow, isOverdue, lineBudget, OPEN_TO_ANSWER, privateLabel, questionCount, standsHeading, waitsOnMe, withoutCut, rowAsk, type Choice, type NeedsFeed, type PrivateNeed, type Support } from "./simpleCore";
+import { actionableTitle, actionLead, answerChoices, answerLabel, askLead, askPreview, checkLine, CHECK_FAILED, CHECKING, DANGLING, decideLine, stripRoom, decisionQuestion, dueLine, fitsRow, isOverdue, lineBudget, OPEN_TO_ANSWER, privateLabel, standsHeading, TIDY_LINE, toTidy, waitsLine, waitsOnMe, withoutCut, rowAsk, type Choice, type NeedsFeed, type PrivateNeed, type Support } from "./simpleCore";
+import { requestRecheck } from "./useTasks";
 
 const KEYS = { side: "uni.companion.side.v1", sideNarrow: "uni.companion.side.narrow.v1", strip: "uni.companion.strip.v1" } as const;
 /** Below this width the side panel starts folded: the conversation gets the space. */
@@ -249,18 +250,24 @@ export function DecisionAnswer({ t, label, onDecide, max = Infinity, onMore, cla
   </div>;
 }
 
-/** A task's question source (r18), only as read at its own revision: a rewritten task drops what was read for the old one. */
-export const supportOf = (t: Pick<Task, "support" | "supportAt" | "updatedAt">): Support | null => (t.support && t.supportAt === t.updatedAt ? t.support : null);
+/** A task's question source (r18), as its current check found it (r19: `check`, set by the list; null when it stands on no note or isn't read). */
+export const supportOf = (t: Pick<Task, "check">): Support | null => (t.check && (t.check.kind === "list" || t.check.kind === "closed" || t.check.kind === "unclear") ? t.check : null);
 
+export type RowMode = "answers" | "preview" | "call" | "decide" | "lead" | "title" | "check" | "checking" | "unavailable" | "waits" | "tidy";
 /** What a Needs-you row leads with (r14), the same in the companion, the work view and the sheet: a task's action when its next step names one
  *  (the title, its event or project, is a quiet line under it); a decision's whole question; else the title. r16: a decision whose question is
  *  too long for a row is its first two lines of words and "Open to decide ›" (`preview`); one with no whole question known is "Decide: <first
  *  words> ›" (`decide`). r18: a decision with no stored options is "Your call: <question> ›" (`call`), answered in words in its sheet; a task
- *  whose source note is closed is "Check: … is closed — still needed?" (`check`), never its extracted action. The title is the shared clean one. */
-export function rowLead(t: Task): { text: string; under: string | null; go: string | null; answers: boolean; yourCall: boolean; lead: boolean; mode: "answers" | "preview" | "call" | "decide" | "lead" | "title" | "check" } {
+ *  whose source note is closed is "Check: … is closed — still needed?" (`check`), never its extracted action. r19: a task whose supporting notes
+ *  aren't read yet is "Checking what's needed…" (`checking`), one whose read failed shows its title and "Couldn't check · Retry"
+ *  (`unavailable`), one whose `depends_on` note is open "Waits on “…” first" (`waits`); none asserts the action. A record Uni has to tidy
+ *  (`tidy`) is its title with why, never an action. The title is the shared clean one. */
+export function rowLead(t: Task): { text: string; under: string | null; go: string | null; answers: boolean; yourCall: boolean; lead: boolean; mode: RowMode } {
   const tt = taskTitle(cleanText(t.title));
   const full = tt.rest;
   const next = t.next.trim();
+  const why = toTidy(t);
+  if (why) return { text: t.kind === "decision" ? decisionAsk(t).text : askOf(full), under: TIDY_LINE[why], go: "", answers: false, yourCall: false, lead: false, mode: "tidy" };
   if (t.kind === "decision") {
     const dq = decisionAsk(t);
     if (!dq.answerable) return { text: dq.decide, under: null, go: "", answers: false, yourCall: false, lead: false, mode: "decide" };
@@ -269,8 +276,11 @@ export function rowLead(t: Task): { text: string; under: string | null; go: stri
     return { text: dq.text, under: null, go: null, answers: true, yourCall: dq.yourCall, lead: false, mode: "answers" };
   }
   const ask = rowAsk(askOf(full), t.ask, false, !!next, tt.cut);
-  const sup = supportOf(t);
-  if (sup?.kind === "closed") return { text: checkLine(sup), under: ask.text || null, go: "", answers: false, yourCall: false, lead: false, mode: "check" };
+  const ck = t.check ?? null;
+  if (ck?.kind === "checking") return { text: CHECKING, under: ask.text || null, go: null, answers: false, yourCall: false, lead: false, mode: "checking" };
+  if (ck?.kind === "unavailable") return { text: ask.text || "This task", under: null, go: null, answers: false, yourCall: false, lead: false, mode: "unavailable" };
+  if (ck?.kind === "closed") return { text: checkLine(ck), under: ask.text || null, go: "", answers: false, yourCall: false, lead: false, mode: "check" };
+  if (ck?.kind === "waits") return { text: waitsLine(ck), under: ask.text || null, go: "", answers: false, yourCall: false, lead: false, mode: "waits" };
   // r17: someone else's task that waits on the user leads with what it asks of them; the task itself is the quiet line under it
   const theirs = waitsOnMe(t);
   const context = theirs ? [`From ${ownerLabel(t.owner)}`, ask.text || null].filter(Boolean).join(" · ") : null;
@@ -297,8 +307,7 @@ export function NeedRow({ t, onTask, onDecide, onNote, meta, compact = false }: 
   const vault = t.vault ?? profileVault;
   const r = rowLead(t);
   const text = r.text;
-  const questions = isDecision ? null : questionCount(next);
-  const sup = questions ? supportOf(t) : null;
+  const sup = isDecision ? null : supportOf(t);
   const titleRef = useRef<HTMLElement>(null);
   const [open, setOpen] = useState(false);
   const [titleLines, setTitleLines] = useState(1);
@@ -307,8 +316,9 @@ export function NeedRow({ t, onTask, onDecide, onNote, meta, compact = false }: 
   // r16: an action reads whole up to four lines (the panel shows fewer rows rather than cutting an instruction); a title reads to its object
   // (up to 3 lines beside other lines, 4 alone); a decision's question is never clamped, its preview is two lines of whole words.
   // r18: in the companion an action is three lines at most, and a long "Your call" or "Check" two
-  const clampMode = r.mode === "preview" || ((r.mode === "call" || r.mode === "check") && compact);
-  const titleMax = isDecision ? (r.mode === "preview" || (r.mode === "call" && compact) ? 2 : 99) : r.lead ? (compact ? 3 : ACTION_LINES) : r.mode === "check" ? (compact ? 2 : 99) : next || due ? 3 : 4;
+  const quietMode = r.mode === "check" || r.mode === "waits" || r.mode === "tidy";
+  const clampMode = r.mode === "preview" || ((r.mode === "call" || quietMode) && compact);
+  const titleMax = isDecision ? (r.mode === "preview" || ((r.mode === "call" || r.mode === "tidy") && compact) ? 2 : 99) : r.lead ? (compact ? 3 : ACTION_LINES) : quietMode ? (compact ? 2 : 99) : next || due ? 3 : 4;
   useLayoutEffect(() => {
     const el = titleRef.current; if (!el) return;
     const measure = () => {
@@ -321,8 +331,9 @@ export function NeedRow({ t, onTask, onDecide, onNote, meta, compact = false }: 
     ro?.observe(el);
     return () => ro?.disconnect();
   }, [text, open, titleMax]);
-  // the next step shows under a title; a row that leads with it does not repeat it, and a "Check" row never shows the action it doubts
-  const showNext = !!next && !r.lead && r.mode !== "check";
+  // the next step shows under a title; a row that leads with it does not repeat it, and a row whose step isn't checked (or is doubted, or is
+  // Uni's to tidy) never shows it (r19)
+  const showNext = !!next && !r.lead && r.mode === "title";
   const nextLines = compact ? Math.min(1, lineBudget(Math.min(titleLines, titleMax), !!due, 4).next) : lineBudget(Math.min(titleLines, titleMax), !!due, 4).next;
   const more = !compact && (open || (titleCut && !isDecision && !clampMode) || (showNext && (nextCut || nextLines <= 0)));
   const clampStyle = open || isDecision ? undefined : ({ WebkitLineClamp: titleMax, lineClamp: titleMax } as React.CSSProperties);
@@ -337,21 +348,23 @@ export function NeedRow({ t, onTask, onDecide, onNote, meta, compact = false }: 
       ? <><WordClamp elRef={titleRef as React.RefObject<HTMLParagraphElement | null>} className="cp-title cp-lead" tokens={stepTokens(next, vault, onNote)} textKey={`${vault}\n${next}`} lines={titleMax} open={open}
           onCut={setTitleCut} onClick={(e) => { if (!(e.target as Element).closest("a, button")) onTask(t); }} />
         <button type="button" className="cp-need cp-need-under" data-id={id ?? undefined} aria-label={[text, r.under, due, meta].filter(Boolean).join(". ")} onClick={() => onTask(t)}>{meta_}</button></>
-      : <button type="button" className={`cp-need${isDecision ? " decision" : ""}`} data-id={id ?? undefined} data-mode={r.mode} aria-label={r.yourCall ? `Your call: ${text}` : undefined} onClick={() => onTask(t)}>
+      : <button type="button" className={`cp-need${isDecision ? " decision" : ""}`} data-id={id ?? undefined} data-mode={r.mode} aria-busy={r.mode === "checking" || undefined} aria-label={r.yourCall ? `Your call: ${text}` : undefined} onClick={() => onTask(t)}>
         {r.yourCall && <small className="cp-call-lead">Your call:</small>}
         {clampMode
           // r16: a question too long for a row: whole words, then "Open to decide ›" (r18: the companion's "Your call"/"Check" lines too)
-          ? <span className="cp-title-wrap"><WordClamp elRef={titleRef as React.RefObject<HTMLParagraphElement | null>} className="cp-title cp-preview" tokens={wordTokens(withoutCut(text))} textKey={text} lines={titleMax} open={false} onCut={() => {}} onClick={() => {}} tag="span" />{r.go === "" && <span className="cp-go" aria-hidden="true"> ›</span>}</span>
-          : <span ref={titleRef} className="cp-title" style={clampStyle}><RefText text={text} vault={vault} />{r.go === "" && <span className="cp-go" aria-hidden="true"> ›</span>}</span>}
+          ? <span className="cp-title-wrap"><WordClamp elRef={titleRef as React.RefObject<HTMLParagraphElement | null>} className="cp-title cp-preview" tokens={wordTokens(withoutCut(text))} textKey={text} lines={titleMax} open={false} onCut={() => {}} onClick={() => {}} tag="span" />{r.go === "" && !compact && <span className="cp-go" aria-hidden="true"> ›</span>}</span>
+          : <span ref={titleRef} className="cp-title" style={clampStyle}><RefText text={text} vault={vault} />{r.go === "" && !compact && <span className="cp-go" aria-hidden="true"> ›</span>}</span>}
         {r.go && <span className="cp-open-decide">{r.go}<span aria-hidden="true"> ›</span></span>}
         {meta_}</button>}
-    {!next && !isDecision && !actionableTitle(text) && text !== "Open to see what's needed" && <p className="cp-open-to-see">Open to see what's needed</p>}
+    {!next && !isDecision && r.mode === "title" && !actionableTitle(text) && text !== "Open to see what's needed" && <p className="cp-open-to-see">Open to see what's needed</p>}
+    {/* r19: the read failed: not "nothing there", and not the action either */}
+    {r.mode === "unavailable" && <p className="cp-checkfail" role="status">{CHECK_FAILED} · <button type="button" className="cp-retry" onClick={requestRecheck}>Retry</button></p>}
     {showNext && <NextText text={next} vault={vault} onNote={onNote} lines={open ? undefined : nextLines} open={open} onOpen={setOpen} onClamp={setNextCut} />}
     {more && <button type="button" className="cp-more-next cp-row-more" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? "Less" : "More"}</button>}
     {/* r18: "Answer N questions" only from an explicit list; an unclear source opens the note; a closed one is the row itself ("Check: …") */}
     {sup?.kind === "list" ? <button type="button" className="cp-open-decide cp-rest cp-questions" onClick={() => onTask(t)}>{answerLabel(sup.items.length)}<span aria-hidden="true"> ›</span></button>
       : sup?.kind === "unclear" ? <button type="button" className="cp-open-decide cp-rest cp-questions" onClick={() => openSource(sup.from ?? { vault, id: t.id })}>{OPEN_TO_ANSWER}<span aria-hidden="true"> ›</span></button>
-      : r.lead && t.nextCut && <button type="button" className="cp-open-decide cp-rest" onClick={() => onTask(t)}>The rest is in its note<span aria-hidden="true"> ›</span></button>}
+      : r.lead && t.nextCut && r.mode === "lead" && <button type="button" className="cp-open-decide cp-rest" onClick={() => onTask(t)}>The rest is in its note<span aria-hidden="true"> ›</span></button>}
     {r.answers && <DecisionAnswer t={t} label={text} onDecide={onDecide} max={OPTS_SHOWN} onMore={() => onTask(t)} />}
   </li>;
 }
@@ -476,6 +489,14 @@ function Body({ stands, ready, note, load, feed, rest = 0, moreTitle = null, onP
   </div>;
 }
 
+/** "Needs you · 2: Say go on prod deploy of #38 + #58": the folded strip's line when anything needs the user (r19). The first row whose request
+ *  is known (never one still being checked); the count is the feed's own total. Null when nothing needs them. */
+export function waitingLine(feed: NeedsFeed): string | null {
+  if (!feed.total) return null;
+  const first = feed.rows.map(rowLead).find((r) => r.mode !== "checking" && r.mode !== "unavailable");
+  return `Needs you · ${feed.total}${first ? `: ${first.yourCall ? `Your call: ${first.text}` : first.text}` : ""}`;
+}
+
 /** The side panel (wide screens). `open` and `onToggle` come from `useCompanionOpen("side")`. */
 export function CompanionSide({ open, onToggle, ...p }: CompanionProps & Fold) {
   return <aside className={`cp side cp-fit ${open ? "open" : "folded"}`} aria-label="Where this stands">
@@ -522,18 +543,16 @@ export function CompanionStrip({ open, onToggle, ...p }: CompanionProps & Fold) 
     if (!asSheet) return;
     const el = ref.current; const room = el?.closest(".sr") as HTMLElement | null;
     setTop(el && room ? Math.max(0, Math.round(el.getBoundingClientRect().top - room.getBoundingClientRect().top)) : 0);
-    // r17: focus goes back to the strip's own line when the sheet closes (the element focused before may be gone or be the body)
+    // r17: focus goes back to the strip's own line when the sheet closes (the element focused before may be gone or be the body). r19: the one
+    // dialog contract (focus in, Tab kept inside, the room under it inert, Escape on the window when it is the top dialog)
     const line = el?.querySelector<HTMLElement>(".cp-line") ?? null;
-    const opener = line ?? (document.activeElement as HTMLElement | null);
-    sheetRef.current?.focus();
-    // Escape on the window, as the drawer does (r16: the walk harness can't send Escape, so this is checked with a dispatched key)
-    const esc = (e: KeyboardEvent) => { if (e.key === "Escape" && !e.defaultPrevented && !document.querySelector(".task-sheet-wrap")) { e.preventDefault(); closeRef.current(); } };
-    window.addEventListener("keydown", esc);
-    return () => { window.removeEventListener("keydown", esc); if (opener?.isConnected) opener.focus(); };
+    const box = sheetRef.current; const layer = box?.closest(".cp-sheet-wrap") as HTMLElement | null;
+    return box ? openDialog(box, () => closeRef.current(), { root: layer, initial: box, opener: line }) : undefined;
   }, [asSheet]);
   const heading = standsHeading(p.scope, p.ready ? p.stands?.ago : null);
-  // r18: folded, the line is the sentence cut on a whole word (never "underway ac…"); open, it is the dated heading
-  const folded = p.note ?? (p.ready ? p.stands?.text ?? "Where this stands" : p.load?.error ? "Couldn't load" : p.load?.slow ? "Still loading" : "Loading…");
+  // r18: folded, the line is the sentence cut on a whole word (never "underway ac…"); open, it is the dated heading. r19: when anything needs
+  // the user, the folded line says what is waiting first ("Needs you · 2: Say go on the deploy…"), never only a dot behind a chevron
+  const folded = p.note ?? (p.ready ? waitingLine(p.feed) ?? p.stands?.text ?? "Where this stands" : p.load?.error ? "Couldn't load" : p.load?.slow ? "Still loading" : "Loading…");
   const lineRef = useRef<HTMLParagraphElement | null>(null);
   const lineTokens = [...(p.scope ? [{ node: <b className="cp-scope">{`${p.scope}:`}</b>, space: false }] : []), ...wordTokens(folded).map((w, i) => (i === 0 && p.scope ? { ...w, space: true } : w))];
   const label = <span className="cp-line-text" title={p.stands?.text}>{open ? heading
@@ -553,7 +572,7 @@ export function CompanionStrip({ open, onToggle, ...p }: CompanionProps & Fold) 
     {asSheet && <div className="cp-sheet-wrap">
       <button type="button" className="cp-sheet-scrim" aria-label="Close" tabIndex={-1} onClick={close} />
       <div ref={sheetRef} className="cp cp-sheet" role="dialog" aria-modal="true" aria-label={p.scope ? `Where ${p.scope} stands` : "Where this stands"} tabIndex={-1}
-        style={{ maxHeight: `calc(100% - ${top}px)` }} onKeyDown={(e) => trapTab(e, sheetRef.current)}>
+        style={{ maxHeight: `calc(100% - ${top}px)` }}>
         <div className="cp-sheet-head"><span>{heading}</span><button type="button" className="cp-sheet-close" onClick={close}>Close</button></div>
         {/* one sheet at a time: an item opened from here (or a way deeper) replaces this sheet */}
         <Body {...p} fit={false} hideHealth onTask={(t) => { close(); p.onTask(t); }} onPrivate={p.onPrivate && ((o) => { close(); p.onPrivate!(o); })} onEverything={p.onEverything && (() => { close(); p.onEverything!(); })} />

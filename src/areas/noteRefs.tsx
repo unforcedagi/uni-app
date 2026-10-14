@@ -21,20 +21,23 @@ const keep = () => { try { localStorage.setItem(titlesKey(owner), JSON.stringify
 /** The signed-in identity whose titles these are: another one starts from its own kept list. */
 export function setTitleOwner(who: string) {
   if (who === owner) return;
-  owner = who; titles.clear(); seen.clear();
+  owner = who; titles.clear(); seen.clear(); reading.clear(); gen++;
   try { localStorage.setItem(OWNER_KEY, who); } catch { /* this session only */ }
   for (const [k, e] of stored()) titles.set(k, e);
   listeners.forEach((f) => f());
 }
 /** Forget (r18): every identity's kept titles go, with the old unscoped list. */
 export function forgetTitles() {
-  titles.clear(); seen.clear();
+  titles.clear(); seen.clear(); reading.clear(); gen++;
   try { for (let i = localStorage.length - 1; i >= 0; i--) { const k = localStorage.key(i); if (k && /^uni\.noteTitles\./.test(k)) localStorage.removeItem(k); } } catch { /* nothing kept */ }
   listeners.forEach((f) => f());
 }
 /** Notes whose title was checked this session (a title kept from the last launch is checked once, in the background). */
 const seen = new Set<string>();
-const reading = new Set<string>();
+/** Reads in flight, by note, with the generation they started in (r19). */
+const reading = new Map<string, number>();
+/** r19: bumped when the identity changes or Forget runs: a read started before (in flight or still queued) never lands in the new owner's titles. */
+let gen = 0;
 const listeners = new Set<() => void>();
 const subscribe = (f: () => void) => { listeners.add(f); return () => { listeners.delete(f); }; };
 
@@ -48,16 +51,19 @@ const release = () => { inFlight--; waiting.shift()?.(); };
 function load(r: NoteRef) {
   const k = refKey(r);
   if (reading.has(k) || !shouldRead(titles.get(k), Date.now(), seen.has(k))) return;
-  seen.add(k); reading.add(k);
-  slot().then(() => invoke<{ note?: { path?: string; updatedAt?: string } } | null>("vault_note", { vault: r.vault, noteRef: r.id }).finally(release))
+  const g = gen;
+  seen.add(k); reading.set(k, g);
+  // a read still queued when the owner changed is dropped before it is sent
+  slot().then(() => (g !== gen ? Promise.reject(new Error("owner changed")) : invoke<{ note?: { path?: string; updatedAt?: string } } | null>("vault_note", { vault: r.vault, noteRef: r.id })).finally(release))
     .then((n) => ({ title: titleOfPath(n?.note?.path), at: typeof n?.note?.updatedAt === "string" ? n.note.updatedAt : null }), () => null)
     .then((read) => {
+      if (g !== gen) return; // another identity (or Forget) since this read started: its answer is not theirs
       const prev = titles.get(k);
       const next = settle(prev, read, Date.now());
       titles.delete(k); titles.set(k, next); capped(titles);
       if (next.title && (next.title !== prev?.title || next.at !== prev?.at)) keep();
     })
-    .finally(() => { reading.delete(k); listeners.forEach((f) => f()); });
+    .finally(() => { if (reading.get(k) === g) reading.delete(k); if (g === gen) listeners.forEach((f) => f()); });
 }
 
 /** Read (or check again) the titles of the notes a text mentions, ahead of showing it: called with every refresh of the work. */

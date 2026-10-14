@@ -52,6 +52,14 @@ export type Task = {
   /** r18: where its questions come from, read at revision `supportAt` (shown only at the row's own revision). */
   support?: import("./simpleCore.ts").Support;
   supportAt?: string | null;
+  /** r19: the `source` field when it names a note (an id or `[[link]]`); provenance strings ("Aaron/Tasks#T-21", "tasks.py new") are not kept. */
+  sourceRef?: string | null;
+  /** r19: `depends_on` (a string or a list): notes this task waits on, by id or `[[link]]`. */
+  dependsOn?: string[];
+  /** r19: a structured `questions` field: the questions themselves, so no note has to be read for them. */
+  questions?: string[];
+  /** r19: what reading its supporting notes came to, as of now (set by the list, never stored): see `checkOf`. */
+  check?: import("./simpleCore.ts").Check | null;
 };
 
 const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);
@@ -151,6 +159,11 @@ const linkOf = (v: unknown): string | null => { const t = str(v); return t && /^
 /** A stored message: words, not a reference to another note (a bare id or `[[link]]` is not the message itself). */
 const messageOf = (v: unknown): string | null => { const t = str(v); return t && !/^(?:\[\[[^\]]+\]\]|(?:[a-z][\w-]*:)?[0-9A-HJKMNP-TV-Z]{26})$/.test(t) ? t : null; };
 
+/** A string, or a list of strings, as a list (r19: `depends_on`, `questions`). */
+const listOf = (v: unknown): string[] => (Array.isArray(v) ? v : v === undefined || v === null ? [] : [v]).map(str).filter((x): x is string => !!x);
+/** A field that names a note: a ULID (bare or `vault:`-prefixed) or a `[[link]]` (r19). */
+const noteRefIn = (v: unknown): boolean => { const t = str(v); return !!t && /\[\[[^\]]+\]\]|\b[0-9A-HJKMNP-TV-Z]{26}\b/.test(t); };
+
 export function parseTask(n: RawNote, tree: TaskTree): Task | null {
   const id = str(n.id), path = str(n.path) && stripExt(str(n.path)!);
   if (!id || !path) return null;
@@ -172,6 +185,9 @@ export function parseTask(n: RawNote, tree: TaskTree): Task | null {
     ...(kind === "decision" && str(m.task) ? { forTask: str(m.task)!.toUpperCase() } : {}),
     ...(linkOf(m.link) ?? linkOf(m.url) ? { link: linkOf(m.link) ?? linkOf(m.url) } : {}),
     ...(messageOf(m.message) ?? messageOf(m.draft) ? { message: messageOf(m.message) ?? messageOf(m.draft) } : {}),
+    ...(noteRefIn(m.source) ? { sourceRef: str(m.source) } : {}),
+    ...(listOf(m.depends_on ?? m.blocked_by).length ? { dependsOn: listOf(m.depends_on ?? m.blocked_by) } : {}),
+    ...(listOf(m.questions).length ? { questions: listOf(m.questions) } : {}),
   };
 }
 

@@ -3,10 +3,10 @@ import { TaskSheet, UndoBar, ownerLabel } from "./NodeWork";
 import { useTasks } from "./useTasks";
 import { draftsUnder, runsUnder } from "./steerCore";
 import { CompanionSide, CompanionStrip, useCompanionOpen, type CompanionProps, type TaskLoad } from "./Companion";
-import { chatPlaceholder, isMine, needsByRow, needsFeed, privateNote, standsHeading, standsLine, stateLine, uniPanel, type PrivateNeed } from "./simpleCore";
+import { chatPlaceholder, isMine, needsByRow, needsFeed, needsYou, privateNote, standsHeading, standsLine, stateLine, uniPanel, type PrivateNeed } from "./simpleCore";
 import { ownRoom, type Steward } from "./talkCore";
 import type { Area } from "./areasCore";
-import { isMe, nodeFilterKeys, priorityOf, tasksUnder, type Task, type TaskNode } from "./taskCore";
+import { isMe, priorityOf, tasksUnder, type Task, type TaskNode } from "./taskCore";
 import type { RoomInfo } from "./TodayView";
 import { refreshDraft } from "./briefCore";
 import AreaView, { type AppView, type AreaActions } from "./AreaView";
@@ -29,7 +29,7 @@ import { LoadHealth } from "./LoadHealth";
 import { Body } from "../MessageBody";
 import { projectBody } from "./projectBody";
 import { rootOpenMemory } from "./rootMemory";
-import { trapTab } from "./focusTrap";
+import { openDialog } from "./focusTrap";
 import { publishDecisions, setDecisionOpener } from "../decisionLinks";
 import { taskTitle } from "./whereCore";
 import type { NoteRef } from "./noteRefsCore";
@@ -94,7 +94,10 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   const sidebar = wide && !shortTree;
   const placesDrawer = !sidebar || railHidden;
   /** The companion beside (wide) or above (phone) the conversation: open or folded, remembered per device. */
-  const [companionOpen, setCompanionOpen] = useCompanionOpen(wide ? "side" : "strip");
+  /** r19: a wide window too short for the sidebar (920×360) has no room for a side panel either: the companion is the strip there, folded to
+   *  one line that still says what is waiting ("Needs you · 2: <first action>"). */
+  const stripCompanion = !wide || shortTree;
+  const [companionOpen, setCompanionOpen] = useCompanionOpen(stripCompanion ? "strip" : "side");
   /** Phone: the room tree is the home and a level opens from it; Uni's own level is one tap on its row. */
   const [rootOpen, setRootOpenState] = useState(rootOpenMemory.open);
   const setRootOpen = (v: boolean) => { rootOpenMemory.open = v; setRootOpenState(v); };
@@ -160,17 +163,11 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   const drawerOpener = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     if (!drawer) return;
-    const box = drawerBox.current; const wrap = box?.closest(".th-drawer-wrap");
+    const box = drawerBox.current; const wrap = box?.closest(".th-drawer-wrap") as HTMLElement | null;
     if (!box || !wrap) return;
-    const marked: Element[] = [];
-    for (let el: Element | null = wrap; el && el !== document.body; el = el.parentElement) {
-      for (const sib of el.parentElement?.children ?? []) if (sib !== el && !sib.hasAttribute("inert")) { sib.setAttribute("inert", ""); marked.push(sib); }
-    }
-    (box.querySelector<HTMLElement>(".th-place, button:not(:disabled)") ?? box).focus();
-    const opener = drawerOpener.current;
-    return () => { for (const m of marked) m.removeAttribute("inert"); const at = document.activeElement; if (opener?.isConnected && (!at || at === document.body)) opener.focus(); };
+    // r19: the one dialog contract every foreground surface uses (focusTrap.openDialog)
+    return openDialog(box, () => setDrawer(false), { root: wrap, initial: box.querySelector<HTMLElement>(".th-place, button:not(:disabled)") ?? box, opener: drawerOpener.current });
   }, [drawer]);
-  const trapDrawer = (e: React.KeyboardEvent) => trapTab(e, drawerBox.current);
   useEffect(() => {
     setBody(null);
     if (!identity || node?.kind !== "project" || !workShown) return;
@@ -247,7 +244,7 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
     openApp?: ((e: React.MouseEvent) => void) | null; appOpen?: boolean }) => {
     const replies = thread && o.chatRoom?.loaded ? o.chatRoom.messages.filter((m) => m.ref !== thread.root).length : null;
     const view = o.main ? "work" : thread ? "thread" : "room";
-    return <div className={`tree-home th-level ${wide ? "wide" : "phone"} th-rooms th-simple ${wide && (!o.companion || o.main) ? "solo" : wide && !companionOpen ? "folded" : ""}`} data-layout="rooms" data-view={view}>
+    return <div className={`tree-home th-level ${wide ? "wide" : "phone"} th-rooms th-simple ${wide && (!o.companion || o.main || stripCompanion) ? "solo" : wide && !companionOpen ? "folded" : ""}`} data-layout="rooms" data-view={view}>
       {sidebar && <RoomSidebar {...treeProps} selected={o.selected} selectedRoom={o.selectedRoom} nav={nav} />}
       <section className="sr" aria-label={o.main ? `Work: ${o.title}` : `Conversation: ${o.title}`} data-node={o.node}>
         <header className="sr-head">
@@ -263,15 +260,15 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
           <span className="sr-thread-label">Thread{replies !== null ? ` · ${replies} ${replies === 1 ? "reply" : "replies"}` : ""}</span></div>}
         {o.workBar}
         {/* below 900px the tree (and its health line) is in the drawer: the room says it itself, outside the drawer (r14); the work view has its own */}
-        {!wide && o.companion && !o.main && tasks.ready && <LoadHealth load={load} ready count={o.companion.feed.total} className="sr-health" />}
-        {!wide && o.companion && !o.main && <CompanionStrip {...o.companion} open={companionOpen} onToggle={setCompanionOpen} />}
+        {stripCompanion && o.companion && !o.main && tasks.ready && <LoadHealth load={load} ready count={o.companion.feed.total} className="sr-health" />}
+        {stripCompanion && o.companion && !o.main && <CompanionStrip {...o.companion} open={companionOpen} onToggle={setCompanionOpen} />}
         {o.main ? <div className="sr-work">{o.main}</div>
           : <div className="sr-chat">{o.chatRoom ? o.chatRoom.render(null, o.placeholder) : <p className="th-quiet" role="status">Opening the room…</p>}</div>}
       </section>
-      {wide && o.companion && !o.main && <CompanionSide {...o.companion} open={companionOpen} onToggle={setCompanionOpen} />}
+      {!stripCompanion && o.companion && !o.main && <CompanionSide {...o.companion} open={companionOpen} onToggle={setCompanionOpen} />}
       {placesDrawer && drawer && <div className="th-drawer-wrap">
         <button type="button" className="th-drawer-scrim" aria-label="Close places" tabIndex={-1} onClick={() => setDrawer(false)} />
-        <aside ref={drawerBox} id="th-drawer" className="th-drawer" role="dialog" aria-modal="true" aria-label="Rooms and places" tabIndex={-1} onKeyDown={trapDrawer}>
+        <aside ref={drawerBox} id="th-drawer" className="th-drawer" role="dialog" aria-modal="true" aria-label="Rooms and places" tabIndex={-1}>
           {placesRow}
           <TreeScreen column {...treeProps} selected={o.selected} selectedRoom={o.selectedRoom} nav={drawerNav} onHide={() => setDrawer(false)} hideLabel="Close places" />
         </aside>
@@ -359,7 +356,6 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   /** r18: a draft note written for the task (its `task` field names it): its text is the message the sheet copies. */
   const draftOf = (t: Task) => { const tid = taskTitle(t.title).id?.toUpperCase(); const d = tid ? tasks.drafts.find((x) => x.task?.toUpperCase() === tid) : null; return d ? { vault: t.vault ?? profile.vault, id: d.id } : null; };
   const sheetView = sheetTask && <TaskSheet key={sheetTask.id} task={sheetTask} gone={sheetGone} here={here} nodeName={nodeName} room={roomOfNode(sheetTask.node) ?? target} inRoom={target?.id} onClose={closeSheet}
-    nodeKeys={sheetTask.node !== ROOT && tasks.tree ? nodeFilterKeys(tasks.tree, [sheetTask.node]) : []}
     draft={draftOf(sheetTask)}
     onAct={(t, a) => tasks.act(t, a, { sheet: true })} onDecide={(t, o) => tasks.decide(t, o)} onNote={actions.openNote} onOpenRoom={openRoomHere} onSay={chat ? sayIn : undefined} onPriority={(t, p) => void tasks.setPriority(t, p)} onStale={tasks.refresh} />;
   const companionProps: CompanionProps = { stands, ready: tasks.ready, load, feed: panel, rest: panel.rest, moreTitle: privateNote(panel.privateCount), onPrivate: openPrivate, runs, nodeName: node.name, scope: borrowed ? node.name : null, onTask: openSheet, onNote: actions.openNote, onDecide: decide, onEverything: () => { closeSheet(); setWork(true); } };
@@ -368,7 +364,8 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   const mineLive = isMine;
   const othersHere = levelTasks.filter((t) => !mineLive(t) && !hidden(t.node)).map((t) => ({ task: t, meta: [stateLine(t, (w) => isMe(w), ownerLabel), isMe(t.owner) ? null : `with ${ownerLabel(t.owner)}`, t.node !== here ? `in ${nodeName(t.node)}` : null].filter(Boolean).join(" · ") }));
   const later = levelTasks.filter((t) => mineLive(t) && t.kind !== "decision" && priorityOf(t) === "someday" && !hidden(t.node));
-  const privateOther = levelTasks.filter((t) => hidden(t.node) && !(mineLive(t) && (t.kind === "decision" || priorityOf(t) !== "someday"))).length;
+  // r19: everything in another private area that isn't in its "N for you" line (a record to tidy there included)
+  const privateOther = levelTasks.filter((t) => hidden(t.node) && !needsYou(t)).length;
   /** No room to talk in (none found once the rooms are in): the work view is the room's view, with no chat to go back to. */
   const noRoom = chat && !target && !roomsPending && !thread;
   // r18: the work view says where this stands with the companion's own sentence, heading and date ("Where this stands · 2 days ago"), one

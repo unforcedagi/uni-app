@@ -37,6 +37,9 @@ export type WorkViewProps = {
 
 export function WorkView(p: WorkViewProps) {
   const [laterOpen, setLaterOpen] = useState(false);
+  const [tidyOpen, setTidyOpen] = useState(false);
+  /** r19: records that aren't real requests yet: Uni's to tidy, listed apart and never counted in Needs you. */
+  const tidy = p.feed.tidy ?? [];
   const vault = useVaultProfile().vault;
   const running = p.runs.filter(isActiveRun);
   const motion = running.length + p.drafts.length + p.others.length;
@@ -63,6 +66,10 @@ export function WorkView(p: WorkViewProps) {
       {p.others.length > 0 && <ul className="cp-list wv-others">{p.others.map(({ task, meta }) => <NeedRow key={task.id} t={task} meta={meta} onTask={p.onTask} onDecide={p.onDecide} onNote={p.onNote} />)}</ul>}
       {p.privateOther > 0 && <p className="cp-none">{p.privateOther === 1 ? "One item in a private area is" : `${p.privateOther} items in private areas are`} not listed here; open the area to see {p.privateOther === 1 ? "it" : "them"}.</p>}
     </section>
+    {tidy.length > 0 && <section className="wv-sec wv-tidy" aria-label="Uni needs to tidy these">
+      <button type="button" className="wv-h wv-fold wv-tidy-h" aria-expanded={tidyOpen} aria-controls="wv-tidy" onClick={() => setTidyOpen(!tidyOpen)}>{`Uni needs to tidy these (${tidy.length})`}<i aria-hidden="true">{tidyOpen ? "–" : "+"}</i></button>
+      {tidyOpen && <ul id="wv-tidy" className="cp-list">{tidy.map((t) => <NeedRow key={t.id} t={t} onTask={p.onTask} onDecide={p.onDecide} onNote={p.onNote} />)}</ul>}
+    </section>}
     {p.later.length > 0 && <section className="wv-sec wv-later" aria-label="Later">
       <button type="button" className="wv-h wv-fold" aria-expanded={laterOpen} aria-controls="wv-later" onClick={() => setLaterOpen(!laterOpen)}>Later <span className="wv-n">{p.later.length}</span><i aria-hidden="true">{laterOpen ? "–" : "+"}</i></button>
       {laterOpen && <ul id="wv-later" className="cp-list">{p.later.map((t) => <NeedRow key={t.id} t={t} meta="Someday" onTask={p.onTask} onDecide={p.onDecide} onNote={p.onNote} />)}</ul>}

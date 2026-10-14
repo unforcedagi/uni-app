@@ -25,3 +25,42 @@ export function trapTab(e: { key: string; shiftKey: boolean; preventDefault: () 
   if (e.shiftKey && (at === f[0] || at === box || !inside)) { e.preventDefault(); f[f.length - 1].focus(); }
   else if (!e.shiftKey && (at === f[f.length - 1] || !inside && at !== box)) { e.preventDefault(); f[0].focus(); }
 }
+
+// ------------------------------------------------------------------------------------------------- r19
+/** The dialogs open now, top last: Escape and Tab belong to the top one only (r19, one contract for every foreground surface). */
+const stack: symbol[] = [];
+export const dialogOpen = (): boolean => stack.length > 0;
+/**
+ * One dialog contract (r19, Codex 5): the task sheet, the companion's sheet, the Places drawer and the utility panels (Search, Settings, Vault).
+ * While `open`: focus moves in (the box itself, or `initial`), Tab wraps among its reachable controls, everything around it is inert (`keep`:
+ * elements left live, the rail that switches the panels), and Escape closes it, only when it is the top dialog, before any other handler sees
+ * the key. On close, focus goes back to what opened it (when that is still there and focus would otherwise be lost).
+ */
+export function isolate(box: HTMLElement, keep: readonly (Element | null)[] = []): () => void {
+  const marked: Element[] = [];
+  const live = (el: Element) => keep.some((k) => k && (k === el || el.contains(k) || k.contains(el)));
+  for (let el: Element | null = box; el && el !== document.body; el = el.parentElement) {
+    for (const sib of el.parentElement?.children ?? []) if (sib !== el && !live(sib) && !sib.hasAttribute("inert") && sib.tagName !== "SCRIPT") { sib.setAttribute("inert", ""); marked.push(sib); }
+  }
+  return () => { for (const m of marked) m.removeAttribute("inert"); };
+}
+export function openDialog(box: HTMLElement, close: () => void, opts: { /** what stays live beside it */ keep?: readonly (Element | null)[]; initial?: HTMLElement | null; opener?: HTMLElement | null;
+  /** the dialog's whole layer (its scrim included), isolated from everything else; default the box */ root?: HTMLElement | null } = {}): () => void {
+  const me = Symbol("dialog"); stack.push(me);
+  const opener = opts.opener ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
+  const undo = isolate(opts.root ?? box, opts.keep);
+  if (!box.contains(document.activeElement)) (opts.initial ?? box).focus();
+  const key = (e: KeyboardEvent) => {
+    if (stack[stack.length - 1] !== me) return;
+    if (e.key === "Escape") { if (e.defaultPrevented) return; e.preventDefault(); e.stopPropagation(); close(); return; }
+    if (e.key === "Tab") trapTab(e, box);
+  };
+  window.addEventListener("keydown", key, true);
+  return () => {
+    window.removeEventListener("keydown", key, true);
+    const i = stack.indexOf(me); if (i >= 0) stack.splice(i, 1);
+    undo();
+    const at = document.activeElement;
+    if (opener?.isConnected && (!at || at === document.body || box.contains(at) || !at.isConnected)) opener.focus();
+  };
+}
