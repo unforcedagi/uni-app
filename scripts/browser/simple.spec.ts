@@ -2487,7 +2487,8 @@ test.describe('r18', () => {
     await openRoom(page, 'ATLAS');
     await openWork(page);
     const row = page.locator('.sr-work .cp-item').filter({ hasText: 'deployed fixes are not awaiting a merge' });
-    await expect(row).toHaveAttribute('data-mode', 'check');
+    // the source is read a moment after the list is on screen (then kept per revision): on a loaded phone that can pass 5 s
+    await expect(row).toHaveAttribute('data-mode', 'check', { timeout: 15_000 });
     await expect(row.locator('.cp-title')).toHaveText(/^Check: “RegenHub: deployed fixes are not awaiting a merge” is closed — still needed\? ›$/);
     await expect(row).not.toContainText('Merge RegenHub PRs');
     await expect(row.getByRole('button', { name: /^Answer \d+ questions?/ })).toHaveCount(0);
