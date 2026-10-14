@@ -30,6 +30,7 @@ import { InlineText } from "./InlineText";
 import { Body } from "../MessageBody";
 import { projectBody } from "./projectBody";
 import { rootOpenMemory } from "./rootMemory";
+import type { NoteRef } from "./noteRefsCore";
 import "./areas.css";
 import "./tree.css";
 
@@ -38,6 +39,9 @@ const PLATFORM = platformName(USER_AGENT);
 
 /** The note for a room no node owns: the companion says so instead of a node's state. */
 export const UNFILED = "Not filed under an area yet.";
+
+/** What the host does for the shell: as an area app's actions, except that a note is opened in its own vault (r15). */
+export type ShellActions = Omit<AreaActions, "openNote"> & { openNote(ref: NoteRef): void };
 
 /**
  * What is open over the place (the task sheet, the work view, the drawer): Android Back closes it first. `modal` (the sheet) holds Alt+arrow
@@ -58,7 +62,7 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   loose?: string | null;
   /** A thread (its room and root message), shown in the shell of its room's node, or as a loose room's. */
   thread?: { channel: string; root: string } | null;
-  rooms: RoomInfo[]; actions: AreaActions;
+  rooms: RoomInfo[]; actions: ShellActions;
   /** The rooms list has not arrived yet (a fresh start): a room place waits for it instead of showing a page with "no room". */
   roomsPending?: boolean;
   /** The host's room view for a room id (or one of its threads, by root): its messages and composer, when that is the one loaded. */
@@ -72,7 +76,11 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   onOverlayChange?: (o: Overlay | null) => void;
 }) {
   // chat.provider null: no Buzz on this surface. No rooms are known here, so nothing resolves a steward, loads messages or opens a room.
-  const chat = useVaultProfile().chat.provider === "buzz";
+  const profile = useVaultProfile();
+  const chat = profile.chat.provider === "buzz";
+  /** A note named by path or id in this vault (a brief's link, the area app's), opened in this vault, never in another. */
+  const openHere = (ref: string) => actions.openNote({ vault: profile.vault, id: ref });
+  const appActions: AreaActions = { ...actions, openNote: openHere };
   const rooms = useMemo<RoomInfo[]>(() => (chat ? hostRooms : []), [chat, hostRooms]);
   const { data, error, loading, signingIn } = useAreas(identity);
   const nav = useNav();
@@ -329,7 +337,7 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   const noRoom = chat && !target && !roomsPending && !thread;
   const briefNow = !isRoot ? entry?.brief.now ?? "" : "";
   const top = (briefNow || fresh || askRoom) ? <div className="wv-top">
-    {briefNow && <p className="th-lede wv-brief">{entry!.brief.nowTokens.length ? <InlineText tokens={entry!.brief.nowTokens} onNote={actions.openNote} /> : briefNow}</p>}
+    {briefNow && <p className="th-lede wv-brief">{entry!.brief.nowTokens.length ? <InlineText tokens={entry!.brief.nowTokens} onNote={openHere} /> : briefNow}</p>}
     <p className="th-fresh wv-fresh">{fresh && <span>Brief {fresh}</span>}{askRoom && <button type="button" className="th-link" onClick={() => actions.compose(askRoom, refreshDraft(node.name, isRoot ? "" : node.path))}>Refresh the brief</button>}</p>
   </div> : null;
   const foot = node.kind === "project" && body ? <details className="th-note wv-note"><summary>Project note</summary><Body body={body} mentions={[]} me={null} /></details> : null;
@@ -345,6 +353,6 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   const roomLevel = (app: AppView | null, openApp: ((e: React.MouseEvent) => void) | null) => shell({ title: node.name, door, crumbs,
     companion: chat ? companionProps : null, chatRoom: thread ? roomFor(thread.channel, thread.root) : roomFor(target?.id), placeholder, selected: node.path, sheet: sheetView,
     main: app ? app.main : workOpen ? workMain : undefined, workBar: app ? app.bar : workBar, openApp, appOpen: !!app });
-  return <AreaView key={node.id} area={body !== null ? { ...node, body } : node} mode={mode} roomName={roomName} actions={actions}
+  return <AreaView key={node.id} area={body !== null ? { ...node, body } : node} mode={mode} roomName={roomName} actions={appActions}
     room={roomFor(nodeRoom)} open={appOpen} onOpen={setAppOpen} render={(app, openApp) => frame(<>{status}{roomLevel(app, openApp)}</>)} />;
 }

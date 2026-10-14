@@ -7,7 +7,7 @@ import { EMPTY_TABS, isSurface, migrateLegacyTabs, persistable, restoreTabs, ser
 import { linkLabel, splitLinks } from "../src/areas/linkText.ts";
 import { createVaultTasks } from "../src/areas/vaultTasks.ts";
 import { actionableTitle, askFromContent, askLead, askPreview, decisionQuestion, fitsRow, ROW_ASK_MAX, askOrder, dueLine, isCutTitle, isOverdue, lineBudget, needsByNode, needsByRow, needsFeed, needsYou, privateLabel, actionLead, sayText, rowAsk, stateLine, topNeeds, uniNeeds, uniPanel, withoutCut } from "../src/areas/simpleCore.ts";
-import { splitRefs, titleOfPath } from "../src/areas/noteRefsCore.ts";
+import { capped, RECHECK_MS, refKey, RETRY_MS, settle, shouldRead, splitRefs, titleOfPath } from "../src/areas/noteRefsCore.ts";
 import { readMessages, readRooms, readWho, writeMessages, writeRooms, writeWho } from "../src/chatCache.ts";
 import { isActiveRun } from "../src/areas/steerCore.ts";
 import { whereWeAre } from "../src/areas/whereCore.ts";
@@ -194,8 +194,29 @@ check("overdue: a passed due date is listed first, oldest first, with a quiet 'w
 });
 check("note ids: uni:<ULID> and a bare ULID are picked out of text; words and short ids are not", () => {
   const id = "01M3ZK2R6A6C62M1ANJCSQNG3M";
-  assert.deepEqual(splitRefs(`See uni:${id} and ${id}.`), [{ text: "See " }, { id }, { text: " and " }, { id }, { text: "." }]);
-  assert.deepEqual(splitRefs("Reply to T-12 about COHERENCEISNOTAULIDATALLXX"), [{ text: "Reply to T-12 about COHERENCEISNOTAULIDATALLXX" }]);
+  assert.deepEqual(splitRefs(`See uni:${id} and ${id}.`, "uni"), [{ text: "See " }, { vault: "uni", id }, { text: " and " }, { vault: "uni", id }, { text: "." }]);
+  assert.deepEqual(splitRefs("Reply to T-12 about COHERENCEISNOTAULIDATALLXX", "uni"), [{ text: "Reply to T-12 about COHERENCEISNOTAULIDATALLXX" }]);
+});
+check("r15 note refs: a bare id is the text's own vault, a prefixed one names its vault; the title cache re-reads and stays capped", () => {
+  const id = "01M3ZK2R6A6C62M1ANJCSQNG3M";
+  // a task in the "life" vault: its bare id is a life note; an explicit uni: one is Uni's
+  assert.deepEqual(splitRefs(`See ${id} and uni:${id}`, "life"), [{ text: "See " }, { vault: "life", id }, { text: " and " }, { vault: "uni", id }]);
+  assert.deepEqual(splitRefs(`work-notes:${id}`, "uni"), [{ vault: "work-notes", id }]);
+  assert.equal(refKey({ vault: "life", id }), `life:${id}`);
+  assert.notEqual(refKey({ vault: "life", id }), refKey({ vault: "uni", id }));
+  const now = 1_000_000_000;
+  assert.equal(shouldRead(undefined, now, false), true, "never read");
+  assert.equal(shouldRead({ title: null, at: null, read: now - 5_000 }, now, true), false, "a failure waits a little");
+  assert.equal(shouldRead({ title: null, at: null, read: now - RETRY_MS }, now, true), true, "then it is tried again, never remembered for the session");
+  assert.equal(shouldRead({ title: "Old", at: "a", read: now - 1_000 }, now, false), true, "a title kept from the last launch is checked once");
+  assert.equal(shouldRead({ title: "Old", at: "a", read: now - 1_000 }, now, true), false);
+  assert.equal(shouldRead({ title: "Old", at: "a", read: now - RECHECK_MS }, now, true), true, "and again once it is old");
+  // a rename: a new revision brings the new title; a failed re-read keeps the known one
+  assert.deepEqual(settle({ title: "Old", at: "a", read: 0 }, { title: "New", at: "b" }, now), { title: "New", at: "b", read: now });
+  assert.deepEqual(settle({ title: "Old", at: "a", read: 0 }, null, now), { title: "Old", at: "a", read: now });
+  assert.deepEqual(settle(undefined, null, now), { title: null, at: null, read: now });
+  const m = new Map<string, number>(); for (let i = 0; i < 310; i++) m.set(`k${i}`, i);
+  capped(m, 300); assert.equal(m.size, 300); assert.equal(m.has("k9"), false); assert.equal(m.has("k10"), true);
   assert.equal(titleOfPath("Projects/Atlas/Follow-up notes"), "Follow-up notes"); assert.equal(titleOfPath(undefined), null);
 });
 check("chat cache: the newest 60 per room, per identity; rooms list; old rooms fall out", () => {

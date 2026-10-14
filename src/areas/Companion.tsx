@@ -5,6 +5,8 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { cleanText } from "../interface/contract";
 import { RefText } from "./noteRefs";
+import type { NoteRef } from "./noteRefsCore";
+import { useVaultProfile } from "./ProfileContext";
 import { LoadHealth } from "./LoadHealth";
 import { isActiveRun, type Run } from "./steerCore";
 import type { Task } from "./taskCore";
@@ -56,8 +58,8 @@ export type CompanionProps = {
   onTask: (t: Task) => void; onDecide: (t: Task, option: string) => void;
   /** "All of X's work" (null: none, for a room no node owns). */
   onEverything: (() => void) | null;
-  /** Opens a linked note (by id) from a title or next step. */
-  onNote?: (ref: string) => void;
+  /** Opens a linked note (in its own vault) from a title or next step. */
+  onNote?: (ref: NoteRef) => void;
 };
 export type TaskLoad = { error: string | null; /** The task tree (the nodes) could not be read: the list may be placed wrongly. */ treeError?: string | null; refreshing: boolean; lastOk: number | null; complete: boolean; retry: () => void };
 
@@ -76,7 +78,7 @@ export const askOf = (rest: string): string => { const t = plainDetail(rest) || 
 const openLink = (e: React.MouseEvent, url: string) => { e.preventDefault(); void invoke("open_link", { url }).catch(() => {}); };
 
 /** A task's next step, in full: wraps up to 6 lines, then "More" opens the rest in place. Links read as their domain and stay clickable; note ids read as the note's title. */
-export function NextText({ text, onNote, lines, open: openProp, onOpen, onClamp }: { text: string; onNote?: (ref: string) => void; lines?: number; open?: boolean; onOpen?: (v: boolean) => void; onClamp?: (v: boolean) => void }) {
+export function NextText({ text, vault, onNote, lines, open: openProp, onOpen, onClamp }: { text: string; /** where the text lives: an id written without a vault is this vault's note */ vault: string; onNote?: (ref: NoteRef) => void; lines?: number; open?: boolean; onOpen?: (v: boolean) => void; onClamp?: (v: boolean) => void }) {
   const ref = useRef<HTMLParagraphElement>(null);
   const [openOwn, setOpenOwn] = useState(false);
   const open = openProp ?? openOwn;
@@ -94,7 +96,7 @@ export function NextText({ text, onNote, lines, open: openProp, onOpen, onClamp 
   return <div className="cp-next-wrap">
     <p ref={ref} className={`cp-next ${open ? "open" : ""}`} style={!open && lines !== undefined ? { WebkitLineClamp: lines, lineClamp: lines, maxHeight: `${(lines * 13.5 * 1.45).toFixed(2)}px` } as React.CSSProperties : undefined}>{splitLinks(cleanText(text)).map((p, i) => "url" in p
       ? <a key={i} className="cp-link" href={p.url} title={p.url} rel="noreferrer noopener" onClick={(e) => openLink(e, p.url)}>{p.label}</a>
-      : <RefText key={i} text={p.text} onNote={onNote} />)}</p>
+      : <RefText key={i} text={p.text} vault={vault} onNote={onNote} />)}</p>
     {!onOpen && (clamped || open) && <button type="button" className="cp-more-next" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? "Less" : "More"}</button>}
   </div>;
 }
@@ -164,13 +166,16 @@ export function rowLead(t: Task): { text: string; under: string | null; go: stri
  * a quiet line; otherwise the title, then the next step. A decision is its whole question beside its answers when it fits; a longer one shows a
  * preview and "Open to decide ›"; with no whole question, "Open to see the question ›". Never answers beside a preview.
  */
-export function NeedRow({ t, onTask, onDecide, onNote, meta }: { t: Task; onTask: (t: Task) => void; onDecide: (t: Task, option: string) => void; onNote?: (ref: string) => void;
+export function NeedRow({ t, onTask, onDecide, onNote, meta }: { t: Task; onTask: (t: Task) => void; onDecide: (t: Task, option: string) => void; onNote?: (ref: NoteRef) => void;
   /** A quiet line on where it stands, for a row that is not the user's ("With Casey · in progress"; the work view's In motion and Later). */
   meta?: string | null }) {
   const { id } = splitTitle(cleanText(t.title));
   const isDecision = t.kind === "decision";
   const next = t.next.trim();
   const due = dueLine(t.due);
+  /** The task's own vault: its linked notes are read and opened there (r15). */
+  const profileVault = useVaultProfile().vault;
+  const vault = t.vault ?? profileVault;
   const r = rowLead(t);
   const text = r.text;
   const titleRef = useRef<HTMLElement>(null);
@@ -206,15 +211,15 @@ export function NeedRow({ t, onTask, onDecide, onNote, meta }: { t: Task; onTask
       ? <><p ref={titleRef as React.RefObject<HTMLParagraphElement | null>} className="cp-title cp-lead" style={clampStyle} onClick={(e) => { if (!(e.target as Element).closest("a, button")) onTask(t); }}>
           {splitLinks(cleanText(next)).map((p, i) => "url" in p
             ? <a key={i} className="cp-link" href={p.url} title={p.url} rel="noreferrer noopener" onClick={(e) => openLink(e, p.url)}>{p.label}</a>
-            : <RefText key={i} text={i === 0 ? p.text.replace(/^\s*\S/, (c) => c.toLocaleUpperCase()) : p.text} onNote={onNote} />)}</p>
+            : <RefText key={i} text={i === 0 ? p.text.replace(/^\s*\S/, (c) => c.toLocaleUpperCase()) : p.text} vault={vault} onNote={onNote} />)}</p>
         <button type="button" className="cp-need cp-need-under" data-id={id ?? undefined} aria-label={[text, r.under, due, meta].filter(Boolean).join(". ")} onClick={() => onTask(t)}>{meta_}</button></>
       : <button type="button" className={`cp-need${isDecision ? " decision" : ""}`} data-id={id ?? undefined} onClick={() => onTask(t)}>
         {r.yourCall && <small className="cp-call-lead">Your call:</small>}
-        <span ref={titleRef} className="cp-title" style={clampStyle}><RefText text={text} />{r.go === "" && <span className="cp-go" aria-hidden="true"> ›</span>}</span>
+        <span ref={titleRef} className="cp-title" style={clampStyle}><RefText text={text} vault={vault} />{r.go === "" && <span className="cp-go" aria-hidden="true"> ›</span>}</span>
         {r.go && <span className="cp-open-decide">{r.go}<span aria-hidden="true"> ›</span></span>}
         {meta_}</button>}
     {!next && !isDecision && !actionableTitle(text) && text !== "Open to see what's needed" && <p className="cp-open-to-see">Open to see what's needed</p>}
-    {showNext && <NextText text={next} onNote={onNote} lines={open ? undefined : nextLines} open={open} onOpen={setOpen} onClamp={setNextCut} />}
+    {showNext && <NextText text={next} vault={vault} onNote={onNote} lines={open ? undefined : nextLines} open={open} onOpen={setOpen} onClamp={setNextCut} />}
     {more && <button type="button" className="cp-more-next cp-row-more" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? "Less" : "More"}</button>}
     {r.answers && <DecisionAnswer t={t} label={text} onDecide={onDecide} max={OPTS_SHOWN} onMore={() => onTask(t)} />}
   </li>;

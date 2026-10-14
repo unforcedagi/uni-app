@@ -9,8 +9,8 @@ import { useNoteTitle } from "./areas/noteRefs";
 const ULID = /^[0-9A-HJKMNP-TV-Z]{26}$/;
 /** A note cited by its bare id (`uni:01M…`) reads as the note's title (r14), never as the id: "a note" when it can't be read (the id stays in
  *  the chip's tooltip). */
-function NoteChipLabel({ id }: { id: string }) {
-  const t = useNoteTitle(id);
+function NoteChipLabel({ id, vault }: { id: string; vault: string }) {
+  const t = useNoteTitle({ vault, id });
   return <>{t ?? "the linked note"}</>;
 }
 const bareId = (n: { ref: { ref: string; vault: string }; c: Inline[] }): string | null => {
@@ -48,7 +48,7 @@ export const Body = memo(function Body({ body, mentions, me, edited }: { body: s
           if (openNote) { e.preventDefault(); openNote(n.ref, n.href); }
           else if (n.href) openLink(e, n.href);
           else e.preventDefault();
-        }}><span className="note-chip-mark" aria-hidden="true">❋</span>{bareId(n) ? <NoteChipLabel id={bareId(n)!} /> : inline(n.c, k)}</a>;
+        }}><span className="note-chip-mark" aria-hidden="true">❋</span>{bareId(n) ? <NoteChipLabel id={bareId(n)!} vault={n.ref.vault} /> : inline(n.c, k)}</a>;
     }
   });
   const blocks = (bs: Block[], key: string): React.ReactNode[] => bs.map((b, i) => {

@@ -9,14 +9,15 @@ import { actionLead, dueLine, sayText, stateLine } from "./simpleCore";
 import { splitTitle } from "./whereCore";
 import { DecisionAnswer, NextText, decisionAsk, plainDetail } from "./Companion";
 import { RefText } from "./noteRefs";
-import { splitRefs } from "./noteRefsCore";
+import { splitRefs, type NoteRef } from "./noteRefsCore";
+import { useVaultProfile } from "./ProfileContext";
 import { changedBy, vaultTasks } from "./vaultTasks";
 
 export const ownerLabel = (o: string, p: VaultProfile = activeProfile()) => (o === p.me ? p.meLabel : p.roomOwnerPrefix && o.startsWith(p.roomOwnerPrefix) ? `#${o.slice(p.roomOwnerPrefix.length)}` : o.startsWith("person:") ? o.slice(7) : p.agentOwners.includes(o) ? o.charAt(0).toUpperCase() + o.slice(1) : o || "unassigned");
 const OWNER = (o: string) => ownerLabel(o);
 
 /** A step with something to open in it: a web link or a linked note. */
-const linky = (text: string) => /https?:\/\/|\bwww\./.test(text) || splitRefs(text).some((p) => "id" in p);
+const linky = (text: string) => /https?:\/\/|\bwww\./.test(text) || splitRefs(text, "").some((p) => "id" in p);
 
 const when = (iso: string | null) => { const d = iso ? new Date(iso) : null; return d && !Number.isNaN(d.getTime()) ? d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : null; };
 
@@ -31,8 +32,8 @@ export function TaskSheet({ task, gone = false, here, nodeName, room, inRoom, on
   /** The room open now: "Open in #room" is not offered for it. */
   inRoom?: string | null;
   onClose: () => void; onAct: (t: Task, a: TaskAction) => void; onDecide: (t: Task, option: string) => void; onOpenRoom: (id: string) => void;
-  /** Open a note (a link in the next step; the task's own note when its question is not whole anywhere else). */
-  onNote: (ref: string) => void;
+  /** Open a note in its vault (a link in the next step; the task's own note when its question is not whole anywhere else). */
+  onNote: (ref: NoteRef) => void;
   /** Put words in a room's composer (never sends). */
   onSay?: (roomId: string, text: string) => void;
   onPriority?: (t: Task, p: Priority) => void;
@@ -53,6 +54,9 @@ export function TaskSheet({ task, gone = false, here, nodeName, room, inRoom, on
     }
   };
   const go = (a: TaskAction) => { onAct(task, a); onClose(); };
+  /** The task's own vault (r15): its note and the notes its step links are read and opened there. */
+  const profileVault = useVaultProfile().vault;
+  const vault = task.vault ?? profileVault;
   const decision = task.kind === "decision";
   const { id: tid, rest } = splitTitle(cleanText(task.title));
   // r14: a cut question not known at this revision is read from its note here, keyed by the note and its revision: a new revision drops the
@@ -93,12 +97,12 @@ export function TaskSheet({ task, gone = false, here, nodeName, room, inRoom, on
     <div ref={box} className="task-sheet" role="dialog" aria-modal="true" aria-labelledby="task-sheet-title" tabIndex={-1}>
       <p className="task-kind">{decision ? `Decision${dflt ? ` (${dflt})` : ""}` : "Task"}{task.node !== here ? ` · in ${nodeName(task.node)}` : ""}</p>
       {dq?.answerable && dq.yourCall && <small className="cp-call-lead">Your call:</small>}
-      <h2 id="task-sheet-title">{lead && !dq ? <RefText text={plainDetail(lead) || lead} /> : heading}</h2>
+      <h2 id="task-sheet-title">{lead && !dq ? <RefText text={plainDetail(lead) || lead} vault={vault} /> : heading}</h2>
       {lead && <p className="task-sub">{rest}</p>}
       {gone && <p className="task-gone" role="status">This is no longer open: it was done, decided or changed elsewhere.</p>}
-      {dq && !dq.answerable && !reading && <p className="task-next"><button type="button" className="task-link" onClick={() => { onClose(); onNote(task.id); }}>Open the note to read the question ›</button></p>}
+      {dq && !dq.answerable && !reading && <p className="task-next"><button type="button" className="task-link" onClick={() => { onClose(); onNote({ vault, id: task.id }); }}>Open the note to read the question ›</button></p>}
       {/* the step itself, with its links to open, when the lead had to drop them (a URL, a linked note) or when it is not an action */}
-      {task.next && (!lead || linky(task.next)) && <div className="task-next"><NextText text={task.next} onNote={(r) => { onClose(); onNote(r); }} /></div>}
+      {task.next && (!lead || linky(task.next)) && <div className="task-next"><NextText text={task.next} vault={vault} onNote={(r) => { onClose(); onNote(r); }} /></div>}
       {!gone && dq?.answerable && <DecisionAnswer t={task} label={heading} onDecide={(t, o) => { onDecide(t, o); onClose(); }} className="task-answer" />}
       <dl className="task-facts">
         <dt>Status</dt><dd>{stateLine(task, (w) => isMe(w), OWNER)}</dd>

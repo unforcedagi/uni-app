@@ -90,7 +90,7 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
       mem.tasks.set(nodePath, { list: r.tasks, truncated: r.truncated });
       mem.at = Date.now();
       setList(r.tasks); setTruncated(r.truncated); setError(null); setLastOk(mem.at);
-      warmTitles(r.tasks.flatMap((t) => [t.title, t.next]));
+      warmTitles(r.tasks.flatMap((t) => [t.title, t.next]), vault);
       // a cut title's full question arrives a moment later, without holding the list back
       void vaultTasks.loadAsks(r.tasks).then((asks) => {
         if (!asks.size || !live || mine !== epoch.current || memory !== mem) return;

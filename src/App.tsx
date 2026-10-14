@@ -12,6 +12,7 @@ import AreasSurface from "./areas/LifeOsSurface";
 import type { Overlay } from "./areas/AreasSurface";
 import { rootOpenMemory } from "./areas/rootMemory";
 import { UNI_CHANNEL } from "./areas/treeCore";
+import type { NoteRef } from "./areas/noteRefsCore";
 import AreaSelfTest from "./interface/selftest/SelfTest";
 import LifeOsVaultSetting from "./areas/LifeOsVaultSetting";
 import { appendDraft } from "./areas/composeDraft";
@@ -1542,7 +1543,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
   };
   const areaActions = useMemo(() => ({
     openRoom: (id: string) => openTargetRef.current(roomTarget(id), "new"),
-    openNote: (ref: string) => openNote({ hub: null, vault: "uni", ref }, null),
+    // r15: a note opens in the vault its reference names (the task's, the area's), the same vault its title was read from
+    openNote: (r: NoteRef) => openNote({ hub: null, vault: r.vault, ref: r.id }, null),
     compose: (id: string, text: string) => composeInRoomRef.current(id, text),
   }), [openNote]);
   const primaryVault = vaults.includes(lifeVault) ? lifeVault : vaults.includes("uni") ? "uni" : null;
