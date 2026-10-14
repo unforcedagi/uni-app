@@ -530,11 +530,14 @@ Two proposals wait on a scope decision.
           case 'vault_list': return d.lifeVault ? ['uni', d.lifeVault] : ['uni'];
           case 'vault_query': {
             if (d.queryDelay) await new Promise((r) => setTimeout(r, d.queryDelay));
+            // r16: one tag's read held back (`window.__tagDelay = { run: 30000 }`): Running and Drafts must not hold the list
+            const td = (w.__tagDelay ?? {})[args.tag]; if (td) await new Promise((r) => setTimeout(r, td));
             if ((w.__queryFails as string[]).includes(args.tag)) throw 'query failed: ' + args.tag;
             if (args.tag === 'node') return [{ id: 'uni-root', path: 'Uni', extension: 'md', tags: ['uni', 'node'], updatedAt: T0, metadata: d.steer ? { stands: 'Atlas and COhere are moving; the usage guard is quiet.', stands_at: new Date((d.now - 86400) * 1000).toISOString() } : {} }, ...notes.filter((n) => (n.tags ?? []).some((t: string) => t === 'area' || t === 'project')).map((n) => ({ ...n, tags: ['node', ...n.tags], content: undefined, metadata: { ...n.metadata, parent: n.metadata?.parent ?? (d.ids ? 'uni-root' : 'Uni') } }))];
             return notes.filter((n) => (n.tags ?? []).includes(args.tag)).map((n) => ({ createdAt: '2026-09-01T00:00:00Z', metadata: {}, ...n, ...(args.includeContent === false ? { content: undefined } : {}) }));
           }
           case 'vault_query_meta': {
+            if (w.__tasksDelay) await new Promise((r) => setTimeout(r, w.__tasksDelay)); // r16: a slow task read
             if (!d.tasks) return [];
             if ((w.__queryFails as string[]).includes(args.tag)) throw 'query failed: ' + args.tag;
             const m = args.metadata ?? {};
@@ -551,6 +554,7 @@ Two proposals wait on a scope decision.
             return all.filter((n) => under.has(n.path));
           }
           case 'vault_subtree_tasks': {
+            if (w.__tasksDelay) await new Promise((r) => setTimeout(r, w.__tasksDelay));
             if (d.nearOff) throw 'MCP error -32602: unknown parameter: near';
             if (!d.tasks) return [];
             const nodes = notes.filter((n) => (n.tags ?? []).some((t: string) => t === 'area' || t === 'project')).map((n) => ({ path: n.path, parent: pathOf(n.metadata?.parent ?? 'Uni') }));
@@ -563,6 +567,8 @@ Two proposals wait on a scope decision.
             if (!t) throw 'note not found: ' + args.id;
             const valid = t.tags.includes('decision') ? ['open', 'decided'] : ['open', 'doing', 'waiting', 'done', 'archived'];
             if (t.metadata['state'] !== args.from) throw `MCP error -32600: [transition_conflict] conflict: note ${args.id} ${'state'} is ${t.metadata['state']}, not ${args.from}`;
+            // r16: the state change is written against the revision the user saw, checked in the same update (as the vault does)
+            if (!args.ifUpdatedAt || args.ifUpdatedAt !== t.updatedAt) throw `conflict: note "${args.id}" has been modified (current updated_at=${t.updatedAt}, expected=${args.ifUpdatedAt})`;
             if (!valid.includes(args.to)) throw '[schema_validation] state is not one of ' + valid.join(',');
             t.metadata['state'] = args.to; t.updatedAt = new Date(Date.now() + taskNotes.length).toISOString(); t.lastUpdatedVia = 'api'; t.lastUpdatedBy = 'app-writer';
             return JSON.parse(JSON.stringify(t));
