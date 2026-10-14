@@ -6,7 +6,7 @@ import { canBack, canForward, EMPTY_HISTORY, placeKey, recent, step, visit, type
 import { EMPTY_TABS, isSurface, migrateLegacyTabs, persistable, restoreTabs, serializeTabs, type Tabs, type TabTarget } from "../src/tabs.ts";
 import { linkLabel, splitLinks } from "../src/areas/linkText.ts";
 import { createVaultTasks } from "../src/areas/vaultTasks.ts";
-import { actionableTitle, askFromContent, askLead, askOrder, dueLine, isCutTitle, isOverdue, lineBudget, needsByNode, needsByRow, needsFeed, needsYou, privateLabel, actionLead, sayText, rowAsk, stateLine, topNeeds, uniNeeds, uniPanel, withoutCut } from "../src/areas/simpleCore.ts";
+import { actionableTitle, askFromContent, askLead, askPreview, decisionQuestion, fitsRow, ROW_ASK_MAX, askOrder, dueLine, isCutTitle, isOverdue, lineBudget, needsByNode, needsByRow, needsFeed, needsYou, privateLabel, actionLead, sayText, rowAsk, stateLine, topNeeds, uniNeeds, uniPanel, withoutCut } from "../src/areas/simpleCore.ts";
 import { splitRefs, titleOfPath } from "../src/areas/noteRefsCore.ts";
 import { readMessages, readRooms, readWho, writeMessages, writeRooms, writeWho } from "../src/chatCache.ts";
 import { isActiveRun } from "../src/areas/steerCore.ts";
@@ -143,10 +143,14 @@ check("r13 one feed, one count: private items are counted and named by place onl
   assert.deepEqual(f.privates, [{ key: "Areas/Sanctum", count: 2, place: "Sanctum", open: { path: "Areas/Sanctum" } }]);
   assert.equal(f.total, 4, "two named, two private; never Someday or someone else's");
   assert.equal(f.total, list.filter(needsYou).length);
-  assert.equal(privateLabel(f.privates[0]), "2 private items in Sanctum");
-  const self = needsFeed(list.filter((t) => t.node.startsWith("Areas/Sanctum")), priv, { path: "Areas/Sanctum", name: "Sanctum" });
-  assert.deepEqual(self.privates.map((p) => [p.count, p.place, p.open]), [[1, null, { note: "p1" }], [1, null, { note: "p2" }]], "at its own level each opens its note");
-  assert.equal(privateLabel(self.privates[0]), "A private item here");
+  assert.equal(privateLabel(f.privates[0]), "Sanctum: 2 for you");
+  // r14: inside the private area Aaron opened, its items are ordinary rows (titles, actions, the sheet); another private area stays one line
+  const other = { ...mk("q1", { priority: "now" }), node: "Areas/Health" };
+  const priv2 = (n: string) => priv(n) ?? (n.startsWith("Areas/Health") ? { path: "Areas/Health", name: "Health" } : null);
+  const self = needsFeed([...list.filter((t) => t.node.startsWith("Areas/Sanctum")), other], priv2, { path: "Areas/Sanctum", name: "Sanctum" });
+  assert.deepEqual(self.rows.map((t) => t.id), ["p1", "p2"]);
+  assert.deepEqual(self.privates, [{ key: "Areas/Health", count: 1, place: "Health", open: { path: "Areas/Health" } }]);
+  assert.equal(self.total, 3);
 });
 check("r13 Uni's panel says how many wait in the areas, and the numbers add up", () => {
   const own = (id: string) => ({ ...mk(id, { priority: "now" }), node: "" });
@@ -221,14 +225,27 @@ check("ask: a cut title shows the first line of the note's content in full, with
   assert.equal(askFromContent("1. Wait\n2. Go"), "");
   assert.equal(askFromContent("- Option A\n\nShould the gateway move on Wednesday?"), "Should the gateway move on Wednesday?");
   assert.equal(askFromContent("_Converted from x_"), "");
+  // r14: the question is the whole first paragraph, never a 280-character trim; the trim is a preview, always marked "…"
   const long = "First sentence here. " + "Second sentence that goes on and on. ".repeat(12);
-  assert.ok(askFromContent(long).endsWith("here.") || askFromContent(long).length <= 280);
+  assert.equal(askFromContent(long), long.trim());
+  assert.equal(askFromContent("Should we move the gateway\non Wednesday, after the backup?\n\nContext below."), "Should we move the gateway on Wednesday, after the backup?");
+  const pv = askPreview(long);
+  assert.ok(pv.endsWith("…") && pv.length <= 162 && pv.startsWith("First sentence here."), pv);
+  assert.equal(askPreview("Short and whole."), "Short and whole.");
+  assert.ok(askPreview("x".repeat(400)).endsWith("…"));
+});
+check("r14 decisionQuestion: the title when whole; a cut title's ask only at the row's own revision; else none", () => {
+  assert.equal(decisionQuestion("Decision (default yes): Ship it?", undefined, undefined, "r1"), "Ship it?");
+  assert.equal(decisionQuestion("Send a daily calendar email to…", "Send a daily calendar email to people who registered?", "r1", "r1"), "Send a daily calendar email to people who registered?");
+  assert.equal(decisionQuestion("Send a daily calendar email to…", "Send a daily calendar email to people who registered?", "r1", "r2"), null, "an ask read at another revision is not this row's");
+  assert.equal(decisionQuestion("Send a daily calendar email to…", "Send it?", null, null), null, "no revision, no question");
+  assert.equal(decisionQuestion("Send a daily calendar email to…", undefined, undefined, "r1"), null);
+  assert.equal(fitsRow("x".repeat(ROW_ASK_MAX)), true); assert.equal(fitsRow("x".repeat(ROW_ASK_MAX + 1)), false);
 });
 check("r12 rowAsk: a cut title never keeps buttons beside a fragment; with no whole question anywhere, 'Open to see the question' and no fragment", () => {
   assert.deepEqual(rowAsk("Name the payer entity", undefined, true, false), { text: "Name the payer entity", openToDecide: false });
   assert.deepEqual(rowAsk("a daily calendar email to people who…", "a daily calendar email to people who registered. It goes to real attendees.", true, false), { text: "a daily calendar email to people who registered. It goes to real attendees.", openToDecide: false });
   assert.deepEqual(rowAsk("a daily calendar email to people who…", undefined, true, false), { text: "Open to see the question", openToDecide: true });
-  assert.deepEqual(rowAsk("a daily calendar email to people who…", "still cut too…", true, true), { text: "Open to see the question", openToDecide: true });
   assert.deepEqual(rowAsk("Riverside: cure window…", undefined, false, true), { text: "Riverside: cure window", openToDecide: false });
   assert.deepEqual(rowAsk("Riverside: cure window…", undefined, false, false), { text: "", openToDecide: false });
   assert.equal(withoutCut("a b..."), "a b");
@@ -247,15 +264,20 @@ await (async () => {
   (globalThis as any).localStorage = { getItem: (k: string) => mem.get(k) ?? null, setItem: (k: string, v: string) => void mem.set(k, v), removeItem: (k: string) => void mem.delete(k) };
   const task = { id: "d1", kind: "decision", title: "T-1 Decision: send a daily calendar email to…", priority: "now", due: null, updatedAt: "2026-10-12T10:00:00Z", owner: "aaron", waitingOn: null } as unknown as Task;
   let reads = 0;
-  const call = async () => { reads++; return { note: { content: "Send a daily calendar email to people who registered?" } }; };
+  let rev = "2026-10-12T10:00:00Z";
+  const call = async () => { reads++; return { note: { content: "Send a daily calendar email to people who registered?", updatedAt: rev } }; };
   const first = createVaultTasks(call, "uni"); first.setAskOwner("me|uni");
-  assert.equal((await first.loadAsks([task])).get("d1"), "Send a daily calendar email to people who registered?");
+  assert.deepEqual((await first.loadAsks([task])).get("d1"), { ask: "Send a daily calendar email to people who registered?", at: "2026-10-12T10:00:00Z" });
   // the next launch (a fresh instance, same identity) paints the ask without a read; another identity does not see it
   const next = createVaultTasks(call, "uni"); next.setAskOwner("me|uni");
-  assert.equal((await next.loadAsks([task])).size, 0); assert.equal(reads, 1);
+  assert.deepEqual((await next.loadAsks([task])).get("d1"), { ask: "Send a daily calendar email to people who registered?", at: "2026-10-12T10:00:00Z" }); assert.equal(reads, 1);
   next.setAskOwner("you|uni"); await next.loadAsks([task]); assert.equal(reads, 2);
   // an edited note (new updatedAt) is read again
   const again = createVaultTasks(call, "uni"); again.setAskOwner("you|uni"); await again.loadAsks([{ ...task, updatedAt: "2026-10-13T10:00:00Z" }]); assert.equal(reads, 3);
+  // r14: the ask carries the revision the note was read at, not the row's: a note newer than the list is not the row's question
+  rev = "2026-10-14T10:00:00Z";
+  const newer = createVaultTasks(call, "uni"); newer.setAskOwner("they|uni");
+  assert.equal((await newer.loadAsks([task])).get("d1")?.at, "2026-10-14T10:00:00Z");
   console.log("ok   r11 asks: kept on the device per identity, re-read when the note changed");
 })();
 check("r10 stateLine: one plain line, never the state and who it waits on", () => {

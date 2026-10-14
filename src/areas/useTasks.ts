@@ -94,8 +94,10 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
       // a cut title's full question arrives a moment later, without holding the list back
       void vaultTasks.loadAsks(r.tasks).then((asks) => {
         if (!asks.size || !live || mine !== epoch.current || memory !== mem) return;
-        const withAsk = (l: Task[] | null) => l && l.map((t) => (asks.has(t.id) ? { ...t, ask: asks.get(t.id)! } : t));
-        const merged = r.tasks.map((t) => (asks.has(t.id) ? { ...t, ask: asks.get(t.id)! } : t));
+        // each ask keeps the revision it was read at; a row shows it as its question only at that revision (decisionAsk)
+        const one = (t: Task) => { const a = asks.get(t.id); return a ? { ...t, ask: a.ask, askAt: a.at } : t; };
+        const withAsk = (l: Task[] | null) => l && l.map(one);
+        const merged = r.tasks.map(one);
         mem.tasks.set(nodePath, { list: merged, truncated: r.truncated });
         setList((cur) => withAsk(cur));
       }).catch(() => {});
@@ -161,14 +163,18 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
     if (r.kind === "conflict") refresh();
   };
 
-  /** One tap on a decision's option. A conflict (already decided elsewhere) says so and re-reads. There is no undo: a decision is a decision. */
+  /**
+   * One tap on a decision's option, written with the revision whose question was on screen (`task.updatedAt`: the row's question is shown
+   * only at that revision). A conflict (decided or changed elsewhere) says so and re-reads. There is no undo: a decision is a decision.
+   */
   const decide = useCallback(async (task: Task, option: string) => {
     setNotice(null);
+    if (!task.updatedAt) { setNotice("Couldn't decide: reload the decision first."); refresh(); return; }
     hide(task.id);
-    const r = await vaultTasks.decide(task.id, option, activeProfile().me);
+    const r = await vaultTasks.decide(task.id, option, activeProfile().me, task.updatedAt);
     if (r.ok) { refresh(); return; }
     restore(task.id);
-    setNotice(r.kind === "conflict" ? "Already decided. Showing the latest." : r.kind === "invalid" ? "Couldn't decide: the vault refused that value." : `Couldn't decide: ${r.message.replace(/^Error:\s*/, "").slice(0, 120)}`);
+    setNotice(r.kind === "conflict" ? "This decision changed or was decided elsewhere, so your answer wasn't recorded. Showing the latest." : r.kind === "invalid" ? "Couldn't decide: the vault refused that value." : `Couldn't decide: ${r.message.replace(/^Error:\s*/, "").slice(0, 120)}`);
     if (r.kind === "conflict") refresh();
   }, [nodePath]); // eslint-disable-line react-hooks/exhaustive-deps
 

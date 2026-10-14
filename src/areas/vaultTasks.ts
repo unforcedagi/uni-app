@@ -75,10 +75,11 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
     try { return (await allPages((offset) => call("vault_query", { vault: name(), tag, includeContent: false, limit: LIMIT, ...(offset ? { offset } : {}) }) as Promise<RawNote[]>)).rows; } catch { return null; }
   }
 
-  /** Full questions already read, by note id, with the note's `updatedAt` they were read at: a refresh shows them at once, and so does the next launch (kept on the device, per identity, newest 150). */
+  /** Full questions already read, by note id, with the note's `updatedAt` they were read at: a refresh shows them at once, and so does the next
+   *  launch (kept on the device, per identity, newest 150). v2 (r14): v1 kept 280-character previews, which are never taken for the question. */
   const askCache = new Map<string, { ask: string; at: string | null }>();
   let askOwner = "";
-  const askKey = () => `uni.asks.v1:${askOwner}`;
+  const askKey = () => `uni.asks.v2:${askOwner}`;
   const keepAsks = () => { try { localStorage.setItem(askKey(), JSON.stringify([...askCache].slice(-ASK_KEEP))); } catch { /* this session only */ } };
   /** Whose asks the cache holds: another identity or vault starts clean, the same one picks up what the device kept. */
   function setAskOwner(owner: string) {
@@ -90,24 +91,30 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
     } catch { /* nothing kept */ }
   }
   const askFor = (t: Task) => { const c = askCache.get(t.id); return c && c.at === t.updatedAt ? c.ask : undefined; };
+  /** A task with the question read at its own revision, when there is one. */
+  const withAsk = (t: Task): Task => { const a = askFor(t); return a !== undefined ? { ...t, ask: a, askAt: t.updatedAt } : t; };
   /**
    * The lists carry no content, so a decision or one of the user's tasks whose title was cut short ("…") gets its full question from the first
-   * line of its note (one read each, only for those; decisions, Now and the soonest due first, at most 40, six at a time). Called after the
-   * list is already on screen; resolves to the new asks.
+   * paragraph of its note (one read each, only for those; decisions, Now and the soonest due first, at most 40, six at a time). Each ask comes
+   * with the note's `updatedAt` it was read at (r14): it belongs to the row only at that revision. Called after the list is on screen.
    */
-  async function loadAsks(tasks: readonly Task[]): Promise<Map<string, string>> {
-    const cut = askOrder(tasks.filter((t) => askFor(t) === undefined && (t.kind === "decision" || groupOf(t) === "you") && isCutTitle(splitTitle(t.title).rest))).slice(0, ASK_READS);
-    const asks = new Map<string, string>();
+  async function loadAsks(tasks: readonly Task[]): Promise<Map<string, { ask: string; at: string | null }>> {
+    const asks = new Map<string, { ask: string; at: string | null }>();
+    const want = tasks.filter((t) => (t.kind === "decision" || groupOf(t) === "you") && isCutTitle(splitTitle(t.title).rest));
+    for (const t of want) { const a = askFor(t); if (a !== undefined) asks.set(t.id, { ask: a, at: t.updatedAt }); }
+    const cut = askOrder(want.filter((t) => !asks.has(t.id))).slice(0, ASK_READS);
+    let fresh = 0;
     for (let i = 0; i < cut.length; i += ASK_PARALLEL) {
       await Promise.all(cut.slice(i, i + ASK_PARALLEL).map(async (t) => {
         try {
           const r = (await call("vault_note", { vault: name(), noteRef: t.id })) as { note?: RawNote } | null;
           const ask = askFromContent(typeof r?.note?.content === "string" ? r.note.content : "");
-          if (ask) { asks.set(t.id, ask); askCache.delete(t.id); askCache.set(t.id, { ask, at: t.updatedAt }); }
+          const at = typeof r?.note?.updatedAt === "string" ? r.note.updatedAt : null;
+          if (ask) { asks.set(t.id, { ask, at }); askCache.delete(t.id); askCache.set(t.id, { ask, at }); fresh++; }
         } catch { /* the row opens to decide instead */ }
       }));
     }
-    if (asks.size) keepAsks();
+    if (fresh) keepAsks();
     return asks;
   }
 
@@ -133,7 +140,7 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
   async function loadTasks(tree: TaskTree, path: string): Promise<{ tasks: Task[]; truncated: boolean }> {
     const finish = (tasks: RawNote[], decisions: RawNote[], cut = tasks.length >= LIMIT || decisions.length >= LIMIT) => {
       const parsed = [...tasks, ...decisions].map((n) => parseTask(n, tree)).filter((t): t is Task => !!t);
-      return { tasks: [...new Map(parsed.map((t) => [t.id, askFor(t) !== undefined ? { ...t, ask: askFor(t)! } : t])).values()], truncated: cut };
+      return { tasks: [...new Map(parsed.map((t) => [t.id, withAsk(t)])).values()], truncated: cut };
     };
     if (path !== ROOT && nearOk !== false) {
       // The anchor is the node's id when the tree knows it (the vault stores references as ids); the path is still accepted.
@@ -179,11 +186,12 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
 
   /**
    * Decide an open decision: one update that sets `state` open -> decided (compare-and-set) and writes `decided`, `decided_at`,
-   * `decided_by`. A decision someone else already decided is a conflict: the caller says so and re-reads, it never retries.
+   * `decided_by`, guarded by `ifUpdatedAt`, the revision whose question the user read (r14). A decision someone else decided or changed
+   * since is a conflict: the caller says so and re-reads, it never retries.
    */
-  async function decide(taskId: string, option: string, by: string, at: string = new Date().toISOString()): Promise<WriteResult> {
+  async function decide(taskId: string, option: string, by: string, ifUpdatedAt: string, at: string = new Date().toISOString()): Promise<WriteResult> {
     try {
-      const note = await call("vault_decide", { vault: name(), id: taskId, from: "open", to: "decided", metadata: { decided: option, decided_at: at, decided_by: by } });
+      const note = await call("vault_decide", { vault: name(), id: taskId, from: "open", to: "decided", metadata: { decided: option, decided_at: at, decided_by: by }, ifUpdatedAt });
       return ok(note);
     } catch (e) {
       const message = String(e);

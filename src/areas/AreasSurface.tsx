@@ -25,6 +25,7 @@ import { useNav, type NavControls } from "../navContext";
 import { useVaultProfile } from "./ProfileContext";
 import { Crumbs, RoomSidebar, TreeScreen } from "./TreeHome";
 import { WorkView } from "./WorkView";
+import { LoadHealth } from "./LoadHealth";
 import { InlineText } from "./InlineText";
 import { Body } from "../MessageBody";
 import { projectBody } from "./projectBody";
@@ -208,6 +209,8 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
         {thread && !o.main && <div className="sr-thread"><button type="button" className="sr-thread-back" onClick={() => actions.openRoom(thread.channel)}><span aria-hidden="true">‹</span> Back to the room</button>
           <span className="sr-thread-label">Thread{replies !== null ? ` · ${replies} ${replies === 1 ? "reply" : "replies"}` : ""}</span></div>}
         {o.workBar}
+        {/* below 900px the tree (and its health line) is in the drawer: the room says it itself, outside the drawer (r14); the work view has its own */}
+        {!wide && o.companion && !o.main && <LoadHealth load={load} ready={tasks.ready} className="sr-health" />}
         {!wide && o.companion && !o.main && <CompanionStrip {...o.companion} open={companionOpen} onToggle={setCompanionOpen} />}
         {o.main ? <div className="sr-work">{o.main}</div>
           : <div className="sr-chat">{o.chatRoom ? o.chatRoom.render(null, o.placeholder) : <p className="th-quiet" role="status">Opening the room…</p>}</div>}
@@ -257,21 +260,22 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   const nodeView = rowOf(node.path);
   const askRoom = target?.id ?? null;
   const trailItems = [{ path: ROOT, name: "Uni" }, ...(tree && !isRoot ? trail(tree, node.path) : isRoot ? [] : [node]).map((n) => ({ path: n.path, name: n.name }))];
-  const privateLevel = !!tree && isPrivateNode(tree, node.path);
   const privateOf = (p: string) => (tree ? privateRoot(tree, p) : null);
+  /** The private area this level is, or sits in: Aaron opened it himself, so its own items show as they are (r14). */
+  const selfPrivate = tree && isPrivateNode(tree, node.path) ? privateOf(node.path) : null;
+  /** A private area's words are never shown outside it: not in Uni's panel, a parent's list, runs, drafts or the stands line. */
+  const hidden = (p: string) => { const r = privateOf(p); return !!r && r.path !== selfPrivate?.path; };
   // ------------------------------------------------------------------------------------------ Needs you: one feed, one count (r13)
-  const feed = needsFeed(levelTasks, privateOf, privateLevel ? privateOf(node.path) : null);
+  const feed = needsFeed(levelTasks, privateOf, selfPrivate);
   const panel = isRoot ? uniPanel(feed) : { ...feed, rest: 0 };
   const taskTree = tasks.tree;
-  /** A private node's words are never shown in a new place: no runs or drafts from it, and none at all on a private level. */
-  const named = (p: string) => !privateLevel && !(tree && isPrivateNode(tree, p));
-  const runs = taskTree ? runsUnder(taskTree, here, tasks.runs).filter((r) => named(r.node)) : [];
-  const drafts = taskTree ? draftsUnder(taskTree, here, tasks.drafts).filter((d) => named(d.node)) : [];
-  const openPrivate = (o: PrivateNeed["open"]) => { closeSheet(); setWork(false); if ("note" in o) actions.openNote(o.note); else openPath(o.path); };
+  const runs = taskTree ? runsUnder(taskTree, here, tasks.runs).filter((r) => !hidden(r.node)) : [];
+  const drafts = taskTree ? draftsUnder(taskTree, here, tasks.drafts).filter((d) => !hidden(d.node)) : [];
+  const openPrivate = (o: PrivateNeed["open"]) => { closeSheet(); setWork(false); openPath(o.path); };
   const rawStands = tasks.tree?.stands.get(node.path) ?? (typeof node.metadata.stands === "string" ? { text: node.metadata.stands, at: typeof node.metadata.stands_at === "string" ? node.metadata.stands_at : null } : null);
   /** A vault with no areas yet: Uni says how to start, in plain words (r13), instead of a tag and a path to type. */
   const noAreas = isRoot && !!tree && !error && childrenOf(tree, ROOT).length === 0;
-  const stands = noAreas ? { text: "No areas yet. Tell Uni here what you want to look after, and it will set up your first area.", ago: "" } : standsLine(rawStands, privateLevel ? [] : levelTasks, now);
+  const stands = noAreas ? { text: "No areas yet. Tell Uni here what you want to look after, and it will set up your first area.", ago: "" } : standsLine(rawStands, levelTasks.filter((t) => !hidden(t.node)), now);
   /** The room's composer when it is the one here, else that room's (opened, filled in, never sent). */
   const sayIn = (roomId: string, text: string) => { closeSheet(); setWork(false); const here = roomFor(roomId); if (here) here.compose(text); else actions.compose(roomId, text); };
   /** From the work view or the sheet, "Open #room" for this room is the conversation: it goes back to it. Another room opens as a tab. */
@@ -281,14 +285,14 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   const sheetTask = sheetId ? live ?? (lastSheet.current?.id === sheetId ? lastSheet.current : null) : null;
   const sheetGone = !!sheetId && (!live || !(live.state === "open" || live.state === "doing" || live.state === "waiting") || (tasks.ready && !tasks.tasks.some((t) => t.id === sheetId) && !tasks.leaving.has(sheetId)));
   const sheetView = sheetTask && <TaskSheet key={sheetTask.id} task={sheetTask} gone={sheetGone} here={here} nodeName={nodeName} room={roomOfNode(sheetTask.node) ?? target} inRoom={target?.id} onClose={closeSheet}
-    onAct={(t, a) => void tasks.act(t, a)} onDecide={decide} onNote={actions.openNote} onOpenRoom={openRoomHere} onSay={chat ? sayIn : undefined} onPriority={(t, p) => void tasks.setPriority(t, p)} />;
+    onAct={(t, a) => void tasks.act(t, a)} onDecide={decide} onNote={actions.openNote} onOpenRoom={openRoomHere} onSay={chat ? sayIn : undefined} onPriority={(t, p) => void tasks.setPriority(t, p)} onStale={tasks.refresh} />;
   const companionProps: CompanionProps = { stands, ready: tasks.ready, load, feed: panel, rest: panel.rest, onPrivate: openPrivate, runs, nodeName: node.name, onTask: openSheet, onNote: actions.openNote, onDecide: decide, onEverything: () => { closeSheet(); setWork(true); } };
   const placeholder = chatPlaceholder({ name: node.name, slash: nodeView.own ? nodeView.slash : null, heldBy: nodeView.heldBy ? nodeView.heldBy.name : null });
   // ------------------------------------------------------------------------------------------ the work view (r13)
   const mineLive = (t: Task) => groupOf(t) === "you";
-  const othersHere = privateLevel ? [] : levelTasks.filter((t) => !mineLive(t) && !privateOf(t.node)).map((t) => ({ task: t, meta: [stateLine(t, (w) => isMe(w), ownerLabel), isMe(t.owner) ? null : `with ${ownerLabel(t.owner)}`, t.node !== here ? `in ${nodeName(t.node)}` : null].filter(Boolean).join(" · ") }));
-  const later = privateLevel ? [] : levelTasks.filter((t) => mineLive(t) && t.kind !== "decision" && priorityOf(t) === "someday" && !privateOf(t.node));
-  const privateOther = levelTasks.filter((t) => (privateLevel || privateOf(t.node)) && !(mineLive(t) && (t.kind === "decision" || priorityOf(t) !== "someday"))).length;
+  const othersHere = levelTasks.filter((t) => !mineLive(t) && !hidden(t.node)).map((t) => ({ task: t, meta: [stateLine(t, (w) => isMe(w), ownerLabel), isMe(t.owner) ? null : `with ${ownerLabel(t.owner)}`, t.node !== here ? `in ${nodeName(t.node)}` : null].filter(Boolean).join(" · ") }));
+  const later = levelTasks.filter((t) => mineLive(t) && t.kind !== "decision" && priorityOf(t) === "someday" && !hidden(t.node));
+  const privateOther = levelTasks.filter((t) => hidden(t.node) && !(mineLive(t) && (t.kind === "decision" || priorityOf(t) !== "someday"))).length;
   const fresh = updatedLabel(freshIso, now);
   /** No room to talk in (none found once the rooms are in): the work view is the room's view, with no chat to go back to. */
   const noRoom = chat && !target && !roomsPending && !thread;
@@ -298,7 +302,7 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
     <p className="th-fresh wv-fresh">{fresh && <span>Brief {fresh}</span>}{askRoom && <button type="button" className="th-link" onClick={() => actions.compose(askRoom, refreshDraft(node.name, isRoot ? "" : node.path))}>Refresh the brief</button>}</p>
   </div> : null;
   const foot = node.kind === "project" && body ? <details className="th-note wv-note"><summary>Project note</summary><Body body={body} mentions={[]} me={null} /></details> : null;
-  const workMain = <WorkView nodeName={node.name} feed={feed} others={othersHere} later={later} runs={runs} drafts={drafts} privateOther={privateOther} ready={tasks.ready} error={tasks.error} onRetry={tasks.refresh}
+  const workMain = <WorkView nodeName={node.name} feed={feed} others={othersHere} later={later} runs={runs} drafts={drafts} privateOther={privateOther} ready={tasks.ready} load={load}
     onTask={openSheet} onDecide={decide} onNote={actions.openNote} onPrivate={openPrivate} top={top} foot={foot} />;
   const workOpen = work || !chat || noRoom;
   const workBar = workOpen ? <div className="sr-thread sr-workbar">{chat && !noRoom && <button type="button" className="sr-thread-back sr-work-back" onClick={() => setWork(false)}><span aria-hidden="true">‹</span> Back to chat</button>}

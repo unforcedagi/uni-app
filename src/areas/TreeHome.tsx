@@ -5,6 +5,7 @@ import { roomSlug, type TreeRow } from "./treeRooms";
 import type { NavControls } from "../navContext";
 import { ancestorsOf, hasKids, isOpen, recentLabels, RECENT_FULL_PX, rolledNeeds, SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN, useFolds, useSidebar, visibleRows } from "./sidebarState";
 import type { TaskLoad } from "./Companion";
+import { LoadHealth } from "./LoadHealth";
 
 // ---------------------------------------------------------------------------------------------- the phone's tree
 
@@ -21,13 +22,6 @@ export type TreeProps = {
   /** Whether the dots can be trusted: a failed first load says so (no dots at all), a failed refresh keeps them with a quiet Retry. */
   load?: TaskLoad; needsReady?: boolean;
 };
-
-/** The dots' health above the tree: never a silent blank when the task list could not be read. */
-function LoadLine({ load, ready }: { load?: TaskLoad; ready?: boolean }) {
-  if (!load?.error && load?.treeError) return <p className="th-load" role="status">Couldn't read where tasks belong · <button type="button" className="th-link" onClick={load.retry}>Retry</button></p>;
-  if (!load?.error) return null;
-  return <p className={`th-load ${ready ? "" : "bad"}`} role={ready ? "status" : "alert"}>{ready ? "Couldn't refresh what needs you" : "Couldn't load what needs you"} · <button type="button" className="th-link" onClick={load.retry}>Retry</button></p>;
-}
 
 /**
  * The rooms list: Uni, then every area with its projects beneath, then "Other rooms". A row is the node's name; the room line under it is
@@ -112,7 +106,7 @@ export function TreeScreen({ status, column, nav, onHide, hideLabel = "Hide the 
       ? <header className="th-toolbar"><NavButtons nav={nav ?? null} /><span className="th-tb-gap" />{onHide && <button type="button" className="th-nb" aria-label={hideLabel} title={hideLabel} onClick={onHide}>‹</button>}</header>
       : <header className="th-treehead"><h1 className="note-title">Uni</h1></header>}
     {status}
-    <LoadLine load={tree.load} ready={tree.needsReady} />
+    <LoadHealth load={tree.load} ready={!!tree.needsReady} />
     <div className="th-rows-wrap"><RoomTree {...tree} /></div>
     {column && nav && nav.recent.length > 0 && <section className={`th-recent ${tight ? "tight" : ""}`} aria-label="Recent"><h2>Recent</h2>
       <ul>{recentLabels(nav.recent, rows, here, tight ? 3 : 5).map(({ r, label }) => <li key={r.key}><button type="button" onClick={r.go} title={label}>{label}</button></li>)}</ul></section>}

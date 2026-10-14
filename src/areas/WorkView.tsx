@@ -7,6 +7,8 @@ import { cleanText } from "../interface/contract";
 import { NeedRow, PrivateRow } from "./Companion";
 import { isActiveRun, type Draft, type Run } from "./steerCore";
 import type { NeedsFeed, PrivateNeed } from "./simpleCore";
+import type { TaskLoad } from "./Companion";
+import { countLabel, countText, LoadHealth } from "./LoadHealth";
 import type { Task } from "./taskCore";
 
 export type WorkViewProps = {
@@ -20,7 +22,9 @@ export type WorkViewProps = {
   runs: readonly Run[]; drafts: readonly Draft[];
   /** Items left out of In motion and Later because they sit in a private area (counted, so the view never reads as all there is). */
   privateOther: number;
-  ready: boolean; error: string | null; onRetry: () => void;
+  ready: boolean;
+  /** The list's health (r14): the same line as the companion's and the tree's, so saved rows never read as current or whole. */
+  load: TaskLoad;
   onTask: (t: Task) => void; onDecide: (t: Task, option: string) => void; onNote: (ref: string) => void; onPrivate: (open: PrivateNeed["open"]) => void;
   /** Above the sections: the brief's lede and its Refresh. Below them: a project's own note, folded. */
   top?: ReactNode; foot?: ReactNode;
@@ -30,11 +34,12 @@ export function WorkView(p: WorkViewProps) {
   const [laterOpen, setLaterOpen] = useState(false);
   const running = p.runs.filter(isActiveRun);
   const motion = running.length + p.drafts.length + p.others.length;
-  if (!p.ready) return <div className="wv"><p className={p.error ? "cp-lede cp-failed" : "th-quiet"} role={p.error ? "alert" : "status"}>{p.error ? <>Couldn't load. <button type="button" className="cp-retry" onClick={p.onRetry}>Retry</button></> : "Loading…"}</p></div>;
+  if (!p.ready) return <div className="wv">{p.load.error ? <LoadHealth load={p.load} ready={false} /> : <p className="th-quiet" role="status">Loading…</p>}</div>;
   return <div className="wv" aria-label={`All of ${p.nodeName}'s work`}>
+    <LoadHealth load={p.load} ready />
     {p.top}
-    <section className="wv-sec" aria-label="Needs you">
-      <h2 className="wv-h">Needs you <span className="wv-n">{p.feed.total}</span></h2>
+    <section className="wv-sec" aria-label="Needs you" aria-busy={p.load.refreshing || undefined}>
+      <h2 className="wv-h">Needs you <span className="wv-n" aria-label={countLabel(p.feed.total, p.load)} title={countLabel(p.feed.total, p.load)}>{countText(p.feed.total, p.load)}</span></h2>
       {p.feed.total === 0 ? <p className="cp-none">Nothing needs you here.</p> : <ul className="cp-list">
         {p.feed.rows.map((t) => <NeedRow key={t.id} t={t} onTask={p.onTask} onDecide={p.onDecide} onNote={p.onNote} />)}
         {p.feed.privates.map((x) => <PrivateRow key={x.key} p={x} onPrivate={p.onPrivate} />)}

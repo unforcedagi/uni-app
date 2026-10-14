@@ -5,11 +5,12 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { cleanText } from "../interface/contract";
 import { RefText } from "./noteRefs";
+import { LoadHealth } from "./LoadHealth";
 import { isActiveRun, type Run } from "./steerCore";
 import type { Task } from "./taskCore";
 import { splitTitle } from "./whereCore";
 import { splitLinks } from "./linkText";
-import { actionableTitle, askLead, dueLine, isOverdue, lineBudget, privateLabel, rowAsk, type NeedsFeed, type PrivateNeed } from "./simpleCore";
+import { actionableTitle, actionLead, askLead, askPreview, decisionQuestion, dueLine, fitsRow, isOverdue, lineBudget, OPEN_TO_SEE, privateLabel, rowAsk, type NeedsFeed, type PrivateNeed } from "./simpleCore";
 
 const KEYS = { side: "uni.companion.side.v1", sideNarrow: "uni.companion.side.narrow.v1", strip: "uni.companion.strip.v1" } as const;
 /** Below this width the side panel starts folded: the conversation gets the space. */
@@ -47,7 +48,7 @@ export type CompanionProps = {
   feed: NeedsFeed;
   /** Uni's panel: how many more from the areas wait in "All of Uni's work" ("+N in areas ›"). */
   rest?: number;
-  /** Open a private item's place (its area) or, at its own level, its note. */
+  /** Open a private area (its items are shown inside it). */
   onPrivate?: (open: PrivateNeed["open"]) => void;
   runs: readonly Run[];
   /** The node's name, so the way deeper says what it opens ("All of COhere's work"). */
@@ -116,14 +117,17 @@ function Stands({ text, ago }: { text: string; ago: string }) {
     {ago && <small className="cp-ago">{ago}</small>}</p>;
 }
 
-/** A decision's question as every surface shows it (r12): its whole ask, sentence-cased, with "Your call:" when it does not ask; or, when no
- *  whole question exists anywhere, "Open to see the question" and nothing to answer yet. */
-export function decisionAsk(t: Task): { text: string; yourCall: boolean; answerable: boolean } {
+/**
+ * A decision's question as every surface shows it (r14): its whole question (the title when not cut, else the ask read from its note at the
+ * row's own revision), sentence-cased, with "Your call:" when it does not ask. `answerable`: the whole question is known; `fits`: it fits a
+ * row, so a row may show it beside its answers (a longer one shows `preview` and opens to decide). With no whole question, nothing to answer.
+ */
+export function decisionAsk(t: Task): { text: string; yourCall: boolean; answerable: boolean; fits: boolean; preview: string } {
   const { rest } = splitTitle(cleanText(t.title));
-  const a = rowAsk(askOf(rest), t.ask, true, !!t.next.trim());
-  if (a.openToDecide) return { text: a.text, yourCall: false, answerable: false };
-  const l = askLead(a.text);
-  return { text: l.text, yourCall: l.yourCall, answerable: true };
+  const q = decisionQuestion(rest, t.ask, t.askAt, t.updatedAt);
+  if (!q) return { text: OPEN_TO_SEE, yourCall: false, answerable: false, fits: false, preview: OPEN_TO_SEE };
+  const l = askLead(q);
+  return { text: l.text, yourCall: l.yourCall, answerable: true, fits: fitsRow(l.text), preview: askPreview(l.text) };
 }
 
 /**
@@ -138,26 +142,44 @@ export function DecisionAnswer({ t, label, onDecide, max = Infinity, onMore, cla
   </div>;
 }
 
-/** A Needs-you row: the ask, then when it was due, then the next step, action first; a tap on More shows all of it. A decision is its whole question with its answers. */
+/** What a Needs-you row leads with (r14), the same in the companion, the work view and the sheet: a task's action when its next step names one
+ *  (the title, its event or project, is a quiet line under it); a decision's whole question; else the title. */
+export function rowLead(t: Task): { text: string; under: string | null; go: string | null; answers: boolean; yourCall: boolean; lead: boolean } {
+  const { rest: full } = splitTitle(cleanText(t.title));
+  const next = t.next.trim();
+  if (t.kind === "decision") {
+    const dq = decisionAsk(t);
+    if (!dq.answerable) return { text: dq.text, under: null, go: "", answers: false, yourCall: false, lead: false };
+    if (!dq.fits) return { text: dq.preview, under: null, go: "Open to decide", answers: false, yourCall: dq.yourCall, lead: false };
+    return { text: dq.text, under: null, go: null, answers: true, yourCall: dq.yourCall, lead: false };
+  }
+  const ask = rowAsk(askOf(full), t.ask, false, !!next);
+  const action = actionLead(next);
+  if (action) return { text: plainDetail(action) || action, under: ask.text || null, go: null, answers: false, yourCall: false, lead: true };
+  return { text: ask.text || "Open to see what's needed", under: null, go: null, answers: false, yourCall: false, lead: false };
+}
+
+/**
+ * A Needs-you row (r14): action first. A task whose next step names an action leads with it (two full lines, then More), its title under it as
+ * a quiet line; otherwise the title, then the next step. A decision is its whole question beside its answers when it fits; a longer one shows a
+ * preview and "Open to decide ›"; with no whole question, "Open to see the question ›". Never answers beside a preview.
+ */
 export function NeedRow({ t, onTask, onDecide, onNote, meta }: { t: Task; onTask: (t: Task) => void; onDecide: (t: Task, option: string) => void; onNote?: (ref: string) => void;
   /** A quiet line on where it stands, for a row that is not the user's ("With Casey · in progress"; the work view's In motion and Later). */
   meta?: string | null }) {
-  const { id, rest: full } = splitTitle(cleanText(t.title));
+  const { id } = splitTitle(cleanText(t.title));
   const isDecision = t.kind === "decision";
   const next = t.next.trim();
   const due = dueLine(t.due);
-  const ask = rowAsk(askOf(full), t.ask, isDecision, !!next);
-  // a decision is its whole question, sentence-cased and never clamped, beside its answers; with no whole question anywhere, "Open to see the question ›"
-  const dq = isDecision ? decisionAsk(t) : null;
-  const lead = dq?.answerable ? dq : null;
-  const text = dq ? dq.text : ask.text || "Open to see what's needed";
+  const r = rowLead(t);
+  const text = r.text;
   const titleRef = useRef<HTMLSpanElement>(null);
   const [open, setOpen] = useState(false);
   const [titleLines, setTitleLines] = useState(1);
   const [titleCut, setTitleCut] = useState(false);
   const [nextCut, setNextCut] = useState(false);
-  // an action reads to its object (up to 3 lines beside other lines, 4 alone)
-  const titleMax = isDecision ? 99 : next || due ? 3 : 4;
+  // an action leads with two full lines; a title reads to its object (up to 3 lines beside other lines, 4 alone); a decision is never clamped
+  const titleMax = isDecision ? 99 : r.lead ? 2 : next || due ? 3 : 4;
   useLayoutEffect(() => {
     const el = titleRef.current; if (!el) return;
     const measure = () => {
@@ -170,26 +192,30 @@ export function NeedRow({ t, onTask, onDecide, onNote, meta }: { t: Task; onTask
     ro?.observe(el);
     return () => ro?.disconnect();
   }, [text, open, titleMax]);
+  // the next step shows under a title; a row that leads with it does not repeat it
+  const showNext = !!next && !r.lead && !isDecision;
   const nextLines = lineBudget(Math.min(titleLines, titleMax), !!due, 4).next;
-  const more = open || (titleCut && !isDecision) || nextCut || (!!next && nextLines <= 0);
+  const more = open || (titleCut && !isDecision) || (showNext && (nextCut || nextLines <= 0));
   const clampStyle = open || isDecision ? undefined : ({ WebkitLineClamp: titleMax, lineClamp: titleMax } as React.CSSProperties);
-  return <li className="cp-item" data-open={open ? "true" : undefined}>
+  return <li className="cp-item" data-open={open ? "true" : undefined} data-lead={r.lead ? "action" : undefined}>
     <button type="button" className={`cp-need${isDecision ? " decision" : ""}`} data-id={id ?? undefined} onClick={() => onTask(t)}>
-      {lead?.yourCall && <small className="cp-call-lead">Your call:</small>}
-      <span ref={titleRef} className="cp-title" style={clampStyle}><RefText text={text} />{ask.openToDecide && <span className="cp-go" aria-hidden="true"> ›</span>}</span>
+      {r.yourCall && <small className="cp-call-lead">Your call:</small>}
+      <span ref={titleRef} className="cp-title" style={clampStyle}><RefText text={text} />{r.go === "" && <span className="cp-go" aria-hidden="true"> ›</span>}</span>
+      {r.go && <span className="cp-open-decide">{r.go}<span aria-hidden="true"> ›</span></span>}
+      {r.under && <small className="cp-detail cp-under">{r.under}</small>}
       {due && <small className={`cp-detail${isOverdue(t.due) ? " overdue" : ""}`}>{due}</small>}
       {meta && <small className="cp-detail cp-meta">{meta}</small>}</button>
     {!next && !isDecision && !actionableTitle(text) && text !== "Open to see what's needed" && <p className="cp-open-to-see">Open to see what's needed</p>}
-    {next && <NextText text={next} onNote={onNote} lines={open ? undefined : nextLines} open={open} onOpen={setOpen} onClamp={setNextCut} />}
+    {showNext && <NextText text={next} onNote={onNote} lines={open ? undefined : nextLines} open={open} onOpen={setOpen} onClamp={setNextCut} />}
     {more && <button type="button" className="cp-more-next cp-row-more" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? "Less" : "More"}</button>}
-    {lead && <DecisionAnswer t={t} label={text} onDecide={onDecide} max={OPTS_SHOWN} onMore={() => onTask(t)} />}
+    {r.answers && <DecisionAnswer t={t} label={text} onDecide={onDecide} max={OPTS_SHOWN} onMore={() => onTask(t)} />}
   </li>;
 }
 
-/** A private item, named by its place only, with where to open it (r13: counted and reachable, never silently left out). */
+/** A private area's items, from outside it (r14): "Sanctum: 2 for you ›", opening that area. Never a title. */
 export function PrivateRow({ p, onPrivate }: { p: PrivateNeed; onPrivate?: (open: PrivateNeed["open"]) => void }) {
   return <li className="cp-item cp-private-item"><button type="button" className="cp-need cp-private" onClick={() => onPrivate?.(p.open)}>
-    <span className="cp-title">{privateLabel(p)} · open<span className="cp-go" aria-hidden="true"> ›</span></span></button></li>;
+    <span className="cp-title">{privateLabel(p)}<span className="cp-go" aria-hidden="true"> ›</span></span></button></li>;
 }
 
 /**
@@ -258,24 +284,21 @@ export function NeedsList({ needs, fit, onTask, onDecide, onNote }: Pick<Compani
   </>;
 }
 
-const clock = (ms: number) => new Date(ms).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
-
-function Body({ stands, ready, note, load, feed, rest = 0, onPrivate, runs, nodeName, onTask, onDecide, onEverything, onNote, fit }: CompanionProps & { fit: boolean }) {
+function Body({ stands, ready, note, load, feed, rest = 0, onPrivate, runs, nodeName, onTask, onDecide, onEverything, onNote, fit, hideHealth = false }: CompanionProps & { fit: boolean; hideHealth?: boolean }) {
   const active = runs.filter(isActiveRun);
   const hiddenRuns = Math.max(0, active.length - RUNS_SHOWN);
   if (note) return <div className="cp-body"><p className="cp-lede cp-note">{note}</p></div>;
-  const retry = load && <button type="button" className="cp-retry" onClick={load.retry}>Retry</button>;
+  // below 900px the room shows the list's health itself, outside the strip (r14)
+  const health = !hideHealth && <LoadHealth load={load} ready={ready} />;
   return <div className="cp-body">
-    {!ready ? (load?.error ? <p className="cp-lede cp-failed" role="alert">Couldn't load. {retry}</p> : <p className="cp-lede">Loading…</p>) : stands && <Stands text={stands.text} ago={stands.ago} />}
+    {!ready ? (load?.error ? health : <p className="cp-lede">Loading…</p>) : stands && <Stands text={stands.text} ago={stands.ago} />}
     {ready && <section aria-label="Needs you" className="cp-sec" aria-busy={load?.refreshing || undefined}>
       <h3 className="cp-h">Needs you</h3>
       {feed.rows.length > 0 && <NeedsList needs={feed.rows} fit={fit} onTask={onTask} onDecide={onDecide} onNote={onNote} />}
       {feed.privates.length > 0 && <ul className="cp-list cp-privates">{feed.privates.map((p) => <PrivateRow key={p.key} p={p} onPrivate={onPrivate} />)}</ul>}
       {rest > 0 && onEverything && <button type="button" className="cp-more cp-more-areas" onClick={onEverything}>+{rest} in areas ›</button>}
       {feed.total === 0 && <p className="cp-none">Nothing needs you here.</p>}
-      {load?.error && <p className="cp-stale" role="status">Couldn't refresh{load.lastOk ? ` (as of ${clock(load.lastOk)})` : ""} · {retry}</p>}
-      {load && !load.error && !load.complete && <p className="cp-stale" role="status">More work exists than the app could read; some may not be listed.</p>}
-      {load?.treeError && !load.error && <p className="cp-stale" role="status">Couldn't read where tasks belong; some may be under the wrong place · {retry}</p>}
+      {health}
     </section>}
     {active.length > 0 && <section aria-label="Running" className="cp-sec">
       <h3 className="cp-h">Running</h3>
@@ -300,12 +323,13 @@ export function CompanionSide({ open, onToggle, ...p }: CompanionProps & Fold) {
 
 /** The phone's strip: one line, tap to open. */
 export function CompanionStrip({ open, onToggle, ...p }: CompanionProps & Fold) {
+  // the strip sits in a room below 900px, which shows the list's health above it (r14)
   return <section className={`cp strip ${open ? "open" : ""}`} aria-label="Where this stands">
     <button type="button" className="cp-line" aria-expanded={open} onClick={() => onToggle(!open)}>
       <span className="cp-line-text" title={p.stands?.text}>{open ? "Where this stands" : p.note ?? (p.ready ? p.stands?.text ?? "Where this stands" : p.load?.error ? "Couldn't load" : "Loading…")}</span>
       {p.feed.total > 0 && <i className="cp-dot" role="img" aria-label="Needs you" title="Needs you" />}
       <span className="cp-chev" aria-hidden="true">{open ? "⌃" : "⌄"}</span>
     </button>
-    {open && <Body {...p} fit={false} />}
+    {open && <Body {...p} fit={false} hideHealth />}
   </section>;
 }

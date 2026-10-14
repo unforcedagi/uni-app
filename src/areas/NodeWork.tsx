@@ -26,7 +26,7 @@ const when = (iso: string | null) => { const d = iso ? new Date(iso) : null; ret
  * here with the companion's control, and only beside its whole question: a cut title's question is read from its note first, and if none is
  * found the sheet offers the note, with no answers. The sheet is live: `task` is the list's current copy; `gone` says it closed elsewhere.
  */
-export function TaskSheet({ task, gone = false, here, nodeName, room, inRoom, onClose, onAct, onDecide, onNote, onOpenRoom, onSay, onPriority }: {
+export function TaskSheet({ task, gone = false, here, nodeName, room, inRoom, onClose, onAct, onDecide, onNote, onOpenRoom, onSay, onPriority, onStale }: {
   task: Task; gone?: boolean; here: string; nodeName: (path: string) => string; room: RoomRef | null;
   /** The room open now: "Open in #room" is not offered for it. */
   inRoom?: string | null;
@@ -36,6 +36,8 @@ export function TaskSheet({ task, gone = false, here, nodeName, room, inRoom, on
   /** Put words in a room's composer (never sends). */
   onSay?: (roomId: string, text: string) => void;
   onPriority?: (t: Task, p: Priority) => void;
+  /** The note was read at a newer revision than the list's copy: re-read the list (the sheet then reads the question again). */
+  onStale?: () => void;
 }) {
   const box = useRef<HTMLDivElement>(null);
   const opener = useRef<Element | null>(typeof document === "undefined" ? null : document.activeElement);
@@ -53,28 +55,39 @@ export function TaskSheet({ task, gone = false, here, nodeName, room, inRoom, on
   const go = (a: TaskAction) => { onAct(task, a); onClose(); };
   const decision = task.kind === "decision";
   const { id: tid, rest } = splitTitle(cleanText(task.title));
-  // a cut question not known yet is read from its note here, so the answers can sit beside it; until then (and if it can't be found) no answers
-  const [ask, setAsk] = useState<{ id: string; text: string | null } | null>(null);
+  // r14: a cut question not known at this revision is read from its note here, keyed by the note and its revision: a new revision drops the
+  // old question at once, and the answers sit only beside a question read at the revision they will be written against
+  const rev = `${task.id}@${task.updatedAt ?? ""}`;
+  const [ask, setAsk] = useState<{ rev: string; text: string | null; at: string | null } | null>(null);
   const known = decision ? decisionAsk(task) : null;
   const needsRead = !!known && !known.answerable;
   useEffect(() => {
     if (!needsRead) return;
     let live = true;
-    vaultTasks.loadAsks([task]).then((m) => { if (live) setAsk({ id: task.id, text: m.get(task.id) ?? null }); }).catch(() => { if (live) setAsk({ id: task.id, text: null }); });
+    vaultTasks.loadAsks([task]).then((m) => {
+      if (!live) return;
+      const a = m.get(task.id) ?? null;
+      setAsk({ rev, text: a?.ask ?? null, at: a?.at ?? null });
+      if (a && a.at !== task.updatedAt) onStale?.();
+    }).catch(() => { if (live) setAsk({ rev, text: null, at: null }); });
     return () => { live = false; };
-  }, [task.id, needsRead]); // eslint-disable-line react-hooks/exhaustive-deps
-  const read = ask && ask.id === task.id ? ask : null;
-  const dq = known && !known.answerable && read?.text ? decisionAsk({ ...task, ask: read.text }) : known;
-  const reading = needsRead && !read;
+  }, [rev, needsRead]); // eslint-disable-line react-hooks/exhaustive-deps
+  const read = ask && ask.rev === rev ? ask : null;
+  /** The note is newer than the list's copy: its question is not shown with this copy's options; the list is being re-read. */
+  const newer = !!read?.text && read.at !== task.updatedAt;
+  const dq = known && !known.answerable && read?.text && !newer ? decisionAsk({ ...task, ask: read.text, askAt: read.at }) : known;
+  const reading = needsRead && (!read || newer);
   const lead = decision ? null : actionLead(task.next);
   const say = lead ? sayText(lead) : null;
-  const heading = dq ? (dq.answerable ? dq.text : reading ? "Reading the question…" : "The question is in its note") : lead ?? rest; // never the bare id
+  const heading = dq ? (dq.answerable ? dq.text : reading ? (newer ? "This changed; reading the latest…" : "Reading the question…") : "The question is in its note") : lead ?? rest; // never the bare id
   /** "default yes": what a decision's title says happens without an answer, kept here though the row shows only the ask. */
   const dflt = decision ? /^decision\s*\(([^)]*)\)/i.exec(rest)?.[1]?.trim() ?? null : null;
   const by = changedBy(task);
   const at = when(task.updatedAt);
   const sayIn = !gone && say && room && onSay ? () => { onSay(room.id, say); onClose(); } : null;
   const prio = priorityOf(task);
+  /** One primary action (r14): the step's own ("Say it in #room ›"), else "I did this". Then the rest, quietly. */
+  const primary = sayIn ? "say" : !gone && !decision ? "done" : null;
   return <div className="task-sheet-wrap" onKeyDown={key}>
     <button type="button" className="task-backdrop" aria-label="Close" tabIndex={-1} onClick={onClose} />
     <div ref={box} className="task-sheet" role="dialog" aria-modal="true" aria-labelledby="task-sheet-title" tabIndex={-1}>
@@ -92,18 +105,18 @@ export function TaskSheet({ task, gone = false, here, nodeName, room, inRoom, on
         {!isMe(task.owner) && !isMe(task.waitingOn) && <><dt>With</dt><dd>{OWNER(task.owner)}</dd></>}
         {task.due && <><dt>Due</dt><dd>{dueLine(task.due)}</dd></>}
       </dl>
-      {!gone && !decision && onPriority && <div className="task-prio" role="group" aria-label="Priority">
-        {PRIORITIES.map((p) => <button key={p} type="button" className="task-prio-b" aria-pressed={p === prio} onClick={() => { if (p !== prio) onPriority(task, p); }}>{PRIORITY_LABEL[p]}</button>)}
-      </div>}
       <div className="task-actions">
-        {sayIn && <button type="button" className="task-do primary" onClick={sayIn}>Say it in #{room!.name.replace(/^#/, "")} ›</button>}
-        {!gone && !decision && <button type="button" className="task-do" onClick={() => go("done")}>I did this</button>}
+        {primary === "say" && <button type="button" className="task-do primary" onClick={sayIn!}>Say it in #{room!.name.replace(/^#/, "")} ›</button>}
+        {!gone && !decision && <button type="button" className={`task-do${primary === "done" ? " primary" : ""}`} onClick={() => go("done")}>I did this</button>}
         {!gone && !decision && <button type="button" className="task-do" onClick={() => go("archive")}>Archive</button>}
         {!gone && <button type="button" className="task-do" onClick={() => go("snooze")}>Snooze until tomorrow</button>}
-        {!sayIn && room && room.id !== inRoom && <button type="button" className="task-do" onClick={() => { onOpenRoom(room.id); onClose(); }}>Open in #{room.name.replace(/^#/, "")}</button>}
+        {!sayIn && room && room.id !== inRoom && <button type="button" className="task-do quiet" onClick={() => { onOpenRoom(room.id); onClose(); }}>Open in #{room.name.replace(/^#/, "")}</button>}
         <button type="button" className="task-do quiet" onClick={onClose}>Close</button>
       </div>
-      {(tid || at) && <details className="task-details"><summary>Details</summary>
+      {(tid || at || (!gone && !decision && onPriority)) && <details className="task-details"><summary>Details</summary>
+        {!gone && !decision && onPriority && <div className="task-prio" role="group" aria-label="Priority">
+          {PRIORITIES.map((p) => <button key={p} type="button" className="task-prio-b" aria-pressed={p === prio} onClick={() => { if (p !== prio) onPriority(task, p); }}>{PRIORITY_LABEL[p]}</button>)}
+        </div>}
         {tid && <p>{decision ? "Decision" : "Task"} {tid}</p>}
         {at && <p>Last changed{by ? ` by ${by}` : ""}, {at}</p>}
       </details>}
