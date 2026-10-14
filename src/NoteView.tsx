@@ -18,7 +18,9 @@ function openExternal(url: string) {
   void invoke("open_link", { url }).catch(() => {});
 }
 
-export default function NoteView({ target, hub, onOpen, onBack, backLabel, onTitle, startEditing = false, onDirty, onCreate, onResolved, onRendered, onSearch }: {
+export default function NoteView({ target, hub, onOpen, onBack, backLabel, onTitle, startEditing = false, onDirty, onCreate, onResolved, onRendered, onSearch, readOnly = false }: {
+  /** r21 (Codex 5): a page that reads, not a document to edit (For you): no Edit, New note or Copy markdown until "Open as a note". */
+  readOnly?: boolean;
   onSearch: (query: string) => void;
   onResolved: (id: string) => void;
   onRendered?: (note: VaultNote["note"]) => void;
@@ -36,6 +38,9 @@ export default function NoteView({ target, hub, onOpen, onBack, backLabel, onTit
   onTitle?: (title: string) => void;
 }) {
   const [editing, setEditing] = useState(startEditing);
+  /** r21: a read-only page opened as its note (an explicit choice): the note's own tools appear */
+  const [asNote, setAsNote] = useState(false);
+  const tools = !readOnly || asNote;
   const [data, setData] = useState<VaultNote | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -122,9 +127,10 @@ export default function NoteView({ target, hub, onOpen, onBack, backLabel, onTit
       <button className="note-back" onClick={onBack} aria-label={`Back to ${backLabel}`}>
         <span className="note-back-arrow" aria-hidden="true">←</span><span className="note-back-label">{backLabel}</span>
       </button>
-      {note && !editing && editableExtension(note.extension) && <button className="note-action" onClick={() => setEditing(true)}>Edit</button>}
-      {note && <button className="note-action" onClick={() => onCreate(note.path?.includes("/") ? note.path.slice(0, note.path.lastIndexOf("/")) : "")}>New note</button>}
-      {note && !editing && <button className="note-action" onClick={() => void copyText(note.content ?? "", "Copied markdown")}>Copy markdown</button>}
+      {note && !tools && <button className="note-action quiet" onClick={() => setAsNote(true)}>Open as a note</button>}
+      {note && tools && !editing && editableExtension(note.extension) && <button className="note-action" onClick={() => setEditing(true)}>Edit</button>}
+      {note && tools && <button className="note-action" onClick={() => onCreate(note.path?.includes("/") ? note.path.slice(0, note.path.lastIndexOf("/")) : "")}>New note</button>}
+      {note && tools && !editing && <button className="note-action" onClick={() => void copyText(note.content ?? "", "Copied markdown")}>Copy markdown</button>}
     </header>
     {note && editing ? <NoteEditor vault={data!.vault} note={note} onDirty={onDirty} onCancel={() => setEditing(false)} onSaved={(updated) => { setData({ ...data!, note: { ...data!.note, ...updated } }); setEditing(false); }} /> : <div className="note-scroll">
       <article className="note-page">

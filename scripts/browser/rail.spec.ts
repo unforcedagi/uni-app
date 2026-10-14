@@ -68,6 +68,9 @@ test('Rail surfaces, overlay panels, focus; rooms are in the tree (r12: no Rooms
   await expect(fy.locator('.rail-count')).toHaveCount(0); await expect(fy.locator('.rail-dot')).toBeVisible();
   await fy.click();
   await expect(page.locator('.note-title')).toHaveText('For you');
+  // r21 (Codex 5): a page to read, not a vault document: its note's tools only after "Open as a note"
+  for (const name of ['Edit', 'New note', 'Copy markdown']) await expect(page.locator('.note-bar').getByRole('button', { name, exact: true })).toHaveCount(0);
+  await expect(page.locator('.note-bar').getByRole('button', { name: 'Open as a note' })).toBeVisible();
   await shot('for-you');
   {
     await expect(fy.locator('.rail-dot')).toHaveCount(0);

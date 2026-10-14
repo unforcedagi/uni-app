@@ -1663,6 +1663,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
             ? { ...known, fresh: true }
             : { count: countRecommendations(note.content ?? ""), updatedAt, fresh: false });
         }}
+        // r21 (Codex 5): For you is a page of recommendations to read, not a vault document to edit (its note opens on request)
+        readOnly={topNote.vault === "uni" && topNote.ref === FOR_YOU_ID}
         startEditing={editOnOpen.current.has(noteKey(topNote))}
         onDirty={(dirty) => { reportDirty(tabs.active!, noteKey(topNote), dirty); if (!dirty) editOnOpen.current.delete(noteKey(topNote)); }}
         onCreate={(folder) => requestCreate(topNote.vault, folder)}
