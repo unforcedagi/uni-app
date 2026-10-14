@@ -205,7 +205,8 @@ const skipLine = (l: string) => /^_?converted from\b/i.test(l.replace(/^[*_>\s]+
 export function askFromContent(content: string | null | undefined): string {
   const lines = (content ?? "").split(/\r?\n/).map((l) => l.trim());
   const start = lines.findIndex((l) => l && !skipLine(l));
-  if (start < 0) return "";
+  // r16: a note that is only its heading and its options ("# Ship the chat? (preview: …)" then a list): the heading is the question
+  if (start < 0) { const h = lines.find((l) => /^#{1,6}\s+\S/.test(l)); return h ? askFromContent(h.replace(/^#{1,6}\s+/, "")) : ""; }
   const para: string[] = [];
   for (const l of lines.slice(start)) { if (!l || skipLine(l)) break; para.push(l); }
   return para.join(" ").replace(/\[\[([^\]|]*\|)?([^\]]*)\]\]/g, "$2").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/[*_`>]/g, "").replace(/^decision\s*(\([^)]*\))?\s*[:\-–—]\s*/i, "").replace(/\s+/g, " ").trim();
@@ -272,6 +273,16 @@ export function stepText(next: string): { text: string; cut: boolean } {
   return { text: `${words.join(" ").replace(/[\s,;:(\[–—-]+$/, "")} …`, cut: true };
 }
 
+/** A cut fragment as whole words (r16): no "…", no unclosed "(3" tail, no hanging word ("…install flow (3" → "…install flow"). */
+export function wholeWords(text: string): string {
+  let t = withoutCut(text);
+  const open = t.lastIndexOf("("); if (open > 0 && t.indexOf(")", open) < 0) t = t.slice(0, open);
+  const words = t.replace(/\s+/g, " ").trim().split(" ").filter(Boolean);
+  const strip = (w: string) => w.replace(/[,;:(\[–—+&-]+$/, "");
+  while (words.length > 1 && (DANGLING.test(strip(words[words.length - 1])) || !strip(words[words.length - 1]))) words.pop();
+  if (words.length) words[words.length - 1] = strip(words[words.length - 1]) || words[words.length - 1];
+  return words.join(" ");
+}
 /** A cut title without its "…": what is left reads as a plain fragment, never as a row that ends on an ellipsis. */
 export const withoutCut = (rest: string): string => rest.replace(/\s*(…|\.\.\.)\s*$/, "").trim();
 
@@ -282,7 +293,7 @@ export function rowAsk(full: string, ask: string | undefined, isDecision: boolea
   if (!cut) return { text: full, openToDecide: false };
   if (ask && !isCutTitle(ask)) return { text: ask, openToDecide: false };
   if (isDecision) return { text: OPEN_TO_SEE, openToDecide: true };
-  return { text: hasNext ? withoutCut(full) : "", openToDecide: false };
+  return { text: hasNext ? wholeWords(full) : "", openToDecide: false };
 }
 
 /** A decision's ask as a question: sentence-cased, and "Your call:" above it when the stored ask does not end in "?". */
@@ -296,6 +307,9 @@ export function askLead(text: string): { text: string; yourCall: boolean } {
 export function stateLine(t: { state: string; waitingOn: string | null; kind: string }, isMeFn: (who: string | null) => boolean, nameOf: (who: string) => string = (w) => w): string {
   if (t.kind === "decision") return "Needs your decision";
   if (isMeFn(t.waitingOn)) return "Waiting on you";
+  // r16: the writer's markers read as words, never "Waiting on blocked"
+  const marker: Record<string, string> = { blocked: "Blocked", parked: "Parked", external: "Waiting on someone outside" };
+  if (t.waitingOn && marker[t.waitingOn.toLowerCase()]) return marker[t.waitingOn.toLowerCase()];
   if (t.waitingOn) return `Waiting on ${nameOf(t.waitingOn)}`;
   return t.state === "doing" ? "In progress" : t.state === "waiting" ? "Waiting" : "Open";
 }

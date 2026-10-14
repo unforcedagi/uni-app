@@ -11,7 +11,7 @@ import { capped, RECHECK_MS, refKey, RETRY_MS, settle, shouldRead, splitRefs, ti
 import { readMessages, readRooms, readWho, writeMessages, writeRooms, writeWho } from "../src/chatCache.ts";
 import { isActiveRun } from "../src/areas/steerCore.ts";
 import { taskTitle, whereWeAre } from "../src/areas/whereCore.ts";
-import { decideLine, firstWords, isMine, NEXT_CAP, stepText, stripRoom } from "../src/areas/simpleCore.ts";
+import { decideLine, firstWords, isMine, NEXT_CAP, stepText, stripRoom, wholeWords } from "../src/areas/simpleCore.ts";
 import { createSavedTasks, SAVED_MAX_TASKS } from "../src/areas/savedTasks.ts";
 import { buildTaskTree, parseNodes, parseTask, type Task } from "../src/areas/taskCore.ts";
 
@@ -368,6 +368,17 @@ check("r16 a decision row with no whole question reads \"Decide: <first words>\"
   assert.equal(decideLine(""), "A decision waits on you");
   assert.ok(!/…|\.\.\.$/.test(firstWords("Uni adds Benya's missing feature #4, the after-event prompt to the companion on Wed. Say no to skip it.")));
   assert.ok(firstWords("x ".repeat(80)).length <= 48);
+});
+check("r16 a note that is only its heading and options: the heading is the question; a cut title reads as whole words; markers read as words", () => {
+  assert.equal(askFromContent("# Ship the Boulder Votes AI chat? (preview: https://x.example/ask)\n\n- Add key and test live on preview first\n- Ship to production after live test"), "Ship the Boulder Votes AI chat? (preview: https://x.example/ask)");
+  assert.equal(askFromContent("Decision: one paragraph.\n\n# Heading"), "one paragraph.", "a paragraph still wins");
+  assert.equal(wholeWords("Companion Today redesign + integrated PWA install flow (3…"), "Companion Today redesign + integrated PWA install flow");
+  assert.equal(wholeWords("A daily calendar email to people who…"), "A daily calendar email to people");
+  const me = (w: string | null) => w === "aaron";
+  assert.equal(stateLine({ state: "waiting", waitingOn: "blocked", kind: "task" }, me), "Blocked");
+  assert.equal(stateLine({ state: "waiting", waitingOn: "parked", kind: "task" }, me), "Parked");
+  assert.equal(stateLine({ state: "waiting", waitingOn: "external", kind: "task" }, me), "Waiting on someone outside");
+  assert.equal(stateLine({ state: "waiting", waitingOn: "aaron", kind: "task" }, me), "Waiting on you");
 });
 check("r16 a next step cut at the writer's 140 characters ends on a whole word and says it was cut", () => {
   const cut = "Merge RegenHub PRs #108 and #109 (both green), then answer the nine operational/editorial questions (door beep, hours, hero wording…) in the";

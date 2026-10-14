@@ -213,13 +213,14 @@ function Stands({ text, ago }: { text: string; ago: string }) {
  * row's own revision), sentence-cased, with "Your call:" when it does not ask. `answerable`: the whole question is known; `fits`: it fits a
  * row, so a row may show it beside its answers (a longer one shows `preview` and opens to decide). With no whole question, nothing to answer.
  */
-export function decisionAsk(t: Task): { text: string; yourCall: boolean; answerable: boolean; fits: boolean; preview: string; decide: string } {
+export function decisionAsk(t: Task): { text: string; yourCall: boolean; answerable: boolean; fits: boolean; preview: string; decide: string; /** the question as the note has it (links and all), for the sheet */ full: string } {
   const tt = taskTitle(cleanText(t.title));
   const q = decisionQuestion(tt.rest, t.ask, t.askAt, t.updatedAt, tt.cut || tt.previewed);
   // r16: no whole question known: the row reads "Decide: <first words>" (verb first, whole words, never "…"), and opens to decide
-  if (!q) { const line = decideLine(askOf(tt.rest)); return { text: line, yourCall: false, answerable: false, fits: false, preview: line, decide: line }; }
-  const l = askLead(q);
-  return { text: l.text, yourCall: l.yourCall, answerable: true, fits: fitsRow(l.text), preview: askPreview(l.text), decide: decideLine(l.text) };
+  if (!q) { const line = decideLine(askOf(tt.rest)); return { text: line, yourCall: false, answerable: false, fits: false, preview: line, decide: line, full: line }; }
+  // r16: the question read from a note is cleaned like a title (no leading date, no "(preview: …)" tail); the sheet keeps the note's words
+  const l = askLead(taskTitle(q).rest || q);
+  return { text: l.text, yourCall: l.yourCall, answerable: true, fits: fitsRow(l.text), preview: askPreview(l.text), decide: decideLine(l.text), full: q };
 }
 
 /**
@@ -318,6 +319,7 @@ export function NeedRow({ t, onTask, onDecide, onNote, meta }: { t: Task; onTask
     {!next && !isDecision && !actionableTitle(text) && text !== "Open to see what's needed" && <p className="cp-open-to-see">Open to see what's needed</p>}
     {showNext && <NextText text={next} vault={vault} onNote={onNote} lines={open ? undefined : nextLines} open={open} onOpen={setOpen} onClamp={setNextCut} />}
     {more && <button type="button" className="cp-more-next cp-row-more" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? "Less" : "More"}</button>}
+    {r.lead && t.nextCut && <button type="button" className="cp-open-decide cp-rest" onClick={() => onTask(t)}>The rest is in its note<span aria-hidden="true"> ›</span></button>}
     {r.answers && <DecisionAnswer t={t} label={text} onDecide={onDecide} max={OPTS_SHOWN} onMore={() => onTask(t)} />}
   </li>;
 }

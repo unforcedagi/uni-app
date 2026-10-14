@@ -580,3 +580,7 @@
 .sr-missing-go .task-do { width: auto; padding: 0 18px; }
 /* r16: a decision's question too long for a row: two full lines of whole words, then "Open to decide ›" */
 .cp-title.cp-preview { display: block; -webkit-line-clamp: unset; line-clamp: none; overflow: visible; }
+/* r16: a step cut short when it was written: the way to the rest, under the action */
+.cp-open-decide.cp-rest { all: unset; box-sizing: border-box; display: inline-flex; align-items: center; min-height: 32px; padding: 0 0 6px; font: 500 13px/1.4 var(--th-sans); color: var(--th-ink2); cursor: pointer; }
+.cp-open-decide.cp-rest:hover { text-decoration: underline; text-underline-offset: 3px; }
+.cp-open-decide.cp-rest:focus-visible { outline: 2px solid var(--th-ink); outline-offset: 2px; }
