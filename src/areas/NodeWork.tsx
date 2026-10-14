@@ -202,7 +202,7 @@ export function TaskSheet({ task, gone = false, here, nodeName, room, inRoom, on
         {dest && (primary === "dest" || primary === "message") && <button type="button" className={`task-do${primary === "dest" ? " primary" : ""}`} onClick={() => openOut(dest.href)}>{dest.label} ›</button>}
         {askDraft && <button type="button" className={`task-do${primary === "draft" ? " primary" : ""}`} onClick={askDraft}>Ask Uni to draft it</button>}
         {!gone && !decision && !check && <button type="button" className={`task-do${primary === "done" ? " primary" : ""}`} aria-busy={busy === "done" || undefined} disabled={!!busy} onClick={() => void go("done")}>{busy === "done" ? "Saving…" : "I did this"}</button>}
-        {!sayIn && !askDraft && room && room.id !== inRoom && <button type="button" className="task-do quiet" onClick={() => { onOpenRoom(room.id); onClose(); }}>Open in #{room.name.replace(/^#/, "")}</button>}
+        {!sayIn && room && room.id !== inRoom && <button type="button" className="task-do quiet" onClick={() => { onOpenRoom(room.id); onClose(); }}>Open in #{room.name.replace(/^#/, "")}</button>}
         <button type="button" className="task-do quiet" onClick={onClose}>Close</button>
       </div>
       {/* r17: housekeeping sits below the real action, smaller and quieter */}
