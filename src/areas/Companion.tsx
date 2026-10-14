@@ -13,7 +13,7 @@ import { isActiveRun, type Run } from "./steerCore";
 import { ownerLabel, type Task } from "./taskCore";
 import { taskTitle } from "./whereCore";
 import { splitLinks } from "./linkText";
-import { actionableTitle, answerChoices, answerLabel, askLead, askPreview, checkLine, CHECK_FAILED, DANGLING, decideLine, stripRoom, decisionQuestion, dueLine, fitsRow, isOverdue, lineBudget, missingLine, OPEN_TASK, OPEN_TO_ANSWER, privateActionLabel, privateRestLabel, askedLine, requestDate, pointsNowhere, firstOfSteps, actionOf, rowAction, withoutBrackets, rowSubParts, standsHeading, titleSays, titleWords, TIDY_LINE, toTidy, unknownDecision, waitsLine, waitsOnMe, withHosts, withoutCut, rowAsk, withoutRawIds, clauseForms, type Choice, type NeedsFeed, type PrivateNeed, type RowAction, type Support } from "./simpleCore";
+import { actionableTitle, answerChoices, answerLabel, askLead, askPreview, checkLine, CHECK_FAILED, DANGLING, decideLine, stripRoom, decisionQuestion, dueLine, fitsRow, isOverdue, lineBudget, missingLine, OPEN_TASK, OPEN_TO_ANSWER, privateActionLabel, privateRestLabel, askedLine, requestDate, pointsNowhere, belowInCard, firstOfSteps, actionOf, rowAction, withoutBrackets, rowSubParts, standsHeading, titleSays, titleWords, TIDY_LINE, toTidy, unknownDecision, waitsLine, waitsOnMe, withHosts, withoutCut, rowAsk, withoutRawIds, clauseForms, type Choice, type NeedsFeed, type PrivateNeed, type RowAction, type Support } from "./simpleCore";
 import { requestRecheck } from "./useTasks";
 
 const KEYS = { side: "uni.companion.side.v1", sideNarrow: "uni.companion.side.narrow.v1", strip: "uni.companion.strip.v1" } as const;
@@ -55,7 +55,7 @@ export function useCompanionOpen(variant: "side" | "strip"): [boolean, (v: boole
 
 export type CompanionProps = {
   /** Where this stands: the sentence and, quietly, when it was written. Null: nothing to say. */
-  stands: { text: string; ago: string } | null; ready: boolean;
+  stands: { text: string; ago: string; calm?: string | null } | null; ready: boolean;
   /** Said in place of a node's state (a room no node owns: "Not filed under an area yet."); there is then no Needs you and no way deeper. */
   note?: string | null;
   /** The task list's health: a failed first load (never an endless "Loading…"), a failed refresh (the rows stay), and whether every page was read. */
@@ -371,7 +371,7 @@ export function rowLead(t: Task, area: string | null = null): RowLead {
   // r20: the action, never the stored sentence: its first clause, the date label and the notes after it left to the subtitle and the sheet
   // r23: a step that points at words nobody stored ("…the message below") asks the room for them: "Ask #techne for the message"
   const nowhere = pointsNowhere(t, t.stewardRoom ?? t.room);
-  const action = rowAction(nowhere ?? next) ?? (theirs && next ? actionOf(next) : null);
+  const action = rowAction(nowhere ?? belowInCard(next, t)) ?? (theirs && next ? actionOf(next) : null);
   if (action) {
     // r17: someone else's task says whose it is (and the task, when its title says something the action doesn't)
     const from = `From ${ownerLabel(t.owner)}`;
@@ -609,7 +609,7 @@ function Body({ stands, ready, note, load, feed, rest = 0, moreTitle = null, onP
   // below 900px the room shows the list's health itself, outside the strip (r14)
   const health = !hideHealth && <LoadHealth load={load} ready={ready} count={feed.total} />;
   return <div className="cp-body">
-    {!ready ? (load?.error || load?.slow ? <LoadHealth load={load} ready={false} /> : <p className="cp-lede">Loading…</p>) : stands && <Stands text={stands.text} />}
+    {!ready ? (load?.error || load?.slow ? <LoadHealth load={load} ready={false} /> : <p className="cp-lede">Loading…</p>) : stands && <><Stands text={stands.text} />{stands.calm && <p className="cp-calm">{stands.calm}</p>}</>}
     {ready && <section aria-label="Needs you" className="cp-sec" aria-busy={load?.refreshing || undefined}>
       <h3 className="cp-h">Needs you</h3>
       {/* r17: Uni's panel is at most three rows and one "Show N more" (private items folded in) to the work view, which keeps the full list */}

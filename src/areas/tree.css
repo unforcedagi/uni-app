@@ -474,6 +474,7 @@
 .cp-failed .cp-retry { font-size: inherit; }
 .cp-retry:focus-visible { outline: 2px solid var(--th-ink); outline-offset: 2px; }
 .cp-stands-more { display: inline-flex; margin-top: 2px; }
+.cp-calm { margin: 4px 0 0; font: 400 12.5px/1.35 var(--th-sans, inherit); color: var(--th-mute); }
 .th-dot.inside { background: none; box-shadow: inset 0 0 0 2px var(--th-sap); }
 .th-load { flex: none; margin: 2px 12px 4px; font: 400 12.5px/1.35 var(--th-sans); color: var(--th-mute); }
 .th-load.bad { color: var(--th-ink); }
