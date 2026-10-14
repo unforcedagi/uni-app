@@ -619,8 +619,6 @@ h1 { font-family: var(--serif); font-weight: 500; font-size: 34px; line-height: 
   .shell.search-open .landscape-panel-surfaces, .shell.search-open .phone-panel-tools, .shell.search-open .rooms-header { display: none; }
   .shell.search-open .search-view { flex: 1 0 auto; min-height: 280px; }
 }
-.room.child { width: calc(100% - 22px); margin-left: 22px; padding: 8px 12px; border-left: 2px solid var(--line); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
-.room.child .avatar { transform: scale(.85); }
 
 /* bookkeeping markers on a message ([done T-NN]) as quiet chips */
 .md-marks { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
