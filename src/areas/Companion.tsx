@@ -122,11 +122,15 @@ export function NextText({ text, vault, onNote, lines, open: openProp, onOpen, o
 }
 
 /** A step as words (r15): each word, link and linked note is one token, so a clamp can end on a whole one. `space`: whitespace before it. */
-function stepTokens(text: string, vault: string, onNote?: (ref: NoteRef) => void): { node: React.ReactNode; space: boolean }[] {
+/** A row's link label (r20): a host too long for a row's line ("cohere-signup-staging.unforced.workers.dev" broke mid-word onto a third line at
+ *  236px) reads as its first part ("cohere-signup-staging"); the link and its title keep the whole address. */
+export const ROW_LINK_MAX = 24;
+export const rowLinkLabel = (label: string): string => (label.length > ROW_LINK_MAX && /^[\w-]+(\.[\w-]+)+$/.test(label) ? label.split(".")[0] : label);
+function stepTokens(text: string, vault: string, onNote?: (ref: NoteRef) => void, row = false): { node: React.ReactNode; space: boolean }[] {
   const out: { node: React.ReactNode; space: boolean }[] = [];
   let space = false; let first = true;
   for (const p of splitLinks(cleanText(text))) {
-    if ("url" in p) { out.push({ node: <a className="cp-link" href={p.url} title={p.url} rel="noreferrer noopener" onClick={(e) => openLink(e, p.url)}>{p.label}</a>, space }); space = false; first = false; continue; }
+    if ("url" in p) { out.push({ node: <a className="cp-link" href={p.url} title={p.url} rel="noreferrer noopener" onClick={(e) => openLink(e, p.url)}>{row ? rowLinkLabel(p.label) : p.label}</a>, space }); space = false; first = false; continue; }
     for (const q of splitRefs(p.text, vault)) {
       if ("id" in q) { out.push({ node: <RefName r={q} onNote={onNote} />, space }); space = false; first = false; continue; }
       for (const w of q.text.split(/(\s+)/)) {
@@ -405,7 +409,7 @@ export function NeedRow({ t, onTask, onNote, meta, compact = false, area = null 
     {r.lead
       // the action leads, its links and linked notes still open (outside the row's button); a tap on its words opens the sheet like the row
       // r15: full lines that end on a whole word ("…" then More), never a cut inside a word, a link or a note's title
-      ? <><WordClamp elRef={titleRef as React.RefObject<HTMLParagraphElement | null>} className="cp-title cp-lead" tokens={stepTokens(r.action?.text ?? next, vault, onNote)} textKey={`${vault}\n${r.action?.text ?? next}`} lines={titleMax} open={open}
+      ? <><WordClamp elRef={titleRef as React.RefObject<HTMLParagraphElement | null>} className="cp-title cp-lead" tokens={stepTokens(r.action?.text ?? next, vault, onNote, true)} textKey={`${vault}\n${r.action?.text ?? next}`} lines={titleMax} open={open}
           keep={r.action ? r.action.verb.split(" ").filter(Boolean).length : 0} onCut={() => {}} onClick={(e) => { if (!(e.target as Element).closest("a, button")) onTask(t); }} />
         <button type="button" className="cp-need cp-need-under" data-id={id ?? undefined} aria-label={[text, r.under, due, meta].filter(Boolean).join(". ")} onClick={() => onTask(t)}>{meta_}</button></>
       : <button type="button" className={`cp-need${isDecision ? " decision" : ""}`} data-id={id ?? undefined} data-mode={r.mode} aria-busy={r.mode === "checking" || undefined} aria-label={r.yourCall ? `Your call: ${text}` : undefined} onClick={() => onTask(t)}>
@@ -425,7 +429,7 @@ export function NeedRow({ t, onTask, onNote, meta, compact = false, area = null 
     {/* r18: "Answer N questions" only from an explicit list; an unclear source opens the note; a closed one is the row itself ("Check: …") */}
     {sup?.kind === "list" ? <button type="button" className="cp-open-decide cp-rest cp-questions" onClick={() => onTask(t)}>{answerLabel(sup.items.length)}<span aria-hidden="true"> ›</span></button>
       : sup?.kind === "unclear" ? <button type="button" className="cp-open-decide cp-rest cp-questions" onClick={() => openSource(sup.from ?? { vault, id: t.id })}>{OPEN_TO_ANSWER}<span aria-hidden="true"> ›</span></button>
-      : r.lead && t.nextCut && r.mode === "lead" && <button type="button" className="cp-open-decide cp-rest" onClick={() => onTask(t)}>The rest is in its note<span aria-hidden="true"> ›</span></button>}
+      : null /* r20: a row leads with the action's first clause; a step cut when it was written says so in its sheet, not with a "›" here */}
   </li>;
 }
 
