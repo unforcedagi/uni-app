@@ -303,7 +303,8 @@
 .cp-stands { margin: 0; overflow-wrap: break-word; }
 /* r18: the strip's folded line is cut on a whole word by WordClamp, never by the browser's mid-word ellipsis */
 .cp-line-words { display: block; white-space: normal; overflow: hidden; }
-.cp-under, .cp-meta { white-space: normal; }
+/* r18: small print is one line of whole words (SmallLine renders a span, cut by WordClamp) */
+.cp-under, .cp-meta { white-space: normal; display: block; overflow: hidden; font: 400 12.5px/1.4 var(--th-sans); color: var(--th-mute); }
 .cp-sec { margin-top: 16px; }
 .cp-h { margin: 0 0 4px; font: 600 13px/1.3 var(--th-sans); color: var(--th-mute); }
 .cp-list { list-style: none; margin: 0; padding: 0; }
@@ -595,3 +596,5 @@
   .tree-home.th-level.th-simple.wide.solo { grid-template-columns: minmax(0, 1fr); }
   .cp.side.folded { overflow: hidden; }
 }
+/* r18: a linked note that couldn't be read just now keeps its last title, quietly marked */
+.cp-ref-off { text-decoration-style: dotted; opacity: .75; }

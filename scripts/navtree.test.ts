@@ -217,7 +217,7 @@ check("r15 note refs: a bare id is the text's own vault, a prefixed one names it
   assert.equal(shouldRead({ title: "Old", at: "a", read: now - RECHECK_MS }, now, true), true, "and again once it is old");
   // a rename: a new revision brings the new title; a failed re-read keeps the known one
   assert.deepEqual(settle({ title: "Old", at: "a", read: 0 }, { title: "New", at: "b" }, now), { title: "New", at: "b", read: now });
-  assert.deepEqual(settle({ title: "Old", at: "a", read: 0 }, null, now), { title: "Old", at: "a", read: now });
+  assert.deepEqual(settle({ title: "Old", at: "a", read: 0 }, null, now), { title: "Old", at: "a", read: now, failed: true }, "r18: kept, and marked as not read this time");
   assert.deepEqual(settle(undefined, null, now), { title: null, at: null, read: now });
   const m = new Map<string, number>(); for (let i = 0; i < 310; i++) m.set(`k${i}`, i);
   capped(m, 300); assert.equal(m.size, 300); assert.equal(m.has("k9"), false); assert.equal(m.has("k10"), true);

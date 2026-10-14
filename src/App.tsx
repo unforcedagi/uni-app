@@ -345,7 +345,9 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const [, setBusy] = useState(false);
   const [sending, setSending] = useState(false);
   const sendingRef = useRef(false);
-  const [status, setStatus] = useState("Loading cached conversations…");
+  const [status, setStatus] = useState("Loading conversations…");
+  /** The last sync's machinery (message count, per-room warnings): for Developer only (r18). */
+  const [syncDetail, setSyncDetail] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pairSourceOpen, setPairSourceOpen] = useState(false);
   const [forgetArmed, setForgetArmed] = useState(false);
@@ -680,13 +682,15 @@ function Conversations({ onForget }: { onForget: () => void }) {
       await loadRooms();
       const warnings = Object.entries(result.channel_errors).map(([id, reason]) => `${id.slice(0, 8)}: ${reason}`);
       if (result.truncated_channels.length) warnings.push("Some rooms have more history than the current 500-message backfill.");
-      setStatus(warnings.length ? `Synced with warnings: ${warnings.join("; ")}` : `Synced · ${result.total_items} cached messages`);
+      // r18: Settings says it in words; the counts and per-room warnings are under Developer
+      setSyncDetail(warnings.length ? `${result.total_items} saved messages; ${warnings.join("; ")}` : `${result.total_items} saved messages`);
+      setStatus(warnings.length ? "Up to date, except a few rooms" : "Up to date");
       setSynced((n) => n + 1);
       // Keep the socket open for push while we're in the foreground.
       invoke<boolean>("live_start").catch((e) => setLive(`Live unavailable: ${e}`));
     } catch (e) {
       setError(String(e));
-      setStatus("Offline · showing cached messages");
+      setStatus("Offline · showing what this device saved");
     } finally { busyRef.current = false; setBusy(false); }
   }, [loadRooms]);
 
@@ -1587,7 +1591,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       {identity && <p className="identity" title={npub ?? identity}>{myName ? <>Signed in as <strong>{myName}</strong></> : <>Public key <code>{npub ? `${npub.slice(0, 14)}…${npub.slice(-6)}` : `${identity.slice(0, 12)}…`}</code></>}<button className="identity-copy" onClick={() => void copyText(npub ?? identity, "Copied public key")} aria-label="Copy your public key">⧉</button></p>}
         <UpdateSettings /><LifeOsVaultSetting vaults={vaults} /><PairDeviceButton onOpen={() => setPairSourceOpen(true)} /><button className="pairing-secondary" onClick={() => void forget()}>{forgetArmed ? "Tap again to forget — you'll need to re-pair" : "Forget this device key"}</button>{forgetArmed && <button className="pairing-secondary" onClick={() => setForgetArmed(false)}>Keep key</button>}
         {/* r13: the machinery (the app sandbox's self-test, where the app connects) is for whoever builds Uni, not part of ordinary Settings */}
-        <details className="settings-dev"><summary>Developer</summary>{hub && <p className="settings-dev-line">Notes hub: <code>{hub}</code></p>}<AreaSelfTest /></details></div>}
+        <details className="settings-dev"><summary>Developer</summary>{hub && <p className="settings-dev-line">Notes hub: <code>{hub}</code></p>}{syncDetail && <p className="settings-dev-line">Last sync: {syncDetail}</p>}<AreaSelfTest /></details></div>}
       {searchOpen && <Search initialQuery={searchQuery} vaults={vaults} key={`${searchScope.vault}:${searchScope.prefix}`} initialVault={searchScope.vault} initialPathPrefix={searchScope.prefix} onOpen={openHit} onOpenNote={(n) => { setSearchOpen(false); openNote({ hub: null, vault: n.vault, ref: n.id }, null); }} onAskUni={askUniSearch} onClose={() => { setSearchOpen(false); if (topNote) setSidebarVisible(false); }} />}
       {searchOpen && error && <p className="error search-error" role="alert">{error}</p>}
       <div className="rooms-body" hidden={searchOpen}>

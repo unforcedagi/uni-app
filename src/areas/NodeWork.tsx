@@ -183,7 +183,7 @@ export function TaskSheet({ task, gone = false, here, nodeName, room, inRoom, on
       </section>}
       {decideError && !gone && <p className="task-gone task-changed" role="alert">{decideError}</p>}
       {!gone && dq?.answerable && !dq.box && <DecisionAnswer t={task} label={heading} onDecide={(t, o) => void answer(t, o)} className={`task-answer${deciding ? " busy" : ""}`} />}
-      {!gone && dq?.answerable && dq.box && <form className="task-answer-box" aria-label="Answer in your words" onSubmit={(e) => { e.preventDefault(); if (typed) void answer(task, typed); }}>
+      {!gone && dq?.answerable && dq.box && <form className="task-answer-box" onSubmit={(e) => { e.preventDefault(); if (typed) void answer(task, typed); }}>
         <label htmlFor="task-answer-words">Answer in your words</label>
         <div className="task-answer-row">
           <input id="task-answer-words" type="text" value={words} maxLength={ANSWER_MAX} autoComplete="off" onChange={(e) => setWords(e.target.value)} disabled={deciding} />

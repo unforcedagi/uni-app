@@ -407,8 +407,9 @@ Two proposals wait on a scope decision.
     const room = (id: string, name: string, unread = 0) => ({ id, name, unread, mentions: false, last_message: lastOf(id)?.body ?? null, last_ts: lastOf(id)?.ts ?? null });
     const rooms = [room('uni-room', 'Uni'), room('ch-techne', 'Techne'), ...(d.multiRoom ? [room('ch-cohere', 'Cohere')] : []), room('ch-unf', 'Unforced Dev'), room('ch-sad', 'Sadhana'), room('ch-atlas', 'Atlas'), room('ch-exp', 'Expression'), ...(d.strayRoom ? [room('ch-garden', 'garden-club')] : [])];
     // A message arriving over the live socket: stored, then announced like the real `uni://live` event.
-    w.__arrive = (channel: string, name: string, body: string) => {
-      const m = msg('live' + Math.random().toString(36).slice(2, 8), channel, name, 0, body);
+    // r18: `ago` (seconds) and `edited` give a message from earlier (a progress ping from Monday)
+    w.__arrive = (channel: string, name: string, body: string, ago = 0, edited = false) => {
+      const m = { ...msg('live' + Math.random().toString(36).slice(2, 8), channel, name, ago, body), edited };
       (msgs[channel] ??= []).push(m);
       const r = rooms.find((x) => x.id === channel); if (r) { r.last_message = body; r.last_ts = m.ts; }
       for (const h of w.__listeners['uni://live'] ?? []) w.__cbs[h]?.({ event: 'uni://live', id: 1, payload: { kind: 'message', channel, author: m.author } });

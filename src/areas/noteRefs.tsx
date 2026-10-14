@@ -3,18 +3,35 @@
 // background), a failed read is tried again, and the cache keeps the newest 300.
 import { useEffect, useSyncExternalStore } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { capped, refKey, settle, shouldRead, splitRefs, titleOfPath, KEEP, type NoteRef, type TitleEntry } from "./noteRefsCore";
+import { capped, refKey, settle, shouldRead, splitRefs, titleOfPath, titlesKey, KEEP, type NoteRef, type TitleEntry } from "./noteRefsCore";
 
-const KEY = "uni.noteTitles.v2";
+/** r18: titles are kept per signed-in identity (keyed by vault and note inside), never shared across identities, and cleared by Forget. */
+const OWNER_KEY = "uni.noteTitles.owner";
+/** The identity whose titles were kept last: the first paint shows them before the identity is confirmed (another one clears them at once). */
+let owner = (() => { try { return localStorage.getItem(OWNER_KEY) ?? ""; } catch { return ""; } })();
 const stored = (): [string, TitleEntry][] => {
   try {
-    const v = JSON.parse(localStorage.getItem(KEY) ?? "[]");
+    const v = JSON.parse(localStorage.getItem(titlesKey(owner)) ?? "[]");
     return Array.isArray(v) ? v.filter((e): e is [string, TitleEntry] => Array.isArray(e) && typeof e[0] === "string" && !!e[1] && typeof e[1].title === "string").slice(-KEEP) : [];
   } catch { return []; }
 };
 // Titles read before are kept on this device: the next launch shows the title on the first paint instead of a placeholder that flips.
-const titles = new Map<string, TitleEntry>(stored());
-const keep = () => { try { localStorage.setItem(KEY, JSON.stringify([...titles].filter(([, e]) => e.title))); } catch { /* this session only */ } };
+const titles = new Map<string, TitleEntry>(owner ? stored() : []);
+const keep = () => { try { localStorage.setItem(titlesKey(owner), JSON.stringify([...titles].filter(([, e]) => e.title))); } catch { /* this session only */ } };
+/** The signed-in identity whose titles these are: another one starts from its own kept list. */
+export function setTitleOwner(who: string) {
+  if (who === owner) return;
+  owner = who; titles.clear(); seen.clear();
+  try { localStorage.setItem(OWNER_KEY, who); } catch { /* this session only */ }
+  for (const [k, e] of stored()) titles.set(k, e);
+  listeners.forEach((f) => f());
+}
+/** Forget (r18): every identity's kept titles go, with the old unscoped list. */
+export function forgetTitles() {
+  titles.clear(); seen.clear();
+  try { for (let i = localStorage.length - 1; i >= 0; i--) { const k = localStorage.key(i); if (k && /^uni\.noteTitles\./.test(k)) localStorage.removeItem(k); } } catch { /* nothing kept */ }
+  listeners.forEach((f) => f());
+}
 /** Notes whose title was checked this session (a title kept from the last launch is checked once, in the background). */
 const seen = new Set<string>();
 const reading = new Set<string>();
@@ -51,14 +68,22 @@ export function warmTitles(texts: readonly string[], vault: string) { for (const
 export function useNoteTitle(r: NoteRef): string | null {
   const k = refKey(r);
   const e = useSyncExternalStore(subscribe, () => titles.get(k));
-  useEffect(() => { load(r); }, [k]); // eslint-disable-line react-hooks/exhaustive-deps
+  // r18: also when the entry goes (another identity's titles were cleared), so it is read again for this one
+  useEffect(() => { load(r); }, [k, e === undefined]); // eslint-disable-line react-hooks/exhaustive-deps
   return e === undefined ? null : e.title || "a note";
+}
+/** r18: the last read of this note failed, so its title is the last one known (said quietly, and read again shortly). */
+export function useNoteUnread(r: NoteRef): boolean {
+  const k = refKey(r);
+  return useSyncExternalStore(subscribe, () => !!titles.get(k)?.failed);
 }
 
 export function RefName({ r, onNote }: { r: NoteRef; onNote?: (ref: NoteRef) => void }) {
   const t = useNoteTitle(r);
+  const off = useNoteUnread(r);
   if (t === null) return <span className="cp-ref-wait">the linked note</span>;
-  return onNote ? <button type="button" className="cp-ref" onClick={() => onNote(r)}>{t}</button> : <span>{t}</span>;
+  const hint = off ? "Couldn't read this note just now; this is its last known title" : undefined;
+  return onNote ? <button type="button" className={`cp-ref${off ? " cp-ref-off" : ""}`} title={hint} onClick={() => onNote(r)}>{t}</button> : <span className={off ? "cp-ref-off" : undefined} title={hint}>{t}</span>;
 }
 
 /** Plain text with its note ids as titles (buttons when `onNote` is given). `vault`: where the text lives, for an id written without one. */
