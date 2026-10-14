@@ -1462,6 +1462,10 @@ function Conversations({ onForget }: { onForget: () => void }) {
   // Uni's chat room: the id the home page attaches (the Uni room by id, else the room named Uni).
   const uniHomeRoom = () => (roomsRef.current.some((r) => r.id === UNI_CHANNEL) ? UNI_CHANNEL : findUniRoom(roomsRef.current)?.id ?? null);
   const uniHome = (): TabTarget => ({ kind: "areas", title: "Uni", ...(uniHomeRoom() ? { channel: uniHomeRoom()! } : {}) });
+  /** r22 (Codex 2): the place (Uni, an area, a room) a utility was opened from: Journal's and the Vault's Back return there, not always to Uni.
+   *  Kept for this session only; a reopened utility returns to Uni. */
+  const originRef = useRef<TabTarget | null>(null);
+  const origin = (): TabTarget => originRef.current ?? uniHome();
   const goBack = useRef<() => void>(() => {});
   goBack.current = () => {
     if (journalFocus) { setJournalFocus(false); return; }
@@ -1472,7 +1476,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     if (root && channel) { openTarget(roomTarget(channel), "focus"); return; }
     // A level goes up, a room on a phone goes back to the room tree (Uni's own level, opened from the tree, too); anything else goes to Uni.
     if (areaBack.current) { areaBack.current(); return; }
-    if (activeTab(tabsRef.current)?.kind !== "areas") openTarget(uniHome(), "replace");
+    if (activeTab(tabsRef.current)?.kind !== "areas") openTarget(origin(), "replace");
   };
   // At Uni's room tree (nothing open over it) the system's own Back runs: the app goes to the background.
   const canGoBack = !!panel || journalFocus || notes.length > 0 || searchOpen || !!root || hasAreaBack || (!!activeTab(tabs) && activeTab(tabs)!.kind !== "areas");
@@ -1513,6 +1517,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
     return () => { dead = true; off?.(); };
   }, [canGoBack]);
   const active = activeTab(tabs);
+  useEffect(() => { if (active && (active.kind === "areas" || active.kind === "area")) { const { id: _id, ...t } = active; originRef.current = t; } }, [active]);
+  const originTitle = originRef.current?.title || "Uni";
   const journalTab = tabs.tabs.find((t) => t.kind === "journal");
   const areasOpen = active?.kind === "areas" || active?.kind === "area";
   /** Every room opens in the room shell (tree, conversation, companion): a node's room, a room no node owns ("Other rooms"), a thread. */
@@ -1628,8 +1634,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
       </div>
     </aside>
     <section className="conversation" aria-label={journalOpen ? "Journal" : shellOpen ? "Uni" : active?.kind === "note" ? "Note" : "Conversation"}>
-      {journalTab && <div className="journal-tab-content" hidden={!journalOpen} onFocusCapture={(e) => { if (e.target instanceof HTMLTextAreaElement) requestAnimationFrame(() => setComposerFocused(true)); }} onBlurCapture={(e) => { const journal = e.currentTarget; requestAnimationFrame(() => setComposerFocused(journal.contains(document.activeElement) && document.activeElement instanceof HTMLTextAreaElement)); }}><Journal focus={journalFocus} onFocus={() => setJournalFocus((v) => !v)} rooms={rooms} uniRoomId={findUniRoom(rooms)?.id ?? null} onShare={shareEntry} onBack={() => openTarget(uniHome())} onRecordingChange={(on, elapsed, stop) => { journalRecordingRef.current = on; setJournalRecording(on ? { elapsed, stop } : null); }} /></div>}
-      {active?.kind === "vault" && active.vault ? <VaultBrowser key={active.vault} vault={active.vault} onBack={() => openTarget(uniHome())} onOpen={(note) => openTarget({ kind: "note", note: { hub: null, vault: active.vault!, ref: note.id }, title: note.path || note.id }, "new")} onCreate={(folder) => requestCreate(active.vault!, folder)} onSearch={(prefix) => { setSearchQuery(""); setSearchScope({ vault: active.vault!, prefix }); setSearchOpen(true); setSidebarVisible(true); }} />
+      {journalTab && <div className="journal-tab-content" hidden={!journalOpen} onFocusCapture={(e) => { if (e.target instanceof HTMLTextAreaElement) requestAnimationFrame(() => setComposerFocused(true)); }} onBlurCapture={(e) => { const journal = e.currentTarget; requestAnimationFrame(() => setComposerFocused(journal.contains(document.activeElement) && document.activeElement instanceof HTMLTextAreaElement)); }}><Journal focus={journalFocus} onFocus={() => setJournalFocus((v) => !v)} rooms={rooms} uniRoomId={findUniRoom(rooms)?.id ?? null} onShare={shareEntry} backTo={originTitle} onBack={() => openTarget(origin())} onRecordingChange={(on, elapsed, stop) => { journalRecordingRef.current = on; setJournalRecording(on ? { elapsed, stop } : null); }} /></div>}
+      {active?.kind === "vault" && active.vault ? <VaultBrowser key={active.vault} vault={active.vault} backTo={originTitle} onBack={() => openTarget(origin())} onOpen={(note) => openTarget({ kind: "note", note: { hub: null, vault: active.vault!, ref: note.id }, title: note.path || note.id }, "new")} onCreate={(folder) => requestCreate(active.vault!, folder)} onSearch={(prefix) => { setSearchQuery(""); setSearchScope({ vault: active.vault!, prefix }); setSearchOpen(true); setSidebarVisible(true); }} />
       : journalOpen ? null
       : shellOpen && active ? <AreasSurface roomsPending={rooms.length === 0 && synced === 0} vaults={vaults} onBackChange={setAreaBack} onOverlayChange={setOverlay} identity={identity} key={`${active.id}:${identity ?? ""}`} path={shellPath} loose={shellLoose} thread={shellThread} rooms={rooms} actions={areaActions} roomFor={areaRoomFor} onRoom={syncAreaRoom}
           onOpenArea={(path, name, room) => openTarget(path === null ? { kind: "areas", title: "Uni", ...(room ? { channel: room } : {}) } : { kind: "area", path, title: name, ...(room ? { channel: room } : {}) }, "replace")} />
