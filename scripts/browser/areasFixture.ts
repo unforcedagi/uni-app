@@ -622,7 +622,8 @@ Two proposals wait on a scope decision.
 const railOf = (page: Page) => page.getByRole('navigation', { name: 'Main navigation' });
 /** Uni (the app opens there; the rail's Uni button comes back to it): the Uni room beside the tree, or the room tree itself on a phone. */
 export const openAreasHome = async (page: Page) => { await railOf(page).getByRole('button', { name: 'Uni', exact: true }).click(); await expect(page.getByRole('heading', { name: 'Uni', level: 1 })).toBeVisible(); };
-const isWide = (page: Page) => (page.viewportSize()?.width ?? 0) >= 900;
+/** The room tree sits beside the room (r17: on a wide window at least 400px tall); otherwise it is the phone's home or the Places drawer. */
+const isWide = (page: Page) => (page.viewportSize()?.width ?? 0) >= 900 && (page.viewportSize()?.height ?? 0) >= 400;
 /** A node's row in the room tree (r12: the tree is the only way to an area; the map and its arms are gone). */
 export const areaCard = (page: Page, name: string) => page.locator(isWide(page) ? '.th-roomnav' : '.th-phone-tree').locator(`.th-go[aria-label^="${name},"]`);
 /**

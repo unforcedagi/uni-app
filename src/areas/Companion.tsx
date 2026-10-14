@@ -139,7 +139,7 @@ function stepTokens(text: string, vault: string, onNote?: (ref: NoteRef) => void
 }
 
 /** A word a cut must not end on (r17): an article, a preposition or a joining word. */
-const DANGLING_WORD = /^(a|an|the|to|of|for|in|on|at|by|with|and|or|but|nor|from|as|is|are|was|be|if|than|then|into|onto|about|your|their|its|this|these|those|our|my|so|via|per)$/i;
+const DANGLING_WORD = /^(a|an|the|to|of|for|in|on|at|by|with|and|or|but|nor|from|as|is|are|was|be|if|than|then|into|onto|about|your|their|its|this|these|those|our|my|so|via|per|because|since|unless|until|while|although|though|whether|when|where)$/i;
 /** Plain words as clamp tokens (a decision's preview has no links). */
 const wordTokens = (text: string) => text.split(/\s+/).filter(Boolean).map((w, i) => ({ node: w, space: i > 0 }));
 
