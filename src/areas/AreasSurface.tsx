@@ -19,7 +19,7 @@ import { childrenOf, parentPath, ROOT, rootNode, trail, UNI_CHANNEL } from "./tr
 import { findUniRoom } from "../uniActions";
 import { useStoredSelfTest } from "../interface/selftest/useSelfTest";
 import { useRailHidden, useShortTree, useUprightPhone, useWide } from "./homeLayout";
-import { isPrivateNode, privateRoot, roomSlug, roomView, treeRows } from "./treeRooms";
+import { privateRoot, privateRootIn, roomSlug, roomView, treeRows } from "./treeRooms";
 import { publishRoomNodes, roomNodeMap } from "./roomLabels";
 import { useNav, type NavControls } from "../navContext";
 import { useVaultProfile } from "./ProfileContext";
@@ -351,9 +351,12 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   const context = borrowed ? `Chat in ${borrowed} · no room of its own yet` : undefined;
   const askRoom = target?.id ?? null;
   const trailItems = [{ path: ROOT, name: "Uni" }, ...(tree && !isRoot ? trail(tree, node.path) : isRoot ? [] : [node]).map((n) => ({ path: n.path, name: n.name }))];
-  const privateOf = (p: string) => (tree ? privateRoot(tree, p) : null);
+  // r21 (found in the real app, cold at 800×600): before the areas are read, a private area's task showed as an ordinary row ("Pick Sanctum
+  // design…"). Privacy is read from the task tree until the areas are, and nothing is listed while neither is known
+  const privateOf = (p: string) => (tree ? privateRoot(tree, p) : tasks.tree ? privateRootIn(tasks.tree, p) : null);
+  const privacyKnown = !!tree || !!tasks.tree;
   /** The private area this level is, or sits in: Aaron opened it himself, so its own items show as they are (r14). */
-  const selfPrivate = tree && isPrivateNode(tree, node.path) ? privateOf(node.path) : null;
+  const selfPrivate = privateOf(node.path);
   /** A private area's words are never shown outside it: not in Uni's panel, a parent's list, runs, drafts or the stands line. */
   const hidden = (p: string) => { const r = privateOf(p); return !!r && r.path !== selfPrivate?.path; };
   // ------------------------------------------------------------------------------------------ Needs you: one feed, one count (r13)
@@ -386,7 +389,7 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
     onAct={(t, a) => tasks.act(t, a, { sheet: true })} onDecide={(t, o) => tasks.decide(t, o)} onNote={actions.openNote} onOpenRoom={openRoomHere} onSay={chat ? sayIn : undefined} onPriority={(t, p) => void tasks.setPriority(t, p)} onStale={tasks.refresh} />;
   /** r20: a row's area when it is shown outside it (Uni's list holds every area's): its subtitle names it when its title can't say where it is. */
   const placeOf = (t: Task) => (t.node !== here ? nodeName(t.node) : null);
-  const companionProps: CompanionProps = { stands, ready: tasks.ready, load, feed: panel, rest: panel.rest, moreTitle: privateNote(panel.privateCount), onPrivate: openPrivate, runs, nodeName: node.name, scope: borrowed ? node.name : null, onTask: openSheet, onNote: actions.openNote, onDecide: decide, placeOf, onEverything: () => { closeSheet(); setWork(true); } };
+  const companionProps: CompanionProps = { stands, ready: tasks.ready && privacyKnown, load, feed: panel, rest: panel.rest, moreTitle: privateNote(panel.privateCount), onPrivate: openPrivate, runs, nodeName: node.name, scope: borrowed ? node.name : null, onTask: openSheet, onNote: actions.openNote, onDecide: decide, placeOf, onEverything: () => { closeSheet(); setWork(true); } };
   const placeholder = chatPlaceholder({ name: node.name, slash: nodeView.own ? nodeView.slash : null, heldBy: nodeView.heldBy ? nodeView.heldBy.name : null });
   // ------------------------------------------------------------------------------------------ the work view (r13)
   const mineLive = isMine;
@@ -403,7 +406,7 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
     {askRoom && <p className="th-fresh wv-fresh"><button type="button" className="th-link" onClick={() => actions.compose(askRoom, refreshDraft(node.name, isRoot ? "" : node.path))}>Ask Uni to update this summary</button></p>}
   </div> : null;
   const foot = node.kind === "project" && body ? <details className="th-note wv-note"><summary>Project note</summary><Body body={body} mentions={[]} me={null} /></details> : null;
-  const workMain = <WorkView nodeName={node.name} feed={feed} others={othersHere} later={later} runs={runs} drafts={drafts} privateOther={privateOther} ready={tasks.ready} load={load} activity={tasks.activity}
+  const workMain = <WorkView nodeName={node.name} feed={feed} others={othersHere} later={later} runs={runs} drafts={drafts} privateOther={privateOther} ready={tasks.ready && privacyKnown} load={load} activity={tasks.activity}
     onTask={openSheet} onDecide={decide} onNote={actions.openNote} onPrivate={openPrivate} placeOf={placeOf} top={top} foot={foot} />;
   const workOpen = work || !chat || noRoom;
   const workBar = workOpen ? <div className="sr-thread sr-workbar">{chat && !noRoom && <button type="button" className="sr-thread-back sr-work-back" onClick={() => setWork(false)}><span aria-hidden="true">‹</span> Back to chat</button>}

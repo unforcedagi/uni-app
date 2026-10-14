@@ -17,6 +17,18 @@ export function privateRoot(tree: Tree, path: string): { path: string; name: str
   return hit ? { path: hit.path, name: hit.name } : null;
 }
 
+/** r21: the same, read from the task tree (its nodes and parents), for while the areas aren't read yet: privacy never waits on them. */
+export function privateRootIn(tasks: { byPath: ReadonlyMap<string, { path: string; name: string }>; parent: ReadonlyMap<string, string> }, path: string): { path: string; name: string } | null {
+  let hit: { path: string; name: string } | null = null;
+  const seen = new Set<string>();
+  for (let at: string | undefined = path; at && !seen.has(at); at = tasks.parent.get(at)) {
+    seen.add(at);
+    const n = tasks.byPath.get(at); if (!n) break;
+    if (PRIVATE.has(n.name.toLowerCase())) hit = { path: n.path, name: n.name };
+  }
+  return hit;
+}
+
 /**
  * A node as the steward rule reads it. A room marked `room_status: archived|missing` is skipped: the node's `room_fallback`
  * (a room name or id) stands in for it, and with none the walk simply continues to the ancestors.
