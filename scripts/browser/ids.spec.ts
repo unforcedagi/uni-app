@@ -98,8 +98,8 @@ test.describe('stewardship', () => {
   test('a project without a room is stewarded by its ancestor, and its tasks open that room', async ({ page }) => {
     await open(page, 'Boulder Civic Calendar');
     // r15: the real room is the heading; the project is a line under it
-    await expect(page.locator('.sr-title')).toHaveText('#boulder');
-    await expect(page.locator('.sr-context')).toHaveText('Boulder Civic Calendar · no room of its own yet, talking in #boulder');
+    await expect(page.locator('.sr-title')).toHaveText('Boulder Civic Calendar'); // r20 (Codex 6): the node stays the heading
+    await expect(page.locator('.sr-context')).toHaveText('Chat in #boulder · no room of its own yet');
     await expect(composer(page)).toHaveAttribute('placeholder', 'Message #boulder');
     // seen from Uni, its task offers its steward's room
     await open(page, 'Uni');

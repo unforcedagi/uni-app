@@ -85,8 +85,6 @@ export type TaskLoad = { error: string | null; /** The task tree (the nodes) cou
 
 /** Lines an action leads with before "…" (r20: two, built from the action's first clause so what is cut is the object, never the verb). */
 export const ACTION_LINES = 2;
-/** Options shown inline on a decision; more are behind the item. */
-const OPTS_SHOWN = 3;
 const URL_RE = /https?:\/\/\S+|\bwww\.\S+/g;
 /** One line of detail: no raw links (they stay in the opened item), whitespace squeezed, no dangling separators. */
 export const plainDetail = (s: string): string => s.replace(URL_RE, "").replace(/\s+/g, " ").replace(/\s*[·,;:(\[-]+\s*$/, "").replace(/\(\s*\)/g, "").trim();
@@ -351,7 +349,7 @@ export function rowLead(t: Task, area: string | null = null): RowLead {
  * its stored options when it fits; a longer one shows a preview and "Open to decide ›"; one with no options is "Your call: <question> ›".
  * `compact` (the companion, r18): no per-row More, at most three lines of action and one of step; the row opens its sheet.
  */
-export function NeedRow({ t, onTask, onDecide, onNote, meta, compact = false, area = null }: { t: Task; onTask: (t: Task) => void; onDecide: (t: Task, option: string) => void; onNote?: (ref: NoteRef) => void;
+export function NeedRow({ t, onTask, onNote, meta, compact = false, area = null }: { t: Task; onTask: (t: Task) => void; /** r20 (Codex 7): answers are in the sheet only; kept for callers */ onDecide?: (t: Task, option: string) => void; onNote?: (ref: NoteRef) => void;
   /** A quiet line on where it stands, for a row that is not the user's ("With Casey · in progress"; the work view's In motion and Later). */
   meta?: string | null; compact?: boolean;
   /** r20: the row's area when it is shown outside it: an action row's subtitle names it when its title can't say where it belongs. */
@@ -376,9 +374,10 @@ export function NeedRow({ t, onTask, onDecide, onNote, meta, compact = false, ar
   // (up to 3 lines beside other lines, 4 alone); a decision's question is never clamped, its preview is two lines of whole words.
   // r18: in the companion an action is three lines at most, and a long "Your call" or "Check" two
   const quietMode = r.mode === "check" || r.mode === "waits" || r.mode === "tidy" || r.mode === "missing";
-  const clampMode = r.mode === "preview" || ((r.mode === "call" || quietMode) && compact);
+  // r20 (Codex 7): one decision presentation: a row is the question and opens the sheet, where the answers are; beside the chat, two lines
+  const clampMode = r.mode === "preview" || ((r.mode === "call" || r.mode === "answers" || quietMode) && compact);
   // r20: an action is two lines everywhere, the companion and the work view alike; what it cuts is the object, never the verb phrase
-  const titleMax = r.lead ? ACTION_LINES : isDecision ? (r.mode === "preview" || ((r.mode === "call" || r.mode === "tidy" || quietMode) && compact) ? 2 : 99) : quietMode ? (compact ? 2 : 99) : next || due ? 3 : 4;
+  const titleMax = r.lead ? ACTION_LINES : isDecision ? (r.mode === "preview" || ((r.mode === "call" || r.mode === "answers" || r.mode === "tidy" || quietMode) && compact) ? 2 : 99) : quietMode ? (compact ? 2 : 99) : next || due ? 3 : 4;
   useLayoutEffect(() => {
     const el = titleRef.current; if (!el) return;
     const measure = () => {
@@ -427,7 +426,6 @@ export function NeedRow({ t, onTask, onDecide, onNote, meta, compact = false, ar
     {sup?.kind === "list" ? <button type="button" className="cp-open-decide cp-rest cp-questions" onClick={() => onTask(t)}>{answerLabel(sup.items.length)}<span aria-hidden="true"> ›</span></button>
       : sup?.kind === "unclear" ? <button type="button" className="cp-open-decide cp-rest cp-questions" onClick={() => openSource(sup.from ?? { vault, id: t.id })}>{OPEN_TO_ANSWER}<span aria-hidden="true"> ›</span></button>
       : r.lead && t.nextCut && r.mode === "lead" && <button type="button" className="cp-open-decide cp-rest" onClick={() => onTask(t)}>The rest is in its note<span aria-hidden="true"> ›</span></button>}
-    {r.answers && <DecisionAnswer t={t} label={text} onDecide={onDecide} max={OPTS_SHOWN} onMore={() => onTask(t)} />}
   </li>;
 }
 

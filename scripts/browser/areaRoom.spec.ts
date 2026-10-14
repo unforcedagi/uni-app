@@ -59,8 +59,8 @@ test.describe('the app is a view in the room shell', () => {
     await bootAreas(page, 'seed');
     await openArea(page, 'Relationships');
     // r15: the real room is the heading; the area is a line under it
-    await expect(page.locator('.sr-title')).toHaveText('#Uni');
-    await expect(page.locator('.sr-context')).toHaveText('Relationships · no room of its own yet, talking in #Uni');
+    await expect(page.locator('.sr-title')).toHaveText('Relationships'); // r20 (Codex 6): the node stays the heading
+    await expect(page.locator('.sr-context')).toHaveText('Chat in #Uni · no room of its own yet');
     await expect(page.locator('.sr-chat').getByRole('textbox', { name: /^Message / })).toHaveAttribute('placeholder', 'Message #Uni'); // r13: the channel's own name
   });
 });
