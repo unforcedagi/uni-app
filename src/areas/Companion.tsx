@@ -491,7 +491,9 @@ export function CompanionStrip({ open, onToggle, ...p }: CompanionProps & Fold) 
     if (!asSheet) return;
     const el = ref.current; const room = el?.closest(".sr") as HTMLElement | null;
     setTop(el && room ? Math.max(0, Math.round(el.getBoundingClientRect().top - room.getBoundingClientRect().top)) : 0);
-    const opener = document.activeElement as HTMLElement | null;
+    // r17: focus goes back to the strip's own line when the sheet closes (the element focused before may be gone or be the body)
+    const line = el?.querySelector<HTMLElement>(".cp-line") ?? null;
+    const opener = line ?? (document.activeElement as HTMLElement | null);
     sheetRef.current?.focus();
     // Escape on the window, as the drawer does (r16: the walk harness can't send Escape, so this is checked with a dispatched key)
     const esc = (e: KeyboardEvent) => { if (e.key === "Escape" && !e.defaultPrevented && !document.querySelector(".task-sheet-wrap")) { e.preventDefault(); closeRef.current(); } };

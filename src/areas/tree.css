@@ -343,7 +343,8 @@
 .cp-sheet-close { all: unset; box-sizing: border-box; min-height: 44px; min-width: 44px; padding: 0 10px; display: inline-flex; align-items: center; justify-content: center; font: 500 14px var(--th-sans); color: var(--th-ink); cursor: pointer; border-radius: 8px; }
 .cp-sheet-close:focus-visible { outline: 2px solid var(--th-ink); outline-offset: -2px; }
 .cp-sheet .cp-body { padding: 10px 16px 6px; }
-.cp-sheet .cp-foot { position: static; }
+/* r17: the way to the room's whole work stays in sight at the sheet's foot, however long the list (Codex r16: missed at 800×600 and 740×360) */
+.cp-sheet .cp-foot { position: sticky; bottom: calc(-10px - env(safe-area-inset-bottom)); z-index: 1; padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
 .cp-line { all: unset; box-sizing: border-box; width: 100%; min-height: 46px; display: flex; align-items: center; gap: 10px; padding: 0 16px; cursor: pointer; }
 .cp-line-text { flex: 1; min-width: 0; font: 400 15px/1.3 var(--th-serif); color: var(--th-ink2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cp-chev { flex: none; width: 20px; text-align: center; font: 400 14px var(--th-sans); color: var(--th-mute); }

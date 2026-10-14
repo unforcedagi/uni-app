@@ -2406,6 +2406,27 @@ test.describe('r17', () => {
     await expect(wv.locator('.cp-private')).toHaveText('Sadhana: 1 for you ›');
   });
 
+  test('a short window\'s strip sheet keeps "All of …\'s work" in sight however long the list, and closing it gives focus back to the strip', async ({ page }) => {
+    for (const [w, h] of [[800, 600], [740, 360]] as const) {
+      await page.setViewportSize({ width: w, height: h });
+      await page.addInitScript(() => { localStorage.removeItem('uni.tabs.v2'); localStorage.removeItem('uni.lastRoom.v1'); });
+      await boot(page, { crowded: true });
+      await openRoom(page, 'COhere 2026');
+      const line = page.locator('.cp-line');
+      await line.click();
+      const sheet = page.getByRole('dialog', { name: /stands$/ });
+      await expect(sheet).toBeVisible();
+      expect(await sheet.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
+      const all = sheet.getByRole('button', { name: /^All of .*'s work/ });
+      const b = (await all.boundingBox())!; const sb = (await sheet.boundingBox())!;
+      expect(b.y + b.height).toBeLessThanOrEqual(sb.y + sb.height + 1);
+      expect(b.y).toBeGreaterThanOrEqual(sb.y);
+      await page.keyboard.press('Escape');
+      await expect(sheet).toHaveCount(0);
+      await expect(line).toBeFocused();
+    }
+  });
+
   test('a cut action ends on a whole word with a clean ellipsis, never on a colon', async ({ page }) => {
     await boot(page);
     await openRoom(page, 'ATLAS');
