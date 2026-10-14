@@ -52,7 +52,7 @@ test('a vault without the pack says so', async ({ page }) => {
 test('the picker switches vault and the choice persists', async ({ page }) => {
   await bootAnyVault(page, { savedVault: 'lifeos' });
   await expect(card(page, 'Health')).toBeVisible();
-  await page.getByLabel('Life OS vault').selectOption('bare');
+  await page.getByLabel('Areas and projects vault').selectOption('bare');
   await expect(page.getByRole('heading', { name: /isn't set up for Uni yet/ })).toBeVisible();
   expect(await page.evaluate(() => localStorage.getItem('uni.lifeos.vault'))).toBe('bare');
 });

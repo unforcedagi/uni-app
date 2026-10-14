@@ -9,6 +9,8 @@ import { bootAreas } from './areasFixture';
 const SHOTS = 'scripts/browser/__shots__/simple';
 const BUILD = '7dcea809-25cd-4160-ba99-f0a56386adcb';
 const wide = (page: Page) => (page.viewportSize()?.width ?? 0) >= 900;
+/** r17: the tree sits beside the room only on a wide window at least 400px tall; otherwise it is in the Places drawer. */
+const treeBeside = (page: Page) => wide(page) && (page.viewportSize()?.height ?? 0) >= 400;
 const fits = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth);
 const calls = (page: Page, cmd: string) => page.evaluate((c) => (window as any).__calls.filter((x: any) => x.cmd === c).map((x: any) => x.args), cmd);
 const shot = async (page: Page, name: string) => {
@@ -24,13 +26,13 @@ const shot = async (page: Page, name: string) => {
 };
 const base = { briefs: true, tree: true, tasks: true, atlas: true, steer: true, pinned: true } as const;
 const boot = (page: Page, extra: Parameters<typeof bootAreas>[2] = {}) => bootAreas(page, 'seed', { ...base, ...extra });
-const scope = (page: Page) => (wide(page) ? page.locator('.th-roomnav') : page.locator('.th-phone-tree'));
+const scope = (page: Page) => (treeBeside(page) ? page.locator('.th-roomnav') : page.locator('.th-phone-tree'));
 /** Open a room from the rooms list (phone: back to the list first when a room is open). */
 async function openRoom(page: Page, name: string) {
   // r16: the strip's sheet is modal over the room: close it first, as a person would
   if (!wide(page) && await page.locator('.cp-sheet').count()) { await page.keyboard.press('Escape'); await expect(page.locator('.cp-sheet')).toHaveCount(0); }
   // r13: below 900px the tree is the phone's home and, from a room, the drawer the room's header opens
-  if (!wide(page)) { await page.locator('.sr-drawer, .th-phone-tree').first().waitFor(); if (await page.locator('.sr-drawer').count() && !await page.locator('.th-drawer').count()) await page.locator('.sr-drawer').click(); }
+  if (!treeBeside(page)) { await page.locator('.sr-drawer, .th-phone-tree').first().waitFor(); if (await page.locator('.sr-drawer').count() && !await page.locator('.th-drawer').count()) await page.locator('.sr-drawer').click(); }
   await unfoldAll(page);
   await scope(page).locator(`.th-go[aria-label^="${name},"]`).click();
   // r15: the place opened (a node in a borrowed room has the room as its heading, the node on a line under it)
@@ -51,7 +53,7 @@ async function openCompanion(page: Page) {
   if (!wide(page) && await page.locator('.cp-line[aria-expanded="false"]').count()) await page.locator('.cp-line').click();
   await expect(page.locator('.cp-body')).toBeVisible();
   // r16: an opened strip shows the rows that fit whole; the rest (and a short window's whole strip) are in its sheet
-  if (!wide(page)) { const more = page.locator('.cp-strip-body .cp-more-rows'); if (await more.count()) { await more.click(); await expect(page.locator('.cp-sheet .cp-body')).toBeVisible(); } }
+  if (!wide(page)) { const more = page.locator('.cp-strip-body .cp-more-rows:not(.cp-more-all)'); if (await more.count()) { await more.click(); await expect(page.locator('.cp-sheet .cp-body')).toBeVisible(); } }
 }
 
 test.describe('simple', () => {
@@ -128,11 +130,13 @@ test.describe('simple', () => {
     await expect(page.locator('.sr-title')).toHaveText('Uni');
     await openCompanion(page);
     const needs = page.locator('.cp-body').getByRole('region', { name: 'Needs you' });
-    if (await page.locator('.cp-more-rows').count()) await page.locator('.cp-more-rows').click();
-    expect(await needs.locator('.cp-need').count()).toBeGreaterThanOrEqual(3);
-    await page.getByRole('button', { name: /^All of .*'s work/ }).click();
+    // r17: Uni's panel is at most three rows; everything else is one "N more ›" to the work view, which lists every one
+    expect(await needs.locator('.cp-list > .cp-item').count()).toBeLessThanOrEqual(3);
+    const more = needs.locator('.cp-more-all');
+    if (await more.count()) await more.click(); else await page.getByRole('button', { name: /^All of .*'s work/ }).click();
     // r13: the work view, inside the room shell
     await expect(page.locator('.sr-work section[aria-label="Needs you"]')).toBeVisible();
+    expect(await page.locator('.sr-work section[aria-label="Needs you"] .cp-need').count()).toBeGreaterThanOrEqual(3);
   });
 
   test('one tap on an option decides: a compare-and-set with the decided metadata', async ({ page }) => {
@@ -255,13 +259,14 @@ test.describe('simple', () => {
     await expect(page.getByRole('dialog').or(page.locator('.sheet, .task-sheet')).first()).toContainText('Decision (default yes)');
   });
 
-  test('teaching lists what is the user\'s own (r16: not a room task that only waits on them); not what waits on someone else', async ({ page }) => {
+  test('teaching lists what is the user\'s own and (r17) what waits on them, whoever holds it; not what waits on someone else', async ({ page }) => {
     await boot(page);
     await openRoom(page, 'Learn Vibe Build');
     await openCompanion(page);
     const needs = page.getByRole('region', { name: 'Needs you' });
-    await expect(needs.locator('.cp-item')).toHaveCount(1);
-    await expect(needs).not.toContainText('Canvas Week 7 brief draft');
+    await expect(needs.locator('.cp-item')).toHaveCount(2);
+    await expect(needs).toContainText('Your OK on the draft');
+    await expect(needs).toContainText('Canvas Week 7 brief draft');
     await expect(needs).toContainText('Grade the Week 6 reflections');
     await expect(needs).not.toContainText('Final brief');
   });
@@ -895,9 +900,11 @@ test.describe('simple', () => {
     await openCompanion(page);
     const item = page.locator('.cp-item').filter({ hasText: 'after-event' });
     await expect(item.getByText('Your call')).toBeVisible();
-    await expect(item.getByRole('button', { name: 'Yes' })).toBeVisible();
-    await expect(item.getByRole('button', { name: 'No', exact: true })).toBeVisible();
-    await item.getByRole('button', { name: 'Yes' }).click();
+    // r17: a proposal is not a question: its answers say what they do ("Go ahead", "Skip it"), never Yes/No beside a statement
+    await expect(item.getByRole('button', { name: 'Go ahead' })).toBeVisible();
+    await expect(item.getByRole('button', { name: 'Skip it', exact: true })).toBeVisible();
+    await expect(item.getByRole('button', { name: /^(Yes|No)$/ })).toHaveCount(0);
+    await item.getByRole('button', { name: 'Go ahead' }).click();
     const [call] = await calls(page, 'vault_decide');
     expect(call.metadata.decided).toBe('yes');
     expect(call.from).toBe('open'); expect(call.to).toBe('decided');
@@ -1076,7 +1083,8 @@ test.describe('simple', () => {
     expect(whole).toBeGreaterThan(0); expect(open).toBeGreaterThan(0);
     // the long question reads whole in the row itself, beside its buttons
     const long = page.locator('.cp-item').filter({ hasText: 'catering exclusivity clause' }).first();
-    await expect(long.getByRole('button', { name: /^(Yes|No)$/ })).toHaveCount(2);
+    // (r17: a proposal, "needs your yes", answers in words that say what they do)
+    await expect(long.getByRole('button', { name: /^(Go ahead|Skip it)$/ })).toHaveCount(2);
     await expect(long.locator('.cp-open-decide')).toHaveCount(0);
   });
 
@@ -1333,10 +1341,9 @@ test.describe('simple', () => {
     await scope(page).locator('.th-go[aria-label^="Uni,"]').click();
     await openCompanion(page);
     await expect(page.locator('.cp-item').first()).toBeVisible();
-    // a row that doesn't fit the panel can still wait behind "+N more", but N is never more than what was picked
-    const more = page.locator('.cp-more-rows');
-    if (await more.count()) { expect(Number((await more.innerText()).replace(/\D/g, ''))).toBeLessThanOrEqual(2); await more.click(); }
-    expect(await page.locator('.cp-item').count()).toBeLessThanOrEqual(3);
+    // r17: at most three rows; what doesn't fit, and everything else, is one "N more ›" to the work view, never "+N in areas"
+    expect(await page.locator('.cp-body .cp-item').count()).toBeLessThanOrEqual(3);
+    await expect(page.locator('.cp-body .cp-more-rows:not(.cp-more-all), .cp-body .cp-more-areas')).toHaveCount(0);
     await expect(page.getByRole('button', { name: /^All of Uni's work/ })).toBeVisible();
   });
 
@@ -1390,6 +1397,8 @@ test.describe('simple', () => {
   /** How many need you, as the companion says it: its rows (all of them, once "+N more" is opened), its private items and "+N in areas". */
   const panelCount = async (page: Page) => {
     const cp = page.locator('.cp-body');
+    // r17: Uni's panel is its rows and one "N more ›" (private items folded in)
+    if (await cp.locator('.cp-more-all').count()) return (await cp.locator('.cp-list > .cp-item').count()) + Number(/^(\d+) more/.exec(await cp.locator('.cp-more-all').innerText())![1]);
     if (await cp.locator('.cp-more-rows').count()) await cp.locator('.cp-more-rows').click();
     const rows = await cp.locator('.cp-list:not(.cp-privates) > .cp-item').count();
     const privates = (await cp.locator('.cp-privates .cp-title').allInnerTexts()).reduce((n, t) => n + Number(/: (\d+) for you/.exec(t)![1]), 0);
@@ -1417,8 +1426,10 @@ test.describe('simple', () => {
     await expect(cut.locator('.cp-title')).toHaveText(/^Decide: a daily calendar email to people ›$/i);
     await expect(wv).not.toContainText('Open to see the question');
     await expect(cut.getByRole('group', { name: /^Decide:/ })).toHaveCount(0);
-    // a whole question carries its answers here too
-    await expect(wv.locator('.cp-item').filter({ hasText: 'the long one that needs a longer ask' }).getByRole('group', { name: /^Decide:/ }).getByRole('button')).toHaveText(['Yes', 'No']);
+    // a whole statement with no answers that say what they do opens to decide (r17: never Yes/No beside a statement)
+    const stmt = wv.locator('.cp-item').filter({ hasText: 'the long one that needs a longer ask' });
+    await expect(stmt.getByRole('group', { name: /^Decide:/ })).toHaveCount(0);
+    await expect(stmt.locator('.cp-open-decide')).toHaveText('Open to decide ›');
     // never a Yes/No beside a title that ends cut short
     for (const row of await wv.locator('.cp-item').all()) if (await row.getByRole('group', { name: /^Decide:/ }).count()) expect((await row.locator('.cp-title').innerText()).trim()).not.toMatch(/(…|\.\.\.)$/);
     await cut.locator('.cp-need').click();
@@ -1448,12 +1459,14 @@ test.describe('simple', () => {
       if (await later.count()) { await expect(later.locator('.wv-fold')).toHaveAttribute('aria-expanded', 'false'); await expect(page.locator('section[aria-label="Needs you"]')).not.toContainText(/Send the Q4 invoice|Find a teacher/); }
       await page.getByRole('button', { name: 'Back to chat' }).click();
     }
-    // r14: from Uni a private area is one line, "Sadhana: N for you ›", opening that area; inside it, its items are ordinary rows
+    // r14/r17: from Uni's work view a private area is one line, "Sadhana: N for you ›", opening that area (the panel folds it into "N more"); inside it, its items are ordinary rows
     await openRoom(page, 'Uni');
     await openCompanion(page);
-    const priv = page.locator('.cp-privates .cp-need');
+    await expect(page.locator('.cp-body .cp-privates')).toHaveCount(0);
+    await page.getByRole('button', { name: /^All of .*'s work/ }).click();
+    const priv = page.locator('.sr-work .cp-private');
     await expect(priv).toHaveText('Sadhana: 1 for you ›');
-    await expect(page.locator('.cp-body')).not.toContainText(/Sit twenty minutes|Before breakfast|A private item/);
+    await expect(page.locator('.sr-work')).not.toContainText(/Sit twenty minutes|Before breakfast|A private item/);
     await priv.click();
     await expect(page.locator('.sr-title')).toHaveText('Sadhana');
     await openCompanion(page);
@@ -1558,11 +1571,11 @@ test.describe('simple', () => {
     await expect.poll(() => calls(page, 'vault_patch_meta').then((c) => c.filter((x: any) => x.metadata?.priority === 'soon').length)).toBe(1);
     await sheet.locator('.task-do.primary').click();
     await expect(page.getByRole('dialog')).toHaveCount(0);
-    await expect(page.locator('.sr-chat textarea')).toHaveValue(/go to send the SOW to Kevin/);
+    await expect(page.locator('.sr-chat textarea')).toHaveValue(/go to send the SOW to Kevin/i);
     expect(await calls(page, 'post_message')).toHaveLength(0);
   });
 
-  test('r13: below 900px the room header opens a drawer with the tree, Back/Forward, Recent and the app\'s places; Settings opens from it', async ({ page }) => {
+  test('r13/r17: below 900px the room header opens a drawer with the tree, Back/Forward and Recent; the app\'s places stay on the rail, never twice', async ({ page }) => {
     await page.setViewportSize({ width: 800, height: 600 });
     await boot(page);
     await openRoom(page, 'Techne');
@@ -1571,14 +1584,15 @@ test.describe('simple', () => {
     await page.getByRole('button', { name: 'Places' }).click();
     const drawer = page.getByRole('dialog', { name: 'Rooms and places' });
     await expect(drawer).toBeVisible();
-    expect(await drawer.getByRole('navigation', { name: 'App' }).getByRole('button').allInnerTexts()).toEqual(expect.arrayContaining(['Journal', 'Vault', 'Search', 'Settings']));
+    // r17 (Codex P2-4): the rail is on screen, so Places doesn't repeat it
+    await expect(page.getByRole('navigation', { name: 'Main navigation' })).toBeVisible();
+    await expect(drawer.getByRole('navigation', { name: 'App' })).toHaveCount(0);
     await expect(drawer.getByRole('button', { name: 'Back', exact: true })).toBeEnabled();
     await expect(drawer.getByRole('region', { name: 'Recent' })).toContainText('Techne');
     await expect(drawer.getByRole('navigation', { name: 'Rooms and areas' })).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(drawer).toHaveCount(0);
-    await page.getByRole('button', { name: 'Places' }).click();
-    await drawer.getByRole('button', { name: 'Settings' }).click();
+    await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Settings' }).click();
     await expect(page.locator('.settings')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Run sandbox self-test' })).toBeHidden();
     await expect(page.locator('.settings-dev > summary')).toHaveText('Developer');
@@ -1688,13 +1702,14 @@ test.describe('r14', () => {
     await expect(row.getByRole('button', { name: /^(Yes|No)$/ })).toHaveCount(0);
     await expect(row).not.toContainText('extra fee of 400 dollars');
     // a whole question that fits keeps its answers beside it
-    await expect(page.locator('.cp-body .cp-item').filter({ hasText: 'after-event' }).getByRole('button', { name: 'Yes' })).toBeVisible();
+    // (r17: a proposal's answers say what they do: "Go ahead", "Skip it")
+    await expect(page.locator('.cp-body .cp-item').filter({ hasText: 'after-event' }).getByRole('button', { name: 'Go ahead' })).toBeVisible();
     await row.locator('.cp-need').click();
     const sheet = page.getByRole('dialog');
     await expect(sheet.locator('#task-sheet-title')).toContainText('which it will only do for an extra fee of 400 dollars.');
-    await expect(sheet.getByRole('button', { name: 'Yes' })).toBeVisible();
+    await expect(sheet.getByRole('button', { name: 'Go ahead' })).toBeVisible();
     const rev = await page.evaluate(() => (window as any).__tasks.find((t: any) => t.id === 'dq11').updatedAt);
-    await sheet.getByRole('button', { name: 'Yes' }).click();
+    await sheet.getByRole('button', { name: 'Go ahead' }).click();
     await expect.poll(async () => (await calls(page, 'vault_decide')).length).toBe(1);
     const a = (await calls(page, 'vault_decide'))[0];
     expect(a).toEqual({ vault: 'uni', id: 'dq11', from: 'open', to: 'decided', metadata: { decided: 'yes', decided_at: expect.any(String), decided_by: expect.any(String) }, ifUpdatedAt: rev });
@@ -1710,7 +1725,7 @@ test.describe('r14', () => {
     await expect(row().locator('.cp-title')).toContainText(oldQ);
     // Uni rewrites the question; the list has not been read again: answering the question on screen is refused (it is not the latest)
     await page.evaluate(() => (window as any).__setContent('dq9', 'Decision (default yes): Should Uni ask attendees for one takeaway the morning after, instead of the prompt?'));
-    await row().getByRole('button', { name: 'Yes' }).click();
+    await row().getByRole('button', { name: 'Go ahead' }).click();
     await expect(page.getByRole('status').filter({ hasText: /changed or was decided elsewhere/ })).toBeVisible();
     const tried = await calls(page, 'vault_decide');
     expect(tried).toHaveLength(1);
@@ -1733,14 +1748,14 @@ test.describe('r14', () => {
     expect((await calls(page, 'vault_decide'))[1].ifUpdatedAt).toBe(rev);
   });
 
-  test('private areas: one line from above ("Sadhana: N for you ›"); inside the area, real rows with their actions and the sheet', async ({ page }) => {
+  test('private areas: from above, counted (r17: in Uni\'s "N more", and one line in its work view); inside the area, real rows with their actions and the sheet', async ({ page }) => {
     await boot(page, { privateTasks: true });
     await openRoom(page, 'Uni');
     await openCompanion(page);
-    const line = page.locator('.cp-body .cp-privates .cp-need');
-    await expect(line).toHaveText('Sadhana: 1 for you ›');
+    await expect(page.locator('.cp-body .cp-privates')).toHaveCount(0);
     await expect(page.locator('.cp-body')).not.toContainText(/Sit twenty minutes|Before breakfast|A private item/);
     await page.getByRole('button', { name: /^All of .*'s work/ }).click();
+    await expect(page.locator('.sr-work .cp-private')).toHaveText('Sadhana: 1 for you ›');
     await expect(page.locator('.sr-work')).not.toContainText(/Sit twenty minutes|Find a teacher|A private item/);
     await expect(page.locator('.sr-work .cp-privates, .sr-work .cp-private')).toHaveCount(1);
     await page.locator('.sr-work .cp-private').click();
@@ -1787,11 +1802,14 @@ test.describe('r14', () => {
     await drawer.getByRole('button', { name: 'Settings', exact: true }).click();
     await expect(page.locator('.settings')).toBeVisible();
     await expect(page.locator('.panel-head h1')).toHaveText('Settings');
-    // and a wider short window keeps the rail, with no Places button
+    // and a wider short window keeps the rail; under 400px tall the tree is in Places (r17), which then never repeats the rail's places
     await page.setViewportSize({ width: 1000, height: 360 });
     await page.getByRole('button', { name: 'Close panel' }).click();
     await expect(page.getByRole('navigation', { name: 'Main navigation' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Places' })).toHaveCount(0);
+    await expect(page.locator('.th-roomnav')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Places' }).click();
+    await expect(drawer.getByRole('navigation', { name: 'Rooms and areas' })).toBeVisible();
+    await expect(drawer.getByRole('navigation', { name: 'App' })).toHaveCount(0);
   });
 
   test('the drawer is a dialog: focus moves in and stays in, the room under it is inert, Escape and Back close it and focus returns', async ({ page }) => {
@@ -1898,7 +1916,9 @@ test.describe('r15', () => {
     expect(m.text.trim()).toMatch(/ ?…$/);
     // the last word shown is a whole word of the step (never a cut inside one)
     const step = 'Try the new check-in flow at example.invalid and answer the three questions. First question: does the QR code scan on the door? Second question: is the badge printout readable from a metre away? And the third question: who carries the spare scanner on the day of the festival, and where do they stand?';
-    expect(step.split(/\s+/)).toContain(m.last);
+    // (r17: a word that only leads into the rest, "question:", ends without its colon)
+    expect(step.split(/\s+/).map((w) => w.replace(/[,;:]+$/, ''))).toContain(m.last);
+    expect(m.text.trim()).not.toMatch(/[:;,]\s*…$/);
     await page.locator('.cp-body .cp-item').filter({ hasText: 'COhere festival readiness' }).getByRole('button', { name: 'More' }).click();
     await expect(lead).not.toHaveAttribute('data-cut', 'true');
     await expect(lead).toContainText('where do they stand?');
@@ -2161,17 +2181,18 @@ test.describe('r16', () => {
     await boot(page);
     await openRoom(page, 'ATLAS');
     const id = await taskId(page, /SOW for the commons grant/);
-    const cut = 'Merge RegenHub PRs #108 and #109 (both green), then answer the nine operational/editorial questions (door beep, hours, hero wording…) in the';
+    // (r17: a step that names its questions says "Answer N questions" instead; this one names none)
+    const cut = 'Run /restart when convenient: loads the uni-relay hook that closes run notes on [done|blocked|decision] markers. Everything else in T-125 is';
     expect(cut.length).toBe(140);
     await page.evaluate(([i, n]) => (window as any).__setTask(i, { next: n }), [id, cut]);
     // the decision's note is only its heading (with a preview link) and its options
     await page.evaluate(() => { const t = (window as any).__tasks.find((x: any) => x.id === 'dq2'); t.path = 'Decisions/2026-10-13 Ship the ATLAS hosting? (preview:…'; t.content = '# Ship the ATLAS hosting? (preview: https://example.invalid/hosting)\n\n- Self-host\n- Managed'; t.updatedAt = new Date(Date.now() + 6000).toISOString(); });
     await refresh(page, '2026-10-09T10:01:00.000Z');
     await openCompanion(page);
-    const row = page.locator('.cp-body .cp-item').filter({ hasText: 'Merge RegenHub PRs' });
-    // it ends on a whole word and says it is cut (the panel's four lines may cut it sooner), never "…in the"
+    const row = page.locator('.cp-body .cp-item').filter({ hasText: 'Run /restart when convenient' });
+    // it ends on a whole word and says it is cut (the panel's four lines may cut it sooner), never "…T-125 is"
     await expect(row.locator('.cp-lead')).toHaveText(/…$/);
-    await expect(row.locator('.cp-lead')).not.toHaveText(/\bin the\s*…?$/);
+    await expect(row.locator('.cp-lead')).not.toHaveText(/\bis\s*…?$/);
     await expect(row.getByRole('button', { name: 'The rest is in its note' })).toBeVisible();
     const dq = page.locator('.cp-body .cp-item').filter({ hasText: 'Ship the ATLAS hosting?' });
     await expect(dq.locator('.cp-title')).toHaveText('Ship the ATLAS hosting?');
@@ -2182,18 +2203,223 @@ test.describe('r16', () => {
     await expect(sheet.getByRole('button', { name: 'Open the note ›' })).toBeVisible();
   });
 
-  test('Needs you is the user\'s own: a room\'s task that only waits on them is in In motion as "Waiting on you"', async ({ page }) => {
+  test('Needs you is the user\'s (r17: and whatever waits on them, whoever holds it); a room\'s task waiting on someone else is in In motion', async ({ page }) => {
     await boot(page);
     await openRoom(page, 'Learn Vibe Build');
     await openWork(page);
     const wv = page.locator('.sr-work');
     await expect(wv.locator('section[aria-label="Needs you"]')).toContainText('Grade the Week 6 reflections');
-    await expect(wv.locator('section[aria-label="Needs you"]')).not.toContainText('Canvas Week 7 brief draft');
-    const moving = wv.locator('section[aria-label="In motion"] .cp-item').filter({ hasText: 'Canvas Week 7 brief draft' });
-    await expect(moving).toContainText('Waiting on you');
+    await expect(wv.locator('section[aria-label="Needs you"]')).toContainText('Canvas Week 7 brief draft');
+    await expect(wv.locator('section[aria-label="In motion"]')).not.toContainText('Canvas Week 7 brief draft');
+    const moving = wv.locator('section[aria-label="In motion"] .cp-item').filter({ hasText: 'Final brief' });
     await expect(moving).toContainText('with #atlas/teach');
     // the companion and the dots count the same
     const n = await wv.locator('section[aria-label="Needs you"] .wv-n').innerText();
     expect(Number(n)).toBe(await wv.locator('section[aria-label="Needs you"] .cp-item').count());
+  });
+});
+
+test.describe('r17', () => {
+  const refresh = async (page: Page, at: string) => { await page.clock.setFixedTime(Date.parse(at)); await page.evaluate(() => window.dispatchEvent(new Event('focus'))); };
+  const openWork = async (page: Page) => { await openCompanion(page); await page.getByRole('button', { name: /^All of .*'s work/ }).click(); await expect(page.locator('.sr-work')).toBeVisible(); };
+  /** A task or decision note added as Uni would write it (raw vault shape), read on the next refresh. */
+  const add = (page: Page, n: { id: string; title: string; node: string; tag?: string; meta?: Record<string, unknown>; content?: string }) => page.evaluate((x) => {
+    (window as any).__tasks.push({ id: x.id, path: `${x.tag === 'decision' ? 'Decisions' : 'Tasks'}/${x.title}`, extension: 'md', tags: [x.tag ?? 'task'], createdAt: '2026-10-10T08:00:00.000Z', updatedAt: new Date(Date.now() + 3000).toISOString(), lastUpdatedBy: 'u', lastUpdatedVia: 'mcp', content: x.content ?? x.title, metadata: { node: x.node, state: 'open', owner: 'aaron', ...(x.meta ?? {}) } });
+  }, n);
+  const sheetOf = (page: Page) => page.getByRole('dialog').filter({ has: page.locator('.task-kind') });
+
+  test('work waiting on Aaron is in Needs you whatever its owner: his requested action leads, the owning task is a quiet line, and its dot lights', async ({ page }) => {
+    await boot(page);
+    await add(page, { id: 'w-uni', title: 'T-150 Newsletter W42 draft', node: 'Projects/Learn Vibe Build', meta: { owner: 'uni', state: 'waiting', waiting_on: 'aaron', next: 'Pick the lead story: the cohort or the grant' } });
+    await refresh(page, '2026-10-09T10:01:00.000Z');
+    await openRoom(page, 'Learn Vibe Build');
+    await openCompanion(page);
+    const needs = page.locator('.cp-body section[aria-label="Needs you"]');
+    // a room's task (owner room:atlas/teach) and Uni's (owner uni), both waiting on Aaron
+    const room = needs.locator('.cp-item').filter({ hasText: 'Your OK on the draft' });
+    await expect(room).toBeVisible();
+    await expect(room.locator('.cp-lead')).toHaveText(/^Your OK on the draft/);
+    await expect(room.locator('.cp-under')).toHaveText('From #atlas/teach · Canvas Week 7 brief draft');
+    const uni = needs.locator('.cp-item').filter({ hasText: 'Pick the lead story' });
+    await expect(uni.locator('.cp-under')).toHaveText('From Uni · Newsletter W42 draft');
+    // the work view: in Needs you, never in In motion; the count is the companion's
+    await openWork(page);
+    const wv = page.locator('.sr-work');
+    await expect(wv.locator('section[aria-label="Needs you"]')).toContainText('Your OK on the draft');
+    await expect(wv.locator('section[aria-label="Needs you"]')).toContainText('Pick the lead story');
+    await expect(wv.locator('section[aria-label="In motion"]')).not.toContainText(/Canvas Week 7|Newsletter W42/);
+    // its sheet: the action, the task it belongs to, whose task it is
+    await wv.locator('.cp-item').filter({ hasText: 'Your OK on the draft' }).locator('.cp-lead').click();
+    const sheet = sheetOf(page);
+    await expect(sheet.locator('h2')).toHaveText(/Your OK on the draft/);
+    await expect(sheet.locator('.task-sub')).toHaveText('Canvas Week 7 brief draft');
+    await expect(sheet.locator('.task-facts')).toContainText('Task of#atlas/teach');
+    await page.keyboard.press('Escape');
+    // the tree's dot for its node
+    if (wide(page)) await expect(page.locator('.th-roomnav .th-go[aria-label^="Learn Vibe Build,"]')).toHaveAttribute('aria-label', /\d+ needs? you/);
+  });
+
+  test('"Say it in #room" only for the room: "Tell Christian…" leads with the action and offers Copy; "Say go…" and a step naming the room say it there', async ({ page }) => {
+    await boot(page);
+    await openRoom(page, 'ATLAS');
+    const id = await page.evaluate(() => (window as any).__tasks.find((t: any) => /SOW for the commons grant/.test(t.path)).id);
+    let minute = 0;
+    const step = async (next: string) => { await page.evaluate(([i, n]) => (window as any).__setTask(i, { next: n }), [id, next]); await refresh(page, `2026-10-09T10:${String(++minute).padStart(2, '0')}:00.000Z`); };
+    const openIt = async (text: string) => { await openCompanion(page); await page.locator('.cp-body .cp-item').filter({ hasText: text }).locator('.cp-lead, .cp-need').first().click(); return sheetOf(page); };
+    await step('Tell Christian the BVSD letter went out Oct 2, before the Oct 20 HRC meeting (skip if already done).');
+    let sheet = await openIt('Tell Christian');
+    await expect(sheet.locator('h2')).toHaveText(/^Tell Christian the BVSD letter went out Oct 2/);
+    await expect(sheet.getByRole('button', { name: /^Say it in/ })).toHaveCount(0);
+    await expect(sheet.locator('.task-do.primary')).toHaveText('Copy');
+    await sheet.getByRole('button', { name: 'Close' }).click();
+    // a person with an address: the real link
+    await step('Email kevin@example.org the scope summary');
+    sheet = await openIt('Email kevin@example.org');
+    await expect(sheet.locator('.task-do.primary')).toHaveText('Email kevin@example.org ›');
+    await expect(sheet.getByRole('button', { name: /^Say it in/ })).toHaveCount(0);
+    await sheet.getByRole('button', { name: 'Close' }).click();
+    // for the room: "Say go…"
+    await step('Say go to deploy #38 (companion) to production by Wed 10-14.');
+    sheet = await openIt('Say go to deploy');
+    await expect(sheet.locator('.task-do.primary')).toHaveText('Say it in #atlas/build ›');
+    await sheet.locator('.task-do.primary').click();
+    await expect(page.locator('.sr-chat textarea')).toHaveValue('Go to deploy #38 (companion) to production by Wed 10-14');
+    expect(await calls(page, 'post_message')).toHaveLength(0);
+    // "Reply to …" a person: never the room's composer
+    await page.locator('.sr-chat textarea').fill('');
+    await step('Reply to Kevin about the scope by Friday');
+    sheet = await openIt('Reply to Kevin');
+    await expect(sheet.getByRole('button', { name: /^Say it in/ })).toHaveCount(0);
+    await expect(sheet.locator('.task-do.primary')).toHaveText('Copy');
+    // housekeeping sits under the real action, quietly
+    const order = await sheet.evaluate((el) => [...el.querySelectorAll('button')].map((b) => b.textContent?.trim()));
+    expect(order.indexOf('Copy')).toBeLessThan(order.indexOf('Archive'));
+    await expect(sheet.locator('.task-house').getByRole('button', { name: 'Archive' })).toBeVisible();
+    await expect(sheet.locator('.task-house').getByRole('button', { name: 'Snooze until tomorrow' })).toBeVisible();
+  });
+
+  test('one answer mechanism: no approval buttons under a chat message; a message naming a decision links to its sheet', async ({ page }) => {
+    await boot(page);
+    await openRoom(page, 'ATLAS');
+    await page.evaluate(() => (window as any).__setTask('dq2', { task: 'T-140' }));
+    await refresh(page, '2026-10-09T10:01:00.000Z');
+    await page.evaluate((b) => (window as any).__arrive(b, 'Uni', '⚠️ Hermes wants to run a command that needs your OK\n```\nrm -rf build\n```\nReason: deletes files\nReply `/approve`, `/approve session`, `/approve always` or `/deny`.'), BUILD);
+    await page.evaluate((b) => (window as any).__arrive(b, 'Uni', 'The hosting call is yours: self-host or managed. [decision T-140]'), BUILD);
+    const chat = page.locator('.sr-chat');
+    await expect(chat.locator('.message').filter({ hasText: 'needs your OK' })).toBeVisible();
+    await expect(chat.locator('.approval-actions')).toHaveCount(0);
+    await expect(chat.getByRole('button', { name: /Approve|Deny|This session|Always/ })).toHaveCount(0);
+    const msg = chat.locator('.message').filter({ hasText: 'The hosting call is yours' });
+    await expect(msg).not.toContainText('T-140');
+    const link = msg.getByRole('button', { name: 'Answer in Needs you' });
+    await expect(link).toBeVisible();
+    await expect(chat.getByRole('button', { name: 'Answer in Needs you' })).toHaveCount(1);
+    // no answers in the chat: the link opens the decision's own sheet, which answers through the vault
+    await expect(msg.locator('.cp-opt')).toHaveCount(0);
+    await link.click();
+    const sheet = sheetOf(page);
+    await expect(sheet.locator('.task-kind')).toHaveText(/^Decision/);
+    await expect(sheet.getByRole('group', { name: /^Decide:/ }).getByRole('button')).toHaveText(['Self-host', 'Managed']);
+    await expect(page.locator('.message').getByRole('button', { name: /^(Self-host|Managed)$/ })).toHaveCount(0);
+  });
+
+  test('questions held in a note: the row says "Answer 9 questions ›" and the sheet lists them, numbered, read from the note (or a note it links)', async ({ page }) => {
+    await boot(page);
+    const nine = ['Front-door beep: silent keypad, leave it, or turn native relock off?', 'Published opening hours?', 'Hero: option 1, 2 or 3?', 'Remove the ownership claims from the homepage?', 'Keep crypto behind a switch?', 'Revoke a disabled member\'s guest codes too?', 'Ask jonbo for a 10-minute on-site check?', 'Reply to jonbo\'s door messages?', 'Edit, send or skip the W41 newsletter draft?'];
+    await add(page, { id: 'q9', title: 'T-160 RegenHub site + newsletter systems', node: 'Projects/ATLAS', meta: { priority: 'now', next: 'Merge RegenHub PRs #108 and #109 (both green), then answer the nine operational/editorial questions (door beep, hours, hero wording…) in the' }, content: `RegenHub site\n\nWhenever you return, answer any of:\n\n${nine.map((q) => `- ${q}`).join('\n')}\n` });
+    await page.evaluate(() => (window as any).__tasks.push({ id: '01M3ZYXCP9QEM2GS0E5THMXXX4', path: 'Projects/ATLAS/Refresh — read and questions', tags: [], metadata: {}, createdAt: '2026-10-02T00:00:00Z', updatedAt: '2026-10-02T00:00:00Z', content: '# Refresh\n\n- a fact\n\n## Questions for Aaron\n1. **Reader:** who should land here?\n2. Scope: a person or a body of work?\n\n## Next\n- later' }));
+    await add(page, { id: 'q2', title: 'T-161 unforced.org refresh', node: 'Projects/ATLAS', meta: { priority: 'now', next: 'When ready, answer the 2 refresh questions in a convo with main.' }, content: 'unforced.org refresh\n\n**Next:** read + 2 questions written (uni:01M3ZYXCP9QEM2GS0E5THMXXX4)' });
+    await refresh(page, '2026-10-09T10:01:00.000Z');
+    await openRoom(page, 'ATLAS');
+    await openWork(page);
+    const wv = page.locator('.sr-work');
+    const row = wv.locator('.cp-item').filter({ hasText: 'Merge RegenHub PRs' });
+    await expect(row.getByRole('button', { name: 'Answer 9 questions' })).toBeVisible();
+    await expect(row.getByRole('button', { name: 'The rest is in its note' })).toHaveCount(0);
+    await row.getByRole('button', { name: 'Answer 9 questions' }).click();
+    let sheet = sheetOf(page);
+    const list = sheet.locator('.task-q-list li');
+    await expect(list).toHaveCount(9);
+    await expect(list.first()).toHaveText(nine[0]);
+    expect(await sheet.locator('.task-q-list').evaluate((el) => el.tagName)).toBe('OL');
+    await sheet.getByRole('button', { name: 'Close' }).click();
+    // the questions are only in another note: that note's list, from the same vault, with a way to it
+    await wv.locator('.cp-item').filter({ hasText: 'refresh questions' }).getByRole('button', { name: 'Answer 2 questions' }).click();
+    sheet = sheetOf(page);
+    await expect(sheet.locator('.task-q-list li')).toHaveText(['Reader: who should land here?', 'Scope: a person or a body of work?']);
+    await expect(sheet.locator('.task-q-note')).toContainText('From Refresh — read and questions ›');
+    const reads = await calls(page, 'vault_note');
+    expect(reads.filter((a: any) => a.noteRef === '01M3ZYXCP9QEM2GS0E5THMXXX4').every((a: any) => a.vault === 'uni')).toBe(true);
+  });
+
+  test('a statement decision answers in words that say what each does; plain Yes/No only beside a question; with nothing to build, "Open to decide ›"', async ({ page }) => {
+    await boot(page);
+    await add(page, { id: 'txt', title: 'Decision: texting is not recommended for this year because carrier…', node: 'Projects/ATLAS', tag: 'decision', meta: { asked: '2026-10-06' }, content: 'Decision: texting is not recommended for this year because carrier approval may not clear before Oct 15.\n\n_Converted from Aaron/For you._' });
+    await add(page, { id: 'mail', title: 'Mail: approve a test week, not an immediate cutover', node: 'Projects/ATLAS', tag: 'decision' });
+    await add(page, { id: 'ship', title: 'Ship the ATLAS map this week?', node: 'Projects/ATLAS', tag: 'decision' });
+    await refresh(page, '2026-10-09T10:01:00.000Z');
+    await openRoom(page, 'ATLAS');
+    await openWork(page);
+    const wv = page.locator('.sr-work section[aria-label="Needs you"]');
+    const texting = wv.locator('.cp-item').filter({ hasText: 'Texting is not recommended' });
+    await expect(texting.getByRole('group', { name: /^Decide:/ }).getByRole('button')).toHaveText(['Agree (skip texting)', 'Disagree']);
+    await expect(texting.getByRole('button', { name: /^(Yes|No)$/ })).toHaveCount(0);
+    const mail = wv.locator('.cp-item').filter({ hasText: 'approve a test week' });
+    await expect(mail.locator('.cp-opt')).toHaveCount(0);
+    await expect(mail.locator('.cp-open-decide')).toHaveText('Open to decide ›');
+    const ship = wv.locator('.cp-item').filter({ hasText: 'Ship the ATLAS map this week?' });
+    await expect(ship.getByRole('group', { name: /^Decide:/ }).getByRole('button')).toHaveText(['Yes', 'No']);
+    // Yes and No never sit beside a sentence that is not a question, anywhere in the view
+    for (const item of await wv.locator('.cp-item').filter({ has: page.locator('.cp-yesno') }).all()) expect((await item.locator('.cp-title').innerText()).trim()).toMatch(/\?$/);
+    // the open one's sheet answers it with Agree and Disagree beside the whole statement; an answer is written in words
+    await mail.locator('.cp-need').click();
+    const sheet = sheetOf(page);
+    await expect(sheet.getByRole('group', { name: /^Decide:/ }).getByRole('button')).toHaveText(['Agree', 'Disagree']);
+    await sheet.getByRole('button', { name: 'Close' }).click();
+    await texting.getByRole('button', { name: 'Agree (skip texting)' }).click();
+    await expect.poll(async () => (await calls(page, 'vault_decide')).length).toBe(1);
+    expect((await calls(page, 'vault_decide'))[0].metadata.decided).toBe('agree: skip texting');
+  });
+
+  test('Uni\'s panel is lighter: at most three rows, then one "N more ›" to the work view (private items folded in, said in its tooltip); the work view keeps the full list', async ({ page }) => {
+    await boot(page, { crowded: true, privateTasks: true });
+    await openRoom(page, 'Uni');
+    await openCompanion(page);
+    const body = page.locator('.cp-body').last();
+    const needs = body.locator('section[aria-label="Needs you"]');
+    const shown = await needs.locator('.cp-list > .cp-item').count();
+    expect(shown).toBeGreaterThanOrEqual(1);
+    expect(shown).toBeLessThanOrEqual(3);
+    await expect(needs.locator('.cp-privates, .cp-private')).toHaveCount(0);
+    await expect(needs).not.toContainText(/Sadhana: \d+ for you|in areas/);
+    const more = needs.locator('.cp-more');
+    await expect(more).toHaveCount(1);
+    await expect(more).toHaveText(/^\d+ more ›$/);
+    await expect(more).toHaveAttribute('title', 'Includes 1 item in a private area');
+    const n = Number((await more.innerText()).match(/\d+/)![0]);
+    await more.click();
+    const wv = page.locator('.sr-work section[aria-label="Needs you"]');
+    await expect(wv).toBeVisible();
+    const total = Number(await wv.locator('.wv-n').innerText());
+    expect(shown + n).toBe(total);
+    expect(await wv.locator('.cp-item').count()).toBe(total); // every named row, and one line for the private area's one item
+    await expect(wv.locator('.cp-private')).toHaveText('Sadhana: 1 for you ›');
+  });
+
+  test('a cut action ends on a whole word with a clean ellipsis, never on a colon', async ({ page }) => {
+    await boot(page);
+    await openRoom(page, 'ATLAS');
+    const id = await page.evaluate(() => (window as any).__tasks.find((t: any) => /SOW for the commons grant/.test(t.path)).id);
+    await page.evaluate((i) => (window as any).__setTask(i, { next: 'Edit and send the draft to Mark and Michael: the follow-up after the October twelfth session with the deck, the estimate and the open questions about the second phase and its budget and dates' }), id);
+    await refresh(page, '2026-10-09T10:01:00.000Z');
+    await openCompanion(page);
+    const lead = page.locator('.cp-body .cp-item').filter({ hasText: 'Edit and send the draft' }).locator('.cp-lead');
+    await expect(lead).toBeVisible();
+    const text = (await lead.innerText()).replace(/\s+/g, ' ').trim();
+    if (await lead.getAttribute('data-cut')) {
+      expect(text).toMatch(/\p{L}…$/u);
+      expect(text).not.toMatch(/[:;,]\s*…$/);
+      expect(text).not.toMatch(/\b(the|and|to|of|with|its)\s*…$/i);
+    }
   });
 });
