@@ -64,9 +64,9 @@ test.describe('grant prompt', () => {
     expect(Object.keys(await grants(page))).toEqual(['app-techne']);
     // and it stays allowed after a reload
     await page.reload();
-    // 0.1.46: the reload reopens the area itself
-    await expect(page.locator('.area-bar-title')).toHaveText('Techne');
-    // a restored tab never starts the app by itself (it opens on the Brief); one tap on App does
+    // 0.1.46: the reload reopens the area itself, on its room
+    await expect(page.locator('.sr-title')).toHaveText('Techne');
+    // a restored tab never starts the app by itself (it opens on the Room); one tap on App does
     await expect(page.locator('iframe.area-frame')).toHaveCount(0);
     await page.getByRole('tab', { name: 'App', exact: true }).click();
     await expect(page.locator('iframe.area-frame')).toHaveCount(1);
@@ -280,7 +280,7 @@ test.describe('P2-C stop, revoke, and no auto-start of a restored app', () => {
     await openAreas(page); await openArea(page, 'Quiet');
     await expect(page.locator('iframe.area-frame')).toHaveCount(1);
     await page.reload();
-    await expect(page.locator('.area-bar-title')).toHaveText('Quiet');
+    await expect(page.locator('.sr-title')).toHaveText('Quiet');
     await expect(page.getByRole('tab', { name: 'App', exact: true })).toBeVisible();
     await expect(page.locator('iframe')).toHaveCount(0);
     await page.getByRole('tab', { name: 'App', exact: true }).click();

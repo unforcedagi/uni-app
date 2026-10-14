@@ -1,7 +1,7 @@
 // Life OS profile PR 3: chat.provider null hides every Buzz surface and makes no Buzz calls (fixture-based: a uni vault whose profile note says chat null).
 import { mkdir } from 'node:fs/promises';
 import { test, expect, type Page } from '@playwright/test';
-import { areaCard, bootAreas } from './areasFixture';
+import { bootAreas } from './areasFixture';
 
 const SHOTS = 'scripts/browser/__shots__/chat-optional';
 const wide = (page: Page) => (page.viewportSize()?.width ?? 0) >= 900;
@@ -27,8 +27,8 @@ test.describe('chat optional (profile.chat.provider null)', () => {
     if (wide(page)) await expect(panel(page)).toBeVisible(); else await expect(page.locator('.th-phone-tree')).toBeVisible();
     await noBuzz(page);
     await shot(page, `${mode}-home`);
-    if (wide(page)) await areaCard(page, 'Boulder').click(); else await page.getByRole('button', { name: /^Boulder,/ }).first().click();
-    await expect(wide(page) ? page.locator('.node-core h1') : page.locator('.th-head h1')).toHaveText('Boulder');
+    await page.getByRole('button', { name: /^Boulder,/ }).first().click();
+    await expect(page.locator('.th-head h1')).toHaveText('Boulder');
     await expect(page.getByRole('region', { name: 'What needs doing here' })).toBeVisible();
     await noBuzz(page);
     await shot(page, `${mode}-level`);
@@ -39,9 +39,9 @@ test.describe('chat optional (profile.chat.provider null)', () => {
     expect(await callsOf(page, 'post_message', 'send', 'prepare_voice_message')).toEqual([]);
   });
 
-  test('chat buzz (the uni vault) keeps the talk bar and room', async ({ page }) => {
+  test('chat buzz (the uni vault) keeps the room and its composer', async ({ page }) => {
     await boot(page, 'buzz');
     if (!wide(page)) await page.getByRole('button', { name: /^Uni,/ }).first().click();
-    await expect(page.getByRole('button', { name: /Hold to talk/ })).toBeVisible();
+    await expect(page.locator('.sr-chat').getByRole('textbox', { name: /^Message / })).toBeVisible();
   });
 });

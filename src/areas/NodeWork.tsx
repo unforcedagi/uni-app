@@ -77,7 +77,7 @@ export function TaskSheet({ task, here, nodeName, room, inRoom, onClose, onAct, 
 }) {
   const box = useRef<HTMLDivElement>(null);
   const opener = useRef<Element | null>(typeof document === "undefined" ? null : document.activeElement);
-  useEffect(() => { box.current?.querySelector<HTMLElement>("button.task-do, .task-answer button")?.focus(); const back = opener.current as HTMLElement | null; return () => { if (back?.isConnected) back.focus(); }; }, []);
+  useEffect(() => { box.current?.querySelector<HTMLElement>("button.task-do")?.focus(); /* never an answer: Enter must not decide by accident */ const back = opener.current as HTMLElement | null; return () => { if (back?.isConnected) back.focus(); }; }, []);
   const key = (e: ReactKeyboardEvent) => {
     if (e.key === "Escape") { e.stopPropagation(); onClose(); }
     if (e.key === "Tab") {

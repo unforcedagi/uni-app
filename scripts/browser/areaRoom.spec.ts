@@ -55,8 +55,9 @@ test.describe('layout', () => {
     const box = (await page.locator('.area-split').boundingBox())!;
     expect((await chat.boundingBox())!.width).toBeLessThanOrEqual(box.width * 0.6 + 1);
     const w = await page.evaluate(() => localStorage.getItem('uni.area.chatWidth.v1'));
-    // persisted across a reload and a different area
+    // persisted across a reload and a different area (a reload reopens the area on its room: one tap on App)
     await page.reload();
+    await page.getByRole('tab', { name: 'App', exact: true }).click();
     await expect(chat).toBeVisible();
     expect(Math.round((await chat.boundingBox())!.width)).toBe(Number(w));
     await mkdir('shots/t75', { recursive: true });
@@ -134,12 +135,12 @@ test.describe('layout', () => {
     await expect(page.locator(isDesktop(page) ? '.area-chat.side' : '.area-chat.sheet')).toHaveCount(1);
   });
 
-  test('an area with no room says so in the chat pane', async ({ page }) => {
+  test('an area with no room of its own talks in the room that holds it (r12: one room shell)', async ({ page }) => {
     await bootAreas(page, 'seed');
     await openArea(page, 'Relationships');
-    await expect(page.locator('.area-chat')).toContainText('This area has no room yet');
-    await expect(page.getByRole('textbox', { name: /^Message / }).filter({ visible: true })).toHaveCount(0);
-    await expect(page.getByRole('button', { name: /^Open #/ })).toHaveCount(0);
+    await expect(page.locator('.sr-title')).toHaveText('Relationships');
+    await expect(page.locator('.sr-door')).toHaveCount(0);
+    await expect(page.locator('.sr-chat').getByRole('textbox', { name: /^Message / })).toHaveAttribute('placeholder', 'Message #uni');
   });
 });
 
@@ -160,23 +161,21 @@ test.describe('the room is the real room', () => {
     await openArea(page, 'Techne');
     if (!isDesktop(page)) await page.locator('.sheet-peek').click();
     await composer(page, 'Techne').fill('half a thought');
+    // r12: the area's room is its Room tab (the room shell), so Open room goes there, with the draft
     await page.getByRole('button', { name: /Open #Techne/ }).click();
-    await expect(page.locator('.conversation-header')).toContainText('Techne');
+    await expect(page.getByRole('tab', { name: 'Room' })).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator('.sr-title')).toHaveText('Techne');
     await expect(page.locator('.tab-strip')).toHaveCount(0);
     await expect(composer(page, 'Techne')).toHaveValue('half a thought');
-    // Back returns to the area and its chat (0.1.46: Back over the places visited)
-    await page.keyboard.press('Alt+ArrowLeft');
-    await expect(page.locator('.area-bar-title')).toHaveText('Techne');
   });
 
   test('the area tab restores with its room after a reload', async ({ page }) => {
     await bootAreas(page, 'seed');
     await openArea(page, 'Techne');
     await page.reload();
-    await expect(page.locator('.area-bar-title')).toHaveText('Techne');
-    if (!isDesktop(page)) await page.locator('.sheet-peek').click();
+    await expect(page.locator('.sr-title')).toHaveText('Techne');
     await expect(composer(page, 'Techne')).toBeVisible();
-    await expect(page.locator('.area-chat .message-list')).toContainText('Run it on the laptop first.');
+    await expect(page.locator('.sr-chat .message-list')).toContainText('Run it on the laptop first.');
   });
 });
 
@@ -293,7 +292,7 @@ test.describe('suggestions', () => {
     await expect(bar).toContainText('from hush');
     await bar.getByRole('button', { name: 'Add to draft' }).click();
     await expect(composer(page, 'Techne')).toHaveValue('from hush');
-    await expect(page.locator('.conversation-header')).toContainText('Techne');
+    await expect(page.locator('.sr-title')).toHaveText('Hush');
   });
 });
 
@@ -314,7 +313,7 @@ test.describe('screenshots', () => {
         await page.screenshot({ path: `shots/t75/${info.project.name}-${scheme}-unforced.png` });
         await page.locator('.area-bar .note-back').click();
         await openArea(page, 'Sadhana');
-        await expect(page.locator('.area-chat')).toContainText('Sat twenty minutes');
+        await expect(page.locator('.sr-chat')).toContainText('Sat twenty minutes');
         await page.screenshot({ path: `shots/t75/${info.project.name}-${scheme}-default.png` });
       });
     });

@@ -6,6 +6,16 @@ async function press(page: Page, target: Locator) {
   else await target.click();
 }
 
+/** r12: a room no node owns is under "Other rooms" in the room tree (no rooms drawer); a phone goes back to the tree first. */
+async function switchRoom(page: Page, name: string) {
+  const phone = test.info().project.name === 'mobile';
+  if (phone && await page.locator('.sr-back').count()) await press(page, page.locator('.sr-back'));
+  const tree = page.locator(phone ? '.th-phone-tree' : '.th-roomnav');
+  const fold = tree.locator('.th-others .th-fold');
+  if (await fold.getAttribute('aria-expanded') !== 'true') await press(page, fold);
+  await press(page, tree.locator('.th-other .th-go').filter({ hasText: '#' + name.toLowerCase().replace(/\s+/g, '-') }));
+}
+
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     const w = window as any;
@@ -42,7 +52,7 @@ test.beforeEach(async ({ page }) => {
           case 'get_messages': return w.knownMessages ?? [];
           case 'vault_list': return [];
           case 'journal_config': return { hub: 'test' };
-          case 'refresh': return { total_items: 0, channel_errors: {}, truncated_channels: [] };
+          case 'refresh': return { pubkey: 'a'.repeat(64), total_items: 0, channel_errors: {}, truncated_channels: [] };
           case 'media_upload':
             if (sessionStorage.getItem('connectFailures')) {
               const remaining = Number(sessionStorage.getItem('connectFailures'));
@@ -295,11 +305,6 @@ for (const replacement of ['first draft', 'next draft']) {
 
 for (const replace of [false, true]) {
   test(`Held send across room navigation preserves scoped drafts and bindings, replace=${replace}`, async ({ page }) => {
-    const switchRoom = async (name: string) => {
-      if (test.info().project.name === 'mobile') await press(page, page.getByRole('button', { name: 'Back to conversations', exact: true }));
-      if (test.info().project.name !== 'mobile') await page.getByRole('button', { name: 'Rooms', exact: true }).click();
-      await press(page, page.locator('.rooms nav button').filter({ hasText: name }));
-    };
     const input = page.getByRole('textbox', { name: 'Message Test room' });
     const chooseMention = async (target: Locator) => {
       await target.fill('@Test');
@@ -314,26 +319,26 @@ for (const replace of [false, true]) {
       await input.fill('');
       await chooseMention(input);
     }
-    await switchRoom('Other room');
+    await switchRoom(page, 'Other room');
     const other = page.getByRole('textbox', { name: 'Message Other room' });
     await chooseMention(other);
     await other.dispatchEvent('keydown', { key: 'Enter' }); // The in-flight send still owns the global send lock.
-    await switchRoom('Test room');
+    await switchRoom(page, 'Test room');
     await expect(input).toHaveValue('@Test member ');
-    await switchRoom('Other room');
+    await switchRoom(page, 'Other room');
     await page.evaluate(() => (window as any).finishSend());
     await expect(page.getByRole('button', { name: 'Send message', exact: true })).toBeEnabled();
     await expect(other).toHaveValue('@Test member ');
     // A settled mention must stay settled after completion and scope restoration.
     await other.press('End');
     await expect(page.getByRole('listbox', { name: 'Mention a member' })).toHaveCount(0);
-    await switchRoom('Test room');
+    await switchRoom(page, 'Test room');
     await expect(input).toHaveValue(replace ? '@Test member ' : '');
     if (replace) {
       await input.press('End');
       await expect(page.getByRole('listbox', { name: 'Mention a member' })).toHaveCount(0);
     }
-    await switchRoom('Other room');
+    await switchRoom(page, 'Other room');
     await press(page, page.getByRole('button', { name: 'Send message', exact: true }));
     const calls = await page.evaluate(() => (window as any).calls.filter((c: any) => c.cmd === 'post_message'));
     expect(calls.map((c: any) => ({ channel: c.args.channel, body: c.args.body, recipients: c.args.recipients }))).toEqual([
@@ -399,8 +404,7 @@ for (const phase of ['recording', 'upload']) {
       await page.waitForFunction(() => !!(window as any).finishUpload);
     }
     await input.blur();
-    await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Rooms', exact: true }).click();
-    await page.locator('.rooms nav button').filter({ hasText: 'Other room' }).click();
+    await switchRoom(page, 'Other room');
     const other = page.getByRole('textbox', { name: 'Message Other room' });
     await other.fill('other draft');
     if (phase === 'recording') {
@@ -412,8 +416,7 @@ for (const phase of ['recording', 'upload']) {
     expect((await voicePosts(page))[0].args.channel).toBe('test');
     await expect(other).toHaveValue('other draft');
     await other.blur();
-    await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Rooms', exact: true }).click();
-    await page.locator('.rooms nav button').filter({ hasText: 'Test room' }).click();
+    await switchRoom(page, 'Test room');
     await expect(input).toHaveValue('origin draft');
   });
 }
@@ -454,16 +457,15 @@ for (const notify of [true, false]) {
       w.uniMember = true;
       const invoke = w.__TAURI_INTERNALS__.invoke;
       w.__TAURI_INTERNALS__.invoke = async (cmd: string, args: any) => {
-        if (cmd === 'get_messages') return [{ ref: 'thread-root', channel: 'test', author: 'b'.repeat(64), author_name: 'Test member', ts: 1790942400, body: 'Start a thread', root: null, parent: null, mentions: [], reply_count: 0, reactions: [] }];
+        if (cmd === 'get_messages') return [{ ref: 'thread-root', channel: 'test', author: 'b'.repeat(64), author_name: 'Test member', ts: 1790942400, body: 'Start a thread', root: null, parent: null, mentions: [], reply_count: 1, last_reply_ts: 1790942500, reactions: [] }];
         return invoke(cmd, args);
       };
     });
-    await page.getByRole('button', { name: 'Refresh messages', exact: true }).click();
-    if (test.info().project.name === 'desktop') await page.locator('article.message').first().hover();
-    await page.getByRole('button', { name: "More actions for Test member's message", exact: true }).click();
-    await page.getByRole('menuitem', { name: 'Reply in thread to Test member', exact: true }).click();
-    await expect(page.locator('.compose-destination')).toContainText('Replying in thread');
-    if (!notify) await page.getByRole('button', { name: 'Uni is listening', exact: true }).click();
+    // r12: no "Reply in thread" in the message menu; a thread opens from its replies, inside the room shell
+    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    await press(page, page.locator('.thread-summary').first());
+    await expect(page.locator('.sr-thread')).toContainText('Thread');
+    if (!notify) await page.getByRole('button', { name: /^Uni is listening/ }).click();
     await page.getByRole('textbox', { name: 'Message Test room' }).fill('@Test member stays in draft');
     await recordClip(page);
     await expect.poll(async () => (await voicePosts(page)).length).toBe(1);
@@ -687,8 +689,7 @@ for (const boundary of ['account', 'relay']) test(`Outbox ignores another ${boun
 
 test('Forget device key clears the whole outbox', async ({ page }) => {
   await seedForeign(page);
-  if (test.info().project.name === 'mobile') await page.getByRole('button', { name: 'Back to conversations', exact: true }).click();
-  await (test.info().project.name === 'mobile' ? page.locator('.rooms-header') : page.getByRole('navigation', { name: 'Main navigation' })).getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Settings', exact: true }).click();
   await page.getByRole('button', { name: 'Forget this device key', exact: true }).click();
   await page.getByRole('button', { name: /Tap again to forget/ }).click();
   await expect(page.locator('.pairing-card')).toBeVisible();

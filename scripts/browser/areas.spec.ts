@@ -12,12 +12,11 @@ const calls = (page: Page, cmd: string) => page.evaluate((c) => (window as any).
 test.describe('seed apps and navigation', () => {
   test.beforeEach(async ({ page }) => bootAreas(page, 'seed'));
 
-  test('home is the node map: foreground areas first, background ones smaller', async ({ page }, info) => {
+  test('home is the room tree: the areas, foreground first', async ({ page }, info) => {
     await openAreas(page);
-    const names = await page.locator('.node-arm').evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset.name));
-    expect(names).toEqual(['Techne', 'Unforced Development', 'Atlas', 'Expression', 'Relationships', 'Sadhana']);
-    await expect(card(page, 'Techne')).toHaveAttribute('class', /foreground/);
-    await expect(card(page, 'Relationships')).toHaveAttribute('class', /background/);
+    const names = await page.locator((page.viewportSize()?.width ?? 0) >= 900 ? '.th-roomnav' : '.th-phone-tree').locator('.th-row.d0 .th-go, .th-row.d1 .th-go').evaluateAll((els) => els.map((e) => (e.getAttribute('aria-label') ?? '').split(',')[0]));
+    expect(names.slice(0, 3)).toEqual(['Uni', 'Techne', 'Unforced Development']);
+    expect(names).toEqual(expect.arrayContaining(['Atlas', 'Expression', 'Relationships', 'Sadhana']));
     await expect(page.getByRole('button', { name: 'Refresh areas' })).toHaveCount(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await mkdir('shots/t74', { recursive: true });
@@ -65,7 +64,7 @@ test.describe('seed apps and navigation', () => {
     await page.locator('.suggestion-bar').getByRole('button', { name: 'Open' }).click();
     await expect(page.locator('.note-sheet')).toContainText('Techne plan body');
     await page.locator('.note-back').click();
-    await expect(page.locator('.area-bar-title')).toHaveText('Techne');
+    await expect(page.locator('.sr-title').or(page.locator('.area-bar-title')).first()).toHaveText('Techne');
   });
 
   test('unforced app renders a dashboard', async ({ page }, info) => {
@@ -79,15 +78,13 @@ test.describe('seed apps and navigation', () => {
     await page.screenshot({ path: `shots/t74/${info.project.name}-area-unforced.png` });
   });
 
-  test('an area without an app shows the Brief page (here: not written yet) and its room', async ({ page }) => {
+  test('an area without an app opens to its room, with no App tab', async ({ page }) => {
     await openAreas(page);
     await openArea(page, 'Sadhana');
     await expect(page.locator('iframe')).toHaveCount(0);
-    await expect(page.locator('.area-default')).toContainText("Uni hasn't written this area's brief yet");
-    await expect(page.locator('.area-default')).toContainText('Daily practice');
-    await expect(page.locator('.area-chat')).toContainText('Sat twenty minutes');
-    await expect(page.getByRole('button', { name: 'Open note' }), 'no button that opens the page you are on').toHaveCount(0);
-    await page.getByRole('button', { name: /Open #Sadhana/ }).click();
+    await expect(page.getByRole('tab')).toHaveCount(0);
+    await expect(page.locator('.sr-title')).toHaveText('Sadhana');
+    await expect(page.locator('.sr-chat')).toContainText('Sat twenty minutes');
     await expect(page.getByRole('textbox', { name: 'Message Sadhana' })).toBeVisible();
   });
 
@@ -96,8 +93,8 @@ test.describe('seed apps and navigation', () => {
     await openArea(page, 'Sadhana');
     await page.reload();
     // 0.1.46: launch reopens the place you were in.
-    await expect(page.locator('.area-bar-title')).toHaveText('Sadhana');
-    await page.locator('.area-bar .note-back').click();
+    await expect(page.locator('.sr-title')).toHaveText('Sadhana');
+    if (await page.locator('.sr-back').count()) await page.locator('.sr-back').click(); else await card(page, 'Uni').click();
     await expect(page.getByRole('heading', { name: 'Uni', level: 1 })).toBeVisible();
   });
 });
@@ -181,7 +178,8 @@ test.describe('platform gate', () => {
     await openAreas(page);
     await openArea(page, 'Techne');
     await expect(page.locator('iframe')).toHaveCount(0);
-    await expect(page.locator('.area-default')).toContainText('The craft of building');
+    await expect(page.getByRole('tab', { name: 'App' })).toHaveCount(0);
+    await expect(page.locator('.sr-title')).toHaveText('Techne');
     expect(await calls(page, 'vault_note').then((c: any[]) => c.filter((x) => x.args.noteRef === 'app-techne'))).toHaveLength(0);
   });
 });
@@ -350,7 +348,7 @@ test.describe('suggestions: only a tap on host UI acts', () => {
     await openArea(page, 'Steal');
     await page.waitForTimeout(2500);
     expect(await page.locator('.conversation-header').count(), 'the view was not hijacked into a room').toBe(0);
-    await expect(page.locator('.area-bar-title')).toHaveText('Steal');
+    await expect(page.locator('.area-bar-title').or(page.locator('.sr-title')).first()).toHaveText('Steal');
     await expect(page.locator('.suggestion-bar .suggestion'), 'pending is capped').toHaveCount(3);
     expect(await calls(page, 'post_message')).toHaveLength(0);
     await expect(page.locator('.note-sheet')).toHaveCount(0);
@@ -487,15 +485,4 @@ test.describe('design', () => {
     expect(Math.abs(geo.base - 18), 'baseline of line one is within 1px of the first rule').toBeLessThanOrEqual(1);
   });
 
-  test.describe('dark', () => {
-    test.use({ colorScheme: 'dark' });
-    test('tiny caps and muted text on the map are at least 4.5:1', async ({ page }) => {
-      await bootAreas(page, 'seed', { briefs: true });
-      await openAreas(page);
-      for (const sel of ['.node-cap', '.node-fresh', '.node-label.quiet', '.brief-fresh']) {
-        const { fg, bg } = await contrastOf(page, sel);
-        expect(ratio(fg, bg), sel).toBeGreaterThanOrEqual(4.5);
-      }
-    });
-  });
 });

@@ -594,17 +594,19 @@ Two proposals wait on a scope decision.
 }
 
 const railOf = (page: Page) => page.getByRole('navigation', { name: 'Main navigation' });
-/** Uni's home page (the app opens there; the rail's Uni button comes back to it). */
-export const openAreasHome = async (page: Page) => { await railOf(page).getByRole('button', { name: 'Uni', exact: true }).click(); await expect(page.getByRole('heading', { name: 'Uni', level: 1 })).toBeVisible(); await expect(page.locator('.area-bar-title')).toHaveText('Uni'); };
-/** An arm of the node map (T-83): the button that zooms into that child. */
-export const areaCard = (page: Page, name: string) => page.locator(`.node-arm[data-name="${name}"]`);
+/** Uni (the app opens there; the rail's Uni button comes back to it): the Uni room beside the tree, or the room tree itself on a phone. */
+export const openAreasHome = async (page: Page) => { await railOf(page).getByRole('button', { name: 'Uni', exact: true }).click(); await expect(page.getByRole('heading', { name: 'Uni', level: 1 })).toBeVisible(); };
+const isWide = (page: Page) => (page.viewportSize()?.width ?? 0) >= 900;
+/** A node's row in the room tree (r12: the tree is the only way to an area; the map and its arms are gone). */
+export const areaCard = (page: Page, name: string) => page.locator(isWide(page) ? '.th-roomnav' : '.th-phone-tree').locator(`.th-go[aria-label^="${name},"]`);
 /**
- * Opens an area from the map and, when it has a sealed app, its App tab.
- * `app: false` stays on the Brief; `true` requires the App tab; the default presses it when it shows up.
+ * Opens an area from the room tree and, when it has a sealed app, its App tab.
+ * `app: false` stays in the room; `true` requires the App tab; the default presses it when it shows up.
  */
 export async function openAreaPage(page: Page, name: string, opts: { app?: boolean } = {}) {
+  if (!isWide(page)) { const back = page.locator('.sr-back, .note-back[aria-label^="Back to"]').first(); if (await back.count() && !(await page.locator('.th-phone-tree').count())) await back.click(); }
   await areaCard(page, name).click();
-  await expect(page.locator('.area-bar-title')).toHaveText(name);
+  await expect(page.locator('.sr-title').or(page.locator('.area-bar-title')).first()).toHaveText(name);
   if (opts.app === false) return;
   const tab = page.getByRole('tab', { name: 'App', exact: true });
   if (opts.app === true || (await tab.waitFor({ state: 'visible', timeout: 1500 }).then(() => true, () => false))) await tab.click();

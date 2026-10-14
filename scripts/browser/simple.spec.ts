@@ -1273,13 +1273,15 @@ test.describe('simple', () => {
     }
   });
 
-  test('r12: Uni\'s own panel is Uni\'s items plus at most three from the areas, with no "+N more"', async ({ page }) => {
+  test('r12: Uni\'s own panel is Uni\'s items plus at most three from the areas: never a "+25 more"', async ({ page }) => {
     await boot(page, { crowded: true });
     await scope(page).locator('.th-go[aria-label^="Uni,"]').click();
     await openCompanion(page);
     await expect(page.locator('.cp-item').first()).toBeVisible();
+    // a row that doesn't fit the panel can still wait behind "+N more", but N is never more than what was picked
+    const more = page.locator('.cp-more-rows');
+    if (await more.count()) { expect(Number((await more.innerText()).replace(/\D/g, ''))).toBeLessThanOrEqual(2); await more.click(); }
     expect(await page.locator('.cp-item').count()).toBeLessThanOrEqual(3);
-    await expect(page.locator('.cp-more-rows')).toHaveCount(0);
     await expect(page.getByRole('button', { name: /^All of Uni's work/ })).toBeVisible();
   });
 

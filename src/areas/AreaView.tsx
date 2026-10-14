@@ -104,14 +104,16 @@ export default function AreaView({ area, channel, onChannel, mode, roomName, act
   const treePage = !onApp;
   const layout = treePage || !chatOn ? "hidden" : chatMode(onApp && manifest?.ok ? manifest.manifest.layout.chat : null, desktop);
   const layoutRef = useRef(layout); layoutRef.current = layout;
+  /** This area's room is its Room tab (the room shell): "Open room" and a draft for it go there, not to another place. */
+  const showRoomRef = useRef(() => {}); showRoomRef.current = () => setTab("brief");
   const hasRoom = area.rooms.length > 0;
   const rooms = area.rooms.length > 1 ? <RoomChips channels={area.rooms} selected={channel} roomName={roomName} onPick={onChannel} /> : null;
   const suggestions = useMemo(() => createSuggestionStore({
     onAccept: (s) => {
       if (s.kind !== "draft") { actionsRef.current.openNote(s.ref); return; }
-      // The composer is right there: fill it. Without a visible pane (hidden hint, other room) zoom into the room as before.
+      // The composer is right there: fill it. With the chat hidden (the app's hint) it is this area's room tab; another room opens.
       const r = roomRef.current;
-      if (r && layoutRef.current !== "hidden" && r.id === s.room) r.compose(s.text); else actionsRef.current.compose(s.room, s.text);
+      if (r && r.id === s.room) { r.compose(s.text); if (layoutRef.current === "hidden") showRoomRef.current(); } else actionsRef.current.compose(s.room, s.text);
     },
   }), [area.path]);
   const pendingSuggestions = useSyncExternalStore(suggestions.subscribe, () => suggestions.list().length, () => 0);
@@ -164,7 +166,7 @@ export default function AreaView({ area, channel, onChannel, mode, roomName, act
     <strong className={`area-bar-title ${framed ? "sr-only" : ""}`}>{name}</strong>
     {framed && mode === "approved-code" && <span className="area-mode-chip" title="On this device apps can reach the network through WebRTC, so this app is only as safe as its code. You approved this version.">Approved code</span>}
     <span className="area-bar-controls">
-      {channel && <button className="pairing-secondary area-zoom" onClick={() => actions.openRoom(channel)} title={`Open #${roomName(channel)} as a full room`} aria-label={`Open #${roomName(channel)} as a full room`}>Open room</button>}
+      {channel && <button className="pairing-secondary area-zoom" onClick={() => (room?.id === channel || area.rooms.includes(channel) ? setTab("brief") : actions.openRoom(channel))} title={`Open #${roomName(channel)} as a full room`} aria-label={`Open #${roomName(channel)} as a full room`}>Open room</button>}
       {framed && <>
         <button type="button" className="pairing-secondary area-menu-toggle" aria-label="App controls" aria-haspopup="true" aria-expanded={menu} onClick={() => setMenu((v) => !v)}>⋯</button>
         <span className={`area-app-actions ${menu ? "open" : ""}`}>

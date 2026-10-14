@@ -33,7 +33,7 @@
 }
 .tree-home-wrap { background: var(--th-paper); }
 .tree-home button { font-family: inherit; }
-.tree-home .th-mono, .th-ctx, .chg, .run-chip, .run-what small, .th-cap, .th-h, .wr-h, .wr-counts dt, .wr-meta, .wr-id, .wr-mv small, .wr-prio, .th-colname, .th-fresh, .th-roomline, .th-door, .th-up small, .th-slip small, .th-line small, .th-rnote, .th-crumbs, .task-meta, .work-group h3 { font-family: var(--th-mono); }
+.tree-home .th-mono, .th-ctx, .chg, .run-chip, .run-what small, .th-cap, .th-h, .wr-h, .wr-counts dt, .wr-meta, .wr-id, .wr-mv small, .wr-prio, .th-colname, .th-fresh, .th-roomline, .th-door, .th-up small, .th-line small, .th-crumbs, .task-meta, .work-group h3 { font-family: var(--th-mono); }
 
 /* ------------------------------------------------------------------------------------------------- the level (wide) */
 .tree-home.th-level { flex: 1; min-height: 0; display: grid; background: var(--th-ground); }
@@ -71,7 +71,7 @@
 .th-door-p { color: var(--th-mute); }
 .th-door.held { border-style: dashed; border-bottom-width: 3px; color: var(--th-ink2); background: transparent; }
 .th-door.th-rowdoor { min-height: 0; padding: 2px 8px 1px; border-radius: 12px 12px 2px 2px; border-bottom-width: 3px; font-size: 12px; align-self: flex-start; }
-.th-rnote { font-size: 12px; letter-spacing: .02em; color: var(--th-mute); }
+
 .th-tag { display: inline-grid; place-items: center; position: relative; flex: none; min-width: 28px; height: 26px; padding: 0 8px 0 15px; background: var(--th-ink); color: var(--th-card); clip-path: var(--th-tag); font: 700 12.5px/1 var(--th-mono); }
 .th-tag::before { content: ""; position: absolute; left: 5px; top: 50%; width: 5px; height: 5px; margin-top: -2.5px; border-radius: 50%; background: var(--th-card); }
 .th-open { flex: none; min-width: 26px; height: 24px; padding: 0 6px; box-sizing: border-box; display: inline-grid; place-items: center; border: 1.5px solid var(--th-ink); border-radius: 12px; background: var(--th-card); font: 700 12px/1 var(--th-mono); }
@@ -101,7 +101,7 @@
 .th-lines.needs .th-k { width: 14px; height: 17px; margin: 4px 4px 0 3px; border: 0; border-radius: 0; background: var(--th-ink); box-shadow: none; clip-path: var(--th-tag); }
 .th-line-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .th-line small { display: block; margin-top: 3px; font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--th-mute); }
-.th-ask { flex: none; font-size: 13px; }
+
 .tree-home .brief-link { color: var(--th-ink); }
 
 /* sap: an update climbing the tree */
@@ -135,11 +135,7 @@
 .tree-home .undo-go { font-family: var(--th-mono); text-transform: uppercase; letter-spacing: .06em; }
 
 /* the room: slips in a ledger, not bubbles */
-.th-roomhead { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin: 10px 0 8px; }
-.th-ledger { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
-.th-slip { padding: 8px 0 10px 14px; margin-bottom: 6px; border-left: 2px solid var(--th-ink); font: 400 16px/1.4 var(--th-serif); overflow-wrap: anywhere; }
-.th-slip small { display: block; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--th-mute); }
-.th-slip.me { margin-left: 28px; padding: 8px 12px 10px; background: var(--th-card); border-left: 6px solid var(--th-ink); box-shadow: inset 0 0 0 1px var(--th-hair2); }
+
 .sr-chat > .th-quiet { margin: 0; padding: 36px 24px; text-align: center; font-family: var(--th-serif); font-size: 17px; }
 .th-quiet { margin: 8px 0; color: var(--th-mute); font-style: italic; }
 
@@ -481,13 +477,11 @@ h3.wr-h { font-weight: 400; }
 .cp-yesno .cp-call { margin: 0 4px 0 0; }
 .cp-need .cp-title .cp-ref, .cp-need .cp-title span { display: inline; }
 .cp-next .cp-ref, .cp-next .cp-link { display: inline; }
-.cp-hint { -webkit-line-clamp: 1; line-clamp: 1; }
 
 /* r11: a decision's question is shown whole (never clamped), led by "Your call:" when it is not phrased as a question */
 .cp-need.decision .cp-title, .cp-item[data-open] .cp-title { -webkit-line-clamp: unset; line-clamp: none; overflow: visible; display: block; }
 .cp-call-lead { display: block; margin: 0 0 2px; font: 500 12px/1.3 var(--th-sans); color: var(--th-ink2); }
 /* the first words of a question that opens in the sheet: two quiet lines at most */
-.cp-need .cp-hint { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
 
 /* r12: one decision control everywhere (the companion's answers in the sheet and the work page too) */
 .task-row.decision { flex-wrap: wrap; max-height: none; }

@@ -4,19 +4,20 @@ import { bootRail } from './railFixture';
 
 test.beforeEach(async ({ page }) => bootRail(page));
 
-test('sidebar default follows the phone breakpoint', async ({ page }) => {
+test('a saved Uni room opens as Uni\'s room at every width; on a phone it is the place shown (r12: no rooms sidebar beside it)', async ({ page }) => {
   await page.addInitScript(() => localStorage.removeItem('uni.lastSurface.v1'));
   for (const width of [390, 599, 600, 1280]) {
     await page.setViewportSize({ width, height: 900 });
-    await page.evaluate(() => localStorage.setItem('uni.tabs.v1', JSON.stringify({ v: 1, tabs: [{ id: 'room', kind: 'room', channel: 'uni-room', title: 'Uni' }], active: 'room', recent: ['room'] })));
+    // a saved Uni-room tab (v1; the v2 the first load wrote would win): it opens as Uni's own room
+    await page.evaluate(() => { localStorage.removeItem('uni.tabs.v2'); localStorage.setItem('uni.tabs.v1', JSON.stringify({ v: 1, tabs: [{ id: 'room', kind: 'room', channel: 'uni-room', title: 'Uni' }], active: 'room', recent: ['room'] })); });
     await page.reload();
     await expect(page.getByRole('textbox', { name: 'Message Uni' })).toBeVisible();
     if (width < 600) await expect(page.locator('.shell')).toHaveClass(/in-room/);
-    else await expect(page.locator('.shell')).not.toHaveClass(/in-room/);
+    await expect(page.locator('aside.rooms')).toBeHidden();
   }
 });
 
-test('Rail surfaces, overlay panels, focus and phone list', async ({ page }, info) => {
+test('Rail surfaces, overlay panels, focus; rooms are in the tree (r12: no Rooms drawer)', async ({ page }, info) => {
   const phone = info.project.name === 'phone';
   const rail = page.getByRole('navigation', { name: 'Main navigation' });
   const shot = async (name: string) => {
@@ -30,7 +31,7 @@ test('Rail surfaces, overlay panels, focus and phone list', async ({ page }, inf
   };
   await expect(rail).toBeVisible();
   if (!phone) expect((await page.locator('.conversation').boundingBox())!.x).toBeLessThanOrEqual(80);
-  await expect(rail.getByLabel('Unread rooms')).toBeVisible();
+  await expect(rail.getByRole('button', { name: 'Rooms', exact: true })).toHaveCount(0);
   await shot('uni');
   if (phone) {
     const box = (await rail.boundingBox())!;
@@ -41,11 +42,8 @@ test('Rail surfaces, overlay panels, focus and phone list', async ({ page }, inf
     await expect(rail).toBeHidden();
     await input.blur();
     await expect(rail).toBeVisible();
-    await rail.getByRole('button', { name: 'Rooms', exact: true }).click();
-    await expect(page.locator('.rooms')).toBeVisible();
-    await page.getByRole('button', { name: 'Close panel', exact: true }).click();
-    await expect(page.locator('.rooms')).toBeHidden();
-    await expect(rail.getByRole('button').filter({ visible: true })).toHaveCount(5);
+    // Uni, Journal, For you, Vault, Search and Settings: everything the drawer used to hold is on the rail or in the tree
+    await expect(rail.getByRole('button').filter({ visible: true })).toHaveCount(6);
   }
   await rail.getByRole('button', { name: 'Journal', exact: true }).click();
   const writing = page.getByRole('textbox', { name: 'Journal entry', exact: true });
@@ -75,20 +73,16 @@ test('Rail surfaces, overlay panels, focus and phone list', async ({ page }, inf
     await expect(fy.locator('.rail-dot')).toHaveCount(0);
     await rail.getByRole('button', { name: 'Uni', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Uni', level: 1 })).toBeVisible();
-    const before = await page.locator('.conversation').boundingBox();
-    await rail.getByRole('button', { name: 'Rooms', exact: true }).click();
-    await expect(page.locator('.rooms')).toBeVisible();
-    expect((await page.locator('.conversation').boundingBox())!.x).toBe(before!.x);
-    await expect(rail.locator('[aria-current="page"], [aria-expanded="true"]')).toHaveCount(1);
-    await expect(page.locator('.capture-shortcuts')).toHaveCount(0);
-    await shot('rooms');
-    await page.locator('.rooms nav button').filter({ hasText: 'Garden' }).click();
-    await expect(page.locator('.rooms')).toBeHidden();
+    // a room no node owns is under "Other rooms" in the tree, and opens in the room shell
+    const narrow = page.viewportSize()!.width < 900;
+    if (narrow && await page.locator('.sr-back').count()) await page.locator('.sr-back').click();
+    const tree = page.locator(narrow ? '.th-phone-tree' : '.th-roomnav');
+    await tree.locator('.th-others .th-fold').click();
+    await tree.locator('.th-other .th-go').filter({ hasText: '#garden' }).click();
     await expect(page.getByRole('textbox', { name: 'Message Garden' })).toBeVisible();
-    if (phone) {
-      await rail.getByRole('button', { name: 'Rooms', exact: true }).click();
-      await page.locator('.phone-panel-tools').getByRole('button', { name: 'Vault', exact: true }).click();
-    } else await rail.getByRole('button', { name: 'Vault', exact: true }).click();
+    await expect(page.locator('.sr-title')).toHaveText('#garden');
+    await shot('other-room');
+    await rail.getByRole('button', { name: 'Vault', exact: true }).click();
     await expect(rail.locator('[aria-current="page"], [aria-expanded="true"]')).toHaveCount(1);
     await page.getByRole('button', { name: 'Close panel', exact: true }).click();
     await rail.getByRole('button', { name: 'Journal', exact: true }).click();
@@ -160,6 +154,7 @@ for (const size of [{ width: 844, height: 390 }, { width: 1092, height: 600 }]) 
 test('For you opened after an old tab set (a note was active) returns to the reading surface; the note itself is not reopened (r7)', async ({ page }) => {
   await page.evaluate(() => {
     localStorage.removeItem('uni.lastSurface.v1');
+    localStorage.removeItem('uni.tabs.v2');
     localStorage.setItem('uni.tabs.v1', JSON.stringify({ v: 1, tabs: [
       { id: 'uni', kind: 'room', channel: 'uni-room', title: 'Uni' },
       { id: 'stale', kind: 'note', title: 'ATLAS — Phase 02B', note: { hub: null, vault: 'uni', ref: 'stale-note' } },
