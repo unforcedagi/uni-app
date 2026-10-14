@@ -114,7 +114,7 @@ export function NextText({ text, vault, onNote, lines, open: openProp, onOpen, o
   }, [text, open, lines]);
   if (lines !== undefined && lines <= 0 && !open) return null;
   return <div className="cp-next-wrap">
-    <p ref={ref} className={`cp-next ${open ? "open" : ""}`} style={!open && lines !== undefined ? { WebkitLineClamp: lines, lineClamp: lines, maxHeight: `${(lines * 13.5 * 1.45).toFixed(2)}px` } as React.CSSProperties : undefined}>{splitLinks(cleanText(text)).map((p, i) => "url" in p
+    <p ref={ref} className={`cp-next ${open ? "open" : ""}`} style={!open && lines !== undefined ? { "--lines": lines, maxHeight: `${(lines * 13.5 * 1.45).toFixed(2)}px` } as React.CSSProperties : undefined}>{splitLinks(cleanText(text)).map((p, i) => "url" in p
       ? <a key={i} className="cp-link" href={p.url} title={p.url} rel="noreferrer noopener" onClick={(e) => openLink(e, p.url)}>{p.label}</a>
       : <RefText key={i} text={p.text} vault={vault} onNote={onNote} />)}</p>
     {!onOpen && (clamped || open) && <button type="button" className="cp-more-next" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? "Less" : "More"}</button>}
@@ -449,7 +449,8 @@ export function NeedRow({ t, onTask, meta, compact = false, area = null }: { t: 
   // Uni's to tidy) never shows it (r19)
   const showNext = !!next && !r.lead && r.mode === "title";
   const nextLines = compact ? Math.min(1, lineBudget(Math.min(titleLines, titleMax), !!due, 4).next) : lineBudget(Math.min(titleLines, titleMax), !!due, 4).next;
-  const clampStyle = isDecision ? undefined : ({ WebkitLineClamp: titleMax, lineClamp: titleMax } as React.CSSProperties);
+  // r23 (both critics): a clamp cuts at a whole line and never draws "…" (`--lines` in tree.css), here and in the step under a title
+  const clampStyle = isDecision ? undefined : ({ "--lines": titleMax } as React.CSSProperties);
   // r20: an action row's subtitle carries its due cue ("COhere opens Oct 15 · due today"); other rows keep the due line of their own
   // r22 (Codex P1): every Needs-you row says when it was asked ("asked Oct 11"), from the record's last change; never on a row that isn't the user's
   // r23 (Codex P1): when it was asked ("asked Oct 6") or, with no request time, added ("added Oct 11"); never the record's last change
@@ -478,7 +479,7 @@ export function NeedRow({ t, onTask, meta, compact = false, area = null }: { t: 
       {r.go && <span className="cp-open-decide">{r.go}</span>}
       {!next && !isDecision && r.mode === "title" && !actionableTitle(text) && text !== "Open to see what's needed" && <span className="cp-open-to-see">Open to see what's needed</span>}
       {/* the step under a title, as words (its links open in the sheet) */}
-      {showNext && nextLines > 0 && <span className="cp-next cp-next-in" style={{ WebkitLineClamp: nextLines, lineClamp: nextLines } as React.CSSProperties}>{splitLinks(cleanText(next)).map((p, i) => "url" in p
+      {showNext && nextLines > 0 && <span className="cp-next cp-next-in" style={{ "--lines": nextLines } as React.CSSProperties}>{splitLinks(cleanText(next)).map((p, i) => "url" in p
         ? <span key={i} className="cp-link" title={p.url}>{rowLinkLabel(p.label)}</span> : <RefText key={i} text={p.text} vault={vault} />)}</span>}
       {/* r18: "Answer N questions" only from an explicit list; an unclear source says to open the note (the sheet has both ways in) */}
       {sup?.kind === "list" ? <span className="cp-questions">{answerLabel(sup.items.length)}</span> : sup?.kind === "unclear" ? <span className="cp-questions">{OPEN_TO_ANSWER}</span> : null}
