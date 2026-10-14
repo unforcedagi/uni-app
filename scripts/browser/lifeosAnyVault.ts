@@ -31,7 +31,7 @@ export function vaultBridge(env: ScratchEnv, log: { cmd: string; args: any }[]) 
       }
       case 'vault_subtree_nodes': return list(v, `tag=node&limit=200&${near(args.root, false)}`);
       case 'vault_subtree_tasks': return list(v, `tag=${enc(args.tag)}&meta[state][in]=${enc(args.states.join(','))}&limit=${args.limit ?? 200}&${near(args.root, true)}`);
-      case 'vault_transition': return api(v, `/notes/${enc(args.id)}`, { method: 'PATCH', body: { state_transition: { field: 'state', from: args.from, to: args.to } } });
+      case 'vault_transition': return api(v, `/notes/${enc(args.id)}`, { method: 'PATCH', body: { state_transition: { field: 'state', from: args.from, to: args.to }, if_updated_at: args.ifUpdatedAt } });
       case 'vault_patch_meta': return api(v, `/notes/${enc(args.id)}`, { method: 'PATCH', body: { metadata: args.metadata, if_updated_at: args.ifUpdatedAt } });
       case 'vault_note': { const n = await api(v, `/notes/${enc(args.noteRef)}`); return { hub: 'http://scratch.invalid', vault: v, note: n.note ?? n }; }
       case 'vault_search': return [];

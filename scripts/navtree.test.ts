@@ -10,7 +10,9 @@ import { actionableTitle, askFromContent, askLead, askPreview, decisionQuestion,
 import { capped, RECHECK_MS, refKey, RETRY_MS, settle, shouldRead, splitRefs, titleOfPath } from "../src/areas/noteRefsCore.ts";
 import { readMessages, readRooms, readWho, writeMessages, writeRooms, writeWho } from "../src/chatCache.ts";
 import { isActiveRun } from "../src/areas/steerCore.ts";
-import { whereWeAre } from "../src/areas/whereCore.ts";
+import { taskTitle, whereWeAre } from "../src/areas/whereCore.ts";
+import { decideLine, firstWords, isMine, NEXT_CAP, stepText, stripRoom } from "../src/areas/simpleCore.ts";
+import { createSavedTasks, SAVED_MAX_TASKS } from "../src/areas/savedTasks.ts";
 import { buildTaskTree, parseNodes, parseTask, type Task } from "../src/areas/taskCore.ts";
 
 let failed = 0;
@@ -112,12 +114,14 @@ const AT = 1_000_000;
 const mk = (id: string, extra: Record<string, unknown> = {}, tags = ["task"]): Task =>
   parseTask({ id, path: `Tasks/${id} Do the thing`, tags, updatedAt: new Date(AT).toISOString(), metadata: { node: "Projects/ATLAS", state: "open", owner: "aaron", ...extra } }, tree)!;
 const feed = (tasks: Task[], today = "2026-10-01") => topNeeds(whereWeAre({ tasks, hidden: () => false, nowMs: AT }), undefined, Infinity, today).map((t) => t.id);
-check("needs-you feed: Aaron's own (or waiting on him), Now and Soon (unsorted is Soon), open decisions; Someday is not there", () => {
+check("needs-you feed: Aaron's own (r16: owner aaron), Now and Soon (unsorted is Soon), open decisions; Someday and a room's or Uni's task that only waits on him are not there", () => {
   const list = [mk("soon1", { priority: "soon" }), mk("none1"), mk("now1", { priority: "now" }), mk("some1", { priority: "someday" }),
-    mk("room1", { owner: "room:atlas", priority: "now" }), mk("wait1", { owner: "room:atlas", state: "waiting", waiting_on: "aaron", priority: "now" }), mk("dec1", { priority: "someday", options: ["a"] }, ["decision"])];
+    mk("room1", { owner: "room:atlas", priority: "now" }), mk("wait1", { owner: "room:atlas", state: "waiting", waiting_on: "aaron", priority: "now" }),
+    mk("uni1", { owner: "uni", state: "doing", waiting_on: "aaron", next: "Drafting the invite" }), mk("mine-wait", { state: "waiting", waiting_on: "aaron" }), mk("dec1", { priority: "someday", options: ["a"] }, ["decision"])];
   const ids = feed(list);
   assert.ok(!ids.includes("some1"), "someday task hidden"); assert.ok(!ids.includes("room1"), "a room's task is not Aaron's");
-  assert.ok(ids.includes("wait1") && ids.includes("none1") && ids.includes("dec1"));
+  assert.ok(!ids.includes("wait1") && !ids.includes("uni1"), "r16: a room's or Uni's drafting that waits on Aaron is In motion, not Needs you");
+  assert.ok(ids.includes("none1") && ids.includes("dec1") && ids.includes("mine-wait"));
   assert.equal(ids.indexOf("dec1"), ids.length - 1, "a someday decision sorts last");
 });
 check("r12 dots and the companion share one rule: Now, Soon and decisions of Aaron's, never Someday; a node's dot is its own", () => {
@@ -347,5 +351,60 @@ check("runs: only the ones still going are running", () => {
   assert.equal(isActiveRun({ state: "decision" }), true);
   assert.equal(isActiveRun({ state: "done" }), false);
   assert.equal(isActiveRun({ state: "failed" }), false);
+});
+
+// r16
+check("r16 one title cleaner: no id, no leading date, no \"(preview: …\" tail; a dropped preview means the question is in the note", () => {
+  assert.deepEqual(taskTitle("2026-10-13 Ship the Boulder Votes AI chat? (preview: …"), { id: null, rest: "Ship the Boulder Votes AI chat?", cut: false, previewed: true });
+  assert.deepEqual(taskTitle("T-40 2026-10-13 14:05 · Pick the guide (preview: the research note says…)"), { id: "T-40", rest: "Pick the guide", cut: false, previewed: true });
+  assert.deepEqual(taskTitle("T-65 Sponsorship invoice draft"), { id: "T-65", rest: "Sponsorship invoice draft", cut: false, previewed: false });
+  assert.equal(taskTitle("Uni adds Benya's missing feature 4, the …").cut, true);
+  assert.equal(taskTitle("2026-10-13").rest, "2026-10-13", "a title that is only a date keeps it");
+  assert.equal(taskTitle("(preview: x)").rest, "(preview: x)", "a title that is only a preview keeps it");
+});
+check("r16 a decision row with no whole question reads \"Decide: <first words>\", whole words, never a hanging word or \"…\"", () => {
+  assert.equal(decideLine("Uni adds Benya's missing feature 4, the …"), "Decide: Uni adds Benya's missing feature 4");
+  assert.equal(decideLine("A daily calendar email to people who …"), "Decide: A daily calendar email to people");
+  assert.equal(decideLine(""), "A decision waits on you");
+  assert.ok(!/…|\.\.\.$/.test(firstWords("Uni adds Benya's missing feature #4, the after-event prompt to the companion on Wed. Say no to skip it.")));
+  assert.ok(firstWords("x ".repeat(80)).length <= 48);
+});
+check("r16 a next step cut at the writer's 140 characters ends on a whole word and says it was cut", () => {
+  const cut = "Merge RegenHub PRs #108 and #109 (both green), then answer the nine operational/editorial questions (door beep, hours, hero wording…) in the";
+  assert.equal(cut.length, NEXT_CAP);
+  assert.deepEqual(stepText(cut), { text: "Merge RegenHub PRs #108 and #109 (both green), then answer the nine operational/editorial questions (door beep, hours, hero wording…) …", cut: true });
+  assert.deepEqual(stepText("Say go to deploy #38 (companion) + #58 (Today/Calendar) to production by Wed 10-14."), { text: "Say go to deploy #38 (companion) + #58 (Today/Calendar) to production by Wed 10-14.", cut: false });
+  const whole = "x".repeat(139) + ".";
+  assert.equal(stepText(whole).cut, false, "a 140-character step that ends a sentence is whole");
+});
+check("r16 Needs you is the user's own: owner aaron or a decision; Uni's drafting that waits on him is not", () => {
+  assert.equal(isMine(mk("a")), true);
+  assert.equal(isMine(mk("d", {}, ["decision"])), true);
+  assert.equal(isMine(mk("u", { owner: "uni", waiting_on: "aaron" })), false);
+  assert.equal(needsYou(mk("u", { owner: "uni", state: "waiting", waiting_on: "aaron" })), false);
+});
+check("r16 a short room keeps its composer and 40% for the conversation; the strip opens inline only with 200px to spare, else as a sheet", () => {
+  assert.deepEqual(stripRoom({ room: 313, above: 64, line: 46, composer: 60 }), { mode: "sheet" }, "740×360");
+  assert.deepEqual(stripRoom({ room: 553, above: 64, line: 46, composer: 60 }), { mode: "sheet" }, "800×600");
+  const phone = stripRoom({ room: 780, above: 64, line: 46, composer: 60 });
+  assert.equal(phone.mode, "inline");
+  if (phone.mode === "inline") assert.ok(phone.body <= 780 - 64 - 46 - 60 - 0.4 * 780 && phone.body >= 200);
+});
+check("r16 the saved list is per identity and vault, size-capped, and never read for another sign-in", () => {
+  const mem = new Map<string, string>();
+  const store = { getItem: (k: string) => mem.get(k) ?? null, setItem: (k: string, v: string) => { mem.set(k, v); }, removeItem: (k: string) => { mem.delete(k); } };
+  const saved = createSavedTasks(store);
+  const t = mk("a", { priority: "now" });
+  assert.equal(saved.write("aaron-key|uni", { at: 5, tree: { ...tree, truncated: false }, list: [t], truncated: false }), true);
+  const back = saved.read("aaron-key|uni");
+  assert.ok(back && back.at === 5 && back.list[0].id === "a" && back.tree.byPath.get("Projects/ATLAS")?.name === "ATLAS" && back.tree.parent.get("Projects/ATLAS") === "Areas/Atlas");
+  assert.equal(saved.read("other-key|uni"), null, "another identity reads nothing");
+  assert.equal(saved.read("aaron-key|life"), null, "another vault reads nothing");
+  assert.equal(saved.read("|uni"), null, "no identity yet reads nothing");
+  assert.equal(saved.write("aaron-key|uni", { at: 6, tree: { ...tree, truncated: false }, list: Array.from({ length: SAVED_MAX_TASKS + 1 }, (_, i) => mk(`x${i}`)), truncated: false }), false);
+  assert.equal(saved.read("aaron-key|uni"), null, "a list over the cap is not kept, and the older copy goes with it");
+  saved.write("aaron-key|uni", { at: 7, tree: { ...tree, truncated: false }, list: [t], truncated: false });
+  saved.clear();
+  assert.equal(saved.read("aaron-key|uni"), null, "Forget clears it");
 });
 if (failed) { console.log(`\n${failed} failed`); process.exit(1); }
