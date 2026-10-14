@@ -1,3 +1,4 @@
+import { pairingFailure } from "./pairingCore";
 import { VoiceOutbox } from "./voiceOutbox";
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
@@ -8,7 +9,11 @@ export default function Pairing({ onPaired }: { onPaired: (pubkey: string) => vo
   const [link, setLink] = useState("");
   const [step, setStep] = useState<PairStep>("paste");
   const [sas, setSas] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [error, setErrorText] = useState<string | null>(null);
+  /** r22 (Codex 5): the raw error, under Details; the line says what happened in words */
+  const [errorDetail, setErrorDetail] = useState<string | null>(null);
+  const setError = (e: string | null, detail: string | null = null) => { setErrorText(e); setErrorDetail(detail); };
+  const failed = (stage: "scan" | "start" | "confirm", e: unknown) => { const raw = e instanceof Error ? e.message : String(e); setError(pairingFailure(stage, raw), raw); };
 
   const isAndroid = /Android/i.test(navigator.userAgent);
   const scanning = useRef(false);
@@ -30,7 +35,7 @@ export default function Pairing({ onPaired }: { onPaired: (pubkey: string) => vo
       if (!uri.startsWith("nostrpair://")) throw new Error("This QR code is not a Uni/Buzz pairing link.");
       setLink(uri);
       await start(uri);
-    } catch (e) { setError(String(e)); setStep("paste"); }
+    } catch (e) { failed("scan", e); setStep("paste"); }
     finally { scanning.current = false; }
   }
 
@@ -42,7 +47,7 @@ export default function Pairing({ onPaired }: { onPaired: (pubkey: string) => vo
       const r = await invoke<{ sas: string }>("pairing_start", { uri });
       setSas(r.sas);
       setStep("code");
-    } catch (e) { setError(String(e)); setStep("paste"); }
+    } catch (e) { failed("start", e); setStep("paste"); }
   }
   async function confirm() {
     setError(null);
@@ -52,7 +57,7 @@ export default function Pairing({ onPaired }: { onPaired: (pubkey: string) => vo
       setLink("");
       setStep("done");
       onPaired(r.pubkey);
-    } catch (e) { setError(String(e)); setStep("paste"); }
+    } catch (e) { failed("confirm", e); setStep("paste"); }
   }
   async function cancel(codesDiffer: boolean) {
     try { await invoke("pairing_cancel", { codesDiffer }); } catch { /* best effort */ }
@@ -89,7 +94,7 @@ export default function Pairing({ onPaired }: { onPaired: (pubkey: string) => vo
         </div>
       </>}
       {step === "done" && <p>Paired. Loading your conversations…</p>}
-      {error && <p className="error" role="alert">{error}</p>}
+      {error && <div className="error" role="alert"><p>{error}</p>{errorDetail && errorDetail !== error && <details className="pairing-detail"><summary>Details</summary><p>{errorDetail}</p></details>}</div>}
       <details className="pairing-help"><summary>More about signing in</summary>
         <p className="pairing-note">Your key is sent encrypted, end to end, and kept in this device's secure storage.</p>
         <p className="pairing-note">Buzz desktop can sign this device in too: its Settings → Pair mobile device.</p>

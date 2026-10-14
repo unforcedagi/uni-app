@@ -3,6 +3,7 @@
 // Run: node --experimental-strip-types scripts/simpleR22.test.ts
 import assert from "node:assert/strict";
 import { askedLine, chatMovedOn, firstOfSteps, needsFeed, privateAction, privateActionLabel, privateRestLabel, ROW_ACTION_MAX, rowAction, rowForm, withHosts } from "../src/areas/simpleCore.ts";
+import { pairingFailure } from "../src/pairingCore.ts";
 import { buildTaskTree, parseNodes, parseTask, type Task } from "../src/areas/taskCore.ts";
 
 let failed = 0;
@@ -48,9 +49,9 @@ check("past 160 characters an action is shortened with words: brackets first, th
   assert.equal(firstOfSteps(rowAction(STAGING)!.steps), "Look at https://cohere-signup-staging.unforced.workers.dev/?look=ecology on phone (step 1 of 2)");
 });
 
-check("a request shows its age: \"asked Oct 11\", today, yesterday; the chat has moved on when it is more than a day newer", () => {
+check("a request shows its age: \"asked Oct 11\", or today; the chat has moved on when it is more than a day newer", () => {
   assert.equal(askedLine("2026-10-11T18:00:00.000Z", "2026-10-14"), "asked Oct 11");
-  assert.equal(askedLine("2026-10-13T18:00:00.000Z", "2026-10-14"), "asked yesterday");
+  assert.equal(askedLine("2026-10-13T18:00:00.000Z", "2026-10-14"), "asked Oct 13");
   assert.equal(askedLine(`2026-10-14T12:00:00`, "2026-10-14"), "asked today");
   assert.equal(askedLine(null), null);
   const asked = "2026-10-11T18:00:00.000Z";
@@ -82,6 +83,15 @@ check("private areas show the action (verb and object only), or one plain line w
   assert.equal(privateRestLabel(f.privates[0]), "In Private: 1 more thing for you · open Private");
   assert.equal(privateRestLabel({ place: "Private", others: 1, actions: [] }), "In Private: 1 thing for you · open Private");
   assert.equal(privateRestLabel({ place: "Private", others: 2, actions: [] }), "In Private: 2 things for you · open Private");
+});
+
+check("pairing failures say what happened in words; the raw error is only Details (Codex 5)", () => {
+  assert.equal(pairingFailure("start", "Error: relay handshake failed: os error 111"), "Couldn't reach the other device. Check that both are online, start a new pairing there, then paste its link again.");
+  assert.match(pairingFailure("start", "invalid pairing uri: missing secret"), /^That link couldn't be read/);
+  assert.match(pairingFailure("confirm", "pairing timed out"), /^The other device didn't answer in time/);
+  assert.match(pairingFailure("confirm", "decrypt failed"), /^This device wasn't signed in/);
+  assert.equal(pairingFailure("scan", "This QR code is not a Uni/Buzz pairing link."), "This QR code is not a Uni/Buzz pairing link.");
+  for (const s of ["start", "confirm", "scan"] as const) assert.doesNotMatch(pairingFailure(s, "Error: os error 111"), /os error|Error:/);
 });
 
 if (failed) { console.log(`${failed} failed`); process.exit(1); }

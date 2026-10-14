@@ -385,7 +385,7 @@ export function topNeeds(w: Where, _path?: string, max = Infinity, today = local
 export const localDay = (d = new Date()): string => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 /** A due date (YYYY-MM-DD) before today. */
 /**
- * When a request was set or last changed (r22, Codex P1): "asked today", "asked yesterday", "asked Oct 11". From the record's last change, the
+ * When a request was set or last changed (r22, Codex P1): "asked today", else "asked Oct 11". From the record's last change, the
  * only time the app has for it. Null: no time known.
  */
 export function askedLine(iso: string | null | undefined, today = localDay()): string | null {
@@ -394,8 +394,7 @@ export function askedLine(iso: string | null | undefined, today = localDay()): s
   const d = new Date(ms);
   const day = localDay(d);
   if (day === today) return "asked today";
-  const y = new Date(`${today}T12:00:00`); y.setDate(y.getDate() - 1);
-  if (day === localDay(y)) return "asked yesterday";
+  // a date, never "yesterday": it reads the same whenever the list is looked at again
   return `asked ${d.toLocaleDateString("en-US", { month: "short", day: "numeric", ...(day.slice(0, 4) !== today.slice(0, 4) ? { year: "numeric" } : {}) })}`;
 }
 /** The room's chat has moved on (r22, Codex P1): its last message is more than a day newer than the request. `lastTs` in seconds, as the rooms list has it. */
