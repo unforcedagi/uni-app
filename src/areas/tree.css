@@ -629,7 +629,8 @@
 .cp-item[data-mode="checking"] .cp-under { font-style: italic; }
 .wv-tidy .wv-h { color: var(--th-mute); }
 /* r20: an action row's subtitle: where it belongs (cut on a whole word if it must) and the due cue, which is never cut */
-.cp-under.cp-sub { display: flex; align-items: baseline; min-width: 0; }
+/* r22: when it was asked never pushes out where the row belongs: the date part wraps to a second line instead */
+.cp-under.cp-sub { display: flex; flex-wrap: wrap; align-items: baseline; min-width: 0; }
 .cp-sub-where { display: block; flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; }
 .cp-sub-where[hidden], .cp-sub-where [hidden] { display: none; }
 .cp-sub-when { flex: none; white-space: pre; }
