@@ -449,7 +449,8 @@ impl VaultClient {
     /// Decide an open decision in one atomic update: `state` open -> decided (a stale `from` fails with
     /// `transition_conflict`) and the `decided`, `decided_at`, `decided_by` metadata, nothing else. Only notes tagged
     /// `decision` (checked against the stored note).
-    pub async fn decide_note(&self, vault: &str, id: &str, from: Value, to: Value, metadata: Value) -> Result<Value> {
+    /// `if_updated_at` is the revision whose question the user read (r14): a decision changed since then is a conflict, never answered blind.
+    pub async fn decide_note(&self, vault: &str, id: &str, from: Value, to: Value, metadata: Value, if_updated_at: &str) -> Result<Value> {
         check_vault(vault)?;
         if id.trim().is_empty() {
             return Err(Error::Invalid("missing note id".into()));
@@ -459,8 +460,10 @@ impl VaultClient {
         if !note["tags"].as_array().is_some_and(|t| t.iter().filter_map(Value::as_str).any(|t| t == "decision")) {
             return Err(Error::Invalid("only decision notes can be decided".into()));
         }
-        let stamp = note["updatedAt"].as_str().unwrap_or_default();
-        let args = decide_args(vault, id, &from, &to, metadata, stamp)?;
+        let args = decide_args(vault, id, &from, &to, metadata, if_updated_at)?;
+        if note["updatedAt"].as_str() != Some(if_updated_at) {
+            return Err(Error::Conflict(format!("note {id} has been modified since its question was read")));
+        }
         let v = self.call("update-note", args).await?;
         check_vault_errors(&v)?;
         note_from(&v, id)
@@ -1522,6 +1525,36 @@ mod surface_tests {
             .patch_metadata("scope-test", "t1", json!({}), "")
             .await
             .is_err());
+        handle.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn deciding_writes_with_the_revision_whose_question_was_read() {
+        crate::init_crypto();
+        let md = json!({"decided": "yes", "decided_at": "2026-10-13T08:00:00Z", "decided_by": "aaron"});
+        let (client, handle) = server(vec![
+            (
+                "query-notes",
+                json!({"vault":"scope-test","id":"d1","include_links":true}),
+                json!({"notes":[{"id":"d1","path":"Tasks/T-9","tags":["decision"],"updatedAt":"r2"}]}),
+            ),
+            (
+                "query-notes",
+                json!({"vault":"scope-test","id":"d1","include_links":true}),
+                json!({"notes":[{"id":"d1","path":"Tasks/T-9","tags":["decision"],"updatedAt":"r2"}]}),
+            ),
+            (
+                "update-note",
+                json!({"vault":"scope-test","id":"d1","include_content":false,"metadata":md.clone(),"if_updated_at":"r2",
+                    "state_transition":{"field":"state","from":"open","to":"decided"}}),
+                json!({"id":"d1","path":"Tasks/T-9","updatedAt":"r3"}),
+            ),
+        ]);
+        // the question shown was read at r1; the note is now at r2: a conflict, and nothing is written
+        let stale = client.decide_note("scope-test", "d1", json!("open"), json!("decided"), md.clone(), "r1").await.unwrap_err();
+        assert!(matches!(stale, Error::Conflict(_)), "{stale}");
+        let done = client.decide_note("scope-test", "d1", json!("open"), json!("decided"), md, "r2").await.unwrap();
+        assert_eq!(done["updatedAt"], "r3");
         handle.join().unwrap();
     }
 
