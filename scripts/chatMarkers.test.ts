@@ -21,3 +21,5 @@ check("worker status matcher", () => {
   assert.equal(isWorkerStatus("⏳ Working on it\nand more"), false);
 });
 if (failed) process.exit(1);
+
+check("r14: a one-word qualifier is part of the marker", () => assert.deepEqual(splitMarkers("[done T-02 step] P1–P3 now run."), { text: "P1–P3 now run.", markers: [{ state: "done", task: "T-02" }] }));

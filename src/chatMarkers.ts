@@ -1,7 +1,8 @@
 // Bookkeeping markers a room appends to a message (`[done T-124]`, `[decision T-9]`, `[blocked T-3]`, `[active T-7]`): pulled off the
 // start or end of the text, or a whole line of only markers anywhere, so the chat can show them as quiet chips. Brackets inside a sentence stay as written.
 export type Marker = { state: "done" | "decision" | "blocked" | "active"; task: string };
-const ONE = "\\[(done|decision|blocked|active)\\s+(T-\\d+)\\]";
+// r14: a one-word qualifier after the id is part of the marker too (`[done T-02 step]`)
+const ONE = "\\[(done|decision|blocked|active)\\s+(T-\\d+)(?:\\s+[a-z]+)?\\]";
 const TAIL = new RegExp(`(?:^|[\\s]+)${ONE}\\s*$`, "i");
 const HEAD = new RegExp(`^\\s*${ONE}(?=\\s|$)`, "i");
 

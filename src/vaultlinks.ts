@@ -66,6 +66,9 @@ export function matchShorthandAt(src: string, i: number, vaults: readonly string
   const head = /^[a-z][a-z0-9_-]*:/.exec(src.slice(i));
   if (!head) return null;
   let end = i + head[0].length;
+  // r14: a bare note id (`uni:01M…` then a space or punctuation) is the whole ref, never the start of a path running on into the sentence
+  const id = /^[0-9A-HJKMNP-TV-Z]{26}(?![\w/])/.exec(src.slice(end, end + 27));
+  if (id) { const ref = parseShorthand(src.slice(i, end + 26), vaults); if (ref) return { ref: { ...ref, recover: true }, end: end + 26 }; }
   let parens = 0;
   // parseShorthand rejects refs over 1024 chars, so never scan further: an
   // unbounded scan made a long line of repeated refs quadratic.

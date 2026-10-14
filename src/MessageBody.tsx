@@ -7,10 +7,11 @@ import { splitMarkers } from "./chatMarkers";
 import { useNoteTitle } from "./areas/noteRefs";
 
 const ULID = /^[0-9A-HJKMNP-TV-Z]{26}$/;
-/** A note cited by its bare id (`uni:01M…`) reads as the note's title (r14), never as the id. */
-function NoteChipLabel({ id, fallback }: { id: string; fallback: React.ReactNode }) {
+/** A note cited by its bare id (`uni:01M…`) reads as the note's title (r14), never as the id: "a note" when it can't be read (the id stays in
+ *  the chip's tooltip). */
+function NoteChipLabel({ id }: { id: string }) {
   const t = useNoteTitle(id);
-  return <>{t && t !== "a note" ? t : t === null ? "the linked note" : fallback}</>;
+  return <>{t ?? "the linked note"}</>;
 }
 const bareId = (n: { ref: { ref: string; vault: string }; c: Inline[] }): string | null => {
   const id = n.ref.ref.trim();
@@ -47,7 +48,7 @@ export const Body = memo(function Body({ body, mentions, me, edited }: { body: s
           if (openNote) { e.preventDefault(); openNote(n.ref, n.href); }
           else if (n.href) openLink(e, n.href);
           else e.preventDefault();
-        }}><span className="note-chip-mark" aria-hidden="true">❋</span>{bareId(n) ? <NoteChipLabel id={bareId(n)!} fallback={inline(n.c, k)} /> : inline(n.c, k)}</a>;
+        }}><span className="note-chip-mark" aria-hidden="true">❋</span>{bareId(n) ? <NoteChipLabel id={bareId(n)!} /> : inline(n.c, k)}</a>;
     }
   });
   const blocks = (bs: Block[], key: string): React.ReactNode[] => bs.map((b, i) => {
