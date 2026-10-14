@@ -611,6 +611,9 @@ Two proposals wait on a scope decision.
           }
           case 'journal_config': return { hub: 'https://example.invalid', vault: 'uni' };
           // r21: a spec may make both searches fail (__searchFails)
+          // r21: a spec may offer pairing (__pairAvailable); its unlock never answers here, so the dialog stays on its first step
+          case 'pair_source_available': return !!w.__pairAvailable;
+          case 'pair_source_start': case 'pair_source_wait_offer': return new Promise(() => {});
           case 'search': if (w.__searchFails) throw 'search index: io error (os error 5)'; return [];
           case 'vault_search': if (w.__searchFails) throw 'vault search: 502 Bad Gateway'; return notes.filter((n) => (n.content ?? '').toLowerCase().includes(String(args.query).toLowerCase()) && (!args.pathPrefix || (n.path ?? '').startsWith(args.pathPrefix))).slice(0, args.limit ?? 20).map((n) => ({ vault: 'uni', id: n.id, path: n.path, snippet: String(n.content).slice(0, 60), score: null, mode: 'keyword' }));
           // r21: a spec may seed journal entries (fiction, never real journal content)
