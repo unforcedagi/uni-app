@@ -40,7 +40,7 @@ const fresh = (owner: string): Memory => ({ owner, tree: null, tasks: new Map(),
 let memory: Memory = fresh("");
 export function forgetTasks() { memory = fresh(""); }
 /** Forget on the device too (the user's Forget): the saved list goes with the key. */
-export function forgetSavedTasks() { forgetTasks(); savedTasks.clear(); forgetTitles(); }
+export function forgetSavedTasks() { forgetTasks(); savedTasks.clear(); forgetTitles(); vaultTasks.forgetKept(); }
 /** The list kept on the device for this identity and vault (r16), for Uni's level (the whole tree's list). */
 const savedFor = (owner: string, nodePath: string) => (nodePath === "" ? savedTasks.read(owner) : null);
 const scoped = (owner: string) => { if (memory.owner !== owner) memory = fresh(owner); return memory; };

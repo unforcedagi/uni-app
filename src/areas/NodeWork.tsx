@@ -4,10 +4,10 @@ import { cleanText } from "../interface/contract";
 import { isMe, ownerLabel, PRIORITIES, PRIORITY_LABEL, priorityOf, type Priority, type Task } from "./taskCore";
 import type { RoomRef } from "./talkCore";
 import type { ActResult, TaskAction, Undo } from "./useTasks";
-import { actionLead, answerLabel, answerText, ANSWER_MAX, checkLine, CHECK_FAILED, CHECKING, cutWords, dueLine, hostOf, OPEN_TO_ANSWER, stateLine, stepAudience, TIDY_SAYS, tidyRequest, toTidy, waitsLine, waitsOnMe } from "./simpleCore";
+import { actionLead, answerLabel, answerText, ANSWER_MAX, checkLine, CHECK_FAILED, CHECKING, cutWords, dueLine, hostOf, withHosts, OPEN_TO_ANSWER, stateLine, stepAudience, TIDY_SAYS, tidyRequest, toTidy, waitsLine, waitsOnMe } from "./simpleCore";
 import { requestRecheck } from "./useTasks";
 import { taskTitle } from "./whereCore";
-import { DecisionAnswer, NextText, decisionAsk, plainDetail, supportOf } from "./Companion";
+import { DecisionAnswer, NextText, decisionAsk, supportOf } from "./Companion";
 import { RefText } from "./noteRefs";
 import { splitRefs, type NoteRef } from "./noteRefsCore";
 import { useVaultProfile } from "./ProfileContext";
@@ -163,7 +163,7 @@ export function TaskSheet({ task, gone = false, here, nodeName, room, inRoom, on
     <div ref={box} className="task-sheet" role="dialog" aria-modal="true" aria-labelledby="task-sheet-title" tabIndex={-1}>
       <p className="task-kind">{decision ? `Decision${dflt ? ` (${dflt})` : ""}` : "Task"}{task.node !== here ? ` · in ${nodeName(task.node)}` : ""}</p>
       {dq?.answerable && dq.yourCall && !tidy && <small className="cp-call-lead">Your call:</small>}
-      <h2 id="task-sheet-title">{lead && !dq ? <RefText text={plainDetail(lead) || lead} vault={vault} /> : heading}</h2>
+      <h2 id="task-sheet-title">{lead && !dq ? <RefText text={withHosts(lead)} vault={vault} /> : heading}</h2>
       {(lead || check || checking || waits) && <p className="task-sub" title={sub !== rest ? rest : undefined}>{sub}</p>}
       {/* r19: why nothing is asserted yet */}
       {checking && <p className="task-q-note" role="status" aria-busy="true">Reading the notes this stands on before saying what it needs.</p>}
