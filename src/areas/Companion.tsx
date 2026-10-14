@@ -352,7 +352,9 @@ export function PrivateRow({ p, onPrivate }: { p: PrivateNeed; onPrivate?: (open
  * Only whole rows are shown: in the side panel (`fit`) the rows that don't fit above the footer wait behind "+N more ›" rather than being
  * cut or faded at the panel's bottom. Every row is drawn once to be measured (before paint), then the ones that fit stay.
  */
-export function NeedsList({ needs, fit, onTask, onDecide, onNote, onMore, extra = 0, moreTitle = null }: Pick<CompanionProps, "onTask" | "onDecide" | "onNote"> & { needs: readonly Task[]; fit: boolean; /** "+N more" opens elsewhere (the strip's sheet) instead of in place */ onMore?: () => void;
+export function NeedsList({ needs, fit, onTask, onDecide, onNote, onMore, extra = 0, moreTitle = null, keepOne = false }: Pick<CompanionProps, "onTask" | "onDecide" | "onNote"> & { needs: readonly Task[]; fit: boolean; /** "+N more" opens elsewhere (the strip's sheet) instead of in place */ onMore?: () => void;
+  /** The phone's inline strip always shows its first row (its body was sized to the room left beside the conversation). */
+  keepOne?: boolean;
   /** r17, Uni's panel: items past these rows (private ones included): they and any row that doesn't fit are one "N more ›" (`onMore`, the work view). */
   extra?: number; moreTitle?: string | null }) {
   const [limit, setLimit] = useState(Infinity);
@@ -387,7 +389,7 @@ export function NeedsList({ needs, fit, onTask, onDecide, onNote, onMore, extra 
     const budget = scroller.clientHeight - top - (body.scrollHeight - list.offsetHeight) - 40;
     let used = 0; let n = 0;
     // r17: not even the first row is kept when it doesn't fit whole (a 360px-tall window): it waits behind "+N more" too, never a sliver
-    for (const r of fits ? [] : rows) { if (used + r.offsetHeight > budget) break; used += r.offsetHeight; n++; }
+    for (const r of fits ? [] : rows) { if ((n > 0 || !keepOne) && used + r.offsetHeight > budget) break; used += r.offsetHeight; n++; }
     setLimit(fits || n >= rows.length ? Infinity : n);
     if (settled.current !== key) remeasured.current = 0;
     settled.current = key;
@@ -403,7 +405,7 @@ export function NeedsList({ needs, fit, onTask, onDecide, onNote, onMore, extra 
       if (scroller.scrollHeight <= scroller.clientHeight + 1) { remeasured.current = 0; return; }
       if (remeasured.current < 6) { remeasured.current++; setLimit(Infinity); setMeasuring(true); }
       // still over after measuring again (a row's height settles only once it is the last one shown): one row fewer, until it fits (r14)
-      else if (Number.isFinite(limit) && limit > 0) setLimit(limit - 1);
+      else if (Number.isFinite(limit) && limit > (keepOne ? 1 : 0)) setLimit(limit - 1);
     };
     const ro = new ResizeObserver(check);
     ro.observe(list);
@@ -421,7 +423,7 @@ export function NeedsList({ needs, fit, onTask, onDecide, onNote, onMore, extra 
   </>;
 }
 
-function Body({ stands, ready, note, load, feed, rest = 0, moreTitle = null, onPrivate, runs, nodeName, onTask, onDecide, onEverything, onNote, fit, hideHealth = false, onMore }: CompanionProps & { fit: boolean; hideHealth?: boolean; onMore?: () => void }) {
+function Body({ stands, ready, note, load, feed, rest = 0, moreTitle = null, onPrivate, runs, nodeName, onTask, onDecide, onEverything, onNote, fit, hideHealth = false, onMore, keepOne = false }: CompanionProps & { fit: boolean; hideHealth?: boolean; onMore?: () => void; keepOne?: boolean }) {
   const active = runs.filter(isActiveRun);
   const hiddenRuns = Math.max(0, active.length - RUNS_SHOWN);
   if (note) return <div className="cp-body"><p className="cp-lede cp-note">{note}</p></div>;
@@ -432,7 +434,7 @@ function Body({ stands, ready, note, load, feed, rest = 0, moreTitle = null, onP
     {ready && <section aria-label="Needs you" className="cp-sec" aria-busy={load?.refreshing || undefined}>
       <h3 className="cp-h">Needs you</h3>
       {/* r17: Uni's panel is at most three rows and one "N more ›" (private items folded in) to the work view, which keeps the full list */}
-      {feed.rows.length > 0 && <NeedsList needs={feed.rows} fit={fit} onTask={onTask} onDecide={onDecide} onNote={onNote} onMore={rest > 0 && onEverything ? onEverything : onMore} extra={onEverything ? rest : 0} moreTitle={moreTitle} />}
+      {feed.rows.length > 0 && <NeedsList needs={feed.rows} fit={fit} onTask={onTask} onDecide={onDecide} onNote={onNote} onMore={rest > 0 && onEverything ? onEverything : onMore} extra={onEverything ? rest : 0} moreTitle={moreTitle} keepOne={keepOne} />}
       {feed.rows.length === 0 && rest > 0 && onEverything && <button type="button" className="cp-more cp-more-rows cp-more-all" title={moreTitle ?? undefined} onClick={onEverything}>{rest} more ›</button>}
       {feed.privates.length > 0 && <ul className="cp-list cp-privates">{feed.privates.map((p) => <PrivateRow key={p.key} p={p} onPrivate={onPrivate} />)}</ul>}
       {feed.total === 0 && <p className="cp-none">Nothing needs you here.</p>}
@@ -511,7 +513,7 @@ export function CompanionStrip({ open, onToggle, ...p }: CompanionProps & Fold) 
         <span className="cp-chev" aria-hidden="true">{open ? "⌃" : "⌄"}</span>
       </button>
       {open && !asSheet && place?.mode === "inline" && <div className="cp-strip-body cp-fit" style={{ maxHeight: `${place.body}px` }}>
-        <Body {...p} fit hideHealth onMore={() => setSheet(true)} />
+        <Body {...p} fit hideHealth keepOne onMore={() => setSheet(true)} />
       </div>}
     </section>
     {asSheet && <div className="cp-sheet-wrap">
