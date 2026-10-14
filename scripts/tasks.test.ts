@@ -183,16 +183,23 @@ await check("fallback: loadTree queries the node tag without content; loadTasks 
   await api.loadTasks(t, ROOT);
   assert.equal("node" in (m.log.at(-1)!.args.metadata as object), false);
 });
-await check("transition(): 200 sends a state_transition with from/to; 409 and 422 are classified, never retried", async () => {
-  const m = mock({ vault_transition: (a) => (a.id === "ok" ? { id: "ok", updatedAt: "T2", lastUpdatedBy: "u", lastUpdatedVia: "api" } : new Error(a.id === "stale" ? "[transition_conflict] conflict: note stale" : "[schema_validation] state is not one of")) });
+await check("transition(): 200 sends a state_transition with from/to and the revision seen (r16); 409 and 422 are classified, never retried", async () => {
+  const m = mock({ vault_transition: (a) => (a.id === "ok" ? { id: "ok", updatedAt: "T2", lastUpdatedBy: "u", lastUpdatedVia: "api" } : new Error(a.id === "stale" ? "[transition_conflict] conflict: note stale" : a.id === "edited" ? 'conflict: note "edited" has been modified (current updated_at=T9, expected=T1)' : "[schema_validation] state is not one of")) });
   const api = createVaultTasks(m.call);
-  assert.deepEqual(await api.transition("ok", "open", "done"), { ok: true, updatedAt: "T2", lastUpdatedBy: "u", lastUpdatedVia: "api" });
-  assert.deepEqual(m.log[0], { cmd: "vault_transition", args: { vault: "uni", id: "ok", from: "open", to: "done" } });
-  const stale = await api.transition("stale", "open", "done");
+  assert.deepEqual(await api.transition("ok", "open", "done", "T1"), { ok: true, updatedAt: "T2", lastUpdatedBy: "u", lastUpdatedVia: "api" });
+  assert.deepEqual(m.log[0], { cmd: "vault_transition", args: { vault: "uni", id: "ok", from: "open", to: "done", ifUpdatedAt: "T1" } });
+  const stale = await api.transition("stale", "open", "done", "T1");
   assert.ok(!stale.ok && stale.kind === "conflict");
-  const bad = await api.transition("bad", "open", "bogus" as any);
+  // r16: the state is unchanged but the instruction was rewritten since the revision seen: a conflict too
+  const edited = await api.transition("edited", "open", "done", "T1");
+  assert.ok(!edited.ok && edited.kind === "conflict");
+  const bad = await api.transition("bad", "open", "bogus" as any, "T1");
   assert.ok(!bad.ok && bad.kind === "invalid");
-  assert.equal(m.log.length, 3);
+  assert.equal(m.log.length, 4);
+  // no revision: refused here, nothing is written
+  const blind = await api.transition("ok", "open", "done", "");
+  assert.ok(!blind.ok && blind.kind === "conflict");
+  assert.equal(m.log.length, 4);
 });
 await check("decide(): one update with the state compare-and-set, the decided metadata and the revision read (r14); a conflict is classified, never retried", async () => {
   const m = mock({ vault_decide: (a) => (a.id === "ok" ? { id: "ok", updatedAt: "T5", lastUpdatedBy: "u", lastUpdatedVia: "api" } : new Error("[transition_conflict] conflict: note stale")) });
@@ -203,12 +210,12 @@ await check("decide(): one update with the state compare-and-set, the decided me
   assert.ok(!stale.ok && stale.kind === "conflict");
   assert.equal(m.log.length, 2);
 });
-await check("Undo is the reverse transition (to → from), and snooze is a guarded metadata merge", async () => {
+await check("Undo is the reverse transition (to → from) guarded by the first write's revision, and snooze is a guarded metadata merge", async () => {
   const m = mock({ vault_transition: () => ({ id: "x", updatedAt: "T3" }), vault_patch_meta: () => ({ id: "x", updatedAt: "T4" }) });
   const api = createVaultTasks(m.call);
-  await api.transition("x", "open", "done");
-  await api.transition("x", "done", "open");
-  assert.deepEqual(m.log.map((l) => [l.args.from, l.args.to]), [["open", "done"], ["done", "open"]]);
+  const w = await api.transition("x", "open", "done", "T2");
+  await api.transition("x", "done", "open", w.ok ? w.updatedAt! : "");
+  assert.deepEqual(m.log.map((l) => [l.args.from, l.args.to, l.args.ifUpdatedAt]), [["open", "done", "T2"], ["done", "open", "T3"]]);
   const s = await api.snooze("x", "2026-10-11", "T3");
   assert.ok(s.ok);
   assert.deepEqual(m.log[2], { cmd: "vault_patch_meta", args: { vault: "uni", id: "x", metadata: { snoozed_until: "2026-10-11" }, ifUpdatedAt: "T3" } });
