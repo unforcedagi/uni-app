@@ -3739,6 +3739,7 @@ test.describe('r23', () => {
     // Techne's chat has messages up to Oct 9; this request was asked on Oct 6
     await page.evaluate(() => (window as any).__arrive('ch-techne', 'Uni', 'The placeholder deploy is ready whenever you are.', 3600));
     await add(page, { id: 'go', title: 'T-303 Placeholder deploy', node: 'Areas/Techne', meta: { next: 'Say go on the placeholder deploy', asked: '2026-10-06T18:00:00.000Z' } });
+    await add(page, { id: 'go3', title: 'T-309 Placeholder budget', node: 'Areas/Techne', meta: { next: 'Say go on the quarterly budget', asked: '2026-10-06T18:00:00.000Z' } });
     await add(page, { id: 'go2', title: 'T-304 Placeholder fresh deploy', node: 'Areas/Techne', meta: { next: 'Say go on the fresh placeholder deploy', asked: new Date(Date.now() + 5000).toISOString() } });
     await refresh(page, '2026-10-14T09:00:00.000Z');
     await openRoom(page, 'Techne');
@@ -3758,9 +3759,32 @@ test.describe('r23', () => {
     await expect(page.locator('.sr-chat')).toBeVisible();
     await expect(page.locator('.sr-chat textarea, .sr-chat [contenteditable]').first()).toHaveText('');
     await openWork(page);
+    // r24: the room's newer chat is about other things: no cue, and "Say it" stays the primary
+    await rowOf(page, 'Say go on the quarterly budget').locator('.cp-need').click();
+    await expect(sheetOf(page).locator('.task-asked')).toBeVisible();
+    await expect(sheetOf(page).locator('.task-movedon')).toHaveCount(0);
+    await expect(sheetOf(page).locator('.task-do.primary')).toHaveText(/^Say it in #/);
+    await sheetOf(page).getByRole('button', { name: 'Close' }).click();
     await rowOf(page, 'Say go on the fresh placeholder deploy').locator('.cp-need').click();
     await expect(sheetOf(page).locator('.task-movedon')).toHaveCount(0);
     await expect(sheetOf(page).locator('.task-do.primary')).toHaveText(/^Say it in #/);
+  });
+
+  test('a step that names a block shows inline text only when it came from that block: otherwise "Open #room to find the \'For Harper\' block"', async ({ page }) => {
+    await boot(page);
+    await add(page, { id: 'b1', title: 'T-310 Placeholder block', node: 'Areas/Techne', meta: { next: "Forward #techne's 'For Harper' block (posted 10-13)", detail: 'Something else entirely: the Spanish copy list.', room: 'techne' } });
+    await add(page, { id: 'b2', title: 'T-311 Placeholder block two', node: 'Areas/Techne', meta: { next: "Forward #techne's 'For Casey' block (posted 10-13)", detail: "## For Casey\nHi Casey, the placeholder text.", room: 'techne' } });
+    await refresh(page, '2026-10-14T09:00:00.000Z');
+    await openRoom(page, 'Techne');
+    await openWork(page);
+    await rowOf(page, "'For Harper' block").locator('.cp-need').click();
+    await expect(sheetOf(page).locator('.task-detail')).toHaveCount(0);
+    await expect(sheetOf(page).locator('.task-block-gap')).toContainText("Open #techne to find the 'For Harper' block");
+    await expect(sheetOf(page).getByText('Spanish copy list')).toHaveCount(0);
+    await sheetOf(page).getByRole('button', { name: 'Close' }).click();
+    await rowOf(page, "'For Casey' block").locator('.cp-need').click();
+    await expect(sheetOf(page).locator('.task-detail')).toContainText('Hi Casey, the placeholder text.');
+    await expect(sheetOf(page).locator('.task-block-gap')).toHaveCount(0);
   });
 
   test('no ellipsis: a step stored cut short is shown as stored, with "(the note ends here · open the note)"; a preview question has none', async ({ page }) => {
@@ -3787,6 +3811,7 @@ test.describe('r23', () => {
     await refresh(page, '2026-10-14T09:00:00.000Z');
     await openRoom(page, 'Techne');
     await openWork(page);
+    await expect(rowOf(page, 'Send Ryan the deploy-access message').locator('.cp-lead')).toHaveText('Send Ryan the deploy-access message (in the card)');
     await rowOf(page, 'Send Ryan the deploy-access message').locator('.cp-need').click();
     const sheet = sheetOf(page);
     await expect(sheet.locator('.task-detail')).toContainText('Hey Ryan, this is the placeholder message');
