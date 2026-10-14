@@ -152,12 +152,9 @@ h1 { font-family: var(--serif); font-weight: 500; font-size: 34px; line-height: 
 .pill:hover { border-color: var(--line-strong); }
 .pill span { font-size: 11px; color: var(--muted); margin-left: 2px; }
 .pill.mine { border-color: var(--accent); background: var(--accent-soft); }
-.approval-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
-.approval-actions .pill { min-height: 36px; padding: 4px 14px; font-size: 13px; font-weight: 500; }
-.approval-actions .pill.approval-go { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
-.approval-actions .pill.approval-stop { color: var(--muted); }
-.approval-actions .pill:disabled { opacity: .55; cursor: default; }
-.approval-sent { font-size: 12px; color: var(--muted); }
+/* r17: a message naming an open decision: one quiet way to its sheet, never answer buttons */
+.msg-decision-link { display: inline-block; margin-top: 6px; padding: 0; border: 0; background: none; color: var(--muted); font: inherit; font-size: 13px; cursor: pointer; text-decoration: underline; text-decoration-color: color-mix(in srgb, currentColor 35%, transparent); text-underline-offset: 3px; }
+.msg-decision-link:hover, .msg-decision-link:focus-visible { color: var(--accent); }
 
 .older { text-align: center; margin: 8px 0 4px; font-size: 12px; color: var(--muted); }
 .older button { border: 1px solid var(--line); background: var(--surface); color: var(--text-soft); border-radius: 999px; padding: 7px 16px; }

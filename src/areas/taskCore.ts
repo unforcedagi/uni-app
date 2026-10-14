@@ -43,6 +43,8 @@ export type Task = {
   vault?: string;
   /** `next` was cut at the writer's 140 characters (r16): the row says so ("…") and the sheet offers the note. */
   nextCut?: boolean;
+  /** A decision's `task` (r17): the task it decides ("T-130"), so a room's `[decision T-130]` marker finds it. */
+  forTask?: string | null;
 };
 
 const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);
@@ -155,6 +157,7 @@ export function parseTask(n: RawNote, tree: TaskTree): Task | null {
     priorityBy: str(m.priority_by),
     updatedAt: str(n.updatedAt), lastUpdatedBy: str(n.lastUpdatedBy), lastUpdatedVia: str(n.lastUpdatedVia),
     options: kind === "decision" ? optionsOf(m.options) : [],
+    ...(kind === "decision" && str(m.task) ? { forTask: str(m.task)!.toUpperCase() } : {}),
   };
 }
 
@@ -166,6 +169,9 @@ export const snoozed = (t: Pick<Task, "snoozedUntil">, now: Date) => !!t.snoozed
 
 /** Whether an `owner` / `waiting_on` field names the user: `aaron`, `Aaron`, `@aaron` or `person:aaron`. A field value only, never free text. */
 export const isMe = (v: string | null | undefined, p: VaultProfile = activeProfile()): boolean => !!v && v.trim().toLowerCase().replace(/^(person:|@)/, "") === p.me.toLowerCase();
+
+/** Who holds a task, in words: "Aaron", "#cohere", "Uni", "leonardo", or "unassigned". */
+export const ownerLabel = (o: string, p: VaultProfile = activeProfile()) => (o === p.me ? p.meLabel : p.roomOwnerPrefix && o.startsWith(p.roomOwnerPrefix) ? `#${o.slice(p.roomOwnerPrefix.length)}` : o.startsWith("person:") ? o.slice(7) : p.agentOwners.includes(o) ? o.charAt(0).toUpperCase() + o.slice(1) : o || "unassigned");
 
 export type Group = "you" | "rooms" | "others";
 /** Aaron's own work and everything waiting on him; Uni and room work; other people. */

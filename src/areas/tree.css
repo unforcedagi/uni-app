@@ -584,3 +584,10 @@
 .cp-open-decide.cp-rest { all: unset; box-sizing: border-box; display: inline-flex; align-items: center; min-height: 32px; padding: 0 0 6px; font: 500 13px/1.4 var(--th-sans); color: var(--th-ink2); cursor: pointer; }
 .cp-open-decide.cp-rest:hover { text-decoration: underline; text-underline-offset: 3px; }
 .cp-open-decide.cp-rest:focus-visible { outline: 2px solid var(--th-ink); outline-offset: 2px; }
+/* r17: under 400px tall the sidebar folds into the Places drawer (useShortTree): the room takes its column */
+@media (max-height: 399.98px) {
+  .tree-home.th-level.th-simple.wide { grid-template-columns: minmax(0, 1fr) 272px; }
+  .tree-home.th-level.th-simple.wide.folded { grid-template-columns: minmax(0, 1fr) 48px; }
+  .tree-home.th-level.th-simple.wide.solo { grid-template-columns: minmax(0, 1fr); }
+  .cp.side.folded { overflow: hidden; }
+}

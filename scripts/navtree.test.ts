@@ -114,13 +114,13 @@ const AT = 1_000_000;
 const mk = (id: string, extra: Record<string, unknown> = {}, tags = ["task"]): Task =>
   parseTask({ id, path: `Tasks/${id} Do the thing`, tags, updatedAt: new Date(AT).toISOString(), metadata: { node: "Projects/ATLAS", state: "open", owner: "aaron", ...extra } }, tree)!;
 const feed = (tasks: Task[], today = "2026-10-01") => topNeeds(whereWeAre({ tasks, hidden: () => false, nowMs: AT }), undefined, Infinity, today).map((t) => t.id);
-check("needs-you feed: Aaron's own (r16: owner aaron), Now and Soon (unsorted is Soon), open decisions; Someday and a room's or Uni's task that only waits on him are not there", () => {
+check("needs-you feed: Aaron's own, Now and Soon (unsorted is Soon), open decisions, and (r17) whatever waits on him; Someday and a room's own task are not there", () => {
   const list = [mk("soon1", { priority: "soon" }), mk("none1"), mk("now1", { priority: "now" }), mk("some1", { priority: "someday" }),
     mk("room1", { owner: "room:atlas", priority: "now" }), mk("wait1", { owner: "room:atlas", state: "waiting", waiting_on: "aaron", priority: "now" }),
     mk("uni1", { owner: "uni", state: "doing", waiting_on: "aaron", next: "Drafting the invite" }), mk("mine-wait", { state: "waiting", waiting_on: "aaron" }), mk("dec1", { priority: "someday", options: ["a"] }, ["decision"])];
   const ids = feed(list);
   assert.ok(!ids.includes("some1"), "someday task hidden"); assert.ok(!ids.includes("room1"), "a room's task is not Aaron's");
-  assert.ok(!ids.includes("wait1") && !ids.includes("uni1"), "r16: a room's or Uni's drafting that waits on Aaron is In motion, not Needs you");
+  assert.ok(ids.includes("wait1") && ids.includes("uni1"), "r17: a room's or Uni's task that waits on Aaron is in Needs you, whatever its owner");
   assert.ok(ids.includes("none1") && ids.includes("dec1") && ids.includes("mine-wait"));
   assert.equal(ids.indexOf("dec1"), ids.length - 1, "a someday decision sorts last");
 });
@@ -156,13 +156,13 @@ check("r13 one feed, one count: private items are counted and named by place onl
   assert.deepEqual(self.privates, [{ key: "Areas/Health", count: 1, place: "Health", open: { path: "Areas/Health" } }]);
   assert.equal(self.total, 3);
 });
-check("r13 Uni's panel says how many wait in the areas, and the numbers add up", () => {
+check("r13/r17 Uni's panel: at most three rows, Uni's own first, and one count of the rest that adds up", () => {
   const own = (id: string) => ({ ...mk(id, { priority: "now" }), node: "" });
   const f = needsFeed([mk("a1", { priority: "now" }), own("u1"), mk("a2"), mk("a3"), mk("a4"), mk("a5", { priority: "now" })], () => null);
   const p = uniPanel(f);
-  assert.deepEqual(p.rows.map((t) => t.id), ["u1", "a1", "a5", "a2"]);
-  assert.equal(p.rest, 2);
-  assert.equal(p.rows.length + p.rest + p.privates.reduce((n, x) => n + x.count, 0), f.total);
+  assert.deepEqual(p.rows.map((t) => t.id), ["u1", "a1", "a5"]);
+  assert.equal(p.rest, 3);
+  assert.equal(p.rows.length + p.rest, f.total);
 });
 check("r13 dots: an item on a node with no row counts on its nearest ancestor's row, else Uni's; the dots add up to the feed", () => {
   const list = [mk("a"), { ...mk("b"), node: "Projects/ATLAS/Sub" }, { ...mk("c"), node: "Nowhere/At/All" }, mk("s", { priority: "someday" })];
@@ -177,9 +177,9 @@ check("r13 the sheet's lead: a next step that names an action leads; a status do
   assert.equal(actionLead("Waiting on Casey"), null);
   assert.equal(actionLead("Check-in PR by Oct 12"), null, "a noun phrase is not an action");
   assert.equal(actionLead(""), null);
-  assert.equal(sayText("Say go to deploy #38 + #58"), "go to deploy #38 + #58");
+  assert.equal(sayText("Say go to deploy #38 + #58"), "Go to deploy #38 + #58");
   assert.equal(sayText("Reply: thanks, Thursday works"), "thanks, Thursday works");
-  assert.equal(sayText("Send to Casey"), null, "only say/reply/tell/answer fill a composer");
+  assert.equal(sayText("Send to Casey"), null, "r17: only a step for the room fills its composer");
 });
 check("needs-you feed: done and archived never appear; Now before Soon, then due date (undated last)", () => {
   const ids = feed([mk("d", { state: "done", priority: "now" }), mk("ar", { state: "archived" }), mk("s1", { priority: "soon", due: "2026-10-12" }), mk("n2", { priority: "now", due: "2026-10-20" }), mk("n1", { priority: "now", due: "2026-10-15" }), mk("n3", { priority: "now" })]);
@@ -388,11 +388,13 @@ check("r16 a next step cut at the writer's 140 characters ends on a whole word a
   const whole = "x".repeat(139) + ".";
   assert.equal(stepText(whole).cut, false, "a 140-character step that ends a sentence is whole");
 });
-check("r16 Needs you is the user's own: owner aaron or a decision; Uni's drafting that waits on him is not", () => {
+check("r16/r17 Needs you is the user's: owner aaron, a decision, or anything waiting on him; Uni's own drafting that waits on no one is not", () => {
   assert.equal(isMine(mk("a")), true);
   assert.equal(isMine(mk("d", {}, ["decision"])), true);
-  assert.equal(isMine(mk("u", { owner: "uni", waiting_on: "aaron" })), false);
-  assert.equal(needsYou(mk("u", { owner: "uni", state: "waiting", waiting_on: "aaron" })), false);
+  assert.equal(isMine(mk("u", { owner: "uni", waiting_on: "aaron" })), true, "r17");
+  assert.equal(needsYou(mk("u", { owner: "uni", state: "waiting", waiting_on: "aaron" })), true, "r17");
+  assert.equal(isMine(mk("u2", { owner: "uni", state: "doing" })), false);
+  assert.equal(needsYou(mk("u2", { owner: "uni", state: "doing" })), false);
 });
 check("r16 a short room keeps its composer and 40% for the conversation; the strip opens inline only with 200px to spare, else as a sheet", () => {
   assert.deepEqual(stripRoom({ room: 313, above: 64, line: 46, composer: 60 }), { mode: "sheet" }, "740×360");

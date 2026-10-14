@@ -10,10 +10,10 @@ import { useVaultProfile } from "./ProfileContext";
 import { LoadHealth } from "./LoadHealth";
 import { trapTab } from "./focusTrap";
 import { isActiveRun, type Run } from "./steerCore";
-import type { Task } from "./taskCore";
+import { ownerLabel, type Task } from "./taskCore";
 import { taskTitle } from "./whereCore";
 import { splitLinks } from "./linkText";
-import { actionableTitle, actionLead, askLead, askPreview, decideLine, stripRoom, decisionQuestion, dueLine, fitsRow, isOverdue, lineBudget, privateLabel, withoutCut, rowAsk, type NeedsFeed, type PrivateNeed } from "./simpleCore";
+import { actionableTitle, actionLead, answerChoices, answerLabel, askLead, askPreview, decideLine, stripRoom, decisionQuestion, dueLine, fitsRow, isOverdue, lineBudget, privateLabel, questionCount, waitsOnMe, withoutCut, rowAsk, type Choice, type NeedsFeed, type PrivateNeed } from "./simpleCore";
 
 const KEYS = { side: "uni.companion.side.v1", sideNarrow: "uni.companion.side.narrow.v1", strip: "uni.companion.strip.v1" } as const;
 /** Below this width the side panel starts folded: the conversation gets the space. */
@@ -61,8 +61,8 @@ export type CompanionProps = {
   load?: TaskLoad;
   /** What needs you here, by the one rule: the rows shown, the private items (named by place only) and the total every surface agrees on. */
   feed: NeedsFeed;
-  /** Uni's panel: how many more from the areas wait in "All of Uni's work" ("+N in areas ›"). */
-  rest?: number;
+  /** Uni's panel (r17): everything past its rows, private items folded in, as one "N more ›" to the work view; `moreTitle` says what it holds. */
+  rest?: number; moreTitle?: string | null;
   /** Open a private area (its items are shown inside it). */
   onPrivate?: (open: PrivateNeed["open"]) => void;
   runs: readonly Run[];
@@ -138,6 +138,8 @@ function stepTokens(text: string, vault: string, onNote?: (ref: NoteRef) => void
   return out;
 }
 
+/** A word a cut must not end on (r17): an article, a preposition or a joining word. */
+const DANGLING_WORD = /^(a|an|the|to|of|for|in|on|at|by|with|and|or|but|nor|from|as|is|are|was|be|if|than|then|into|onto|about|your|their|its|this|these|those|our|my|so|via|per)$/i;
 /** Plain words as clamp tokens (a decision's preview has no links). */
 const wordTokens = (text: string) => text.split(/\s+/).filter(Boolean).map((w, i) => ({ node: w, space: i > 0 }));
 
@@ -168,6 +170,9 @@ function WordClamp({ tokens, lines, open, textKey, onCut, elRef, className, onCl
     if (k >= words.length) { onCut(false); return; }
     // the "…" must fit after the last word kept, on the last line
     while (k > 1 && lineOf(last(words[k - 1]).top) === lines - 1 && last(words[k - 1]).right + room > right) k--;
+    // r17: never end on a hanging word ("…to the …") or a word that only leads into the rest ("Dominic: …")
+    const plain = (i: number) => (typeof tokens[i]?.node === "string" ? (tokens[i].node as string) : null);
+    while (k > 1 && plain(k - 1) !== null && (DANGLING_WORD.test(plain(k - 1)!.replace(/[,;:(\[–—-]+$/, "")) || /^[,;:–—&+-]+$/.test(plain(k - 1)!))) k--;
     setCut(Math.max(1, k)); onCut(true);
   });
   useLayoutEffect(() => {
@@ -182,7 +187,7 @@ function WordClamp({ tokens, lines, open, textKey, onCut, elRef, className, onCl
     ro.observe(el);
     return () => ro.disconnect();
   }, [cut, open, lines]); // eslint-disable-line react-hooks/exhaustive-deps
-  const shown = open || cut === null ? tokens : tokens.slice(0, cut);
+  const shown = open || cut === null ? tokens : tokens.slice(0, cut).map((t, i, a) => (i === a.length - 1 && typeof t.node === "string" ? { ...t, node: t.node.replace(/[\s,;:(\[–—-]+$/, "") || t.node } : t));
   const Tag = tag;
   return <Tag ref={elRef} className={className} data-cut={cut !== null && !open ? "true" : undefined} onClick={onClick}>
     {shown.map((t, i) => <span key={i}>{i > 0 && t.space ? " " : ""}<span className="wc-w">{t.node}</span></span>)}
@@ -213,23 +218,28 @@ function Stands({ text, ago }: { text: string; ago: string }) {
  * row's own revision), sentence-cased, with "Your call:" when it does not ask. `answerable`: the whole question is known; `fits`: it fits a
  * row, so a row may show it beside its answers (a longer one shows `preview` and opens to decide). With no whole question, nothing to answer.
  */
-export function decisionAsk(t: Task): { text: string; yourCall: boolean; answerable: boolean; fits: boolean; preview: string; decide: string; /** the question as the note has it (links and all), for the sheet */ full: string } {
+export function decisionAsk(t: Task): { text: string; yourCall: boolean; answerable: boolean; fits: boolean; preview: string; decide: string; /** the question as the note has it (links and all), for the sheet */ full: string;
+  /** r17: answers that say what each does (its options, Yes/No only beside a question, else built from the statement); `open`: none could be built */
+  choices: Choice[]; open: boolean } {
   const tt = taskTitle(cleanText(t.title));
   const q = decisionQuestion(tt.rest, t.ask, t.askAt, t.updatedAt, tt.cut || tt.previewed);
   // r16: no whole question known: the row reads "Decide: <first words>" (verb first, whole words, never "…"), and opens to decide
-  if (!q) { const line = decideLine(askOf(tt.rest)); return { text: line, yourCall: false, answerable: false, fits: false, preview: line, decide: line, full: line }; }
+  if (!q) { const line = decideLine(askOf(tt.rest)); return { text: line, yourCall: false, answerable: false, fits: false, preview: line, decide: line, full: line, choices: [], open: true }; }
   // r16: the question read from a note is cleaned like a title (no leading date, no "(preview: …)" tail); the sheet keeps the note's words
   const l = askLead(taskTitle(q).rest || q);
-  return { text: l.text, yourCall: l.yourCall, answerable: true, fits: fitsRow(l.text), preview: askPreview(l.text), decide: decideLine(l.text), full: q };
+  const a = answerChoices(l.text, t.options, tt.rest);
+  return { text: l.text, yourCall: l.yourCall, answerable: true, fits: fitsRow(l.text), preview: askPreview(l.text), decide: decideLine(l.text), full: q, choices: a.choices, open: a.open };
 }
 
 /**
- * The one way a decision is closed (r12): its options, or Yes and No when it has none. A tap records the answer (`decided`) through the
- * vault's compare-and-set; nothing closes a decision without one. The companion, the task sheet and the work page all use this.
+ * The one way a decision is closed (r12): its options; with none, Yes and No only beside a question, else answers built from its statement that
+ * say what each does (r17: "Agree (skip texting)", "Disagree"). A tap records the answer (`decided`) through the vault's compare-and-set;
+ * nothing closes a decision without one. The companion, the task sheet and the work page all use this.
  */
 export function DecisionAnswer({ t, label, onDecide, max = Infinity, onMore, className = "" }: { t: Task; label: string; onDecide: (t: Task, option: string) => void; max?: number; onMore?: () => void; className?: string }) {
-  const opts = t.options.length ? t.options.map((o) => ({ label: cleanText(o), value: o })) : [{ label: "Yes", value: "yes" }, { label: "No", value: "no" }];
-  return <div className={`cp-opts ${t.options.length ? "" : "cp-yesno"} ${className}`} role="group" aria-label={`Decide: ${label}`}>
+  const opts = answerChoices(label, t.options, taskTitle(cleanText(t.title)).rest).choices.map((o) => ({ label: cleanText(o.label), value: o.value }));
+  const yesNo = !t.options.length && opts.length === 2 && opts[0].value === "yes" && opts[0].label === "Yes";
+  return <div className={`cp-opts ${yesNo ? "cp-yesno" : ""} ${className}`} role="group" aria-label={`Decide: ${label}`}>
     {opts.slice(0, max).map((o) => <button key={o.value} type="button" className="cp-opt" onClick={() => onDecide(t, o.value)}>{o.label}</button>)}
     {opts.length > max && onMore && <button type="button" className="cp-opt more" onClick={onMore}>More…</button>}
   </div>;
@@ -239,7 +249,7 @@ export function DecisionAnswer({ t, label, onDecide, max = Infinity, onMore, cla
  *  (the title, its event or project, is a quiet line under it); a decision's whole question; else the title. r16: a decision whose question is
  *  too long for a row is its first two lines of words and "Open to decide ›" (`preview`); one with no whole question known is "Decide: <first
  *  words> ›" (`decide`). The title is the shared clean one (no id, leading date or "(preview: …" tail). */
-export function rowLead(t: Task): { text: string; under: string | null; go: string | null; answers: boolean; yourCall: boolean; lead: boolean; mode: "answers" | "preview" | "decide" | "lead" | "title" } {
+export function rowLead(t: Task): { text: string; under: string | null; go: string | null; answers: boolean; yourCall: boolean; lead: boolean; mode: "answers" | "preview" | "statement" | "decide" | "lead" | "title" } {
   const tt = taskTitle(cleanText(t.title));
   const full = tt.rest;
   const next = t.next.trim();
@@ -247,12 +257,17 @@ export function rowLead(t: Task): { text: string; under: string | null; go: stri
     const dq = decisionAsk(t);
     if (!dq.answerable) return { text: dq.decide, under: null, go: "", answers: false, yourCall: false, lead: false, mode: "decide" };
     if (!dq.fits) return { text: dq.preview, under: null, go: "Open to decide", answers: false, yourCall: dq.yourCall, lead: false, mode: "preview" };
+    // r17: a statement whose answers can't say what they do is never Yes/No beside it: the whole statement, then "Open to decide ›"
+    if (dq.open) return { text: dq.text, under: null, go: "Open to decide", answers: false, yourCall: dq.yourCall, lead: false, mode: "statement" };
     return { text: dq.text, under: null, go: null, answers: true, yourCall: dq.yourCall, lead: false, mode: "answers" };
   }
   const ask = rowAsk(askOf(full), t.ask, false, !!next, tt.cut);
-  const action = actionLead(next);
-  if (action) return { text: plainDetail(action) || action, under: ask.text || null, go: null, answers: false, yourCall: false, lead: true, mode: "lead" };
-  return { text: ask.text || "Open to see what's needed", under: null, go: null, answers: false, yourCall: false, lead: false, mode: "title" };
+  // r17: someone else's task that waits on the user leads with what it asks of them; the task itself is the quiet line under it
+  const theirs = waitsOnMe(t);
+  const context = theirs ? [`From ${ownerLabel(t.owner)}`, ask.text || null].filter(Boolean).join(" · ") : null;
+  const action = actionLead(next) ?? (theirs && next ? next : null);
+  if (action) return { text: plainDetail(action) || action, under: context ?? (ask.text || null), go: null, answers: false, yourCall: false, lead: true, mode: "lead" };
+  return { text: ask.text || "Open to see what's needed", under: context && theirs ? `From ${ownerLabel(t.owner)}` : null, go: null, answers: false, yourCall: false, lead: false, mode: "title" };
 }
 
 /**
@@ -273,6 +288,7 @@ export function NeedRow({ t, onTask, onDecide, onNote, meta }: { t: Task; onTask
   const vault = t.vault ?? profileVault;
   const r = rowLead(t);
   const text = r.text;
+  const questions = isDecision ? null : questionCount(next);
   const titleRef = useRef<HTMLElement>(null);
   const [open, setOpen] = useState(false);
   const [titleLines, setTitleLines] = useState(1);
@@ -319,7 +335,9 @@ export function NeedRow({ t, onTask, onDecide, onNote, meta }: { t: Task; onTask
     {!next && !isDecision && !actionableTitle(text) && text !== "Open to see what's needed" && <p className="cp-open-to-see">Open to see what's needed</p>}
     {showNext && <NextText text={next} vault={vault} onNote={onNote} lines={open ? undefined : nextLines} open={open} onOpen={setOpen} onClamp={setNextCut} />}
     {more && <button type="button" className="cp-more-next cp-row-more" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? "Less" : "More"}</button>}
-    {r.lead && t.nextCut && <button type="button" className="cp-open-decide cp-rest" onClick={() => onTask(t)}>The rest is in its note<span aria-hidden="true"> ›</span></button>}
+    {/* r17: a step that asks for answers to questions written elsewhere says how many, and the sheet lists them */}
+    {questions ? <button type="button" className="cp-open-decide cp-rest cp-questions" onClick={() => onTask(t)}>{answerLabel(questions)}<span aria-hidden="true"> ›</span></button>
+      : r.lead && t.nextCut && <button type="button" className="cp-open-decide cp-rest" onClick={() => onTask(t)}>The rest is in its note<span aria-hidden="true"> ›</span></button>}
     {r.answers && <DecisionAnswer t={t} label={text} onDecide={onDecide} max={OPTS_SHOWN} onMore={() => onTask(t)} />}
   </li>;
 }
@@ -334,7 +352,9 @@ export function PrivateRow({ p, onPrivate }: { p: PrivateNeed; onPrivate?: (open
  * Only whole rows are shown: in the side panel (`fit`) the rows that don't fit above the footer wait behind "+N more ›" rather than being
  * cut or faded at the panel's bottom. Every row is drawn once to be measured (before paint), then the ones that fit stay.
  */
-export function NeedsList({ needs, fit, onTask, onDecide, onNote, onMore }: Pick<CompanionProps, "onTask" | "onDecide" | "onNote"> & { needs: readonly Task[]; fit: boolean; /** "+N more" opens elsewhere (the strip's sheet) instead of in place */ onMore?: () => void }) {
+export function NeedsList({ needs, fit, onTask, onDecide, onNote, onMore, extra = 0, moreTitle = null }: Pick<CompanionProps, "onTask" | "onDecide" | "onNote"> & { needs: readonly Task[]; fit: boolean; /** "+N more" opens elsewhere (the strip's sheet) instead of in place */ onMore?: () => void;
+  /** r17, Uni's panel: items past these rows (private ones included): they and any row that doesn't fit are one "N more ›" (`onMore`, the work view). */
+  extra?: number; moreTitle?: string | null }) {
   const [limit, setLimit] = useState(Infinity);
   const [measuring, setMeasuring] = useState(fit);
   const [all, setAll] = useState(false);
@@ -394,11 +414,13 @@ export function NeedsList({ needs, fit, onTask, onDecide, onNote, onMore }: Pick
   const hidden = needs.length - shown.length;
   return <>
     <ul ref={listRef} className="cp-list">{shown.map((t) => <NeedRow key={t.id} t={t} onTask={onTask} onDecide={onDecide} onNote={onNote} />)}</ul>
-    {hidden > 0 && <button type="button" className="cp-more cp-more-rows" onClick={() => (onMore ? onMore() : setAll(true))}>+{hidden} more ›</button>}
+    {extra > 0
+      ? <button type="button" className="cp-more cp-more-rows cp-more-all" title={moreTitle ?? undefined} onClick={() => onMore?.()}>{hidden + extra} more ›</button>
+      : hidden > 0 && <button type="button" className="cp-more cp-more-rows" onClick={() => (onMore ? onMore() : setAll(true))}>+{hidden} more ›</button>}
   </>;
 }
 
-function Body({ stands, ready, note, load, feed, rest = 0, onPrivate, runs, nodeName, onTask, onDecide, onEverything, onNote, fit, hideHealth = false, onMore }: CompanionProps & { fit: boolean; hideHealth?: boolean; onMore?: () => void }) {
+function Body({ stands, ready, note, load, feed, rest = 0, moreTitle = null, onPrivate, runs, nodeName, onTask, onDecide, onEverything, onNote, fit, hideHealth = false, onMore }: CompanionProps & { fit: boolean; hideHealth?: boolean; onMore?: () => void }) {
   const active = runs.filter(isActiveRun);
   const hiddenRuns = Math.max(0, active.length - RUNS_SHOWN);
   if (note) return <div className="cp-body"><p className="cp-lede cp-note">{note}</p></div>;
@@ -408,9 +430,10 @@ function Body({ stands, ready, note, load, feed, rest = 0, onPrivate, runs, node
     {!ready ? (load?.error || load?.slow ? <LoadHealth load={load} ready={false} /> : <p className="cp-lede">Loading…</p>) : stands && <Stands text={stands.text} ago={stands.ago} />}
     {ready && <section aria-label="Needs you" className="cp-sec" aria-busy={load?.refreshing || undefined}>
       <h3 className="cp-h">Needs you</h3>
-      {feed.rows.length > 0 && <NeedsList needs={feed.rows} fit={fit} onTask={onTask} onDecide={onDecide} onNote={onNote} onMore={onMore} />}
+      {/* r17: Uni's panel is at most three rows and one "N more ›" (private items folded in) to the work view, which keeps the full list */}
+      {feed.rows.length > 0 && <NeedsList needs={feed.rows} fit={fit} onTask={onTask} onDecide={onDecide} onNote={onNote} onMore={rest > 0 && onEverything ? onEverything : onMore} extra={onEverything ? rest : 0} moreTitle={moreTitle} />}
+      {feed.rows.length === 0 && rest > 0 && onEverything && <button type="button" className="cp-more cp-more-rows cp-more-all" title={moreTitle ?? undefined} onClick={onEverything}>{rest} more ›</button>}
       {feed.privates.length > 0 && <ul className="cp-list cp-privates">{feed.privates.map((p) => <PrivateRow key={p.key} p={p} onPrivate={onPrivate} />)}</ul>}
-      {rest > 0 && onEverything && <button type="button" className="cp-more cp-more-areas" onClick={onEverything}>+{rest} in areas ›</button>}
       {feed.total === 0 && <p className="cp-none">Nothing needs you here.</p>}
       {health}
     </section>}

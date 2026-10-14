@@ -207,15 +207,17 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
    * One tap on a decision's option, written with the revision whose question was on screen (`task.updatedAt`: the row's question is shown
    * only at that revision). A conflict (decided or changed elsewhere) says so and re-reads. There is no undo: a decision is a decision.
    */
-  const decide = useCallback(async (task: Task, option: string) => {
+  const decide = useCallback(async (task: Task, option: string): Promise<{ ok: boolean; message?: string }> => {
     setNotice(null);
-    if (!task.updatedAt) { setNotice("Couldn't decide: reload the decision first."); refresh(); return; }
+    if (!task.updatedAt) { setNotice("Couldn't decide: reload the decision first."); refresh(); return { ok: false, message: "Reload the decision first." }; }
     hide(task.id);
     const r = await vaultTasks.decide(task.id, option, activeProfile().me, task.updatedAt);
-    if (r.ok) { refresh(); return; }
+    if (r.ok) { refresh(); return { ok: true }; }
     restore(task.id);
-    setNotice(r.kind === "conflict" ? "This decision changed or was decided elsewhere, so your answer wasn't recorded. Showing the latest." : r.kind === "invalid" ? "Couldn't decide: the vault refused that value." : `Couldn't decide: ${r.message.replace(/^Error:\s*/, "").slice(0, 120)}`);
+    const message = r.kind === "conflict" ? "This decision changed or was decided elsewhere, so your answer wasn't recorded. Showing the latest." : r.kind === "invalid" ? "Couldn't decide: the vault refused that value." : `Couldn't decide: ${r.message.replace(/^Error:\s*/, "").slice(0, 120)}`;
+    setNotice(message);
     if (r.kind === "conflict") refresh();
+    return { ok: false, message };
   }, [nodePath]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /**

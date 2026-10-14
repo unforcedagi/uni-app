@@ -27,3 +27,6 @@ export function splitMarkers(body: string): { text: string; markers: Marker[] } 
 
 /** A worker's progress ping ("⏳ Working — 6 min — iteration 7", possibly edited): shown as one muted line, not a bubble. */
 export const isWorkerStatus = (body: string): boolean => /^\s*⏳\s*Working\s*[—–-]\s*\d+\s*(?:min|mins|minutes|m|s|sec|secs|h)\b[^\n]*$/i.test(body);
+
+/** Uni's maintenance notes to itself ("Self-improvement review: Skill 'client-site-copy' patched."): bookkeeping, shown as one muted line (r17). */
+export const isMaintenance = (body: string): boolean => /^\W{0,4}(?:self-improvement review|skill review|memory review)\s*[:—–-]/i.test(body) && body.trim().split("\n").length <= 3;

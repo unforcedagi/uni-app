@@ -5,7 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { buildTaskTree, failureKind, groupOf, LIVE_STATES, nodeFilterKeys, parseNodes, parseTask, subtreePaths, type AnyState, type FailureKind, type Priority, type RawNote, type Task, type TaskTree } from "./taskCore.ts";
 import { ROOT } from "./treeCore.ts";
 import { taskTitle } from "./whereCore.ts";
-import { askFromContent, askOrder, isListLine, stepText } from "./simpleCore.ts";
+import { askFromContent, askOrder, isListLine, linkedRefs, questionsFrom, stepText } from "./simpleCore.ts";
 import { activeProfile } from "./profile.ts";
 
 export type Call = (cmd: string, args: Record<string, unknown>) => Promise<unknown>;
@@ -229,7 +229,39 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
   const setPriority = (taskId: string, priority: Priority | null, updatedAt: string, by: string | null = "hand") =>
     patchMeta(taskId, { priority, priority_by: priority === null ? null : by }, updatedAt);
 
-  return { setAskOwner, loadTree, loadTagged, loadAsks, loadSubtree, loadTasks, transition, decide, snooze, setPriority, nearSupported: () => nearOk };
+  /**
+   * The questions a task asks the user to answer (r17: "answer the nine questions…"), read where they are written, all in this vault: the task's
+   * own note (the first list under a "Questions" heading, else the first numbered list, else a list of the count the step names); else a note
+   * the step or the note links to; else a closed task merged into this one ("Merged into T-11"), on the same node. `from`: the note they were
+   * read from when it is not the task's own. Null: they are not written out anywhere found.
+   */
+  async function loadQuestions(t: Pick<Task, "id" | "title" | "next">, nodeKeys: readonly string[], want: number | null): Promise<{ items: string[]; from: { id: string; title: string } | null } | null> {
+    const read = async (ref: string): Promise<RawNote | null> => { try { return ((await call("vault_note", { vault: name(), noteRef: ref })) as { note?: RawNote } | null)?.note ?? null; } catch { return null; } };
+    const text = (n: RawNote | null) => (typeof n?.content === "string" ? n.content : "");
+    const named = (n: RawNote) => ({ id: typeof n.id === "string" ? n.id : "", title: taskTitle((typeof n.path === "string" ? n.path : "").split("/").pop() ?? "").rest || "its note" });
+    const own = await read(t.id);
+    let items = questionsFrom(text(own), want);
+    if (items) return { items, from: null };
+    for (const ref of linkedRefs(`${t.next}\n${text(own)}`).filter((r) => r !== t.id).slice(0, 4)) {
+      const n = await read(ref);
+      items = n ? questionsFrom(text(n), want) : null;
+      if (items && n) return { items, from: named(n) };
+    }
+    const tid = taskTitle(t.title).id;
+    if (tid && nodeKeys.length) {
+      let rows: RawNote[] = [];
+      try { rows = (await call("vault_query_meta", { vault: name(), tag: "task", metadata: { node: { in: [...nodeKeys] }, state: { in: ["done", "archived"] } }, limit: LIMIT })) as RawNote[]; } catch { rows = []; }
+      const merged = new RegExp(`\\bmerged into ${tid.replace(/[-]/g, "\\-")}\\b`, "i");
+      for (const r of rows.filter((x) => typeof x.id === "string" && merged.test(JSON.stringify(x.metadata ?? {}))).slice(0, 3)) {
+        const n = await read(r.id as string);
+        items = n ? questionsFrom(text(n), want) : null;
+        if (items && n) return { items, from: named(n) };
+      }
+    }
+    return null;
+  }
+
+  return { setAskOwner, loadTree, loadTagged, loadAsks, loadSubtree, loadTasks, loadQuestions, transition, decide, snooze, setPriority, nearSupported: () => nearOk };
 }
 
 export const vaultTasks = createVaultTasks();
