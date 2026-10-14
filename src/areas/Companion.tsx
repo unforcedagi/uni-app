@@ -460,13 +460,21 @@ export function CompanionStrip({ open, onToggle, ...p }: CompanionProps & Fold) 
     return () => window.removeEventListener("resize", measure);
   }, [open]);
   const asSheet = open && (sheet || place?.mode === "sheet");
+  const close = () => { setSheet(false); onToggle(false); };
+  const closeRef = useRef(close); closeRef.current = close;
+  /** Where the sheet starts: under the room's header, so the room it belongs to stays in sight (r16). */
+  const [top, setTop] = useState(0);
   useEffect(() => {
     if (!asSheet) return;
+    const el = ref.current; const room = el?.closest(".sr") as HTMLElement | null;
+    setTop(el && room ? Math.max(0, Math.round(el.getBoundingClientRect().top - room.getBoundingClientRect().top)) : 0);
     const opener = document.activeElement as HTMLElement | null;
     sheetRef.current?.focus();
-    return () => { if (opener?.isConnected) opener.focus(); };
+    // Escape on the window, as the drawer does (WebKitGTK delivered it there, not to the sheet's own handler, in the r16 walk)
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape" && !e.defaultPrevented && !document.querySelector(".task-sheet-wrap")) { e.preventDefault(); closeRef.current(); } };
+    window.addEventListener("keydown", esc);
+    return () => { window.removeEventListener("keydown", esc); if (opener?.isConnected) opener.focus(); };
   }, [asSheet]);
-  const close = () => { setSheet(false); onToggle(false); };
   const label = <span className="cp-line-text" title={p.stands?.text}>{p.scope && <b className="cp-scope">{open ? `Where ${p.scope} stands` : `${p.scope}:`}</b>}{open ? (p.scope ? "" : "Where this stands") : <>{p.scope ? " " : ""}{p.note ?? (p.ready ? p.stands?.text ?? "Where this stands" : p.load?.error ? "Couldn't load" : p.load?.slow ? "Still loading" : "Loading…")}</>}</span>;
   // the strip sits in a room below 900px, which shows the list's health above it (r14)
   return <>
@@ -483,7 +491,7 @@ export function CompanionStrip({ open, onToggle, ...p }: CompanionProps & Fold) 
     {asSheet && <div className="cp-sheet-wrap">
       <button type="button" className="cp-sheet-scrim" aria-label="Close" tabIndex={-1} onClick={close} />
       <div ref={sheetRef} className="cp cp-sheet" role="dialog" aria-modal="true" aria-label={p.scope ? `Where ${p.scope} stands` : "Where this stands"} tabIndex={-1}
-        onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); close(); } trapTab(e, sheetRef.current); }}>
+        style={{ maxHeight: `calc(100% - ${top}px)` }} onKeyDown={(e) => trapTab(e, sheetRef.current)}>
         <div className="cp-sheet-head"><span>{p.scope ? `Where ${p.scope} stands` : "Where this stands"}</span><button type="button" className="cp-sheet-close" onClick={close}>Close</button></div>
         {/* one sheet at a time: an item opened from here (or a way deeper) replaces this sheet */}
         <Body {...p} fit={false} hideHealth onTask={(t) => { close(); p.onTask(t); }} onPrivate={p.onPrivate && ((o) => { close(); p.onPrivate!(o); })} onEverything={p.onEverything && (() => { close(); p.onEverything!(); })} />

@@ -2046,7 +2046,8 @@ test.describe('r16', () => {
   test('a short window keeps the conversation: the strip starts folded whatever was saved, and opens as a sheet over the room', async ({ page }) => {
     for (const [w, h] of [[800, 600], [740, 360]] as const) {
       await page.setViewportSize({ width: w, height: h });
-      await page.addInitScript(() => localStorage.setItem('uni.companion.strip.v1', '1'));
+      // the strip was left open on this device; each size starts at Uni (not the room the last size reopened)
+      await page.addInitScript(() => { localStorage.setItem('uni.companion.strip.v1', '1'); localStorage.removeItem('uni.tabs.v2'); localStorage.removeItem('uni.lastRoom.v1'); });
       await boot(page);
       await openRoom(page, 'ATLAS');
       const line = page.locator('.cp-line');
