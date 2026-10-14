@@ -3102,6 +3102,8 @@ test.describe('r20', () => {
     const needs = page.locator('.sr-work section[aria-label="Needs you"]');
     await expect(needs.locator('.cp-item[data-mode="checking"]')).toHaveCount(3);
     await expect(needs.locator('.cp-item[data-mode="checking"] .cp-title').first()).toHaveText('Checking what\'s needed…');
+    // the line under it is the title as words (found in the real app: "…feature 4, the", "a daily calendar…")
+    expect((await needs.locator('.cp-item[data-mode="checking"] .cp-under').allInnerTexts()).sort()).toEqual(['A daily email of the calendar at 7', 'Texting Uni: a number that reaches', 'Uni adds Benya\'s missing feature 4'].sort());
     await expect(needs.locator('.wv-n')).toHaveText('0');
     if (treeBeside(page)) expect(await page.locator('.th-roomnav .th-go[aria-label^="Atlas Institute"]').getAttribute('aria-label')).not.toMatch(/need/);
     // classified: statements, so Uni's to tidy; still nothing owed

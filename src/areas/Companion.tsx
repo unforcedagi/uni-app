@@ -13,7 +13,7 @@ import { isActiveRun, type Run } from "./steerCore";
 import { ownerLabel, type Task } from "./taskCore";
 import { taskTitle } from "./whereCore";
 import { splitLinks } from "./linkText";
-import { actionableTitle, answerChoices, answerLabel, askLead, askPreview, checkLine, CHECK_FAILED, CHECKING, DANGLING, decideLine, stripRoom, decisionQuestion, dueLine, firstClause, fitsRow, isOverdue, lineBudget, missingLine, OPEN_TASK, OPEN_TO_ANSWER, privateLabel, rowAction, rowSubParts, standsHeading, titleSays, TIDY_LINE, toTidy, unknownDecision, verbPhrase, waitsLine, waitsOnMe, withHosts, withoutCut, rowAsk, type Choice, type NeedsFeed, type PrivateNeed, type RowAction, type Support } from "./simpleCore";
+import { actionableTitle, answerChoices, answerLabel, askLead, askPreview, checkLine, CHECK_FAILED, CHECKING, DANGLING, decideLine, stripRoom, decisionQuestion, dueLine, firstClause, fitsRow, isOverdue, lineBudget, missingLine, OPEN_TASK, OPEN_TO_ANSWER, privateLabel, rowAction, rowSubParts, standsHeading, titleSays, titleWords, TIDY_LINE, toTidy, unknownDecision, verbPhrase, waitsLine, waitsOnMe, withHosts, withoutCut, rowAsk, type Choice, type NeedsFeed, type PrivateNeed, type RowAction, type Support } from "./simpleCore";
 import { requestRecheck } from "./useTasks";
 
 const KEYS = { side: "uni.companion.side.v1", sideNarrow: "uni.companion.side.narrow.v1", strip: "uni.companion.strip.v1" } as const;
@@ -312,7 +312,8 @@ export function rowLead(t: Task, area: string | null = null): RowLead {
   const full = tt.rest;
   const next = t.next.trim();
   const ck = t.check ?? null;
-  const words = withoutCut(askOf(full)) || full;
+  // r20: a quiet line under a row that asserts nothing is the title as words (never "…feature 4, the")
+  const words = titleWords(askOf(full)) || full;
   const quiet = (text: string, under: string | null, mode: RowMode): RowLead => ({ text, under, go: mode === "check" || mode === "waits" || mode === "missing" ? "" : null, answers: false, yourCall: false, lead: false, mode });
   // r20: nothing is owed until it is known: a decision whose record isn't read yet (or couldn't be) asserts nothing
   if (t.kind === "decision" && (t.askFailed || ck?.kind === "unavailable")) return quiet(words, null, "unavailable");

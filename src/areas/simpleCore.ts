@@ -790,3 +790,5 @@ export function titleSays(raw: string, action: string): string | null {
   const title = tt.rest.replace(/\s+/g, " ").trim();
   return title && !tt.cut && title.length <= SUB_TITLE_MAX && !repeats(title, action) ? title : null;
 }
+/** A title as plain words for a quiet line (r20): no "Decision (default yes):" label, no cut tail ("…feature 4, the"), sentence-cased. */
+export const titleWords = (rest: string): string => { const w = wholeWords(rest.replace(/^decision\s*(\([^)]*\))?\s*[:\-–—]\s*/i, "")); return w ? capFirst(w) : rest; };
