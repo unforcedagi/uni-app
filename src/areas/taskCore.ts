@@ -49,9 +49,6 @@ export type Task = {
   link?: string | null;
   /** r18: the message itself (`message`, or a `draft` field holding text): "Copy the message" copies it. */
   message?: string | null;
-  /** r18: where its questions come from, read at revision `supportAt` (shown only at the row's own revision). */
-  support?: import("./simpleCore.ts").Support;
-  supportAt?: string | null;
   /** r19: the `source` field when it names a note (an id or `[[link]]`); provenance strings ("Aaron/Tasks#T-21", "tasks.py new") are not kept. */
   sourceRef?: string | null;
   /** r19: `depends_on` (a string or a list): notes this task waits on, by id or `[[link]]`. */

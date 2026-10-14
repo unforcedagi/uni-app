@@ -161,6 +161,10 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
       const land = (id: string, s: CheckState) => {
         // a check is kept by the notes it read and when, so it lands even when a newer list read has started meanwhile
         if (!mounted.current || memory !== mem) return;
+        // a check from a read that began before the one already shown is stale: the newer one stands
+        const had = mem.checks?.get(id);
+        const when = (c: CheckState | undefined) => Math.max(c?.rec?.at ?? 0, c?.failedAt ?? 0);
+        if (had && when(had) > when(s)) return;
         mem.checks = new Map(mem.checks).set(id, s);
         setChecks(mem.checks);
       };
