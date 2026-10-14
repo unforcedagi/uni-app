@@ -377,7 +377,7 @@ export function decisionQuestion(rest: string, ask: string | undefined, askAt: s
 }
 
 /** Words a fragment must not end on ("…feature 4, the"): an article, a preposition or a joining word left hanging. */
-const DANGLING = /^(a|an|the|to|of|for|in|on|at|by|with|and|or|but|nor|who|whom|whose|that|which|from|as|is|are|was|be|if|than|then|into|onto|about|your|their|its|this|these|those|our|my|so|via|per|&|\+|-|–|—)$/i;
+const DANGLING = /^(a|an|the|to|of|for|in|on|at|by|with|and|or|but|nor|who|whom|whose|that|which|from|as|is|are|was|be|if|than|then|into|onto|about|your|their|its|this|these|those|our|my|so|via|per|because|since|unless|until|while|although|though|whether|when|where|&|\+|-|–|—)$/i;
 /** The first whole words of a text within `max` characters, never ending on a hanging word or a separator, and never with "…" (r16). */
 export function firstWords(text: string, max = 48): string {
   const words = withoutCut(text).replace(/\s+/g, " ").trim().split(" ").filter(Boolean);

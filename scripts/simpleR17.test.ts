@@ -3,7 +3,7 @@
 // Real phrasings are task titles (and two non-private next steps) from the scratch copy of the vault; no private area's words.
 // Run: node --experimental-strip-types scripts/simpleR17.test.ts
 import assert from "node:assert/strict";
-import { answerChoices, answerLabel, isMine, linkedRefs, needsByRow, needsFeed, needsYou, privateNote, questionCount, questionsFrom, stepAudience, uniPanel, waitsOnMe } from "../src/areas/simpleCore.ts";
+import { answerChoices, answerLabel, decideLine, firstWords, isMine, wholeWords, linkedRefs, needsByRow, needsFeed, needsYou, privateNote, questionCount, questionsFrom, stepAudience, uniPanel, waitsOnMe } from "../src/areas/simpleCore.ts";
 import { buildTaskTree, parseNodes, parseTask, type Task } from "../src/areas/taskCore.ts";
 import { decisionIn } from "../src/decisionLinks.ts";
 import { appendDraft } from "../src/areas/composeDraft.ts";
@@ -164,6 +164,13 @@ await check("small: 'Say it' with no words leaves the draft alone; maintenance n
   assert.equal(isMaintenance("Self-improvement review: Skill 'client-site-copy' patched."), true);
   assert.equal(isMaintenance("💾 Self-improvement review — memory updated"), true);
   assert.equal(isMaintenance("Let's do a self-improvement review of the site tomorrow"), false);
+});
+
+await check("mid-sentence cuts: a cut decision line never ends on a joining word ('…for this year because ›')", () => {
+  // the texting decision's cut title from the scratch copy, read before its note (a cold device)
+  assert.equal(decideLine("texting is not recommended for this year because carrier…"), "Decide: texting is not recommended for this year");
+  assert.equal(firstWords("Edit and send the draft to Mark and Dominic: the follow-up", 46), "Edit and send the draft to Mark and Dominic");
+  assert.equal(wholeWords("a daily calendar email to people who…"), "a daily calendar email to people");
 });
 
 if (failed) { console.log(`\n${failed} failed`); process.exit(1); }
