@@ -22,13 +22,14 @@ const COHERE = "Wed 10-14: say go on prod deploy of #38 + #58; Eileen signs off 
 
 await check("the whole action: objects and recipients are never cut; only context after the action is the sheet's", () => {
   const at = rowAction(ATLAS)!;
-  assert.equal(at.text, "Edit and send the ATLAS follow-up to Mark and Michael from your account");
-  assert.equal(at.rest, "fill the opening, sign-off and next-review date.");
+  // r22 (both critics): a ";" clause that leads with a work verb is the user's too, so it stays in the action
+  assert.equal(at.text, "Edit and send the ATLAS follow-up to Mark and Michael from your account; fill the opening, sign-off and next-review date");
+  assert.equal(at.rest, "");
   assert.deepEqual(at.forms.map((f) => f.text), [at.text]);
   const pays = rowAction(PAYS)!;
   assert.equal(pays.text, "Tell Uni who pays (Techne or Gitcoin Foundation) and how: crypto or ACH/Stripe, plus Woven Web's legal details");
-  // its brackets are what a narrow row may leave to the sheet; the object stays whole
-  assert.equal(pays.forms[1].text, "Tell Uni who pays and how: crypto or ACH/Stripe, plus Woven Web's legal details");
+  // r22: one form, the whole action (brackets are dropped only past 160 characters)
+  assert.deepEqual(pays.forms.map((f) => f.text), [pays.text]);
   const co = rowAction(COHERE)!;
   assert.equal(co.text, "Say go on prod deploy of #38 + #58");
   assert.equal(co.prefix, "Wed 10-14");
@@ -44,18 +45,12 @@ await check("multi-step: \"A, then B\" is both steps; the fallback is \"2 steps:
   const ww = rowAction(WOVEN)!;
   assert.deepEqual(ww.steps, ["Review the Woven Web handoff draft, fill the unknowns", "talk with Eileen yourself"]);
   assert.equal(ww.text, "Review the Woven Web handoff draft, fill the unknowns, then talk with Eileen yourself");
-  assert.equal(ww.forms[ww.forms.length - 1].text, "2 steps: Review the Woven Web handoff draft, fill the unknowns, then …");
-  assert.equal(ww.forms[ww.forms.length - 1].keep, "2 steps: Review the Woven Web handoff draft, fill the unknowns");
-  // a cut never enters the first clause: "Edit and send the ATLAS follow-up to Mark and Michael from your account" is kept whole
-  assert.equal(rowAction(ATLAS)!.forms[0].keep, "Edit and send the ATLAS follow-up to Mark and Michael from your account");
+  // r22: never "2 steps: A, then …": the one form is both steps
+  assert.deepEqual(ww.forms.map((f) => f.text), [ww.text]);
   const st = rowAction(STAGING)!;
   assert.equal(st.steps.length, 2);
   assert.match(st.steps[1], /^forward #cohere's 'For Eileen' block/);
-  assert.deepEqual(st.forms.map((f) => f.text), [
-    st.text,
-    "Look at https://cohere-signup-staging.unforced.workers.dev/?look=ecology on phone, then forward #cohere's 'For Eileen' block",
-    "2 steps: Look at https://cohere-signup-staging.unforced.workers.dev/?look=ecology on phone, then …",
-  ]);
+  assert.deepEqual(st.forms.map((f) => f.text), [st.text]);
   // "A; then B" too; "then" inside brackets is not a step
   assert.equal(actionOf("Merge #55; then tell Kevin it is live").steps.length, 2);
   assert.equal(actionOf("Pick a direction (3 directions, then build the pick)").steps.length, 1);
