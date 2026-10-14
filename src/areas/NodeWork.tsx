@@ -4,9 +4,9 @@ import { cleanText } from "../interface/contract";
 import { isMe, ownerLabel, PRIORITIES, PRIORITY_LABEL, priorityOf, type Priority, type Task } from "./taskCore";
 import type { RoomRef } from "./talkCore";
 import type { ActResult, TaskAction, Undo } from "./useTasks";
-import { actionLead, answerLabel, dueLine, questionCount, stateLine, stepAudience, waitsOnMe } from "./simpleCore";
+import { actionLead, answerLabel, answerText, ANSWER_MAX, checkLine, cutWords, dueLine, hostOf, OPEN_TO_ANSWER, questionCount, stateLine, stepAudience, waitsOnMe, type Support } from "./simpleCore";
 import { taskTitle } from "./whereCore";
-import { DecisionAnswer, NextText, decisionAsk, plainDetail } from "./Companion";
+import { DecisionAnswer, NextText, decisionAsk, plainDetail, supportOf } from "./Companion";
 import { RefText } from "./noteRefs";
 import { splitRefs, type NoteRef } from "./noteRefsCore";
 import { useVaultProfile } from "./ProfileContext";
@@ -29,7 +29,7 @@ const when = (iso: string | null) => { const d = iso ? new Date(iso) : null; ret
  * here with the companion's control, and only beside its whole question: a cut title's question is read from its note first, and if none is
  * found the sheet offers the note, with no answers. The sheet is live: `task` is the list's current copy; `gone` says it closed elsewhere.
  */
-export function TaskSheet({ task, gone = false, here, nodeName, room, inRoom, onClose, onAct, onDecide, onNote, onOpenRoom, onSay, onPriority, onStale, nodeKeys = [] }: {
+export function TaskSheet({ task, gone = false, here, nodeName, room, inRoom, onClose, onAct, onDecide, onNote, onOpenRoom, onSay, onPriority, onStale, nodeKeys = [], draft = null }: {
   task: Task; gone?: boolean; here: string; nodeName: (path: string) => string; room: RoomRef | null;
   /** The room open now: "Open in #room" is not offered for it. */
   inRoom?: string | null;
@@ -46,6 +46,8 @@ export function TaskSheet({ task, gone = false, here, nodeName, room, inRoom, on
   onPriority?: (t: Task, p: Priority) => void;
   /** The note was read at a newer revision than the list's copy: re-read the list (the sheet then reads the question again). */
   onStale?: () => void;
+  /** r18: a draft note written for this task (`draft` tag, its `task` field): its text is the message "Copy the message" copies. */
+  draft?: { vault: string; id: string } | null;
 }) {
   const box = useRef<HTMLDivElement>(null);
   const opener = useRef<Element | null>(typeof document === "undefined" ? null : document.activeElement);
@@ -94,22 +96,25 @@ export function TaskSheet({ task, gone = false, here, nodeName, room, inRoom, on
   const newer = !!read?.text && read.at !== task.updatedAt;
   const dq = known && !known.answerable && read?.text && !newer ? decisionAsk({ ...task, ask: read.text, askAt: read.at }) : known;
   const reading = needsRead && (!read || newer);
+  /** r18: a step asking for answers to questions: where they come from (an explicit list, a closed source, or neither), as the row read it, else read here. */
+  const want = decision ? null : questionCount(task.next);
+  const known_ = want ? supportOf(task) : null;
+  const [qs, setQs] = useState<{ rev: string; support: Support } | null>(null);
+  useEffect(() => {
+    if (!want || known_) return;
+    let live = true;
+    vaultTasks.loadSupport(task, nodeKeys, want).then((r) => { if (live) setQs({ rev, support: r }); }).catch(() => { if (live) setQs({ rev, support: { kind: "unclear", from: null } }); });
+    return () => { live = false; };
+  }, [rev, want, !!known_]); // eslint-disable-line react-hooks/exhaustive-deps
+  const support = known_ ?? (want && qs?.rev === rev ? qs.support : null);
+  /** r18: its source note is closed: the sheet asks whether it is still needed, and never leads with the action it doubts. */
+  const check = support?.kind === "closed" ? support : null;
   // r17: someone else's task that waits on the user leads with what it asks of them, whatever its first word
-  const lead = decision ? null : actionLead(task.next) ?? (waitsOnMe(task) && task.next.trim() ? task.next.trim() : null);
+  const lead = decision || check ? null : actionLead(task.next) ?? (waitsOnMe(task) && task.next.trim() ? task.next.trim() : null);
   /** Who the step's words are for (r17): the room ("Say go…", "Tell Uni…", a step naming this room), or a person outside it ("Tell Christian…"). */
   const audience = decision || !lead ? null : stepAudience(task.next, room?.name ?? null);
   const say = audience?.kind === "room" ? audience.text : null;
   const toPerson = audience?.kind === "person" ? audience : null;
-  /** r17: a step asking for answers to questions written elsewhere: they are read (from its note, a note it links, or a task merged into it) and listed here. */
-  const want = decision ? null : questionCount(task.next);
-  const [qs, setQs] = useState<{ rev: string; items: string[] | null; from: { id: string; title: string } | null } | null>(null);
-  useEffect(() => {
-    if (!want) return;
-    let live = true;
-    vaultTasks.loadQuestions(task, nodeKeys, want).then((r) => { if (live) setQs({ rev, items: r?.items ?? null, from: r?.from ?? null }); }).catch(() => { if (live) setQs({ rev, items: null, from: null }); });
-    return () => { live = false; };
-  }, [rev, want]); // eslint-disable-line react-hooks/exhaustive-deps
-  const questions = want && qs?.rev === rev ? qs : null;
   const [copied, setCopied] = useState(false);
   /** An answer being written (r17: the sheet waits for it), and why it wasn't recorded when it wasn't. */
   const [deciding, setDeciding] = useState(false);
@@ -121,55 +126,83 @@ export function TaskSheet({ task, gone = false, here, nodeName, room, inRoom, on
     setDeciding(false);
     if (!r || r.ok) onClose(); else { setDecideError(r.message ?? "Your answer wasn't recorded."); box.current?.focus(); }
   };
-  const heading = dq ? (dq.answerable ? dq.text : reading ? (newer ? "This changed; reading the latest…" : "Reading the question…") : "The question is in its note") : lead ?? rest; // never the bare id
+  const heading = check ? checkLine(check) : dq ? (dq.answerable ? dq.text : reading ? (newer ? "This changed; reading the latest…" : "Reading the question…") : "The question is in its note") : lead ?? rest; // never the bare id
   /** "default yes": what a decision's title says happens without an answer, kept here though the row shows only the ask. */
   const dflt = decision ? /^decision\s*\(([^)]*)\)/i.exec(rest)?.[1]?.trim() ?? null : null;
   const by = changedBy(task);
   const at = when(task.updatedAt);
   const sayIn = !gone && say !== null && room && onSay ? () => { onSay(room.id, say); onClose(); } : null;
   const prio = priorityOf(task);
-  /** One primary action (r14): the step's own ("Say it in #room ›"; r17: toward a person, its real link or Copy), else "I did this". Then the rest, quietly. */
-  const primary = sayIn ? "say" : !gone && toPerson ? "person" : !gone && !decision ? "done" : null;
+  /**
+   * r18, toward a person: the message itself when one is stored (the task's `message`/`draft` field, or its draft note's text) is "Copy the
+   * message"; an explicit destination (the `link`/`url` field, or a `mailto:` written in the step) opens; with no message, "Ask Uni to draft it"
+   * types a request in the owning room (never sent). The bare instruction is never what Copy copies.
+   */
+  const [draftText, setDraftText] = useState<string | null>(null);
+  useEffect(() => {
+    if (!toPerson || task.message || !draft) return;
+    let live = true;
+    invoke("vault_note", { vault: draft.vault, noteRef: draft.id }).then((r) => { const c = (r as { note?: { content?: unknown } } | null)?.note?.content; if (live && typeof c === "string" && c.trim()) setDraftText(c.trim()); }).catch(() => {});
+    return () => { live = false; };
+  }, [draft?.id, !!toPerson]); // eslint-disable-line react-hooks/exhaustive-deps
+  const message = toPerson ? task.message ?? draftText : null;
+  const dest = toPerson ? (task.link ? { href: task.link, label: /^mailto:/i.test(task.link) ? `Email ${task.link.replace(/^mailto:/i, "").split("?")[0]}` : `Open ${hostOf(task.link)}` } : toPerson.link) : null;
+  const askDraft = !gone && toPerson && !message && room && onSay ? () => { onSay(room.id, `Please draft the message for ${tid ?? "this task"} (${cutWords(rest, 80)}): ${task.next.trim()}`); onClose(); } : null;
+  /** One primary action (r14): the step's own ("Say it in #room ›"; toward a person: its message, its destination, or a draft from Uni), else "I did this". */
+  const primary = check ? "source" : sayIn ? "say" : !gone && toPerson ? (message ? "message" : dest ? "dest" : askDraft ? "draft" : "done") : !gone && !decision ? "done" : null;
   const openOut = (href: string) => { void invoke("open_link", { url: href }).catch(() => { try { window.open(href, "_blank", "noopener"); } catch { /* nothing to open with */ } }); };
+  /** The title under the action, one line of whole words; the whole of it (and the note's own words) is in Details (r18). */
+  const sub = cutWords(rest, 96);
+  const about = (task.ask && task.ask.trim() !== rest.trim() ? task.ask.trim() : null) ?? (sub !== rest ? rest : null);
+  /** r18: a decision with no stored options is answered in words, written like a tap: one revision-guarded write of `decided`. */
+  const [words, setWords] = useState("");
+  const typed = answerText(words);
   return <div className="task-sheet-wrap" onKeyDown={key}>
     <button type="button" className="task-backdrop" aria-label="Close" tabIndex={-1} onClick={onClose} />
     <div ref={box} className="task-sheet" role="dialog" aria-modal="true" aria-labelledby="task-sheet-title" tabIndex={-1}>
       <p className="task-kind">{decision ? `Decision${dflt ? ` (${dflt})` : ""}` : "Task"}{task.node !== here ? ` · in ${nodeName(task.node)}` : ""}</p>
       {dq?.answerable && dq.yourCall && <small className="cp-call-lead">Your call:</small>}
       <h2 id="task-sheet-title">{lead && !dq ? <RefText text={plainDetail(lead) || lead} vault={vault} /> : heading}</h2>
-      {lead && <p className="task-sub">{rest}</p>}
+      {(lead || check) && <p className="task-sub" title={sub !== rest ? rest : undefined}>{sub}</p>}
       {gone && <p className="task-gone" role="status">This is no longer open: it was done, decided or changed elsewhere.</p>}
       {changed && !gone && <p className="task-gone task-changed" role="alert">This changed since you opened it. Nothing was saved; this is the latest.</p>}
       {dq?.answerable && dq.full !== dq.text && /https?:\/\/|\bwww\./.test(dq.full) && <div className="task-next"><NextText text={dq.full} vault={vault} onNote={(r) => { onClose(); onNote(r); }} /></div>}
       {dq && !dq.answerable && !reading && <p className="task-next"><button type="button" className="task-link" onClick={() => { onClose(); onNote({ vault, id: task.id }); }}>Open the note to read the question ›</button></p>}
-      {/* the step itself, with its links to open, when the lead had to drop them (a URL, a linked note) or when it is not an action */}
-      {task.next && (!lead || linky(task.next)) && <div className="task-next"><NextText text={task.next} vault={vault} onNote={(r) => { onClose(); onNote(r); }} /></div>}
-      {task.nextCut && <p className="task-next task-cut">This step was cut short when it was written. <button type="button" className="task-link" onClick={() => { onClose(); onNote({ vault, id: task.id }); }}>Open the note ›</button></p>}
-      {want && <section className="task-questions" aria-label={answerLabel(want)}>
-        <h3 className="task-q-h">{answerLabel(want)}</h3>
-        {!questions ? <p className="task-q-note" role="status">Reading the questions…</p>
-          : questions.items ? <>
-            <ol className="task-q-list">{questions.items.map((q, i) => <li key={i}><RefText text={q} vault={vault} /></li>)}</ol>
-            {questions.from && <p className="task-q-note">From <button type="button" className="task-link" onClick={() => { onClose(); onNote({ vault, id: questions.from!.id }); }}>{questions.from.title} ›</button></p>}
-            {questions.items.length !== want && <p className="task-q-note">The step says {want}; its note lists {questions.items.length}.</p>}
+      {/* the step itself, with its links to open, when the lead had to drop them (a URL, a linked note) or when it is not an action; never under "Check" */}
+      {!check && task.next && (!lead || linky(task.next)) && <div className="task-next"><NextText text={task.next} vault={vault} onNote={(r) => { onClose(); onNote(r); }} /></div>}
+      {!check && task.nextCut && <p className="task-next task-cut">This step was cut short when it was written. <button type="button" className="task-link" onClick={() => { onClose(); onNote({ vault, id: task.id }); }}>Open the note ›</button></p>}
+      {check && <p className="task-q-note">Its questions came from that note, and it is {check.how === "superseded" ? "superseded" : "closed"}. If this still needs you, its note says what; if not, archive it.</p>}
+      {want && !check && <section className="task-questions" aria-label={support?.kind === "list" ? answerLabel(support.items.length) : OPEN_TO_ANSWER}>
+        {!support ? <p className="task-q-note" role="status">Reading the questions…</p>
+          : support.kind === "list" ? <>
+            <h3 className="task-q-h">{answerLabel(support.items.length)}</h3>
+            <ol className="task-q-list">{support.items.map((q, i) => <li key={i}><RefText text={q} vault={vault} /></li>)}</ol>
+            {support.from && <p className="task-q-note">From <button type="button" className="task-link" onClick={() => { onClose(); onNote({ vault: support.from!.vault, id: support.from!.id }); }}>{support.from.title} ›</button></p>}
           </>
-          : <p className="task-q-note">The questions aren't written out in its note or the notes it links. <button type="button" className="task-link" onClick={() => { onClose(); onNote({ vault, id: task.id }); }}>Open the note ›</button></p>}
+          : <p className="task-q-note"><button type="button" className="task-link" onClick={() => { onClose(); onNote(support.from ? { vault: support.from.vault, id: support.from.id } : { vault, id: task.id }); }}>{OPEN_TO_ANSWER} ›</button></p>}
       </section>}
       {decideError && !gone && <p className="task-gone task-changed" role="alert">{decideError}</p>}
-      {!gone && dq?.answerable && <DecisionAnswer t={task} label={heading} onDecide={(t, o) => void answer(t, o)} className={`task-answer${deciding ? " busy" : ""}`} />}
+      {!gone && dq?.answerable && !dq.box && <DecisionAnswer t={task} label={heading} onDecide={(t, o) => void answer(t, o)} className={`task-answer${deciding ? " busy" : ""}`} />}
+      {!gone && dq?.answerable && dq.box && <form className="task-answer-box" aria-label="Answer in your words" onSubmit={(e) => { e.preventDefault(); if (typed) void answer(task, typed); }}>
+        <label htmlFor="task-answer-words">Answer in your words</label>
+        <div className="task-answer-row">
+          <input id="task-answer-words" type="text" value={words} maxLength={ANSWER_MAX} autoComplete="off" onChange={(e) => setWords(e.target.value)} disabled={deciding} />
+          <button type="submit" className="task-do primary" disabled={!typed || deciding} aria-busy={deciding || undefined}>{deciding ? "Saving…" : "Answer"}</button>
+        </div>
+      </form>}
       <dl className="task-facts">
         <dt>Status</dt><dd>{stateLine(task, (w) => isMe(w), OWNER)}</dd>
         {!isMe(task.owner) && <><dt>{isMe(task.waitingOn) ? "Task of" : "With"}</dt><dd>{OWNER(task.owner)}</dd></>}
         {task.due && <><dt>Due</dt><dd>{dueLine(task.due)}</dd></>}
       </dl>
       <div className="task-actions">
+        {primary === "source" && <button type="button" className="task-do primary" onClick={() => { onClose(); onNote({ vault: check!.from.vault, id: check!.from.id }); }}>Open the note</button>}
         {primary === "say" && <button type="button" className="task-do primary" onClick={sayIn!}>Say it in #{room!.name.replace(/^#/, "")} ›</button>}
-        {/* r17: toward a person outside the room: the step's own link (mailto: or a URL it carries), else Copy; never a room prefill */}
-        {primary === "person" && (toPerson!.link
-          ? <button type="button" className="task-do primary" onClick={() => openOut(toPerson!.link!.href)}>{toPerson!.link.label} ›</button>
-          : <button type="button" className="task-do primary" aria-live="polite" onClick={() => void copyText(toPerson!.copy, "Copied").then((ok) => { if (ok) setCopied(true); })}>{copied ? "Copied" : "Copy"}</button>)}
-        {!gone && !decision && <button type="button" className={`task-do${primary === "done" ? " primary" : ""}`} aria-busy={busy === "done" || undefined} disabled={!!busy} onClick={() => void go("done")}>{busy === "done" ? "Saving…" : "I did this"}</button>}
-        {!sayIn && room && room.id !== inRoom && <button type="button" className="task-do quiet" onClick={() => { onOpenRoom(room.id); onClose(); }}>Open in #{room.name.replace(/^#/, "")}</button>}
+        {primary === "message" && <button type="button" className="task-do primary" aria-live="polite" onClick={() => void copyText(message!, "Copied the message").then((ok) => { if (ok) setCopied(true); })}>{copied ? "Copied" : "Copy the message"}</button>}
+        {dest && (primary === "dest" || primary === "message") && <button type="button" className={`task-do${primary === "dest" ? " primary" : ""}`} onClick={() => openOut(dest.href)}>{dest.label} ›</button>}
+        {askDraft && <button type="button" className={`task-do${primary === "draft" ? " primary" : ""}`} onClick={askDraft}>Ask Uni to draft it</button>}
+        {!gone && !decision && !check && <button type="button" className={`task-do${primary === "done" ? " primary" : ""}`} aria-busy={busy === "done" || undefined} disabled={!!busy} onClick={() => void go("done")}>{busy === "done" ? "Saving…" : "I did this"}</button>}
+        {!sayIn && !askDraft && room && room.id !== inRoom && <button type="button" className="task-do quiet" onClick={() => { onOpenRoom(room.id); onClose(); }}>Open in #{room.name.replace(/^#/, "")}</button>}
         <button type="button" className="task-do quiet" onClick={onClose}>Close</button>
       </div>
       {/* r17: housekeeping sits below the real action, smaller and quieter */}
@@ -177,10 +210,13 @@ export function TaskSheet({ task, gone = false, here, nodeName, room, inRoom, on
         {!decision && <button type="button" className="task-house-b" aria-busy={busy === "archive" || undefined} disabled={!!busy} onClick={() => void go("archive")}>{busy === "archive" ? "Archiving…" : "Archive"}</button>}
         <button type="button" className="task-house-b" aria-busy={busy === "snooze" || undefined} disabled={!!busy} onClick={() => void go("snooze")}>{busy === "snooze" ? "Snoozing…" : "Snooze until tomorrow"}</button>
       </div>}
-      {(tid || at || (!gone && !decision && onPriority)) && <details className="task-details" onToggle={(e) => { const d = e.currentTarget; if (d.open) requestAnimationFrame(() => d.scrollIntoView({ block: "nearest" })); }}><summary>Details</summary>
+      {(tid || at || about || check || (!gone && !decision && onPriority)) && <details className="task-details" onToggle={(e) => { const d = e.currentTarget; if (d.open) requestAnimationFrame(() => d.scrollIntoView({ block: "nearest" })); }}><summary>Details</summary>
         {!gone && !decision && onPriority && <div className="task-prio" role="group" aria-label="Priority">
           {PRIORITIES.map((p) => <button key={p} type="button" className="task-prio-b" aria-pressed={p === prio} onClick={() => { if (p !== prio) onPriority(task, p); }}>{PRIORITY_LABEL[p]}</button>)}
         </div>}
+        {/* r18: the note's own words (the wall a row used to carry under its action) and, under "Check", the step it doubts */}
+        {about && <p className="task-about"><RefText text={about} vault={vault} /></p>}
+        {check && task.next && <p className="task-about">Its step: <RefText text={task.next} vault={vault} /> <button type="button" className="task-link" onClick={() => { onClose(); onNote({ vault, id: task.id }); }}>This task's note ›</button></p>}
         {tid && <p>{decision ? "Decision" : "Task"} {tid}</p>}
         {at && <p>Last changed{by ? ` by ${by}` : ""}, {at}</p>}
       </details>}

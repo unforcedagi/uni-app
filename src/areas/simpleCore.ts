@@ -122,10 +122,11 @@ export function actionLead(next: string | null | undefined): string | null {
  * Who a step's words are for (r17). `room`: the message is for the room itself ("Say go to deploy…", "Tell Uni…", "Tell the room…", "Ask Uni
  * to…", or a step that names this room, "…in #woven-web"): the sheet offers "Say it in #room ›" with `text` in the composer (never sent; "" when
  * there are no words to put there). `person`: an action toward someone outside the room ("Tell Christian…", "Reply to jonbo…", "Email…", "Send
- * Ryan…"): the sheet leads with the action and offers its real link (`mailto:` or a URL the task carries) or Copy, never a room prefill. Null: any
+ * Ryan…"): the sheet leads with the action and offers an explicit destination (r18: a `mailto:` in the step; the task's `link` field is the
+ * caller's), the message to copy when one is stored, or "Ask Uni to draft it"; never a room prefill. Null: any
  * other step. `room`: the task's room name (with or without "#"), so a step naming it is known to be for it.
  */
-export type Audience = { kind: "room"; text: string } | { kind: "person"; copy: string; link: { href: string; label: string } | null };
+export type Audience = { kind: "room"; text: string } | { kind: "person"; link: { href: string; label: string } | null };
 const ROOM_WORDS = /^(?:uni|main|the room|this room|the channel|everyone here)\b/i;
 const QUESTION_WORD = /^(?:whether|which|if|what|who|when|how|why)\b/i;
 const PERSON_VERB = /^(?:tell|reply|respond|email|e-mail|mail|message|text|call|phone|ping|ask|send|forward|invite|write|thank|remind|follow up|introduce|nudge|answer)\b/i;
@@ -161,15 +162,15 @@ export function stepAudience(next: string | null | undefined, room: string | nul
     const rest = act.replace(PERSON_VERB, "").trim();
     const toSomeone = /^(?:email|e-mail|mail|call|phone|text)\b/i.test(act) || namesPerson(rest) || /\bto\s+\p{Lu}/u.test(rest) || /^(?:to|back to)\s+\S/i.test(rest);
     if (toSomeone) {
-      const mail = /\b[\w.+-]+@[\w-]+(?:\.[\w-]+)+\b/.exec(step)?.[0];
-      const url = /https?:\/\/[^\s)>\]]+/.exec(step)?.[0];
-      const link = mail ? { href: `mailto:${mail}`, label: `Email ${mail}` } : url ? { href: url.replace(/[.,;:]+$/, ""), label: `Open ${hostOf(url)}` } : null;
-      return { kind: "person", copy: step, link };
+      // r18: a link leads only when it is written as the destination: an explicit `mailto:` here, or the task's `link`/`url` field
+      // (`destination`); never a web address that merely appears in the instruction
+      const mail = /\bmailto:([\w.+-]+@[\w-]+(?:\.[\w-]+)+)\b/i.exec(step)?.[1];
+      return { kind: "person", link: mail ? { href: `mailto:${mail}`, label: `Email ${mail}` } : null };
     }
   }
   return null;
 }
-const hostOf = (url: string) => { try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return "the link"; } };
+export const hostOf = (url: string) => { try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return "the link"; } };
 /** What a room-directed step would put in the room's composer (never sent). Kept for the r13 callers: the room's words, else null. */
 export function sayText(lead: string | null, room: string | null = null): string | null {
   const a = stepAudience(lead, room);
@@ -190,69 +191,100 @@ export function questionCount(next: string | null | undefined): number | null {
 }
 /** "Answer 9 questions": the row's way into the sheet that lists them. */
 export const answerLabel = (n: number): string => `Answer ${n} ${n === 1 ? "question" : "questions"}`;
-const LIST_ITEM = /^\s*(?:[-*+•]|\d+[.)])\s+(.*)$/;
+const LIST_ITEM = /^(\s*)(?:[-*+•]|\d+[.)])\s+(.*)$/;
 const NUMBERED = /^\s*\d+[.)]\s+/;
 const cleanItem = (s: string) => s.replace(/\[\[([^\]|]*\|)?([^\]]*)\]\]/g, "$2").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/[*_`]/g, "").replace(/\s+/g, " ").trim();
-/** The lists in a note: runs of list lines, each with the heading it sits under and whether it is numbered. */
+/**
+ * The lists in a note: runs of top-level list items, each with the heading it sits under. r18: an item is kept whole, with its indented
+ * continuation lines and nested items (joined into its text), never cut at its first line.
+ */
 function listsIn(content: string): { heading: string; numbered: boolean; items: string[] }[] {
   const out: { heading: string; numbered: boolean; items: string[] }[] = [];
   let heading = ""; let cur: { heading: string; numbered: boolean; items: string[] } | null = null;
+  let item: string[] | null = null;
+  const close = () => { if (cur && item) cur.items.push(cleanItem(item.join(" "))); item = null; };
   for (const raw of content.split(/\r?\n/)) {
     const h = /^#{1,6}\s+(.*)$/.exec(raw.trim());
-    if (h) { heading = h[1]; cur = null; continue; }
+    if (h) { close(); heading = h[1]; cur = null; continue; }
     const li = LIST_ITEM.exec(raw);
-    if (li && !/^\s{2,}/.test(raw)) {
+    if (li && li[1].length < 2) {
+      close();
       // a list of the other kind (numbered after bullets) is a new list
       if (cur && cur.numbered !== NUMBERED.test(raw)) cur = null;
       if (!cur) { cur = { heading, numbered: NUMBERED.test(raw), items: [] }; out.push(cur); }
-      cur.items.push(cleanItem(li[1]));
+      item = [li[2]];
       continue;
     }
-    if (cur && raw.trim() && /^\s{2,}/.test(raw)) continue; // a nested line stays with its item
-    if (cur && raw.trim()) cur = null;
+    // an indented line (a wrapped line or a nested item) belongs to the item above it
+    if (item && raw.trim() && /^\s{2,}/.test(raw)) { item.push(LIST_ITEM.exec(raw)?.[2] ?? raw.trim()); continue; }
+    if (raw.trim()) { close(); cur = null; }
   }
+  close();
   return out.filter((l) => l.items.length);
 }
 /**
- * The questions a note holds (r17): the first list under a heading about questions, else the first numbered list, else (when the step said how
- * many) the first list of exactly that many. Null when the note has none: the sheet then says so and offers the note.
+ * The questions a note holds (r18: only from an explicit source): its structured `questions` field, else the list under a heading that names
+ * questions ("## Questions for Aaron"). No numbered plan or bullet list elsewhere is taken for questions. `want`: the count the step names; a
+ * source that holds another count is `unclear` (the sheet then says "Open the note to answer" and claims no list). Null: no explicit source here.
  */
-export function questionsFrom(content: string | null | undefined, want: number | null = null): string[] | null {
-  const lists = listsIn(content ?? "");
-  const pick = lists.find((l) => /\bquestions?\b/i.test(l.heading)) ?? lists.find((l) => l.numbered) ?? (want ? lists.find((l) => l.items.length === want) : undefined);
-  return pick ? pick.items : null;
+export type Questions = { status: "list"; items: string[] } | { status: "unclear"; found: number };
+export function questionsFrom(content: string | null | undefined, want: number | null = null, metadata: Record<string, unknown> | null = null): Questions | null {
+  const field = metadata?.questions;
+  const stored = Array.isArray(field) ? field.filter((q): q is string => typeof q === "string" && !!q.trim()).map(cleanItem) : null;
+  const items = stored?.length ? stored : listsIn(content ?? "").find((l) => /\bquestions?\b/i.test(l.heading))?.items ?? null;
+  if (!items) return null;
+  return want !== null && items.length !== want ? { status: "unclear", found: items.length } : { status: "list", items };
 }
-/** Notes a text links to, as refs to read in its own vault: `uni:<ULID>`, `[[Path]]` and bare ULIDs, in order, once each. */
-export function linkedRefs(text: string | null | undefined): string[] {
-  const out: string[] = [];
-  const add = (r: string) => { const t = r.trim(); if (t && !out.includes(t)) out.push(t); };
-  for (const m of (text ?? "").matchAll(/\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]|(?:\b[a-z][\w-]*:)?\b([0-9A-HJKMNP-TV-Z]{26})\b/g)) add(m[1] ?? m[2]);
+/** A note a text links to, as `{vault, id}` (r18): `uni:<ULID>` names its vault; a bare ULID or `[[Path]]` is the text's own vault (null). */
+export type LinkRef = { vault: string | null; id: string };
+/** Notes a text links to, in order, once each: `uni:<ULID>`, `[[Path]]` and bare ULIDs, each with the vault it names. */
+export function linkedRefs(text: string | null | undefined): LinkRef[] {
+  const out: LinkRef[] = [];
+  const add = (vault: string | null, r: string) => { const id = r.trim(); if (id && !out.some((o) => o.id === id && o.vault === vault)) out.push({ vault, id }); };
+  for (const m of (text ?? "").matchAll(/\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]|(?:\b([a-z][\w-]*):)?\b([0-9A-HJKMNP-TV-Z]{26})\b/g)) {
+    if (m[1]) add(null, m[1]); else add(m[2] ?? null, m[3]);
+  }
   return out;
 }
+/**
+ * Whether a note's own metadata says it is finished (r18): a task or decision `done`, `archived`, `decided` or `closed`, or a `superseded_by`
+ * field. Only explicit state; a title's words are never read for it. Null: open, or nothing said.
+ */
+export function closedBy(metadata: Record<string, unknown> | null | undefined): "closed" | "superseded" | null {
+  const m = metadata ?? {};
+  if (typeof m.superseded_by === "string" ? m.superseded_by.trim() : m.superseded_by) return "superseded";
+  const st = typeof m.state === "string" ? m.state.trim().toLowerCase() : "";
+  return ["done", "archived", "decided", "closed"].includes(st) ? "closed" : null;
+}
+/**
+ * Where a task's questions (or the detail it carries) come from (r18), as every surface shows it. `list`: read from an explicit source (`from`
+ * when it is not the task's own note). `closed`: its source note is closed or superseded, so its action is not shown as current: "Check: <source>
+ * is closed — still needed?". `unclear`: no explicit list, or a count other than the step's: "Open the note to answer", no list claimed.
+ */
+export type SourceRef = { vault: string; id: string; title: string };
+export type Support = { kind: "list"; items: string[]; from: SourceRef | null } | { kind: "closed"; how: "closed" | "superseded"; from: SourceRef } | { kind: "unclear"; from: SourceRef | null };
+/** "Check: “RegenHub: deployed fixes…” is closed — still needed?": a task whose source note is finished (r18). */
+export const checkLine = (s: Extract<Support, { kind: "closed" }>): string => `Check: “${s.from.title}” ${s.how === "superseded" ? "was superseded" : "is closed"} — still needed?`;
+export const OPEN_TO_ANSWER = "Open the note to answer";
 
 /**
- * The answers a decision offers (r17), so no answer is ambiguous. Its stored options; else Yes and No only beside a question (a sentence ending
- * in "?"); else answers built from the statement that say what each does ("Texting is not recommended…": "Agree (skip texting)" and
- * "Disagree"; a proposal, "Decision (default yes): Uni adds…": "Go ahead" and "Skip it"). `open`: no such answers can be built: the row says
- * "Open to decide ›" and the sheet offers "Agree" and "Disagree" beside the whole statement.
+ * The answers a decision offers (r18: only what is stored on it). Its `options`, each written back as stored; plain Yes/No only when the stored
+ * options are exactly yes and no (the writer, `tasks.py decide new`, has no `kind: binary` field). With no options there are no buttons: the
+ * sheet has a one-line answer box ("Answer in your words") written with the same revision-guarded write. Nothing is read from punctuation.
  */
 export type Choice = { label: string; value: string };
-export function answerChoices(question: string, options: readonly string[], title = ""): { choices: Choice[]; open: boolean } {
-  if (options.length) return { choices: options.map((o) => ({ label: o, value: o })), open: false };
-  const q = question.replace(/\s+/g, " ").trim();
-  if (/\?["')\]]*$/.test(q)) return { choices: [{ label: "Yes", value: "yes" }, { label: "No", value: "no" }], open: false };
-  const agreeDisagree = (what: string): Choice[] => [{ label: `Agree (${what})`, value: `agree: ${what}` }, { label: "Disagree", value: "disagree" }];
-  const subject = (s: string) => { const w = s.replace(/^(?:the|a|an)\s+/i, "").trim(); return w.split(/\s+/).length <= 4 && !/[,;:]/.test(w) ? (/^\p{Lu}{2,}/u.test(w) ? w : w[0].toLocaleLowerCase() + w.slice(1)) : null; };
-  let m = /^(.+?)\s+(?:is|are)\s+not\s+(?:recommended|advised|worth it|needed)\b/i.exec(q) ?? /^(?:we\s+|uni\s+)?(?:don't|do not|doesn't|does not)\s+recommend\s+(.+?)(?=\s+(?:for|this|because|until|before|now)\b|[.,;]|$)/i.exec(q);
-  if (m) { const s = subject(m[1]); if (s) return { choices: agreeDisagree(`skip ${s}`), open: false }; }
-  m = /^(.+?)\s+(?:is|are)\s+recommended\b/i.exec(q) ?? /^(?:we\s+|uni\s+)?recommends?\s+(.+?)(?=\s+(?:for|this|because|until|before|now)\b|[.,;]|$)/i.exec(q);
-  if (m) { const s = subject(m[1]); if (s) return { choices: agreeDisagree(s), open: false }; }
-  // a proposal: Uni goes ahead unless told no ("default yes"), or waits for a yes ("needs your yes")
-  if (/^decision\s*\((?:default yes|needs your yes)\)/i.test(title.trim()) || /\bsay no to\b/i.test(q)) {
-    const no = /\bsay no to (skip|drop|stop|cancel|hold) (it|this|that)\b/i.exec(q);
-    return { choices: [{ label: "Go ahead", value: "yes" }, { label: no ? capFirst(`${no[1].toLowerCase()} ${no[2].toLowerCase()}`) : "Skip it", value: "no" }], open: false };
-  }
-  return { choices: [{ label: "Agree", value: "agree" }, { label: "Disagree", value: "disagree" }], open: true };
+export function answerChoices(options: readonly string[]): { choices: Choice[]; box: boolean; binary: boolean } {
+  if (!options.length) return { choices: [], box: true, binary: false };
+  const low = options.map((o) => o.trim().toLowerCase());
+  const binary = options.length === 2 && low.includes("yes") && low.includes("no");
+  return { choices: options.map((o) => ({ label: binary ? capFirst(o.trim().toLowerCase()) : o, value: o })), box: false, binary };
+}
+/** The vault keeps an answer to 500 characters (uni-core `check_decide_patch`). */
+export const ANSWER_MAX = 500;
+/** An answer typed in words, as written: one line, trimmed; null when empty or too long to record. */
+export function answerText(raw: string): string | null {
+  const t = raw.replace(/\s+/g, " ").trim();
+  return t && t.length <= ANSWER_MAX ? t : null;
 }
 
 /**
@@ -323,6 +355,15 @@ export function standsLine(stands: { text: string; at: string | null } | null | 
   return { text: line, ago: quietAgo(pick.updatedAt, nowMs) };
 }
 
+/**
+ * The companion's heading, and the work view's (r18: one wording, one timestamp, `standsLine`'s): "Where this stands · 2 days ago" once the
+ * summary is older than today; "Where Expression stands" for a node shown in a room it borrows.
+ */
+export function standsHeading(scope: string | null | undefined, ago: string | null | undefined): string {
+  const base = scope ? `Where ${scope} stands` : "Where this stands";
+  return ago && ago !== "today" ? `${base} · ${ago}` : base;
+}
+
 /** `Message #atlas/build`; a node held by a room says whose (`Message #atlas`); no room, the node's name. */
 export function chatPlaceholder(a: { name: string; slash: string | null; heldBy: string | null }): string {
   if (a.slash) return `Message #${a.slash}`;
@@ -358,7 +399,7 @@ export function askPreview(text: string, max = 160): string {
   if (plain.length <= max) return plain;
   let out = "";
   for (const sen of plain.match(/[^.!?]+[.!?]+(?=\s|$)/g) ?? []) { if ((out + sen).length > max) break; out = `${out}${sen}`; }
-  return `${(out.trim() || plain.slice(0, max).replace(/\s+\S*$/, "")).replace(/[\s,;:]+$/, "")} …`;
+  return out.trim() ? `${out.trim()} …` : cutWords(plain, max);
 }
 
 /** A Needs-you row shows a whole question beside its answers only when it fits the row; a longer one opens to decide (r14). */
@@ -377,17 +418,40 @@ export function decisionQuestion(rest: string, ask: string | undefined, askAt: s
 }
 
 /** Words a fragment must not end on ("…feature 4, the"): an article, a preposition or a joining word left hanging. */
-const DANGLING = /^(a|an|the|to|of|for|in|on|at|by|with|and|or|but|nor|who|whom|whose|that|which|from|as|is|are|was|be|if|than|then|into|onto|about|your|their|its|this|these|those|our|my|so|via|per|because|since|unless|until|while|although|though|whether|when|where|&|\+|-|–|—)$/i;
-/** The first whole words of a text within `max` characters, never ending on a hanging word or a separator, and never with "…" (r16). */
-export function firstWords(text: string, max = 48): string {
-  const words = withoutCut(text).replace(/\s+/g, " ").trim().split(" ").filter(Boolean);
+export const DANGLING = /^(a|an|the|to|of|for|in|on|at|by|with|and|or|but|nor|who|whom|whose|that|which|from|as|is|are|was|be|if|than|then|into|onto|about|your|their|its|this|these|those|our|my|so|via|per|because|since|unless|until|while|although|though|whether|when|where|&|\+|-|–|—)$/i;
+const SEP_TAIL = /[\s,;:(\[–—+&-]+$/;
+/** Already says it was cut: ends in "…" or "..." (perhaps inside a closing bracket or quote, "hero wording…)"). */
+const endsCut = (t: string) => /(…|\.\.\.)[)\]"”’']*$/.test(t);
+/** The words kept, without a hanging word, a separator or an unclosed "(" left at the end. */
+function tidyTail(words: string[]): string[] {
+  const out = [...words];
+  const strip = (w: string) => w.replace(SEP_TAIL, "");
+  for (let n = 0; n < 16; n++) {
+    const joined = out.join(" "); const open = joined.lastIndexOf("(");
+    if (open > 0 && joined.indexOf(")", open) < 0) { const keep = joined.slice(0, open).trim().split(" ").filter(Boolean); if (keep.length) { out.splice(0, out.length, ...keep); continue; } }
+    if (out.length > 1 && (DANGLING.test(strip(out[out.length - 1])) || !strip(out[out.length - 1]))) { out.pop(); continue; }
+    break;
+  }
+  if (out.length) out[out.length - 1] = endsCut(out[out.length - 1]) ? out[out.length - 1] : strip(out[out.length - 1]) || out[out.length - 1];
+  return out;
+}
+/**
+ * The one cut (r18): every text the app shortens goes through here. The first whole words within `max` characters, never ending on a hanging
+ * word, a separator or an unclosed "("; then "…" (`mark`), unless the words kept already end in one (never "wording…) …"). A text within
+ * `max` comes back whole. `max` Infinity: only tidies a text that was cut elsewhere (its own "…" is dropped first).
+ */
+export function cutWords(text: string, max = Infinity, mark = true): string {
+  const plain = text.replace(/\s+/g, " ").trim();
+  if (max === Infinity) { const t = tidyTail(withoutCut(plain).split(" ").filter(Boolean)).join(" "); return mark && t && !endsCut(t) ? `${t}…` : t; }
+  if (plain.length <= max) return plain;
+  const words = plain.split(" ");
   const out: string[] = [];
   for (const w of words) { if (out.length && [...out, w].join(" ").length > max) break; out.push(w); }
-  const strip = (w: string) => w.replace(/[,;:(\[–—-]+$/, "");
-  while (out.length > 1 && (DANGLING.test(strip(out[out.length - 1])) || !strip(out[out.length - 1]))) out.pop();
-  if (out.length) out[out.length - 1] = strip(out[out.length - 1]) || out[out.length - 1];
-  return out.join(" ");
+  const t = tidyTail(out).join(" ");
+  return mark && !endsCut(t) ? `${t}…` : t;
 }
+/** The first whole words of a text within `max` characters, never ending on a hanging word or a separator, and never with "…" (r16). */
+export const firstWords = (text: string, max = 48): string => tidyTail(cutWords(withoutCut(text), max, false).split(" ").filter(Boolean)).join(" ");
 /**
  * A decision row with no whole question to show (r16): the verb first, the first words, and the way in: "Decide: Uni adds Benya's missing
  * feature 4". The row opens to decide; it never ends on "…" with nothing to act on.
@@ -408,22 +472,12 @@ export const NEXT_CAP = 140;
 export function stepText(next: string): { text: string; cut: boolean } {
   const t = next.replace(/\s+/g, " ").trim();
   if (t.length < NEXT_CAP || /[.!?)"”’'\]]$/.test(t)) return { text: t, cut: false };
-  const words = t.split(" ");
-  words.pop();
-  while (words.length > 1 && DANGLING.test(words[words.length - 1].replace(/[,;:(\[]+$/, ""))) words.pop();
-  return { text: `${words.join(" ").replace(/[\s,;:(\[–—-]+$/, "")} …`, cut: true };
+  const words = t.split(" "); words.pop();
+  return { text: cutWords(words.join(" ")), cut: true };
 }
 
 /** A cut fragment as whole words (r16): no "…", no unclosed "(3" tail, no hanging word ("…install flow (3" → "…install flow"). */
-export function wholeWords(text: string): string {
-  let t = withoutCut(text);
-  const open = t.lastIndexOf("("); if (open > 0 && t.indexOf(")", open) < 0) t = t.slice(0, open);
-  const words = t.replace(/\s+/g, " ").trim().split(" ").filter(Boolean);
-  const strip = (w: string) => w.replace(/[,;:(\[–—+&-]+$/, "");
-  while (words.length > 1 && (DANGLING.test(strip(words[words.length - 1])) || !strip(words[words.length - 1]))) words.pop();
-  if (words.length) words[words.length - 1] = strip(words[words.length - 1]) || words[words.length - 1];
-  return words.join(" ");
-}
+export const wholeWords = (text: string): string => cutWords(text, Infinity, false);
 /** A cut title without its "…": what is left reads as a plain fragment, never as a row that ends on an ellipsis. */
 export const withoutCut = (rest: string): string => rest.replace(/\s*(…|\.\.\.)\s*$/, "").trim();
 

@@ -300,7 +300,10 @@
 .cp-dot { display: inline-block; flex: none; width: 9px; height: 9px; border-radius: 50%; background: var(--th-sap); }
 .cp-unfold .cp-dot { position: absolute; right: 4px; top: 4px; }
 .cp-lede { margin: 0; font: 400 16px/1.4 var(--th-serif); letter-spacing: -.003em; color: var(--th-ink); }
-.cp-stands { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; overflow-wrap: anywhere; }
+.cp-stands { margin: 0; overflow-wrap: break-word; }
+/* r18: the strip's folded line is cut on a whole word by WordClamp, never by the browser's mid-word ellipsis */
+.cp-line-words { display: block; white-space: normal; overflow: hidden; }
+.cp-under, .cp-meta { white-space: normal; }
 .cp-sec { margin-top: 16px; }
 .cp-h { margin: 0 0 4px; font: 600 13px/1.3 var(--th-sans); color: var(--th-mute); }
 .cp-list { list-style: none; margin: 0; padding: 0; }
@@ -359,7 +362,7 @@
 .sr-chat .message-list { padding-top: 14px; }
 .sr-chat { border-top: 1px solid var(--th-hair2); }
 
-.cp-lede.full .cp-stands { -webkit-line-clamp: unset; line-clamp: none; display: block; }
+.cp-lede.full .cp-stands { display: block; }
 .cp-lede.cp-note { cursor: default; color: var(--th-mute); }
 
 /* ------------------------------------------------------------------------------------------------- r7: a narrow, foldable sidebar */
@@ -549,7 +552,7 @@
   .th-drawer .th-recent { display: none; }
 }
 /* r14: a row leads with its action; its title (the event or project) is a quiet line under it. A long decision opens to decide. */
-.cp-need .cp-under { display: block; color: var(--th-mute); overflow-wrap: anywhere; }
+.cp-need .cp-under { display: block; color: var(--th-mute); overflow-wrap: break-word; }
 .cp-open-decide { font: 500 13px/1.4 var(--th-sans); color: var(--th-ink2); }
 /* r14: the task list's health, one component everywhere */
 .lh { margin: 0; }

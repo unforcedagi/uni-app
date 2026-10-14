@@ -45,6 +45,13 @@ export type Task = {
   nextCut?: boolean;
   /** A decision's `task` (r17): the task it decides ("T-130"), so a room's `[decision T-130]` marker finds it. */
   forTask?: string | null;
+  /** r18: an explicit destination (`link` or `url` field, a web or `mailto:` address): only this may lead a person-directed step. */
+  link?: string | null;
+  /** r18: the message itself (`message`, or a `draft` field holding text): "Copy the message" copies it. */
+  message?: string | null;
+  /** r18: where its questions come from, read at revision `supportAt` (shown only at the row's own revision). */
+  support?: import("./simpleCore.ts").Support;
+  supportAt?: string | null;
 };
 
 const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);
@@ -139,6 +146,11 @@ export function optionsOf(v: unknown): string[] {
   return [...new Set(out)].slice(0, 4);
 }
 
+/** A `link`/`url` field that is a real destination: a web address or `mailto:` (r18). */
+const linkOf = (v: unknown): string | null => { const t = str(v); return t && /^(?:https?:\/\/\S+|mailto:[^\s@]+@\S+)$/i.test(t) ? t : null; };
+/** A stored message: words, not a reference to another note (a bare id or `[[link]]` is not the message itself). */
+const messageOf = (v: unknown): string | null => { const t = str(v); return t && !/^(?:\[\[[^\]]+\]\]|(?:[a-z][\w-]*:)?[0-9A-HJKMNP-TV-Z]{26})$/.test(t) ? t : null; };
+
 export function parseTask(n: RawNote, tree: TaskTree): Task | null {
   const id = str(n.id), path = str(n.path) && stripExt(str(n.path)!);
   if (!id || !path) return null;
@@ -158,6 +170,8 @@ export function parseTask(n: RawNote, tree: TaskTree): Task | null {
     updatedAt: str(n.updatedAt), lastUpdatedBy: str(n.lastUpdatedBy), lastUpdatedVia: str(n.lastUpdatedVia),
     options: kind === "decision" ? optionsOf(m.options) : [],
     ...(kind === "decision" && str(m.task) ? { forTask: str(m.task)!.toUpperCase() } : {}),
+    ...(linkOf(m.link) ?? linkOf(m.url) ? { link: linkOf(m.link) ?? linkOf(m.url) } : {}),
+    ...(messageOf(m.message) ?? messageOf(m.draft) ? { message: messageOf(m.message) ?? messageOf(m.draft) } : {}),
   };
 }
 

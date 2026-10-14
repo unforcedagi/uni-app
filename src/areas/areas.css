@@ -154,3 +154,13 @@
 /* r17: "Details" no longer sits on the sheet's bottom edge (Sonnet) */
 .task-sheet .task-details { margin-bottom: 6px; }
 .task-sheet::after { height: 24px; }
+/* r18: a decision with no stored options is answered in words: one line, written like a tap */
+.task-answer-box { margin: 4px 0 12px; display: grid; gap: 6px; }
+.task-answer-box label { font-size: 13px; font-weight: 600; color: var(--th-ink); }
+.task-answer-row { display: flex; gap: 8px; }
+.task-answer-row input { flex: 1; min-width: 0; min-height: 44px; padding: 0 12px; font: 400 15px var(--th-sans); color: var(--th-ink); background: transparent; border: 1px solid var(--th-hair2); border-radius: 10px; }
+.task-answer-row input:focus-visible { outline: 2px solid var(--th-ink); outline-offset: 1px; }
+.task-answer-row .task-do { flex: none; width: auto; min-width: 96px; }
+.task-sub { white-space: normal; }
+.task-about { overflow-wrap: break-word; }
+.wv-stands-h { margin: 0 0 4px; }

@@ -3,12 +3,12 @@ import { TaskSheet, UndoBar, ownerLabel } from "./NodeWork";
 import { useTasks } from "./useTasks";
 import { draftsUnder, runsUnder } from "./steerCore";
 import { CompanionSide, CompanionStrip, useCompanionOpen, type CompanionProps, type TaskLoad } from "./Companion";
-import { chatPlaceholder, isMine, needsByRow, needsFeed, privateNote, standsLine, stateLine, uniPanel, type PrivateNeed } from "./simpleCore";
+import { chatPlaceholder, isMine, needsByRow, needsFeed, privateNote, standsHeading, standsLine, stateLine, uniPanel, type PrivateNeed } from "./simpleCore";
 import { ownRoom, type Steward } from "./talkCore";
 import type { Area } from "./areasCore";
 import { isMe, nodeFilterKeys, priorityOf, tasksUnder, type Task, type TaskNode } from "./taskCore";
 import type { RoomInfo } from "./TodayView";
-import { refreshDraft, updatedLabel } from "./briefCore";
+import { refreshDraft } from "./briefCore";
 import AreaView, { type AppView, type AreaActions } from "./AreaView";
 import type { AreaRoom } from "./AreaChat";
 import { currentUserAgent, gateMode, platformName } from "../interface/selftest/gate";
@@ -26,7 +26,6 @@ import { useVaultProfile } from "./ProfileContext";
 import { Crumbs, RoomSidebar, TreeScreen } from "./TreeHome";
 import { WorkView } from "./WorkView";
 import { LoadHealth } from "./LoadHealth";
-import { InlineText } from "./InlineText";
 import { Body } from "../MessageBody";
 import { projectBody } from "./projectBody";
 import { rootOpenMemory } from "./rootMemory";
@@ -317,9 +316,6 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
     return <div className="areas-home tree-home-wrap"><TreeScreen {...treeProps} status={<>{status}{railHidden && places.length > 0 && <div className="th-places-short">{placesRow}</div>}</>} />
       <UndoBar undo={tasks.undo} notice={tasks.notice} onDismiss={tasks.dismissNotice} /></div>;
   }
-  const today = data?.today;
-  const entry = data?.briefs[node.path] ?? null;
-  const freshIso = isRoot ? (today ? today.generatedAt ?? today.updatedAt : null) : entry ? entry.generatedAt ?? entry.updatedAt : null;
   const stewardView: Steward = isRoot ? { room: uniRef, via: "own", from: null } : stewardOf(node.path);
   const target = stewardView.room;
   const nodeName = (p: string) => data?.tree.nodes.get(p)?.name ?? p.split("/").pop() ?? p;
@@ -356,8 +352,11 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   if (live) lastSheet.current = live;
   const sheetTask = sheetId ? live ?? (lastSheet.current?.id === sheetId ? lastSheet.current : null) : null;
   const sheetGone = !!sheetId && (!live || !(live.state === "open" || live.state === "doing" || live.state === "waiting") || (tasks.ready && !tasks.tasks.some((t) => t.id === sheetId) && !tasks.leaving.has(sheetId)));
+  /** r18: a draft note written for the task (its `task` field names it): its text is the message the sheet copies. */
+  const draftOf = (t: Task) => { const tid = taskTitle(t.title).id?.toUpperCase(); const d = tid ? tasks.drafts.find((x) => x.task?.toUpperCase() === tid) : null; return d ? { vault: t.vault ?? profile.vault, id: d.id } : null; };
   const sheetView = sheetTask && <TaskSheet key={sheetTask.id} task={sheetTask} gone={sheetGone} here={here} nodeName={nodeName} room={roomOfNode(sheetTask.node) ?? target} inRoom={target?.id} onClose={closeSheet}
     nodeKeys={sheetTask.node !== ROOT && tasks.tree ? nodeFilterKeys(tasks.tree, [sheetTask.node]) : []}
+    draft={draftOf(sheetTask)}
     onAct={(t, a) => tasks.act(t, a, { sheet: true })} onDecide={(t, o) => tasks.decide(t, o)} onNote={actions.openNote} onOpenRoom={openRoomHere} onSay={chat ? sayIn : undefined} onPriority={(t, p) => void tasks.setPriority(t, p)} onStale={tasks.refresh} />;
   const companionProps: CompanionProps = { stands, ready: tasks.ready, load, feed: panel, rest: panel.rest, moreTitle: privateNote(panel.privateCount), onPrivate: openPrivate, runs, nodeName: node.name, scope: borrowed ? node.name : null, onTask: openSheet, onNote: actions.openNote, onDecide: decide, onEverything: () => { closeSheet(); setWork(true); } };
   const placeholder = chatPlaceholder({ name: node.name, slash: nodeView.own ? nodeView.slash : null, heldBy: nodeView.heldBy ? nodeView.heldBy.name : null });
@@ -366,13 +365,13 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   const othersHere = levelTasks.filter((t) => !mineLive(t) && !hidden(t.node)).map((t) => ({ task: t, meta: [stateLine(t, (w) => isMe(w), ownerLabel), isMe(t.owner) ? null : `with ${ownerLabel(t.owner)}`, t.node !== here ? `in ${nodeName(t.node)}` : null].filter(Boolean).join(" · ") }));
   const later = levelTasks.filter((t) => mineLive(t) && t.kind !== "decision" && priorityOf(t) === "someday" && !hidden(t.node));
   const privateOther = levelTasks.filter((t) => hidden(t.node) && !(mineLive(t) && (t.kind === "decision" || priorityOf(t) !== "someday"))).length;
-  const fresh = updatedLabel(freshIso, now);
   /** No room to talk in (none found once the rooms are in): the work view is the room's view, with no chat to go back to. */
   const noRoom = chat && !target && !roomsPending && !thread;
-  const briefNow = !isRoot ? entry?.brief.now ?? "" : "";
-  const top = (briefNow || fresh || askRoom) ? <div className="wv-top">
-    {briefNow && <p className="th-lede wv-brief">{entry!.brief.nowTokens.length ? <InlineText tokens={entry!.brief.nowTokens} onNote={openHere} /> : briefNow}</p>}
-    <p className="th-fresh wv-fresh">{fresh && <span>Brief {fresh}</span>}{askRoom && <button type="button" className="th-link" onClick={() => actions.compose(askRoom, refreshDraft(node.name, isRoot ? "" : node.path))}>Ask Uni to update this summary</button>}</p>
+  // r18: the work view says where this stands with the companion's own sentence, heading and date ("Where this stands · 2 days ago"), one
+  // timestamp source (`stands_at`, else the newest change it names); the brief's separate "updated 16h ago" is gone
+  const top = (stands || askRoom) ? <div className="wv-top">
+    {stands && <><h3 className="cp-h wv-stands-h">{standsHeading(borrowed ? node.name : null, stands.ago)}</h3><p className="th-lede wv-brief">{stands.text}</p></>}
+    {askRoom && <p className="th-fresh wv-fresh"><button type="button" className="th-link" onClick={() => actions.compose(askRoom, refreshDraft(node.name, isRoot ? "" : node.path))}>Ask Uni to update this summary</button></p>}
   </div> : null;
   const foot = node.kind === "project" && body ? <details className="th-note wv-note"><summary>Project note</summary><Body body={body} mentions={[]} me={null} /></details> : null;
   const workMain = <WorkView nodeName={node.name} feed={feed} others={othersHere} later={later} runs={runs} drafts={drafts} privateOther={privateOther} ready={tasks.ready} load={load} activity={tasks.activity}
