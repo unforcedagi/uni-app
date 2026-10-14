@@ -1,6 +1,6 @@
 // Run: node --experimental-strip-types scripts/tabs.test.ts
 import assert from "node:assert/strict";
-import { isRealRoom, lastRoomOf, restorePlace, activeTab, closeTab, EMPTY_TABS, focusTab, MAX_TABS, navigateNoteTab, nextAfterClose, openTab, recordingTabCanClose, restoreTabs, sameTarget, serializeTabs, tabForDigit, updateTab, type TabTarget, type Tabs } from "../src/tabs.ts";
+import { isRealRoom, lastRoomOf, restorePlace, activeTab, closeTab, EMPTY_TABS, focusTab, MAX_TABS, navigateNoteTab, nextAfterClose, openTab, recordingTabCanClose, restoreTabs, sameTarget, serializeTabs, updateTab, type TabTarget, type Tabs } from "../src/tabs.ts";
 import { claimRecording, recordingHolder, releaseRecording, RecordingBusy } from "../src/recLock.ts";
 
 let n = 0;
@@ -104,13 +104,6 @@ assert.equal(activeTab(nested)?.title, "B title");
 nested = navigateNoteTab(nested, nestedId, note("A").note!, "A title");
 assert.equal(activeTab(restoreTabs(serializeTabs(nested), []))?.note?.ref, "A");
 
-// Cmd-1…8 / 9 = last.
-assert.equal(tabForDigit(k, 1)?.id, k.tabs[0].id);
-assert.equal(tabForDigit(k, 9)?.id, k.tabs[k.tabs.length - 1].id);
-assert.equal(tabForDigit(EMPTY_TABS, 1), null);
-let two = openTab(EMPTY_TABS, room("a"), "focus", id);
-two = openTab(two, room("b"), "new", id);
-assert.equal(tabForDigit(two, 5), null);
 
 // Persist and restore round trip.
 let p = openTab(EMPTY_TABS, room("a"), "focus", id);

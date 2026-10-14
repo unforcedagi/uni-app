@@ -1625,39 +1625,6 @@ mod mobile;
 mod pair_source;
 mod secure_store;
 
-#[cfg(target_os = "macos")]
-fn install_tab_menu(app: &mut tauri::App) -> tauri::Result<()> {
-    use tauri::menu::{Menu, MenuItem, WINDOW_SUBMENU_ID};
-    // The default macOS menu binds Cmd+W to Close Window in both File and
-    // Window. Replace those native actions with Close Tab so the OS does not
-    // close the app before the WebView can receive the keydown.
-    let menu = Menu::default(app.handle())?;
-    for item in menu.items()? {
-        if let Some(submenu) = item.as_submenu() {
-            if submenu.text()? == "File" {
-                let _ = submenu.remove_at(0)?; // default Close Window
-                let close = MenuItem::with_id(
-                    app.handle(),
-                    "uni-close-tab",
-                    "Close Tab",
-                    true,
-                    Some("Cmd+W"),
-                )?;
-                submenu.prepend(&close)?;
-            } else if item.id().0 == WINDOW_SUBMENU_ID {
-                let last = submenu.items()?.len().saturating_sub(1);
-                let _ = submenu.remove_at(last)?; // default Close Window
-            }
-        }
-    }
-    app.set_menu(menu)?;
-    app.on_menu_event(|handle, event| {
-        if event.id().0 == "uni-close-tab" {
-            let _ = handle.emit("uni://close-tab", ());
-        }
-    });
-    Ok(())
-}
 
 /// wry registers a `webkit.messageHandlers.ipc` script message handler in the default script world, which every
 /// frame of the page sees, sandboxed `srcdoc` frames included. Tauri on Linux sends invokes through the `ipc://`
@@ -1720,8 +1687,8 @@ pub fn run() {
         .setup(|_app| {
             #[cfg(mobile)]
             _app.handle().plugin(tauri_plugin_barcode_scanner::init())?;
-            #[cfg(target_os = "macos")]
-            install_tab_menu(_app)?;
+            // T-124 r22 (Codex 6): the app has no tabs, so macOS keeps its own menu: File and Window say "Close Window" (Cmd+W), which is what
+            // Cmd+W does there. The custom "Close Tab" item is gone.
             #[cfg(desktop)]
             {
                 _app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;

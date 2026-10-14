@@ -1476,8 +1476,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   };
   // At Uni's room tree (nothing open over it) the system's own Back runs: the app goes to the background.
   const canGoBack = !!panel || journalFocus || notes.length > 0 || searchOpen || !!root || hasAreaBack || (!!activeTab(tabs) && activeTab(tabs)!.kind !== "areas");
-  // Desktop tab shortcuts. On macOS the native menu owns Cmd+W; it emits
-  // uni://close-tab from Rust, so the WebView never closes the window.
+  // Ctrl+W (Linux, Windows) closes what is open over the place. r22 (Codex 6): on macOS the native menu's "Close Window" owns Cmd+W.
   const closeActiveRef = useRef(() => {});
   const goHistoryRef = useRef<(by: -1 | 1) => void>(() => {});
   goHistoryRef.current = goHistory;
@@ -1503,8 +1502,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       }
     };
     window.addEventListener("keydown", onKey);
-    const un = listen("uni://close-tab", () => closeActiveRef.current());
-    return () => { window.removeEventListener("keydown", onKey); void un.then((off) => off()); };
+    return () => window.removeEventListener("keydown", onKey);
   }, []);
   useEffect(() => {
     if (!canGoBack) return;
