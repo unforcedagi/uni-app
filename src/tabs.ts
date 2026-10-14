@@ -133,12 +133,6 @@ export function recordingTabCanClose(id: string, originTabId: string | null): bo
   return originTabId !== id;
 }
 
-/** Cmd/Ctrl-1…8 pick that tab; 9 picks the last (browser convention). */
-export function tabForDigit(s: Tabs, digit: number): Tab | null {
-  if (digit < 1 || digit > 9 || !s.tabs.length) return null;
-  return digit === 9 ? s.tabs[s.tabs.length - 1] : s.tabs[digit - 1] ?? null;
-}
-
 export function serializeTabs(s: Tabs): string {
   return JSON.stringify({ v: 1, tabs: s.tabs, active: s.active, recent: s.recent });
 }
