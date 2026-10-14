@@ -666,3 +666,6 @@
 .task-asked { margin: 0 0 10px; font-size: 13.5px; color: var(--th-mute); }
 .task-movedon { color: var(--th-ink2); }
 .task-record { overflow-wrap: anywhere; }
+/* r22 (Codex 10, part): in a short window the companion's sheet doesn't pin "All of X's work" over its rows; it follows the list, so the rows
+   get the height and the scrollbar shows there is more */
+@media (max-height: 420px) { .cp-sheet .cp-foot { position: static; } }
