@@ -1376,7 +1376,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   /** r17: a message naming an open decision (its `[decision T-NN]` marker or its id) gets one quiet way to that decision's sheet. */
   const decisionLink = (m: Message) => {
     const id = decisionIn(m.body, decisions.known);
-    return id ? <button type="button" className="msg-decision-link" onClick={() => openDecision(id)}>Answer in Needs you<span aria-hidden="true"> ›</span></button> : null;
+    return id ? <button type="button" className="msg-decision-link" onClick={() => openDecision(id)}>Answer in Needs you</button> : null;
   };
 
   const renderMessage = (m: Message, inThread: boolean, prev?: Message, newest = false) => {

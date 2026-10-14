@@ -34,6 +34,8 @@ export default function Journal({ rooms, uniRoomId, onShare, onBack, onRecording
   const [loading, setLoading] = useState(false);
   const [more, setMore] = useState(true);
   const [shareFor, setShareFor] = useState<string | null>(null);
+  /** r21 (Codex 6): the entry whose one menu is open. */
+  const [menuFor, setMenuFor] = useState<string | null>(null);
   const [shared, setShared] = useState<Record<string, string>>({});
   const [settings, setSettings] = useState(false);
   const watching = useRef(new Set<string>());
@@ -194,13 +196,17 @@ export default function Journal({ rooms, uniRoomId, onShare, onBack, onRecording
         <div className="journal-meta"><span>{e.source === "voice" ? <MicIcon /> : e.source === "text" ? "✎" : "•"} {when(e.created_at)}</span>{shared[e.id] && <span className="queued-tag">shared · {shared[e.id]}</span>}</div>
         {e.pending ? <p className="journal-body pending">{entryText(e.content) ? <>{entryText(e.content)}<br /></> : null}<em>Transcribing…</em></p>
           : <p className="journal-body">{entryText(e.content)}</p>}
-        <div className="message-actions journal-entry-actions">
-          <button onClick={() => uniRoomId && void share(e, uniRoomId, true)} disabled={!uniRoomId || e.pending} aria-label="Pass this journal entry to Uni">✦ Pass to Uni</button>
-          <button onClick={() => setShareFor(shareFor === e.id ? null : e.id)} disabled={e.pending} aria-expanded={shareFor === e.id}>Share to…</button>
-        </div>
-        {shareFor === e.id && <div className="share-picker" role="menu" aria-label="Choose a room">
-          {rooms.map((r) => <button key={r.id} role="menuitem" onClick={() => void share(e, r.id, false)}>#{r.name}</button>)}
-          {rooms.length === 0 && <span className="empty">No rooms cached. Refresh conversations first.</span>}
+        {/* r21 (Codex 6): no action strip repeated under every entry: one menu per entry, as in the chat ("⋯", then Pass to Uni, Share to a room) */}
+        {!e.pending && <div className={`message-more journal-more ${menuFor === e.id ? "open" : ""}`}>
+          <button type="button" className="message-more-go" aria-label="More for this entry" aria-expanded={menuFor === e.id} onClick={() => { setMenuFor(menuFor === e.id ? null : e.id); setShareFor(null); }}>⋯</button>
+          {menuFor === e.id && <div className="message-menu" role="group" aria-label="Entry actions">
+            <button type="button" onClick={() => { setMenuFor(null); if (uniRoomId) void share(e, uniRoomId, true); }} disabled={!uniRoomId}>Pass to Uni</button>
+            <button type="button" aria-expanded={shareFor === e.id} onClick={() => setShareFor(shareFor === e.id ? null : e.id)}>Share to a room…</button>
+            {shareFor === e.id && <div className="share-picker" role="menu" aria-label="Choose a room">
+              {rooms.map((r) => <button key={r.id} role="menuitem" onClick={() => { setMenuFor(null); void share(e, r.id, false); }}>#{r.name}</button>)}
+              {rooms.length === 0 && <span className="empty">No rooms cached. Refresh conversations first.</span>}
+            </div>}
+          </div>}
         </div>}
       </article>)}
       {more && entries.length > 0 && <div className="older"><button onClick={() => void load(true)} disabled={loading}>{loading ? "Loading…" : "Older journal entries"}</button></div>}

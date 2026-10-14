@@ -611,7 +611,9 @@ Two proposals wait on a scope decision.
           }
           case 'journal_config': return { hub: 'https://example.invalid', vault: 'uni' };
           case 'vault_search': return notes.filter((n) => (n.content ?? '').toLowerCase().includes(String(args.query).toLowerCase()) && (!args.pathPrefix || (n.path ?? '').startsWith(args.pathPrefix))).slice(0, args.limit ?? 20).map((n) => ({ vault: 'uni', id: n.id, path: n.path, snippet: String(n.content).slice(0, 60), score: null, mode: 'keyword' }));
-          case 'journal_pending': case 'journal_list': case 'search_messages': return [];
+          // r21: a spec may seed journal entries (fiction, never real journal content)
+          case 'journal_list': return (w.__journal ?? []).slice(args.offset ?? 0, (args.offset ?? 0) + (args.limit ?? 50));
+          case 'journal_pending': case 'search_messages': return [];
           case 'journal_flush': return { sent: [], remaining: 0, error: null };
           case 'refresh': if (d.identityDelay) await new Promise((r) => setTimeout(r, d.identityDelay)); return { pubkey: U, total_items: 0, channel_errors: {}, truncated_channels: [] };
           default: return null;

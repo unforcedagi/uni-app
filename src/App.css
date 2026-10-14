@@ -342,7 +342,11 @@ h1 { font-family: var(--serif); font-weight: 500; font-size: 34px; line-height: 
 .journal-body { margin: 0; white-space: pre-wrap; font-family: var(--serif); font-size: 19px; line-height: 1.6; overflow-wrap: anywhere; }
 .journal-body.pending em { color: var(--muted); font-size: 16px; }
 .journal-error { color: var(--danger); display: block; margin-top: 6px; font-size: 12px; }
-.message-actions.journal-entry-actions { opacity: 1; max-height: none; margin: 10px 0 0 -8px; }
+/* r21 (Codex 6): an entry's actions are one menu ("⋯"), as a message's are */
+.journal-entry { position: relative; }
+.journal-more { top: 10px; right: 8px; }
+.journal-entry:hover .message-more-go, .journal-entry:focus-within .message-more-go { opacity: 1; }
+.journal-more .share-picker { margin: 4px 0 0; padding: 4px 8px 6px; }
 .share-picker { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; animation: rise .25s var(--ease); }
 .share-picker button { background: var(--surface-2); border: 1px solid var(--line); border-radius: 999px; padding: 7px 14px; font-size: 13px; }
 .share-picker button:hover { border-color: var(--accent); color: var(--accent); }
