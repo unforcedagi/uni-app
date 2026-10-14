@@ -823,7 +823,8 @@ test.describe('simple', () => {
     // r14: a next step that names an action leads the row; the title is the quiet line under it
     const invoice = needs.locator('.cp-item').filter({ hasText: 'Sponsorship invoice draft' });
     await expect(invoice.locator('.cp-lead')).toHaveText('Send to Casey for the numbers');
-    await expect(invoice.locator('.cp-under')).toHaveText('Sponsorship invoice draft');
+    // r22: the quiet line also says when it was asked (the title may give way to it in a narrow panel; it is whole in the tooltip)
+    await expect(invoice.locator('.cp-under')).toHaveAttribute('title', /^Sponsorship invoice draft · asked \w+ \d+$/);
     // Someday is never in Needs you, in any room
     await openRoom(page, 'Unforced Development');
     await openCompanion(page);
@@ -845,8 +846,9 @@ test.describe('simple', () => {
     await expect(item.getByRole('button', { name: /^(More|Less)$/ })).toHaveCount(0);
     await expect(item.locator('.cp-lead')).not.toContainText('where do they stand?');
     await item.locator('.cp-need').click();
-    await expect(page.locator('.task-sheet h2')).toContainText('third question');
-    await expect(page.locator('.task-sheet h2')).toContainText('where do they stand?');
+    // r22 (Codex 7): the action is the heading, the questions after it the sheet's body, each said once
+    await expect(page.locator('.task-sheet')).toContainText('third question');
+    await expect(page.locator('.task-sheet')).toContainText('where do they stand?');
   });
 
   test('r7: opening a task without a title worth reading or a next step says to open it', async ({ page }) => {
@@ -1050,7 +1052,7 @@ test.describe('simple', () => {
     const row = page.locator('.sr-work .cp-item').filter({ hasText: 'Edit the draft, check the dates' }).first();
     await expect(row.locator('.cp-lead')).toHaveText('Edit the draft, check the dates against the calendar, and send it from the shared inbox');
     await row.locator('.cp-need').click();
-    await expect(page.locator('.task-sheet h2')).toContainText('so nobody sends it twice.');
+    await expect(page.locator('.task-sheet')).toContainText('so nobody sends it twice.');
   });
 
   test('r10: a row says its state once: no "waiting, waiting on" in the opened item, no repeat of the row\'s label', async ({ page }) => {
@@ -1301,8 +1303,10 @@ test.describe('simple', () => {
     // r21: a step in two parts ("Read …, then … and reply") is listed, numbered, under "2 steps"
     await expect(sheet.locator('h2')).toHaveText('2 steps');
     await expect(sheet.locator('.task-steps li').first()).toHaveText('Read Follow-up notes');
-    await expect(sheet.locator('.task-sub')).toHaveText('Review the ATLAS follow-up');
-    await expect(sheet.locator('.task-next')).toContainText('Follow-up notes'); // the note id reads as its title, and opens
+    // r22 (Codex 7): the request is said once; the record's title is in Details
+    await expect(sheet.locator('.task-sub')).toHaveCount(0);
+    await expect(sheet.locator('.task-record')).toHaveText('Task T-13: Review the ATLAS follow-up');
+    await expect(sheet.locator('.task-steps')).toContainText('Follow-up notes'); // the note id reads as its title, and opens
     await expect(sheet).not.toContainText(/T-13|cdf67944|via api|Changed by|01M3ZK2R6A6C62M1ANJCSQNG3M/, { useInnerText: true });
     const details = sheet.locator('details.task-details');
     await expect(details).not.toHaveAttribute('open', '');
@@ -1510,7 +1514,7 @@ test.describe('simple', () => {
     await expect(page.locator('.cp-body .cp-privates')).toHaveCount(0);
     await page.getByRole('button', { name: /^All of .*'s work/ }).click();
     const priv = page.locator('.sr-work .cp-private');
-    await expect(priv).toHaveText('Sanctum: 1 for you');
+    await expect(priv).toHaveText('In Sanctum: 1 thing for you · open Sanctum');
     await expect(page.locator('.sr-work')).not.toContainText(/Sit twenty minutes|Before breakfast|A private item/);
     await priv.click();
     await expect(page.locator('.sr-title')).toHaveText('Sanctum');
@@ -1583,7 +1587,7 @@ test.describe('simple', () => {
     await page.evaluate(() => window.dispatchEvent(new Event('focus')));
     // the action leads, the title sits under it, and its own action fills the room's composer (never sends); "I did this" stays secondary
     await expect(sheet.locator('h2')).toHaveText('Say go to send the SOW to Casey');
-    await expect(sheet.locator('.task-sub')).toContainText('SOW for the commons grant');
+    await expect(sheet.locator('.task-record')).toContainText('SOW for the commons grant'); // r22: the title is in Details
     await expect(sheet.locator('.task-facts')).toContainText('due Oct 20');
     await expect(sheet.locator('.task-do.primary')).toHaveText(/^Say it in #/);
     await expect(sheet.getByRole('button', { name: 'I did this' })).not.toHaveClass(/primary/);
@@ -1808,7 +1812,7 @@ test.describe('r14', () => {
     await expect(page.locator('.cp-body .cp-privates')).toHaveCount(0);
     await expect(page.locator('.cp-body')).not.toContainText(/Sit twenty minutes|Before breakfast|A private item/);
     await page.getByRole('button', { name: /^All of .*'s work/ }).click();
-    await expect(page.locator('.sr-work .cp-private')).toHaveText('Sanctum: 1 for you');
+    await expect(page.locator('.sr-work .cp-private')).toHaveText('In Sanctum: 1 thing for you · open Sanctum');
     await expect(page.locator('.sr-work')).not.toContainText(/Sit twenty minutes|Find a teacher|A private item/);
     await expect(page.locator('.sr-work .cp-privates, .sr-work .cp-private')).toHaveCount(1);
     await page.locator('.sr-work .cp-private').click();
@@ -1975,7 +1979,7 @@ test.describe('r15', () => {
     // what follows the sentence (the three questions) is the sheet's: the row never opens in place
     await expect(lead).not.toContainText('First question');
     await page.locator('.sr-work .cp-item').filter({ hasText: 'Try the new check-in flow' }).locator('.cp-need').click();
-    await expect(page.locator('.task-sheet h2')).toContainText('where do they stand?');
+    await expect(page.locator('.task-sheet')).toContainText('where do they stand?');
   });
 
   test('a failed refresh says what the kept count is as of, never "at least"; an overdue row says "was due"', async ({ page }) => {
@@ -1983,7 +1987,7 @@ test.describe('r15', () => {
     await openRoom(page, 'COhere 2026');
     await openWork(page);
     const wv = page.locator('.sr-work');
-    await expect(wv.locator('.cp-item').filter({ hasText: 'COhere festival readiness' }).locator('.cp-detail.overdue')).toHaveText('was due Oct 7');
+    await expect(wv.locator('.cp-item').filter({ hasText: 'COhere festival readiness' }).locator('.cp-detail.overdue')).toHaveText(/^was due Oct 7 · asked \w+ \d+$/);
     const n = await wv.locator('section[aria-label="Needs you"] .wv-n').innerText();
     await page.evaluate(() => { (window as any).__queryFails = ['task']; });
     await refresh(page, '2026-10-09T10:02:00.000Z');
@@ -2297,11 +2301,11 @@ test.describe('r17', () => {
     await expect(room.locator('.cp-lead')).toHaveText(/^Your OK on the draft/);
     // r18: small print is one line of whole words (never ending on "·"), the whole of it in its title
     // r20: and the due cue, which is never cut
-    await expect(room.locator('.cp-under')).toHaveAttribute('title', /^From #atlas\/teach · Canvas Week 7 brief draft(?: · (?:was )?due \w+ \d+)?$/);
-    expect((await room.locator('.cp-under').innerText()).replace(/\s+/g, ' ').trim()).toMatch(/^From #atlas\/teach(?: · Canvas[\p{L}\d ]*)?…?(?: · (?:was )?due \w+ \d+)?$/u);
+    await expect(room.locator('.cp-under')).toHaveAttribute('title', /^From #atlas\/teach · Canvas Week 7 brief draft(?: · (?:was )?due \w+ \d+)? · asked \w+ \d+$/);
+    expect((await room.locator('.cp-under').innerText()).replace(/\s+/g, ' ').trim()).toMatch(/^From #atlas\/teach(?: · Canvas[\p{L}\d ]*)?…?(?: · (?:was )?due \w+ \d+)?(?: · asked \w+ \d+)?$/u);
     expect((await room.locator('.cp-under').innerText()).trim()).not.toMatch(/·\s*…$/);
     const uni = needs.locator('.cp-item').filter({ hasText: 'Pick the lead story' });
-    await expect(uni.locator('.cp-under')).toHaveAttribute('title', 'From Uni · Newsletter W42 draft');
+    await expect(uni.locator('.cp-under')).toHaveAttribute('title', /^From Uni · Newsletter W42 draft · asked \w+( \d+)?$/); // r22: and when it was asked
     // the work view: in Needs you, never in In motion; the count is the companion's
     await openWork(page);
     const wv = page.locator('.sr-work');
@@ -2312,7 +2316,7 @@ test.describe('r17', () => {
     await wv.locator('.cp-item').filter({ hasText: 'Your OK on the draft' }).locator('.cp-lead').click();
     const sheet = sheetOf(page);
     await expect(sheet.locator('h2')).toHaveText(/Your OK on the draft/);
-    await expect(sheet.locator('.task-sub')).toHaveText('Canvas Week 7 brief draft');
+    await expect(sheet.locator('.task-record')).toContainText('Canvas Week 7 brief draft'); // r22: the title is in Details
     await expect(sheet.locator('.task-facts')).toContainText('Task of#atlas/teach');
     await page.keyboard.press('Escape');
     // the tree's dot for its node
@@ -2435,7 +2439,7 @@ test.describe('r17', () => {
     const total = Number(await wv.locator('.wv-n').innerText());
     expect(shown + n).toBe(total);
     expect(await wv.locator('.cp-item').count()).toBe(total); // every named row, and one line for the private area's one item
-    await expect(wv.locator('.cp-private')).toHaveText('Sanctum: 1 for you');
+    await expect(wv.locator('.cp-private')).toHaveText('In Sanctum: 1 thing for you · open Sanctum');
   });
 
   test('a short window\'s strip sheet keeps "All of …\'s work" in sight however long the list, and closing it gives focus back to the strip', async ({ page }) => {
@@ -2650,7 +2654,8 @@ test.describe('r18', () => {
     await expect(needs.locator('.cp-row-more, .cp-item .cp-more-next')).toHaveCount(0);
     for (const u of await needs.locator('.cp-under, .cp-meta').all()) {
       const lines = await u.evaluate((e) => Math.round(e.getBoundingClientRect().height / (parseFloat(getComputedStyle(e).lineHeight) || 16)));
-      expect(lines).toBeLessThanOrEqual(1);
+      // r22: when it was asked is on every row; rather than push out where the row belongs, the date part may take a second line
+      expect(lines).toBeLessThanOrEqual(2);
     }
     await needs.locator('.cp-list > .cp-item').first().locator('.cp-need').first().click();
     await expect(sheetOf(page)).toBeVisible();
@@ -2857,14 +2862,15 @@ test.describe('r19', () => {
       await openWork(page);
       await page.locator('.sr-work .cp-item').filter({ hasText: 'Reply to Sebastian' }).locator('.cp-lead').click();
       const sheet = sheetOf(page);
-      seen.push([await sheet.locator('h2').innerText(), await sheet.locator('.task-sub').innerText()]);
+      // r22 (Codex 7): the title is no longer under the action; it is whole in Details
+      seen.push([await sheet.locator('h2').innerText(), (await sheet.locator('.task-record').textContent()) ?? '']);
       await sheet.getByRole('button', { name: 'Close' }).click();
       await page.getByRole('button', { name: /Back to chat/ }).click();
     }
     expect(seen[1]).toEqual(seen[0]);
     expect(seen[2]).toEqual(seen[0]);
-    expect(seen[0][0]).toBe('Reply to Sebastian in your existing thread that the BVSD letter went out Oct 2, before the Oct 20 HRC meeting (skip if already done).');
-    expect(seen[0][1].endsWith('…')).toBe(true);
+    expect(seen[0][0]).toBe('Reply to Sebastian in your existing thread that the BVSD letter went out Oct 2, before the Oct 20 HRC meeting (skip if already done)');
+    expect(seen[0][1]).toBe(`Task ${title.replace(/^(T-\d+) /, '$1: ')}`);
   });
 
   test('in a short window the sheet\'s primary action and "I did this" stay in view: a sticky footer', async ({ page }) => {
@@ -3019,18 +3025,21 @@ test.describe('r20', () => {
       expect(l.lines, r.title).toBeLessThanOrEqual(3);
       expect(l.text.replace(/^2 steps: /, '').startsWith(r.verb), `${r.title}: "${l.text}"`).toBe(true);
       // context after the action ("; Harper signs off…", "; fill the opening…") is the sheet's, never the row's
-      expect(l.text).not.toMatch(/Harper signs|fill the opening/);
+      // r22 (both critics): "; fill the opening…" is the user's too, and on the row; "; Harper signs off…" is context
+      expect(l.text).not.toMatch(/Harper signs/);
     }
     // COhere: the date label is not the lead; the subtitle is where it belongs and the due cue
     const co = page.locator('.sr-work .cp-item').filter({ hasText: 'Say go on prod deploy' });
     await expect(co.locator('.cp-lead')).toHaveText('Say go on prod deploy of #38 + #58');
-    await expect(co.locator('.cp-under')).toHaveAttribute('title', 'COhere opens Oct 15 · due today');
-    await expect(co.locator('.cp-sub-when')).toHaveText(' · due today');
+    await expect(co.locator('.cp-under')).toHaveAttribute('title', /^COhere opens Oct 15 · due today · asked \w+ \d+$/); // r22: and when it was asked
+    await expect(co.locator('.cp-sub-when')).toHaveText(/^ · due today · asked \w+ \d+$/);
     // a subtitle that repeats the action is dropped (in its own area there is nothing else to say)
-    await expect(page.locator('.sr-work .cp-item').filter({ hasText: 'Edit and send the ATLAS follow-up' }).locator('.cp-under')).toHaveCount(0);
+    // (r22: only when it was asked is left)
+    await expect(page.locator('.sr-work .cp-item').filter({ hasText: 'Edit and send the ATLAS follow-up' }).locator('.cp-under')).toHaveText(/^\s*asked \w+ \d+$/);
     // the whole step is in the sheet
     await co.locator('.cp-need').click();
-    await expect(sheetOf(page).locator('h2')).toContainText('Harper signs off the copy/photos');
+    await expect(sheetOf(page).locator('h2')).toHaveText('Say go on prod deploy of #38 + #58');
+    await expect(sheetOf(page).locator('.task-steps-rest')).toContainText('Harper signs off the copy/photos'); // r22: said once, after the action
     await sheetOf(page).getByRole('button', { name: 'Close' }).click();
   });
 
@@ -3041,14 +3050,13 @@ test.describe('r20', () => {
     await openRoom(page, 'ATLAS');
     await openWork(page); await narrowWork(page);
     const row = page.locator('.sr-work .cp-item').filter({ hasText: 'Look at' });
-    await expect(row.locator('.cp-lead')).toContainText(/^(2 steps: )?Look at cohere-signup-staging on phone, then/);
+    await expect(row.locator('.cp-lead')).toHaveText('Look at cohere-signup-staging on phone, then forward #cohere\'s \'For Harper\' block (posted 10-13)');
     await expect(row.locator('.cp-lead .cp-link')).toHaveText('cohere-signup-staging');
     await expect(row.locator('.cp-lead .cp-link')).toHaveAttribute('title', 'https://cohere-signup-staging.example-workers.invalid/?look=ecology');
     await expect(row.locator('a')).toHaveCount(0);
-    const h = await row.locator('.cp-lead').evaluate((el) => el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight));
-    expect(Math.round(h)).toBeLessThanOrEqual(3);
+    // r22: the row is whole, as many lines as it needs; the sheet's step has the link as its button
     await row.locator('.cp-need').click();
-    await expect(sheetOf(page).locator('.task-next a.cp-link')).toHaveAttribute('href', 'https://cohere-signup-staging.example-workers.invalid/?look=ecology');
+    await expect(sheetOf(page).locator('.task-step-open')).toHaveAttribute('title', 'https://cohere-signup-staging.example-workers.invalid/?look=ecology');
   });
 
   test('P1-1 a missing prerequisite never authorizes an action: "Couldn\'t find … · Open the task", no action lead, no "I did this"', async ({ page }) => {
@@ -3295,8 +3303,9 @@ test.describe('r21', () => {
     await page.locator('.sr-work .cp-item').filter({ hasText: 'Look at cohere-signup-staging' }).locator('.cp-need').click();
     const sheet = sheetOf(page);
     await expect(sheet.locator('h2')).toHaveText('2 steps');
-    await expect(sheet.locator('.task-steps li')).toHaveText(['Look at cohere-signup-staging.example-workers.invalid on phone', 'Forward #cohere\'s \'For Harper\' block (posted 10-13)']);
-    await expect(sheet.locator('.task-next a.cp-link')).toHaveCount(1);
+    await expect(sheet.locator('.task-steps li')).toHaveText(['Look at cohere-signup-staging.example-workers.invalid on phoneOpen cohere-signup-staging', 'Forward #cohere\'s \'For Harper\' block (posted 10-13)']);
+    // r22 (Codex 7): the link is a button in its step
+    await expect(sheet.locator('.task-step-open')).toHaveCount(1);
   });
 
   test('a decision being checked leads with its question; "Checking…" is a quiet line under it, and it isn\'t counted until it\'s classified', async ({ page }) => {
@@ -3388,7 +3397,7 @@ test.describe('r21', () => {
     for (const el of await body.locator('.cp-item, .cp-more').all()) expect(await el.innerText()).not.toContain('›');
     await body.locator('.cp-more').click();
     const wv = page.locator('.sr-work');
-    await expect(wv.locator('.cp-private')).toHaveText('Sanctum: 1 for you');
+    await expect(wv.locator('.cp-private')).toHaveText('In Sanctum: 1 thing for you · open Sanctum');
     for (const el of await wv.locator('.cp-item, .cp-more, .wv-tidy-line').all()) expect(await el.innerText()).not.toContain('›');
   });
 
@@ -3508,7 +3517,8 @@ test.describe('r21', () => {
     await refresh(page, '2026-10-14T09:00:00.000Z');
     await openRoom(page, 'ATLAS');
     const line = page.locator('.cp.strip .cp-line-text');
-    await expect(line).toContainText(/^Needs you · \d+: 2 steps: Look at cohere-signup-staging/);
+    // r22 (both critics): never "then …": step 1 and how many there are
+    await expect(line).toContainText(/^Needs you · \d+: Look at cohere-signup-staging on phone \(step 1 of 2\)$/);
     await expect(line).not.toContainText('example-workers.invalid');
   });
 
@@ -3522,7 +3532,7 @@ test.describe('r21', () => {
     if (!wide(page)) await page.setViewportSize({ width: 740, height: 360 });
     await boot(page, { privateTasks: true });
     await openWork(page);
-    await expect(page.locator('.sr-work .cp-private')).toHaveText('Sanctum: 1 for you', { timeout: 15_000 });
+    await expect(page.locator('.sr-work .cp-private')).toHaveText('In Sanctum: 1 thing for you · open Sanctum', { timeout: 15_000 });
     await page.waitForTimeout(6500);
     expect(await page.evaluate(() => (window as any).__sawPrivate)).toBe(false);
   });
@@ -3562,8 +3572,8 @@ test.describe('r22', () => {
     { id: 'pay', title: 'T-65 $10k COhere sponsorship invoice draft', next: 'Tell Uni who pays (Techne or Gitcoin Foundation) and how: crypto or ACH/Stripe, plus Woven Web\'s legal details.', has: ['Tell Uni who pays (Techne or Gitcoin Foundation)', 'and how: crypto or ACH/Stripe, plus Woven Web\'s legal details'] },
     { id: 'co', title: 'T-90 COhere opens Oct 15', next: 'Wed 10-14: say go on prod deploy of #38 + #58; Harper signs off the copy/photos before/after (posting today); yes/no on add-only DB…', has: ['Say go on prod deploy of #38 + #58'], due: '2026-10-14' },
   ];
-  const seed = async (page: Page, node = 'Projects/ATLAS') => {
-    for (const r of ROWS) await add(page, { id: r.id, title: r.title, node, updatedAt: '2026-10-11T18:00:00.000Z', meta: { priority: 'now', next: r.next, ...(r.due ? { due: r.due } : {}) } });
+  const seed = async (page: Page, node = 'Projects/ATLAS', updatedAt = '2026-10-11T18:00:00.000Z') => {
+    for (const r of ROWS) await add(page, { id: r.id, title: r.title, node, updatedAt, meta: { priority: 'now', next: r.next, ...(r.due ? { due: r.due } : {}) } });
     await refresh(page, '2026-10-14T09:00:00.000Z');
   };
   const assertWhole = async (row: ReturnType<Page['locator']>, r: (typeof ROWS)[number]) => {
@@ -3594,36 +3604,26 @@ test.describe('r22', () => {
       const n = await rows.count();
       expect(n).toBeGreaterThanOrEqual(2);
       for (const row of await rows.all()) { const t = await leadText(row).catch(() => ''); const r = ROWS.find((x) => t.includes(x.has[0].slice(0, 20))); if (r) await assertWhole(row, r); }
-      if (n < ROWS.length) await expect(body.locator('.cp-more')).toHaveText(`Show ${ROWS.length - n} more`);
+      await expect(body.locator('.cp-more')).toHaveText(/^Show \d+ more$/);
     }
   });
 
-  test('the folded strip says step 1 and how many there are, never "then …"', async ({ page }) => {
-    test.skip(wide(page) && treeBeside(page), 'the strip is below 900px');
+  test('a request shows its age: "asked Oct 6" on the row and the sheet; when the room\'s chat is more than a day newer, the sheet says the chat has moved on (and nothing is hidden)', async ({ page }) => {
     await boot(page);
-    await add(page, { id: 'st', title: ROWS[2].title, node: 'Projects/ATLAS', meta: { priority: 'now', due: '2026-10-13', next: ROWS[2].next } });
+    // Techne's room has messages up to Oct 9 (the fixture's pinned time); these requests were set on Oct 6
+    await seed(page, 'Areas/Techne', '2026-10-06T18:00:00.000Z');
+    await add(page, { id: 'fresh', title: 'T-200 A fresh placeholder request', node: 'Areas/Techne', updatedAt: new Date(Date.now() + 5000).toISOString(), meta: { priority: 'now', next: 'Send the placeholder note to Casey' } });
     await refresh(page, '2026-10-14T09:00:00.000Z');
-    await openRoom(page, 'ATLAS');
-    const line = page.locator('.cp.strip .cp-line-text');
-    await expect(line).toContainText(/Needs you · \d+: Look at cohere-signup-staging on phone \(step 1 of 2\)/);
-    await expect(line).not.toContainText('then …');
-  });
-
-  test('a request shows its age: "asked Oct 11" on the row and the sheet; when the room\'s chat is more than a day newer, the sheet says the chat has moved on (and nothing is hidden)', async ({ page }) => {
-    await boot(page);
-    await seed(page);
-    await add(page, { id: 'fresh', title: 'T-200 A fresh placeholder request', node: 'Projects/ATLAS', updatedAt: new Date(Date.now() + 5000).toISOString(), meta: { priority: 'now', next: 'Send the placeholder note to Casey' } });
-    await refresh(page, '2026-10-14T09:00:00.000Z');
-    await openRoom(page, 'ATLAS');
+    await openRoom(page, 'Techne');
     await openWork(page);
     const co = page.locator('.sr-work .cp-item').filter({ hasText: 'Say go on prod deploy' });
-    await expect(co.locator('.cp-under')).toHaveAttribute('title', 'COhere opens Oct 15 · due today · asked Oct 11');
+    await expect(co.locator('.cp-under')).toHaveAttribute('title', 'COhere opens Oct 15 · due today · asked Oct 6');
     await expect(co.locator('.cp-lead')).toHaveText('Say go on prod deploy of #38 + #58');
     await co.locator('.cp-need').click();
     const sheet = sheetOf(page);
     await expect(sheet.locator('h2')).toHaveText('Say go on prod deploy of #38 + #58');
-    await expect(sheet.locator('.task-asked')).toContainText('Asked Oct 11');
-    // ATLAS's chat has messages from today: more than a day newer than Oct 11
+    await expect(sheet.locator('.task-asked')).toContainText('Asked Oct 6');
+    // Techne's chat has messages from Oct 9: more than a day newer than Oct 6
     await expect(sheet.locator('.task-movedon')).toHaveText('Chat has moved on since this was asked · open the chat');
     // the request is still there, with its own action
     await expect(sheet.getByRole('button', { name: /^Say it in #/ })).toBeVisible();

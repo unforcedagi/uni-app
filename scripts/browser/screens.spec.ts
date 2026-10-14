@@ -31,9 +31,9 @@ test('All reading surfaces fit the screen', async ({ page }, info) => {
   const place = async (name: 'Uni' | 'Journal' | 'For you' | 'Settings' | 'Search') => {
     if (!short) { await rail.getByRole('button', { name, exact: true }).click(); return; }
     await expect(rail).toBeHidden();
-    if (name === 'Uni') { const back = page.getByRole('button', { name: 'Back to Uni' }); if (await back.isVisible()) await back.click(); return; }
+    if (name === 'Uni') { const back = page.getByRole('button', { name: /^Back to / }); if (await back.isVisible()) await back.click(); return; }
     // from the Journal (not a room), Uni first
-    if (!await page.locator('.sr-drawer, .th-places-short').first().isVisible()) { await page.getByRole('button', { name: 'Back to Uni' }).click(); await page.locator('.sr-drawer, .th-places-short').first().waitFor(); }
+    if (!await page.locator('.sr-drawer, .th-places-short').first().isVisible()) { await page.getByRole('button', { name: /^Back to / }).click(); await page.locator('.sr-drawer, .th-places-short').first().waitFor(); }
     if (await page.locator('.sr-drawer').isVisible() && !await page.locator('.th-drawer').count()) await page.locator('.sr-drawer').click();
     await page.locator('.th-places:visible').getByRole('button', { name, exact: true }).click();
   };

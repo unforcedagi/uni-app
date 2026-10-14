@@ -174,7 +174,7 @@ test.describe('rooms nav', () => {
     await go(page, 'Uni');
     await title(page, 'Uni');
     await expect(work(page)).not.toContainText(/Sit twenty|Find a teacher|T-31|T-32/);
-    await expect(needs(page).locator('.cp-private')).toHaveText('Sanctum: 1 for you'); // r21: no "›" on a link row
+    await expect(needs(page).locator('.cp-private')).toHaveText('In Sanctum: 1 thing for you · open Sanctum'); // r21: no "›" on a link row; r22: the private line
     await expect(work(page)).toContainText(/One item in a private area is not listed here/);
     if (wide(page)) await expect(page.locator('.th-roomnav')).not.toContainText(/T-3[12]/);
     // r14: the area itself, opened by Aaron: its items are ordinary rows, with their titles
