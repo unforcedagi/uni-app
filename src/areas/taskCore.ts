@@ -11,7 +11,7 @@ export type AnyState = TaskState | "decided";
 export const LIVE_STATES: readonly TaskState[] = ["open", "doing", "waiting"];
 
 export type RawNote = {
-  id?: unknown; path?: unknown; tags?: unknown; metadata?: unknown; updatedAt?: unknown;
+  id?: unknown; path?: unknown; tags?: unknown; metadata?: unknown; updatedAt?: unknown; createdAt?: unknown;
   lastUpdatedBy?: unknown; lastUpdatedVia?: unknown; content?: unknown;
 };
 
@@ -57,6 +57,15 @@ export type Task = {
   questions?: string[];
   /** r20: reading the note for its question failed (a decision whose title was cut): it is not owed until read ("Couldn't check · Retry"). */
   askFailed?: boolean;
+  /**
+   * r23 (Codex P1): when the request was made, never the record's last change (`updatedAt` moves when the board is rebalanced). `asked`:
+   * an explicit request time (`asked`, `asked_at` or `next_at`), read as "asked Oct 6"; else `added`: the task's `created` field or the
+   * note's `createdAt`, read as "added Oct 11".
+   */
+  asked?: string | null;
+  added?: string | null;
+  /** r23: `detail`, the content an ask carries (T-131: the questions, the message, the draft): the sheet shows it under the step. */
+  detail?: string | null;
   /** r19: what reading its supporting notes came to, as of now (set by the list, never stored): see `checkOf`. */
   check?: import("./simpleCore.ts").Check | null;
 };
@@ -187,6 +196,9 @@ export function parseTask(n: RawNote, tree: TaskTree): Task | null {
     ...(noteRefIn(m.source) ? { sourceRef: str(m.source) } : {}),
     ...(listOf(m.depends_on ?? m.blocked_by).length ? { dependsOn: listOf(m.depends_on ?? m.blocked_by) } : {}),
     ...(listOf(m.questions).length ? { questions: listOf(m.questions) } : {}),
+    ...(str(m.asked) ?? str(m.asked_at) ?? str(m.next_at) ? { asked: str(m.asked) ?? str(m.asked_at) ?? str(m.next_at) } : {}),
+    ...(str(m.created) ?? str(n.createdAt) ? { added: str(m.created) ?? str(n.createdAt) } : {}),
+    ...(str(m.detail) ? { detail: str(m.detail) } : {}),
   };
 }
 

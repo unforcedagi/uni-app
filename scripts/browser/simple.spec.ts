@@ -2049,7 +2049,7 @@ test.describe('r15', () => {
     await sheet.locator('details.task-details > summary').click();
     const last = sheet.locator('details.task-details > p').last();
     await expect(last).toBeVisible();
-    await last.evaluate((el) => el.closest('.task-sheet')!.scrollTo(0, 99999));
+    await last.evaluate((el) => (el.closest('.task-body') ?? el.closest('.task-sheet'))!.scrollTo(0, 99999));
     const [l, s] = [await last.boundingBox(), await sheet.boundingBox()];
     expect(l!.y + l!.height).toBeLessThanOrEqual(s!.y + s!.height - 4);
   });

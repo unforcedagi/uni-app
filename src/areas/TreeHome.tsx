@@ -78,6 +78,7 @@ const NavButtons = ({ nav }: { nav: NavControls | null }) => nav ? <>
   <button type="button" className="th-nb" aria-label="Forward" title="Forward (Alt+→)" disabled={!nav.canForward} onClick={nav.forward}>→</button>
 </> : null;
 
+const FRESHNESS = ["saved", "refresh", "slow"];
 export function TreeScreen({ status, column, nav, onHide, hideLabel = "Hide the sidebar", ...tree }: TreeProps & {
   status?: ReactNode;
   /** The left column beside a room (wide screens, and the drawer below 900px): a slim toolbar (Back, Forward, hide), the tree, then the last few places. */
@@ -95,10 +96,13 @@ export function TreeScreen({ status, column, nav, onHide, hideLabel = "Hide the 
       const fixed = [...root.children].filter((c) => c !== wrap && !c.classList.contains("th-recent")).reduce((a, c) => a + (c as HTMLElement).offsetHeight, 0);
       setTight(list.offsetHeight > root.clientHeight - fixed - RECENT_FULL_PX);
     };
-    measure();
-    const ro = new ResizeObserver(measure);
+    // r23: the tree scrolls in its own region above Recent; while rows run on below, its last line fades, so a row never reads as under Recent
+    const more = () => { const on = wrap.scrollHeight - wrap.scrollTop - wrap.clientHeight > 2; if (on) wrap.setAttribute("data-more", ""); else wrap.removeAttribute("data-more"); };
+    measure(); more();
+    const ro = new ResizeObserver(() => { measure(); more(); });
     ro.observe(root); ro.observe(list);
-    return () => ro.disconnect();
+    wrap.addEventListener("scroll", more, { passive: true });
+    return () => { ro.disconnect(); wrap.removeEventListener("scroll", more); };
   }, [column]);
   const here = selectedRoom ? others?.find((o) => o.id === selectedRoom)?.name ?? null : rows.find((r) => r.path === selected)?.name ?? null;
   return <div ref={box} className={`tree-home th-phone-tree ${column ? "th-column" : ""}`}>
@@ -106,7 +110,8 @@ export function TreeScreen({ status, column, nav, onHide, hideLabel = "Hide the 
       ? <header className="th-toolbar"><NavButtons nav={nav ?? null} /><span className="th-tb-gap" />{onHide && <button type="button" className="th-nb" aria-label={hideLabel} title={hideLabel} onClick={onHide}>‹</button>}</header>
       : <header className="th-treehead"><h1 className="note-title">Uni</h1></header>}
     {status}
-    <LoadHealth load={tree.load} ready={!!tree.needsReady} />
+    {/* r23: one freshness line at a time: beside a room (the column), the companion or the room's strip says it, so the tree doesn't */}
+    <LoadHealth load={tree.load} ready={!!tree.needsReady} skip={column ? FRESHNESS : undefined} />
     <div className="th-rows-wrap"><RoomTree {...tree} /></div>
     {column && nav && nav.recent.length > 0 && <section className={`th-recent ${tight ? "tight" : ""}`} aria-label="Recent"><h2>Recent</h2>
       <ul>{recentLabels(nav.recent, rows, here, tight ? 3 : 5).map(({ r, label }) => <li key={r.key}><button type="button" onClick={r.go} title={label}>{label}</button></li>)}</ul></section>}

@@ -385,25 +385,68 @@ export function topNeeds(w: Where, _path?: string, max = Infinity, today = local
 export const localDay = (d = new Date()): string => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 /** A due date (YYYY-MM-DD) before today. */
 /**
- * When a request was set or last changed (r22, Codex P1): "asked today", else "asked Oct 11". From the record's last change, the
- * only time the app has for it. Null: no time known.
+ * When a request was made (r23, Codex P1), never the record's last change: `updatedAt` moves when the board is rebalanced, so it is not a
+ * request date. An explicit request time reads "asked Oct 6"; without one, when the task was added: "added Oct 11". Null: neither is known.
  */
-export function askedLine(iso: string | null | undefined, today = localDay()): string | null {
-  const ms = stampMs(iso);
+export type AskedWhen = { at: string; kind: "asked" | "added" };
+export function requestDate(t: Partial<Pick<Task, "asked" | "added">>): AskedWhen | null {
+  if (t.asked && Number.isFinite(stampMs(t.asked))) return { at: t.asked, kind: "asked" };
+  if (t.added && Number.isFinite(stampMs(t.added))) return { at: t.added, kind: "added" };
+  return null;
+}
+/** "asked today", "added Oct 11": a date, never "yesterday", so it reads the same whenever the list is looked at again. */
+export function askedLine(w: AskedWhen | null | undefined, today = localDay()): string | null {
+  if (!w) return null;
+  const ms = stampMs(w.at);
   if (!Number.isFinite(ms)) return null;
   const d = new Date(ms);
   const day = localDay(d);
-  if (day === today) return "asked today";
-  // a date, never "yesterday": it reads the same whenever the list is looked at again
-  return `asked ${d.toLocaleDateString("en-US", { month: "short", day: "numeric", ...(day.slice(0, 4) !== today.slice(0, 4) ? { year: "numeric" } : {}) })}`;
+  if (day === today) return `${w.kind} today`;
+  return `${w.kind} ${d.toLocaleDateString("en-US", { month: "short", day: "numeric", ...(day.slice(0, 4) !== today.slice(0, 4) ? { year: "numeric" } : {}) })}`;
 }
-/** The room's chat has moved on (r22, Codex P1): its last message is more than a day newer than the request. `lastTs` in seconds, as the rooms list has it. */
+/**
+ * The room's chat has moved on (r22, Codex P1): its last message is more than a day newer than the request (r23: the request's own date,
+ * `requestDate`; a date without a time counts from the end of that day). `lastTs` in seconds, as the rooms list has it.
+ */
 export const MOVED_ON_MS = 24 * 3600_000;
-export function chatMovedOn(asked: string | null | undefined, lastTs: number | null | undefined): boolean {
-  const ms = stampMs(asked);
+export function chatMovedOn(w: AskedWhen | null | undefined, lastTs: number | null | undefined): boolean {
+  if (!w) return false;
+  const day = /^\d{4}-\d{2}-\d{2}$/.test(w.at.trim());
+  const ms = day ? new Date(`${w.at.trim()}T23:59:59`).getTime() : stampMs(w.at);
   return Number.isFinite(ms) && typeof lastTs === "number" && Number.isFinite(lastTs) && lastTs * 1000 - ms > MOVED_ON_MS;
 }
 export const MOVED_ON = "Chat has moved on since this was asked";
+export const movedOnText = (w: AskedWhen): string => (w.kind === "asked" ? MOVED_ON : "Chat has moved on since this was added");
+
+/**
+ * A step that points at words it doesn't carry (r23, both critics): "Send Ryan the deploy-access message below", "…the draft", "…the
+ * message". `noun`: what it points at, for "Ask #room for the message".
+ */
+export function pointsAt(next: string): { noun: "message" | "draft" } | null {
+  const m = /\b(?:below|the\s+(?:[\w’'-]+\s+){0,2}?(message|draft))\b/i.exec(next);
+  if (!m) return null;
+  return { noun: (m[1] ?? "").toLowerCase() === "draft" ? "draft" : "message" };
+}
+/**
+ * A step that points at words nobody stored (r23): "…the deploy-access message below" with no `detail`, `message` or `draft`, and no link
+ * to a note that holds them. The row then asks the room for them: "Ask #techne for the message". Null when the words travel with it.
+ */
+export function pointsNowhere(t: Pick<Task, "next" | "room"> & Partial<Pick<Task, "detail" | "message">>, room: string | null = t.room): string | null {
+  const p = pointsAt(t.next);
+  if (!p || t.detail || t.message) return null;
+  if (/https?:\/\/|\[\[|\buni:|\b[0-9A-HJKMNP-TV-Z]{26}\b/.test(t.next)) return null;
+  return `Ask ${room ? `#${room.replace(/^#/, "")}` : "Uni"} for the ${p.noun}`;
+}
+/** The message in a task's `detail`, when it quotes one ("Send this to Ryan: 'Hey Ryan, …'"): the quoted words, whole. */
+export function quotedMessage(detail: string | null | undefined): string | null {
+  if (!detail) return null;
+  for (const para of detail.split(/\n\s*\n/)) {
+    const m = /^\s*(['"“‘])([\s\S]{40,})(['"”’])\s*$/.exec(para);
+    if (m) return m[2].trim();
+  }
+  return null;
+}
+
 export const isOverdue = (due: string | null | undefined, today = localDay()): boolean => !!due && due < today;
 /** "due Oct 14", or "was due Oct 12" once it has passed. Null without a date. */
 export function dueLine(due: string | null | undefined, today = localDay()): string | null {
@@ -578,7 +621,35 @@ export function stepText(next: string): { text: string; cut: boolean } {
   const t = next.replace(/\s+/g, " ").trim();
   if (t.length < NEXT_CAP || /[.!?)"”’'\]]$/.test(t)) return { text: t, cut: false };
   const words = t.split(" "); words.pop();
-  return { text: cutWords(words.join(" ")), cut: true };
+  // r23 (both critics): as stored, never "…": the sheet says the note ends here and opens it
+  return { text: cutWords(words.join(" "), Infinity, false), cut: true };
+}
+
+/**
+ * "Where this stands" without raw ids (r23, both critics): a bracket that holds a run number, a hash or a long link goes whole ("(run
+ * 38456928492 green)"), and so does a bare one; the words around it stay.
+ */
+const RAW_ID = /\b(?:run\s+)?\d{7,}\b|\b(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}\b|https?:\/\/\S{30,}/i;
+export function withoutRawIds(text: string): string {
+  let t = text.replace(/\s*\(([^()]*)\)/g, (m, inner: string) => (RAW_ID.test(inner) ? "" : m));
+  t = t.replace(new RegExp(RAW_ID.source, "gi"), "");
+  return t.replace(/\s+([,;:.])/g, "$1").replace(/([,;:])(?=[,;:.])/g, "").replace(/\s{2,}/g, " ").trim();
+}
+/**
+ * A sentence's shorter forms with words, longest first (r23): the whole, then each prefix that ends on a clause (";", ":", a spaced dash,
+ * a sentence end), never a cut inside a clause and never "…". The summary shows the longest that fits its three lines.
+ */
+export function clauseForms(text: string): string[] {
+  const t = text.trim();
+  const out = [t];
+  const re = /(?:;|:|\.(?=\s+\p{Lu})|\s[—–-]\s)/gu;
+  const ends: number[] = [];
+  for (let m; (m = re.exec(t));) if (m.index >= 12) ends.push(m.index);
+  for (const e of ends.reverse()) {
+    const f = t.slice(0, e).replace(/[\s,;:—–-]+$/, "").trim();
+    if (f && f !== out[out.length - 1]) out.push(/[.!?]$/.test(f) ? f : `${f}.`);
+  }
+  return out;
 }
 
 /** A cut fragment as whole words (r16): no "…", no unclosed "(3" tail, no hanging word ("…install flow (3" → "…install flow"). */

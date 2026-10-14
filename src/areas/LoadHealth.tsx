@@ -34,8 +34,8 @@ export function loadIssues(load: TaskLoad | undefined, ready: boolean, count?: n
 export const countText = (n: number, load?: TaskLoad): string => (load && !load.complete ? `${n}+` : String(n));
 export const countLabel = (n: number, load?: TaskLoad): string => (load && !load.complete ? `at least ${n}` : load?.error && load.lastOk ? `${n} as of ${asOf(load.lastOk)}` : load?.savedAt ? `${n} as of ${asOf(load.savedAt)}` : String(n));
 
-export function LoadHealth({ load, ready, count, className = "" }: { load?: TaskLoad; ready: boolean; count?: number; className?: string }) {
-  const issues = loadIssues(load, ready, count);
+export function LoadHealth({ load, ready, count, className = "", skip }: { load?: TaskLoad; ready: boolean; count?: number; className?: string; /** r23: lines said elsewhere on screen ("saved": "18 as of 1:44 PM · refreshing") */ skip?: readonly string[] }) {
+  const issues = loadIssues(load, ready, count).filter((i) => !skip?.includes(i.key));
   if (!load || !issues.length) return null;
   return <div className={`lh ${className}`} data-health={issues.map((i) => i.key).join(" ")}>
     {issues.map((i) => <p key={i.key} className={`lh-line${i.alert ? " bad" : ""}`} role={i.alert ? "alert" : "status"}>
