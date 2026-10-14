@@ -39,6 +39,8 @@ export type Task = {
   ask?: string;
   /** The note revision (`updatedAt`) `ask` was read at (r14): a question read at another revision than the row's is not this row's. */
   askAt?: string | null;
+  /** The vault it was read from (r15): its linked notes are read and opened there, never in another vault. */
+  vault?: string;
 };
 
 const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);

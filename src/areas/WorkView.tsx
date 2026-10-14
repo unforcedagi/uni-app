@@ -10,6 +10,8 @@ import type { NeedsFeed, PrivateNeed } from "./simpleCore";
 import type { TaskLoad } from "./Companion";
 import { countLabel, countText, LoadHealth } from "./LoadHealth";
 import type { Task } from "./taskCore";
+import type { NoteRef } from "./noteRefsCore";
+import { useVaultProfile } from "./ProfileContext";
 
 export type WorkViewProps = {
   nodeName: string;
@@ -25,13 +27,14 @@ export type WorkViewProps = {
   ready: boolean;
   /** The list's health (r14): the same line as the companion's and the tree's, so saved rows never read as current or whole. */
   load: TaskLoad;
-  onTask: (t: Task) => void; onDecide: (t: Task, option: string) => void; onNote: (ref: string) => void; onPrivate: (open: PrivateNeed["open"]) => void;
+  onTask: (t: Task) => void; onDecide: (t: Task, option: string) => void; onNote: (ref: NoteRef) => void; onPrivate: (open: PrivateNeed["open"]) => void;
   /** Above the sections: the brief's lede and its Refresh. Below them: a project's own note, folded. */
   top?: ReactNode; foot?: ReactNode;
 };
 
 export function WorkView(p: WorkViewProps) {
   const [laterOpen, setLaterOpen] = useState(false);
+  const vault = useVaultProfile().vault;
   const running = p.runs.filter(isActiveRun);
   const motion = running.length + p.drafts.length + p.others.length;
   if (!p.ready) return <div className="wv">{p.load.error ? <LoadHealth load={p.load} ready={false} /> : <p className="th-quiet" role="status">Loading…</p>}</div>;
@@ -50,7 +53,7 @@ export function WorkView(p: WorkViewProps) {
       {motion === 0 && !p.privateOther && <p className="cp-none">Nothing is moving here right now.</p>}
       {running.length > 0 && <ul className="cp-list wv-runs" aria-label="Running">{running.map((r) => <li key={r.id} className="cp-run" data-state={r.state}><i aria-hidden="true" /><span>{cleanText(r.what)}</span><small>{r.state}</small></li>)}</ul>}
       {p.drafts.length > 0 && <ul className="cp-list wv-drafts" aria-label="Drafts">{p.drafts.map((d) => <li key={d.id} className="cp-item">
-        <button type="button" className="cp-need" onClick={() => p.onNote(d.id)}><span className="cp-title">{cleanText(d.title)}</span><small className="cp-detail">{d.status === "ready" ? "Draft ready to read" : "Being drafted"}</small></button></li>)}</ul>}
+        <button type="button" className="cp-need" onClick={() => p.onNote({ vault, id: d.id })}><span className="cp-title">{cleanText(d.title)}</span><small className="cp-detail">{d.status === "ready" ? "Draft ready to read" : "Being drafted"}</small></button></li>)}</ul>}
       {p.others.length > 0 && <ul className="cp-list wv-others">{p.others.map(({ task, meta }) => <NeedRow key={task.id} t={task} meta={meta} onTask={p.onTask} onDecide={p.onDecide} onNote={p.onNote} />)}</ul>}
       {p.privateOther > 0 && <p className="cp-none">{p.privateOther === 1 ? "One item in a private area is" : `${p.privateOther} items in private areas are`} not listed here; open the area to see {p.privateOther === 1 ? "it" : "them"}.</p>}
     </section>

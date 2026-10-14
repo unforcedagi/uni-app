@@ -1,45 +1,60 @@
 // T-124 r9: a `uni:<ULID>` or bare ULID in a task's title or next step reads as the linked note's title (read once, cached), never as the id.
+// r15: keyed by vault and id, read from and opened in the same vault; a renamed note re-reads (a known title is checked again in the
+// background), a failed read is tried again, and the cache keeps the newest 300.
 import { useEffect, useSyncExternalStore } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { activeProfile } from "./profile";
-import { splitRefs, titleOfPath } from "./noteRefsCore";
+import { capped, refKey, settle, shouldRead, splitRefs, titleOfPath, KEEP, type NoteRef, type TitleEntry } from "./noteRefsCore";
 
-const KEY = "uni.noteTitles.v1";
-const KEEP = 300;
-const stored = (): Record<string, string> => { try { const v = JSON.parse(localStorage.getItem(KEY) ?? "{}"); return v && typeof v === "object" ? v : {}; } catch { return {}; } };
+const KEY = "uni.noteTitles.v2";
+const stored = (): [string, TitleEntry][] => {
+  try {
+    const v = JSON.parse(localStorage.getItem(KEY) ?? "[]");
+    return Array.isArray(v) ? v.filter((e): e is [string, TitleEntry] => Array.isArray(e) && typeof e[0] === "string" && !!e[1] && typeof e[1].title === "string").slice(-KEEP) : [];
+  } catch { return []; }
+};
 // Titles read before are kept on this device: the next launch shows the title on the first paint instead of a placeholder that flips.
-const titles = new Map<string, string | null>(Object.entries(stored()));
-const keep = () => { try { localStorage.setItem(KEY, JSON.stringify(Object.fromEntries([...titles].filter(([, t]) => t).slice(-KEEP)))); } catch { /* this session only */ } };
-const asked = new Set<string>();
+const titles = new Map<string, TitleEntry>(stored());
+const keep = () => { try { localStorage.setItem(KEY, JSON.stringify([...titles].filter(([, e]) => e.title))); } catch { /* this session only */ } };
+/** Notes whose title was checked this session (a title kept from the last launch is checked once, in the background). */
+const seen = new Set<string>();
+const reading = new Set<string>();
 const listeners = new Set<() => void>();
 const subscribe = (f: () => void) => { listeners.add(f); return () => { listeners.delete(f); }; };
 
-function load(id: string) {
-  if (asked.has(id)) return;
-  asked.add(id);
-  invoke<{ note?: { path?: string } } | null>("vault_note", { vault: activeProfile().vault, noteRef: id })
-    .then((r) => { const t = titleOfPath(r?.note?.path); if (t) { titles.delete(id); titles.set(id, t); keep(); } else titles.set(id, titles.get(id) ?? null); })
-    .catch(() => { if (!titles.get(id)) titles.set(id, null); })
-    .finally(() => listeners.forEach((f) => f()));
+function load(r: NoteRef) {
+  const k = refKey(r);
+  if (reading.has(k) || !shouldRead(titles.get(k), Date.now(), seen.has(k))) return;
+  seen.add(k); reading.add(k);
+  invoke<{ note?: { path?: string; updatedAt?: string } } | null>("vault_note", { vault: r.vault, noteRef: r.id })
+    .then((n) => ({ title: titleOfPath(n?.note?.path), at: typeof n?.note?.updatedAt === "string" ? n.note.updatedAt : null }), () => null)
+    .then((read) => {
+      const prev = titles.get(k);
+      const next = settle(prev, read, Date.now());
+      titles.delete(k); titles.set(k, next); capped(titles);
+      if (next.title && (next.title !== prev?.title || next.at !== prev?.at)) keep();
+    })
+    .finally(() => { reading.delete(k); listeners.forEach((f) => f()); });
 }
 
-/** Read the titles of the notes a text mentions, ahead of showing it. */
-export function warmTitles(texts: readonly string[]) { for (const t of texts) for (const p of splitRefs(t)) if ("id" in p) load(p.id); }
+/** Read (or check again) the titles of the notes a text mentions, ahead of showing it: called with every refresh of the work. */
+export function warmTitles(texts: readonly string[], vault: string) { for (const t of texts) for (const p of splitRefs(t, vault)) if ("id" in p) load(p); }
 
-/** A linked note's title; `null` while it is still being read (callers show a quiet neutral, never a placeholder that later flips), "a note" only when it can't be read. */
-export function useNoteTitle(id: string): string | null {
-  const t = useSyncExternalStore(subscribe, () => titles.get(id));
-  useEffect(() => { load(id); }, [id]);
-  return t === undefined ? null : t || "a note";
+/** A linked note's title; `null` while it is first being read (callers show a quiet neutral, never a placeholder that later flips), "a note"
+ *  when it can't be read (tried again on the next look after a short wait). */
+export function useNoteTitle(r: NoteRef): string | null {
+  const k = refKey(r);
+  const e = useSyncExternalStore(subscribe, () => titles.get(k));
+  useEffect(() => { load(r); }, [k]); // eslint-disable-line react-hooks/exhaustive-deps
+  return e === undefined ? null : e.title || "a note";
 }
 
-export function RefName({ id, onNote }: { id: string; onNote?: (ref: string) => void }) {
-  const t = useNoteTitle(id);
+export function RefName({ r, onNote }: { r: NoteRef; onNote?: (ref: NoteRef) => void }) {
+  const t = useNoteTitle(r);
   if (t === null) return <span className="cp-ref-wait">the linked note</span>;
-  return onNote ? <button type="button" className="cp-ref" onClick={() => onNote(id)}>{t}</button> : <span>{t}</span>;
+  return onNote ? <button type="button" className="cp-ref" onClick={() => onNote(r)}>{t}</button> : <span>{t}</span>;
 }
 
-/** Plain text with its note ids as titles (buttons when `onNote` is given). */
-export function RefText({ text, onNote }: { text: string; onNote?: (ref: string) => void }) {
-  return <>{splitRefs(text).map((p, i) => "id" in p ? <RefName key={i} id={p.id} onNote={onNote} /> : <span key={i}>{p.text}</span>)}</>;
+/** Plain text with its note ids as titles (buttons when `onNote` is given). `vault`: where the text lives, for an id written without one. */
+export function RefText({ text, vault, onNote }: { text: string; vault: string; onNote?: (ref: NoteRef) => void }) {
+  return <>{splitRefs(text, vault).map((p, i) => "id" in p ? <RefName key={i} r={p} onNote={onNote} /> : <span key={i}>{p.text}</span>)}</>;
 }

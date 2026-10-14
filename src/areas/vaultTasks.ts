@@ -139,7 +139,8 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
    */
   async function loadTasks(tree: TaskTree, path: string): Promise<{ tasks: Task[]; truncated: boolean }> {
     const finish = (tasks: RawNote[], decisions: RawNote[], cut = tasks.length >= LIMIT || decisions.length >= LIMIT) => {
-      const parsed = [...tasks, ...decisions].map((n) => parseTask(n, tree)).filter((t): t is Task => !!t);
+      const vault = name();
+      const parsed = [...tasks, ...decisions].map((n) => parseTask(n, tree)).filter((t): t is Task => !!t).map((t) => ({ ...t, vault }));
       return { tasks: [...new Map(parsed.map((t) => [t.id, withAsk(t)])).values()], truncated: cut };
     };
     if (path !== ROOT && nearOk !== false) {
