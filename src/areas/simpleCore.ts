@@ -547,7 +547,8 @@ export function askPreview(text: string, max = 160): string {
   if (plain.length <= max) return plain;
   let out = "";
   for (const sen of plain.match(/[^.!?]+[.!?]+(?=\s|$)/g) ?? []) { if ((out + sen).length > max) break; out = `${out}${sen}`; }
-  return out.trim() ? `${out.trim()} …` : cutWords(plain, max);
+  // r23 (both critics): whole sentences, or whole words; never "…" (the sheet has the whole question)
+  return out.trim() || cutWords(plain, max, false);
 }
 
 /** A Needs-you row shows a whole question beside its answers only when it fits the row; a longer one opens to decide (r14). */

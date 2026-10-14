@@ -251,14 +251,14 @@ check("ask: a cut title shows the first line of the note's content in full, with
   assert.equal(askFromContent("1. Wait\n2. Go"), "");
   assert.equal(askFromContent("- Option A\n\nShould the gateway move on Wednesday?"), "Should the gateway move on Wednesday?");
   assert.equal(askFromContent("_Converted from x_"), "");
-  // r14: the question is the whole first paragraph, never a 280-character trim; the trim is a preview, always marked "…"
+  // r14: the question is the whole first paragraph, never a 280-character trim; the trim is a preview (r23: whole sentences, never "…")
   const long = "First sentence here. " + "Second sentence that goes on and on. ".repeat(12);
   assert.equal(askFromContent(long), long.trim());
   assert.equal(askFromContent("Should we move the gateway\non Wednesday, after the backup?\n\nContext below."), "Should we move the gateway on Wednesday, after the backup?");
   const pv = askPreview(long);
-  assert.ok(pv.endsWith("…") && pv.length <= 162 && pv.startsWith("First sentence here."), pv);
+  assert.ok(!pv.includes("…") && pv.endsWith(".") && pv.length <= 160 && pv.startsWith("First sentence here."), pv);
   assert.equal(askPreview("Short and whole."), "Short and whole.");
-  assert.ok(askPreview("x".repeat(400)).endsWith("…"));
+  assert.ok(!askPreview("x ".repeat(200)).includes("…"));
 });
 check("r14 decisionQuestion: the title when whole; a cut title's ask only at the row's own revision; else none", () => {
   assert.equal(decisionQuestion("Decision (default yes): Ship it?", undefined, undefined, "r1"), "Ship it?");

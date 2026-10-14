@@ -337,11 +337,10 @@ test.describe('simple', () => {
     await page.getByRole('button', { name: 'Show where this stands' }).click();
     await page.evaluate(() => { document.querySelector('.cp.side')!.setAttribute('style', 'width:130px'); });
     await expect(page.locator('.cp-all-t')).toHaveText(/^All of .+'s work$/);
-    // narrow, the sentence runs past three lines: cut on a whole word (r18: never inside one), with a real button that shows it whole
+    // narrow, the sentence runs past three lines: r23, shortened at a clause's end, never "…", with a real button that shows it whole
     const lede = page.locator('.cp-stands').first();
     await expect(lede).toHaveAttribute('data-cut', 'true');
-    expect((await lede.innerText()).replace(/\s+/g, ' ').trim()).toMatch(/^Atlas and COhere .*\p{L}…$/u);
-    expect('Atlas and COhere are moving; the usage guard is quiet.'.startsWith((await lede.innerText()).replace(/\s+/g, ' ').replace(/…$/, '').trim())).toBe(true);
+    await expect(lede).toHaveText('Atlas and COhere are moving.');
     const more = page.locator('.cp-stands-more');
     await expect(more).toBeVisible();
     await more.focus(); await page.keyboard.press('Enter');
@@ -824,7 +823,7 @@ test.describe('simple', () => {
     const invoice = needs.locator('.cp-item').filter({ hasText: 'Sponsorship invoice draft' });
     await expect(invoice.locator('.cp-lead')).toHaveText('Send to Casey for the numbers');
     // r22: the quiet line also says when it was asked (the title may give way to it in a narrow panel; it is whole in the tooltip)
-    await expect(invoice.locator('.cp-under')).toHaveAttribute('title', /^Sponsorship invoice draft · asked \w+ \d+$/);
+    await expect(invoice.locator('.cp-under')).toHaveAttribute('title', /^Sponsorship invoice draft · (?:asked|added) \w+ \d+$/);
     // Someday is never in Needs you, in any room
     await openRoom(page, 'Unforced Development');
     await openCompanion(page);
@@ -1748,7 +1747,7 @@ test.describe('r14', () => {
     if (await page.locator('.cp-more-rows').count()) await page.locator('.cp-more-rows').click();
     const row = page.locator('.cp-body .cp-item').filter({ hasText: 'riverside barn' });
     await expect(row.locator('.cp-need')).toHaveAttribute('data-mode', 'call');
-    await expect(row.locator('.cp-title')).toHaveText(/…\s*›?$/);
+    await expect(row.locator('.cp-title')).not.toHaveText(/…/); // r23: no ellipsis in Needs you; the sheet has it whole
     await expect(row.locator('.cp-opt')).toHaveCount(0);
     await expect(row).not.toContainText('extra fee of 400 dollars');
     await row.locator('.cp-need').click();
@@ -1987,7 +1986,7 @@ test.describe('r15', () => {
     await openRoom(page, 'COhere 2026');
     await openWork(page);
     const wv = page.locator('.sr-work');
-    await expect(wv.locator('.cp-item').filter({ hasText: 'COhere festival readiness' }).locator('.cp-detail.overdue')).toHaveText(/^was due Oct 7 · asked \w+ \d+$/);
+    await expect(wv.locator('.cp-item').filter({ hasText: 'COhere festival readiness' }).locator('.cp-detail.overdue')).toHaveText(/^was due Oct 7 · (?:asked|added) \w+ \d+$/);
     const n = await wv.locator('section[aria-label="Needs you"] .wv-n').innerText();
     await page.evaluate(() => { (window as any).__queryFails = ['task']; });
     await refresh(page, '2026-10-09T10:02:00.000Z');
@@ -2259,8 +2258,9 @@ test.describe('r16', () => {
     await expect(dq.locator('.cp-title')).toHaveText('Ship the ATLAS hosting?');
     await row.locator('.cp-need').click();
     const sheet = page.getByRole('dialog');
-    await expect(sheet.locator('.task-cut')).toContainText('This step was cut short when it was written.');
-    await expect(sheet.getByRole('button', { name: 'Open the note ›' })).toBeVisible();
+    // r23: as stored, no "…", and a plain line instead of an apology
+    await expect(sheet.locator('.task-cut')).toHaveText('(the note ends here · open the note)');
+    await expect(sheet.locator('.task-cut').getByRole('button', { name: 'open the note' })).toBeVisible();
   });
 
   test('Needs you is the user\'s (r17: and whatever waits on them, whoever holds it); a room\'s task waiting on someone else is in In motion', async ({ page }) => {
@@ -2301,11 +2301,11 @@ test.describe('r17', () => {
     await expect(room.locator('.cp-lead')).toHaveText(/^Your OK on the draft/);
     // r18: small print is one line of whole words (never ending on "·"), the whole of it in its title
     // r20: and the due cue, which is never cut
-    await expect(room.locator('.cp-under')).toHaveAttribute('title', /^From #atlas\/teach · Canvas Week 7 brief draft(?: · (?:was )?due \w+ \d+)? · asked \w+ \d+$/);
-    expect((await room.locator('.cp-under').innerText()).replace(/\s+/g, ' ').trim()).toMatch(/^From #atlas\/teach(?: · Canvas[\p{L}\d ]*)?…?(?:(?: ·)? (?:(?:was )?due \w+ \d+ · )?asked \w+ \d+)?$/u); // r22: a wrapped date line has no " · "
+    await expect(room.locator('.cp-under')).toHaveAttribute('title', /^From #atlas\/teach · Canvas Week 7 brief draft(?: · (?:was )?due \w+ \d+)? · (?:asked|added) \w+ \d+$/);
+    expect((await room.locator('.cp-under').innerText()).replace(/\s+/g, ' ').trim()).toMatch(/^From #atlas\/teach(?: · Canvas[\p{L}\d ]*)?…?(?:(?: ·)? (?:(?:was )?due \w+ \d+ · )?(?:asked|added) \w+ \d+)?$/u); // r22: a wrapped date line has no " · "
     expect((await room.locator('.cp-under').innerText()).trim()).not.toMatch(/·\s*…$/);
     const uni = needs.locator('.cp-item').filter({ hasText: 'Pick the lead story' });
-    await expect(uni.locator('.cp-under')).toHaveAttribute('title', /^From Uni · Newsletter W42 draft · asked \w+( \d+)?$/); // r22: and when it was asked
+    await expect(uni.locator('.cp-under')).toHaveAttribute('title', /^From Uni · Newsletter W42 draft · (?:asked|added) \w+( \d+)?$/); // r22: and when it was asked
     // the work view: in Needs you, never in In motion; the count is the companion's
     await openWork(page);
     const wv = page.locator('.sr-work');
@@ -2482,7 +2482,7 @@ test.describe('r17', () => {
     expect(await sheet.evaluate((el) => el.getBoundingClientRect().bottom <= innerHeight + 0.5)).toBe(true);
   });
 
-  test('a cut action ends on a whole word with a clean ellipsis, never on a colon', async ({ page }) => {
+  test('a cut action ends on a whole word, never on a colon (r23: and never with an ellipsis)', async ({ page }) => {
     await boot(page);
     await openRoom(page, 'ATLAS');
     const id = await page.evaluate(() => (window as any).__tasks.find((t: any) => /SOW for the commons grant/.test(t.path)).id);
@@ -2493,9 +2493,9 @@ test.describe('r17', () => {
     await expect(lead).toBeVisible();
     const text = (await lead.innerText()).replace(/\s+/g, ' ').trim();
     if (await lead.getAttribute('data-cut')) {
-      expect(text).toMatch(/\p{L}…$/u);
-      expect(text).not.toMatch(/[:;,]\s*…$/);
-      expect(text).not.toMatch(/\b(the|and|to|of|with|its)\s*…$/i);
+      expect(text).toMatch(/\p{L}$/u);
+      expect(text).not.toMatch(/…/);
+      expect(text).not.toMatch(/\b(the|and|to|of|with|its)$/i);
     }
   });
 });
@@ -3031,11 +3031,11 @@ test.describe('r20', () => {
     // COhere: the date label is not the lead; the subtitle is where it belongs and the due cue
     const co = page.locator('.sr-work .cp-item').filter({ hasText: 'Say go on prod deploy' });
     await expect(co.locator('.cp-lead')).toHaveText('Say go on prod deploy of #38 + #58');
-    await expect(co.locator('.cp-under')).toHaveAttribute('title', /^COhere opens Oct 15 · due today · asked \w+ \d+$/); // r22: and when it was asked
-    await expect(co.locator('.cp-sub-when')).toHaveText(/^(?: · )?due today · asked \w+ \d+$/); // r22: a wrapped date line has no leading " · "
+    await expect(co.locator('.cp-under')).toHaveAttribute('title', /^COhere opens Oct 15 · due today · (?:asked|added) \w+ \d+$/); // r22: and when it was asked
+    await expect(co.locator('.cp-sub-when')).toHaveText(/^(?: · )?due today · (?:asked|added) \w+ \d+$/); // r22: a wrapped date line has no leading " · "
     // a subtitle that repeats the action is dropped (in its own area there is nothing else to say)
     // (r22: only when it was asked is left)
-    await expect(page.locator('.sr-work .cp-item').filter({ hasText: 'Edit and send the ATLAS follow-up' }).locator('.cp-under')).toHaveText(/^\s*asked \w+ \d+$/);
+    await expect(page.locator('.sr-work .cp-item').filter({ hasText: 'Edit and send the ATLAS follow-up' }).locator('.cp-under')).toHaveText(/^\s*(?:asked|added) \w+ \d+$/);
     // the whole step is in the sheet
     await co.locator('.cp-need').click();
     await expect(sheetOf(page).locator('h2')).toHaveText('Say go on prod deploy of #38 + #58');
@@ -3572,8 +3572,9 @@ test.describe('r22', () => {
     { id: 'pay', title: 'T-65 $10k COhere sponsorship invoice draft', next: 'Tell Uni who pays (Techne or Gitcoin Foundation) and how: crypto or ACH/Stripe, plus Woven Web\'s legal details.', has: ['Tell Uni who pays (Techne or Gitcoin Foundation)', 'and how: crypto or ACH/Stripe, plus Woven Web\'s legal details'] },
     { id: 'co', title: 'T-90 COhere opens Oct 15', next: 'Wed 10-14: say go on prod deploy of #38 + #58; Harper signs off the copy/photos before/after (posting today); yes/no on add-only DB…', has: ['Say go on prod deploy of #38 + #58'], due: '2026-10-14' },
   ];
-  const seed = async (page: Page, node = 'Projects/ATLAS', updatedAt = '2026-10-11T18:00:00.000Z') => {
-    for (const r of ROWS) await add(page, { id: r.id, title: r.title, node, updatedAt, meta: { priority: 'now', next: r.next, ...(r.due ? { due: r.due } : {}) } });
+  // r23: `asked` is the request's own time (the record's `updatedAt` is not a request date)
+  const seed = async (page: Page, node = 'Projects/ATLAS', asked = '2026-10-11T18:00:00.000Z') => {
+    for (const r of ROWS) await add(page, { id: r.id, title: r.title, node, meta: { priority: 'now', next: r.next, asked, ...(r.due ? { due: r.due } : {}) } });
     await refresh(page, '2026-10-14T09:00:00.000Z');
   };
   const assertWhole = async (row: ReturnType<Page['locator']>, r: (typeof ROWS)[number]) => {
@@ -3586,7 +3587,7 @@ test.describe('r22', () => {
     expect(['none', '', 'unset'].includes(clamp.clamp), `${r.title}: line clamp ${clamp.clamp}`).toBe(true);
     // the small print says when it was asked; where it belongs stays, and a wrapped date line starts with its words, not " · "
     const sub = row.locator('.cp-sub');
-    await expect(sub).toHaveAttribute('title', / · asked \w+ \d+$|^asked \w+ \d+$/);
+    await expect(sub).toHaveAttribute('title', / · (?:asked|added) \w+ \d+$|^(?:asked|added) \w+ \d+$/);
     if (await sub.getAttribute('data-wrapped')) expect((await sub.locator('.cp-sub-when').textContent()) ?? '', r.title).not.toMatch(/^\s*·/);
     else if (await sub.locator('.cp-sub-where:not([hidden])').count()) expect((await sub.locator('.cp-sub-when').textContent()) ?? '', r.title).toMatch(/^ · /);
   };
@@ -3617,7 +3618,7 @@ test.describe('r22', () => {
     await boot(page);
     // Techne's room has messages up to Oct 9 (the fixture's pinned time); these requests were set on Oct 6
     await seed(page, 'Areas/Techne', '2026-10-06T18:00:00.000Z');
-    await add(page, { id: 'fresh', title: 'T-200 A fresh placeholder request', node: 'Areas/Techne', updatedAt: new Date(Date.now() + 5000).toISOString(), meta: { priority: 'now', next: 'Send the placeholder note to Casey' } });
+    await add(page, { id: 'fresh', title: 'T-200 A fresh placeholder request', node: 'Areas/Techne', meta: { priority: 'now', next: 'Send the placeholder note to Casey', asked: new Date(Date.now() + 5000).toISOString() } });
     await refresh(page, '2026-10-14T09:00:00.000Z');
     await openRoom(page, 'Techne');
     await openWork(page);
@@ -3629,20 +3630,20 @@ test.describe('r22', () => {
     await expect(sheet.locator('h2')).toHaveText('Say go on prod deploy of #38 + #58');
     await expect(sheet.locator('.task-asked')).toContainText('Asked Oct 6');
     // Techne's chat has messages from Oct 9: more than a day newer than Oct 6
-    await expect(sheet.locator('.task-movedon')).toHaveText('Chat has moved on since this was asked · open the chat');
-    // the request is still there, with its own action
+    await expect(sheet.locator('.task-movedon')).toHaveText('Chat has moved on since this was asked');
+    // the request is still there; r23: its "Say it" follows "Check in #techne first"
     await expect(sheet.getByRole('button', { name: /^Say it in #/ })).toBeVisible();
     await sheet.getByRole('button', { name: 'Close' }).click();
     // a request newer than the chat's last message has no cue
     const fresh = page.locator('.sr-work .cp-item').filter({ hasText: 'Send the placeholder note' });
-    await expect(fresh.locator('.cp-under')).toHaveAttribute('title', /asked /);
+    await expect(fresh.locator('.cp-under')).toHaveAttribute('title', /(?:asked|added) /);
     await fresh.locator('.cp-need').click();
     await expect(sheetOf(page).locator('.task-asked')).toBeVisible();
     await expect(sheetOf(page).locator('.task-movedon')).toHaveCount(0);
     await sheetOf(page).getByRole('button', { name: 'Close' }).click();
-    // "open the chat" goes to the room's conversation
+    // r23: "Check in #room first" goes to the room's conversation
     await co.locator('.cp-need').click();
-    await sheetOf(page).getByRole('button', { name: 'open the chat' }).click();
+    await sheetOf(page).getByRole('button', { name: /^Check in #.* first$/ }).click();
     await expect(sheetOf(page)).toHaveCount(0);
     await expect(page.locator('.sr-chat')).toBeVisible();
   });
