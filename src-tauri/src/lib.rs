@@ -697,10 +697,11 @@ struct IdentityStatus {
 async fn identity_status(app: tauri::AppHandle) -> Result<IdentityStatus, String> {
     secure_store::ensure_loaded(&app).await?;
     // Desktop may hit the OS keyring here; keep it off the async executor.
+    // No key at all is "unpaired"; a key that could not be read is an error the app retries, never a pairing screen.
     let pubkey = blocking(|| {
-        Ok(uni_core::load_keys(false)
-            .ok()
-            .map(|(k, _)| k.public_key().to_hex()))
+        uni_core::key_status()
+            .map(|k| k.map(|k| k.public_key().to_hex()))
+            .map_err(|e| e.to_string())
     })
     .await?;
     Ok(IdentityStatus {

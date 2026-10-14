@@ -121,6 +121,38 @@ pub fn load_keys(allow_ephemeral: bool) -> Result<(Keys, KeySource)> {
     )))
 }
 
+/// Whether this device has a key, for the app's launch check. `Ok(None)`: there is none (pair this device).
+/// `Err`: a key may well exist but reading it failed (an unreadable env key, a keyring that answered with an error),
+/// so the app says it couldn't read the key and offers Retry instead of sending the user to pairing.
+pub fn key_status() -> Result<Option<Keys>> {
+    let device = DEVICE_KEYS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
+    let keyring = if skip_keyring() {
+        Ok(None)
+    } else {
+        read_keyring()
+    };
+    resolve_status(std::env::var(ENV_NSEC).ok(), device, keyring)
+}
+
+fn resolve_status(
+    env: Option<String>,
+    device: Option<Keys>,
+    keyring: Result<Option<Keys>>,
+) -> Result<Option<Keys>> {
+    if let Some(v) = env.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+        return Keys::parse(v).map(Some).map_err(|_| {
+            Error::Identity(format!("{ENV_NSEC} is set but not a valid hex/nsec key"))
+        });
+    }
+    if device.is_some() {
+        return Ok(device);
+    }
+    keyring
+}
+
 /// Env var that disables the keyring lookup (`UNI_NO_KEYRING=1`).
 ///
 /// Tests set this: an unsigned test binary reading the macOS Keychain
@@ -219,6 +251,42 @@ pub fn init_keyring_key() -> Result<KeyInit> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn key_status_tells_none_from_unreadable() {
+        let k = Keys::generate();
+        let err = || Err(Error::Identity("keyring: platform failure".into()));
+        assert!(
+            resolve_status(None, None, Ok(None)).unwrap().is_none(),
+            "nothing anywhere: unpaired"
+        );
+        assert!(
+            resolve_status(None, None, err()).is_err(),
+            "a keyring error is not 'unpaired'"
+        );
+        assert!(
+            resolve_status(Some("not a key".into()), None, Ok(None)).is_err(),
+            "a bad env key is unreadable, not missing"
+        );
+        assert!(
+            resolve_status(Some("  ".into()), None, Ok(None))
+                .unwrap()
+                .is_none(),
+            "a blank env var is no key"
+        );
+        let dev = resolve_status(None, Some(k.clone()), err())
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            dev.public_key(),
+            k.public_key(),
+            "a device key wins over a failing keyring"
+        );
+        let kr = resolve_status(None, None, Ok(Some(k.clone())))
+            .unwrap()
+            .unwrap();
+        assert_eq!(kr.public_key(), k.public_key());
+    }
 
     #[test]
     fn ephemeral_then_device_keys() {
