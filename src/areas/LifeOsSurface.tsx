@@ -32,8 +32,9 @@ export default function LifeOsSurface({ vaults, identity, ...rest }: { vaults: s
   const picker = choices.length > 1 && chosen !== UNI_VAULT ? <label className="lifeos-vault"><span>Life OS vault</span>
     <select value={chosen} onChange={(e) => pick(e.target.value)}>{choices.map((v) => <option key={v} value={v}>{v}</option>)}</select></label> : null;
   if (ready && !ready.hasPack) return <div className="areas-home lifeos-nopack">{picker}
-    <h1>This vault has no Life OS pack</h1>
-    <p className="empty">“{chosen}” has no <code>node</code> notes. Install the pack into it (<code>parachute-vault packs add life-os</code>) or choose another vault.</p></div>;
+    <h1>“{chosen}” isn't set up for Uni yet</h1>
+    <p className="empty">It has no areas or projects for Uni to show. Choose another vault, or ask Uni to set this one up.</p>
+    <details className="settings-dev"><summary>Developer</summary><p className="settings-dev-line">No <code>node</code> notes. Install the Life OS pack: <code>parachute-vault packs add life-os</code></p></details></div>;
   if (!profile) return <div className="areas-home lifeos-nopack">{picker}<p className="empty">{identity ? "Opening vault…" : "Signing in…"}</p></div>;
   return <VaultProfileProvider profile={profile}>{picker}<AreasSurface key={chosen} identity={identity} {...rest} /></VaultProfileProvider>;
 }

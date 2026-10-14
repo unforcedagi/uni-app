@@ -1506,6 +1506,12 @@ async fn vault_transition(
     .await
 }
 
+/// The running app's version (r14): Settings reads it here when the app plugin's `getVersion` can't answer.
+#[tauri::command]
+fn app_version(app: tauri::AppHandle) -> String {
+    app.package_info().version.to_string()
+}
+
 /// Decide an open decision: the `state` compare-and-set and the `decided*` metadata in one update, guarded by the revision whose
 /// question was shown (`if_updated_at`). The client refuses any other key or note.
 #[tauri::command]
@@ -1795,6 +1801,7 @@ pub fn run() {
             vault_transition,
             vault_patch_meta,
             vault_decide,
+            app_version,
             vault_create,
             vault_save,
             android_update_manifest

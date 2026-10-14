@@ -5,7 +5,7 @@
 // kept for http(s) and mailto; anything else (javascript:, data:, intent:)
 // degrades to plain text. Covers what agent replies actually use: headings,
 // paragraphs, bold/italic/strike, inline code, fenced code, block quotes,
-// ordered/unordered (nested by indent) lists, rules, [text](url) links and
+// ordered/unordered (nested by indent) lists, pipe tables, rules, [text](url) links and
 // bare URLs. Parachute note URLs and `uni:`/`unforced:` note references
 // become `vaultlink` nodes, which open the in-app note view.
 
@@ -26,6 +26,8 @@ export type Block =
   | { t: "code"; lang: string; v: string }
   | { t: "quote"; c: Block[] }
   | { t: "list"; ordered: boolean; start: number; items: Block[][] }
+  /** A pipe table (r14): a header row, a `---|---` rule, then rows; cells are inline. */
+  | { t: "table"; head: Inline[][]; rows: Inline[][][]; align: ("left" | "center" | "right" | null)[] }
   | { t: "hr" };
 
 const SAFE_URL = /^(https?:\/\/|mailto:)/i;
@@ -40,6 +42,20 @@ const HEADING = /^ {0,3}(#{1,6})\s+(.*?)\s*#*\s*$/;
 const HR = /^ {0,3}([-*_])(\s*\1){2,}\s*$/;
 const QUOTE = /^ {0,3}>\s?(.*)$/;
 const ITEM = /^(\s*)([-*+]|\d{1,9}[.)])\s+(.*)$/;
+const TABLE_RULE = /^ {0,3}\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
+/** At most this many rows and columns render as a table; past that a message is a wall, read as text. */
+const MAX_TABLE = 200;
+const cells = (line: string): string[] => {
+  const t = line.trim().replace(/^\|/, "").replace(/(?<!\\)\|$/, "");
+  const out: string[] = []; let cur = "";
+  for (let i = 0; i < t.length; i++) {
+    if (t[i] === "\\" && t[i + 1] === "|") { cur += "|"; i++; continue; }
+    if (t[i] === "|") { out.push(cur.trim()); cur = ""; continue; }
+    cur += t[i];
+  }
+  out.push(cur.trim());
+  return out;
+};
 // Message text is remote input: nesting beyond this renders flat, so a crafted
 // message (`>>>>…`, `[[[[…`, deeply indented lists) cannot overflow the stack
 // and take the whole UI down with it.
@@ -75,6 +91,22 @@ function parseBlocks(lines: string[], depth = 0): Block[] {
     if (!line.trim()) { flush(); i++; continue; }
     const h = HEADING.exec(line);
     if (h) { flush(); out.push({ t: "h", level: h[1].length, c: parseInline(h[2], depth) }); i++; continue; }
+    if (line.includes("|") && i + 1 < lines.length && TABLE_RULE.test(lines[i + 1]) && lines[i + 1].includes("-") && (lines[i + 1].includes("|") || line.trim().startsWith("|"))) {
+      const head = cells(line);
+      const rule = cells(lines[i + 1]);
+      if (head.length === rule.length && head.length <= MAX_TABLE) {
+        flush();
+        const align = rule.map((c) => (/^:-+:$/.test(c) ? "center" : /^-+:$/.test(c) ? "right" : /^:-+$/.test(c) ? "left" : null));
+        const rows: Inline[][][] = [];
+        i += 2;
+        for (; i < lines.length && lines[i].trim() && lines[i].includes("|") && rows.length < MAX_TABLE; i++) {
+          const r = cells(lines[i]);
+          rows.push(head.map((_, j) => parseInline(r[j] ?? "", depth)));
+        }
+        out.push({ t: "table", head: head.map((c) => parseInline(c, depth)), rows, align });
+        continue;
+      }
+    }
     if (HR.test(line)) { flush(); out.push({ t: "hr" }); i++; continue; }
     const nest = depth < MAX_DEPTH;
     if (nest && QUOTE.test(line)) {
@@ -288,6 +320,7 @@ export function markdownToText(src: string): string {
       case "code": return [x.v];
       case "quote": return blk(x.c);
       case "list": return x.items.flatMap((it) => blk(it));
+      case "table": return [x.head, ...x.rows].map((r) => r.map(inl).join(" · "));
       case "hr": return [];
     }
   });

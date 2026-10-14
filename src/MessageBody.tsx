@@ -4,6 +4,20 @@ import { parseMarkdown, type Block, type Inline } from "./markdown";
 import { mentionSegments, type Member } from "./mentions";
 import { useNoteOpener } from "./noteLinks";
 import { splitMarkers } from "./chatMarkers";
+import { useNoteTitle } from "./areas/noteRefs";
+
+const ULID = /^[0-9A-HJKMNP-TV-Z]{26}$/;
+/** A note cited by its bare id (`uni:01M…`) reads as the note's title (r14), never as the id. */
+function NoteChipLabel({ id, fallback }: { id: string; fallback: React.ReactNode }) {
+  const t = useNoteTitle(id);
+  return <>{t && t !== "a note" ? t : t === null ? "the linked note" : fallback}</>;
+}
+const bareId = (n: { ref: { ref: string; vault: string }; c: Inline[] }): string | null => {
+  const id = n.ref.ref.trim();
+  if (!ULID.test(id) || n.c.length !== 1 || n.c[0].t !== "text") return null;
+  const label = n.c[0].v.trim();
+  return label === id || label === `${n.ref.vault}:${id}` ? id : null;
+};
 
 function openLink(e: React.MouseEvent, href: string) {
   // Never navigate the app's own WebView; hand the link to the system browser.
@@ -33,7 +47,7 @@ export const Body = memo(function Body({ body, mentions, me, edited }: { body: s
           if (openNote) { e.preventDefault(); openNote(n.ref, n.href); }
           else if (n.href) openLink(e, n.href);
           else e.preventDefault();
-        }}><span className="note-chip-mark" aria-hidden="true">❋</span>{inline(n.c, k)}</a>;
+        }}><span className="note-chip-mark" aria-hidden="true">❋</span>{bareId(n) ? <NoteChipLabel id={bareId(n)!} fallback={inline(n.c, k)} /> : inline(n.c, k)}</a>;
     }
   });
   const blocks = (bs: Block[], key: string): React.ReactNode[] => bs.map((b, i) => {
@@ -48,9 +62,14 @@ export const Body = memo(function Body({ body, mentions, me, edited }: { body: s
         const items = b.items.map((it, j) => <li key={`${k}.${j}`}>{blocks(it, `${k}.${j}`)}</li>);
         return b.ordered ? <ol key={k} start={b.start}>{items}</ol> : <ul key={k}>{items}</ul>;
       }
+      case "table": return <div key={k} className="md-table-wrap"><table className="md-table">
+        <thead><tr>{b.head.map((c, j) => <th key={j} style={b.align[j] ? { textAlign: b.align[j]! } : undefined}>{inline(c, `${k}.h${j}`)}</th>)}</tr></thead>
+        <tbody>{b.rows.map((r, ri) => <tr key={ri}>{r.map((c, j) => <td key={j} style={b.align[j] ? { textAlign: b.align[j]! } : undefined}>{inline(c, `${k}.${ri}.${j}`)}</td>)}</tr>)}</tbody>
+      </table></div>;
     }
   });
   const split = splitMarkers(body);
   const tree = parseMarkdown(split.text);
-  return <div className="md">{blocks(tree, "b")}{split.markers.length > 0 && <div className="md-marks">{split.markers.map((m) => <span key={`${m.state}${m.task}`} className="md-mark" data-state={m.state}>{m.state} · {m.task}</span>)}</div>}{edited && <span className="edited" title="Edited by the author">(edited)</span>}</div>;
+  // r14: the task-state markers ([done T-123]) are bookkeeping for the rooms, not words for the reader: they are taken out and not shown
+  return <div className="md">{blocks(tree, "b")}{edited && <span className="edited" title="Edited by the author">(edited)</span>}</div>;
 });

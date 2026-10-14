@@ -7,7 +7,7 @@ export function useAppVersion(): string | null {
   const [version, setVersion] = useState<string | null>(null);
   useEffect(() => {
     let on = true;
-    getVersion().then((v) => on && setVersion(v ? String(v) : null), () => on && setVersion(null));
+    getVersion().catch(() => invoke<string>("app_version")).then((v) => on && setVersion(v ? String(v) : null), () => on && setVersion(null));
     return () => { on = false; };
   }, []);
   return version;

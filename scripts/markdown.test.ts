@@ -89,3 +89,18 @@ assert.ok(markdownToText(">".repeat(50) + " deep").includes("deep"));
 assert.deepEqual(parseInline("a * b *c*"), [t("a * b "), { t: "em", c: [t("c")] }]);
 
 console.log("markdown tests passed");
+
+// r14: pipe tables render as tables (header, alignment, escaped pipes); a lone pipe line is still a paragraph
+{
+  const t = parseMarkdown("| Window | When |\n|---|:--:|\n| Gateway | Wed 10:00 |\n| Vaults | Thu \\| late |\n\nAfter.");
+  assert.equal(t[0].t, "table");
+  if (t[0].t === "table") {
+    assert.equal(t[0].head.length, 2);
+    assert.deepEqual(t[0].align, [null, "center"]);
+    assert.equal(t[0].rows.length, 2);
+    assert.deepEqual(t[0].rows[1][1], [{ t: "text", v: "Thu | late" }]);
+  }
+  assert.equal(t[1].t, "p");
+  assert.equal(parseMarkdown("a | b")[0].t, "p");
+  assert.equal(markdownToText("| A | B |\n|---|---|\n| 1 | 2 |"), "A · B 1 · 2");
+}
