@@ -8,7 +8,7 @@ import { parseDrafts, parseRuns } from "./steerCore";
 import { activeProfile } from "./profile";
 import { forgetTitles, setTitleOwner, warmTitles } from "./noteRefs";
 import { savedTasks } from "./savedTasks";
-import { checkOf, wouldNeedYou, type CheckState } from "./simpleCore";
+import { checkOf, retryState, wouldNeedYou, type CheckState } from "./simpleCore";
 import type { FailureKind } from "./taskCore";
 
 export type TaskAction = "done" | "archive" | "snooze";
@@ -193,7 +193,7 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
   useEffect(() => {
     const again = () => {
       const mem = memory;
-      if (mem.checks) { mem.checks = new Map([...mem.checks].map(([id, c]) => [id, c.failedAt ? { ...c, failedAt: null } : c])); setChecks(mem.checks); }
+      if (mem.checks) { mem.checks = new Map([...mem.checks].map(([id, c]) => [id, retryState(c)])); setChecks(mem.checks); }
       refresh();
     };
     window.addEventListener(RECHECK, again);

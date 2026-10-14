@@ -57,8 +57,8 @@ await check("P1-1 nothing is asserted before it is checked: no record is checkin
   assert.deepEqual(checkOf(t, { rec: null, failedAt: now - 1000 }, now), { kind: "unavailable" });
   const rec = { taskRev: t.updatedAt, at: now - 1000, result: { kind: "ok" as const }, sources: [{ vault: "uni", id: PLAN, rev: "r1" }] };
   assert.deepEqual(checkOf(t, { rec, failedAt: null }, now), { kind: "ok" });
-  // a newer failure doesn't hide a good record that is still within its time
-  assert.deepEqual(checkOf(t, { rec, failedAt: now }, now), { kind: "ok" });
+  // r21 (Codex P1-1, replacing r19's "a newer failure doesn't hide a good record"): a newer failure invalidates it
+  assert.deepEqual(checkOf(t, { rec, failedAt: now }, now), { kind: "unavailable" });
 });
 
 await check("P1-2 a check expires on its own schedule, and a rewritten task drops it", () => {

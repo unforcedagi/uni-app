@@ -37,7 +37,10 @@ export type WorkViewProps = {
   top?: ReactNode; foot?: ReactNode;
 };
 
-/** A record Uni is tidying, by its title as words (r20): no "Decision (default yes):" label, no cut tail ("…feature 4, the"). */
+/** "4 records need rewording by their rooms" (r21): the factual line for records that aren't real requests yet. */
+export const rewordLine = (n: number): string => (n === 1 ? "1 record needs rewording by its room" : `${n} records need rewording by their rooms`);
+
+/** A record to reword, by its title as words (r20): no "Decision (default yes):" label, no cut tail ("…feature 4, the"). */
 export const tidyTitle = (t: Task): string => titleWords(cleanText(taskTitle(t.title).rest)) || cleanText(t.title);
 
 export function WorkView(p: WorkViewProps) {
@@ -74,9 +77,10 @@ export function WorkView(p: WorkViewProps) {
       {p.others.length > 0 && <ul className="cp-list wv-others">{p.others.map(({ task, meta }) => <NeedRow key={task.id} t={task} meta={meta} onTask={p.onTask} onDecide={p.onDecide} onNote={p.onNote} />)}</ul>}
       {p.privateOther > 0 && <p className="cp-none">{p.privateOther === 1 ? "One item in a private area is" : `${p.privateOther} items in private areas are`} not listed here; open the area to see {p.privateOther === 1 ? "it" : "them"}.</p>}
     </section>
-    {/* r20 (Codex 8): Uni's tidying stays Uni's: one quiet line, no rows to act on; opened, the records' titles, read-only */}
-    {tidy.length > 0 && <section className="wv-sec wv-tidy" aria-label="Uni is tidying">
-      <button type="button" className="wv-tidy-line" aria-expanded={tidyOpen} aria-controls="wv-tidy" onClick={() => setTidyOpen(!tidyOpen)}>{`Uni is tidying ${tidy.length} ${tidy.length === 1 ? "record" : "records"}`}</button>
+    {/* r20 (Codex 8): one quiet line, no rows to act on; opened, the records' titles, read-only. r21 (Codex P1-2): it says only what is true
+        (nothing here starts repair work): these records need rewording by the rooms that wrote them */}
+    {tidy.length > 0 && <section className="wv-sec wv-tidy" aria-label="Records to reword">
+      <button type="button" className="wv-tidy-line" aria-expanded={tidyOpen} aria-controls="wv-tidy" onClick={() => setTidyOpen(!tidyOpen)}>{rewordLine(tidy.length)}</button>
       {tidyOpen && <ul id="wv-tidy" className="wv-tidy-list">{tidy.map((t) => <li key={t.id}>{tidyTitle(t)}</li>)}</ul>}
     </section>}
     {p.later.length > 0 && <section className="wv-sec wv-later" aria-label="Later">

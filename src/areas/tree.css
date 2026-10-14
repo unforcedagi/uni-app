@@ -570,14 +570,15 @@
 .sr-work:has(> .area-app) { overflow: hidden; display: flex; flex-direction: column; }
 .area-app { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .sr-appbar .area-bar-controls { margin-left: auto; position: relative; }
-.cp-lead { margin: 0; padding: 8px 0 1px; cursor: pointer; }
-.cp-lead:hover { text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
-.cp-item[data-open] .cp-lead { -webkit-line-clamp: unset; line-clamp: none; overflow: visible; display: block; }
-/* r15: the lead is cut by the app at a whole word (WordClamp), not by the browser mid-word */
-.cp-title.cp-lead { display: block; -webkit-line-clamp: unset; line-clamp: none; overflow: visible; }
+/* r21 (Codex 10): the action is inside the row's one button. r15: it is cut by the app at a whole word (WordClamp), never mid-word */
+.cp-title.cp-lead { display: block; -webkit-line-clamp: unset; line-clamp: none; overflow: visible; margin: 0; padding: 0; }
 .cp-lead .wc-more { margin-left: .15em; }
-.cp-need.cp-need-under { min-height: 0; padding-top: 0; }
-.cp-need.cp-need-under:empty { display: none; }
+.cp-lead .cp-link { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+/* r21: what used to sit outside the row's button (its step, its questions, "Couldn't check · Retry") is quiet lines inside it */
+.cp-need .cp-next-in { display: -webkit-box; margin: 1px 0 0; font: 400 13.5px/1.45 var(--th-sans); }
+.cp-need .cp-questions { display: block; font: 500 13px/1.4 var(--th-sans); color: var(--th-ink2); padding-top: 2px; }
+.cp-need .cp-open-to-see { display: block; padding: 0; }
+.cp-need .cp-checkfail { display: block; padding: 2px 0 0; font-weight: 500; }
 
 /* r15: an area that can't be shown, inside the room shell */
 .sr-missing { padding-top: 18px; }
@@ -618,7 +619,9 @@
 }
 /* a row whose supporting notes couldn't be read: not its action, and not "nothing there" */
 .cp-checkfail { margin: 0; padding: 0 0 8px; font: 400 12.5px/1.4 var(--th-sans); color: var(--th-ink); }
-.cp-item[data-mode="checking"] .cp-title { color: var(--th-ink2); font-style: italic; }
+/* r21: a row being checked leads with its question or title; "Checking…" is the quiet italic line under it */
+.cp-item[data-mode="checking"] .cp-title { color: var(--th-ink2); }
+.cp-item[data-mode="checking"] .cp-under { font-style: italic; }
 .wv-tidy .wv-h { color: var(--th-mute); }
 /* r20: an action row's subtitle: where it belongs (cut on a whole word if it must) and the due cue, which is never cut */
 .cp-under.cp-sub { display: flex; align-items: baseline; min-width: 0; }
@@ -637,4 +640,12 @@
 @media (max-height: 520px) {
   .task-sheet .task-foot .task-answer .cp-opt { min-height: 36px; padding: 6px 12px; font-size: 14px; }
   .task-sheet .task-foot .task-answer-box label { display: none; }
+}
+/* ------------------------------------------------------------------------------------------------- r21 */
+/* the task sheet floats with a margin and its whole border on anything wider than a phone (it ran off the bottom edge at 800×600); an upright
+   phone keeps the sheet that rises from the bottom edge */
+@media (min-width: 600px) {
+  .task-sheet-wrap { align-items: center; padding: 12px; box-sizing: border-box; }
+  .task-sheet { border-bottom: 2px solid var(--th-ink); border-radius: 18px; max-height: min(88vh, calc(100dvh - 24px)); }
+  .task-sheet .task-foot { border-radius: 0 0 16px 16px; }
 }

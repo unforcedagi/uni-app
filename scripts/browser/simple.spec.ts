@@ -200,7 +200,9 @@ test.describe('simple', () => {
     const item = page.locator('.cp-item').filter({ hasText: 'COhere festival readiness' });
     await expect(item.locator('.cp-next')).toContainText('Check-in PR by Oct 12, see example.invalid for the diff');
     await expect(item.locator('.cp-link')).toHaveText('example.invalid');
-    await expect(item.locator('.cp-link')).toHaveAttribute('href', 'https://example.invalid/pr/12');
+    // r21 (Codex 10): in a row a link is words (its address in the tooltip); it opens from the sheet
+    await expect(item.locator('.cp-link')).toHaveAttribute('title', 'https://example.invalid/pr/12');
+    await expect(item.locator('a, .cp-need button')).toHaveCount(0);
     for (const el of await page.locator('.cp-body .cp-title').all()) expect(await el.evaluate((e) => e.getBoundingClientRect().height < 48)).toBeTruthy();
     const link = page.getByRole('button', { name: /^All of .*'s work/ });
     await page.locator('.cp.side').evaluate((e) => { e.scrollTop = e.scrollHeight; });
@@ -837,7 +839,9 @@ test.describe('simple', () => {
     await expect(page.locator('.cp-body .cp-row-more, .cp-body .cp-item .cp-more-next')).toHaveCount(0);
     await openWorkView(page); await narrowWork(page);
     const item = page.locator('.sr-work .cp-item').filter({ hasText: 'COhere festival readiness' });
-    await expect(item.locator('.cp-lead')).toHaveAttribute('data-cut', 'true');
+    // r21: the row is the whole action (to its sentence's end) within three lines; the questions after it are the sheet's
+    const h = await item.locator('.cp-lead').evaluate((el) => el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight));
+    expect(Math.round(h)).toBeLessThanOrEqual(3);
     await expect(item.getByRole('button', { name: /^(More|Less)$/ })).toHaveCount(0);
     await expect(item.locator('.cp-lead')).not.toContainText('where do they stand?');
     await item.locator('.cp-need').click();
@@ -950,11 +954,12 @@ test.describe('simple', () => {
     await scope(page).locator('.th-go[aria-label^="Techne,"]').click();
     await openCompanion(page);
     const item = page.locator('.cp-item').filter({ hasText: 'ATLAS follow-up' });
-    await expect(item.getByRole('button', { name: 'Follow-up notes' })).toBeVisible();
-    // r14: the step leads the row (an action), and its linked note still reads as the note's title and opens
+    // r14: the step leads the row (an action), and its linked note reads as the note's title. r21 (Codex 10): it opens from the sheet: the
+    // row is one button with nothing clickable inside it
     const step = item.locator('.cp-lead, .cp-next').first();
-    // r20: the row leads with the action's first clause ("Read Follow-up notes"); "then … and reply" is the sheet's
-    await expect(step).toHaveText('Read Follow-up notes');
+    await expect(item.getByRole('button')).toHaveCount(1);
+    // r21: both steps ("Read …, then … and reply"), or "2 steps: Read Follow-up notes, then …" where they don't fit
+    await expect(step).toContainText(/^(2 steps: )?Read Follow-up notes, then/);
     await expect(step).not.toContainText('01M3ZK2R6A6C62M1ANJCSQNG3');
     await expect(step).not.toContainText('uni:');
   });
@@ -1023,13 +1028,13 @@ test.describe('simple', () => {
         return [...el.querySelectorAll<HTMLElement>('.cp-title, .cp-detail, .cp-next')].reduce((a, n) => a + Math.round(n.getBoundingClientRect().height / lh(n)), 0);
       });
       if (decision) expect(await row.locator('.cp-title').evaluate((el) => el.scrollHeight <= el.clientHeight + 1)).toBe(true); // never clamped
-      else expect(lines).toBeLessThanOrEqual(4); // an action reads to its object: up to four lines
+      else expect(lines).toBeLessThanOrEqual(4); // an action reads to its object: up to three lines, and one of small print
       const b = await row.boundingBox();
       expect(b!.y + b!.height).toBeLessThanOrEqual(Math.min(foot!.y, pb!.y + pb!.height) + 1);
     }
-    // the rows that don't fit wait behind "+N more ›"; a tap shows them
+    // the rows that don't fit wait behind "Show N more" (r21: no "›"); a tap shows them
     const more = page.locator('.cp-more-rows');
-    await expect(more).toHaveText(/^\+\d+ more ›$/);
+    await expect(more).toHaveText(/^Show \d+ more$/);
     const before = await page.locator('.cp-item').count();
     await more.click();
     expect(await page.locator('.cp-item').count()).toBeGreaterThan(before);
@@ -1041,8 +1046,10 @@ test.describe('simple', () => {
     await scope(page).locator('.th-go[aria-label^="Uni,"]').click();
     await openWorkView(page); await narrowWork(page);
     await expect(page.locator('.sr-work .cp-row-more, .sr-work .cp-item .cp-more-next')).toHaveCount(0);
-    const row = page.locator('.sr-work .cp-item').filter({ has: page.locator('.cp-lead[data-cut="true"]') }).first();
-    await row.locator('.cp-lead').click();
+    // r21: the row is the whole first sentence ("Edit the draft, … from the shared inbox"); the next sentence is the sheet's
+    const row = page.locator('.sr-work .cp-item').filter({ hasText: 'Edit the draft, check the dates' }).first();
+    await expect(row.locator('.cp-lead')).toHaveText('Edit the draft, check the dates against the calendar, and send it from the shared inbox');
+    await row.locator('.cp-need').click();
     await expect(page.locator('.task-sheet h2')).toContainText('so nobody sends it twice.');
   });
 
@@ -1291,7 +1298,9 @@ test.describe('simple', () => {
     await page.locator('.cp-item').filter({ hasText: 'Review the ATLAS follow-up' }).locator('.cp-need').click();
     const sheet = page.getByRole('dialog');
     // r13: its next step names an action, so the sheet leads with it (note ids read as titles) and the title sits under it
-    await expect(sheet.locator('h2')).toContainText('Read Follow-up notes');
+    // r21: a step in two parts ("Read …, then … and reply") is listed, numbered, under "2 steps"
+    await expect(sheet.locator('h2')).toHaveText('2 steps');
+    await expect(sheet.locator('.task-steps li').first()).toHaveText('Read Follow-up notes');
     await expect(sheet.locator('.task-sub')).toHaveText('Review the ATLAS follow-up');
     await expect(sheet.locator('.task-next')).toContainText('Follow-up notes'); // the note id reads as its title, and opens
     await expect(sheet).not.toContainText(/T-13|cdf67944|via api|Changed by|01M3ZK2R6A6C62M1ANJCSQNG3M/, { useInnerText: true });
@@ -1431,7 +1440,7 @@ test.describe('simple', () => {
   const panelCount = async (page: Page) => {
     const cp = page.locator('.cp-body');
     // r17: Uni's panel is its rows and one "N more ›" (private items folded in)
-    if (await cp.locator('.cp-more-all').count()) return (await cp.locator('.cp-list > .cp-item').count()) + Number(/^(\d+) more/.exec(await cp.locator('.cp-more-all').innerText())![1]);
+    if (await cp.locator('.cp-more-all').count()) return (await cp.locator('.cp-list > .cp-item').count()) + Number(/^Show (\d+) more/.exec(await cp.locator('.cp-more-all').innerText())![1]);
     if (await cp.locator('.cp-more-rows').count()) await cp.locator('.cp-more-rows').click();
     const rows = await cp.locator('.cp-list:not(.cp-privates) > .cp-item').count();
     const privates = (await cp.locator('.cp-privates .cp-title').allInnerTexts()).reduce((n, t) => n + Number(/: (\d+) for you/.exec(t)![1]), 0);
@@ -1501,7 +1510,7 @@ test.describe('simple', () => {
     await expect(page.locator('.cp-body .cp-privates')).toHaveCount(0);
     await page.getByRole('button', { name: /^All of .*'s work/ }).click();
     const priv = page.locator('.sr-work .cp-private');
-    await expect(priv).toHaveText('Sadhana: 1 for you ›');
+    await expect(priv).toHaveText('Sadhana: 1 for you');
     await expect(page.locator('.sr-work')).not.toContainText(/Sit twenty minutes|Before breakfast|A private item/);
     await priv.click();
     await expect(page.locator('.sr-title')).toHaveText('Sadhana');
@@ -1797,7 +1806,7 @@ test.describe('r14', () => {
     await expect(page.locator('.cp-body .cp-privates')).toHaveCount(0);
     await expect(page.locator('.cp-body')).not.toContainText(/Sit twenty minutes|Before breakfast|A private item/);
     await page.getByRole('button', { name: /^All of .*'s work/ }).click();
-    await expect(page.locator('.sr-work .cp-private')).toHaveText('Sadhana: 1 for you ›');
+    await expect(page.locator('.sr-work .cp-private')).toHaveText('Sadhana: 1 for you');
     await expect(page.locator('.sr-work')).not.toContainText(/Sit twenty minutes|Find a teacher|A private item/);
     await expect(page.locator('.sr-work .cp-privates, .sr-work .cp-private')).toHaveCount(1);
     await page.locator('.sr-work .cp-private').click();
@@ -1925,8 +1934,9 @@ test.describe('r15', () => {
     await unfoldAll(page);
     await scope(page).locator('.th-go[aria-label="Techne"], .th-go[aria-label^="Techne,"]').first().click();
     const row = page.locator('.cp-item').filter({ hasText: 'ATLAS follow-up' }).first();
-    // r20: the row is the action's first clause ("Read Follow-up notes"); the rest of the step, with its second note, is in the sheet
-    await expect(row.getByRole('button', { name: 'Follow-up notes' })).toBeVisible();
+    // r21: the row is both steps as words (one button, its notes open from the sheet)
+    await expect(row.locator('.cp-lead')).toContainText('Follow-up notes');
+    await expect(row.getByRole('button')).toHaveCount(1);
     await row.locator('.cp-need').click();
     const sheet = page.getByRole('dialog');
     await expect(sheet.getByRole('button', { name: 'Morning pages' })).toBeVisible();
@@ -1945,31 +1955,23 @@ test.describe('r15', () => {
     expect(opened.every((a: any) => a.vault === 'life')).toBe(true);
   });
 
-  test('an action line is two lines everywhere (r20), the verb phrase whole, ending on a whole word; all of it is in the sheet', async ({ page }) => {
+  test('an action line is the whole action everywhere (r21: up to three lines, never cut inside its object); all of the step is in the sheet', async ({ page }) => {
     await boot(page, { longNext: true });
     await openRoom(page, 'COhere 2026');
     await openCompanion(page);
     const lines = (el: Element) => new Set([...el.querySelectorAll<HTMLElement>('.wc-w')].map((w) => Math.round(w.getBoundingClientRect().top))).size;
+    const whole = 'Try the new check-in flow at example.invalid and answer the three questions';
     const cpLead = page.locator('.cp-body .cp-item').filter({ hasText: 'Try the new check-in flow' }).locator('.cp-lead');
-    await expect(cpLead).toHaveAttribute('data-cut', 'true');
-    expect(await cpLead.evaluate(lines)).toBeLessThanOrEqual(2);
-    await expect(cpLead).toContainText('Try the new check-in flow');
+    await expect(cpLead).toHaveText(whole);
+    await expect(cpLead).not.toHaveAttribute('data-cut', 'true');
+    expect(await cpLead.evaluate(lines)).toBeLessThanOrEqual(3);
     await expect(page.locator('.cp-body .cp-item').filter({ hasText: 'Try the new check-in flow' }).getByRole('button', { name: 'More' })).toHaveCount(0);
     await openWorkView(page); await narrowWork(page);
     const lead = page.locator('.sr-work .cp-item').filter({ hasText: 'Try the new check-in flow' }).locator('.cp-lead');
-    await expect(lead).toHaveAttribute('data-cut', 'true');
-    const m = await lead.evaluate((el) => {
-      const words = [...el.querySelectorAll<HTMLElement>('.wc-w')];
-      return { lines: new Set(words.map((w) => Math.round(w.getBoundingClientRect().top))).size, last: words[words.length - 1].innerText, text: el.innerText };
-    });
-    expect(m.lines).toBe(2);
-    expect(m.text.trim()).toMatch(/^Try the new check-in flow\b/);
-    expect(m.text.trim()).toMatch(/ ?…$/);
-    // the last word shown is a whole word of the step's first clause (never a cut inside one)
-    const clause = 'Try the new check-in flow at example.invalid and answer the three questions.';
-    expect(clause.split(/\s+/).map((w) => w.replace(/[,;:.]+$/, ''))).toContain(m.last.replace(/[,;:.]+$/, ''));
-    expect(m.text.trim()).not.toMatch(/[:;,]\s*…$/);
-    // r19: all of it is in its sheet (the row never opens in place)
+    await expect(lead).toHaveText(whole);
+    expect(await lead.evaluate(lines)).toBeLessThanOrEqual(3);
+    // what follows the sentence (the three questions) is the sheet's: the row never opens in place
+    await expect(lead).not.toContainText('First question');
     await page.locator('.sr-work .cp-item').filter({ hasText: 'Try the new check-in flow' }).locator('.cp-need').click();
     await expect(page.locator('.task-sheet h2')).toContainText('where do they stand?');
   });
@@ -2241,9 +2243,11 @@ test.describe('r16', () => {
     await refresh(page, '2026-10-09T10:01:00.000Z');
     await openCompanion(page);
     const row = page.locator('.cp-body .cp-item').filter({ hasText: 'Send the SOW to Kevin when convenient' });
-    // r20: the row is the action's first clause, whole ("…when convenient"), never "…T-07 is"; the rest is in the note
-    await expect(row.locator('.cp-lead')).toHaveText('Send the SOW to Kevin when convenient');
+    // r21: the row is the whole action to its sentence's end; where three lines can't hold it, the cut falls after its first clause (whole,
+    // "…when convenient"), never inside it, and never "…T-07 is"; the rest is in the note
+    await expect(row.locator('.cp-lead')).toContainText(/^Send the SOW to Kevin when convenient: attach the budget/);
     await expect(row.locator('.cp-lead')).not.toHaveText(/\bis\s*…?$/);
+    await expect(row.locator('.cp-lead')).not.toContainText('Everything else');
     await expect(row.getByRole('button', { name: 'The rest is in its note' })).toHaveCount(0); // r20: the sheet says it, the row has no "›"
     const dq = page.locator('.cp-body .cp-item').filter({ hasText: 'Ship the ATLAS hosting?' });
     await expect(dq.locator('.cp-title')).toHaveText('Ship the ATLAS hosting?');
@@ -2419,7 +2423,8 @@ test.describe('r17', () => {
     await expect(needs).not.toContainText(/Sadhana: \d+ for you|in areas/);
     const more = needs.locator('.cp-more');
     await expect(more).toHaveCount(1);
-    await expect(more).toHaveText(/^\d+ more ›$/);
+    // r21: "Show N more", no "›"
+    await expect(more).toHaveText(/^Show \d+ more$/);
     await expect(more).toHaveAttribute('title', 'Includes 1 item in a private area');
     const n = Number((await more.innerText()).match(/\d+/)![0]);
     await more.click();
@@ -2428,7 +2433,7 @@ test.describe('r17', () => {
     const total = Number(await wv.locator('.wv-n').innerText());
     expect(shown + n).toBe(total);
     expect(await wv.locator('.cp-item').count()).toBe(total); // every named row, and one line for the private area's one item
-    await expect(wv.locator('.cp-private')).toHaveText('Sadhana: 1 for you ›');
+    await expect(wv.locator('.cp-private')).toHaveText('Sadhana: 1 for you');
   });
 
   test('a short window\'s strip sheet keeps "All of …\'s work" in sight however long the list, and closing it gives focus back to the strip', async ({ page }) => {
@@ -2605,20 +2610,23 @@ test.describe('r18', () => {
     await openWork(page);
     const wv = page.locator('.sr-work');
     const plan = wv.locator('.cp-item').filter({ hasText: 'Answer the 3 door questions' });
-    await expect(plan.getByRole('button', { name: /^Answer \d+ questions?/ })).toHaveCount(0);
-    await expect(plan.getByRole('button', { name: 'Open the note to answer' })).toBeVisible();
-    await plan.locator('.cp-lead').click();
+    // r21 (Codex 10): the row is one button; what it says about its questions is a quiet line inside it, and the ways in are in the sheet
+    await expect(plan.locator('.cp-questions')).toHaveText('Open the note to answer');
+    await expect(plan.getByRole('button')).toHaveCount(1);
+    await plan.locator('.cp-need').click();
     let sheet = sheetOf(page);
     await expect(sheet.locator('.task-q-list')).toHaveCount(0);
     await expect(sheet.getByRole('button', { name: 'Open the note to answer ›' })).toBeVisible();
     await sheet.getByRole('button', { name: 'Close' }).click();
     const wrap = wv.locator('.cp-item').filter({ hasText: 'Answer the 2 hours questions' });
-    await wrap.getByRole('button', { name: 'Answer 2 questions' }).click();
+    await expect(wrap.locator('.cp-questions')).toHaveText('Answer 2 questions');
+    await wrap.locator('.cp-need').click();
     sheet = sheetOf(page);
     await expect(sheet.locator('.task-q-list li')).toHaveText(['Front-door beep: silent keypad, leave it, or disable native relock (needs a hold-open plan)?', 'Published opening hours?']);
     await sheet.getByRole('button', { name: 'Close' }).click();
     const xv = wv.locator('.cp-item').filter({ hasText: 'design questions' });
-    await xv.getByRole('button', { name: 'Answer 2 questions' }).click();
+    await expect(xv.locator('.cp-questions')).toHaveText('Answer 2 questions');
+    await xv.locator('.cp-need').click();
     sheet = sheetOf(page);
     await expect(sheet.locator('.task-q-list li')).toHaveText(['Reader?', 'Scope?']);
     await expect(sheet.locator('.task-q-note')).toContainText('From Questions for Aaron ›');
@@ -2636,7 +2644,7 @@ test.describe('r18', () => {
     if (wide(page)) await expect(needs.locator('.cp-list > .cp-item')).toHaveCount(3);
     else expect(await needs.locator('.cp-list > .cp-item').count()).toBeLessThanOrEqual(3);
     await expect(needs.locator('.cp-more')).toHaveCount(1);
-    await expect(needs.locator('.cp-more')).toHaveText(/^\d+ more ›$/);
+    await expect(needs.locator('.cp-more')).toHaveText(/^Show \d+ more$/);
     await expect(needs.locator('.cp-row-more, .cp-item .cp-more-next')).toHaveCount(0);
     for (const u of await needs.locator('.cp-under, .cp-meta').all()) {
       const lines = await u.evaluate((e) => Math.round(e.getBoundingClientRect().height / (parseFloat(getComputedStyle(e).lineHeight) || 16)));
@@ -2704,8 +2712,9 @@ test.describe('r19', () => {
     await refresh(page, '2026-10-09T10:01:00.000Z');
     const row = row13(page);
     await expect(row).toHaveAttribute('data-mode', 'checking');
-    await expect(row.locator('.cp-title')).toHaveText("Checking what's needed…");
-    await expect(row.locator('.cp-under')).toHaveText('Self-hosted mail: approved 10-02');
+    // r21: the row leads with its title, "Checking…" a quiet line under it; never the step
+    await expect(row.locator('.cp-title')).toHaveText('Self-hosted mail: approved 10-02');
+    await expect(row.locator('.cp-under')).toHaveText('Checking…');
     await row.locator('.cp-need').click();
     const sheet = sheetOf(page);
     await expect(sheet.locator('h2')).toHaveText("Checking what's needed…");
@@ -2772,7 +2781,10 @@ test.describe('r19', () => {
     await expect(sheetOf(page).locator('.task-checkfail')).toContainText("Couldn't check");
     await sheetOf(page).getByRole('button', { name: 'Close' }).click();
     await page.evaluate(() => { (window as any).__noteFails = {}; });
-    await row.getByRole('button', { name: 'Retry' }).click();
+    // r21 (Codex 10): the row is one button; its tap retries and opens the sheet
+    await expect(row.getByRole('button')).toHaveCount(1);
+    await row.locator('.cp-need').click();
+    await sheetOf(page).getByRole('button', { name: 'Close' }).click();
     await expect(row).toHaveAttribute('data-mode', 'lead');
     await expect(row.locator('.cp-lead')).toContainText('Approve or change');
   });
@@ -2791,7 +2803,8 @@ test.describe('r19', () => {
     const needs = page.locator('.sr-work section[aria-label="Needs you"]');
     await expect(needs).not.toContainText('Fractal flow test');
     await expect(needs).not.toContainText('approve a test week');
-    await expect(page.locator('.sr-work section[aria-label="Uni is tidying"] .wv-tidy-line')).toHaveText('Uni is tidying 3 records');
+    // r21 (Codex P1-2): only what is true: nothing starts repair work, so the line says these need rewording by their rooms
+    await expect(page.locator('.sr-work section[aria-label="Records to reword"] .wv-tidy-line')).toHaveText('3 records need rewording by their rooms');
     // opened, titles as words: no "Decision (…):" label, no cut tail (found in the real app: "…feature 4, the")
     await page.locator('.sr-work .wv-tidy-line').click();
     const titles = await page.locator('.sr-work .wv-tidy-list li').allInnerTexts();
@@ -2992,7 +3005,7 @@ test.describe('r20', () => {
   /** A rendered lead: its lines (by the words' tops) and its text. */
   const leadOf = (row: ReturnType<Page['locator']>) => row.locator('.cp-lead').evaluate((el) => ({ lines: new Set([...el.querySelectorAll<HTMLElement>('.wc-w')].map((w) => Math.round(w.getBoundingClientRect().top))).size, text: (el as HTMLElement).innerText.replace(/\s+/g, ' ').trim() }));
 
-  test('rows say the action within two lines: the whole verb phrase of each real step (the four Sonnet cuts, COhere, Woven Web, who pays, the ATLAS follow-up), at the side panel\'s width and in the work view', async ({ page }) => {
+  test('rows say the whole action (r21, both critics): every real step\'s objects and recipients, within three lines, at the side panel\'s width and in the work view', async ({ page }) => {
     await boot(page);
     await seedReal(page);
     await openRoom(page, 'ATLAS');
@@ -3001,11 +3014,10 @@ test.describe('r20', () => {
       const row = page.locator('.sr-work section[aria-label="Needs you"] .cp-item').filter({ hasText: r.verb });
       await expect(row).toHaveAttribute('data-lead', 'action');
       const l = await leadOf(row);
-      expect(l.lines, r.title).toBeLessThanOrEqual(2);
-      expect(l.text.startsWith(r.verb), `${r.title}: "${l.text}"`).toBe(true);
-      // what follows the first clause ("then talk…", "; Eileen signs off…", "; fill the opening…", ": crypto…") is the sheet's, never the row's
-      expect(l.text).not.toMatch(/then talk|Eileen signs|fill the opening|crypto/);
-      if (r.action && l.text.replace(/\s?…$/, '') === r.action) expect(l.text).toBe(r.action);
+      expect(l.lines, r.title).toBeLessThanOrEqual(3);
+      expect(l.text.replace(/^2 steps: /, '').startsWith(r.verb), `${r.title}: "${l.text}"`).toBe(true);
+      // context after the action ("; Eileen signs off…", "; fill the opening…") is the sheet's, never the row's
+      expect(l.text).not.toMatch(/Eileen signs|fill the opening/);
     }
     // COhere: the date label is not the lead; the subtitle is where it belongs and the due cue
     const co = page.locator('.sr-work .cp-item').filter({ hasText: 'Say go on prod deploy' });
@@ -3018,30 +3030,23 @@ test.describe('r20', () => {
     await co.locator('.cp-need').click();
     await expect(sheetOf(page).locator('h2')).toContainText('Eileen signs off the copy/photos');
     await sheetOf(page).getByRole('button', { name: 'Close' }).click();
-    if (!wide(page)) return;
-    // the side panel (236px): the same rows, two lines, the verb phrase whole
-    await page.getByRole('button', { name: /Back to chat/ }).click();
-    const body = page.locator('.cp-body').last();
-    for (const lead of await body.locator('.cp-item[data-lead="action"]').all()) {
-      const l = await leadOf(lead);
-      expect(l.lines).toBeLessThanOrEqual(2);
-      const r = REAL.find((x) => l.text.startsWith(x.verb));
-      if (r) expect(l.text.startsWith(r.verb)).toBe(true);
-    }
-    await expect(body.locator('.cp-item[data-lead="action"]').first()).toBeVisible();
   });
 
-  test('a long host in an action reads as its first part in a row (found in the real app: it broke onto a third line at 236px); the link keeps the whole address', async ({ page }) => {
+  test('a long host in an action reads as its first part in a row (found in the real app: it broke onto a third line at 236px); the row is one button and its sheet keeps the link', async ({ page }) => {
     await boot(page);
     await add(page, { id: 't113', title: 'T-113 Companion Today redesign + integrated PWA install flow (3 directions, then build the pick)', node: 'Projects/ATLAS', meta: { priority: 'now', due: '2026-10-13', next: 'Look at https://cohere-signup-staging.example-workers.invalid/?look=ecology on phone, then forward #cohere\'s \'For Eileen\' block (posted 10-13)' } });
     await refresh(page, '2026-10-14T09:00:00.000Z');
     await openRoom(page, 'ATLAS');
     await openWork(page); await narrowWork(page);
     const row = page.locator('.sr-work .cp-item').filter({ hasText: 'Look at' });
-    await expect(row.locator('.cp-lead')).toHaveText('Look at cohere-signup-staging on phone');
-    await expect(row.locator('.cp-lead .cp-link')).toHaveAttribute('href', 'https://cohere-signup-staging.example-workers.invalid/?look=ecology');
+    await expect(row.locator('.cp-lead')).toContainText(/^(2 steps: )?Look at cohere-signup-staging on phone, then/);
+    await expect(row.locator('.cp-lead .cp-link')).toHaveText('cohere-signup-staging');
+    await expect(row.locator('.cp-lead .cp-link')).toHaveAttribute('title', 'https://cohere-signup-staging.example-workers.invalid/?look=ecology');
+    await expect(row.locator('a')).toHaveCount(0);
     const h = await row.locator('.cp-lead').evaluate((el) => el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight));
-    expect(Math.round(h)).toBeLessThanOrEqual(2);
+    expect(Math.round(h)).toBeLessThanOrEqual(3);
+    await row.locator('.cp-need').click();
+    await expect(sheetOf(page).locator('.task-next a.cp-link')).toHaveAttribute('href', 'https://cohere-signup-staging.example-workers.invalid/?look=ecology');
   });
 
   test('P1-1 a missing prerequisite never authorizes an action: "Couldn\'t find … · Open the task", no action lead, no "I did this"', async ({ page }) => {
@@ -3101,13 +3106,14 @@ test.describe('r20', () => {
     await openWork(page);
     const needs = page.locator('.sr-work section[aria-label="Needs you"]');
     await expect(needs.locator('.cp-item[data-mode="checking"]')).toHaveCount(3);
-    await expect(needs.locator('.cp-item[data-mode="checking"] .cp-title').first()).toHaveText('Checking what\'s needed…');
-    // the line under it is the title as words (found in the real app: "…feature 4, the", "a daily calendar…")
-    expect((await needs.locator('.cp-item[data-mode="checking"] .cp-under').allInnerTexts()).sort()).toEqual(['A daily email of the calendar at 7', 'Texting Uni: a number that reaches', 'Uni adds Benya\'s missing feature 4'].sort());
+    // r21 (both critics): a decision being checked leads with its question (here the title as words: found in the real app, "…feature 4,
+    // the"), "Checking…" a quiet line under it, never its title
+    expect((await needs.locator('.cp-item[data-mode="checking"] .cp-title').allInnerTexts()).sort()).toEqual(['A daily email of the calendar at 7', 'Texting Uni: a number that reaches', 'Uni adds Benya\'s missing feature 4'].sort());
+    await expect(needs.locator('.cp-item[data-mode="checking"] .cp-under')).toHaveText(['Checking…', 'Checking…', 'Checking…']);
     await expect(needs.locator('.wv-n')).toHaveText('0');
     if (treeBeside(page)) expect(await page.locator('.th-roomnav .th-go[aria-label^="Atlas Institute"]').getAttribute('aria-label')).not.toMatch(/need/);
     // classified: statements, so Uni's to tidy; still nothing owed
-    await expect(page.locator('.sr-work .wv-tidy-line')).toHaveText('Uni is tidying 3 records', { timeout: 15_000 });
+    await expect(page.locator('.sr-work .wv-tidy-line')).toHaveText('3 records need rewording by their rooms', { timeout: 15_000 });
     await expect(needs.locator('.cp-item')).toHaveCount(0);
     await expect(needs.locator('.wv-n')).toHaveText('0');
     expect(await page.evaluate(() => (window as any).__sawDecide)).toBe(false);
@@ -3141,7 +3147,7 @@ test.describe('r20', () => {
     await openWork(page);
     const n = await page.locator('.sr-work section[aria-label="Needs you"] .wv-n').innerText();
     const line = page.locator('.sr-work .wv-tidy-line');
-    await expect(line).toHaveText('Uni is tidying 3 records');
+    await expect(line).toHaveText('3 records need rewording by their rooms');
     await expect(page.locator('.sr-work .wv-tidy .cp-item, .sr-work .wv-tidy .cp-need')).toHaveCount(0);
     await line.click();
     const list = page.locator('.sr-work .wv-tidy-list li');
@@ -3225,4 +3231,200 @@ test.describe('r20', () => {
       for (const name of ['I did this', 'Close']) await expect(sheet.locator('.task-foot').getByRole('button', { name, exact: true })).toBeInViewport({ ratio: 1 });
     });
   }
+});
+
+test.describe('r21', () => {
+  const refresh = async (page: Page, at: string) => { await page.clock.setFixedTime(Date.parse(at)); await page.evaluate(() => window.dispatchEvent(new Event('focus'))); };
+  const add = (page: Page, n: { id: string; title: string; node: string; tag?: string; meta?: Record<string, unknown>; content?: string; path?: string }) => page.evaluate((x) => {
+    (window as any).__tasks.push({ id: x.id, path: x.path ?? `${x.tag === 'decision' ? 'Decisions' : 'Tasks'}/${x.title}`, extension: 'md', tags: x.tag === 'none' ? [] : [x.tag ?? 'task'], createdAt: '2026-10-10T08:00:00.000Z', updatedAt: new Date(Date.now() + 3000).toISOString(), lastUpdatedBy: 'u', lastUpdatedVia: 'mcp', content: x.content ?? x.title, metadata: x.tag === 'none' ? (x.meta ?? {}) : { node: x.node, state: 'open', owner: 'aaron', ...(x.meta ?? {}) } });
+  }, n);
+  const sheetOf = (page: Page) => page.getByRole('dialog').filter({ has: page.locator('.task-kind') });
+  const openWork = async (page: Page) => { await openCompanion(page); await page.getByRole('button', { name: /^All of .*'s work/ }).click(); await expect(page.locator('.sr-work')).toBeVisible(); };
+  const leadOf = (row: ReturnType<Page['locator']>) => row.locator('.cp-lead').evaluate((el) => ({ lines: new Set([...el.querySelectorAll<HTMLElement>('.wc-w')].map((w) => Math.round(w.getBoundingClientRect().top))).size, text: (el as HTMLElement).innerText.replace(/\s+/g, ' ').trim(), cut: el.getAttribute('data-cut') === 'true', form: el.getAttribute('data-form') }));
+  /** The real steps from the scratch copy (10-14), and what the row must hold whole (its object, its recipients, both steps). */
+  const WHOLE = [
+    { id: 'at', title: 'T-129 Send the ATLAS Oct 12 follow-up email', next: 'Edit and send the ATLAS follow-up to Mark and Michael from your account; fill the opening, sign-off and next-review date.', has: ['Edit and send the ATLAS follow-up to Mark and Michael from your account'] },
+    { id: 'ww', title: 'T-67 Woven Web handoff note for Eileen', next: 'Review the Woven Web handoff draft, fill the unknowns, then talk with Eileen yourself.', has: ['Review the Woven Web handoff draft, fill the unknowns'], step2: 'then talk with Eileen yourself' },
+    { id: 'st', title: 'T-113 Companion Today redesign + integrated PWA install flow (3…', next: 'Look at https://cohere-signup-staging.example-workers.invalid/?look=ecology on phone, then forward #cohere\'s \'For Eileen\' block (posted 10-13)', has: ['Look at cohere-signup-staging on phone'], step2: 'then forward #cohere\'s \'For Eileen\' block' },
+    { id: 'pay', title: 'T-65 $10k COhere sponsorship invoice draft', next: 'Tell Uni who pays (Techne or Gitcoin Foundation) and how: crypto or ACH/Stripe, plus Woven Web\'s legal details.', has: ['Tell Uni who pays', 'and how: crypto or ACH/Stripe, plus Woven Web\'s legal details'] },
+    { id: 'co', title: 'T-90 COhere opens Oct 15', next: 'Wed 10-14: say go on prod deploy of #38 + #58; Eileen signs off the copy/photos before/after (posting today); yes/no on add-only DB…', has: ['Say go on prod deploy of #38 + #58'], due: '2026-10-14' },
+  ];
+  const seed = async (page: Page, node = 'Projects/ATLAS') => {
+    for (const r of WHOLE) await add(page, { id: r.id, title: r.title, node, meta: { priority: 'now', next: r.next, ...(r.due ? { due: r.due } : {}) } });
+    await refresh(page, '2026-10-14T09:00:00.000Z');
+  };
+  /** A rendered row holds the whole action: its object and recipients, and both steps (or "2 steps: A, then …"), within three lines, never cut. */
+  const assertWhole = async (row: ReturnType<Page['locator']>, r: (typeof WHOLE)[number]) => {
+    const l = await leadOf(row);
+    expect(l.lines, `${r.title}: "${l.text}"`).toBeLessThanOrEqual(3);
+    expect(l.cut, `${r.title}: "${l.text}" is cut`).toBe(false);
+    for (const h of r.has) expect(l.text, r.title).toContain(h);
+    if (r.step2) expect(l.text.includes(r.step2) || (/^2 steps: /.test(l.text) && /, then …$/.test(l.text)), `${r.title}: "${l.text}" shows both steps`).toBe(true);
+  };
+
+  test('the whole action shows: ATLAS (both recipients), Woven Web, cohere-signup-staging (both steps), who pays, COhere opens Oct 15, at 236px and in the work view', async ({ page }) => {
+    await boot(page);
+    await seed(page);
+    await openRoom(page, 'ATLAS');
+    await openWork(page);
+    for (const narrow of [false, true]) {
+      if (narrow) await narrowWork(page);
+      for (const r of WHOLE) await assertWhole(page.locator('.sr-work section[aria-label="Needs you"] .cp-item').filter({ hasText: r.has[0].slice(0, 20) }), r);
+    }
+    // the side panel at its own width: every action row it shows holds its whole action
+    if (wide(page)) {
+      await page.getByRole('button', { name: /Back to chat/ }).click();
+      const body = page.locator('aside.cp.side .cp-body');
+      const rows = body.locator('.cp-item[data-lead="action"]');
+      expect(await rows.count()).toBeGreaterThan(0);
+      for (const row of await rows.all()) {
+        const t = (await leadOf(row)).text;
+        const r = WHOLE.find((x) => t.includes(x.has[0].slice(0, 20)));
+        if (r) await assertWhole(row, r);
+      }
+    }
+  });
+
+  test('a step in two parts: the sheet lists them, numbered, under "2 steps"; the rest of the step (its date) stays in the sheet', async ({ page }) => {
+    await boot(page);
+    await seed(page);
+    await openRoom(page, 'ATLAS');
+    await openWork(page);
+    await page.locator('.sr-work .cp-item').filter({ hasText: 'Look at cohere-signup-staging' }).locator('.cp-need').click();
+    const sheet = sheetOf(page);
+    await expect(sheet.locator('h2')).toHaveText('2 steps');
+    await expect(sheet.locator('.task-steps li')).toHaveText(['Look at cohere-signup-staging.example-workers.invalid on phone', 'Forward #cohere\'s \'For Eileen\' block (posted 10-13)']);
+    await expect(sheet.locator('.task-next a.cp-link')).toHaveCount(1);
+  });
+
+  test('a decision being checked leads with its question; "Checking…" is a quiet line under it, and it isn\'t counted until it\'s classified', async ({ page }) => {
+    const SRC = '01M41111111111111111111112';
+    await page.addInitScript((src) => {
+      const w = window as any;
+      const at = '2026-10-14T06:00:00.000Z';
+      w.__noteDelay = { [src]: 4000 };
+      w.__seedTasks = [
+        { id: src, path: 'Projects/Boulder Votes/Chat plan', extension: 'md', tags: [], createdAt: at, updatedAt: at, content: 'plan', metadata: {} },
+        { id: 'bvq', path: 'Decisions/Ship the Boulder Votes AI chat?', extension: 'md', tags: ['decision'], createdAt: at, updatedAt: at, lastUpdatedVia: 'mcp', content: 'Ship the Boulder Votes AI chat?', metadata: { node: 'Projects/Atlas Institute', state: 'open', owner: 'aaron', priority: 'now', options: ['Ship it', 'Wait'], source: `uni:${src}` } },
+      ];
+      w.__sawChecking = false;
+      new MutationObserver(() => { for (const t of document.querySelectorAll('.cp-item .cp-title')) if (/^Checking/.test(t.textContent ?? '')) w.__sawChecking = true; }).observe(document, { subtree: true, childList: true, characterData: true });
+    }, SRC);
+    await boot(page);
+    await openRoom(page, 'Atlas Institute');
+    await openWork(page);
+    const needs = page.locator('.sr-work section[aria-label="Needs you"]');
+    const row = needs.locator('.cp-item').filter({ hasText: 'Boulder Votes' });
+    await expect(row).toHaveAttribute('data-mode', 'checking');
+    await expect(row.locator('.cp-title')).toHaveText('Ship the Boulder Votes AI chat?');
+    await expect(row.locator('.cp-under')).toHaveText('Checking…');
+    await expect(needs.locator('.wv-n')).toHaveText('0');
+    // classified: the same question, now owed and counted
+    await expect(row).toHaveAttribute('data-mode', 'answers', { timeout: 10_000 });
+    await expect(row.locator('.cp-title')).toHaveText('Ship the Boulder Votes AI chat?');
+    await expect(needs.locator('.wv-n')).toHaveText('1');
+    // "Checking…" was never a row's title
+    expect(await page.evaluate(() => (window as any).__sawChecking)).toBe(false);
+  });
+
+  test('P1-1 a failed check never leaves an old instruction actionable: ok, then a failed refresh, then the action is gone (Couldn\'t check · Retry, no "I did this")', async ({ page }) => {
+    const PLAN = '01M3ZR1RDJAZXTM6NQS74P8YS5';
+    await boot(page);
+    await add(page, { id: PLAN, title: 'Cutover plan', node: '', tag: 'none', path: 'Projects/Mail/Cutover plan — unforced.dev', content: 'The plan.' });
+    await add(page, { id: 't13', title: 'T-13 Self-hosted mail: approved 10-02', node: 'Projects/ATLAS', meta: { priority: 'now', next: `Approve or change the mail cutover plan (uni:${PLAN}).` } });
+    await refresh(page, '2026-10-14T09:00:00.000Z');
+    await openRoom(page, 'ATLAS');
+    await openWork(page);
+    const row = page.locator('.sr-work section[aria-label="Needs you"] .cp-item').filter({ hasText: /Self-hosted mail|mail cutover plan/ });
+    await expect(row).toHaveAttribute('data-mode', 'lead');
+    await expect(row.locator('.cp-lead')).toContainText('Approve or change the mail cutover plan');
+    // the note can't be read on the next refresh
+    await page.evaluate((id) => { (window as any).__noteFails = { [id]: true }; }, PLAN);
+    await refresh(page, '2026-10-14T09:02:00.000Z');
+    await expect(row).toHaveAttribute('data-mode', 'unavailable');
+    await expect(row.locator('.cp-lead')).toHaveCount(0);
+    await expect(row).not.toContainText('Approve or change');
+    await expect(row.locator('.cp-checkfail')).toHaveText('Couldn\'t check · Retry');
+    await row.locator('.cp-need').click();
+    const sheet = sheetOf(page);
+    await expect(sheet.getByRole('button', { name: 'I did this' })).toHaveCount(0);
+    await expect(sheet.locator('h2')).not.toContainText('Approve or change');
+    await expect(sheet.locator('.task-checkfail')).toContainText('Couldn\'t check');
+    await sheet.getByRole('button', { name: 'Close' }).click();
+    // still failing: Retry (the row's tap) never brings the old ok back
+    await expect(row).not.toHaveAttribute('data-mode', 'lead');
+    await expect(row).not.toContainText('Approve or change');
+    // a good read brings the action back
+    await page.evaluate(() => { (window as any).__noteFails = {}; });
+    await row.locator('.cp-need').click();
+    await sheetOf(page).getByRole('button', { name: 'Close' }).click();
+    await expect(row).toHaveAttribute('data-mode', 'lead', { timeout: 10_000 });
+  });
+
+  test('P1-2 status claims only what\'s true: "N records need rewording by their rooms", quiet, no "›", no action; it opens a read-only list of titles', async ({ page }) => {
+    await boot(page);
+    await add(page, { id: 'mail', title: 'Mail: approve a test week, not an immediate cutover', node: 'Projects/ATLAS', tag: 'decision' });
+    await add(page, { id: 'benya', title: 'Decision (default yes): Uni adds Benya\'s missing feature 4, the…', node: 'Projects/ATLAS', tag: 'decision', content: 'Decision (default yes): Uni adds Benya\'s missing feature 4, the calendar view, this week.' });
+    await refresh(page, '2026-10-14T09:00:00.000Z');
+    await openRoom(page, 'ATLAS');
+    await openWork(page);
+    const sec = page.locator('.sr-work section[aria-label="Records to reword"]');
+    await expect(sec.locator('.wv-tidy-line')).toHaveText('2 records need rewording by their rooms');
+    await expect(page.locator('.sr-work')).not.toContainText(/tidying|will come back/i);
+    await sec.locator('.wv-tidy-line').click();
+    await expect(sec.locator('.wv-tidy-list li')).toHaveText(['Mail: approve a test week, not an immediate cutover', 'Uni adds Benya\'s missing feature 4']);
+    await expect(sec.locator('button:not(.wv-tidy-line), a')).toHaveCount(0);
+    await expect(sec).not.toContainText('›');
+  });
+
+  test('no "›" on any row or link row: rows, "Sadhana: 1 for you", "Show N more"', async ({ page }) => {
+    await boot(page, { crowded: true, privateTasks: true });
+    await openRoom(page, 'Uni');
+    await openCompanion(page);
+    const body = page.locator('.cp-body').last();
+    await expect(body.locator('.cp-more')).toHaveText(/^Show \d+ more$/);
+    for (const el of await body.locator('.cp-item, .cp-more').all()) expect(await el.innerText()).not.toContain('›');
+    await body.locator('.cp-more').click();
+    const wv = page.locator('.sr-work');
+    await expect(wv.locator('.cp-private')).toHaveText('Sadhana: 1 for you');
+    for (const el of await wv.locator('.cp-item, .cp-more, .wv-tidy-line').all()) expect(await el.innerText()).not.toContain('›');
+  });
+
+  test('one target per visible request (Codex 10): every row is one keyboard-focusable button that opens its sheet, with nothing clickable inside it', async ({ page }) => {
+    await boot(page, { crowded: true, ulidNext: true, longNext: true });
+    await seed(page, 'Areas/Techne');
+    await openRoom(page, 'Techne');
+    await openWork(page);
+    const rows = page.locator('.sr-work section[aria-label="Needs you"] .cp-list > .cp-item');
+    expect(await rows.count()).toBeGreaterThan(4);
+    for (const row of await rows.all()) {
+      const focusable = await row.evaluate((el) => [...el.querySelectorAll<HTMLElement>('a[href], button, [tabindex]:not([tabindex="-1"]), input, select, textarea')].map((e) => ({ tag: e.tagName, cls: e.className, nested: !!e.parentElement?.closest('button, a') })));
+      expect(focusable, await row.innerText()).toHaveLength(1);
+      expect(focusable[0].tag).toBe('BUTTON');
+      expect(focusable[0].nested).toBe(false);
+    }
+    // the keyboard reaches a row and Enter opens its sheet
+    const first = rows.first().locator('.cp-need');
+    await first.focus();
+    await page.keyboard.press('Enter');
+    await expect(sheetOf(page)).toBeVisible();
+  });
+
+  test('the 800×600 sheet has a margin and its whole border', async ({ page }) => {
+    await page.setViewportSize({ width: 800, height: 600 });
+    await boot(page);
+    await seed(page);
+    await openRoom(page, 'ATLAS');
+    await openWork(page);
+    await page.locator('.sr-work .cp-item').filter({ hasText: 'Edit and send the ATLAS follow-up' }).locator('.cp-need').click();
+    const sheet = sheetOf(page);
+    await sheet.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
+    const b = (await sheet.boundingBox())!;
+    expect(b.y + b.height).toBeLessThanOrEqual(600 - 8);
+    expect(b.y).toBeGreaterThanOrEqual(8);
+    const border = await sheet.evaluate((el) => { const cs = getComputedStyle(el); return { bottom: parseFloat(cs.borderBottomWidth), radius: parseFloat(cs.borderBottomLeftRadius) }; });
+    expect(border.bottom).toBeGreaterThan(0);
+    expect(border.radius).toBeGreaterThan(0);
+    await page.screenshot({ path: `${SHOTS}/r21-sheet-800x600.png` }).catch(() => {});
+  });
 });
