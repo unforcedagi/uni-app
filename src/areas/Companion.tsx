@@ -394,10 +394,13 @@ export function NeedsList({ needs, fit, onTask, onDecide, onNote, onMore, extra 
   // scrollbar, which narrows the panel, and that must not fold it back)
   useLayoutEffect(() => { if (fit) { setAll(false); setLimit(Infinity); setMeasuring(true); } }, [fit, key]);
   useLayoutEffect(() => { if (fit && !all) { setLimit(Infinity); setMeasuring(true); } }, [size]); // eslint-disable-line react-hooks/exhaustive-deps
+  /** r18: rows cut their own lines (WordClamp) in the commit that draws them; the list is measured one commit later, once they have. */
+  const [pass, setPass] = useState(0);
   useLayoutEffect(() => {
     if (!fit || !measuring) return;
+    if (pass === 0) { setPass(1); return; }
     const list = listRef.current; const scroller = list?.closest(".cp-fit") as HTMLElement | null; const body = list?.closest(".cp-body") as HTMLElement | null;
-    if (!list || !scroller || !body) { setMeasuring(false); return; }
+    if (!list || !scroller || !body) { setMeasuring(false); setPass(0); return; }
     const rows = [...list.children] as HTMLElement[];
     // room for the list = the panel minus everything that is not the list (heading, sentence, runs, footer) minus the "+N more" line
     // with every row drawn: no overflow means they all fit. Otherwise the body has its natural height, and the panel's own bar sits outside it
@@ -410,8 +413,8 @@ export function NeedsList({ needs, fit, onTask, onDecide, onNote, onMore, extra 
     setLimit(fits || n >= rows.length ? Infinity : n);
     if (settled.current !== key) remeasured.current = 0;
     settled.current = key;
-    setMeasuring(false);
-  }, [measuring, fit]); // eslint-disable-line react-hooks/exhaustive-deps
+    setMeasuring(false); setPass(0);
+  }, [measuring, fit, pass]); // eslint-disable-line react-hooks/exhaustive-deps
   // a row can change height after it was measured (a full question arrives, a next step wraps): if the panel then overflows, measure
   // again (a few times in a row at most, so this settles)
   useLayoutEffect(() => {
