@@ -77,6 +77,8 @@ test('All reading surfaces fit the screen', async ({ page }, info) => {
   await lastRoom.scrollIntoViewIfNeeded();
   await fits(lastRoom, phone);
   await shot('rooms');
+  // the drawer (below 900px) closes before the rail is used again
+  if (await page.locator('.th-drawer').count()) { await page.keyboard.press('Escape'); await expect(page.locator('.th-drawer')).toHaveCount(0); }
   await openPanel('Settings');
   await expect(page.locator('.settings')).toBeVisible();
   await expect(page.locator('.identity')).toContainText('Signed in as Aaron');
