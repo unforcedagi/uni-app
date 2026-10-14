@@ -3032,7 +3032,7 @@ test.describe('r20', () => {
     const co = page.locator('.sr-work .cp-item').filter({ hasText: 'Say go on prod deploy' });
     await expect(co.locator('.cp-lead')).toHaveText('Say go on prod deploy of #38 + #58');
     await expect(co.locator('.cp-under')).toHaveAttribute('title', /^COhere opens Oct 15 · due today · asked \w+ \d+$/); // r22: and when it was asked
-    await expect(co.locator('.cp-sub-when')).toHaveText(/^ · due today · asked \w+ \d+$/);
+    await expect(co.locator('.cp-sub-when')).toHaveText(/^(?: · )?due today · asked \w+ \d+$/); // r22: a wrapped date line has no leading " · "
     // a subtitle that repeats the action is dropped (in its own area there is nothing else to say)
     // (r22: only when it was asked is left)
     await expect(page.locator('.sr-work .cp-item').filter({ hasText: 'Edit and send the ATLAS follow-up' }).locator('.cp-under')).toHaveText(/^\s*asked \w+ \d+$/);
@@ -3584,6 +3584,11 @@ test.describe('r22', () => {
     const clamp = await row.locator('.cp-lead').evaluate((el) => { const s = getComputedStyle(el); return { clamp: s.webkitLineClamp, over: el.scrollHeight > el.clientHeight + 1 }; });
     expect(clamp.over, `${r.title} overflows its row`).toBe(false);
     expect(['none', '', 'unset'].includes(clamp.clamp), `${r.title}: line clamp ${clamp.clamp}`).toBe(true);
+    // the small print says when it was asked; where it belongs stays, and a wrapped date line starts with its words, not " · "
+    const sub = row.locator('.cp-sub');
+    await expect(sub).toHaveAttribute('title', / · asked \w+ \d+$|^asked \w+ \d+$/);
+    if (await sub.getAttribute('data-wrapped')) expect((await sub.locator('.cp-sub-when').textContent()) ?? '', r.title).not.toMatch(/^\s*·/);
+    else if (await sub.locator('.cp-sub-where:not([hidden])').count()) expect((await sub.locator('.cp-sub-when').textContent()) ?? '', r.title).toMatch(/^ · /);
   };
 
   test('rows say the whole job (both critics): staging, Woven Web, ATLAS ("…fill the opening, sign-off and next-review date") and who pays hold every verb phrase, with no "…", at 236px and in the work view', async ({ page }) => {
