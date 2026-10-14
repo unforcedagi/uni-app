@@ -1855,7 +1855,7 @@ test.describe('r15', () => {
   test('one vault per reference: in another vault a task\'s bare note id is read and opened there; a uni: one in Uni', async ({ page }) => {
     await boot(page, { lifeVault: 'life', ulidNext: true, vaultNotes: true });
     await unfoldAll(page);
-    await scope(page).locator('.th-go[aria-label^="Techne,"]').click();
+    await scope(page).locator('.th-go[aria-label="Techne"], .th-go[aria-label^="Techne,"]').first().click();
     const row = page.locator('.cp-item').filter({ hasText: 'ATLAS follow-up' }).first();
     await expect(row.getByRole('button', { name: 'Morning pages' })).toBeVisible();
     await expect(row.getByRole('button', { name: 'Follow-up notes' })).toBeVisible();
@@ -1952,18 +1952,19 @@ test.describe('r15', () => {
     const inside = () => page.evaluate(() => !!document.activeElement?.closest('.task-sheet'));
     for (let i = 0; i < 24; i++) { await page.keyboard.press(i % 5 === 4 ? 'Shift+Tab' : 'Tab'); expect(await hidden()).toBe(false); expect(await inside()).toBe(true); }
     // from the first control Shift+Tab lands on the last reachable one (the Details summary), never a hidden Now/Soon/Someday
-    await sheet.locator('.task-do').first().focus();
+    await sheet.focus();
     await page.keyboard.press('Shift+Tab');
     await expect(sheet.locator('details.task-details > summary')).toBeFocused();
     await page.keyboard.press('Tab');
-    await expect(sheet.locator('.task-do').first()).toBeFocused();
+    expect(await inside()).toBe(true); expect(await hidden()).toBe(false);
+    await expect(sheet.locator('details.task-details > summary')).not.toBeFocused();
     // opened, its controls join the ring, and its last line is inside the sheet at 720px tall
     await page.setViewportSize({ width: page.viewportSize()!.width, height: 720 });
     await sheet.locator('details.task-details > summary').click();
     const last = sheet.locator('details.task-details > p').last();
     await expect(last).toBeVisible();
     await last.evaluate((el) => el.closest('.task-sheet')!.scrollTo(0, 99999));
-    const [l, s] = [await last.boundingBox(), await sheet.locator('.task-sheet').boundingBox()];
+    const [l, s] = [await last.boundingBox(), await sheet.boundingBox()];
     expect(l!.y + l!.height).toBeLessThanOrEqual(s!.y + s!.height - 4);
   });
 
@@ -1976,6 +1977,8 @@ test.describe('r15', () => {
     if (wide(page)) await expect(page.locator('.th-roomnav')).toBeVisible();
     else await expect(page.getByRole('button', { name: 'Places' })).toBeVisible();
     await page.getByRole('button', { name: 'Open Uni' }).click();
-    await expect(page.locator('.sr')).toHaveAttribute('data-node', 'Uni');
+    // a phone held upright opens Uni on its tree; elsewhere Uni's room
+    if (wide(page)) await expect(page.locator('.sr')).toHaveAttribute('data-node', 'Uni');
+    else await expect(page.locator('.th-phone-tree')).toBeVisible();
   });
 });
