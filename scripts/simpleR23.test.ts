@@ -70,7 +70,11 @@ check("text: \"Where this stands\" without raw ids, shortened with words at clau
 
 check("text: a step that points at a message shows it when it is stored, and asks the room for it when it isn't", () => {
   assert.deepEqual(pointsAt("Send Ryan the deploy-access message below (asks for Cloudflare Pages access to bouldernewtech)."), { noun: "message" });
-  assert.deepEqual(pointsAt("Edit and send the draft to Mark"), { noun: "draft" });
+  assert.deepEqual(pointsAt("Send the draft to Mark"), { noun: "draft" });
+  // only a sending step: a draft that exists elsewhere is asked about, not sent from here
+  assert.equal(pointsAt("Your OK on the draft"), null);
+  assert.equal(pointsAt("Edit the draft, check the dates against the calendar, and send it from the shared inbox"), null);
+  assert.equal(pointsAt("Pick design A, B or C and answer the follow-ups below"), null);
   assert.equal(pointsAt("Tell Uni who pays (Techne or Gitcoin Foundation) and how"), null);
   assert.equal(pointsAt("Review the Woven Web handoff draft, fill the unknowns"), null);
   const next = "Send Ryan the deploy-access message below.";

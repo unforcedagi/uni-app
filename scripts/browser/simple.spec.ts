@@ -3698,3 +3698,165 @@ test.describe('r22', () => {
     await expect(page.locator('.sr-title')).toHaveText('Sanctum');
   });
 });
+
+test.describe('r23', () => {
+  const refresh = async (page: Page, at: string) => { await page.clock.setFixedTime(Date.parse(at)); await page.evaluate(() => window.dispatchEvent(new Event('focus'))); };
+  const add = (page: Page, n: { id: string; title: string; node: string; meta?: Record<string, unknown>; createdAt?: string; updatedAt?: string }) => page.evaluate((x) => {
+    (window as any).__tasks.push({ id: x.id, path: `Tasks/${x.title}`, extension: 'md', tags: ['task'], createdAt: x.createdAt ?? '2026-10-06T16:00:00.000Z', updatedAt: x.updatedAt ?? new Date(Date.now() + 3000).toISOString(), lastUpdatedBy: 'u', lastUpdatedVia: 'mcp', content: x.title, metadata: { node: x.node, state: 'open', owner: 'aaron', priority: 'now', ...(x.meta ?? {}) } });
+  }, n);
+  const sheetOf = (page: Page) => page.getByRole('dialog').filter({ has: page.locator('.task-kind') });
+  const openWork = async (page: Page) => { await openCompanion(page); await page.getByRole('button', { name: /^All of .*'s work/ }).click(); await expect(page.locator('.sr-work')).toBeVisible(); };
+  const rowOf = (page: Page, text: string) => page.locator('.sr-work .cp-item').filter({ hasText: text });
+  /** The placeholder message a task's `detail` carries (made up; the live one is Ryan's deploy-access note). */
+  const DETAIL = "Send this to Ryan:\n\n'Hey Ryan, this is the placeholder message about deploy access for the staging copy of the site.'\n\nAfter he replies, Uni checks the account.";
+
+  test('"asked" means asked (Codex P1): an explicit request time reads "asked Oct 6"; without one, "added Oct 6" from when the task was added; a rebalanced record keeps its date', async ({ page }) => {
+    await boot(page);
+    await add(page, { id: 'a1', title: 'T-301 Placeholder with a request time', node: 'Areas/Techne', meta: { next: 'Send the placeholder note to Casey', asked: '2026-10-06' } });
+    await add(page, { id: 'a2', title: 'T-302 Placeholder added on Oct 6', node: 'Areas/Techne', meta: { next: 'Send the placeholder plan to Casey' } });
+    await refresh(page, '2026-10-14T09:00:00.000Z');
+    await openRoom(page, 'Techne');
+    await openWork(page);
+    await expect(rowOf(page, 'placeholder note to Casey').locator('.cp-under, .cp-asked-line').first()).toHaveAttribute('title', /asked Oct 6$/);
+    const added = rowOf(page, 'placeholder plan to Casey');
+    await expect(added.locator('.cp-under, .cp-asked-line').first()).toHaveAttribute('title', /added Oct 6$/);
+    // the board is rebalanced: a new `updatedAt` and priority; the date stays
+    await page.evaluate(() => (window as any).__setTask('a2', { priority: 'soon' }));
+    await refresh(page, '2026-10-14T09:01:00.000Z');
+    await expect(added.locator('.cp-under, .cp-asked-line').first()).toHaveAttribute('title', /added Oct 6$/);
+    await added.locator('.cp-need').click();
+    await expect(sheetOf(page).locator('.task-asked')).toContainText('Added Oct 6');
+    await expect(sheetOf(page).locator('.task-asked')).toHaveAttribute('data-kind', 'added');
+    // and the moved-on cue is from the same date, in the same words
+    await expect(sheetOf(page).locator('.task-movedon')).toHaveText('Chat has moved on since this was added');
+  });
+
+  test('an approval can\'t outlive its moment (Codex P1): with the chat moved on, "Check in #room first" leads and "Say it" follows; a fresh request keeps "Say it" first', async ({ page }) => {
+    await boot(page);
+    // Techne's chat has messages up to Oct 9; this request was asked on Oct 6
+    await add(page, { id: 'go', title: 'T-303 Placeholder deploy', node: 'Areas/Techne', meta: { next: 'Say go on the placeholder deploy', asked: '2026-10-06T18:00:00.000Z' } });
+    await add(page, { id: 'go2', title: 'T-304 Placeholder fresh deploy', node: 'Areas/Techne', meta: { next: 'Say go on the fresh placeholder deploy', asked: new Date(Date.now() + 5000).toISOString() } });
+    await refresh(page, '2026-10-14T09:00:00.000Z');
+    await openRoom(page, 'Techne');
+    await openWork(page);
+    await rowOf(page, 'Say go on the placeholder deploy').locator('.cp-need').click();
+    const sheet = sheetOf(page);
+    await expect(sheet.locator('.task-movedon')).toHaveText('Chat has moved on since this was asked');
+    const primary = sheet.locator('.task-do.primary');
+    await expect(primary).toHaveCount(1);
+    await expect(primary).toHaveText(/^Check in #.+ first$/);
+    const say = sheet.getByRole('button', { name: /^Say it in #/ });
+    await expect(say).toBeVisible();
+    await expect(say).not.toHaveClass(/primary/);
+    // "Check in" opens the chat, and puts nothing in the composer
+    await primary.click();
+    await expect(sheetOf(page)).toHaveCount(0);
+    await expect(page.locator('.sr-chat')).toBeVisible();
+    await expect(page.locator('.sr-chat textarea, .sr-chat [contenteditable]').first()).toHaveText('');
+    await openWork(page);
+    await rowOf(page, 'Say go on the fresh placeholder deploy').locator('.cp-need').click();
+    await expect(sheetOf(page).locator('.task-movedon')).toHaveCount(0);
+    await expect(sheetOf(page).locator('.task-do.primary')).toHaveText(/^Say it in #/);
+  });
+
+  test('no ellipsis: a step stored cut short is shown as stored, with "(the note ends here · open the note)"; a preview question has none', async ({ page }) => {
+    await boot(page);
+    const cut = 'Say go on the placeholder deploy; Harper signs off the copy and photos before and after (posting today); yes or no on the add-only DB migratio';
+    await add(page, { id: 'c1', title: 'T-305 Placeholder cut step', node: 'Areas/Techne', meta: { next: cut.padEnd(140, 'x').slice(0, 140) } });
+    await refresh(page, '2026-10-14T09:00:00.000Z');
+    await openRoom(page, 'Techne');
+    await openWork(page);
+    const row = rowOf(page, 'Say go on the placeholder deploy');
+    expect(await row.innerText()).not.toMatch(/…|\.\.\./);
+    await row.locator('.cp-need').click();
+    const sheet = sheetOf(page);
+    expect(await sheet.innerText()).not.toMatch(/…|\.\.\./);
+    await expect(sheet.locator('.task-cut')).toHaveText('(the note ends here · open the note)');
+    await sheet.locator('.task-cut').getByRole('button', { name: 'open the note' }).click();
+    await expect(sheetOf(page)).toHaveCount(0);
+  });
+
+  test('"…message below": the message a task carries is shown and is what "Copy the message" copies; with none stored the row reads "Ask #room for the message"', async ({ page }) => {
+    await boot(page);
+    await add(page, { id: 'm1', title: 'T-306 Placeholder deploy access', node: 'Areas/Techne', meta: { next: 'Send Ryan the deploy-access message below.', detail: DETAIL, room: 'techne' } });
+    await add(page, { id: 'm2', title: 'T-307 Placeholder access, no message', node: 'Areas/Techne', meta: { next: 'Send Casey the access message below.', room: 'techne' } });
+    await refresh(page, '2026-10-14T09:00:00.000Z');
+    await openRoom(page, 'Techne');
+    await openWork(page);
+    await rowOf(page, 'Send Ryan the deploy-access message').locator('.cp-need').click();
+    const sheet = sheetOf(page);
+    await expect(sheet.locator('.task-detail')).toContainText('Hey Ryan, this is the placeholder message');
+    await expect(sheet.locator('.task-detail')).toContainText('After he replies, Uni checks the account.');
+    await expect(sheet.locator('.task-do.primary')).toHaveText('Copy the message');
+    await expect(sheet.getByRole('button', { name: 'Ask Uni to draft it' })).toHaveCount(0);
+    await sheet.getByRole('button', { name: 'Close' }).click();
+    // nothing stored: the row asks the room for it, and its sheet puts the request in the room's composer (never sent)
+    const ask = rowOf(page, 'Ask #techne for the message');
+    await expect(ask.locator('.cp-lead')).toHaveText('Ask #techne for the message');
+    await ask.locator('.cp-need').click();
+    await expect(sheetOf(page).locator('h2')).toHaveText('Ask #techne for the message');
+    await expect(sheetOf(page).locator('.task-do.primary')).toHaveText(/^Ask in #techne ›$/);
+    await expect(sheetOf(page).locator('.task-detail')).toHaveCount(0);
+  });
+
+  test('a short window: the sheet\'s body scrolls above its footer, and no cue is ever under the footer (740×360, 920×360)', async ({ page }) => {
+    await boot(page);
+    await add(page, { id: 'f1', title: 'T-308 Placeholder long request', node: 'Areas/Techne', meta: { next: 'Send Ryan the deploy-access message below.', detail: `${DETAIL}\n\n${'A further placeholder paragraph about the account and the project. '.repeat(4)}`, room: 'techne', asked: '2026-10-06' } });
+    await refresh(page, '2026-10-14T09:00:00.000Z');
+    await openRoom(page, 'Techne');
+    for (const [w, h] of [[740, 360], [920, 360]] as const) {
+      await page.setViewportSize({ width: w, height: h });
+      await openWork(page);
+      await rowOf(page, 'Send Ryan the deploy-access message').locator('.cp-need').click();
+      const sheet = sheetOf(page);
+      await expect(sheet.locator('.task-asked')).toBeVisible();
+      for (const end of [0, 99999]) {
+        await sheet.locator('.task-body').evaluate((el, y) => el.scrollTo(0, y), end);
+        const under = await sheet.evaluate((d) => { const f = d.querySelector('.task-foot')!.getBoundingClientRect(); return [...d.querySelectorAll('.task-asked, .task-movedon, .task-q-note, .task-cut, .task-gone')].filter((c) => { const q = c.getBoundingClientRect(); return q.height > 0 && q.bottom > f.top + 0.5 && q.top < f.bottom; }).map((c) => c.className); });
+        expect(under, `${w}×${h} at scroll ${end}`).toEqual([]);
+      }
+      // the footer is not drawn over the body: the body ends where the footer starts
+      const [body, foot] = [await sheet.locator('.task-body').boundingBox(), await sheet.locator('.task-foot').boundingBox()];
+      expect(body!.y + body!.height).toBeLessThanOrEqual(foot!.y + 0.5);
+      await sheet.getByRole('button', { name: 'Close' }).click();
+      await page.getByRole('button', { name: /Back to chat/ }).click().catch(() => {});
+    }
+  });
+
+  test('one freshness line at a time: a saved copy being read again says "N as of 1:44 PM · refreshing…" once, not in the tree too', async ({ page }) => {
+    test.skip(!wide(page), 'the tree beside the room');
+    await boot(page);
+    await openRoom(page, 'ATLAS');
+    await openCompanion(page);
+    await expect(page.locator('.cp-body .cp-item').first()).toBeVisible();
+    await expect.poll(() => page.evaluate(() => (localStorage.getItem('uni.tasks.saved.v1') ?? '').length > 0)).toBe(true);
+    await page.addInitScript(() => { (window as any).__tasksDelay = 60_000; });
+    await page.reload();
+    await openRoom(page, 'ATLAS');
+    await openCompanion(page);
+    const lines = page.locator('.lh-line').filter({ hasText: /as of \d{1,2}:\d{2}\s?[AP]M · refreshing…$/ });
+    await expect(lines.first()).toBeVisible();
+    await expect(lines).toHaveCount(1);
+  });
+
+  test('Recent never overlaps the area list: the tree scrolls in its own region above Recent, its last line fading while rows run on (1280×720)', async ({ page }) => {
+    test.skip(!wide(page), 'the sidebar');
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await boot(page);
+    for (const n of ['Atlas', 'Techne', 'Learn Vibe Build', 'COhere 2026']) await openRoom(page, n);
+    // every area unfolded, so the tree runs past its region
+    for (let i = 0; i < 20; i++) { const f = page.locator('.th-roomnav .th-fold[aria-expanded="false"]').first(); if (!(await f.count())) break; await f.click(); }
+    await page.addStyleTag({ content: '.th-roomnav { max-height: 420px; }' });
+    const wrap = page.locator('.th-roomnav .th-rows-wrap');
+    const recent = page.locator('.th-roomnav .th-recent');
+    await expect(recent).toBeVisible();
+    const [a, b] = [await wrap.boundingBox(), await recent.boundingBox()];
+    expect(a!.y + a!.height).toBeLessThanOrEqual(b!.y + 0.5);
+    if (await wrap.evaluate((el) => el.scrollHeight > el.clientHeight + 1)) {
+      await wrap.evaluate((el) => el.scrollTo(0, 0));
+      await expect(wrap).toHaveAttribute('data-more', '');
+      await wrap.evaluate((el) => el.scrollTo(0, 99999));
+      await expect(wrap).not.toHaveAttribute('data-more', '');
+    }
+  });
+});

@@ -419,13 +419,16 @@ export const MOVED_ON = "Chat has moved on since this was asked";
 export const movedOnText = (w: AskedWhen): string => (w.kind === "asked" ? MOVED_ON : "Chat has moved on since this was added");
 
 /**
- * A step that points at words it doesn't carry (r23, both critics): "Send Ryan the deploy-access message below", "…the draft", "…the
- * message". `noun`: what it points at, for "Ask #room for the message".
+ * A step that sends words it doesn't carry (r23, both critics): "Send Ryan the deploy-access message below", "Forward the draft", "Send the
+ * message". Only a sending step counts ("Your OK on the draft" or "Edit the draft, …" asks something else of a draft that exists).
+ * `noun`: what it points at, for "Ask #room for the message".
  */
 export function pointsAt(next: string): { noun: "message" | "draft" } | null {
-  const m = /\b(?:below|the\s+(?:[\w’'-]+\s+){0,2}?(message|draft))\b/i.exec(next);
+  const step = datePrefix(next.trim()).rest.trim();
+  if (!/^(?:send|forward|paste|post|share|email)\b/i.test(step)) return null;
+  const m = /\b(?:(message|draft|text|block|note)\s+below|below|the\s+(?:[\w’'-]+\s+){0,2}?(message|draft))\b/i.exec(step);
   if (!m) return null;
-  return { noun: (m[1] ?? "").toLowerCase() === "draft" ? "draft" : "message" };
+  return { noun: (m[1] ?? m[2] ?? "").toLowerCase() === "draft" ? "draft" : "message" };
 }
 /**
  * A step that points at words nobody stored (r23): "…the deploy-access message below" with no `detail`, `message` or `draft`, and no link
