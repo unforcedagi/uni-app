@@ -66,6 +66,10 @@ export type Task = {
   added?: string | null;
   /** r23: `detail`, the content an ask carries (T-131: the questions, the message, the draft): the sheet shows it under the step. */
   detail?: string | null;
+  /** r23: the room that stewards its node, by name (set by the list, never stored): who "Ask #room for the message" names. */
+  stewardRoom?: string | null;
+  /** r23: a draft note was written for it (its `task` field names it; set by the list): the words its step points at exist. */
+  hasDraft?: boolean;
   /** r19: what reading its supporting notes came to, as of now (set by the list, never stored): see `checkOf`. */
   check?: import("./simpleCore.ts").Check | null;
 };
