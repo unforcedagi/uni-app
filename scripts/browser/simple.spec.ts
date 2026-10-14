@@ -1741,6 +1741,20 @@ test.describe('r14', () => {
     await expect(page.locator('.sr-work')).toContainText('Find a teacher');
   });
 
+  test('chat: a cited note reads as its title (or "a note"), a table renders, and task-state markers are not shown', async ({ page }) => {
+    await boot(page, { ulidNext: true });
+    await openRoom(page, 'Techne');
+    await page.evaluate(() => (window as any).__arrive('ch-techne', 'Uni', 'See uni:01M3ZK2R6A6C62M1ANJCSQNG3M and uni:01M3ZK2R6A6C62M1ANJCSQNG3N.\n\n| Window | When |\n|---|---|\n| Gateway | Wed 10:00 |\n\n[done T-9]'));
+    const chat = page.locator('.sr-chat');
+    await expect(chat.locator('.note-chip').filter({ hasText: 'Follow-up notes' })).toHaveCount(1);
+    await expect(chat.locator('.note-chip').filter({ hasText: /^❋?a note$/ })).toHaveCount(1);
+    await expect(chat).not.toContainText('01M3ZK2R6A6C62M1ANJCSQNG3');
+    await expect(chat.locator('.md-table th')).toHaveText(['Window', 'When']);
+    await expect(chat.locator('.md-table td')).toHaveText(['Gateway', 'Wed 10:00']);
+    await expect(chat).not.toContainText('T-9');
+    await expect(page.locator('.address-label')).toHaveCount(0);
+  });
+
   test('920×360: the rail is hidden and Places is in the room header, with every place', async ({ page }) => {
     await page.setViewportSize({ width: 920, height: 360 });
     await boot(page);

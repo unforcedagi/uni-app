@@ -178,3 +178,11 @@ assert.equal((parseInline("see [[Projects/Ricki/Phase 1 — work plan|the plan]]
   assert.ok(ms < 200, `refCandidates on a 64k-space ref took ${ms.toFixed(0)}ms`);
   assert.deepEqual(refCandidates("Projects/Ricki/Phase 1 — work plan then more"), ["Projects/Ricki/Phase 1 — work plan then", "Projects/Ricki/Phase 1 — work plan", "Projects/Ricki/Phase 1 — work", "Projects/Ricki/Phase 1 —", "Projects/Ricki/Phase 1", "Projects/Ricki/Phase"]);
 }
+
+// r14: a bare note id followed by more words is the whole ref, not the start of a path that runs on into the sentence
+{
+  const hit = matchShorthandAt("uni:01M3ZK2R6A6C62M1ANJCSQNG3M and more", 0);
+  assert.equal(hit?.ref.ref, "01M3ZK2R6A6C62M1ANJCSQNG3M");
+  assert.equal(hit?.end, 30);
+  assert.equal(matchShorthandAt("uni:System/How Uni is organized", 0)?.ref.ref, "System/How Uni is organized");
+}
