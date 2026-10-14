@@ -39,7 +39,7 @@ export function WorkView(p: WorkViewProps) {
   const motion = running.length + p.drafts.length + p.others.length;
   if (!p.ready) return <div className="wv">{p.load.error ? <LoadHealth load={p.load} ready={false} /> : <p className="th-quiet" role="status">Loading…</p>}</div>;
   return <div className="wv" aria-label={`All of ${p.nodeName}'s work`}>
-    <LoadHealth load={p.load} ready />
+    <LoadHealth load={p.load} ready count={p.feed.total} />
     {p.top}
     <section className="wv-sec" aria-label="Needs you" aria-busy={p.load.refreshing || undefined}>
       <h2 className="wv-h">Needs you <span className="wv-n" aria-label={countLabel(p.feed.total, p.load)} title={countLabel(p.feed.total, p.load)}>{countText(p.feed.total, p.load)}</span></h2>

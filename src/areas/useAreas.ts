@@ -158,7 +158,7 @@ export function useAreas(identity: string | null) {
     document.addEventListener("visibilitychange", visible);
     return () => document.removeEventListener("visibilitychange", visible);
   }, []);
-  return { data, error, loading: !!identity && loading, signingIn: !identity };
+  return { data, error, loading: !!identity && loading, signingIn: !identity, retry: () => setN((x) => x + 1) };
 }
 
 // Browser regression seam, absent from production builds.

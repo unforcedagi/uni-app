@@ -139,11 +139,21 @@ export function actionableTitle(rest: string): boolean {
   return rest.trim().split(/\s+/).filter(Boolean).length >= 2;
 }
 
-/** How long ago, quietly: "today", "yesterday", "3 days ago", "2 weeks ago", else the month and day. Empty for a missing or future time. */
+/** A stamp as a moment: a bare date (`2026-10-13`) is that day on the local calendar, never UTC midnight (the evening before, west of UTC). */
+export const stampMs = (iso: string | null | undefined): number => (!iso ? NaN : /^\d{4}-\d{2}-\d{2}$/.test(iso.trim()) ? new Date(`${iso.trim()}T12:00:00`).getTime() : Date.parse(iso));
+/** Whole calendar days between two moments on the local clock (r15: "yesterday" is the day before today, not 24 hours ago). */
+export const calendarDays = (fromMs: number, toMs: number): number => {
+  const a = new Date(fromMs), b = new Date(toMs);
+  return Math.round((Date.UTC(b.getFullYear(), b.getMonth(), b.getDate()) - Date.UTC(a.getFullYear(), a.getMonth(), a.getDate())) / 86_400_000);
+};
+/**
+ * How long ago, quietly: "today", "yesterday", "3 days ago", "2 weeks ago", else the month and day. Empty for a missing or future time.
+ * By calendar day on one local clock (r15), so every room says the same of the same moment.
+ */
 export function quietAgo(iso: string | null | undefined, nowMs: number): string {
-  const t = iso ? Date.parse(iso) : NaN;
+  const t = stampMs(iso);
   if (Number.isNaN(t) || t > nowMs + 60_000) return "";
-  const days = Math.floor((nowMs - t) / 86_400_000);
+  const days = Math.max(0, calendarDays(t, nowMs));
   if (days < 1) return "today";
   if (days === 1) return "yesterday";
   if (days < 14) return `${days} days ago`;
@@ -161,7 +171,7 @@ const plainTitle = (t: string) => t.replace(/^T-\d+\s+/, "");
 export function standsLine(stands: { text: string; at: string | null } | null | undefined, tasks: readonly Recent[], nowMs: number): { text: string; ago: string } | null {
   const text = firstSentence(stands?.text);
   if (text) return { text, ago: quietAgo(stands?.at, nowMs) };
-  const stamped = tasks.filter((t) => t.updatedAt && !Number.isNaN(Date.parse(t.updatedAt))).sort((a, b) => Date.parse(b.updatedAt!) - Date.parse(a.updatedAt!));
+  const stamped = tasks.filter((t) => t.updatedAt && !Number.isNaN(stampMs(t.updatedAt))).sort((a, b) => stampMs(b.updatedAt) - stampMs(a.updatedAt));
   const pick = stamped.find((t) => t.kind === "decision") ?? stamped[0];
   if (!pick) return null;
   const what = plainTitle(pick.title);

@@ -1,6 +1,6 @@
 // Run: node --experimental-strip-types scripts/tabs.test.ts
 import assert from "node:assert/strict";
-import { activeTab, closeTab, EMPTY_TABS, focusTab, MAX_TABS, navigateNoteTab, nextAfterClose, openTab, recordingTabCanClose, restoreTabs, sameTarget, serializeTabs, tabForDigit, updateTab, type TabTarget, type Tabs } from "../src/tabs.ts";
+import { isRealRoom, lastRoomOf, restorePlace, activeTab, closeTab, EMPTY_TABS, focusTab, MAX_TABS, navigateNoteTab, nextAfterClose, openTab, recordingTabCanClose, restoreTabs, sameTarget, serializeTabs, tabForDigit, updateTab, type TabTarget, type Tabs } from "../src/tabs.ts";
 import { claimRecording, recordingHolder, releaseRecording, RecordingBusy } from "../src/recLock.ts";
 
 let n = 0;
@@ -214,6 +214,30 @@ assert.equal(activeTab(restoreTabs(serializeTabs(resolvedTab), []))?.note?.ref, 
   // a saved set with two tabs for one place (older builds): the active twin restores as the kept one, never as the Journal
   const raw = JSON.stringify({ v: 1, tabs: [{ id: "a1", kind: "area", path: "P", title: "P" }, { id: "j", kind: "journal", title: "Journal" }, { id: "a2", kind: "area", path: "P", title: "P" }], active: "a2", recent: ["a1", "j", "a2"] });
   assert.equal(restoreTabs(raw, []).active, "a1");
+}
+
+{
+  // r15: a saved node that only borrows a room reopens on the last real room opened, else on nothing (the app then opens Uni)
+  let n = 0; const id = () => `n${++n}`;
+  const saved = (t: object) => restoreTabs(JSON.stringify({ v: 1, tabs: [{ id: "x", ...t }], active: "x", recent: ["x"] }), ["ch-uni", "ch-cohere"]);
+  const expr = saved({ kind: "area", path: "Areas/Expression", title: "Expression", channel: "ch-uni", borrowed: true });
+  assert.equal(activeTab(expr)?.borrowed, true, "the flag survives a save");
+  const cohere = { id: "c", kind: "area" as const, path: "Projects/COhere", title: "COhere", channel: "ch-cohere", borrowed: false };
+  assert.equal(isRealRoom(cohere), true);
+  assert.equal(lastRoomOf({ ...cohere, borrowed: true }), null, "a borrowed room is never the last room");
+  assert.equal(lastRoomOf({ id: "u", kind: "area", path: "X", title: "X" }), null, "nor a node not yet known to own one");
+  const back = restorePlace(expr, lastRoomOf(cohere), ["ch-uni", "ch-cohere"], id);
+  assert.equal(activeTab(back)?.path, "Projects/COhere");
+  assert.equal(back.tabs.some((t) => t.path === "Areas/Expression"), false);
+  assert.equal(activeTab(restorePlace(expr, null, ["ch-uni"], id)), null, "no last room: nothing, so the app opens Uni");
+  assert.equal(activeTab(restorePlace(expr, "{bad", ["ch-uni"], id)), null);
+  // a last room that has gone is not reopened
+  assert.equal(activeTab(restorePlace(expr, JSON.stringify({ kind: "room", channel: "ch-gone", title: "x" }), ["ch-uni"], id)), null);
+  // a place that owns its room, or is not yet known, is kept
+  const own = saved({ kind: "area", path: "Projects/COhere", title: "COhere", channel: "ch-cohere", borrowed: false });
+  assert.equal(restorePlace(own, null, [], id), own);
+  const unknown = saved({ kind: "area", path: "Areas/Expression", title: "Expression" });
+  assert.equal(restorePlace(unknown, null, [], id), unknown);
 }
 
 console.log("tabs tests passed");
