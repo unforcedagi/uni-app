@@ -25,13 +25,13 @@ import { copyText, onCopied } from "./clipboard";
 import { markFor, restoreTop, type ScrollMark } from "./noteText";
 import "./App.css";
 import { Body } from "./MessageBody";
-import { isWorkerStatus } from "./chatMarkers";
+import { isMaintenance, isWorkerStatus } from "./chatMarkers";
 import Pairing from "./Pairing";
 import { emojiLabel, type Reaction } from "./reactions";
 import { DeleteButton, InlineEditor } from "./InlineEditor";
 import { lastOwnMessage } from "./ownMessages";
 
-import { approvalOpen, parseApproval } from "./approvals";
+import { decisionIn, openDecision, useDecisionLinks } from "./decisionLinks";
 import { findUniMember, findUniRoom, searchHandoffText } from "./uniActions";
 import Search from "./Search";
 import Journal from "./Journal";
@@ -369,13 +369,13 @@ function Conversations({ onForget }: { onForget: () => void }) {
   }, [menuFor]);
   // Our own message currently open in the inline editor.
   const [editing, setEditing] = useState<string | null>(null);
-  // Approval prompts answered from this device: message ref -> reply sent.
-  const [answered, setAnswered] = useState<Map<string, string>>(new Map());
+  // r17: one answer mechanism: a message that names an open decision links to its sheet ("Answer in Needs you ›"); no buttons in the chat
+  const decisions = useDecisionLinks();
   // Latest bindings for syncPicker (called in the same tick as setBindings).
   const bindingsRef = useRef<Bindings>(new Map());
   // Message actions go through a ref so the memoized list never holds stale closures.
   useEffect(() => { bindingsRef.current = bindings; }, [bindings]);
-  const actions = useRef({ openThread: (_m: Message) => {}, loadOlder: () => {}, saveEdit: (_m: Message, _b: string): Promise<void> => Promise.resolve(), cancelEdit: () => {}, deleteOwn: (_m: Message): Promise<void> => Promise.resolve(), answer: (_m: Message, _reply: string) => {} });
+  const actions = useRef({ openThread: (_m: Message) => {}, loadOlder: () => {}, saveEdit: (_m: Message, _b: string): Promise<void> => Promise.resolve(), cancelEdit: () => {}, deleteOwn: (_m: Message): Promise<void> => Promise.resolve() });
 
   const [searchOpen, setSearchOpen] = useState(false);
   // Search result to scroll to and flash once its room/thread has loaded.
@@ -1288,25 +1288,6 @@ function Conversations({ onForget }: { onForget: () => void }) {
     finally { sendingRef.current = false; setSending(false); }
   }
 
-  // One-tap answer to a Hermes approval prompt: post the reply text as an
-  // ordinary message in the same lane, addressed to Uni, like send() would.
-  async function answerApproval(m: Message, reply: string) {
-    if (!channel || answered.has(m.ref)) return;
-    let target: string | null = null;
-    if (root) target = messages.some((x) => x.ref === root) ? root : messages[messages.length - 1]?.ref ?? null;
-    if (root && !target) { setError("Thread not in local cache. Refresh before replying."); return; }
-    const uni = findUniMember(members);
-    setAnswered((prev) => new Map(prev).set(m.ref, reply));
-    try {
-      await invoke<Message>("post_message", { channel, body: reply, replyTo: target, recipients: uni ? [uni.pubkey] : [] });
-      setTick((n) => n + 1);
-      setStatus(`Sent ${reply}`);
-    } catch (e) {
-      setAnswered((prev) => { const next = new Map(prev); next.delete(m.ref); return next; });
-      setError(String(e));
-    }
-  }
-
   async function forget() {
     // Two taps instead of window.confirm (unreliable in Android WebView).
     if (!forgetArmed) { setForgetArmed(true); return; }
@@ -1370,25 +1351,20 @@ function Conversations({ onForget }: { onForget: () => void }) {
           <p className="compose-hint">Enter to send · Shift+Enter for a new line · @ to mention</p>
         </footer>
   </>;
-  const approvalRow = (m: Message) => {
-    const prompt = parseApproval(m.body);
-    if (!prompt) return null;
-    const sent = answered.get(m.ref);
-    if (!sent && !approvalOpen(m.ts, messages, Date.now() / 1000, 1800)) return null;
-    return <div className="approval-actions" role="group" aria-label="Answer approval request">
-      {prompt.choices.map((c) => <button key={c.reply} className={`pill approval-${c.tone}`} disabled={!!sent} onClick={() => actions.current.answer(m, c.reply)} aria-label={`${c.label}: send ${c.reply}`}>{c.label}</button>)}
-      {sent && <span className="approval-sent">Sent: {sent}</span>}
-    </div>;
+  /** r17: a message naming an open decision (its `[decision T-NN]` marker or its id) gets one quiet way to that decision's sheet. */
+  const decisionLink = (m: Message) => {
+    const id = decisionIn(m.body, decisions.known);
+    return id ? <button type="button" className="msg-decision-link" onClick={() => openDecision(id)}>Answer in Needs you<span aria-hidden="true"> ›</span></button> : null;
   };
 
   const renderMessage = (m: Message, inThread: boolean, prev?: Message) => {
-    if (isWorkerStatus(m.body) && !(inThread && m.ref === root) && editing !== m.ref) return <article key={m.ref} data-ref={m.ref} className="message status-line" title={m.body}><span className="status-line-text">{m.body}</span><time>{clock(m.ts)}</time></article>;
+    if ((isWorkerStatus(m.body) || isMaintenance(m.body)) && !(inThread && m.ref === root) && editing !== m.ref) return <article key={m.ref} data-ref={m.ref} className="message status-line" title={m.body}><span className="status-line-text">{m.body}</span><time>{clock(m.ts)}</time></article>;
     const grouped = !!prev && prev.author === m.author && m.ts - prev.ts < 300 && !(inThread && prev.ref === root);
     return <article key={m.ref} data-ref={m.ref} className={`message ${m.ref === focusRef ? "search-focus" : ""} ${grouped ? "grouped" : ""} ${m.author === identity ? "mine" : ""} ${m.mentions_me ? "highlight" : ""} ${inThread && m.ref === root ? "thread-root" : ""}`}>
       {grouped ? <time className="gutter-time">{clock(m.ts)}</time> : <span className="message-avatar" style={{ background: `hsl(${150 + (hue(m.author) % 120) - 60} 22% 44%)` }} aria-hidden="true">{m.author_name[0]?.toUpperCase() ?? "?"}</span>}
       <div className="message-content">{!grouped && <div className="message-meta"><strong>{m.author_name}</strong><time>{clock(m.ts)}</time></div>}{editing === m.ref ? <InlineEditor key={m.ref} initial={m.body} onSave={(body) => actions.current.saveEdit(m, body)} onCancel={() => actions.current.cancelEdit()} /> : <Body body={attachmentBody(m.body, m.media, relayOrigin)} mentions={m.mentions} me={identity} edited={m.edited} />}
         <Attachments body={m.body} media={m.media} />
-        {approvalRow(m)}
+        {decisionLink(m)}
         {m.reactions.length > 0 && <div className="reactions" aria-label="Reactions">{m.reactions.map((r) => <span key={r.emoji} className={`pill ${r.mine ? "mine" : ""}`} aria-label={`${emojiLabel(r.emoji)} ${r.count}${r.mine ? ", including yours" : ""}`}>{emojiLabel(r.emoji)} <span>{r.count}</span></span>)}</div>}
         {!inThread && m.reply_count > 0 && <button className="thread-summary" onClick={() => actions.current.openThread(m)} aria-label={`View thread with ${m.reply_count} ${m.reply_count === 1 ? "reply" : "replies"}`}>💬 {m.reply_count} {m.reply_count === 1 ? "reply" : "replies"}{m.last_reply_ts ? <span> · last {time(m.last_reply_ts)}</span> : null}</button>}
         <div className={`message-more ${menuFor === m.ref ? "open" : ""}`}>
@@ -1419,7 +1395,6 @@ function Conversations({ onForget }: { onForget: () => void }) {
     saveEdit,
     cancelEdit: () => { setEditing(null); input.current?.focus(); },
     deleteOwn,
-    answer: (m, reply) => void answerApproval(m, reply),
   };
 
   // The rendered timeline depends only on data, never on the draft, so
@@ -1445,7 +1420,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     {renderList(messages, false)}
   </>,
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  [messages, identity, menuFor, answered, root, older, roomName, editing, focusRef, relayOrigin, fetchedView, failedView, currentView]);
+  [messages, identity, menuFor, decisions.version, root, older, roomName, editing, focusRef, relayOrigin, fetchedView, failedView, currentView]);
 
   const topNote = notes[notes.length - 1];
   // A top-level note Back closes its tab and returns to the last used tab.

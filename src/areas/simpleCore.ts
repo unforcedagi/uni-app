@@ -12,17 +12,19 @@ export function firstSentence(text: string | null | undefined): string {
   return m ? m[0] : plain;
 }
 
+/** A task someone else holds that waits on the user (r17: `waiting_on` names them, whatever its owner): their part is the step it asks for. */
+export const waitsOnMe = (t: Pick<Task, "owner" | "waitingOn">): boolean => isMe(t.waitingOn) && !isMe(t.owner);
 /**
  * Whether a task belongs in Needs you: the companion's list, the work view and the tree's dots use this one rule (r12). Every open decision,
- * and the user's own tasks (r16: `owner` is the user; a room's or Uni's task that only waits on them is theirs to move, so it stays in
- * In motion as "Waiting on you") at Now or Soon (unsorted is Soon); live, never Someday. Snoozed and finished tasks are dropped before.
+ * the user's own tasks, and (r17) any task whose `waiting_on` names the user whatever its owner, at Now or Soon (unsorted is Soon); live,
+ * never Someday. A room's or Uni's own drafting that waits on no one is not theirs (r16). Snoozed and finished tasks are dropped before.
  */
 export function needsYou(t: Pick<Task, "kind" | "owner" | "waitingOn" | "priority" | "state">): boolean {
   if (t.state !== "open" && t.state !== "doing" && t.state !== "waiting") return false;
-  return t.kind === "decision" || (isMe(t.owner) && t.priority !== "someday");
+  return t.kind === "decision" || ((isMe(t.owner) || isMe(t.waitingOn)) && t.priority !== "someday");
 }
-/** The user's own: an open decision, or a task they own (r16). Everything else here is someone else's, in In motion. */
-export const isMine = (t: Pick<Task, "kind" | "owner">): boolean => t.kind === "decision" || isMe(t.owner);
+/** The user's own: an open decision, a task they own, or one that waits on them (r17). Everything else here is someone else's, in In motion. */
+export const isMine = (t: Pick<Task, "kind" | "owner" | "waitingOn">): boolean => t.kind === "decision" || isMe(t.owner) || isMe(t.waitingOn);
 
 /** How many items under each node path need you there (the node's own, never its children's): the tree's dots. */
 export function needsByNode(tasks: readonly Task[]): Map<string, number> {
@@ -87,12 +89,22 @@ export function needsFeed(tasks: readonly Task[], privateOf: (node: string) => P
   return { rows, privates: [...by.values()], total: all.length };
 }
 
-/** Uni's panel (r13): Uni's own rows, then the first `fromAreas` from the areas; `rest` is how many named area rows wait in "All of Uni's work". */
-export function uniPanel(feed: NeedsFeed, fromAreas = 3): NeedsFeed & { rest: number } {
+/** Rows Uni's own panel shows (r17): the rest, private items included, are one "N more ›" to the work view. */
+export const UNI_ROWS = 3;
+/**
+ * Uni's panel (r17, lighter): at most `max` rows (Uni's own first, then the areas by urgency) and one count of everything else (`rest`, which
+ * folds in the private areas' items: `privateCount`, said only in the link's tooltip). No private lines and no second "more" line here; the work
+ * view keeps the full list.
+ */
+export function uniPanel(feed: NeedsFeed, max = UNI_ROWS): NeedsFeed & { rest: number; privateCount: number } {
   const own = feed.rows.filter((t) => t.node === ROOT);
   const areas = feed.rows.filter((t) => t.node !== ROOT);
-  return { ...feed, rows: [...own, ...areas.slice(0, fromAreas)], rest: Math.max(0, areas.length - fromAreas) };
+  const rows = [...own, ...areas].slice(0, max);
+  const privateCount = feed.privates.reduce((n, p) => n + p.count, 0);
+  return { rows, privates: [], total: feed.total, rest: Math.max(0, feed.total - rows.length), privateCount };
 }
+/** "Includes 1 in a private area": the "N more ›" link's tooltip, when private items are folded into its count. */
+export const privateNote = (n: number): string | null => (n <= 0 ? null : n === 1 ? "Includes 1 item in a private area" : `Includes ${n} items in private areas`);
 
 /** "Sadhana: 2 for you": a private area's items, from outside it, by place and count only (r14). */
 export function privateLabel(p: Pick<PrivateNeed, "count" | "place">): string {
@@ -106,12 +118,139 @@ export function actionLead(next: string | null | undefined): string | null {
   if (!t || !ACTION_VERBS.test(t)) return null;
   return t[0].toLocaleUpperCase() + t.slice(1);
 }
-/** What a "Say …" / "Reply …" / "Tell …" step would put in the room's composer (never sent): the words after the verb. Null for other steps. */
-export function sayText(lead: string | null): string | null {
-  const m = /^(say|reply|tell|answer)\b[\s:,-]*(?:with\s+|to\s+(?:the\s+)?room\s+)?(.*)$/i.exec(lead ?? "");
+/**
+ * Who a step's words are for (r17). `room`: the message is for the room itself ("Say go to deploy…", "Tell Uni…", "Tell the room…", "Ask Uni
+ * to…", or a step that names this room, "…in #woven-web"): the sheet offers "Say it in #room ›" with `text` in the composer (never sent; "" when
+ * there are no words to put there). `person`: an action toward someone outside the room ("Tell Christian…", "Reply to jonbo…", "Email…", "Send
+ * Ryan…"): the sheet leads with the action and offers its real link (`mailto:` or a URL the task carries) or Copy, never a room prefill. Null: any
+ * other step. `room`: the task's room name (with or without "#"), so a step naming it is known to be for it.
+ */
+export type Audience = { kind: "room"; text: string } | { kind: "person"; copy: string; link: { href: string; label: string } | null };
+const ROOM_WORDS = /^(?:uni|main|the room|this room|the channel|everyone here)\b/i;
+const QUESTION_WORD = /^(?:whether|which|if|what|who|when|how|why)\b/i;
+const PERSON_VERB = /^(?:tell|reply|respond|email|e-mail|mail|message|text|call|phone|ping|ask|send|forward|invite|write|thank|remind|follow up|introduce|nudge|answer)\b/i;
+const unquote = (s: string) => s.replace(/^["“'‘]+|["”'’]+$/g, "").replace(/[.\s]+$/, "").trim();
+const capFirst = (s: string) => (s ? s[0].toLocaleUpperCase() + s.slice(1) : s);
+const slugOf = (s: string | null | undefined) => (s ?? "").trim().replace(/^#/, "").toLowerCase();
+/** A recipient written as a name ("to Christian", "Christian the…", "Benya + Eileen"): a capitalised word that is not Uni, the room or a channel. */
+const namesPerson = (rest: string) => /^(?:to\s+|with\s+)?(?!uni\b|main\b|the\b|this\b|everyone\b|#)\p{Lu}[\p{L}'’.-]*/u.test(rest);
+export function stepAudience(next: string | null | undefined, room: string | null = null): Audience | null {
+  const step = (next ?? "").replace(/[*_`>]/g, "").replace(/\s+/g, " ").trim();
+  if (!step) return null;
+  const here = slugOf(room);
+  const named = [...step.matchAll(/(?:^|\s)#([\w./-]*\w)/g)].map((m) => m[1].toLowerCase());
+  const quoted = /["“'‘]([^"”'’]{1,120})["”'’]/.exec(step)?.[1] ?? "";
+  // "Say …": for the room, unless it is said to a named person ("Say thanks to Mark")
+  let m = /^say\b[\s:,-]*(.*)$/i.exec(step);
+  if (m && !/\bto\s+\p{Lu}[\p{L}'’.-]*(?:\s|$|[,.])/u.test(m[1].replace(/\bto\s+(?:uni|the room)\b/gi, ""))) {
+    const rest = m[1].replace(/^(?:with\s+|to\s+(?:the\s+)?room\s+)/i, "");
+    return { kind: "room", text: QUESTION_WORD.test(rest) ? "" : capFirst(unquote(rest)) };
+  }
+  // "Tell Uni …", "Tell the room …", "Ask Uni to …", "Reply to Uni …"
+  m = /^(?:tell|ask|reply to|answer|message|ping)\s+(uni|main|the room|this room|the channel|everyone here)\b[\s:,-]*(?:to\s+|that\s+)?(.*)$/i.exec(step);
+  if (m && ROOM_WORDS.test(m[1])) return { kind: "room", text: QUESTION_WORD.test(m[2]) ? "" : capFirst(unquote(m[2])) };
+  // a step that names this room ("Answer the 7 questions in #woven-web", "Reply in the room with…")
+  if (here && named.includes(here)) return { kind: "room", text: unquote(quoted) };
+  if (/^(?:reply|answer|respond)\b/i.test(step) && !named.length && (/\b(?:in|to) (?:the|this) room\b/i.test(step) || (/^reply\b/i.test(step) && !/^reply\s+to\b/i.test(step) && !namesPerson(step.replace(/^reply\s*/i, ""))))) return { kind: "room", text: unquote(quoted || (/^\w+\s*[:—–]\s*(.+)$/.exec(step)?.[1] ?? "")) };
+  // toward a person outside the room
+  // "Edit and send the draft to Mark…": the sending is the action
+  const act = step.replace(/^(?:edit|review|check|finish|polish|read)(?:\s+(?:it|this|the draft))?\s+and\s+/i, "");
+  if (PERSON_VERB.test(act)) {
+    const rest = act.replace(PERSON_VERB, "").trim();
+    const toSomeone = /^(?:email|e-mail|mail|call|phone|text)\b/i.test(act) || namesPerson(rest) || /\bto\s+\p{Lu}/u.test(rest) || /^(?:to|back to)\s+\S/i.test(rest);
+    if (toSomeone) {
+      const mail = /\b[\w.+-]+@[\w-]+(?:\.[\w-]+)+\b/.exec(step)?.[0];
+      const url = /https?:\/\/[^\s)>\]]+/.exec(step)?.[0];
+      const link = mail ? { href: `mailto:${mail}`, label: `Email ${mail}` } : url ? { href: url.replace(/[.,;:]+$/, ""), label: `Open ${hostOf(url)}` } : null;
+      return { kind: "person", copy: step, link };
+    }
+  }
+  return null;
+}
+const hostOf = (url: string) => { try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return "the link"; } };
+/** What a room-directed step would put in the room's composer (never sent). Kept for the r13 callers: the room's words, else null. */
+export function sayText(lead: string | null, room: string | null = null): string | null {
+  const a = stepAudience(lead, room);
+  return a?.kind === "room" ? a.text : null;
+}
+
+/** Number words a step may use for its questions ("the nine questions"). */
+const NUMBER_WORDS: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12 };
+/**
+ * A step that asks for answers to questions written elsewhere (r17): "answer the nine operational/editorial questions…", "Answer the 7 Woven
+ * Web direction questions". The count, or null. The row says "Answer 9 questions ›" and the sheet lists them, read from the notes.
+ */
+export function questionCount(next: string | null | undefined): number | null {
+  const m = /\banswer\b(?:\s+(?:the|any of the|all|all of the|these|those|my|your|his|her))?\s+(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b(?:[^.?!;]|\.(?=\S)){0,60}?\bquestions?\b/i.exec(next ?? "");
   if (!m) return null;
-  const words = m[2].replace(/^["“'‘]|["”'’]$/g, "").trim();
-  return words || null;
+  const n = /^\d+$/.test(m[1]) ? Number(m[1]) : NUMBER_WORDS[m[1].toLowerCase()];
+  return n && n > 0 ? n : null;
+}
+/** "Answer 9 questions": the row's way into the sheet that lists them. */
+export const answerLabel = (n: number): string => `Answer ${n} ${n === 1 ? "question" : "questions"}`;
+const LIST_ITEM = /^\s*(?:[-*+•]|\d+[.)])\s+(.*)$/;
+const NUMBERED = /^\s*\d+[.)]\s+/;
+const cleanItem = (s: string) => s.replace(/\[\[([^\]|]*\|)?([^\]]*)\]\]/g, "$2").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/[*_`]/g, "").replace(/\s+/g, " ").trim();
+/** The lists in a note: runs of list lines, each with the heading it sits under and whether it is numbered. */
+function listsIn(content: string): { heading: string; numbered: boolean; items: string[] }[] {
+  const out: { heading: string; numbered: boolean; items: string[] }[] = [];
+  let heading = ""; let cur: { heading: string; numbered: boolean; items: string[] } | null = null;
+  for (const raw of content.split(/\r?\n/)) {
+    const h = /^#{1,6}\s+(.*)$/.exec(raw.trim());
+    if (h) { heading = h[1]; cur = null; continue; }
+    const li = LIST_ITEM.exec(raw);
+    if (li && !/^\s{2,}/.test(raw)) {
+      // a list of the other kind (numbered after bullets) is a new list
+      if (cur && cur.numbered !== NUMBERED.test(raw)) cur = null;
+      if (!cur) { cur = { heading, numbered: NUMBERED.test(raw), items: [] }; out.push(cur); }
+      cur.items.push(cleanItem(li[1]));
+      continue;
+    }
+    if (cur && raw.trim() && /^\s{2,}/.test(raw)) continue; // a nested line stays with its item
+    if (cur && raw.trim()) cur = null;
+  }
+  return out.filter((l) => l.items.length);
+}
+/**
+ * The questions a note holds (r17): the first list under a heading about questions, else the first numbered list, else (when the step said how
+ * many) the first list of exactly that many. Null when the note has none: the sheet then says so and offers the note.
+ */
+export function questionsFrom(content: string | null | undefined, want: number | null = null): string[] | null {
+  const lists = listsIn(content ?? "");
+  const pick = lists.find((l) => /\bquestions?\b/i.test(l.heading)) ?? lists.find((l) => l.numbered) ?? (want ? lists.find((l) => l.items.length === want) : undefined);
+  return pick ? pick.items : null;
+}
+/** Notes a text links to, as refs to read in its own vault: `uni:<ULID>`, `[[Path]]` and bare ULIDs, in order, once each. */
+export function linkedRefs(text: string | null | undefined): string[] {
+  const out: string[] = [];
+  const add = (r: string) => { const t = r.trim(); if (t && !out.includes(t)) out.push(t); };
+  for (const m of (text ?? "").matchAll(/\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]|(?:\b[a-z][\w-]*:)?\b([0-9A-HJKMNP-TV-Z]{26})\b/g)) add(m[1] ?? m[2]);
+  return out;
+}
+
+/**
+ * The answers a decision offers (r17), so no answer is ambiguous. Its stored options; else Yes and No only beside a question (a sentence ending
+ * in "?"); else answers built from the statement that say what each does ("Texting is not recommended…": "Agree (skip texting)" and
+ * "Disagree"; a proposal, "Decision (default yes): Uni adds…": "Go ahead" and "Skip it"). `open`: no such answers can be built: the row says
+ * "Open to decide ›" and the sheet offers "Agree" and "Disagree" beside the whole statement.
+ */
+export type Choice = { label: string; value: string };
+export function answerChoices(question: string, options: readonly string[], title = ""): { choices: Choice[]; open: boolean } {
+  if (options.length) return { choices: options.map((o) => ({ label: o, value: o })), open: false };
+  const q = question.replace(/\s+/g, " ").trim();
+  if (/\?["')\]]*$/.test(q)) return { choices: [{ label: "Yes", value: "yes" }, { label: "No", value: "no" }], open: false };
+  const agreeDisagree = (what: string): Choice[] => [{ label: `Agree (${what})`, value: `agree: ${what}` }, { label: "Disagree", value: "disagree" }];
+  const subject = (s: string) => { const w = s.replace(/^(?:the|a|an)\s+/i, "").trim(); return w.split(/\s+/).length <= 4 && !/[,;:]/.test(w) ? (/^\p{Lu}{2,}/u.test(w) ? w : w[0].toLocaleLowerCase() + w.slice(1)) : null; };
+  let m = /^(.+?)\s+(?:is|are)\s+not\s+(?:recommended|advised|worth it|needed)\b/i.exec(q) ?? /^(?:we\s+|uni\s+)?(?:don't|do not|doesn't|does not)\s+recommend\s+(.+?)(?=\s+(?:for|this|because|until|before|now)\b|[.,;]|$)/i.exec(q);
+  if (m) { const s = subject(m[1]); if (s) return { choices: agreeDisagree(`skip ${s}`), open: false }; }
+  m = /^(.+?)\s+(?:is|are)\s+recommended\b/i.exec(q) ?? /^(?:we\s+|uni\s+)?recommends?\s+(.+?)(?=\s+(?:for|this|because|until|before|now)\b|[.,;]|$)/i.exec(q);
+  if (m) { const s = subject(m[1]); if (s) return { choices: agreeDisagree(s), open: false }; }
+  // a proposal: Uni goes ahead unless told no ("default yes"), or waits for a yes ("needs your yes")
+  if (/^decision\s*\((?:default yes|needs your yes)\)/i.test(title.trim()) || /\bsay no to\b/i.test(q)) {
+    const no = /\bsay no to (skip|drop|stop|cancel|hold) (it|this|that)\b/i.exec(q);
+    return { choices: [{ label: "Go ahead", value: "yes" }, { label: no ? capFirst(`${no[1].toLowerCase()} ${no[2].toLowerCase()}`) : "Skip it", value: "no" }], open: false };
+  }
+  return { choices: [{ label: "Agree", value: "agree" }, { label: "Disagree", value: "disagree" }], open: true };
 }
 
 /**

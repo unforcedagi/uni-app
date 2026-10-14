@@ -101,7 +101,7 @@ export default function PairSource({ onClose }: { onClose: () => void }) {
     <h2 id="pair-source-title">Pair a device</h2>
     {step === "unlock" && <p role="status">Unlock your device to continue…</p>}
     {step === "waiting" && <>
-      <p>On the other device, open Uni → Pair, scan this code or paste the link.</p>
+      <p>On the other device, open Uni’s sign-in screen, then scan this code or paste the link there.</p>
       <img className="pair-source-qr" src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(qr)}`} alt="Pairing QR code" />
       <button className="pairing-secondary" onClick={() => void copy()}>{copied ? "Link copied" : "Copy link"}</button>
       <p className="pairing-note">This link contains a session secret. Share it only with the device you are pairing.</p>

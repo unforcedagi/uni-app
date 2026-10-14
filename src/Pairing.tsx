@@ -72,7 +72,6 @@ export default function Pairing({ onPaired }: { onPaired: (pubkey: string) => vo
           <li>Scan the QR code it shows, or copy its link and paste it here.</li>
           <li>Tap Start, then compare the 6-digit codes.</li>
         </ol>
-        <p className="pairing-note">Buzz desktop can sign this device in too: Settings → Pair mobile device.</p>
         {isAndroid && <button className="pairing-secondary" disabled={step === "connecting"} onClick={() => void scanQr()}>Scan QR code</button>}
         <label className="pairing-label">Pairing link
           <textarea value={link} onChange={(e) => setLink(e.target.value)} rows={4} spellCheck={false} autoCapitalize="off" autoCorrect="off" placeholder="Paste the link from the other device" disabled={step === "connecting"} />
@@ -91,7 +90,10 @@ export default function Pairing({ onPaired }: { onPaired: (pubkey: string) => vo
       </>}
       {step === "done" && <p>Paired. Loading your conversations…</p>}
       {error && <p className="error" role="alert">{error}</p>}
-      <p className="pairing-note">Your key is sent encrypted, end to end, and stored in this device's secure keystore.</p>
+      <details className="pairing-help"><summary>More about signing in</summary>
+        <p className="pairing-note">Your key is sent encrypted, end to end, and kept in this device's secure storage.</p>
+        <p className="pairing-note">Buzz desktop can sign this device in too: its Settings → Pair mobile device.</p>
+      </details>
     </div>
   </main>;
 }

@@ -137,3 +137,20 @@
 .undo-go:focus-visible, .undo-x:focus-visible { outline: 3px solid var(--th-paper); outline-offset: -4px; }
 @media (prefers-reduced-motion: reduce) { .task-row.leaving, .task-sheet { animation: none; } .task-row.leaving { opacity: 0; max-height: 0; } }
 
+/* r17: Archive and Snooze are housekeeping: a small quiet row under the real action, never as heavy as it */
+.task-house { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 10px 0 0; padding: 0 2px; }
+.task-house-b { all: unset; box-sizing: border-box; min-height: 36px; display: inline-flex; align-items: center; font-size: 13.5px; font-weight: 500; color: var(--th-ink2); text-decoration: underline; text-decoration-color: var(--th-hair2); text-underline-offset: 3px; cursor: pointer; }
+.task-house-b:hover { color: var(--th-ink); }
+.task-house-b:focus-visible { outline: 2px solid var(--th-ink); outline-offset: 2px; }
+.task-house-b[disabled] { opacity: .6; cursor: default; }
+@media (pointer: coarse) { .task-house-b { min-height: 44px; } }
+/* r17: the questions a step asks to answer, read from the notes, as a numbered list in the sheet */
+.task-questions { margin: 4px 0 12px; }
+.task-q-h { margin: 0 0 4px; font-size: 13px; letter-spacing: .02em; font-weight: 700; color: var(--th-ink); }
+.task-q-list { margin: 0; padding-left: 1.5em; display: grid; gap: 6px; font-size: 15px; line-height: 1.4; }
+.task-q-list li { overflow-wrap: anywhere; }
+.task-q-note { margin: 6px 0 0; font-size: 13px; color: var(--th-ink2); }
+.task-answer.busy { opacity: .6; pointer-events: none; }
+/* r17: "Details" no longer sits on the sheet's bottom edge (Sonnet) */
+.task-sheet .task-details { margin-bottom: 6px; }
+.task-sheet::after { height: 24px; }

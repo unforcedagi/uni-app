@@ -3,10 +3,10 @@ import { TaskSheet, UndoBar, ownerLabel } from "./NodeWork";
 import { useTasks } from "./useTasks";
 import { draftsUnder, runsUnder } from "./steerCore";
 import { CompanionSide, CompanionStrip, useCompanionOpen, type CompanionProps, type TaskLoad } from "./Companion";
-import { chatPlaceholder, isMine, needsByRow, needsFeed, standsLine, stateLine, uniPanel, type PrivateNeed } from "./simpleCore";
+import { chatPlaceholder, isMine, needsByRow, needsFeed, privateNote, standsLine, stateLine, uniPanel, type PrivateNeed } from "./simpleCore";
 import { ownRoom, type Steward } from "./talkCore";
 import type { Area } from "./areasCore";
-import { isMe, priorityOf, tasksUnder, type Task, type TaskNode } from "./taskCore";
+import { isMe, nodeFilterKeys, priorityOf, tasksUnder, type Task, type TaskNode } from "./taskCore";
 import type { RoomInfo } from "./TodayView";
 import { refreshDraft, updatedLabel } from "./briefCore";
 import AreaView, { type AppView, type AreaActions } from "./AreaView";
@@ -18,7 +18,7 @@ import { pickRoom } from "./areaLayout";
 import { childrenOf, parentPath, ROOT, rootNode, trail, UNI_CHANNEL } from "./treeCore";
 import { findUniRoom } from "../uniActions";
 import { useStoredSelfTest } from "../interface/selftest/useSelfTest";
-import { useRailHidden, useWide } from "./homeLayout";
+import { useRailHidden, useShortTree, useWide } from "./homeLayout";
 import { isPrivateNode, privateRoot, roomSlug, roomView, treeRows } from "./treeRooms";
 import { publishRoomNodes, roomNodeMap } from "./roomLabels";
 import { useNav, type NavControls } from "../navContext";
@@ -31,6 +31,8 @@ import { Body } from "../MessageBody";
 import { projectBody } from "./projectBody";
 import { rootOpenMemory } from "./rootMemory";
 import { trapTab } from "./focusTrap";
+import { publishDecisions, setDecisionOpener } from "../decisionLinks";
+import { taskTitle } from "./whereCore";
 import type { NoteRef } from "./noteRefsCore";
 import "./areas.css";
 import "./tree.css";
@@ -88,7 +90,10 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   const wide = useWide();
   /** One rule for global navigation (r14): Places (the drawer) shows whenever the rail is hidden, and below 900px where the tree is. */
   const railHidden = useRailHidden();
-  const placesDrawer = !wide || railHidden;
+  /** r17: under 400px tall the sidebar folds into the drawer (the chat had ~170px beside it at 920×360): one tree, never two. */
+  const shortTree = useShortTree();
+  const sidebar = wide && !shortTree;
+  const placesDrawer = !sidebar || railHidden;
   /** The companion beside (wide) or above (phone) the conversation: open or folded, remembered per device. */
   const [companionOpen, setCompanionOpen] = useCompanionOpen(wide ? "side" : "strip");
   /** Phone: the room tree is the home and a level opens from it; Uni's own level is one tap on its row. */
@@ -189,6 +194,12 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   // The whole tree's tasks are loaded once (the room tree beside the room needs every row's dot) and each level takes its subtree.
   const tasks = useTasks(identity, "", fallback);
   const levelTasks = useMemo(() => (tasks.tree && node ? tasksUnder(tasks.tree, node.path, tasks.tasks) : tasks.tasks), [tasks.tree, tasks.tasks, node?.path]); // eslint-disable-line react-hooks/exhaustive-deps
+  // r17: one answer mechanism: the chat links a message that names an open decision to that decision's sheet here (never a private area's)
+  useEffect(() => {
+    const tree = data?.tree;
+    publishDecisions((tasks.all ?? []).filter((t) => t.kind === "decision" && t.state === "open" && !(tree && privateRoot(tree, t.node))).map((t) => ({ id: t.id, tid: taskTitle(t.title).id, forTask: t.forTask ?? null })));
+  }, [tasks.all, data?.tree]);
+  useEffect(() => { setDecisionOpener((id) => { setWork(false); setDrawer(false); setAppOpen(false); setSheetId(id); }); return () => setDecisionOpener(null); }, []);
   /** The task list's health, for the companion and the tree. */
   const load: TaskLoad = { error: tasks.error, treeError: tasks.treeError, refreshing: tasks.refreshing, lastOk: tasks.lastOk, complete: tasks.complete, retry: tasks.refresh, savedAt: tasks.savedAt, slow: tasks.slow };
   // opening a room anywhere opens its node's one view
@@ -223,7 +234,8 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   const treeProps = { chat, rows: navRows, needs: navNeeds, onOpen: openPath, others, onOpenRoom: openRoomFromTree, load, needsReady: tasks.ready };
   /** The app's own places (Journal, Vault, Search, Settings), for where the rail is out of reach: the drawer and a short screen's tree. */
   const places = nav?.places ?? [];
-  const placesRow = places.length > 0 && <nav className="th-places" aria-label="App">{places.map((p) => <button key={p.label} type="button" className="th-place" onClick={() => { setDrawer(false); p.go(); }}>{p.label}</button>)}</nav>;
+  // r17: Places holds only what the shell is not already showing: the app's places only while the rail is hidden (Codex P2-4)
+  const placesRow = railHidden && places.length > 0 && <nav className="th-places" aria-label="App">{places.map((p) => <button key={p.label} type="button" className="th-place" onClick={() => { setDrawer(false); p.go(); }}>{p.label}</button>)}</nav>;
   const drawerNav: NavControls | null = nav ? { ...nav, back: () => { setDrawer(false); (nav.backPlace ?? nav.back)(); }, forward: () => { setDrawer(false); nav.forward(); }, recent: nav.recent.map((r) => ({ ...r, go: () => { setDrawer(false); r.go(); } })) } : null;
   /**
    * The room itself: a header (title, the room's own name, where it sits), the conversation, and the companion beside it (wide) or as a
@@ -237,7 +249,7 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
     const replies = thread && o.chatRoom?.loaded ? o.chatRoom.messages.filter((m) => m.ref !== thread.root).length : null;
     const view = o.main ? "work" : thread ? "thread" : "room";
     return <div className={`tree-home th-level ${wide ? "wide" : "phone"} th-rooms th-simple ${wide && (!o.companion || o.main) ? "solo" : wide && !companionOpen ? "folded" : ""}`} data-layout="rooms" data-view={view}>
-      {wide && <RoomSidebar {...treeProps} selected={o.selected} selectedRoom={o.selectedRoom} nav={nav} />}
+      {sidebar && <RoomSidebar {...treeProps} selected={o.selected} selectedRoom={o.selectedRoom} nav={nav} />}
       <section className="sr" aria-label={o.main ? `Work: ${o.title}` : `Conversation: ${o.title}`} data-node={o.node}>
         <header className="sr-head">
           {placesDrawer && <button ref={drawerOpener} type="button" className="sr-drawer" aria-label="Places" title="Rooms and places" aria-expanded={drawer} aria-controls="th-drawer" onClick={() => setDrawer(true)}><span aria-hidden="true" /></button>}
@@ -327,7 +339,7 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   const hidden = (p: string) => { const r = privateOf(p); return !!r && r.path !== selfPrivate?.path; };
   // ------------------------------------------------------------------------------------------ Needs you: one feed, one count (r13)
   const feed = needsFeed(levelTasks, privateOf, selfPrivate);
-  const panel = isRoot ? uniPanel(feed) : { ...feed, rest: 0 };
+  const panel = isRoot ? uniPanel(feed) : { ...feed, rest: 0, privateCount: 0 };
   const taskTree = tasks.tree;
   const runs = taskTree ? runsUnder(taskTree, here, tasks.runs).filter((r) => !hidden(r.node)) : [];
   const drafts = taskTree ? draftsUnder(taskTree, here, tasks.drafts).filter((d) => !hidden(d.node)) : [];
@@ -345,8 +357,9 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   const sheetTask = sheetId ? live ?? (lastSheet.current?.id === sheetId ? lastSheet.current : null) : null;
   const sheetGone = !!sheetId && (!live || !(live.state === "open" || live.state === "doing" || live.state === "waiting") || (tasks.ready && !tasks.tasks.some((t) => t.id === sheetId) && !tasks.leaving.has(sheetId)));
   const sheetView = sheetTask && <TaskSheet key={sheetTask.id} task={sheetTask} gone={sheetGone} here={here} nodeName={nodeName} room={roomOfNode(sheetTask.node) ?? target} inRoom={target?.id} onClose={closeSheet}
-    onAct={(t, a) => tasks.act(t, a, { sheet: true })} onDecide={decide} onNote={actions.openNote} onOpenRoom={openRoomHere} onSay={chat ? sayIn : undefined} onPriority={(t, p) => void tasks.setPriority(t, p)} onStale={tasks.refresh} />;
-  const companionProps: CompanionProps = { stands, ready: tasks.ready, load, feed: panel, rest: panel.rest, onPrivate: openPrivate, runs, nodeName: node.name, scope: borrowed ? node.name : null, onTask: openSheet, onNote: actions.openNote, onDecide: decide, onEverything: () => { closeSheet(); setWork(true); } };
+    nodeKeys={sheetTask.node !== ROOT && tasks.tree ? nodeFilterKeys(tasks.tree, [sheetTask.node]) : []}
+    onAct={(t, a) => tasks.act(t, a, { sheet: true })} onDecide={(t, o) => tasks.decide(t, o)} onNote={actions.openNote} onOpenRoom={openRoomHere} onSay={chat ? sayIn : undefined} onPriority={(t, p) => void tasks.setPriority(t, p)} onStale={tasks.refresh} />;
+  const companionProps: CompanionProps = { stands, ready: tasks.ready, load, feed: panel, rest: panel.rest, moreTitle: privateNote(panel.privateCount), onPrivate: openPrivate, runs, nodeName: node.name, scope: borrowed ? node.name : null, onTask: openSheet, onNote: actions.openNote, onDecide: decide, onEverything: () => { closeSheet(); setWork(true); } };
   const placeholder = chatPlaceholder({ name: node.name, slash: nodeView.own ? nodeView.slash : null, heldBy: nodeView.heldBy ? nodeView.heldBy.name : null });
   // ------------------------------------------------------------------------------------------ the work view (r13)
   const mineLive = isMine;
@@ -359,7 +372,7 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   const briefNow = !isRoot ? entry?.brief.now ?? "" : "";
   const top = (briefNow || fresh || askRoom) ? <div className="wv-top">
     {briefNow && <p className="th-lede wv-brief">{entry!.brief.nowTokens.length ? <InlineText tokens={entry!.brief.nowTokens} onNote={openHere} /> : briefNow}</p>}
-    <p className="th-fresh wv-fresh">{fresh && <span>Brief {fresh}</span>}{askRoom && <button type="button" className="th-link" onClick={() => actions.compose(askRoom, refreshDraft(node.name, isRoot ? "" : node.path))}>Refresh the brief</button>}</p>
+    <p className="th-fresh wv-fresh">{fresh && <span>Brief {fresh}</span>}{askRoom && <button type="button" className="th-link" onClick={() => actions.compose(askRoom, refreshDraft(node.name, isRoot ? "" : node.path))}>Ask Uni to update this summary</button>}</p>
   </div> : null;
   const foot = node.kind === "project" && body ? <details className="th-note wv-note"><summary>Project note</summary><Body body={body} mentions={[]} me={null} /></details> : null;
   const workMain = <WorkView nodeName={node.name} feed={feed} others={othersHere} later={later} runs={runs} drafts={drafts} privateOther={privateOther} ready={tasks.ready} load={load} activity={tasks.activity}

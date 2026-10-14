@@ -27,3 +27,8 @@ export const useWide = (): boolean => useSyncExternalStore(subscribeWide, () => 
 export const RAIL_HIDDEN_QUERY = "(max-height: 499px) and (max-width: 950px)";
 const subscribeRail = (f: () => void) => { const mq = window.matchMedia(RAIL_HIDDEN_QUERY); mq.addEventListener("change", f); return () => mq.removeEventListener("change", f); };
 export const useRailHidden = (): boolean => useSyncExternalStore(subscribeRail, () => window.matchMedia(RAIL_HIDDEN_QUERY).matches, () => false);
+
+/** Under 400px tall (r17: 920×360) the room's sidebar folds into the Places drawer, so the chat gets the width; Places then holds the tree. */
+export const SHORT_TREE_QUERY = "(max-height: 399.98px)";
+const subscribeShortTree = (f: () => void) => { const mq = window.matchMedia(SHORT_TREE_QUERY); mq.addEventListener("change", f); return () => mq.removeEventListener("change", f); };
+export const useShortTree = (): boolean => useSyncExternalStore(subscribeShortTree, () => window.matchMedia(SHORT_TREE_QUERY).matches, () => false);

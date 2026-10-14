@@ -32,7 +32,7 @@ export default function LifeOsSurface({ vaults, identity, ...rest }: { vaults: s
   const pick = chooseLifeOsVault;
   // Decided 10-12: the uni home stays unchanged (no picker row). The picker shows here only while another vault is
   // open, as the way back; otherwise it lives in Settings → Life OS vault.
-  const picker = choices.length > 1 && chosen !== UNI_VAULT ? <label className="lifeos-vault"><span>Life OS vault</span>
+  const picker = choices.length > 1 && chosen !== UNI_VAULT ? <label className="lifeos-vault"><span>Areas and projects vault</span>
     <select value={chosen} onChange={(e) => pick(e.target.value)}>{choices.map((v) => <option key={v} value={v}>{v}</option>)}</select></label> : null;
   // r15: the ways on, said as actions: ask Uni (its room's composer, filled in, never sent), look again, or go back to Uni's own vault
   const uniRoom = rest.rooms.some((r) => r.id === UNI_CHANNEL) ? UNI_CHANNEL : findUniRoom(rest.rooms)?.id ?? null;
