@@ -194,12 +194,12 @@ await check("transition(): 200 sends a state_transition with from/to; 409 and 42
   assert.ok(!bad.ok && bad.kind === "invalid");
   assert.equal(m.log.length, 3);
 });
-await check("decide(): one update with the state compare-and-set and the decided metadata; a conflict is classified, never retried", async () => {
+await check("decide(): one update with the state compare-and-set, the decided metadata and the revision read (r14); a conflict is classified, never retried", async () => {
   const m = mock({ vault_decide: (a) => (a.id === "ok" ? { id: "ok", updatedAt: "T5", lastUpdatedBy: "u", lastUpdatedVia: "api" } : new Error("[transition_conflict] conflict: note stale")) });
   const api = createVaultTasks(m.call);
-  assert.deepEqual(await api.decide("ok", "Ship it", "aaron", "2026-10-13T09:00:00.000Z"), { ok: true, updatedAt: "T5", lastUpdatedBy: "u", lastUpdatedVia: "api" });
-  assert.deepEqual(m.log[0], { cmd: "vault_decide", args: { vault: "uni", id: "ok", from: "open", to: "decided", metadata: { decided: "Ship it", decided_at: "2026-10-13T09:00:00.000Z", decided_by: "aaron" } } });
-  const stale = await api.decide("stale", "Hold", "aaron");
+  assert.deepEqual(await api.decide("ok", "Ship it", "aaron", "T4", "2026-10-13T09:00:00.000Z"), { ok: true, updatedAt: "T5", lastUpdatedBy: "u", lastUpdatedVia: "api" });
+  assert.deepEqual(m.log[0], { cmd: "vault_decide", args: { vault: "uni", id: "ok", from: "open", to: "decided", metadata: { decided: "Ship it", decided_at: "2026-10-13T09:00:00.000Z", decided_by: "aaron" }, ifUpdatedAt: "T4" } });
+  const stale = await api.decide("stale", "Hold", "aaron", "T1");
   assert.ok(!stale.ok && stale.kind === "conflict");
   assert.equal(m.log.length, 2);
 });

@@ -35,8 +35,10 @@ export type Task = {
   updatedAt: string | null; lastUpdatedBy: string | null; lastUpdatedVia: string | null;
   /** An open decision's choices (`options[]`), as the labels to show; empty for a task or a decision with none. */
   options: string[];
-  /** The full question when the title was cut short ("…"): the first line of the note's content, loaded for those only. */
+  /** The full question when the title was cut short ("…"): the note's first paragraph, whole, loaded for those only. */
   ask?: string;
+  /** The note revision (`updatedAt`) `ask` was read at (r14): a question read at another revision than the row's is not this row's. */
+  askAt?: string | null;
 };
 
 const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);

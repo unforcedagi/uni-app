@@ -571,3 +571,15 @@ h3.wr-h { font-weight: 400; }
 }
 /* a short screen: the places keep to one line (it scrolls sideways) so the tree keeps its room */
 @media (max-height: 499px) { .th-drawer .th-places { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 6px; } .th-drawer .th-place { flex: none; } }
+/* r14: a row leads with its action; its title (the event or project) is a quiet line under it. A long decision opens to decide. */
+.cp-need .cp-under { color: var(--th-mute); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cp-item[data-open] .cp-need .cp-under { white-space: normal; }
+.cp-open-decide { font: 500 13px/1.4 var(--th-sans); color: var(--th-ink2); }
+/* r14: the task list's health, one component everywhere */
+.lh { margin: 0; }
+.lh-line { margin: 0; padding: 2px 0 6px; font: 400 12.5px/1.4 var(--th-sans); color: var(--th-mute); }
+.lh-line.bad { color: var(--th-ink); }
+.lh-detail { font: inherit; color: var(--th-mute); }
+.th-column .lh, .th-phone-tree .lh { flex: none; margin: 2px 12px 4px; }
+.sr-health { flex: none; padding: 4px 16px 0; border-bottom: 1px solid var(--th-hair2); }
+.wv .lh { margin: 0 0 12px; }

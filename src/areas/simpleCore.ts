@@ -53,10 +53,10 @@ export function uniNeeds(feed: readonly Task[], fromAreas = 3): Task[] {
 /** A place whose words are never shown elsewhere (a private area), as the feed names it: by place only. */
 export type PrivatePlace = { path: string; name: string };
 /**
- * Items that need you in a private area, named only by where they are (r13): from above, one row per private area ("A private item in
- * Sadhana", opening that area); at the private area's own level, one row per item ("A private item here", opening its note). They count.
+ * Items that need you in a private area, seen from outside it (r14): one line per private area, "Sadhana: 2 for you ›", opening that area.
+ * Inside the area Aaron opened himself, its items are ordinary rows. They always count.
  */
-export type PrivateNeed = { key: string; count: number; place: string | null; open: { path: string } | { note: string } };
+export type PrivateNeed = { key: string; count: number; place: string; open: { path: string } };
 /** Needs you at one level, the one list every surface reads (r13): the companion, "+N in areas", the dots and the work view add up to `total`. */
 export type NeedsFeed = { rows: Task[]; privates: PrivateNeed[]; total: number };
 
@@ -68,16 +68,16 @@ export function rankNeeds(list: readonly Task[], today = localDay()): Task[] {
 
 /**
  * Everything that needs you at a level and below, by the one rule (`needsYou`). `privateOf(node)`: the private area a node sits in, or null.
- * `self`: the level itself is private (it is that area, or inside one), so nothing here is named; each item is its own row, opening its note.
+ * `self`: the private area this level is (or sits in), opened by the user: its own items are ordinary rows with their titles (r14); items in
+ * any other private area are one line per area.
  */
 export function needsFeed(tasks: readonly Task[], privateOf: (node: string) => PrivatePlace | null, self: PrivatePlace | null = null, today = localDay()): NeedsFeed {
   const all = rankNeeds(tasks.filter(needsYou), today);
-  if (self) return { rows: [], privates: all.map((t) => ({ key: t.id, count: 1, place: null, open: { note: t.id } })), total: all.length };
   const rows: Task[] = [];
   const by = new Map<string, PrivateNeed>();
   for (const t of all) {
     const p = privateOf(t.node);
-    if (!p) { rows.push(t); continue; }
+    if (!p || (self && p.path === self.path)) { rows.push(t); continue; }
     const g = by.get(p.path);
     if (g) g.count++; else by.set(p.path, { key: p.path, count: 1, place: p.name, open: { path: p.path } });
   }
@@ -91,10 +91,9 @@ export function uniPanel(feed: NeedsFeed, fromAreas = 3): NeedsFeed & { rest: nu
   return { ...feed, rows: [...own, ...areas.slice(0, fromAreas)], rest: Math.max(0, areas.length - fromAreas) };
 }
 
-/** "A private item in Sadhana", "2 private items in Sadhana", "A private item here". */
+/** "Sadhana: 2 for you": a private area's items, from outside it, by place and count only (r14). */
 export function privateLabel(p: Pick<PrivateNeed, "count" | "place">): string {
-  const what = p.count === 1 ? "A private item" : `${p.count} private items`;
-  return p.place ? `${what} in ${p.place}` : `${what} here`;
+  return `${p.place}: ${p.count} for you`;
 }
 
 const ACTION_VERBS = /^(say|reply|tell|answer|send|approve|confirm|review|decide|sign|pay|call|email|write|read|pick|choose|check|book|schedule|draft|merge|deploy|ship|test|ask|give|post|share|record|update|fix|add|set|move|file|submit|finish|meet|join|buy|order|cancel|renew|follow|try|look|go|let|ping|invite|publish|upload|run|print|prepare|bring|forward|accept|decline|reject)(?=[\s:,]|$)/i;
@@ -180,23 +179,45 @@ export function chatPlaceholder(a: { name: string; slash: string | null; heldBy:
 /** A title that was cut short on the way into the vault ("…", "..."), so the real question is in the note's content. */
 export const isCutTitle = (rest: string): boolean => /(…|\.\.\.)\s*$/.test(rest.trim());
 
-const ASK_MAX = 280;
-/**
- * The full question of a decision (or task) whose title is cut: the first real line of its content, without `_Converted from …_` lines or
- * the "Decision (default yes):" label, kept to whole sentences (the first one or two) and at most 280 characters. "" when there is nothing.
- */
+/** The longest question a Needs-you row shows in full beside its answers; a longer one opens to decide (r14). */
+export const ROW_ASK_MAX = 280;
 /** A list item ("- Ship it", "2. Wait"): a decision's options are listed so, and an option is never its question (r13). */
 export const isListLine = (l: string): boolean => /^([-*+•]|\d+[.)])\s/.test(l.trim());
+const skipLine = (l: string) => /^_?converted from\b/i.test(l.replace(/^[*_>\s]+/, "")) || /^#{1,6}\s/.test(l) || /^---+$/.test(l) || isListLine(l);
+/**
+ * The full question of a decision (or task) whose title is cut (r14): the first paragraph of its content, whole, without `_Converted from …_`
+ * lines, headings, rules, list items or the "Decision (default yes):" label. Never trimmed: a shortened question is a preview
+ * (`askPreview`), and only a whole one is answered. "" when there is nothing.
+ */
 export function askFromContent(content: string | null | undefined): string {
-  const line = (content ?? "").split(/\r?\n/).map((l) => l.trim()).find((l) => l && !/^_?converted from\b/i.test(l.replace(/^[*_>\s]+/, "")) && !/^#{1,6}\s/.test(l) && !/^---+$/.test(l) && !isListLine(l));
-  if (!line) return "";
-  const plain = line.replace(/\[\[([^\]|]*\|)?([^\]]*)\]\]/g, "$2").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/[*_`>]/g, "").replace(/^decision\s*(\([^)]*\))?\s*[:\-–—]\s*/i, "").replace(/\s+/g, " ").trim();
-  if (plain.length <= ASK_MAX) return plain;
-  const sentences = plain.match(/[^.!?]+[.!?]+(?=\s|$)/g) ?? [];
+  const lines = (content ?? "").split(/\r?\n/).map((l) => l.trim());
+  const start = lines.findIndex((l) => l && !skipLine(l));
+  if (start < 0) return "";
+  const para: string[] = [];
+  for (const l of lines.slice(start)) { if (!l || skipLine(l)) break; para.push(l); }
+  return para.join(" ").replace(/\[\[([^\]|]*\|)?([^\]]*)\]\]/g, "$2").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/[*_`>]/g, "").replace(/^decision\s*(\([^)]*\))?\s*[:\-–—]\s*/i, "").replace(/\s+/g, " ").trim();
+}
+/** A short preview of a long question: its first whole sentences within `max`, else its first words, and always "…" when anything is left out. */
+export function askPreview(text: string, max = 160): string {
+  const plain = text.replace(/\s+/g, " ").trim();
+  if (plain.length <= max) return plain;
   let out = "";
-  for (const sen of sentences) { if ((out + sen).length > ASK_MAX) break; out = `${out}${sen}`.replace(/\s*$/, " "); }
-  if (out.trim()) return out.trim();
-  return `${plain.slice(0, ASK_MAX).replace(/\s+\S*$/, "")}…`;
+  for (const sen of plain.match(/[^.!?]+[.!?]+(?=\s|$)/g) ?? []) { if ((out + sen).length > max) break; out = `${out}${sen}`; }
+  return `${(out.trim() || plain.slice(0, max).replace(/\s+\S*$/, "")).replace(/[\s,;:]+$/, "")} …`;
+}
+
+/** A Needs-you row shows a whole question beside its answers only when it fits the row; a longer one opens to decide (r14). */
+export const fitsRow = (q: string): boolean => q.length <= ROW_ASK_MAX;
+
+/**
+ * A decision's whole question (r14), or null when none is known: its title when the title is not cut (`rest`, without its id), else the ask
+ * read from its note, but only when that ask was read at the row's own revision (`askAt === updatedAt`), so the question shown and the
+ * answer written are the same revision's. Punctuation proves nothing: a cut title with no ask at this revision has no question here.
+ */
+export function decisionQuestion(rest: string, ask: string | undefined, askAt: string | null | undefined, updatedAt: string | null): string | null {
+  if (!isCutTitle(rest)) { const t = rest.replace(/\s+/g, " ").trim(); return t.replace(/^decision\s*(\([^)]*\))?\s*[:\-–—]\s*/i, "").trim() || t || null; }
+  if (ask && updatedAt && askAt === updatedAt) return ask;
+  return null;
 }
 
 /** A cut title without its "…": what is left reads as a plain fragment, never as a row that ends on an ellipsis. */
@@ -207,7 +228,7 @@ export type RowAsk = { text: string; /** a decision with no full question anywhe
 export const OPEN_TO_SEE = "Open to see the question";
 export function rowAsk(full: string, ask: string | undefined, isDecision: boolean, hasNext: boolean): RowAsk {
   if (!isCutTitle(full)) return { text: full, openToDecide: false };
-  if (ask && !isCutTitle(ask)) return { text: ask, openToDecide: false };
+  if (ask) return { text: ask, openToDecide: false };
   if (isDecision) return { text: OPEN_TO_SEE, openToDecide: true };
   return { text: hasNext ? withoutCut(full) : "", openToDecide: false };
 }
