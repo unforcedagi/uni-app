@@ -3443,6 +3443,27 @@ test.describe('r21', () => {
     await expect(chat.locator('textarea')).toBeVisible();
   });
 
+  test('P2 (Codex 7) a slow note says so with Retry and Back; a failed search says so in words, with Retry, its reason a detail', async ({ page }) => {
+    test.skip(!wide(page), 'the rail');
+    await page.addInitScript(() => { (window as any).__noteDelay = { '01M3ZQF7EM4ADC7HEY36D3DC3B': 11000 }; });
+    await boot(page);
+    const rail = page.getByRole('navigation', { name: 'Main navigation' });
+    await rail.getByRole('button', { name: 'For you', exact: true }).click();
+    await expect(page.locator('.note-sheet')).toContainText('Opening note…');
+    await expect(page.locator('.note-sheet')).toContainText('Still opening this note.', { timeout: 10_000 });
+    await expect(page.locator('.note-sheet').getByRole('button', { name: 'Retry' })).toBeVisible();
+    await expect(page.locator('.note-sheet').getByRole('button', { name: /^Back to / }).last()).toBeVisible();
+    await page.evaluate(() => { (window as any).__searchFails = true; });
+    await rail.getByRole('button', { name: 'Search', exact: true }).click();
+    await page.getByRole('searchbox').or(page.getByRole('textbox', { name: /Search/ })).first().fill('cutover');
+    await expect(page.getByText('Couldn\'t search messages just now.')).toBeVisible();
+    await expect(page.getByText('Couldn\'t reach your vault just now.')).toBeVisible();
+    await expect(page.locator('.search-results')).not.toContainText('os error 5', { useInnerText: true });
+    await page.evaluate(() => { (window as any).__searchFails = false; });
+    await page.locator('.search-results').getByRole('button', { name: 'Retry' }).first().click();
+    await expect(page.getByText('Couldn\'t search messages just now.')).toHaveCount(0);
+  });
+
   test('the 800×600 sheet has a margin and its whole border', async ({ page }) => {
     await page.setViewportSize({ width: 800, height: 600 });
     await boot(page);

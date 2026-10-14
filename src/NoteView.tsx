@@ -137,7 +137,7 @@ export default function NoteView({ target, hub, onOpen, onBack, backLabel, onTit
         <h1 className="note-title">{heading}</h1>
         <p className="note-meta-line">{note ? noteMeta(data!.vault, note.path, note.updatedAt ?? note.createdAt) : `${target.vault} · ${error || missing ? "unavailable" : "opening…"}`}</p>
         {tags.length > 0 && <p className="note-tags">{tags.map((t) => <span key={t} className="note-tag">#{t}</span>)}</p>}
-        {!data && !error && !missing && <p className="empty">Opening note…</p>}
+        {!data && !error && !missing && <OpeningNote key={attempt} onRetry={() => setAttempt((n) => n + 1)} onBack={onBack} backLabel={backLabel} />}
         {missing && <div className="note-error">
           <p role="status">No note named {target.ref} in {target.vault}</p>
           {searching && <p>Searching notes…</p>}
@@ -166,5 +166,16 @@ export default function NoteView({ target, hub, onOpen, onBack, backLabel, onTit
         </>}
       </article>
     </div>}
+  </div>;
+}
+
+/** r21 (Codex 7): a note slow to open says so after 8 seconds, with Retry and the way back, never "Opening note…" for good. */
+function OpeningNote({ onRetry, onBack, backLabel }: { onRetry: () => void; onBack: () => void; backLabel: string }) {
+  const [slow, setSlow] = useState(false);
+  useEffect(() => { const t = setTimeout(() => setSlow(true), 8000); return () => clearTimeout(t); }, []);
+  if (!slow) return <p className="empty">Opening note…</p>;
+  return <div className="note-error" role="status">
+    <p>Still opening this note.</p>
+    <p className="note-error-go"><button className="task-do primary" onClick={onRetry}>Retry</button><button className="task-do quiet" onClick={onBack}>Back to {backLabel}</button></p>
   </div>;
 }
