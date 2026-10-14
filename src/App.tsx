@@ -25,7 +25,7 @@ import { copyText, onCopied } from "./clipboard";
 import { markFor, restoreTop, type ScrollMark } from "./noteText";
 import "./App.css";
 import { Body } from "./MessageBody";
-import { isMaintenance, isWorkerStatus } from "./chatMarkers";
+import { isMaintenance, isWorkerStatus, staleStatus } from "./chatMarkers";
 import Pairing from "./Pairing";
 import { emojiLabel, type Reaction } from "./reactions";
 import { DeleteButton, InlineEditor } from "./InlineEditor";
@@ -1357,7 +1357,10 @@ function Conversations({ onForget }: { onForget: () => void }) {
     return id ? <button type="button" className="msg-decision-link" onClick={() => openDecision(id)}>Answer in Needs you<span aria-hidden="true"> ›</span></button> : null;
   };
 
-  const renderMessage = (m: Message, inThread: boolean, prev?: Message) => {
+  const renderMessage = (m: Message, inThread: boolean, prev?: Message, newest = false) => {
+    // r18: a progress ping from hours or days ago is folded away as a past update, never the room's live status
+    if (isWorkerStatus(m.body) && !(inThread && m.ref === root) && editing !== m.ref && staleStatus(m, Date.now() / 1000, newest)) return <details key={m.ref} data-ref={m.ref} className="message status-line status-past">
+      <summary><span className="status-line-text">Earlier progress update</span><time>{time(m.ts)}</time></summary><p className="status-past-body">{m.body}</p></details>;
     if ((isWorkerStatus(m.body) || isMaintenance(m.body)) && !(inThread && m.ref === root) && editing !== m.ref) return <article key={m.ref} data-ref={m.ref} className="message status-line" title={m.body}><span className="status-line-text">{m.body}</span><time>{clock(m.ts)}</time></article>;
     const grouped = !!prev && prev.author === m.author && m.ts - prev.ts < 300 && !(inThread && prev.ref === root);
     return <article key={m.ref} data-ref={m.ref} className={`message ${m.ref === focusRef ? "search-focus" : ""} ${grouped ? "grouped" : ""} ${m.author === identity ? "mine" : ""} ${m.mentions_me ? "highlight" : ""} ${inThread && m.ref === root ? "thread-root" : ""}`}>
@@ -1385,7 +1388,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     const sameDay = !!prev && dayKey(prev.ts) === dayKey(m.ts);
     const out: React.ReactNode[] = [];
     if (!sameDay) out.push(<div key={`d-${m.ref}`} className="day-divider" role="separator"><span>{dayLabel(m.ts)}</span></div>);
-    out.push(renderMessage(m, inThread, sameDay ? prev : undefined));
+    out.push(renderMessage(m, inThread, sameDay ? prev : undefined, i === list.length - 1));
     return out;
   });
 

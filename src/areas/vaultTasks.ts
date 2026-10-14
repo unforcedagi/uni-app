@@ -5,7 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { buildTaskTree, failureKind, groupOf, LIVE_STATES, nodeFilterKeys, parseNodes, parseTask, subtreePaths, type AnyState, type FailureKind, type Priority, type RawNote, type Task, type TaskTree } from "./taskCore.ts";
 import { ROOT } from "./treeCore.ts";
 import { taskTitle } from "./whereCore.ts";
-import { askFromContent, askOrder, isListLine, linkedRefs, questionsFrom, stepText } from "./simpleCore.ts";
+import { askFromContent, askOrder, closedBy, isListLine, linkedRefs, needsYou, questionCount, questionsFrom, stepText, type SourceRef, type Support } from "./simpleCore.ts";
 import { activeProfile } from "./profile.ts";
 
 export type Call = (cmd: string, args: Record<string, unknown>) => Promise<unknown>;
@@ -145,7 +145,7 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
       const t = await treeIn;
       // r16: a step cut at the writer's 140 characters reads as cut ("…"), never as a phrase left hanging
       const parsed = [...tasks, ...decisions].map((n) => parseTask(n, t)).filter((x): x is Task => !!x).map((x) => { const st = stepText(x.next); return { ...x, vault, next: st.text, ...(st.cut ? { nextCut: true } : {}) }; });
-      return { tasks: [...new Map(parsed.map((x) => [x.id, withAsk(x)])).values()], truncated: cut };
+      return { tasks: [...new Map(parsed.map((x) => [x.id, withSupport(withAsk(x))])).values()], truncated: cut };
     };
     const tree = path === ROOT ? null : await treeIn;
     if (tree && nearOk !== false) {
@@ -230,38 +230,74 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
     patchMeta(taskId, { priority, priority_by: priority === null ? null : by }, updatedAt);
 
   /**
-   * The questions a task asks the user to answer (r17: "answer the nine questions…"), read where they are written, all in this vault: the task's
-   * own note (the first list under a "Questions" heading, else the first numbered list, else a list of the count the step names); else a note
-   * the step or the note links to; else a closed task merged into this one ("Merged into T-11"), on the same node. `from`: the note they were
-   * read from when it is not the task's own. Null: they are not written out anywhere found.
+   * Where a task's questions come from (r18), read in each note's own vault. The task's own note, when it holds them explicitly (a structured
+   * `questions` field, or a list under a heading that names questions); else a note its step or note links (`uni:<ULID>` in that vault, a bare
+   * id or `[[Path]]` in the task's); else a closed task merged into it ("Merged into T-11"), on the same node. A source that is closed or
+   * superseded (its own state, never its title's words) is `closed`; a linked note named in the step counts as the step's source even without a
+   * list. Nothing explicit: `unclear` (the sheet says "Open the note to answer"). Never a numbered plan or any other list taken for questions.
    */
-  async function loadQuestions(t: Pick<Task, "id" | "title" | "next">, nodeKeys: readonly string[], want: number | null): Promise<{ items: string[]; from: { id: string; title: string } | null } | null> {
-    const read = async (ref: string): Promise<RawNote | null> => { try { return ((await call("vault_note", { vault: name(), noteRef: ref })) as { note?: RawNote } | null)?.note ?? null; } catch { return null; } };
+  async function loadSupport(t: Pick<Task, "id" | "title" | "next" | "vault">, nodeKeys: readonly string[], want: number | null): Promise<Support> {
+    const home = t.vault ?? name();
+    const read = async (vault: string, ref: string): Promise<RawNote | null> => { try { return ((await call("vault_note", { vault, noteRef: ref })) as { note?: RawNote } | null)?.note ?? null; } catch { return null; } };
     const text = (n: RawNote | null) => (typeof n?.content === "string" ? n.content : "");
-    const named = (n: RawNote) => ({ id: typeof n.id === "string" ? n.id : "", title: taskTitle((typeof n.path === "string" ? n.path : "").split("/").pop() ?? "").rest || "its note" });
-    const own = await read(t.id);
-    let items = questionsFrom(text(own), want);
-    if (items) return { items, from: null };
-    for (const ref of linkedRefs(`${t.next}\n${text(own)}`).filter((r) => r !== t.id).slice(0, 4)) {
-      const n = await read(ref);
-      items = n ? questionsFrom(text(n), want) : null;
-      if (items && n) return { items, from: named(n) };
+    const meta = (n: RawNote | null) => (n?.metadata && typeof n.metadata === "object" ? n.metadata as Record<string, unknown> : null);
+    const named = (vault: string, n: RawNote): SourceRef => ({ vault, id: typeof n.id === "string" ? n.id : "", title: taskTitle((typeof n.path === "string" ? n.path : "").split("/").pop() ?? "").rest || "its note" });
+    const own = await read(home, t.id);
+    const mine = questionsFrom(text(own), want, meta(own));
+    if (mine) return mine.status === "list" ? { kind: "list", items: mine.items, from: null } : { kind: "unclear", from: null };
+    const inStep = new Set(linkedRefs(t.next).map((r) => `${r.vault ?? home}\n${r.id}`));
+    for (const ref of linkedRefs(`${t.next}\n${text(own)}`).filter((r) => r.id !== t.id).slice(0, 4)) {
+      const vault = ref.vault ?? home;
+      const n = await read(vault, ref.id);
+      if (!n) continue;
+      const q = questionsFrom(text(n), want, meta(n));
+      const done = closedBy(meta(n));
+      if (done && (q || inStep.has(`${vault}\n${ref.id}`))) return { kind: "closed", how: done, from: named(vault, n) };
+      if (q) return q.status === "list" ? { kind: "list", items: q.items, from: named(vault, n) } : { kind: "unclear", from: named(vault, n) };
     }
     const tid = taskTitle(t.title).id;
     if (tid && nodeKeys.length) {
       let rows: RawNote[] = [];
-      try { rows = (await call("vault_query_meta", { vault: name(), tag: "task", metadata: { node: { in: [...nodeKeys] }, state: { in: ["done", "archived"] } }, limit: LIMIT })) as RawNote[]; } catch { rows = []; }
+      try { rows = (await call("vault_query_meta", { vault: home, tag: "task", metadata: { node: { in: [...nodeKeys] }, state: { in: ["done", "archived"] } }, limit: LIMIT })) as RawNote[]; } catch { rows = []; }
+      // the id written in a merge note ("Merged into T-11"): an explicit pointer to this task, never a match on its title's words
       const merged = new RegExp(`\\bmerged into ${tid.replace(/[-]/g, "\\-")}\\b`, "i");
-      for (const r of rows.filter((x) => typeof x.id === "string" && merged.test(JSON.stringify(x.metadata ?? {}))).slice(0, 3)) {
-        const n = await read(r.id as string);
-        items = n ? questionsFrom(text(n), want) : null;
-        if (items && n) return { items, from: named(n) };
-      }
+      const r = rows.find((x) => typeof x.id === "string" && merged.test(JSON.stringify(x.metadata ?? {})));
+      if (r) return { kind: "closed", how: closedBy(meta(r)) ?? "closed", from: named(home, r) };
     }
-    return null;
+    return { kind: "unclear", from: null };
   }
 
-  return { setAskOwner, loadTree, loadTagged, loadAsks, loadSubtree, loadTasks, loadQuestions, transition, decide, snooze, setPriority, nearSupported: () => nearOk };
+  /** Sources already read, by task id, with the revision they were read at: a refresh and the next launch show them at once (per identity). */
+  const supportCache = new Map<string, { at: string | null; support: Support }>();
+  const supportKey = () => `uni.support.v1:${askOwner}`;
+  let supportOwner = "\u0000";
+  const supportsLoaded = () => {
+    if (supportOwner === askOwner) return;
+    supportOwner = askOwner; supportCache.clear();
+    try { const v = JSON.parse(localStorage.getItem(supportKey()) ?? "[]"); if (Array.isArray(v)) for (const e of v) if (Array.isArray(e) && typeof e[0] === "string" && e[1]?.support?.kind) supportCache.set(e[0], e[1]); } catch { /* nothing kept */ }
+  };
+  const keepSupports = () => { try { localStorage.setItem(supportKey(), JSON.stringify([...supportCache].slice(-ASK_KEEP))); } catch { /* this session only */ } };
+  /** A task with its source as read at its own revision, when known. */
+  const withSupport = (t: Task): Task => { supportsLoaded(); const c = supportCache.get(t.id); return c && c.at === t.updatedAt ? { ...t, support: c.support, supportAt: c.at } : t; };
+  /**
+   * The sources of the questions the rows in Needs you ask for (r18), read after the list is on screen (a few, six at a time): the row says
+   * "Answer N questions ›" only from an explicit list, "Check: … is closed — still needed?" when its source is finished, else "Open the note to answer".
+   */
+  async function loadSupports(tasks: readonly Task[], keysOf: (t: Task) => readonly string[]): Promise<Map<string, { at: string | null; support: Support }>> {
+    supportsLoaded();
+    const out = new Map<string, { at: string | null; support: Support }>();
+    const want = tasks.filter((t) => t.kind === "task" && needsYou(t) && questionCount(t.next) !== null);
+    const todo = want.filter((t) => { const c = supportCache.get(t.id); if (c && c.at === t.updatedAt) { out.set(t.id, c); return false; } return true; }).slice(0, ASK_READS);
+    for (let i = 0; i < todo.length; i += ASK_PARALLEL) {
+      await Promise.all(todo.slice(i, i + ASK_PARALLEL).map(async (t) => {
+        try { const support = await loadSupport(t, keysOf(t), questionCount(t.next)); const e = { at: t.updatedAt, support }; out.set(t.id, e); supportCache.delete(t.id); supportCache.set(t.id, e); } catch { /* the row keeps its step */ }
+      }));
+    }
+    if (todo.length) keepSupports();
+    return out;
+  }
+
+  return { setAskOwner, loadTree, loadTagged, loadAsks, loadSubtree, loadTasks, loadSupport, loadSupports, transition, decide, snooze, setPriority, nearSupported: () => nearOk };
 }
 
 export const vaultTasks = createVaultTasks();

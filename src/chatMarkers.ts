@@ -30,3 +30,12 @@ export const isWorkerStatus = (body: string): boolean => /^\s*⏳\s*Working\s*[�
 
 /** Uni's maintenance notes to itself ("Self-improvement review: Skill 'client-site-copy' patched."): bookkeeping, shown as one muted line (r17). */
 export const isMaintenance = (body: string): boolean => /^\W{0,4}(?:self-improvement review|skill review|memory review)\s*[:—–-]/i.test(body) && body.trim().split("\n").length <= 3;
+
+/** A progress ping older than this (seconds) is no longer news (r18). */
+export const STATUS_STALE_S = 3600;
+/**
+ * A worker's progress ping that no longer says what is happening (r18): older than about an hour. A ping is edited in place while its worker
+ * runs and the relay keeps only its first time, so an edited ping that is still the room's newest message may be live and is not called stale.
+ * A stale one is folded into "Earlier progress update", never shown as the room's current state.
+ */
+export const staleStatus = (m: { ts: number; edited: boolean }, nowS: number, newest: boolean): boolean => nowS - m.ts > STATUS_STALE_S && !(newest && m.edited);

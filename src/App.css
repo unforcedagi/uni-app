@@ -116,6 +116,13 @@ h1 { font-family: var(--serif); font-weight: 500; font-size: 34px; line-height: 
 .message.status-line { padding: 2px 0; gap: 10px; align-items: baseline; font-size: 12.5px; color: var(--muted); opacity: .8; }
 .status-line-text { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .message.status-line time { flex: none; font-size: 11px; }
+/* r18: a stale progress ping is a folded past update */
+.message.status-past { display: block; }
+.message.status-past > summary { display: flex; gap: 10px; align-items: baseline; cursor: pointer; list-style: none; }
+.message.status-past > summary::-webkit-details-marker { display: none; }
+.message.status-past > summary::after { content: "›"; font-size: 12px; }
+.message.status-past[open] > summary::after { content: "⌄"; }
+.status-past-body { margin: 2px 0 0; white-space: pre-wrap; }
 .message-meta strong { color: var(--accent); font-size: 14px; font-weight: 600; }
 .message-meta time { color: var(--muted); font-size: 11px; }
 .message-content p { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; font-size: 15px; margin: 4px 0; }

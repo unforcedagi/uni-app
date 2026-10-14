@@ -383,7 +383,7 @@ check("r16 a note that is only its heading and options: the heading is the quest
 check("r16 a next step cut at the writer's 140 characters ends on a whole word and says it was cut", () => {
   const cut = "Merge RegenHub PRs #108 and #109 (both green), then answer the nine operational/editorial questions (door beep, hours, hero wording…) in the";
   assert.equal(cut.length, NEXT_CAP);
-  assert.deepEqual(stepText(cut), { text: "Merge RegenHub PRs #108 and #109 (both green), then answer the nine operational/editorial questions (door beep, hours, hero wording…) …", cut: true });
+  assert.deepEqual(stepText(cut), { text: "Merge RegenHub PRs #108 and #109 (both green), then answer the nine operational/editorial questions (door beep, hours, hero wording…)", cut: true }, "r18: one ellipsis, never \"wording…) …\"");
   assert.deepEqual(stepText("Say go to deploy #38 (companion) + #58 (Today/Calendar) to production by Wed 10-14."), { text: "Say go to deploy #38 (companion) + #58 (Today/Calendar) to production by Wed 10-14.", cut: false });
   const whole = "x".repeat(139) + ".";
   assert.equal(stepText(whole).cut, false, "a 140-character step that ends a sentence is whole");

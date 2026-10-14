@@ -59,15 +59,18 @@ await check("P1-2 actions toward a person outside the room are never a room pref
     "Forward to Benya + Harper: the \"Notifications: paste-ready answer\"…", "Send Tobias the 9 questions", "Edit and send the draft to Mark and Dominic"]) {
     const a = stepAudience(title, "cohere");
     assert.equal(a?.kind, "person", title);
-    if (a?.kind === "person") { assert.equal(a.copy, title.replace(/\s+/g, " ")); assert.equal(a.link, null, "nothing to link: Copy"); }
+    if (a?.kind === "person") assert.equal(a.link, null, "r18: no destination written: no link");
   }
   assert.notEqual(stepAudience("Send the ATLAS Oct 12 follow-up email", "atlas/build")?.kind, "room", "an email is never said in the room");
   assert.notEqual(stepAudience("Say thanks to Mark for the intro", "atlas")?.kind, "room", "said to a person, not the room");
   assert.equal(stepAudience("Reply to jonbo's door messages", "regenhub")?.kind, "person");
-  const mail = stepAudience("Email priya@example.org the second draft", null);
+  // r18: only an explicit `mailto:` leads; an address or a URL that merely appears in the step does not
+  const mail = stepAudience("Email mailto:priya@example.org the second draft", null);
   assert.deepEqual(mail?.kind === "person" && mail.link, { href: "mailto:priya@example.org", label: "Email priya@example.org" });
+  const bare = stepAudience("Email priya@example.org the second draft", null);
+  assert.equal(bare?.kind === "person" && bare.link, null);
   const url = stepAudience("Tell Sebastian the letter is at https://example.org/letter.pdf.", null);
-  assert.deepEqual(url?.kind === "person" && url.link, { href: "https://example.org/letter.pdf", label: "Open example.org" });
+  assert.equal(url?.kind === "person" && url.link, null);
   // drafting for someone is the room's work, not a message: neither
   assert.equal(stepAudience("Draft the forward to Benya and Harper; bring back for your yes.", "cohere"), null);
   assert.equal(stepAudience("Confirm scope with Casey", null), null);
@@ -82,14 +85,13 @@ await check("rows: a step that asks for answers to questions says how many; the 
   assert.equal(answerLabel(9), "Answer 9 questions");
   assert.equal(answerLabel(1), "Answer 1 question");
   const note = "# Read\n\n- a point\n- another\n\n## Questions for Aaron\n1. **Reader:** who lands here?\n2. Scope: person or body of work?\n\n## Next\n- later";
-  assert.deepEqual(questionsFrom(note, 2), ["Reader: who lands here?", "Scope: person or body of work?"], "the list under the Questions heading");
-  assert.deepEqual(questionsFrom("Intro\n\n- x\n\n1. First\n2. Second", null), ["First", "Second"], "else the first numbered list");
+  assert.deepEqual(questionsFrom(note, 2), { status: "list", items: ["Reader: who lands here?", "Scope: person or body of work?"] }, "the list under the Questions heading");
+  // r18: no numbered list or list of the right count elsewhere is taken for questions
+  assert.equal(questionsFrom("Intro\n\n- x\n\n1. First\n2. Second", null), null, "a numbered list without a Questions heading is not questions");
   const nine = `Whenever you return, answer any of:\n\n${Array.from({ length: 9 }, (_, i) => `- Item ${i + 1}: [[Projects/RegenHub/Audit 2026-10|the audit]]`).join("\n")}\n\n_Converted._`;
-  assert.equal(questionsFrom(nine, 9)?.length, 9, "else a list of the count the step names");
-  assert.equal(questionsFrom(nine, 9)?.[0], "Item 1: the audit");
-  assert.equal(questionsFrom(nine, null), null, "a plain bullet list is not taken for questions without a count");
+  assert.equal(questionsFrom(nine, 9), null, "r18: a bare list of the step's count is not an explicit source");
   assert.equal(questionsFrom("RegenHub site\n\n**Next:** still owes door beep / hours", 9), null);
-  assert.deepEqual(linkedRefs("read + 7 questions written (uni:01M3ZYXCP9QEM2GS0E5THMXXX4); see [[Projects/X/Note|the note]] and 01M3ZYW4HW3CBS6YGGWH5EB0NE"), ["01M3ZYXCP9QEM2GS0E5THMXXX4", "Projects/X/Note", "01M3ZYW4HW3CBS6YGGWH5EB0NE"]);
+  assert.deepEqual(linkedRefs("read + 7 questions written (uni:01M3ZYXCP9QEM2GS0E5THMXXX4); see [[Projects/X/Note|the note]] and 01M3ZYW4HW3CBS6YGGWH5EB0NE"), [{ vault: "uni", id: "01M3ZYXCP9QEM2GS0E5THMXXX4" }, { vault: null, id: "Projects/X/Note" }, { vault: null, id: "01M3ZYW4HW3CBS6YGGWH5EB0NE" }]);
 });
 await check("rows: the questions are found in the task's note, a note it links, or a closed task merged into it, in the same vault", async () => {
   const notes: Record<string, { id: string; path: string; content: string; metadata?: Record<string, unknown> }> = {
@@ -106,29 +108,19 @@ await check("rows: the questions are found in the task's note, a note it links, 
     return [];
   };
   const vt = createVaultTasks(call, "uni");
-  const merged = await vt.loadQuestions({ id: "t11", title: "T-11 RegenHub site", next: "answer the nine questions" }, ["Projects/RegenHub", "n-rh"], 9);
-  assert.deepEqual(merged, { items: ["Q1", "Q2", "Q3", "Q4", "Q5", "Q6", "Q7", "Q8", "Q9"], from: { id: "t93", title: "RegenHub: nine answers remain" } });
-  const linked = await vt.loadQuestions({ id: "t26", title: "T-26 unforced.org refresh", next: "answer the 7 questions" }, [], 7);
-  assert.deepEqual(linked?.items, ["Reader?", "Scope?"]);
-  assert.equal(linked?.from?.title, "Refresh — read and questions (2026-10)");
+  // r18: a closed task merged into this one is its source, and it is closed: "Check", never its list as current
+  const merged = await vt.loadSupport({ id: "t11", title: "T-11 RegenHub site", next: "answer the nine questions" }, ["Projects/RegenHub", "n-rh"], 9);
+  assert.deepEqual(merged, { kind: "closed", how: "closed", from: { vault: "uni", id: "t93", title: "RegenHub: nine answers remain" } });
+  const linked = await vt.loadSupport({ id: "t26", title: "T-26 unforced.org refresh", next: "answer the 2 questions" }, [], 2);
+  assert.deepEqual(linked, { kind: "list", items: ["Reader?", "Scope?"], from: { vault: "uni", id: "01M3ZYXCP9QEM2GS0E5THMXXX4", title: "Refresh — read and questions (2026-10)" } });
   assert.ok(seen.every((c) => c.vault === "uni"), "every read is in the task's own vault");
-  assert.equal(await vt.loadQuestions({ id: "t11", title: "T-11 RegenHub site", next: "answer the nine questions" }, [], 9), null, "not written out anywhere found");
+  assert.deepEqual(await vt.loadSupport({ id: "t11", title: "T-11 RegenHub site", next: "answer the nine questions" }, [], 9), { kind: "unclear", from: null }, "not written out anywhere found");
 });
 
-await check("rows: a statement decision gets answers that say what they do; plain Yes/No only beside a question", () => {
-  // the texting decision from the scratch copy (its note's sentence)
-  assert.deepEqual(answerChoices("Texting is not recommended for this year because carrier approval may not clear before Oct 15.", [], "Decision: texting is not recommended for this year because carrier…"),
-    { choices: [{ label: "Agree (skip texting)", value: "agree: skip texting" }, { label: "Disagree", value: "disagree" }], open: false });
-  assert.deepEqual(answerChoices("Ship the Boulder Votes AI chat?", []).choices.map((c) => c.label), ["Yes", "No"]);
-  assert.deepEqual(answerChoices("Ship it?", ["Add key and test live on preview first", "Change it first"]).choices.map((c) => c.label), ["Add key and test live on preview first", "Change it first"]);
-  assert.deepEqual(answerChoices("Uni adds Benya's missing feature #4, the after-event prompt, to the companion on Wed. Say no to skip it.", [], "Decision (default yes): Uni adds Benya's missing feature 4, the…").choices.map((c) => [c.label, c.value]), [["Go ahead", "yes"], ["Skip it", "no"]]);
-  assert.deepEqual(answerChoices("A daily calendar email to people who registered and opted in, for those who don't install the app.", [], "Decision (needs your yes): a daily calendar email to people who…").choices.map((c) => c.label), ["Go ahead", "Skip it"]);
-  assert.deepEqual(answerChoices("Self-hosting is recommended for the ATLAS site.", []).choices.map((c) => c.label), ["Agree (self-hosting)", "Disagree"]);
-  // nothing to build from: open to decide (the sheet then offers Agree and Disagree beside the whole statement)
-  const mail = answerChoices("Mail: approve a test week, not an immediate cutover.", [], "Mail: approve a test week, not an immediate cutover");
-  assert.equal(mail.open, true);
-  assert.deepEqual(mail.choices.map((c) => c.label), ["Agree", "Disagree"]);
-  assert.ok(!mail.choices.some((c) => c.label === "Yes"));
+await check("rows (r18): answers come only from stored options; with none, an answer box, never Yes/No or answers built from the wording", () => {
+  assert.deepEqual(answerChoices([]), { choices: [], box: true, binary: false }, "the texting statement and the mail decision: no options, words");
+  assert.deepEqual(answerChoices(["Add key and test live on preview first", "Change it first"]).choices.map((c) => c.label), ["Add key and test live on preview first", "Change it first"]);
+  assert.deepEqual(answerChoices(["yes", "no"]), { choices: [{ label: "Yes", value: "yes" }, { label: "No", value: "no" }], box: false, binary: true });
 });
 
 await check("P1-3 a message names an open decision by its marker (title id or the task it decides) or by its note id; nothing else links", () => {

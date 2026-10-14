@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { buildTaskTree, dayOf, isLive, rollUp, snoozed, tasksUnder, tomorrowOf, type AnyState, type Counts, type Priority, type RawNote, type Task, type TaskNode, type TaskTree } from "./taskCore";
+import { buildTaskTree, dayOf, isLive, nodeFilterKeys, rollUp, snoozed, tasksUnder, tomorrowOf, type AnyState, type Counts, type Priority, type RawNote, type Task, type TaskNode, type TaskTree } from "./taskCore";
 import { vaultTasks } from "./vaultTasks";
+import { ROOT } from "./treeCore";
 import { shouldReload } from "./pathCache";
 import { useVaultProfile } from "./ProfileContext";
 import { parseDrafts, parseRuns } from "./steerCore";
@@ -137,9 +138,18 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
         // each ask keeps the revision it was read at; a row shows it as its question only at that revision (decisionAsk)
         const one = (t: Task) => { const a = asks.get(t.id); return a ? { ...t, ask: a.ask, askAt: a.at } : t; };
         const withAsk = (l: Task[] | null) => l && l.map(one);
-        const merged = r.tasks.map(one);
+        const merged = (mem.tasks.get(nodePath)?.list ?? r.tasks).map(one);
         mem.tasks.set(nodePath, { list: merged, truncated: r.truncated });
         setList((cur) => withAsk(cur));
+      }).catch(() => {});
+      // r18: where each row's questions come from (an explicit list, a closed source, or neither), also a moment later; kept per revision
+      const keysOf = (t: Task) => (t.node !== ROOT && mem.tree ? nodeFilterKeys(mem.tree, [t.node]) : []);
+      void vaultTasks.loadSupports(r.tasks, keysOf).then((found) => {
+        if (!found.size || !current() || memory !== mem) return;
+        const one = (t: Task) => { const f = found.get(t.id); return f && f.at === t.updatedAt ? { ...t, support: f.support, supportAt: f.at } : t; };
+        const kept = mem.tasks.get(nodePath);
+        if (kept) mem.tasks.set(nodePath, { ...kept, list: kept.list.map(one) });
+        setList((cur) => cur && cur.map(one));
       }).catch(() => {});
       // anything the server no longer lists is settled: stop hiding it by hand
       setGone((g) => new Set([...g].filter((id) => r.tasks.some((x) => x.id === id && isLive(x)))));
