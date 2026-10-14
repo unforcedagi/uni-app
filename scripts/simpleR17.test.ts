@@ -52,6 +52,7 @@ await check("P1-2 'Say it in #room' only for the room: Say go…, Tell Uni…, T
   assert.equal(stepAudience("Answer the 7 Woven Web direction questions in #woven-web (A/B/C; lean A+C).", "cohere"), null, "another room's name is not this room");
   assert.deepEqual(stepAudience("Say whether to build the live browser share and whether sessions are kept.", "uni-os"), { kind: "room", text: "" }, "a question to answer puts no words in his mouth");
   assert.deepEqual(stepAudience("Reply 'publish' or what to change.", null), { kind: "room", text: "publish" });
+  assert.deepEqual(stepAudience("Say go to send the SOW to Casey", "atlas/build"), { kind: "room", text: "Go to send the SOW to Casey" }, "the word is for the room, whatever follows");
 });
 await check("P1-2 actions toward a person outside the room are never a room prefill (titles from the scratch copy)", () => {
   for (const title of ["Tell Sebastian the BVSD letter is sent, if not done…", "Send: the invite to Tobias and Leonardo. The draft is in Agent…",

@@ -111,7 +111,7 @@ export function privateLabel(p: Pick<PrivateNeed, "count" | "place">): string {
   return `${p.place}: ${p.count} for you`;
 }
 
-const ACTION_VERBS = /^(say|reply|tell|answer|send|approve|confirm|review|decide|sign|pay|call|email|write|read|pick|choose|check|book|schedule|draft|merge|deploy|ship|test|ask|give|post|share|record|update|fix|add|set|move|file|submit|finish|meet|join|buy|order|cancel|renew|follow|try|look|go|let|ping|invite|publish|upload|run|print|prepare|bring|forward|accept|decline|reject)(?=[\s:,]|$)/i;
+const ACTION_VERBS = /^(say|reply|tell|answer|send|edit|approve|confirm|review|decide|sign|pay|call|email|write|read|pick|choose|check|book|schedule|draft|merge|deploy|ship|test|ask|give|post|share|record|update|fix|add|set|move|file|submit|finish|meet|join|buy|order|cancel|renew|follow|try|look|go|let|ping|invite|publish|upload|run|print|prepare|bring|forward|accept|decline|reject)(?=[\s:,]|$)/i;
 /** A next step that names something to do ("Say go to deploy #38 + #58"), not a status ("Waiting on Casey"): the task sheet leads with it. */
 export function actionLead(next: string | null | undefined): string | null {
   const t = (next ?? "").replace(/[*_`>]/g, "").replace(/\s+/g, " ").trim();
@@ -142,7 +142,9 @@ export function stepAudience(next: string | null | undefined, room: string | nul
   const quoted = /["“'‘]([^"”'’]{1,120})["”'’]/.exec(step)?.[1] ?? "";
   // "Say …": for the room, unless it is said to a named person ("Say thanks to Mark")
   let m = /^say\b[\s:,-]*(.*)$/i.exec(step);
-  if (m && !/\bto\s+\p{Lu}[\p{L}'’.-]*(?:\s|$|[,.])/u.test(m[1].replace(/\bto\s+(?:uni|the room)\b/gi, ""))) {
+  // "Say go…", "Say yes…", "Say 'ship it'…": a word for the room (whatever the step does next, "…to send the SOW to Casey")
+  const roomWord = !!m && /^(?:go|yes|no|ok|okay|stop|wait|done|hold|ship it|start\b|["“'‘])/i.test(m[1]);
+  if (m && (roomWord || !/\bto\s+\p{Lu}[\p{L}'’.-]*(?:\s|$|[,.])/u.test(m[1].replace(/\bto\s+(?:uni|the room)\b/gi, "")))) {
     const rest = m[1].replace(/^(?:with\s+|to\s+(?:the\s+)?room\s+)/i, "");
     return { kind: "room", text: QUESTION_WORD.test(rest) ? "" : capFirst(unquote(rest)) };
   }
