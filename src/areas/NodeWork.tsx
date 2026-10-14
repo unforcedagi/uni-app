@@ -187,21 +187,23 @@ export function TaskSheet({ task, gone = false, here, nodeName, room, inRoom, on
           : <p className="task-q-note"><button type="button" className="task-link" onClick={() => { onClose(); onNote(asks.from ? { vault: asks.from.vault, id: asks.from.id } : { vault, id: task.id }); }}>{OPEN_TO_ANSWER} ›</button></p>}
       </section>}
       {decideError && !gone && <p className="task-gone task-changed" role="alert">{decideError}</p>}
-      {!gone && !tidy && dq?.answerable && !dq.box && <DecisionAnswer t={task} label={heading} onDecide={(t, o) => void answer(t, o)} className={`task-answer${deciding ? " busy" : ""}`} />}
-      {!gone && !tidy && dq?.answerable && dq.box && <form className="task-answer-box" onSubmit={(e) => { e.preventDefault(); if (typed) void answer(task, typed); }}>
-        <label htmlFor="task-answer-words">Answer in your words</label>
-        <div className="task-answer-row">
-          <input id="task-answer-words" type="text" value={words} maxLength={ANSWER_MAX} autoComplete="off" onChange={(e) => setWords(e.target.value)} disabled={deciding} />
-          <button type="submit" className="task-do primary" disabled={!typed || deciding} aria-busy={deciding || undefined}>{deciding ? "Saving…" : "Answer"}</button>
-        </div>
-      </form>}
       <dl className="task-facts">
-        <dt>Status</dt><dd>{stateLine(task, (w) => isMe(w), OWNER)}</dd>
+        {/* r19: a record to tidy is Uni's to fix, never "Needs your decision" */}
+        <dt>Status</dt><dd>{tidy ? "Uni's to tidy: not a clear request yet" : stateLine(task, (w) => isMe(w), OWNER)}</dd>
         {!isMe(task.owner) && <><dt>{isMe(task.waitingOn) ? "Task of" : "With"}</dt><dd>{OWNER(task.owner)}</dd></>}
         {task.due && <><dt>Due</dt><dd>{dueLine(task.due)}</dd></>}
       </dl>
       {/* r19: the actions are the sheet's footer, kept in view however short the window (the sheet scrolls above them) */}
       <div className="task-actions task-foot">
+        {/* a decision's answers are its primary action: in the footer too, so a short window never hides them behind it */}
+        {!gone && !tidy && dq?.answerable && !dq.box && <DecisionAnswer t={task} label={heading} onDecide={(t, o) => void answer(t, o)} className={`task-answer${deciding ? " busy" : ""}`} />}
+        {!gone && !tidy && dq?.answerable && dq.box && <form className="task-answer-box" onSubmit={(e) => { e.preventDefault(); if (typed) void answer(task, typed); }}>
+          <label htmlFor="task-answer-words">Answer in your words</label>
+          <div className="task-answer-row">
+            <input id="task-answer-words" type="text" value={words} maxLength={ANSWER_MAX} autoComplete="off" onChange={(e) => setWords(e.target.value)} disabled={deciding} />
+            <button type="submit" className="task-do primary" disabled={!typed || deciding} aria-busy={deciding || undefined}>{deciding ? "Saving…" : "Answer"}</button>
+          </div>
+        </form>}
         {primary === "fix" && <button type="button" className="task-do primary" onClick={askFix!}>Ask Uni to fix this record</button>}
         {(primary === "note" || primary === "fix") && <button type="button" className={`task-do${primary === "note" ? " primary" : ""}`} onClick={() => { onClose(); onNote({ vault, id: task.id }); }}>Open the note</button>}
         {primary === "source" && <button type="button" className="task-do primary" onClick={() => { const f = (check ?? waits)!.from; onClose(); onNote({ vault: f.vault, id: f.id }); }}>Open the note</button>}

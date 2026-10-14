@@ -616,3 +616,9 @@
 .cp-checkfail { margin: 0; padding: 0 0 8px; font: 400 12.5px/1.4 var(--th-sans); color: var(--th-ink); }
 .cp-item[data-mode="checking"] .cp-title { color: var(--th-ink2); font-style: italic; }
 .wv-tidy .wv-h { color: var(--th-mute); }
+/* a decision's answers sit at the top of the sheet's footer (its primary action), whole rows, wrapping */
+.task-sheet .task-foot .task-answer, .task-sheet .task-foot .task-answer-box { flex-basis: 100%; margin: 0; padding: 0 0 4px; }
+@media (max-height: 520px) {
+  .task-sheet .task-foot .task-answer .cp-opt { min-height: 36px; padding: 6px 12px; font-size: 14px; }
+  .task-sheet .task-foot .task-answer-box label { display: none; }
+}
