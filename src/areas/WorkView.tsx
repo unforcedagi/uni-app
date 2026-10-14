@@ -6,7 +6,7 @@ import { useState, type ReactNode } from "react";
 import { cleanText } from "../interface/contract";
 import { NeedRow, PrivateRow } from "./Companion";
 import { isActiveRun, type Draft, type Run } from "./steerCore";
-import { withoutCut, type NeedsFeed, type PrivateNeed } from "./simpleCore";
+import { wholeWords, type NeedsFeed, type PrivateNeed } from "./simpleCore";
 import type { TaskLoad } from "./Companion";
 import { asOf, countLabel, countText, LoadHealth } from "./LoadHealth";
 import type { Task } from "./taskCore";
@@ -35,6 +35,12 @@ export type WorkViewProps = {
   placeOf?: (t: Task) => string | null;
   /** Above the sections: the brief's lede and its Refresh. Below them: a project's own note, folded. */
   top?: ReactNode; foot?: ReactNode;
+};
+
+/** A record Uni is tidying, by its title as words (r20): no "Decision (default yes):" label, no cut tail ("…feature 4, the"). */
+export const tidyTitle = (t: Task): string => {
+  const words = wholeWords(cleanText(taskTitle(t.title).rest).replace(/^decision\s*(\([^)]*\))?\s*[:\-–—]\s*/i, "")) || cleanText(t.title);
+  return words[0].toLocaleUpperCase() + words.slice(1);
 };
 
 export function WorkView(p: WorkViewProps) {
@@ -74,7 +80,7 @@ export function WorkView(p: WorkViewProps) {
     {/* r20 (Codex 8): Uni's tidying stays Uni's: one quiet line, no rows to act on; opened, the records' titles, read-only */}
     {tidy.length > 0 && <section className="wv-sec wv-tidy" aria-label="Uni is tidying">
       <button type="button" className="wv-tidy-line" aria-expanded={tidyOpen} aria-controls="wv-tidy" onClick={() => setTidyOpen(!tidyOpen)}>{`Uni is tidying ${tidy.length} ${tidy.length === 1 ? "record" : "records"}`}</button>
-      {tidyOpen && <ul id="wv-tidy" className="wv-tidy-list">{tidy.map((t) => <li key={t.id}>{cleanText(withoutCut(taskTitle(t.title).rest) || t.title)}</li>)}</ul>}
+      {tidyOpen && <ul id="wv-tidy" className="wv-tidy-list">{tidy.map((t) => <li key={t.id}>{tidyTitle(t)}</li>)}</ul>}
     </section>}
     {p.later.length > 0 && <section className="wv-sec wv-later" aria-label="Later">
       <button type="button" className="wv-h wv-fold" aria-expanded={laterOpen} aria-controls="wv-later" onClick={() => setLaterOpen(!laterOpen)}>Later <span className="wv-n">{p.later.length}</span><i aria-hidden="true">{laterOpen ? "–" : "+"}</i></button>

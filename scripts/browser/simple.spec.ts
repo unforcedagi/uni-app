@@ -2244,10 +2244,10 @@ test.describe('r16', () => {
     // r20: the row is the action's first clause, whole ("…when convenient"), never "…T-07 is"; the rest is in the note
     await expect(row.locator('.cp-lead')).toHaveText('Send the SOW to Kevin when convenient');
     await expect(row.locator('.cp-lead')).not.toHaveText(/\bis\s*…?$/);
-    await expect(row.getByRole('button', { name: 'The rest is in its note' })).toBeVisible();
+    await expect(row.getByRole('button', { name: 'The rest is in its note' })).toHaveCount(0); // r20: the sheet says it, the row has no "›"
     const dq = page.locator('.cp-body .cp-item').filter({ hasText: 'Ship the ATLAS hosting?' });
     await expect(dq.locator('.cp-title')).toHaveText('Ship the ATLAS hosting?');
-    await row.getByRole('button', { name: 'The rest is in its note' }).click();
+    await row.locator('.cp-need').click();
     const sheet = page.getByRole('dialog');
     await expect(sheet.locator('.task-cut')).toContainText('This step was cut short when it was written.');
     await expect(sheet.getByRole('button', { name: 'Open the note ›' })).toBeVisible();
@@ -2792,6 +2792,10 @@ test.describe('r19', () => {
     await expect(needs).not.toContainText('Fractal flow test');
     await expect(needs).not.toContainText('approve a test week');
     await expect(page.locator('.sr-work section[aria-label="Uni is tidying"] .wv-tidy-line')).toHaveText('Uni is tidying 3 records');
+    // opened, titles as words: no "Decision (…):" label, no cut tail (found in the real app: "…feature 4, the")
+    await page.locator('.sr-work .wv-tidy-line').click();
+    const titles = await page.locator('.sr-work .wv-tidy-list li').allInnerTexts();
+    expect(titles.sort()).toEqual(['Fractal flow test: real work in area rooms, check updates', 'Mail: approve a test week, not an immediate cutover', 'Rooms write state: stands field, runs/drafts/decisions'].sort());
   });
 
   test('a decision\'s stored options wrap inside its sheet and never run past its edge (r20, Codex 7: the companion\'s row has none)', async ({ page }) => {
@@ -3027,6 +3031,19 @@ test.describe('r20', () => {
     await expect(body.locator('.cp-item[data-lead="action"]').first()).toBeVisible();
   });
 
+  test('a long host in an action reads as its first part in a row (found in the real app: it broke onto a third line at 236px); the link keeps the whole address', async ({ page }) => {
+    await boot(page);
+    await add(page, { id: 't113', title: 'T-113 Companion Today redesign + integrated PWA install flow (3 directions, then build the pick)', node: 'Projects/ATLAS', meta: { priority: 'now', due: '2026-10-13', next: 'Look at https://cohere-signup-staging.example-workers.invalid/?look=ecology on phone, then forward #cohere\'s \'For Eileen\' block (posted 10-13)' } });
+    await refresh(page, '2026-10-14T09:00:00.000Z');
+    await openRoom(page, 'ATLAS');
+    await openWork(page); await narrowWork(page);
+    const row = page.locator('.sr-work .cp-item').filter({ hasText: 'Look at' });
+    await expect(row.locator('.cp-lead')).toHaveText('Look at cohere-signup-staging on phone');
+    await expect(row.locator('.cp-lead .cp-link')).toHaveAttribute('href', 'https://cohere-signup-staging.example-workers.invalid/?look=ecology');
+    const h = await row.locator('.cp-lead').evaluate((el) => el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight));
+    expect(Math.round(h)).toBeLessThanOrEqual(2);
+  });
+
   test('P1-1 a missing prerequisite never authorizes an action: "Couldn\'t find … · Open the task", no action lead, no "I did this"', async ({ page }) => {
     await boot(page);
     await add(page, { id: 'mig', title: 'T-135 Migrate Uni to the new machine (Gigabyte Aero 16)', node: 'Projects/ATLAS', meta: { priority: 'now', next: 'OK the migration windows (gateway Wed, vaults Thu, Buzz+mail Sat)', depends_on: '[[Projects/Mail/Migration runbook]]' } });
@@ -3116,16 +3133,18 @@ test.describe('r20', () => {
     await boot(page);
     await add(page, { id: 'mail', title: 'Mail: approve a test week, not an immediate cutover', node: 'Projects/ATLAS', tag: 'decision' });
     await add(page, { id: 'r125', title: 'T-125 Rooms write state: stands field, runs∕drafts∕decisions in…', node: 'Projects/ATLAS', meta: { priority: 'now', next: 'Run /restart when convenient: loads the uni-relay hook that closes run notes on [done|blocked|decision] markers.' } });
+    await add(page, { id: 'benya', title: 'Decision (default yes): Uni adds Benya\'s missing feature 4, the…', node: 'Projects/ATLAS', tag: 'decision', content: 'Decision (default yes): Uni adds Benya\'s missing feature 4, the calendar view, this week.' });
     await refresh(page, '2026-10-14T09:00:00.000Z');
     await openRoom(page, 'ATLAS');
     await openWork(page);
     const n = await page.locator('.sr-work section[aria-label="Needs you"] .wv-n').innerText();
     const line = page.locator('.sr-work .wv-tidy-line');
-    await expect(line).toHaveText('Uni is tidying 2 records');
+    await expect(line).toHaveText('Uni is tidying 3 records');
     await expect(page.locator('.sr-work .wv-tidy .cp-item, .sr-work .wv-tidy .cp-need')).toHaveCount(0);
     await line.click();
     const list = page.locator('.sr-work .wv-tidy-list li');
-    await expect(list).toHaveText(['Rooms write state: stands field, runs/drafts/decisions in', 'Mail: approve a test week, not an immediate cutover']);
+    // titles as words: never a "Decision (…):" label or a cut tail ("…decisions in", "…feature 4, the")
+    await expect(list).toHaveText(['Rooms write state: stands field, runs/drafts/decisions', 'Mail: approve a test week, not an immediate cutover', 'Uni adds Benya\'s missing feature 4']);
     await expect(page.locator('.sr-work .wv-tidy').locator('button:not(.wv-tidy-line), a, .cp-go')).toHaveCount(0);
     await expect(page.locator('.sr-work .wv-tidy')).not.toContainText('›');
     await expect(page.locator('.sr-work section[aria-label="Needs you"] .wv-n')).toHaveText(n);
