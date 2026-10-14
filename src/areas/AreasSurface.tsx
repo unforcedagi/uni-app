@@ -18,8 +18,8 @@ import { pickRoom } from "./areaLayout";
 import { childrenOf, parentPath, ROOT, rootNode, trail, UNI_CHANNEL } from "./treeCore";
 import { findUniRoom } from "../uniActions";
 import { useStoredSelfTest } from "../interface/selftest/useSelfTest";
-import { useWide } from "./homeLayout";
-import { isPrivateNode, privateRoot, roomView, treeRows } from "./treeRooms";
+import { useRailHidden, useWide } from "./homeLayout";
+import { isPrivateNode, privateRoot, roomSlug, roomView, treeRows } from "./treeRooms";
 import { publishRoomNodes, roomNodeMap } from "./roomLabels";
 import { useNav, type NavControls } from "../navContext";
 import { useVaultProfile } from "./ProfileContext";
@@ -77,6 +77,9 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   const { data, error, loading, signingIn } = useAreas(identity);
   const nav = useNav();
   const wide = useWide();
+  /** One rule for global navigation (r14): Places (the drawer) shows whenever the rail is hidden, and below 900px where the tree is. */
+  const railHidden = useRailHidden();
+  const placesDrawer = !wide || railHidden;
   /** The companion beside (wide) or above (phone) the conversation: open or folded, remembered per device. */
   const [companionOpen, setCompanionOpen] = useCompanionOpen(wide ? "side" : "strip");
   /** Phone: the room tree is the home and a level opens from it; Uni's own level is one tap on its row. */
@@ -114,8 +117,9 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   }) : phoneTree && rootOpen ? () => setRootOpen(false) : null;
   /** What is over the place, top first: the sheet (modal), then the drawer, then the work view (only when the chat is there to go back to). */
   const workOver = work && chat;
+  // the drawer is closed by every Back first (r14), its own Back button excepted (that one goes back a place as it closes)
   const overlay: Overlay | null = sheetId ? { close: closeSheet, modal: true, history: false }
-    : drawer ? { close: () => { setDrawer(false); setWork(false); }, modal: false, history: workOver }
+    : drawer ? { close: () => setDrawer(false), modal: false, history: true }
     : workOver ? { close: () => setWork(false), modal: false, history: true } : null;
   const overlayKey = `${sheetId ? "sheet" : ""}${drawer ? "drawer" : ""}${workOver ? "work" : ""}`;
   useEffect(() => {
@@ -132,6 +136,28 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   }, [overlayKey]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => onOverlayChange?.(null), []); // eslint-disable-line react-hooks/exhaustive-deps
   const workShown = work || !chat;
+  // the drawer is a dialog (r14): focus moves in, stays in (Tab wraps), what is under it is inert, and closing gives focus back to Places
+  const drawerBox = useRef<HTMLElement>(null);
+  const drawerOpener = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!drawer) return;
+    const box = drawerBox.current; const wrap = box?.closest(".th-drawer-wrap");
+    if (!box || !wrap) return;
+    const marked: Element[] = [];
+    for (let el: Element | null = wrap; el && el !== document.body; el = el.parentElement) {
+      for (const sib of el.parentElement?.children ?? []) if (sib !== el && !sib.hasAttribute("inert")) { sib.setAttribute("inert", ""); marked.push(sib); }
+    }
+    (box.querySelector<HTMLElement>(".th-place, button:not(:disabled)") ?? box).focus();
+    const opener = drawerOpener.current;
+    return () => { for (const m of marked) m.removeAttribute("inert"); const at = document.activeElement; if (opener?.isConnected && (!at || at === document.body)) opener.focus(); };
+  }, [drawer]);
+  const trapDrawer = (e: React.KeyboardEvent) => {
+    if (e.key !== "Tab") return;
+    const f = [...drawerBox.current!.querySelectorAll<HTMLElement>("button:not(:disabled), a[href], [tabindex='0']")];
+    if (!f.length) return;
+    if (e.shiftKey && (document.activeElement === f[0] || document.activeElement === drawerBox.current)) { e.preventDefault(); f[f.length - 1].focus(); }
+    else if (!e.shiftKey && document.activeElement === f[f.length - 1]) { e.preventDefault(); f[0].focus(); }
+  };
   useEffect(() => {
     setBody(null);
     if (!identity || node?.kind !== "project" || !workShown) return;
@@ -188,7 +214,7 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   /** The app's own places (Journal, Vault, Search, Settings), for where the rail is out of reach: the drawer and a short screen's tree. */
   const places = nav?.places ?? [];
   const placesRow = places.length > 0 && <nav className="th-places" aria-label="App">{places.map((p) => <button key={p.label} type="button" className="th-place" onClick={() => { setDrawer(false); p.go(); }}>{p.label}</button>)}</nav>;
-  const drawerNav: NavControls | null = nav ? { ...nav, back: () => { setDrawer(false); nav.back(); }, forward: () => { setDrawer(false); nav.forward(); }, recent: nav.recent.map((r) => ({ ...r, go: () => { setDrawer(false); r.go(); } })) } : null;
+  const drawerNav: NavControls | null = nav ? { ...nav, back: () => { setDrawer(false); (nav.backPlace ?? nav.back)(); }, forward: () => { setDrawer(false); nav.forward(); }, recent: nav.recent.map((r) => ({ ...r, go: () => { setDrawer(false); r.go(); } })) } : null;
   /**
    * The room itself: a header (title, the room's own name, where it sits), the conversation, and the companion beside it (wide) or as a
    * strip above it (phone). A thread or the work view shows inside it, with a way back to the room.
@@ -200,7 +226,7 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
       {wide && <RoomSidebar {...treeProps} selected={o.selected} selectedRoom={o.selectedRoom} nav={nav} />}
       <section className="sr" aria-label={o.main ? `Work: ${o.title}` : `Conversation: ${o.title}`}>
         <header className="sr-head">
-          {!wide && <button type="button" className="sr-drawer" aria-label="Places" title="Rooms and places" aria-expanded={drawer} aria-controls="th-drawer" onClick={() => setDrawer(true)}><span aria-hidden="true" /></button>}
+          {placesDrawer && <button ref={drawerOpener} type="button" className="sr-drawer" aria-label="Places" title="Rooms and places" aria-expanded={drawer} aria-controls="th-drawer" onClick={() => setDrawer(true)}><span aria-hidden="true" /></button>}
           <div className="sr-titles">
             {(o.door || o.crumbs) && <div className="sr-meta">{o.crumbs}{o.door && <span className="sr-door">{o.door}</span>}</div>}
             <h1 className="sr-title">{o.title}</h1>
@@ -216,9 +242,9 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
           : <div className="sr-chat">{o.chatRoom ? o.chatRoom.render(null, o.placeholder) : <p className="th-quiet" role="status">Opening the room…</p>}</div>}
       </section>
       {wide && o.companion && !o.main && <CompanionSide {...o.companion} open={companionOpen} onToggle={setCompanionOpen} />}
-      {!wide && drawer && <div className="th-drawer-wrap">
+      {placesDrawer && drawer && <div className="th-drawer-wrap">
         <button type="button" className="th-drawer-scrim" aria-label="Close places" tabIndex={-1} onClick={() => setDrawer(false)} />
-        <aside id="th-drawer" className="th-drawer" aria-label="Rooms and places">
+        <aside ref={drawerBox} id="th-drawer" className="th-drawer" role="dialog" aria-modal="true" aria-label="Rooms and places" tabIndex={-1} onKeyDown={trapDrawer}>
           {placesRow}
           <TreeScreen column {...treeProps} selected={o.selected} selectedRoom={o.selectedRoom} nav={drawerNav} onHide={() => setDrawer(false)} hideLabel="Close places" />
         </aside>
@@ -246,7 +272,7 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
     {!!data?.truncated.length && <p className="areas-status" role="status">{data.truncated.join(", ")}: showing first 200 notes; more may exist.</p>}
   </>;
   if (phoneTree && path === null && !rootOpen) {
-    return <div className="areas-home tree-home-wrap"><TreeScreen {...treeProps} status={<>{status}{places.length > 0 && <div className="th-places-short">{placesRow}</div>}</>} />
+    return <div className="areas-home tree-home-wrap"><TreeScreen {...treeProps} status={<>{status}{railHidden && places.length > 0 && <div className="th-places-short">{placesRow}</div>}</>} />
       <UndoBar undo={tasks.undo} notice={tasks.notice} onDismiss={tasks.dismissNotice} /></div>;
   }
   const today = data?.today;
@@ -308,7 +334,9 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   const workBar = workOpen ? <div className="sr-thread sr-workbar">{chat && !noRoom && <button type="button" className="sr-thread-back sr-work-back" onClick={() => setWork(false)}><span aria-hidden="true">‹</span> Back to chat</button>}
     <span className="sr-thread-label">{`All of ${node.name}'s work`}</span></div> : null;
   const crumbs = !isRoot ? <Crumbs trail={trailItems} onOpen={openPath} compact={!wide} /> : null;
-  const roomLevel = shell({ title: node.name, door: chat && nodeView.own && nodeView.slash ? `#${nodeView.slash.replace(/^#/, "")}` : "", crumbs,
+  /** The room's channel, once (r14): its own (`#cohere`), or the room it borrows, said plainly ("Conversation in #boulder"). */
+  const door = !chat ? "" : nodeView.own && nodeView.slash ? `#${nodeView.slash.replace(/^#/, "")}` : nodeView.heldBy && !isRoot ? `Conversation in #${roomSlug(nodeView.heldBy.name)}` : "";
+  const roomLevel = shell({ title: node.name, door, crumbs,
     companion: chat ? companionProps : null, chatRoom: thread ? roomFor(thread.channel, thread.root) : roomFor(target?.id), placeholder, selected: node.path, sheet: sheetView,
     main: workOpen ? workMain : undefined, workBar });
   return <AreaView key={node.id} area={body !== null ? { ...node, body } : node} channel={nodeRoom} onChannel={setPicked} mode={mode} roomName={roomName} actions={actions}

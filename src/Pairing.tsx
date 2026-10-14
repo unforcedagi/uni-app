@@ -63,18 +63,19 @@ export default function Pairing({ onPaired }: { onPaired: (pubkey: string) => vo
 
   return <main className="pairing">
     <div className="pairing-card">
-      <span className="eyebrow">Unforced</span>
-      <h1>Pair with another device (Uni or Buzz desktop)</h1>
+      <h1>Sign in to Uni from a device you already use</h1>
+      <p className="pairing-note">Uni signs this device in with the key from one where you are signed in already. Nothing to type but a link.</p>
       {step === "scanning" && <p role="status">Scanning QR code…</p>}
       {(step === "paste" || step === "connecting") && <>
         <ol className="pairing-steps">
-          <li>On the other device, open Uni → Settings → <strong>Pair a device</strong>, or Buzz desktop → Settings → <strong>Pair mobile device</strong>.</li>
-          <li>Scan its QR code or copy its link and paste it here.</li>
+          <li>On the other device, open Uni → Settings → <strong>Pair a device</strong>.</li>
+          <li>Scan the QR code it shows, or copy its link and paste it here.</li>
           <li>Tap Start, then compare the 6-digit codes.</li>
         </ol>
+        <p className="pairing-note">Buzz desktop can sign this device in too: Settings → Pair mobile device.</p>
         {isAndroid && <button className="pairing-secondary" disabled={step === "connecting"} onClick={() => void scanQr()}>Scan QR code</button>}
         <label className="pairing-label">Pairing link
-          <textarea value={link} onChange={(e) => setLink(e.target.value)} rows={4} spellCheck={false} autoCapitalize="off" autoCorrect="off" placeholder="nostrpair://…" disabled={step === "connecting"} />
+          <textarea value={link} onChange={(e) => setLink(e.target.value)} rows={4} spellCheck={false} autoCapitalize="off" autoCorrect="off" placeholder="Paste the link from the other device" disabled={step === "connecting"} />
         </label>
         <button className="send pairing-primary" disabled={!link.trim().startsWith("nostrpair://") || step === "connecting"} onClick={() => void start()}>{step === "connecting" ? "Connecting…" : "Start"}</button>
       </>}

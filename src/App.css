@@ -592,9 +592,11 @@ h1 { font-family: var(--serif); font-weight: 500; font-size: 34px; line-height: 
   .toast { bottom: calc(68px + env(safe-area-inset-bottom)); }
 }
 @keyframes phone-sheet-in { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: none; } }
+/* r14: the rail is hidden by one rule (RAIL_HIDDEN_QUERY in homeLayout.ts), set on the shell as .rail-off; the room then offers Places */
+.shell.rail-off { padding-bottom: 0; }
+.shell.rail-off .rail { display: none; }
 @media (max-height: 499px) and (max-width: 950px) {
   .shell { padding-bottom: 0; }
-  .rail { display: none; }
   .shell .rooms, .shell.in-room .rooms { left: 0; width: 100%; max-width: 100%; z-index: 50; }
   .note-sheet { left: 0; bottom: 0; }
   .back { display: grid; }
@@ -626,3 +628,12 @@ h1 { font-family: var(--serif); font-weight: 500; font-size: 34px; line-height: 
 .settings-dev > summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; color: var(--text-soft); font-size: 14px; }
 .settings-dev-line { margin: 4px 0 8px; font-size: 13px; color: var(--text-soft); overflow-wrap: anywhere; }
 .room-loading { color: var(--text-soft); }
+/* r14: one utility-panel frame (Settings, Search, Vault): the destination's title and Close */
+.panel-head { flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 14px 10px 8px 24px; }
+.panel-head h1 { margin: 0; font-size: 20px; font-weight: 600; }
+.panel-head .panel-close { margin: 0; align-self: center; }
+/* r14: pipe tables in chat */
+.md-table-wrap { max-width: 100%; overflow-x: auto; margin: 6px 0; }
+.md-table { border-collapse: collapse; font-size: .94em; }
+.md-table th, .md-table td { border: 1px solid var(--line); padding: 4px 10px; vertical-align: top; text-align: left; }
+.md-table th { font-weight: 600; background: var(--surface-2); }

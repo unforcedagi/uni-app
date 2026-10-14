@@ -557,9 +557,7 @@ h3.wr-h { font-weight: 400; }
 .th-places { flex: none; display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 10px 4px; }
 .th-place { all: unset; box-sizing: border-box; min-height: 44px; padding: 0 14px; display: inline-flex; align-items: center; border: 1px solid var(--th-hair2); border-radius: 999px; font: 500 14px var(--th-sans); color: var(--th-ink); cursor: pointer; background: var(--th-paper); }
 .th-place:focus-visible { outline: 2px solid var(--th-ink); outline-offset: 2px; }
-/* the phone's tree home shows the places only where the rail is out of reach (a short landscape screen) */
-.th-places-short { display: none; }
-@media (max-height: 499px) and (max-width: 950px) { .th-places-short { display: block; } }
+/* the phone's tree home shows the places only where the rail is hidden (useRailHidden, r14) */
 .key-error { display: flex; align-items: center; gap: 8px; justify-content: center; }
 .tree-home.th-level.th-simple.wide.solo { grid-template-columns: var(--th-nav-w, 220px) minmax(0, 1fr); }
 /* the drawer is touched on phones and tablets: whole rows and folds are 44px targets there */
@@ -569,8 +567,13 @@ h3.wr-h { font-weight: 400; }
   .th-drawer .th-recent button { min-height: 44px; display: flex; align-items: center; }
   .th-drawer .th-nb { width: 44px; height: 44px; }
 }
-/* a short screen: the places keep to one line (it scrolls sideways) so the tree keeps its room */
-@media (max-height: 499px) { .th-drawer .th-places { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 6px; } .th-drawer .th-place { flex: none; } }
+/* a short screen (r14): the drawer is wider so the places fit one line without scrolling, and Recent steps aside so the tree keeps the height */
+@media (max-height: 499px) {
+  .th-drawer { width: min(520px, 92vw); }
+  .th-drawer .th-places { flex-wrap: wrap; overflow: visible; gap: 4px; padding: 6px 8px 2px; }
+  .th-drawer .th-place { flex: none; padding: 0 12px; font-size: 13.5px; }
+  .th-drawer .th-recent { display: none; }
+}
 /* r14: a row leads with its action; its title (the event or project) is a quiet line under it. A long decision opens to decide. */
 .cp-need .cp-under { color: var(--th-mute); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cp-item[data-open] .cp-need .cp-under { white-space: normal; }

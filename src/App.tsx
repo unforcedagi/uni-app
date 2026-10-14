@@ -44,6 +44,7 @@ import { currentUserAgent, platformName } from "./interface/selftest/gate";
 import { activeTab, closeTab, EMPTY_TABS, focusTab, isSurface, LEGACY_TABS_KEY, migrateLegacyTabs, navigateNoteTab, nextAfterClose, openTab, persistable, recordingTabCanClose, restoreTabs, serializeTabs, updateTab, TABS_KEY, type Tabs, type Tab, type TabTarget, type OpenMode } from "./tabs";
 import { canBack as histCanBack, canForward as histCanForward, EMPTY_HISTORY, placeKey, RECENT_SHOWN, recent as histRecent, step as histStep, visit as histVisit, type History } from "./navHistory";
 import { NavContext, type NavControls } from "./navContext";
+import { useRailHidden } from "./areas/homeLayout";
 import { notifyMention, setUnreadBadge } from "./desktopNotify";
 import NoteView from "./NoteView";
 import SurfaceModal from "./SurfaceModal";
@@ -75,7 +76,6 @@ const MAX_ATTACHMENTS = 20;
 const OTHER_VAULTS_KEY = "uni:other-vaults-expanded";
 
 const time = (ts: number) => new Date(ts * 1000).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
-const HEX_KEY = /^[0-9a-f]{64}$/i;
 const keyFor = (channel: string, root: string | null) => `${channel}:${root ?? "room"}`;
 const dayKey = (ts: number) => new Date(ts * 1000).toDateString();
 function dayLabel(ts: number) {
@@ -240,6 +240,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
   /** `nav`: the navigation panel where the rail is out of reach (short landscape screens): the surfaces, Vault, Search and the vaults. */
   const [panel, setPanel] = useState<"nav" | "vault" | "settings" | null>(null);
   const [composerFocused, setComposerFocused] = useState(false);
+  /** The rail is hidden on short windows up to 950px (one rule, r14): the room then shows its Places drawer. */
+  const railHidden = useRailHidden();
   const forYouBack = useRef("Uni");
   const forYouReturn = useRef<string | null>(null);
   const [journalFocus, setJournalFocus] = useState(false);
@@ -339,9 +341,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const [bindings, setBindings] = useState<Bindings>(new Map());
   const bindingStore = useRef(new Map<string, Bindings>());
   const [picker, setPicker] = useState<Picker | null>(null);
-  const [rawKey, setRawKey] = useState("");
-  const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [, setBusy] = useState(false);
   const [sending, setSending] = useState(false);
   const sendingRef = useRef(false);
   const [status, setStatus] = useState("Loading cached conversations…");
@@ -399,11 +399,11 @@ function Conversations({ onForget }: { onForget: () => void }) {
     const next = histVisit(histRef.current, t);
     if (next !== histRef.current) { histRef.current = next; setHist(next); }
   }
-  function goHistory(by: -1 | 1) {
+  function goHistory(by: -1 | 1, pastOverlay = false) {
     // A note open over the place has its own Back: that comes first. A task sheet holds history while it is open (Escape closes it);
-    // the work view and the drawer close before Back changes places.
+    // the work view and the drawer close before Back changes places (`pastOverlay`: the drawer's own Back, pressed as it closes).
     if (by < 0 && notesRef.current.length) { closeNoteRef.current(); return; }
-    const over = overlayRef.current;
+    const over = pastOverlay ? null : overlayRef.current;
     if (over?.modal) return;
     if (by < 0 && over?.history) { over.close(); return; }
     const hop = histStep(histRef.current, by);
@@ -1239,11 +1239,6 @@ function Conversations({ onForget }: { onForget: () => void }) {
     const recipients = [...resolved.recipients];
     const uniHere = findUniMember(members);
     if (notifyUni && uniHere && !recipients.includes(uniHere.pubkey)) recipients.push(uniHere.pubkey);
-    const raw = rawKey.trim();
-    if (raw) {
-      if (!HEX_KEY.test(raw)) { setError("The advanced public key must be 64 hex characters."); return; }
-      if (!recipients.includes(raw.toLowerCase())) recipients.push(raw.toLowerCase());
-    }
     // In a thread, reply to the root. If the root is not cached, reply to the newest cached message in the thread.
     let target: string | null = null;
     if (root) target = messages.some((m) => m.ref === root) ? root : messages[messages.length - 1]?.ref ?? null;
@@ -1268,7 +1263,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
         }
       }
       if (activeScope.current === key) {
-        setRawKey("");
+
       }
       // Re-read through the room effect, which drops the result if the
       // user has switched rooms meanwhile.
@@ -1336,7 +1331,6 @@ function Conversations({ onForget }: { onForget: () => void }) {
               </button>
             </li>)}
           </ul>}
-          {advancedOpen && <label className="address-label">Advanced: also notify a raw public key (64 hex characters)<input value={rawKey} onChange={(e) => setRawKey(e.target.value)} autoComplete="off" spellCheck={false} placeholder="hex pubkey" /></label>}
           {typingLine && <div className="typing-line" role="status" aria-live="polite">{typingLine}</div>}
           {pending.length > 0 && <div className="compose-files" aria-label="Attachments">
             {pending.map((item) => <div className={`compose-file ${item.state}`} key={item.id}>
@@ -1361,7 +1355,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
               {sending ? <span aria-hidden="true">…</span> : <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 7-7 7 7M12 5v14" /></svg>}
             </button>
           </div>
-          <p className="compose-hint">Enter to send · Shift+Enter for a new line · @ to mention · <button className="link" onClick={() => setAdvancedOpen(!advancedOpen)}>{advancedOpen ? "hide raw key" : "raw key…"}</button></p>
+          <p className="compose-hint">Enter to send · Shift+Enter for a new line · @ to mention</p>
         </footer>
   </>;
   const approvalRow = (m: Message) => {
@@ -1423,8 +1417,11 @@ function Conversations({ onForget }: { onForget: () => void }) {
     {rootMessage ? renderMessage(rootMessage, true) : messages.length > 0 && <p className="empty">Root message is not cached; showing replies we have.</p>}
     {rootMessage && <div className="thread-divider"><span>{threadReplies.length ? `${threadReplies.length} ${threadReplies.length === 1 ? "reply" : "replies"}` : "No replies yet"}</span></div>}
     {renderList(threadReplies, true)}
-    {messages.length === 0 && fetchedView === currentView && <p className="empty">Thread not in local cache. Refresh to try again.</p>}
-    {messages.length === 0 && fetchedView !== currentView && <p className="empty room-loading" role="status">Loading the thread…</p>}
+    {messages.length === 0 && fetchedView === currentView && <p className="empty">This thread has no messages yet.</p>}
+    {/* r14: a thread's first read fails the same way a room's does, with Retry */}
+    {messages.length === 0 && fetchedView !== currentView && (failedView === currentView
+      ? <p className="empty room-loading" role="alert">Couldn't load the thread · <button type="button" className="pairing-secondary" onClick={() => setTick((n) => n + 1)}>Retry</button></p>
+      : <p className="empty room-loading" role="status">Loading the thread…</p>)}
   </> : <>
     {messages.length > 0 && <div className="older">{older === "done" ? <span>Start of #{roomName}</span> : <button onClick={() => actions.current.loadOlder()} disabled={older === "loading"}>{older === "loading" ? "Loading older messages…" : "Load older messages"}</button>}</div>}
     {/* the kept copy or nothing until the store has answered: a room is never called empty before it has been read */}
@@ -1570,13 +1567,15 @@ function Conversations({ onForget }: { onForget: () => void }) {
       { label: "Search", go: () => { setPanel(null); setSearchQuery(""); setSearchScope({ vault: "", prefix: "" }); setSearchOpen(true); } },
       { label: "Settings", go: () => { setSearchOpen(false); setPanel("settings"); setForgetArmed(false); } },
     ],
-    back: () => goHistory(-1), forward: () => goHistory(1),
+    back: () => goHistory(-1), forward: () => goHistory(1), backPlace: () => goHistory(-1, true),
     recent: histRecent(hist, RECENT_SHOWN, placeOf).filter((t) => !active || placeOf(t) !== placeOf(active)).map((t) => ({ key: placeOf(t), title: t.title, path: t.kind === "area" ? t.path ?? null : null, room: t.kind === "room" ? t.channel ?? null : null, go: () => openTarget(t, "focus") })),
   };
+  /** The open utility panel's own name (r14): its frame says where you are. */
+  const panelTitle = searchOpen ? "Search" : panel === "settings" ? "Settings" : panel === "vault" ? "Vault" : "Places";
   const recordingTab = recordingOrigin.current;
   const pill = recordingTab && recorder.busy ? { title: recordingTab.title, elapsed: recorder.elapsed, tabId: recordingTab.tabId, stop: recorder.stop, phase: recorder.phase } :
     journalRecording && journalTab ? { title: "Journal", elapsed: journalRecording.elapsed, tabId: journalTab.id, stop: journalRecording.stop, phase: "recording" as const } : null;
-  return <NavContext.Provider value={navControls}><NoteOpener.Provider value={openNote}><main className={`shell ${(!sidebarVisible && (channel || journalOpen || shellOpen || (active?.kind === "note" || active?.kind === "vault"))) ? "in-room" : ""} ${topNote ? "note-open" : ""} ${panel ? `panel-open panel-${panel}` : ""} ${searchOpen ? "search-open" : ""} ${composerFocused ? "composer-focused" : ""} ${journalFocus && journalOpen ? "journal-focus" : ""}`}>
+  return <NavContext.Provider value={navControls}><NoteOpener.Provider value={openNote}><main className={`shell ${(!sidebarVisible && (channel || journalOpen || shellOpen || (active?.kind === "note" || active?.kind === "vault"))) ? "in-room" : ""} ${topNote ? "note-open" : ""} ${panel ? `panel-open panel-${panel}` : ""} ${searchOpen ? "search-open" : ""} ${composerFocused ? "composer-focused" : ""} ${journalFocus && journalOpen ? "journal-focus" : ""} ${railHidden ? "rail-off" : ""}`}>
     <nav className="rail" aria-label="Main navigation">
       <button aria-label="Uni" aria-current={!panel && !searchOpen && (!topNote && shellOpen ? "page" : undefined)} onClick={() => openTarget(uniHome())}><i><UniIcon /></i><span>Uni</span></button>
       <button aria-label="Journal" aria-current={!panel && !searchOpen && (journalOpen && !topNote ? "page" : undefined)} onClick={() => openTarget({ kind: "journal", title: "Journal" })}><i><JournalIcon /></i><span>Journal</span></button>
@@ -1586,11 +1585,9 @@ function Conversations({ onForget }: { onForget: () => void }) {
       <button className="rail-settings" aria-label="Settings" aria-expanded={panel === "settings"} onClick={() => { setSearchOpen(false); setPanel(panel === "settings" ? null : "settings"); setForgetArmed(false); }}><i><SettingsIcon /></i><span>Settings</span></button>
     </nav>
     {(panel || searchOpen) && <button className="panel-scrim" aria-label="Close navigation panel" onClick={() => { setPanel(null); setSearchOpen(false); }} />}
-    <aside className="rooms" aria-label="Conversations">
-      {(panel || searchOpen) && <button className="panel-close icon-button" aria-label="Close panel" onClick={() => { setPanel(null); setSearchOpen(false); }}>×</button>}
-      <div className="landscape-panel-surfaces"><button onClick={() => openTarget(uniHome())}><UniIcon />Uni</button><button onClick={() => openTarget({ kind: "journal", title: "Journal" })}><JournalIcon />Journal</button><button onClick={openForYou}><StarIcon />For you</button><button onClick={() => { setPanel("settings"); }}><SettingsIcon />Settings</button></div>
-      <div className="phone-panel-tools"><button onClick={() => { setPanel("vault"); setSearchOpen(false); }}>Vault</button><button onClick={() => { setPanel(null); setSearchOpen(true); }}>Search</button></div>
-      <header className="rooms-header"><div><span className="eyebrow">Unforced</span><h1>Uni</h1></div><div><button className="icon-button" onClick={() => { setSearchQuery(""); setSearchScope({ vault: "", prefix: "" }); setSearchOpen(true); }} aria-label="Search messages and notes">⌕</button><button className="icon-button" onClick={() => void refresh()} disabled={busy} aria-label="Refresh conversations">↻</button><button className="icon-button" onClick={() => { setPanel(panel === "settings" ? "nav" : "settings"); setSearchOpen(false); setForgetArmed(false); }} aria-label="Settings" aria-expanded={panel === "settings"}><SettingsIcon /></button></div></header>
+    {/* r14: one utility-panel frame for Settings, Search and Vault: the destination's title and Close, nothing else */}
+    <aside className="rooms" aria-label={panelTitle}>
+      {(panel || searchOpen) && <header className="panel-head"><h1>{panelTitle}</h1><button className="panel-close icon-button" aria-label="Close panel" title="Close" onClick={() => { setPanel(null); setSearchOpen(false); }}>×</button></header>}
       {pairSourceOpen && <PairSource onClose={() => setPairSourceOpen(false)} />}
       {panel === "settings" && <div className="settings">
         <p className="connection" role="status">{status}{live ? <span className={`live ${live === "Live" ? "on" : ""}`}> · {live}</span> : null}</p>
@@ -1601,7 +1598,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       {searchOpen && <Search initialQuery={searchQuery} vaults={vaults} key={`${searchScope.vault}:${searchScope.prefix}`} initialVault={searchScope.vault} initialPathPrefix={searchScope.prefix} onOpen={openHit} onOpenNote={(n) => { setSearchOpen(false); openNote({ hub: null, vault: n.vault, ref: n.id }, null); }} onAskUni={askUniSearch} onClose={() => { setSearchOpen(false); if (topNote) setSidebarVisible(false); }} />}
       {searchOpen && error && <p className="error search-error" role="alert">{error}</p>}
       <div className="rooms-body" hidden={searchOpen}>
-      <section className="vault-sidebar" aria-label="Vaults"><div className="vault-heading"><h2>Vaults</h2><button className="note-quiet" onClick={() => setVaultRefresh((n) => n + 1)}>Refresh</button></div>
+      <section className="vault-sidebar" aria-label="Vaults"><div className="vault-heading"><button className="note-quiet" onClick={() => setVaultRefresh((n) => n + 1)}>Refresh the list</button></div>
         {vaultError && <p className="error" role="alert">{vaultError}</p>}
         {primaryVault && vaultRow(primaryVault)}
         {otherVaults.length > 0 && <>

@@ -80,9 +80,10 @@ export function useUpdater(): { state: UpdateState; label: string; check: () => 
 export function UpdateSettings() {
   const { state: s, label, check } = useUpdater();
   const [version, setVersion] = useState<string | null>(null);
-  useEffect(() => { getVersion().then(setVersion).catch(() => setVersion("(version unknown)")); }, []);
+  // r14: the app plugin's version, else the app's own command; if neither answers, just "Uni" (never "version unknown" in Settings)
+  useEffect(() => { getVersion().catch(() => invoke<string>("app_version")).then((v) => setVersion(v ? String(v) : ""), () => setVersion("")); }, []);
   return <div className="update-settings">
-    <span className="update-version">Uni {version ?? "…"}</span>
+    <span className="update-version">{version ? `Uni ${version}` : version === "" ? "Uni" : "Uni …"}</span>
     {s.kind === "ready" ? <button className="pairing-secondary" onClick={() => void restartToUpdate()}>{label} — Restart</button>
       : s.kind === "available" ? <button className="pairing-secondary" onClick={() => openApkDownload(s.url)}>{label} — Download APK</button>
       : <button className="pairing-secondary" onClick={check} disabled={isBusy(s)}>{isBusy(s) ? label : "Check for updates"}</button>}
