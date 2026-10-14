@@ -689,7 +689,9 @@ test.describe('simple', () => {
     test.skip(!wide(page), 'sidebar column');
     await boot(page);
     const nav = page.locator('.th-roomnav');
-    const width = async () => Math.round((await nav.boundingBox())!.width);
+    const width = async () => { const b = await nav.boundingBox(); return b ? Math.round(b.width) : -1; };
+    await expect(nav).toBeVisible();
+    await expect.poll(width).toBeGreaterThan(0);
     expect(await width()).toBeLessThanOrEqual(222);
     expect(await width()).toBeGreaterThanOrEqual(218);
     await expect(nav.locator('.th-colname')).toHaveCount(0); // no big "Rooms" heading
@@ -706,13 +708,15 @@ test.describe('simple', () => {
     expect(await width()).toBe(196);
     await page.reload();
     await expect(page.locator('.th-roomnav')).toBeVisible();
-    expect(await width()).toBe(196);
+    // the room shell remounts once just after the first paint (as in r13): read the width once it has settled
+    await expect.poll(width).toBe(196);
     // hide down to a strip, and bring it back
     await nav.getByRole('button', { name: 'Hide the sidebar' }).click();
     expect(await width()).toBeLessThanOrEqual(40);
     await expect(nav.locator('.th-go')).toHaveCount(0);
     await page.reload();
-    expect(await width()).toBeLessThanOrEqual(40);
+    await expect(page.locator('.th-roomnav')).toBeVisible();
+    await expect.poll(async () => { const w = await width(); return w > 0 && w <= 40; }).toBe(true);
     await page.locator('.th-roomnav').getByRole('button', { name: 'Show the sidebar' }).click();
     expect(await width()).toBe(196);
     // about 20 rows fit at 720px once every area is open

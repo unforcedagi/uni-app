@@ -877,7 +877,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     try {
       const roster = await invoke<Member[]>("get_members", { channel: uniRoom.id });
       const uni = findUniMember(roster);
-      if (!uni) { setError("Uni isn't in the Uni room's member list yet. Refresh to load it."); return false; }
+      if (!uni) { setError("Uni isn't in the Uni room's member list yet. Try again in a moment."); return false; }
       const label = memberLabels(roster).get(uni.pubkey) ?? uni.name;
       await invoke<Message>("post_message", { channel: uniRoom.id, body: searchHandoffText(query, label), replyTo: null, recipients: [uni.pubkey] });
       setStatus("Asked Uni · results will arrive in #Uni");
@@ -1324,7 +1324,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
           <input ref={fileInput} className="file-picker" type="file" multiple aria-label="Choose files to attach" onChange={(e) => { addFiles(Array.from(e.target.files ?? [])); e.target.value = ""; }} />
           {error && <p className="error" role="alert">{error}</p>}
           {picker && <ul className="mention-picker" role="listbox" aria-label="Mention a member">
-            {suggestions.length === 0 && <li className="mention-empty">{members.length ? `No member matches “${picker.query}”` : "No member list cached yet. Refresh to load it."}</li>}
+            {suggestions.length === 0 && <li className="mention-empty">{members.length ? `No member matches “${picker.query}”` : "No members known for this room yet."}</li>}
             {suggestions.map((m, i) => <li key={m.pubkey} role="option" aria-selected={i === picker.index}>
               <button className={i === picker.index ? "active" : ""} onPointerDown={(e) => e.preventDefault()} onMouseDown={(e) => e.preventDefault()} onClick={() => choose(m)}>
                 <span className="avatar small">{m.name[0]?.toUpperCase() ?? "?"}</span><span className="mention-name">{labels.get(m.pubkey) ?? m.name}</span><small>{m.pubkey.slice(0, 8)}</small>
