@@ -130,7 +130,7 @@ test('Unavailable storage leaves vaults collapsed but operable', async ({ page }
 
 test('Search still reaches every vault', async ({ page }) => {
   await boot(page);
-  await page.getByRole('button', { name: 'Search messages and notes' }).click();
+  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Search', exact: true }).click();
   const options = await page.locator('select option').allTextContents();
   for (const name of ['parachute', 'scope-test', 'unforced', 'uni', 'uni-1']) expect(options).toContain(name);
 });

@@ -56,7 +56,7 @@ test.describe('grant prompt', () => {
     await expect(page.locator('.area-default')).toBeVisible();
     expect(await grants(page)).toEqual({});
     // Not now is not remembered
-    await page.locator('.area-bar .note-back').click();
+    await page.getByRole('button', { name: /^Back to (chat|the room)$/ }).click();
     await openArea(page, 'Techne');
     await expect(prompt).toBeVisible();
     await prompt.getByRole('button', { name: 'Allow' }).click();
@@ -69,7 +69,7 @@ test.describe('grant prompt', () => {
     await expect(page.locator('.sr-title')).toHaveText('Techne');
     // a restored tab never starts the app by itself (it opens on the Room); one tap on App does
     await expect(page.locator('iframe.area-frame')).toHaveCount(0);
-    await page.getByRole('tab', { name: 'App', exact: true }).click();
+    await page.locator('.sr-app').click();
     await expect(page.locator('iframe.area-frame')).toHaveCount(1);
     await expect(page.getByRole('region', { name: /asking for access/ })).toHaveCount(0);
   });
@@ -84,7 +84,7 @@ test.describe('grant prompt', () => {
     await expect(prompt).toContainText('Read notes in Areas/Narrow/');
     await expect(prompt).not.toContainText('recent messages');
     await expect(page.locator('iframe')).toHaveCount(0);
-    await page.locator('.area-bar .note-back').click();
+    await page.getByRole('button', { name: /^Back to (chat|the room)$/ }).click();
     await openArea(page, 'Broken');
     await expect(page.locator('iframe')).toHaveCount(0);
     await expect(page.getByRole('region', { name: /asking for access/ })).toHaveCount(0);
@@ -137,7 +137,7 @@ test.describe('kits', () => {
       const f = page.frameLocator('iframe.area-frame');
       await expect(f.locator(key === 'techne' ? '#notes button' : '#feed li').first()).toBeVisible();
       await page.screenshot({ path: `shots/t74/${info.project.name}-seed-${key}.png` });
-      await page.locator('.area-bar .note-back').click();
+      await page.getByRole('button', { name: /^Back to (chat|the room)$/ }).click();
     }
   });
 });
@@ -282,9 +282,9 @@ test.describe('P2-C stop, revoke, and no auto-start of a restored app', () => {
     await expect(page.locator('iframe.area-frame')).toHaveCount(1);
     await page.reload();
     await expect(page.locator('.sr-title')).toHaveText('Quiet');
-    await expect(page.getByRole('tab', { name: 'App', exact: true })).toBeVisible();
+    await expect(page.locator('.sr-app')).toBeVisible();
     await expect(page.locator('iframe')).toHaveCount(0);
-    await page.getByRole('tab', { name: 'App', exact: true }).click();
+    await page.locator('.sr-app').click();
     await expect(page.locator('iframe.area-frame')).toHaveCount(1);
   });
 });
@@ -359,13 +359,13 @@ test.describe('P3-N3 the "updated" notice stays until Accept', () => {
     await expect(page.locator('.area-updated')).toBeVisible();
     await appControl(page, 'Stop app');
     await page.reload();
-    await page.getByRole('tab', { name: 'App', exact: true }).click();
+    await page.locator('.sr-app').click();
     await expect(page.locator('iframe.area-frame')).toHaveCount(1);
     await expect(page.locator('.area-updated'), 'not consumed by the earlier view or the restart').toBeVisible();
     await page.locator('.area-updated').getByRole('button', { name: 'Accept' }).click();
     await expect(page.locator('.area-updated')).toHaveCount(0);
     await page.reload();
-    await page.getByRole('tab', { name: 'App', exact: true }).click();
+    await page.locator('.sr-app').click();
     await expect(page.locator('iframe.area-frame')).toHaveCount(1);
     await expect(page.locator('.area-updated')).toHaveCount(0);
   });

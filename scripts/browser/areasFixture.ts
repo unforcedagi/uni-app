@@ -616,14 +616,15 @@ const isWide = (page: Page) => (page.viewportSize()?.width ?? 0) >= 900;
 /** A node's row in the room tree (r12: the tree is the only way to an area; the map and its arms are gone). */
 export const areaCard = (page: Page, name: string) => page.locator(isWide(page) ? '.th-roomnav' : '.th-phone-tree').locator(`.th-go[aria-label^="${name},"]`);
 /**
- * Opens an area from the room tree and, when it has a sealed app, its App tab.
- * `app: false` stays in the room; `true` requires the App tab; the default presses it when it shows up.
+ * Opens an area from the room tree and, when it has a sealed app, its app (r14: "App ›" in the room's header).
+ * `app: false` stays in the room; `true` requires the app; the default presses it when it shows up.
  */
 export async function openAreaPage(page: Page, name: string, opts: { app?: boolean } = {}) {
   if (!isWide(page)) { const back = page.locator('.sr-drawer, .note-back[aria-label^="Back to"]').first(); if (await back.count() && !(await page.locator('.th-phone-tree').count())) await back.click(); }
   await areaCard(page, name).click();
   await expect(page.locator('.sr-title').or(page.locator('.area-bar-title')).first()).toHaveText(name);
   if (opts.app === false) return;
-  const tab = page.getByRole('tab', { name: 'App', exact: true });
+  // r14: the app opens from the room's header ("App ›") as a view inside the room shell
+  const tab = page.locator('.sr-app');
   if (opts.app === true || (await tab.waitFor({ state: 'visible', timeout: 1500 }).then(() => true, () => false))) await tab.click();
 }
