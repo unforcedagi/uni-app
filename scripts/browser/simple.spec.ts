@@ -2852,6 +2852,8 @@ test.describe('r19', () => {
     await openWork(page);
     await page.locator('.sr-work .cp-item').filter({ hasText: 'Reply to Christian' }).locator('.cp-lead').click();
     const sheet = sheetOf(page);
+    // measured once it has slid in (configs without reduced motion animate it)
+    await sheet.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
     for (const name of ['Ask Uni to draft it', 'I did this', 'Close']) {
       const b = await sheet.getByRole('button', { name, exact: true }).boundingBox();
       expect(b, name).not.toBeNull();
