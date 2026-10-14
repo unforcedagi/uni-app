@@ -1506,7 +1506,8 @@ async fn vault_transition(
     .await
 }
 
-/// Decide an open decision: the `state` compare-and-set and the `decided*` metadata in one update (the client refuses any other key or note).
+/// Decide an open decision: the `state` compare-and-set and the `decided*` metadata in one update, guarded by the revision whose
+/// question was shown (`if_updated_at`). The client refuses any other key or note.
 #[tauri::command]
 async fn vault_decide(
     app: tauri::AppHandle,
@@ -1515,9 +1516,10 @@ async fn vault_decide(
     from: serde_json::Value,
     to: serde_json::Value,
     metadata: serde_json::Value,
+    if_updated_at: String,
 ) -> Result<serde_json::Value, String> {
     with_vault(&app, move |c| {
-        tauri::async_runtime::block_on(c.decide_note(&vault, &id, from, to, metadata))
+        tauri::async_runtime::block_on(c.decide_note(&vault, &id, from, to, metadata, &if_updated_at))
             .map_err(|e| e.to_string())
     })
     .await
