@@ -813,7 +813,7 @@ test.describe('simple', () => {
     await expect(needs).toContainText('Nothing needs you here.');
   });
 
-  test('r7: a long next step is clamped within the three lines of its row and "More" opens it in place (r18: in the work view; the companion has no per-row More)', async ({ page }) => {
+  test('r7: a long next step is clamped within its row; the row opens its sheet with all of it (r19: in the work view as in the companion, never More in place)', async ({ page }) => {
     test.skip(!wide(page), 'side panel');
     await boot(page, { longNext: true });
     await scope(page).locator('.th-go[aria-label^="Uni,"]').click();
@@ -821,14 +821,12 @@ test.describe('simple', () => {
     await expect(page.locator('.cp-body .cp-row-more, .cp-body .cp-item .cp-more-next')).toHaveCount(0);
     await openWorkView(page); await narrowWork(page);
     const item = page.locator('.sr-work .cp-item').filter({ hasText: 'COhere festival readiness' });
-    const h = async () => (await item.boundingBox())!.height;
-    const closed = await h();
-    await item.getByRole('button', { name: 'More' }).click();
-    expect(await h()).toBeGreaterThan(closed + 10);
-    await expect(item.getByRole('button', { name: 'Less' })).toBeVisible();
-    await expect(item.locator('.cp-lead')).toContainText('third question');
-    await item.getByRole('button', { name: 'Less' }).click();
-    expect(await h()).toBe(closed);
+    await expect(item.locator('.cp-lead')).toHaveAttribute('data-cut', 'true');
+    await expect(item.getByRole('button', { name: /^(More|Less)$/ })).toHaveCount(0);
+    await expect(item.locator('.cp-lead')).not.toContainText('where do they stand?');
+    await item.locator('.cp-need').click();
+    await expect(page.locator('.task-sheet h2')).toContainText('third question');
+    await expect(page.locator('.task-sheet h2')).toContainText('where do they stand?');
   });
 
   test('r7: opening a task without a title worth reading or a next step says to open it', async ({ page }) => {
@@ -1020,18 +1018,15 @@ test.describe('simple', () => {
     expect(await page.locator('.cp-item').count()).toBeGreaterThan(before);
   });
 
-  test('r10: a row clamps with More and a tap shows all of it', async ({ page }) => {
+  test('r10: a row clamps and a tap shows all of it in its sheet (r19: no in-place More anywhere)', async ({ page }) => {
     test.skip(!wide(page), 'side panel');
     await boot(page, { crowded: true });
     await scope(page).locator('.th-go[aria-label^="Uni,"]').click();
-    await openWorkView(page); await narrowWork(page); // r18: per-row More is the work view's; the companion's rows open their sheets
-    const more = page.locator('.sr-work .cp-item .cp-row-more').first(); // the first row that doesn't fit its lines
-    const row = page.locator('.sr-work .cp-item').filter({ has: page.locator('.cp-row-more') }).first();
-    await expect(more).toHaveText('More');
-    const h = (await row.boundingBox())!.height;
-    await more.click();
-    await expect(more).toHaveText('Less');
-    expect((await row.boundingBox())!.height).toBeGreaterThan(h);
+    await openWorkView(page); await narrowWork(page);
+    await expect(page.locator('.sr-work .cp-row-more, .sr-work .cp-item .cp-more-next')).toHaveCount(0);
+    const row = page.locator('.sr-work .cp-item').filter({ has: page.locator('.cp-lead[data-cut="true"]') }).first();
+    await row.locator('.cp-lead').click();
+    await expect(page.locator('.task-sheet h2')).toContainText('so nobody sends it twice.');
   });
 
   test('r10: a row says its state once: no "waiting, waiting on" in the opened item, no repeat of the row\'s label', async ({ page }) => {
@@ -1520,7 +1515,7 @@ test.describe('simple', () => {
     await shot(page, 'r13-work');
   });
 
-  test('r13: Back closes the work view first: Escape, Alt+←, the sidebar\'s ← and Android Back; a sheet holds Alt+arrows while open', async ({ page }) => {
+  test('r13: Back closes the work view first: Escape, Alt+←, the sidebar\'s ← and Android Back (r19: and an open sheet, before any place changes)', async ({ page }) => {
     await boot(page);
     await openRoom(page, 'Techne');
     await openRoom(page, 'ATLAS');
@@ -1536,15 +1531,13 @@ test.describe('simple', () => {
     await openWork(page);
     await page.evaluate(() => { const w = window as any; w.__cbs[w.__backHandler.id]({ message: {}, index: w.__backIndex ?? 0 }); w.__backIndex = (w.__backIndex ?? 0) + 1; });
     await inAtlas();
-    // a sheet is modal: Alt+← does nothing behind it; Escape closes it, and only then does Back change places
+    // r19: Back means one thing: Alt+← closes the open sheet first (it used to do nothing behind it), and only then changes places
     await openCompanion(page);
     await page.locator('.cp-need').first().click();
-    await expect(page.getByRole('dialog')).toBeVisible();
+    await expect(page.locator('.task-sheet')).toBeVisible();
     await page.keyboard.press('Alt+ArrowLeft');
-    await expect(page.getByRole('dialog')).toBeVisible();
+    await expect(page.locator('.task-sheet')).toHaveCount(0);
     await expect(page.locator('.sr-title')).toHaveText('ATLAS');
-    await page.keyboard.press('Escape');
-    await expect(page.getByRole('dialog')).toHaveCount(0);
     if (wide(page)) { await page.keyboard.press('Alt+ArrowLeft'); await expect(page.locator('.sr-title')).toHaveText('Techne'); }
   });
 
@@ -1953,9 +1946,9 @@ test.describe('r15', () => {
     // (r17: a word that only leads into the rest, "question:", ends without its colon)
     expect(step.split(/\s+/).map((w) => w.replace(/[,;:]+$/, ''))).toContain(m.last);
     expect(m.text.trim()).not.toMatch(/[:;,]\s*…$/);
-    await page.locator('.sr-work .cp-item').filter({ hasText: 'COhere festival readiness' }).getByRole('button', { name: 'More' }).click();
-    await expect(lead).not.toHaveAttribute('data-cut', 'true');
-    await expect(lead).toContainText('where do they stand?');
+    // r19: all of it is in its sheet (the row never opens in place)
+    await page.locator('.sr-work .cp-item').filter({ hasText: 'COhere festival readiness' }).locator('.cp-need').click();
+    await expect(page.locator('.task-sheet h2')).toContainText('where do they stand?');
   });
 
   test('a failed refresh says what the kept count is as of, never "at least"; an overdue row says "was due"', async ({ page }) => {
@@ -1990,7 +1983,7 @@ test.describe('r15', () => {
     await boot(page);
     await openRoom(page, 'Techne');
     await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Search' }).click();
-    const panel = page.getByRole('complementary', { name: 'Search' });
+    const panel = page.getByRole('dialog', { name: 'Search' }); // r19: the utility panels keep the one dialog contract
     const field = panel.getByRole('searchbox', { name: 'Search conversations and notes' });
     await expect(field).toBeVisible();
     expect(await panel.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
@@ -2905,6 +2898,19 @@ test.describe('r19', () => {
       await expect(page.getByRole('dialog', { name: 'Settings' })).toHaveCount(0);
       await expect(page.locator('.rail-settings')).toBeFocused();
     }
+  });
+
+  test('Uni\'s upkeep is not conversation: a self-improvement review, however long, folds into one closed "Uni\'s upkeep" line', async ({ page }) => {
+    await boot(page);
+    await openRoom(page, 'ATLAS');
+    const body = '💾 Self-improvement review: Background review may not delete memory entries unattended. The proposed batch was staged for your approval.\n\n- one\n- two\n- three\n- four';
+    await page.evaluate(([b, t]) => (window as any).__arrive(b, 'Uni', t), [BUILD, body] as const);
+    await page.evaluate((b) => (window as any).__arrive(b, 'Uni', 'The SOW draft is in the note.'), BUILD);
+    const upkeep = page.locator('.sr-chat .status-upkeep');
+    await expect(upkeep).toHaveCount(1);
+    await expect(upkeep.locator('summary')).toContainText("Uni's upkeep");
+    await expect(upkeep.locator('.status-past-body')).toBeHidden();
+    await expect(page.locator('.sr-chat .message:not(.status-line)').filter({ hasText: 'Self-improvement review' })).toHaveCount(0);
   });
 
   test('Back means one thing: it closes the open sheet first, then goes back a place', async ({ page }) => {

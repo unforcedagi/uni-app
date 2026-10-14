@@ -26,7 +26,7 @@ import { copyText, onCopied } from "./clipboard";
 import { markFor, restoreTop, type ScrollMark } from "./noteText";
 import "./App.css";
 import { Body } from "./MessageBody";
-import { isMaintenance, isWorkerStatus, staleStatus } from "./chatMarkers";
+import { isMaintenance, isWorkerStatus, staleStatus, UPKEEP_LABEL } from "./chatMarkers";
 import Pairing from "./Pairing";
 import { emojiLabel, type Reaction } from "./reactions";
 import { DeleteButton, InlineEditor } from "./InlineEditor";
@@ -97,12 +97,17 @@ function App() {
   /** The key could not be read (not the same as having none): say so and retry, never send the user to pairing. */
   const [keyError, setKeyError] = useState(false);
   const [check, setCheck] = useState(0);
+  const [keySlow, setKeySlow] = useState(false);
   useEffect(() => {
-    setKeyError(false);
-    invoke<IdentityStatus>("identity_status").then((s) => setPaired(s.paired)).catch(() => setKeyError(true));
+    setKeyError(false); setKeySlow(false);
+    let live = true;
+    const slow = setTimeout(() => { if (live) setKeySlow(true); }, 8000);
+    invoke<IdentityStatus>("identity_status").then((s) => { if (live) setPaired(s.paired); }).catch(() => { if (live) setKeyError(true); }).finally(() => clearTimeout(slow));
+    return () => { live = false; clearTimeout(slow); };
   }, [check]);
   if (keyError) return <main className="pairing"><p className="empty key-error" role="alert">Couldn't read your key · <button type="button" className="pairing-secondary" onClick={() => setCheck((n) => n + 1)}>Retry</button></p></main>;
-  if (paired === null) return <main className="pairing"><p className="empty">Loading…</p></main>;
+  // r19 (Codex 9): the first key check is bounded too: past 8 s it says so, with Retry
+  if (paired === null) return <main className="pairing">{keySlow ? <p className="empty" role="status">Still checking your key · <button type="button" className="pairing-secondary" onClick={() => setCheck((n) => n + 1)}>Retry</button></p> : <p className="empty">Loading…</p>}</main>;
   if (!paired) return <Pairing onPaired={() => setPaired(true)} />;
   return <Conversations onForget={() => setPaired(false)} />;
 }
@@ -699,7 +704,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
       setStatus(warnings.length ? "Up to date, except a few rooms" : "Up to date");
       setSynced((n) => n + 1);
       // Keep the socket open for push while we're in the foreground.
-      invoke<boolean>("live_start").catch((e) => setLive(`Live unavailable: ${e}`));
+      // r19 (Codex 10): the reason goes to the developer log, the status line says it in words
+      invoke<boolean>("live_start").catch((e) => { console.warn("live_start failed", e); setLive("Live updates paused"); });
     } catch (e) {
       setError(String(e));
       setStatus("Offline · showing what this device saved");
@@ -1377,7 +1383,10 @@ function Conversations({ onForget }: { onForget: () => void }) {
     // r18: a progress ping from hours or days ago is folded away as a past update, never the room's live status
     if (isWorkerStatus(m.body) && !(inThread && m.ref === root) && editing !== m.ref && staleStatus(m, Date.now() / 1000, newest)) return <details key={m.ref} data-ref={m.ref} className="message status-line status-past">
       <summary><span className="status-line-text">Earlier progress update</span><time>{time(m.ts)}</time></summary><p className="status-past-body">{m.body}</p></details>;
-    if ((isWorkerStatus(m.body) || isMaintenance(m.body)) && !(inThread && m.ref === root) && editing !== m.ref) return <article key={m.ref} data-ref={m.ref} className="message status-line" title={m.body}><span className="status-line-text">{m.body}</span><time>{clock(m.ts)}</time></article>;
+    // r19: Uni's upkeep notes (self-improvement reviews, the usage guard, cron jobs) are folded away, never a bubble in the conversation
+    if (isMaintenance(m.body) && !(inThread && m.ref === root) && editing !== m.ref) return <details key={m.ref} data-ref={m.ref} className="message status-line status-past status-upkeep">
+      <summary><span className="status-line-text">{UPKEEP_LABEL}</span><time>{clock(m.ts)}</time></summary><p className="status-past-body">{m.body}</p></details>;
+    if (isWorkerStatus(m.body) && !(inThread && m.ref === root) && editing !== m.ref) return <article key={m.ref} data-ref={m.ref} className="message status-line" title={m.body}><span className="status-line-text">{m.body}</span><time>{clock(m.ts)}</time></article>;
     const grouped = !!prev && prev.author === m.author && m.ts - prev.ts < 300 && !(inThread && prev.ref === root);
     return <article key={m.ref} data-ref={m.ref} className={`message ${m.ref === focusRef ? "search-focus" : ""} ${grouped ? "grouped" : ""} ${m.author === identity ? "mine" : ""} ${m.mentions_me ? "highlight" : ""} ${inThread && m.ref === root ? "thread-root" : ""}`}>
       {grouped ? <time className="gutter-time">{clock(m.ts)}</time> : <span className="message-avatar" style={{ background: `hsl(${150 + (hue(m.author) % 120) - 60} 22% 44%)` }} aria-hidden="true">{m.author_name[0]?.toUpperCase() ?? "?"}</span>}
