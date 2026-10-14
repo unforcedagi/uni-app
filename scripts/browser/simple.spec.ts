@@ -2779,6 +2779,7 @@ test.describe('r19', () => {
     await tidy.locator('.cp-item').filter({ hasText: 'approve a test week' }).locator('.cp-need').click();
     const sheet = sheetOf(page);
     await expect(sheet.locator('.task-tidy')).toContainText('asks you nothing');
+    await expect(sheet.locator('.task-facts')).not.toContainText('Needs your decision');
     await expect(sheet.locator('.cp-opt, .task-answer-box')).toHaveCount(0);
     await expect(sheet.getByRole('button', { name: 'I did this' })).toHaveCount(0);
     await expect(sheet.locator('.task-do.primary')).toHaveText('Ask Uni to fix this record');
@@ -2862,6 +2863,18 @@ test.describe('r19', () => {
     // the sheet's text scrolls above the footer; Details is still there below
     await sheet.locator('.task-details summary').scrollIntoViewIfNeeded();
     await expect(sheet.getByRole('button', { name: 'I did this' })).toBeInViewport();
+    await sheet.getByRole('button', { name: 'Close' }).click();
+    // a decision's answers are its primary action: in the footer, whole and in view (found in the real app at 740×360)
+    await add(page, { id: 'bvc', title: 'Ship the Boulder Votes AI chat?', node: 'Projects/ATLAS', tag: 'decision', meta: { priority: 'now', options: ['Add key and test live on preview first', 'Ship to production after live test', 'Change it first'] }, content: 'Ship the Boulder Votes AI chat?\n\n' + 'Context line. '.repeat(30) });
+    await refresh(page, '2026-10-09T10:02:00.000Z');
+    await page.locator('.sr-work .cp-item').filter({ hasText: 'Ship the Boulder Votes AI chat?' }).locator('.cp-need').click();
+    const dec = sheetOf(page);
+    for (const o of await dec.locator('.task-foot .cp-opt').all()) {
+      const b = (await o.boundingBox())!;
+      expect(b.y).toBeGreaterThanOrEqual(0);
+      expect(b.y + b.height).toBeLessThanOrEqual(360);
+    }
+    await expect(dec.locator('.task-foot .cp-opt')).toHaveCount(3);
   });
 
   test('at 920×360 the folded companion still says what is waiting: "Needs you · N: <first request>" on the strip', async ({ page }) => {
