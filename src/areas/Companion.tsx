@@ -4,15 +4,15 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { cleanText } from "../interface/contract";
-import { RefText } from "./noteRefs";
-import type { NoteRef } from "./noteRefsCore";
+import { RefName, RefText } from "./noteRefs";
+import { splitRefs, type NoteRef } from "./noteRefsCore";
 import { useVaultProfile } from "./ProfileContext";
 import { LoadHealth } from "./LoadHealth";
 import { isActiveRun, type Run } from "./steerCore";
 import type { Task } from "./taskCore";
 import { splitTitle } from "./whereCore";
 import { splitLinks } from "./linkText";
-import { actionableTitle, actionLead, askLead, askPreview, decisionQuestion, dueLine, fitsRow, isOverdue, lineBudget, OPEN_TO_SEE, privateLabel, rowAsk, type NeedsFeed, type PrivateNeed } from "./simpleCore";
+import { actionableTitle, actionLead, askLead, askPreview, decisionQuestion, dueLine, fitsRow, isOverdue, lineBudget, privateLabel, withoutCut, rowAsk, type NeedsFeed, type PrivateNeed } from "./simpleCore";
 
 const KEYS = { side: "uni.companion.side.v1", sideNarrow: "uni.companion.side.narrow.v1", strip: "uni.companion.strip.v1" } as const;
 /** Below this width the side panel starts folded: the conversation gets the space. */
@@ -55,6 +55,8 @@ export type CompanionProps = {
   runs: readonly Run[];
   /** The node's name, so the way deeper says what it opens ("All of COhere's work"). */
   nodeName: string;
+  /** A node shown in a room it borrows (r15): the state is labelled as this node's ("Where Expression stands"), not the room's. */
+  scope?: string | null;
   onTask: (t: Task) => void; onDecide: (t: Task, option: string) => void;
   /** "All of X's work" (null: none, for a room no node owns). */
   onEverything: (() => void) | null;
@@ -101,6 +103,72 @@ export function NextText({ text, vault, onNote, lines, open: openProp, onOpen, o
   </div>;
 }
 
+/** A step as words (r15): each word, link and linked note is one token, so a clamp can end on a whole one. `space`: whitespace before it. */
+function stepTokens(text: string, vault: string, onNote?: (ref: NoteRef) => void): { node: React.ReactNode; space: boolean }[] {
+  const out: { node: React.ReactNode; space: boolean }[] = [];
+  let space = false; let first = true;
+  for (const p of splitLinks(cleanText(text))) {
+    if ("url" in p) { out.push({ node: <a className="cp-link" href={p.url} title={p.url} rel="noreferrer noopener" onClick={(e) => openLink(e, p.url)}>{p.label}</a>, space }); space = false; first = false; continue; }
+    for (const q of splitRefs(p.text, vault)) {
+      if ("id" in q) { out.push({ node: <RefName r={q} onNote={onNote} />, space }); space = false; first = false; continue; }
+      for (const w of q.text.split(/(\s+)/)) {
+        if (!w) continue;
+        if (/^\s+$/.test(w)) { space = true; continue; }
+        out.push({ node: first ? w.replace(/^\S/, (c) => c.toLocaleUpperCase()) : w, space }); space = false; first = false;
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Text clamped at `lines` lines that ends on a whole word (r15): every line full, then "…" after the last word that fits, never inside a
+ * word, a link or a note's title. Drawn whole once to measure (before paint), then cut; a new width or text measures again.
+ */
+function WordClamp({ tokens, lines, open, textKey, onCut, elRef, className, onClick }: { tokens: { node: React.ReactNode; space: boolean }[]; lines: number; open: boolean; textKey: string;
+  onCut: (cut: boolean) => void; elRef: React.RefObject<HTMLParagraphElement | null>; className: string; onClick: (e: React.MouseEvent) => void }) {
+  const [cut, setCut] = useState<number | null>(null);
+  const [width, setWidth] = useState(0);
+  const tries = useRef(0);
+  useLayoutEffect(() => { tries.current = 0; setCut(null); }, [textKey, lines, open, width]);
+  useLayoutEffect(() => {
+    const el = elRef.current;
+    if (!el || open || cut !== null) { if (open) onCut(false); return; }
+    const words = [...el.querySelectorAll<HTMLElement>(".wc-w")];
+    const cs = getComputedStyle(el);
+    const lh = parseFloat(cs.lineHeight) || 20;
+    const box = el.getBoundingClientRect();
+    const top = box.top + (parseFloat(cs.paddingTop) || 0);
+    const right = box.right - (parseFloat(cs.paddingRight) || 0);
+    const room = (parseFloat(cs.fontSize) || 15) * 1.1; // the "…" after the last word
+    const lineOf = (y: number) => Math.floor((y - top + 1) / lh);
+    const last = (w: HTMLElement) => { const r = w.getClientRects(); return r[r.length - 1] ?? w.getBoundingClientRect(); };
+    let k = 0;
+    while (k < words.length && lineOf(last(words[k]).top) < lines) k++;
+    if (k >= words.length) { onCut(false); return; }
+    // the "…" must fit after the last word kept, on the last line
+    while (k > 1 && lineOf(last(words[k - 1]).top) === lines - 1 && last(words[k - 1]).right + room > right) k--;
+    setCut(Math.max(1, k)); onCut(true);
+  });
+  useLayoutEffect(() => {
+    const el = elRef.current; if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => {
+      const w = Math.round(el.clientWidth);
+      setWidth((cur) => (cur === w ? cur : w));
+      // a word kept changed length (a note's title arrived) and the text runs past its lines: measure again, a few times at most
+      const lh = parseFloat(getComputedStyle(el).lineHeight) || 20;
+      if (cut !== null && !open && el.scrollHeight > lines * lh + (parseFloat(getComputedStyle(el).paddingTop) || 0) + (parseFloat(getComputedStyle(el).paddingBottom) || 0) + 2 && tries.current < 4) { tries.current++; setCut(null); }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [cut, open, lines]); // eslint-disable-line react-hooks/exhaustive-deps
+  const shown = open || cut === null ? tokens : tokens.slice(0, cut);
+  return <p ref={elRef} className={className} data-cut={cut !== null && !open ? "true" : undefined} onClick={onClick}>
+    {shown.map((t, i) => <span key={i}>{i > 0 && t.space ? " " : ""}<span className="wc-w">{t.node}</span></span>)}
+    {cut !== null && !open && <span className="wc-more" aria-hidden="true">…</span>}
+  </p>;
+}
+
 /** The whole sentence, clamped at 3 lines on screen only; "More" (a real button) shows all of it. */
 function Stands({ text, ago }: { text: string; ago: string }) {
   const [full, setFull] = useState(false);
@@ -127,7 +195,8 @@ function Stands({ text, ago }: { text: string; ago: string }) {
 export function decisionAsk(t: Task): { text: string; yourCall: boolean; answerable: boolean; fits: boolean; preview: string } {
   const { rest } = splitTitle(cleanText(t.title));
   const q = decisionQuestion(rest, t.ask, t.askAt, t.updatedAt);
-  if (!q) return { text: OPEN_TO_SEE, yourCall: false, answerable: false, fits: false, preview: OPEN_TO_SEE };
+  // r15: no whole question known: the cut title's own words as a preview (it opens to decide), the same as a question too long for a row
+  if (!q) { const words = withoutCut(askOf(rest)); const pv = words ? `${askLead(words).text} …` : "A decision waits on you"; return { text: pv, yourCall: false, answerable: false, fits: false, preview: pv }; }
   const l = askLead(q);
   return { text: l.text, yourCall: l.yourCall, answerable: true, fits: fitsRow(l.text), preview: askPreview(l.text) };
 }
@@ -151,7 +220,7 @@ export function rowLead(t: Task): { text: string; under: string | null; go: stri
   const next = t.next.trim();
   if (t.kind === "decision") {
     const dq = decisionAsk(t);
-    if (!dq.answerable) return { text: dq.text, under: null, go: "", answers: false, yourCall: false, lead: false };
+    if (!dq.answerable) return { text: dq.preview, under: null, go: "Open to decide", answers: false, yourCall: false, lead: false };
     if (!dq.fits) return { text: dq.preview, under: null, go: "Open to decide", answers: false, yourCall: dq.yourCall, lead: false };
     return { text: dq.text, under: null, go: null, answers: true, yourCall: dq.yourCall, lead: false };
   }
@@ -164,7 +233,8 @@ export function rowLead(t: Task): { text: string; under: string | null; go: stri
 /**
  * A Needs-you row (r14): action first. A task whose next step names an action leads with it (two full lines, then More), its title under it as
  * a quiet line; otherwise the title, then the next step. A decision is its whole question beside its answers when it fits; a longer one shows a
- * preview and "Open to decide ›"; with no whole question, "Open to see the question ›". Never answers beside a preview.
+ * preview and "Open to decide ›", and so does one whose whole question is not known (r15: its title's words as the preview). Never answers
+ * beside a preview.
  */
 export function NeedRow({ t, onTask, onDecide, onNote, meta }: { t: Task; onTask: (t: Task) => void; onDecide: (t: Task, option: string) => void; onNote?: (ref: NoteRef) => void;
   /** A quiet line on where it stands, for a row that is not the user's ("With Casey · in progress"; the work view's In motion and Later). */
@@ -190,7 +260,7 @@ export function NeedRow({ t, onTask, onDecide, onNote, meta }: { t: Task; onTask
     const measure = () => {
       const lh = parseFloat(getComputedStyle(el).lineHeight) || 20;
       setTitleLines(Math.max(1, Math.round(el.clientHeight / lh)));
-      if (!open) setTitleCut(el.scrollHeight > el.clientHeight + 1);
+      if (!open && !r.lead) setTitleCut(el.scrollHeight > el.clientHeight + 1); // a lead's own clamp says when it cut
     };
     measure();
     const ro = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
@@ -208,10 +278,9 @@ export function NeedRow({ t, onTask, onDecide, onNote, meta }: { t: Task; onTask
   return <li className="cp-item" data-open={open ? "true" : undefined} data-lead={r.lead ? "action" : undefined}>
     {r.lead
       // the action leads, its links and linked notes still open (outside the row's button); a tap on its words opens the sheet like the row
-      ? <><p ref={titleRef as React.RefObject<HTMLParagraphElement | null>} className="cp-title cp-lead" style={clampStyle} onClick={(e) => { if (!(e.target as Element).closest("a, button")) onTask(t); }}>
-          {splitLinks(cleanText(next)).map((p, i) => "url" in p
-            ? <a key={i} className="cp-link" href={p.url} title={p.url} rel="noreferrer noopener" onClick={(e) => openLink(e, p.url)}>{p.label}</a>
-            : <RefText key={i} text={i === 0 ? p.text.replace(/^\s*\S/, (c) => c.toLocaleUpperCase()) : p.text} vault={vault} onNote={onNote} />)}</p>
+      // r15: two full lines that end on a whole word ("…" then More), never a cut inside a word, a link or a note's title
+      ? <><WordClamp elRef={titleRef as React.RefObject<HTMLParagraphElement | null>} className="cp-title cp-lead" tokens={stepTokens(next, vault, onNote)} textKey={`${vault}\n${next}`} lines={titleMax} open={open}
+          onCut={setTitleCut} onClick={(e) => { if (!(e.target as Element).closest("a, button")) onTask(t); }} />
         <button type="button" className="cp-need cp-need-under" data-id={id ?? undefined} aria-label={[text, r.under, due, meta].filter(Boolean).join(". ")} onClick={() => onTask(t)}>{meta_}</button></>
       : <button type="button" className={`cp-need${isDecision ? " decision" : ""}`} data-id={id ?? undefined} onClick={() => onTask(t)}>
         {r.yourCall && <small className="cp-call-lead">Your call:</small>}
@@ -304,7 +373,7 @@ function Body({ stands, ready, note, load, feed, rest = 0, onPrivate, runs, node
   const hiddenRuns = Math.max(0, active.length - RUNS_SHOWN);
   if (note) return <div className="cp-body"><p className="cp-lede cp-note">{note}</p></div>;
   // below 900px the room shows the list's health itself, outside the strip (r14)
-  const health = !hideHealth && <LoadHealth load={load} ready={ready} />;
+  const health = !hideHealth && <LoadHealth load={load} ready={ready} count={feed.total} />;
   return <div className="cp-body">
     {!ready ? (load?.error ? <LoadHealth load={load} ready={false} /> : <p className="cp-lede">Loading…</p>) : stands && <Stands text={stands.text} ago={stands.ago} />}
     {ready && <section aria-label="Needs you" className="cp-sec" aria-busy={load?.refreshing || undefined}>
@@ -328,7 +397,7 @@ export function CompanionSide({ open, onToggle, ...p }: CompanionProps & Fold) {
   return <aside className={`cp side ${open ? "open" : "folded"}`} aria-label="Where this stands">
     {open
       ? <>
-        <button type="button" className="cp-top" aria-expanded="true" aria-label="Hide where this stands" title="Hide where this stands" onClick={() => onToggle(false)}><span>Where this stands</span><span className="cp-fold" aria-hidden="true">›</span></button>
+        <button type="button" className="cp-top" aria-expanded="true" aria-label="Hide where this stands" title="Hide where this stands" onClick={() => onToggle(false)}><span>{p.scope ? `Where ${p.scope} stands` : "Where this stands"}</span><span className="cp-fold" aria-hidden="true">›</span></button>
         <Body {...p} fit />
       </>
       : <button type="button" className="cp-unfold" aria-expanded="false" aria-label="Show where this stands" title="Show where this stands" onClick={() => onToggle(true)}>
@@ -341,7 +410,7 @@ export function CompanionStrip({ open, onToggle, ...p }: CompanionProps & Fold) 
   // the strip sits in a room below 900px, which shows the list's health above it (r14)
   return <section className={`cp strip ${open ? "open" : ""}`} aria-label="Where this stands">
     <button type="button" className="cp-line" aria-expanded={open} onClick={() => onToggle(!open)}>
-      <span className="cp-line-text" title={p.stands?.text}>{open ? "Where this stands" : p.note ?? (p.ready ? p.stands?.text ?? "Where this stands" : p.load?.error ? "Couldn't load" : "Loading…")}</span>
+      <span className="cp-line-text" title={p.stands?.text}>{p.scope && <b className="cp-scope">{open ? `Where ${p.scope} stands` : `${p.scope}:`}</b>}{open ? (p.scope ? "" : "Where this stands") : <>{p.scope ? " " : ""}{p.note ?? (p.ready ? p.stands?.text ?? "Where this stands" : p.load?.error ? "Couldn't load" : "Loading…")}</>}</span>
       {p.feed.total > 0 && <i className="cp-dot" role="img" aria-label="Needs you" title="Needs you" />}
       <span className="cp-chev" aria-hidden="true">{open ? "⌃" : "⌄"}</span>
     </button>

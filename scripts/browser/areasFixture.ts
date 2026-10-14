@@ -208,6 +208,9 @@ export type BootOpts = {
   crowded?: boolean;
   /** A task whose next step names a note by `uni:<ULID>` (the note exists, titled "Follow-up notes"), and one that names a note that can't be read. */
   ulidNext?: boolean;
+  /** r15 (with ulidNext): the bare id in that step is a note of the life vault ("Morning pages"), and the `uni:` one is Uni's only: each is
+   *  found only in its own vault, so a title read (or a note opened) in the wrong vault is "a note" / not found. */
+  vaultNotes?: boolean;
   /** The COhere readiness task is overdue against the pinned clock (Oct 9): due Oct 7. */
   pastDue?: boolean;
   /** T-124 r6 (with longChat): a worker status ping before the newest message, and a newest message taller than the list with a marker line mid-way. */
@@ -240,7 +243,7 @@ export async function bootAreas(page: Page, variant: Variant = 'seed', opts: Boo
   const now = Math.floor((opts.pinned ? pinnedAt : Date.now()) / 1000);
   const data = {
     profileNote: opts.profileNote ?? null, lifeVault: opts.lifeVault ?? null, now, variant, selftest: opts.selftest ?? true, ipcLeak: opts.ipcLeak ?? false, hostile: hostileApp(opts.ports ?? { http: 9, udp: 9 }), benign: BENIGN, techne: seed('techne'), unforced: seed('unforced'), seedMeta,
-    apps: opts.apps ?? [], multiRoom: !!opts.multiRoom || !!opts.tree, tree: !!opts.tree, tasks: !!opts.tasks, briefs: !!opts.briefs, queryDelay: opts.queryDelay ?? 0, identityDelay: opts.identityDelay ?? 0, identityFails: opts.identityFails ?? 0, roomsDelay: opts.roomsDelay ?? 0, messagesDelay: opts.messagesDelay ?? 0, nodeStatuses: opts.nodeStatuses ?? {}, nearOff: !!opts.nearOff, ids: !!opts.ids, boulder: !!opts.boulder, savedLayout: opts.savedLayout ?? null, strayRoom: !!opts.strayRoom, thread: !!opts.thread, manyTasks: opts.manyTasks ?? 0, uniMember: !!opts.uniMember, twins: !!opts.twins, underBoulder: !!opts.underBoulder, priya: !!opts.priya, atlas: !!opts.atlas, steer: !!opts.steer, longChat: !!opts.longChat, longNext: !!opts.longNext, bareTask: !!opts.bareTask, cutDecision: !!opts.cutDecision, cutNoAsk: !!opts.cutNoAsk, longAsk: !!opts.longAsk, previewAsk: !!opts.previewAsk, crowded: !!opts.crowded, ulidNext: !!opts.ulidNext, pastDue: !!opts.pastDue, tallLast: !!opts.tallLast, privateTasks: !!opts.privateTasks, deviceCache: opts.deviceCache ?? null, queryFails: opts.queryFails ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null, mode: opts.mode ?? 'sealed', grantedUnder: opts.grantedUnder ?? (opts.mode ?? 'sealed'),
+    apps: opts.apps ?? [], multiRoom: !!opts.multiRoom || !!opts.tree, tree: !!opts.tree, tasks: !!opts.tasks, briefs: !!opts.briefs, queryDelay: opts.queryDelay ?? 0, identityDelay: opts.identityDelay ?? 0, identityFails: opts.identityFails ?? 0, roomsDelay: opts.roomsDelay ?? 0, messagesDelay: opts.messagesDelay ?? 0, nodeStatuses: opts.nodeStatuses ?? {}, nearOff: !!opts.nearOff, ids: !!opts.ids, boulder: !!opts.boulder, savedLayout: opts.savedLayout ?? null, strayRoom: !!opts.strayRoom, thread: !!opts.thread, manyTasks: opts.manyTasks ?? 0, uniMember: !!opts.uniMember, twins: !!opts.twins, underBoulder: !!opts.underBoulder, priya: !!opts.priya, atlas: !!opts.atlas, steer: !!opts.steer, longChat: !!opts.longChat, longNext: !!opts.longNext, bareTask: !!opts.bareTask, cutDecision: !!opts.cutDecision, cutNoAsk: !!opts.cutNoAsk, longAsk: !!opts.longAsk, previewAsk: !!opts.previewAsk, crowded: !!opts.crowded, ulidNext: !!opts.ulidNext, vaultNotes: !!opts.vaultNotes, pastDue: !!opts.pastDue, tallLast: !!opts.tallLast, privateTasks: !!opts.privateTasks, deviceCache: opts.deviceCache ?? null, queryFails: opts.queryFails ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null, mode: opts.mode ?? 'sealed', grantedUnder: opts.grantedUnder ?? (opts.mode ?? 'sealed'),
   };
   // Pre-granted apps: the grant key is the SHA-256 of the RESOLVED default needs plus the app's html.
   const preGrant = [
@@ -431,7 +434,8 @@ Two proposals wait on a scope decision.
       mk('k11', 'T-14 A snoozed one', 'Areas/Techne', { snoozed_until: '2099-01-01' }),
       mk('dq1', 'Decide the COhere venue', C26, { priority: 'someday' }, 'decision'),
       ...(d.ulidNext ? [mk('k13', 'T-13 Review the ATLAS follow-up', 'Areas/Techne', { priority: 'now', next: 'Read uni:01M3ZK2R6A6C62M1ANJCSQNG3M, then 01M3ZK2R6A6C62M1ANJCSQNG3N and reply.' }),
-        { id: '01M3ZK2R6A6C62M1ANJCSQNG3M', path: 'Projects/Atlas/Follow-up notes', content: 'x', tags: [], metadata: {}, createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-02T00:00:00Z' }] : []),
+        { id: '01M3ZK2R6A6C62M1ANJCSQNG3M', path: 'Projects/Atlas/Follow-up notes', content: 'x', tags: [], metadata: {}, createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-02T00:00:00Z', ...(d.vaultNotes ? { inVault: 'uni' } : {}) },
+        ...(d.vaultNotes ? [{ id: '01M3ZK2R6A6C62M1ANJCSQNG3N', path: 'Life/Morning pages', content: 'y', tags: [], metadata: {}, createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-02T00:00:00Z', inVault: d.lifeVault ?? 'life' }] : [])] : []),
       ...(d.cutNoAsk ? [{ ...mk('dq8', 'Decision (needs your yes): a daily calendar email to people who…', C26, { priority: 'now' }, 'decision'), content: 'Decision (needs your yes): a daily calendar email to people who…' },
         mk('dq7', 'Decision: the long one that needs a longer ask than most', C26, { priority: 'now' }, 'decision')] : []),
       ...(d.crowded ? Array.from({ length: 7 }, (_, i) => mk(`cr${i}`, `Send the follow-up note number ${i + 1} to the whole organizing group`, C26, { priority: 'now', next: 'Edit the draft, check the dates against the calendar, and send it from the shared inbox. Then post the link in the room and tell the team it went out so nobody sends it twice.' })) : []),
@@ -588,9 +592,9 @@ Two proposals wait on a scope decision.
           case 'relay_origin': return 'wss://relay.test';
           case 'vault_note': {
             if (d.profileNote && args.noteRef === '.parachute/life-os') return { hub: 'https://example.invalid', vault: 'uni', note: { id: 'profile-note', path: '.parachute/life-os', content: '', createdAt: '2026-09-01T00:00:00Z', tags: [], metadata: d.profileNote } };
-            const n = [...notes, ...(w.__tasks ?? [])].find((x) => x.id === args.noteRef || x.path === args.noteRef);
+            const n = [...notes, ...(w.__tasks ?? [])].find((x) => (x.id === args.noteRef || x.path === args.noteRef) && (!x.inVault || x.inVault === args.vault));
             if (!n) throw 'note not found: ' + args.noteRef;
-            return { hub: 'https://example.invalid', vault: 'uni', note: { createdAt: '2026-09-01T00:00:00Z', tags: [], metadata: {}, ...n } };
+            return { hub: 'https://example.invalid', vault: args.vault ?? 'uni', note: { createdAt: '2026-09-01T00:00:00Z', tags: [], metadata: {}, ...n } };
           }
           case 'journal_config': return { hub: 'https://example.invalid', vault: 'uni' };
           case 'vault_search': return notes.filter((n) => (n.content ?? '').toLowerCase().includes(String(args.query).toLowerCase()) && (!args.pathPrefix || (n.path ?? '').startsWith(args.pathPrefix))).slice(0, args.limit ?? 20).map((n) => ({ vault: 'uni', id: n.id, path: n.path, snippet: String(n.content).slice(0, 60), score: null, mode: 'keyword' }));

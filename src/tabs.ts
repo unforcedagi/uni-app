@@ -6,7 +6,9 @@ import type { VaultRef } from "./vaultlinks.ts";
 
 export type TabKind = "room" | "thread" | "note" | "journal" | "vault" | "areas" | "area";
 /** `channel` on an `areas` (Uni) or `area` tab is the node's room: the one its chat pane shows. */
-export type Tab = { id: string; kind: TabKind; channel?: string; root?: string; note?: VaultRef; vault?: string; /** `area`: the node's note path (an `Areas/<Name>` area, or a project under one). */ path?: string; title: string };
+export type Tab = { id: string; kind: TabKind; channel?: string; root?: string; note?: VaultRef; vault?: string; /** `area`: the node's note path (an `Areas/<Name>` area, or a project under one). */ path?: string; title: string;
+  /** `area` (r15): the node has no room of its own and talks in an ancestor's (or Uni's). Unset until the shell knows. */
+  borrowed?: boolean };
 export type TabTarget = Omit<Tab, "id">;
 /** `recent`: tab ids by last activation, most recent last (drives the cap and close). */
 export type Tabs = { tabs: Tab[]; active: string | null; recent: string[] };
@@ -153,7 +155,7 @@ function validTab(x: unknown): Tab | null {
   if (kind === "journal") return { id: t.id, kind, title: title || "Journal" };
   // The areas tab is Uni's home (saved tabs from before were titled "Areas").
   if (kind === "areas") return { id: t.id, kind, title: "Uni", ...(str(t.channel) ? { channel: t.channel } : {}) };
-  if (kind === "area") return typeof t.path === "string" && /^[^/.][^/]*(\/[^/.][^/]*)*$/.test(t.path) && t.path.length <= 300 ? { id: t.id, kind, path: t.path, title: title || t.path.split("/").pop()!, ...(str(t.channel) ? { channel: t.channel } : {}) } : null;
+  if (kind === "area") return typeof t.path === "string" && /^[^/.][^/]*(\/[^/.][^/]*)*$/.test(t.path) && t.path.length <= 300 ? { id: t.id, kind, path: t.path, title: title || t.path.split("/").pop()!, ...(str(t.channel) ? { channel: t.channel } : {}), ...(typeof t.borrowed === "boolean" ? { borrowed: t.borrowed } : {}) } : null;
   if (kind === "vault") return str(t.vault) ? { id: t.id, kind, vault: t.vault, title: title || t.vault } : null;
   if (kind === "note") {
     const n = t.note as Record<string, unknown> | undefined;
@@ -213,4 +215,27 @@ export function migrateLegacyTabs(raw: string | null, roomIds: Iterable<string>)
   const cur = activeTab(old);
   const hit = cur && isSurface(cur) ? cur : [...old.recent].reverse().map((id) => old.tabs.find((t) => t.id === id)).find((t) => !!t && isSurface(t)) ?? null;
   return hit ? { tabs: [hit], active: hit.id, recent: [hit.id] } : EMPTY_TABS;
+}
+
+/** The last place opened that is a room in its own right (r15): what the app reopens to when the saved place only borrows a room. */
+export const LAST_ROOM_KEY = "uni.lastRoom.v1";
+/** A place that is a real conversation: a room, a thread, Uni, or a node known to have a room of its own. */
+export const isRealRoom = (t: Pick<Tab, "kind" | "borrowed">): boolean => t.kind === "room" || t.kind === "thread" || t.kind === "areas" || (t.kind === "area" && t.borrowed === false);
+/** What to keep as the last real room: the target alone, without its id. */
+export const lastRoomOf = (t: Tab): string | null => { if (!isRealRoom(t)) return null; const { id: _id, ...target } = t; return JSON.stringify(target); };
+
+/**
+ * The place to reopen (r15). A saved node that only borrows a room (Expression, talking in #Uni) is not where Aaron last talked: the last real
+ * room opened is (`lastRoom`, from `lastRoomOf`), else nothing, so the caller opens Uni. Any other saved place is kept.
+ */
+export function restorePlace(s: Tabs, lastRoom: string | null, roomIds: Iterable<string>, newId: () => string): Tabs {
+  const cur = activeTab(s);
+  if (!cur || cur.kind !== "area" || cur.borrowed !== true) return s;
+  const rest: Tabs = { tabs: s.tabs.filter((t) => t.id !== cur.id), active: null, recent: s.recent.filter((x) => x !== cur.id) };
+  let target: unknown = null;
+  try { target = lastRoom ? JSON.parse(lastRoom) : null; } catch { target = null; }
+  const hit = target && typeof target === "object" ? activeTab(restoreTabs(JSON.stringify({ v: 1, tabs: [{ ...(target as object), id: "last" }], active: "last", recent: [] }), roomIds)) : null;
+  if (!hit || !isRealRoom(hit)) return rest;
+  const { id: _id, ...t } = hit;
+  return openTab(rest, t, "new", newId);
 }

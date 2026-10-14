@@ -145,6 +145,15 @@ check("stands: the node's own sentence with a quiet time; never a count or the d
   assert.equal(quietAgo("2026-10-10T08:00:00Z", now), "3 days ago");
   assert.equal(quietAgo("2026-09-20T08:00:00Z", now), "3 weeks ago");
   assert.equal(quietAgo("garbage", now), "");
+  // r15: by calendar day on the local clock, and a bare date is that local day (never UTC midnight, the evening before west of UTC)
+  const late = new Date(2026, 9, 13, 23, 30).getTime();
+  assert.equal(quietAgo(new Date(2026, 9, 13, 0, 30).toISOString(), late), "today", "earlier the same day");
+  assert.equal(quietAgo(new Date(2026, 9, 12, 23, 50).toISOString(), new Date(2026, 9, 13, 0, 10).getTime()), "yesterday", "20 minutes ago, across midnight");
+  assert.equal(quietAgo("2026-10-13", late), "today");
+  assert.equal(quietAgo("2026-10-12", new Date(2026, 9, 13, 0, 5).getTime()), "yesterday");
+  // two rooms read at the same moment say the same of the same stamp, whichever form it is written in
+  const at = new Date(2026, 9, 13, 9, 0);
+  assert.equal(quietAgo(at.toISOString(), late), quietAgo("2026-10-13", late));
 });
 check("stands: read from the node notes, including Uni's own", () => {
   const withStands = parseNodes([{ id: "u", path: "Uni", tags: ["uni"], metadata: { stands: "All quiet.", stands_at: "2026-10-12T00:00:00Z" } }, { id: "a", path: "Areas/Atlas", tags: ["area"], metadata: { parent: "Uni", stands: "Atlas is moving." } }, { id: "b", path: "Areas/B", tags: ["area"], metadata: { parent: "Uni" } }]);

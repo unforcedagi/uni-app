@@ -89,28 +89,31 @@ export default function Search({ onOpen, onOpenNote, onAskUni, onClose, vaults, 
   const q = query.trim();
   const groups = groupByRoom(hits);
 
-  return <section className="search-view" aria-label="Ask everything">
+  // r15: inside the utility frame (its title and Close are the frame's): one field that shrinks with the panel, plain words, and the
+  // narrowing (how notes match, which vault, which folder) folded under "Narrow" so a narrow panel never scrolls sideways
+  const narrowed = mode !== "meaning" || !!vault || !!pathPrefix;
+  return <section className="search-view" aria-label="Search conversations and notes">
     <div className="search-bar">
       <label className="search-field"><span aria-hidden="true">✧</span>
         <input ref={input} type="search" value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Escape") onClose(); }}
-          placeholder="Search messages and notes" aria-label="Search messages and notes" autoCapitalize="off" autoCorrect="off" spellCheck={false} maxLength={500} />
+          placeholder="Search conversations and notes" aria-label="Search conversations and notes" autoCapitalize="off" autoCorrect="off" spellCheck={false} maxLength={500} />
       </label>
-      <button className="search-cancel" onClick={onClose}>Cancel</button>
     </div>
-    <div className="search-filters">
-      <div role="group" aria-label="Note search mode">{(["meaning", "keyword"] as const).map((m) => <button key={m} className="note-action" aria-pressed={mode === m} onClick={() => setMode(m)}>{m === "meaning" ? "Meaning" : "Keyword"}</button>)}</div>
+    <details className="search-narrow" open={narrowed || undefined}>
+      <summary>Narrow the notes</summary>
+      <div className="search-filters"><div role="group" aria-label="How notes match">{(["meaning", "keyword"] as const).map((m) => <button key={m} className="note-action" aria-pressed={mode === m} onClick={() => setMode(m)}>{m === "meaning" ? "Similar meaning" : "Exact words"}</button>)}</div>
       <label>Vault <select value={vault} onChange={(e) => setVault(e.target.value)}><option value="">All vaults</option>{[...new Set([...vaults, ...(initialVault ? [initialVault] : [])])].map((v) => <option key={v} value={v}>{v}</option>)}</select></label>
-      <label>Path prefix <input value={pathPrefix} placeholder="Any folder" onChange={(e) => setPathPrefix(e.target.value)} /></label>
-    </div>
+      <label>Folder <input value={pathPrefix} placeholder="Any folder" onChange={(e) => setPathPrefix(e.target.value)} /></label></div>
+    </details>
     <div className="search-results" aria-live="polite">
       {!q && <div className="search-empty">
-        <p><strong>Ask everything.</strong> Search the messages cached on this phone — every room and thread, including edits.</p>
-        <p>Your notes are searched too, by meaning or by keyword.</p>
+        <p><strong>Search conversations and notes.</strong> Every room and thread on this device, including edits.</p>
+        <p>Notes are found by what they mean, or by their exact words.</p>
       </div>}
       {q && <>
         <h2 className="search-section">Messages{state === "searching" ? " · searching…" : state === "done" ? ` · ${hits.length}${hits.length >= 60 ? "+" : ""}` : ""}</h2>
         {state === "error" && <p className="error" role="alert">{error}</p>}
-        {state === "done" && hits.length === 0 && <p className="search-none">No messages match “{q}”. Only messages cached on this device are searched — refresh or load older history to widen it.</p>}
+        {state === "done" && hits.length === 0 && <p className="search-none">No messages match “{q}”. Only conversations already on this device are searched; older history may not be here yet.</p>}
         {groups.map((g) => <div key={g.channel} className="search-group">
           <h3>#{g.name}</h3>
           {g.hits.map((h) => {

@@ -30,6 +30,7 @@ import { InlineText } from "./InlineText";
 import { Body } from "../MessageBody";
 import { projectBody } from "./projectBody";
 import { rootOpenMemory } from "./rootMemory";
+import { trapTab } from "./focusTrap";
 import type { NoteRef } from "./noteRefsCore";
 import "./areas.css";
 import "./tree.css";
@@ -67,8 +68,8 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   roomsPending?: boolean;
   /** The host's room view for a room id (or one of its threads, by root): its messages and composer, when that is the one loaded. */
   roomFor: (id: string | null | undefined, threadRoot?: string | null) => AreaRoom | null;
-  /** The open node's room (null: none), so the host can load it. */
-  onRoom: (id: string | null) => void;
+  /** The open node's room (null: none), so the host can load it, and whether the room is the node's own (r15: a borrowed one is not reopened). */
+  onRoom: (id: string | null, own: boolean | null) => void;
   /** Open a node (path null: Uni) in this tab. */
   onOpenArea: (areaPath: string | null, name: string, room: string | null) => void;
   onBackChange: (back: (() => void) | null) => void;
@@ -82,7 +83,7 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   const openHere = (ref: string) => actions.openNote({ vault: profile.vault, id: ref });
   const appActions: AreaActions = { ...actions, openNote: openHere };
   const rooms = useMemo<RoomInfo[]>(() => (chat ? hostRooms : []), [chat, hostRooms]);
-  const { data, error, loading, signingIn } = useAreas(identity);
+  const { data, error, loading, signingIn, retry: retryAreas } = useAreas(identity);
   const nav = useNav();
   const wide = useWide();
   /** One rule for global navigation (r14): Places (the drawer) shows whenever the rail is hidden, and below 900px where the tree is. */
@@ -94,6 +95,9 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   const [rootOpen, setRootOpenState] = useState(rootOpenMemory.open);
   const setRootOpen = (v: boolean) => { rootOpenMemory.open = v; setRootOpenState(v); };
   const phoneTree = !wide;
+  /** The tree as a full-screen home (a phone held upright). A short window (the rail hidden: 740×360) opens on the room instead, with Places in
+   *  its header (r15): the tree is the drawer there. */
+  const treeHome = phoneTree && !railHidden;
   const version = useAppVersion();
   const runtime = useWebviewRuntime();
   const stored = useStoredSelfTest();
@@ -121,10 +125,10 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   /** The area's app, as a view inside the shell (r14): Back (every kind) closes it, like the work view. */
   const [appOpen, setAppOpen] = useState(false);
   const toTree = () => { setRootOpen(false); onOpenArea(null, "Uni", uniRoom); };
-  const back = loose ? (phoneTree ? toTree : null) : path ? (phoneTree ? toTree : () => {
+  const back = loose ? (treeHome ? toTree : null) : path ? (treeHome ? toTree : () => {
     const up = data ? data.tree.nodes.get(parentPath(data.tree, path)) : null;
     onOpenArea(up?.path ?? null, up?.name ?? "Uni", up ? pickRoom(withRoom(up).rooms, null) : uniRoom);
-  }) : phoneTree && rootOpen ? () => setRootOpen(false) : null;
+  }) : treeHome && rootOpen ? () => setRootOpen(false) : null;
   /** What is over the place, top first: the sheet (modal), then the drawer, then the work view (only when the chat is there to go back to). */
   const workOver = work && chat;
   // the drawer is closed by every Back first (r14), its own Back button excepted (that one goes back a place as it closes)
@@ -162,13 +166,7 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
     const opener = drawerOpener.current;
     return () => { for (const m of marked) m.removeAttribute("inert"); const at = document.activeElement; if (opener?.isConnected && (!at || at === document.body)) opener.focus(); };
   }, [drawer]);
-  const trapDrawer = (e: React.KeyboardEvent) => {
-    if (e.key !== "Tab") return;
-    const f = [...drawerBox.current!.querySelectorAll<HTMLElement>("button:not(:disabled), a[href], [tabindex='0']")];
-    if (!f.length) return;
-    if (e.shiftKey && (document.activeElement === f[0] || document.activeElement === drawerBox.current)) { e.preventDefault(); f[f.length - 1].focus(); }
-    else if (!e.shiftKey && document.activeElement === f[f.length - 1]) { e.preventDefault(); f[0].focus(); }
-  };
+  const trapDrawer = (e: React.KeyboardEvent) => trapTab(e, drawerBox.current);
   useEffect(() => {
     setBody(null);
     if (!identity || node?.kind !== "project" || !workShown) return;
@@ -182,7 +180,9 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   const stewardRoomId = node && data ? roomView(data.tree, node.path, roomRefs, uniRef).target?.id ?? null : null;
   const hostRoom = !chat ? null : stewardRoomId ?? (node?.path === ROOT ? uniRoom : null);
   // a thread's room is the thread's own (the host opened it with the tab)
-  useEffect(() => { if (node && !thread) onRoom(hostRoom); }, [node?.id, hostRoom, !thread]); // eslint-disable-line react-hooks/exhaustive-deps
+  // whether the room is the node's own is known once the tree is (before that a node is not taken for borrowing)
+  const ownRoomHere = !node ? null : node.path === ROOT ? true : !data ? null : roomView(data.tree, node.path, roomRefs, uniRef).own;
+  useEffect(() => { if (node && !thread) onRoom(hostRoom, ownRoomHere); }, [node?.id, hostRoom, !thread, ownRoomHere]); // eslint-disable-line react-hooks/exhaustive-deps
   const roomName = useMemo(() => (id: string) => rooms.find((r) => r.id === id)?.name ?? "room", [rooms]);
   const now = Date.now();
   const fallback = useMemo<TaskNode[]>(() => (data?.areas ?? []).map((a) => ({ id: a.id, path: a.path, name: a.name, parent: a.parent, room: typeof a.metadata.room === "string" ? a.metadata.room : null, status: a.status === "archived" || a.status === "done" ? a.status : "active", isRoot: false })), [data?.areas]);
@@ -229,19 +229,22 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
    * The room itself: a header (title, the room's own name, where it sits), the conversation, and the companion beside it (wide) or as a
    * strip above it (phone). A thread or the work view shows inside it, with a way back to the room.
    */
-  const shell = (o: { title: string; door: string; crumbs: ReactNode; companion: CompanionProps | null; chatRoom: AreaRoom | null; placeholder: string; selected?: string; selectedRoom?: string; sheet: ReactNode; main?: ReactNode; workBar?: ReactNode;
+  const shell = (o: { title: string; door: string;
+    /** A node in a borrowed room (r15): the room is the heading, and this line says whose place it is ("Expression · no room of its own yet, talking in #Uni"). */
+    context?: string; node?: string; crumbs: ReactNode; companion: CompanionProps | null; chatRoom: AreaRoom | null; placeholder: string; selected?: string; selectedRoom?: string; sheet: ReactNode; main?: ReactNode; workBar?: ReactNode;
     /** The area's app, opened from the header (r14): it shows as a view in this shell. */
     openApp?: ((e: React.MouseEvent) => void) | null; appOpen?: boolean }) => {
     const replies = thread && o.chatRoom?.loaded ? o.chatRoom.messages.filter((m) => m.ref !== thread.root).length : null;
     const view = o.main ? "work" : thread ? "thread" : "room";
     return <div className={`tree-home th-level ${wide ? "wide" : "phone"} th-rooms th-simple ${wide && (!o.companion || o.main) ? "solo" : wide && !companionOpen ? "folded" : ""}`} data-layout="rooms" data-view={view}>
       {wide && <RoomSidebar {...treeProps} selected={o.selected} selectedRoom={o.selectedRoom} nav={nav} />}
-      <section className="sr" aria-label={o.main ? `Work: ${o.title}` : `Conversation: ${o.title}`}>
+      <section className="sr" aria-label={o.main ? `Work: ${o.title}` : `Conversation: ${o.title}`} data-node={o.node}>
         <header className="sr-head">
           {placesDrawer && <button ref={drawerOpener} type="button" className="sr-drawer" aria-label="Places" title="Rooms and places" aria-expanded={drawer} aria-controls="th-drawer" onClick={() => setDrawer(true)}><span aria-hidden="true" /></button>}
           <div className="sr-titles">
             {(o.door || o.crumbs) && <div className="sr-meta">{o.crumbs}{o.door && <span className="sr-door">{o.door}</span>}</div>}
             <h1 className="sr-title">{o.title}</h1>
+            {o.context && <p className="sr-context">{o.context}</p>}
           </div>
           {o.openApp && !o.appOpen && <button type="button" className="sr-app" aria-label={`Open the ${o.title} app`} onClick={o.openApp}>App ›</button>}
         </header>
@@ -249,7 +252,7 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
           <span className="sr-thread-label">Thread{replies !== null ? ` · ${replies} ${replies === 1 ? "reply" : "replies"}` : ""}</span></div>}
         {o.workBar}
         {/* below 900px the tree (and its health line) is in the drawer: the room says it itself, outside the drawer (r14); the work view has its own */}
-        {!wide && o.companion && !o.main && tasks.ready && <LoadHealth load={load} ready className="sr-health" />}
+        {!wide && o.companion && !o.main && tasks.ready && <LoadHealth load={load} ready count={o.companion.feed.total} className="sr-health" />}
         {!wide && o.companion && !o.main && <CompanionStrip {...o.companion} open={companionOpen} onToggle={setCompanionOpen} />}
         {o.main ? <div className="sr-work">{o.main}</div>
           : <div className="sr-chat">{o.chatRoom ? o.chatRoom.render(null, o.placeholder) : <p className="th-quiet" role="status">Opening the room…</p>}</div>}
@@ -274,8 +277,22 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
     const companion: CompanionProps = { stands: null, ready: !!data, note: data ? UNFILED : null, feed: { rows: [], privates: [], total: 0 }, runs: [], nodeName: title, onTask: () => {}, onNote: actions.openNote, onDecide: () => {}, onEverything: null };
     return frame(shell({ title, door: "", crumbs: null, companion, chatRoom: roomFor(loose, thread?.root ?? null), placeholder: `Message ${title}`, selectedRoom: loose, sheet: null }));
   }
-  if (!node) return <div className="areas-home"><button className="note-back" onClick={toUni}><span className="note-back-arrow" aria-hidden="true">←</span><span className="note-back-label">Uni</span></button>
-    <p className="empty">{signingIn ? "Signing in…" : loading ? "Opening area…" : error ? `Couldn't load: ${error}` : "This area no longer exists."}</p></div>;
+  // r15: an area that can't be shown (gone, or the areas couldn't be read) stays inside the room shell: the tree (or Places), a heading that
+  // says what happened, and the ways on: Retry, Back, Uni
+  if (!node) {
+    const gone = !signingIn && !loading && !error;
+    const title = signingIn ? "Signing in…" : loading ? "Opening…" : error ? "Couldn't open this area" : "This area no longer exists";
+    const main = <div className="wv sr-missing" role={error ? "alert" : "status"}>
+      {error && <p className="cp-none">The areas couldn't be read: {error.replace(/^Error:\s*/, "").slice(0, 160)}</p>}
+      {gone && <p className="cp-none">It may have been renamed, moved or archived. It is not in the tree any more.</p>}
+      {!signingIn && !loading && <p className="sr-missing-go">
+        {error && <button type="button" className="task-do primary" onClick={retryAreas}>Retry</button>}
+        {nav?.canBack && <button type="button" className="task-do" onClick={() => nav.back()}>Back</button>}
+        <button type="button" className={`task-do${error ? "" : " primary"}`} onClick={toUni}>Open Uni</button>
+      </p>}
+    </div>;
+    return frame(shell({ title, door: "", crumbs: null, companion: null, chatRoom: null, placeholder: "", sheet: null, main }));
+  }
   const isRoot = node.path === ROOT;
   const tree = data?.tree;
   const status = <>
@@ -284,7 +301,7 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
     {!data && error && <p className="note-error" role="alert">Couldn't load areas: {error}</p>}
     {!!data?.truncated.length && <p className="areas-status" role="status">{data.truncated.join(", ")}: showing first 200 notes; more may exist.</p>}
   </>;
-  if (phoneTree && path === null && !rootOpen) {
+  if (treeHome && path === null && !rootOpen) {
     return <div className="areas-home tree-home-wrap"><TreeScreen {...treeProps} status={<>{status}{railHidden && places.length > 0 && <div className="th-places-short">{placesRow}</div>}</>} />
       <UndoBar undo={tasks.undo} notice={tasks.notice} onDismiss={tasks.dismissNotice} /></div>;
   }
@@ -297,6 +314,10 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   const here = isRoot ? "" : node.path;
   const rowOf = (p: string) => (tree ? roomView(tree, p, roomRefs, uniRef) : { target: uniRef, slash: null, heldBy: uniRef, own: false, heldNode: null });
   const nodeView = rowOf(node.path);
+  /** A node with no room of its own talks in an ancestor's (or Uni's): that real room is the heading over its conversation, and the node is a
+   *  line under it (r15). Its work view and app are still the node's own, so they keep its name. */
+  const borrowed = chat && !isRoot && !nodeView.own && nodeView.heldBy ? `#${roomSlug(nodeView.heldBy.name)}` : null;
+  const context = borrowed ? `${node.name} · no room of its own yet, talking in ${borrowed}` : undefined;
   const askRoom = target?.id ?? null;
   const trailItems = [{ path: ROOT, name: "Uni" }, ...(tree && !isRoot ? trail(tree, node.path) : isRoot ? [] : [node]).map((n) => ({ path: n.path, name: n.name }))];
   const privateOf = (p: string) => (tree ? privateRoot(tree, p) : null);
@@ -325,7 +346,7 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   const sheetGone = !!sheetId && (!live || !(live.state === "open" || live.state === "doing" || live.state === "waiting") || (tasks.ready && !tasks.tasks.some((t) => t.id === sheetId) && !tasks.leaving.has(sheetId)));
   const sheetView = sheetTask && <TaskSheet key={sheetTask.id} task={sheetTask} gone={sheetGone} here={here} nodeName={nodeName} room={roomOfNode(sheetTask.node) ?? target} inRoom={target?.id} onClose={closeSheet}
     onAct={(t, a) => void tasks.act(t, a)} onDecide={decide} onNote={actions.openNote} onOpenRoom={openRoomHere} onSay={chat ? sayIn : undefined} onPriority={(t, p) => void tasks.setPriority(t, p)} onStale={tasks.refresh} />;
-  const companionProps: CompanionProps = { stands, ready: tasks.ready, load, feed: panel, rest: panel.rest, onPrivate: openPrivate, runs, nodeName: node.name, onTask: openSheet, onNote: actions.openNote, onDecide: decide, onEverything: () => { closeSheet(); setWork(true); } };
+  const companionProps: CompanionProps = { stands, ready: tasks.ready, load, feed: panel, rest: panel.rest, onPrivate: openPrivate, runs, nodeName: node.name, scope: borrowed ? node.name : null, onTask: openSheet, onNote: actions.openNote, onDecide: decide, onEverything: () => { closeSheet(); setWork(true); } };
   const placeholder = chatPlaceholder({ name: node.name, slash: nodeView.own ? nodeView.slash : null, heldBy: nodeView.heldBy ? nodeView.heldBy.name : null });
   // ------------------------------------------------------------------------------------------ the work view (r13)
   const mineLive = (t: Task) => groupOf(t) === "you";
@@ -347,10 +368,10 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   const workBar = workOpen ? <div className="sr-thread sr-workbar">{chat && !noRoom && <button type="button" className="sr-thread-back sr-work-back" onClick={() => setWork(false)}><span aria-hidden="true">‹</span> Back to chat</button>}
     <span className="sr-thread-label">{`All of ${node.name}'s work`}</span></div> : null;
   const crumbs = !isRoot ? <Crumbs trail={trailItems} onOpen={openPath} compact={!wide} /> : null;
-  /** The room's channel, once (r14): its own (`#cohere`), or the room it borrows, said plainly ("Conversation in #boulder"). */
-  const door = !chat ? "" : nodeView.own && nodeView.slash ? `#${nodeView.slash.replace(/^#/, "")}` : nodeView.heldBy && !isRoot ? `Conversation in #${roomSlug(nodeView.heldBy.name)}` : "";
+  /** The room's channel, once (r14): its own (`#cohere`). */
+  const door = !chat ? "" : nodeView.own && nodeView.slash ? `#${nodeView.slash.replace(/^#/, "")}` : "";
   // the area's app, when open, is the view in the chat's place (r14); otherwise the work view when it is open, else the conversation
-  const roomLevel = (app: AppView | null, openApp: ((e: React.MouseEvent) => void) | null) => shell({ title: node.name, door, crumbs,
+  const roomLevel = (app: AppView | null, openApp: ((e: React.MouseEvent) => void) | null) => shell({ title: borrowed && !app && !workOpen ? borrowed : node.name, door, context, node: node.name, crumbs,
     companion: chat ? companionProps : null, chatRoom: thread ? roomFor(thread.channel, thread.root) : roomFor(target?.id), placeholder, selected: node.path, sheet: sheetView,
     main: app ? app.main : workOpen ? workMain : undefined, workBar: app ? app.bar : workBar, openApp, appOpen: !!app });
   return <AreaView key={node.id} area={body !== null ? { ...node, body } : node} mode={mode} roomName={roomName} actions={appActions}

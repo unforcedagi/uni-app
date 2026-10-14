@@ -12,6 +12,7 @@ import { RefText } from "./noteRefs";
 import { splitRefs, type NoteRef } from "./noteRefsCore";
 import { useVaultProfile } from "./ProfileContext";
 import { changedBy, vaultTasks } from "./vaultTasks";
+import { trapTab } from "./focusTrap";
 
 export const ownerLabel = (o: string, p: VaultProfile = activeProfile()) => (o === p.me ? p.meLabel : p.roomOwnerPrefix && o.startsWith(p.roomOwnerPrefix) ? `#${o.slice(p.roomOwnerPrefix.length)}` : o.startsWith("person:") ? o.slice(7) : p.agentOwners.includes(o) ? o.charAt(0).toUpperCase() + o.slice(1) : o || "unassigned");
 const OWNER = (o: string) => ownerLabel(o);
@@ -46,12 +47,7 @@ export function TaskSheet({ task, gone = false, here, nodeName, room, inRoom, on
   useEffect(() => { box.current?.focus(); const back = opener.current as HTMLElement | null; return () => { if (back?.isConnected) back.focus(); }; }, []);
   const key = (e: ReactKeyboardEvent) => {
     if (e.key === "Escape") { e.stopPropagation(); onClose(); }
-    if (e.key === "Tab") {
-      const f = [...box.current!.querySelectorAll<HTMLElement>("button:not(:disabled), summary, a[href]")];
-      if (!f.length) return;
-      if (e.shiftKey && (document.activeElement === f[0] || document.activeElement === box.current)) { e.preventDefault(); f[f.length - 1].focus(); }
-      else if (!e.shiftKey && document.activeElement === f[f.length - 1]) { e.preventDefault(); f[0].focus(); }
-    }
+    trapTab(e, box.current); // r15: only reachable controls (never the closed Details' priority buttons)
   };
   const go = (a: TaskAction) => { onAct(task, a); onClose(); };
   /** The task's own vault (r15): its note and the notes its step links are read and opened there. */
@@ -117,7 +113,7 @@ export function TaskSheet({ task, gone = false, here, nodeName, room, inRoom, on
         {!sayIn && room && room.id !== inRoom && <button type="button" className="task-do quiet" onClick={() => { onOpenRoom(room.id); onClose(); }}>Open in #{room.name.replace(/^#/, "")}</button>}
         <button type="button" className="task-do quiet" onClick={onClose}>Close</button>
       </div>
-      {(tid || at || (!gone && !decision && onPriority)) && <details className="task-details"><summary>Details</summary>
+      {(tid || at || (!gone && !decision && onPriority)) && <details className="task-details" onToggle={(e) => { const d = e.currentTarget; if (d.open) requestAnimationFrame(() => d.scrollIntoView({ block: "nearest" })); }}><summary>Details</summary>
         {!gone && !decision && onPriority && <div className="task-prio" role="group" aria-label="Priority">
           {PRIORITIES.map((p) => <button key={p} type="button" className="task-prio-b" aria-pressed={p === prio} onClick={() => { if (p !== prio) onPriority(task, p); }}>{PRIORITY_LABEL[p]}</button>)}
         </div>}

@@ -267,6 +267,9 @@
 .sr-meta { min-width: 0; display: flex; align-items: center; gap: 10px; min-height: 24px; }
 .sr-door { flex: none; margin: 0; font: 400 12.5px/1.3 var(--th-sans); color: var(--th-mute); }
 .sr-meta .th-crumbs + .sr-door::before { content: "·"; margin-right: 10px; }
+/* r15: a node in a borrowed room: the room is the heading, the node a quiet line under it */
+.sr-context { margin: 1px 0 0; font: 400 12.5px/1.3 var(--th-sans); color: var(--th-mute); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cp-scope { font-weight: 600; color: var(--th-ink2); }
 .sr-back { all: unset; box-sizing: border-box; flex: none; width: 44px; height: 44px; display: grid; place-items: center; font: 400 30px/1 var(--th-sans); cursor: pointer; color: var(--th-ink); }
 .sr-back:focus-visible { outline: 2px solid var(--th-ink); outline-offset: -4px; }
 .sr .th-crumbs { font: 400 12.5px var(--th-sans); letter-spacing: 0; color: var(--th-mute); }
@@ -553,5 +556,13 @@
 .cp-lead { margin: 0; padding: 8px 0 1px; cursor: pointer; }
 .cp-lead:hover { text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
 .cp-item[data-open] .cp-lead { -webkit-line-clamp: unset; line-clamp: none; overflow: visible; display: block; }
+/* r15: the lead is cut by the app at a whole word (WordClamp), not by the browser mid-word */
+.cp-title.cp-lead { display: block; -webkit-line-clamp: unset; line-clamp: none; overflow: visible; }
+.cp-lead .wc-more { margin-left: .15em; }
 .cp-need.cp-need-under { min-height: 0; padding-top: 0; }
 .cp-need.cp-need-under:empty { display: none; }
+
+/* r15: an area that can't be shown, inside the room shell */
+.sr-missing { padding-top: 18px; }
+.sr-missing-go { display: flex; flex-wrap: wrap; gap: 10px; margin: 14px 0 0; }
+.sr-missing-go .task-do { width: auto; padding: 0 18px; }

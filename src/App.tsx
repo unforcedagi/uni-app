@@ -42,7 +42,7 @@ import PairSource, { PairDeviceButton } from "./PairSource";
 import { UpdateSettings } from "./UpdateNotice";
 import { watchLostIpc } from "./ipcLost";
 import { currentUserAgent, platformName } from "./interface/selftest/gate";
-import { activeTab, closeTab, EMPTY_TABS, focusTab, isSurface, LEGACY_TABS_KEY, migrateLegacyTabs, navigateNoteTab, nextAfterClose, openTab, persistable, recordingTabCanClose, restoreTabs, serializeTabs, updateTab, TABS_KEY, type Tabs, type Tab, type TabTarget, type OpenMode } from "./tabs";
+import { activeTab, closeTab, EMPTY_TABS, focusTab, isSurface, LAST_ROOM_KEY, lastRoomOf, restorePlace, LEGACY_TABS_KEY, migrateLegacyTabs, navigateNoteTab, nextAfterClose, openTab, persistable, recordingTabCanClose, restoreTabs, serializeTabs, updateTab, TABS_KEY, type Tabs, type Tab, type TabTarget, type OpenMode } from "./tabs";
 import { canBack as histCanBack, canForward as histCanForward, EMPTY_HISTORY, placeKey, RECENT_SHOWN, recent as histRecent, step as histStep, visit as histVisit, type History } from "./navHistory";
 import { NavContext, type NavControls } from "./navContext";
 import { useRailHidden } from "./areas/homeLayout";
@@ -415,7 +415,14 @@ function Conversations({ onForget }: { onForget: () => void }) {
   function commitTabs(next: Tabs) {
     tabsRef.current = next;
     setTabs(next);
-    if (tabsReady.current) { try { localStorage.setItem(TABS_KEY, serializeTabs(persistable(next))); } catch { /* private storage */ } }
+    if (tabsReady.current) {
+      try {
+        localStorage.setItem(TABS_KEY, serializeTabs(persistable(next)));
+        // r15: the last place that is a real room, for a restore that lands on a node that only borrows one
+        const cur = activeTab(next); const last = cur ? lastRoomOf(cur) : null;
+        if (last) localStorage.setItem(LAST_ROOM_KEY, last);
+      } catch { /* private storage */ }
+    }
   }
   function switchToTab(tab: Tab | null) {
     setComposerFocused(false);
@@ -631,6 +638,10 @@ function Conversations({ onForget }: { onForget: () => void }) {
       let saved: string | null = null, legacy: string | null = null;
       try { saved = localStorage.getItem(TABS_KEY); if (!saved) legacy = localStorage.getItem(LEGACY_TABS_KEY); } catch { /* private storage */ }
       let next = saved ? restoreTabs(saved, ids) : migrateLegacyTabs(legacy, ids);
+      // a node that only borrows a room (r15) reopens on the last room actually opened, else on Uni
+      let lastRoom: string | null = null;
+      try { lastRoom = localStorage.getItem(LAST_ROOM_KEY); } catch { /* private storage */ }
+      next = restorePlace(next, lastRoom, ids, () => crypto.randomUUID());
       if (!activeTab(next)) {
         const uni = rows.some((r) => r.id === UNI_CHANNEL) ? UNI_CHANNEL : findUniRoom(rows)?.id;
         // The app opens to Uni: its home page, with the Uni room attached as the chat. Without a Uni room (an account that has none) it opens the first room.
@@ -1535,10 +1546,12 @@ function Conversations({ onForget }: { onForget: () => void }) {
     return { id, messages, loaded: loadedView === `${id}|${threadRoot}`, me: identity, render: (above: ReactNode, placeholder?: string) => roomPane(room, above, placeholder), compose: composeHere };
   };
   // An area learns its room from the area note; the tab remembers it, and the room view follows the tab.
-  const syncAreaRoom = (id: string | null) => {
+  const syncAreaRoom = (id: string | null, own: boolean | null) => {
     const tab = activeTab(tabsRef.current);
     if (tab?.kind !== "area" && tab?.kind !== "areas") return;
-    if ((tab.channel ?? null) !== id) commitTabs(updateTab(tabsRef.current, tab.id, { channel: id ?? undefined }));
+    // an area tab also remembers whether the room is its own (r15): a borrowed one is not what the app reopens to
+    const borrowed = tab.kind === "area" && own !== null ? !own : tab.borrowed;
+    if ((tab.channel ?? null) !== id || tab.borrowed !== borrowed) commitTabs(updateTab(tabsRef.current, tab.id, { channel: id ?? undefined, borrowed }));
     if ((channel ?? null) !== id || root) navigate(id, null);
   };
   const areaActions = useMemo(() => ({
