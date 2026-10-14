@@ -25,7 +25,7 @@ async function open(page: Page, name: string) {
   await scope(page).locator('.th-row.d1').first().waitFor();
   for (let i = 0; i < 12; i++) { const f = scope(page).locator('.th-fold[aria-expanded="false"]'); if (!await f.count()) break; await f.first().click(); }
   await scope(page).locator(`.th-go[aria-label^="${name},"]`).click();
-  await expect.poll(async () => [await page.locator('.sr').first().getAttribute('data-node').catch(() => null), await page.locator('.sr-title').first().textContent().catch(() => null)]).toContain(name); // r15: a borrowed room's heading is the room; the place is data-node
+  await expect.poll(async () => [await page.locator('.sr').first().getAttribute('data-node').catch(() => null), await page.locator('.sr-title').first().textContent().catch(() => null)]).toContain(name); /* r15: a borrowed room's heading is the room; the place is data-node */
 }
 /** The node's work view ("All of X's work", r13: inside the room shell). */
 async function work(page: Page) {
