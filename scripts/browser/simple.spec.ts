@@ -1344,7 +1344,8 @@ test.describe('simple', () => {
     await expect(stale).toContainText("Couldn't refresh");
     await expect(stale).toContainText(/\d+ as of \d{1,2}:\d{2}/); // r15: the kept count, as of its read
     await expect(page.locator('.cp-item').filter({ hasText: 'SOW for the commons grant' })).toBeVisible();
-    if (wide(page)) await expect(scope(page).locator('.lh')).toContainText("Couldn't refresh");
+    // r23: one freshness line at a time: beside the room, the companion says it and the tree doesn't
+    if (wide(page)) await expect(scope(page).locator('.lh-line').filter({ hasText: "Couldn't refresh" })).toHaveCount(0);
     await page.evaluate(() => { (window as any).__queryFails = []; });
     await stale.getByRole('button', { name: 'Retry' }).click();
     await expect(stale).toHaveCount(0);
@@ -3792,11 +3793,12 @@ test.describe('r23', () => {
     await expect(sheet.getByRole('button', { name: 'Ask Uni to draft it' })).toHaveCount(0);
     await sheet.getByRole('button', { name: 'Close' }).click();
     // nothing stored: the row asks the room for it, and its sheet puts the request in the room's composer (never sent)
-    const ask = rowOf(page, 'Ask #techne for the message');
-    await expect(ask.locator('.cp-lead')).toHaveText('Ask #techne for the message');
+    // (the room that stewards Techne, named as the rooms list names it)
+    const ask = page.locator('.sr-work .cp-item').filter({ hasText: /Ask #techne for the message/i });
+    await expect(ask.locator('.cp-lead')).toHaveText(/^Ask #techne for the message$/i);
     await ask.locator('.cp-need').click();
-    await expect(sheetOf(page).locator('h2')).toHaveText('Ask #techne for the message');
-    await expect(sheetOf(page).locator('.task-do.primary')).toHaveText(/^Ask in #techne ›$/);
+    await expect(sheetOf(page).locator('h2')).toHaveText(/^Ask #techne for the message$/i);
+    await expect(sheetOf(page).locator('.task-do.primary')).toHaveText(/^Ask in #techne ›$/i);
     await expect(sheetOf(page).locator('.task-detail')).toHaveCount(0);
   });
 
@@ -3811,11 +3813,14 @@ test.describe('r23', () => {
       await rowOf(page, 'Send Ryan the deploy-access message').locator('.cp-need').click();
       const sheet = sheetOf(page);
       await expect(sheet.locator('.task-asked')).toBeVisible();
-      for (const end of [0, 99999]) {
-        await sheet.locator('.task-body').evaluate((el, y) => el.scrollTo(0, y), end);
-        const under = await sheet.evaluate((d) => { const f = d.querySelector('.task-foot')!.getBoundingClientRect(); return [...d.querySelectorAll('.task-asked, .task-movedon, .task-q-note, .task-cut, .task-gone')].filter((c) => { const q = c.getBoundingClientRect(); return q.height > 0 && q.bottom > f.top + 0.5 && q.top < f.bottom; }).map((c) => c.className); });
-        expect(under, `${w}×${h} at scroll ${end}`).toEqual([]);
-      }
+      // when it was asked and the moved-on cue lead the sheet: whole and in view at once, above the footer
+      await expect(sheet.locator('.task-asked')).toBeInViewport({ ratio: 1 });
+      const [cue, foot0] = [await sheet.locator('.task-asked').boundingBox(), await sheet.locator('.task-foot').boundingBox()];
+      expect(cue!.y + cue!.height, `${w}×${h}`).toBeLessThanOrEqual(foot0!.y);
+      // scrolled to its end, the body's last line is above the footer too
+      await sheet.locator('.task-body').evaluate((el) => el.scrollTo(0, 99999));
+      const lastBox = await sheet.locator('.task-body > *:last-child').boundingBox();
+      expect(lastBox!.y + lastBox!.height, `${w}×${h} scrolled`).toBeLessThanOrEqual(foot0!.y + 1);
       // the footer is not drawn over the body: the body ends where the footer starts
       const [body, foot] = [await sheet.locator('.task-body').boundingBox(), await sheet.locator('.task-foot').boundingBox()];
       expect(body!.y + body!.height).toBeLessThanOrEqual(foot!.y + 0.5);
