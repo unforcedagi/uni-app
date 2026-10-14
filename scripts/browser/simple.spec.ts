@@ -1281,7 +1281,7 @@ test.describe('simple', () => {
     await page.evaluate(() => window.dispatchEvent(new Event('focus')));
     const stale = page.locator(wide(page) ? '.cp-body .lh' : '.sr-health');
     await expect(stale).toContainText("Couldn't refresh");
-    await expect(stale).toContainText('Showing what was read at');
+    await expect(stale).toContainText(/\d+ as of \d{1,2}:\d{2}/); // r15: the kept count, as of its read
     await expect(page.locator('.cp-item').filter({ hasText: 'SOW for the commons grant' })).toBeVisible();
     if (wide(page)) await expect(scope(page).locator('.lh')).toContainText("Couldn't refresh");
     await page.evaluate(() => { (window as any).__queryFails = []; });

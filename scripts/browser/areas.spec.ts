@@ -82,7 +82,7 @@ test.describe('seed apps and navigation', () => {
     await openArea(page, 'Sanctum');
     await expect(page.locator('iframe')).toHaveCount(0);
     await expect(page.locator('.sr-app')).toHaveCount(0);
-    await expect(page.locator('.sr-title')).toHaveText('Sanctum');
+    await expect(page.locator('.sr')).toHaveAttribute('data-node', 'Sanctum'); // r15: a borrowed room's heading is the room
     await expect(page.locator('.sr-chat')).toContainText('Sat twenty minutes');
     await expect(page.getByRole('textbox', { name: 'Message Sanctum' })).toBeVisible();
   });
@@ -92,7 +92,7 @@ test.describe('seed apps and navigation', () => {
     await openArea(page, 'Sanctum');
     await page.reload();
     // 0.1.46: launch reopens the place you were in.
-    await expect(page.locator('.sr-title')).toHaveText('Sanctum');
+    await expect(page.locator('.sr')).toHaveAttribute('data-node', 'Sanctum'); // r15: a borrowed room's heading is the room
     // r13: below 900px the room's header opens the drawer, whose tree holds Uni
     if (await page.locator('.sr-drawer').count()) await page.locator('.sr-drawer').click();
     await card(page, 'Uni').click();

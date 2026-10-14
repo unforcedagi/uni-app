@@ -58,8 +58,9 @@ test.describe('the app is a view in the room shell', () => {
   test('an area with no room of its own talks in the room that holds it, and says so', async ({ page }) => {
     await bootAreas(page, 'seed');
     await openArea(page, 'Relationships');
-    await expect(page.locator('.sr-title')).toHaveText('Relationships');
-    await expect(page.locator('.sr-door')).toHaveText('Conversation in #Uni');
+    // r15: the real room is the heading; the area is a line under it
+    await expect(page.locator('.sr-title')).toHaveText('#Uni');
+    await expect(page.locator('.sr-context')).toHaveText('Relationships · no room of its own yet, talking in #Uni');
     await expect(page.locator('.sr-chat').getByRole('textbox', { name: /^Message / })).toHaveAttribute('placeholder', 'Message #Uni'); // r13: the channel's own name
   });
 });
