@@ -392,6 +392,24 @@ export function NeedRow({ t, onTask, meta, compact = false, area = null }: { t: 
   const [titleLines, setTitleLines] = useState(1);
   /** r20: the subtitle's "where" didn't fit whole beside the due cue, so it is dropped (never cut short) */
   const [whereHidden, setWhereHidden] = useState(false);
+  /** r22: the date part wrapped under where the row belongs: that line starts with its words, not " · " */
+  const subRef = useRef<HTMLSpanElement>(null);
+  const [subWrapped, setSubWrapped] = useState(false);
+  useLayoutEffect(() => {
+    const el = subRef.current; if (!el) return;
+    const check = () => {
+      const w = el.querySelector<HTMLElement>(".cp-sub-where"); const d = el.querySelector<HTMLElement>(".cp-sub-when");
+      if (!w || !d || w.hidden) { setSubWrapped(false); return; }
+      const wb = w.getBoundingClientRect(); const db = d.getBoundingClientRect();
+      // once wrapped (no " · "), it comes back up only when the date and a separator fit beside where it belongs: no flip-flop
+      const sep = (parseFloat(getComputedStyle(el).fontSize) || 13) * 1.6;
+      setSubWrapped(el.dataset.wrapped ? el.getBoundingClientRect().right - wb.right < db.width + sep : db.top > wb.top + 2);
+    };
+    check();
+    const ro = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(check);
+    ro?.observe(el);
+    return () => ro?.disconnect();
+  });
   // r16: an action reads whole up to four lines (the panel shows fewer rows rather than cutting an instruction); a title reads to its object
   // (up to 3 lines beside other lines, 4 alone); a decision's question is never clamped, its preview is two lines of whole words.
   // r18: in the companion an action is three lines at most, and a long "Your call" or "Check" two
@@ -420,8 +438,8 @@ export function NeedRow({ t, onTask, meta, compact = false, area = null }: { t: 
   // r22 (Codex P1): every Needs-you row says when it was asked ("asked Oct 11"), from the record's last change; never on a row that isn't the user's
   const asked = meta ? null : askedLine(t.updatedAt);
   const when_ = r.sub ? [r.sub.when, asked].filter(Boolean).join(" · ") : null;
-  const meta_ = <>{r.sub ? (<span className="cp-under cp-sub" title={[r.sub.where, when_].filter(Boolean).join(" · ")}>{r.sub.where && <FitLine className="cp-sub-where" text={r.sub.where} fallback={r.sub.short ?? null} onHide={setWhereHidden} />}
-      {when_ && <span className={`cp-sub-when${isOverdue(t.due) ? " overdue" : ""}`}>{r.sub.where && !whereHidden ? " · " : ""}{when_}</span>}</span>)
+  const meta_ = <>{r.sub ? (<span ref={subRef} className="cp-under cp-sub" data-wrapped={subWrapped || undefined} title={[r.sub.where, when_].filter(Boolean).join(" · ")}>{r.sub.where && <FitLine className="cp-sub-where" text={r.sub.where} fallback={r.sub.short ?? null} onHide={setWhereHidden} />}
+      {when_ && <span className={`cp-sub-when${isOverdue(t.due) ? " overdue" : ""}`}>{r.sub.where && !whereHidden && !subWrapped ? " · " : ""}{when_}</span>}</span>)
     : r.under && <SmallLine className="cp-under" text={r.under} />}
     {!r.lead && (due || asked) && <small className={`cp-detail cp-asked-line${isOverdue(t.due) ? " overdue" : ""}`}>{[due, asked].filter(Boolean).join(" · ")}</small>}
     {meta && <SmallLine className="cp-detail cp-meta" text={meta} />}</>;
