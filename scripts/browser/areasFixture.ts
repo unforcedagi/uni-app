@@ -436,7 +436,8 @@ Two proposals wait on a scope decision.
       mk('dq1', 'Decide the COhere venue', C26, { priority: 'someday' }, 'decision'),
       ...(d.ulidNext ? [mk('k13', 'T-13 Review the ATLAS follow-up', 'Areas/Techne', { priority: 'now', next: 'Read uni:01M3ZK2R6A6C62M1ANJCSQNG3M, then 01M3ZK2R6A6C62M1ANJCSQNG3N and reply.' }),
         { id: '01M3ZK2R6A6C62M1ANJCSQNG3M', path: 'Projects/Atlas/Follow-up notes', content: 'x', tags: [], metadata: {}, createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-02T00:00:00Z', ...(d.vaultNotes ? { inVault: 'uni' } : {}) },
-        ...(d.vaultNotes ? [{ id: '01M3ZK2R6A6C62M1ANJCSQNG3N', path: 'Life/Morning pages', content: 'y', tags: [], metadata: {}, createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-02T00:00:00Z', inVault: d.lifeVault ?? 'life' }] : [])] : []),
+        // r20: the step's second note exists (a reference the vault doesn't have is unresolved, never read past): in the life vault, or here
+        { id: '01M3ZK2R6A6C62M1ANJCSQNG3N', path: 'Life/Morning pages', content: 'y', tags: [], metadata: {}, createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-02T00:00:00Z', ...(d.vaultNotes ? { inVault: d.lifeVault ?? 'life' } : {}) }] : []),
       ...(d.cutNoAsk ? [{ ...mk('dq8', 'Decision (needs your yes): a daily calendar email to people who…', C26, { priority: 'now' }, 'decision'), content: 'Decision (needs your yes): a daily calendar email to people who…' },
         mk('dq7', 'Decision: the long one that needs a longer ask than most', C26, { priority: 'now' }, 'decision')] : []),
       ...(d.crowded ? Array.from({ length: 7 }, (_, i) => mk(`cr${i}`, `Send the follow-up note number ${i + 1} to the whole organizing group`, C26, { priority: 'now', next: 'Edit the draft, check the dates against the calendar, and send it from the shared inbox. Then post the link in the room and tell the team it went out so nobody sends it twice.' })) : []),

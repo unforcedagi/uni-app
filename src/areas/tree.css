@@ -620,6 +620,12 @@
 .cp-checkfail { margin: 0; padding: 0 0 8px; font: 400 12.5px/1.4 var(--th-sans); color: var(--th-ink); }
 .cp-item[data-mode="checking"] .cp-title { color: var(--th-ink2); font-style: italic; }
 .wv-tidy .wv-h { color: var(--th-mute); }
+/* r20: an action row's subtitle: where it belongs (cut on a whole word if it must) and the due cue, which is never cut */
+.cp-under.cp-sub { display: flex; align-items: baseline; min-width: 0; }
+.cp-sub-where { display: block; flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; }
+.cp-sub-where[hidden], .cp-sub-where [hidden] { display: none; }
+.cp-sub-when { flex: none; white-space: pre; }
+.cp-sub-when.overdue { color: var(--th-ink2); font-weight: 500; }
 /* r20: Uni's tidying is one quiet line; opened, its records are titles only, read-only (nothing to act on, nothing counted) */
 .wv-tidy-line { all: unset; box-sizing: border-box; min-height: 32px; display: inline-flex; align-items: center; font: 400 13px/1.4 var(--th-sans); color: var(--th-mute); cursor: pointer; }
 .wv-tidy-line:hover { color: var(--th-ink2); text-decoration: underline; text-underline-offset: 3px; }
