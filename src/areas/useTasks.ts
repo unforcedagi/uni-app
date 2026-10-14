@@ -40,6 +40,8 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
   // The local date, re-read when the window is shown or focused again: a snooze ends at midnight even if the app stayed open.
   const [day, setDay] = useState(() => dayOf(new Date()));
   const [error, setError] = useState<string | null>(null);
+  /** The last read of the task tree failed (the rows may sit under the wrong place until it reads again). */
+  const [treeError, setTreeError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   /** When the list last read cleanly (ms): a failed refresh says how old the rows it keeps are. */
   const [lastOk, setLastOk] = useState<number | null>(() => scoped(owner).at);
@@ -67,12 +69,18 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
     setLoading(true);
     lastLoad.current = Date.now();
     (async () => {
-      let t = mem.tree;
-      if (!t) {
-        // `node` notes are the tree; if the vault has none yet, the app's own tree (areas and projects) stands in.
-        try { const loaded = await vaultTasks.loadTree(); t = loaded.byPath.size || !fallback.length ? loaded : { ...buildTaskTree(fallback), truncated: false }; }
-        catch { t = { ...buildTaskTree(fallback), truncated: false }; }
+      // The tree is re-read with every refresh (r13), so a project filed or moved meanwhile is placed right. `node` notes are the tree; if the
+      // vault has none yet, the app's own tree (areas and projects) stands in. A failed read keeps the last good tree, or the app's own, and
+      // says so: it is never kept as if it had been read.
+      let t: TaskTree & { truncated: boolean };
+      try {
+        const loaded = await vaultTasks.loadTree();
+        t = loaded.byPath.size || !fallback.length ? loaded : { ...buildTaskTree(fallback), truncated: false };
         mem.tree = t;
+        if (live && mine === epoch.current) setTreeError(null);
+      } catch (e) {
+        t = mem.tree ?? { ...buildTaskTree(fallback), truncated: false };
+        if (live && mine === epoch.current) setTreeError(String(e));
       }
       if (live && mine === epoch.current) { setTree(t); setTreeTruncated(!!t.truncated); }
       const [r, runs, drafts] = await Promise.all([vaultTasks.loadTasks(t, nodePath), nodePath === "" ? vaultTasks.loadTagged("run") : null, nodePath === "" ? vaultTasks.loadTagged("draft") : null]);
@@ -224,7 +232,7 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
     } });
   }, [nodePath]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  return { tree, tasks: visible, all: list, runs, drafts, setPriority, decide, leaving, counts, truncated, treeTruncated, error, loading, notice, undo, act, refresh, refreshIfStale, dismissNotice: () => setNotice(null), ready: list !== null, now,
+  return { tree, tasks: visible, all: list, runs, drafts, setPriority, decide, leaving, counts, truncated, treeTruncated, error, treeError, loading, notice, undo, act, refresh, refreshIfStale, dismissNotice: () => setNotice(null), ready: list !== null, now,
     /** A re-read is under way while rows are on screen. */
     refreshing: loading && list !== null,
     lastOk,

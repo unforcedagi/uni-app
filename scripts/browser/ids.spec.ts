@@ -21,7 +21,7 @@ const wide = (page: Page) => (page.viewportSize()?.width ?? 0) >= 900;
 const scope = (page: Page) => (wide(page) ? page.locator('.th-roomnav') : page.locator('.th-phone-tree'));
 /** Open a node's room from the tree (r12: the tree is the only way in; a phone goes back to the tree first). */
 async function open(page: Page, name: string) {
-  if (!wide(page) && await page.locator('.sr-back, .th-back').count()) await page.locator('.sr-back, .th-back').first().click();
+  if (!wide(page) && await page.locator('.sr-drawer, .th-back').count()) await page.locator('.sr-drawer, .th-back').first().click();
   await scope(page).locator('.th-row.d1').first().waitFor();
   for (let i = 0; i < 12; i++) { const f = scope(page).locator('.th-fold[aria-expanded="false"]'); if (!await f.count()) break; await f.first().click(); }
   await scope(page).locator(`.th-go[aria-label^="${name},"]`).click();

@@ -9,6 +9,7 @@ import { useLifeOsVault } from "./areas/useLifeOsVault";
 import { effectiveLifeVault, showUniGlue } from "./areas/profile";
 import { clearProjectBodies } from "./areas/projectBody";
 import AreasSurface from "./areas/LifeOsSurface";
+import type { Overlay } from "./areas/AreasSurface";
 import { rootOpenMemory } from "./areas/rootMemory";
 import { UNI_CHANNEL } from "./areas/treeCore";
 import AreaSelfTest from "./interface/selftest/SelfTest";
@@ -91,9 +92,14 @@ const hue = (pk: string) => parseInt(pk.slice(0, 6), 16) % 360;
 
 function App() {
   const [paired, setPaired] = useState<boolean | null>(null);
+  /** The key could not be read (not the same as having none): say so and retry, never send the user to pairing. */
+  const [keyError, setKeyError] = useState(false);
+  const [check, setCheck] = useState(0);
   useEffect(() => {
-    invoke<IdentityStatus>("identity_status").then((s) => setPaired(s.paired)).catch(() => setPaired(false));
-  }, []);
+    setKeyError(false);
+    invoke<IdentityStatus>("identity_status").then((s) => setPaired(s.paired)).catch(() => setKeyError(true));
+  }, [check]);
+  if (keyError) return <main className="pairing"><p className="empty key-error" role="alert">Couldn't read your key · <button type="button" className="pairing-secondary" onClick={() => setCheck((n) => n + 1)}>Retry</button></p></main>;
   if (paired === null) return <main className="pairing"><p className="empty">Loading…</p></main>;
   if (!paired) return <Pairing onPaired={() => setPaired(true)} />;
   return <Conversations onForget={() => setPaired(false)} />;
@@ -167,6 +173,10 @@ function Conversations({ onForget }: { onForget: () => void }) {
   /** Whether the open place has a Back of its own (a level up, the room tree): Android Back is the app's while it does. */
   const [hasAreaBack, setHasAreaBack] = useState(false);
   const setAreaBack = useCallback((back: (() => void) | null) => { areaBack.current = back; setHasAreaBack(!!back); }, []);
+  /** What the room shell has open over the place (its task sheet, work view or drawer): every Back closes it first; a modal one holds history. */
+  const overlayRef = useRef<Overlay | null>(null);
+  const [hasOverlay, setHasOverlay] = useState(false);
+  const setOverlay = useCallback((o: Overlay | null) => { overlayRef.current = o; setHasOverlay(!!o && !o.modal); }, []);
   const tabsReady = useRef(false);
   const [vaults, setVaults] = useState<string[]>([]);
   const [vaultError, setVaultError] = useState<string | null>(null);
@@ -390,8 +400,12 @@ function Conversations({ onForget }: { onForget: () => void }) {
     if (next !== histRef.current) { histRef.current = next; setHist(next); }
   }
   function goHistory(by: -1 | 1) {
-    // A note open over the place has its own Back: that comes first.
+    // A note open over the place has its own Back: that comes first. A task sheet holds history while it is open (Escape closes it);
+    // the work view and the drawer close before Back changes places.
     if (by < 0 && notesRef.current.length) { closeNoteRef.current(); return; }
+    const over = overlayRef.current;
+    if (over?.modal) return;
+    if (by < 0 && over) { over.close(); return; }
     const hop = histStep(histRef.current, by);
     if (!hop) return;
     histRef.current = hop.history; setHist(hop.history);
@@ -571,6 +585,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const [loadedView, setLoadedView] = useState<string | null>(null);
   /** The view whose messages the relay store has answered with (not just the device's kept copy): only then can a room be said to be empty. */
   const [fetchedView, setFetchedView] = useState<string | null>(null);
+  /** The view whose last read failed with nothing kept to show: the timeline says so, with Retry, instead of loading forever. */
+  const [failedView, setFailedView] = useState<string | null>(null);
   const fetchSeq = useRef(0), appliedSeq = useRef(0), viewNow = useRef<string | null>(null);
   const [listEl, setListEl] = useState<HTMLDivElement | null>(null);
   const setList = useCallback((el: HTMLDivElement | null) => {
@@ -644,7 +660,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     if (busyRef.current) return;
     busyRef.current = true;
     setBusy(true);
-    setStatus("Connecting to Buzz…");
+    setStatus("Connecting…");
     setError(null);
     try {
       const result = await invoke<SyncResult>("refresh");
@@ -744,7 +760,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       if (kept) { setMessages(kept); setLoadedView(view); }
     }
     viewNow.current = view;
-    invoke<Message[]>("get_messages", { channel, root, limit }).then((rows) => { if (viewNow.current === view && seq > appliedSeq.current) { appliedSeq.current = seq; setMessages(rows); setLoadedView(view); setFetchedView(view); if (root === null) writeMessages(localStorage, whoRef.current, channel, rows); } }).catch((e) => { if (current) setError(String(e)); });
+    invoke<Message[]>("get_messages", { channel, root, limit }).then((rows) => { if (viewNow.current === view && seq > appliedSeq.current) { appliedSeq.current = seq; setMessages(rows); setLoadedView(view); setFetchedView(view); setFailedView(null); if (root === null) writeMessages(localStorage, whoRef.current, channel, rows); } }).catch((e) => { if (current) { setError(String(e)); setFailedView(view); } });
     // Viewing the room reads it (only while the app is actually on screen).
     if (document.visibilityState === "visible") {
       invoke("mark_read", { channel }).then(() => loadRooms()).catch(() => {});
@@ -1258,7 +1274,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       // user has switched rooms meanwhile.
       setTick((n) => n + 1);
       await loadRooms();
-      setStatus(recipients.length ? `Message accepted by relay · notified ${recipients.length}` : "Message accepted by relay");
+      setStatus(recipients.length ? `Message sent · notified ${recipients.length}` : "Message sent");
     } catch (e) {
       setError(String(e));
     }
@@ -1408,14 +1424,19 @@ function Conversations({ onForget }: { onForget: () => void }) {
     {rootMessage && <div className="thread-divider"><span>{threadReplies.length ? `${threadReplies.length} ${threadReplies.length === 1 ? "reply" : "replies"}` : "No replies yet"}</span></div>}
     {renderList(threadReplies, true)}
     {messages.length === 0 && fetchedView === currentView && <p className="empty">Thread not in local cache. Refresh to try again.</p>}
+    {messages.length === 0 && fetchedView !== currentView && <p className="empty room-loading" role="status">Loading the thread…</p>}
   </> : <>
     {messages.length > 0 && <div className="older">{older === "done" ? <span>Start of #{roomName}</span> : <button onClick={() => actions.current.loadOlder()} disabled={older === "loading"}>{older === "loading" ? "Loading older messages…" : "Load older messages"}</button>}</div>}
     {/* the kept copy or nothing until the store has answered: a room is never called empty before it has been read */}
     {messages.length === 0 && fetchedView === currentView && <p className="empty">No messages in this room yet.</p>}
+    {/* r13: a known room is never a blank timeline while its first read is under way */}
+    {messages.length === 0 && fetchedView !== currentView && (failedView === currentView
+      ? <p className="empty room-loading" role="alert">Couldn't load messages · <button type="button" className="pairing-secondary" onClick={() => setTick((n) => n + 1)}>Retry</button></p>
+      : <p className="empty room-loading" role="status">Loading messages…</p>)}
     {renderList(messages, false)}
   </>,
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  [messages, identity, menuFor, answered, root, older, roomName, editing, focusRef, relayOrigin, fetchedView, currentView]);
+  [messages, identity, menuFor, answered, root, older, roomName, editing, focusRef, relayOrigin, fetchedView, failedView, currentView]);
 
   const topNote = notes[notes.length - 1];
   // A top-level note Back closes its tab and returns to the last used tab.
@@ -1434,6 +1455,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     if (journalFocus) { setJournalFocus(false); return; }
     if (panel) { setPanel(null); return; }
     if (searchOpen) { setSearchOpen(false); return; }
+    if (overlayRef.current && !notes.length) { overlayRef.current.close(); return; }
     if (notes.length) { closeNote(); return; }
     if (root && channel) { openTarget(roomTarget(channel), "focus"); return; }
     // A level goes up, a room on a phone goes back to the room tree (Uni's own level, opened from the tree, too); anything else goes to Uni.
@@ -1540,7 +1562,14 @@ function Conversations({ onForget }: { onForget: () => void }) {
   /** A place's identity: a room a node owns is that node (Uni's room, opened before the tree loaded, is Uni). */
   const placeOf = (t: TabTarget): string => { const n = t.kind === "room" && t.channel ? roomNodes.get(t.channel) : null; return n ? (n.path === "" ? "uni" : `area:${n.path}`) : placeKey(t); };
   const navControls: NavControls = {
-    canBack: histCanBack(hist) || notes.length > 0, canForward: histCanForward(hist),
+    canBack: histCanBack(hist) || notes.length > 0 || hasOverlay, canForward: histCanForward(hist),
+    places: [
+      { label: "Journal", go: () => openTarget({ kind: "journal", title: "Journal" }) },
+      ...(showUniGlue(lifeVault) ? [{ label: "For you", go: openForYou }] : []),
+      { label: "Vault", go: () => { setSearchOpen(false); setPanel("vault"); } },
+      { label: "Search", go: () => { setPanel(null); setSearchQuery(""); setSearchScope({ vault: "", prefix: "" }); setSearchOpen(true); } },
+      { label: "Settings", go: () => { setSearchOpen(false); setPanel("settings"); setForgetArmed(false); } },
+    ],
     back: () => goHistory(-1), forward: () => goHistory(1),
     recent: histRecent(hist, RECENT_SHOWN, placeOf).filter((t) => !active || placeOf(t) !== placeOf(active)).map((t) => ({ key: placeOf(t), title: t.title, path: t.kind === "area" ? t.path ?? null : null, room: t.kind === "room" ? t.channel ?? null : null, go: () => openTarget(t, "focus") })),
   };
@@ -1566,7 +1595,9 @@ function Conversations({ onForget }: { onForget: () => void }) {
       {panel === "settings" && <div className="settings">
         <p className="connection" role="status">{status}{live ? <span className={`live ${live === "Live" ? "on" : ""}`}> · {live}</span> : null}</p>
       {identity && <p className="identity" title={npub ?? identity}>{myName ? <>Signed in as <strong>{myName}</strong></> : <>Public key <code>{npub ? `${npub.slice(0, 14)}…${npub.slice(-6)}` : `${identity.slice(0, 12)}…`}</code></>}<button className="identity-copy" onClick={() => void copyText(npub ?? identity, "Copied public key")} aria-label="Copy your public key">⧉</button></p>}
-        <UpdateSettings /><LifeOsVaultSetting vaults={vaults} /><AreaSelfTest /><PairDeviceButton onOpen={() => setPairSourceOpen(true)} /><button className="pairing-secondary" onClick={() => void forget()}>{forgetArmed ? "Tap again to forget — you'll need to re-pair" : "Forget this device key"}</button>{forgetArmed && <button className="pairing-secondary" onClick={() => setForgetArmed(false)}>Keep key</button>}</div>}
+        <UpdateSettings /><LifeOsVaultSetting vaults={vaults} /><PairDeviceButton onOpen={() => setPairSourceOpen(true)} /><button className="pairing-secondary" onClick={() => void forget()}>{forgetArmed ? "Tap again to forget — you'll need to re-pair" : "Forget this device key"}</button>{forgetArmed && <button className="pairing-secondary" onClick={() => setForgetArmed(false)}>Keep key</button>}
+        {/* r13: the machinery (the app sandbox's self-test, where the app connects) is for whoever builds Uni, not part of ordinary Settings */}
+        <details className="settings-dev"><summary>Developer</summary>{hub && <p className="settings-dev-line">Notes hub: <code>{hub}</code></p>}<AreaSelfTest /></details></div>}
       {searchOpen && <Search initialQuery={searchQuery} vaults={vaults} key={`${searchScope.vault}:${searchScope.prefix}`} initialVault={searchScope.vault} initialPathPrefix={searchScope.prefix} onOpen={openHit} onOpenNote={(n) => { setSearchOpen(false); openNote({ hub: null, vault: n.vault, ref: n.id }, null); }} onAskUni={askUniSearch} onClose={() => { setSearchOpen(false); if (topNote) setSidebarVisible(false); }} />}
       {searchOpen && error && <p className="error search-error" role="alert">{error}</p>}
       <div className="rooms-body" hidden={searchOpen}>
@@ -1586,7 +1617,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       {journalTab && <div className="journal-tab-content" hidden={!journalOpen} onFocusCapture={(e) => { if (e.target instanceof HTMLTextAreaElement) requestAnimationFrame(() => setComposerFocused(true)); }} onBlurCapture={(e) => { const journal = e.currentTarget; requestAnimationFrame(() => setComposerFocused(journal.contains(document.activeElement) && document.activeElement instanceof HTMLTextAreaElement)); }}><Journal focus={journalFocus} onFocus={() => setJournalFocus((v) => !v)} rooms={rooms} uniRoomId={findUniRoom(rooms)?.id ?? null} onShare={shareEntry} onBack={() => openTarget(uniHome())} onRecordingChange={(on, elapsed, stop) => { journalRecordingRef.current = on; setJournalRecording(on ? { elapsed, stop } : null); }} /></div>}
       {active?.kind === "vault" && active.vault ? <VaultBrowser key={active.vault} vault={active.vault} onBack={() => openTarget(uniHome())} onOpen={(note) => openTarget({ kind: "note", note: { hub: null, vault: active.vault!, ref: note.id }, title: note.path || note.id }, "new")} onCreate={(folder) => requestCreate(active.vault!, folder)} onSearch={(prefix) => { setSearchQuery(""); setSearchScope({ vault: active.vault!, prefix }); setSearchOpen(true); setSidebarVisible(true); }} />
       : journalOpen ? null
-      : shellOpen && active ? <AreasSurface roomsPending={rooms.length === 0 && synced === 0} vaults={vaults} onBackChange={setAreaBack} identity={identity} key={`${active.id}:${identity ?? ""}`} path={shellPath} loose={shellLoose} thread={shellThread} rooms={rooms} actions={areaActions} roomFor={areaRoomFor} onRoom={syncAreaRoom}
+      : shellOpen && active ? <AreasSurface roomsPending={rooms.length === 0 && synced === 0} vaults={vaults} onBackChange={setAreaBack} onOverlayChange={setOverlay} identity={identity} key={`${active.id}:${identity ?? ""}`} path={shellPath} loose={shellLoose} thread={shellThread} rooms={rooms} actions={areaActions} roomFor={areaRoomFor} onRoom={syncAreaRoom}
           onOpenArea={(path, name, room) => openTarget(path === null ? { kind: "areas", title: "Uni", ...(room ? { channel: room } : {}) } : { kind: "area", path, title: name, ...(room ? { channel: room } : {}) }, "replace")} />
       : <div className="welcome"><span className="welcome-mark">✦</span><h2>Your conversation starts here</h2><p>Select a room to read and reply. Messages are cached for offline reading.</p></div>}
     </section>

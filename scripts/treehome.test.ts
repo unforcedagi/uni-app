@@ -4,8 +4,7 @@ import assert from "node:assert/strict";
 import { parseArea, parseProject } from "../src/areas/areasCore.ts";
 import { buildTree, ROOT } from "../src/areas/treeCore.ts";
 import { ownRoom } from "../src/areas/talkCore.ts";
-import { isPrivateNode, roomSlug, roomView, treeRows, updatesBelow } from "../src/areas/treeRooms.ts";
-import { levelAlive } from "../src/areas/treeAlive.ts";
+import { isPrivateNode, privateRoot, roomSlug, roomView, treeRows } from "../src/areas/treeRooms.ts";
 import { parseBrief } from "../src/areas/briefCore.ts";
 import { HOME_LAYOUT_KEY, migrateHomeLayout } from "../src/areas/homeLayout.ts";
 
@@ -34,12 +33,12 @@ const tree = buildTree([
   proj("p-sad", "Sit", "Areas/Sanctum", { room: "sit" }),
 ]);
 
-check("slug: lower case, spaces to dashes", () => { assert.equal(roomSlug("Boulder New Tech"), "boulder-new-tech"); assert.equal(roomSlug("#Cohere"), "cohere"); });
+check("r13: a room is written by its real channel name, never lowercased or re-spaced", () => { assert.equal(roomSlug("Boulder New Tech"), "Boulder New Tech"); assert.equal(roomSlug("#Cohere"), "Cohere"); assert.equal(roomSlug("atlas/build"), "atlas/build"); });
 check("an area with a room shows it flat; a project shows its own room's real name: #cohere", () => {
   assert.deepEqual(roomView(tree, "Areas/Boulder", ROOMS, UNI), { target: ROOMS[1], slash: "boulder", heldBy: null, own: true, heldNode: null });
   const v = roomView(tree, "Projects/COhere", ROOMS, UNI);
   assert.equal(v.slash, "cohere"); assert.equal(v.target?.id, "r-coh"); assert.equal(v.own, true);
-  assert.equal(roomView(tree, "Projects/New Tech", ROOMS, UNI).slash, "boulder-new-tech");
+  assert.equal(roomView(tree, "Projects/New Tech", ROOMS, UNI).slash, "Boulder New Tech");
 });
 check("a project with no room is held by its area's room, and talk goes there", () => {
   const v = roomView(tree, "Projects/Civic", ROOMS, UNI);
@@ -58,25 +57,13 @@ check("an archived room is skipped: no fallback means held by the ancestor; a fa
 check("an area with no room anywhere is held by #Uni", () => {
   const v = roomView(tree, "Areas/Relationships", ROOMS, UNI);
   assert.equal(v.own, false); assert.equal(v.heldBy?.id, "r-uni"); assert.equal(v.target?.id, "r-uni");
-  assert.deepEqual(roomView(tree, ROOT, ROOMS, UNI), { target: UNI, slash: "uni", heldBy: null, own: true, heldNode: null });
+  assert.deepEqual(roomView(tree, ROOT, ROOMS, UNI), { target: UNI, slash: "Uni", heldBy: null, own: true, heldNode: null });
 });
-check("updates from below: rooms of their own under the node, active within a day, newest first, not its own room", () => {
-  const now = 1_000_000;
-  const rooms = [{ id: "r-uni", name: "Uni", last_message: "x", last_ts: now - 10 }, { id: "r-bou", name: "boulder", last_message: "own room line", last_ts: now - 5 }, { id: "r-coh", name: "cohere", last_message: "venue held", last_ts: now - 3600 }, { id: "r-nt", name: "Boulder New Tech", last_message: "old news", last_ts: now - 3 * 86400 }, { id: "r-ufd", name: "Unforced Dev", last_message: "invoice sent", last_ts: now - 600 }, { id: "r-sad", name: "Sanctum", last_message: "sat twenty minutes", last_ts: now - 7200 }, ...[]];
-  const b = updatesBelow(tree, "Areas/Boulder", rooms, UNI, now);
-  assert.deepEqual(b.map((u) => [u.slash, u.text]), [["cohere", "venue held"]]);
-  const all = updatesBelow(tree, ROOT, rooms, UNI, now);
-  assert.deepEqual(all.map((u) => u.slash), ["boulder", "unforced-dev", "cohere", "sanctum"], "newest first");
-  assert.ok(all.some((u) => u.slash === "unforced-dev"), "an area's own room counts for Uni");
-  assert.ok(!all.some((u) => u.slash.includes("new-tech")), "older than a day is left out");
-});
-check("private areas contribute the time only, never the words", () => {
+check("r13: privateRoot names the private area a node sits in (itself included), else null", () => {
+  assert.deepEqual(privateRoot(tree, "Projects/Sit"), { path: "Areas/Sanctum", name: "Sanctum" });
+  assert.deepEqual(privateRoot(tree, "Areas/Relationships"), { path: "Areas/Relationships", name: "Relationships" });
+  assert.equal(privateRoot(tree, "Projects/COhere"), null);
   assert.equal(isPrivateNode(tree, "Projects/Sit"), true);
-  assert.equal(isPrivateNode(tree, "Areas/Boulder"), false);
-  const rooms = [{ id: "r-sad", name: "Sanctum", last_message: "sat twenty minutes", last_ts: 999_000 }, { id: "r-ufd", name: "Unforced Dev", last_message: "invoice sent", last_ts: 999_500 }];
-  const u = updatesBelow(tree, ROOT, rooms, null, 1_000_000);
-  assert.equal(u.find((x) => x.name === "Sanctum")!.text, null);
-  assert.equal(u.find((x) => x.name === "Unforced Development")!.text, "invoice sent");
 });
 check("the phone's rows: Uni, then depth-first by foreground and name, with room or held-by", () => {
   const rows = treeRows(tree, ROOMS, UNI);
@@ -97,28 +84,6 @@ check("layout setting (r12): a saved Map, Octopus or Classic choice is dropped o
     assert.equal(migrateHomeLayout(st), null, "the second start finds nothing to migrate");
   }
   assert.equal(migrateHomeLayout(null), null);
-});
-check("alive: a node with a Brief reads it; a project with none is derived from its summary, the area brief's lines naming it, and the rooms' tasks", () => {
-  const briefs = { "Areas/Boulder": { brief: parseBrief("## Now\nBoulder is mostly COhere this week.\n\n## Needs you\n- Confirm the COhere venue deposit\n- Approve the testimony\n\n## Moving\n- COhere tents ordered\n"), updatedAt: null, generatedAt: null } } as never;
-  const task = (id: string, title: string, owner: string) => ({ id, path: id, title, kind: "task" as const, node: "Projects/COhere", state: "open" as const, owner, waitingOn: null, due: null, next: "", room: null, snoozedUntil: null, updatedAt: null, lastUpdatedBy: null, lastUpdatedVia: null });
-  const own = levelAlive({ tree, path: "Areas/Boulder", node: tree.nodes.get("Areas/Boulder")!, entry: (briefs as never)["Areas/Boulder"], briefs, tasks: [] });
-  assert.equal(own.derived, false); assert.equal(own.needs.length, 2); assert.match(own.now, /COhere/);
-  const d = levelAlive({ tree, path: "Projects/COhere", node: tree.nodes.get("Projects/COhere")!, entry: null, briefs, tasks: [task("t1", "Crew list pass", "room:cohere"), task("t2", "Pay the deposit", "aaron")] });
-  assert.equal(d.derived, true);
-  assert.deepEqual(d.needs.map((x) => x.text), ["Confirm the COhere venue deposit"]);
-  assert.deepEqual(d.moving.map((x) => x.text), ["COhere tents ordered", "Crew list pass"]);
-  assert.equal(d.moving[1].note, "in #cohere");
-  const priv = levelAlive({ tree, path: "Projects/Sit", node: tree.nodes.get("Projects/Sit")!, entry: null, briefs, tasks: [task("t3", "Sit longer", "room:sit")] });
-  assert.deepEqual(priv.moving, [], "a private area gets no task-derived lines");
-});
-check("alive: with no room owners (chat null profile) a room-owned task shows no #room note; the uni profile still does", async () => {
-  const { setActiveProfile, defaultProfile, packProfile } = await import("../src/areas/profile.ts");
-  const task = { id: "t1", path: "t1", title: "Crew list pass", kind: "task" as const, node: "Projects/COhere", state: "open" as const, owner: "room:cohere", waitingOn: null, due: null, next: "", room: null, snoozedUntil: null, updatedAt: "2026-10-12T00:00:00Z" } as never;
-  const at = () => levelAlive({ tree, path: "Projects/COhere", node: tree.nodes.get("Projects/COhere")!, entry: null, briefs: {}, tasks: [task] }).moving.map((x) => x.note);
-  try {
-    setActiveProfile(packProfile("pack", "root")); assert.deepEqual(at(), [undefined]);
-    setActiveProfile(defaultProfile()); assert.deepEqual(at(), ["in #cohere"]);
-  } finally { setActiveProfile(defaultProfile()); }
 });
 check("slash: a room line is the room's real name (atlas/build is a channel name; cohere is not boulder/cohere)", () => {
   const rooms = [{ id: "r-uni", name: "Uni" }, { id: "r-atl", name: "atlas" }, { id: "r-bld", name: "atlas/build" }, { id: "r-tch", name: "atlas/teach" }, { id: "r-bou", name: "boulder" }, { id: "r-coh", name: "cohere" }];

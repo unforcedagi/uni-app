@@ -13,7 +13,8 @@ const appControl = async (page: Page, name: string) => {
 const rail = (page: Page) => page.getByRole('navigation', { name: 'Main navigation' });
 const openAreas = openAreasHome;
 const openArea = openAreaPage;
-const openSettings = async (page: Page) => { await rail(page).getByRole('button', { name: 'Settings' }).click(); await expect(page.getByRole('button', { name: 'Run sandbox self-test' })).toBeVisible(); };
+// r13: the self-test sits under Settings → Developer
+const openSettings = async (page: Page) => { await rail(page).getByRole('button', { name: 'Settings' }).click(); await page.locator('.settings-dev > summary').click(); await expect(page.getByRole('button', { name: 'Run sandbox self-test' })).toBeVisible(); };
 const calls = (page: Page, cmd: string) => page.evaluate((c) => (window as any).__calls.filter((x: any) => x.cmd === c), cmd);
 const grants = (page: Page) => page.evaluate(() => JSON.parse(localStorage.getItem('uni.interface.grants.v2') ?? '{}'));
 

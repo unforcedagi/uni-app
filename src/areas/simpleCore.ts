@@ -28,10 +28,88 @@ export function needsByNode(tasks: readonly Task[]): Map<string, number> {
   return m;
 }
 
+/**
+ * The tree's dots (r13): each item that needs you counts on its node's row or, when that node has no row in the tree, on its nearest
+ * ancestor's (else Uni's), so the dots under a level add up to that level's feed.
+ */
+export function needsByRow(tasks: readonly Task[], rows: ReadonlySet<string>, parentOf: (path: string) => string | undefined): Map<string, number> {
+  const m = new Map<string, number>();
+  for (const t of tasks) {
+    if (!needsYou(t)) continue;
+    let at: string | undefined = t.node;
+    for (let n = 0; at !== undefined && at !== ROOT && !rows.has(at) && n < 64; n++) at = parentOf(at);
+    const key = at !== undefined && rows.has(at) ? at : ROOT;
+    m.set(key, (m.get(key) ?? 0) + 1);
+  }
+  return m;
+}
+
 /** Uni's own panel (r12): what is Uni's own, then at most `fromAreas` from the areas by urgency; the rest is in "All of Uni's work". */
 export function uniNeeds(feed: readonly Task[], fromAreas = 3): Task[] {
   const own = feed.filter((t) => t.node === ROOT);
   return [...own, ...feed.filter((t) => t.node !== ROOT).slice(0, fromAreas)];
+}
+
+/** A place whose words are never shown elsewhere (a private area), as the feed names it: by place only. */
+export type PrivatePlace = { path: string; name: string };
+/**
+ * Items that need you in a private area, named only by where they are (r13): from above, one row per private area ("A private item in
+ * Sanctum", opening that area); at the private area's own level, one row per item ("A private item here", opening its note). They count.
+ */
+export type PrivateNeed = { key: string; count: number; place: string | null; open: { path: string } | { note: string } };
+/** Needs you at one level, the one list every surface reads (r13): the companion, "+N in areas", the dots and the work view add up to `total`. */
+export type NeedsFeed = { rows: Task[]; privates: PrivateNeed[]; total: number };
+
+/** Now before Soon (overdue first), then by due date (undated last), then a decision before a task, then by title. */
+export function rankNeeds(list: readonly Task[], today = localDay()): Task[] {
+  const rank = (t: Task) => (isOverdue(t.due, today) ? -1 : t.priority === "now" ? 0 : t.priority === "someday" ? 2 : 1);
+  return [...list].sort((a, b) => rank(a) - rank(b) || (a.due ?? "9999").localeCompare(b.due ?? "9999") || Number(b.kind === "decision") - Number(a.kind === "decision") || a.title.localeCompare(b.title));
+}
+
+/**
+ * Everything that needs you at a level and below, by the one rule (`needsYou`). `privateOf(node)`: the private area a node sits in, or null.
+ * `self`: the level itself is private (it is that area, or inside one), so nothing here is named; each item is its own row, opening its note.
+ */
+export function needsFeed(tasks: readonly Task[], privateOf: (node: string) => PrivatePlace | null, self: PrivatePlace | null = null, today = localDay()): NeedsFeed {
+  const all = rankNeeds(tasks.filter(needsYou), today);
+  if (self) return { rows: [], privates: all.map((t) => ({ key: t.id, count: 1, place: null, open: { note: t.id } })), total: all.length };
+  const rows: Task[] = [];
+  const by = new Map<string, PrivateNeed>();
+  for (const t of all) {
+    const p = privateOf(t.node);
+    if (!p) { rows.push(t); continue; }
+    const g = by.get(p.path);
+    if (g) g.count++; else by.set(p.path, { key: p.path, count: 1, place: p.name, open: { path: p.path } });
+  }
+  return { rows, privates: [...by.values()], total: all.length };
+}
+
+/** Uni's panel (r13): Uni's own rows, then the first `fromAreas` from the areas; `rest` is how many named area rows wait in "All of Uni's work". */
+export function uniPanel(feed: NeedsFeed, fromAreas = 3): NeedsFeed & { rest: number } {
+  const own = feed.rows.filter((t) => t.node === ROOT);
+  const areas = feed.rows.filter((t) => t.node !== ROOT);
+  return { ...feed, rows: [...own, ...areas.slice(0, fromAreas)], rest: Math.max(0, areas.length - fromAreas) };
+}
+
+/** "A private item in Sanctum", "2 private items in Sanctum", "A private item here". */
+export function privateLabel(p: Pick<PrivateNeed, "count" | "place">): string {
+  const what = p.count === 1 ? "A private item" : `${p.count} private items`;
+  return p.place ? `${what} in ${p.place}` : `${what} here`;
+}
+
+const ACTION_VERBS = /^(say|reply|tell|answer|send|approve|confirm|review|decide|sign|pay|call|email|write|read|pick|choose|check|book|schedule|draft|merge|deploy|ship|test|ask|give|post|share|record|update|fix|add|set|move|file|submit|finish|meet|join|buy|order|cancel|renew|follow|try|look|go|let|ping|invite|publish|upload|run|print|prepare|bring|forward|accept|decline|reject)(?=[\s:,]|$)/i;
+/** A next step that names something to do ("Say go to deploy #38 + #58"), not a status ("Waiting on Casey"): the task sheet leads with it. */
+export function actionLead(next: string | null | undefined): string | null {
+  const t = (next ?? "").replace(/[*_`>]/g, "").replace(/\s+/g, " ").trim();
+  if (!t || !ACTION_VERBS.test(t)) return null;
+  return t[0].toLocaleUpperCase() + t.slice(1);
+}
+/** What a "Say …" / "Reply …" / "Tell …" step would put in the room's composer (never sent): the words after the verb. Null for other steps. */
+export function sayText(lead: string | null): string | null {
+  const m = /^(say|reply|tell|answer)\b[\s:,-]*(?:with\s+|to\s+(?:the\s+)?room\s+)?(.*)$/i.exec(lead ?? "");
+  if (!m) return null;
+  const words = m[2].replace(/^["“'‘]|["”'’]$/g, "").trim();
+  return words || null;
 }
 
 /**

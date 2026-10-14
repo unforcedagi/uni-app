@@ -9,7 +9,7 @@ async function press(page: Page, target: Locator) {
 /** r12: a room no node owns is under "Other rooms" in the room tree (no rooms drawer); a phone goes back to the tree first. */
 async function switchRoom(page: Page, name: string) {
   const phone = test.info().project.name === 'mobile';
-  if (phone && await page.locator('.sr-back').count()) await press(page, page.locator('.sr-back'));
+  if (phone && await page.locator('.sr-drawer').count()) await press(page, page.locator('.sr-drawer'));
   const tree = page.locator(phone ? '.th-phone-tree' : '.th-roomnav');
   const fold = tree.locator('.th-others .th-fold');
   if (await fold.getAttribute('aria-expanded') !== 'true') await press(page, fold);

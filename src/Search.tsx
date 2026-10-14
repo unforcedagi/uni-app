@@ -105,7 +105,7 @@ export default function Search({ onOpen, onOpenNote, onAskUni, onClose, vaults, 
     <div className="search-results" aria-live="polite">
       {!q && <div className="search-empty">
         <p><strong>Ask everything.</strong> Search the messages cached on this phone — every room and thread, including edits.</p>
-        <p>Your Parachute notes are searched by meaning, signed with your Nostr key.</p>
+        <p>Your notes are searched too, by meaning or by keyword.</p>
       </div>}
       {q && <>
         <h2 className="search-section">Messages{state === "searching" ? " · searching…" : state === "done" ? ` · ${hits.length}${hits.length >= 60 ? "+" : ""}` : ""}</h2>

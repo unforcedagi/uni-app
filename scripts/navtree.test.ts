@@ -6,7 +6,7 @@ import { canBack, canForward, EMPTY_HISTORY, placeKey, recent, step, visit, type
 import { EMPTY_TABS, isSurface, migrateLegacyTabs, persistable, restoreTabs, serializeTabs, type Tabs, type TabTarget } from "../src/tabs.ts";
 import { linkLabel, splitLinks } from "../src/areas/linkText.ts";
 import { createVaultTasks } from "../src/areas/vaultTasks.ts";
-import { actionableTitle, askFromContent, askLead, askOrder, dueLine, isCutTitle, isOverdue, lineBudget, needsByNode, needsYou, rowAsk, stateLine, topNeeds, uniNeeds, withoutCut } from "../src/areas/simpleCore.ts";
+import { actionableTitle, askFromContent, askLead, askOrder, dueLine, isCutTitle, isOverdue, lineBudget, needsByNode, needsByRow, needsFeed, needsYou, privateLabel, actionLead, sayText, rowAsk, stateLine, topNeeds, uniNeeds, uniPanel, withoutCut } from "../src/areas/simpleCore.ts";
 import { splitRefs, titleOfPath } from "../src/areas/noteRefsCore.ts";
 import { readMessages, readRooms, readWho, writeMessages, writeRooms, writeWho } from "../src/chatCache.ts";
 import { isActiveRun } from "../src/areas/steerCore.ts";
@@ -133,6 +133,45 @@ check("r12 Uni's own panel: Uni's own items, then at most three from the areas; 
   const out = uniNeeds([area("a1"), own("u1"), area("a2"), area("a3"), area("a4"), own("u2"), area("a5")]);
   assert.deepEqual(out.map((t) => t.id), ["u1", "u2", "a1", "a2", "a3"]);
   assert.deepEqual(uniNeeds([area("a1")]).map((t) => t.id), ["a1"]);
+});
+check("r13 one feed, one count: private items are counted and named by place only; the total is every surface's number", () => {
+  const list = [mk("n1", { priority: "now" }), mk("s1", { priority: "someday" }), { ...mk("p1", { priority: "now" }), node: "Areas/Sanctum" }, { ...mk("p2", { priority: "soon" }), node: "Areas/Sanctum/Sit" },
+    mk("dec1", { options: ["a"] }, ["decision"]), mk("room1", { owner: "room:atlas", priority: "now" })];
+  const priv = (n: string) => (n.startsWith("Areas/Sanctum") ? { path: "Areas/Sanctum", name: "Sanctum" } : null);
+  const f = needsFeed(list, priv);
+  assert.deepEqual(f.rows.map((t) => t.id), ["n1", "dec1"]);
+  assert.deepEqual(f.privates, [{ key: "Areas/Sanctum", count: 2, place: "Sanctum", open: { path: "Areas/Sanctum" } }]);
+  assert.equal(f.total, 4, "two named, two private; never Someday or someone else's");
+  assert.equal(f.total, list.filter(needsYou).length);
+  assert.equal(privateLabel(f.privates[0]), "2 private items in Sanctum");
+  const self = needsFeed(list.filter((t) => t.node.startsWith("Areas/Sanctum")), priv, { path: "Areas/Sanctum", name: "Sanctum" });
+  assert.deepEqual(self.privates.map((p) => [p.count, p.place, p.open]), [[1, null, { note: "p1" }], [1, null, { note: "p2" }]], "at its own level each opens its note");
+  assert.equal(privateLabel(self.privates[0]), "A private item here");
+});
+check("r13 Uni's panel says how many wait in the areas, and the numbers add up", () => {
+  const own = (id: string) => ({ ...mk(id, { priority: "now" }), node: "" });
+  const f = needsFeed([mk("a1", { priority: "now" }), own("u1"), mk("a2"), mk("a3"), mk("a4"), mk("a5", { priority: "now" })], () => null);
+  const p = uniPanel(f);
+  assert.deepEqual(p.rows.map((t) => t.id), ["u1", "a1", "a5", "a2"]);
+  assert.equal(p.rest, 2);
+  assert.equal(p.rows.length + p.rest + p.privates.reduce((n, x) => n + x.count, 0), f.total);
+});
+check("r13 dots: an item on a node with no row counts on its nearest ancestor's row, else Uni's; the dots add up to the feed", () => {
+  const list = [mk("a"), { ...mk("b"), node: "Projects/ATLAS/Sub" }, { ...mk("c"), node: "Nowhere/At/All" }, mk("s", { priority: "someday" })];
+  const parent = (p: string) => (p === "Projects/ATLAS/Sub" ? "Projects/ATLAS" : p === "Projects/ATLAS" ? "Areas/Atlas" : undefined);
+  const m = needsByRow(list, new Set(["", "Areas/Atlas", "Projects/ATLAS"]), parent);
+  assert.deepEqual([...m].sort(), [["", 1], ["Projects/ATLAS", 2]]);
+  assert.equal([...m.values()].reduce((a, b) => a + b, 0), list.filter(needsYou).length);
+});
+check("r13 the sheet's lead: a next step that names an action leads; a status does not; a Say step fills the composer", () => {
+  assert.equal(actionLead("Say go to deploy #38 + #58 by Oct 14"), "Say go to deploy #38 + #58 by Oct 14");
+  assert.equal(actionLead("send to Casey for the numbers"), "Send to Casey for the numbers");
+  assert.equal(actionLead("Waiting on Casey"), null);
+  assert.equal(actionLead("Check-in PR by Oct 12"), null, "a noun phrase is not an action");
+  assert.equal(actionLead(""), null);
+  assert.equal(sayText("Say go to deploy #38 + #58"), "go to deploy #38 + #58");
+  assert.equal(sayText("Reply: thanks, Thursday works"), "thanks, Thursday works");
+  assert.equal(sayText("Send to Casey"), null, "only say/reply/tell/answer fill a composer");
 });
 check("needs-you feed: done and archived never appear; Now before Soon, then due date (undated last)", () => {
   const ids = feed([mk("d", { state: "done", priority: "now" }), mk("ar", { state: "archived" }), mk("s1", { priority: "soon", due: "2026-10-12" }), mk("n2", { priority: "now", due: "2026-10-20" }), mk("n1", { priority: "now", due: "2026-10-15" }), mk("n3", { priority: "now" })]);
