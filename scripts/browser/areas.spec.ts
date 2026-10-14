@@ -94,7 +94,9 @@ test.describe('seed apps and navigation', () => {
     await page.reload();
     // 0.1.46: launch reopens the place you were in.
     await expect(page.locator('.sr-title')).toHaveText('Sanctum');
-    if (await page.locator('.sr-drawer').count()) await page.locator('.sr-drawer').click(); else await card(page, 'Uni').click();
+    // r13: below 900px the room's header opens the drawer, whose tree holds Uni
+    if (await page.locator('.sr-drawer').count()) await page.locator('.sr-drawer').click();
+    await card(page, 'Uni').click();
     await expect(page.getByRole('heading', { name: 'Uni', level: 1 })).toBeVisible();
   });
 });

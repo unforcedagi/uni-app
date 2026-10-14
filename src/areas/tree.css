@@ -516,8 +516,10 @@ h3.wr-h { font-weight: 400; }
 .sr-workbar { border-bottom: 0; }
 .wv { box-sizing: border-box; width: min(100%, 720px); margin: 0 auto; padding: 8px 24px 40px; display: flex; flex-direction: column; gap: 22px; }
 .th-simple.phone .wv { padding: 6px 14px 32px; }
-.wv-fresh { width: min(100%, 720px); margin: 10px auto 0; padding: 0 24px; box-sizing: border-box; display: flex; gap: 12px; align-items: center; }
-.th-simple.phone .wv-fresh { padding: 0 14px; }
+.wv-top { display: flex; flex-direction: column; gap: 4px; padding-top: 6px; }
+.wv-brief { margin: 0; font: 400 16px/1.5 var(--th-serif); color: var(--text); }
+.wv-fresh { margin: 0; display: flex; gap: 12px; align-items: center; }
+.wv-note { margin-top: 4px; }
 .wv-sec .cp-list { margin: 0; }
 .wv-h { all: unset; box-sizing: border-box; display: flex; align-items: baseline; gap: 8px; margin: 0 0 6px; font: 600 13px/1.3 var(--th-sans); letter-spacing: .04em; text-transform: uppercase; color: var(--th-ink2); }
 .wv-n { font-weight: 500; color: var(--th-mute); letter-spacing: 0; }
@@ -560,3 +562,12 @@ h3.wr-h { font-weight: 400; }
 @media (max-height: 499px) and (max-width: 950px) { .th-places-short { display: block; } }
 .key-error { display: flex; align-items: center; gap: 8px; justify-content: center; }
 .tree-home.th-level.th-simple.wide.solo { grid-template-columns: var(--th-nav-w, 220px) minmax(0, 1fr); }
+/* the drawer is touched on phones and tablets: whole rows and folds are 44px targets there */
+@media (pointer: coarse), (max-width: 599px) {
+  .th-drawer .th-column .th-go { min-height: 44px; }
+  .th-drawer .th-column .th-fold, .th-drawer .th-column .th-fold-gap { width: 30px; height: 44px; }
+  .th-drawer .th-recent button { min-height: 44px; display: flex; align-items: center; }
+  .th-drawer .th-nb { width: 44px; height: 44px; }
+}
+/* a short screen: the places keep to one line (it scrolls sideways) so the tree keeps its room */
+@media (max-height: 499px) { .th-drawer .th-places { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 6px; } .th-drawer .th-place { flex: none; } }

@@ -80,7 +80,7 @@ test('Rail surfaces, overlay panels, focus; rooms are in the tree (r12: no Rooms
     await tree.locator('.th-others .th-fold').click();
     await tree.locator('.th-other .th-go').filter({ hasText: '#garden' }).click();
     await expect(page.getByRole('textbox', { name: 'Message Garden' })).toBeVisible();
-    await expect(page.locator('.sr-title')).toHaveText('#garden');
+    await expect(page.locator('.sr-title')).toHaveText('#Garden'); // r13: the channel's own name
     await shot('other-room');
     await rail.getByRole('button', { name: 'Vault', exact: true }).click();
     await expect(rail.locator('[aria-current="page"], [aria-expanded="true"]')).toHaveCount(1);

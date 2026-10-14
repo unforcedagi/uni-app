@@ -185,8 +185,10 @@ const ASK_MAX = 280;
  * The full question of a decision (or task) whose title is cut: the first real line of its content, without `_Converted from …_` lines or
  * the "Decision (default yes):" label, kept to whole sentences (the first one or two) and at most 280 characters. "" when there is nothing.
  */
+/** A list item ("- Ship it", "2. Wait"): a decision's options are listed so, and an option is never its question (r13). */
+export const isListLine = (l: string): boolean => /^([-*+•]|\d+[.)])\s/.test(l.trim());
 export function askFromContent(content: string | null | undefined): string {
-  const line = (content ?? "").split(/\r?\n/).map((l) => l.trim()).find((l) => l && !/^_?converted from\b/i.test(l.replace(/^[*_>\s]+/, "")) && !/^#{1,6}\s/.test(l) && !/^---+$/.test(l));
+  const line = (content ?? "").split(/\r?\n/).map((l) => l.trim()).find((l) => l && !/^_?converted from\b/i.test(l.replace(/^[*_>\s]+/, "")) && !/^#{1,6}\s/.test(l) && !/^---+$/.test(l) && !isListLine(l));
   if (!line) return "";
   const plain = line.replace(/\[\[([^\]|]*\|)?([^\]]*)\]\]/g, "$2").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/[*_`>]/g, "").replace(/^decision\s*(\([^)]*\))?\s*[:\-–—]\s*/i, "").replace(/\s+/g, " ").trim();
   if (plain.length <= ASK_MAX) return plain;

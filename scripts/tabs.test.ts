@@ -40,14 +40,16 @@ s = openTab(s, note("Projects/X"), "new", id);
 assert.equal(s.tabs.length, before);
 assert.equal(activeTab(s)?.kind, "note");
 
-// Replace navigates in place (room → thread), even if that room is open elsewhere.
+// Replace navigates in place (room → thread); a place that already has a tab is opened there instead (r13: no tab strip, so a
+// second tab for one place is never wanted, and a restore folds it away).
 s = focusTab(s, s.tabs[0].id);
 const pos = s.tabs.findIndex((t) => t.id === s.active);
 s = openTab(s, thread("b", "r1"), "replace", id);
 assert.equal(s.tabs[pos].kind, "thread");
 assert.equal(s.tabs[pos].id, s.active);
 s = openTab(s, room("c"), "replace", id);
-assert.equal(s.tabs.filter((t) => t.channel === "c").length, 2);
+assert.equal(s.tabs.filter((t) => t.channel === "c").length, 1);
+assert.equal(activeTab(s)?.channel, "c");
 
 // sameTarget.
 assert.ok(sameTarget(journal, { kind: "journal", title: "x" }));
@@ -193,6 +195,25 @@ assert.equal(activeTab(restoreTabs(serializeTabs(resolvedTab), []))?.note?.ref, 
   assert.equal(restored.tabs[1].path, "Projects/COhere/COhere 2026");
   assert.equal(restoreTabs(raw, []).tabs[0].channel, undefined, "a room that is gone is dropped, the tab stays");
   assert.equal(restoreTabs(raw, []).tabs.length, 2);
+}
+
+// r13: Journal → Uni → a place that already has a tab: that tab is used, never a second one; and a saved twin restores as its kept tab
+{
+  const area = (path: string): TabTarget => ({ kind: "area", path, title: path });
+  const uni: TabTarget = { kind: "areas", title: "Uni" };
+  let t = openTab(EMPTY_TABS, area("Projects/COhere"), "focus", id);
+  const cohere = t.active!;
+  t = openTab(t, journal, "new", id);
+  const jid = t.active!;
+  t = openTab(t, uni, "new", id); // the Journal's Back to Uni opens beside it
+  t = openTab(t, area("Projects/COhere"), "replace", id); // a row of the tree, from Uni's tab
+  assert.equal(t.tabs.filter((x) => x.kind === "area" && x.path === "Projects/COhere").length, 1, "one tab per place");
+  assert.equal(t.active, cohere, "the place's own tab is the one shown");
+  assert.equal(restoreTabs(serializeTabs(t), []).active, cohere, "and it survives the next restore");
+  assert.ok(t.tabs.some((x) => x.id === jid), "the Journal keeps its tab");
+  // a saved set with two tabs for one place (older builds): the active twin restores as the kept one, never as the Journal
+  const raw = JSON.stringify({ v: 1, tabs: [{ id: "a1", kind: "area", path: "P", title: "P" }, { id: "j", kind: "journal", title: "Journal" }, { id: "a2", kind: "area", path: "P", title: "P" }], active: "a2", recent: ["a1", "j", "a2"] });
+  assert.equal(restoreTabs(raw, []).active, "a1");
 }
 
 console.log("tabs tests passed");

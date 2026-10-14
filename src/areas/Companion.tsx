@@ -213,7 +213,10 @@ export function NeedsList({ needs, fit, onTask, onDecide, onNote }: Pick<Compani
     setSize(`${scroller.clientWidth}x${scroller.clientHeight}`);
     return () => ro?.disconnect();
   }, [fit]);
-  useLayoutEffect(() => { if (fit) { setAll(false); setLimit(Infinity); setMeasuring(true); } }, [fit, key, size]);
+  // a new list folds back to what fits; a resize only measures again, so "+N more" once opened stays open (r13: opening it can add a
+  // scrollbar, which narrows the panel, and that must not fold it back)
+  useLayoutEffect(() => { if (fit) { setAll(false); setLimit(Infinity); setMeasuring(true); } }, [fit, key]);
+  useLayoutEffect(() => { if (fit && !all) { setLimit(Infinity); setMeasuring(true); } }, [size]); // eslint-disable-line react-hooks/exhaustive-deps
   useLayoutEffect(() => {
     if (!fit || !measuring) return;
     const list = listRef.current; const scroller = list?.closest(".cp.side") as HTMLElement | null; const body = list?.closest(".cp-body") as HTMLElement | null;

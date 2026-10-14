@@ -18,7 +18,8 @@ async function workPage(page: Page, name: string) {
   await areaCard(page, name).click();
   if (!isDesktop(page) && await page.locator('.cp-line[aria-expanded="false"]').count()) await page.locator('.cp-line').click();
   await page.getByRole('button', { name: /^All of .*'s work/ }).click();
-  await expect(page.locator('.th-head h1')).toHaveText(name);
+  await expect(page.locator('.sr-work')).toBeVisible();
+  await expect(page.locator('.sr-title')).toHaveText(name);
 }
 
 test.describe('device cache', () => {
@@ -161,6 +162,7 @@ test('path brief beats a newer metadata-only note; limit is visible', async ({ p
  test('system Back follows parent levels and the project body is read once', async ({ page }) => {
   await bootAreas(page, 'seed', { tree: true, briefs: true });
   await workPage(page, 'COhere 2026');
+  await page.locator('.th-note summary').click();
   await expect(page.locator('.th-note')).toContainText('The festival: venue, crew and the schedule.');
   const back = () => page.evaluate(() => { const w = window as any; w.__cbs[w.__backHandler.id]({ message: {}, index: w.__backIndex ?? 0 }); w.__backIndex = (w.__backIndex ?? 0) + 1; });
   await back(); // the work page closes back to the room
@@ -205,7 +207,8 @@ test('failed project refresh retains previous projects and stale marker', async 
   });
   await page.clock.install(); await page.clock.fastForward(31000);
   await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
-  await expect.poll(() => page.evaluate(() => (window as any).__pendingAreas.length)).toBe(6); // the four area queries and the page's run and draft queries
+  // r13: the four area queries and the task tree's (re-read with every refresh; the run and draft reads follow it)
+  await expect.poll(() => page.evaluate(() => (window as any).__pendingAreas.length)).toBe(5);
   await expect(page.locator('.areas-status')).toHaveCount(0);
   await page.evaluate(async () => { for (const resolve of (window as any).__pendingAreas) await resolve(); });
  });
@@ -242,6 +245,7 @@ test('identity changes discard cached project bodies, including when returning t
   });
   await workPage(page, 'COhere 2026');
   const purpose = page.locator('.th-note');
+  await purpose.locator('summary').click();
   await expect(purpose).toContainText('Body for account a');
   for (const owner of ['b', 'a']) {
     await page.evaluate((owner) => {
@@ -252,6 +256,7 @@ test('identity changes discard cached project bodies, including when returning t
     await expect.poll(async () => (await calls(page, 'refresh')).length).toBeGreaterThan(0);
     await page.waitForTimeout(300);
     if (!await purpose.count()) await workPage(page, 'COhere 2026');
+    if (!await purpose.getAttribute('open').then((v) => v !== null).catch(() => false)) await purpose.locator('summary').click();
     await expect(purpose).toContainText(`Body for account ${owner}`);
   }
   expect((await calls(page, 'vault_note')).filter((c: any) => c.args.noteRef === 'p-cohere')).toHaveLength(3);

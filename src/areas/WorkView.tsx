@@ -2,7 +2,7 @@
 // to the chat, and three sections built from the companion's own rows: Needs you (the one feed, with the one count), In motion (what is
 // running, what is being drafted, what others hold), and Later (Someday, folded). No census, no counters per state, no priority pickers:
 // priority is set in the task sheet. Styling is in tree.css.
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { cleanText } from "../interface/contract";
 import { NeedRow, PrivateRow } from "./Companion";
 import { isActiveRun, type Draft, type Run } from "./steerCore";
@@ -22,6 +22,8 @@ export type WorkViewProps = {
   privateOther: number;
   ready: boolean; error: string | null; onRetry: () => void;
   onTask: (t: Task) => void; onDecide: (t: Task, option: string) => void; onNote: (ref: string) => void; onPrivate: (open: PrivateNeed["open"]) => void;
+  /** Above the sections: the brief's lede and its Refresh. Below them: a project's own note, folded. */
+  top?: ReactNode; foot?: ReactNode;
 };
 
 export function WorkView(p: WorkViewProps) {
@@ -30,6 +32,7 @@ export function WorkView(p: WorkViewProps) {
   const motion = running.length + p.drafts.length + p.others.length;
   if (!p.ready) return <div className="wv"><p className={p.error ? "cp-lede cp-failed" : "th-quiet"} role={p.error ? "alert" : "status"}>{p.error ? <>Couldn't load. <button type="button" className="cp-retry" onClick={p.onRetry}>Retry</button></> : "Loading…"}</p></div>;
   return <div className="wv" aria-label={`All of ${p.nodeName}'s work`}>
+    {p.top}
     <section className="wv-sec" aria-label="Needs you">
       <h2 className="wv-h">Needs you <span className="wv-n">{p.feed.total}</span></h2>
       {p.feed.total === 0 ? <p className="cp-none">Nothing needs you here.</p> : <ul className="cp-list">
@@ -50,5 +53,6 @@ export function WorkView(p: WorkViewProps) {
       <button type="button" className="wv-h wv-fold" aria-expanded={laterOpen} aria-controls="wv-later" onClick={() => setLaterOpen(!laterOpen)}>Later <span className="wv-n">{p.later.length}</span><i aria-hidden="true">{laterOpen ? "–" : "+"}</i></button>
       {laterOpen && <ul id="wv-later" className="cp-list">{p.later.map((t) => <NeedRow key={t.id} t={t} meta="Someday" onTask={p.onTask} onDecide={p.onDecide} onNote={p.onNote} />)}</ul>}
     </section>}
+    {p.foot}
   </div>;
 }

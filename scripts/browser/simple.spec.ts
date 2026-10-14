@@ -1561,6 +1561,14 @@ test.describe('simple', () => {
     await drawer.getByRole('button', { name: 'Journal', exact: true }).click();
     await expect(page.getByRole('textbox', { name: 'Journal entry', exact: true })).toBeVisible();
     expect(await fits(page)).toBe(true);
+    // and from the Journal (not a room) its own Back goes to Uni, where the places are again; also when the app reopens on the Journal
+    for (const reopen of [false, true]) {
+      if (reopen) { await page.reload(); await expect(page.getByRole('textbox', { name: 'Journal entry', exact: true })).toBeVisible(); await page.waitForTimeout(1500); }
+      await page.getByRole('button', { name: 'Back to Uni' }).click();
+      await expect(page.getByRole('textbox', { name: 'Journal entry', exact: true })).toBeHidden();
+      await expect(page.locator('.sr-drawer, .th-places-short .th-places').first()).toBeVisible();
+      if (!reopen) { await page.locator('.sr-drawer, .th-places-short .th-places').first().waitFor(); if (await page.locator('.sr-drawer').isVisible()) await page.locator('.sr-drawer').click(); await page.locator('.th-places:visible').getByRole('button', { name: 'Journal', exact: true }).click(); }
+    }
   });
 
   test('r13: a key that exists but could not be read says so with Retry, never the pairing screen', async ({ page }) => {

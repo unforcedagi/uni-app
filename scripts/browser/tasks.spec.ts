@@ -1,5 +1,5 @@
-// T-86, after r12: tasks are Parachute objects. The lists come from indexed vault queries, every check-off is a compare-and-set
-// `state_transition`, Undo is the reverse. These run on a node's work page ("All of X's work"), reached from its room in the tree.
+// T-86, after r13: tasks are Parachute objects. The lists come from indexed vault queries, every write is a compare-and-set
+// `state_transition`, Undo is the reverse. These run in a node's work view ("All of X's work", inside its room's shell) and its task sheet.
 // (The octopus node view, its task groups and its talk bar were deleted with the old layouts; roomsnav and simple cover the rest.)
 import { mkdir } from 'node:fs/promises';
 import { test, expect, type Page } from '@playwright/test';
@@ -9,7 +9,9 @@ const SHOTS = 'scripts/browser/__shots__/t86';
 const isDesktop = (page: Page) => (page.viewportSize()?.width ?? 0) >= 900;
 const fits = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth);
 const calls = (page: Page, cmd: string) => page.evaluate((c) => (window as any).__calls.filter((x: any) => x.cmd === c).map((x: any) => x.args), cmd);
-const row = (page: Page, id: string) => page.locator(`.wr-row[data-id="${id}"]`);
+const row = (page: Page, id: string) => page.locator('.sr-work .cp-item').filter({ has: page.locator(`.cp-need[data-id="${id}"]`) });
+/** Open a row's task sheet. */
+const openTask = (page: Page, id: string) => page.locator(`.sr-work .cp-need[data-id="${id}"]`).click();
 const infinite = (page: Page) => page.evaluate(() => document.getAnimations().filter((a) => { const t = a.effect?.getComputedTiming(); return !t || t.iterations === Infinity || !Number.isFinite(t.endTime as number); }).length);
 const tree = (page: Page) => page.locator(isDesktop(page) ? '.th-roomnav' : '.th-phone-tree');
 /** A node's work page, from its room in the tree. */
@@ -20,7 +22,8 @@ async function workPage(page: Page, name: string) {
   await areaCard(page, name).click();
   if (!isDesktop(page) && await page.locator('.cp-line[aria-expanded="false"]').count()) await page.locator('.cp-line').click();
   await page.getByRole('button', { name: /^All of .*'s work/ }).click();
-  await expect(page.locator('.th-head h1')).toHaveText(name);
+  await expect(page.locator('.sr-work')).toBeVisible();
+  await expect(page.locator('.sr-title')).toHaveText(name);
 }
 const shot = async (page: Page, name: string) => {
   await mkdir(SHOTS, { recursive: true });
@@ -28,23 +31,23 @@ const shot = async (page: Page, name: string) => {
   await page.screenshot({ path: `${SHOTS}/${name}-${size.width}x${size.height}.png` });
 };
 
-test.describe('tasks on the work page', () => {
+test.describe('tasks in the work view', () => {
   test.beforeEach(async ({ page }) => { await bootAreas(page, 'seed', { briefs: true, tree: true, tasks: true }); });
 
   test('the task sheet: the action and its next step, Archive, Snooze until tomorrow (guarded merge) and their undo', async ({ page }) => {
     await workPage(page, 'COhere 2026');
-    await row(page, 'T-03').locator('.wr-main').click();
+    await openTask(page, 'T-03');
     const sheet = page.getByRole('dialog');
     await expect(sheet.locator('h2')).toHaveText('COhere festival readiness');
     await expect(sheet).toContainText('Check-in PR by Oct 12');
     await expect(sheet).not.toContainText(/cdf67944|via api/, { useInnerText: true });
-    for (const name of ['Mark done', 'Archive', 'Snooze until tomorrow']) await expect(sheet.getByRole('button', { name })).toBeVisible();
+    for (const name of ['I did this', 'Archive', 'Snooze until tomorrow']) await expect(sheet.getByRole('button', { name })).toBeVisible();
     for (const b of await sheet.locator('.task-actions button').all()) expect((await b.boundingBox())!.height).toBeGreaterThanOrEqual(44);
     await shot(page, 'task-sheet');
     await page.keyboard.press('Escape');
     await expect(sheet).toHaveCount(0);
 
-    await row(page, 'T-65').locator('.wr-main').click();
+    await openTask(page, 'T-65');
     await page.getByRole('button', { name: 'Archive' }).click();
     expect((await calls(page, 'vault_transition')).at(-1)).toEqual({ vault: 'uni', id: 'k3', from: 'open', to: 'archived' });
     await expect(row(page, 'T-65')).toHaveCount(0);
@@ -52,7 +55,7 @@ test.describe('tasks on the work page', () => {
     await expect(row(page, 'T-65')).toHaveCount(1);
     expect((await calls(page, 'vault_transition')).at(-1)).toEqual({ vault: 'uni', id: 'k3', from: 'archived', to: 'open' });
 
-    await row(page, 'T-65').locator('.wr-main').click();
+    await openTask(page, 'T-65');
     await page.getByRole('button', { name: 'Snooze until tomorrow' }).click();
     const [patch] = await calls(page, 'vault_patch_meta');
     const t = new Date(); t.setDate(t.getDate() + 1);
@@ -67,7 +70,7 @@ test.describe('tasks on the work page', () => {
 
   test('Open in #room (from another room) opens that room in its shell', async ({ page }) => {
     await workPage(page, 'Uni');
-    await row(page, 'T-65').locator('.wr-main').click();
+    await openTask(page, 'T-65');
     await page.getByRole('button', { name: 'Open in #Cohere' }).click();
     await expect(page.locator('.sr-title')).toHaveText('COhere 2026');
     await expect(page.getByRole('textbox', { name: 'Message Cohere' })).toBeVisible();
@@ -77,40 +80,45 @@ test.describe('tasks on the work page', () => {
     await workPage(page, 'COhere 2026');
     await page.evaluate(() => (window as any).__elsewhere('k3', 'done'));
     const before = (await calls(page, 'vault_query_meta')).length;
-    await row(page, 'T-65').getByRole('button', { name: /^Mark done:/ }).click();
+    await openTask(page, 'T-65');
+    await page.getByRole('dialog').getByRole('button', { name: 'I did this' }).click();
     await expect(page.getByRole('status').filter({ hasText: 'changed elsewhere' })).toBeVisible();
     await expect.poll(async () => (await calls(page, 'vault_query_meta')).length).toBeGreaterThan(before);
     expect(await calls(page, 'vault_transition')).toHaveLength(1);
     await expect(row(page, 'T-65')).toHaveCount(0);
 
     await page.evaluate(() => { (window as any).__failNext = '[schema_validation] state is not one of open,doing'; });
-    await row(page, 'T-03').getByRole('button', { name: /^Mark done:/ }).click();
+    await openTask(page, 'T-03');
+    await page.getByRole('dialog').getByRole('button', { name: 'I did this' }).click();
     await expect(page.getByText(/the vault refused that value/)).toBeVisible();
     await expect(row(page, 'T-03')).toHaveCount(1);
 
     await page.evaluate(() => { (window as any).__failNext = 'hub unreachable: connect'; });
-    await row(page, 'T-03').getByRole('button', { name: /^Mark done:/ }).click();
+    await openTask(page, 'T-03');
+    await page.getByRole('dialog').getByRole('button', { name: 'I did this' }).click();
     await expect(page.getByText(/Couldn't mark it done: hub unreachable/)).toBeVisible();
     await expect(row(page, 'T-03')).toHaveCount(1);
     expect(await calls(page, 'vault_transition')).toHaveLength(3);
   });
 
-  test('Android Back closes the task sheet first, then the work page, back to the room', async ({ page }) => {
+  test('Android Back closes the task sheet first, then the work view, back to the room', async ({ page }) => {
     await workPage(page, 'COhere 2026');
-    await row(page, 'T-65').locator('.wr-main').click();
+    await openTask(page, 'T-65');
     await expect(page.getByRole('dialog')).toBeVisible();
     const back = () => page.evaluate(() => { const w = window as any; w.__cbs[w.__backHandler.id]({ message: {}, index: w.__backIndex ?? 0 }); w.__backIndex = (w.__backIndex ?? 0) + 1; });
     await back();
     await expect(page.getByRole('dialog')).toHaveCount(0);
-    await expect(page.locator('.th-head h1')).toHaveText('COhere 2026');
+    await expect(page.locator('.sr-work')).toBeVisible();
     await back();
+    await expect(page.locator('.sr-work')).toHaveCount(0);
+    await expect(page.locator('.sr-chat')).toBeVisible();
     await expect(page.locator('.sr-title')).toHaveText('COhere 2026');
   });
 
   test('calm: nothing loops, no overflow at three sizes', async ({ page }, info) => {
     await workPage(page, 'COhere 2026');
     expect(await infinite(page)).toBe(0);
-    await row(page, 'T-65').locator('.wr-main').click();
+    await openTask(page, 'T-65');
     await page.waitForTimeout(400);
     expect(await infinite(page)).toBe(0);
     await page.keyboard.press('Escape');
@@ -129,7 +137,7 @@ test('a task title is text, never markup', async ({ page }) => {
   await bootAreas(page, 'seed', { briefs: true, tree: true, tasks: true });
   await page.evaluate(() => { (window as any).__tasks.push({ id: 'x1', path: 'Tasks/<img src=x onerror=window.__pwn=1> bold', extension: 'md', tags: ['task'], updatedAt: 'T', metadata: { node: 'Uni', state: 'open', owner: 'aaron', next: '<b>hi</b>' } }); });
   await workPage(page, 'Uni');
-  await expect(page.locator('.wr-title', { hasText: '<img src=x' })).toBeVisible();
+  await expect(page.locator('.sr-work .cp-title', { hasText: '<img src=x' })).toBeVisible();
   expect(await page.evaluate(() => (window as any).__pwn)).toBeUndefined();
-  expect(await page.locator('.wr-row img, .cp-item img').count()).toBe(0);
+  expect(await page.locator('.sr-work img, .cp-item img').count()).toBe(0);
 });
