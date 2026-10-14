@@ -206,7 +206,7 @@ export function TaskSheet({ task, gone = false, here, nodeName, room, inRoom, ch
       {act?.rest && <p className="task-next task-steps-rest"><RefText text={withHosts(capFirst(act.rest))} vault={vault} onNote={(r) => { onClose(); onNote(r); }} />{stepLinks(act.rest, false)}</p>}
       {asked && <p className="task-asked" data-asked={reqAt?.at ?? undefined} data-kind={reqAt?.kind}>{capFirst(asked)}{movedOn && <> · <span className="task-movedon">{movedOnText(reqAt!)}</span></>}</p>}
       {/* r23: the content the ask carries (`detail`: the message, the questions, the draft), as stored */}
-      {!unsure && task.detail && <div className="task-detail">{task.detail.split(/\n\s*\n/).map((para, i) => <p key={i}><RefText text={para.trim()} vault={vault} onNote={(r) => { onClose(); onNote(r); }} /></p>)}</div>}
+      {!unsure && task.detail && <div className="task-detail">{task.detail.split(/\n\s*\n/).map((para, i) => <p key={i}><DetailText text={para.trim()} vault={vault} onNote={(r) => { onClose(); onNote(r); }} /></p>)}</div>}
       {/* r22 (Codex 7): the record's title is in Details; here only where it is the subject (a check, a wait, a missing note) */}
       {(check || checking || waits || missing || (unavailable && decision)) && <p className="task-sub" title={sub !== rest ? rest : undefined}>{sub}</p>}
       {/* r19: why nothing is asserted yet */}
@@ -283,6 +283,21 @@ export function TaskSheet({ task, gone = false, here, nodeName, room, inRoom, ch
       </div>
     </div>
   </div>;
+}
+
+/** r23: a task's `detail` as written: a `[[Path|Name]]` link is a link to that note ("Name", or the path's last part), an id is its note. */
+function DetailText({ text, vault, onNote }: { text: string; vault: string; onNote: (r: NoteRef) => void }) {
+  const parts: React.ReactNode[] = [];
+  let at = 0;
+  for (const m of text.matchAll(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g)) {
+    const i = m.index ?? 0;
+    if (i > at) parts.push(<RefText key={`t${i}`} text={text.slice(at, i)} vault={vault} onNote={onNote} />);
+    const path = m[1].trim();
+    parts.push(<button key={`l${i}`} type="button" className="task-link" onClick={() => onNote({ vault, id: path })}>{(m[2] ?? path.split("/").pop() ?? path).trim()}</button>);
+    at = i + m[0].length;
+  }
+  if (at < text.length) parts.push(<RefText key="end" text={text.slice(at)} vault={vault} onNote={onNote} />);
+  return <>{parts}</>;
 }
 
 /** The last action, with five seconds to take it back. */

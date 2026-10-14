@@ -6,7 +6,7 @@ import { ROOT } from "./treeCore.ts";
 
 /** The first sentence of the level's lede, as plain text and whole (a long one is clamped on screen, never cut here: it opens in full). */
 export function firstSentence(text: string | null | undefined): string {
-  const plain = (text ?? "").replace(/\[\[([^\]|]*\|)?([^\]]*)\]\]/g, "$2").replace(/[*_`#>]/g, "").replace(/\s+/g, " ").trim();
+  const plain = (text ?? "").replace(/\[\[([^\]|]*\|)?([^\]]*)\]\]/g, "$2").replace(/[*_`>]/g, "").replace(/(^|\s)#+(?=\s)/g, "$1").replace(/\s+/g, " ").trim(); // r23: a heading's "#" goes, "#38" stays
   if (!plain) return "";
   const m = /^.*?[.!?](?=\s|$)/.exec(plain);
   return m ? m[0] : plain;
