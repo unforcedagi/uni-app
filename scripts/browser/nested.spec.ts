@@ -29,7 +29,7 @@ test.describe('nested rooms', () => {
     await shot(page, 'tree');
     // T-124: a node held by an ancestor's room opens that room's conversation, and says whose it is
     await scope.locator('.th-go[aria-label^="Atlas Institute,"]').click();
-    await expect(page.locator('.sr-door')).toHaveCount(0);
+    await expect(page.locator('.sr-door')).toHaveText('Conversation in #atlas');
     await expect(page.locator('.sr-chat').getByRole('textbox', { name: /^Message / })).toHaveAttribute('placeholder', 'Message #atlas');
     if (!wide(page)) await page.locator('.sr-drawer').click();
     await scope.locator('.th-go[aria-label^="ATLAS,"]').click();

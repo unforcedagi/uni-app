@@ -49,7 +49,8 @@ async function go(page: Page, name: string) {
 const title = async (page: Page, name: string) => { await full(page); await expect(page.locator('.sr-title')).toHaveText(name); };
 const row = (page: Page, id: string) => work(page).locator('.cp-item').filter({ has: page.locator(`.cp-need[data-id="${id}"]`) });
 const needs = (page: Page) => work(page).getByRole('region', { name: 'Needs you' });
-const priority = (page: Page) => page.getByRole('dialog').getByRole('group', { name: 'Priority' });
+/** r14: priority is under the sheet's Details. */
+const priority = async (page: Page) => { const d = page.getByRole('dialog'); if (await d.locator('.task-details:not([open]) > summary').count()) await d.locator('.task-details > summary').click(); return d.getByRole('group', { name: 'Priority' }); };
 
 test.describe('rooms nav', () => {
   test('the room tree is the home on both screens: a column beside the panel on Daylight, the home on the phone', async ({ page }) => {
@@ -120,14 +121,14 @@ test.describe('rooms nav', () => {
     await go(page, 'COhere 2026');
     await title(page, 'COhere 2026');
     await row(page, 'T-65').locator('.cp-need').click();
-    await expect(priority(page).getByRole('button', { name: 'Soon' })).toHaveAttribute('aria-pressed', 'true');
-    await priority(page).getByRole('button', { name: 'Now' }).click();
+    await expect((await priority(page)).getByRole('button', { name: 'Soon' })).toHaveAttribute('aria-pressed', 'true');
+    await (await priority(page)).getByRole('button', { name: 'Now' }).click();
     await expect.poll(async () => (await calls(page, 'vault_patch_meta')).length).toBe(1);
     const [w] = await calls(page, 'vault_patch_meta');
     expect(w).toMatchObject({ vault: 'uni', id: 'k3', metadata: { priority: 'now', priority_by: 'hand' } });
     expect(typeof w.ifUpdatedAt).toBe('string');
     // the sheet is live: it shows the new priority at once
-    await expect(priority(page).getByRole('button', { name: 'Now' })).toHaveAttribute('aria-pressed', 'true');
+    await expect((await priority(page)).getByRole('button', { name: 'Now' })).toHaveAttribute('aria-pressed', 'true');
     await expect(page.getByText('Priority: now')).toBeVisible();
     await page.keyboard.press('Escape');
     await shot(page, 'priority-undo');
@@ -138,7 +139,7 @@ test.describe('rooms nav', () => {
     // an unsorted task: undo clears the key again rather than inventing a value
     await go(page, 'Boulder');
     await row(page, 'T-90').locator('.cp-need').click();
-    await priority(page).getByRole('button', { name: 'Someday' }).click();
+    await (await priority(page)).getByRole('button', { name: 'Someday' }).click();
     await expect.poll(async () => (await calls(page, 'vault_patch_meta')).length).toBe(3);
     await page.keyboard.press('Escape');
     await page.getByRole('button', { name: 'Undo' }).click();
@@ -152,7 +153,7 @@ test.describe('rooms nav', () => {
     await go(page, 'COhere 2026');
     await row(page, 'T-65').locator('.cp-need').click();
     await page.evaluate(() => { const t = (window as any).__tasks.find((x: any) => x.id === 'k3'); t.metadata.priority = 'someday'; t.updatedAt = '2026-10-11T09:00:00.000Z'; });
-    await priority(page).getByRole('button', { name: 'Now' }).click();
+    await (await priority(page)).getByRole('button', { name: 'Now' }).click();
     await expect(page.getByText(/changed elsewhere, so its priority wasn't changed/)).toBeVisible();
     expect(await page.evaluate(() => (window as any).__tasks.find((t: any) => t.id === 'k3').metadata.priority)).toBe('someday');
   });
@@ -167,21 +168,21 @@ test.describe('rooms nav', () => {
     await shot(page, 'root');
   });
 
-  test('private areas are named by place only, from above and at their own level, and they are counted', async ({ page }) => {
+  test('private areas are one line by place from above; inside the area they are its rows; they are counted', async ({ page }) => {
     await boot(page);
     if (!wide(page)) await expect(page.locator('.th-phone-tree')).not.toContainText(/T-3[12]/);
     await go(page, 'Uni');
     await title(page, 'Uni');
     await expect(work(page)).not.toContainText(/Sit twenty|Find a teacher|T-31|T-32/);
-    await expect(needs(page).locator('.cp-private')).toHaveText('A private item in Sadhana · open ›');
+    await expect(needs(page).locator('.cp-private')).toHaveText('Sadhana: 1 for you ›');
     await expect(work(page)).toContainText(/One item in a private area is not listed here/);
     if (wide(page)) await expect(page.locator('.th-roomnav')).not.toContainText(/T-3[12]/);
-    // the level itself: each item its own row, opening its note; never a title
+    // r14: the area itself, opened by Aaron: its items are ordinary rows, with their titles
     await go(page, 'Sadhana');
     await title(page, 'Sadhana');
     await expect(needs(page).locator('.wv-n')).toHaveText('1');
-    await expect(needs(page).locator('.cp-private')).toHaveText(['A private item here · open ›']);
-    await expect(work(page)).not.toContainText(/Sit twenty|Find a teacher/);
+    await expect(needs(page).locator('.cp-private')).toHaveCount(0);
+    await expect(needs(page)).toContainText('Sit twenty');
     await shot(page, 'private');
   });
 
@@ -194,7 +195,7 @@ test.describe('rooms nav', () => {
     await expect(page.locator('.talk, .th-door, .th-roomline, .th-ledger, .sr-chat, .composer')).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Back to chat' })).toHaveCount(0);
     await row(page, 'T-65').locator('.cp-need').click();
-    await priority(page).getByRole('button', { name: 'Now' }).click();
+    await (await priority(page)).getByRole('button', { name: 'Now' }).click();
     await expect.poll(async () => (await calls(page, 'vault_patch_meta')).length).toBe(1);
     expect(await calls(page, 'post_message')).toEqual([]);
     await shot(page, 'no-chat');
