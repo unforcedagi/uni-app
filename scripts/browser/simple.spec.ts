@@ -56,6 +56,13 @@ async function openWorkView(page: Page) {
   await expect(page.locator('.sr-work')).toBeVisible();
 }
 const companion = (page: Page) => page.getByRole('region', { name: 'Where this stands' }).or(page.getByRole('complementary', { name: 'Where this stands' }));
+/** r20 (Codex 7): a decision's answers are in its sheet only: open the row, and its answers are the sheet's. */
+async function sheetAnswers(page: Page, row: ReturnType<Page['locator']>) {
+  await row.locator('.cp-need').first().click();
+  const answers = page.getByRole('dialog').filter({ has: page.locator('.task-kind') }).getByRole('group', { name: /^Decide:/ });
+  await expect(answers).toBeVisible();
+  return answers;
+}
 /** The phone's strip opens on a tap; the side panel is open already. */
 async function openCompanion(page: Page) {
   // (r19: a wide window under 400px tall has the strip too)
@@ -97,7 +104,7 @@ test.describe('simple', () => {
     // Now before Soon: the dated Now task first, then the decision (Soon), which carries its options as buttons
     await expect(needs.locator('.cp-need').first()).toContainText('SOW for the commons grant');
     await expect(needs.locator('.cp-need').nth(1)).toContainText('Decide the ATLAS hosting');
-    await expect(needs.locator('.cp-opt')).toHaveText(['Self-host', 'Managed']);
+    await expect(needs.locator('.cp-opt')).toHaveCount(0); // r20 (Codex 7): its answers are in its sheet
     await expect(needs).toContainText('SOW for the commons grant');
     await expect(needs).toContainText('Confirm scope with Kevin');
     await expect(needs).toContainText('due Oct 13');
@@ -155,11 +162,13 @@ test.describe('simple', () => {
     await openRoom(page, 'ATLAS');
     await openCompanion(page);
     const needs = page.locator('.cp-body').getByRole('region', { name: 'Needs you' });
-    await needs.getByRole('button', { name: 'Self-host' }).click();
+    // r20 (Codex 7): one tap on an option in the decision's sheet
+    await (await sheetAnswers(page, needs.locator('.cp-item').filter({ hasText: 'Decide the ATLAS hosting' }))).getByRole('button', { name: 'Self-host' }).click();
     await expect.poll(async () => (await calls(page, 'vault_decide')).length).toBe(1);
     const a = (await calls(page, 'vault_decide'))[0];
     expect(a).toMatchObject({ id: 'dq2', from: 'open', to: 'decided', metadata: { decided: 'Self-host', decided_by: expect.any(String) } });
     expect(Date.parse(a.metadata.decided_at)).not.toBeNaN();
+    await openCompanion(page); // a phone's strip closed when the row opened
     await expect(needs).not.toContainText('Decide the ATLAS hosting');
     await expect(needs).toContainText('SOW for the commons grant');
   });
@@ -169,10 +178,13 @@ test.describe('simple', () => {
     await openRoom(page, 'ATLAS');
     await openCompanion(page);
     const needs = page.locator('.cp-body').getByRole('region', { name: 'Needs you' });
-    await expect(needs.getByRole('button', { name: 'Managed' })).toBeVisible();
+    const answers = await sheetAnswers(page, needs.locator('.cp-item').filter({ hasText: 'Decide the ATLAS hosting' }));
+    await expect(answers.getByRole('button', { name: 'Managed' })).toBeVisible();
     await page.evaluate(() => (window as any).__decideElsewhere('dq2'));
-    await needs.getByRole('button', { name: 'Managed' }).click();
-    await expect(page.getByRole('status').filter({ hasText: /decided elsewhere/i })).toBeVisible();
+    await answers.getByRole('button', { name: 'Managed' }).click();
+    await expect(page.getByRole('alert').or(page.getByRole('status')).filter({ hasText: /decided elsewhere/i }).first()).toBeVisible();
+    await page.keyboard.press('Escape');
+    await openCompanion(page);
     await expect(needs).not.toContainText('Decide the ATLAS hosting');
     await expect.poll(async () => (await calls(page, 'vault_decide')).length).toBe(1);
   });
@@ -198,15 +210,17 @@ test.describe('simple', () => {
     await page.screenshot({ path: `${SHOTS}/fold-1280x720.png` }).catch(() => {});
   });
 
-  test('a decision is a button row: its title on one line, its options as buttons', async ({ page }) => {
+  test('a decision row is its question (r20, Codex 7: its options are buttons in its sheet, never in the row)', async ({ page }) => {
     await boot(page);
     await openRoom(page, 'ATLAS');
     await openCompanion(page);
     const item = page.locator('.cp-item').filter({ hasText: 'Decide the ATLAS hosting' });
     await expect(item.locator('.cp-title')).toHaveText('Decide the ATLAS hosting');
     expect(await item.locator('.cp-title').evaluate((e) => e.scrollHeight <= e.clientHeight + 1), 'a decision is never clipped').toBe(true);
-    await expect(item.locator('.cp-opt')).toHaveText(['Self-host', 'Managed']);
-    for (const b of await item.locator('.cp-opt').all()) expect(await b.evaluate((e) => getComputedStyle(e).backgroundColor)).not.toBe('rgba(0, 0, 0, 0)');
+    await expect(item.locator('.cp-opt')).toHaveCount(0);
+    const answers = await sheetAnswers(page, item);
+    await expect(answers.locator('.cp-opt')).toHaveText(['Self-host', 'Managed']);
+    for (const b of await answers.locator('.cp-opt').all()) expect(await b.evaluate((e) => getComputedStyle(e).backgroundColor)).not.toBe('rgba(0, 0, 0, 0)');
   });
 
   test('a decision without options has no Decide button; the row itself opens it. Running fits above the footer', async ({ page }) => {
@@ -487,8 +501,8 @@ test.describe('simple', () => {
     await boot(page);
     await openRoom(page, 'Atlas Institute');
     // r15: the real room is the heading; the node is a quiet line under it, and the companion's state is labelled as the node's
-    await expect(page.locator('.sr-title')).toHaveText('#atlas');
-    await expect(page.locator('.sr-context')).toHaveText('Atlas Institute · no room of its own yet, talking in #atlas');
+    await expect(page.locator('.sr-title')).toHaveText('Atlas Institute'); // r20 (Codex 6)
+    await expect(page.locator('.sr-context')).toHaveText('Chat in #atlas · no room of its own yet');
     await expect(page.locator('.sr-door')).toHaveCount(0);
     await expect(page.locator('.sr-chat').getByRole('textbox', { name: /^Message / })).toHaveAttribute('placeholder', 'Message #atlas');
   });
@@ -1240,7 +1254,7 @@ test.describe('simple', () => {
     await openRoom(page, 'ATLAS');
     await openCompanion(page);
     const row = page.locator('.cp-item').filter({ hasText: 'Decide the ATLAS hosting' });
-    await expect(row.getByRole('group', { name: /^Decide:/ }).getByRole('button')).toHaveText(['Self-host', 'Managed']);
+    await expect(row.getByRole('group', { name: /^Decide:/ })).toHaveCount(0); // r20 (Codex 7): only the sheet answers
     await row.locator('.cp-need').click();
     const sheet = page.getByRole('dialog');
     await expect(sheet.locator('h2')).toHaveText('Decide the ATLAS hosting');
@@ -1256,14 +1270,16 @@ test.describe('simple', () => {
     await expect(page.locator('.cp-item').filter({ hasText: 'Decide the ATLAS hosting' })).toHaveCount(0);
   });
 
-  test('r12: on the work page a decision row carries the same answers, never a check-off', async ({ page }) => {
+  test('r12: on the work page a decision row is the same row (r20: its answers in its sheet), never a check-off', async ({ page }) => {
     await boot(page);
     await openRoom(page, 'ATLAS');
     await openCompanion(page);
     await page.getByRole('button', { name: /^All of .*'s work/ }).click();
     const wrow = page.locator('.sr-work .cp-item').filter({ hasText: 'Decide the ATLAS hosting' });
-    await expect(wrow.getByRole('group', { name: /^Decide:/ }).getByRole('button')).toHaveText(['Self-host', 'Managed']);
+    await expect(wrow.getByRole('group', { name: /^Decide:/ })).toHaveCount(0);
     await expect(wrow.locator('.task-check')).toHaveCount(0);
+    await expect((await sheetAnswers(page, wrow)).getByRole('button')).toHaveText(['Self-host', 'Managed']);
+    await page.keyboard.press('Escape');
     await expect(page.getByRole('button', { name: /^Mark decided/ })).toHaveCount(0);
   });
 
@@ -1509,8 +1525,9 @@ test.describe('simple', () => {
     await expect(page.getByRole('button', { name: 'Back to chat' })).toBeVisible();
     expect(await page.locator('.sr-work section').evaluateAll((els) => els.map((e) => e.getAttribute('aria-label')))).toEqual(expect.arrayContaining(['Needs you', 'In motion']));
     await expect(page.locator('.wr-counts, .wr-prio, select, .task-check, .th-sec, .th-panel')).toHaveCount(0);
-    // the same row as the companion: a decision is its whole question with its answers
-    await expect(page.locator('.sr-work .cp-item').filter({ hasText: 'Decide the ATLAS hosting' }).getByRole('group', { name: /^Decide:/ }).getByRole('button')).toHaveText(['Self-host', 'Managed']);
+    // the same row as the companion: a decision is its whole question (r20: its answers in its sheet)
+    await expect(page.locator('.sr-work .cp-item').filter({ hasText: 'Decide the ATLAS hosting' }).locator('.cp-title')).toHaveText('Decide the ATLAS hosting');
+    await expect(page.locator('.sr-work .cp-item').filter({ hasText: 'Decide the ATLAS hosting' }).getByRole('group', { name: /^Decide:/ })).toHaveCount(0);
     await expect(page.locator('.sr-chat')).toHaveCount(0);
     await page.getByRole('button', { name: 'Back to chat' }).click();
     await expect(page.locator('.sr-chat .message')).toHaveCount(3);
@@ -1872,11 +1889,11 @@ test.describe('r15', () => {
   const openWork = async (page: Page) => { await openCompanion(page); await page.getByRole('button', { name: /^All of .*'s work/ }).click(); await expect(page.locator('.sr-work')).toBeVisible(); };
   const refresh = async (page: Page, at: string) => { await page.clock.setFixedTime(Date.parse(at)); await page.evaluate(() => window.dispatchEvent(new Event('focus'))); };
 
-  test('a node with no room of its own: the real room is the heading, the node a line under it, the companion labelled as the node\'s', async ({ page }) => {
+  test('a node with no room of its own (r20, Codex 6): the node is the heading everywhere, the room it talks in a line under it, the composer the real channel\'s', async ({ page }) => {
     await boot(page);
     await openRoom(page, 'Relationships');
-    await expect(page.locator('.sr-title')).toHaveText('#Uni');
-    await expect(page.locator('.sr-context')).toHaveText('Relationships · no room of its own yet, talking in #Uni');
+    await expect(page.locator('.sr-title')).toHaveText('Relationships');
+    await expect(page.locator('.sr-context')).toHaveText('Chat in #Uni · no room of its own yet');
     await expect(page.locator('.sr-door')).toHaveCount(0);
     await expect(page.locator('.sr-chat').getByRole('textbox', { name: /^Message / })).toHaveAttribute('placeholder', 'Message #Uni');
     // the state beside the conversation is the node's, not the room's
@@ -1896,7 +1913,7 @@ test.describe('r15', () => {
     await boot(page);
     await openRoom(page, 'Techne');
     await openRoom(page, 'Relationships');
-    await expect(page.locator('.sr-title')).toHaveText('#Uni');
+    await expect(page.locator('.sr-title')).toHaveText('Relationships');
     await expect.poll(() => page.evaluate(() => localStorage.getItem('uni.tabs.v2') ?? '')).toContain('"borrowed":true');
     await page.reload();
     await expect(page.locator('.sr')).toHaveAttribute('data-node', 'Techne');
@@ -2230,7 +2247,6 @@ test.describe('r16', () => {
     await expect(row.getByRole('button', { name: 'The rest is in its note' })).toBeVisible();
     const dq = page.locator('.cp-body .cp-item').filter({ hasText: 'Ship the ATLAS hosting?' });
     await expect(dq.locator('.cp-title')).toHaveText('Ship the ATLAS hosting?');
-    await expect(dq.getByRole('group', { name: /^Decide:/ }).getByRole('button')).toHaveText(['Self-host', 'Managed']);
     await row.getByRole('button', { name: 'The rest is in its note' }).click();
     const sheet = page.getByRole('dialog');
     await expect(sheet.locator('.task-cut')).toContainText('This step was cut short when it was written.');
@@ -2531,14 +2547,15 @@ test.describe('r18', () => {
     await expect(texting).toHaveCount(1);
     await expect(texting.locator('.cp-opt, .cp-call-lead, button')).toHaveCount(0);
     // Yes/No only where they are the stored options, written back as stored
-    await expect(wv.locator('.cp-item').filter({ hasText: 'Ship the ATLAS map' }).getByRole('group', { name: /^Decide:/ }).getByRole('button')).toHaveText(['Yes', 'No']);
-    for (const item of await wv.locator('.cp-item').filter({ has: page.locator('.cp-opt') }).all()) expect(await item.locator('.cp-opt').count()).toBeGreaterThan(0);
+    await expect(wv.locator('.cp-opt')).toHaveCount(0); // r20 (Codex 7): answers are in the sheet only
+    await expect((await sheetAnswers(page, wv.locator('.cp-item').filter({ hasText: 'Ship the ATLAS map' }))).getByRole('button')).toHaveText(['Yes', 'No']);
+    await page.keyboard.press('Escape');
     await hours.locator('.cp-need').click();
     const sheet = sheetOf(page);
     await expect(sheet.locator('.cp-opt')).toHaveCount(0);
     await expect(sheet.getByLabel('Answer in your words')).toBeVisible();
     await sheet.getByRole('button', { name: 'Close' }).click();
-    await wv.locator('.cp-item').filter({ hasText: 'Ship the ATLAS map' }).getByRole('button', { name: 'Yes' }).click();
+    await (await sheetAnswers(page, wv.locator('.cp-item').filter({ hasText: 'Ship the ATLAS map' }))).getByRole('button', { name: 'Yes' }).click();
     await expect.poll(async () => (await calls(page, 'vault_decide')).length).toBe(1);
     expect((await calls(page, 'vault_decide'))[0].metadata.decided).toBe('yes');
     expect((await calls(page, 'vault_decide')).some((c: any) => /^(agree|disagree)/.test(c.metadata.decided))).toBe(false);
@@ -2777,16 +2794,17 @@ test.describe('r19', () => {
     await expect(page.locator('.sr-work section[aria-label="Uni is tidying"] .wv-tidy-line')).toHaveText('Uni is tidying 3 records');
   });
 
-  test('a decision\'s stored options wrap inside the companion and never run past its edge', async ({ page }) => {
+  test('a decision\'s stored options wrap inside its sheet and never run past its edge (r20, Codex 7: the companion\'s row has none)', async ({ page }) => {
     await boot(page);
     await add(page, { id: 'bvc', title: 'Ship the Boulder Votes AI chat?', node: 'Projects/ATLAS', tag: 'decision', meta: { priority: 'now', options: ['Add key and test live on preview first', 'Ship to production after live test', 'Change it first'] } });
     await refresh(page, '2026-10-09T10:01:00.000Z');
     await openRoom(page, 'ATLAS');
     await openCompanion(page);
-    const body = page.locator('.cp-body').last();
+    await expect(page.locator('.cp-body').last().locator('.cp-opt')).toHaveCount(0);
+    const body = await sheetAnswers(page, page.locator('.cp-body').last().locator('.cp-item').filter({ hasText: 'Boulder Votes AI chat' }));
     const opts = body.locator('.cp-opt');
     await expect(opts.first()).toBeVisible();
-    const edge = await body.evaluate((b) => b.getBoundingClientRect().right);
+    const edge = await body.evaluate((b) => b.closest('.task-sheet')!.getBoundingClientRect().right);
     for (const o of await opts.all()) {
       const r = await o.evaluate((e) => ({ right: e.getBoundingClientRect().right, clipped: e.scrollWidth > e.clientWidth + 1 }));
       expect(r.right).toBeLessThanOrEqual(edge + 0.5);

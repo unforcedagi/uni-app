@@ -239,7 +239,7 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
    * strip above it (phone). A thread or the work view shows inside it, with a way back to the room.
    */
   const shell = (o: { title: string; door: string;
-    /** A node in a borrowed room (r15): the room is the heading, and this line says whose place it is ("Expression · no room of its own yet, talking in #Uni"). */
+    /** A node in a borrowed room (r20): the node stays the heading, and this line says where it talks ("Chat in #Uni · no room of its own yet"). */
     context?: string; node?: string; crumbs: ReactNode; companion: CompanionProps | null; chatRoom: AreaRoom | null; placeholder: string; selected?: string; selectedRoom?: string; sheet: ReactNode; main?: ReactNode; workBar?: ReactNode;
     /** The area's app, opened from the header (r14): it shows as a view in this shell. */
     openApp?: ((e: React.MouseEvent) => void) | null; appOpen?: boolean }) => {
@@ -323,7 +323,9 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   /** A node with no room of its own talks in an ancestor's (or Uni's): that real room is the heading over its conversation, and the node is a
    *  line under it (r15). Its work view and app are still the node's own, so they keep its name. */
   const borrowed = chat && !isRoot && !nodeView.own && nodeView.heldBy ? `#${roomSlug(nodeView.heldBy.name)}` : null;
-  const context = borrowed ? `${node.name} · no room of its own yet, talking in ${borrowed}` : undefined;
+  // r20 (Codex 6): one identity across the header, the breadcrumb and the work view: the heading is the node's name everywhere, and the room it
+  // talks in is a secondary line ("Chat in #Uni"); the composer keeps the real channel's name
+  const context = borrowed ? `Chat in ${borrowed} · no room of its own yet` : undefined;
   const askRoom = target?.id ?? null;
   const trailItems = [{ path: ROOT, name: "Uni" }, ...(tree && !isRoot ? trail(tree, node.path) : isRoot ? [] : [node]).map((n) => ({ path: n.path, name: n.name }))];
   const privateOf = (p: string) => (tree ? privateRoot(tree, p) : null);
@@ -387,7 +389,7 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   /** The room's channel, once (r14): its own (`#cohere`). */
   const door = !chat ? "" : nodeView.own && nodeView.slash ? `#${nodeView.slash.replace(/^#/, "")}` : "";
   // the area's app, when open, is the view in the chat's place (r14); otherwise the work view when it is open, else the conversation
-  const roomLevel = (app: AppView | null, openApp: ((e: React.MouseEvent) => void) | null) => shell({ title: borrowed && !app && !workOpen ? borrowed : node.name, door, context, node: node.name, crumbs,
+  const roomLevel = (app: AppView | null, openApp: ((e: React.MouseEvent) => void) | null) => shell({ title: node.name, door, context: app || workOpen ? undefined : context, node: node.name, crumbs,
     companion: chat ? companionProps : null, chatRoom: thread ? roomFor(thread.channel, thread.root) : roomFor(target?.id), placeholder, selected: node.path, sheet: sheetView,
     main: app ? app.main : workOpen ? workMain : undefined, workBar: app ? app.bar : workBar, openApp, appOpen: !!app });
   return <AreaView key={node.id} area={body !== null ? { ...node, body } : node} mode={mode} roomName={roomName} actions={appActions}
