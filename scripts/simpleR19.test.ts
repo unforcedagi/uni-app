@@ -120,6 +120,26 @@ await check("P1-2 one slow note doesn't hold the others: each task's check lands
   assert.deepEqual(landed, ["b", "a"]);
 });
 
+await check("P1-2 an older read that finishes last never overwrites a newer check (kept by when its reads began)", async () => {
+  let release: () => void = () => {};
+  const gate = new Promise<void>((r) => { release = r; });
+  let closed = false; let n = 0;
+  const call = async (cmd: string) => {
+    if (cmd !== "vault_note") return [];
+    const mine = ++n; const state = closed ? "done" : "open";
+    if (mine === 1) await gate; // the first read hangs, holding the plan as it was
+    return { note: { id: PLAN, path: "Projects/Mail/Cutover plan", metadata: { state }, updatedAt: state === "done" ? "r2" : "r1", content: "" } };
+  };
+  const vt = createVaultTasks(call, "uni");
+  const t = task("t13", "T-13 Self-hosted mail: approved 10-02", { next: `Approve the plan (uni:${PLAN}).` });
+  const old = vt.loadChecks([t], () => []);
+  await new Promise((r) => setTimeout(r, 5));
+  closed = true;
+  await vt.loadChecks([t], () => []);
+  release(); await old;
+  assert.equal(vt.cachedChecks().get("t13")!.rec!.result.kind, "closed");
+});
+
 await check("P1-1 a `depends_on` note still open: the task waits on it (no action asserted); finished, the task is clear", async () => {
   const dep = "01M4MKXFQWKF85E2XN38W1QYSB";
   const { vt, list } = fakeVault([{ id: dep, path: "Tasks/T-43 Mail view in Uni over Stalwart JMAP", metadata: { state: "open" }, updatedAt: "r1" }]);

@@ -339,13 +339,16 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
     for (let i = 0; i < todo.length; i += ASK_PARALLEL) {
       await Promise.all(todo.slice(i, i + ASK_PARALLEL).map(async (t) => {
         let s: CheckState;
+        // verified as of when the reads began (a read that started earlier never outranks one that started later)
+        const started = Date.now();
         try {
           const { result, sources } = await assessTask(t, keysOf(t));
-          const rec: CheckRecord = { taskRev: t.updatedAt, at: Date.now(), result, sources };
-          checkCache.delete(t.id); checkCache.set(t.id, rec); kept = true;
+          const rec: CheckRecord = { taskRev: t.updatedAt, at: started, result, sources };
+          const had = checkCache.get(t.id);
+          if (!had || had.at <= started) { checkCache.delete(t.id); checkCache.set(t.id, rec); kept = true; }
           s = { rec, failedAt: null };
         } catch {
-          s = { rec: checkCache.get(t.id) ?? null, failedAt: Date.now() };
+          s = { rec: checkCache.get(t.id) ?? null, failedAt: started };
         }
         out.set(t.id, s); onEach?.(t.id, s);
       }));
