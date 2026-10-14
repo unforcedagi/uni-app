@@ -66,8 +66,9 @@ export function openTab(s: Tabs, target: TabTarget, mode: OpenMode, newId: () =>
   if (mode !== "replace") {
     const existing = s.tabs.find((t) => sameTarget(t, target));
     if (existing) return focusTab(s, existing.id);
-  } else if (cur && target.kind === "areas") {
-    // Back from an area to the grid: if an Areas tab already exists, close this tab and use it.
+  } else if (cur) {
+    // A place that already has a tab (Uni, an area beside the Journal): close this tab and use that one. Two tabs for one place would be
+    // folded into one on the next restore, and the active one could be the one dropped (r13: a room opened from the tree came back as the Journal).
     const existing = s.tabs.find((t) => t.id !== cur.id && sameTarget(t, target));
     if (existing) return focusTab({ tabs: s.tabs.filter((t) => t.id !== cur.id), active: s.active, recent: s.recent.filter((x) => x !== cur.id) }, existing.id);
   }
@@ -173,19 +174,23 @@ export function restoreTabs(raw: string | null, roomIds: Iterable<string>): Tabs
   const d = data as { tabs: unknown[]; active?: unknown; recent?: unknown };
   const rooms = new Set(roomIds);
   const seen = new Set<string>();
+  /** A tab dropped as the twin of an earlier one stands for that one (it may be the active tab). */
+  const twin = new Map<string, string>();
   const tabs: Tab[] = [];
   for (const x of d.tabs) {
     const t = validTab(x);
     if (!t || seen.has(t.id)) continue;
     if ((t.kind === "room" || t.kind === "thread") && !rooms.has(t.channel!)) continue;
-    if (tabs.some((o) => sameTarget(o, t))) continue;
+    const same = tabs.find((o) => sameTarget(o, t));
+    if (same) { twin.set(t.id, same.id); continue; }
     seen.add(t.id);
     // An area whose room has gone keeps its tab; only the room link is dropped.
     tabs.push((t.kind === "area" || t.kind === "areas") && t.channel && !rooms.has(t.channel) ? { id: t.id, kind: t.kind, title: t.title, ...(t.path ? { path: t.path } : {}) } : t);
   }
-  const recentRaw = Array.isArray(d.recent) ? d.recent.filter((x): x is string => typeof x === "string" && seen.has(x)) : [];
+  const recentRaw = Array.isArray(d.recent) ? d.recent.filter((x): x is string => typeof x === "string").map((x) => twin.get(x) ?? x).filter((x) => seen.has(x)) : [];
   const recent = [...new Set(recentRaw)];
-  let active = typeof d.active === "string" && seen.has(d.active) ? d.active : null;
+  const wanted = typeof d.active === "string" ? twin.get(d.active) ?? d.active : null;
+  let active = wanted && seen.has(wanted) ? wanted : null;
   if (!active) active = recent[recent.length - 1] ?? tabs[0]?.id ?? null;
   return capped({ tabs, active, recent: active ? touch(recent, active) : recent });
 }

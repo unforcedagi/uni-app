@@ -5,7 +5,7 @@ import { bootAreas } from './areasFixture';
 
 const SHOTS = 'scripts/browser/__shots__/chat-optional';
 const wide = (page: Page) => (page.viewportSize()?.width ?? 0) >= 900;
-const panel = (page: Page) => page.locator('.th-panel');
+const panel = (page: Page) => page.locator('.sr-work'); // r13: with no chat a room's view is its work view
 const callsOf = (page: Page, ...cmds: string[]) => page.evaluate((c) => (window as any).__calls.filter((x: any) => c.includes(x.cmd)).map((x: any) => x.cmd + ' ' + JSON.stringify(x.args).slice(0, 100)), cmds);
 const shot = async (page: Page, name: string) => { await mkdir(SHOTS, { recursive: true }); const s = page.viewportSize()!; await page.screenshot({ path: `${SHOTS}/${name}-${s.width}x${s.height}.png` }); };
 const base = { briefs: true, tree: true, tasks: true, boulder: true, underBoulder: true, ricki: true, pinned: true } as const;
@@ -28,8 +28,9 @@ test.describe('chat optional (profile.chat.provider null)', () => {
     await noBuzz(page);
     await shot(page, `${mode}-home`);
     await page.getByRole('button', { name: /^Boulder,/ }).first().click();
-    await expect(page.locator('.th-head h1')).toHaveText('Boulder');
-    await expect(page.getByRole('region', { name: 'What needs doing here' })).toBeVisible();
+    // r13: with no chat the room's view is its work view, in the same shell
+    await expect(page.locator('.sr-title')).toHaveText('Boulder');
+    await expect(page.locator('.sr-work').getByRole('region', { name: 'Needs you' })).toBeVisible();
     await noBuzz(page);
     await shot(page, `${mode}-level`);
     // The uni vault renders at once with Uni's own profile, so a profile note that turns chat off only lands after its discovery: its first room load can precede it.

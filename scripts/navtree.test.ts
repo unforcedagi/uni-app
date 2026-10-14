@@ -216,6 +216,10 @@ check("ask: a cut title shows the first line of the note's content in full, with
   const content = `_Converted from a task on 2026-10-01_\n\nDecision (default yes): Uni adds Benya's missing feature #4, the after-event "were you there? one takeaway" prompt, to the companion on Wed. Say no to skip it.\n\nMore detail below.`;
   assert.equal(askFromContent(content), `Uni adds Benya's missing feature #4, the after-event "were you there? one takeaway" prompt, to the companion on Wed. Say no to skip it.`);
   assert.equal(askFromContent(""), "");
+  // r13: an option is never the question: a note that starts with its options has no whole question here
+  assert.equal(askFromContent("- Add key and test live on preview first\n- Ship to production after live test\n- Change it first"), "");
+  assert.equal(askFromContent("1. Wait\n2. Go"), "");
+  assert.equal(askFromContent("- Option A\n\nShould the gateway move on Wednesday?"), "Should the gateway move on Wednesday?");
   assert.equal(askFromContent("_Converted from x_"), "");
   const long = "First sentence here. " + "Second sentence that goes on and on. ".repeat(12);
   assert.ok(askFromContent(long).endsWith("here.") || askFromContent(long).length <= 280);

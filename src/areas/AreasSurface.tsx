@@ -25,6 +25,9 @@ import { useNav, type NavControls } from "../navContext";
 import { useVaultProfile } from "./ProfileContext";
 import { Crumbs, RoomSidebar, TreeScreen } from "./TreeHome";
 import { WorkView } from "./WorkView";
+import { InlineText } from "./InlineText";
+import { Body } from "../MessageBody";
+import { projectBody } from "./projectBody";
 import { rootOpenMemory } from "./rootMemory";
 import "./areas.css";
 import "./tree.css";
@@ -35,8 +38,12 @@ const PLATFORM = platformName(USER_AGENT);
 /** The note for a room no node owns: the companion says so instead of a node's state. */
 export const UNFILED = "Not filed under an area yet.";
 
-/** An overlay on the place (the task sheet, the work view, the drawer): Back closes it first; a modal one also holds Alt+arrow history. */
-export type Overlay = { close: () => void; modal: boolean };
+/**
+ * What is open over the place (the task sheet, the work view, the drawer): Android Back closes it first. `modal` (the sheet) holds Alt+arrow
+ * history while open; `history` says Alt+← and the sidebar's ← close it before they change places (the work view; not the drawer alone,
+ * whose own Back button goes back).
+ */
+export type Overlay = { close: () => void; modal: boolean; history: boolean };
 
 /**
  * The room shell: Uni itself at `{kind:"areas"}` (path null), any area or project under it at `{kind:"area", path}`, a room no node owns
@@ -88,6 +95,8 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   const withRoom = (a: Area): Area => { if (!chat) return a.rooms.length ? { ...a, rooms: [] } : a; if (a.rooms.length) return a; const r = ownRoom({ room: typeof a.metadata.room === "string" ? a.metadata.room : null, channels: [] }, roomRefs); return r ? { ...a, rooms: [r.id] } : a; };
   const found = loose ? null : path ? data?.tree.nodes.get(path) ?? null : root;
   const node = found ? withRoom(found) : null;
+  /** A project's own note, read when its work view opens (it is shown there, folded). */
+  const [body, setBody] = useState<string | null>(null);
   /** The open task, by id: the sheet always shows the list's current copy (r13), and says so when the task has closed elsewhere. */
   const [sheetId, setSheetId] = useState<string | null>(null);
   const lastSheet = useRef<Task | null>(null);
@@ -103,21 +112,32 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
     onOpenArea(up?.path ?? null, up?.name ?? "Uni", up ? pickRoom(withRoom(up).rooms, null) : uniRoom);
   }) : phoneTree && rootOpen ? () => setRootOpen(false) : null;
   /** What is over the place, top first: the sheet (modal), then the drawer, then the work view (only when the chat is there to go back to). */
-  const overlay: Overlay | null = sheetId ? { close: closeSheet, modal: true } : drawer ? { close: () => setDrawer(false), modal: false } : work && chat ? { close: () => setWork(false), modal: false } : null;
-  const overlayKey = sheetId ? "sheet" : drawer ? "drawer" : work && chat ? "work" : "";
+  const workOver = work && chat;
+  const overlay: Overlay | null = sheetId ? { close: closeSheet, modal: true, history: false }
+    : drawer ? { close: () => { setDrawer(false); setWork(false); }, modal: false, history: workOver }
+    : workOver ? { close: () => setWork(false), modal: false, history: true } : null;
+  const overlayKey = `${sheetId ? "sheet" : ""}${drawer ? "drawer" : ""}${workOver ? "work" : ""}`;
   useEffect(() => {
     // Android Back closes what is over the place before it zooms out a level.
-    onBackChange(overlay ? overlay.close : back);
+    onBackChange(sheetId ? closeSheet : drawer ? () => setDrawer(false) : workOver ? () => setWork(false) : back);
     return () => onBackChange(null);
   }, [path, loose, data, uniRoom, onOpenArea, onBackChange, overlayKey, phoneTree, rootOpen]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     onOverlayChange?.(overlay);
     // Escape closes the drawer or the work view (the sheet handles its own)
-    const esc = (e: KeyboardEvent) => { if (e.key === "Escape" && overlay && !overlay.modal && !e.defaultPrevented) overlay.close(); };
+    const esc = (e: KeyboardEvent) => { if (e.key !== "Escape" || !overlay || overlay.modal || e.defaultPrevented) return; if (drawer) setDrawer(false); else setWork(false); };
     if (overlay && !overlay.modal) window.addEventListener("keydown", esc);
     return () => { window.removeEventListener("keydown", esc); };
   }, [overlayKey]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => onOverlayChange?.(null), []); // eslint-disable-line react-hooks/exhaustive-deps
+  const workShown = work || !chat;
+  useEffect(() => {
+    setBody(null);
+    if (!identity || node?.kind !== "project" || !workShown) return;
+    let live = true;
+    projectBody(identity, node).then((text) => { if (live) setBody(text); }).catch(() => {});
+    return () => { live = false; };
+  }, [identity, node?.id, node?.updatedAt, workShown]); // eslint-disable-line react-hooks/exhaustive-deps
   // A node can have several rooms (metadata.channel is a list): the user's pick, else the first.
   const [picked, setPicked] = useState<string | null>(null);
   const nodeRoom = node ? pickRoom(node.rooms, picked) : null;
@@ -272,11 +292,14 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   const fresh = updatedLabel(freshIso, now);
   /** No room to talk in (none found once the rooms are in): the work view is the room's view, with no chat to go back to. */
   const noRoom = chat && !target && !roomsPending && !thread;
-  const workMain = <>
-    {(fresh || askRoom) && <p className="th-fresh wv-fresh">{fresh && <span>Brief {fresh}</span>}{askRoom && <button type="button" className="th-link" onClick={() => actions.compose(askRoom, refreshDraft(node.name, isRoot ? "" : node.path))}>Refresh the brief</button>}</p>}
-    <WorkView nodeName={node.name} feed={feed} others={othersHere} later={later} runs={runs} drafts={drafts} privateOther={privateOther} ready={tasks.ready} error={tasks.error} onRetry={tasks.refresh}
-      onTask={openSheet} onDecide={decide} onNote={actions.openNote} onPrivate={openPrivate} />
-  </>;
+  const briefNow = !isRoot ? entry?.brief.now ?? "" : "";
+  const top = (briefNow || fresh || askRoom) ? <div className="wv-top">
+    {briefNow && <p className="th-lede wv-brief">{entry!.brief.nowTokens.length ? <InlineText tokens={entry!.brief.nowTokens} onNote={actions.openNote} /> : briefNow}</p>}
+    <p className="th-fresh wv-fresh">{fresh && <span>Brief {fresh}</span>}{askRoom && <button type="button" className="th-link" onClick={() => actions.compose(askRoom, refreshDraft(node.name, isRoot ? "" : node.path))}>Refresh the brief</button>}</p>
+  </div> : null;
+  const foot = node.kind === "project" && body ? <details className="th-note wv-note"><summary>Project note</summary><Body body={body} mentions={[]} me={null} /></details> : null;
+  const workMain = <WorkView nodeName={node.name} feed={feed} others={othersHere} later={later} runs={runs} drafts={drafts} privateOther={privateOther} ready={tasks.ready} error={tasks.error} onRetry={tasks.refresh}
+    onTask={openSheet} onDecide={decide} onNote={actions.openNote} onPrivate={openPrivate} top={top} foot={foot} />;
   const workOpen = work || !chat || noRoom;
   const workBar = workOpen ? <div className="sr-thread sr-workbar">{chat && !noRoom && <button type="button" className="sr-thread-back sr-work-back" onClick={() => setWork(false)}><span aria-hidden="true">‹</span> Back to chat</button>}
     <span className="sr-thread-label">{`All of ${node.name}'s work`}</span></div> : null;
@@ -284,6 +307,6 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   const roomLevel = shell({ title: node.name, door: chat && nodeView.own && nodeView.slash ? `#${nodeView.slash.replace(/^#/, "")}` : "", crumbs,
     companion: chat ? companionProps : null, chatRoom: thread ? roomFor(thread.channel, thread.root) : roomFor(target?.id), placeholder, selected: node.path, sheet: sheetView,
     main: workOpen ? workMain : undefined, workBar });
-  return <AreaView key={node.id} area={node} channel={nodeRoom} onChannel={setPicked} mode={mode} roomName={roomName} actions={actions}
+  return <AreaView key={node.id} area={body !== null ? { ...node, body } : node} channel={nodeRoom} onChannel={setPicked} mode={mode} roomName={roomName} actions={actions}
     room={roomFor(nodeRoom)} onBack={back} backLabel={tree?.nodes.get(parentPath(tree, node.path))?.name ?? "Uni"} tree={<>{status}{roomLevel}</>} />;
 }

@@ -27,13 +27,17 @@ async function open(page: Page, name: string) {
   await scope(page).locator(`.th-go[aria-label^="${name},"]`).click();
   await expect(page.locator('.sr-title')).toHaveText(name);
 }
-/** The node's whole work page ("All of X's work"): its counts lead. */
+/** The node's work view ("All of X's work", r13: inside the room shell). */
 async function work(page: Page) {
   if (!wide(page) && await page.locator('.cp-line[aria-expanded="false"]').count()) await page.locator('.cp-line').click();
   await page.getByRole('button', { name: /^All of .*'s work/ }).click();
-  await expect(page.locator('.wr')).toBeVisible();
+  await expect(page.locator('.sr-work section[aria-label="Needs you"]')).toBeVisible();
 }
-const total = (page: Page) => page.locator('.wr .th-h em');
+/** Every live task the work view holds: Needs you, what others hold (In motion) and Later. */
+const total = async (page: Page) => page.locator('.sr-work').evaluate((w) => {
+  const n = (sel: string) => Number(w.querySelector(sel)?.textContent ?? 0);
+  return String(n('section[aria-label="Needs you"] .wv-n') + w.querySelectorAll('.wv-others > .cp-item').length + n('section[aria-label="Later"] .wv-n'));
+});
 
 for (const nearOff of [false, true]) {
   test.describe(`ids${nearOff ? ' (two-query fallback)' : ''}`, () => {
@@ -42,14 +46,14 @@ for (const nearOff of [false, true]) {
     test('the tree and the counts are the same with ids as with paths', async ({ page }) => {
       await open(page, 'Uni');
       await work(page);
-      await expect(total(page)).toHaveText('11');
+      await expect.poll(() => total(page)).toBe('11');
       await shot(page, 'uni');
       await open(page, 'Techne');
       await work(page);
-      await expect(total(page)).toHaveText('7');
+      await expect.poll(() => total(page)).toBe('7');
       await open(page, 'COhere 2026');
       await work(page);
-      await expect(total(page)).toHaveText('4');
+      await expect.poll(() => total(page)).toBe('4');
       // the Brief named by id is the one shown
       await expect(page.getByText('Venue is held for Oct 15')).toBeVisible();
       expect(await fits(page)).toBe(true);
@@ -58,7 +62,7 @@ for (const nearOff of [false, true]) {
     test('r12: the whole tree\'s tasks are one read at the root (no per-node subtree query), with ids or paths', async ({ page }) => {
       await open(page, 'Techne');
       await work(page);
-      await expect(total(page)).toHaveText('7');
+      await expect.poll(() => total(page)).toBe('7');
       expect(await calls(page, 'vault_subtree_tasks')).toEqual([]);
       for (const a of await calls(page, 'vault_query_meta')) expect(a.metadata.node).toBeUndefined();
     });
@@ -72,22 +76,22 @@ test.describe('stewardship', () => {
 
   test('Uni names its own room; Boulder is found by channel id although the metadata says #civics', async ({ page }) => {
     await open(page, 'Uni');
-    await expect(door(page)).toHaveText('#uni');
+    await expect(door(page)).toHaveText('#Uni'); // r13: the channel's own name
     await open(page, 'Boulder');
     await expect(door(page)).toHaveText('#boulder');
     await expect(composer(page)).toHaveAttribute('placeholder', 'Message #boulder');
     await work(page);
-    await expect(total(page)).toHaveText('2');
-    await expect(page.getByRole('region', { name: 'Projects' })).toContainText('Boulder Civic Calendar');
+    await expect.poll(() => total(page)).toBe('2');
+    if (wide(page)) await expect(scope(page)).toContainText('Boulder Civic Calendar');
     await shot(page, 'boulder');
   });
 
   test('a project with its own room says so', async ({ page }) => {
     await open(page, 'Techne');
-    await expect(door(page)).toHaveText('#techne');
+    await expect(door(page)).toHaveText('#Techne');
     await open(page, 'COhere 2026');
-    await expect(door(page)).toHaveText('#cohere');
-    await expect(composer(page)).toHaveAttribute('placeholder', 'Message #cohere');
+    await expect(door(page)).toHaveText('#Cohere');
+    await expect(composer(page)).toHaveAttribute('placeholder', 'Message #Cohere');
     await shot(page, 'pilot-own-room');
   });
 
@@ -98,7 +102,7 @@ test.describe('stewardship', () => {
     // seen from Uni, its task offers its steward's room
     await open(page, 'Uni');
     await work(page);
-    await page.locator('.task-row').filter({ hasText: 'Add the November dates' }).locator('.task-main').click();
+    await page.locator('.sr-work .cp-item').filter({ hasText: 'Add the November dates' }).locator('.cp-need').click();
     await expect(page.getByRole('button', { name: 'Open in #boulder' })).toBeVisible();
     await page.keyboard.press('Escape');
     await shot(page, 'inherited-steward');

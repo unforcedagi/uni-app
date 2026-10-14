@@ -140,7 +140,7 @@ test.describe('layout', () => {
     await openArea(page, 'Relationships');
     await expect(page.locator('.sr-title')).toHaveText('Relationships');
     await expect(page.locator('.sr-door')).toHaveCount(0);
-    await expect(page.locator('.sr-chat').getByRole('textbox', { name: /^Message / })).toHaveAttribute('placeholder', 'Message #uni');
+    await expect(page.locator('.sr-chat').getByRole('textbox', { name: /^Message / })).toHaveAttribute('placeholder', 'Message #Uni'); // r13: the channel's own name
   });
 });
 

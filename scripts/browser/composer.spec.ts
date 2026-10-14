@@ -13,7 +13,7 @@ async function switchRoom(page: Page, name: string) {
   const tree = page.locator(phone ? '.th-phone-tree' : '.th-roomnav');
   const fold = tree.locator('.th-others .th-fold');
   if (await fold.getAttribute('aria-expanded') !== 'true') await press(page, fold);
-  await press(page, tree.locator('.th-other .th-go').filter({ hasText: '#' + name.toLowerCase().replace(/\s+/g, '-') }));
+  await press(page, tree.locator('.th-other .th-go').filter({ hasText: '#' + name }) /* r13: the channel's own name */);
 }
 
 test.beforeEach(async ({ page }) => {

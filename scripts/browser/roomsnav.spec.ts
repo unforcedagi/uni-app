@@ -1,6 +1,7 @@
-// T-111 (0.1.42): rooms as the primary navigation, and "Where we are" at the top of each level's panel.
-// The room tree is visible on the phone (as the home) and on Daylight (a left column beside the panel); Needs you groups by priority;
-// the priority control writes once and undoes; private areas show counts only; a vault without chat still works.
+// T-111 (0.1.42), after r13: rooms as the primary navigation, and each node's work in its room. The room tree is visible on the phone (as
+// the home) and on Daylight (a left column); "All of X's work" is a view inside the room shell (Needs you, In motion, Later); priority is
+// set in the task sheet with one guarded write and an undo; private areas are named by place only; a vault without chat still works.
+// (The "Where we are" census, its Now/Soon/Someday buckets and the per-row priority selects were deleted in r13.)
 import { mkdir } from 'node:fs/promises';
 import { test, expect, type Page } from '@playwright/test';
 import { bootAreas } from './areasFixture';
@@ -9,9 +10,7 @@ const SHOTS = 'scripts/browser/__shots__/roomsnav';
 const wide = (page: Page) => (page.viewportSize()?.width ?? 0) >= 900;
 const fits = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth);
 const calls = (page: Page, cmd: string) => page.evaluate((c) => (window as any).__calls.filter((x: any) => x.cmd === c).map((x: any) => x.args), cmd);
-const panel = (page: Page) => page.locator('.th-panel');
-// T-122: the counts sit in the page header, Needs you and Moved this week in its left column: `where` is the whole state page
-const where = (page: Page) => panel(page).locator('.th-scroll');
+const work = (page: Page) => page.locator('.sr-work');
 const base = { briefs: true, tree: true, tasks: true, boulder: true, underBoulder: true, ricki: true, pinned: true, privateTasks: true } as const;
 const boot = (page: Page, o: Parameters<typeof bootAreas>[2] = {}) => bootAreas(page, 'seed', { ...base, ...o });
 const shot = async (page: Page, name: string) => {
@@ -23,17 +22,18 @@ const shot = async (page: Page, name: string) => {
   await page.screenshot({ path: `${file}-gray.png` });
   await tag.evaluate((n) => n.remove());
 };
-/** T-124: a room opens to its conversation; the state page is one level deeper ("Everything here"). The specs below test that page. */
+/** The node's work view ("All of X's work"): one level deeper than its room, inside the same shell. Without chat it is the room's view. */
 async function full(page: Page) {
-  await page.locator('.sr, .th-panel').first().waitFor();
-  if (await page.locator('.th-panel').count()) return;
+  await page.locator('.sr').first().waitFor();
+  if (await work(page).count()) return;
   if (await page.locator('.cp-line[aria-expanded="false"]').count()) await page.locator('.cp-line').click();
   await page.getByRole('button', { name: /^All of .*'s work/ }).click();
-  await page.locator('.th-panel').waitFor();
+  await work(page).waitFor();
 }
 /** Open a node by name: a row of the left column (wide), or a row of the room tree / a child in the panel (phone). */
 /** r7: areas start folded; open every fold so any row can be clicked. */
 async function unfoldTree(page: Page) {
+  if (!wide(page) && await page.locator('.sr-drawer').count() && !await page.locator('.th-drawer').count()) await page.locator('.sr-drawer').click();
   const tree = page.locator('.th-roomnav, .th-phone-tree').first();
   if (!await tree.count()) return;
   await tree.locator('.th-row.d1').first().waitFor().catch(() => {});
@@ -46,8 +46,10 @@ async function go(page: Page, name: string) {
   if (await row.count()) await row.first().click(); else await page.locator(`.th-kid[data-name="${name}"]`).click();
   await full(page);
 }
-const title = async (page: Page, name: string) => { await full(page); await expect(panel(page).locator('h1')).toHaveText(name); };
-const bucket = (page: Page, p: string) => where(page).locator(`.wr-bucket.p-${p}`);
+const title = async (page: Page, name: string) => { await full(page); await expect(page.locator('.sr-title')).toHaveText(name); };
+const row = (page: Page, id: string) => work(page).locator('.cp-item').filter({ has: page.locator(`.cp-need[data-id="${id}"]`) });
+const needs = (page: Page) => work(page).getByRole('region', { name: 'Needs you' });
+const priority = (page: Page) => page.getByRole('dialog').getByRole('group', { name: 'Priority' });
 
 test.describe('rooms nav', () => {
   test('the room tree is the home on both screens: a column beside the panel on Daylight, the home on the phone', async ({ page }) => {
@@ -61,7 +63,7 @@ test.describe('rooms nav', () => {
       await title(page, 'Uni');
       await expect(nav.locator('.th-go[aria-current="page"]')).toHaveAttribute('data-path', '');
       for (const n of ['Boulder', 'COhere 2026', 'Techne', 'Unforced Development']) await expect(nav.locator(`.th-go[aria-label^="${n},"]`)).toBeVisible();
-      await expect(nav.locator('.th-go[aria-label^="COhere 2026,"]')).toContainText('#cohere');
+      await expect(nav.locator('.th-go[aria-label^="COhere 2026,"]')).toContainText('#Cohere');
       await expect(nav.locator('.th-go[aria-label^="Boulder Civic Calendar,"]')).not.toContainText('held by');
       // the column stays while the level changes, and marks the selected one
       await page.locator('.th-roomnav .th-go[aria-label^="Techne,"]').click();
@@ -70,7 +72,7 @@ test.describe('rooms nav', () => {
       await expect(nav.locator('.th-go[aria-current="page"]')).toHaveAttribute('aria-label', /^Techne,/);
     } else {
       await expect(page.locator('.th-phone-tree')).toBeVisible();
-      await expect(page.locator('.th-go[aria-label^="COhere 2026,"]')).toContainText('#cohere');
+      await expect(page.locator('.th-go[aria-label^="COhere 2026,"]')).toContainText('#Cohere');
       await expect(page.locator('.th-go[aria-label^="Techne,"] .th-dot')).toBeVisible();
       for (const b of await page.locator('.th-go').all()) expect((await b.boundingBox())!.height).toBeGreaterThanOrEqual(44);
     }
@@ -78,160 +80,127 @@ test.describe('rooms nav', () => {
     await shot(page, 'home');
   });
 
-  test('Boulder → COhere 2026: selecting a room updates the panel; Where we are leads it', async ({ page }) => {
+  test('Boulder → COhere 2026: each work view lists its own subtree; seen from above a row says where it sits', async ({ page }) => {
     await boot(page);
     await go(page, 'Boulder');
     await title(page, 'Boulder');
-    // Where we are (the counts) is the first section of the header
-    await expect(panel(page).locator('.th-head section').first()).toHaveAttribute('aria-label', 'Where we are');
-    // Boulder's subtree: T-03 (waiting on you), T-64 (doing, a room's), T-65, the decision, T-90, T-91
-    await expect(where(page).locator('.wr-counts')).toContainText(/open\s*4/);
-    await expect(where(page).locator('.wr-counts')).toContainText(/doing\s*1/);
-    await expect(where(page).locator('.wr-counts')).toContainText(/waiting\s*1/);
-    await expect(where(page).locator('.wr-counts')).toContainText(/need you\s*4/);
-    await expect(where(page).getByRole('region', { name: 'Moved this week' })).toContainText('T-90');
-    // seen from above, a row names the project it belongs to
-    await expect(bucket(page, 'soon').locator('.wr-row', { hasText: 'T-65' })).toContainText('COhere 2026');
+    // Boulder's subtree: T-03 (waiting on you), T-65, T-90 and the open decision need you; T-64 (a room's) and T-91 are in motion
+    await expect(needs(page).locator('.wv-n')).toHaveText('4');
+    for (const id of ['T-03', 'T-65', 'T-90']) await expect(row(page, id)).toHaveCount(1);
+    await expect(needs(page)).toContainText('Decide the COhere venue');
+    await expect(work(page).getByRole('region', { name: 'In motion' })).toContainText('COhere app spec');
+    await expect(work(page).getByRole('region', { name: 'In motion' })).toContainText('in COhere 2026');
     await shot(page, 'boulder');
     await go(page, 'COhere 2026');
     await title(page, 'COhere 2026');
-    await expect(where(page).locator('.wr-counts')).toContainText(/need you\s*3/);
-    // at its own level a row does not repeat the project; next step and due show
-    await expect(bucket(page, 'now').locator('.wr-row', { hasText: 'T-03' })).toContainText('Check-in PR by Oct 12');
-    await expect(bucket(page, 'now').locator('.wr-row', { hasText: 'T-03' })).toContainText(/due Oct 12/);
-    await expect(bucket(page, 'soon').locator('.wr-row', { hasText: 'T-65' })).not.toContainText('COhere 2026');
-    await expect(bucket(page, 'soon').locator('.wr-row', { hasText: 'T-65' })).toContainText('Send to Kevin for the numbers');
-    await expect(panel(page).locator('.th-roomline .th-door')).toHaveText('cohere');
+    await expect(needs(page).locator('.wv-n')).toHaveText('3');
+    await expect(row(page, 'T-03')).toContainText('Check-in PR by Oct 12');
+    await expect(row(page, 'T-03')).toContainText(/due Oct 12/);
+    await expect(row(page, 'T-65')).toContainText('Send to Kevin for the numbers');
     await shot(page, 'cohere');
     expect(await fits(page)).toBe(true);
   });
 
-  test('Needs you is grouped Now / Soon / Someday; Someday is collapsed to a count until opened', async ({ page }) => {
+  test('Later holds Someday, folded until opened and never counted in Needs you', async ({ page }) => {
     await boot(page);
-    await go(page, 'Boulder');
-    await title(page, 'Boulder');
-    const needs = where(page).getByRole('region', { name: 'Needs you' });
-    await expect(needs.locator('.wr-bucket')).toHaveCount(3);
-    await expect(needs.locator('.wr-bucket .wr-h span')).toHaveText(['Now', 'Soon', 'Someday']);
-    await expect(bucket(page, 'now').locator('.wr-row')).toHaveText([/T-03/]);
-    // soon holds the explicit `soon` and the task with no priority at all (unsorted reads as soon)
-    await expect(bucket(page, 'soon').locator('.wr-row .wr-id')).toHaveText(['T-65', 'T-90']);
-    await expect(bucket(page, 'soon').locator('.wr-prio[aria-label="Priority for T-90"] option:checked')).toHaveText('Soon (unsorted)');
-    // someday: a count, no rows
-    const fold = bucket(page, 'someday').locator('.wr-fold');
+    await go(page, 'Unforced Development');
+    const later = work(page).getByRole('region', { name: 'Later' });
+    const fold = later.locator('.wv-fold');
     await expect(fold).toHaveAttribute('aria-expanded', 'false');
-    await expect(fold.locator('em')).toHaveText('1');
-    await expect(bucket(page, 'someday').locator('.wr-row')).toHaveCount(0);
-    await expect(where(page)).not.toContainText('Decide the COhere venue');
+    await expect(work(page)).not.toContainText('Send the Q4 invoice');
     await fold.click();
     await expect(fold).toHaveAttribute('aria-expanded', 'true');
-    await expect(bucket(page, 'someday').locator('.wr-row')).toContainText('Decide the COhere venue');
-    await shot(page, 'someday-open');
-    await fold.click();
-    await expect(bucket(page, 'someday').locator('.wr-row')).toHaveCount(0);
-    // check-off keeps working from the new rows: a state_transition, with undo
-    await page.getByRole('button', { name: 'Mark done: T-90 Draft council testimony' }).click();
-    expect(await calls(page, 'vault_transition')).toEqual([{ vault: 'uni', id: 'b1', from: 'open', to: 'done' }]);
-    await expect(where(page).locator('.wr-row', { hasText: 'T-90' })).toHaveCount(0);
-    await page.getByRole('button', { name: 'Undo' }).click();
-    await expect(where(page).locator('.wr-row', { hasText: 'T-90' })).toHaveCount(1);
+    await expect(later).toContainText('Send the Q4 invoice');
+    await expect(needs(page)).not.toContainText('Send the Q4 invoice');
+    await shot(page, 'later-open');
   });
 
-  test('priority: one guarded metadata write, the row moves, and Undo reverts it', async ({ page }) => {
+  test('priority: set in the task sheet, one guarded metadata write, and Undo reverts it', async ({ page }) => {
     await boot(page);
-    await go(page, 'Boulder');
     await go(page, 'COhere 2026');
     await title(page, 'COhere 2026');
-    const pick = where(page).locator('.wr-prio[aria-label="Priority for T-65"]');
-    await expect(pick).toHaveValue('soon');
-    await pick.selectOption('now');
+    await row(page, 'T-65').locator('.cp-need').click();
+    await expect(priority(page).getByRole('button', { name: 'Soon' })).toHaveAttribute('aria-pressed', 'true');
+    await priority(page).getByRole('button', { name: 'Now' }).click();
     await expect.poll(async () => (await calls(page, 'vault_patch_meta')).length).toBe(1);
     const [w] = await calls(page, 'vault_patch_meta');
     expect(w).toMatchObject({ vault: 'uni', id: 'k3', metadata: { priority: 'now', priority_by: 'hand' } });
     expect(typeof w.ifUpdatedAt).toBe('string');
-    await expect(bucket(page, 'now').locator('.wr-row .wr-id')).toHaveText(['T-03', 'T-65']);
-    await expect(bucket(page, 'soon')).toHaveCount(0);
+    // the sheet is live: it shows the new priority at once
+    await expect(priority(page).getByRole('button', { name: 'Now' })).toHaveAttribute('aria-pressed', 'true');
     await expect(page.getByText('Priority: now')).toBeVisible();
+    await page.keyboard.press('Escape');
     await shot(page, 'priority-undo');
     await page.getByRole('button', { name: 'Undo' }).click();
     await expect.poll(async () => (await calls(page, 'vault_patch_meta')).length).toBe(2);
     expect((await calls(page, 'vault_patch_meta'))[1]).toMatchObject({ id: 'k3', metadata: { priority: 'soon', priority_by: 'weigh.py 2026-10-12' } });
-    await expect(bucket(page, 'soon').locator('.wr-row .wr-id')).toHaveText(['T-65']);
     expect(await page.evaluate(() => (window as any).__tasks.find((t: any) => t.id === 'k3').metadata.priority)).toBe('soon');
     // an unsorted task: undo clears the key again rather than inventing a value
-    await panel(page).getByRole('navigation', { name: 'Where you are' }).getByRole('button', { name: 'Boulder' }).click();
-    await title(page, 'Boulder');
-    await where(page).locator('.wr-prio[aria-label="Priority for T-90"]').selectOption('someday');
+    await go(page, 'Boulder');
+    await row(page, 'T-90').locator('.cp-need').click();
+    await priority(page).getByRole('button', { name: 'Someday' }).click();
     await expect.poll(async () => (await calls(page, 'vault_patch_meta')).length).toBe(3);
+    await page.keyboard.press('Escape');
     await page.getByRole('button', { name: 'Undo' }).click();
     await expect.poll(async () => (await calls(page, 'vault_patch_meta')).length).toBe(4);
     expect((await calls(page, 'vault_patch_meta'))[3]).toMatchObject({ id: 'b1', metadata: { priority: null, priority_by: null } });
     expect(await page.evaluate(() => 'priority' in (window as any).__tasks.find((t: any) => t.id === 'b1').metadata)).toBe(false);
-    // the five seconds run out
-    await where(page).locator('.wr-prio[aria-label="Priority for T-90"]').selectOption('now');
-    await expect(page.getByRole('button', { name: 'Undo' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Undo' })).toHaveCount(0, { timeout: 7000 });
   });
 
   test('a priority changed elsewhere meanwhile is a conflict: nothing is overwritten, and it says so', async ({ page }) => {
     await boot(page);
-    await go(page, 'Boulder');
     await go(page, 'COhere 2026');
+    await row(page, 'T-65').locator('.cp-need').click();
     await page.evaluate(() => { const t = (window as any).__tasks.find((x: any) => x.id === 'k3'); t.metadata.priority = 'someday'; t.updatedAt = '2026-10-11T09:00:00.000Z'; });
-    await where(page).locator('.wr-prio[aria-label="Priority for T-65"]').selectOption('now');
+    await priority(page).getByRole('button', { name: 'Now' }).click();
     await expect(page.getByText(/changed elsewhere, so its priority wasn't changed/)).toBeVisible();
     expect(await page.evaluate(() => (window as any).__tasks.find((t: any) => t.id === 'k3').metadata.priority)).toBe('someday');
   });
 
-  test('the root level is the morning view: all of it, across the areas; the old long list is not repeated', async ({ page }) => {
+  test('Uni\'s work view is all of it, across the areas: each row says where it sits', async ({ page }) => {
     await boot(page);
     if (!wide(page)) await expect(page.locator('.th-phone-tree')).toBeVisible();
     await go(page, 'Uni');
     await title(page, 'Uni');
-    await expect(where(page).locator('.wr-counts')).toContainText(/need you\s*\d+/);
-    // seen from Uni, each row says where it belongs
-    await expect(where(page).locator('.wr-row', { hasText: 'T-33' })).toContainText('Techne');
-    await expect(panel(page).getByRole('region', { name: 'Needs you' })).toHaveCount(1);
-    await expect(panel(page).locator('.th-sec.th-needs')).toHaveCount(0);
+    await expect(row(page, 'T-33')).toHaveCount(1);
+    await expect(work(page).getByRole('region', { name: 'Needs you' })).toHaveCount(1);
     await shot(page, 'root');
   });
 
-  test('private areas: counts and time only, from above and at their own level', async ({ page }) => {
+  test('private areas are named by place only, from above and at their own level, and they are counted', async ({ page }) => {
     await boot(page);
-    // the root counts Sadhana's two tasks but names neither
     if (!wide(page)) await expect(page.locator('.th-phone-tree')).not.toContainText(/T-3[12]/);
     await go(page, 'Uni');
     await title(page, 'Uni');
-    await expect(where(page)).not.toContainText(/Sit twenty|Find a teacher|T-31|T-32/);
-    await expect(where(page).getByRole('region', { name: 'Needs you' }).locator('.wr-bucket.p-now .wr-h em')).toHaveText('3');
-    await expect(bucket(page, 'someday').locator('.wr-fold em')).toHaveText('4');
-    await expect(where(page).getByText(/more in private areas, counted not named/).first()).toBeVisible();
+    await expect(work(page)).not.toContainText(/Sit twenty|Find a teacher|T-31|T-32/);
+    await expect(needs(page).locator('.cp-private')).toHaveText('A private item in Sadhana · open ›');
+    await expect(work(page)).toContainText(/One item in a private area is not listed here/);
     if (wide(page)) await expect(page.locator('.th-roomnav')).not.toContainText(/T-3[12]/);
-    // the level itself: counts, no rows, a time for the last change
+    // the level itself: each item its own row, opening its note; never a title
     await go(page, 'Sadhana');
     await title(page, 'Sadhana');
-    await expect(where(page).locator('.wr-counts')).toContainText(/need you\s*2/);
-    await expect(where(page).locator('.wr-row')).toHaveCount(0);
-    await expect(where(page).getByRole('region', { name: 'Moved this week' })).toContainText(/1 changed, the last \d+[dh] ago\. Counted, not named\./);
-    await expect(panel(page).locator('.sp-left')).not.toContainText(/Sit twenty|Find a teacher/);
+    await expect(needs(page).locator('.wv-n')).toHaveText('1');
+    await expect(needs(page).locator('.cp-private')).toHaveText(['A private item here · open ›']);
+    await expect(work(page)).not.toContainText(/Sit twenty|Find a teacher/);
     await shot(page, 'private');
   });
 
-  test('chat.provider null: the tree, Where we are and the priority control work with no room or Buzz surface', async ({ page }) => {
+  test('chat.provider null: the tree, the work view and the sheet\'s priority work with no room or Buzz surface', async ({ page }) => {
     await boot(page, { profileNote: { chat: { provider: null } } });
     await expect(page.locator(wide(page) ? '.th-roomnav' : '.th-phone-tree')).toBeVisible();
     await go(page, 'Boulder');
     await title(page, 'Boulder');
-    await expect(where(page)).toBeVisible();
-    await expect(bucket(page, 'now').locator('.wr-row')).toContainText('T-03');
-    await expect(page.locator('.talk, .th-door, .th-roomline, .th-ledger, .th-sec.th-updates')).toHaveCount(0);
-    await where(page).locator('.wr-prio[aria-label="Priority for T-65"]').selectOption('now');
+    await expect(row(page, 'T-03')).toHaveCount(1);
+    await expect(page.locator('.talk, .th-door, .th-roomline, .th-ledger, .sr-chat, .composer')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Back to chat' })).toHaveCount(0);
+    await row(page, 'T-65').locator('.cp-need').click();
+    await priority(page).getByRole('button', { name: 'Now' }).click();
     await expect.poll(async () => (await calls(page, 'vault_patch_meta')).length).toBe(1);
     expect(await calls(page, 'post_message')).toEqual([]);
     await shot(page, 'no-chat');
   });
 
-  test('calm: nothing loops, and the only motion is a short fade on a leaving row', async ({ page }) => {
+  test('calm: nothing loops in the work view', async ({ page }) => {
     await boot(page, { });
     await page.emulateMedia({ reducedMotion: 'no-preference' });
     await go(page, 'Boulder');

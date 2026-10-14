@@ -35,11 +35,12 @@ test.describe('nested rooms', () => {
     await scope.locator('.th-go[aria-label^="ATLAS,"]').click();
     await expect(page.locator('.sr-door')).toHaveText('#atlas/build');
     await shot(page, 'project');
-    // the conversation is in place (no new tab); "Everything here" is the node page, whose Open #room returns to it
+    // the conversation is in place (no new tab); "All of X's work" is a view in the same shell, whose "Back to chat" returns to it (r13)
     const tabs = await page.locator('.tab-title').count();
     if (!wide(page)) await page.locator('.cp-line').click();
     await page.getByRole('button', { name: /^All of .*'s work/ }).click();
-    const open = page.getByRole('button', { name: 'Open #atlas/build' });
+    await expect(page.locator('.sr-door')).toHaveText('#atlas/build');
+    const open = page.getByRole('button', { name: 'Back to chat' });
     await expect(open).toBeVisible();
     expect((await open.boundingBox())!.height).toBeGreaterThanOrEqual(44);
     await open.click();

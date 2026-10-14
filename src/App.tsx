@@ -176,7 +176,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   /** What the room shell has open over the place (its task sheet, work view or drawer): every Back closes it first; a modal one holds history. */
   const overlayRef = useRef<Overlay | null>(null);
   const [hasOverlay, setHasOverlay] = useState(false);
-  const setOverlay = useCallback((o: Overlay | null) => { overlayRef.current = o; setHasOverlay(!!o && !o.modal); }, []);
+  const setOverlay = useCallback((o: Overlay | null) => { overlayRef.current = o; setHasOverlay(!!o?.history); }, []);
   const tabsReady = useRef(false);
   const [vaults, setVaults] = useState<string[]>([]);
   const [vaultError, setVaultError] = useState<string | null>(null);
@@ -405,7 +405,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     if (by < 0 && notesRef.current.length) { closeNoteRef.current(); return; }
     const over = overlayRef.current;
     if (over?.modal) return;
-    if (by < 0 && over) { over.close(); return; }
+    if (by < 0 && over?.history) { over.close(); return; }
     const hop = histStep(histRef.current, by);
     if (!hop) return;
     histRef.current = hop.history; setHist(hop.history);

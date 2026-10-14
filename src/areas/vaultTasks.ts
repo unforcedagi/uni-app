@@ -5,7 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { buildTaskTree, failureKind, groupOf, LIVE_STATES, nodeFilterKeys, parseNodes, parseTask, subtreePaths, type AnyState, type FailureKind, type Priority, type RawNote, type Task, type TaskTree } from "./taskCore.ts";
 import { ROOT } from "./treeCore.ts";
 import { splitTitle } from "./whereCore.ts";
-import { askFromContent, askOrder, isCutTitle } from "./simpleCore.ts";
+import { askFromContent, askOrder, isCutTitle, isListLine } from "./simpleCore.ts";
 import { activeProfile } from "./profile.ts";
 
 export type Call = (cmd: string, args: Record<string, unknown>) => Promise<unknown>;
@@ -86,7 +86,7 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
     askOwner = owner; askCache.clear();
     try {
       const v = JSON.parse(localStorage.getItem(askKey()) ?? "[]");
-      if (Array.isArray(v)) for (const e of v) if (Array.isArray(e) && typeof e[0] === "string" && e[1] && typeof e[1].ask === "string") askCache.set(e[0], { ask: e[1].ask, at: typeof e[1].at === "string" ? e[1].at : null });
+      if (Array.isArray(v)) for (const e of v) if (Array.isArray(e) && typeof e[0] === "string" && e[1] && typeof e[1].ask === "string" && !isListLine(e[1].ask)) askCache.set(e[0], { ask: e[1].ask, at: typeof e[1].at === "string" ? e[1].at : null });
     } catch { /* nothing kept */ }
   }
   const askFor = (t: Task) => { const c = askCache.get(t.id); return c && c.at === t.updatedAt ? c.ask : undefined; };
