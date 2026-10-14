@@ -198,13 +198,14 @@ export function TaskSheet({ task, gone = false, here, nodeName, room, inRoom, ch
       {/* r23: the body scrolls in its own region above the footer, so nothing in it (a cue, a step) is ever drawn under the footer */}
       <div className="task-body">
       <p className="task-kind">{decision ? `Decision${dflt ? ` (${dflt})` : ""}` : "Task"}{task.node !== here ? ` · in ${nodeName(task.node)}` : ""}</p>
+      {/* r23: when it was asked, and whether the chat has moved on, first: a short window never scrolls it out of sight */}
+      {asked && <p className="task-asked" data-asked={reqAt?.at ?? undefined} data-kind={reqAt?.kind}>{capFirst(asked)}{movedOn && <> · <span className="task-movedon">{movedOnText(reqAt!)}</span></>}</p>}
       {dq?.answerable && dq.yourCall && !unsure && <small className="cp-call-lead">Your call:</small>}
       {/* r21: a step of more than one part ("A, then B") is listed, numbered, under how many steps it is */}
       <h2 id="task-sheet-title">{steps ? `${steps.steps.length} steps` : act ? <RefText text={withHosts(act.text)} vault={vault} onNote={(r) => { onClose(); onNote(r); }} /> : heading}</h2>
       {act && !steps && stepLinks(act.text, true)}
       {steps && <ol className="task-steps">{steps.steps.map((x, i) => <li key={i}><RefText text={withHosts(capFirst(x))} vault={vault} onNote={(r) => { onClose(); onNote(r); }} />{stepLinks(x, i === 0)}</li>)}</ol>}
       {act?.rest && <p className="task-next task-steps-rest"><RefText text={withHosts(capFirst(act.rest))} vault={vault} onNote={(r) => { onClose(); onNote(r); }} />{stepLinks(act.rest, false)}</p>}
-      {asked && <p className="task-asked" data-asked={reqAt?.at ?? undefined} data-kind={reqAt?.kind}>{capFirst(asked)}{movedOn && <> · <span className="task-movedon">{movedOnText(reqAt!)}</span></>}</p>}
       {/* r23: the content the ask carries (`detail`: the message, the questions, the draft), as stored */}
       {!unsure && task.detail && <div className="task-detail">{task.detail.split(/\n\s*\n/).map((para, i) => <p key={i}><DetailText text={para.trim()} vault={vault} onNote={(r) => { onClose(); onNote(r); }} /></p>)}</div>}
       {/* r22 (Codex 7): the record's title is in Details; here only where it is the subject (a check, a wait, a missing note) */}
