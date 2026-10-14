@@ -149,6 +149,9 @@
 .task-q-h { margin: 0 0 4px; font-size: 13px; letter-spacing: .02em; font-weight: 700; color: var(--th-ink); }
 .task-q-list { margin: 0; padding-left: 1.5em; display: grid; gap: 6px; font-size: 15px; line-height: 1.4; }
 .task-q-list li { overflow-wrap: anywhere; }
+/* r21: an action of more than one step, numbered under "2 steps" */
+.task-steps { margin: 4px 0 6px; padding-left: 1.5em; display: grid; gap: 6px; font: 500 16px/1.4 var(--th-sans, inherit); }
+.task-steps li { overflow-wrap: anywhere; }
 .task-q-note { margin: 6px 0 0; font-size: 13px; color: var(--th-ink2); }
 .task-answer.busy { opacity: .6; pointer-events: none; }
 /* r17: "Details" no longer sits on the sheet's bottom edge (Sonnet) */

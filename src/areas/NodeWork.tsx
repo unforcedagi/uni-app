@@ -4,7 +4,7 @@ import { cleanText } from "../interface/contract";
 import { isMe, ownerLabel, PRIORITIES, PRIORITY_LABEL, priorityOf, type Priority, type Task } from "./taskCore";
 import type { RoomRef } from "./talkCore";
 import type { ActResult, TaskAction, Undo } from "./useTasks";
-import { actionLead, answerLabel, answerText, ANSWER_MAX, checkLine, CHECK_FAILED, CHECKING, cutWords, dueLine, hostOf, withHosts, missingLine, OPEN_TASK, OPEN_TO_ANSWER, stateLine, stepAudience, TIDY_SAYS, toTidy, unknownDecision, waitsLine, waitsOnMe } from "./simpleCore";
+import { actionLead, actionOf, answerLabel, answerText, ANSWER_MAX, checkLine, CHECK_FAILED, CHECKING, cutWords, dueLine, hostOf, withHosts, missingLine, OPEN_TASK, OPEN_TO_ANSWER, stateLine, stepAudience, TIDY_SAYS, toTidy, unknownDecision, waitsLine, waitsOnMe } from "./simpleCore";
 import { requestRecheck } from "./useTasks";
 import { taskTitle } from "./whereCore";
 import { DecisionAnswer, NextText, decisionAsk, supportOf } from "./Companion";
@@ -18,6 +18,7 @@ import { copyText } from "../clipboard";
 
 export { ownerLabel };
 const OWNER = (o: string) => ownerLabel(o);
+const capFirst = (s: string) => (s ? s[0].toLocaleUpperCase() + s.slice(1) : s);
 
 /** A step with something to open in it: a web link or a linked note. */
 const linky = (text: string) => /https?:\/\/|\bwww\./.test(text) || splitRefs(text, "").some((p) => "id" in p);
@@ -109,7 +110,7 @@ export function TaskSheet({ task, gone = false, here, nodeName, room, inRoom, on
   const waits = ck?.kind === "waits" ? ck : null;
   /** r20: a note it stands on that the vault doesn't have: unresolved, "Couldn't find … · Open the task". */
   const missing = ck?.kind === "missing" ? ck : null;
-  /** r19: a record that isn't a real request: Uni's to tidy, never the action or an answer. r20: Uni's to do; nothing here asks the user. */
+  /** r19: a record that isn't a real request: never the action or an answer. r21: it needs rewording by its room; nothing here asks the user. */
   const tidy = toTidy(task);
   /** Where its questions are, once read: an explicit list, or "Open the note to answer". */
   const asks = support?.kind === "list" || support?.kind === "unclear" ? support : null;
@@ -117,6 +118,8 @@ export function TaskSheet({ task, gone = false, here, nodeName, room, inRoom, on
   const unsure = !!check || checking || unavailable || !!waits || !!missing || !!tidy;
   // r17: someone else's task that waits on the user leads with what it asks of them, whatever its first word
   const lead = decision || unsure ? null : actionLead(task.next) ?? (waitsOnMe(task) && task.next.trim() ? task.next.trim() : null);
+  /** r21: the action's steps, when it has more than one (the row reads "A, then B", or "2 steps: A, then …"). */
+  const steps = lead && !decision ? (() => { const a = actionOf(lead); return a.steps.length > 1 ? a : null; })() : null;
   /** Who the step's words are for (r17): the room ("Say go…", "Tell Uni…", a step naming this room), or a person outside it ("Tell Sebastian…"). */
   const audience = decision || !lead ? null : stepAudience(task.next, room?.name ?? null);
   const say = audience?.kind === "room" ? audience.text : null;
@@ -168,7 +171,10 @@ export function TaskSheet({ task, gone = false, here, nodeName, room, inRoom, on
     <div ref={box} className="task-sheet" role="dialog" aria-modal="true" aria-labelledby="task-sheet-title" tabIndex={-1}>
       <p className="task-kind">{decision ? `Decision${dflt ? ` (${dflt})` : ""}` : "Task"}{task.node !== here ? ` · in ${nodeName(task.node)}` : ""}</p>
       {dq?.answerable && dq.yourCall && !unsure && <small className="cp-call-lead">Your call:</small>}
-      <h2 id="task-sheet-title">{lead && !dq ? <RefText text={withHosts(lead)} vault={vault} /> : heading}</h2>
+      {/* r21: a step of more than one part ("A, then B") is listed, numbered, under how many steps it is */}
+      <h2 id="task-sheet-title">{steps ? `${steps.steps.length} steps` : lead && !dq ? <RefText text={withHosts(lead)} vault={vault} /> : heading}</h2>
+      {steps && <ol className="task-steps">{steps.steps.map((x, i) => <li key={i}><RefText text={withHosts(capFirst(x))} vault={vault} /></li>)}</ol>}
+      {steps?.rest && <p className="task-next task-steps-rest"><RefText text={withHosts(capFirst(steps.rest))} vault={vault} /></p>}
       {(lead || check || checking || waits || missing || (unavailable && decision)) && <p className="task-sub" title={sub !== rest ? rest : undefined}>{sub}</p>}
       {/* r19: why nothing is asserted yet */}
       {checking && <p className="task-q-note" role="status" aria-busy="true">{decision && !ck ? "Reading its note before saying what it asks." : "Reading the notes this stands on before saying what it needs."}</p>}
@@ -176,7 +182,7 @@ export function TaskSheet({ task, gone = false, here, nodeName, room, inRoom, on
       {waits && <p className="task-q-note">This waits on that note, which is still open. When it is finished, this comes back with its step.</p>}
       {/* r20: a missing note is unresolved, never read past */}
       {missing && <p className="task-q-note task-missing" role="status">A note this stands on isn't in the vault: it may have been moved, renamed or deleted. Nothing here is asked of you until it is found; open the task to see what it needs.</p>}
-      {tidy && !missing && !check && !checking && !unavailable && !waits && <p className="task-q-note task-tidy">{TIDY_SAYS[tidy]} Uni is tidying it: it will come back as one clear request, or be closed. Nothing here is yours to do.</p>}
+      {tidy && !missing && !check && !checking && !unavailable && !waits && <p className="task-q-note task-tidy">{TIDY_SAYS[tidy]} It needs rewording by its room as one clear request, or closing. Nothing here is yours to do.</p>}
       {gone && <p className="task-gone" role="status">This is no longer open: it was done, decided or changed elsewhere.</p>}
       {changed && !gone && <p className="task-gone task-changed" role="alert">This changed since you opened it. Nothing was saved; this is the latest.</p>}
       {dq?.answerable && !unsure && dq.full !== dq.text && /https?:\/\/|\bwww\./.test(dq.full) && <div className="task-next"><NextText text={dq.full} vault={vault} onNote={(r) => { onClose(); onNote(r); }} /></div>}
@@ -196,7 +202,7 @@ export function TaskSheet({ task, gone = false, here, nodeName, room, inRoom, on
       {decideError && !gone && <p className="task-gone task-changed" role="alert">{decideError}</p>}
       <dl className="task-facts">
         {/* r19: a record to tidy is Uni's to fix, never "Needs your decision"; r20: nor is one not read yet */}
-        <dt>Status</dt><dd>{missing ? "Can't be checked: a note is missing" : decision && (checking || unavailable) ? "Not read yet" : tidy ? "Uni is tidying it: not a request yet" : stateLine(task, (w) => isMe(w), OWNER)}</dd>
+        <dt>Status</dt><dd>{missing ? "Can't be checked: a note is missing" : decision && (checking || unavailable) ? "Not read yet" : tidy ? "Needs rewording by its room: not a request yet" : stateLine(task, (w) => isMe(w), OWNER)}</dd>
         {!isMe(task.owner) && <><dt>{isMe(task.waitingOn) ? "Task of" : "With"}</dt><dd>{OWNER(task.owner)}</dd></>}
         {task.due && <><dt>Due</dt><dd>{dueLine(task.due)}</dd></>}
       </dl>

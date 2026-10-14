@@ -13,7 +13,7 @@ import { isActiveRun, type Run } from "./steerCore";
 import { ownerLabel, type Task } from "./taskCore";
 import { taskTitle } from "./whereCore";
 import { splitLinks } from "./linkText";
-import { actionableTitle, answerChoices, answerLabel, askLead, askPreview, checkLine, CHECK_FAILED, CHECKING, DANGLING, decideLine, stripRoom, decisionQuestion, dueLine, firstClause, fitsRow, isOverdue, lineBudget, missingLine, OPEN_TASK, OPEN_TO_ANSWER, privateLabel, rowAction, rowSubParts, standsHeading, titleSays, titleWords, TIDY_LINE, toTidy, unknownDecision, verbPhrase, waitsLine, waitsOnMe, withHosts, withoutCut, rowAsk, type Choice, type NeedsFeed, type PrivateNeed, type RowAction, type Support } from "./simpleCore";
+import { actionableTitle, answerChoices, answerLabel, askLead, askPreview, checkLine, CHECK_FAILED, DANGLING, decideLine, stripRoom, decisionQuestion, dueLine, fitsRow, isOverdue, lineBudget, missingLine, OPEN_TASK, OPEN_TO_ANSWER, privateLabel, actionOf, rowAction, rowSubParts, standsHeading, titleSays, titleWords, TIDY_LINE, toTidy, unknownDecision, waitsLine, waitsOnMe, withHosts, withoutCut, rowAsk, type Choice, type NeedsFeed, type PrivateNeed, type RowAction, type Support } from "./simpleCore";
 import { requestRecheck } from "./useTasks";
 
 const KEYS = { side: "uni.companion.side.v1", sideNarrow: "uni.companion.side.narrow.v1", strip: "uni.companion.strip.v1" } as const;
@@ -83,8 +83,8 @@ export type TaskLoad = { error: string | null; /** The task tree (the nodes) cou
   /** The rows are the device's copy from this moment, being read again (r16). */ savedAt?: number | null;
   /** The read has run past 8 seconds (r16): "Still loading · Retry". */ slow?: boolean };
 
-/** Lines an action leads with before "…" (r20: two, built from the action's first clause so what is cut is the object, never the verb). */
-export const ACTION_LINES = 2;
+/** Lines an action may take (r21: the whole action; a third line rather than cut its object). */
+export const ACTION_LINES = 3;
 const URL_RE = /https?:\/\/\S+|\bwww\.\S+/g;
 /** One line of detail: no raw links (they stay in the opened item), whitespace squeezed, no dangling separators. */
 export const plainDetail = (s: string): string => s.replace(URL_RE, "").replace(/\s+/g, " ").replace(/\s*[·,;:(\[-]+\s*$/, "").replace(/\(\s*\)/g, "").trim();
@@ -130,9 +130,10 @@ function stepTokens(text: string, vault: string, onNote?: (ref: NoteRef) => void
   const out: { node: React.ReactNode; space: boolean }[] = [];
   let space = false; let first = true;
   for (const p of splitLinks(cleanText(text))) {
-    if ("url" in p) { out.push({ node: <a className="cp-link" href={p.url} title={p.url} rel="noreferrer noopener" onClick={(e) => openLink(e, p.url)}>{row ? rowLinkLabel(p.label) : p.label}</a>, space }); space = false; first = false; continue; }
+    // r21 (Codex 10): in a row a link is words (the row is one button that opens the sheet, where the link opens)
+    if ("url" in p) { out.push({ node: row ? <span className="cp-link" title={p.url}>{rowLinkLabel(p.label)}</span> : <a className="cp-link" href={p.url} title={p.url} rel="noreferrer noopener" onClick={(e) => openLink(e, p.url)}>{p.label}</a>, space }); space = false; first = false; continue; }
     for (const q of splitRefs(p.text, vault)) {
-      if ("id" in q) { out.push({ node: <RefName r={q} onNote={onNote} />, space }); space = false; first = false; continue; }
+      if ("id" in q) { out.push({ node: <RefName r={q} onNote={row ? undefined : onNote} />, space }); space = false; first = false; continue; }
       for (const w of q.text.split(/(\s+)/)) {
         if (!w) continue;
         if (/^\s+$/.test(w)) { space = true; continue; }
@@ -152,14 +153,22 @@ const wordTokens = (text: string) => text.split(/\s+/).filter(Boolean).map((w, i
  * Text clamped at `lines` lines that ends on a whole word (r15): every line full, then "…" after the last word that fits, never inside a
  * word, a link or a note's title. Drawn whole once to measure (before paint), then cut; a new width or text measures again.
  */
-function WordClamp({ tokens, lines, open, textKey, onCut, elRef, className, onClick, tag = "p", title, keep = 0 }: { tokens: { node: React.ReactNode; space: boolean }[]; lines: number; open: boolean; textKey: string; title?: string;
+function WordClamp({ tokens: tokens0, lines, open, textKey, onCut, elRef, className, onClick, tag = "p", title, keep: keep0 = 0, data, alts }: { tokens: { node: React.ReactNode; space: boolean }[]; lines: number; open: boolean; textKey: string; title?: string;
+  /** data-* attributes for the element */
+  data?: Record<string, string>;
+  /** r21: forms to try in order (a row's whole action, then shorter forms): the first that fits `lines` shows; only the last is ever cut */
+  alts?: { tokens: { node: React.ReactNode; space: boolean }[]; keep: number }[];
   /** r20: the first `keep` tokens (a row's verb phrase) are never cut: a cut falls inside the object, after them */
   keep?: number;
   onCut: (cut: boolean) => void; elRef: React.RefObject<HTMLParagraphElement | null>; className: string; onClick: (e: React.MouseEvent) => void; /** "span" inside a button */ tag?: "p" | "span" }) {
   const [cut, setCut] = useState<number | null>(null);
   const [width, setWidth] = useState(0);
+  const [form, setForm] = useState(0);
+  const f = alts?.length ? Math.min(form, alts.length - 1) : 0;
+  const tokens = alts?.length ? alts[f].tokens : tokens0;
+  const keep = alts?.length ? alts[f].keep : keep0;
   const tries = useRef(0);
-  useLayoutEffect(() => { tries.current = 0; setCut(null); }, [textKey, lines, open, width]);
+  useLayoutEffect(() => { tries.current = 0; setCut(null); setForm(0); }, [textKey, lines, open, width]);
   useLayoutEffect(() => {
     const el = elRef.current;
     if (!el || open || cut !== null) { if (open) onCut(false); return; }
@@ -175,6 +184,8 @@ function WordClamp({ tokens, lines, open, textKey, onCut, elRef, className, onCl
     let k = 0;
     while (k < words.length && lineOf(last(words[k]).top) < lines) k++;
     if (k >= words.length) { onCut(false); return; }
+    // r21: a shorter form whole before any cut
+    if (alts && f < alts.length - 1) { setForm(f + 1); return; }
     // the "…" must fit after the last word kept, on the last line
     while (k > 1 && lineOf(last(words[k - 1]).top) === lines - 1 && last(words[k - 1]).right + room > right) k--;
     // r17: never end on a hanging word ("…to the …") or a word that only leads into the rest ("Dominic: …")
@@ -199,10 +210,19 @@ function WordClamp({ tokens, lines, open, textKey, onCut, elRef, className, onCl
   }, [cut, open, lines]); // eslint-disable-line react-hooks/exhaustive-deps
   const shown = open || cut === null ? tokens : tokens.slice(0, cut).map((t, i, a) => (i === a.length - 1 && typeof t.node === "string" ? { ...t, node: t.node.replace(/[\s,;:(\[–—-]+$/, "") || t.node } : t));
   const Tag = tag;
-  return <Tag ref={elRef} className={className} title={title} data-cut={cut !== null && !open ? "true" : undefined} onClick={onClick}>
+  return <Tag ref={elRef} className={className} title={title} {...data} data-form={alts?.length ? String(f) : undefined} data-cut={cut !== null && !open ? "true" : undefined} onClick={onClick}>
     {shown.map((t, i) => <span key={i}>{i > 0 && t.space ? " " : ""}<span className="wc-w">{t.node}</span></span>)}
     {cut !== null && !open && <span className="wc-more" aria-hidden="true">…</span>}
   </Tag>;
+}
+
+/**
+ * A row's action (r21, both critics): the first of its forms that fits `lines` whole (the whole action; without its brackets; "2 steps: A, then
+ * …"), measured before paint and again when the row's width changes. Only when none fits is the last form cut, and never inside its `keep`.
+ */
+function ActionLine({ forms, vault, lines, textKey, elRef }: { forms: { text: string; keep: string }[]; vault: string; lines: number; textKey: string; elRef: React.RefObject<HTMLParagraphElement | null> }) {
+  const alts = forms.map((f) => ({ tokens: stepTokens(f.text, vault, undefined, true), keep: f.keep.split(" ").filter(Boolean).length }));
+  return <WordClamp elRef={elRef} className="cp-title cp-lead" tag="span" tokens={alts[0].tokens} alts={alts} textKey={textKey} lines={lines} open={false} onCut={() => {}} onClick={() => {}} />;
 }
 
 /**
@@ -307,6 +327,10 @@ export type RowLead = { text: string; under: string | null; go: string | null; a
  *  "Decide: …"; a note it stands on that can't be found is "Couldn't find … · Open the task" (`missing`); a decision has the same contract for
  *  what it stands on as a task. An action row leads with the action's first clause (`rowAction`), its subtitle the title or area and the due
  *  cue (`rowSub`). `area`: the row's area when it is shown outside it. */
+/** r21: "Checking…", the quiet line under a row being checked (never its title). */
+export const CHECKING_SHORT = "Checking…";
+/** A decision's question as words while its record is being read (r21): its whole question when the title holds it, else the title as words. */
+const decisionLeadWords = (t: Task, words: string): string => { const dq = decisionAsk(t); return dq.answerable ? dq.text : words; };
 export function rowLead(t: Task, area: string | null = null): RowLead {
   const tt = taskTitle(cleanText(t.title));
   const full = tt.rest;
@@ -317,9 +341,11 @@ export function rowLead(t: Task, area: string | null = null): RowLead {
   const quiet = (text: string, under: string | null, mode: RowMode): RowLead => ({ text, under, go: mode === "check" || mode === "waits" || mode === "missing" ? "" : null, answers: false, yourCall: false, lead: false, mode });
   // r20: nothing is owed until it is known: a decision whose record isn't read yet (or couldn't be) asserts nothing
   if (t.kind === "decision" && (t.askFailed || ck?.kind === "unavailable")) return quiet(words, null, "unavailable");
-  if (t.kind === "decision" && unknownDecision(t)) return quiet(CHECKING, words, "checking");
+  // r21 (both critics): a row being checked leads with its question (a decision) or its title (a task), "Checking…" a quiet line under it: it
+  // asserts no action and isn't counted until it is classified
+  if (t.kind === "decision" && unknownDecision(t)) return quiet(decisionLeadWords(t, words), CHECKING_SHORT, "checking");
   const ask = rowAsk(askOf(full), t.ask, false, !!next, tt.cut);
-  if (ck?.kind === "checking") return quiet(CHECKING, ask.text || null, "checking");
+  if (ck?.kind === "checking") return quiet(t.kind === "decision" ? decisionLeadWords(t, words) : ask.text || words, CHECKING_SHORT, "checking");
   if (ck?.kind === "unavailable") return quiet(ask.text || "This task", null, "unavailable");
   // r20: a missing note it stands on is unresolved: no action, no "I did this"; the way on is the task itself
   if (ck?.kind === "missing") return quiet(`${missingLine(ck)} · ${OPEN_TASK}`, t.kind === "decision" ? words : ask.text || null, "missing");
@@ -337,7 +363,7 @@ export function rowLead(t: Task, area: string | null = null): RowLead {
   // r17: someone else's task that waits on the user leads with what it asks of them; the task itself is the quiet line under it
   const theirs = waitsOnMe(t);
   // r20: the action, never the stored sentence: its first clause, the date label and the notes after it left to the subtitle and the sheet
-  const action = rowAction(next) ?? (theirs && next ? (() => { const c = firstClause(next); return { text: c, verb: verbPhrase(c), rest: next.slice(c.length).trim(), prefix: null }; })() : null);
+  const action = rowAction(next) ?? (theirs && next ? actionOf(next) : null);
   if (action) {
     // r17: someone else's task says whose it is (and the task, when its title says something the action doesn't)
     const from = `From ${ownerLabel(t.owner)}`;
@@ -349,12 +375,13 @@ export function rowLead(t: Task, area: string | null = null): RowLead {
 }
 
 /**
- * A Needs-you row (r14): action first. A task whose next step names an action leads with it (up to four lines, then More), its title under it as
- * one quiet line (r18: small print is never more than a line); otherwise the title, then the next step. A decision is its whole question beside
- * its stored options when it fits; a longer one shows a preview and "Open to decide ›"; one with no options is "Your call: <question> ›".
- * `compact` (the companion, r18): no per-row More, at most three lines of action and one of step; the row opens its sheet.
+ * A Needs-you row (r14): action first. A task whose next step names an action leads with it (r21: the whole action, up to three lines), its
+ * title or area under it as one quiet line (r18: small print is never more than a line); otherwise the title, then the next step. A decision is
+ * its question; its answers are in the sheet. r21 (Codex 10): the row is one button that opens its sheet, with nothing clickable inside it.
+ * `compact` (the companion, r18): at most one line of step under a title.
  */
-export function NeedRow({ t, onTask, onNote, meta, compact = false, area = null }: { t: Task; onTask: (t: Task) => void; /** r20 (Codex 7): answers are in the sheet only; kept for callers */ onDecide?: (t: Task, option: string) => void; onNote?: (ref: NoteRef) => void;
+export function NeedRow({ t, onTask, meta, compact = false, area = null }: { t: Task; onTask: (t: Task) => void; /** r20 (Codex 7): answers are in the sheet only; kept for callers */ onDecide?: (t: Task, option: string) => void;
+  /** r21 (Codex 10): a row's notes and links open in its sheet; kept for callers */ onNote?: (ref: NoteRef) => void;
   /** A quiet line on where it stands, for a row that is not the user's ("With Casey · in progress"; the work view's In motion and Later). */
   meta?: string | null; compact?: boolean;
   /** r20: the row's area when it is shown outside it: an action row's subtitle names it when its title can't say where it belongs. */
@@ -370,8 +397,6 @@ export function NeedRow({ t, onTask, onNote, meta, compact = false, area = null 
   const text = r.text;
   const sup = isDecision ? null : supportOf(t);
   const titleRef = useRef<HTMLElement>(null);
-  /** r19 (Codex 7): rows never open in place (the sheet shows all of a request); kept as a constant for the clamps below. */
-  const open = false;
   const [titleLines, setTitleLines] = useState(1);
   /** r20: the subtitle's "where" didn't fit whole beside the due cue, so it is dropped (never cut short) */
   const [whereHidden, setWhereHidden] = useState(false);
@@ -398,47 +423,50 @@ export function NeedRow({ t, onTask, onNote, meta, compact = false, area = null 
   // Uni's to tidy) never shows it (r19)
   const showNext = !!next && !r.lead && r.mode === "title";
   const nextLines = compact ? Math.min(1, lineBudget(Math.min(titleLines, titleMax), !!due, 4).next) : lineBudget(Math.min(titleLines, titleMax), !!due, 4).next;
-  const clampStyle = open || isDecision ? undefined : ({ WebkitLineClamp: titleMax, lineClamp: titleMax } as React.CSSProperties);
+  const clampStyle = isDecision ? undefined : ({ WebkitLineClamp: titleMax, lineClamp: titleMax } as React.CSSProperties);
   // r20: an action row's subtitle carries its due cue ("COhere opens Oct 15 · due today"); other rows keep the due line of their own
   const meta_ = <>{r.sub ? (r.under && <span className="cp-under cp-sub" title={r.under}>{r.sub.where && <FitLine className="cp-sub-where" text={r.sub.where} fallback={r.sub.short ?? null} onHide={setWhereHidden} />}
       {r.sub.when && <span className={`cp-sub-when${isOverdue(t.due) ? " overdue" : ""}`}>{r.sub.where && !whereHidden ? " · " : ""}{r.sub.when}</span>}</span>)
     : r.under && <SmallLine className="cp-under" text={r.under} />}
     {due && !r.lead && <small className={`cp-detail${isOverdue(t.due) ? " overdue" : ""}`}>{due}</small>}
     {meta && <SmallLine className="cp-detail cp-meta" text={meta} />}</>;
-  const openSource = (ref: { vault: string; id: string }) => (onNote ? onNote(ref) : onTask(t));
-  return <li className="cp-item" data-open={open ? "true" : undefined} data-lead={r.lead ? "action" : undefined} data-mode={r.mode}>
-    {r.lead
-      // the action leads, its links and linked notes still open (outside the row's button); a tap on its words opens the sheet like the row
-      // r15: full lines that end on a whole word ("…" then More), never a cut inside a word, a link or a note's title
-      ? <><WordClamp elRef={titleRef as React.RefObject<HTMLParagraphElement | null>} className="cp-title cp-lead" tokens={stepTokens(r.action?.text ?? next, vault, onNote, true)} textKey={`${vault}\n${r.action?.text ?? next}`} lines={titleMax} open={open}
-          keep={r.action ? r.action.verb.split(" ").filter(Boolean).length : 0} onCut={() => {}} onClick={(e) => { if (!(e.target as Element).closest("a, button")) onTask(t); }} />
-        <button type="button" className="cp-need cp-need-under" data-id={id ?? undefined} aria-label={[text, r.under, due, meta].filter(Boolean).join(". ")} onClick={() => onTask(t)}>{meta_}</button></>
-      : <button type="button" className={`cp-need${isDecision ? " decision" : ""}`} data-id={id ?? undefined} data-mode={r.mode} aria-busy={r.mode === "checking" || undefined} aria-label={r.yourCall ? `Your call: ${text}` : undefined} onClick={() => onTask(t)}>
-        {r.yourCall && <small className="cp-call-lead">Your call:</small>}
-        {clampMode
-          // r16: a question too long for a row: whole words, then "Open to decide ›" (r18: the companion's "Your call"/"Check" lines too)
+  // r21 (Codex 10): one target per visible request: the whole row is one button that opens its sheet (its links and notes open there).
+  // r21 (P1-1): a row whose check failed retries as it opens, so its "Retry" is what the tap does
+  const open_ = () => { if (r.mode === "unavailable") requestRecheck(); onTask(t); };
+  const label = r.lead ? [r.action?.text ? plainDetail(withHosts(r.action.text)) : text, r.under, meta].filter(Boolean).join(". ") : r.yourCall ? `Your call: ${text}` : undefined;
+  return <li className="cp-item" data-lead={r.lead ? "action" : undefined} data-mode={r.mode}>
+    <button type="button" className={`cp-need${isDecision ? " decision" : ""}${r.lead ? " cp-need-lead" : ""}`} data-id={id ?? undefined} data-mode={r.mode} aria-busy={r.mode === "checking" || undefined} aria-label={label} onClick={open_}>
+      {r.yourCall && <small className="cp-call-lead">Your call:</small>}
+      {r.lead
+        // r21: the whole action, a third line before its object is cut; "2 steps: A, then …" when two steps don't fit
+        ? <ActionLine elRef={titleRef as React.RefObject<HTMLParagraphElement | null>} forms={r.action?.forms.length ? r.action.forms : [{ text: next, keep: "" }]} vault={vault} lines={titleMax} textKey={`${vault}\n${next}`} />
+        : clampMode
+          // r16: a question too long for a row: whole words, then "Open to decide" (r18: the companion's "Your call"/"Check" lines too)
           ? <span className="cp-title-wrap"><WordClamp elRef={titleRef as React.RefObject<HTMLParagraphElement | null>} className="cp-title cp-preview" tokens={wordTokens(withoutCut(text))} textKey={text} lines={titleMax} open={false} onCut={() => {}} onClick={() => {}} tag="span" /></span>
           // r20: no "›" on any row: the whole row opens its sheet, in the companion and the work view alike
           : <span ref={titleRef} className="cp-title" style={clampStyle}><RefText text={text} vault={vault} /></span>}
-        {r.go && <span className="cp-open-decide">{r.go}</span>}
-        {meta_}</button>}
-    {!next && !isDecision && r.mode === "title" && !actionableTitle(text) && text !== "Open to see what's needed" && <p className="cp-open-to-see">Open to see what's needed</p>}
-    {/* r19: the read failed: not "nothing there", and not the action either */}
-    {r.mode === "unavailable" && <p className="cp-checkfail" role="status">{CHECK_FAILED} · <button type="button" className="cp-retry" onClick={requestRecheck}>Retry</button></p>}
-    {/* r19 (Codex 7): one way to see all of a request, in the companion and the work view alike: the row opens its sheet, never More in place */}
-    {showNext && <div className="cp-next-tap" onClick={(e) => { if (!(e.target as Element).closest("a, button")) onTask(t); }}><NextText text={next} vault={vault} onNote={onNote} lines={nextLines} open={false} onOpen={() => onTask(t)} /></div>}
-    {/* r18: "Answer N questions" only from an explicit list; an unclear source opens the note; a closed one is the row itself ("Check: …") */}
-    {sup?.kind === "list" ? <button type="button" className="cp-open-decide cp-rest cp-questions" onClick={() => onTask(t)}>{answerLabel(sup.items.length)}<span aria-hidden="true"> ›</span></button>
-      : sup?.kind === "unclear" ? <button type="button" className="cp-open-decide cp-rest cp-questions" onClick={() => openSource(sup.from ?? { vault, id: t.id })}>{OPEN_TO_ANSWER}<span aria-hidden="true"> ›</span></button>
-      : null /* r20: a row leads with the action's first clause; a step cut when it was written says so in its sheet, not with a "›" here */}
+      {r.go && <span className="cp-open-decide">{r.go}</span>}
+      {!next && !isDecision && r.mode === "title" && !actionableTitle(text) && text !== "Open to see what's needed" && <span className="cp-open-to-see">Open to see what's needed</span>}
+      {/* the step under a title, as words (its links open in the sheet) */}
+      {showNext && nextLines > 0 && <span className="cp-next cp-next-in" style={{ WebkitLineClamp: nextLines, lineClamp: nextLines } as React.CSSProperties}>{splitLinks(cleanText(next)).map((p, i) => "url" in p
+        ? <span key={i} className="cp-link" title={p.url}>{rowLinkLabel(p.label)}</span> : <RefText key={i} text={p.text} vault={vault} />)}</span>}
+      {/* r18: "Answer N questions" only from an explicit list; an unclear source says to open the note (the sheet has both ways in) */}
+      {sup?.kind === "list" ? <span className="cp-questions">{answerLabel(sup.items.length)}</span> : sup?.kind === "unclear" ? <span className="cp-questions">{OPEN_TO_ANSWER}</span> : null}
+      {meta_}
+      {/* r19: the read failed: not "nothing there", and not the action either; r21: the tap retries */}
+      {r.mode === "unavailable" && <span className="cp-checkfail" role="status">{CHECK_FAILED} · Retry</span>}
+    </button>
   </li>;
 }
 
-/** A private area's items, from outside it (r14): "Sanctum: 2 for you ›", opening that area. Never a title. */
+/** A private area's items, from outside it (r14): "Sanctum: 2 for you", opening that area. Never a title. r21: no "›" on any row. */
 export function PrivateRow({ p, onPrivate }: { p: PrivateNeed; onPrivate?: (open: PrivateNeed["open"]) => void }) {
   return <li className="cp-item cp-private-item"><button type="button" className="cp-need cp-private" onClick={() => onPrivate?.(p.open)}>
-    <span className="cp-title">{privateLabel(p)}<span className="cp-go" aria-hidden="true"> ›</span></span></button></li>;
+    <span className="cp-title">{privateLabel(p)}</span></button></li>;
 }
+
+/** r21: "Show 15 more": a link row says what it does, with no "›". */
+export const moreLabel = (n: number): string => `Show ${n} more`;
 
 /**
  * Only whole rows are shown: in the side panel (`fit`) the rows that don't fit above the footer wait behind "+N more ›" rather than being
@@ -528,8 +556,8 @@ export function NeedsList({ needs: owed, pending = [], fit, onTask, onDecide, on
   return <>
     <ul ref={listRef} className="cp-list">{shown.map((t) => <NeedRow key={t.id} t={t} onTask={onTask} onDecide={onDecide} onNote={onNote} area={placeOf?.(t) ?? null} compact />)}</ul>
     {extra > 0
-      ? <button type="button" className="cp-more cp-more-rows cp-more-all" title={moreTitle ?? undefined} onClick={() => onMore?.()}>{hidden + extra} more ›</button>
-      : hidden > 0 && <button type="button" className="cp-more cp-more-rows" onClick={() => (onMore ? onMore() : setAll(true))}>+{hidden} more ›</button>}
+      ? <button type="button" className="cp-more cp-more-rows cp-more-all" title={moreTitle ?? undefined} onClick={() => onMore?.()}>{moreLabel(hidden + extra)}</button>
+      : hidden > 0 && <button type="button" className="cp-more cp-more-rows" onClick={() => (onMore ? onMore() : setAll(true))}>{moreLabel(hidden)}</button>}
   </>;
 }
 
@@ -545,7 +573,7 @@ function Body({ stands, ready, note, load, feed, rest = 0, moreTitle = null, onP
       <h3 className="cp-h">Needs you</h3>
       {/* r17: Uni's panel is at most three rows and one "N more ›" (private items folded in) to the work view, which keeps the full list */}
       {(feed.rows.length > 0 || !!feed.pending?.length) && <NeedsList needs={feed.rows} pending={feed.pending} fit={fit} onTask={onTask} onDecide={onDecide} onNote={onNote} placeOf={placeOf} onMore={rest > 0 && onEverything ? onEverything : onMore} extra={onEverything ? rest : 0} moreTitle={moreTitle} keepOne={keepOne} />}
-      {feed.rows.length === 0 && rest > 0 && onEverything && <button type="button" className="cp-more cp-more-rows cp-more-all" title={moreTitle ?? undefined} onClick={onEverything}>{rest} more ›</button>}
+      {feed.rows.length === 0 && rest > 0 && onEverything && <button type="button" className="cp-more cp-more-rows cp-more-all" title={moreTitle ?? undefined} onClick={onEverything}>{moreLabel(rest)}</button>}
       {feed.privates.length > 0 && <ul className="cp-list cp-privates">{feed.privates.map((p) => <PrivateRow key={p.key} p={p} onPrivate={onPrivate} />)}</ul>}
       {feed.total === 0 && !feed.pending?.length && <p className="cp-none">Nothing needs you here.</p>}
       {health}

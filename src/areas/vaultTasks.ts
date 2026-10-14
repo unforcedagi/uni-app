@@ -349,7 +349,7 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
   const cachedChecks = (): Map<string, CheckState> => { checksLoaded(); return new Map([...checkCache].map(([id, rec]) => [id, { rec, failedAt: null }])); };
   /**
    * Read the supporting notes of every row in Needs you that stands on any (r19), after the list is on screen (a few at a time, at most 40):
-   * on every list refresh, whatever is kept. Each task's outcome: a fresh record, or (the read failed) the record kept before with `failedAt`.
+   * on every list refresh, whatever is kept. Each task's outcome: a fresh record, or (the read failed) `failedAt` and no record (r21: the old one is invalidated).
    * `onEach` hears each outcome as it lands, so one slow note doesn't hold the others back.
    */
   async function loadChecks(tasks: readonly Task[], keysOf: (t: Task) => readonly string[], onEach?: (id: string, s: CheckState) => void): Promise<Map<string, CheckState>> {
@@ -369,7 +369,10 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
           if (!had || had.at <= started) { checkCache.delete(t.id); checkCache.set(t.id, rec); kept = true; }
           s = { rec, failedAt: null };
         } catch {
-          s = { rec: checkCache.get(t.id) ?? null, failedAt: started };
+          // r21 (Codex P1-1): a failed read invalidates what this device verified before: it is no longer painted as current on the next launch
+          const had = checkCache.get(t.id);
+          if (had && had.at <= started) { checkCache.delete(t.id); kept = true; }
+          s = { rec: null, failedAt: started };
         }
         out.set(t.id, s); onEach?.(t.id, s);
     });

@@ -37,19 +37,20 @@ function fakeVault(list: N[], delay = 0) {
 /** The real steps (scratch copy, 10-14) and what a row must lead with: the whole verb phrase, and the action's first clause. */
 const REAL: [string, string, string][] = [
   // the four Sonnet cuts
-  ["Review the Woven Web handoff draft, fill the unknowns, then talk with Harper yourself.", "Review the Woven Web handoff draft", "Review the Woven Web handoff draft, fill the unknowns"],
+  ["Review the Woven Web handoff draft, fill the unknowns, then talk with Harper yourself.", "Review the Woven Web handoff draft", "Review the Woven Web handoff draft, fill the unknowns, then talk with Harper yourself"],
   ["Wed 10-14: say go on prod deploy of #38 + #58; Harper signs off the copy/photos before/after (posting today); yes/no on add-only DB…", "Say go", "Say go on prod deploy of #38 + #58"],
   ["Edit and send the ATLAS follow-up to Mark and Dominic from your account; fill the opening, sign-off and next-review date.", "Edit and send the ATLAS follow-up", "Edit and send the ATLAS follow-up to Mark and Dominic from your account"],
-  ["Tell Uni who pays (Techne or Gitcoin Foundation) and how: crypto or ACH/Stripe, plus Woven Web's legal details.", "Tell Uni who pays", "Tell Uni who pays (Techne or Gitcoin Foundation) and how"],
+  ["Tell Uni who pays (Techne or Gitcoin Foundation) and how: crypto or ACH/Stripe, plus Woven Web's legal details.", "Tell Uni who pays", "Tell Uni who pays (Techne or Gitcoin Foundation) and how: crypto or ACH/Stripe, plus Woven Web's legal details"],
   // more from the same list
-  ["Look at https://cohere-signup-staging.unforced.workers.dev/?look=ecology on phone, then forward #cohere's 'For Harper' block (posted 10-13)", "Look at https://cohere-signup-staging.unforced.workers.dev/?look=ecology", "Look at https://cohere-signup-staging.unforced.workers.dev/?look=ecology on phone"],
-  ["Production go: gateway deploy ($10/day cap), merge #55, BV_CHAT_ENABLED on; listen to 2 Jacobs clips first", "Production go: gateway deploy", "Production go: gateway deploy ($10/day cap), merge #55, BV_CHAT_ENABLED on"],
-  ["Tell Uni how to reach the friends box: add uni-1's SSH key for a read-only user, or have Omar run the export himself.", "Tell Uni how", "Tell Uni how to reach the friends box"],
-  ["Reply: keep or archive the 87 Tana tasks (recommended: keep 15, fold 32, archive 40), and is journal Parachute's default entry type?", "Reply: keep or archive the 87 Tana tasks", "Reply: keep or archive the 87 Tana tasks"],
-  ["Approve or change the unforced.dev mail cutover plan (uni:01M3ZR1RDJAZXTM6NQS74P8YS5).", "Approve or change the unforced.dev mail cutover plan", "Approve or change the unforced.dev mail cutover plan (uni:01M3ZR1RDJAZXTM6NQS74P8YS5)."],
+  ["Look at https://cohere-signup-staging.unforced.workers.dev/?look=ecology on phone, then forward #cohere's 'For Harper' block (posted 10-13)", "Look at https://cohere-signup-staging.unforced.workers.dev/?look=ecology", "Look at https://cohere-signup-staging.unforced.workers.dev/?look=ecology on phone, then forward #cohere's 'For Harper' block (posted 10-13)"],
+  ["Production go: gateway deploy ($10/day cap), merge #55, BV_CHAT_ENABLED on; listen to 2 Jacobs clips first", "Production go: gateway deploy", "Production go: gateway deploy ($10/day cap), merge #55, BV_CHAT_ENABLED on; listen to 2 Jacobs clips first"],
+  ["Tell Uni how to reach the friends box: add uni-1's SSH key for a read-only user, or have Omar run the export himself.", "Tell Uni how", "Tell Uni how to reach the friends box: add uni-1's SSH key for a read-only user, or have Omar run the export himself"],
+  ["Reply: keep or archive the 87 Tana tasks (recommended: keep 15, fold 32, archive 40), and is journal Parachute's default entry type?", "Reply: keep or archive the 87 Tana tasks", "Reply: keep or archive the 87 Tana tasks (recommended: keep 15, fold 32, archive 40), and is journal Parachute's default entry type?"],
+  ["Approve or change the unforced.dev mail cutover plan (uni:01M3ZR1RDJAZXTM6NQS74P8YS5).", "Approve or change the unforced.dev mail cutover plan", "Approve or change the unforced.dev mail cutover plan (uni:01M3ZR1RDJAZXTM6NQS74P8YS5)"],
 ];
 
-await check("rows lead with the action: the verb phrase and its object, to the end of the first clause; the rest goes to the sheet", () => {
+// r21 (both critics): the whole action, to the sentence's end; only context after it (a ";" clause that isn't the user's) is the sheet's
+await check("rows lead with the action: the verb phrase and its object, the whole action (r21); the context after it goes to the sheet", () => {
   for (const [next, verb, text] of REAL) {
     const a = rowAction(next)!;
     assert.ok(a, next);
@@ -57,7 +58,7 @@ await check("rows lead with the action: the verb phrase and its object, to the e
     assert.equal(a.text, text, next);
     assert.ok(a.text.startsWith(a.verb), `the action starts with its verb phrase: ${next}`);
   }
-  assert.equal(rowAction("Review the Woven Web handoff draft, fill the unknowns, then talk with Harper yourself.")!.rest, "then talk with Harper yourself.");
+  assert.equal(rowAction("Edit and send the ATLAS follow-up to Mark and Dominic from your account; fill the opening, sign-off and next-review date.")!.rest, "fill the opening, sign-off and next-review date.");
   // a date label is never what a row leads with, and is kept as the cue when there is no due date
   assert.equal(rowAction("Wed 10-14: say go on prod deploy of #38 + #58; Harper signs off")!.prefix, "Wed 10-14");
   assert.equal(rowAction("10-05 09:04: send Runway the claim; wait")!.text, "Send Runway the claim");

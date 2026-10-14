@@ -120,8 +120,9 @@ h1 { font-family: var(--serif); font-weight: 500; font-size: 34px; line-height: 
 .message.status-past { display: block; }
 .message.status-past > summary { display: flex; gap: 10px; align-items: baseline; cursor: pointer; list-style: none; }
 .message.status-past > summary::-webkit-details-marker { display: none; }
-.message.status-past > summary::after { content: "›"; font-size: 12px; }
-.message.status-past[open] > summary::after { content: "⌄"; }
+/* r21: no "›" on a row: a folded line says it opens as the Later fold does (+, then –) */
+.message.status-past > summary::after { content: "+"; font-size: 12px; }
+.message.status-past[open] > summary::after { content: "–"; }
 .status-past-body { margin: 2px 0 0; white-space: pre-wrap; }
 .message-meta strong { color: var(--accent); font-size: 14px; font-weight: 600; }
 .message-meta time { color: var(--muted); font-size: 11px; }

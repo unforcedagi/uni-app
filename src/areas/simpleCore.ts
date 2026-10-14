@@ -633,9 +633,13 @@ export type Check = { kind: "checking" } | { kind: "unavailable" } | Assessed;
 export function checkOf(t: Parameters<typeof taskDeps>[0] & Pick<Task, "updatedAt">, state: CheckState | undefined, nowMs: number): Check | null {
   if (!hasDeps(taskDeps(t))) return null;
   const rec = state?.rec;
+  // r21 (Codex P1-1): a failed check newer than the last good one invalidates it: "Couldn't check · Retry", never the old instruction
+  if (state?.failedAt && (!rec || state.failedAt >= rec.at)) return { kind: "unavailable" };
   if (rec && rec.taskRev === t.updatedAt && nowMs - rec.at < CHECK_TTL && nowMs >= rec.at - 60_000) return rec.result;
   return state?.failedAt ? { kind: "unavailable" } : { kind: "checking" };
 }
+/** r21: Retry: a failed check reads as checking again (never the result it invalidated) until a read succeeds. */
+export const retryState = (s: CheckState): CheckState => (s.failedAt ? { rec: null, failedAt: null } : s);
 export const CHECKING = "Checking what's needed…";
 export const CHECK_FAILED = "Couldn't check";
 /** "Waits on “Mail plan v2” first": a `depends_on` note that is still open (r19). */
@@ -746,19 +750,82 @@ export function firstClause(text: string, from = 0): string {
   return out.replace(/[\s,;:—–-]+$/, "").trim();
 }
 /**
- * What a row leads with (r20, both critics): the action, never the stored sentence. A leading date label is dropped (it is the due cue, or the
- * subtitle); then the verb phrase and its object, to the end of the first clause ("Review the Woven Web handoff draft, fill the unknowns" — "then
- * talk with Harper yourself" is the sheet's). `verb`: the part a two-line row never cuts. `rest`: what the sheet keeps. Null: not an action.
+ * What a row leads with (r20; r21, both critics: the whole action). A leading date label is dropped (it is the due cue, or the subtitle); the
+ * action is the verb phrase with all its objects and recipients, up to the sentence's end ("Edit and send the ATLAS follow-up to Mark and
+ * Dominic from your account"). Only context after it is the sheet's: a ";" clause that isn't the user's ("; Harper signs off…"), a spaced dash,
+ * "because…". A step written "A, then B" (or "A; then B") is both steps (`steps`). `forms`: what a row may show, best first: the whole action;
+ * the same without its brackets (dates, examples, links' notes); for more than one step, "2 steps: A, then …" (the sheet lists them). `keep`:
+ * each form's part a cut never enters. `text`: the whole action. Null: not an action.
  */
-export type RowAction = { text: string; verb: string; rest: string; prefix: string | null };
+export type RowAction = { text: string; verb: string; rest: string; prefix: string | null; steps: string[]; forms: { text: string; keep: string }[] };
+/** Bracket depth before each character of a text ("(…)", "[…]"). */
+const depths = (t: string): number[] => { const d: number[] = []; let n = 0; for (let i = 0; i < t.length; i++) { const c = t[i]; if (c === "(" || c === "[") n++; d.push(n); if ((c === ")" || c === "]") && n > 0) n--; } return d; };
+/** Where a "then" joins two steps (r21): ", then", "; then", " and then", or a bare " then " before a verb. */
+const THEN = /(?:,|;)?\s+(?:and\s+)?then\s+(?=\S)/gi;
+const isThen = (t: string, m: RegExpExecArray): boolean => /^[,;]|\band\s/i.test(m[0]) || ACTION_VERBS.test(t.slice(m.index + m[0].length));
+/** A ";" clause that is a step the user does before the rest ("; listen to 2 Jacobs clips first"). */
+const FIRST_CLAUSE = /^;\s*([^;.!?]*\bfirst)(?=[.;!?]|$)/i;
+/** Where the action ends (r21): the sentence's end, or the first ";" (not "; then", not "; … first"), spaced dash or "because" outside brackets. */
+function actionEnd(t: string): number {
+  const d = depths(t);
+  for (let i = 0; i < t.length; i++) {
+    if (d[i] !== 0) continue;
+    const c = t[i]; const after = t.slice(i);
+    if ((c === "." || c === "!" || c === "?") && (i + 1 === t.length || /\s/.test(t[i + 1]))) {
+      if (c === "." && /\b(?:e\.g|i\.e|etc|vs|approx|incl)$/i.test(t.slice(0, i))) continue;
+      // a question carried on by the next ("…browser share? And keep logged-in sessions or log out after each job?") is one ask
+      const more = c === "?" ? /^\s+(?:and|or|also)\b[^.!?]*\?/i.exec(t.slice(i + 1)) : null;
+      if (more) { i += more[0].length - 1; continue; }
+      return c === "." ? i : i + 1;
+    }
+    if (c === ";") {
+      if (/^;\s*(?:and\s+)?then\s/i.test(after)) continue;
+      const f = FIRST_CLAUSE.exec(after);
+      if (f && ACTION_VERBS.test(f[1].trim())) { i += f[0].length - 1; continue; }
+      return i;
+    }
+    if (/^\s[—–-]\s/.test(after) || /^,?\s+because\s/i.test(after)) return i;
+  }
+  return t.length;
+}
+/** The action's steps (r21), in the order they are done ("A; B first" is B, then A). */
+function stepsOf(region: string): string[] {
+  const d = depths(region);
+  const out: string[] = []; let from = 0;
+  THEN.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = THEN.exec(region))) { if (d[m.index] === 0 && isThen(region, m)) { out.push(region.slice(from, m.index)); from = m.index + m[0].length; } }
+  out.push(region.slice(from));
+  const steps = out.map((x) => x.replace(/^[\s,;:]+|[\s,;:—–-]+$/g, "").trim()).filter(Boolean);
+  // "…; listen to 2 Jacobs clips first": that clause is the first step
+  const last = steps.length ? steps[steps.length - 1] : "";
+  const semi = last.lastIndexOf(";");
+  if (semi > 0 && depths(last)[semi] === 0) { const f = FIRST_CLAUSE.exec(last.slice(semi)); if (f) return [capFirst(f[1].trim()), ...steps.slice(0, -1), last.slice(0, semi).trim()]; }
+  return steps;
+}
+/** A text without its bracketed parts ("Tell Uni who pays (Techne or Gitcoin Foundation) and how" → "Tell Uni who pays and how"). */
+export const withoutBrackets = (t: string): string => { const d = depths(t); let out = ""; for (let i = 0; i < t.length; i++) if (d[i] === 0 && t[i] !== ")" && t[i] !== "]") out += t[i]; return out.replace(/\s+([,;:.!?])/g, "$1").replace(/\s+/g, " ").trim(); };
+/** The row's form for more than one step that doesn't fit whole (r21): "2 steps: A, then …". */
+export const stepsLine = (steps: readonly string[]): string => `${steps.length} steps: ${withoutBrackets(steps[0])}, then …`;
 export function rowAction(next: string | null | undefined): RowAction | null {
   const lead = actionLead(next);
   if (!lead) return null;
-  const { prefix } = datePrefix(plainStep(next));
-  const verb = verbPhrase(lead);
-  const text = firstClause(lead, Math.min(verb.length, lead.length));
-  const kept = text.length >= verb.length ? text : verb;
-  return { text: kept, verb, rest: lead.slice(kept.length).replace(/^[\s,;:—–-]+/, "").trim(), prefix };
+  return actionOf(lead, datePrefix(plainStep(next)).prefix);
+}
+/** The whole action of a step already known to be one (r21): its text, steps and forms. */
+export function actionOf(lead: string, prefix: string | null = null): RowAction {
+  const at = actionEnd(lead);
+  const text = lead.slice(0, at).replace(/[\s,;:—–-]+$/, "").trim() || lead;
+  const verb = verbPhrase(text);
+  const steps = stepsOf(text);
+  const forms: { text: string; keep: string }[] = [];
+  const add = (f: string, keep: string) => { if (f && !forms.some((x) => x.text === f)) forms.push({ text: f, keep }); };
+  // what a cut never enters: the verb phrase and the rest of its first clause ("Send the SOW to Casey when convenient", never "…to Mark…")
+  const main = (t: string) => { const v = verbPhrase(t); const c = firstClause(t, Math.min(v.length, t.length)); return c.length >= v.length ? c : v; };
+  add(text, main(text));
+  add(withoutBrackets(text), main(withoutBrackets(text)));
+  if (steps.length > 1) add(stepsLine(steps), `${steps.length} steps: ${main(withoutBrackets(steps[0]))}`);
+  return { text, verb, rest: lead.slice(text.length).replace(/^[\s.,;:—–-]+/, "").trim(), prefix, steps, forms };
 }
 const sig = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}\s-]/gu, " ").split(/\s+/).filter((w) => w.length > 2 && !/^(?:the|and|for|with|from|your|this|that|into|onto)$/.test(w));
 /** Whether a title mostly says again what the action says ("Send the ATLAS Oct 12 follow-up email" under "Edit and send the ATLAS follow-up…"). */
