@@ -109,6 +109,7 @@ export function TaskSheet({ task, gone = false, here, nodeName, room, inRoom, on
       {lead && <p className="task-sub">{rest}</p>}
       {gone && <p className="task-gone" role="status">This is no longer open: it was done, decided or changed elsewhere.</p>}
       {changed && !gone && <p className="task-gone task-changed" role="alert">This changed since you opened it. Nothing was saved; this is the latest.</p>}
+      {dq?.answerable && dq.full !== dq.text && /https?:\/\/|\bwww\./.test(dq.full) && <div className="task-next"><NextText text={dq.full} vault={vault} onNote={(r) => { onClose(); onNote(r); }} /></div>}
       {dq && !dq.answerable && !reading && <p className="task-next"><button type="button" className="task-link" onClick={() => { onClose(); onNote({ vault, id: task.id }); }}>Open the note to read the question ›</button></p>}
       {/* the step itself, with its links to open, when the lead had to drop them (a URL, a linked note) or when it is not an action */}
       {task.next && (!lead || linky(task.next)) && <div className="task-next"><NextText text={task.next} vault={vault} onNote={(r) => { onClose(); onNote(r); }} /></div>}

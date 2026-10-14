@@ -2155,6 +2155,31 @@ test.describe('r16', () => {
     for (const t of await page.locator('.cp-body .cp-need .cp-title').allInnerTexts()) expect(t.trim()).not.toMatch(/(…|\.\.\.)$/);
   });
 
+  test('a step cut at the writer\'s 140 characters ends on a whole word with a way to the rest; a note that is only a heading and options is a whole question', async ({ page }) => {
+    await boot(page);
+    await openRoom(page, 'ATLAS');
+    const id = await taskId(page, /SOW for the commons grant/);
+    const cut = 'Merge RegenHub PRs #108 and #109 (both green), then answer the nine operational/editorial questions (door beep, hours, hero wording…) in the';
+    expect(cut.length).toBe(140);
+    await page.evaluate(([i, n]) => (window as any).__setTask(i, { next: n }), [id, cut]);
+    // the decision's note is only its heading (with a preview link) and its options
+    await page.evaluate(() => { const t = (window as any).__tasks.find((x: any) => x.id === 'dq2'); t.path = 'Decisions/2026-10-13 Ship the ATLAS hosting? (preview:…'; t.content = '# Ship the ATLAS hosting? (preview: https://example.invalid/hosting)\n\n- Self-host\n- Managed'; t.updatedAt = new Date(Date.now() + 6000).toISOString(); });
+    await refresh(page, '2026-10-09T10:01:00.000Z');
+    await openCompanion(page);
+    const row = page.locator('.cp-body .cp-item').filter({ hasText: 'Merge RegenHub PRs' });
+    // it ends on a whole word and says it is cut (the panel's four lines may cut it sooner), never "…in the"
+    await expect(row.locator('.cp-lead')).toHaveText(/…$/);
+    await expect(row.locator('.cp-lead')).not.toHaveText(/\bin the\s*…?$/);
+    await expect(row.getByRole('button', { name: 'The rest is in its note' })).toBeVisible();
+    const dq = page.locator('.cp-body .cp-item').filter({ hasText: 'Ship the ATLAS hosting?' });
+    await expect(dq.locator('.cp-title')).toHaveText('Ship the ATLAS hosting?');
+    await expect(dq.getByRole('group', { name: /^Decide:/ }).getByRole('button')).toHaveText(['Self-host', 'Managed']);
+    await row.getByRole('button', { name: 'The rest is in its note' }).click();
+    const sheet = page.getByRole('dialog');
+    await expect(sheet.locator('.task-cut')).toContainText('This step was cut short when it was written.');
+    await expect(sheet.getByRole('button', { name: 'Open the note ›' })).toBeVisible();
+  });
+
   test('Needs you is the user\'s own: a room\'s task that only waits on them is in In motion as "Waiting on you"', async ({ page }) => {
     await boot(page);
     await openRoom(page, 'Learn Vibe Build');
