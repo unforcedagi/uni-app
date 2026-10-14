@@ -41,6 +41,8 @@ export type Task = {
   askAt?: string | null;
   /** The vault it was read from (r15): its linked notes are read and opened there, never in another vault. */
   vault?: string;
+  /** `next` was cut at the writer's 140 characters (r16): the row says so ("…") and the sheet offers the note. */
+  nextCut?: boolean;
 };
 
 const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);

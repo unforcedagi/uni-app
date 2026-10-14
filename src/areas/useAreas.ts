@@ -5,7 +5,7 @@ import { parseArea, parseProject, sortAreas, trustedBrief, type Area, type AreaN
 import { parseBrief, parseToday, type Brief, type Today } from "./briefCore";
 import { deviceCache, type AreasPayload, type BriefRaw, type CacheOwner } from "./areasCache";
 import { buildTree, type Tree } from "./treeCore";
-import { forgetTasks } from "./useTasks";
+import { forgetSavedTasks, forgetTasks } from "./useTasks";
 import { createPathCache, shouldReload } from "./pathCache";
 import { activeProfile } from "./profile";
 import { useVaultProfile } from "./ProfileContext";
@@ -100,7 +100,7 @@ export function forgetAreas() {
   generation++;
   payload = null; lastLoadAt = null; savedAt = null; memoryOwner = null; memoryStale = true;
   clearProjectBodies();
-  forgetTasks();
+  forgetSavedTasks();
   deviceCache.clear();
   areaPaths.reset();
 }

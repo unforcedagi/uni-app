@@ -44,3 +44,24 @@ export function splitTitle(title: string): { id: string | null; rest: string } {
   const m = /^([A-Z]{1,4}-\d+)\s+(.*)$/s.exec(title.trim());
   return m ? { id: m[1], rest: m[2] } : { id: null, rest: title.trim() };
 }
+
+/** A leading date (and time) a writer put in front of a title: "2026-10-13 ", "2026-10-13 14:05 · ". */
+const DATE_LEAD = /^\d{4}-\d{2}-\d{2}(?:[ T]\d{1,2}[:.]\d{2}(?::\d{2})?)?\s*(?:[-–—:·|]\s*)?(?=\S)/;
+/** A "(preview: …" tail a writer appended (closed or not): a fragment of the note, never part of the title. */
+const PREVIEW_TAIL = /\s*\((?:preview|excerpt|snippet)\s*:[^)]*\)?\s*$/i;
+const CUT_END = /(…|\.\.\.)\s*$/;
+
+/**
+ * A task's or decision's title as every surface shows it (r16, one cleaner for the companion, the work view and the sheet): without its id,
+ * a leading date and a "(preview: …" tail. `cut`: the title itself was cut short ("…"); `previewed`: a preview tail was dropped, so the
+ * note holds more than the title says (a decision's question is then read from its note before it is answered).
+ */
+export function taskTitle(title: string): { id: string | null; rest: string; cut: boolean; previewed: boolean } {
+  const { id, rest } = splitTitle(title);
+  let r = rest;
+  const tail = PREVIEW_TAIL.exec(r);
+  if (tail && tail.index > 0) r = r.slice(0, tail.index);
+  r = r.replace(DATE_LEAD, "").trim();
+  if (!r) return { id, rest, cut: CUT_END.test(rest), previewed: false };
+  return { id, rest: r, cut: CUT_END.test(r), previewed: !!tail && tail.index > 0 };
+}

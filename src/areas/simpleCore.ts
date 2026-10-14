@@ -1,7 +1,7 @@
 // T-124 "Simple first" (pure, unit-tested in scripts/steer.test.ts): what the room's quiet companion says. One sentence for where
 // the room stands, at most three things that need the user (Now first), the chat composer's placeholder.
-import { groupOf, PRIORITIES, type Task } from "./taskCore.ts";
-import type { Where } from "./whereCore.ts";
+import { isMe, PRIORITIES, type Task } from "./taskCore.ts";
+import { taskTitle, type Where } from "./whereCore.ts";
 import { ROOT } from "./treeCore.ts";
 
 /** The first sentence of the level's lede, as plain text and whole (a long one is clamped on screen, never cut here: it opens in full). */
@@ -13,13 +13,16 @@ export function firstSentence(text: string | null | undefined): string {
 }
 
 /**
- * Whether a task belongs in Needs you: the companion's list and the tree's dots use this one rule (r12). The user's own (owner, or waiting
- * on them) at Now or Soon (unsorted is Soon), and every open decision; live, never Someday. Snoozed and finished tasks are dropped before.
+ * Whether a task belongs in Needs you: the companion's list, the work view and the tree's dots use this one rule (r12). Every open decision,
+ * and the user's own tasks (r16: `owner` is the user; a room's or Uni's task that only waits on them is theirs to move, so it stays in
+ * In motion as "Waiting on you") at Now or Soon (unsorted is Soon); live, never Someday. Snoozed and finished tasks are dropped before.
  */
 export function needsYou(t: Pick<Task, "kind" | "owner" | "waitingOn" | "priority" | "state">): boolean {
   if (t.state !== "open" && t.state !== "doing" && t.state !== "waiting") return false;
-  return groupOf(t) === "you" && (t.kind === "decision" || t.priority !== "someday");
+  return t.kind === "decision" || (isMe(t.owner) && t.priority !== "someday");
 }
+/** The user's own: an open decision, or a task they own (r16). Everything else here is someone else's, in In motion. */
+export const isMine = (t: Pick<Task, "kind" | "owner">): boolean => t.kind === "decision" || isMe(t.owner);
 
 /** How many items under each node path need you there (the node's own, never its children's): the tree's dots. */
 export function needsByNode(tasks: readonly Task[]): Map<string, number> {
@@ -162,7 +165,7 @@ export function quietAgo(iso: string | null | undefined, nowMs: number): string 
 }
 
 type Recent = Pick<Task, "title" | "state" | "kind" | "updatedAt" | "options">;
-const plainTitle = (t: string) => t.replace(/^T-\d+\s+/, "");
+const plainTitle = (t: string) => withoutCut(taskTitle(t).rest);
 
 /**
  * Where the room stands, in one sentence and never a count. The node's own `stands` (with `stands_at` as a quiet time); without it the
@@ -224,11 +227,49 @@ export const fitsRow = (q: string): boolean => q.length <= ROW_ASK_MAX;
  * read from its note, but only when that ask was read at the row's own revision (`askAt === updatedAt`), so the question shown and the
  * answer written are the same revision's. Punctuation proves nothing: a cut title with no ask at this revision has no question here.
  */
-export function decisionQuestion(rest: string, ask: string | undefined, askAt: string | null | undefined, updatedAt: string | null): string | null {
-  if (!isCutTitle(rest)) { const t = rest.replace(/\s+/g, " ").trim(); return t.replace(/^decision\s*(\([^)]*\))?\s*[:\-–—]\s*/i, "").trim() || t || null; }
+export function decisionQuestion(rest: string, ask: string | undefined, askAt: string | null | undefined, updatedAt: string | null, inNote = isCutTitle(rest)): string | null {
+  if (!inNote) { const t = rest.replace(/\s+/g, " ").trim(); return t.replace(/^decision\s*(\([^)]*\))?\s*[:\-–—]\s*/i, "").trim() || t || null; }
   // an ask that is itself cut (the note repeats the cut title) is no whole question either
   if (ask && !isCutTitle(ask) && updatedAt && askAt === updatedAt) return ask;
   return null;
+}
+
+/** Words a fragment must not end on ("…feature 4, the"): an article, a preposition or a joining word left hanging. */
+const DANGLING = /^(a|an|the|to|of|for|in|on|at|by|with|and|or|but|nor|who|whom|whose|that|which|from|as|is|are|was|be|if|than|then|into|onto|about|your|their|its|this|these|those|our|my|so|via|per|&|\+|-|–|—)$/i;
+/** The first whole words of a text within `max` characters, never ending on a hanging word or a separator, and never with "…" (r16). */
+export function firstWords(text: string, max = 48): string {
+  const words = withoutCut(text).replace(/\s+/g, " ").trim().split(" ").filter(Boolean);
+  const out: string[] = [];
+  for (const w of words) { if (out.length && [...out, w].join(" ").length > max) break; out.push(w); }
+  const strip = (w: string) => w.replace(/[,;:(\[–—-]+$/, "");
+  while (out.length > 1 && (DANGLING.test(strip(out[out.length - 1])) || !strip(out[out.length - 1]))) out.pop();
+  if (out.length) out[out.length - 1] = strip(out[out.length - 1]) || out[out.length - 1];
+  return out.join(" ");
+}
+/**
+ * A decision row with no whole question to show (r16): the verb first, the first words, and the way in: "Decide: Uni adds Benya's missing
+ * feature 4". The row opens to decide; it never ends on "…" with nothing to act on.
+ */
+export const decideLine = (words: string): string => {
+  const w = firstWords(words);
+  if (!w) return "A decision waits on you";
+  // a question that already leads with the verb keeps it once ("Decide the ATLAS hosting", never "Decide: Decide …")
+  return /^decide\b/i.test(w) ? w.replace(/^decide\b\s*:?\s*/i, "Decide: ") : `Decide: ${w}`;
+};
+
+/** The vault's task writer keeps `next` to 140 characters (tasks.py): a step that long with no ending was cut there (r16). */
+export const NEXT_CAP = 140;
+/**
+ * A task's next step as rows show it (r16): a step cut at the writer's 140 characters loses its last (possibly partial) word and any hanging
+ * word, and says it was cut ("…"), so a row never ends mid-phrase ("…in the"). `cut`: the full step is only in the note.
+ */
+export function stepText(next: string): { text: string; cut: boolean } {
+  const t = next.replace(/\s+/g, " ").trim();
+  if (t.length < NEXT_CAP || /[.!?)"”’'\]]$/.test(t)) return { text: t, cut: false };
+  const words = t.split(" ");
+  words.pop();
+  while (words.length > 1 && DANGLING.test(words[words.length - 1].replace(/[,;:(\[]+$/, ""))) words.pop();
+  return { text: `${words.join(" ").replace(/[\s,;:(\[–—-]+$/, "")} …`, cut: true };
 }
 
 /** A cut title without its "…": what is left reads as a plain fragment, never as a row that ends on an ellipsis. */
@@ -237,8 +278,8 @@ export const withoutCut = (rest: string): string => rest.replace(/\s*(…|\.\.\.
 /** What a Needs-you row says about its ask, given what is known: the full question, a whole title, or that there is no whole question. */
 export type RowAsk = { text: string; /** a decision with no full question anywhere: open it to see the question, no buttons and no fragment */ openToDecide: boolean };
 export const OPEN_TO_SEE = "Open to see the question";
-export function rowAsk(full: string, ask: string | undefined, isDecision: boolean, hasNext: boolean): RowAsk {
-  if (!isCutTitle(full)) return { text: full, openToDecide: false };
+export function rowAsk(full: string, ask: string | undefined, isDecision: boolean, hasNext: boolean, cut = isCutTitle(full)): RowAsk {
+  if (!cut) return { text: full, openToDecide: false };
   if (ask && !isCutTitle(ask)) return { text: ask, openToDecide: false };
   if (isDecision) return { text: OPEN_TO_SEE, openToDecide: true };
   return { text: hasNext ? withoutCut(full) : "", openToDecide: false };
@@ -268,4 +309,17 @@ export function askOrder<T extends { kind: string; priority: string | null; due:
 /** How many text lines each part of a row may take so the whole stays within `budget` (3): title first, then the due line, then the next step. */
 export function lineBudget(titleLines: number, hasDue: boolean, budget = 3): { next: number } {
   return { next: Math.max(0, budget - Math.min(titleLines, budget) - (hasDue ? 1 : 0)) };
+}
+
+/** Of the room's height, what the conversation keeps before the strip gets any (r16), with the whole composer. */
+export const CONVERSATION_SHARE = 0.4;
+/** Less room than this for the strip's body and it opens as a sheet over the room instead of pushing the conversation away. */
+export const STRIP_MIN_BODY = 200;
+/**
+ * Where an opened strip goes (r16): inline (with this many px for its body) when the room keeps its composer and 40% of its height for the
+ * conversation and still has STRIP_MIN_BODY to spare; otherwise a sheet over the room. Pure: the numbers are measured by the strip.
+ */
+export function stripRoom(m: { room: number; above: number; line: number; composer: number }): { mode: "inline"; body: number } | { mode: "sheet" } {
+  const body = Math.floor(m.room - m.above - m.line - m.composer - CONVERSATION_SHARE * m.room);
+  return body >= STRIP_MIN_BODY ? { mode: "inline", body } : { mode: "sheet" };
 }
