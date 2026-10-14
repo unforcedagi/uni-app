@@ -83,8 +83,8 @@ export type TaskLoad = { error: string | null; /** The task tree (the nodes) cou
   /** The rows are the device's copy from this moment, being read again (r16). */ savedAt?: number | null;
   /** The read has run past 8 seconds (r16): "Still loading · Retry". */ slow?: boolean };
 
-/** Lines an action may take (r21: the whole action; a third line rather than cut its object). */
-export const ACTION_LINES = 99;
+/** Lines an action may take (r22: no limit; the whole action, as many lines as it needs). */
+const ACTION_LINES = 99;
 const URL_RE = /https?:\/\/\S+|\bwww\.\S+/g;
 /** One line of detail: no raw links (they stay in the opened item), whitespace squeezed, no dangling separators. */
 export const plainDetail = (s: string): string => s.replace(URL_RE, "").replace(/\s+/g, " ").replace(/\s*[·,;:(\[-]+\s*$/, "").replace(/\(\s*\)/g, "").trim();
@@ -153,22 +153,16 @@ const wordTokens = (text: string) => text.split(/\s+/).filter(Boolean).map((w, i
  * Text clamped at `lines` lines that ends on a whole word (r15): every line full, then "…" after the last word that fits, never inside a
  * word, a link or a note's title. Drawn whole once to measure (before paint), then cut; a new width or text measures again.
  */
-function WordClamp({ tokens: tokens0, lines, open, textKey, onCut, elRef, className, onClick, tag = "p", title, keep: keep0 = 0, data, alts }: { tokens: { node: React.ReactNode; space: boolean }[]; lines: number; open: boolean; textKey: string; title?: string;
+function WordClamp({ tokens, lines, open, textKey, onCut, elRef, className, onClick, tag = "p", title, keep = 0, data }: { tokens: { node: React.ReactNode; space: boolean }[]; lines: number; open: boolean; textKey: string; title?: string;
   /** data-* attributes for the element */
   data?: Record<string, string>;
-  /** r21: forms to try in order (a row's whole action, then shorter forms): the first that fits `lines` shows; only the last is ever cut */
-  alts?: { tokens: { node: React.ReactNode; space: boolean }[]; keep: number }[];
   /** r20: the first `keep` tokens (a row's verb phrase) are never cut: a cut falls inside the object, after them */
   keep?: number;
   onCut: (cut: boolean) => void; elRef: React.RefObject<HTMLParagraphElement | null>; className: string; onClick: (e: React.MouseEvent) => void; /** "span" inside a button */ tag?: "p" | "span" }) {
   const [cut, setCut] = useState<number | null>(null);
   const [width, setWidth] = useState(0);
-  const [form, setForm] = useState(0);
-  const f = alts?.length ? Math.min(form, alts.length - 1) : 0;
-  const tokens = alts?.length ? alts[f].tokens : tokens0;
-  const keep = alts?.length ? alts[f].keep : keep0;
   const tries = useRef(0);
-  useLayoutEffect(() => { tries.current = 0; setCut(null); setForm(0); }, [textKey, lines, open, width]);
+  useLayoutEffect(() => { tries.current = 0; setCut(null); }, [textKey, lines, open, width]);
   useLayoutEffect(() => {
     const el = elRef.current;
     if (!el || open || cut !== null) { if (open) onCut(false); return; }
@@ -184,8 +178,6 @@ function WordClamp({ tokens: tokens0, lines, open, textKey, onCut, elRef, classN
     let k = 0;
     while (k < words.length && lineOf(last(words[k]).top) < lines) k++;
     if (k >= words.length) { onCut(false); return; }
-    // r21: a shorter form whole before any cut
-    if (alts && f < alts.length - 1) { setForm(f + 1); return; }
     // the "…" must fit after the last word kept, on the last line
     while (k > 1 && lineOf(last(words[k - 1]).top) === lines - 1 && last(words[k - 1]).right + room > right) k--;
     // r17: never end on a hanging word ("…to the …") or a word that only leads into the rest ("Michael: …")
@@ -210,7 +202,7 @@ function WordClamp({ tokens: tokens0, lines, open, textKey, onCut, elRef, classN
   }, [cut, open, lines]); // eslint-disable-line react-hooks/exhaustive-deps
   const shown = open || cut === null ? tokens : tokens.slice(0, cut).map((t, i, a) => (i === a.length - 1 && typeof t.node === "string" ? { ...t, node: t.node.replace(/[\s,;:(\[–—-]+$/, "") || t.node } : t));
   const Tag = tag;
-  return <Tag ref={elRef} className={className} title={title} {...data} data-form={alts?.length ? String(f) : undefined} data-cut={cut !== null && !open ? "true" : undefined} onClick={onClick}>
+  return <Tag ref={elRef} className={className} title={title} {...data} data-cut={cut !== null && !open ? "true" : undefined} onClick={onClick}>
     {shown.map((t, i) => <span key={i}>{i > 0 && t.space ? " " : ""}<span className="wc-w">{t.node}</span></span>)}
     {cut !== null && !open && <span className="wc-more" aria-hidden="true">…</span>}
   </Tag>;

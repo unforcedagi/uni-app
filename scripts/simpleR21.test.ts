@@ -2,7 +2,7 @@
 // Steps are the real ones from the scratch copy (10-14), no private areas; links are written in the same shapes.
 // Run: node --experimental-strip-types scripts/simpleR21.test.ts
 import assert from "node:assert/strict";
-import { actionOf, checkOf, retryState, rowAction, stepsLine, withoutBrackets, type CheckState } from "../src/areas/simpleCore.ts";
+import { actionOf, checkOf, retryState, rowAction, withoutBrackets, type CheckState } from "../src/areas/simpleCore.ts";
 import { buildTaskTree, parseNodes, parseTask, type Task } from "../src/areas/taskCore.ts";
 import { createVaultTasks } from "../src/areas/vaultTasks.ts";
 
@@ -56,7 +56,6 @@ await check("multi-step: \"A, then B\" is both steps; the fallback is \"2 steps:
   assert.equal(actionOf("Pick a direction (3 directions, then build the pick)").steps.length, 1);
   // "…; listen to 2 Jacobs clips first": that step comes first
   assert.deepEqual(rowAction("Production go: gateway deploy ($10/day cap), merge #55, BV_CHAT_ENABLED on; listen to 2 Jacobs clips first")!.steps, ["Listen to 2 Jacobs clips first", "Production go: gateway deploy ($10/day cap), merge #55, BV_CHAT_ENABLED on"]);
-  assert.equal(stepsLine(["Do A (soon)", "do B", "do C"]), "3 steps: Do A, then …");
   assert.equal(withoutBrackets("OK the windows (gateway Wed, vaults Thu) and set the limit"), "OK the windows and set the limit");
 });
 

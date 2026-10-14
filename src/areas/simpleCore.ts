@@ -860,8 +860,6 @@ function stepsOf(region: string): string[] {
 }
 /** A text without its bracketed parts ("Tell Uni who pays (Techne or Gitcoin Foundation) and how" → "Tell Uni who pays and how"). */
 export const withoutBrackets = (t: string): string => { const d = depths(t); let out = ""; for (let i = 0; i < t.length; i++) if (d[i] === 0 && t[i] !== ")" && t[i] !== "]") out += t[i]; return out.replace(/\s+([,;:.!?])/g, "$1").replace(/\s+/g, " ").trim(); };
-/** The row's form for more than one step that doesn't fit whole (r21): "2 steps: A, then …". */
-export const stepsLine = (steps: readonly string[]): string => `${steps.length} steps: ${withoutBrackets(steps[0])}, then …`;
 /** r22: past this many characters (links read as their hosts) a row's action is shortened with words, never with an ellipsis. */
 export const ROW_ACTION_MAX = 160;
 /** A row's action (r22): the whole action; when longer than `ROW_ACTION_MAX`, without its brackets, then with each link as "the link". */
