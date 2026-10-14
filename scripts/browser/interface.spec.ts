@@ -89,6 +89,21 @@ test.describe('grant prompt', () => {
     await expect(page.locator('iframe')).toHaveCount(0);
     await expect(page.getByRole('region', { name: /asking for access/ })).toHaveCount(0);
     await expect(page.getByRole('status').filter({ hasText: 'was not opened' })).toContainText('bad scope for vault.read');
+    // r21 (Codex 8): an invalid manifest ends the loading: never "was not opened" beside "Opening this area's app…"
+    await expect(page.getByText('Opening this area\'s app…')).toHaveCount(0);
+  });
+
+  test('r21 (Codex 8) a failed look for an area\'s app is not "no app": the way in stays, says it couldn\'t check, and Retry finds it', async ({ page }) => {
+    const only = { contract: 1, needs: [{ 'vault.read': 'area' }] };
+    await page.addInitScript(() => { (window as any).__noteFails = { 'Areas/KitProbe/app': true }; });
+    await bootAreas(page, 'seed', { granted: false, apps: [{ name: 'KitProbe', html: PROBE_KITS, interface: only }] });
+    await openAreas(page);
+    await openArea(page, 'KitProbe');
+    await expect(page.locator('.area-app .area-default')).toContainText('Couldn\'t check for this area\'s app');
+    await expect(page.getByText('Opening this area\'s app…')).toHaveCount(0);
+    await page.evaluate(() => { (window as any).__noteFails = {}; });
+    await page.getByRole('button', { name: 'Retry' }).click();
+    await expect(page.getByRole('region', { name: /KitProbe is asking for access/ })).toBeVisible();
   });
 
   test('a grant without chat.read gets not_granted for chat.recent and chat.draft', async ({ page }) => {

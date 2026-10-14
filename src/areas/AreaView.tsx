@@ -55,6 +55,9 @@ export default function AreaView({ area, mode, roomName, actions, room, open, on
   // Uni itself (path "") has no app note to look up.
   const live = mode !== "closed" && area.path !== "";
   const [app, setApp] = useState<AppNote | null>(null);
+  /** r21 (Codex 8): where looking for the app stands: absent (no app note), failed (the read failed: Retry), loading or ready, never confused */
+  const [found, setFound] = useState<{ state: "loading" | "absent" | "failed" | "ready"; error?: string }>({ state: "loading" });
+  const [lookups, setLookups] = useState(0);
   const [declined, setDeclined] = useState(false);
   const [menu, setMenu] = useState(false);
   const [keys, setKeys] = useState<{ scope: string; html: string } | null>(null);
@@ -63,15 +66,22 @@ export default function AreaView({ area, mode, roomName, actions, room, open, on
   const name = cleanText(area.name);
   // The app note is looked up by its path, in the background: no vault listing, and the room never waits for it.
   useEffect(() => {
-    setApp(null); setDeclined(false);
+    setApp(null); setDeclined(false); setFound({ state: "loading" });
     if (!live) return;
     let on = true;
     const get = (ref: string) => invoke<{ note: { id: string; extension?: string | null; content?: string; metadata?: unknown } }>("vault_note", { vault: vaultName, noteRef: ref });
-    get(`${area.path}/app`).catch(() => get(`${area.path}/app.html`))
-      .then((d) => { if (on && (d.note.extension ?? "html").replace(/^\./, "").toLowerCase() === "html") setApp({ id: d.note.id, html: d.note.content ?? "", metadata: d.note.metadata }); }).catch(() => {});
+    /** "not found" is an area without an app; any other failure is a failed look, never taken for "no app" */
+    const absent = (e: unknown) => /not found|404/i.test(String(e));
+    get(`${area.path}/app`).catch((e) => (absent(e) ? get(`${area.path}/app.html`) : Promise.reject(e)))
+      .then((d) => {
+        if (!on) return;
+        if ((d.note.extension ?? "html").replace(/^\./, "").toLowerCase() === "html") { setApp({ id: d.note.id, html: d.note.content ?? "", metadata: d.note.metadata }); setFound({ state: "ready" }); }
+        else setFound({ state: "absent" });
+      }).catch((e) => { if (on) setFound(absent(e) ? { state: "absent" } : { state: "failed", error: String(e).replace(/^Error:\s*/, "").slice(0, 160) }); });
     return () => { on = false; };
-  }, [live, area.path, vaultName]);
-  const onApp = open && !!app;
+  }, [live, area.path, vaultName, lookups]);
+  const failed = found.state === "failed";
+  const onApp = open && (!!app || failed);
 
   // What the app asked for (or the default), resolved against this area.
   const ctx = useMemo(() => ({ areaPath: area.path, channels: area.channels }), [area.path, area.channels]);
@@ -119,7 +129,9 @@ export default function AreaView({ area, mode, roomName, actions, room, open, on
   const revoke = () => { if (!app) return; grants.revoke(app.id); suggestions.clear(); markStopped(area.path); stoppedByUser.current = true; setDeclined(false); bump(); };
   const start = () => { stoppedByUser.current = false; markStarted(area.path); bump(); };
   // Opening the app is the user's own press: it starts the app unless they stopped it.
-  const openApp = app ? (e: React.MouseEvent) => { if (!e.isTrusted) return; onOpen(true); if (!stoppedByUser.current) markStarted(area.path); bump(); } : null;
+  const openApp = app ? (e: React.MouseEvent) => { if (!e.isTrusted) return; onOpen(true); if (!stoppedByUser.current) markStarted(area.path); bump(); }
+    // r21 (Codex 8): a failed look keeps the way in, which says it failed and offers Retry
+    : failed ? (e: React.MouseEvent) => { if (e.isTrusted) onOpen(true); } : null;
   const accept = () => { if (app && keys && running) { grants.acknowledge(app.id, keys.html); bump(); } };
   const router = useMemo(() => createRouter([
     createVaultModule({
@@ -153,7 +165,9 @@ export default function AreaView({ area, mode, roomName, actions, room, open, on
   const stage = framed ? <InterfaceFrame html={app!.html} title={`${name} app`} router={router} grant={grant} ready={ready} onSession={(s) => { session.current = s; }} />
     : asking && manifest?.ok ? <GrantPrompt name={name} codeChanged={codeChanged && status === "updated"} approvedCode={mode === "approved-code"} lines={describeNeeds(manifest.manifest.needs, ctx, roomName)}
       onAllow={() => { grants.grant(app!.id, keys!.scope, keys!.html, mode === "approved-code" ? "approved-code" : "sealed"); markStarted(area.path); bump(); }} onNotNow={() => setDeclined(true)} />
-    : <AppPanel area={area} pending={!keys} onOpenApp={idle ? start : null} onRevoke={idle ? revoke : null}
+    // r21 (Codex 8): an invalid manifest ends the loading ("was not opened", never beside "Opening…"); a failed look says so, with Retry
+    : failed ? <AppPanel area={area} pending={false} onOpenApp={null} onRevoke={null} notice={`Couldn't check for this area's app: ${found.error ?? "the vault couldn't be read"}.`} onRetry={() => setLookups(lookups + 1)} />
+    : <AppPanel area={area} pending={manifest?.ok === true && !keys} onOpenApp={idle ? start : null} onRevoke={idle ? revoke : null}
       notice={manifest && !manifest.ok ? `This area's app was not opened: ${manifest.error}.` : null} />;
   const main = <div className={`area-app ${framed ? "framed" : ""}`}>
     {decision === "run-notice" && <p className="area-updated" role="status">This app was updated since you allowed it. <button className="pairing-secondary area-accept" onClick={(e) => { if (e.isTrusted) accept(); }}>Accept</button></p>}
@@ -164,7 +178,7 @@ export default function AreaView({ area, mode, roomName, actions, room, open, on
 }
 
 /** The app view when the app isn't on screen: it is loading, waiting to be opened, or was stopped. */
-function AppPanel({ area, pending, notice, onOpenApp, onRevoke }: { area: Area; pending: boolean; notice: string | null; onOpenApp: (() => void) | null; onRevoke: (() => void) | null }) {
+function AppPanel({ area, pending, notice, onOpenApp, onRevoke, onRetry }: { area: Area; pending: boolean; notice: string | null; onOpenApp: (() => void) | null; onRevoke: (() => void) | null; onRetry?: () => void }) {
   return <div className="area-scroll"><article className="area-default">
     <h1 className="note-title">{area.title}</h1>
     {pending && <p className="area-quiet">Opening this area's app…</p>}
@@ -172,6 +186,7 @@ function AppPanel({ area, pending, notice, onOpenApp, onRevoke }: { area: Area; 
     <div className="area-actions">
       {onOpenApp && <button className="suggestion-go area-open-app" onClick={(e) => { if (e.isTrusted) onOpenApp(); }}>Open {cleanText(area.name)} app</button>}
       {onRevoke && <button className="pairing-secondary area-revoke" onClick={(e) => { if (e.isTrusted) onRevoke(); }}>Revoke access</button>}
+      {onRetry && <button className="suggestion-go area-retry" onClick={onRetry}>Retry</button>}
     </div>
   </article></div>;
 }
