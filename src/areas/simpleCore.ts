@@ -1178,16 +1178,8 @@ function stepsOf(region: string): string[] {
 }
 /** A text without its bracketed parts ("Tell Uni who pays (Techne or Gitcoin Foundation) and how" → "Tell Uni who pays and how"). */
 export const withoutBrackets = (t: string): string => { const d = depths(t); let out = ""; for (let i = 0; i < t.length; i++) if (d[i] === 0 && t[i] !== ")" && t[i] !== "]") out += t[i]; return out.replace(/\s+([,;:.!?])/g, "$1").replace(/\s+/g, " ").trim(); };
-/** r22: past this many characters (links read as their hosts) a row's action is shortened with words, never with an ellipsis. */
-export const ROW_ACTION_MAX = 160;
-/** A row's action (r22): the whole action; when longer than `ROW_ACTION_MAX`, without its brackets, then with each link as "the link". */
-export function rowForm(text: string): string {
-  const len = (t: string) => withHosts(t).length;
-  if (len(text) <= ROW_ACTION_MAX) return text;
-  const a = withoutBrackets(text);
-  if (len(a) <= ROW_ACTION_MAX) return a;
-  return a.replace(/https?:\/\/[^\s)]+|\bwww\.[^\s)]+/g, "the link").replace(/\s+/g, " ").trim();
-}
+/** r28 (Sonnet): a row's step is always its whole text, wrapped: there is no length past which it is shortened (r22's 160-character shortening is gone). */
+export const rowForm = (text: string): string => text;
 /** The folded strip's one line for an action of more than one step (r22): step 1 and how many there are, never "then …". */
 export const firstOfSteps = (steps: readonly string[]): string => `${withoutBrackets(steps[0])} (step 1 of ${steps.length})`;
 export function rowAction(next: string | null | undefined): RowAction | null {

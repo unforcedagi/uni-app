@@ -194,7 +194,8 @@ export function TaskSheet({ task, gone = false, nodeName, room, roomNamed, inRoo
   const gated = !gone && !unsure;
   const conf: Resolved = confirmation ?? UNRESOLVED;
   const [anyway, setAnyway] = useState(anywayStart);
-  useEffect(() => { setAnyway(anywayStart); }, [task.id, anywayStart]);
+  // (a check that comes back different, Retry for one, takes the answers back behind "Answer anyway")
+  useEffect(() => { setAnyway(anywayStart); }, [task.id, anywayStart, conf.state, conf.why, conf.failed]);
   const hit: ChatHit | null = conf.hit;
   const fresh = conf.state;
   const lookFailed = gated && conf.failed;

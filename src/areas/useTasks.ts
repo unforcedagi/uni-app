@@ -34,10 +34,10 @@ const reduced = () => typeof window !== "undefined" && !!window.matchMedia?.("(p
 // Memory for this session only, scoped to the signed-in identity and cleared on Forget: tasks are Aaron's private work.
 /** Running and Drafts' own read (r16): read yet, the last failure, when they last read cleanly. */
 export type Activity = { ready: boolean; error: string | null; lastOk: number | null };
-type Memory = { owner: string; tree: (TaskTree & { truncated: boolean }) | null; tasks: Map<string, { list: Task[]; truncated: boolean }>; at: number | null; runs: RawNote[]; drafts: RawNote[]; closed: Task[]; activity: Activity;
+type Memory = { owner: string; tree: (TaskTree & { truncated: boolean }) | null; tasks: Map<string, { list: Task[]; truncated: boolean }>; at: number | null; runs: RawNote[]; drafts: RawNote[]; closed: Task[]; closedAt: number; activity: Activity;
   /** r19: each task's check of its supporting notes (seeded from what the device verified, read again on every list read). */
   checks: Map<string, CheckState> | null };
-const fresh = (owner: string): Memory => ({ owner, tree: null, tasks: new Map(), at: null, runs: [], drafts: [], closed: [], activity: { ready: false, error: null, lastOk: null }, checks: null });
+const fresh = (owner: string): Memory => ({ owner, tree: null, tasks: new Map(), at: null, runs: [], drafts: [], closed: [], closedAt: 0, activity: { ready: false, error: null, lastOk: null }, checks: null });
 let memory: Memory = fresh("");
 export function forgetTasks() { memory = fresh(""); }
 /** Forget on the device too (the user's Forget): the saved list goes with the key. */
@@ -140,14 +140,16 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
         setActivity(mem.activity);
       });
     }
-    if (nodePath === "") {
+    // the closed tasks are read at most every five minutes (the done pile only grows, and a closure is a day's news, not a minute's)
+    if (nodePath === "" && Date.now() - mem.closedAt > 5 * 60_000) {
+      mem.closedAt = Date.now();
       // the window starts at the oldest summary there is, at most 90 days back (older ones are old whatever was closed)
       void treeP.then((t) => {
         const floor = localDay(new Date(Date.now() - 90 * 86_400_000));
         const days = [...t.stands.values()].map((s) => (s.at ? localDay(new Date(Date.parse(s.at.length === 10 ? `${s.at}T12:00:00` : s.at))) : "")).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d));
         const since = days.length ? [days.sort()[0], floor].sort()[1] : localDay(new Date(Date.now() - 30 * 86_400_000));
         return vaultTasks.loadClosed(t, since);
-      }).then((rows) => { if (rows && current() && memory === mem) { mem.closed = rows; setClosedTasks(rows); } });
+      }).then((rows) => { if (memory !== mem) return; if (rows) { mem.closed = rows; if (mounted.current) setClosedTasks(rows); } else mem.closedAt = 0; });
     }
     (async () => {
       const r = await vaultTasks.loadTasks(treeP, nodePath);
@@ -217,7 +219,13 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
 
   const now = new Date();
   /** r19: each row with its check as of this render (a check past CHECK_TTL reads as checking again; only Needs-you rows are checked). */
-  const checked = useMemo(() => { const at = Date.now(); return list && list.map((t) => (wouldNeedYou(t) ? { ...t, check: checkOf(t, checks.get(t.id), at) } : t)); }, [list, checks, n, day]); // eslint-disable-line react-hooks/exhaustive-deps
+  const checked = useMemo(() => {
+    const at = Date.now();
+    // layout walks only (`VITE_ASSUME_ASKED=1`, never in a release build): a vault whose tasks carry no `asked_at` yet reads as asked just now, so the
+    // panel can be looked at with confirmed asks in it. The confirmation's chat lookup still applies.
+    const assume = import.meta.env.VITE_ASSUME_ASKED === "1" ? new Date(at - 3600_000).toISOString() : null;
+    return list && list.map((t0) => { const t = assume && !t0.askedAt ? { ...t0, askedAt: assume } : t0; return wouldNeedYou(t) ? { ...t, check: checkOf(t, checks.get(t.id), at) } : t; });
+  }, [list, checks, n, day]); // eslint-disable-line react-hooks/exhaustive-deps
   const visible = useMemo(() => (checked ?? []).filter((t) => isLive(t) && !gone.has(t.id) && !snoozed(t, new Date())), [checked, gone, n, day]); // eslint-disable-line react-hooks/exhaustive-deps
   const counts: Map<string, Counts> = useMemo(() => (tree ? rollUp(tree, tasksUnder(tree, nodePath, visible)) : new Map()), [tree, nodePath, visible]);
 

@@ -72,7 +72,7 @@ export function WorkView(p: WorkViewProps) {
       </ul>}
       <WaitingRuns runs={waiting} className="cp-list cp-waiting wv-waiting" />
       {!!p.feed.checking?.length && <p className="cp-checking" role="status" aria-busy="true">{checkingAsks(p.feed.checking.length)}</p>}
-      <Rechecks tasks={p.feed.recheck ?? []} onTask={p.onTask} />
+      <Rechecks tasks={p.feed.recheck ?? []} onTask={p.onTask} placeOf={p.placeOf} />
     </section>
     {/* r27: no heading with nothing under it: Running is here when something runs, when what runs couldn't be read, or when nothing moves at all */}
     {(running.length > 0 || !!p.activity.error || !p.activity.ready || (motion === 0 && !p.privateOther)) && <section className="wv-sec" aria-label="Running">

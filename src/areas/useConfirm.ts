@@ -9,7 +9,7 @@ import { checkInResult, CONFIRM_WAIT_MS, confirmationOf, needsRead, requestKeys,
 /** A room's chat is read again when the copy is older than this (the task list is re-read every minute). */
 export const ROOM_TTL_MS = 60_000;
 export const ROOM_LIMIT = 200;
-type RoomRead = { at: number; msgs: RoomMsg[] | null };
+type RoomRead = { at: number; msgs: RoomMsg[] | null; /** the newest message the rooms list knew when the read began (seconds): a room whose list says it has talked since has newer chat than the read saw */ seen: number };
 /** Session memory: room id → its last read (null msgs: it failed). */
 const reads = new Map<string, RoomRead>();
 const inflight = new Set<string>();
@@ -43,8 +43,9 @@ export type Confirmations = {
  * `tasks`: the visible list. `roomOf`: the room whose chat would answer an ask (its steward's), by id; null: no room to check in.
  * `stamp`: changes when the list is read again, so a room is read again with it.
  */
-export function useConfirm(tasks: readonly Task[], roomOf: (t: Task) => { id: string } | null, stamp: number | null, ready: boolean): Confirmations {
-  const [, bump] = useState(0);
+export function useConfirm(tasks: readonly Task[], roomOf: (t: Task) => { id: string } | null, stamp: number | null, ready: boolean, chat = true,
+  /** the newest message the rooms list knows in a room (seconds): a read older than it is read again, and until then its asks are held back */ lastTs: (room: string) => number | null = () => null): Confirmations {
+  const [ver, bump] = useState(0);
   const [gaveUp, setGaveUp] = useState<ReadonlySet<string>>(new Set());
   const nowMs = useMemo(() => Date.now(), [tasks, stamp, ready]); // eslint-disable-line react-hooks/exhaustive-deps
   /** room id → the words of its asks (only used by the test build that finds chat) */
@@ -52,7 +53,7 @@ export function useConfirm(tasks: readonly Task[], roomOf: (t: Task) => { id: st
     const m = new Map<string, string>();
     if (!ready) return m;
     for (const t of tasks) {
-      const room = roomOf(t);
+      const room = chat ? roomOf(t) : null;
       if (!room || !needsRead(true, t.askedAt, Date.now())) continue;
       const k = requestKeys(t);
       m.set(room.id, `${m.get(room.id) ?? ""} ${k.ids.join(" ")} ${k.words.join(" ")}`);
@@ -60,38 +61,47 @@ export function useConfirm(tasks: readonly Task[], roomOf: (t: Task) => { id: st
     return m;
   }, [tasks, ready]); // eslint-disable-line react-hooks/exhaustive-deps
   const key = [...wanted.keys()].sort().join("\n");
+  const lastTsRef = useRef(lastTs); lastTsRef.current = lastTs;
   const alive = useRef(true);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   const fetchRoom = useCallback((room: string, hint: string) => {
     if (inflight.has(room)) return;
     inflight.add(room);
+    const seen = lastTsRef.current(room) ?? 0;
     readRoom(room, hint).then((msgs) => msgs, () => null).then((msgs) => {
       inflight.delete(room);
-      reads.set(room, { at: Date.now(), msgs });
+      reads.set(room, { at: Date.now(), msgs, seen });
       if (alive.current) { setGaveUp((g) => { if (!g.has(room)) return g; const c = new Set(g); c.delete(room); return c; }); bump((n) => n + 1); }
     });
   }, []);
   // every wanted room is read once and read again when its copy is old; while a room has no read, its asks are pending
+  const staleRead = (room: string, r: RoomRead | undefined) => !!r && (lastTs(room) ?? 0) > r.seen;
+  const talkKey = [...wanted.keys()].sort().map((k) => `${k}:${lastTs(k) ?? ""}`).join("|");
   useEffect(() => {
-    for (const [room, hint] of wanted) { const r = reads.get(room); if (!r || Date.now() - r.at > ROOM_TTL_MS) fetchRoom(room, hint); }
-  }, [key, stamp, fetchRoom]); // eslint-disable-line react-hooks/exhaustive-deps
+    for (const [room, hint] of wanted) { const r = reads.get(room); if (!r || Date.now() - r.at > ROOM_TTL_MS || staleRead(room, r)) fetchRoom(room, hint); }
+  }, [key, stamp, talkKey, fetchRoom]); // eslint-disable-line react-hooks/exhaustive-deps
   // a room that has not answered in a few seconds is "couldn't read": its asks are rechecks, not held back for good
   useEffect(() => {
-    const open = [...wanted.keys()].filter((r) => !reads.has(r));
+    const waiting = (r: string) => !reads.has(r) || staleRead(r, reads.get(r));
+    const open = [...wanted.keys()].filter(waiting);
     if (!open.length) return;
-    const t = setTimeout(() => { setGaveUp((g) => new Set([...g, ...open.filter((r) => !reads.has(r))])); }, CONFIRM_WAIT_MS);
+    const t = setTimeout(() => { setGaveUp((g) => new Set([...g, ...open.filter(waiting)])); }, CONFIRM_WAIT_MS);
     return () => clearTimeout(t);
-  }, [key, reads.size, gaveUp.size]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [key, reads.size, gaveUp.size, talkKey, ver]); // eslint-disable-line react-hooks/exhaustive-deps
   const retry = useCallback((room: string) => { reads.delete(room); setGaveUp((g) => { const c = new Set(g); c.delete(room); return c; }); bump((n) => n + 1); fetchRoom(room, wanted.get(room) ?? ""); }, [fetchRoom, wanted]);
   const memo = useRef(new Map<string, { sig: string; res: Resolved }>());
   const of = useCallback((t: Task): Resolved => {
-    if (!ready) return UNRESOLVED;
+    // before the rooms and areas are known an ask with a recent date is held back ("Checking…"), never shown as a recheck and moved
+    if (!ready) return needsRead(true, t.askedAt, nowMs) ? { state: "pending", why: null, hit: null, failed: false } : UNRESOLVED;
+    // a profile with no chat has no room to be talked about in: the ask's own date is all there is to go on
+    if (!chat) return confirmationOf(true, t.askedAt, { kind: "none" }, nowMs);
     const room = roomOf(t);
     const hasRoom = !!room;
     let look = null as ReturnType<typeof checkInResult> | null;
     if (room && needsRead(true, t.askedAt, nowMs)) {
       const r = reads.get(room.id);
-      if (r) look = checkInResult({ at: t.askedAt!, kind: "asked" }, r.msgs, requestKeys(t));
+      // a room that has talked since the read was made is read again; until then its asks are held back (never confirmed on a chat that is out of date)
+      if (r && !staleRead(room.id, r)) look = checkInResult({ at: t.askedAt!, kind: "asked" }, r.msgs, requestKeys(t));
       else if (gaveUp.has(room.id)) look = { kind: "failed" };
     }
     const res = confirmationOf(hasRoom, t.askedAt, look, nowMs);
@@ -100,7 +110,7 @@ export function useConfirm(tasks: readonly Task[], roomOf: (t: Task) => { id: st
     if (had && had.sig === sig) return had.res;
     memo.current.set(t.id, { sig, res });
     return res;
-  }, [ready, roomOf, gaveUp, nowMs, reads.size, tasks]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [ready, chat, roomOf, gaveUp, nowMs, ver, tasks, talkKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const settled = ready && [...wanted.keys()].every((r) => reads.has(r) || gaveUp.has(r));
   return { of, retry, settled };
 }

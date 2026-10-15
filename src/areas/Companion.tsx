@@ -207,7 +207,7 @@ function WordClamp({ tokens, lines, open, textKey, onCut, elRef, className, onCl
 
 /**
  * A row's action (r22, both critics): the whole action, every step ("A, then B") and every verb phrase, wrapping to as many lines as it needs:
- * no clamp, no "then …", no ellipsis. An action past `ROW_ACTION_MAX` characters was already shortened with words (`rowForm`).
+ * no clamp, no "then …", no ellipsis, and (r28) no length past which it is shortened.
  */
 function ActionLine({ forms, vault, elRef }: { forms: { text: string; keep: string }[]; vault: string; elRef: React.RefObject<HTMLParagraphElement | null> }) {
   const tokens = stepTokens(forms[0].text, vault, undefined, true);
@@ -663,14 +663,15 @@ export function wholeStep(t: Task): string {
  * line says Uni is rechecking them; it opens to a plain list: each ask's whole step, when it was asked, "Open" and a secondary "Answer anyway"
  * (one tap to the sheet with its answers ready). The sheet keeps "not confirmed since" for these.
  */
-export function Rechecks({ tasks, onTask }: { tasks: readonly Task[]; onTask: (t: Task, o?: { anyway?: boolean }) => void }) {
+export function Rechecks({ tasks, onTask, placeOf }: { tasks: readonly Task[]; onTask: (t: Task, o?: { anyway?: boolean }) => void; /** the area an ask belongs to when it is listed outside it */ placeOf?: (t: Task) => string | null }) {
   const [open, setOpen] = useState(false);
   const vault = useVaultProfile().vault;
   if (!tasks.length) return null;
   return <div className="cp-recheck" data-count={tasks.length}>
     <button type="button" className="cp-recheck-line" aria-expanded={open} onClick={() => setOpen(!open)}>{recheckLine(tasks.length)}<i aria-hidden="true">{open ? "–" : "+"}</i></button>
     {open && <ul className="cp-recheck-list" aria-label="Older asks Uni is rechecking">{tasks.map((t) => {
-      const when = askedLine(requestDate(t));
+      const place = placeOf?.(t) ?? null;
+      const when = [askedLine(requestDate(t)), place ? `in ${place}` : null].filter(Boolean).join(" · ");
       return <li key={t.id} className="cp-recheck-item" data-id={taskTitle(t.title).id ?? undefined}>
         <span className="cp-recheck-step"><RefText text={wholeStep(t)} vault={t.vault ?? vault} /></span>
         {when && <small className="cp-recheck-asked">{when}</small>}
@@ -682,7 +683,7 @@ export function Rechecks({ tasks, onTask }: { tasks: readonly Task[]; onTask: (t
 
 /** The compact panel's summary: its date line first; the summary itself opens from it (r28, Codex P2-5). */
 function FoldedStands({ stands, scope }: { stands: NonNullable<CompanionProps["stands"]>; scope: string | null | undefined }) {
-  return <details className="cp-said cp-stands-fold"><summary>{standsHeading(scope, stands.ago, stands.asOf)}{stands.asOf ? ` · as of ${stands.asOf}` : ""}</summary><p>{asOfPrefix(stands.asOf)}{withoutRawIds(stands.text)}</p></details>;
+  return <details className="cp-said cp-lede cp-stands-fold"><summary>{standsHeading(scope, stands.ago, stands.asOf)}{stands.asOf ? ` · as of ${stands.asOf}` : ""}</summary><p className="cp-stands">{asOfPrefix(stands.asOf)}{withoutRawIds(stands.text)}</p></details>;
 }
 
 function Body({ stands, scope, ready, note, load, feed, rest = 0, moreTitle = null, onPrivate, runs, nodeName, onTask, onDecide, onEverything, onNote, placeOf, fit, hideHealth = false, onMore, keepOne = false, compact = false }: CompanionProps & { fit: boolean; hideHealth?: boolean; onMore?: () => void; keepOne?: boolean;
@@ -730,7 +731,7 @@ function Body({ stands, scope, ready, note, load, feed, rest = 0, moreTitle = nu
       <WaitingRuns runs={waiting} />
       {feed.total === 0 && !feed.pending?.length && !waiting.length && <p className="cp-none">Nothing needs you here.</p>}
       {!!feed.checking?.length && <p className="cp-checking" role="status" aria-busy="true">{checkingAsks(feed.checking.length)}</p>}
-      <Rechecks tasks={feed.recheck ?? []} onTask={onTask} />
+      <Rechecks tasks={feed.recheck ?? []} onTask={onTask} placeOf={placeOf} />
       {health}
     </section>}
     {active.length > 0 && runsShown > 0 && <section aria-label="Running" className="cp-sec">
@@ -802,14 +803,15 @@ export function CompanionSide({ open, onToggle, ...p }: CompanionProps & Fold) {
  * room, under its header. The panel's summary is folded to its date line, its footer is outside what scrolls, and it always starts with a whole
  * request. Opening a task from it leaves the panel where it was; closing the task comes back to the panel at the same scroll position.
  */
-export function CompanionStrip({ open, onToggle, onSheet, ...p }: CompanionProps & Fold & { /** r20 (Codex 5): the sheet's close, while it is open, so the shell's Back closes it first */ onSheet?: (close: (() => void) | null) => void }) {
+export function CompanionStrip({ open, onToggle, onSheet, behind = false, ...p }: CompanionProps & Fold & { /** r20 (Codex 5): the sheet's close, while it is open, so the shell's Back closes it first */ onSheet?: (close: (() => void) | null) => void;
+  /** r28: a task's sheet is open over this panel: the panel stays where it is, out of the way of assistive technology until that sheet is closed */ behind?: boolean }) {
   const ref = useRef<HTMLElement>(null);
   const sheetRef = useRef<HTMLDivElement>(null);
   const close = () => onToggle(false);
   const closeRef = useRef(close); closeRef.current = close;
   /** Where the panel starts: under the room's header, so the room it belongs to stays in sight; in a window too short for that, from the top. */
   const [top, setTop] = useState(0);
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!open) return;
     const el = ref.current; const room = el?.closest(".sr") as HTMLElement | null;
     const under = el && room ? Math.max(0, Math.round(el.getBoundingClientRect().top - room.getBoundingClientRect().top)) : 0;
@@ -841,7 +843,7 @@ export function CompanionStrip({ open, onToggle, onSheet, ...p }: CompanionProps
         <span className="cp-chev" aria-hidden="true">{open ? "⌃" : "⌄"}</span>
       </button>
     </section>
-    {open && <div className="cp-sheet-wrap">
+    {open && <div className="cp-sheet-wrap" aria-hidden={behind || undefined}>
       <button type="button" className="cp-sheet-scrim" aria-label="Close" tabIndex={-1} onClick={close} />
       <div ref={sheetRef} className="cp cp-sheet" role="dialog" aria-modal="true" aria-label={p.scope ? `Where ${p.scope} stands` : "Where this stands"} tabIndex={-1}
         style={{ maxHeight: `calc(100% - ${top}px)` }}>

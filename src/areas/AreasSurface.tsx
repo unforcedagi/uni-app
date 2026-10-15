@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useConfirm } from "./useConfirm";
 import { invoke } from "@tauri-apps/api/core";
 import { TaskSheet, UndoBar, ownerLabel } from "./NodeWork";
@@ -174,12 +174,13 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
     : appOpen ? { close: () => setAppOpen(false), modal: false, history: true }
     : workOver ? { close: () => setWork(false), modal: false, history: true } : null;
   const overlayKey = `${sheetId ? "sheet" : ""}${stripSheet ? "strip" : ""}${drawer ? "drawer" : ""}${appOpen ? "app" : ""}${workOver ? "work" : ""}`;
-  useEffect(() => {
+  // (layout effects: what is over the place is known to the host's Back before the first key can reach it)
+  useLayoutEffect(() => {
     // Android Back closes what is over the place before it zooms out a level.
     onBackChange(sheetId ? closeSheet : stripSheet ? stripSheet.close : drawer ? () => setDrawer(false) : appOpen ? () => setAppOpen(false) : workOver ? () => setWork(false) : back);
     return () => onBackChange(null);
   }, [path, loose, data, uniRoom, onOpenArea, onBackChange, overlayKey, phoneTree, treeHome, rootOpen]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => {
+  useLayoutEffect(() => {
     onOverlayChange?.(overlay);
     // Escape closes the drawer or the work view (the sheet handles its own)
     const esc = (e: KeyboardEvent) => { if (e.key !== "Escape" || !overlay || overlay.modal || e.defaultPrevented) return; if (drawer) setDrawer(false); else if (appOpen) setAppOpen(false); else setWork(false); };
@@ -245,7 +246,7 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   const roomOfNode = (p: string) => stewardOf(p).room;
   // r28 (Codex P1-1/2): an ask is confirmed here, in the feed, before any row, count or dot shows it: one read of each room's chat, cached
   const roomOfTask = useCallback((t: Task) => (data ? roomView(data.tree, t.node, roomRefs, uniRef).target : uniRef) ?? null, [data, roomRefs, uniRef]);
-  const confirm = useConfirm(tasks.tasks, roomOfTask, tasks.lastOk, tasks.ready && (!chat || !!data || !!error));
+  const confirm = useConfirm(tasks.tasks, roomOfTask, tasks.lastOk, tasks.ready && (!chat || !!data || !!error), chat, (id) => rooms.find((r) => r.id === id)?.last_ts ?? null);
   // r28: the asks Uni must recheck are told to the rooms once per launch, as task ids in the app's log (the app never writes them to the vault)
   useEffect(() => {
     if (!confirm.settled || tasks.savedAt || recheckLogged.done) return;
@@ -303,7 +304,7 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
         {o.workBar}
         {/* below 900px the tree (and its health line) is in the drawer: the room says it itself, outside the drawer (r14); the work view has its own */}
         {stripCompanion && o.companion && !o.main && tasks.ready && <LoadHealth load={load} ready count={o.companion.feed.total} className="sr-health" />}
-        {stripCompanion && o.companion && !o.main && <CompanionStrip {...o.companion} open={companionOpen} onToggle={setCompanionOpen} onSheet={(close) => setStripSheet(close ? { close } : null)} />}
+        {stripCompanion && o.companion && !o.main && <CompanionStrip {...o.companion} open={companionOpen} onToggle={setCompanionOpen} onSheet={(close) => setStripSheet(close ? { close } : null)} behind={!!sheetId} />}
         {o.main ? <div className="sr-work">{o.main}</div>
           : <div className="sr-chat" data-chat={o.chatRoom ? "open" : "waiting"}>{o.chatRoom ? o.chatRoom.render(null, o.placeholder) : <ChatWait placeholder={o.placeholder} retry={o.retryChat ?? null} />}</div>}
       </section>
@@ -387,7 +388,7 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   const feed = withWaiting(feed0, runs);
   const panel = isRoot ? uniPanel(feed) : { ...feed, rest: 0, privateCount: 0 };
   const drafts = taskTree ? draftsUnder(taskTree, here, tasks.drafts).filter((d) => !hidden(d.node)) : [];
-  const openPrivate = (o: PrivateNeed["open"]) => { closeSheet(); setWork(false); openPath(o.path); };
+  const openPrivate = (o: PrivateNeed["open"]) => { closeSheet(); stripSheet?.close(); setWork(false); openPath(o.path); };
   // r18: one summary for the companion and the work view: the node's `stands`, else its brief's "Now" (with the brief's own time), else the
   // newest change it names (standsLine)
   const brief = !isRoot ? data?.briefs[node.path] ?? null : null;
@@ -403,9 +404,9 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   const written = !noAreas && !!rawStands && !!firstSentence(rawStands.text);
   const stands = stands0 && !noAreas ? { ...stands0, asOf: written ? asOfDate(rawStands!.at) : null, stale: written ? staleSummary(stands0.text, rawStands!.at, [...feed.rows, ...(feed.recheck ?? [])], direct.map((t) => t.askedAt), directClosed.map((t) => t.closed)) : null } : stands0;
   /** The room's composer when it is the one here, else that room's (opened, filled in, never sent). */
-  const sayIn = (roomId: string, text: string) => { closeSheet(); setWork(false); const here = roomFor(roomId); if (here) here.compose(text); else actions.compose(roomId, text); };
+  const sayIn = (roomId: string, text: string) => { closeSheet(); stripSheet?.close(); setWork(false); const here = roomFor(roomId); if (here) here.compose(text); else actions.compose(roomId, text); };
   /** From the work view or the sheet, "Open #room" for this room is the conversation: it goes back to it. Another room opens as a tab. */
-  const openRoomHere = (id: string, focus?: string | null, checking?: string | null) => { if (chat && id === target?.id) { closeSheet(); setWork(false); if (focus || checking) actions.focusMessage?.(focus ?? null, id, checking ?? null); } else (actions.openRoom as (id: string, focus?: string | null, checking?: string | null) => void)(id, focus, checking); };
+  const openRoomHere = (id: string, focus?: string | null, checking?: string | null) => { if (chat && id === target?.id) { closeSheet(); stripSheet?.close(); setWork(false); if (focus || checking) actions.focusMessage?.(focus ?? null, id, checking ?? null); } else (actions.openRoom as (id: string, focus?: string | null, checking?: string | null) => void)(id, focus, checking); };
   const live = sheetId ? tasks.all?.find((t) => t.id === sheetId) ?? null : null;
   if (live) lastSheet.current = live;
   const sheetTask = sheetId ? live ?? (lastSheet.current?.id === sheetId ? lastSheet.current : null) : null;
