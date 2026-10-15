@@ -180,6 +180,7 @@ export function TaskSheet({ task, gone = false, nodeName, room, roomNamed, inRoo
   /** r22 (Codex 7): a link in a step is a button in that step ("Open cohere-signup-staging"); for a "look at / open" step it is the primary action */
   const firstStep = steps ? steps.steps[0] : act?.text ?? "";
   const lookOpen = !gone && !!act && LOOK.test(withoutIntro(firstStep.trim())) && linksIn(firstStep).length > 0;
+  const firstLink = lookOpen ? linksIn(firstStep)[0] : null;
   /** r24 (Codex P1 2): the cue shows only for a room-directed or approval request whose room has talked about it since it was asked/added */
   const reqAt = requestDate(task);
   const asked = askedLine(reqAt);
@@ -223,9 +224,9 @@ export function TaskSheet({ task, gone = false, nodeName, room, roomNamed, inRoo
   const primary1 = movedOn ? "check" : !gone && !unsure && !!room && lookFailed ? "openroom" : primary0 === "done" && lookOpen ? "open" : primary0;
   // r26: while the instruction is unresolved (looking, related talk, couldn't read), the answers are not the primary; they come after "Answer anyway"
   const primary = !ready && (primary1 === "done" || primary1 === "say") ? null : primary1;
-  const stepLinks = (text: string, first: boolean) => {
+  const stepLinks = (text: string, _first: boolean) => {
     const ls = linksIn(text);
-    return ls.length ? <span className="task-step-links">{ls.map((u, i) => <button key={i} type="button" className={`task-do task-step-open${first && i === 0 && primary === "open" ? " primary" : ""}`} title={u} onClick={() => openOut(u)}>Open {rowLinkLabel(hostOf(u))}</button>)}</span> : null;
+    return ls.length ? <span className="task-step-links">{ls.map((u, i) => <button key={i} type="button" className="task-do task-step-open" title={u} onClick={() => openOut(u)}>Open {rowLinkLabel(hostOf(u))}</button>)}</span> : null;
   };
   /** The title under the action, one line of whole words; the whole of it (and the note's own words) is in Details (r18). */
   const sub = cutWords(withoutCut(rest), 96, false);
@@ -332,6 +333,8 @@ export function TaskSheet({ task, gone = false, nodeName, room, roomNamed, inRoo
         {primary === "task" && <button type="button" className="task-do primary" onClick={() => { onClose(); onNote({ vault, id: task.id }); }}>{OPEN_TASK}</button>}
         {primary === "note" && <button type="button" className="task-do primary" onClick={() => { onClose(); onNote({ vault, id: task.id }); }}>Open the note</button>}
         {primary === "source" && <button type="button" className="task-do primary" onClick={() => { const f = (check ?? waits)!.from; onClose(); onNote({ vault: f.vault, id: f.id }); }}>Open the note</button>}
+        {/* r26: a "look at" step's link is the primary action in the footer too: with a list under the heading it would otherwise be off the screen in a short window */}
+        {primary === "open" && firstLink && <button type="button" className="task-do primary" title={firstLink} onClick={() => openOut(firstLink)}>Open {rowLinkLabel(hostOf(firstLink))}</button>}
         {primary === "check" && <button type="button" className="task-do primary" onClick={() => { onOpenRoom(room!.id, hit?.ref ?? null, checkingBanner(step)); onClose(); }}>Check in #{room!.name.replace(/^#/, "")} first</button>}
         {primary === "openroom" && <button type="button" className="task-do primary" onClick={() => { onOpenRoom(room!.id); onClose(); }}>Open #{room!.name.replace(/^#/, "")}</button>}
         {sayIn && ready && (primary === "say" || primary === "check" || primary === "openroom") && <button type="button" className={`task-do${primary === "say" ? " primary" : ""}`} onClick={sayIn}>Say it in #{room!.name.replace(/^#/, "")} ›</button>}

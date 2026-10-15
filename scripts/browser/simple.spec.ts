@@ -3796,9 +3796,11 @@ test.describe('r22', () => {
     await expect(sheet.locator('h2')).toContainText('Look at cohere-signup-staging.example-workers.invalid on phone, then forward');
     await expect(sheet.locator('.task-steps li').nth(0)).toContainText('Look at cohere-signup-staging.example-workers.invalid on phone');
     await expect(sheet.locator('.task-steps li').nth(1)).toHaveText('Forward #cohere\'s \'For Eileen\' block (posted 10-13)');
-    const open = sheet.locator('.task-steps li').nth(0).getByRole('button', { name: 'Open cohere-signup-staging' });
+    // r26: the link is the primary action in the footer (the step keeps its own, secondary, button)
+    const open = sheet.locator('.task-foot').getByRole('button', { name: 'Open cohere-signup-staging' });
     await expect(open).toBeVisible();
     await expect(open).toHaveClass(/primary/);
+    await expect(sheet.locator('.task-steps li').nth(0).getByRole('button', { name: 'Open cohere-signup-staging' })).not.toHaveClass(/primary/);
     await expect(sheet.locator('.task-do.primary')).toHaveCount(1);
     await expect(sheet.getByRole('button', { name: 'I did this' })).not.toHaveClass(/primary/);
     // said once: the title is the quiet line under the heading (r26), no second copy of the step
@@ -4111,9 +4113,9 @@ test.describe('r23', () => {
     expect(await row.innerText()).not.toMatch(/…|\.\.\./);
     await row.locator('.cp-need').click();
     const sheet = sheetOf(page);
-    // two steps: the heading says so and the steps are the next, whole
-    await expect(sheet.locator('.task-steps li').nth(0)).toContainText('On your phone, look at cohereboulder.org');
-    await expect(sheet.locator('.task-steps li').nth(1)).toContainText('Forward Eileen the asks');
+    // r26: the heading is the next, whole (never "2 steps", never the title); a step list with nothing to open in it is not repeated under it
+    await expect(sheet.locator('h2')).toHaveText('On your phone, look at cohereboulder.org, then forward Eileen the asks');
+    await expect(sheet.locator('.task-steps')).toHaveCount(0);
     expect(await sheet.locator('h2').innerText()).not.toContain('Companion Today');
     expect(await sheet.innerText()).not.toMatch(/\(3…|\(3\.\.\./);
   });
@@ -4485,6 +4487,7 @@ test.describe('r26', () => {
   });
 
   test('r26 P1 3: the message being sent shows "Sending…" in its thread at once and the draft stays until it is delivered', async ({ page }) => {
+    test.skip(!wide(page), 'the composer beside the tree');
     await boot(page);
     await openRoom(page, 'Techne');
     await page.evaluate(() => { (window as any).__postDelay = 1500; });
