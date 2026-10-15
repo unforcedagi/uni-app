@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { buildTaskTree, parseNodes, parseTask, type Task } from "../src/areas/taskCore.ts";
 import type { Run } from "../src/areas/steerCore.ts";
 import {
-  askStamp, confirmationOf, chatAbout, checkInResult, ANNOUNCE_GRACE_MS, needsByRow, needsFeed, staleSummary, uniPanel, waitingRunParts, withWaiting, ROW_ITEMS, itemForms, taskIdOf, UNRESOLVED,
+  askStamp, confirmationOf, chatAbout, checkInResult, ANNOUNCE_GRACE_MS, needsByRow, needsFeed, uniPanel, waitingRunParts, withWaiting, ROW_ITEMS, itemForms, taskIdOf, UNRESOLVED,
   type ConfOf, type Resolved,
 } from "../src/areas/simpleCore.ts";
 import { ROOT } from "../src/areas/treeCore.ts";
@@ -109,25 +109,6 @@ await check("a row's list shows at most two whole items; the others are 'and N m
   assert.ok(itemForms("a whole item")[0] === "a whole item");
 });
 
-// ---- summaries: dimmed only by a task directly on the node
-const SUM = "COhere 2026 is live on grove.example.org; the fix ships Friday.";
-const WRITTEN = "2026-10-14T12:00:00.000Z";
-await check("summary case 1: an ask written on the node after the summary dims it", () => {
-  const r = staleSummary(SUM, WRITTEN, [], ["2026-10-14T18:30:00.000Z"], [])!;
-  assert.equal(r.why, "newer");
-});
-await check("summary case 2: a task closed on or after the summary's day dims it", () => {
-  assert.equal(staleSummary(SUM, WRITTEN, [], [], ["2026-10-14"])!.why, "closed", "the same day counts");
-  assert.equal(staleSummary(SUM, WRITTEN, [], [], ["2026-10-15"])!.why, "closed");
-  assert.equal(staleSummary(SUM, WRITTEN, [], [], ["2026-10-13"]), null, "closed the day before: the summary already knew");
-  assert.equal(staleSummary(SUM, WRITTEN, [], [], [null, "not a date"]), null);
-});
-await check("summary case 3: nothing newer directly on the node leaves it as written, however much changed elsewhere", () => {
-  assert.equal(staleSummary(SUM, WRITTEN, [], ["2026-10-14T11:59:00.000Z", null], []), null, "an ask written before it");
-  assert.equal(staleSummary(SUM, WRITTEN, [], [], []), null, "descendants' changes are never passed in");
-  assert.equal(staleSummary("Quiet.", null, [], ["2026-10-14T18:30:00.000Z"], ["2026-10-15"]), null, "an undated summary can't be compared");
-});
-
 await check("taskIdOf reads the T-NN a run names", () => {
   assert.equal(taskIdOf(mk(30)), "T-30");
   assert.equal(UNRESOLVED.state, "recheck");
@@ -138,12 +119,12 @@ await check("r28: a room announcing the ask it just re-stated doesn't unconfirm 
   const sec = (ms: number) => Math.floor(ms / 1000);
   const t0 = new Date(at).getTime();
   const keys = { ids: ["T-65"], words: [] as string[] };
-  const announce = [{ ref: "a", ts: sec(t0 + 9_000), body: "I've re-stated each ask: T-65: who pays the $10k sponsorship" }];
-  assert.equal(chatAbout({ at, kind: "asked" }, announce, keys), null);
-  assert.equal(checkInResult({ at, kind: "asked" }, announce, keys).kind, "none");
+  const announce = [{ ref: "a", ts: sec(t0 + 9_000), body: "I've re-stated each ask: T-65: who pays the $10k sponsorship", author: "uni-key" }];
+  assert.equal(chatAbout({ at, kind: "asked" }, announce, keys, "uni-key"), null);
+  assert.equal(checkInResult({ at, kind: "asked" }, announce, keys, undefined, "uni-key").kind, "none");
   const later = [{ ref: "b", ts: sec(t0 + ANNOUNCE_GRACE_MS + 60_000), body: "T-65 is settled" }];
   assert.equal(checkInResult({ at, kind: "asked" }, later, keys).kind, "found");
-  assert.equal(chatAbout({ at, kind: "added" }, announce, keys)?.key, "T-65", "an added (not asked) record keeps the strict rule");
+  assert.equal(chatAbout({ at, kind: "added" }, announce, keys, "uni-key")?.key, "T-65", "an added (not asked) record keeps the strict rule");
 });
 
 if (failed) { console.log(`\n${failed} failed`); process.exit(1); }

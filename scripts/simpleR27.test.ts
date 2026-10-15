@@ -2,8 +2,8 @@
 // Run: node --experimental-strip-types scripts/simpleR27.test.ts
 import assert from "node:assert/strict";
 import {
-  answersReady, asOfDate, asOfPrefix, checkInResult, checkingBanner, detailLists, confirmationOf, itemForms, needsRead, askStamp, referencedItems,
-  repeatsHeading, runStateLabel, staleLine, staleSummary, standsHeading, unconfirmedLine, waitingOnYou, LOOKUP_LIMIT,
+  answersReady, asOfDate, lastWritten, checkInResult, checkingBanner, detailLists, confirmationOf, itemForms, needsRead, askStamp, referencedItems,
+  repeatsHeading, runStateLabel, standsHeading, unconfirmedLine, waitingOnYou, LOOKUP_LIMIT,
 } from "../src/areas/simpleCore.ts";
 
 let failed = 0;
@@ -132,31 +132,16 @@ check("an incomplete lookup is unknown, not 'nothing related': a full read that 
 // ---- Codex P1-2: summaries are dated accounts
 const COHERE = "COhere 2026 is live on grove.example.org (new look, members, harvests; notifications off); tonight a time-of-day test failure blocks deploys while a fix is built, and register+sign-in (T-138) goes to staging for review on 10-15.";
 const WRITTEN = "2026-10-14T12:00:00.000Z";
-check("a fresh summary: nothing newer, nothing claimed, so it shows as written with its date", () => {
-  assert.equal(staleSummary(COHERE, WRITTEN, [], [day(3), "2026-10-14T11:59:00.000Z", null]), null);
-  assert.equal(staleSummary(COHERE, WRITTEN, [], []), null);
+check("a summary is a dated account: the date and the room, and no freshness verdict (r29)", () => {
   assert.equal(asOfDate(WRITTEN), "Oct 14");
-  assert.equal(asOfPrefix("Oct 14"), "As of Oct 14: ");
-  assert.equal(asOfPrefix(null), "");
+  assert.equal(lastWritten("Oct 14", "cohere"), "Last written Oct 14 by #cohere:");
+  assert.equal(lastWritten("Oct 14", "#Uni"), "Last written Oct 14 by #Uni:");
+  assert.equal(lastWritten("Oct 14", null), "Last written Oct 14:");
+  assert.equal(lastWritten(null, "cohere"), "Last written by #cohere:");
   assert.equal(asOfDate(null), null);
   assert.equal(standsHeading(null, "yesterday", "Oct 14"), "Where this stands", "the date is in the text, not twice");
   assert.equal(standsHeading(null, "2 days ago"), "Where this stands · 2 days ago", "a derived line keeps its age");
   assert.equal(standsHeading("COhere", null, null), "Where COhere stands");
-});
-check("a summary older than a task change on the node: the whole of it is older than the latest work", () => {
-  const r = staleSummary(COHERE, WRITTEN, [], ["2026-10-14T11:00:00.000Z", "2026-10-14T18:30:00.000Z"])!;
-  assert.ok(r);
-  assert.equal(r.why, "newer");
-  assert.equal(staleLine(r), "This summary is older than the latest work · from Oct 14");
-});
-check("COhere's real summary: it names nothing that waits on Aaron, so only a newer task dims it", () => {
-  assert.equal(staleSummary(COHERE, "2026-10-15T03:32:18.000Z", [{ title: "T-113 Look at grove.example.org", next: "forward Harper the asks" }], ["2026-10-15T03:00:00.000Z"]), null);
-  assert.equal(staleSummary(COHERE, "2026-10-15T03:32:18.000Z", [], ["2026-10-15T09:00:00.000Z"])!.why, "newer");
-});
-check("a summary with no date cannot be compared with the work: only a wait claim dims it", () => {
-  assert.equal(staleSummary(COHERE, null, [], [day(0)]), null);
-  assert.equal(staleSummary("Waits on Aaron's go.", null, [], [])!.why, "claim");
-  assert.equal(staleLine(staleSummary("Waits on Aaron's go.", null, [], [])!), "This summary is older than the latest work");
 });
 
 // ---- Codex P2-5: a run waiting on Aaron's answer is Needs you

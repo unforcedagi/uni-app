@@ -736,3 +736,11 @@
 .cp-sheet .cp-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .cp-sheet > .cp-foot { position: static; flex: none; margin: 0; padding: 4px 16px calc(8px + env(safe-area-inset-bottom)); border-top: 1px solid var(--th-hair2); }
 .cp-sheet-head { position: static; flex: none; }
+
+/* r29 (Codex P1-3): the summary is a dated account, muted and secondary, below Needs you; the app doesn't vouch for it */
+.cp-stands-note { margin: 14px 0 0; font: 400 13.5px/1.45 var(--th-sans); letter-spacing: 0; color: var(--th-mute); }
+.cp-stands-note .cp-asof { display: block; margin: 0 0 2px; font: 500 12.5px/1.4 var(--th-sans); color: var(--th-mute); }
+.cp-stands-note .cp-stands, .cp-stands-note .cp-said > p { margin: 0; font: inherit; color: var(--th-mute); }
+.cp-stands-note .cp-said { margin: 0; font: inherit; }
+.cp-stands-note .cp-said > p { margin: 4px 0 0; }
+.wv .cp-stands-note { margin: 0; }

@@ -422,6 +422,10 @@ export function answerText(raw: string): string | null {
   return t && t.length <= ANSWER_MAX ? t : null;
 }
 
+/** "12 older asks need confirming": the one quiet line under Needs you for what is not confirmed. It claims no work: the app doesn't start any. (r29, Codex P1-2) */
+export const recheckLine = (n: number): string => `${n} older ${n === 1 ? "ask needs" : "asks need"} confirming`;
+/** The empty Needs you: "Nothing needs you here" only when no ask is waiting to be confirmed either; else it says what is known: no ask is confirmed. */
+export const noneLine = (f: Pick<NeedsFeed, "recheck" | "checking">): string => ((f.recheck?.length ?? 0) + (f.checking?.length ?? 0) > 0 ? "No confirmed asks" : "Nothing needs you here.");
 /**
  * The needs-you feed (T-124 r7): only what the user must do. Their tasks (owner, or waiting on them) that are live and not snoozed (the
  * caller's `Where` has already dropped those, and anything done or archived), at priority Now or Soon (unsorted counts as Soon), plus open
@@ -491,21 +495,24 @@ export function requestKeys(t: { title?: string | null; next?: string | null }):
 export function isApprovalRequest(t: { kind?: string; next?: string | null }, audienceIsRoom: boolean): boolean {
   return t.kind === "decision" || audienceIsRoom || /(?:^|[,;:]\s*|\bthen\s+)(?:approve|say)\b|\bgo\s*\/\s*no[- ]?go\b|\bgo or no\b/i.test(t.next ?? "");
 }
-export type RoomMsg = { ref?: string; ts: number; body: string };
-/** Chat within this long after an ask was written is the room announcing it, not talk that moved past it. */
+export type RoomMsg = { ref?: string; ts: number; body: string; /** the author's pubkey, as the room's messages carry it */ author?: string };
+/** Uni's own message within this long after an ask was written, naming the ask's T-NN, is the room announcing it, not talk that moved past it. */
 export const ANNOUNCE_GRACE_MS = 10 * 60_000;
 export type ChatHit = { key: string; ref: string | null; ts: number };
-/** The first message after the request (`ts` in seconds) that mentions its key terms, or null. */
-export function chatAbout(w: AskedWhen | null | undefined, msgs: readonly RoomMsg[], keys: RequestKeys): ChatHit | null {
+/** The first message after the request (`ts` in seconds) that mentions its key terms, or null. `uni`: Uni's pubkey in the room (null: unknown, so nothing is an announcement). */
+export function chatAbout(w: AskedWhen | null | undefined, msgs: readonly RoomMsg[], keys: RequestKeys, uni: string | null = null): ChatHit | null {
   if (!w || !(keys.ids.length || keys.words.length)) return null;
   const day = /^\d{4}-\d{2}-\d{2}$/.test(w.at.trim());
   const at = day ? new Date(`${w.at.trim()}T23:59:59`).getTime() : stampMs(w.at);
   if (!Number.isFinite(at)) return null;
-  // r28: the room announces an ask it just wrote ("I've re-stated each ask: T-65 …") seconds after asked_at; that is the ask, not talk past it
-  const from = !day && w.kind === "asked" ? at + ANNOUNCE_GRACE_MS : at;
+  // r29 (Codex P1-1): Uni announcing an ask it just wrote ("I've re-stated each ask: T-65 …") seconds after asked_at is the ask, not talk past
+  // it. Only that: Uni's own key and the ask's own T-NN. Aaron's messages, other keys, and Uni's messages that don't name the task all count.
+  const graceTo = !day && w.kind === "asked" ? at + ANNOUNCE_GRACE_MS : at;
+  const tids = keys.ids.filter((k) => /^T-\d+$/i.test(k));
   for (const m of [...msgs].sort((a, b) => a.ts - b.ts)) {
-    if (!(m.ts * 1000 > from)) continue;
+    if (!(m.ts * 1000 > at)) continue;
     const body = m.body.toLowerCase();
+    if (m.ts * 1000 <= graceTo && uni && m.author === uni && tids.some((k) => new RegExp(`\\b${k.toLowerCase()}\\b`).test(body))) continue;
     const id = keys.ids.find((k) => (k.startsWith("#") ? new RegExp(`(^|[^\\w&])${k.toLowerCase()}\\b`) : new RegExp(`\\b${k.toLowerCase()}\\b`)).test(body));
     if (id) return { key: id, ref: m.ref ?? null, ts: m.ts };
     const hit = keys.words.filter((k) => new RegExp(`(^|[^a-z-])${k}([^a-z-]|$)`).test(body));
@@ -522,9 +529,9 @@ export function chatAbout(w: AskedWhen | null | undefined, msgs: readonly RoomMs
 export type CheckIn = { kind: "found"; hit: ChatHit | null } | { kind: "failed" } | { kind: "none" };
 /** The most messages the lookup reads: a read this full that starts after the write has not seen the write's time. */
 export const LOOKUP_LIMIT = 200;
-export function checkInResult(w: AskedWhen | null | undefined, msgs: readonly RoomMsg[] | null | undefined, keys: RequestKeys, limit = LOOKUP_LIMIT): CheckIn {
+export function checkInResult(w: AskedWhen | null | undefined, msgs: readonly RoomMsg[] | null | undefined, keys: RequestKeys, limit = LOOKUP_LIMIT, uni: string | null = null): CheckIn {
   if (!Array.isArray(msgs)) return { kind: "failed" };
-  const hit = chatAbout(w, msgs, keys);
+  const hit = chatAbout(w, msgs, keys, uni);
   if (hit) return { kind: "found", hit };
   const from = w ? (/^\d{4}-\d{2}-\d{2}$/.test(w.at.trim()) ? new Date(`${w.at.trim()}T23:59:59`).getTime() : stampMs(w.at)) : NaN;
   const oldest = msgs.length ? Math.min(...msgs.map((m) => m.ts)) * 1000 : Infinity;
@@ -537,20 +544,18 @@ export const checkingBanner = (step: string): string => `Checking: ${cutWords(wi
 export const checkInCue = (room: string, key: string, w: AskedWhen): string => `#${room.replace(/^#/, "")} has talked about ${key} since this was ${w.kind === "asked" ? "asked" : "added"}`;
 
 /**
- * r27 (Codex P1-2): "Where this stands" is a dated account ("As of Oct 14: ...") shown as written, never partly promoted. Two things make the
- * whole of it older than the work: a clause that says something waits on Aaron or on approval that no open item matches (the r26 claim check,
- * now only the trigger: ids it names, else two distinctive words), or a newer change in any task under the node (`updated_at` after the
- * summary's). Either dims the whole summary behind "This summary is older than the latest work · from Oct 14", with "What it said" to open it.
+ * r29 (Codex P1-3): "Where this stands" is a dated account and the app doesn't vouch for it. It is shown as "Last written Oct 14 by #room:" and
+ * the text as written, muted, below Needs you. There is no freshness check: the date alone is the signal.
  */
-export const WAITS_ON_ME = /\bwaits?\s+on\s+aaron\b|\baaron['’]s\s+(?:go|ok|okay|ask|call|ans|decision|approval|sign-?off)\b|\bneeds?\s+aaron\b|\bfor\s+aaron\s+to\b|\bawaiting\s+aaron\b|\bwaiting\s+(?:on|for)\s+aaron\b|\b(?:awaiting|pending|needs?|needed|requires?)\s+(?:your\s+|aaron['’]s\s+|his\s+)?(?:approval|sign-?off|go-?ahead|ok\b|okay\b|decision)|\bapproval\s+(?:pending|needed|required)\b|\bwaits?\s+on\s+(?:your|his)\s+(?:go|ok|approval|answer|decision)/i;
-export type StaleSummary = { from: string | null; /** why: a wait claim nothing open matches, or a newer change in a task on the node */ why: "claim" | "newer" | "closed" };
-export const STALE_SUMMARY = "This summary is older than the latest work";
-export const staleLine = (s: Pick<StaleSummary, "from">): string => (s.from ? `${STALE_SUMMARY} · from ${s.from}` : STALE_SUMMARY);
 /** A stamp as the date a summary is dated by: "Oct 14" (local calendar day). Null when unknown. */
 export const asOfDate = (at: string | null | undefined): string | null => { const ms = stampMs(at ?? ""); return Number.isFinite(ms) ? new Date(ms).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : null; };
-/** The summary as written, with its date in front: "As of Oct 14: COhere 2026 is live…". */
-export const asOfPrefix = (asOf: string | null | undefined): string => (asOf ? `As of ${asOf}: ` : "");
-const CLAIM_STOP = new Set("aaron aaron's waits waiting awaiting needs needed decision approval prod staging deploy deployed first second their about which where would should could these those after before until still ready today tomorrow there being other under again while review reviews".split(" "));
+/** The label in front of a written summary: "Last written Oct 14 by #cohere:" (a part that isn't known is left out). */
+export function lastWritten(asOf: string | null | undefined, by: string | null | undefined): string {
+  const room = by ? `#${by.replace(/^#/, "")}` : "";
+  return `Last written${asOf ? ` ${asOf}` : ""}${room ? ` by ${room}` : ""}:`;
+}
+/** A summary longer than this is behind "What it said"; a shorter one is shown whole. */
+export const SUMMARY_LONG = 280;
 type Clause = { text: string; sep: string };
 /** The summary as clauses: split at sentence ends, ";" and (when both sides are real clauses) ", "; never inside a bracket. */
 export function summaryClauses(text: string): Clause[] {
@@ -575,64 +580,6 @@ export function summaryClauses(text: string): Clause[] {
   if (rest) out.push({ text: rest, sep: "" });
   return out;
 }
-const claimIds = (x: string): string[] => [...new Set([...x.matchAll(/(?:^|[^\w&])(#\d{1,5}|T-\d+)\b/gi)].map((m) => m[1].toLowerCase()).concat([...x.matchAll(/\bPR\s*#?(\d{1,5})\b/gi)].map((m) => `#${m[1]}`)))];
-const claimWords = (x: string): string[] => [...new Set((x.toLowerCase().match(/[a-z]{5,}/g) ?? []).filter((w) => !CLAIM_STOP.has(w)))];
-export type OpenItem = Partial<Pick<Task, "title" | "next" | "detail">>;
-/** Whether one wait clause is some open item: every id it names is in an item, else two distinctive words shared with one item. */
-function clauseIsOpen(clause: string, before: string, items: readonly OpenItem[]): boolean {
-  if (!items.length) return false;
-  const ids = claimIds(clause);
-  if (ids.length) {
-    const have = new Set(items.flatMap((t) => claimIds([t.title, t.next, t.detail].filter(Boolean).join(" "))));
-    return ids.every((id) => have.has(id));
-  }
-  let words = claimWords(clause);
-  // "..., waiting on Aaron": a clause with too few words of its own is read with the clause before it
-  if (words.length < 2) words = [...new Set([...words, ...claimWords(before)])];
-  return items.some((t) => { const text = [t.title, t.next].filter(Boolean).join(" ").toLowerCase(); return words.filter((w) => new RegExp(`(^|[^a-z])${w}`).test(text)).length >= 2; });
-}
-/** Whether a clause says something of its own: a verb or a state word ("review done", "email drafted", "class live", "waits on Aaron"). */
-const PREDICATE = /\b(?:is|are|was|were|be|been|has|have|had|will|shall|can|may|must|should|waits?|waiting|awaiting|needs?|needed|requires?|done|live|ready|open|closed|green|red|failing|passing|due|blocked|paused|held|quiet|late|stuck|queued|running|underway|complete|completed|signed|approved|shipped|sent|merged|built|staged|deployed|launched|fixed|written|posted|booked|filed|resolved|expected)\b|\w{3,}ed\b/i;
-/**
- * "COhere deployment (Wed), ATLAS grading, Techne contract signing need Aaron decisions": the clauses before a wait claim that say nothing of
- * their own are what it is about, so they are part of it (never left standing alone as if they were true).
- */
-function mergeSubjects(clauses: Clause[]): Clause[] {
-  const out: Clause[] = [];
-  const lastComma = (t: string): number => { const d = depths(t); for (let i = t.length - 1; i >= 0; i--) if (t[i] === "," && d[i] === 0) return i; return -1; };
-  for (const c of clauses) {
-    let cur = c;
-    if (WAITS_ON_ME.test(cur.text)) {
-      for (let guard = 0; guard < 8 && out.length && out[out.length - 1].sep.startsWith(","); guard++) {
-        const prev = out[out.length - 1];
-        const at = lastComma(prev.text);
-        const chunk = at >= 0 ? prev.text.slice(at + 1).trim() : prev.text;
-        if (PREDICATE.test(chunk.replace(WAITS_ON_ME, ""))) break;
-        if (at >= 0) { out[out.length - 1] = { text: prev.text.slice(0, at).trim(), sep: prev.sep }; }
-        else out.pop();
-        cur = { text: `${chunk}, ${cur.text}`, sep: cur.sep };
-        if (at < 0) continue;
-      }
-    }
-    out.push(cur);
-  }
-  return out;
-}
-export function staleSummary(stands: string | null | undefined, updated: string | null | undefined, open: readonly OpenItem[] = [], asked: readonly (string | null | undefined)[] = [], closed: readonly (string | null | undefined)[] = []): StaleSummary | null {
-  if (!stands) return null;
-  const ms = stampMs(updated ?? "");
-  const from = asOfDate(updated);
-  // r28 (Codex P1-3): only a task directly on the node counts. An ask written (`asked_at`) after the summary was written…
-  if (Number.isFinite(ms) && asked.some((c) => { const t = stampMs(c ?? ""); return Number.isFinite(t) && t > ms; })) return { from, why: "newer" };
-  // …or a task closed on or after the day it was written (`closed` is a day, so the comparison is by day)
-  if (Number.isFinite(ms) && closed.some((c) => { const d = (c ?? "").trim().slice(0, 10); return /^\d{4}-\d{2}-\d{2}$/.test(d) && d >= localDay(new Date(ms)); })) return { from, why: "closed" };
-  // a wait claim no open item is
-  if (!WAITS_ON_ME.test(stands)) return null;
-  const clauses = mergeSubjects(summaryClauses(stands));
-  const unmatched = clauses.some((c, i) => WAITS_ON_ME.test(c.text) && !clauseIsOpen(c.text, clauses[i - 1]?.text ?? "", open));
-  return unmatched ? { from, why: "claim" } : null;
-}
-
 /**
  * A step that sends words it doesn't carry (r23, both critics): "Send Ryan the deploy-access message below", "Forward the draft", "Send the
  * message". Only a sending step counts ("Your OK on the draft" or "Edit the draft, …" asks something else of a draft that exists).

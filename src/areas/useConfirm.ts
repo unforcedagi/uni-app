@@ -4,12 +4,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { Task } from "./taskCore";
+import { findUniMember } from "../uniActions";
 import { checkInResult, CONFIRM_WAIT_MS, confirmationOf, needsRead, requestKeys, UNRESOLVED, type Resolved, type RoomMsg } from "./simpleCore";
 
 /** A room's chat is read again when the copy is older than this (the task list is re-read every minute). */
 export const ROOM_TTL_MS = 60_000;
 export const ROOM_LIMIT = 200;
-type RoomRead = { at: number; msgs: RoomMsg[] | null; /** the newest message the rooms list knew when the read began (seconds): a room whose list says it has talked since has newer chat than the read saw */ seen: number };
+type RoomRead = { at: number; msgs: RoomMsg[] | null; /** Uni's pubkey in the room (null: not known, so no message is taken for Uni's announcement) */ uni: string | null; /** the newest message the rooms list knew when the read began (seconds): a room whose list says it has talked since has newer chat than the read saw */ seen: number };
 /** Session memory: room id → its last read (null msgs: it failed). */
 const reads = new Map<string, RoomRead>();
 const inflight = new Set<string>();
@@ -19,7 +20,7 @@ export const forgetRoomReads = () => { reads.clear(); inflight.clear(); };
  * One read of a room's recent chat. Test builds can block it (`VITE_CHECKIN_BLOCK=1`), delay it (`VITE_CHECKIN_DELAY=<ms>`) or find chat after
  * every ask (`VITE_CHECKIN_FOUND=1`, with `hint` the words of the room's asks) to show each state in the real app; none is in a normal build.
  */
-async function readRoom(room: string, hint: string): Promise<RoomMsg[] | null> {
+async function readRoom(room: string, hint: string): Promise<{ msgs: RoomMsg[] | null; uni: string | null }> {
   const wait = Number(import.meta.env.VITE_CHECKIN_DELAY ?? 0) || 0;
   const go = async (): Promise<unknown> => {
     if (import.meta.env.VITE_CHECKIN_BLOCK === "1") throw new Error("blocked");
@@ -27,7 +28,9 @@ async function readRoom(room: string, hint: string): Promise<RoomMsg[] | null> {
     return invoke("get_messages", { channel: room, root: null, limit: ROOM_LIMIT });
   };
   const r = wait ? await new Promise<unknown>((res, rej) => setTimeout(() => go().then(res, rej), wait)) : await go();
-  return Array.isArray(r) ? (r as RoomMsg[]) : null;
+  // r29: who Uni is in this room, to tell its own announcement of an ask from talk past it; unknown stays unknown
+  const uni = await invoke<{ pubkey: string; name: string }[]>("get_members", { channel: room }).then((m) => findUniMember(m)?.pubkey ?? null, () => null);
+  return { msgs: Array.isArray(r) ? (r as RoomMsg[]) : null, uni };
 }
 
 export type Confirmations = {
@@ -68,9 +71,9 @@ export function useConfirm(tasks: readonly Task[], roomOf: (t: Task) => { id: st
     if (inflight.has(room)) return;
     inflight.add(room);
     const seen = lastTsRef.current(room) ?? 0;
-    readRoom(room, hint).then((msgs) => msgs, () => null).then((msgs) => {
+    readRoom(room, hint).catch(() => ({ msgs: null, uni: null })).then(({ msgs, uni }) => {
       inflight.delete(room);
-      reads.set(room, { at: Date.now(), msgs, seen });
+      reads.set(room, { at: Date.now(), msgs, uni, seen });
       if (alive.current) { setGaveUp((g) => { if (!g.has(room)) return g; const c = new Set(g); c.delete(room); return c; }); bump((n) => n + 1); }
     });
   }, []);
@@ -101,7 +104,7 @@ export function useConfirm(tasks: readonly Task[], roomOf: (t: Task) => { id: st
     if (room && needsRead(true, t.askedAt, nowMs)) {
       const r = reads.get(room.id);
       // a room that has talked since the read was made is read again; until then its asks are held back (never confirmed on a chat that is out of date)
-      if (r && !staleRead(room.id, r)) look = checkInResult({ at: t.askedAt!, kind: "asked" }, r.msgs, requestKeys(t));
+      if (r && !staleRead(room.id, r)) look = checkInResult({ at: t.askedAt!, kind: "asked" }, r.msgs, requestKeys(t), undefined, r.uni);
       else if (gaveUp.has(room.id)) look = { kind: "failed" };
     }
     const res = confirmationOf(hasRoom, t.askedAt, look, nowMs);

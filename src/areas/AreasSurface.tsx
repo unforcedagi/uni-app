@@ -4,8 +4,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { TaskSheet, UndoBar, ownerLabel } from "./NodeWork";
 import { useTasks } from "./useTasks";
 import { draftsUnder, runsUnder } from "./steerCore";
-import { CompanionSide, CompanionStrip, StaleStands, useCompanionOpen, type CompanionProps, type TaskLoad } from "./Companion";
-import { chatPlaceholder, isMine, needsByRow, needsFeed, needsYou, privateNote, withWaiting, standsHeading, staleSummary, standsLine, asOfDate, asOfPrefix, firstSentence, stateLine, uniPanel, type PrivateNeed } from "./simpleCore";
+import { CompanionSide, CompanionStrip, Stands, useCompanionOpen, type CompanionProps, type TaskLoad } from "./Companion";
+import { chatPlaceholder, isMine, needsByRow, needsFeed, needsYou, privateNote, withWaiting, standsHeading, standsLine, asOfDate, firstSentence, stateLine, uniPanel, type PrivateNeed } from "./simpleCore";
 import { ownRoom, type Steward } from "./talkCore";
 import type { Area } from "./areasCore";
 import { isMe, priorityOf, tasksUnder, type Task, type TaskNode } from "./taskCore";
@@ -397,12 +397,9 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   /** A vault with no areas yet: Uni says how to start, in plain words (r13), instead of a tag and a path to type. */
   const noAreas = isRoot && !!tree && !error && childrenOf(tree, ROOT).length === 0;
   const stands0 = noAreas ? { text: "No areas yet. Tell Uni here what you want to look after, and it will set up your first area.", ago: "" } : standsLine(rawStands, levelTasks.filter((t) => !hidden(t.node)), now);
-  /** r27 (Codex P1-2): a written summary is a dated account ("As of Oct 14: …"); a wait claim no open item is, an ask written on this node after it, or a task on this node closed on or after its day, makes the whole of it "older than the latest work" */
-  /** r28 (Codex P1-3): only tasks directly on this node can dim its summary (Uni's root summary is no longer dimmed by a change anywhere below it) */
-  const direct = levelTasks.filter((t) => t.node === node.path && !hidden(t.node));
-  const directClosed = (tasks.closed ?? []).filter((t) => t.node === node.path && !hidden(t.node));
+  /** r29 (Codex P1-3): a written summary is a dated account: "Last written Oct 14 by #room:" and the text as written. The app doesn't judge whether it still holds. */
   const written = !noAreas && !!rawStands && !!firstSentence(rawStands.text);
-  const stands = stands0 && !noAreas ? { ...stands0, asOf: written ? asOfDate(rawStands!.at) : null, stale: written ? staleSummary(stands0.text, rawStands!.at, [...feed.rows, ...(feed.recheck ?? [])], direct.map((t) => t.askedAt), directClosed.map((t) => t.closed)) : null } : stands0;
+  const stands = stands0 && !noAreas ? { ...stands0, written, asOf: written ? asOfDate(rawStands!.at) : null, by: written ? target?.name ?? null : null } : stands0;
   /** The room's composer when it is the one here, else that room's (opened, filled in, never sent). */
   const sayIn = (roomId: string, text: string) => { closeSheet(); stripSheet?.close(); setWork(false); const here = roomFor(roomId); if (here) here.compose(text); else actions.compose(roomId, text); };
   /** From the work view or the sheet, "Open #room" for this room is the conversation: it goes back to it. Another room opens as a tab. */
@@ -431,7 +428,7 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   // r18: the work view says where this stands with the companion's own sentence, heading and date ("Where this stands · 2 days ago"), one
   // timestamp source (`stands_at`, else the newest change it names); the brief's separate "updated 16h ago" is gone
   const top = (stands || askRoom) ? <div className="wv-top">
-    {stands && <><h3 className="cp-h wv-stands-h">{standsHeading(borrowed ? node.name : null, stands.ago, "asOf" in stands ? stands.asOf : null)}</h3>{"stale" in stands && stands.stale ? <StaleStands stale={stands.stale} text={stands.text} className="th-lede wv-brief" /> : <p className="th-lede wv-brief">{"asOf" in stands ? asOfPrefix(stands.asOf) : ""}{stands.text}</p>}</>}
+    {stands && <><h3 className="cp-h wv-stands-h">{standsHeading(borrowed ? node.name : null, stands.ago, "asOf" in stands ? stands.asOf : null)}</h3><Stands stands={stands} className="th-lede wv-brief" /></>}
     {askRoom && <p className="th-fresh wv-fresh"><button type="button" className="th-link" onClick={() => actions.compose(askRoom, refreshDraft(node.name, isRoot ? "" : node.path))}>Ask Uni to update this summary</button></p>}
   </div> : null;
   const foot = node.kind === "project" && body ? <details className="th-note wv-note"><summary>Project note</summary><Body body={body} mentions={[]} me={null} /></details> : null;

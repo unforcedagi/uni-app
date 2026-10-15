@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import {
   answersReady, checkInResult, closedTask, currentStep, detailLists, gateOf, itemForms, liveRuns, needsYou, notWrittenDown, referencedItems,
-  revisionMoved, rowAction, clauseForms, staleLine, staleSummary, stepHeading, stepNotes, summaryClauses, titleSays, ANSWER_ANYWAY,
+  revisionMoved, rowAction, clauseForms, stepHeading, stepNotes, summaryClauses, titleSays, ANSWER_ANYWAY,
 } from "../src/areas/simpleCore.ts";
 
 let failed = 0;
@@ -149,33 +149,6 @@ check("the revision guard: a task changed since the sheet loaded", () => {
 });
 
 // ---- 5 (Codex P1 2, r27): the claim check is only the trigger for dimming the whole summary
-const FROM = "2026-10-13T18:00:00.000Z";
-check("a wait claim no open item matches dims the whole summary; one that is open does not", () => {
-  const s = "Prod deploy of #38 waits on Aaron's go; #58 also waits on Aaron's approval; docs shipped on staging.";
-  const r = staleSummary(s, FROM, [{ title: "T-90 Deploy", next: "Say go to deploy #38" }])!;
-  assert.ok(r);
-  assert.equal(r.why, "claim");
-  assert.equal(r.from, "Oct 13");
-  assert.equal(staleLine(r), "This summary is older than the latest work · from Oct 13");
-  assert.ok(staleSummary("Deploy of #38 and #58 waits on Aaron's go.", FROM, [{ title: "T-90", next: "Say go to deploy #38" }]), "every id a claim names must be open");
-  assert.equal(staleSummary("Deploy of #38 + #58 waits on Aaron's go.", FROM, [{ title: "T-90", next: "Say go to deploy #38 + #58" }]), null);
-  assert.equal(staleSummary("PR #61 waits on Aaron's approval.", FROM, [{ title: "T-113 Look", detail: "Live on prod (PR #61)" }]), null);
-});
-check("a summary with no ids: two distinctive words in one item; one shared word is not enough", () => {
-  const s = "Follow-up email drafted and awaiting approval; grading and discovery end date waiting on Aaron.";
-  assert.ok(staleSummary(s, FROM, [{ title: "T-129 Send the ATLAS Oct 12 follow-up email", next: "Edit and send the ATLAS follow-up to Mark and Dominic" }]));
-  assert.ok(staleSummary("SOW waiting on Aaron to add the wallet.", FROM, [{ title: "T-1 Add the logo", next: "Send the wallet card" }]), "wallet alone");
-  assert.equal(staleSummary("SOW waiting on Aaron to add the wallet and sign individually.", FROM, [{ title: "T-1 Add wallet", next: "Sign the SOW individually or as an LLC" }]), null);
-  assert.equal(staleSummary("Wallet SOW ready for signature, waiting on Aaron.", FROM, [{ title: "T-1 SOW signature", next: "Add the wallet" }]), null);
-});
-check("a summary that waits on nothing is untouched unless a task changed after it", () => {
-  assert.equal(staleSummary("Quiet; no open tasks.", FROM, []), null);
-  assert.ok(staleSummary("Tuesday: Atlas review done; follow-up waiting on Aaron's go.", FROM, []));
-});
-check("a list of subjects before a wait claim is part of it", () => {
-  const s = "Coordinates five areas with cascading approvals due this week: COhere deployment (Wed), ATLAS grading, Techne contract signing need Aaron decisions.";
-  assert.equal(staleSummary(s, FROM, [])!.why, "claim");
-});
 check("clauseForms never cuts inside a bracket (COhere's real summary)", () => {
   const forms = clauseForms("COhere 2026 is live on grove.example.org (new look, members, harvests; notifications off); tonight a time-of-day test failure blocks deploys while a fix is built, and register+sign-in (T-138) goes to staging for review on 10-15.");
   assert.ok(forms.length >= 2);

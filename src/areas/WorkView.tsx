@@ -7,7 +7,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { cleanText } from "../interface/contract";
 import { checkingAsks, NeedRow, PrivateRow, Rechecks, RunText, WaitingRuns } from "./Companion";
 import { isActiveRun, type Draft, type Run } from "./steerCore";
-import { quietAgo, runStateLabel, stampMs, titleWords, waitingOnYou, type NeedsFeed, type PrivateNeed } from "./simpleCore";
+import { noneLine, quietAgo, runStateLabel, stampMs, titleWords, waitingOnYou, type NeedsFeed, type PrivateNeed } from "./simpleCore";
 import type { TaskLoad } from "./Companion";
 import { asOf, countLabel, countText, LoadHealth } from "./LoadHealth";
 import type { Task } from "./taskCore";
@@ -62,10 +62,9 @@ export function WorkView(p: WorkViewProps) {
   if (!p.ready) return <div className="wv">{p.load.error || p.load.slow ? <LoadHealth load={p.load} ready={false} /> : <p className="th-quiet" role="status">Loading…</p>}</div>;
   return <div className="wv" aria-label={`All of ${p.nodeName}'s work`}>
     <LoadHealth load={p.load} ready count={p.feed.total} />
-    {p.top}
     <section className="wv-sec" aria-label="Needs you" aria-busy={p.load.refreshing || undefined}>
       <h2 className="wv-h">Needs you <span className="wv-n" aria-label={countLabel(p.feed.total, p.load)} title={countLabel(p.feed.total, p.load)}>{countText(p.feed.total, p.load)}</span></h2>
-      {p.feed.total === 0 && !pending.length && !waiting.length ? <p className="cp-none">Nothing needs you here.</p> : p.feed.total === 0 && !pending.length ? null : <ul className="cp-list">
+      {p.feed.total === 0 && !pending.length && !waiting.length ? <p className="cp-none">{noneLine(p.feed)}</p> : p.feed.total === 0 && !pending.length ? null : <ul className="cp-list">
         {p.feed.rows.map((t) => <NeedRow key={t.id} t={t} onTask={p.onTask} onDecide={p.onDecide} onNote={p.onNote} area={p.placeOf?.(t) ?? null} />)}
         {p.feed.privates.map((x) => <PrivateRow key={x.key} p={x} onPrivate={p.onPrivate} />)}
         {pending.map((t) => <NeedRow key={t.id} t={t} onTask={p.onTask} onDecide={p.onDecide} onNote={p.onNote} area={p.placeOf?.(t) ?? null} />)}
@@ -74,6 +73,8 @@ export function WorkView(p: WorkViewProps) {
       {!!p.feed.checking?.length && <p className="cp-checking" role="status" aria-busy="true">{checkingAsks(p.feed.checking.length)}</p>}
       <Rechecks tasks={p.feed.recheck ?? []} onTask={p.onTask} placeOf={p.placeOf} />
     </section>
+    {/* r29 (Codex P1-3): the summary is a dated account, below what needs you */}
+    {p.top}
     {/* r27: no heading with nothing under it: Running is here when something runs, when what runs couldn't be read, or when nothing moves at all */}
     {(running.length > 0 || !!p.activity.error || !p.activity.ready || (motion === 0 && !p.privateOther)) && <section className="wv-sec" aria-label="Running">
       <h2 className="wv-h">Running</h2>
