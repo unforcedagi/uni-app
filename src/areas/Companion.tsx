@@ -660,9 +660,12 @@ export function Rechecks({ tasks, why, scope = "room", onTask, placeOf }: { task
       const place = placeOf?.(t) ?? null;
       const w = why?.[t.id] ?? null;
       const reason = [reasonShort(w, t), place && w !== "chat-since" && w !== "read-failed" ? `in ${place}` : null].filter(Boolean).join(" · ");
+      // a request whose row leads with its title (no action in its step) shows the step under it, whole: no word of it is left out of the list
+      const under = t.kind !== "decision" && rowLead(t).mode === "title" ? t.next.trim() : "";
       return <li key={t.id} className="cp-recheck-item" data-id={taskTitle(t.title).id ?? undefined} data-why={w ?? undefined}>
-        <button type="button" className="cp-rc-open" aria-label={`${wholeStep(t)}. ${reason}`} onClick={() => onTask(t)}>
+        <button type="button" className="cp-rc-open" aria-label={`${wholeStep(t)}${under ? `. ${under}` : ""}. ${reason}`} onClick={() => onTask(t)}>
           <span className="cp-recheck-step"><RefText text={wholeStep(t)} vault={t.vault ?? vault} /></span>
+          {under && <span className="cp-recheck-next"><RefText text={under} vault={t.vault ?? vault} /></span>}
           <small className="cp-recheck-asked">{reason}</small>
         </button>
       </li>;
