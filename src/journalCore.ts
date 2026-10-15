@@ -1,24 +1,76 @@
-// Journal helpers (pure, unit-tested). Entries use the Parachute app's capture
-// shape: path Notes/YYYY/MM-DD/HH-MM-SS in local time, tag `capture`.
+// Journal helpers (pure, unit-tested). New entries are filed where the server's
+// T-60 sweep (~/scripts/t60_journal_sweep.py) would put them: path
+// `Journal/YYYY/MM-DD/HH-MM <first words>` in local time, tag `journal`. A voice
+// entry still transcribing keeps the time-only `Journal/YYYY/MM-DD/HH-MM`; the
+// sweep titles it once the transcript lands.
 
 import { quote } from "./uniActions.ts";
 import { noteUrl } from "./vaultlinks.ts";
 
-export type JournalDraft = { entry_id: string; path: string; content: string; source: "text" | "voice"; created_at: string };
+export type JournalDraft = { entry_id: string; path: string; content: string; source: "text" | "voice"; created_at: string; /** paths to try, in order, when `path` is taken */ alternates: string[] };
 export type JournalNote = { id: string; path: string; created_at: string; content: string; source: string | null; entry_id: string | null; tags: string[]; pending: boolean };
 export type QueuedEntry = { entry_id: string; path: string; content: string; source: string; created_at: string; has_audio: boolean; note_id: string | null; attempts: number; last_error: string | null };
-export type FlushReport = { sent: string[]; remaining: number; error: string | null };
+export type FlushReport = { sent: string[]; remaining: number; error: string | null; /** the entry was already queued ("waiting") or sent in the last 10 minutes ("saved"); nothing new was queued */ duplicate?: { kind: "waiting" | "saved"; id: string } | null };
 
 export const TRANSCRIPT_PENDING = "_Transcript pending._";
 const pad = (n: number) => String(n).padStart(2, "0");
 
-/** Vault path for an entry made at `d` (local time, like the Parachute app). */
-export function entryPath(d: Date): string {
+// The sweep's `first_words`, ported rule for rule (T-60): the placeholders, front matter, images, link and wikilink targets, bare URLs,
+// list/heading/quote markers, ** and __, and the characters a path can't hold go; then up to `n` words while the title stays within `limit`
+// characters; then the edge punctuation goes.
+const PENDING = ["_Transcript pending._", "*(Transcribing...)*", "_Transcript pending (part"];
+const STRIP = /[\\/\[\]#|:*?"<>^{}`~]/g;
+export function firstWords(content: string | null | undefined, n = 7, limit = 60): string {
+  let text = content ?? "";
+  for (const p of PENDING) text = text.split(p).join(" ");
+  text = text.replace(/^---\n[\s\S]*?\n---\n/, "");
+  text = text.replace(/!\[[^\]]*\]\([^)]*\)/g, " ");
+  text = text.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1");
+  text = text.replace(/\[\[([^\]|]*\|)?([^\]]*)\]\]/g, "$2");
+  text = text.replace(/https?:\/\/\S+/g, " ");
+  text = text.replace(/(^|\n)\s*([#>*\-]+|\d+\.)\s+/g, "$1");
+  text = text.split("**").join("").split("__").join("").replace(STRIP, " ");
+  let title = "";
+  for (const w of text.split(/\s+/).filter(Boolean).slice(0, n)) {
+    const next = `${title} ${w}`.trim();
+    if ([...next].length > limit) break;
+    title = next;
+  }
+  return title.replace(/^[ .,;\-—–']+|[ .,;\-—–']+$/g, "");
+}
+
+const isPending = (content: string) => PENDING.some((p) => content.includes(p));
+
+/**
+ * Where an entry made at `d` (local time) goes, and where it goes instead when that path is taken, by the sweep's clash rule: the minute's
+ * seconds (`HH-MM-SS`), then more first words (12, 20, 40 within 200 characters). Never `-1`. A voice entry with no words yet is time-only.
+ */
+export function entryPaths(d: Date, content: string, source: "text" | "voice"): { path: string; alternates: string[] } {
+  const folder = `Journal/${d.getFullYear()}/${pad(d.getMonth() + 1)}-${pad(d.getDate())}/`;
+  const hm = `${pad(d.getHours())}-${pad(d.getMinutes())}`;
+  const hms = `${hm}-${pad(d.getSeconds())}`;
+  const title = firstWords(content);
+  if (!title && isPending(content)) return { path: folder + hm, alternates: [folder + hms] };
+  const name = title || (source === "voice" ? "Voice memo" : "Entry");
+  const path = `${folder}${hm} ${name}`;
+  const out = [`${folder}${hms} ${name}`];
+  // (the sweep means to keep the folder and the stamp here; its regex drops them, see REPORT-NIGHT-0146)
+  for (const k of [12, 20, 40]) {
+    const more = firstWords(content, k, 200);
+    if (more) out.push(`${folder}${hms} ${more}`);
+  }
+  const seen = new Set([path.toLowerCase()]);
+  return { path, alternates: out.filter((p) => !seen.has(p.toLowerCase()) && !!seen.add(p.toLowerCase())) };
+}
+
+/** The old shape (<= 0.1.45): `Notes/YYYY/MM-DD/HH-MM-SS`, tag `capture`. Entries still queued on a device with it send as they are; the sweep files them. */
+export function legacyEntryPath(d: Date): string {
   return `Notes/${d.getFullYear()}/${pad(d.getMonth() + 1)}-${pad(d.getDate())}/${pad(d.getHours())}-${pad(d.getMinutes())}-${pad(d.getSeconds())}`;
 }
 
 export function newDraft(content: string, source: "text" | "voice", d = new Date(), id = crypto.randomUUID()): JournalDraft {
-  return { entry_id: id, path: entryPath(d), content, source, created_at: d.toISOString() };
+  const body = source === "voice" ? (content.trim() ? `${content.trim()}\n\n${TRANSCRIPT_PENDING}` : TRANSCRIPT_PENDING) : content;
+  return { entry_id: id, ...entryPaths(d, body, source), content, source, created_at: d.toISOString() };
 }
 
 /** Content without the transcription placeholder, trimmed. */

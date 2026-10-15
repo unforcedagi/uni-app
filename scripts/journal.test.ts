@@ -1,11 +1,12 @@
 // Run: node --experimental-strip-types scripts/journal.test.ts
 import assert from "node:assert/strict";
-import { entryPath, entryText, mmss, newDraft, pickAudioMime, shareText, TRANSCRIPT_PENDING } from "../src/journalCore.ts";
+import { entryText, legacyEntryPath, mmss, newDraft, pickAudioMime, shareText, TRANSCRIPT_PENDING } from "../src/journalCore.ts";
 
 const d = new Date(2026, 8, 5, 7, 3, 9);
-assert.equal(entryPath(d), "Notes/2026/09-05/07-03-09");
+// 0.1.46: filed under Journal/ by its first words (scripts/journalPaths.test.ts has the sweep's cases); Notes/ is the old shape
+assert.equal(legacyEntryPath(d), "Notes/2026/09-05/07-03-09");
 const draft = newDraft("hi", "text", d, "id-1");
-assert.deepEqual([draft.entry_id, draft.path, draft.source], ["id-1", "Notes/2026/09-05/07-03-09", "text"]);
+assert.deepEqual([draft.entry_id, draft.path, draft.source], ["id-1", "Journal/2026/09-05/07-03 hi", "text"]);
 assert.equal(draft.created_at, d.toISOString());
 
 assert.equal(entryText(`note\n\n${TRANSCRIPT_PENDING}`), "note");

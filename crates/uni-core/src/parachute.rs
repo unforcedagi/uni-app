@@ -187,13 +187,14 @@ impl VaultClient {
         Ok(tool_result(&rpc))
     }
 
-    /// Create a journal entry (text now, or a voice placeholder).
+    /// Create a journal entry (text now, or a voice placeholder). Tagged
+    /// `journal` (T-60): `capture` is the legacy alias the sweep converts.
     pub async fn create_entry(&self, entry: &NewEntry) -> Result<JournalNote> {
         let mut args = json!({
             "vault": self.cfg.vault,
             "content": entry.content,
             "path": entry.path,
-            "tags": ["capture"],
+            "tags": [JOURNAL_TAG],
             "metadata": { "source": entry.source, "client": "uni-app" },
             // A retried upload after a lost response finds the first write.
             "if_exists": "ignore",
@@ -255,14 +256,40 @@ impl VaultClient {
         Ok(())
     }
 
-    /// Newest journal entries first.
+    /// The note an entry already wrote, found by its `metadata.entry_id`
+    /// (`None`: not in the vault).
+    pub async fn find_entry(&self, entry_id: &str) -> Result<Option<JournalNote>> {
+        let v = self
+            .call(
+                "query-notes",
+                json!({
+                    "vault": self.cfg.vault,
+                    "tag": JOURNAL_TAGS,
+                    "tag_match": "any",
+                    "metadata": { "entry_id": entry_id },
+                    "limit": 1,
+                    "include_content": true,
+                    "content_length": 2000,
+                    "include_metadata": ["source", "entry_id"],
+                }),
+            )
+            .await?;
+        Ok(notes_in(&v)
+            .iter()
+            .filter_map(JournalNote::from_value)
+            .find(|n| n.entry_id.as_deref() == Some(entry_id)))
+    }
+
+    /// Newest journal entries first (`journal`, and `capture` stragglers the
+    /// sweep hasn't converted yet).
     pub async fn list_entries(&self, limit: usize, offset: usize) -> Result<Vec<JournalNote>> {
         let v = self
             .call(
                 "query-notes",
                 json!({
                     "vault": self.cfg.vault,
-                    "tag": "capture",
+                    "tag": JOURNAL_TAGS,
+                    "tag_match": "any",
                     "sort": "desc",
                     "limit": limit.clamp(1, 100),
                     "offset": offset,
@@ -1029,6 +1056,11 @@ fn note_from(v: &Value, r: &str) -> Result<Value> {
     Ok(note)
 }
 
+/// The journal's tag (T-60, 2026-10-06).
+pub const JOURNAL_TAG: &str = "journal";
+/// Tags a journal entry may carry: `capture` is the legacy alias.
+pub const JOURNAL_TAGS: [&str; 2] = [JOURNAL_TAG, "capture"];
+
 /// What the app writes for one entry.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct NewEntry {
@@ -1348,7 +1380,7 @@ mod tests {
 }
 
 #[cfg(test)]
-mod surface_tests {
+pub(crate) mod surface_tests {
     use super::*;
 
     #[test]
@@ -1427,7 +1459,7 @@ mod surface_tests {
     }
 
     // A local scripted MCP door verifies the public client, not just helpers.
-    fn server(
+    pub(crate) fn server(
         script: Vec<(&'static str, Value, Value)>,
     ) -> (VaultClient, std::thread::JoinHandle<()>) {
         use std::io::{BufRead, Read, Write};

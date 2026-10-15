@@ -526,6 +526,38 @@ test.describe('simple', () => {
     await shot(page, 'rooms');
   });
 
+  test('journal (0.1.46): an entry not in the vault yet says "Waiting to send" with its time; the same words saved again show it, not a second entry; a new entry is filed under Journal/', async ({ page }) => {
+    await boot(page);
+    const words = 'A placeholder entry about the garden and the rain';
+    await page.evaluate((words) => {
+      const w = window as any;
+      w.__queue = [{ entry_id: 'q1', path: 'Journal/2026/10-14/19-43 A placeholder entry about the garden', content: words, source: 'text', created_at: '2026-10-15T01:43:10.000Z', has_audio: false, note_id: null, attempts: 1, last_error: null }];
+      w.__flushReport = { sent: [], remaining: 1, error: null };
+    }, words);
+    await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Journal' }).click();
+    const queued = page.locator('.journal-entry.queued');
+    await expect(queued).toHaveCount(1);
+    await expect(queued.locator('.queued-tag')).toHaveText('Waiting to send');
+    await expect(queued.locator('.journal-meta')).toContainText(/\d{1,2}:43/);
+    // typed again while it waits: the app keeps one entry and points at it
+    await page.evaluate(() => { (window as any).__saveReport = { sent: [], remaining: 1, error: null, duplicate: { kind: 'waiting', id: 'q1' } }; });
+    await page.getByRole('textbox', { name: 'Journal entry', exact: true }).fill(words);
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await expect(page.locator('.journal-status')).toHaveText('Waiting to send');
+    await expect(queued).toHaveCount(1);
+    await expect(queued).toHaveAttribute('data-again', 'true');
+    await expect(page.getByRole('textbox', { name: 'Journal entry', exact: true })).toHaveValue('');
+    // the draft the app handed over is filed where the sweep files it, with its clash paths (seconds, then more words)
+    const draft = await page.evaluate(() => (window as any).__calls.filter((c: any) => c.cmd === 'journal_save_text').at(-1).args.entry);
+    expect(draft.path).toMatch(/^Journal\/\d{4}\/\d\d-\d\d\/\d\d-\d\d A placeholder entry about the garden and$/);
+    expect(draft.alternates[0]).toMatch(/^Journal\/\d{4}\/\d\d-\d\d\/\d\d-\d\d-\d\d A placeholder entry about the garden and$/);
+    // already sent: "Already saved"
+    await page.evaluate(() => { const w = window as any; w.__queue = []; w.__saveReport = { sent: [], remaining: 0, error: null, duplicate: { kind: 'saved', id: 'n1' } }; });
+    await page.getByRole('textbox', { name: 'Journal entry', exact: true }).fill(words);
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await expect(page.locator('.journal-status')).toHaveText('Already saved');
+  });
+
   test('one look: the journal, settings and a room read as the same app; Settings has no layout picker (shots, light and dark)', async ({ page }) => {
     await boot(page);
     const rail = page.getByRole('navigation', { name: 'Main navigation' });

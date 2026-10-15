@@ -622,8 +622,11 @@ Two proposals wait on a scope decision.
           case 'vault_search': if (w.__searchFails) throw 'vault search: 502 Bad Gateway'; return notes.filter((n) => (n.content ?? '').toLowerCase().includes(String(args.query).toLowerCase()) && (!args.pathPrefix || (n.path ?? '').startsWith(args.pathPrefix))).slice(0, args.limit ?? 20).map((n) => ({ vault: 'uni', id: n.id, path: n.path, snippet: String(n.content).slice(0, 60), score: null, mode: 'keyword' }));
           // r21: a spec may seed journal entries (fiction, never real journal content)
           case 'journal_list': return (w.__journal ?? []).slice(args.offset ?? 0, (args.offset ?? 0) + (args.limit ?? 50));
-          case 'journal_pending': case 'search_messages': return [];
-          case 'journal_flush': return { sent: [], remaining: 0, error: null };
+          // 0.1.46: a spec may hold entries in the device queue (__queue) and say what a save or flush reports (__saveReport, __flushReport)
+          case 'journal_pending': return w.__queue ?? [];
+          case 'journal_save_text': return w.__saveReport ?? { sent: [], remaining: 0, error: null };
+          case 'search_messages': return [];
+          case 'journal_flush': return w.__flushReport ?? { sent: [], remaining: 0, error: null };
           case 'refresh': if (d.identityDelay) await new Promise((r) => setTimeout(r, d.identityDelay)); return { pubkey: U, total_items: 0, channel_errors: {}, truncated_channels: [] };
           default: return null;
         }

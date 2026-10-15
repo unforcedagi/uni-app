@@ -38,6 +38,8 @@ export default function Journal({ rooms, uniRoomId, onShare, onBack, backTo = "U
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const [shared, setShared] = useState<Record<string, string>>({});
   const [settings, setSettings] = useState(false);
+  /** The entry the same words were already saved as (a duplicate save shows it instead of adding one). */
+  const [again, setAgain] = useState<string | null>(null);
   const watching = useRef(new Set<string>());
   const alive = useRef(true);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
@@ -82,19 +84,30 @@ export default function Journal({ rooms, uniRoomId, onShare, onBack, backTo = "U
   }, []);
 
   const afterFlush = useCallback(async (r: FlushReport, what: string) => {
+    // what was sent is in the list before it leaves the queue, so a sent entry never blinks out of view
+    if (r.sent.length) await load(false);
     await loadQueue();
-    if (r.error) {
+    if (r.duplicate) {
+      setAgain(r.duplicate.id);
+      setStatus(r.duplicate.kind === "saved" ? "Already saved" : "Waiting to send");
+      if (r.error) setError(r.error);
+    } else if (r.error) {
       setStatus(`${what} saved on this device · will send when the vault is reachable`);
       setError(r.error);
     } else {
       setStatus(r.sent.length ? `${what} saved to your vault` : what);
       setError(null);
     }
-    if (r.sent.length) {
-      await load(false);
-      r.sent.forEach(watch);
-    }
+    if (r.sent.length) r.sent.forEach(watch);
   }, [load, loadQueue, watch]);
+
+  // the entry a duplicate save pointed at comes into view, marked for a moment
+  useEffect(() => {
+    if (!again) return;
+    document.querySelector(`.journal-entry[data-id="${CSS.escape(again)}"]`)?.scrollIntoView({ block: "nearest" });
+    const t = setTimeout(() => setAgain(null), 4000);
+    return () => clearTimeout(t);
+  }, [again, entries, queued]);
 
   useEffect(() => {
     invoke<VaultConfig>("journal_config").then(setCfg).catch(() => {});
@@ -186,13 +199,13 @@ export default function Journal({ rooms, uniRoomId, onShare, onBack, backTo = "U
       {error && <p className="error" role="alert">{error}</p>}
     </div>
     <div className="message-list journal-list" aria-label="Journal entries">
-      {queuedOnly.map((q) => <article key={q.entry_id} className="journal-entry queued">
-        <div className="journal-meta"><span>{q.source === "voice" ? <MicIcon /> : "✎"} {when(q.created_at)}</span><span className="queued-tag">{q.note_id ? "uploading audio…" : "on this device · not sent yet"}</span></div>
+      {queuedOnly.map((q) => <article key={q.entry_id} data-id={q.entry_id} data-again={again === q.entry_id || undefined} className="journal-entry queued">
+        <div className="journal-meta"><span>{q.source === "voice" ? <MicIcon /> : "✎"} {when(q.created_at)}</span><span className="queued-tag">{q.note_id ? "uploading audio…" : "Waiting to send"}</span></div>
         <p className="journal-body">{entryText(q.content) || (q.has_audio ? "Voice recording, transcribed after upload." : "")}</p>
         {q.last_error && <small className="journal-error">{q.last_error}</small>}
       </article>)}
       {entries.length === 0 && queuedOnly.length === 0 && !loading && <p className="empty">No journal entries yet. Your first one is a tap away.</p>}
-      {entries.map((e) => <article key={e.id} className="journal-entry">
+      {entries.map((e) => <article key={e.id} data-id={e.id} data-again={again === e.id || undefined} className="journal-entry">
         <div className="journal-meta"><span>{e.source === "voice" ? <MicIcon /> : e.source === "text" ? "✎" : "•"} {when(e.created_at)}</span>{shared[e.id] && <span className="queued-tag">shared · {shared[e.id]}</span>}</div>
         {e.pending ? <p className="journal-body pending">{entryText(e.content) ? <>{entryText(e.content)}<br /></> : null}<em>Transcribing…</em></p>
           : <p className="journal-body">{entryText(e.content)}</p>}
