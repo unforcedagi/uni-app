@@ -71,6 +71,8 @@ test('Rail surfaces, overlay panels, focus; rooms are in the tree (r12: no Rooms
   // r21 (Codex 5): a page to read, not a vault document: its note's tools only after "Open as a note"
   for (const name of ['Edit', 'New note', 'Copy markdown']) await expect(page.locator('.note-bar').getByRole('button', { name, exact: true })).toHaveCount(0);
   await expect(page.locator('.note-bar').getByRole('button', { name: 'Open as a note' })).toBeVisible();
+  // r24 (Codex 5): nor its metadata, tags, backlinks or Parachute footer
+  for (const sel of ['.note-meta-line', '.note-tags', '.note-backlinks', '.note-footer']) await expect(page.locator(sel), sel).toHaveCount(0);
   await shot('for-you');
   {
     await expect(fy.locator('.rail-dot')).toHaveCount(0);

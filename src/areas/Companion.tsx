@@ -614,8 +614,10 @@ function Body({ stands, ready, note, load, feed, rest = 0, moreTitle = null, onP
     const check = () => {
       const runs = b.querySelectorAll<HTMLElement>(".cp-run"); const foot = b.querySelector<HTMLElement>(".cp-foot");
       const last = runs[runs.length - 1]; if (!last || !foot || sc.scrollTop > 0) return;
-      const over = sc.scrollHeight > sc.clientHeight + 1 && last.getBoundingClientRect().bottom > foot.getBoundingClientRect().top + 0.5;
-      if (over) setRunCap((c) => Math.max(0, Math.min(c, runs.length) - 1));
+      const [l, f] = [last.getBoundingClientRect(), foot.getBoundingClientRect()];
+      // a row the sticky footer cuts in two (not one wholly below it, which scrolls into view): one fewer, never fewer than one
+      const cut = sc.scrollHeight > sc.clientHeight + 1 && l.bottom > f.top + 0.5 && l.top < f.top - 0.5;
+      if (cut && runs.length > 1) setRunCap((c) => Math.max(1, Math.min(c, runs.length) - 1));
     };
     const ro = new ResizeObserver(check); ro.observe(b); ro.observe(sc); check();
     return () => ro.disconnect();

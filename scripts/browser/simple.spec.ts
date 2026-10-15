@@ -3831,7 +3831,7 @@ test.describe('r23', () => {
 
   test('a short window: the sheet\'s body scrolls above its footer, and no cue is ever under the footer (740×360, 920×360)', async ({ page }) => {
     await boot(page);
-    await add(page, { id: 'f1', title: 'T-308 Placeholder long request', node: 'Areas/Techne', meta: { next: 'Send Ryan the deploy-access message below.', detail: `${DETAIL}\n\n${'A further placeholder paragraph about the account and the project. '.repeat(4)}`, room: 'techne', asked: '2026-10-06' } });
+    await add(page, { id: 'f1', title: 'T-308 Placeholder long request', node: 'Areas/Techne', meta: { next: 'Send Ryan the deploy-access message below.', due: '2026-10-20', detail: `${DETAIL}\n\n${'A further placeholder paragraph about the account and the project. '.repeat(4)}`, room: 'techne', asked: '2026-10-06' } });
     await refresh(page, '2026-10-14T09:00:00.000Z');
     await openRoom(page, 'Techne');
     for (const [w, h] of [[740, 360], [920, 360]] as const) {
@@ -3848,11 +3848,37 @@ test.describe('r23', () => {
       await sheet.locator('.task-body').evaluate((el) => el.scrollTo(0, 99999));
       const lastBox = await sheet.locator('.task-body > *:last-child').boundingBox();
       expect(lastBox!.y + lastBox!.height, `${w}×${h} scrolled`).toBeLessThanOrEqual(foot0!.y + 1);
+      // r24 (Sonnet): the Status and Due lines scroll fully above the footer too (they are the sheet's facts, before Put aside and Details)
+      const facts = await sheet.locator('.task-facts dd').last().boundingBox();
+      expect(facts!.y + facts!.height, `${w}×${h} facts`).toBeLessThanOrEqual(foot0!.y + 0.5);
+      await sheet.locator('.task-facts').scrollIntoViewIfNeeded();
+      const [fb, ft] = [await sheet.locator('.task-facts').boundingBox(), await sheet.locator('.task-foot').boundingBox()];
+      expect(fb!.y + fb!.height, `${w}×${h} facts in view`).toBeLessThanOrEqual(ft!.y + 0.5);
+      await expect(sheet.locator('.task-facts')).toBeInViewport({ ratio: 1 });
       // the footer is not drawn over the body: the body ends where the footer starts
       const [body, foot] = [await sheet.locator('.task-body').boundingBox(), await sheet.locator('.task-foot').boundingBox()];
       expect(body!.y + body!.height).toBeLessThanOrEqual(foot!.y + 0.5);
       await sheet.getByRole('button', { name: 'Close' }).click();
       await page.getByRole('button', { name: /Back to chat/ }).click().catch(() => {});
+    }
+  });
+
+  test('r24: a decision sheet in a short window keeps its Status and Due lines whole above the footer (740×360, 920×360)', async ({ page }) => {
+    await boot(page);
+    await openRoom(page, 'ATLAS');
+    for (const [w, h] of [[740, 360], [920, 360]] as const) {
+      await page.setViewportSize({ width: w, height: h });
+      await openCompanion(page);
+      await page.locator('.cp-item').filter({ hasText: 'Decide the ATLAS hosting' }).locator('.cp-need').first().click();
+      const sheet = sheetOf(page);
+      await expect(sheet.locator('.task-facts')).toHaveCount(1);
+      await sheet.locator('.task-body').evaluate((el) => el.scrollTo(0, 99999));
+      const [body, foot, facts] = [await sheet.locator('.task-body').boundingBox(), await sheet.locator('.task-foot').boundingBox(), await sheet.locator('.task-facts').boundingBox()];
+      expect(body!.height, `${w}×${h} the body has room`).toBeGreaterThan(60);
+      expect(body!.y + body!.height).toBeLessThanOrEqual(foot!.y + 0.5);
+      expect(facts!.y + facts!.height, `${w}×${h} facts above the footer`).toBeLessThanOrEqual(foot!.y + 0.5);
+      expect(facts!.y, `${w}×${h} facts inside the body`).toBeGreaterThanOrEqual(body!.y - 0.5);
+      await page.keyboard.press('Escape');
     }
   });
 
