@@ -351,6 +351,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const [picker, setPicker] = useState<Picker | null>(null);
   const [busy, setBusy] = useState(false);
   const [sending, setSending] = useState(false);
+  /** r26 (Codex P1 3): the message being sent shows in its thread as "Sending…" the moment Send is pressed, until it is delivered (the draft stays in the composer meanwhile and is never lost) */
+  const [outgoing, setOutgoing] = useState<{ key: string; body: string } | null>(null);
   const sendingRef = useRef(false);
   const [status, setStatus] = useState("Loading conversations…");
   /** The last sync's machinery (message count, per-room warnings): for Developer only (r18). */
@@ -1298,6 +1300,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     if (root && !target) { setError("Thread not in local cache. Refresh before replying."); return; }
     sendingRef.current = true;
     setSending(true);
+    setOutgoing({ key, body: snapshot });
     setError(null);
     try {
       await invoke<Message>("post_message", { channel, body: snapshot, replyTo: target, recipients, media: files.map((f) => f.media!) });
@@ -1326,7 +1329,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     } catch (e) {
       setError(String(e));
     }
-    finally { sendingRef.current = false; setSending(false); }
+    finally { sendingRef.current = false; setSending(false); setOutgoing(null); }
   }
 
   async function forget() {
@@ -1350,6 +1353,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
         <div className="message-list" ref={setList} role="log" aria-label="Messages" aria-live="polite">
           <div className="message-stack" ref={setStackEl}>
             {timeline}
+            {outgoing && outgoing.key === keyFor(currentRoom.id, root) && <article className="message mine outgoing" aria-busy="true" data-outgoing="true"><span className="message-avatar" aria-hidden="true" /><div className="message-content"><div className="message-meta"><time>Sending…</time></div><p className="outgoing-body">{outgoing.body}</p></div></article>}
             <div ref={scrollEnd} />
           </div>
         </div>

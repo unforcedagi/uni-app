@@ -6,7 +6,7 @@ import { useState, type ReactNode } from "react";
 import { cleanText } from "../interface/contract";
 import { NeedRow, PrivateRow, RunText } from "./Companion";
 import { isActiveRun, type Draft, type Run } from "./steerCore";
-import { titleWords, type NeedsFeed, type PrivateNeed } from "./simpleCore";
+import { runStateLabel, titleWords, type NeedsFeed, type PrivateNeed } from "./simpleCore";
 import type { TaskLoad } from "./Companion";
 import { asOf, countLabel, countText, LoadHealth } from "./LoadHealth";
 import type { Task } from "./taskCore";
@@ -65,13 +65,13 @@ export function WorkView(p: WorkViewProps) {
         {pending.map((t) => <NeedRow key={t.id} t={t} onTask={p.onTask} onDecide={p.onDecide} onNote={p.onNote} area={p.placeOf?.(t) ?? null} />)}
       </ul>}
     </section>
-    <section className="wv-sec" aria-label="In motion">
-      <h2 className="wv-h">In motion</h2>
+    <section className="wv-sec" aria-label="Being worked on">
+      <h2 className="wv-h">Being worked on <span className="wv-sub">by Uni and others, not waiting on you</span></h2>
       {/* r16: activity that couldn't be read is never "nothing moving"; activity kept from an earlier read says when it was read */}
       {p.activity.error ? <p className="lh-line" role="status">{p.activity.lastOk ? `Running and drafts as of ${asOf(p.activity.lastOk)} · Couldn't refresh` : "Couldn't check what's running"} · <button type="button" className="cp-retry" onClick={p.load.retry}>Retry</button></p>
         : !p.activity.ready ? <p className="lh-line" role="status">Checking what's running…</p> : null}
       {motion === 0 && !p.privateOther && p.activity.ready && !p.activity.error && <p className="cp-none">Nothing is moving here right now.</p>}
-      {running.length > 0 && <ul className="cp-list wv-runs" aria-label="Running">{running.map((r) => <li key={r.id} className="cp-run" data-state={r.state}><i aria-hidden="true" /><RunText what={cleanText(r.what)} /><small>{r.state}</small></li>)}</ul>}
+      {running.length > 0 && <ul className="cp-list wv-runs" aria-label="Running">{running.map((r) => <li key={r.id} className="cp-run" data-state={r.state}><i aria-hidden="true" /><RunText what={cleanText(r.what)} /><small>{runStateLabel(r.state)}</small></li>)}</ul>}
       {p.drafts.length > 0 && <ul className="cp-list wv-drafts" aria-label="Drafts">{p.drafts.map((d) => <li key={d.id} className="cp-item">
         <button type="button" className="cp-need" onClick={() => p.onNote({ vault, id: d.id })}><span className="cp-title">{cleanText(taskTitle(d.title).rest)}</span><small className="cp-detail">{d.status === "ready" ? "Draft ready to read" : "Being drafted"}</small></button></li>)}</ul>}
       {p.others.length > 0 && <ul className="cp-list wv-others">{p.others.map(({ task, meta }) => <NeedRow key={task.id} t={task} meta={meta} onTask={p.onTask} onDecide={p.onDecide} onNote={p.onNote} />)}</ul>}

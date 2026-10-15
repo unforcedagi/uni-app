@@ -48,20 +48,23 @@ const STANDS = "Staging is up; prod waits on Aaron's Wed 10-14 go for #38, #58, 
 check("P1-2: a claim with no open request is replaced by one short line, dated", () => {
   const s = staleSummary(STANDS, "2026-10-13T10:00:00Z", [])!;
   assert.ok(s);
-  assert.match(staleLine(s), /^This summary needs updating · from Oct 1[23]$/);
-  assert.equal(staleLine({ from: null }), "This summary needs updating");
+  assert.match(staleLine(s), /^Part of this summary needs updating · from Oct 1[23]$/, "r26: the true clause (staging is up) stays current");
+  assert.equal(s.current, "Staging is up.");
+  assert.equal(staleLine({ from: null, current: "", history: [] }), "This summary needs updating");
 });
 
 check("P1-2: open requests that don't match the claim also make it stale; one that does keeps it current", () => {
-  assert.ok(staleSummary(STANDS, "2026-10-13T10:00:00Z", ["Companion Today redesign", "Edit and send the ATLAS follow-up"]));
-  assert.equal(staleSummary(STANDS, "2026-10-13T10:00:00Z", ["Say go on prod deploy of #58"]), null, "#58 is open");
-  assert.equal(staleSummary(STANDS, "2026-10-13T10:00:00Z", ["Say go on prod deploy of #580"]) !== null, true, "#580 is not #58");
+  assert.ok(staleSummary(STANDS, "2026-10-13T10:00:00Z", [{ title: "Companion Today redesign" }, { title: "Edit and send the ATLAS follow-up" }]));
+  assert.equal(staleSummary(STANDS, "2026-10-13T10:00:00Z", [{ next: "Say go on prod deploy of #38, #58 and #62" }]), null, "#38, #58 and #62 are all open");
+  assert.ok(staleSummary(STANDS, "2026-10-13T10:00:00Z", [{ next: "Say go on prod deploy of #58" }]), "r26: #58 alone is not all three");
+  assert.equal(staleSummary(STANDS, "2026-10-13T10:00:00Z", [{ next: "Say go on prod deploy of #580" }]) !== null, true, "#580 is not #58");
 });
 
 check("P1-2: with no id in the claim, a shared distinctive word reconciles it; nothing shared does not", () => {
-  const c = "Waits on Aaron's decision about hosting.";
-  assert.equal(staleSummary(c, null, ["Decide the ATLAS hosting"]), null);
-  assert.ok(staleSummary(c, null, ["Send the follow-up email"]));
+  const c = "Waits on Aaron's decision about ATLAS hosting.";
+  assert.equal(staleSummary(c, null, [{ title: "Decide the ATLAS hosting" }]), null);
+  assert.ok(staleSummary(c, null, [{ title: "Send the follow-up email" }]));
+  assert.ok(staleSummary(c, null, [{ title: "Decide the hosting budget" }]), "r26: one shared word is not enough");
   assert.equal(staleSummary("Staging is up and quiet.", null, []), null, "no claim, no line");
   for (const t of ["needs Aaron to pick", "for Aaron to sign", "Aaron's go", "waits on Aaron"]) assert.ok(staleSummary(t, null, []), t);
 });
