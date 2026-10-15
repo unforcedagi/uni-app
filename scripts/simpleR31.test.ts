@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import * as core from "../src/areas/simpleCore.ts";
 import { buildTaskTree, parseNodes, parseTask, type Task } from "../src/areas/taskCore.ts";
 import { parseRuns, type Run } from "../src/areas/steerCore.ts";
-import { askedShown, askStamp, confirmationOf, currentAt, daysSince, needsByRow, needsFeed, needsYou, reasonShort, summaryLine, unconfirmedLine, withWaiting, type ConfOf } from "../src/areas/simpleCore.ts";
+import { askedShown, askStamp, taskIdOf, UNRESOLVED, confirmationOf, currentAt, daysSince, needsByRow, needsFeed, needsYou, reasonShort, summaryLine, unconfirmedLine, withWaiting, type ConfOf } from "../src/areas/simpleCore.ts";
 
 let failed = 0;
 async function check(name: string, fn: () => void | Promise<void>) {
@@ -92,6 +92,11 @@ await check("1: waiting runs and dots still add up with the record-only resolver
   assert.equal(f.total, 3);
   const m = needsByRow([...confirmed, mk(52)], new Set(["Projects/ATLAS", "Areas/Atlas", "Uni"]), () => undefined, resolver(), []);
   assert.equal([...m.values()].reduce((a, b) => a + b, 0), 2);
+});
+
+await check("1: taskIdOf reads the T-NN a task names; a task the feed has not resolved is a recheck with no date", () => {
+  assert.equal(taskIdOf(mk(30)), "T-30");
+  assert.deepEqual(UNRESOLVED, { state: "recheck", why: "no-date" });
 });
 
 await check("2: the folded summary is one line: the heading folded into the date and room; older than 2 days says how old", () => {
