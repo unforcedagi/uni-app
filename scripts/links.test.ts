@@ -194,6 +194,12 @@ check("0.1.46 equivalence: on a parent-only tree every node's room and subtree m
     assert.deepEqual(sorted(subtreePaths(tt, path)), sorted(oldSub(path)), `subtree of ${path}`);
   }
 });
+check("parent-only project with two channels keeps its unclaimed one when a legacy child claims the other (Codex 0.1.47 review 2)", () => {
+  const RR = [{ id: "r-area", name: "area", last_ts: 1 }, { id: "r-parent", name: "parent", last_ts: 1 }, { id: "r-child", name: "child", last_ts: 1 }];
+  const t = buildTree([area("a-a", "A", { channel: "r-area" }), proj("p-p", "P", { parent: "Areas/A", channel: ["r-child", "r-parent"] }), proj("p-c", "C", { parent: "Projects/P", channel: "r-child" })]);
+  assert.equal(roomView(t, "Projects/P", RR, RR[0]).target?.id, "r-parent");
+  assert.equal(roomView(t, "Projects/C", RR, RR[0]).target?.id, "r-child");
+});
 
 if (failed) { console.log(`\n${failed} failed`); process.exit(1); }
 console.log("\nall passed");

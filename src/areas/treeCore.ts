@@ -35,7 +35,8 @@ export function buildTree(list: readonly Area[]): Tree {
   const live = [...nodes.values()];
   const g = linkGraph(live.map((n) => ({ id: n.id, path: n.path, name: n.name, kind: n.kind, parent: n.parent, links: n.links })), [...live, ...archived]);
   const kids = new Map<string, Area[]>();
-  for (const [p, paths] of g.children) kids.set(p, paths.map((c) => nodes.get(c)!));
+  // Claims follow the task scope (display children plus legacy parent children), so a parent-only project keeps its rooms as in 0.1.46.
+  for (const [p, paths] of g.scope) kids.set(p, paths.map((c) => nodes.get(c)!));
   // A room a child claims is shown on the child, not repeated on the parent (unless that would leave the parent with none).
   for (const [path, n] of [...nodes]) {
     const claimed = new Set((kids.get(path) ?? []).flatMap((c) => c.channels));
