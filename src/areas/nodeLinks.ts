@@ -24,6 +24,10 @@ export type LinkGraph = {
   parent: Map<string, string>;
   /** area path -> the projects linked to it by name; ROOT_PATH -> the areas, then the projects with no area. */
   children: Map<string, string[]>;
+  /** Legacy-aware ancestry for rooms and privacy: a node with only an old `parent` goes up that parent (project or area) as in 0.1.46; else `parent`. */
+  chain: Map<string, string>;
+  /** Task scope: `children` plus legacy parent children and a project's linked projects that name it (it does not name them back). */
+  scope: Map<string, string[]>;
 };
 
 /**
@@ -59,6 +63,16 @@ export function linkGraph(live: readonly LinkNode[], known: readonly { id: strin
     }
     return [];
   };
+  // Legacy chain (rooms, task scope): a node with no `links` of its own still goes up its `parent`, project or area, until it is migrated.
+  const legacyUp = new Map<string, string>();
+  for (const n of live) { const up = resolve(n.parent); if (up && up !== n.path && byPath.has(up) && !n.links?.length) legacyUp.set(n.path, up); }
+  // A cycle is broken at its smallest path (that node falls back to its linked area), so the same data always gives the same tree.
+  for (const start of [...legacyUp.keys()].sort()) {
+    const seen: string[] = [];
+    let at: string | undefined = start;
+    while (at && !seen.includes(at)) { seen.push(at); at = legacyUp.get(at); }
+    if (at) legacyUp.delete([...seen.slice(seen.indexOf(at))].sort()[0]);
+  }
   const links = new Map<string, string[]>(), areasOf = new Map<string, string[]>(), parent = new Map<string, string>();
   const children = new Map<string, string[]>([[ROOT_PATH, []]]);
   for (const [path, set] of sets) {
@@ -73,5 +87,11 @@ export function linkGraph(live: readonly LinkNode[], known: readonly { id: strin
   const top = [...byPath.keys()].filter((p) => parent.get(p) === ROOT_PATH);
   children.set(ROOT_PATH, [...top.filter((p) => byPath.get(p)!.kind === "area").sort(byName), ...top.filter((p) => byPath.get(p)!.kind === "project").sort(byName)]);
   for (const [a, list] of children) if (a !== ROOT_PATH) children.set(a, list.sort(byName));
-  return { links, areasOf, parent, children };
+  const chain = new Map<string, string>([...parent].map(([p, up]) => [p, legacyUp.get(p) ?? up]));
+  const scope = new Map<string, string[]>([...children].map(([p, list]) => [p, [...list]]));
+  const add = (p: string, c: string) => { const l = scope.get(p) ?? []; if (!l.includes(c)) scope.set(p, [...l, c]); };
+  for (const [c, p] of legacyUp) add(p, c);
+  // A project that lists another project (and is not listed back) is work under it: COhere holds Woven Web when Woven Web links COhere.
+  for (const n of live) if (n.kind === "project") for (const ref of n.links ?? []) { const p = resolve(ref); const t = p && byPath.get(p); if (t && t.kind === "project" && p !== n.path && !(t.links ?? []).some((r) => resolve(r) === n.path)) add(p, n.path); }
+  return { links, areasOf, parent, children, chain, scope };
 }

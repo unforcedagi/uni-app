@@ -141,8 +141,9 @@ export function buildTaskTree(nodes: readonly TaskNode[], rootPath: string | nul
   // T-140: nodes join through `links` (two-way) and the legacy `parent`; each is an id, a path or a `[[link]]`. Only a live node counts, anything else is dropped.
   const live = [...byPath.values()];
   const g = linkGraph(live.map((n) => ({ id: n.id, path: n.path, name: n.name, kind: n.kind ?? (isAreaPath(n.path) ? "area" : "project"), parent: n.parent, links: n.links })), nodes.filter((n) => !rootRefs.has(n.id)));
-  const parent = g.parent;
-  const children = new Map<string, string[]>(g.children);
+  // `parent` is the legacy-aware way up (rooms, privacy) and `children` the task scope: both follow an old project `parent` until the node has links.
+  const parent = g.chain;
+  const children = new Map<string, string[]>(g.scope);
   for (const [k, list] of children) children.set(k, [...list].sort());
   return { byPath, idPath, children, parent, areasOf: g.areasOf, links: g.links, rootRefs, stands };
 }

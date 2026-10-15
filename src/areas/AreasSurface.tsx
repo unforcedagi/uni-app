@@ -220,7 +220,7 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   useEffect(() => { if (node && !thread) onRoom(hostRoom, ownRoomHere); }, [node?.id, hostRoom, !thread, ownRoomHere]); // eslint-disable-line react-hooks/exhaustive-deps
   const roomName = useMemo(() => (id: string) => rooms.find((r) => r.id === id)?.name ?? "room", [rooms]);
   const now = Date.now();
-  const fallback = useMemo<TaskNode[]>(() => (data?.areas ?? []).map((a) => ({ id: a.id, path: a.path, name: a.name, parent: a.parent, room: typeof a.metadata.room === "string" ? a.metadata.room : null, status: a.status === "archived" || a.status === "done" ? a.status : "active", isRoot: false })), [data?.areas]);
+  const fallback = useMemo<TaskNode[]>(() => (data?.areas ?? []).map((a) => ({ id: a.id, path: a.path, name: a.name, parent: a.parent, links: a.links, kind: a.kind, room: typeof a.metadata.room === "string" ? a.metadata.room : null, status: a.status === "archived" || a.status === "done" ? a.status : "active", isRoot: false })), [data?.areas]);
   // The whole tree's tasks are loaded once (the room tree beside the room needs every row's dot) and each level takes its subtree.
   const tasks = useTasks(identity, "", fallback);
   const levelTasks = useMemo(() => (tasks.tree && node ? tasksUnder(tasks.tree, node.path, tasks.tasks) : tasks.tasks), [tasks.tree, tasks.tasks, node?.path]); // eslint-disable-line react-hooks/exhaustive-deps

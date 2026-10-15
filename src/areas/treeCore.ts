@@ -15,6 +15,10 @@ export type Tree = {
   children: Map<string, Area[]>;
   /** A node's primary parent after validation (ROOT: top level): a project's first linked area by name. Back and the breadcrumb use it unless you came through another area. */
   parent: Map<string, string>;
+  /** Legacy-aware ancestry (rooms, privacy): an old `parent` project still counts as the way up until the node has `links`. */
+  chain: Map<string, string>;
+  /** Everything a node holds for rooms: its children plus legacy-parent children and projects that link to it. */
+  scope: Map<string, Area[]>;
   /** T-140: every node's linked nodes (two-way; `parent` counts as a link), by name. Project-to-project links are noted here only. */
   links: Map<string, string[]>;
   /** The areas a node is linked to, by name; the node appears under each. */
@@ -40,7 +44,9 @@ export function buildTree(list: readonly Area[]): Tree {
   }
   const children = new Map<string, Area[]>();
   for (const [p, paths] of g.children) children.set(p, sortAreas(paths.map((c) => nodes.get(c)!)));
-  return { nodes, children, parent: g.parent, links: g.links, areasOf: g.areasOf, archived };
+  const scope = new Map<string, Area[]>();
+  for (const [p, paths] of g.scope) scope.set(p, paths.map((c) => nodes.get(c)!));
+  return { nodes, children, parent: g.parent, chain: g.chain, scope, links: g.links, areasOf: g.areasOf, archived };
 }
 
 export const childrenOf = (tree: Tree, path: string): Area[] => tree.children.get(path) ?? [];
@@ -60,7 +66,7 @@ export function trail(tree: Tree, path: string, via?: string | null): Area[] {
 export function ancestry(tree: Tree, path: string): Area[] {
   const out: Area[] = [];
   const seen = new Set<string>();
-  for (let at: string | undefined = path; at && at !== ROOT && !seen.has(at) && tree.nodes.has(at); at = tree.parent.get(at)) { seen.add(at); out.push(tree.nodes.get(at)!); }
+  for (let at: string | undefined = path; at && at !== ROOT && !seen.has(at) && tree.nodes.has(at); at = tree.chain.get(at)) { seen.add(at); out.push(tree.nodes.get(at)!); }
   return out;
 }
 
