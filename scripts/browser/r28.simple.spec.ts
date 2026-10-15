@@ -69,7 +69,7 @@ test.describe('r28', () => {
     await expect(page.locator('.th-roomnav .th-go[aria-label^="Techne,"]')).toHaveAttribute('aria-label', new RegExp(`, ${rowCount} needs? you$`));
     // one quiet line, collapsed; it opens to a plain list
     const line = needs.locator('.cp-recheck-line');
-    await expect(line).toHaveText(/^\d+ older asks? needs? confirming\+$/);
+    await expect(line).toHaveText(/^\d+ requests? needs? confirming in this room\+$/);
     await expect(needs.locator('.cp-recheck-list')).toHaveCount(0);
     const n = Number((await line.innerText()).match(/\d+/)![0]);
     expect(n).toBeGreaterThanOrEqual(4);
@@ -79,20 +79,22 @@ test.describe('r28', () => {
     const beta = items.filter({ hasText: 'Say go on beta' });
     await expect(beta.locator('.cp-recheck-step')).toHaveText('Say go on beta');
     await expect(beta.locator('.cp-recheck-asked')).toHaveText(/^(asked|added) [A-Z][a-z]{2} \d+$/);
-    await expect(beta.getByRole('button', { name: 'Open' })).toBeVisible();
-    await expect(beta.getByRole('button', { name: 'Answer anyway' })).toBeVisible();
+    await expect(beta.locator('.cp-rc-open')).toBeVisible();
+    // r30: "Answer anyway" is in the sheet, never on a list row
+    await expect(beta.getByRole('button', { name: 'Answer anyway' })).toHaveCount(0);
     // not counted, no dots: nothing in the list is a Needs-you row
     await expect(needs.locator('.wv-n')).toHaveText(String(rowCount));
     for (const t of await items.locator('.cp-recheck-step').allInnerTexts()) expect(t).not.toMatch(/[:;,—–-]$|…|\.\.\./);
     // Open: the sheet says it is not confirmed since; Answer anyway: the sheet with its answers ready, one tap
-    await beta.getByRole('button', { name: 'Open' }).click();
+    await beta.locator('.cp-rc-open').click();
     let sheet = sheetOf(page);
     await expect(sheet.locator('.task-asked')).toHaveAttribute('data-fresh', 'unconfirmed');
     await expect(sheet.locator('.task-asked')).toHaveText(/not confirmed since$/);
     await expect(sheet.getByRole('button', { name: 'I did this' })).toHaveCount(0);
     await sheet.getByRole('button', { name: 'Close' }).click();
-    await items.filter({ hasText: 'Say go on gamma' }).getByRole('button', { name: 'Answer anyway' }).click();
+    await items.filter({ hasText: 'Say go on gamma' }).locator('.cp-rc-open').click();
     sheet = sheetOf(page);
+    await sheet.getByRole('button', { name: 'Answer anyway' }).click();
     await expect(sheet.getByRole('button', { name: 'I did this' })).toBeVisible();
     await sheet.getByRole('button', { name: 'Close' }).click();
     // the confirmed ask's sheet has its answers ready and no "not confirmed" line
@@ -143,7 +145,7 @@ test.describe('r28', () => {
     await openWork(page);
     const needs = section(page, 'Needs you');
     await expect(needs.locator('.cp-checking')).toHaveText(/^Checking 1 ask…$/);
-    await expect(needs.locator('.cp-recheck-line')).toHaveText(/^1 older ask needs confirming\+$/, { timeout: 9000 });
+    await expect(needs.locator('.cp-recheck-line')).toHaveText(/^1 request needs confirming in this room\+$/, { timeout: 9000 });
     await expect(needs.locator('.cp-checking')).toHaveCount(0);
     await expect(needs.locator('.wv-n')).toHaveText('0');
     await needs.locator('.cp-recheck-line').click();

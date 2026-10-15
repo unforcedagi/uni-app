@@ -83,7 +83,7 @@ async function openTaskSheet(page: Page, text: string | RegExp) {
   const line = page.locator('.sr-work .cp-recheck-line');
   await expect(line).toBeVisible();
   if ((await line.getAttribute('aria-expanded')) !== 'true') await line.click();
-  await page.locator('.sr-work .cp-recheck-item').filter({ hasText: text }).getByRole('button', { name: 'Open' }).click();
+  await page.locator('.sr-work .cp-recheck-item').filter({ hasText: text }).locator('.cp-rc-open').click();
 }
 /** The phone's strip opens on a tap; the side panel is open already. */
 async function openCompanion(page: Page) {
@@ -987,15 +987,14 @@ test.describe('simple', () => {
     await expect(page.locator('.cp-body .cp-row-more, .cp-body .cp-item .cp-more-next')).toHaveCount(0);
     await openWorkView(page); await narrowWork(page);
     const item = page.locator('.sr-work .cp-item').filter({ hasText: 'COhere festival readiness' });
-    // r21: the row is the whole action (to its sentence's end) within three lines; the questions after it are the sheet's
-    const h = await item.locator('.cp-lead').evaluate((el) => el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight));
-    expect(Math.round(h)).toBeLessThanOrEqual(3);
+    // r30: the row is the whole step, every word (it wraps; it is never clamped, cut or opened in place)
+    await expect(item.locator('.cp-lead')).toContainText('where do they stand?');
+    await expect(item.locator('.cp-lead')).not.toHaveAttribute('data-cut', 'true');
     await expect(item.getByRole('button', { name: /^(More|Less)$/ })).toHaveCount(0);
-    await expect(item.locator('.cp-lead')).not.toContainText('where do they stand?');
     await item.locator('.cp-need').click();
-    // r22 (Codex 7): the action is the heading, the questions after it the sheet's body, each said once
-    await expect(page.locator('.task-sheet')).toContainText('third question');
-    await expect(page.locator('.task-sheet')).toContainText('where do they stand?');
+    // r30: the heading is the same whole step
+    await expect(page.locator('.task-sheet h2')).toContainText('third question');
+    await expect(page.locator('.task-sheet h2')).toContainText('where do they stand?');
   });
 
   test('r7: opening a task without a title worth reading or a next step says to open it', async ({ page }) => {
@@ -1161,7 +1160,7 @@ test.describe('simple', () => {
     await expect(sheet.getByRole('button', { name: /Mark decided/ })).toHaveCount(0);
   });
 
-  test('r10: every action row is at most four lines, a decision is its whole question, and no row is cut at the panel bottom', async ({ page }) => {
+  test('r10 (r30): every action row is its whole step (it wraps, never clamped), a decision is its whole question, and no row is cut at the panel bottom', async ({ page }) => {
     test.skip(!wide(page), 'side panel');
     await boot(page, { crowded: true, cutDecision: true, ulidNext: true });
     await openRoom(page, 'Techne');
@@ -1172,12 +1171,9 @@ test.describe('simple', () => {
     const pb = await panel.boundingBox();
     for (const row of await page.locator('.cp-item').all()) {
       const decision = await row.locator('.cp-need.decision').count();
-      const lines = await row.evaluate((el) => {
-        const lh = (n: Element) => parseFloat(getComputedStyle(n).lineHeight) || 20;
-        return [...el.querySelectorAll<HTMLElement>('.cp-title, .cp-detail, .cp-next')].reduce((a, n) => a + Math.round(n.getBoundingClientRect().height / lh(n)), 0);
-      });
-      if (decision) expect(await row.locator('.cp-title').evaluate((el) => el.scrollHeight <= el.clientHeight + 1)).toBe(true); // never clamped
-      else expect(lines).toBeLessThanOrEqual(4); // an action reads to its object: up to three lines, and one of small print
+      // r30: a row's words are never clamped: nothing scrolls inside it and no cut mark ends it
+      expect(await row.locator('.cp-title').evaluate((el) => el.scrollHeight <= el.clientHeight + 1)).toBe(true);
+      if (!decision && await row.locator('.cp-lead').count()) await expect(row.locator('.cp-lead')).not.toHaveAttribute('data-cut', 'true');
       const b = await row.boundingBox();
       expect(b!.y + b!.height).toBeLessThanOrEqual(Math.min(foot!.y, pb!.y + pb!.height) + 1);
     }
@@ -1195,11 +1191,11 @@ test.describe('simple', () => {
     await scope(page).locator('.th-go[aria-label^="Uni,"]').click();
     await openWorkView(page); await narrowWork(page);
     await expect(page.locator('.sr-work .cp-row-more, .sr-work .cp-item .cp-more-next')).toHaveCount(0);
-    // r21: the row is the whole first sentence ("Edit the draft, … from the shared inbox"); the next sentence is the sheet's
+    // r30: the row is the whole step, both sentences of it; the sheet's heading says the same
     const row = page.locator('.sr-work .cp-item').filter({ hasText: 'Edit the draft, check the dates' }).first();
-    await expect(row.locator('.cp-lead')).toHaveText('Edit the draft, check the dates against the calendar, and send it from the shared inbox');
+    await expect(row.locator('.cp-lead')).toHaveText('Edit the draft, check the dates against the calendar, and send it from the shared inbox. Then post the link in the room and tell the team it went out so nobody sends it twice');
     await row.locator('.cp-need').click();
-    await expect(page.locator('.task-sheet')).toContainText('so nobody sends it twice.');
+    await expect(page.locator('.task-sheet h2')).toContainText('so nobody sends it twice');
   });
 
   test('r10: a row says its state once: no "waiting, waiting on" in the opened item, no repeat of the row\'s label', async ({ page }) => {
@@ -2118,21 +2114,17 @@ test.describe('r15', () => {
     await boot(page, { longNext: true });
     await openRoom(page, 'COhere 2026');
     await openCompanion(page);
-    const lines = (el: Element) => new Set([...el.querySelectorAll<HTMLElement>('.wc-w')].map((w) => Math.round(w.getBoundingClientRect().top))).size;
-    const whole = 'Try the new check-in flow at example.invalid and answer the three questions';
+    // r30: the row is the whole step, every word of it (it wraps; nothing after the first sentence is left to the sheet)
+    const whole = /^Try the new check-in flow at example\.invalid and answer the three questions\. First question: .* and where do they stand\?$/;
     const cpLead = page.locator('.cp-body .cp-item').filter({ hasText: 'Try the new check-in flow' }).locator('.cp-lead');
     await expect(cpLead).toHaveText(whole);
     await expect(cpLead).not.toHaveAttribute('data-cut', 'true');
-    expect(await cpLead.evaluate(lines)).toBeLessThanOrEqual(3);
     await expect(page.locator('.cp-body .cp-item').filter({ hasText: 'Try the new check-in flow' }).getByRole('button', { name: 'More' })).toHaveCount(0);
     await openWorkView(page); await narrowWork(page);
     const lead = page.locator('.sr-work .cp-item').filter({ hasText: 'Try the new check-in flow' }).locator('.cp-lead');
     await expect(lead).toHaveText(whole);
-    expect(await lead.evaluate(lines)).toBeLessThanOrEqual(3);
-    // what follows the sentence (the three questions) is the sheet's: the row never opens in place
-    await expect(lead).not.toContainText('First question');
     await page.locator('.sr-work .cp-item').filter({ hasText: 'Try the new check-in flow' }).locator('.cp-need').click();
-    await expect(page.locator('.task-sheet')).toContainText('where do they stand?');
+    await expect(page.locator('.task-sheet h2')).toContainText('where do they stand?');
   });
 
   test('a failed refresh says what the kept count is as of, never "at least"; an overdue row says "was due"', async ({ page }) => {
@@ -2398,8 +2390,9 @@ test.describe('r16', () => {
     // r21: the row is the whole action to its sentence's end; where three lines can't hold it, the cut falls after its first clause (whole,
     // "…when convenient"), never inside it, and never "…T-07 is"; the rest is in the note
     await expect(row.locator('.cp-lead')).toContainText(/^Send the SOW to Kevin when convenient: attach the budget/);
+    // r30: the row is every word stored but the cut one: a step of exactly the old writer's 140 characters loses its last word ("is"), no more
     await expect(row.locator('.cp-lead')).not.toHaveText(/\bis\s*…?$/);
-    await expect(row.locator('.cp-lead')).not.toContainText('Everything else');
+    await expect(row.locator('.cp-lead')).toHaveText(/Everything else in T-07$/);
     await expect(row.getByRole('button', { name: 'The rest is in its note' })).toHaveCount(0); // r20: the sheet says it, the row has no "›"
     const dq = page.locator('.cp-body .cp-item').filter({ hasText: 'Ship the ATLAS hosting?' });
     await expect(dq.locator('.cp-title')).toHaveText('Ship the ATLAS hosting?');
@@ -2790,8 +2783,8 @@ test.describe('r18', () => {
     await openRoom(page, 'Uni');
     await openCompanion(page);
     const needs = page.locator('.cp-body').last().locator('section[aria-label="Needs you"]');
-    // the side panel shows exactly three; the phone's inline strip keeps the rows that fit beside the conversation (r16), the rest in "N more"
-    if (wide(page)) await expect(needs.locator('.cp-list > .cp-item')).toHaveCount(3);
+    // the side panel shows at most three (r30: a row is its whole step, so a short panel keeps two whole rows); the phone's inline strip keeps the rows that fit beside the conversation (r16), the rest in "N more"
+    if (wide(page)) { const n = await needs.locator('.cp-list > .cp-item').count(); expect(n).toBeGreaterThanOrEqual(2); expect(n).toBeLessThanOrEqual(3); }
     else expect(await needs.locator('.cp-list > .cp-item').count()).toBeLessThanOrEqual(3);
     await expect(needs.locator('.cp-more')).toHaveCount(1);
     await expect(needs.locator('.cp-more')).toHaveText(/^Show \d+ more$/);
@@ -3169,15 +3162,14 @@ test.describe('r20', () => {
       const row = page.locator('.sr-work section[aria-label="Needs you"] .cp-item').filter({ hasText: r.verb });
       await expect(row).toHaveAttribute('data-lead', 'action');
       const l = await leadOf(row);
-      expect(l.lines, r.title).toBeLessThanOrEqual(3);
       expect(l.text.replace(/^2 steps: /, '').startsWith(r.verb), `${r.title}: "${l.text}"`).toBe(true);
-      // context after the action ("; Eileen signs off…", "; fill the opening…") is the sheet's, never the row's
-      // r22 (both critics): "; fill the opening…" is the user's too, and on the row; "; Eileen signs off…" is context
-      expect(l.text).not.toMatch(/Eileen signs/);
+      // r30: the row is the whole step, every word of it ("; Eileen signs off…" and "; fill the opening…" included), never clamped or cut
+      const stored = r.next.replace(/^Wed 10-14:\s*/, '').replace(/…$|\.$/, '').trim();
+      expect(l.text.toLowerCase(), r.title).toBe(stored.toLowerCase());
     }
     // COhere: the date label is not the lead; the subtitle is where it belongs and the due cue
     const co = page.locator('.sr-work .cp-item').filter({ hasText: 'Say go on prod deploy' });
-    await expect(co.locator('.cp-lead')).toHaveText('Say go on prod deploy of #38 + #58');
+    await expect(co.locator('.cp-lead')).toHaveText('Say go on prod deploy of #38 + #58; Eileen signs off the copy/photos before/after (posting today); yes/no on add-only DB');
     await expect(co.locator('.cp-under')).toHaveAttribute('title', /^COhere opens Oct 15 · due today · (?:asked|added) (?:today|\w+ \d+)$/); // r22: and when it was asked
     await expect(co.locator('.cp-sub-when')).toHaveText(/^(?: · )?due today · (?:asked|added) (?:today|\w+ \d+)$/); // r22: a wrapped date line has no leading " · "
     // a subtitle that repeats the action is dropped (in its own area there is nothing else to say)
@@ -3185,8 +3177,7 @@ test.describe('r20', () => {
     await expect(page.locator('.sr-work .cp-item').filter({ hasText: 'Edit and send the ATLAS follow-up' }).locator('.cp-under')).toHaveText(/^\s*(?:asked|added) (?:today|\w+ \d+)$/);
     // the whole step is in the sheet
     await co.locator('.cp-need').click();
-    await expect(sheetOf(page).locator('h2')).toHaveText('Say go on prod deploy of #38 + #58');
-    await expect(sheetOf(page).locator('.task-steps-rest')).toContainText('Eileen signs off the copy/photos'); // r22: said once, after the action
+    await expect(sheetOf(page).locator('h2')).toHaveText('Say go on prod deploy of #38 + #58; Eileen signs off the copy/photos before/after (posting today); yes/no on add-only DB'); // r30: the heading is the whole step, said once
     await sheetOf(page).getByRole('button', { name: 'Close' }).click();
   });
 
@@ -3771,13 +3762,13 @@ test.describe('r22', () => {
     // r28: Techne's chat talked about it since it was asked (Oct 6): it is not in Needs you; it is in the recheck list, whole, with when it was asked
     await expect(page.locator('.sr-work section[aria-label="Needs you"] > .cp-list > .cp-item').filter({ hasText: 'Say go on prod deploy' })).toHaveCount(0);
     await openTaskSheet(page, 'Say go on prod deploy');
-    await expect(page.locator('.sr-work .cp-recheck-item').filter({ hasText: 'Say go on prod deploy' }).locator('.cp-recheck-step')).toHaveText('Say go on prod deploy of #38 + #58');
-    await expect(page.locator('.sr-work .cp-recheck-item').filter({ hasText: 'Say go on prod deploy' }).locator('.cp-recheck-asked')).toHaveText(/^asked Oct 6/);
+    await expect(page.locator('.sr-work .cp-recheck-item').filter({ hasText: 'Say go on prod deploy' }).locator('.cp-recheck-step')).toHaveText('Say go on prod deploy of #38 + #58; Eileen signs off the copy/photos before/after (posting today); yes/no on add-only DB'); // r30: the whole step
+    await expect(page.locator('.sr-work .cp-recheck-item').filter({ hasText: 'Say go on prod deploy' }).locator('.cp-recheck-asked')).toHaveText(/^chat since in #techne$/i); // r30: its reason (the sheet says when it was asked)
     const sheet = sheetOf(page);
-    await expect(sheet.locator('h2')).toHaveText('Say go on prod deploy of #38 + #58');
+    await expect(sheet.locator('h2')).toHaveText('Say go on prod deploy of #38 + #58; Eileen signs off the copy/photos before/after (posting today); yes/no on add-only DB');
     await expect(sheet.locator('.task-asked')).toContainText('Asked Oct 6');
     // Techne's chat has messages from Oct 9: more than a day newer than Oct 6
-    await expect(sheet.locator('.task-unconfirmed')).toHaveText('Asked Oct 6 · not confirmed since');
+    await expect(sheet.locator('.task-unconfirmed')).toHaveText(/^Asked Oct 6 · chat since in #techne$/i);
     await expect(sheet.locator('.task-movedon')).toHaveCount(0);
     // the request is still there; r26: its "Say it" waits behind "Answer anyway" while the chat check is unresolved
     await expect(sheet.getByRole('button', { name: /^Say it in #/ })).toHaveCount(0);
@@ -3879,7 +3870,7 @@ test.describe('r23', () => {
     await page.evaluate(() => (window as any).__setTask('a2', { priority: 'soon' }));
     await refresh(page, '2026-10-14T09:01:00.000Z');
     await expect(added.locator('.cp-recheck-asked')).toHaveText(/^added Oct 6/);
-    await added.getByRole('button', { name: 'Open' }).click();
+    await added.locator('.cp-rc-open').click();
     await expect(sheetOf(page).locator('.task-asked')).toContainText('Added Oct 6');
     await expect(sheetOf(page).locator('.task-asked')).toHaveAttribute('data-kind', 'added');
     // r24: "Send the plan to Kevin" isn't room-directed or an approval, and the chat hasn't talked about it: no cue
@@ -3898,7 +3889,7 @@ test.describe('r23', () => {
     await openWork(page);
     await openTaskSheet(page, 'Say go on the placeholder deploy');
     const sheet = sheetOf(page);
-    await expect(sheet.locator('.task-unconfirmed')).toHaveText('Asked Oct 6 · not confirmed since');
+    await expect(sheet.locator('.task-unconfirmed')).toHaveText(/^Asked Oct 6 · chat since in #techne$/i);
     await expect(sheet.locator('.task-movedon')).toHaveCount(0);
     const primary = sheet.locator('.task-do.primary');
     await expect(primary).toHaveCount(1);
@@ -3936,7 +3927,7 @@ test.describe('r23', () => {
     await openWork(page);
     await openTaskSheet(page, 'placeholder-signup-staging');
     const sheet = sheetOf(page);
-    await expect(sheet.locator('.task-unconfirmed')).toHaveText('Asked Oct 6 · not confirmed since');
+    await expect(sheet.locator('.task-unconfirmed')).toHaveText(/^Asked Oct 6 · chat since in #techne$/i);
     await expect(sheet.locator('.task-movedon')).toHaveCount(0);
     await expect(sheet.locator('.task-do.primary')).toHaveCount(1);
     await expect(sheet.locator('.task-do.primary')).toHaveText(/^Check in #techne first$/i);
@@ -4161,7 +4152,7 @@ test.describe('r23', () => {
     await page.evaluate(() => { (window as any).__lookupFails = false; });
     await sheet.getByRole('button', { name: 'Retry' }).click();
     await expect(sheet.locator('.task-lookfail')).toHaveCount(0);
-    await expect(sheet.locator('.task-unconfirmed')).toHaveText('Asked Oct 6 · not confirmed since');
+    await expect(sheet.locator('.task-unconfirmed')).toHaveText(/^Asked Oct 6 · chat since in #techne$/i);
     await expect(sheet.locator('.task-movedon')).toHaveCount(0);
     await expect(sheet.locator('.task-do.primary')).toHaveText(/^Check in #techne first$/i);
     await expect(sheet.getByRole('button', { name: 'I did this' })).toHaveCount(0);
@@ -4285,14 +4276,14 @@ test.describe('r26', () => {
     await openRoom(page, 'Techne');
     await openWork(page);
     const row = rowOf(page, 'cohereboulder.org');
-    await expect(row.locator('.cp-lead')).toHaveText('On your phone, look at cohereboulder.org (live now), then forward Eileen the asks');
+    await expect(row.locator('.cp-lead')).toHaveText("On your phone, look at cohereboulder.org (live now), then forward Eileen the asks listed in this task's detail");
     expect(await itemTotal(row)).toBe(4);
     await expect(row.locator('.cp-item-line').nth(0)).toContainText('OK or cut 6 groups of short functional lines');
-    expect(await row.innerText()).not.toMatch(/listed in this task|…|\.\.\./);
+    expect(await row.innerText()).not.toMatch(/…|\.\.\./);
     await row.locator('.cp-need').click();
     const sheet = sheetOf(page);
-    // the heading is the current step in full, never "2 steps"
-    await expect(sheet.locator('h2')).toHaveText('On your phone, look at cohereboulder.org (live now), then forward Eileen the asks');
+    // the heading is the current step in full (r30: its stored words, "listed in this task's detail" included), never "2 steps"
+    await expect(sheet.locator('h2')).toHaveText("On your phone, look at cohereboulder.org (live now), then forward Eileen the asks listed in this task's detail");
     expect(await sheet.locator('h2').innerText()).not.toMatch(/steps|Companion Today/);
     await expect(sheet.locator('.task-stepof')).toHaveText('Step 1 of 2');
     // the whole list sits directly under the heading (after the quiet title line)
@@ -4331,7 +4322,7 @@ test.describe('r26', () => {
     // nothing resolves
     const none = rowOf(page, 'Forward Kevin the asks');
     await expect(none.locator('.cp-items-none')).toHaveText(/^The asks aren't written down in this task · Open #techne$/i);
-    await expect(none.locator('.cp-lead')).toHaveText('Forward Kevin the asks');
+    await expect(none.locator('.cp-lead')).toHaveText("Forward Kevin the asks listed in this task's detail");
     await none.locator('.cp-need').click();
     sheet = sheetOf(page);
     await expect(sheet.locator('.task-notwritten')).toHaveText(/^The asks aren't written down in this task · Open #techne$/i);
@@ -4638,7 +4629,7 @@ test.describe('r27', () => {
     // r28: the row's step is the question; "in #Uni" is its place; it is counted with the asks
     await expect(needs.locator('.cp-run-waiting .cp-run-step')).toHaveText('Release 0.1.46 placeholder');
     await expect(needs.locator('.cp-run-waiting .cp-run-place')).toHaveText('in #Uni');
-    await expect(needs.locator('.cp-run-waiting > small')).toHaveText('Waiting on you');
+    await expect(needs.locator('.cp-run-waiting .cp-run-open > small')).toHaveText('Waiting on you');
     await expect(needs.locator('.wv-n')).toHaveText('2');
     const running = wv.locator('section[aria-label="Running"]');
     await expect(running).toContainText('Placeholder build underway');
@@ -4703,7 +4694,7 @@ test.describe('r27', () => {
     await openTaskSheet(page, 'Say go on the placeholder deploy');
     let sheet = sheetOf(page);
     await expect(sheet.locator('.task-asked')).toHaveAttribute('data-fresh', 'unconfirmed');
-    await expect(sheet.locator('.task-asked')).toHaveText('Asked Oct 6 · not confirmed since');
+    await expect(sheet.locator('.task-asked')).toHaveText(/^Asked Oct 6 · chat since in #techne$/i);
     await expect(sheet.locator('.task-do.primary')).toHaveText(/^Check in #techne first$/i);
     expect(await sheet.innerText()).not.toMatch(/has talked about|nothing related/i);
     await sheet.getByRole('button', { name: 'Close' }).click();
