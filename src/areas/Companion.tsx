@@ -647,7 +647,7 @@ function Body({ stands, ready, note, load, feed, rest = 0, moreTitle = null, onP
     </section>}
     {active.length > 0 && runsShown > 0 && <section aria-label="Running" className="cp-sec">
       <h3 className="cp-h">Running</h3>
-      <ul className="cp-list">{active.slice(0, runsShown).map((r) => <li key={r.id} className="cp-run" data-state={r.state}><i aria-hidden="true" /><span>{cleanText(r.what)}</span><small>{r.state}</small></li>)}</ul>
+      <ul className="cp-list">{active.slice(0, runsShown).map((r) => <li key={r.id} className="cp-run" data-state={r.state}><i aria-hidden="true" /><span title={cleanText(r.what)}>{cleanText(r.what)}</span><small>{r.state}</small></li>)}</ul>
     </section>}
     {onEverything && <div className="cp-foot"><button type="button" className="cp-all" onClick={onEverything}><span className="cp-all-t">{`All of ${nodeName}'s work`}</span>{hiddenRuns > 0 && <span className="cp-all-more">+{hiddenRuns} more running</span>}<span className="cp-all-arrow" aria-hidden="true">→</span></button></div>}
   </div>;
