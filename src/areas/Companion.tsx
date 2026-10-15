@@ -13,7 +13,7 @@ import { isActiveRun, type Run } from "./steerCore";
 import { ownerLabel, type Task } from "./taskCore";
 import { taskTitle } from "./whereCore";
 import { splitLinks } from "./linkText";
-import { actionableTitle, runText, runShort, answerChoices, answerLabel, askLead, askPreview, checkLine, CHECK_FAILED, DANGLING, decideLine, stripRoom, decisionQuestion, dueLine, fitsRow, isOverdue, lineBudget, missingLine, OPEN_TASK, OPEN_TO_ANSWER, privateActionLabel, privateRestLabel, askedLine, requestDate, currentStep, firstOfSteps, actionOf, rowAction, withoutBrackets, rowSubParts, standsHeading, titleSays, titleWords, TIDY_LINE, toTidy, unknownDecision, waitsLine, waitsOnMe, withHosts, withoutCut, rowAsk, withoutRawIds, notWrittenDown, referencedItems, rowItems, staleLine, historyLine, clauseForms, type Choice, type NeedsFeed, type PrivateNeed, type RowAction, type StaleSummary, type Support } from "./simpleCore";
+import { actionableTitle, runText, runShort, answerChoices, answerLabel, askLead, askPreview, checkLine, CHECK_FAILED, DANGLING, decideLine, stripRoom, decisionQuestion, dueLine, fitsRow, isOverdue, lineBudget, missingLine, OPEN_TASK, OPEN_TO_ANSWER, privateActionLabel, privateRestLabel, askedLine, requestDate, currentStep, firstOfSteps, actionOf, rowAction, withoutBrackets, rowSubParts, standsHeading, titleSays, titleWords, TIDY_LINE, toTidy, unknownDecision, waitsLine, waitsOnMe, withHosts, withoutCut, rowAsk, withoutRawIds, runStateLabel, notWrittenDown, referencedItems, rowItems, staleLine, historyLine, clauseForms, type Choice, type NeedsFeed, type PrivateNeed, type RowAction, type StaleSummary, type Support } from "./simpleCore";
 import { requestRecheck } from "./useTasks";
 
 const KEYS = { side: "uni.companion.side.v1", sideNarrow: "uni.companion.side.narrow.v1", strip: "uni.companion.strip.v1" } as const;
@@ -668,7 +668,7 @@ function Body({ stands, ready, note, load, feed, rest = 0, moreTitle = null, onP
     </section>}
     {active.length > 0 && runsShown > 0 && <section aria-label="Running" className="cp-sec">
       <h3 className="cp-h">Running</h3>
-      <ul className="cp-list">{active.slice(0, runsShown).map((r) => <li key={r.id} className="cp-run" data-state={r.state}><i aria-hidden="true" /><RunText what={cleanText(r.what)} /><small>{r.state}</small></li>)}</ul>
+      <ul className="cp-list">{active.slice(0, runsShown).map((r) => <li key={r.id} className="cp-run" data-state={r.state}><i aria-hidden="true" /><RunText what={cleanText(r.what)} /><small>{runStateLabel(r.state)}</small></li>)}</ul>
     </section>}
     {onEverything && <div className="cp-foot"><button type="button" className="cp-all" onClick={onEverything}><span className="cp-all-t">{`All of ${nodeName}'s work`}</span>{hiddenRuns > 0 && <span className="cp-all-more">+{hiddenRuns} more running</span>}<span className="cp-all-arrow" aria-hidden="true">→</span></button></div>}
   </div>;
@@ -791,7 +791,7 @@ export function CompanionStrip({ open, onToggle, onSheet, ...p }: CompanionProps
       <button type="button" className="cp-sheet-scrim" aria-label="Close" tabIndex={-1} onClick={close} />
       <div ref={sheetRef} className="cp cp-sheet" role="dialog" aria-modal="true" aria-label={p.scope ? `Where ${p.scope} stands` : "Where this stands"} tabIndex={-1}
         style={{ maxHeight: `calc(100% - ${top}px)` }}>
-        <div className="cp-sheet-head"><span>{heading}</span><button type="button" className="cp-sheet-close" onClick={close}>Close</button></div>
+        <div className="cp-sheet-head"><span className="cp-sheet-lead">{p.scope ?? p.nodeName}</span><button type="button" className="cp-sheet-close" onClick={close}>Close</button></div>
         {/* one sheet at a time: an item opened from here (or a way deeper) replaces this sheet */}
         <Body {...p} fit={false} hideHealth onTask={(t) => { close(); p.onTask(t); }} onPrivate={p.onPrivate && ((o) => { close(); p.onPrivate!(o); })} onEverything={p.onEverything && (() => { close(); p.onEverything!(); })} />
       </div>

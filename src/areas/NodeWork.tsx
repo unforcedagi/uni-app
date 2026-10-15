@@ -209,7 +209,10 @@ export function TaskSheet({ task, gone = false, nodeName, room, roomNamed, inRoo
   const gate = gateOf(applies, look);
   // r26 (Codex P1 1): the revision the sheet opened at; a task that moved since is shown as changed, and its answers wait for a reload
   const opened = useRef({ id: task.id, rev: task.updatedAt });
-  if (opened.current.id !== task.id) opened.current = { id: task.id, rev: task.updatedAt };
+  /** a write made from this sheet (a priority) moves the revision itself: that is adopted, not "changed since you opened it" */
+  const ownWrite = useRef(false);
+  if (opened.current.id !== task.id) { opened.current = { id: task.id, rev: task.updatedAt }; ownWrite.current = false; }
+  else if (ownWrite.current && task.updatedAt !== opened.current.rev) { opened.current.rev = task.updatedAt; ownWrite.current = false; }
   const [, bump] = useState(0);
   const moved = !gone && revisionMoved(opened.current.rev, task.updatedAt);
   useEffect(() => { if (moved) onStale?.(); }, [moved]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -248,7 +251,7 @@ export function TaskSheet({ task, gone = false, nodeName, room, roomNamed, inRoo
       {!gone && !unsure && !!room && gate === "pending" && <p className="task-q-note task-lookpending" data-gate="pending" role="status" aria-busy="true">{checkingRoom(room.name)}</p>}
       {dq?.answerable && dq.yourCall && !unsure && <small className="cp-call-lead">Your call:</small>}
       {/* r21: a step of more than one part ("A, then B") is listed, numbered, under how many steps it is */}
-      <h2 id="task-sheet-title">{act ? <RefText text={withHosts(act.text)} vault={vault} onNote={(r) => { onClose(); onNote(r); }} /> : heading}</h2>
+      <h2 id="task-sheet-title">{act ? <RefText text={withHosts(act.text)} vault={vault} onNote={steps ? undefined : (r) => { onClose(); onNote(r); }} /> : heading}</h2>
       {/* r26 (Sonnet, Codex): the title is the quiet line under the heading (a trailing "(…)" that repeats the heading is dropped), and the notes the step's own "(…)" named */}
       {act && (quiet || notes) && <p className="task-sub task-sub-title" title={quiet && quiet !== rest ? rest : undefined}>{quiet}{quiet && notes ? " · " : ""}{notes && <RefText text={notes} vault={vault} onNote={(r) => { onClose(); onNote(r); }} />}</p>}
       {/* r26: a step that points at a list shows it, from this task's own detail, directly under the heading */}
@@ -274,7 +277,7 @@ export function TaskSheet({ task, gone = false, nodeName, room, roomNamed, inRoo
       {tidy && !missing && !check && !checking && !unavailable && !waits && <p className="task-q-note task-tidy">{TIDY_SAYS[tidy]} It needs rewording by its room as one clear request, or closing. Nothing here is yours to do.</p>}
       {gone && <p className="task-gone" role="status">This is no longer open: it was done, decided or changed elsewhere.</p>}
       {changed && !gone && <p className="task-gone task-changed" role="alert">This changed since you opened it. Nothing was saved; this is the latest.</p>}
-      {moved && !changed && <p className="task-gone task-changed" data-moved="true" role="alert">{CHANGED_SINCE}. This is the latest. <button type="button" className="task-link" onClick={() => { opened.current = { id: task.id, rev: task.updatedAt }; bump((n) => n + 1); }}>Reload</button></p>}
+      {moved && !changed && !decideError && <p className="task-gone task-changed" data-moved="true" role="alert">{CHANGED_SINCE}. This is the latest. <button type="button" className="task-link" onClick={() => { opened.current = { id: task.id, rev: task.updatedAt }; bump((n) => n + 1); }}>Reload</button></p>}
       {dq?.answerable && !unsure && dq.full !== dq.text && /https?:\/\/|\bwww\./.test(dq.full) && <div className="task-next"><NextText text={dq.full} vault={vault} onNote={(r) => { onClose(); onNote(r); }} /></div>}
       {dq && !dq.answerable && !reading && !unsure && <p className="task-next"><button type="button" className="task-link" onClick={() => { onClose(); onNote({ vault, id: task.id }); }}>Open the note to read the question ›</button></p>}
       {/* the step itself, with its links to open, when the lead had to drop them (a URL, a linked note) or when it is not an action; never under "Check" */}
@@ -304,7 +307,7 @@ export function TaskSheet({ task, gone = false, nodeName, room, roomNamed, inRoo
       </div>}
       {(tid || at || about || check || act || (!gone && !decision && onPriority)) && <details className="task-details" onToggle={(e) => { const d = e.currentTarget; if (d.open) requestAnimationFrame(() => d.scrollIntoView({ block: "nearest" })); }}><summary>Details</summary>
         {!gone && !decision && !tidy && onPriority && <div className="task-prio" role="group" aria-label="Priority">
-          {PRIORITIES.map((p) => <button key={p} type="button" className="task-prio-b" aria-pressed={p === prio} onClick={() => { if (p !== prio) onPriority(task, p); }}>{PRIORITY_LABEL[p]}</button>)}
+          {PRIORITIES.map((p) => <button key={p} type="button" className="task-prio-b" aria-pressed={p === prio} onClick={() => { if (p !== prio) { ownWrite.current = true; onPriority(task, p); } }}>{PRIORITY_LABEL[p]}</button>)}
         </div>}
         {/* r18: the note's own words (the wall a row used to carry under its action) and, under "Check", the step it doubts */}
         {about && <p className="task-about"><RefText text={about} vault={vault} /></p>}

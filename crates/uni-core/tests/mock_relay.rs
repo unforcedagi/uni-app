@@ -253,6 +253,12 @@ async fn serve(listener: TcpListener, relay: Arc<MockRelay>) {
                                         .unwrap();
                                     continue;
                                 }
+                                // r26: a slow room history (`MOCK_HISTORY_DELAY_MS`, off by default), to stand in for the real relay's cold sync
+                                if filters.iter().any(|f| f["#h"].is_array()) {
+                                    if let Some(ms) = std::env::var("MOCK_HISTORY_DELAY_MS").ok().and_then(|v| v.parse::<u64>().ok()) {
+                                        tokio::time::sleep(Duration::from_millis(ms)).await;
+                                    }
+                                }
                                 let snapshot = relay.events.lock().unwrap().clone();
                                 // Per filter: the newest `limit` matches (NIP-01), deduped across filters.
                                 let mut out: Vec<&Value> = Vec::new();
@@ -2055,4 +2061,32 @@ async fn live_read_state_from_desktop_arrives_in_real_time() {
     };
     let (r, _) = tokio::join!(runner, driver);
     r.unwrap();
+}
+
+/// r26 (Codex P1 3): serves a relay with five rooms for the app's cold-send walk, until killed. Not a test: `cargo test -p uni-core --offline
+/// --test mock_relay -- --ignored serve_for_the_walk`, with `MOCK_MEMBER_HEX` (the member's public key), `MOCK_PORT`, and `MOCK_HISTORY_DELAY_MS`
+/// (each room's history answers this late, so the first sync takes about five times as long).
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn serve_for_the_walk() {
+    let member = std::env::var("MOCK_MEMBER_HEX").expect("MOCK_MEMBER_HEX");
+    let port = std::env::var("MOCK_PORT").unwrap_or_else(|_| "19391".into());
+    let relay_keys = Keys::generate();
+    let other = Keys::generate();
+    let member_pk = nostr::PublicKey::from_hex(&member).unwrap();
+    let chans: Vec<Uuid> = (0..5).map(|_| Uuid::new_v4()).collect();
+    let mut events = Vec::new();
+    for (i, ch) in chans.iter().enumerate() {
+        let name = ["walk-send", "walk-two", "walk-three", "walk-four", "walk-five"][i];
+        events.push(signed(&relay_keys, 39002, vec![d(*ch), p(&other), vec!["p".into(), member.clone()]], "", 1));
+        events.push(signed(&relay_keys, 39000, vec![d(*ch), named("name", name)], "", 1));
+        for n in 0..60u64 {
+            events.push(signed(&other, 9, vec![h(*ch), p(&other)], &format!("{name} message {n}"), 100 + n));
+        }
+    }
+    let _ = member_pk;
+    let relay = MockRelay::new(vec![member], chans.clone(), events);
+    let listener = TcpListener::bind(format!("127.0.0.1:{port}")).await.unwrap();
+    println!("serving ws://127.0.0.1:{port}");
+    serve(listener, relay).await;
 }

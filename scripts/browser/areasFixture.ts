@@ -498,6 +498,8 @@ Two proposals wait on a scope decision.
       w.__setStands = (id: string, text: string, at?: string) => { const n = notes.find((x) => x.id === id); n.metadata = { ...n.metadata, stands: text, stands_at: at ?? new Date((d.now - 2 * 86400) * 1000).toISOString() }; n.updatedAt = new Date(Date.now() + 5000).toISOString(); };
       /** r24: change what a run says it is doing */
       w.__setRunWhat = (id: string, what: string) => { const n = notes.find((x) => x.id === id); n.metadata = { ...n.metadata, summary: what, what }; n.updatedAt = new Date(Date.now() + 5000).toISOString(); };
+      /** r26: a run about a task, on a node */
+      w.__addRun = (id: string, node: string, task: string, what: string) => { notes.push(run(id, what, { node, task, state: 'running' })); };
       w.__decideElsewhere = (id: string) => { const t = taskNotes.find((x) => x.id === id); t.metadata.state = 'decided'; t.updatedAt = new Date(Date.now() + 9000).toISOString(); };
       /** r13: change a task as Uni would through MCP (metadata merged, optionally a new title or state). */
       w.__setTask = (id: string, meta: Record<string, unknown>, title?: string) => { const t = taskNotes.find((x) => x.id === id); Object.assign(t.metadata, meta); if (title) t.path = t.path.replace(/[^/]*$/, title); t.updatedAt = new Date(Date.now() + 5000).toISOString(); t.lastUpdatedVia = 'mcp'; };
@@ -532,7 +534,7 @@ Two proposals wait on a scope decision.
           case 'get_identity': if (d.identityDelay) await new Promise((r) => setTimeout(r, d.identityDelay)); return U;
           case 'get_npub': return 'test';
           case 'get_rooms': if (d.roomsDelay) await new Promise((r) => setTimeout(r, d.roomsDelay)); w.__roomsResolved = true; return rooms;
-          case 'get_messages': if (args.limit === 200 && w.__lookupFails) throw 'relay unreachable'; if (d.messagesDelay) await new Promise((r) => setTimeout(r, d.messagesDelay)); return args.root ? threads[args.root] ?? [] : (msgs[args.channel] ?? []).slice(-(args.limit ?? 300));
+          case 'get_messages': if (args.limit === 200 && w.__lookupDelay) await new Promise((r) => setTimeout(r, w.__lookupDelay)); if (args.limit === 200 && w.__lookupFails) throw 'relay unreachable'; if (d.messagesDelay) await new Promise((r) => setTimeout(r, d.messagesDelay)); return args.root ? threads[args.root] ?? [] : (msgs[args.channel] ?? []).slice(-(args.limit ?? 300));
           case 'get_members': return [{ pubkey: U, name: 'Aaron', named: true }, ...(d.uniMember ? [{ pubkey: 'c'.repeat(64), name: 'Uni', named: true }] : [])];
           case 'vault_paths': return notes.map(rowOf);
           case 'vault_list': return d.lifeVault ? ['uni', d.lifeVault] : ['uni'];
@@ -578,7 +580,7 @@ Two proposals wait on a scope decision.
             // r16: the state change is written against the revision the user saw, checked in the same update (as the vault does)
             if (!args.ifUpdatedAt || args.ifUpdatedAt !== t.updatedAt) throw `conflict: note "${args.id}" has been modified (current updated_at=${t.updatedAt}, expected=${args.ifUpdatedAt})`;
             if (!valid.includes(args.to)) throw '[schema_validation] state is not one of ' + valid.join(',');
-            t.metadata['state'] = args.to; t.updatedAt = new Date(Date.now() + taskNotes.length).toISOString(); t.lastUpdatedVia = 'api'; t.lastUpdatedBy = 'app-writer';
+            t.metadata['state'] = args.to; if (args.metadata) Object.assign(t.metadata, args.metadata); t.updatedAt = new Date(Date.now() + taskNotes.length).toISOString(); t.lastUpdatedVia = 'api'; t.lastUpdatedBy = 'app-writer';
             return JSON.parse(JSON.stringify(t));
           }
           case 'vault_decide': {
@@ -588,7 +590,7 @@ Two proposals wait on a scope decision.
             // r14: the answer is written against the revision whose question was shown
             if (!args.ifUpdatedAt || args.ifUpdatedAt !== t.updatedAt) throw `conflict: note ${args.id} has been modified since its question was read`;
             const keys = Object.keys(args.metadata ?? {}).sort().join();
-            if (keys !== 'decided,decided_at,decided_by') throw 'invalid decision metadata: ' + keys;
+            if (keys !== 'decided,decided_at,decided_by' && keys !== 'answered_rev,decided,decided_at,decided_by') throw 'invalid decision metadata: ' + keys;
             t.metadata['state'] = args.to; Object.assign(t.metadata, args.metadata); t.updatedAt = new Date(Date.now() + taskNotes.length).toISOString(); t.lastUpdatedVia = 'api'; t.lastUpdatedBy = 'app-writer';
             return JSON.parse(JSON.stringify(t));
           }
@@ -602,7 +604,7 @@ Two proposals wait on a scope decision.
           }
           case 'media_upload': return { url: 'https://example.invalid/voice.webm', mime: 'audio/webm', name: 'voice.webm', size: 4 };
           case 'prepare_voice_message': return JSON.stringify({ id: 'voice:' + args.channel + ':' + crypto.randomUUID() });
-          case 'post_message': { const ref = 'sent-' + w.__calls.length; if (args.body) (msgs[args.channel] ??= []).push(msg(ref, args.channel, 'Aaron', 0, args.body)); return { ref, channel: args.channel }; }
+          case 'post_message': { if (w.__postDelay) await new Promise((r) => setTimeout(r, w.__postDelay)); const ref = 'sent-' + w.__calls.length; if (args.body) (msgs[args.channel] ??= []).push(msg(ref, args.channel, 'Aaron', 0, args.body)); return { ref, channel: args.channel }; }
           case 'relay_origin': return 'wss://relay.test';
           case 'vault_note': {
             // r19: a note's read held back (`__noteDelay = { id: ms }`) or failing (`__noteFails = { id: true }`): what a row asserts meanwhile

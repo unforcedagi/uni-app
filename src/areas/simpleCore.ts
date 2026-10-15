@@ -1354,3 +1354,7 @@ export const checkingRoom = (room: string): string => `Checking #${room.replace(
 /** The task changed since the sheet loaded: the revision it was opened at is not the list's now. */
 export const revisionMoved = (opened: string | null | undefined, now: string | null | undefined): boolean => !!opened && !!now && opened !== now;
 export const CHANGED_SINCE = "This changed since you opened it";
+
+/** r26 (Codex 6): a run's state as a person reads it, the same in the companion and the work view (never the raw "decision"). */
+export const RUN_STATE_LABEL: Record<string, string> = { running: "Working", queued: "Queued", stalled: "Stalled", blocked: "Blocked", decision: "Waiting on you", done: "Done", failed: "Failed" };
+export const runStateLabel = (state: string): string => RUN_STATE_LABEL[state] ?? state;
