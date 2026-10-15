@@ -165,6 +165,7 @@ test.describe('r30 confirming', () => {
     await add(page, { id: 'r1', title: 'T-901 Placeholder chat since', node: 'Areas/Techne', asked_at: ASKED, meta: { next: NEXT('amber') } });
     await add(page, { id: 'r2', title: 'T-902 Placeholder old', node: 'Areas/Techne', asked_at: '2026-10-05T08:00:00.000Z', meta: { next: NEXT('cobalt') } });
     await add(page, { id: 'r3', title: 'T-903 Placeholder undated', node: 'Areas/Techne', asked_at: null, meta: { next: NEXT('quartz') } });
+    await add(page, { id: 'r4', title: 'T-904 Placeholder waiting', node: 'Areas/Techne', asked_at: null, meta: { next: 'Waiting on the placeholder printer to be repaired by the supplier' } });
     await arriveAt(page, 'Aaron', 'T-901 is off', 120);
     await refresh(page);
     await openRoom(page, 'Techne');
@@ -178,6 +179,8 @@ test.describe('r30 confirming', () => {
     await expect(items.filter({ hasText: 'amber' }).locator('.cp-recheck-asked')).toHaveText(/^chat since in #techne$/i);
     await expect(items.filter({ hasText: 'cobalt' }).locator('.cp-recheck-asked')).toHaveText(/^asked Oct 5( · in .*)?$/);
     await expect(items.filter({ hasText: 'quartz' }).locator('.cp-recheck-asked')).toHaveText(/^(no date|added \w+ \d+)( · in .*)?$/);
+    // a request that leads with its title (its step is a status, no action) still shows its step, whole, under it
+    await expect(items.filter({ hasText: 'Placeholder waiting' }).locator('.cp-recheck-next')).toHaveText('Waiting on the placeholder printer to be repaired by the supplier');
     // a list row is its whole step and its reason; there is no "Answer anyway" on any of them
     await expect(panel.locator('.cp-recheck-list').getByRole('button', { name: 'Answer anyway' })).toHaveCount(0);
     await expect(panel.locator('.cp-recheck-list')).not.toContainText('Answer anyway');

@@ -771,3 +771,4 @@
 .cp-stands-note[data-folded] .cp-said > summary { cursor: pointer; min-height: 32px; display: inline-flex; align-items: center; color: var(--th-ink2); text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
 .cp-foot .cp-stands-note { margin: 8px 0 0; }
 .cp-foot .cp-said[open] > p { max-height: 30vh; overflow-y: auto; }
+.cp-recheck-next { font: 400 13.5px/1.4 var(--th-sans); color: var(--th-ink2); overflow-wrap: anywhere; }
