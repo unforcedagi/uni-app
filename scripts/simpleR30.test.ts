@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { buildTaskTree, parseTask } from "../src/areas/taskCore.ts";
 import { parseRuns } from "../src/areas/steerCore.ts";
-import { ANNOUNCE_GRACE_MS, chatAbout, checkInResult, currentStep, detailLists, NEXT_CAP, quotes, reasonShort, recheckLine, referencedItems, requestKeys, rowAction, stepText, unconfirmedLine } from "../src/areas/simpleCore.ts";
+import { currentStep, detailLists, NEXT_CAP, reasonShort, recheckLine, referencedItems, rowAction, stepText, unconfirmedLine } from "../src/areas/simpleCore.ts";
 
 let failed = 0;
 async function check(name: string, fn: () => void | Promise<void>) {
@@ -89,56 +89,6 @@ await check("4: the line says it counts requests, and which rooms", () => {
   assert.equal(recheckLine(3, "room"), "3 requests need confirming in this room");
   assert.equal(recheckLine(13, "all"), "13 requests need confirming across all rooms");
   assert.ok(!/older/i.test(recheckLine(13, "all")));
-});
-await check("4: each reason in a few words", () => {
-  const t = { stewardRoom: "cohere", asked: "2026-10-11T08:00:00.000Z" };
-  assert.equal(reasonShort("chat-since", t), "chat since in #cohere");
-  assert.equal(reasonShort("read-failed", t), "couldn't read #cohere");
-  assert.equal(reasonShort("no-room", { ...t, stewardRoom: null }), "no room");
-  assert.equal(reasonShort("old", t, "2026-10-14"), "asked Oct 11");
-  assert.equal(reasonShort("no-date", {}), "no date");
-  assert.equal(unconfirmedLine("asked Oct 13", "chat-since", "cohere"), "Asked Oct 13 · chat since in #cohere");
-  assert.equal(unconfirmedLine("asked Oct 13", "old"), "Asked Oct 13 · not confirmed since");
-  assert.equal(unconfirmedLine("asked Oct 13", "no-room"), "Asked Oct 13 · no room");
-});
-
-// ---- 5. the announcement grace, narrowed
-const at = "2026-10-15T08:05:41.000Z";
-const t0 = new Date(at).getTime();
-const sec = (ms: number) => Math.floor(ms / 1000);
-const asked = { at, kind: "asked" as const };
-const NEXT = "Tell Uni who pays the $10k COhere sponsorship (Techne or Gitcoin Foundation) and how";
-const keys = requestKeys({ title: "T-65 $10k COhere sponsorship invoice draft", next: NEXT });
-const UNI = "uni-pubkey", AARON = "aaron-pubkey";
-await check("5: quotes() needs six consecutive words of the next, case and punctuation aside", () => {
-  assert.equal(quotes("Re-stated: tell Uni who pays the $10k COhere sponsorship", NEXT), true);
-  assert.equal(quotes("tell Uni who pays the $10k", NEXT), true);
-  assert.equal(quotes("tell Uni who pays the", NEXT), false, "five words");
-  assert.equal(quotes("tell Uni who, the $10k pays", NEXT), false, "not consecutive");
-  assert.equal(quotes("anything", "three word step"), false);
-});
-await check("5a announcement: in the window, Uni naming the T-NN and quoting six words of the ask is skipped", () => {
-  const m = [{ ref: "a", ts: sec(t0 + 9_000), body: `T-65: ${NEXT}`, author: UNI }];
-  assert.equal(chatAbout(asked, m, keys, UNI), null);
-  assert.equal(checkInResult(asked, m, keys, undefined, UNI).kind, "none");
-});
-await check("5b cancellation in the window: Uni naming the T-NN but not quoting it unconfirms", () => {
-  const m = [{ ref: "a", ts: sec(t0 + 9_000), body: `T-65: ${NEXT}`, author: UNI }, { ref: "x", ts: sec(t0 + 90_000), body: "T-65 is cancelled, ignore it", author: UNI }];
-  assert.equal(chatAbout(asked, m, keys, UNI)?.ref, "x");
-  assert.equal(checkInResult(asked, m, keys, undefined, UNI).kind, "found");
-  // quoting without the T-NN is not the announcement of this ask either
-  assert.equal(chatAbout(asked, [{ ref: "q", ts: sec(t0 + 9_000), body: "tell Uni who pays the $10k COhere sponsorship, please", author: UNI }], { ...keys, words: ["sponsorship", "cohere"] }, UNI)?.ref, "q");
-});
-await check("5c reminder later: past the window Uni quoting six words of the current next does not unconfirm", () => {
-  const m = [{ ref: "r", ts: sec(t0 + ANNOUNCE_GRACE_MS + 3_600_000), body: `Reminder, T-65 still open: ${NEXT}`, author: UNI }];
-  assert.equal(chatAbout(asked, m, keys, UNI), null);
-  assert.equal(checkInResult(asked, m, keys, undefined, UNI).kind, "none");
-  // Aaron quoting it is still talk
-  assert.equal(chatAbout(asked, [{ ref: "r", ts: sec(t0 + ANNOUNCE_GRACE_MS + 60_000), body: `T-65 ${NEXT}`, author: AARON }], keys, UNI)?.ref, "r");
-});
-await check("5d other talk later: Uni's message past the window that names the T-NN and quotes nothing unconfirms; so does an unknown Uni key", () => {
-  assert.equal(chatAbout(asked, [{ ref: "z", ts: sec(t0 + ANNOUNCE_GRACE_MS + 60_000), body: "T-65 is settled", author: UNI }], keys, UNI)?.ref, "z");
-  assert.equal(chatAbout(asked, [{ ref: "a", ts: sec(t0 + 9_000), body: `T-65: ${NEXT}`, author: UNI }], keys, null)?.ref, "a");
 });
 
 // ---- 6. a waiting run carries its message

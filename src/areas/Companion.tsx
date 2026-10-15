@@ -13,7 +13,7 @@ import { isActiveRun, type Run } from "./steerCore";
 import { ownerLabel, type Task } from "./taskCore";
 import { taskTitle } from "./whereCore";
 import { splitLinks } from "./linkText";
-import { actionableTitle, runText, answerChoices, answerLabel, askLead, askPreview, checkLine, CHECK_FAILED, DANGLING, decideLine, decisionQuestion, dueLine, fitsRow, isOverdue, missingLine, OPEN_TASK, OPEN_TO_ANSWER, privateActionLabel, privateRestLabel, askedLine, requestDate, currentStep, actionOf, rowAction, rowSubParts, standsHeading, titleSays, titleWords, TIDY_LINE, toTidy, unknownDecision, waitsLine, waitsOnMe, withHosts, rowAsk, withoutRawIds, runStateLabel, waitingOnYou, waitingRunParts, notWrittenDown, referencedItems, ROW_ITEMS, ITEM_LINES, itemForms, lastWritten, SUMMARY_LONG, recheckLine, reasonShort, noneLine, type RecheckScope, type Choice, type NeedsFeed, type PrivateNeed, type RowAction, type Support } from "./simpleCore";
+import { ROOM_NOT_FOUND, actionableTitle, runText, answerChoices, answerLabel, askLead, askPreview, checkLine, CHECK_FAILED, DANGLING, decideLine, decisionQuestion, dueLine, fitsRow, isOverdue, missingLine, OPEN_TASK, OPEN_TO_ANSWER, privateActionLabel, privateRestLabel, askedLine, askedShown, requestDate, currentStep, actionOf, rowAction, rowSubParts, standsHeading, titleSays, titleWords, TIDY_LINE, toTidy, unknownDecision, waitsLine, waitsOnMe, withHosts, rowAsk, withoutRawIds, runStateLabel, waitingOnYou, waitingRunParts, notWrittenDown, referencedItems, ROW_ITEMS, ITEM_LINES, itemForms, lastWritten, summaryLine, SUMMARY_LONG, recheckLine, reasonShort, noneLine, type RecheckScope, type Choice, type NeedsFeed, type PrivateNeed, type RowAction, type Support } from "./simpleCore";
 import { requestRecheck } from "./useTasks";
 import type { RecheckWhy } from "./simpleCore";
 
@@ -56,7 +56,7 @@ export function useCompanionOpen(variant: "side" | "strip"): [boolean, (v: boole
 
 export type CompanionProps = {
   /** Where this stands: the sentence and, quietly, when it was written. Null: nothing to say. */
-  stands: { text: string; ago: string; /** r27: the date a written summary is dated by ("Oct 14") */ asOf?: string | null; /** the room that wrote it */ by?: string | null; /** a summary somebody wrote, not the app's own line */ written?: boolean } | null; ready: boolean;
+  stands: { text: string; ago: string; /** r31: days since a written summary was written */ age?: number | null; /** r27: the date a written summary is dated by ("Oct 14") */ asOf?: string | null; /** the room that wrote it */ by?: string | null; /** a summary somebody wrote, not the app's own line */ written?: boolean } | null; ready: boolean;
   /** Said in place of a node's state (a room no node owns: "Not filed under an area yet."); there is then no Needs you and no way deeper. */
   note?: string | null;
   /** The task list's health: a failed first load (never an endless "Loading…"), a failed refresh (the rows stay), and whether every page was read. */
@@ -75,6 +75,8 @@ export type CompanionProps = {
   onTask: (t: Task) => void; onDecide: (t: Task, option: string) => void;
   /** r30: a run waiting on the user's answer is a row: it opens its room at the run's message, the composer focused */
   onRun?: (r: Run) => void;
+  /** r31: a waiting run whose room (by its `channel` id) is not among the rooms: its row says "Room not found" */
+  runMissing?: (r: Run) => boolean;
   /** r30: this is Uni's own room: what it counts is across all rooms (any other room's counts are its own) */
   scopeAll?: boolean;
   /** "All of X's work" (null: none, for a room no node owns). */
@@ -224,13 +226,13 @@ function ActionLine({ forms, vault, elRef }: { forms: { text: string; keep: stri
  * (without raw ids), muted, below Needs you. Whole when short; a long one is behind "What it said". `written`: a summary somebody wrote (the
  * app's own line from the tasks has no author or date to give).
  */
-export function Stands({ stands, className = "cp-lede", folded = false }: { stands: { text: string; asOf?: string | null; by?: string | null; written?: boolean }; className?: string;
+export function Stands({ stands, className = "cp-lede", folded = false }: { stands: { text: string; asOf?: string | null; by?: string | null; written?: boolean; /** days since it was written */ age?: number | null }; className?: string;
   /** r30: the room for it is short: its date line, and "Read" to open the whole (never a text cut by the panel's edge) */ folded?: boolean }) {
   const text = useMemo(() => withoutRawIds(stands.text), [stands.text]);
   const long = text.length > SUMMARY_LONG;
   return <div className={`${className} cp-stands-note`} data-written={stands.written ? "true" : undefined} data-folded={folded ? "true" : undefined}>
-    {stands.written && <p className="cp-asof">{lastWritten(stands.asOf, stands.by)}</p>}
-    {folded || long ? <details className="cp-said"><summary>{folded ? "Read" : "What it said"}</summary><p className="cp-stands">{text}</p></details> : <p className="cp-stands">{text}</p>}
+    {folded || long ? <details className="cp-said"><summary>{summaryLine(stands.written ? stands.asOf : null, stands.by, stands.age)}</summary><p className="cp-stands">{text}</p></details>
+      : <>{stands.written && <p className="cp-asof">{lastWritten(stands.asOf, stands.by)}</p>}<p className="cp-stands">{text}</p></>}
   </div>;
 }
 
@@ -375,10 +377,10 @@ export function rowLead(t: Task, area: string | null = null): RowLead {
 /**
  * r27 (both critics): the items a row carries, each its whole clause. An item takes at most two lines and is cut only at a sentence end: the
  * first of its forms (`itemForms`) that fits is drawn; an item with no form that fits is left out whole (the sheet lists it), and the row says
- * "and N more" for it and for any past `cap`. `cap`: how many the room above the panel's footer allows (the panel lowers it when three whole
+ * the total ("10 labels in all") for it and for any past `cap`: the same number whatever the width or height (r31; a count of what is left out changed with the panel). `cap`: how many the room above the panel's footer allows (the panel lowers it when three whole
  * items don't fit).
  */
-export function RowItems({ items, cap }: { items: readonly string[]; cap: number; noun?: string }) {
+export function RowItems({ items, cap, noun = "items" }: { items: readonly string[]; cap: number; noun?: string }) {
   const forms = useMemo(() => items.map(itemForms), [items]);
   const key = items.join("\n");
   const [pick, setPick] = useState<number[]>(() => items.map(() => 0));
@@ -404,7 +406,7 @@ export function RowItems({ items, cap }: { items: readonly string[]; cap: number
   const more = items.length - drawn.length;
   return <span ref={ref} className="cp-items" data-count={items.length} data-shown={drawn.length}>
     {drawn.map((i) => <span key={i} className="cp-item-line">{forms[i][Math.min(pick[i] ?? 0, forms[i].length - 1)]}</span>)}
-    {drawn.length > 0 && more > 0 && <span className="cp-item-more">{`and ${more} more`}</span>}
+    {drawn.length > 0 && more > 0 && <span className="cp-item-more" data-total={items.length}>{`${items.length} ${noun} in all`}</span>}
   </span>;
 }
 
@@ -459,7 +461,7 @@ export function NeedRow({ t, onTask, meta, area = null, itemCap = ROW_ITEMS }: {
   // r20: an action row's subtitle carries its due cue ("COhere opens Oct 15 · due today"); other rows keep the due line of their own
   // r22 (Codex P1): every Needs-you row says when it was asked ("asked Oct 11"), from the record's last change; never on a row that isn't the user's
   // r23 (Codex P1): when it was asked ("asked Oct 6") or, with no request time, added ("added Oct 11"); never the record's last change
-  const asked = meta ? null : askedLine(requestDate(t));
+  const asked = meta ? null : askedShown(t.due, askedLine(requestDate(t)));
   const when_ = r.sub ? [r.sub.when, asked].filter(Boolean).join(" · ") : null;
   const meta_ = <>{r.sub ? (<span ref={subRef} className="cp-under cp-sub" data-wrapped={subWrapped || undefined} title={[r.sub.where, when_].filter(Boolean).join(" · ")}>{r.sub.where && <FitLine className="cp-sub-where" text={r.sub.where} fallback={r.sub.short ?? null} onHide={setWhereHidden} />}
       {when_ && <span className={`cp-sub-when${isOverdue(t.due) ? " overdue" : ""}`}>{r.sub.where && !whereHidden && !subWrapped ? " · " : ""}{when_}</span>}</span>)
@@ -481,7 +483,7 @@ export function NeedRow({ t, onTask, meta, area = null, itemCap = ROW_ITEMS }: {
         ? <ActionLine elRef={titleRef as React.RefObject<HTMLParagraphElement | null>} forms={r.action?.forms.length ? r.action.forms : [{ text: next, keep: "" }]} vault={vault} />
         // r20: no "›" on any row: the whole row opens its sheet, in the companion and the work view alike
         : <span ref={titleRef} className="cp-title"><RefText text={text} vault={vault} /></span>}
-      {refd?.kind === "list" && <RowItems items={refd.items} cap={itemCap} />}
+      {refd?.kind === "list" && <RowItems items={refd.items} cap={itemCap} noun={refd.noun.toLowerCase()} />}
       {refd?.kind === "none" && <span className="cp-items cp-items-none">{notWrittenDown(refd.noun)}{itemRoom ? ` · Open #${itemRoom}` : ""}</span>}
       {r.go && <span className="cp-open-decide">{r.go}</span>}
       {!next && !isDecision && r.mode === "title" && !actionableTitle(text) && text !== "Open to see what's needed" && <span className="cp-open-to-see">Open to see what's needed</span>}
@@ -628,16 +630,16 @@ export function NeedsList({ needs: owed, pending = [], fit, onTask, onDecide, on
  * r28 (Sonnet): a run that waits on the user's answer is a Needs-you row, counted with the asks: the question it waits on is the step, whole
  * and wrapped ("Waiting on your answer in #Uni: Ship 0.1.46?" is "Ship 0.1.46?", "in #Uni" its place), never the lead-in with a colon.
  */
-export function WaitingRuns({ runs, className = "cp-list cp-waiting", onRun }: { runs: readonly Run[]; className?: string; /** r30: the whole row opens its room at the run's message (the room, with none), the composer focused */ onRun?: (r: Run) => void }) {
+export function WaitingRuns({ runs, className = "cp-list cp-waiting", onRun, missing }: { runs: readonly Run[]; className?: string; missing?: (r: Run) => boolean; /** r30: the whole row opens its room at the run's message (the room, with none), the composer focused */ onRun?: (r: Run) => void }) {
   return runs.length > 0 ? <ul className={className} aria-label="Waiting on your answer">{runs.map((r) => {
     const w = waitingRunParts(cleanText(r.what));
+    const gone = !!missing?.(r);
     return <li key={r.id} className="cp-run cp-run-waiting" data-state={r.state} data-task={r.task ?? undefined}>
-      <button type="button" className="cp-need cp-run-open" aria-label={[w.step, w.place, runStateLabel(r.state)].filter(Boolean).join(". ")} onClick={() => onRun?.(r)}>
-        <i aria-hidden="true" /><span className="cp-run-text" title={cleanText(r.what)}><span className="cp-run-step">{w.step}</span>{w.place && <small className="cp-run-place">{w.place}</small>}</span><small>{runStateLabel(r.state)}</small>
+      <button type="button" className="cp-need cp-run-open" aria-label={[w.step, w.place, gone ? ROOM_NOT_FOUND : runStateLabel(r.state)].filter(Boolean).join(". ")} data-missing={gone || undefined} onClick={() => onRun?.(r)}>
+        <i aria-hidden="true" /><span className="cp-run-text" title={cleanText(r.what)}><span className="cp-run-step">{w.step}</span>{w.place && <small className="cp-run-place">{w.place}</small>}</span><small>{gone ? ROOM_NOT_FOUND : runStateLabel(r.state)}</small>
       </button></li>;
   })}</ul> : null;
 }
-export const checkingAsks = (n: number): string => `Checking ${n} ${n === 1 ? "ask" : "asks"}…`;
 /** An ask's whole step, wrapped, never ending at a colon (the recheck list shows nothing less). */
 export function wholeStep(t: Task): string {
   const r = rowLead(t);
@@ -645,9 +647,9 @@ export function wholeStep(t: Task): string {
   return text.replace(/[\s:;,—–-]+$/, "");
 }
 /**
- * r28 (Codex P1-2), r30: requests that aren't confirmed (no recent `asked_at`, or related chat since) are not in Needs you and not counted. One quiet
+ * r28 (Codex P1-2), r30: requests that aren't confirmed (no `asked_at` or `confirmed_at` within 3 days) are not in Needs you and not counted. One quiet
  * line says how many need confirming and where it counts ("in this room", "across all rooms"); it opens to a plain list: each request's whole step,
- * its reason in a few words ("chat since in #cohere", "couldn't read #cohere", "asked Oct 11", "no room"), and one tap to its sheet. "Answer anyway"
+ * its reason in a few words ("asked Oct 11"), and one tap to its sheet. "Answer anyway"
  * is not here: it is in the sheet, after the reason.
  */
 export function Rechecks({ tasks, why, scope = "room", onTask, placeOf }: { tasks: readonly Task[]; why?: Record<string, RecheckWhy | null>; scope?: RecheckScope; onTask: (t: Task) => void; /** the area an ask belongs to when it is listed outside it */ placeOf?: (t: Task) => string | null }) {
@@ -659,7 +661,7 @@ export function Rechecks({ tasks, why, scope = "room", onTask, placeOf }: { task
     {open && <ul className="cp-recheck-list" aria-label="Requests that need confirming">{tasks.map((t) => {
       const place = placeOf?.(t) ?? null;
       const w = why?.[t.id] ?? null;
-      const reason = [reasonShort(w, t), place && w !== "chat-since" && w !== "read-failed" ? `in ${place}` : null].filter(Boolean).join(" · ");
+      const reason = [reasonShort(t), place ? `in ${place}` : null].filter(Boolean).join(" · ");
       // a request whose row leads with its title (no action in its step) shows the step under it, whole: no word of it is left out of the list
       const under = t.kind !== "decision" && rowLead(t).mode === "title" ? t.next.trim() : "";
       return <li key={t.id} className="cp-recheck-item" data-id={taskTitle(t.title).id ?? undefined} data-why={w ?? undefined}>
@@ -673,7 +675,7 @@ export function Rechecks({ tasks, why, scope = "room", onTask, placeOf }: { task
   </div>;
 }
 
-function Body({ stands, ready, note, load, feed, rest = 0, moreTitle = null, onPrivate, runs, nodeName, onTask, onDecide, onRun, scopeAll, onEverything, onNote, placeOf, fit, hideHealth = false, onMore, keepOne = false, compact = false }: CompanionProps & { fit: boolean; hideHealth?: boolean; onMore?: () => void; keepOne?: boolean;
+function Body({ stands, ready, note, load, feed, rest = 0, moreTitle = null, onPrivate, runs, nodeName, onTask, onDecide, onRun, runMissing, scopeAll, onEverything, onNote, placeOf, fit, hideHealth = false, onMore, keepOne = false, compact = false }: CompanionProps & { fit: boolean; hideHealth?: boolean; onMore?: () => void; keepOne?: boolean;
   /** r28 (Codex P2-5): the one compact panel: the summary is its date line, the footer is outside what scrolls */
   compact?: boolean }) {
   const live = runs.filter(isActiveRun);
@@ -768,9 +770,8 @@ function Body({ stands, ready, note, load, feed, rest = 0, moreTitle = null, onP
       {(feed.rows.length > 0 || !!feed.pending?.length) && <NeedsList needs={feed.rows} pending={feed.pending} fit={fit} onTask={onTask} onDecide={onDecide} onNote={onNote} placeOf={placeOf} onMore={rest > 0 && onEverything ? onEverything : onMore} extra={onEverything ? rest : 0} moreTitle={moreTitle} keepOne={keepOne} wholeFirst={compact} />}
       {feed.rows.length === 0 && rest > 0 && onEverything && <button type="button" className="cp-more cp-more-rows cp-more-all" title={moreTitle ?? undefined} onClick={onEverything}>{moreLabel(rest)}</button>}
       {feed.privates.length > 0 && <ul className="cp-list cp-privates">{feed.privates.map((p) => <PrivateRow key={p.key} p={p} onPrivate={onPrivate} />)}</ul>}
-      <WaitingRuns runs={waiting} onRun={onRun} />
+      <WaitingRuns runs={waiting} onRun={onRun} missing={runMissing} />
       {feed.total === 0 && !feed.pending?.length && !waiting.length && <p className="cp-none">{noneLine(feed)}</p>}
-      {!!feed.checking?.length && <p className="cp-checking" role="status" aria-busy="true">{checkingAsks(feed.checking.length)}</p>}
       <Rechecks tasks={feed.recheck ?? []} why={feed.recheckWhy} scope={scopeAll ? "all" : "room"} onTask={onTask} placeOf={placeOf} />
       {health}
     </section>}

@@ -69,6 +69,10 @@ export type Task = {
    * field that can confirm an ask is still current: never `updatedAt`, which any unrelated edit renews. Absent: the ask is unconfirmed.
    */
   askedAt?: string | null;
+  /** r31: `confirmed_at`, stamped by `tasks.py confirm T-NN`: the ask was checked and is still wanted. With `askedAt`, the one record of whether an ask is current. */
+  confirmedAt?: string | null;
+  /** r31: `superseded_by`: the task or note that replaces this one; a superseded ask is not owed. */
+  supersededBy?: string | null;
   /** r28: `closed`, the day a done or archived task was closed (tasks.py): a closure after a summary was written dims it. */
   closed?: string | null;
   /** r23: `detail`, the content an ask carries (T-131: the questions, the message, the draft): the sheet shows it under the step. */
@@ -183,6 +187,13 @@ const listOf = (v: unknown): string[] => (Array.isArray(v) ? v : v === undefined
 /** A field that names a note: a ULID (bare or `vault:`-prefixed) or a `[[link]]` (r19). */
 const noteRefIn = (v: unknown): boolean => { const t = str(v); return !!t && /\[\[[^\]]+\]\]|\b[0-9A-HJKMNP-TV-Z]{26}\b/.test(t); };
 
+/** When the ask was made or last confirmed: the newer of the explicit request time (`asked`, `asked_at`, `next_at`) and `confirmed_at`. */
+function askedOf(m: Record<string, unknown>): string | null {
+  const a = str(m.asked) ?? str(m.asked_at) ?? str(m.next_at), c = str(m.confirmed_at);
+  const ms = (x: string | null) => (x ? Date.parse(x.length === 10 ? `${x}T23:59:59` : x) : NaN);
+  return Number.isFinite(ms(c)) && !(Number.isFinite(ms(a)) && ms(a) >= ms(c)) ? c : a;
+}
+
 export function parseTask(n: RawNote, tree: TaskTree): Task | null {
   const id = str(n.id), path = str(n.path) && stripExt(str(n.path)!);
   if (!id || !path) return null;
@@ -207,8 +218,10 @@ export function parseTask(n: RawNote, tree: TaskTree): Task | null {
     ...(noteRefIn(m.source) ? { sourceRef: str(m.source) } : {}),
     ...(listOf(m.depends_on ?? m.blocked_by).length ? { dependsOn: listOf(m.depends_on ?? m.blocked_by) } : {}),
     ...(listOf(m.questions).length ? { questions: listOf(m.questions) } : {}),
-    ...(str(m.asked) ?? str(m.asked_at) ?? str(m.next_at) ? { asked: str(m.asked) ?? str(m.asked_at) ?? str(m.next_at) } : {}),
+    ...(askedOf(m) ? { asked: askedOf(m) } : {}),
     ...(str(m.asked_at) ? { askedAt: str(m.asked_at) } : {}),
+    ...(str(m.confirmed_at) ? { confirmedAt: str(m.confirmed_at) } : {}),
+    ...(str(m.superseded_by) ? { supersededBy: str(m.superseded_by) } : {}),
     ...(str(m.closed) ? { closed: str(m.closed) } : {}),
     ...(str(m.created) ?? str(n.createdAt) ? { added: str(m.created) ?? str(n.createdAt) } : {}),
     ...(str(m.detail) ? { detail: str(m.detail) } : {}),

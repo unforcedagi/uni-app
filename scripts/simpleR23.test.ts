@@ -2,7 +2,7 @@
 // Steps are the real shapes from the scratch copy (10-14); the message text is a made-up placeholder.
 // Run: node --experimental-strip-types scripts/simpleR23.test.ts
 import assert from "node:assert/strict";
-import { askedLine, chatMovedOn, clauseForms, movedOnText, MOVED_ON, pointsAt, pointsNowhere, quotedMessage, requestDate, stepText, withoutRawIds } from "../src/areas/simpleCore.ts";
+import { askedLine, clauseForms, pointsAt, pointsNowhere, quotedMessage, requestDate, stepText, withoutRawIds } from "../src/areas/simpleCore.ts";
 import { buildTaskTree, parseNodes, parseTask } from "../src/areas/taskCore.ts";
 
 let failed = 0;
@@ -32,17 +32,6 @@ check("P1: \"asked\" means asked: an explicit request time, else when it was add
   assert.equal(requestDate({}), null);
 });
 
-check("P1: the moved-on cue is from the same honest date, in the same words (\"since this was added\")", () => {
-  const added = { at: "2026-10-11", kind: "added" as const };
-  // a date without a time counts from the end of that day
-  assert.equal(chatMovedOn(added, Date.parse("2026-10-12T20:00:00") / 1000), false);
-  assert.equal(chatMovedOn(added, Date.parse("2026-10-13T09:00:00") / 1000), true);
-  assert.equal(movedOnText(added), "Chat has moved on since this was added");
-  assert.equal(movedOnText({ at: "2026-10-06", kind: "asked" }), MOVED_ON);
-  // a rebalance the day after doesn't hide the cue (it did when the date was `updatedAt`)
-  const t = parse({ next: "x", created: "2026-10-11" });
-  assert.equal(chatMovedOn(requestDate({ ...t, updatedAt: "2026-10-14T09:00:00Z" }), Date.parse("2026-10-14T08:00:00") / 1000), true);
-});
 
 check("text: a step stored cut short is shown as stored, never with \"…\"", () => {
   const cut = "Wed 10-14: say go on prod deploy of #38 + #58; Harper signs off the copy/photos before/after (posting today); yes/no on add-only DB migratio";

@@ -142,7 +142,7 @@ test.describe('r30 sheet', () => {
     });
   }
 
-  test('2: the row carries the labels, whole: two items, then "and 8 more"', async ({ page }) => {
+  test('2: the row carries the labels, whole: two items, then the one total ("10 labels in all"), the same at any width', async ({ page }) => {
     test.skip(!wide(page), 'side panel');
     await page.setViewportSize({ width: 1280, height: 720 });
     await boot(page);
@@ -152,7 +152,7 @@ test.describe('r30 sheet', () => {
     await openCompanion(page);
     const row = page.locator('.cp-body li.cp-item').filter({ hasText: 'morning-practice' }).first();
     await expect(row.locator('.cp-item-line')).toHaveText(['Already registered? Sign in', 'Update your registration']);
-    await expect(row.locator('.cp-item-more')).toHaveText('and 8 more');
+    await expect(row.locator('.cp-item-more')).toHaveText(/^10 \w+ in all$/);
     await expect(row.locator('.cp-lead')).not.toContainText('Already registered');
   });
 });
@@ -162,7 +162,7 @@ test.describe('r30 confirming', () => {
   test('4: the line says requests, and where it counts; each list row its reason; no Answer anyway on a row; the sheet has it after the reason', async ({ page }) => {
     test.skip(!wide(page), 'side panel');
     await boot(page);
-    await add(page, { id: 'r1', title: 'T-901 Placeholder chat since', node: 'Areas/Techne', asked_at: ASKED, meta: { next: NEXT('amber') } });
+    await add(page, { id: 'r1', title: 'T-901 Placeholder chat after', node: 'Areas/Techne', asked_at: ASKED, meta: { next: NEXT('amber') } });
     await add(page, { id: 'r2', title: 'T-902 Placeholder old', node: 'Areas/Techne', asked_at: '2026-10-05T08:00:00.000Z', meta: { next: NEXT('cobalt') } });
     await add(page, { id: 'r3', title: 'T-903 Placeholder undated', node: 'Areas/Techne', asked_at: null, meta: { next: NEXT('quartz') } });
     await add(page, { id: 'r4', title: 'T-904 Placeholder waiting', node: 'Areas/Techne', asked_at: null, meta: { next: 'Waiting on the placeholder printer to be repaired by the supplier' } });
@@ -173,10 +173,12 @@ test.describe('r30 confirming', () => {
     const panel = page.locator('.cp-body').getByRole('region', { name: 'Needs you' });
     await expect(panel.locator('.cp-recheck-line')).toHaveText(/^\d+ requests need confirming in this room\+$/);
     expect(Number((await panel.locator('.cp-recheck-line').innerText()).match(/\d+/)![0])).toBeGreaterThanOrEqual(3);
-    await expect(page.locator('.cp-body')).not.toContainText(/older/i);
+    await expect(page.locator('.cp-body')).not.toContainText(/\bolder\b/i);
     await panel.locator('.cp-recheck-line').click();
     const items = panel.locator('.cp-recheck-item');
-    await expect(items.filter({ hasText: 'amber' }).locator('.cp-recheck-asked')).toHaveText(/^chat since in #techne$/i);
+    // r31: chat said "T-901 is off" and changed nothing: the record says it was asked recently, so it is a row, not a recheck
+    await expect(items.filter({ hasText: 'amber' })).toHaveCount(0);
+    await expect(panel.locator('.cp-list > li.cp-item').filter({ hasText: 'amber' })).toHaveCount(1);
     await expect(items.filter({ hasText: 'cobalt' }).locator('.cp-recheck-asked')).toHaveText(/^asked Oct 5( · in .*)?$/);
     await expect(items.filter({ hasText: 'quartz' }).locator('.cp-recheck-asked')).toHaveText(/^(no date|added \w+ \d+)( · in .*)?$/);
     // a request that leads with its title (its step is a status, no action) still shows its step, whole, under it
@@ -185,9 +187,9 @@ test.describe('r30 confirming', () => {
     await expect(panel.locator('.cp-recheck-list').getByRole('button', { name: 'Answer anyway' })).toHaveCount(0);
     await expect(panel.locator('.cp-recheck-list')).not.toContainText('Answer anyway');
     // the sheet: its reason line, then "Answer anyway" straight after it
-    await items.filter({ hasText: 'amber' }).locator('.cp-rc-open').click();
+    await items.filter({ hasText: 'cobalt' }).locator('.cp-rc-open').click();
     const sheet = sheetOf(page);
-    await expect(sheet.locator('.task-asked')).toHaveText(/^Asked .* · chat since in #techne$/i);
+    await expect(sheet.locator('.task-asked')).toHaveText(/^Asked Oct 5 · not confirmed since$/i);
     const after = await sheet.evaluate((d) => { const r = d.querySelector('.task-asked')!; const a = d.querySelector('.task-anyway')!; return { follows: !!(r.compareDocumentPosition(a) & Node.DOCUMENT_POSITION_FOLLOWING), between: [...d.querySelectorAll('.task-body > *')].filter((e) => e.compareDocumentPosition(r) & Node.DOCUMENT_POSITION_PRECEDING && e.compareDocumentPosition(a) & Node.DOCUMENT_POSITION_FOLLOWING).length, inFoot: !!d.querySelector('.task-foot .task-anyway') }; });
     expect(after.follows).toBe(true);
     expect(after.inFoot).toBe(false);
@@ -216,68 +218,7 @@ test.describe('r30 confirming', () => {
     await openWork(page);
     await expect(section(page, 'Needs you').locator('.cp-recheck-line')).toHaveText(/^1 request needs confirming in this room\+$/);
   });
-
-  test('4: a room that cannot be read: its reason is "couldn\'t read #techne", and the sheet has "Answer anyway" after it', async ({ page }) => {
-    test.skip(!wide(page), 'work view');
-    await boot(page);
-    await add(page, { id: 'f1', title: 'T-921 Placeholder unread', node: 'Areas/Techne', asked_at: ASKED, meta: { next: NEXT('opal') } });
-    await page.evaluate(() => { (window as any).__lookupFails = true; });
-    await refresh(page);
-    await openRoom(page, 'Techne');
-    await openWork(page);
-    const needs = section(page, 'Needs you');
-    await expect(needs.locator('.cp-recheck-line')).toHaveText(/^\d+ requests? needs? confirming in this room\+$/, { timeout: 9000 });
-    await needs.locator('.cp-recheck-line').click();
-    const unread = needs.locator('.cp-recheck-item').filter({ hasText: 'opal' });
-    await expect(unread.locator('.cp-recheck-asked')).toHaveText(/^couldn't read #techne$/i);
-    await unread.locator('.cp-rc-open').click();
-    const sheet = sheetOf(page);
-    await expect(sheet.locator('.task-lookfail')).toHaveText(/^Couldn't read #techne · Retry$/i);
-    const follows = await sheet.evaluate((d) => !!(d.querySelector('.task-lookfail')!.compareDocumentPosition(d.querySelector('.task-anyway')!) & Node.DOCUMENT_POSITION_FOLLOWING));
-    expect(follows).toBe(true);
-  });
 });
-
-test.describe('r30 grace', () => {
-  const T0 = '2026-10-14T08:00:00.000Z';
-  const NEXTS: Record<string, string> = {
-    g1: 'Tell Uni who pays the amber sponsorship invoice and how',
-    g2: 'Tell Uni who signs the cobalt venue contract and when',
-    g3: 'Tell Uni which quartz gateway key to rotate this week',
-    g4: 'Tell Uni where the jade festival banner should hang tonight',
-  };
-  test('5: announcement (named and quoted) is skipped; cancellation in the window, a later reminder, and other talk later each do what they should', async ({ page }) => {
-    test.skip(!wide(page), 'work view');
-    await boot(page);
-    for (const [id, tid] of [['g1', 'T-931'], ['g2', 'T-932'], ['g3', 'T-933'], ['g4', 'T-934']] as const) await add(page, { id, title: `${tid} Placeholder grace ${id}`, node: 'Areas/Techne', asked_at: T0, meta: { next: NEXTS[id] } });
-    // g1: Uni announces exactly this ask, naming it and quoting it, seconds after
-    await arriveAt(page, 'Uni', `T-931: ${NEXTS.g1}`, 9);
-    // g2: the announcement, then a cancellation in the window (names it, quotes nothing)
-    await arriveAt(page, 'Uni', `T-932: ${NEXTS.g2}`, 10);
-    await arriveAt(page, 'Uni', 'T-932 is cancelled, ignore it', 90);
-    // g3: the announcement, then (two hours on) a reminder that quotes the ask
-    await arriveAt(page, 'Uni', `T-933: ${NEXTS.g3}`, 11);
-    await arriveAt(page, 'Uni', `Reminder, T-933 is still open: ${NEXTS.g3}`, 7200);
-    // g4: the announcement, then (two hours on) other talk that names it and quotes nothing
-    await arriveAt(page, 'Uni', `T-934: ${NEXTS.g4}`, 12);
-    await arriveAt(page, 'Uni', 'T-934 is settled, thanks', 7200);
-    await refresh(page);
-    await openRoom(page, 'Techne');
-    await openWork(page);
-    const needs = section(page, 'Needs you');
-    const rows = needs.locator('.cp-list > li.cp-item');
-    await expect(rows.filter({ hasText: NEXTS.g1 })).toHaveCount(1); // announcement: skipped, still confirmed
-    await expect(rows.filter({ hasText: NEXTS.g2 })).toHaveCount(0); // cancellation in the window: unconfirmed
-    await expect(rows.filter({ hasText: NEXTS.g3 })).toHaveCount(1); // reminder later: not talk past it
-    await expect(rows.filter({ hasText: NEXTS.g4 })).toHaveCount(0); // other talk later: unconfirmed
-    await needs.locator('.cp-recheck-line').click();
-    const unconfirmed = needs.locator('.cp-recheck-item');
-    await expect(unconfirmed.filter({ hasText: NEXTS.g2 })).toHaveCount(1);
-    await expect(unconfirmed.filter({ hasText: NEXTS.g4 })).toHaveCount(1);
-    await expect(unconfirmed.filter({ hasText: NEXTS.g1 })).toHaveCount(0);
-  });
-});
-
 test.describe('r30 waiting runs', () => {
   const composerFocused = (page: Page) => page.evaluate(() => document.activeElement?.tagName === 'TEXTAREA' && !!document.activeElement.closest('.composer'));
   test('6: a waiting run is a row: the whole row opens its room at the run\'s message, the composer focused (the same contract as a request)', async ({ page }) => {
@@ -318,7 +259,7 @@ test.describe('r30 waiting runs', () => {
 test.describe('r30 summary', () => {
   const SUMMARY = "Cohort two starts Oct 15 with twelve people; the staging site is live, the sign-in flow was checked on a phone, and prod waits on one go from Aaron for the labels and the three practice lines Harper still owes us.";
   for (const size of [{ width: 1280, height: 720 }, { width: 1280, height: 600 }, { width: 800, height: 600 }, { width: 740, height: 360 }, { width: 920, height: 360 }]) {
-    test(`7: at ${size.width}×${size.height} the summary is never cut by the panel's edge: whole, folded to its date line with "Read", or below the footer`, async ({ page }) => {
+    test(`7: at ${size.width}×${size.height} the summary is never cut by the panel's edge: whole, folded to its one line, or below the footer`, async ({ page }) => {
       test.skip(page.viewportSize()?.width !== 1440, 'one project is enough for the fixed sizes');
       await page.setViewportSize(size);
       await boot(page);
@@ -343,9 +284,9 @@ test.describe('r30 summary', () => {
       const r = await check();
       expect(r.present).toBe(true);
       expect(r.cut, JSON.stringify(r)).toBe(false);
-      expect(r.asof).toBe('Last written Oct 14 by #atlas/teach:');
-      if (r.folded) await expect(page.locator('.cp-stands-note[data-folded] .cp-said summary')).toHaveText('Read');
-      else await expect(page.locator('.cp-stands-note .cp-stands').first()).toHaveText(SUMMARY);
+      // r31: folded, it is one line that opens the summary ("Where this stands · Oct 14, #atlas/teach"): no colon with nothing after it, no second heading
+      if (r.folded) { expect(r.asof ?? null).toBeNull(); await expect(page.locator('.cp-stands-note[data-folded] .cp-said summary')).toHaveText('Where this stands · Oct 14, #atlas/teach'); }
+      else { expect(r.asof).toBe('Last written Oct 14 by #atlas/teach:'); await expect(page.locator('.cp-stands-note .cp-stands').first()).toHaveText(SUMMARY); }
     });
   }
 });

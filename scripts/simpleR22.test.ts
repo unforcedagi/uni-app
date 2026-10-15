@@ -2,7 +2,7 @@
 // Steps are the real ones from the scratch copy (10-14), no private areas; private items are made-up placeholders.
 // Run: node --experimental-strip-types scripts/simpleR22.test.ts
 import assert from "node:assert/strict";
-import { askedLine, chatMovedOn, firstOfSteps, needsFeed, privateAction, privateActionLabel, privateRestLabel, rowAction, rowForm, withHosts } from "../src/areas/simpleCore.ts";
+import { askedLine, firstOfSteps, needsFeed, privateAction, privateActionLabel, privateRestLabel, rowAction, rowForm, withHosts } from "../src/areas/simpleCore.ts";
 import { pairingFailure } from "../src/pairingCore.ts";
 import { buildTaskTree, parseNodes, parseTask, type Task } from "../src/areas/taskCore.ts";
 
@@ -47,18 +47,6 @@ check("r28: an action is never shortened, however long: its brackets and its lin
   assert.equal(firstOfSteps(rowAction(STAGING)!.steps), "Look at https://cohere-signup-staging.unforced.workers.dev/?look=ecology on phone (step 1 of 2)");
 });
 
-check("a request shows its age: \"asked Oct 11\", or today; the chat has moved on when it is more than a day newer (r23: from the request's own date)", () => {
-  const at = (x: string) => ({ at: x, kind: "asked" as const });
-  assert.equal(askedLine(at("2026-10-11T18:00:00.000Z"), "2026-10-14"), "asked Oct 11");
-  assert.equal(askedLine(at("2026-10-13T18:00:00.000Z"), "2026-10-14"), "asked Oct 13");
-  assert.equal(askedLine(at(`2026-10-14T12:00:00`), "2026-10-14"), "asked today");
-  assert.equal(askedLine(null), null);
-  const asked = at("2026-10-11T18:00:00.000Z");
-  assert.equal(chatMovedOn(asked, Date.parse("2026-10-13T09:00:00Z") / 1000), true);
-  assert.equal(chatMovedOn(asked, Date.parse("2026-10-12T09:00:00Z") / 1000), false);
-  assert.equal(chatMovedOn(asked, null), false);
-  assert.equal(chatMovedOn(null, Date.parse("2026-10-13T09:00:00Z") / 1000), false);
-});
 
 const tree = (() => { const { nodes, rootPath } = parseNodes([{ id: "u", path: "Uni", tags: ["uni"], metadata: {} }]); return buildTaskTree(nodes, rootPath); })();
 const task = (id: string, next: string, kind = "task"): Task => ({ ...parseTask({ id, path: `Tasks/T-9${id} Placeholder ${id}`, tags: [kind], updatedAt: "2026-10-14T06:00:00.000Z", metadata: { state: "open", owner: "aaron", priority: "now", next } }, tree)!, node: "Areas/Private" });

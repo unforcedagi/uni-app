@@ -4,7 +4,7 @@ import { cleanText } from "../interface/contract";
 import { isMe, ownerLabel, PRIORITIES, PRIORITY_LABEL, priorityOf, type Priority, type Task } from "./taskCore";
 import type { RoomRef } from "./talkCore";
 import type { ActResult, TaskAction, Undo } from "./useTasks";
-import { ANSWER_ANYWAY, CHANGED_SINCE, answersReady, checkingRoom, notWrittenDown, UNRESOLVED, type Resolved, referencedItems, repeatsHeading, revisionMoved, stepNotes, unconfirmedLine, actionLead, actionOf, askedLine, titleSays, checkingBanner, couldntRead, currentStep, unresolvedBlock, withoutIntro, type ChatHit, pointsAt, pointsNowhere, quotedMessage, requestDate, withoutCut, answerLabel, answerText, ANSWER_MAX, checkLine, CHECK_FAILED, CHECKING, cutWords, dueLine, hostOf, withHosts, missingLine, OPEN_TASK, OPEN_TO_ANSWER, stateLine, stepAudience, TIDY_SAYS, toTidy, unknownDecision, waitsLine, waitsOnMe } from "./simpleCore";
+import { isOverdue, ANSWER_ANYWAY, CHANGED_SINCE, answersReady, notWrittenDown, UNRESOLVED, type Resolved, referencedItems, repeatsHeading, revisionMoved, stepNotes, unconfirmedLine, actionLead, actionOf, askedLine, titleSays, checkingBanner, currentStep, unresolvedBlock, withoutIntro, pointsAt, pointsNowhere, quotedMessage, requestDate, withoutCut, answerLabel, answerText, ANSWER_MAX, checkLine, CHECK_FAILED, CHECKING, cutWords, dueLine, hostOf, withHosts, missingLine, OPEN_TASK, OPEN_TO_ANSWER, stateLine, stepAudience, TIDY_SAYS, toTidy, unknownDecision, waitsLine, waitsOnMe } from "./simpleCore";
 import { requestRecheck } from "./useTasks";
 import { taskTitle } from "./whereCore";
 import { DecisionAnswer, NextText, decisionAsk, rowLinkLabel, supportOf } from "./Companion";
@@ -37,7 +37,7 @@ const linksIn = (text: string): string[] => [...text.matchAll(URLS)].map((m) => 
 /** A step that asks the user to look at or open something (r22): its link is the step's own action. */
 const LOOK = /^(?:look|open|view|visit|see|check|try|watch|read|test)\b/i;
 
-export function TaskSheet({ task, gone = false, nodeName, room, roomNamed, inRoom, onClose, onAct, onDecide, onNote, onOpenRoom, onSay, onPriority, onStale, draft = null, confirmation = null, onRecheckRoom }: {
+export function TaskSheet({ task, gone = false, nodeName, room, roomNamed, inRoom, onClose, onAct, onDecide, onNote, onOpenRoom, onSay, onPriority, onStale, draft = null, confirmation = null }: {
   task: Task; gone?: boolean; here: string; nodeName: (path: string) => string; room: RoomRef | null;
   /** r24: the joined room a step names ("#cohere's 'For Harper' block"), when there is one */
   roomNamed?: (name: string) => RoomRef | null;
@@ -60,7 +60,6 @@ export function TaskSheet({ task, gone = false, nodeName, room, roomNamed, inRoo
   /** r28: what the feed resolved for this ask (confirmed, to recheck, or still being checked); null: nothing resolved (a recheck with no date) */
   confirmation?: Resolved | null;
   /** r28: read this room's chat again ("Couldn't read #room · Retry") */
-  onRecheckRoom?: (roomId: string) => void;
 }) {
   const box = useRef<HTMLDivElement>(null);
   const wrap = useRef<HTMLDivElement>(null);
@@ -189,14 +188,14 @@ export function TaskSheet({ task, gone = false, nodeName, room, roomNamed, inRoo
    *  their answers ready; the rest says "not confirmed since" and keeps its answers behind "Answer anyway" (r30: after the reason line, in the sheet only) */
   const reqAt = requestDate(task);
   const asked = askedLine(reqAt);
+  /** r31: an overdue task says "was due Oct 13" and not when it was asked: one date, as on its row */
+  const overdue = !!task.due && isOverdue(task.due);
   const gated = !gone && !unsure;
   const conf: Resolved = confirmation ?? UNRESOLVED;
   const [anyway, setAnyway] = useState(false);
   // (a check that comes back different, Retry for one, takes the answers back behind "Answer anyway")
-  useEffect(() => { setAnyway(false); }, [task.id, conf.state, conf.why, conf.failed]);
-  const hit: ChatHit | null = conf.hit;
+  useEffect(() => { setAnyway(false); }, [task.id, conf.state, conf.why]);
   const fresh = conf.state;
-  const lookFailed = gated && conf.failed;
   // r26 (Codex P1 1): the revision the sheet opened at; a task that moved since is shown as changed, and its answers wait for a reload
   const opened = useRef({ id: task.id, rev: task.updatedAt });
   /** a write made from this sheet (a priority) moves the revision itself: that is adopted, not "changed since you opened it" */
@@ -208,10 +207,10 @@ export function TaskSheet({ task, gone = false, nodeName, room, roomNamed, inRoo
   useEffect(() => { if (moved) onStale?.(); }, [moved]); // eslint-disable-line react-hooks/exhaustive-deps
   const ready = answersReady(fresh, anyway) && !moved;
   const blockGap = unresolvedBlock(task.next, task.detail);
-  const unconfirmed = gated && fresh === "recheck" && !lookFailed;
-  // couldn't read the room: the room opens as the primary, and "I did this" and "Say it" stay behind "Answer anyway"; unconfirmed: "Check in" first
-  const primary1 = unconfirmed && room && !lookFailed ? "check" : gated && !!room && lookFailed ? "openroom" : unconfirmed && !room && (primary0 === "done" || primary0 === "say" || primary0 === null) ? "note" : primary0 === "done" && lookOpen ? "open" : primary0;
-  // while the request is not current (looking, unconfirmed, couldn't read), the answers are not the primary; they come after "Answer anyway"
+  const unconfirmed = gated && fresh === "recheck";
+  // unconfirmed: "Check in" first, and "I did this" and "Say it" stay behind "Answer anyway"
+  const primary1 = unconfirmed && room ? "check" : unconfirmed && !room && (primary0 === "done" || primary0 === "say" || primary0 === null) ? "note" : primary0 === "done" && lookOpen ? "open" : primary0;
+  // while the request is not current (unconfirmed), the answers are not the primary; they come after "Answer anyway"
   const primary = !ready && (primary1 === "done" || primary1 === "say") ? null : primary1;
   const stepLinks = (text: string, _first: boolean) => {
     const ls = linksIn(text);
@@ -238,11 +237,8 @@ export function TaskSheet({ task, gone = false, nodeName, room, roomNamed, inRoo
       <div className="task-body">
       <p className="task-kind">{decision ? `Decision${dflt ? ` (${dflt})` : ""}` : "Task"}{` · in ${room ? `#${room.name.replace(/^#/, "")}` : nodeName(task.node)}`}</p>
       {/* r27: when it was asked, first: an unconfirmed request says so in this one quiet line (no cue, no "nothing related found") */}
-      {unconfirmed ? <p className="task-asked task-unconfirmed" data-fresh="unconfirmed" data-asked={reqAt?.at ?? undefined} data-kind={reqAt?.kind}>{unconfirmedLine(asked, conf.why, room?.name ?? null)}</p>
-        : asked && <p className="task-asked" data-fresh={gated ? (fresh === "confirmed" ? "current" : fresh === "recheck" ? "unconfirmed" : "pending") : undefined} data-asked={reqAt?.at ?? undefined} data-kind={reqAt?.kind}>{capFirst(asked)}</p>}
-      {/* r25: the chat couldn't be read, which is not "nothing related" */}
-      {!!room && lookFailed && <p className="task-q-note task-lookfail" data-gate="failed" role="status">{couldntRead(room.name)} · <button type="button" className="task-link" onClick={() => onRecheckRoom?.(room.id)}>Retry</button></p>}
-      {!!room && gated && fresh === "pending" && <p className="task-q-note task-lookpending" data-gate="pending" role="status" aria-busy="true">{checkingRoom(room.name)}</p>}
+      {unconfirmed ? <p className="task-asked task-unconfirmed" data-fresh="unconfirmed" data-asked={reqAt?.at ?? undefined} data-kind={reqAt?.kind}>{unconfirmedLine(asked)}</p>
+        : (asked || overdue) && <p className="task-asked" data-fresh={gated ? (fresh === "confirmed" ? "current" : "unconfirmed") : undefined} data-asked={reqAt?.at ?? undefined} data-kind={reqAt?.kind}>{capFirst((overdue ? dueLine(task.due) : asked) ?? "")}</p>}
       {/* r30: "Answer anyway" is the sheet's, directly after the reason the request isn't confirmed; it is never on a list row */}
       {gated && !ready && !moved && (decision ? !!dq?.answerable : true) && <p className="task-anyway-line"><button type="button" className="task-link task-anyway" onClick={() => setAnyway(true)}>{ANSWER_ANYWAY}</button></p>}
       {dq?.answerable && dq.yourCall && !unsure && <small className="cp-call-lead">Your call:</small>}
@@ -307,7 +303,7 @@ export function TaskSheet({ task, gone = false, nodeName, room, roomNamed, inRoo
         {!decision && <button type="button" className="task-house-b" aria-busy={busy === "archive" || undefined} disabled={!!busy} onClick={() => void go("archive")}>{busy === "archive" ? "Archiving…" : "Archive"}</button>}
         <button type="button" className="task-house-b" aria-busy={busy === "snooze" || undefined} disabled={!!busy} onClick={() => void go("snooze")}>{busy === "snooze" ? "Snoozing…" : "Snooze until tomorrow"}</button>
       </div>}
-      {!checking && !(gated && fresh === "pending") && (tid || at || about || check || act || (!gone && !decision && onPriority)) && <details className="task-details" onToggle={(e) => { const d = e.currentTarget; if (d.open) requestAnimationFrame(() => d.scrollIntoView({ block: "nearest" })); }}><summary>Details</summary>
+      {!checking && (tid || at || about || check || act || (!gone && !decision && onPriority)) && <details className="task-details" onToggle={(e) => { const d = e.currentTarget; if (d.open) requestAnimationFrame(() => d.scrollIntoView({ block: "nearest" })); }}><summary>Details</summary>
         {!gone && !decision && !tidy && onPriority && <div className="task-prio" role="group" aria-label="Priority">
           {PRIORITIES.map((p) => <button key={p} type="button" className="task-prio-b" aria-pressed={p === prio} onClick={() => { if (p !== prio) { ownWrite.current = true; onPriority(task, p); } }}>{PRIORITY_LABEL[p]}</button>)}
         </div>}
@@ -335,16 +331,15 @@ export function TaskSheet({ task, gone = false, nodeName, room, roomNamed, inRoo
         {primary === "source" && <button type="button" className="task-do primary" onClick={() => { const f = (check ?? waits)!.from; onClose(); onNote({ vault: f.vault, id: f.id }); }}>Open the note</button>}
         {/* r26: a "look at" step's link is the primary action in the footer too: with a list under the heading it would otherwise be off the screen in a short window */}
         {primary === "open" && firstLink && <button type="button" className="task-do primary" title={firstLink} onClick={() => openOut(firstLink)}>Open {rowLinkLabel(hostOf(firstLink))}</button>}
-        {primary === "check" && <button type="button" className="task-do primary" onClick={() => { onOpenRoom(room!.id, hit?.ref ?? null, checkingBanner(step)); onClose(); }}>Check in #{room!.name.replace(/^#/, "")} first</button>}
-        {primary === "openroom" && <button type="button" className="task-do primary" onClick={() => { onOpenRoom(room!.id); onClose(); }}>Open #{room!.name.replace(/^#/, "")}</button>}
-        {sayIn && ready && (primary === "say" || primary === "check" || primary === "openroom") && <button type="button" className={`task-do${primary === "say" ? " primary" : ""}`} onClick={sayIn}>Say it in #{room!.name.replace(/^#/, "")} ›</button>}
+        {primary === "check" && <button type="button" className="task-do primary" onClick={() => { onOpenRoom(room!.id, null, checkingBanner(step)); onClose(); }}>Check in #{room!.name.replace(/^#/, "")} first</button>}
+                {sayIn && ready && (primary === "say" || primary === "check") && <button type="button" className={`task-do${primary === "say" ? " primary" : ""}`} onClick={sayIn}>Say it in #{room!.name.replace(/^#/, "")} ›</button>}
         {primary === "askroom" && <button type="button" className="task-do primary" onClick={askRoom!}>Ask in #{room!.name.replace(/^#/, "")} ›</button>}
         {primary === "message" && <button type="button" className="task-do primary" aria-live="polite" onClick={() => void copyText(message!, "Copied the message").then((ok) => { if (ok) setCopied(true); })}>{copied ? "Copied" : "Copy the message"}</button>}
         {dest && (primary === "dest" || primary === "message") && <button type="button" className={`task-do${primary === "dest" ? " primary" : ""}`} onClick={() => openOut(dest.href)}>{dest.label} ›</button>}
         {askDraft && <button type="button" className={`task-do${primary === "draft" ? " primary" : ""}`} onClick={askDraft}>Ask Uni to draft it</button>}
         {!gone && !decision && !unsure && ready && <button type="button" className={`task-do${primary === "done" ? " primary" : ""}`} aria-busy={busy === "done" || undefined} disabled={!!busy} onClick={() => void go("done")}>{busy === "done" ? "Saving…" : "I did this"}</button>}
         {/* r26: the answers wait behind one quiet tap while the instruction is unresolved */}
-        {!sayIn && !askRoom && !tidy && primary !== "openroom" && room && room.id !== inRoom && <button type="button" className="task-do quiet" onClick={() => { onOpenRoom(room.id); onClose(); }}>Open in #{room.name.replace(/^#/, "")}</button>}
+        {!sayIn && !askRoom && !tidy && room && room.id !== inRoom && <button type="button" className="task-do quiet" onClick={() => { onOpenRoom(room.id); onClose(); }}>Open in #{room.name.replace(/^#/, "")}</button>}
         <button type="button" className="task-do quiet" onClick={onClose}>Close</button>
       </div>
     </div>

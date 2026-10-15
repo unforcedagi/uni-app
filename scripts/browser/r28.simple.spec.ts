@@ -54,14 +54,16 @@ test.describe('r28', () => {
     await add(page, { id: 'c2', title: 'T-602 Placeholder beta', node: 'Areas/Techne', asked_at: null, meta: { next: 'Say go on beta' } });                    // no asked_at (updated_at is fresh: it must not matter)
     await add(page, { id: 'c3', title: 'T-603 Placeholder gamma', node: 'Areas/Techne', asked_at: '2026-10-09T12:00:00.000Z', meta: { next: 'Say go on gamma' } }); // 5 days
     await add(page, { id: 'c4', title: 'T-604 Placeholder delta', node: 'Areas/Techne', asked_at: '2026-10-20T12:00:00.000Z', meta: { next: 'Say go on delta' } }); // future
-    await add(page, { id: 'c5', title: 'T-605 Placeholder epsilon', node: 'Areas/Techne', meta: { next: 'Say go on epsilon' } });                                 // related chat since
-    await page.evaluate(() => (window as any).__arrive('ch-techne', 'Uni', 'T-605 epsilon is now ready, so the request has changed.', -426600));
+    await add(page, { id: 'c5', title: 'T-605 Placeholder epsilon', node: 'Areas/Techne', asked_at: '2026-10-09T12:00:00.000Z', meta: { next: 'Say go on epsilon', confirmed_at: RECENT } }); // asked 5 days ago, confirmed since (r31)
+    // r31: chat never promotes or demotes an ask: talk about the confirmed one changes nothing
+    await page.evaluate(() => (window as any).__arrive('ch-techne', 'Uni', 'T-601 alpha is now ready, so the request has changed.', -426600));
     await refresh(page);
     await openRoom(page, 'Techne');
     await openWork(page);
     const needs = section(page, 'Needs you');
     await expect(needs.locator('.cp-list > li.cp-item').filter({ hasText: 'Say go on alpha' })).toHaveCount(1);
-    for (const w of ['beta', 'gamma', 'delta', 'epsilon']) await expect(needs.locator('.cp-list > li.cp-item').filter({ hasText: `Say go on ${w}` })).toHaveCount(0);
+    await expect(needs.locator('.cp-list > li.cp-item').filter({ hasText: 'Say go on epsilon' })).toHaveCount(1);
+    for (const w of ['beta', 'gamma', 'delta']) await expect(needs.locator('.cp-list > li.cp-item').filter({ hasText: `Say go on ${w}` })).toHaveCount(0);
     // the count is the rows of Needs you (and the runs waiting on the user), never the rechecks
     const rowCount = await needs.locator('.cp-list > li.cp-item, .cp-waiting > li').count();
     await expect(needs.locator('.wv-n')).toHaveText(String(rowCount));
@@ -72,7 +74,7 @@ test.describe('r28', () => {
     await expect(line).toHaveText(/^\d+ requests? needs? confirming in this room\+$/);
     await expect(needs.locator('.cp-recheck-list')).toHaveCount(0);
     const n = Number((await line.innerText()).match(/\d+/)![0]);
-    expect(n).toBeGreaterThanOrEqual(4);
+    expect(n).toBeGreaterThanOrEqual(3);
     await line.click();
     const items = needs.locator('.cp-recheck-item');
     await expect(items).toHaveCount(n);
@@ -115,44 +117,6 @@ test.describe('r28', () => {
     await expect(section(page, 'Needs you').locator('.cp-list > li.cp-item').filter({ hasText: 'Say go on edited' })).toHaveCount(0);
     await section(page, 'Needs you').locator('.cp-recheck-line').click();
     await expect(section(page, 'Needs you').locator('.cp-recheck-item').filter({ hasText: 'Say go on edited' })).toHaveCount(1);
-  });
-
-  test('line 1: while a room\'s chat is being read its asks are held back ("Checking…"), then they are counted', async ({ page }) => {
-    test.skip(!wide(page), 'work view');
-    await boot(page);
-    await add(page, { id: 'p1', title: 'T-621 Placeholder pending', node: 'Areas/Expression', meta: { next: 'Say go on pending' } });
-    await page.evaluate(() => { (window as any).__lookupDelay = 1800; });
-    await refresh(page);
-    await openRoom(page, 'Expression');
-    await openWork(page);
-    const needs = section(page, 'Needs you');
-    await expect(needs.locator('.cp-checking')).toHaveText(/^Checking 1 ask…$/);
-    await expect(needs.locator('.wv-n')).toHaveText('0');
-    await expect(needs.locator('.cp-list > li.cp-item').filter({ hasText: 'Say go on pending' })).toHaveCount(0);
-    await expect(needs.locator('.cp-recheck-line')).toHaveCount(0);
-    await expect(needs.locator('.cp-list > li.cp-item').filter({ hasText: 'Say go on pending' })).toHaveCount(1, { timeout: 8000 });
-    await expect(needs.locator('.cp-checking')).toHaveCount(0);
-    await expect(needs.locator('.wv-n')).toHaveText('1');
-  });
-
-  test('line 1: a chat that does not answer in a few seconds makes its asks rechecks, and the sheet says it could not read the room', async ({ page }) => {
-    test.skip(!wide(page), 'work view');
-    await boot(page);
-    await add(page, { id: 'p2', title: 'T-622 Placeholder silent', node: 'Areas/Expression', meta: { next: 'Say go on silent' } });
-    await page.evaluate(() => { (window as any).__lookupDelay = 30000; });
-    await refresh(page);
-    await openRoom(page, 'Expression');
-    await openWork(page);
-    const needs = section(page, 'Needs you');
-    await expect(needs.locator('.cp-checking')).toHaveText(/^Checking 1 ask…$/);
-    await expect(needs.locator('.cp-recheck-line')).toHaveText(/^1 request needs confirming in this room\+$/, { timeout: 9000 });
-    await expect(needs.locator('.cp-checking')).toHaveCount(0);
-    await expect(needs.locator('.wv-n')).toHaveText('0');
-    await needs.locator('.cp-recheck-line').click();
-    await needs.locator('.cp-rc-open').click();
-    const sheet = sheetOf(page);
-    await expect(sheet.locator('.task-lookfail')).toHaveText(/^Couldn't read #expression · Retry$/i);
-    await expect(sheet.getByRole('button', { name: 'I did this' })).toHaveCount(0);
   });
 
   test('line 3: a run waiting on the user\'s answer is a row whose step is the question; "in #Uni" is its place; counted once with the asks, deduplicated by task', async ({ page }) => {
@@ -207,7 +171,7 @@ test.describe('r28', () => {
     await rowsWhole(needs.locator('li.cp-item'));
   });
 
-  test('line 3: a row is whole or it is not shown, in the side panel and the work view; inline sub-items are at most two, then "and N more"', async ({ page }) => {
+  test('line 3: a row is whole or it is not shown, in the side panel and the work view; inline sub-items are at most two, then the list total ("4 asks in all")', async ({ page }) => {
     test.skip(!wide(page), 'side panel');
     await page.setViewportSize({ width: 1280, height: 720 });
     await boot(page);
@@ -221,8 +185,9 @@ test.describe('r28', () => {
     if (await row.count()) {
       const shown = await row.locator('.cp-item-line').count();
       expect(shown).toBeLessThanOrEqual(2);
-      const more = await row.locator('.cp-item-more').count() ? Number((await row.locator('.cp-item-more').innerText()).match(/and (\d+) more/)![1]) : 0;
-      expect(shown + more).toBe(4);
+      // r31: the count is the list's own length, whatever is drawn
+      if (shown < 4) await expect(row.locator('.cp-item-more')).toHaveText(/^4 \w+ in all$/);
+      else await expect(row.locator('.cp-item-more')).toHaveCount(0);
     }
     await openWork(page);
     await rowsWhole(section(page, 'Needs you').locator('li.cp-item'));
@@ -331,11 +296,10 @@ test.describe('r28 compact list', () => {
       await expect(first).toBeVisible();
       await expect(first).toContainText('Forward Harper the asks');
       await expect.poll(async () => first.evaluate((el) => { const r = el.getBoundingClientRect(); const s = (el.closest('.cp-scroll') as HTMLElement).getBoundingClientRect(); return r.top >= s.top - 0.5 && r.bottom <= s.bottom + 0.5; })).toBe(true);
-      // what is shown of its list is whole (each item two lines at most, the rest "and N more"); none at all is allowed
+      // what is shown of its list is whole (each item two lines at most, then the total); none at all is allowed
       const shown = await first.locator('.cp-item-line').count();
-      const more = await first.locator('.cp-item-more').count() ? Number((await first.locator('.cp-item-more').innerText()).match(/and (\d+) more/)![1]) : 0;
-      if (shown) expect(shown + more).toBe(4);
-      else expect(more).toBe(0);
+      if (shown && shown < 4) await expect(first.locator('.cp-item-more')).toHaveText(/^4 \w+ in all$/);
+      else await expect(first.locator('.cp-item-more')).toHaveCount(0);
       await rowsWhole(first);
     });
   }

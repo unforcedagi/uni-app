@@ -82,7 +82,8 @@ export const RUN_STATES = ["queued", "running", "stalled", "blocked", "decision"
 export type RunState = (typeof RUN_STATES)[number];
 /** One line of the T-118 dispatch ledger (`run` notes). */
 export type Run = { id: string; path: string; node: string; task: string | null; what: string; by: string; state: RunState; started: string | null; updated: string | null; result: string | null; room: string | null;
-  /** r30: the message in `room` the run waits on (its ref), when the run note carries one: a row opens the room there */ message?: string | null };
+  /** r31: the room's channel id (`channel`, set by `tasks.py run start --channel`): the one thing that says which room a waiting run opens */ channel?: string | null;
+  /** r31: the event id (`message_ref`, `run start --message-ref`) of the message the run waits on, when it waits on a specific one: a row opens the room there */ message?: string | null };
 export type DraftStatus = "drafting" | "ready";
 export type Draft = { id: string; path: string; title: string; node: string; task: string | null; status: DraftStatus; updatedAt: string | null };
 
@@ -106,7 +107,7 @@ export function parseRuns(notes: readonly RawNote[], tree: TaskTree): Run[] {
     // T-125 run notes: `summary`, `worker`, `started_at`, `ended_at`. The 0.1.44 ledger: `what`, `by`, `started`, `updated`. Never the note's path.
     const task = str(m.task);
     out.push({ id, path, node, task, what: str(m.summary) ?? str(m.what) ?? (task ? `Working on ${task}` : "Working on it"), by: str(m.worker) ?? str(m.by) ?? "", state: state as RunState,
-      started: str(m.started_at) ?? str(m.started), updated: str(m.ended_at) ?? str(m.updated) ?? str(n.updatedAt), result: str(m.result), room: str(m.room)?.replace(/^#/, "") ?? null, message: str(m.message_ref) ?? str(m.message) ?? str(m.ref) ?? null });
+      started: str(m.started_at) ?? str(m.started), updated: str(m.ended_at) ?? str(m.updated) ?? str(n.updatedAt), result: str(m.result), room: str(m.room)?.replace(/^#/, "") ?? null, channel: str(m.channel), message: str(m.message_ref) });
   }
   return out;
 }

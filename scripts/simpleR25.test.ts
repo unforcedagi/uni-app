@@ -2,7 +2,7 @@
 // Check in has three honest states.
 // Run: node --experimental-strip-types scripts/simpleR25.test.ts
 import assert from "node:assert/strict";
-import { actionLead, belowInCard, checkInResult, checkingBanner, couldntRead, currentStep, privateAction, rowAction, rowSub, titleSays, verbPhrase } from "../src/areas/simpleCore.ts";
+import { actionLead, belowInCard, checkingBanner, currentStep, privateAction, rowAction, rowSub, titleSays, verbPhrase } from "../src/areas/simpleCore.ts";
 
 let failed = 0;
 function check(name: string, fn: () => void) {
@@ -45,19 +45,6 @@ check("Ryan: the row and the sheet heading say \"Send Ryan the deploy-access mes
 });
 
 
-check("P1-3: Check in has three states: found, couldn't check, nothing related", () => {
-  const asked = { at: "2026-10-06", kind: "asked" as const };
-  const keys = { ids: ["#38"], words: [] };
-  const ts = Date.parse("2026-10-12T11:00:00") / 1000;
-  const found = checkInResult(asked, [{ ref: "m1", ts, body: "Merged #38, waiting on the go." }], keys);
-  assert.equal(found.kind, "found");
-  assert.equal(found.kind === "found" && found.hit?.ref, "m1");
-  assert.deepEqual(checkInResult(asked, [{ ref: "m2", ts, body: "Lunch at noon?" }], keys), { kind: "none" });
-  assert.deepEqual(checkInResult(asked, [], keys), { kind: "none" });
-  assert.deepEqual(checkInResult(asked, null, keys), { kind: "failed" }, "a lookup that failed is never \"nothing related\"");
-  assert.deepEqual(checkInResult(asked, undefined, keys), { kind: "failed" });
-  assert.equal(couldntRead("#cohere"), "Couldn't read #cohere");
-});
 
 check("P1-3: the banner over the composer is one line: \"Checking: <step>\", in words", () => {
   assert.equal(checkingBanner("Say go on prod deploy of #38 + #58"), "Checking: Say go on prod deploy of #38 + #58");
