@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import {
   answersReady, checkInResult, closedTask, currentStep, detailLists, gateOf, itemShort, liveRuns, needsYou, notWrittenDown, referencedItems,
-  revisionMoved, rowAction, rowItems, staleLine, staleSummary, stepHeading, stepNotes, summaryClauses, titleSays, ANSWER_ANYWAY,
+  revisionMoved, rowAction, clauseForms, rowItems, staleLine, staleSummary, stepHeading, stepNotes, summaryClauses, titleSays, ANSWER_ANYWAY,
 } from "../src/areas/simpleCore.ts";
 
 let failed = 0;
@@ -199,6 +199,19 @@ check("a summary that waits on Aaron with no open item at all is all history; on
   assert.deepEqual(r.history, ["follow-up waiting on Aaron's go"]);
   assert.equal(r.current, "Tuesday: Atlas review done.");
   assert.equal(staleSummary("Quiet; no open tasks.", FROM, []), null);
+});
+check("a list of subjects before a wait claim is part of it: it is never left standing alone as if it were true", () => {
+  const s = "Coordinates five areas with cascading approvals due this week: COhere deployment (Wed), ATLAS grading, Techne contract signing need Aaron decisions.";
+  const r = staleSummary(s, FROM, [])!;
+  assert.ok(r);
+  assert.deepEqual(r.history, ["ATLAS grading, Techne contract signing need Aaron decisions"]);
+  assert.equal(r.current, "Coordinates five areas with cascading approvals due this week: COhere deployment (Wed).");
+});
+check("clauseForms never cuts inside a bracket (COhere's real summary)", () => {
+  const forms = clauseForms("COhere 2026 is live on cohereboulder.org (new look, members, harvests; notifications off); tonight a time-of-day test failure blocks deploys while a fix is built, and register+sign-in (T-138) goes to staging for review on 10-15.");
+  assert.ok(forms.length >= 2);
+  for (const f of forms) assert.equal((f.match(/\(/g) ?? []).length, (f.match(/\)/g) ?? []).length, f);
+  assert.equal(forms[1], "COhere 2026 is live on cohereboulder.org (new look, members, harvests; notifications off).");
 });
 check("summaryClauses keeps brackets whole and does not split a list of ids", () => {
   const c = summaryClauses("Deploy of #38, #58 waits on Aaron (go, then ship); done.").map((x) => x.text);

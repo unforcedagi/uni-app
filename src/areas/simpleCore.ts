@@ -535,9 +535,36 @@ function clauseIsOpen(clause: string, before: string, items: readonly OpenItem[]
   if (words.length < 2) words = [...new Set([...words, ...claimWords(before)])];
   return items.some((t) => { const text = [t.title, t.next].filter(Boolean).join(" ").toLowerCase(); return words.filter((w) => new RegExp(`(^|[^a-z])${w}`).test(text)).length >= 2; });
 }
+/** Whether a clause says something of its own: a verb or a state word ("review done", "email drafted", "class live", "waits on Aaron"). */
+const PREDICATE = /\b(?:is|are|was|were|be|been|has|have|had|will|shall|can|may|must|should|waits?|waiting|awaiting|needs?|needed|requires?|done|live|ready|open|closed|green|red|failing|passing|due|blocked|paused|held|quiet|late|stuck|queued|running|underway|complete|completed|signed|approved|shipped|sent|merged|built|staged|deployed|launched|fixed|written|posted|booked|filed|resolved|expected)\b|\w{3,}ed\b/i;
+/**
+ * "COhere deployment (Wed), ATLAS grading, Techne contract signing need Aaron decisions": the clauses before a wait claim that say nothing of
+ * their own are what it is about, so they are part of it (never left standing alone as if they were true).
+ */
+function mergeSubjects(clauses: Clause[]): Clause[] {
+  const out: Clause[] = [];
+  const lastComma = (t: string): number => { const d = depths(t); for (let i = t.length - 1; i >= 0; i--) if (t[i] === "," && d[i] === 0) return i; return -1; };
+  for (const c of clauses) {
+    let cur = c;
+    if (WAITS_ON_ME.test(cur.text)) {
+      for (let guard = 0; guard < 8 && out.length && out[out.length - 1].sep.startsWith(","); guard++) {
+        const prev = out[out.length - 1];
+        const at = lastComma(prev.text);
+        const chunk = at >= 0 ? prev.text.slice(at + 1).trim() : prev.text;
+        if (PREDICATE.test(chunk.replace(WAITS_ON_ME, ""))) break;
+        if (at >= 0) { out[out.length - 1] = { text: prev.text.slice(0, at).trim(), sep: prev.sep }; }
+        else out.pop();
+        cur = { text: `${chunk}, ${cur.text}`, sep: cur.sep };
+        if (at < 0) continue;
+      }
+    }
+    out.push(cur);
+  }
+  return out;
+}
 export function staleSummary(stands: string | null | undefined, updated: string | null | undefined, open: readonly OpenItem[] = []): StaleSummary | null {
   if (!stands || !WAITS_ON_ME.test(stands)) return null;
-  const clauses = summaryClauses(stands);
+  const clauses = mergeSubjects(summaryClauses(stands));
   const history: string[] = []; const kept: Clause[] = [];
   clauses.forEach((c, i) => {
     if (WAITS_ON_ME.test(c.text) && !clauseIsOpen(c.text, clauses[i - 1]?.text ?? "", open)) history.push(c.text.replace(/[.\s]+$/, ""));
@@ -808,7 +835,9 @@ export function clauseForms(text: string): string[] {
   const out = [t];
   const re = /(?:;|:|\.(?=\s+\p{Lu})|\s[—–-]\s)/gu;
   const ends: number[] = [];
-  for (let m; (m = re.exec(t));) if (m.index >= 12) ends.push(m.index);
+  const d = depths(t);
+  // r26: never inside a bracket ("(new look, members, harvests; notifications off)")
+  for (let m; (m = re.exec(t));) if (m.index >= 12 && d[m.index] === 0) ends.push(m.index);
   for (const e of ends.reverse()) {
     const f = t.slice(0, e).replace(/[\s,;:—–-]+$/, "").trim();
     if (f && f !== out[out.length - 1]) out.push(/[.!?]$/.test(f) ? f : `${f}.`);
