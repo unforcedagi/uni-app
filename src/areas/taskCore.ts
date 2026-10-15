@@ -1,7 +1,9 @@
 // Tasks as Parachute objects (pure, unit-tested in scripts/tasks.test.ts): parse `task` and `decision` notes, build the node tree
 // from `node` notes, take a subtree, group by owner, roll counts up the tree. Nothing here fetches.
 import { ROOT } from "./treeCore.ts";
-import { pathResolver, refKey, stripExt } from "./refs.ts";
+import { refKey, stripExt } from "./refs.ts";
+import { linkGraph, linksOf } from "./nodeLinks.ts";
+import { isAreaPath } from "./areasCore.ts";
 import { activeProfile, isAgentOwner, type VaultProfile } from "./profile.ts";
 export { refKey };
 
@@ -88,7 +90,7 @@ export type Task = {
 const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);
 const leaf = (p: string) => p.split("/").filter(Boolean).pop() ?? p;
 
-export type TaskNode = { id: string; path: string; name: string; parent: string | null; room: string | null; status: string; isRoot: boolean; /** `metadata.stands` (where it stands, one sentence) and `stands_at` (when it was written). */ stands?: string | null; standsAt?: string | null };
+export type TaskNode = { id: string; path: string; name: string; parent: string | null; /** T-140: `metadata.links` as written. */ links?: string[]; /** area or project; absent: an area when the path is `Areas/<Name>`. */ kind?: "area" | "project"; room: string | null; status: string; isRoot: boolean; /** `metadata.stands` (where it stands, one sentence) and `stands_at` (when it was written). */ stands?: string | null; standsAt?: string | null };
 
 /** `node` notes in. The root (the profile's `rootTag`: `uni` in Uni's vault, `root` in the pack) is kept apart: its children are the top level. */
 export function parseNodes(notes: readonly RawNote[], rootTag: string = activeProfile().rootTag): { nodes: TaskNode[]; rootPath: string | null } {
@@ -103,7 +105,7 @@ export function parseNodes(notes: readonly RawNote[], rootTag: string = activePr
     if (isRoot) rootPath = path;
     if (/\/(Brief|app)$/.test(path)) continue;
     const status = str(m.status) ?? "active";
-    out.set(path, { id, path, name: leaf(path), parent: refKey(m.parent), room: str(m.room)?.replace(/^#/, "") ?? null, status, isRoot, stands: str(m.stands), standsAt: str(m.stands_at) });
+    out.set(path, { id, path, name: leaf(path), parent: refKey(m.parent), links: linksOf(m), kind: tags.includes("area") || isAreaPath(path) ? "area" : "project", room: str(m.room)?.replace(/^#/, "") ?? null, status, isRoot, stands: str(m.stands), standsAt: str(m.stands_at) });
   }
   return { nodes: [...out.values()], rootPath };
 }
@@ -116,6 +118,9 @@ export type TaskTree = {
   /** parent path (ROOT: top level) → child paths. A missing parent, self parent or a cycle means "top level" for that link. */
   children: Map<string, string[]>;
   parent: Map<string, string>;
+  /** T-140: the areas a node is linked to, and every node it is linked to (both ways). */
+  areasOf: Map<string, string[]>;
+  links: Map<string, string[]>;
   /** The Uni root's path and id: a reference to either means ROOT. */
   rootRefs: ReadonlySet<string>;
   /** `metadata.stands` by node path (ROOT: Uni), with `stands_at` when it was written. */
@@ -133,20 +138,13 @@ export function buildTaskTree(nodes: readonly TaskNode[], rootPath: string | nul
     idPath.set(n.id, n.path);
     if (n.status !== "archived" && n.status !== "done") byPath.set(n.path, n);
   }
-  const parent = new Map<string, string>();
-  // A parent may be written as a path, a `[[link]]` or an id; only a live node counts, anything else is the top level.
-  const resolve = pathResolver(nodes.filter((n) => !rootRefs.has(n.id)));
-  const up = (n: TaskNode) => { const p = resolve(n.parent); return p && p !== n.path && byPath.has(p) ? p : ROOT; };
-  for (const n of byPath.values()) parent.set(n.path, up(n));
-  for (const start of [...byPath.keys()].sort()) {
-    const seen: string[] = [];
-    let at = start;
-    while (at !== ROOT && !seen.includes(at)) { seen.push(at); at = parent.get(at) ?? ROOT; }
-    if (at !== ROOT) parent.set([...seen.slice(seen.indexOf(at))].sort()[0], ROOT);
-  }
-  const children = new Map<string, string[]>();
-  for (const [p, up_] of [...parent].sort((a, b) => a[0].localeCompare(b[0]))) children.set(up_, [...(children.get(up_) ?? []), p]);
-  return { byPath, idPath, children, parent, rootRefs, stands };
+  // T-140: nodes join through `links` (two-way) and the legacy `parent`; each is an id, a path or a `[[link]]`. Only a live node counts, anything else is dropped.
+  const live = [...byPath.values()];
+  const g = linkGraph(live.map((n) => ({ id: n.id, path: n.path, name: n.name, kind: n.kind ?? (isAreaPath(n.path) ? "area" : "project"), parent: n.parent, links: n.links })), nodes.filter((n) => !rootRefs.has(n.id)));
+  const parent = g.parent;
+  const children = new Map<string, string[]>(g.children);
+  for (const [k, list] of children) children.set(k, [...list].sort());
+  return { byPath, idPath, children, parent, areasOf: g.areasOf, links: g.links, rootRefs, stands };
 }
 
 /** The node and everything beneath it (paths). ROOT is every node. */
@@ -267,17 +265,12 @@ export function rollUp(tree: TaskTree, list: readonly Task[]): Map<string, Count
   const own = new Map<string, Counts>();
   for (const t of list) { const c = own.get(t.node) ?? none(); c[groupOf(t)]++; c.total++; own.set(t.node, c); }
   const out = new Map<string, Counts>();
-  const visit = (p: string, seen: Set<string>): Counts => {
-    const done = out.get(p); if (done) return done;
-    const c = { ...(own.get(p) ?? none()) };
-    if (!seen.has(p)) {
-      seen.add(p);
-      for (const k of tree.children.get(p) ?? []) { const s = visit(k, seen); c.you += s.you; c.rooms += s.rooms; c.others += s.others; c.total += s.total; }
-    }
+  // T-140: a project linked to two areas is under both, but counts once in each total above it (Uni's is every node once)
+  for (const p of [ROOT, ...tree.byPath.keys()]) {
+    const c = { ...none() };
+    for (const k of p === ROOT ? [ROOT, ...tree.byPath.keys()] : subtreePaths(tree, p)) { const o = own.get(k); if (o) { c.you += o.you; c.rooms += o.rooms; c.others += o.others; c.total += o.total; } }
     out.set(p, c);
-    return c;
-  };
-  for (const p of [ROOT, ...tree.byPath.keys()]) visit(p, new Set());
+  }
   // tasks filed on the Uni root itself or on an unknown node count for Uni
   for (const t of list) if (t.node !== ROOT && !tree.byPath.has(t.node)) { const c = out.get(ROOT)!; c[groupOf(t)]++; c.total++; }
   return out;

@@ -20,6 +20,7 @@ import { childrenOf, parentPath, ROOT, rootNode, trail, UNI_CHANNEL } from "./tr
 import { findUniRoom } from "../uniActions";
 import { useStoredSelfTest } from "../interface/selftest/useSelfTest";
 import { useRailHidden, useShortTree, useUprightPhone, useWide } from "./homeLayout";
+import { archivedRoomIds, projectCards, roomsList } from "./viewsCore";
 import { privateRoot, privateRootIn, roomSlug, roomView, treeRows } from "./treeRooms";
 import { publishRoomNodes, roomNodeMap } from "./roomLabels";
 import { useNav, type NavControls } from "../navContext";
@@ -80,6 +81,8 @@ function ChatWait({ placeholder, retry }: { placeholder: string; retry: (() => v
  * (`loose`, listed under "Other rooms") and a thread of any of them. One component for all: the tree, the conversation, the companion. "All of
  * X's work" is a view inside the same shell (r13), and below 900px the tree is a drawer opened from the room's header, with the app's places.
  */
+const viaMemory: { path: string | null; via: string | null } = { path: null, via: null };
+
 export default function AreasSurface({ identity, path, loose = null, thread = null, rooms: hostRooms, roomsPending = false, actions, roomFor, onRoom, onOpenArea, onBackChange, onOverlayChange }: {
   identity: string | null;
   path: string | null;
@@ -150,6 +153,9 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   const openSheet = (t: Task) => { lastSheet.current = t; setSheetId(t.id); };
   const closeSheet = () => { setSheetId(null); };
   /** "All of X's work": a view inside the shell, over the chat; Back (every kind) closes it first. Without chat it is the room's only view. */
+  /** T-140: the area the open node was reached through (a project linked to two areas sits under both); its breadcrumb and Back go there. Opening a place
+   *  remounts this surface, so the choice is kept outside it, for the node it was made for. */
+  const via = viaMemory.path === path ? viaMemory.via : null;
   const [work, setWork] = useState(false);
   /** Below 900px: the tree, Back/Forward, Recent and the app's places, in a drawer opened from the room's header. */
   const [drawer, setDrawer] = useState(false);
@@ -159,7 +165,7 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   const [stripSheet, setStripSheet] = useState<{ close: () => void } | null>(null);
   const toTree = () => { setRootOpen(false); onOpenArea(null, "Uni", uniRoom); };
   const back = loose ? (treeHome ? toTree : null) : path ? (treeHome ? toTree : () => {
-    const up = data ? data.tree.nodes.get(parentPath(data.tree, path)) : null;
+    const up = data ? data.tree.nodes.get(parentPath(data.tree, path, via)) : null;
     onOpenArea(up?.path ?? null, up?.name ?? "Uni", up ? pickRoom(withRoom(up).rooms, null) : uniRoom);
   }) : treeHome && rootOpen ? () => setRootOpen(false) : null;
   /** What is over the place, top first: the sheet (modal), then the drawer, then the work view (only when the chat is there to go back to). */
@@ -255,18 +261,25 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   const decide = (t: Task, o: string) => void tasks.decide(t, o);
   const open = (a: Area) => { setRootOpen(false); const w = withRoom(a); onOpenArea(w.path, w.name, pickRoom(w.rooms, null)); };
   const toUni = () => onOpenArea(null, "Uni", uniRoom);
-  const openPath = (p: string) => {
-    setDrawer(false);
+  const openPath = (p: string, through?: string | null) => {
+    setDrawer(false); viaMemory.path = p; viaMemory.via = through ?? null;
     if (p === ROOT) { setRootOpen(true); onOpenArea(null, "Uni", uniRoom); return; }
     const n = data?.tree.nodes.get(p); if (n) open(n);
   };
-  const navRows = data ? treeRows(data.tree, roomRefs, uniRef) : [{ path: ROOT, name: "Uni", depth: 0, kind: "root" as const, slash: uniRef ? uniRef.name : null, heldBy: null, heldNode: null, own: !!uniRef, trunk: [], last: true }];
+  const navRows = data ? treeRows(data.tree, roomRefs, uniRef) : [{ key: "~uni", via: null, path: ROOT, name: "Uni", depth: 0, kind: "root" as const, slash: uniRef ? uniRef.name : null, heldBy: null, heldNode: null, own: !!uniRef, trunk: [], last: true }];
   /** A row's dot is its own node's needs-you items (a parent never lights up for its children's), by the companion's one rule; an item on a
    *  node with no row counts on its nearest ancestor's (r13), so the dots under a level add up to its Needs you. */
   const rowPaths = useMemo(() => new Set(navRows.map((r) => r.path)), [navRows.map((r) => r.path).join("\n")]); // eslint-disable-line react-hooks/exhaustive-deps
   const navNeeds = useMemo(() => needsByRow(tasks.tasks, rowPaths, (p) => tasks.tree?.parent.get(p) ?? data?.tree.parent.get(p), confirm.of, tasks.runs), [tasks.tasks, tasks.runs, rowPaths, tasks.tree, data?.tree, confirm.of]); // eslint-disable-line react-hooks/exhaustive-deps
   const openRoomFromTree = (id: string) => { setDrawer(false); actions.openRoom(id); };
-  const treeProps = { chat, rows: navRows, needs: navNeeds, onOpen: openPath, others, onOpenRoom: openRoomFromTree, load, needsReady: tasks.ready };
+  // T-140: Rooms (by last message) and Projects (cards with link chips) read the app's own room list, whose `last_ts` the live push keeps current
+  const lists = useMemo(() => {
+    if (!chat || !data || !owned) return undefined;
+    const stamps = rooms.map((r) => ({ id: r.id, name: r.name, last_ts: r.last_ts }));
+    const { live, archived } = roomsList(stamps, archivedRoomIds(data.tree, roomRefs, owned));
+    return { live, archived, cards: projectCards(data.tree, stamps, uniRef), now: Math.floor(Date.now() / 1000) };
+  }, [chat, data, owned, rooms, roomRefs, uniRef]);
+  const treeProps = { chat, rows: navRows, needs: navNeeds, onOpen: openPath, others, onOpenRoom: openRoomFromTree, load, needsReady: tasks.ready, lists };
   /** The app's own places (Journal, Vault, Search, Settings), for where the rail is out of reach: the drawer and a short screen's tree. */
   const places = nav?.places ?? [];
   // r17: Places holds only what the shell is not already showing: the app's places only while the rail is hidden (Codex P2-4)
@@ -367,7 +380,7 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   // talks in is a secondary line ("Chat in #Uni"); the composer keeps the real channel's name
   const context = borrowed ? `Chat in ${borrowed} · no room of its own yet` : undefined;
   const askRoom = target?.id ?? null;
-  const trailItems = [{ path: ROOT, name: "Uni" }, ...(tree && !isRoot ? trail(tree, node.path) : isRoot ? [] : [node]).map((n) => ({ path: n.path, name: n.name }))];
+  const trailItems = [{ path: ROOT, name: "Uni" }, ...(tree && !isRoot ? trail(tree, node.path, via) : isRoot ? [] : [node]).map((n) => ({ path: n.path, name: n.name }))];
   // r21 (found in the real app, cold at 800×600): before the areas are read, a private area's task showed as an ordinary row ("Pick Sanctum
   // design…"). Privacy is read from the task tree until the areas are, and nothing is listed while neither is known
   const privateOf = (p: string) => (tree ? privateRoot(tree, p) : tasks.tree ? privateRootIn(tasks.tree, p) : null);

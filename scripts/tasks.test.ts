@@ -16,7 +16,7 @@ const NODES = [
   node("a-t", "Areas/Techne", "Uni", { room: "techne" }, ["area"]),
   node("a-x", "Areas/Atlas", "[[Uni]]", {}, ["area"]),
   node("p-c", "Projects/COhere", "Areas/Techne"),
-  node("p-c26", "Projects/COhere/COhere 2026", "Projects/COhere", { room: "#cohere" }),
+  node("p-c26", "Projects/COhere/COhere 2026", "Areas/Techne", { room: "#cohere", links: ["p-c"] }),
   node("p-old", "Projects/Old", "Areas/Techne", { status: "archived" }),
   node("p-loose", "Projects/Loose", "Areas/Missing"),
 ];
@@ -28,15 +28,16 @@ check("tree: parents by path, [[link]] tolerated, missing parent is top level, a
   assert.deepEqual([...tree.byPath.keys()].sort(), ["Areas/Atlas", "Areas/Techne", "Projects/COhere", "Projects/COhere/COhere 2026", "Projects/Loose"]);
   assert.equal(tree.parent.get("Areas/Atlas"), ROOT);
   assert.equal(tree.parent.get("Projects/Loose"), ROOT);
-  assert.equal(tree.parent.get("Projects/COhere/COhere 2026"), "Projects/COhere");
+  assert.equal(tree.parent.get("Projects/COhere/COhere 2026"), "Areas/Techne", "a project link to a project does not nest");
+  assert.deepEqual(tree.links.get("Projects/COhere"), ["Projects/COhere/COhere 2026", "Areas/Techne"]);
   assert.equal(nodes.find((n) => n.path.endsWith("2026"))!.room, "cohere");
 });
-check("tree: a parent stored as an id resolves; a cycle is broken at its smallest path; self parent is top level", () => {
+check("tree: a parent stored as an id resolves; project links never nest or loop; self parent is top level", () => {
   const t = buildTaskTree(parseNodes([node("1", "P/B", "2"), node("2", "P/A", "1"), node("3", "P/S", "P/S")]).nodes);
   assert.equal(t.parent.get("P/A"), ROOT);
-  assert.equal(t.parent.get("P/B"), "P/A");
+  assert.equal(t.parent.get("P/B"), ROOT);
   assert.equal(t.parent.get("P/S"), ROOT);
-  assert.deepEqual(subtreePaths(t, "P/A").sort(), ["P/A", "P/B"]);
+  assert.deepEqual(subtreePaths(t, "P/A"), ["P/A"]);
 });
 check("subtree paths: the node and everything under it; ROOT is all; unknown is empty", () => {
   assert.deepEqual(subtreePaths(tree, "Areas/Techne").sort(), ["Areas/Techne", "Projects/COhere", "Projects/COhere/COhere 2026"]);
@@ -76,10 +77,10 @@ check("grouping: You (aaron, waiting on aaron, decisions) / Rooms (room:, uni) /
   assert.deepEqual(g[2].tasks.map((t) => t.id), ["c"]);
   assert.equal(groupOf({ owner: "", waitingOn: null, kind: "task" }), "others");
 });
-check("roll-up: counts include everything beneath; the root counts all, including tasks on the root note", () => {
+check("roll-up: an area counts the projects linked to it; the root counts all, including tasks on the root note", () => {
   const r = rollUp(tree, sample());
   assert.equal(r.get("Projects/COhere/COhere 2026")!.total, 2);
-  assert.equal(r.get("Projects/COhere")!.total, 2);
+  assert.equal(r.get("Projects/COhere")!.total, 0, "a project linked to a project does not roll up into it");
   assert.equal(r.get("Areas/Techne")!.total, 5);
   assert.deepEqual({ ...r.get("Areas/Techne")! }, { you: 3, rooms: 1, others: 1, total: 5 });
   assert.equal(r.get("Areas/Atlas")!.total, 1);
@@ -109,66 +110,32 @@ check("failure kinds: 409 transition_conflict, 422 schema_validation, other", ()
 type Log = { cmd: string; args: Record<string, unknown> }[];
 const mock = (answers: Record<string, (args: any) => unknown>) => { const log: Log = []; return { log, call: async (cmd: string, args: Record<string, unknown>) => { log.push({ cmd, args }); const f = answers[cmd]; if (!f) throw new Error("unexpected " + cmd); const v = f(args); if (v instanceof Error) throw v; return v; } }; };
 
-const unknownParam = () => new Error("MCP error -32602: unknown parameter: near.then");
-await check("one-request path: loadTasks sends a fixed near+then shape per kind, detects support, and does not walk the tree", async () => {
-  const m = mock({ vault_subtree_tasks: (a) => (a.tag === "task" ? [task("t", "p-c26")] : [task("d", "Areas/Techne", {}, ["decision"])]), vault_query_meta: () => [] });
+await check("loadTasks (T-140): one `node in` request per kind from the tree in memory, never a vault walk over `parent`; the root is a plain state filter", async () => {
+  const m = mock({ vault_query_meta: (a) => (a.tag === "task" ? [task("t", "p-c26")] : [task("d", "Areas/Techne", {}, ["decision"])]) });
   const api = createVaultTasks(m.call);
   const t = buildTaskTree(parseNodes(NODES).nodes);
   const { tasks } = await api.loadTasks(t, "Areas/Techne");
-  assert.deepEqual(m.log.map((l) => l.cmd), ["vault_subtree_tasks", "vault_subtree_tasks"]);
-  assert.deepEqual(m.log[0].args, { vault: "uni", tag: "task", root: "a-t", states: ["open", "doing", "waiting"], limit: 200 });
-  assert.deepEqual(m.log[1].args, { vault: "uni", tag: "decision", root: "a-t", states: ["open"], limit: 200 });
+  assert.deepEqual(m.log.map((l) => l.cmd), ["vault_query_meta", "vault_query_meta"]);
   assert.deepEqual(tasks.map((x) => x.id).sort(), ["d", "t"]);
-  assert.equal(api.nearSupported(), true);
-  await api.loadTasks(t, ROOT); // the root is "everything": a plain state filter, no near
+  await api.loadTasks(t, ROOT);
   assert.deepEqual(m.log.slice(2).map((l) => l.cmd), ["vault_query_meta", "vault_query_meta"]);
   assert.equal("node" in (m.log.at(-1)!.args.metadata as object), false);
 });
-await check("one-request path: an unknown-parameter error falls back to the two-query walk, once per session", async () => {
-  const m = mock({ vault_subtree_tasks: unknownParam, vault_query_meta: (a) => (a.tag === "task" ? [task("t", "p-c26")] : []) });
-  const api = createVaultTasks(m.call);
-  const t = buildTaskTree(parseNodes(NODES).nodes);
-  const a = await api.loadTasks(t, "Areas/Techne");
-  assert.deepEqual(a.tasks.map((x) => x.id), ["t"]);
-  assert.equal(api.nearSupported(), false);
-  const tried = m.log.filter((l) => l.cmd === "vault_subtree_tasks").length;
-  await api.loadTasks(t, "Areas/Techne");
-  assert.equal(m.log.filter((l) => l.cmd === "vault_subtree_tasks").length, tried, "not retried after detection");
-  assert.equal(m.log.filter((l) => l.cmd === "vault_query_meta").length, 4);
-});
-await check("one-request path: a network error is thrown, not mistaken for a missing feature", async () => {
-  const m = mock({ vault_subtree_tasks: () => new Error("hub unreachable"), vault_query_meta: () => [] });
+await check("a network error is thrown", async () => {
+  const m = mock({ vault_query_meta: () => new Error("hub unreachable") });
   const api = createVaultTasks(m.call);
   const t = buildTaskTree(parseNodes(NODES).nodes);
   await assert.rejects(api.loadTasks(t, "Areas/Techne"), /hub unreachable/);
-  assert.equal(api.nearSupported(), null);
-  assert.equal(m.log.some((l) => l.cmd === "vault_query_meta"), false);
 });
-await check("a node the vault can't anchor on (not_found) falls back for that call without turning the feature off", async () => {
-  const m = mock({ vault_subtree_tasks: () => new Error("Anchor note not found"), vault_query_meta: () => [task("t", "Areas/Techne")] });
+await check("a node the loaded tree lacks asks nothing and has no tasks", async () => {
+  const m = mock({});
   const api = createVaultTasks(m.call);
-  const t = buildTaskTree(parseNodes(NODES).nodes);
-  assert.equal((await api.loadTasks(t, "Areas/Techne")).tasks.length, 1);
-  assert.equal(api.nearSupported(), null);
-});
-await check("loadSubtree: one near request for the nodes; the anchor is always included", async () => {
-  const m = mock({ vault_subtree_nodes: () => NODES.filter((n) => String(n.path).startsWith("Projects/COhere")) });
-  const api = createVaultTasks(m.call);
-  const s = await api.loadSubtree("Areas/Techne");
-  assert.deepEqual(m.log, [{ cmd: "vault_subtree_nodes", args: { vault: "uni", root: "Areas/Techne" } }]);
-  assert.ok(s.paths.includes("Areas/Techne") && s.paths.includes("Projects/COhere/COhere 2026"));
-});
-await check("a node the loaded tree lacks is resolved with loadSubtree before the two-query walk", async () => {
-  const m = mock({ vault_subtree_tasks: () => new Error("Anchor note not found"), vault_subtree_nodes: () => [{ id: "z", path: "Projects/Late", tags: ["node"], metadata: { parent: "Areas/Techne" } }], vault_query_meta: (a) => (a.tag === "task" ? [task("t", "Projects/Late")] : []) });
-  const api = createVaultTasks(m.call);
-  const t = buildTaskTree(parseNodes(NODES).nodes);
-  assert.equal((await api.loadTasks(t, "Projects/Late")).tasks.length, 1);
-  const meta = m.log.find((l) => l.cmd === "vault_query_meta")!.args.metadata as any;
-  assert.deepEqual(meta.node.in, ["Projects/Late", "z"]);
+  assert.deepEqual(await api.loadTasks(buildTaskTree(parseNodes(NODES).nodes), "Projects/Late"), { tasks: [], truncated: false });
+  assert.deepEqual(m.log, []);
 });
 
-await check("fallback: loadTree queries the node tag without content; loadTasks sends the subtree paths+ids and the live states", async () => {
-  const m = mock({ vault_query: () => NODES, vault_subtree_tasks: unknownParam, vault_query_meta: (a) => (a.tag === "task" ? [task("t", "p-c26")] : [task("d", "Areas/Techne", {}, ["decision"])]) });
+await check("loadTree queries the node tag without content; loadTasks sends the subtree paths+ids and the live states", async () => {
+  const m = mock({ vault_query: () => NODES, vault_query_meta: (a) => (a.tag === "task" ? [task("t", "p-c26")] : [task("d", "Areas/Techne", {}, ["decision"])]) });
   const api = createVaultTasks(m.call);
   const t = await api.loadTree();
   assert.deepEqual(m.log[0], { cmd: "vault_query", args: { vault: "uni", tag: "node", includeContent: false, limit: 200 } });

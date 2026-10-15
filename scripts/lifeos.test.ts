@@ -245,13 +245,12 @@ check("buildTree: a missing parent puts the node at the top level; so does namin
   const t = buildTree(nodes(areaNote("Techne"), projectNote("Projects/Lost", { parent: "Areas/Gone" }), projectNote("Projects/Self", { parent: "Projects/Self" })));
   assert.deepEqual(childrenOf(t, ROOT).map((n) => n.path).sort(), ["Areas/Techne", "Projects/Lost", "Projects/Self"]);
 });
-check("buildTree: cycles are broken at the smallest path and nothing is lost or loops", () => {
+check("buildTree: a cycle of project links links only: nothing nests, nothing is lost or loops (T-140)", () => {
   const t = buildTree(nodes(projectNote("Projects/B", { parent: "Projects/A" }), projectNote("Projects/A", { parent: "Projects/C" }), projectNote("Projects/C", { parent: "Projects/B" }), projectNote("Projects/D", { parent: "Projects/C" })));
   assert.equal(t.nodes.size, 4);
-  assert.deepEqual(childrenOf(t, ROOT).map((n) => n.path), ["Projects/A"]);
-  assert.deepEqual(trail(t, "Projects/D").map((n) => n.path), ["Projects/A", "Projects/B", "Projects/C", "Projects/D"]);
-  const total = [ROOT, ...t.nodes.keys()].reduce((n, k) => n + childrenOf(t, k).length, 0);
-  assert.equal(total, 4, "every node has exactly one parent");
+  assert.deepEqual(childrenOf(t, ROOT).map((n) => n.path), ["Projects/A", "Projects/B", "Projects/C", "Projects/D"]);
+  assert.deepEqual(trail(t, "Projects/D").map((n) => n.path), ["Projects/D"]);
+  assert.deepEqual(t.links.get("Projects/C"), ["Projects/A", "Projects/B", "Projects/D"], "the links are kept, both ways");
 });
 check("buildTree: multiple rooms are kept in order, and a child's room leaves the parent's view but not the note", () => {
   const t = buildTree(nodes(areaNote("Techne", { channel: "t1, c1,t1" }), projectNote("Projects/COhere/COhere 2026", { parent: "Areas/Techne", channel: "c1" }), projectNote("Projects/Two", { parent: "Areas/Techne", channel: "x1, x2" })));

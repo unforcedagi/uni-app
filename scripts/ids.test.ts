@@ -60,43 +60,44 @@ await check("task tree: mixed id / path / link parents build one tree; a task's 
   assert.equal(c.get(ROOT)!.total, 4);
 });
 
-await check("task tree: an archived parent given as an id is top level; a cycle written in ids is broken; filter keys carry both forms", () => {
+await check("task tree: an archived parent given as an id is top level; project links written in ids link only (no nesting, no loop); filter keys carry both forms", () => {
   const t = buildTaskTree(parseNodes([note("1", "P/A", "2"), note("2", "P/B", "1"), note("3", "P/C", "9"), note("9", "P/Old", null, { status: "archived" })]).nodes);
   assert.equal(t.parent.get("P/C"), ROOT);
   assert.equal(t.parent.get("P/A"), ROOT);
-  assert.equal(t.parent.get("P/B"), "P/A");
-  assert.deepEqual(subtreePaths(t, "P/A").sort(), ["P/A", "P/B"]);
+  assert.equal(t.parent.get("P/B"), ROOT);
+  assert.deepEqual(t.links.get("P/A"), ["P/B"]);
+  assert.deepEqual(subtreePaths(t, "P/A").sort(), ["P/A"]);
   assert.deepEqual(nodeFilterKeys(t, ["P/A"]).sort(), ["1", "P/A"]);
 });
 
-await check("app tree: parents as ids, paths and links; a self or missing parent is top level; a cycle is broken deterministically", () => {
+await check("app tree: parents as ids, paths and links; a self or missing parent is top level; project-to-project links never nest (a legacy parent project lends its area)", () => {
   const area = (id: string, path: string, parent: string | null) => parseArea({ id, path, tags: ["area"], metadata: { status: "foreground", ...(parent ? { parent } : {}) }, content: "# x" })!;
   const proj = (id: string, path: string, parent: string) => parseProject({ id, path, tags: ["project"], metadata: { parent } })!;
   const tree = buildTree([area(TECH, "Areas/Techne", U), proj(COH, "Projects/C", TECH), proj(RIC, "Projects/R", "[[Projects/C]]"), proj("x1", "Projects/X", "x2"), proj("x2", "Projects/Y", "x1"), proj("s", "Projects/S", "s"), proj("m", "Projects/M", "01M0000000000000000000GONE")]);
   assert.equal(parentPath(tree, "Projects/C"), "Areas/Techne");
-  assert.equal(parentPath(tree, "Projects/R"), "Projects/C");
+  assert.equal(parentPath(tree, "Projects/R"), "Areas/Techne", "legacy: filed under a project in Techne, shown in Techne, not nested");
+  assert.deepEqual(tree.links.get("Projects/R"), ["Projects/C"]);
   assert.equal(parentPath(tree, "Projects/S"), ROOT);
   assert.equal(parentPath(tree, "Projects/M"), ROOT);
   assert.equal(parentPath(tree, "Projects/X"), ROOT);
-  assert.equal(parentPath(tree, "Projects/Y"), "Projects/X");
-  assert.deepEqual(ancestry(tree, "Projects/R").map((n) => n.name), ["R", "C", "Techne"]);
-  assert.deepEqual(ancestry(tree, "Projects/Y").map((n) => n.name), ["Y", "X"]);
+  assert.equal(parentPath(tree, "Projects/Y"), ROOT);
+  assert.deepEqual(ancestry(tree, "Projects/C").map((n) => n.name), ["C", "Techne"]);
+  assert.deepEqual(ancestry(tree, "Projects/Y").map((n) => n.name), ["Y"]);
   assert.deepEqual(ancestry(tree, "nowhere"), []);
 });
 
-await check("subtree query is anchored at the node's id; the path still works when the id is unknown; the fallback filters on ids and paths", async () => {
+await check("subtree query (T-140): one `node in` request per kind, from the tree in memory, filtering on ids and paths; a node the tree lacks asks nothing", async () => {
   const log: { cmd: string; args: any }[] = [];
-  const mk = (off: boolean) => createVaultTasks(async (cmd, args) => { log.push({ cmd, args }); if (off && cmd === "vault_subtree_tasks") throw new Error("MCP error -32602: unknown parameter: near"); return []; });
+  const api = createVaultTasks(async (cmd, args) => { log.push({ cmd, args }); return []; });
   const t = buildTaskTree(parseNodes(NOTES).nodes);
-  await mk(false).loadTasks(t, "Areas/Techne");
-  assert.equal(log[0].args.root, TECH);
-  log.length = 0;
-  await mk(false).loadTasks(buildTaskTree([]), "Areas/Gone");
-  assert.equal(log[0].args.root, "Areas/Gone");
-  log.length = 0;
-  await mk(true).loadTasks(t, "Areas/Techne");
-  const where = log.find((l) => l.cmd === "vault_query_meta")!.args.metadata.node.in as string[];
+  await api.loadTasks(t, "Areas/Techne");
+  assert.deepEqual(log.map((l) => l.cmd), ["vault_query_meta", "vault_query_meta"]);
+  const where = log[0].args.metadata.node.in as string[];
   for (const k of ["Areas/Techne", TECH, "Projects/COhere/COhere 2026", COH, "Projects/Priya", RIC]) assert.ok(where.includes(k), k);
+  assert.ok(!where.includes("Projects/Mail"));
+  log.length = 0;
+  assert.deepEqual(await api.loadTasks(buildTaskTree([]), "Areas/Gone"), { tasks: [], truncated: false });
+  assert.deepEqual(log, []);
 });
 
 const rooms = [{ id: "r-uni", name: "Uni" }, { id: "r-techne", name: "techne" }, { id: "r-cohere", name: "cohere" }, { id: "9f5dd143-96b1-440a-ab71-812219cdfaa1", name: "boulder" }];
@@ -126,14 +127,14 @@ await check("steward: a room that does not exist is skipped (not a dead end); ch
   assert.deepEqual([skipped.room?.name, skipped.via], ["boulder", "inherited"]);
 });
 
-await check("steward on a cyclic tree terminates: the chain comes from ancestry(), which stops at a repeat", () => {
+await check("steward on a cycle of project links terminates: links do not nest, so each chain is the node alone (T-140)", () => {
   const a = parseProject({ id: "a", path: "P/A", tags: ["project"], metadata: { parent: "b", room: "cohere" } })!;
   const b = parseProject({ id: "b", path: "P/B", tags: ["project"], metadata: { parent: "a" } })!;
   const tree = buildTree([a, b]);
   for (const p of ["P/A", "P/B"]) {
     const chain = ancestry(tree, p).map((n) => rn(n.path, typeof n.metadata.room === "string" ? n.metadata.room : null, n.rooms));
-    assert.ok(chain.length <= 2);
-    assert.equal(steward(chain, rooms, uni).room?.name, "cohere");
+    assert.equal(chain.length, 1);
+    assert.equal(steward(chain, rooms, uni).room?.name, p === "P/A" ? "cohere" : "Uni");
   }
 });
 

@@ -190,6 +190,8 @@ export type BootOpts = {
   atlas?: boolean;
   /** T-122 steer: ATLAS (needs `atlas`, `tasks`) holds T-07 (due Tue 10-13), a decision, run ledger notes and draft notes, and #atlas/build has a day's messages. `window.__setDue(id, due)` moves a task as a room would. */
   steer?: boolean;
+  /** T-140: node links. Parachute (room #parachute) holds uni-app (own room #uni-os; `links` Parachute and Sanctum) and Mail (legacy `parent` only, no room); RegenHub (room #regenhub) is linked to Boulder and Techne, listed on Techne's side only for Techne; an archived project `Old Client` leaves its room #old-client behind. Messages age so rooms sort: uni-os, regenhub, parachute, boulder. Needs `boulder`. */
+  links?: boolean;
   /** T-124 r2: #atlas/build and #atlas/teach hold sixty messages each, so a room has history to open at the end of. */
   longChat?: boolean;
   /** T-124 r7: T-03's next step is long (three questions and a link): it wraps to four lines with a "More". */
@@ -243,7 +245,7 @@ export async function bootAreas(page: Page, variant: Variant = 'seed', opts: Boo
   const now = Math.floor((opts.pinned ? pinnedAt : Date.now()) / 1000);
   const data = {
     profileNote: opts.profileNote ?? null, lifeVault: opts.lifeVault ?? null, now, variant, selftest: opts.selftest ?? true, ipcLeak: opts.ipcLeak ?? false, hostile: hostileApp(opts.ports ?? { http: 9, udp: 9 }), benign: BENIGN, techne: seed('techne'), unforced: seed('unforced'), seedMeta,
-    apps: opts.apps ?? [], multiRoom: !!opts.multiRoom || !!opts.tree, tree: !!opts.tree, tasks: !!opts.tasks, briefs: !!opts.briefs, queryDelay: opts.queryDelay ?? 0, identityDelay: opts.identityDelay ?? 0, identityFails: opts.identityFails ?? 0, roomsDelay: opts.roomsDelay ?? 0, messagesDelay: opts.messagesDelay ?? 0, nodeStatuses: opts.nodeStatuses ?? {}, nearOff: !!opts.nearOff, ids: !!opts.ids, boulder: !!opts.boulder, savedLayout: opts.savedLayout ?? null, strayRoom: !!opts.strayRoom, thread: !!opts.thread, manyTasks: opts.manyTasks ?? 0, uniMember: !!opts.uniMember, twins: !!opts.twins, underBoulder: !!opts.underBoulder, priya: !!opts.priya, atlas: !!opts.atlas, steer: !!opts.steer, longChat: !!opts.longChat, longNext: !!opts.longNext, bareTask: !!opts.bareTask, cutDecision: !!opts.cutDecision, cutNoAsk: !!opts.cutNoAsk, longAsk: !!opts.longAsk, previewAsk: !!opts.previewAsk, crowded: !!opts.crowded, ulidNext: !!opts.ulidNext, vaultNotes: !!opts.vaultNotes, pastDue: !!opts.pastDue, tallLast: !!opts.tallLast, privateTasks: !!opts.privateTasks, deviceCache: opts.deviceCache ?? null, queryFails: opts.queryFails ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null, mode: opts.mode ?? 'sealed', grantedUnder: opts.grantedUnder ?? (opts.mode ?? 'sealed'),
+    apps: opts.apps ?? [], multiRoom: !!opts.multiRoom || !!opts.tree, tree: !!opts.tree, tasks: !!opts.tasks, briefs: !!opts.briefs, queryDelay: opts.queryDelay ?? 0, identityDelay: opts.identityDelay ?? 0, identityFails: opts.identityFails ?? 0, roomsDelay: opts.roomsDelay ?? 0, messagesDelay: opts.messagesDelay ?? 0, nodeStatuses: opts.nodeStatuses ?? {}, nearOff: !!opts.nearOff, ids: !!opts.ids, boulder: !!opts.boulder, savedLayout: opts.savedLayout ?? null, strayRoom: !!opts.strayRoom, thread: !!opts.thread, manyTasks: opts.manyTasks ?? 0, uniMember: !!opts.uniMember, twins: !!opts.twins, underBoulder: !!opts.underBoulder, priya: !!opts.priya, links: !!opts.links, atlas: !!opts.atlas, steer: !!opts.steer, longChat: !!opts.longChat, longNext: !!opts.longNext, bareTask: !!opts.bareTask, cutDecision: !!opts.cutDecision, cutNoAsk: !!opts.cutNoAsk, longAsk: !!opts.longAsk, previewAsk: !!opts.previewAsk, crowded: !!opts.crowded, ulidNext: !!opts.ulidNext, vaultNotes: !!opts.vaultNotes, pastDue: !!opts.pastDue, tallLast: !!opts.tallLast, privateTasks: !!opts.privateTasks, deviceCache: opts.deviceCache ?? null, queryFails: opts.queryFails ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null, mode: opts.mode ?? 'sealed', grantedUnder: opts.grantedUnder ?? (opts.mode ?? 'sealed'),
   };
   // Pre-granted apps: the grant key is the SHA-256 of the RESOLVED default needs plus the app's html.
   const preGrant = [
@@ -463,6 +465,16 @@ Two proposals wait on a scope decision.
         { id: 'br-boulder', path: 'Areas/Boulder/Brief', extension: 'md', tags: ['area-brief'], metadata: { generated_at: new Date((d.now - 7200) * 1000).toISOString() }, updatedAt: new Date((d.now - 7200) * 1000).toISOString(), content: '## Now\nThe council agenda is out; the calendar needs this week\'s dates.\n\n## Needs you\n- Approve the draft testimony\n\n## Moving\n- nothing recent\n' });
       rooms.push(room(BOULDER, 'boulder'));
       if (d.tasks) taskNotes.push(mk('b1', 'T-90 Draft council testimony', 'Areas/Boulder'), mk('b2', 'T-91 Add the November dates', 'Projects/Boulder Civic Calendar', { owner: 'room:boulder' }));
+    }
+    if (d.links) {
+      const parachute = area('a-parachute', 'Parachute', 'foreground', 'ch-parachute', 'Building Uni itself: memory, app, mail, infra.');
+      const pj = (id: string, name: string, meta: Record<string, unknown>) => ({ id, path: `Projects/${name}`, extension: 'md', tags: ['project'], metadata: { status: 'foreground', summary: `${name}.`, ...meta }, updatedAt: '2026-10-08T00:00:00Z', content: `# ${name}\n\n${name}.` });
+      notes.push(parachute, pj('p-uniapp', 'uni-app', { room: 'uni-os', channel: 'ch-unios', links: ['a-parachute', 'a-sad', 'p-mail'] }), pj('p-mail', 'Mail', { parent: 'Areas/Parachute' }),
+        pj('p-regen', 'RegenHub', { room: 'regenhub', channel: 'ch-regen', links: ['a-boulder'] }), pj('p-old', 'Old Client', { status: 'archived', room: 'old-client', channel: 'ch-old' }));
+      const tech = notes.find((n) => n.id === 'a-techne'); if (tech) tech.metadata = { ...tech.metadata, links: ['p-regen'] };
+      for (const [ch, ago] of [['ch-parachute', 3000], ['ch-unios', 60], ['ch-regen', 1800], ['ch-old', 500000]] as const) msgs[ch] = [msg('lk-' + ch, ch, 'Uni', ago, `Latest in ${ch}.`)];
+      rooms.push(room('ch-parachute', 'parachute'), room('ch-unios', 'uni-os'), room('ch-regen', 'regenhub'), room('ch-old', 'old-client'));
+      const bou = rooms.find((r) => r.id === BOULDER); if (bou) { bou.last_ts = d.now - 7200; bou.last_message = 'Council agenda is out.'; }
     }
     if (d.underBoulder) { const c = notes.find((n) => n.id === 'p-cohere'); if (c) c.metadata = { ...c.metadata, parent: 'Areas/Boulder' }; }
     if (d.atlas) {
