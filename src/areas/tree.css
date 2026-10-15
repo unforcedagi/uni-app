@@ -315,7 +315,7 @@
 .cp-run { display: flex; align-items: baseline; gap: 10px; padding: 5px 0; font: 400 15px/1.35 var(--th-sans); }
 /* r24: a run is a glance, two lines at most (its words whole in the tooltip and the work view), so it fits above the panel footer; cut at a
    whole line like the r23 rows, never with the "…" -webkit-line-clamp draws */
-.cp .cp-run span { display: block; min-width: 0; max-height: calc(2 * 1.35em); overflow: clip; overflow-wrap: anywhere; }
+.cp .cp-run span { display: block; min-width: 0; overflow-wrap: anywhere; }
 .cp-run i { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--th-ink); align-self: center; }
 .cp-run[data-state="queued"] i { background: none; box-shadow: inset 0 0 0 1.5px var(--th-ink); }
 .cp-run small { margin-left: auto; font: 400 12.5px var(--th-sans); color: var(--th-mute); }
@@ -669,15 +669,10 @@
 .task-movedon { color: var(--th-ink2); }
 .task-record { overflow-wrap: anywhere; }
 
-/* r23 (both critics): no ellipsis in Needs you. A row's clamp cuts at a whole line (lines wrap on words), never drawing "…": a height of
-   `--lines` lines instead of -webkit-line-clamp, which always draws one. */
-.cp-item .cp-title:not(.cp-lead), .cp-item .cp-need small, .cp-item .cp-next { display: block; -webkit-line-clamp: unset; line-clamp: none; overflow: hidden; }
-.cp-item .cp-title:not(.cp-lead) { max-height: calc(var(--lines, 2) * 1.35em); }
-.cp-need.decision .cp-title, .cp-item[data-open] .cp-title { max-height: none; }
-.cp-item .cp-need small { line-height: 1.35; max-height: calc(var(--lines, 2) * 1.35em); }
-.cp-item .cp-need small.cp-detail { --lines: 1; }
-.cp-item .cp-need .cp-sub, .cp-item .cp-need small.cp-asked-line { max-height: none; }
-.cp-item .cp-next { max-height: calc(var(--lines, 6) * 1.45em); }
+/* r28 (Sonnet): a row is whole or it is not shown. No clamp of any kind on a row's words: a step wraps to as many lines as it needs, and the
+   list shows fewer rows (with "Show N more") when the rest don't fit. Small print wraps too: it is never cut. */
+.cp-item .cp-title, .cp-item .cp-need small, .cp-item .cp-next { display: block; overflow: visible; max-height: none; }
+.cp-item .cp-need small { line-height: 1.35; }
 .cp-item .cp-next.open { max-height: none; overflow: visible; }
 
 /* r25: the chat couldn't be read: a quiet line under the "asked" line, never a cue */
@@ -713,3 +708,31 @@
 .task-details summary::-webkit-details-marker { display: none; }
 .task-details summary::after { content: "+"; font-weight: 400; color: var(--th-mute); }
 .task-details[open] summary::after { content: "–"; }
+
+
+/* r28: Needs you holds only confirmed asks. What Uni must recheck is one quiet line that opens to a plain list; a waiting run is a row with its
+   question as the step; the compact panel is one panel whose summary is a date line and whose footer is outside what scrolls. */
+.cp-recheck { margin: 8px 0 2px; font: 400 13px/1.4 var(--th-sans); color: var(--th-mute); }
+.cp-recheck-line { all: unset; box-sizing: border-box; min-height: 36px; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; color: var(--th-mute); text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
+.cp-recheck-line:focus-visible, .cp-rc-open:focus-visible, .cp-rc-anyway:focus-visible { outline: 2px solid var(--th-ink); outline-offset: 2px; }
+.cp-recheck-line i { font-style: normal; text-decoration: none; }
+.cp-recheck-list { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 0; }
+.cp-recheck-item { padding: 8px 0; border-top: 1px solid var(--th-hair2); display: grid; gap: 2px; color: var(--th-ink2); }
+.cp-recheck-step { font: 400 14.5px/1.4 var(--th-sans); color: var(--th-ink); overflow-wrap: anywhere; }
+.cp-recheck-asked { font: 400 12.5px/1.35 var(--th-sans); color: var(--th-mute); }
+.cp-recheck-go { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 2px; }
+.cp-rc-open, .cp-rc-anyway { all: unset; box-sizing: border-box; min-height: 36px; display: inline-flex; align-items: center; cursor: pointer; font: 500 13.5px var(--th-sans); color: var(--th-ink); text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
+.cp-rc-anyway { font-weight: 400; color: var(--th-mute); }
+.cp-checking { margin: 6px 0 0; font: 400 13px/1.4 var(--th-sans); color: var(--th-mute); }
+.cp-run-text .cp-run-step { display: block; }
+.cp-run-text .cp-run-place { display: block; margin: 0; font: 400 12.5px/1.35 var(--th-sans); color: var(--th-mute); }
+.cp-run-waiting { align-items: flex-start; }
+.cp-run-waiting i { margin-top: .45em; align-self: flex-start; }
+.cp-line-text .cp-line-fit { display: block; white-space: nowrap; overflow: hidden; text-overflow: clip; }
+.cp-stands-fold { margin: 0 0 6px; }
+.cp-stands-fold > summary { font: 400 13px/1.4 var(--th-sans); }
+/* the one compact panel: head and footer are fixed, what is between them scrolls, so nothing is ever under the footer */
+.cp-sheet { display: flex; flex-direction: column; overflow: hidden; padding-bottom: 0; }
+.cp-sheet .cp-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.cp-sheet > .cp-foot { position: static; flex: none; margin: 0; padding: 4px 16px calc(8px + env(safe-area-inset-bottom)); border-top: 1px solid var(--th-hair2); }
+.cp-sheet-head { position: static; flex: none; }

@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useConfirm } from "./useConfirm";
+import { invoke } from "@tauri-apps/api/core";
 import { TaskSheet, UndoBar, ownerLabel } from "./NodeWork";
 import { useTasks } from "./useTasks";
 import { draftsUnder, runsUnder } from "./steerCore";
 import { CompanionSide, CompanionStrip, StaleStands, useCompanionOpen, type CompanionProps, type TaskLoad } from "./Companion";
-import { chatPlaceholder, isMine, needsByRow, needsFeed, needsYou, privateNote, standsHeading, staleSummary, standsLine, asOfDate, asOfPrefix, firstSentence, stateLine, uniPanel, type PrivateNeed } from "./simpleCore";
+import { chatPlaceholder, isMine, needsByRow, needsFeed, needsYou, privateNote, withWaiting, standsHeading, staleSummary, standsLine, asOfDate, asOfPrefix, firstSentence, stateLine, uniPanel, type PrivateNeed } from "./simpleCore";
 import { ownRoom, type Steward } from "./talkCore";
 import type { Area } from "./areasCore";
 import { isMe, priorityOf, tasksUnder, type Task, type TaskNode } from "./taskCore";
@@ -57,6 +59,8 @@ export type ShellActions = Omit<AreaActions, "openNote"> & { openNote(ref: NoteR
 export type Overlay = { close: () => void; modal: boolean; history: boolean };
 
 /** After this long a conversation still opening says so, with a way to try again (r21, Codex 9). */
+/** r28: the rechecks are logged once per launch (the module lives as long as the app does) */
+const recheckLogged = { done: false };
 const CHAT_SLOW_MS = 8000;
 /**
  * The conversation's place while it opens (r21, Codex 9): a quiet chat, shaped like the one coming (an empty conversation and its composer's
@@ -144,8 +148,10 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   /** The open task, by id: the sheet always shows the list's current copy (r13), and says so when the task has closed elsewhere. */
   const [sheetId, setSheetId] = useState<string | null>(null);
   const lastSheet = useRef<Task | null>(null);
-  const openSheet = (t: Task) => { lastSheet.current = t; setSheetId(t.id); };
-  const closeSheet = () => setSheetId(null);
+  /** r28: a sheet opened by "Answer anyway" in the recheck list starts with the answers ready */
+  const [sheetAnyway, setSheetAnyway] = useState(false);
+  const openSheet = (t: Task, o?: { anyway?: boolean }) => { lastSheet.current = t; setSheetAnyway(!!o?.anyway); setSheetId(t.id); };
+  const closeSheet = () => { setSheetId(null); setSheetAnyway(false); };
   /** "All of X's work": a view inside the shell, over the chat; Back (every kind) closes it first. Without chat it is the room's only view. */
   const [work, setWork] = useState(false);
   /** Below 900px: the tree, Back/Forward, Recent and the app's places, in a drawer opened from the room's header. */
@@ -237,6 +243,16 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
     return { room: v.target, via: v.own ? "own" : v.heldBy && v.heldBy.id !== uniRef?.id ? "inherited" : "uni", from: null };
   };
   const roomOfNode = (p: string) => stewardOf(p).room;
+  // r28 (Codex P1-1/2): an ask is confirmed here, in the feed, before any row, count or dot shows it: one read of each room's chat, cached
+  const roomOfTask = useCallback((t: Task) => (data ? roomView(data.tree, t.node, roomRefs, uniRef).target : uniRef) ?? null, [data, roomRefs, uniRef]);
+  const confirm = useConfirm(tasks.tasks, roomOfTask, tasks.lastOk, tasks.ready && (!chat || !!data || !!error));
+  // r28: the asks Uni must recheck are told to the rooms once per launch, as task ids in the app's log (the app never writes them to the vault)
+  useEffect(() => {
+    if (!confirm.settled || tasks.savedAt || recheckLogged.done) return;
+    const ids = tasks.tasks.filter((t) => needsYou(t) && confirm.of(t).state === "recheck").map((t) => taskTitle(t.title).id).filter(Boolean) as string[];
+    recheckLogged.done = true;
+    void invoke("log_line", { line: `recheck: ${ids.join(" ") || "none"}` }).catch(() => {});
+  }, [confirm.settled, tasks.tasks, tasks.savedAt]); // eslint-disable-line react-hooks/exhaustive-deps
   const decide = (t: Task, o: string) => void tasks.decide(t, o);
   const open = (a: Area) => { setRootOpen(false); const w = withRoom(a); onOpenArea(w.path, w.name, pickRoom(w.rooms, null)); };
   const toUni = () => onOpenArea(null, "Uni", uniRoom);
@@ -249,7 +265,7 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   /** A row's dot is its own node's needs-you items (a parent never lights up for its children's), by the companion's one rule; an item on a
    *  node with no row counts on its nearest ancestor's (r13), so the dots under a level add up to its Needs you. */
   const rowPaths = useMemo(() => new Set(navRows.map((r) => r.path)), [navRows.map((r) => r.path).join("\n")]); // eslint-disable-line react-hooks/exhaustive-deps
-  const navNeeds = useMemo(() => needsByRow(tasks.tasks, rowPaths, (p) => tasks.tree?.parent.get(p) ?? data?.tree.parent.get(p)), [tasks.tasks, rowPaths, tasks.tree, data?.tree]);
+  const navNeeds = useMemo(() => needsByRow(tasks.tasks, rowPaths, (p) => tasks.tree?.parent.get(p) ?? data?.tree.parent.get(p), confirm.of, tasks.runs), [tasks.tasks, tasks.runs, rowPaths, tasks.tree, data?.tree, confirm.of]); // eslint-disable-line react-hooks/exhaustive-deps
   const openRoomFromTree = (id: string) => { setDrawer(false); actions.openRoom(id); };
   const treeProps = { chat, rows: navRows, needs: navNeeds, onOpen: openPath, others, onOpenRoom: openRoomFromTree, load, needsReady: tasks.ready };
   /** The app's own places (Journal, Vault, Search, Settings), for where the rail is out of reach: the drawer and a short screen's tree. */
@@ -364,10 +380,12 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   // ------------------------------------------------------------------------------------------ Needs you: one feed, one count (r13)
   // r23: each row knows the room that stewards it, as its sheet does ("Ask #techne for the message")
   const drafted = new Set(tasks.drafts.map((d) => d.task?.toUpperCase()).filter(Boolean));
-  const feed = needsFeed(levelTasks.map((t) => ({ ...t, stewardRoom: roomOfNode(t.node)?.name ?? null, hasDraft: drafted.has(taskTitle(t.title).id?.toUpperCase()) })), privateOf, selfPrivate);
-  const panel = isRoot ? uniPanel(feed) : { ...feed, rest: 0, privateCount: 0 };
+  const feed0 = needsFeed(levelTasks.map((t) => ({ ...t, stewardRoom: roomOfNode(t.node)?.name ?? null, hasDraft: drafted.has(taskTitle(t.title).id?.toUpperCase()) })), privateOf, selfPrivate, undefined, confirm.of);
   const taskTree = tasks.tree;
   const runs = taskTree ? runsUnder(taskTree, here, tasks.runs).filter((r) => !hidden(r.node)) : [];
+  // r28 (Codex P2-6): a run waiting on the user's answer is in the same feed, counted once with the asks
+  const feed = withWaiting(feed0, runs);
+  const panel = isRoot ? uniPanel(feed) : { ...feed, rest: 0, privateCount: 0 };
   const drafts = taskTree ? draftsUnder(taskTree, here, tasks.drafts).filter((d) => !hidden(d.node)) : [];
   const openPrivate = (o: PrivateNeed["open"]) => { closeSheet(); setWork(false); openPath(o.path); };
   // r18: one summary for the companion and the work view: the node's `stands`, else its brief's "Now" (with the brief's own time), else the
@@ -378,9 +396,12 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   /** A vault with no areas yet: Uni says how to start, in plain words (r13), instead of a tag and a path to type. */
   const noAreas = isRoot && !!tree && !error && childrenOf(tree, ROOT).length === 0;
   const stands0 = noAreas ? { text: "No areas yet. Tell Uni here what you want to look after, and it will set up your first area.", ago: "" } : standsLine(rawStands, levelTasks.filter((t) => !hidden(t.node)), now);
-  /** r27 (Codex P1-2): a written summary is a dated account ("As of Oct 14: …"); a wait claim no open item is, or any task here changed after it was written, makes the whole of it "older than the latest work" */
+  /** r27 (Codex P1-2): a written summary is a dated account ("As of Oct 14: …"); a wait claim no open item is, an ask written on this node after it, or a task on this node closed on or after its day, makes the whole of it "older than the latest work" */
+  /** r28 (Codex P1-3): only tasks directly on this node can dim its summary (Uni's root summary is no longer dimmed by a change anywhere below it) */
+  const direct = levelTasks.filter((t) => t.node === node.path && !hidden(t.node));
+  const directClosed = (tasks.closed ?? []).filter((t) => t.node === node.path && !hidden(t.node));
   const written = !noAreas && !!rawStands && !!firstSentence(rawStands.text);
-  const stands = stands0 && !noAreas ? { ...stands0, asOf: written ? asOfDate(rawStands!.at) : null, stale: written ? staleSummary(stands0.text, rawStands!.at, feed.rows, levelTasks.filter((t) => !hidden(t.node)).map((t) => t.updatedAt)) : null } : stands0;
+  const stands = stands0 && !noAreas ? { ...stands0, asOf: written ? asOfDate(rawStands!.at) : null, stale: written ? staleSummary(stands0.text, rawStands!.at, [...feed.rows, ...(feed.recheck ?? [])], direct.map((t) => t.askedAt), directClosed.map((t) => t.closed)) : null } : stands0;
   /** The room's composer when it is the one here, else that room's (opened, filled in, never sent). */
   const sayIn = (roomId: string, text: string) => { closeSheet(); setWork(false); const here = roomFor(roomId); if (here) here.compose(text); else actions.compose(roomId, text); };
   /** From the work view or the sheet, "Open #room" for this room is the conversation: it goes back to it. Another room opens as a tab. */
@@ -392,7 +413,7 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   /** r18: a draft note written for the task (its `task` field names it): its text is the message the sheet copies. */
   const draftOf = (t: Task) => { const tid = taskTitle(t.title).id?.toUpperCase(); const d = tid ? tasks.drafts.find((x) => x.task?.toUpperCase() === tid) : null; return d ? { vault: t.vault ?? profile.vault, id: d.id } : null; };
   const sheetView = sheetTask && <TaskSheet key={sheetTask.id} task={sheetTask} gone={sheetGone} here={here} nodeName={nodeName} room={roomOfNode(sheetTask.node) ?? target} roomNamed={(n) => rooms.find((r) => r.name.replace(/^#/, "").toLowerCase() === n.replace(/^#/, "").toLowerCase()) ?? null} inRoom={target?.id} onClose={closeSheet}
-    draft={draftOf(sheetTask)}
+    draft={draftOf(sheetTask)} confirmation={confirm.of(sheetTask)} anyway={sheetAnyway} onRecheckRoom={confirm.retry}
     onAct={(t, a) => tasks.act(t, a, { sheet: true })} onDecide={(t, o) => tasks.decide(t, o)} onNote={actions.openNote} onOpenRoom={openRoomHere} onSay={chat ? sayIn : undefined} onPriority={(t, p) => void tasks.setPriority(t, p)} onStale={tasks.refresh} />;
   /** r20: a row's area when it is shown outside it (Uni's list holds every area's): its subtitle names it when its title can't say where it is. */
   const placeOf = (t: Task) => (t.node !== here ? nodeName(t.node) : null);

@@ -5,7 +5,7 @@
 // rooms' business: logged, never shown. Styling is in tree.css.
 import { useEffect, useState, type ReactNode } from "react";
 import { cleanText } from "../interface/contract";
-import { NeedRow, PrivateRow, RunText, WaitingRuns } from "./Companion";
+import { checkingAsks, NeedRow, PrivateRow, Rechecks, RunText, WaitingRuns } from "./Companion";
 import { isActiveRun, type Draft, type Run } from "./steerCore";
 import { quietAgo, runStateLabel, stampMs, titleWords, waitingOnYou, type NeedsFeed, type PrivateNeed } from "./simpleCore";
 import type { TaskLoad } from "./Companion";
@@ -31,7 +31,7 @@ export type WorkViewProps = {
   load: TaskLoad;
   /** Running and Drafts, read on their own (r16): not read yet, failed (with what was read before, and when), or read. */
   activity: { ready: boolean; error: string | null; lastOk: number | null };
-  onTask: (t: Task) => void; onDecide: (t: Task, option: string) => void; onNote: (ref: NoteRef) => void; onPrivate: (open: PrivateNeed["open"]) => void;
+  onTask: (t: Task, o?: { anyway?: boolean }) => void; onDecide: (t: Task, option: string) => void; onNote: (ref: NoteRef) => void; onPrivate: (open: PrivateNeed["open"]) => void;
   /** r20: a row's area when it is shown outside it (an action row's subtitle names it). */
   placeOf?: (t: Task) => string | null;
   /** Above the sections: the brief's lede and its Refresh. Below them: a project's own note, folded. */
@@ -55,7 +55,7 @@ export function WorkView(p: WorkViewProps) {
   const vault = useVaultProfile().vault;
   const live = p.runs.filter(isActiveRun);
   /** r27 (Codex P2-5): a run waiting on the user's answer is Needs you; Running holds only what is not waiting on them */
-  const waiting = live.filter(waitingOnYou);
+  const waiting = p.feed.waiting ?? [];
   const running = live.filter((r) => !waitingOnYou(r));
   const done = doneLately(p.runs);
   const motion = running.length + p.drafts.length + p.others.length;
@@ -71,6 +71,8 @@ export function WorkView(p: WorkViewProps) {
         {pending.map((t) => <NeedRow key={t.id} t={t} onTask={p.onTask} onDecide={p.onDecide} onNote={p.onNote} area={p.placeOf?.(t) ?? null} />)}
       </ul>}
       <WaitingRuns runs={waiting} className="cp-list cp-waiting wv-waiting" />
+      {!!p.feed.checking?.length && <p className="cp-checking" role="status" aria-busy="true">{checkingAsks(p.feed.checking.length)}</p>}
+      <Rechecks tasks={p.feed.recheck ?? []} onTask={p.onTask} />
     </section>
     {/* r27: no heading with nothing under it: Running is here when something runs, when what runs couldn't be read, or when nothing moves at all */}
     {(running.length > 0 || !!p.activity.error || !p.activity.ready || (motion === 0 && !p.privateOther)) && <section className="wv-sec" aria-label="Running">

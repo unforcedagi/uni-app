@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { buildTaskTree, dayOf, isLive, nodeFilterKeys, rollUp, snoozed, tasksUnder, tomorrowOf, type AnyState, type Counts, type Priority, type RawNote, type Task, type TaskNode, type TaskTree } from "./taskCore";
 import { vaultTasks, type AskRead } from "./vaultTasks";
+import { localDay } from "./simpleCore";
 import { ROOT } from "./treeCore";
 import { shouldReload } from "./pathCache";
 import { useVaultProfile } from "./ProfileContext";
@@ -33,10 +34,10 @@ const reduced = () => typeof window !== "undefined" && !!window.matchMedia?.("(p
 // Memory for this session only, scoped to the signed-in identity and cleared on Forget: tasks are Aaron's private work.
 /** Running and Drafts' own read (r16): read yet, the last failure, when they last read cleanly. */
 export type Activity = { ready: boolean; error: string | null; lastOk: number | null };
-type Memory = { owner: string; tree: (TaskTree & { truncated: boolean }) | null; tasks: Map<string, { list: Task[]; truncated: boolean }>; at: number | null; runs: RawNote[]; drafts: RawNote[]; activity: Activity;
+type Memory = { owner: string; tree: (TaskTree & { truncated: boolean }) | null; tasks: Map<string, { list: Task[]; truncated: boolean }>; at: number | null; runs: RawNote[]; drafts: RawNote[]; closed: Task[]; activity: Activity;
   /** r19: each task's check of its supporting notes (seeded from what the device verified, read again on every list read). */
   checks: Map<string, CheckState> | null };
-const fresh = (owner: string): Memory => ({ owner, tree: null, tasks: new Map(), at: null, runs: [], drafts: [], activity: { ready: false, error: null, lastOk: null }, checks: null });
+const fresh = (owner: string): Memory => ({ owner, tree: null, tasks: new Map(), at: null, runs: [], drafts: [], closed: [], activity: { ready: false, error: null, lastOk: null }, checks: null });
 let memory: Memory = fresh("");
 export function forgetTasks() { memory = fresh(""); }
 /** Forget on the device too (the user's Forget): the saved list goes with the key. */
@@ -81,6 +82,8 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
   // The dispatch ledger and the draft notes: read with the tree-wide load (the node page's Running and Drafts), empty when the vault has none.
   const [rawRuns, setRawRuns] = useState<RawNote[]>(() => scoped(owner).runs);
   const [rawDrafts, setRawDrafts] = useState<RawNote[]>(() => scoped(owner).drafts);
+  /** r28: tasks closed lately (read with the tree-wide load): a closure after a summary was written dims it. */
+  const [closedTasks, setClosedTasks] = useState<Task[]>(() => scoped(owner).closed);
   /** Running and Drafts are read on their own (r16), so the list never waits for them; whether they were read, and when. */
   const [activity, setActivity] = useState<Activity>(() => scoped(owner).activity);
   /** r19: each task's check of the notes it stands on (see `checkOf`). */
@@ -136,6 +139,15 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
         mem.activity = runs && drafts ? { ready: true, error: null, lastOk: Date.now() } : { ...mem.activity, error: "Couldn't check what's running" };
         setActivity(mem.activity);
       });
+    }
+    if (nodePath === "") {
+      // the window starts at the oldest summary there is, at most 90 days back (older ones are old whatever was closed)
+      void treeP.then((t) => {
+        const floor = localDay(new Date(Date.now() - 90 * 86_400_000));
+        const days = [...t.stands.values()].map((s) => (s.at ? localDay(new Date(Date.parse(s.at.length === 10 ? `${s.at}T12:00:00` : s.at))) : "")).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d));
+        const since = days.length ? [days.sort()[0], floor].sort()[1] : localDay(new Date(Date.now() - 30 * 86_400_000));
+        return vaultTasks.loadClosed(t, since);
+      }).then((rows) => { if (rows && current() && memory === mem) { mem.closed = rows; setClosedTasks(rows); } });
     }
     (async () => {
       const r = await vaultTasks.loadTasks(treeP, nodePath);
@@ -343,7 +355,7 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
     } });
   }, [nodePath]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  return { tree, tasks: visible, all: checked, runs, drafts, setPriority, decide, leaving, counts, truncated, treeTruncated, error, treeError, loading, notice, undo, act, refresh, refreshIfStale, dismissNotice: () => setNotice(null), ready: list !== null, now,
+  return { tree, tasks: visible, all: checked, runs, drafts, closed: closedTasks, setPriority, decide, leaving, counts, truncated, treeTruncated, error, treeError, loading, notice, undo, act, refresh, refreshIfStale, dismissNotice: () => setNotice(null), ready: list !== null, now,
     /** The rows are the device's copy from this moment (ms), not yet read again this session (r16). */
     savedAt,
     /** The current read has run past SLOW_MS: "Still loading · Retry" (r16). */

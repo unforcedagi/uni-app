@@ -139,8 +139,8 @@ check("the four lookup states (kept internally); answers are ready only when cur
   assert.equal(gateOf(true, checkInResult({ at: "2026-10-12", kind: "added" }, null, keys)), "failed");
   assert.equal(gateOf(true, checkInResult({ at: "2026-10-12", kind: "added" }, [], keys)), "none");
   assert.equal(gateOf(true, checkInResult({ at: "2026-10-12", kind: "added" }, [{ ts: Date.parse("2026-10-13T10:00:00Z") / 1000, body: "deploy #38 went fine" }], keys)), "found");
-  assert.equal(answersReady("current", false), true);
-  for (const g of ["pending", "unconfirmed", "unreadable"] as const) { assert.equal(answersReady(g, false), false, g); assert.equal(answersReady(g, true), true, `${g} after ${ANSWER_ANYWAY}`); }
+  assert.equal(answersReady("confirmed", false), true);
+  for (const g of ["pending", "recheck"] as const) { assert.equal(answersReady(g, false), false, g); assert.equal(answersReady(g, true), true, `${g} after ${ANSWER_ANYWAY}`); }
 });
 check("the revision guard: a task changed since the sheet loaded", () => {
   assert.equal(revisionMoved("2026-10-14T10:00:00Z", "2026-10-14T10:00:00Z"), false);
