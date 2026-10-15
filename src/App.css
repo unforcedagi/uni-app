@@ -332,6 +332,7 @@ h1 { font-family: var(--serif); font-weight: 500; font-size: 34px; line-height: 
 .journal-actions .mic span { font-size: 15px; font-variant-numeric: tabular-nums; }
 .journal-prompt { margin: 0; font-family: var(--serif); font-style: italic; font-size: 19px; color: var(--text-soft); }
 .journal-status { flex: 1; font-size: 13px; color: var(--muted); min-width: 0; line-height: 1.45; }
+.journal-same { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; margin-top: 10px; }
 .journal-list { display: flex; flex-direction: column; gap: 14px; }
 .journal-entry { padding: 16px 18px 12px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow); animation: rise .45s var(--ease) both; }
 .journal-entry.queued { border-style: dashed; background: var(--surface-2); box-shadow: none; }

@@ -2,7 +2,7 @@ import { SettingsIcon, MicIcon } from "./Icons";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useRecorder } from "./recorder";
-import { entryText, greeting, mmss, newDraft, type FlushReport, type JournalNote, type QueuedEntry } from "./journalCore";
+import { entryText, greeting, mmss, newDraft, sameWordsLine, type FlushReport, type JournalDraft, type JournalNote, type QueuedEntry, type SameWords } from "./journalCore";
 
 type Room = { id: string; name: string };
 type VaultConfig = { hub: string; vault: string };
@@ -25,6 +25,21 @@ export default function Journal({ rooms, uniRoomId, onShare, onBack, backTo = "U
   // The draft outlives the Journal screen: leaving to answer a message, or the
   // app being closed, must never lose what you were writing.
   const [text, setText] = useState(() => localStorage.getItem(DRAFT_KEY) ?? "");
+  /** The composer's words as of now, and a count of every change to them: a save that returns later checks it is still the words it was sent with. */
+  const live = useRef({ text, rev: 0 });
+  function edit(next: string) {
+    live.current = { text: next, rev: live.current.rev + 1 };
+    setText(next);
+  }
+  /** Empty the composer, but only if it still holds the words that were submitted at `rev`; anything typed since stays. */
+  function clearIf(rev: number, submitted: string) {
+    if (live.current.rev !== rev) return false;
+    live.current = { text: "", rev: rev + 1 };
+    setText("");
+    // the Journal screen may have closed while the save was out: its draft must not come back as unsent words
+    if (!alive.current && localStorage.getItem(DRAFT_KEY) === submitted) localStorage.removeItem(DRAFT_KEY);
+    return true;
+  }
   useEffect(() => {
     if (text) localStorage.setItem(DRAFT_KEY, text); else localStorage.removeItem(DRAFT_KEY);
   }, [text]);
@@ -40,6 +55,12 @@ export default function Journal({ rooms, uniRoomId, onShare, onBack, backTo = "U
   const [settings, setSettings] = useState(false);
   /** The entry the same words were already saved as (a duplicate save shows it instead of adding one). */
   const [again, setAgain] = useState<string | null>(null);
+  /** The new words match this entry: nothing is saved until "Save another" or "Keep one". */
+  const [same, setSame] = useState<SameWords | null>(null);
+  /** The words (revision) the "Same words" question was raised for. */
+  const sameFor = useRef<number | null>(null);
+  /** This composer send: its ids stay the same when it is retried, so the outbox knows a retry from new words. */
+  const send = useRef<{ body: string; draft: JournalDraft } | null>(null);
   const watching = useRef(new Set<string>());
   const alive = useRef(true);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
@@ -83,13 +104,19 @@ export default function Journal({ rooms, uniRoomId, onShare, onBack, backTo = "U
     setTimeout(tick, 2000);
   }, []);
 
-  const afterFlush = useCallback(async (r: FlushReport, what: string) => {
+  const afterFlush = useCallback(async (r: FlushReport, what: string, rev?: number) => {
     // what was sent is in the list before it leaves the queue, so a sent entry never blinks out of view
     if (r.sent.length) await load(false);
     await loadQueue();
-    if (r.duplicate) {
+    if (r.duplicate && rev !== undefined && live.current.rev !== rev) {
+      // the words were changed while this save was out: the question is about words that are gone, and nothing was saved
+      setStatus("");
+      if (r.error) setError(r.error);
+    } else if (r.duplicate) {
+      sameFor.current = rev ?? live.current.rev;
+      setSame(r.duplicate);
       setAgain(r.duplicate.id);
-      setStatus(r.duplicate.kind === "saved" ? "Already saved" : "Waiting to send");
+      setStatus(sameWordsLine(r.duplicate));
       if (r.error) setError(r.error);
     } else if (r.error) {
       setStatus(`${what} saved on this device · will send when the vault is reachable`);
@@ -122,28 +149,50 @@ export default function Journal({ rooms, uniRoomId, onShare, onBack, backTo = "U
 
   useEffect(() => { entries.filter((e) => e.pending).forEach((e) => watch(e.id)); }, [entries, watch]);
 
-  async function saveText() {
+  async function saveText(saveAnother = false) {
     const body = text.trim();
     if (!body || saving) return;
+    if (send.current?.body !== body) send.current = { body, draft: newDraft(body, "text") };
+    const draft = send.current.draft;
+    const rev = live.current.rev;
     setSaving(true);
+    setSame(null);
     setStatus("Saving…");
     try {
-      const r = await invoke<FlushReport>("journal_save_text", { entry: newDraft(body, "text") });
-      setText("");
-      await afterFlush(r, "Journal entry");
+      const r = await invoke<FlushReport>("journal_save_text", { entry: draft, saveAnother });
+      // same words as another entry: nothing was saved, and the text stays until a choice is made
+      if (!r.duplicate) {
+        // this send is finished whatever the composer holds now; the composer clears only if it still holds these words
+        if (send.current?.draft === draft) send.current = null;
+        clearIf(rev, text);
+      }
+      await afterFlush(r, "Journal entry", rev);
     } catch (e) { setError(String(e)); setStatus("Not saved · your text is still here"); }
     finally { setSaving(false); }
+  }
+
+  function keepOne() {
+    // only the words the question was raised for are dropped
+    if (!same || sameFor.current !== live.current.rev) { setSame(null); return; }
+    setSame(null);
+    clearIf(live.current.rev, live.current.text);
+    send.current = null;
+    setAgain(same.id);
+    setStatus(same.kind === "saved" ? "Kept one · it's in your vault" : "Kept one · waiting to send");
   }
 
   const recorder = useRecorder(async (blob, mime) => {
     if (blob.size < 200) { setStatus("Recording was empty"); return; }
     setSaving(true);
     setStatus("Saving journal entry…");
-    const note = text.trim();
+    const note = live.current.text.trim();
+    const rev = live.current.rev;
+    const submitted = live.current.text;
     try {
       const bytes = new Uint8Array(await blob.arrayBuffer());
       const r = await invoke<FlushReport>("journal_save_voice", bytes, { headers: { "x-entry": JSON.stringify(newDraft(note, "voice")), "x-audio-mime": mime } });
-      setText("");
+      // the typed words went with the recording: clear them only if they are still what was sent
+      if (clearIf(rev, submitted)) { setSame(null); send.current = null; }
       await afterFlush(r, "Journal entry");
       if (!r.error) setStatus("Journal entry saved · transcribing…");
     } catch (e) { setError(String(e)); setStatus("Journal entry not saved"); }
@@ -187,7 +236,7 @@ export default function Journal({ rooms, uniRoomId, onShare, onBack, backTo = "U
     {settings && cfg && <JournalSettings cfg={cfg} onSaved={(c) => { setCfg(c); setSettings(false); void load(false); }} />}
     <div className="journal-compose">
       <div className="journal-writing-heading"><p className="journal-prompt">{greeting(new Date())}</p><button className="note-action" aria-pressed={focus} onClick={onFocus}>Focus</button></div>
-      <textarea value={text} onChange={(e) => setText(e.target.value)} placeholder="What's here right now…" rows={4} maxLength={65536} aria-label="Journal entry"
+      <textarea value={text} onChange={(e) => { edit(e.target.value); if (same) { setSame(null); setStatus(""); } }} placeholder="What's here right now…" rows={4} maxLength={65536} aria-label="Journal entry"
         onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void saveText(); } }} />
       <div className="journal-actions">
         <button className={`mic ${recorder.recording ? "on" : ""}`} onClick={() => void toggleMic()} disabled={saving && !recorder.recording} aria-label={recorder.recording ? "Stop recording and save" : "Record a journal entry"}>
@@ -196,6 +245,10 @@ export default function Journal({ rooms, uniRoomId, onShare, onBack, backTo = "U
         <span className="journal-status" role="status">{recorder.recording ? `Recording · ${mmss(recorder.elapsed)}${text.trim() ? " · your typed text is kept with it" : ""}` : status}</span>
         <button className="send" onClick={() => void saveText()} disabled={!text.trim() || saving || recorder.recording}>{saving ? "Saving…" : "Save"}</button>
       </div>
+      {same && <div className="journal-same" role="group" aria-label="Same words as another entry">
+        <button type="button" className="note-action" onClick={() => void saveText(true)} disabled={saving}>Save another</button>
+        <button type="button" className="note-action" onClick={keepOne} disabled={saving}>Keep one</button>
+      </div>}
       {error && <p className="error" role="alert">{error}</p>}
     </div>
     <div className="message-list journal-list" aria-label="Journal entries">
