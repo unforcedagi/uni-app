@@ -90,11 +90,17 @@ export function noteUrl(hub: string, vault: string, idOrPath: string): string {
   return `${hub.replace(/\/+$/, "")}/surface/parachute/v/${encodeURIComponent(vault)}/n/${encodeURIComponent(idOrPath)}`;
 }
 
-/** Whether a link's hub is the one this app reads from (null = shorthand = ours). */
-export function sameHub(ref: VaultRef, hub: string | null | undefined): boolean {
+/**
+ * Whether a link's hub is the one this app reads from (null = shorthand = ours). `aliases` are the other origins of the same hub, from the
+ * app's one alias table (T-137: `uni-1` and `uni` during the tailnet rename), so old links in notes keep opening in-app after it.
+ */
+export function sameHub(ref: VaultRef, hub: string | null | undefined, aliases: readonly string[] = []): boolean {
   if (!ref.hub) return true;
   if (!hub) return false;
-  try { return new URL(ref.hub).origin === new URL(hub).origin; } catch { return false; }
+  try {
+    const origin = new URL(ref.hub).origin;
+    return [hub, ...aliases].some((h) => { try { return new URL(h).origin === origin; } catch { return false; } });
+  } catch { return false; }
 }
 
 /** Short visible label for a bare link: `uni · System/Now`, ids abbreviated. */

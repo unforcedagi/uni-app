@@ -144,6 +144,21 @@ assert.ok(!parseInline("[[A/B\nC]]").some((n) => n.t === "vaultlink"));
 assert.deepEqual(resolve("Runbooks/Tending#Weekly|alias"), { href: noteRoute("uni", "T1"), exists: true });
 assert.deepEqual(resolve("unforced:Notes/Title with spaces#Heading|alias"), { href: noteRoute("unforced", "Notes/Title with spaces"), exists: false });
 assert.ok(!sameHub({ hub: "https://uni-2.example.ts.net", vault: "uni", ref: ID }, HUB));
+// T-137: during the tailnet rename uni-1 and uni are one hub (the app's alias table hands both origins over in journal_config)
+{
+  const OLD = "https://uni-1.example.ts.net", NEW = "https://uni.example.ts.net";
+  const old = parseNoteUrl(`${OLD}/surface/parachute/v/uni/n/${ID}`)!;
+  const neu = parseNoteUrl(`${NEW}/surface/parachute/v/uni/n/${ID}`)!;
+  // before the rename (configured uni-1) and after it (the app remembered uni): links on either name open in-app
+  for (const [hub, origins] of [[OLD, [OLD, NEW]], [NEW, [NEW, OLD]]] as const) {
+    assert.ok(sameHub(old, hub, origins), `uni-1 link, hub ${hub}`);
+    assert.ok(sameHub(neu, hub, origins), `uni link, hub ${hub}`);
+    assert.ok(!sameHub({ hub: "https://uni-2.example.ts.net", vault: "uni", ref: ID }, hub, origins), "uni-2 is still another hub");
+    assert.ok(!sameHub({ hub: "http://uni-1.example.ts.net", vault: "uni", ref: ID }, hub, origins), "another scheme is another origin");
+  }
+  // without the alias list (an older config answer) only the configured name is ours
+  assert.ok(!sameHub(neu, OLD));
+}
 
 const spaced = wikilinkResolver({ id: "S", links: [{ sourceId: "S", targetNote: { id: "T", path: "Notes/Title with spaces" } }] }, "uni");
 assert.deepEqual(spaced("Notes/Title with spaces#Heading|alias"), { href: noteRoute("uni", "T"), exists: true });

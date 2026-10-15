@@ -1,4 +1,6 @@
-//! Voice-message transcription on uni-1 (faster-whisper behind Tailscale Serve).
+//! Voice-message transcription on the hub's host (faster-whisper behind
+//! Tailscale Serve, port 8445). The URL derives from the hub setting
+//! ([`crate::hub::transcribe_url`]), so it follows the tailnet rename.
 //!
 //! The app POSTs the recorded audio with a NIP-98 header signed by the user's
 //! key; the server only accepts allowlisted pubkeys, so no token lives on the
@@ -11,8 +13,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::{Error, Result};
 
-/// Public endpoint; the NIP-98 `u` tag must match it exactly.
-pub const TRANSCRIBE_URL: &str = "https://uni-1.example.ts.net:8445/transcribe";
 /// Largest recording sent for transcription.
 pub const MAX_TRANSCRIBE_BYTES: usize = 25 * 1024 * 1024;
 
@@ -24,15 +24,67 @@ pub struct Transcript {
     pub duration: Option<f64>,
 }
 
-/// Transcribe `audio` at `url` (normally [`TRANSCRIBE_URL`]).
+/// Transcribe `audio` at `url` (the NIP-98 `u` tag must match it exactly).
 pub async fn transcribe(url: &str, keys: &Keys, audio: Vec<u8>, mime: &str) -> Result<Transcript> {
+    post(url, keys, audio, mime).await.map_err(|(_, e)| e)
+}
+
+/// Transcribe on the hub's host ([`crate::hub::transcribe_url`]). When that
+/// host can't be reached at all (DNS, connection) and the hub has another
+/// name ([`crate::hub`]), try that once; `on_switch` hears the hub origin
+/// that answered so the app can remember it.
+pub async fn transcribe_on_hub(
+    hub: &str,
+    keys: &Keys,
+    audio: Vec<u8>,
+    mime: &str,
+    on_switch: Option<crate::parachute::OnHubSwitch>,
+) -> Result<Transcript> {
+    let url = crate::hub::transcribe_url(hub).ok_or_else(|| Error::Media(format!("no transcription URL for hub {hub}")))?;
+    let alias = crate::hub::alias_of(hub).and_then(|a| Some((crate::hub::transcribe_url(&a)?, a)));
+    transcribe_or_alias(&url, alias, keys, audio, mime, on_switch).await
+}
+
+/// `url`, then once `alias` (its URL, and the hub origin to report) if `url`'s host is unreachable.
+async fn transcribe_or_alias(
+    url: &str,
+    alias: Option<(String, String)>,
+    keys: &Keys,
+    audio: Vec<u8>,
+    mime: &str,
+    on_switch: Option<crate::parachute::OnHubSwitch>,
+) -> Result<Transcript> {
+    let err = match post(url, keys, audio.clone(), mime).await {
+        Ok(t) => return Ok(t),
+        Err((true, e)) => e,
+        Err((false, e)) => return Err(e),
+    };
+    let Some((alias_url, alias)) = alias else {
+        return Err(err);
+    };
+    match post(&alias_url, keys, audio, mime).await {
+        Ok(t) => {
+            if let Some(f) = on_switch {
+                f(&alias);
+            }
+            Ok(t)
+        }
+        // the alias answered with an error: that's its answer
+        Err((false, e)) => Err(e),
+        Err((true, _)) => Err(err),
+    }
+}
+
+/// One POST; the error says whether the host was unreachable (DNS/connect).
+async fn post(url: &str, keys: &Keys, audio: Vec<u8>, mime: &str) -> std::result::Result<Transcript, (bool, Error)> {
+    let plain = |e: Error| (false, e);
     if audio.is_empty() || audio.len() > MAX_TRANSCRIBE_BYTES {
-        return Err(Error::Media("recording is empty or larger than 25 MB".into()));
+        return Err(plain(Error::Media("recording is empty or larger than 25 MB".into())));
     }
     crate::init_crypto();
-    let auth = crate::parachute::nip98_header(keys, url, "POST", &audio)?;
+    let auth = crate::parachute::nip98_header(keys, url, "POST", &audio).map_err(plain)?;
     // Whisper on a laptop CPU runs near real time; allow for long messages.
-    let client = crate::media::http_client_with_timeout(Duration::from_secs(300))?;
+    let client = crate::media::http_client_with_timeout(Duration::from_secs(300)).map_err(plain)?;
     let hint = if mime.starts_with("audio/") && !mime.contains(['\r', '\n']) { mime } else { "application/octet-stream" };
     let response = client
         .post(url)
@@ -41,14 +93,14 @@ pub async fn transcribe(url: &str, keys: &Keys, audio: Vec<u8>, mime: &str) -> R
         .body(audio)
         .send()
         .await
-        .map_err(|e| Error::Media(format!("transcription unreachable (tailnet only): {e}")))?;
+        .map_err(|e| (crate::hub::is_connect_failure(&e), Error::Media(format!("transcription unreachable (tailnet only): {e}"))))?;
     let status = response.status();
     let body = response.text().await.unwrap_or_default();
     if !status.is_success() {
         let brief: String = body.chars().take(300).collect();
-        return Err(Error::Media(format!("transcription failed ({status}): {brief}")));
+        return Err(plain(Error::Media(format!("transcription failed ({status}): {brief}"))));
     }
-    serde_json::from_str(&body).map_err(|e| Error::Media(format!("bad transcription response: {e}")))
+    serde_json::from_str(&body).map_err(|e| plain(Error::Media(format!("bad transcription response: {e}"))))
 }
 
 #[cfg(test)]
@@ -86,5 +138,67 @@ mod tests {
         assert_eq!(body, b"OggS fake");
         assert!(head.to_ascii_lowercase().contains("authorization: nostr "));
         assert!(transcribe(&url, &keys, vec![], "audio/ogg").await.is_err());
+    }
+
+    /// Answers one POST with `status` and a transcript body.
+    async fn answer_once(status: u16) -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://127.0.0.1:{}/transcribe", listener.local_addr().unwrap().port());
+        tokio::spawn(async move {
+            let (mut sock, _) = listener.accept().await.unwrap();
+            let mut buf = vec![0u8; 65536];
+            let _ = sock.read(&mut buf).await;
+            let reply = r#"{"text":"from the alias","language":"en","duration":1.0}"#;
+            let _ = sock.write_all(format!("HTTP/1.1 {status} X\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{reply}", reply.len()).as_bytes()).await;
+        });
+        url
+    }
+
+    #[test]
+    fn t137_the_url_derives_from_the_hub_host() {
+        assert_eq!(crate::hub::transcribe_url("https://uni-1.example.ts.net").as_deref(), Some("https://uni-1.example.ts.net:8445/transcribe"));
+        assert_eq!(crate::hub::transcribe_url("https://uni.example.ts.net").as_deref(), Some("https://uni.example.ts.net:8445/transcribe"));
+    }
+
+    #[tokio::test]
+    async fn t137_an_unresolvable_host_falls_back_to_the_alias_once_and_reports_it() {
+        let alias_url = answer_once(200).await;
+        let heard = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let h2 = heard.clone();
+        let t = transcribe_or_alias(
+            "https://uni-t137-gone.invalid:8445/transcribe",
+            Some((alias_url, "https://uni.example".into())),
+            &Keys::generate(),
+            b"OggS fake".to_vec(),
+            "audio/ogg",
+            Some(std::sync::Arc::new(move |o: &str| h2.lock().unwrap().push(o.into()))),
+        )
+        .await
+        .unwrap();
+        assert_eq!(t.text, "from the alias");
+        assert_eq!(*heard.lock().unwrap(), vec!["https://uni.example".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn t137_an_http_error_is_an_answer_never_a_fallback() {
+        for status in [401u16, 500] {
+            let hub_url = answer_once(status).await;
+            let heard = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let h2 = heard.clone();
+            // an answer, even an error, is never retried on the alias (the report hook stays silent)
+            let e = transcribe_or_alias(
+                &hub_url,
+                Some(("https://uni-t137-never.invalid:8445/transcribe".into(), "https://uni.example".into())),
+                &Keys::generate(),
+                b"OggS fake".to_vec(),
+                "audio/ogg",
+                Some(std::sync::Arc::new(move |_: &str| h2.store(true, std::sync::atomic::Ordering::SeqCst))),
+            )
+            .await
+            .unwrap_err()
+            .to_string();
+            assert!(e.contains(&format!("({status}")), "{e}");
+            assert!(!heard.load(std::sync::atomic::Ordering::SeqCst));
+        }
     }
 }
