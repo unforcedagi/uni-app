@@ -85,6 +85,19 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
     return { ...buildTaskTree(nodes, rootPath), truncated: !complete };
   }
 
+  /**
+   * r28 (Codex P1-3): the tasks closed (done or archived) on or after `since` (a day), for the one rule that a closure after a summary was
+   * written dims it. Read on its own, never holding the list back; filtered here by `closed` too, so a vault that ignores the filter
+   * still answers right. null: the read failed (a summary then isn't dimmed by closures it couldn't see).
+   */
+  async function loadClosed(treeIn: TaskTree | Promise<TaskTree>, since: string): Promise<Task[] | null> {
+    try {
+      const t = await treeIn;
+      const { rows } = await allPages((offset) => call("vault_query_meta", { vault: name(), tag: "task", metadata: { state: { in: ["done", "archived"] }, closed: { gte: since } }, limit: LIMIT, ...(offset ? { offset } : {}) }) as Promise<RawNote[]>);
+      return rows.map((n) => parseTask(n, t)).filter((x): x is Task => !!x && (x.state === "done" || x.state === "archived") && !!x.closed && x.closed.slice(0, 10) >= since);
+    } catch { return null; }
+  }
+
   /** Every note with `tag`, metadata only (the dispatch ledger `run`, the `draft` notes). A vault with none, or one that refuses, reads as empty: these are extras on the page. */
   async function loadTagged(tag: string): Promise<RawNote[] | null> {
     // null = the read failed: the caller keeps what it had rather than wiping Running/Drafts on a transient error
@@ -386,7 +399,7 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
     askCache.clear(); checkCache.clear(); askOwner = ""; checkOwner = "\u0000";
     try { for (let i = localStorage.length - 1; i >= 0; i--) { const k = localStorage.key(i); if (k && /^uni\.(asks|checks|support)\.v\d+:/.test(k)) localStorage.removeItem(k); } } catch { /* nothing kept */ }
   }
-  return { prioritize, forgetKept, setAskOwner, loadTree, loadTagged, loadAsks, loadSubtree, loadTasks, loadSupport, assessTask, loadChecks, cachedChecks, transition, decide, snooze, setPriority, nearSupported: () => nearOk };
+  return { prioritize, forgetKept, setAskOwner, loadTree, loadTagged, loadClosed, loadAsks, loadSubtree, loadTasks, loadSupport, assessTask, loadChecks, cachedChecks, transition, decide, snooze, setPriority, nearSupported: () => nearOk };
 }
 
 export const vaultTasks = createVaultTasks();

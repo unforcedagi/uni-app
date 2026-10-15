@@ -2,7 +2,7 @@
 // Run: node --experimental-strip-types scripts/simpleR27.test.ts
 import assert from "node:assert/strict";
 import {
-  answersReady, asOfDate, asOfPrefix, checkInResult, checkingBanner, detailLists, freshnessOf, itemForms, needsLookup, recordVouches, referencedItems,
+  answersReady, asOfDate, asOfPrefix, checkInResult, checkingBanner, detailLists, confirmationOf, itemForms, needsRead, askStamp, referencedItems,
   repeatsHeading, runStateLabel, staleLine, staleSummary, standsHeading, unconfirmedLine, waitingOnYou, LOOKUP_LIMIT,
 } from "../src/areas/simpleCore.ts";
 
@@ -70,34 +70,39 @@ check("repeatsHeading: the heading or the title said again", () => {
 // ---- Codex P1-1: freshness
 const NOW = Date.parse("2026-10-15T12:00:00Z");
 const day = (n: number) => new Date(NOW - n * 86_400_000).toISOString();
-check("a record vouches for itself only when written within 3 days", () => {
-  assert.equal(recordVouches(day(0.5), NOW), true);
-  assert.equal(recordVouches(day(2.9), NOW), true);
-  assert.equal(recordVouches(day(3.1), NOW), false);
-  assert.equal(recordVouches(null, NOW), false);
-  assert.equal(recordVouches("not a date", NOW), false);
-  assert.equal(recordVouches(day(-2), NOW), true, "a write stamped ahead of this clock is skew, not an old record");
+check("r28: an ask is confirmed only by its own asked_at: within 3 days, never in the future", () => {
+  assert.equal(askStamp(day(0.5), NOW), "recent");
+  assert.equal(askStamp(day(2.9), NOW), "recent");
+  assert.equal(askStamp(day(3.1), NOW), "old");
+  assert.equal(askStamp(null, NOW), "none");
+  assert.equal(askStamp("not a date", NOW), "none");
+  assert.equal(askStamp(day(-2), NOW), "future", "ahead of this clock by days is a wrong date, not a vouch");
+  assert.equal(askStamp(day(-0.001), NOW), "recent", "a clock a few minutes ahead is skew");
 });
-check("current: vouched by its own record, a room to check, and nothing related since", () => {
-  assert.equal(freshnessOf(true, day(1), { kind: "none" }, NOW), "current");
-  assert.equal(answersReady("current", false), true);
+check("r28: confirmed = a recent asked_at, a room to check, and nothing related since", () => {
+  const r = confirmationOf(true, day(1), { kind: "none" }, NOW);
+  assert.equal(r.state, "confirmed");
+  assert.equal(answersReady("confirmed", false), true);
 });
-check("unconfirmed: no room, no date, an old record, related chat since, a read too short to tell", () => {
-  assert.equal(freshnessOf(false, day(1), { kind: "none" }, NOW), "unconfirmed", "no room");
-  assert.equal(freshnessOf(true, null, { kind: "none" }, NOW), "unconfirmed", "no date");
-  assert.equal(freshnessOf(true, day(5), { kind: "none" }, NOW), "unconfirmed", "older than 3 days, whatever the chat says");
-  assert.equal(freshnessOf(true, day(1), { kind: "found", hit: { key: "#38", ref: "m1", ts: 1 } }, NOW), "unconfirmed", "related chat since");
-  assert.equal(freshnessOf(true, day(5), null, NOW), "unconfirmed", "no lookup is needed to say so");
-  assert.equal(needsLookup(true, day(5), NOW), false);
-  assert.equal(needsLookup(false, day(1), NOW), false);
-  assert.equal(needsLookup(true, day(1), NOW), true);
-  assert.equal(answersReady("unconfirmed", false), false);
-  assert.equal(answersReady("unconfirmed", true), true);
+check("r28: a recheck: no date, an old date, a future date, no room, related chat since, a read too short, a chat that can't be read", () => {
+  const why = (r: ReturnType<typeof confirmationOf>) => `${r.state}:${r.why}`;
+  assert.equal(why(confirmationOf(true, null, { kind: "none" }, NOW)), "recheck:no-date", "no asked_at: updated_at is never a fallback");
+  assert.equal(why(confirmationOf(true, day(5), { kind: "none" }, NOW)), "recheck:old");
+  assert.equal(why(confirmationOf(true, day(-3), { kind: "none" }, NOW)), "recheck:future");
+  assert.equal(why(confirmationOf(false, day(1), { kind: "none" }, NOW)), "recheck:no-room");
+  assert.equal(why(confirmationOf(true, day(1), { kind: "found", hit: { key: "#38", ref: "m1", ts: 1 } }, NOW)), "recheck:chat-since");
+  assert.equal(why(confirmationOf(true, day(1), { kind: "found", hit: null }, NOW)), "recheck:chat-since", "a read that starts after the ask");
+  const f = confirmationOf(true, day(1), { kind: "failed" }, NOW);
+  assert.equal(why(f), "recheck:read-failed"); assert.equal(f.failed, true);
+  assert.equal(why(confirmationOf(true, day(5), null, NOW)), "recheck:old", "no chat read is needed to say so");
+  assert.equal(needsRead(true, day(5), NOW), false);
+  assert.equal(needsRead(false, day(1), NOW), false);
+  assert.equal(needsRead(true, day(1), NOW), true);
+  assert.equal(answersReady("recheck", false), false);
+  assert.equal(answersReady("recheck", true), true);
 });
-check("couldn't read: the chat lookup failed; pending until it is back", () => {
-  assert.equal(freshnessOf(true, day(1), { kind: "failed" }, NOW), "unreadable");
-  assert.equal(freshnessOf(true, day(1), null, NOW), "pending");
-  assert.equal(answersReady("unreadable", false), false);
+check("r28: pending while the room's chat is being read", () => {
+  assert.equal(confirmationOf(true, day(1), null, NOW).state, "pending");
   assert.equal(answersReady("pending", false), false);
 });
 check("the line over an unconfirmed request: 'Asked Oct 13 · not confirmed since'", () => {

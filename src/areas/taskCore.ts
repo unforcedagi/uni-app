@@ -64,6 +64,13 @@ export type Task = {
    */
   asked?: string | null;
   added?: string | null;
+  /**
+   * r28: `asked_at`, written by tasks.py whenever a room or the user writes the task's `next` or `detail` (other edits don't touch it). The only
+   * field that can confirm an ask is still current: never `updatedAt`, which any unrelated edit renews. Absent: the ask is unconfirmed.
+   */
+  askedAt?: string | null;
+  /** r28: `closed`, the day a done or archived task was closed (tasks.py): a closure after a summary was written dims it. */
+  closed?: string | null;
   /** r23: `detail`, the content an ask carries (T-131: the questions, the message, the draft): the sheet shows it under the step. */
   detail?: string | null;
   /** r23: the room that stewards its node, by name (set by the list, never stored): who "Ask #room for the message" names. */
@@ -201,6 +208,8 @@ export function parseTask(n: RawNote, tree: TaskTree): Task | null {
     ...(listOf(m.depends_on ?? m.blocked_by).length ? { dependsOn: listOf(m.depends_on ?? m.blocked_by) } : {}),
     ...(listOf(m.questions).length ? { questions: listOf(m.questions) } : {}),
     ...(str(m.asked) ?? str(m.asked_at) ?? str(m.next_at) ? { asked: str(m.asked) ?? str(m.asked_at) ?? str(m.next_at) } : {}),
+    ...(str(m.asked_at) ? { askedAt: str(m.asked_at) } : {}),
+    ...(str(m.closed) ? { closed: str(m.closed) } : {}),
     ...(str(m.created) ?? str(n.createdAt) ? { added: str(m.created) ?? str(n.createdAt) } : {}),
     ...(str(m.detail) ? { detail: str(m.detail) } : {}),
   };

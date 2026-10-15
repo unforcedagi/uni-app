@@ -458,6 +458,13 @@ fn schedule_read_state_publish(app: &tauri::AppHandle) {
     });
 }
 
+/// One line from the webview into the app's own log (`uni.log`): which asks Uni must recheck (T-124 r28). Task ids only; one line, bounded.
+#[tauri::command]
+fn log_line(line: String) {
+    let one: String = line.chars().filter(|c| !c.is_control()).take(1000).collect();
+    tracing::info!(target: "uni_web", "{one}");
+}
+
 /// Open a link from a message in the system browser. Only web and mail links;
 /// anything else (javascript:, file:, intent:) is refused.
 #[tauri::command]
@@ -1830,6 +1837,7 @@ pub fn run() {
             #[cfg(all(debug_assertions, target_os = "linux"))]
             t76::t76_read,
             webview_runtime,
+            log_line,
             get_rooms,
             get_messages,
             get_members,

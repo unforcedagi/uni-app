@@ -4,7 +4,7 @@ import { cleanText } from "../interface/contract";
 import { isMe, ownerLabel, PRIORITIES, PRIORITY_LABEL, priorityOf, type Priority, type Task } from "./taskCore";
 import type { RoomRef } from "./talkCore";
 import type { ActResult, TaskAction, Undo } from "./useTasks";
-import { ANSWER_ANYWAY, CHANGED_SINCE, answersReady, checkingRoom, freshnessOf, needsLookup, notWrittenDown, referencedItems, repeatsHeading, revisionMoved, stepNotes, unconfirmedLine, actionLead, actionOf, askedLine, titleSays, checkInResult, checkingBanner, couldntRead, currentStep, type CheckIn, type RoomMsg, unresolvedBlock, withoutIntro, requestKeys, type ChatHit, pointsAt, pointsNowhere, quotedMessage, requestDate, withoutCut, answerLabel, answerText, ANSWER_MAX, checkLine, CHECK_FAILED, CHECKING, cutWords, dueLine, hostOf, withHosts, missingLine, OPEN_TASK, OPEN_TO_ANSWER, stateLine, stepAudience, TIDY_SAYS, toTidy, unknownDecision, waitsLine, waitsOnMe } from "./simpleCore";
+import { ANSWER_ANYWAY, CHANGED_SINCE, answersReady, checkingRoom, notWrittenDown, UNRESOLVED, type Resolved, referencedItems, repeatsHeading, revisionMoved, stepNotes, unconfirmedLine, actionLead, actionOf, askedLine, titleSays, checkingBanner, couldntRead, currentStep, unresolvedBlock, withoutIntro, type ChatHit, pointsAt, pointsNowhere, quotedMessage, requestDate, withoutCut, answerLabel, answerText, ANSWER_MAX, checkLine, CHECK_FAILED, CHECKING, cutWords, dueLine, hostOf, withHosts, missingLine, OPEN_TASK, OPEN_TO_ANSWER, stateLine, stepAudience, TIDY_SAYS, toTidy, unknownDecision, waitsLine, waitsOnMe } from "./simpleCore";
 import { requestRecheck } from "./useTasks";
 import { taskTitle } from "./whereCore";
 import { DecisionAnswer, NextText, decisionAsk, rowLinkLabel, supportOf } from "./Companion";
@@ -37,7 +37,7 @@ const linksIn = (text: string): string[] => [...text.matchAll(URLS)].map((m) => 
 /** A step that asks the user to look at or open something (r22): its link is the step's own action. */
 const LOOK = /^(?:look|open|view|visit|see|check|try|watch|read|test)\b/i;
 
-export function TaskSheet({ task, gone = false, nodeName, room, roomNamed, inRoom, onClose, onAct, onDecide, onNote, onOpenRoom, onSay, onPriority, onStale, draft = null }: {
+export function TaskSheet({ task, gone = false, nodeName, room, roomNamed, inRoom, onClose, onAct, onDecide, onNote, onOpenRoom, onSay, onPriority, onStale, draft = null, confirmation = null, anyway: anywayStart = false, onRecheckRoom }: {
   task: Task; gone?: boolean; here: string; nodeName: (path: string) => string; room: RoomRef | null;
   /** r24: the joined room a step names ("#cohere's 'For Eileen' block"), when there is one */
   roomNamed?: (name: string) => RoomRef | null;
@@ -57,6 +57,12 @@ export function TaskSheet({ task, gone = false, nodeName, room, roomNamed, inRoo
   onStale?: () => void;
   /** r18: a draft note written for this task (`draft` tag, its `task` field): its text is the message "Copy the message" copies. */
   draft?: { vault: string; id: string } | null;
+  /** r28: what the feed resolved for this ask (confirmed, to recheck, or still being checked); null: nothing resolved (a recheck with no date) */
+  confirmation?: Resolved | null;
+  /** r28: opened by "Answer anyway" in the recheck list: the answers are ready at once */
+  anyway?: boolean;
+  /** r28: read this room's chat again ("Couldn't read #room · Retry") */
+  onRecheckRoom?: (roomId: string) => void;
 }) {
   const box = useRef<HTMLDivElement>(null);
   const wrap = useRef<HTMLDivElement>(null);
@@ -181,34 +187,17 @@ export function TaskSheet({ task, gone = false, nodeName, room, roomNamed, inRoo
   const firstStep = steps ? steps.steps[0] : act?.text ?? "";
   const lookOpen = !gone && !!act && LOOK.test(withoutIntro(firstStep.trim())) && linksIn(firstStep).length > 0;
   const firstLink = lookOpen ? linksIn(firstStep)[0] : null;
-  /** r27 (Codex P1-1): freshness is unknown unless the record says otherwise: a request is current only when its own record (written within 3 days)
-   *  vouches for it and no related chat in its room is newer than that write; the rest is unconfirmed, and a chat that can't be read says so */
+  /** r28: whether the ask is confirmed is resolved by the feed (one read of the room's chat, cached), never by the sheet: confirmed asks have
+   *  their answers ready; the rest says "not confirmed since" and keeps its answers behind "Answer anyway" (one tap from the recheck list) */
   const reqAt = requestDate(task);
   const asked = askedLine(reqAt);
   const gated = !gone && !unsure;
-  const [look, setLook] = useState<CheckIn | null>(null);
-  const [tries, setTries] = useState(0);
-  const [anyway, setAnyway] = useState(false);
-  const checkable = gated && !!room && needsLookup(true, task.updatedAt);
-  const hit: ChatHit | null = look?.kind === "found" ? look.hit : null;
-  useEffect(() => {
-    setLook(null); setAnyway(false);
-    if (!checkable || !room || !task.updatedAt) return;
-    let live = true;
-    const keys = requestKeys(task);
-    const wrote = { at: task.updatedAt, kind: "asked" as const };
-    // test builds can block the lookup (`VITE_CHECKIN_BLOCK=1`), delay it (`VITE_CHECKIN_DELAY=<ms>`) or find a chat hit (`VITE_CHECKIN_FOUND=1`)
-    // to show each state in the real app; none of these is in a normal build
-    const wait = Number(import.meta.env.VITE_CHECKIN_DELAY ?? 0) || 0;
-    const lookup: Promise<unknown> = import.meta.env.VITE_CHECKIN_BLOCK === "1" ? Promise.reject(new Error("blocked"))
-      : import.meta.env.VITE_CHECKIN_FOUND === "1" ? Promise.resolve([{ ts: Date.now() / 1000 + 5, body: `${keys.ids[0] ?? keys.words[0] ?? "this"} ${keys.words[0] ?? ""} ${keys.words[1] ?? ""}` }])
-      : invoke("get_messages", { channel: room.id, root: null, limit: 200 });
-    const delayed = wait ? new Promise<unknown>((res, rej) => setTimeout(() => lookup.then(res, rej), wait)) : lookup;
-    delayed.then((r) => { if (live) setLook(checkInResult(wrote, Array.isArray(r) ? (r as RoomMsg[]) : null, keys)); }).catch(() => { if (live) setLook({ kind: "failed" }); });
-    return () => { live = false; };
-  }, [task.id, task.updatedAt, room?.id, checkable, tries]); // eslint-disable-line react-hooks/exhaustive-deps
-  const fresh = freshnessOf(!!room, task.updatedAt, look);
-  const lookFailed = gated && fresh === "unreadable";
+  const conf: Resolved = confirmation ?? UNRESOLVED;
+  const [anyway, setAnyway] = useState(anywayStart);
+  useEffect(() => { setAnyway(anywayStart); }, [task.id, anywayStart]);
+  const hit: ChatHit | null = conf.hit;
+  const fresh = conf.state;
+  const lookFailed = gated && conf.failed;
   // r26 (Codex P1 1): the revision the sheet opened at; a task that moved since is shown as changed, and its answers wait for a reload
   const opened = useRef({ id: task.id, rev: task.updatedAt });
   /** a write made from this sheet (a priority) moves the revision itself: that is adopted, not "changed since you opened it" */
@@ -220,9 +209,9 @@ export function TaskSheet({ task, gone = false, nodeName, room, roomNamed, inRoo
   useEffect(() => { if (moved) onStale?.(); }, [moved]); // eslint-disable-line react-hooks/exhaustive-deps
   const ready = answersReady(fresh, anyway) && !moved;
   const blockGap = unresolvedBlock(task.next, task.detail);
-  const unconfirmed = gated && fresh === "unconfirmed";
+  const unconfirmed = gated && fresh === "recheck" && !lookFailed;
   // couldn't read the room: the room opens as the primary, and "I did this" and "Say it" stay behind "Answer anyway"; unconfirmed: "Check in" first
-  const primary1 = unconfirmed && room ? "check" : gated && !!room && lookFailed ? "openroom" : unconfirmed && !room && (primary0 === "done" || primary0 === "say" || primary0 === null) ? "note" : primary0 === "done" && lookOpen ? "open" : primary0;
+  const primary1 = unconfirmed && room && !lookFailed ? "check" : gated && !!room && lookFailed ? "openroom" : unconfirmed && !room && (primary0 === "done" || primary0 === "say" || primary0 === null) ? "note" : primary0 === "done" && lookOpen ? "open" : primary0;
   // while the request is not current (looking, unconfirmed, couldn't read), the answers are not the primary; they come after "Answer anyway"
   const primary = !ready && (primary1 === "done" || primary1 === "say") ? null : primary1;
   const stepLinks = (text: string, _first: boolean) => {
@@ -248,9 +237,9 @@ export function TaskSheet({ task, gone = false, nodeName, room, roomNamed, inRoo
       <p className="task-kind">{decision ? `Decision${dflt ? ` (${dflt})` : ""}` : "Task"}{` · in ${room ? `#${room.name.replace(/^#/, "")}` : nodeName(task.node)}`}</p>
       {/* r27: when it was asked, first: an unconfirmed request says so in this one quiet line (no cue, no "nothing related found") */}
       {unconfirmed ? <p className="task-asked task-unconfirmed" data-fresh="unconfirmed" data-asked={reqAt?.at ?? undefined} data-kind={reqAt?.kind}>{unconfirmedLine(asked)}</p>
-        : asked && <p className="task-asked" data-fresh={gated ? fresh : undefined} data-asked={reqAt?.at ?? undefined} data-kind={reqAt?.kind}>{capFirst(asked)}</p>}
+        : asked && <p className="task-asked" data-fresh={gated ? (fresh === "confirmed" ? "current" : fresh === "recheck" ? "unconfirmed" : "pending") : undefined} data-asked={reqAt?.at ?? undefined} data-kind={reqAt?.kind}>{capFirst(asked)}</p>}
       {/* r25: the chat couldn't be read, which is not "nothing related" */}
-      {!!room && lookFailed && <p className="task-q-note task-lookfail" data-gate="failed" role="status">{couldntRead(room.name)} · <button type="button" className="task-link" onClick={() => setTries((n) => n + 1)}>Retry</button></p>}
+      {!!room && lookFailed && <p className="task-q-note task-lookfail" data-gate="failed" role="status">{couldntRead(room.name)} · <button type="button" className="task-link" onClick={() => onRecheckRoom?.(room.id)}>Retry</button></p>}
       {!!room && gated && fresh === "pending" && <p className="task-q-note task-lookpending" data-gate="pending" role="status" aria-busy="true">{checkingRoom(room.name)}</p>}
       {dq?.answerable && dq.yourCall && !unsure && <small className="cp-call-lead">Your call:</small>}
       {/* r21: a step of more than one part ("A, then B") is listed, numbered, under how many steps it is */}

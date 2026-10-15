@@ -3,6 +3,7 @@
 import { isMe, PRIORITIES, type Task } from "./taskCore.ts";
 import { taskTitle, type Where } from "./whereCore.ts";
 import { ROOT } from "./treeCore.ts";
+import type { Run } from "./steerCore.ts";
 
 /** The first sentence of the level's lede, as plain text and whole (a long one is clamped on screen, never cut here: it opens in full). */
 export function firstSentence(text: string | null | undefined): string {
@@ -59,17 +60,27 @@ export function needsByNode(tasks: readonly Task[]): Map<string, number> {
  * The tree's dots (r13): each item that needs you counts on its node's row or, when that node has no row in the tree, on its nearest
  * ancestor's (else Uni's), so the dots under a level add up to that level's feed.
  */
-export function needsByRow(tasks: readonly Task[], rows: ReadonlySet<string>, parentOf: (path: string) => string | undefined): Map<string, number> {
+export function needsByRow(tasks: readonly Task[], rows: ReadonlySet<string>, parentOf: (path: string) => string | undefined, confOf?: ConfOf, runs: readonly Pick<Run, "node" | "task" | "state">[] = []): Map<string, number> {
   const m = new Map<string, number>();
-  for (const t of tasks) {
-    if (!needsYou(t)) continue;
-    let at: string | undefined = t.node;
+  const place = (node: string) => {
+    let at: string | undefined = node;
     for (let n = 0; at !== undefined && at !== ROOT && !rows.has(at) && n < 64; n++) at = parentOf(at);
     const key = at !== undefined && rows.has(at) ? at : ROOT;
     m.set(key, (m.get(key) ?? 0) + 1);
+  };
+  const counted = new Set<string>();
+  for (const t of tasks) {
+    // r28 (Codex P2-6): only confirmed asks count; a recheck or a held-back ask lights no dot
+    if (!needsYou(t) || (confOf && confOf(t).state !== "confirmed")) continue;
+    const id = taskIdOf(t); if (id) counted.add(id);
+    place(t.node);
   }
+  // a run waiting on the user's answer is counted once: not when its task is already counted
+  for (const r of runs) if (waitingOnYou(r) && !(r.task && counted.has(r.task.toUpperCase()))) place(r.node);
   return m;
 }
+/** The task's id as a run names it ("T-07"), upper-cased; null when its title has none. */
+export const taskIdOf = (t: Pick<Task, "title">): string | null => taskTitle(t.title).id?.toUpperCase() ?? null;
 
 /** Uni's own panel (r12): what is Uni's own, then at most `fromAreas` from the areas by urgency; the rest is in "All of Uni's work". */
 export function uniNeeds(feed: readonly Task[], fromAreas = 3): Task[] {
@@ -90,6 +101,12 @@ export type PrivateNeed = { key: string; count: number; place: string; open: { p
   others: number };
 /** Needs you at one level, the one list every surface reads (r13): the companion, "+N in areas", the dots and the work view add up to `total`. */
 export type NeedsFeed = { rows: Task[]; privates: PrivateNeed[]; total: number;
+  /** r28: asks Uni must recheck (not confirmed): listed apart under "Uni is rechecking N older asks", never in `total` or the dots. */
+  recheck?: Task[];
+  /** r28: asks whose room's chat is still being read: held back from `total`, "Checking…" for a few seconds at most. */
+  checking?: Task[];
+  /** r28 (Codex P2-6): runs waiting on the user's answer, deduplicated by task; they are in `total` (one count everywhere). */
+  waiting?: Run[];
   /** r19: records Uni has to tidy (not real requests yet), outside private areas; never in `total`. */
   tidy?: Task[];
   /** r20: decisions not read yet ("Checking what's needed…"), outside private areas: shown after the rows, never in `total` or the dots. */
@@ -106,15 +123,25 @@ export function rankNeeds(list: readonly Task[], today = localDay()): Task[] {
  * `self`: the private area this level is (or sits in), opened by the user: its own items are ordinary rows with their titles (r14); items in
  * any other private area are one line per area.
  */
-export function needsFeed(tasks: readonly Task[], privateOf: (node: string) => PrivatePlace | null, self: PrivatePlace | null = null, today = localDay()): NeedsFeed {
-  const all = rankNeeds(tasks.filter(needsYou), today);
+export type ConfOf = (t: Task) => Resolved;
+export function needsFeed(tasks: readonly Task[], privateOf: (node: string) => PrivatePlace | null, self: PrivatePlace | null = null, today = localDay(), confOf?: ConfOf): NeedsFeed {
+  const owed = rankNeeds(tasks.filter(needsYou), today);
+  const stateOf = (t: Task): Confirm => (confOf ? confOf(t).state : "confirmed");
+  const all = owed.filter((t) => stateOf(t) === "confirmed");
   const rows: Task[] = [];
+  const recheck: Task[] = [];
+  const checking: Task[] = [];
   const by = new Map<string, PrivateNeed>();
-  for (const t of all) {
+  for (const t of owed) {
     const p = privateOf(t.node);
-    if (!p || (self && p.path === self.path)) { rows.push(t); continue; }
-    const g = by.get(p.path) ?? { key: p.path, count: 0, place: p.name, open: { path: p.path }, actions: [], others: 0 };
-    by.set(p.path, g);
+    const open = !p || (self && p.path === self.path);
+    const st = stateOf(t);
+    // a private area's unconfirmed asks are not listed outside it (their words stay inside); they are neither counted nor named
+    if (st === "recheck") { if (open) recheck.push(t); continue; }
+    if (st === "pending") { if (open) checking.push(t); continue; }
+    if (open) { rows.push(t); continue; }
+    const g = by.get(p!.path) ?? { key: p!.path, count: 0, place: p!.name, open: { path: p!.path }, actions: [], others: 0 };
+    by.set(p!.path, g);
     g.count++;
     const a = privateAction(t);
     if (a) g.actions.push(a); else g.others++;
@@ -122,7 +149,24 @@ export function needsFeed(tasks: readonly Task[], privateOf: (node: string) => P
   const here = (t: Task) => !privateOf(t.node) || privateOf(t.node)?.path === self?.path;
   const tidy = tasks.filter((t) => toTidy(t) && here(t));
   const pending = rankNeeds(tasks.filter((t) => wouldNeedYou(t) && unknownDecision(t) && here(t)), today);
-  return { rows, privates: [...by.values()], total: all.length, tidy, pending };
+  return { rows, privates: [...by.values()], total: all.length, tidy, pending, recheck, checking, waiting: [] };
+}
+/**
+ * r28 (Codex P2-6): the runs waiting on the user's answer join the feed, so the count, the dots and the strip say the same number. Each is
+ * counted once, deduplicated by task: a run whose task is already a confirmed row is not a second item, and an ask in the recheck list whose
+ * run is waiting now is not rechecked (the run is the live word).
+ */
+export function withWaiting(feed: NeedsFeed, runs: readonly Run[]): NeedsFeed {
+  const have = new Set(feed.rows.map(taskIdOf).filter(Boolean) as string[]);
+  const seen = new Set<string>();
+  const waiting = runs.filter(waitingOnYou).filter((r) => {
+    const tid = r.task?.toUpperCase() ?? null;
+    if (tid && (have.has(tid) || seen.has(tid))) return false;
+    if (tid) seen.add(tid);
+    return true;
+  });
+  const names = new Set(waiting.map((r) => r.task?.toUpperCase()).filter(Boolean) as string[]);
+  return { ...feed, waiting, total: feed.total + waiting.length, recheck: (feed.recheck ?? []).filter((t) => { const id = taskIdOf(t); return !(id && names.has(id)); }) };
 }
 
 /** Rows Uni's own panel shows (r17): the rest, private items included, are one "N more ›" to the work view. */
@@ -139,7 +183,8 @@ export function uniPanel(feed: NeedsFeed, max = UNI_ROWS): NeedsFeed & { rest: n
   const privateCount = feed.privates.reduce((n, p) => n + p.count, 0);
   // r20: a decision still being read fills a row only where nothing owed is left to show; it is never counted
   const pending = (feed.pending ?? []).slice(0, Math.max(0, max - rows.length));
-  return { rows, privates: [], total: feed.total, rest: Math.max(0, feed.total - rows.length), privateCount, pending };
+  // r28: the waiting runs are shown in the panel itself, so they are not in "Show N more"
+  return { ...feed, rows, privates: [], total: feed.total, rest: Math.max(0, feed.total - rows.length - (feed.waiting?.length ?? 0)), privateCount, pending };
 }
 /** "Includes 1 in a private area": the "N more ›" link's tooltip, when private items are folded into its count. */
 export const privateNote = (n: number): string | null => (n <= 0 ? null : n === 1 ? "Includes 1 item in a private area" : `Includes ${n} items in private areas`);
@@ -494,7 +539,7 @@ export const checkInCue = (room: string, key: string, w: AskedWhen): string => `
  * summary's). Either dims the whole summary behind "This summary is older than the latest work · from Oct 14", with "What it said" to open it.
  */
 export const WAITS_ON_ME = /\bwaits?\s+on\s+aaron\b|\baaron['’]s\s+(?:go|ok|okay|ask|call|ans|decision|approval|sign-?off)\b|\bneeds?\s+aaron\b|\bfor\s+aaron\s+to\b|\bawaiting\s+aaron\b|\bwaiting\s+(?:on|for)\s+aaron\b|\b(?:awaiting|pending|needs?|needed|requires?)\s+(?:your\s+|aaron['’]s\s+|his\s+)?(?:approval|sign-?off|go-?ahead|ok\b|okay\b|decision)|\bapproval\s+(?:pending|needed|required)\b|\bwaits?\s+on\s+(?:your|his)\s+(?:go|ok|approval|answer|decision)/i;
-export type StaleSummary = { from: string | null; /** why: a wait claim nothing open matches, or a newer change in a task on the node */ why: "claim" | "newer" };
+export type StaleSummary = { from: string | null; /** why: a wait claim nothing open matches, or a newer change in a task on the node */ why: "claim" | "newer" | "closed" };
 export const STALE_SUMMARY = "This summary is older than the latest work";
 export const staleLine = (s: Pick<StaleSummary, "from">): string => (s.from ? `${STALE_SUMMARY} · from ${s.from}` : STALE_SUMMARY);
 /** A stamp as the date a summary is dated by: "Oct 14" (local calendar day). Null when unknown. */
@@ -569,12 +614,14 @@ function mergeSubjects(clauses: Clause[]): Clause[] {
   }
   return out;
 }
-export function staleSummary(stands: string | null | undefined, updated: string | null | undefined, open: readonly OpenItem[] = [], changed: readonly (string | null | undefined)[] = []): StaleSummary | null {
+export function staleSummary(stands: string | null | undefined, updated: string | null | undefined, open: readonly OpenItem[] = [], asked: readonly (string | null | undefined)[] = [], closed: readonly (string | null | undefined)[] = []): StaleSummary | null {
   if (!stands) return null;
   const ms = stampMs(updated ?? "");
   const from = asOfDate(updated);
-  // a task on the node changed after the summary was written
-  if (Number.isFinite(ms) && changed.some((c) => { const t = stampMs(c ?? ""); return Number.isFinite(t) && t > ms; })) return { from, why: "newer" };
+  // r28 (Codex P1-3): only a task directly on the node counts. An ask written (`asked_at`) after the summary was written…
+  if (Number.isFinite(ms) && asked.some((c) => { const t = stampMs(c ?? ""); return Number.isFinite(t) && t > ms; })) return { from, why: "newer" };
+  // …or a task closed on or after the day it was written (`closed` is a day, so the comparison is by day)
+  if (Number.isFinite(ms) && closed.some((c) => { const d = (c ?? "").trim().slice(0, 10); return /^\d{4}-\d{2}-\d{2}$/.test(d) && d >= localDay(new Date(ms)); })) return { from, why: "closed" };
   // a wait claim no open item is
   if (!WAITS_ON_ME.test(stands)) return null;
   const clauses = mergeSubjects(summaryClauses(stands));
@@ -1221,6 +1268,19 @@ export function runShort(what: string | null | undefined, max = 56): string {
   return runText(cutWords(full, max, false));
 }
 
+/**
+ * r28 (Sonnet): a run that waits on the user's answer, as a Needs-you row: "Waiting on your answer in #Uni: Ship 0.1.46?" is the question
+ * ("Ship 0.1.46?") as its step and "in #Uni" as its place; never the lead-in with a trailing colon. With no question after the lead-in, the step
+ * is the lead-in's own words ("Waiting on your answer") and the place still "in #Uni".
+ */
+export function waitingRunParts(what: string | null | undefined): { step: string; place: string | null } {
+  const full = runText(what);
+  const m = /^(waiting\s+on\s+your\s+\w+|needs\s+your\s+\w+)(?:\s+in\s+(#[\w/-]+))?\s*(?::\s*(\S.*))?$/i.exec(full);
+  if (!m) return { step: full, place: null };
+  const q = m[3]?.trim().replace(/[\s:;,—–-]+$/, "") ?? "";
+  return { step: q ? q[0].toLocaleUpperCase() + q.slice(1) : m[1][0].toLocaleUpperCase() + m[1].slice(1), place: m[2] ? `in ${m[2]}` : null };
+}
+
 // ------------------------------------------------------------------------------------------------- r26
 /** r26 (Sonnet, Codex): a step that says the task was superseded ("Superseded by T-136 (Aaron, 10-14)") closes it, whatever its stored state. */
 export const superseded = (next: string | null | undefined): boolean => /^\s*(?:superseded|obsolete)\b/i.test(next ?? "");
@@ -1363,7 +1423,7 @@ export function referencedItems(next: string | null | undefined, detail: string 
 /** "The asks aren't written down in this task": nothing in the task is the list its step points at. */
 export const notWrittenDown = (noun: string): string => `The ${noun.toLowerCase()} aren't written down in this task`;
 /** How many of a referenced list's items a row shows at most. */
-export const ROW_ITEMS = 3;
+export const ROW_ITEMS = 2;
 /** The most lines one item may take on a row. */
 export const ITEM_LINES = 2;
 /** The sentence ends in a text, outside brackets: the positions just after "." / "!" / "?" that are followed by a new sentence. */
@@ -1404,25 +1464,44 @@ export function itemForms(item: string): string[] {
 export type Gate = "pending" | "found" | "failed" | "none";
 export const gateOf = (applies: boolean, look: CheckIn | null): Gate => (!applies ? "none" : look === null ? "pending" : look.kind);
 /**
- * r27 (Codex P1-1): freshness is unknown unless the record says otherwise. A request is `current` only when its own record vouches for it (its
- * `updated_at` is within the last 3 days) and no related chat in its room is newer than that write. Anything else is `unconfirmed`: no room, no
- * date, a record older than 3 days, related chat since, or a read too short to tell. `unreadable`: the room's chat couldn't be read. `pending`:
- * the lookup is not back yet (shown as "Checking #room…", then one of the three).
+ * r28 (Codex P1-1, P1-2): an ask is *confirmed* only when its own `asked_at` says so: within the last 3 days, not in the future (a clock a few
+ * minutes ahead is skew; more is a wrong date), and no related chat in its room is newer than it. With no `asked_at` the ask is unconfirmed:
+ * `updated_at` is never a fallback, because any unrelated edit renews it. Confirmation is resolved in the feed, before a row shows. States:
+ * `confirmed` (counted, in Needs you), `recheck` (Uni's to recheck: listed apart, never counted), `pending` (its room's chat is still being read:
+ * held back, "Checking…", for at most `CONFIRM_WAIT_MS`).
  */
-export const CURRENT_DAYS = 3;
-export type Freshness = "current" | "unconfirmed" | "unreadable" | "pending";
-/** (A write stamped ahead of this clock is a skewed clock, not an old record: it vouches.) */
-export const recordVouches = (updatedAt: string | null | undefined, nowMs = Date.now()): boolean => { const t = stampMs(updatedAt ?? ""); return Number.isFinite(t) && nowMs - t <= CURRENT_DAYS * 86_400_000; };
-/** Whether the room's chat has to be read to tell: only a record that vouches for itself and has a room to be checked in. */
-export const needsLookup = (hasRoom: boolean, updatedAt: string | null | undefined, nowMs = Date.now()): boolean => hasRoom && recordVouches(updatedAt, nowMs);
-export function freshnessOf(hasRoom: boolean, updatedAt: string | null | undefined, look: CheckIn | null, nowMs = Date.now()): Freshness {
-  if (!needsLookup(hasRoom, updatedAt, nowMs)) return "unconfirmed";
-  return look === null ? "pending" : look.kind === "failed" ? "unreadable" : look.kind === "found" ? "unconfirmed" : "current";
+export const CONFIRM_DAYS = 3;
+export const CONFIRM_SKEW_MS = 5 * 60_000;
+export const CONFIRM_WAIT_MS = 4000;
+export type Confirm = "confirmed" | "recheck" | "pending";
+export type AskStamp = "none" | "old" | "future" | "recent";
+export function askStamp(askedAt: string | null | undefined, nowMs = Date.now()): AskStamp {
+  const t = stampMs(askedAt ?? "");
+  if (!Number.isFinite(t)) return "none";
+  if (/^\d{4}-\d{2}-\d{2}$/.test((askedAt ?? "").trim())) { const day = (askedAt ?? "").trim(); const today = localDay(new Date(nowMs)); if (day > today) return "future"; }
+  else if (t - nowMs > CONFIRM_SKEW_MS) return "future";
+  return nowMs - t > CONFIRM_DAYS * 86_400_000 ? "old" : "recent";
 }
+/** Why an ask is not confirmed, for the log and the tests. */
+export type RecheckWhy = "no-date" | "old" | "future" | "no-room" | "chat-since" | "read-failed";
+export type Resolved = { state: Confirm; why: RecheckWhy | null; /** the related message that came after the ask, when that is why */ hit: ChatHit | null; /** the room's chat couldn't be read */ failed: boolean };
+/** Whether the room's chat has to be read to tell: only an ask whose own date is recent and that has a room to be checked in. */
+export const needsRead = (hasRoom: boolean, askedAt: string | null | undefined, nowMs = Date.now()): boolean => hasRoom && askStamp(askedAt, nowMs) === "recent";
+export function confirmationOf(hasRoom: boolean, askedAt: string | null | undefined, look: CheckIn | null, nowMs = Date.now()): Resolved {
+  const stamp = askStamp(askedAt, nowMs);
+  if (stamp !== "recent") return { state: "recheck", why: stamp === "none" ? "no-date" : stamp, hit: null, failed: false };
+  if (!hasRoom) return { state: "recheck", why: "no-room", hit: null, failed: false };
+  if (look === null) return { state: "pending", why: null, hit: null, failed: false };
+  if (look.kind === "failed") return { state: "recheck", why: "read-failed", hit: null, failed: true };
+  if (look.kind === "found") return { state: "recheck", why: "chat-since", hit: look.hit, failed: false };
+  return { state: "confirmed", why: null, hit: null, failed: false };
+}
+/** A task whose record isn't asked about (or any task the feed hasn't resolved): unconfirmed, with no date to go on. */
+export const UNRESOLVED: Resolved = { state: "recheck", why: "no-date", hit: null, failed: false };
 /** The one quiet line over an unconfirmed request: "Asked Oct 13 · not confirmed since" (with no date: "Not confirmed since it was written"). */
 export const unconfirmedLine = (asked: string | null | undefined): string => (asked ? `${asked[0].toLocaleUpperCase()}${asked.slice(1)} · not confirmed since` : "Not confirmed since it was written");
-/** Whether the approval answers (and "I did this") are offered as ready: only when the request is current, or after "Answer anyway". */
-export const answersReady = (f: Freshness, anyway: boolean): boolean => f === "current" || anyway;
+/** Whether the approval answers (and "I did this") are offered as ready: only when the ask is confirmed, or after "Answer anyway". */
+export const answersReady = (c: Confirm, anyway: boolean): boolean => c === "confirmed" || anyway;
 export const ANSWER_ANYWAY = "Answer anyway";
 export const checkingRoom = (room: string): string => `Checking #${room.replace(/^#/, "")}…`;
 /** The task changed since the sheet loaded: the revision it was opened at is not the list's now. */
