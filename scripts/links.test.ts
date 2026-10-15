@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { parseArea, parseProject } from "../src/areas/areasCore.ts";
 import { buildTree, childrenOf, parentPath, ROOT, trail, ancestry } from "../src/areas/treeCore.ts";
 import { buildTaskTree, parseNodes, subtreePaths, rollUp, tasksUnder } from "../src/areas/taskCore.ts";
-import { treeRows } from "../src/areas/treeRooms.ts";
+import { roomView, treeRows } from "../src/areas/treeRooms.ts";
 import { ancestorsOf, visibleRows } from "../src/areas/sidebarState.ts";
 import { archivedRoomIds, byActivity, parseView, projectCards, roomsList } from "../src/areas/viewsCore.ts";
 import { linksOf } from "../src/areas/nodeLinks.ts";
@@ -68,7 +68,7 @@ check("cycle safety: parents and links in a ring, area-to-area and self links ne
     proj("p1", "P1", { parent: "p2", links: ["a1"] }), proj("p2", "P2", { parent: "p3" }), proj("p3", "P3", { parent: "p1" })]);
   assert.deepEqual(shape(t), { Uni: ["A1", "A2"], "Areas/A1": ["P1", "P2", "P3"] }, "the legacy parent ring lends A1 to P2 and P3, and ends");
   assert.deepEqual(trail(t, "Projects/P1").map((n) => n.name), ["A1", "P1"]);
-  assert.deepEqual(ancestry(t, "Projects/P3").map((n) => n.name), ["P3", "A1"]);
+  assert.deepEqual(ancestry(t, "Projects/P3").map((n) => n.name), ["P3", "P1", "A1"]);
   assert.equal(t.nodes.size, 5);
 });
 check("a project in two areas: the breadcrumb and Back use the area you came through, else the first by name", () => {
@@ -131,6 +131,68 @@ check("Projects view: by the room's last activity; a roomless project talks in i
 check("the view choice is remembered per device: a bad value is Areas", () => {
   assert.equal(parseView('"rooms"'), "rooms"); assert.equal(parseView("projects"), "projects");
   assert.equal(parseView(null), "areas"); assert.equal(parseView("nope"), "areas");
+});
+
+// ---- fix pass: legacy parent chains keep their room and task scope; the fallback task tree keeps links; 0.1.46 equivalence on parent-only data
+const FR = [{ id: "r-uni", name: "Uni", last_ts: 1 }, { id: "r-bou", name: "boulder", last_ts: 1 }, { id: "r-coh", name: "cohere", last_ts: 1 }, { id: "r-c26", name: "cohere-2026", last_ts: 1 }];
+const tnode = (id: string, name: string, kind: "area" | "project", meta: { parent?: string; links?: string[]; room?: string }): import("../src/areas/taskCore.ts").TaskNode =>
+  ({ id, path: `${kind === "area" ? "Areas" : "Projects"}/${name}`, name, parent: meta.parent ?? null, links: meta.links, kind, room: meta.room ?? null, status: "active", isRoot: false });
+const legacyAreas = () => buildTree([area("a-bou", "Boulder", { room: "boulder" }), proj("p-coh", "COhere", { parent: "Areas/Boulder", room: "cohere" }),
+  proj("p-ww", "Woven Web", { parent: "Projects/COhere" }), proj("p-c26", "COhere 2026", { parent: "p-coh", room: "cohere-2026" }), proj("p-top", "Loose", { parent: "Projects/Woven Web" })]);
+const legacyTasks = () => buildTaskTree([tnode("a-bou", "Boulder", "area", { room: "boulder" }), tnode("p-coh", "COhere", "project", { parent: "Areas/Boulder", room: "cohere" }),
+  tnode("p-ww", "Woven Web", "project", { parent: "Projects/COhere" }), tnode("p-c26", "COhere 2026", "project", { parent: "p-coh", room: "cohere-2026" }), tnode("p-top", "Loose", "project", { parent: "Projects/Woven Web" })]);
+const sorted = (l: string[]) => [...l].sort();
+check("legacy parent chain: Boulder -> COhere -> roomless Woven Web keeps #cohere and is listed flat under Boulder", () => {
+  const t = legacyAreas();
+  assert.deepEqual(childrenOf(t, "Areas/Boulder").map((n) => n.name), ["COhere", "COhere 2026", "Loose", "Woven Web"]);
+  assert.equal(roomView(t, "Projects/Woven Web", FR, FR[0]).target?.name, "cohere");
+  assert.equal(roomView(t, "Projects/Loose", FR, FR[0]).target?.name, "cohere");
+  assert.equal(roomView(t, "Projects/COhere", FR, FR[0]).own, true);
+});
+check("legacy parent chain: COhere's task subtree holds Woven Web; Boulder's holds all", () => {
+  const t = legacyTasks();
+  assert.deepEqual(sorted(subtreePaths(t, "Projects/COhere")), ["Projects/COhere", "Projects/COhere 2026", "Projects/Loose", "Projects/Woven Web"]);
+  assert.deepEqual(sorted(subtreePaths(t, "Areas/Boulder")), ["Areas/Boulder", "Projects/COhere", "Projects/COhere 2026", "Projects/Loose", "Projects/Woven Web"]);
+  assert.deepEqual(subtreePaths(t, "Projects/Woven Web").sort(), ["Projects/Loose", "Projects/Woven Web"]);
+});
+check("the same three written with links only give the same subtrees (Woven Web lists Boulder and COhere)", () => {
+  const t = buildTaskTree([tnode("a-bou", "Boulder", "area", {}), tnode("p-coh", "COhere", "project", { links: ["a-bou"] }), tnode("p-ww", "Woven Web", "project", { links: ["a-bou", "p-coh"] })]);
+  assert.deepEqual(sorted(subtreePaths(t, "Projects/COhere")), ["Projects/COhere", "Projects/Woven Web"]);
+  assert.deepEqual(sorted(subtreePaths(t, "Areas/Boulder")), ["Areas/Boulder", "Projects/COhere", "Projects/Woven Web"]);
+  assert.deepEqual(subtreePaths(t, "Projects/Woven Web"), ["Projects/Woven Web"], "the project that lists the other is the one under it");
+});
+check("once a node has links, links rule: a legacy parent is ignored for its chain", () => {
+  const t = buildTree([area("a-bou", "Boulder", { room: "boulder" }), proj("p-coh", "COhere", { links: ["a-bou"], room: "cohere" }), proj("p-ww", "Woven Web", { parent: "p-coh", links: ["a-bou"] })]);
+  assert.equal(roomView(t, "Projects/Woven Web", FR, FR[0]).target?.name, "boulder");
+});
+check("the fallback task tree (no node tags) keeps links and kind, so a linked project's tasks stay in its area's feed", () => {
+  const nodes = [tnode("a-bou", "Boulder", "area", {}), tnode("p-reg", "RegenHub", "project", { links: ["a-bou"] })];
+  const t = buildTaskTree(nodes);
+  assert.deepEqual(sorted(subtreePaths(t, "Areas/Boulder")), ["Areas/Boulder", "Projects/RegenHub"]);
+  const task = { node: "Projects/RegenHub", state: "open", owner: "uni", priority: null } as unknown as Parameters<typeof tasksUnder>[2][number];
+  assert.equal(tasksUnder(t, "Areas/Boulder", [task]).length, 1);
+  // what AreasSurface now builds from the areas it read
+  const a = buildTree([area("a-bou", "Boulder"), proj("p-reg", "RegenHub", { links: ["a-bou"] })]).nodes.get("Projects/RegenHub")!;
+  assert.deepEqual([a.links, a.kind], [["a-bou"], "project"]);
+});
+check("0.1.46 equivalence: on a parent-only tree every node's room and subtree match the old logic", () => {
+  // 0.1.46 logic, copied: parent map (cycles broken at the smallest path), children from it, ancestry up it
+  const list = [area("a-bou", "Boulder", { room: "boulder" }), area("a-par", "Parachute"), proj("p-coh", "COhere", { parent: "Areas/Boulder", room: "cohere" }), proj("p-ww", "Woven Web", { parent: "Projects/COhere" }),
+    proj("p-c26", "COhere 2026", { parent: "p-coh", room: "cohere-2026" }), proj("p-x", "Deep", { parent: "[[Projects/Woven Web]]" }), proj("p-app", "uni-app", { parent: "Areas/Parachute" }), proj("p-lone", "Lone", {})];
+  const neu = buildTree(list);
+  const nodes = neu.nodes;
+  const oldParent = new Map<string, string>();
+  for (const [p, n] of nodes) { const raw = n.parent ? n.parent.replace(/^\[\[|\]\]$/g, "") : null; const hit = raw && [...nodes.values()].find((m) => m.path === raw || m.id === raw)?.path; oldParent.set(p, hit && hit !== p ? hit : ROOT); }
+  const oldKids = new Map<string, string[]>();
+  for (const [p, up] of oldParent) oldKids.set(up, [...(oldKids.get(up) ?? []), p]);
+  const oldTree = { ...neu, parent: oldParent, chain: oldParent, children: new Map([...oldKids].map(([k, v]) => [k, v.map((c) => nodes.get(c)!)])), scope: new Map([...oldKids].map(([k, v]) => [k, v.map((c) => nodes.get(c)!)])) } as typeof neu;
+  const oldSub = (path: string): string[] => { const out = [path]; for (const c of oldKids.get(path) ?? []) out.push(...oldSub(c)); return out; };
+  const tt = buildTaskTree(list.map((a) => tnode(a.id, a.name, a.kind, { parent: a.parent ?? undefined, room: typeof a.metadata.room === "string" ? a.metadata.room : undefined })));
+  for (const path of nodes.keys()) {
+    const a = roomView(neu, path, FR, FR[0]), b = roomView(oldTree, path, FR, FR[0]);
+    assert.deepEqual([a.target?.id, a.own, a.heldNode], [b.target?.id, b.own, b.heldNode], `room of ${path}`);
+    assert.deepEqual(sorted(subtreePaths(tt, path)), sorted(oldSub(path)), `subtree of ${path}`);
+  }
 });
 
 if (failed) { console.log(`\n${failed} failed`); process.exit(1); }
