@@ -3758,6 +3758,8 @@ test.describe('r23', () => {
     await expect(sheetOf(page)).toHaveCount(0);
     await expect(page.locator('.sr-chat')).toBeVisible();
     await expect(page.locator('.sr-chat textarea, .sr-chat [contenteditable]').first()).toHaveText('');
+    // r24: and it is scrolled to the first message about the request, marked
+    await expect(page.locator('.message.search-focus')).toContainText('The placeholder deploy is ready');
     await openWork(page);
     // r24: the room's newer chat is about other things: no cue, and "Say it" stays the primary
     await rowOf(page, 'Say go on the quarterly budget').locator('.cp-need').click();
@@ -3768,6 +3770,21 @@ test.describe('r23', () => {
     await rowOf(page, 'Say go on the fresh placeholder deploy').locator('.cp-need').click();
     await expect(sheetOf(page).locator('.task-movedon')).toHaveCount(0);
     await expect(sheetOf(page).locator('.task-do.primary')).toHaveText(/^Say it in #/);
+  });
+
+  test('r24: a "look at" sheet whose room has talked about it leads with "Check in #room first" like every other sheet with the cue; its link is secondary', async ({ page }) => {
+    await boot(page);
+    await page.evaluate(() => (window as any).__arrive('ch-techne', 'Uni', 'The signup staging copy is posted, please look.', 3600));
+    await add(page, { id: 'st1', title: 'T-330 Placeholder staging look', node: 'Areas/Techne', meta: { next: 'Look at placeholder-signup-staging.example.invalid on phone, then say go on the signup staging', asked: '2026-10-06T18:00:00.000Z' } });
+    await refresh(page, '2026-10-14T09:00:00.000Z');
+    await openRoom(page, 'Techne');
+    await openWork(page);
+    await page.locator('.sr-work .cp-item').filter({ hasText: 'placeholder-signup-staging' }).locator('.cp-need').click();
+    const sheet = sheetOf(page);
+    await expect(sheet.locator('.task-movedon')).toHaveText(/^#techne has talked about .+ since this was asked$/i);
+    await expect(sheet.locator('.task-do.primary')).toHaveCount(1);
+    await expect(sheet.locator('.task-do.primary')).toHaveText(/^Check in #techne first$/i);
+    await expect(sheet.getByRole('button', { name: 'I did this' })).not.toHaveClass(/primary/);
   });
 
   test('a step that names a block shows inline text only when it came from that block: otherwise "Open #room to find the \'For Eileen\' block"', async ({ page }) => {
@@ -3880,6 +3897,21 @@ test.describe('r23', () => {
       expect(facts!.y, `${w}×${h} facts inside the body`).toBeGreaterThanOrEqual(body!.y - 0.5);
       await page.keyboard.press('Escape');
     }
+  });
+
+  test('r24 (Codex 1): a summary that says something waits on Aaron gets a quiet line when no open request is that; the stored text stays', async ({ page }) => {
+    await boot(page);
+    await page.evaluate(() => (window as any).__setStands('p-lvb', "Cohort two starts Oct 15; prod waits on Aaron's go for #38 and #58."));
+    await refresh(page, '2026-10-14T09:00:00.000Z');
+    await openRoom(page, 'Learn Vibe Build');
+    await openCompanion(page);
+    await expect(page.locator('.cp-stands')).toContainText("prod waits on Aaron's go for #38 and #58");
+    await expect(page.locator('.cp-calm')).toHaveText(/^(Nothing is waiting on you here now|No open request mentions this now) · this summary is from Oct \d+$/);
+    // an open request that names #38: the claim is owed, so no line
+    await add(page, { id: 'g38', title: 'T-320 Placeholder prod go', node: 'Projects/Learn Vibe Build', meta: { priority: 'now', next: 'Say go on the placeholder prod deploy of #38', asked: '2026-10-13T18:00:00.000Z' } });
+    await refresh(page, '2026-10-14T09:30:00.000Z');
+    await expect(page.locator('.cp-body').getByText('Say go on the placeholder prod deploy')).toBeVisible();
+    await expect(page.locator('.cp-calm')).toHaveCount(0);
   });
 
   test('one freshness line at a time: a saved copy being read again says "N as of 1:44 PM · refreshing…" once, not in the tree too', async ({ page }) => {

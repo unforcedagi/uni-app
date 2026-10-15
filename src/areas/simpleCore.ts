@@ -423,7 +423,7 @@ export const movedOnText = (w: AskedWhen): string => (w.kind === "asked" ? MOVED
  * request must be room-directed or an approval; the chat counts only when a message after the request names its task id, a `#NN` number from
  * its step, or two of the step's distinctive words.
  */
-const KEY_STOP = new Set("about after again also back before being both check could from have here into just like make more need next onto only other over same some that then there these they this those through very want were what when where which while will with without would your their them been done does each first last must still such than well".split(" "));
+const KEY_STOP = new Set("about after again also back before being both check could from have here into just like make more need next onto only other over same some that then there these they this those through very want were what when where which while will with without would your their them been done does each first last must still such than well went already skip change changes please today tomorrow yesterday thread letter email draft ready going gets getting being using use used".split(" "));
 export type RequestKeys = { ids: string[]; words: string[] };
 export function requestKeys(t: { title?: string | null; next?: string | null }): RequestKeys {
   const title = t.title ?? "";
@@ -432,12 +432,12 @@ export function requestKeys(t: { title?: string | null; next?: string | null }):
   const tid = /\bT-\d+\b/i.exec(title)?.[0];
   if (tid) ids.add(tid.toUpperCase());
   for (const m of `${next} ${title}`.matchAll(/(?:^|[^\w&])#(\d{1,5})\b/g)) ids.add(`#${m[1]}`);
-  const words = [...new Set((next.toLowerCase().match(/[a-z][a-z-]{3,}/g) ?? []).filter((w) => !KEY_STOP.has(w) && !/^(?:say|tell|reply|ask|send|copy|approve|approval|message|room|chat)$/.test(w)))];
+  const words = [...new Set((next.toLowerCase().replace(/\b([\w-]+)(?:\.[\w-]+)+\b/g, "$1").match(/[a-z]{5,}/g) ?? []).filter((w) => !KEY_STOP.has(w) && !/^(?:say|tell|reply|ask|send|copy|approve|approval|message|room|chat)$/.test(w)))];
   return { ids: [...ids], words };
 }
 /** A request spoken to the room or asking for an approval: "Say …", "Tell Uni …", "Approve …", "go/no-go", a decision. */
 export function isApprovalRequest(t: { kind?: string; next?: string | null }, audienceIsRoom: boolean): boolean {
-  return t.kind === "decision" || audienceIsRoom || /^\s*(?:approve|say|reply)\b|\bgo\s*\/\s*no[- ]?go\b|\bgo or no\b/i.test(t.next ?? "");
+  return t.kind === "decision" || audienceIsRoom || /(?:^|[,;:]\s*|\bthen\s+)(?:approve|say)\b|\bgo\s*\/\s*no[- ]?go\b|\bgo or no\b/i.test(t.next ?? "");
 }
 export type RoomMsg = { ref?: string; ts: number; body: string };
 export type ChatHit = { key: string; ref: string | null; ts: number };
@@ -452,7 +452,7 @@ export function chatAbout(w: AskedWhen | null | undefined, msgs: readonly RoomMs
     const body = m.body.toLowerCase();
     const id = keys.ids.find((k) => (k.startsWith("#") ? new RegExp(`(^|[^\\w&])${k.toLowerCase()}\\b`) : new RegExp(`\\b${k.toLowerCase()}\\b`)).test(body));
     if (id) return { key: id, ref: m.ref ?? null, ts: m.ts };
-    const hit = keys.words.filter((k) => body.includes(k));
+    const hit = keys.words.filter((k) => new RegExp(`(^|[^a-z-])${k}([^a-z-]|$)`).test(body));
     if (hit.length >= 2) return { key: hit.slice(0, 2).join(" "), ref: m.ref ?? null, ts: m.ts };
   }
   return null;
@@ -464,11 +464,16 @@ export const checkInCue = (room: string, key: string, w: AskedWhen): string => `
  * line under it and leaves the stored text alone (the room rewrites it).
  */
 export const WAITS_ON_ME = /\bwaits?\s+on\s+aaron\b|\baaron['’]s\s+(?:go|ok|okay|ask|call|ans|decision|approval|sign-?off)\b|\bneeds?\s+aaron\b|\bfor\s+aaron\s+to\b|\bawaiting\s+aaron\b/i;
-export const nothingWaiting = (stands: string | null | undefined, open: number, updated: string | null | undefined): string | null => {
-  if (open > 0 || !stands || !WAITS_ON_ME.test(stands)) return null;
+export const nothingWaiting = (stands: string | null | undefined, open: number, updated: string | null | undefined, openTexts: readonly string[] = []): string | null => {
+  if (!stands || !WAITS_ON_ME.test(stands)) return null;
   const ms = stampMs(updated ?? "");
-  const d = Number.isFinite(ms) ? new Date(ms).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : null;
-  return `Nothing is waiting on you here now${d ? ` · this summary is from ${d}` : ""}`;
+  const d = Number.isFinite(ms) ? ` · this summary is from ${new Date(ms).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : "";
+  if (open === 0) return `Nothing is waiting on you here now${d}`;
+  // something else is open: the claim is about the ids it names (#38, T-90); when no open request mentions any of them, it is not owed
+  const ids = [...stands.matchAll(/(?:^|[^\w&])(#\d{1,5}|T-\d+)\b/gi)].map((m) => m[1].toLowerCase());
+  if (!ids.length) return null;
+  const mentioned = openTexts.some((t) => ids.some((id) => new RegExp(`(^|[^\\w&])${id}\\b`, "i").test(t)));
+  return mentioned ? null : `No open request mentions this now${d}`;
 };
 
 /**

@@ -45,7 +45,9 @@ export const UNFILED = "Not filed under an area yet.";
 /** What the host does for the shell: as an area app's actions, except that a note is opened in its own vault (r15). */
 export type ShellActions = Omit<AreaActions, "openNote"> & { openNote(ref: NoteRef): void;
   /** r21 (Codex 9): read the rooms list again (a conversation slow to open before its room is known) */
-  retryRooms?: () => void };
+  retryRooms?: () => void;
+  /** r24: scroll to and mark a message of the room open now ("Check in #room first" goes to the first message about the request) */
+  focusMessage?: (ref: string) => void };
 
 /**
  * What is open over the place (the task sheet, the work view, the drawer): Android Back closes it first. `modal` (the sheet) holds Alt+arrow
@@ -377,18 +379,18 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   const noAreas = isRoot && !!tree && !error && childrenOf(tree, ROOT).length === 0;
   const stands0 = noAreas ? { text: "No areas yet. Tell Uni here what you want to look after, and it will set up your first area.", ago: "" } : standsLine(rawStands, levelTasks.filter((t) => !hidden(t.node)), now);
   /** r24 (Codex P1 1): a stored summary that says something waits on the user, with nothing open for them here: a quiet line says so (the text stays) */
-  const stands = stands0 && !noAreas ? { ...stands0, calm: nothingWaiting(rawStands?.text, feed.total + feed.privates.length, rawStands?.at) } : stands0;
+  const stands = stands0 && !noAreas ? { ...stands0, calm: nothingWaiting(rawStands?.text, feed.total + feed.privates.length, rawStands?.at, feed.rows.map((t) => [t.title, t.next, t.detail].filter(Boolean).join(" "))) } : stands0;
   /** The room's composer when it is the one here, else that room's (opened, filled in, never sent). */
   const sayIn = (roomId: string, text: string) => { closeSheet(); setWork(false); const here = roomFor(roomId); if (here) here.compose(text); else actions.compose(roomId, text); };
   /** From the work view or the sheet, "Open #room" for this room is the conversation: it goes back to it. Another room opens as a tab. */
-  const openRoomHere = (id: string) => { if (chat && id === target?.id) { closeSheet(); setWork(false); } else actions.openRoom(id); };
+  const openRoomHere = (id: string, focus?: string | null) => { if (chat && id === target?.id) { closeSheet(); setWork(false); if (focus) actions.focusMessage?.(focus); } else (actions.openRoom as (id: string, focus?: string | null) => void)(id, focus); };
   const live = sheetId ? tasks.all?.find((t) => t.id === sheetId) ?? null : null;
   if (live) lastSheet.current = live;
   const sheetTask = sheetId ? live ?? (lastSheet.current?.id === sheetId ? lastSheet.current : null) : null;
   const sheetGone = !!sheetId && (!live || !(live.state === "open" || live.state === "doing" || live.state === "waiting") || (tasks.ready && !tasks.tasks.some((t) => t.id === sheetId) && !tasks.leaving.has(sheetId)));
   /** r18: a draft note written for the task (its `task` field names it): its text is the message the sheet copies. */
   const draftOf = (t: Task) => { const tid = taskTitle(t.title).id?.toUpperCase(); const d = tid ? tasks.drafts.find((x) => x.task?.toUpperCase() === tid) : null; return d ? { vault: t.vault ?? profile.vault, id: d.id } : null; };
-  const sheetView = sheetTask && <TaskSheet key={sheetTask.id} task={sheetTask} gone={sheetGone} here={here} nodeName={nodeName} room={roomOfNode(sheetTask.node) ?? target} inRoom={target?.id} onClose={closeSheet}
+  const sheetView = sheetTask && <TaskSheet key={sheetTask.id} task={sheetTask} gone={sheetGone} here={here} nodeName={nodeName} room={roomOfNode(sheetTask.node) ?? target} roomNamed={(n) => rooms.find((r) => r.name.replace(/^#/, "").toLowerCase() === n.replace(/^#/, "").toLowerCase()) ?? null} inRoom={target?.id} onClose={closeSheet}
     draft={draftOf(sheetTask)}
     onAct={(t, a) => tasks.act(t, a, { sheet: true })} onDecide={(t, o) => tasks.decide(t, o)} onNote={actions.openNote} onOpenRoom={openRoomHere} onSay={chat ? sayIn : undefined} onPriority={(t, p) => void tasks.setPriority(t, p)} onStale={tasks.refresh} />;
   /** r20: a row's area when it is shown outside it (Uni's list holds every area's): its subtitle names it when its title can't say where it is. */

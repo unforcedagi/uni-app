@@ -32,6 +32,7 @@ check("P1: with no id, two distinctive words of the step are needed", () => {
 
 check("P1: only a room-directed request or an approval can carry the cue", () => {
   assert.equal(isApprovalRequest({ next: "Send the plan to Kevin" }, false), false);
+  assert.equal(isApprovalRequest({ next: "Reply to Christian in your existing thread that the letter went out Oct 2 (skip if already done)" }, false), false, "an email reply is not an approval");
   assert.equal(isApprovalRequest({ next: "Say go on the deploy" }, true), true);
   assert.equal(isApprovalRequest({ next: "Approve the budget" }, false), true);
   assert.equal(isApprovalRequest({ next: "x", kind: "decision" }, false), true);
@@ -41,13 +42,26 @@ check("P1: only a room-directed request or an approval can carry the cue", () =>
 check("P1: a summary that says something waits on Aaron, with nothing open for them, gets a quiet line", () => {
   const s = "Staging is up; prod waits on Aaron's Wed 10-14 go for #38, #58, #62";
   assert.match(nothingWaiting(s, 0, "2026-10-13T10:00:00Z")!, /^Nothing is waiting on you here now · this summary is from Oct 1[23]$/);
-  assert.equal(nothingWaiting(s, 1, "2026-10-13T10:00:00Z"), null, "something open: no line");
+  assert.equal(nothingWaiting(s, 1, "2026-10-13T10:00:00Z", ["Say go on prod deploy of #38"]), null, "an open request names #38: still owed, no line");
   assert.equal(nothingWaiting("Staging is up and quiet.", 0, "2026-10-13T10:00:00Z"), null);
   for (const t of ["needs Aaron to pick", "for Aaron to sign", "Aaron's go", "waits on Aaron"]) assert.ok(nothingWaiting(t, 0, null), t);
   assert.equal(nothingWaiting(s, 0, null), "Nothing is waiting on you here now");
 });
 
-check("rows: \"message below\" reads \"(in the card)\" when the card carries the message", () => {
+check("P1: something else is open, but nothing open mentions what the summary says waits on Aaron: a different quiet line", () => {
+  const s = "Staging is up; prod waits on Aaron's Wed 10-14 go for #38, #58, #62";
+  assert.match(nothingWaiting(s, 2, "2026-10-13T10:00:00Z", ["Companion Today redesign", "Edit and send the ATLAS follow-up"])!, /^No open request mentions this now · this summary is from Oct 1[23]$/);
+  assert.equal(nothingWaiting(s, 2, null, ["Say go on prod deploy of #58"]), null, "an open request names #58: the claim is owed");
+  assert.equal(nothingWaiting("Waits on Aaron to pick", 2, null, ["x"]), null, "no id to check: no line while anything is open");
+});
+
+check("P1: two whole distinctive words, not a substring or a common verb", () => {
+  const keys = requestKeys({ title: "x", next: "Approve the Cloudflare migration plan; the letter went out" });
+  assert.equal(chatAbout(asked, [{ ts: ts("2026-10-12T11:00:00"), body: "The cloudflared tunnel and migrations are fine; the letter went to everyone" }], keys), null);
+  assert.ok(chatAbout(asked, [{ ts: ts("2026-10-12T11:00:00"), body: "Cloudflare migration is done" }], keys));
+});
+
+check("rows:\"message below\" reads \"(in the card)\" when the card carries the message", () => {
   assert.equal(belowInCard("Send Ryan the deploy-access message below.", { detail: "x" }), "Send Ryan the deploy-access message (in the card).");
   assert.equal(belowInCard("Send Ryan the deploy-access message below.", {}), "Send Ryan the deploy-access message below.");
 });
