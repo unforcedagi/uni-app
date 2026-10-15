@@ -411,6 +411,14 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
     const here = roomFor(room.id);
     if (here) here.compose(""); else actions.compose(room.id, "");
     if (r.message) actions.focusMessage?.(r.message, room.id, null);
+    // a room that was not open takes a moment to come up: its composer is focused as soon as it is that room's (never before)
+    const want = room.name.replace(/^#/, "").toLowerCase();
+    let tries = 0;
+    const timer = setInterval(() => {
+      const ta = document.querySelector<HTMLTextAreaElement>(".composer textarea");
+      if (ta && !ta.disabled && (ta.getAttribute("aria-label") ?? "").toLowerCase().includes(want)) { ta.focus(); if (document.activeElement === ta) tries = 99; }
+      if (++tries > 30) clearInterval(timer);
+    }, 100);
   };
   const live = sheetId ? tasks.all?.find((t) => t.id === sheetId) ?? null : null;
   if (live) lastSheet.current = live;

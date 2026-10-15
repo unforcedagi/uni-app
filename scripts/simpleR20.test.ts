@@ -61,7 +61,7 @@ await check("rows lead with the action: the verb phrase and its object, the whol
     assert.ok(a.text.startsWith(a.head), `the step starts with its action: ${next}`);
     assert.ok(a.text.startsWith(a.verb), `the action starts with its verb phrase: ${next}`);
   }
-  assert.equal(rowAction("Edit and send the ATLAS follow-up to Mark and Dominic from your account; fill the opening, sign-off and next-review date.")!.text, "Edit and send the ATLAS follow-up to Mark and Dominic from your account; fill the opening, sign-off and next-review date."); // r22: on the row (r30: every word)
+  assert.equal(rowAction("Edit and send the ATLAS follow-up to Mark and Dominic from your account; fill the opening, sign-off and next-review date.")!.text, "Edit and send the ATLAS follow-up to Mark and Dominic from your account; fill the opening, sign-off and next-review date"); // r22: on the row (r30: every word)
   // a date label is never what a row leads with, and is kept as the cue when there is no due date
   assert.equal(rowAction("Wed 10-14: say go on prod deploy of #38 + #58; Harper signs off")!.prefix, "Wed 10-14");
   assert.equal(rowAction("10-05 09:04: send Runway the claim; wait")!.head, "Send Runway the claim");

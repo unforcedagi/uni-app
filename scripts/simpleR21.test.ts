@@ -24,7 +24,7 @@ await check("the whole action: objects and recipients are never cut; only contex
   const at = rowAction(ATLAS)!;
   // r22 (both critics): a ";" clause that leads with a work verb is the user's too, so it stays in the action
   assert.equal(at.head, "Edit and send the ATLAS follow-up to Mark and Dominic from your account; fill the opening, sign-off and next-review date");
-  assert.equal(at.text, ATLAS, "r30: the row and the heading say every word of the step");
+  assert.equal(at.text, ATLAS.replace(/\.$/, ""), "r30: the row and the heading say every word of the step");
   assert.deepEqual(at.forms.map((f) => f.text), [at.text]);
   const pays = rowAction(PAYS)!;
   assert.equal(pays.head, "Tell Uni who pays (Techne or Gitcoin Foundation) and how: crypto or ACH/Stripe, plus Woven Web's legal details");
@@ -46,7 +46,7 @@ await check("the whole action: objects and recipients are never cut; only contex
 await check("multi-step: \"A, then B\" is both steps; the fallback is \"2 steps: A, then …\" and never step 1 alone", () => {
   const ww = rowAction(WOVEN)!;
   assert.deepEqual(ww.steps, ["Review the Woven Web handoff draft, fill the unknowns", "talk with Harper yourself"]);
-  assert.equal(ww.text, "Review the Woven Web handoff draft, fill the unknowns, then talk with Harper yourself.");
+  assert.equal(ww.text, "Review the Woven Web handoff draft, fill the unknowns, then talk with Harper yourself");
   // r22: never "2 steps: A, then …": the one form is both steps
   assert.deepEqual(ww.forms.map((f) => f.text), [ww.text]);
   const st = rowAction(STAGING)!;

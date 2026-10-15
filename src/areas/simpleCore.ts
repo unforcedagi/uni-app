@@ -101,7 +101,7 @@ export type PrivateNeed = { key: string; count: number; place: string; open: { p
   others: number };
 /** Needs you at one level, the one list every surface reads (r13): the companion, "+N in areas", the dots and the work view add up to `total`. */
 export type NeedsFeed = { rows: Task[]; privates: PrivateNeed[]; total: number;
-  /** r28: asks Uni must recheck (not confirmed): listed apart under "Uni is rechecking N older asks", never in `total` or the dots. */
+  /** r28: requests that are not confirmed (r30: "N requests need confirming"): listed apart under Needs you, never in `total` or the dots. */
   recheck?: Task[];
   /** r30: why each of them is not confirmed (by task id), for its reason line */
   recheckWhy?: Record<string, RecheckWhy | null>;
@@ -1176,7 +1176,8 @@ export function actionOf(lead: string, prefix: string | null = null): RowAction 
   const at = actionEnd(lead);
   const head = lead.slice(0, at).replace(/[\s,;:—–-]+$/, "").trim() || lead;
   // r30: the row and the sheet's heading carry the whole step, never just its first clause ("…then say whether journal should be Parachute's default" was lost)
-  const text = lead.replace(/[\s,;:—–-]+$/, "").trim() || head;
+  // (a sentence's closing "." is not a word: the heading has never ended on one; nor is a cut mark, which no surface shows)
+  const text = lead.replace(/\s*(?:…|\.\.\.)\s*$/, "").replace(/[\s,;:—–-]+$/, "").replace(/\.$/, "").trim() || head;
   const verb = verbPhrase(head);
   const steps = stepsOf(head);
   return { text, head, verb, prefix, steps, forms: [{ text: rowForm(text), keep: text }] };

@@ -631,7 +631,7 @@ export function NeedsList({ needs: owed, pending = [], fit, onTask, onDecide, on
 export function WaitingRuns({ runs, className = "cp-list cp-waiting", onRun }: { runs: readonly Run[]; className?: string; /** r30: the whole row opens its room at the run's message (the room, with none), the composer focused */ onRun?: (r: Run) => void }) {
   return runs.length > 0 ? <ul className={className} aria-label="Waiting on your answer">{runs.map((r) => {
     const w = waitingRunParts(cleanText(r.what));
-    return <li key={r.id} className="cp-item cp-run cp-run-waiting" data-state={r.state} data-task={r.task ?? undefined}>
+    return <li key={r.id} className="cp-run cp-run-waiting" data-state={r.state} data-task={r.task ?? undefined}>
       <button type="button" className="cp-need cp-run-open" aria-label={[w.step, w.place, runStateLabel(r.state)].filter(Boolean).join(". ")} onClick={() => onRun?.(r)}>
         <i aria-hidden="true" /><span className="cp-run-text" title={cleanText(r.what)}><span className="cp-run-step">{w.step}</span>{w.place && <small className="cp-run-place">{w.place}</small>}</span><small>{runStateLabel(r.state)}</small>
       </button></li>;
@@ -710,25 +710,36 @@ function Body({ stands, ready, note, load, feed, rest = 0, moreTitle = null, onP
   useLayoutEffect(() => {
     const b = bodyRef.current; const sc = (fit ? b?.closest(".cp-fit") : compact ? b : null) as HTMLElement | null;
     if (!sc || typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(() => setPanelSize(`${sc.clientWidth}x${sc.clientHeight}`));
-    ro.observe(sc); setPanelSize(`${sc.clientWidth}x${sc.clientHeight}`);
+    // (the panel's width and the window's height: the panel's own height follows what it holds, and a scrollbar that comes or goes with it is not a new size)
+    const size = () => setPanelSize(`${sc.offsetWidth}x${window.innerHeight}`);
+    const ro = new ResizeObserver(size);
+    ro.observe(sc); size();
     return () => ro.disconnect();
   }, [fit, compact]);
   useLayoutEffect(() => {
     if (standsSeen.current !== standsKey) { standsSeen.current = standsKey; if (standsAt !== "whole") { setStandsAt("whole"); return; } }
-    // measured once the panel has been quiet for a moment: the rows above it are still being fitted while they change
-    const t = setTimeout(() => {
-      const b = bodyRef.current; const sc = (fit ? b?.closest(".cp-fit") : compact ? b : null) as HTMLElement | null;
-      const note = b?.querySelector<HTMLElement>(".cp-stands-note");
-      if (!sc || !b || !note || standsAt === "foot" || sc.scrollTop > 1 || note.querySelector("details[open]")) return;
+    const b = bodyRef.current; const sc = (fit ? b?.closest(".cp-fit") : compact ? b : null) as HTMLElement | null;
+    if (!b || !sc || standsAt === "foot") return;
+    // measured once the panel has been quiet for a moment (the rows above are still being fitted while they change), and again whenever it changes
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const measure = () => {
+      const note = b.querySelector<HTMLElement>(".cp-stands-note");
+      if (!note || sc.scrollTop > 1 || note.querySelector("details[open]")) return;
       const s = sc.getBoundingClientRect(); const n = note.getBoundingClientRect();
       const foot = (fit ? b : sc.parentElement)?.querySelector<HTMLElement>(".cp-foot");
       // what is in view above the footer: a sticky footer covers the scrolling panel's bottom; the compact panel's footer is outside what scrolls
       const limit = Math.min(s.bottom, foot && foot.getBoundingClientRect().top > s.top ? foot.getBoundingClientRect().top : Infinity);
       if (n.top < limit - 0.5 && n.bottom > limit + 0.5) setStandsAt(standsAt === "whole" ? "folded" : foot ? "foot" : "folded");
-    }, 120);
-    return () => clearTimeout(t);
-  });
+    };
+    const later = () => { clearTimeout(timer); timer = setTimeout(measure, 120); };
+    later();
+    // (a scroller that is the body itself doesn't change size when its content does: its children are watched too)
+    const ro = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(later);
+    ro?.observe(b); ro?.observe(sc); for (const c of Array.from(b.children)) ro?.observe(c);
+    const mo = typeof MutationObserver === "undefined" ? null : new MutationObserver(later);
+    mo?.observe(b, { childList: true, subtree: true });
+    return () => { clearTimeout(timer); ro?.disconnect(); mo?.disconnect(); };
+  }, [standsAt, standsKey, fit, compact]);
   const runsShown = fit ? Math.min(RUNS_SHOWN, runCap) : RUNS_SHOWN;
   const hiddenRuns = Math.max(0, active.length - runsShown);
   if (note) return <div className="cp-body"><p className="cp-lede cp-note">{note}</p></div>;

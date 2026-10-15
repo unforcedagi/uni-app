@@ -46,8 +46,9 @@ await check("1: every live ask on the scratch hub (hub11): the row's words conta
     const a = rowAction(step);
     // a row that leads with an action draws it whole; any other row draws the step under its title, whole
     const drawn = a ? a.forms[0].text : t.next;
-    assert.equal(norm(drawn), norm(t.next).replace(/\s*\(\s*\)$/, ""), `${t.title}: the row says the stored words`);
-    if (a) assert.equal(norm(a.text), norm(t.next), `${t.title}: the sheet's heading says the same`);
+    const stored = norm(t.next).replace(/\.$/, ""); // (a closing "." is no word)
+    assert.equal(norm(drawn).replace(/\.$/, ""), stored, `${t.title}: the row says the stored words`);
+    if (a) assert.equal(norm(a.text), stored, `${t.title}: the sheet's heading says the same`);
   }
   assert.ok(steps >= 10, `${steps} asks with a step were checked`);
 });
