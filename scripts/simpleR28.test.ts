@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { buildTaskTree, parseNodes, parseTask, type Task } from "../src/areas/taskCore.ts";
 import type { Run } from "../src/areas/steerCore.ts";
 import {
-  askStamp, confirmationOf, needsByRow, needsFeed, staleSummary, uniPanel, waitingRunParts, withWaiting, ROW_ITEMS, itemForms, taskIdOf, UNRESOLVED,
+  askStamp, confirmationOf, chatAbout, checkInResult, ANNOUNCE_GRACE_MS, needsByRow, needsFeed, staleSummary, uniPanel, waitingRunParts, withWaiting, ROW_ITEMS, itemForms, taskIdOf, UNRESOLVED,
   type ConfOf, type Resolved,
 } from "../src/areas/simpleCore.ts";
 import { ROOT } from "../src/areas/treeCore.ts";
@@ -131,6 +131,19 @@ await check("summary case 3: nothing newer directly on the node leaves it as wri
 await check("taskIdOf reads the T-NN a run names", () => {
   assert.equal(taskIdOf(mk(30)), "T-30");
   assert.equal(UNRESOLVED.state, "recheck");
+});
+
+await check("r28: a room announcing the ask it just re-stated doesn't unconfirm it; related chat past the grace window does", () => {
+  const at = "2026-10-15T08:05:41.000Z";
+  const sec = (ms: number) => Math.floor(ms / 1000);
+  const t0 = new Date(at).getTime();
+  const keys = { ids: ["T-65"], words: [] as string[] };
+  const announce = [{ ref: "a", ts: sec(t0 + 9_000), body: "I've re-stated each ask: T-65: who pays the $10k sponsorship" }];
+  assert.equal(chatAbout({ at, kind: "asked" }, announce, keys), null);
+  assert.equal(checkInResult({ at, kind: "asked" }, announce, keys).kind, "none");
+  const later = [{ ref: "b", ts: sec(t0 + ANNOUNCE_GRACE_MS + 60_000), body: "T-65 is settled" }];
+  assert.equal(checkInResult({ at, kind: "asked" }, later, keys).kind, "found");
+  assert.equal(chatAbout({ at, kind: "added" }, announce, keys)?.key, "T-65", "an added (not asked) record keeps the strict rule");
 });
 
 if (failed) { console.log(`\n${failed} failed`); process.exit(1); }

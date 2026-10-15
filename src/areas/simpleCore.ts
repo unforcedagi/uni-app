@@ -492,13 +492,17 @@ export function isApprovalRequest(t: { kind?: string; next?: string | null }, au
   return t.kind === "decision" || audienceIsRoom || /(?:^|[,;:]\s*|\bthen\s+)(?:approve|say)\b|\bgo\s*\/\s*no[- ]?go\b|\bgo or no\b/i.test(t.next ?? "");
 }
 export type RoomMsg = { ref?: string; ts: number; body: string };
+/** Chat within this long after an ask was written is the room announcing it, not talk that moved past it. */
+export const ANNOUNCE_GRACE_MS = 10 * 60_000;
 export type ChatHit = { key: string; ref: string | null; ts: number };
 /** The first message after the request (`ts` in seconds) that mentions its key terms, or null. */
 export function chatAbout(w: AskedWhen | null | undefined, msgs: readonly RoomMsg[], keys: RequestKeys): ChatHit | null {
   if (!w || !(keys.ids.length || keys.words.length)) return null;
   const day = /^\d{4}-\d{2}-\d{2}$/.test(w.at.trim());
-  const from = day ? new Date(`${w.at.trim()}T23:59:59`).getTime() : stampMs(w.at);
-  if (!Number.isFinite(from)) return null;
+  const at = day ? new Date(`${w.at.trim()}T23:59:59`).getTime() : stampMs(w.at);
+  if (!Number.isFinite(at)) return null;
+  // r28: the room announces an ask it just wrote ("I've re-stated each ask: T-65 …") seconds after asked_at; that is the ask, not talk past it
+  const from = !day && w.kind === "asked" ? at + ANNOUNCE_GRACE_MS : at;
   for (const m of [...msgs].sort((a, b) => a.ts - b.ts)) {
     if (!(m.ts * 1000 > from)) continue;
     const body = m.body.toLowerCase();
