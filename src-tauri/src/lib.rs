@@ -1267,6 +1267,7 @@ async fn journal_queue_entry(
     app: &tauri::AppHandle,
     entry: JournalDraft,
     audio: Option<(Vec<u8>, String)>,
+    save_another: bool,
 ) -> Result<uni_core::journal::Queued, String> {
     let path = db_path(app)?;
     blocking(move || {
@@ -1275,8 +1276,13 @@ async fn journal_queue_entry(
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs() as i64)
             .unwrap_or_default();
+        let send = uni_core::journal::Submission {
+            id: entry.submission_id.as_deref().unwrap_or(&entry.entry_id),
+            save_another,
+        };
         store
-            .journal_queue(
+            .journal_submit(
+                send,
                 &entry.entry_id,
                 &entry.path,
                 &entry.alternates,
@@ -1301,20 +1307,26 @@ struct JournalDraft {
     /// Paths to try, in order, when `path` is taken (0.1.46; older drafts have none).
     #[serde(default)]
     alternates: Vec<String>,
+    /// Made once per composer send and kept when that send is retried
+    /// (0.1.46 fix); a draft without one is its own send (its entry id).
+    #[serde(default)]
+    submission_id: Option<String>,
 }
 
-/// Queue a typed entry, then try to send everything queued. The same words
-/// already waiting, or sent in the last ten minutes, aren't queued again:
-/// the report names the existing entry instead.
+/// Queue a typed entry, then try to send everything queued. A retry of the
+/// same send queues nothing. The same words as an entry waiting, or sent in
+/// the last ten minutes, aren't queued: the report names that entry and the
+/// app asks; `save_another` is the answer "Save another".
 #[tauri::command]
 async fn journal_save_text(
     app: tauri::AppHandle,
     entry: JournalDraft,
+    save_another: Option<bool>,
 ) -> Result<uni_core::journal::FlushReport, String> {
-    let queued = journal_queue_entry(&app, entry, None).await?;
+    let queued = journal_queue_entry(&app, entry, None, save_another.unwrap_or(false)).await?;
     let mut report = journal_flush_inner(&app).await?;
-    if queued != uni_core::journal::Queued::New {
-        report.duplicate = Some(queued);
+    if let uni_core::journal::Queued::SameWords(same) = queued {
+        report.duplicate = Some(same);
     }
     Ok(report)
 }
@@ -1347,7 +1359,7 @@ async fn journal_save_voice(
     if bytes.is_empty() || bytes.len() > uni_core::parachute::MAX_AUDIO_BYTES {
         return Err("audio is empty or too large".into());
     }
-    journal_queue_entry(&app, entry, Some((bytes.clone(), mime))).await?;
+    journal_queue_entry(&app, entry, Some((bytes.clone(), mime)), false).await?;
     journal_flush_inner(&app).await
 }
 
