@@ -708,8 +708,8 @@ function Body({ stands, ready, note, load, feed, rest = 0, moreTitle = null, onP
   const [panelSize, setPanelSize] = useState("");
   const standsKey = `${stands?.text ?? ""}|${feed.rows.length}|${feed.recheck?.length ?? 0}|${waiting.length}|${active.length}|${fit}|${compact}|${panelSize}`;
   const standsSeen = useRef("");
-  /** the summary's height when it was drawn whole (what unfolding it would take) */
-  const wholeHeight = useRef(0);
+  /** how many times a summary folded while the panel settled has been tried whole again */
+  const retries = useRef(0);
   useLayoutEffect(() => {
     const b = bodyRef.current; const sc = (fit ? b?.closest(".cp-fit") : compact ? b : null) as HTMLElement | null;
     if (!sc || typeof ResizeObserver === "undefined") return;
@@ -720,7 +720,7 @@ function Body({ stands, ready, note, load, feed, rest = 0, moreTitle = null, onP
     return () => ro.disconnect();
   }, [fit, compact]);
   useLayoutEffect(() => {
-    if (standsSeen.current !== standsKey) { standsSeen.current = standsKey; wholeHeight.current = 0; if (standsAt !== "whole") { setStandsAt("whole"); return; } }
+    if (standsSeen.current !== standsKey) { standsSeen.current = standsKey; retries.current = 0; if (standsAt !== "whole") { setStandsAt("whole"); return; } }
     const b = bodyRef.current; const sc = (fit ? b?.closest(".cp-fit") : compact ? b : null) as HTMLElement | null;
     if (!b || !sc || standsAt === "foot") return;
     // measured once the panel has been quiet for a moment (the rows above are still being fitted while they change), and again whenever it changes
@@ -732,12 +732,11 @@ function Body({ stands, ready, note, load, feed, rest = 0, moreTitle = null, onP
       const foot = (fit ? b : sc.parentElement)?.querySelector<HTMLElement>(".cp-foot");
       // what is in view above the footer: a sticky footer covers the scrolling panel's bottom; the compact panel's footer is outside what scrolls
       const limit = Math.min(s.bottom, foot && foot.getBoundingClientRect().top > s.top ? foot.getBoundingClientRect().top : Infinity);
-      if (standsAt === "whole") wholeHeight.current = n.height;
       if (n.top < limit - 0.5 && n.bottom > limit + 0.5) { setStandsAt(standsAt === "whole" ? "folded" : foot ? "foot" : "folded"); return; }
-      // folded while the panel was still settling, and now the whole summary fits with room to spare: it is whole again
-      if (standsAt === "folded" && wholeHeight.current) {
+      // folded while the panel was still settling, and now there is room to spare: the whole summary is tried again (twice at most; it folds again if it is cut)
+      if (standsAt === "folded" && retries.current < 2) {
         const lastBottom = Math.max(...Array.from(b.children).filter((c) => !c.classList.contains("cp-foot")).map((c) => c.getBoundingClientRect().bottom));
-        if (lastBottom + (wholeHeight.current - n.height) + 16 <= limit) setStandsAt("whole");
+        if (limit - lastBottom >= 76) { retries.current++; setStandsAt("whole"); }
       }
     };
     const later = () => { clearTimeout(timer); timer = setTimeout(measure, 120); };
