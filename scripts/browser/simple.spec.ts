@@ -613,6 +613,46 @@ test.describe('simple', () => {
     expect(s[3].entry.entry_id).not.toBe(s[0].entry.entry_id);
   });
 
+  test('journal (0.1.46 fix 2): words typed while a save is out stay in the composer and in local storage; a late "same words" question for the earlier words never deletes them', async ({ page }) => {
+    await boot(page);
+    await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Journal' }).click();
+    const box = page.getByRole('textbox', { name: 'Journal entry', exact: true });
+    const hold = () => page.evaluate(() => { const w = window as any; w.__saveGate = new Promise((r) => { w.__saveGo = () => { w.__saveGate = null; r(null); }; }); });
+    const release = () => page.evaluate(() => (window as any).__saveGo());
+    const stored = () => page.evaluate(() => localStorage.getItem('uni.journal.draft'));
+    const A = 'Placeholder words A: bread and a long walk';
+    const B = 'Placeholder words B: typed while A was saving';
+    // saved: A goes, B typed meanwhile stays
+    await hold();
+    await box.fill(A);
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Saving…' })).toBeVisible();
+    await box.fill(B);
+    await release();
+    await expect(page.getByRole('button', { name: 'Saving…' })).toHaveCount(0);
+    await expect(box).toHaveValue(B);
+    expect(await stored()).toBe(B);
+    await box.fill(A);
+    await page.evaluate(() => { (window as any).__saveReport = { sent: [], remaining: 0, error: null, duplicate: { kind: 'saved', id: 'n1', created_at: '2026-10-15T01:43:10.000Z' } }; });
+    // late duplicate: A is saved again, the answer says "same words", but B replaced A before it came back
+    await hold();
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Saving…' })).toBeVisible();
+    await box.fill(B);
+    await release();
+    await expect(page.getByRole('button', { name: 'Saving…' })).toHaveCount(0);
+    await expect(page.getByRole('group', { name: 'Same words as another entry' })).toHaveCount(0);
+    await expect(box).toHaveValue(B);
+    expect(await stored()).toBe(B);
+    // the question raised for B itself, then Keep one, removes B only
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    const ask = page.getByRole('group', { name: 'Same words as another entry' });
+    await expect(ask).toBeVisible();
+    await ask.getByRole('button', { name: 'Keep one' }).click();
+    await expect(box).toHaveValue('');
+    expect(await stored()).toBeNull();
+  });
+
   test('one look: the journal, settings and a room read as the same app; Settings has no layout picker (shots, light and dark)', async ({ page }) => {
     await boot(page);
     const rail = page.getByRole('navigation', { name: 'Main navigation' });
