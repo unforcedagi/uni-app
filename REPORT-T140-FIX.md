@@ -15,8 +15,13 @@
 - 0.1.46 equivalence: the old logic is copied into the test, and every node's room (target, own, heldNode) and subtree match on one parent-only fixture.
 - The cycle-safety test now expects `ancestry(P3)` = P3, P1, A1. The legacy chain through P1 shows up, as in 0.1.46.
 
+## Existing tests updated (they asserted the 0.1.47 behaviour this fix reverses)
+- `tasks.test.ts` (2) and `ids.test.ts` (3) now expect 0.1.46's legacy rings: broken at the smallest path, with the other node under it.
+- A project that links another and isn't linked back rolls up into it (COhere total 0 → 2).
+- `ancestry` of a project under a project now includes the project.
+
 ## Gates
 - `tsc --noEmit`: clean.
-- `npm test`: all suites pass, with 0 FAIL lines (`links.test.ts` has 17 ok).
+- `npm test`: all suites pass, 0 FAIL lines (an earlier run had 5 FAILs in tasks.test.ts and ids.test.ts, fixed as above; `links.test.ts` has 20 ok).
 - `playwright simple`: 667 passed, 107 skipped. The rewritten `__shots__` were restored.
 - I did not run 0.1.46 against the live vault; the equivalence test uses a fixture.
