@@ -7,10 +7,12 @@
 import { quote } from "./uniActions.ts";
 import { noteUrl } from "./vaultlinks.ts";
 
-export type JournalDraft = { entry_id: string; path: string; content: string; source: "text" | "voice"; created_at: string; /** paths to try, in order, when `path` is taken */ alternates: string[] };
+export type JournalDraft = { entry_id: string; /** made once per composer send and kept when that send is retried */ submission_id: string; path: string; content: string; source: "text" | "voice"; created_at: string; /** paths to try, in order, when `path` is taken */ alternates: string[] };
 export type JournalNote = { id: string; path: string; created_at: string; content: string; source: string | null; entry_id: string | null; tags: string[]; pending: boolean };
 export type QueuedEntry = { entry_id: string; path: string; content: string; source: string; created_at: string; has_audio: boolean; note_id: string | null; attempts: number; last_error: string | null };
-export type FlushReport = { sent: string[]; remaining: number; error: string | null; /** the entry was already queued ("waiting") or sent in the last 10 minutes ("saved"); nothing new was queued */ duplicate?: { kind: "waiting" | "saved"; id: string } | null };
+/** An entry with the same words, still waiting ("waiting", its entry id) or sent in the last 10 minutes ("saved", its note id). */
+export type SameWords = { kind: "waiting" | "saved"; id: string; created_at: string };
+export type FlushReport = { sent: string[]; remaining: number; error: string | null; /** the new entry has the same words as this one; nothing was queued until the user picks "Save another" or "Keep one" */ duplicate?: SameWords | null };
 
 export const TRANSCRIPT_PENDING = "_Transcript pending._";
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -44,6 +46,7 @@ const isPending = (content: string) => PENDING.some((p) => content.includes(p));
 /**
  * Where an entry made at `d` (local time) goes, and where it goes instead when that path is taken, by the sweep's clash rule: the minute's
  * seconds (`HH-MM-SS`), then more first words (12, 20, 40 within 200 characters). Never `-1`. A voice entry with no words yet is time-only.
+ * Past these the device outbox adds the last resort, `HH-MM-SS <title> (2)`… (crates/uni-core/src/journal.rs `last_resort_paths`).
  */
 export function entryPaths(d: Date, content: string, source: "text" | "voice"): { path: string; alternates: string[] } {
   const folder = `Journal/${d.getFullYear()}/${pad(d.getMonth() + 1)}-${pad(d.getDate())}/`;
@@ -68,9 +71,16 @@ export function legacyEntryPath(d: Date): string {
   return `Notes/${d.getFullYear()}/${pad(d.getMonth() + 1)}-${pad(d.getDate())}/${pad(d.getHours())}-${pad(d.getMinutes())}-${pad(d.getSeconds())}`;
 }
 
-export function newDraft(content: string, source: "text" | "voice", d = new Date(), id = crypto.randomUUID()): JournalDraft {
+export function newDraft(content: string, source: "text" | "voice", d = new Date(), id = crypto.randomUUID(), submission = crypto.randomUUID()): JournalDraft {
   const body = source === "voice" ? (content.trim() ? `${content.trim()}\n\n${TRANSCRIPT_PENDING}` : TRANSCRIPT_PENDING) : content;
-  return { entry_id: id, ...entryPaths(d, body, source), content, source, created_at: d.toISOString() };
+  return { entry_id: id, submission_id: submission, ...entryPaths(d, body, source), content, source, created_at: d.toISOString() };
+}
+
+/** "Same words as your 7:43 PM entry" (the time of the entry the new words match). */
+export function sameWordsLine(same: SameWords): string {
+  const d = new Date(same.created_at);
+  const at = isNaN(d.getTime()) ? "earlier" : d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  return `Same words as your ${at} entry`;
 }
 
 /** Content without the transcription placeholder, trimmed. */
