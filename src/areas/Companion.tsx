@@ -399,8 +399,9 @@ export function rowLead(t: Task, area: string | null = null): RowLead {
 
 /**
  * r27 (both critics): the items a row carries, each its whole clause. An item takes at most two lines and is cut only at a sentence end: the
- * first of its forms (`itemForms`) that fits is drawn; an item with no form that fits is not drawn at all, nor any after it, and the row says
- * "and N more". `cap`: how many the room above the panel's footer allows (the panel lowers it when three whole items don't fit).
+ * first of its forms (`itemForms`) that fits is drawn; an item with no form that fits is left out whole (the sheet lists it), and the row says
+ * "and N more" for it and for any past `cap`. `cap`: how many the room above the panel's footer allows (the panel lowers it when three whole
+ * items don't fit).
  */
 export function RowItems({ items, cap, noun }: { items: readonly string[]; cap: number; noun: string }) {
   const forms = useMemo(() => items.map(itemForms), [items]);
@@ -409,13 +410,14 @@ export function RowItems({ items, cap, noun }: { items: readonly string[]; cap: 
   const [width, setWidth] = useState(0);
   const ref = useRef<HTMLSpanElement | null>(null);
   useLayoutEffect(() => { setPick(items.map(() => 0)); }, [key, width]); // eslint-disable-line react-hooks/exhaustive-deps
-  const upTo = (() => { const lim = Math.min(cap, items.length); let n = 0; while (n < lim && (pick[n] ?? 0) < forms[n].length) n++; return n; })();
+  /** the items drawn: in order, each with a form that has not been ruled out, at most `cap` */
+  const drawn = (() => { const out: number[] = []; for (let i = 0; i < items.length && out.length < cap; i++) if ((pick[i] ?? 0) < forms[i].length) out.push(i); return out; })();
   useLayoutEffect(() => {
     const box = ref.current; if (!box) return;
     const lines = [...box.querySelectorAll<HTMLElement>(".cp-item-line")];
-    for (let i = 0; i < lines.length; i++) {
-      const lh = parseFloat(getComputedStyle(lines[i]).lineHeight) || 17;
-      if (lines[i].getBoundingClientRect().height > lh * ITEM_LINES + 2) { setPick((p) => { const q = [...p]; q[i] = (q[i] ?? 0) + 1; return q; }); return; }
+    for (let j = 0; j < lines.length; j++) {
+      const lh = parseFloat(getComputedStyle(lines[j]).lineHeight) || 17;
+      if (lines[j].getBoundingClientRect().height > lh * ITEM_LINES + 2) { const i = drawn[j]; setPick((p) => { const q = [...p]; q[i] = (q[i] ?? 0) + 1; return q; }); return; }
     }
   });
   useLayoutEffect(() => {
@@ -424,10 +426,10 @@ export function RowItems({ items, cap, noun }: { items: readonly string[]; cap: 
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
-  const more = items.length - upTo;
-  return <span ref={ref} className="cp-items" data-count={items.length} data-shown={upTo}>
-    {forms.slice(0, upTo).map((f, i) => <span key={i} className="cp-item-line">{f[Math.min(pick[i] ?? 0, f.length - 1)]}</span>)}
-    {more > 0 && <span className="cp-item-more">{upTo > 0 ? `and ${more} more` : `${more} ${noun}`}</span>}
+  const more = items.length - drawn.length;
+  return <span ref={ref} className="cp-items" data-count={items.length} data-shown={drawn.length}>
+    {drawn.map((i) => <span key={i} className="cp-item-line">{forms[i][Math.min(pick[i] ?? 0, forms[i].length - 1)]}</span>)}
+    {more > 0 && <span className="cp-item-more">{drawn.length > 0 ? `and ${more} more` : `${more} ${noun}`}</span>}
   </span>;
 }
 

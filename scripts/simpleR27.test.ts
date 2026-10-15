@@ -34,6 +34,11 @@ check("itemForms: never stops at a colon, a comma or mid-phrase; a sentence end 
   assert.deepEqual(itemForms(""), []);
   assert.deepEqual(itemForms("  ,;: "), []);
 });
+check("itemForms: a label that isn't a count stays with its clause; a bracket inside a word is not an aside", () => {
+  const f = itemForms("Nonprofit details: 501(c)(3) status, legal name, EIN.");
+  assert.equal(f[0], "Nonprofit details: 501(c)(3) status, legal name, EIN");
+  assert.deepEqual(f, ["Nonprofit details: 501(c)(3) status, legal name, EIN", "501(c)(3) status, legal name, EIN"], "the clause after the colon only when the whole doesn't fit");
+});
 check("itemForms: a bracket inside a sentence does not make a false sentence end", () => {
   assert.deepEqual(itemForms("Fix the intro (see Fig. 2. Then more) before Friday"), ["Fix the intro (see Fig. 2. Then more) before Friday", "Fix the intro before Friday"]);
 });
@@ -71,7 +76,7 @@ check("a record vouches for itself only when written within 3 days", () => {
   assert.equal(recordVouches(day(3.1), NOW), false);
   assert.equal(recordVouches(null, NOW), false);
   assert.equal(recordVouches("not a date", NOW), false);
-  assert.equal(recordVouches(day(-2), NOW), false, "a write in the future vouches for nothing");
+  assert.equal(recordVouches(day(-2), NOW), true, "a write stamped ahead of this clock is skew, not an old record");
 });
 check("current: vouched by its own record, a room to check, and nothing related since", () => {
   assert.equal(freshnessOf(true, day(1), { kind: "none" }, NOW), "current");

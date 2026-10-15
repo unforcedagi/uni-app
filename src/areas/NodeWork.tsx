@@ -272,7 +272,7 @@ export function TaskSheet({ task, gone = false, nodeName, room, roomNamed, inRoo
       {!unsure && detailText && !blockGap && <div className="task-detail">{detailText.split(/\n\s*\n/).map((para, i) => <p key={i}><DetailText text={para.trim()} vault={vault} onNote={(r) => { onClose(); onNote(r); }} /></p>)}</div>}
       {/* r22 (Codex 7): the record's title is in Details; here only where it is the subject (a check, a wait, a missing note) */}
       {/* r27: never the heading or the title said again as a body */}
-      {(check || checking || waits || missing || (unavailable && decision)) && !repeatsHeading(sub, act?.text ?? heading, rest) && <p className="task-sub" title={sub !== rest ? rest : undefined}>{sub}</p>}
+      {(check || checking || waits || missing || (unavailable && decision)) && !repeatsHeading(sub, act?.text ?? heading, decision ? rest : null) && <p className="task-sub" title={sub !== rest ? rest : undefined}>{sub}</p>}
       {/* r19: why nothing is asserted yet */}
       {checking && <p className="task-q-note" role="status" aria-busy="true">{decision && !ck ? "Reading its note before saying what it asks." : "Reading the notes this stands on before saying what it needs."}</p>}
       {unavailable && <p className="task-q-note task-checkfail" role="status">{CHECK_FAILED}: {decision && !ck ? "its note" : "the notes this stands on"} couldn't be read just now. <button type="button" className="task-link" onClick={requestRecheck}>Retry</button></p>}
@@ -284,10 +284,11 @@ export function TaskSheet({ task, gone = false, nodeName, room, roomNamed, inRoo
       {changed && !gone && <p className="task-gone task-changed" role="alert">This changed since you opened it. Nothing was saved; this is the latest.</p>}
       {moved && !changed && !decideError && <p className="task-gone task-changed" data-moved="true" role="alert">{CHANGED_SINCE}. This is the latest. <button type="button" className="task-link" onClick={() => { opened.current = { id: task.id, rev: task.updatedAt }; bump((n) => n + 1); }}>Reload</button></p>}
       {/* r27: the note's own words (a preview link in them) are shown only when they say more than the heading: otherwise just the link */}
-      {dq?.answerable && !unsure && dq.full !== dq.text && /https?:\/\/|\bwww\./.test(dq.full) && (repeatsHeading(dq.full, heading, rest) ? stepLinks(dq.full, true) : <div className="task-next"><NextText text={dq.full} vault={vault} onNote={(r) => { onClose(); onNote(r); }} /></div>)}
+      {dq?.answerable && !unsure && dq.full !== dq.text && /https?:\/\/|\bwww\./.test(dq.full) && (repeatsHeading(dq.full, heading, decision ? rest : null) ? stepLinks(dq.full, true) : <div className="task-next"><NextText text={dq.full} vault={vault} onNote={(r) => { onClose(); onNote(r); }} /></div>)}
       {dq && !dq.answerable && !reading && !unsure && <p className="task-next"><button type="button" className="task-link" onClick={() => { onClose(); onNote({ vault, id: task.id }); }}>Open the note to read the question ›</button></p>}
       {/* the step itself, with its links to open, when the lead had to drop them (a URL, a linked note) or when it is not an action; never under "Check" */}
-      {!unsure && task.next && !act && (!lead || linky(task.next)) && <div className="task-next"><NextText text={task.next} vault={vault} onNote={(r) => { onClose(); onNote(r); }} /></div>}
+      {/* r27: a decision's step that only says its question again is not shown twice: its links stay */}
+      {!unsure && task.next && !act && (!lead || linky(task.next)) && (decision && repeatsHeading(task.next, heading, rest) ? stepLinks(task.next, true) : <div className="task-next"><NextText text={task.next} vault={vault} onNote={(r) => { onClose(); onNote(r); }} /></div>)}
       {!unsure && task.nextCut && <p className="task-next task-cut">(the note ends here · <button type="button" className="task-link" onClick={() => { onClose(); onNote({ vault, id: task.id }); }}>open the note</button>)</p>}
       {check && <p className="task-q-note">{decision ? "This decision stands on that note" : "Its questions came from that note"}, and it is {check.how === "superseded" ? "superseded" : "closed"}. If this still needs you, its note says what; if not, archive it.</p>}
       {asks && !unsure && <section className="task-questions" aria-label={asks.kind === "list" ? answerLabel(asks.items.length) : OPEN_TO_ANSWER}>
@@ -311,7 +312,7 @@ export function TaskSheet({ task, gone = false, nodeName, room, roomNamed, inRoo
         {!decision && <button type="button" className="task-house-b" aria-busy={busy === "archive" || undefined} disabled={!!busy} onClick={() => void go("archive")}>{busy === "archive" ? "Archiving…" : "Archive"}</button>}
         <button type="button" className="task-house-b" aria-busy={busy === "snooze" || undefined} disabled={!!busy} onClick={() => void go("snooze")}>{busy === "snooze" ? "Snoozing…" : "Snooze until tomorrow"}</button>
       </div>}
-      {!checking && (tid || at || about || check || act || (!gone && !decision && onPriority)) && <details className="task-details" onToggle={(e) => { const d = e.currentTarget; if (d.open) requestAnimationFrame(() => d.scrollIntoView({ block: "nearest" })); }}><summary>Details</summary>
+      {!checking && !(gated && fresh === "pending") && (tid || at || about || check || act || (!gone && !decision && onPriority)) && <details className="task-details" onToggle={(e) => { const d = e.currentTarget; if (d.open) requestAnimationFrame(() => d.scrollIntoView({ block: "nearest" })); }}><summary>Details</summary>
         {!gone && !decision && !tidy && onPriority && <div className="task-prio" role="group" aria-label="Priority">
           {PRIORITIES.map((p) => <button key={p} type="button" className="task-prio-b" aria-pressed={p === prio} onClick={() => { if (p !== prio) { ownWrite.current = true; onPriority(task, p); } }}>{PRIORITY_LABEL[p]}</button>)}
         </div>}

@@ -1373,23 +1373,29 @@ function sentenceEnds(t: string): number[] {
   return out;
 }
 /**
- * r27 (both critics): one item as a row may show it, best first, every form a whole clause. The clause after a short label ("3 answers: Spanish
- * versions of 'What is COhere?' …" shows the clause that follows the colon), never the label alone. Then the same without its brackets, then
- * the first sentences of it that end whole. The row draws the first form that fits its two lines; when none does, the item is not shown (the
- * row says "and N more"): a cut item is never shown.
+ * r27 (both critics): one item as a row may show it, best first, every form a whole clause. An item led by a count ("3 answers: Spanish versions
+ * of 'What is COhere?' …") shows the clause that follows the colon, never the label alone; any other label stays with its clause ("Nonprofit
+ * details: 501(c)(3) status, …") and is dropped only when the whole doesn't fit. Then each form without its brackets, then the first sentences
+ * that end whole. The row draws the first form that fits its two lines; when none does, the item is not shown (the row says "and N more"):
+ * a cut item is never shown.
  */
+const COUNT_LABEL = /^(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)\b/i;
+/** A text without its asides: a bracket group set off by a space ("… lines (notifications, email)"), never one inside a word ("501(c)(3)"). */
+const withoutAsides = (t: string): string => { let x = t; for (let i = 0; i < 4; i++) { const y = x.replace(/\s+\([^()]*\)/g, ""); if (y === x) break; x = y; } return x.replace(/\s+([,;:.!?])/g, "$1").replace(/\s+/g, " ").trim(); };
 export function itemForms(item: string): string[] {
-  let t = item.replace(/\s+/g, " ").trim().replace(/[\s,;:]+$/, "");
-  const lab = /^([^:()\[\]'"“‘]{2,40}):\s+(\S.*)$/.exec(t);
-  if (lab && lab[2].trim().split(/\s+/).length >= 3) t = lab[2].trim();
-  t = t.replace(/\.$/, "");
+  const t = item.replace(/\s+/g, " ").trim().replace(/[\s,;:]+$/, "").replace(/\.$/, "");
   if (!t) return [];
+  const lab = /^([^:()\[\]'"“‘]{2,40}):\s+(\S.*)$/.exec(t);
+  const clause = lab && lab[2].trim().split(/\s+/).length >= 3 ? lab[2].trim().replace(/\.$/, "") : null;
+  const counted = !!lab && !!clause && COUNT_LABEL.test(lab[1]);
   const out: string[] = [];
   const add = (f: string) => { const x = f.replace(/[\s,;:]+$/, "").trim(); if (x && !out.includes(x)) out.push(x); };
-  add(t);
-  const bare = withoutBrackets(t);
-  if (bare && bare.length < t.length) add(bare);
-  for (const base of bare && bare.length < t.length ? [bare] : [t]) for (const e of sentenceEnds(base).reverse()) add(base.slice(0, e).replace(/\.$/, ""));
+  const bases = counted ? [clause!] : clause ? [t, clause] : [t];
+  for (const base of bases) { add(base); const bare = withoutAsides(base); if (bare && bare.length < base.length) add(bare); }
+  const last = bases[bases.length - 1];
+  const tail = withoutAsides(last);
+  const sentences = tail && tail.length < last.length ? tail : last;
+  for (const e of sentenceEnds(sentences).reverse()) add(sentences.slice(0, e).replace(/\.$/, ""));
   return out;
 }
 
@@ -1405,7 +1411,8 @@ export const gateOf = (applies: boolean, look: CheckIn | null): Gate => (!applie
  */
 export const CURRENT_DAYS = 3;
 export type Freshness = "current" | "unconfirmed" | "unreadable" | "pending";
-export const recordVouches = (updatedAt: string | null | undefined, nowMs = Date.now()): boolean => { const t = stampMs(updatedAt ?? ""); return Number.isFinite(t) && t <= nowMs + 60_000 && nowMs - t <= CURRENT_DAYS * 86_400_000; };
+/** (A write stamped ahead of this clock is a skewed clock, not an old record: it vouches.) */
+export const recordVouches = (updatedAt: string | null | undefined, nowMs = Date.now()): boolean => { const t = stampMs(updatedAt ?? ""); return Number.isFinite(t) && nowMs - t <= CURRENT_DAYS * 86_400_000; };
 /** Whether the room's chat has to be read to tell: only a record that vouches for itself and has a room to be checked in. */
 export const needsLookup = (hasRoom: boolean, updatedAt: string | null | undefined, nowMs = Date.now()): boolean => hasRoom && recordVouches(updatedAt, nowMs);
 export function freshnessOf(hasRoom: boolean, updatedAt: string | null | undefined, look: CheckIn | null, nowMs = Date.now()): Freshness {
