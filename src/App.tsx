@@ -409,7 +409,9 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const [notes, setNotes] = useState<VaultRef[]>([]);
   notesRef.current = notes;
   const [hub, setHub] = useState<string | null>(null);
-  useEffect(() => { invoke<{ hub: string }>("journal_config").then((c) => setHub(c.hub)).catch(() => {}); }, []);
+  /** T-137: every origin that is this hub (its tailnet alias too), from the app's alias table */
+  const [hubOrigins, setHubOrigins] = useState<string[]>([]);
+  useEffect(() => { invoke<{ hub: string; hub_origins?: string[] }>("journal_config").then((c) => { setHub(c.hub); setHubOrigins(c.hub_origins ?? []); }).catch(() => {}); }, []);
 
   // The places visited, for Back and Forward (Alt+←/→ and the sidebar's two buttons).
   const [hist, setHist] = useState<History>(EMPTY_HISTORY);
@@ -547,7 +549,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const openNote = useCallback((ref: VaultRef, href: string | null) => {
     // A note on some other hub isn't readable with this key: let the browser
     // (and that hub's Parachute app) handle it.
-    if (!sameHub(ref, hub)) { if (href) void invoke("open_link", { url: href }).catch(() => {}); return; }
+    if (!sameHub(ref, hub, hubOrigins)) { if (href) void invoke("open_link", { url: href }).catch(() => {}); return; }
     setSidebarVisible(false);
     const target = resolveNote({ ...ref, hub: null }, aliases.current);
     const current = activeTab(tabsRef.current);
@@ -562,7 +564,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     } else {
       openTargetRef.current({ kind: "note", note: target, title: ref.ref.split("/").pop() || ref.ref }, "new");
     }
-  }, [hub]);
+  }, [hub, hubOrigins]);
   // Loaded note titles, so a nested note's Back reads "← <previous note>".
   const [noteTitles, setNoteTitles] = useState<Record<string, string>>({});
   const closeNote = useCallback(() => {

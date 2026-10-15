@@ -1013,7 +1013,9 @@ fn ipc_bytes(request: &tauri::ipc::Request<'_>, max: usize) -> Result<Vec<u8>, S
     }
 }
 
-/// Transcribe a voice message on uni-1. Body: raw audio; header `x-audio-mime`.
+/// Transcribe a voice message on the hub's host (T-137: the URL follows the
+/// hub setting, and its other name if this one is unreachable). Body: raw
+/// audio; header `x-audio-mime`.
 #[tauri::command]
 async fn voice_transcribe(
     app: tauri::AppHandle,
@@ -1031,13 +1033,16 @@ async fn voice_transcribe(
         .to_string();
     let audio = bytes.clone();
     secure_store::ensure_loaded(&app).await?;
+    let cfg = vault_config(&app);
+    let remember = remember_hub(&app, &cfg);
     blocking(move || {
         let (keys, _) = uni_core::load_keys(false).map_err(|e| e.to_string())?;
-        tauri::async_runtime::block_on(uni_core::transcribe::transcribe(
-            uni_core::transcribe::TRANSCRIBE_URL,
+        tauri::async_runtime::block_on(uni_core::transcribe::transcribe_on_hub(
+            &cfg.hub,
             &keys,
             audio,
             &mime,
+            Some(remember),
         ))
         .map_err(|e| e.to_string())
     })
@@ -1122,6 +1127,8 @@ fn relay_origin(app: tauri::AppHandle) -> String {
 // with the same key that signs Buzz messages (NIP-98). The device queues each
 // entry first, so journaling works offline and survives app restarts.
 
+/// T-137: stays `uni-1` until the tailnet rename (step 3); `uni` is its alias
+/// (`uni_core::hub::HUB_ALIASES`), so this build reaches the hub either way.
 const DEFAULT_HUB: &str = "https://uni-1.taildf9ce2.ts.net";
 const DEFAULT_VAULT: &str = "uni";
 /// `unforced` was merged into `uni` (T-56, 2026-10-06) and is now a read-only
@@ -1150,9 +1157,62 @@ fn migrate_retired_vault(cfg: &mut uni_core::parachute::VaultConfig) {
     }
 }
 
+/// The hub setting as the UI sees it, with every origin that is this hub
+/// (T-137: links on either tailnet name open in-app).
+#[derive(Serialize)]
+struct HubSetting {
+    hub: String,
+    vault: String,
+    hub_origins: Vec<String>,
+}
+
 #[tauri::command]
-fn journal_config(app: tauri::AppHandle) -> uni_core::parachute::VaultConfig {
-    vault_config(&app)
+fn journal_config(app: tauri::AppHandle) -> HubSetting {
+    let cfg = vault_config(&app);
+    HubSetting {
+        hub_origins: uni_core::hub::hub_origins(&cfg.hub),
+        hub: cfg.hub,
+        vault: cfg.vault,
+    }
+}
+
+/// T-137: when the hub answers on its other name, later launches go straight
+/// there: the setting in `vault.json` becomes that name.
+fn remember_hub(
+    app: &tauri::AppHandle,
+    cfg: &uni_core::parachute::VaultConfig,
+) -> uni_core::parachute::OnHubSwitch {
+    let dir = app.path().app_data_dir().ok();
+    let vault = cfg.vault.clone();
+    std::sync::Arc::new(move |origin: &str| {
+        let Some(dir) = &dir else { return };
+        let cfg = uni_core::parachute::VaultConfig {
+            hub: origin.to_string(),
+            vault: vault.clone(),
+        };
+        let saved = std::fs::create_dir_all(dir).and_then(|_| {
+            std::fs::write(
+                dir.join("vault.json"),
+                serde_json::to_string(&cfg).unwrap_or_default(),
+            )
+        });
+        if let Err(e) = saved {
+            tracing::warn!("hub {origin} answered but couldn't be saved: {e}");
+        }
+    })
+}
+
+/// The vault client for the hub setting, remembering the hub's other name
+/// when that is the one that answers.
+fn vault_client(
+    app: &tauri::AppHandle,
+    cfg: uni_core::parachute::VaultConfig,
+    keys: nostr::Keys,
+) -> Result<uni_core::parachute::VaultClient, String> {
+    let remember = remember_hub(app, &cfg);
+    uni_core::parachute::VaultClient::new(cfg, keys)
+        .map(|c| c.on_hub_switch(remember))
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -1191,11 +1251,12 @@ async fn journal_flush_inner(
     secure_store::ensure_loaded(app).await?;
     let path = db_path(app)?;
     let cfg = vault_config(app);
+    let app = app.clone();
     let _gate = JOURNAL_GATE.lock().await;
     blocking(move || {
         let (keys, _) = uni_core::load_keys(false).map_err(|e| e.to_string())?;
         let store = Store::open(path).map_err(|e| e.to_string())?;
-        let client = uni_core::parachute::VaultClient::new(cfg, keys).map_err(|e| e.to_string())?;
+        let client = vault_client(&app, cfg, keys)?;
         tauri::async_runtime::block_on(uni_core::journal::flush(&store, &client))
             .map_err(|e| e.to_string())
     })
@@ -1315,9 +1376,10 @@ where
 {
     secure_store::ensure_loaded(app).await?;
     let cfg = vault_config(app);
+    let app = app.clone();
     blocking(move || {
         let (keys, _) = uni_core::load_keys(false).map_err(|e| e.to_string())?;
-        let client = uni_core::parachute::VaultClient::new(cfg, keys).map_err(|e| e.to_string())?;
+        let client = vault_client(&app, cfg, keys)?;
         f(client)
     })
     .await
@@ -1374,7 +1436,7 @@ async fn vault_note(
         let note = tauri::async_runtime::block_on(c.get_note(&vault, &note_ref))
             .map_err(|e| e.to_string())?;
         Ok(VaultNote {
-            hub: c.origin().to_string(),
+            hub: c.origin(),
             vault,
             note,
         })

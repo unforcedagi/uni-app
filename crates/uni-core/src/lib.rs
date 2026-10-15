@@ -30,6 +30,7 @@ pub mod live;
 pub mod media;
 pub mod pairing;
 pub mod pairing_source;
+pub mod hub;
 pub mod parachute;
 pub mod readstate;
 pub mod store;

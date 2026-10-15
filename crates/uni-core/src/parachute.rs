@@ -129,10 +129,18 @@ impl JournalNote {
     }
 }
 
+/// Told the hub's other name answered (T-137), so the app can remember it.
+pub type OnHubSwitch = Arc<dyn Fn(&str) + Send + Sync>;
+
 /// Signed client for the hub's account MCP.
 pub struct VaultClient {
     cfg: VaultConfig,
-    origin: String,
+    /// The origin requests go to now: the configured hub, or its alias once
+    /// that is the one that answered.
+    origin: std::sync::Mutex<String>,
+    /// The hub's other name ([`crate::hub`]), tried once on a connect failure.
+    alias: std::sync::Mutex<Option<String>>,
+    on_switch: Option<OnHubSwitch>,
     keys: Keys,
     http: reqwest::Client,
 }
@@ -140,12 +148,82 @@ pub struct VaultClient {
 impl VaultClient {
     pub fn new(cfg: VaultConfig, keys: Keys) -> Result<Self> {
         let origin = cfg.origin()?;
+        let alias = crate::hub::alias_of(&origin).and_then(|a| {
+            VaultConfig {
+                hub: a,
+                vault: String::new(),
+            }
+            .origin()
+            .ok()
+        });
         Ok(Self {
             cfg,
-            origin,
+            origin: std::sync::Mutex::new(origin),
+            alias: std::sync::Mutex::new(alias),
+            on_switch: None,
             keys,
             http: http_client()?,
         })
+    }
+
+    /// Call `f` with the alias origin when a connect failure moved requests there.
+    pub fn on_hub_switch(mut self, f: OnHubSwitch) -> Self {
+        self.on_switch = Some(f);
+        self
+    }
+
+    /// Use `alias` as the hub's other name (tests and scratch runs; the
+    /// built-in table and `UNI_HUB_ALIASES` set it otherwise).
+    pub fn with_alias(self, alias: Option<&str>) -> Result<Self> {
+        let alias = alias
+            .map(|a| {
+                VaultConfig {
+                    hub: a.into(),
+                    vault: String::new(),
+                }
+                .origin()
+            })
+            .transpose()?;
+        *self.alias.lock().unwrap_or_else(|e| e.into_inner()) = alias;
+        Ok(self)
+    }
+
+    fn current_origin(&self) -> String {
+        self.origin.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    /// Send a request built for an origin. On a DNS or connection failure
+    /// (never on an HTTP answer) try the hub's other name once; when that
+    /// answers, requests stay there and the app is told so it can remember.
+    /// A failure reads "`what`: <cause>", the configured name's cause.
+    async fn send_to_hub<F>(&self, what: &str, build: F) -> Result<reqwest::Response>
+    where
+        F: Fn(&str) -> Result<reqwest::RequestBuilder>,
+    {
+        let fail = |e: &reqwest::Error| Error::Vault(format!("{what}: {}", chain(e)));
+        let first = self.current_origin();
+        let err = match build(&first)?.send().await {
+            Ok(r) => return Ok(r),
+            Err(e) if crate::hub::is_connect_failure(&e) => e,
+            Err(e) => return Err(fail(&e)),
+        };
+        let alias = self.alias.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let Some(alias) = alias.filter(|a| *a != first) else {
+            return Err(fail(&err));
+        };
+        match build(&alias)?.send().await {
+            Ok(r) => {
+                tracing::info!(from = %first, to = %alias, "hub answered on its other name");
+                *self.origin.lock().unwrap_or_else(|e| e.into_inner()) = alias.clone();
+                *self.alias.lock().unwrap_or_else(|e| e.into_inner()) = Some(first);
+                if let Some(f) = &self.on_switch {
+                    f(&alias);
+                }
+                Ok(r)
+            }
+            // neither name answered: report the configured one's failure
+            Err(_) => Err(fail(&err)),
+        }
     }
 
     /// Call one MCP tool; returns the tool's JSON result (parsed from the
@@ -158,7 +236,6 @@ impl VaultClient {
     /// (outer `Err`: hub unreachable, auth) from the tool's own error
     /// (inner `Err`), so callers can retry only the latter.
     async fn rpc(&self, tool: &str, arguments: Value) -> Result<Result<Value>> {
-        let url = format!("{}/mcp", self.origin);
         let body = serde_json::to_vec(&json!({
             "jsonrpc": "2.0",
             "id": 1,
@@ -166,17 +243,20 @@ impl VaultClient {
             "params": { "name": tool, "arguments": arguments },
         }))
         .map_err(|e| Error::Vault(e.to_string()))?;
-        let auth = nip98_header(&self.keys, &url, "POST", &body)?;
+        // signed per origin: the NIP-98 `u` tag names the host the request goes to
         let res = self
-            .http
-            .post(&url)
-            .header("authorization", auth)
-            .header("content-type", "application/json")
-            .header("accept", "application/json, text/event-stream")
-            .body(body)
-            .send()
-            .await
-            .map_err(|e| Error::Vault(format!("hub unreachable: {}", chain(&e))))?;
+            .send_to_hub("hub unreachable", |origin| {
+                let url = format!("{origin}/mcp");
+                let auth = nip98_header(&self.keys, &url, "POST", &body)?;
+                Ok(self
+                    .http
+                    .post(&url)
+                    .header("authorization", auth)
+                    .header("content-type", "application/json")
+                    .header("accept", "application/json, text/event-stream")
+                    .body(body.clone()))
+            })
+            .await?;
         let status = res.status();
         let text = res.text().await.map_err(|e| Error::Vault(e.to_string()))?;
         if !status.is_success() {
@@ -236,7 +316,7 @@ impl VaultClient {
                 }),
             )
             .await?;
-        let url = ticket_url(&self.origin, &self.cfg.vault, &ticket)?;
+        let url = ticket_url(&self.current_origin(), &self.cfg.vault, &ticket)?;
         let res = self
             .http
             .put(&url)
@@ -316,9 +396,10 @@ impl VaultClient {
             .ok_or_else(|| Error::Vault(format!("entry not found: {id}")))
     }
 
-    /// Hub origin this client signs requests for.
-    pub fn origin(&self) -> &str {
-        &self.origin
+    /// Hub origin this client signs requests for (the alias, once that is
+    /// the name that answered).
+    pub fn origin(&self) -> String {
+        self.current_origin()
     }
 
     /// One note (by id or path) from any vault this key can read, with its
@@ -1316,7 +1397,7 @@ mod tests {
         assert!(VaultClient::new(cfg("http://uni-1.example"), k.clone()).is_err());
         assert!(VaultClient::new(cfg("http://127.0.0.1:1939"), k.clone()).is_ok());
         let c = VaultClient::new(cfg("https://uni-1.example/some/path"), k).unwrap();
-        assert_eq!(c.origin, "https://uni-1.example");
+        assert_eq!(c.origin(), "https://uni-1.example");
     }
 
     #[test]
@@ -1512,6 +1593,118 @@ pub(crate) mod surface_tests {
         )
         .unwrap();
         (client, handle)
+    }
+
+    /// A listener that only counts the connections it is offered (none expected).
+    fn untouched() -> (String, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let origin = format!("http://{}", l.local_addr().unwrap());
+        l.set_nonblocking(true).unwrap();
+        let hits = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let h = hits.clone();
+        std::thread::spawn(move || {
+            for _ in 0..40 {
+                if l.accept().is_ok() {
+                    h.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+        });
+        (origin, hits)
+    }
+
+    fn q() -> Value {
+        json!({"vault": "scope-test", "id": "n1"})
+    }
+
+    #[tokio::test]
+    async fn t137_a_hub_name_that_does_not_resolve_falls_back_to_its_alias_once_and_remembers_it() {
+        crate::init_crypto();
+        let (mock, handle) = server(vec![
+            ("query-notes", q(), json!({"notes": [{"id": "n1", "path": "A"}]})),
+            ("query-notes", q(), json!({"notes": [{"id": "n1", "path": "A"}]})),
+        ]);
+        let alias = mock.origin();
+        let switched = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let s2 = switched.clone();
+        // `.invalid` never resolves (RFC 2606): a real DNS failure, not a mock
+        let client = VaultClient::new(
+            VaultConfig { hub: "https://uni-t137-gone.invalid".into(), vault: "scope-test".into() },
+            Keys::generate(),
+        )
+        .unwrap()
+        .with_alias(Some(&alias))
+        .unwrap()
+        .on_hub_switch(std::sync::Arc::new(move |o: &str| s2.lock().unwrap().push(o.to_string())));
+        client.call("query-notes", q()).await.unwrap();
+        assert_eq!(client.origin(), alias, "requests now go to the alias");
+        assert_eq!(*switched.lock().unwrap(), vec![alias.clone()], "the app is told once, to remember it");
+        // the next call goes straight there (the mock answers exactly two calls)
+        client.call("query-notes", q()).await.unwrap();
+        assert_eq!(switched.lock().unwrap().len(), 1);
+        handle.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn t137_a_refused_connection_falls_back_too() {
+        crate::init_crypto();
+        let closed = {
+            let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            format!("http://{}", l.local_addr().unwrap())
+        };
+        let (mock, handle) = server(vec![("query-notes", q(), json!({"notes": []}))]);
+        let client = VaultClient::new(VaultConfig { hub: closed, vault: "scope-test".into() }, Keys::generate())
+            .unwrap()
+            .with_alias(Some(&mock.origin()))
+            .unwrap();
+        client.call("query-notes", q()).await.unwrap();
+        assert_eq!(client.origin(), mock.origin());
+        handle.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn t137_an_http_error_is_an_answer_never_a_fallback() {
+        crate::init_crypto();
+        for status in [401, 500] {
+            let (hub, handle) = server(vec![("query-notes", q(), json!({"http_status": status, "error": "no"}))]);
+            let (alias, hits) = untouched();
+            let switched = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let s2 = switched.clone();
+            let client = hub
+                .with_alias(Some(&alias))
+                .unwrap()
+                .on_hub_switch(std::sync::Arc::new(move |_: &str| s2.store(true, std::sync::atomic::Ordering::SeqCst)));
+            let origin = client.origin();
+            assert!(client.call("query-notes", q()).await.is_err(), "{status}");
+            handle.join().unwrap();
+            std::thread::sleep(Duration::from_millis(150));
+            assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 0, "{status}: the alias was never tried");
+            assert!(!switched.load(std::sync::atomic::Ordering::SeqCst), "{status}");
+            assert_eq!(client.origin(), origin, "{status}");
+        }
+    }
+
+    #[tokio::test]
+    async fn t137_neither_name_answers_reports_the_configured_one_and_stays() {
+        crate::init_crypto();
+        let client = VaultClient::new(
+            VaultConfig { hub: "https://uni-t137-gone.invalid".into(), vault: "scope-test".into() },
+            Keys::generate(),
+        )
+        .unwrap()
+        .with_alias(Some("https://uni-t137-also-gone.invalid"))
+        .unwrap();
+        let e = client.call("query-notes", q()).await.unwrap_err().to_string();
+        assert!(e.contains("hub unreachable") && e.contains("uni-t137-gone.invalid"), "{e}");
+        assert_eq!(client.origin(), "https://uni-t137-gone.invalid");
+    }
+
+    #[test]
+    fn t137_the_built_in_alias_is_uni_1_and_uni() {
+        let c = |hub: &str| VaultClient::new(VaultConfig { hub: hub.into(), vault: "v".into() }, Keys::generate()).unwrap();
+        assert_eq!(c("https://uni-1.taildf9ce2.ts.net").alias.lock().unwrap().as_deref(), Some("https://uni.taildf9ce2.ts.net"));
+        assert_eq!(c("https://uni.taildf9ce2.ts.net/").alias.lock().unwrap().as_deref(), Some("https://uni-1.taildf9ce2.ts.net"));
+        assert_eq!(c("https://uni-2.taildf9ce2.ts.net").alias.lock().unwrap().as_deref(), None);
     }
 
     #[tokio::test]
