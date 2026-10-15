@@ -64,9 +64,9 @@ await check("task tree: an archived parent given as an id is top level; project 
   const t = buildTaskTree(parseNodes([note("1", "P/A", "2"), note("2", "P/B", "1"), note("3", "P/C", "9"), note("9", "P/Old", null, { status: "archived" })]).nodes);
   assert.equal(t.parent.get("P/C"), ROOT);
   assert.equal(t.parent.get("P/A"), ROOT);
-  assert.equal(t.parent.get("P/B"), ROOT);
+  assert.equal(t.parent.get("P/B"), "P/A", "a legacy parent ring is broken at its smallest path, as in 0.1.46");
   assert.deepEqual(t.links.get("P/A"), ["P/B"]);
-  assert.deepEqual(subtreePaths(t, "P/A").sort(), ["P/A"]);
+  assert.deepEqual(subtreePaths(t, "P/A").sort(), ["P/A", "P/B"]);
   assert.deepEqual(nodeFilterKeys(t, ["P/A"]).sort(), ["1", "P/A"]);
 });
 
@@ -82,7 +82,8 @@ await check("app tree: parents as ids, paths and links; a self or missing parent
   assert.equal(parentPath(tree, "Projects/X"), ROOT);
   assert.equal(parentPath(tree, "Projects/Y"), ROOT);
   assert.deepEqual(ancestry(tree, "Projects/C").map((n) => n.name), ["C", "Techne"]);
-  assert.deepEqual(ancestry(tree, "Projects/Y").map((n) => n.name), ["Y"]);
+  assert.deepEqual(ancestry(tree, "Projects/R").map((n) => n.name), ["R", "C", "Techne"], "rooms still follow the legacy project parent (T-140 fix)");
+  assert.deepEqual(ancestry(tree, "Projects/Y").map((n) => n.name), ["Y", "X"], "a legacy ring is broken at its smallest path");
   assert.deepEqual(ancestry(tree, "nowhere"), []);
 });
 
@@ -127,14 +128,14 @@ await check("steward: a room that does not exist is skipped (not a dead end); ch
   assert.deepEqual([skipped.room?.name, skipped.via], ["boulder", "inherited"]);
 });
 
-await check("steward on a cycle of project links terminates: links do not nest, so each chain is the node alone (T-140)", () => {
+await check("steward on a cycle of legacy parents terminates: the ring is broken at its smallest path (T-140 fix)", () => {
   const a = parseProject({ id: "a", path: "P/A", tags: ["project"], metadata: { parent: "b", room: "cohere" } })!;
   const b = parseProject({ id: "b", path: "P/B", tags: ["project"], metadata: { parent: "a" } })!;
   const tree = buildTree([a, b]);
   for (const p of ["P/A", "P/B"]) {
     const chain = ancestry(tree, p).map((n) => rn(n.path, typeof n.metadata.room === "string" ? n.metadata.room : null, n.rooms));
-    assert.equal(chain.length, 1);
-    assert.equal(steward(chain, rooms, uni).room?.name, p === "P/A" ? "cohere" : "Uni");
+    assert.equal(chain.length, p === "P/A" ? 1 : 2);
+    assert.equal(steward(chain, rooms, uni).room?.name, "cohere");
   }
 });
 

@@ -35,9 +35,9 @@ check("tree: parents by path, [[link]] tolerated, missing parent is top level, a
 check("tree: a parent stored as an id resolves; project links never nest or loop; self parent is top level", () => {
   const t = buildTaskTree(parseNodes([node("1", "P/B", "2"), node("2", "P/A", "1"), node("3", "P/S", "P/S")]).nodes);
   assert.equal(t.parent.get("P/A"), ROOT);
-  assert.equal(t.parent.get("P/B"), ROOT);
+  assert.equal(t.parent.get("P/B"), "P/A", "a legacy parent ring is broken at its smallest path, as in 0.1.46");
   assert.equal(t.parent.get("P/S"), ROOT);
-  assert.deepEqual(subtreePaths(t, "P/A"), ["P/A"]);
+  assert.deepEqual(subtreePaths(t, "P/A").sort(), ["P/A", "P/B"]);
 });
 check("subtree paths: the node and everything under it; ROOT is all; unknown is empty", () => {
   assert.deepEqual(subtreePaths(tree, "Areas/Techne").sort(), ["Areas/Techne", "Projects/COhere", "Projects/COhere/COhere 2026"]);
@@ -80,7 +80,7 @@ check("grouping: You (aaron, waiting on aaron, decisions) / Rooms (room:, uni) /
 check("roll-up: an area counts the projects linked to it; the root counts all, including tasks on the root note", () => {
   const r = rollUp(tree, sample());
   assert.equal(r.get("Projects/COhere/COhere 2026")!.total, 2);
-  assert.equal(r.get("Projects/COhere")!.total, 0, "a project linked to a project does not roll up into it");
+  assert.equal(r.get("Projects/COhere")!.total, 2, "a project that links another (not linked back) is work under it (T-140 fix)");
   assert.equal(r.get("Areas/Techne")!.total, 5);
   assert.deepEqual({ ...r.get("Areas/Techne")! }, { you: 3, rooms: 1, others: 1, total: 5 });
   assert.equal(r.get("Areas/Atlas")!.total, 1);
