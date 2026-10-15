@@ -2410,8 +2410,8 @@ test.describe('r16', () => {
     const wv = page.locator('.sr-work');
     await expect(wv.locator('section[aria-label="Needs you"]')).toContainText('Grade the Week 6 reflections');
     await expect(wv.locator('section[aria-label="Needs you"] .cp-under[title*="Canvas Week 7 brief draft"]')).toHaveCount(1); // r18: one line, whole in its title
-    await expect(wv.locator('section[aria-label="Running"]')).not.toContainText('Canvas Week 7 brief draft');
-    const moving = wv.locator('section[aria-label="Running"] .cp-item').filter({ hasText: 'Final brief' });
+    await expect(wv.locator('section[aria-label="With others"]')).not.toContainText('Canvas Week 7 brief draft');
+    const moving = wv.locator('section[aria-label="With others"] .cp-item').filter({ hasText: 'Final brief' });
     await expect(moving.locator('.cp-meta')).toHaveAttribute('title', /with #atlas\/teach/); // r18: one line of small print, whole in its title
     // the companion and the dots count the same
     const n = await wv.locator('section[aria-label="Needs you"] .wv-n').innerText();
@@ -2451,7 +2451,7 @@ test.describe('r17', () => {
     const wv = page.locator('.sr-work');
     await expect(wv.locator('section[aria-label="Needs you"]')).toContainText('Your OK on the draft');
     await expect(wv.locator('section[aria-label="Needs you"]')).toContainText('Pick the lead story');
-    await expect(wv.locator('section[aria-label="Running"]')).not.toContainText(/Canvas Week 7|Newsletter W42/);
+    await expect(wv.locator('section[aria-label="With others"]')).not.toContainText(/Canvas Week 7|Newsletter W42/);
     // its sheet: the action, the task it belongs to, whose task it is
     await wv.locator('.cp-item').filter({ hasText: 'Your OK on the draft' }).locator('.cp-lead').click();
     const sheet = sheetOf(page);
@@ -4619,6 +4619,7 @@ test.describe('r27', () => {
   test('r27 line 6: All-work uses the companion\'s names; a run waiting on the user\'s answer is in Needs you; no records-to-reword section', async ({ page }) => {
     await boot(page);
     await add(page, { id: 'wk1', title: 'T-520 Placeholder go', node: 'Areas/Techne', meta: { next: 'Say go on the placeholder go', state: 'waiting', waiting_on: 'aaron' } });
+    await add(page, { id: 'wk3', title: 'T-522 Placeholder plan', node: 'Areas/Techne', meta: { owner: 'kevin', next: 'Kevin writes the placeholder plan', state: 'doing' } });
     await add(page, { id: 'wk2', title: 'T-521 Outline', node: 'Areas/Techne', meta: { next: 'Notes: real work in area rooms, check updates propagate up; nested room names; fractal flow', state: 'waiting', waiting_on: 'aaron' } });
     await page.evaluate(() => {
       const w = window as any;
@@ -4631,7 +4632,7 @@ test.describe('r27', () => {
     await openWork(page);
     const wv = page.locator('.sr-work');
     const labels = await wv.locator('section').evaluateAll((els) => els.map((e) => e.getAttribute('aria-label')));
-    expect(labels).toEqual(expect.arrayContaining(['Needs you', 'Running', 'Done lately']));
+    expect(labels).toEqual(expect.arrayContaining(['Needs you', 'Running', 'With others', 'Done lately']));
     expect(labels).not.toContain('Being worked on');
     expect(labels).not.toContain('Records to reword');
     const needs = wv.locator('section[aria-label="Needs you"]');
@@ -4640,6 +4641,9 @@ test.describe('r27', () => {
     const running = wv.locator('section[aria-label="Running"]');
     await expect(running).toContainText('Placeholder build underway');
     expect(await running.innerText()).not.toMatch(/Waiting on your answer|not waiting on you/);
+    // a task someone else holds is not "Running": it is With others
+    await expect(wv.locator('section[aria-label="With others"]')).toContainText('Kevin writes the placeholder plan');
+    expect(await running.innerText()).not.toContain('Kevin writes the placeholder plan');
     await expect(wv.locator('section[aria-label="Done lately"]')).toContainText('Placeholder build finished');
     expect(await wv.innerText()).not.toMatch(/records? needs? rewording|need rewording/i);
     // the panel says the same: the waiting run is under Needs you, not Running
