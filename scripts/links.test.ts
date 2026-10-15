@@ -200,6 +200,11 @@ check("parent-only project with two channels keeps its unclaimed one when a lega
   assert.equal(roomView(t, "Projects/P", RR, RR[0]).target?.id, "r-parent");
   assert.equal(roomView(t, "Projects/C", RR, RR[0]).target?.id, "r-child");
 });
+check("links-only project cycle P->Q->R->P: each opens its own room (Codex 0.1.47 review 3)", () => {
+  const RR = [{ id: "r-uni", name: "Uni", last_ts: 1 }, { id: "r-p", name: "p", last_ts: 1 }, { id: "r-q", name: "q", last_ts: 1 }, { id: "r-r", name: "r", last_ts: 1 }];
+  const t = buildTree([proj("p-p", "P", { links: ["p-q"], channel: "r-p" }), proj("p-q", "Q", { links: ["p-r"], channel: "r-q" }), proj("p-r", "R", { links: ["p-p"], channel: "r-r" })]);
+  for (const [n, id] of [["P", "r-p"], ["Q", "r-q"], ["R", "r-r"]]) assert.equal(roomView(t, `Projects/${n}`, RR, RR[0]).target?.id, id, n);
+});
 
 if (failed) { console.log(`\n${failed} failed`); process.exit(1); }
 console.log("\nall passed");

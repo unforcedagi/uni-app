@@ -58,7 +58,8 @@ export type RoomView = {
 
 /** Whether a node beneath `path` names `roomId` as its own room. */
 function claimedBelow(tree: Tree, path: string, roomId: string, rooms: readonly RoomRef[]): boolean {
-  const stack = [...(tree.scope.get(path) ?? [])]; const seen = new Set<string>();
+  // the start is seen: a cycle of links that comes back to it is not a descendant's claim (Codex 0.1.47 review 3)
+  const stack = [...(tree.scope.get(path) ?? [])]; const seen = new Set<string>([path]);
   while (stack.length) {
     const n = stack.pop()!;
     if (seen.has(n.path)) continue;
