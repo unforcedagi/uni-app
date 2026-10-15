@@ -463,11 +463,15 @@ pub async fn flush(store: &Store, client: &VaultClient) -> Result<FlushReport> {
 /// The paths to try for an entry, in order. A `Journal/` entry has the
 /// sweep's fallbacks from the device (never `-N`), then the last resort (see
 /// [`last_resort_paths`]); an old `Notes/` entry keeps the old `-2`…`-9`
-/// suffixes, which the sweep still recognises.
+/// suffixes, which the sweep still recognises, and when those are all taken
+/// moves onto the `Journal/` scheme with the same last resort.
 pub fn paths_to_try(e: &QueuedEntry) -> Vec<String> {
     let mut out = vec![e.path.clone()];
     if e.path.starts_with("Notes/") {
         out.extend((2..=9).map(|n| format!("{}-{n}", e.path)));
+        if let Some(base) = journal_base_for_notes(e) {
+            out.extend(resort_paths(&base, &e.entry_id));
+        }
     } else {
         out.extend(e.alternates.iter().cloned());
         for p in last_resort_paths(e) {
@@ -494,12 +498,63 @@ pub fn last_resort_paths(e: &QueuedEntry) -> Vec<String> {
         .chain(e.alternates.iter())
         .find(|p| has_seconds(p))
         .unwrap_or(&e.path);
+    resort_paths(base, &e.entry_id)
+}
+
+/// `<base> (2)`…`(9)`, then `<base> (<entry id>)`, those that are valid paths.
+fn resort_paths(base: &str, entry_id: &str) -> Vec<String> {
     (2..=9)
         .map(|n| n.to_string())
-        .chain(std::iter::once(e.entry_id.clone()))
+        .chain(std::iter::once(entry_id.to_string()))
         .map(|n| format!("{base} ({n})"))
         .filter(|p| check_path(p).is_ok())
         .collect()
+}
+
+/// Where an old `Notes/YYYY/MM-DD/HH-MM-SS` entry goes on the `Journal/`
+/// scheme: the same day and time. A path that does not read that way falls
+/// back to the entry's creation time (UTC); with neither, there is no base.
+fn journal_base_for_notes(e: &QueuedEntry) -> Option<String> {
+    let digits = |s: &str, n: usize| s.len() == n && s.bytes().all(|b| b.is_ascii_digit());
+    let from_path = || {
+        let segs: Vec<&str> = e.path.split('/').collect();
+        let ["Notes", year, day, name] = segs.as_slice() else {
+            return None;
+        };
+        let stamp: Vec<&str> = name.split('-').take(3).collect();
+        let day_ok =
+            day.len() == 5 && digits(&day[..2], 2) && &day[2..3] == "-" && digits(&day[3..], 2);
+        (digits(year, 4) && day_ok && stamp.len() == 3 && stamp.iter().all(|p| digits(p, 2)))
+            .then(|| format!("Journal/{year}/{day}/{}", stamp.join("-")))
+    };
+    // "2026-10-15T01:43:10.000Z": the UTC date and time, read by position
+    let from_created = || {
+        let c = e.created_at.as_str();
+        let ok = c.is_char_boundary(19)
+            && c.len() >= 19
+            && [(0, 4), (5, 2), (8, 2), (11, 2), (14, 2), (17, 2)]
+                .iter()
+                .all(|&(i, n)| digits(&c[i..i + n], n))
+            && &c[4..5] == "-"
+            && &c[7..8] == "-"
+            && matches!(&c[10..11], "T" | " ")
+            && &c[13..14] == ":"
+            && &c[16..17] == ":";
+        ok.then(|| {
+            format!(
+                "Journal/{}/{}-{}/{}-{}-{}",
+                &c[0..4],
+                &c[5..7],
+                &c[8..10],
+                &c[11..13],
+                &c[14..16],
+                &c[17..19]
+            )
+        })
+    };
+    from_path()
+        .or_else(from_created)
+        .filter(|b| check_path(b).is_ok())
 }
 
 async fn send_one(store: &Store, client: &VaultClient, e: &QueuedEntry) -> Result<String> {
@@ -982,13 +1037,28 @@ mod tests {
             .unwrap();
         let tried = paths_to_try(&old);
         assert_eq!(
-            (tried[0].as_str(), tried[1].as_str(), tried.len()),
+            (tried[0].as_str(), tried[1].as_str(), tried[8].as_str()),
             (
                 "Notes/2026/10-14/19-43-10",
                 "Notes/2026/10-14/19-43-10-2",
-                9
+                "Notes/2026/10-14/19-43-10-9"
             )
         );
+        // with those ten taken it moves onto the Journal scheme, ending on a name only this entry can hold
+        assert_eq!(tried[9], "Journal/2026/10-14/19-43-10 (2)");
+        assert_eq!(
+            tried.last().unwrap(),
+            &format!("Journal/2026/10-14/19-43-10 ({ID3})")
+        );
+        assert_eq!(tried.len(), 9 + 9);
+        assert!(tried.iter().all(|p| check_path(p).is_ok()));
+        // a Notes path that is not a date and time falls back to the creation time
+        let odd = QueuedEntry {
+            path: "Notes/a".into(),
+            created_at: "2026-10-15T01:43:10.000Z".into(),
+            ..old.clone()
+        };
+        assert_eq!(paths_to_try(&odd)[9], "Journal/2026/10-15/01-43-10 (2)");
     }
 
     fn created(path: &str, entry_id: &str) -> serde_json::Value {
@@ -1173,6 +1243,48 @@ mod tests {
                 0,
                 None
             )
+        );
+    }
+
+    #[tokio::test]
+    async fn an_old_notes_entry_with_every_old_path_taken_still_saves() {
+        crate::init_crypto();
+        let old = "Notes/2026/10-14/19-43-10";
+        let free = "Journal/2026/10-14/19-43-10 (2)";
+        // the original path and -2…-9 each hold another entry; the next name is on the Journal scheme
+        let mut script: Vec<_> = std::iter::once(old.to_string())
+            .chain((2..=9).map(|n| format!("{old}-{n}")))
+            .map(|p| {
+                (
+                    "create-note",
+                    create_args(&p, "Placeholder words", ID),
+                    created(&p, ID2),
+                )
+            })
+            .collect();
+        script.push((
+            "create-note",
+            create_args(free, "Placeholder words", ID),
+            created(free, ID),
+        ));
+        let (client, handle) = crate::parachute::surface_tests::server(script);
+        let s = Store::open_in_memory().unwrap();
+        s.journal_queue(
+            ID,
+            old,
+            &[],
+            "Placeholder words",
+            "text",
+            "2026-10-15T01:43:10.000Z",
+            None,
+            1,
+        )
+        .unwrap();
+        let r = flush(&s, &client).await.unwrap();
+        handle.join().unwrap();
+        assert_eq!(
+            (r.sent, r.remaining, r.error),
+            (vec![format!("n:{free}")], 0, None)
         );
     }
 
