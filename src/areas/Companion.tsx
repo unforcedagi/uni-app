@@ -13,7 +13,7 @@ import { isActiveRun, type Run } from "./steerCore";
 import { ownerLabel, type Task } from "./taskCore";
 import { taskTitle } from "./whereCore";
 import { splitLinks } from "./linkText";
-import { actionableTitle, runText, runShort, answerChoices, answerLabel, askLead, askPreview, checkLine, CHECK_FAILED, DANGLING, decideLine, stripRoom, decisionQuestion, dueLine, fitsRow, isOverdue, lineBudget, missingLine, OPEN_TASK, OPEN_TO_ANSWER, privateActionLabel, privateRestLabel, askedLine, requestDate, currentStep, firstOfSteps, actionOf, rowAction, withoutBrackets, rowSubParts, standsHeading, titleSays, titleWords, TIDY_LINE, toTidy, unknownDecision, waitsLine, waitsOnMe, withHosts, withoutCut, rowAsk, withoutRawIds, runStateLabel, notWrittenDown, referencedItems, rowItems, staleLine, historyLine, clauseForms, type Choice, type NeedsFeed, type PrivateNeed, type RowAction, type StaleSummary, type Support } from "./simpleCore";
+import { actionableTitle, runText, runShort, answerChoices, answerLabel, askLead, askPreview, checkLine, CHECK_FAILED, DANGLING, decideLine, stripRoom, decisionQuestion, dueLine, fitsRow, isOverdue, lineBudget, missingLine, OPEN_TASK, OPEN_TO_ANSWER, privateActionLabel, privateRestLabel, askedLine, requestDate, currentStep, firstOfSteps, actionOf, rowAction, withoutBrackets, rowSubParts, standsHeading, titleSays, titleWords, TIDY_LINE, toTidy, unknownDecision, waitsLine, waitsOnMe, withHosts, withoutCut, rowAsk, withoutRawIds, runStateLabel, notWrittenDown, referencedItems, ROW_ITEMS, rowItems, staleLine, historyLine, clauseForms, type Choice, type NeedsFeed, type PrivateNeed, type RowAction, type StaleSummary, type Support } from "./simpleCore";
 import { requestRecheck } from "./useTasks";
 
 const KEYS = { side: "uni.companion.side.v1", sideNarrow: "uni.companion.side.narrow.v1", strip: "uni.companion.strip.v1" } as const;
@@ -253,7 +253,7 @@ function Stands({ text }: { text: string }) {
  */
 export function StaleStands({ stale, className = "cp-lede" }: { stale: StaleSummary; text?: string; className?: string }) {
   return <div className={className}>
-    {stale.current && <p className="cp-stands" data-part="current">{withoutRawIds(stale.current)}</p>}
+    {stale.current && <div data-part="current"><Stands text={stale.current} /></div>}
     <p className="cp-stands cp-stale" data-stale={stale.current ? "part" : "true"}>{staleLine(stale)}</p>
     <details className="cp-said"><summary>What it said</summary>{stale.history.map((h, i) => <p key={i}>{historyLine(stale, withoutRawIds(h))}</p>)}</details>
   </div>;
@@ -481,7 +481,7 @@ export function NeedRow({ t, onTask, meta, compact = false, area = null }: { t: 
   const open_ = () => { if (r.mode === "unavailable") requestRecheck(); onTask(t); };
   // r26: a step that points at a list ("the asks listed in this task's detail", "the unknowns") carries it: the first three items under the row
   const refd = r.lead && !isDecision ? referencedItems(next, t.detail) : null;
-  const shownItems = refd?.kind === "list" ? rowItems(refd.items) : null;
+  const shownItems = refd?.kind === "list" ? rowItems(refd.items, ROW_ITEMS, compact ? 44 : 72) : null;
   const itemRoom = (t.stewardRoom ?? t.room ?? "").replace(/^#/, "");
   const label = r.lead ? [r.action?.text ? plainDetail(withHosts(r.action.text)) : text, shownItems ? `${shownItems.shown.join("; ")}${shownItems.more ? `; and ${shownItems.more} more` : ""}` : refd ? notWrittenDown(refd.noun) : null, r.sub ? [r.sub.where, when_].filter(Boolean).join(" · ") : r.under, meta].filter(Boolean).join(". ") : r.yourCall ? `Your call: ${text}` : undefined;
   return <li className="cp-item" data-lead={r.lead ? "action" : undefined} data-mode={r.mode}>
