@@ -4,7 +4,7 @@ import { cleanText } from "../interface/contract";
 import { isMe, ownerLabel, PRIORITIES, PRIORITY_LABEL, priorityOf, type Priority, type Task } from "./taskCore";
 import type { RoomRef } from "./talkCore";
 import type { ActResult, TaskAction, Undo } from "./useTasks";
-import { actionLead, actionOf, askedLine, checkInCue, checkInResult, checkingBanner, couldntRead, currentStep, type CheckIn, type RoomMsg, unresolvedBlock, isApprovalRequest, requestKeys, type ChatHit, pointsAt, pointsNowhere, quotedMessage, requestDate, withoutCut, answerLabel, answerText, ANSWER_MAX, checkLine, CHECK_FAILED, CHECKING, cutWords, dueLine, hostOf, withHosts, missingLine, OPEN_TASK, OPEN_TO_ANSWER, stateLine, stepAudience, TIDY_SAYS, toTidy, unknownDecision, waitsLine, waitsOnMe } from "./simpleCore";
+import { actionLead, actionOf, askedLine, checkInCue, checkInResult, checkingBanner, couldntRead, currentStep, type CheckIn, type RoomMsg, unresolvedBlock, withoutIntro, isApprovalRequest, requestKeys, type ChatHit, pointsAt, pointsNowhere, quotedMessage, requestDate, withoutCut, answerLabel, answerText, ANSWER_MAX, checkLine, CHECK_FAILED, CHECKING, cutWords, dueLine, hostOf, withHosts, missingLine, OPEN_TASK, OPEN_TO_ANSWER, stateLine, stepAudience, TIDY_SAYS, toTidy, unknownDecision, waitsLine, waitsOnMe } from "./simpleCore";
 import { requestRecheck } from "./useTasks";
 import { taskTitle } from "./whereCore";
 import { DecisionAnswer, NextText, decisionAsk, rowLinkLabel, supportOf } from "./Companion";
@@ -179,7 +179,7 @@ export function TaskSheet({ task, gone = false, here, nodeName, room, roomNamed,
   const openOut = (href: string) => { void invoke("open_link", { url: href }).catch(() => { try { window.open(href, "_blank", "noopener"); } catch { /* nothing to open with */ } }); };
   /** r22 (Codex 7): a link in a step is a button in that step ("Open cohere-signup-staging"); for a "look at / open" step it is the primary action */
   const firstStep = steps ? steps.steps[0] : act?.text ?? "";
-  const lookOpen = !gone && !!act && LOOK.test(firstStep.trim()) && linksIn(firstStep).length > 0;
+  const lookOpen = !gone && !!act && LOOK.test(withoutIntro(firstStep.trim())) && linksIn(firstStep).length > 0;
   /** r24 (Codex P1 2): the cue shows only for a room-directed or approval request whose room has talked about it since it was asked/added */
   const reqAt = requestDate(task);
   const asked = askedLine(reqAt);

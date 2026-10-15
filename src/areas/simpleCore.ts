@@ -197,6 +197,8 @@ export function actionLead(next: string | null | undefined): string | null {
 }
 /** r25 (Codex P2 5): "On your phone, look at cohereboulder.org, then forward Eileen the asks" is an action that begins with where or when. */
 const INTRO = /^(?:on|at|in|from|when|once|after|before|with|using|via)\b[^,;:.]{1,48},\s+(?=\S)/i;
+/** A step without the where/when it begins with ("On your phone, look at …" → "look at …"), for reading its verb. */
+export const withoutIntro = (t: string): string => { const m = INTRO.exec(t); return m && ACTION_VERBS.test(t.slice(m[0].length)) ? t.slice(m[0].length) : t; };
 const introducedAction = (t: string): boolean => { const m = INTRO.exec(t); return !!m && ACTION_VERBS.test(t.slice(m[0].length)); };
 /**
  * Who a step's words are for (r17). `room`: the message is for the room itself ("Say go to deploy…", "Tell Uni…", "Tell the room…", "Ask Uni
