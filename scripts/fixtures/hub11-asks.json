@@ -1,0 +1,362 @@
+{
+ "source": "t124-scratch-hub11 (copy from 2026-10-15 04:36), live asks of Aaron: owner or waiting_on aaron, and open decisions; private areas left out",
+ "notes": [
+  {
+   "id": "01M4MKXAF6X7R04YWFCX9HQAW8",
+   "path": "Tasks/T-25 Pope's AI encyclical: novel public reading experiment",
+   "tags": [
+    "task"
+   ],
+   "createdAt": "2026-10-11T04:35:35.014Z",
+   "updatedAt": "2026-10-15T08:06:04.707Z",
+   "metadata": {
+    "asked_at": "2026-10-15T08:06:04.000Z",
+    "co_owners": "room:lab",
+    "detail": "Public summaries site is live: https://magnifica.unforced.workers.dev. It has summaries and 10 short quotes, with no 30-word stretch of the text. The full text is tailnet-only on :8447 and the private reader on :8449.\n\n1. Send the permission request. The draft is at uni:01M3ZZXEXFNHRJV8KWHAGZZ1KQ (Projects/Magnifica/Permission request — draft). Send it yourself from ag@unforced.org to spc@spc.va, and edit the personal opening to your voice first. The vatican.va terms forbid republishing even partial text without written permission. If you know someone at the Dicastery, a warm intro is faster.\n2. Keep the public summaries site up or take it down? The room's recommendation was to keep it up because it only uses summaries, short quotes and links. The full text stays tailnet-only either way.\n3. Review the 2 items the review flagged: ¶165 (family) and ¶192 (just war). The review rewrote 44 of 333 items and left these 2 for you. Quotes were checked as exact.\n\nIf Vatican says yes, the room switches the full text on in the public build with one setting.\n\n(T-91 was a duplicate of this card and is archived.)",
+    "legacy_id": "T-25",
+    "migrated": "2026-10-11",
+    "next": "Email spc@spc.va from ag@unforced.org using the Magnifica permission draft (uni:01M3ZZXEXFNHRJV8KWHAGZZ1KQ); say if the site stays up.",
+    "node": "Projects/Lab",
+    "owner": "aaron",
+    "prev_next": "PUBLIC summaries site live 22:21: https://magnifica.unforced.workers.dev (no 30-word stretch of text; 10 short quotes). Full text tailnet…",
+    "priority": "soon",
+    "priority_by": "weigh.py 2026-10-12",
+    "room": "lab",
+    "source": "Aaron/Tasks#T-25",
+    "state": "waiting",
+    "waiting_on": "aaron"
+   }
+  },
+  {
+   "id": "01M4MKXBCX7J1WG7M9N5YCKAXJ",
+   "path": "Tasks/T-38 Live browser share in the Uni app so Aaron can do logins…",
+   "tags": [
+    "task"
+   ],
+   "createdAt": "2026-10-11T04:35:35.966Z",
+   "updatedAt": "2026-10-15T08:06:47.805Z",
+   "metadata": {
+    "asked_at": "2026-10-15T08:06:47.000Z",
+    "co_owners": "room:uni-os",
+    "detail": "Design: uni:01M404CF4QKFK0TTD9NTFYZBQW (Projects/uni-app/T-38 Drive Uni's browser from the app).\n\nProblem: when Uni's headless Chrome hits a login wall, you can only get past it by SSH or VNC.\n\nRecommendation: option 1, a live CDP stream of Uni's own browser, with option 3's flow as its face. Uni posts a [needs login] card, you tap Open browser, log in (including 2FA), tap Done, and Uni carries on. Keep VNC as a fallback only.\n\n1. Build it? Recommended yes.\n2. Keep sessions or log out after each job? Staying logged in lets Uni act as that account on that site. The note suggests a Log out button for sensitive accounts, or a separate Uni-only account. The note gives no single recommendation here.\n\nSecurity: tailnet-only, a one-time token that expires in 15 minutes, and your keystrokes never reach the model.\n\nFirst check before building: whether Facebook's login page loads for headless Chrome at all. Hardware keys and passkeys will not work.",
+    "legacy_id": "T-38",
+    "migrated": "2026-10-11",
+    "next": "Decide: build the live browser share (CDP stream + needs-login card)? And keep logged-in sessions or log out after each job?",
+    "node": "Projects/uni-app",
+    "owner": "aaron",
+    "prev_next": "Note uni:01M404CF4QKFK0TTD9NTFYZBQW: rec option 1 (CDP stream) + option 3 flow (needs-login card). Aaron: OK to build? Keep sessions or…",
+    "priority": "someday",
+    "priority_by": "weigh.py 2026-10-12",
+    "room": "uni-os",
+    "source": "Aaron/Tasks#T-38",
+    "state": "waiting",
+    "waiting_on": "aaron"
+   }
+  },
+  {
+   "id": "01M4MKXBG0NFBA0Z1J55PGRG3S",
+   "path": "Tasks/T-36 Help Adam migrate friends.parachute.computer → Parachute…",
+   "tags": [
+    "task"
+   ],
+   "createdAt": "2026-10-11T04:35:36.064Z",
+   "updatedAt": "2026-10-15T09:58:20.753Z",
+   "metadata": {
+    "asked_at": "2026-10-15T09:58:20.000Z",
+    "co_owners": "room:parachute",
+    "detail": "Goal: migrate Adam's vault (friends.parachute.computer, 204.168.188.56) to Parachute cloud. Plan: uni:01M401HZNZFXGR3GNJS6RQ90Q3\n\nBlocker: no machine Uni controls can SSH into the friends box (root, uni, unforced, parachute, adam, ubuntu all refused). The read-only inventory (note count, attachments, tokens) can't run.\n\nChoose one:\n1. (a) Whoever runs friends (you, Adam or the original admin) adds uni-1's public key to a read-only user, or runs the inventory commands and pastes the output.\n2. (b) Adam does the export and cloud import himself from his admin UI/CLI, and Uni only verifies counts.\n\nNo recommendation is stated in the plan. Nothing on friends has been changed. Cloud import limit: 50 MiB per upload.",
+    "legacy_id": "T-36",
+    "migrated": "2026-10-11",
+    "next": "Pick how Uni reaches Adam's friends box (friends.parachute.computer): (a) add uni's SSH key to a read-only user there, or (b) Adam exports and imports to Parachute cloud himself and Uni verifies the counts.",
+    "node": "Projects/Parachute",
+    "owner": "aaron",
+    "prev_next": "Plan written uni:01M401HZNZFXGR3GNJS6RQ90Q3; inventory not run: mini has no SSH into friends box (204.168.188.56). Aaron: how Uni gets…",
+    "priority": "soon",
+    "priority_by": "weigh.py 2026-10-12",
+    "room": "parachute",
+    "source": "Aaron/Tasks#T-36",
+    "state": "waiting",
+    "waiting_on": "aaron"
+   }
+  },
+  {
+   "id": "01M4MKXCEWDV4Y65BPVP41CYCR",
+   "path": "Tasks/T-60 Vault coherence after merge: captures → journal…",
+   "tags": [
+    "task"
+   ],
+   "createdAt": "2026-10-11T04:35:37.052Z",
+   "updatedAt": "2026-10-15T09:58:20.861Z",
+   "metadata": {
+    "asked_at": "2026-10-15T09:58:20.000Z",
+    "co_owners": "room:parachute",
+    "detail": "1. Tana tasks (87, Jul 2023–Aug 2024). Full list: [[Aaron/T-60 Tana tasks — keep or archive]]\n   Recommendation: keep 15 as journal entries, fold 32 into two notes (Boulder city council outreach 15; Woven Web/CoHack 17), archive 40 (30 done errands, 10 practice tasks). Archiving only adds the 'archived' tag; nothing is deleted.\n   Reply 'yes' or name the ones to change.\n2. Should Parachute's default entry type be journal? Context: [[System/Vault coherence — T-60 proposal]]. The note excerpt doesn't state a recommendation for this; the room should add one.\n3. uni-app PR #5 merge (releases 0.1.29): the task mentions it but the PR details were not in the material given; the room should add a link.",
+    "legacy_id": "T-60",
+    "migrated": "2026-10-11",
+    "next": "Reply on the 87 Tana tasks: keep 15, fold 32 into two notes, archive 40 (recommended), or say otherwise. Also say whether journal should be Parachute's default entry type.",
+    "node": "Projects/Parachute",
+    "owner": "aaron",
+    "prev_next": "Phase 2 + path rule done 15:50. Aaron: Tana tasks keep/archive (Aaron/T-60 Tana tasks — keep or archive); Parachute default journal?;…",
+    "priority": "soon",
+    "priority_by": "weigh.py 2026-10-12",
+    "room": "parachute",
+    "source": "Aaron/Tasks#T-60",
+    "state": "waiting",
+    "waiting_on": "aaron"
+   }
+  },
+  {
+   "id": "01M4MKXCXTF56GJC2GE4MPRK2Q",
+   "path": "Tasks/T-65 $10k COhere sponsorship invoice draft",
+   "tags": [
+    "task"
+   ],
+   "createdAt": "2026-10-11T04:35:37.530Z",
+   "updatedAt": "2026-10-15T09:58:04.450Z",
+   "metadata": {
+    "asked_at": "2026-10-15T09:58:04.000Z",
+    "detail": "Draft invoice COH-2026-001, $10,000, issued Oct 6, due Oct 21 (Net 15). Draft: [[Projects/COhere/Techne sponsorship invoice — draft (2026-10-06)]] (PDF attached). Nothing sent.\n\nNeeded from you:\n1. Payer: Techne Foundation or Gitcoin Foundation? Legal name, address, billing contact.\n2. Crypto or fiat? If crypto: token (USDC?), chain, receiving Woven Web wallet and who controls it.\n3. Woven Web legal name, address, EIN, and bank details for ACH if any.\n4. Does the payer need a W-9, signed invoice or receipt?\n5. Tax/fiscal sponsor: ask an accountant; the payment may need to go to a fiscal sponsor.\n\nAlso: Gitcoin has an open Stripe invoice FNEOZHOY-0004 ($4,000, unpaid since Aug 13). Raise it in the same conversation, and decide whether the invoice comes from your Stripe (Unforced) or Woven Web. Sending stays with you.",
+    "legacy_id": "T-65",
+    "migrated": "2026-10-11",
+    "next": "Tell Uni who pays the $10k COhere sponsorship (Techne or Gitcoin Foundation) and how (crypto, or ACH/Stripe), plus Woven Web's legal name and address for the invoice",
+    "node": "Projects/COhere/COhere 2026",
+    "owner": "aaron",
+    "prev_next": "Aaron: payer entity + payment method; nothing sent",
+    "priority": "soon",
+    "priority_by": "hand",
+    "source": "Aaron/Tasks#T-65",
+    "state": "waiting",
+    "waiting_on": "aaron"
+   }
+  },
+  {
+   "id": "01M4MKXD05KJRNPQ648GYECYWG",
+   "path": "Tasks/T-67 Woven Web handoff note for Eileen",
+   "tags": [
+    "task"
+   ],
+   "createdAt": "2026-10-11T04:35:37.605Z",
+   "updatedAt": "2026-10-15T08:05:41.861Z",
+   "metadata": {
+    "asked_at": "2026-10-15T08:05:41.000Z",
+    "detail": "Draft (not sent to Eileen): [[Projects/Woven Web/Handoff for Eileen]]\n\nKey unknowns only you can fill:\n1. Has Eileen agreed to the whole handoff, including admin and filings, and in what role (ED or board)?\n2. Nonprofit details: 501(c)(3) status, legal name, EIN, Colorado standing, board and officers.\n3. Bank account and signers; who holds the Cloudflare, Network Solutions, Google Workspace and Resend accounts.\n4. Filings: taxes are behind, an IRS call is owed, and an IRS correspondence item may be unanswered. Next hard deadline unknown.\n5. Do you stay on the board?\n\nNothing should be promised to funders until filings are current.",
+    "legacy_id": "T-67",
+    "migrated": "2026-10-11",
+    "next": "Open the Woven Web handoff draft in this task, fill the facts marked unknown, then talk it through with Eileen yourself",
+    "node": "Projects/Woven Web",
+    "owner": "aaron",
+    "prev_next": "Aaron reviews, then talks with Eileen",
+    "priority": "soon",
+    "priority_by": "hand",
+    "source": "Aaron/Tasks#T-67",
+    "state": "waiting",
+    "waiting_on": "aaron"
+   }
+  },
+  {
+   "id": "01M4MKXGNGA5JN6V53VEK6AZVM",
+   "path": "Tasks/T-101 Tell Christian the BVSD letter is sent, if not done…",
+   "tags": [
+    "task"
+   ],
+   "createdAt": "2026-10-11T04:35:41.360Z",
+   "updatedAt": "2026-10-15T08:05:38.265Z",
+   "metadata": {
+    "asked_at": "2026-10-15T08:05:38.000Z",
+    "detail": "Send in your existing thread with Christian:\n\n'Hi Christian, I sent the BVSD superintendent letter on Oct 2, ahead of the Oct 20 HRC hearing. Please let Kurt know; I'll bring any reply to the hearing.'\n\nDeadline: before the Oct 20 HRC hearing. The letter email itself is done. Whether Christian was told is unconfirmed. No new recipient address is guessed.",
+    "due": "2026-10-20",
+    "fy_key": "8659e1129f",
+    "legacy_id": "T-101",
+    "migrated": "2026-10-11",
+    "next": "Reply to Christian in your existing thread that the BVSD letter went out Oct 2 (skip if already done).",
+    "node": "Projects/Civic",
+    "owner": "aaron",
+    "prev_next": "Letter context · Dated correction: sent Oct 2, HRC Oct 20. The email itself is done; the notice to Christian is not confirmed. Forward:…",
+    "priority": "soon",
+    "priority_by": "hand",
+    "source": "Aaron/For you#Small clicks",
+    "state": "waiting",
+    "waiting_on": "aaron"
+   }
+  },
+  {
+   "id": "01M4MKXH1PT4KDQ0ASHN848KEK",
+   "path": "Tasks/T-107 Ready to send (10-09): Field Notes is now a short convention on one…",
+   "tags": [
+    "task"
+   ],
+   "createdAt": "2026-10-11T04:35:41.750Z",
+   "updatedAt": "2026-10-15T09:58:04.732Z",
+   "metadata": {
+    "asked_at": "2026-10-15T09:58:04.000Z",
+    "detail": "Field Notes is a short convention, not code: a signed kind-1 Nostr note on wss://relay.primal.net tagged t=agent-learning, at most one per agent per day, max 2,500 characters, replies via e/p tags, read only agents you follow, treat what you read as information, never share private material. The invite points to trusted tools (nak, nostr-tools, rust-nostr/nostr-sdk) and shows Uni's setup as an example. Nothing touches your Buzz relay. Action: copy the invite + convention from the end of the design note, send to Lucian, Benjamin and Kevin, and ask each for their agent's npub.",
+    "fy_key": "a62210c884",
+    "legacy_id": "T-107",
+    "migrated": "2026-10-11",
+    "next": "Send the Field Notes invite and convention (at the end of Projects/Lab/Agent learnings board — design, uni:01M4H7B1WSK1N57EB6C9ATYKS6) to Lucian, Benjamin and Kevin from your own account, and ask each for their agent's npub so #lab can follow them.",
+    "node": "Projects/Lab",
+    "owner": "aaron",
+    "prev_next": "Field Notes is now a short convention on one relay (Primal), with links to trusted Nostr tools and Uni's setup as an example. No script to…",
+    "priority": "soon",
+    "priority_by": "weigh.py 2026-10-12",
+    "source": "Aaron/For you#T-73 Agent learnings board",
+    "state": "waiting",
+    "waiting_on": "aaron"
+   }
+  },
+  {
+   "id": "01M4PGKQDGWVE8V458WKBAP1XA",
+   "path": "Tasks/T-113 Look at cohereboulder.org on your phone, then forward Eileen the asks",
+   "tags": [
+    "task"
+   ],
+   "createdAt": "2026-10-11T22:16:23.728Z",
+   "updatedAt": "2026-10-15T09:58:04.543Z",
+   "metadata": {
+    "asked_at": "2026-10-15T09:58:04.000Z",
+    "closed_event": "7ae2b34ec9610007cfc29c2c72f1924a94e152da675b1daf44a5b0b178ae41a8",
+    "created": "2026-10-11",
+    "detail": "Labels to approve (en; es written): 'Already registered? Sign in' · 'Update your registration' · 'Save changes' · 'Your registration is updated.' · 'This email is already registered. Sign in to change your registration.' · 'Create your account to RSVP to events' · 'You're signed in' · 'Sign in to RSVP' · 'We couldn't load your registration.' · 'Try again'. Also her call: keep or cut the older registration lines 'You're woven in!', 'choose your own adventure from the community calendar', 'stay up to date with what's unfolding'. Practice lines: her doc has 2 of 11 days (Honoring Water, Noticing Session). Earlier asks from 10-13 (6 groups of short lines, 3 questions) still unanswered in #cohere. Screens: posted in #cohere 10-14 ~22:00 (flows.png).",
+    "due": "2026-10-13",
+    "last_step": "cohere 10-12: done marker",
+    "legacy_id": "T-113",
+    "next": "Send Eileen the new site labels listed in detail to approve or replace, and ask her for one morning-practice line per day Oct 15-25; then sign in once on cohereboulder.org and open Board, People and Me",
+    "node": "Projects/COhere",
+    "owner": "aaron",
+    "priority": "now",
+    "priority_by": "hand",
+    "source": "tasks.py new",
+    "state": "waiting",
+    "waiting_on": "aaron"
+   }
+  },
+  {
+   "id": "01M4SVBGWTHGY83RD638S8NJP7",
+   "path": "Tasks/T-129 Send the ATLAS Oct 12 follow-up email",
+   "tags": [
+    "task"
+   ],
+   "createdAt": "2026-10-13T05:21:52.538Z",
+   "updatedAt": "2026-10-15T09:58:09.467Z",
+   "metadata": {
+    "asked_at": "2026-10-15T09:58:09.000Z",
+    "created": "2026-10-12",
+    "detail": "Draft: uni:01M4RP293PWCCNP84EJ06R1T9J (Projects/ATLAS/Oct 12 follow-up email draft), still marked not sent",
+    "legacy_id": "T-129",
+    "next": "Edit and send the Oct 12 follow-up email to Mark and Michael (cc Neil and Jon); first update its numbers to the refreshed data (563 publications, 405 projects).",
+    "node": "Projects/ATLAS",
+    "owner": "aaron",
+    "priority": "now",
+    "source": "tasks.py new",
+    "state": "open"
+   }
+  },
+  {
+   "id": "01M4V05KY04E5M9R5RAG56FN9H",
+   "path": "Tasks/T-130 Shared Haiku gateway ($10∕day cap) + Boulder Votes AI chat",
+   "tags": [
+    "task"
+   ],
+   "createdAt": "2026-10-13T16:05:16.352Z",
+   "updatedAt": "2026-10-15T09:58:02.192Z",
+   "metadata": {
+    "asked_at": "2026-10-15T09:58:02.000Z",
+    "created": "2026-10-13",
+    "detail": "Checked 2026-10-15: production gateway has no ANTHROPIC_API_KEY (only ADMIN_TOKEN, SALT); /ask returns 'The AI helper hit a snag'. No redeploy needed after; Uni then tests the live /ask with 'Where do the mayor candidates stand on housing?'. Optional before or after: listen to two Jacobs quotes (machine-transcribed 3x, not heard by a person): 'I'm not for middle-class housing.' https://youtu.be/pT9IeGL6deg?t=9385 and 'So I am for bus lanes being driven by cars.' https://youtu.be/pT9IeGL6deg?t=9720",
+    "handed_back": "10-13 Aaron in #Uni: Aaron picked version A (Just talk) for /ask, 10-13",
+    "legacy_id": "T-130",
+    "next": "In a terminal on uni-1 run: cd ~/Code/haiku-gateway && npx wrangler secret put ANTHROPIC_API_KEY, then paste the same Anthropic key you used for preview. Until then bouldervotes.org/ask errors on every question.",
+    "node": "Projects/Boulder Votes",
+    "owner": "aaron",
+    "priority": "now",
+    "priority_by": "hand",
+    "source": "tasks.py new",
+    "state": "waiting",
+    "waiting_on": "aaron"
+   }
+  },
+  {
+   "id": "01M4YVYZ9DHAZ9N9C5KPW9JDYH",
+   "path": "Tasks/T-143 Confirm the 9 unforced.dev inbound addresses (T-136 Worker…",
+   "tags": [
+    "task"
+   ],
+   "createdAt": "2026-10-15T04:08:42.029Z",
+   "updatedAt": "2026-10-15T09:58:20.650Z",
+   "metadata": {
+    "asked_at": "2026-10-15T09:58:20.000Z",
+    "created": "2026-10-14",
+    "detail": "Mail to any address not on this list gets an immediate 550 bounce after the switch. From plan v9 (T-136):\n- ag@unforced.dev (Aaron)\n- agi@unforced.dev (Uni)\n- postmaster@unforced.dev, abuse@unforced.dev, dmarc@unforced.dev (required/role; aliases to ag@)\n- probe@unforced.dev, probe-rollback@unforced.dev (cutover and rollback test addresses)\n- probe@uni.unforced.dev, test@uni.unforced.dev (existing test domain)\nMissing anything you receive at @unforced.dev today (old aliases, info@, hello@, a form address)? Say so before the window.",
+    "legacy_id": "T-143",
+    "next": "Reply yes to these 9 inbound addresses, or name additions/removals: ag@, agi@, postmaster@, abuse@, dmarc@, probe@ and probe-rollback@ unforced.dev; probe@ and test@ uni.unforced.dev. Mail to any other address bounces after the switch.",
+    "node": "Projects/Mail",
+    "owner": "aaron",
+    "source": "tasks.py new",
+    "starter_channel": "3d4ee4fa-249b-4c6c-be0a-b0cea4c1610d",
+    "starter_room": "parachute",
+    "starter_session": "agent:main:buzz:group:3d4ee4fa-249b-4c6c-be0a-b0cea4c1610d:3e748f43fe80e8e2e07f23893acef8eb028db9704f66c4478ce224f8d20ce151",
+    "state": "open"
+   }
+  },
+  {
+   "id": "01M4Z9HXG2ZTH7HQT7VRZJXANJ",
+   "path": "Tasks/T-144 Restart the Hermes gateway to load Rooms v1 (T-139)",
+   "tags": [
+    "task"
+   ],
+   "createdAt": "2026-10-15T08:06:14.274Z",
+   "updatedAt": "2026-10-15T08:06:14.274Z",
+   "metadata": {
+    "asked_at": "2026-10-15T08:06:14.000Z",
+    "created": "2026-10-15",
+    "detail": "Loads the T-139 Rooms v1 plugins (uni-relay, uni-digest) and config that went on disk 10-14 21:18 (Codex SHIP). Hermes blocks restarts from inside the gateway, so it has to come from your shell.\n1. ssh uni@uni-1\n2. hermes gateway restart\n3. Say \"restarted\" in #parachute. Uni then runs the live proof (~/.hermes/cache/scratch/t139-handoff.md), and the rollback in the same file if anything is off.",
+    "legacy_id": "T-144",
+    "next": "From your Mac: ssh uni@uni-1, then run hermes gateway restart, then say \"restarted\" in #parachute.",
+    "node": "Projects/Parachute",
+    "owner": "aaron",
+    "source": "tasks.py new",
+    "starter_channel": "3d4ee4fa-249b-4c6c-be0a-b0cea4c1610d",
+    "starter_room": "parachute",
+    "starter_session": "agent:main:buzz:group:3d4ee4fa-249b-4c6c-be0a-b0cea4c1610d:3e748f43fe80e8e2e07f23893acef8eb028db9704f66c4478ce224f8d20ce151",
+    "state": "open"
+   }
+  },
+  {
+   "id": "01M4MKXH71BP1XGW0W7B45QZX5",
+   "path": "Decisions/Mail: approve a test week, not an immediate cutover",
+   "tags": [
+    "decision"
+   ],
+   "createdAt": "2026-10-11T04:35:41.921Z",
+   "updatedAt": "2026-10-11T15:49:07.457Z",
+   "metadata": {
+    "migrated": "2026-10-11",
+    "node": "Projects/Mail",
+    "owner": "aaron",
+    "source": "Aaron/For you#Decisions",
+    "state": "open"
+   }
+  },
+  {
+   "id": "01M4V11N5D02YWZX918DM4FWJA",
+   "path": "Decisions/2026-10-13 Ship the Boulder Votes AI chat? (preview:…",
+   "tags": [
+    "decision"
+   ],
+   "createdAt": "2026-10-13T16:20:35.117Z",
+   "updatedAt": "2026-10-13T16:20:35.117Z",
+   "metadata": {
+    "asked": "2026-10-13",
+    "node": "Projects/Boulder Votes",
+    "options": [
+     "Add key and test live on preview first",
+     "Ship to production after live test",
+     "Change it first"
+    ],
+    "owner": "aaron",
+    "state": "open",
+    "task": "T-130"
+   }
+  }
+ ]
+}

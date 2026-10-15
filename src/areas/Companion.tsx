@@ -13,8 +13,9 @@ import { isActiveRun, type Run } from "./steerCore";
 import { ownerLabel, type Task } from "./taskCore";
 import { taskTitle } from "./whereCore";
 import { splitLinks } from "./linkText";
-import { actionableTitle, runText, answerChoices, answerLabel, askLead, askPreview, checkLine, CHECK_FAILED, DANGLING, decideLine, decisionQuestion, dueLine, fitsRow, isOverdue, missingLine, OPEN_TASK, OPEN_TO_ANSWER, privateActionLabel, privateRestLabel, askedLine, requestDate, currentStep, actionOf, rowAction, rowSubParts, standsHeading, titleSays, titleWords, TIDY_LINE, toTidy, unknownDecision, waitsLine, waitsOnMe, withHosts, rowAsk, withoutRawIds, runStateLabel, waitingOnYou, waitingRunParts, notWrittenDown, referencedItems, ROW_ITEMS, ITEM_LINES, itemForms, lastWritten, SUMMARY_LONG, recheckLine, noneLine, type Choice, type NeedsFeed, type PrivateNeed, type RowAction, type Support } from "./simpleCore";
+import { actionableTitle, runText, answerChoices, answerLabel, askLead, askPreview, checkLine, CHECK_FAILED, DANGLING, decideLine, decisionQuestion, dueLine, fitsRow, isOverdue, missingLine, OPEN_TASK, OPEN_TO_ANSWER, privateActionLabel, privateRestLabel, askedLine, requestDate, currentStep, actionOf, rowAction, rowSubParts, standsHeading, titleSays, titleWords, TIDY_LINE, toTidy, unknownDecision, waitsLine, waitsOnMe, withHosts, rowAsk, withoutRawIds, runStateLabel, waitingOnYou, waitingRunParts, notWrittenDown, referencedItems, ROW_ITEMS, ITEM_LINES, itemForms, lastWritten, SUMMARY_LONG, recheckLine, reasonShort, noneLine, type RecheckScope, type Choice, type NeedsFeed, type PrivateNeed, type RowAction, type Support } from "./simpleCore";
 import { requestRecheck } from "./useTasks";
+import type { RecheckWhy } from "./simpleCore";
 
 const KEYS = { side: "uni.companion.side.v1", sideNarrow: "uni.companion.side.narrow.v1", strip: "uni.companion.strip.v1" } as const;
 /** Below this width the side panel starts folded: the conversation gets the space. */
@@ -71,7 +72,11 @@ export type CompanionProps = {
   nodeName: string;
   /** A node shown in a room it borrows (r15): the state is labelled as this node's ("Where Expression stands"), not the room's. */
   scope?: string | null;
-  onTask: (t: Task, o?: { anyway?: boolean }) => void; onDecide: (t: Task, option: string) => void;
+  onTask: (t: Task) => void; onDecide: (t: Task, option: string) => void;
+  /** r30: a run waiting on the user's answer is a row: it opens its room at the run's message, the composer focused */
+  onRun?: (r: Run) => void;
+  /** r30: this is Uni's own room: what it counts is across all rooms (any other room's counts are its own) */
+  scopeAll?: boolean;
   /** "All of X's work" (null: none, for a room no node owns). */
   onEverything: (() => void) | null;
   /** Opens a linked note (in its own vault) from a title or next step. */
@@ -219,12 +224,13 @@ function ActionLine({ forms, vault, elRef }: { forms: { text: string; keep: stri
  * (without raw ids), muted, below Needs you. Whole when short; a long one is behind "What it said". `written`: a summary somebody wrote (the
  * app's own line from the tasks has no author or date to give).
  */
-export function Stands({ stands, className = "cp-lede" }: { stands: { text: string; asOf?: string | null; by?: string | null; written?: boolean }; className?: string }) {
+export function Stands({ stands, className = "cp-lede", folded = false }: { stands: { text: string; asOf?: string | null; by?: string | null; written?: boolean }; className?: string;
+  /** r30: the room for it is short: its date line, and "Read" to open the whole (never a text cut by the panel's edge) */ folded?: boolean }) {
   const text = useMemo(() => withoutRawIds(stands.text), [stands.text]);
   const long = text.length > SUMMARY_LONG;
-  return <div className={`${className} cp-stands-note`} data-written={stands.written ? "true" : undefined}>
+  return <div className={`${className} cp-stands-note`} data-written={stands.written ? "true" : undefined} data-folded={folded ? "true" : undefined}>
     {stands.written && <p className="cp-asof">{lastWritten(stands.asOf, stands.by)}</p>}
-    {long ? <details className="cp-said"><summary>What it said</summary><p className="cp-stands">{text}</p></details> : <p className="cp-stands">{text}</p>}
+    {folded || long ? <details className="cp-said"><summary>{folded ? "Read" : "What it said"}</summary><p className="cp-stands">{text}</p></details> : <p className="cp-stands">{text}</p>}
   </div>;
 }
 
@@ -622,14 +628,15 @@ export function NeedsList({ needs: owed, pending = [], fit, onTask, onDecide, on
  * r28 (Sonnet): a run that waits on the user's answer is a Needs-you row, counted with the asks: the question it waits on is the step, whole
  * and wrapped ("Waiting on your answer in #Uni: Ship 0.1.46?" is "Ship 0.1.46?", "in #Uni" its place), never the lead-in with a colon.
  */
-export function WaitingRuns({ runs, className = "cp-list cp-waiting" }: { runs: readonly Run[]; className?: string }) {
+export function WaitingRuns({ runs, className = "cp-list cp-waiting", onRun }: { runs: readonly Run[]; className?: string; /** r30: the whole row opens its room at the run's message (the room, with none), the composer focused */ onRun?: (r: Run) => void }) {
   return runs.length > 0 ? <ul className={className} aria-label="Waiting on your answer">{runs.map((r) => {
     const w = waitingRunParts(cleanText(r.what));
-    return <li key={r.id} className="cp-run cp-run-waiting" data-state={r.state} data-task={r.task ?? undefined}><i aria-hidden="true" />
-      <span className="cp-run-text" title={cleanText(r.what)}><span className="cp-run-step">{w.step}</span>{w.place && <small className="cp-run-place">{w.place}</small>}</span><small>{runStateLabel(r.state)}</small></li>;
+    return <li key={r.id} className="cp-item cp-run cp-run-waiting" data-state={r.state} data-task={r.task ?? undefined}>
+      <button type="button" className="cp-need cp-run-open" aria-label={[w.step, w.place, runStateLabel(r.state)].filter(Boolean).join(". ")} onClick={() => onRun?.(r)}>
+        <i aria-hidden="true" /><span className="cp-run-text" title={cleanText(r.what)}><span className="cp-run-step">{w.step}</span>{w.place && <small className="cp-run-place">{w.place}</small>}</span><small>{runStateLabel(r.state)}</small>
+      </button></li>;
   })}</ul> : null;
 }
-
 export const checkingAsks = (n: number): string => `Checking ${n} ${n === 1 ? "ask" : "asks"}…`;
 /** An ask's whole step, wrapped, never ending at a colon (the recheck list shows nothing less). */
 export function wholeStep(t: Task): string {
@@ -638,29 +645,32 @@ export function wholeStep(t: Task): string {
   return text.replace(/[\s:;,—–-]+$/, "");
 }
 /**
- * r28 (Codex P1-2): asks that aren't confirmed (no recent `asked_at`, or related chat since) are not in Needs you and not counted. One quiet
- * line says they need confirming; it opens to a plain list: each ask's whole step, when it was asked, "Open" and a secondary "Answer anyway"
- * (one tap to the sheet with its answers ready). The sheet keeps "not confirmed since" for these.
+ * r28 (Codex P1-2), r30: requests that aren't confirmed (no recent `asked_at`, or related chat since) are not in Needs you and not counted. One quiet
+ * line says how many need confirming and where it counts ("in this room", "across all rooms"); it opens to a plain list: each request's whole step,
+ * its reason in a few words ("chat since in #cohere", "couldn't read #cohere", "asked Oct 11", "no room"), and one tap to its sheet. "Answer anyway"
+ * is not here: it is in the sheet, after the reason.
  */
-export function Rechecks({ tasks, onTask, placeOf }: { tasks: readonly Task[]; onTask: (t: Task, o?: { anyway?: boolean }) => void; /** the area an ask belongs to when it is listed outside it */ placeOf?: (t: Task) => string | null }) {
+export function Rechecks({ tasks, why, scope = "room", onTask, placeOf }: { tasks: readonly Task[]; why?: Record<string, RecheckWhy | null>; scope?: RecheckScope; onTask: (t: Task) => void; /** the area an ask belongs to when it is listed outside it */ placeOf?: (t: Task) => string | null }) {
   const [open, setOpen] = useState(false);
   const vault = useVaultProfile().vault;
   if (!tasks.length) return null;
-  return <div className="cp-recheck" data-count={tasks.length}>
-    <button type="button" className="cp-recheck-line" aria-expanded={open} onClick={() => setOpen(!open)}>{recheckLine(tasks.length)}<i aria-hidden="true">{open ? "–" : "+"}</i></button>
-    {open && <ul className="cp-recheck-list" aria-label="Older asks that need confirming">{tasks.map((t) => {
+  return <div className="cp-recheck" data-count={tasks.length} data-scope={scope}>
+    <button type="button" className="cp-recheck-line" aria-expanded={open} onClick={() => setOpen(!open)}>{recheckLine(tasks.length, scope)}<i aria-hidden="true">{open ? "–" : "+"}</i></button>
+    {open && <ul className="cp-recheck-list" aria-label="Requests that need confirming">{tasks.map((t) => {
       const place = placeOf?.(t) ?? null;
-      const when = [askedLine(requestDate(t)), place ? `in ${place}` : null].filter(Boolean).join(" · ");
-      return <li key={t.id} className="cp-recheck-item" data-id={taskTitle(t.title).id ?? undefined}>
-        <span className="cp-recheck-step"><RefText text={wholeStep(t)} vault={t.vault ?? vault} /></span>
-        {when && <small className="cp-recheck-asked">{when}</small>}
-        <span className="cp-recheck-go"><button type="button" className="cp-rc-open" onClick={() => onTask(t)}>Open</button><button type="button" className="cp-rc-anyway" onClick={() => onTask(t, { anyway: true })}>Answer anyway</button></span>
+      const w = why?.[t.id] ?? null;
+      const reason = [reasonShort(w, t), place && w !== "chat-since" && w !== "read-failed" ? `in ${place}` : null].filter(Boolean).join(" · ");
+      return <li key={t.id} className="cp-recheck-item" data-id={taskTitle(t.title).id ?? undefined} data-why={w ?? undefined}>
+        <button type="button" className="cp-rc-open" aria-label={`${wholeStep(t)}. ${reason}`} onClick={() => onTask(t)}>
+          <span className="cp-recheck-step"><RefText text={wholeStep(t)} vault={t.vault ?? vault} /></span>
+          <small className="cp-recheck-asked">{reason}</small>
+        </button>
       </li>;
     })}</ul>}
   </div>;
 }
 
-function Body({ stands, ready, note, load, feed, rest = 0, moreTitle = null, onPrivate, runs, nodeName, onTask, onDecide, onEverything, onNote, placeOf, fit, hideHealth = false, onMore, keepOne = false, compact = false }: CompanionProps & { fit: boolean; hideHealth?: boolean; onMore?: () => void; keepOne?: boolean;
+function Body({ stands, ready, note, load, feed, rest = 0, moreTitle = null, onPrivate, runs, nodeName, onTask, onDecide, onRun, scopeAll, onEverything, onNote, placeOf, fit, hideHealth = false, onMore, keepOne = false, compact = false }: CompanionProps & { fit: boolean; hideHealth?: boolean; onMore?: () => void; keepOne?: boolean;
   /** r28 (Codex P2-5): the one compact panel: the summary is its date line, the footer is outside what scrolls */
   compact?: boolean }) {
   const live = runs.filter(isActiveRun);
@@ -688,12 +698,46 @@ function Body({ stands, ready, note, load, feed, rest = 0, moreTitle = null, onP
     const ro = new ResizeObserver(check); ro.observe(b); ro.observe(sc); check();
     return () => ro.disconnect();
   }, [fit, runCap, active.length, feed.rows.length]);
+  /**
+   * r30 (Codex, Sonnet: "Where this stands" was cut mid-line at the panel's bottom): the summary is shown whole, or as its date line with "Read", or
+   * (when even that line would be cut) below "All of X's work"; never cut by the panel's edge. It goes down one step at a time, never back up until
+   * the text or the panel's size changes.
+   */
+  const [standsAt, setStandsAt] = useState<"whole" | "folded" | "foot">("whole");
+  const [panelSize, setPanelSize] = useState("");
+  const standsKey = `${stands?.text ?? ""}|${feed.rows.length}|${feed.recheck?.length ?? 0}|${waiting.length}|${active.length}|${fit}|${compact}|${panelSize}`;
+  const standsSeen = useRef("");
+  useLayoutEffect(() => {
+    const b = bodyRef.current; const sc = (fit ? b?.closest(".cp-fit") : compact ? b : null) as HTMLElement | null;
+    if (!sc || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => setPanelSize(`${sc.clientWidth}x${sc.clientHeight}`));
+    ro.observe(sc); setPanelSize(`${sc.clientWidth}x${sc.clientHeight}`);
+    return () => ro.disconnect();
+  }, [fit, compact]);
+  useLayoutEffect(() => {
+    if (standsSeen.current !== standsKey) { standsSeen.current = standsKey; if (standsAt !== "whole") { setStandsAt("whole"); return; } }
+    // measured once the panel has been quiet for a moment: the rows above it are still being fitted while they change
+    const t = setTimeout(() => {
+      const b = bodyRef.current; const sc = (fit ? b?.closest(".cp-fit") : compact ? b : null) as HTMLElement | null;
+      const note = b?.querySelector<HTMLElement>(".cp-stands-note");
+      if (!sc || !b || !note || standsAt === "foot" || sc.scrollTop > 1 || note.querySelector("details[open]")) return;
+      const s = sc.getBoundingClientRect(); const n = note.getBoundingClientRect();
+      const foot = (fit ? b : sc.parentElement)?.querySelector<HTMLElement>(".cp-foot");
+      // what is in view above the footer: a sticky footer covers the scrolling panel's bottom; the compact panel's footer is outside what scrolls
+      const limit = Math.min(s.bottom, foot && foot.getBoundingClientRect().top > s.top ? foot.getBoundingClientRect().top : Infinity);
+      if (n.top < limit - 0.5 && n.bottom > limit + 0.5) setStandsAt(standsAt === "whole" ? "folded" : foot ? "foot" : "folded");
+    }, 120);
+    return () => clearTimeout(t);
+  });
   const runsShown = fit ? Math.min(RUNS_SHOWN, runCap) : RUNS_SHOWN;
   const hiddenRuns = Math.max(0, active.length - runsShown);
   if (note) return <div className="cp-body"><p className="cp-lede cp-note">{note}</p></div>;
   // below 900px the room shows the list's health itself, outside the strip (r14)
   const health = !hideHealth && <LoadHealth load={load} ready={ready} count={feed.total} />;
-  const foot = onEverything && <div className="cp-foot"><button type="button" className="cp-all" onClick={onEverything}><span className="cp-all-t">{`All of ${nodeName}'s work`}</span>{hiddenRuns > 0 && <span className="cp-all-more">+{hiddenRuns} more running</span>}<span className="cp-all-arrow" aria-hidden="true">→</span></button></div>;
+  const footStands = ready && !!stands && standsAt === "foot";
+  const foot = onEverything && <div className="cp-foot"><button type="button" className="cp-all" onClick={onEverything}><span className="cp-all-t">{`All of ${nodeName}'s work`}</span>{hiddenRuns > 0 && <span className="cp-all-more">+{hiddenRuns} more running</span>}<span className="cp-all-arrow" aria-hidden="true">→</span></button>
+    {/* r30: with no room above the footer for even its date line, the summary is below "All of X's work", folded */}
+    {footStands && <Stands stands={stands!} folded />}</div>;
   const content = <>
     {!ready && (load?.error || load?.slow ? <LoadHealth load={load} ready={false} /> : <p className="cp-lede">Loading…</p>)}
     {ready && <section aria-label="Needs you" className="cp-sec" aria-busy={load?.refreshing || undefined}>
@@ -702,14 +746,14 @@ function Body({ stands, ready, note, load, feed, rest = 0, moreTitle = null, onP
       {(feed.rows.length > 0 || !!feed.pending?.length) && <NeedsList needs={feed.rows} pending={feed.pending} fit={fit} onTask={onTask} onDecide={onDecide} onNote={onNote} placeOf={placeOf} onMore={rest > 0 && onEverything ? onEverything : onMore} extra={onEverything ? rest : 0} moreTitle={moreTitle} keepOne={keepOne} wholeFirst={compact} />}
       {feed.rows.length === 0 && rest > 0 && onEverything && <button type="button" className="cp-more cp-more-rows cp-more-all" title={moreTitle ?? undefined} onClick={onEverything}>{moreLabel(rest)}</button>}
       {feed.privates.length > 0 && <ul className="cp-list cp-privates">{feed.privates.map((p) => <PrivateRow key={p.key} p={p} onPrivate={onPrivate} />)}</ul>}
-      <WaitingRuns runs={waiting} />
+      <WaitingRuns runs={waiting} onRun={onRun} />
       {feed.total === 0 && !feed.pending?.length && !waiting.length && <p className="cp-none">{noneLine(feed)}</p>}
       {!!feed.checking?.length && <p className="cp-checking" role="status" aria-busy="true">{checkingAsks(feed.checking.length)}</p>}
-      <Rechecks tasks={feed.recheck ?? []} onTask={onTask} placeOf={placeOf} />
+      <Rechecks tasks={feed.recheck ?? []} why={feed.recheckWhy} scope={scopeAll ? "all" : "room"} onTask={onTask} placeOf={placeOf} />
       {health}
     </section>}
     {/* r29 (Codex P1-3): the summary is a dated account, below what needs you, never leading */}
-    {ready && stands && <Stands stands={stands} />}
+    {ready && stands && !footStands && <Stands stands={stands} folded={standsAt === "folded"} />}
     {active.length > 0 && runsShown > 0 && <section aria-label="Running" className="cp-sec">
       <h3 className="cp-h">Running</h3>
       <ul className="cp-list">{active.slice(0, runsShown).map((r) => <li key={r.id} className="cp-run" data-state={r.state}><i aria-hidden="true" /><RunText what={cleanText(r.what)} /><small>{runStateLabel(r.state)}</small></li>)}</ul>

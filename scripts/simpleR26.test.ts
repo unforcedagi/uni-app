@@ -41,7 +41,8 @@ check("T-113: each item is its whole clause (r27: the clause after the label, ne
   assert.match(forms[1][0], /^Spanish versions of 'What is COhere\?' and 'What's Coming Up', whether .* hat photo$/);
   assert.equal(forms[2][0], "one morning-practice line per day for Oct 15–25 (her doc has 2)");
   assert.ok(forms.every((f) => f.every((x) => !/…|\.\.\.|:$|,$/.test(x))), "no cut mark, no dangling colon or comma");
-  assert.equal(currentStep({ next: T113_NEXT, room: "cohere" }), "On your phone, look at https://cohereboulder.org (live now), then forward Eileen the asks");
+  // r30: the step keeps the words it was stored with ("listed in this task's detail" included): the list is under it
+  assert.equal(currentStep({ next: T113_NEXT, room: "cohere" }), T113_NEXT);
   assert.equal(rowAction(currentStep({ next: T113_NEXT, room: "cohere" }))!.steps.length, 2);
 });
 check("Woven Web T-67: 'fill the unknowns' takes the list under 'Key unknowns only you can fill:'", () => {
@@ -61,7 +62,7 @@ check("T-70: 'the follow-ups below' takes the detail's only list, with no label"
   if (r.kind !== "list") return;
   assert.equal(r.label, null);
   assert.equal(r.items.length, 3);
-  assert.equal(currentStep({ next: T70_NEXT, room: "sadhana" }), "Pick Sadhana design A, B or C at https://uni-1.taildf9ce2.ts.net:8459/ and answer the follow-ups.");
+  assert.equal(currentStep({ next: T70_NEXT, room: "sadhana" }), T70_NEXT, "r30: the step keeps its words");
 });
 check("nothing resolves: a step that points at a list its task doesn't hold says so, and never borrows another note's", () => {
   const r = referencedItems("Forward Eileen the asks listed in this task's detail", "Live on prod since 10-14. Nothing else is written here.")!;

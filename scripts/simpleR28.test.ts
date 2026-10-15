@@ -118,13 +118,15 @@ await check("r28: a room announcing the ask it just re-stated doesn't unconfirm 
   const at = "2026-10-15T08:05:41.000Z";
   const sec = (ms: number) => Math.floor(ms / 1000);
   const t0 = new Date(at).getTime();
-  const keys = { ids: ["T-65"], words: [] as string[] };
-  const announce = [{ ref: "a", ts: sec(t0 + 9_000), body: "I've re-stated each ask: T-65: who pays the $10k sponsorship", author: "uni-key" }];
+  const keys = { ids: ["T-65"], words: [] as string[], next: "Tell Uni who pays the $10k sponsorship and how" };
+  // r30: the announcement names the T-NN and quotes six words of the ask
+  const announce = [{ ref: "a", ts: sec(t0 + 9_000), body: "I've re-stated each ask: T-65: tell Uni who pays the $10k sponsorship and how", author: "uni-key" }];
   assert.equal(chatAbout({ at, kind: "asked" }, announce, keys, "uni-key"), null);
   assert.equal(checkInResult({ at, kind: "asked" }, announce, keys, undefined, "uni-key").kind, "none");
   const later = [{ ref: "b", ts: sec(t0 + ANNOUNCE_GRACE_MS + 60_000), body: "T-65 is settled" }];
   assert.equal(checkInResult({ at, kind: "asked" }, later, keys).kind, "found");
-  assert.equal(chatAbout({ at, kind: "added" }, announce, keys, "uni-key")?.key, "T-65", "an added (not asked) record keeps the strict rule");
+  // r30: Uni's message that quotes the ask is its reminder (outside the window), for an added record as for an asked one
+  assert.equal(chatAbout({ at, kind: "added" }, announce, keys, "uni-key"), null);
 });
 
 if (failed) { console.log(`\n${failed} failed`); process.exit(1); }

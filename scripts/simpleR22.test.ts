@@ -31,9 +31,9 @@ check("a row is the whole job: every verb phrase, both steps, no \"then …\" an
     assert.doesNotMatch(t, /…|\.\.\.|then\s*…?$/);
     assert.equal(rowAction(next)!.forms.length, 1);
   }
-  // context that isn't the user's stays the sheet's: COhere's row is the go itself
-  assert.equal(shown(COHERE), "Say go on prod deploy of #38 + #58");
-  assert.match(rowAction(COHERE)!.rest, /^Eileen signs off/);
+  // r30: the row says every word of the step: COhere's go, and the context after it
+  assert.match(shown(COHERE), /^Say go on prod deploy of #38 \+ #58; Eileen signs off/);
+  assert.equal(rowAction(COHERE)!.head, "Say go on prod deploy of #38 + #58");
 });
 
 check("r28: an action is never shortened, however long: its brackets and its links stay in the row (links read as their hosts)", () => {

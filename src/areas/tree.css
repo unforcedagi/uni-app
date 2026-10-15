@@ -744,3 +744,29 @@
 .cp-stands-note .cp-said { margin: 0; font: inherit; }
 .cp-stands-note .cp-said > p { margin: 4px 0 0; }
 .wv .cp-stands-note { margin: 0; }
+
+/* r30: the sheet is the ask: anything else it carries (earlier asks, history, "her call") is one closed "Background" disclosure, the same control as Details */
+.task-background { margin: 10px 0 6px; font: 400 13px/1.45 var(--th-sans); color: var(--th-ink2); }
+.task-background > summary { list-style: none; cursor: pointer; min-height: 32px; display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.task-background > summary::-webkit-details-marker { display: none; }
+.task-background > summary::after { content: "+"; font-weight: 400; color: var(--th-mute); }
+.task-background[open] > summary::after { content: "–"; }
+.task-background .task-detail { margin-top: 4px; }
+
+/* r30: a request that needs confirming is one row (its whole step and why), the whole row opens its sheet; "Answer anyway" is in the sheet only */
+.cp-recheck-item { padding: 0; }
+.cp-recheck-item .cp-rc-open { width: 100%; min-height: 44px; padding: 8px 0; display: grid; gap: 2px; text-align: left; font: inherit; color: var(--th-ink2); text-decoration: none; }
+.cp-recheck-item .cp-rc-open:hover .cp-recheck-step { text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
+.task-anyway-line { margin: 2px 0 8px; }
+.task-anyway { min-height: 32px; font: 400 13.5px var(--th-sans); color: var(--th-ink2); }
+/* a run waiting on the user is a row like a request: one button, the whole row */
+.cp-run-waiting { padding: 0; }
+.cp-run-waiting .cp-run-open { flex-direction: row; align-items: flex-start; justify-content: flex-start; gap: 10px; padding: 8px 0; font: 400 15px/1.35 var(--th-sans); }
+.cp-run-waiting .cp-run-open .cp-run-text { flex: 1 1 auto; min-width: 0; }
+.cp-run-waiting .cp-run-open > small { margin-left: auto; flex: none; }
+.cp-run-waiting .cp-run-open:hover .cp-run-step { text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
+
+/* r30: a summary that would be cut by the panel's edge is its date line with "Read", or sits below "All of X's work" */
+.cp-stands-note[data-folded] .cp-said > summary { cursor: pointer; min-height: 32px; display: inline-flex; align-items: center; color: var(--th-ink2); text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
+.cp-foot .cp-stands-note { margin: 8px 0 0; }
+.cp-foot .cp-said[open] > p { max-height: 30vh; overflow-y: auto; }
