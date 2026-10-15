@@ -1206,7 +1206,7 @@ async fn journal_queue_entry(
     app: &tauri::AppHandle,
     entry: JournalDraft,
     audio: Option<(Vec<u8>, String)>,
-) -> Result<(), String> {
+) -> Result<uni_core::journal::Queued, String> {
     let path = db_path(app)?;
     blocking(move || {
         let store = Store::open(path).map_err(|e| e.to_string())?;
@@ -1218,6 +1218,7 @@ async fn journal_queue_entry(
             .journal_queue(
                 &entry.entry_id,
                 &entry.path,
+                &entry.alternates,
                 &entry.content,
                 &entry.source,
                 &entry.created_at,
@@ -1236,16 +1237,25 @@ struct JournalDraft {
     content: String,
     source: String,
     created_at: String,
+    /// Paths to try, in order, when `path` is taken (0.1.46; older drafts have none).
+    #[serde(default)]
+    alternates: Vec<String>,
 }
 
-/// Queue a typed entry, then try to send everything queued.
+/// Queue a typed entry, then try to send everything queued. The same words
+/// already waiting, or sent in the last ten minutes, aren't queued again:
+/// the report names the existing entry instead.
 #[tauri::command]
 async fn journal_save_text(
     app: tauri::AppHandle,
     entry: JournalDraft,
 ) -> Result<uni_core::journal::FlushReport, String> {
-    journal_queue_entry(&app, entry, None).await?;
-    journal_flush_inner(&app).await
+    let queued = journal_queue_entry(&app, entry, None).await?;
+    let mut report = journal_flush_inner(&app).await?;
+    if queued != uni_core::journal::Queued::New {
+        report.duplicate = Some(queued);
+    }
+    Ok(report)
 }
 
 /// Queue a voice entry. Body: raw audio bytes. Headers: `x-entry` (JSON

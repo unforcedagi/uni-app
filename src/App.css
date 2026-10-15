@@ -337,6 +337,7 @@ h1 { font-family: var(--serif); font-weight: 500; font-size: 34px; line-height: 
 .journal-entry.queued { border-style: dashed; background: var(--surface-2); box-shadow: none; }
 .journal-meta { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--muted); margin-bottom: 8px; letter-spacing: .01em; }
 .queued-tag { color: var(--warn); }
+.journal-entry[data-again] { outline: 2px solid var(--accent, currentColor); outline-offset: 2px; }
 .journal-body { margin: 0; white-space: pre-wrap; font-family: var(--serif); font-size: 19px; line-height: 1.6; overflow-wrap: anywhere; }
 .journal-body.pending em { color: var(--muted); font-size: 16px; }
 .journal-error { color: var(--danger); display: block; margin-top: 6px; font-size: 12px; }
