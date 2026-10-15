@@ -646,8 +646,8 @@ h1 { font-family: var(--serif); font-weight: 500; font-size: 34px; line-height: 
 
 /* r25: "Check in" keeps the sheet's question over the composer, one line, cut at a whole word by the app and never drawn with "…" */
 .checking-banner { display: flex; align-items: center; gap: 8px; margin: 0 0 6px; padding: 4px 8px; font: 500 12.5px/1.3 var(--sans, inherit); color: var(--muted, inherit); border-left: 2px solid var(--line); }
-/* r26: one line, cut at a whole word (a line clamp ends on its last whole line), never a letter cut at the edge and never "…" */
-.checking-text { flex: 1; min-width: 0; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 1; line-clamp: 1; overflow: hidden; text-overflow: clip; overflow-wrap: normal; word-break: normal; }
+/* r26: one line, cut at a whole word: the text wraps and only its first line shows (a height cut draws no "…", as the rows' `--lines` clamps do) */
+.checking-text { flex: 1; min-width: 0; max-height: 1.3em; overflow: hidden; overflow-wrap: normal; word-break: normal; }
 .checking-x { border: 0; background: none; color: inherit; font: inherit; font-size: 16px; line-height: 1; padding: 0 4px; cursor: pointer; }
 
 /* r26: the message being sent, in its thread, until it is delivered */
