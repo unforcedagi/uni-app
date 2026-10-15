@@ -32,7 +32,9 @@ pub async fn transcribe(url: &str, keys: &Keys, audio: Vec<u8>, mime: &str) -> R
 /// Transcribe on the hub's host ([`crate::hub::transcribe_url`]). When that
 /// host can't be reached at all (DNS, connection) and the hub has another
 /// name ([`crate::hub`]), try that once; `on_switch` hears the hub origin
-/// that answered so the app can remember it.
+/// that answered so the app can remember it. The hub and its other name
+/// both pass [`crate::hub::checked_origin`] before any audio is sent; an
+/// alias that fails it is never tried.
 pub async fn transcribe_on_hub(
     hub: &str,
     keys: &Keys,
@@ -40,8 +42,9 @@ pub async fn transcribe_on_hub(
     mime: &str,
     on_switch: Option<crate::parachute::OnHubSwitch>,
 ) -> Result<Transcript> {
-    let url = crate::hub::transcribe_url(hub).ok_or_else(|| Error::Media(format!("no transcription URL for hub {hub}")))?;
-    let alias = crate::hub::alias_of(hub).and_then(|a| Some((crate::hub::transcribe_url(&a)?, a)));
+    let hub = crate::hub::checked_origin(hub)?;
+    let url = crate::hub::transcribe_url(&hub).ok_or_else(|| Error::Media(format!("no transcription URL for hub {hub}")))?;
+    let alias = crate::hub::alias_of(&hub).and_then(|a| Some((crate::hub::transcribe_url(&a)?, a)));
     transcribe_or_alias(&url, alias, keys, audio, mime, on_switch).await
 }
 
@@ -54,6 +57,10 @@ async fn transcribe_or_alias(
     mime: &str,
     on_switch: Option<crate::parachute::OnHubSwitch>,
 ) -> Result<Transcript> {
+    // both endpoints are checked before any audio leaves: a bad hub fails here,
+    // a bad alias is dropped
+    crate::hub::checked_origin(url)?;
+    let alias = alias.filter(|(u, a)| crate::hub::checked_origin(u).is_ok() && crate::hub::checked_origin(a).is_ok());
     let err = match post(url, keys, audio.clone(), mime).await {
         Ok(t) => return Ok(t),
         Err((true, e)) => e,
@@ -78,6 +85,7 @@ async fn transcribe_or_alias(
 /// One POST; the error says whether the host was unreachable (DNS/connect).
 async fn post(url: &str, keys: &Keys, audio: Vec<u8>, mime: &str) -> std::result::Result<Transcript, (bool, Error)> {
     let plain = |e: Error| (false, e);
+    crate::hub::checked_origin(url).map_err(plain)?;
     if audio.is_empty() || audio.len() > MAX_TRANSCRIBE_BYTES {
         return Err(plain(Error::Media("recording is empty or larger than 25 MB".into())));
     }
@@ -177,6 +185,53 @@ mod tests {
         .unwrap();
         assert_eq!(t.text, "from the alias");
         assert_eq!(*heard.lock().unwrap(), vec!["https://uni.example".to_string()]);
+    }
+
+    /// A listener on 127.0.0.2 (loopback, but not a name `checked_origin`
+    /// allows over http): counts any connection, so a refusal is provably
+    /// made before audio leaves.
+    async fn counting_remote() -> (String, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.2:0").await.unwrap();
+        let origin = format!("http://127.0.0.2:{}", listener.local_addr().unwrap().port());
+        let hits = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let h = hits.clone();
+        tokio::spawn(async move {
+            while listener.accept().await.is_ok() {
+                h.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
+        });
+        (origin, hits)
+    }
+
+    #[tokio::test]
+    async fn an_http_remote_hub_is_refused_for_transcription() {
+        let (remote, hits) = counting_remote().await;
+        let keys = Keys::generate();
+        // the hub setting itself
+        let e = transcribe_on_hub(&remote, &keys, b"OggS fake".to_vec(), "audio/ogg", None).await.unwrap_err();
+        assert!(e.to_string().contains("must be https"), "{e}");
+        let e = transcribe_on_hub("http://uni-1.taildf9ce2.ts.net", &keys, b"OggS fake".to_vec(), "audio/ogg", None).await.unwrap_err();
+        assert!(e.to_string().contains("must be https"), "{e}");
+        // a URL handed straight to the client
+        let e = transcribe(&format!("{remote}/transcribe"), &keys, b"OggS fake".to_vec(), "audio/ogg").await.unwrap_err();
+        assert!(e.to_string().contains("must be https"), "{e}");
+        // an alias over http to another machine is never tried: the hub's own failure stands
+        let heard = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let h2 = heard.clone();
+        let e = transcribe_or_alias(
+            "https://uni-t137-gone.invalid:8445/transcribe",
+            Some((format!("{remote}/transcribe"), remote.clone())),
+            &keys,
+            b"OggS fake".to_vec(),
+            "audio/ogg",
+            Some(std::sync::Arc::new(move |_: &str| h2.store(true, std::sync::atomic::Ordering::SeqCst))),
+        )
+        .await
+        .unwrap_err();
+        assert!(e.to_string().contains("unreachable"), "{e}");
+        assert!(!heard.load(std::sync::atomic::Ordering::SeqCst));
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 0, "no audio reached the http remote");
     }
 
     #[tokio::test]

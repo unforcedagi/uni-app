@@ -1034,6 +1034,8 @@ async fn voice_transcribe(
     let audio = bytes.clone();
     secure_store::ensure_loaded(&app).await?;
     let cfg = vault_config(&app);
+    // the vault client's rule: https, or http only on this device (never audio over plain http)
+    uni_core::hub::checked_origin(&cfg.hub).map_err(|e| e.to_string())?;
     let remember = remember_hub(&app, &cfg);
     blocking(move || {
         let (keys, _) = uni_core::load_keys(false).map_err(|e| e.to_string())?;
