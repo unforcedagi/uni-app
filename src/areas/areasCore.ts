@@ -4,6 +4,7 @@
 
 import { refKey } from "./refs.ts";
 import { activeProfile, UNI_VAULT } from "./profile.ts";
+import { linksOf } from "./nodeLinks.ts";
 
 export const AREAS_ROOT = "Areas";
 export type AreaStatus = "foreground" | "background" | "archived" | "done";
@@ -15,6 +16,8 @@ export type Area = {
   kind: "area" | "project";
   /** The parent as written in `metadata.parent`: an id, a path or a link (null: a top-level node). The tree resolves and validates it. */
   parent: string | null;
+  /** T-140: `metadata.links` as written (ids, paths or links). Two-way and joined with `parent` by nodeLinks.ts; absent = none. */
+  links?: string[];
   /** The rooms this node shows: `channels` minus the rooms its children claim. `channels` itself stays what the note says. */
   rooms: string[];
 };
@@ -69,7 +72,7 @@ export function parseArea(note: AreaNoteLike): Area | null {
     channels: splitChannels(metadata.channel),
     since: typeof metadata.since === "string" ? metadata.since : null,
     title: titleOf(content, name), body: content, metadata, updatedAt: note.updatedAt ?? null,
-    kind: "area", parent: parentOf(metadata), rooms: splitChannels(metadata.channel),
+    kind: "area", parent: parentOf(metadata), links: linksOf(metadata), rooms: splitChannels(metadata.channel),
   };
 }
 
@@ -78,12 +81,13 @@ export function parentOf(metadata: Record<string, unknown>): string | null {
   return refKey(metadata.parent);
 }
 
-/** A project note under a node: tagged `project`, with `metadata.parent`. Its Brief and app notes are not nodes. */
+/** A project note: tagged `project` and joined to the tree by `metadata.links` (or the legacy `parent`) or filed directly under `Projects/`. Its Brief and app notes are not nodes. */
 export function parseProject(note: AreaNoteLike): Area | null {
   const path = note.path ? stripExt(note.path) : "";
   const metadata = note.metadata ?? {};
   const parent = parentOf(metadata);
-  if (!path || !parent || !(note.tags ?? []).includes("project") || /\/(Brief|app)$/.test(path)) return null;
+  const links = linksOf(metadata);
+  if (!path || !(parent || links.length || /^Projects\/[^/]+$/.test(path)) || !(note.tags ?? []).includes("project") || /\/(Brief|app)$/.test(path)) return null;
   const content = note.content ?? "";
   const name = leaf(path);
   return {
@@ -92,7 +96,7 @@ export function parseProject(note: AreaNoteLike): Area | null {
     channels: splitChannels(metadata.channel),
     since: typeof metadata.since === "string" ? metadata.since : null,
     title: titleOf(content, name), body: content, metadata, updatedAt: note.updatedAt ?? null,
-    kind: "project", parent, rooms: splitChannels(metadata.channel),
+    kind: "project", parent, links, rooms: splitChannels(metadata.channel),
   };
 }
 

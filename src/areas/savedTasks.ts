@@ -14,10 +14,10 @@ const SLOTS = 3;
 export type SavedTasks = { at: number; tree: TaskTree & { truncated: boolean }; list: Task[]; truncated: boolean };
 type Store = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
-type Wire = { v: 1; owner: string; at: number; truncated: boolean; tree: { byPath: [string, unknown][]; idPath: [string, string][]; children: [string, string[]][]; parent: [string, string][]; rootRefs: string[]; stands: [string, { text: string; at: string | null }][]; truncated: boolean }; list: Task[] };
+type Wire = { v: 1; owner: string; at: number; truncated: boolean; tree: { byPath: [string, unknown][]; idPath: [string, string][]; children: [string, string[]][]; parent: [string, string][]; areasOf?: [string, string[]][]; links?: [string, string[]][]; rootRefs: string[]; stands: [string, { text: string; at: string | null }][]; truncated: boolean }; list: Task[] };
 
 const toWire = (owner: string, s: SavedTasks): Wire => ({ v: 1, owner, at: s.at, truncated: s.truncated, list: s.list,
-  tree: { byPath: [...s.tree.byPath], idPath: [...s.tree.idPath], children: [...s.tree.children], parent: [...s.tree.parent], rootRefs: [...s.tree.rootRefs], stands: [...s.tree.stands], truncated: s.tree.truncated } });
+  tree: { byPath: [...s.tree.byPath], idPath: [...s.tree.idPath], children: [...s.tree.children], parent: [...s.tree.parent], areasOf: [...s.tree.areasOf], links: [...s.tree.links], rootRefs: [...s.tree.rootRefs], stands: [...s.tree.stands], truncated: s.tree.truncated } });
 
 const isTask = (t: unknown): t is Task => { const x = t as Partial<Task> | null; return !!x && typeof x.id === "string" && typeof x.title === "string" && typeof x.node === "string" && typeof x.state === "string" && typeof x.owner === "string" && typeof x.next === "string" && (x.kind === "task" || x.kind === "decision") && Array.isArray(x.options); };
 const pairs = (v: unknown): v is [string, unknown][] => Array.isArray(v) && v.every((e) => Array.isArray(e) && e.length === 2 && typeof e[0] === "string");
@@ -27,7 +27,7 @@ function fromWire(w: Wire): SavedTasks | null {
   if (!t || !pairs(t.byPath) || !pairs(t.idPath) || !pairs(t.children) || !pairs(t.parent) || !Array.isArray(t.rootRefs) || !pairs(t.stands)) return null;
   if (!Array.isArray(w.list) || !w.list.every(isTask) || typeof w.at !== "number") return null;
   return { at: w.at, truncated: !!w.truncated, list: w.list,
-    tree: { byPath: new Map(t.byPath) as TaskTree["byPath"], idPath: new Map(t.idPath as [string, string][]), children: new Map(t.children as [string, string[]][]), parent: new Map(t.parent as [string, string][]), rootRefs: new Set(t.rootRefs.filter((r): r is string => typeof r === "string")), stands: new Map(t.stands as [string, { text: string; at: string | null }][]), truncated: !!t.truncated } };
+    tree: { byPath: new Map(t.byPath) as TaskTree["byPath"], idPath: new Map(t.idPath as [string, string][]), children: new Map(t.children as [string, string[]][]), parent: new Map(t.parent as [string, string][]), areasOf: new Map(pairs(t.areasOf) ? t.areasOf as [string, string[]][] : []), links: new Map(pairs(t.links) ? t.links as [string, string[]][] : []), rootRefs: new Set(t.rootRefs.filter((r): r is string => typeof r === "string")), stands: new Map(t.stands as [string, { text: string; at: string | null }][]), truncated: !!t.truncated } };
 }
 
 export function createSavedTasks(store: Store | null) {

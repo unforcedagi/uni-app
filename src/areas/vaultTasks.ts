@@ -153,23 +153,11 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
     return asks;
   }
 
-  // Feature detect once per session: does the vault answer `near` with `direction` and `then`? null = not yet known.
-  let nearOk: boolean | null = null;
-  const unsupported = (e: unknown) => /unknown|unrecogni[sz]ed|unsupported|not supported|invalid[_ ]?(param|near|query)|bad[_ ]request|\b400\b|"?then"?/i.test(String(e)) && !/not[_ ]found/i.test(String(e));
   const missing = (e: unknown) => /not[_ ]found/i.test(String(e));
 
-  /** The node at `path` and every node beneath it, one request (`near` inbound over `parent`). Paths in `paths`, ids in `ids`. */
-  async function loadSubtree(path: string): Promise<{ paths: string[]; ids: string[] }> {
-    const rows = (await call("vault_subtree_nodes", { vault: name(), root: path })) as RawNote[];
-    const { nodes } = parseNodes(rows);
-    const self = nodes.some((n) => n.path === path) ? [] : [path]; // the walk should include its anchor; make sure
-    return { paths: [...nodes.map((n) => n.path), ...self], ids: nodes.map((n) => n.id) };
-  }
-
   /**
-   * Live tasks and open decisions under `path` (ROOT: everywhere). With the vault's subtree queries, one `near` request per
-   * kind (anchored at the node's id, else its path; `parent` inbound, then `node` inbound, `state in [open, doing, waiting]`). A vault that answers with an unknown-parameter
-   * error gets the older walk instead: `node in [subtree paths and ids]`, decided once per session. `truncated` says the
+   * Live tasks and open decisions under `path` (ROOT: everywhere): one request per kind, `node in [the subtree's paths and ids]` and
+   * `state in [open, doing, waiting]`, the subtree taken from the node tree in memory (T-140: links, not a `parent` walk). `truncated` says the
    * vault returned a full page (more may exist).
    */
   async function loadTasks(treeIn: TaskTree | Promise<TaskTree>, path: string): Promise<{ tasks: Task[]; truncated: boolean }> {
@@ -182,27 +170,13 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
       return { tasks: [...new Map(parsed.map((x) => [x.id, withAsk(x)])).values()], truncated: cut };
     };
     const tree = path === ROOT ? null : await treeIn;
-    if (tree && nearOk !== false) {
-      // The anchor is the node's id when the tree knows it (the vault stores references as ids); the path is still accepted.
-      const root = tree.byPath.get(path)?.id ?? path;
-      try {
-        const [tasks, decisions] = await Promise.all([
-          call("vault_subtree_tasks", { vault: name(), tag: "task", root, states: [...LIVE_STATES], limit: LIMIT }) as Promise<RawNote[]>,
-          call("vault_subtree_tasks", { vault: name(), tag: "decision", root, states: ["open"], limit: LIMIT }) as Promise<RawNote[]>,
-        ]);
-        nearOk = true;
-        return finish(tasks, decisions);
-      } catch (e) {
-        if (unsupported(e) && nearOk === null) nearOk = false;
-        else if (!missing(e)) throw e; // a network or vault failure is the caller's to show; only "can't do this" falls back
-      }
-    }
+    // T-140: a node's subtree is computed from the tree already read (an area and the projects linked to it, either end), so one
+    // `node in [...]` query per kind answers it whatever the vault's link layout; a vault walk over `parent` would miss every `links` edge.
     let keys: string[] | null = null;
     if (tree) {
       const known = subtreePaths(tree, path);
-      if (known.length) keys = nodeFilterKeys(tree, known);
-      else if (nearOk !== false) { try { const s = await loadSubtree(path); keys = [...s.paths, ...s.ids]; } catch { /* no such subtree */ } }
-      if (!keys?.length) return { tasks: [], truncated: false };
+      if (!known.length) return { tasks: [], truncated: false };
+      keys = nodeFilterKeys(tree, known);
     }
     const where = keys ? { node: { in: keys } } : {};
     // past the first 200: every page is read before the list is taken for the whole
@@ -400,7 +374,7 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
     askCache.clear(); checkCache.clear(); askOwner = ""; checkOwner = "\u0000";
     try { for (let i = localStorage.length - 1; i >= 0; i--) { const k = localStorage.key(i); if (k && /^uni\.(asks|checks|support)\.v\d+:/.test(k)) localStorage.removeItem(k); } } catch { /* nothing kept */ }
   }
-  return { prioritize, forgetKept, setAskOwner, loadTree, loadTagged, loadClosed, loadAsks, loadSubtree, loadTasks, loadSupport, assessTask, loadChecks, cachedChecks, transition, decide, snooze, setPriority, nearSupported: () => nearOk };
+  return { prioritize, forgetKept, setAskOwner, loadTree, loadTagged, loadClosed, loadAsks, loadTasks, loadSupport, assessTask, loadChecks, cachedChecks, transition, decide, snooze, setPriority };
 }
 
 export const vaultTasks = createVaultTasks();

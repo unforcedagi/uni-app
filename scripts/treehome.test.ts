@@ -26,7 +26,7 @@ const tree = buildTree([
   area("a-rel", "Relationships"),
   proj("p-coh", "COhere", "Areas/Boulder", { room: "cohere" }),
   proj("p-civ", "Civic", "Areas/Boulder"),
-  proj("p-coh26", "COhere 2026", "Projects/COhere", { room: "cohere" }),
+  proj("p-coh26", "COhere 2026", "Areas/Boulder", { room: "cohere", links: ["p-coh"] }),
   proj("p-nt", "New Tech", "Areas/Boulder", { room: "Boulder New Tech" }),
   proj("p-ric", "Ricki", "Areas/Unforced Development", { room: "ricki", room_status: "archived" }),
   proj("p-ric2", "Ricki Two", "Areas/Unforced Development", { room: "ricki", room_status: "archived", room_fallback: "boulder" }),
@@ -44,9 +44,10 @@ check("a project with no room is held by its area's room, and talk goes there", 
   const v = roomView(tree, "Projects/Civic", ROOMS, UNI);
   assert.equal(v.own, false); assert.equal(v.slash, null); assert.equal(v.heldBy?.id, "r-bou"); assert.equal(v.target?.id, "r-bou");
 });
-check("a project that names the same room as its parent project is held by it, not nested twice", () => {
+check("T-140: a project linked to another project does not nest under it or lose its room: both are the area's projects", () => {
   const v = roomView(tree, "Projects/COhere 2026", ROOMS, UNI);
-  assert.equal(v.own, false); assert.equal(v.heldBy?.id, "r-coh"); assert.equal(v.slash, null);
+  assert.equal(v.own, true); assert.equal(v.target?.id, "r-coh");
+  assert.deepEqual(tree.links.get("Projects/COhere"), ["Areas/Boulder", "Projects/COhere 2026"]);
 });
 check("an archived room is skipped: no fallback means held by the ancestor; a fallback names the room it borrows", () => {
   const a = roomView(tree, "Projects/Ricki", ROOMS, UNI);
@@ -71,10 +72,10 @@ check("the phone's rows: Uni, then depth-first by foreground and name, with room
   const ri = (p: string) => rows.find((r) => r.path === p)!;
   assert.equal(ri("Areas/Boulder").depth, 1);
   assert.equal(ri("Projects/COhere").depth, 2); assert.equal(ri("Projects/COhere").slash, "cohere");
-  assert.equal(ri("Projects/COhere 2026").depth, 3); assert.equal(ri("Projects/COhere 2026").heldBy, "cohere");
+  assert.equal(ri("Projects/COhere 2026").depth, 2); assert.equal(ri("Projects/COhere 2026").via, "Areas/Boulder");
   assert.equal(ri("Projects/Civic").heldBy, "boulder");
   const order = rows.map((r) => r.path);
-  assert.ok(order.indexOf("Projects/COhere") + 1 === order.indexOf("Projects/COhere 2026"), "a child follows its parent");
+  assert.ok(order.indexOf("Areas/Boulder") < order.indexOf("Projects/COhere 2026"), "a project follows its area");
 });
 check("layout setting (r12): a saved Map, Octopus or Classic choice is dropped once; the room layout is all there is", () => {
   for (const was of ["tree", "octopus", "classic", "rooms"]) {

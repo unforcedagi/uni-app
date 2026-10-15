@@ -769,3 +769,27 @@
 .cp-foot .cp-stands-note { margin: 8px 0 0; }
 .cp-foot .cp-said[open] > p { max-height: 30vh; overflow-y: auto; }
 .cp-recheck-next { font: 400 13.5px/1.4 var(--th-sans); color: var(--th-ink2); overflow-wrap: anywhere; }
+
+/* T-140: the Rooms / Projects / Areas switch and the two list views */
+.th-views { flex: none; display: flex; gap: 2px; margin: 2px 8px 8px; padding: 3px; border-radius: 8px; background: var(--th-ring); }
+.th-view { all: unset; box-sizing: border-box; flex: 1; min-height: 32px; display: grid; place-items: center; border-radius: 6px; font: 500 13px/1 var(--th-sans); color: var(--th-mute); cursor: pointer; }
+.th-view[aria-pressed="true"] { background: var(--th-card); color: var(--th-ink); font-weight: 700; box-shadow: 0 1px 2px var(--th-ring); }
+.th-view:focus-visible, .th-showarch:focus-visible, .th-chip:focus-visible, .th-cardroom:focus-visible { outline: 3px solid var(--th-ink); outline-offset: 2px; }
+.th-roomlist, .th-cards { list-style: none; margin: 0; padding: 0; }
+.th-room { display: flex; border-radius: 6px; }
+.th-room.sel, .th-card.sel { background: var(--th-sap-soft); }
+.th-room-go { min-height: 40px; padding: 4px 8px; justify-content: space-between; }
+.th-room-go .th-name b { font: 600 15px/1.2 var(--th-sans); }
+.th-when { flex: none; font: 400 12px/1 var(--th-sans); color: var(--th-mute); white-space: nowrap; }
+.th-archived { padding: 6px 8px; }
+.th-showarch { all: unset; cursor: pointer; font: 400 13px/1.2 var(--th-sans); color: var(--th-mute); text-decoration: underline; }
+.th-card { margin: 0 8px 8px; padding: 8px 10px; border: 1px solid var(--th-hair2); border-radius: 10px; background: var(--th-card); display: flex; flex-direction: column; gap: 4px; }
+.th-card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; }
+.th-card-name { min-height: 32px; padding: 0; }
+.th-card-name .th-name b { font: 600 16px/1.2 var(--th-serif); }
+.th-cardroom { all: unset; cursor: pointer; align-self: flex-start; font: 500 13px/1.2 var(--th-sans); color: var(--th-sap); }
+.th-cardroom.held { color: var(--th-mute); font-weight: 400; }
+.th-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.th-chip { all: unset; box-sizing: border-box; cursor: pointer; min-height: 26px; padding: 3px 9px; display: inline-flex; align-items: center; border: 1px solid var(--th-hair2); border-radius: 999px; font: 400 12px/1.2 var(--th-sans); color: var(--th-ink); background: var(--th-paper); }
+.th-chip b { font-weight: 600; }
+.th-chip:disabled { opacity: .5; cursor: default; }

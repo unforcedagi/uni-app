@@ -2,7 +2,7 @@
 // notes whose `metadata.parent` names their parent's path. Built from the notes of one tagged query and a parent index;
 // nothing here fetches.
 import { sortAreas, type Area } from "./areasCore.ts";
-import { pathResolver } from "./refs.ts";
+import { linkGraph } from "./nodeLinks.ts";
 
 /** The Uni root's key in `children`. Never a note path. */
 export const ROOT = "";
@@ -11,34 +11,27 @@ export const UNI_CHANNEL = "1b667c1f-95c8-45e5-a7cc-1df13b7d0e2a";
 export type Tree = {
   /** Every node by path. */
   nodes: Map<string, Area>;
-  /** A node's children (ROOT: the top level), foreground first, then by name. */
+  /** A node's children (ROOT: the top level), foreground first, then by name. An area's children are the projects linked to it (either end); a project linked to two areas is a child of both. */
   children: Map<string, Area[]>;
-  /** A node's parent path after validation (ROOT: top level). */
+  /** A node's primary parent after validation (ROOT: top level): a project's first linked area by name. Back and the breadcrumb use it unless you came through another area. */
   parent: Map<string, string>;
+  /** T-140: every node's linked nodes (two-way; `parent` counts as a link), by name. Project-to-project links are noted here only. */
+  links: Map<string, string[]>;
+  /** The areas a node is linked to, by name; the node appears under each. */
+  areasOf: Map<string, string[]>;
+  /** Archived and done nodes: not drawn, but their rooms are known to be retired. */
+  archived: Area[];
 };
-
-/** Parent links that survive: a parent that is missing, the node itself, or part of a cycle means "top level" for that link. */
-function resolveParents(nodes: Map<string, Area>): Map<string, string> {
-  const parent = new Map<string, string>();
-  const resolve = pathResolver([...nodes.values()]);
-  for (const [path, n] of nodes) { const p = resolve(n.parent); parent.set(path, p && p !== path && nodes.has(p) ? p : ROOT); }
-  // A cycle is broken at its smallest path, so the same data always gives the same tree.
-  for (const start of [...nodes.keys()].sort()) {
-    const seen: string[] = [];
-    let at = start;
-    while (at !== ROOT && !seen.includes(at)) { seen.push(at); at = parent.get(at) ?? ROOT; }
-    if (at !== ROOT) { const cycle = seen.slice(seen.indexOf(at)); parent.set([...cycle].sort()[0], ROOT); }
-  }
-  return parent;
-}
 
 /** Nodes in, tree out. Duplicate paths keep the most recently updated note. */
 export function buildTree(list: readonly Area[]): Tree {
   const nodes = new Map<string, Area>();
-  for (const a of list.filter((n) => n.status !== "archived" && n.status !== "done")) { const old = nodes.get(a.path); if (!old || (a.updatedAt ?? "") >= (old.updatedAt ?? "")) nodes.set(a.path, a); }
-  const parent = resolveParents(nodes);
+  const archived: Area[] = [];
+  for (const a of list) { if (a.status === "archived" || a.status === "done") { archived.push(a); continue; } const old = nodes.get(a.path); if (!old || (a.updatedAt ?? "") >= (old.updatedAt ?? "")) nodes.set(a.path, a); }
+  const live = [...nodes.values()];
+  const g = linkGraph(live.map((n) => ({ id: n.id, path: n.path, name: n.name, kind: n.kind, parent: n.parent, links: n.links })), [...live, ...archived]);
   const kids = new Map<string, Area[]>();
-  for (const [path, n] of nodes) { const p = parent.get(path)!; kids.set(p, [...(kids.get(p) ?? []), n]); }
+  for (const [p, paths] of g.children) kids.set(p, paths.map((c) => nodes.get(c)!));
   // A room a child claims is shown on the child, not repeated on the parent (unless that would leave the parent with none).
   for (const [path, n] of [...nodes]) {
     const claimed = new Set((kids.get(path) ?? []).flatMap((c) => c.channels));
@@ -46,17 +39,20 @@ export function buildTree(list: readonly Area[]): Tree {
     nodes.set(path, { ...n, rooms: own.length ? own : n.channels });
   }
   const children = new Map<string, Area[]>();
-  for (const [p, list] of kids) children.set(p, sortAreas(list.map((c) => nodes.get(c.path)!)));
-  return { nodes, children, parent };
+  for (const [p, paths] of g.children) children.set(p, sortAreas(paths.map((c) => nodes.get(c)!)));
+  return { nodes, children, parent: g.parent, links: g.links, areasOf: g.areasOf, archived };
 }
 
 export const childrenOf = (tree: Tree, path: string): Area[] => tree.children.get(path) ?? [];
 
-/** From the top level down to `path` (inclusive); empty for an unknown path. */
-export function trail(tree: Tree, path: string): Area[] {
+/** The area `path` is reached through: `via` when the node is linked to it, else its primary parent (its first linked area by name). */
+export const upFrom = (tree: Tree, path: string, via?: string | null): string => via && tree.areasOf.get(path)?.includes(via) ? via : tree.parent.get(path) ?? ROOT;
+
+/** From the top level down to `path` (inclusive), through the area `via` when the node sits in it; empty for an unknown path. */
+export function trail(tree: Tree, path: string, via?: string | null): Area[] {
   const out: Area[] = [];
   let at: string | undefined = path;
-  while (at && at !== ROOT && tree.nodes.has(at) && out.length <= tree.nodes.size) { out.unshift(tree.nodes.get(at)!); at = tree.parent.get(at); }
+  for (let first = true; at && at !== ROOT && tree.nodes.has(at) && out.length <= tree.nodes.size; first = false) { out.unshift(tree.nodes.get(at)!); at = upFrom(tree, at, first ? via : null); }
   return tree.nodes.has(path) ? out : [];
 }
 
@@ -68,8 +64,8 @@ export function ancestry(tree: Tree, path: string): Area[] {
   return out;
 }
 
-/** The path a node's Back goes to: its parent, or Uni (ROOT). */
-export const parentPath = (tree: Tree, path: string): string => tree.parent.get(path) ?? ROOT;
+/** The path a node's Back goes to: the area it was reached through (else its first area), or Uni (ROOT). */
+export const parentPath = (tree: Tree, path: string, via?: string | null): string => upFrom(tree, path, via);
 
 /** The Uni root as a node, so the same page component draws it. */
 export function rootNode(rooms: readonly string[]): Area {
