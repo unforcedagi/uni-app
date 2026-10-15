@@ -465,35 +465,42 @@ export function chatAbout(w: AskedWhen | null | undefined, msgs: readonly RoomMs
   return null;
 }
 /**
- * r25 (Codex P1 2): what looking in the room's chat came to, in three honest states. `found`: related conversation (the cue, "Check in" the
- * primary action). `failed`: the chat couldn't be read, which is not "nothing related" (a quiet "Couldn't read #room · Retry"; no cue, no
- * "Check in"). `none`: nothing related (the ordinary actions). `msgs` null is a lookup that failed.
+ * r25 (Codex P1 2), r27: what looking in the room's chat came to, in the four states the sheet keeps internally. `found`: related conversation
+ * after the record's write, or a read too short to reach back to it (`hit` null: unknown is not "nothing new"). `failed`: the chat couldn't be
+ * read. `none`: nothing related after the write. `pending` is a lookup not back yet (`gateOf`). `msgs` null is a lookup that failed. The sheet
+ * shows only current, unconfirmed and couldn't-read (`freshnessOf`); "nothing related found" is never shown as a validation.
  */
-export type CheckIn = { kind: "found"; hit: ChatHit } | { kind: "failed" } | { kind: "none" };
-export function checkInResult(w: AskedWhen | null | undefined, msgs: readonly RoomMsg[] | null | undefined, keys: RequestKeys): CheckIn {
+export type CheckIn = { kind: "found"; hit: ChatHit | null } | { kind: "failed" } | { kind: "none" };
+/** The most messages the lookup reads: a read this full that starts after the write has not seen the write's time. */
+export const LOOKUP_LIMIT = 200;
+export function checkInResult(w: AskedWhen | null | undefined, msgs: readonly RoomMsg[] | null | undefined, keys: RequestKeys, limit = LOOKUP_LIMIT): CheckIn {
   if (!Array.isArray(msgs)) return { kind: "failed" };
   const hit = chatAbout(w, msgs, keys);
-  return hit ? { kind: "found", hit } : { kind: "none" };
+  if (hit) return { kind: "found", hit };
+  const from = w ? (/^\d{4}-\d{2}-\d{2}$/.test(w.at.trim()) ? new Date(`${w.at.trim()}T23:59:59`).getTime() : stampMs(w.at)) : NaN;
+  const oldest = msgs.length ? Math.min(...msgs.map((m) => m.ts)) * 1000 : Infinity;
+  // r27: a full read whose oldest message is already newer than the write may have missed what came right after it
+  return msgs.length >= limit && Number.isFinite(from) && oldest > from ? { kind: "found", hit: null } : { kind: "none" };
 }
 export const couldntRead = (room: string): string => `Couldn't read #${room.replace(/^#/, "")}`;
 /** The banner over the composer after "Check in": the sheet's question stays in view while the chat is read (r25). */
-export const checkingBanner = (step: string): string => `Checking: ${cutWords(withHosts(plainStep(step)), 110, false)}`;
+export const checkingBanner = (step: string): string => `Checking: ${cutWords(withHosts(plainStep(step)), 110, false).replace(/[\s,;:]+$/, "")}`;
 export const checkInCue = (room: string, key: string, w: AskedWhen): string => `#${room.replace(/^#/, "")} has talked about ${key} since this was ${w.kind === "asked" ? "asked" : "added"}`;
 
 /**
- * r26 (Codex P1 2): "Where this stands" is reconciled claim by claim. The text is split into clauses (sentences, ";" parts, comma parts of
- * some length); each clause that says something waits on Aaron or on approval must match its own open Needs-you item, by the ids it names
- * (#38, T-90, PR 61: every id, each in some open item), else by two distinctive words it shares with one item. A clause that doesn't match
- * is dated history ("from Oct 13: ..."), shown under "What it said"; a matched clause, and a clause that is not a wait, stays current. One
- * match never validates the rest of the paragraph.
+ * r27 (Codex P1-2): "Where this stands" is a dated account ("As of Oct 14: ...") shown as written, never partly promoted. Two things make the
+ * whole of it older than the work: a clause that says something waits on Aaron or on approval that no open item matches (the r26 claim check,
+ * now only the trigger: ids it names, else two distinctive words), or a newer change in any task under the node (`updated_at` after the
+ * summary's). Either dims the whole summary behind "This summary is older than the latest work · from Oct 14", with "What it said" to open it.
  */
 export const WAITS_ON_ME = /\bwaits?\s+on\s+aaron\b|\baaron['’]s\s+(?:go|ok|okay|ask|call|ans|decision|approval|sign-?off)\b|\bneeds?\s+aaron\b|\bfor\s+aaron\s+to\b|\bawaiting\s+aaron\b|\bwaiting\s+(?:on|for)\s+aaron\b|\b(?:awaiting|pending|needs?|needed|requires?)\s+(?:your\s+|aaron['’]s\s+|his\s+)?(?:approval|sign-?off|go-?ahead|ok\b|okay\b|decision)|\bapproval\s+(?:pending|needed|required)\b|\bwaits?\s+on\s+(?:your|his)\s+(?:go|ok|approval|answer|decision)/i;
-export type StaleSummary = { from: string | null; /** the clauses still true, as text ("" when none is) */ current: string; /** the clauses nothing open matches, as they were written */ history: string[] };
-export const STALE_SUMMARY = "This summary needs updating";
-export const STALE_PART = "Part of this summary needs updating";
-export const staleLine = (s: Pick<StaleSummary, "from" | "current">): string => { const head = s.current ? STALE_PART : STALE_SUMMARY; return s.from ? `${head} · from ${s.from}` : head; };
-/** One history clause as the panel shows it: "from Oct 13: Atlas grading waits on Aaron". */
-export const historyLine = (s: Pick<StaleSummary, "from">, clause: string): string => (s.from ? `from ${s.from}: ${clause}` : clause);
+export type StaleSummary = { from: string | null; /** why: a wait claim nothing open matches, or a newer change in a task on the node */ why: "claim" | "newer" };
+export const STALE_SUMMARY = "This summary is older than the latest work";
+export const staleLine = (s: Pick<StaleSummary, "from">): string => (s.from ? `${STALE_SUMMARY} · from ${s.from}` : STALE_SUMMARY);
+/** A stamp as the date a summary is dated by: "Oct 14" (local calendar day). Null when unknown. */
+export const asOfDate = (at: string | null | undefined): string | null => { const ms = stampMs(at ?? ""); return Number.isFinite(ms) ? new Date(ms).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : null; };
+/** The summary as written, with its date in front: "As of Oct 14: COhere 2026 is live…". */
+export const asOfPrefix = (asOf: string | null | undefined): string => (asOf ? `As of ${asOf}: ` : "");
 const CLAIM_STOP = new Set("aaron aaron's waits waiting awaiting needs needed decision approval prod staging deploy deployed first second their about which where would should could these those after before until still ready today tomorrow there being other under again while review reviews".split(" "));
 type Clause = { text: string; sep: string };
 /** The summary as clauses: split at sentence ends, ";" and (when both sides are real clauses) ", "; never inside a bracket. */
@@ -562,21 +569,17 @@ function mergeSubjects(clauses: Clause[]): Clause[] {
   }
   return out;
 }
-export function staleSummary(stands: string | null | undefined, updated: string | null | undefined, open: readonly OpenItem[] = []): StaleSummary | null {
-  if (!stands || !WAITS_ON_ME.test(stands)) return null;
-  const clauses = mergeSubjects(summaryClauses(stands));
-  const history: string[] = []; const kept: Clause[] = [];
-  clauses.forEach((c, i) => {
-    if (WAITS_ON_ME.test(c.text) && !clauseIsOpen(c.text, clauses[i - 1]?.text ?? "", open)) history.push(c.text.replace(/[.\s]+$/, ""));
-    else kept.push(c);
-  });
-  if (!history.length) return null;
+export function staleSummary(stands: string | null | undefined, updated: string | null | undefined, open: readonly OpenItem[] = [], changed: readonly (string | null | undefined)[] = []): StaleSummary | null {
+  if (!stands) return null;
   const ms = stampMs(updated ?? "");
-  const from = Number.isFinite(ms) ? new Date(ms).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : null;
-  let current = kept.map((c, i) => `${c.text}${i === kept.length - 1 ? "" : c.sep || " "}`).join("").replace(/[\s,;:]+$/, "").trim();
-  if (current && !/[.!?]$/.test(current)) current += ".";
-  if (current) current = current[0].toLocaleUpperCase() + current.slice(1);
-  return { from, current, history };
+  const from = asOfDate(updated);
+  // a task on the node changed after the summary was written
+  if (Number.isFinite(ms) && changed.some((c) => { const t = stampMs(c ?? ""); return Number.isFinite(t) && t > ms; })) return { from, why: "newer" };
+  // a wait claim no open item is
+  if (!WAITS_ON_ME.test(stands)) return null;
+  const clauses = mergeSubjects(summaryClauses(stands));
+  const unmatched = clauses.some((c, i) => WAITS_ON_ME.test(c.text) && !clauseIsOpen(c.text, clauses[i - 1]?.text ?? "", open));
+  return unmatched ? { from, why: "claim" } : null;
 }
 
 /**
@@ -697,9 +700,10 @@ export function standsLine(stands: { text: string; at: string | null } | null | 
  * The companion's heading, and the work view's (r18: one wording, one timestamp, `standsLine`'s): "Where this stands · 2 days ago" once the
  * summary is older than today; "Where Expression stands" for a node shown in a room it borrows.
  */
-export function standsHeading(scope: string | null | undefined, ago: string | null | undefined): string {
+export function standsHeading(scope: string | null | undefined, ago: string | null | undefined, asOf: string | null | undefined = null): string {
   const base = scope ? `Where ${scope} stands` : "Where this stands";
-  return ago && ago !== "today" ? `${base} · ${ago}` : base;
+  // r27: a written summary carries its own date ("As of Oct 14: …"); the heading adds no second one
+  return !asOf && ago && ago !== "today" ? `${base} · ${ago}` : base;
 }
 
 /** `Message #atlas/build`; a node held by a room says whose (`Message #atlas`); no room, the node's name. */
@@ -1358,32 +1362,76 @@ export function referencedItems(next: string | null | undefined, detail: string 
 }
 /** "The asks aren't written down in this task": nothing in the task is the list its step points at. */
 export const notWrittenDown = (noun: string): string => `The ${noun.toLowerCase()} aren't written down in this task`;
-/** How many of a referenced list's items a row shows. */
+/** How many of a referenced list's items a row shows at most. */
 export const ROW_ITEMS = 3;
-/** One item as a row shows it: whole when short, else without its brackets, else its label ("3 answers"), else its first whole words; never "…". */
-export function itemShort(item: string, max = 72): string {
-  const t = item.replace(/\s+/g, " ").trim();
-  if (t.length <= max) return t;
-  const bare = withoutBrackets(t);
-  if (bare.length <= max) return bare;
-  const lab = /^([^:]{3,28}):\s+\S/.exec(bare)?.[1];
-  return lab ?? cutWords(bare, max, false);
+/** The most lines one item may take on a row. */
+export const ITEM_LINES = 2;
+/** The sentence ends in a text, outside brackets: the positions just after "." / "!" / "?" that are followed by a new sentence. */
+function sentenceEnds(t: string): number[] {
+  const d = depths(t); const out: number[] = [];
+  for (const m of t.matchAll(/[.!?](?=\s+\p{Lu})/gu)) if (d[m.index ?? 0] === 0 && !/\b(?:e\.g|i\.e|etc|vs)$/i.test(t.slice(0, m.index ?? 0))) out.push((m.index ?? 0) + 1);
+  return out;
 }
-/** A list's row form: the first `ROW_ITEMS` items (short) and how many more there are, for "and 1 more". */
-export const rowItems = (items: readonly string[], n = ROW_ITEMS, max = 72): { shown: string[]; more: number } => ({ shown: items.slice(0, n).map((x) => itemShort(x, max)), more: Math.max(0, items.length - n) });
+/**
+ * r27 (both critics): one item as a row may show it, best first, every form a whole clause. The clause after a short label ("3 answers: Spanish
+ * versions of 'What is COhere?' …" shows the clause that follows the colon), never the label alone. Then the same without its brackets, then
+ * the first sentences of it that end whole. The row draws the first form that fits its two lines; when none does, the item is not shown (the
+ * row says "and N more"): a cut item is never shown.
+ */
+export function itemForms(item: string): string[] {
+  let t = item.replace(/\s+/g, " ").trim().replace(/[\s,;:]+$/, "");
+  const lab = /^([^:()\[\]'"“‘]{2,40}):\s+(\S.*)$/.exec(t);
+  if (lab && lab[2].trim().split(/\s+/).length >= 3) t = lab[2].trim();
+  t = t.replace(/\.$/, "");
+  if (!t) return [];
+  const out: string[] = [];
+  const add = (f: string) => { const x = f.replace(/[\s,;:]+$/, "").trim(); if (x && !out.includes(x)) out.push(x); };
+  add(t);
+  const bare = withoutBrackets(t);
+  if (bare && bare.length < t.length) add(bare);
+  for (const base of bare && bare.length < t.length ? [bare] : [t]) for (const e of sentenceEnds(base).reverse()) add(base.slice(0, e).replace(/\.$/, ""));
+  return out;
+}
 
 // ------------------------------------------------------------------------------------------------- r26: a check that gates answers
 /** The lookup of the room's chat: asked and not back yet, related talk found, couldn't be read, or nothing related. */
 export type Gate = "pending" | "found" | "failed" | "none";
 export const gateOf = (applies: boolean, look: CheckIn | null): Gate => (!applies ? "none" : look === null ? "pending" : look.kind);
-/** Whether the approval answers (and "I did this") are offered as ready: only when nothing is unresolved, or after "Answer anyway". */
-export const answersReady = (g: Gate, anyway: boolean): boolean => g === "none" || anyway;
+/**
+ * r27 (Codex P1-1): freshness is unknown unless the record says otherwise. A request is `current` only when its own record vouches for it (its
+ * `updated_at` is within the last 3 days) and no related chat in its room is newer than that write. Anything else is `unconfirmed`: no room, no
+ * date, a record older than 3 days, related chat since, or a read too short to tell. `unreadable`: the room's chat couldn't be read. `pending`:
+ * the lookup is not back yet (shown as "Checking #room…", then one of the three).
+ */
+export const CURRENT_DAYS = 3;
+export type Freshness = "current" | "unconfirmed" | "unreadable" | "pending";
+export const recordVouches = (updatedAt: string | null | undefined, nowMs = Date.now()): boolean => { const t = stampMs(updatedAt ?? ""); return Number.isFinite(t) && t <= nowMs + 60_000 && nowMs - t <= CURRENT_DAYS * 86_400_000; };
+/** Whether the room's chat has to be read to tell: only a record that vouches for itself and has a room to be checked in. */
+export const needsLookup = (hasRoom: boolean, updatedAt: string | null | undefined, nowMs = Date.now()): boolean => hasRoom && recordVouches(updatedAt, nowMs);
+export function freshnessOf(hasRoom: boolean, updatedAt: string | null | undefined, look: CheckIn | null, nowMs = Date.now()): Freshness {
+  if (!needsLookup(hasRoom, updatedAt, nowMs)) return "unconfirmed";
+  return look === null ? "pending" : look.kind === "failed" ? "unreadable" : look.kind === "found" ? "unconfirmed" : "current";
+}
+/** The one quiet line over an unconfirmed request: "Asked Oct 13 · not confirmed since" (with no date: "Not confirmed since it was written"). */
+export const unconfirmedLine = (asked: string | null | undefined): string => (asked ? `${asked[0].toLocaleUpperCase()}${asked.slice(1)} · not confirmed since` : "Not confirmed since it was written");
+/** Whether the approval answers (and "I did this") are offered as ready: only when the request is current, or after "Answer anyway". */
+export const answersReady = (f: Freshness, anyway: boolean): boolean => f === "current" || anyway;
 export const ANSWER_ANYWAY = "Answer anyway";
 export const checkingRoom = (room: string): string => `Checking #${room.replace(/^#/, "")}…`;
 /** The task changed since the sheet loaded: the revision it was opened at is not the list's now. */
 export const revisionMoved = (opened: string | null | undefined, now: string | null | undefined): boolean => !!opened && !!now && opened !== now;
 export const CHANGED_SINCE = "This changed since you opened it";
 
+/** r27: a body that only says its heading or its title again ("Ship the Boulder Votes AI chat?" under "Ship the Boulder Votes AI chat? (preview: …)"). */
+const sameWords = (t: string): string => t.toLowerCase().replace(/\([^)]*\)/g, " ").replace(/[^\p{L}\p{N}\s]/gu, " ").replace(/\s+/g, " ").trim();
+export function repeatsHeading(body: string | null | undefined, ...others: readonly (string | null | undefined)[]): boolean {
+  const b = sameWords(body ?? "");
+  if (!b) return true;
+  return others.some((o) => { const x = sameWords(o ?? ""); return !!x && (x === b || x.startsWith(b)); });
+}
+
 /** r26 (Codex 6): a run's state as a person reads it, the same in the companion and the work view (never the raw "decision"). */
 export const RUN_STATE_LABEL: Record<string, string> = { running: "Working", queued: "Queued", stalled: "Stalled", blocked: "Blocked", decision: "Waiting on you", done: "Done", failed: "Failed" };
 export const runStateLabel = (state: string): string => RUN_STATE_LABEL[state] ?? state;
+/** r27 (Codex P2-5): a run that waits on Aaron's answer is Needs you, never Running ("not waiting on you"). */
+export const waitingOnYou = (r: { state: string }): boolean => r.state === "decision";

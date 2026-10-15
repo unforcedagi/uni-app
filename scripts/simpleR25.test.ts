@@ -45,12 +45,12 @@ check("Ryan: the row and the sheet heading say \"Send Ryan the deploy-access mes
 });
 
 const STANDS = "Staging is up; prod waits on Aaron's Wed 10-14 go for #38, #58, #62.";
-check("P1-2: a claim with no open request is replaced by one short line, dated", () => {
+check("P1-2: a claim with no open request makes the whole summary older than the work, dated (r27: nothing is promoted)", () => {
   const s = staleSummary(STANDS, "2026-10-13T10:00:00Z", [])!;
   assert.ok(s);
-  assert.match(staleLine(s), /^Part of this summary needs updating · from Oct 1[23]$/, "r26: the true clause (staging is up) stays current");
-  assert.equal(s.current, "Staging is up.");
-  assert.equal(staleLine({ from: null, current: "", history: [] }), "This summary needs updating");
+  assert.match(staleLine(s), /^This summary is older than the latest work · from Oct 1[23]$/);
+  assert.equal(s.why, "claim");
+  assert.equal(staleLine({ from: null }), "This summary is older than the latest work");
 });
 
 check("P1-2: open requests that don't match the claim also make it stale; one that does keeps it current", () => {
@@ -75,7 +75,7 @@ check("P1-3: Check in has three states: found, couldn't check, nothing related",
   const ts = Date.parse("2026-10-12T11:00:00") / 1000;
   const found = checkInResult(asked, [{ ref: "m1", ts, body: "Merged #38, waiting on the go." }], keys);
   assert.equal(found.kind, "found");
-  assert.equal(found.kind === "found" && found.hit.ref, "m1");
+  assert.equal(found.kind === "found" && found.hit?.ref, "m1");
   assert.deepEqual(checkInResult(asked, [{ ref: "m2", ts, body: "Lunch at noon?" }], keys), { kind: "none" });
   assert.deepEqual(checkInResult(asked, [], keys), { kind: "none" });
   assert.deepEqual(checkInResult(asked, null, keys), { kind: "failed" }, "a lookup that failed is never \"nothing related\"");

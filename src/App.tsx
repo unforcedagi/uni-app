@@ -61,6 +61,7 @@ import { sameHub, type VaultRef } from "./vaultlinks";
 import { attachmentKind, formatSize } from "./media";
 import { Attachments, attachmentBody, useRelayOrigin, type MediaRef } from "./Attachments";
 import { activeQuery, filterMembers, insertMention, memberLabels, pruneBindings, resolveRecipients, type Bindings, type Member } from "./mentions";
+import { SmallLine } from "./areas/Companion";
 
 type Room = { id: string; name: string; last_message: string | null; last_ts: number | null; mentions: boolean; unread: number };
 type Message = { ref: string; channel: string; author: string; author_name: string; ts: number; body: string; mentions_me: boolean; root: string | null; parent: string | null; mentions: Member[]; reply_count: number; last_reply_ts: number | null; edited: boolean; reactions: Reaction[]; media?: MediaRef[] };
@@ -1358,7 +1359,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
           </div>
         </div>
         <footer onFocusCapture={() => requestAnimationFrame(() => setComposerFocused(true))} onBlurCapture={(e) => { const composer = e.currentTarget; requestAnimationFrame(() => setComposerFocused(composer.contains(document.activeElement))); }} className="composer" onDragOver={(e) => { if (e.dataTransfer.types.includes("Files")) e.preventDefault(); }} onDrop={onDropFiles}>
-          {checking && checking.channel === channel && <p className="checking-banner" role="status" title={checking.text}><span className="checking-text">{checking.text}</span><button type="button" className="checking-x" aria-label="Stop checking" onClick={() => setChecking(null)}>×</button></p>}
+          {checking && checking.channel === channel && <p className="checking-banner" role="status" title={checking.text}><SmallLine className="checking-text" text={checking.text} /><button type="button" className="checking-x" aria-label="Stop checking" onClick={() => setChecking(null)}>×</button></p>}
           {above}
           <input ref={fileInput} className="file-picker" type="file" multiple aria-label="Choose files to attach" onChange={(e) => { addFiles(Array.from(e.target.files ?? [])); e.target.value = ""; }} />
           {error && <p className="error" role="alert">{error}</p>}

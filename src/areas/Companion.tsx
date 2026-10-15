@@ -13,7 +13,7 @@ import { isActiveRun, type Run } from "./steerCore";
 import { ownerLabel, type Task } from "./taskCore";
 import { taskTitle } from "./whereCore";
 import { splitLinks } from "./linkText";
-import { actionableTitle, runText, runShort, answerChoices, answerLabel, askLead, askPreview, checkLine, CHECK_FAILED, DANGLING, decideLine, stripRoom, decisionQuestion, dueLine, fitsRow, isOverdue, lineBudget, missingLine, OPEN_TASK, OPEN_TO_ANSWER, privateActionLabel, privateRestLabel, askedLine, requestDate, currentStep, firstOfSteps, actionOf, rowAction, withoutBrackets, rowSubParts, standsHeading, titleSays, titleWords, TIDY_LINE, toTidy, unknownDecision, waitsLine, waitsOnMe, withHosts, withoutCut, rowAsk, withoutRawIds, runStateLabel, notWrittenDown, referencedItems, ROW_ITEMS, rowItems, staleLine, historyLine, clauseForms, type Choice, type NeedsFeed, type PrivateNeed, type RowAction, type StaleSummary, type Support } from "./simpleCore";
+import { actionableTitle, runText, runShort, answerChoices, answerLabel, askLead, askPreview, checkLine, CHECK_FAILED, DANGLING, decideLine, stripRoom, decisionQuestion, dueLine, fitsRow, isOverdue, lineBudget, missingLine, OPEN_TASK, OPEN_TO_ANSWER, privateActionLabel, privateRestLabel, askedLine, requestDate, currentStep, firstOfSteps, actionOf, rowAction, withoutBrackets, rowSubParts, standsHeading, titleSays, titleWords, TIDY_LINE, toTidy, unknownDecision, waitsLine, waitsOnMe, withHosts, withoutCut, rowAsk, withoutRawIds, runStateLabel, waitingOnYou, notWrittenDown, referencedItems, ROW_ITEMS, ITEM_LINES, itemForms, staleLine, asOfPrefix, clauseForms, type Choice, type NeedsFeed, type PrivateNeed, type RowAction, type StaleSummary, type Support } from "./simpleCore";
 import { requestRecheck } from "./useTasks";
 
 const KEYS = { side: "uni.companion.side.v1", sideNarrow: "uni.companion.side.narrow.v1", strip: "uni.companion.strip.v1" } as const;
@@ -55,7 +55,7 @@ export function useCompanionOpen(variant: "side" | "strip"): [boolean, (v: boole
 
 export type CompanionProps = {
   /** Where this stands: the sentence and, quietly, when it was written. Null: nothing to say. */
-  stands: { text: string; ago: string; stale?: StaleSummary | null } | null; ready: boolean;
+  stands: { text: string; ago: string; /** r27: the date a written summary is dated by ("Oct 14") */ asOf?: string | null; stale?: StaleSummary | null } | null; ready: boolean;
   /** Said in place of a node's state (a room no node owns: "Not filed under an area yet."); there is then no Needs you and no way deeper. */
   note?: string | null;
   /** The task list's health: a failed first load (never an endless "Loading…"), a failed refresh (the rows stay), and whether every page was read. */
@@ -180,6 +180,8 @@ function WordClamp({ tokens, lines, open, textKey, onCut, elRef, className, onCl
     while (k > 1 && lineOf(last(words[k - 1]).top) === lines - 1 && last(words[k - 1]).right > right + 1) k--;
     // r17: never end on a hanging word ("…to the …") or a word that only leads into the rest ("Dominic: …")
     const plain = (i: number) => (typeof tokens[i]?.node === "string" ? (tokens[i].node as string) : null);
+    // r27: nor inside an unclosed bracket ("(recommended: keep 15, fold" → before the "("), for text that is only words
+    if (tokens.every((t) => typeof t.node === "string")) while (k > 1) { const j = tokens.slice(0, k).map((t) => t.node as string).join(" "); const o = j.lastIndexOf("("); if (o > 0 && j.indexOf(")", o) < 0) k--; else break; }
     while (k > 1 && plain(k - 1) !== null && (DANGLING_WORD.test(plain(k - 1)!.replace(/[,;:(\[–—-]+$/, "")) || /^[,;:–—&+·•|/-]+$/.test(plain(k - 1)!))) k--;
     // r20: never inside the verb phrase ("Edit and send the ATLAS follow-up"): the cut keeps it whole, and the verb
     k = Math.max(k, Math.min(keep, words.length));
@@ -219,7 +221,7 @@ function ActionLine({ forms, vault, elRef }: { forms: { text: string; keep: stri
  * lines, else the longest form that ends on a clause ("…; prod waits…" → "Staging has the D2 one-app…."), never cut inside one and never
  * with "…". "More" (a real button) shows the whole. Its date is in the heading ("Where this stands · 2 days ago"), not under it.
  */
-function Stands({ text }: { text: string }) {
+function Stands({ text, asOf = null }: { text: string; /** r27: the date the summary is dated by, written before it ("As of Oct 14: …") */ asOf?: string | null }) {
   const clean = useMemo(() => withoutRawIds(text), [text]);
   const forms = useMemo(() => clauseForms(clean), [clean]);
   const [full, setFull] = useState(false);
@@ -241,26 +243,24 @@ function Stands({ text }: { text: string }) {
   const cut = !full && form > 0;
   const shown = full ? clean : forms[form];
   return <div className={`cp-lede ${full ? "full" : ""}`}>
-    <p ref={ref} className="cp-stands" data-cut={cut ? "true" : undefined}>{shown}</p>
+    <p ref={ref} className="cp-stands" data-cut={cut ? "true" : undefined}>{asOf && <span className="cp-asof">{asOfPrefix(asOf)}</span>}{shown}</p>
     {(cut || full) && <button type="button" className="cp-more-next cp-stands-more" aria-expanded={full} onClick={() => setFull(!full)}>{full ? "Less" : "More"}</button>}
 </div>;
 }
 
 /**
- * r26 (Codex P1 2): a summary is reconciled claim by claim. The claims that are still true (a claim that something waits on Aaron that an open
- * item is, and every claim that is not a wait) read as the summary; each claim no open item matches is dated history under "What it said"
- * ("from Oct 13: ...") and the line above it says so.
+ * r27 (Codex P1-2): a summary older than the latest work is not shown as the state of things. One quiet line says so ("This summary is older
+ * than the latest work · from Oct 14"); what it said, whole and as written, with its date, is behind "What it said". Nothing in it is promoted.
  */
-export function StaleStands({ stale, className = "cp-lede" }: { stale: StaleSummary; text?: string; className?: string }) {
-  return <div className={className}>
-    {stale.current && <div data-part="current"><Stands text={stale.current} /></div>}
-    <p className="cp-stands cp-stale" data-stale={stale.current ? "part" : "true"}>{staleLine(stale)}</p>
-    <details className="cp-said"><summary>What it said</summary>{stale.history.map((h, i) => <p key={i}>{historyLine(stale, withoutRawIds(h))}</p>)}</details>
+export function StaleStands({ stale, text, className = "cp-lede" }: { stale: StaleSummary; text: string; className?: string }) {
+  return <div className={className} data-stale-why={stale.why}>
+    <p className="cp-stands cp-stale" data-stale="true">{staleLine(stale)}</p>
+    <details className="cp-said"><summary>What it said</summary><p>{asOfPrefix(stale.from)}{withoutRawIds(text)}</p></details>
   </div>;
 }
 
 /** One line of small print under a row (r18): whole words, then "…"; never a second line. */
-function SmallLine({ text, className }: { text: string; className: string }) {
+export function SmallLine({ text, className }: { text: string; className: string }) {
   const ref = useRef<HTMLParagraphElement | null>(null);
   return <WordClamp title={text} elRef={ref} className={className} tokens={wordTokens(text)} textKey={text} lines={1} open={false} onCut={() => {}} onClick={() => {}} tag="span" />;
 }
@@ -398,17 +398,52 @@ export function rowLead(t: Task, area: string | null = null): RowLead {
 }
 
 /**
+ * r27 (both critics): the items a row carries, each its whole clause. An item takes at most two lines and is cut only at a sentence end: the
+ * first of its forms (`itemForms`) that fits is drawn; an item with no form that fits is not drawn at all, nor any after it, and the row says
+ * "and N more". `cap`: how many the room above the panel's footer allows (the panel lowers it when three whole items don't fit).
+ */
+export function RowItems({ items, cap, noun }: { items: readonly string[]; cap: number; noun: string }) {
+  const forms = useMemo(() => items.map(itemForms), [items]);
+  const key = items.join("\n");
+  const [pick, setPick] = useState<number[]>(() => items.map(() => 0));
+  const [width, setWidth] = useState(0);
+  const ref = useRef<HTMLSpanElement | null>(null);
+  useLayoutEffect(() => { setPick(items.map(() => 0)); }, [key, width]); // eslint-disable-line react-hooks/exhaustive-deps
+  const upTo = (() => { const lim = Math.min(cap, items.length); let n = 0; while (n < lim && (pick[n] ?? 0) < forms[n].length) n++; return n; })();
+  useLayoutEffect(() => {
+    const box = ref.current; if (!box) return;
+    const lines = [...box.querySelectorAll<HTMLElement>(".cp-item-line")];
+    for (let i = 0; i < lines.length; i++) {
+      const lh = parseFloat(getComputedStyle(lines[i]).lineHeight) || 17;
+      if (lines[i].getBoundingClientRect().height > lh * ITEM_LINES + 2) { setPick((p) => { const q = [...p]; q[i] = (q[i] ?? 0) + 1; return q; }); return; }
+    }
+  });
+  useLayoutEffect(() => {
+    const el = ref.current; if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => { const w = Math.round(el.clientWidth); setWidth((cur) => (cur === w ? cur : w)); });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const more = items.length - upTo;
+  return <span ref={ref} className="cp-items" data-count={items.length} data-shown={upTo}>
+    {forms.slice(0, upTo).map((f, i) => <span key={i} className="cp-item-line">{f[Math.min(pick[i] ?? 0, f.length - 1)]}</span>)}
+    {more > 0 && <span className="cp-item-more">{upTo > 0 ? `and ${more} more` : `${more} ${noun}`}</span>}
+  </span>;
+}
+
+/**
  * A Needs-you row (r14): action first. A task whose next step names an action leads with it (r21: the whole action, up to three lines), its
  * title or area under it as one quiet line (r18: small print is never more than a line); otherwise the title, then the next step. A decision is
  * its question; its answers are in the sheet. r21 (Codex 10): the row is one button that opens its sheet, with nothing clickable inside it.
  * `compact` (the companion, r18): at most one line of step under a title.
  */
-export function NeedRow({ t, onTask, meta, compact = false, area = null }: { t: Task; onTask: (t: Task) => void; /** r20 (Codex 7): answers are in the sheet only; kept for callers */ onDecide?: (t: Task, option: string) => void;
+export function NeedRow({ t, onTask, meta, compact = false, area = null, itemCap = ROW_ITEMS }: { t: Task; onTask: (t: Task) => void; /** r20 (Codex 7): answers are in the sheet only; kept for callers */ onDecide?: (t: Task, option: string) => void;
   /** r21 (Codex 10): a row's notes and links open in its sheet; kept for callers */ onNote?: (ref: NoteRef) => void;
   /** A quiet line on where it stands, for a row that is not the user's ("With Casey · in progress"; the work view's In motion and Later). */
   meta?: string | null; compact?: boolean;
   /** r20: the row's area when it is shown outside it: an action row's subtitle names it when its title can't say where it belongs. */
-  area?: string | null }) {
+  area?: string | null;
+  /** r27: how many of the list a row carries may show (the panel lowers it when whole items don't fit above its footer) */ itemCap?: number }) {
   const { id } = taskTitle(cleanText(t.title));
   const isDecision = t.kind === "decision";
   const next = t.next.trim();
@@ -481,9 +516,8 @@ export function NeedRow({ t, onTask, meta, compact = false, area = null }: { t: 
   const open_ = () => { if (r.mode === "unavailable") requestRecheck(); onTask(t); };
   // r26: a step that points at a list ("the asks listed in this task's detail", "the unknowns") carries it: the first three items under the row
   const refd = r.lead && !isDecision ? referencedItems(next, t.detail) : null;
-  const shownItems = refd?.kind === "list" ? rowItems(refd.items, ROW_ITEMS, compact ? 44 : 72) : null;
   const itemRoom = (t.stewardRoom ?? t.room ?? "").replace(/^#/, "");
-  const label = r.lead ? [r.action?.text ? plainDetail(withHosts(r.action.text)) : text, shownItems ? `${shownItems.shown.join("; ")}${shownItems.more ? `; and ${shownItems.more} more` : ""}` : refd ? notWrittenDown(refd.noun) : null, r.sub ? [r.sub.where, when_].filter(Boolean).join(" · ") : r.under, meta].filter(Boolean).join(". ") : r.yourCall ? `Your call: ${text}` : undefined;
+  const label = r.lead ? [r.action?.text ? plainDetail(withHosts(r.action.text)) : text, refd?.kind === "list" ? refd.items.map((x) => itemForms(x)[0] ?? x).join("; ") : refd ? notWrittenDown(refd.noun) : null, r.sub ? [r.sub.where, when_].filter(Boolean).join(" · ") : r.under, meta].filter(Boolean).join(". ") : r.yourCall ? `Your call: ${text}` : undefined;
   return <li className="cp-item" data-lead={r.lead ? "action" : undefined} data-mode={r.mode}>
     <button type="button" className={`cp-need${isDecision ? " decision" : ""}${r.lead ? " cp-need-lead" : ""}`} data-id={id ?? undefined} data-mode={r.mode} aria-busy={r.mode === "checking" || undefined} aria-label={label} onClick={open_}>
       {r.yourCall && <small className="cp-call-lead">Your call:</small>}
@@ -495,10 +529,7 @@ export function NeedRow({ t, onTask, meta, compact = false, area = null }: { t: 
           ? <span className="cp-title-wrap"><WordClamp elRef={titleRef as React.RefObject<HTMLParagraphElement | null>} className="cp-title cp-preview" tokens={wordTokens(withoutCut(text))} textKey={text} lines={titleMax} open={false} onCut={() => {}} onClick={() => {}} tag="span" /></span>
           // r20: no "›" on any row: the whole row opens its sheet, in the companion and the work view alike
           : <span ref={titleRef} className="cp-title" style={clampStyle}><RefText text={text} vault={vault} /></span>}
-      {shownItems && <span className="cp-items" data-count={refd && refd.kind === "list" ? refd.items.length : undefined}>
-        {shownItems.shown.map((x, i) => <span key={i} className="cp-item-line">{x}</span>)}
-        {shownItems.more > 0 && <span className="cp-item-more">and {shownItems.more} more</span>}
-      </span>}
+      {refd?.kind === "list" && <RowItems items={refd.items} cap={itemCap} noun={refd.noun} />}
       {refd?.kind === "none" && <span className="cp-items cp-items-none">{notWrittenDown(refd.noun)}{itemRoom ? ` · Open #${itemRoom}` : ""}</span>}
       {r.go && <span className="cp-open-decide">{r.go}</span>}
       {!next && !isDecision && r.mode === "title" && !actionableTitle(text) && text !== "Open to see what's needed" && <span className="cp-open-to-see">Open to see what's needed</span>}
@@ -547,6 +578,8 @@ export function NeedsList({ needs: owed, pending = [], fit, onTask, onDecide, on
   const [measuring, setMeasuring] = useState(fit);
   const [all, setAll] = useState(false);
   const [size, setSize] = useState("");
+  /** r27: how many items of a row's list show: three whole items that don't fit above the footer become fewer, with "and N more" */
+  const [itemCap, setItemCap] = useState(ROW_ITEMS);
   const listRef = useRef<HTMLUListElement>(null);
   const settled = useRef(""); // the list the last measurement was made for
   const remeasured = useRef(0);
@@ -564,8 +597,8 @@ export function NeedsList({ needs: owed, pending = [], fit, onTask, onDecide, on
   }, [fit]);
   // a new list folds back to what fits; a resize only measures again, so "+N more" once opened stays open (r13: opening it can add a
   // scrollbar, which narrows the panel, and that must not fold it back)
-  useLayoutEffect(() => { if (fit) { setAll(false); setLimit(Infinity); setMeasuring(true); } }, [fit, key]);
-  useLayoutEffect(() => { if (fit && !all) { setLimit(Infinity); setMeasuring(true); } }, [size]); // eslint-disable-line react-hooks/exhaustive-deps
+  useLayoutEffect(() => { if (fit) { setAll(false); setItemCap(ROW_ITEMS); setLimit(Infinity); setMeasuring(true); } }, [fit, key]);
+  useLayoutEffect(() => { if (fit && !all) { setItemCap(ROW_ITEMS); setLimit(Infinity); setMeasuring(true); } }, [size]); // eslint-disable-line react-hooks/exhaustive-deps
   /** r18: rows cut their own lines (WordClamp) in the commit that draws them; the list is measured one commit later, once they have. */
   const [pass, setPass] = useState(0);
   useLayoutEffect(() => {
@@ -584,6 +617,8 @@ export function NeedsList({ needs: owed, pending = [], fit, onTask, onDecide, on
     // r22 (both critics): rows are whole actions now, so fewer may fit: at least two are kept (the panel scrolls), one in the phone's strip
     // r26: a row that carries its list ("and 3 more") can be tall enough that two rows leave no room for Running: then one is kept
     const keepMin = keepOne || rows[0]?.querySelector(".cp-items") ? 1 : 2;
+    // r27: the first row's list is too tall for the room above the footer: one item fewer, measured again (never a cut item)
+    if (!fits && itemCap > 1 && rows[0]?.querySelector(".cp-items") && rows[0].offsetHeight > budget) { setItemCap(itemCap - 1); setPass(0); return; }
     for (const r of fits ? [] : rows) { if (n >= keepMin && used + r.offsetHeight > budget) break; used += r.offsetHeight; n++; }
     setLimit(fits || n >= rows.length ? Infinity : n);
     if (settled.current !== key) remeasured.current = 0;
@@ -620,15 +655,22 @@ export function NeedsList({ needs: owed, pending = [], fit, onTask, onDecide, on
   // r20: only what is owed counts in "+N more"; a decision still being read is never a count
   const hidden = Math.max(0, owed.length - Math.min(shown.length, owed.length));
   return <>
-    <ul ref={listRef} className="cp-list">{shown.map((t) => <NeedRow key={t.id} t={t} onTask={onTask} onDecide={onDecide} onNote={onNote} area={placeOf?.(t) ?? null} compact />)}</ul>
+    <ul ref={listRef} className="cp-list">{shown.map((t) => <NeedRow key={t.id} t={t} onTask={onTask} onDecide={onDecide} onNote={onNote} area={placeOf?.(t) ?? null} compact itemCap={itemCap} />)}</ul>
     {extra > 0
       ? <button type="button" className="cp-more cp-more-rows cp-more-all" title={moreTitle ?? undefined} onClick={() => onMore?.()}>{moreLabel(hidden + extra)}</button>
       : hidden > 0 && <button type="button" className="cp-more cp-more-rows" onClick={() => (onMore ? onMore() : setAll(true))}>{moreLabel(hidden)}</button>}
   </>;
 }
 
+/** r27: a run that waits on the user's answer, shown in Needs you (never counted there: it is not a task) */
+export function WaitingRuns({ runs, className = "cp-list cp-waiting" }: { runs: readonly Run[]; className?: string }) {
+  return runs.length > 0 ? <ul className={className} aria-label="Waiting on your answer">{runs.map((r) => <li key={r.id} className="cp-run cp-run-waiting" data-state={r.state}><i aria-hidden="true" /><RunText what={cleanText(r.what)} /><small>{runStateLabel(r.state)}</small></li>)}</ul> : null;
+}
+
 function Body({ stands, ready, note, load, feed, rest = 0, moreTitle = null, onPrivate, runs, nodeName, onTask, onDecide, onEverything, onNote, placeOf, fit, hideHealth = false, onMore, keepOne = false }: CompanionProps & { fit: boolean; hideHealth?: boolean; onMore?: () => void; keepOne?: boolean }) {
-  const active = runs.filter(isActiveRun);
+  const live = runs.filter(isActiveRun);
+  const waiting = live.filter(waitingOnYou);
+  const active = live.filter((r) => !waitingOnYou(r));
   /** r24 (Sonnet): in the side panel a Running row is whole above the footer or it waits behind "+N more running": one fewer until the last fits */
   const [runCap, setRunCap] = useState(RUNS_SHOWN);
   const bodyRef = useRef<HTMLDivElement | null>(null);
@@ -657,14 +699,15 @@ function Body({ stands, ready, note, load, feed, rest = 0, moreTitle = null, onP
   // below 900px the room shows the list's health itself, outside the strip (r14)
   const health = !hideHealth && <LoadHealth load={load} ready={ready} count={feed.total} />;
   return <div className="cp-body" ref={bodyRef}>
-    {!ready ? (load?.error || load?.slow ? <LoadHealth load={load} ready={false} /> : <p className="cp-lede">Loading…</p>) : stands && (stands.stale ? <StaleStands stale={stands.stale} /> : <Stands text={stands.text} />)}
+    {!ready ? (load?.error || load?.slow ? <LoadHealth load={load} ready={false} /> : <p className="cp-lede">Loading…</p>) : stands && (stands.stale ? <StaleStands stale={stands.stale} text={stands.text} /> : <Stands text={stands.text} asOf={stands.asOf} />)}
     {ready && <section aria-label="Needs you" className="cp-sec" aria-busy={load?.refreshing || undefined}>
       <h3 className="cp-h">Needs you</h3>
       {/* r17: Uni's panel is at most three rows and one "Show N more" (private items folded in) to the work view, which keeps the full list */}
       {(feed.rows.length > 0 || !!feed.pending?.length) && <NeedsList needs={feed.rows} pending={feed.pending} fit={fit} onTask={onTask} onDecide={onDecide} onNote={onNote} placeOf={placeOf} onMore={rest > 0 && onEverything ? onEverything : onMore} extra={onEverything ? rest : 0} moreTitle={moreTitle} keepOne={keepOne} />}
       {feed.rows.length === 0 && rest > 0 && onEverything && <button type="button" className="cp-more cp-more-rows cp-more-all" title={moreTitle ?? undefined} onClick={onEverything}>{moreLabel(rest)}</button>}
       {feed.privates.length > 0 && <ul className="cp-list cp-privates">{feed.privates.map((p) => <PrivateRow key={p.key} p={p} onPrivate={onPrivate} />)}</ul>}
-      {feed.total === 0 && !feed.pending?.length && <p className="cp-none">Nothing needs you here.</p>}
+      <WaitingRuns runs={waiting} />
+      {feed.total === 0 && !feed.pending?.length && !waiting.length && <p className="cp-none">Nothing needs you here.</p>}
       {health}
     </section>}
     {active.length > 0 && runsShown > 0 && <section aria-label="Running" className="cp-sec">
@@ -719,7 +762,7 @@ export function CompanionSide({ open, onToggle, ...p }: CompanionProps & Fold) {
   return <aside className={`cp side cp-fit ${open ? "open" : "folded"}`} aria-label="Where this stands">
     {open
       ? <>
-        <button type="button" className="cp-top" aria-expanded="true" aria-label="Hide where this stands" title="Hide where this stands" onClick={() => onToggle(false)}><span>{standsHeading(p.scope, p.ready ? p.stands?.ago : null)}</span><span className="cp-fold" aria-hidden="true">›</span></button>
+        <button type="button" className="cp-top" aria-expanded="true" aria-label="Hide where this stands" title="Hide where this stands" onClick={() => onToggle(false)}><span>{standsHeading(p.scope, p.ready ? p.stands?.ago : null, p.stands?.asOf)}</span><span className="cp-fold" aria-hidden="true">›</span></button>
         <Body {...p} fit />
       </>
       : <button type="button" className="cp-unfold" aria-expanded="false" aria-label="Show where this stands" title="Show where this stands" onClick={() => onToggle(true)}>
@@ -768,10 +811,10 @@ export function CompanionStrip({ open, onToggle, onSheet, ...p }: CompanionProps
     const off = box ? openDialog(box, () => closeRef.current(), { root: layer, initial: box, opener: line }) : undefined;
     return () => { off?.(); onSheet?.(null); };
   }, [asSheet]); // eslint-disable-line react-hooks/exhaustive-deps
-  const heading = standsHeading(p.scope, p.ready ? p.stands?.ago : null);
+  const heading = standsHeading(p.scope, p.ready ? p.stands?.ago : null, p.stands?.asOf);
   // r18: folded, the line is the sentence cut on a whole word (never "underway ac…"); open, it is the dated heading. r19: when anything needs
   // the user, the folded line says what is waiting first ("Needs you · 2: Say go on the deploy…"), never only a dot behind a chevron
-  const folded = p.note ?? (p.ready ? waitingLine(p.feed) ?? (p.stands ? (p.stands.stale ? (p.stands.stale.current ? withoutRawIds(p.stands.stale.current) : staleLine(p.stands.stale)) : withoutRawIds(p.stands.text)) : null) ?? "Where this stands" : p.load?.error ? "Couldn't load" : p.load?.slow ? "Still loading" : "Loading…");
+  const folded = p.note ?? (p.ready ? waitingLine(p.feed) ?? (p.stands ? (p.stands.stale ? staleLine(p.stands.stale) : `${asOfPrefix(p.stands.asOf)}${withoutRawIds(p.stands.text)}`) : null) ?? "Where this stands" : p.load?.error ? "Couldn't load" : p.load?.slow ? "Still loading" : "Loading…");
   const lineRef = useRef<HTMLParagraphElement | null>(null);
   const lineTokens = [...(p.scope ? [{ node: <b className="cp-scope">{`${p.scope}:`}</b>, space: false }] : []), ...wordTokens(folded).map((w, i) => (i === 0 && p.scope ? { ...w, space: true } : w))];
   const label = <span className="cp-line-text" title={p.stands?.text}>{open ? heading

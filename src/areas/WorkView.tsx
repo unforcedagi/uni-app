@@ -1,12 +1,13 @@
 // T-124 r13: "All of X's work" as a focused view inside the room shell, not a second app. The same header and crumbs as the room, a way back
-// to the chat, and three sections built from the companion's own rows: Needs you (the one feed, with the one count), In motion (what is
-// running, what is being drafted, what others hold), and Later (Someday, folded). No census, no counters per state, no priority pickers:
-// priority is set in the task sheet. Styling is in tree.css.
-import { useState, type ReactNode } from "react";
+// to the chat, and sections built from the companion's own rows with the companion's own names (r27): Needs you (the one feed, with the one
+// count, and a run waiting on the user's answer), Running (what is running and what others hold), Drafts, Done lately, and Later (Someday,
+// folded). No census, no counters per state, no priority pickers: priority is set in the task sheet. Records that need rewording are the
+// rooms' business: logged, never shown. Styling is in tree.css.
+import { useEffect, useState, type ReactNode } from "react";
 import { cleanText } from "../interface/contract";
-import { NeedRow, PrivateRow, RunText } from "./Companion";
+import { NeedRow, PrivateRow, RunText, WaitingRuns } from "./Companion";
 import { isActiveRun, type Draft, type Run } from "./steerCore";
-import { runStateLabel, titleWords, type NeedsFeed, type PrivateNeed } from "./simpleCore";
+import { quietAgo, runStateLabel, stampMs, titleWords, waitingOnYou, type NeedsFeed, type PrivateNeed } from "./simpleCore";
 import type { TaskLoad } from "./Companion";
 import { asOf, countLabel, countText, LoadHealth } from "./LoadHealth";
 import type { Task } from "./taskCore";
@@ -37,21 +38,26 @@ export type WorkViewProps = {
   top?: ReactNode; foot?: ReactNode;
 };
 
-/** "4 records need rewording by their rooms" (r21): the factual line for records that aren't real requests yet. */
-export const rewordLine = (n: number): string => (n === 1 ? "1 record needs rewording by its room" : `${n} records need rewording by their rooms`);
-
-/** A record to reword, by its title as words (r20): no "Decision (default yes):" label, no cut tail ("…feature 4, the"). */
+/** A record to reword, by its title as words (r20): no "Decision (default yes):" label, no cut tail ("…feature 4, the"). Logged for the rooms (r27), never shown. */
 export const tidyTitle = (t: Task): string => titleWords(cleanText(taskTitle(t.title).rest)) || cleanText(t.title);
+/** Runs finished lately (r27): "Done lately" lists those done within a week, newest first. */
+export const DONE_LATELY_DAYS = 7;
+export const doneLately = (runs: readonly Run[], nowMs = Date.now()): Run[] => runs.filter((r) => { const t = stampMs(r.updated ?? r.started ?? ""); return r.state === "done" && Number.isFinite(t) && nowMs - t <= DONE_LATELY_DAYS * 86_400_000; }).sort((a, b) => stampMs(b.updated ?? b.started) - stampMs(a.updated ?? a.started)).slice(0, 5);
 
 export function WorkView(p: WorkViewProps) {
   const [laterOpen, setLaterOpen] = useState(false);
-  const [tidyOpen, setTidyOpen] = useState(false);
-  /** r19: records that aren't real requests yet: Uni's to tidy, never counted in Needs you. r20: one quiet line, its titles read-only. */
+  /** r19: records that aren't real requests yet: Uni's to tidy, never counted in Needs you. r27: not Aaron's to read: they are for the rooms, so they are logged. */
   const tidy = p.feed.tidy ?? [];
+  const tidyKey = tidy.map((t) => t.id).join(",");
+  useEffect(() => { if (tidy.length) console.info(`[uni] ${tidy.length} record${tidy.length === 1 ? "" : "s"} need rewording by their rooms:`, tidy.map((t) => `${t.id} ${tidyTitle(t)}`)); }, [tidyKey]); // eslint-disable-line react-hooks/exhaustive-deps
   /** r20: decisions not read yet: "Checking what's needed…" rows after the owed ones, never counted. */
   const pending = p.feed.pending ?? [];
   const vault = useVaultProfile().vault;
-  const running = p.runs.filter(isActiveRun);
+  const live = p.runs.filter(isActiveRun);
+  /** r27 (Codex P2-5): a run waiting on the user's answer is Needs you; Running holds only what is not waiting on them */
+  const waiting = live.filter(waitingOnYou);
+  const running = live.filter((r) => !waitingOnYou(r));
+  const done = doneLately(p.runs);
   const motion = running.length + p.drafts.length + p.others.length;
   if (!p.ready) return <div className="wv">{p.load.error || p.load.slow ? <LoadHealth load={p.load} ready={false} /> : <p className="th-quiet" role="status">Loading…</p>}</div>;
   return <div className="wv" aria-label={`All of ${p.nodeName}'s work`}>
@@ -59,29 +65,31 @@ export function WorkView(p: WorkViewProps) {
     {p.top}
     <section className="wv-sec" aria-label="Needs you" aria-busy={p.load.refreshing || undefined}>
       <h2 className="wv-h">Needs you <span className="wv-n" aria-label={countLabel(p.feed.total, p.load)} title={countLabel(p.feed.total, p.load)}>{countText(p.feed.total, p.load)}</span></h2>
-      {p.feed.total === 0 && !pending.length ? <p className="cp-none">Nothing needs you here.</p> : <ul className="cp-list">
+      {p.feed.total === 0 && !pending.length && !waiting.length ? <p className="cp-none">Nothing needs you here.</p> : p.feed.total === 0 && !pending.length ? null : <ul className="cp-list">
         {p.feed.rows.map((t) => <NeedRow key={t.id} t={t} onTask={p.onTask} onDecide={p.onDecide} onNote={p.onNote} area={p.placeOf?.(t) ?? null} />)}
         {p.feed.privates.map((x) => <PrivateRow key={x.key} p={x} onPrivate={p.onPrivate} />)}
         {pending.map((t) => <NeedRow key={t.id} t={t} onTask={p.onTask} onDecide={p.onDecide} onNote={p.onNote} area={p.placeOf?.(t) ?? null} />)}
       </ul>}
+      <WaitingRuns runs={waiting} className="cp-list cp-waiting wv-waiting" />
     </section>
-    <section className="wv-sec" aria-label="Being worked on">
-      <h2 className="wv-h">Being worked on <span className="wv-sub">by Uni and others, not waiting on you</span></h2>
+    <section className="wv-sec" aria-label="Running">
+      <h2 className="wv-h">Running</h2>
       {/* r16: activity that couldn't be read is never "nothing moving"; activity kept from an earlier read says when it was read */}
       {p.activity.error ? <p className="lh-line" role="status">{p.activity.lastOk ? `Running and drafts as of ${asOf(p.activity.lastOk)} · Couldn't refresh` : "Couldn't check what's running"} · <button type="button" className="cp-retry" onClick={p.load.retry}>Retry</button></p>
         : !p.activity.ready ? <p className="lh-line" role="status">Checking what's running…</p> : null}
       {motion === 0 && !p.privateOther && p.activity.ready && !p.activity.error && <p className="cp-none">Nothing is moving here right now.</p>}
-      {running.length > 0 && <ul className="cp-list wv-runs" aria-label="Running">{running.map((r) => <li key={r.id} className="cp-run" data-state={r.state}><i aria-hidden="true" /><RunText what={cleanText(r.what)} /><small>{runStateLabel(r.state)}</small></li>)}</ul>}
-      {p.drafts.length > 0 && <ul className="cp-list wv-drafts" aria-label="Drafts">{p.drafts.map((d) => <li key={d.id} className="cp-item">
-        <button type="button" className="cp-need" onClick={() => p.onNote({ vault, id: d.id })}><span className="cp-title">{cleanText(taskTitle(d.title).rest)}</span><small className="cp-detail">{d.status === "ready" ? "Draft ready to read" : "Being drafted"}</small></button></li>)}</ul>}
+      {running.length > 0 && <ul className="cp-list wv-runs" aria-label="Running now">{running.map((r) => <li key={r.id} className="cp-run" data-state={r.state}><i aria-hidden="true" /><RunText what={cleanText(r.what)} /><small>{runStateLabel(r.state)}</small></li>)}</ul>}
       {p.others.length > 0 && <ul className="cp-list wv-others">{p.others.map(({ task, meta }) => <NeedRow key={task.id} t={task} meta={meta} onTask={p.onTask} onDecide={p.onDecide} onNote={p.onNote} />)}</ul>}
       {p.privateOther > 0 && <p className="cp-none">{p.privateOther === 1 ? "One item in a private area is" : `${p.privateOther} items in private areas are`} not listed here; open the area to see {p.privateOther === 1 ? "it" : "them"}.</p>}
     </section>
-    {/* r20 (Codex 8): one quiet line, no rows to act on; opened, the records' titles, read-only. r21 (Codex P1-2): it says only what is true
-        (nothing here starts repair work): these records need rewording by the rooms that wrote them */}
-    {tidy.length > 0 && <section className="wv-sec wv-tidy" aria-label="Records to reword">
-      <button type="button" className="wv-tidy-line" aria-expanded={tidyOpen} aria-controls="wv-tidy" onClick={() => setTidyOpen(!tidyOpen)}>{rewordLine(tidy.length)}</button>
-      {tidyOpen && <ul id="wv-tidy" className="wv-tidy-list">{tidy.map((t) => <li key={t.id}>{tidyTitle(t)}</li>)}</ul>}
+    {p.drafts.length > 0 && <section className="wv-sec" aria-label="Drafts">
+      <h2 className="wv-h">Drafts</h2>
+      <ul className="cp-list wv-drafts">{p.drafts.map((d) => <li key={d.id} className="cp-item">
+        <button type="button" className="cp-need" onClick={() => p.onNote({ vault, id: d.id })}><span className="cp-title">{cleanText(taskTitle(d.title).rest)}</span><small className="cp-detail">{d.status === "ready" ? "Draft ready to read" : "Being drafted"}</small></button></li>)}</ul>
+    </section>}
+    {done.length > 0 && <section className="wv-sec" aria-label="Done lately">
+      <h2 className="wv-h">Done lately</h2>
+      <ul className="cp-list wv-done">{done.map((r) => <li key={r.id} className="cp-run" data-state={r.state}><i aria-hidden="true" /><RunText what={cleanText(r.what)} /><small>{quietAgo(r.updated ?? r.started, Date.now()) || runStateLabel(r.state)}</small></li>)}</ul>
     </section>}
     {p.later.length > 0 && <section className="wv-sec wv-later" aria-label="Later">
       <button type="button" className="wv-h wv-fold" aria-expanded={laterOpen} aria-controls="wv-later" onClick={() => setLaterOpen(!laterOpen)}>Later <span className="wv-n">{p.later.length}</span><i aria-hidden="true">{laterOpen ? "–" : "+"}</i></button>
