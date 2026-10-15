@@ -1,6 +1,6 @@
 // T-124 r13: "All of X's work" as a focused view inside the room shell, not a second app. The same header and crumbs as the room, a way back
 // to the chat, and sections built from the companion's own rows with the companion's own names (r27): Needs you (the one feed, with the one
-// count, and a run waiting on the user's answer), Running (what is running and what others hold), Drafts, Done lately, and Later (Someday,
+// count, and a run waiting on the user's answer), Running (what is running), Drafts, With others (tasks others hold), Done lately, and Later (Someday,
 // folded). No census, no counters per state, no priority pickers: priority is set in the task sheet. Records that need rewording are the
 // rooms' business: logged, never shown. Styling is in tree.css.
 import { useEffect, useState, type ReactNode } from "react";
@@ -72,21 +72,25 @@ export function WorkView(p: WorkViewProps) {
       </ul>}
       <WaitingRuns runs={waiting} className="cp-list cp-waiting wv-waiting" />
     </section>
-    <section className="wv-sec" aria-label="Running">
+    {/* r27: no heading with nothing under it: Running is here when something runs, when what runs couldn't be read, or when nothing moves at all */}
+    {(running.length > 0 || !!p.activity.error || !p.activity.ready || (motion === 0 && !p.privateOther)) && <section className="wv-sec" aria-label="Running">
       <h2 className="wv-h">Running</h2>
       {/* r16: activity that couldn't be read is never "nothing moving"; activity kept from an earlier read says when it was read */}
       {p.activity.error ? <p className="lh-line" role="status">{p.activity.lastOk ? `Running and drafts as of ${asOf(p.activity.lastOk)} · Couldn't refresh` : "Couldn't check what's running"} · <button type="button" className="cp-retry" onClick={p.load.retry}>Retry</button></p>
         : !p.activity.ready ? <p className="lh-line" role="status">Checking what's running…</p> : null}
       {motion === 0 && !p.privateOther && p.activity.ready && !p.activity.error && <p className="cp-none">Nothing is moving here right now.</p>}
       {running.length > 0 && <ul className="cp-list wv-runs" aria-label="Running now">{running.map((r) => <li key={r.id} className="cp-run" data-state={r.state}><i aria-hidden="true" /><RunText what={cleanText(r.what)} /><small>{runStateLabel(r.state)}</small></li>)}</ul>}
-      {p.others.length > 0 && <ul className="cp-list wv-others">{p.others.map(({ task, meta }) => <NeedRow key={task.id} t={task} meta={meta} onTask={p.onTask} onDecide={p.onDecide} onNote={p.onNote} />)}</ul>}
-      {p.privateOther > 0 && <p className="cp-none">{p.privateOther === 1 ? "One item in a private area is" : `${p.privateOther} items in private areas are`} not listed here; open the area to see {p.privateOther === 1 ? "it" : "them"}.</p>}
-    </section>
+    </section>}
     {p.drafts.length > 0 && <section className="wv-sec" aria-label="Drafts">
       <h2 className="wv-h">Drafts</h2>
       <ul className="cp-list wv-drafts">{p.drafts.map((d) => <li key={d.id} className="cp-item">
         <button type="button" className="cp-need" onClick={() => p.onNote({ vault, id: d.id })}><span className="cp-title">{cleanText(taskTitle(d.title).rest)}</span><small className="cp-detail">{d.status === "ready" ? "Draft ready to read" : "Being drafted"}</small></button></li>)}</ul>
     </section>}
+    {p.others.length > 0 && <section className="wv-sec" aria-label="With others">
+      <h2 className="wv-h">With others</h2>
+      <ul className="cp-list wv-others">{p.others.map(({ task, meta }) => <NeedRow key={task.id} t={task} meta={meta} onTask={p.onTask} onDecide={p.onDecide} onNote={p.onNote} />)}</ul>
+    </section>}
+    {p.privateOther > 0 && <p className="cp-none wv-private-other">{p.privateOther === 1 ? "One item in a private area is" : `${p.privateOther} items in private areas are`} not listed here; open the area to see {p.privateOther === 1 ? "it" : "them"}.</p>}
     {done.length > 0 && <section className="wv-sec" aria-label="Done lately">
       <h2 className="wv-h">Done lately</h2>
       <ul className="cp-list wv-done">{done.map((r) => <li key={r.id} className="cp-run" data-state={r.state}><i aria-hidden="true" /><RunText what={cleanText(r.what)} /><small>{quietAgo(r.updated ?? r.started, Date.now()) || runStateLabel(r.state)}</small></li>)}</ul>

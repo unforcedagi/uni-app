@@ -708,3 +708,8 @@
 .cp-run-waiting i { background: none; box-shadow: inset 0 0 0 1.5px var(--th-ink); }
 .task-unconfirmed { color: var(--th-ink2); }
 .cp-said > p { color: var(--th-mute); }
+/* r27: Details is a control, not a heading with nothing under it: it shows a + that turns to – when opened (the same mark Later uses) */
+.task-details summary { list-style: none; gap: 8px; }
+.task-details summary::-webkit-details-marker { display: none; }
+.task-details summary::after { content: "+"; font-weight: 400; color: var(--th-mute); }
+.task-details[open] summary::after { content: "–"; }
