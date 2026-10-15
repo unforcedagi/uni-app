@@ -568,9 +568,9 @@ export function NeedsList({ needs: owed, pending = [], fit, onTask, onDecide, on
     const budget = scroller.clientHeight - top - (body.scrollHeight - list.offsetHeight) - 40;
     let used = 0; let n = 0;
     // r17: not even the first row is kept when it doesn't fit whole (a 360px-tall window): it waits behind "+N more" too, never a sliver
-    // r22 (both critics): rows are whole actions now, so fewer may fit: at least two are kept (the panel scrolls), one in the phone's strip
-    // r26: a row that carries its list ("and 3 more") can be tall enough that two rows leave no room for Running: then one is kept
-    const keepMin = keepOne || rows[0]?.querySelector(".cp-items") ? 1 : 2;
+    // r22 (both critics): rows are whole actions now, so fewer may fit. r30: the panel shows the rows that fit whole above its footer, the first
+    // always (the panel scrolls only for that one): a second row that would push the rest of the panel under the footer waits behind "Show N more"
+    const keepMin = 1;
     // r27: the first row's list is too tall for the room above the footer: one item fewer, measured again (never a cut item)
     if (!fits && itemCap > 1 && rows[0]?.querySelector(".cp-items") && rows[0].offsetHeight > budget) { setItemCap(itemCap - 1); setPass(0); return; }
     for (const r of fits ? [] : rows) { if (n >= keepMin && used + r.offsetHeight > budget) break; used += r.offsetHeight; n++; }
@@ -691,8 +691,9 @@ function Body({ stands, ready, note, load, feed, rest = 0, moreTitle = null, onP
       const runs = b.querySelectorAll<HTMLElement>(".cp-run"); const foot = b.querySelector<HTMLElement>(".cp-foot");
       const last = runs[runs.length - 1]; if (!last || !foot || sc.scrollTop > 0) return;
       const [l, f] = [last.getBoundingClientRect(), foot.getBoundingClientRect()];
-      // a row the sticky footer cuts in two (one wholly below it scrolls into view): one fewer, down to none ("+N more running" is in the footer)
-      const cut = sc.scrollHeight > sc.clientHeight + 1 && l.bottom > f.top + 0.5 && l.top < f.top - 0.5;
+      // a row the sticky footer cuts in two, or that is wholly under it (r30: its "Running" heading would stand alone above the footer): one fewer,
+      // down to none ("+N more running" is in the footer)
+      const cut = sc.scrollHeight > sc.clientHeight + 1 && l.bottom > f.top + 0.5;
       if (cut) setRunCap((c) => Math.max(0, Math.min(c, runs.length) - 1));
     };
     const ro = new ResizeObserver(check); ro.observe(b); ro.observe(sc); check();
