@@ -13,7 +13,7 @@ import { isActiveRun, type Run } from "./steerCore";
 import { ownerLabel, type Task } from "./taskCore";
 import { taskTitle } from "./whereCore";
 import { splitLinks } from "./linkText";
-import { actionableTitle, runText, answerChoices, answerLabel, askLead, askPreview, checkLine, CHECK_FAILED, DANGLING, decideLine, decisionQuestion, dueLine, fitsRow, isOverdue, missingLine, OPEN_TASK, OPEN_TO_ANSWER, privateActionLabel, privateRestLabel, askedLine, requestDate, currentStep, firstOfSteps, actionOf, rowAction, withoutBrackets, rowSubParts, standsHeading, titleSays, titleWords, TIDY_LINE, toTidy, unknownDecision, waitsLine, waitsOnMe, withHosts, rowAsk, withoutRawIds, runStateLabel, waitingOnYou, waitingRunParts, notWrittenDown, referencedItems, ROW_ITEMS, ITEM_LINES, itemForms, staleLine, asOfPrefix, clauseForms, type Choice, type NeedsFeed, type PrivateNeed, type RowAction, type StaleSummary, type Support } from "./simpleCore";
+import { actionableTitle, runText, answerChoices, answerLabel, askLead, askPreview, checkLine, CHECK_FAILED, DANGLING, decideLine, decisionQuestion, dueLine, fitsRow, isOverdue, missingLine, OPEN_TASK, OPEN_TO_ANSWER, privateActionLabel, privateRestLabel, askedLine, requestDate, currentStep, actionOf, rowAction, rowSubParts, standsHeading, titleSays, titleWords, TIDY_LINE, toTidy, unknownDecision, waitsLine, waitsOnMe, withHosts, rowAsk, withoutRawIds, runStateLabel, waitingOnYou, waitingRunParts, notWrittenDown, referencedItems, ROW_ITEMS, ITEM_LINES, itemForms, staleLine, asOfPrefix, clauseForms, type Choice, type NeedsFeed, type PrivateNeed, type RowAction, type StaleSummary, type Support } from "./simpleCore";
 import { requestRecheck } from "./useTasks";
 
 const KEYS = { side: "uni.companion.side.v1", sideNarrow: "uni.companion.side.narrow.v1", strip: "uni.companion.strip.v1" } as const;
@@ -541,11 +541,13 @@ export const moreLabel = (n: number): string => `Show ${n} more`;
  * Only whole rows are shown: in the side panel (`fit`) the rows that don't fit above the footer wait behind "+N more ›" rather than being
  * cut or faded at the panel's bottom. Every row is drawn once to be measured (before paint), then the ones that fit stay.
  */
-export function NeedsList({ needs: owed, pending = [], fit, onTask, onDecide, onNote, placeOf, onMore, extra = 0, moreTitle = null, keepOne = false }: Pick<CompanionProps, "onTask" | "onDecide" | "onNote" | "placeOf"> & { needs: readonly Task[]; fit: boolean; /** "+N more" opens elsewhere (the strip's sheet) instead of in place */ onMore?: () => void;
+export function NeedsList({ needs: owed, pending = [], fit, onTask, onDecide, onNote, placeOf, onMore, extra = 0, moreTitle = null, keepOne = false, wholeFirst = false }: Pick<CompanionProps, "onTask" | "onDecide" | "onNote" | "placeOf"> & { needs: readonly Task[]; fit: boolean; /** "+N more" opens elsewhere (the strip's sheet) instead of in place */ onMore?: () => void;
   /** r20: decisions still being read: shown after the rows that are owed, never counted in "+N more" */
   pending?: readonly Task[];
   /** The phone's inline strip always shows its first row (its body was sized to the room left beside the conversation). */
   keepOne?: boolean;
+  /** r28 (Codex P2-5): the compact panel starts with one whole request: the first row's inline items are lowered until the row fits in what scrolls (none, when none fit) */
+  wholeFirst?: boolean;
   /** r17, Uni's panel: items past these rows (private ones included): they and any row that doesn't fit are one "N more ›" (`onMore`, the work view). */
   extra?: number; moreTitle?: string | null }) {
   const needs = pending.length ? [...owed, ...pending] : owed;
@@ -626,6 +628,14 @@ export function NeedsList({ needs: owed, pending = [], fit, onTask, onDecide, on
     check();
     return () => ro.disconnect();
   }, [fit, measuring, all, limit, needs.length, key]);
+  // r28: the compact panel's first request is whole in view at scroll 0: its inline items go one at a time (to none) until it fits
+  useLayoutEffect(() => {
+    if (!wholeFirst) return;
+    const list = listRef.current; const sc = list?.closest(".cp-scroll") as HTMLElement | null; const row = list?.firstElementChild as HTMLElement | null;
+    if (!list || !sc || !row || sc.scrollTop > 0 || !row.querySelector(".cp-items") || itemCap <= 0) return;
+    if (row.getBoundingClientRect().bottom > sc.getBoundingClientRect().bottom + 0.5) setItemCap(itemCap - 1);
+  });
+  useLayoutEffect(() => { if (wholeFirst) setItemCap(ROW_ITEMS); }, [wholeFirst, key]);
   const shown = fit && !measuring && !all ? needs.slice(0, limit) : needs;
   // r20: only what is owed counts in "+N more"; a decision still being read is never a count
   const hidden = Math.max(0, owed.length - Math.min(shown.length, owed.length));
@@ -725,7 +735,7 @@ function Body({ stands, scope, ready, note, load, feed, rest = 0, moreTitle = nu
     {ready && <section aria-label="Needs you" className="cp-sec" aria-busy={load?.refreshing || undefined}>
       <h3 className="cp-h">Needs you</h3>
       {/* r17: Uni's panel is at most three rows and one "Show N more" (private items folded in) to the work view, which keeps the full list */}
-      {(feed.rows.length > 0 || !!feed.pending?.length) && <NeedsList needs={feed.rows} pending={feed.pending} fit={fit} onTask={onTask} onDecide={onDecide} onNote={onNote} placeOf={placeOf} onMore={rest > 0 && onEverything ? onEverything : onMore} extra={onEverything ? rest : 0} moreTitle={moreTitle} keepOne={keepOne} />}
+      {(feed.rows.length > 0 || !!feed.pending?.length) && <NeedsList needs={feed.rows} pending={feed.pending} fit={fit} onTask={onTask} onDecide={onDecide} onNote={onNote} placeOf={placeOf} onMore={rest > 0 && onEverything ? onEverything : onMore} extra={onEverything ? rest : 0} moreTitle={moreTitle} keepOne={keepOne} wholeFirst={compact} />}
       {feed.rows.length === 0 && rest > 0 && onEverything && <button type="button" className="cp-more cp-more-rows cp-more-all" title={moreTitle ?? undefined} onClick={onEverything}>{moreLabel(rest)}</button>}
       {feed.privates.length > 0 && <ul className="cp-list cp-privates">{feed.privates.map((p) => <PrivateRow key={p.key} p={p} onPrivate={onPrivate} />)}</ul>}
       <WaitingRuns runs={waiting} />
@@ -759,10 +769,8 @@ export function waitingLine(feed: NeedsFeed): { full: string; short: string } | 
   const short = `Needs you · ${feed.total}`;
   const first = feed.rows.map((t) => rowLead(t)).find((r) => r.mode !== "checking" && r.mode !== "unavailable");
   const run = !first && feed.waiting?.length ? waitingRunParts(feed.waiting[0].what).step : null;
-  // r21: one line can't hold every action whole: an action of two steps says so ("2 steps: Look at …, then …"), never step 1 as the whole
-  // job; brackets are left to the row; a long host reads as its first part, as in a row
-  const a = first?.action;
-  const text = run ?? (a ? withHosts(a.steps.length > 1 ? firstOfSteps(a.steps) : withoutBrackets(a.text)).replace(/\b([\w-]+)(?:\.[\w-]+){2,}\b/g, (h) => rowLinkLabel(h)) : first?.text);
+  // r28: the line is the first request whole, or just the count: never step 1 of it, never a part (the r21 "step 1 of 2" form is gone)
+  const text = run ?? first?.text;
   return { short, full: `${short}${text ? `: ${first?.yourCall ? `Your call: ${text}` : text}` : ""}` };
 }
 
