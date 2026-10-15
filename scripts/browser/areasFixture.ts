@@ -418,8 +418,8 @@ Two proposals wait on a scope decision.
     if (d.tasks) for (const n of notes) { if (n.id === 'a-techne') n.metadata = { ...n.metadata, room: 'techne' }; if (n.id === 'p-cohere') n.metadata = { ...n.metadata, room: 'cohere' }; }
     // T-86 tasks: the vault's task and decision notes (node by path), with compare-and-set transitions.
     const T0 = '2026-10-10T08:00:00.000Z';
-    // r27: a record vouches for itself when written within 3 days: the fixture's tasks were written 2.9 days ago (still vouching, and older than any summary)
-    const mk = (id: string, title: string, node: string, extra: Record<string, unknown> = {}, tag = 'task') => ({ id, path: `Tasks/${title}`, extension: 'md', tags: [tag], createdAt: T0, updatedAt: new Date((d.now - 2.9 * 86400) * 1000).toISOString(), lastUpdatedBy: 'cdf67944-c5f2-4e42-a0d8-02ce7a95bbdb', lastUpdatedVia: 'api', metadata: { node, state: 'open', owner: 'aaron', ...extra } });
+    // r27: a record was written 2.9 days ago (within 3 days, and older than any summary). r28: an ask is confirmed by its own asked_at; a task that has no `asked_at` key reads as a current ask (see `asked`), and the confirmation's lookup (limit 200) sees only messages that arrived in the test (`__arrive`), never the seeded history, so the older specs keep their meaning. A spec that wants an unconfirmed ask sets `asked_at: null`.
+    const mk = (id: string, title: string, node: string, extra: Record<string, unknown> = {}, tag = 'task') => ({ id, path: `Tasks/${title}`, extension: 'md', tags: [tag], createdAt: T0, updatedAt: new Date((d.now - 2.9 * 86400) * 1000).toISOString(), lastUpdatedBy: 'cdf67944-c5f2-4e42-a0d8-02ce7a95bbdb', lastUpdatedVia: 'api', fixtureTask: true, metadata: { node, state: 'open', owner: 'aaron', ...extra } });
     const C26 = 'Projects/COhere/COhere 2026';
     const taskNotes: any[] = d.tasks ? [
       mk('k1', 'T-03 COhere festival readiness', C26, { state: 'waiting', waiting_on: 'aaron', due: d.pastDue ? '2026-10-07' : '2026-10-12', next: d.longNext ? 'Try the new check-in flow at https://example.invalid/pr/12 and answer the three questions. First question: does the QR code scan on the door? Second question: is the badge printout readable from a metre away? And the third question: who carries the spare scanner on the day of the festival, and where do they stand?' : 'Check-in PR by Oct 12, see https://example.invalid/pr/12 for the diff', priority: 'now' }),
@@ -521,6 +521,8 @@ Two proposals wait on a scope decision.
     const pathOf = (ref: string) => notes.find((n) => n.id === ref || n.path === ref)?.path ?? ref;
     w.__elsewhere = (id: string, state: string) => { const t = taskNotes.find((x) => x.id === id); t.metadata.state = state; t.updatedAt = new Date().toISOString(); t.lastUpdatedVia = 'mcp'; };
     for (const n of notes) if (d.nodeStatuses[n.id]) n.metadata = { ...n.metadata, status: d.nodeStatuses[n.id] };
+    /** r28: the vault's answer for a task note: a task with no `asked_at` key at all reads as the older specs meant it: a fixture task asked 2.9 days before the clock (a current ask, older than any summary), a task a spec wrote asked an hour before the page's clock (a current ask); an explicit `asked_at` (null included) is kept */
+    const asked = (t: any) => { const c = JSON.parse(JSON.stringify(t)); if (c.metadata && !('asked_at' in c.metadata)) c.metadata.asked_at = c.fixtureTask ? new Date((d.now - 2.9 * 86400) * 1000).toISOString() : new Date(Date.now() - 3600_000).toISOString(); return c; };
     const rowOf = (n: any) => ({ id: n.id, path: n.path, extension: n.extension, updatedAt: n.updatedAt });
     w.__TAURI_INTERNALS__ = {
       metadata: { currentWindow: { label: 'main' }, currentWebview: { label: 'main' } }, transformCallback: (cb: any) => { w.__cbs.push(cb); return w.__cbs.length - 1; },
@@ -535,7 +537,7 @@ Two proposals wait on a scope decision.
           case 'get_identity': if (d.identityDelay) await new Promise((r) => setTimeout(r, d.identityDelay)); return U;
           case 'get_npub': return 'test';
           case 'get_rooms': if (d.roomsDelay) await new Promise((r) => setTimeout(r, d.roomsDelay)); w.__roomsResolved = true; return rooms;
-          case 'get_messages': if (args.limit === 200 && w.__lookupDelay) await new Promise((r) => setTimeout(r, w.__lookupDelay)); if (args.limit === 200 && w.__lookupFails) throw 'relay unreachable'; if (d.messagesDelay) await new Promise((r) => setTimeout(r, d.messagesDelay)); return args.root ? threads[args.root] ?? [] : (msgs[args.channel] ?? []).slice(-(args.limit ?? 300));
+          case 'get_messages': if (args.limit === 200 && w.__lookupDelay) await new Promise((r) => setTimeout(r, w.__lookupDelay)); if (args.limit === 200 && w.__lookupFails) throw 'relay unreachable'; if (d.messagesDelay) await new Promise((r) => setTimeout(r, d.messagesDelay)); return args.root ? threads[args.root] ?? [] : (msgs[args.channel] ?? []).filter((m: any) => !(args.limit === 200 && !String(m.ref).startsWith('live'))).slice(-(args.limit ?? 300));
           case 'get_members': return [{ pubkey: U, name: 'Aaron', named: true }, ...(d.uniMember ? [{ pubkey: 'c'.repeat(64), name: 'Uni', named: true }] : [])];
           case 'vault_paths': return notes.map(rowOf);
           case 'vault_list': return d.lifeVault ? ['uni', d.lifeVault] : ['uni'];
@@ -556,7 +558,7 @@ Two proposals wait on a scope decision.
             // one page, as the vault answers: `limit` from `offset`
             // r14: `__ignoreOffset` is a vault that ignores `offset` (every page the first): the list can't be read whole
             const from = w.__ignoreOffset ? 0 : args.offset ?? 0;
-            return hits.slice(from, from + (args.limit ?? 200)).map((t) => JSON.parse(JSON.stringify(t)));
+            return hits.slice(from, from + (args.limit ?? 200)).map(asked);
           }
           case 'vault_subtree_nodes': {
             if (d.nearOff) throw 'MCP error -32602: unknown parameter: near';
@@ -570,7 +572,7 @@ Two proposals wait on a scope decision.
             if (!d.tasks) return [];
             const nodes = notes.filter((n) => (n.tags ?? []).some((t: string) => t === 'area' || t === 'project')).map((n) => ({ path: n.path, parent: pathOf(n.metadata?.parent ?? 'Uni') }));
             const under = new Set([pathOf(args.root)]); for (let grew = true; grew;) { grew = false; for (const n of nodes) if (!under.has(n.path) && under.has(n.parent)) { under.add(n.path); grew = true; } }
-            return taskNotes.filter((t) => t.tags.includes(args.tag) && under.has(pathOf(t.metadata.node)) && args.states.includes(t.metadata.state)).map((t) => JSON.parse(JSON.stringify(t)));
+            return taskNotes.filter((t) => t.tags.includes(args.tag) && under.has(pathOf(t.metadata.node)) && args.states.includes(t.metadata.state)).map(asked);
           }
           case 'vault_transition': {
             const t = taskNotes.find((x) => x.id === args.id);
