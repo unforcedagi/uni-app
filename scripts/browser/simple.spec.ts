@@ -118,9 +118,11 @@ test.describe('simple', () => {
     const cp = page.locator('.cp-body');
     await expect(cp.locator('.cp-lede')).toContainText('The SOW is drafted and waits on Casey.');
     await expect(cp.locator('.cp-lede')).not.toContainText('The map comes next');
-    // r27: a written summary carries its own date, "As of Oct 13: …"; the heading adds no second one
+    // r29: a written summary is a dated account, "Last written Oct 13 by #room:", below Needs you; the heading adds no second date
     await expect(companion(page).getByText(/^Where this stands$/).first()).toBeVisible();
-    await expect(cp.locator('.cp-stands').first()).toHaveText(/^As of [A-Z][a-z]{2} \d+: The SOW is drafted and waits on Casey\./);
+    await expect(cp.locator('.cp-asof')).toHaveText(/^Last written [A-Z][a-z]{2} \d+ by #\S+:$/);
+    await expect(cp.locator('.cp-stands').first()).toHaveText(/^The SOW is drafted and waits on Casey\./);
+    expect((await cp.locator('.cp-stands-note').boundingBox())!.y).toBeGreaterThan((await cp.getByRole('region', { name: 'Needs you' }).boundingBox())!.y);
     const needs = cp.getByRole('region', { name: 'Needs you' });
     await expect(needs.locator('.cp-need')).toHaveCount(2);
     // the decision on this very node leads and carries its options as buttons
@@ -350,7 +352,7 @@ test.describe('simple', () => {
     await shot(page, 'midmessage');
   });
 
-  test('the footer link keeps the long form at any width; detail lines wrap; the sentence clamps on screen and More shows it whole', async ({ page }) => {
+  test('the footer link keeps the long form at any width; detail lines wrap; a short summary stays whole when narrow', async ({ page }) => {
     test.skip(!wide(page), 'side panel');
     await boot(page);
     await scope(page).locator('.th-go[aria-label^="Uni,"]').click();
@@ -362,17 +364,11 @@ test.describe('simple', () => {
     await page.getByRole('button', { name: 'Show where this stands' }).click();
     await page.evaluate(() => { document.querySelector('.cp.side')!.setAttribute('style', 'width:130px'); });
     await expect(page.locator('.cp-all-t')).toHaveText(/^All of .+'s work$/);
-    // narrow, the sentence runs past three lines: r23, shortened at a clause's end, never "…", with a real button that shows it whole
+    // narrow, a short summary is still shown whole (r29: no clause cuts and no "More"; only a long one is behind "What it said")
     const lede = page.locator('.cp-stands').first();
-    await expect(lede).toHaveAttribute('data-cut', 'true');
-    await expect(lede).toHaveText(/^As of [A-Z][a-z]{2} \d+: Atlas and COhere are moving\.$/);
-    const more = page.locator('.cp-stands-more');
-    await expect(more).toBeVisible();
-    await more.focus(); await page.keyboard.press('Enter');
-    await expect(more).toHaveAttribute('aria-expanded', 'true');
-    await expect(lede).toHaveText(/^As of [A-Z][a-z]{2} \d+: Atlas and COhere are moving; the usage guard is quiet\.$/);
-    await more.click();
-    await expect(lede).toHaveAttribute('data-cut', 'true');
+    await expect(lede).toHaveText('Atlas and COhere are moving; the usage guard is quiet.');
+    await expect(page.locator('.cp-stands-more')).toHaveCount(0);
+    await expect(page.locator('.cp-stands-note .cp-said')).toHaveCount(0);
     await page.evaluate(() => { document.querySelector('.cp.side')!.removeAttribute('style'); });
     for (const d of await page.locator('.cp-detail').all()) expect(await d.evaluate((e) => getComputedStyle(e).whiteSpace)).not.toBe('nowrap');
   });
@@ -2809,16 +2805,18 @@ test.describe('r18', () => {
     await expect(sheetOf(page)).toBeVisible();
   });
 
-  test('r18, r27: the summary carries its date: "As of Oct 13: …" in the companion and the work view, from the same stamp; the heading adds no second date', async ({ page }) => {
+  test('r18, r29: the summary carries its date and room: "Last written Oct 13 by #room:" in the companion and the work view, below Needs you; the heading adds no second date', async ({ page }) => {
     await boot(page);
     await openRoom(page, 'ATLAS');
     await openCompanion(page);
     await expect(companion(page).getByText('Where this stands', { exact: true }).first()).toBeVisible();
-    if (wide(page)) await expect(companion(page).locator('.cp-stands').first()).toHaveText(/^As of [A-Z][a-z]{2} \d+: The SOW is drafted and waits on Casey\./);
+    if (wide(page)) { await expect(companion(page).locator('.cp-asof')).toHaveText(/^Last written [A-Z][a-z]{2} \d+ by #\S+:$/); await expect(companion(page).locator('.cp-stands').first()).toHaveText(/^The SOW is drafted and waits on Casey\./); }
     await page.getByRole('button', { name: /^All of .*'s work/ }).first().click();
     const top = page.locator('.sr-work .wv-top');
     await expect(top.locator('.wv-stands-h')).toHaveText('Where this stands');
-    await expect(top.locator('.wv-brief')).toHaveText(/^As of [A-Z][a-z]{2} \d+: The SOW is drafted and waits on Casey\./);
+    await expect(top.locator('.cp-asof')).toHaveText(/^Last written [A-Z][a-z]{2} \d+ by #\S+:$/);
+    await expect(top.locator('.wv-brief .cp-stands')).toHaveText(/^The SOW is drafted and waits on Casey\./);
+    expect((await top.boundingBox())!.y).toBeGreaterThan((await page.locator('.sr-work').getByRole('region', { name: 'Needs you' }).boundingBox())!.y);
     await expect(top).toContainText('The SOW is drafted and waits on Casey.');
     await expect(top).not.toContainText(/Brief updated|updated \d+h ago/);
   });
@@ -4189,31 +4187,22 @@ test.describe('r23', () => {
     await expect(sheet.locator('.task-do.primary')).toHaveText(/^Say it in #/);
   });
 
-  test('r25 (Codex P1 1), r27: a summary claim that no open request matches makes the whole summary older than the latest work: "This summary is older than the latest work · from Oct 13", what it said collapsed', async ({ page }) => {
+  test('r29 (Codex P1-3): a summary that says something waits on Aaron is not judged by the app: dated, below Needs you, no stale notice, whatever is open', async ({ page }) => {
     await boot(page);
-    await page.evaluate(() => (window as any).__setStands('p-lvb', "Prod waits on Aaron's go for #38 and #58.", '2026-10-13T20:00:00.000Z')); // r28: written after the asks below were (so only the claim can dim it)
+    await page.evaluate(() => (window as any).__setStands('p-lvb', "Prod waits on Aaron's go for #38 and #58.", '2026-10-13T20:00:00.000Z'));
     await refresh(page, '2026-10-14T09:00:00.000Z');
     await openRoom(page, 'Learn Vibe Build');
     await openCompanion(page);
-    await expect(page.locator('.cp-stale')).toHaveText(/^This summary is older than the latest work · from Oct \d+$/);
-    await expect(page.locator('.cp-stands:not(.cp-stale)')).toHaveCount(0);
-    const said = page.locator('.cp-said');
-    await expect(said.locator('summary')).toHaveText('What it said');
-    await expect(said).not.toHaveAttribute('open', '');
-    await said.locator('summary').click();
-    await expect(said.locator('p')).toHaveText(/^As of Oct \d+: Prod waits on Aaron's go for #38 and #58\.$/);
-    // an open request that doesn't name what the summary says waits: still older than the work
-    await add(page, { id: 'other', title: 'T-321 Placeholder other thing', node: 'Projects/Learn Vibe Build', updatedAt: '2026-10-10T08:00:00.000Z', meta: { priority: 'now', next: 'Edit the placeholder note for Casey', asked: '2026-10-13T18:00:00.000Z', asked_at: '2026-10-13T18:00:00.000Z' } });
+    await expect(page.locator('.cp-stale, [data-stale], [data-stale-why]')).toHaveCount(0);
+    await expect(page.locator('.cp-body')).not.toContainText('older than the latest work');
+    await expect(page.locator('.cp-asof')).toHaveText(/^Last written Oct 13 by #\S+:$/);
+    await expect(page.locator('.cp-stands').first()).toHaveText("Prod waits on Aaron's go for #38 and #58.");
+    // an open request that doesn't name what the summary says waits: the same line, unchanged
+    await add(page, { id: 'other', title: 'T-321 Placeholder other thing', node: 'Projects/Learn Vibe Build', updatedAt: '2026-10-10T08:00:00.000Z', meta: { priority: 'now', next: 'Edit the placeholder note for Casey', asked: '2026-10-13T18:00:00.000Z' } });
     await refresh(page, '2026-10-14T09:15:00.000Z');
     await expect(page.locator('.cp-body').getByText('Edit the placeholder note for Casey')).toBeVisible();
-    await expect(page.locator('.cp-stale')).toHaveText(/^This summary is older than the latest work/);
-    // an open request that names #38 and #58 (every id the claim names must be open), and no task newer than the summary: shown as written, dated
-    await add(page, { id: 'g38', title: 'T-320 Placeholder prod go', node: 'Projects/Learn Vibe Build', updatedAt: '2026-10-10T08:00:00.000Z', meta: { priority: 'now', next: 'Say go on the placeholder prod deploy of #38 + #58', asked: '2026-10-13T18:00:00.000Z', asked_at: '2026-10-13T18:00:00.000Z' } });
-    await refresh(page, '2026-10-14T09:30:00.000Z');
-    await expect(page.locator('.cp-body').getByText('Say go on the placeholder prod deploy')).toBeVisible();
-    await expect(page.locator('.cp-stale')).toHaveCount(0);
-    await expect(page.locator('.cp-stands')).toContainText("waits on Aaron's go for #38 and #58");
-    await expect(page.locator('.cp-stands').first()).toHaveText(/^As of Oct \d+: Prod waits/);
+    await expect(page.locator('.cp-asof')).toHaveText(/^Last written Oct 13 by #\S+:$/);
+    await expect(page.locator('.cp-stale, [data-stale], [data-stale-why]')).toHaveCount(0);
   });
 
   test('one freshness line at a time: a saved copy being read again says "N as of 1:44 PM · refreshing…" once, not in the tree too', async ({ page }) => {
@@ -4736,41 +4725,55 @@ test.describe('r27', () => {
     await expect(sheet.getByRole('button', { name: 'I did this' })).toBeVisible();
   });
 
-  test('r27 P1-2: a fresh summary is shown as written with its date; one older than a task change is dimmed behind "This summary is older than the latest work"', async ({ page }) => {
+  test('r29 P1-3: a summary is "Last written Oct 14 by #room:" and the text as written, below Needs you, whether or not anything changed after it; a long one is behind "What it said"', async ({ page }) => {
     await boot(page);
     const SUMMARY = 'COhere 2026 is live on grove.example.org (new look, members, harvests; notifications off); tonight a time-of-day test failure blocks deploys while a fix is built, and register+sign-in (T-138) goes to staging for review on 10-15.';
     await page.evaluate((s) => (window as any).__setStands('p-lvb', s, '2026-10-14T12:00:00.000Z'), SUMMARY);
     await refresh(page, '2026-10-14T20:00:00.000Z');
     await openRoom(page, 'Learn Vibe Build');
     await openCompanion(page);
-    // fresh: nothing on the node changed after it was written
-    await expect(page.locator('.cp-stale')).toHaveCount(0);
-    await expect(page.locator('.cp-stands').first()).toHaveText(/^As of Oct 14: COhere 2026 is live on grove\.example\.org/);
-    expect(await page.locator('.cp-stands').first().evaluate((el) => (el as HTMLElement).innerText)).not.toMatch(/…|\.\.\./);
-    // a task under the node changed after the summary: the whole summary is older than the latest work
-    await add(page, { id: 'nw1', title: 'T-322 Placeholder newer change', node: 'Projects/Learn Vibe Build', updatedAt: '2026-10-14T18:00:00.000Z', meta: { priority: 'now', next: 'Edit the placeholder note for Casey', asked: '2026-10-13T18:00:00.000Z' } });
+    const note = page.locator('.cp-body .cp-stands-note');
+    await expect(note.locator('.cp-asof')).toHaveText(/^Last written Oct 14 by #\S+:$/);
+    await expect(note.locator('.cp-stands')).toHaveText(/^COhere 2026 is live on grove\.example\.org/);
+    expect(await note.locator('.cp-stands').innerText()).not.toMatch(/…|\.\.\./);
+    await expect(note.locator('.cp-said')).toHaveCount(0); // short: whole
+    // below Needs you, never leading
+    expect((await note.boundingBox())!.y).toBeGreaterThan((await page.locator('.cp-body').getByRole('region', { name: 'Needs you' }).boundingBox())!.y);
+    // a task under the node changed after the summary: the same line, no notice
+    await add(page, { id: 'nw1', title: 'T-322 Placeholder newer change', node: 'Projects/Learn Vibe Build', updatedAt: '2026-10-14T18:00:00.000Z', meta: { priority: 'now', next: 'Edit the placeholder note for Casey', asked: '2026-10-14T18:00:00.000Z' } });
     await refresh(page, '2026-10-14T20:05:00.000Z');
-    await expect(page.locator('.cp-stale')).toHaveText('This summary is older than the latest work · from Oct 14');
-    await expect(page.locator('.cp-stands:not(.cp-stale)')).toHaveCount(0);
-    const said = page.locator('.cp-said');
-    await expect(said).not.toHaveAttribute('open', '');
-    await said.locator('summary').click();
-    await expect(said.locator('p')).toHaveText(/^As of Oct 14: COhere 2026 is live on grove\.example\.org .*goes to staging for review on 10-15\.$/);
-    // nothing is promoted: no "Part of this summary", no current clause
-    expect(await page.locator('.cp-body').innerText()).not.toMatch(/Part of this summary/);
-    await expect(page.locator('[data-part="current"]')).toHaveCount(0);
+    await expect(page.locator('.cp-stale, [data-stale], [data-stale-why]')).toHaveCount(0);
+    await expect(note.locator('.cp-asof')).toHaveText(/^Last written Oct 14 by #\S+:$/);
   });
 
-  test('r27 P1-2: a wait claim nothing open matches also dims the whole summary, and the work view says the same', async ({ page }) => {
+  test('r29 P1-3: a long summary is behind "What it said", with its date and room above it', async ({ page }) => {
+    await boot(page);
+    const LONG = 'COhere 2026 is live on grove.example.org (new look, members, harvests; notifications off); tonight a time-of-day test failure blocks deploys while a fix is built, and register+sign-in (T-138) goes to staging for review on 10-15; the festival crew list needs a second pass by Friday, and the harvest sign-up copy waits for the new photographs from the farm.';
+    await page.evaluate((s) => (window as any).__setStands('p-lvb', s, '2026-10-14T12:00:00.000Z'), LONG);
+    await refresh(page, '2026-10-14T20:10:00.000Z');
+    await openRoom(page, 'Learn Vibe Build');
+    await openCompanion(page);
+    const note = page.locator('.cp-body .cp-stands-note');
+    const said = note.locator('.cp-said');
+    await expect(note.locator('.cp-asof')).toHaveText(/^Last written Oct 14 by #\S+:$/);
+    await expect(said.locator('summary')).toHaveText('What it said');
+    await expect(said).not.toHaveAttribute('open', '');
+    await said.locator('summary').click();
+    await expect(said.locator('p')).toHaveText(/^COhere 2026 is live on grove\.example\.org .*from the farm\.$/);
+  });
+
+  test('r29 P1-3: the work view says the same, below Needs you, and a wait claim is not judged', async ({ page }) => {
     await boot(page);
     await page.evaluate(() => (window as any).__setStands('p-lvb', "Cohort two starts Oct 15; prod deploy of #38 waits on Aaron's go.", '2026-10-14T12:00:00.000Z'));
     await refresh(page, '2026-10-14T20:00:00.000Z');
     await openRoom(page, 'Learn Vibe Build');
     await openCompanion(page);
-    await expect(page.locator('.cp-stale')).toHaveText('This summary is older than the latest work · from Oct 14');
+    await expect(page.locator('.cp-stale, [data-stale], [data-stale-why]')).toHaveCount(0);
+    await expect(page.locator('.cp-asof')).toHaveText(/^Last written Oct 14 by #\S+:$/);
     await openWork(page);
-    await expect(page.locator('.sr-work .cp-stale')).toHaveText('This summary is older than the latest work · from Oct 14');
-    await page.locator('.sr-work .cp-said summary').click();
-    await expect(page.locator('.sr-work .cp-said p')).toHaveText("As of Oct 14: Cohort two starts Oct 15; prod deploy of #38 waits on Aaron's go.");
+    await expect(page.locator('.sr-work .cp-stale, .sr-work [data-stale-why]')).toHaveCount(0);
+    await expect(page.locator('.sr-work .cp-asof')).toHaveText(/^Last written Oct 14 by #\S+:$/);
+    await expect(page.locator('.sr-work .cp-stands')).toHaveText("Cohort two starts Oct 15; prod deploy of #38 waits on Aaron's go.");
+    expect((await page.locator('.sr-work .wv-top').boundingBox())!.y).toBeGreaterThan((await page.locator('.sr-work').getByRole('region', { name: 'Needs you' }).boundingBox())!.y);
   });
 });

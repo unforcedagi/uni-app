@@ -69,7 +69,7 @@ test.describe('r28', () => {
     await expect(page.locator('.th-roomnav .th-go[aria-label^="Techne,"]')).toHaveAttribute('aria-label', new RegExp(`, ${rowCount} needs? you$`));
     // one quiet line, collapsed; it opens to a plain list
     const line = needs.locator('.cp-recheck-line');
-    await expect(line).toHaveText(/^Uni is rechecking \d+ older asks?\+$/);
+    await expect(line).toHaveText(/^\d+ older asks? needs? confirming\+$/);
     await expect(needs.locator('.cp-recheck-list')).toHaveCount(0);
     const n = Number((await line.innerText()).match(/\d+/)![0]);
     expect(n).toBeGreaterThanOrEqual(4);
@@ -143,7 +143,7 @@ test.describe('r28', () => {
     await openWork(page);
     const needs = section(page, 'Needs you');
     await expect(needs.locator('.cp-checking')).toHaveText(/^Checking 1 ask…$/);
-    await expect(needs.locator('.cp-recheck-line')).toHaveText(/^Uni is rechecking 1 older ask\+$/, { timeout: 9000 });
+    await expect(needs.locator('.cp-recheck-line')).toHaveText(/^1 older ask needs confirming\+$/, { timeout: 9000 });
     await expect(needs.locator('.cp-checking')).toHaveCount(0);
     await expect(needs.locator('.wv-n')).toHaveText('0');
     await needs.locator('.cp-recheck-line').click();
@@ -227,51 +227,25 @@ test.describe('r28', () => {
     await expect(section(page, 'Needs you').locator('li.cp-item').filter({ hasText: 'paste the same key' })).toContainText('tell her once it works for the whole crew');
   });
 
-  test('line 4: a summary dims only for a task directly on its node: an ask written after it, a task closed on or after its day; Uni\'s root summary is not dimmed by a change anywhere below', async ({ page }) => {
+  test('r29 P1-3: nothing that changes after a summary was written (an ask on its node, a closure, a change on Uni) dims it or adds a notice: the date is the signal', async ({ page }) => {
     test.skip(!wide(page), 'side panel');
     await boot(page);
     await page.evaluate(() => (window as any).__setStands('p-lvb', 'Cohort two starts Oct 15; grading briefs are queued.', '2026-10-14T06:00:00.000Z'));
-    await refresh(page);
-    await openRoom(page, 'Learn Vibe Build');
-    await openCompanion(page);
-    // case 0: nothing on the node after the summary: as written
-    await expect(page.locator('.cp-stale')).toHaveCount(0);
-    await expect(page.locator('.cp-stands').first()).toHaveText(/^As of Oct 14: Cohort two starts Oct 15/);
-    // a change on a node elsewhere (a sibling) does not touch it
-    await add(page, { id: 'sm1', title: 'T-661 Placeholder elsewhere', node: 'Projects/ATLAS', asked_at: '2026-10-14T08:00:00.000Z', meta: { next: 'Say go on elsewhere' } });
-    await refresh(page, '2026-10-14T09:05:00.000Z');
-    await expect(page.locator('.cp-stale')).toHaveCount(0);
-    // case 1: an ask written on the node after the summary
+    await add(page, { id: 'cl2', title: 'T-672 Placeholder closed that day', node: 'Projects/Learn Vibe Build', asked_at: null, meta: { state: 'archived', closed: '2026-10-14' } });
     await add(page, { id: 'sm2', title: 'T-662 Placeholder on the node', node: 'Projects/Learn Vibe Build', asked_at: '2026-10-14T08:00:00.000Z', meta: { next: 'Say go on the node' } });
     await refresh(page, '2026-10-14T09:10:00.000Z');
-    await expect(page.locator('.cp-stale')).toHaveText('This summary is older than the latest work · from Oct 14');
-  });
-
-  test('line 4: a task closed on the node on or after the summary\'s day dims it, one closed the day before does not', async ({ page }) => {
-    test.skip(!wide(page), 'side panel');
-    await boot(page);
-    await page.evaluate(() => (window as any).__setStands('p-lvb', 'Cohort two starts Oct 15; grading briefs are queued.', '2026-10-14T06:00:00.000Z'));
-    await add(page, { id: 'cl1', title: 'T-671 Placeholder closed early', node: 'Projects/Learn Vibe Build', asked_at: null, meta: { state: 'done', closed: '2026-10-13' } });
-    await refresh(page);
     await openRoom(page, 'Learn Vibe Build');
     await openCompanion(page);
-    await expect(page.locator('.cp-stale')).toHaveCount(0);
-    await add(page, { id: 'cl2', title: 'T-672 Placeholder closed that day', node: 'Projects/Learn Vibe Build', asked_at: null, meta: { state: 'archived', closed: '2026-10-14' } });
-    await refresh(page, '2026-10-14T09:06:00.000Z'); // (the closed tasks are read at most every five minutes)
-    await expect(page.locator('.cp-stale')).toHaveText('This summary is older than the latest work · from Oct 14');
-  });
-
-  test('line 4: Uni\'s root summary is not dimmed by a change in an area below it, but is by an ask written on Uni itself', async ({ page }) => {
-    test.skip(!wide(page), 'side panel');
-    await boot(page);
-    await add(page, { id: 'u1', title: 'T-681 Placeholder in an area', node: 'Areas/Techne', asked_at: '2026-10-14T08:00:00.000Z', meta: { next: 'Say go on in an area' } });
-    await refresh(page);
-    await openRoom(page, 'Uni').catch(async () => { await page.locator('.th-go[aria-label^="Uni,"]').first().click(); });
-    await expect(page.locator('.cp.side .cp-stands').first()).toBeVisible();
-    await expect(page.locator('.cp-stale')).toHaveCount(0);
+    await expect(page.locator('.cp-stale, [data-stale], [data-stale-why]')).toHaveCount(0);
+    await expect(page.locator('.cp-body')).not.toContainText('older than the latest work');
+    await expect(page.locator('.cp-asof')).toHaveText(/^Last written Oct 14 by #\S+:$/);
+    await expect(page.locator('.cp-stands').first()).toHaveText('Cohort two starts Oct 15; grading briefs are queued.');
+    // Uni's own summary, with an ask written on Uni after it
     await add(page, { id: 'u2', title: 'T-682 Placeholder on Uni', node: 'Uni', asked_at: '2026-10-14T08:30:00.000Z', meta: { next: 'Say go on uni itself' } });
-    await refresh(page, '2026-10-14T09:05:00.000Z');
-    await expect(page.locator('.cp-stale')).toHaveText(/^This summary is older than the latest work · from Oct \d+$/);
+    await refresh(page, '2026-10-14T09:15:00.000Z');
+    await page.locator('.th-go[aria-label^="Uni,"]').first().click();
+    await expect(page.locator('.cp.side .cp-asof')).toHaveText(/^Last written (Oct \d+ )?by #Uni:$/);
+    await expect(page.locator('.cp-stale, [data-stale], [data-stale-why]')).toHaveCount(0);
   });
 
   test('line 2: the rechecks are told to the rooms once per launch, as "recheck: T-NN …", in the app\'s log', async ({ page }) => {
@@ -291,7 +265,7 @@ test.describe('r28', () => {
 
 test.describe('r28 compact', () => {
   for (const size of [{ width: 740, height: 360 }, { width: 800, height: 600 }, { width: 920, height: 360 }]) {
-    test(`Codex P2-5 at ${size.width}×${size.height}: the strip opens one panel; it starts with a whole request; the summary is its date line; nothing is under the footer; a task opened from it returns to it at the same scroll`, async ({ page }) => {
+    test(`Codex P2-5 at ${size.width}×${size.height}: the strip opens one panel; it starts with a whole request; the summary is a dated account below Needs you; nothing is under the footer; a task opened from it returns to it at the same scroll`, async ({ page }) => {
       test.skip(page.viewportSize()?.width !== 1440 && page.viewportSize()?.width !== 1280, 'one project is enough for the fixed sizes');
       await page.setViewportSize(size);
       await boot(page);
@@ -313,10 +287,11 @@ test.describe('r28 compact', () => {
       // the footer is outside what scrolls: the scrolling region ends where the footer begins
       const geo = await page.evaluate(() => { const s = document.querySelector('.cp-sheet .cp-scroll')!.getBoundingClientRect(); const f = document.querySelector('.cp-sheet > .cp-foot')!.getBoundingClientRect(); return { sBottom: s.bottom, fTop: f.top, within: s.bottom <= f.top + 0.5 }; });
       expect(geo.within, JSON.stringify(geo)).toBe(true);
-      // the summary is folded to its date line
-      const fold = page.locator('.cp-sheet .cp-stands-fold, .cp-sheet .cp-stale');
-      await expect(fold.first()).toBeVisible();
-      if (await page.locator('.cp-sheet .cp-stands-fold').count()) expect(await page.locator('.cp-sheet .cp-stands-fold').evaluate((d) => (d as HTMLDetailsElement).open)).toBe(false);
+      // the summary is a dated account below Needs you, never leading
+      await expect(page.locator('.cp-sheet .cp-stale, .cp-sheet [data-stale-why]')).toHaveCount(0);
+      const note = page.locator('.cp-sheet .cp-stands-note');
+      await expect(note.locator('.cp-asof')).toHaveText(/^Last written (Oct \d+ )?by #\S+:$/);
+      expect(await page.evaluate(() => { const n = document.querySelector('.cp-sheet .cp-stands-note')!; const w = document.querySelector('.cp-sheet section[aria-label="Needs you"]')!; return !!(w.compareDocumentPosition(n) & Node.DOCUMENT_POSITION_FOLLOWING); }), 'after Needs you').toBe(true);
       // the first request is whole and fully in view at scroll 0
       const first = scroller.locator('section[aria-label="Needs you"] li.cp-item').first();
       await expect(first).toBeVisible();
