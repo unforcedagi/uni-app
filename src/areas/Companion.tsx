@@ -582,7 +582,8 @@ export function NeedsList({ needs: owed, pending = [], fit, onTask, onDecide, on
     let used = 0; let n = 0;
     // r17: not even the first row is kept when it doesn't fit whole (a 360px-tall window): it waits behind "+N more" too, never a sliver
     // r22 (both critics): rows are whole actions now, so fewer may fit: at least two are kept (the panel scrolls), one in the phone's strip
-    const keepMin = keepOne ? 1 : 2;
+    // r26: a row that carries its list ("and 3 more") can be tall enough that two rows leave no room for Running: then one is kept
+    const keepMin = keepOne || rows[0]?.querySelector(".cp-items") ? 1 : 2;
     for (const r of fits ? [] : rows) { if (n >= keepMin && used + r.offsetHeight > budget) break; used += r.offsetHeight; n++; }
     setLimit(fits || n >= rows.length ? Infinity : n);
     if (settled.current !== key) remeasured.current = 0;
