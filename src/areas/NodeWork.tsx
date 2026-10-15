@@ -37,15 +37,17 @@ const linksIn = (text: string): string[] => [...text.matchAll(URLS)].map((m) => 
 /** A step that asks the user to look at or open something (r22): its link is the step's own action. */
 const LOOK = /^(?:look|open|view|visit|see|check|try|watch|read|test)\b/i;
 
-export function TaskSheet({ task, gone = false, here, nodeName, room, inRoom, onClose, onAct, onDecide, onNote, onOpenRoom, onSay, onPriority, onStale, draft = null }: {
+export function TaskSheet({ task, gone = false, here, nodeName, room, roomNamed, inRoom, onClose, onAct, onDecide, onNote, onOpenRoom, onSay, onPriority, onStale, draft = null }: {
   task: Task; gone?: boolean; here: string; nodeName: (path: string) => string; room: RoomRef | null;
+  /** r24: the joined room a step names ("#cohere's 'For Harper' block"), when there is one */
+  roomNamed?: (name: string) => RoomRef | null;
   /** r22 (Codex P1): the room's last message time (seconds), from the rooms list: a chat more than a day newer than the request is cued. */
   /** The room open now: "Open in #room" is not offered for it. */
   inRoom?: string | null;
   /** A write against the revision shown (r16): the sheet waits for it, closes on success, and on a conflict stays with the latest copy. */
   onClose: () => void; onAct: (t: Task, a: TaskAction) => Promise<ActResult> | void;
   /** r17: the sheet waits for an answer's write, closes when it is recorded, and keeps the question with the reason when it isn't. */
-  onDecide: (t: Task, option: string) => Promise<{ ok: boolean; message?: string }> | void; onOpenRoom: (id: string) => void;
+  onDecide: (t: Task, option: string) => Promise<{ ok: boolean; message?: string }> | void; onOpenRoom: (id: string, focus?: string | null) => void;
   /** Open a note in its vault (a link in the next step; the task's own note when its question is not whole anywhere else). */
   onNote: (ref: NoteRef) => void;
   /** Put words in a room's composer (never sends). */
@@ -216,7 +218,7 @@ export function TaskSheet({ task, gone = false, here, nodeName, room, inRoom, on
       {steps && <ol className="task-steps">{steps.steps.map((x, i) => <li key={i}><RefText text={withHosts(capFirst(x))} vault={vault} onNote={(r) => { onClose(); onNote(r); }} />{stepLinks(x, i === 0)}</li>)}</ol>}
       {act?.rest && <p className="task-next task-steps-rest"><RefText text={withHosts(capFirst(act.rest))} vault={vault} onNote={(r) => { onClose(); onNote(r); }} />{stepLinks(act.rest, false)}</p>}
       {/* r23: the content the ask carries (`detail`: the message, the questions, the draft), as stored */}
-      {!unsure && blockGap && <p className="task-block-gap">{room ? <button type="button" className="task-link" onClick={() => { onOpenRoom(room.id); onClose(); }}>Open #{(blockGap.room ?? room.name).replace(/^#/, "")} to find the '{blockGap.name}' block ›</button> : <>Find the '{blockGap.name}' block{blockGap.room ? ` in #${blockGap.room}` : ""}</>}</p>}
+      {!unsure && blockGap && (() => { const named = blockGap.room ? roomNamed?.(blockGap.room) ?? null : room; const where = blockGap.room ?? room?.name.replace(/^#/, "") ?? null; return <p className="task-block-gap">{named ? <button type="button" className="task-link" onClick={() => { onOpenRoom(named.id); onClose(); }}>Open #{(blockGap.room ?? named.name).replace(/^#/, "")} to find the '{blockGap.name}' block ›</button> : <>{where ? `Open #${where}` : "Look"} to find the '{blockGap.name}' block</>}</p>; })()}
       {!unsure && task.detail && !blockGap && <div className="task-detail">{task.detail.split(/\n\s*\n/).map((para, i) => <p key={i}><DetailText text={para.trim()} vault={vault} onNote={(r) => { onClose(); onNote(r); }} /></p>)}</div>}
       {/* r22 (Codex 7): the record's title is in Details; here only where it is the subject (a check, a wait, a missing note) */}
       {(check || checking || waits || missing || (unavailable && decision)) && <p className="task-sub" title={sub !== rest ? rest : undefined}>{sub}</p>}
@@ -282,7 +284,7 @@ export function TaskSheet({ task, gone = false, here, nodeName, room, inRoom, on
         {primary === "task" && <button type="button" className="task-do primary" onClick={() => { onClose(); onNote({ vault, id: task.id }); }}>{OPEN_TASK}</button>}
         {primary === "note" && <button type="button" className="task-do primary" onClick={() => { onClose(); onNote({ vault, id: task.id }); }}>Open the note</button>}
         {primary === "source" && <button type="button" className="task-do primary" onClick={() => { const f = (check ?? waits)!.from; onClose(); onNote({ vault: f.vault, id: f.id }); }}>Open the note</button>}
-        {primary === "check" && <button type="button" className="task-do primary" onClick={() => { onOpenRoom(room!.id); onClose(); }}>Check in #{room!.name.replace(/^#/, "")} first</button>}
+        {primary === "check" && <button type="button" className="task-do primary" onClick={() => { onOpenRoom(room!.id, hit?.ref ?? null); onClose(); }}>Check in #{room!.name.replace(/^#/, "")} first</button>}
         {sayIn && (primary === "say" || primary === "check") && <button type="button" className={`task-do${primary === "say" ? " primary" : ""}`} onClick={sayIn}>Say it in #{room!.name.replace(/^#/, "")} ›</button>}
         {primary === "askroom" && <button type="button" className="task-do primary" onClick={askRoom!}>Ask in #{room!.name.replace(/^#/, "")} ›</button>}
         {primary === "message" && <button type="button" className="task-do primary" aria-live="polite" onClick={() => void copyText(message!, "Copied the message").then((ok) => { if (ok) setCopied(true); })}>{copied ? "Copied" : "Copy the message"}</button>}

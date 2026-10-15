@@ -1571,11 +1571,13 @@ function Conversations({ onForget }: { onForget: () => void }) {
     if ((channel ?? null) !== id || root) navigate(id, null);
   };
   const areaActions = useMemo(() => ({
-    openRoom: (id: string) => openTargetRef.current(roomTarget(id), "new"),
+    /** `focus`: a message of that room to scroll to and mark (the request sheet's "Check in #room first" goes to the first message about it) */
+    openRoom: (id: string, focus?: string | null) => { openTargetRef.current(roomTarget(id), "new"); if (focus) { focusTries.current = 0; setFocusRef(focus); } },
     // r15: a note opens in the vault its reference names (the task's, the area's), the same vault its title was read from
     openNote: (r: NoteRef) => openNote({ hub: null, vault: r.vault, ref: r.id }, null),
     compose: (id: string, text: string) => composeInRoomRef.current(id, text),
     retryRooms: () => { void loadRooms().catch(() => {}); },
+    focusMessage: (ref: string) => { focusTries.current = 0; setFocusRef(ref); },
   }), [openNote, loadRooms]);
   const primaryVault = vaults.includes(lifeVault) ? lifeVault : vaults.includes("uni") ? "uni" : null;
   const otherVaults = vaults.filter((vault) => vault !== primaryVault);

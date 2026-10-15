@@ -13,7 +13,7 @@ import { isActiveRun, type Run } from "./steerCore";
 import { ownerLabel, type Task } from "./taskCore";
 import { taskTitle } from "./whereCore";
 import { splitLinks } from "./linkText";
-import { actionableTitle, answerChoices, answerLabel, askLead, askPreview, checkLine, CHECK_FAILED, DANGLING, decideLine, stripRoom, decisionQuestion, dueLine, fitsRow, isOverdue, lineBudget, missingLine, OPEN_TASK, OPEN_TO_ANSWER, privateActionLabel, privateRestLabel, askedLine, requestDate, pointsNowhere, belowInCard, firstOfSteps, actionOf, rowAction, withoutBrackets, rowSubParts, standsHeading, titleSays, titleWords, TIDY_LINE, toTidy, unknownDecision, waitsLine, waitsOnMe, withHosts, withoutCut, rowAsk, withoutRawIds, clauseForms, type Choice, type NeedsFeed, type PrivateNeed, type RowAction, type Support } from "./simpleCore";
+import { actionableTitle, answerChoices, answerLabel, askLead, askPreview, checkLine, CHECK_FAILED, DANGLING, decideLine, stripRoom, decisionQuestion, dueLine, fitsRow, isOverdue, lineBudget, missingLine, OPEN_TASK, OPEN_TO_ANSWER, privateActionLabel, privateRestLabel, askedLine, requestDate, pointsNowhere, belowInCard, firstOfSteps, actionOf, rowAction, withoutBrackets, rowSubParts, standsHeading, titleSays, titleWords, TIDY_LINE, toTidy, unknownDecision, waitsLine, waitsOnMe, withHosts, withoutCut, rowAsk, withoutRawIds, WAITS_ON_ME, clauseForms, type Choice, type NeedsFeed, type PrivateNeed, type RowAction, type Support } from "./simpleCore";
 import { requestRecheck } from "./useTasks";
 
 const KEYS = { side: "uni.companion.side.v1", sideNarrow: "uni.companion.side.narrow.v1", strip: "uni.companion.strip.v1" } as const;
@@ -219,7 +219,7 @@ function ActionLine({ forms, vault, elRef }: { forms: { text: string; keep: stri
  * lines, else the longest form that ends on a clause ("…; prod waits…" → "Staging has the D2 one-app…."), never cut inside one and never
  * with "…". "More" (a real button) shows the whole. Its date is in the heading ("Where this stands · 2 days ago"), not under it.
  */
-function Stands({ text }: { text: string }) {
+function Stands({ text, calm = null }: { text: string; calm?: string | null }) {
   const clean = useMemo(() => withoutRawIds(text), [text]);
   const forms = useMemo(() => clauseForms(clean), [clean]);
   const [full, setFull] = useState(false);
@@ -239,9 +239,12 @@ function Stands({ text }: { text: string }) {
     return () => ro.disconnect();
   }, []);
   const cut = !full && form > 0;
+  const shown = full ? clean : forms[form];
   return <div className={`cp-lede ${full ? "full" : ""}`}>
-    <p ref={ref} className="cp-stands" data-cut={cut ? "true" : undefined}>{full ? clean : forms[form]}</p>
-    {(cut || full) && <button type="button" className="cp-more-next cp-stands-more" aria-expanded={full} onClick={() => setFull(!full)}>{full ? "Less" : "More"}</button>}</div>;
+    <p ref={ref} className="cp-stands" data-cut={cut ? "true" : undefined}>{shown}</p>
+    {(cut || full) && <button type="button" className="cp-more-next cp-stands-more" aria-expanded={full} onClick={() => setFull(!full)}>{full ? "Less" : "More"}</button>}
+    {/* r24: the line is under the words that say something waits on the user (the summary itself is the room's to rewrite) */}
+    {calm && WAITS_ON_ME.test(shown) && <p className="cp-calm">{calm}</p>}</div>;
 }
 
 /** One line of small print under a row (r18): whole words, then "…"; never a second line. */
@@ -611,13 +614,17 @@ function Body({ stands, ready, note, load, feed, rest = 0, moreTitle = null, onP
   useLayoutEffect(() => {
     const b = bodyRef.current; const sc = b?.closest(".cp-fit") as HTMLElement | null;
     if (!fit || !b || !sc || typeof ResizeObserver === "undefined") return;
+    let height = sc.clientHeight;
     const check = () => {
+      // a taller panel gives the rows back
+      if (sc.clientHeight > height + 1) { height = sc.clientHeight; setRunCap(RUNS_SHOWN); return; }
+      height = sc.clientHeight;
       const runs = b.querySelectorAll<HTMLElement>(".cp-run"); const foot = b.querySelector<HTMLElement>(".cp-foot");
       const last = runs[runs.length - 1]; if (!last || !foot || sc.scrollTop > 0) return;
       const [l, f] = [last.getBoundingClientRect(), foot.getBoundingClientRect()];
-      // a row the sticky footer cuts in two (not one wholly below it, which scrolls into view): one fewer, never fewer than one
+      // a row the sticky footer cuts in two (one wholly below it scrolls into view): one fewer, down to none ("+N more running" is in the footer)
       const cut = sc.scrollHeight > sc.clientHeight + 1 && l.bottom > f.top + 0.5 && l.top < f.top - 0.5;
-      if (cut && runs.length > 1) setRunCap((c) => Math.max(1, Math.min(c, runs.length) - 1));
+      if (cut) setRunCap((c) => Math.max(0, Math.min(c, runs.length) - 1));
     };
     const ro = new ResizeObserver(check); ro.observe(b); ro.observe(sc); check();
     return () => ro.disconnect();
@@ -628,7 +635,7 @@ function Body({ stands, ready, note, load, feed, rest = 0, moreTitle = null, onP
   // below 900px the room shows the list's health itself, outside the strip (r14)
   const health = !hideHealth && <LoadHealth load={load} ready={ready} count={feed.total} />;
   return <div className="cp-body" ref={bodyRef}>
-    {!ready ? (load?.error || load?.slow ? <LoadHealth load={load} ready={false} /> : <p className="cp-lede">Loading…</p>) : stands && <><Stands text={stands.text} />{stands.calm && <p className="cp-calm">{stands.calm}</p>}</>}
+    {!ready ? (load?.error || load?.slow ? <LoadHealth load={load} ready={false} /> : <p className="cp-lede">Loading…</p>) : stands && <Stands text={stands.text} calm={stands.calm} />}
     {ready && <section aria-label="Needs you" className="cp-sec" aria-busy={load?.refreshing || undefined}>
       <h3 className="cp-h">Needs you</h3>
       {/* r17: Uni's panel is at most three rows and one "Show N more" (private items folded in) to the work view, which keeps the full list */}
