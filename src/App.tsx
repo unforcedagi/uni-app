@@ -1,3 +1,4 @@
+import { mark } from "./startupTrace";
 import { readMessages, readRooms, readWho, writeMessages, writeRooms, writeWho } from "./chatCache";
 import { nodeOfRoom, useRoomNodes } from "./areas/roomLabels";
 import { isNetworkError, netError } from "./netError";
@@ -348,7 +349,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const [bindings, setBindings] = useState<Bindings>(new Map());
   const bindingStore = useRef(new Map<string, Bindings>());
   const [picker, setPicker] = useState<Picker | null>(null);
-  const [, setBusy] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [sending, setSending] = useState(false);
   const sendingRef = useRef(false);
   const [status, setStatus] = useState("Loading conversations…");
@@ -398,6 +399,14 @@ function Conversations({ onForget }: { onForget: () => void }) {
   }, [utilityOpen]);
   // Search result to scroll to and flash once its room/thread has loaded.
   const [focusRef, setFocusRef] = useState<string | null>(null);
+  /** r25: "Check in" opens a room at a message and keeps the sheet's question over the composer ("Checking: <step>") until it is dismissed or the room is left. */
+  const [checking, setChecking] = useState<{ channel: string; text: string } | null>(null);
+  const checkingSeen = useRef(false);
+  useEffect(() => {
+    if (!checking) { checkingSeen.current = false; return; }
+    if (channel === checking.channel) checkingSeen.current = true;
+    else if (checkingSeen.current) setChecking(null); // the room it was about is left
+  }, [checking, channel]);
   const [journalOpen, setJournalOpen] = useState(activeTab(tabs)?.kind === "journal");
   const [npub, setNpub] = useState<string | null>(null);
   const [myName, setMyName] = useState<string | null>(null);
@@ -635,6 +644,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const composerInput = useCallback((el: HTMLTextAreaElement | null) => {
     input.current = el;
     if (!el) return;
+    mark("composer");
     resizeComposer(el);
     let width = el.getBoundingClientRect().width;
     const observer = new ResizeObserver(() => {
@@ -649,6 +659,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
 
   const loadRooms = useCallback(async (cached?: Room[]) => {
     const rows = cached ?? await invoke<Room[]>("get_rooms");
+    if (rows.length) mark(cached ? "roomsCached" : "rooms");
     setRooms(rows);
     roomsRef.current = rows;
     if (!cached) { writeRooms(localStorage, whoRef.current, rows); setUnreadBadge(rows.reduce((n, r) => n + (r.unread || 0), 0)); }
@@ -692,7 +703,12 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const refresh = useCallback(async () => {
     if (busyRef.current) return;
     busyRef.current = true;
+    mark("syncStart");
     setBusy(true);
+    // r25 (Codex 8): the first sync of a cold start takes seconds, but its rooms are in the local store in milliseconds and each room's
+    // messages as its history lands: read them while it runs, so the conversation and its composer don't wait for the whole sync
+    const cold = roomsRef.current.length === 0;
+    const poll = cold ? window.setInterval(() => { void loadRooms().catch(() => {}); setTick((n) => n + 1); }, 700) : 0;
     setStatus("Connecting…");
     setError(null);
     try {
@@ -704,6 +720,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       // r18: Settings says it in words; the counts and per-room warnings are under Developer
       setSyncDetail(warnings.length ? `${result.total_items} saved messages; ${warnings.join("; ")}` : `${result.total_items} saved messages`);
       setStatus(warnings.length ? "Up to date, except a few rooms" : "Up to date");
+      mark("syncDone");
       setSynced((n) => n + 1);
       // Keep the socket open for push while we're in the foreground.
       // r19 (Codex 10): the reason goes to the developer log, the status line says it in words
@@ -711,12 +728,12 @@ function Conversations({ onForget }: { onForget: () => void }) {
     } catch (e) {
       setError(String(e));
       setStatus("Offline · showing what this device saved");
-    } finally { busyRef.current = false; setBusy(false); }
+    } finally { if (poll) window.clearInterval(poll); busyRef.current = false; setBusy(false); }
   }, [loadRooms]);
 
   useEffect(() => {
     let active = true;
-    invoke<string>("get_identity").then((id) => { if (active) setIdentity(id); }).catch(() => {});
+    invoke<string>("get_identity").then((id) => { mark("identity"); if (active) setIdentity(id); }).catch(() => {});
     // A rooms list from the last run restores the place at once; the real list follows and re-syncs it.
     if (roomsRef.current.length) void loadRooms(roomsRef.current).catch(() => {});
     loadRooms().then(() => { if (active) void refresh(); }).catch((e) => {
@@ -793,10 +810,10 @@ function Conversations({ onForget }: { onForget: () => void }) {
     // A room opened from the cache paints its last messages now (the composer is live with them); the fetch below refreshes them.
     if (viewNow.current !== view && root === null) {
       const kept = readMessages<Message>(localStorage, whoRef.current, channel);
-      if (kept) { setMessages(kept); setLoadedView(view); }
+      if (kept) { mark("messagesCached"); setMessages(kept); setLoadedView(view); }
     }
     viewNow.current = view;
-    invoke<Message[]>("get_messages", { channel, root, limit }).then((rows) => { if (viewNow.current === view && seq > appliedSeq.current) { appliedSeq.current = seq; setMessages(rows); setLoadedView(view); setFetchedView(view); setFailedView(null); if (root === null) writeMessages(localStorage, whoRef.current, channel, rows); } }).catch((e) => { if (current) { setError(String(e)); setFailedView(view); } });
+    invoke<Message[]>("get_messages", { channel, root, limit }).then((rows) => { if (rows.length) mark("messages"); if (viewNow.current === view && seq > appliedSeq.current) { appliedSeq.current = seq; setMessages(rows); setLoadedView(view); setFetchedView(view); setFailedView(null); if (root === null) writeMessages(localStorage, whoRef.current, channel, rows); } }).catch((e) => { if (current) { setError(String(e)); setFailedView(view); } });
     // Viewing the room reads it (only while the app is actually on screen).
     if (document.visibilityState === "visible") {
       invoke("mark_read", { channel }).then(() => loadRooms()).catch(() => {});
@@ -1337,6 +1354,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
           </div>
         </div>
         <footer onFocusCapture={() => requestAnimationFrame(() => setComposerFocused(true))} onBlurCapture={(e) => { const composer = e.currentTarget; requestAnimationFrame(() => setComposerFocused(composer.contains(document.activeElement))); }} className="composer" onDragOver={(e) => { if (e.dataTransfer.types.includes("Files")) e.preventDefault(); }} onDrop={onDropFiles}>
+          {checking && checking.channel === channel && <p className="checking-banner" role="status" title={checking.text}><span className="checking-text">{checking.text}</span><button type="button" className="checking-x" aria-label="Stop checking" onClick={() => setChecking(null)}>×</button></p>}
           {above}
           <input ref={fileInput} className="file-picker" type="file" multiple aria-label="Choose files to attach" onChange={(e) => { addFiles(Array.from(e.target.files ?? [])); e.target.value = ""; }} />
           {error && <p className="error" role="alert">{error}</p>}
@@ -1442,7 +1460,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   </> : <>
     {messages.length > 0 && <div className="older">{older === "done" ? <span>Start of #{roomName}</span> : <button onClick={() => actions.current.loadOlder()} disabled={older === "loading"}>{older === "loading" ? "Loading older messages…" : "Load older messages"}</button>}</div>}
     {/* the kept copy or nothing until the store has answered: a room is never called empty before it has been read */}
-    {messages.length === 0 && fetchedView === currentView && <p className="empty">No messages in this room yet.</p>}
+    {messages.length === 0 && fetchedView === currentView && !(busy && synced === 0) && <p className="empty">No messages in this room yet.</p>}
     {/* r13: a known room is never a blank timeline while its first read is under way */}
     {messages.length === 0 && fetchedView !== currentView && (failedView === currentView
       ? <p className="empty room-loading" role="alert">Couldn't load messages · <button type="button" className="pairing-secondary" onClick={() => setTick((n) => n + 1)}>Retry</button></p>
@@ -1450,7 +1468,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     {renderList(messages, false)}
   </>,
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  [messages, identity, menuFor, decisions.version, root, older, roomName, editing, focusRef, relayOrigin, fetchedView, failedView, currentView]);
+  [messages, identity, menuFor, decisions.version, root, older, roomName, editing, focusRef, relayOrigin, fetchedView, failedView, currentView, busy, synced]);
 
   const topNote = notes[notes.length - 1];
   // A top-level note Back closes its tab and returns to the last used tab.
@@ -1574,12 +1592,12 @@ function Conversations({ onForget }: { onForget: () => void }) {
   };
   const areaActions = useMemo(() => ({
     /** `focus`: a message of that room to scroll to and mark (the request sheet's "Check in #room first" goes to the first message about it) */
-    openRoom: (id: string, focus?: string | null) => { openTargetRef.current(roomTarget(id), "new"); if (focus) { focusTries.current = 0; setFocusRef(focus); } },
+    openRoom: (id: string, focus?: string | null, checking?: string | null) => { openTargetRef.current(roomTarget(id), "new"); if (focus) { focusTries.current = 0; setFocusRef(focus); } setChecking(checking ? { channel: id, text: checking } : null); },
     // r15: a note opens in the vault its reference names (the task's, the area's), the same vault its title was read from
     openNote: (r: NoteRef) => openNote({ hub: null, vault: r.vault, ref: r.id }, null),
     compose: (id: string, text: string) => composeInRoomRef.current(id, text),
     retryRooms: () => { void loadRooms().catch(() => {}); },
-    focusMessage: (ref: string) => { focusTries.current = 0; setFocusRef(ref); },
+    focusMessage: (ref: string | null, room?: string, checking?: string | null) => { if (ref) { focusTries.current = 0; setFocusRef(ref); } if (room) setChecking(checking ? { channel: room, text: checking } : null); },
   }), [openNote, loadRooms]);
   const primaryVault = vaults.includes(lifeVault) ? lifeVault : vaults.includes("uni") ? "uni" : null;
   const otherVaults = vaults.filter((vault) => vault !== primaryVault);
