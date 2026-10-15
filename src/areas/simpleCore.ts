@@ -20,7 +20,7 @@ export const waitsOnMe = (t: Pick<Task, "owner" | "waitingOn">): boolean => isMe
  * the user's own tasks, and (r17) any task whose `waiting_on` names the user whatever its owner, at Now or Soon (unsorted is Soon); live,
  * never Someday. A room's or Uni's own drafting that waits on no one is not theirs (r16). Snoozed and finished tasks are dropped before.
  */
-export function needsYou(t: Pick<Task, "kind" | "owner" | "waitingOn" | "priority" | "state"> & Partial<Pick<Task, "title" | "next" | "options" | "ask" | "askAt" | "updatedAt" | "askFailed" | "check">>): boolean {
+export function needsYou(t: Pick<Task, "kind" | "owner" | "waitingOn" | "priority" | "state"> & Partial<Pick<Task, "title" | "next" | "options" | "ask" | "askAt" | "updatedAt" | "askFailed" | "check" | "supersededBy">>): boolean {
   // r19: a record that isn't a real request is Uni's to tidy, listed apart and never counted here. r20: nor is a decision not read yet
   return wouldNeedYou(t) && !tidyReason(t) && !unknownDecision(t);
 }
@@ -38,8 +38,10 @@ export function unknownDecision(t: Partial<Pick<Task, "kind" | "title" | "ask" |
   return !(typeof t.ask === "string" && !!t.updatedAt && t.askAt === t.updatedAt);
 }
 /** The r12 rule before r19's tidy check: open decisions, the user's own tasks and tasks waiting on them, at Now or Soon. */
-export function wouldNeedYou(t: Pick<Task, "kind" | "owner" | "waitingOn" | "priority" | "state"> & Partial<Pick<Task, "next">>): boolean {
+export function wouldNeedYou(t: Pick<Task, "kind" | "owner" | "waitingOn" | "priority" | "state"> & Partial<Pick<Task, "next" | "supersededBy">>): boolean {
   if (t.state !== "open" && t.state !== "doing" && t.state !== "waiting") return false;
+  // r31: superseded is the note's own field (`superseded_by`), never read from chat
+  if (t.supersededBy) return false;
   // r26: a task whose own step says it was superseded is closed, whatever its stored state
   if (superseded(t.next)) return false;
   return t.kind === "decision" || ((isMe(t.owner) || isMe(t.waitingOn)) && t.priority !== "someday");
@@ -105,8 +107,6 @@ export type NeedsFeed = { rows: Task[]; privates: PrivateNeed[]; total: number;
   recheck?: Task[];
   /** r30: why each of them is not confirmed (by task id), for its reason line */
   recheckWhy?: Record<string, RecheckWhy | null>;
-  /** r28: asks whose room's chat is still being read: held back from `total`, "Checking…" for a few seconds at most. */
-  checking?: Task[];
   /** r28 (Codex P2-6): runs waiting on the user's answer, deduplicated by task; they are in `total` (one count everywhere). */
   waiting?: Run[];
   /** r19: records Uni has to tidy (not real requests yet), outside private areas; never in `total`. */
@@ -133,7 +133,6 @@ export function needsFeed(tasks: readonly Task[], privateOf: (node: string) => P
   const rows: Task[] = [];
   const recheck: Task[] = [];
   const recheckWhy: Record<string, RecheckWhy | null> = {};
-  const checking: Task[] = [];
   const by = new Map<string, PrivateNeed>();
   for (const t of owed) {
     const p = privateOf(t.node);
@@ -141,7 +140,6 @@ export function needsFeed(tasks: readonly Task[], privateOf: (node: string) => P
     const st = stateOf(t);
     // a private area's unconfirmed asks are not listed outside it (their words stay inside); they are neither counted nor named
     if (st === "recheck") { if (open) { recheck.push(t); recheckWhy[t.id] = confOf ? confOf(t).why : null; } continue; }
-    if (st === "pending") { if (open) checking.push(t); continue; }
     if (open) { rows.push(t); continue; }
     const g = by.get(p!.path) ?? { key: p!.path, count: 0, place: p!.name, open: { path: p!.path }, actions: [], others: 0 };
     by.set(p!.path, g);
@@ -152,7 +150,7 @@ export function needsFeed(tasks: readonly Task[], privateOf: (node: string) => P
   const here = (t: Task) => !privateOf(t.node) || privateOf(t.node)?.path === self?.path;
   const tidy = tasks.filter((t) => toTidy(t) && here(t));
   const pending = rankNeeds(tasks.filter((t) => wouldNeedYou(t) && unknownDecision(t) && here(t)), today);
-  return { rows, privates: [...by.values()], total: all.length, tidy, pending, recheck, recheckWhy, checking, waiting: [] };
+  return { rows, privates: [...by.values()], total: all.length, tidy, pending, recheck, recheckWhy, waiting: [] };
 }
 /**
  * r28 (Codex P2-6): the runs waiting on the user's answer join the feed, so the count, the dots and the strip say the same number. Each is
@@ -431,18 +429,12 @@ export function answerText(raw: string): string | null {
  */
 export type RecheckScope = "room" | "all";
 export const recheckLine = (n: number, scope: RecheckScope = "room"): string => `${n} ${n === 1 ? "request needs" : "requests need"} confirming ${scope === "all" ? "across all rooms" : "in this room"}`;
-/** Why a request is not confirmed, in a few words: "chat since in #cohere", "couldn't read #cohere", "asked Oct 11", "no room". */
-export function reasonShort(why: RecheckWhy | null | undefined, t: Partial<Pick<Task, "asked" | "added" | "stewardRoom" | "room">>, today = localDay()): string {
-  const room = (t.stewardRoom ?? t.room ?? "").replace(/^#/, "");
-  switch (why) {
-    case "chat-since": return room ? `chat since in #${room}` : "chat since";
-    case "read-failed": return room ? `couldn't read #${room}` : "couldn't read the chat";
-    case "no-room": return "no room";
-    default: return askedLine(requestDate(t), today) ?? "no date";
-  }
+/** Why a request is not confirmed, in a few words: "asked Oct 11" (the date of the newer of its `asked_at` and `confirmed_at`), or "no date". */
+export function reasonShort(t: Partial<Pick<Task, "asked" | "added">>, today = localDay()): string {
+  return askedLine(requestDate(t), today) ?? "no date";
 }
 /** The empty Needs you: "Nothing needs you here" only when no ask is waiting to be confirmed either; else it says what is known: no ask is confirmed. */
-export const noneLine = (f: Pick<NeedsFeed, "recheck" | "checking">): string => ((f.recheck?.length ?? 0) + (f.checking?.length ?? 0) > 0 ? "No confirmed asks" : "Nothing needs you here.");
+export const noneLine = (f: Pick<NeedsFeed, "recheck">): string => ((f.recheck?.length ?? 0) > 0 ? "No confirmed asks" : "Nothing needs you here.");
 /**
  * The needs-you feed (T-124 r7): only what the user must do. Their tasks (owner, or waiting on them) that are live and not snoozed (the
  * caller's `Where` has already dropped those, and anything done or archived), at priority Now or Soon (unsorted counts as Soon), plus open
@@ -477,103 +469,8 @@ export function askedLine(w: AskedWhen | null | undefined, today = localDay()): 
   if (day === today) return `${w.kind} today`;
   return `${w.kind} ${d.toLocaleDateString("en-US", { month: "short", day: "numeric", ...(day.slice(0, 4) !== today.slice(0, 4) ? { year: "numeric" } : {}) })}`;
 }
-/**
- * The room's chat has moved on (r22, Codex P1): its last message is more than a day newer than the request (r23: the request's own date,
- * `requestDate`; a date without a time counts from the end of that day). `lastTs` in seconds, as the rooms list has it.
- */
-export const MOVED_ON_MS = 24 * 3600_000;
-export function chatMovedOn(w: AskedWhen | null | undefined, lastTs: number | null | undefined): boolean {
-  if (!w) return false;
-  const day = /^\d{4}-\d{2}-\d{2}$/.test(w.at.trim());
-  const ms = day ? new Date(`${w.at.trim()}T23:59:59`).getTime() : stampMs(w.at);
-  return Number.isFinite(ms) && typeof lastTs === "number" && Number.isFinite(lastTs) && lastTs * 1000 - ms > MOVED_ON_MS;
-}
-export const MOVED_ON = "Chat has moved on since this was asked";
-export const movedOnText = (w: AskedWhen): string => (w.kind === "asked" ? MOVED_ON : "Chat has moved on since this was added");
-
-/**
- * r24 (Codex P1 2, Sonnet line 5): "moved on" means something only when the room has talked about THIS request since it was asked. The
- * request must be room-directed or an approval; the chat counts only when a message after the request names its task id, a `#NN` number from
- * its step, or two of the step's distinctive words.
- */
-const KEY_STOP = new Set("about after again also back before being both check could from have here into just like make more need next onto only other over same some that then there these they this those through very want were what when where which while will with without would your their them been done does each first last must still such than well went already skip change changes please today tomorrow yesterday thread letter email draft ready going gets getting being using use used".split(" "));
-export type RequestKeys = { ids: string[]; words: string[]; /** the ask's stored `next`, whose words a message may quote */ next?: string };
-export function requestKeys(t: { title?: string | null; next?: string | null }): RequestKeys {
-  const title = t.title ?? "";
-  const next = t.next ?? "";
-  const ids = new Set<string>();
-  const tid = /\bT-\d+\b/i.exec(title)?.[0];
-  if (tid) ids.add(tid.toUpperCase());
-  for (const m of `${next} ${title}`.matchAll(/(?:^|[^\w&])#(\d{1,5})\b/g)) ids.add(`#${m[1]}`);
-  const words = [...new Set((next.toLowerCase().replace(/\b([\w-]+)(?:\.[\w-]+)+\b/g, "$1").match(/[a-z]{5,}/g) ?? []).filter((w) => !KEY_STOP.has(w) && !/^(?:say|tell|reply|ask|send|copy|approve|approval|message|room|chat)$/.test(w)))];
-  return { ids: [...ids], words, next };
-}
-/** A request spoken to the room or asking for an approval: "Say …", "Tell Uni …", "Approve …", "go/no-go", a decision. */
-export function isApprovalRequest(t: { kind?: string; next?: string | null }, audienceIsRoom: boolean): boolean {
-  return t.kind === "decision" || audienceIsRoom || /(?:^|[,;:]\s*|\bthen\s+)(?:approve|say)\b|\bgo\s*\/\s*no[- ]?go\b|\bgo or no\b/i.test(t.next ?? "");
-}
-export type RoomMsg = { ref?: string; ts: number; body: string; /** the author's pubkey, as the room's messages carry it */ author?: string };
-/** Uni's own message within this long after an ask was written, naming the ask's T-NN and quoting it, is the room announcing it, not talk that moved past it. */
-export const ANNOUNCE_GRACE_MS = 10 * 60_000;
-/** How many consecutive words of the stored `next` a message must quote to be an announcement or a reminder of exactly this ask (r30). */
-export const QUOTE_WORDS = 6;
-const quoteWords = (t: string): string[] => t.toLowerCase().replace(/[’‘]/g, "'").replace(/https?:\/\/\S+/g, (u) => { try { return new URL(u).hostname; } catch { return u; } }).match(/[\p{L}\p{N}][\p{L}\p{N}'@./_-]*/gu)?.map((w) => w.replace(/[.'/_-]+$/, "")).filter(Boolean) ?? [];
-/** Whether `body` quotes at least `n` consecutive words of `next` (case and punctuation aside). */
-export function quotes(body: string, next: string | null | undefined, n = QUOTE_WORDS): boolean {
-  const a = quoteWords(next ?? ""); if (a.length < n) return false;
-  const text = ` ${quoteWords(body).join(" ")} `;
-  for (let i = 0; i + n <= a.length; i++) if (text.includes(` ${a.slice(i, i + n).join(" ")} `)) return true;
-  return false;
-}
-export type ChatHit = { key: string; ref: string | null; ts: number };
-/** The first message after the request (`ts` in seconds) that mentions its key terms, or null. `uni`: Uni's pubkey in the room (null: unknown, so nothing is an announcement). */
-export function chatAbout(w: AskedWhen | null | undefined, msgs: readonly RoomMsg[], keys: RequestKeys, uni: string | null = null): ChatHit | null {
-  if (!w || !(keys.ids.length || keys.words.length)) return null;
-  const day = /^\d{4}-\d{2}-\d{2}$/.test(w.at.trim());
-  const at = day ? new Date(`${w.at.trim()}T23:59:59`).getTime() : stampMs(w.at);
-  if (!Number.isFinite(at)) return null;
-  // r30 (Codex P1-1): within the window, Uni's own message is skipped only when it names the ask's T-NN and quotes at least six consecutive words of its
-  // stored `next`: that is the announcement of exactly this ask (a cancellation or a correction doesn't quote it). Past the window, Uni's message
-  // that quotes six words of the current `next` is a reminder of it, and doesn't unconfirm. Everything else counts: Aaron's messages, other keys,
-  // Uni's messages that quote nothing.
-  const graceTo = !day && w.kind === "asked" ? at + ANNOUNCE_GRACE_MS : at;
-  const tids = keys.ids.filter((k) => /^T-\d+$/i.test(k));
-  for (const m of [...msgs].sort((a, b) => a.ts - b.ts)) {
-    if (!(m.ts * 1000 > at)) continue;
-    const body = m.body.toLowerCase();
-    if (uni && m.author === uni && quotes(m.body, keys.next)) {
-      const inWindow = m.ts * 1000 <= graceTo;
-      if (!inWindow || tids.some((k) => new RegExp(`\\b${k.toLowerCase()}\\b`).test(body))) continue;
-    }
-    const id = keys.ids.find((k) => (k.startsWith("#") ? new RegExp(`(^|[^\\w&])${k.toLowerCase()}\\b`) : new RegExp(`\\b${k.toLowerCase()}\\b`)).test(body));
-    if (id) return { key: id, ref: m.ref ?? null, ts: m.ts };
-    const hit = keys.words.filter((k) => new RegExp(`(^|[^a-z-])${k}([^a-z-]|$)`).test(body));
-    if (hit.length >= 2) return { key: hit.slice(0, 2).join(" "), ref: m.ref ?? null, ts: m.ts };
-  }
-  return null;
-}
-/**
- * r25 (Codex P1 2), r27: what looking in the room's chat came to, in the four states the sheet keeps internally. `found`: related conversation
- * after the record's write, or a read too short to reach back to it (`hit` null: unknown is not "nothing new"). `failed`: the chat couldn't be
- * read. `none`: nothing related after the write. `pending` is a lookup not back yet (`gateOf`). `msgs` null is a lookup that failed. The sheet
- * shows only current, unconfirmed and couldn't-read (`freshnessOf`); "nothing related found" is never shown as a validation.
- */
-export type CheckIn = { kind: "found"; hit: ChatHit | null } | { kind: "failed" } | { kind: "none" };
-/** The most messages the lookup reads: a read this full that starts after the write has not seen the write's time. */
-export const LOOKUP_LIMIT = 200;
-export function checkInResult(w: AskedWhen | null | undefined, msgs: readonly RoomMsg[] | null | undefined, keys: RequestKeys, limit = LOOKUP_LIMIT, uni: string | null = null): CheckIn {
-  if (!Array.isArray(msgs)) return { kind: "failed" };
-  const hit = chatAbout(w, msgs, keys, uni);
-  if (hit) return { kind: "found", hit };
-  const from = w ? (/^\d{4}-\d{2}-\d{2}$/.test(w.at.trim()) ? new Date(`${w.at.trim()}T23:59:59`).getTime() : stampMs(w.at)) : NaN;
-  const oldest = msgs.length ? Math.min(...msgs.map((m) => m.ts)) * 1000 : Infinity;
-  // r27: a full read whose oldest message is already newer than the write may have missed what came right after it
-  return msgs.length >= limit && Number.isFinite(from) && oldest > from ? { kind: "found", hit: null } : { kind: "none" };
-}
-export const couldntRead = (room: string): string => `Couldn't read #${room.replace(/^#/, "")}`;
-/** The banner over the composer after "Check in": the sheet's question stays in view while the chat is read (r25). */
+/** The banner over the composer after "Check in": the sheet's question stays in view while the room is open (r25). */
 export const checkingBanner = (step: string): string => `Checking: ${cutWords(withHosts(plainStep(step)), 110, false).replace(/[\s,;:]+$/, "")}`;
-export const checkInCue = (room: string, key: string, w: AskedWhen): string => `#${room.replace(/^#/, "")} has talked about ${key} since this was ${w.kind === "asked" ? "asked" : "added"}`;
 
 /**
  * r29 (Codex P1-3): "Where this stands" is a dated account and the app doesn't vouch for it. It is shown as "Last written Oct 14 by #room:" and
@@ -586,7 +483,27 @@ export function lastWritten(asOf: string | null | undefined, by: string | null |
   const room = by ? `#${by.replace(/^#/, "")}` : "";
   return `Last written${asOf ? ` ${asOf}` : ""}${room ? ` by ${room}` : ""}:`;
 }
-/** A summary longer than this is behind "What it said"; a shorter one is shown whole. */
+/** Calendar days since a stamp (local); null when it isn't a date. */
+export function daysSince(at: string | null | undefined, nowMs = Date.now()): number | null {
+  const ms = stampMs(at ?? "");
+  if (!Number.isFinite(ms)) return null;
+  const day = (m: number) => { const d = new Date(m); return Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()); };
+  return Math.round((day(nowMs) - day(ms)) / 86_400_000);
+}
+/** A summary older than this many days says how old it is. */
+export const SUMMARY_OLD_DAYS = 2;
+/**
+ * r31: the one line that opens a folded or long summary, with the heading folded into it (no second heading, no colon with nothing after it):
+ * "Where this stands · Oct 14, #cohere"; once it is more than two days old, "Where this stands · Oct 12 (3 days old)". A summary nobody wrote or
+ * dated is just "Where this stands".
+ */
+export function summaryLine(asOf: string | null | undefined, by: string | null | undefined, age: number | null | undefined = null, base = "Where this stands"): string {
+  if (!asOf) return base;
+  if (typeof age === "number" && age > SUMMARY_OLD_DAYS) return `${base} · ${asOf} (${age} days old)`;
+  const room = by ? `, #${by.replace(/^#/, "")}` : "";
+  return `${base} · ${asOf}${room}`;
+}
+/** A summary longer than this is behind its one line; a shorter one is shown whole. */
 export const SUMMARY_LONG = 280;
 type Clause = { text: string; sep: string };
 /** The summary as clauses: split at sentence ends, ";" and (when both sides are real clauses) ", "; never inside a bracket. */
@@ -1201,6 +1118,11 @@ export function rowSub(t: Pick<Task, "title" | "due">, action: RowAction, area: 
   const { where, when } = rowSubParts(t, action, area, today);
   return [where, when].filter(Boolean).join(" · ") || null;
 }
+/**
+ * r31: one date on a row. A task that is overdue says "was due Oct 13" and nothing about when it was asked (asked after its due date would
+ * read as a contradiction); otherwise its asked date stands, with any upcoming due date. The row and the sheet say the same.
+ */
+export const askedShown = (due: string | null | undefined, asked: string | null, today = localDay()): string | null => (isOverdue(due, today) ? null : asked);
 /** The subtitle's two parts (r20): where it belongs (a row may cut this) and the due cue (a row never cuts it). */
 export function rowSubParts(t: Pick<Task, "title" | "due">, action: RowAction, area: string | null = null, today = localDay()): { where: string | null; when: string | null } {
   const where = titleSays(t.title, action.text) ?? area;
@@ -1446,55 +1368,50 @@ export function itemForms(item: string): string[] {
   return out;
 }
 
-// ------------------------------------------------------------------------------------------------- r26: a check that gates answers
-/** The lookup of the room's chat: asked and not back yet, related talk found, couldn't be read, or nothing related. */
-export type Gate = "pending" | "found" | "failed" | "none";
-export const gateOf = (applies: boolean, look: CheckIn | null): Gate => (!applies ? "none" : look === null ? "pending" : look.kind);
+// ------------------------------------------------------------------------------------------------- r31: an ask is current because its record says so
 /**
- * r28 (Codex P1-1, P1-2): an ask is *confirmed* only when its own `asked_at` says so: within the last 3 days, not in the future (a clock a few
- * minutes ahead is skew; more is a wrong date), and no related chat in its room is newer than it. With no `asked_at` the ask is unconfirmed:
- * `updated_at` is never a fallback, because any unrelated edit renews it. Confirmation is resolved in the feed, before a row shows. States:
- * `confirmed` (counted, in Needs you), `recheck` (Uni's to recheck: listed apart, never counted), `pending` (its room's chat is still being read:
- * held back, "Checking…", for at most `CONFIRM_WAIT_MS`).
+ * r31 (Codex P1, 19 rounds): chat can neither prove an ask is current nor that it was cancelled, so it is not read. An ask is *confirmed* when its
+ * task note says so: `asked_at` (stamped by `tasks.py` whenever `next` or `detail` is written) or `confirmed_at` (`tasks.py confirm T-NN`), the
+ * newer of the two, is within 3 days and not in the future (a clock a few minutes ahead is skew; more is a wrong date). Nothing else promotes
+ * or demotes it. A cancelled or superseded ask is the note's own state (`done`, `archived`, `superseded_by`), which `wouldNeedYou` reads.
+ * `confirmed` is counted and in Needs you; `recheck` is listed apart, never counted. It depends on the one stored record, so the same ask
+ * classifies the same on a cold home and a warm one.
  */
 export const CONFIRM_DAYS = 3;
 export const CONFIRM_SKEW_MS = 5 * 60_000;
-export const CONFIRM_WAIT_MS = 4000;
-export type Confirm = "confirmed" | "recheck" | "pending";
+export type Confirm = "confirmed" | "recheck";
 export type AskStamp = "none" | "old" | "future" | "recent";
-export function askStamp(askedAt: string | null | undefined, nowMs = Date.now()): AskStamp {
-  const t = stampMs(askedAt ?? "");
+/**
+ * The newer of `asked_at` and `confirmed_at` (the one date an ask is current by); null when neither is a date. A stamp in the future past the
+ * clock skew is a wrong date: it is passed over for the other one, and used only when it is all there is (then it reads "future").
+ */
+export function currentAt(t: { askedAt?: string | null; confirmedAt?: string | null }, nowMs = Date.now()): string | null {
+  const ok = [t.askedAt, t.confirmedAt].filter((x): x is string => !!x && Number.isFinite(stampMs(x)));
+  const newest = (xs: string[]) => xs.reduce((a, b) => (stampMs(b) > stampMs(a) ? b : a));
+  const sane = ok.filter((x) => askStamp(x, nowMs) !== "future");
+  return sane.length ? newest(sane) : ok.length ? newest(ok) : null;
+}
+export function askStamp(at: string | null | undefined, nowMs = Date.now()): AskStamp {
+  const t = stampMs(at ?? "");
   if (!Number.isFinite(t)) return "none";
-  if (/^\d{4}-\d{2}-\d{2}$/.test((askedAt ?? "").trim())) { const day = (askedAt ?? "").trim(); const today = localDay(new Date(nowMs)); if (day > today) return "future"; }
+  if (/^\d{4}-\d{2}-\d{2}$/.test((at ?? "").trim())) { const day = (at ?? "").trim(); const today = localDay(new Date(nowMs)); if (day > today) return "future"; }
   else if (t - nowMs > CONFIRM_SKEW_MS) return "future";
   return nowMs - t > CONFIRM_DAYS * 86_400_000 ? "old" : "recent";
 }
 /** Why an ask is not confirmed, for the log and the tests. */
-export type RecheckWhy = "no-date" | "old" | "future" | "no-room" | "chat-since" | "read-failed";
-export type Resolved = { state: Confirm; why: RecheckWhy | null; /** the related message that came after the ask, when that is why */ hit: ChatHit | null; /** the room's chat couldn't be read */ failed: boolean };
-/** Whether the room's chat has to be read to tell: only an ask whose own date is recent and that has a room to be checked in. */
-export const needsRead = (hasRoom: boolean, askedAt: string | null | undefined, nowMs = Date.now()): boolean => hasRoom && askStamp(askedAt, nowMs) === "recent";
-export function confirmationOf(hasRoom: boolean, askedAt: string | null | undefined, look: CheckIn | null, nowMs = Date.now()): Resolved {
-  const stamp = askStamp(askedAt, nowMs);
-  if (stamp !== "recent") return { state: "recheck", why: stamp === "none" ? "no-date" : stamp, hit: null, failed: false };
-  if (!hasRoom) return { state: "recheck", why: "no-room", hit: null, failed: false };
-  if (look === null) return { state: "pending", why: null, hit: null, failed: false };
-  if (look.kind === "failed") return { state: "recheck", why: "read-failed", hit: null, failed: true };
-  if (look.kind === "found") return { state: "recheck", why: "chat-since", hit: look.hit, failed: false };
-  return { state: "confirmed", why: null, hit: null, failed: false };
+export type RecheckWhy = "no-date" | "old" | "future";
+export type Resolved = { state: Confirm; why: RecheckWhy | null };
+export function confirmationOf(t: { askedAt?: string | null; confirmedAt?: string | null }, nowMs = Date.now()): Resolved {
+  const stamp = askStamp(currentAt(t, nowMs), nowMs);
+  return stamp === "recent" ? { state: "confirmed", why: null } : { state: "recheck", why: stamp === "none" ? "no-date" : stamp };
 }
 /** A task whose record isn't asked about (or any task the feed hasn't resolved): unconfirmed, with no date to go on. */
-export const UNRESOLVED: Resolved = { state: "recheck", why: "no-date", hit: null, failed: false };
-/** The one quiet line over an unconfirmed request, with its reason (r30): "Asked Oct 13 · chat since in #cohere"; an old one "Asked Oct 11 · not confirmed since"; with no date "Not confirmed since it was written". */
-export const unconfirmedLine = (asked: string | null | undefined, why: RecheckWhy | null = null, room: string | null = null): string => {
-  const r = room?.replace(/^#/, "") ?? "";
-  const reason = why === "chat-since" ? (r ? `chat since in #${r}` : "chat since") : why === "no-room" ? "no room" : "not confirmed since";
-  return asked ? `${asked[0].toLocaleUpperCase()}${asked.slice(1)} · ${reason}` : why === "no-room" ? "No room" : why === "chat-since" ? `Chat since in ${r ? `#${r}` : "its room"}` : "Not confirmed since it was written";
-};
+export const UNRESOLVED: Resolved = { state: "recheck", why: "no-date" };
+/** The one quiet line over an unconfirmed request, with its reason: "Asked Oct 11 · not confirmed since"; with no date "Not confirmed since it was written". */
+export const unconfirmedLine = (asked: string | null | undefined): string => (asked ? `${asked[0].toLocaleUpperCase()}${asked.slice(1)} · not confirmed since` : "Not confirmed since it was written");
 /** Whether the approval answers (and "I did this") are offered as ready: only when the ask is confirmed, or after "Answer anyway". */
 export const answersReady = (c: Confirm, anyway: boolean): boolean => c === "confirmed" || anyway;
 export const ANSWER_ANYWAY = "Answer anyway";
-export const checkingRoom = (room: string): string => `Checking #${room.replace(/^#/, "")}…`;
 /** The task changed since the sheet loaded: the revision it was opened at is not the list's now. */
 export const revisionMoved = (opened: string | null | undefined, now: string | null | undefined): boolean => !!opened && !!now && opened !== now;
 export const CHANGED_SINCE = "This changed since you opened it";
@@ -1510,5 +1427,7 @@ export function repeatsHeading(body: string | null | undefined, ...others: reado
 /** r26 (Codex 6): a run's state as a person reads it, the same in the companion and the work view (never the raw "decision"). */
 export const RUN_STATE_LABEL: Record<string, string> = { running: "Working", queued: "Queued", stalled: "Stalled", blocked: "Blocked", decision: "Waiting on you", done: "Done", failed: "Failed" };
 export const runStateLabel = (state: string): string => RUN_STATE_LABEL[state] ?? state;
+/** r31: a waiting run whose `channel` id is not among the rooms: its row says so; it never opens another room. */
+export const ROOM_NOT_FOUND = "Room not found";
 /** r27 (Codex P2-5): a run that waits on Aaron's answer is Needs you, never Running ("not waiting on you"). */
 export const waitingOnYou = (r: { state: string }): boolean => r.state === "decision";

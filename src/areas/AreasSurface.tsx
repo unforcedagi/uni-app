@@ -1,11 +1,10 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { useConfirm } from "./useConfirm";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { TaskSheet, UndoBar, ownerLabel } from "./NodeWork";
 import { useTasks } from "./useTasks";
 import { draftsUnder, runsUnder, type Run } from "./steerCore";
 import { CompanionSide, CompanionStrip, Stands, useCompanionOpen, type CompanionProps, type TaskLoad } from "./Companion";
-import { chatPlaceholder, isMine, needsByRow, needsFeed, needsYou, privateNote, withWaiting, standsHeading, standsLine, asOfDate, firstSentence, stateLine, uniPanel, type PrivateNeed } from "./simpleCore";
+import { chatPlaceholder, confirmationOf, type Resolved, isMine, needsByRow, needsFeed, needsYou, privateNote, withWaiting, standsHeading, standsLine, asOfDate, daysSince, firstSentence, stateLine, uniPanel, type PrivateNeed } from "./simpleCore";
 import { ownRoom, type Steward } from "./talkCore";
 import type { Area } from "./areasCore";
 import { isMe, priorityOf, tasksUnder, type Task, type TaskNode } from "./taskCore";
@@ -242,16 +241,17 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
     return { room: v.target, via: v.own ? "own" : v.heldBy && v.heldBy.id !== uniRef?.id ? "inherited" : "uni", from: null };
   };
   const roomOfNode = (p: string) => stewardOf(p).room;
-  // r28 (Codex P1-1/2): an ask is confirmed here, in the feed, before any row, count or dot shows it: one read of each room's chat, cached
-  const roomOfTask = useCallback((t: Task) => (data ? roomView(data.tree, t.node, roomRefs, uniRef).target : uniRef) ?? null, [data, roomRefs, uniRef]);
-  const confirm = useConfirm(tasks.tasks, roomOfTask, tasks.lastOk, tasks.ready && (!chat || !!data || !!error), chat, (id) => rooms.find((r) => r.id === id)?.last_ts ?? null);
+  // r31: an ask is current because its task note says so (`asked_at` / `confirmed_at` within 3 days), resolved here before any row, count or dot shows it.
+  // It reads nothing else (no chat, no room roster), so a cold launch and a warm one classify the same stored ask the same.
+  const confirmNow = useMemo(() => Date.now(), [tasks.tasks, tasks.lastOk]); // eslint-disable-line react-hooks/exhaustive-deps
+  const confirm = useMemo(() => ({ of: (t: Task): Resolved => confirmationOf(t, confirmNow) }), [confirmNow]);
   // r28: the asks Uni must recheck are told to the rooms once per launch, as task ids in the app's log (the app never writes them to the vault)
   useEffect(() => {
-    if (!confirm.settled || tasks.savedAt || recheckLogged.done) return;
+    if (!tasks.ready || tasks.savedAt || recheckLogged.done) return;
     const ids = tasks.tasks.filter((t) => needsYou(t) && confirm.of(t).state === "recheck").map((t) => taskTitle(t.title).id).filter(Boolean) as string[];
     recheckLogged.done = true;
     void invoke("log_line", { line: `recheck: ${ids.join(" ") || "none"}` }).catch(() => {});
-  }, [confirm.settled, tasks.tasks, tasks.savedAt]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [tasks.ready, tasks.tasks, tasks.savedAt]); // eslint-disable-line react-hooks/exhaustive-deps
   const decide = (t: Task, o: string) => void tasks.decide(t, o);
   const open = (a: Area) => { setRootOpen(false); const w = withRoom(a); onOpenArea(w.path, w.name, pickRoom(w.rooms, null)); };
   const toUni = () => onOpenArea(null, "Uni", uniRoom);
@@ -397,15 +397,18 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   const stands0 = noAreas ? { text: "No areas yet. Tell Uni here what you want to look after, and it will set up your first area.", ago: "" } : standsLine(rawStands, levelTasks.filter((t) => !hidden(t.node)), now);
   /** r29 (Codex P1-3): a written summary is a dated account: "Last written Oct 14 by #room:" and the text as written. The app doesn't judge whether it still holds. */
   const written = !noAreas && !!rawStands && !!firstSentence(rawStands.text);
-  const stands = stands0 && !noAreas ? { ...stands0, written, asOf: written ? asOfDate(rawStands!.at) : null, by: written ? target?.name ?? null : null } : stands0;
+  const stands = stands0 && !noAreas ? { ...stands0, written, asOf: written ? asOfDate(rawStands!.at) : null, age: written ? daysSince(rawStands!.at) : null, by: written ? target?.name ?? null : null } : stands0;
   /** The room's composer when it is the one here, else that room's (opened, filled in, never sent). */
   const sayIn = (roomId: string, text: string) => { closeSheet(); stripSheet?.close(); setWork(false); const here = roomFor(roomId); if (here) here.compose(text); else actions.compose(roomId, text); };
   /** From the work view or the sheet, "Open #room" for this room is the conversation: it goes back to it. Another room opens as a tab. */
   const openRoomHere = (id: string, focus?: string | null, checking?: string | null) => { if (chat && id === target?.id) { closeSheet(); stripSheet?.close(); setWork(false); if (focus || checking) actions.focusMessage?.(focus ?? null, id, checking ?? null); } else (actions.openRoom as (id: string, focus?: string | null, checking?: string | null) => void)(id, focus, checking); };
   /** r30: a run waiting on the user's answer is a row like a request: it opens its room (at the run's message, when it has one) with the composer focused, writing nothing */
+  /** r31: the run's room is its `channel` id, exactly; a run with only a room name is that name, exactly; a run with neither is its node's room. An id or name that is
+   *  not among the rooms is "Room not found": never another room. */
+  const runRoom = (r: Run) => r.channel ? rooms.find((x) => x.id === r.channel) ?? null : r.room ? rooms.find((x) => x.name.replace(/^#/, "").toLowerCase() === r.room!.toLowerCase()) ?? null : roomOfNode(r.node) ?? target;
+  const runMissing = (r: Run) => !roomsPending && rooms.length > 0 && !!(r.channel || r.room) && !runRoom(r);
   const openRun = (r: Run) => {
-    const named = r.room ? rooms.find((x) => x.name.replace(/^#/, "").toLowerCase() === r.room!.toLowerCase()) ?? null : null;
-    const room = named ?? roomOfNode(r.node) ?? target;
+    const room = runRoom(r);
     if (!room) return;
     closeSheet(); stripSheet?.close(); setWork(false);
     const here = roomFor(room.id);
@@ -427,11 +430,11 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   /** r18: a draft note written for the task (its `task` field names it): its text is the message the sheet copies. */
   const draftOf = (t: Task) => { const tid = taskTitle(t.title).id?.toUpperCase(); const d = tid ? tasks.drafts.find((x) => x.task?.toUpperCase() === tid) : null; return d ? { vault: t.vault ?? profile.vault, id: d.id } : null; };
   const sheetView = sheetTask && <TaskSheet key={sheetTask.id} task={sheetTask} gone={sheetGone} here={here} nodeName={nodeName} room={roomOfNode(sheetTask.node) ?? target} roomNamed={(n) => rooms.find((r) => r.name.replace(/^#/, "").toLowerCase() === n.replace(/^#/, "").toLowerCase()) ?? null} inRoom={target?.id} onClose={closeSheet}
-    draft={draftOf(sheetTask)} confirmation={confirm.of(sheetTask)} onRecheckRoom={confirm.retry}
+    draft={draftOf(sheetTask)} confirmation={confirm.of(sheetTask)}
     onAct={(t, a) => tasks.act(t, a, { sheet: true })} onDecide={(t, o) => tasks.decide(t, o)} onNote={actions.openNote} onOpenRoom={openRoomHere} onSay={chat ? sayIn : undefined} onPriority={(t, p) => void tasks.setPriority(t, p)} onStale={tasks.refresh} />;
   /** r20: a row's area when it is shown outside it (Uni's list holds every area's): its subtitle names it when its title can't say where it is. */
   const placeOf = (t: Task) => (t.node !== here ? nodeName(t.node) : null);
-  const companionProps: CompanionProps = { stands, ready: tasks.ready && privacyKnown, load, feed: panel, rest: panel.rest, moreTitle: privateNote(panel.privateCount), onPrivate: openPrivate, runs, nodeName: node.name, scope: borrowed ? node.name : null, onTask: openSheet, onRun: openRun, scopeAll: isRoot, onNote: actions.openNote, onDecide: decide, placeOf, onEverything: () => { closeSheet(); setWork(true); } };
+  const companionProps: CompanionProps = { stands, ready: tasks.ready && privacyKnown, load, feed: panel, rest: panel.rest, moreTitle: privateNote(panel.privateCount), onPrivate: openPrivate, runs, nodeName: node.name, scope: borrowed ? node.name : null, onTask: openSheet, onRun: openRun, runMissing, scopeAll: isRoot, onNote: actions.openNote, onDecide: decide, placeOf, onEverything: () => { closeSheet(); setWork(true); } };
   const placeholder = chatPlaceholder({ name: node.name, slash: nodeView.own ? nodeView.slash : null, heldBy: nodeView.heldBy ? nodeView.heldBy.name : null });
   // ------------------------------------------------------------------------------------------ the work view (r13)
   const mineLive = isMine;
@@ -449,7 +452,7 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   </div> : null;
   const foot = node.kind === "project" && body ? <details className="th-note wv-note"><summary>Project note</summary><Body body={body} mentions={[]} me={null} /></details> : null;
   const workMain = <WorkView nodeName={node.name} feed={feed} others={othersHere} later={later} runs={runs} drafts={drafts} privateOther={privateOther} ready={tasks.ready && privacyKnown} load={load} activity={tasks.activity}
-    onTask={openSheet} onRun={openRun} scopeAll={isRoot} onDecide={decide} onNote={actions.openNote} onPrivate={openPrivate} placeOf={placeOf} top={top} foot={foot} />;
+    onTask={openSheet} onRun={openRun} runMissing={runMissing} scopeAll={isRoot} onDecide={decide} onNote={actions.openNote} onPrivate={openPrivate} placeOf={placeOf} top={top} foot={foot} />;
   const workOpen = work || !chat || noRoom;
   const workBar = workOpen ? <div className="sr-thread sr-workbar">{chat && !noRoom && <button type="button" className="sr-thread-back sr-work-back" onClick={() => setWork(false)}><span aria-hidden="true">‹</span> Back to chat</button>}
     <span className="sr-thread-label">{`All of ${node.name}'s work`}</span></div> : null;

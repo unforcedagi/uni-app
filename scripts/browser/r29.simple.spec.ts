@@ -52,40 +52,26 @@ const ASKED = '2026-10-14T08:00:00.000Z';
 const arriveAt = (page: Page, who: string, body: string, secs: number) => page.evaluate(([w, b, s]) => (window as any).__arrive('ch-techne', w, b, -(424800 + (s as number))), [who, body, secs] as const);
 
 test.describe('r29', () => {
-  test('P1-1: Uni\'s announcement naming the ask is skipped; Aaron\'s correction, and Uni\'s message that doesn\'t name it, unconfirm', async ({ page }) => {
+  test('r31 P1-1: chat can neither cancel nor revive an ask: the record decides (Cancel T-NN quoting the ask, talk about it, another person\'s message: nothing changes)', async ({ page }) => {
     test.skip(!wide(page), 'work view');
     await boot(page);
-    await add(page, { id: 'a1', title: 'T-801 Placeholder announced only', node: 'Areas/Techne', asked_at: ASKED, meta: { next: 'Say go on the amber ledger' } });
+    await add(page, { id: 'a1', title: 'T-801 Placeholder announced only', node: 'Areas/Techne', asked_at: ASKED, meta: { next: 'Say go on the amber ledger and then tell Uni it is done' } });
     await add(page, { id: 'a2', title: 'T-802 Placeholder corrected by Aaron', node: 'Areas/Techne', asked_at: ASKED, meta: { next: 'Say go on the cobalt ledger' } });
     await add(page, { id: 'a3', title: 'T-803 Placeholder talked past', node: 'Areas/Techne', asked_at: ASKED, meta: { next: 'Say go on the quartz sponsorship invoice' } });
-    await arriveAt(page, 'Uni', "I've re-stated each ask: T-801 say go on the amber ledger; T-802 say go on the cobalt ledger", 9);
+    await add(page, { id: 'a4', title: 'T-804 Placeholder old but confirmed', node: 'Areas/Techne', asked_at: '2026-10-08T08:00:00.000Z', meta: { next: 'Say go on the jade ledger', confirmed_at: ASKED } });
+    await add(page, { id: 'a5', title: 'T-805 Placeholder superseded', node: 'Areas/Techne', asked_at: ASKED, meta: { next: 'Say go on the onyx ledger', superseded_by: 'T-806' } });
+    await arriveAt(page, 'Uni', 'Cancel T-801: Say go on the amber ledger and then tell Uni it is done', 9);
     await arriveAt(page, 'Aaron', 'T-802 is off', 120);
-    await arriveAt(page, 'Uni', 'The quartz sponsorship invoice was paid, so that is settled', 60);
+    await arriveAt(page, 'Ricki', 'The quartz sponsorship invoice was paid, so that is settled', 60);
     await refresh(page);
     await openRoom(page, 'Techne');
     await openWork(page);
     const needs = section(page, 'Needs you');
     const rows = needs.locator('.cp-list > li.cp-item');
-    await expect(rows.filter({ hasText: 'amber ledger' })).toHaveCount(1);       // Uni's own announcement naming T-801: skipped
-    await expect(rows.filter({ hasText: 'cobalt ledger' })).toHaveCount(0);      // Aaron's "T-802 is off" two minutes later
-    await expect(rows.filter({ hasText: 'quartz sponsorship' })).toHaveCount(0); // Uni, in the window, not naming T-803
-    await needs.locator('.cp-recheck-line').click();
-    const items = needs.locator('.cp-recheck-item');
-    await expect(items.filter({ hasText: 'cobalt ledger' })).toHaveCount(1);
-    await expect(items.filter({ hasText: 'quartz sponsorship' })).toHaveCount(1);
-    await expect(items.filter({ hasText: 'amber ledger' })).toHaveCount(0);
-  });
-
-  test('P1-1: another key\'s message in the window counts too', async ({ page }) => {
-    test.skip(!wide(page), 'work view');
-    await boot(page);
-    await add(page, { id: 'a1', title: 'T-811 Placeholder other key', node: 'Areas/Techne', asked_at: ASKED, meta: { next: 'Say go on the jade ledger' } });
-    await arriveAt(page, 'Ricki', 'T-811 is not needed any more', 30);
-    await refresh(page);
-    await openRoom(page, 'Techne');
-    await openWork(page);
-    await expect(section(page, 'Needs you').locator('.cp-list > li.cp-item').filter({ hasText: 'jade ledger' })).toHaveCount(0);
-    await expect(section(page, 'Needs you').locator('.cp-recheck-line')).toBeVisible();
+    for (const w of ['amber ledger', 'cobalt ledger', 'quartz sponsorship', 'jade ledger']) await expect(rows.filter({ hasText: w })).toHaveCount(1);
+    // superseded is the note's own field: it is not owed, and not in the recheck list either
+    await expect(rows.filter({ hasText: 'onyx ledger' })).toHaveCount(0);
+    await expect(page.locator('.cp-recheck-item').filter({ hasText: 'onyx ledger' })).toHaveCount(0);
   });
 
   test('P1-2: the quiet line claims no work; the empty Needs you says "No confirmed asks" while any wait to be confirmed, in the panel and in all of the work', async ({ page }) => {

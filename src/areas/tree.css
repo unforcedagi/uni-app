@@ -676,7 +676,6 @@
 .cp-item .cp-next.open { max-height: none; overflow: visible; }
 
 /* r25: the chat couldn't be read: a quiet line under the "asked" line, never a cue */
-.task-lookfail { margin: 0 0 6px; }
 .cp-stale { margin: 0; font: 400 14px/1.4 var(--th-sans, inherit); color: var(--th-mute); }
 .cp-said { margin: 4px 0 0; font: 400 12.5px/1.4 var(--th-sans, inherit); color: var(--th-mute); }
 .cp-said > summary { cursor: pointer; width: fit-content; }
@@ -692,7 +691,6 @@
 .task-sub-title { margin: -2px 0 8px; font-size: 13.5px; color: var(--th-mute); }
 .task-stepof { display: block; margin: 6px 0 0; font: 500 12px/1.4 var(--th-sans, inherit); color: var(--th-mute); }
 .task-notwritten { margin: 2px 0 10px; }
-.task-lookpending { color: var(--th-mute); }
 .task-do.task-anyway { margin-left: auto; }
 .cp-stands[data-stale="part"] { padding-top: 2px; }
 .wv-sub { font-weight: 400; font-size: 12.5px; color: var(--th-mute); letter-spacing: 0; margin-left: 6px; text-transform: none; }
@@ -723,7 +721,6 @@
 .cp-recheck-go { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 2px; }
 .cp-rc-open, .cp-rc-anyway { all: unset; box-sizing: border-box; min-height: 36px; display: inline-flex; align-items: center; cursor: pointer; font: 500 13.5px var(--th-sans); color: var(--th-ink); text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
 .cp-rc-anyway { font-weight: 400; color: var(--th-mute); }
-.cp-checking { margin: 6px 0 0; font: 400 13px/1.4 var(--th-sans); color: var(--th-mute); }
 .cp-run-text .cp-run-step { display: block; }
 .cp-run-text .cp-run-place { display: block; margin: 0; font: 400 12.5px/1.35 var(--th-sans); color: var(--th-mute); }
 .cp-run-waiting { align-items: flex-start; }

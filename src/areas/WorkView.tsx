@@ -5,7 +5,7 @@
 // rooms' business: logged, never shown. Styling is in tree.css.
 import { useEffect, useState, type ReactNode } from "react";
 import { cleanText } from "../interface/contract";
-import { checkingAsks, NeedRow, PrivateRow, Rechecks, RunText, WaitingRuns } from "./Companion";
+import { NeedRow, PrivateRow, Rechecks, RunText, WaitingRuns } from "./Companion";
 import { isActiveRun, type Draft, type Run } from "./steerCore";
 import { noneLine, quietAgo, runStateLabel, stampMs, titleWords, waitingOnYou, type NeedsFeed, type PrivateNeed } from "./simpleCore";
 import type { TaskLoad } from "./Companion";
@@ -33,7 +33,7 @@ export type WorkViewProps = {
   activity: { ready: boolean; error: string | null; lastOk: number | null };
   onTask: (t: Task) => void;
   /** r30: a run waiting on the user opens its room at the run's message, the composer focused */
-  onRun?: (r: Run) => void; onDecide: (t: Task, option: string) => void; onNote: (ref: NoteRef) => void; onPrivate: (open: PrivateNeed["open"]) => void;
+  onRun?: (r: Run) => void; runMissing?: (r: Run) => boolean; onDecide: (t: Task, option: string) => void; onNote: (ref: NoteRef) => void; onPrivate: (open: PrivateNeed["open"]) => void;
   /** r30: this is Uni's own work view: its counts are across all rooms; any other room's are its own */
   scopeAll?: boolean;
   /** r20: a row's area when it is shown outside it (an action row's subtitle names it). */
@@ -73,8 +73,7 @@ export function WorkView(p: WorkViewProps) {
         {p.feed.privates.map((x) => <PrivateRow key={x.key} p={x} onPrivate={p.onPrivate} />)}
         {pending.map((t) => <NeedRow key={t.id} t={t} onTask={p.onTask} onDecide={p.onDecide} onNote={p.onNote} area={p.placeOf?.(t) ?? null} />)}
       </ul>}
-      <WaitingRuns runs={waiting} className="cp-list cp-waiting wv-waiting" onRun={p.onRun} />
-      {!!p.feed.checking?.length && <p className="cp-checking" role="status" aria-busy="true">{checkingAsks(p.feed.checking.length)}</p>}
+      <WaitingRuns runs={waiting} className="cp-list cp-waiting wv-waiting" onRun={p.onRun} missing={p.runMissing} />
       <Rechecks tasks={p.feed.recheck ?? []} why={p.feed.recheckWhy} scope={p.scopeAll ? "all" : "room"} onTask={p.onTask} placeOf={p.placeOf} />
     </section>
     {/* r29 (Codex P1-3): the summary is a dated account, below what needs you */}

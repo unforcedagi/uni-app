@@ -3,7 +3,7 @@
 // Run: node --experimental-strip-types scripts/simpleR26.test.ts
 import assert from "node:assert/strict";
 import {
-  answersReady, checkInResult, closedTask, currentStep, detailLists, gateOf, itemForms, liveRuns, needsYou, notWrittenDown, referencedItems,
+  answersReady, closedTask, currentStep, detailLists, itemForms, liveRuns, needsYou, notWrittenDown, referencedItems,
   revisionMoved, rowAction, clauseForms, stepHeading, stepNotes, summaryClauses, titleSays, ANSWER_ANYWAY,
 } from "../src/areas/simpleCore.ts";
 
@@ -133,16 +133,6 @@ check("a run about a closed or missing task is not running; one about an open ta
 });
 
 // ---- 4 (Codex P1 1): a check gates answers
-check("the four lookup states (kept internally); answers are ready only when current, or after Answer anyway", () => {
-  assert.equal(gateOf(false, null), "none", "nothing to look up");
-  assert.equal(gateOf(true, null), "pending");
-  const keys = { ids: ["#38"], words: [] };
-  assert.equal(gateOf(true, checkInResult({ at: "2026-10-12", kind: "added" }, null, keys)), "failed");
-  assert.equal(gateOf(true, checkInResult({ at: "2026-10-12", kind: "added" }, [], keys)), "none");
-  assert.equal(gateOf(true, checkInResult({ at: "2026-10-12", kind: "added" }, [{ ts: Date.parse("2026-10-13T10:00:00Z") / 1000, body: "deploy #38 went fine" }], keys)), "found");
-  assert.equal(answersReady("confirmed", false), true);
-  for (const g of ["pending", "recheck"] as const) { assert.equal(answersReady(g, false), false, g); assert.equal(answersReady(g, true), true, `${g} after ${ANSWER_ANYWAY}`); }
-});
 check("the revision guard: a task changed since the sheet loaded", () => {
   assert.equal(revisionMoved("2026-10-14T10:00:00Z", "2026-10-14T10:00:00Z"), false);
   assert.equal(revisionMoved("2026-10-14T10:00:00Z", "2026-10-14T11:00:00Z"), true);

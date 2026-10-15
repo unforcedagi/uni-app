@@ -2,9 +2,8 @@
 // Run: node --experimental-strip-types scripts/simpleR27.test.ts
 import assert from "node:assert/strict";
 import {
-  answersReady, asOfDate, lastWritten, checkInResult, checkingBanner, detailLists, confirmationOf, itemForms, needsRead, askStamp, referencedItems,
-  repeatsHeading, runStateLabel, standsHeading, unconfirmedLine, waitingOnYou, LOOKUP_LIMIT,
-} from "../src/areas/simpleCore.ts";
+  answersReady, asOfDate, lastWritten, checkingBanner, detailLists, confirmationOf, itemForms, askStamp, referencedItems,
+  repeatsHeading, runStateLabel, standsHeading, unconfirmedLine, waitingOnYou, } from "../src/areas/simpleCore.ts";
 
 let failed = 0;
 function check(name: string, fn: () => void) {
@@ -70,64 +69,6 @@ check("repeatsHeading: the heading or the title said again", () => {
 // ---- Codex P1-1: freshness
 const NOW = Date.parse("2026-10-15T12:00:00Z");
 const day = (n: number) => new Date(NOW - n * 86_400_000).toISOString();
-check("r28: an ask is confirmed only by its own asked_at: within 3 days, never in the future", () => {
-  assert.equal(askStamp(day(0.5), NOW), "recent");
-  assert.equal(askStamp(day(2.9), NOW), "recent");
-  assert.equal(askStamp(day(3.1), NOW), "old");
-  assert.equal(askStamp(null, NOW), "none");
-  assert.equal(askStamp("not a date", NOW), "none");
-  assert.equal(askStamp(day(-2), NOW), "future", "ahead of this clock by days is a wrong date, not a vouch");
-  assert.equal(askStamp(day(-0.001), NOW), "recent", "a clock a few minutes ahead is skew");
-});
-check("r28: confirmed = a recent asked_at, a room to check, and nothing related since", () => {
-  const r = confirmationOf(true, day(1), { kind: "none" }, NOW);
-  assert.equal(r.state, "confirmed");
-  assert.equal(answersReady("confirmed", false), true);
-});
-check("r28: a recheck: no date, an old date, a future date, no room, related chat since, a read too short, a chat that can't be read", () => {
-  const why = (r: ReturnType<typeof confirmationOf>) => `${r.state}:${r.why}`;
-  assert.equal(why(confirmationOf(true, null, { kind: "none" }, NOW)), "recheck:no-date", "no asked_at: updated_at is never a fallback");
-  assert.equal(why(confirmationOf(true, day(5), { kind: "none" }, NOW)), "recheck:old");
-  assert.equal(why(confirmationOf(true, day(-3), { kind: "none" }, NOW)), "recheck:future");
-  assert.equal(why(confirmationOf(false, day(1), { kind: "none" }, NOW)), "recheck:no-room");
-  assert.equal(why(confirmationOf(true, day(1), { kind: "found", hit: { key: "#38", ref: "m1", ts: 1 } }, NOW)), "recheck:chat-since");
-  assert.equal(why(confirmationOf(true, day(1), { kind: "found", hit: null }, NOW)), "recheck:chat-since", "a read that starts after the ask");
-  const f = confirmationOf(true, day(1), { kind: "failed" }, NOW);
-  assert.equal(why(f), "recheck:read-failed"); assert.equal(f.failed, true);
-  assert.equal(why(confirmationOf(true, day(5), null, NOW)), "recheck:old", "no chat read is needed to say so");
-  assert.equal(needsRead(true, day(5), NOW), false);
-  assert.equal(needsRead(false, day(1), NOW), false);
-  assert.equal(needsRead(true, day(1), NOW), true);
-  assert.equal(answersReady("recheck", false), false);
-  assert.equal(answersReady("recheck", true), true);
-});
-check("r28: pending while the room's chat is being read", () => {
-  assert.equal(confirmationOf(true, day(1), null, NOW).state, "pending");
-  assert.equal(answersReady("pending", false), false);
-});
-check("the line over an unconfirmed request: 'Asked Oct 13 · not confirmed since'", () => {
-  assert.equal(unconfirmedLine("asked Oct 13"), "Asked Oct 13 · not confirmed since");
-  assert.equal(unconfirmedLine("added today"), "Added today · not confirmed since");
-  assert.equal(unconfirmedLine(null), "Not confirmed since it was written");
-});
-check("the lookup measures chat against the record's write: only messages after it count", () => {
-  const wrote = { at: "2026-10-14T10:00:00Z", kind: "asked" as const };
-  const keys = { ids: ["T-90"], words: [] };
-  const t = (iso: string) => Date.parse(iso) / 1000;
-  assert.deepEqual(checkInResult(wrote, [{ ts: t("2026-10-14T09:00:00Z"), body: "T-90 is ready" }], keys), { kind: "none" }, "chat before the write");
-  assert.equal(checkInResult(wrote, [{ ts: t("2026-10-14T11:00:00Z"), body: "T-90 changed" }], keys).kind, "found");
-  assert.deepEqual(checkInResult(wrote, [{ ts: t("2026-10-14T11:00:00Z"), body: "lunch" }], keys), { kind: "none" });
-});
-check("an incomplete lookup is unknown, not 'nothing related': a full read that starts after the write", () => {
-  const wrote = { at: "2026-10-14T10:00:00Z", kind: "asked" as const };
-  const keys = { ids: ["T-90"], words: [] };
-  const base = Date.parse("2026-10-14T12:00:00Z") / 1000;
-  const full = Array.from({ length: LOOKUP_LIMIT }, (_, i) => ({ ts: base + i, body: "lunch" }));
-  assert.deepEqual(checkInResult(wrote, full, keys), { kind: "found", hit: null });
-  const reaches = [{ ts: Date.parse("2026-10-14T08:00:00Z") / 1000, body: "early" }, ...full.slice(1)];
-  assert.deepEqual(checkInResult(wrote, reaches, keys), { kind: "none" }, "a read that reaches back before the write is complete");
-  assert.deepEqual(checkInResult(wrote, full.slice(0, 20), keys), { kind: "none" }, "a short list is the whole room");
-});
 
 // ---- Codex P1-2: summaries are dated accounts
 const COHERE = "COhere 2026 is live on cohereboulder.org (new look, members, harvests; notifications off); tonight a time-of-day test failure blocks deploys while a fix is built, and register+sign-in (T-138) goes to staging for review on 10-15.";

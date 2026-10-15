@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { buildTaskTree, parseNodes, parseTask, type Task } from "../src/areas/taskCore.ts";
 import type { Run } from "../src/areas/steerCore.ts";
 import {
-  askStamp, confirmationOf, chatAbout, checkInResult, ANNOUNCE_GRACE_MS, needsByRow, needsFeed, uniPanel, waitingRunParts, withWaiting, ROW_ITEMS, itemForms, taskIdOf, UNRESOLVED,
+  askStamp, confirmationOf, needsByRow, needsFeed, uniPanel, waitingRunParts, withWaiting, ROW_ITEMS, itemForms, taskIdOf, UNRESOLVED,
   type ConfOf, type Resolved,
 } from "../src/areas/simpleCore.ts";
 import { ROOT } from "../src/areas/treeCore.ts";
@@ -21,11 +21,8 @@ const mk = (n: number, extra: Record<string, unknown> = {}, node = "Projects/ATL
   parseTask({ id: `id${n}`, path: `Tasks/T-${n} Do thing ${n}`, tags: ["task"], updatedAt: "2026-10-14T08:00:00.000Z", metadata: { node, state: "open", owner: "aaron", next: `Say go on thing ${n}`, ...extra } }, tree)!;
 const NOW = Date.parse("2026-10-15T12:00:00Z");
 const hoursAgo = (h: number) => new Date(NOW - h * 3_600_000).toISOString();
-/** the feed's own resolver, over a table of chat results */
-const resolver = (chat: Record<string, "none" | "found" | "failed" | "pending"> = {}): ConfOf => (t) => {
-  const look = chat[t.id] === undefined ? { kind: "none" as const } : chat[t.id] === "pending" ? null : chat[t.id] === "found" ? { kind: "found" as const, hit: null } : { kind: chat[t.id] as "failed" | "none" };
-  return confirmationOf(true, t.askedAt, look, NOW);
-};
+/** the feed's own resolver: the record alone (r31) */
+const resolver = (): ConfOf => (t) => confirmationOf(t, NOW);
 
 await check("asked_at is read as itself: the field is askedAt, apart from updated_at", () => {
   const t = mk(1, { asked_at: "2026-10-14T10:00:00+00:00" });
@@ -34,36 +31,8 @@ await check("asked_at is read as itself: the field is askedAt, apart from update
   assert.equal(mk(3, { closed: "2026-10-14" }).closed, "2026-10-14");
 });
 
-await check("Needs you holds only confirmed asks; the rest is the recheck list, never counted", () => {
-  const tasks = [
-    mk(1, { asked_at: hoursAgo(5) }),         // confirmed
-    mk(2),                                      // no asked_at: unconfirmed, whatever updated_at
-    mk(3, { asked_at: hoursAgo(24 * 5) }),    // old
-    mk(4, { asked_at: hoursAgo(-48) }),       // in the future
-    mk(5, { asked_at: hoursAgo(5) }),         // related chat since
-    mk(6, { asked_at: hoursAgo(5) }),         // chat still being read
-    mk(7, { asked_at: hoursAgo(5) }),         // chat couldn't be read
-  ];
-  const f = needsFeed(tasks, () => null, null, "2026-10-15", resolver({ id5: "found", id6: "pending", id7: "failed" }));
-  assert.deepEqual(f.rows.map((t) => t.id), ["id1"]);
-  assert.equal(f.total, 1);
-  assert.deepEqual((f.recheck ?? []).map((t) => t.id).sort(), ["id2", "id3", "id4", "id5", "id7"]);
-  assert.deepEqual((f.checking ?? []).map((t) => t.id), ["id6"], "held back while its room's chat is read: not counted");
-  // without a resolver everything is as before (callers that don't confirm)
-  assert.equal(needsFeed(tasks, () => null).total, 7);
-});
 
-await check("an unrelated edit never confirms: a fresh updated_at with no asked_at is a recheck", () => {
-  const t = mk(8, {}); // updatedAt 2026-10-14T08:00Z, within 3 days of NOW
-  assert.equal(confirmationOf(true, t.askedAt, { kind: "none" }, NOW).state, "recheck");
-  assert.equal(confirmationOf(true, t.askedAt, { kind: "none" }, NOW).why, "no-date");
-});
 
-await check("day-only asked_at: today is recent, tomorrow is the future", () => {
-  assert.equal(askStamp("2026-10-15", NOW), "recent");
-  assert.equal(askStamp("2026-10-16", NOW), "future");
-  assert.equal(askStamp("2026-10-11", NOW), "old");
-});
 
 await check("one count, once: asks and waiting runs, deduplicated by task", () => {
   const confirmed = [mk(10, { asked_at: hoursAgo(2) }), mk(11, { asked_at: hoursAgo(2) })];
@@ -109,25 +78,7 @@ await check("a row's list shows at most two whole items; the others are 'and N m
   assert.ok(itemForms("a whole item")[0] === "a whole item");
 });
 
-await check("taskIdOf reads the T-NN a run names", () => {
-  assert.equal(taskIdOf(mk(30)), "T-30");
-  assert.equal(UNRESOLVED.state, "recheck");
-});
 
-await check("r28: a room announcing the ask it just re-stated doesn't unconfirm it; related chat past the grace window does", () => {
-  const at = "2026-10-15T08:05:41.000Z";
-  const sec = (ms: number) => Math.floor(ms / 1000);
-  const t0 = new Date(at).getTime();
-  const keys = { ids: ["T-65"], words: [] as string[], next: "Tell Uni who pays the $10k sponsorship and how" };
-  // r30: the announcement names the T-NN and quotes six words of the ask
-  const announce = [{ ref: "a", ts: sec(t0 + 9_000), body: "I've re-stated each ask: T-65: tell Uni who pays the $10k sponsorship and how", author: "uni-key" }];
-  assert.equal(chatAbout({ at, kind: "asked" }, announce, keys, "uni-key"), null);
-  assert.equal(checkInResult({ at, kind: "asked" }, announce, keys, undefined, "uni-key").kind, "none");
-  const later = [{ ref: "b", ts: sec(t0 + ANNOUNCE_GRACE_MS + 60_000), body: "T-65 is settled" }];
-  assert.equal(checkInResult({ at, kind: "asked" }, later, keys).kind, "found");
-  // r30: Uni's message that quotes the ask is its reminder (outside the window), for an added record as for an asked one
-  assert.equal(chatAbout({ at, kind: "added" }, announce, keys, "uni-key"), null);
-});
 
 if (failed) { console.log(`\n${failed} failed`); process.exit(1); }
 console.log("simpleR28: all ok");

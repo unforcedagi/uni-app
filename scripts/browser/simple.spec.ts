@@ -2132,7 +2132,7 @@ test.describe('r15', () => {
     await openRoom(page, 'COhere 2026');
     await openWork(page);
     const wv = page.locator('.sr-work');
-    await expect(wv.locator('.cp-item').filter({ hasText: 'COhere festival readiness' }).locator('.cp-detail.overdue')).toHaveText(/^was due Oct 7 · (?:asked|added) \w+ \d+$/);
+    await expect(wv.locator('.cp-item').filter({ hasText: 'COhere festival readiness' }).locator('.cp-detail.overdue')).toHaveText('was due Oct 7');
     const n = await wv.locator('section[aria-label="Needs you"] .wv-n').innerText();
     await page.evaluate(() => { (window as any).__queryFails = ['task']; });
     await refresh(page, '2026-10-09T10:02:00.000Z');
@@ -3710,7 +3710,7 @@ test.describe('r22', () => {
   ];
   // r23: `asked` is the request's own time (the record's `updatedAt` is not a request date)
   const seed = async (page: Page, node = 'Projects/ATLAS', asked = '2026-10-11T18:00:00.000Z') => {
-    for (const r of ROWS) await add(page, { id: r.id, title: r.title, node, meta: { priority: 'now', next: r.next, asked, ...(r.due ? { due: r.due } : {}) } });
+    for (const r of ROWS) await add(page, { id: r.id, title: r.title, node, meta: { priority: 'now', next: r.next, asked, asked_at: asked, ...(r.due ? { due: r.due } : {}) } });
     await refresh(page, '2026-10-14T09:00:00.000Z');
   };
   const assertWhole = async (row: ReturnType<Page['locator']>, r: (typeof ROWS)[number]) => {
@@ -3763,14 +3763,14 @@ test.describe('r22', () => {
     await expect(page.locator('.sr-work section[aria-label="Needs you"] > .cp-list > .cp-item').filter({ hasText: 'Say go on prod deploy' })).toHaveCount(0);
     await openTaskSheet(page, 'Say go on prod deploy');
     await expect(page.locator('.sr-work .cp-recheck-item').filter({ hasText: 'Say go on prod deploy' }).locator('.cp-recheck-step')).toHaveText('Say go on prod deploy of #38 + #58; Eileen signs off the copy/photos before/after (posting today); yes/no on add-only DB'); // r30: the whole step
-    await expect(page.locator('.sr-work .cp-recheck-item').filter({ hasText: 'Say go on prod deploy' }).locator('.cp-recheck-asked')).toHaveText(/^chat since in #techne$/i); // r30: its reason (the sheet says when it was asked)
+    await expect(page.locator('.sr-work .cp-recheck-item').filter({ hasText: 'Say go on prod deploy' }).locator('.cp-recheck-asked')).toHaveText(/^asked Oct 6$/i); // r31: its reason is the date of its record (asked_at), the sheet says the same
     const sheet = sheetOf(page);
     await expect(sheet.locator('h2')).toHaveText('Say go on prod deploy of #38 + #58; Eileen signs off the copy/photos before/after (posting today); yes/no on add-only DB');
     await expect(sheet.locator('.task-asked')).toContainText('Asked Oct 6');
     // Techne's chat has messages from Oct 9: more than a day newer than Oct 6
-    await expect(sheet.locator('.task-unconfirmed')).toHaveText(/^Asked Oct 6 · chat since in #techne$/i);
+    await expect(sheet.locator('.task-unconfirmed')).toHaveText(/^Asked Oct 6 · not confirmed since$/i);
     await expect(sheet.locator('.task-movedon')).toHaveCount(0);
-    // the request is still there; r26: its "Say it" waits behind "Answer anyway" while the chat check is unresolved
+    // the request is still there; r26: its "Say it" waits behind "Answer anyway" while it is not confirmed
     await expect(sheet.getByRole('button', { name: /^Say it in #/ })).toHaveCount(0);
     await sheet.getByRole('button', { name: 'Answer anyway' }).click();
     await expect(sheet.getByRole('button', { name: /^Say it in #/ })).toBeVisible();
@@ -3881,15 +3881,15 @@ test.describe('r23', () => {
     await boot(page);
     // Techne's chat has messages up to Oct 9; this request was asked on Oct 6
     await page.evaluate(() => (window as any).__arrive('ch-techne', 'Uni', 'The placeholder deploy is ready whenever you are.', -426600));
-    await add(page, { id: 'go', title: 'T-303 Placeholder deploy', node: 'Areas/Techne', meta: { next: 'Say go on the placeholder deploy', asked: '2026-10-06T18:00:00.000Z' } });
-    await add(page, { id: 'go3', title: 'T-309 Placeholder budget', node: 'Areas/Techne', meta: { next: 'Say go on the quarterly budget', asked: '2026-10-06T18:00:00.000Z' } });
+    await add(page, { id: 'go', title: 'T-303 Placeholder deploy', node: 'Areas/Techne', meta: { next: 'Say go on the placeholder deploy', asked: '2026-10-06T18:00:00.000Z', asked_at: '2026-10-06T18:00:00.000Z' } });
+    await add(page, { id: 'go3', title: 'T-309 Placeholder budget', node: 'Areas/Techne', meta: { next: 'Say go on the quarterly budget', asked: '2026-10-06T18:00:00.000Z', asked_at: '2026-10-06T18:00:00.000Z' } });
     await add(page, { id: 'go2', title: 'T-304 Placeholder fresh deploy', node: 'Areas/Techne', updatedAt: '2026-10-14T08:45:00.000Z', meta: { asked_at: '2026-10-14T08:45:00.000Z', next: 'Say go on the fresh placeholder deploy', asked: new Date(Date.now() + 5000).toISOString() } });
     await refresh(page, '2026-10-14T09:00:00.000Z');
     await openRoom(page, 'Techne');
     await openWork(page);
     await openTaskSheet(page, 'Say go on the placeholder deploy');
     const sheet = sheetOf(page);
-    await expect(sheet.locator('.task-unconfirmed')).toHaveText(/^Asked Oct 6 · chat since in #techne$/i);
+    await expect(sheet.locator('.task-unconfirmed')).toHaveText(/^Asked Oct 6 · not confirmed since$/i);
     await expect(sheet.locator('.task-movedon')).toHaveCount(0);
     const primary = sheet.locator('.task-do.primary');
     await expect(primary).toHaveCount(1);
@@ -3904,14 +3904,11 @@ test.describe('r23', () => {
     await expect(sheetOf(page)).toHaveCount(0);
     await expect(page.locator('.sr-chat')).toBeVisible();
     await expect(page.locator('.sr-chat textarea, .sr-chat [contenteditable]').first()).toHaveText('');
-    // r24: and it is scrolled to the first message about the request, marked
-    await expect(page.locator('.message.search-focus')).toContainText('The placeholder deploy is ready');
     await openWork(page);
-    // r24: the room's newer chat is about other things: no cue, and "Say it" stays the primary
+    // r31: the record alone decides: the other Oct 6 ask is no more current for the room's chat being about something else
     await openTaskSheet(page, 'Say go on the quarterly budget');
-    await expect(sheetOf(page).locator('.task-asked')).toBeVisible();
+    await expect(sheetOf(page).locator('.task-unconfirmed')).toHaveText(/^Asked Oct 6 · not confirmed since$/i);
     await expect(sheetOf(page).locator('.task-movedon')).toHaveCount(0);
-    await expect(sheetOf(page).locator('.task-do.primary')).toHaveText(/^Say it in #/);
     await sheetOf(page).getByRole('button', { name: 'Close' }).click();
     await openTaskSheet(page, 'Say go on the fresh placeholder deploy');
     await expect(sheetOf(page).locator('.task-movedon')).toHaveCount(0);
@@ -3921,13 +3918,13 @@ test.describe('r23', () => {
   test('r24: a "look at" sheet whose room has talked about it leads with "Check in #room first" like every other sheet with the cue; its link is secondary', async ({ page }) => {
     await boot(page);
     await page.evaluate(() => (window as any).__arrive('ch-techne', 'Uni', 'The signup staging copy is posted, please look.', -426600));
-    await add(page, { id: 'st1', title: 'T-330 Placeholder staging look', node: 'Areas/Techne', meta: { next: 'Look at placeholder-signup-staging.example.invalid on phone, then say go on the signup staging', asked: '2026-10-06T18:00:00.000Z' } });
+    await add(page, { id: 'st1', title: 'T-330 Placeholder staging look', node: 'Areas/Techne', meta: { next: 'Look at placeholder-signup-staging.example.invalid on phone, then say go on the signup staging', asked: '2026-10-06T18:00:00.000Z', asked_at: '2026-10-06T18:00:00.000Z' } });
     await refresh(page, '2026-10-14T09:00:00.000Z');
     await openRoom(page, 'Techne');
     await openWork(page);
     await openTaskSheet(page, 'placeholder-signup-staging');
     const sheet = sheetOf(page);
-    await expect(sheet.locator('.task-unconfirmed')).toHaveText(/^Asked Oct 6 · chat since in #techne$/i);
+    await expect(sheet.locator('.task-unconfirmed')).toHaveText(/^Asked Oct 6 · not confirmed since$/i);
     await expect(sheet.locator('.task-movedon')).toHaveCount(0);
     await expect(sheet.locator('.task-do.primary')).toHaveCount(1);
     await expect(sheet.locator('.task-do.primary')).toHaveText(/^Check in #techne first$/i);
@@ -4126,39 +4123,32 @@ test.describe('r23', () => {
     expect(await sheet.innerText()).not.toMatch(/\(3…|\(3\.\.\./);
   });
 
-  test('r25 (Codex P1 2), r27: Check in: related chat after the record\'s write (unconfirmed, Check in leads), couldn\'t check (quiet "Couldn\'t read #room · Retry"), nothing related (ordinary actions); Check in keeps the question over the composer', async ({ page }) => {
+  test('r25 (Codex P1 2), r27: Check in: an ask past 3 days is unconfirmed and Check in leads; it keeps the question over the composer (r31: no chat is read)', async ({ page }) => {
     await boot(page);
     await page.evaluate(() => (window as any).__arrive('ch-techne', 'Uni', 'The placeholder deploy is ready whenever you are.', -426600));
-    await add(page, { id: 'ci1', title: 'T-303 Placeholder deploy', node: 'Areas/Techne', updatedAt: '2026-10-13T12:00:00.000Z', meta: { next: 'Say go on the placeholder deploy', asked: '2026-10-06T18:00:00.000Z' } });
-    await add(page, { id: 'ci2', title: 'T-309 Placeholder budget', node: 'Areas/Techne', updatedAt: '2026-10-13T12:00:00.000Z', meta: { next: 'Say go on the quarterly budget', asked: '2026-10-06T18:00:00.000Z' } });
-    // couldn't check: the lookup fails, which is not "nothing related" (r28: the feed reads the room's chat, so it fails before the list is shown)
-    await page.evaluate(() => { (window as any).__lookupFails = true; });
+    await add(page, { id: 'ci1', title: 'T-303 Placeholder deploy', node: 'Areas/Techne', updatedAt: '2026-10-13T12:00:00.000Z', meta: { next: 'Say go on the placeholder deploy', asked: '2026-10-06T18:00:00.000Z', asked_at: '2026-10-06T18:00:00.000Z' } });
+    await add(page, { id: 'ci2', title: 'T-309 Placeholder budget', node: 'Areas/Techne', updatedAt: '2026-10-13T12:00:00.000Z', meta: { next: 'Say go on the quarterly budget', asked: '2026-10-06T18:00:00.000Z', asked_at: '2026-10-06T18:00:00.000Z' } });
     await refresh(page, '2026-10-14T09:00:00.000Z');
     await openRoom(page, 'Techne');
     await openWork(page);
     await openTaskSheet(page, 'Say go on the placeholder deploy');
     let sheet = sheetOf(page);
-    await expect(sheet.locator('.task-lookfail')).toHaveText(/^Couldn't read #techne · Retry$/i);
+    // r31: the record says when it was asked (Oct 6, past 3 days); nothing in the chat is read, so there is no "couldn't read" and no Retry
+    await expect(sheet.locator('.task-lookfail')).toHaveCount(0);
+    await expect(sheet.locator('.task-unconfirmed')).toHaveText(/^Asked Oct 6 · not confirmed since$/i);
     await expect(sheet.locator('.task-movedon')).toHaveCount(0);
-    await expect(sheet.getByRole('button', { name: /^Check in/ })).toHaveCount(0);
-    await expect(sheet.locator('.task-do.primary')).toHaveText(/^Open #techne$/i);
-    // r26: while the chat can't be read, the answers are not offered as ready; one tap on "Answer anyway" brings them, secondary
+    await expect(sheet.locator('.task-do.primary')).toHaveText(/^Check in #techne first$/i);
+    // r26: the answers are not offered as ready; one tap on "Answer anyway" brings them, secondary
     await expect(sheet.getByRole('button', { name: 'I did this' })).toHaveCount(0);
     await sheet.getByRole('button', { name: 'Answer anyway' }).click();
     await expect(sheet.getByRole('button', { name: 'I did this' })).not.toHaveClass(/primary/);
     await expect(sheet.getByRole('button', { name: /^Say it in #/ })).not.toHaveClass(/primary/);
-    expect(await sheet.innerText()).not.toMatch(/approved|confirmed/i);
-    // Retry, once the chat can be read: related conversation found
-    await page.evaluate(() => { (window as any).__lookupFails = false; });
-    await sheet.getByRole('button', { name: 'Retry' }).click();
-    await expect(sheet.locator('.task-lookfail')).toHaveCount(0);
-    await expect(sheet.locator('.task-unconfirmed')).toHaveText(/^Asked Oct 6 · chat since in #techne$/i);
-    await expect(sheet.locator('.task-movedon')).toHaveCount(0);
-    await expect(sheet.locator('.task-do.primary')).toHaveText(/^Check in #techne first$/i);
-    await expect(sheet.getByRole('button', { name: 'I did this' })).toHaveCount(0);
-    // Check in opens the room at the message and keeps the question in view above the composer
+    expect(await sheet.innerText()).not.toMatch(/approved|(?<!not )confirmed/i);
+    await sheet.getByRole('button', { name: 'Close' }).click();
+    await openTaskSheet(page, 'Say go on the placeholder deploy');
+    sheet = sheetOf(page);
+    // Check in opens the room and keeps the question in view above the composer
     await sheet.locator('.task-do.primary').click();
-    await expect(page.locator('.message.search-focus')).toContainText('The placeholder deploy is ready');
     const banner = page.locator('.checking-banner');
     await expect(banner).toHaveText(/^Checking: Say go on the placeholder deploy/);
     const bb = (await banner.boundingBox())!;
@@ -4168,14 +4158,6 @@ test.describe('r23', () => {
     expect(await banner.innerText()).not.toMatch(/…|\.\.\./);
     await page.getByRole('button', { name: 'Stop checking' }).click();
     await expect(banner).toHaveCount(0);
-    // nothing related: the ordinary actions, no cue, no failure line
-    await openWork(page);
-    await openTaskSheet(page, 'Say go on the quarterly budget');
-    sheet = sheetOf(page);
-    await expect(sheet.locator('.task-asked')).toBeVisible();
-    await expect(sheet.locator('.task-movedon')).toHaveCount(0);
-    await expect(sheet.locator('.task-lookfail')).toHaveCount(0);
-    await expect(sheet.locator('.task-do.primary')).toHaveText(/^Say it in #/);
   });
 
   test('r29 (Codex P1-3): a summary that says something waits on Aaron is not judged by the app: dated, below Needs you, no stale notice, whatever is open', async ({ page }) => {
@@ -4264,7 +4246,8 @@ test.describe('r26', () => {
     const lines = await row.locator('.cp-item-line').allInnerTexts();
     for (const l of lines) { expect(l).not.toMatch(/…|\.\.\.|[,;:]$/); expect(l.trim()).not.toBe('3 answers'); }
     const more = await row.locator('.cp-item-more').count() ? await row.locator('.cp-item-more').innerText() : '';
-    return lines.length + (Number(/^and (\d+) more$/.exec(more.trim())?.[1] ?? /^(\d+) /.exec(more.trim())?.[1] ?? 0));
+    // r31: the row says the list's own length ("6 asks in all"), the same at any width; with nothing left out it says nothing
+    return /^(\d+) \w+ in all$/.exec(more.trim()) ? Number(/^(\d+) /.exec(more.trim())![1]) : lines.length;
   };
   const NEXT113 = "On your phone, look at https://cohereboulder.org (live now), then forward Eileen the asks listed in this task's detail";
   const DETAIL113 = "Live on prod since 10-14 15:24 (PR #61); staging matches. Eileen still owes: (1) OK or cut 6 groups of short functional lines (notifications, email links, install, privacy, harvest/board, profile labels); (2) 3 answers: Spanish versions of 'What is COhere?' and 'What's Coming Up', whether 'Explore events on the community events' should end in 'calendar'; (3) one morning-practice line per day for Oct 15–25 (her doc has 2); (4) yes/no on the Today heading showing just 'Honoring Water (9 AM at Martin Park)' with 'Home practice:' in bold. Aaron: sign in once as a member and open Board, People and Me.";
@@ -4371,16 +4354,15 @@ test.describe('r26', () => {
     expect(await wv.innerText()).not.toMatch(/Self-hosted mail|approved 10-02|Superseded/);
   });
 
-  test('r26 P1 1: a check gates answers: pending, found and failed offer no answers as ready (a decision\'s answers and "I did this" wait behind "Answer anyway"); none shows the ordinary actions', async ({ page }) => {
+  test('r26 P1 1: an ask that is not confirmed offers no answers as ready (a decision\'s answers and "I did this" wait behind "Answer anyway"); a current one shows the ordinary actions', async ({ page }) => {
     await boot(page);
     await page.evaluate(() => (window as any).__arrive('ch-techne', 'Uni', 'The placeholder deploy is ready whenever you are.', -426600));
-    await add(page, { id: 'g1', title: 'T-303 Placeholder deploy', node: 'Areas/Techne', updatedAt: '2026-10-13T12:00:00.000Z', meta: { next: 'Say go on the placeholder deploy', asked: '2026-10-06T18:00:00.000Z' } });
-    await add(page, { id: 'g2', title: 'T-309 Placeholder budget', node: 'Areas/Techne', updatedAt: '2026-10-13T12:00:00.000Z', meta: { next: 'Say go on the quarterly budget', asked: '2026-10-06T18:00:00.000Z' } });
+    await add(page, { id: 'g1', title: 'T-303 Placeholder deploy', node: 'Areas/Techne', updatedAt: '2026-10-13T12:00:00.000Z', meta: { next: 'Say go on the placeholder deploy', asked: '2026-10-06T18:00:00.000Z', asked_at: '2026-10-06T18:00:00.000Z' } });
+    await add(page, { id: 'g2', title: 'T-309 Placeholder budget', node: 'Areas/Techne', updatedAt: '2026-10-13T12:00:00.000Z', meta: { next: 'Say go on the quarterly budget', asked_at: '2026-10-13T12:00:00.000Z' } });
     await refresh(page, '2026-10-14T09:00:00.000Z');
     await openRoom(page, 'Techne');
     await openWork(page);
-    // r28: while a room's chat is being read its asks are not listed at all ("Checking…"), so a sheet is never opened on a request still being checked
-    // found: related talk
+    // not confirmed: asked Oct 6, past 3 days
     await openTaskSheet(page, 'Say go on the placeholder deploy');
     let sheet = sheetOf(page);
     await expect(sheet.locator('.task-lookpending')).toHaveCount(0);
@@ -4393,19 +4375,7 @@ test.describe('r26', () => {
     await expect(sheet.getByRole('button', { name: 'I did this' })).not.toHaveClass(/primary/);
     await expect(sheet.locator('.task-do.primary')).toHaveText(/^Check in #techne first$/i);
     await sheet.getByRole('button', { name: 'Close' }).click();
-    // failed: the room's chat is read again (a minute later) and can't be read
-    await page.evaluate(() => { (window as any).__lookupFails = true; });
-    await refresh(page, '2026-10-14T09:02:00.000Z');
-    await openTaskSheet(page, 'Say go on the placeholder deploy');
-    sheet = sheetOf(page);
-    await expect(sheet.locator('.task-lookfail')).toHaveText(/^Couldn't read #techne · Retry$/i);
-    await expect(sheet.getByRole('button', { name: 'I did this' })).toHaveCount(0);
-    await expect(sheet.locator('.task-do.primary')).toHaveText(/^Open #techne$/i);
-    // none: the chat can be read again (Retry): nothing related to the other request, the ordinary actions
-    await page.evaluate(() => { (window as any).__lookupFails = false; });
-    await sheet.getByRole('button', { name: 'Retry' }).click();
-    await expect(sheet.locator('.task-lookfail')).toHaveCount(0);
-    await sheet.getByRole('button', { name: 'Close' }).click();
+    // r31: a current ask (its own asked_at is recent) has its ordinary actions, whatever the chat says
     await openTaskSheet(page, 'Say go on the quarterly budget');
     sheet = sheetOf(page);
     await expect(sheet.locator('.task-asked')).toBeVisible();
@@ -4417,7 +4387,7 @@ test.describe('r26', () => {
   test('r26 P1 1: a decision\'s answers wait behind "Answer anyway" while its chat check is unresolved, and an answer records the revision it answered in the same write', async ({ page }) => {
     await boot(page);
     await page.evaluate(() => (window as any).__arrive('ch-techne', 'Uni', 'The placeholder hosting choice is settled in the doc.', -426600));
-    await add(page, { id: 'r26d1', title: 'Decide the placeholder hosting choice', tag: 'decision', node: 'Areas/Techne', updatedAt: '2026-10-13T12:00:00.000Z', meta: { options: ['Host A', 'Host B'], next: 'Pick the placeholder hosting choice', asked: '2026-10-06T18:00:00.000Z', task: 'T-500' } });
+    await add(page, { id: 'r26d1', title: 'Decide the placeholder hosting choice', tag: 'decision', node: 'Areas/Techne', updatedAt: '2026-10-13T12:00:00.000Z', meta: { options: ['Host A', 'Host B'], next: 'Pick the placeholder hosting choice', asked: '2026-10-06T18:00:00.000Z', asked_at: '2026-10-06T18:00:00.000Z', task: 'T-500' } });
     await refresh(page, '2026-10-14T09:00:00.000Z');
     await openRoom(page, 'Techne');
     await openWork(page);
@@ -4504,7 +4474,7 @@ test.describe('r27', () => {
     const lines = await row.locator('.cp-item-line').evaluateAll((els) => els.map((e) => ({ text: (e as HTMLElement).innerText.trim(), lines: Math.round(e.getBoundingClientRect().height / (parseFloat(getComputedStyle(e).lineHeight) || 17)) })));
     for (const l of lines) { expect(l.lines, l.text).toBeLessThanOrEqual(2); expect(l.text).not.toMatch(/[,;:]$|…|\.\.\./); expect(l.text).not.toMatch(/^3 answers$/); }
     const more = await row.locator('.cp-item-more').count() ? (await row.locator('.cp-item-more').innerText()).trim() : '';
-    const n = lines.length + (/^and (\d+) more$/.exec(more)?.[1] ? Number(/^and (\d+) more$/.exec(more)![1]) : /^(\d+) /.exec(more)?.[1] ? Number(/^(\d+) /.exec(more)![1]) : 0);
+    const n = /^(\d+) \w+ in all$/.exec(more) ? Number(/^(\d+) /.exec(more)![1]) : lines.length;
     expect(n, `shown ${lines.length} + ${more}`).toBe(total);
     return lines.map((l) => l.text);
   };
@@ -4533,7 +4503,7 @@ test.describe('r27', () => {
     expect(inWork).toContain('one morning-practice line per day for Oct 15–25 (her doc has 2)');
   });
 
-  test('r27 line 5.1: an item too long for two lines is not shown cut: fewer items and "and N more"', async ({ page }) => {
+  test('r27 line 5.1: an item too long for two lines is not shown cut: fewer items and the list total', async ({ page }) => {
     test.skip(!wide(page), 'side panel');
     await page.setViewportSize({ width: 1280, height: 720 });
     await boot(page);
@@ -4551,7 +4521,7 @@ test.describe('r27', () => {
   test('r27 line 5.2: the Checking banner ends at a whole word with no trailing comma, semicolon or colon', async ({ page }) => {
     await boot(page);
     await page.evaluate(() => (window as any).__arrive('ch-techne', 'Uni', 'The placeholder deploy is ready whenever you are.', -426600));
-    await add(page, { id: 'bn1', title: 'T-303 Placeholder deploy', node: 'Areas/Techne', meta: { next: 'Say go on the placeholder deploy (recommended: keep 15, fold 32, archive 40), then confirm the quarterly numbers with Kevin and the dates for the whole rollout, and the parking', asked: '2026-10-06T18:00:00.000Z' } });
+    await add(page, { id: 'bn1', title: 'T-303 Placeholder deploy', node: 'Areas/Techne', meta: { next: 'Say go on the placeholder deploy (recommended: keep 15, fold 32, archive 40), then confirm the quarterly numbers with Kevin and the dates for the whole rollout, and the parking', asked: '2026-10-06T18:00:00.000Z', asked_at: '2026-10-06T18:00:00.000Z' } });
     await refresh(page, NOW);
     await openRoom(page, 'Techne');
     await openWork(page);
@@ -4566,24 +4536,18 @@ test.describe('r27', () => {
     expect(lines).toBe(1);
   });
 
-  test('r27 line 5.3 + 5.4, r28: a sheet has no heading with nothing under it, and a decision sheet never repeats its title as its body (also when the lookup failed)', async ({ page }) => {
+  test('r27 line 5.3 + 5.4, r28: a sheet has no heading with nothing under it, and a decision sheet never repeats its title as its body', async ({ page }) => {
     await boot(page);
     await add(page, { id: 'dc1', title: 'T-510 Ship the placeholder chat?', tag: 'decision', node: 'Areas/Techne', meta: { options: ['Yes', 'No'], next: 'Ship the placeholder chat? (preview: https://chat.placeholder-preview.pages.dev)', asked: '2026-10-12T18:00:00.000Z' } });
-    // r28: the feed reads the room's chat before it lists anything: a request is never opened while it is still being checked; the chat can't be read
-    await page.evaluate(() => { (window as any).__lookupFails = true; });
     await refresh(page, NOW);
     await openRoom(page, 'Techne');
     await openWork(page);
     await openTaskSheet(page, 'Ship the placeholder chat');
     const sheet = sheetOf(page);
-    await expect(sheet.locator('.task-lookfail')).toBeVisible();
     expect((await sheet.innerText()).match(/Ship the placeholder chat/g)?.length).toBe(1);
     // the preview link it carried is still a way in
     await expect(sheet.getByRole('button', { name: /^Open chat/ })).toBeVisible();
-    // the chat is read again (Retry): the sheet has its Details, no empty heading, and the question is still said once
-    await page.evaluate(() => { (window as any).__lookupFails = false; });
-    await sheet.getByRole('button', { name: 'Retry' }).click();
-    await expect(sheet.locator('.task-lookfail')).toHaveCount(0);
+    // the sheet has its Details, no empty heading, and the question is still said once
     await expect(sheet.locator('summary')).toHaveText('Details');
     for (const h of await sheet.locator('h1, h2, h3, summary').all()) expect((await h.innerText()).trim().length).toBeGreaterThan(0);
     expect((await sheet.innerText()).match(/Ship the placeholder chat/g)?.length).toBe(1);
@@ -4653,7 +4617,7 @@ test.describe('r27', () => {
     await boot(page);
     // the chat is from 3 days before the fixed clock: older than the record's write below
     await page.evaluate(() => (window as any).__arrive('ch-techne', 'Uni', 'The placeholder deploy is ready whenever you are.', 6 * 86400));
-    await add(page, { id: 'f1', title: 'T-303 Placeholder deploy', node: 'Areas/Techne', updatedAt: '2026-10-13T12:00:00.000Z', meta: { next: 'Say go on the placeholder deploy', asked: '2026-10-06T18:00:00.000Z' } });
+    await add(page, { id: 'f1', title: 'T-303 Placeholder deploy', node: 'Areas/Techne', updatedAt: '2026-10-13T12:00:00.000Z', meta: { next: 'Say go on the placeholder deploy', asked: '2026-10-06T18:00:00.000Z', asked_at: '2026-10-06T18:00:00.000Z' } });
     await refresh(page, NOW);
     await openRoom(page, 'Techne');
     await openWork(page);
@@ -4682,11 +4646,11 @@ test.describe('r27', () => {
     await expect(sheet.locator('.task-do.primary')).toHaveText(/^Check in #techne first$/i);
   });
 
-  test('r27 P1-1: related chat after the record\'s write, a record with no date, and a chat that can\'t be read: unconfirmed, unconfirmed, couldn\'t read', async ({ page }) => {
+  test('r27 P1-1: an ask past 3 days and a record with no date are unconfirmed, whatever the chat says (r31)', async ({ page }) => {
     await boot(page);
     await page.evaluate(() => (window as any).__arrive('ch-techne', 'Uni', 'The placeholder deploy is ready whenever you are.', -426600));
-    await add(page, { id: 'u1', title: 'T-303 Placeholder deploy', node: 'Areas/Techne', updatedAt: '2026-10-13T12:00:00.000Z', meta: { next: 'Say go on the placeholder deploy', asked: '2026-10-06T18:00:00.000Z' } });
-    await add(page, { id: 'u2', title: 'T-309 Placeholder budget', node: 'Areas/Techne', updatedAt: '', meta: { next: 'Say go on the quarterly budget', asked: '2026-10-06T18:00:00.000Z' } });
+    await add(page, { id: 'u1', title: 'T-303 Placeholder deploy', node: 'Areas/Techne', updatedAt: '2026-10-13T12:00:00.000Z', meta: { next: 'Say go on the placeholder deploy', asked: '2026-10-06T18:00:00.000Z', asked_at: '2026-10-06T18:00:00.000Z' } });
+    await add(page, { id: 'u2', title: 'T-309 Placeholder budget', node: 'Areas/Techne', updatedAt: '', meta: { next: 'Say go on the quarterly budget', asked: '2026-10-06T18:00:00.000Z', asked_at: null } });
     await refresh(page, NOW);
     await openRoom(page, 'Techne');
     await openWork(page);
@@ -4694,7 +4658,7 @@ test.describe('r27', () => {
     await openTaskSheet(page, 'Say go on the placeholder deploy');
     let sheet = sheetOf(page);
     await expect(sheet.locator('.task-asked')).toHaveAttribute('data-fresh', 'unconfirmed');
-    await expect(sheet.locator('.task-asked')).toHaveText(/^Asked Oct 6 · chat since in #techne$/i);
+    await expect(sheet.locator('.task-asked')).toHaveText(/^Asked Oct 6 · not confirmed since$/i);
     await expect(sheet.locator('.task-do.primary')).toHaveText(/^Check in #techne first$/i);
     expect(await sheet.innerText()).not.toMatch(/has talked about|nothing related/i);
     await sheet.getByRole('button', { name: 'Close' }).click();
@@ -4704,13 +4668,12 @@ test.describe('r27', () => {
     await expect(sheet.locator('.task-asked')).toHaveAttribute('data-fresh', 'unconfirmed');
     await expect(sheet.locator('.task-do.primary')).toHaveText(/^Check in #techne first$/i);
     await sheet.getByRole('button', { name: 'Close' }).click();
-    // couldn't read (the room's chat is read again a minute later)
-    await page.evaluate(() => { (window as any).__lookupFails = true; });
+    // r31: nothing is read from the room, so there is no "couldn't read": the same two asks classify the same on every launch
     await refresh(page, '2026-10-14T09:02:00.000Z');
     await openTaskSheet(page, 'Say go on the placeholder deploy');
     sheet = sheetOf(page);
-    await expect(sheet.locator('.task-lookfail')).toHaveText(/^Couldn't read #techne · Retry$/i);
-    await expect(sheet.locator('.task-do.primary')).toHaveText(/^Open #techne$/i);
+    await expect(sheet.locator('.task-lookfail')).toHaveCount(0);
+    await expect(sheet.locator('.task-asked')).toHaveAttribute('data-fresh', 'unconfirmed');
     await expect(sheet.getByRole('button', { name: 'I did this' })).toHaveCount(0);
     await sheet.getByRole('button', { name: 'Answer anyway' }).click();
     await expect(sheet.getByRole('button', { name: 'I did this' })).toBeVisible();
@@ -4737,7 +4700,7 @@ test.describe('r27', () => {
     await expect(note.locator('.cp-asof')).toHaveText(/^Last written Oct 14 by #\S+:$/);
   });
 
-  test('r29 P1-3: a long summary is behind "What it said", with its date and room above it', async ({ page }) => {
+  test('r29 P1-3: a long summary is behind one line, "Where this stands · Oct 14, #room"', async ({ page }) => {
     await boot(page);
     const LONG = 'COhere 2026 is live on cohereboulder.org (new look, members, harvests; notifications off); tonight a time-of-day test failure blocks deploys while a fix is built, and register+sign-in (T-138) goes to staging for review on 10-15; the festival crew list needs a second pass by Friday, and the harvest sign-up copy waits for the new photographs from the farm.';
     await page.evaluate((s) => (window as any).__setStands('p-lvb', s, '2026-10-14T12:00:00.000Z'), LONG);
@@ -4746,8 +4709,9 @@ test.describe('r27', () => {
     await openCompanion(page);
     const note = page.locator('.cp-body .cp-stands-note');
     const said = note.locator('.cp-said');
-    await expect(note.locator('.cp-asof')).toHaveText(/^Last written Oct 14 by #\S+:$/);
-    await expect(said.locator('summary')).toHaveText('What it said');
+    // r31: one line that opens it, the heading folded into the date and room (no colon with nothing after it)
+    await expect(note.locator('.cp-asof')).toHaveCount(0);
+    await expect(said.locator('summary')).toHaveText(/^Where this stands · Oct 14, #\S+$/);
     await expect(said).not.toHaveAttribute('open', '');
     await said.locator('summary').click();
     await expect(said.locator('p')).toHaveText(/^COhere 2026 is live on cohereboulder\.org .*from the farm\.$/);
