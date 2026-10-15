@@ -13,7 +13,7 @@ import { isActiveRun, type Run } from "./steerCore";
 import { ownerLabel, type Task } from "./taskCore";
 import { taskTitle } from "./whereCore";
 import { splitLinks } from "./linkText";
-import { actionableTitle, answerChoices, answerLabel, askLead, askPreview, checkLine, CHECK_FAILED, DANGLING, decideLine, stripRoom, decisionQuestion, dueLine, fitsRow, isOverdue, lineBudget, missingLine, OPEN_TASK, OPEN_TO_ANSWER, privateActionLabel, privateRestLabel, askedLine, requestDate, pointsNowhere, belowInCard, firstOfSteps, actionOf, rowAction, withoutBrackets, rowSubParts, standsHeading, titleSays, titleWords, TIDY_LINE, toTidy, unknownDecision, waitsLine, waitsOnMe, withHosts, withoutCut, rowAsk, withoutRawIds, WAITS_ON_ME, clauseForms, type Choice, type NeedsFeed, type PrivateNeed, type RowAction, type Support } from "./simpleCore";
+import { actionableTitle, runText, runShort, answerChoices, answerLabel, askLead, askPreview, checkLine, CHECK_FAILED, DANGLING, decideLine, stripRoom, decisionQuestion, dueLine, fitsRow, isOverdue, lineBudget, missingLine, OPEN_TASK, OPEN_TO_ANSWER, privateActionLabel, privateRestLabel, askedLine, requestDate, currentStep, firstOfSteps, actionOf, rowAction, withoutBrackets, rowSubParts, standsHeading, titleSays, titleWords, TIDY_LINE, toTidy, unknownDecision, waitsLine, waitsOnMe, withHosts, withoutCut, rowAsk, withoutRawIds, staleLine, clauseForms, type Choice, type NeedsFeed, type PrivateNeed, type RowAction, type StaleSummary, type Support } from "./simpleCore";
 import { requestRecheck } from "./useTasks";
 
 const KEYS = { side: "uni.companion.side.v1", sideNarrow: "uni.companion.side.narrow.v1", strip: "uni.companion.strip.v1" } as const;
@@ -55,7 +55,7 @@ export function useCompanionOpen(variant: "side" | "strip"): [boolean, (v: boole
 
 export type CompanionProps = {
   /** Where this stands: the sentence and, quietly, when it was written. Null: nothing to say. */
-  stands: { text: string; ago: string; calm?: string | null } | null; ready: boolean;
+  stands: { text: string; ago: string; stale?: StaleSummary | null } | null; ready: boolean;
   /** Said in place of a node's state (a room no node owns: "Not filed under an area yet."); there is then no Needs you and no way deeper. */
   note?: string | null;
   /** The task list's health: a failed first load (never an endless "Loading…"), a failed refresh (the rows stay), and whether every page was read. */
@@ -219,7 +219,7 @@ function ActionLine({ forms, vault, elRef }: { forms: { text: string; keep: stri
  * lines, else the longest form that ends on a clause ("…; prod waits…" → "Staging has the D2 one-app…."), never cut inside one and never
  * with "…". "More" (a real button) shows the whole. Its date is in the heading ("Where this stands · 2 days ago"), not under it.
  */
-function Stands({ text, calm = null }: { text: string; calm?: string | null }) {
+function Stands({ text }: { text: string }) {
   const clean = useMemo(() => withoutRawIds(text), [text]);
   const forms = useMemo(() => clauseForms(clean), [clean]);
   const [full, setFull] = useState(false);
@@ -243,8 +243,18 @@ function Stands({ text, calm = null }: { text: string; calm?: string | null }) {
   return <div className={`cp-lede ${full ? "full" : ""}`}>
     <p ref={ref} className="cp-stands" data-cut={cut ? "true" : undefined}>{shown}</p>
     {(cut || full) && <button type="button" className="cp-more-next cp-stands-more" aria-expanded={full} onClick={() => setFull(!full)}>{full ? "Less" : "More"}</button>}
-    {/* r24: the line is under the words that say something waits on the user (the summary itself is the room's to rewrite) */}
-    {calm && WAITS_ON_ME.test(shown) && <p className="cp-calm">{calm}</p>}</div>;
+</div>;
+}
+
+/**
+ * r25 (Codex P1 1): a summary whose claim can't be reconciled with Needs you is not shown as current: one short line says it needs updating,
+ * and what it said sits collapsed under "What it said" (the room rewrites it).
+ */
+export function StaleStands({ stale, text, className = "cp-lede" }: { stale: StaleSummary; text: string; className?: string }) {
+  return <div className={className}>
+    <p className="cp-stands cp-stale" data-stale="true">{staleLine(stale)}</p>
+    <details className="cp-said"><summary>What it said</summary><p>{withoutRawIds(text)}</p></details>
+  </div>;
 }
 
 /** One line of small print under a row (r18): whole words, then "…"; never a second line. */
@@ -373,8 +383,8 @@ export function rowLead(t: Task, area: string | null = null): RowLead {
   const theirs = waitsOnMe(t);
   // r20: the action, never the stored sentence: its first clause, the date label and the notes after it left to the subtitle and the sheet
   // r23: a step that points at words nobody stored ("…the message below") asks the room for them: "Ask #techne for the message"
-  const nowhere = pointsNowhere(t, t.stewardRoom ?? t.room);
-  const action = rowAction(nowhere ?? belowInCard(next, t)) ?? (theirs && next ? actionOf(next) : null);
+  // r25: the row and the sheet's heading say the same current step (`currentStep`)
+  const action = rowAction(currentStep(t, t.stewardRoom ?? t.room)) ?? (theirs && next ? actionOf(next) : null);
   if (action) {
     // r17: someone else's task says whose it is (and the task, when its title says something the action doesn't)
     const from = `From ${ownerLabel(t.owner)}`;
@@ -635,7 +645,7 @@ function Body({ stands, ready, note, load, feed, rest = 0, moreTitle = null, onP
   // below 900px the room shows the list's health itself, outside the strip (r14)
   const health = !hideHealth && <LoadHealth load={load} ready={ready} count={feed.total} />;
   return <div className="cp-body" ref={bodyRef}>
-    {!ready ? (load?.error || load?.slow ? <LoadHealth load={load} ready={false} /> : <p className="cp-lede">Loading…</p>) : stands && <Stands text={stands.text} calm={stands.calm} />}
+    {!ready ? (load?.error || load?.slow ? <LoadHealth load={load} ready={false} /> : <p className="cp-lede">Loading…</p>) : stands && (stands.stale ? <StaleStands stale={stands.stale} text={stands.text} /> : <Stands text={stands.text} />)}
     {ready && <section aria-label="Needs you" className="cp-sec" aria-busy={load?.refreshing || undefined}>
       <h3 className="cp-h">Needs you</h3>
       {/* r17: Uni's panel is at most three rows and one "Show N more" (private items folded in) to the work view, which keeps the full list */}
@@ -647,10 +657,37 @@ function Body({ stands, ready, note, load, feed, rest = 0, moreTitle = null, onP
     </section>}
     {active.length > 0 && runsShown > 0 && <section aria-label="Running" className="cp-sec">
       <h3 className="cp-h">Running</h3>
-      <ul className="cp-list">{active.slice(0, runsShown).map((r) => <li key={r.id} className="cp-run" data-state={r.state}><i aria-hidden="true" /><span title={cleanText(r.what)}>{cleanText(r.what)}</span><small>{r.state}</small></li>)}</ul>
+      <ul className="cp-list">{active.slice(0, runsShown).map((r) => <li key={r.id} className="cp-run" data-state={r.state}><i aria-hidden="true" /><RunText what={cleanText(r.what)} /><small>{r.state}</small></li>)}</ul>
     </section>}
     {onEverything && <div className="cp-foot"><button type="button" className="cp-all" onClick={onEverything}><span className="cp-all-t">{`All of ${nodeName}'s work`}</span>{hiddenRuns > 0 && <span className="cp-all-more">+{hiddenRuns} more running</span>}<span className="cp-all-arrow" aria-hidden="true">→</span></button></div>}
   </div>;
+}
+
+/**
+ * A Running row's words (r25): the whole text in two lines, else its short form (the words before the colon, "Waiting on your answer in
+ * #Uni"); never "…" and never a dangling colon. The whole text is the tooltip.
+ */
+export function RunText({ what }: { what: string }) {
+  const full = runText(what);
+  const ref = useRef<HTMLSpanElement | null>(null);
+  const [short, setShort] = useState(false);
+  useLayoutEffect(() => {
+    const el = ref.current; if (!el) return;
+    const measure = () => {
+      setShort(false);
+      requestAnimationFrame(() => {
+        const e = ref.current; if (!e) return;
+        const lh = parseFloat(getComputedStyle(e).lineHeight) || 20;
+        setShort(e.scrollHeight > lh * 2 + 1);
+      });
+    };
+    measure();
+    const lastW = { current: Math.round(el.clientWidth) };
+    const ro = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => { const w = Math.round(el.clientWidth); if (w !== lastW.current) { lastW.current = w; measure(); } });
+    ro?.observe(el);
+    return () => ro?.disconnect();
+  }, [full]);
+  return <span ref={ref} className="cp-run-text" title={full} data-short={short || undefined}>{short ? runShort(what) : full}</span>;
 }
 
 /** "Needs you · 2: Say go on prod deploy of #38 + #58": the folded strip's line when anything needs the user (r19). The first row whose request
@@ -722,7 +759,7 @@ export function CompanionStrip({ open, onToggle, onSheet, ...p }: CompanionProps
   const heading = standsHeading(p.scope, p.ready ? p.stands?.ago : null);
   // r18: folded, the line is the sentence cut on a whole word (never "underway ac…"); open, it is the dated heading. r19: when anything needs
   // the user, the folded line says what is waiting first ("Needs you · 2: Say go on the deploy…"), never only a dot behind a chevron
-  const folded = p.note ?? (p.ready ? waitingLine(p.feed) ?? (p.stands ? withoutRawIds(p.stands.text) : null) ?? "Where this stands" : p.load?.error ? "Couldn't load" : p.load?.slow ? "Still loading" : "Loading…");
+  const folded = p.note ?? (p.ready ? waitingLine(p.feed) ?? (p.stands ? (p.stands.stale ? staleLine(p.stands.stale) : withoutRawIds(p.stands.text)) : null) ?? "Where this stands" : p.load?.error ? "Couldn't load" : p.load?.slow ? "Still loading" : "Loading…");
   const lineRef = useRef<HTMLParagraphElement | null>(null);
   const lineTokens = [...(p.scope ? [{ node: <b className="cp-scope">{`${p.scope}:`}</b>, space: false }] : []), ...wordTokens(folded).map((w, i) => (i === 0 && p.scope ? { ...w, space: true } : w))];
   const label = <span className="cp-line-text" title={p.stands?.text}>{open ? heading

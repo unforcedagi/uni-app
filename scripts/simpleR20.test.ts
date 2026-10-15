@@ -76,9 +76,9 @@ await check("a subtitle is the due cue and where it belongs: never a title that 
   assert.equal(rowSub(atlas, rowAction(atlas.next)!, "ATLAS", today), "ATLAS", "the title says the action again: the area instead");
   assert.equal(rowSub(atlas, rowAction(atlas.next)!, null, today), null, "inside its own area there is nothing to add");
   const look = task("t113", "T-113 Companion Today redesign + integrated PWA install flow (3 directions, then build the pick)", { due: "2026-10-13", next: REAL[4][0] });
-  assert.equal(rowSub(look, rowAction(look.next)!, "uni-app", today), "uni-app · was due Oct 13", "a long title is vague: the area");
+  assert.equal(rowSub(look, rowAction(look.next)!, "uni-app", today), "Companion Today redesign + integrated PWA install flow · was due Oct 13", "r25: a long title is the quiet line, cut with words and no \"…\"");
   const cut = task("c", "T-40 Companion Today redesign…", { next: "Look at the staging site on phone" });
-  assert.equal(rowSub(cut, rowAction(cut.next)!, null, today), null, "a cut title is never a subtitle");
+  assert.equal(rowSub(cut, rowAction(cut.next)!, null, today), "Companion Today redesign", "r25: a cut title is shown without its \"…\"");
   // no due date: the step's date label is the cue
   const nodue = task("n", "T-90 COhere opens Oct 15", { next: REAL[1][0] });
   assert.equal(rowSub(nodue, rowAction(nodue.next)!, null, today), "COhere opens Oct 15 · Wed 10-14");

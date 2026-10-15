@@ -2,8 +2,8 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { TaskSheet, UndoBar, ownerLabel } from "./NodeWork";
 import { useTasks } from "./useTasks";
 import { draftsUnder, runsUnder } from "./steerCore";
-import { CompanionSide, CompanionStrip, useCompanionOpen, type CompanionProps, type TaskLoad } from "./Companion";
-import { chatPlaceholder, isMine, needsByRow, needsFeed, needsYou, privateNote, standsHeading, nothingWaiting, standsLine, stateLine, uniPanel, type PrivateNeed } from "./simpleCore";
+import { CompanionSide, CompanionStrip, StaleStands, useCompanionOpen, type CompanionProps, type TaskLoad } from "./Companion";
+import { chatPlaceholder, isMine, needsByRow, needsFeed, needsYou, privateNote, standsHeading, staleSummary, standsLine, stateLine, uniPanel, type PrivateNeed } from "./simpleCore";
 import { ownRoom, type Steward } from "./talkCore";
 import type { Area } from "./areasCore";
 import { isMe, priorityOf, tasksUnder, type Task, type TaskNode } from "./taskCore";
@@ -47,7 +47,7 @@ export type ShellActions = Omit<AreaActions, "openNote"> & { openNote(ref: NoteR
   /** r21 (Codex 9): read the rooms list again (a conversation slow to open before its room is known) */
   retryRooms?: () => void;
   /** r24: scroll to and mark a message of the room open now ("Check in #room first" goes to the first message about the request) */
-  focusMessage?: (ref: string) => void };
+  focusMessage?: (ref: string | null, room?: string, checking?: string | null) => void };
 
 /**
  * What is open over the place (the task sheet, the work view, the drawer): Android Back closes it first. `modal` (the sheet) holds Alt+arrow
@@ -378,12 +378,12 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   /** A vault with no areas yet: Uni says how to start, in plain words (r13), instead of a tag and a path to type. */
   const noAreas = isRoot && !!tree && !error && childrenOf(tree, ROOT).length === 0;
   const stands0 = noAreas ? { text: "No areas yet. Tell Uni here what you want to look after, and it will set up your first area.", ago: "" } : standsLine(rawStands, levelTasks.filter((t) => !hidden(t.node)), now);
-  /** r24 (Codex P1 1): a stored summary that says something waits on the user, with nothing open for them here: a quiet line says so (the text stays) */
-  const stands = stands0 && !noAreas ? { ...stands0, calm: nothingWaiting(rawStands?.text, feed.total + feed.privates.length, rawStands?.at, feed.rows.map((t) => [t.title, t.next, t.detail].filter(Boolean).join(" "))) } : stands0;
+  /** r25 (Codex P1 1): a stored summary that says something waits on the user while no open request here is that is not shown as current */
+  const stands = stands0 && !noAreas ? { ...stands0, stale: rawStands ? staleSummary(stands0.text, rawStands.at, feed.rows.map((t) => [t.title, t.next, t.detail].filter(Boolean).join(" "))) : null } : stands0;
   /** The room's composer when it is the one here, else that room's (opened, filled in, never sent). */
   const sayIn = (roomId: string, text: string) => { closeSheet(); setWork(false); const here = roomFor(roomId); if (here) here.compose(text); else actions.compose(roomId, text); };
   /** From the work view or the sheet, "Open #room" for this room is the conversation: it goes back to it. Another room opens as a tab. */
-  const openRoomHere = (id: string, focus?: string | null) => { if (chat && id === target?.id) { closeSheet(); setWork(false); if (focus) actions.focusMessage?.(focus); } else (actions.openRoom as (id: string, focus?: string | null) => void)(id, focus); };
+  const openRoomHere = (id: string, focus?: string | null, checking?: string | null) => { if (chat && id === target?.id) { closeSheet(); setWork(false); if (focus || checking) actions.focusMessage?.(focus ?? null, id, checking ?? null); } else (actions.openRoom as (id: string, focus?: string | null, checking?: string | null) => void)(id, focus, checking); };
   const live = sheetId ? tasks.all?.find((t) => t.id === sheetId) ?? null : null;
   if (live) lastSheet.current = live;
   const sheetTask = sheetId ? live ?? (lastSheet.current?.id === sheetId ? lastSheet.current : null) : null;
@@ -408,7 +408,7 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   // r18: the work view says where this stands with the companion's own sentence, heading and date ("Where this stands · 2 days ago"), one
   // timestamp source (`stands_at`, else the newest change it names); the brief's separate "updated 16h ago" is gone
   const top = (stands || askRoom) ? <div className="wv-top">
-    {stands && <><h3 className="cp-h wv-stands-h">{standsHeading(borrowed ? node.name : null, stands.ago)}</h3><p className="th-lede wv-brief">{stands.text}</p></>}
+    {stands && <><h3 className="cp-h wv-stands-h">{standsHeading(borrowed ? node.name : null, stands.ago)}</h3>{"stale" in stands && stands.stale ? <StaleStands stale={stands.stale} text={stands.text} className="th-lede wv-brief" /> : <p className="th-lede wv-brief">{stands.text}</p>}</>}
     {askRoom && <p className="th-fresh wv-fresh"><button type="button" className="th-link" onClick={() => actions.compose(askRoom, refreshDraft(node.name, isRoot ? "" : node.path))}>Ask Uni to update this summary</button></p>}
   </div> : null;
   const foot = node.kind === "project" && body ? <details className="th-note wv-note"><summary>Project note</summary><Body body={body} mentions={[]} me={null} /></details> : null;

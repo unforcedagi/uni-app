@@ -234,9 +234,9 @@
 .th-sub { font: 400 12.5px/1.3 var(--th-sans); color: var(--th-mute); }
 .th-dot { flex: none; width: 9px; height: 9px; margin-right: 6px; border-radius: 50%; background: var(--th-sap); }
 .th-guide.run::before, .th-guide.branch::before, .th-guide.branch::after { border-color: var(--th-hair2); }
-.th-row.sel .th-go { background: var(--th-card); box-shadow: none; }
+/* r25: the active row is its card and a hairline; the 3px bar at its left edge read as a text cursor on the first letter */
+.th-row.sel .th-go { background: var(--th-card); box-shadow: inset 0 0 0 1px var(--th-hair2); }
 .th-row.sel .th-name b { text-decoration: none; }
-.th-row.sel .th-go::before { content: ""; position: absolute; left: 0; top: 10px; bottom: 10px; width: 3px; border-radius: 2px; background: var(--th-ink); }
 .th-go { position: relative; }
 /* "Other rooms": rooms no node owns, quiet, at the foot of the tree */
 .th-others { margin-top: 8px; }
@@ -392,7 +392,6 @@
 .th-column .th-row.d2 .th-name b, .th-column .th-row.d3 .th-name b, .th-column .th-row.d4 .th-name b { font-weight: 500; font-size: 13.5px; }
 .th-column .th-sub { font-size: 11px; line-height: 1.25; }
 .th-column .th-dot { width: 7px; height: 7px; margin-right: 2px; }
-.th-row.sel .th-go::before { top: 5px; bottom: 5px; }
 .th-column .th-row.d0 { padding-left: 10px; }
 .th-column .th-row.d1 { padding-left: 14px; }
 /* the fold chevron: its own target, left of the name */
@@ -477,7 +476,6 @@
 .cp-failed .cp-retry { font-size: inherit; }
 .cp-retry:focus-visible { outline: 2px solid var(--th-ink); outline-offset: 2px; }
 .cp-stands-more { display: inline-flex; margin-top: 2px; }
-.cp-calm { margin: 4px 0 0; font: 400 12.5px/1.35 var(--th-sans, inherit); color: var(--th-mute); }
 .th-dot.inside { background: none; box-shadow: inset 0 0 0 2px var(--th-sap); }
 .th-load { flex: none; margin: 2px 12px 4px; font: 400 12.5px/1.35 var(--th-sans); color: var(--th-mute); }
 .th-load.bad { color: var(--th-ink); }
@@ -681,3 +679,10 @@
 .cp-item .cp-need .cp-sub, .cp-item .cp-need small.cp-asked-line { max-height: none; }
 .cp-item .cp-next { max-height: calc(var(--lines, 6) * 1.45em); }
 .cp-item .cp-next.open { max-height: none; overflow: visible; }
+
+/* r25: the chat couldn't be read: a quiet line under the "asked" line, never a cue */
+.task-lookfail { margin: 0 0 6px; }
+.cp-stale { margin: 0; font: 400 14px/1.4 var(--th-sans, inherit); color: var(--th-mute); }
+.cp-said { margin: 4px 0 0; font: 400 12.5px/1.4 var(--th-sans, inherit); color: var(--th-mute); }
+.cp-said > summary { cursor: pointer; width: fit-content; }
+.cp-said > p { margin: 4px 0 0; }
