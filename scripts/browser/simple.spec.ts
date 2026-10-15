@@ -526,7 +526,7 @@ test.describe('simple', () => {
     await shot(page, 'rooms');
   });
 
-  test('journal (0.1.46): an entry not in the vault yet says "Waiting to send" with its time; the same words saved again show it, not a second entry; a new entry is filed under Journal/', async ({ page }) => {
+  test('journal (0.1.46): an entry not in the vault yet says "Waiting to send" with its time; the same words again ask "Save another / Keep one" and keep the text; Keep one saves nothing; a new entry is filed under Journal/', async ({ page }) => {
     await boot(page);
     const words = 'A placeholder entry about the garden and the rain';
     await page.evaluate((words) => {
@@ -539,23 +539,78 @@ test.describe('simple', () => {
     await expect(queued).toHaveCount(1);
     await expect(queued.locator('.queued-tag')).toHaveText('Waiting to send');
     await expect(queued.locator('.journal-meta')).toContainText(/\d{1,2}:43/);
-    // typed again while it waits: the app keeps one entry and points at it
-    await page.evaluate(() => { (window as any).__saveReport = { sent: [], remaining: 1, error: null, duplicate: { kind: 'waiting', id: 'q1' } }; });
-    await page.getByRole('textbox', { name: 'Journal entry', exact: true }).fill(words);
+    // typed again while it waits: nothing is saved yet; the app names the entry and asks
+    await page.evaluate(() => { (window as any).__saveReport = { sent: [], remaining: 1, error: null, duplicate: { kind: 'waiting', id: 'q1', created_at: '2026-10-15T01:43:10.000Z' } }; });
+    const box = page.getByRole('textbox', { name: 'Journal entry', exact: true });
+    await box.fill(words);
     await page.getByRole('button', { name: 'Save', exact: true }).click();
-    await expect(page.locator('.journal-status')).toHaveText('Waiting to send');
+    await expect(page.locator('.journal-status')).toHaveText(/^Same words as your \d{1,2}:43(\s?[AP]M)? entry$/);
+    const ask = page.getByRole('group', { name: 'Same words as another entry' });
+    await expect(ask.getByRole('button')).toHaveText(['Save another', 'Keep one']);
+    await expect(box).toHaveValue(words);
     await expect(queued).toHaveCount(1);
     await expect(queued).toHaveAttribute('data-again', 'true');
-    await expect(page.getByRole('textbox', { name: 'Journal entry', exact: true })).toHaveValue('');
-    // the draft the app handed over is filed where the sweep files it, with its clash paths (seconds, then more words)
+    // the draft the app handed over is filed where the sweep files it, with its clash paths (seconds, then more words), and is its own send
     const draft = await page.evaluate(() => (window as any).__calls.filter((c: any) => c.cmd === 'journal_save_text').at(-1).args.entry);
     expect(draft.path).toMatch(/^Journal\/\d{4}\/\d\d-\d\d\/\d\d-\d\d A placeholder entry about the garden and$/);
     expect(draft.alternates[0]).toMatch(/^Journal\/\d{4}\/\d\d-\d\d\/\d\d-\d\d-\d\d A placeholder entry about the garden and$/);
-    // already sent: "Already saved"
-    await page.evaluate(() => { const w = window as any; w.__queue = []; w.__saveReport = { sent: [], remaining: 0, error: null, duplicate: { kind: 'saved', id: 'n1' } }; });
-    await page.getByRole('textbox', { name: 'Journal entry', exact: true }).fill(words);
+    expect(draft.submission_id).toMatch(/^[0-9a-f-]{36}$/);
+    // Keep one: the composer clears and nothing more is saved
+    await ask.getByRole('button', { name: 'Keep one' }).click();
+    await expect(box).toHaveValue('');
+    await expect(ask).toHaveCount(0);
+    await expect(page.locator('.journal-status')).toHaveText('Kept one · waiting to send');
+    expect(await calls(page, 'journal_save_text')).toHaveLength(1);
+    // editing the words drops the question: they are other words now
+    await page.evaluate(() => { (window as any).__saveReport = { sent: [], remaining: 1, error: null, duplicate: { kind: 'waiting', id: 'q1', created_at: '2026-10-15T01:43:10.000Z' } }; });
+    await box.fill(words);
     await page.getByRole('button', { name: 'Save', exact: true }).click();
-    await expect(page.locator('.journal-status')).toHaveText('Already saved');
+    await expect(ask).toBeVisible();
+    await box.fill(words + ' again');
+    await expect(ask).toHaveCount(0);
+  });
+
+  test('journal (0.1.46 fix): same words as an entry already saved: "Save another" saves the same send a second time; a failed save retried keeps its ids', async ({ page }) => {
+    await boot(page);
+    const words = 'Placeholder check-in: tea, then a walk';
+    await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Journal' }).click();
+    const box = page.getByRole('textbox', { name: 'Journal entry', exact: true });
+    const saves = () => calls(page, 'journal_save_text');
+    // a save that never answered: the text stays, and Save again is the same send (same ids), so the outbox sees a retry
+    await page.evaluate(() => { (window as any).__saveFails = 1; });
+    await box.fill(words);
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await expect(page.locator('.journal-status')).toHaveText('Not saved · your text is still here');
+    await expect(box).toHaveValue(words);
+    // the retry meets the words already sent in the last ten minutes
+    await page.evaluate(() => { (window as any).__saveReport = { sent: [], remaining: 0, error: null, duplicate: { kind: 'saved', id: 'n1', created_at: '2026-10-15T01:43:10.000Z' } }; });
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    const ask = page.getByRole('group', { name: 'Same words as another entry' });
+    await expect(ask).toBeVisible();
+    await expect(page.locator('.journal-status')).toHaveText(/^Same words as your \d{1,2}:43(\s?[AP]M)? entry$/);
+    await expect(box).toHaveValue(words);
+    let s = await saves();
+    expect(s).toHaveLength(2);
+    expect(s[1].entry.entry_id).toBe(s[0].entry.entry_id);
+    expect(s[1].entry.submission_id).toBe(s[0].entry.submission_id);
+    expect(s.map((a: any) => !!a.saveAnother)).toEqual([false, false]);
+    // Save another: the same send once more, now allowed; the composer clears
+    await page.evaluate(() => { (window as any).__saveReport = { sent: ['n2'], remaining: 0, error: null }; });
+    await ask.getByRole('button', { name: 'Save another' }).click();
+    await expect(box).toHaveValue('');
+    await expect(ask).toHaveCount(0);
+    s = await saves();
+    expect(s).toHaveLength(3);
+    expect(s[2].saveAnother).toBe(true);
+    expect(s[2].entry.submission_id).toBe(s[0].entry.submission_id);
+    expect(s[2].entry.content).toBe(words);
+    // the next words are a new send
+    await box.fill('Other placeholder words');
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await expect(box).toHaveValue('');
+    s = await saves();
+    expect(s[3].entry.submission_id).not.toBe(s[0].entry.submission_id);
+    expect(s[3].entry.entry_id).not.toBe(s[0].entry.entry_id);
   });
 
   test('one look: the journal, settings and a room read as the same app; Settings has no layout picker (shots, light and dark)', async ({ page }) => {

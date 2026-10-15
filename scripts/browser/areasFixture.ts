@@ -624,7 +624,8 @@ Two proposals wait on a scope decision.
           case 'journal_list': return (w.__journal ?? []).slice(args.offset ?? 0, (args.offset ?? 0) + (args.limit ?? 50));
           // 0.1.46: a spec may hold entries in the device queue (__queue) and say what a save or flush reports (__saveReport, __flushReport)
           case 'journal_pending': return w.__queue ?? [];
-          case 'journal_save_text': return w.__saveReport ?? { sent: [], remaining: 0, error: null };
+          // 0.1.46 fix: a save may fail outright (__saveFails = n: the next n saves throw), so a spec can retry it
+          case 'journal_save_text': if (w.__saveFails > 0) { w.__saveFails--; throw 'IPC lost: the save did not answer'; } return w.__saveReport ?? { sent: [], remaining: 0, error: null };
           case 'search_messages': return [];
           case 'journal_flush': return w.__flushReport ?? { sent: [], remaining: 0, error: null };
           case 'refresh': if (d.identityDelay) await new Promise((r) => setTimeout(r, d.identityDelay)); return { pubkey: U, total_items: 0, channel_errors: {}, truncated_channels: [] };
