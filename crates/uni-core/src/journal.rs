@@ -11,13 +11,15 @@
 //! Paths (0.1.46): the device files an entry where the server's T-60 sweep
 //! would, `Journal/YYYY/MM-DD/HH-MM <first words>` (local time), and hands
 //! over the sweep's clash fallbacks as `alternates` (`HH-MM-SS`, then more
-//! words; never `-1`). An entry queued by an older build keeps its
-//! `Notes/YYYY/MM-DD/HH-MM-SS` path and the old `-N` fallback; the sweep
-//! files it.
+//! words; never `-1`). When all of those are taken the entry still saves, at
+//! `HH-MM-SS <title> (2)`…, last `(<entry id>)`. An entry queued by an older
+//! build keeps its `Notes/YYYY/MM-DD/HH-MM-SS` path and the old `-N`
+//! fallback; the sweep files it.
 //!
-//! The same words saved twice (an entry that sat offline, then typed again)
-//! make one entry: a text entry whose trimmed words match one still waiting,
-//! or one sent in the last ten minutes, is not queued again.
+//! A retry is the same composer send again, known by its submission id (or
+//! entry id), never by its words: it queues nothing. Other words-for-words
+//! the same as an entry still waiting, or sent in the last ten minutes, are
+//! held back until the user chooses to save another or keep one.
 
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
@@ -53,14 +55,25 @@ pub const DUPLICATE_WINDOW_SECS: i64 = 600;
 
 pub(crate) fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
     conn.execute_batch(SCHEMA)?;
-    let has_alternates: bool = conn.query_row(
-        "SELECT COUNT(*) FROM pragma_table_info('journal_outbox') WHERE name='alternates'",
-        [],
+    // JSON array of paths to try, in order, when `path` is taken.
+    add_column(conn, "journal_outbox", "alternates")?;
+    // The composer send this entry came from (0.1.46 fix): a retry of the same
+    // send is recognised by it (or the entry id), never by its words.
+    add_column(conn, "journal_outbox", "submission_id")?;
+    add_column(conn, "journal_sent", "submission_id")?;
+    add_column(conn, "journal_sent", "created_at")?;
+    add_column(conn, "journal_sent", "source")?;
+    Ok(())
+}
+
+fn add_column(conn: &Connection, table: &str, column: &str) -> rusqlite::Result<()> {
+    let has: bool = conn.query_row(
+        &format!("SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name=?1"),
+        [column],
         |r| r.get::<_, i64>(0),
     )? > 0;
-    if !has_alternates {
-        // JSON array of paths to try, in order, when `path` is taken.
-        conn.execute_batch("ALTER TABLE journal_outbox ADD COLUMN alternates TEXT")?;
+    if !has {
+        conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} TEXT"))?;
     }
     Ok(())
 }
@@ -90,14 +103,34 @@ pub struct QueuedEntry {
 
 /// What queueing an entry did.
 #[derive(Debug, Clone, Serialize, PartialEq)]
-#[serde(tag = "kind", content = "id", rename_all = "lowercase")]
 pub enum Queued {
     /// Queued as a new entry.
     New,
-    /// The same words are already waiting to send (that entry's `entry_id`).
-    Waiting(String),
-    /// The same words reached the vault in the last ten minutes (its note id).
-    Saved(String),
+    /// This composer send (its submission id or entry id) is already queued
+    /// or was sent: a retry of the same send, so nothing new is queued.
+    Retry,
+    /// Other words-for-words the same as an entry waiting or recently saved.
+    /// Nothing is queued until the user chooses (save another, or keep one).
+    SameWords(SameWords),
+}
+
+/// The entry a new one has the same words as.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct SameWords {
+    /// `waiting` (still on the device: its `entry_id`) or `saved` (in the
+    /// vault in the last ten minutes: its note id).
+    pub kind: &'static str,
+    pub id: String,
+    /// When that entry was made (the UI says "your 7:43 entry").
+    pub created_at: String,
+}
+
+/// One composer send: `id` is made once per send and kept across retries of
+/// it; `save_another` is the user's answer to [`Queued::SameWords`].
+#[derive(Debug, Clone, Copy)]
+pub struct Submission<'a> {
+    pub id: &'a str,
+    pub save_another: bool,
 }
 
 /// What one flush did.
@@ -106,8 +139,9 @@ pub struct FlushReport {
     pub sent: Vec<String>,
     pub remaining: usize,
     pub error: Option<String>,
-    /// Set when the entry just saved was a duplicate and nothing new was queued.
-    pub duplicate: Option<Queued>,
+    /// Set when the entry just saved has the same words as another and
+    /// nothing was queued: the app asks before saving it.
+    pub duplicate: Option<SameWords>,
 }
 
 /// Validate a device-built note path. `Journal/YYYY/MM-DD/HH-MM[-SS][ <first
@@ -151,12 +185,37 @@ pub fn check_path(path: &str) -> Result<()> {
 }
 
 impl Store {
-    /// Queue an entry. Voice entries carry audio and start as a placeholder.
-    /// A text entry whose words match one still waiting, or one sent in the
-    /// last ten minutes, is not queued again: the existing one is returned.
+    /// Queue an entry as its own composer send (submission id = entry id).
     #[allow(clippy::too_many_arguments)]
     pub fn journal_queue(
         &self,
+        entry_id: &str,
+        path: &str,
+        alternates: &[String],
+        content: &str,
+        source: &str,
+        created_at: &str,
+        audio: Option<(&[u8], &str)>,
+        now: i64,
+    ) -> Result<Queued> {
+        let send = Submission {
+            id: entry_id,
+            save_another: false,
+        };
+        self.journal_submit(
+            send, entry_id, path, alternates, content, source, created_at, audio, now,
+        )
+    }
+
+    /// Queue an entry. Voice entries carry audio and start as a placeholder.
+    /// The same send again (its submission id or entry id) is a retry and
+    /// queues nothing. A text entry whose words match one still waiting, or
+    /// one sent in the last ten minutes, is held back as
+    /// [`Queued::SameWords`] unless the user chose to save another.
+    #[allow(clippy::too_many_arguments)]
+    pub fn journal_submit(
+        &self,
+        send: Submission<'_>,
         entry_id: &str,
         path: &str,
         alternates: &[String],
@@ -173,12 +232,21 @@ impl Store {
         if alternates.len() > 8 {
             return Err(Error::Invalid("too many alternate paths".into()));
         }
-        if uuid::Uuid::parse_str(entry_id).is_err() {
-            return Err(Error::Invalid("entry id must be a UUID".into()));
+        if uuid::Uuid::parse_str(entry_id).is_err() || uuid::Uuid::parse_str(send.id).is_err() {
+            return Err(Error::Invalid(
+                "entry and submission ids must be UUIDs".into(),
+            ));
         }
-        if audio.is_none() {
-            if let Some(dup) = self.journal_duplicate(entry_id, content, now)? {
-                return Ok(dup);
+        self.conn.execute(
+            "DELETE FROM journal_sent WHERE sent_at < ?1",
+            [now - DUPLICATE_WINDOW_SECS],
+        )?;
+        if self.journal_is_retry(send.id, entry_id)? {
+            return Ok(Queued::Retry);
+        }
+        if audio.is_none() && !send.save_another {
+            if let Some(same) = self.journal_same_words(content)? {
+                return Ok(Queued::SameWords(same));
             }
         }
         let content = match audio {
@@ -198,8 +266,8 @@ impl Store {
             .map_err(|e| Error::Invalid(e.to_string()))?;
         self.conn.execute(
             "INSERT OR IGNORE INTO journal_outbox
-               (entry_id, path, content, source, created_at, audio, audio_mime, queued_at, alternates)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+               (entry_id, path, content, source, created_at, audio, audio_mime, queued_at, alternates, submission_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
                 entry_id,
                 path,
@@ -209,33 +277,47 @@ impl Store {
                 audio.map(|a| a.0),
                 audio.map(|a| a.1),
                 now,
-                alternates
+                alternates,
+                send.id
             ],
         )?;
         Ok(Queued::New)
     }
 
-    /// The same words (trimmed) already waiting, or sent within the window.
-    /// The same `entry_id` again is not a duplicate (it is the same entry).
-    fn journal_duplicate(&self, entry_id: &str, content: &str, now: i64) -> Result<Option<Queued>> {
+    /// This send (by submission id or entry id) is already queued, or was
+    /// sent within the window.
+    fn journal_is_retry(&self, submission_id: &str, entry_id: &str) -> Result<bool> {
+        let n: i64 = self.conn.query_row(
+            "SELECT (SELECT COUNT(*) FROM journal_outbox WHERE entry_id = ?2 OR submission_id = ?1)
+                  + (SELECT COUNT(*) FROM journal_sent WHERE entry_id = ?2 OR submission_id = ?1)",
+            params![submission_id, entry_id],
+            |r| r.get(0),
+        )?;
+        Ok(n > 0)
+    }
+
+    /// A text entry with the same words (trimmed) waiting, or sent within the
+    /// window (the sent table was pruned by the caller).
+    fn journal_same_words(&self, content: &str) -> Result<Option<SameWords>> {
         let words = content.trim();
         if words.is_empty() {
             return Ok(None);
         }
-        self.conn.execute(
-            "DELETE FROM journal_sent WHERE sent_at < ?1",
-            [now - DUPLICATE_WINDOW_SECS],
-        )?;
         if let Some(q) = self
             .journal_pending()?
             .into_iter()
-            .find(|q| q.entry_id != entry_id && !q.has_audio && q.content.trim() == words)
+            .find(|q| q.source == "text" && !q.has_audio && q.content.trim() == words)
         {
-            return Ok(Some(Queued::Waiting(q.entry_id)));
+            return Ok(Some(SameWords {
+                kind: "waiting",
+                id: q.entry_id,
+                created_at: q.created_at,
+            }));
         }
-        let mut st = self
-            .conn
-            .prepare("SELECT entry_id, content, note_id FROM journal_sent ORDER BY sent_at DESC")?;
+        let mut st = self.conn.prepare(
+            "SELECT content, note_id, COALESCE(created_at, '') FROM journal_sent
+             WHERE COALESCE(source, 'text') = 'text' ORDER BY sent_at DESC",
+        )?;
         let sent = st
             .query_map([], |r| {
                 Ok((
@@ -247,20 +329,35 @@ impl Store {
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(sent
             .into_iter()
-            .find(|(id, c, _)| id != entry_id && c.trim() == words)
-            .map(|(_, _, note)| Queued::Saved(note)))
+            .find(|(c, _, _)| c.trim() == words)
+            .map(|(_, note, created_at)| SameWords {
+                kind: "saved",
+                id: note,
+                created_at,
+            }))
     }
 
-    /// Remember a sent entry's words for the duplicate window.
+    /// Remember a sent entry for the window: its send (a retry of it is not
+    /// queued again) and, for text, its words.
     fn journal_mark_sent(&self, e: &QueuedEntry, note_id: &str, now: i64) -> Result<()> {
-        if e.has_audio || e.content.trim().is_empty() {
-            return Ok(());
-        }
         self.conn.execute(
-            "INSERT OR REPLACE INTO journal_sent (entry_id, content, note_id, sent_at) VALUES (?1, ?2, ?3, ?4)",
-            params![e.entry_id, e.content, note_id, now],
+            "INSERT OR REPLACE INTO journal_sent (entry_id, content, note_id, sent_at, submission_id, created_at, source)
+             VALUES (?1, ?2, ?3, ?4, (SELECT submission_id FROM journal_outbox WHERE entry_id = ?1), ?5, ?6)",
+            params![e.entry_id, e.content, note_id, now, e.created_at, e.source],
         )?;
         Ok(())
+    }
+
+    /// The note a sent entry became, while the window remembers it.
+    pub fn journal_sent_note(&self, entry_id: &str) -> Result<Option<String>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT note_id FROM journal_sent WHERE entry_id = ?1",
+                [entry_id],
+                |r| r.get(0),
+            )
+            .optional()?)
     }
 
     /// Entries not yet fully in the vault, oldest first.
@@ -364,16 +461,100 @@ pub async fn flush(store: &Store, client: &VaultClient) -> Result<FlushReport> {
 }
 
 /// The paths to try for an entry, in order. A `Journal/` entry has the
-/// sweep's fallbacks from the device (never `-N`); an old `Notes/` entry
-/// keeps the old `-2`…`-9` suffixes, which the sweep still recognises.
+/// sweep's fallbacks from the device (never `-N`), then the last resort (see
+/// [`last_resort_paths`]); an old `Notes/` entry keeps the old `-2`…`-9`
+/// suffixes, which the sweep still recognises, and when those are all taken
+/// moves onto the `Journal/` scheme with the same last resort.
 pub fn paths_to_try(e: &QueuedEntry) -> Vec<String> {
     let mut out = vec![e.path.clone()];
     if e.path.starts_with("Notes/") {
         out.extend((2..=9).map(|n| format!("{}-{n}", e.path)));
+        if let Some(base) = journal_base_for_notes(e) {
+            out.extend(resort_paths(&base, &e.entry_id));
+        }
     } else {
         out.extend(e.alternates.iter().cloned());
+        for p in last_resort_paths(e) {
+            if !out.iter().any(|o| o.eq_ignore_ascii_case(&p)) {
+                out.push(p);
+            }
+        }
     }
     out
+}
+
+/// When the minute, the seconds and the longer titles are all taken, an
+/// entry is never stuck: `HH-MM-SS <title> (2)`…`(9)` (time-only for a voice
+/// entry still transcribing: `HH-MM-SS (2)`), then `(<entry id>)`, which no
+/// other entry can hold. The sweep's `CANON` takes any title after the
+/// stamp, so it leaves these where they are.
+pub fn last_resort_paths(e: &QueuedEntry) -> Vec<String> {
+    let has_seconds = |p: &str| {
+        let name = p.rsplit('/').next().unwrap_or_default();
+        let stamp = name.split(' ').next().unwrap_or_default();
+        stamp.split('-').count() == 3
+    };
+    let base = std::iter::once(&e.path)
+        .chain(e.alternates.iter())
+        .find(|p| has_seconds(p))
+        .unwrap_or(&e.path);
+    resort_paths(base, &e.entry_id)
+}
+
+/// `<base> (2)`…`(9)`, then `<base> (<entry id>)`, those that are valid paths.
+fn resort_paths(base: &str, entry_id: &str) -> Vec<String> {
+    (2..=9)
+        .map(|n| n.to_string())
+        .chain(std::iter::once(entry_id.to_string()))
+        .map(|n| format!("{base} ({n})"))
+        .filter(|p| check_path(p).is_ok())
+        .collect()
+}
+
+/// Where an old `Notes/YYYY/MM-DD/HH-MM-SS` entry goes on the `Journal/`
+/// scheme: the same day and time. A path that does not read that way falls
+/// back to the entry's creation time (UTC); with neither, there is no base.
+fn journal_base_for_notes(e: &QueuedEntry) -> Option<String> {
+    let digits = |s: &str, n: usize| s.len() == n && s.bytes().all(|b| b.is_ascii_digit());
+    let from_path = || {
+        let segs: Vec<&str> = e.path.split('/').collect();
+        let ["Notes", year, day, name] = segs.as_slice() else {
+            return None;
+        };
+        let stamp: Vec<&str> = name.split('-').take(3).collect();
+        let day_ok =
+            day.len() == 5 && digits(&day[..2], 2) && &day[2..3] == "-" && digits(&day[3..], 2);
+        (digits(year, 4) && day_ok && stamp.len() == 3 && stamp.iter().all(|p| digits(p, 2)))
+            .then(|| format!("Journal/{year}/{day}/{}", stamp.join("-")))
+    };
+    // "2026-10-15T01:43:10.000Z": the UTC date and time, read by position
+    let from_created = || {
+        let c = e.created_at.as_str();
+        let ok = c.is_char_boundary(19)
+            && c.len() >= 19
+            && [(0, 4), (5, 2), (8, 2), (11, 2), (14, 2), (17, 2)]
+                .iter()
+                .all(|&(i, n)| digits(&c[i..i + n], n))
+            && &c[4..5] == "-"
+            && &c[7..8] == "-"
+            && matches!(&c[10..11], "T" | " ")
+            && &c[13..14] == ":"
+            && &c[16..17] == ":";
+        ok.then(|| {
+            format!(
+                "Journal/{}/{}-{}/{}-{}-{}",
+                &c[0..4],
+                &c[5..7],
+                &c[8..10],
+                &c[11..13],
+                &c[14..16],
+                &c[17..19]
+            )
+        })
+    };
+    from_path()
+        .or_else(from_created)
+        .filter(|b| check_path(b).is_ok())
 }
 
 async fn send_one(store: &Store, client: &VaultClient, e: &QueuedEntry) -> Result<String> {
@@ -382,8 +563,10 @@ async fn send_one(store: &Store, client: &VaultClient, e: &QueuedEntry) -> Resul
         None => {
             // A retry may follow a write whose answer was lost (on another path
             // than the first one tried): look for this entry before writing again.
+            // A lookup that fails is no answer: the entry stays queued, and only
+            // a lookup that succeeded and found nothing lets it write.
             let found = if e.attempts > 0 {
-                client.find_entry(&e.entry_id).await.ok().flatten()
+                client.find_entry(&e.entry_id).await?
             } else {
                 None
             };
@@ -574,78 +757,101 @@ mod tests {
         }
     }
 
+    const SEND: &str = "a1b2c3d4-0000-4000-8000-000000000001";
+    const SEND2: &str = "a1b2c3d4-0000-4000-8000-000000000002";
+
+    fn send(id: &str, save_another: bool) -> Submission<'_> {
+        Submission { id, save_another }
+    }
+
     #[test]
-    fn a_duplicate_is_refused_while_waiting_and_for_ten_minutes_after() {
+    fn same_words_are_held_back_until_the_user_chooses_while_waiting_and_for_ten_minutes_after() {
         let s = Store::open_in_memory().unwrap();
         let p1 = "Journal/2026/10-14/19-43 A placeholder entry about the garden";
         let p2 = "Journal/2026/10-14/19-46 A placeholder entry about the garden";
         let words = "A placeholder entry about the garden.";
+        let at = "2026-10-15T01:43:10.000Z";
+        let submit = |send: Submission<'_>, id: &str, path: &str, words: &str, now: i64| {
+            s.journal_submit(send, id, path, &[], words, "text", at, None, now)
+                .unwrap()
+        };
+        assert_eq!(submit(send(SEND, false), ID, p1, words, 100), Queued::New);
+        // another send with the same words (stray whitespace) while the first waits: held back, nothing queued
+        let waiting = Queued::SameWords(SameWords {
+            kind: "waiting",
+            id: ID.into(),
+            created_at: at.into(),
+        });
         assert_eq!(
-            s.journal_queue(ID, p1, &[], words, "text", "t", None, 100)
-                .unwrap(),
-            Queued::New
-        );
-        // typed again (with stray whitespace) while the first is still waiting: no second entry
-        assert_eq!(
-            s.journal_queue(
-                ID2,
-                p2,
-                &[],
-                &format!("  {words}\n"),
-                "text",
-                "t",
-                None,
-                280
-            )
-            .unwrap(),
-            Queued::Waiting(ID.into())
-        );
-        assert_eq!(s.journal_pending().unwrap().len(), 1);
-        // the same entry id again is the same entry, not a duplicate
-        assert_eq!(
-            s.journal_queue(ID, p1, &[], words, "text", "t", None, 281)
-                .unwrap(),
-            Queued::New
+            submit(send(SEND2, false), ID2, p2, &format!("  {words}\n"), 280),
+            waiting
         );
         assert_eq!(s.journal_pending().unwrap().len(), 1);
         // other words are a new entry
         assert_eq!(
-            s.journal_queue(
+            submit(
+                send(ID3, false),
                 ID3,
                 p2,
-                &[],
                 "Different placeholder words",
-                "text",
-                "t",
-                None,
                 282
-            )
-            .unwrap(),
+            ),
             Queued::New
         );
         s.journal_remove(ID3).unwrap();
-        // sent: the same words within ten minutes are "already saved"
+        // sent: the same words within ten minutes are held back as "saved", with the entry's time
         let e = s.journal_pending().unwrap().remove(0);
         s.journal_mark_sent(&e, "note-1", 300).unwrap();
         s.journal_remove(ID).unwrap();
         assert_eq!(
-            s.journal_queue(
+            submit(
+                send(SEND2, false),
                 ID2,
                 p2,
-                &[],
                 words,
-                "text",
-                "t",
-                None,
                 300 + DUPLICATE_WINDOW_SECS - 1
-            )
-            .unwrap(),
-            Queued::Saved("note-1".into())
+            ),
+            Queued::SameWords(SameWords {
+                kind: "saved",
+                id: "note-1".into(),
+                created_at: at.into(),
+            })
         );
         assert!(s.journal_pending().unwrap().is_empty());
-        // after the window the same words may be written again
+        // after the window the same words are simply a new entry
         assert_eq!(
-            s.journal_queue(
+            submit(
+                send(SEND2, false),
+                ID2,
+                p2,
+                words,
+                301 + DUPLICATE_WINDOW_SECS
+            ),
+            Queued::New
+        );
+    }
+
+    #[test]
+    fn save_another_queues_the_same_words_as_a_second_entry() {
+        let s = Store::open_in_memory().unwrap();
+        let p1 = "Journal/2026/10-14/19-43 Placeholder check-in";
+        let p2 = "Journal/2026/10-14/19-48 Placeholder check-in";
+        let words = "Placeholder check-in";
+        s.journal_submit(
+            send(SEND, false),
+            ID,
+            p1,
+            &[],
+            words,
+            "text",
+            "t",
+            None,
+            100,
+        )
+        .unwrap();
+        assert!(matches!(
+            s.journal_submit(
+                send(SEND2, false),
                 ID2,
                 p2,
                 &[],
@@ -653,11 +859,92 @@ mod tests {
                 "text",
                 "t",
                 None,
-                301 + DUPLICATE_WINDOW_SECS
+                101
+            )
+            .unwrap(),
+            Queued::SameWords(_)
+        ));
+        // the user chose "Save another": the same send, now allowed
+        assert_eq!(
+            s.journal_submit(
+                send(SEND2, true),
+                ID2,
+                p2,
+                &[],
+                words,
+                "text",
+                "t",
+                None,
+                102
             )
             .unwrap(),
             Queued::New
         );
+        let ids: Vec<String> = s
+            .journal_pending()
+            .unwrap()
+            .into_iter()
+            .map(|q| q.entry_id)
+            .collect();
+        assert_eq!(ids, vec![ID.to_string(), ID2.to_string()]);
+    }
+
+    #[test]
+    fn a_retry_of_the_same_send_queues_nothing_and_is_not_same_words() {
+        let s = Store::open_in_memory().unwrap();
+        let p = "Journal/2026/10-14/19-43 Placeholder words";
+        let words = "Placeholder words";
+        assert_eq!(
+            s.journal_submit(send(SEND, false), ID, p, &[], words, "text", "t", None, 100)
+                .unwrap(),
+            Queued::New
+        );
+        // the same send retried (same submission and entry id): a retry, never "same words"
+        assert_eq!(
+            s.journal_submit(send(SEND, false), ID, p, &[], words, "text", "t", None, 101)
+                .unwrap(),
+            Queued::Retry
+        );
+        // the same submission id under a new entry id is still that send
+        assert_eq!(
+            s.journal_submit(
+                send(SEND, false),
+                ID2,
+                p,
+                &[],
+                words,
+                "text",
+                "t",
+                None,
+                102
+            )
+            .unwrap(),
+            Queued::Retry
+        );
+        assert_eq!(s.journal_pending().unwrap().len(), 1);
+        // once sent, a retry of it is not queued again
+        let e = s.journal_pending().unwrap().remove(0);
+        s.journal_mark_sent(&e, "note-1", 200).unwrap();
+        s.journal_remove(ID).unwrap();
+        assert_eq!(
+            s.journal_submit(send(SEND, true), ID, p, &[], words, "text", "t", None, 201)
+                .unwrap(),
+            Queued::Retry
+        );
+        assert!(s.journal_pending().unwrap().is_empty());
+        assert!(s
+            .journal_submit(
+                send("not-a-uuid", false),
+                ID3,
+                p,
+                &[],
+                words,
+                "text",
+                "t",
+                None,
+                202
+            )
+            .is_err());
     }
 
     #[test]
@@ -703,13 +990,21 @@ mod tests {
         )
         .unwrap();
         let e = &s.journal_pending().unwrap()[0];
+        let tried = paths_to_try(e);
         assert_eq!(
-            paths_to_try(e),
-            vec![
+            tried[..4],
+            [
                 "Journal/2026/10-14/19-43 Placeholder".to_string(),
-                alts[0].clone()
+                alts[0].clone(),
+                "Journal/2026/10-14/19-43-10 Placeholder (2)".to_string(),
+                "Journal/2026/10-14/19-43-10 Placeholder (3)".to_string(),
             ]
         );
+        assert_eq!(
+            tried.last().unwrap(),
+            &format!("Journal/2026/10-14/19-43-10 Placeholder ({ID})")
+        );
+        assert_eq!(tried.len(), 2 + 8 + 1);
         assert!(s
             .journal_queue(
                 ID2,
@@ -742,13 +1037,28 @@ mod tests {
             .unwrap();
         let tried = paths_to_try(&old);
         assert_eq!(
-            (tried[0].as_str(), tried[1].as_str(), tried.len()),
+            (tried[0].as_str(), tried[1].as_str(), tried[8].as_str()),
             (
                 "Notes/2026/10-14/19-43-10",
                 "Notes/2026/10-14/19-43-10-2",
-                9
+                "Notes/2026/10-14/19-43-10-9"
             )
         );
+        // with those ten taken it moves onto the Journal scheme, ending on a name only this entry can hold
+        assert_eq!(tried[9], "Journal/2026/10-14/19-43-10 (2)");
+        assert_eq!(
+            tried.last().unwrap(),
+            &format!("Journal/2026/10-14/19-43-10 ({ID3})")
+        );
+        assert_eq!(tried.len(), 9 + 9);
+        assert!(tried.iter().all(|p| check_path(p).is_ok()));
+        // a Notes path that is not a date and time falls back to the creation time
+        let odd = QueuedEntry {
+            path: "Notes/a".into(),
+            created_at: "2026-10-15T01:43:10.000Z".into(),
+            ..old.clone()
+        };
+        assert_eq!(paths_to_try(&odd)[9], "Journal/2026/10-15/01-43-10 (2)");
     }
 
     fn created(path: &str, entry_id: &str) -> serde_json::Value {
@@ -833,32 +1143,136 @@ mod tests {
                 now_secs()
             )
             .unwrap(),
-            Queued::Saved(format!("n:{alt}"))
+            Queued::SameWords(SameWords {
+                kind: "saved",
+                id: format!("n:{alt}"),
+                created_at: "2026-10-15T01:43:10.000Z".into(),
+            })
+        );
+    }
+
+    #[test]
+    fn a_voice_entry_still_transcribing_falls_back_to_time_only_then_numbered() {
+        let s = Store::open_in_memory().unwrap();
+        let audio: &[u8] = b"abc";
+        s.journal_queue(
+            ID,
+            "Journal/2026/10-14/19-43",
+            &["Journal/2026/10-14/19-43-10".into()],
+            "",
+            "voice",
+            "t",
+            Some((audio, "audio/webm")),
+            1,
+        )
+        .unwrap();
+        let tried = paths_to_try(&s.journal_pending().unwrap()[0]);
+        assert_eq!(
+            tried[..3],
+            [
+                "Journal/2026/10-14/19-43".to_string(),
+                "Journal/2026/10-14/19-43-10".to_string(),
+                "Journal/2026/10-14/19-43-10 (2)".to_string(),
+            ]
+        );
+        assert_eq!(
+            tried.last().unwrap(),
+            &format!("Journal/2026/10-14/19-43-10 ({ID})")
+        );
+        // the sweep's CANON (`Journal/YYYY/MM-DD/(HH-MM(-SS)? )?.+`) holds every candidate,
+        // so it leaves them where they are; never a `-N` suffix
+        for p in &tried {
+            let b = p.as_bytes();
+            assert!(
+                !(b[b.len() - 2] == b'-' && b[b.len() - 1].is_ascii_digit()),
+                "{p}"
+            );
+            assert!(check_path(p).is_ok(), "{p}");
+        }
+    }
+
+    #[tokio::test]
+    async fn three_entries_at_the_same_second_all_save() {
+        crate::init_crypto();
+        let p = "Journal/2026/10-14/19-43 Placeholder words";
+        let alt = "Journal/2026/10-14/19-43-10 Placeholder words";
+        let last = "Journal/2026/10-14/19-43-10 Placeholder words (2)";
+        let ids = [ID, ID2, ID3];
+        let mut script = vec![];
+        // the first takes the minute, the second the seconds, the third the last resort
+        for (n, id) in ids.iter().enumerate() {
+            for (k, path) in [p, alt, last].iter().enumerate().take(n + 1) {
+                let holder = if k == n { id } else { &ids[k] };
+                script.push((
+                    "create-note",
+                    create_args(path, "Placeholder words", id),
+                    created(path, holder),
+                ));
+            }
+        }
+        let (client, handle) = crate::parachute::surface_tests::server(script);
+        let s = Store::open_in_memory().unwrap();
+        for (n, id) in ids.iter().enumerate() {
+            // the same words each time: the user chose "Save another" for the second and third
+            let send = Submission {
+                id,
+                save_another: n > 0,
+            };
+            assert_eq!(
+                s.journal_submit(
+                    send,
+                    id,
+                    p,
+                    &[alt.into()],
+                    "Placeholder words",
+                    "text",
+                    "2026-10-15T01:43:10.000Z",
+                    None,
+                    1,
+                )
+                .unwrap(),
+                Queued::New
+            );
+        }
+        let r = flush(&s, &client).await.unwrap();
+        handle.join().unwrap();
+        assert_eq!(
+            (r.sent, r.remaining, r.error),
+            (
+                vec![format!("n:{p}"), format!("n:{alt}"), format!("n:{last}")],
+                0,
+                None
+            )
         );
     }
 
     #[tokio::test]
-    async fn every_path_taken_stays_queued_with_an_error() {
+    async fn an_old_notes_entry_with_every_old_path_taken_still_saves() {
         crate::init_crypto();
-        let p = "Journal/2026/10-14/19-43 Placeholder words";
-        let alt = "Journal/2026/10-14/19-43-10 Placeholder words";
-        let (client, handle) = crate::parachute::surface_tests::server(vec![
-            (
-                "create-note",
-                create_args(p, "Placeholder words", ID),
-                created(p, ID2),
-            ),
-            (
-                "create-note",
-                create_args(alt, "Placeholder words", ID),
-                created(alt, ID3),
-            ),
-        ]);
+        let old = "Notes/2026/10-14/19-43-10";
+        let free = "Journal/2026/10-14/19-43-10 (2)";
+        // the original path and -2…-9 each hold another entry; the next name is on the Journal scheme
+        let mut script: Vec<_> = std::iter::once(old.to_string())
+            .chain((2..=9).map(|n| format!("{old}-{n}")))
+            .map(|p| {
+                (
+                    "create-note",
+                    create_args(&p, "Placeholder words", ID),
+                    created(&p, ID2),
+                )
+            })
+            .collect();
+        script.push((
+            "create-note",
+            create_args(free, "Placeholder words", ID),
+            created(free, ID),
+        ));
+        let (client, handle) = crate::parachute::surface_tests::server(script);
         let s = Store::open_in_memory().unwrap();
         s.journal_queue(
             ID,
-            p,
-            &[alt.into()],
+            old,
+            &[],
             "Placeholder words",
             "text",
             "2026-10-15T01:43:10.000Z",
@@ -868,8 +1282,10 @@ mod tests {
         .unwrap();
         let r = flush(&s, &client).await.unwrap();
         handle.join().unwrap();
-        assert_eq!(r.remaining, 1);
-        assert!(r.error.unwrap().contains("path taken"));
+        assert_eq!(
+            (r.sent, r.remaining, r.error),
+            (vec![format!("n:{free}")], 0, None)
+        );
     }
 
     #[tokio::test]
@@ -898,6 +1314,81 @@ mod tests {
         s.journal_failed(ID, "hub unreachable: reset").unwrap();
         let r = flush(&s, &client).await.unwrap();
         handle.join().unwrap();
+        // found: marked sent with no create (the script holds no create-note)
         assert_eq!((r.sent, r.remaining), (vec![format!("n:{alt}")], 0));
+        assert_eq!(
+            s.journal_sent_note(ID).unwrap().as_deref(),
+            Some(format!("n:{alt}").as_str())
+        );
+    }
+
+    fn lookup_args() -> serde_json::Value {
+        serde_json::json!({"vault": "scope-test", "tag": ["journal", "capture"], "tag_match": "any", "metadata": {"entry_id": ID}, "limit": 1, "include_content": true, "content_length": 2000, "include_metadata": ["source", "entry_id"]})
+    }
+
+    fn queue_retry(s: &Store, p: &str, alt: &str) {
+        s.journal_queue(
+            ID,
+            p,
+            &[alt.into()],
+            "Placeholder words",
+            "text",
+            "2026-10-15T01:43:10.000Z",
+            None,
+            1,
+        )
+        .unwrap();
+        s.journal_failed(ID, "hub unreachable: reset").unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_retry_whose_lookup_fails_never_creates_and_stays_queued() {
+        crate::init_crypto();
+        let p = "Journal/2026/10-14/19-43 Placeholder words";
+        let alt = "Journal/2026/10-14/19-43-10 Placeholder words";
+        // the lookup errors; the script holds no create-note, so a create would
+        // meet a closed door and report "unreachable", not the lookup's 500
+        let (client, handle) = crate::parachute::surface_tests::server(vec![(
+            "query-notes",
+            lookup_args(),
+            serde_json::json!({"http_status": 500, "error": "index rebuilding"}),
+        )]);
+        let s = Store::open_in_memory().unwrap();
+        queue_retry(&s, p, alt);
+        let r = flush(&s, &client).await.unwrap();
+        handle.join().unwrap();
+        assert!(r.sent.is_empty());
+        assert_eq!(r.remaining, 1);
+        let err = r.error.unwrap();
+        assert!(err.contains("hub error 500"), "{err}");
+        let q = &s.journal_pending().unwrap()[0];
+        assert_eq!((q.attempts, q.note_id.as_deref()), (2, None));
+    }
+
+    #[tokio::test]
+    async fn a_retry_whose_lookup_finds_nothing_creates() {
+        crate::init_crypto();
+        let p = "Journal/2026/10-14/19-43 Placeholder words";
+        let alt = "Journal/2026/10-14/19-43-10 Placeholder words";
+        let (client, handle) = crate::parachute::surface_tests::server(vec![
+            (
+                "query-notes",
+                lookup_args(),
+                serde_json::json!({"notes": []}),
+            ),
+            (
+                "create-note",
+                create_args(p, "Placeholder words", ID),
+                created(p, ID),
+            ),
+        ]);
+        let s = Store::open_in_memory().unwrap();
+        queue_retry(&s, p, alt);
+        let r = flush(&s, &client).await.unwrap();
+        handle.join().unwrap();
+        assert_eq!(
+            (r.sent, r.remaining, r.error),
+            (vec![format!("n:{p}")], 0, None)
+        );
     }
 }

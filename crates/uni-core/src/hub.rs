@@ -7,6 +7,11 @@
 //! tries the other once, and the app remembers the one that answered.
 //!
 //! Cleanup after the rename: delete the pair from [`HUB_ALIASES`].
+//!
+//! Every hub URL anything is sent to passes [`checked_origin`] first: https,
+//! or http only on this device (`localhost`, `127.0.0.1`). The vault client
+//! and transcription share it, so private audio never goes over plain http to
+//! another machine.
 
 /// Origins that are one hub, in pairs. Either side may be the configured one.
 pub const HUB_ALIASES: &[(&str, &str)] = &[(
@@ -20,6 +25,18 @@ pub const ALIAS_ENV: &str = "UNI_HUB_ALIASES";
 
 /// Port the transcription service listens on, on the hub's host.
 pub const TRANSCRIBE_PORT: u16 = 8445;
+
+/// The origin of a hub URL that is safe to send to: https, or http only for
+/// `localhost` and `127.0.0.1`.
+pub fn checked_origin(url: &str) -> crate::Result<String> {
+    let u =
+        url::Url::parse(url.trim()).map_err(|e| crate::Error::Invalid(format!("hub URL: {e}")))?;
+    let local = matches!(u.host_str(), Some("127.0.0.1" | "localhost"));
+    if u.scheme() != "https" && !(u.scheme() == "http" && local) {
+        return Err(crate::Error::Invalid("hub URL must be https".into()));
+    }
+    Ok(u.origin().ascii_serialization())
+}
 
 fn origin_of(url: &str) -> Option<String> {
     let u = url::Url::parse(url.trim()).ok()?;
@@ -72,9 +89,10 @@ pub fn hub_origins(hub: &str) -> Vec<String> {
 }
 
 /// The transcription endpoint on the hub's host: same scheme and host, port
-/// [`TRANSCRIBE_PORT`], path `/transcribe`.
+/// [`TRANSCRIBE_PORT`], path `/transcribe`. `None` for a hub that fails
+/// [`checked_origin`] (e.g. plain http to another machine).
 pub fn transcribe_url(hub: &str) -> Option<String> {
-    let mut u = url::Url::parse(hub.trim()).ok()?;
+    let mut u = url::Url::parse(&checked_origin(hub).ok()?).ok()?;
     u.host_str()?;
     u.set_port(Some(TRANSCRIBE_PORT)).ok()?;
     u.set_path("/transcribe");
@@ -118,6 +136,31 @@ mod tests {
             Some("https://hub.example.org:8445/transcribe")
         );
         assert_eq!(transcribe_url("not a url"), None);
+    }
+
+    #[test]
+    fn an_http_remote_hub_is_refused_for_transcription() {
+        for bad in [
+            "http://uni-1.example.ts.net",
+            "http://hub.example.org:8443",
+            "http://10.0.0.5",
+            "ftp://hub.example.org",
+        ] {
+            assert!(checked_origin(bad).is_err(), "{bad}");
+            assert_eq!(transcribe_url(bad), None, "{bad}");
+        }
+        assert_eq!(
+            transcribe_url("http://127.0.0.1:1939").as_deref(),
+            Some("http://127.0.0.1:8445/transcribe")
+        );
+        assert_eq!(
+            transcribe_url("http://localhost").as_deref(),
+            Some("http://localhost:8445/transcribe")
+        );
+        assert_eq!(
+            checked_origin("https://uni.example.ts.net/x").unwrap(),
+            NEW
+        );
     }
 
     #[test]

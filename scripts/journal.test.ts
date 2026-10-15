@@ -1,6 +1,6 @@
 // Run: node --experimental-strip-types scripts/journal.test.ts
 import assert from "node:assert/strict";
-import { entryText, legacyEntryPath, mmss, newDraft, pickAudioMime, shareText, TRANSCRIPT_PENDING } from "../src/journalCore.ts";
+import { entryText, legacyEntryPath, mmss, newDraft, pickAudioMime, sameWordsLine, shareText, TRANSCRIPT_PENDING } from "../src/journalCore.ts";
 
 const d = new Date(2026, 8, 5, 7, 3, 9);
 // 0.1.46: filed under Journal/ by its first words (scripts/journalPaths.test.ts has the sweep's cases); Notes/ is the old shape
@@ -8,6 +8,15 @@ assert.equal(legacyEntryPath(d), "Notes/2026/09-05/07-03-09");
 const draft = newDraft("hi", "text", d, "id-1");
 assert.deepEqual([draft.entry_id, draft.path, draft.source], ["id-1", "Journal/2026/09-05/07-03 hi", "text"]);
 assert.equal(draft.created_at, d.toISOString());
+// 0.1.46 fix (P2): every composer send has its own submission id besides the entry id (a retry reuses the draft, so both stay)
+const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const a = newDraft("hi", "text", d), b = newDraft("hi", "text", d);
+assert.match(a.submission_id, uuid);
+assert.notEqual(a.submission_id, b.submission_id);
+assert.notEqual(a.submission_id, a.entry_id);
+assert.equal(newDraft("hi", "text", d, "id-1", "send-1").submission_id, "send-1");
+assert.match(sameWordsLine({ kind: "waiting", id: "q1", created_at: new Date(2026, 9, 14, 19, 43).toISOString() }), /^Same words as your 7:43\sPM entry$|^Same words as your 19:43 entry$/);
+assert.equal(sameWordsLine({ kind: "saved", id: "n1", created_at: "" }), "Same words as your earlier entry");
 
 assert.equal(entryText(`note\n\n${TRANSCRIPT_PENDING}`), "note");
 assert.equal(entryText(TRANSCRIPT_PENDING), "");

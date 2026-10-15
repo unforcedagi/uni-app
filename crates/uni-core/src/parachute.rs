@@ -76,13 +76,7 @@ pub struct VaultConfig {
 
 impl VaultConfig {
     fn origin(&self) -> Result<String> {
-        let url = url::Url::parse(self.hub.trim())
-            .map_err(|e| Error::Invalid(format!("hub URL: {e}")))?;
-        let local = matches!(url.host_str(), Some("127.0.0.1" | "localhost"));
-        if url.scheme() != "https" && !(url.scheme() == "http" && local) {
-            return Err(Error::Invalid("hub URL must be https".into()));
-        }
-        Ok(url.origin().ascii_serialization())
+        crate::hub::checked_origin(&self.hub)
     }
 }
 
