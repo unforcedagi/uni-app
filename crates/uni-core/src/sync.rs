@@ -254,10 +254,13 @@ pub async fn sync_once(
     };
 
     crate::init_crypto();
+    // r25 (Codex 8): where a cold start's time goes: connect + auth, discovery, then each room's history
+    let t0 = std::time::Instant::now();
     let mut client = BuzzClient::connect(relay_url, keys, auth_tag).await?;
-    tracing::info!(relay = relay_url, "authenticated (NIP-42)");
+    tracing::info!(relay = relay_url, ms = t0.elapsed().as_millis() as u64, "authenticated (NIP-42)");
 
     let discovery = client.discover().await?;
+    tracing::info!(ms = t0.elapsed().as_millis() as u64, rooms = discovery.channels.len(), "sync: rooms discovered");
     let channels = discovery.channels;
     let now = nostr::Timestamp::now().as_secs() as i64;
     for ci in channels.values() {
@@ -289,6 +292,7 @@ pub async fn sync_once(
             }
             Err(e) => return Err(e),
         };
+        tracing::info!(ms = t0.elapsed().as_millis() as u64, channel = %ch_str, events = events.len(), first_sync = since.is_none(), "sync: room history fetched");
         report.fetched.insert(ch_str.clone(), events.len());
 
         let mut inserted = 0usize;
@@ -330,6 +334,7 @@ pub async fn sync_once(
     let (requested, stored) = refresh_profiles(&mut client, store).await?;
     report.profiles_requested = requested;
     report.profiles_stored = stored;
+    tracing::info!(ms = t0.elapsed().as_millis() as u64, "sync: done");
 
     let _ = client.disconnect().await;
     report.total_items = store.count_items()?;
