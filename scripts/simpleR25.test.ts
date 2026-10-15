@@ -2,7 +2,7 @@
 // Check in has three honest states.
 // Run: node --experimental-strip-types scripts/simpleR25.test.ts
 import assert from "node:assert/strict";
-import { actionLead, belowInCard, checkInResult, checkingBanner, couldntRead, currentStep, privateAction, rowAction, rowSub, staleLine, staleSummary, titleSays, verbPhrase } from "../src/areas/simpleCore.ts";
+import { actionLead, belowInCard, checkInResult, checkingBanner, couldntRead, currentStep, privateAction, rowAction, rowSub, titleSays, verbPhrase } from "../src/areas/simpleCore.ts";
 
 let failed = 0;
 function check(name: string, fn: () => void) {
@@ -44,30 +44,6 @@ check("Ryan: the row and the sheet heading say \"Send Ryan the deploy-access mes
   assert.equal(currentStep({ next: "Send Ryan the deploy-access message below", room: "techne" }), "Ask #techne for the message", "words nobody stored: ask the room");
 });
 
-const STANDS = "Staging is up; prod waits on Aaron's Wed 10-14 go for #38, #58, #62.";
-check("P1-2: a claim with no open request makes the whole summary older than the work, dated (r27: nothing is promoted)", () => {
-  const s = staleSummary(STANDS, "2026-10-13T10:00:00Z", [])!;
-  assert.ok(s);
-  assert.match(staleLine(s), /^This summary is older than the latest work · from Oct 1[23]$/);
-  assert.equal(s.why, "claim");
-  assert.equal(staleLine({ from: null }), "This summary is older than the latest work");
-});
-
-check("P1-2: open requests that don't match the claim also make it stale; one that does keeps it current", () => {
-  assert.ok(staleSummary(STANDS, "2026-10-13T10:00:00Z", [{ title: "Companion Today redesign" }, { title: "Edit and send the ATLAS follow-up" }]));
-  assert.equal(staleSummary(STANDS, "2026-10-13T10:00:00Z", [{ next: "Say go on prod deploy of #38, #58 and #62" }]), null, "#38, #58 and #62 are all open");
-  assert.ok(staleSummary(STANDS, "2026-10-13T10:00:00Z", [{ next: "Say go on prod deploy of #58" }]), "r26: #58 alone is not all three");
-  assert.equal(staleSummary(STANDS, "2026-10-13T10:00:00Z", [{ next: "Say go on prod deploy of #580" }]) !== null, true, "#580 is not #58");
-});
-
-check("P1-2: with no id in the claim, a shared distinctive word reconciles it; nothing shared does not", () => {
-  const c = "Waits on Aaron's decision about ATLAS hosting.";
-  assert.equal(staleSummary(c, null, [{ title: "Decide the ATLAS hosting" }]), null);
-  assert.ok(staleSummary(c, null, [{ title: "Send the follow-up email" }]));
-  assert.ok(staleSummary(c, null, [{ title: "Decide the hosting budget" }]), "r26: one shared word is not enough");
-  assert.equal(staleSummary("Staging is up and quiet.", null, []), null, "no claim, no line");
-  for (const t of ["needs Aaron to pick", "for Aaron to sign", "Aaron's go", "waits on Aaron"]) assert.ok(staleSummary(t, null, []), t);
-});
 
 check("P1-3: Check in has three states: found, couldn't check, nothing related", () => {
   const asked = { at: "2026-10-06", kind: "asked" as const };

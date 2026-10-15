@@ -13,7 +13,7 @@ import { isActiveRun, type Run } from "./steerCore";
 import { ownerLabel, type Task } from "./taskCore";
 import { taskTitle } from "./whereCore";
 import { splitLinks } from "./linkText";
-import { actionableTitle, runText, answerChoices, answerLabel, askLead, askPreview, checkLine, CHECK_FAILED, DANGLING, decideLine, decisionQuestion, dueLine, fitsRow, isOverdue, missingLine, OPEN_TASK, OPEN_TO_ANSWER, privateActionLabel, privateRestLabel, askedLine, requestDate, currentStep, actionOf, rowAction, rowSubParts, standsHeading, titleSays, titleWords, TIDY_LINE, toTidy, unknownDecision, waitsLine, waitsOnMe, withHosts, rowAsk, withoutRawIds, runStateLabel, waitingOnYou, waitingRunParts, notWrittenDown, referencedItems, ROW_ITEMS, ITEM_LINES, itemForms, staleLine, asOfPrefix, clauseForms, type Choice, type NeedsFeed, type PrivateNeed, type RowAction, type StaleSummary, type Support } from "./simpleCore";
+import { actionableTitle, runText, answerChoices, answerLabel, askLead, askPreview, checkLine, CHECK_FAILED, DANGLING, decideLine, decisionQuestion, dueLine, fitsRow, isOverdue, missingLine, OPEN_TASK, OPEN_TO_ANSWER, privateActionLabel, privateRestLabel, askedLine, requestDate, currentStep, actionOf, rowAction, rowSubParts, standsHeading, titleSays, titleWords, TIDY_LINE, toTidy, unknownDecision, waitsLine, waitsOnMe, withHosts, rowAsk, withoutRawIds, runStateLabel, waitingOnYou, waitingRunParts, notWrittenDown, referencedItems, ROW_ITEMS, ITEM_LINES, itemForms, lastWritten, SUMMARY_LONG, recheckLine, noneLine, type Choice, type NeedsFeed, type PrivateNeed, type RowAction, type Support } from "./simpleCore";
 import { requestRecheck } from "./useTasks";
 
 const KEYS = { side: "uni.companion.side.v1", sideNarrow: "uni.companion.side.narrow.v1", strip: "uni.companion.strip.v1" } as const;
@@ -55,7 +55,7 @@ export function useCompanionOpen(variant: "side" | "strip"): [boolean, (v: boole
 
 export type CompanionProps = {
   /** Where this stands: the sentence and, quietly, when it was written. Null: nothing to say. */
-  stands: { text: string; ago: string; /** r27: the date a written summary is dated by ("Oct 14") */ asOf?: string | null; stale?: StaleSummary | null } | null; ready: boolean;
+  stands: { text: string; ago: string; /** r27: the date a written summary is dated by ("Oct 14") */ asOf?: string | null; /** the room that wrote it */ by?: string | null; /** a summary somebody wrote, not the app's own line */ written?: boolean } | null; ready: boolean;
   /** Said in place of a node's state (a room no node owns: "Not filed under an area yet."); there is then no Needs you and no way deeper. */
   note?: string | null;
   /** The task list's health: a failed first load (never an endless "Loading…"), a failed refresh (the rows stay), and whether every page was read. */
@@ -215,45 +215,16 @@ function ActionLine({ forms, vault, elRef }: { forms: { text: string; keep: stri
 }
 
 /**
- * Where this stands (r23, both critics): the node's sentence without raw ids (run numbers, hashes, long links), whole when it fits three
- * lines, else the longest form that ends on a clause ("…; prod waits…" → "Staging has the D2 one-app…."), never cut inside one and never
- * with "…". "More" (a real button) shows the whole. Its date is in the heading ("Where this stands · 2 days ago"), not under it.
+ * Where this stands (r29, Codex P1-3): a dated account, never the app's own claim. "Last written Oct 14 by #cohere:" and the text as written
+ * (without raw ids), muted, below Needs you. Whole when short; a long one is behind "What it said". `written`: a summary somebody wrote (the
+ * app's own line from the tasks has no author or date to give).
  */
-function Stands({ text, asOf = null }: { text: string; /** r27: the date the summary is dated by, written before it ("As of Oct 14: …") */ asOf?: string | null }) {
-  const clean = useMemo(() => withoutRawIds(text), [text]);
-  const forms = useMemo(() => clauseForms(clean), [clean]);
-  const [full, setFull] = useState(false);
-  const [form, setForm] = useState(0);
-  const [width, setWidth] = useState(0);
-  const ref = useRef<HTMLParagraphElement | null>(null);
-  useLayoutEffect(() => { setForm(0); }, [clean, width]);
-  useLayoutEffect(() => {
-    const el = ref.current; if (!el || full) return;
-    const lh = parseFloat(getComputedStyle(el).lineHeight) || 22;
-    if (el.scrollHeight > lh * 3 + 2 && form < forms.length - 1) setForm(form + 1);
-  });
-  useLayoutEffect(() => {
-    const el = ref.current; if (!el || typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(() => { const w = Math.round(el.clientWidth); setWidth((cur) => (cur === w ? cur : w)); });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-  const cut = !full && form > 0;
-  const shown = full ? clean : forms[form];
-  return <div className={`cp-lede ${full ? "full" : ""}`}>
-    <p ref={ref} className="cp-stands" data-cut={cut ? "true" : undefined}>{asOf && <span className="cp-asof">{asOfPrefix(asOf)}</span>}{shown}</p>
-    {(cut || full) && <button type="button" className="cp-more-next cp-stands-more" aria-expanded={full} onClick={() => setFull(!full)}>{full ? "Less" : "More"}</button>}
-</div>;
-}
-
-/**
- * r27 (Codex P1-2): a summary older than the latest work is not shown as the state of things. One quiet line says so ("This summary is older
- * than the latest work · from Oct 14"); what it said, whole and as written, with its date, is behind "What it said". Nothing in it is promoted.
- */
-export function StaleStands({ stale, text, className = "cp-lede" }: { stale: StaleSummary; text: string; className?: string }) {
-  return <div className={className} data-stale-why={stale.why}>
-    <p className="cp-stands cp-stale" data-stale="true">{staleLine(stale)}</p>
-    <details className="cp-said"><summary>What it said</summary><p>{asOfPrefix(stale.from)}{withoutRawIds(text)}</p></details>
+export function Stands({ stands, className = "cp-lede" }: { stands: { text: string; asOf?: string | null; by?: string | null; written?: boolean }; className?: string }) {
+  const text = useMemo(() => withoutRawIds(stands.text), [stands.text]);
+  const long = text.length > SUMMARY_LONG;
+  return <div className={`${className} cp-stands-note`} data-written={stands.written ? "true" : undefined}>
+    {stands.written && <p className="cp-asof">{lastWritten(stands.asOf, stands.by)}</p>}
+    {long ? <details className="cp-said"><summary>What it said</summary><p className="cp-stands">{text}</p></details> : <p className="cp-stands">{text}</p>}
   </div>;
 }
 
@@ -659,8 +630,6 @@ export function WaitingRuns({ runs, className = "cp-list cp-waiting" }: { runs: 
   })}</ul> : null;
 }
 
-/** "Uni is rechecking 12 older asks": the one quiet line under Needs you for what is not confirmed. */
-export const recheckLine = (n: number): string => `Uni is rechecking ${n} older ${n === 1 ? "ask" : "asks"}`;
 export const checkingAsks = (n: number): string => `Checking ${n} ${n === 1 ? "ask" : "asks"}…`;
 /** An ask's whole step, wrapped, never ending at a colon (the recheck list shows nothing less). */
 export function wholeStep(t: Task): string {
@@ -670,7 +639,7 @@ export function wholeStep(t: Task): string {
 }
 /**
  * r28 (Codex P1-2): asks that aren't confirmed (no recent `asked_at`, or related chat since) are not in Needs you and not counted. One quiet
- * line says Uni is rechecking them; it opens to a plain list: each ask's whole step, when it was asked, "Open" and a secondary "Answer anyway"
+ * line says they need confirming; it opens to a plain list: each ask's whole step, when it was asked, "Open" and a secondary "Answer anyway"
  * (one tap to the sheet with its answers ready). The sheet keeps "not confirmed since" for these.
  */
 export function Rechecks({ tasks, onTask, placeOf }: { tasks: readonly Task[]; onTask: (t: Task, o?: { anyway?: boolean }) => void; /** the area an ask belongs to when it is listed outside it */ placeOf?: (t: Task) => string | null }) {
@@ -679,7 +648,7 @@ export function Rechecks({ tasks, onTask, placeOf }: { tasks: readonly Task[]; o
   if (!tasks.length) return null;
   return <div className="cp-recheck" data-count={tasks.length}>
     <button type="button" className="cp-recheck-line" aria-expanded={open} onClick={() => setOpen(!open)}>{recheckLine(tasks.length)}<i aria-hidden="true">{open ? "–" : "+"}</i></button>
-    {open && <ul className="cp-recheck-list" aria-label="Older asks Uni is rechecking">{tasks.map((t) => {
+    {open && <ul className="cp-recheck-list" aria-label="Older asks that need confirming">{tasks.map((t) => {
       const place = placeOf?.(t) ?? null;
       const when = [askedLine(requestDate(t)), place ? `in ${place}` : null].filter(Boolean).join(" · ");
       return <li key={t.id} className="cp-recheck-item" data-id={taskTitle(t.title).id ?? undefined}>
@@ -691,12 +660,7 @@ export function Rechecks({ tasks, onTask, placeOf }: { tasks: readonly Task[]; o
   </div>;
 }
 
-/** The compact panel's summary: its date line first; the summary itself opens from it (r28, Codex P2-5). */
-function FoldedStands({ stands, scope }: { stands: NonNullable<CompanionProps["stands"]>; scope: string | null | undefined }) {
-  return <details className="cp-said cp-lede cp-stands-fold"><summary>{standsHeading(scope, stands.ago, stands.asOf)}{stands.asOf ? ` · as of ${stands.asOf}` : ""}</summary><p className="cp-stands">{asOfPrefix(stands.asOf)}{withoutRawIds(stands.text)}</p></details>;
-}
-
-function Body({ stands, scope, ready, note, load, feed, rest = 0, moreTitle = null, onPrivate, runs, nodeName, onTask, onDecide, onEverything, onNote, placeOf, fit, hideHealth = false, onMore, keepOne = false, compact = false }: CompanionProps & { fit: boolean; hideHealth?: boolean; onMore?: () => void; keepOne?: boolean;
+function Body({ stands, ready, note, load, feed, rest = 0, moreTitle = null, onPrivate, runs, nodeName, onTask, onDecide, onEverything, onNote, placeOf, fit, hideHealth = false, onMore, keepOne = false, compact = false }: CompanionProps & { fit: boolean; hideHealth?: boolean; onMore?: () => void; keepOne?: boolean;
   /** r28 (Codex P2-5): the one compact panel: the summary is its date line, the footer is outside what scrolls */
   compact?: boolean }) {
   const live = runs.filter(isActiveRun);
@@ -731,7 +695,7 @@ function Body({ stands, scope, ready, note, load, feed, rest = 0, moreTitle = nu
   const health = !hideHealth && <LoadHealth load={load} ready={ready} count={feed.total} />;
   const foot = onEverything && <div className="cp-foot"><button type="button" className="cp-all" onClick={onEverything}><span className="cp-all-t">{`All of ${nodeName}'s work`}</span>{hiddenRuns > 0 && <span className="cp-all-more">+{hiddenRuns} more running</span>}<span className="cp-all-arrow" aria-hidden="true">→</span></button></div>;
   const content = <>
-    {!ready ? (load?.error || load?.slow ? <LoadHealth load={load} ready={false} /> : <p className="cp-lede">Loading…</p>) : stands && (stands.stale ? <StaleStands stale={stands.stale} text={stands.text} /> : compact ? <FoldedStands stands={stands} scope={scope} /> : <Stands text={stands.text} asOf={stands.asOf} />)}
+    {!ready && (load?.error || load?.slow ? <LoadHealth load={load} ready={false} /> : <p className="cp-lede">Loading…</p>)}
     {ready && <section aria-label="Needs you" className="cp-sec" aria-busy={load?.refreshing || undefined}>
       <h3 className="cp-h">Needs you</h3>
       {/* r17: Uni's panel is at most three rows and one "Show N more" (private items folded in) to the work view, which keeps the full list */}
@@ -739,11 +703,13 @@ function Body({ stands, scope, ready, note, load, feed, rest = 0, moreTitle = nu
       {feed.rows.length === 0 && rest > 0 && onEverything && <button type="button" className="cp-more cp-more-rows cp-more-all" title={moreTitle ?? undefined} onClick={onEverything}>{moreLabel(rest)}</button>}
       {feed.privates.length > 0 && <ul className="cp-list cp-privates">{feed.privates.map((p) => <PrivateRow key={p.key} p={p} onPrivate={onPrivate} />)}</ul>}
       <WaitingRuns runs={waiting} />
-      {feed.total === 0 && !feed.pending?.length && !waiting.length && <p className="cp-none">Nothing needs you here.</p>}
+      {feed.total === 0 && !feed.pending?.length && !waiting.length && <p className="cp-none">{noneLine(feed)}</p>}
       {!!feed.checking?.length && <p className="cp-checking" role="status" aria-busy="true">{checkingAsks(feed.checking.length)}</p>}
       <Rechecks tasks={feed.recheck ?? []} onTask={onTask} placeOf={placeOf} />
       {health}
     </section>}
+    {/* r29 (Codex P1-3): the summary is a dated account, below what needs you, never leading */}
+    {ready && stands && <Stands stands={stands} />}
     {active.length > 0 && runsShown > 0 && <section aria-label="Running" className="cp-sec">
       <h3 className="cp-h">Running</h3>
       <ul className="cp-list">{active.slice(0, runsShown).map((r) => <li key={r.id} className="cp-run" data-state={r.state}><i aria-hidden="true" /><RunText what={cleanText(r.what)} /><small>{runStateLabel(r.state)}</small></li>)}</ul>
@@ -836,7 +802,7 @@ export function CompanionStrip({ open, onToggle, onSheet, behind = false, ...p }
   // r18: folded, the line is the sentence cut on a whole word (never "underway ac…"); open, it is the dated heading. r19: when anything needs
   // the user, the folded line says what is waiting first ("Needs you · 2: Say go on the deploy…"), never only a dot behind a chevron
   const waiting = p.ready && !p.note ? waitingLine(p.feed) : null;
-  const folded = p.note ?? (p.ready ? (p.stands ? (p.stands.stale ? staleLine(p.stands.stale) : `${asOfPrefix(p.stands.asOf)}${withoutRawIds(p.stands.text)}`) : null) ?? "Where this stands" : p.load?.error ? "Couldn't load" : p.load?.slow ? "Still loading" : "Loading…");
+  const folded = p.note ?? (p.ready ? (p.stands ? (p.stands.written ? `${lastWritten(p.stands.asOf, p.stands.by)} ${withoutRawIds(p.stands.text)}` : withoutRawIds(p.stands.text)) : null) ?? "Where this stands" : p.load?.error ? "Couldn't load" : p.load?.slow ? "Still loading" : "Loading…");
   const lineRef = useRef<HTMLParagraphElement | null>(null);
   const lineTokens = [...(p.scope ? [{ node: <b className="cp-scope">{`${p.scope}:`}</b>, space: false }] : []), ...wordTokens(folded).map((w, i) => (i === 0 && p.scope ? { ...w, space: true } : w))];
   const label = <span className="cp-line-text" title={p.stands?.text}>{open ? heading
