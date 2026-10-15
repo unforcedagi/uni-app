@@ -205,10 +205,18 @@ await check("decide(): one update with the state compare-and-set, the decided me
   const m = mock({ vault_decide: (a) => (a.id === "ok" ? { id: "ok", updatedAt: "T5", lastUpdatedBy: "u", lastUpdatedVia: "api" } : new Error("[transition_conflict] conflict: note stale")) });
   const api = createVaultTasks(m.call);
   assert.deepEqual(await api.decide("ok", "Ship it", "aaron", "T4", "2026-10-13T09:00:00.000Z"), { ok: true, updatedAt: "T5", lastUpdatedBy: "u", lastUpdatedVia: "api" });
-  assert.deepEqual(m.log[0], { cmd: "vault_decide", args: { vault: "uni", id: "ok", from: "open", to: "decided", metadata: { decided: "Ship it", decided_at: "2026-10-13T09:00:00.000Z", decided_by: "aaron" }, ifUpdatedAt: "T4" } });
+  assert.deepEqual(m.log[0], { cmd: "vault_decide", args: { vault: "uni", id: "ok", from: "open", to: "decided", metadata: { decided: "Ship it", decided_at: "2026-10-13T09:00:00.000Z", decided_by: "aaron", answered_rev: "T4" }, ifUpdatedAt: "T4" } });
   const stale = await api.decide("stale", "Hold", "aaron", "T1");
   assert.ok(!stale.ok && stale.kind === "conflict");
   assert.equal(m.log.length, 2);
+});
+await check("r26: \"I did this\" records the revision it answered in the same transition; an undo or a plain transition carries none", async () => {
+  const m = mock({ vault_transition: () => ({ id: "x", updatedAt: "T3" }) });
+  const api = createVaultTasks(m.call);
+  await api.transition("x", "open", "done", "T2", true);
+  await api.transition("x", "done", "open", "T3");
+  assert.deepEqual(m.log[0].args.metadata, { answered_rev: "T2" });
+  assert.equal("metadata" in m.log[1].args, false);
 });
 await check("Undo is the reverse transition (to → from) guarded by the first write's revision, and snooze is a guarded metadata merge", async () => {
   const m = mock({ vault_transition: () => ({ id: "x", updatedAt: "T3" }), vault_patch_meta: () => ({ id: "x", updatedAt: "T4" }) });

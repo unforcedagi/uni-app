@@ -84,7 +84,7 @@ await check("P1-2 the answer box writes like a tap: one vault_decide of decided/
   const r = await vt.decide("d1", "Mon–Fri 9 to 5", "aaron", "2026-10-14T10:00:00Z", "2026-10-14T10:00:00Z");
   assert.equal(r.ok, true);
   assert.equal(calls.length, 1);
-  assert.deepEqual(calls[0], { cmd: "vault_decide", args: { vault: "uni", id: "d1", from: "open", to: "decided", metadata: { decided: "Mon–Fri 9 to 5", decided_at: "2026-10-14T10:00:00Z", decided_by: "aaron" }, ifUpdatedAt: "2026-10-14T10:00:00Z" } });
+  assert.deepEqual(calls[0], { cmd: "vault_decide", args: { vault: "uni", id: "d1", from: "open", to: "decided", metadata: { decided: "Mon–Fri 9 to 5", decided_at: "2026-10-14T10:00:00Z", decided_by: "aaron", answered_rev: "2026-10-14T10:00:00Z" }, ifUpdatedAt: "2026-10-14T10:00:00Z" } });
 });
 
 await check("P1-3 explicit questions only: a numbered plan is not questions; a wrapped item stays whole; a count that differs is unclear", () => {

@@ -38,6 +38,29 @@ where
     .await
 }
 
+/// r26 (Codex P1 3): relay work for what the user sends (a message, an edit, a delete, a voice message's event). It does not take
+/// [`IO_GATE`]: the first sync holds that gate for 12 to 13 s, and a send must not wait behind it. Sends keep their own order
+/// ([`SEND_GATE`]) and their own store connection (WAL, 5 s busy timeout, as the live loop already does), so a send during a sync
+/// writes only its own rows. The sync's watermarks are `max(ts)` of what it fetched, and a send's `set_since` only moves one forward.
+async fn relay_send_io<T, F>(app: &tauri::AppHandle, f: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce(&str, &nostr::Keys, &Store) -> Result<T, String> + Send + 'static,
+{
+    secure_store::ensure_loaded(app).await?;
+    let path = db_path(app)?;
+    let url = relay_url(app);
+    let queued = std::time::Instant::now();
+    blocking(move || {
+        let _gate = SEND_GATE.blocking_lock();
+        tracing::info!(waited_ms = queued.elapsed().as_millis() as u64, "send: own path");
+        let (keys, _) = uni_core::load_keys(false).map_err(|e| e.to_string())?;
+        let store = Store::open(path).map_err(|e| e.to_string())?;
+        f(&url, &keys, &store)
+    })
+    .await
+}
+
 fn room_id<T: std::str::FromStr>(channel: &str) -> Result<T, String> {
     channel.parse().map_err(|_| "invalid room id".to_string())
 }
@@ -49,7 +72,7 @@ async fn change_own_message(
     target: String,
     new_body: Option<String>,
 ) -> Result<(), String> {
-    relay_io(app, move |url, keys, store| {
+    relay_send_io(app, move |url, keys, store| {
         let ch = room_id(&channel)?;
         tauri::async_runtime::block_on(async {
             match new_body {
@@ -86,9 +109,11 @@ async fn delete_message(
     change_own_message(&app, channel, target, None).await
 }
 
-// Serialize foreground refresh, send and forget so SQLite and relay
-// watermarks cannot race.
+// Serialize foreground refresh, history paging and forget so SQLite and relay
+// watermarks cannot race. (r26: sends have their own path, `relay_send_io`.)
 static IO_GATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+/// r26: sends, edits and deletes wait only for each other (see [`relay_send_io`]).
+static SEND_GATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 #[derive(Serialize)]
 struct MessageView {
@@ -819,7 +844,7 @@ async fn prepare_voice_message(
     recipients: Vec<String>,
     media: Vec<uni_core::MediaRef>,
 ) -> Result<String, String> {
-    relay_io(&app, move |url, keys, store| {
+    relay_send_io(&app, move |url, keys, store| {
         let event = uni_core::compose::prepare_message(
             url,
             keys,
@@ -850,7 +875,7 @@ async fn post_message(
     media: Option<Vec<uni_core::MediaRef>>,
     signed_event: Option<String>,
 ) -> Result<MessageView, serde_json::Value> {
-    relay_io(&app, move |url, keys, store| {
+    relay_send_io(&app, move |url, keys, store| {
         let ch = room_id(&channel)?;
         let sent = if let Some(json) = signed_event {
             let event = serde_json::from_str(&json).map_err(|e| e.to_string())?;
@@ -1586,9 +1611,10 @@ async fn vault_transition(
     from: serde_json::Value,
     to: serde_json::Value,
     if_updated_at: String,
+    metadata: Option<serde_json::Value>,
 ) -> Result<serde_json::Value, String> {
     with_vault(&app, move |c| {
-        tauri::async_runtime::block_on(c.transition_note(&vault, &id, "state", from, to, &if_updated_at))
+        tauri::async_runtime::block_on(c.transition_note_with(&vault, &id, "state", from, to, &if_updated_at, metadata))
             .map_err(|e| e.to_string())
     })
     .await

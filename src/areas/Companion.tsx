@@ -13,7 +13,7 @@ import { isActiveRun, type Run } from "./steerCore";
 import { ownerLabel, type Task } from "./taskCore";
 import { taskTitle } from "./whereCore";
 import { splitLinks } from "./linkText";
-import { actionableTitle, runText, runShort, answerChoices, answerLabel, askLead, askPreview, checkLine, CHECK_FAILED, DANGLING, decideLine, stripRoom, decisionQuestion, dueLine, fitsRow, isOverdue, lineBudget, missingLine, OPEN_TASK, OPEN_TO_ANSWER, privateActionLabel, privateRestLabel, askedLine, requestDate, currentStep, firstOfSteps, actionOf, rowAction, withoutBrackets, rowSubParts, standsHeading, titleSays, titleWords, TIDY_LINE, toTidy, unknownDecision, waitsLine, waitsOnMe, withHosts, withoutCut, rowAsk, withoutRawIds, staleLine, clauseForms, type Choice, type NeedsFeed, type PrivateNeed, type RowAction, type StaleSummary, type Support } from "./simpleCore";
+import { actionableTitle, runText, runShort, answerChoices, answerLabel, askLead, askPreview, checkLine, CHECK_FAILED, DANGLING, decideLine, stripRoom, decisionQuestion, dueLine, fitsRow, isOverdue, lineBudget, missingLine, OPEN_TASK, OPEN_TO_ANSWER, privateActionLabel, privateRestLabel, askedLine, requestDate, currentStep, firstOfSteps, actionOf, rowAction, withoutBrackets, rowSubParts, standsHeading, titleSays, titleWords, TIDY_LINE, toTidy, unknownDecision, waitsLine, waitsOnMe, withHosts, withoutCut, rowAsk, withoutRawIds, notWrittenDown, referencedItems, rowItems, staleLine, historyLine, clauseForms, type Choice, type NeedsFeed, type PrivateNeed, type RowAction, type StaleSummary, type Support } from "./simpleCore";
 import { requestRecheck } from "./useTasks";
 
 const KEYS = { side: "uni.companion.side.v1", sideNarrow: "uni.companion.side.narrow.v1", strip: "uni.companion.strip.v1" } as const;
@@ -247,13 +247,15 @@ function Stands({ text }: { text: string }) {
 }
 
 /**
- * r25 (Codex P1 1): a summary whose claim can't be reconciled with Needs you is not shown as current: one short line says it needs updating,
- * and what it said sits collapsed under "What it said" (the room rewrites it).
+ * r26 (Codex P1 2): a summary is reconciled claim by claim. The claims that are still true (a claim that something waits on Aaron that an open
+ * item is, and every claim that is not a wait) read as the summary; each claim no open item matches is dated history under "What it said"
+ * ("from Oct 13: ...") and the line above it says so.
  */
-export function StaleStands({ stale, text, className = "cp-lede" }: { stale: StaleSummary; text: string; className?: string }) {
+export function StaleStands({ stale, className = "cp-lede" }: { stale: StaleSummary; text?: string; className?: string }) {
   return <div className={className}>
-    <p className="cp-stands cp-stale" data-stale="true">{staleLine(stale)}</p>
-    <details className="cp-said"><summary>What it said</summary><p>{withoutRawIds(text)}</p></details>
+    {stale.current && <p className="cp-stands" data-part="current">{withoutRawIds(stale.current)}</p>}
+    <p className="cp-stands cp-stale" data-stale={stale.current ? "part" : "true"}>{staleLine(stale)}</p>
+    <details className="cp-said"><summary>What it said</summary>{stale.history.map((h, i) => <p key={i}>{historyLine(stale, withoutRawIds(h))}</p>)}</details>
   </div>;
 }
 
@@ -477,7 +479,11 @@ export function NeedRow({ t, onTask, meta, compact = false, area = null }: { t: 
   // r21 (Codex 10): one target per visible request: the whole row is one button that opens its sheet (its links and notes open there).
   // r21 (P1-1): a row whose check failed retries as it opens, so its "Retry" is what the tap does
   const open_ = () => { if (r.mode === "unavailable") requestRecheck(); onTask(t); };
-  const label = r.lead ? [r.action?.text ? plainDetail(withHosts(r.action.text)) : text, r.sub ? [r.sub.where, when_].filter(Boolean).join(" · ") : r.under, meta].filter(Boolean).join(". ") : r.yourCall ? `Your call: ${text}` : undefined;
+  // r26: a step that points at a list ("the asks listed in this task's detail", "the unknowns") carries it: the first three items under the row
+  const refd = r.lead && !isDecision ? referencedItems(next, t.detail) : null;
+  const shownItems = refd?.kind === "list" ? rowItems(refd.items) : null;
+  const itemRoom = (t.stewardRoom ?? t.room ?? "").replace(/^#/, "");
+  const label = r.lead ? [r.action?.text ? plainDetail(withHosts(r.action.text)) : text, shownItems ? `${shownItems.shown.join("; ")}${shownItems.more ? `; and ${shownItems.more} more` : ""}` : refd ? notWrittenDown(refd.noun) : null, r.sub ? [r.sub.where, when_].filter(Boolean).join(" · ") : r.under, meta].filter(Boolean).join(". ") : r.yourCall ? `Your call: ${text}` : undefined;
   return <li className="cp-item" data-lead={r.lead ? "action" : undefined} data-mode={r.mode}>
     <button type="button" className={`cp-need${isDecision ? " decision" : ""}${r.lead ? " cp-need-lead" : ""}`} data-id={id ?? undefined} data-mode={r.mode} aria-busy={r.mode === "checking" || undefined} aria-label={label} onClick={open_}>
       {r.yourCall && <small className="cp-call-lead">Your call:</small>}
@@ -489,6 +495,11 @@ export function NeedRow({ t, onTask, meta, compact = false, area = null }: { t: 
           ? <span className="cp-title-wrap"><WordClamp elRef={titleRef as React.RefObject<HTMLParagraphElement | null>} className="cp-title cp-preview" tokens={wordTokens(withoutCut(text))} textKey={text} lines={titleMax} open={false} onCut={() => {}} onClick={() => {}} tag="span" /></span>
           // r20: no "›" on any row: the whole row opens its sheet, in the companion and the work view alike
           : <span ref={titleRef} className="cp-title" style={clampStyle}><RefText text={text} vault={vault} /></span>}
+      {shownItems && <span className="cp-items" data-count={refd && refd.kind === "list" ? refd.items.length : undefined}>
+        {shownItems.shown.map((x, i) => <span key={i} className="cp-item-line">{x}</span>)}
+        {shownItems.more > 0 && <span className="cp-item-more">and {shownItems.more} more</span>}
+      </span>}
+      {refd?.kind === "none" && <span className="cp-items cp-items-none">{notWrittenDown(refd.noun)}{itemRoom ? ` · Open #${itemRoom}` : ""}</span>}
       {r.go && <span className="cp-open-decide">{r.go}</span>}
       {!next && !isDecision && r.mode === "title" && !actionableTitle(text) && text !== "Open to see what's needed" && <span className="cp-open-to-see">Open to see what's needed</span>}
       {/* the step under a title, as words (its links open in the sheet) */}
@@ -645,7 +656,7 @@ function Body({ stands, ready, note, load, feed, rest = 0, moreTitle = null, onP
   // below 900px the room shows the list's health itself, outside the strip (r14)
   const health = !hideHealth && <LoadHealth load={load} ready={ready} count={feed.total} />;
   return <div className="cp-body" ref={bodyRef}>
-    {!ready ? (load?.error || load?.slow ? <LoadHealth load={load} ready={false} /> : <p className="cp-lede">Loading…</p>) : stands && (stands.stale ? <StaleStands stale={stands.stale} text={stands.text} /> : <Stands text={stands.text} />)}
+    {!ready ? (load?.error || load?.slow ? <LoadHealth load={load} ready={false} /> : <p className="cp-lede">Loading…</p>) : stands && (stands.stale ? <StaleStands stale={stands.stale} /> : <Stands text={stands.text} />)}
     {ready && <section aria-label="Needs you" className="cp-sec" aria-busy={load?.refreshing || undefined}>
       <h3 className="cp-h">Needs you</h3>
       {/* r17: Uni's panel is at most three rows and one "Show N more" (private items folded in) to the work view, which keeps the full list */}
@@ -759,7 +770,7 @@ export function CompanionStrip({ open, onToggle, onSheet, ...p }: CompanionProps
   const heading = standsHeading(p.scope, p.ready ? p.stands?.ago : null);
   // r18: folded, the line is the sentence cut on a whole word (never "underway ac…"); open, it is the dated heading. r19: when anything needs
   // the user, the folded line says what is waiting first ("Needs you · 2: Say go on the deploy…"), never only a dot behind a chevron
-  const folded = p.note ?? (p.ready ? waitingLine(p.feed) ?? (p.stands ? (p.stands.stale ? staleLine(p.stands.stale) : withoutRawIds(p.stands.text)) : null) ?? "Where this stands" : p.load?.error ? "Couldn't load" : p.load?.slow ? "Still loading" : "Loading…");
+  const folded = p.note ?? (p.ready ? waitingLine(p.feed) ?? (p.stands ? (p.stands.stale ? (p.stands.stale.current ? withoutRawIds(p.stands.stale.current) : staleLine(p.stands.stale)) : withoutRawIds(p.stands.text)) : null) ?? "Where this stands" : p.load?.error ? "Couldn't load" : p.load?.slow ? "Still loading" : "Loading…");
   const lineRef = useRef<HTMLParagraphElement | null>(null);
   const lineTokens = [...(p.scope ? [{ node: <b className="cp-scope">{`${p.scope}:`}</b>, space: false }] : []), ...wordTokens(folded).map((w, i) => (i === 0 && p.scope ? { ...w, space: true } : w))];
   const label = <span className="cp-line-text" title={p.stands?.text}>{open ? heading

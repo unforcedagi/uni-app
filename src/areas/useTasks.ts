@@ -8,7 +8,7 @@ import { parseDrafts, parseRuns } from "./steerCore";
 import { activeProfile } from "./profile";
 import { forgetTitles, setTitleOwner, warmTitles } from "./noteRefs";
 import { savedTasks } from "./savedTasks";
-import { checkOf, retryState, wouldNeedYou, type CheckState } from "./simpleCore";
+import { checkOf, liveRuns, retryState, wouldNeedYou, type CheckState } from "./simpleCore";
 import type { FailureKind } from "./taskCore";
 
 export type TaskAction = "done" | "archive" | "snooze";
@@ -209,7 +209,8 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
   const visible = useMemo(() => (checked ?? []).filter((t) => isLive(t) && !gone.has(t.id) && !snoozed(t, new Date())), [checked, gone, n, day]); // eslint-disable-line react-hooks/exhaustive-deps
   const counts: Map<string, Counts> = useMemo(() => (tree ? rollUp(tree, tasksUnder(tree, nodePath, visible)) : new Map()), [tree, nodePath, visible]);
 
-  const runs = useMemo(() => (tree ? parseRuns(rawRuns, tree) : []), [tree, rawRuns]);
+  // r26: a run about a finished, archived or superseded task is history, not Running (judged against the whole list when it was read in full)
+  const runs = useMemo(() => (tree ? liveRuns(parseRuns(rawRuns, tree), checked ?? [], nodePath === "" && !!checked && !truncated) : []), [tree, rawRuns, checked, truncated, nodePath]);
   const drafts = useMemo(() => (tree ? parseDrafts(rawDrafts, tree, list ?? []) : []), [tree, rawDrafts, list]);
 
   const patch = (id: string, f: (t: Task) => Task) => {
@@ -300,7 +301,7 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
     }
     const from = task.state;
     const to: AnyState = action === "archive" ? "archived" : "done";
-    const r = await vaultTasks.transition(task.id, from, to, task.updatedAt);
+    const r = await vaultTasks.transition(task.id, from, to, task.updatedAt, action === "done");
     if (!r.ok) return failed(r);
     if (opts.sheet) hide(task.id);
     patch(task.id, (t) => ({ ...t, state: to, updatedAt: r.updatedAt ?? t.updatedAt, lastUpdatedBy: r.lastUpdatedBy ?? t.lastUpdatedBy, lastUpdatedVia: r.lastUpdatedVia ?? t.lastUpdatedVia }));

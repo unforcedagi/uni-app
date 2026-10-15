@@ -379,7 +379,7 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   const noAreas = isRoot && !!tree && !error && childrenOf(tree, ROOT).length === 0;
   const stands0 = noAreas ? { text: "No areas yet. Tell Uni here what you want to look after, and it will set up your first area.", ago: "" } : standsLine(rawStands, levelTasks.filter((t) => !hidden(t.node)), now);
   /** r25 (Codex P1 1): a stored summary that says something waits on the user while no open request here is that is not shown as current */
-  const stands = stands0 && !noAreas ? { ...stands0, stale: rawStands ? staleSummary(stands0.text, rawStands.at, feed.rows.map((t) => [t.title, t.next, t.detail].filter(Boolean).join(" "))) : null } : stands0;
+  const stands = stands0 && !noAreas ? { ...stands0, stale: rawStands ? staleSummary(stands0.text, rawStands.at, feed.rows) : null } : stands0;
   /** The room's composer when it is the one here, else that room's (opened, filled in, never sent). */
   const sayIn = (roomId: string, text: string) => { closeSheet(); setWork(false); const here = roomFor(roomId); if (here) here.compose(text); else actions.compose(roomId, text); };
   /** From the work view or the sheet, "Open #room" for this room is the conversation: it goes back to it. Another room opens as a tab. */

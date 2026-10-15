@@ -37,8 +37,10 @@ export function unknownDecision(t: Partial<Pick<Task, "kind" | "title" | "ask" |
   return !(typeof t.ask === "string" && !!t.updatedAt && t.askAt === t.updatedAt);
 }
 /** The r12 rule before r19's tidy check: open decisions, the user's own tasks and tasks waiting on them, at Now or Soon. */
-export function wouldNeedYou(t: Pick<Task, "kind" | "owner" | "waitingOn" | "priority" | "state">): boolean {
+export function wouldNeedYou(t: Pick<Task, "kind" | "owner" | "waitingOn" | "priority" | "state"> & Partial<Pick<Task, "next">>): boolean {
   if (t.state !== "open" && t.state !== "doing" && t.state !== "waiting") return false;
+  // r26: a task whose own step says it was superseded is closed, whatever its stored state
+  if (superseded(t.next)) return false;
   return t.kind === "decision" || ((isMe(t.owner) || isMe(t.waitingOn)) && t.priority !== "someday");
 }
 /** A record the user would be asked for that Uni has to tidy first (r19): the work view's "Uni needs to tidy these (N)". */
@@ -479,27 +481,75 @@ export const checkingBanner = (step: string): string => `Checking: ${cutWords(wi
 export const checkInCue = (room: string, key: string, w: AskedWhen): string => `#${room.replace(/^#/, "")} has talked about ${key} since this was ${w.kind === "asked" ? "asked" : "added"}`;
 
 /**
- * r25 (Codex P1 1): the stored "Where this stands" claims something waits on the user, and no open Needs-you item for the node is that: the
- * claim is not shown as current. The panel says "This summary needs updating · from Oct 13" and keeps the stored words under "What it said"
- * (the room rewrites it). A claim is matched by the ids it names (#38, T-90), else by its distinctive words; with no open item at all, it
- * matches nothing. Null: no claim, or an open item is that claim.
+ * r26 (Codex P1 2): "Where this stands" is reconciled claim by claim. The text is split into clauses (sentences, ";" parts, comma parts of
+ * some length); each clause that says something waits on Aaron or on approval must match its own open Needs-you item, by the ids it names
+ * (#38, T-90, PR 61: every id, each in some open item), else by two distinctive words it shares with one item. A clause that doesn't match
+ * is dated history ("from Oct 13: ..."), shown under "What it said"; a matched clause, and a clause that is not a wait, stays current. One
+ * match never validates the rest of the paragraph.
  */
-export const WAITS_ON_ME = /\bwaits?\s+on\s+aaron\b|\baaron['’]s\s+(?:go|ok|okay|ask|call|ans|decision|approval|sign-?off)\b|\bneeds?\s+aaron\b|\bfor\s+aaron\s+to\b|\bawaiting\s+aaron\b/i;
-export type StaleSummary = { from: string | null };
+export const WAITS_ON_ME = /\bwaits?\s+on\s+aaron\b|\baaron['’]s\s+(?:go|ok|okay|ask|call|ans|decision|approval|sign-?off)\b|\bneeds?\s+aaron\b|\bfor\s+aaron\s+to\b|\bawaiting\s+aaron\b|\bwaiting\s+(?:on|for)\s+aaron\b|\b(?:awaiting|pending|needs?|needed|requires?)\s+(?:your\s+|aaron['’]s\s+|his\s+)?(?:approval|sign-?off|go-?ahead|ok\b|okay\b|decision)|\bapproval\s+(?:pending|needed|required)\b|\bwaits?\s+on\s+(?:your|his)\s+(?:go|ok|approval|answer|decision)/i;
+export type StaleSummary = { from: string | null; /** the clauses still true, as text ("" when none is) */ current: string; /** the clauses nothing open matches, as they were written */ history: string[] };
 export const STALE_SUMMARY = "This summary needs updating";
-export const staleLine = (s: StaleSummary): string => (s.from ? `${STALE_SUMMARY} · from ${s.from}` : STALE_SUMMARY);
-const CLAIM_STOP = new Set("aaron aaron's waits waiting awaiting needs decision approval prod staging deploy deployed first second their about which where would should could these those after before until still ready today tomorrow".split(" "));
-export function staleSummary(stands: string | null | undefined, updated: string | null | undefined, openTexts: readonly string[] = []): StaleSummary | null {
+export const STALE_PART = "Part of this summary needs updating";
+export const staleLine = (s: Pick<StaleSummary, "from" | "current">): string => { const head = s.current ? STALE_PART : STALE_SUMMARY; return s.from ? `${head} · from ${s.from}` : head; };
+/** One history clause as the panel shows it: "from Oct 13: Atlas grading waits on Aaron". */
+export const historyLine = (s: Pick<StaleSummary, "from">, clause: string): string => (s.from ? `from ${s.from}: ${clause}` : clause);
+const CLAIM_STOP = new Set("aaron aaron's waits waiting awaiting needs needed decision approval prod staging deploy deployed first second their about which where would should could these those after before until still ready today tomorrow there being other under again while review reviews".split(" "));
+type Clause = { text: string; sep: string };
+/** The summary as clauses: split at sentence ends, ";" and (when both sides are real clauses) ", "; never inside a bracket. */
+export function summaryClauses(text: string): Clause[] {
+  const t = text.replace(/\s+/g, " ").trim();
+  const d = depths(t);
+  const out: Clause[] = []; let from = 0;
+  const words = (x: string) => x.trim().split(/\s+/).filter(Boolean).length;
+  const push = (end: number, sepEnd: number) => { const c = t.slice(from, end).trim(); if (c) out.push({ text: c, sep: t.slice(end, sepEnd) }); from = sepEnd; };
+  for (let i = 0; i < t.length; i++) {
+    if (d[i] !== 0) continue;
+    const c = t[i];
+    const sp = /^\s*/.exec(t.slice(i + 1))![0].length;
+    if (c === ";") { push(i, i + 1 + sp); i += sp; continue; }
+    if ((c === "." || c === "!" || c === "?") && (i + 1 === t.length || /\s/.test(t[i + 1])) && !(c === "." && /\b(?:e\.g|i\.e|etc|vs)$/i.test(t.slice(0, i)))) { push(i, i + 1 + sp); i += sp; continue; }
+    if (c === "," && /\s/.test(t[i + 1] ?? "")) {
+      const left = t.slice(from, i), right = t.slice(i + 1).replace(/^\s*(?:and\s+)?/i, "");
+      const rightClause = right.split(/[;,.]/)[0];
+      if (words(left) >= 3 && words(rightClause) >= 3 && !/^[#\d]/.test(right)) { const skip = /^\s*(?:and\s+)?/i.exec(t.slice(i + 1))![0].length; push(i, i + 1 + skip); i += skip; }
+    }
+  }
+  const rest = t.slice(from).trim();
+  if (rest) out.push({ text: rest, sep: "" });
+  return out;
+}
+const claimIds = (x: string): string[] => [...new Set([...x.matchAll(/(?:^|[^\w&])(#\d{1,5}|T-\d+)\b/gi)].map((m) => m[1].toLowerCase()).concat([...x.matchAll(/\bPR\s*#?(\d{1,5})\b/gi)].map((m) => `#${m[1]}`)))];
+const claimWords = (x: string): string[] => [...new Set((x.toLowerCase().match(/[a-z]{5,}/g) ?? []).filter((w) => !CLAIM_STOP.has(w)))];
+export type OpenItem = Partial<Pick<Task, "title" | "next" | "detail">>;
+/** Whether one wait clause is some open item: every id it names is in an item, else two distinctive words shared with one item. */
+function clauseIsOpen(clause: string, before: string, items: readonly OpenItem[]): boolean {
+  if (!items.length) return false;
+  const ids = claimIds(clause);
+  if (ids.length) {
+    const have = new Set(items.flatMap((t) => claimIds([t.title, t.next, t.detail].filter(Boolean).join(" "))));
+    return ids.every((id) => have.has(id));
+  }
+  let words = claimWords(clause);
+  // "..., waiting on Aaron": a clause with too few words of its own is read with the clause before it
+  if (words.length < 2) words = [...new Set([...words, ...claimWords(before)])];
+  return items.some((t) => { const text = [t.title, t.next].filter(Boolean).join(" ").toLowerCase(); return words.filter((w) => new RegExp(`(^|[^a-z])${w}`).test(text)).length >= 2; });
+}
+export function staleSummary(stands: string | null | undefined, updated: string | null | undefined, open: readonly OpenItem[] = []): StaleSummary | null {
   if (!stands || !WAITS_ON_ME.test(stands)) return null;
+  const clauses = summaryClauses(stands);
+  const history: string[] = []; const kept: Clause[] = [];
+  clauses.forEach((c, i) => {
+    if (WAITS_ON_ME.test(c.text) && !clauseIsOpen(c.text, clauses[i - 1]?.text ?? "", open)) history.push(c.text.replace(/[.\s]+$/, ""));
+    else kept.push(c);
+  });
+  if (!history.length) return null;
   const ms = stampMs(updated ?? "");
   const from = Number.isFinite(ms) ? new Date(ms).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : null;
-  const stale = { from };
-  if (!openTexts.length) return stale;
-  const ids = [...stands.matchAll(/(?:^|[^\w&])(#\d{1,5}|T-\d+)\b/gi)].map((m) => m[1].toLowerCase());
-  if (ids.length) return openTexts.some((t) => ids.some((id) => new RegExp(`(^|[^\\w&])${id}\\b`, "i").test(t))) ? null : stale;
-  const words = [...new Set((stands.toLowerCase().match(/[a-z]{5,}/g) ?? []).filter((w) => !CLAIM_STOP.has(w)))];
-  const open = openTexts.join(" ").toLowerCase();
-  return words.some((w) => new RegExp(`(^|[^a-z])${w}`).test(open)) ? null : stale;
+  let current = kept.map((c, i) => `${c.text}${i === kept.length - 1 ? "" : c.sep || " "}`).join("").replace(/[\s,;:]+$/, "").trim();
+  if (current && !/[.!?]$/.test(current)) current += ".";
+  if (current) current = current[0].toLocaleUpperCase() + current.slice(1);
+  return { from, current, history };
 }
 
 /**
@@ -541,14 +591,14 @@ export function unresolvedBlock(next: string | null | undefined, detail: string 
  */
 export function belowInCard(next: string, t: Partial<Pick<Task, "detail" | "message" | "hasDraft">>): string {
   if (!pointsAt(next) || !(t.detail || t.message || t.hasDraft)) return next;
-  return next.replace(/\s+(?:(?:message|draft|text|block|note)\s+)?below\b/i, (m) => m.replace(/\s+below\b/i, ""));
+  return next.replace(/\s*\((?:in|see|from) the (?:card|detail|details)\)/i, "").replace(/\s+(?:(?:message|draft|text|block|note)\s+)?below\b/i, (m) => m.replace(/\s+below\b/i, ""));
 }
 /**
  * r25 (Codex P2 5): the one current step a task asks of the user, for its Needs-you row and its sheet's heading alike: "Ask #room for the
  * message" when its words were never stored, else its `next` without a "below" that has nothing under it. Both call this, so they never differ.
  */
 export function currentStep(t: Pick<Task, "next" | "room"> & Partial<Pick<Task, "detail" | "message" | "hasDraft">>, room: string | null = t.room): string {
-  return pointsNowhere(t, room) ?? belowInCard(t.next.trim(), t);
+  return stepHeading(pointsNowhere(t, room) ?? belowInCard(t.next.trim(), t));
 }
 /** The message in a task's `detail`, when it quotes one ("Send this to Ryan: 'Hey Ryan, …'"): the quoted words, whole. */
 export function quotedMessage(detail: string | null | undefined): string | null {
@@ -1113,7 +1163,10 @@ export function rowSubParts(t: Pick<Task, "title" | "due">, action: RowAction, a
  */
 export function titleSays(raw: string, action: string): string | null {
   const tt = taskTitle(raw);
-  const title = cutWords(wholeWords(tt.rest.replace(/\s+/g, " ").trim()), SUB_TITLE_MAX, false);
+  const flat = tt.rest.replace(/\s+/g, " ").trim();
+  // r26: a trailing "(...)" that says the action again is dropped
+  const tail = /^(.*\S)\s*\(([^()]*)\)$/.exec(flat);
+  const title = cutWords(wholeWords(tail && repeatsWords(tail[2], action) ? tail[1] : flat), SUB_TITLE_MAX, false);
   return title && actionableTitle(title) && !repeats(title, action) ? title : null;
 }
 /** A title as plain words for a quiet line (r20): no "Decision (default yes):" label, no cut tail ("…feature 4, the"), sentence-cased. */
@@ -1134,3 +1187,170 @@ export function runShort(what: string | null | undefined, max = 56): string {
   if (head && head.length <= max + 24) return runText(head);
   return runText(cutWords(full, max, false));
 }
+
+// ------------------------------------------------------------------------------------------------- r26
+/** r26 (Sonnet, Codex): a step that says the task was superseded ("Superseded by T-136 (Aaron, 10-14)") closes it, whatever its stored state. */
+export const superseded = (next: string | null | undefined): boolean => /^\s*(?:superseded|obsolete)\b/i.test(next ?? "");
+/** r26: a task that is finished, archived or superseded: never in Needs you, Running or any surface that lists what is open. */
+export function closedTask(t: Partial<Pick<Task, "state" | "next">>): boolean {
+  return t.state === "done" || t.state === "archived" || (t.state as string | undefined) === "decided" || superseded(t.next);
+}
+/**
+ * r26: the runs that are still about something open. A run names its task (`T-13`, or words); one whose task is finished, archived or
+ * superseded is history, and so is one whose `T-NN` is in a complete list of the open tasks and decisions yet matches none of them. A run that
+ * names no `T-NN`, or is checked against a list that wasn't read in full, stays.
+ */
+export function liveRuns<R extends { task: string | null }>(runs: readonly R[], tasks: readonly (Partial<Pick<Task, "title" | "state" | "next" | "forTask">>)[], complete: boolean): R[] {
+  return runs.filter((r) => {
+    const id = /\bT-\d+\b/i.exec(r.task ?? "")?.[0]?.toUpperCase();
+    if (!id) return true;
+    const mine = tasks.filter((t) => taskTitle(t.title ?? "").id?.toUpperCase() === id || t.forTask?.toUpperCase() === id);
+    if (mine.some((t) => closedTask(t) && taskTitle(t.title ?? "").id?.toUpperCase() === id)) return false;
+    if (!mine.length) return !complete;
+    return mine.some((t) => !closedTask(t));
+  });
+}
+
+/**
+ * r26 (Sonnet line 5): the heading is the current step in full, never the step with a note's name hanging off it ("... cutover plan (Cutover plan —
+ * unforced.dev)"). A trailing "(...)" that holds only note links, or whose words the step already said, is dropped; `stepNotes` has the links.
+ */
+const TAIL_PAREN = /^(.*\S)\s*\(([^()]*)\)\s*([.!?]?)$/;
+const refsOnly = (inner: string): boolean => !inner.replace(/\buni:[0-9A-HJKMNP-TV-Z]{26}\b|\[\[[^\]]*\]\]|\b[0-9A-HJKMNP-TV-Z]{26}\b|https?:\/\/\S+|\bwww\.\S+|\band\b/gi, "").replace(/[\s,;·&+|-]+/g, "");
+const shortWords = (t: string): string[] => [...new Set((t.toLowerCase().match(/[a-z]{4,}/g) ?? []))];
+const repeatsWords = (inner: string, head: string): boolean => { const w = shortWords(inner); if (!w.length) return false; const h = shortWords(head).map((x) => x.slice(0, 5)); return w.filter((x) => h.includes(x.slice(0, 5))).length / w.length >= 0.6; };
+/** The list-pointer words a step carries ("... the asks listed in this task's detail", "... the follow-ups below"): the content is shown, not pointed at. */
+export const LIST_NOUN = "asks|unknowns|follow-?ups|questions|blanks|gaps|requests|items";
+const LIST_REF = new RegExp(`\\b(?:the|these|those|its|his|her|their)\\s+(?:(?:open|remaining|key|listed|following|main)\\s+)?(${LIST_NOUN})\\b`, "i");
+const LIST_LOC = /\s+(?:(?:listed|written|described|noted|stated|spelled out)\s+)?(?:below|(?:in|from|on)\s+(?:this task['’]s|the task['’]s|the|this|its)\s+(?:detail|details|card|note|description))\b/i;
+function listPointerOff(step: string): string {
+  const m = LIST_REF.exec(step);
+  if (!m) return step;
+  const at = m.index + m[0].length;
+  const loc = LIST_LOC.exec(step.slice(at));
+  if (!loc || loc.index > 12) return step;
+  return (step.slice(0, at) + step.slice(at + loc.index + loc[0].length)).replace(/\s+([,;:.])/g, "$1");
+}
+export function stepHeading(step: string): string {
+  const s = listPointerOff(step);
+  const m = TAIL_PAREN.exec(s);
+  if (!m) return s;
+  return refsOnly(m[2]) || repeatsWords(m[2], m[1]) ? `${m[1].replace(/[\s,;:]+$/, "")}${m[3] === "." ? "" : m[3]}` : s;
+}
+/** The notes a step's trailing "(...)" pointed at, kept for the quiet line under the heading ("uni:01M3… (Cutover plan)" → that text); null: none. */
+export function stepNotes(step: string): string | null {
+  const m = TAIL_PAREN.exec(listPointerOff(step));
+  return m && refsOnly(m[2]) && m[2].trim() ? m[2].trim() : null;
+}
+
+// ------------------------------------------------------------------------------------------------- r26: rows that carry their content
+export type Referenced =
+  | { kind: "list"; noun: string; label: string | null; items: string[]; rest: string | null }
+  /** the step points at a list and nothing in this task's detail is that list */
+  | { kind: "none"; noun: string };
+const LISTLINE = /^(\s*)(?:[-*+•]|\d+[.)])\s+(.*)$/;
+const SYNONYMS: Record<string, RegExp> = {
+  ask: /\b(?:asks?|owes?|owed|needed|needs?|requests?|questions?|wants?)\b/i,
+  unknown: /\bunknowns?\b/i, followup: /\bfollow-?ups?\b|\bquestions?\b/i, question: /\bquestions?\b/i,
+  blank: /\bblanks?\b|\bgaps?\b|\bunknowns?\b/i, gap: /\bgaps?\b|\bblanks?\b|\bunknowns?\b/i, request: /\brequests?\b|\basks?\b|\bneeded\b/i, item: /\bitems?\b/i,
+};
+const nounKey = (n: string): string => n.toLowerCase().replace(/-/g, "").replace(/s$/, "");
+const tidyItem = (s: string): string => cleanItem(s).replace(/^[\s;,]+|[\s;,.]+$/g, "").replace(/^and\s+/i, "").trim();
+type DetailList = { label: string | null; items: string[]; rest: string };
+/** The lists a task's `detail` holds: numbered or bulleted lines, and "(1) ...; (2) ..." run into a paragraph; each with the label before it and the detail without it. */
+export function detailLists(detail: string | null | undefined): DetailList[] {
+  const text = (detail ?? "").replace(/\r\n?/g, "\n");
+  if (!text.trim()) return [];
+  const lines = text.split("\n");
+  const out: DetailList[] = [];
+  const without = (drop: Set<number>, extra?: { at: number; text: string }) => lines.map((l, i) => (extra && i === extra.at ? extra.text : drop.has(i) ? null : l)).filter((l) => l !== null).join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  // lists written one item to a line
+  for (let i = 0; i < lines.length; i++) {
+    const li = LISTLINE.exec(lines[i]);
+    if (!li || li[1].length >= 2) continue;
+    const items: string[] = []; const drop = new Set<number>();
+    let j = i;
+    for (; j < lines.length; j++) {
+      const m = LISTLINE.exec(lines[j]);
+      if (m && m[1].length < 2) { items.push(m[2]); drop.add(j); continue; }
+      if (items.length && lines[j].trim() && /^\s{2,}/.test(lines[j])) { items[items.length - 1] += ` ${LISTLINE.exec(lines[j])?.[2] ?? lines[j].trim()}`; drop.add(j); continue; }
+      break;
+    }
+    let k = i - 1; while (k >= 0 && !lines[k].trim()) k--;
+    const lab = k >= 0 ? lines[k].trim() : "";
+    const label = /:$/.test(lab) ? lab.replace(/:$/, "").trim() : /^#{1,6}\s+/.test(lab) ? lab.replace(/^#{1,6}\s+/, "").trim() : null;
+    if (label) drop.add(k);
+    out.push({ label, items: items.map(tidyItem).filter(Boolean), rest: without(drop) });
+    i = j - 1;
+  }
+  // "(1) ...; (2) ...; (3) ..." inside a paragraph
+  lines.forEach((line, at) => {
+    if (LISTLINE.test(line)) return;
+    const marks = [...line.matchAll(/\((\d{1,2})\)\s+/g)];
+    const seq: RegExpMatchArray[] = [];
+    for (const m of marks) if (Number(m[1]) === seq.length + 1) seq.push(m);
+    if (seq.length < 2) return;
+    const first = seq[0].index ?? 0;
+    const prefix = line.slice(0, first);
+    const lab = /([^.!?\n]*?):\s*$/.exec(prefix);
+    const label = lab ? lab[1].trim() : null;
+    const before = (label !== null ? prefix.slice(0, prefix.length - lab![0].length) : prefix).trim();
+    const items: string[] = [];
+    let after = "";
+    seq.forEach((m, n) => {
+      const from = (m.index ?? 0) + m[0].length;
+      const to = n + 1 < seq.length ? (seq[n + 1].index ?? line.length) : line.length;
+      let chunk = line.slice(from, to);
+      if (n + 1 === seq.length) { const d = depths(chunk); const e = [...chunk.matchAll(/[.!?](?=\s+\p{Lu})/gu)].find((x) => d[x.index ?? 0] === 0); if (e) { after = chunk.slice((e.index ?? 0) + 1).trim(); chunk = chunk.slice(0, (e.index ?? 0) + 1); } }
+      items.push(tidyItem(chunk));
+    });
+    out.push({ label, items: items.filter(Boolean), rest: without(new Set(), { at, text: [before, after].filter(Boolean).join(" ") }) });
+  });
+  return out.filter((l) => l.items.length);
+}
+/**
+ * r26 (Sonnet, Codex line 5): a step that points at a list ("... the asks listed in this task's detail", "fill the unknowns", "answer the
+ * follow-ups below") has that list, from this task's own detail only: a list under a heading that names it, or, when the step says where it
+ * is ("listed in this task's detail", "below"), the detail's only list. Nothing resolving is `none`. Null: the step points at no list.
+ */
+export function referencedItems(next: string | null | undefined, detail: string | null | undefined): Referenced | null {
+  const step = (next ?? "").replace(/\s+/g, " ").trim();
+  const m = LIST_REF.exec(step);
+  if (!m || questionCount(step) !== null) return null;
+  const noun = m[1].toLowerCase();
+  const located = !!LIST_LOC.exec(step.slice(m.index + m[0].length)) || /\blisted\b/i.test(step);
+  const verbed = new RegExp(`\\b(?:fill(?: in)?|answer|resolve|settle|cover|address|work through|go through|forward|send|share|review|close|clear|handle)\\s+(?:(?:in|all|all of|each of|any of)\\s+)?${m[0].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "i").test(step);
+  if (!located && !verbed) return null;
+  const lists = detailLists(detail);
+  const key = nounKey(noun);
+  const re = SYNONYMS[key] ?? new RegExp(`\\b${key}`, "i");
+  const hit = lists.find((l) => l.label && re.test(l.label)) ?? (located && lists.length === 1 ? lists[0] : undefined);
+  return hit ? { kind: "list", noun, label: hit.label, items: hit.items, rest: hit.rest || null } : { kind: "none", noun };
+}
+/** "The asks aren't written down in this task": nothing in the task is the list its step points at. */
+export const notWrittenDown = (noun: string): string => `The ${noun.toLowerCase()} aren't written down in this task`;
+/** How many of a referenced list's items a row shows. */
+export const ROW_ITEMS = 3;
+/** One item as a row shows it: whole when short, else without its brackets, else its label ("3 answers"), else its first whole words; never "…". */
+export function itemShort(item: string, max = 72): string {
+  const t = item.replace(/\s+/g, " ").trim();
+  if (t.length <= max) return t;
+  const bare = withoutBrackets(t);
+  if (bare.length <= max) return bare;
+  const lab = /^([^:]{3,28}):\s+\S/.exec(bare)?.[1];
+  return lab ?? cutWords(bare, max, false);
+}
+/** A list's row form: the first `ROW_ITEMS` items (short) and how many more there are, for "and 1 more". */
+export const rowItems = (items: readonly string[], n = ROW_ITEMS): { shown: string[]; more: number } => ({ shown: items.slice(0, n).map((x) => itemShort(x)), more: Math.max(0, items.length - n) });
+
+// ------------------------------------------------------------------------------------------------- r26: a check that gates answers
+/** The lookup of the room's chat: asked and not back yet, related talk found, couldn't be read, or nothing related. */
+export type Gate = "pending" | "found" | "failed" | "none";
+export const gateOf = (applies: boolean, look: CheckIn | null): Gate => (!applies ? "none" : look === null ? "pending" : look.kind);
+/** Whether the approval answers (and "I did this") are offered as ready: only when nothing is unresolved, or after "Answer anyway". */
+export const answersReady = (g: Gate, anyway: boolean): boolean => g === "none" || anyway;
+export const ANSWER_ANYWAY = "Answer anyway";
+export const checkingRoom = (room: string): string => `Checking #${room.replace(/^#/, "")}…`;
+/** The task changed since the sheet loaded: the revision it was opened at is not the list's now. */
+export const revisionMoved = (opened: string | null | undefined, now: string | null | undefined): boolean => !!opened && !!now && opened !== now;
+export const CHANGED_SINCE = "This changed since you opened it";
