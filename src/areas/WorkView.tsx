@@ -4,7 +4,7 @@
 // priority is set in the task sheet. Styling is in tree.css.
 import { useState, type ReactNode } from "react";
 import { cleanText } from "../interface/contract";
-import { NeedRow, PrivateRow } from "./Companion";
+import { NeedRow, PrivateRow, RunText } from "./Companion";
 import { isActiveRun, type Draft, type Run } from "./steerCore";
 import { titleWords, type NeedsFeed, type PrivateNeed } from "./simpleCore";
 import type { TaskLoad } from "./Companion";
@@ -71,7 +71,7 @@ export function WorkView(p: WorkViewProps) {
       {p.activity.error ? <p className="lh-line" role="status">{p.activity.lastOk ? `Running and drafts as of ${asOf(p.activity.lastOk)} · Couldn't refresh` : "Couldn't check what's running"} · <button type="button" className="cp-retry" onClick={p.load.retry}>Retry</button></p>
         : !p.activity.ready ? <p className="lh-line" role="status">Checking what's running…</p> : null}
       {motion === 0 && !p.privateOther && p.activity.ready && !p.activity.error && <p className="cp-none">Nothing is moving here right now.</p>}
-      {running.length > 0 && <ul className="cp-list wv-runs" aria-label="Running">{running.map((r) => <li key={r.id} className="cp-run" data-state={r.state}><i aria-hidden="true" /><span>{cleanText(r.what)}</span><small>{r.state}</small></li>)}</ul>}
+      {running.length > 0 && <ul className="cp-list wv-runs" aria-label="Running">{running.map((r) => <li key={r.id} className="cp-run" data-state={r.state}><i aria-hidden="true" /><RunText what={cleanText(r.what)} /><small>{r.state}</small></li>)}</ul>}
       {p.drafts.length > 0 && <ul className="cp-list wv-drafts" aria-label="Drafts">{p.drafts.map((d) => <li key={d.id} className="cp-item">
         <button type="button" className="cp-need" onClick={() => p.onNote({ vault, id: d.id })}><span className="cp-title">{cleanText(taskTitle(d.title).rest)}</span><small className="cp-detail">{d.status === "ready" ? "Draft ready to read" : "Being drafted"}</small></button></li>)}</ul>}
       {p.others.length > 0 && <ul className="cp-list wv-others">{p.others.map(({ task, meta }) => <NeedRow key={task.id} t={task} meta={meta} onTask={p.onTask} onDecide={p.onDecide} onNote={p.onNote} />)}</ul>}

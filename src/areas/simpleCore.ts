@@ -157,7 +157,7 @@ export const PRIVATE_ACTION_MAX = 48;
 export function privateAction(t: Pick<Task, "kind" | "next">): string | null {
   if (t.kind !== "task") return null;
   const a = rowAction(t.next);
-  if (!a || a.steps.length > 1 || a.prefix) return null;
+  if (!a || a.steps.length > 1 || a.prefix || !ACTION_VERBS.test(a.text)) return null;
   const text = withoutBrackets(a.text);
   if (/https?:\/\/|\bwww\.|\[\[|\buni:/i.test(text)) return null;
   if (text.length > PRIVATE_ACTION_MAX || text.split(" ").filter(Boolean).length > PRIVATE_ACTION_WORDS) return null;
@@ -192,9 +192,12 @@ const labelAsks = (step: string): boolean => { const m = ASKING_LABEL.exec(step)
  *  r20: a leading date label is not the action ("Wed 10-14: say go…" leads with "Say go…"); a label that asks ("Production go: …") is one. */
 export function actionLead(next: string | null | undefined): string | null {
   const t = datePrefix(plainStep(next)).rest;
-  if (!t || (!ACTION_VERBS.test(t) && !labelAsks(t))) return null;
+  if (!t || (!ACTION_VERBS.test(t) && !labelAsks(t) && !introducedAction(t))) return null;
   return t[0].toLocaleUpperCase() + t.slice(1);
 }
+/** r25 (Codex P2 5): "On your phone, look at cohereboulder.org, then forward Eileen the asks" is an action that begins with where or when. */
+const INTRO = /^(?:on|at|in|from|when|once|after|before|with|using|via)\b[^,;:.]{1,48},\s+(?=\S)/i;
+const introducedAction = (t: string): boolean => { const m = INTRO.exec(t); return !!m && ACTION_VERBS.test(t.slice(m[0].length)); };
 /**
  * Who a step's words are for (r17). `room`: the message is for the room itself ("Say go to deploy…", "Tell Uni…", "Tell the room…", "Ask Uni
  * to…", or a step that names this room, "…in #woven-web"): the sheet offers "Say it in #room ›" with `text` in the composer (never sent; "" when
@@ -457,24 +460,45 @@ export function chatAbout(w: AskedWhen | null | undefined, msgs: readonly RoomMs
   }
   return null;
 }
+/**
+ * r25 (Codex P1 2): what looking in the room's chat came to, in three honest states. `found`: related conversation (the cue, "Check in" the
+ * primary action). `failed`: the chat couldn't be read, which is not "nothing related" (a quiet "Couldn't read #room · Retry"; no cue, no
+ * "Check in"). `none`: nothing related (the ordinary actions). `msgs` null is a lookup that failed.
+ */
+export type CheckIn = { kind: "found"; hit: ChatHit } | { kind: "failed" } | { kind: "none" };
+export function checkInResult(w: AskedWhen | null | undefined, msgs: readonly RoomMsg[] | null | undefined, keys: RequestKeys): CheckIn {
+  if (!Array.isArray(msgs)) return { kind: "failed" };
+  const hit = chatAbout(w, msgs, keys);
+  return hit ? { kind: "found", hit } : { kind: "none" };
+}
+export const couldntRead = (room: string): string => `Couldn't read #${room.replace(/^#/, "")}`;
+/** The banner over the composer after "Check in": the sheet's question stays in view while the chat is read (r25). */
+export const checkingBanner = (step: string): string => `Checking: ${cutWords(withHosts(plainStep(step)), 110, false)}`;
 export const checkInCue = (room: string, key: string, w: AskedWhen): string => `#${room.replace(/^#/, "")} has talked about ${key} since this was ${w.kind === "asked" ? "asked" : "added"}`;
 
 /**
- * r24 (Codex P1 1): the stored "Where this stands" says something waits on Aaron while the node has no open Needs-you item: the app adds a quiet
- * line under it and leaves the stored text alone (the room rewrites it).
+ * r25 (Codex P1 1): the stored "Where this stands" claims something waits on the user, and no open Needs-you item for the node is that: the
+ * claim is not shown as current. The panel says "This summary needs updating · from Oct 13" and keeps the stored words under "What it said"
+ * (the room rewrites it). A claim is matched by the ids it names (#38, T-90), else by its distinctive words; with no open item at all, it
+ * matches nothing. Null: no claim, or an open item is that claim.
  */
 export const WAITS_ON_ME = /\bwaits?\s+on\s+aaron\b|\baaron['’]s\s+(?:go|ok|okay|ask|call|ans|decision|approval|sign-?off)\b|\bneeds?\s+aaron\b|\bfor\s+aaron\s+to\b|\bawaiting\s+aaron\b/i;
-export const nothingWaiting = (stands: string | null | undefined, open: number, updated: string | null | undefined, openTexts: readonly string[] = []): string | null => {
+export type StaleSummary = { from: string | null };
+export const STALE_SUMMARY = "This summary needs updating";
+export const staleLine = (s: StaleSummary): string => (s.from ? `${STALE_SUMMARY} · from ${s.from}` : STALE_SUMMARY);
+const CLAIM_STOP = new Set("aaron aaron's waits waiting awaiting needs decision approval prod staging deploy deployed first second their about which where would should could these those after before until still ready today tomorrow".split(" "));
+export function staleSummary(stands: string | null | undefined, updated: string | null | undefined, openTexts: readonly string[] = []): StaleSummary | null {
   if (!stands || !WAITS_ON_ME.test(stands)) return null;
   const ms = stampMs(updated ?? "");
-  const d = Number.isFinite(ms) ? ` · this summary is from ${new Date(ms).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : "";
-  if (open === 0) return `Nothing is waiting on you here now${d}`;
-  // something else is open: the claim is about the ids it names (#38, T-90); when no open request mentions any of them, it is not owed
+  const from = Number.isFinite(ms) ? new Date(ms).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : null;
+  const stale = { from };
+  if (!openTexts.length) return stale;
   const ids = [...stands.matchAll(/(?:^|[^\w&])(#\d{1,5}|T-\d+)\b/gi)].map((m) => m[1].toLowerCase());
-  if (!ids.length) return null;
-  const mentioned = openTexts.some((t) => ids.some((id) => new RegExp(`(^|[^\\w&])${id}\\b`, "i").test(t)));
-  return mentioned ? null : `No open request mentions this now${d}`;
-};
+  if (ids.length) return openTexts.some((t) => ids.some((id) => new RegExp(`(^|[^\\w&])${id}\\b`, "i").test(t))) ? null : stale;
+  const words = [...new Set((stands.toLowerCase().match(/[a-z]{5,}/g) ?? []).filter((w) => !CLAIM_STOP.has(w)))];
+  const open = openTexts.join(" ").toLowerCase();
+  return words.some((w) => new RegExp(`(^|[^a-z])${w}`).test(open)) ? null : stale;
+}
 
 /**
  * A step that sends words it doesn't carry (r23, both critics): "Send Ryan the deploy-access message below", "Forward the draft", "Send the
@@ -509,10 +533,20 @@ export function unresolvedBlock(next: string | null | undefined, detail: string 
   if (detail && detail.toLowerCase().includes(name.toLowerCase())) return null;
   return { name, room: m[1] ?? null };
 }
-/** r24 (both critics): a row can't point "below" at words that are in its card: "Send Ryan the deploy-access message below" reads "…message (in the card)". */
+/**
+ * r24, r25 (Ryan): a step can't point "below" at words that are in its card, and the row has no card to point at: the row and the sheet's
+ * heading say the same words, "Send Ryan the deploy-access message", and the message sits directly beneath it in the sheet.
+ */
 export function belowInCard(next: string, t: Partial<Pick<Task, "detail" | "message" | "hasDraft">>): string {
   if (!pointsAt(next) || !(t.detail || t.message || t.hasDraft)) return next;
-  return next.replace(/\b(message|draft|text|block|note)\s+below\b/i, "$1 (in the card)").replace(/\s+below\b/i, " (in the card)");
+  return next.replace(/\s+(?:(?:message|draft|text|block|note)\s+)?below\b/i, (m) => m.replace(/\s+below\b/i, ""));
+}
+/**
+ * r25 (Codex P2 5): the one current step a task asks of the user, for its Needs-you row and its sheet's heading alike: "Ask #room for the
+ * message" when its words were never stored, else its `next` without a "below" that has nothing under it. Both call this, so they never differ.
+ */
+export function currentStep(t: Pick<Task, "next" | "room"> & Partial<Pick<Task, "detail" | "message" | "hasDraft">>, room: string | null = t.room): string {
+  return pointsNowhere(t, room) ?? belowInCard(t.next.trim(), t);
 }
 /** The message in a task's `detail`, when it quotes one ("Send this to Ryan: 'Hey Ryan, …'"): the quoted words, whole. */
 export function quotedMessage(detail: string | null | undefined): string | null {
@@ -915,6 +949,9 @@ const PARTICLE = /^(?:at|to|up|out|off|back|over|through|in|on)$/i;
  * it. At most eight words.
  */
 export function verbPhrase(action: string): string {
+  // r25: "On your phone, look at the site": the phrase that begins with where or when stays, then the verb phrase after it
+  const intro = INTRO.exec(action);
+  if (intro && ACTION_VERBS.test(action.slice(intro[0].length)) && !ACTION_VERBS.test(action)) return `${intro[0]}${verbPhrase(action.slice(intro[0].length))}`.trim();
   // a label ("Production go:", "Reply:") is part of the phrase, with the verb phrase after it
   const lab = /^([^:;]{1,40}):\s+(\S.*)$/.exec(action);
   if (lab && ((labelAsks(action) && !ACTION_VERBS.test(lab[1])) || (/^\S+$/.test(lab[1]) && ACTION_VERBS.test(lab[1])))) return `${lab[1]}: ${verbPhrase(lab[2])}`.replace(/[,;:.]+$/, "");
@@ -1052,7 +1089,7 @@ export function repeats(title: string, action: string): boolean {
   return t.filter((w) => a.has(w)).length / t.length >= 0.5;
 }
 /** A title short and whole enough to say where an action belongs ("COhere opens Oct 15"); a long or cut one is vague. */
-export const SUB_TITLE_MAX = 40;
+export const SUB_TITLE_MAX = 72;
 /**
  * A row's subtitle (r20): the due cue ("due today", "was due Oct 13"; else the step's date label), after where it belongs: the task's own title
  * when it is short, whole and says something the action doesn't, else its area when the row is shown outside it. Never a cut or vague title
@@ -1067,11 +1104,31 @@ export function rowSubParts(t: Pick<Task, "title" | "due">, action: RowAction, a
   const where = titleSays(t.title, action.text) ?? area;
   return { where, when: dueLine(t.due, today) ?? action.prefix };
 }
-/** A task's title when it is short, whole and says something its action doesn't (r20): else null. */
+/**
+ * A task's title as the row's quiet secondary line (r25, Codex P2 5): the action is the `next` step, and the title says what it belongs to, in
+ * whole words and never with "…": a title stored cut ("…flow (3…") loses its tail, a long one is cut at a word. Null when it only says the
+ * action again.
+ */
 export function titleSays(raw: string, action: string): string | null {
   const tt = taskTitle(raw);
-  const title = tt.rest.replace(/\s+/g, " ").trim();
-  return title && !tt.cut && title.length <= SUB_TITLE_MAX && !repeats(title, action) ? title : null;
+  const title = cutWords(wholeWords(tt.rest.replace(/\s+/g, " ").trim()), SUB_TITLE_MAX, false);
+  return title && actionableTitle(title) && !repeats(title, action) ? title : null;
 }
 /** A title as plain words for a quiet line (r20): no "Decision (default yes):" label, no cut tail ("…feature 4, the"), sentence-cased. */
 export const titleWords = (rest: string): string => { const w = wholeWords(rest.replace(/^decision\s*(\([^)]*\))?\s*[:\-–—]\s*/i, "")); return w ? capFirst(w) : rest; };
+
+/**
+ * r25 (Sonnet, Codex): a Running row's words, whole and never cut: the stored text without a cut mark ("…") or a dangling colon or dash
+ * ("Waiting on your answer in #Uni:" → "Waiting on your answer in #Uni"). One function for the panel and the work view.
+ */
+export function runText(what: string | null | undefined): string {
+  const plain = (what ?? "").replace(/\s+/g, " ").trim();
+  return plain.replace(/\s*(?:…|\.\.\.)\s*$/, "").replace(/[\s:;,—–-]+$/, "").trim();
+}
+/** The short form of a run too long for its two lines (r25): the words before its colon, else its first whole words; never "…", never a dangling colon. */
+export function runShort(what: string | null | undefined, max = 56): string {
+  const full = runText(what);
+  const head = /^([^:]{8,}?):\s+\S/.exec(full)?.[1]?.trim();
+  if (head && head.length <= max + 24) return runText(head);
+  return runText(cutWords(full, max, false));
+}
