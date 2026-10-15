@@ -87,13 +87,14 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
 
   /**
    * r28 (Codex P1-3): the tasks closed (done or archived) on or after `since` (a day), for the one rule that a closure after a summary was
-   * written dims it. Read on its own, never holding the list back; filtered here by `closed` too, so a vault that ignores the filter
-   * still answers right. null: the read failed (a summary then isn't dimmed by closures it couldn't see).
+   * written dims it. Read on its own, never holding the list back. `closed` is not an indexed field in the vault (a range filter on it is
+   * refused: found in the real app), so the done and archived tasks are read by `state` and filtered here. null: the read failed (a summary
+   * then isn't dimmed by closures it couldn't see).
    */
   async function loadClosed(treeIn: TaskTree | Promise<TaskTree>, since: string): Promise<Task[] | null> {
     try {
       const t = await treeIn;
-      const { rows } = await allPages((offset) => call("vault_query_meta", { vault: name(), tag: "task", metadata: { state: { in: ["done", "archived"] }, closed: { gte: since } }, limit: LIMIT, ...(offset ? { offset } : {}) }) as Promise<RawNote[]>);
+      const { rows } = await allPages((offset) => call("vault_query_meta", { vault: name(), tag: "task", metadata: { state: { in: ["done", "archived"] } }, limit: LIMIT, ...(offset ? { offset } : {}) }) as Promise<RawNote[]>);
       return rows.map((n) => parseTask(n, t)).filter((x): x is Task => !!x && (x.state === "done" || x.state === "archived") && !!x.closed && x.closed.slice(0, 10) >= since);
     } catch { return null; }
   }

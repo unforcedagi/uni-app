@@ -2,7 +2,7 @@
 // Steps are the real ones from the scratch copy (10-14), no private areas; private items are made-up placeholders.
 // Run: node --experimental-strip-types scripts/simpleR22.test.ts
 import assert from "node:assert/strict";
-import { askedLine, chatMovedOn, firstOfSteps, needsFeed, privateAction, privateActionLabel, privateRestLabel, ROW_ACTION_MAX, rowAction, rowForm, withHosts } from "../src/areas/simpleCore.ts";
+import { askedLine, chatMovedOn, firstOfSteps, needsFeed, privateAction, privateActionLabel, privateRestLabel, rowAction, rowForm, withHosts } from "../src/areas/simpleCore.ts";
 import { pairingFailure } from "../src/pairingCore.ts";
 import { buildTaskTree, parseNodes, parseTask, type Task } from "../src/areas/taskCore.ts";
 
@@ -36,15 +36,13 @@ check("a row is the whole job: every verb phrase, both steps, no \"then …\" an
   assert.match(rowAction(COHERE)!.rest, /^Harper signs off/);
 });
 
-check("past 160 characters an action is shortened with words: brackets first, then links' addresses; never an ellipsis", () => {
+check("r28: an action is never shortened, however long: its brackets and its links stay in the row (links read as their hosts)", () => {
   const long = "Review the placeholder budget (the one from the long planning thread in September, with the three revisions and the notes) and send it to the placeholder board before the meeting";
-  assert.ok(withHosts(long).length > ROW_ACTION_MAX);
-  assert.equal(rowForm(long), "Review the placeholder budget and send it to the placeholder board before the meeting");
+  assert.ok(withHosts(long).length > 160);
+  assert.equal(rowForm(long), long);
   const linky = "Look at https://example.org/a/very/long/path/that/goes/on/and/on?with=query&and=more&still=more&and=even-more-words-here on phone and send placeholder notes to the placeholder team about the placeholder thing";
-  const f = rowForm(linky);
-  assert.ok(!/…/.test(f));
-  assert.ok(f.length <= linky.length);
-  assert.match(f, /^Look at /);
+  assert.equal(rowForm(linky), linky);
+  assert.equal(rowAction(long)?.text, long, "the row's action is the whole text");
   // the folded strip says step 1 and how many there are, never "then …"
   assert.equal(firstOfSteps(rowAction(STAGING)!.steps), "Look at https://cohere-signup-staging.unforced.workers.dev/?look=ecology on phone (step 1 of 2)");
 });
