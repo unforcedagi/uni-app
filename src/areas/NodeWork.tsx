@@ -202,7 +202,7 @@ export function TaskSheet({ task, gone = false, here, nodeName, room, roomNamed,
   const blockGap = unresolvedBlock(task.next, task.detail);
   const movedOn = !gone && !unsure && !!room && !!hit;
   // couldn't read the room: no cue and no "Check in"; the room opens as the primary, and "I did this" and "Say it" stay secondary
-  const primary = movedOn ? "check" : !gone && !unsure && !!room && lookFailed ? "openroom" : primary0 === "done" && lookOpen ? "open" : primary0;
+  const primary = movedOn ? "check" : !gone && !unsure && !decision && !!room && lookFailed ? "openroom" : primary0 === "done" && lookOpen ? "open" : primary0;
   const stepLinks = (text: string, first: boolean) => {
     const ls = linksIn(text);
     return ls.length ? <span className="task-step-links">{ls.map((u, i) => <button key={i} type="button" className={`task-do task-step-open${first && i === 0 && primary === "open" ? " primary" : ""}`} title={u} onClick={() => openOut(u)}>Open {rowLinkLabel(hostOf(u))}</button>)}</span> : null;
