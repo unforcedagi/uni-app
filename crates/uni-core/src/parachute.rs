@@ -532,8 +532,28 @@ impl VaultClient {
         to: Value,
         if_updated_at: &str,
     ) -> Result<Value> {
+        self.transition_note_with(vault, id, field, from, to, if_updated_at, None).await
+    }
+
+    /// [`Self::transition_note`] that also records which revision the answer was given against (r26): `metadata` may hold only
+    /// `answered_rev`, written in the same update as the compare-and-set.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn transition_note_with(
+        &self,
+        vault: &str,
+        id: &str,
+        field: &str,
+        from: Value,
+        to: Value,
+        if_updated_at: &str,
+        metadata: Option<Value>,
+    ) -> Result<Value> {
         check_vault(vault)?;
-        let args = transition_args(vault, id, field, &from, &to, if_updated_at)?;
+        let mut args = transition_args(vault, id, field, &from, &to, if_updated_at)?;
+        if let Some(m) = metadata {
+            check_answered_patch(&m)?;
+            args["metadata"] = m;
+        }
         let v = self.call("update-note", args).await?;
         check_vault_errors(&v)?;
         note_from(&v, id)
@@ -1093,10 +1113,22 @@ fn decide_args(vault: &str, id: &str, from: &Value, to: &Value, metadata: Value,
         "state_transition": {"field": "state", "from": "open", "to": "decided"}}))
 }
 
+/// The one key an answered task may carry besides its new state (r26): the revision the answer was given against.
+fn check_answered_patch(metadata: &Value) -> Result<()> {
+    let ok = metadata.as_object().is_some_and(|o| {
+        o.len() == 1 && o.get("answered_rev").and_then(Value::as_str).is_some_and(|s| !s.trim().is_empty() && s.len() <= 100)
+    });
+    if ok {
+        Ok(())
+    } else {
+        Err(Error::Invalid("an answered task takes only `answered_rev`".into()))
+    }
+}
+
 fn check_decide_patch(metadata: &Value) -> Result<()> {
-    let obj = metadata.as_object().filter(|o| !o.is_empty() && o.keys().all(|k| matches!(k.as_str(), "decided" | "decided_at" | "decided_by")));
+    let obj = metadata.as_object().filter(|o| !o.is_empty() && o.keys().all(|k| matches!(k.as_str(), "decided" | "decided_at" | "decided_by" | "answered_rev")));
     let Some(obj) = obj else {
-        return Err(Error::Invalid("a decision takes only `decided`, `decided_at` and `decided_by`".into()));
+        return Err(Error::Invalid("a decision takes only `decided`, `decided_at`, `decided_by` and `answered_rev`".into()));
     };
     if obj.values().all(|v| v.as_str().is_some_and(|s| !s.trim().is_empty() && s.len() <= 500)) {
         Ok(())
@@ -1284,6 +1316,18 @@ mod tests {
         assert!(decide_args("uni", "N1", &json!("open"), &json!("decided"), md.clone(), "").is_err());
         assert!(decide_args("uni", "N1", &json!("open"), &json!("archived"), md.clone(), "x").is_err());
         assert!(decide_args("uni", "N1", &json!("decided"), &json!("open"), md, "x").is_err());
+    }
+
+    #[test]
+    fn an_answer_records_the_revision_it_answered_and_nothing_else() {
+        assert!(check_answered_patch(&json!({"answered_rev": "2026-10-14T07:00:00.000Z"})).is_ok());
+        assert!(check_answered_patch(&json!({"answered_rev": ""})).is_err());
+        assert!(check_answered_patch(&json!({"answered_rev": "x", "state": "done"})).is_err());
+        assert!(check_answered_patch(&json!({"next": "x"})).is_err());
+        assert!(check_answered_patch(&json!("x")).is_err());
+        let md = json!({"decided": "yes", "decided_at": "2026-10-13T08:00:00Z", "decided_by": "aaron", "answered_rev": "2026-10-13T07:00:00.000Z"});
+        assert!(check_decide_patch(&md).is_ok());
+        assert!(check_decide_patch(&json!({"decided": "yes", "owner": "x"})).is_err());
     }
 
     use super::*;

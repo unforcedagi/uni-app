@@ -204,10 +204,11 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
    * `from`, or a task changed since that revision (a rewritten step, even with the state unchanged), is a conflict: the caller re-reads and
    * says so, it never retries blind.
    */
-  async function transition(taskId: string, from: AnyState, to: AnyState, ifUpdatedAt: string): Promise<WriteResult> {
+  async function transition(taskId: string, from: AnyState, to: AnyState, ifUpdatedAt: string, answered = false): Promise<WriteResult> {
     if (!ifUpdatedAt) return { ok: false, kind: "conflict", message: "no revision: reload the task first" };
     try {
-      const note = ((await call("vault_transition", { vault: name(), id: taskId, from, to, ifUpdatedAt })) as RawNote);
+      // r26: an answer ("I did this") records the revision it answered, in the same compare-and-set write
+      const note = ((await call("vault_transition", { vault: name(), id: taskId, from, to, ifUpdatedAt, ...(answered ? { metadata: { answered_rev: ifUpdatedAt } } : {}) })) as RawNote);
       return ok(note);
     } catch (e) {
       const message = String(e);
@@ -222,7 +223,7 @@ export function createVaultTasks(call: Call = (cmd, args) => invoke(cmd, args), 
    */
   async function decide(taskId: string, option: string, by: string, ifUpdatedAt: string, at: string = new Date().toISOString()): Promise<WriteResult> {
     try {
-      const note = await call("vault_decide", { vault: name(), id: taskId, from: "open", to: "decided", metadata: { decided: option, decided_at: at, decided_by: by }, ifUpdatedAt });
+      const note = await call("vault_decide", { vault: name(), id: taskId, from: "open", to: "decided", metadata: { decided: option, decided_at: at, decided_by: by, answered_rev: ifUpdatedAt }, ifUpdatedAt });
       return ok(note);
     } catch (e) {
       const message = String(e);

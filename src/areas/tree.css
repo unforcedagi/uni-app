@@ -686,3 +686,17 @@
 .cp-said { margin: 4px 0 0; font: 400 12.5px/1.4 var(--th-sans, inherit); color: var(--th-mute); }
 .cp-said > summary { cursor: pointer; width: fit-content; }
 .cp-said > p { margin: 4px 0 0; }
+
+/* r26: a row that points at a list carries its first items; the sheet lists them in full under the heading */
+.cp-need .cp-items { display: grid; gap: 1px; margin: 3px 0 0; font: 400 13px/1.4 var(--th-sans); color: var(--th-ink2); }
+.cp-need .cp-item-line { display: block; padding-left: 12px; position: relative; overflow-wrap: anywhere; }
+.cp-need .cp-item-line::before { content: "·"; position: absolute; left: 3px; color: var(--th-mute); }
+.cp-need .cp-item-more { display: block; padding-left: 12px; color: var(--th-mute); }
+.cp-need .cp-items-none { color: var(--th-mute); }
+.task-items { margin: 2px 0 10px; }
+.task-sub-title { margin: -2px 0 8px; font-size: 13.5px; color: var(--th-mute); }
+.task-stepof { display: block; margin: 6px 0 0; font: 500 12px/1.4 var(--th-sans, inherit); color: var(--th-mute); }
+.task-notwritten { margin: 2px 0 10px; }
+.task-lookpending { color: var(--th-mute); }
+.task-do.task-anyway { margin-left: auto; }
+.cp-stands[data-stale="part"] { padding-top: 2px; }
