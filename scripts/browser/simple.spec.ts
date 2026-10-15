@@ -3853,6 +3853,8 @@ test.describe('r23', () => {
     await openRoom(page, 'Techne');
     for (const [w, h] of [[740, 360], [920, 360]] as const) {
       await page.setViewportSize({ width: w, height: h });
+      // a window under 400px tall has the strip (r19): wait for the switch before opening it, or openCompanion sees the old side panel
+      await expect(page.locator('.cp.strip')).toHaveCount(1);
       await openWork(page);
       await rowOf(page, 'Send Ryan the deploy-access message').locator('.cp-need').click();
       const sheet = sheetOf(page);
@@ -3885,6 +3887,7 @@ test.describe('r23', () => {
     await openRoom(page, 'ATLAS');
     for (const [w, h] of [[740, 360], [920, 360]] as const) {
       await page.setViewportSize({ width: w, height: h });
+      await expect(page.locator('.cp.strip')).toHaveCount(1);
       await openCompanion(page);
       await page.locator('.cp-item').filter({ hasText: 'Decide the ATLAS hosting' }).locator('.cp-need').first().click();
       const sheet = sheetOf(page);
@@ -3896,6 +3899,34 @@ test.describe('r23', () => {
       expect(facts!.y + facts!.height, `${w}×${h} facts above the footer`).toBeLessThanOrEqual(foot!.y + 0.5);
       expect(facts!.y, `${w}×${h} facts inside the body`).toBeGreaterThanOrEqual(body!.y - 0.5);
       await page.keyboard.press('Escape');
+    }
+  });
+
+  test('r24 (Sonnet): at 1280×720 the last Running row sits wholly above the panel footer, unscrolled; a long run is two whole lines, no "…"', async ({ page }) => {
+    test.skip(!wide(page), 'side panel');
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await boot(page);
+    const long = 'Draft the placeholder statement of work for the commons grant, with the budget table, the milestones and the two letters of support attached';
+    await page.evaluate((t) => (window as any).__setRunWhat('run-1', t), long);
+    await refresh(page, '2026-10-14T09:00:00.000Z');
+    await openRoom(page, 'ATLAS');
+    await openCompanion(page);
+    const runs = page.locator('.cp.side .cp-run');
+    const foot = (await page.locator('.cp-foot').boundingBox())!;
+    const n = await runs.count();
+    if (n) {
+      const last = (await runs.nth(n - 1).boundingBox())!;
+      expect(last.y + last.height, 'last run above the footer').toBeLessThanOrEqual(foot.y + 0.5);
+    }
+    const first = page.locator('.cp.side .cp-run span').filter({ hasText: 'placeholder statement of work' });
+    if (await first.count()) {
+      expect(await first.evaluate((e) => getComputedStyle(e).webkitLineClamp), 'no line-clamp ellipsis').toMatch(/^(none|)$/);
+      const lh = await first.evaluate((e) => parseFloat(getComputedStyle(e).lineHeight));
+      expect((await first.boundingBox())!.height).toBeLessThanOrEqual(2 * lh + 1);
+      await expect(first).toHaveAttribute('title', long);
+    } else {
+      // the panel had no room for it: it waits behind "+N more running" in the footer
+      await expect(page.locator('.cp-all-more')).toContainText('more running');
     }
   });
 

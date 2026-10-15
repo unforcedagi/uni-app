@@ -496,6 +496,8 @@ Two proposals wait on a scope decision.
       for (const [id, text] of [['p-atlas', 'The SOW is drafted and waits on Casey. The map comes next.'], ['a-atlas', 'Atlas is mostly the grant this week.'], ['p-lvb', 'Cohort two starts Oct 15; grading briefs are queued.']]) { const n = notes.find((x) => x.id === id); if (n) n.metadata = { ...n.metadata, stands: text, stands_at: new Date((d.now - 2 * 86400) * 1000).toISOString() }; }
       /** r24: change a node's `stands` (the summary a room wrote) and when */
       w.__setStands = (id: string, text: string, at?: string) => { const n = notes.find((x) => x.id === id); n.metadata = { ...n.metadata, stands: text, stands_at: at ?? new Date((d.now - 2 * 86400) * 1000).toISOString() }; n.updatedAt = new Date(Date.now() + 5000).toISOString(); };
+      /** r24: change what a run says it is doing */
+      w.__setRunWhat = (id: string, what: string) => { const n = notes.find((x) => x.id === id); n.metadata = { ...n.metadata, summary: what, what }; n.updatedAt = new Date(Date.now() + 5000).toISOString(); };
       w.__decideElsewhere = (id: string) => { const t = taskNotes.find((x) => x.id === id); t.metadata.state = 'decided'; t.updatedAt = new Date(Date.now() + 9000).toISOString(); };
       /** r13: change a task as Uni would through MCP (metadata merged, optionally a new title or state). */
       w.__setTask = (id: string, meta: Record<string, unknown>, title?: string) => { const t = taskNotes.find((x) => x.id === id); Object.assign(t.metadata, meta); if (title) t.path = t.path.replace(/[^/]*$/, title); t.updatedAt = new Date(Date.now() + 5000).toISOString(); t.lastUpdatedVia = 'mcp'; };

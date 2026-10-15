@@ -313,8 +313,9 @@
 .cp-opt:focus-visible { outline: 2px solid var(--th-ink); outline-offset: 2px; }
 .cp-more { all: unset; box-sizing: border-box; min-height: 40px; display: inline-flex; align-items: center; font: 500 14px var(--th-sans); color: var(--th-ink2); cursor: pointer; text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
 .cp-run { display: flex; align-items: baseline; gap: 10px; padding: 5px 0; font: 400 15px/1.35 var(--th-sans); }
-/* r24: a run is a glance, two lines at most (its words whole in the tooltip and the work view), so it fits above the panel footer */
-.cp .cp-run span { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
+/* r24: a run is a glance, two lines at most (its words whole in the tooltip and the work view), so it fits above the panel footer; cut at a
+   whole line like the r23 rows, never with the "…" -webkit-line-clamp draws */
+.cp .cp-run span { display: block; min-width: 0; max-height: calc(2 * 1.35em); overflow: clip; overflow-wrap: anywhere; }
 .cp-run i { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--th-ink); align-self: center; }
 .cp-run[data-state="queued"] i { background: none; box-shadow: inset 0 0 0 1.5px var(--th-ink); }
 .cp-run small { margin-left: auto; font: 400 12.5px var(--th-sans); color: var(--th-mute); }
