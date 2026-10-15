@@ -1,4 +1,4 @@
-// T-124 r29: say only what the app knows. Only Uni's own message naming the ask is its announcement; "N older asks need confirming" claims no work, and
+// T-124 r29: say only what the app knows. Only Uni's own message naming the ask is its announcement; "N requests need confirming" claims no work, and
 // an empty Needs you says "No confirmed asks" while any wait to be confirmed; a summary is a dated account below Needs you.
 // Run: SIMPLE_TEST_PORT=5711 npx playwright test --config playwright.simple.config.ts r29
 import { test, expect, type Locator, type Page } from '@playwright/test';
@@ -98,16 +98,16 @@ test.describe('r29', () => {
     await openCompanion(page);
     const panel = page.locator('.cp-body').getByRole('region', { name: 'Needs you' });
     await expect(panel.locator('.cp-none')).toHaveText('No confirmed asks');
-    await expect(panel.locator('.cp-recheck-line')).toHaveText(/^2 older asks need confirming\+$/);
+    await expect(panel.locator('.cp-recheck-line')).toHaveText(/^2 requests need confirming in this room\+$/);
     await expect(panel.locator('.cp-list > li.cp-item')).toHaveCount(0);
     await expect(page.locator('.cp-body')).not.toContainText(/rechecking|Nothing needs you here/);
     await panel.locator('.cp-recheck-line').click();
-    await expect(panel.locator('.cp-recheck-list')).toHaveAttribute('aria-label', 'Older asks that need confirming');
+    await expect(panel.locator('.cp-recheck-list')).toHaveAttribute('aria-label', 'Requests that need confirming');
     await openWork(page);
     const needs = section(page, 'Needs you');
     await expect(needs.locator('.cp-none')).toHaveText('No confirmed asks');
     await expect(needs.locator('.wv-n')).toHaveText('0');
-    await expect(needs.locator('.cp-recheck-line')).toHaveText(/^2 older asks need confirming\+$/);
+    await expect(needs.locator('.cp-recheck-line')).toHaveText(/^2 requests need confirming in this room\+$/);
     await expect(page.locator('.sr-work')).not.toContainText(/rechecking|Nothing needs you here/);
   });
 
@@ -133,7 +133,7 @@ test.describe('r29', () => {
     const panel = page.locator('.cp-body').getByRole('region', { name: 'Needs you' });
     await expect(panel.locator('.cp-none')).toHaveCount(0);
     await expect(panel.locator('.cp-list > li.cp-item').filter({ hasText: 'confirmed one' })).toHaveCount(1);
-    await expect(panel.locator('.cp-recheck-line')).toHaveText(/^1 older ask needs confirming\+$/);
+    await expect(panel.locator('.cp-recheck-line')).toHaveText(/^1 request needs confirming in this room\+$/);
   });
 
   test('P1-3: the summary is below Needs you, labelled with its date and room, muted, and carries no stale notice', async ({ page }) => {
@@ -169,7 +169,7 @@ test.describe('r29 compact', () => {
       await page.locator('.cp-line').click();
       const sheet = page.locator('.cp-sheet');
       await expect(sheet.locator('.cp-none')).toHaveText('No confirmed asks');
-      await expect(sheet.locator('.cp-recheck-line')).toHaveText(/^1 older ask needs confirming\+$/);
+      await expect(sheet.locator('.cp-recheck-line')).toHaveText(/^1 request needs confirming in this room\+$/);
       await expect(sheet.locator('.cp-asof')).toHaveText(/^Last written Oct 14 by #\S+:$/);
       await expect(sheet.locator('.cp-stale, [data-stale-why]')).toHaveCount(0);
       expect(await page.evaluate(() => { const n = document.querySelector('.cp-sheet .cp-stands-note')!; const w = document.querySelector('.cp-sheet section[aria-label="Needs you"]')!; return !!(w.compareDocumentPosition(n) & Node.DOCUMENT_POSITION_FOLLOWING); })).toBe(true);

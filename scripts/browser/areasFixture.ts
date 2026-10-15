@@ -500,7 +500,7 @@ Two proposals wait on a scope decision.
       /** r24: change what a run says it is doing */
       w.__setRunWhat = (id: string, what: string) => { const n = notes.find((x) => x.id === id); n.metadata = { ...n.metadata, summary: what, what }; n.updatedAt = new Date(Date.now() + 5000).toISOString(); };
       /** r26: a run about a task, on a node */
-      w.__addRun = (id: string, node: string, task: string, what: string, state = 'running') => { notes.push(run(id, what, { node, task, state })); };
+      w.__addRun = (id: string, node: string, task: string, what: string, state = 'running', extra: Record<string, unknown> = {}) => { notes.push(run(id, what, { node, task, state, ...extra })); };
       w.__decideElsewhere = (id: string) => { const t = taskNotes.find((x) => x.id === id); t.metadata.state = 'decided'; t.updatedAt = new Date(Date.now() + 9000).toISOString(); };
       /** r13: change a task as Uni would through MCP (metadata merged, optionally a new title or state). */
       w.__setTask = (id: string, meta: Record<string, unknown>, title?: string) => { const t = taskNotes.find((x) => x.id === id); Object.assign(t.metadata, meta); if (title) t.path = t.path.replace(/[^/]*$/, title); t.updatedAt = new Date(Date.now() + 5000).toISOString(); t.lastUpdatedVia = 'mcp'; };
