@@ -4613,11 +4613,11 @@ test.describe('r27', () => {
     }
   });
 
-  test('r27 P1-1: a request is current only when its own record (written within 3 days) vouches for it and no related chat is newer than that write; the sheet leads with answers only then', async ({ page }) => {
+  test('r27 P1-1: a request is current only when its own record (asked_at, within 3 days) vouches for it; the sheet leads with answers only then (r31: chat is not read)', async ({ page }) => {
     await boot(page);
     // the chat is from 3 days before the fixed clock: older than the record's write below
     await page.evaluate(() => (window as any).__arrive('ch-techne', 'Uni', 'The placeholder deploy is ready whenever you are.', 6 * 86400));
-    await add(page, { id: 'f1', title: 'T-303 Placeholder deploy', node: 'Areas/Techne', updatedAt: '2026-10-13T12:00:00.000Z', meta: { next: 'Say go on the placeholder deploy', asked: '2026-10-06T18:00:00.000Z', asked_at: '2026-10-06T18:00:00.000Z' } });
+    await add(page, { id: 'f1', title: 'T-303 Placeholder deploy', node: 'Areas/Techne', updatedAt: '2026-10-13T12:00:00.000Z', meta: { next: 'Say go on the placeholder deploy', asked: '2026-10-06T18:00:00.000Z', asked_at: '2026-10-13T12:00:00.000Z' } });
     await refresh(page, NOW);
     await openRoom(page, 'Techne');
     await openWork(page);
