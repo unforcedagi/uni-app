@@ -1370,7 +1370,7 @@ export function itemShort(item: string, max = 72): string {
   return lab ?? cutWords(bare, max, false);
 }
 /** A list's row form: the first `ROW_ITEMS` items (short) and how many more there are, for "and 1 more". */
-export const rowItems = (items: readonly string[], n = ROW_ITEMS): { shown: string[]; more: number } => ({ shown: items.slice(0, n).map((x) => itemShort(x)), more: Math.max(0, items.length - n) });
+export const rowItems = (items: readonly string[], n = ROW_ITEMS, max = 72): { shown: string[]; more: number } => ({ shown: items.slice(0, n).map((x) => itemShort(x, max)), more: Math.max(0, items.length - n) });
 
 // ------------------------------------------------------------------------------------------------- r26: a check that gates answers
 /** The lookup of the room's chat: asked and not back yet, related talk found, couldn't be read, or nothing related. */

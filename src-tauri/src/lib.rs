@@ -1923,3 +1923,31 @@ mod vault_default_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod send_gate_tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    /// r26 (Codex P1 3): the first sync holds `IO_GATE` for its whole run; a send must not wait for it.
+    #[tokio::test]
+    async fn a_send_does_not_wait_behind_the_sync() {
+        let sync = IO_GATE.lock().await; // a cold sync in progress
+        let t = Instant::now();
+        let got = tokio::time::timeout(Duration::from_millis(500), SEND_GATE.lock()).await;
+        assert!(got.is_ok(), "the send path waited for the sync's gate");
+        assert!(t.elapsed() < Duration::from_millis(100));
+        drop(got);
+        drop(sync);
+    }
+
+    /// Sends, edits and deletes still keep their own order.
+    #[tokio::test]
+    async fn sends_wait_for_each_other() {
+        let first = SEND_GATE.lock().await;
+        let second = tokio::time::timeout(Duration::from_millis(100), SEND_GATE.lock()).await;
+        assert!(second.is_err(), "two sends ran at once");
+        drop(first);
+        assert!(tokio::time::timeout(Duration::from_millis(500), SEND_GATE.lock()).await.is_ok());
+    }
+}

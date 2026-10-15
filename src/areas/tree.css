@@ -688,7 +688,7 @@
 .cp-said > p { margin: 4px 0 0; }
 
 /* r26: a row that points at a list carries its first items; the sheet lists them in full under the heading */
-.cp-need .cp-items { display: grid; gap: 1px; margin: 3px 0 0; font: 400 13px/1.4 var(--th-sans); color: var(--th-ink2); }
+.cp-need .cp-items { display: grid; gap: 0; margin: 2px 0 0; font: 400 12.5px/1.35 var(--th-sans); color: var(--th-ink2); }
 .cp-need .cp-item-line { display: block; padding-left: 12px; position: relative; overflow-wrap: anywhere; }
 .cp-need .cp-item-line::before { content: "·"; position: absolute; left: 3px; color: var(--th-mute); }
 .cp-need .cp-item-more { display: block; padding-left: 12px; color: var(--th-mute); }

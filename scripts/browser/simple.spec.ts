@@ -4466,7 +4466,7 @@ test.describe('r26', () => {
     await refresh(page, '2026-10-14T09:00:00.000Z');
     await openRoom(page, 'Learn Vibe Build');
     await openCompanion(page);
-    await expect(page.locator('.cp-stands[data-part="current"]')).toHaveText("Cohort two starts Oct 15; prod deploy of #38 waits on Aaron's go; docs shipped on staging.");
+    await expect(page.locator('[data-part="current"] .cp-stands')).toHaveText("Cohort two starts Oct 15; prod deploy of #38 waits on Aaron's go; docs shipped on staging.");
     await expect(page.locator('.cp-stale')).toHaveText(/^Part of this summary needs updating · from Oct \d+$/);
     const said = page.locator('.cp-said');
     await said.locator('summary').click();
