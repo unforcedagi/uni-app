@@ -7,6 +7,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { bootAreas } from './areasFixture';
 
 const SHOTS = 'scripts/browser/__shots__/simple';
+/** r27: `__arrive(…, -426600)` puts a message at 2026-10-14 08:30Z (the fixture's clock is pinned at Oct 9 10:00Z): after a record written at 08:00 that day */
 const BUILD = '7dcea809-25cd-4160-ba99-f0a56386adcb';
 const wide = (page: Page) => (page.viewportSize()?.width ?? 0) >= 900;
 /** r17: the tree sits beside the room only on a wide window at least 400px tall; otherwise it is in the Places drawer. */
@@ -24,6 +25,12 @@ const shot = async (page: Page, name: string) => {
   }
   await page.emulateMedia({ colorScheme: 'light' });
 };
+/** r27: a sheet's chat lookup settles (pending, then current, unconfirmed or couldn't read). Where the answers wait behind "Answer anyway", take that one tap, so a check that is about something else sees the sheet with its answers. */
+async function answersOpen(sheet: ReturnType<Page['locator']>) {
+  await expect(sheet.locator('.task-lookpending')).toHaveCount(0, { timeout: 10_000 });
+  const anyway = sheet.getByRole('button', { name: 'Answer anyway' });
+  if (await anyway.count()) await anyway.click();
+}
 const base = { briefs: true, tree: true, tasks: true, atlas: true, steer: true, pinned: true } as const;
 const boot = (page: Page, extra: Parameters<typeof bootAreas>[2] = {}) => bootAreas(page, 'seed', { ...base, ...extra });
 const scope = (page: Page) => (treeBeside(page) ? page.locator('.th-roomnav') : page.locator('.th-phone-tree'));
@@ -96,8 +103,9 @@ test.describe('simple', () => {
     const cp = page.locator('.cp-body');
     await expect(cp.locator('.cp-lede')).toContainText('The SOW is drafted and waits on Casey.');
     await expect(cp.locator('.cp-lede')).not.toContainText('The map comes next');
-    // r18: the summary's date is in the heading, the one wording the work view uses too
-    await expect(companion(page).getByText(/^Where this stands · 2 days ago$/).first()).toBeVisible();
+    // r27: a written summary carries its own date, "As of Oct 13: …"; the heading adds no second one
+    await expect(companion(page).getByText(/^Where this stands$/).first()).toBeVisible();
+    await expect(cp.locator('.cp-stands').first()).toHaveText(/^As of [A-Z][a-z]{2} \d+: The SOW is drafted and waits on Casey\./);
     const needs = cp.getByRole('region', { name: 'Needs you' });
     await expect(needs.locator('.cp-need')).toHaveCount(2);
     // the decision on this very node leads and carries its options as buttons
@@ -340,12 +348,12 @@ test.describe('simple', () => {
     // narrow, the sentence runs past three lines: r23, shortened at a clause's end, never "…", with a real button that shows it whole
     const lede = page.locator('.cp-stands').first();
     await expect(lede).toHaveAttribute('data-cut', 'true');
-    await expect(lede).toHaveText('Atlas and COhere are moving.');
+    await expect(lede).toHaveText(/^As of [A-Z][a-z]{2} \d+: Atlas and COhere are moving\.$/);
     const more = page.locator('.cp-stands-more');
     await expect(more).toBeVisible();
     await more.focus(); await page.keyboard.press('Enter');
     await expect(more).toHaveAttribute('aria-expanded', 'true');
-    await expect(lede).toHaveText('Atlas and COhere are moving; the usage guard is quiet.');
+    await expect(lede).toHaveText(/^As of [A-Z][a-z]{2} \d+: Atlas and COhere are moving; the usage guard is quiet\.$/);
     await more.click();
     await expect(lede).toHaveAttribute('data-cut', 'true');
     await page.evaluate(() => { document.querySelector('.cp.side')!.removeAttribute('style'); });
@@ -451,7 +459,7 @@ test.describe('simple', () => {
     await expect(page.locator('.sr-title')).toHaveText('ATLAS');
     await expect(work.getByRole('region', { name: 'Needs you' })).toContainText('SOW for the commons grant');
     await expect(work.getByRole('list', { name: 'Running' })).toContainText('Draft the SOW');
-    await expect(work.getByRole('list', { name: 'Drafts' })).toContainText('SOW commons grant');
+    await expect(work.getByRole('region', { name: 'Drafts' })).toContainText('SOW commons grant');
     await expect(page.locator('.steer, .logstrip, .steer-log, .th-panel')).toHaveCount(0);
     expect(await fits(page)).toBe(true);
     await shot(page, 'everything');
@@ -1602,11 +1610,9 @@ test.describe('simple', () => {
     await expect(cut.getByRole('group', { name: /^Decide:/ })).toHaveCount(0);
     // r19: a whole statement with no stored options asks nothing: it is Uni's to tidy, listed apart (never "Your call", never buttons)
     await expect(wv.locator('section[aria-label="Needs you"]')).not.toContainText('the long one that needs a longer ask');
-    // r20: Uni's tidying is one quiet line; opened, titles only, read-only
-    await wv.locator('.wv-tidy-line').click();
-    const stmt = wv.locator('.wv-tidy-list li').filter({ hasText: 'the long one that needs a longer ask' });
-    await expect(stmt).toHaveCount(1);
-    await expect(stmt.locator('button, .cp-opt, .cp-call-lead')).toHaveCount(0);
+    // r27: records to reword are the rooms' business: not in Aaron's view at all
+    await expect(wv).not.toContainText(/the long one that needs a longer ask|rewording/);
+    await expect(wv.locator('.wv-tidy-line, .wv-tidy')).toHaveCount(0);
     // never a Yes/No beside a title that ends cut short
     for (const row of await wv.locator('.cp-item').all()) if (await row.getByRole('group', { name: /^Decide:/ }).count()) expect((await row.locator('.cp-title').innerText()).trim()).not.toMatch(/(…|\.\.\.)$/);
     await cut.locator('.cp-need').click();
@@ -1664,7 +1670,7 @@ test.describe('simple', () => {
     await expect(page.locator('.sr-title')).toHaveText(title);
     expect(await page.locator('.sr-meta').innerText()).toBe(meta);
     await expect(page.getByRole('button', { name: 'Back to chat' })).toBeVisible();
-    expect(await page.locator('.sr-work section').evaluateAll((els) => els.map((e) => e.getAttribute('aria-label')))).toEqual(expect.arrayContaining(['Needs you', 'Being worked on']));
+    expect(await page.locator('.sr-work section').evaluateAll((els) => els.map((e) => e.getAttribute('aria-label')))).toEqual(expect.arrayContaining(['Needs you', 'Running']));
     await expect(page.locator('.wr-counts, .wr-prio, select, .task-check, .th-sec, .th-panel')).toHaveCount(0);
     // the same row as the companion: a decision is its whole question (r20: its answers in its sheet)
     await expect(page.locator('.sr-work .cp-item').filter({ hasText: 'Decide the ATLAS hosting' }).locator('.cp-title')).toHaveText('Decide the ATLAS hosting');
@@ -2207,7 +2213,7 @@ test.describe('r16', () => {
   const refresh = async (page: Page, at: string) => { await page.clock.setFixedTime(Date.parse(at)); await page.evaluate(() => window.dispatchEvent(new Event('focus'))); };
   const taskId = (page: Page, title: RegExp) => page.evaluate((src) => (window as any).__tasks.find((t: any) => new RegExp(src).test(t.path)).id, title.source);
   const stampOf = (page: Page, id: string) => page.evaluate((i) => (window as any).__tasks.find((t: any) => t.id === i).updatedAt, id);
-  const openSheetFor = async (page: Page, text: string) => { await openCompanion(page); await page.locator('.cp-body .cp-item').filter({ hasText: text }).locator('.cp-need, .cp-lead').first().click(); return page.getByRole('dialog').filter({ has: page.locator('.task-sheet, .task-kind') }); };
+  const openSheetFor = async (page: Page, text: string) => { await openCompanion(page); await page.locator('.cp-body .cp-item').filter({ hasText: text }).locator('.cp-need, .cp-lead').first().click(); const sheet = page.getByRole('dialog').filter({ has: page.locator('.task-sheet, .task-kind') }); await answersOpen(sheet); return sheet; };
 
   test('tasks show before Running and Drafts are read; the work view says it is still checking, never "nothing is moving"', async ({ page }) => {
     await page.addInitScript(() => { (window as any).__tagDelay = { run: 60_000, draft: 60_000 }; });
@@ -2404,8 +2410,8 @@ test.describe('r16', () => {
     const wv = page.locator('.sr-work');
     await expect(wv.locator('section[aria-label="Needs you"]')).toContainText('Grade the Week 6 reflections');
     await expect(wv.locator('section[aria-label="Needs you"] .cp-under[title*="Canvas Week 7 brief draft"]')).toHaveCount(1); // r18: one line, whole in its title
-    await expect(wv.locator('section[aria-label="Being worked on"]')).not.toContainText('Canvas Week 7 brief draft');
-    const moving = wv.locator('section[aria-label="Being worked on"] .cp-item').filter({ hasText: 'Final brief' });
+    await expect(wv.locator('section[aria-label="Running"]')).not.toContainText('Canvas Week 7 brief draft');
+    const moving = wv.locator('section[aria-label="Running"] .cp-item').filter({ hasText: 'Final brief' });
     await expect(moving.locator('.cp-meta')).toHaveAttribute('title', /with #atlas\/teach/); // r18: one line of small print, whole in its title
     // the companion and the dots count the same
     const n = await wv.locator('section[aria-label="Needs you"] .wv-n').innerText();
@@ -2418,7 +2424,7 @@ test.describe('r17', () => {
   const openWork = async (page: Page) => { await openCompanion(page); await page.getByRole('button', { name: /^All of .*'s work/ }).click(); await expect(page.locator('.sr-work')).toBeVisible(); };
   /** A task or decision note added as Uni would write it (raw vault shape), read on the next refresh. */
   const add = (page: Page, n: { id: string; title: string; node: string; tag?: string; meta?: Record<string, unknown>; content?: string }) => page.evaluate((x) => {
-    (window as any).__tasks.push({ id: x.id, path: `${x.tag === 'decision' ? 'Decisions' : 'Tasks'}/${x.title}`, extension: 'md', tags: [x.tag ?? 'task'], createdAt: '2026-10-10T08:00:00.000Z', updatedAt: new Date(Date.now() + 3000).toISOString(), lastUpdatedBy: 'u', lastUpdatedVia: 'mcp', content: x.content ?? x.title, metadata: { node: x.node, state: 'open', owner: 'aaron', ...(x.meta ?? {}) } });
+    (window as any).__tasks.push({ id: x.id, path: `${x.tag === 'decision' ? 'Decisions' : 'Tasks'}/${x.title}`, extension: 'md', tags: [x.tag ?? 'task'], createdAt: '2026-10-10T08:00:00.000Z', updatedAt: '2026-10-14T08:00:00.000Z', lastUpdatedBy: 'u', lastUpdatedVia: 'mcp', content: x.content ?? x.title, metadata: { node: x.node, state: 'open', owner: 'aaron', ...(x.meta ?? {}) } });
   }, n);
   const sheetOf = (page: Page) => page.getByRole('dialog').filter({ has: page.locator('.task-kind') });
 
@@ -2445,7 +2451,7 @@ test.describe('r17', () => {
     const wv = page.locator('.sr-work');
     await expect(wv.locator('section[aria-label="Needs you"]')).toContainText('Your OK on the draft');
     await expect(wv.locator('section[aria-label="Needs you"]')).toContainText('Pick the lead story');
-    await expect(wv.locator('section[aria-label="Being worked on"]')).not.toContainText(/Canvas Week 7|Newsletter W42/);
+    await expect(wv.locator('section[aria-label="Running"]')).not.toContainText(/Canvas Week 7|Newsletter W42/);
     // its sheet: the action, the task it belongs to, whose task it is
     await wv.locator('.cp-item').filter({ hasText: 'Your OK on the draft' }).locator('.cp-lead').click();
     const sheet = sheetOf(page);
@@ -2638,7 +2644,7 @@ test.describe('r18', () => {
   const refresh = async (page: Page, at: string) => { await page.clock.setFixedTime(Date.parse(at)); await page.evaluate(() => window.dispatchEvent(new Event('focus'))); };
   /** A task or decision note added as Uni would write it (raw vault shape), read on the next refresh. */
   const add = (page: Page, n: { id: string; title: string; node: string; tag?: string; meta?: Record<string, unknown>; content?: string; path?: string; vault?: string }) => page.evaluate((x) => {
-    (window as any).__tasks.push({ id: x.id, path: x.path ?? `${x.tag === 'decision' ? 'Decisions' : 'Tasks'}/${x.title}`, extension: 'md', tags: x.tag === 'none' ? [] : [x.tag ?? 'task'], createdAt: '2026-10-10T08:00:00.000Z', updatedAt: new Date(Date.now() + 3000).toISOString(), lastUpdatedBy: 'u', lastUpdatedVia: 'mcp', content: x.content ?? x.title, ...(x.vault ? { inVault: x.vault } : {}), metadata: x.tag === 'none' ? (x.meta ?? {}) : { node: x.node, state: 'open', owner: 'aaron', ...(x.meta ?? {}) } });
+    (window as any).__tasks.push({ id: x.id, path: x.path ?? `${x.tag === 'decision' ? 'Decisions' : 'Tasks'}/${x.title}`, extension: 'md', tags: x.tag === 'none' ? [] : [x.tag ?? 'task'], createdAt: '2026-10-10T08:00:00.000Z', updatedAt: '2026-10-14T08:00:00.000Z', lastUpdatedBy: 'u', lastUpdatedVia: 'mcp', content: x.content ?? x.title, ...(x.vault ? { inVault: x.vault } : {}), metadata: x.tag === 'none' ? (x.meta ?? {}) : { node: x.node, state: 'open', owner: 'aaron', ...(x.meta ?? {}) } });
   }, n);
   const sheetOf = (page: Page) => page.getByRole('dialog').filter({ has: page.locator('.task-kind') });
   const openWork = async (page: Page) => { await openCompanion(page); await page.getByRole('button', { name: /^All of .*'s work/ }).click(); await expect(page.locator('.sr-work')).toBeVisible(); };
@@ -2687,10 +2693,7 @@ test.describe('r18', () => {
     await expect(hours.locator('.cp-go')).toHaveCount(0); // r20: no "›" on a decision row; the whole row opens its sheet
     // r19: the texting statement asks nothing (no question, no options): Uni's to tidy, out of Needs you, never "Your call" or buttons
     await expect(wv).not.toContainText('exting is not recommended');
-    await page.locator('.sr-work .wv-tidy-line').click();
-    const texting = page.locator('.sr-work .wv-tidy-list li').filter({ hasText: 'exting is not recommended' });
-    await expect(texting).toHaveCount(1);
-    await expect(texting.locator('.cp-opt, .cp-call-lead, button')).toHaveCount(0);
+    await expect(page.locator('.sr-work .wv-tidy-line, .sr-work .wv-tidy')).toHaveCount(0);
     // Yes/No only where they are the stored options, written back as stored
     await expect(wv.locator('.cp-opt')).toHaveCount(0); // r20 (Codex 7): answers are in the sheet only
     await expect((await sheetAnswers(page, wv.locator('.cp-item').filter({ hasText: 'Ship the ATLAS map' }))).getByRole('button')).toHaveText(['Yes', 'No']);
@@ -2795,14 +2798,16 @@ test.describe('r18', () => {
     await expect(sheetOf(page)).toBeVisible();
   });
 
-  test('the summary carries its date: "Where this stands · 2 days ago" on the companion and the work view, from the same stamp; whole words when cut', async ({ page }) => {
+  test('r18, r27: the summary carries its date: "As of Oct 13: …" in the companion and the work view, from the same stamp; the heading adds no second date', async ({ page }) => {
     await boot(page);
     await openRoom(page, 'ATLAS');
     await openCompanion(page);
-    await expect(companion(page).getByText('Where this stands · 2 days ago').first()).toBeVisible();
+    await expect(companion(page).getByText('Where this stands', { exact: true }).first()).toBeVisible();
+    if (wide(page)) await expect(companion(page).locator('.cp-stands').first()).toHaveText(/^As of [A-Z][a-z]{2} \d+: The SOW is drafted and waits on Casey\./);
     await page.getByRole('button', { name: /^All of .*'s work/ }).first().click();
     const top = page.locator('.sr-work .wv-top');
-    await expect(top.locator('.wv-stands-h')).toHaveText('Where this stands · 2 days ago');
+    await expect(top.locator('.wv-stands-h')).toHaveText('Where this stands');
+    await expect(top.locator('.wv-brief')).toHaveText(/^As of [A-Z][a-z]{2} \d+: The SOW is drafted and waits on Casey\./);
     await expect(top).toContainText('The SOW is drafted and waits on Casey.');
     await expect(top).not.toContainText(/Brief updated|updated \d+h ago/);
   });
@@ -2827,7 +2832,7 @@ test.describe('r18', () => {
 test.describe('r19', () => {
   const refresh = async (page: Page, at: string) => { await page.clock.setFixedTime(Date.parse(at)); await page.evaluate(() => window.dispatchEvent(new Event('focus'))); };
   const add = (page: Page, n: { id: string; title: string; node: string; tag?: string; meta?: Record<string, unknown>; content?: string; path?: string }) => page.evaluate((x) => {
-    (window as any).__tasks.push({ id: x.id, path: x.path ?? `${x.tag === 'decision' ? 'Decisions' : 'Tasks'}/${x.title}`, extension: 'md', tags: x.tag === 'none' ? [] : [x.tag ?? 'task'], createdAt: '2026-10-10T08:00:00.000Z', updatedAt: new Date(Date.now() + 3000).toISOString(), lastUpdatedBy: 'u', lastUpdatedVia: 'mcp', content: x.content ?? x.title, metadata: x.tag === 'none' ? (x.meta ?? {}) : { node: x.node, state: 'open', owner: 'aaron', ...(x.meta ?? {}) } });
+    (window as any).__tasks.push({ id: x.id, path: x.path ?? `${x.tag === 'decision' ? 'Decisions' : 'Tasks'}/${x.title}`, extension: 'md', tags: x.tag === 'none' ? [] : [x.tag ?? 'task'], createdAt: '2026-10-10T08:00:00.000Z', updatedAt: '2026-10-14T08:00:00.000Z', lastUpdatedBy: 'u', lastUpdatedVia: 'mcp', content: x.content ?? x.title, metadata: x.tag === 'none' ? (x.meta ?? {}) : { node: x.node, state: 'open', owner: 'aaron', ...(x.meta ?? {}) } });
   }, n);
   /** A supporting note changed as Uni would (its own metadata and revision), the task that links it untouched. */
   const setNote = (page: Page, id: string, meta: Record<string, unknown>) => page.evaluate(([i, m]) => { const n = (window as any).__tasks.find((x: any) => x.id === i); Object.assign(n.metadata, m); n.updatedAt = new Date(Date.now() + 8000).toISOString(); }, [id, meta] as const);
@@ -2945,12 +2950,9 @@ test.describe('r19', () => {
     const needs = page.locator('.sr-work section[aria-label="Needs you"]');
     await expect(needs).not.toContainText('Fractal flow test');
     await expect(needs).not.toContainText('approve a test week');
-    // r21 (Codex P1-2): only what is true: nothing starts repair work, so the line says these need rewording by their rooms
-    await expect(page.locator('.sr-work section[aria-label="Records to reword"] .wv-tidy-line')).toHaveText('3 records need rewording by their rooms');
-    // opened, titles as words: no "Decision (…):" label, no cut tail (found in the real app: "…feature 4, the")
-    await page.locator('.sr-work .wv-tidy-line').click();
-    const titles = await page.locator('.sr-work .wv-tidy-list li').allInnerTexts();
-    expect(titles.sort()).toEqual(['Fractal flow test: real work in area rooms, check updates', 'Mail: approve a test week, not an immediate cutover', 'Rooms write state: stands field, runs/drafts/decisions'].sort());
+    // r27: records that need rewording are not shown to the user (the rooms' business: console only)
+    await expect(page.locator('.sr-work section[aria-label="Records to reword"]')).toHaveCount(0);
+    await expect(page.locator('.sr-work')).not.toContainText(/rewording|Fractal flow test|approve a test week/);
   });
 
   test('a decision\'s stored options wrap inside its sheet and never run past its edge (r20, Codex 7: the companion\'s row has none)', async ({ page }) => {
@@ -3017,6 +3019,7 @@ test.describe('r19', () => {
     await openWork(page);
     await page.locator('.sr-work .cp-item').filter({ hasText: 'Reply to Sebastian' }).locator('.cp-lead').click();
     const sheet = sheetOf(page);
+    await answersOpen(sheet);
     // measured once it has slid in (configs without reduced motion animate it)
     await sheet.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
     for (const name of ['Ask Uni to draft it', 'I did this', 'Close']) {
@@ -3130,7 +3133,7 @@ test.describe('r19', () => {
 test.describe('r20', () => {
   const refresh = async (page: Page, at: string) => { await page.clock.setFixedTime(Date.parse(at)); await page.evaluate(() => window.dispatchEvent(new Event('focus'))); };
   const add = (page: Page, n: { id: string; title: string; node: string; tag?: string; meta?: Record<string, unknown>; content?: string; path?: string }) => page.evaluate((x) => {
-    (window as any).__tasks.push({ id: x.id, path: x.path ?? `${x.tag === 'decision' ? 'Decisions' : 'Tasks'}/${x.title}`, extension: 'md', tags: x.tag === 'none' ? [] : [x.tag ?? 'task'], createdAt: '2026-10-10T08:00:00.000Z', updatedAt: new Date(Date.now() + 3000).toISOString(), lastUpdatedBy: 'u', lastUpdatedVia: 'mcp', content: x.content ?? x.title, metadata: x.tag === 'none' ? (x.meta ?? {}) : { node: x.node, state: 'open', owner: 'aaron', ...(x.meta ?? {}) } });
+    (window as any).__tasks.push({ id: x.id, path: x.path ?? `${x.tag === 'decision' ? 'Decisions' : 'Tasks'}/${x.title}`, extension: 'md', tags: x.tag === 'none' ? [] : [x.tag ?? 'task'], createdAt: '2026-10-10T08:00:00.000Z', updatedAt: '2026-10-14T08:00:00.000Z', lastUpdatedBy: 'u', lastUpdatedVia: 'mcp', content: x.content ?? x.title, metadata: x.tag === 'none' ? (x.meta ?? {}) : { node: x.node, state: 'open', owner: 'aaron', ...(x.meta ?? {}) } });
   }, n);
   const sheetOf = (page: Page) => page.getByRole('dialog').filter({ has: page.locator('.task-kind') });
   const openWork = async (page: Page) => { await openCompanion(page); await page.getByRole('button', { name: /^All of .*'s work/ }).click(); await expect(page.locator('.sr-work')).toBeVisible(); };
@@ -3257,8 +3260,8 @@ test.describe('r20', () => {
     await expect(needs.locator('.cp-item[data-mode="checking"] .cp-under')).toHaveText(['Checking…', 'Checking…', 'Checking…']);
     await expect(needs.locator('.wv-n')).toHaveText('0');
     if (treeBeside(page)) expect(await page.locator('.th-roomnav .th-go[aria-label^="Atlas Institute"]').getAttribute('aria-label')).not.toMatch(/need/);
-    // classified: statements, so Uni's to tidy; still nothing owed
-    await expect(page.locator('.sr-work .wv-tidy-line')).toHaveText('3 records need rewording by their rooms', { timeout: 15_000 });
+    // classified: statements, so the rooms' to reword (not shown); still nothing owed
+    await expect(needs.locator('.cp-item[data-mode="checking"]')).toHaveCount(0, { timeout: 15_000 });
     await expect(needs.locator('.cp-item')).toHaveCount(0);
     await expect(needs.locator('.wv-n')).toHaveText('0');
     expect(await page.evaluate(() => (window as any).__sawDecide)).toBe(false);
@@ -3291,15 +3294,9 @@ test.describe('r20', () => {
     await openRoom(page, 'ATLAS');
     await openWork(page);
     const n = await page.locator('.sr-work section[aria-label="Needs you"] .wv-n').innerText();
-    const line = page.locator('.sr-work .wv-tidy-line');
-    await expect(line).toHaveText('3 records need rewording by their rooms');
-    await expect(page.locator('.sr-work .wv-tidy .cp-item, .sr-work .wv-tidy .cp-need')).toHaveCount(0);
-    await line.click();
-    const list = page.locator('.sr-work .wv-tidy-list li');
-    // titles as words: never a "Decision (…):" label or a cut tail ("…decisions in", "…feature 4, the")
-    await expect(list).toHaveText(['Rooms write state: stands field, runs/drafts/decisions', 'Mail: approve a test week, not an immediate cutover', 'Uni adds Benya\'s missing feature 4']);
-    await expect(page.locator('.sr-work .wv-tidy').locator('button:not(.wv-tidy-line), a, .cp-go')).toHaveCount(0);
-    await expect(page.locator('.sr-work .wv-tidy')).not.toContainText('›');
+    // r27: not in the view at all; the count of what needs the user is unchanged by them
+    await expect(page.locator('.sr-work .wv-tidy-line, .sr-work .wv-tidy')).toHaveCount(0);
+    await expect(page.locator('.sr-work')).not.toContainText(/rewording|approve a test week/);
     await expect(page.locator('.sr-work section[aria-label="Needs you"] .wv-n')).toHaveText(n);
     await expect(page.getByText('Ask Uni to fix this record')).toHaveCount(0);
     await expect(page.locator('body')).not.toContainText('tasks.py');
@@ -3363,6 +3360,7 @@ test.describe('r20', () => {
       await openWork(page);
       await page.locator('.sr-work .cp-item').filter({ hasText: 'Reply to Sebastian' }).locator('.cp-lead').click();
       const sheet = sheetOf(page);
+      await answersOpen(sheet);
       await sheet.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
       // the footer is the sheet's last part: nothing after it
       expect(await sheet.evaluate((el) => el.lastElementChild?.classList.contains('task-foot'))).toBe(true);
@@ -3381,7 +3379,7 @@ test.describe('r20', () => {
 test.describe('r21', () => {
   const refresh = async (page: Page, at: string) => { await page.clock.setFixedTime(Date.parse(at)); await page.evaluate(() => window.dispatchEvent(new Event('focus'))); };
   const add = (page: Page, n: { id: string; title: string; node: string; tag?: string; meta?: Record<string, unknown>; content?: string; path?: string }) => page.evaluate((x) => {
-    (window as any).__tasks.push({ id: x.id, path: x.path ?? `${x.tag === 'decision' ? 'Decisions' : 'Tasks'}/${x.title}`, extension: 'md', tags: x.tag === 'none' ? [] : [x.tag ?? 'task'], createdAt: '2026-10-10T08:00:00.000Z', updatedAt: new Date(Date.now() + 3000).toISOString(), lastUpdatedBy: 'u', lastUpdatedVia: 'mcp', content: x.content ?? x.title, metadata: x.tag === 'none' ? (x.meta ?? {}) : { node: x.node, state: 'open', owner: 'aaron', ...(x.meta ?? {}) } });
+    (window as any).__tasks.push({ id: x.id, path: x.path ?? `${x.tag === 'decision' ? 'Decisions' : 'Tasks'}/${x.title}`, extension: 'md', tags: x.tag === 'none' ? [] : [x.tag ?? 'task'], createdAt: '2026-10-10T08:00:00.000Z', updatedAt: '2026-10-14T08:00:00.000Z', lastUpdatedBy: 'u', lastUpdatedVia: 'mcp', content: x.content ?? x.title, metadata: x.tag === 'none' ? (x.meta ?? {}) : { node: x.node, state: 'open', owner: 'aaron', ...(x.meta ?? {}) } });
   }, n);
   const sheetOf = (page: Page) => page.getByRole('dialog').filter({ has: page.locator('.task-kind') });
   const openWork = async (page: Page) => { await openCompanion(page); await page.getByRole('button', { name: /^All of .*'s work/ }).click(); await expect(page.locator('.sr-work')).toBeVisible(); };
@@ -3507,20 +3505,20 @@ test.describe('r21', () => {
     await expect(row).toHaveAttribute('data-mode', 'lead', { timeout: 10_000 });
   });
 
-  test('P1-2 status claims only what\'s true: "N records need rewording by their rooms", quiet, no "›", no action; it opens a read-only list of titles', async ({ page }) => {
+  test('r27 (Codex P2-5): records that need rewording are the rooms\' business: logged to the console, never shown in the work view', async ({ page }) => {
+    const logged: string[] = [];
+    page.on('console', (m) => { if (/need rewording by their rooms/.test(m.text())) logged.push(m.text()); });
     await boot(page);
     await add(page, { id: 'mail', title: 'Mail: approve a test week, not an immediate cutover', node: 'Projects/ATLAS', tag: 'decision' });
-    await add(page, { id: 'benya', title: 'Decision (default yes): Uni adds Benya\'s missing feature 4, the…', node: 'Projects/ATLAS', tag: 'decision', content: 'Decision (default yes): Uni adds Benya\'s missing feature 4, the calendar view, this week.' });
+    await add(page, { id: 'benya', title: 'Decision (default yes): Uni adds Benya\'s missing feature 4, the…', node: 'Projects/ATLAS', tag: 'decision', content: 'Decision (default yes): Uni adds Benya\'s missing feature 4, the calendar view' });
     await refresh(page, '2026-10-14T09:00:00.000Z');
     await openRoom(page, 'ATLAS');
     await openWork(page);
-    const sec = page.locator('.sr-work section[aria-label="Records to reword"]');
-    await expect(sec.locator('.wv-tidy-line')).toHaveText('2 records need rewording by their rooms');
-    await expect(page.locator('.sr-work')).not.toContainText(/tidying|will come back/i);
-    await sec.locator('.wv-tidy-line').click();
-    await expect(sec.locator('.wv-tidy-list li')).toHaveText(['Mail: approve a test week, not an immediate cutover', 'Uni adds Benya\'s missing feature 4']);
-    await expect(sec.locator('button:not(.wv-tidy-line), a')).toHaveCount(0);
-    await expect(sec).not.toContainText('›');
+    await expect(page.locator('.sr-work section[aria-label="Needs you"]')).toBeVisible();
+    await expect(page.locator('.sr-work section[aria-label="Records to reword"]')).toHaveCount(0);
+    await expect(page.locator('.sr-work')).not.toContainText(/rewording|approve a test week/);
+    await expect.poll(() => logged.length).toBeGreaterThan(0);
+    expect(logged.join('\n')).toMatch(/Mail: approve a test week, not an immediate cutover/);
   });
 
   test('no "›" on any row or link row: rows, "Sanctum: 1 for you", "Show N more"', async ({ page }) => {
@@ -3533,7 +3531,7 @@ test.describe('r21', () => {
     await body.locator('.cp-more').click();
     const wv = page.locator('.sr-work');
     await expect(wv.locator('.cp-private')).toHaveText('In Sanctum: 1 thing for you · open Sanctum');
-    for (const el of await wv.locator('.cp-item, .cp-more, .wv-tidy-line').all()) expect(await el.innerText()).not.toContain('›');
+    for (const el of await wv.locator('.cp-item, .cp-more').all()) expect(await el.innerText()).not.toContain('›');
   });
 
   test('one target per visible request (Codex 10): every row is one keyboard-focusable button that opens its sheet, with nothing clickable inside it', async ({ page }) => {
@@ -3694,7 +3692,7 @@ test.describe('r21', () => {
 test.describe('r22', () => {
   const refresh = async (page: Page, at: string) => { await page.clock.setFixedTime(Date.parse(at)); await page.evaluate(() => window.dispatchEvent(new Event('focus'))); };
   const add = (page: Page, n: { id: string; title: string; node: string; tag?: string; meta?: Record<string, unknown>; content?: string; path?: string; updatedAt?: string }) => page.evaluate((x) => {
-    (window as any).__tasks.push({ id: x.id, path: x.path ?? `${x.tag === 'decision' ? 'Decisions' : 'Tasks'}/${x.title}`, extension: 'md', tags: x.tag === 'none' ? [] : [x.tag ?? 'task'], createdAt: '2026-10-10T08:00:00.000Z', updatedAt: x.updatedAt ?? new Date(Date.now() + 3000).toISOString(), lastUpdatedBy: 'u', lastUpdatedVia: 'mcp', content: x.content ?? x.title, metadata: x.tag === 'none' ? (x.meta ?? {}) : { node: x.node, state: 'open', owner: 'aaron', ...(x.meta ?? {}) } });
+    (window as any).__tasks.push({ id: x.id, path: x.path ?? `${x.tag === 'decision' ? 'Decisions' : 'Tasks'}/${x.title}`, extension: 'md', tags: x.tag === 'none' ? [] : [x.tag ?? 'task'], createdAt: '2026-10-10T08:00:00.000Z', updatedAt: x.updatedAt ?? '2026-10-14T08:00:00.000Z', lastUpdatedBy: 'u', lastUpdatedVia: 'mcp', content: x.content ?? x.title, metadata: x.tag === 'none' ? (x.meta ?? {}) : { node: x.node, state: 'open', owner: 'aaron', ...(x.meta ?? {}) } });
   }, n);
   const sheetOf = (page: Page) => page.getByRole('dialog').filter({ has: page.locator('.task-kind') });
   const openWork = async (page: Page) => { await openCompanion(page); await page.getByRole('button', { name: /^All of .*'s work/ }).click(); await expect(page.locator('.sr-work')).toBeVisible(); };
@@ -3753,7 +3751,7 @@ test.describe('r22', () => {
     await boot(page);
     // Techne's room has messages up to Oct 9 (the fixture's pinned time); these requests were set on Oct 6
     await seed(page, 'Areas/Techne', '2026-10-06T18:00:00.000Z');
-    await page.evaluate(() => (window as any).__arrive('ch-techne', 'Uni', 'Prod deploy of #38 is staged and waiting.', 3600));
+    await page.evaluate(() => (window as any).__arrive('ch-techne', 'Uni', 'Prod deploy of #38 is staged and waiting.', -426600));
     await add(page, { id: 'fresh', title: 'T-200 A fresh placeholder request', node: 'Areas/Techne', meta: { priority: 'now', next: 'Send the placeholder note to Casey', asked: new Date(Date.now() + 5000).toISOString() } });
     await refresh(page, '2026-10-14T09:00:00.000Z');
     await openRoom(page, 'Techne');
@@ -3766,7 +3764,8 @@ test.describe('r22', () => {
     await expect(sheet.locator('h2')).toHaveText('Say go on prod deploy of #38 + #58');
     await expect(sheet.locator('.task-asked')).toContainText('Asked Oct 6');
     // Techne's chat has messages from Oct 9: more than a day newer than Oct 6
-    await expect(sheet.locator('.task-movedon')).toHaveText(/^#techne has talked about #38 since this was asked$/i);
+    await expect(sheet.locator('.task-unconfirmed')).toHaveText('Asked Oct 6 · not confirmed since');
+    await expect(sheet.locator('.task-movedon')).toHaveCount(0);
     // the request is still there; r26: its "Say it" waits behind "Answer anyway" while the chat check is unresolved
     await expect(sheet.getByRole('button', { name: /^Say it in #/ })).toHaveCount(0);
     await sheet.getByRole('button', { name: 'Answer anyway' }).click();
@@ -3842,7 +3841,7 @@ test.describe('r22', () => {
 test.describe('r23', () => {
   const refresh = async (page: Page, at: string) => { await page.clock.setFixedTime(Date.parse(at)); await page.evaluate(() => window.dispatchEvent(new Event('focus'))); };
   const add = (page: Page, n: { id: string; title: string; node: string; meta?: Record<string, unknown>; createdAt?: string; updatedAt?: string }) => page.evaluate((x) => {
-    (window as any).__tasks.push({ id: x.id, path: `Tasks/${x.title}`, extension: 'md', tags: ['task'], createdAt: x.createdAt ?? '2026-10-06T16:00:00.000Z', updatedAt: x.updatedAt ?? new Date(Date.now() + 3000).toISOString(), lastUpdatedBy: 'u', lastUpdatedVia: 'mcp', content: x.title, metadata: { node: x.node, state: 'open', owner: 'aaron', priority: 'now', ...(x.meta ?? {}) } });
+    (window as any).__tasks.push({ id: x.id, path: `Tasks/${x.title}`, extension: 'md', tags: ['task'], createdAt: x.createdAt ?? '2026-10-06T16:00:00.000Z', updatedAt: x.updatedAt ?? '2026-10-14T08:00:00.000Z', lastUpdatedBy: 'u', lastUpdatedVia: 'mcp', content: x.title, metadata: { node: x.node, state: 'open', owner: 'aaron', priority: 'now', ...(x.meta ?? {}) } });
   }, n);
   const sheetOf = (page: Page) => page.getByRole('dialog').filter({ has: page.locator('.task-kind') });
   const openWork = async (page: Page) => { await openCompanion(page); await page.getByRole('button', { name: /^All of .*'s work/ }).click(); await expect(page.locator('.sr-work')).toBeVisible(); };
@@ -3874,16 +3873,17 @@ test.describe('r23', () => {
   test('an approval can\'t outlive its moment (Codex P1): with the chat moved on, "Check in #room first" leads and "Say it" follows; a fresh request keeps "Say it" first', async ({ page }) => {
     await boot(page);
     // Techne's chat has messages up to Oct 9; this request was asked on Oct 6
-    await page.evaluate(() => (window as any).__arrive('ch-techne', 'Uni', 'The placeholder deploy is ready whenever you are.', 3600));
+    await page.evaluate(() => (window as any).__arrive('ch-techne', 'Uni', 'The placeholder deploy is ready whenever you are.', -426600));
     await add(page, { id: 'go', title: 'T-303 Placeholder deploy', node: 'Areas/Techne', meta: { next: 'Say go on the placeholder deploy', asked: '2026-10-06T18:00:00.000Z' } });
     await add(page, { id: 'go3', title: 'T-309 Placeholder budget', node: 'Areas/Techne', meta: { next: 'Say go on the quarterly budget', asked: '2026-10-06T18:00:00.000Z' } });
-    await add(page, { id: 'go2', title: 'T-304 Placeholder fresh deploy', node: 'Areas/Techne', meta: { next: 'Say go on the fresh placeholder deploy', asked: new Date(Date.now() + 5000).toISOString() } });
+    await add(page, { id: 'go2', title: 'T-304 Placeholder fresh deploy', node: 'Areas/Techne', updatedAt: '2026-10-14T08:45:00.000Z', meta: { next: 'Say go on the fresh placeholder deploy', asked: new Date(Date.now() + 5000).toISOString() } });
     await refresh(page, '2026-10-14T09:00:00.000Z');
     await openRoom(page, 'Techne');
     await openWork(page);
     await rowOf(page, 'Say go on the placeholder deploy').locator('.cp-need').click();
     const sheet = sheetOf(page);
-    await expect(sheet.locator('.task-movedon')).toHaveText(/^#techne has talked about (?:placeholder deploy|deploy placeholder) since this was asked$/i);
+    await expect(sheet.locator('.task-unconfirmed')).toHaveText('Asked Oct 6 · not confirmed since');
+    await expect(sheet.locator('.task-movedon')).toHaveCount(0);
     const primary = sheet.locator('.task-do.primary');
     await expect(primary).toHaveCount(1);
     await expect(primary).toHaveText(/^Check in #.+ first$/);
@@ -3913,14 +3913,15 @@ test.describe('r23', () => {
 
   test('r24: a "look at" sheet whose room has talked about it leads with "Check in #room first" like every other sheet with the cue; its link is secondary', async ({ page }) => {
     await boot(page);
-    await page.evaluate(() => (window as any).__arrive('ch-techne', 'Uni', 'The signup staging copy is posted, please look.', 3600));
+    await page.evaluate(() => (window as any).__arrive('ch-techne', 'Uni', 'The signup staging copy is posted, please look.', -426600));
     await add(page, { id: 'st1', title: 'T-330 Placeholder staging look', node: 'Areas/Techne', meta: { next: 'Look at placeholder-signup-staging.example.invalid on phone, then say go on the signup staging', asked: '2026-10-06T18:00:00.000Z' } });
     await refresh(page, '2026-10-14T09:00:00.000Z');
     await openRoom(page, 'Techne');
     await openWork(page);
     await page.locator('.sr-work .cp-item').filter({ hasText: 'placeholder-signup-staging' }).locator('.cp-need').click();
     const sheet = sheetOf(page);
-    await expect(sheet.locator('.task-movedon')).toHaveText(/^#techne has talked about .+ since this was asked$/i);
+    await expect(sheet.locator('.task-unconfirmed')).toHaveText('Asked Oct 6 · not confirmed since');
+    await expect(sheet.locator('.task-movedon')).toHaveCount(0);
     await expect(sheet.locator('.task-do.primary')).toHaveCount(1);
     await expect(sheet.locator('.task-do.primary')).toHaveText(/^Check in #techne first$/i);
     await expect(sheet.getByRole('button', { name: 'I did this' })).toHaveCount(0); // r26
@@ -4120,11 +4121,11 @@ test.describe('r23', () => {
     expect(await sheet.innerText()).not.toMatch(/\(3…|\(3\.\.\./);
   });
 
-  test('r25 (Codex P1 2): Check in has three honest states: related conversation found (cue + Check in), couldn\'t check (quiet "Couldn\'t read #room · Retry", no cue), nothing related (ordinary actions); Check in keeps the question over the composer', async ({ page }) => {
+  test('r25 (Codex P1 2), r27: Check in: related chat after the record\'s write (unconfirmed, Check in leads), couldn\'t check (quiet "Couldn\'t read #room · Retry"), nothing related (ordinary actions); Check in keeps the question over the composer', async ({ page }) => {
     await boot(page);
-    await page.evaluate(() => (window as any).__arrive('ch-techne', 'Uni', 'The placeholder deploy is ready whenever you are.', 3600));
-    await add(page, { id: 'ci1', title: 'T-303 Placeholder deploy', node: 'Areas/Techne', meta: { next: 'Say go on the placeholder deploy', asked: '2026-10-06T18:00:00.000Z' } });
-    await add(page, { id: 'ci2', title: 'T-309 Placeholder budget', node: 'Areas/Techne', meta: { next: 'Say go on the quarterly budget', asked: '2026-10-06T18:00:00.000Z' } });
+    await page.evaluate(() => (window as any).__arrive('ch-techne', 'Uni', 'The placeholder deploy is ready whenever you are.', -426600));
+    await add(page, { id: 'ci1', title: 'T-303 Placeholder deploy', node: 'Areas/Techne', updatedAt: '2026-10-13T12:00:00.000Z', meta: { next: 'Say go on the placeholder deploy', asked: '2026-10-06T18:00:00.000Z' } });
+    await add(page, { id: 'ci2', title: 'T-309 Placeholder budget', node: 'Areas/Techne', updatedAt: '2026-10-13T12:00:00.000Z', meta: { next: 'Say go on the quarterly budget', asked: '2026-10-06T18:00:00.000Z' } });
     await refresh(page, '2026-10-14T09:00:00.000Z');
     await openRoom(page, 'Techne');
     await openWork(page);
@@ -4146,7 +4147,8 @@ test.describe('r23', () => {
     await page.evaluate(() => { (window as any).__lookupFails = false; });
     await sheet.getByRole('button', { name: 'Retry' }).click();
     await expect(sheet.locator('.task-lookfail')).toHaveCount(0);
-    await expect(sheet.locator('.task-movedon')).toHaveText(/^#techne has talked about .+ since this was asked$/i);
+    await expect(sheet.locator('.task-unconfirmed')).toHaveText('Asked Oct 6 · not confirmed since');
+    await expect(sheet.locator('.task-movedon')).toHaveCount(0);
     await expect(sheet.locator('.task-do.primary')).toHaveText(/^Check in #techne first$/i);
     await expect(sheet.getByRole('button', { name: 'I did this' })).toHaveCount(0);
     // Check in opens the room at the message and keeps the question in view above the composer
@@ -4171,33 +4173,31 @@ test.describe('r23', () => {
     await expect(sheet.locator('.task-do.primary')).toHaveText(/^Say it in #/);
   });
 
-  test('r25 (Codex P1 1): a summary claim that no open request matches is not shown as current: "This summary needs updating · from Oct 13", what it said collapsed', async ({ page }) => {
+  test('r25 (Codex P1 1), r27: a summary claim that no open request matches makes the whole summary older than the latest work: "This summary is older than the latest work · from Oct 13", what it said collapsed', async ({ page }) => {
     await boot(page);
-    await page.evaluate(() => (window as any).__setStands('p-lvb', "Prod waits on Aaron's go for #38 and #58."));
+    await page.evaluate(() => (window as any).__setStands('p-lvb', "Prod waits on Aaron's go for #38 and #58.", '2026-10-12T12:00:00.000Z'));
     await refresh(page, '2026-10-14T09:00:00.000Z');
     await openRoom(page, 'Learn Vibe Build');
     await openCompanion(page);
-    // r25: the claim is not shown as current: one short line, and what it said is collapsed under "What it said"
-    await expect(page.locator('.cp-stale')).toHaveText(/^This summary needs updating · from Oct \d+$/);
+    await expect(page.locator('.cp-stale')).toHaveText(/^This summary is older than the latest work · from Oct \d+$/);
     await expect(page.locator('.cp-stands:not(.cp-stale)')).toHaveCount(0);
     const said = page.locator('.cp-said');
     await expect(said.locator('summary')).toHaveText('What it said');
     await expect(said).not.toHaveAttribute('open', '');
     await said.locator('summary').click();
-    await expect(said.locator('p')).toContainText("waits on Aaron's go for #38 and #58");
-    expect(await page.locator('.cp-body').innerText()).not.toContain('No open request mentions this now');
-    // an open request that doesn't name what the summary says waits: still not current, and never "No open request mentions this now" beside open rows
-    await add(page, { id: 'other', title: 'T-321 Placeholder other thing', node: 'Projects/Learn Vibe Build', meta: { priority: 'now', next: 'Edit the placeholder note for Casey', asked: '2026-10-13T18:00:00.000Z' } });
+    await expect(said.locator('p')).toHaveText(/^As of Oct \d+: Prod waits on Aaron's go for #38 and #58\.$/);
+    // an open request that doesn't name what the summary says waits: still older than the work
+    await add(page, { id: 'other', title: 'T-321 Placeholder other thing', node: 'Projects/Learn Vibe Build', updatedAt: '2026-10-10T08:00:00.000Z', meta: { priority: 'now', next: 'Edit the placeholder note for Casey', asked: '2026-10-13T18:00:00.000Z' } });
     await refresh(page, '2026-10-14T09:15:00.000Z');
     await expect(page.locator('.cp-body').getByText('Edit the placeholder note for Casey')).toBeVisible();
-    await expect(page.locator('.cp-stale')).toHaveText(/^This summary needs updating/);
-    expect(await page.locator('.cp-body').innerText()).not.toContain('No open request mentions this now');
-    // an open request that names #38 and #58 (r26: every id the claim names must be open): the claim is owed, so the summary is shown as it is
-    await add(page, { id: 'g38', title: 'T-320 Placeholder prod go', node: 'Projects/Learn Vibe Build', meta: { priority: 'now', next: 'Say go on the placeholder prod deploy of #38 + #58', asked: '2026-10-13T18:00:00.000Z' } });
+    await expect(page.locator('.cp-stale')).toHaveText(/^This summary is older than the latest work/);
+    // an open request that names #38 and #58 (every id the claim names must be open), and no task newer than the summary: shown as written, dated
+    await add(page, { id: 'g38', title: 'T-320 Placeholder prod go', node: 'Projects/Learn Vibe Build', updatedAt: '2026-10-10T08:00:00.000Z', meta: { priority: 'now', next: 'Say go on the placeholder prod deploy of #38 + #58', asked: '2026-10-13T18:00:00.000Z' } });
     await refresh(page, '2026-10-14T09:30:00.000Z');
     await expect(page.locator('.cp-body').getByText('Say go on the placeholder prod deploy')).toBeVisible();
     await expect(page.locator('.cp-stale')).toHaveCount(0);
     await expect(page.locator('.cp-stands')).toContainText("waits on Aaron's go for #38 and #58");
+    await expect(page.locator('.cp-stands').first()).toHaveText(/^As of Oct \d+: Prod waits/);
   });
 
   test('one freshness line at a time: a saved copy being read again says "N as of 1:44 PM · refreshing…" once, not in the tree too', async ({ page }) => {
@@ -4258,11 +4258,18 @@ test.describe('r23', () => {
 test.describe('r26', () => {
   const refresh = async (page: Page, at: string) => { await page.clock.setFixedTime(Date.parse(at)); await page.evaluate(() => window.dispatchEvent(new Event('focus'))); };
   const add = (page: Page, n: { id: string; title: string; node: string; tag?: string; meta?: Record<string, unknown>; updatedAt?: string }) => page.evaluate((x) => {
-    (window as any).__tasks.push({ id: x.id, path: `Tasks/${x.title}`, extension: 'md', tags: [x.tag ?? 'task'], createdAt: '2026-10-06T16:00:00.000Z', updatedAt: x.updatedAt ?? new Date(Date.now() + 3000).toISOString(), lastUpdatedBy: 'u', lastUpdatedVia: 'mcp', content: x.title, metadata: { node: x.node, state: 'open', owner: 'aaron', priority: 'now', ...(x.meta ?? {}) } });
+    (window as any).__tasks.push({ id: x.id, path: `Tasks/${x.title}`, extension: 'md', tags: [x.tag ?? 'task'], createdAt: '2026-10-06T16:00:00.000Z', updatedAt: x.updatedAt ?? '2026-10-14T08:00:00.000Z', lastUpdatedBy: 'u', lastUpdatedVia: 'mcp', content: x.title, metadata: { node: x.node, state: 'open', owner: 'aaron', priority: 'now', ...(x.meta ?? {}) } });
   }, n);
   const sheetOf = (page: Page) => page.getByRole('dialog').filter({ has: page.locator('.task-kind') });
   const openWork = async (page: Page) => { await openCompanion(page); await page.getByRole('button', { name: /^All of .*'s work/ }).click(); await expect(page.locator('.sr-work')).toBeVisible(); };
   const rowOf = (page: Page, text: string) => page.locator('.sr-work .cp-item').filter({ hasText: text });
+  /** r27: the items a row shows plus "and N more" are the whole list; each is a whole clause (no cut mark, never the bare label "3 answers") */
+  const itemTotal = async (row: ReturnType<Page['locator']>) => {
+    const lines = await row.locator('.cp-item-line').allInnerTexts();
+    for (const l of lines) { expect(l).not.toMatch(/…|\.\.\.|[,;:]$/); expect(l.trim()).not.toBe('3 answers'); }
+    const more = await row.locator('.cp-item-more').count() ? await row.locator('.cp-item-more').innerText() : '';
+    return lines.length + (Number(/^and (\d+) more$/.exec(more.trim())?.[1] ?? /^(\d+) /.exec(more.trim())?.[1] ?? 0));
+  };
   const NEXT113 = "On your phone, look at https://grove.example.org (live now), then forward Harper the asks listed in this task's detail";
   const DETAIL113 = "Live on prod since 10-14 15:24 (PR #61); staging matches. Harper still owes: (1) OK or cut 6 groups of short functional lines (notifications, email links, install, privacy, harvest/board, profile labels); (2) 3 answers: Spanish versions of 'What is COhere?' and 'What's Coming Up', whether 'Explore events on the community events' should end in 'calendar'; (3) one morning-practice line per day for Oct 15–25 (her doc has 2); (4) yes/no on the Today heading showing just 'Honoring Water (9 AM at Martin Park)' with 'Home practice:' in bold. Aaron: sign in once as a member and open Board, People and Me.";
 
@@ -4274,9 +4281,8 @@ test.describe('r26', () => {
     await openWork(page);
     const row = rowOf(page, 'grove.example.org');
     await expect(row.locator('.cp-lead')).toHaveText('On your phone, look at grove.example.org (live now), then forward Harper the asks');
-    await expect(row.locator('.cp-item-line')).toHaveCount(3);
-    await expect(row.locator('.cp-item-line').nth(0)).toHaveText('OK or cut 6 groups of short functional lines');
-    await expect(row.locator('.cp-item-more')).toHaveText('and 1 more');
+    expect(await itemTotal(row)).toBe(4);
+    await expect(row.locator('.cp-item-line').nth(0)).toContainText('OK or cut 6 groups of short functional lines');
     expect(await row.innerText()).not.toMatch(/listed in this task|…|\.\.\./);
     await row.locator('.cp-need').click();
     const sheet = sheetOf(page);
@@ -4289,9 +4295,10 @@ test.describe('r26', () => {
     await expect(items.locator('h3')).toHaveText('Harper still owes');
     await expect(items.locator('li')).toHaveCount(4);
     await expect(items.locator('li').nth(3)).toContainText("yes/no on the Today heading");
+    // r27: the steps come first ("Step 1 of 2"), the asks (step 2's content) after them
     const h = (await sheet.locator('h2').boundingBox())!, i = (await items.boundingBox())!, s = (await sheet.locator('.task-steps').boundingBox())!;
     expect(i.y).toBeGreaterThan(h.y);
-    expect(i.y).toBeLessThan(s.y);
+    expect(i.y).toBeGreaterThan(s.y);
     await expect(sheet.locator('.task-sub-title')).toContainText('Companion Today redesign + integrated PWA install flow');
     expect(await sheet.locator('.task-sub-title').innerText()).not.toMatch(/…|\.\.\./);
     // the tag always says where it is
@@ -4310,8 +4317,7 @@ test.describe('r26', () => {
     await openRoom(page, 'Techne');
     await openWork(page);
     const row = rowOf(page, 'fill the unknowns');
-    await expect(row.locator('.cp-item-line')).toHaveCount(3);
-    await expect(row.locator('.cp-item-more')).toHaveText('and 2 more');
+    expect(await itemTotal(row)).toBe(5);
     await row.locator('.cp-need').click();
     let sheet = sheetOf(page);
     await expect(sheet.locator('.task-items h3')).toHaveText('Key unknowns only you can fill');
@@ -4371,9 +4377,9 @@ test.describe('r26', () => {
 
   test('r26 P1 1: a check gates answers: pending, found and failed offer no answers as ready (a decision\'s answers and "I did this" wait behind "Answer anyway"); none shows the ordinary actions', async ({ page }) => {
     await boot(page);
-    await page.evaluate(() => (window as any).__arrive('ch-techne', 'Uni', 'The placeholder deploy is ready whenever you are.', 3600));
-    await add(page, { id: 'g1', title: 'T-303 Placeholder deploy', node: 'Areas/Techne', meta: { next: 'Say go on the placeholder deploy', asked: '2026-10-06T18:00:00.000Z' } });
-    await add(page, { id: 'g2', title: 'T-309 Placeholder budget', node: 'Areas/Techne', meta: { next: 'Say go on the quarterly budget', asked: '2026-10-06T18:00:00.000Z' } });
+    await page.evaluate(() => (window as any).__arrive('ch-techne', 'Uni', 'The placeholder deploy is ready whenever you are.', -426600));
+    await add(page, { id: 'g1', title: 'T-303 Placeholder deploy', node: 'Areas/Techne', updatedAt: '2026-10-13T12:00:00.000Z', meta: { next: 'Say go on the placeholder deploy', asked: '2026-10-06T18:00:00.000Z' } });
+    await add(page, { id: 'g2', title: 'T-309 Placeholder budget', node: 'Areas/Techne', updatedAt: '2026-10-13T12:00:00.000Z', meta: { next: 'Say go on the quarterly budget', asked: '2026-10-06T18:00:00.000Z' } });
     await refresh(page, '2026-10-14T09:00:00.000Z');
     await openRoom(page, 'Techne');
     await openWork(page);
@@ -4416,14 +4422,14 @@ test.describe('r26', () => {
 
   test('r26 P1 1: a decision\'s answers wait behind "Answer anyway" while its chat check is unresolved, and an answer records the revision it answered in the same write', async ({ page }) => {
     await boot(page);
-    await page.evaluate(() => (window as any).__arrive('ch-techne', 'Uni', 'The placeholder hosting choice is settled in the doc.', 3600));
-    await add(page, { id: 'r26d1', title: 'Decide the placeholder hosting choice', tag: 'decision', node: 'Areas/Techne', meta: { options: ['Host A', 'Host B'], next: 'Pick the placeholder hosting choice', asked: '2026-10-06T18:00:00.000Z', task: 'T-500' } });
+    await page.evaluate(() => (window as any).__arrive('ch-techne', 'Uni', 'The placeholder hosting choice is settled in the doc.', -426600));
+    await add(page, { id: 'r26d1', title: 'Decide the placeholder hosting choice', tag: 'decision', node: 'Areas/Techne', updatedAt: '2026-10-13T12:00:00.000Z', meta: { options: ['Host A', 'Host B'], next: 'Pick the placeholder hosting choice', asked: '2026-10-06T18:00:00.000Z', task: 'T-500' } });
     await refresh(page, '2026-10-14T09:00:00.000Z');
     await openRoom(page, 'Techne');
     await openWork(page);
     await rowOf(page, 'placeholder hosting choice').locator('.cp-need').click();
     const sheet = sheetOf(page);
-    await expect(sheet.locator('.task-movedon')).toBeVisible();
+    await expect(sheet.locator('.task-unconfirmed')).toBeVisible();
     await expect(sheet.locator('.task-do.primary')).toHaveText(/^Check in #techne first$/i);
     await expect(sheet.getByRole('button', { name: 'Host A' })).toHaveCount(0);
     await sheet.getByRole('button', { name: 'Answer anyway' }).click();
@@ -4461,21 +4467,6 @@ test.describe('r26', () => {
     expect(call.metadata).toEqual({ answered_rev: rev1 });
   });
 
-  test('r26 P1 2: a summary is reconciled claim by claim: the matched claim and the claims that wait on nothing stay current, the rest is dated history under "What it said"', async ({ page }) => {
-    await boot(page);
-    await page.evaluate(() => (window as any).__setStands('p-lvb', "Cohort two starts Oct 15; prod deploy of #38 waits on Aaron's go; #58 also waits on Aaron's approval; docs shipped on staging."));
-    await add(page, { id: 'g38', title: 'T-320 Placeholder prod go', node: 'Projects/Learn Vibe Build', meta: { priority: 'now', next: 'Say go on the placeholder prod deploy of #38', asked: '2026-10-13T18:00:00.000Z' } });
-    await refresh(page, '2026-10-14T09:00:00.000Z');
-    await openRoom(page, 'Learn Vibe Build');
-    await openCompanion(page);
-    await expect(page.locator('[data-part="current"] .cp-stands')).toHaveText("Cohort two starts Oct 15; prod deploy of #38 waits on Aaron's go; docs shipped on staging.");
-    await expect(page.locator('.cp-stale')).toHaveText(/^Part of this summary needs updating · from Oct \d+$/);
-    const said = page.locator('.cp-said');
-    await said.locator('summary').click();
-    await expect(said.locator('p')).toHaveCount(1);
-    await expect(said.locator('p')).toHaveText(/^from Oct \d+: #58 also waits on Aaron's approval$/);
-  });
-
   test('r26 P1 2: a summary with nothing waiting on Aaron is shown as it is (COhere\'s real summary)', async ({ page }) => {
     await boot(page);
     await page.evaluate(() => (window as any).__setStands('p-lvb', 'COhere 2026 is live on grove.example.org (new look, members, harvests; notifications off); tonight a time-of-day test failure blocks deploys while a fix is built, and register+sign-in (T-138) goes to staging for review on 10-15.'));
@@ -4498,5 +4489,270 @@ test.describe('r26', () => {
     await expect(out).toContainText('A placeholder message sent while the first sync runs');
     await expect(out.locator('time')).toHaveText('Sending…');
     await expect(out).toHaveCount(0, { timeout: 8000 });
+  });
+});
+
+test.describe('r27', () => {
+  const refresh = async (page: Page, at: string) => { await page.clock.setFixedTime(Date.parse(at)); await page.evaluate(() => window.dispatchEvent(new Event('focus'))); };
+  /** `updatedAt` is the record's own write: by default a day before the fixed clock, so the record vouches for itself (within 3 days) */
+  const add = (page: Page, n: { id: string; title: string; node: string; tag?: string; meta?: Record<string, unknown>; updatedAt?: string }) => page.evaluate((x) => {
+    (window as any).__tasks.push({ id: x.id, path: `Tasks/${x.title}`, extension: 'md', tags: [x.tag ?? 'task'], createdAt: '2026-10-06T16:00:00.000Z', updatedAt: x.updatedAt ?? '2026-10-13T12:00:00.000Z', lastUpdatedBy: 'u', lastUpdatedVia: 'mcp', content: x.title, metadata: { node: x.node, state: 'open', owner: 'aaron', priority: 'now', ...(x.meta ?? {}) } });
+  }, n);
+  const NOW = '2026-10-14T09:00:00.000Z';
+  const sheetOf = (page: Page) => page.getByRole('dialog').filter({ has: page.locator('.task-kind') });
+  const openWork = async (page: Page) => { await openCompanion(page); await page.getByRole('button', { name: /^All of .*'s work/ }).click(); await expect(page.locator('.sr-work')).toBeVisible(); };
+  const rowOf = (page: Page, text: string) => page.locator('.sr-work .cp-item').filter({ hasText: text });
+  const NEXT113 = "On your phone, look at https://grove.example.org (live now), then forward Harper the asks listed in this task's detail";
+  const DETAIL113 = "Live on prod since 10-14 15:24 (PR #61); staging matches. Harper still owes: (1) OK or cut 6 groups of short functional lines (notifications, email links, install, privacy, harvest/board, profile labels); (2) 3 answers: Spanish versions of 'What is COhere?' and 'What's Coming Up', whether 'Explore events on the community events' should end in 'calendar', whether the signed-in Home also gets the hat photo; (3) one morning-practice line per day for Oct 15–25 (her doc has 2); (4) yes/no on the Today heading showing just 'Honoring Water (9 AM at Martin Park)' with 'Home practice:' in bold. Aaron: sign in once as a member and open Board, People and Me.";
+  const t113 = (page: Page) => add(page, { id: 'n113', title: 'T-113 Companion Today redesign + integrated PWA install flow (3…', node: 'Areas/Techne', meta: { due: '2026-10-13', next: NEXT113, detail: DETAIL113, waiting_on: 'aaron', state: 'waiting' } });
+  /** every item line of a row is whole (two lines at most, no cut mark, never ending on a colon or a comma) and the shown ones and "and N more" add up to the list */
+  const itemsAreWhole = async (row: ReturnType<Page['locator']>, total: number) => {
+    const lines = await row.locator('.cp-item-line').evaluateAll((els) => els.map((e) => ({ text: (e as HTMLElement).innerText.trim(), lines: Math.round(e.getBoundingClientRect().height / (parseFloat(getComputedStyle(e).lineHeight) || 17)) })));
+    for (const l of lines) { expect(l.lines, l.text).toBeLessThanOrEqual(2); expect(l.text).not.toMatch(/[,;:]$|…|\.\.\./); expect(l.text).not.toMatch(/^3 answers$/); }
+    const more = await row.locator('.cp-item-more').count() ? (await row.locator('.cp-item-more').innerText()).trim() : '';
+    const n = lines.length + (/^and (\d+) more$/.exec(more)?.[1] ? Number(/^and (\d+) more$/.exec(more)![1]) : /^(\d+) /.exec(more)?.[1] ? Number(/^(\d+) /.exec(more)![1]) : 0);
+    expect(n, `shown ${lines.length} + ${more}`).toBe(total);
+    return lines.map((l) => l.text);
+  };
+
+  test('r27 line 5.1: T-113\'s row carries whole items (each at most two lines, cut at no colon or comma), in the panel and in the work view', async ({ page }) => {
+    test.skip(!wide(page), 'side panel');
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await boot(page);
+    await t113(page);
+    await refresh(page, NOW);
+    await openRoom(page, 'Techne');
+    await openCompanion(page);
+    const prow = page.locator('.cp.side .cp-item').filter({ hasText: 'grove.example.org' });
+    await expect(prow.locator('.cp-items')).toBeVisible();
+    const inPanel = await itemsAreWhole(prow, 4);
+    expect(inPanel.length).toBeLessThanOrEqual(3);
+    // the panel keeps its footer in view: the row ends above it
+    const foot = (await page.locator('.cp.side .cp-foot').boundingBox())!, rb = (await prow.boundingBox())!;
+    expect(rb.y + rb.height).toBeLessThanOrEqual(foot.y + 1);
+    await openWork(page);
+    const row = rowOf(page, 'grove.example.org');
+    const inWork = await itemsAreWhole(row, 4);
+    expect(inWork.length).toBeGreaterThanOrEqual(inPanel.length);
+    // "3 answers" is its clause: what the answers are
+    if (inWork.some((t) => /^Spanish versions/.test(t))) expect(inWork.join('\n')).not.toMatch(/^3 answers/m);
+    expect(inWork).toContain('one morning-practice line per day for Oct 15–25 (her doc has 2)');
+  });
+
+  test('r27 line 5.1: an item too long for two lines is not shown cut: fewer items and "and N more"', async ({ page }) => {
+    test.skip(!wide(page), 'side panel');
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await boot(page);
+    await add(page, { id: 'long1', title: 'T-801 Placeholder asks', node: 'Areas/Techne', meta: { next: 'Forward Casey the asks listed in this task\'s detail', state: 'waiting', waiting_on: 'aaron',
+      detail: 'Casey owes: (1) A very long first ask that keeps going and going with many words about the venue and the dates and the budget and the parking and the signage and the schedule for the whole week; (2) short one; (3) another short one' } });
+    await refresh(page, NOW);
+    await openRoom(page, 'Techne');
+    await openCompanion(page);
+    const prow = page.locator('.cp.side .cp-item').filter({ hasText: 'Forward Casey the asks' });
+    const lines = await itemsAreWhole(prow, 3);
+    expect(lines.join(' ')).not.toContain('A very long first ask that keeps going');
+    await expect(prow.locator('.cp-item-more')).toBeVisible();
+  });
+
+  test('r27 line 5.2: the Checking banner ends at a whole word with no trailing comma, semicolon or colon', async ({ page }) => {
+    await boot(page);
+    await page.evaluate(() => (window as any).__arrive('ch-techne', 'Uni', 'The placeholder deploy is ready whenever you are.', -426600));
+    await add(page, { id: 'bn1', title: 'T-303 Placeholder deploy', node: 'Areas/Techne', meta: { next: 'Say go on the placeholder deploy (recommended: keep 15, fold 32, archive 40), then confirm the quarterly numbers with Casey and the dates for the whole rollout, and the parking', asked: '2026-10-06T18:00:00.000Z' } });
+    await refresh(page, NOW);
+    await openRoom(page, 'Techne');
+    await openWork(page);
+    await rowOf(page, 'placeholder deploy').locator('.cp-need').click();
+    await sheetOf(page).locator('.task-do.primary').click();
+    const banner = page.locator('.checking-banner');
+    await expect(banner).toHaveText(/^Checking: /);
+    const text = (await banner.locator('.checking-text').innerText()).trim();
+    expect(text).not.toMatch(/[,;:]$|…|\.\.\./);
+    expect((await banner.boundingBox())!.height, 'one line').toBeLessThan(40);
+    const lines = await banner.locator('.checking-text').evaluate((el) => Math.round(el.getBoundingClientRect().height / (parseFloat(getComputedStyle(el).lineHeight) || 16)));
+    expect(lines).toBe(1);
+  });
+
+  test('r27 line 5.3 + 5.4: a pending sheet has no heading with nothing under it, and a decision sheet never repeats its title as its body (also when the lookup failed)', async ({ page }) => {
+    await boot(page);
+    await add(page, { id: 'dc1', title: 'T-510 Ship the placeholder chat?', tag: 'decision', node: 'Areas/Techne', meta: { options: ['Yes', 'No'], next: 'Ship the placeholder chat? (preview: https://chat.placeholder-preview.pages.dev)', asked: '2026-10-12T18:00:00.000Z' } });
+    await refresh(page, NOW);
+    await openRoom(page, 'Techne');
+    await openWork(page);
+    // pending: the lookup is slow
+    await page.evaluate(() => { (window as any).__lookupDelay = 1500; });
+    await rowOf(page, 'Ship the placeholder chat').locator('.cp-need').click();
+    let sheet = sheetOf(page);
+    await expect(sheet.locator('.task-lookpending')).toHaveText(/^Checking #techne…$/i);
+    await expect(sheet.locator('summary')).toHaveCount(0);
+    for (const h of await sheet.locator('h1, h2, h3, summary').all()) expect((await h.innerText()).trim().length).toBeGreaterThan(0);
+    expect((await sheet.innerText()).match(/Ship the placeholder chat/g)?.length).toBe(1);
+    await expect(sheet.locator('.task-lookpending')).toHaveCount(0, { timeout: 8000 });
+    await expect(sheet.locator('summary')).toHaveText('Details');
+    await sheet.getByRole('button', { name: 'Close' }).click();
+    // failed: the same question, once
+    await page.evaluate(() => { (window as any).__lookupDelay = 0; (window as any).__lookupFails = true; });
+    await rowOf(page, 'Ship the placeholder chat').locator('.cp-need').click();
+    sheet = sheetOf(page);
+    await expect(sheet.locator('.task-lookfail')).toBeVisible();
+    expect((await sheet.innerText()).match(/Ship the placeholder chat/g)?.length).toBe(1);
+    // the preview link it carried is still a way in
+    await expect(sheet.getByRole('button', { name: /^Open chat/ })).toBeVisible();
+  });
+
+  test('r27 line 5.5: a multi-step task\'s sheet shows "Step 1 of 2" without scrolling, with the asks under it (1280×720)', async ({ page }) => {
+    test.skip(!wide(page), 'desktop sheet');
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await boot(page);
+    await t113(page);
+    await refresh(page, NOW);
+    await openRoom(page, 'Techne');
+    await openWork(page);
+    await rowOf(page, 'grove.example.org').locator('.cp-need').click();
+    const sheet = sheetOf(page);
+    await expect(sheet.locator('.task-stepof')).toHaveText('Step 1 of 2');
+    await expect(sheet.locator('.task-stepof')).toBeInViewport({ ratio: 1 });
+    const s = (await sheet.locator('.task-steps').boundingBox())!, i = (await sheet.locator('.task-items').boundingBox())!;
+    expect(i.y, 'the asks follow the steps').toBeGreaterThan(s.y);
+    await expect(sheet.locator('.task-items li')).toHaveCount(4);
+  });
+
+  test('r27 line 6: All-work uses the companion\'s names; a run waiting on the user\'s answer is in Needs you; no records-to-reword section', async ({ page }) => {
+    await boot(page);
+    await add(page, { id: 'wk1', title: 'T-520 Placeholder go', node: 'Areas/Techne', meta: { next: 'Say go on the placeholder go', state: 'waiting', waiting_on: 'aaron' } });
+    await add(page, { id: 'wk2', title: 'T-521 Outline', node: 'Areas/Techne', meta: { next: 'Notes: real work in area rooms, check updates propagate up; nested room names; fractal flow', state: 'waiting', waiting_on: 'aaron' } });
+    await page.evaluate(() => {
+      const w = window as any;
+      w.__addRun('rw1', 'Areas/Techne', 'T-520', 'Waiting on your answer in #Uni: release 0.1.46 placeholder', 'decision');
+      w.__addRun('rw2', 'Areas/Techne', 'T-520', 'Placeholder build underway', 'running');
+      w.__addRun('rw3', 'Areas/Techne', 'T-520', 'Placeholder build finished', 'done');
+    });
+    await refresh(page, NOW);
+    await openRoom(page, 'Techne');
+    await openWork(page);
+    const wv = page.locator('.sr-work');
+    const labels = await wv.locator('section').evaluateAll((els) => els.map((e) => e.getAttribute('aria-label')));
+    expect(labels).toEqual(expect.arrayContaining(['Needs you', 'Running', 'Done lately']));
+    expect(labels).not.toContain('Being worked on');
+    expect(labels).not.toContain('Records to reword');
+    const needs = wv.locator('section[aria-label="Needs you"]');
+    await expect(needs).toContainText('Waiting on your answer in #Uni');
+    await expect(needs.locator('.cp-run small')).toHaveText('Waiting on you');
+    const running = wv.locator('section[aria-label="Running"]');
+    await expect(running).toContainText('Placeholder build underway');
+    expect(await running.innerText()).not.toMatch(/Waiting on your answer|not waiting on you/);
+    await expect(wv.locator('section[aria-label="Done lately"]')).toContainText('Placeholder build finished');
+    expect(await wv.innerText()).not.toMatch(/records? needs? rewording|need rewording/i);
+    // the panel says the same: the waiting run is under Needs you, not Running
+    await page.getByRole('button', { name: /^Back to chat/ }).click();
+    await openCompanion(page);
+    if (wide(page)) {
+      const side = page.locator('.cp.side .cp-body');
+      await expect(side.locator('section[aria-label="Needs you"]')).toContainText('Waiting on your answer in #Uni');
+      expect(await side.locator('section[aria-label="Running"]').innerText()).not.toContain('Waiting on your answer');
+    }
+  });
+
+  test('r27 P1-1: a request is current only when its own record (written within 3 days) vouches for it and no related chat is newer than that write; the sheet leads with answers only then', async ({ page }) => {
+    await boot(page);
+    // the chat is from 3 days before the fixed clock: older than the record's write below
+    await page.evaluate(() => (window as any).__arrive('ch-techne', 'Uni', 'The placeholder deploy is ready whenever you are.', 6 * 86400));
+    await add(page, { id: 'f1', title: 'T-303 Placeholder deploy', node: 'Areas/Techne', updatedAt: '2026-10-13T12:00:00.000Z', meta: { next: 'Say go on the placeholder deploy', asked: '2026-10-06T18:00:00.000Z' } });
+    await refresh(page, NOW);
+    await openRoom(page, 'Techne');
+    await openWork(page);
+    // current: written yesterday, nothing related since
+    await rowOf(page, 'Say go on the placeholder deploy').locator('.cp-need').click();
+    let sheet = sheetOf(page);
+    await expect(sheet.locator('.task-asked')).toHaveAttribute('data-fresh', 'current');
+    await expect(sheet.locator('.task-asked')).toHaveText(/^Asked Oct 6$/);
+    await expect(sheet.locator('.task-do.primary')).toHaveText(/^Say it in #/);
+    await expect(sheet.getByRole('button', { name: 'I did this' })).toBeVisible();
+    await expect(sheet.getByRole('button', { name: 'Answer anyway' })).toHaveCount(0);
+    expect(await sheet.innerText()).not.toMatch(/not confirmed|nothing related|validated|confirmed/i);
+    await sheet.getByRole('button', { name: 'Close' }).click();
+    // a record older than 3 days: unconfirmed, whatever the chat says
+    await page.evaluate(() => { const t = (window as any).__tasks.find((x: any) => x.id === 'f1'); t.updatedAt = '2026-10-09T12:00:00.000Z'; });
+    await refresh(page, '2026-10-14T09:05:00.000Z');
+    await rowOf(page, 'Say go on the placeholder deploy').locator('.cp-need').click();
+    sheet = sheetOf(page);
+    await expect(sheet.locator('.task-asked')).toHaveAttribute('data-fresh', 'unconfirmed');
+    await expect(sheet.locator('.task-asked')).toHaveText('Asked Oct 6 · not confirmed since');
+    await expect(sheet.locator('.task-do.primary')).toHaveText(/^Check in #techne first$/i);
+    await expect(sheet.getByRole('button', { name: 'I did this' })).toHaveCount(0);
+    await expect(sheet.getByRole('button', { name: /^Say it in #/ })).toHaveCount(0);
+    await sheet.getByRole('button', { name: 'Answer anyway' }).click();
+    await expect(sheet.getByRole('button', { name: 'I did this' })).not.toHaveClass(/primary/);
+    await expect(sheet.locator('.task-do.primary')).toHaveText(/^Check in #techne first$/i);
+  });
+
+  test('r27 P1-1: related chat after the record\'s write, a record with no date, and a chat that can\'t be read: unconfirmed, unconfirmed, couldn\'t read', async ({ page }) => {
+    await boot(page);
+    await page.evaluate(() => (window as any).__arrive('ch-techne', 'Uni', 'The placeholder deploy is ready whenever you are.', -426600));
+    await add(page, { id: 'u1', title: 'T-303 Placeholder deploy', node: 'Areas/Techne', updatedAt: '2026-10-13T12:00:00.000Z', meta: { next: 'Say go on the placeholder deploy', asked: '2026-10-06T18:00:00.000Z' } });
+    await add(page, { id: 'u2', title: 'T-309 Placeholder budget', node: 'Areas/Techne', updatedAt: '', meta: { next: 'Say go on the quarterly budget', asked: '2026-10-06T18:00:00.000Z' } });
+    await refresh(page, NOW);
+    await openRoom(page, 'Techne');
+    await openWork(page);
+    // related chat newer than the write
+    await rowOf(page, 'Say go on the placeholder deploy').locator('.cp-need').click();
+    let sheet = sheetOf(page);
+    await expect(sheet.locator('.task-asked')).toHaveAttribute('data-fresh', 'unconfirmed');
+    await expect(sheet.locator('.task-asked')).toHaveText('Asked Oct 6 · not confirmed since');
+    await expect(sheet.locator('.task-do.primary')).toHaveText(/^Check in #techne first$/i);
+    expect(await sheet.innerText()).not.toMatch(/has talked about|nothing related/i);
+    await sheet.getByRole('button', { name: 'Close' }).click();
+    // no date to vouch with
+    await rowOf(page, 'Say go on the quarterly budget').locator('.cp-need').click();
+    sheet = sheetOf(page);
+    await expect(sheet.locator('.task-asked')).toHaveAttribute('data-fresh', 'unconfirmed');
+    await expect(sheet.locator('.task-do.primary')).toHaveText(/^Check in #techne first$/i);
+    await sheet.getByRole('button', { name: 'Close' }).click();
+    // couldn't read
+    await page.evaluate(() => { (window as any).__lookupFails = true; });
+    await rowOf(page, 'Say go on the placeholder deploy').locator('.cp-need').click();
+    sheet = sheetOf(page);
+    await expect(sheet.locator('.task-lookfail')).toHaveText(/^Couldn't read #techne · Retry$/i);
+    await expect(sheet.locator('.task-do.primary')).toHaveText(/^Open #techne$/i);
+    await expect(sheet.getByRole('button', { name: 'I did this' })).toHaveCount(0);
+    await sheet.getByRole('button', { name: 'Answer anyway' }).click();
+    await expect(sheet.getByRole('button', { name: 'I did this' })).toBeVisible();
+  });
+
+  test('r27 P1-2: a fresh summary is shown as written with its date; one older than a task change is dimmed behind "This summary is older than the latest work"', async ({ page }) => {
+    await boot(page);
+    const SUMMARY = 'COhere 2026 is live on grove.example.org (new look, members, harvests; notifications off); tonight a time-of-day test failure blocks deploys while a fix is built, and register+sign-in (T-138) goes to staging for review on 10-15.';
+    await page.evaluate((s) => (window as any).__setStands('p-lvb', s, '2026-10-14T12:00:00.000Z'), SUMMARY);
+    await refresh(page, '2026-10-14T20:00:00.000Z');
+    await openRoom(page, 'Learn Vibe Build');
+    await openCompanion(page);
+    // fresh: nothing on the node changed after it was written
+    await expect(page.locator('.cp-stale')).toHaveCount(0);
+    await expect(page.locator('.cp-stands').first()).toHaveText(/^As of Oct 14: COhere 2026 is live on grove\.example\.org/);
+    expect(await page.locator('.cp-stands').first().evaluate((el) => (el as HTMLElement).innerText)).not.toMatch(/…|\.\.\./);
+    // a task under the node changed after the summary: the whole summary is older than the latest work
+    await add(page, { id: 'nw1', title: 'T-322 Placeholder newer change', node: 'Projects/Learn Vibe Build', updatedAt: '2026-10-14T18:00:00.000Z', meta: { priority: 'now', next: 'Edit the placeholder note for Casey', asked: '2026-10-13T18:00:00.000Z' } });
+    await refresh(page, '2026-10-14T20:05:00.000Z');
+    await expect(page.locator('.cp-stale')).toHaveText('This summary is older than the latest work · from Oct 14');
+    await expect(page.locator('.cp-stands:not(.cp-stale)')).toHaveCount(0);
+    const said = page.locator('.cp-said');
+    await expect(said).not.toHaveAttribute('open', '');
+    await said.locator('summary').click();
+    await expect(said.locator('p')).toHaveText(/^As of Oct 14: COhere 2026 is live on grove\.example\.org .*goes to staging for review on 10-15\.$/);
+    // nothing is promoted: no "Part of this summary", no current clause
+    expect(await page.locator('.cp-body').innerText()).not.toMatch(/Part of this summary/);
+    await expect(page.locator('[data-part="current"]')).toHaveCount(0);
+  });
+
+  test('r27 P1-2: a wait claim nothing open matches also dims the whole summary, and the work view says the same', async ({ page }) => {
+    await boot(page);
+    await page.evaluate(() => (window as any).__setStands('p-lvb', "Cohort two starts Oct 15; prod deploy of #38 waits on Aaron's go.", '2026-10-14T12:00:00.000Z'));
+    await refresh(page, '2026-10-14T20:00:00.000Z');
+    await openRoom(page, 'Learn Vibe Build');
+    await openCompanion(page);
+    await expect(page.locator('.cp-stale')).toHaveText('This summary is older than the latest work · from Oct 14');
+    await openWork(page);
+    await expect(page.locator('.sr-work .cp-stale')).toHaveText('This summary is older than the latest work · from Oct 14');
+    await page.locator('.sr-work .cp-said summary').click();
+    await expect(page.locator('.sr-work .cp-said p')).toHaveText("As of Oct 14: Cohort two starts Oct 15; prod deploy of #38 waits on Aaron's go.");
   });
 });
