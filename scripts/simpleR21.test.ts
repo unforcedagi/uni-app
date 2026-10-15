@@ -23,28 +23,30 @@ const COHERE = "Wed 10-14: say go on prod deploy of #38 + #58; Harper signs off 
 await check("the whole action: objects and recipients are never cut; only context after the action is the sheet's", () => {
   const at = rowAction(ATLAS)!;
   // r22 (both critics): a ";" clause that leads with a work verb is the user's too, so it stays in the action
-  assert.equal(at.text, "Edit and send the ATLAS follow-up to Mark and Dominic from your account; fill the opening, sign-off and next-review date");
-  assert.equal(at.rest, "");
+  assert.equal(at.head, "Edit and send the ATLAS follow-up to Mark and Dominic from your account; fill the opening, sign-off and next-review date");
+  assert.equal(at.text, ATLAS, "r30: the row and the heading say every word of the step");
   assert.deepEqual(at.forms.map((f) => f.text), [at.text]);
   const pays = rowAction(PAYS)!;
-  assert.equal(pays.text, "Tell Uni who pays (Techne or Gitcoin Foundation) and how: crypto or ACH/Stripe, plus Woven Web's legal details");
+  assert.equal(pays.head, "Tell Uni who pays (Techne or Gitcoin Foundation) and how: crypto or ACH/Stripe, plus Woven Web's legal details");
   // r22: one form, the whole action (brackets are dropped only past 160 characters)
   assert.deepEqual(pays.forms.map((f) => f.text), [pays.text]);
   const co = rowAction(COHERE)!;
-  assert.equal(co.text, "Say go on prod deploy of #38 + #58");
+  assert.equal(co.head, "Say go on prod deploy of #38 + #58");
   assert.equal(co.prefix, "Wed 10-14");
-  assert.match(co.rest, /^Harper signs off/);
+  assert.match(co.text, /^Say go on prod deploy of #38 \+ #58; Harper signs off/, "r30: the context after the action is on the row too");
   // a question carried on by the next is one ask
-  assert.equal(rowAction("Decide: build the live browser share (CDP stream + needs-login card)? And keep logged-in sessions or log out after each job?")!.rest, "");
+  const qa = rowAction("Decide: build the live browser share (CDP stream + needs-login card)? And keep logged-in sessions or log out after each job?")!;
+  assert.equal(qa.head, qa.text);
   // context: a spaced dash, "because…"
-  assert.equal(rowAction("Reply to Casey — he asked twice")!.text, "Reply to Casey");
-  assert.equal(rowAction("Send Ryan the access note because Pages needs it")!.text, "Send Ryan the access note");
+  assert.equal(rowAction("Reply to Casey — he asked twice")!.head, "Reply to Casey");
+  assert.equal(rowAction("Reply to Casey — he asked twice")!.text, "Reply to Casey — he asked twice");
+  assert.equal(rowAction("Send Ryan the access note because Pages needs it")!.head, "Send Ryan the access note");
 });
 
 await check("multi-step: \"A, then B\" is both steps; the fallback is \"2 steps: A, then …\" and never step 1 alone", () => {
   const ww = rowAction(WOVEN)!;
   assert.deepEqual(ww.steps, ["Review the Woven Web handoff draft, fill the unknowns", "talk with Harper yourself"]);
-  assert.equal(ww.text, "Review the Woven Web handoff draft, fill the unknowns, then talk with Harper yourself");
+  assert.equal(ww.text, "Review the Woven Web handoff draft, fill the unknowns, then talk with Harper yourself.");
   // r22: never "2 steps: A, then …": the one form is both steps
   assert.deepEqual(ww.forms.map((f) => f.text), [ww.text]);
   const st = rowAction(STAGING)!;

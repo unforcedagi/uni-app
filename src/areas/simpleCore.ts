@@ -103,6 +103,8 @@ export type PrivateNeed = { key: string; count: number; place: string; open: { p
 export type NeedsFeed = { rows: Task[]; privates: PrivateNeed[]; total: number;
   /** r28: asks Uni must recheck (not confirmed): listed apart under "Uni is rechecking N older asks", never in `total` or the dots. */
   recheck?: Task[];
+  /** r30: why each of them is not confirmed (by task id), for its reason line */
+  recheckWhy?: Record<string, RecheckWhy | null>;
   /** r28: asks whose room's chat is still being read: held back from `total`, "Checking…" for a few seconds at most. */
   checking?: Task[];
   /** r28 (Codex P2-6): runs waiting on the user's answer, deduplicated by task; they are in `total` (one count everywhere). */
@@ -130,6 +132,7 @@ export function needsFeed(tasks: readonly Task[], privateOf: (node: string) => P
   const all = owed.filter((t) => stateOf(t) === "confirmed");
   const rows: Task[] = [];
   const recheck: Task[] = [];
+  const recheckWhy: Record<string, RecheckWhy | null> = {};
   const checking: Task[] = [];
   const by = new Map<string, PrivateNeed>();
   for (const t of owed) {
@@ -137,7 +140,7 @@ export function needsFeed(tasks: readonly Task[], privateOf: (node: string) => P
     const open = !p || (self && p.path === self.path);
     const st = stateOf(t);
     // a private area's unconfirmed asks are not listed outside it (their words stay inside); they are neither counted nor named
-    if (st === "recheck") { if (open) recheck.push(t); continue; }
+    if (st === "recheck") { if (open) { recheck.push(t); recheckWhy[t.id] = confOf ? confOf(t).why : null; } continue; }
     if (st === "pending") { if (open) checking.push(t); continue; }
     if (open) { rows.push(t); continue; }
     const g = by.get(p!.path) ?? { key: p!.path, count: 0, place: p!.name, open: { path: p!.path }, actions: [], others: 0 };
@@ -149,7 +152,7 @@ export function needsFeed(tasks: readonly Task[], privateOf: (node: string) => P
   const here = (t: Task) => !privateOf(t.node) || privateOf(t.node)?.path === self?.path;
   const tidy = tasks.filter((t) => toTidy(t) && here(t));
   const pending = rankNeeds(tasks.filter((t) => wouldNeedYou(t) && unknownDecision(t) && here(t)), today);
-  return { rows, privates: [...by.values()], total: all.length, tidy, pending, recheck, checking, waiting: [] };
+  return { rows, privates: [...by.values()], total: all.length, tidy, pending, recheck, recheckWhy, checking, waiting: [] };
 }
 /**
  * r28 (Codex P2-6): the runs waiting on the user's answer join the feed, so the count, the dots and the strip say the same number. Each is
@@ -422,8 +425,22 @@ export function answerText(raw: string): string | null {
   return t && t.length <= ANSWER_MAX ? t : null;
 }
 
-/** "12 older asks need confirming": the one quiet line under Needs you for what is not confirmed. It claims no work: the app doesn't start any. (r29, Codex P1-2) */
-export const recheckLine = (n: number): string => `${n} older ${n === 1 ? "ask needs" : "asks need"} confirming`;
+/**
+ * "3 requests need confirming in this room" / "13 requests need confirming across all rooms": the one quiet line under Needs you for what is not
+ * confirmed. It claims no work (the app starts none), says nothing about age (some were asked today), and says which rooms it counts (r30). (r29, Codex P1-2)
+ */
+export type RecheckScope = "room" | "all";
+export const recheckLine = (n: number, scope: RecheckScope = "room"): string => `${n} ${n === 1 ? "request needs" : "requests need"} confirming ${scope === "all" ? "across all rooms" : "in this room"}`;
+/** Why a request is not confirmed, in a few words: "chat since in #cohere", "couldn't read #cohere", "asked Oct 11", "no room". */
+export function reasonShort(why: RecheckWhy | null | undefined, t: Partial<Pick<Task, "asked" | "added" | "stewardRoom" | "room">>, today = localDay()): string {
+  const room = (t.stewardRoom ?? t.room ?? "").replace(/^#/, "");
+  switch (why) {
+    case "chat-since": return room ? `chat since in #${room}` : "chat since";
+    case "read-failed": return room ? `couldn't read #${room}` : "couldn't read the chat";
+    case "no-room": return "no room";
+    default: return askedLine(requestDate(t), today) ?? "no date";
+  }
+}
 /** The empty Needs you: "Nothing needs you here" only when no ask is waiting to be confirmed either; else it says what is known: no ask is confirmed. */
 export const noneLine = (f: Pick<NeedsFeed, "recheck" | "checking">): string => ((f.recheck?.length ?? 0) + (f.checking?.length ?? 0) > 0 ? "No confirmed asks" : "Nothing needs you here.");
 /**
@@ -480,7 +497,7 @@ export const movedOnText = (w: AskedWhen): string => (w.kind === "asked" ? MOVED
  * its step, or two of the step's distinctive words.
  */
 const KEY_STOP = new Set("about after again also back before being both check could from have here into just like make more need next onto only other over same some that then there these they this those through very want were what when where which while will with without would your their them been done does each first last must still such than well went already skip change changes please today tomorrow yesterday thread letter email draft ready going gets getting being using use used".split(" "));
-export type RequestKeys = { ids: string[]; words: string[] };
+export type RequestKeys = { ids: string[]; words: string[]; /** the ask's stored `next`, whose words a message may quote */ next?: string };
 export function requestKeys(t: { title?: string | null; next?: string | null }): RequestKeys {
   const title = t.title ?? "";
   const next = t.next ?? "";
@@ -489,15 +506,25 @@ export function requestKeys(t: { title?: string | null; next?: string | null }):
   if (tid) ids.add(tid.toUpperCase());
   for (const m of `${next} ${title}`.matchAll(/(?:^|[^\w&])#(\d{1,5})\b/g)) ids.add(`#${m[1]}`);
   const words = [...new Set((next.toLowerCase().replace(/\b([\w-]+)(?:\.[\w-]+)+\b/g, "$1").match(/[a-z]{5,}/g) ?? []).filter((w) => !KEY_STOP.has(w) && !/^(?:say|tell|reply|ask|send|copy|approve|approval|message|room|chat)$/.test(w)))];
-  return { ids: [...ids], words };
+  return { ids: [...ids], words, next };
 }
 /** A request spoken to the room or asking for an approval: "Say …", "Tell Uni …", "Approve …", "go/no-go", a decision. */
 export function isApprovalRequest(t: { kind?: string; next?: string | null }, audienceIsRoom: boolean): boolean {
   return t.kind === "decision" || audienceIsRoom || /(?:^|[,;:]\s*|\bthen\s+)(?:approve|say)\b|\bgo\s*\/\s*no[- ]?go\b|\bgo or no\b/i.test(t.next ?? "");
 }
 export type RoomMsg = { ref?: string; ts: number; body: string; /** the author's pubkey, as the room's messages carry it */ author?: string };
-/** Uni's own message within this long after an ask was written, naming the ask's T-NN, is the room announcing it, not talk that moved past it. */
+/** Uni's own message within this long after an ask was written, naming the ask's T-NN and quoting it, is the room announcing it, not talk that moved past it. */
 export const ANNOUNCE_GRACE_MS = 10 * 60_000;
+/** How many consecutive words of the stored `next` a message must quote to be an announcement or a reminder of exactly this ask (r30). */
+export const QUOTE_WORDS = 6;
+const quoteWords = (t: string): string[] => t.toLowerCase().replace(/[’‘]/g, "'").replace(/https?:\/\/\S+/g, (u) => { try { return new URL(u).hostname; } catch { return u; } }).match(/[\p{L}\p{N}][\p{L}\p{N}'@./_-]*/gu)?.map((w) => w.replace(/[.'/_-]+$/, "")).filter(Boolean) ?? [];
+/** Whether `body` quotes at least `n` consecutive words of `next` (case and punctuation aside). */
+export function quotes(body: string, next: string | null | undefined, n = QUOTE_WORDS): boolean {
+  const a = quoteWords(next ?? ""); if (a.length < n) return false;
+  const text = ` ${quoteWords(body).join(" ")} `;
+  for (let i = 0; i + n <= a.length; i++) if (text.includes(` ${a.slice(i, i + n).join(" ")} `)) return true;
+  return false;
+}
 export type ChatHit = { key: string; ref: string | null; ts: number };
 /** The first message after the request (`ts` in seconds) that mentions its key terms, or null. `uni`: Uni's pubkey in the room (null: unknown, so nothing is an announcement). */
 export function chatAbout(w: AskedWhen | null | undefined, msgs: readonly RoomMsg[], keys: RequestKeys, uni: string | null = null): ChatHit | null {
@@ -505,14 +532,19 @@ export function chatAbout(w: AskedWhen | null | undefined, msgs: readonly RoomMs
   const day = /^\d{4}-\d{2}-\d{2}$/.test(w.at.trim());
   const at = day ? new Date(`${w.at.trim()}T23:59:59`).getTime() : stampMs(w.at);
   if (!Number.isFinite(at)) return null;
-  // r29 (Codex P1-1): Uni announcing an ask it just wrote ("I've re-stated each ask: T-65 …") seconds after asked_at is the ask, not talk past
-  // it. Only that: Uni's own key and the ask's own T-NN. Aaron's messages, other keys, and Uni's messages that don't name the task all count.
+  // r30 (Codex P1-1): within the window, Uni's own message is skipped only when it names the ask's T-NN and quotes at least six consecutive words of its
+  // stored `next`: that is the announcement of exactly this ask (a cancellation or a correction doesn't quote it). Past the window, Uni's message
+  // that quotes six words of the current `next` is a reminder of it, and doesn't unconfirm. Everything else counts: Aaron's messages, other keys,
+  // Uni's messages that quote nothing.
   const graceTo = !day && w.kind === "asked" ? at + ANNOUNCE_GRACE_MS : at;
   const tids = keys.ids.filter((k) => /^T-\d+$/i.test(k));
   for (const m of [...msgs].sort((a, b) => a.ts - b.ts)) {
     if (!(m.ts * 1000 > at)) continue;
     const body = m.body.toLowerCase();
-    if (m.ts * 1000 <= graceTo && uni && m.author === uni && tids.some((k) => new RegExp(`\\b${k.toLowerCase()}\\b`).test(body))) continue;
+    if (uni && m.author === uni && quotes(m.body, keys.next)) {
+      const inWindow = m.ts * 1000 <= graceTo;
+      if (!inWindow || tids.some((k) => new RegExp(`\\b${k.toLowerCase()}\\b`).test(body))) continue;
+    }
     const id = keys.ids.find((k) => (k.startsWith("#") ? new RegExp(`(^|[^\\w&])${k.toLowerCase()}\\b`) : new RegExp(`\\b${k.toLowerCase()}\\b`)).test(body));
     if (id) return { key: id, ref: m.ref ?? null, ts: m.ts };
     const hit = keys.words.filter((k) => new RegExp(`(^|[^a-z-])${k}([^a-z-]|$)`).test(body));
@@ -804,15 +836,16 @@ export const decideLine = (words: string): string => {
   return /^decide\b/i.test(w) ? w.replace(/^decide\b\s*:?\s*/i, "Decide: ") : `Decide: ${w}`;
 };
 
-/** The vault's task writer keeps `next` to 140 characters (tasks.py): a step that long with no ending was cut there (r16). */
+/** The vault's task writer used to keep `next` to 140 characters (tasks.py `[:140]`); it now stores it whole (up to 400) and never cuts it silently (r30). */
 export const NEXT_CAP = 140;
 /**
- * A task's next step as rows show it (r16): a step cut at the writer's 140 characters loses its last (possibly partial) word and any hanging
- * word, and says it was cut ("…"), so a row never ends mid-phrase ("…in the"). `cut`: the full step is only in the note.
+ * A task's next step as rows show it. r30 (Sonnet, both rows and sheet lost "and Me" from a stored 207-character step): a step is the stored words,
+ * whole. Only a step that is exactly what the old 140-character writer left (139 or 140 characters, no ending) is taken for a cut one: it loses
+ * its last (possibly partial) word and any hanging word, and `cut` says the full step is only in the note. A longer step was written whole.
  */
 export function stepText(next: string): { text: string; cut: boolean } {
   const t = next.replace(/\s+/g, " ").trim();
-  if (t.length < NEXT_CAP || /[.!?)"”’'\]]$/.test(t)) return { text: t, cut: false };
+  if (t.length < NEXT_CAP - 1 || t.length > NEXT_CAP || /[.!?)"”’'\]]$/.test(t)) return { text: t, cut: false };
   const words = t.split(" "); words.pop();
   // r23 (both critics): as stored, never "…": the sheet says the note ends here and opens it
   return { text: cutWords(words.join(" "), Infinity, false), cut: true };
@@ -1078,7 +1111,7 @@ export function firstClause(text: string, from = 0): string {
  * the same without its brackets (dates, examples, links' notes); for more than one step, "2 steps: A, then …" (the sheet lists them). `keep`:
  * each form's part a cut never enters. `text`: the whole action. Null: not an action.
  */
-export type RowAction = { text: string; verb: string; rest: string; prefix: string | null; steps: string[]; forms: { text: string; keep: string }[] };
+export type RowAction = { /** r30: the whole step, every word of it (the row and the sheet's heading say this) */ text: string; /** the action's first part (its first sentence or clause): what its verb, steps and link are read from */ head: string; verb: string; prefix: string | null; steps: string[]; forms: { text: string; keep: string }[] };
 /** Bracket depth before each character of a text ("(…)", "[…]"). */
 const depths = (t: string): number[] => { const d: number[] = []; let n = 0; for (let i = 0; i < t.length; i++) { const c = t[i]; if (c === "(" || c === "[") n++; d.push(n); if ((c === ")" || c === "]") && n > 0) n--; } return d; };
 /** Where a "then" joins two steps (r21): ", then", "; then", " and then", or a bare " then " before a verb. */
@@ -1141,19 +1174,12 @@ export function rowAction(next: string | null | undefined): RowAction | null {
 /** The whole action of a step already known to be one (r21): its text, steps and forms. */
 export function actionOf(lead: string, prefix: string | null = null): RowAction {
   const at = actionEnd(lead);
-  const text = lead.slice(0, at).replace(/[\s,;:—–-]+$/, "").trim() || lead;
-  const verb = verbPhrase(text);
-  const steps = stepsOf(text);
-  const forms: { text: string; keep: string }[] = [];
-  const add = (f: string, keep: string) => { if (f && !forms.some((x) => x.text === f)) forms.push({ text: f, keep }); };
-  // what a cut never enters: the verb phrase and the rest of its first clause ("Send the SOW to Casey when convenient", never "…to Mark…")
-  const main = (t: string) => { const v = verbPhrase(t); const c = firstClause(t, Math.min(v.length, t.length)); return c.length >= v.length ? c : v; };
-  // r22 (both critics): one form, the whole action, every step ("A, then B") and every verb phrase; never clamped, never "then …". Past
-  // `ROW_ACTION_MAX` characters it is shortened with words: its brackets, then its links' addresses, go to the sheet
-  void main;
-  const f = rowForm(text);
-  add(f, f);
-  return { text, verb, rest: lead.slice(text.length).replace(/^[\s.,;:—–-]+/, "").trim(), prefix, steps, forms };
+  const head = lead.slice(0, at).replace(/[\s,;:—–-]+$/, "").trim() || lead;
+  // r30: the row and the sheet's heading carry the whole step, never just its first clause ("…then say whether journal should be Parachute's default" was lost)
+  const text = lead.replace(/[\s,;:—–-]+$/, "").trim() || head;
+  const verb = verbPhrase(head);
+  const steps = stepsOf(head);
+  return { text, head, verb, prefix, steps, forms: [{ text: rowForm(text), keep: text }] };
 }
 const sig = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}\s-]/gu, " ").split(/\s+/).filter((w) => w.length > 2 && !/^(?:the|and|for|with|from|your|this|that|into|onto)$/.test(w));
 /** Whether a title mostly says again what the action says ("Send the ATLAS Oct 12 follow-up email" under "Edit and send the ATLAS follow-up…"). */
@@ -1255,27 +1281,22 @@ const TAIL_PAREN = /^(.*\S)\s*\(([^()]*)\)\s*([.!?]?)$/;
 const refsOnly = (inner: string): boolean => !inner.replace(/\buni:[0-9A-HJKMNP-TV-Z]{26}\b|\[\[[^\]]*\]\]|\b[0-9A-HJKMNP-TV-Z]{26}\b|https?:\/\/\S+|\bwww\.\S+|\band\b/gi, "").replace(/[\s,;·&+|-]+/g, "");
 const shortWords = (t: string): string[] => [...new Set((t.toLowerCase().match(/[a-z]{4,}/g) ?? []))];
 const repeatsWords = (inner: string, head: string): boolean => { const w = shortWords(inner); if (!w.length) return false; const h = shortWords(head).map((x) => x.slice(0, 5)); return w.filter((x) => h.includes(x.slice(0, 5))).length / w.length >= 0.6; };
-/** The list-pointer words a step carries ("... the asks listed in this task's detail", "... the follow-ups below"): the content is shown, not pointed at. */
-export const LIST_NOUN = "asks|unknowns|follow-?ups|questions|blanks|gaps|requests|items";
-const LIST_REF = new RegExp(`\\b(?:the|these|those|its|his|her|their)\\s+(?:(?:open|remaining|key|listed|following|main)\\s+)?(${LIST_NOUN})\\b`, "i");
-const LIST_LOC = /\s+(?:(?:listed|written|described|noted|stated|spelled out)\s+)?(?:below|(?:in|from|on)\s+(?:this task['’]s|the task['’]s|the|this|its)\s+(?:detail|details|card|note|description))\b/i;
-function listPointerOff(step: string): string {
-  const m = LIST_REF.exec(step);
-  if (!m) return step;
-  const at = m.index + m[0].length;
-  const loc = LIST_LOC.exec(step.slice(at));
-  if (!loc || loc.index > 12) return step;
-  return (step.slice(0, at) + step.slice(at + loc.index + loc[0].length)).replace(/\s+([,;:.])/g, "$1");
-}
+/**
+ * The list-pointer words a step carries ("... the asks listed in this task's detail", "... the new site labels listed in detail", "... the follow-ups
+ * below"): the content is shown under the step, and the step keeps its words (r30: the words on screen are the stored words).
+ */
+export const LIST_NOUN = "asks|unknowns|follow-?ups|questions|blanks|gaps|requests|items|labels|lines|answers|options|names|phrases|strings|texts|points|changes|edits|fixes|addresses|links|files|pages|screens|numbers|steps";
+const LIST_REF = new RegExp(`\\b(?:the|these|those|its|his|her|their)\\s+(?:(?:open|remaining|key|listed|following|main)\\s+)?(?:[\\w’'-]+\\s+){0,3}?(${LIST_NOUN})\\b`, "i");
+/** Where the list is: "below", "in this task's detail", "in the detail", "in detail" (r30: with or without the determiner). */
+const LIST_LOC = /\s+(?:(?:listed|written|described|noted|stated|spelled out)\s+)?(?:below|(?:in|from|on)\s+(?:(?:this task['’]s|the task['’]s|the|this|its)\s+(?:detail|details|card|note|description)|details?))\b/i;
 export function stepHeading(step: string): string {
-  const s = listPointerOff(step);
-  const m = TAIL_PAREN.exec(s);
-  if (!m) return s;
-  return refsOnly(m[2]) || repeatsWords(m[2], m[1]) ? `${m[1].replace(/[\s,;:]+$/, "")}${m[3] === "." ? "" : m[3]}` : s;
+  const m = TAIL_PAREN.exec(step);
+  if (!m) return step;
+  return refsOnly(m[2]) || repeatsWords(m[2], m[1]) ? `${m[1].replace(/[\s,;:]+$/, "")}${m[3] === "." ? "" : m[3]}` : step;
 }
 /** The notes a step's trailing "(...)" pointed at, kept for the quiet line under the heading ("uni:01M3… (Cutover plan)" → that text); null: none. */
 export function stepNotes(step: string): string | null {
-  const m = TAIL_PAREN.exec(listPointerOff(step));
+  const m = TAIL_PAREN.exec(step);
   return m && refsOnly(m[2]) && m[2].trim() ? m[2].trim() : null;
 }
 
@@ -1341,6 +1362,28 @@ export function detailLists(detail: string | null | undefined): DetailList[] {
       items.push(tidyItem(chunk));
     });
     out.push({ label, items: items.filter(Boolean), rest: without(new Set(), { at, text: [before, after].filter(Boolean).join(" ") }) });
+  });
+  // r30: "Labels to approve (en; es written): 'A' · 'B' · 'C'. Also her call: …": items set apart by " · " in a paragraph (at least three)
+  lines.forEach((line, at) => {
+    if (LISTLINE.test(line)) return;
+    const parts = line.split(/\s+·\s+/);
+    if (parts.length < 3) return;
+    const lab = /^(.*?)([^.!?\n]*?):\s+(?=\S)/u.exec(parts[0]);
+    if (!lab) return;
+    const before = lab[1].trim();
+    const label = lab[2].trim();
+    if (!label || label.length > 80) return;
+    const first = parts[0].slice(lab[0].length);
+    const lastRaw = parts[parts.length - 1];
+    // the last item ends at its closing quote (a quote not followed by a letter) or at the sentence's end; what follows is the paragraph's own
+    const q = /^['"“‘]/.test(lastRaw) ? /^(\S[\s\S]*?['"”’])(?=[.;,]?\s+\p{Lu}|[.;,]?$)/u.exec(lastRaw) : null;
+    const d = depths(lastRaw);
+    const e = q ? null : [...lastRaw.matchAll(/[.!?](?=\s+\p{Lu})/gu)].find((x) => d[x.index ?? 0] === 0);
+    const lastItem = q ? q[1] : e ? lastRaw.slice(0, (e.index ?? 0) + 1) : lastRaw;
+    const after = (q ? lastRaw.slice(q[1].length) : e ? lastRaw.slice((e.index ?? 0) + 1) : "").replace(/^[.;,]\s*/, "").trim();
+    const items = [first, ...parts.slice(1, -1), lastItem].map((x) => tidyItem(x).replace(/^['"“‘]([\s\S]*?)['"”’][.;,]?$/, "$1").trim()).filter(Boolean);
+    if (items.length < 3 || items.some((x) => x.length > 200)) return;
+    out.push({ label, items, rest: without(new Set(), { at, text: [before, after].filter(Boolean).join(" ") }) });
   });
   return out.filter((l) => l.items.length);
 }
@@ -1441,8 +1484,12 @@ export function confirmationOf(hasRoom: boolean, askedAt: string | null | undefi
 }
 /** A task whose record isn't asked about (or any task the feed hasn't resolved): unconfirmed, with no date to go on. */
 export const UNRESOLVED: Resolved = { state: "recheck", why: "no-date", hit: null, failed: false };
-/** The one quiet line over an unconfirmed request: "Asked Oct 13 · not confirmed since" (with no date: "Not confirmed since it was written"). */
-export const unconfirmedLine = (asked: string | null | undefined): string => (asked ? `${asked[0].toLocaleUpperCase()}${asked.slice(1)} · not confirmed since` : "Not confirmed since it was written");
+/** The one quiet line over an unconfirmed request, with its reason (r30): "Asked Oct 13 · chat since in #cohere"; an old one "Asked Oct 11 · not confirmed since"; with no date "Not confirmed since it was written". */
+export const unconfirmedLine = (asked: string | null | undefined, why: RecheckWhy | null = null, room: string | null = null): string => {
+  const r = room?.replace(/^#/, "") ?? "";
+  const reason = why === "chat-since" ? (r ? `chat since in #${r}` : "chat since") : why === "no-room" ? "no room" : "not confirmed since";
+  return asked ? `${asked[0].toLocaleUpperCase()}${asked.slice(1)} · ${reason}` : why === "no-room" ? "No room" : why === "chat-since" ? `Chat since in ${r ? `#${r}` : "its room"}` : "Not confirmed since it was written";
+};
 /** Whether the approval answers (and "I did this") are offered as ready: only when the ask is confirmed, or after "Answer anyway". */
 export const answersReady = (c: Confirm, anyway: boolean): boolean => c === "confirmed" || anyway;
 export const ANSWER_ANYWAY = "Answer anyway";
