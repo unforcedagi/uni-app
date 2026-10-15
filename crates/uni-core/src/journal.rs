@@ -233,7 +233,9 @@ impl Store {
             return Err(Error::Invalid("too many alternate paths".into()));
         }
         if uuid::Uuid::parse_str(entry_id).is_err() || uuid::Uuid::parse_str(send.id).is_err() {
-            return Err(Error::Invalid("entry and submission ids must be UUIDs".into()));
+            return Err(Error::Invalid(
+                "entry and submission ids must be UUIDs".into(),
+            ));
         }
         self.conn.execute(
             "DELETE FROM journal_sent WHERE sent_at < ?1",
@@ -732,7 +734,13 @@ mod tests {
         assert_eq!(s.journal_pending().unwrap().len(), 1);
         // other words are a new entry
         assert_eq!(
-            submit(send(ID3, false), ID3, p2, "Different placeholder words", 282),
+            submit(
+                send(ID3, false),
+                ID3,
+                p2,
+                "Different placeholder words",
+                282
+            ),
             Queued::New
         );
         s.journal_remove(ID3).unwrap();
@@ -741,7 +749,13 @@ mod tests {
         s.journal_mark_sent(&e, "note-1", 300).unwrap();
         s.journal_remove(ID).unwrap();
         assert_eq!(
-            submit(send(SEND2, false), ID2, p2, words, 300 + DUPLICATE_WINDOW_SECS - 1),
+            submit(
+                send(SEND2, false),
+                ID2,
+                p2,
+                words,
+                300 + DUPLICATE_WINDOW_SECS - 1
+            ),
             Queued::SameWords(SameWords {
                 kind: "saved",
                 id: "note-1".into(),
@@ -751,7 +765,13 @@ mod tests {
         assert!(s.journal_pending().unwrap().is_empty());
         // after the window the same words are simply a new entry
         assert_eq!(
-            submit(send(SEND2, false), ID2, p2, words, 301 + DUPLICATE_WINDOW_SECS),
+            submit(
+                send(SEND2, false),
+                ID2,
+                p2,
+                words,
+                301 + DUPLICATE_WINDOW_SECS
+            ),
             Queued::New
         );
     }
@@ -762,17 +782,47 @@ mod tests {
         let p1 = "Journal/2026/10-14/19-43 Placeholder check-in";
         let p2 = "Journal/2026/10-14/19-48 Placeholder check-in";
         let words = "Placeholder check-in";
-        s.journal_submit(send(SEND, false), ID, p1, &[], words, "text", "t", None, 100)
-            .unwrap();
+        s.journal_submit(
+            send(SEND, false),
+            ID,
+            p1,
+            &[],
+            words,
+            "text",
+            "t",
+            None,
+            100,
+        )
+        .unwrap();
         assert!(matches!(
-            s.journal_submit(send(SEND2, false), ID2, p2, &[], words, "text", "t", None, 101)
-                .unwrap(),
+            s.journal_submit(
+                send(SEND2, false),
+                ID2,
+                p2,
+                &[],
+                words,
+                "text",
+                "t",
+                None,
+                101
+            )
+            .unwrap(),
             Queued::SameWords(_)
         ));
         // the user chose "Save another": the same send, now allowed
         assert_eq!(
-            s.journal_submit(send(SEND2, true), ID2, p2, &[], words, "text", "t", None, 102)
-                .unwrap(),
+            s.journal_submit(
+                send(SEND2, true),
+                ID2,
+                p2,
+                &[],
+                words,
+                "text",
+                "t",
+                None,
+                102
+            )
+            .unwrap(),
             Queued::New
         );
         let ids: Vec<String> = s
@@ -802,8 +852,18 @@ mod tests {
         );
         // the same submission id under a new entry id is still that send
         assert_eq!(
-            s.journal_submit(send(SEND, false), ID2, p, &[], words, "text", "t", None, 102)
-                .unwrap(),
+            s.journal_submit(
+                send(SEND, false),
+                ID2,
+                p,
+                &[],
+                words,
+                "text",
+                "t",
+                None,
+                102
+            )
+            .unwrap(),
             Queued::Retry
         );
         assert_eq!(s.journal_pending().unwrap().len(), 1);
@@ -818,7 +878,17 @@ mod tests {
         );
         assert!(s.journal_pending().unwrap().is_empty());
         assert!(s
-            .journal_submit(send("not-a-uuid", false), ID3, p, &[], words, "text", "t", None, 202)
+            .journal_submit(
+                send("not-a-uuid", false),
+                ID3,
+                p,
+                &[],
+                words,
+                "text",
+                "t",
+                None,
+                202
+            )
             .is_err());
     }
 
@@ -1043,7 +1113,10 @@ mod tests {
         // so it leaves them where they are; never a `-N` suffix
         for p in &tried {
             let b = p.as_bytes();
-            assert!(!(b[b.len() - 2] == b'-' && b[b.len() - 1].is_ascii_digit()), "{p}");
+            assert!(
+                !(b[b.len() - 2] == b'-' && b[b.len() - 1].is_ascii_digit()),
+                "{p}"
+            );
             assert!(check_path(p).is_ok(), "{p}");
         }
     }
@@ -1201,6 +1274,9 @@ mod tests {
         queue_retry(&s, p, alt);
         let r = flush(&s, &client).await.unwrap();
         handle.join().unwrap();
-        assert_eq!((r.sent, r.remaining, r.error), (vec![format!("n:{p}")], 0, None));
+        assert_eq!(
+            (r.sent, r.remaining, r.error),
+            (vec![format!("n:{p}")], 0, None)
+        );
     }
 }
