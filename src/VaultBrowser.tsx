@@ -59,7 +59,9 @@ export default function VaultBrowser({ vault, onOpen, onCreate, onSearch, onBack
   return <section className="vault-browser" aria-label={`Vault ${vault}`}>
     <header className="note-bar"><button className="note-action" onClick={onBack}>← {backTo}</button><strong>{vault}</strong><button className="note-action" disabled={loading} onClick={() => invalidatePaths(vault)}>Refresh</button></header>
     <div className="vault-toolbar"><input type="search" aria-label="Filter paths" placeholder="Filter paths" value={filter} onChange={(e) => setFilter(e.target.value)} />{actions("")}</div>
-    <div className="vault-scroll">{loading && <p role="status">Loading paths…</p>}{error && <p className="error" role="alert">{error}</p>}
+    <div className="vault-scroll">{loading && <p role="status">Loading paths…</p>}{/* r25 (Codex 7): a failure is a plain sentence and Retry, the technical cause under Details (as Search and notes do) */}
+      {error && <div className="note-error" role="alert"><p>Couldn't read this vault just now. <button type="button" className="cp-retry" onClick={() => invalidatePaths(vault)}>Retry</button></p>
+        <details className="note-error-more"><summary>Details</summary><p className="note-error-detail">{error}</p></details></div>}
       {paths.length >= 20_000 && <p>Showing the first 20,000 notes. Use folder search for more.</p>}
       {!loading && !error && tree.length === 0 && <p className="empty">{filter ? "No matching paths." : "This vault is empty."}</p>}{renderedTree}{capped && <p>Showing up to 2,000 rows; refine your filter to see more.</p>}</div>
   </section>;
