@@ -338,3 +338,28 @@ test.describe('r28 compact', () => {
     });
   }
 });
+
+test.describe('r28 compact list', () => {
+  for (const size of [{ width: 740, height: 360 }, { width: 920, height: 360 }]) {
+    test(`Codex P2-5 at ${size.width}×${size.height}: a first request that carries a list is still whole in view: its items go, to none, before the request is cut`, async ({ page }) => {
+      test.skip(page.viewportSize()?.width !== 1440 && page.viewportSize()?.width !== 1280, 'one project is enough for the fixed sizes');
+      await page.setViewportSize(size);
+      await boot(page);
+      await add(page, { id: 'li1', title: 'T-711 Placeholder with a list', node: 'Areas/Techne', meta: { due: '2026-10-13', next: 'Forward Eileen the asks listed in this task\'s detail', detail: 'Eileen still owes: (1) OK or cut 6 groups of short functional lines in the placeholder copy; (2) the Spanish versions of two page names and whether the heading should end in a full stop; (3) one morning-practice line per day for the placeholder week; (4) yes or no on the heading.' } });
+      await refresh(page);
+      await openRoom(page, 'Techne');
+      await page.locator('.cp-line').click();
+      const scroller = page.locator('.cp-sheet .cp-scroll');
+      const first = scroller.locator('section[aria-label="Needs you"] li.cp-item').first();
+      await expect(first).toBeVisible();
+      await expect(first).toContainText('Forward Eileen the asks');
+      await expect.poll(async () => first.evaluate((el) => { const r = el.getBoundingClientRect(); const s = (el.closest('.cp-scroll') as HTMLElement).getBoundingClientRect(); return r.top >= s.top - 0.5 && r.bottom <= s.bottom + 0.5; })).toBe(true);
+      // what is shown of its list is whole (each item two lines at most, the rest "and N more"); none at all is allowed
+      const shown = await first.locator('.cp-item-line').count();
+      const more = await first.locator('.cp-item-more').count() ? Number((await first.locator('.cp-item-more').innerText()).match(/and (\d+) more/)![1]) : 0;
+      if (shown) expect(shown + more).toBe(4);
+      else expect(more).toBe(0);
+      await rowsWhole(first);
+    });
+  }
+});

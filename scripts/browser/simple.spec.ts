@@ -2623,7 +2623,7 @@ test.describe('r17', () => {
     await expect(page.locator('.cp.side')).toHaveCount(0);
     for (const h of [360, 330, 300]) {
       await page.setViewportSize({ width: 920, height: h });
-      await expect(page.locator('.cp.strip .cp-line-text'), `${h}px`).toHaveText(/^Needs you · \d+: \S/);
+      await expect(page.locator('.cp.strip .cp-line-text'), `${h}px`).toHaveText(/^Needs you · \d+(?:: \S.*)?$/); // r28: the first request whole, or just the count: never part of it
     }
     await page.locator('.cp.strip .cp-line').click();
     const sheet = page.locator('.cp-sheet');
@@ -3654,15 +3654,18 @@ test.describe('r21', () => {
     await expect(settings).toHaveCount(0);
   });
 
-  test('the folded strip never shows step 1 as the whole job: "Needs you · N: 2 steps: Look at cohere-signup-staging on phone, then …" (found in the real app at 800×600)', async ({ page }) => {
+  test('the folded strip never shows step 1 as the whole job (r28: nor any part of the request): "Needs you · N: <the whole first request>" when it fits one line, else "Needs you · N"', async ({ page }) => {
     await page.setViewportSize({ width: 800, height: 600 });
     await boot(page);
     await add(page, { id: 'st', title: 'T-113 Companion Today redesign', node: 'Projects/ATLAS', meta: { priority: 'now', due: '2026-10-01', next: 'Look at https://cohere-signup-staging.example-workers.invalid/?look=ecology on phone, then forward #cohere\'s \'For Eileen\' block (posted 10-13)' } });
     await refresh(page, '2026-10-14T09:00:00.000Z');
     await openRoom(page, 'ATLAS');
     const line = page.locator('.cp.strip .cp-line-text');
-    // r22 (both critics): never "then …": step 1 and how many there are
-    await expect(line).toContainText(/^Needs you · \d+: Look at cohere-signup-staging on phone \(step 1 of 2\)$/);
+    const text = (await line.innerText()).trim();
+    expect(text).toMatch(/^Needs you · \d+(?:: .+)?$/);
+    expect(text).not.toMatch(/step 1 of|…|\.\.\./);
+    // with a request after the count it is the whole of it (both steps), never the first step alone
+    if (/:/.test(text)) expect(text).toContain("then forward #cohere's 'For Eileen' block (posted 10-13)");
     await expect(line).not.toContainText('example-workers.invalid');
   });
 
