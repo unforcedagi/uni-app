@@ -1937,9 +1937,13 @@ mod send_gate_tests {
     use super::*;
     use std::time::{Duration, Instant};
 
+    /// Both tests lock the process-wide gates; run in parallel, one holds `SEND_GATE` for 100 ms and the other's timing fails. They take turns.
+    static SERIAL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
     /// r26 (Codex P1 3): the first sync holds `IO_GATE` for its whole run; a send must not wait for it.
     #[tokio::test]
     async fn a_send_does_not_wait_behind_the_sync() {
+        let _serial = SERIAL.lock().await;
         let sync = IO_GATE.lock().await; // a cold sync in progress
         let t = Instant::now();
         let got = tokio::time::timeout(Duration::from_millis(500), SEND_GATE.lock()).await;
@@ -1952,6 +1956,7 @@ mod send_gate_tests {
     /// Sends, edits and deletes still keep their own order.
     #[tokio::test]
     async fn sends_wait_for_each_other() {
+        let _serial = SERIAL.lock().await;
         let first = SEND_GATE.lock().await;
         let second = tokio::time::timeout(Duration::from_millis(100), SEND_GATE.lock()).await;
         assert!(second.is_err(), "two sends ran at once");
