@@ -128,6 +128,15 @@ check("Projects view: by the room's last activity; a roomless project talks in i
   assert.deepEqual([cards[1].roomName, cards[1].own], ["parachute", false], "Mail has no room: it talks in #parachute");
   assert.deepEqual(cards[1].chips.map((c) => c.name), ["Parachute", "uni-app"]);
 });
+check("Projects view: a project linked to nothing (it only falls back to #Uni) sorts after projects with a room, not first because #Uni is busy", () => {
+  const busyUni = ROOMS.map((r) => r.id === "r-uni" ? { ...r, last_ts: 9999 } : r);
+  const t = buildTree([area("a-par", "Parachute", { room: "parachute" }), area("a-bou", "Boulder", { room: "boulder" }),
+    proj("p-mail", "Mail", { links: ["a-par"] }), proj("p-reg", "RegenHub", { links: ["a-bou"] }), proj("p-g5", "Give5")]);
+  const cards = projectCards(t, busyUni, busyUni[0]);
+  assert.deepEqual(cards.map((c) => c.name), ["Mail", "RegenHub", "Give5"]);
+  const g5 = cards[2];
+  assert.deepEqual([g5.roomName, g5.own, g5.lastTs], ["Uni", false, null], "it still talks in #Uni");
+});
 check("the view choice is remembered per device: a bad value is Areas", () => {
   assert.equal(parseView('"rooms"'), "rooms"); assert.equal(parseView("projects"), "projects");
   assert.equal(parseView(null), "areas"); assert.equal(parseView("nope"), "areas");
