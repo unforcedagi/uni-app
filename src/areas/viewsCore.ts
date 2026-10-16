@@ -51,7 +51,9 @@ export function projectCards(tree: Tree, rooms: readonly RoomStamp[], uni: RoomR
     const v = roomView(tree, n.path, rooms, uni);
     const links = tree.links.get(n.path) ?? [];
     const chips = [...links.filter((p) => tree.nodes.get(p)?.kind === "area"), ...links.filter((p) => tree.nodes.get(p)?.kind === "project")].map(chipOf);
-    return { path: n.path, name: n.name, summary: n.purpose, roomId: v.target?.id ?? null, roomName: v.target?.name ?? null, own: v.own, lastTs: v.target ? stamp.get(v.target.id) ?? null : null, chips };
+    // Uni links to everything implicitly: a project that only falls back to #Uni has no activity of its own, so #Uni's chatter must not sort it first.
+    const viaUni = !v.own && !!uni && v.target?.id === uni.id;
+    return { path: n.path, name: n.name, summary: n.purpose, roomId: v.target?.id ?? null, roomName: v.target?.name ?? null, own: v.own, lastTs: v.target && !viaUni ? stamp.get(v.target.id) ?? null : null, chips };
   });
   return byActivity(cards.map((c) => ({ ...c, last_ts: c.lastTs }))).map(({ last_ts: _drop, ...c }) => c);
 }
