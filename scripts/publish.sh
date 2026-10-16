@@ -66,6 +66,12 @@ for f in Uni-mac-arm64.zip Uni.app.tar.gz Uni.app.tar.gz.sig; do test -s "$STAGE
 cp "$(pwd)/src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk" "$STAGE/uni.apk"
 BADGING="$("$HOME/Android/Sdk/build-tools/35.0.0/aapt" dump badging "$STAGE/uni.apk" | head -1)"
 [[ $BADGING == *"versionCode='$CODE'"*"versionName='$VERSION'"* ]] || { echo "APK not stamped $VERSION/$CODE: $BADGING" >&2; exit 1; }
+# Installed apps trust only the original signing key (~/.config/.android/debug.keystore, set via ANDROID_USER_HOME
+# in android.env). An APK signed by any other key fails on every device with "conflicts with another package"
+# (0.1.47, 10-16). Refuse to publish it.
+APK_SIGNER_SHA256="6e9f4f94ffbb86604e02ca97a1b7b764ae0cc341430e92b4c7a4a4f22246b63d"
+SIGNERS="$("$HOME/Android/Sdk/build-tools/36.1.0/apksigner" verify --print-certs "$STAGE/uni.apk" | sed -n 's/^Signer #[0-9]* certificate SHA-256 digest: //p')"
+[[ $SIGNERS == "$APK_SIGNER_SHA256" ]] || { echo "APK signed by the wrong key: '$SIGNERS' (expected $APK_SIGNER_SHA256)" >&2; exit 1; }
 python3 scripts/write-release-manifest.py "$STAGE" "$VERSION" "$SHA" "$REPO_SLUG"
 # The tag is created last, so a failed build leaves nothing behind and the next tick retries.
 gh release create "$TAG" --repo "$REPO_SLUG" --target "$SHA" --latest \
