@@ -1268,21 +1268,42 @@ fn cached_attachment(dir: &std::path::Path, hash: &str, expected: Option<&str>, 
 /// the name no longer hurts it.
 const OPENED_COPY_GRACE: std::time::Duration = std::time::Duration::from_secs(10 * 60);
 
+/// Open copies being prepared: one lock per `<hash>.<ext>`, so two Opens of the same file never write it at once.
+static OPEN_COPY_LOCKS: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, std::sync::Arc<std::sync::Mutex<()>>>>> =
+    std::sync::LazyLock::new(Default::default);
+
+/// Make `dir/<name>` a verified copy of the cached `dir/<hash>`. A copy already there is reused only if it still
+/// hashes to `hash` (never on its length alone). Otherwise the cache file is copied to a private `.part` name,
+/// hashed on the way, and only a copy that verified is renamed onto `<name>`: a viewer holding the old file
+/// keeps reading it whole, and nobody ever sees a half-written or wrong copy (Codex T-174 review 1).
+/// Returns whether it copied.
+fn prepare_open_copy(dir: &std::path::Path, hash: &str, name: &str) -> Result<bool, String> {
+    let lock = OPEN_COPY_LOCKS.lock().unwrap_or_else(|e| e.into_inner()).entry(name.to_string()).or_default().clone();
+    let _one_writer = lock.lock().unwrap_or_else(|e| e.into_inner());
+    let target = dir.join(name);
+    if uni_core::media::file_sha256(&target).is_ok_and(|got| got == hash) {
+        return Ok(false);
+    }
+    let tmp = dir.join(format!("{name}.{}.part", uuid::Uuid::new_v4()));
+    uni_core::media::copy_verified(&dir.join(hash), &tmp, hash).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, &target).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        e.to_string()
+    })?;
+    Ok(true)
+}
+
 /// Copy the cached `<hash>` to `<hash>.<ext>` for the OS opener, pinning the copy's name first so no prune
 /// removes it while it is written or before the viewer opens it (Codex review 2). The caller releases the
 /// returned name (after [`OPENED_COPY_GRACE`]).
 fn pinned_copy(reg: &std::sync::Mutex<media_registry::Registry>, dir: &std::path::Path, hash: &str, ext: &str) -> Result<(PathBuf, String), String> {
     let name = format!("{hash}.{ext}");
     media_registry::lock(reg).pin(&name);
-    let (path, target) = (dir.join(hash), dir.join(&name));
-    // A 500 MB file: reuse the copy from the last open.
-    let same = std::fs::metadata(&path).ok().map(|m| m.len()) == std::fs::metadata(&target).ok().map(|m| m.len());
-    let copied = if same { Ok(0) } else { std::fs::copy(&path, &target) };
-    match copied {
-        Ok(_) => Ok((target, name)),
+    match prepare_open_copy(dir, hash, &name) {
+        Ok(_) => Ok((dir.join(&name), name)),
         Err(e) => {
             media_registry::lock(reg).release(&name);
-            Err(e.to_string())
+            Err(e)
         }
     }
 }
@@ -2235,12 +2256,88 @@ mod media_open_tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    fn cached(d: &std::path::Path, data: &[u8]) -> String {
+        let sha = uni_core::media::sha256_hex(data);
+        std::fs::write(d.join(&sha), data).unwrap();
+        sha
+    }
+
+    fn leftovers(d: &std::path::Path) -> Vec<String> {
+        std::fs::read_dir(d).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).filter(|n| n.ends_with(".part")).collect()
+    }
+
+    /// Codex T-174 review 1: a copy of the right length but the wrong bytes is not handed to the viewer.
+    #[test]
+    fn a_same_length_corrupt_copy_is_replaced() {
+        let (d, reg) = (dir(), std::sync::Mutex::new(media_registry::Registry::default()));
+        let data = b"the real attachment".to_vec();
+        let sha = cached(&d, &data);
+        std::fs::write(d.join(format!("{sha}.pdf")), vec![b'x'; data.len()]).unwrap();
+        let (target, _) = pinned_copy(&reg, &d, &sha, "pdf").unwrap();
+        assert_eq!(std::fs::read(&target).unwrap(), data);
+        assert!(leftovers(&d).is_empty());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Codex T-174 review 1: bytes that don't hash to the name are never published, and nothing is left behind.
+    #[test]
+    fn a_copy_that_fails_its_hash_is_not_published() {
+        let (d, reg) = (dir(), std::sync::Mutex::new(media_registry::Registry::default()));
+        let sha = cached(&d, b"verified when fetched");
+        std::fs::write(d.join(&sha), b"changed on disk since").unwrap();
+        let err = pinned_copy(&reg, &d, &sha, "pdf").unwrap_err();
+        assert!(err.contains("integrity"), "{err}");
+        assert!(!d.join(format!("{sha}.pdf")).exists());
+        assert!(leftovers(&d).is_empty());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Codex T-174 review 1: a viewer already reading an earlier copy keeps reading it whole; a new copy is a new
+    /// file put in its place, never the same file truncated and rewritten.
+    #[cfg(unix)]
+    #[test]
+    fn a_new_copy_replaces_the_file_instead_of_rewriting_it() {
+        use std::io::Read as _;
+        use std::os::unix::fs::MetadataExt as _;
+        let (d, reg) = (dir(), std::sync::Mutex::new(media_registry::Registry::default()));
+        let data = vec![7u8; 4096];
+        let sha = cached(&d, &data);
+        let target = d.join(format!("{sha}.mp4"));
+        std::fs::write(&target, b"an older, different copy").unwrap();
+        let mut viewer = std::fs::File::open(&target).unwrap();
+        pinned_copy(&reg, &d, &sha, "mp4").unwrap();
+        assert_ne!(viewer.metadata().unwrap().ino(), std::fs::metadata(&target).unwrap().ino());
+        let mut seen = Vec::new();
+        viewer.read_to_end(&mut seen).unwrap();
+        assert_eq!(seen, b"an older, different copy");
+        assert_eq!(std::fs::read(&target).unwrap(), data);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Codex T-174 review 1: two Opens of the same file at once: one writes the copy, the other waits and reuses it.
+    #[test]
+    fn concurrent_opens_write_the_copy_once() {
+        let d = dir();
+        let data: Vec<u8> = (0..24 * 1024 * 1024u32).map(|i| (i % 251) as u8).collect();
+        let sha = cached(&d, &data);
+        let name = format!("{sha}.mp4");
+        let start = std::sync::Barrier::new(2);
+        let copies: Vec<bool> = std::thread::scope(|s| {
+            let runs: Vec<_> = (0..2).map(|_| s.spawn(|| { start.wait(); prepare_open_copy(&d, &sha, &name).unwrap() })).collect();
+            runs.into_iter().map(|r| r.join().unwrap()).collect()
+        });
+        assert_eq!(copies.iter().filter(|c| **c).count(), 1, "{copies:?}");
+        assert!(std::fs::read(d.join(&name)).unwrap() == data);
+        assert!(leftovers(&d).is_empty());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
     /// Codex review 2: another download's prune runs while Open's copy is being handed to the OS.
     #[test]
     fn the_opened_copy_survives_a_prune_until_released() {
         let (d, reg) = (dir(), std::sync::Mutex::new(media_registry::Registry::default()));
-        let sha = "a".repeat(64);
-        std::fs::write(d.join(&sha), [1u8; 64]).unwrap();
+        // The cache file holds what its name says (Open now checks; T-174 review 1).
+        let sha = cached(&d, &[1u8; 64]);
         let (target, name) = pinned_copy(&reg, &d, &sha, "pdf").unwrap();
         assert_eq!(target, d.join(format!("{sha}.pdf")));
         media_registry::lock(&reg).prune(&d, 0); // a concurrent download, cache over budget

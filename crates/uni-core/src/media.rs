@@ -471,28 +471,58 @@ pub fn read_cached(cache_dir: &Path, sha: &str) -> Option<Vec<u8>> {
 /// its name (read in chunks, never whole). A corrupt file is removed; a hit
 /// is marked recently used for [`prune_cache`].
 pub fn verified_cache_file(cache_dir: &Path, sha: &str, max: u64) -> Option<PathBuf> {
-    use std::io::Read as _;
     let path = cache_path(cache_dir, sha).ok()?;
-    let mut file = std::fs::File::open(&path).ok()?;
-    if file.metadata().ok()?.len() > max {
+    if std::fs::metadata(&path).ok()?.len() > max {
         return None;
     }
-    let mut engine = sha256::Hash::engine();
-    let mut buf = vec![0u8; 1024 * 1024];
-    loop {
-        match file.read(&mut buf) {
-            Ok(0) => break,
-            Ok(n) => nostr::hashes::HashEngine::input(&mut engine, &buf[..n]),
-            Err(_) => return None,
-        }
-    }
-    if sha256::Hash::from_engine(engine).to_string() != sha {
-        drop(file);
+    if file_sha256(&path).ok()? != sha {
         let _ = std::fs::remove_file(&path);
         return None;
     }
     touch(&path);
     Some(path)
+}
+
+/// Read `src` in 1 MB chunks, hashing; with `out`, write each chunk there as well. Returns the SHA-256 hex.
+fn hash_through(src: &Path, mut out: Option<&mut std::fs::File>) -> std::io::Result<String> {
+    use std::io::{Read as _, Write as _};
+    let mut file = std::fs::File::open(src)?;
+    let mut engine = sha256::Hash::engine();
+    let mut buf = vec![0u8; 1024 * 1024];
+    loop {
+        let n = file.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        nostr::hashes::HashEngine::input(&mut engine, &buf[..n]);
+        if let Some(out) = out.as_mut() {
+            out.write_all(&buf[..n])?;
+        }
+    }
+    Ok(sha256::Hash::from_engine(engine).to_string())
+}
+
+/// SHA-256 (hex) of a file, read in chunks, never whole.
+pub fn file_sha256(path: &Path) -> std::io::Result<String> {
+    hash_through(path, None)
+}
+
+/// Copy `src` to a new file `dst`, hashing as it goes, and sync it. Fails, removing `dst`, unless the bytes
+/// written hash to `sha`. `dst` must not exist (it is created, never overwritten).
+pub fn copy_verified(src: &Path, dst: &Path, sha: &str) -> std::io::Result<()> {
+    let mut out = std::fs::File::options().write(true).create_new(true).open(dst)?;
+    // From here on `dst` is ours: on any failure it goes.
+    let result = hash_through(src, Some(&mut out)).and_then(|got| {
+        if got != sha {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "file failed its integrity check"));
+        }
+        out.sync_all()
+    });
+    if result.is_err() {
+        drop(out);
+        let _ = std::fs::remove_file(dst);
+    }
+    result
 }
 
 /// Mark a cache file recently used for [`prune_cache`] (best effort).
@@ -1578,6 +1608,26 @@ mod tests {
         let placed = export_file(&cached, &nested, &hostile).unwrap();
         assert_eq!(placed, nested.join("bashrc.pdf"));
         assert!(export_file(&cached, &nested, "../x").is_err());
+    }
+
+    #[test]
+    fn copy_verified_publishes_only_matching_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("src");
+        std::fs::write(&src, b"attachment bytes").unwrap();
+        let sha = sha256_hex(b"attachment bytes");
+        assert_eq!(file_sha256(&src).unwrap(), sha);
+        let dst = dir.path().join("dst");
+        copy_verified(&src, &dst, &sha).unwrap();
+        assert_eq!(std::fs::read(&dst).unwrap(), b"attachment bytes");
+        // Never over an existing file.
+        assert!(copy_verified(&src, &dst, &sha).is_err());
+        assert_eq!(std::fs::read(&dst).unwrap(), b"attachment bytes");
+        // Wrong bytes: an error and no file left.
+        let bad = dir.path().join("bad");
+        let err = copy_verified(&src, &bad, H).unwrap_err();
+        assert!(err.to_string().contains("integrity"), "{err}");
+        assert!(!bad.exists());
     }
 
     #[test]
