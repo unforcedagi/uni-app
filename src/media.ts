@@ -68,6 +68,33 @@ export function formatSize(n: number | null | undefined): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+/**
+ * T-172 (Codex review 1): one player's pin on its cached file. The app keeps a pinned file out of cache pruning, so
+ * a player holds a pin only while it plays: from `media_stream` (which pins) or a later `play`, until the media
+ * ends, fails, or the player goes away. `call` sends `media_pin` / `media_release` to the app.
+ */
+export function playerPin(call: (cmd: "media_pin" | "media_release", sha: string) => void) {
+  let sha: string | null = null; // the file this player plays
+  let held = false;
+  let gone = false;
+  const release = () => { if (held && sha) call("media_release", sha); held = false; };
+  return {
+    /** `media_stream` answered: it pinned `next` for us. */
+    loaded(next: string) {
+      if (gone) { call("media_release", next); return; }
+      release();
+      sha = next;
+      held = true;
+    },
+    /** Playback (re)started. */
+    play() { if (!held && sha && !gone) { call("media_pin", sha); held = true; } },
+    /** Ended or failed. */
+    release,
+    /** Unmount. */
+    dispose() { release(); gone = true; },
+  };
+}
+
 /** A media command's error as one short line for the attachment card ("media: relay answered 401 …" → "Relay answered 401 …"). */
 export function mediaErrorText(e: unknown): string {
   const raw = String(e instanceof Error ? e.message : e).replace(/^(media|invalid): /, "").trim();

@@ -7,7 +7,7 @@
 import { useEffect, useRef, useState } from "react";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { pdfThumbnail } from "./pdfPreview";
-import { attachmentKind, collectAttachments, displayName, formatSize, imageLinks, mediaErrorText, parseDim, playbackErrorText, relayMediaSha, stripAttachmentLines, type MediaRef } from "./media";
+import { attachmentKind, collectAttachments, displayName, formatSize, imageLinks, mediaErrorText, parseDim, playbackErrorText, playerPin, relayMediaSha, stripAttachmentLines, type MediaRef } from "./media";
 
 export type { MediaRef } from "./media";
 
@@ -64,20 +64,15 @@ function relayBlob(m: MediaRef): Promise<string> {
 
 // Video/audio → local `unimedia` URL over the verified cache file. Not behind
 // `slot`: a 40 MB download must not hold up the images.
-const streams = new Map<string, Promise<string>>();
-const streamKey = (m: MediaRef) => `${m.url}|${m.sha256 ?? ""}`;
-
-function relayStream(m: MediaRef): Promise<string> {
-  const key = streamKey(m);
-  let p = streams.get(key);
-  if (!p) {
-    p = invoke<{ sha: string; url: string | null }>("media_stream", { url: m.url, sha: m.sha256, mime: m.mime })
-      .then((r) => r.url ?? convertFileSrc(r.sha, "unimedia")); // url: the 127.0.0.1 loopback on Linux and Android (see media_loopback.rs)
-    p.catch(() => streams.delete(key));
-    streams.set(key, p);
-  }
-  return p;
+// Each player asks for itself: `media_stream` pins the file for that player (see playerPin), and a file already
+// verified this session answers at once.
+function relayStream(m: MediaRef): Promise<{ sha: string; src: string }> {
+  return invoke<{ sha: string; url: string | null }>("media_stream", { url: m.url, sha: m.sha256, mime: m.mime })
+    // url: the 127.0.0.1 loopback on Linux and Android (see media_loopback.rs)
+    .then((r) => ({ sha: r.sha, src: r.url ?? convertFileSrc(r.sha, "unimedia") }));
 }
+
+const pinCall = (cmd: "media_pin" | "media_release", sha: string) => { void invoke(cmd, { sha }).catch(() => {}); };
 
 // ── Hooks ────────────────────────────────────────────────────────────────
 function useVisible<T extends Element>(): [React.RefObject<T | null>, boolean] {
@@ -131,15 +126,18 @@ function RelayPlayer({ m }: { m: MediaRef }) {
   const [go, setGo] = useState(false);
   const [retry, setRetry] = useState(0);
   const kind = attachmentKind(m);
-  const { src, error, fail } = useRelayMedia(relayStream, m, go, retry);
-  // A playback error (format, or the cache file evicted) drops the stream so a retry fetches again.
+  const pin = useRef(playerPin(pinCall)).current;
+  useEffect(() => () => pin.dispose(), []);
+  const { src, error, fail } = useRelayMedia((m) => relayStream(m).then((r) => { pin.loaded(r.sha); return r.src; }), m, go, retry);
+  // A playback error (format, or the cache file evicted) gives the pin back; a retry asks media_stream again.
   const failed = (e: React.SyntheticEvent<HTMLMediaElement>) => {
-    streams.delete(streamKey(m));
+    pin.release();
     fail(playbackErrorText(e.currentTarget.error?.code));
   };
+  const events = { onError: failed, onPlay: () => pin.play(), onEnded: () => pin.release() };
   if (src) return kind === "video"
-    ? <video className="attachment-video" src={src} controls playsInline autoPlay style={boxStyle(m.dim)} onError={failed} />
-    : <audio className="attachment-audio" src={src} controls autoPlay onError={failed} />;
+    ? <video className="attachment-video" src={src} controls playsInline autoPlay style={boxStyle(m.dim)} {...events} />
+    : <audio className="attachment-audio" src={src} controls autoPlay {...events} />;
   const size = formatSize(m.size);
   return <button className="attachment-file" onClick={() => { if (go) setRetry((n) => n + 1); else setGo(true); }} disabled={go && !error}
     title={error ?? undefined}>

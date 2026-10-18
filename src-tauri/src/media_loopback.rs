@@ -8,36 +8,71 @@
 //!
 //! Both played the same file over plain http. So this serves the verified cache files over HTTP on 127.0.0.1, under
 //! a random per-launch token, streaming the asked range from disk. macOS (and other platforms) keep the custom
-//! protocol. Android: the debug-built APK allows cleartext; a release build would need 127.0.0.1 in a network
-//! security config.
+//! protocol. Android allows cleartext to 127.0.0.1 and localhost only, in release builds too
+//! (gen/android/app/src/main/res/xml/network_security_config.xml).
 
-use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
-use std::time::Duration;
+use std::sync::mpsc::{sync_channel, TrySendError};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 static BASE: OnceLock<Result<String, String>> = OnceLock::new();
 
-/// `http://127.0.0.1:<port>/<token>`; the server starts on first use and lives as long as the app.
-pub fn base(cache_dir: PathBuf) -> Result<String, String> {
-    BASE.get_or_init(|| start(cache_dir)).clone()
+/// Codex review 1 (P1): any app on an Android device can reach 127.0.0.1 without the token. So the work one
+/// connection can cause is bounded before the token is read: a fixed pool of handlers, a short queue (a connection
+/// beyond it is closed at once), and one deadline for the whole request head, however slowly it trickles in.
+#[derive(Clone, Copy)]
+struct Limits {
+    workers: usize,
+    queue: usize,
+    head_deadline: Duration,
+    write_timeout: Duration,
 }
 
-fn start(cache_dir: PathBuf) -> Result<String, String> {
+const LIMITS: Limits = Limits {
+    workers: 8,
+    queue: 8,
+    head_deadline: Duration::from_secs(3),
+    // A paused player stops reading; give the handler back. It asks again with a Range on resume.
+    write_timeout: Duration::from_secs(15),
+};
+const MAX_HEAD: usize = 16 * 1024;
+
+/// `http://127.0.0.1:<port>/<token>`; the server starts on first use and lives as long as the app.
+pub fn base(cache_dir: PathBuf) -> Result<String, String> {
+    BASE.get_or_init(|| start(cache_dir, LIMITS)).clone()
+}
+
+fn start(cache_dir: PathBuf, limits: Limits) -> Result<String, String> {
     let listener = TcpListener::bind(("127.0.0.1", 0)).map_err(|e| format!("media server: {e}"))?;
     let port = listener.local_addr().map_err(|e| e.to_string())?.port();
-    // 244 random bits: another local user or a web page that reaches the port cannot guess a path.
+    // 244 random bits: another local user, app or web page that reaches the port cannot guess a path.
     let token = format!("{}{}", uuid::Uuid::new_v4().simple(), uuid::Uuid::new_v4().simple());
-    let path_token = token.clone();
+    let (tx, rx) = sync_channel::<TcpStream>(limits.queue);
+    let rx = Arc::new(Mutex::new(rx));
+    for i in 0..limits.workers {
+        let (rx, dir, token) = (rx.clone(), cache_dir.clone(), token.clone());
+        std::thread::Builder::new()
+            .name(format!("unimedia-{i}"))
+            .spawn(move || loop {
+                let conn = match rx.lock().map(|r| r.recv()) {
+                    Ok(Ok(conn)) => conn,
+                    _ => return,
+                };
+                let _ = serve(conn, &dir, &token, limits);
+            })
+            .map_err(|e| e.to_string())?;
+    }
     std::thread::Builder::new()
-        .name("unimedia-loopback".into())
+        .name("unimedia-accept".into())
         .spawn(move || {
             for conn in listener.incoming().flatten() {
-                let (dir, token) = (cache_dir.clone(), path_token.clone());
-                std::thread::spawn(move || {
-                    let _ = serve(conn, &dir, &token);
-                });
+                // Full: every handler is busy and the queue is too. Close now rather than pile up.
+                if let Err(TrySendError::Full(conn)) = tx.try_send(conn) {
+                    drop(conn);
+                }
             }
         })
         .map_err(|e| e.to_string())?;
@@ -45,33 +80,41 @@ fn start(cache_dir: PathBuf) -> Result<String, String> {
     Ok(format!("http://127.0.0.1:{port}/{token}"))
 }
 
-fn serve(mut conn: TcpStream, dir: &Path, token: &str) -> std::io::Result<()> {
-    conn.set_read_timeout(Some(Duration::from_secs(10)))?;
-    // A paused player stops reading; give the thread and file back. It asks again with a Range on resume.
-    conn.set_write_timeout(Some(Duration::from_secs(30)))?;
-    let mut reader = BufReader::new(conn.try_clone()?);
-    let mut line = String::new();
-    (&mut reader).take(8192).read_line(&mut line)?;
-    let mut parts = line.split_whitespace();
-    let (method, target) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""));
-    let mut range = None;
-    for _ in 0..100 {
-        let mut h = String::new();
-        if (&mut reader).take(8192).read_line(&mut h)? == 0 || h.trim().is_empty() {
-            break;
-        }
-        if let Some((k, v)) = h.split_once(':') {
-            if k.trim().eq_ignore_ascii_case("range") {
-                range = Some(v.trim().to_string());
-            }
+/// The request head (up to the blank line), read within `deadline` in total; None when it isn't there in time.
+fn read_head(conn: &mut TcpStream, deadline: Duration) -> Option<String> {
+    let end = Instant::now() + deadline;
+    let mut buf = Vec::with_capacity(1024);
+    let mut chunk = [0u8; 1024];
+    while !buf.windows(4).any(|w| w == b"\r\n\r\n") {
+        let left = end.checked_duration_since(Instant::now()).filter(|d| !d.is_zero())?;
+        conn.set_read_timeout(Some(left)).ok()?;
+        let n = conn.read(&mut chunk).ok().filter(|n| *n > 0)?;
+        buf.extend_from_slice(&chunk[..n]);
+        if buf.len() > MAX_HEAD {
+            return None;
         }
     }
+    Some(String::from_utf8_lossy(&buf).into_owned())
+}
+
+fn serve(mut conn: TcpStream, dir: &Path, token: &str, limits: Limits) -> std::io::Result<()> {
+    conn.set_write_timeout(Some(limits.write_timeout))?;
+    let Some(head) = read_head(&mut conn, limits.head_deadline) else {
+        return Ok(()); // dropped: closes the connection
+    };
+    let mut lines = head.split("\r\n");
+    let mut parts = lines.next().unwrap_or("").split_whitespace();
+    let (method, target) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""));
+    let range = lines
+        .filter_map(|h| h.split_once(':'))
+        .find(|(k, _)| k.trim().eq_ignore_ascii_case("range"))
+        .map(|(_, v)| v.trim().to_string());
     let sha = target
         .strip_prefix('/')
         .and_then(|p| p.strip_prefix(token))
         .and_then(|p| p.strip_prefix('/'))
         .unwrap_or("");
-    let content_type = crate::MEDIA_STREAMS.lock().ok().and_then(|m| m.get(sha).cloned());
+    let content_type = crate::media_registry::lock(&crate::media_registry::MEDIA).content_type(sha);
     let file = content_type
         .as_ref()
         .and_then(|_| uni_core::media::cache_path(dir, sha).ok())
@@ -126,12 +169,12 @@ mod tests {
         let data: Vec<u8> = (0..3_000_000u32).map(|i| (i % 249) as u8).collect();
         let sha = uni_core::media::sha256_hex(&data);
         std::fs::write(dir.join(&sha), &data).unwrap();
-        let base = start(dir.clone()).unwrap();
+        let base = start(dir.clone(), LIMITS).unwrap();
         let token_path = base.splitn(4, '/').nth(3).unwrap().to_string();
 
         // Not allowed yet (not verified this session): 404.
         assert!(get(&base, &format!("/{token_path}/{sha}"), None).0.starts_with("HTTP/1.1 404"));
-        crate::MEDIA_STREAMS.lock().unwrap().insert(sha.clone(), "video/mp4".into());
+        crate::media_registry::lock(&crate::media_registry::MEDIA).allow_for_test(&sha, "video/mp4");
 
         let (head, body) = get(&base, &format!("/{token_path}/{sha}"), Some("bytes=1000-"));
         assert!(head.starts_with("HTTP/1.1 206"), "{head}");
@@ -147,6 +190,65 @@ mod tests {
         assert!(get(&base, &format!("/{}/{sha}", "0".repeat(64)), None).0.starts_with("HTTP/1.1 404"));
         assert!(get(&base, &format!("/{sha}"), None).0.starts_with("HTTP/1.1 404"));
         assert!(get(&base, &format!("/{token_path}/../{sha}"), None).0.starts_with("HTTP/1.1 404"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn threads() -> usize {
+        std::fs::read_dir("/proc/self/task").unwrap().count()
+    }
+
+    /// Codex review 1 (P1): connections that never send a full request head, slowly or at all.
+    #[test]
+    fn silent_or_trickling_clients_hold_no_more_than_the_pool() {
+        let dir = std::env::temp_dir().join(format!("unimedia-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let data = vec![7u8; 4096];
+        let sha = uni_core::media::sha256_hex(&data);
+        std::fs::write(dir.join(&sha), &data).unwrap();
+        crate::media_registry::lock(&crate::media_registry::MEDIA).allow_for_test(&sha, "audio/mp4");
+        let limits = Limits { workers: 2, queue: 2, head_deadline: Duration::from_millis(600), write_timeout: Duration::from_secs(1) };
+        let base = start(dir.clone(), limits).unwrap();
+        let addr = base.trim_start_matches("http://").split('/').next().unwrap().to_string();
+        let token_path = base.splitn(4, '/').nth(3).unwrap().to_string();
+
+        // A head that trickles in a byte every 150 ms is cut off at the deadline, not kept alive per read.
+        let mut c = TcpStream::connect(&addr).unwrap();
+        c.set_read_timeout(Some(Duration::from_millis(150))).unwrap();
+        let t = Instant::now();
+        let mut closed = false;
+        while t.elapsed() < Duration::from_secs(4) {
+            if c.write_all(b"G").is_err() {
+                closed = true;
+                break;
+            }
+            match c.read(&mut [0u8; 1]) {
+                Ok(0) => {
+                    closed = true;
+                    break;
+                }
+                Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {}
+                _ => {
+                    closed = true;
+                    break;
+                }
+            }
+        }
+        assert!(closed, "a trickling client kept its handler for {:?}", t.elapsed());
+        assert!(t.elapsed() < Duration::from_millis(1500), "closed only after {:?}", t.elapsed());
+
+        // 60 silent connections: no thread per connection.
+        let before = threads();
+        let idle: Vec<TcpStream> = (0..60).map(|_| TcpStream::connect(&addr).unwrap()).collect();
+        std::thread::sleep(Duration::from_millis(300));
+        let grown = threads().saturating_sub(before);
+        assert!(grown <= 10, "{grown} threads for 60 idle connections");
+
+        // When they time out, the handlers serve a real request again.
+        std::thread::sleep(Duration::from_millis(800));
+        drop(idle);
+        let (head, body) = get(&base, &format!("/{token_path}/{sha}"), None);
+        assert!(head.starts_with("HTTP/1.1 200"), "{head}");
+        assert_eq!(body, data);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -977,11 +977,6 @@ async fn media_bytes(
     Ok(tauri::ipc::Response::new(bytes))
 }
 
-/// Relay videos and audio verified this session, by hash, with the
-/// Content-Type to play them as. The `unimedia` protocol serves only these.
-static MEDIA_STREAMS: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, String>>> =
-    std::sync::LazyLock::new(Default::default);
-
 /// Content-Type for a streamed attachment: the `imeta` `m` when it is audio
 /// or video, else from the URL's extension (as `attachmentKind` decides in
 /// the UI). None for anything that is not playable media.
@@ -1019,21 +1014,14 @@ struct MediaStreamView {
     url: Option<String>,
 }
 
-/// Trim the media cache after a streamed download, sparing that file and any
-/// video or audio verified for playback this session.
-fn prune_media(dir: &std::path::Path, sha: &str) {
-    let mut keep: Vec<String> = MEDIA_STREAMS.lock().map(|m| m.keys().cloned().collect()).unwrap_or_default();
-    keep.push(sha.to_string());
-    uni_core::media::prune_cache(dir, &keep, uni_core::media::MEDIA_CACHE_BUDGET);
-}
-
 /// T-172: make a relay video or audio file playable. It is streamed to the
 /// hash-keyed cache (Blossom auth, SHA-256 verified, up to 500 MB) and allowed
 /// on the `unimedia` protocol; the webview then plays
 /// `unimedia://localhost/<sha>`, which answers byte ranges from that file
 /// (Linux and Android: a token-guarded 127.0.0.1 URL instead). Neither the bytes nor
 /// the auth token pass through JavaScript. A file already in the cache plays
-/// once its hash is re-checked, without the key.
+/// once its hash is re-checked, without the key. The hash stays pinned against
+/// cache pruning until the player calls `media_release`.
 #[tauri::command]
 async fn media_stream(
     app: tauri::AppHandle,
@@ -1049,13 +1037,17 @@ async fn media_stream(
     if sha.as_deref().is_some_and(|x| !x.is_empty() && !x.eq_ignore_ascii_case(&hash)) {
         return Err("imeta hash does not match the media URL".into());
     }
-    let known = MEDIA_STREAMS.lock().map_err(|e| e.to_string())?.contains_key(&hash);
-    if !(known && dir.join(&hash).is_file()) {
-        let fetched = hash.clone();
-        blocking(move || {
+    let fetched = hash.clone();
+    blocking(move || {
+        let reg = &media_registry::MEDIA;
+        let budget = uni_core::media::MEDIA_CACHE_BUDGET;
+        media_registry::fetch_pinned(reg, &dir, &fetched, Some(&content_type), budget, || {
             let max = uni_core::media::MAX_STREAM_MEDIA_BYTES;
+            if media_registry::lock(reg).is_allowed(&fetched) && dir.join(&fetched).is_file() {
+                return Ok(false);
+            }
             if uni_core::media::verified_cache_file(&dir, &fetched, max).is_some() {
-                return Ok(());
+                return Ok(false);
             }
             let (keys, _) = uni_core::load_keys(false).map_err(|e| e.to_string())?;
             tauri::async_runtime::block_on(uni_core::media::fetch_media_to_file(
@@ -1068,20 +1060,39 @@ async fn media_stream(
             ))
             .map_err(|e| e.to_string())?;
             tracing::info!(sha = %fetched, "media_stream: downloaded and verified");
-            prune_media(&dir, &fetched);
-            Ok(())
+            Ok(true)
         })
-        .await?;
-    }
-    MEDIA_STREAMS
-        .lock()
-        .map_err(|e| e.to_string())?
-        .insert(hash.clone(), content_type);
+    })
+    .await?;
     #[cfg(any(target_os = "linux", target_os = "android"))]
     let url = Some(format!("{}/{hash}", media_loopback::base(media_cache_dir(&app)?)?));
     #[cfg(not(any(target_os = "linux", target_os = "android")))]
     let url = None;
     Ok(MediaStreamView { sha: hash, url })
+}
+
+fn checked_hash(sha: &str) -> Result<String, String> {
+    let sha = sha.trim().to_ascii_lowercase();
+    if sha.len() == 64 && sha.bytes().all(|b| b.is_ascii_hexdigit()) {
+        Ok(sha)
+    } else {
+        Err("bad media hash".into())
+    }
+}
+
+/// A player started (again) on a streamed file: keep it in the cache while it plays.
+#[tauri::command]
+fn media_pin(sha: String) -> Result<(), String> {
+    media_registry::lock(&media_registry::MEDIA).pin(&checked_hash(&sha)?);
+    Ok(())
+}
+
+/// A player ended or went away: its file may be pruned again. Pairs with
+/// `media_stream` and `media_pin`.
+#[tauri::command]
+fn media_release(sha: String) -> Result<(), String> {
+    media_registry::lock(&media_registry::MEDIA).release(&checked_hash(&sha)?);
+    Ok(())
 }
 
 /// The `unimedia` protocol: byte ranges of a verified cached video or audio
@@ -1100,7 +1111,7 @@ fn media_protocol(
             .get(header::RANGE)
             .and_then(|v| v.to_str().ok())
             .map(str::to_string);
-        let content_type = MEDIA_STREAMS.lock().ok().and_then(|m| m.get(&sha).cloned());
+        let content_type = media_registry::lock(&media_registry::MEDIA).content_type(&sha);
         let head = request.method() == tauri::http::Method::HEAD;
         let reply = content_type.and_then(|ct| {
             let path = uni_core::media::cache_path(&media_cache_dir(&app).ok()?, &sha).ok()?;
@@ -1242,35 +1253,47 @@ async fn voice_transcribe(
     .await
 }
 
-/// Download a relay file to the cache (streamed, up to 500 MB) and return its local path.
-#[tauri::command]
-async fn media_save(
-    app: tauri::AppHandle,
-    url: String,
-    sha: Option<String>,
-) -> Result<String, String> {
-    secure_store::ensure_loaded(&app).await?;
-    let relay = relay_url(&app);
-    let dir = media_cache_dir(&app)?;
+/// Download a relay file to the cache (streamed, up to 500 MB) and return its
+/// local path and hash. The hash stays pinned; the caller releases it.
+async fn save_pinned(app: &tauri::AppHandle, url: String, sha: Option<String>) -> Result<(String, String), String> {
+    secure_store::ensure_loaded(app).await?;
+    let relay = relay_url(app);
+    let dir = media_cache_dir(app)?;
+    let hash = uni_core::media::media_sha_from_url(&relay, &url).map_err(|e| e.to_string())?;
+    let pinned = hash.clone();
     blocking(move || {
-        let (keys, _) = uni_core::load_keys(false).map_err(|e| e.to_string())?;
-        tauri::async_runtime::block_on(uni_core::media::fetch_media_to_file(
-            &relay,
-            &keys,
-            &url,
-            sha.as_deref(),
-            &dir,
-            uni_core::media::MAX_STREAM_MEDIA_BYTES,
-        ))
-        .map(|p| {
-            if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
-                prune_media(&dir, name);
+        let reg = &media_registry::MEDIA;
+        let budget = uni_core::media::MEDIA_CACHE_BUDGET;
+        media_registry::fetch_pinned(reg, &dir, &pinned, None, budget, || {
+            let max = uni_core::media::MAX_STREAM_MEDIA_BYTES;
+            if uni_core::media::verified_cache_file(&dir, &pinned, max).is_some() {
+                return Ok(false);
             }
-            p.to_string_lossy().into_owned()
-        })
-        .map_err(|e| e.to_string())
+            let (keys, _) = uni_core::load_keys(false).map_err(|e| e.to_string())?;
+            tauri::async_runtime::block_on(uni_core::media::fetch_media_to_file(
+                &relay,
+                &keys,
+                &url,
+                sha.as_deref(),
+                &dir,
+                max,
+            ))
+            .map(|_| true)
+            .map_err(|e| e.to_string())
+        })?;
+        uni_core::media::cache_path(&dir, &pinned)
+            .map(|p| (p.to_string_lossy().into_owned(), pinned.clone()))
+            .map_err(|e| e.to_string())
     })
     .await
+}
+
+/// Download a relay file to the cache (streamed, up to 500 MB) and return its local path.
+#[tauri::command]
+async fn media_save(app: tauri::AppHandle, url: String, sha: Option<String>) -> Result<String, String> {
+    let (path, hash) = save_pinned(&app, url, sha).await?;
+    media_registry::lock(&media_registry::MEDIA).release(&hash);
+    Ok(path)
 }
 
 /// Fetch and open an attachment with the OS default file handler. Never
@@ -1291,9 +1314,9 @@ async fn media_open(app: tauri::AppHandle, url: String, sha: Option<String>) -> 
         })
         .unwrap_or("bin")
         .to_string();
-    let path = media_save(app.clone(), url, sha).await?;
+    let (path, hash) = save_pinned(&app, url, sha).await?;
     let target = format!("{path}.{ext}");
-    blocking({
+    let copied = blocking({
         let path = path.clone();
         let target = target.clone();
         move || {
@@ -1307,7 +1330,9 @@ async fn media_open(app: tauri::AppHandle, url: String, sha: Option<String>) -> 
                 .map_err(|e| e.to_string())
         }
     })
-    .await?;
+    .await;
+    media_registry::lock(&media_registry::MEDIA).release(&hash);
+    copied?;
     app.opener()
         .open_path(target, None::<&str>)
         .map_err(|e| e.to_string())
@@ -1910,6 +1935,7 @@ mod t76;
 mod mobile;
 #[cfg(any(target_os = "linux", target_os = "android"))]
 mod media_loopback;
+mod media_registry;
 mod pair_source;
 mod secure_store;
 
@@ -2037,6 +2063,8 @@ pub fn run() {
             search,
             media_bytes,
             media_stream,
+            media_pin,
+            media_release,
             media_upload,
             voice_transcribe,
             media_save,

@@ -1,6 +1,6 @@
 // Run: node --experimental-strip-types scripts/media.test.ts (Node >= 22.6)
 import assert from "node:assert/strict";
-import { attachmentKind, collectAttachments, displayName, formatSize, imageLinks, mediaErrorText, parseDim, playbackErrorText, relayMediaSha, stripAttachmentLines, type MediaRef } from "../src/media.ts";
+import { attachmentKind, collectAttachments, displayName, formatSize, imageLinks, mediaErrorText, parseDim, playbackErrorText, playerPin, relayMediaSha, stripAttachmentLines, type MediaRef } from "../src/media.ts";
 
 const O = "https://buzz.example";
 const H = "ab".repeat(32);
@@ -67,5 +67,29 @@ assert.equal(mediaErrorText(new Error("invalid: media URL is not on this relay")
 assert.equal(mediaErrorText(""), "Could not load");
 assert.equal(playbackErrorText(4), "Couldn't play this file here (format not supported, or it didn't load)");
 assert.equal(playbackErrorText(undefined), "Playback failed");
+
+// T-172 (Codex review 1): a player holds its cache pin only while it plays.
+{
+  const calls: string[] = [];
+  const pin = playerPin((cmd, sha) => calls.push(`${cmd} ${sha}`));
+  pin.loaded("a"); // media_stream pinned "a"
+  pin.play(); // already held: no second pin
+  pin.release(); // ended
+  pin.release(); // and an error after it: still one release
+  pin.play(); // replayed
+  pin.dispose(); // unmounted while playing
+  pin.play(); // a late event after unmount
+  assert.deepEqual(calls, ["media_release a", "media_pin a", "media_release a"]);
+}
+{
+  // Retried into a new stream: the old pin goes. Unmounted before media_stream answered: its pin goes at once.
+  const calls: string[] = [];
+  const pin = playerPin((cmd, sha) => calls.push(`${cmd} ${sha}`));
+  pin.loaded("a");
+  pin.loaded("b");
+  pin.dispose();
+  pin.loaded("c");
+  assert.deepEqual(calls, ["media_release a", "media_release b", "media_release c"]);
+}
 
 console.log("media tests passed");
