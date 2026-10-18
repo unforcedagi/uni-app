@@ -1253,6 +1253,39 @@ async fn voice_transcribe(
     .await
 }
 
+/// The verified cache file for the attachment whose URL names `hash`, if cached. The `imeta` `x` (`expected`) is
+/// checked first, as `fetch_media_to_file` does before its own cache lookup, so a cache hit can't skip it
+/// (Codex review 2).
+fn cached_attachment(dir: &std::path::Path, hash: &str, expected: Option<&str>, max: u64) -> Result<Option<PathBuf>, String> {
+    if expected.is_some_and(|x| !x.is_empty() && !x.eq_ignore_ascii_case(hash)) {
+        return Err("imeta hash does not match the media URL".into());
+    }
+    Ok(uni_core::media::verified_cache_file(dir, hash, max))
+}
+
+/// How long an opened copy stays pinned after it is handed to the OS: the viewer opens it after `open_path`
+/// returns, and once it has the file open, pruning the name no longer hurts it.
+const OPENED_COPY_GRACE: std::time::Duration = std::time::Duration::from_secs(10 * 60);
+
+/// Copy the cached `<hash>` to `<hash>.<ext>` for the OS opener, pinning the copy's name first so no prune
+/// removes it while it is written or before the viewer opens it (Codex review 2). The caller releases the
+/// returned name (after [`OPENED_COPY_GRACE`]).
+fn pinned_copy(reg: &std::sync::Mutex<media_registry::Registry>, dir: &std::path::Path, hash: &str, ext: &str) -> Result<(PathBuf, String), String> {
+    let name = format!("{hash}.{ext}");
+    media_registry::lock(reg).pin(&name);
+    let (path, target) = (dir.join(hash), dir.join(&name));
+    // A 500 MB file: reuse the copy from the last open.
+    let same = std::fs::metadata(&path).ok().map(|m| m.len()) == std::fs::metadata(&target).ok().map(|m| m.len());
+    let copied = if same { Ok(0) } else { std::fs::copy(&path, &target) };
+    match copied {
+        Ok(_) => Ok((target, name)),
+        Err(e) => {
+            media_registry::lock(reg).release(&name);
+            Err(e.to_string())
+        }
+    }
+}
+
 /// Download a relay file to the cache (streamed, up to 500 MB) and return its
 /// local path and hash. The hash stays pinned; the caller releases it.
 async fn save_pinned(app: &tauri::AppHandle, url: String, sha: Option<String>) -> Result<(String, String), String> {
@@ -1266,7 +1299,7 @@ async fn save_pinned(app: &tauri::AppHandle, url: String, sha: Option<String>) -
         let budget = uni_core::media::MEDIA_CACHE_BUDGET;
         media_registry::fetch_pinned(reg, &dir, &pinned, None, budget, || {
             let max = uni_core::media::MAX_STREAM_MEDIA_BYTES;
-            if uni_core::media::verified_cache_file(&dir, &pinned, max).is_some() {
+            if cached_attachment(&dir, &pinned, sha.as_deref(), max)?.is_some() {
                 return Ok(false);
             }
             let (keys, _) = uni_core::load_keys(false).map_err(|e| e.to_string())?;
@@ -1314,28 +1347,24 @@ async fn media_open(app: tauri::AppHandle, url: String, sha: Option<String>) -> 
         })
         .unwrap_or("bin")
         .to_string();
-    let (path, hash) = save_pinned(&app, url, sha).await?;
-    let target = format!("{path}.{ext}");
+    let (_, hash) = save_pinned(&app, url, sha).await?;
+    let dir = media_cache_dir(&app)?;
     let copied = blocking({
-        let path = path.clone();
-        let target = target.clone();
-        move || {
-            // A 500 MB file: reuse the copy from the last open.
-            let same = |a: &str, b: &str| std::fs::metadata(a).ok().map(|m| m.len()) == std::fs::metadata(b).ok().map(|m| m.len());
-            if same(&path, &target) {
-                return Ok(());
-            }
-            std::fs::copy(&path, &target)
-                .map(|_| ())
-                .map_err(|e| e.to_string())
-        }
+        let hash = hash.clone();
+        move || pinned_copy(&media_registry::MEDIA, &dir, &hash, &ext)
     })
     .await;
     media_registry::lock(&media_registry::MEDIA).release(&hash);
-    copied?;
-    app.opener()
-        .open_path(target, None::<&str>)
-        .map_err(|e| e.to_string())
+    let (target, name) = copied?;
+    let opened = app
+        .opener()
+        .open_path(target.to_string_lossy(), None::<&str>)
+        .map_err(|e| e.to_string());
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(OPENED_COPY_GRACE).await;
+        media_registry::lock(&media_registry::MEDIA).release(&name);
+    });
+    opened
 }
 
 /// The relay's HTTP origin (e.g. `https://buzz.unforced.org`), so the UI can
@@ -2161,6 +2190,48 @@ mod send_gate_tests {
         assert!(second.is_err(), "two sends ran at once");
         drop(first);
         assert!(tokio::time::timeout(Duration::from_millis(500), SEND_GATE.lock()).await.is_ok());
+    }
+}
+
+#[cfg(test)]
+mod media_open_tests {
+    use super::*;
+
+    fn dir() -> PathBuf {
+        let d = std::env::temp_dir().join(format!("unimedia-open-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    /// Codex review 2: a cached file must not satisfy an attachment whose `imeta` `x` names another hash.
+    #[test]
+    fn a_cache_hit_still_checks_the_imeta_hash() {
+        let d = dir();
+        let data = b"cached file".to_vec();
+        let sha = uni_core::media::sha256_hex(&data);
+        std::fs::write(d.join(&sha), &data).unwrap();
+        let max = uni_core::media::MAX_STREAM_MEDIA_BYTES;
+        let err = cached_attachment(&d, &sha, Some(&"f".repeat(64)), max).unwrap_err();
+        assert!(err.contains("imeta hash does not match"), "{err}");
+        assert_eq!(cached_attachment(&d, &sha, Some(&sha.to_uppercase()), max).unwrap(), Some(d.join(&sha)));
+        assert_eq!(cached_attachment(&d, &sha, None, max).unwrap(), Some(d.join(&sha)));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Codex review 2: another download's prune runs while Open's copy is being handed to the OS.
+    #[test]
+    fn the_opened_copy_survives_a_prune_until_released() {
+        let (d, reg) = (dir(), std::sync::Mutex::new(media_registry::Registry::default()));
+        let sha = "a".repeat(64);
+        std::fs::write(d.join(&sha), [1u8; 64]).unwrap();
+        let (target, name) = pinned_copy(&reg, &d, &sha, "pdf").unwrap();
+        assert_eq!(target, d.join(format!("{sha}.pdf")));
+        media_registry::lock(&reg).prune(&d, 0); // a concurrent download, cache over budget
+        assert!(target.exists(), "the copy was pruned before the viewer could open it");
+        media_registry::lock(&reg).release(&name); // the grace period is over
+        media_registry::lock(&reg).prune(&d, 0);
+        assert!(!target.exists());
+        let _ = std::fs::remove_dir_all(&d);
     }
 }
 
