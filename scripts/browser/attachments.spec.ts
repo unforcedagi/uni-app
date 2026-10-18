@@ -3,7 +3,7 @@
 // tests (uni-core `saved_attachment_lands_in_downloads_under_its_name`).
 import { test, expect, type Page, type Locator } from '@playwright/test';
 
-const PDF = '6'.repeat(64), MP4 = 'f'.repeat(64), JPG = '7'.repeat(64);
+const PDF = '6'.repeat(64), MP4 = 'f'.repeat(64), JPG = '7'.repeat(64), BIG = '8'.repeat(64);
 const O = 'https://relay.example';
 
 async function press(page: Page, target: Locator) {
@@ -12,10 +12,12 @@ async function press(page: Page, target: Locator) {
 }
 
 test.beforeEach(async ({ page }) => {
-  await page.addInitScript(({ PDF, MP4, JPG, O }) => {
+  await page.addInitScript(({ PDF, MP4, JPG, BIG, O }) => {
     const w = window as any;
     w.calls = [];
     w.replies = {}; // cmd → Error message to reject with
+    w.holds = {}; // cmd → true: wait for w.release[cmd]()
+    w.release = {};
     const now = Math.floor(Date.now() / 1000);
     const media = (sha: string, ext: string, mime: string, filename: string, size: number) =>
       ({ url: `${O}/media/${sha}.${ext}`, mime, sha256: sha, size, dim: ext === 'jpg' ? '1200x800' : null, blurhash: null, alt: null, filename });
@@ -25,6 +27,7 @@ test.beforeEach(async ({ page }) => {
       msg('m1', now - 180, 'The report', media(PDF, 'pdf', 'application/pdf', 'Q3 report.pdf', 70563)),
       msg('m2', now - 120, 'Class recording', media(MP4, 'mp4', 'video/mp4', 'class.mp4', 36665525)),
       msg('m3', now - 60, 'The garden', media(JPG, 'jpg', 'image/jpeg', 'garden.jpg', 51421)),
+      msg('m4', now - 30, 'Panorama', media(BIG, 'jpg', 'image/jpeg', 'panorama.jpg', 40 * 1024 * 1024)),
     ];
     // 1x1 PNG, so the image card has something to show.
     const png = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='), (c) => c.charCodeAt(0)).buffer;
@@ -34,6 +37,7 @@ test.beforeEach(async ({ page }) => {
       convertFileSrc: (p: string, proto: string) => `${proto}://localhost/${p}`,
       invoke: async (cmd: string, args: any) => {
         w.calls.push({ cmd, args });
+        if (w.holds[cmd]) await new Promise((r) => { w.release[cmd] = r; });
         if (w.replies[cmd]) throw w.replies[cmd];
         switch (cmd) {
           case 'identity_status': return { paired: true, pubkey: 'a'.repeat(64) };
@@ -48,6 +52,7 @@ test.beforeEach(async ({ page }) => {
           case 'refresh': return { pubkey: 'a'.repeat(64), total_items: 3, channel_errors: {}, truncated_channels: [] };
           case 'media_bytes':
             if (args.sha === JPG) return png;
+            if (args.sha === BIG) throw 'media: file is too large (over 25 MB)';
             throw 'no preview in this test';
           case 'media_save': return `Downloads/${args.name}`;
           case 'media_open': return null;
@@ -56,7 +61,7 @@ test.beforeEach(async ({ page }) => {
       },
     };
     w.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} };
-  }, { PDF, MP4, JPG, O });
+  }, { PDF, MP4, JPG, BIG, O });
   await page.goto('/');
   await expect(page.getByRole('button', { name: 'Open Q3 report.pdf' })).toBeVisible();
 });
@@ -108,4 +113,33 @@ test('Images can be saved from the full-screen view', async ({ page }) => {
   await expect(dialog.getByRole('status')).toHaveText('✓ Saved to Downloads/garden.jpg');
   // Tapping Save did not close the image.
   await expect(dialog).toBeVisible();
+});
+
+test('A save still reports after the image viewer closes', async ({ page }) => {
+  await press(page, page.getByRole('button', { name: 'Open image garden.jpg' }));
+  const dialog = page.getByRole('dialog', { name: 'garden.jpg' });
+  await page.evaluate(() => { (window as any).holds.media_save = true; });
+  await press(page, dialog.getByRole('button', { name: 'Save garden.jpg to Downloads' }));
+  await expect(dialog.getByRole('button', { name: 'Save garden.jpg to Downloads' })).toHaveText('Saving…');
+  await press(page, dialog.getByRole('button', { name: 'Close image' }));
+  await expect(dialog).toBeHidden();
+  await page.evaluate(() => (window as any).release.media_save());
+  await expect(page.getByRole('status').filter({ hasText: 'Saved to Downloads/garden.jpg' })).toBeVisible();
+});
+
+test('An image without a preview can still be saved', async ({ page }) => {
+  const card = page.getByRole('button', { name: 'Image failed to load: panorama.jpg' });
+  await card.scrollIntoViewIfNeeded();
+  await expect(card).toBeVisible();
+  await press(page, page.getByRole('button', { name: 'Save panorama.jpg to Downloads' }));
+  await expect(page.getByRole('status').filter({ hasText: 'Saved to Downloads/panorama.jpg' })).toBeVisible();
+});
+
+test('Saving again makes another copy', async ({ page }) => {
+  const save = page.getByRole('button', { name: 'Save Q3 report.pdf to Downloads' });
+  await press(page, save);
+  await expect(save).toHaveText('✓ Saved');
+  await expect(save).toBeEnabled();
+  await press(page, save);
+  await expect.poll(() => calls(page, 'media_save').then((c) => c.length)).toBe(2);
 });

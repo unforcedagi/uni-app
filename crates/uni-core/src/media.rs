@@ -558,8 +558,8 @@ pub fn url_extension(url: &str) -> Option<&str> {
 /// T-174: the name an attachment is saved under where the user will find it
 /// (Downloads). The `imeta` filename without any folder part, characters file
 /// systems refuse, or leading/trailing dots and spaces, at most 120
-/// characters; when it has no extension, the URL's is added. Without a
-/// usable name: `<first 12 of the hash>.<ext>`.
+/// characters; when it has no extension (`notes`, `Meeting 10.18`), the
+/// URL's is added. Without a usable name: `<first 12 of the hash>.<ext>`.
 pub fn download_name(filename: Option<&str>, url: &str, sha: &str) -> String {
     let ext = url_extension(url);
     let base = filename
@@ -575,7 +575,11 @@ pub fn download_name(filename: Option<&str>, url: &str, sha: &str) -> String {
     } else {
         clean.to_string()
     };
-    if let Some(ext) = ext.filter(|_| !name.contains('.')) {
+    // An extension: up to 8 letters or digits, at least one a letter (`10.18` is not one).
+    let has_ext = name.rsplit_once('.').is_some_and(|(stem, e)| {
+        !stem.is_empty() && e.len() <= 8 && e.bytes().all(|b| b.is_ascii_alphanumeric()) && e.bytes().any(|b| b.is_ascii_alphabetic())
+    });
+    if let Some(ext) = ext.filter(|_| !has_ext) {
         name = format!("{name}.{ext}");
     }
     if name.chars().count() > 120 {
@@ -611,20 +615,26 @@ pub fn export_file(src: &Path, dir: &Path, name: &str) -> std::io::Result<PathBu
     std::fs::create_dir_all(dir)?;
     let tmp = dir.join(format!(".{}.uni-part", uuid::Uuid::new_v4()));
     let placed = (|| {
-        std::fs::copy(src, &tmp)?;
-        std::fs::File::open(&tmp)?.sync_all()?;
+        let mut out = std::fs::File::create(&tmp)?;
+        std::io::copy(&mut std::fs::File::open(src)?, &mut out)?;
+        out.sync_all()?;
+        drop(out);
         for n in 0..1000 {
             let target = dir.join(numbered(name, n));
             // A hard link fails if the name is taken, so nothing is overwritten.
             match std::fs::hard_link(&tmp, &target) {
                 Ok(()) => return Ok(target),
                 Err(e) if e.kind() == ErrorKind::AlreadyExists => continue,
-                // File systems without hard links (FAT, some network shares).
-                Err(_) if !target.exists() => {
-                    std::fs::rename(&tmp, &target)?;
-                    return Ok(target);
-                }
-                Err(_) => continue,
+                // File systems without hard links (FAT, some network shares): claim the
+                // name with an empty file first, then move the copy over our own claim.
+                Err(_) => match std::fs::OpenOptions::new().write(true).create_new(true).open(&target) {
+                    Ok(_) => {
+                        std::fs::rename(&tmp, &target)?;
+                        return Ok(target);
+                    }
+                    Err(e) if e.kind() == ErrorKind::AlreadyExists => continue,
+                    Err(e) => return Err(e),
+                },
             }
         }
         Err(std::io::Error::new(ErrorKind::AlreadyExists, "too many files with this name"))
@@ -1576,6 +1586,9 @@ mod tests {
         let url = format!("https://relay.example/media/{sha}.mp4");
         assert_eq!(download_name(Some("class.mp4"), &url, sha), "class.mp4");
         assert_eq!(download_name(Some("class"), &url, sha), "class.mp4");
+        assert_eq!(download_name(Some("Meeting 10.18"), &url, sha), "Meeting 10.18.mp4");
+        assert_eq!(download_name(Some("v1.2 notes"), &url, sha), "v1.2 notes.mp4");
+        assert_eq!(download_name(Some("clip.MOV"), &url, sha), "clip.MOV");
         assert_eq!(download_name(Some("C:\\Users\\a\\notes.txt"), &url, sha), "notes.txt");
         assert_eq!(download_name(Some("a<b>:c?.mp4"), &url, sha), "a_b__c_.mp4");
         assert_eq!(download_name(Some(" .. "), &url, sha), format!("{}.mp4", &sha[..12]));

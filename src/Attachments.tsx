@@ -7,7 +7,7 @@
 // can be saved where the user finds it (`media_save`: Android's Downloads, the
 // Downloads folder on desktop), and files open in the app for their type
 // (`media_open`); both say what happened, or why not, on the card (T-174).
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { pdfThumbnail } from "./pdfPreview";
 import { attachmentKind, collectAttachments, displayName, formatSize, imageLinks, mediaErrorText, parseDim, playbackErrorText, playerPin, relayMediaSha, stripAttachmentLines, type MediaRef } from "./media";
@@ -116,21 +116,30 @@ function boxStyle(dim: string | null): React.CSSProperties | undefined {
 }
 
 // ── Save to Downloads (T-174) ───────────────────────────────────────────
-type Saver = { state: "idle" | "saving" | "saved" | "error"; text: string; save: () => void };
+// One state per attachment URL, shared by its card and the image viewer, so a save that finishes after the
+// viewer closed still reports on the card.
+type SaveState = { state: "idle" | "saving" | "saved" | "error"; text: string };
+type Saver = SaveState & { save: () => void };
+const IDLE: SaveState = { state: "idle", text: "" };
+const saves = new Map<string, SaveState>();
+const saveListeners = new Set<() => void>();
+const setSave = (url: string, s: SaveState) => { saves.set(url, s); saveListeners.forEach((l) => l()); };
+const onSaves = (l: () => void) => { saveListeners.add(l); return () => { saveListeners.delete(l); }; };
 
-/** `media_save` for one attachment; `text` says where it went, or why it didn't. */
+/** `media_save` for one attachment; `text` says where it went, or why it didn't. Saving again makes another copy. */
 function useSave(m: MediaRef): Saver {
-  const [s, setS] = useState<Omit<Saver, "save">>({ state: "idle", text: "" });
+  const s = useSyncExternalStore(onSaves, () => saves.get(m.url) ?? IDLE);
   const save = () => {
-    setS({ state: "saving", text: "" });
+    if (saves.get(m.url)?.state === "saving") return;
+    setSave(m.url, { state: "saving", text: "" });
     invoke<string>("media_save", { url: m.url, sha: m.sha256, name: m.filename, mime: m.mime })
-      .then((where) => setS({ state: "saved", text: `Saved to ${where}` }), (e) => setS({ state: "error", text: `Not saved: ${mediaErrorText(e)}` }));
+      .then((where) => setSave(m.url, { state: "saved", text: `Saved to ${where}` }), (e) => setSave(m.url, { state: "error", text: `Not saved: ${mediaErrorText(e)}` }));
   };
   return { ...s, save };
 }
 
 function SaveButton({ m, s, className = "attachment-save" }: { m: MediaRef; s: Saver; className?: string }) {
-  return <button className={className} onClick={(e) => { e.stopPropagation(); s.save(); }} disabled={s.state === "saving" || s.state === "saved"}
+  return <button className={className} onClick={(e) => { e.stopPropagation(); s.save(); }} disabled={s.state === "saving"}
     aria-label={`Save ${displayName(m)} to Downloads`}>{s.state === "saved" ? "✓ Saved" : s.state === "saving" ? "Saving…" : "Save"}</button>;
 }
 
@@ -144,11 +153,19 @@ function SaveNote({ s }: { s: Saver }) {
 function RelayImage({ m, onOpen }: { m: MediaRef; onOpen: Open }) {
   const [ref, visible] = useVisible<HTMLButtonElement>();
   const { src, error } = useRelayMedia(relayBlob, m, visible);
+  const saver = useSave(m);
   const alt = m.alt ?? displayName(m);
-  return <button ref={ref} className={`attachment-image ${src ? "" : "loading"}`} style={boxStyle(m.dim)} disabled={!src}
-    onClick={() => src && onOpen(src, alt, m)} aria-label={src ? `Open image ${alt}` : error ? `Image failed to load: ${alt}` : `Loading image ${alt}`}>
-    {src ? <img src={src} alt={alt} /> : <span className="attachment-status">{error ? "⚠ Image unavailable" : "Loading image…"}</span>}
-  </button>;
+  // The box's width goes on the wrapper (its `100%` is the message's width); the image fills it.
+  const box = boxStyle(m.dim);
+  return <div className="attachment-media-group" style={box && { width: box.width }}>
+    <button ref={ref} className={`attachment-image ${src ? "" : "loading"}`} style={box && { aspectRatio: box.aspectRatio, width: "100%" }} disabled={!src}
+      onClick={() => src && onOpen(src, alt, m)} aria-label={src ? `Open image ${alt}` : error ? `Image failed to load: ${alt}` : `Loading image ${alt}`}>
+      {src ? <img src={src} alt={alt} /> : <span className="attachment-status">{error ? "⚠ Image unavailable" : "Loading image…"}</span>}
+    </button>
+    {/* Saved from the full-screen view; without a preview (too large, or it failed) from here. */}
+    {error && <div className="attachment-actions"><SaveButton m={m} s={saver} className="attachment-save attachment-save-pill" /></div>}
+    <SaveNote s={saver} />
+  </div>;
 }
 
 function RelayPlayer({ m }: { m: MediaRef }) {

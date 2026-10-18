@@ -1309,9 +1309,8 @@ async fn media_save(
     name: Option<String>,
     mime: Option<String>,
 ) -> Result<String, String> {
-    let hash = uni_core::media::media_sha_from_url(&relay_url(&app), &url).map_err(|e| e.to_string())?;
+    let (path, hash) = save_pinned(&app, url.clone(), sha).await?;
     let name = uni_core::media::download_name(name.as_deref(), &url, &hash);
-    let (path, hash) = save_pinned(&app, url, sha).await?;
     // Still pinned: the cache is not pruned under the copy.
     let saved = files::save(&app, std::path::Path::new(&path), &name, attachment_mime(mime.as_deref()).as_deref()).await;
     media_registry::lock(&media_registry::MEDIA).release(&hash);

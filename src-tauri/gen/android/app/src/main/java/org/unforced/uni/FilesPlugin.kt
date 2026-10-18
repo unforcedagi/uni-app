@@ -90,18 +90,18 @@ class FilesPlugin(private val activity: Activity) : Plugin(activity) {
         resolver.openOutputStream(uri)?.use { out -> src.inputStream().use { it.copyTo(out, 1 shl 16) } }
           ?: throw IllegalStateException("could not write to Downloads")
         // Publishing moves the file to its name. MediaStore can refuse that name (UNIQUE files._data) when a row
-        // for it outlived its file; then publish as "name (1).ext", … without copying again.
+        // for it outlived its file; then publish as "name (1).ext", … without copying again. A refusal can be an
+        // exception or no row updated; until one publish takes, the file stays pending (hidden), so never say saved.
         for (n in 0..20) {
           val done = ContentValues().apply {
             put(MediaStore.MediaColumns.IS_PENDING, 0)
             if (n > 0) put(MediaStore.MediaColumns.DISPLAY_NAME, numbered(args.name, n))
           }
-          try {
-            resolver.update(uri, done, null, null)
-            break
-          } catch (e: Exception) {
-            if (n == 20) throw e
+          val published = try { resolver.update(uri, done, null, null) > 0 } catch (e: Exception) {
+            if (n == 20) throw e else false
           }
+          if (published) break
+          if (n == 20) throw IllegalStateException("Downloads did not take the file")
         }
         // MediaStore renames a duplicate ("report (1).pdf"): report the name it really has.
         var saved = args.name
