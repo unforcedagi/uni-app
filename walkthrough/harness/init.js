@@ -12,7 +12,7 @@ if (window.top === window) (function () {
     msg('m1', now - 120, 'Thursday class recording (35 MB)', [{ url: `${O}/media/${SHA}.mp4`, mime: 'video/mp4', sha256: SHA, size: 36665525, dim: '1280x720', blurhash: null, alt: null, filename: 'teaching-clip.mp4' }]),
     msg('m2', now - 60, 'And the full-day recording', [{ url: `${O}/media/${BIG}.mp4`, mime: 'video/mp4', sha256: BIG, size: 600 * 1024 * 1024, dim: '1280x720', blurhash: null, alt: null, filename: 'full-day.mp4' }]),
   ];
-  const REAL = new Set(['media_stream', 'relay_origin', 't76_write', 't76_read', 'log_line']);
+  const REAL = new Set(['media_stream', 'media_pin', 'media_release', 'relay_origin', 't76_write', 't76_read', 'log_line']);
   w.__calls = [];
   w.__T76_MOCK__ = {
     metadata: { currentWindow: { label: 't76' }, currentWebview: { label: 't76' } },
@@ -74,6 +74,14 @@ if (window.top === window) (function () {
       v.currentTime = 45;
       await sleep(5000);
       step('after seek to 45 s', { currentTime: v.currentTime, paused: v.paused, readyState: v.readyState, err: v.error && v.error.code });
+      const pins = () => w.__calls.filter((c) => c === 'media_stream' || c === 'media_pin' || c === 'media_release');
+      step('pin calls while playing', { calls: pins() });
+      v.currentTime = 58.5;
+      await until(() => v.ended, 8000);
+      await sleep(300);
+      step('ended', { ended: v.ended, calls: pins() });
+      v.play(); await sleep(800);
+      step('replayed', { calls: pins() });
       v.pause();
       const b = card('full-day');
       b.scrollIntoView({ block: 'center' });
