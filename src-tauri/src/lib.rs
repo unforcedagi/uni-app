@@ -977,6 +977,126 @@ async fn media_bytes(
     Ok(tauri::ipc::Response::new(bytes))
 }
 
+/// Relay videos and audio verified this session, by hash, with the
+/// Content-Type to play them as. The `unimedia` protocol serves only these.
+static MEDIA_STREAMS: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, String>>> =
+    std::sync::LazyLock::new(Default::default);
+
+/// Content-Type for a streamed attachment: the `imeta` `m` when it is audio
+/// or video, else from the URL's extension (as `attachmentKind` decides in
+/// the UI). None for anything that is not playable media.
+fn stream_mime(mime: Option<&str>, url: &str) -> Option<String> {
+    if let Some(m) = mime.map(str::trim).filter(|m| !m.is_empty()) {
+        let m = m.to_ascii_lowercase();
+        let safe = m.bytes().all(|b| b.is_ascii_alphanumeric() || b"/-+.".contains(&b));
+        return (safe && (m.starts_with("video/") || m.starts_with("audio/"))).then_some(m);
+    }
+    let ext = url.rsplit_once('.')?.1.to_ascii_lowercase();
+    Some(
+        match ext.as_str() {
+            "mp4" | "m4v" => "video/mp4",
+            "webm" => "video/webm",
+            "mov" => "video/quicktime",
+            "mp3" => "audio/mpeg",
+            "m4a" => "audio/mp4",
+            "aac" => "audio/aac",
+            "ogg" | "oga" => "audio/ogg",
+            "opus" => "audio/opus",
+            "wav" => "audio/wav",
+            "flac" => "audio/flac",
+            _ => return None,
+        }
+        .to_string(),
+    )
+}
+
+/// T-172: make a relay video or audio file playable. It is streamed to the
+/// hash-keyed cache (Blossom auth, SHA-256 verified, up to 500 MB) and allowed
+/// on the `unimedia` protocol; the webview then plays
+/// `unimedia://localhost/<sha>` (`http://unimedia.localhost/<sha>` on
+/// Android), which answers byte ranges from that file. Neither the bytes nor
+/// the auth token pass through JavaScript. Returns the hash.
+#[tauri::command]
+async fn media_stream(
+    app: tauri::AppHandle,
+    url: String,
+    sha: Option<String>,
+    mime: Option<String>,
+) -> Result<String, String> {
+    let content_type = stream_mime(mime.as_deref(), &url).ok_or("not a video or audio attachment")?;
+    secure_store::ensure_loaded(&app).await?;
+    let relay = relay_url(&app);
+    let dir = media_cache_dir(&app)?;
+    let hash = uni_core::media::media_sha_from_url(&relay, &url).map_err(|e| e.to_string())?;
+    let known = MEDIA_STREAMS.lock().map_err(|e| e.to_string())?.contains_key(&hash);
+    if !(known && dir.join(&hash).is_file()) {
+        let fetched = hash.clone();
+        blocking(move || {
+            let (keys, _) = uni_core::load_keys(false).map_err(|e| e.to_string())?;
+            tauri::async_runtime::block_on(uni_core::media::fetch_media_to_file(
+                &relay,
+                &keys,
+                &url,
+                sha.as_deref(),
+                &dir,
+                uni_core::media::MAX_STREAM_MEDIA_BYTES,
+            ))
+            .map_err(|e| e.to_string())
+        })
+        .await?;
+        tracing::info!(sha = %fetched, "media_stream: verified in cache");
+    }
+    MEDIA_STREAMS
+        .lock()
+        .map_err(|e| e.to_string())?
+        .insert(hash.clone(), content_type);
+    Ok(hash)
+}
+
+/// The `unimedia` protocol: byte ranges of a verified cached video or audio
+/// file (see [`media_stream`]); 404 for any other path.
+fn media_protocol(
+    ctx: tauri::UriSchemeContext<'_, tauri::Wry>,
+    request: tauri::http::Request<Vec<u8>>,
+    responder: tauri::UriSchemeResponder,
+) {
+    use tauri::http::{header, Response};
+    let app = ctx.app_handle().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let sha = request.uri().path().trim_start_matches('/').to_string();
+        let range = request
+            .headers()
+            .get(header::RANGE)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_string);
+        let content_type = MEDIA_STREAMS.lock().ok().and_then(|m| m.get(&sha).cloned());
+        let reply = content_type.and_then(|ct| {
+            let path = uni_core::media::cache_path(&media_cache_dir(&app).ok()?, &sha).ok()?;
+            Some((ct, uni_core::media::read_range(&path, range.as_deref()).ok()?))
+        });
+        let response = match reply {
+            Some((ct, r)) => {
+                let mut b = Response::builder()
+                    .status(r.status)
+                    .header(header::CONTENT_TYPE, ct)
+                    .header(header::ACCEPT_RANGES, "bytes")
+                    .header(header::CONTENT_LENGTH, r.body.len())
+                    .header(header::CACHE_CONTROL, "no-store");
+                if let Some(cr) = r.content_range {
+                    b = b.header(header::CONTENT_RANGE, cr);
+                }
+                let body = if request.method() == tauri::http::Method::HEAD { Vec::new() } else { r.body };
+                b.body(body)
+            }
+            None => Response::builder()
+                .status(404)
+                .header(header::CONTENT_TYPE, "text/plain")
+                .body(b"not found".to_vec()),
+        };
+        responder.respond(response.unwrap_or_else(|_| Response::new(Vec::new())));
+    });
+}
+
 /// Upload a picked/pasted/dropped file via raw IPC (never a JSON byte array).
 /// `x-filename` and `x-file-mime` are display/advisory hints only.
 #[tauri::command]
@@ -1083,7 +1203,7 @@ async fn voice_transcribe(
     .await
 }
 
-/// Download a relay file to the cache and return its local path.
+/// Download a relay file to the cache (streamed, up to 500 MB) and return its local path.
 #[tauri::command]
 async fn media_save(
     app: tauri::AppHandle,
@@ -1095,18 +1215,16 @@ async fn media_save(
     let dir = media_cache_dir(&app)?;
     blocking(move || {
         let (keys, _) = uni_core::load_keys(false).map_err(|e| e.to_string())?;
-        let hash = uni_core::media::media_sha_from_url(&relay, &url).map_err(|e| e.to_string())?;
-        tauri::async_runtime::block_on(uni_core::fetch_media(
+        tauri::async_runtime::block_on(uni_core::media::fetch_media_to_file(
             &relay,
             &keys,
             &url,
             sha.as_deref(),
             &dir,
+            uni_core::media::MAX_STREAM_MEDIA_BYTES,
         ))
-        .map_err(|e| e.to_string())?;
-        uni_core::media::cache_path(&dir, &hash)
-            .map(|p| p.to_string_lossy().into_owned())
-            .map_err(|e| e.to_string())
+        .map(|p| p.to_string_lossy().into_owned())
+        .map_err(|e| e.to_string())
     })
     .await
 }
@@ -1803,6 +1921,7 @@ pub fn run() {
         .plugin(secure_store::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        .register_asynchronous_uri_scheme_protocol("unimedia", media_protocol)
         .setup(|_app| {
             #[cfg(mobile)]
             _app.handle().plugin(tauri_plugin_barcode_scanner::init())?;
@@ -1866,6 +1985,7 @@ pub fn run() {
             delete_message,
             search,
             media_bytes,
+            media_stream,
             media_upload,
             voice_transcribe,
             media_save,
@@ -1962,5 +2082,24 @@ mod send_gate_tests {
         assert!(second.is_err(), "two sends ran at once");
         drop(first);
         assert!(tokio::time::timeout(Duration::from_millis(500), SEND_GATE.lock()).await.is_ok());
+    }
+}
+
+#[cfg(test)]
+mod media_stream_tests {
+    use super::stream_mime;
+
+    #[test]
+    fn only_audio_and_video_are_streamed() {
+        let u = "https://r/media/abc.mp4";
+        assert_eq!(stream_mime(Some("video/mp4"), u).as_deref(), Some("video/mp4"));
+        assert_eq!(stream_mime(Some("Audio/MPEG"), u).as_deref(), Some("audio/mpeg"));
+        assert_eq!(stream_mime(None, u).as_deref(), Some("video/mp4"));
+        assert_eq!(stream_mime(Some(""), "https://r/media/abc.M4A").as_deref(), Some("audio/mp4"));
+        // A declared non-media type wins over the extension; header-unsafe values are refused.
+        assert_eq!(stream_mime(Some("text/html"), u), None);
+        assert_eq!(stream_mime(Some("video/mp4\r\nX-Evil: 1"), u), None);
+        assert_eq!(stream_mime(None, "https://r/media/abc.html"), None);
+        assert_eq!(stream_mime(None, "https://r/media/abc"), None);
     }
 }

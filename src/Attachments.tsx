@@ -1,10 +1,12 @@
 // Message attachments: Buzz relay media (imeta + Blossom-authenticated fetch
-// through the `media_bytes` command → `blob:` URL, like Buzz desktop's
-// `fetch_media_bytes`) and previews of plain third-party image links.
+// in Rust) and previews of plain third-party image links. Images come through
+// the `media_bytes` command → `blob:` URL, like Buzz desktop's
+// `fetch_media_bytes`; video and audio are streamed to the disk cache by
+// `media_stream` and played from the local `unimedia` protocol (T-172).
 import { useEffect, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { pdfThumbnail } from "./pdfPreview";
-import { attachmentKind, collectAttachments, displayName, formatSize, imageLinks, parseDim, relayMediaSha, stripAttachmentLines, type MediaRef } from "./media";
+import { attachmentKind, collectAttachments, displayName, formatSize, imageLinks, mediaErrorText, parseDim, playbackErrorText, relayMediaSha, stripAttachmentLines, type MediaRef } from "./media";
 
 export type { MediaRef } from "./media";
 
@@ -59,6 +61,21 @@ function relayBlob(m: MediaRef): Promise<string> {
   return p;
 }
 
+// Video/audio → local `unimedia` URL over the verified cache file. Not behind
+// `slot`: a 40 MB download must not hold up the images.
+const streams = new Map<string, Promise<string>>();
+
+function relayStream(m: MediaRef): Promise<string> {
+  const key = `${m.url}|${m.sha256 ?? ""}`;
+  let p = streams.get(key);
+  if (!p) {
+    p = invoke<string>("media_stream", { url: m.url, sha: m.sha256, mime: m.mime }).then((sha) => convertFileSrc(sha, "unimedia"));
+    p.catch(() => streams.delete(key));
+    streams.set(key, p);
+  }
+  return p;
+}
+
 // ── Hooks ────────────────────────────────────────────────────────────────
 function useVisible<T extends Element>(): [React.RefObject<T | null>, boolean] {
   const ref = useRef<T>(null);
@@ -106,16 +123,31 @@ function RelayImage({ m, onOpen }: { m: MediaRef; onOpen: Open }) {
 
 function RelayPlayer({ m }: { m: MediaRef }) {
   const [go, setGo] = useState(false);
+  const [state, setState] = useState<{ src: string | null; error: string | null }>({ src: null, error: null });
   const [retry, setRetry] = useState(0);
-  const { src, error } = useRelayBlob(m, go, retry);
   const kind = attachmentKind(m);
+  useEffect(() => {
+    if (!go) return;
+    let live = true;
+    setState({ src: null, error: null });
+    relayStream(m).then((src) => live && setState({ src, error: null }), (e) => live && setState({ src: null, error: mediaErrorText(e) }));
+    return () => { live = false; };
+  }, [m.url, m.sha256, go, retry]);
+  const { src, error } = state;
+  // A playback error (format, or the cache file evicted) drops the stream so a retry fetches again.
+  const failed = (e: React.SyntheticEvent<HTMLMediaElement>) => {
+    streams.delete(`${m.url}|${m.sha256 ?? ""}`);
+    setState({ src: null, error: playbackErrorText(e.currentTarget.error?.code) });
+  };
   if (src) return kind === "video"
-    ? <video className="attachment-video" src={src} controls playsInline autoPlay style={boxStyle(m.dim)} />
-    : <audio className="attachment-audio" src={src} controls autoPlay />;
-  return <button className="attachment-file" onClick={() => { if (go) setRetry((n) => n + 1); else setGo(true); }} disabled={go && !error}>
+    ? <video className="attachment-video" src={src} controls playsInline autoPlay style={boxStyle(m.dim)} onError={failed} />
+    : <audio className="attachment-audio" src={src} controls autoPlay onError={failed} />;
+  const size = formatSize(m.size);
+  return <button className="attachment-file" onClick={() => { if (go) setRetry((n) => n + 1); else setGo(true); }} disabled={go && !error}
+    title={error ?? undefined}>
     <span aria-hidden="true">{kind === "video" ? "▶" : "♪"}</span>
     <span className="attachment-name">{displayName(m)}</span>
-    <small>{error ? "⚠ Failed — tap to retry" : go ? "Loading…" : [formatSize(m.size), kind === "video" ? "Play video" : "Play audio"].filter(Boolean).join(" · ")}</small>
+    <small className={error ? "attachment-error" : undefined}>{error ? `⚠ ${error} · tap to retry` : go ? (size ? `Downloading ${size}…` : "Downloading…") : [size, kind === "video" ? "Play video" : "Play audio"].filter(Boolean).join(" · ")}</small>
   </button>;
 }
 
@@ -161,7 +193,7 @@ function RelayFile({ m }: { m: MediaRef }) {
     <div className="attachment-file-card" title={path || undefined}>
     <button className="attachment-file" onClick={() => void run("opening")} disabled={busy} aria-label={`Open ${displayName(m)}`}>
       <span aria-hidden="true">{pdf ? "📄" : "📎"}</span><span className="attachment-name">{displayName(m)}</span>
-      <small>{state === "opening" ? "Opening…" : state === "error" ? "⚠ Failed — tap to retry" : [formatSize(m.size), "Open"].filter(Boolean).join(" · ")}</small>
+      <small>{state === "opening" ? "Opening…" : state === "error" ? `⚠ ${mediaErrorText(path)} · tap to retry` : [formatSize(m.size), "Open"].filter(Boolean).join(" · ")}</small>
     </button>
     <button className="attachment-save" onClick={() => void run("saving")} disabled={busy || state === "saved"} aria-label={`Cache ${displayName(m)}`}>{state === "saved" ? "✓ Cached" : state === "saving" ? "Saving…" : "Save"}</button>
     </div>

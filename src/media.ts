@@ -68,6 +68,20 @@ export function formatSize(n: number | null | undefined): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+/** A media command's error as one short line for the attachment card ("media: relay answered 401 …" → "Relay answered 401 …"). */
+export function mediaErrorText(e: unknown): string {
+  const raw = String(e instanceof Error ? e.message : e).replace(/^(media|invalid): /, "").trim();
+  return raw ? raw[0].toUpperCase() + raw.slice(1) : "Could not load";
+}
+
+/** Why a <video>/<audio> element stopped (its MediaError code). */
+export function playbackErrorText(code: number | undefined): string {
+  if (code === 4) return "This device can't play this file's format";
+  if (code === 3) return "The file could not be decoded";
+  if (code === 2) return "Playback was interrupted";
+  return "Playback failed";
+}
+
 export function displayName(m: MediaRef): string {
   if (m.filename) return m.filename;
   const last = urlPath(m.url).split("/").pop() ?? "";

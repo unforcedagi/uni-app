@@ -1,6 +1,6 @@
 // Run: node --experimental-strip-types scripts/media.test.ts (Node >= 22.6)
 import assert from "node:assert/strict";
-import { attachmentKind, collectAttachments, displayName, formatSize, imageLinks, parseDim, relayMediaSha, stripAttachmentLines, type MediaRef } from "../src/media.ts";
+import { attachmentKind, collectAttachments, displayName, formatSize, imageLinks, mediaErrorText, parseDim, playbackErrorText, relayMediaSha, stripAttachmentLines, type MediaRef } from "../src/media.ts";
 
 const O = "https://buzz.example";
 const H = "ab".repeat(32);
@@ -59,5 +59,13 @@ assert.deepEqual(
 assert.deepEqual(imageLinks(`relay ${img}`, O, new Set()), []);
 assert.deepEqual(imageLinks("a https://x.example/a.gif", O, new Set(["https://x.example/a.gif"])), []);
 assert.equal(imageLinks("https://x.example/1.png https://x.example/2.png https://x.example/3.png https://x.example/4.png https://x.example/5.png", O, new Set()).length, 4);
+
+// T-172: the card says what went wrong instead of a bare "Failed".
+assert.equal(mediaErrorText("media: file is too large (over 500 MB)"), "File is too large (over 500 MB)");
+assert.equal(mediaErrorText("media: relay answered 401 Unauthorized"), "Relay answered 401 Unauthorized");
+assert.equal(mediaErrorText(new Error("invalid: media URL is not on this relay")), "Media URL is not on this relay");
+assert.equal(mediaErrorText(""), "Could not load");
+assert.equal(playbackErrorText(4), "This device can't play this file's format");
+assert.equal(playbackErrorText(undefined), "Playback failed");
 
 console.log("media tests passed");
