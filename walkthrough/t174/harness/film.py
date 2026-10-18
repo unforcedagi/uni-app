@@ -28,18 +28,21 @@ before = f'{WORK}/before.png'
 subprocess.run(['magick', '-size', '1280x720', 'xc:#1c1f1d', '-fill', '#e8efe9', '-font', 'Liberation-Sans', '-pointsize', '44', '-annotate', '+80+170', 'Before (Android 13, previous build)',
                 '-pointsize', '30', '-fill', '#c9d3cc', '-annotate', '+80+260', 'Save:  "Cached"  (the file stayed in the app\'s private cache)',
                 '-annotate', '+80+320', 'Open:  "Cannot construct instance of app.tauri.opener.OpenArgs…"',
-                '-annotate', '+80+420', 'Nothing landed anywhere you could find it.', before], check=True)
+                '-annotate', '+80+380', 'Video over 25 MB:  "Failed — tap to retry"',
+                '-annotate', '+80+470', 'Nothing landed anywhere you could find it, and big videos never played.', before], check=True)
 SCENES = [
-    (before, 0, 6, "Before this fix, Save only copied a file into the app's private cache and said: cached. On Android, Open failed inside the app. So, from where you sat, nothing happened."),
+    (before, 0, 6, "Before these fixes, Save only copied a file into the app's private cache and said: cached. On Android, Open failed inside the app. And any video over 25 megabytes failed to play."),
     (desk, L['01-cards'] - 2.5, L['01-cards'], "This is the real Linux build, with three attachments in a room: a PDF, a 35 megabyte class video, and a photo."),
     (desk, L['01-cards'], L['02-pdf-saved'], "Tap Save. The file downloads with your key, its fingerprint is checked, and it goes into your Downloads folder. The card says exactly where."),
     (desk, L['02-pdf-saved'], L['03-pdf-opened'] + 1.5, "Open hands it to the PDF viewer."),
     (desk, L['05-video-saved'] - 4.0, L['05-video-saved'], "Videos have a Save button now too. Here, the 35 megabyte class."),
+    (desk, L['05b-video-playing'] - 6.0, L['05c-video-seeked'] + 0.3, "And the same 35 megabyte video now plays right here, streamed from the file the app just checked. Seeking jumps straight to 45 seconds."),
     (desk, L['07-lightbox'] - 1.5, L['08-image-saved'] + 0.5, "Photos save from the full-screen view."),
     (desk, L['09-error'] - 3.5, L['09-error'], "And when it can't, here a file that's gone from the relay, the card says why, instead of nothing happening."),
     (ANDR, A['01-cards'] - 1.0, A['02-pdf-saved'] + 0.5, "Now Android 13 on the emulator, the Daylight's version. Save puts the PDF in the phone's Downloads."),
     (ANDR, A['02-pdf-saved'] + 0.5, A['03-pdf-opened'] + 1.0, "Open shows it in the phone's PDF viewer. This is the step that used to fail."),
-    (ANDR, A['04-video-saving'] - 1.0, A['05-video-saved'] + 0.5, "The class video saves the same way."),
+    (ANDR, A['04-video-saving'] - 1.0, A['05-video-saved'] + 0.5, "The 35 megabyte class video saves the same way."),
+    (ANDR, A['05-video-saved'] + 0.8, A['05b-video-playing'] + 0.3, "It plays in the app as well, here after a jump to 45 seconds."),
     (ANDR, A['07-lightbox'] - 1.0, A['08-image-saved'] + 0.8, "And the photo, from the full-screen view."),
     # screenrecord only writes frames on change and stops before this mark: the Files app from its screen grab.
     (f'{AND}/android-09-downloads.png', 0, 3, "All three are in Downloads, where the Files app shows them. Not tested yet: your Daylight itself, which wasn't connected, and the Mac, which I checked only by reading the code."),

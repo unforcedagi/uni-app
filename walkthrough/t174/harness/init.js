@@ -87,6 +87,20 @@ if (window.top === window) (function () {
       step('video save', { note: await until(() => note('class.mp4'), 60000) });
       await sleep(2500); mark('05-video-saved');
 
+      // T-172: the 35 MB video plays in the app, streamed from the verified cache, and seeks.
+      const play = [...document.querySelectorAll('button.attachment-file')].find((b) => b.textContent.includes('class.mp4'));
+      play.click();
+      await sleep(400); mark('05a-video-loading');
+      const v = await until(() => document.querySelector('video.attachment-video'), 60000);
+      if (!v) throw new Error('no video element');
+      v.muted = true; await v.play().catch(() => {});
+      await sleep(5000); mark('05b-video-playing');
+      step('video playing', { t: v.currentTime, duration: v.duration, w: v.videoWidth, h: v.videoHeight, paused: v.paused, err: v.error && v.error.code });
+      v.currentTime = 45;
+      await sleep(3500); mark('05c-video-seeked');
+      step('video after seek', { t: v.currentTime, paused: v.paused, err: v.error && v.error.code });
+      v.pause();
+
       // The video and image have no Open button (they play / show in the app); prove the real command opens them too.
       const origin = await real.invoke('relay_origin');
       for (const [sha, ext, mime] of [[MP4, 'mp4', 'video/mp4'], [JPG, 'jpg', 'image/jpeg']]) {
