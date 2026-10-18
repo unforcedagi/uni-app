@@ -1288,32 +1288,49 @@ async fn save_pinned(app: &tauri::AppHandle, url: String, sha: Option<String>) -
     .await
 }
 
-/// Download a relay file to the cache (streamed, up to 500 MB) and return its local path.
-#[tauri::command]
-async fn media_save(app: tauri::AppHandle, url: String, sha: Option<String>) -> Result<String, String> {
-    let (path, hash) = save_pinned(&app, url, sha).await?;
-    media_registry::lock(&media_registry::MEDIA).release(&hash);
-    Ok(path)
+/// The `imeta` `m` when it is a plain `type/subtype` (parameters dropped); a hint for the app that opens the file.
+fn attachment_mime(mime: Option<&str>) -> Option<String> {
+    let m = mime?.split(';').next()?.trim().to_ascii_lowercase();
+    let safe = m.split_once('/').is_some_and(|(a, b)| !a.is_empty() && !b.is_empty())
+        && m.bytes().all(|b| b.is_ascii_alphanumeric() || b"/-+.".contains(&b));
+    safe.then_some(m)
 }
 
-/// Fetch and open an attachment with the OS default file handler. Never
-/// open a remote URL directly (that would omit Blossom auth and leak identity).
+/// T-174: save a relay attachment where the user finds it: Android's
+/// Downloads (MediaStore), the Downloads folder on desktop (see `files`).
+/// Downloaded to the cache first (streamed, up to 500 MB, Blossom auth and
+/// SHA-256 check), then copied out under the attachment's own name (`name`:
+/// the `imeta` filename). Returns where it went, for the confirmation.
 #[tauri::command]
-async fn media_open(app: tauri::AppHandle, url: String, sha: Option<String>) -> Result<(), String> {
-    use tauri_plugin_opener::OpenerExt;
+async fn media_save(
+    app: tauri::AppHandle,
+    url: String,
+    sha: Option<String>,
+    name: Option<String>,
+    mime: Option<String>,
+) -> Result<String, String> {
+    let hash = uni_core::media::media_sha_from_url(&relay_url(&app), &url).map_err(|e| e.to_string())?;
+    let name = uni_core::media::download_name(name.as_deref(), &url, &hash);
+    let (path, hash) = save_pinned(&app, url, sha).await?;
+    // Still pinned: the cache is not pruned under the copy.
+    let saved = files::save(&app, std::path::Path::new(&path), &name, attachment_mime(mime.as_deref()).as_deref()).await;
+    media_registry::lock(&media_registry::MEDIA).release(&hash);
+    saved
+}
+
+/// Fetch and open an attachment in the app the system picks for its type
+/// (Android: FileProvider + ACTION_VIEW, see `files`). Never open a remote
+/// URL directly (that would omit Blossom auth and leak identity).
+#[tauri::command]
+async fn media_open(
+    app: tauri::AppHandle,
+    url: String,
+    sha: Option<String>,
+    mime: Option<String>,
+) -> Result<(), String> {
     let relay = relay_url(&app);
     uni_core::media::media_sha_from_url(&relay, &url).map_err(|e| e.to_string())?;
-    let ext = url
-        .rsplit_once('.')
-        .map(|(_, ext)| ext)
-        .filter(|ext| {
-            ext.len() <= 8
-                && ext
-                    .bytes()
-                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
-        })
-        .unwrap_or("bin")
-        .to_string();
+    let ext = uni_core::media::url_extension(&url).unwrap_or("bin").to_string();
     let (path, hash) = save_pinned(&app, url, sha).await?;
     let target = format!("{path}.{ext}");
     let copied = blocking({
@@ -1333,9 +1350,7 @@ async fn media_open(app: tauri::AppHandle, url: String, sha: Option<String>) -> 
     .await;
     media_registry::lock(&media_registry::MEDIA).release(&hash);
     copied?;
-    app.opener()
-        .open_path(target, None::<&str>)
-        .map_err(|e| e.to_string())
+    files::open(&app, std::path::Path::new(&target), attachment_mime(mime.as_deref()).as_deref()).await
 }
 
 /// The relay's HTTP origin (e.g. `https://buzz.unforced.org`), so the UI can
@@ -1933,6 +1948,7 @@ mod desktop_log;
 mod t76;
 #[cfg(mobile)]
 mod mobile;
+mod files;
 #[cfg(any(target_os = "linux", target_os = "android"))]
 mod media_loopback;
 mod media_registry;
@@ -1996,6 +2012,7 @@ pub fn run() {
     uni_core::init_crypto();
     tauri::Builder::default()
         .plugin(secure_store::init())
+        .plugin(files::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .register_asynchronous_uri_scheme_protocol("unimedia", media_protocol)

@@ -449,6 +449,18 @@ h1 { font-family: var(--serif); font-weight: 500; font-size: 34px; line-height: 
 
 /* PDF first-page preview */
 .attachment-file-group { display: flex; flex-direction: column; gap: 6px; max-width: 280px; }
+/* T-174: Save on every relay attachment, and what became of it. */
+.attachment-media-group { display: flex; flex-direction: column; gap: 6px; max-width: 100%; }
+.attachment-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.attachment-save-pill { border: 1px solid var(--line); border-radius: 999px; padding: 6px 12px; }
+.attachment-save:disabled { color: var(--muted); }
+.attachment-note { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.attachment-note.attachment-error { color: var(--danger); }
+.lightbox-actions { position: absolute; left: 0; right: 0; bottom: calc(env(safe-area-inset-bottom) + 16px); display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 0 16px; }
+.lightbox-save { min-height: 44px; padding: 0 22px; border-radius: 999px; border: 0; background: rgba(255, 255, 255, .9); color: #111a17; font-size: 15px; }
+.lightbox-save:disabled { background: rgba(255, 255, 255, .6); }
+.lightbox-actions .attachment-note { color: #e8efe9; font-size: 13px; text-align: center; }
+.lightbox-actions .attachment-note.attachment-error { color: #ffb4a8; }
 .attachment-pdf { position: relative; display: block; width: 240px; min-height: 120px; padding: 0; border: 1px solid var(--border, #ddd); border-radius: 8px; background: #fff; overflow: hidden; cursor: pointer; }
 .attachment-pdf img { display: block; width: 100%; height: auto; }
 .attachment-pdf.loading { display: flex; align-items: center; justify-content: center; }

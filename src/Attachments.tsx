@@ -3,7 +3,10 @@
 // the `media_bytes` command → `blob:` URL, like Buzz desktop's
 // `fetch_media_bytes`; video and audio are streamed to the disk cache by
 // `media_stream` and played from the local `unimedia` protocol, or on Linux
-// and Android a token-guarded 127.0.0.1 URL (T-172).
+// and Android a token-guarded 127.0.0.1 URL (T-172). Every relay attachment
+// can be saved where the user finds it (`media_save`: Android's Downloads, the
+// Downloads folder on desktop), and files open in the app for their type
+// (`media_open`); both say what happened, or why not, on the card (T-174).
 import { useEffect, useRef, useState } from "react";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { pdfThumbnail } from "./pdfPreview";
@@ -105,11 +108,37 @@ function useRelayMedia(load: (m: MediaRef) => Promise<string>, m: MediaRef, enab
 }
 
 // ── Components ───────────────────────────────────────────────────────────
-type Open = (src: string, alt: string) => void;
+type Open = (src: string, alt: string, m?: MediaRef) => void;
 
 function boxStyle(dim: string | null): React.CSSProperties | undefined {
   const d = parseDim(dim);
   return d ? { aspectRatio: `${d[0]} / ${d[1]}`, width: `min(100%, ${Math.round((240 * d[0]) / d[1])}px, ${d[0]}px)` } : undefined;
+}
+
+// ── Save to Downloads (T-174) ───────────────────────────────────────────
+type Saver = { state: "idle" | "saving" | "saved" | "error"; text: string; save: () => void };
+
+/** `media_save` for one attachment; `text` says where it went, or why it didn't. */
+function useSave(m: MediaRef): Saver {
+  const [s, setS] = useState<Omit<Saver, "save">>({ state: "idle", text: "" });
+  const save = () => {
+    setS({ state: "saving", text: "" });
+    invoke<string>("media_save", { url: m.url, sha: m.sha256, name: m.filename, mime: m.mime })
+      .then((where) => setS({ state: "saved", text: `Saved to ${where}` }), (e) => setS({ state: "error", text: `Not saved: ${mediaErrorText(e)}` }));
+  };
+  return { ...s, save };
+}
+
+function SaveButton({ m, s, className = "attachment-save" }: { m: MediaRef; s: Saver; className?: string }) {
+  return <button className={className} onClick={(e) => { e.stopPropagation(); s.save(); }} disabled={s.state === "saving" || s.state === "saved"}
+    aria-label={`Save ${displayName(m)} to Downloads`}>{s.state === "saved" ? "✓ Saved" : s.state === "saving" ? "Saving…" : "Save"}</button>;
+}
+
+/** Where a save went, or why it failed; nothing while idle. */
+function SaveNote({ s }: { s: Saver }) {
+  if (s.state === "saved") return <small className="attachment-note" role="status">✓ {s.text}</small>;
+  if (s.state === "error") return <small className="attachment-note attachment-error" role="alert">⚠ {s.text}</small>;
+  return null;
 }
 
 function RelayImage({ m, onOpen }: { m: MediaRef; onOpen: Open }) {
@@ -117,7 +146,7 @@ function RelayImage({ m, onOpen }: { m: MediaRef; onOpen: Open }) {
   const { src, error } = useRelayMedia(relayBlob, m, visible);
   const alt = m.alt ?? displayName(m);
   return <button ref={ref} className={`attachment-image ${src ? "" : "loading"}`} style={boxStyle(m.dim)} disabled={!src}
-    onClick={() => src && onOpen(src, alt)} aria-label={src ? `Open image ${alt}` : error ? `Image failed to load: ${alt}` : `Loading image ${alt}`}>
+    onClick={() => src && onOpen(src, alt, m)} aria-label={src ? `Open image ${alt}` : error ? `Image failed to load: ${alt}` : `Loading image ${alt}`}>
     {src ? <img src={src} alt={alt} /> : <span className="attachment-status">{error ? "⚠ Image unavailable" : "Loading image…"}</span>}
   </button>;
 }
@@ -135,16 +164,26 @@ function RelayPlayer({ m }: { m: MediaRef }) {
     fail(playbackErrorText(e.currentTarget.error?.code));
   };
   const events = { onError: failed, onPlay: () => pin.play(), onEnded: () => pin.release() };
-  if (src) return kind === "video"
-    ? <video className="attachment-video" src={src} controls playsInline autoPlay style={boxStyle(m.dim)} {...events} />
-    : <audio className="attachment-audio" src={src} controls autoPlay {...events} />;
+  const saver = useSave(m);
+  if (src) return <div className="attachment-media-group">
+    {kind === "video"
+      ? <video className="attachment-video" src={src} controls playsInline autoPlay style={boxStyle(m.dim)} {...events} />
+      : <audio className="attachment-audio" src={src} controls autoPlay {...events} />}
+    <div className="attachment-actions"><SaveButton m={m} s={saver} className="attachment-save attachment-save-pill" /><SaveNote s={saver} /></div>
+  </div>;
   const size = formatSize(m.size);
-  return <button className="attachment-file" onClick={() => { if (go) setRetry((n) => n + 1); else setGo(true); }} disabled={go && !error}
-    title={error ?? undefined}>
-    <span aria-hidden="true">{kind === "video" ? "▶" : "♪"}</span>
-    <span className="attachment-name">{displayName(m)}</span>
-    <small className={error ? "attachment-error" : undefined}>{error ? `⚠ ${error} · tap to retry` : go ? (size ? `Downloading ${size}…` : "Downloading…") : [size, kind === "video" ? "Play video" : "Play audio"].filter(Boolean).join(" · ")}</small>
-  </button>;
+  return <div className="attachment-file-group">
+    <div className="attachment-file-card">
+    <button className="attachment-file" onClick={() => { if (go) setRetry((n) => n + 1); else setGo(true); }} disabled={go && !error}
+      title={error ?? undefined}>
+      <span aria-hidden="true">{kind === "video" ? "▶" : "♪"}</span>
+      <span className="attachment-name">{displayName(m)}</span>
+      <small className={error ? "attachment-error" : undefined}>{error ? `⚠ ${error} · tap to retry` : go ? (size ? `Downloading ${size}…` : "Downloading…") : [size, kind === "video" ? "Play video" : "Play audio"].filter(Boolean).join(" · ")}</small>
+    </button>
+    <SaveButton m={m} s={saver} />
+    </div>
+    <SaveNote s={saver} />
+  </div>;
 }
 
 // PDF thumbnails keyed by url; rendered once per session.
@@ -173,26 +212,24 @@ function PdfThumb({ m, onOpen }: { m: MediaRef; onOpen: () => void }) {
 }
 
 function RelayFile({ m }: { m: MediaRef }) {
-  const [state, setState] = useState<"idle" | "opening" | "saving" | "saved" | "error">("idle");
-  const [path, setPath] = useState("");
-  const run = async (action: "opening" | "saving") => {
-    setState(action);
-    try {
-      if (action === "opening") { await invoke("media_open", { url: m.url, sha: m.sha256 }); setState("idle"); }
-      else { setPath(await invoke<string>("media_save", { url: m.url, sha: m.sha256 })); setState("saved"); }
-    } catch (e) { setPath(String(e)); setState("error"); }
+  const [opening, setOpening] = useState<{ busy: boolean; error: string | null }>({ busy: false, error: null });
+  const saver = useSave(m);
+  const open = () => {
+    setOpening({ busy: true, error: null });
+    invoke("media_open", { url: m.url, sha: m.sha256, mime: m.mime })
+      .then(() => setOpening({ busy: false, error: null }), (e) => setOpening({ busy: false, error: mediaErrorText(e) }));
   };
-  const busy = state === "opening" || state === "saving";
   const pdf = m.mime === "application/pdf" || displayName(m).toLowerCase().endsWith(".pdf");
   return <div className="attachment-file-group">
-    {pdf && <PdfThumb m={m} onOpen={() => void run("opening")} />}
-    <div className="attachment-file-card" title={path || undefined}>
-    <button className="attachment-file" onClick={() => void run("opening")} disabled={busy} aria-label={`Open ${displayName(m)}`}>
+    {pdf && <PdfThumb m={m} onOpen={open} />}
+    <div className="attachment-file-card">
+    <button className="attachment-file" onClick={open} disabled={opening.busy} aria-label={`Open ${displayName(m)}`} title={opening.error ?? undefined}>
       <span aria-hidden="true">{pdf ? "📄" : "📎"}</span><span className="attachment-name">{displayName(m)}</span>
-      <small>{state === "opening" ? "Opening…" : state === "error" ? `⚠ ${mediaErrorText(path)} · tap to retry` : [formatSize(m.size), "Open"].filter(Boolean).join(" · ")}</small>
+      <small className={opening.error ? "attachment-error" : undefined} role={opening.error ? "alert" : undefined}>{opening.busy ? "Opening…" : opening.error ? `⚠ ${opening.error} · tap to retry` : [formatSize(m.size), "Open"].filter(Boolean).join(" · ")}</small>
     </button>
-    <button className="attachment-save" onClick={() => void run("saving")} disabled={busy || state === "saved"} aria-label={`Cache ${displayName(m)}`}>{state === "saved" ? "✓ Cached" : state === "saving" ? "Saving…" : "Save"}</button>
+    <SaveButton m={m} s={saver} />
     </div>
+    <SaveNote s={saver} />
   </div>;
 }
 
@@ -205,7 +242,7 @@ function LinkImage({ url, onOpen }: { url: string; onOpen: Open }) {
   </button>;
 }
 
-function Lightbox({ src, alt, onClose }: { src: string; alt: string; onClose: () => void }) {
+function Lightbox({ src, alt, m, onClose }: { src: string; alt: string; m?: MediaRef; onClose: () => void }) {
   const close = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     close.current?.focus();
@@ -216,17 +253,26 @@ function Lightbox({ src, alt, onClose }: { src: string; alt: string; onClose: ()
   return <div className="lightbox" role="dialog" aria-modal="true" aria-label={alt} onClick={onClose}>
     <img src={src} alt={alt} referrerPolicy="no-referrer" onClick={(e) => e.stopPropagation()} />
     <button ref={close} className="lightbox-close" onClick={onClose} aria-label="Close image">✕</button>
+    {m && <LightboxSave m={m} />}
+  </div>;
+}
+
+/** Save for a relay image, at the foot of the lightbox. */
+function LightboxSave({ m }: { m: MediaRef }) {
+  const saver = useSave(m);
+  return <div className="lightbox-actions" onClick={(e) => e.stopPropagation()}>
+    <SaveButton m={m} s={saver} className="lightbox-save" /><SaveNote s={saver} />
   </div>;
 }
 
 /** Attachments and image-link previews for one message. */
 export function Attachments({ body, media }: { body: string; media: MediaRef[] | undefined }) {
   const relayOrigin = useRelayOrigin();
-  const [open, setOpen] = useState<{ src: string; alt: string } | null>(null);
+  const [open, setOpen] = useState<{ src: string; alt: string; m?: MediaRef } | null>(null);
   const items = collectAttachments(body, media ?? [], relayOrigin);
   const links = imageLinks(body, relayOrigin, new Set(items.map((m) => m.url)));
   if (!items.length && !links.length) return null;
-  const onOpen: Open = (src, alt) => setOpen({ src, alt });
+  const onOpen: Open = (src, alt, m) => setOpen({ src, alt, m });
   return <div className="attachments">
     {items.map((m) => {
       const kind = attachmentKind(m);
@@ -240,6 +286,6 @@ export function Attachments({ body, media }: { body: string; media: MediaRef[] |
       return <RelayFile key={m.url} m={m} />;
     })}
     {links.map((u) => <LinkImage key={u} url={u} onOpen={onOpen} />)}
-    {open && <Lightbox src={open.src} alt={open.alt} onClose={() => setOpen(null)} />}
+    {open && <Lightbox src={open.src} alt={open.alt} m={open.m} onClose={() => setOpen(null)} />}
   </div>;
 }

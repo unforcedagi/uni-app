@@ -544,6 +544,95 @@ pub fn prune_cache(cache_dir: &Path, keep: &[String], budget: u64) {
     }
 }
 
+/// The extension of a relay media URL (`…/<sha>.pdf` → `pdf`): at most 8
+/// lowercase letters or digits, else none.
+pub fn url_extension(url: &str) -> Option<&str> {
+    let last = url.rsplit('/').next()?;
+    let ext = last.rsplit_once('.')?.1;
+    (!ext.is_empty()
+        && ext.len() <= 8
+        && ext.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit()))
+    .then_some(ext)
+}
+
+/// T-174: the name an attachment is saved under where the user will find it
+/// (Downloads). The `imeta` filename without any folder part, characters file
+/// systems refuse, or leading/trailing dots and spaces, at most 120
+/// characters; when it has no extension, the URL's is added. Without a
+/// usable name: `<first 12 of the hash>.<ext>`.
+pub fn download_name(filename: Option<&str>, url: &str, sha: &str) -> String {
+    let ext = url_extension(url);
+    let base = filename
+        .and_then(|f| f.rsplit(['/', '\\']).next())
+        .unwrap_or("");
+    let clean: String = base
+        .chars()
+        .map(|c| if c.is_control() || "<>:\"/\\|?*".contains(c) { '_' } else { c })
+        .collect();
+    let clean = clean.trim_matches(|c: char| c == '.' || c.is_whitespace());
+    let mut name = if clean.is_empty() {
+        sha.chars().take(12).collect::<String>()
+    } else {
+        clean.to_string()
+    };
+    if let Some(ext) = ext.filter(|_| !name.contains('.')) {
+        name = format!("{name}.{ext}");
+    }
+    if name.chars().count() > 120 {
+        // Keep the extension; shorten the stem.
+        let (stem, ext) = name.rsplit_once('.').filter(|(_, e)| e.chars().count() <= 8).unwrap_or((&name, ""));
+        let keep = if ext.is_empty() { 120 } else { 120 - ext.chars().count() - 1 };
+        let stem: String = stem.chars().take(keep).collect();
+        name = if ext.is_empty() { stem } else { format!("{stem}.{ext}") };
+    }
+    name
+}
+
+/// `report.pdf`, then `report (1).pdf`, `report (2).pdf`, …
+fn numbered(name: &str, n: u32) -> String {
+    if n == 0 {
+        return name.to_string();
+    }
+    match name.rsplit_once('.').filter(|(stem, _)| !stem.is_empty()) {
+        Some((stem, ext)) => format!("{stem} ({n}).{ext}"),
+        None => format!("{name} ({n})"),
+    }
+}
+
+/// T-174: copy a (verified) cache file into `dir` as `name`, never over a file
+/// that is already there (`report (1).pdf` instead). The copy is written
+/// under a hidden temporary name and only then given its own, so a
+/// half-written file never shows up in the folder. Returns where it went.
+pub fn export_file(src: &Path, dir: &Path, name: &str) -> std::io::Result<PathBuf> {
+    use std::io::ErrorKind;
+    if name.is_empty() || name.contains(['/', '\\']) || name.starts_with('.') {
+        return Err(std::io::Error::new(ErrorKind::InvalidInput, "bad file name"));
+    }
+    std::fs::create_dir_all(dir)?;
+    let tmp = dir.join(format!(".{}.uni-part", uuid::Uuid::new_v4()));
+    let placed = (|| {
+        std::fs::copy(src, &tmp)?;
+        std::fs::File::open(&tmp)?.sync_all()?;
+        for n in 0..1000 {
+            let target = dir.join(numbered(name, n));
+            // A hard link fails if the name is taken, so nothing is overwritten.
+            match std::fs::hard_link(&tmp, &target) {
+                Ok(()) => return Ok(target),
+                Err(e) if e.kind() == ErrorKind::AlreadyExists => continue,
+                // File systems without hard links (FAT, some network shares).
+                Err(_) if !target.exists() => {
+                    std::fs::rename(&tmp, &target)?;
+                    return Ok(target);
+                }
+                Err(_) => continue,
+            }
+        }
+        Err(std::io::Error::new(ErrorKind::AlreadyExists, "too many files with this name"))
+    })();
+    let _ = std::fs::remove_file(&tmp);
+    placed
+}
+
 pub(crate) fn http_client() -> Result<reqwest::Client> {
     http_client_with_timeout(FETCH_TIMEOUT)
 }
@@ -1432,6 +1521,74 @@ mod tests {
             .collect();
         left.sort();
         assert_eq!(left, ["keep", "new"]);
+    }
+
+    /// T-174: "Save" must put the file where the user finds it. The real save
+    /// path: Blossom-authenticated, hash-checked download to the cache, then a
+    /// copy into the Downloads folder under the attachment's own name, with
+    /// nothing overwritten and no temporary file left behind.
+    #[tokio::test]
+    async fn saved_attachment_lands_in_downloads_under_its_name() {
+        let body: Vec<u8> = (0..2 * 1024 * 1024u32).map(|i| (i % 249) as u8).collect();
+        let sha = sha256_hex(&body);
+        let (port, mut seen) = serve("200 OK", body.clone()).await;
+        let relay = format!("ws://127.0.0.1:{port}");
+        let url = format!("http://127.0.0.1:{port}/media/{sha}.pdf");
+        let cache = tempfile::tempdir().unwrap();
+        let downloads = tempfile::tempdir().unwrap();
+        let keys = Keys::generate();
+
+        let cached = fetch_media_to_file(&relay, &keys, &url, Some(&sha), cache.path(), MAX_STREAM_MEDIA_BYTES)
+            .await
+            .unwrap();
+        assert!(seen.recv().await.unwrap().is_some(), "sent with Blossom auth");
+        let name = download_name(Some("Q3 report.pdf"), &url, &sha);
+        let saved = export_file(&cached, downloads.path(), &name).unwrap();
+        assert_eq!(saved, downloads.path().join("Q3 report.pdf"));
+        assert!(std::fs::read(&saved).unwrap() == body);
+
+        // Saving again keeps the first copy and numbers the second.
+        std::fs::write(&saved, b"the user's edits").unwrap();
+        let again = export_file(&cached, downloads.path(), &name).unwrap();
+        assert_eq!(again, downloads.path().join("Q3 report (1).pdf"));
+        assert_eq!(std::fs::read(&saved).unwrap(), b"the user's edits");
+        assert!(std::fs::read(&again).unwrap() == body);
+
+        // Only the two saved files: no hidden temporary copy left behind.
+        let mut names: Vec<String> = std::fs::read_dir(downloads.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        assert_eq!(names, ["Q3 report (1).pdf", "Q3 report.pdf"]);
+
+        // A missing Downloads folder is created; a hostile name stays inside it.
+        let nested = downloads.path().join("new");
+        let hostile = download_name(Some("../../.bashrc"), &url, &sha);
+        let placed = export_file(&cached, &nested, &hostile).unwrap();
+        assert_eq!(placed, nested.join("bashrc.pdf"));
+        assert!(export_file(&cached, &nested, "../x").is_err());
+    }
+
+    #[test]
+    fn download_names_are_safe_and_keep_their_type() {
+        let sha = H;
+        let url = format!("https://relay.example/media/{sha}.mp4");
+        assert_eq!(download_name(Some("class.mp4"), &url, sha), "class.mp4");
+        assert_eq!(download_name(Some("class"), &url, sha), "class.mp4");
+        assert_eq!(download_name(Some("C:\\Users\\a\\notes.txt"), &url, sha), "notes.txt");
+        assert_eq!(download_name(Some("a<b>:c?.mp4"), &url, sha), "a_b__c_.mp4");
+        assert_eq!(download_name(Some(" .. "), &url, sha), format!("{}.mp4", &sha[..12]));
+        assert_eq!(download_name(None, &url, sha), format!("{}.mp4", &sha[..12]));
+        assert_eq!(download_name(None, "https://relay.example/media/x", sha), sha[..12].to_string());
+        let long = format!("{}.pdf", "x".repeat(300));
+        let short = download_name(Some(&long), &url, sha);
+        assert_eq!(short.chars().count(), 120);
+        assert!(short.ends_with(".pdf"));
+        assert_eq!(url_extension(&url), Some("mp4"));
+        assert_eq!(url_extension("https://relay.example/media/x.EXE"), None);
+        assert_eq!(numbered("a.tar.gz", 2), "a.tar (2).gz");
+        assert_eq!(numbered(".env", 1), ".env (1)");
     }
 
     #[tokio::test]
