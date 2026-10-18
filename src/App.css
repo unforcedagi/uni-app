@@ -453,6 +453,7 @@ h1 { font-family: var(--serif); font-weight: 500; font-size: 34px; line-height: 
 .attachment-media-group { display: flex; flex-direction: column; gap: 6px; max-width: 100%; }
 .attachment-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .attachment-save-pill { border: 1px solid var(--line); border-radius: 999px; padding: 6px 12px; }
+.attachment-save { white-space: nowrap; }
 .attachment-save:disabled { color: var(--muted); }
 .attachment-note { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
 .attachment-note.attachment-error { color: var(--danger); }

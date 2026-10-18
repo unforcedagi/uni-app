@@ -83,11 +83,14 @@ pub async fn save<R: Runtime>(
     {
         use tauri::Manager;
         let _ = mime;
+        let home = app.path().home_dir().ok();
+        // Linux without xdg-user-dirs (`user-dirs.dirs`) has no named Downloads folder: use ~/Downloads.
         let dir = app
             .path()
             .download_dir()
-            .map_err(|_| "Couldn't find a Downloads folder on this computer".to_string())?;
-        let home = app.path().home_dir().ok();
+            .ok()
+            .or_else(|| home.as_ref().map(|h| h.join("Downloads")))
+            .ok_or("Couldn't find a Downloads folder on this computer")?;
         let (cached, name) = (cached.to_path_buf(), name.to_string());
         let path = tauri::async_runtime::spawn_blocking(move || uni_core::media::export_file(&cached, &dir, &name))
             .await

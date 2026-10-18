@@ -47,6 +47,12 @@ class FilesPlugin(private val activity: Activity) : Plugin(activity) {
       ?: "application/octet-stream"
   }
 
+  /** `report.pdf` → `report (1).pdf`. */
+  private fun numbered(name: String, n: Int): String {
+    val dot = name.lastIndexOf('.')
+    return if (dot > 0) "${name.substring(0, dot)} ($n)${name.substring(dot)}" else "$name ($n)"
+  }
+
   /** Only files in the app's media cache, the one folder the FileProvider shares (res/xml/file_paths.xml). */
   private fun mediaFile(path: String): File? {
     val media = File(activity.cacheDir, "media").canonicalFile
@@ -83,7 +89,20 @@ class FilesPlugin(private val activity: Activity) : Plugin(activity) {
           ?: throw IllegalStateException("Downloads refused the file")
         resolver.openOutputStream(uri)?.use { out -> src.inputStream().use { it.copyTo(out, 1 shl 16) } }
           ?: throw IllegalStateException("could not write to Downloads")
-        resolver.update(uri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
+        // Publishing moves the file to its name. MediaStore can refuse that name (UNIQUE files._data) when a row
+        // for it outlived its file; then publish as "name (1).ext", … without copying again.
+        for (n in 0..20) {
+          val done = ContentValues().apply {
+            put(MediaStore.MediaColumns.IS_PENDING, 0)
+            if (n > 0) put(MediaStore.MediaColumns.DISPLAY_NAME, numbered(args.name, n))
+          }
+          try {
+            resolver.update(uri, done, null, null)
+            break
+          } catch (e: Exception) {
+            if (n == 20) throw e
+          }
+        }
         // MediaStore renames a duplicate ("report (1).pdf"): report the name it really has.
         var saved = args.name
         resolver.query(uri, arrayOf(MediaStore.MediaColumns.DISPLAY_NAME), null, null, null)?.use { c ->
