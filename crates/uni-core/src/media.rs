@@ -749,22 +749,59 @@ pub struct RangeReply {
     pub body: Vec<u8>,
 }
 
-/// Read the part of `path` a `Range` header asks for, at most
-/// [`MAX_RANGE_CHUNK`] bytes, as media elements expect: `bytes=a-b`,
-/// `bytes=a-` and `bytes=-n` (only the first of several ranges). A file that
+/// The inclusive byte span a `Range` header asks of a `len`-byte file:
+/// `bytes=a-b`, `bytes=a-` and `bytes=-n` (only the first of several
+/// ranges; an end past the file is clamped). `Ok(None)`: no `Range`, the
+/// whole file. `Err(())`: not satisfiable (answer 416).
+#[allow(clippy::result_unit_err)]
+pub fn parse_range(range: Option<&str>, len: u64) -> std::result::Result<Option<(u64, u64)>, ()> {
+    let Some(r) = range.map(str::trim) else {
+        return Ok(None);
+    };
+    let spec = r.strip_prefix("bytes=").ok_or(())?;
+    let first = spec.split(',').next().unwrap_or("").trim();
+    let (a, b) = first.split_once('-').ok_or(())?;
+    let (a, b) = (a.trim(), b.trim());
+    let last = len.checked_sub(1).ok_or(())?;
+    let span = match (a.is_empty(), b.is_empty()) {
+        // bytes=-n: the last n bytes.
+        (true, false) => b
+            .parse::<u64>()
+            .ok()
+            .filter(|n| *n > 0)
+            .map(|n| (len.saturating_sub(n), last)),
+        (false, true) => a.parse::<u64>().ok().map(|s| (s, last)),
+        (false, false) => a
+            .parse::<u64>()
+            .ok()
+            .zip(b.parse::<u64>().ok())
+            .filter(|(s, e)| s <= e)
+            .map(|(s, e)| (s, e.min(last))),
+        (true, true) => None,
+    };
+    match span {
+        Some((s, e)) if s < len => Ok(Some((s, e))),
+        _ => Err(()),
+    }
+}
+
+/// Read the part of `path` a `Range` header asks for ([`parse_range`]), at
+/// most [`MAX_RANGE_CHUNK`] bytes, as media elements expect. A file that
 /// needs more than one chunk is answered with a partial 206 even without a
 /// `Range` header, so its bytes are never loaded whole.
 pub fn read_range(path: &Path, range: Option<&str>) -> std::io::Result<RangeReply> {
     use std::io::{Read as _, Seek as _};
     let mut file = std::fs::File::open(path)?;
     let len = file.metadata()?.len();
-    let unsatisfiable = || RangeReply {
-        status: 416,
-        content_range: Some(format!("bytes */{len}")),
-        body: Vec::new(),
-    };
-    let (start, end) = match range.map(str::trim) {
-        None if len <= MAX_RANGE_CHUNK => {
+    let (start, end) = match parse_range(range, len) {
+        Err(()) => {
+            return Ok(RangeReply {
+                status: 416,
+                content_range: Some(format!("bytes */{len}")),
+                body: Vec::new(),
+            })
+        }
+        Ok(None) if len <= MAX_RANGE_CHUNK => {
             let mut body = Vec::with_capacity(len as usize);
             file.read_to_end(&mut body)?;
             return Ok(RangeReply {
@@ -773,37 +810,8 @@ pub fn read_range(path: &Path, range: Option<&str>) -> std::io::Result<RangeRepl
                 body,
             });
         }
-        None => (0, len - 1),
-        Some(r) => {
-            let Some(spec) = r.strip_prefix("bytes=") else {
-                return Ok(unsatisfiable());
-            };
-            let first = spec.split(',').next().unwrap_or("").trim();
-            let Some((a, b)) = first.split_once('-') else {
-                return Ok(unsatisfiable());
-            };
-            let (a, b) = (a.trim(), b.trim());
-            let parsed = match (a.is_empty(), b.is_empty()) {
-                // bytes=-n: the last n bytes.
-                (true, false) => b
-                    .parse::<u64>()
-                    .ok()
-                    .filter(|n| *n > 0)
-                    .map(|n| (len.saturating_sub(n), len.saturating_sub(1))),
-                (false, true) => a.parse::<u64>().ok().map(|s| (s, len.saturating_sub(1))),
-                (false, false) => a
-                    .parse::<u64>()
-                    .ok()
-                    .zip(b.parse::<u64>().ok())
-                    .filter(|(s, e)| s <= e)
-                    .map(|(s, e)| (s, e.min(len.saturating_sub(1)))),
-                (true, true) => None,
-            };
-            match parsed {
-                Some((s, e)) if s < len => (s, e),
-                _ => return Ok(unsatisfiable()),
-            }
-        }
+        Ok(None) => (0, len - 1),
+        Ok(Some(span)) => span,
     };
     let end = end.min(start + MAX_RANGE_CHUNK - 1);
     let mut body = Vec::with_capacity((end + 1 - start) as usize);
@@ -1370,6 +1378,20 @@ mod tests {
                 body: b"tiny".to_vec()
             }
         );
+    }
+
+    #[test]
+    fn parse_range_spans() {
+        assert_eq!(parse_range(None, 10), Ok(None));
+        assert_eq!(parse_range(Some("bytes=2-4"), 10), Ok(Some((2, 4))));
+        assert_eq!(parse_range(Some("bytes=2-"), 10), Ok(Some((2, 9))));
+        assert_eq!(parse_range(Some("bytes=-3"), 10), Ok(Some((7, 9))));
+        assert_eq!(parse_range(Some("bytes=-30"), 10), Ok(Some((0, 9))));
+        assert_eq!(parse_range(Some("bytes=8-99"), 10), Ok(Some((8, 9))));
+        for bad in ["bytes=10-", "bytes=4-2", "bytes=-0", "bytes=-", "lines=1-2", "bytes=a-"] {
+            assert_eq!(parse_range(Some(bad), 10), Err(()), "{bad}");
+        }
+        assert_eq!(parse_range(Some("bytes=0-"), 0), Err(()));
     }
 
     #[test]

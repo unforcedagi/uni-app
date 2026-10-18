@@ -1010,28 +1010,44 @@ fn stream_mime(mime: Option<&str>, url: &str) -> Option<String> {
     )
 }
 
+/// Where the webview plays a streamed attachment: `url` on Linux (see
+/// `media_loopback`), else the `unimedia` protocol URL the UI builds from `sha`.
+#[derive(Serialize)]
+struct MediaStreamView {
+    sha: String,
+    url: Option<String>,
+}
+
 /// T-172: make a relay video or audio file playable. It is streamed to the
 /// hash-keyed cache (Blossom auth, SHA-256 verified, up to 500 MB) and allowed
 /// on the `unimedia` protocol; the webview then plays
 /// `unimedia://localhost/<sha>` (`http://unimedia.localhost/<sha>` on
 /// Android), which answers byte ranges from that file. Neither the bytes nor
-/// the auth token pass through JavaScript. Returns the hash.
+/// the auth token pass through JavaScript. A file already in the cache plays
+/// once its hash is re-checked, without the key.
 #[tauri::command]
 async fn media_stream(
     app: tauri::AppHandle,
     url: String,
     sha: Option<String>,
     mime: Option<String>,
-) -> Result<String, String> {
+) -> Result<MediaStreamView, String> {
     let content_type = stream_mime(mime.as_deref(), &url).ok_or("not a video or audio attachment")?;
     secure_store::ensure_loaded(&app).await?;
     let relay = relay_url(&app);
     let dir = media_cache_dir(&app)?;
     let hash = uni_core::media::media_sha_from_url(&relay, &url).map_err(|e| e.to_string())?;
+    if sha.as_deref().is_some_and(|x| !x.is_empty() && !x.eq_ignore_ascii_case(&hash)) {
+        return Err("imeta hash does not match the media URL".into());
+    }
     let known = MEDIA_STREAMS.lock().map_err(|e| e.to_string())?.contains_key(&hash);
     if !(known && dir.join(&hash).is_file()) {
         let fetched = hash.clone();
         blocking(move || {
+            let max = uni_core::media::MAX_STREAM_MEDIA_BYTES;
+            if uni_core::media::verified_cache_file(&dir, &fetched, max).is_some() {
+                return Ok(());
+            }
             let (keys, _) = uni_core::load_keys(false).map_err(|e| e.to_string())?;
             tauri::async_runtime::block_on(uni_core::media::fetch_media_to_file(
                 &relay,
@@ -1039,18 +1055,22 @@ async fn media_stream(
                 &url,
                 sha.as_deref(),
                 &dir,
-                uni_core::media::MAX_STREAM_MEDIA_BYTES,
+                max,
             ))
+            .map(|_| tracing::info!(sha = %fetched, "media_stream: downloaded and verified"))
             .map_err(|e| e.to_string())
         })
         .await?;
-        tracing::info!(sha = %fetched, "media_stream: verified in cache");
     }
     MEDIA_STREAMS
         .lock()
         .map_err(|e| e.to_string())?
         .insert(hash.clone(), content_type);
-    Ok(hash)
+    #[cfg(target_os = "linux")]
+    let url = Some(format!("{}/{hash}", media_loopback::base(media_cache_dir(&app)?)?));
+    #[cfg(not(target_os = "linux"))]
+    let url = None;
+    Ok(MediaStreamView { sha: hash, url })
 }
 
 /// The `unimedia` protocol: byte ranges of a verified cached video or audio
@@ -1074,6 +1094,7 @@ fn media_protocol(
             let path = uni_core::media::cache_path(&media_cache_dir(&app).ok()?, &sha).ok()?;
             Some((ct, uni_core::media::read_range(&path, range.as_deref()).ok()?))
         });
+        tracing::debug!(sha = %sha, range = ?range, status = reply.as_ref().map(|r| r.1.status), "unimedia");
         let response = match reply {
             Some((ct, r)) => {
                 let mut b = Response::builder()
@@ -1859,6 +1880,8 @@ mod desktop_log;
 mod t76;
 #[cfg(mobile)]
 mod mobile;
+#[cfg(target_os = "linux")]
+mod media_loopback;
 mod pair_source;
 mod secure_store;
 
