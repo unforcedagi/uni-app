@@ -28,8 +28,17 @@ use serde::{Deserialize, Serialize};
 
 use crate::{Error, Result};
 
-/// Largest blob we download (Buzz desktop allows 50 MB; a phone needs less).
+/// Largest blob we download into memory: images and PDF previews (Buzz
+/// desktop allows 50 MB; a phone needs less).
 pub const MAX_MEDIA_BYTES: u64 = 25 * 1024 * 1024;
+/// Largest video, audio or file we stream to the disk cache (T-172: Buzz
+/// videos are routinely 30–50 MB). Played and opened from disk, never held whole.
+pub const MAX_STREAM_MEDIA_BYTES: u64 = 500 * 1024 * 1024;
+/// The media cache is trimmed, oldest first, to this after each streamed download.
+pub const MEDIA_CACHE_BUDGET: u64 = 2 * 1024 * 1024 * 1024;
+/// Most bytes one local playback response carries; players ask for the rest
+/// with further `Range` requests (Tauri's asset protocol uses ~1 MB too).
+pub const MAX_RANGE_CHUNK: u64 = 1024 * 1024;
 /// Upload cap keeps the raw IPC payload and Rust/relay buffers practical on mobile.
 pub const MAX_UPLOAD_BYTES: usize = 25 * 1024 * 1024;
 /// Lifetime of a `t=get` token (Buzz: `MEDIA_GET_AUTH_EXPIRY_SECS`).
@@ -37,6 +46,9 @@ pub const MEDIA_GET_AUTH_EXPIRY_SECS: u64 = 600;
 /// Most `imeta` entries kept per message.
 pub const MAX_IMETA_PER_MESSAGE: usize = 20;
 const FETCH_TIMEOUT: Duration = Duration::from_secs(60);
+/// Whole-transfer limit for a streamed download; each read still has to
+/// arrive within [`FETCH_TIMEOUT`].
+const STREAM_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
 /// One NIP-92 attachment on a message.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -437,11 +449,12 @@ pub fn cache_path(cache_dir: &Path, sha: &str) -> Result<PathBuf> {
     Ok(cache_dir.join(sha))
 }
 
-/// Cached bytes for `sha`, re-verified (a corrupt file is removed).
+/// Cached bytes for `sha`, re-verified (a corrupt file is removed). A file
+/// over [`MAX_MEDIA_BYTES`] is a streamed video or file, not ours to load
+/// into memory: it is left alone.
 pub fn read_cached(cache_dir: &Path, sha: &str) -> Option<Vec<u8>> {
     let path = cache_path(cache_dir, sha).ok()?;
     if std::fs::metadata(&path).ok()?.len() > MAX_MEDIA_BYTES {
-        let _ = std::fs::remove_file(&path);
         return None;
     }
     let bytes = std::fs::read(&path).ok()?;
@@ -450,6 +463,75 @@ pub fn read_cached(cache_dir: &Path, sha: &str) -> Option<Vec<u8>> {
     } else {
         let _ = std::fs::remove_file(&path);
         None
+    }
+}
+
+/// The cached file for `sha` if it is at most `max` bytes and still hashes to
+/// its name (read in chunks, never whole). A corrupt file is removed; a hit
+/// is marked recently used for [`prune_cache`].
+pub fn verified_cache_file(cache_dir: &Path, sha: &str, max: u64) -> Option<PathBuf> {
+    use std::io::Read as _;
+    let path = cache_path(cache_dir, sha).ok()?;
+    let mut file = std::fs::File::open(&path).ok()?;
+    if file.metadata().ok()?.len() > max {
+        return None;
+    }
+    let mut engine = sha256::Hash::engine();
+    let mut buf = vec![0u8; 1024 * 1024];
+    loop {
+        match file.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => nostr::hashes::HashEngine::input(&mut engine, &buf[..n]),
+            Err(_) => return None,
+        }
+    }
+    if sha256::Hash::from_engine(engine).to_string() != sha {
+        drop(file);
+        let _ = std::fs::remove_file(&path);
+        return None;
+    }
+    let _ = std::fs::File::options()
+        .append(true)
+        .open(&path)
+        .and_then(|f| f.set_modified(std::time::SystemTime::now()));
+    Some(path)
+}
+
+/// Trim the cache to `budget` bytes, least recently used first, never
+/// touching `keep`. Stale `.part` files from interrupted downloads go too.
+pub fn prune_cache(cache_dir: &Path, keep: &str, budget: u64) {
+    let Ok(entries) = std::fs::read_dir(cache_dir) else {
+        return;
+    };
+    let day = Duration::from_secs(24 * 3600);
+    let mut files: Vec<(std::time::SystemTime, u64, PathBuf)> = Vec::new();
+    for e in entries.flatten() {
+        let Ok(meta) = e.metadata() else { continue };
+        if !meta.is_file() {
+            continue;
+        }
+        let modified = meta.modified().unwrap_or(std::time::UNIX_EPOCH);
+        let name = e.file_name().to_string_lossy().into_owned();
+        if name.ends_with(".part") {
+            if modified.elapsed().is_ok_and(|age| age > day) {
+                let _ = std::fs::remove_file(e.path());
+            }
+            continue;
+        }
+        if name != keep {
+            files.push((modified, meta.len(), e.path()));
+        }
+    }
+    let keep_len = std::fs::metadata(cache_dir.join(keep)).map_or(0, |m| m.len());
+    let mut total = keep_len + files.iter().map(|f| f.1).sum::<u64>();
+    files.sort();
+    for (_, len, path) in files {
+        if total <= budget {
+            break;
+        }
+        if std::fs::remove_file(&path).is_ok() {
+            total -= len;
+        }
     }
 }
 
@@ -471,6 +553,13 @@ pub fn https_client_following_redirects(timeout: Duration) -> Result<reqwest::Cl
 }
 
 fn client_with(timeout: Duration, redirect: reqwest::redirect::Policy) -> Result<reqwest::Client> {
+    client_builder(redirect)?
+        .timeout(timeout)
+        .build()
+        .map_err(|e| Error::Media(format!("http client: {e}")))
+}
+
+fn client_builder(redirect: reqwest::redirect::Policy) -> Result<reqwest::ClientBuilder> {
     // Mozilla roots (the same set tokio-tungstenite uses for the relay socket),
     // not the platform verifier: that one needs JNI setup on Android.
     let mut roots = rustls::RootCertStore::empty();
@@ -483,25 +572,13 @@ fn client_with(timeout: Duration, redirect: reqwest::redirect::Policy) -> Result
         .map_err(|e| Error::Media(format!("tls: {e}")))?
         .with_root_certificates(roots)
         .with_no_client_auth();
-    reqwest::Client::builder()
+    Ok(reqwest::Client::builder()
         .tls_backend_preconfigured(tls)
-        .redirect(redirect)
-        .timeout(timeout)
-        .build()
-        .map_err(|e| Error::Media(format!("http client: {e}")))
+        .redirect(redirect))
 }
 
-/// Fetch a relay media blob with Blossom auth, verify its SHA-256 against the
-/// URL (and `expected_sha`, the `imeta` `x`, when given), cache it under
-/// `cache_dir/<sha256>` and return the bytes. A verified cache hit skips the
-/// network entirely.
-pub async fn fetch_media(
-    relay_url: &str,
-    keys: &Keys,
-    url: &str,
-    expected_sha: Option<&str>,
-    cache_dir: &Path,
-) -> Result<Vec<u8>> {
+/// The hash a relay media URL names, checked against the `imeta` `x`.
+fn checked_media_sha(relay_url: &str, url: &str, expected_sha: Option<&str>) -> Result<String> {
     let sha = media_sha_from_url(relay_url, url)?;
     if let Some(x) = expected_sha.filter(|x| !x.is_empty()) {
         if !x.eq_ignore_ascii_case(&sha) {
@@ -510,12 +587,28 @@ pub async fn fetch_media(
             ));
         }
     }
-    if let Some(bytes) = read_cached(cache_dir, &sha) {
-        return Ok(bytes);
-    }
+    Ok(sha)
+}
+
+fn too_large(max: u64) -> Error {
+    Error::Media(format!(
+        "file is too large (over {} MB)",
+        max / (1024 * 1024)
+    ))
+}
+
+/// GET a relay media blob with Blossom `t=get` auth. Redirects and error
+/// statuses are refused, and so is a declared length over `max`.
+async fn get_relay_media(
+    client: &reqwest::Client,
+    relay_url: &str,
+    keys: &Keys,
+    url: &str,
+    max: u64,
+) -> Result<reqwest::Response> {
     crate::init_crypto();
     let auth = sign_blossom_get(keys, relay_url)?;
-    let mut resp = http_client()?
+    let resp = client
         .get(url.trim())
         .header("Authorization", auth)
         .send()
@@ -530,9 +623,29 @@ pub async fn fetch_media(
     if !status.is_success() {
         return Err(Error::Media(format!("relay answered {status}")));
     }
-    if resp.content_length().is_some_and(|n| n > MAX_MEDIA_BYTES) {
-        return Err(Error::Media("file is too large".into()));
+    if resp.content_length().is_some_and(|n| n > max) {
+        return Err(too_large(max));
     }
+    Ok(resp)
+}
+
+/// Fetch a relay media blob with Blossom auth, verify its SHA-256 against the
+/// URL (and `expected_sha`, the `imeta` `x`, when given), cache it under
+/// `cache_dir/<sha256>` and return the bytes. A verified cache hit skips the
+/// network entirely. For images and previews: capped at [`MAX_MEDIA_BYTES`];
+/// videos and files go through [`fetch_media_to_file`].
+pub async fn fetch_media(
+    relay_url: &str,
+    keys: &Keys,
+    url: &str,
+    expected_sha: Option<&str>,
+    cache_dir: &Path,
+) -> Result<Vec<u8>> {
+    let sha = checked_media_sha(relay_url, url, expected_sha)?;
+    if let Some(bytes) = read_cached(cache_dir, &sha) {
+        return Ok(bytes);
+    }
+    let mut resp = get_relay_media(&http_client()?, relay_url, keys, url, MAX_MEDIA_BYTES).await?;
     let mut bytes = Vec::new();
     while let Some(chunk) = resp
         .chunk()
@@ -540,7 +653,7 @@ pub async fn fetch_media(
         .map_err(|e| Error::Media(format!("download failed: {e}")))?
     {
         if (bytes.len() + chunk.len()) as u64 > MAX_MEDIA_BYTES {
-            return Err(Error::Media("file is too large".into()));
+            return Err(too_large(MAX_MEDIA_BYTES));
         }
         bytes.extend_from_slice(&chunk);
     }
@@ -562,6 +675,145 @@ pub async fn fetch_media(
         }
     }
     Ok(bytes)
+}
+
+/// Like [`fetch_media`], but streams the blob (at most `max` bytes) straight
+/// into `cache_dir/<sha256>`, hashing as it goes, and returns the path. Memory
+/// use stays at one network chunk however large the file. Nothing is stored
+/// under the hash name unless it verified; a verified cache hit skips the
+/// network. Afterwards the cache is trimmed to [`MEDIA_CACHE_BUDGET`].
+pub async fn fetch_media_to_file(
+    relay_url: &str,
+    keys: &Keys,
+    url: &str,
+    expected_sha: Option<&str>,
+    cache_dir: &Path,
+    max: u64,
+) -> Result<PathBuf> {
+    use std::io::Write as _;
+    let sha = checked_media_sha(relay_url, url, expected_sha)?;
+    if let Some(path) = verified_cache_file(cache_dir, &sha, max) {
+        return Ok(path);
+    }
+    let client = client_builder(reqwest::redirect::Policy::none())?
+        .timeout(STREAM_TIMEOUT)
+        .read_timeout(FETCH_TIMEOUT)
+        .build()
+        .map_err(|e| Error::Media(format!("http client: {e}")))?;
+    let mut resp = get_relay_media(&client, relay_url, keys, url, max).await?;
+    let disk = |e: std::io::Error| Error::Media(format!("could not write the media cache: {e}"));
+    std::fs::create_dir_all(cache_dir).map_err(disk)?;
+    let path = cache_dir.join(&sha);
+    let tmp = cache_dir.join(format!("{sha}.{}.part", uuid::Uuid::new_v4()));
+    let result = async {
+        let mut file = std::fs::File::create(&tmp).map_err(disk)?;
+        let mut engine = sha256::Hash::engine();
+        let mut len = 0u64;
+        while let Some(chunk) = resp
+            .chunk()
+            .await
+            .map_err(|e| Error::Media(format!("download failed: {e}")))?
+        {
+            len += chunk.len() as u64;
+            if len > max {
+                return Err(too_large(max));
+            }
+            nostr::hashes::HashEngine::input(&mut engine, &chunk);
+            file.write_all(&chunk).map_err(disk)?;
+        }
+        if sha256::Hash::from_engine(engine).to_string() != sha {
+            return Err(Error::Media(
+                "downloaded file failed its integrity check".into(),
+            ));
+        }
+        file.sync_all().map_err(disk)?;
+        drop(file);
+        std::fs::rename(&tmp, &path).map_err(disk)
+    }
+    .await;
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    result?;
+    prune_cache(cache_dir, &sha, MEDIA_CACHE_BUDGET);
+    Ok(path)
+}
+
+/// One answer of the local playback protocol to a `Range` request.
+#[derive(Debug, PartialEq, Eq)]
+pub struct RangeReply {
+    /// 200, 206 or 416.
+    pub status: u16,
+    /// `Content-Range` header value, when there is one.
+    pub content_range: Option<String>,
+    pub body: Vec<u8>,
+}
+
+/// Read the part of `path` a `Range` header asks for, at most
+/// [`MAX_RANGE_CHUNK`] bytes, as media elements expect: `bytes=a-b`,
+/// `bytes=a-` and `bytes=-n` (only the first of several ranges). A file that
+/// needs more than one chunk is answered with a partial 206 even without a
+/// `Range` header, so its bytes are never loaded whole.
+pub fn read_range(path: &Path, range: Option<&str>) -> std::io::Result<RangeReply> {
+    use std::io::{Read as _, Seek as _};
+    let mut file = std::fs::File::open(path)?;
+    let len = file.metadata()?.len();
+    let unsatisfiable = || RangeReply {
+        status: 416,
+        content_range: Some(format!("bytes */{len}")),
+        body: Vec::new(),
+    };
+    let (start, end) = match range.map(str::trim) {
+        None if len <= MAX_RANGE_CHUNK => {
+            let mut body = Vec::with_capacity(len as usize);
+            file.read_to_end(&mut body)?;
+            return Ok(RangeReply {
+                status: 200,
+                content_range: None,
+                body,
+            });
+        }
+        None => (0, len - 1),
+        Some(r) => {
+            let Some(spec) = r.strip_prefix("bytes=") else {
+                return Ok(unsatisfiable());
+            };
+            let first = spec.split(',').next().unwrap_or("").trim();
+            let Some((a, b)) = first.split_once('-') else {
+                return Ok(unsatisfiable());
+            };
+            let (a, b) = (a.trim(), b.trim());
+            let parsed = match (a.is_empty(), b.is_empty()) {
+                // bytes=-n: the last n bytes.
+                (true, false) => b
+                    .parse::<u64>()
+                    .ok()
+                    .filter(|n| *n > 0)
+                    .map(|n| (len.saturating_sub(n), len.saturating_sub(1))),
+                (false, true) => a.parse::<u64>().ok().map(|s| (s, len.saturating_sub(1))),
+                (false, false) => a
+                    .parse::<u64>()
+                    .ok()
+                    .zip(b.parse::<u64>().ok())
+                    .filter(|(s, e)| s <= e)
+                    .map(|(s, e)| (s, e.min(len.saturating_sub(1)))),
+                (true, true) => None,
+            };
+            match parsed {
+                Some((s, e)) if s < len => (s, e),
+                _ => return Ok(unsatisfiable()),
+            }
+        }
+    };
+    let end = end.min(start + MAX_RANGE_CHUNK - 1);
+    let mut body = Vec::with_capacity((end + 1 - start) as usize);
+    file.seek(std::io::SeekFrom::Start(start))?;
+    file.take(end + 1 - start).read_to_end(&mut body)?;
+    Ok(RangeReply {
+        status: 206,
+        content_range: Some(format!("bytes {start}-{end}/{len}")),
+        body,
+    })
 }
 
 #[cfg(test)]
@@ -957,6 +1209,198 @@ mod tests {
             .await
             .is_err());
         assert!(seen.try_recv().is_err());
+    }
+
+    /// T-172: Aaron's teaching videos are 30–46 MB. They stream to the hash
+    /// file with the same Blossom auth and SHA-256 check as images.
+    #[tokio::test]
+    async fn relay_video_over_25mb_streams_to_the_cache() {
+        let body: Vec<u8> = (0..30 * 1024 * 1024u32).map(|i| (i % 251) as u8).collect();
+        let sha = sha256_hex(&body);
+        let (port, mut seen) = serve("200 OK", body.clone()).await;
+        let relay = format!("ws://127.0.0.1:{port}");
+        let url = format!("http://127.0.0.1:{port}/media/{sha}.mp4");
+        let dir = tempfile::tempdir().unwrap();
+        let keys = Keys::generate();
+        let fetch = |max| fetch_media_to_file(&relay, &keys, &url, Some(&sha), dir.path(), max);
+
+        let path = fetch(MAX_STREAM_MEDIA_BYTES).await.unwrap();
+        assert_eq!(path, dir.path().join(&sha));
+        assert!(std::fs::read(&path).unwrap() == body);
+        let ev = decode_auth(&seen.recv().await.unwrap().expect("Authorization header"));
+        assert_eq!(ev.kind, Kind::from(24242));
+        assert_eq!(ev.pubkey, keys.public_key());
+        // No .part file left behind.
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+
+        // Verified cache hit: no second request.
+        assert_eq!(fetch(MAX_STREAM_MEDIA_BYTES).await.unwrap(), path);
+        assert!(seen.try_recv().is_err());
+
+        // The in-memory image path still refuses it, and leaves the file alone.
+        let err = fetch_media(&relay, &keys, &url, None, dir.path())
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("too large (over 25 MB)"), "{err}");
+        assert!(path.exists());
+
+        // A cached file that no longer hashes to its name is fetched again.
+        std::fs::write(&path, b"corrupt").unwrap();
+        assert_eq!(fetch(MAX_STREAM_MEDIA_BYTES).await.unwrap(), path);
+        assert!(std::fs::read(&path).unwrap() == body);
+        assert!(seen.recv().await.unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn streamed_fetch_enforces_the_cap_and_the_hash() {
+        let body = vec![7u8; 3 * 1024 * 1024];
+        let sha = sha256_hex(&body);
+        let (port, _seen) = serve("200 OK", body).await;
+        let relay = format!("ws://127.0.0.1:{port}");
+        let dir = tempfile::tempdir().unwrap();
+        let keys = Keys::generate();
+        let url = format!("http://127.0.0.1:{port}/media/{sha}.mp4");
+        let err = fetch_media_to_file(&relay, &keys, &url, None, dir.path(), 2 * 1024 * 1024)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("too large (over 2 MB)"), "{err}");
+
+        // Bytes that don't match the name never land under it.
+        let url = format!("http://127.0.0.1:{port}/media/{H}.mp4");
+        let err = fetch_media_to_file(
+            &relay,
+            &keys,
+            &url,
+            None,
+            dir.path(),
+            MAX_STREAM_MEDIA_BYTES,
+        )
+        .await
+        .unwrap_err();
+        assert!(err.to_string().contains("integrity"), "{err}");
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+
+        // Same origin and imeta rules as fetch_media.
+        let off = format!("http://localhost:{port}/media/{sha}.mp4");
+        assert!(fetch_media_to_file(
+            &relay,
+            &keys,
+            &off,
+            None,
+            dir.path(),
+            MAX_STREAM_MEDIA_BYTES
+        )
+        .await
+        .is_err());
+        let url = format!("http://127.0.0.1:{port}/media/{sha}.mp4");
+        assert!(fetch_media_to_file(
+            &relay,
+            &keys,
+            &url,
+            Some(H),
+            dir.path(),
+            MAX_STREAM_MEDIA_BYTES
+        )
+        .await
+        .is_err());
+    }
+
+    #[test]
+    fn read_range_answers_media_element_requests() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("v");
+        let len = 3 * MAX_RANGE_CHUNK + 10;
+        let data: Vec<u8> = (0..len).map(|i| (i % 253) as u8).collect();
+        std::fs::write(&path, &data).unwrap();
+        let r = |h: Option<&str>| read_range(&path, h).unwrap();
+
+        // AVFoundation's probe.
+        let a = r(Some("bytes=0-1"));
+        assert_eq!(
+            (a.status, a.content_range.as_deref(), &a.body[..]),
+            (206, Some(&*format!("bytes 0-1/{len}")), &data[..2])
+        );
+        // Chromium / GStreamer open-ended: capped at one chunk.
+        let a = r(Some("bytes=0-"));
+        assert_eq!(a.status, 206);
+        assert_eq!(
+            a.content_range,
+            Some(format!("bytes 0-{}/{len}", MAX_RANGE_CHUNK - 1))
+        );
+        assert!(a.body == data[..MAX_RANGE_CHUNK as usize]);
+        // Seek near the end: the tail.
+        let a = r(Some(&format!("bytes={}-", len - 4)));
+        assert_eq!(
+            (a.content_range, a.body),
+            (
+                Some(format!("bytes {}-{}/{len}", len - 4, len - 1)),
+                data[len as usize - 4..].to_vec()
+            )
+        );
+        let a = r(Some("bytes=-3"));
+        assert_eq!(a.body, data[len as usize - 3..].to_vec());
+        // End past the file is clamped; several ranges: the first.
+        let a = r(Some(&format!("bytes={}-{}, 0-1", len - 2, len + 100)));
+        assert_eq!(a.body, data[len as usize - 2..].to_vec());
+        // Unsatisfiable or malformed.
+        for h in [
+            format!("bytes={len}-"),
+            "bytes=5-2".into(),
+            "items=0-1".into(),
+            "bytes=-0".into(),
+            "bytes=x-".into(),
+        ] {
+            let a = r(Some(&h));
+            assert_eq!(
+                (a.status, a.content_range),
+                (416, Some(format!("bytes */{len}"))),
+                "{h}"
+            );
+        }
+        // No Range on a large file: a first chunk, never the whole file.
+        let a = r(None);
+        assert_eq!((a.status, a.body.len() as u64), (206, MAX_RANGE_CHUNK));
+        // No Range on a small file: all of it.
+        std::fs::write(&path, b"tiny").unwrap();
+        assert_eq!(
+            r(None),
+            RangeReply {
+                status: 200,
+                content_range: None,
+                body: b"tiny".to_vec()
+            }
+        );
+    }
+
+    #[test]
+    fn prune_cache_drops_least_recently_used_but_keeps_the_new_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let t = |secs| std::time::UNIX_EPOCH + Duration::from_secs(secs);
+        for (name, age) in [("old", 100), ("mid", 200), ("new", 300), ("keep", 50)] {
+            let p = dir.path().join(name);
+            std::fs::write(&p, [0u8; 10]).unwrap();
+            std::fs::File::options()
+                .append(true)
+                .open(&p)
+                .unwrap()
+                .set_modified(t(age))
+                .unwrap();
+        }
+        let part = dir.path().join("x.part");
+        std::fs::write(&part, [0u8; 1]).unwrap();
+        std::fs::File::options()
+            .append(true)
+            .open(&part)
+            .unwrap()
+            .set_modified(t(1))
+            .unwrap();
+        prune_cache(dir.path(), "keep", 25);
+        let mut left: Vec<String> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
+            .collect();
+        left.sort();
+        assert_eq!(left, ["keep", "new"]);
     }
 
     #[tokio::test]
