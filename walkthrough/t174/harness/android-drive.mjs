@@ -60,6 +60,19 @@ sock.onopen = async () => {
     step('video save', await until(note('class.mp4'), 60000));
     await sleep(1500); shot('05-video-saved');
 
+    // T-172 on the merged build: the 35 MB video plays in the app (streamed from the verified cache) and seeks.
+    await tap(`[...document.querySelectorAll('button.attachment-file')].find((b) => b.textContent.includes('class.mp4'))`);
+    if (!(await until(`document.querySelector('video.attachment-video')`, 30000))) throw new Error('no video element: ' + await js(`[...document.querySelectorAll('button.attachment-file')].map((b) => b.textContent).join(' | ')`));
+    await js(`(async () => { const v = document.querySelector('video.attachment-video'); v.muted = true; await v.play().catch(() => {}); })()`);
+    await sleep(6000);
+    const play = await js(`(() => { const v = document.querySelector('video.attachment-video'); return { t: Math.round(v.currentTime * 10) / 10, duration: v.duration, w: v.videoWidth, h: v.videoHeight, paused: v.paused, err: v.error && v.error.code, src: v.src.replace(/[0-9a-f]{64}/g, '<hex>').replace(/\\/[^/]{16,}\\//, '/<token>/') }; })()`);
+    step('video playing', play);
+    await js(`document.querySelector('video.attachment-video').currentTime = 45`);
+    await sleep(4000);
+    step('video after seek to 45 s', await js(`(() => { const v = document.querySelector('video.attachment-video'); return { t: Math.round(v.currentTime * 10) / 10, paused: v.paused, err: v.error && v.error.code }; })()`));
+    shot('05b-video-playing');
+    await js(`document.querySelector('video.attachment-video').pause()`);
+
     // No Open button on video (it plays here); the real command opens it in the video app.
     step('mp4 open (command)', await js(`(async () => { const o = await window.__TAURI_INTERNALS__.invoke('relay_origin'); return window.__TAURI_INTERNALS__.invoke('media_open', { url: o + '/media/fc17a6aad1586839a26ba0aaf47dc8b11a9f12b8e2172d5ac28449003a0849e6.mp4', sha: 'fc17a6aad1586839a26ba0aaf47dc8b11a9f12b8e2172d5ac28449003a0849e6', mime: 'video/mp4' }).then(() => 'ok', (e) => 'error: ' + e); })()`));
     await sleep(4000);
