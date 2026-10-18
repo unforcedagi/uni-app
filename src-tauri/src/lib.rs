@@ -1010,8 +1010,8 @@ fn stream_mime(mime: Option<&str>, url: &str) -> Option<String> {
     )
 }
 
-/// Where the webview plays a streamed attachment: `url` on Linux (see
-/// `media_loopback`), else the `unimedia` protocol URL the UI builds from `sha`.
+/// Where the webview plays a streamed attachment: `url` on Linux and Android
+/// (see `media_loopback`), else the `unimedia` protocol URL the UI builds from `sha`.
 #[derive(Serialize)]
 struct MediaStreamView {
     sha: String,
@@ -1021,8 +1021,8 @@ struct MediaStreamView {
 /// T-172: make a relay video or audio file playable. It is streamed to the
 /// hash-keyed cache (Blossom auth, SHA-256 verified, up to 500 MB) and allowed
 /// on the `unimedia` protocol; the webview then plays
-/// `unimedia://localhost/<sha>` (`http://unimedia.localhost/<sha>` on
-/// Android), which answers byte ranges from that file. Neither the bytes nor
+/// `unimedia://localhost/<sha>`, which answers byte ranges from that file
+/// (Linux and Android: a token-guarded 127.0.0.1 URL instead). Neither the bytes nor
 /// the auth token pass through JavaScript. A file already in the cache plays
 /// once its hash is re-checked, without the key.
 #[tauri::command]
@@ -1066,9 +1066,9 @@ async fn media_stream(
         .lock()
         .map_err(|e| e.to_string())?
         .insert(hash.clone(), content_type);
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "android"))]
     let url = Some(format!("{}/{hash}", media_loopback::base(media_cache_dir(&app)?)?));
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
     let url = None;
     Ok(MediaStreamView { sha: hash, url })
 }
@@ -1880,7 +1880,7 @@ mod desktop_log;
 mod t76;
 #[cfg(mobile)]
 mod mobile;
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "android"))]
 mod media_loopback;
 mod pair_source;
 mod secure_store;

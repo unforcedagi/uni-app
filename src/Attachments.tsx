@@ -3,7 +3,7 @@
 // the `media_bytes` command → `blob:` URL, like Buzz desktop's
 // `fetch_media_bytes`; video and audio are streamed to the disk cache by
 // `media_stream` and played from the local `unimedia` protocol, or on Linux
-// a token-guarded 127.0.0.1 URL (T-172).
+// and Android a token-guarded 127.0.0.1 URL (T-172).
 import { useEffect, useRef, useState } from "react";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { pdfThumbnail } from "./pdfPreview";
@@ -71,7 +71,7 @@ function relayStream(m: MediaRef): Promise<string> {
   let p = streams.get(key);
   if (!p) {
     p = invoke<{ sha: string; url: string | null }>("media_stream", { url: m.url, sha: m.sha256, mime: m.mime })
-      .then((r) => r.url ?? convertFileSrc(r.sha, "unimedia")); // url: Linux's loopback (WebKitGTK media can't use custom schemes)
+      .then((r) => r.url ?? convertFileSrc(r.sha, "unimedia")); // url: the 127.0.0.1 loopback on Linux and Android (see media_loopback.rs)
     p.catch(() => streams.delete(key));
     streams.set(key, p);
   }

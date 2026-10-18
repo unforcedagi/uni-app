@@ -1,8 +1,14 @@
-//! T-172, Linux only. WebKitGTK hands media URLs to GStreamer, whose WebKit source element takes only http(s) and
-//! blob, so a `<video>` on the `unimedia` custom protocol fails with `FormatError` before any request is made
-//! (seen on WebKitGTK 2.52 with the same file playing fine over http). This serves the same verified cache files
-//! over HTTP on 127.0.0.1, under a random per-launch token, streaming the asked byte range from disk.
-//! Android and macOS keep the custom protocol, whose requests their webviews route to the app.
+//! T-172, Linux and Android. Neither webview can play a long video from the `unimedia` custom protocol:
+//! - WebKitGTK hands media URLs to GStreamer, whose WebKit source element takes only http(s) and blob, so a
+//!   `<video>` on a custom scheme fails with `FormatError` before any request (WebKitGTK 2.52).
+//! - Android's WebView passes intercepted responses to the media stack without their `Content-Range`, so the first
+//!   1 MiB partial answer reads as the whole file and playback stops after it (WebView 109: stuck at 1.7 s, while the
+//!   same file in 1 MiB ranges from a real HTTP server played through). A full answer would need the whole range in
+//!   memory, since Tauri protocol responses are not streamed.
+//! Both played the same file over plain http. So this serves the verified cache files over HTTP on 127.0.0.1, under
+//! a random per-launch token, streaming the asked range from disk. macOS (and other platforms) keep the custom
+//! protocol. Android: the debug-built APK allows cleartext; a release build would need 127.0.0.1 in a network
+//! security config.
 
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::net::{TcpListener, TcpStream};
