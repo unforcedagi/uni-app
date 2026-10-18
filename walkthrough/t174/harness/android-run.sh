@@ -27,12 +27,14 @@ for _ in $(seq 1 30); do curl -s http://127.0.0.1:9341/json | grep -q webSocketD
 sleep 3
 WS=$(curl -s http://127.0.0.1:9341/json | python3 -c "import json,sys; print(json.load(sys.stdin)[0]['webSocketDebuggerUrl'])")
 $E shell rm -f /sdcard/t174.mp4
+date +%s%3N > "$OUT/rec-start"
 $E shell screenrecord --time-limit 170 --bit-rate 6000000 /sdcard/t174.mp4 & REC=$!
 sleep 1
 node "$H/android-drive.mjs" "$WS" "$H/android-init.js" "$OUT" $S "$DATA/photo.jpg" || echo "driver failed"
 # Downloads, as the user sees it (Files app).
 $E shell am start -a android.intent.action.VIEW -t vnd.android.document/root -d content://com.android.providers.downloads.documents/root/downloads >/dev/null 2>&1 || true
 sleep 4
+date +%s%3N > "$OUT/mark-downloads"
 $E exec-out screencap -p > "$OUT/android-09-downloads.png"
 sleep 2
 $E shell pkill -INT screenrecord || true; wait $REC 2>/dev/null || true; sleep 2

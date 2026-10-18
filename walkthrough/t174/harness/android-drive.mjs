@@ -22,7 +22,8 @@ async function tap(sel) {
   await sleep(80);
   await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
 }
-const shot = (name) => writeFileSync(`${out}/android-${name}.png`, adb('exec-out', 'screencap', '-p'));
+const marks = {};
+const shot = (name) => { marks[name] = Date.now(); writeFileSync(`${out}/android-marks.json`, JSON.stringify(marks)); writeFileSync(`${out}/android-${name}.png`, adb('exec-out', 'screencap', '-p')); };
 const btn = (label) => `document.querySelector('button[aria-label="${label}"]')`;
 const note = (name) => `${btn(`Save ${name} to Downloads`)}?.closest('.attachment-file-group, .attachment-media-group, .lightbox')?.querySelector('.attachment-note')?.textContent`;
 const log = [];
