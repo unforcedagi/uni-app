@@ -5,6 +5,7 @@
 //!   1 MiB partial answer reads as the whole file and playback stops after it (WebView 109: stuck at 1.7 s, while the
 //!   same file in 1 MiB ranges from a real HTTP server played through). A full answer would need the whole range in
 //!   memory, since Tauri protocol responses are not streamed.
+//!
 //! Both played the same file over plain http. So this serves the verified cache files over HTTP on 127.0.0.1, under
 //! a random per-launch token, streaming the asked range from disk. macOS (and other platforms) keep the custom
 //! protocol. Android: the debug-built APK allows cleartext; a release build would need 127.0.0.1 in a network
@@ -46,6 +47,8 @@ fn start(cache_dir: PathBuf) -> Result<String, String> {
 
 fn serve(mut conn: TcpStream, dir: &Path, token: &str) -> std::io::Result<()> {
     conn.set_read_timeout(Some(Duration::from_secs(10)))?;
+    // A paused player stops reading; give the thread and file back. It asks again with a Range on resume.
+    conn.set_write_timeout(Some(Duration::from_secs(30)))?;
     let mut reader = BufReader::new(conn.try_clone()?);
     let mut line = String::new();
     (&mut reader).take(8192).read_line(&mut line)?;

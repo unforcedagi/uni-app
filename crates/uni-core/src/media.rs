@@ -459,6 +459,7 @@ pub fn read_cached(cache_dir: &Path, sha: &str) -> Option<Vec<u8>> {
     }
     let bytes = std::fs::read(&path).ok()?;
     if bytes.len() as u64 <= MAX_MEDIA_BYTES && sha256_hex(&bytes) == sha {
+        touch(&path);
         Some(bytes)
     } else {
         let _ = std::fs::remove_file(&path);
@@ -490,21 +491,28 @@ pub fn verified_cache_file(cache_dir: &Path, sha: &str, max: u64) -> Option<Path
         let _ = std::fs::remove_file(&path);
         return None;
     }
-    let _ = std::fs::File::options()
-        .append(true)
-        .open(&path)
-        .and_then(|f| f.set_modified(std::time::SystemTime::now()));
+    touch(&path);
     Some(path)
 }
 
+/// Mark a cache file recently used for [`prune_cache`] (best effort).
+fn touch(path: &Path) {
+    let _ = std::fs::File::options()
+        .append(true)
+        .open(path)
+        .and_then(|f| f.set_modified(std::time::SystemTime::now()));
+}
+
 /// Trim the cache to `budget` bytes, least recently used first, never
-/// touching `keep`. Stale `.part` files from interrupted downloads go too.
-pub fn prune_cache(cache_dir: &Path, keep: &str, budget: u64) {
+/// touching the files named in `keep` (the new download, media playing now).
+/// Stale `.part` files from interrupted downloads go too.
+pub fn prune_cache(cache_dir: &Path, keep: &[String], budget: u64) {
     let Ok(entries) = std::fs::read_dir(cache_dir) else {
         return;
     };
     let day = Duration::from_secs(24 * 3600);
     let mut files: Vec<(std::time::SystemTime, u64, PathBuf)> = Vec::new();
+    let mut kept = 0u64;
     for e in entries.flatten() {
         let Ok(meta) = e.metadata() else { continue };
         if !meta.is_file() {
@@ -518,12 +526,13 @@ pub fn prune_cache(cache_dir: &Path, keep: &str, budget: u64) {
             }
             continue;
         }
-        if name != keep {
+        if keep.contains(&name) {
+            kept += meta.len();
+        } else {
             files.push((modified, meta.len(), e.path()));
         }
     }
-    let keep_len = std::fs::metadata(cache_dir.join(keep)).map_or(0, |m| m.len());
-    let mut total = keep_len + files.iter().map(|f| f.1).sum::<u64>();
+    let mut total = kept + files.iter().map(|f| f.1).sum::<u64>();
     files.sort();
     for (_, len, path) in files {
         if total <= budget {
@@ -681,7 +690,8 @@ pub async fn fetch_media(
 /// into `cache_dir/<sha256>`, hashing as it goes, and returns the path. Memory
 /// use stays at one network chunk however large the file. Nothing is stored
 /// under the hash name unless it verified; a verified cache hit skips the
-/// network. Afterwards the cache is trimmed to [`MEDIA_CACHE_BUDGET`].
+/// network. Callers trim the cache afterwards ([`prune_cache`]), knowing
+/// which files are in use.
 pub async fn fetch_media_to_file(
     relay_url: &str,
     keys: &Keys,
@@ -735,7 +745,6 @@ pub async fn fetch_media_to_file(
         let _ = std::fs::remove_file(&tmp);
     }
     result?;
-    prune_cache(cache_dir, &sha, MEDIA_CACHE_BUDGET);
     Ok(path)
 }
 
@@ -1395,7 +1404,7 @@ mod tests {
     }
 
     #[test]
-    fn prune_cache_drops_least_recently_used_but_keeps_the_new_file() {
+    fn prune_cache_drops_least_recently_used_but_keeps_files_in_use() {
         let dir = tempfile::tempdir().unwrap();
         let t = |secs| std::time::UNIX_EPOCH + Duration::from_secs(secs);
         for (name, age) in [("old", 100), ("mid", 200), ("new", 300), ("keep", 50)] {
@@ -1416,7 +1425,7 @@ mod tests {
             .unwrap()
             .set_modified(t(1))
             .unwrap();
-        prune_cache(dir.path(), "keep", 25);
+        prune_cache(dir.path(), &["keep".into(), "gone".into()], 25);
         let mut left: Vec<String> = std::fs::read_dir(dir.path())
             .unwrap()
             .map(|e| e.unwrap().file_name().into_string().unwrap())

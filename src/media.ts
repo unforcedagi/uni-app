@@ -76,7 +76,8 @@ export function mediaErrorText(e: unknown): string {
 
 /** Why a <video>/<audio> element stopped (its MediaError code). */
 export function playbackErrorText(code: number | undefined): string {
-  if (code === 4) return "This device can't play this file's format";
+  // 4 also covers a source that could not be loaded at all, not only an unknown format.
+  if (code === 4) return "Couldn't play this file here (format not supported, or it didn't load)";
   if (code === 3) return "The file could not be decoded";
   if (code === 2) return "Playback was interrupted";
   return "Playback failed";

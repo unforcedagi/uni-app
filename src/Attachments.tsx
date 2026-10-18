@@ -65,9 +65,10 @@ function relayBlob(m: MediaRef): Promise<string> {
 // Video/audio → local `unimedia` URL over the verified cache file. Not behind
 // `slot`: a 40 MB download must not hold up the images.
 const streams = new Map<string, Promise<string>>();
+const streamKey = (m: MediaRef) => `${m.url}|${m.sha256 ?? ""}`;
 
 function relayStream(m: MediaRef): Promise<string> {
-  const key = `${m.url}|${m.sha256 ?? ""}`;
+  const key = streamKey(m);
   let p = streams.get(key);
   if (!p) {
     p = invoke<{ sha: string; url: string | null }>("media_stream", { url: m.url, sha: m.sha256, mime: m.mime })
@@ -93,16 +94,19 @@ function useVisible<T extends Element>(): [React.RefObject<T | null>, boolean] {
   return [ref, seen];
 }
 
-function useRelayBlob(m: MediaRef, enabled: boolean, retry = 0): { src: string | null; error: string | null } {
-  const [state, setState] = useState<{ src: string | null; error: string | null }>({ src: null, error: null });
+type MediaState = { src: string | null; error: string | null };
+
+/** `load(m)` once enabled (again on each `retry`); `fail` shows a later error, e.g. from playback. */
+function useRelayMedia(load: (m: MediaRef) => Promise<string>, m: MediaRef, enabled: boolean, retry = 0): MediaState & { fail: (error: string) => void } {
+  const [state, setState] = useState<MediaState>({ src: null, error: null });
   useEffect(() => {
     if (!enabled) return;
     let live = true;
     setState({ src: null, error: null });
-    relayBlob(m).then((src) => live && setState({ src, error: null }), (e) => live && setState({ src: null, error: String(e) }));
+    load(m).then((src) => live && setState({ src, error: null }), (e) => live && setState({ src: null, error: mediaErrorText(e) }));
     return () => { live = false; };
   }, [m.url, m.sha256, enabled, retry]);
-  return state;
+  return { ...state, fail: (error) => setState({ src: null, error }) };
 }
 
 // ── Components ───────────────────────────────────────────────────────────
@@ -115,7 +119,7 @@ function boxStyle(dim: string | null): React.CSSProperties | undefined {
 
 function RelayImage({ m, onOpen }: { m: MediaRef; onOpen: Open }) {
   const [ref, visible] = useVisible<HTMLButtonElement>();
-  const { src, error } = useRelayBlob(m, visible);
+  const { src, error } = useRelayMedia(relayBlob, m, visible);
   const alt = m.alt ?? displayName(m);
   return <button ref={ref} className={`attachment-image ${src ? "" : "loading"}`} style={boxStyle(m.dim)} disabled={!src}
     onClick={() => src && onOpen(src, alt)} aria-label={src ? `Open image ${alt}` : error ? `Image failed to load: ${alt}` : `Loading image ${alt}`}>
@@ -125,21 +129,13 @@ function RelayImage({ m, onOpen }: { m: MediaRef; onOpen: Open }) {
 
 function RelayPlayer({ m }: { m: MediaRef }) {
   const [go, setGo] = useState(false);
-  const [state, setState] = useState<{ src: string | null; error: string | null }>({ src: null, error: null });
   const [retry, setRetry] = useState(0);
   const kind = attachmentKind(m);
-  useEffect(() => {
-    if (!go) return;
-    let live = true;
-    setState({ src: null, error: null });
-    relayStream(m).then((src) => live && setState({ src, error: null }), (e) => live && setState({ src: null, error: mediaErrorText(e) }));
-    return () => { live = false; };
-  }, [m.url, m.sha256, go, retry]);
-  const { src, error } = state;
+  const { src, error, fail } = useRelayMedia(relayStream, m, go, retry);
   // A playback error (format, or the cache file evicted) drops the stream so a retry fetches again.
   const failed = (e: React.SyntheticEvent<HTMLMediaElement>) => {
-    streams.delete(`${m.url}|${m.sha256 ?? ""}`);
-    setState({ src: null, error: playbackErrorText(e.currentTarget.error?.code) });
+    streams.delete(streamKey(m));
+    fail(playbackErrorText(e.currentTarget.error?.code));
   };
   if (src) return kind === "video"
     ? <video className="attachment-video" src={src} controls playsInline autoPlay style={boxStyle(m.dim)} onError={failed} />

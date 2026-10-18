@@ -986,7 +986,8 @@ static MEDIA_STREAMS: std::sync::LazyLock<std::sync::Mutex<std::collections::Has
 /// or video, else from the URL's extension (as `attachmentKind` decides in
 /// the UI). None for anything that is not playable media.
 fn stream_mime(mime: Option<&str>, url: &str) -> Option<String> {
-    if let Some(m) = mime.map(str::trim).filter(|m| !m.is_empty()) {
+    // Parameters (`video/mp4; codecs="avc1"`) don't change what it is.
+    if let Some(m) = mime.map(|m| m.split(';').next().unwrap_or("").trim()).filter(|m| !m.is_empty()) {
         let m = m.to_ascii_lowercase();
         let safe = m.bytes().all(|b| b.is_ascii_alphanumeric() || b"/-+.".contains(&b));
         return (safe && (m.starts_with("video/") || m.starts_with("audio/"))).then_some(m);
@@ -1016,6 +1017,14 @@ fn stream_mime(mime: Option<&str>, url: &str) -> Option<String> {
 struct MediaStreamView {
     sha: String,
     url: Option<String>,
+}
+
+/// Trim the media cache after a streamed download, sparing that file and any
+/// video or audio verified for playback this session.
+fn prune_media(dir: &std::path::Path, sha: &str) {
+    let mut keep: Vec<String> = MEDIA_STREAMS.lock().map(|m| m.keys().cloned().collect()).unwrap_or_default();
+    keep.push(sha.to_string());
+    uni_core::media::prune_cache(dir, &keep, uni_core::media::MEDIA_CACHE_BUDGET);
 }
 
 /// T-172: make a relay video or audio file playable. It is streamed to the
@@ -1057,8 +1066,10 @@ async fn media_stream(
                 &dir,
                 max,
             ))
-            .map(|_| tracing::info!(sha = %fetched, "media_stream: downloaded and verified"))
-            .map_err(|e| e.to_string())
+            .map_err(|e| e.to_string())?;
+            tracing::info!(sha = %fetched, "media_stream: downloaded and verified");
+            prune_media(&dir, &fetched);
+            Ok(())
         })
         .await?;
     }
@@ -1090,24 +1101,31 @@ fn media_protocol(
             .and_then(|v| v.to_str().ok())
             .map(str::to_string);
         let content_type = MEDIA_STREAMS.lock().ok().and_then(|m| m.get(&sha).cloned());
+        let head = request.method() == tauri::http::Method::HEAD;
         let reply = content_type.and_then(|ct| {
             let path = uni_core::media::cache_path(&media_cache_dir(&app).ok()?, &sha).ok()?;
-            Some((ct, uni_core::media::read_range(&path, range.as_deref()).ok()?))
+            if head {
+                // The length only: never read the file for a HEAD.
+                let len = std::fs::metadata(&path).ok()?.len();
+                return Some((ct, uni_core::media::RangeReply { status: 200, content_range: None, body: Vec::new() }, len));
+            }
+            let r = uni_core::media::read_range(&path, range.as_deref()).ok()?;
+            let len = r.body.len() as u64;
+            Some((ct, r, len))
         });
         tracing::debug!(sha = %sha, range = ?range, status = reply.as_ref().map(|r| r.1.status), "unimedia");
         let response = match reply {
-            Some((ct, r)) => {
+            Some((ct, r, len)) => {
                 let mut b = Response::builder()
                     .status(r.status)
                     .header(header::CONTENT_TYPE, ct)
                     .header(header::ACCEPT_RANGES, "bytes")
-                    .header(header::CONTENT_LENGTH, r.body.len())
+                    .header(header::CONTENT_LENGTH, len)
                     .header(header::CACHE_CONTROL, "no-store");
                 if let Some(cr) = r.content_range {
                     b = b.header(header::CONTENT_RANGE, cr);
                 }
-                let body = if request.method() == tauri::http::Method::HEAD { Vec::new() } else { r.body };
-                b.body(body)
+                b.body(r.body)
             }
             None => Response::builder()
                 .status(404)
@@ -1244,7 +1262,12 @@ async fn media_save(
             &dir,
             uni_core::media::MAX_STREAM_MEDIA_BYTES,
         ))
-        .map(|p| p.to_string_lossy().into_owned())
+        .map(|p| {
+            if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
+                prune_media(&dir, name);
+            }
+            p.to_string_lossy().into_owned()
+        })
         .map_err(|e| e.to_string())
     })
     .await
@@ -1274,6 +1297,11 @@ async fn media_open(app: tauri::AppHandle, url: String, sha: Option<String>) -> 
         let path = path.clone();
         let target = target.clone();
         move || {
+            // A 500 MB file: reuse the copy from the last open.
+            let same = |a: &str, b: &str| std::fs::metadata(a).ok().map(|m| m.len()) == std::fs::metadata(b).ok().map(|m| m.len());
+            if same(&path, &target) {
+                return Ok(());
+            }
             std::fs::copy(&path, &target)
                 .map(|_| ())
                 .map_err(|e| e.to_string())
@@ -2119,6 +2147,8 @@ mod media_stream_tests {
         assert_eq!(stream_mime(Some("Audio/MPEG"), u).as_deref(), Some("audio/mpeg"));
         assert_eq!(stream_mime(None, u).as_deref(), Some("video/mp4"));
         assert_eq!(stream_mime(Some(""), "https://r/media/abc.M4A").as_deref(), Some("audio/mp4"));
+        assert_eq!(stream_mime(Some("audio/ogg; codecs=opus"), u).as_deref(), Some("audio/ogg"));
+        assert_eq!(stream_mime(Some("text/html; x=video/mp4"), u), None);
         // A declared non-media type wins over the extension; header-unsafe values are refused.
         assert_eq!(stream_mime(Some("text/html"), u), None);
         assert_eq!(stream_mime(Some("video/mp4\r\nX-Evil: 1"), u), None);

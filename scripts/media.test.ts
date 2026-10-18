@@ -65,7 +65,7 @@ assert.equal(mediaErrorText("media: file is too large (over 500 MB)"), "File is 
 assert.equal(mediaErrorText("media: relay answered 401 Unauthorized"), "Relay answered 401 Unauthorized");
 assert.equal(mediaErrorText(new Error("invalid: media URL is not on this relay")), "Media URL is not on this relay");
 assert.equal(mediaErrorText(""), "Could not load");
-assert.equal(playbackErrorText(4), "This device can't play this file's format");
+assert.equal(playbackErrorText(4), "Couldn't play this file here (format not supported, or it didn't load)");
 assert.equal(playbackErrorText(undefined), "Playback failed");
 
 console.log("media tests passed");
