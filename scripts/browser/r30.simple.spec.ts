@@ -78,11 +78,11 @@ test.describe('r30', () => {
   }
 });
 
-/** the live asks of the scratch hub (hub11), as stored */
-const FIXTURE = JSON.parse(readFileSync(new URL('../fixtures/hub11-asks.json', import.meta.url), 'utf8')) as { notes: { id: string; path: string; tags: string[]; metadata: Record<string, any> }[] };
+/** the sample asks (synthetic, same shape as a live hub's asks) */
+const FIXTURE = JSON.parse(readFileSync(new URL('../fixtures/sample-asks.json', import.meta.url), 'utf8')) as { notes: { id: string; path: string; tags: string[]; metadata: Record<string, any> }[] };
 
 test.describe('r30 words', () => {
-  test('1: every live ask of the scratch hub shows its whole stored next in its row, word for word (work view)', async ({ page }) => {
+  test('1: every sample ask shows its whole stored next in its row, word for word (work view)', async ({ page }) => {
     test.skip(!wide(page), 'work view');
     await page.setViewportSize({ width: 1280, height: 720 });
     await boot(page);

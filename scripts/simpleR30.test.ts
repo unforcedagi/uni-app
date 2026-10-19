@@ -10,7 +10,7 @@ async function check(name: string, fn: () => void | Promise<void>) {
   try { await fn(); console.log(`ok   ${name}`); } catch (e) { failed++; console.log(`FAIL ${name}\n     ${(e as Error).message.split("\n")[0]}`); }
 }
 
-const fx = JSON.parse(readFileSync(new URL("./fixtures/hub11-asks.json", import.meta.url), "utf8")) as { notes: { id: string; path: string; tags: string[]; metadata: Record<string, unknown> }[] };
+const fx = JSON.parse(readFileSync(new URL("./fixtures/sample-asks.json", import.meta.url), "utf8")) as { notes: { id: string; path: string; tags: string[]; metadata: Record<string, unknown> }[] };
 const tree = buildTaskTree([], null);
 const T113 = fx.notes.find((n) => n.path.includes("T-113"))!;
 
@@ -31,7 +31,7 @@ await check("1: only what the old 140-character writer left (139 or 140 characte
   assert.equal(stepText(`${cut} site`).cut, false, "a longer step was written whole");
   assert.equal(stepText("Reply to Sebastian. ").cut, false);
 });
-await check("1: every live ask on the scratch hub (hub11): the row's words contain its whole stored next, no word missing", () => {
+await check("1: every sample ask: the row's words contain its whole stored next, no word missing", () => {
   let steps = 0;
   const norm = (t: string) => t.replace(/\s+/g, " ").trim();
   for (const n of fx.notes) {
@@ -54,7 +54,7 @@ await check("1: every live ask on the scratch hub (hub11): the row's words conta
 });
 
 // ---- 2. "listed in detail" carries the list
-await check("2: T-113 (the real one): 'listed in detail' is recognised and its labels are the list, whole, 10 of them", () => {
+await check("2: T-113 (the sample one): 'listed in detail' is recognised and its labels are the list, whole, 10 of them", () => {
   const r = referencedItems(String(T113.metadata.next), String(T113.metadata.detail))!;
   assert.equal(r.kind, "list");
   if (r.kind !== "list") return;

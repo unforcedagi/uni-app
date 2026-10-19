@@ -1,0 +1,362 @@
+{
+ "source": "Synthetic sample asks for the r30 tests (T-190): same shape and step forms as a live hub's asks; every name, address and id is made up.",
+ "notes": [
+  {
+   "id": "01M4YJ78ND0RCSZRYNFHAGACQ4",
+   "path": "Tasks/T-25 Sample reading site: public summaries experiment",
+   "tags": [
+    "task"
+   ],
+   "createdAt": "2026-10-11T04:35:35.000Z",
+   "updatedAt": "2026-10-15T09:00:00.000Z",
+   "metadata": {
+    "asked_at": "2026-10-15T09:00:00.000Z",
+    "co_owners": "room:lab",
+    "detail": "Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background f",
+    "legacy_id": "T-25",
+    "migrated": "2026-10-11",
+    "next": "Email permissions@example.org from you@example.com using the permission draft (uni:01M44ANQDEYS49534PKS3NDR4W); say if the site stays up.",
+    "node": "Projects/Sample Lab",
+    "owner": "aaron",
+    "prev_next": "Summaries site live: https://reading.example.workers.dev (short quotes only). Full text…",
+    "priority": "soon",
+    "priority_by": "weigh.py 2026-10-12",
+    "room": "lab",
+    "source": "sample",
+    "state": "waiting",
+    "waiting_on": "aaron"
+   }
+  },
+  {
+   "id": "01M4THTPKX7FRJY8ARZXX1MV0J",
+   "path": "Tasks/T-38 Live browser share in the app so the owner can do logins…",
+   "tags": [
+    "task"
+   ],
+   "createdAt": "2026-10-11T04:35:35.000Z",
+   "updatedAt": "2026-10-15T09:00:00.000Z",
+   "metadata": {
+    "asked_at": "2026-10-15T09:00:00.000Z",
+    "co_owners": "room:app",
+    "detail": "Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sa",
+    "legacy_id": "T-38",
+    "migrated": "2026-10-11",
+    "next": "Decide: build the live browser share (CDP stream + needs-login card)? And keep logged-in sessions or log out after each job?",
+    "node": "Projects/Sample App",
+    "owner": "aaron",
+    "prev_next": "Note uni:01M4X73ECMHMSCRWKG9WSMGAE3: rec option 1 (CDP stream) + option 3 flow (needs-login card). OK to build? Keep sessions or…",
+    "priority": "someday",
+    "priority_by": "weigh.py 2026-10-12",
+    "room": "app",
+    "source": "sample",
+    "state": "waiting",
+    "waiting_on": "aaron"
+   }
+  },
+  {
+   "id": "01M4HAX26AX5NQH428JQF0TT4V",
+   "path": "Tasks/T-36 Help Robin move the old.example.net box → the cloud…",
+   "tags": [
+    "task"
+   ],
+   "createdAt": "2026-10-11T04:35:35.000Z",
+   "updatedAt": "2026-10-15T09:00:00.000Z",
+   "metadata": {
+    "asked_at": "2026-10-15T09:00:00.000Z",
+    "co_owners": "room:platform",
+    "detail": "Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for t",
+    "legacy_id": "T-36",
+    "migrated": "2026-10-11",
+    "next": "Pick how the agent reaches Robin's box (old.example.net): (a) add the agent's SSH key to a read-only user there, or (b) Robin exports and imports to the cloud and the agent verifies the counts.",
+    "node": "Projects/Sample Platform",
+    "owner": "aaron",
+    "prev_next": "Plan written uni:01M4KE0Y2VA6FJ85MJY6GG3Q4Z; inventory not run: no SSH into the box (192.0.2.10). How the agent gets…",
+    "priority": "soon",
+    "priority_by": "weigh.py 2026-10-12",
+    "room": "platform",
+    "source": "sample",
+    "state": "waiting",
+    "waiting_on": "aaron"
+   }
+  },
+  {
+   "id": "01M4GKGRED8SQYHKN3TT9GDX7W",
+   "path": "Tasks/T-60 Vault coherence after merge: captures → journal…",
+   "tags": [
+    "task"
+   ],
+   "createdAt": "2026-10-11T04:35:35.000Z",
+   "updatedAt": "2026-10-15T09:00:00.000Z",
+   "metadata": {
+    "asked_at": "2026-10-15T09:00:00.000Z",
+    "co_owners": "room:platform",
+    "detail": "Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample a",
+    "legacy_id": "T-60",
+    "migrated": "2026-10-11",
+    "next": "Reply on the 87 imported tasks: keep 15, fold 32 into two notes, archive 40 (recommended), or say otherwise. Also say whether journal should be the default entry type.",
+    "node": "Projects/Sample Platform",
+    "owner": "aaron",
+    "prev_next": "Phase 2 + path rule done 15:50. Imported tasks keep/archive; default journal?;…",
+    "priority": "soon",
+    "priority_by": "weigh.py 2026-10-12",
+    "room": "platform",
+    "source": "sample",
+    "state": "waiting",
+    "waiting_on": "aaron"
+   }
+  },
+  {
+   "id": "01M4EZHKKDZ3YFHVXV64A5N4YR",
+   "path": "Tasks/T-65 $10k sample sponsorship invoice draft",
+   "tags": [
+    "task"
+   ],
+   "createdAt": "2026-10-11T04:35:35.000Z",
+   "updatedAt": "2026-10-15T09:00:00.000Z",
+   "metadata": {
+    "asked_at": "2026-10-15T09:00:00.000Z",
+    "detail": "Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this",
+    "legacy_id": "T-65",
+    "migrated": "2026-10-11",
+    "next": "Tell Uni who pays the $10k event sponsorship (Org A or Org B) and how (crypto, or ACH/Stripe), plus the host org's legal name and address for the invoice",
+    "node": "Projects/Sample Event/Event 2026",
+    "owner": "aaron",
+    "prev_next": "Payer entity + payment method; nothing sent",
+    "priority": "soon",
+    "priority_by": "hand",
+    "source": "sample",
+    "state": "waiting",
+    "waiting_on": "aaron"
+   }
+  },
+  {
+   "id": "01M4ACKJ3498B8GFKCAR8KJ7KM",
+   "path": "Tasks/T-67 Handoff note for Dana",
+   "tags": [
+    "task"
+   ],
+   "createdAt": "2026-10-11T04:35:35.000Z",
+   "updatedAt": "2026-10-15T09:00:00.000Z",
+   "metadata": {
+    "asked_at": "2026-10-15T09:00:00.000Z",
+    "detail": "Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask.",
+    "legacy_id": "T-67",
+    "migrated": "2026-10-11",
+    "next": "Open the handoff draft in this task, fill the facts marked unknown, then talk it through with Dana yourself",
+    "node": "Projects/Sample Handoff",
+    "owner": "aaron",
+    "prev_next": "Review, then talk with Dana",
+    "priority": "soon",
+    "priority_by": "hand",
+    "source": "sample",
+    "state": "waiting",
+    "waiting_on": "aaron"
+   }
+  },
+  {
+   "id": "01M4TRPHFZ5SAR6TZ8NHG7HEKX",
+   "path": "Tasks/T-101 Tell Lee the district letter is sent, if not done…",
+   "tags": [
+    "task"
+   ],
+   "createdAt": "2026-10-11T04:35:35.000Z",
+   "updatedAt": "2026-10-15T09:00:00.000Z",
+   "metadata": {
+    "asked_at": "2026-10-15T09:00:00.000Z",
+    "detail": "Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Back",
+    "due": "2026-10-20",
+    "fy_key": "73806f0526",
+    "legacy_id": "T-101",
+    "migrated": "2026-10-11",
+    "next": "Reply to Lee in your existing thread that the district letter went out Oct 2 (skip if already done).",
+    "node": "Projects/Sample Civic",
+    "owner": "aaron",
+    "prev_next": "Letter context · Dated correction: sent Oct 2, hearing Oct 20. The email itself is done; the notice to Lee is not confirmed. Forward:…",
+    "priority": "soon",
+    "priority_by": "hand",
+    "source": "sample",
+    "state": "waiting",
+    "waiting_on": "aaron"
+   }
+  },
+  {
+   "id": "01M4GHEXYCX11TPPWY1CG3Z6RP",
+   "path": "Tasks/T-107 Ready to send (10-09): Field Notes is now a short convention on one…",
+   "tags": [
+    "task"
+   ],
+   "createdAt": "2026-10-11T04:35:35.000Z",
+   "updatedAt": "2026-10-15T09:00:00.000Z",
+   "metadata": {
+    "asked_at": "2026-10-15T09:00:00.000Z",
+    "detail": "Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Back",
+    "fy_key": "1b06527652",
+    "legacy_id": "T-107",
+    "migrated": "2026-10-11",
+    "next": "Send the Field Notes invite and convention (at the end of Projects/Sample Lab/Agent learnings board — design, uni:01M4K441RAYK3EHK63YSZ7Z462) to Avery, Blake and Casey from your own account, and ask each for their agent's npub so #lab can follow them.",
+    "node": "Projects/Sample Lab",
+    "owner": "aaron",
+    "prev_next": "Field Notes is now a short convention on one relay, with links to trusted Nostr tools and a setup as an example. No script to…",
+    "priority": "soon",
+    "priority_by": "weigh.py 2026-10-12",
+    "source": "sample",
+    "state": "waiting",
+    "waiting_on": "aaron"
+   }
+  },
+  {
+   "id": "01M4AZ3BARD6B897CPNMTWP1NC",
+   "path": "Tasks/T-113 Look at example-site.org on your phone, then forward Sloane the asks",
+   "tags": [
+    "task"
+   ],
+   "createdAt": "2026-10-11T04:35:35.000Z",
+   "updatedAt": "2026-10-15T09:00:00.000Z",
+   "metadata": {
+    "asked_at": "2026-10-15T09:00:00.000Z",
+    "closed_event": "511aa045f45d7cbc817d786258fcb3f73015fa1cf61c67ed449010675082e7ec",
+    "created": "2026-10-11",
+    "detail": "Labels to approve (en; es written): 'Already registered? Sign in' · 'Update your registration' · 'Save changes' · 'Your registration is updated.' · 'This email is already registered. Sign in to change your registration.' · 'Create your account to RSVP to events' · 'You're signed in' · 'Sign in to RSVP' · 'We couldn't load your registration.' · 'Try again'. Also her call: keep or cut the older registration lines 'Welcome aboard!', 'pick a path from the event calendar', 'stay up to date with what is new'. Practice lines: her doc has 2 of 11 days. Earlier asks from 10-13 (6 groups of short lines, 3 questions) still unanswered in the room. Screens: posted in the room 10-14 (flows.png).",
+    "due": "2026-10-13",
+    "last_step": "10-12: done marker",
+    "legacy_id": "T-113",
+    "next": "Send Sloane the new site labels listed in detail to approve or replace, and ask her for one morning-practice line per day Oct 15-25; then sign in once on example-site.org and open Board, People and Me",
+    "node": "Projects/Sample Event",
+    "owner": "aaron",
+    "priority": "now",
+    "priority_by": "hand",
+    "source": "sample",
+    "state": "waiting",
+    "waiting_on": "aaron"
+   }
+  },
+  {
+   "id": "01M41B0EECC7AZNAJ0GYVDKXXS",
+   "path": "Tasks/T-129 Send the Oct 12 follow-up email",
+   "tags": [
+    "task"
+   ],
+   "createdAt": "2026-10-11T04:35:35.000Z",
+   "updatedAt": "2026-10-15T09:00:00.000Z",
+   "metadata": {
+    "asked_at": "2026-10-15T09:00:00.000Z",
+    "created": "2026-10-12",
+    "detail": "Background for this sample ask. Background for this sample ask. Background for this sample ask. Background",
+    "legacy_id": "T-129",
+    "next": "Edit and send the Oct 12 follow-up email to Morgan and Riley (cc Quinn and Jules); first update its numbers to the refreshed data (563 publications, 405 projects).",
+    "node": "Projects/Sample Research",
+    "owner": "aaron",
+    "priority": "now",
+    "source": "sample",
+    "state": "open"
+   }
+  },
+  {
+   "id": "01M4P4Y9EB5RQ2MQ2KG76KHCZ4",
+   "path": "Tasks/T-130 Shared model gateway ($10∕day cap) + sample AI chat",
+   "tags": [
+    "task"
+   ],
+   "createdAt": "2026-10-11T04:35:35.000Z",
+   "updatedAt": "2026-10-15T09:00:00.000Z",
+   "metadata": {
+    "asked_at": "2026-10-15T09:00:00.000Z",
+    "created": "2026-10-13",
+    "detail": "Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this",
+    "handed_back": "10-13 in #app: version A (Just talk) for /ask, 10-13",
+    "legacy_id": "T-130",
+    "next": "In a terminal on the host run: cd ~/Code/model-gateway && npx wrangler secret put API_KEY, then paste the same key you used for preview. Until then votes.example.org/ask errors on every question.",
+    "node": "Projects/Sample Votes",
+    "owner": "aaron",
+    "priority": "now",
+    "priority_by": "hand",
+    "source": "sample",
+    "state": "waiting",
+    "waiting_on": "aaron"
+   }
+  },
+  {
+   "id": "01M4306GYFRGXEY8T1A2CZDA3M",
+   "path": "Tasks/T-143 Confirm the 9 example.com inbound addresses (T-136 Worker…",
+   "tags": [
+    "task"
+   ],
+   "createdAt": "2026-10-11T04:35:35.000Z",
+   "updatedAt": "2026-10-15T09:00:00.000Z",
+   "metadata": {
+    "asked_at": "2026-10-15T09:00:00.000Z",
+    "created": "2026-10-14",
+    "detail": "Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sampl",
+    "legacy_id": "T-143",
+    "next": "Reply yes to these 9 inbound addresses, or name additions/removals: me@, agent@, postmaster@, abuse@, dmarc@, probe@ and probe-rollback@ example.com; probe@ and test@ mail.example.com. Mail to any other address bounces after the switch.",
+    "node": "Projects/Sample Mail",
+    "owner": "aaron",
+    "source": "sample",
+    "starter_channel": "00000000-0000-4000-8000-000000000190",
+    "starter_room": "platform",
+    "starter_session": "agent:main:buzz:group:00000000-0000-4000-8000-000000000190:89181d30dad2db4d914d61eb947cbc49650aa78e9e31f0fe722058fc9af6853d",
+    "state": "open"
+   }
+  },
+  {
+   "id": "01M4Q80EA8P4VJ63EXHWHVM5NB",
+   "path": "Tasks/T-144 Restart the gateway to load Rooms v1 (T-139)",
+   "tags": [
+    "task"
+   ],
+   "createdAt": "2026-10-11T04:35:35.000Z",
+   "updatedAt": "2026-10-15T09:00:00.000Z",
+   "metadata": {
+    "asked_at": "2026-10-15T09:00:00.000Z",
+    "created": "2026-10-15",
+    "detail": "Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background for this sample ask. Background fo",
+    "legacy_id": "T-144",
+    "next": "From your laptop: ssh you@host, then run gateway restart, then say \"restarted\" in #platform.",
+    "node": "Projects/Sample Platform",
+    "owner": "aaron",
+    "source": "sample",
+    "starter_channel": "00000000-0000-4000-8000-000000000190",
+    "starter_room": "platform",
+    "starter_session": "agent:main:buzz:group:00000000-0000-4000-8000-000000000190:68e5016a0bfc5a970656a0558f2d6698e82b1a59ceb136218187dce3dc0f705e",
+    "state": "open"
+   }
+  },
+  {
+   "id": "01M4W4P966CQPBKKHVZ9TZC5CH",
+   "path": "Decisions/Mail: approve a test week, not an immediate cutover",
+   "tags": [
+    "decision"
+   ],
+   "createdAt": "2026-10-11T04:35:41.000Z",
+   "updatedAt": "2026-10-15T09:00:00.000Z",
+   "metadata": {
+    "migrated": "2026-10-11",
+    "node": "Projects/Sample Mail",
+    "owner": "aaron",
+    "source": "sample",
+    "state": "open"
+   }
+  },
+  {
+   "id": "01M4Q1QHTZHZE0DHC3K4R7GYSX",
+   "path": "Decisions/2026-10-13 Ship the sample AI chat? (preview:…",
+   "tags": [
+    "decision"
+   ],
+   "createdAt": "2026-10-13T16:20:35.000Z",
+   "updatedAt": "2026-10-15T09:00:00.000Z",
+   "metadata": {
+    "asked": "2026-10-13",
+    "node": "Projects/Sample Votes",
+    "options": [
+     "Add key and test live on preview first",
+     "Ship to production after live test",
+     "Change it first"
+    ],
+    "owner": "aaron",
+    "state": "open",
+    "task": "T-130"
+   }
+  }
+ ]
+}
