@@ -1,6 +1,6 @@
 // T-124 r17: nothing waiting on Aaron disappears, "Say it" only for the room, questions held in notes, statement decisions, one answer
 // mechanism (the chat's link to a decision), the lighter Uni panel and whole-word cuts.
-// Real phrasings are task titles (and two non-private next steps) from the scratch copy of the vault; no private area's words.
+// Phrasings follow the shape of real task titles and next steps; every name, place and address in them is made up (T-190).
 // Run: node --experimental-strip-types scripts/simpleR17.test.ts
 import assert from "node:assert/strict";
 import { answerChoices, answerLabel, decideLine, firstWords, isMine, wholeWords, linkedRefs, needsByRow, needsFeed, needsYou, privateNote, questionCount, questionsFrom, stepAudience, uniPanel, waitsOnMe } from "../src/areas/simpleCore.ts";
@@ -54,16 +54,16 @@ await check("P1-2 'Say it in #room' only for the room: Say go…, Tell Uni…, T
   assert.deepEqual(stepAudience("Reply 'publish' or what to change.", null), { kind: "room", text: "publish" });
   assert.deepEqual(stepAudience("Say go to send the SOW to Casey", "atlas/build"), { kind: "room", text: "Go to send the SOW to Casey" }, "the word is for the room, whatever follows");
 });
-await check("P1-2 actions toward a person outside the room are never a room prefill (titles from the scratch copy)", () => {
-  for (const title of ["Tell Sebastian the BVSD letter is sent, if not done…", "Send: the invite to Tobias and Leonardo. The draft is in Agent…",
-    "Forward to Benya + Harper: the \"Notifications: paste-ready answer\"…", "Send Tobias the 9 questions", "Edit and send the draft to Mark and Dominic"]) {
+await check("P1-2 actions toward a person outside the room are never a room prefill (title shapes from real tasks, made-up names)", () => {
+  for (const title of ["Tell Sebastian the district letter is sent, if not done…", "Send: the invite to Tobias and Leonardo. The draft is in Agent…",
+    "Forward to Lenny + Harper: the \"Notifications: paste-ready answer\"…", "Send Tobias the 9 questions", "Edit and send the draft to Theo and Dominic"]) {
     const a = stepAudience(title, "cohere");
     assert.equal(a?.kind, "person", title);
     if (a?.kind === "person") assert.equal(a.link, null, "r18: no destination written: no link");
   }
   assert.notEqual(stepAudience("Send the ATLAS Oct 12 follow-up email", "atlas/build")?.kind, "room", "an email is never said in the room");
-  assert.notEqual(stepAudience("Say thanks to Mark for the intro", "atlas")?.kind, "room", "said to a person, not the room");
-  assert.equal(stepAudience("Reply to jonbo's door messages", "regenhub")?.kind, "person");
+  assert.notEqual(stepAudience("Say thanks to Theo for the intro", "atlas")?.kind, "room", "said to a person, not the room");
+  assert.equal(stepAudience("Reply to zeeko's door messages", "regenhub")?.kind, "person");
   // r18: only an explicit `mailto:` leads; an address or a URL that merely appears in the step does not
   const mail = stepAudience("Email mailto:priya@example.org the second draft", null);
   assert.deepEqual(mail?.kind === "person" && mail.link, { href: "mailto:priya@example.org", label: "Email priya@example.org" });
@@ -72,7 +72,7 @@ await check("P1-2 actions toward a person outside the room are never a room pref
   const url = stepAudience("Tell Sebastian the letter is at https://example.org/letter.pdf.", null);
   assert.equal(url?.kind === "person" && url.link, null);
   // drafting for someone is the room's work, not a message: neither
-  assert.equal(stepAudience("Draft the forward to Benya and Harper; bring back for your yes.", "cohere"), null);
+  assert.equal(stepAudience("Draft the forward to Lenny and Harper; bring back for your yes.", "cohere"), null);
   assert.equal(stepAudience("Confirm scope with Casey", null), null);
 });
 
@@ -159,9 +159,9 @@ await check("small: 'Say it' with no words leaves the draft alone; maintenance n
 });
 
 await check("mid-sentence cuts: a cut decision line never ends on a joining word ('…for this year because ›')", () => {
-  // the texting decision's cut title from the scratch copy, read before its note (a cold device)
+  // a cut decision title, read before its note (a cold device)
   assert.equal(decideLine("texting is not recommended for this year because carrier…"), "Decide: texting is not recommended for this year");
-  assert.equal(firstWords("Edit and send the draft to Mark and Dominic: the follow-up", 46), "Edit and send the draft to Mark and Dominic");
+  assert.equal(firstWords("Edit and send the draft to Theo and Dominic: the follow-up", 46), "Edit and send the draft to Theo and Dominic");
   assert.equal(wholeWords("a daily calendar email to people who…"), "a daily calendar email to people");
 });
 

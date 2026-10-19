@@ -1420,7 +1420,7 @@ fn relay_origin(app: tauri::AppHandle) -> String {
 
 /// T-137: stays `uni-1` until the tailnet rename (step 3); `uni` is its alias
 /// (`uni_core::hub::HUB_ALIASES`), so this build reaches the hub either way.
-const DEFAULT_HUB: &str = "https://uni-1.example.ts.net";
+const DEFAULT_HUB: &str = "https://uni-1.taildf9ce2.ts.net"; // public-ok: the shipped default hub (T-190, see CLAUDE.md)
 const DEFAULT_VAULT: &str = "uni";
 /// `unforced` was merged into `uni` (T-56, 2026-10-06) and is now a read-only
 /// archive, so a device still pointed at it writes to `uni` instead.

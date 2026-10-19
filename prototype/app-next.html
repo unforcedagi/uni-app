@@ -149,7 +149,7 @@ const P = {
   aaron:{name:"Aaron",i:"A",about:"Builds Parachute + Uni. Daylight DC-1 and Pixel 7."},
   uni:{name:"Uni",i:"✦",about:"Aaron's agent. Lives on uni-1, talks in Buzz, remembers in Parachute."},
   astra:{name:"AstraJi",i:"S",about:"Co-designing the vault surfaces."},
-  kai:{name:"Kai",i:"K",about:"Runs the Buzz relay."}
+  bea:{name:"Bea",i:"B",about:"Runs the Buzz relay."}
 };
 const PROJ = {
   "uni-app":{name:"Talk to Uni app",status:"Tier 1a in review (PR #1)",next:["Tier 1b: reactions, images, paging","Read markers via kind 30078","Parachute bridge (this prototype)"]},
@@ -160,11 +160,11 @@ let items = [
   {id:"c1",src:"cap",who:"aaron",t:"08:15",day:"Today",body:"Walking thought: the app shouldn't have a 'notes tab' and a 'chats tab'. It's one stream of things I said, things Uni said, and things I kept.",tags:["idea","uni-app"],proj:"uni-app"},
   {id:"m2",src:"chat",room:"uni-app",who:"astra",t:"08:40",day:"Today",body:"If a message becomes a note, it should keep a backlink to the conversation it came from — otherwise context evaporates.",people:["astra"],proj:"uni-app"},
   {id:"n1",src:"note",who:"uni",t:"09:05",day:"Today",title:"Buzz feature parity",body:"Matrix of Buzz desktop/mobile vs uni-app. Tier 1: edits/deletes, unread, markdown, live, media, reactions, paging, avatars.",tags:["roadmap","buzz","uni-app"],proj:"uni-app",links:["m1"]},
-  {id:"m3",src:"chat",room:"uni",who:"aaron",t:"09:20",day:"Today",body:"@Uni can you pull together what Kai said about push notifications? I think it was last week.",people:["uni","kai"],me:false},
-  {id:"m4",src:"chat",room:"uni",who:"uni",t:"09:21",day:"Today",body:"Found it by meaning, not keywords — Kai called it *\"relay wake-ups\"* in #parachute on Thursday. Summary: relay needs an FCM profile or a UnifiedPush bridge. I saved it as a note and linked it to **Talk to Uni app**.",people:["aaron","kai"],me:true,proj:"uni-app",noted:"n2"},
-  {id:"n2",src:"note",who:"uni",t:"09:21",day:"Today",title:"Push for Talk to Uni",body:"Kai (Thu, #parachute): relay wake-ups need an FCM profile on the gateway, or a UnifiedPush distributor. Daylight has no Play Services → UnifiedPush path matters.",tags:["push","android"],proj:"uni-app",people:["kai"],links:["m4"]},
-  {id:"c2",src:"cap",who:"aaron",t:"10:02",day:"Today",body:"Ask Kai whether relay wake-ups could piggyback on the Tailscale connection.",tags:["todo"],people:["kai"]},
-  {id:"m5",src:"chat",room:"parachute",who:"kai",t:"Thu",day:"Thursday",body:"Re notifications: honestly the cleanest is relay wake-ups — the relay pokes a UnifiedPush endpoint, app wakes, syncs, shows a local notification. No message content leaves the relay.",people:["kai"]},
+  {id:"m3",src:"chat",room:"uni",who:"aaron",t:"09:20",day:"Today",body:"@Uni can you pull together what Bea said about push notifications? I think it was last week.",people:["uni","bea"],me:false},
+  {id:"m4",src:"chat",room:"uni",who:"uni",t:"09:21",day:"Today",body:"Found it by meaning, not keywords — Bea called it *\"relay wake-ups\"* in #parachute on Thursday. Summary: relay needs an FCM profile or a UnifiedPush bridge. I saved it as a note and linked it to **Talk to Uni app**.",people:["aaron","bea"],me:true,proj:"uni-app",noted:"n2"},
+  {id:"n2",src:"note",who:"uni",t:"09:21",day:"Today",title:"Push for Talk to Uni",body:"Bea (Thu, #parachute): relay wake-ups need an FCM profile on the gateway, or a UnifiedPush distributor. Daylight has no Play Services → UnifiedPush path matters.",tags:["push","android"],proj:"uni-app",people:["bea"],links:["m4"]},
+  {id:"c2",src:"cap",who:"aaron",t:"10:02",day:"Today",body:"Ask Bea whether relay wake-ups could piggyback on the Tailscale connection.",tags:["todo"],people:["bea"]},
+  {id:"m5",src:"chat",room:"parachute",who:"bea",t:"Thu",day:"Thursday",body:"Re notifications: honestly the cleanest is relay wake-ups — the relay pokes a UnifiedPush endpoint, app wakes, syncs, shows a local notification. No message content leaves the relay.",people:["bea"]},
   {id:"n3",src:"note",who:"aaron",t:"Wed",day:"Wednesday",title:"Daylight DC-1 quirks",body:"No camera → pairing must be paste-link. Reflective screen → avoid motion, prefer strong contrast. MALI log spam is harmless.",tags:["daylight","hardware"],proj:"daylight"}
 ];
 
@@ -291,10 +291,10 @@ function setMode(m){mode=m;document.querySelectorAll(".mode button").forEach(b=>
 function send(){
   const v=$("#box").value.trim();if(!v)return;
   if(mode==="cap"){const c={id:"c"+Date.now(),src:"cap",who:"aaron",t:"now",day:"Today",body:v,tags:["inbox"]};
-    if(/kai/i.test(v))c.people=["kai"];if(/app|uni/i.test(v))c.proj="uni-app";items.push(c);toast("Captured to vault · Uni filed it under "+(c.proj?PROJ[c.proj].name:"Inbox"))}
+    if(/\bbea\b/i.test(v))c.people=["bea"];if(/app|uni/i.test(v))c.proj="uni-app";items.push(c);toast("Captured to vault · Uni filed it under "+(c.proj?PROJ[c.proj].name:"Inbox"))}
   else{const room=view.startsWith("room:")?view.slice(5):"uni";const m={id:"m"+Date.now(),src:"chat",room,who:"aaron",t:"now",day:"Today",body:v};if(context)m.about=context.id;items.push(m);
     setTimeout(()=>{items.push({id:"m"+Date.now(),src:"chat",room,who:"uni",t:"now",day:"Today",me:true,about:context?.id,
-      body:context?`Looking at **${context.title||"your capture"}** with you: ${context.people?.includes("kai")?"Kai's UnifiedPush path is the one that works on the Daylight (no Play Services). Want me to ask him in #parachute and link the answer back to this note?":"I linked this conversation to the note, so it'll show up there under *Conversations about it*."}`
+      body:context?`Looking at **${context.title||"your capture"}** with you: ${context.people?.includes("bea")?"Bea's UnifiedPush path is the one that works on the Daylight (no Play Services). Want me to ask her in #parachute and link the answer back to this note?":"I linked this conversation to the note, so it'll show up there under *Conversations about it*."}`
       :"On it. I'll reply here, and anything worth keeping I'll offer to save to the vault."});render();$("#stream").scrollTop=1e9},700)}
   $("#box").value="";if(view==="search"||view==="people"||view==="projects")view="now";render();$("#stream").scrollTop=1e9;
 }

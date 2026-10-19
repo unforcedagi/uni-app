@@ -112,7 +112,7 @@ await check("P1-3 a vault-prefixed id resolves in its own vault, a bare one in t
 await check("Copy: a person's step leads with a destination only when it is written as one; the message comes from a stored field", () => {
   const { nodes, rootPath } = parseNodes([{ id: "u", path: "Uni", tags: ["uni"], metadata: {} }]);
   const tree = buildTaskTree(nodes, rootPath);
-  const t = (meta: Record<string, unknown>) => parseTask({ id: "x", path: "Tasks/T-101 Tell Sebastian", tags: ["task"], metadata: { state: "open", owner: "aaron", next: "Tell Sebastian the BVSD letter went out Oct 2", ...meta } }, tree)!;
+  const t = (meta: Record<string, unknown>) => parseTask({ id: "x", path: "Tasks/T-101 Tell Sebastian", tags: ["task"], metadata: { state: "open", owner: "aaron", next: "Tell Sebastian the PTSA letter went out Oct 2", ...meta } }, tree)!;
   assert.equal(t({}).link, undefined);
   assert.equal(t({}).message, undefined);
   assert.equal(t({ link: "mailto:sebastian@example.org" }).link, "mailto:sebastian@example.org");
@@ -122,7 +122,7 @@ await check("Copy: a person's step leads with a destination only when it is writ
   assert.equal(t({ draft: "Hi Sebastian" }).message, "Hi Sebastian");
   assert.equal(t({ draft: "uni:01M3ZYXCP9QEM2GS0E5THMXXX4" }).message, undefined, "a reference to a note is not the message");
   // the step from the scratch copy: no destination written in it
-  const a = stepAudience("Tell Sebastian the BVSD letter went out Oct 2, before the Oct 20 HRC meeting (skip if already done).", null);
+  const a = stepAudience("Tell Sebastian the PTSA letter went out Oct 2, before the Oct 20 ZBA meeting (skip if already done).", null);
   assert.deepEqual(a, { kind: "person", link: null });
   assert.deepEqual(stepAudience("Tell Sebastian the letter is at https://example.org/l.pdf", null), { kind: "person", link: null }, "a URL in the instruction is not the destination");
 });

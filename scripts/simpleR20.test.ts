@@ -40,7 +40,7 @@ const REAL: [string, string, string][] = [
   ["Review the Woven Web handoff draft, fill the unknowns, then talk with Harper yourself.", "Review the Woven Web handoff draft", "Review the Woven Web handoff draft, fill the unknowns, then talk with Harper yourself"],
   ["Wed 10-14: say go on prod deploy of #38 + #58; Harper signs off the copy/photos before/after (posting today); yes/no on add-only DB…", "Say go", "Say go on prod deploy of #38 + #58"],
   // r22 (both critics): "; fill the opening…" leads with a work verb, so it is the user's too and stays in the action
-  ["Edit and send the ATLAS follow-up to Mark and Dominic from your account; fill the opening, sign-off and next-review date.", "Edit and send the ATLAS follow-up", "Edit and send the ATLAS follow-up to Mark and Dominic from your account; fill the opening, sign-off and next-review date"],
+  ["Edit and send the ATLAS follow-up to Theo and Dominic from your account; fill the opening, sign-off and next-review date.", "Edit and send the ATLAS follow-up", "Edit and send the ATLAS follow-up to Theo and Dominic from your account; fill the opening, sign-off and next-review date"],
   ["Tell Uni who pays (Techne or Gitcoin Foundation) and how: crypto or ACH/Stripe, plus Woven Web's legal details.", "Tell Uni who pays", "Tell Uni who pays (Techne or Gitcoin Foundation) and how: crypto or ACH/Stripe, plus Woven Web's legal details"],
   // more from the same list
   ["Look at https://cohere-signup-staging.unforced.workers.dev/?look=ecology on phone, then forward #cohere's 'For Harper' block (posted 10-13)", "Look at https://cohere-signup-staging.unforced.workers.dev/?look=ecology", "Look at https://cohere-signup-staging.unforced.workers.dev/?look=ecology on phone, then forward #cohere's 'For Harper' block (posted 10-13)"],
@@ -61,7 +61,7 @@ await check("rows lead with the action: the verb phrase and its object, the whol
     assert.ok(a.text.startsWith(a.head), `the step starts with its action: ${next}`);
     assert.ok(a.text.startsWith(a.verb), `the action starts with its verb phrase: ${next}`);
   }
-  assert.equal(rowAction("Edit and send the ATLAS follow-up to Mark and Dominic from your account; fill the opening, sign-off and next-review date.")!.text, "Edit and send the ATLAS follow-up to Mark and Dominic from your account; fill the opening, sign-off and next-review date"); // r22: on the row (r30: every word)
+  assert.equal(rowAction("Edit and send the ATLAS follow-up to Theo and Dominic from your account; fill the opening, sign-off and next-review date.")!.text, "Edit and send the ATLAS follow-up to Theo and Dominic from your account; fill the opening, sign-off and next-review date"); // r22: on the row (r30: every word)
   // a date label is never what a row leads with, and is kept as the cue when there is no due date
   assert.equal(rowAction("Wed 10-14: say go on prod deploy of #38 + #58; Harper signs off")!.prefix, "Wed 10-14");
   assert.equal(rowAction("10-05 09:04: send Runway the claim; wait")!.head, "Send Runway the claim");
@@ -120,7 +120,7 @@ await check("P1-1 decisions get the same dependency contract: a closed `source` 
 });
 
 await check("P1-2 a cold list with three statement-only decisions owes 0 until they are classified (then they are Uni's to tidy)", async () => {
-  const titles = ["Uni adds Benya's missing feature 4, the…", "A daily email of the calendar at 7, with…", "Texting Uni: a number that reaches…"];
+  const titles = ["Uni adds Lenny's missing feature 4, the…", "A daily email of the calendar at 7, with…", "Texting Uni: a number that reaches…"];
   const notes: N[] = titles.map((t, i) => ({ id: `d${i}`, path: `Decisions/${t}`, content: `Decision (needs your yes): ${t.replace(/…$/, "")} and more of the proposal.`, updatedAt: "2026-10-14T06:00:00.000Z" }));
   const cold = titles.map((t, i) => task(`d${i}`, t, { options: [] }, "decision"));
   for (const d of cold) assert.equal(unknownDecision(d), true);

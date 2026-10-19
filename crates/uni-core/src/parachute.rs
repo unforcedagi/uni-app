@@ -68,7 +68,7 @@ pub fn nip98_header(keys: &Keys, url: &str, method: &str, body: &[u8]) -> Result
 /// Where the hub lives and which vault holds the journal.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct VaultConfig {
-    /// Hub origin, e.g. `https://uni-1.example.ts.net`.
+    /// Hub origin, e.g. `https://hub.example.ts.net`.
     pub hub: String,
     /// Vault name, e.g. `unforced`.
     pub vault: String,
@@ -1740,9 +1740,11 @@ pub(crate) mod surface_tests {
     #[test]
     fn t137_the_built_in_alias_is_uni_1_and_uni() {
         let c = |hub: &str| VaultClient::new(VaultConfig { hub: hub.into(), vault: "v".into() }, Keys::generate()).unwrap();
-        assert_eq!(c("https://uni-1.example.ts.net").alias.lock().unwrap().as_deref(), Some("https://uni.example.ts.net"));
-        assert_eq!(c("https://uni.example.ts.net/").alias.lock().unwrap().as_deref(), Some("https://uni-1.example.ts.net"));
-        assert_eq!(c("https://uni-2.example.ts.net").alias.lock().unwrap().as_deref(), None);
+        let (old, new) = crate::hub::HUB_ALIASES[0];
+        assert!(old.contains("uni-1") && !new.contains("uni-1"), "the pair is uni-1 and uni");
+        assert_eq!(c(old).alias.lock().unwrap().as_deref(), Some(new));
+        assert_eq!(c(&format!("{new}/")).alias.lock().unwrap().as_deref(), Some(old));
+        assert_eq!(c(&old.replacen("uni-1", "uni-2", 1)).alias.lock().unwrap().as_deref(), None);
     }
 
     #[tokio::test]

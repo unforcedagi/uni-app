@@ -49,7 +49,7 @@ async function rowsWhole(rows: Locator) {
 
 
 const ASKED = '2026-10-14T08:00:00.000Z';
-const NEXT113 = 'Send Harper the new site labels listed in detail to approve or replace, and ask her for one morning-practice line per day Oct 15-25; then sign in once on grove.example.org and open Board, People and Me';
+const NEXT113 = 'Send Sloane the new site labels listed in detail to approve or replace, and ask her for one morning-practice line per day Oct 15-25; then sign in once on example-site.org and open Board, People and Me';  // the sample asks' T-113 step (200 characters, ending "Me")
 const LABELS = Array.from({ length: 10 }, (_, i) => `'Label number ${i + 1} ${['alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot', 'golf', 'hotel', 'india', 'juliet'][i]}'`).join(' · ');
 const DETAIL113 = `Labels to approve (en; es written): ${LABELS}\n\nAlso her call: nothing else.`;
 const composerFocused = (page: Page) => page.evaluate(() => document.activeElement?.tagName === 'TEXTAREA' && !!document.activeElement.closest('.composer'));
@@ -108,7 +108,7 @@ test.describe('r31 one date and one count', () => {
   test('2: an overdue row says only "was due Oct 13", on the row and the sheet; one that is not keeps its asked date', async ({ page }) => {
     test.skip(!wide(page), 'side panel');
     await boot(page);
-    await add(page, { id: 'd1', title: 'T-113 Look at grove.example.org on your phone, then forward Harper the asks', node: 'Areas/Techne', asked_at: ASKED, meta: { due: '2026-10-13', next: NEXT113, state: 'waiting', waiting_on: 'aaron' } });
+    await add(page, { id: 'd1', title: 'T-113 Look at example-site.org on your phone, then forward Sloane the asks', node: 'Areas/Techne', asked_at: ASKED, meta: { due: '2026-10-13', next: NEXT113, state: 'waiting', waiting_on: 'aaron' } });
     await add(page, { id: 'd2', title: 'T-114 Placeholder not due', node: 'Areas/Techne', asked_at: ASKED, meta: { due: '2026-10-20', next: 'Say go on the placeholder number two' } });
     await refresh(page);
     await openRoom(page, 'Techne');
@@ -126,7 +126,7 @@ test.describe('r31 one date and one count', () => {
     test.skip(!wide(page), 'side panel');
     await page.setViewportSize({ width: 1280, height: 720 });
     await boot(page);
-    await add(page, { id: 'c1', title: 'T-113 Look at grove.example.org on your phone, then forward Harper the asks', node: 'Areas/Techne', asked_at: ASKED, meta: { next: NEXT113, detail: DETAIL113, state: 'waiting', waiting_on: 'aaron', due: '2026-10-13' } });
+    await add(page, { id: 'c1', title: 'T-113 Look at example-site.org on your phone, then forward Sloane the asks', node: 'Areas/Techne', asked_at: ASKED, meta: { next: NEXT113, detail: DETAIL113, state: 'waiting', waiting_on: 'aaron', due: '2026-10-13' } });
     for (let i = 0; i < 4; i++) await add(page, { id: `m${i}`, title: `T-12${i} Placeholder many ${i}`, node: i % 2 ? 'Areas/Techne' : 'Projects/ATLAS', asked_at: ASKED, meta: { next: `Say go on many number ${i} of the placeholder rows` } });
     await refresh(page);
     await openRoom(page, 'Techne');

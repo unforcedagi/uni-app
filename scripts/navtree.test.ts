@@ -241,10 +241,10 @@ check("chat cache: the newest 60 per room, per identity; rooms list; old rooms f
   writeMessages(st, "pk1", "c29", []); assert.equal(readMessages(st, "pk1", "c29"), null);
 });
 check("ask: a cut title shows the first line of the note's content in full, without the label or the converted line", () => {
-  assert.equal(isCutTitle("Uni adds Benya's missing feature 4, the…"), true);
+  assert.equal(isCutTitle("Uni adds Lenny's missing feature 4, the…"), true);
   assert.equal(isCutTitle("Name the payer entity"), false);
-  const content = `_Converted from a task on 2026-10-01_\n\nDecision (default yes): Uni adds Benya's missing feature #4, the after-event "were you there? one takeaway" prompt, to the companion on Wed. Say no to skip it.\n\nMore detail below.`;
-  assert.equal(askFromContent(content), `Uni adds Benya's missing feature #4, the after-event "were you there? one takeaway" prompt, to the companion on Wed. Say no to skip it.`);
+  const content = `_Converted from a task on 2026-10-01_\n\nDecision (default yes): Uni adds Lenny's missing feature #4, the after-event "were you there? one takeaway" prompt, to the companion on Wed. Say no to skip it.\n\nMore detail below.`;
+  assert.equal(askFromContent(content), `Uni adds Lenny's missing feature #4, the after-event "were you there? one takeaway" prompt, to the companion on Wed. Say no to skip it.`);
   assert.equal(askFromContent(""), "");
   // r13: an option is never the question: a note that starts with its options has no whole question here
   assert.equal(askFromContent("- Add key and test live on preview first\n- Ship to production after live test\n- Change it first"), "");
@@ -359,15 +359,15 @@ check("r16 one title cleaner: no id, no leading date, no \"(preview: …\" tail;
   assert.deepEqual(taskTitle("2026-10-13 Ship the Boulder Votes AI chat? (preview: …"), { id: null, rest: "Ship the Boulder Votes AI chat?", cut: false, previewed: true });
   assert.deepEqual(taskTitle("T-40 2026-10-13 14:05 · Pick the guide (preview: the research note says…)"), { id: "T-40", rest: "Pick the guide", cut: false, previewed: true });
   assert.deepEqual(taskTitle("T-65 Sponsorship invoice draft"), { id: "T-65", rest: "Sponsorship invoice draft", cut: false, previewed: false });
-  assert.equal(taskTitle("Uni adds Benya's missing feature 4, the …").cut, true);
+  assert.equal(taskTitle("Uni adds Lenny's missing feature 4, the …").cut, true);
   assert.equal(taskTitle("2026-10-13").rest, "2026-10-13", "a title that is only a date keeps it");
   assert.equal(taskTitle("(preview: x)").rest, "(preview: x)", "a title that is only a preview keeps it");
 });
 check("r16 a decision row with no whole question reads \"Decide: <first words>\", whole words, never a hanging word or \"…\"", () => {
-  assert.equal(decideLine("Uni adds Benya's missing feature 4, the …"), "Decide: Uni adds Benya's missing feature 4");
+  assert.equal(decideLine("Uni adds Lenny's missing feature 4, the …"), "Decide: Uni adds Lenny's missing feature 4");
   assert.equal(decideLine("A daily calendar email to people who …"), "Decide: A daily calendar email to people");
   assert.equal(decideLine(""), "A decision waits on you");
-  assert.ok(!/…|\.\.\.$/.test(firstWords("Uni adds Benya's missing feature #4, the after-event prompt to the companion on Wed. Say no to skip it.")));
+  assert.ok(!/…|\.\.\.$/.test(firstWords("Uni adds Lenny's missing feature #4, the after-event prompt to the companion on Wed. Say no to skip it.")));
   assert.ok(firstWords("x ".repeat(80)).length <= 48);
 });
 check("r16 a note that is only its heading and options: the heading is the question; a cut title reads as whole words; markers read as words", () => {

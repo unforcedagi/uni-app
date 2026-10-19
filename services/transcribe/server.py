@@ -24,7 +24,7 @@ from coincurve import PublicKeyXOnly
 from faster_whisper import WhisperModel
 
 PORT = int(os.environ.get("UNI_TRANSCRIBE_PORT", "1950"))
-PUBLIC_URL = os.environ.get("UNI_TRANSCRIBE_URL", "https://uni-1.example.ts.net:8445/transcribe")
+PUBLIC_URL = os.environ.get("UNI_TRANSCRIBE_URL", "https://uni-1.taildf9ce2.ts.net:8445/transcribe")  # public-ok: the deployed host (T-190, see CLAUDE.md)
 MODEL = os.environ.get("UNI_WHISPER_MODEL", "small")
 MAX_BYTES = 25 * 1024 * 1024
 ALLOW_FILE = Path.home() / ".config/uni/transcribe-allow"

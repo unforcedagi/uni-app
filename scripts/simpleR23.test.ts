@@ -15,7 +15,7 @@ const parse = (meta: Record<string, unknown>, extra: Record<string, unknown> = {
 
 check("P1: \"asked\" means asked: an explicit request time, else when it was added (\"added Oct 11\"); never `updatedAt`", () => {
   // the live shape: no request time stored, created 10-11, rebalanced 10-13
-  const t = parse({ next: "Send Ryan the deploy-access message below." });
+  const t = parse({ next: "Send Nico the deploy-access message below." });
   assert.deepEqual(requestDate(t), { at: "2026-10-11T04:35:40.734Z", kind: "added" });
   // (the note's time, in the user's day: 04:35 UTC on 10-11 is Oct 10 in Mountain time)
   assert.equal(askedLine(requestDate(t), "2026-10-14"), `added Oct ${new Date("2026-10-11T04:35:40.734Z").getDate()}`);
@@ -58,19 +58,19 @@ check("text: \"Where this stands\" without raw ids, shortened with words at clau
 });
 
 check("text: a step that points at a message shows it when it is stored, and asks the room for it when it isn't", () => {
-  assert.deepEqual(pointsAt("Send Ryan the deploy-access message below (asks for Cloudflare Pages access to bouldernewtech)."), { noun: "message" });
-  assert.deepEqual(pointsAt("Send the draft to Mark"), { noun: "draft" });
+  assert.deepEqual(pointsAt("Send Nico the deploy-access message below (asks for Cloudflare Pages access to bouldernewtech)."), { noun: "message" });
+  assert.deepEqual(pointsAt("Send the draft to Theo"), { noun: "draft" });
   // only a sending step: a draft that exists elsewhere is asked about, not sent from here
   assert.equal(pointsAt("Your OK on the draft"), null);
   assert.equal(pointsAt("Edit the draft, check the dates against the calendar, and send it from the shared inbox"), null);
   assert.equal(pointsAt("Pick design A, B or C and answer the follow-ups below"), null);
   assert.equal(pointsAt("Tell Uni who pays (Techne or Gitcoin Foundation) and how"), null);
   assert.equal(pointsAt("Review the Woven Web handoff draft, fill the unknowns"), null);
-  const next = "Send Ryan the deploy-access message below.";
+  const next = "Send Nico the deploy-access message below.";
   // with `detail`, the content travels: nothing to ask for, and a quoted message is the one to copy
-  const detail = "Send this to Ryan:\n\n'Hey Ryan, here is the placeholder message about deploy access for the staging copy.'\n\nAfter he replies, Uni checks the account.";
+  const detail = "Send this to Nico:\n\n'Hey Nico, here is the placeholder message about deploy access for the staging copy.'\n\nAfter he replies, Uni checks the account.";
   assert.equal(pointsNowhere({ next, room: "techne", detail }), null);
-  assert.equal(quotedMessage(detail), "Hey Ryan, here is the placeholder message about deploy access for the staging copy.");
+  assert.equal(quotedMessage(detail), "Hey Nico, here is the placeholder message about deploy access for the staging copy.");
   assert.equal(quotedMessage("No quote here, only a plan."), null);
   // with none: "Ask #room for the message", the room named
   assert.equal(pointsNowhere({ next, room: "techne" }), "Ask #techne for the message");

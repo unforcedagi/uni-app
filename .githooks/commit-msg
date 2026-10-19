@@ -1,0 +1,3 @@
+#!/bin/sh
+# Commit messages are public too: refuse denylisted words, tailnet hosts and addresses in them (see CLAUDE.md).
+exec python3 "$(git rev-parse --show-toplevel)/scripts/check-public.py" --message "$1"

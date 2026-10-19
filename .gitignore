@@ -10,3 +10,16 @@ dist/
 
 /shots/
 dist-lifeos-vault/
+
+# This repo is public (see CLAUDE.md). Screenshots and videos are test outputs, never committed.
+__shots__/
+walkthrough/**/*.png
+walkthrough/**/*.webm
+walkthrough/**/*.mp4
+# Run notes go to the vault or $TMPDIR, never into the repo.
+REPORT-*.md
+BRIEF-*.md
+NEXT-*.md
+RESULT*.md
+WALKTHROUGH*.md
+__pycache__/

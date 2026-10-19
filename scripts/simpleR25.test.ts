@@ -38,10 +38,10 @@ check("P1-1: the title is the quiet secondary line, cut with words and no \"…\
   assert.equal(rowSub({ title: T113_TITLE, due: "2026-10-13" }, a, null, "2026-10-14"), "Companion Today redesign + integrated PWA install flow · was due Oct 13");
 });
 
-check("Ryan: the row and the sheet heading say \"Send Ryan the deploy-access message\", the message beneath", () => {
-  assert.equal(currentStep({ next: "Send Ryan the deploy-access message below", room: "techne", detail: "Hey Ryan, …" }), "Send Ryan the deploy-access message");
-  assert.equal(belowInCard("Send Ryan the deploy-access message below.", { message: "x" }), "Send Ryan the deploy-access message.");
-  assert.equal(currentStep({ next: "Send Ryan the deploy-access message below", room: "techne" }), "Ask #techne for the message", "words nobody stored: ask the room");
+check("Nico: the row and the sheet heading say \"Send Nico the deploy-access message\", the message beneath", () => {
+  assert.equal(currentStep({ next: "Send Nico the deploy-access message below", room: "techne", detail: "Hey Nico, …" }), "Send Nico the deploy-access message");
+  assert.equal(belowInCard("Send Nico the deploy-access message below.", { message: "x" }), "Send Nico the deploy-access message.");
+  assert.equal(currentStep({ next: "Send Nico the deploy-access message below", room: "techne" }), "Ask #techne for the message", "words nobody stored: ask the room");
 });
 
 

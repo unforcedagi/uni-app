@@ -171,7 +171,7 @@ export function TaskSheet({ task, gone = false, nodeName, room, roomNamed, inRoo
     invoke("vault_note", { vault: draft.vault, noteRef: draft.id }).then((r) => { const c = (r as { note?: { content?: unknown } } | null)?.note?.content; if (live && typeof c === "string" && c.trim()) setDraftText(c.trim()); }).catch(() => {});
     return () => { live = false; };
   }, [draft?.id, !!toPerson]); // eslint-disable-line react-hooks/exhaustive-deps
-  // r23: the message a task's `detail` quotes ("Send this to Ryan: 'Hey Ryan, …'") is the message too
+  // r23: the message a task's `detail` quotes ("Send this to Nico: 'Hey Nico, …'") is the message too
   const message = toPerson ? task.message ?? quotedMessage(task.detail) ?? draftText : null;
   const dest = toPerson ? (task.link ? { href: task.link, label: /^mailto:/i.test(task.link) ? `Email ${task.link.replace(/^mailto:/i, "").split("?")[0]}` : `Open ${hostOf(task.link)}` } : toPerson.link) : null;
   const askDraft = !gone && toPerson && !message && !task.detail && room && onSay ? () => { onSay(room.id, `Please draft the message for ${tid ?? "this task"} (${cutWords(rest, 80)}): ${task.next.trim()}`); onClose(); } : null;
@@ -224,7 +224,7 @@ export function TaskSheet({ task, gone = false, nodeName, room, roomNamed, inRoo
   const notes = act ? stepNotes(task.next) : null;
   const refd = !decision && !unsure && !tidy ? referencedItems(task.next, task.detail) : null;
   const detailText = refd?.kind === "list" ? refd.rest : task.detail;
-  /** r30: the step points at the detail's words ("Send Ryan the message below"): they are the ask itself, shown under the heading */
+  /** r30: the step points at the detail's words ("Send Nico the message below"): they are the ask itself, shown under the heading */
   const carries = !!task.detail && !!pointsAt(task.next) && !refd;
   const detailParas = detailText ? detailText.split(/\n\s*\n/).map((para, i) => <p key={i}><DetailText text={para.trim()} vault={vault} onNote={(r) => { onClose(); onNote(r); }} /></p>) : null;
   /** r18: a decision with no stored options is answered in words, written like a tap: one revision-guarded write of `decided`. */

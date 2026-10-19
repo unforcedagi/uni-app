@@ -251,8 +251,8 @@ const introducedAction = (t: string): boolean => { const m = INTRO.exec(t); retu
 /**
  * Who a step's words are for (r17). `room`: the message is for the room itself ("Say go to deploy…", "Tell Uni…", "Tell the room…", "Ask Uni
  * to…", or a step that names this room, "…in #woven-web"): the sheet offers "Say it in #room ›" with `text` in the composer (never sent; "" when
- * there are no words to put there). `person`: an action toward someone outside the room ("Tell Sebastian…", "Reply to jonbo…", "Email…", "Send
- * Ryan…"): the sheet leads with the action and offers an explicit destination (r18: a `mailto:` in the step; the task's `link` field is the
+ * there are no words to put there). `person`: an action toward someone outside the room ("Tell Sebastian…", "Reply to zeeko…", "Email…", "Send
+ * Nico…"): the sheet leads with the action and offers an explicit destination (r18: a `mailto:` in the step; the task's `link` field is the
  * caller's), the message to copy when one is stored, or "Ask Uni to draft it"; never a room prefill. Null: any
  * other step. `room`: the task's room name (with or without "#"), so a step naming it is known to be for it.
  */
@@ -263,7 +263,7 @@ const PERSON_VERB = /^(?:tell|reply|respond|email|e-mail|mail|message|text|call|
 const unquote = (s: string) => s.replace(/^["“'‘]+|["”'’]+$/g, "").replace(/[.\s]+$/, "").trim();
 const capFirst = (s: string) => (s ? s[0].toLocaleUpperCase() + s.slice(1) : s);
 const slugOf = (s: string | null | undefined) => (s ?? "").trim().replace(/^#/, "").toLowerCase();
-/** A recipient written as a name ("to Sebastian", "Sebastian the…", "Benya + Harper"): a capitalised word that is not Uni, the room or a channel. */
+/** A recipient written as a name ("to Sebastian", "Sebastian the…", "Lenny + Harper"): a capitalised word that is not Uni, the room or a channel. */
 const namesPerson = (rest: string) => /^(?:to\s+|with\s+)?(?!uni\b|main\b|the\b|this\b|everyone\b|#)\p{Lu}[\p{L}'’.-]*/u.test(rest);
 export function stepAudience(next: string | null | undefined, room: string | null = null): Audience | null {
   // r20: a leading date label ("Wed 10-14: say go…") is not who the step speaks to
@@ -273,7 +273,7 @@ export function stepAudience(next: string | null | undefined, room: string | nul
   // r19: a room named as where something is ("#cohere's 'For Harper' block") is not who the step speaks to
   const named = [...step.matchAll(/(?:^|\s)#([\w./-]*\w)(?!['’]s\b)/g)].map((m) => m[1].toLowerCase());
   const quoted = /["“'‘]([^"”'’]{1,120})["”'’]/.exec(step)?.[1] ?? "";
-  // "Say …": for the room, unless it is said to a named person ("Say thanks to Mark")
+  // "Say …": for the room, unless it is said to a named person ("Say thanks to Theo")
   let m = /^say\b[\s:,-]*(.*)$/i.exec(step);
   // "Say go…", "Say yes…", "Say 'ship it'…": a word for the room (whatever the step does next, "…to send the SOW to Casey")
   const roomWord = !!m && /^(?:go|yes|no|ok|okay|stop|wait|done|hold|ship it|start\b|["“'‘])/i.test(m[1]);
@@ -289,7 +289,7 @@ export function stepAudience(next: string | null | undefined, room: string | nul
   if (here && named.includes(here)) return { kind: "room", text: unquote(quoted) };
   if (/^(?:reply|answer|respond)\b/i.test(step) && !named.length && (/\b(?:in|to) (?:the|this) room\b/i.test(step) || (/^reply\b/i.test(step) && !/^reply\s+to\b/i.test(step) && !namesPerson(step.replace(/^reply\s*/i, ""))))) return { kind: "room", text: unquote(quoted || (/^\w+\s*[:—–]\s*(.+)$/.exec(step)?.[1] ?? "")) };
   // toward a person outside the room
-  // "Edit and send the draft to Mark…": the sending is the action
+  // "Edit and send the draft to Theo…": the sending is the action
   const act = step.replace(/^(?:edit|review|check|finish|polish|read)(?:\s+(?:it|this|the draft))?\s+and\s+/i, "");
   if (PERSON_VERB.test(act)) {
     const rest = act.replace(PERSON_VERB, "").trim();
@@ -530,7 +530,7 @@ export function summaryClauses(text: string): Clause[] {
   return out;
 }
 /**
- * A step that sends words it doesn't carry (r23, both critics): "Send Ryan the deploy-access message below", "Forward the draft", "Send the
+ * A step that sends words it doesn't carry (r23, both critics): "Send Nico the deploy-access message below", "Forward the draft", "Send the
  * message". Only a sending step counts ("Your OK on the draft" or "Edit the draft, …" asks something else of a draft that exists).
  * `noun`: what it points at, for "Ask #room for the message".
  */
@@ -563,8 +563,8 @@ export function unresolvedBlock(next: string | null | undefined, detail: string 
   return { name, room: m[1] ?? null };
 }
 /**
- * r24, r25 (Ryan): a step can't point "below" at words that are in its card, and the row has no card to point at: the row and the sheet's
- * heading say the same words, "Send Ryan the deploy-access message", and the message sits directly beneath it in the sheet.
+ * r24, r25 (Nico): a step can't point "below" at words that are in its card, and the row has no card to point at: the row and the sheet's
+ * heading say the same words, "Send Nico the deploy-access message", and the message sits directly beneath it in the sheet.
  */
 export function belowInCard(next: string, t: Partial<Pick<Task, "detail" | "message" | "hasDraft">>): string {
   if (!pointsAt(next) || !(t.detail || t.message || t.hasDraft)) return next;
@@ -577,7 +577,7 @@ export function belowInCard(next: string, t: Partial<Pick<Task, "detail" | "mess
 export function currentStep(t: Pick<Task, "next" | "room"> & Partial<Pick<Task, "detail" | "message" | "hasDraft">>, room: string | null = t.room): string {
   return stepHeading(pointsNowhere(t, room) ?? belowInCard(t.next.trim(), t));
 }
-/** The message in a task's `detail`, when it quotes one ("Send this to Ryan: 'Hey Ryan, …'"): the quoted words, whole. */
+/** The message in a task's `detail`, when it quotes one ("Send this to Nico: 'Hey Nico, …'"): the quoted words, whole. */
 export function quotedMessage(detail: string | null | undefined): string | null {
   if (!detail) return null;
   for (const para of detail.split(/\n\s*\n/)) {
@@ -743,7 +743,7 @@ export function cutWords(text: string, max = Infinity, mark = true): string {
 /** The first whole words of a text within `max` characters, never ending on a hanging word or a separator, and never with "…" (r16). */
 export const firstWords = (text: string, max = 48): string => tidyTail(cutWords(withoutCut(text), max, false).split(" ").filter(Boolean)).join(" ");
 /**
- * A decision row with no whole question to show (r16): the verb first, the first words, and the way in: "Decide: Uni adds Benya's missing
+ * A decision row with no whole question to show (r16): the verb first, the first words, and the way in: "Decide: Uni adds Lenny's missing
  * feature 4". The row opens to decide; it never ends on "…" with nothing to act on.
  */
 export const decideLine = (words: string): string => {
@@ -972,7 +972,7 @@ export const TIDY_SAYS: Record<TidyReason, string> = {
 // ------------------------------------------------------------------------------------------------- r20
 /** Where a step's first clause ends (r20): ";", a spaced dash, " then ", ": " or a sentence's end, the first after `from`. */
 const CLAUSE_END = /;|\s[—–-]\s|,?\s+then\s|:\s|[.!?](?=\s|$)/gi;
-/** Words that end a verb phrase's object ("Edit and send the ATLAS follow-up | to Mark…"): a preposition or a joining word. */
+/** Words that end a verb phrase's object ("Edit and send the ATLAS follow-up | to Theo…"): a preposition or a joining word. */
 const OBJECT_END = /^(?:to|from|with|in|on|at|for|by|about|before|after|via|into|onto|over|under|through|if|when|so|because|then|and|or|but|while|until|unless|once|as|than|per)$/i;
 /** A word that belongs to the verb before its object ("Look at", "Reply to", "Follow up", "Sign off"). */
 const PARTICLE = /^(?:at|to|up|out|off|back|over|through|in|on)$/i;
@@ -1022,7 +1022,7 @@ export function firstClause(text: string, from = 0): string {
 }
 /**
  * What a row leads with (r20; r21, both critics: the whole action). A leading date label is dropped (it is the due cue, or the subtitle); the
- * action is the verb phrase with all its objects and recipients, up to the sentence's end ("Edit and send the ATLAS follow-up to Mark and
+ * action is the verb phrase with all its objects and recipients, up to the sentence's end ("Edit and send the ATLAS follow-up to Theo and
  * Dominic from your account"). Only context after it is the sheet's: a ";" clause that isn't the user's ("; Harper signs off…"), a spaced dash,
  * "because…". A step written "A, then B" (or "A; then B") is both steps (`steps`). `forms`: what a row may show, best first: the whole action;
  * the same without its brackets (dates, examples, links' notes); for more than one step, "2 steps: A, then …" (the sheet lists them). `keep`:

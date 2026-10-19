@@ -43,7 +43,7 @@ await check("P1-1 dependencies are explicit: the notes a step links, a `source` 
   const t2 = task("t2", "T-135 Migrate Uni to the new machine (Gigabyte Aero 16)", { next: "OK the migration windows", source: `[[Projects/Mail/Cutover plan]]`, depends_on: [`uni:${PLAN}`] });
   assert.deepEqual(taskDeps(t2).refs.map((r) => [r.role, r.id]), [["source", "Projects/Mail/Cutover plan"], ["after", PLAN]]);
   // a step with no note named stands on nothing: no check, no "Checking…"
-  const t95 = task("t95", "T-95 Ryan’s deploy access", { next: "Send Ryan the deploy-access message." });
+  const t95 = task("t95", "T-95 Nico’s deploy access", { next: "Send Nico the deploy-access message." });
   assert.equal(checkOf(t95, undefined, Date.now()), null);
   // a step asking for answers stands on its own note, unless its `questions` field already holds them
   assert.equal(taskDeps(task("q", "T-40 Dynamic guides in Parachute", { next: "Answer the 4 questions on dynamic guides." })).questions, 4);
@@ -96,7 +96,7 @@ await check("P1-2 a read fails and then recovers: unavailable (never 'nothing th
   assert.equal(up.failedAt, null);
   assert.deepEqual(checkOf(t, up, Date.now()), { kind: "closed", how: "closed", from: { vault: "uni", id: PLAN, title: "Cutover plan — unforced.dev" } });
   // a note that doesn't exist is an answer, not a failure (r20: an unresolved one, "Couldn't find …", never all clear)
-  const gone = task("g", "T-25 Pope's AI encyclical: novel public reading experiment", { next: "Send the permission email (draft uni:01M3ZZXEXFNHRJV8KWHAGZZ1KQ)." });
+  const gone = task("g", "T-25 Annotated essay: a novel public reading experiment", { next: "Send the permission email (draft uni:01M3ZZXEXFNHRJV8KWHAGZZ1KQ)." });
   assert.deepEqual((await vt.loadChecks([gone], () => [])).get("g")!.rec!.result, { kind: "missing", ref: "01M3ZZXEXF…" });
 });
 
@@ -111,7 +111,7 @@ await check("P1-2 one slow note doesn't hold the others: each task's check lands
   };
   const vt = createVaultTasks(call, "uni");
   const landed: string[] = [];
-  const a = task("a", "T-25 Pope's AI encyclical: novel public reading experiment", { next: `Send the email (draft uni:${slow}).` });
+  const a = task("a", "T-25 Annotated essay: a novel public reading experiment", { next: `Send the email (draft uni:${slow}).` });
   const b = task("b", "T-13 Self-hosted mail: approved 10-02", { next: `Approve the plan (uni:${PLAN}).` });
   const all = vt.loadChecks([a, b], () => [], (id) => landed.push(id));
   await new Promise((r) => setTimeout(r, 20));
@@ -159,7 +159,7 @@ await check("P1-3 records that aren't real requests: a testing outline, maintena
   const prop = (id: string, title: string, ask?: string) => ({ ...task(id, title, {}, "decision"), ...(ask ? { ask, askAt: "2026-10-14T06:00:00.000Z" } : {}) });
   assert.equal(tidyReason(prop("m", "Mail: approve a test week, not an immediate cutover")), "proposal");
   assert.equal(tidyReason(prop("d", "Decision (needs your yes): a daily calendar email to people who…", "Decision (needs your yes): a daily calendar email to people who registered and opted in. It goes to real attendees.")), "proposal");
-  assert.equal(tidyReason(prop("b", "Decision (default yes): Uni adds Benya's missing feature 4, the…", "Uni adds the after-event “were you there? one takeaway” prompt on Wed. Say no to skip it.")), "proposal", "a ? inside a quote asks nothing");
+  assert.equal(tidyReason(prop("b", "Decision (default yes): Uni adds Lenny's missing feature 4, the…", "Uni adds the after-event “were you there? one takeaway” prompt on Wed. Say no to skip it.")), "proposal", "a ? inside a quote asks nothing");
   assert.equal(tidyReason(prop("x", "Decision: texting is not recommended for this year because carrier…", "Decision: texting is not recommended for this year because carrier approval may not clear.")), "proposal");
 });
 
@@ -172,7 +172,7 @@ await check("P1-3 when unsure, the item stays in Needs you: concrete steps (the 
     ["T-67 Woven Web handoff note for Harper", "Review the handoff draft, fill the unknowns, then talk with Harper yourself."],
     ["T-113 Companion Today redesign + integrated PWA install flow (3…", "Look at the staging link on your phone, then forward the block to Harper."],
     ["T-135 Migrate Uni to the new machine (Gigabyte Aero 16)", "OK the migration windows (gateway Wed, vaults Thu, Buzz+mail Sat)"],
-    ["T-101 Tell Sebastian the BVSD letter is sent, if not done…", "Reply to Sebastian in your existing thread that the letter went out Oct 2."],
+    ["T-101 Tell Sebastian the PTSA letter is sent, if not done…", "Reply to Sebastian in your existing thread that the letter went out Oct 2."],
     ["T-12 Boulder New Tech site + organizer app", ""],
   ];
   for (const [title, next] of keep) assert.equal(tidyReason(task("k", title, { next })), null, title);
@@ -185,7 +185,7 @@ await check("P1-3 when unsure, the item stays in Needs you: concrete steps (the 
 
 await check("P1-3 tidy records leave Needs you and its count, and are listed apart; a room's own record never shows there", () => {
   const rows = [
-    task("a", "T-129 Send the ATLAS Oct 12 follow-up email", { next: "Edit and send the follow-up to Mark and Dominic.", priority: "now" }),
+    task("a", "T-129 Send the ATLAS Oct 12 follow-up email", { next: "Edit and send the follow-up to Theo and Dominic.", priority: "now" }),
     task("f", "T-111 Fractal flow test: real work in area rooms, check updates…", { next: "Fractal flow test: real work in area rooms, check updates propagate up; nested room names; app refresh for the tree" }),
     task("m", "Mail: approve a test week, not an immediate cutover", {}, "decision"),
     task("o", "T-11 RegenHub site + newsletter systems", { owner: "room:boulder", next: "Run /restart after the merge" }),

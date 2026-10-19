@@ -1,0 +1,38 @@
+name: Public repo check
+
+# This repo is public. Refuse private data in the tree and in every new commit (tree and message);
+# see CLAUDE.md and scripts/check-public.py. The hooks stop it before a push; this catches what skipped them.
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check-public:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Guard tests
+        run: python3 scripts/test_check_public.py
+      - name: No private data in the tree
+        run: python3 scripts/check-public.py
+      - name: No private data in any new commit
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = pull_request ]; then range="$BASE..$HEAD"
+          elif [ -n "$BEFORE" ] && ! printf '%s' "$BEFORE" | grep -qE '^0+$' && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then range="$BEFORE..$AFTER"
+          else range="$AFTER^!"
+          fi
+          python3 scripts/check-public.py --rev $(git rev-list "$range")

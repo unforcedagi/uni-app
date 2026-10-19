@@ -8,7 +8,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     uni_core::init_crypto();
     let (keys, _) = uni_core::load_keys(false)?;
     let audio = std::fs::read(&args[1])?;
-    let hub = args.get(3).map(String::as_str).unwrap_or("https://uni-1.example.ts.net");
+    let hub = args.get(3).map(String::as_str).unwrap_or(uni_core::hub::HUB_ALIASES[0].0);
     let url = uni_core::hub::transcribe_url(hub).ok_or("bad hub URL")?;
     let started = std::time::Instant::now();
     let t = uni_core::transcribe::transcribe(&url, &keys, audio, &args[2]).await?;

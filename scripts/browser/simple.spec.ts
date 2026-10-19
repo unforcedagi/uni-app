@@ -2472,24 +2472,24 @@ test.describe('r17', () => {
     const openIt = async (text: string) => { await openCompanion(page); await page.locator('.cp-body .cp-item').filter({ hasText: text }).locator('.cp-lead, .cp-need').first().click(); return sheetOf(page); };
     const textarea = page.locator('.sr-chat textarea');
     // no message stored: the sheet asks Uni to draft one (typed in the room, never sent), and never copies the bare instruction
-    await step('Tell Sebastian the BVSD letter went out Oct 2, before the Oct 20 HRC meeting (skip if already done).');
+    await step('Tell Sebastian the PTSA letter went out Oct 2, before the Oct 20 ZBA meeting (skip if already done).');
     let sheet = await openIt('Tell Sebastian');
-    await expect(sheet.locator('h2')).toHaveText(/^Tell Sebastian the BVSD letter went out Oct 2/);
+    await expect(sheet.locator('h2')).toHaveText(/^Tell Sebastian the PTSA letter went out Oct 2/);
     await expect(sheet.getByRole('button', { name: /^Say it in/ })).toHaveCount(0);
     await expect(sheet.getByRole('button', { name: /^Copy/ })).toHaveCount(0);
     await expect(sheet.locator('.task-do.primary')).toHaveText('Ask Uni to draft it');
     await sheet.locator('.task-do.primary').click();
-    await expect(textarea).toHaveValue(/^Please draft the message for T-\d+ .*Tell Sebastian the BVSD letter went out Oct 2/);
+    await expect(textarea).toHaveValue(/^Please draft the message for T-\d+ .*Tell Sebastian the PTSA letter went out Oct 2/);
     expect(await calls(page, 'post_message')).toHaveLength(0);
     await textarea.fill('');
     // a stored message: "Copy the message" copies it, not the instruction
-    await step('Tell Sebastian the BVSD letter went out Oct 2', { message: 'Hi Sebastian — I sent the BVSD letter on Oct 2, ahead of the Oct 20 HRC hearing.' });
+    await step('Tell Sebastian the PTSA letter went out Oct 2', { message: 'Hi Sebastian — I sent the PTSA letter on Oct 2, ahead of the Oct 20 ZBA hearing.' });
     sheet = await openIt('Tell Sebastian');
     await expect(sheet.locator('.task-do.primary')).toHaveText('Copy the message');
     await sheet.locator('.task-do.primary').click();
     await expect(sheet.locator('.task-do.primary')).toHaveText('Copied');
     const copied = (await page.evaluate(() => (window as any).__calls.filter((x: any) => /clipboard/.test(x.cmd)).map((x: any) => JSON.stringify(x.args)))) as string[];
-    expect(copied.join('\n')).toContain('Hi Sebastian — I sent the BVSD letter');
+    expect(copied.join('\n')).toContain('Hi Sebastian — I sent the PTSA letter');
     expect(copied.join('\n')).not.toContain('Tell Sebastian');
     await sheet.getByRole('button', { name: 'Close' }).click();
     // an address in the words is not a destination; one written as mailto: is
@@ -2626,7 +2626,7 @@ test.describe('r17', () => {
     await boot(page);
     await openRoom(page, 'ATLAS');
     const id = await page.evaluate(() => (window as any).__tasks.find((t: any) => /SOW for the commons grant/.test(t.path)).id);
-    await page.evaluate((i) => (window as any).__setTask(i, { next: 'Edit and send the draft to Mark and Dominic: the follow-up after the October twelfth session with the deck, the estimate and the open questions about the second phase and its budget and dates' }), id);
+    await page.evaluate((i) => (window as any).__setTask(i, { next: 'Edit and send the draft to Theo and Dominic: the follow-up after the October twelfth session with the deck, the estimate and the open questions about the second phase and its budget and dates' }), id);
     await refresh(page, '2026-10-09T10:01:00.000Z');
     await openCompanion(page);
     const lead = page.locator('.cp-body .cp-item').filter({ hasText: 'Edit and send the draft' }).locator('.cp-lead');
@@ -2886,7 +2886,7 @@ test.describe('r19', () => {
       w.__seedTasks = [
         { id: plan, path: 'Projects/Mail/Cutover plan — unforced.dev', extension: 'md', tags: [], createdAt: at, updatedAt: at, content: 'The plan.', metadata: {} },
         { id: 't13', path: 'Tasks/T-13 Self-hosted mail: approved 10-02', extension: 'md', tags: ['task'], createdAt: at, updatedAt: at, lastUpdatedVia: 'mcp', content: 'Mail', metadata: { node: 'Projects/ATLAS', state: 'waiting', owner: 'aaron', waiting_on: 'aaron', priority: 'now', next: step, source: 'Aaron/Tasks#T-13' } },
-        { id: 't95', path: 'Tasks/T-95 Ryan’s deploy access', extension: 'md', tags: ['task'], createdAt: at, updatedAt: at, lastUpdatedVia: 'mcp', content: 'Ryan', metadata: { node: 'Projects/ATLAS', state: 'open', owner: 'aaron', priority: 'now', next: 'Send Ryan the deploy-access message.' } },
+        { id: 't95', path: 'Tasks/T-95 Nico’s deploy access', extension: 'md', tags: ['task'], createdAt: at, updatedAt: at, lastUpdatedVia: 'mcp', content: 'Nico', metadata: { node: 'Projects/ATLAS', state: 'open', owner: 'aaron', priority: 'now', next: 'Send Nico the deploy-access message.' } },
       ];
     }, [PLAN, STEP] as const);
     await boot(page);
@@ -2894,7 +2894,7 @@ test.describe('r19', () => {
     await openWork(page);
     await expect(row13(page)).toHaveAttribute('data-mode', 'checking');
     await expect(row13(page)).not.toContainText('Approve or change');
-    // r23: "Send Ryan the deploy-access message." with no message stored asks the room for it
+    // r23: "Send Nico the deploy-access message." with no message stored asks the room for it
     await expect(page.locator('.sr-work .cp-item').filter({ hasText: /^\s*Ask #\S+ for the message/ })).toHaveAttribute('data-mode', 'lead');
   });
 
@@ -2991,8 +2991,8 @@ test.describe('r19', () => {
 
   test('a sheet\'s text is cut by one rule at every size: the whole step, the title cut at the same words, the whole of it under Details', async ({ page }) => {
     await boot(page);
-    const title = 'T-101 Tell Sebastian the BVSD letter is sent before the HRC hearing on the twentieth, and that Finn has the copy, if that is not done';
-    await add(page, { id: 't101', title, node: 'Projects/ATLAS', meta: { priority: 'now', next: 'Reply to Sebastian in your existing thread that the BVSD letter went out Oct 2, before the Oct 20 HRC meeting (skip if already done).' } });
+    const title = 'T-101 Tell Sebastian the PTSA letter is sent before the ZBA hearing on the twentieth, and that Finn has the copy, if that is not done';
+    await add(page, { id: 't101', title, node: 'Projects/ATLAS', meta: { priority: 'now', next: 'Reply to Sebastian in your existing thread that the PTSA letter went out Oct 2, before the Oct 20 ZBA meeting (skip if already done).' } });
     await refresh(page, '2026-10-09T10:01:00.000Z');
     const seen: string[][] = [];
     for (const size of [{ width: 1440, height: 900 }, { width: 800, height: 600 }, { width: 740, height: 360 }]) {
@@ -3008,13 +3008,13 @@ test.describe('r19', () => {
     }
     expect(seen[1]).toEqual(seen[0]);
     expect(seen[2]).toEqual(seen[0]);
-    expect(seen[0][0]).toBe('Reply to Sebastian in your existing thread that the BVSD letter went out Oct 2, before the Oct 20 HRC meeting (skip if already done)');
+    expect(seen[0][0]).toBe('Reply to Sebastian in your existing thread that the PTSA letter went out Oct 2, before the Oct 20 ZBA meeting (skip if already done)');
     expect(seen[0][1]).toBe(`Task ${title.replace(/^(T-\d+) /, '$1: ')}`);
   });
 
   test('in a short window the sheet\'s primary action and "I did this" stay in view: a sticky footer', async ({ page }) => {
     await boot(page);
-    await add(page, { id: 't101', title: 'T-101 Tell Sebastian the BVSD letter is sent, if not done…', node: 'Projects/ATLAS', meta: { priority: 'now', due: '2026-10-20', next: 'Reply to Sebastian in your existing thread that the BVSD letter went out Oct 2, before the Oct 20 HRC meeting (skip if already done).' }, content: 'Tell Sebastian.\n\n' + 'Letter context. '.repeat(40) });
+    await add(page, { id: 't101', title: 'T-101 Tell Sebastian the PTSA letter is sent, if not done…', node: 'Projects/ATLAS', meta: { priority: 'now', due: '2026-10-20', next: 'Reply to Sebastian in your existing thread that the PTSA letter went out Oct 2, before the Oct 20 ZBA meeting (skip if already done).' }, content: 'Tell Sebastian.\n\n' + 'Letter context. '.repeat(40) });
     await refresh(page, '2026-10-09T10:01:00.000Z');
     await page.setViewportSize({ width: 740, height: 360 });
     await openRoom(page, 'ATLAS');
@@ -3143,7 +3143,7 @@ test.describe('r20', () => {
   const REAL = [
     { id: 'ww', title: 'Woven Web handoff note for Harper', next: 'Review the Woven Web handoff draft, fill the unknowns, then talk with Harper yourself.', verb: 'Review the Woven Web handoff draft', action: 'Review the Woven Web handoff draft, fill the unknowns' },
     { id: 'co', title: 'T-90 COhere opens Oct 15', next: 'Wed 10-14: say go on prod deploy of #38 + #58; Harper signs off the copy/photos before/after (posting today); yes/no on add-only DB…', verb: 'Say go', action: 'Say go on prod deploy of #38 + #58', due: '2026-10-14' },
-    { id: 'at', title: 'T-138 Send the ATLAS Oct 12 follow-up email', next: 'Edit and send the ATLAS follow-up to Mark and Dominic from your account; fill the opening, sign-off and next-review date.', verb: 'Edit and send the ATLAS follow-up', action: null },
+    { id: 'at', title: 'T-138 Send the ATLAS Oct 12 follow-up email', next: 'Edit and send the ATLAS follow-up to Theo and Dominic from your account; fill the opening, sign-off and next-review date.', verb: 'Edit and send the ATLAS follow-up', action: null },
     { id: 'pay', title: '$10k COhere sponsorship invoice draft', next: 'Tell Uni who pays (Techne or Gitcoin Foundation) and how: crypto or ACH/Stripe, plus Woven Web\'s legal details.', verb: 'Tell Uni who pays', action: null },
   ];
   const seedReal = async (page: Page) => {
@@ -3239,7 +3239,7 @@ test.describe('r20', () => {
   });
 
   test('P1-2 unknown decisions aren\'t owed: a cold list with three statement-only decisions counts 0, shows "Checking what\'s needed…" (never "Decide:"), and lights no dot until classified', async ({ page }) => {
-    const titles = ['Uni adds Benya\'s missing feature 4, the…', 'A daily email of the calendar at 7, with…', 'Texting Uni: a number that reaches…'];
+    const titles = ['Uni adds Lenny\'s missing feature 4, the…', 'A daily email of the calendar at 7, with…', 'Texting Uni: a number that reaches…'];
     await page.addInitScript((ts) => {
       const w = window as any;
       const at = '2026-10-14T06:00:00.000Z';
@@ -3256,7 +3256,7 @@ test.describe('r20', () => {
     await expect(needs.locator('.cp-item[data-mode="checking"]')).toHaveCount(3);
     // r21 (both critics): a decision being checked leads with its question (here the title as words: found in the real app, "…feature 4,
     // the"), "Checking…" a quiet line under it, never its title
-    expect((await needs.locator('.cp-item[data-mode="checking"] .cp-title').allInnerTexts()).sort()).toEqual(['A daily email of the calendar at 7', 'Texting Uni: a number that reaches', 'Uni adds Benya\'s missing feature 4'].sort());
+    expect((await needs.locator('.cp-item[data-mode="checking"] .cp-title').allInnerTexts()).sort()).toEqual(['A daily email of the calendar at 7', 'Texting Uni: a number that reaches', 'Uni adds Lenny\'s missing feature 4'].sort());
     await expect(needs.locator('.cp-item[data-mode="checking"] .cp-under')).toHaveText(['Checking…', 'Checking…', 'Checking…']);
     await expect(needs.locator('.wv-n')).toHaveText('0');
     if (treeBeside(page)) expect(await page.locator('.th-roomnav .th-go[aria-label^="Atlas Institute"]').getAttribute('aria-label')).not.toMatch(/need/);
@@ -3289,7 +3289,7 @@ test.describe('r20', () => {
     await boot(page);
     await add(page, { id: 'mail', title: 'Mail: approve a test week, not an immediate cutover', node: 'Projects/ATLAS', tag: 'decision' });
     await add(page, { id: 'r125', title: 'T-125 Rooms write state: stands field, runs∕drafts∕decisions in…', node: 'Projects/ATLAS', meta: { priority: 'now', next: 'Run /restart when convenient: loads the uni-relay hook that closes run notes on [done|blocked|decision] markers.' } });
-    await add(page, { id: 'benya', title: 'Decision (default yes): Uni adds Benya\'s missing feature 4, the…', node: 'Projects/ATLAS', tag: 'decision', content: 'Decision (default yes): Uni adds Benya\'s missing feature 4, the calendar view, this week.' });
+    await add(page, { id: 'lenny', title: 'Decision (default yes): Uni adds Lenny\'s missing feature 4, the…', node: 'Projects/ATLAS', tag: 'decision', content: 'Decision (default yes): Uni adds Lenny\'s missing feature 4, the calendar view, this week.' });
     await refresh(page, '2026-10-14T09:00:00.000Z');
     await openRoom(page, 'ATLAS');
     await openWork(page);
@@ -3354,7 +3354,7 @@ test.describe('r20', () => {
     test(`P2 the sheet's foot fits at ${size.width}×${size.height}: "Snooze until tomorrow" sits in the scrolling body above the footer, never behind or below it`, async ({ page }) => {
       await page.setViewportSize(size);
       await boot(page);
-      await add(page, { id: 't101', title: 'T-101 Tell Sebastian the BVSD letter is sent, if not done…', node: 'Projects/ATLAS', meta: { priority: 'now', due: '2026-10-20', next: 'Reply to Sebastian in your existing thread that the BVSD letter went out Oct 2, before the Oct 20 HRC meeting (skip if already done).' }, content: 'Tell Sebastian.\n\n' + 'Letter context. '.repeat(40) });
+      await add(page, { id: 't101', title: 'T-101 Tell Sebastian the PTSA letter is sent, if not done…', node: 'Projects/ATLAS', meta: { priority: 'now', due: '2026-10-20', next: 'Reply to Sebastian in your existing thread that the PTSA letter went out Oct 2, before the Oct 20 ZBA meeting (skip if already done).' }, content: 'Tell Sebastian.\n\n' + 'Letter context. '.repeat(40) });
       await refresh(page, '2026-10-14T09:00:00.000Z');
       await openRoom(page, 'ATLAS');
       await openWork(page);
@@ -3386,7 +3386,7 @@ test.describe('r21', () => {
   const leadOf = (row: ReturnType<Page['locator']>) => row.locator('.cp-lead').evaluate((el) => ({ lines: new Set([...el.querySelectorAll<HTMLElement>('.wc-w')].map((w) => Math.round(w.getBoundingClientRect().top))).size, text: (el as HTMLElement).innerText.replace(/\s+/g, ' ').trim(), cut: el.getAttribute('data-cut') === 'true', form: el.getAttribute('data-form') }));
   /** The real steps from the scratch copy (10-14), and what the row must hold whole (its object, its recipients, both steps). */
   const WHOLE = [
-    { id: 'at', title: 'T-129 Send the ATLAS Oct 12 follow-up email', next: 'Edit and send the ATLAS follow-up to Mark and Dominic from your account; fill the opening, sign-off and next-review date.', has: ['Edit and send the ATLAS follow-up to Mark and Dominic from your account'] },
+    { id: 'at', title: 'T-129 Send the ATLAS Oct 12 follow-up email', next: 'Edit and send the ATLAS follow-up to Theo and Dominic from your account; fill the opening, sign-off and next-review date.', has: ['Edit and send the ATLAS follow-up to Theo and Dominic from your account'] },
     { id: 'ww', title: 'T-67 Woven Web handoff note for Harper', next: 'Review the Woven Web handoff draft, fill the unknowns, then talk with Harper yourself.', has: ['Review the Woven Web handoff draft, fill the unknowns'], step2: 'then talk with Harper yourself' },
     { id: 'st', title: 'T-113 Companion Today redesign + integrated PWA install flow (3…', next: 'Look at https://cohere-signup-staging.example-workers.invalid/?look=ecology on phone, then forward #cohere\'s \'For Harper\' block (posted 10-13)', has: ['Look at cohere-signup-staging on phone'], step2: 'then forward #cohere\'s \'For Harper\' block' },
     { id: 'pay', title: 'T-65 $10k COhere sponsorship invoice draft', next: 'Tell Uni who pays (Techne or Gitcoin Foundation) and how: crypto or ACH/Stripe, plus Woven Web\'s legal details.', has: ['Tell Uni who pays', 'and how: crypto or ACH/Stripe, plus Woven Web\'s legal details'] },
@@ -3510,7 +3510,7 @@ test.describe('r21', () => {
     page.on('console', (m) => { if (/need rewording by their rooms/.test(m.text())) logged.push(m.text()); });
     await boot(page);
     await add(page, { id: 'mail', title: 'Mail: approve a test week, not an immediate cutover', node: 'Projects/ATLAS', tag: 'decision' });
-    await add(page, { id: 'benya', title: 'Decision (default yes): Uni adds Benya\'s missing feature 4, the…', node: 'Projects/ATLAS', tag: 'decision', content: 'Decision (default yes): Uni adds Benya\'s missing feature 4, the calendar view' });
+    await add(page, { id: 'lenny', title: 'Decision (default yes): Uni adds Lenny\'s missing feature 4, the…', node: 'Projects/ATLAS', tag: 'decision', content: 'Decision (default yes): Uni adds Lenny\'s missing feature 4, the calendar view' });
     await refresh(page, '2026-10-14T09:00:00.000Z');
     await openRoom(page, 'ATLAS');
     await openWork(page);
@@ -3702,7 +3702,7 @@ test.describe('r22', () => {
   const leadText = (row: ReturnType<Page['locator']>) => row.locator('.cp-lead').evaluate((el) => (el as HTMLElement).innerText.replace(/\s+/g, ' ').trim());
   /** The real steps from the scratch copy (10-14), and every verb phrase the row must say (both critics, r21). */
   const ROWS = [
-    { id: 'at', title: 'T-129 Send the ATLAS Oct 12 follow-up email', next: 'Edit and send the ATLAS follow-up to Mark and Dominic from your account; fill the opening, sign-off and next-review date.', has: ['Edit and send the ATLAS follow-up', 'to Mark and Dominic from your account', 'fill the opening, sign-off and next-review date'] },
+    { id: 'at', title: 'T-129 Send the ATLAS Oct 12 follow-up email', next: 'Edit and send the ATLAS follow-up to Theo and Dominic from your account; fill the opening, sign-off and next-review date.', has: ['Edit and send the ATLAS follow-up', 'to Theo and Dominic from your account', 'fill the opening, sign-off and next-review date'] },
     { id: 'ww', title: 'T-67 Woven Web handoff note for Harper', next: 'Review the Woven Web handoff draft, fill the unknowns, then talk with Harper yourself.', has: ['Review the Woven Web handoff draft', 'fill the unknowns', 'then talk with Harper yourself'] },
     { id: 'st', title: 'T-113 Companion Today redesign + integrated PWA install flow (3…', next: 'Look at https://cohere-signup-staging.example-workers.invalid/?look=ecology on phone, then forward #cohere\'s \'For Harper\' block (posted 10-13)', has: ['Look at cohere-signup-staging on phone', 'then forward #cohere\'s \'For Harper\' block (posted 10-13)'] },
     { id: 'pay', title: 'T-65 $10k COhere sponsorship invoice draft', next: 'Tell Uni who pays (Techne or Gitcoin Foundation) and how: crypto or ACH/Stripe, plus Woven Web\'s legal details.', has: ['Tell Uni who pays (Techne or Gitcoin Foundation)', 'and how: crypto or ACH/Stripe, plus Woven Web\'s legal details'] },
@@ -3850,8 +3850,8 @@ test.describe('r23', () => {
   const sheetOf = (page: Page) => page.getByRole('dialog').filter({ has: page.locator('.task-kind') });
   const openWork = async (page: Page) => { await openCompanion(page); await page.getByRole('button', { name: /^All of .*'s work/ }).click(); await expect(page.locator('.sr-work')).toBeVisible(); };
   const rowOf = (page: Page, text: string) => page.locator('.sr-work .cp-item').filter({ hasText: text });
-  /** The placeholder message a task's `detail` carries (made up; the live one is Ryan's deploy-access note). */
-  const DETAIL = "Send this to Ryan:\n\n'Hey Ryan, this is the placeholder message about deploy access for the staging copy of the site.'\n\nAfter he replies, Uni checks the account.";
+  /** The placeholder message a task's `detail` carries (made up; the live one is Nico's deploy-access note). */
+  const DETAIL = "Send this to Nico:\n\n'Hey Nico, this is the placeholder message about deploy access for the staging copy of the site.'\n\nAfter he replies, Uni checks the account.";
 
   test('"asked" means asked (Codex P1): an explicit request time reads "asked Oct 6"; without one, "added Oct 6" from when the task was added; a rebalanced record keeps its date', async ({ page }) => {
     await boot(page);
@@ -3969,18 +3969,18 @@ test.describe('r23', () => {
 
   test('"…message below": the message a task carries is shown and is what "Copy the message" copies; with none stored the row reads "Ask #room for the message"', async ({ page }) => {
     await boot(page);
-    await add(page, { id: 'm1', title: 'T-306 Placeholder deploy access', node: 'Areas/Techne', meta: { next: 'Send Ryan the deploy-access message below.', detail: DETAIL, room: 'techne' } });
+    await add(page, { id: 'm1', title: 'T-306 Placeholder deploy access', node: 'Areas/Techne', meta: { next: 'Send Nico the deploy-access message below.', detail: DETAIL, room: 'techne' } });
     await add(page, { id: 'm2', title: 'T-307 Placeholder access, no message', node: 'Areas/Techne', meta: { next: 'Send Casey the access message below.', room: 'techne' } });
     await refresh(page, '2026-10-14T09:00:00.000Z');
     await openRoom(page, 'Techne');
     await openWork(page);
-    await expect(rowOf(page, 'Send Ryan the deploy-access message').locator('.cp-lead')).toHaveText('Send Ryan the deploy-access message');
-    await openTaskSheet(page, 'Send Ryan the deploy-access message');
+    await expect(rowOf(page, 'Send Nico the deploy-access message').locator('.cp-lead')).toHaveText('Send Nico the deploy-access message');
+    await openTaskSheet(page, 'Send Nico the deploy-access message');
     const sheet = sheetOf(page);
-    // r25 (Ryan): the sheet's heading says the row's words, the message directly beneath it
-    await expect(sheet.locator('h2')).toHaveText('Send Ryan the deploy-access message');
+    // r25 (Nico): the sheet's heading says the row's words, the message directly beneath it
+    await expect(sheet.locator('h2')).toHaveText('Send Nico the deploy-access message');
     expect(await sheet.locator('h2').evaluate((h) => { let n = h.nextElementSibling as HTMLElement | null; if (n?.classList.contains('task-sub-title')) n = n.nextElementSibling as HTMLElement | null; return n?.className ?? ''; })).toContain('task-detail'); // r26: only the quiet title line may sit between
-    await expect(sheet.locator('.task-detail')).toContainText('Hey Ryan, this is the placeholder message');
+    await expect(sheet.locator('.task-detail')).toContainText('Hey Nico, this is the placeholder message');
     await expect(sheet.locator('.task-detail')).toContainText('After he replies, Uni checks the account.');
     await expect(sheet.locator('.task-do.primary')).toHaveText('Copy the message');
     await expect(sheet.getByRole('button', { name: 'Ask Uni to draft it' })).toHaveCount(0);
@@ -3997,7 +3997,7 @@ test.describe('r23', () => {
 
   test('a short window: the sheet\'s body scrolls above its footer, and no cue is ever under the footer (740×360, 920×360)', async ({ page }) => {
     await boot(page);
-    await add(page, { id: 'f1', title: 'T-308 Placeholder long request', node: 'Areas/Techne', meta: { next: 'Send Ryan the deploy-access message below.', due: '2026-10-20', detail: `${DETAIL}\n\n${'A further placeholder paragraph about the account and the project. '.repeat(4)}`, room: 'techne', asked: '2026-10-06' } });
+    await add(page, { id: 'f1', title: 'T-308 Placeholder long request', node: 'Areas/Techne', meta: { next: 'Send Nico the deploy-access message below.', due: '2026-10-20', detail: `${DETAIL}\n\n${'A further placeholder paragraph about the account and the project. '.repeat(4)}`, room: 'techne', asked: '2026-10-06' } });
     await refresh(page, '2026-10-14T09:00:00.000Z');
     await openRoom(page, 'Techne');
     for (const [w, h] of [[740, 360], [920, 360]] as const) {
@@ -4005,7 +4005,7 @@ test.describe('r23', () => {
       // a window under 400px tall has the strip (r19): wait for the switch before opening it, or openCompanion sees the old side panel
       await expect(page.locator('.cp.strip')).toHaveCount(1);
       await openWork(page);
-      await openTaskSheet(page, 'Send Ryan the deploy-access message');
+      await openTaskSheet(page, 'Send Nico the deploy-access message');
       const sheet = sheetOf(page);
       await expect(sheet.locator('.task-asked')).toBeVisible();
       // when it was asked and the moved-on cue lead the sheet: whole and in view at once, above the footer

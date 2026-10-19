@@ -26,7 +26,7 @@ trap cleanup_generated EXIT
 REPO_SLUG="unforcedagi/uni-app"
 # Legacy bridge: 0.1.2-0.1.5 installs poll the tailnet; keep those pointers current.
 SERVE="$HOME/.local/share/uni/apk"
-LEGACY_BASE="https://uni-1.example.ts.net:8443"
+LEGACY_BASE="https://uni-1.taildf9ce2.ts.net:8443" # public-ok: the deployed legacy host (T-190, see CLAUDE.md)
 [[ -z $(git status --porcelain) ]] || { echo 'Commit/clean changes before publishing' >&2; exit 1; }
 git fetch --quiet origin main --tags
 SHA="$(git rev-parse HEAD)"
@@ -39,6 +39,8 @@ echo "Releasing $TAG (Android $CODE) from $SHA" >&2
 pnpm install --frozen-lockfile
 python3 scripts/check-case-collisions.py
 python3 scripts/test_case_collisions.py
+python3 scripts/test_check_public.py
+python3 scripts/check-public.py
 pnpm typecheck
 pnpm test
 cargo test --workspace

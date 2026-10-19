@@ -14,7 +14,7 @@ const tree = (() => { const { nodes, rootPath } = parseNodes([{ id: "u", path: "
 const task = (id: string, title: string, meta: Record<string, unknown>, updatedAt = "2026-10-14T06:00:00.000Z"): Task =>
   parseTask({ id, path: `Tasks/${title}`, tags: ["task"], updatedAt, metadata: { state: "open", owner: "aaron", ...meta } }, tree)!;
 
-const ATLAS = "Edit and send the ATLAS follow-up to Mark and Dominic from your account; fill the opening, sign-off and next-review date.";
+const ATLAS = "Edit and send the ATLAS follow-up to Theo and Dominic from your account; fill the opening, sign-off and next-review date.";
 const WOVEN = "Review the Woven Web handoff draft, fill the unknowns, then talk with Harper yourself.";
 const STAGING = "Look at https://cohere-signup-staging.unforced.workers.dev/?look=ecology on phone, then forward #cohere's 'For Harper' block (posted 10-13)";
 const PAYS = "Tell Uni who pays (Techne or Gitcoin Foundation) and how: crypto or ACH/Stripe, plus Woven Web's legal details.";
@@ -23,7 +23,7 @@ const COHERE = "Wed 10-14: say go on prod deploy of #38 + #58; Harper signs off 
 await check("the whole action: objects and recipients are never cut; only context after the action is the sheet's", () => {
   const at = rowAction(ATLAS)!;
   // r22 (both critics): a ";" clause that leads with a work verb is the user's too, so it stays in the action
-  assert.equal(at.head, "Edit and send the ATLAS follow-up to Mark and Dominic from your account; fill the opening, sign-off and next-review date");
+  assert.equal(at.head, "Edit and send the ATLAS follow-up to Theo and Dominic from your account; fill the opening, sign-off and next-review date");
   assert.equal(at.text, ATLAS.replace(/\.$/, ""), "r30: the row and the heading say every word of the step");
   assert.deepEqual(at.forms.map((f) => f.text), [at.text]);
   const pays = rowAction(PAYS)!;
@@ -40,7 +40,7 @@ await check("the whole action: objects and recipients are never cut; only contex
   // context: a spaced dash, "because…"
   assert.equal(rowAction("Reply to Casey — he asked twice")!.head, "Reply to Casey");
   assert.equal(rowAction("Reply to Casey — he asked twice")!.text, "Reply to Casey — he asked twice");
-  assert.equal(rowAction("Send Ryan the access note because Pages needs it")!.head, "Send Ryan the access note");
+  assert.equal(rowAction("Send Nico the access note because Pages needs it")!.head, "Send Nico the access note");
 });
 
 await check("multi-step: \"A, then B\" is both steps; the fallback is \"2 steps: A, then …\" and never step 1 alone", () => {

@@ -78,7 +78,7 @@ check("steps that do not point at a list are left alone; a count of questions ke
   assert.equal(referencedItems("Say go to deploy #38 + #58", T113_DETAIL), null);
   assert.equal(referencedItems("Answer the nine operational questions in the woven-web note", "1. a\n2. b"), null);
   assert.equal(referencedItems("Tell Uni who pays and how", "Needed from you:\n1. Payer"), null);
-  assert.equal(referencedItems("Send Ryan the deploy-access message below", "Send this to Ryan: 'Hey'"), null);
+  assert.equal(referencedItems("Send Nico the deploy-access message below", "Send this to Nico: 'Hey'"), null);
 });
 check("a bulleted list under a heading line, and an item with a continuation line, stay whole", () => {
   const l = detailLists("Context here.\n\nQuestions for Aaron:\n- First thing to settle\n  with a second line\n- Second thing\n\nTail.");
@@ -96,7 +96,7 @@ check("heading: a trailing note-link parenthetical is dropped from the step and 
 });
 check("heading: a parenthetical that repeats the step is dropped; one that adds something stays", () => {
   assert.equal(stepHeading("Approve the mail cutover plan (mail cutover plan)"), "Approve the mail cutover plan");
-  assert.equal(stepHeading("Send Ryan the deploy-access message (asks for Cloudflare Pages access to bouldernewtech)."), "Send Ryan the deploy-access message (asks for Cloudflare Pages access to bouldernewtech).");
+  assert.equal(stepHeading("Send Nico the deploy-access message (asks for Cloudflare Pages access to bouldernewtech)."), "Send Nico the deploy-access message (asks for Cloudflare Pages access to bouldernewtech).");
   assert.equal(stepHeading("Look at the site (live now)"), "Look at the site (live now)");
 });
 check("the quiet title line drops a trailing '(…)' that repeats the heading", () => {

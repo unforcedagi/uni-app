@@ -23,7 +23,7 @@ CONF="${UNI_ADB_DEVICES:-$HOME/.config/uni/adb-devices}"
 REPO="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 APP_ID="org.unforced.uni"
 SERVE_DIR="${UNI_APK_DIR:-$HOME/.local/share/uni/apk}"
-SERVE_URL="${UNI_APK_URL:-https://uni-1.example.ts.net:8443/uni.apk}"
+SERVE_URL="${UNI_APK_URL:-https://uni-1.taildf9ce2.ts.net:8443/uni.apk}" # public-ok: the deployed APK host (T-190, see CLAUDE.md)
 
 die() { echo "uni-adb: $*" >&2; exit 1; }
 

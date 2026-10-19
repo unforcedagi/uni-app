@@ -8,12 +8,21 @@ import { ownRoom, steward, type RoomNode, type RoomRef } from "./talkCore.ts";
 /** A room as the app writes it after "#": its real channel name, exactly (r13: never lowercased or re-spaced), without a leading "#". */
 export const roomSlug = (name: string) => name.trim().replace(/^#/, "");
 
-/** Nodes whose words and titles are never shown in a new place, only counts (the T-111 privacy rule). */
+/** Nodes whose words and titles are never shown in a new place, only counts (the T-111 privacy rule). "sanctum" is the fixtures'
+ *  private area; the owner's own is kept as a hash of its lowercased name, so this public repo doesn't name it (T-190). */
 const PRIVATE = new Set(["relationships", "sanctum"]);
-export const isPrivateNode = (tree: Tree, path: string): boolean => ancestry(tree, path).some((n) => PRIVATE.has(n.name.toLowerCase()));
+const PRIVATE_HASHED = new Set([0x4c19dafd]);
+/** 32-bit FNV-1a: enough to recognise one known name, not to hide it from someone who guesses it. */
+export function fnv1a(s: string): number {
+  let h = 0x811c9dc5;
+  for (const c of s) { h ^= c.codePointAt(0)!; h = Math.imul(h, 0x01000193) >>> 0; }
+  return h;
+}
+export const isPrivateName = (name: string): boolean => { const n = name.toLowerCase(); return PRIVATE.has(n) || PRIVATE_HASHED.has(fnv1a(n)); };
+export const isPrivateNode = (tree: Tree, path: string): boolean => ancestry(tree, path).some((n) => isPrivateName(n.name));
 /** The private area a node sits in (the outermost one, itself included), or null: the feed names private items by this place only. */
 export function privateRoot(tree: Tree, path: string): { path: string; name: string } | null {
-  const hit = ancestry(tree, path).filter((n) => PRIVATE.has(n.name.toLowerCase())).pop();
+  const hit = ancestry(tree, path).filter((n) => isPrivateName(n.name)).pop();
   return hit ? { path: hit.path, name: hit.name } : null;
 }
 
@@ -24,7 +33,7 @@ export function privateRootIn(tasks: { byPath: ReadonlyMap<string, { path: strin
   for (let at: string | undefined = path; at && !seen.has(at); at = tasks.parent.get(at)) {
     seen.add(at);
     const n = tasks.byPath.get(at); if (!n) break;
-    if (PRIVATE.has(n.name.toLowerCase())) hit = { path: n.path, name: n.name };
+    if (isPrivateName(n.name)) hit = { path: n.path, name: n.name };
   }
   return hit;
 }

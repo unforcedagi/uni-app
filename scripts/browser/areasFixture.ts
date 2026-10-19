@@ -324,7 +324,7 @@ The coop paperwork is signed. COhere starts Oct 15 and still needs a room plan.
 - **Festival** logistics: tents ordered [[Areas/Techne/Workbench log|Workbench log]]
 
 ## People
-- Leonardo, Mara
+- Leonardo, Tess
 
 ## Recent
 - 10-08 Coop papers signed
@@ -335,7 +335,7 @@ The coop paperwork is signed. COhere starts Oct 15 and still needs a room plan.
 
 ## Suggested next
 - Draft a reply to Leonardo
-- Ask Mara for the room plan
+- Ask Tess for the room plan
 ` },
         { id: 'br-unf', path: 'Areas/Unforced Development/Brief', extension: 'md', tags: ['area-brief'], metadata: { area: 'Unforced Development', generated_at: iso(86400) }, updatedAt: iso(86400), content: `## Now
 Two proposals wait on a scope decision.

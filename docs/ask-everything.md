@@ -41,7 +41,7 @@ search API that we use today.
 
 ### What the vault offers (read from `~/Code/parachute-vault`, v0.7.9 live)
 
-- REST base: `https://uni-1.example.ts.net/vault/uni/api` (tailnet only; Tailscale
+- REST base: `https://<hub>.<tailnet>.ts.net/vault/uni/api` (tailnet only; Tailscale
   `serve`, no funnel). Without credentials, every route returns
   `401 {"error":"Unauthorized","message":"API key required"}`. CORS is `*`.
 - **Meaning search**: `GET /notes?semantic=true&near_text=<q>&limit=N[&tag=…]`

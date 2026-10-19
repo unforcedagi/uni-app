@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { parseArea, parseProject } from "../src/areas/areasCore.ts";
 import { buildTree, ROOT } from "../src/areas/treeCore.ts";
 import { ownRoom } from "../src/areas/talkCore.ts";
-import { isPrivateNode, privateRoot, roomSlug, roomView, treeRows } from "../src/areas/treeRooms.ts";
+import { fnv1a, isPrivateName, isPrivateNode, privateRoot, roomSlug, roomView, treeRows } from "../src/areas/treeRooms.ts";
 import { parseBrief } from "../src/areas/briefCore.ts";
 import { HOME_LAYOUT_KEY, migrateHomeLayout } from "../src/areas/homeLayout.ts";
 
@@ -115,5 +115,10 @@ check("an area whose channel points at its child's room does not show that room 
   assert.equal(c.own, true, "COhere owns its room even though Boulder's channel names it"); assert.equal(c.slash, "cohere");
   const noBoulderRoom = roomView(t2, "Areas/Boulder", ROOMS.filter((r) => r.id !== "r-bou"), UNI);
   assert.equal(noBoulderRoom.own, false); assert.equal(noBoulderRoom.slash, null); assert.equal(noBoulderRoom.target?.id, "r-uni");
+});
+check("T-190: private names: the two plain ones, any case; the owner's own by a pinned 32-bit FNV-1a; nothing else", () => {
+  assert.equal(fnv1a(""), 0x811c9dc5); assert.equal(fnv1a("a"), 0xe40c292c); assert.equal(fnv1a("foobar"), 0xbf9cf968);
+  assert.equal(isPrivateName("Sanctum"), true); assert.equal(isPrivateName("RELATIONSHIPS"), true);
+  for (const n of ["Techne", "Boulder", "Parachute", "Sanctums", ""]) assert.equal(isPrivateName(n), false, n);
 });
 if (failed) { console.log(`\n${failed} failed`); process.exit(1); }

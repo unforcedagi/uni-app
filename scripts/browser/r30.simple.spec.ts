@@ -51,9 +51,13 @@ async function rowsWhole(rows: Locator) {
 const ASKED = '2026-10-14T08:00:00.000Z';
 /** a message `secs` after ASKED (the fixture's clock is Oct 9 10:00Z, so `ago` is negative for later times); its ref */
 const arriveAt = (page: Page, who: string, body: string, secs: number): Promise<string> => page.evaluate(([w, b, s]) => (window as any).__arrive('ch-techne', w, b, -(424800 + (s as number))), [who, body, secs] as const);
-/** T-113's `next` and `detail`, as stored on the scratch hub (hub11, 10-15) */
-const NEXT113 = 'Send Harper the new site labels listed in detail to approve or replace, and ask her for one morning-practice line per day Oct 15-25; then sign in once on grove.example.org and open Board, People and Me';
-const DETAIL113 = "Labels to approve (en; es written): 'Already registered? Sign in' \u00b7 'Update your registration' \u00b7 'Save changes' \u00b7 'Your registration is updated.' \u00b7 'This email is already registered. Sign in to change your registration.' \u00b7 'Create your account to RSVP to events' \u00b7 'You're signed in' \u00b7 'Sign in to RSVP' \u00b7 'We couldn't load your registration.' \u00b7 'Try again'. Also her call: keep or cut the older registration lines 'You're woven in!', 'choose your own adventure from the community calendar', 'stay up to date with what's unfolding'. Practice lines: her doc has 2 of 11 days (Honoring Water, Noticing Session). Earlier asks from 10-13 (6 groups of short lines, 3 questions) still unanswered in #cohere. Screens: posted in #cohere 10-14 ~22:00 (flows.png).";
+/** the sample asks (synthetic, same shape as a live hub's asks) */
+const FIXTURE = JSON.parse(readFileSync(new URL('../fixtures/sample-asks.json', import.meta.url), 'utf8')) as { notes: { id: string; path: string; tags: string[]; metadata: Record<string, any> }[] };
+/** T-113's `next`, `detail` and title, from the sample asks: a 200-character step ending "Me" and its 10 labels */
+const T113 = FIXTURE.notes.find((n) => n.path.includes('T-113'))!;
+const NEXT113: string = T113.metadata.next;
+const DETAIL113: string = T113.metadata.detail;
+const TITLE113 = T113.path.replace(/^Tasks\//, '');
 const words = (s: string) => s.replace(/\s+/g, ' ').trim();
 
 test.describe('r30', () => {
@@ -62,7 +66,7 @@ test.describe('r30', () => {
       test.skip(page.viewportSize()?.width !== 1440, 'one project is enough for the fixed sizes');
       await page.setViewportSize(size);
       await boot(page);
-      await add(page, { id: 'c1', title: 'T-113 Look at grove.example.org on your phone, then forward Harper the asks', node: 'Areas/Techne', asked_at: ASKED, meta: { next: NEXT113, detail: DETAIL113, room: 'techne', state: 'waiting', waiting_on: 'aaron' } });
+      await add(page, { id: 'c1', title: TITLE113, node: 'Areas/Techne', asked_at: ASKED, meta: { next: NEXT113, detail: DETAIL113, room: 'techne', state: 'waiting', waiting_on: 'aaron' } });
       await refresh(page);
       await openRoom(page, 'Techne');
       await openCompanion(page);
@@ -78,8 +82,6 @@ test.describe('r30', () => {
   }
 });
 
-/** the sample asks (synthetic, same shape as a live hub's asks) */
-const FIXTURE = JSON.parse(readFileSync(new URL('../fixtures/sample-asks.json', import.meta.url), 'utf8')) as { notes: { id: string; path: string; tags: string[]; metadata: Record<string, any> }[] };
 
 test.describe('r30 words', () => {
   test('1: every sample ask shows its whole stored next in its row, word for word (work view)', async ({ page }) => {
@@ -119,7 +121,7 @@ test.describe('r30 sheet', () => {
       test.skip(page.viewportSize()?.width !== 1440, 'one project is enough for the fixed sizes');
       await page.setViewportSize(size);
       await boot(page);
-      await add(page, { id: 'c1', title: 'T-113 Look at grove.example.org on your phone, then forward Harper the asks', node: 'Areas/Techne', asked_at: ASKED, meta: { next: NEXT113, detail: DETAIL113, room: 'techne', state: 'waiting', waiting_on: 'aaron' } });
+      await add(page, { id: 'c1', title: TITLE113, node: 'Areas/Techne', asked_at: ASKED, meta: { next: NEXT113, detail: DETAIL113, room: 'techne', state: 'waiting', waiting_on: 'aaron' } });
       await refresh(page);
       await openRoom(page, 'Techne');
       await openCompanion(page);
@@ -146,7 +148,7 @@ test.describe('r30 sheet', () => {
     test.skip(!wide(page), 'side panel');
     await page.setViewportSize({ width: 1280, height: 720 });
     await boot(page);
-    await add(page, { id: 'c1', title: 'T-113 Look at grove.example.org on your phone, then forward Harper the asks', node: 'Areas/Techne', asked_at: ASKED, meta: { next: NEXT113, detail: DETAIL113, room: 'techne', state: 'waiting', waiting_on: 'aaron' } });
+    await add(page, { id: 'c1', title: TITLE113, node: 'Areas/Techne', asked_at: ASKED, meta: { next: NEXT113, detail: DETAIL113, room: 'techne', state: 'waiting', waiting_on: 'aaron' } });
     await refresh(page);
     await openRoom(page, 'Techne');
     await openCompanion(page);
@@ -264,7 +266,7 @@ test.describe('r30 summary', () => {
       await page.setViewportSize(size);
       await boot(page);
       // tall rows (T-113's whole step and its labels, a long ask, a short one): there is little room left for the summary
-      await add(page, { id: 's1', title: 'T-113 Look at grove.example.org on your phone, then forward Harper the asks', node: 'Projects/Learn Vibe Build', asked_at: ASKED, meta: { next: NEXT113, detail: DETAIL113, state: 'waiting', waiting_on: 'aaron' } });
+      await add(page, { id: 's1', title: TITLE113, node: 'Projects/Learn Vibe Build', asked_at: ASKED, meta: { next: NEXT113, detail: DETAIL113, state: 'waiting', waiting_on: 'aaron' } });
       await add(page, { id: 's2', title: 'T-114 Placeholder second', node: 'Projects/Learn Vibe Build', asked_at: ASKED, meta: { next: 'Tell Uni who pays the amber sponsorship invoice and how, plus the legal name and address for the invoice and the date it is due' } });
       await add(page, { id: 's3', title: 'T-115 Placeholder third', node: 'Projects/Learn Vibe Build', asked_at: ASKED, meta: { next: 'Say go on the placeholder number three release after you look at it on your phone' } });
       await page.evaluate((t) => (window as any).__setStands('p-lvb', t, '2026-10-14T06:00:00.000Z'), SUMMARY);

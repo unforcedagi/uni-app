@@ -29,7 +29,7 @@ The coop paperwork is done. COhere starts Oct 15 and needs a room plan.
 - **Festival** logistics: tents ordered [[Projects/Cohere/Logistics|Logistics]]
 
 ## People
-- Leonardo, Mara
+- Leonardo, Tess
 
 ## Recent
 - 10-08 Coop papers signed
@@ -40,7 +40,7 @@ The coop paperwork is done. COhere starts Oct 15 and needs a room plan.
 
 ## Suggested next
 - Draft a reply to Leonardo
-- Ask Mara for the room plan
+- Ask Tess for the room plan
 `;
 
 check("parseBrief reads the seven sections in order", () => {

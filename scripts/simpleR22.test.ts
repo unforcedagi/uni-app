@@ -10,7 +10,7 @@ let failed = 0;
 function check(name: string, fn: () => void) {
   try { fn(); console.log(`ok   ${name}`); } catch (e) { failed++; console.log(`FAIL ${name}\n     ${(e as Error).message.split("\n")[0]}`); }
 }
-const ATLAS = "Edit and send the ATLAS follow-up to Mark and Dominic from your account; fill the opening, sign-off and next-review date.";
+const ATLAS = "Edit and send the ATLAS follow-up to Theo and Dominic from your account; fill the opening, sign-off and next-review date.";
 const WOVEN = "Review the Woven Web handoff draft, fill the unknowns, then talk with Harper yourself.";
 const STAGING = "Look at https://cohere-signup-staging.unforced.workers.dev/?look=ecology on phone, then forward #cohere's 'For Harper' block (posted 10-13)";
 const PAYS = "Tell Uni who pays (Techne or Gitcoin Foundation) and how: crypto or ACH/Stripe, plus Woven Web's legal details.";
@@ -20,7 +20,7 @@ const shown = (next: string) => withHosts(rowAction(next)!.forms[0].text);
 
 check("a row is the whole job: every verb phrase, both steps, no \"then …\" and no ellipsis", () => {
   const want: [string, string[]][] = [
-    [ATLAS, ["Edit and send the ATLAS follow-up", "to Mark and Dominic from your account", "fill the opening, sign-off and next-review date"]],
+    [ATLAS, ["Edit and send the ATLAS follow-up", "to Theo and Dominic from your account", "fill the opening, sign-off and next-review date"]],
     [WOVEN, ["Review the Woven Web handoff draft", "fill the unknowns", "then talk with Harper yourself"]],
     [STAGING, ["Look at cohere-signup-staging.unforced.workers.dev on phone", "then forward #cohere's 'For Harper' block"]],
     [PAYS, ["Tell Uni who pays", "and how: crypto or ACH/Stripe, plus Woven Web's legal details"]],

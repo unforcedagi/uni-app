@@ -14,9 +14,10 @@
 //! another machine.
 
 /// Origins that are one hub, in pairs. Either side may be the configured one.
+// The shipped hub's two names; tests read them from here, never spell them out.
 pub const HUB_ALIASES: &[(&str, &str)] = &[(
-    "https://uni-1.example.ts.net",
-    "https://uni.example.ts.net",
+    "https://uni-1.taildf9ce2.ts.net", // public-ok: the shipped hub (T-190, see CLAUDE.md)
+    "https://uni.taildf9ce2.ts.net",   // public-ok: its new name
 )];
 
 /// Extra pairs for a scratch run, `from=to[,from=to]` (e.g. an unresolvable
@@ -111,8 +112,15 @@ pub fn is_connect_failure(e: &reqwest::Error) -> bool {
 mod tests {
     use super::*;
 
-    const OLD: &str = "https://uni-1.example.ts.net";
-    const NEW: &str = "https://uni.example.ts.net";
+    // The built-in pair, and a third host on the same tailnet that is not this hub.
+    const OLD: &str = HUB_ALIASES[0].0;
+    const NEW: &str = HUB_ALIASES[0].1;
+    fn other() -> String {
+        OLD.replacen("uni-1", "uni-2", 1)
+    }
+    fn on(origin: &str, suffix: &str) -> String {
+        format!("{origin}{suffix}")
+    }
 
     fn table() -> Vec<(String, String)> {
         HUB_ALIASES
@@ -125,11 +133,11 @@ mod tests {
     fn transcription_follows_the_hub_host() {
         assert_eq!(
             transcribe_url(OLD).as_deref(),
-            Some("https://uni-1.example.ts.net:8445/transcribe")
+            Some(on(OLD, ":8445/transcribe").as_str())
         );
         assert_eq!(
             transcribe_url(&format!("{NEW}/")).as_deref(),
-            Some("https://uni.example.ts.net:8445/transcribe")
+            Some(on(NEW, ":8445/transcribe").as_str())
         );
         assert_eq!(
             transcribe_url("https://hub.example.org/some/path?x=1").as_deref(),
@@ -141,7 +149,7 @@ mod tests {
     #[test]
     fn an_http_remote_hub_is_refused_for_transcription() {
         for bad in [
-            "http://uni-1.example.ts.net",
+            OLD.replacen("https", "http", 1).as_str(),
             "http://hub.example.org:8443",
             "http://10.0.0.5",
             "ftp://hub.example.org",
@@ -157,10 +165,7 @@ mod tests {
             transcribe_url("http://localhost").as_deref(),
             Some("http://localhost:8445/transcribe")
         );
-        assert_eq!(
-            checked_origin("https://uni.example.ts.net/x").unwrap(),
-            NEW
-        );
+        assert_eq!(checked_origin(&on(NEW, "/x")).unwrap(), NEW);
     }
 
     #[test]
@@ -169,17 +174,17 @@ mod tests {
         assert_eq!(alias_in(OLD, &t).as_deref(), Some(NEW));
         assert_eq!(alias_in(&format!("{NEW}/"), &t).as_deref(), Some(OLD));
         assert_eq!(
-            alias_in("https://UNI-1.example.ts.net", &t).as_deref(),
+            alias_in(&OLD.replacen("uni-1", "UNI-1", 1), &t).as_deref(),
             Some(NEW)
         );
-        assert_eq!(alias_in("https://uni-2.example.ts.net", &t), None);
+        assert_eq!(alias_in(&other(), &t), None);
         assert_eq!(
-            alias_in("http://uni-1.example.ts.net", &t),
+            alias_in(&OLD.replacen("https", "http", 1), &t),
             None,
             "another scheme is another origin"
         );
         assert_eq!(
-            alias_in("https://uni-1.example.ts.net:8443", &t),
+            alias_in(&on(OLD, ":8443"), &t),
             None,
             "another port is another origin"
         );
@@ -192,10 +197,7 @@ mod tests {
             vec![OLD.to_string(), NEW.to_string()]
         );
         assert_eq!(hub_origins(NEW), vec![NEW.to_string(), OLD.to_string()]);
-        assert_eq!(
-            hub_origins("https://uni-2.example.ts.net"),
-            vec!["https://uni-2.example.ts.net".to_string()]
-        );
+        assert_eq!(hub_origins(&other()), vec![other()]);
     }
 
     #[test]

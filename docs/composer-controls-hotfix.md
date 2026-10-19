@@ -75,9 +75,9 @@ Commands actually run:
 
 ```
 adb devices -l
-adb -s adb-29231FDH200F2L-c5p2OU._adb-tls-connect._tcp shell dumpsys window
-adb -s adb-29231FDH200F2L-c5p2OU._adb-tls-connect._tcp shell dumpsys trust
-ssh -o BatchMode=yes -o ConnectTimeout=5 unforced@192.0.2.10 true
+adb -s adb-<serial>._adb-tls-connect._tcp shell dumpsys window
+adb -s adb-<serial>._adb-tls-connect._tcp shell dumpsys trust
+ssh -o BatchMode=yes -o ConnectTimeout=5 <user>@<mac-tailnet-ip> true
 ```
 
 Pixel 7 is connected, but `mCurrentFocus=NotificationShade`,

@@ -15,15 +15,15 @@ const ts = (iso: string) => Date.parse(iso) / 1000;
 
 
 check("r25: \"message below\" loses \"below\" when the card carries the message (row and sheet heading say the same words)", () => {
-  assert.equal(belowInCard("Send Ryan the deploy-access message below.", { detail: "x" }), "Send Ryan the deploy-access message.");
-  assert.equal(belowInCard("Send Ryan the deploy-access message below.", {}), "Send Ryan the deploy-access message below.");
+  assert.equal(belowInCard("Send Nico the deploy-access message below.", { detail: "x" }), "Send Nico the deploy-access message.");
+  assert.equal(belowInCard("Send Nico the deploy-access message below.", {}), "Send Nico the deploy-access message below.");
 });
 
 check("a step that names a block shows inline text only when it came from that block", () => {
   const next = "Send Harper #cohere's 'For Harper' block";
   assert.deepEqual(unresolvedBlock(next, "Some other note's text"), { name: "For Harper", room: "cohere" });
   assert.equal(unresolvedBlock(next, "## For Harper\nHi Harper"), null);
-  assert.equal(unresolvedBlock("Send Ryan the message", "x"), null);
+  assert.equal(unresolvedBlock("Send Nico the message", "x"), null);
 });
 
 if (failed) { console.log(`${failed} failed`); process.exit(1); }
