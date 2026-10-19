@@ -118,13 +118,14 @@ test('a stored receipt flips the card; Forget asks Uni to delete it', async ({ p
   expect((await calls(page)).filter((x) => x.cmd === 'forget_secret').map((x) => x.args)).toEqual([{ channel: 'test', request: 'd'.repeat(64) }]);
 });
 
-test('someone else named "Uni" gets no field until their own key is trusted, and their receipts do not count', async ({ page }) => {
+test('once Uni is trusted, someone else named "Uni" gets no field and no Trust button, and their receipts do not count', async ({ page }) => {
   const impostor = '9'.repeat(64);
   const fake = msg('d'.repeat(64), request, now() - 60, impostor, 'Uni');
   const fakeStored = msg('b'.repeat(64), fx.stored.content, now() - 30, UNI, 'Uni'); // a receipt by the real Uni for a request it never made
   await boot(page, { messages: [fake, fakeStored], signed: { ['d'.repeat(64)]: impostor }, trusted: true });
   const card = page.getByRole('region', { name: 'Secret request: Tailscale API token' });
-  await expect(card.getByRole('button', { name: /Trust Uni \(9999 9999 9999 9999\)/ })).toBeVisible();
+  await expect(card.getByText(/This isn't the key you trust for secrets/)).toBeVisible();
+  await expect(card.getByRole('button')).toHaveCount(0);
   await expect(card.locator('input')).toHaveCount(0);
   await expect(card.getByText(/Stored as/)).toHaveCount(0);
 });

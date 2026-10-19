@@ -407,7 +407,8 @@ mod tests {
 
     #[test]
     fn parses_the_request_the_plugin_writes() {
-        // made by hermes-plugin/uni-secrets/desk.py; the TS card parses the same file (scripts/secretRequest.test.ts)
+        // written by the plugin's desk.py, then re-signed with a throwaway key; the TS card parses the same file
+        // (scripts/secretRequest.test.ts)
         let fx: serde_json::Value =
             serde_json::from_str(include_str!("../../../scripts/fixtures/t176-messages.json")).unwrap();
         let r = parse_request(fx["request"]["content"].as_str().unwrap()).unwrap();

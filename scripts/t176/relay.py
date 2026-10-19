@@ -1,6 +1,6 @@
 """A throwaway Buzz-shaped relay for the T-176 end-to-end test. Local only (127.0.0.1), in-process.
 
-The rules the secret handoff depends on, as wss://buzz.unforced.org applies them
+The rules the secret handoff depends on, as the production Buzz relay applies them
 (buzz-relay handlers/event.rs, ingest.rs; buzz-core P_GATED_KINDS):
 - NIP-42: a proactive AUTH challenge; only member pubkeys may authenticate.
 - An EVENT must be signed by the authenticated key, except kind 1059 (a gift wrap is signed by a

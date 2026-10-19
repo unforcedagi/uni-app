@@ -3,7 +3,8 @@ import { readFileSync } from "node:fs";
 import { parseSecretReceipt, parseSecretRequest, receiptFor, receiptsByRequest, withoutSecretBlock } from "../src/secretRequest.ts";
 let failed = 0;
 const check = (n: string, f: () => void) => { try { f(); console.log("ok  ", n); } catch (e) { failed++; console.log("FAIL", n, e); } };
-// Made by the uni-secrets plugin itself (hermes-plugin/uni-secrets/desk.py), so this checks the two sides agree.
+// Written by the uni-secrets plugin's desk.py (then re-signed with a throwaway key, a task id taken out of the purpose),
+// so this checks the two sides agree on the format as of that capture; regenerate it when the plugin's format changes.
 const fx = JSON.parse(readFileSync(new URL("./fixtures/t176-messages.json", import.meta.url), "utf8"));
 const req = fx.request.content as string;
 

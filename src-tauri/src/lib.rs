@@ -966,7 +966,8 @@ async fn secret_request(app: tauri::AppHandle, channel: String, request: String)
 }
 
 /// Trust the key that signed message `request` to ask for secrets (the card's "Trust" button, after showing its
-/// fingerprint). The key comes from the verified signed event, not from the webview.
+/// fingerprint). The key comes from the verified signed event, not from the webview. Only the first key is trusted this
+/// way: once one is pinned, another member can't become a requester by one click (a second key goes in the file by hand).
 #[tauri::command]
 async fn secret_pin(app: tauri::AppHandle, channel: String, request: String) -> Result<(), String> {
     let path = db_path(&app)?;
@@ -977,8 +978,12 @@ async fn secret_pin(app: tauri::AppHandle, channel: String, request: String) -> 
             .map_err(|e| e.to_string())
     })
     .await?;
-    if secret_requesters_list(&app).contains(&key) {
+    let pinned = secret_requesters_list(&app);
+    if pinned.contains(&key) {
         return Ok(());
+    }
+    if !pinned.is_empty() {
+        return Err("another key is already trusted for secrets; add this one to the secret-requesters file by hand".into());
     }
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;

@@ -7,7 +7,9 @@ import { fingerprint, type SecretReceipt, type SecretRequest } from "./secretReq
 // state as soon as Send is pressed and never rendered, logged or put in a chat message.
 // What the card shows and who it says signed it come from `secret_request`, which re-verifies the request's signed
 // event in Rust (once per card); whether that signer is trusted is checked against the pinned keys. A request that
-// doesn't verify gets no field and no Trust button. `send_secret` re-checks both in Rust.
+// doesn't verify gets no field and no Trust button. Trust is offered only while no key is pinned: once one is, a request
+// signed by any other key (a member who calls itself "Uni") gets a warning, not a button. `send_secret` re-checks both
+// in Rust, and `secret_pin` refuses a second key.
 
 type Props = {
   channel: string; requestRef: string; authorName: string; receipts: (author: string, rid: string) => SecretReceipt | undefined;
@@ -81,10 +83,13 @@ export function SecretRequestCard({ channel, requestRef, authorName, receipts, p
     </dl>
     {status}
     {!receipt && phase !== "sent" && (!trusted
-      ? <div className="secret-trust">
-          <p>The app hasn't been told to trust this key for secrets. Check the fingerprint with {authorName} first.</p>
-          <button type="button" className="pairing-secondary" onClick={onTrust}>Trust {authorName} ({fingerprint(author)})</button>
-        </div>
+      ? pins.length === 0
+        ? <div className="secret-trust">
+            <p>The app hasn't been told to trust this key for secrets. Check the fingerprint with {authorName} first.</p>
+            <button type="button" className="pairing-secondary" onClick={onTrust}>Trust {authorName} ({fingerprint(author)})</button>
+          </div>
+        : <p className="secret-status warn" role="status">This isn't the key you trust for secrets, whatever its name says. Don't
+            answer it here. Only the key you trusted before may ask; another one goes in the app's secret-requesters file by hand.</p>
       : expired
         ? <p className="secret-status warn">This request has expired. Ask {authorName} for a new one.</p>
         : <form className="secret-form" onSubmit={(e) => { e.preventDefault(); if (value) void send(); }}>
