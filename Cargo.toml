@@ -18,7 +18,7 @@ zeroize = "1.8"
 url = "2"
 
 # Must match the `nostr` version buzz pins (buzz/Cargo.toml) so types interop.
-nostr = { version = "0.44", features = ["nip44", "nip98"] }
+nostr = { version = "0.44", features = ["nip44", "nip59", "nip98"] }
 
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
 serde = { version = "1", features = ["derive"] }

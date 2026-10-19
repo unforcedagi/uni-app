@@ -162,6 +162,25 @@ h1 { font-family: var(--serif); font-weight: 500; font-size: 34px; line-height: 
 .msg-decision-link { display: inline-block; margin-top: 6px; padding: 0; border: 0; background: none; color: var(--muted); font: inherit; font-size: 13px; cursor: pointer; text-decoration: underline; text-decoration-color: color-mix(in srgb, currentColor 35%, transparent); text-underline-offset: 3px; }
 .msg-decision-link:hover, .msg-decision-link:focus-visible { color: var(--accent); }
 
+/* T-176: Uni's secret request — a card with a masked field, never a chat message */
+.secret-card { margin: 8px 0 4px; padding: 14px 16px; max-width: 460px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--surface); box-shadow: var(--shadow); }
+.secret-card header { font-family: var(--serif); font-size: 17px; }
+.secret-purpose { margin: 6px 0 8px; color: var(--text-soft); font-size: 14px; line-height: 1.5; }
+.secret-facts { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 0 0 10px; font-size: 13px; color: var(--muted); }
+.secret-facts dt { font-weight: 600; } .secret-facts dd { margin: 0; overflow-wrap: anywhere; }
+.secret-facts code, .secret-status code { font-family: var(--mono); font-size: 12px; }
+.secret-form { display: flex; gap: 8px; }
+.secret-form input { flex: 1; min-width: 0; min-height: 42px; padding: 0 12px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--bg); color: var(--text); font-family: var(--mono); font-size: 14px; }
+.secret-form input:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+.secret-form button, .secret-forget { min-height: 42px; padding: 0 16px; border: 0; border-radius: 999px; background: var(--accent); color: var(--accent-ink); font: inherit; font-size: 14px; }
+.secret-form button:disabled { opacity: .45; }
+.secret-forget { margin-top: 8px; background: transparent; border: 1px solid var(--line-strong); color: var(--text-soft); }
+.secret-trust p { margin: 0 0 8px; font-size: 13px; color: var(--text-soft); }
+.secret-trust .pairing-secondary { min-height: 40px; }
+.secret-status { margin: 6px 0; font-size: 14px; color: var(--text-soft); }
+.secret-status.ok { color: var(--text); } .secret-status.warn { color: var(--warn); }
+.secret-note { margin: 10px 0 0; font-size: 12px; color: var(--muted); }
+
 .older { text-align: center; margin: 8px 0 4px; font-size: 12px; color: var(--muted); }
 .older button { border: 1px solid var(--line); background: var(--surface); color: var(--text-soft); border-radius: 999px; padding: 7px 16px; }
 .older button:hover { border-color: var(--line-strong); }

@@ -255,6 +255,14 @@ CREATE TABLE IF NOT EXISTS message_media (
     PRIMARY KEY (ref, idx)
 );
 
+-- T-176: the full signed event of each kind-9 message that carries a secret
+-- request. The secret path re-verifies it (id and signature) before answering,
+-- so it never trusts the `items` row alone.
+CREATE TABLE IF NOT EXISTS signed_events (
+    ref  TEXT PRIMARY KEY,
+    json TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS profiles (
     pubkey       TEXT PRIMARY KEY,
     name         TEXT,
@@ -411,6 +419,23 @@ impl Store {
             ],
         )?;
         Ok(n == 1)
+    }
+
+    /// Keep the signed JSON of event `id` (first copy wins, like `items`).
+    pub fn put_signed_event(&self, id: &str, json: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT OR IGNORE INTO signed_events (ref, json) VALUES (?1, ?2)",
+            params![id, json],
+        )?;
+        Ok(())
+    }
+
+    /// The signed JSON kept for event `id`, if any. Unverified: callers check it.
+    pub fn signed_event(&self, id: &str) -> Result<Option<String>> {
+        Ok(self
+            .conn
+            .query_row("SELECT json FROM signed_events WHERE ref = ?1", params![id], |r| r.get(0))
+            .optional()?)
     }
 
     /// Record an edit / deletion event aimed at `target`. Idempotent; returns

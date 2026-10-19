@@ -19,6 +19,7 @@
 //! - [`media`]: NIP-92 `imeta` attachments and Blossom-authenticated media reads.
 //! - [`parachute`]: NIP-98-signed MCP client for the Parachute hub (journal notes).
 //! - [`journal`]: on-device outbox that sends journal entries to the vault.
+//! - [`secret`]: T-176 secret handoff — answer Uni's secret request with a NIP-59 gift wrap.
 
 pub mod archive;
 pub mod backoff;
@@ -33,6 +34,7 @@ pub mod pairing_source;
 pub mod hub;
 pub mod parachute;
 pub mod readstate;
+pub mod secret;
 pub mod store;
 pub mod sync;
 pub mod transcribe;

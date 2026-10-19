@@ -2090,3 +2090,103 @@ async fn serve_for_the_walk() {
     println!("serving ws://127.0.0.1:{port}");
     serve(listener, relay).await;
 }
+
+/// T-176 (Codex review P1): a relay that lies about who wrote a secret request. It serves Uni's real
+/// request, the same request with its one-time key swapped for the relay's own, a request it signed
+/// itself but labelled as Uni's, a forged "stored" receipt and a forged edit. Through the real sync and
+/// live paths only the genuine events are stored, and only the genuine request can be answered (with
+/// its own one-time key).
+#[tokio::test]
+async fn a_lying_relay_cannot_forge_a_secret_request_or_receipt() {
+    use uni_core::secret::{check_answerable, parse_request, seal_delivery, stored_request};
+
+    let f = fixture().await;
+    let uni = Keys::generate();
+    let relay_op = Keys::generate();
+    let (one_time, theirs) = (Keys::generate(), Keys::generate());
+    let ts = now();
+    let request = |rpk: &Keys, rid: &str| {
+        format!(
+            "🔐 Uni is asking for a secret\n\n```uni-secret-request\n{}\n```",
+            json!({"v":1,"rid":rid,"name":"tailscale-api","label":"Tailscale API token","purpose":"list devices",
+                   "store":"~/.config/uni/tailscale-api","keep_days":30,"expires":ts + 900,
+                   "rpk":rpk.public_key().to_hex()})
+        )
+    };
+    let forge_as_uni = |mut v: Value| {
+        v["pubkey"] = uni.public_key().to_hex().into();
+        v
+    };
+    let genuine = signed(&uni, 9, vec![h(f.ch_a)], &request(&one_time, &"1".repeat(32)), ts);
+    let mut swapped = genuine.clone();
+    swapped["content"] = request(&theirs, &"1".repeat(32)).into();
+    let relabelled = forge_as_uni(signed(&relay_op, 9, vec![h(f.ch_a)], &request(&theirs, &"2".repeat(32)), ts + 1));
+    let receipt = forge_as_uni(signed(
+        &relay_op,
+        9,
+        vec![h(f.ch_a)],
+        "🔒 Stored\n\n```uni-secret-stored\n{\"v\":1,\"rid\":\"11111111111111111111111111111111\",\"name\":\"tailscale-api\",\"until\":1}\n```",
+        ts + 2,
+    ));
+    let edit = forge_as_uni(signed(
+        &relay_op,
+        40003,
+        vec![h(f.ch_a), vec!["e".into(), genuine["id"].as_str().unwrap().into()]],
+        &request(&theirs, &"1".repeat(32)),
+        ts + 3,
+    ));
+    for ev in [&swapped, &relabelled, &receipt, &edit] {
+        f.relay.publish(ev.clone());
+    }
+    let store = Store::open_in_memory().unwrap();
+    sync_once(&f.url, &f.me, None, &store).await.unwrap();
+    let ch = f.ch_a.to_string();
+    let swapped_id = swapped["id"].as_str().unwrap();
+    assert!(store.message(&ch, swapped_id).unwrap().is_none(), "the key-swapped request was stored");
+    assert!(stored_request(&store, &ch, swapped_id).is_err());
+
+    // The swapped copy has the genuine one's id, so the relay served it instead; now it serves the real one.
+    f.relay.events.lock().unwrap().retain(|e| e != &swapped);
+    f.relay.publish(genuine.clone());
+    sync_once(&f.url, &f.me, None, &store).await.unwrap();
+    let bodies: Vec<String> = store.room_messages(&ch, 50).unwrap().into_iter().map(|m| m.item.body).collect();
+    assert_eq!(bodies.iter().filter(|b| b.contains("uni-secret")).count(), 1, "{bodies:#?}");
+    assert!(!bodies.iter().any(|b| b.contains(&theirs.public_key().to_hex())), "a forged request or edit was stored");
+    assert!(!bodies.iter().any(|b| b.contains("uni-secret-stored")), "a forged receipt was stored");
+
+    // The genuine request answers to its own one-time key; the forged ones can't be answered at all.
+    let gid = genuine["id"].as_str().unwrap();
+    let asked = stored_request(&store, &ch, gid).unwrap();
+    check_answerable(&asked, &[uni.public_key()], ts).unwrap();
+    assert_eq!(asked.one_time_key, one_time.public_key());
+    let wrap = seal_delivery(&f.me, &asked, "t176-dummy-mock", ts).unwrap();
+    assert!(nostr::nips::nip44::decrypt(theirs.secret_key(), &wrap.pubkey, &wrap.content).is_err());
+    assert!(nostr::nips::nip44::decrypt(one_time.secret_key(), &wrap.pubkey, &wrap.content).is_ok());
+    assert!(stored_request(&store, &ch, relabelled["id"].as_str().unwrap()).is_err());
+
+    // Live: a forged request pushed after EOSE is dropped too.
+    let store = Store::open_in_memory().unwrap();
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let (stop_tx, stop_rx) = watch::channel(false);
+    let (url, me, store_ref) = (f.url.clone(), f.me.clone(), &store);
+    let runner = async move { run_live(live_cfg(&url), &me, None, store_ref, tx, stop_rx).await };
+    let driver = async {
+        let mut seen = Vec::new();
+        for _ in 0..2 {
+            assert!(wait_for(&mut rx, &mut seen, Duration::from_secs(5), |e| matches!(e, LiveEvent::Eose { .. })).await);
+        }
+        let late = forge_as_uni(signed(&relay_op, 9, vec![h(f.ch_a)], &request(&theirs, &"3".repeat(32)), ts + 10));
+        f.relay.publish(late.clone());
+        f.relay.publish(signed(&f.other, 9, vec![h(f.ch_a)], "after the forgery", ts + 11));
+        assert!(
+            wait_for(&mut rx, &mut seen, Duration::from_secs(5), |e| matches!(
+                e, LiveEvent::Message { item, .. } if item.body == "after the forgery"))
+            .await
+        );
+        assert!(store.message(&ch, late["id"].as_str().unwrap()).unwrap().is_none());
+        assert!(!seen.iter().any(|e| matches!(e, LiveEvent::Message { item, .. } if parse_request(&item.body).is_some() && item.r#ref != gid)));
+        stop_tx.send(true).unwrap();
+    };
+    let (res, ()) = tokio::join!(runner, driver);
+    res.unwrap();
+}

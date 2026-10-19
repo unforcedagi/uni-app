@@ -924,6 +924,118 @@ async fn post_message(
     .map_err(|e| serde_json::from_str(&e).unwrap_or(serde_json::Value::String(e)))
 }
 
+/// T-176: keys the person trusts to ask for secrets: `UNI_SECRET_REQUESTERS` (comma-separated hex) plus the
+/// `secret-requesters` file in app data (one hex pubkey per line, written by [`secret_pin`]).
+fn secret_requesters_list(app: &tauri::AppHandle) -> Vec<nostr::PublicKey> {
+    let from_file = app
+        .path()
+        .app_data_dir()
+        .ok()
+        .and_then(|d| std::fs::read_to_string(d.join("secret-requesters")).ok())
+        .unwrap_or_default();
+    let from_env = std::env::var("UNI_SECRET_REQUESTERS").unwrap_or_default();
+    from_file
+        .lines()
+        .chain(from_env.split(','))
+        .filter_map(|s| nostr::PublicKey::from_hex(s.trim()).ok())
+        .collect()
+}
+
+#[tauri::command]
+fn secret_requesters(app: tauri::AppHandle) -> Vec<String> {
+    secret_requesters_list(&app).iter().map(|k| k.to_hex()).collect()
+}
+
+/// T-176: the request in message `request`, verified from its signed event (never the cached row), with the key that
+/// signed it. The card renders from this, so what it shows is what `send_secret` will answer.
+#[derive(Serialize)]
+struct SecretRequestView {
+    author: String,
+    request: uni_core::secret::SecretRequest,
+}
+
+#[tauri::command]
+async fn secret_request(app: tauri::AppHandle, channel: String, request: String) -> Result<SecretRequestView, String> {
+    let path = db_path(&app)?;
+    blocking(move || {
+        let store = Store::open(path).map_err(|e| e.to_string())?;
+        let asked = uni_core::secret::stored_request(&store, &channel, &request).map_err(|e| e.to_string())?;
+        Ok(SecretRequestView { author: asked.requester.to_hex(), request: asked.request })
+    })
+    .await
+}
+
+/// Trust the key that signed message `request` to ask for secrets (the card's "Trust" button, after showing its
+/// fingerprint). The key comes from the verified signed event, not from the webview.
+#[tauri::command]
+async fn secret_pin(app: tauri::AppHandle, channel: String, request: String) -> Result<(), String> {
+    let path = db_path(&app)?;
+    let key = blocking(move || {
+        let store = Store::open(path).map_err(|e| e.to_string())?;
+        uni_core::secret::stored_request(&store, &channel, &request)
+            .map(|a| a.requester)
+            .map_err(|e| e.to_string())
+    })
+    .await?;
+    if secret_requesters_list(&app).contains(&key) {
+        return Ok(());
+    }
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    use std::io::Write;
+    let mut f = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dir.join("secret-requesters"))
+        .map_err(|e| e.to_string())?;
+    writeln!(f, "{}", key.to_hex()).map_err(|e| e.to_string())
+}
+
+/// T-176: answer the secret request in message `request` with `value`, sealed (NIP-59) to the request's one-time
+/// key. The request, its signer and its one-time key come from the signed event kept at ingest and re-verified here,
+/// never from the cached row or the webview. The value is never logged; this copy is zeroized when the command
+/// returns (the IPC buffer and the webview's string are not: T-176 design note §7).
+/// Returns the wrap's event id.
+#[tauri::command]
+async fn send_secret(
+    app: tauri::AppHandle,
+    channel: String,
+    request: String,
+    value: String,
+) -> Result<String, String> {
+    let value = zeroize::Zeroizing::new(value);
+    let pinned = secret_requesters_list(&app);
+    relay_send_io(&app, move |url, keys, store| {
+        let asked = uni_core::secret::stored_request(store, &channel, &request).map_err(|e| e.to_string())?;
+        let now = nostr::Timestamp::now().as_secs();
+        uni_core::secret::check_answerable(&asked, &pinned, now).map_err(|e| e.to_string())?;
+        let wrap = uni_core::secret::seal_delivery(keys, &asked, &value, now).map_err(|e| e.to_string())?;
+        tauri::async_runtime::block_on(uni_core::secret::publish_wrap(url, keys, None, wrap))
+            .map(|id| id.to_hex())
+            .map_err(|e| e.to_string())
+    })
+    .await
+}
+
+/// T-176: ask the requester of message `request` to forget what it stored under that request's name.
+#[tauri::command]
+async fn forget_secret(app: tauri::AppHandle, channel: String, request: String) -> Result<String, String> {
+    let pinned = secret_requesters_list(&app);
+    relay_send_io(&app, move |url, keys, store| {
+        let asked = uni_core::secret::stored_request(store, &channel, &request).map_err(|e| e.to_string())?;
+        if !pinned.contains(&asked.requester) {
+            return Err("this requester is not trusted for secrets".into());
+        }
+        let now = nostr::Timestamp::now().as_secs();
+        let wrap = uni_core::secret::seal_forget(keys, &asked, now)
+            .map_err(|e| e.to_string())?;
+        tauri::async_runtime::block_on(uni_core::secret::publish_wrap(url, keys, None, wrap))
+            .map(|id| id.to_hex())
+            .map_err(|e| e.to_string())
+    })
+    .await
+}
+
 /// Load one page of older history for `channel`. Returns new message count;
 /// 0 means the start of the room has been reached.
 #[tauri::command]
@@ -2118,6 +2230,11 @@ pub fn run() {
             pairing_cancel,
             refresh,
             post_message,
+            secret_requesters,
+            secret_request,
+            secret_pin,
+            send_secret,
+            forget_secret,
             prepare_voice_message,
             mark_read,
             open_link,

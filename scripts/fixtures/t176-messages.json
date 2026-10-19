@@ -1,0 +1,45 @@
+{
+ "author": "4e9ab02bb475d60e7a5327cc5d1783422c73bf3ba5b52e49929f584da238222c",
+ "request": {
+  "pubkey": "4e9ab02bb475d60e7a5327cc5d1783422c73bf3ba5b52e49929f584da238222c",
+  "created_at": 1792362112,
+  "kind": 9,
+  "tags": [
+   [
+    "h",
+    "c"
+   ]
+  ],
+  "content": "🔐 **Uni is asking for a secret:** Tailscale API token\nWhy: List the devices on the tailnet.\nKept as `tailscale-api` in `~/.config/uni/tailscale-api` on uni (mode 600) for 30 days.\nOpen this in the Uni app and use the masked field. Please don't paste it in chat.\n\n```uni-secret-request\n{\"v\":1,\"rid\":\"7d63d59a0f3a9a22d4d95871be0d6993\",\"name\":\"tailscale-api\",\"label\":\"Tailscale API token\",\"purpose\":\"List the devices on the tailnet.\",\"store\":\"~/.config/uni/tailscale-api\",\"keep_days\":30,\"expires\":1792363012,\"rpk\":\"393986691fe4b1d321eaa1f50d8d533765b2741f26b1bcea874fea6d5a8664e1\"}\n```",
+  "id": "c211820b625121254c8ae2489793d49ee34b59b027ebfc2e638dc092e00dbd5e",
+  "sig": "acae3ded04e02f02413cd5d6289efa6a5869eff09594d8f6f165960c82e8ade2ee5b8ea98c0ad8c8c67f490c8fddcf238189ba8b7355f1c3d343c974596f0aed"
+ },
+ "stored": {
+  "pubkey": "4e9ab02bb475d60e7a5327cc5d1783422c73bf3ba5b52e49929f584da238222c",
+  "created_at": 1792362112,
+  "kind": 9,
+  "tags": [
+   [
+    "h",
+    "c"
+   ]
+  ],
+  "content": "🔒 Stored **Tailscale API token** as `tailscale-api` (handle `uni-secret:tailscale-api`), kept until 2026-11-17. I only see the handle.\n\n```uni-secret-stored\n{\"v\":1,\"rid\":\"7d63d59a0f3a9a22d4d95871be0d6993\",\"name\":\"tailscale-api\",\"until\":1794916800}\n```",
+  "id": "bd61fcdd1ae92520b2fad397ca76854abd0338503c86cec08fb160a84708c140",
+  "sig": "c4b123319f4c5e3892546d902ca8df5e699f0c7f1bea826966806c944893b548103dcb756133ffa76a46923ca5702729dc524bedefc9e9d6469a24f01ce9a871"
+ },
+ "forgotten": {
+  "pubkey": "4e9ab02bb475d60e7a5327cc5d1783422c73bf3ba5b52e49929f584da238222c",
+  "created_at": 1792362112,
+  "kind": 9,
+  "tags": [
+   [
+    "h",
+    "c"
+   ]
+  ],
+  "content": "🗑️ Forgot `tailscale-api`; the file is deleted.\n\n```uni-secret-forgotten\n{\"v\":1,\"name\":\"tailscale-api\"}\n```",
+  "id": "5b6e2a5b7eba784fca7dd5b2d1b536b795f5e16ba10501d7f53d99d17be7128d",
+  "sig": "fd39ace52f9d37b25d14648351109a07f61d136576d487793ba04afc1aa7a2a33dc70d65b190978a9f61c5e56d3554b6090398e2e102b9ec9ffb9612366585bf"
+ }
+}

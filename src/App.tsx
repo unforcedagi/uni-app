@@ -62,6 +62,8 @@ import { attachmentKind, formatSize } from "./media";
 import { Attachments, attachmentBody, useRelayOrigin, type MediaRef } from "./Attachments";
 import { activeQuery, filterMembers, insertMention, memberLabels, pruneBindings, resolveRecipients, type Bindings, type Member } from "./mentions";
 import { SmallLine } from "./areas/Companion";
+import { SecretRequestCard } from "./SecretRequestCard";
+import { parseSecretReceipt, parseSecretRequest, receiptFor, receiptsByRequest, secretCardsOn, withoutSecretBlock } from "./secretRequest";
 
 type Room = { id: string; name: string; last_message: string | null; last_ts: number | null; mentions: boolean; unread: number };
 type Message = { ref: string; channel: string; author: string; author_name: string; ts: number; body: string; mentions_me: boolean; root: string | null; parent: string | null; mentions: Member[]; reply_count: number; last_reply_ts: number | null; edited: boolean; reactions: Reaction[]; media?: MediaRef[] };
@@ -296,6 +298,12 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const [channel, setChannel] = useState<string | null>(null);
   const [root, setRoot] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
+  // T-176: Uni's secret-request cards (on unless "uni:secret-cards" is "off"), the keys trusted to ask, and what became of each request
+  const [secretCards] = useState(secretCardsOn);
+  const [secretRequesters, setSecretRequesters] = useState<string[]>([]);
+  useEffect(() => { if (secretCards) invoke<string[]>("secret_requesters").then((k) => setSecretRequesters(k ?? [])).catch(() => {}); }, [secretCards]);
+  const trustRequester = (channel: string, request: string) => invoke("secret_pin", { channel, request }).then(() => invoke<string[]>("secret_requesters")).then((k) => setSecretRequesters(k ?? [])).catch(() => {});
+  const secretReceipts = useMemo(() => secretCards ? receiptsByRequest(messages) : new Map(), [secretCards, messages]);
   const [members, setMembers] = useState<Member[]>([]);
   const [identity, setIdentity] = useState<string | null>(null);
   useLayoutEffect(() => { clearProjectBodies(); }, [identity]);
@@ -1404,6 +1412,15 @@ function Conversations({ onForget }: { onForget: () => void }) {
     return id ? <button type="button" className="msg-decision-link" onClick={() => openDecision(id)}>Answer in Needs you</button> : null;
   };
 
+  /** T-176: a secret request becomes its card; a receipt shows only its human line. Null: the ordinary body. */
+  const secretView = (m: Message) => {
+    if (!secretCards) return null;
+    if (parseSecretRequest(m.body)) return <><Body body={withoutSecretBlock(m.body).split("\n")[0]} mentions={m.mentions} me={identity} edited={m.edited} />
+      <SecretRequestCard channel={m.channel} requestRef={m.ref} authorName={m.author_name} receipts={(author, rid) => receiptFor(secretReceipts, author, rid)}
+        pins={secretRequesters} onTrust={() => void trustRequester(m.channel, m.ref)} /></>;
+    return parseSecretReceipt(m.body) ? <Body body={withoutSecretBlock(m.body)} mentions={m.mentions} me={identity} edited={m.edited} /> : null;
+  };
+
   const renderMessage = (m: Message, inThread: boolean, prev?: Message, newest = false) => {
     // r18: a progress ping from hours or days ago is folded away as a past update, never the room's live status
     if (isWorkerStatus(m.body) && !(inThread && m.ref === root) && editing !== m.ref && staleStatus(m, Date.now() / 1000, newest)) return <details key={m.ref} data-ref={m.ref} className="message status-line status-past">
@@ -1415,7 +1432,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     const grouped = !!prev && prev.author === m.author && m.ts - prev.ts < 300 && !(inThread && prev.ref === root);
     return <article key={m.ref} data-ref={m.ref} className={`message ${m.ref === focusRef ? "search-focus" : ""} ${grouped ? "grouped" : ""} ${m.author === identity ? "mine" : ""} ${m.mentions_me ? "highlight" : ""} ${inThread && m.ref === root ? "thread-root" : ""}`}>
       {grouped ? <time className="gutter-time">{clock(m.ts)}</time> : <span className="message-avatar" style={{ background: `hsl(${150 + (hue(m.author) % 120) - 60} 22% 44%)` }} aria-hidden="true">{m.author_name[0]?.toUpperCase() ?? "?"}</span>}
-      <div className="message-content">{!grouped && <div className="message-meta"><strong>{m.author_name}</strong><time>{clock(m.ts)}</time></div>}{editing === m.ref ? <InlineEditor key={m.ref} initial={m.body} onSave={(body) => actions.current.saveEdit(m, body)} onCancel={() => actions.current.cancelEdit()} /> : <Body body={attachmentBody(m.body, m.media, relayOrigin)} mentions={m.mentions} me={identity} edited={m.edited} />}
+      <div className="message-content">{!grouped && <div className="message-meta"><strong>{m.author_name}</strong><time>{clock(m.ts)}</time></div>}{editing === m.ref ? <InlineEditor key={m.ref} initial={m.body} onSave={(body) => actions.current.saveEdit(m, body)} onCancel={() => actions.current.cancelEdit()} /> : secretView(m) ?? <Body body={attachmentBody(m.body, m.media, relayOrigin)} mentions={m.mentions} me={identity} edited={m.edited} />}
         <Attachments body={m.body} media={m.media} />
         {decisionLink(m)}
         {m.reactions.length > 0 && <div className="reactions" aria-label="Reactions">{m.reactions.map((r) => <span key={r.emoji} className={`pill ${r.mine ? "mine" : ""}`} aria-label={`${emojiLabel(r.emoji)} ${r.count}${r.mine ? ", including yours" : ""}`}>{emojiLabel(r.emoji)} <span>{r.count}</span></span>)}</div>}
@@ -1473,7 +1490,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     {renderList(messages, false)}
   </>,
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  [messages, identity, menuFor, decisions.version, root, older, roomName, editing, focusRef, relayOrigin, fetchedView, failedView, currentView, busy, synced]);
+  [messages, identity, menuFor, decisions.version, root, older, roomName, editing, focusRef, relayOrigin, fetchedView, failedView, currentView, busy, synced, secretRequesters, secretReceipts]);
 
   const topNote = notes[notes.length - 1];
   // A top-level note Back closes its tab and returns to the last used tab.

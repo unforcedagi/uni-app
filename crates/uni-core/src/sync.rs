@@ -9,7 +9,7 @@
 
 use std::collections::BTreeMap;
 
-use nostr::{Event, Keys, PublicKey, Tag};
+use nostr::{Event, JsonUtil, Keys, PublicKey, Tag};
 
 use crate::buzz::{
     aux_target, event_channel, mentions, p_tags, BuzzClient, AUX_KINDS, KIND_CHANNEL_MESSAGE,
@@ -64,6 +64,10 @@ pub fn ingest_message(
         mentions_me: mentions(ev, me),
     };
     let inserted = store.upsert_item(&item)?;
+    if crate::secret::parse_request(&ev.content).is_some() {
+        // T-176: the secret path re-verifies this before it answers (see `secret::stored_request`).
+        store.put_signed_event(&item.r#ref, &ev.as_json())?;
+    }
     store.set_message_mentions(&item.r#ref, &p_tags(ev))?;
     let media = crate::media::parse_imeta(ev.tags.iter().map(|t| t.as_slice()));
     if !media.is_empty() {
@@ -138,7 +142,9 @@ pub fn ingest_aux(store: &Store, ev: &Event) -> Result<Ingested> {
     })
 }
 
-/// Route any event delivered on a `ch-<uuid>` subscription.
+/// Route any event delivered on a `ch-<uuid>` subscription. An event whose id
+/// or signature does not verify is dropped: the relay's word is not proof of
+/// who wrote it (the websocket client does not verify on receipt).
 pub fn ingest_channel_event(
     store: &Store,
     ev: &Event,
@@ -146,6 +152,10 @@ pub fn ingest_channel_event(
     channel: uuid::Uuid,
 ) -> Result<Ingested> {
     let kind = ev.kind.as_u16();
+    if (kind == KIND_CHANNEL_MESSAGE || AUX_KINDS.contains(&kind)) && ev.verify().is_err() {
+        tracing::warn!(id = %ev.id, kind, "dropping an event whose id or signature does not verify");
+        return Ok(Ingested::Ignored);
+    }
     if kind == KIND_CHANNEL_MESSAGE {
         let (new, item) = ingest_message(store, ev, me, channel)?;
         Ok(Ingested::Message { new, item })
@@ -194,7 +204,11 @@ pub async fn sync_older(
 }
 
 /// Store a kind-0 event as a profile row. Returns `true` if stored/replaced.
+/// A profile whose signature does not verify is dropped.
 pub fn ingest_profile(store: &Store, ev: &Event) -> Result<bool> {
+    if ev.verify().is_err() {
+        return Ok(false);
+    }
     let p = Profile::from_kind0(
         &ev.pubkey.to_hex(),
         &ev.content,
