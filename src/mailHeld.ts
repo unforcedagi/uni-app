@@ -49,6 +49,8 @@ export function endDeciding(opId: string): void {
 
 /** Each listing is numbered when it is asked for; one that comes back after a newer one was merged is dropped. */
 let listings = 0;
+/** The accounts where deciding was offered, as of the newest listing that said so. */
+let offered: { ids: string[]; seq: number } = { ids: [], seq: 0 };
 const merged: Record<string, number> = {};
 
 export function beginListing(): number {
@@ -62,6 +64,8 @@ export function beginListing(): number {
  *  it goes. */
 export function mergeListing(accountId: string, list: Parked[], forGen: number, seq: number): void {
   if (forGen !== gen || seq < (merged[accountId] ?? 0)) return;
+  // a newer session said deciding isn't offered on this account: an answer read before that doesn't bring it back
+  if (offered.seq > seq && !offered.ids.includes(accountId)) return;
   merged[accountId] = seq;
   const before = entries[accountId] ?? [];
   const now: HeldEntry[] = list.map((item) => {
@@ -81,8 +85,9 @@ export function setOutcome(accountId: string, opId: string, outcome: HeldOutcome
 
 /** An account where deciding is no longer offered: what was decided there, or is being decided, is kept out of sight
  *  (not listed, not counted) so its outcome isn't lost if deciding comes back; the rest goes. */
-export function keepAccounts(ids: string[], forGen: number): void {
-  if (forGen !== gen) return;
+export function keepAccounts(ids: string[], forGen: number, seq: number): void {
+  if (forGen !== gen || seq < offered.seq) return;
+  offered = { ids, seq };
   let touched = false;
   const next: Record<string, HeldEntry[]> = {};
   for (const [id, list] of Object.entries(entries)) {
@@ -128,10 +133,10 @@ export async function checkHeld(minGapMs = 0): Promise<void> {
   try {
     const o = await invoke<Overview | null>("mail_overview");
     if (!o || !Array.isArray(o.accounts)) return;
-    const offered = o.accounts.filter(approvalOffered);
+    const decidable = o.accounts.filter(approvalOffered);
     if (mine !== gen) return;
-    keepAccounts(offered.map((a) => a.id), mine);
-    for (const a of offered.filter((x) => can(x, "send.parked"))) {
+    keepAccounts(decidable.map((a) => a.id), mine, seq);
+    for (const a of decidable.filter((x) => can(x, "send.parked"))) {
       const list = await invoke<Parked[] | null>("mail_parked", { accountId: a.id });
       if (Array.isArray(list)) mergeListing(a.id, list, mine, seq);
     }
@@ -144,6 +149,7 @@ export function forgetHeld(): void {
   entries = {};
   deciding.clear();
   for (const k of Object.keys(merged)) delete merged[k];
+  offered = { ids: [], seq: 0 };
   lastCheck = 0;
   changed();
 }

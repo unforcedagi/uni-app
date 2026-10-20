@@ -367,7 +367,7 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
   const loadHeld = useCallback(async (o: Overview) => {
     const gen = heldGen(), seq = beginListing();
     const offered = o.accounts.filter(approvalOffered);
-    keepAccounts(offered.map((a) => a.id), gen);
+    keepAccounts(offered.map((a) => a.id), gen, seq);
     setHeldProblem(null);
     setHeldLoading(true);
     try {

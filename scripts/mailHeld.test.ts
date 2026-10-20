@@ -66,13 +66,22 @@ assert.deepEqual(heldEntries().U.map((e) => e.item.op_id), ["op-a"], "the older 
 // deciding stops being offered while a decision is out: its outcome is kept out of sight, and back when it returns
 mergeListing("U", [held("op-e"), held("op-f")], gen, beginListing());
 assert.ok(startDeciding("op-e"));
-keepAccounts([], gen);
+keepAccounts([], gen, beginListing());
 assert.equal(waitingCount(), 0, "nothing counted where deciding isn't offered");
 assert.deepEqual(heldEntries().U.map((e) => [e.item.op_id, e.listed]), [["op-e", false], ["op-a", false]], "the one being decided and the one sent earlier are kept; the rest goes");
 setOutcome("U", "op-e", { kind: "sent", text: "Sent" }, gen);
 endDeciding("op-e");
 mergeListing("U", [held("op-f")], gen, beginListing()); // offered again
 assert.deepEqual(heldEntries().U.map((e) => [e.item.op_id, e.outcome?.kind ?? null]), [["op-f", null], ["op-e", "sent"], ["op-a", "sent"]]);
+// a listing still out when a newer session withdraws deciding doesn't bring the sends (or the badge) back
+const before = beginListing();
+keepAccounts([], gen, beginListing());
+mergeListing("U", [held("op-g")], gen, before);
+assert.equal(waitingCount(), 0, "the older answer is dropped");
+assert.ok(!heldEntries().U.some((e) => e.item.op_id === "op-g"));
+keepAccounts(["U"], gen, beginListing());
+mergeListing("U", [held("op-g")], gen, beginListing());
+assert.equal(waitingCount(), 1, "offered again: listed again");
 // Forget: nothing kept, and an answer that left before it is dropped
 assert.ok(startDeciding("op-c"));
 forgetHeld();
