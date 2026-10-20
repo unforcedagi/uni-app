@@ -3,7 +3,7 @@ const port = Number(process.env.COMPOSER_TEST_PORT ?? 1420);
 export default defineConfig({
   outputDir: 'test-results/composer',
   testDir: './scripts/browser',
-  testIgnore: ['vault-sidebar.spec.ts', 'rail.spec.ts', 'screens.spec.ts', 'areas.spec.ts', 'interface.spec.ts', 'areaRoom.spec.ts', 'lifeos.spec.ts', 'tasks.spec.ts', 'lifeosVault.spec.ts', 'secret.spec.ts'], // dedicated sidebar and rail configs
+  testIgnore: ['vault-sidebar.spec.ts', 'rail.spec.ts', 'screens.spec.ts', 'areas.spec.ts', 'interface.spec.ts', 'areaRoom.spec.ts', 'lifeos.spec.ts', 'tasks.spec.ts', 'lifeosVault.spec.ts', 'secret.spec.ts', 't200.spec.ts'], // dedicated sidebar and rail configs
   reporter: 'list',
   use: { baseURL: `http://127.0.0.1:${port}`, trace: 'retain-on-failure', launchOptions: { args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] } },
   projects: [

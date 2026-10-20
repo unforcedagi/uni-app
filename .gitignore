@@ -27,3 +27,4 @@ REVIEW-*.md
 __pycache__/
 # The uni-secrets Hermes plugin is private: staged here for the T-176 e2e scripts, never committed.
 hermes-plugin/
+dist-t200/

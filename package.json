@@ -25,7 +25,8 @@
     "test:chatoptional": "playwright test --config playwright.chatoptional.config.ts",
     "test:roomsnav": "playwright test --config playwright.roomsnav.config.ts",
     "test:simple": "playwright test --config playwright.simple.config.ts",
-    "test:sidebar": "playwright test --config playwright.sidebar.config.ts"
+    "test:sidebar": "playwright test --config playwright.sidebar.config.ts",
+    "test:t200": "playwright test --config playwright.t200.config.ts"
   },
   "dependencies": {
     "@openparachute/surface-client": "0.3.7",

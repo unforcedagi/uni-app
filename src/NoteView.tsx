@@ -2,7 +2,7 @@ import NoteEditor from "./NoteEditor";
 import { readDraft, clearDraft } from "./noteDrafts";
 import { editableExtension, beginEdit, isDirty } from "./noteEdit";
 import { backlinks } from "./backlinks";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { NoteRenderer, type LinkComponentProps } from "@openparachute/surface-render";
 import type { NoteHit } from "./Search";
@@ -20,7 +20,12 @@ function openExternal(url: string) {
   void invoke("open_link", { url }).catch(() => {});
 }
 
-export default function NoteView({ target, hub, onOpen, onBack, backLabel, onTitle, startEditing = false, onDirty, onCreate, onResolved, onRendered, onSearch, readOnly = false }: {
+export default function NoteView({ target, hub, onOpen, onBack, backLabel, onTitle, startEditing = false, onDirty, onCreate, onResolved, onRendered, onSearch, readOnly = false, backIcon = "←", actions, compact = false }: {
+  /** T-200: a note beside the chat closes rather than goes back (×), carries the pane's own buttons, and is for reading: no Edit (the
+   *  pane has no unsaved-changes guard), New note or Copy markdown. */
+  backIcon?: string;
+  actions?: ReactNode;
+  compact?: boolean;
   /** r21 (Codex 5): a page that reads, not a document to edit (For you): no Edit, New note or Copy markdown until "Open as a note". */
   readOnly?: boolean;
   onSearch: (query: string) => void;
@@ -126,14 +131,15 @@ export default function NoteView({ target, hub, onOpen, onBack, backLabel, onTit
 
   return <div className="note-view">
     <header className="note-bar">
-      <button className="note-back" onClick={onBack} aria-label={`Back to ${backLabel}`}>
-        <span className="note-back-arrow" aria-hidden="true">←</span><span className="note-back-label">{backLabel}</span>
+      <button className="note-back" onClick={onBack} aria-label={backIcon === "←" ? `Back to ${backLabel}` : backLabel}>
+        <span className="note-back-arrow" aria-hidden="true">{backIcon}</span><span className="note-back-label">{backLabel}</span>
       </button>
       {note && !tools && <button className="note-action quiet" onClick={() => setAsNote(true)}>Open as a note</button>}
-      {note && tools && !editing && editableExtension(note.extension) && <button className="note-action" onClick={() => setEditing(true)}>Edit</button>}
-      {note && tools && <button className="note-action" onClick={() => onCreate(note.path?.includes("/") ? note.path.slice(0, note.path.lastIndexOf("/")) : "")}>New note</button>}
-      {note && tools && !editing && <button className="note-action" onClick={() => void copyText(note.content ?? "", "Copied markdown")}>Copy markdown</button>}
-      {note && tools && !editing && isMarkdownNote(note.extension) && <NoteDownload note={note} title={heading} />}
+      {note && tools && !editing && !compact && editableExtension(note.extension) && <button className="note-action" onClick={() => setEditing(true)}>Edit</button>}
+      {note && tools && !compact && <button className="note-action" onClick={() => onCreate(note.path?.includes("/") ? note.path.slice(0, note.path.lastIndexOf("/")) : "")}>New note</button>}
+      {note && tools && !editing && !compact && <button className="note-action" onClick={() => void copyText(note.content ?? "", "Copied markdown")}>Copy markdown</button>}
+      {note && tools && !editing && !compact && isMarkdownNote(note.extension) && <NoteDownload note={note} title={heading} />}
+      {actions}
     </header>
     {note && editing ? <NoteEditor vault={data!.vault} note={note} onDirty={onDirty} onCancel={() => setEditing(false)} onSaved={(updated) => { setData({ ...data!, note: { ...data!.note, ...updated } }); setEditing(false); }} /> : <div className="note-scroll">
       <article className="note-page">

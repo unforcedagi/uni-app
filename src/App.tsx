@@ -65,6 +65,9 @@ import { activeQuery, filterMembers, insertMention, memberLabels, pruneBindings,
 import { SmallLine } from "./areas/Companion";
 import { SecretRequestCard } from "./SecretRequestCard";
 import { parseSecretReceipt, parseSecretRequest, receiptFor, receiptsByRequest, secretCardsOn, withoutSecretBlock } from "./secretRequest";
+import { NOTE_MODE, chatOnScreen } from "./t200/mode";
+import NotePane, { useTapTracking } from "./t200/NotePane";
+import { NOTE_CHANNEL, focusSelf, openNoteWindow, useWidth } from "./t200/noteWindow";
 
 type Room = { id: string; name: string; last_message: string | null; last_ts: number | null; mentions: boolean; unread: number };
 type Message = { ref: string; channel: string; author: string; author_name: string; ts: number; body: string; mentions_me: boolean; root: string | null; parent: string | null; mentions: Member[]; reply_count: number; last_reply_ts: number | null; edited: boolean; reactions: Reaction[]; media?: MediaRef[] };
@@ -429,6 +432,19 @@ function Conversations({ onForget }: { onForget: () => void }) {
   // whatever was open (room, thread or Journal) and Back pops it.
   const [notes, setNotes] = useState<VaultRef[]>([]);
   notesRef.current = notes;
+  // T-200 (behind NOTE_MODE): a note linked in chat opens beside or over the chat, which stays mounted with its scroll and draft.
+  // It belongs to the room it was opened from: another room shows no note (and a quote can't land there); coming back shows it again.
+  const [aside, setAside] = useState<{ room: string; stack: VaultRef[] } | null>(null);
+  const asideRef = useRef(aside);
+  asideRef.current = aside;
+  const popAside = () => setAside((a) => a && a.stack.length > 1 ? { ...a, stack: a.stack.slice(0, -1) } : null);
+  const chatShown = () => chatOnScreen(activeTab(tabsRef.current), channelRef.current, notesRef.current.length);
+  const chatShownRef = useRef(chatShown);
+  chatShownRef.current = chatShown;
+  const width = useWidth();
+  const widthRef = useRef(width);
+  widthRef.current = width;
+  useTapTracking(!!NOTE_MODE);
   const [hub, setHub] = useState<string | null>(null);
   /** T-137: every origin that is this hub (its tailnet alias too), from the app's alias table */
   const [hubOrigins, setHubOrigins] = useState<string[]>([]);
@@ -442,6 +458,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     if (next !== histRef.current) { histRef.current = next; setHist(next); }
   }
   function goHistory(by: -1 | 1, pastOverlay = false) {
+    if (by < 0 && asideRef.current && asideRef.current.room === channelRef.current && chatShownRef.current()) { popAside(); return; }
     // A note open over the place has its own Back: that comes first. Then whatever is in front closes (the task sheet, the drawer, the work
     // view) before Back changes places (`pastOverlay`: the drawer's own Back, pressed as it closes); Forward never closes anything.
     if (by < 0 && notesRef.current.length) { closeNoteRef.current(); return; }
@@ -573,6 +590,10 @@ function Conversations({ onForget }: { onForget: () => void }) {
     if (!sameHub(ref, hub, hubOrigins)) { if (href) void invoke("open_link", { url: href }).catch(() => {}); return; }
     setSidebarVisible(false);
     const target = resolveNote({ ...ref, hub: null }, aliases.current);
+    if (NOTE_MODE && chatShownRef.current()) {
+      if (NOTE_MODE === "window" && widthRef.current.desktop) { void openNoteWindow(target, channelRef.current!); return; }
+      setAside({ room: channelRef.current!, stack: [target] }); return;
+    }
     const current = activeTab(tabsRef.current);
     if (current?.kind === "note") {
       const top = notesRef.current[notesRef.current.length - 1];
@@ -1509,11 +1530,14 @@ function Conversations({ onForget }: { onForget: () => void }) {
    *  Kept for this session only; a reopened utility returns to Uni. */
   const originRef = useRef<TabTarget | null>(null);
   const origin = (): TabTarget => originRef.current ?? uniHome();
+  const asideShown = !!aside && aside.room === channel && chatOnScreen(activeTab(tabs), channel, notes.length);
+  const asideShape = NOTE_MODE === "split" ? (width.wide ? "beside" : "above") : "sheet";
   const goBack = useRef<() => void>(() => {});
   goBack.current = () => {
     if (journalFocus) { setJournalFocus(false); return; }
     if (panel) { setPanel(null); return; }
     if (searchOpen) { setSearchOpen(false); return; }
+    if (asideShown) { popAside(); return; }
     if (overlayRef.current && !notes.length) { overlayRef.current.close(); return; }
     if (notes.length) { closeNote(); return; }
     if (root && channel) { openTarget(roomTarget(channel), "focus"); return; }
@@ -1522,7 +1546,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     if (activeTab(tabsRef.current)?.kind !== "areas") openTarget(origin(), "replace");
   };
   // At Uni's room tree (nothing open over it) the system's own Back runs: the app goes to the background.
-  const canGoBack = !!panel || journalFocus || notes.length > 0 || searchOpen || !!root || hasAreaBack || (!!activeTab(tabs) && activeTab(tabs)!.kind !== "areas");
+  const canGoBack = !!panel || journalFocus || notes.length > 0 || asideShown || searchOpen || !!root || hasAreaBack || (!!activeTab(tabs) && activeTab(tabs)!.kind !== "areas");
   // Ctrl+W (Linux, Windows) closes what is open over the place. r22 (Codex 6): on macOS the native menu's "Close Window" owns Cmd+W.
   const closeActiveRef = useRef(() => {});
   const goHistoryRef = useRef<(by: -1 | 1) => void>(() => {});
@@ -1598,6 +1622,21 @@ function Conversations({ onForget }: { onForget: () => void }) {
     setDraft(next);
     requestAnimationFrame(() => input.current?.focus());
   };
+  /** T-200: a quoted passage for a room's draft: straight into the composer when that room is open, else kept for when it opens. */
+  const quoteInto = (room: string | null, text: string) => {
+    if (!room || scope() === keyFor(room, root)) { composeHere(text); return; }
+    const key = keyFor(room, null);
+    editDraft(key, appendDraft(drafts.current.get(key), text));
+    setToast("Quote added to your draft in that room");
+  };
+  const quoteIntoRef = useRef(quoteInto);
+  quoteIntoRef.current = quoteInto;
+  useEffect(() => {
+    if (NOTE_MODE !== "window" || typeof BroadcastChannel === "undefined") return;
+    const ch = new BroadcastChannel(NOTE_CHANNEL);
+    ch.onmessage = (e) => { const m = e.data; if (m?.kind === "quote" && typeof m.text === "string") { quoteIntoRef.current(typeof m.room === "string" ? m.room : null, m.text); void focusSelf(); } };
+    return () => ch.close();
+  }, []);
   /** The loaded room (or one of its threads, by root) as the shell's chat; null while another is loaded. */
   const areaRoomFor = (id: string | null | undefined, threadRoot: string | null = null) => {
     const room = id && channel === id && (root ?? null) === threadRoot ? currentRoom : undefined;
@@ -1653,7 +1692,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const recordingTab = recordingOrigin.current;
   const pill = recordingTab && recorder.busy ? { title: recordingTab.title, elapsed: recorder.elapsed, tabId: recordingTab.tabId, stop: recorder.stop, phase: recorder.phase } :
     journalRecording && journalTab ? { title: "Journal", elapsed: journalRecording.elapsed, tabId: journalTab.id, stop: journalRecording.stop, phase: "recording" as const } : null;
-  return <NavContext.Provider value={navControls}><NoteOpener.Provider value={openNote}><main className={`shell ${(!sidebarVisible && (channel || journalOpen || shellOpen || (active?.kind === "note" || active?.kind === "vault" || active?.kind === "mail"))) ? "in-room" : ""} ${topNote ? "note-open" : ""} ${panel ? `panel-open panel-${panel}` : ""} ${searchOpen ? "search-open" : ""} ${composerFocused ? "composer-focused" : ""} ${journalFocus && journalOpen ? "journal-focus" : ""} ${railHidden ? "rail-off" : ""}`}>
+  return <NavContext.Provider value={navControls}><NoteOpener.Provider value={openNote}><main className={`shell ${(!sidebarVisible && (channel || journalOpen || shellOpen || (active?.kind === "note" || active?.kind === "vault" || active?.kind === "mail"))) ? "in-room" : ""} ${topNote ? "note-open" : ""} ${panel ? `panel-open panel-${panel}` : ""} ${searchOpen ? "search-open" : ""} ${composerFocused ? "composer-focused" : ""} ${journalFocus && journalOpen ? "journal-focus" : ""} ${railHidden ? "rail-off" : ""} ${asideShown ? `t200-aside t200-with-${asideShape}` : ""}`}>
     <nav ref={railRef} className="rail" aria-label="Main navigation">
       <button aria-label="Uni" aria-current={!panel && !searchOpen && (!topNote && shellOpen ? "page" : undefined)} onClick={() => openTarget(uniHome())}><i><UniIcon /></i><span>Uni</span></button>
       <button aria-label="Journal" aria-current={!panel && !searchOpen && (journalOpen && !topNote ? "page" : undefined)} onClick={() => openTarget({ kind: "journal", title: "Journal" })}><i><JournalIcon /></i><span>Journal</span></button>
@@ -1698,6 +1737,9 @@ function Conversations({ onForget }: { onForget: () => void }) {
           onOpenArea={(path, name, room) => openTarget(path === null ? { kind: "areas", title: "Uni", ...(room ? { channel: room } : {}) } : { kind: "area", path, title: name, ...(room ? { channel: room } : {}) }, "replace")} />
       : <div className="welcome"><span className="welcome-mark">✦</span><h2>Your conversation starts here</h2><p>Select a room to read and reply. Messages are cached for offline reading.</p></div>}
     </section>
+    {asideShown && aside && <NotePane shape={asideShape} stack={aside.stack} hub={hub} layoutKey={`${channel}|${root}`} onQuote={(text) => quoteInto(aside.room, text)}
+      onOpen={(ref, href) => { if (!sameHub(ref, hub, hubOrigins)) { if (href) void invoke("open_link", { url: href }).catch(() => {}); return; } const t = resolveNote({ ...ref, hub: null }, aliases.current); setAside((a) => a && { ...a, stack: [...a.stack.slice(-19), t] }); }}
+      onBack={popAside} onClose={() => setAside(null)} />}
     {pill && <div className={`recording-pill ${sidebarVisible ? "over-sidebar" : ""}`} role="status" aria-live="polite">
       <span className="recording-dot" aria-hidden="true">●</span><span>{pill.phase === "recording" ? mmss(pill.elapsed) : pill.phase === "starting" ? "Starting…" : "Finishing…"}</span>
       <span className="recording-separator" aria-hidden="true">·</span>
