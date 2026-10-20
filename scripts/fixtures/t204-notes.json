@@ -1,0 +1,29 @@
+{
+  "_comment": "T-204: made-up notes for the Download .md tests (browser, Linux build, Android emulator). Titles cover slashes and other refused characters, emoji, and a long non-ASCII title; bodies keep CRLF, trailing spaces, tabs and no final newline, so a changed byte shows.",
+  "notes": [
+    {
+      "id": "01JT204SLASHEMOJI000000001",
+      "path": "Garden/Plans 10-19",
+      "createdAt": "2026-10-01T09:00:00Z",
+      "updatedAt": "2026-10-19T21:30:00Z",
+      "content": "# Plans 10/19 🌱: draft?\r\n\r\nSeed list for the made-up garden:  \r\n- tomatoes\t(two rows)\r\n- beans 🫘\r\n\r\n> \"quoted\" <b>not html</b>\r\nNo final newline",
+      "expectedName": "Plans 1019 🌱 draft.md"
+    },
+    {
+      "id": "01JT204LONGTITLE0000000002",
+      "path": "Archive/long",
+      "createdAt": "2026-09-02T08:00:00Z",
+      "updatedAt": "2026-09-03T08:00:00Z",
+      "content": "# 長い題名のメモ長い題名のメモ長い題名のメモ長い題名のメモ長い題名のメモ長い題名のメモ長い題名のメモ長い題名のメモ長い題名のメモ長い題名のメモ\n\n本文はそのまま。\n",
+      "expectedName": "長い題名のメモ長い題名のメモ長い題名のメモ長い題名のメモ長い題名のメモ長い題名の.md"
+    },
+    {
+      "id": "01JT204FRONTMATTER00000003",
+      "path": "Notes/With front matter",
+      "createdAt": "2026-08-10T10:00:00Z",
+      "updatedAt": "2026-08-11T11:00:00Z",
+      "content": "---\ntags: [example]\n---\n# Field notes\n\nBody.\n",
+      "expectedName": "Field notes.md"
+    }
+  ]
+}

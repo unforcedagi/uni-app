@@ -14,6 +14,11 @@ export function onCopied(fn: Listener): () => void {
   return () => { listeners.delete(fn); };
 }
 
+/** Show `message` in the same toast (T-204: "Saved to Downloads/x.md"). */
+export function announce(message: string): void {
+  listeners.forEach((fn) => fn(message));
+}
+
 function execCopy(text: string): boolean {
   const ta = document.createElement("textarea");
   ta.value = text;

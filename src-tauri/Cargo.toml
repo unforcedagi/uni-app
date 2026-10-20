@@ -38,6 +38,10 @@ tauri-plugin-updater = "=2.12.0"
 tauri-plugin-process = "=2.3.1"
 # Desktop only: Android stops the live socket in the background anyway.
 tauri-plugin-notification = "=2.3.3"
+# T-204: the system Save dialog for "Download .md". 2.8+ pulls Tauri 2.12; stay on the Tauri 2.11 release line.
+tauri-plugin-dialog = "=2.7.1"
+# Not used directly: the dialog plugin's dependency, held at 2.5 because 2.6+ needs Tauri 2.12.
+tauri-plugin-fs = "=2.5.2"
 
 [target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
 # Match the JavaScript scanner minor version.

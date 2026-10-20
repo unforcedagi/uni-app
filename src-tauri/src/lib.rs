@@ -1489,6 +1489,20 @@ async fn media_save(
     saved
 }
 
+/// T-204: "Download .md": save a note's markdown (`text`, exactly as the UI
+/// read it from the vault) as `name`. Desktop asks where with the Save dialog,
+/// Android puts it in Downloads (see `files`). `None` when the user cancelled.
+#[tauri::command]
+async fn note_download(window: tauri::Window, name: String, text: String) -> Result<Option<String>, String> {
+    files::save_note(&window, &name, text).await
+}
+
+/// T-204: share a note's markdown as `name` through the Android share sheet.
+#[tauri::command]
+async fn note_share(app: tauri::AppHandle, name: String, text: String, title: Option<String>) -> Result<(), String> {
+    files::share_note(&app, &name, text, title.as_deref()).await
+}
+
 /// Fetch and open an attachment in the app the system picks for its type
 /// (Android: FileProvider + ACTION_VIEW, see `files`). Never open a remote
 /// URL directly (that would omit Blossom auth and leak identity).
@@ -2273,6 +2287,7 @@ pub fn run() {
                 _app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;
                 _app.handle().plugin(tauri_plugin_process::init())?;
                 _app.handle().plugin(tauri_plugin_notification::init())?;
+                _app.handle().plugin(tauri_plugin_dialog::init())?;
             }
             #[cfg(mobile)]
             mobile::setup(_app);
@@ -2338,6 +2353,8 @@ pub fn run() {
             voice_transcribe,
             media_save,
             media_open,
+            note_download,
+            note_share,
             relay_origin,
             mail_mailboxes,
             mail_messages,

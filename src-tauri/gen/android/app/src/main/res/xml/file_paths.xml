@@ -2,8 +2,10 @@
 <!-- T-174: FilesPlugin.openFile shares a downloaded attachment from the media cache (cache/media) with the
      app that views it, one content:// URI and read grant at a time. The WebView's camera capture (wry's
      RustWebChromeClient.createImageFileUri) hands the camera a file in files/Pictures on external app storage.
+     T-204: FilesPlugin.shareText shares a note's .md copy from cache/shared with the app picked in the share sheet.
      Nothing else is shared. -->
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
   <cache-path name="media" path="media/" />
+  <cache-path name="shared" path="shared/" />
   <external-files-path name="captures" path="Pictures/" />
 </paths>

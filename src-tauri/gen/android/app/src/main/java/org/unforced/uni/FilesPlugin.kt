@@ -6,8 +6,11 @@ package org.unforced.uni
 //   (Android 10+, no storage permission needed) and says what it is called there;
 // - openFile hands a cached file to the app that views its type, as a FileProvider content:// URI
 //   with a one-off read grant (ACTION_VIEW). A file:// path would crash on Android 7+.
+// T-204: a note's markdown goes the same ways: saveTextToDownloads (Downloads, as above) and
+// shareText (the share sheet, ACTION_SEND with a content:// URI).
 
 import android.app.Activity
+import android.content.ClipData
 import android.content.ActivityNotFoundException
 import android.content.ContentValues
 import android.content.Intent
@@ -28,6 +31,21 @@ import java.io.File
 class SaveFileArgs {
   lateinit var path: String
   lateinit var name: String
+  var mime: String? = null
+}
+
+@InvokeArg
+class SaveTextArgs {
+  lateinit var name: String
+  lateinit var text: String
+  var mime: String? = null
+}
+
+@InvokeArg
+class ShareTextArgs {
+  lateinit var name: String
+  lateinit var text: String
+  var title: String? = null
   var mime: String? = null
 }
 
@@ -75,47 +93,111 @@ class FilesPlugin(private val activity: Activity) : Plugin(activity) {
       return
     }
     // Up to 500 MB: not on the caller's thread.
-    Thread {
-      val resolver = activity.contentResolver
-      val values = ContentValues().apply {
-        put(MediaStore.MediaColumns.DISPLAY_NAME, args.name)
-        put(MediaStore.MediaColumns.MIME_TYPE, mimeFor(args.name, args.mime))
-        put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
-        put(MediaStore.MediaColumns.IS_PENDING, 1)
+    Thread { publish(invoke, args.name, args.mime) { out -> src.inputStream().use { it.copyTo(out, 1 shl 16) } } }.start()
+  }
+
+  /** T-204: a note's markdown, written into Downloads as it is (UTF-8, no conversion). */
+  @Command
+  fun saveTextToDownloads(invoke: Invoke) {
+    val args = try { invoke.parseArgs(SaveTextArgs::class.java) } catch (e: Exception) {
+      invoke.reject("bad save request"); return
+    }
+    if (Build.VERSION.SDK_INT < 29) {
+      invoke.reject("Saving to Downloads needs Android 10 or newer; use Share instead")
+      return
+    }
+    if (!safeName(args.name)) {
+      invoke.reject("bad file name"); return
+    }
+    Thread { publish(invoke, args.name, args.mime) { out -> out.write(args.text.toByteArray(Charsets.UTF_8)) } }.start()
+  }
+
+  /** Write a new Downloads entry called `name` with `write`, publish it, and resolve with the name it really got. */
+  private fun publish(invoke: Invoke, name: String, mime: String?, write: (java.io.OutputStream) -> Unit) {
+    val resolver = activity.contentResolver
+    val values = ContentValues().apply {
+      put(MediaStore.MediaColumns.DISPLAY_NAME, name)
+      put(MediaStore.MediaColumns.MIME_TYPE, mimeFor(name, mime))
+      put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+      put(MediaStore.MediaColumns.IS_PENDING, 1)
+    }
+    var uri: android.net.Uri? = null
+    try {
+      uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+        ?: throw IllegalStateException("Downloads refused the file")
+      resolver.openOutputStream(uri)?.use(write)
+        ?: throw IllegalStateException("could not write to Downloads")
+      // Publishing moves the file to its name. MediaStore can refuse that name (UNIQUE files._data) when a row
+      // for it outlived its file; then publish as "name (1).ext", … without copying again. A refusal can be an
+      // exception or no row updated; until one publish takes, the file stays pending (hidden), so never say saved.
+      for (n in 0..20) {
+        val done = ContentValues().apply {
+          put(MediaStore.MediaColumns.IS_PENDING, 0)
+          if (n > 0) put(MediaStore.MediaColumns.DISPLAY_NAME, numbered(name, n))
+        }
+        val published = try { resolver.update(uri, done, null, null) > 0 } catch (e: Exception) {
+          if (n == 20) throw e else false
+        }
+        if (published) break
+        if (n == 20) throw IllegalStateException("Downloads did not take the file")
       }
-      var uri: android.net.Uri? = null
+      // MediaStore renames a duplicate ("report (1).pdf"): report the name it really has.
+      var saved = name
+      resolver.query(uri, arrayOf(MediaStore.MediaColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+        if (c.moveToFirst()) c.getString(0)?.let { saved = it }
+      }
+      val out = JSObject()
+      out.put("name", saved)
+      invoke.resolve(out)
+    } catch (e: Exception) {
+      uri?.let { runCatching { resolver.delete(it, null, null) } }
+      invoke.reject("Couldn't save to Downloads: ${e.message ?: e.javaClass.simpleName}")
+    }
+  }
+
+  /** A plain file name: no folder part, not hidden, not empty. */
+  private fun safeName(name: String): Boolean =
+    name.isNotBlank() && !name.contains('/') && !name.contains('\\') && !name.startsWith('.')
+
+  /**
+   * T-204: hand a note to the share sheet as a .md file. It is written to cache/shared/<random>/<name> (shared by
+   * the FileProvider, res/xml/file_paths.xml) so the receiving app sees the note's own file name; copies older
+   * than an hour are removed first, since a target may read the file after the sheet closes.
+   */
+  @Command
+  fun shareText(invoke: Invoke) {
+    val args = try { invoke.parseArgs(ShareTextArgs::class.java) } catch (e: Exception) {
+      invoke.reject("bad share request"); return
+    }
+    if (!safeName(args.name)) {
+      invoke.reject("bad file name"); return
+    }
+    val shared = File(activity.cacheDir, "shared")
+    val file = try {
+      val cutoff = System.currentTimeMillis() - 60 * 60 * 1000L
+      shared.listFiles()?.filter { it.lastModified() < cutoff }?.forEach { it.deleteRecursively() }
+      val dir = File(shared, java.util.UUID.randomUUID().toString()).apply { mkdirs() }
+      File(dir, args.name).apply { writeBytes(args.text.toByteArray(Charsets.UTF_8)) }
+    } catch (e: Exception) {
+      invoke.reject("Couldn't share the note: ${e.message ?: e.javaClass.simpleName}"); return
+    }
+    activity.runOnUiThread {
       try {
-        uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-          ?: throw IllegalStateException("Downloads refused the file")
-        resolver.openOutputStream(uri)?.use { out -> src.inputStream().use { it.copyTo(out, 1 shl 16) } }
-          ?: throw IllegalStateException("could not write to Downloads")
-        // Publishing moves the file to its name. MediaStore can refuse that name (UNIQUE files._data) when a row
-        // for it outlived its file; then publish as "name (1).ext", … without copying again. A refusal can be an
-        // exception or no row updated; until one publish takes, the file stays pending (hidden), so never say saved.
-        for (n in 0..20) {
-          val done = ContentValues().apply {
-            put(MediaStore.MediaColumns.IS_PENDING, 0)
-            if (n > 0) put(MediaStore.MediaColumns.DISPLAY_NAME, numbered(args.name, n))
-          }
-          val published = try { resolver.update(uri, done, null, null) > 0 } catch (e: Exception) {
-            if (n == 20) throw e else false
-          }
-          if (published) break
-          if (n == 20) throw IllegalStateException("Downloads did not take the file")
+        val uri = FileProvider.getUriForFile(activity, "${activity.packageName}.fileprovider", file)
+        val send = Intent(Intent.ACTION_SEND).apply {
+          type = mimeFor(file.name, args.mime)
+          putExtra(Intent.EXTRA_STREAM, uri)
+          args.title?.let { putExtra(Intent.EXTRA_SUBJECT, it) }
+          // The grant travels with the ClipData through the chooser to the app the user picks.
+          clipData = ClipData.newUri(activity.contentResolver, file.name, uri)
+          addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
-        // MediaStore renames a duplicate ("report (1).pdf"): report the name it really has.
-        var saved = args.name
-        resolver.query(uri, arrayOf(MediaStore.MediaColumns.DISPLAY_NAME), null, null, null)?.use { c ->
-          if (c.moveToFirst()) c.getString(0)?.let { saved = it }
-        }
-        val out = JSObject()
-        out.put("name", saved)
-        invoke.resolve(out)
+        activity.startActivity(Intent.createChooser(send, args.title ?: file.name))
+        invoke.resolve()
       } catch (e: Exception) {
-        uri?.let { runCatching { resolver.delete(it, null, null) } }
-        invoke.reject("Couldn't save to Downloads: ${e.message ?: e.javaClass.simpleName}")
+        invoke.reject("Couldn't share the note: ${e.message ?: e.javaClass.simpleName}")
       }
-    }.start()
+    }
   }
 
   @Command
