@@ -1544,7 +1544,7 @@ fn mail_invalid(message: impl ToString) -> MailError {
 
 /// The bridge origin and, for a hub with another name (T-137), the bridge
 /// there: `UNI_MAIL_URL` (a scratch or fake bridge, no alias), else port 8452
-/// on the hub's host.
+/// on the hub's host, its new name first ([`uni_core::mail::bridge_urls`]).
 fn mail_base(app: &tauri::AppHandle) -> Result<(String, Option<String>), MailError> {
     if let Ok(v) = std::env::var(uni_core::mail::MAIL_URL_ENV) {
         if !v.trim().is_empty() {
@@ -1552,8 +1552,7 @@ fn mail_base(app: &tauri::AppHandle) -> Result<(String, Option<String>), MailErr
         }
     }
     let hub = vault_config(app).hub;
-    let base = uni_core::mail::mail_url(&hub).ok_or_else(|| mail_invalid(format!("no mail bridge for the hub {hub} (it must be https)")))?;
-    Ok((base, uni_core::hub::alias_of(&hub).and_then(|a| uni_core::mail::mail_url(&a))))
+    uni_core::mail::bridge_urls(&hub).ok_or_else(|| mail_invalid(format!("no mail bridge for the hub {hub} (it must be https)")))
 }
 
 /// Run `f` with a bridge client on the device key, off the async executor.

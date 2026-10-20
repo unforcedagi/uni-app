@@ -82,6 +82,26 @@ pub fn mail_url(hub: &str) -> Option<String> {
     crate::hub::service_origin(hub, MAIL_PORT)
 }
 
+/// The bridge to call for `hub`, and the bridge under the hub's other name
+/// (T-137) to try when the first can't be reached. A hub still set to its
+/// old name (the first of a [`crate::hub::HUB_ALIASES`] pair) calls the new
+/// name first: after the tailnet rename the old one no longer resolves, so
+/// every read would otherwise start with a failed lookup.
+pub fn bridge_urls(hub: &str) -> Option<(String, Option<String>)> {
+    let base = mail_url(hub)?;
+    let alias = crate::hub::alias_of(hub).and_then(|a| mail_url(&a));
+    let renamed = crate::hub::HUB_ALIASES.iter().any(|(old, _)| mail_url(old).as_deref() == Some(base.as_str()));
+    Some(match alias {
+        Some(new) if renamed => (new, Some(base)),
+        alias => (base, alias),
+    })
+}
+
+/// The bridge on the shipped hub's host, under its current name.
+pub fn default_bridge() -> (String, Option<String>) {
+    bridge_urls(crate::hub::HUB_ALIASES[0].1).expect("the shipped hub is https")
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Mailbox {
     pub id: String,
@@ -620,6 +640,18 @@ mod tests {
         assert_eq!(mail_url("https://uni.example.ts.net/x?y").as_deref(), Some("https://uni.example.ts.net:8452"));
         assert_eq!(mail_url("http://uni-1.example.ts.net"), None, "never plain http to another machine");
         assert_eq!(mail_url("http://127.0.0.1:1939").as_deref(), Some("http://127.0.0.1:8452"));
+    }
+
+    #[test]
+    fn the_bridge_is_called_by_the_hubs_new_name_first() {
+        let (old, new) = crate::hub::HUB_ALIASES[0];
+        let (old, new) = (mail_url(old).unwrap(), mail_url(new).unwrap());
+        for hub in [crate::hub::HUB_ALIASES[0].0, crate::hub::HUB_ALIASES[0].1] {
+            assert_eq!(bridge_urls(hub), Some((new.clone(), Some(old.clone()))), "hub {hub}");
+        }
+        assert_eq!(default_bridge(), (new, Some(old)));
+        assert_eq!(bridge_urls("https://hub.example.ts.net"), Some(("https://hub.example.ts.net:8452".into(), None)));
+        assert_eq!(bridge_urls("http://hub.example.ts.net"), None);
     }
 
     #[test]

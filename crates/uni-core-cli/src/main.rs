@@ -101,7 +101,7 @@ enum Cmd {
     },
     /// Read mail through the read-only mail bridge (T-45): the mailboxes, or the newest messages of one.
     Mail {
-        /// Bridge origin [default: the bridge on the shipped hub's host].
+        /// Bridge origin [default: the bridge on the shipped hub's host, its new name, the old one as fallback].
         #[arg(long, env = "UNI_MAIL_URL")]
         bridge: Option<String>,
         /// Sign for this public URL while connecting to --bridge (e.g. loopback on the bridge's host).
@@ -348,15 +348,18 @@ async fn main() -> Result<()> {
             Ok(())
         }
         Cmd::Mail { bridge, sign_as, mailbox } => {
-            let bridge = match bridge {
-                Some(b) => b,
-                None => uni_core::mail::mail_url(uni_core::hub::HUB_ALIASES[0].0).context("no default mail bridge")?,
+            let (bridge, alias) = match bridge {
+                Some(b) => (b, None),
+                None => uni_core::mail::default_bridge(),
             };
             let (keys, source) = load_keys(false).context("loading identity")?;
             println!("bridge:     {bridge}");
             println!("key source: {}", key_source_label(source));
             println!("pubkey:     {}", keys.public_key().to_hex());
-            let mut mail = uni_core::mail::MailBridge::new(&bridge, &keys)?;
+            if let Some(a) = &alias {
+                println!("fallback:   {a}");
+            }
+            let mut mail = uni_core::mail::MailBridge::new(&bridge, &keys)?.with_alias(alias.as_deref());
             if let Some(public) = sign_as {
                 println!("signing as: {public}");
                 mail = mail.signing_as(&public)?;
