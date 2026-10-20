@@ -525,3 +525,32 @@ test("a draft whose review doesn't say what it holds isn't opened; while saving,
   await expect(page.getByRole('region', { name: 'New message' })).toHaveCount(0);
   expect((await calls(page, 'mail_draft_save'))[0].fields.text).toBe('Half a thought.');
 });
+
+/** Codex review 4, P1: a save-and-close still running when Mail is left and opened again is finished by the composer
+ *  that comes back, and the message being written is still kept afterwards. */
+test('a save-and-close under way when you leave Mail finishes when you come back, and nothing written is lost', async ({ page }) => {
+  await boot(page, 'ok', { writes: true });
+  await newButton(page).click();
+  let c = page.getByRole('region', { name: 'New message' });
+  await c.getByRole('radio', { name: /robin@example\.com/ }).check();
+  await c.getByRole('textbox', { name: 'Message' }).fill('Saved on the way out.');
+  await page.evaluate(() => { (window as any).__saveDelay = 1500; });
+  await c.getByRole('button', { name: '✕ Close' }).click();
+  await page.getByRole('alertdialog', { name: 'Close without saving?' }).getByRole('button', { name: 'Save draft and close' }).click();
+  const rail = page.getByRole('navigation', { name: 'Main navigation' });
+  await rail.getByRole('button', { name: 'Journal', exact: true }).click();
+  await rail.getByRole('button', { name: 'Mail', exact: true }).click();
+  c = page.getByRole('region', { name: 'New message' });
+  await expect(c.getByRole('textbox', { name: 'Message' })).not.toBeEditable();
+  await expect(page.getByRole('region', { name: 'New message' })).toHaveCount(0, { timeout: 4000 });
+  expect(await calls(page, 'mail_draft_save')).toHaveLength(1);
+  // a new message after that is still kept across leaving Mail
+  await page.evaluate(() => { (window as any).__saveDelay = 0; });
+  await newButton(page).click();
+  c = page.getByRole('region', { name: 'New message' });
+  await c.getByRole('radio', { name: /robin@example\.com/ }).check();
+  await c.getByRole('textbox', { name: 'Message' }).fill('Still here after leaving.');
+  await rail.getByRole('button', { name: 'Journal', exact: true }).click();
+  await rail.getByRole('button', { name: 'Mail', exact: true }).click();
+  await expect(page.getByRole('region', { name: 'New message' }).getByRole('textbox', { name: 'Message' })).toHaveValue('Still here after leaving.');
+});

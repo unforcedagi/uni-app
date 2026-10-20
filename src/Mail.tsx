@@ -235,8 +235,12 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
   /** The open thread and list now, for callbacks that finish later (an archive, a refresh). */
   const openRef = useRef<Open | null>(remembered.open);
   const composeRef = useRef<Compose | null>(remembered.compose);
+  /** False once this Mail is gone: a late answer for it (a save that finished after Mail was left) changes nothing shared. */
+  const alive = useRef(true);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   /** The composer as kept here; its live text is in `remembered.compose.snapshot` (kept on every change, not rendered). */
   const setCompose = (c: Compose | null) => {
+    if (!alive.current) return;
     const live = c && remembered.compose?.key === c.key ? remembered.compose.snapshot : c?.snapshot ?? null;
     const next = c ? { ...c, snapshot: live } : null;
     remembered.compose = next; composeRef.current = next; setComposeState(next);
@@ -372,10 +376,11 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
   };
   /** Close the composer `key` (a late answer for one already gone closes nothing newer). */
   const endCompose = (changed: boolean, key: number) => {
+    if (!alive.current) return;
     if (composeRef.current?.key === key) { setCompose(null); setComposeNote(null); if (!openRef.current) setPane("list"); }
     if (changed) void refresh();
   };
-  const keepSnapshot = (snapshot: ComposerSnapshot) => { if (remembered.compose) remembered.compose = { ...remembered.compose, snapshot }; };
+  const keepSnapshot = (snapshot: ComposerSnapshot) => { if (alive.current && remembered.compose) remembered.compose = { ...remembered.compose, snapshot }; };
   const pendingChanged = () => setPending(readPending(typeof localStorage === "undefined" ? null : localStorage));
   /** Ask the bridge about each send whose outcome isn't known (a lost answer, or a composer closed before it came). */
   const checkPending = async () => {
@@ -417,7 +422,8 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
     const inInbox = real.filter((m) => inbox && m.mailbox_ids.includes(inbox)).map((m) => m.id);
     const flaggedIds = t.messages.filter((m) => m.flagged).map((m) => m.id);
     const setFlag = (ids: string[], flagged: boolean) => {
-      setThread((cur) => (cur ? { ...cur, messages: cur.messages.map((m) => (ids.includes(m.id) ? { ...m, flagged } : m)) } : cur));
+      // only if that thread is still the one shown (email ids are per account)
+      setThread((cur) => (cur && cur.account_id === o.accountId && cur.thread_id === o.threadId ? { ...cur, messages: cur.messages.map((m) => (ids.includes(m.id) ? { ...m, flagged } : m)) } : cur));
       setList((cur) => (cur ? { ...cur, threads: cur.threads.map((r) => (r.account_id === o.accountId && r.thread_id === o.threadId ? { ...r, flagged } : r)) } : cur));
     };
     const mark = can(acct, "mark_seen");
@@ -513,7 +519,7 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
         <section className="mail-read" aria-label="Thread">
           {compose && <div className="mail-compose-wrap" hidden={compose.hidden}>
             {composeNote && !compose.hidden && <p className="mail-note mail-compose-note" role="status">{composeNote}</p>}
-            <Composer key={compose.key} overview={overview} start={compose.start} snapshot={compose.snapshot} onSnapshot={keepSnapshot}
+            <Composer key={compose.key} composeKey={compose.key} overview={overview} start={compose.start} snapshot={compose.snapshot} onSnapshot={keepSnapshot}
               onClose={(changed) => endCompose(changed, compose.key)} onDone={() => endCompose(true, compose.key)} onPendingChange={pendingChanged} /></div>}
           {composing ? null
           : threadProblem ? <div className="mail-scroll"><button type="button" className="note-action mail-thread-back" onClick={() => setPane("list")}>← Threads</button><Problem p={threadProblem} onRetry={() => open && void loadThread(open)} /></div>

@@ -50,6 +50,11 @@ type Raw = { to: string; cc: string; bcc: string; subject: string; text: string 
 /** What Mail keeps of a composer while you look elsewhere. */
 export type ComposerSnapshot = { from: string | null; raw: Raw; baseline: Raw; showCc: boolean; saved: Saved | null; discardAhead: string[]; stage: Stage; dirty: boolean };
 
+/** Saves under way, by composer key. Mail can be left and opened again while one runs: the composer that comes back
+ *  takes the save over (its draft id, and the close it was asked for) instead of losing it. */
+type Saving = { promise: Promise<Reviewed>; account: string; fields: DraftFields; raw: Raw; thenClose: boolean };
+const saving = new Map<number, Saving>();
+
 /** Enter in a one-line field never submits anything. */
 const noEnter = (e: KeyboardEvent<HTMLInputElement>) => { if (e.key === "Enter") e.preventDefault(); };
 const store = () => (typeof localStorage === "undefined" ? null : localStorage);
@@ -62,8 +67,8 @@ function rawOf(f: DraftFields | null): Raw {
   return { to: f ? formatAddresses(f.to) : "", cc: f ? formatAddresses(f.cc) : "", bcc: f ? formatAddresses(f.bcc) : "", subject: f?.subject ?? "", text: f?.text ?? "" };
 }
 
-export default function Composer({ overview, start, snapshot, onSnapshot, onClose, onDone, onPendingChange }: {
-  overview: Overview; start: ComposeStart; snapshot: ComposerSnapshot | null; onSnapshot: (s: ComposerSnapshot) => void;
+export default function Composer({ composeKey, overview, start, snapshot, onSnapshot, onClose, onDone, onPendingChange }: {
+  composeKey: number; overview: Overview; start: ComposeStart; snapshot: ComposerSnapshot | null; onSnapshot: (s: ComposerSnapshot) => void;
   onClose: (changed: boolean) => void; onDone: () => void; onPendingChange: () => void;
 }) {
   const first = start.kind === "new" ? null : start.fields;
@@ -74,7 +79,7 @@ export default function Composer({ overview, start, snapshot, onSnapshot, onClos
   const inReplyTo = start.kind === "reply" ? start.fields.in_reply_to : null;
   const [saved, setSaved] = useState<Saved | null>(snapshot?.saved ?? null);
   const [discardAhead, setDiscardAhead] = useState<string[]>(snapshot?.discardAhead ?? []);
-  const [stage, setStage] = useState<Stage>(snapshot?.stage ?? (start.kind === "draft" ? { kind: "opening" } : { kind: "edit" }));
+  const [stage, setStage] = useState<Stage>(saving.has(composeKey) ? { kind: "busy", what: "Saving…" } : snapshot?.stage ?? (start.kind === "draft" ? { kind: "opening" } : { kind: "edit" }));
   const [problem, setProblem] = useState<MailProblem | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [changed, setChanged] = useState(false);
@@ -126,22 +131,39 @@ export default function Composer({ overview, start, snapshot, onSnapshot, onClos
 
   const fail = (e: unknown) => { setProblem(mailProblem(e)); };
 
-  /** Save as a draft in your Drafts (over the one this composer already saved or opened, in that draft's account). */
-  const save = async (f: DraftFields): Promise<Reviewed> => {
-    const account = saved?.accountId ?? from;
-    const r = await invoke<Reviewed>("mail_draft_save", { accountId: account, fields: f, replaces: saved?.draftId ?? null, base: saved?.fingerprint ?? null });
-    setSaved({ accountId: account!, draftId: r.draft_id, fingerprint: r.fingerprint, fields: f });
-    setBaseline(raw);
+  const applySaved = (account: string, r: Reviewed, f: DraftFields, at: Raw) => {
+    setSaved({ accountId: account, draftId: r.draft_id, fingerprint: r.fingerprint, fields: f });
+    setBaseline(at);
     setDiscardAhead(r.discard);
     setChanged(true);
-    return r;
   };
+
+  /** Save as a draft in your Drafts (over the one this composer already saved or opened, in that draft's account). */
+  const save = async (f: DraftFields, thenClose = false): Promise<Reviewed> => {
+    const account = (saved?.accountId ?? from)!;
+    const promise = invoke<Reviewed>("mail_draft_save", { accountId: account, fields: f, replaces: saved?.draftId ?? null, base: saved?.fingerprint ?? null });
+    saving.set(composeKey, { promise, account, fields: f, raw, thenClose });
+    try {
+      const r = await promise;
+      applySaved(account, r, f, raw);
+      return r;
+    } finally { if (saving.get(composeKey)?.promise === promise) saving.delete(composeKey); }
+  };
+
+  // a save this composer's earlier self started before Mail was left: finish it here
+  useEffect(() => {
+    const s = saving.get(composeKey);
+    if (!s) return;
+    s.promise
+      .then((r) => { applySaved(s.account, r, s.fields, s.raw); if (s.thenClose) { onClose(true); return; } setNote("Saved in your Drafts."); setStage({ kind: "edit" }); })
+      .catch((e) => { fail(e); setStage({ kind: "edit" }); });
+  }, []);
 
   const saveDraft = async (thenClose = false) => {
     const f = fields();
     if (typeof f === "string") { setNote(f); setConfirmClose(false); return; }
     setProblem(null); setNote(null); setStage({ kind: "busy", what: "Saving…" });
-    try { await save(f); if (thenClose) { onClose(true); return; } setNote("Saved in your Drafts."); } catch (e) { fail(e); }
+    try { await save(f, thenClose); if (thenClose) { onClose(true); return; } setNote("Saved in your Drafts."); } catch (e) { fail(e); }
     setStage({ kind: "edit" });
   };
 
