@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { announce } from "./clipboard";
 import { currentUserAgent, platformName } from "./interface/selftest/gate";
-import { downloadName, frontmatterPref, markdownFile, setFrontmatterPref, type NoteDates } from "./noteDownload";
+import { downloadName, frontmatterPref, markdownFile, setFrontmatterPref, type NoteDates } from "./noteFile";
 
 export type DownloadableNote = NoteDates & { id: string; content?: string };
 

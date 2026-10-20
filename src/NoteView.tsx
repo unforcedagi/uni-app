@@ -10,7 +10,7 @@ import type { Note } from "@openparachute/surface-client";
 import { safeHref } from "./markdown";
 import { copyText } from "./clipboard";
 import NoteDownload from "./NoteDownload";
-import { isMarkdownNote } from "./noteDownload";
+import { isMarkdownNote } from "./noteFile";
 import { bodyWithoutTitle, noteMeta, noteTitle } from "./noteText";
 import { refCandidates, isNoteNotFound, noteUrl, parseNoteRoute, parseNoteUrl, wikilinkResolver, type VaultRef } from "./vaultlinks";
 

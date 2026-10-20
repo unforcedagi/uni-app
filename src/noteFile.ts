@@ -1,5 +1,5 @@
 // T-204: a Parachute note downloaded as a .md file (unit-tested in
-// scripts/noteDownload.test.ts; the Save itself is in src-tauri/src/files.rs).
+// scripts/noteFile.test.ts; the Save itself is in src-tauri/src/files.rs).
 
 /** Characters file systems refuse in a name (Windows' set covers Linux, macOS and Android). */
 const FORBIDDEN = /[/\\:*?"<>|]/g;

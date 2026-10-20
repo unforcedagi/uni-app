@@ -1,6 +1,6 @@
-// Run: node --experimental-strip-types scripts/noteDownload.test.ts (Node >= 22.6)
+// Run: node --experimental-strip-types scripts/noteFile.test.ts (Node >= 22.6)
 import assert from "node:assert/strict";
-import { downloadName, isMarkdownNote, markdownFile, MAX_STEM_BYTES } from "../src/noteDownload.ts";
+import { downloadName, isMarkdownNote, markdownFile, MAX_STEM_BYTES } from "../src/noteFile.ts";
 
 const bytes = (s: string) => new TextEncoder().encode(s).length;
 
@@ -47,4 +47,4 @@ assert.equal(markdownFile("---\nnot closed", { path: "p" }, true), '---\npath: "
 assert.ok(isMarkdownNote(undefined) && isMarkdownNote("md") && isMarkdownNote(".MD") && isMarkdownNote("mdx"));
 assert.ok(!isMarkdownNote("canvas") && !isMarkdownNote("pdf") && !isMarkdownNote("json"));
 
-console.log("noteDownload tests passed");
+console.log("noteFile tests passed");
