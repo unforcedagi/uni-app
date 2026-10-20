@@ -1,19 +1,81 @@
 // Mail (T-45), pure parts: the shapes the Rust commands return, how a failure
-// reads, dates, sender labels, and the sealed document an HTML body renders in.
-// Read-only: nothing here sends, flags or deletes.
+// reads, dates, sender labels, which accounts a list reads, and the sealed
+// document an HTML body renders in. Read-only: nothing here sends, flags or deletes.
 
 export type Address = { name: string | null; email: string };
 export type Mailbox = { id: string; name: string; role: string | null; parent_id: string | null; total: number; unread: number };
-export type MailAccount = { account: string; mailboxes: Mailbox[] };
-export type MessageSummary = { id: string; thread_id: string | null; from: Address[]; subject: string; preview: string; received_at: string; unread: boolean; has_attachment: boolean };
-export type MessagePage = { account: string; mailbox: string; position: number; total: number | null; messages: MessageSummary[] };
 export type MailLink = { url: string; text: string | null };
-export type MailAttachment = { blob_id: string; name: string | null; mime: string; size: number; cid: string | null };
+/** `refused`: Rust's name/type check, made without fetching (v1's first gate); shown at once. */
+export type MailAttachment = { blob_id: string; part_id?: string | null; name: string | null; mime: string; size: number; cid: string | null; refused?: string | null };
 export type MailMessage = {
   id: string; thread_id: string | null; from: Address[]; to: Address[]; cc: Address[]; reply_to: Address[];
-  subject: string; received_at: string; sent_at: string | null; unread: boolean;
+  subject: string; received_at: string; sent_at: string | null; unread: boolean; draft: boolean; uni_drafted: boolean; mailbox_ids: string[];
   text: string | null; html: string | null; remote_images: number; links: MailLink[]; truncated: boolean; attachments: MailAttachment[];
 };
+
+/** Whose mail (T-45 v2): the key's own account (YOU) or the one shared with it (UNI). Never shown by colour alone. */
+export type Who = "owner" | "uni";
+export type AccountBoxes = { id: string; name: string; who: Who; mailboxes: Mailbox[] };
+/** `multi`: the bridge reads by account; false is a v1 bridge with one account. */
+export type Overview = { login: string; multi: boolean; accounts: AccountBoxes[] };
+/** One account's part of a list, and where its next page starts. A search reads the whole account less `exclude`. */
+export type Source = { account_id: string; mailbox_id: string | null; exclude: string[]; position: number };
+export type ThreadSummary = {
+  account_id: string; thread_id: string; email_id: string; from: Address[]; to: Address[]; subject: string; preview: string;
+  received_at: string; count: number; unread: boolean; has_attachment: boolean; draft: boolean; uni_drafted: boolean;
+};
+export type ThreadPage = { threads: ThreadSummary[]; next: Source[]; more: boolean; total: number | null };
+export type MailThread = { account_id: string; thread_id: string; messages: MailMessage[] };
+
+/** What a list shows: every account's Inbox at once, or one mailbox. */
+export type Scope = { kind: "all-inboxes" } | { kind: "mailbox"; accountId: string; mailboxId: string };
+
+export function scopeKey(s: Scope): string {
+  return s.kind === "all-inboxes" ? "all" : `${s.accountId}/${s.mailboxId}`;
+}
+
+/** The tag on every row, group and header: a word, not a colour. */
+export function whoTag(who: Who): string {
+  return who === "uni" ? "UNI" : "YOU";
+}
+
+/** "Your mail" / "Uni's mail", for labels that are read aloud. */
+export function whoMail(who: Who): string {
+  return who === "uni" ? "Uni's mail" : "Your mail";
+}
+
+function role(a: AccountBoxes, r: string): Mailbox | undefined {
+  return a.mailboxes.find((b) => b.role === r);
+}
+
+/** The accounts and mailboxes a list reads. A search reads the scope's accounts whole, less Junk and Trash. */
+export function sourcesFor(scope: Scope, o: Overview, searching: boolean): Source[] {
+  const accounts = scope.kind === "all-inboxes" ? o.accounts : o.accounts.filter((a) => a.id === scope.accountId);
+  return accounts.flatMap((a): Source[] => {
+    if (searching) return [{ account_id: a.id, mailbox_id: null, exclude: ["junk", "trash"].flatMap((r) => role(a, r)?.id ?? []), position: 0 }];
+    const box = scope.kind === "mailbox" ? scope.mailboxId : role(a, "inbox")?.id;
+    return box ? [{ account_id: a.id, mailbox_id: box, exclude: [], position: 0 }] : [];
+  });
+}
+
+/** Unread mail across every account's Inbox. */
+export function allInboxesUnread(o: Overview): number {
+  return o.accounts.reduce((n, a) => n + (role(a, "inbox")?.unread ?? 0), 0);
+}
+
+/** The list's heading. */
+export function scopeTitle(scope: Scope, o: Overview, query: string): string {
+  const acct = scope.kind === "mailbox" ? o.accounts.find((a) => a.id === scope.accountId) : undefined;
+  if (query) return scope.kind === "all-inboxes" ? (o.accounts.length > 1 ? "Search: both mailboxes" : "Search: your mail") : `Search: ${acct?.who === "uni" ? "Uni's mail" : "your mail"}`;
+  if (scope.kind === "all-inboxes") return o.accounts.length > 1 ? "All inboxes" : "Inbox";
+  const box = acct?.mailboxes.find((b) => b.id === scope.mailboxId);
+  return `${acct?.who === "uni" ? "Uni" : "Your"} · ${box ? mailboxLabel(box) : "mailbox"}`;
+}
+
+/** The scope still exists in this overview (an account or mailbox can go). */
+export function scopeValid(scope: Scope, o: Overview): boolean {
+  return scope.kind === "all-inboxes" || o.accounts.some((a) => a.id === scope.accountId && a.mailboxes.some((b) => b.id === scope.mailboxId));
+}
 
 /** `uni_core::mail::MailError` as it arrives over IPC. */
 export type MailError =
@@ -95,11 +157,6 @@ export function subjectLabel(subject: string): string {
 /** Mailbox name; the Inbox is called Inbox whatever the server names it. */
 export function mailboxLabel(b: Mailbox): string {
   return b.role === "inbox" ? "Inbox" : b.name || "(unnamed)";
-}
-
-/** More of this mailbox to load. */
-export function hasMore(page: { total: number | null; loaded: number }): boolean {
-  return page.total !== null && page.loaded < page.total;
 }
 
 /**

@@ -1,6 +1,9 @@
 // T-45 Mail, pure parts. Run: node --experimental-strip-types scripts/mail.test.ts (Node >= 22.6)
 import assert from "node:assert/strict";
-import { addressLine, hasMore, mailboxLabel, mailDate, MAIL_FRAME_CSP, mailProblem, mailSrcdoc, senderLabel, subjectLabel } from "../src/mailCore.ts";
+import {
+  addressLine, allInboxesUnread, mailboxLabel, mailDate, MAIL_FRAME_CSP, mailProblem, mailSrcdoc, scopeTitle, scopeValid, senderLabel, sourcesFor, subjectLabel, whoTag,
+  type Overview,
+} from "../src/mailCore.ts";
 import { restoreTabs, sameTarget, serializeTabs } from "../src/tabs.ts";
 
 // Every failure the bridge can give reads as a plain sentence, with what to do.
@@ -31,9 +34,34 @@ assert.equal(addressLine([{ name: "Ada", email: "ada@x" }, { name: null, email: 
 assert.equal(subjectLabel("  "), "(no subject)");
 assert.equal(mailboxLabel({ id: "1", name: "INBOX", role: "inbox", parent_id: null, total: 0, unread: 0 }), "Inbox");
 assert.equal(mailboxLabel({ id: "2", name: "Junk Mail", role: "junk", parent_id: null, total: 0, unread: 0 }), "Junk Mail");
-assert.equal(hasMore({ total: 120, loaded: 50 }), true);
-assert.equal(hasMore({ total: 50, loaded: 50 }), false);
-assert.equal(hasMore({ total: null, loaded: 50 }), false);
+
+// T-45 v2: which accounts and mailboxes a list reads
+const box = (id: string, role: string, unread = 0) => ({ id, name: role, role, parent_id: null, total: unread, unread });
+const two: Overview = { login: "robin@example.com", multi: true, accounts: [
+  { id: "A", name: "robin@example.com", who: "owner", mailboxes: [box("A-in", "inbox", 2), box("A-dr", "drafts"), box("A-junk", "junk", 4), box("A-trash", "trash")] },
+  { id: "U", name: "uni@example.com", who: "uni", mailboxes: [box("U-in", "inbox", 1), box("U-sent", "sent")] },
+] };
+assert.deepEqual(sourcesFor({ kind: "all-inboxes" }, two, false), [
+  { account_id: "A", mailbox_id: "A-in", exclude: [], position: 0 },
+  { account_id: "U", mailbox_id: "U-in", exclude: [], position: 0 },
+], "the combined view: each account's Inbox");
+assert.deepEqual(sourcesFor({ kind: "mailbox", accountId: "U", mailboxId: "U-sent" }, two, false), [{ account_id: "U", mailbox_id: "U-sent", exclude: [], position: 0 }]);
+assert.deepEqual(sourcesFor({ kind: "all-inboxes" }, two, true), [
+  { account_id: "A", mailbox_id: null, exclude: ["A-junk", "A-trash"], position: 0 },
+  { account_id: "U", mailbox_id: null, exclude: [], position: 0 },
+], "a search reads each account whole, less Junk and Trash");
+assert.deepEqual(sourcesFor({ kind: "mailbox", accountId: "A", mailboxId: "A-dr" }, two, true).map((s) => s.account_id), ["A"], "searching from a mailbox reads its account");
+assert.equal(allInboxesUnread(two), 3, "Junk's unread doesn't count");
+assert.equal(scopeTitle({ kind: "all-inboxes" }, two, ""), "All inboxes");
+assert.equal(scopeTitle({ kind: "all-inboxes" }, two, "jars"), "Search: both mailboxes");
+assert.equal(scopeTitle({ kind: "mailbox", accountId: "U", mailboxId: "U-sent" }, two, ""), "Uni · sent");
+assert.equal(scopeTitle({ kind: "mailbox", accountId: "U", mailboxId: "U-sent" }, two, "x"), "Search: Uni's mail");
+const one: Overview = { login: "test@example.com", multi: false, accounts: [two.accounts[0]] };
+assert.equal(scopeTitle({ kind: "all-inboxes" }, one, ""), "Inbox", "one account: no 'All inboxes'");
+assert.equal(scopeValid({ kind: "mailbox", accountId: "U", mailboxId: "U-in" }, one), false, "a scope in an account that went is dropped");
+assert.equal(scopeValid({ kind: "mailbox", accountId: "A", mailboxId: "A-in" }, one), true);
+assert.equal(whoTag("owner"), "YOU");
+assert.equal(whoTag("uni"), "UNI");
 
 // Dates: today shows a time, this week a day, this year a month and day, older the year too
 const now = new Date("2026-10-18T15:00:00");
@@ -55,4 +83,4 @@ assert.ok(sameTarget({ kind: "mail", title: "Mail" }, { kind: "mail", title: "x"
 const saved = serializeTabs({ tabs: [{ id: "m", kind: "mail", title: "Mail" }], active: "m", recent: ["m"] });
 assert.deepEqual(restoreTabs(saved, []).tabs, [{ id: "m", kind: "mail", title: "Mail" }]);
 
-console.log("ok   mail: problems, labels, dates, sealed frame, tab");
+console.log("ok   mail: problems, labels, sources and scopes, dates, sealed frame, tab");
