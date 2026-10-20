@@ -22,7 +22,7 @@ function openExternal(url: string) {
 
 export default function NoteView({ target, hub, onOpen, onBack, backLabel, onTitle, startEditing = false, onDirty, onCreate, onResolved, onRendered, onSearch, readOnly = false, backIcon = "←", actions, compact = false }: {
   /** T-200: a note beside the chat closes rather than goes back (×), carries the pane's own buttons, and keeps to reading and editing:
-   *  no New note or Copy markdown in its narrow bar. */
+   *  no New note, Copy markdown or Download in its narrow bar (Open as page has them). */
   backIcon?: string;
   actions?: ReactNode;
   compact?: boolean;
