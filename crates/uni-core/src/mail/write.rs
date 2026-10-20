@@ -12,11 +12,31 @@
 //! through the bridge's deputy path (`send_as_uni`), under Uni's outbound rules.
 
 use std::collections::HashMap;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use super::{check_id, invalid, Address, MailBridge, MailError, MailResult, JMAP_TIMEOUT};
+use super::{check_id, invalid, Address, MailBridge, MailError, MailResult, MailSession, JMAP_TIMEOUT};
+
+/// How long a session answer stands for the write check, so a write doesn't cost a session round trip each time.
+const SESSION_FRESH: Duration = Duration::from_secs(30);
+/// The last session per (bridge, key), from [`MailBridge::session`].
+static SESSIONS: Mutex<Vec<(String, String, Instant, MailSession)>> = Mutex::new(Vec::new());
+
+pub(super) fn remember_session(bridge: &MailBridge<'_>, s: &MailSession) {
+    let (base, key) = (bridge.base.clone(), bridge.keys.public_key().to_hex());
+    let mut all = SESSIONS.lock().unwrap_or_else(|e| e.into_inner());
+    all.retain(|(b, k, _, _)| !(b == &base && k == &key));
+    all.push((base, key, Instant::now(), s.clone()));
+}
+
+fn recent_session(bridge: &MailBridge<'_>) -> Option<MailSession> {
+    let key = bridge.keys.public_key().to_hex();
+    let all = SESSIONS.lock().unwrap_or_else(|e| e.into_inner());
+    all.iter().find(|(b, k, at, _)| b == &bridge.base && k == &key && at.elapsed() < SESSION_FRESH).map(|(_, _, _, s)| s.clone())
+}
 
 /// Every operation this client knows (the bridge's names).
 pub const OPERATIONS: &[&str] = &[
@@ -210,7 +230,10 @@ impl MailBridge<'_> {
         if !OPERATIONS.contains(&op) {
             return Err(invalid(format!("unknown mail operation {op}")));
         }
-        let session = self.session().await?;
+        let session = match recent_session(self) {
+            Some(s) => s,
+            None => self.session().await?,
+        };
         let allowed = session.accounts.iter().find(|a| a.id == account).is_some_and(|a| a.operations.iter().any(|o| o == op));
         if !allowed {
             return Err(MailError::Refused { status: 403, message: format!("the mail bridge doesn't offer {op} on this mailbox") });

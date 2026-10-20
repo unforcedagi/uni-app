@@ -7,23 +7,25 @@
 // unread undoes it; Flag; Archive (your own mail only); Reply, New and a Uni draft's review open the composer
 // (MailCompose.tsx), which saves, shows what will be sent, and sends it once.
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
-import Composer, { WhoTag, type ComposeStart } from "./MailCompose";
+import Composer, { WhoTag, type ComposeStart, type ComposerSnapshot } from "./MailCompose";
 import { invoke } from "@tauri-apps/api/core";
 import { copyText } from "./clipboard";
 import { splitLinks } from "./areas/linkText";
 import { formatSize } from "./media";
 import {
-  addressLine, allInboxesUnread, can, canSendFrom, draftFields, mailboxLabel, mailDate, mailDateLong, mailProblem, mailSrcdoc, notVerified, replyFields,
+  addressLine, allInboxesUnread, can, canSendFrom, draftEditable, draftFields, mailboxLabel, readPending, sendOutcomeText, settled, withoutPending, writePending, mailDate, mailDateLong, mailProblem, mailSrcdoc, notVerified, replyFields,
   scopeKey, scopeTitle, scopeValid, senderLabel, sourcesFor, subjectLabel, whoMail, writesOffered,
   type AccountBoxes, type MailAttachment, type MailLink, type MailMessage, type MailProblem, type MailThread, type Overview, type Scope,
-  type Source, type ThreadPage, type ThreadSummary, type Who,
+  type PendingSend, type SendOutcome, type Source, type ThreadPage, type ThreadSummary, type Who,
 } from "./mailCore";
 import "./Mail.css";
 
 type List = { key: string; threads: ThreadSummary[]; next: Source[]; more: boolean; total: number | null };
 type Open = { accountId: string; threadId: string };
-/** Where you were in Mail: the view remounts each time it is opened, and comes back to the same list and thread. */
-const remembered: { scope: Scope; query: string; open: Open | null } = { scope: { kind: "all-inboxes" }, query: "", open: null };
+type Compose = { key: number; start: ComposeStart; hidden: boolean; snapshot: ComposerSnapshot | null };
+/** Where you were in Mail: the view remounts each time it is opened, and comes back to the same list, thread and
+ *  message being written. */
+const remembered: { scope: Scope; query: string; open: Open | null; compose: Compose | null } = { scope: { kind: "all-inboxes" }, query: "", open: null, compose: null };
 /** A phone shows one pane at a time; a narrow tablet shows the boxes in place of the list. */
 type Pane = "boxes" | "list" | "thread";
 /** The Daylight (and every Android device): no motion at all. Each frame of an animation is an e-ink redraw. */
@@ -89,12 +91,16 @@ function LinkList({ links }: { links: MailLink[] }) {
 
 /** What a draft is, in words: whose, and that it was not sent; and what you can do with it here. */
 function DraftTag({ m, acct, onOpen }: { m: MailMessage; acct: AccountBoxes; onOpen: (() => void) | null }) {
+  // formatting, attachments or a cut-off body: the composer can't show it all, so it doesn't offer to send it
+  const whole = draftEditable(m);
+  const elsewhere = onOpen && !whole && <span className="mail-note">It has formatting or attachments this app can't show in full: send it from your mail client.</span>;
+  if (!whole) onOpen = null;
   if (acct.who === "uni") return <p className="mail-draft-note"><span className="mail-draft-tag">UNI'S OWN DRAFT · NOT SENT</span><span>A draft in Uni's mail. You can read it here; only Uni sends it, under its rules.</span></p>;
   if (m.uni_drafted) return <div className="mail-draft-note" role="note"><span className="mail-draft-tag">DRAFT · BY UNI · NOT SENT</span>
     <span>Uni wrote this in your Drafts. Uni can't send as you: nothing goes out unless you send it.{!onOpen && ` ${LATER} in this app.`}</span>
-    {onOpen && <button type="button" className="note-action mail-draft-open" onClick={onOpen}>Review and send it yourself…</button>}</div>;
+    {onOpen && <button type="button" className="note-action mail-draft-open" onClick={onOpen}>Review and send it yourself…</button>}{elsewhere}</div>;
   return <div className="mail-draft-note"><span className="mail-draft-tag">DRAFT · NOT SENT</span>
-    {onOpen && <button type="button" className="note-action mail-draft-open" onClick={onOpen}>Edit draft</button>}</div>;
+    {onOpen && <button type="button" className="note-action mail-draft-open" onClick={onOpen}>Edit draft</button>}{elsewhere}</div>;
 }
 
 /** Where a message of a thread lives, when that isn't somewhere you'd read it: a thread can reach into Junk and Trash. */
@@ -211,8 +217,11 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
   const [thread, setThread] = useState<MailThread | null>(null);
   const [threadNote, setThreadNote] = useState<string | null>(null);
   const [threadProblem, setThreadProblem] = useState<MailProblem | null>(null);
-  const [pane, setPane] = useState<Pane>(remembered.open ? "thread" : "list");
-  const [compose, setCompose] = useState<{ key: number; start: ComposeStart } | null>(null);
+  const [pane, setPane] = useState<Pane>((remembered.compose && !remembered.compose.hidden) || remembered.open ? "thread" : "list");
+  const [compose, setComposeState] = useState<Compose | null>(remembered.compose);
+  /** Sends whose outcome isn't known yet (kept on the device), and what checking them found. */
+  const [pending, setPending] = useState<PendingSend[]>(() => readPending(typeof localStorage === "undefined" ? null : localStorage));
+  const [pendingNote, setPendingNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [actionProblem, setActionProblem] = useState<string | null>(null);
   const search = useRef<HTMLInputElement>(null);
@@ -220,7 +229,17 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
   const overviewRef = useRef<Overview | null>(null);
   /** T-208 follow-up: each fresh list (not a further page) is a new generation; a triage answer for an older one is dropped. */
   const notesGen = useRef(0);
-  const composeSeq = useRef(0);
+  const composeSeq = useRef(remembered.compose?.key ?? 0);
+  /** The thread just opened from the list: only that load marks it read (a Refresh or a reload doesn't undo Mark unread). */
+  const markOnOpen = useRef<string | null>(null);
+  /** The open thread and list now, for callbacks that finish later (an archive, a refresh). */
+  const openRef = useRef<Open | null>(remembered.open);
+  /** The composer as kept here; its live text is in `remembered.compose.snapshot` (kept on every change, not rendered). */
+  const setCompose = (c: Compose | null) => {
+    const live = c && remembered.compose?.key === c.key ? remembered.compose.snapshot : c?.snapshot ?? null;
+    const next = c ? { ...c, snapshot: live } : null;
+    remembered.compose = next; setComposeState(next);
+  };
   // a slow answer for a list or thread no longer shown is dropped
   const listSeq = useRef(0);
   const threadSeq = useRef(0);
@@ -295,10 +314,13 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
       const t = await invoke<MailThread>("mail_thread", { accountId: o.accountId, threadId: o.threadId });
       if (seq !== threadSeq.current) return;
       setThread(t);
-      // opening a thread marks it read, where the bridge offers that (Mark unread undoes it)
+      // opening a thread of your own from the list marks it read, where the bridge offers that (Mark unread undoes
+      // it). Uni's mail stays as Uni left it unless you mark it; a reload never marks.
       const acct = overviewRef.current?.accounts.find((a) => a.id === t.account_id);
       const unreadIds = t.messages.filter((m) => m.unread && !m.draft).map((m) => m.id);
-      if (can(acct, "mark_seen") && unreadIds.length > 0) {
+      const opened = markOnOpen.current === `${o.accountId}/${o.threadId}`;
+      if (opened) markOnOpen.current = null;
+      if (opened && acct?.who === "owner" && can(acct, "mark_seen") && unreadIds.length > 0) {
         void invoke("mail_mark_seen", { accountId: t.account_id, emailIds: unreadIds, seen: true })
           .then(() => { markShown(o, unreadIds, false); void loadOverview(); })
           .catch((e) => { if (seq === threadSeq.current) setActionProblem(`Couldn't mark it read: ${mailProblem(e).title}`); });
@@ -319,19 +341,54 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
     // the overview's counts change on Refresh; the list reloads only when what it shows changes
   }, [listKey, loadList]);
   useEffect(() => { if (open) void loadThread(open); }, [open, loadThread]);
-  useEffect(() => { remembered.scope = scope; remembered.query = query; remembered.open = open; }, [scope, query, open]);
+  useEffect(() => { remembered.scope = scope; remembered.query = query; remembered.open = open; openRef.current = open; }, [scope, query, open]);
 
   const accountOf = (id: string) => overview?.accounts.find((a) => a.id === id);
   const refresh = async () => {
     const o = await loadOverview();
     // the list reloads with the accounts the bridge has now (a scope that went is reset, and its effect reloads)
     if (o && scopeValid(scope, o)) void loadList(listKey, sourcesFor(scope, o, !!query), query, null);
-    if (o && open && o.accounts.some((a) => a.id === open.accountId)) void loadThread(open);
+    const now = openRef.current;
+    if (o && now && o.accounts.some((a) => a.id === now.accountId)) void loadThread(now);
   };
   const pick = (s: Scope) => { threadSeq.current++; setScope(s); setQuery(""); setTyped(""); setOpen(null); setThread(null); setThreadProblem(null); setPane("list"); };
-  const openThread = (t: ThreadSummary) => { setCompose(null); setOpen({ accountId: t.account_id, threadId: t.thread_id }); setPane("thread"); };
-  const startCompose = (start: ComposeStart) => { setCompose({ key: ++composeSeq.current, start }); setPane("thread"); };
-  const endCompose = (changed: boolean) => { setCompose(null); if (!open) setPane("list"); if (changed) void refresh(); };
+  const openThread = (t: ThreadSummary) => {
+    // a message being written stays: it waits behind the thread, with Resume
+    if (compose && !compose.hidden) setCompose({ ...compose, hidden: true });
+    markOnOpen.current = `${t.account_id}/${t.thread_id}`;
+    setOpen({ accountId: t.account_id, threadId: t.thread_id }); setPane("thread");
+  };
+  const [composeNote, setComposeNote] = useState<string | null>(null);
+  const resume = () => { if (compose) { setCompose({ ...compose, hidden: false }); setPane("thread"); } };
+  const startCompose = (start: ComposeStart) => {
+    // one message at a time: one with changes, a saved draft or a send under way comes back instead of being replaced
+    const snap = remembered.compose?.snapshot;
+    if (compose && (snap?.dirty || snap?.saved || (snap && snap.stage.kind !== "edit"))) {
+      setComposeNote("Finish or close this message first."); resume(); return;
+    }
+    setComposeNote(null);
+    setCompose({ key: ++composeSeq.current, start, hidden: false, snapshot: null }); setPane("thread");
+  };
+  const endCompose = (changed: boolean) => { setCompose(null); setComposeNote(null); if (!openRef.current) setPane("list"); if (changed) void refresh(); };
+  const keepSnapshot = (snapshot: ComposerSnapshot) => { if (remembered.compose) remembered.compose = { ...remembered.compose, snapshot }; };
+  const pendingChanged = () => setPending(readPending(typeof localStorage === "undefined" ? null : localStorage));
+  /** Ask the bridge about each send whose outcome isn't known (a lost answer, or a composer closed before it came). */
+  const checkPending = async () => {
+    const store = typeof localStorage === "undefined" ? null : localStorage;
+    const said: string[] = [];
+    for (const p of readPending(store)) {
+      try {
+        const out = await invoke<SendOutcome>("mail_send_check", { accountId: p.account_id, opId: p.op_id });
+        if (settled(out.state)) { writePending(store, withoutPending(readPending(store), p.op_id)); said.push(sendOutcomeText(out, p.who).text); }
+        else said.push("Still unknown; it won't be sent twice.");
+      } catch (e) {
+        const prob = mailProblem(e);
+        if (prob.kind === "refused" && prob.detail.startsWith("404")) { writePending(store, withoutPending(readPending(store), p.op_id)); said.push("It never reached the mail bridge: nothing was sent."); }
+        else said.push(`Couldn't check: ${prob.title}`);
+      }
+    }
+    pendingChanged(); setPendingNote(said.join(" ")); void refresh();
+  };
   const senders = overview ? overview.accounts.filter(canSendFrom) : [];
   const newMessage = () => {
     // from a mailbox, its account (if it can send); from the combined view, nobody until you choose
@@ -369,7 +426,11 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
         void act(on ? "flag it" : "unflag it", () => invoke("mail_flag", { accountId: o.accountId, emailIds: ids, flagged: on }), () => setFlag(ids, on));
       } : null,
       archive: can(acct, "archive") && inInbox.length > 0 ? () => void act("archive it", () => invoke("mail_archive", { accountId: o.accountId, emailIds: inInbox }), () => {
-        threadSeq.current++; setOpen(null); setThread(null); setPane("list"); void refresh();
+        // only if that thread is still the one shown: another opened since stays open
+        const same = (c: Open | null) => !!c && c.accountId === o.accountId && c.threadId === o.threadId;
+        if (same(openRef.current)) { threadSeq.current++; openRef.current = null; setOpen(null); setThread(null); if (!compose || compose.hidden) setPane("list"); }
+        setList((cur) => (cur ? { ...cur, threads: cur.threads.filter((r) => !(r.account_id === o.accountId && r.thread_id === o.threadId)) } : cur));
+        void refresh();
       }) : null,
       openDraft: acct.who === "owner" && canSendFrom(acct) ? (m: MailMessage) => startCompose({ kind: "draft", accountId: acct.id, draftId: m.id, fields: draftFields(m), uni: m.uni_drafted }) : null,
     } satisfies ThreadActions;
@@ -380,7 +441,8 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
   const unreadAll = overview ? allInboxesUnread(overview) : 0;
   const openAcct = open ? accountOf(open.accountId) : undefined;
 
-  return <section className={`mail mail-a ${still ? "mail-still" : ""}`} aria-label="Mail" data-pane={pane} data-composing={compose && pane === "thread" ? "true" : undefined}>
+  const composing = !!compose && !compose.hidden;
+  return <section className={`mail mail-a ${still ? "mail-still" : ""}`} aria-label="Mail" data-pane={pane} data-composing={composing && pane === "thread" ? "true" : undefined}>
     <header className="note-bar mail-bar">
       <button className="note-action" onClick={onBack}>← {backTo}</button>
       <span className="mail-title"><strong>Mail</strong>{overview && <small className="mail-account" title="The address this device reads as">{overview.login}{writesOffered(overview) ? "" : " · read-only"}</small>}</span>
@@ -423,6 +485,12 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
             {query && <button type="button" className="note-quiet" onClick={() => { setTyped(""); setQuery(""); }}>Clear</button>}
             <span className="mail-list-new">{senders.length > 0 ? <button type="button" className="send mail-new" onClick={newMessage}>New</button> : <LaterButton label="New" className="send mail-new" captioned />}</span>
           </form>
+          {compose?.hidden && <button type="button" className="mail-resume" onClick={resume}>✎ A message in progress · Resume</button>}
+          {pending.length > 0 && !composing && <div className="mail-pending" role="status">
+            <span>{pending.length === 1 ? "A message you sent hasn't confirmed yet." : `${pending.length} messages you sent haven't confirmed yet.`} None goes out twice.</span>
+            <button type="button" className="note-action" onClick={() => void checkPending()}>Check</button>
+          </div>}
+          {pendingNote && <p className="mail-note mail-pending-note" role="status">{pendingNote}</p>}
           <div className="mail-scroll">
             {listProblem && <Problem p={listProblem} onRetry={() => void loadList(listKey, sourcesFor(scope, overview, !!query), query, null)} />}
             {!listProblem && !list && listLoading && <p className="mail-loading" role="status">{query ? "Searching…" : "Loading threads…"}</p>}
@@ -434,9 +502,13 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
           </div>
         </section>
         <section className="mail-read" aria-label="Thread">
-          {compose ? <Composer key={compose.key} overview={overview} start={compose.start} onClose={endCompose} onDone={() => endCompose(true)} />
+          {compose && <div className="mail-compose-wrap" hidden={compose.hidden}>
+            {composeNote && !compose.hidden && <p className="mail-note mail-compose-note" role="status">{composeNote}</p>}
+            <Composer key={compose.key} overview={overview} start={compose.start} snapshot={compose.snapshot} onSnapshot={keepSnapshot}
+              onClose={endCompose} onDone={() => endCompose(true)} onPendingChange={pendingChanged} /></div>}
+          {composing ? null
           : threadProblem ? <div className="mail-scroll"><button type="button" className="note-action mail-thread-back" onClick={() => setPane("list")}>← Threads</button><Problem p={threadProblem} onRetry={() => open && void loadThread(open)} /></div>
-          : thread && openAcct ? <ThreadView key={`${thread.account_id}/${thread.thread_id}`} t={thread} acct={openAcct} overview={overview} note={threadNote} onBack={() => setPane("list")} actions={threadActions(thread, openAcct)} />
+          : thread && openAcct ? <>{compose?.hidden && <button type="button" className="mail-resume" onClick={resume}>✎ A message in progress · Resume</button>}<ThreadView key={`${thread.account_id}/${thread.thread_id}`} t={thread} acct={openAcct} overview={overview} note={threadNote} onBack={() => setPane("list")} actions={threadActions(thread, openAcct)} /></>
           : open && !openAcct ? <div className="mail-scroll"><button type="button" className="note-action mail-thread-back" onClick={() => setPane("list")}>← Threads</button><p className="empty mail-pick">This mailbox isn't shared with this device any more.</p></div>
           : open ? <p className="mail-loading" role="status">Opening…</p>
           : <p className="empty mail-pick">Pick a thread to read it.</p>}

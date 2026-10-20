@@ -3,11 +3,12 @@
 // that go from the thread's mailbox; a retry that is the same send; outcomes that block; the "not verified" badge.
 // Run: npx playwright test --config playwright.mail.config.ts (desktop, phone, and the Daylight upright and sideways)
 import { expect, test, type Page } from '@playwright/test';
-import { backToThreads, boot, mail, rows, shot, stacked } from './mailMock';
+import { backToThreads, boot, boxesHidden, mail, pickBox, rows, shot, stacked } from './mailMock';
 
 const calls = (page: Page, cmd: string): Promise<any[]> => page.evaluate((c) => (window as any).__calls.filter((x: any) => x.cmd === c).map((x: any) => x.args), cmd);
 const submissions = (page: Page): Promise<any[]> => page.evaluate(() => (window as any).__submissions);
 const row = (page: Page, text: string) => rows(page).filter({ hasText: text });
+const pickAll = (page: Page) => pickBox(page, null, 'All inboxes');
 const writeCmds = ['mail_mark_seen', 'mail_flag', 'mail_archive', 'mail_draft_save', 'mail_draft_review', 'mail_draft_discard', 'mail_send', 'mail_send_as_uni', 'mail_send_check'];
 
 /** The New button in reach: the list head on a wide screen, the bottom bar on a phone. */
@@ -47,10 +48,14 @@ test('opening a thread marks it read, Mark unread undoes it, flags show on the r
   await expect(rows(page).nth(0)).toHaveAccessibleName(/^Unread\. Flagged\. Your mail\. Mara Quill/);
   await expect(rows(page).nth(0).locator('.mail-row-flag')).toBeVisible();
 
-  // Uni's mail: you can mark and flag it, never move it
+  // Uni's mail: opening it leaves it as Uni left it; you can mark and flag it, never move it
   await row(page, 'Server report').click();
   const uniThread = page.getByRole('region', { name: 'Thread: Server report for Tuesday' });
+  await expect(uniThread.getByRole('button', { name: 'Mark read' })).toBeVisible();
+  expect((await calls(page, 'mail_mark_seen')).filter((c) => c.accountId === 'U')).toEqual([]);
+  await uniThread.getByRole('button', { name: 'Mark read' }).click();
   await expect(uniThread.getByRole('button', { name: 'Mark unread' })).toBeVisible();
+  expect((await calls(page, 'mail_mark_seen')).at(-1)).toEqual({ accountId: 'U', emailIds: ['u1'], seen: true });
   await expect(uniThread.getByRole('button', { name: 'Archive' })).toHaveCount(0);
   await expect(uniThread.getByRole('button', { name: '⚐ Flag' })).toBeVisible();
   await backToThreads(page);
@@ -163,7 +168,8 @@ test("a reply goes from the thread's mailbox; a retry is the same send; an unkno
   await c.getByRole('button', { name: '✕ Close' }).click();
   await backToThreads(page);
 
-  // your thread: the answer is lost once; Send again is the same opId, and one message goes
+  // your thread: the answer is lost once. The outcome is unknown: no edit, no new send; Check finds the bridge never
+  // got it, and the same send (the same opId) goes once
   await rows(page).nth(0).click();
   await page.getByRole('region', { name: 'Thread: Planning the garden week' }).getByRole('button', { name: 'Reply as you, from robin@example.com' }).click();
   c = page.getByRole('region', { name: 'Reply' });
@@ -173,9 +179,12 @@ test("a reply goes from the thread's mailbox; a retry is the same send; an unkno
   const review = page.getByRole('region', { name: 'Review before sending' });
   await page.evaluate(() => { (window as any).__sendFails = 1; });
   await review.getByRole('button', { name: /^Send as you/ }).click();
-  await expect(review.getByRole('alert')).toContainText("Mail isn't reachable right now.");
-  await expect(review).toContainText("Trying again is safe: it is the same send, and it can't go out twice.");
-  await review.getByRole('button', { name: /^Send as you/ }).click();
+  await expect(review.getByText("Outcome unknown, checking. It won't be sent twice.")).toBeVisible();
+  await expect(review.getByRole('button', { name: '← Edit' })).toHaveCount(0);
+  await expect(review.getByRole('button', { name: /^Send as/ })).toHaveCount(0);
+  await review.getByRole('button', { name: 'Check again' }).click();
+  await expect(review.getByText('The mail bridge has no record of this send: it never arrived, and nothing was sent.')).toBeVisible();
+  await review.getByRole('button', { name: 'Send it again (the same send)' }).click();
   await expect(review.getByText('Sent as you.')).toBeVisible();
   const sends = await calls(page, 'mail_send');
   expect(sends).toHaveLength(2);
@@ -196,7 +205,7 @@ test("a reply goes from the thread's mailbox; a retry is the same send; an unkno
   await shot(page, 'w6-unknown');
   await review.getByRole('button', { name: 'Check again' }).click();
   await expect(review.getByText('Sent as you.')).toBeVisible();
-  expect((await calls(page, 'mail_send_check')).length).toBe(1);
+  expect((await calls(page, 'mail_send_check')).length).toBe(2, 'one after the lost answer, one here');
   await review.getByRole('button', { name: 'Close' }).click();
 
   // a refusal: said in words, and you can edit and try again (a new review, a new opId)
@@ -259,4 +268,157 @@ test('on the Daylight the thread tools and the composer move nothing, and every 
   await page.getByRole('button', { name: /^Send as you/ }).click();
   await expect(page.getByRole('region', { name: 'Review before sending' })).toBeVisible();
   await check();
+});
+
+test('a message being written survives opening a thread, New and leaving Mail; Close asks before dropping it', async ({ page }) => {
+  await boot(page, 'ok', { writes: true });
+  await newButton(page).click();
+  let c = page.getByRole('region', { name: 'New message' });
+  await c.getByRole('radio', { name: /robin@example\.com/ }).check();
+  await c.getByRole('textbox', { name: 'To' }).fill('mara@example.org');
+  await c.getByRole('textbox', { name: 'Message' }).fill('A long message I am still writing.');
+  if (!stacked(page)) {
+    // beside the list (a phone shows the composer alone): open a thread, and the message waits behind it
+    await row(page, 'Workshop photos').click();
+    await expect(page.getByRole('region', { name: 'Thread: Workshop photos and slides' })).toBeVisible();
+    await expect(page.getByRole('region', { name: 'New message' })).toBeHidden();
+    await page.locator('.mail-read').getByRole('button', { name: '✎ A message in progress · Resume' }).click();
+    c = page.getByRole('region', { name: 'New message' });
+    await expect(c.getByRole('textbox', { name: 'Message' })).toHaveValue('A long message I am still writing.');
+    // New brings this one back instead of replacing it
+    await row(page, 'Your hold is ready').click();
+    await newButton(page).click();
+    await expect(page.getByText('Finish or close this message first.')).toBeVisible();
+    await expect(c.getByRole('textbox', { name: 'Message' })).toHaveValue('A long message I am still writing.');
+  }
+  // leave Mail and come back
+  const rail = page.getByRole('navigation', { name: 'Main navigation' });
+  await rail.getByRole('button', { name: 'Journal', exact: true }).click();
+  await expect(page.locator('.mail')).toHaveCount(0);
+  await rail.getByRole('button', { name: 'Mail', exact: true }).click();
+  c = page.getByRole('region', { name: 'New message' });
+  await expect(c.getByRole('textbox', { name: 'Message' })).toHaveValue('A long message I am still writing.');
+  await expect(c.getByRole('group', { name: 'From' })).toContainText('robin@example.com');
+  // Close asks first
+  await c.getByRole('button', { name: '✕ Close' }).click();
+  const ask = page.getByRole('alertdialog', { name: 'Close without saving?' });
+  await expect(ask).toBeVisible();
+  await ask.getByRole('button', { name: 'Keep writing' }).click();
+  await expect(c.getByRole('textbox', { name: 'Message' })).toHaveValue('A long message I am still writing.');
+  await c.getByRole('button', { name: '✕ Close' }).click();
+  await ask.getByRole('button', { name: 'Save draft and close' }).click();
+  await expect(page.getByRole('region', { name: 'New message' })).toHaveCount(0);
+  const saved = await calls(page, 'mail_draft_save');
+  expect(saved).toHaveLength(1);
+  expect(saved[0].fields.text).toBe('A long message I am still writing.');
+});
+
+test("a send as Uni that got no answer can't be edited or sent under a new id, and is checked after the composer closes", async ({ page }) => {
+  await boot(page, 'ok', { writes: true });
+  await newButton(page).click();
+  const c = page.getByRole('region', { name: 'New message' });
+  await c.getByRole('radio', { name: /uni@example\.com/ }).check();
+  await c.getByRole('textbox', { name: 'To' }).fill('ada@example.org');
+  await c.getByRole('textbox', { name: 'Message' }).fill('Thursday.');
+  await c.getByRole('button', { name: /^Send as Uni/ }).click();
+  const review = page.getByRole('region', { name: 'Review before sending' });
+  // the bridge takes it, and the answer is lost on the way back
+  await page.evaluate(() => { (window as any).__loseAnswer = true; });
+  await review.getByRole('button', { name: /^Send as Uni/ }).click();
+  await expect(review.getByText("Outcome unknown, checking. It won't be sent twice.")).toBeVisible();
+  await expect(review.getByRole('button', { name: '← Edit' })).toHaveCount(0);
+  await expect(review.getByRole('button', { name: /^Send/ })).toHaveCount(0);
+  await review.getByRole('button', { name: 'Close' }).click();
+  await expect(page.locator('.mail-pending')).toContainText("A message you sent hasn't confirmed yet.");
+  await page.locator('.mail-pending').getByRole('button', { name: 'Check' }).click();
+  await expect(page.locator('.mail-pending-note')).toHaveText('Sent as Uni.');
+  await expect(page.locator('.mail-pending')).toHaveCount(0);
+  const sent = await calls(page, 'mail_send_as_uni');
+  expect(sent).toHaveLength(1);
+  expect((await calls(page, 'mail_send_check'))[0].opId).toBe(sent[0].opId);
+  expect(await submissions(page)).toHaveLength(1);
+});
+
+test('the composer offers only what the bridge offers', async ({ page }) => {
+  // your account offers save and send but not review: nothing can be sent from it, so neither New nor Reply opens
+  await boot(page, 'ok', { ops: { A: ['mark_seen', 'draft.save', 'send', 'send.check'], U: ['mark_seen'] } });
+  await expect(newButton(page)).toBeDisabled();
+  await rows(page).nth(0).click();
+  const thread = page.getByRole('region', { name: 'Thread: Planning the garden week' });
+  await expect(thread.getByRole('button', { name: /^Reply/ })).toBeDisabled();
+  await expect(thread.getByRole('button', { name: /Review and send/ })).toHaveCount(0);
+  await expect(thread.getByRole('button', { name: 'Archive' })).toHaveCount(0);
+  await expect(thread.getByRole('button', { name: '⚐ Flag' })).toHaveCount(0);
+  for (const cmd of ['mail_draft_save', 'mail_draft_review', 'mail_send', 'mail_archive', 'mail_flag']) expect(await calls(page, cmd), cmd).toEqual([]);
+});
+
+test('when the bridge stops offering sending while you write, Send turns off and says why', async ({ page }) => {
+  await boot(page, 'ok', { writes: true });
+  await newButton(page).click();
+  const c = page.getByRole('region', { name: 'New message' });
+  await c.getByRole('radio', { name: /robin@example\.com/ }).check();
+  await expect(c.getByRole('button', { name: /^Send as you/ })).toBeEnabled();
+  await expect(c.getByRole('button', { name: 'Save draft' })).toBeVisible();
+  await page.evaluate(() => { (window as any).__ops.A = ['mark_seen']; });
+  await page.getByRole('button', { name: 'Refresh' }).click();
+  await expect(c.getByRole('button', { name: /^Send as you/ })).toBeDisabled();
+  await expect(c.getByText("The mail bridge doesn't offer sending from this mailbox now.")).toBeVisible();
+  await expect(c.getByRole('button', { name: 'Save draft' })).toHaveCount(0);
+});
+
+test("a draft with formatting isn't offered for sending here, and one that can't be opened can't be edited", async ({ page }) => {
+  await boot(page, 'ok', { writes: true });
+  if (boxesHidden(page)) await page.getByRole('button', { name: '☰ Mailboxes' }).click();
+  await page.getByRole('navigation', { name: 'Mailboxes' }).getByRole('group', { name: 'Your mailboxes' }).getByRole('button', { name: /^Drafts/ }).click();
+  await row(page, 'Flyer for the garden week').click();
+  const flyer = page.getByRole('region', { name: 'Thread: Flyer for the garden week' });
+  await expect(flyer.getByText("It has formatting or attachments this app can't show in full: send it from your mail client.")).toBeVisible();
+  await expect(flyer.getByRole('button', { name: 'Edit draft' })).toHaveCount(0);
+  await backToThreads(page);
+  // Uni's draft, when the bridge doesn't answer the review: no fields to edit, so no second draft can be made
+  await pickAll(page);
+  await rows(page).nth(0).click();
+  await page.evaluate(() => { (window as any).__reviewFails = 1; });
+  await page.locator('.mail-card').last().getByRole('button', { name: 'Review and send it yourself…' }).click();
+  const c = page.getByRole('region', { name: "Review Uni's draft" });
+  await expect(c.getByText("The draft couldn't be opened for review, so it can't be edited or sent yet.")).toBeVisible();
+  await expect(c.getByRole('textbox')).toHaveCount(0);
+  await c.getByRole('button', { name: 'Retry' }).click();
+  await expect(c.getByRole('textbox', { name: 'Message' })).toHaveValue('Monday suits me. See you then.\n\nRobin');
+  expect(await calls(page, 'mail_draft_save')).toEqual([]);
+});
+
+test('Mark unread stays after Refresh; an archive that finishes late leaves the thread you opened since', async ({ page }) => {
+  await boot(page, 'ok', { writes: true });
+  await rows(page).nth(0).click();
+  const plan = page.getByRole('region', { name: 'Thread: Planning the garden week' });
+  await plan.getByRole('button', { name: 'Mark unread' }).click();
+  await expect(plan.getByRole('button', { name: 'Mark read' })).toBeVisible();
+  await page.getByRole('button', { name: 'Refresh' }).click();
+  await expect(plan.getByRole('button', { name: 'Mark read' })).toBeVisible();
+  await page.waitForTimeout(300);
+  expect((await calls(page, 'mail_mark_seen')).map((c) => c.seen)).toEqual([true, false], 'the reload did not mark it read again');
+  await backToThreads(page);
+  await row(page, 'Workshop photos').click();
+  await page.evaluate(() => { (window as any).__archiveDelay = 1500; });
+  await page.getByRole('region', { name: 'Thread: Workshop photos and slides' }).getByRole('button', { name: 'Archive' }).click();
+  await backToThreads(page);
+  await row(page, 'Your hold is ready').click();
+  await page.waitForTimeout(1800);
+  await expect(page.getByRole('region', { name: 'Thread: Your hold is ready' })).toBeVisible();
+  await expect(row(page, 'Workshop photos')).toHaveCount(0);
+});
+
+test('a new message saved as a draft keeps its sender: From locks once it is saved', async ({ page }) => {
+  await boot(page, 'ok', { writes: true });
+  await newButton(page).click();
+  const c = page.getByRole('region', { name: 'New message' });
+  await c.getByRole('radio', { name: /robin@example\.com/ }).check();
+  await c.getByRole('textbox', { name: 'To' }).fill('mara@example.org');
+  await c.getByRole('button', { name: 'Save draft' }).click();
+  await expect(c.getByText('Saved in your Drafts.')).toBeVisible();
+  await expect(c.getByRole('radio')).toHaveCount(0);
+  await expect(c.getByRole('group', { name: 'From' })).toContainText("saved in this mailbox's Drafts");
+  await c.getByRole('button', { name: 'Discard draft' }).click();
+  expect((await calls(page, 'mail_draft_discard'))[0].accountId).toBe('A');
 });

@@ -169,3 +169,18 @@ async fn mail_from_the_owner_that_failed_dmarc_says_so() {
     let t = mail.thread("A", "TA-plan").await.unwrap();
     assert!(t.messages.iter().all(|m| m.dmarc.is_none()), "mail with no authentication header has no result");
 }
+
+/// /code-review: a write checks what the bridge offers without a session round trip each time (the session is fresh for
+/// 30 s after the app last read it).
+#[tokio::test]
+async fn writes_reuse_a_fresh_session() {
+    let keys = Keys::generate();
+    let fake = writable(&keys).await;
+    let mail = MailBridge::new(&fake.url, &keys).unwrap();
+    mail.overview().await.unwrap();
+    mail.mark_seen("A", &["a3".into()], true).await.unwrap();
+    mail.flag("A", &["a3".into()], true).await.unwrap();
+    mail.archive("A", &["a4".into()]).await.unwrap();
+    let sessions = fake.state.lock().unwrap().requests.iter().filter(|(p, _)| p == "/mail/session").count();
+    assert_eq!(sessions, 1, "one session for the overview, none per write");
+}

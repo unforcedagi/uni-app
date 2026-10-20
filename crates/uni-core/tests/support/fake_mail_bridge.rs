@@ -612,7 +612,8 @@ fn op(s: &mut State, req: &Value) -> (u16, Value) {
                 for k in ["to", "cc", "bcc"] {
                     e[k] = f[k].clone();
                 }
-                e["inReplyTo"] = f["inReplyTo"].clone();
+                // as the bridge does: a draft saved over another keeps its In-Reply-To when the fields name none
+                e["inReplyTo"] = if f["inReplyTo"].is_null() { old.map(|n| mail.emails[n]["inReplyTo"].clone()).unwrap_or(Value::Null) } else { f["inReplyTo"].clone() };
                 e["keywords"]["$draft"] = json!(true);
                 if uni {
                     e["keywords"]["$uni-drafted"] = json!(true);

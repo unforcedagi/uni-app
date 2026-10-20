@@ -196,10 +196,21 @@ export function can(a: AccountBoxes | undefined, op: string): boolean {
   return !!a?.operations?.includes(op);
 }
 
-/** A message can be sent from this account: the owner's own by save → review → send; Uni's through the deputy path. */
+/** Every operation sending from this account uses: yours is save → review → send (and check an unknown outcome);
+ *  Uni's goes through the deputy path. The composer opens only when the bridge offers all of them. */
+export function sendOps(who: Who): string[] {
+  return who === "uni" ? ["send_as_uni", "send.check"] : ["draft.save", "draft.review", "send", "send.check"];
+}
+
+/** A message can be sent from this account (every operation of `sendOps` is offered). */
 export function canSendFrom(a: AccountBoxes | undefined): boolean {
-  if (!a) return false;
-  return a.who === "uni" ? can(a, "send_as_uni") : can(a, "draft.save") && can(a, "send");
+  return !!a && sendOps(a.who).every((op) => can(a, op));
+}
+
+/** A stored draft this app can edit and review in full: plain text only, no attachments, not cut short. Anything else
+ *  would be sent with parts the review can't show, or lose them when saved again. */
+export function draftEditable(m: MailMessage): boolean {
+  return m.html == null && m.attachments.length === 0 && !m.truncated;
 }
 
 /** Any write is offered anywhere (else the header says read-only). */
@@ -282,6 +293,41 @@ export function notVerified(m: MailMessage, o: Overview): boolean {
   const owner = o.accounts.find((a) => a.who === "owner")?.name.toLowerCase();
   if (!owner || m.draft || m.dmarc == null) return false;
   return m.from.some((a) => a.email.toLowerCase() === owner) && m.dmarc.toLowerCase() !== "pass";
+}
+
+/** A send whose outcome the app doesn't know yet: kept (on the device) until the bridge says what happened to it. */
+export type PendingSend = { account_id: string; op_id: string; who: Who; at: string };
+const PENDING_KEY = "uni.mail.pending.v1";
+
+/** States a send can't leave by itself: the outcome is known. */
+export function settled(state: SendState): boolean {
+  return ["cleaned", "submitted", "refused", "failed", "awaiting-approval"].includes(state);
+}
+
+export function readPending(store: Pick<Storage, "getItem"> | null): PendingSend[] {
+  try {
+    const v = JSON.parse(store?.getItem(PENDING_KEY) ?? "[]");
+    return Array.isArray(v) ? v.filter((p) => p && typeof p.op_id === "string" && typeof p.account_id === "string" && (p.who === "owner" || p.who === "uni")) : [];
+  } catch { return []; }
+}
+
+export function writePending(store: Pick<Storage, "setItem"> | null, list: PendingSend[]): void {
+  try { store?.setItem(PENDING_KEY, JSON.stringify(list)); } catch { /* storage full or off: the composer still shows it */ }
+}
+
+/** The list with `p` added (once), or with `opId` taken out. */
+export function withPending(list: PendingSend[], p: PendingSend): PendingSend[] {
+  return [...list.filter((x) => x.op_id !== p.op_id), p];
+}
+export function withoutPending(list: PendingSend[], opId: string): PendingSend[] {
+  return list.filter((x) => x.op_id !== opId);
+}
+
+/** Whether a failed send call leaves the outcome unknown: the bridge may have taken it (no answer, a cut-off or unreadable
+ *  answer, a failure behind it). A refusal (4xx) is a definite no: nothing was sent. */
+export function uncertain(e: unknown): boolean {
+  const p = mailProblem(e);
+  return p.kind !== "refused" && p.kind !== "not_allowed";
 }
 
 /** What a send's outcome says, in a sentence; `done`: nothing more will happen to it; `blocked`: no Send button. */

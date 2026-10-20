@@ -1,7 +1,8 @@
 // T-45 Mail, pure parts. Run: node --experimental-strip-types scripts/mail.test.ts (Node >= 22.6)
 import assert from "node:assert/strict";
 import {
-  can, canSendFrom, draftFields, formatAddresses, newOpId, notVerified, parseAddresses, replyFields, sameFields, sendLabel, sendOutcomeText, validAddress, writesOffered,
+  can, canSendFrom, draftEditable, draftFields, formatAddresses, newOpId, notVerified, parseAddresses, readPending, replyFields, sameFields, sendLabel, sendOutcomeText, settled,
+  uncertain, validAddress, withoutPending, withPending, writePending, writesOffered,
   type AccountBoxes, type MailMessage, type MailThread, type SendOutcome,
 } from "../src/mailCore.ts";
 import {
@@ -152,4 +153,36 @@ assert.match(sendOutcomeText(out("awaiting-approval", "Uni's outbound rules want
 const op1 = newOpId(), op2 = newOpId();
 assert.match(op1, /^op-[0-9a-f]{32}$/);
 assert.notEqual(op1, op2);
-console.log("ok   mail (T-210): what is offered, addresses, replies, not verified, send outcomes");
+// Codex review 1: sending needs every operation its workflow uses, not just save and send
+assert.equal(canSendFrom({ ...own, operations: ["draft.save", "send", "send.check"] }), false, "no review: an opened draft couldn't be sent");
+assert.equal(canSendFrom({ ...unis, operations: ["send_as_uni"] }), false, "no check: an unknown outcome could never be resolved");
+
+// a draft is edited and reviewed here only when the review can show all of it
+assert.equal(draftEditable(msg({ draft: true, text: "x" })), true);
+assert.equal(draftEditable(msg({ draft: true, text: "x", html: "<p>x</p>" })), false);
+assert.equal(draftEditable(msg({ draft: true, text: "x", truncated: true })), false);
+assert.equal(draftEditable(msg({ draft: true, text: "x", attachments: [{ blob_id: "b", name: "a.pdf", mime: "application/pdf", size: 1, cid: null }] })), false);
+
+// a send call that failed without a refusal may have gone: its outcome is unknown, never "not sent"
+assert.equal(uncertain({ kind: "unreachable", message: "timeout" }), true);
+assert.equal(uncertain({ kind: "server", message: "mail server: URLError" }), true);
+assert.equal(uncertain({ kind: "invalid", message: "bad bridge answer" }), true);
+assert.equal(uncertain("IPC failed"), true);
+assert.equal(uncertain({ kind: "refused", status: 409, message: "this opId was used for a different request" }), false);
+assert.equal(uncertain({ kind: "refused", status: 403, message: "not offered" }), false);
+assert.deepEqual(["cleaned", "submitted", "refused", "failed", "awaiting-approval"].map((x) => settled(x as SendOutcome["state"])), [true, true, true, true, true]);
+assert.deepEqual(["unknown", "submitting", "reserved", "drafting"].map((x) => settled(x as SendOutcome["state"])), [false, false, false, false]);
+
+// the pending list survives a restart and holds each send once
+const mem = new Map<string, string>();
+const fake = { getItem: (k: string) => mem.get(k) ?? null, setItem: (k: string, v: string) => void mem.set(k, v) };
+const p1 = { account_id: "A", op_id: "op-1", who: "owner" as const, at: "2026-10-20T10:00:00Z" };
+writePending(fake, withPending(withPending(readPending(fake), p1), p1));
+assert.deepEqual(readPending(fake), [p1]);
+writePending(fake, withoutPending(readPending(fake), "op-1"));
+assert.deepEqual(readPending(fake), []);
+mem.set("uni.mail.pending.v1", "{not json");
+assert.deepEqual(readPending(fake), [], "a broken list reads as empty, not an error");
+mem.set("uni.mail.pending.v1", JSON.stringify([{ op_id: 7 }, { ...p1, who: "someone" }, p1]));
+assert.deepEqual(readPending(fake), [p1]);
+console.log("ok   mail (T-210): what is offered, addresses, replies, not verified, send outcomes, pending sends");

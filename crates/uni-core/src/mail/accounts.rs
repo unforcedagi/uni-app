@@ -344,6 +344,12 @@ impl MailBridge<'_> {
     /// The session's accounts: the key's own, and the one shared with it. A v1 bridge (no `/mail/session`) is one
     /// account, the one it reads.
     pub async fn session(&self) -> MailResult<MailSession> {
+        let s = self.fetch_session().await?;
+        super::write::remember_session(self, &s);
+        Ok(s)
+    }
+
+    async fn fetch_session(&self) -> MailResult<MailSession> {
         match self.post("/mail/session", &json!({}), super::JMAP_TIMEOUT, 1024 * 1024).await {
             Ok(raw) => parse_session(&serde_json::from_slice(&raw).map_err(|e| invalid(format!("bad bridge answer: {e}")))?),
             Err(e) if not_found(&e) => {
