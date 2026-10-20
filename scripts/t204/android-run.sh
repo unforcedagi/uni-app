@@ -43,7 +43,7 @@ SHARED=$(grep -F "/$NAME" "$OUT/shared-files.txt" | tr -d '\r' | head -1 || true
 $E shell content query --uri content://media/external/downloads --projection _display_name:mime_type:relative_path:_size:is_pending --where "\"_display_name LIKE '%.md'\"" > "$OUT/mediastore.txt" || true
 $E shell input keyevent KEYCODE_BACK || true
 cat "$OUT/share-intent.txt" "$OUT/mediastore.txt"
-python3 -I - "$FIX" "$IDX" "$OUT" <<'PY'
+python3 -I - "$FIX" "$IDX" "$OUT" <<'PY' | tee "$OUT/check.txt"
 import json, os, sys
 fix, idx, out = sys.argv[1], int(sys.argv[2]), sys.argv[3]
 n = json.load(open(fix, encoding="utf-8"))["notes"][idx]
