@@ -224,18 +224,21 @@ function HeldView({ e, acct, onBack, onDecide }: { e: HeldEntry; acct: AccountBo
   const open = waiting(e);
   const approvable = canApprove(acct, p);
   const declinable = can(acct, "send.decline");
+  // a confirm stands only while its own operation is offered (the bridge's session can change on Refresh)
+  const allowed = (kind: "approve" | "decline" | null) => (kind === "approve" ? approvable : kind === "decline" ? declinable : false);
+  const asking = allowed(confirm) ? confirm : null;
   const ask = (kind: "approve" | "decline") => { setConfirm(kind); requestAnimationFrame(() => confirmBox.current?.focus()); };
   const go = async () => {
     // a second tap while the first is on its way does nothing
-    if (inflight.current || !confirm) return;
+    if (inflight.current || !asking) return;
     inflight.current = true; setBusy(true);
-    try { await onDecide(confirm); } finally { inflight.current = false; setBusy(false); setConfirm(null); }
+    try { await onDecide(asking); } finally { inflight.current = false; setBusy(false); setConfirm(null); }
   };
   const from = `Uni's address (${acct.name})`;
   return <section className="mail-thread mail-held" aria-label={`Held send: ${subjectLabel(f?.subject ?? "")}`}>
     <div className="mail-thread-bar">
       <button type="button" className="note-action mail-thread-back" onClick={onBack}>← Waiting</button>
-      <span className="mail-held-where"><WhoTag who="uni" address={acct.name} /> Held for you · not sent</span>
+      <span className="mail-held-where"><WhoTag who="uni" address={acct.name} /> {e.outcome?.kind === "sent" ? "Sent from Uni's address" : e.outcome?.kind === "declined" ? "Declined · not sent" : "Held for you · not sent"}</span>
     </div>
     <div className="mail-thread-scroll">
       <h2 className="mail-subject">{subjectLabel(f?.subject ?? "")}</h2>
@@ -254,12 +257,12 @@ function HeldView({ e, acct, onBack, onDecide }: { e: HeldEntry; acct: AccountBo
         {f.text ? <PlainBody text={f.text} /> : <p className="empty">This message has no text.</p>}
       </article>}
       {e.outcome && <p className={`mail-held-outcome held-${e.outcome.kind}`} role="status">{e.outcome.text}</p>}
-      {open && (approvable || declinable) && (confirm
-        ? <div ref={confirmBox} tabIndex={-1} className="mail-held-confirm" role="group" aria-label={confirm === "approve" ? "Confirm sending" : "Confirm not sending"}>
-            <p>{confirm === "approve" ? `Send this from ${from} to ${heldTo(p)}? It goes out exactly as shown.` : `Don't send this? Nothing goes out from ${from}; Uni can change or drop the draft.`}</p>
+      {open && (approvable || declinable) && (asking
+        ? <div ref={confirmBox} tabIndex={-1} className="mail-held-confirm" role="group" aria-label={asking === "approve" ? "Confirm sending" : "Confirm not sending"}>
+            <p>{asking === "approve" ? `Send this from ${from} to ${heldTo(p)}? It goes out exactly as shown.` : `Don't send this? Nothing goes out from ${from}; Uni can change or drop the draft.`}</p>
             <span className="mail-held-buttons">
-              <button type="button" className={confirm === "approve" ? "send mail-held-yes" : "note-action mail-held-yes"} disabled={busy} onKeyDown={noEnter} onClick={() => void go()}>
-                {busy ? (confirm === "approve" ? "Sending…" : "Declining…") : confirm === "approve" ? "Yes, send from Uni's address" : "Yes, don't send it"}</button>
+              <button type="button" className={asking === "approve" ? "send mail-held-yes" : "note-action mail-held-yes"} disabled={busy} onKeyDown={noEnter} onClick={() => void go()}>
+                {busy ? (asking === "approve" ? "Sending…" : "Declining…") : asking === "approve" ? "Yes, send from Uni's address" : "Yes, don't send it"}</button>
               <button type="button" className="note-quiet" disabled={busy} onKeyDown={noEnter} onClick={() => setConfirm(null)}>Cancel</button>
             </span>
           </div>

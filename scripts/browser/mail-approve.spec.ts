@@ -64,6 +64,7 @@ test("a held send shows what it sends and why; Send it takes a confirm, never En
   await page.evaluate(() => { (window as any).__decideDelay = 400; });
   await yes.evaluate((b: HTMLElement) => { b.click(); b.click(); });
   await expect(h.getByRole('status')).toHaveText("Sent from Uni's address (uni@example.com).");
+  await expect(h.locator('.mail-held-where')).toContainText("Sent from Uni's address");
   expect(await calls(page, 'mail_send_approve')).toEqual([{ accountId: 'U', opId: 'op-held-1-00000000000000', fingerprint: await parkedFp(page, 0) }]);
   expect(await submissions(page)).toEqual([{ account: 'U', draft: 'h1', to: ['orchard@example.org'] }]);
   await expect(h.getByRole('button', { name: /^Send it/ })).toHaveCount(0);
@@ -186,12 +187,20 @@ test("nothing about held sends shows unless the bridge offers deciding them; eac
   await expect(badge(page)).toHaveCount(0);
   expect(await calls(page, 'mail_parked')).toEqual([]);
 
-  // declining only: Don't send, no Send it
-  await page.evaluate(() => { (window as any).__ops.U = ['mark_seen', 'flag', 'send.parked', 'send.decline']; });
+  // both offered, Send it's confirm open; then the bridge stops offering approving: the confirm goes with it
+  await page.evaluate(() => { (window as any).__ops.U = ['mark_seen', 'flag', 'send.parked', 'send.approve', 'send.decline']; });
   await mail(page).getByRole('button', { name: 'Refresh' }).click();
   const h = await openHeld(page, BARN);
+  await h.getByRole('button', { name: /^Send it/ }).click();
+  await expect(h.getByRole('group', { name: 'Confirm sending' })).toBeVisible();
+  await page.evaluate(() => { (window as any).__ops.U = ['mark_seen', 'flag', 'send.parked', 'send.decline']; });
+  await mail(page).getByRole('button', { name: 'Refresh' }).click();
+  await expect(h.getByRole('group', { name: 'Confirm sending' })).toHaveCount(0);
+  await expect(h.getByRole('button', { name: "Yes, send from Uni's address" })).toHaveCount(0);
+  // declining only: Don't send, no Send it
   await expect(h.getByRole('button', { name: /^Don't send/ })).toBeVisible();
   await expect(h.getByRole('button', { name: /^Send it/ })).toHaveCount(0);
+  expect(await calls(page, 'mail_send_approve')).toEqual([]);
 
   // the bridge stops offering them: the group goes
   await page.evaluate(() => { (window as any).__ops.U = ['mark_seen', 'flag']; });
