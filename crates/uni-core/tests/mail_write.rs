@@ -157,7 +157,7 @@ async fn the_owner_sends_as_uni_by_fields_and_a_parked_send_says_so() {
     let fields = DraftFields { to: to("ada@example.org"), subject: "Re: Question about the reading group".into(), text: "Yes, Thursday.".into(), in_reply_to: Some("u2".into()), ..Default::default() };
     let out = mail.send_as_uni("U", "op-uni-0123456789ab", &fields).await.unwrap();
     assert_eq!(out.state, SendState::Cleaned);
-    fake.state.lock().unwrap().force_send = Some(("awaiting-approval".into(), "Uni's outbound rules want Aaron to approve mail to ada@example.org".into()));
+    fake.state.lock().unwrap().force_send = Some(("awaiting-approval".into(), "Uni's outbound rules want Robin to approve mail to ada@example.org".into()));
     let parked = mail.send_as_uni("U", "op-uni-fedcba987654", &fields).await.unwrap();
     assert_eq!(parked.state, SendState::AwaitingApproval);
     assert!(parked.reason.unwrap().contains("approve"));
@@ -188,4 +188,94 @@ async fn writes_reuse_a_fresh_session() {
     mail.archive("A", &["a4".into()]).await.unwrap();
     let sessions = fake.state.lock().unwrap().requests.iter().filter(|(p, _)| p == "/mail/session").count();
     assert_eq!(sessions, 1, "one session for the overview, none per write");
+}
+
+/// T-213: the owner's key on Uni's account, where the bridge offers the approval operations.
+const ON_UNI_APPROVING: &[&str] = &["mark_seen", "flag", "send.parked", "send.approve", "send.decline"];
+
+async fn approving(keys: &Keys) -> FakeBridge {
+    let fake = writable(keys).await;
+    {
+        let mut s = fake.state.lock().unwrap();
+        s.ops.insert("U".into(), ON_UNI_APPROVING.iter().map(|o| o.to_string()).collect());
+        s.park("U", "ask@example.org", "Lunch on Thursday?", "Shall we meet at noon?", "Uni's outbound rules want Robin to approve mail to ask@example.org");
+        s.park("U", "ask@example.org", "A second question", "And Friday?", "Uni's outbound rules want Robin to approve mail to ask@example.org");
+    }
+    fake
+}
+
+#[tokio::test]
+async fn the_owner_sees_a_held_send_and_approves_exactly_it_once() {
+    let keys = Keys::generate();
+    let fake = approving(&keys).await;
+    let mail = MailBridge::new(&fake.url, &keys).unwrap();
+    let o = mail.overview().await.unwrap();
+    assert_eq!(o.accounts[1].operations, ON_UNI_APPROVING);
+    let held = mail.parked("U").await.unwrap();
+    assert_eq!(held.len(), 2);
+    let h = &held[0];
+    let f = h.fields.as_ref().unwrap();
+    assert_eq!((f.to[0].email.as_str(), f.subject.as_str(), f.text.as_str()), ("ask@example.org", "Lunch on Thursday?", "Shall we meet at noon?"));
+    assert_eq!((h.recipients.as_slice(), h.changed, h.problem.as_deref()), (&["ask@example.org".to_string()][..], false, None));
+    assert!(h.reason.as_deref().unwrap().contains("approve"));
+    let fp = h.fingerprint.clone().unwrap();
+    let out = mail.send_approve("U", &h.op_id, &fp).await.unwrap();
+    assert_eq!(out.state, SendState::Cleaned);
+    // a second tap (or a retry after a lost answer) is the same approval: its outcome, nothing sent again
+    assert_eq!(mail.send_approve("U", &h.op_id, &fp).await.unwrap().state, SendState::Cleaned);
+    assert_eq!(fake.state.lock().unwrap().submissions.len(), 1);
+    // it has left the list; declining it now is refused
+    assert_eq!(mail.parked("U").await.unwrap().iter().map(|p| p.op_id.as_str()).collect::<Vec<_>>(), [held[1].op_id.as_str()]);
+    assert!(matches!(mail.send_decline("U", &h.op_id).await, Err(MailError::Refused { status: 409, .. })));
+    // what was asked: the parked send by opId and the fingerprint shown, never fields
+    let log = fake.state.lock().unwrap().op_log.clone();
+    let asked = log.iter().find(|o| o["op"] == "send.approve").unwrap();
+    assert_eq!((asked["opId"].as_str(), asked["fingerprint"].as_str(), asked.get("fields")), (Some(h.op_id.as_str()), Some(fp.as_str()), None));
+}
+
+#[tokio::test]
+async fn a_held_send_that_changed_since_it_was_shown_is_not_sent() {
+    let keys = Keys::generate();
+    let fake = approving(&keys).await;
+    let mail = MailBridge::new(&fake.url, &keys).unwrap();
+    let held = mail.parked("U").await.unwrap();
+    let (h, other) = (&held[0], &held[1]);
+    // another fingerprint than the one parked: refused before anything runs
+    let e = mail.send_approve("U", &h.op_id, other.fingerprint.as_deref().unwrap()).await.unwrap_err();
+    assert!(matches!(&e, MailError::Refused { status: 409, message } if message.contains("isn't the draft")), "{e:?}");
+    // the stored draft changed after it was shown: the shown fingerprint no longer sends it
+    {
+        let mut s = fake.state.lock().unwrap();
+        let u = s.shared.iter_mut().find(|m| m.id == "U").unwrap();
+        let d = u.emails.iter_mut().find(|e| e["id"] == h.draft_id.as_deref().unwrap()).unwrap();
+        d["bodyValues"]["1"]["value"] = serde_json::json!("Shall we meet at noon? Bring the account number.");
+    }
+    let out = mail.send_approve("U", &h.op_id, h.fingerprint.as_deref().unwrap()).await.unwrap();
+    assert_eq!((out.state, out.reason.as_deref()), (SendState::Refused, Some("the draft changed since it was reviewed")));
+    // a fingerprint that isn't one never leaves the device
+    let before = ops_sent(&fake).len();
+    assert!(matches!(mail.send_approve("U", &other.op_id, "not-a-fingerprint").await, Err(MailError::Invalid { .. })));
+    assert_eq!(ops_sent(&fake).len(), before);
+    assert!(fake.state.lock().unwrap().submissions.is_empty());
+}
+
+#[tokio::test]
+async fn declining_sends_nothing_and_a_bridge_without_the_operations_gets_none() {
+    let keys = Keys::generate();
+    let fake = approving(&keys).await;
+    let mail = MailBridge::new(&fake.url, &keys).unwrap();
+    let held = mail.parked("U").await.unwrap();
+    let out = mail.send_decline("U", &held[1].op_id).await.unwrap();
+    assert_eq!(out.state, SendState::Declined);
+    assert_eq!(mail.send_decline("U", &held[1].op_id).await.unwrap().state, SendState::Declined, "a retry gets the outcome");
+    assert!(matches!(mail.send_approve("U", &held[1].op_id, held[1].fingerprint.as_deref().unwrap()).await, Err(MailError::Refused { status: 409, .. })));
+    assert!(fake.state.lock().unwrap().submissions.is_empty());
+    // the same bridge with the approval operations off: nothing is asked of it
+    fake.state.lock().unwrap().ops.insert("U".into(), vec!["mark_seen".into(), "flag".into()]);
+    mail.session().await.unwrap(); // the app reads the session again (Refresh): the change is seen
+    let before = ops_sent(&fake).len();
+    for e in [mail.parked("U").await.map(|_| ()), mail.send_approve("U", &held[0].op_id, held[0].fingerprint.as_deref().unwrap()).await.map(|_| ()), mail.send_decline("U", &held[0].op_id).await.map(|_| ())] {
+        assert!(matches!(&e, Err(MailError::Refused { status: 403, message }) if message.contains("doesn't offer")), "{e:?}");
+    }
+    assert_eq!(ops_sent(&fake).len(), before);
 }

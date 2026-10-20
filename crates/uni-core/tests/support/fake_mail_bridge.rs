@@ -28,6 +28,10 @@
 //! operation not offered is 403; a send binds to the draft's fingerprint, one outcome per opId (a changed request under
 //! it is 409) and one per draft. [`State::force_send`] makes the next sends end in a given state (refused, unknown, …).
 //! Every op request is kept in [`State::op_log`]; a submission is a row in [`State::submissions`], never mail.
+//!
+//! T-213: a send forced to `awaiting-approval` (or one made by [`State::park`]) is parked: `send.parked` lists it with
+//! what the draft says and the fingerprint of it now, `send.approve` sends it only under the fingerprint it was parked
+//! with (a retry gets the outcome), and `send.decline` sends nothing. The proposed bridge addition is `send.parked`.
 #![allow(dead_code)]
 
 use std::collections::{HashMap, HashSet};
@@ -91,6 +95,8 @@ pub struct State {
     pub submissions: Vec<(String, String, Vec<String>)>,
     /// Make sends end in this state instead of going out ("refused", "unknown", "awaiting-approval", "failed").
     pub force_send: Option<(String, String)>,
+    /// Parked sends by opId: the fingerprint each was parked with, and in what order they were parked.
+    pub parked: Vec<(String, String)>,
     seen: HashSet<String>,
 }
 
@@ -129,6 +135,7 @@ impl FakeBridge {
             sends: HashMap::new(),
             submissions: Vec::new(),
             force_send: None,
+            parked: Vec::new(),
             allow: allow.iter().map(|k| k.to_lowercase()).collect(),
             server_down: false,
             forwarded: Vec::new(),
@@ -313,6 +320,24 @@ impl State {
     }
 
     /// Every email's keywords, by account and id: what a test compares before and after reading.
+    /// Uni's account `account` parks a send for the owner: a draft to `to` in its Drafts and the send held, as the bridge
+    /// does under a needs-aaron rule. Returns the opId.
+    pub fn park(&mut self, account: &str, to: &str, subject: &str, text: &str, reason: &str) -> String {
+        let n = self.parked.len() + 1;
+        let (op_id, id) = (format!("op-park-{n:04}-0000000000"), format!("p{n}"));
+        let mail = self.account_mut(account).expect("no such account");
+        let address = mail.account.clone();
+        let mut e = email(&id, &format!("{account}-drafts"), ("Uni", &address), subject, &format!("2026-10-19T{:02}:15:00Z", 8 + n % 12), true, text, None);
+        e["to"] = json!([{ "name": null, "email": to }]);
+        e["keywords"]["$draft"] = json!(true);
+        let fp = fingerprint(&e);
+        mail.emails.push(e);
+        let out = json!({ "opId": op_id, "accountId": account, "draftId": id, "state": "awaiting-approval", "reason": reason });
+        self.sends.insert(op_id.clone(), (json!({ "accountId": account, "opId": op_id, "draftId": id }), out));
+        self.parked.push((op_id.clone(), fp));
+        op_id
+    }
+
     pub fn keywords(&self) -> Vec<(String, String, Value)> {
         std::iter::once(&self.mail).chain(self.shared.iter()).flat_map(|m| m.emails.iter().map(|e| (m.id.clone(), e["id"].as_str().unwrap_or("").to_string(), e["keywords"].clone()))).collect()
     }
@@ -720,7 +745,88 @@ fn op(s: &mut State, req: &Value) -> (u16, Value) {
             if let Some(r) = reason {
                 out["reason"] = json!(r);
             }
+            if state == "awaiting-approval" {
+                let mail = s.account(&account).unwrap();
+                let fp = find(mail, &draft).map(|n| fingerprint(&mail.emails[n])).unwrap_or_default();
+                s.parked.push((op_id.clone(), fp));
+            }
             s.sends.insert(op_id, (request, out.clone()));
+            (200, out)
+        }
+        "send.parked" => {
+            if req.as_object().is_some_and(|o| o.len() > 2) {
+                return op_err(400, "send.parked doesn't take arguments");
+            }
+            let mail = s.account(&account).unwrap();
+            let list: Vec<Value> = s.parked.iter().filter_map(|(op_id, parked_fp)| {
+                let (r, out) = s.sends.get(op_id)?;
+                if r["accountId"] != account.as_str() || out["state"] != "awaiting-approval" {
+                    return None;
+                }
+                let mut item = json!({ "opId": op_id, "draftId": out["draftId"], "reason": out["reason"], "sentBy": "Uni", "parkedAt": "2026-10-19T12:00:00Z" });
+                match out["draftId"].as_str().and_then(|d| find(mail, d)) {
+                    None => item["problem"] = json!("the parked draft isn't there"),
+                    Some(n) => {
+                        let e = &mail.emails[n];
+                        let fp = fingerprint(e);
+                        let text = e["textBody"].as_array().into_iter().flatten().filter_map(|p| e["bodyValues"][p["partId"].as_str()?]["value"].as_str()).collect::<Vec<_>>().join("");
+                        let addrs = |k: &str| e[k].as_array().cloned().unwrap_or_default();
+                        item["recipients"] = json!(["to", "cc", "bcc"].iter().flat_map(|k| addrs(k)).filter_map(|a| a["email"].as_str().map(str::to_string)).collect::<Vec<_>>());
+                        item["fields"] = json!({ "to": addrs("to"), "cc": addrs("cc"), "bcc": addrs("bcc"), "subject": e["subject"], "text": text });
+                        item["plain"] = json!(true);
+                        item["changed"] = json!(&fp != parked_fp);
+                        item["fingerprint"] = json!(fp);
+                    }
+                }
+                Some(item)
+            }).collect();
+            (200, json!({ "accountId": account, "parked": list }))
+        }
+        "send.approve" | "send.decline" => {
+            let Some(op_id) = req["opId"].as_str().map(str::to_string) else { return op_err(400, "opId is required") };
+            let parked_fp = s.parked.iter().find(|(o, _)| *o == op_id).map(|(_, f)| f.clone());
+            let Some((r, out)) = s.sends.get(&op_id).cloned().filter(|(r, _)| r["accountId"] == account.as_str() && parked_fp.is_some()) else { return op_err(404, "no such send") };
+            let parked_fp = parked_fp.unwrap();
+            let fp = req["fingerprint"].as_str().unwrap_or("");
+            if let Some(was) = out["decision"]["outcome"].as_str() {
+                let same = (name == "send.approve" && was == "approved" && fp == parked_fp) || (name == "send.decline" && was == "declined");
+                return if same { (200, out) } else { op_err(409, &format!("that send was already {was}")) };
+            }
+            if out["state"] != "awaiting-approval" {
+                return op_err(409, &format!("that send isn't waiting for approval (it is {})", out["state"].as_str().unwrap_or("?")));
+            }
+            let mut out = out;
+            if name == "send.decline" {
+                out["state"] = json!("declined");
+                out["reason"] = json!("the owner declined it");
+                out["decision"] = json!({ "by": "owner", "at": "2026-10-19T12:30:00Z", "outcome": "declined" });
+            } else {
+                if fp != parked_fp {
+                    return op_err(409, "that isn't the draft this send was parked with");
+                }
+                out["decision"] = json!({ "by": "owner", "at": "2026-10-19T12:30:00Z", "outcome": "approved" });
+                let draft = r["draftId"].as_str().unwrap_or("").to_string();
+                let mail = s.account_mut(&account).unwrap();
+                match find(mail, &draft).filter(|n| is_draft(&mail.emails[*n])) {
+                    Some(n) if fingerprint(&mail.emails[n]) == parked_fp => {
+                        let rcpts = ["to", "cc", "bcc"].iter().flat_map(|k| mail.emails[n][*k].as_array().cloned().unwrap_or_default()).filter_map(|a| a["email"].as_str().map(str::to_string)).collect();
+                        mail.emails[n]["mailboxIds"] = json!({ boxid("sent"): true });
+                        mail.emails[n]["keywords"].as_object_mut().map(|o| o.remove("$draft"));
+                        s.submissions.push((account.clone(), draft, rcpts));
+                        out["state"] = json!("cleaned");
+                        out.as_object_mut().map(|o| o.remove("reason"));
+                    }
+                    Some(_) => {
+                        out["state"] = json!("refused");
+                        out["reason"] = json!("the draft changed since it was reviewed");
+                    }
+                    None => {
+                        out["state"] = json!("refused");
+                        out["reason"] = json!("that isn't a draft in this account's Drafts");
+                    }
+                }
+            }
+            s.sends.get_mut(&op_id).unwrap().1 = out.clone();
             (200, out)
         }
         _ => op_err(403, &format!("{name} isn't an operation this fake knows")),

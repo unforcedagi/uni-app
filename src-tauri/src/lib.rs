@@ -1691,6 +1691,24 @@ async fn mail_send_check(app: tauri::AppHandle, account_id: String, op_id: Strin
     mail_io(&app, move |mail| tauri::async_runtime::block_on(mail.send_check(&account_id, &op_id))).await
 }
 
+/// T-213: the sends on Uni's account waiting for you, with what each says (read-only).
+#[tauri::command]
+async fn mail_parked(app: tauri::AppHandle, account_id: String) -> Result<Vec<uni_core::mail::Parked>, MailError> {
+    mail_io(&app, move |mail| tauri::async_runtime::block_on(mail.parked(&account_id))).await
+}
+
+/// Approve a parked send: exactly the draft whose fingerprint you were shown, once per opId.
+#[tauri::command]
+async fn mail_send_approve(app: tauri::AppHandle, account_id: String, op_id: String, fingerprint: String) -> Result<SendOutcome, MailError> {
+    mail_io(&app, move |mail| tauri::async_runtime::block_on(mail.send_approve(&account_id, &op_id, &fingerprint))).await
+}
+
+/// Decline a parked send: nothing is sent.
+#[tauri::command]
+async fn mail_send_decline(app: tauri::AppHandle, account_id: String, op_id: String) -> Result<SendOutcome, MailError> {
+    mail_io(&app, move |mail| tauri::async_runtime::block_on(mail.send_decline(&account_id, &op_id))).await
+}
+
 // ── Journal: entries go straight to the Parachute vault, signed per request
 // with the same key that signs Buzz messages (NIP-98). The device queues each
 // entry first, so journaling works offline and survives app restarts.
@@ -2460,6 +2478,9 @@ pub fn run() {
             mail_send,
             mail_send_as_uni,
             mail_send_check,
+            mail_parked,
+            mail_send_approve,
+            mail_send_decline,
             journal_config,
             journal_set_config,
             journal_save_text,

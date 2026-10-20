@@ -7,6 +7,8 @@
 //! `writes` (T-210) is `shared` on a bridge that offers writes: the owner's operations on its own account and, on Uni's,
 //! reading state, flags and the deputy send. Each `/mail/op` is printed with its operation and account; a send is a row
 //! in memory, never mail.
+//! `approve` (T-213) is `writes` with two sends parked in Uni's Drafts for the owner, and the owner's key offered
+//! `send.parked`, `send.approve` and `send.decline` on Uni's account. Approving one is a row in memory, never mail.
 
 #[path = "../tests/support/fake_mail_bridge.rs"]
 mod fake;
@@ -17,15 +19,22 @@ async fn main() {
     let port: u16 = args.next().and_then(|p| p.parse().ok()).expect("usage: fake_mail_bridge <port> <pubkey hex,…> [down|shared]");
     let allow: Vec<String> = args.next().unwrap_or_default().split(',').filter(|k| !k.is_empty()).map(str::to_string).collect();
     let mode = args.next().unwrap_or_default();
-    let bridge = if mode == "shared" || mode == "writes" {
+    let bridge = if mode == "shared" || mode == "writes" || mode == "approve" {
         let (own, uni, triage) = fake::shared_mail();
         let b = fake::FakeBridge::start_shared(port, &allow, own, vec![uni]).await;
         b.state.lock().unwrap().triage = triage;
-        if mode == "writes" {
+        if mode == "writes" || mode == "approve" {
             let ops = |l: &[&str]| l.iter().map(|o| o.to_string()).collect::<Vec<_>>();
             let mut s = b.state.lock().unwrap();
             s.ops.insert("A".into(), ops(&["mark_seen", "flag", "archive", "draft.save", "draft.review", "draft.discard", "send", "send.check"]));
             s.ops.insert("U".into(), ops(&["mark_seen", "flag", "send_as_uni", "send.check"]));
+        }
+        if mode == "approve" {
+            let mut s = b.state.lock().unwrap();
+            s.ops.get_mut("U").unwrap().extend(["send.parked", "send.approve", "send.decline"].map(String::from));
+            let why = |a: &str| format!("Uni's outbound rules want Robin to approve mail to {a}");
+            s.park("U", "orchard@example.org", "Booking the barn for the harvest supper", "Hello,\n\nCould we book the barn for the harvest supper on Saturday the 7th, from five until ten? We expect about forty people.\n\nThank you,\nUni, for Robin Vale", &why("orchard@example.org"));
+            s.park("U", "press@example.net", "A quote for your newsletter", "Hi,\n\nRobin is happy to be quoted on the garden week. Here is the line: \"Bring a jar, take a jar.\"\n\nUni", &why("press@example.net"));
         }
         b
     } else {

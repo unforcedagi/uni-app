@@ -10,6 +10,11 @@
 //! fingerprint is the SHA-256 of the stored message), then `send` that draft by id and fingerprint under one `opId` per
 //! review. A retry with the same `opId` gets the first outcome, never a second message. The owner sends as Uni only
 //! through the bridge's deputy path (`send_as_uni`), under Uni's outbound rules.
+//!
+//! T-213: a send from Uni's account that its outbound rules hold for the owner is *parked* in Uni's Drafts. The owner's
+//! key lists those (`send.parked`, read-only), then approves one (`send.approve`, bound to the fingerprint of the bytes it
+//! was shown, so a draft that changed since is refused) or declines it (`send.decline`: nothing is sent). Both are once
+//! per opId: a retry gets the first outcome.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -41,6 +46,7 @@ fn recent_session(bridge: &MailBridge<'_>) -> Option<MailSession> {
 /// Every operation this client knows (the bridge's names).
 pub const OPERATIONS: &[&str] = &[
     "mark_seen", "flag", "archive", "draft.save", "draft.review", "draft.discard", "draft.add_for_owner", "send", "send_as_uni", "send.check",
+    "send.parked", "send.approve", "send.decline",
 ];
 const MAX_IDS: usize = 100;
 const MAX_RECIPIENTS: usize = 50;
@@ -96,6 +102,8 @@ pub enum SendState {
     AwaitingApproval,
     Failed,
     Unknown,
+    /// The owner declined a parked send: nothing was sent (T-213).
+    Declined,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -110,6 +118,67 @@ pub struct SendOutcome {
     pub delivery: Option<HashMap<String, String>>,
     /// The bridge returned an earlier send's outcome for this draft (it was already sent under another opId).
     pub note: Option<String>,
+}
+
+/// A send from Uni's account waiting for the owner (T-213), as the bridge's `send.parked` lists it. `fields` and
+/// `fingerprint` come from the same bytes of the parked draft: approving sends what was shown, or nothing.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Parked {
+    pub op_id: String,
+    pub draft_id: Option<String>,
+    /// Why the rules held it (the rule's words).
+    pub reason: Option<String>,
+    /// "Uni", or "owner, as Uni" for the owner's own send as Uni.
+    pub sent_by: Option<String>,
+    pub parked_at: Option<String>,
+    /// The envelope recipients the bridge recorded when it parked the send.
+    pub recipients: Vec<String>,
+    /// SHA-256 of the parked draft as read now; `None` when it couldn't be read (`problem` says why).
+    pub fingerprint: Option<String>,
+    /// The stored draft is no longer the one parked: an approve will be refused.
+    pub changed: bool,
+    pub fields: Option<DraftFields>,
+    /// Plain text and nothing else, so `fields` is all of it.
+    pub plain: Option<bool>,
+    pub problem: Option<String>,
+}
+
+fn is_fingerprint(f: &str) -> bool {
+    f.len() == 64 && f.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
+fn parked_list(v: &Value, account: &str) -> MailResult<Vec<Parked>> {
+    if v.get("accountId").and_then(Value::as_str) != Some(account) {
+        return Err(invalid("the bridge answered about another account"));
+    }
+    let list = v.get("parked").and_then(Value::as_array).ok_or_else(|| invalid("the bridge's answer has no list of held sends"))?;
+    list.iter()
+        .map(|p| {
+            let s = |k: &str| p.get(k).and_then(Value::as_str).map(str::to_string);
+            let op_id = s("opId").ok_or_else(|| invalid("a held send without an id"))?;
+            check_op_id(&op_id)?;
+            let fingerprint = s("fingerprint");
+            if fingerprint.as_deref().is_some_and(|f| !is_fingerprint(f)) {
+                return Err(invalid("a held send with a bad fingerprint"));
+            }
+            let fields: Option<DraftFields> = p.get("fields").and_then(|f| serde_json::from_value(f.clone()).ok());
+            // without what it says and the fingerprint of it, there is nothing to approve: say why instead
+            let problem = s("problem").or_else(|| (fields.is_none() || fingerprint.is_none()).then(|| "the bridge didn't say what this send holds".to_string()));
+            Ok(Parked {
+                draft_id: s("draftId"),
+                reason: s("reason"),
+                sent_by: s("sentBy"),
+                parked_at: s("parkedAt"),
+                recipients: p.get("recipients").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect(),
+                fingerprint: if problem.is_some() { None } else { fingerprint },
+                changed: p.get("changed").and_then(Value::as_bool).unwrap_or(false),
+                fields: if problem.is_some() { None } else { fields },
+                plain: p.get("plain").and_then(Value::as_bool),
+                problem,
+                op_id,
+            })
+        })
+        .collect()
 }
 
 /// The operations a session answer lists for `account` (unknown names dropped). A bridge without the write patch lists
@@ -314,6 +383,29 @@ impl MailBridge<'_> {
         outcome(&v, account, op_id)
     }
 
+    /// The sends on Uni's account `account` waiting for the owner. Reads only.
+    pub async fn parked(&self, account: &str) -> MailResult<Vec<Parked>> {
+        parked_list(&self.run("send.parked", account, json!({})).await?, account)
+    }
+
+    /// Approve a parked send: the bridge sends exactly the draft whose bytes have `fingerprint` (what was shown), or
+    /// refuses. Once per opId.
+    pub async fn send_approve(&self, account: &str, op_id: &str, fingerprint: &str) -> MailResult<SendOutcome> {
+        check_op_id(op_id)?;
+        if !is_fingerprint(fingerprint) {
+            return Err(invalid("approving needs the fingerprint of the draft you were shown"));
+        }
+        let v = self.run("send.approve", account, json!({ "opId": op_id, "fingerprint": fingerprint })).await?;
+        outcome(&v, account, op_id)
+    }
+
+    /// Decline a parked send: nothing is sent, and Uni may revise or discard the draft.
+    pub async fn send_decline(&self, account: &str, op_id: &str) -> MailResult<SendOutcome> {
+        check_op_id(op_id)?;
+        let v = self.run("send.decline", account, json!({ "opId": op_id })).await?;
+        outcome(&v, account, op_id)
+    }
+
     /// Where a send stands now (an unknown outcome is checked with the mail server first), with delivery per recipient.
     pub async fn send_check(&self, account: &str, op_id: &str) -> MailResult<SendOutcome> {
         check_op_id(op_id)?;
@@ -369,5 +461,25 @@ mod tests {
         assert!(outcome(&v, "A", "fedcba9876543210").is_err());
         assert!(outcome(&json!({ "opId": "0123456789abcdef", "accountId": "A", "state": "maybe" }), "A", "0123456789abcdef").is_err());
         assert_eq!(serde_json::from_value::<SendState>(json!("awaiting-approval")).unwrap(), SendState::AwaitingApproval);
+        assert_eq!(serde_json::from_value::<SendState>(json!("declined")).unwrap(), SendState::Declined);
+    }
+
+    #[test]
+    fn a_held_send_without_its_content_and_fingerprint_offers_nothing_to_approve() {
+        let fp = "ab".repeat(32);
+        let fields = json!({ "to": [{ "name": null, "email": "ask@example.org" }], "cc": [], "bcc": [], "subject": "Lunch", "text": "Thursday?" });
+        let v = json!({ "accountId": "U", "parked": [
+            { "opId": "0123456789abcdef", "fingerprint": fp, "fields": fields, "reason": "r", "recipients": ["ask@example.org"] },
+            { "opId": "0123456789abcdeg", "fingerprint": fp },
+            { "opId": "0123456789abcdeh", "problem": "the parked draft isn't there" },
+        ] });
+        let got = parked_list(&v, "U").unwrap();
+        assert_eq!((got[0].fingerprint.as_deref(), got[0].problem.as_deref()), (Some(fp.as_str()), None));
+        assert_eq!(got[0].fields.as_ref().unwrap().subject, "Lunch");
+        assert!(got[1].fingerprint.is_none() && got[1].problem.is_some(), "no content: not approvable");
+        assert_eq!(got[2].problem.as_deref(), Some("the parked draft isn't there"));
+        assert!(parked_list(&v, "A").is_err(), "an answer about another account");
+        assert!(parked_list(&json!({ "accountId": "U", "parked": [{ "opId": "x/y", "fingerprint": fp }] }), "U").is_err());
+        assert!(parked_list(&json!({ "accountId": "U", "parked": [{ "opId": "0123456789abcdef", "fingerprint": "AB".repeat(32) }] }), "U").is_err());
     }
 }
