@@ -2,7 +2,7 @@
 // what you decided through listings. Run: node --experimental-strip-types scripts/mailHeld.test.ts (Node >= 22.6)
 import assert from "node:assert/strict";
 import { approvalOffered, approveOutcome, canApprove, declineOutcome, heldFailure, settled, type AccountBoxes, type Parked, type SendOutcome } from "../src/mailCore.ts";
-import { beginListing, endDeciding, forgetHeld, heldEntries, heldGen, mergeListing, setOutcome, startDeciding, waitingCount } from "../src/mailHeld.ts";
+import { beginListing, endDeciding, forgetHeld, heldEntries, heldGen, keepAccounts, mergeListing, setOutcome, startDeciding, waitingCount } from "../src/mailHeld.ts";
 
 const uni = (operations: string[]): AccountBoxes => ({ id: "U", name: "uni@example.com", who: "uni", mailboxes: [], operations });
 const ALL = ["send.parked", "send.approve", "send.decline"];
@@ -63,6 +63,16 @@ mergeListing("U", [], gen, newer);
 mergeListing("U", [held("op-elsewhere")], gen, older);
 assert.deepEqual(heldEntries().U.map((e) => e.item.op_id), ["op-a"], "the older listing is dropped");
 
+// deciding stops being offered while a decision is out: its outcome is kept out of sight, and back when it returns
+mergeListing("U", [held("op-e"), held("op-f")], gen, beginListing());
+assert.ok(startDeciding("op-e"));
+keepAccounts([], gen);
+assert.equal(waitingCount(), 0, "nothing counted where deciding isn't offered");
+assert.deepEqual(heldEntries().U.map((e) => [e.item.op_id, e.listed]), [["op-e", false], ["op-a", false]], "the one being decided and the one sent earlier are kept; the rest goes");
+setOutcome("U", "op-e", { kind: "sent", text: "Sent" }, gen);
+endDeciding("op-e");
+mergeListing("U", [held("op-f")], gen, beginListing()); // offered again
+assert.deepEqual(heldEntries().U.map((e) => [e.item.op_id, e.outcome?.kind ?? null]), [["op-f", null], ["op-e", "sent"], ["op-a", "sent"]]);
 // Forget: nothing kept, and an answer that left before it is dropped
 assert.ok(startDeciding("op-c"));
 forgetHeld();

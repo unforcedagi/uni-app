@@ -79,10 +79,20 @@ export function setOutcome(accountId: string, opId: string, outcome: HeldOutcome
   changed();
 }
 
-/** Accounts that are no longer offered lose their entries. */
+/** An account where deciding is no longer offered: what was decided there, or is being decided, is kept out of sight
+ *  (not listed, not counted) so its outcome isn't lost if deciding comes back; the rest goes. */
 export function keepAccounts(ids: string[], forGen: number): void {
-  if (forGen !== gen || Object.keys(entries).every((id) => ids.includes(id))) return;
-  entries = Object.fromEntries(Object.entries(entries).filter(([id]) => ids.includes(id)));
+  if (forGen !== gen) return;
+  let touched = false;
+  const next: Record<string, HeldEntry[]> = {};
+  for (const [id, list] of Object.entries(entries)) {
+    if (ids.includes(id)) { next[id] = list; continue; }
+    const kept = list.filter((e) => e.outcome || deciding.has(e.item.op_id)).map((e) => (e.listed ? { ...e, listed: false } : e));
+    if (kept.length !== list.length || kept.some((e, i) => e !== list[i])) touched = true;
+    if (kept.length) next[id] = kept;
+  }
+  if (!touched) return;
+  entries = next;
   changed();
 }
 
