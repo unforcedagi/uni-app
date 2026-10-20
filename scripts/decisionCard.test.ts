@@ -1,6 +1,7 @@
 // T-212: what turns a room's message into a decision card, and what a won tap posts (the parsers; the card itself is decisionCard.spec.ts).
 import assert from "node:assert/strict";
 import { decisionRefsIn, parseDecisionNote, pickedLine, questionOf, unreferenced } from "../src/decisionCard.ts";
+import { makeDecisionStore } from "../src/decisionStore.ts";
 let failed = 0;
 const check = (n: string, f: () => void) => { try { f(); console.log("ok  ", n); } catch (e) { failed++; console.log("FAIL", n, e); } };
 const ID = "01M5D0000000000000000000A1";
@@ -44,4 +45,14 @@ check("the room lists its open decisions no message names", () => {
   const known = [{ id: "a", channel: "r1" }, { id: "b", channel: "r1" }, { id: "c", channel: "r2" }, { id: "d", channel: null }];
   assert.deepEqual(unreferenced(known, "r1", new Set(["a"])), ["b"]);
 });
+// the store: Forget (a new identity) drops what was read and any read still under way; vaults don't mix
+const pending: { vault: string; id: string; done: (v: unknown) => void }[] = [];
+const store = makeDecisionStore((vault, id) => new Promise((done) => pending.push({ vault, id, done })));
+const answer = async () => { const p = pending.shift()!; p.done(note({ state: "open", options: ["A", "B"] }, { id: p.id })); await new Promise((r) => setTimeout(r, 0)); };
+void store.load(ID, "uni"); await answer();
+check("a read decision is shared by vault and id", () => { assert.equal(store.get(ID, "uni")?.view?.question, "Which layout for the garden page?"); assert.equal(store.get(ID, "life"), undefined); });
+void store.load(ID, "life");
+store.forget();
+await answer();
+check("Forget empties the store, and a read under way when it did is dropped", () => { assert.equal(store.get(ID, "uni"), undefined); assert.equal(store.get(ID, "life"), undefined); });
 if (failed) { console.log(`${failed} failed`); process.exit(1); }

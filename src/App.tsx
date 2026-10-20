@@ -35,7 +35,7 @@ import { DeleteButton, InlineEditor } from "./InlineEditor";
 import { lastOwnMessage } from "./ownMessages";
 
 import { decisionIn, useDecisionLinks } from "./decisionLinks";
-import { DecisionCard } from "./DecisionCard";
+import { DecisionCard, forgetDecisions } from "./DecisionCard";
 import { decisionRefsIn, unreferenced } from "./decisionCard";
 import { findUniMember, findUniRoom, searchHandoffText } from "./uniActions";
 import Search from "./Search";
@@ -1461,7 +1461,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     // Two taps instead of window.confirm (unreliable in Android WebView).
     if (!forgetArmed) { setForgetArmed(true); return; }
     try { voiceMounted.current = false; await voiceQueue.current; await voiceOutbox.current.clear(); await invoke("identity_forget");
-      forgetDrafts(); invalidatePaths(); forgetAreas();
+      forgetDrafts(); invalidatePaths(); forgetAreas(); forgetDecisions();
       try { for (const key of Object.keys(localStorage)) if (key.startsWith("uni.noteDraft.v1:") || key.startsWith("uni.vaultExpanded.v1:") || key === ALIASES_KEY) localStorage.removeItem(key); } catch { /* unavailable storage */ }
       onForget(); } catch (e) { voiceMounted.current = true; setError(String(e)); }
   }
