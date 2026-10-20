@@ -19,6 +19,7 @@ import { pickRoom } from "./areaLayout";
 import { childrenOf, parentPath, ROOT, rootNode, trail, UNI_CHANNEL } from "./treeCore";
 import { findUniRoom } from "../uniActions";
 import { useStoredSelfTest } from "../interface/selftest/useSelfTest";
+import { storedSidebarWidth } from "./sidebarState";
 import { useRailHidden, useShortTree, useTreeBesideNote, useUprightPhone, useWide } from "./homeLayout";
 import { archivedRoomIds, projectCards, roomsList } from "./viewsCore";
 import { privateRoot, privateRootIn, roomSlug, roomView, treeRows } from "./treeRooms";
@@ -309,7 +310,7 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
     const replies = thread && o.chatRoom?.loaded ? o.chatRoom.messages.filter((m) => m.ref !== thread.root).length : null;
     const view = o.main ? "work" : thread ? "thread" : "room";
     return <div className={`tree-home th-level ${wide ? "wide" : "phone"} th-rooms th-simple ${wide && (!o.companion || o.main || stripCompanion) ? "solo" : wide && !companionOpen ? "folded" : ""}`} data-layout="rooms" data-view={view}
-      style={sidebar && treeFold?.folded ? { "--th-nav-w": "34px" } as React.CSSProperties : undefined}>
+      style={sidebar && treeFold ? { "--th-nav-w": treeFold.folded ? "34px" : `${storedSidebarWidth()}px` } as React.CSSProperties : undefined}>
       {sidebar && <RoomSidebar {...treeProps} selected={o.selected} selectedRoom={o.selectedRoom} nav={nav} fold={treeFold} />}
       <section className="sr" aria-label={o.main ? `Work: ${o.title}` : `Conversation: ${o.title}`} data-node={o.node}>
         <header className="sr-head">

@@ -229,3 +229,32 @@ test('sheet: half or full height, ending at the composer, with the composer in s
   expect(await pane.evaluate((el) => [el, ...el.querySelectorAll('*')].filter((x) => { const s = getComputedStyle(x); return s.animationName !== 'none' || s.transitionDuration.split(',').some((d) => parseFloat(d) > 0); })
     .map((x) => `${x.tagName.toLowerCase()}.${[...x.classList].join('.')} ${getComputedStyle(x).animationName} ${getComputedStyle(x).transitionDuration}`))).toEqual([]);
 });
+
+test('sheet: with the Journal open in its own tab too, the sheet lies over the room, not the hidden Journal', async ({ page }) => {
+  test.skip(beside(), 'the sheet is for narrow screens and Android');
+  await openRoom(page);
+  await tap(page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Journal' }));
+  await expect(page.locator('.journal-list')).toBeVisible();
+  await page.locator('body').press('Alt+ArrowLeft');
+  await expect(page.getByRole('textbox', { name: 'Message Orchard' })).toBeVisible();
+  await expect(page.locator('.journal-list')).toHaveCount(1); // still mounted, hidden
+  const chip = page.locator('.message-list .note-chip', { hasText: 'Spring planting plan' }).first();
+  await chip.scrollIntoViewIfNeeded();
+  await tap(chip);
+  const pane = page.locator('.note-pane-sheet');
+  await expect(pane.locator('.note-title')).toHaveText('Spring planting plan');
+  const list = (await page.locator('.sr-chat .message-list').boundingBox())!, sheet = (await pane.boundingBox())!;
+  expect(Math.abs(sheet.width - list.width)).toBeLessThanOrEqual(2);
+  expect(Math.abs(sheet.x - list.x)).toBeLessThanOrEqual(2);
+});
+
+test('beside: the folded tree unfolds to its own width, even when the sidebar is kept hidden', async ({ page }) => {
+  test.skip(!beside(), 'the column beside the chat is for wide screens off Android');
+  await page.addInitScript(() => localStorage.setItem('uni.sidebar.v1', JSON.stringify({ width: 260, hidden: true })));
+  const { chip } = await openRoom(page);
+  await tap(chip);
+  await expect(page.locator('.note-pane .note-title')).toHaveText('Spring planting plan');
+  await tap(page.locator('.th-roomnav').getByRole('button', { name: 'Show the sidebar' }));
+  await expect(page.locator('.th-roomnav:not(.hidden)')).toBeVisible();
+  expect(Math.round((await page.locator('.th-roomnav').boundingBox())!.width)).toBeGreaterThanOrEqual(250);
+});

@@ -118,6 +118,9 @@ export function useFolds(): [Folds, (path: string, open: boolean) => void, (path
   return [folds, set, reveal];
 }
 
+/** The sidebar's width as kept on this device (T-200: the tree unfolded beside a note takes it even when the sidebar is kept hidden). */
+export const storedSidebarWidth = (): number => read(SIDEBAR_KEY, parseSidebar).width;
+
 export function useSidebar(): [SidebarState, (s: Partial<SidebarState>) => void] {
   const [state, setState] = useState<SidebarState>(() => read(SIDEBAR_KEY, parseSidebar));
   const update = useCallback((s: Partial<SidebarState>) => setState((c) => { const n = { ...c, ...s, width: clampWidth(s.width ?? c.width) }; write(SIDEBAR_KEY, n); return n; }), []);

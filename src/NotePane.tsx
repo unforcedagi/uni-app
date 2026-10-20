@@ -32,8 +32,12 @@ const clampWidth = (w: number) => Math.max(320, Math.min(w, window.innerWidth - 
  * `beside`: a resizable column right of the chat, its width remembered. `sheet`: over the message list, ending at the composer's top edge,
  * at half or full height. No animation anywhere (e-ink).
  */
-export default function NotePane({ shape, stack, hub, onOpen, onBack, onClose, onQuote, onOpenPage, onDirty, layoutKey = "" }: {
+export default function NotePane({ shape, stack, hub, list, onOpen, onBack, onClose, onQuote, onOpenPage, onDirty, onSearch, layoutKey = "" }: {
   shape: PaneShape;
+  /** The room's message list (the sheet lies over it, down to the room's composer). */
+  list: HTMLElement;
+  /** "Search all vaults" from a note that can't be found. */
+  onSearch: (query: string) => void;
   /** Changes when the chat underneath is a different view (room, thread): the sheet measures it again. */
   layoutKey?: string;
   stack: VaultRef[];
@@ -78,11 +82,13 @@ export default function NotePane({ shape, stack, hub, onOpen, onBack, onClose, o
   };
 
   // beside: width in px; sheet: half or full height. Both remembered on this device.
-  const [width, setWidth] = useState(() => clampWidth(storedWidth()));
+  const [width, setWidthState] = useState(() => clampWidth(storedWidth()));
+  const widthRef = useRef(width);
+  const setWidth = (w: number) => { widthRef.current = w; setWidthState(w); };
+  const keep = (key: string, value: string) => { try { localStorage.setItem(key, value); } catch { /* private storage */ } };
   const [full, setFull] = useState(() => { try { return localStorage.getItem(SHEET_KEY) === "full"; } catch { return false; } });
-  useEffect(() => { try { localStorage.setItem(WIDTH_KEY, String(Math.round(width))); localStorage.setItem(SHEET_KEY, full ? "full" : "half"); } catch { /* private storage */ } }, [width, full]);
   useEffect(() => {
-    const fit = () => setWidth((w) => clampWidth(w));
+    const fit = () => setWidth(clampWidth(widthRef.current));
     window.addEventListener("resize", fit);
     return () => window.removeEventListener("resize", fit);
   }, []);
@@ -91,21 +97,24 @@ export default function NotePane({ shape, stack, hub, onOpen, onBack, onClose, o
     const handle = e.currentTarget;
     handle.setPointerCapture(e.pointerId);
     const move = (ev: PointerEvent) => setWidth(clampWidth(window.innerWidth - ev.clientX));
-    const up = () => { handle.removeEventListener("pointermove", move); handle.removeEventListener("pointerup", up); handle.removeEventListener("pointercancel", up); };
+    // the width is kept once the drag ends, not on every move
+    const up = () => { keep(WIDTH_KEY, String(Math.round(widthRef.current))); handle.removeEventListener("pointermove", move); handle.removeEventListener("pointerup", up); handle.removeEventListener("pointercancel", up); };
     handle.addEventListener("pointermove", move); handle.addEventListener("pointerup", up); handle.addEventListener("pointercancel", up);
   };
   const nudge = (e: React.KeyboardEvent) => {
     if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
     e.preventDefault();
     const step = e.shiftKey ? 80 : 24;
-    setWidth((w) => clampWidth(w + (e.key === "ArrowLeft" ? step : -step)));
+    const w = clampWidth(widthRef.current + (e.key === "ArrowLeft" ? step : -step));
+    setWidth(w);
+    keep(WIDTH_KEY, String(Math.round(w)));
   };
 
   // sheet: sits exactly over the message list of the room underneath, ending at the composer's top edge.
   const [rect, setRect] = useState<{ left: number; width: number; top: number; bottom: number } | null>(null);
   useLayoutEffect(() => {
     if (shape !== "sheet") return;
-    const parts = () => [document.querySelector(".conversation .message-list"), document.querySelector(".conversation .composer")];
+    const parts = () => [list, list.parentElement?.querySelector(":scope > .composer") ?? null];
     const measure = () => {
       const [area, foot] = parts();
       if (!area || !foot) { setRect(null); return; }
@@ -119,7 +128,7 @@ export default function NotePane({ shape, stack, hub, onOpen, onBack, onClose, o
     window.addEventListener("resize", measure);
     window.visualViewport?.addEventListener("resize", measure);
     return () => { ro.disconnect(); window.removeEventListener("resize", measure); window.visualViewport?.removeEventListener("resize", measure); };
-  }, [shape, layoutKey]);
+  }, [shape, layoutKey, list]);
 
   const style: CSSProperties = shape === "beside" ? { width }
     : rect ? { left: rect.left, width: rect.width, top: full ? rect.top : rect.top + (rect.bottom - rect.top) / 2, height: full ? rect.bottom - rect.top : (rect.bottom - rect.top) / 2 }
@@ -134,13 +143,13 @@ export default function NotePane({ shape, stack, hub, onOpen, onBack, onClose, o
       onBack={prev ? onBack : onClose} backIcon={prev ? "←" : "×"} backLabel={prev ? titles[`${prev.vault}:${prev.ref}`] ?? prev.ref.split("/").pop() ?? "note" : "Close note"}
       onTitle={(t) => setTitles((m) => m[key] === t ? m : { ...m, [key]: t })}
       onResolved={(id) => setIds((m) => m[key] === id ? m : { ...m, [key]: id })}
-      onDirty={(dirty) => onDirty(top, dirty)} onCreate={() => {}} onSearch={() => {}}
+      onDirty={(dirty) => onDirty(top, dirty)} onCreate={() => {}} onSearch={onSearch}
       actions={<>
         <button type="button" className={`note-action note-pane-quote${picked ? " ready" : ""}`} disabled={!picked || !ids[key]} onPointerDown={(e) => e.preventDefault()} onMouseDown={(e) => e.preventDefault()} onClick={quote}
           title={picked ? "Put the selected passage in your reply" : "Select a passage in the note first"}>Quote in reply</button>
         <button type="button" className="note-action quiet" onClick={() => onOpenPage(ids[key] ? { ...top, ref: ids[key] } : top, title)}>Open as page</button>
         {prev && <button type="button" className="note-action note-pane-close" aria-label="Close note" onClick={onClose}>×</button>}
-        {shape === "sheet" && <button type="button" className="note-action note-pane-size" aria-pressed={full} onClick={() => setFull((f) => !f)}>{full ? "Half" : "Full"}</button>}
+        {shape === "sheet" && <button type="button" className="note-action note-pane-size" aria-pressed={full} onClick={() => { keep(SHEET_KEY, full ? "half" : "full"); setFull(!full); }}>{full ? "Half" : "Full"}</button>}
       </>} />
   </section>;
 }

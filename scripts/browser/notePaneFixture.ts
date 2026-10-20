@@ -107,6 +107,8 @@ Rules: bring it back clean, say if it broke, and nobody takes the good saw home 
         return m;
       }
       case 'vault_list': return ['uni'];
+      case 'journal_list': case 'journal_pending': return [];
+      case 'journal_flush': return { sent: [], failed: [] };
       case 'vault_note': {
         const key = Object.keys(notes).find((k) => k === args.noteRef || notes[k].path === args.noteRef);
         if (args.vault !== 'uni' || !key) throw `vault: note not found: ${args.noteRef}`;

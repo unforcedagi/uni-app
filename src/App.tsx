@@ -447,15 +447,17 @@ function Conversations({ onForget }: { onForget: () => void }) {
   notesRef.current = notes;
   // T-200: a note linked in chat opens beside the chat (wide screens) or as a sheet over it (narrow ones, Android), and the chat stays
   // mounted with its scroll and draft. Each room keeps its own note (a stack, for links inside it): another room shows its own or none,
-  // and coming back shows it again. `asideAhead`: the stacks Back left, newest last, for Forward.
+  // and coming back shows it again. `asideAhead`: the stacks Back left in the room on screen, newest last, for Forward (gone once you
+  // leave the room or open another note: Forward never brings back a note from long ago).
   const [asides, setAsides] = useState<Record<string, VaultRef[]>>({});
   const asidesRef = useRef(asides);
   const asideAhead = useRef(new Map<string, VaultRef[][]>());
   /** Notes in a pane with an edit not saved yet (their drafts are kept on this device). */
   const asideDirty = useRef(new Set<string>());
   const paneShape = usePaneShape();
-  /** The room whose chat is on screen, so whose note may show; null under a full-page note, the Journal or a vault. */
-  const chatRoom = () => chatOnScreen(activeTab(tabsRef.current), channelRef.current, notesRef.current.length) ? channelRef.current : null;
+  /** The room whose chat is on screen, so whose note may show; null under a full-page note, the Journal, a vault, a phone's room tree or
+   *  a work view (the room's message list is not drawn). */
+  const chatRoom = () => chatOnScreen(activeTab(tabsRef.current), channelRef.current, notesRef.current.length) && listRef.current?.isConnected ? channelRef.current : null;
   function putAside(room: string, stack: VaultRef[]) {
     const next = { ...asidesRef.current };
     if (stack.length) next[room] = stack; else delete next[room];
@@ -474,16 +476,24 @@ function Conversations({ onForget }: { onForget: () => void }) {
     asideAhead.current.delete(room);
     putAside(room, [target]);
   }
-  /** Back in the room's note: one step (a link inside it), or `all` (×, Escape) closes it. Forward brings back what Back left. */
+  /** Back in the room's note: one step (a link inside it), kept for Forward; or `all` (×, Escape) closes it. Leaving an unsaved edit asks first. */
   function backAside(room: string, all = false, confirmed = false) {
     const cur = asidesRef.current[room];
     if (!cur) return;
-    const next = all ? [] : cur.slice(0, -1);
-    if (!next.length && !confirmed && paneDraft(cur)) {
+    if (!confirmed && paneDraft(all ? cur : cur.slice(-1))) {
       setConfirmation({ text: "Close this note with unsaved changes? Its draft will be kept on this device.", run: () => backAside(room, all, true) }); return;
     }
-    asideAhead.current.set(room, [...(asideAhead.current.get(room) ?? []), cur].slice(-20));
-    putAside(room, next);
+    if (all) asideAhead.current.delete(room);
+    else asideAhead.current.set(room, [...(asideAhead.current.get(room) ?? []), cur].slice(-20));
+    putAside(room, all ? [] : cur.slice(0, -1));
+  }
+  /** A link inside the room's note opens over it (a new branch: nothing ahead). */
+  function pushAside(room: string, target: VaultRef) {
+    const cur = asidesRef.current[room] ?? [];
+    const top = cur[cur.length - 1];
+    if (top && top.vault === target.vault && resolveNote(top, aliases.current).ref === target.ref) return;
+    asideAhead.current.delete(room);
+    putAside(room, [...cur.slice(-19), target]);
   }
   function forwardAside(room: string): boolean {
     const ahead = asideAhead.current.get(room);
@@ -911,7 +921,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   }, [channel, root, synced, tick, limit, loadRooms]);
 
   // New room: back to the default window; older pages load on demand.
-  useEffect(() => { setLimit(300); setOlder("idle"); setMenuFor(null); setEditing(null); }, [channel]);
+  useEffect(() => { setLimit(300); setOlder("idle"); setMenuFor(null); setEditing(null); asideAhead.current.clear(); }, [channel]);
 
   useEffect(() => {
     if (!channel) { setMembers([]); return; }
@@ -936,6 +946,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       settleUntil.current = 0;
       pinned.current = { ...spot, until: Date.now() + SETTLE_MS };
     } else {
+      pinned.current = null;
       el.scrollTop = restoreTop(undefined, el.scrollHeight, el.clientHeight);
       stickToEnd.current = true;
       settleUntil.current = Date.now() + SETTLE_MS;
@@ -972,7 +983,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
   useEffect(() => {
     if (!listEl || !stackEl || typeof ResizeObserver === "undefined") return;
     const ro = new ResizeObserver(() => {
-      if (pinned.current && Date.now() < pinned.current.until) { pinTo(listEl, pinned.current); return; }
+      if (pinned.current && Date.now() < pinned.current.until && pinTo(listEl, pinned.current)) return;
+      pinned.current = null;
       if (stickToEnd.current && restoredView.current && preserveScroll.current === null) listEl.scrollTop = listEl.scrollHeight;
     });
     ro.observe(stackEl);
@@ -1595,7 +1607,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
    *  Kept for this session only; a reopened utility returns to Uni. */
   const originRef = useRef<TabTarget | null>(null);
   const origin = (): TabTarget => originRef.current ?? uniHome();
-  const asideRoom = channel && chatOnScreen(activeTab(tabs), channel, notes.length) && asides[channel] ? channel : null;
+  const asideRoom = channel && chatOnScreen(activeTab(tabs), channel, notes.length) && listEl?.isConnected && asides[channel] ? channel : null;
   const asideShown = !!asideRoom;
   const goBack = useRef<() => void>(() => {});
   goBack.current = () => {
@@ -1725,7 +1737,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   /** A place's identity: a room a node owns is that node (Uni's room, opened before the tree loaded, is Uni). */
   const placeOf = (t: TabTarget): string => { const n = t.kind === "room" && t.channel ? roomNodes.get(t.channel) : null; return n ? (n.path === "" ? "uni" : `area:${n.path}`) : placeKey(t); };
   const navControls: NavControls = {
-    canBack: histCanBack(hist) || notes.length > 0 || hasOverlay || asideShown, canForward: histCanForward(hist) || (!!channel && !!asideAhead.current.get(channel)?.length && chatOnScreen(active ?? null, channel, notes.length)),
+    canBack: histCanBack(hist) || notes.length > 0 || hasOverlay || asideShown, canForward: histCanForward(hist) || (!!channel && !!listEl?.isConnected && !!asideAhead.current.get(channel)?.length && chatOnScreen(active ?? null, channel, notes.length)),
     places: [
       { label: "Journal", go: () => openTarget({ kind: "journal", title: "Journal" }) },
       { label: "Mail", go: () => openTarget({ kind: "mail", title: "Mail" }) },
@@ -1787,12 +1799,12 @@ function Conversations({ onForget }: { onForget: () => void }) {
           onOpenArea={(path, name, room) => openTarget(path === null ? { kind: "areas", title: "Uni", ...(room ? { channel: room } : {}) } : { kind: "area", path, title: name, ...(room ? { channel: room } : {}) }, "replace")} />
       : <div className="welcome"><span className="welcome-mark">✦</span><h2>Your conversation starts here</h2><p>Select a room to read and reply. Messages are cached for offline reading.</p></div>}
     </section>
-    {asideRoom && <NotePane shape={paneShape} stack={asides[asideRoom]} hub={hub} layoutKey={`${channel}|${root}`} onQuote={composeHere}
+    {asideRoom && listEl && <NotePane shape={paneShape} stack={asides[asideRoom]} hub={hub} list={listEl} layoutKey={`${channel}|${root}`} onQuote={composeHere}
+      onSearch={(query) => { setSidebarVisible(true); setSearchQuery(query); setSearchScope({ vault: "", prefix: "" }); setSearchOpen(true); }}
       onOpen={(ref, href) => {
         // a link inside the note opens over it in the pane; another hub's note goes to the browser
         if (!sameHub(ref, hub, hubOrigins)) { if (href) void invoke("open_link", { url: href }).catch(() => {}); return; }
-        asideAhead.current.delete(asideRoom);
-        putAside(asideRoom, [...asides[asideRoom].slice(-19), resolveNote({ ...ref, hub: null }, aliases.current)]);
+        pushAside(asideRoom, resolveNote({ ...ref, hub: null }, aliases.current));
       }}
       onBack={() => backAside(asideRoom)} onClose={() => backAside(asideRoom, true)}
       onOpenPage={(note, title) => {
