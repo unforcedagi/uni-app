@@ -55,4 +55,10 @@ void store.load(ID, "life");
 store.forget();
 await answer();
 check("Forget empties the store, and a read under way when it did is dropped", () => { assert.equal(store.get(ID, "uni"), undefined); assert.equal(store.get(ID, "life"), undefined); });
+const g = store.generation();
+store.forget();
+store.put(ID, "uni", { view: parseDecisionNote(note({ state: "decided", options: ["A", "B"], decided: "A" })), error: null, read: 0 }, g);
+check("a tap's answer that comes back after Forget is not stored", () => assert.equal(store.get(ID, "uni"), undefined));
+store.put(ID, "uni", { view: parseDecisionNote(note({ state: "decided", options: ["A", "B"], decided: "A" })), error: null, read: 0 }, store.generation());
+check("one from this identity is", () => assert.equal(store.get(ID, "uni")?.view?.decided, "A"));
 if (failed) { console.log(`${failed} failed`); process.exit(1); }

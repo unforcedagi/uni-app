@@ -29,7 +29,10 @@ export function makeDecisionStore(read: (vault: string, id: string) => Promise<u
   const stale = (ms: number) => [...entries.values()].flatMap((e) => (e.view?.state === "open" || (!e.view && e.error)) && now() - e.read > ms ? [e] : []);
   return {
     get: (id: string, vault: string) => entries.get(key(vault, id)),
-    put: (id: string, vault: string, e: Omit<Entry, "vault" | "id">) => put(vault, id, e),
+    /** Store what a tap returned, unless Forget came in between (`gen` is the generation the tap started in). */
+    put: (id: string, vault: string, e: Omit<Entry, "vault" | "id">, gen: number) => { if (gen === generation) put(vault, id, e); },
+    /** Which identity's store this is: a tap captures it before it goes out and drops its answer when it changed. */
+    generation: () => generation,
     load,
     /** Re-read the open and failed ones older than `ms` (focus). */
     refresh: (ms: number) => { for (const e of stale(ms)) void load(e.id, e.vault); },

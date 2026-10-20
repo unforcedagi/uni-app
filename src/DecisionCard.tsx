@@ -55,17 +55,22 @@ export function DecisionCard({ id, vault, post }: Props) {
   };
   const pick = async (option: string) => {
     setError(null); setPhase("saving");
+    // a Forget while the tap is out: its answer, the room message and any re-read belong to the identity that is gone
+    const gen = store.generation();
+    const current = () => gen === store.generation();
     try {
       const r = await invoke<{ outcome: "picked" | "already_decided"; decided: string; decided_by?: string | null; note: unknown }>("vault_pick_decision",
         { vault, id, option, by: activeProfile().me, at: new Date().toISOString(), ifUpdatedAt: d.updatedAt });
+      if (!current()) return;
       const now = parseDecisionNote(r.note);
       // the question stays the one read with its content (the write answers without it)
       const view: DecisionView = { ...d, updatedAt: now?.updatedAt ?? d.updatedAt, state: "decided", decided: r.decided, decidedBy: r.outcome === "picked" ? activeProfile().me : r.decided_by ?? now?.decidedBy ?? null };
-      store.put(id, vault, { view, error: null, read: Date.now() });
+      store.put(id, vault, { view, error: null, read: Date.now() }, gen);
       decisionDecided();
       if (r.outcome === "picked") { const body = pickedLine(r.decided, d); setLine(body); await tell(body); }
       else { setLost(true); setPhase("idle"); }
     } catch (e) {
+      if (!current()) return;
       // a question changed since it was shown is never answered blind: the card shows the new one, and you tap again
       setError(/changed since it was shown|modified since|conflict/i.test(msg(e)) ? "The question changed since you saw it. Here it is again; nothing was saved." : `Couldn't save your pick: ${msg(e)}`);
       setPhase("idle");
