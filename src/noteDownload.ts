@@ -41,6 +41,9 @@ export function downloadName(title: string | undefined, id: string): string {
   return `${stem}.md`;
 }
 
+/** Only markdown notes download as .md (a note without an extension is markdown); others are not text for this. */
+export const isMarkdownNote = (extension: string | undefined) => ["md", "mdx", "markdown"].includes((extension ?? "md").replace(/^\./, "").toLowerCase());
+
 export type NoteDates = { path?: string | null; createdAt?: string | null; updatedAt?: string | null };
 
 const FENCE = /^---\r?\n/;

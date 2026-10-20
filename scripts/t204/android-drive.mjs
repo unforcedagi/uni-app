@@ -24,6 +24,17 @@ const marks = {};
 const shot = (name) => { marks[name] = Date.now(); writeFileSync(`${out}/android-marks.json`, JSON.stringify(marks)); writeFileSync(`${out}/android-${name}.png`, adb('exec-out', 'screencap', '-p')); };
 const button = (text) => `[...document.querySelectorAll('button')].find((b) => b.textContent === ${JSON.stringify(text)} || b.getAttribute('aria-label') === ${JSON.stringify(text)})`;
 const toast = `[...document.querySelectorAll('body *')].find((e) => e.children.length === 0 && /^(Saved to|Couldn't)/.test(e.textContent || ''))?.textContent`;
+// The software-rendered emulator's System UI can stall under load and show "isn't responding" (not the app): tap Wait.
+function dismissAnr() {
+  try {
+    adb('shell', 'uiautomator', 'dump', '/sdcard/t204-ui.xml');
+    const xml = adb('exec-out', 'cat', '/sdcard/t204-ui.xml').toString();
+    if (!/isn.t responding/.test(xml)) return false;
+    const m = /text="Wait"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/.exec(xml);
+    if (m) adb('shell', 'input', 'tap', String((+m[1] + +m[3]) >> 1), String((+m[2] + +m[4]) >> 1));
+    return !!m;
+  } catch { return false; }
+}
 const log = {};
 sock.onopen = async () => {
   try {
@@ -40,6 +51,7 @@ sock.onopen = async () => {
     await sleep(800); shot('03-menu');
     await tap(button('Share…'));
     await sleep(3500);
+    if (dismissAnr()) { log.anrDismissed = true; await sleep(1500); }
     log.foreground = adb('shell', 'dumpsys activity activities | grep -m1 topResumedActivity').toString().trim();
     console.log('after Share:', log.foreground);
     shot('04-share-sheet');

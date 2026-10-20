@@ -27,7 +27,7 @@ async function boot(page: Page, note: FixtureNote) {
           case 'refresh': return { total_items: 0, channel_errors: {}, truncated_channels: [] };
           case 'vault_note':
             if (args.noteRef !== note.id) return { vault: 'uni', note: { id: args.noteRef, content: '' } };
-            return { hub: 'https://hub.example.ts.net', vault: 'uni', note: { id: note.id, path: note.path, createdAt: note.createdAt, updatedAt: note.updatedAt, content: note.content, tags: [] } };
+            return { hub: 'https://hub.example.ts.net', vault: 'uni', note: { id: note.id, extension: (note as any).extension, path: note.path, createdAt: note.createdAt, updatedAt: note.updatedAt, content: note.content, tags: [] } };
           case 'note_download': {
             // What the desktop Save dialog or Android's Downloads would get: these bytes under this name.
             const a = document.createElement('a');
@@ -89,6 +89,19 @@ test('a note with its own front matter keeps it; only missing keys are added ins
   const file = await download(page);
   const expected = `---\npath: "${note.path}"\ncreated: "${note.createdAt}"\nupdated: "${note.updatedAt}"\n` + note.content.slice('---\n'.length);
   expect(file.bytes.toString('utf8')).toBe(expected);
+});
+
+test('a note that is not markdown has no Download .md', async ({ page }) => {
+  await boot(page, { ...fixture.notes[0], extension: 'canvas' } as FixtureNote);
+  await expect(page.getByRole('button', { name: 'Copy markdown' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Download .md' })).toHaveCount(0);
+});
+
+test('a failed save says why once', async ({ page }) => {
+  await boot(page, fixture.notes[0]);
+  await page.evaluate(() => { const w = window as any; const inner = w.__TAURI_INTERNALS__.invoke; w.__TAURI_INTERNALS__.invoke = async (cmd: string, args: any) => { if (cmd === 'note_download') throw "Couldn't save the note: Permission denied (os error 13)"; return inner(cmd, args); }; });
+  await page.getByRole('button', { name: 'Download .md' }).click();
+  await expect(page.getByText("Couldn't save the note: Permission denied (os error 13)", { exact: true })).toBeVisible();
 });
 
 test('Share is not offered off Android', async ({ page }) => {

@@ -9,6 +9,9 @@ import { downloadName, frontmatterPref, markdownFile, setFrontmatterPref, type N
 
 export type DownloadableNote = NoteDates & { id: string; content?: string };
 
+/** The error as the user reads it: Rust's own "Couldn't save …" as it is, anything else after "Couldn't <what>:". */
+const said = (e: unknown, what: string) => /^Couldn't /.test(String(e)) ? String(e) : `Couldn't ${what}: ${String(e)}`;
+
 export default function NoteDownload({ note, title }: { note: DownloadableNote; title: string }) {
   const android = platformName(currentUserAgent()) === "android";
   const [frontmatter, setFrontmatter] = useState(frontmatterPref);
@@ -33,13 +36,13 @@ export default function NoteDownload({ note, title }: { note: DownloadableNote; 
       const saved = await invoke<string | null>("note_download", file());
       if (saved) announce(`Saved to ${saved}`);
     } catch (e) {
-      announce(`Couldn't save: ${String(e)}`);
+      announce(said(e, "save"));
     } finally { setBusy(false); }
   }
 
   async function share() {
     setOpen(false);
-    try { await invoke("note_share", { ...file(), title }); } catch (e) { announce(`Couldn't share: ${String(e)}`); }
+    try { await invoke("note_share", { ...file(), title }); } catch (e) { announce(said(e, "share")); }
   }
 
   return <div className="note-download" ref={box}>

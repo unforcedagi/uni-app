@@ -10,6 +10,7 @@ import type { Note } from "@openparachute/surface-client";
 import { safeHref } from "./markdown";
 import { copyText } from "./clipboard";
 import NoteDownload from "./NoteDownload";
+import { isMarkdownNote } from "./noteDownload";
 import { bodyWithoutTitle, noteMeta, noteTitle } from "./noteText";
 import { refCandidates, isNoteNotFound, noteUrl, parseNoteRoute, parseNoteUrl, wikilinkResolver, type VaultRef } from "./vaultlinks";
 
@@ -132,7 +133,7 @@ export default function NoteView({ target, hub, onOpen, onBack, backLabel, onTit
       {note && tools && !editing && editableExtension(note.extension) && <button className="note-action" onClick={() => setEditing(true)}>Edit</button>}
       {note && tools && <button className="note-action" onClick={() => onCreate(note.path?.includes("/") ? note.path.slice(0, note.path.lastIndexOf("/")) : "")}>New note</button>}
       {note && tools && !editing && <button className="note-action" onClick={() => void copyText(note.content ?? "", "Copied markdown")}>Copy markdown</button>}
-      {note && tools && !editing && <NoteDownload note={note} title={heading} />}
+      {note && tools && !editing && isMarkdownNote(note.extension) && <NoteDownload note={note} title={heading} />}
     </header>
     {note && editing ? <NoteEditor vault={data!.vault} note={note} onDirty={onDirty} onCancel={() => setEditing(false)} onSaved={(updated) => { setData({ ...data!, note: { ...data!.note, ...updated } }); setEditing(false); }} /> : <div className="note-scroll">
       <article className="note-page">

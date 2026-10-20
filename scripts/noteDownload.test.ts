@@ -1,6 +1,6 @@
 // Run: node --experimental-strip-types scripts/noteDownload.test.ts (Node >= 22.6)
 import assert from "node:assert/strict";
-import { downloadName, markdownFile, MAX_STEM_BYTES } from "../src/noteDownload.ts";
+import { downloadName, isMarkdownNote, markdownFile, MAX_STEM_BYTES } from "../src/noteDownload.ts";
 
 const bytes = (s: string) => new TextEncoder().encode(s).length;
 
@@ -42,5 +42,9 @@ const crlf = "---\r\ntitle: x\r\n---\r\nbody";
 assert.equal(markdownFile(crlf, { path: "p" }, true), '---\r\npath: "p"\r\ntitle: x\r\n---\r\nbody');
 // An unclosed fence is not front matter: a block goes before it.
 assert.equal(markdownFile("---\nnot closed", { path: "p" }, true), '---\npath: "p"\n---\n---\nnot closed');
+
+// Only markdown notes download as .md.
+assert.ok(isMarkdownNote(undefined) && isMarkdownNote("md") && isMarkdownNote(".MD") && isMarkdownNote("mdx"));
+assert.ok(!isMarkdownNote("canvas") && !isMarkdownNote("pdf") && !isMarkdownNote("json"));
 
 console.log("noteDownload tests passed");
