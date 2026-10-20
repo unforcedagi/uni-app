@@ -1,6 +1,6 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { optionLabel, parseDecisionNote, pickedLine, type DecisionView } from "./decisionCard";
+import { optionLabel, parseDecisionNote, pickedLine, type DecisionView } from "./decisionView";
 import { makeDecisionStore, msg, type Entry } from "./decisionStore";
 import { useNoteOpener } from "./noteLinks";
 import { activeProfile } from "./areas/profile";

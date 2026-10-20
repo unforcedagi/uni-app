@@ -1,6 +1,6 @@
 // T-212: what turns a room's message into a decision card, and what a won tap posts (the parsers; the card itself is decisionCard.spec.ts).
 import assert from "node:assert/strict";
-import { decisionRefsIn, parseDecisionNote, pickedLine, questionOf, unreferenced } from "../src/decisionCard.ts";
+import { decisionRefsIn, parseDecisionNote, pickedLine, questionOf, unreferenced } from "../src/decisionView.ts";
 import { makeDecisionStore } from "../src/decisionStore.ts";
 let failed = 0;
 const check = (n: string, f: () => void) => { try { f(); console.log("ok  ", n); } catch (e) { failed++; console.log("FAIL", n, e); } };

@@ -1,4 +1,4 @@
-// T-212: a decision as a card in the chat of the room that asked it (pure, unit-tested in scripts/decisionCard.test.ts).
+// T-212: a decision as a card in the chat of the room that asked it (pure, unit-tested in scripts/decisionCard.test.ts; not decisionCard.ts: on a Mac that is DecisionCard.tsx).
 // A room posts a line with `uni:<id>` of a `Decisions/…` note (tasks.py `decide new` prints it); the app reads that note and shows
 // the question with one button per option. A tap is a compare-and-set in the vault (open -> decided) and, only when that tap won,
 // a short message from you in the room ("Picked: B …") so the room's Uni session hears the answer.

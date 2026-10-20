@@ -36,7 +36,7 @@ import { lastOwnMessage } from "./ownMessages";
 
 import { decisionIn, useDecisionLinks } from "./decisionLinks";
 import { DecisionCard, forgetDecisions } from "./DecisionCard";
-import { decisionRefsIn, unreferenced } from "./decisionCard";
+import { decisionRefsIn, unreferenced } from "./decisionView";
 import { findUniMember, findUniRoom, searchHandoffText } from "./uniActions";
 import Search from "./Search";
 import Journal from "./Journal";

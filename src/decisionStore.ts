@@ -1,7 +1,7 @@
 // T-212: the decision notes the chat's cards show, read once per vault and note and shared by every card of a decision (pure; the read
 // is passed in, so scripts/decisionCard.test.ts drives it). Forget empties it, and a read still under way when it does is dropped, so a
 // card never shows what an earlier identity could read.
-import { parseDecisionNote, type DecisionView } from "./decisionCard.ts";
+import { parseDecisionNote, type DecisionView } from "./decisionView.ts";
 
 export type Entry = { view: DecisionView | null; error: string | null; read: number; vault: string; id: string };
 /** An error as one line, without the "Error:" a thrown string or an invoke rejection may carry. */
