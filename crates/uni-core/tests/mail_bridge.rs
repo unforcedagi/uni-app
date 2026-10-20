@@ -179,7 +179,7 @@ async fn plain_http_to_another_machine_is_refused() {
 #[tokio::test]
 async fn a_message_gone_from_the_mailbox_says_so() {
     let keys = Keys::generate();
-    let mail = Mail { account: "x@y".into(), mailboxes: vec![], emails: vec![email("a", "mb", ("A", "a@x"), "s", "2026-01-01T00:00:00Z", true, "t", None)], blobs: Default::default() };
+    let mail = Mail { account: "x@y".into(), id: "a".into(), mailboxes: vec![], emails: vec![email("a", "mb", ("A", "a@x"), "s", "2026-01-01T00:00:00Z", true, "t", None)], blobs: Default::default() };
     let fake = FakeBridge::start(0, &[keys.public_key().to_hex()], mail).await;
     let e = MailBridge::new(&fake.url, &keys).unwrap().message("gone").await.unwrap_err();
     assert!(matches!(e, MailError::Invalid { ref message } if message.contains("no longer")), "{e:?}");

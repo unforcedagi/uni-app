@@ -8,7 +8,11 @@
 //! `POST /mail/raw {blobId}` → the blob's bytes (a message or an attachment).
 //!
 //! Nothing here writes: no send, no flag change, no delete. Opening a message
-//! does not mark it read.
+//! does not mark it read. Every call goes through [`check_read_only`], so a
+//! write method never leaves the device, whatever the bridge would allow.
+//!
+//! T-45 v2 ([`accounts`]): a key's session can hold a second, shared account
+//! (Uni's mailbox beside the owner's), read by `accountId`; see that module.
 //!
 //! Message HTML is sanitized here ([`sanitize_html`]) so the webview never
 //! sees the sender's markup: no scripts, no forms, no remote images (they are
@@ -24,8 +28,10 @@ use nostr::Keys;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+pub mod accounts;
 pub mod attachment;
-pub use attachment::{open_attachment, openable_extension};
+pub use accounts::{AccountBoxes, MailSession, Overview, SessionAccount, Source, Thread, ThreadPage, ThreadSummary, Who};
+pub use attachment::{open_attachment, open_attachment_in, openable_extension, refused_before_fetch};
 
 /// Port the mail bridge listens on, on the hub's host (Tailscale Serve).
 pub const MAIL_PORT: u16 = 8452;
@@ -36,8 +42,27 @@ pub const PAGE_SIZE: u64 = 50;
 /// The bridge's own cap on a blob (`MAX_RAW`).
 pub const MAX_BLOB_BYTES: usize = 30 * 1024 * 1024;
 /// Longest body part fetched; JMAP marks a longer one truncated.
-const MAX_BODY_VALUE_BYTES: u64 = 1_000_000;
-const JMAP_TIMEOUT: Duration = Duration::from_secs(45);
+pub(crate) const MAX_BODY_VALUE_BYTES: u64 = 1_000_000;
+pub(crate) const JMAP_TIMEOUT: Duration = Duration::from_secs(45);
+/// The only JMAP methods this client sends. Reads: nothing that sets a keyword, moves, drafts or submits
+/// (`Email/set`, `EmailSubmission/set`, `Email/import`, `Email/copy`, `Mailbox/set`, …).
+pub const READ_METHODS: &[&str] = &[
+    "Mailbox/get", "Mailbox/query", "Mailbox/changes", "Email/get", "Email/query", "Email/changes", "Email/queryChanges",
+    "Thread/get", "Thread/changes", "SearchSnippet/get", "Identity/get",
+];
+
+/// Refuse, on the device, any method call that isn't a read ([`READ_METHODS`]). The bridge refuses writes too;
+/// this is the first wall, and it doesn't depend on how the bridge is configured.
+pub fn check_read_only(calls: &Value) -> MailResult<()> {
+    let calls = calls.as_array().ok_or_else(|| invalid("method calls must be a list"))?;
+    for c in calls {
+        let name = c.get(0).and_then(Value::as_str).unwrap_or("");
+        if !READ_METHODS.contains(&name) {
+            return Err(invalid(format!("this app only reads mail; it never sends {name}")));
+        }
+    }
+    Ok(())
+}
 const RAW_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Why a mail request failed, in the shape the UI shows.
@@ -152,11 +177,18 @@ pub struct MessagePage {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Attachment {
     pub blob_id: String,
+    /// The part within its message (JMAP `partId`).
+    #[serde(default)]
+    pub part_id: Option<String>,
     pub name: Option<String>,
     pub mime: String,
     pub size: u64,
     /// Inline part (`Content-ID`), referenced from the HTML as `cid:`.
     pub cid: Option<String>,
+    /// Why it won't be opened, decided from its name and declared type alone ([`refused_before_fetch`]):
+    /// shown at once, and nothing is fetched. `None`: Open fetches it and its bytes decide.
+    #[serde(default)]
+    pub refused: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -178,6 +210,14 @@ pub struct Message {
     pub received_at: String,
     pub sent_at: Option<String>,
     pub unread: bool,
+    /// A draft (`$draft`): never sent.
+    #[serde(default)]
+    pub draft: bool,
+    /// The bridge's display copy of its "made by Uni" ledger (`$uni-drafted`). Shown, never trusted for anything.
+    #[serde(default)]
+    pub uni_drafted: bool,
+    #[serde(default)]
+    pub mailbox_ids: Vec<String>,
     /// The plain-text body, when the message has one.
     pub text: Option<String>,
     /// The HTML body, already sanitized ([`sanitize_html`]).
@@ -227,7 +267,7 @@ impl<'a> MailBridge<'a> {
 
     /// One signed POST; the body on 200, a [`MailError`] otherwise. When the
     /// bridge's host can't be reached at all, the alias is tried once.
-    async fn post(&self, path: &str, body: &Value, timeout: Duration, max: usize) -> MailResult<Vec<u8>> {
+    pub(crate) async fn post(&self, path: &str, body: &Value, timeout: Duration, max: usize) -> MailResult<Vec<u8>> {
         crate::init_crypto();
         let body = serde_json::to_vec(body).map_err(|e| invalid(e.to_string()))?;
         let client = crate::media::http_client_with_timeout(timeout).map_err(|e| invalid(e.to_string()))?;
@@ -279,7 +319,8 @@ impl<'a> MailBridge<'a> {
     }
 
     /// Run JMAP method calls; the account the bridge reads, and the responses by call id.
-    async fn jmap(&self, calls: Value) -> MailResult<(String, HashMap<String, Value>)> {
+    pub(crate) async fn jmap(&self, calls: Value) -> MailResult<(String, HashMap<String, Value>)> {
+        check_read_only(&calls)?;
         let raw = self.post("/mail/jmap", &json!({ "calls": calls }), JMAP_TIMEOUT, 64 * 1024 * 1024).await?;
         let v: Value = serde_json::from_slice(&raw).map_err(|e| invalid(format!("bad bridge answer: {e}")))?;
         let account = v.get("account").and_then(Value::as_str).unwrap_or_default().to_string();
@@ -306,24 +347,8 @@ impl<'a> MailBridge<'a> {
         }, "m"]]);
         let (account, r) = self.jmap(calls).await?;
         let list = r.get("m").and_then(|m| m.get("list")).and_then(Value::as_array).ok_or_else(|| invalid("no mailbox list in the answer"))?;
-        let mut boxes: Vec<(u64, Mailbox)> = list
-            .iter()
-            .filter_map(|b| {
-                Some((
-                    b.get("sortOrder").and_then(Value::as_u64).unwrap_or(0),
-                    Mailbox {
-                        id: b.get("id")?.as_str()?.to_string(),
-                        name: b.get("name").and_then(Value::as_str).unwrap_or("").to_string(),
-                        role: b.get("role").and_then(Value::as_str).map(str::to_string),
-                        parent_id: b.get("parentId").and_then(Value::as_str).map(str::to_string),
-                        total: b.get("totalEmails").and_then(Value::as_u64).unwrap_or(0),
-                        unread: b.get("unreadEmails").and_then(Value::as_u64).unwrap_or(0),
-                    },
-                ))
-            })
-            .collect();
-        boxes.sort_by(|(sa, a), (sb, b)| role_rank(a).cmp(&role_rank(b)).then(sa.cmp(sb)).then(a.name.to_lowercase().cmp(&b.name.to_lowercase())));
-        Ok(MailAccount { account, mailboxes: boxes.into_iter().map(|(_, b)| b).collect() })
+        let boxes = parse_mailboxes(list);
+        Ok(MailAccount { account, mailboxes: boxes })
     }
 
     /// One page of `mailbox`, newest first, starting at `position`.
@@ -391,14 +416,43 @@ impl<'a> MailBridge<'a> {
         check_id(blob_id)?;
         self.post("/mail/raw", &json!({ "blobId": blob_id }), RAW_TIMEOUT, MAX_BLOB_BYTES).await
     }
+
+    /// The bytes of a blob in `account` (the bridge checks the account is in this key's session).
+    pub async fn blob_in(&self, account: &str, blob_id: &str) -> MailResult<Vec<u8>> {
+        check_id(account)?;
+        check_id(blob_id)?;
+        self.post("/mail/raw", &json!({ "accountId": account, "blobId": blob_id }), RAW_TIMEOUT, MAX_BLOB_BYTES).await
+    }
 }
 
 /// JMAP ids are `[A-Za-z0-9_-]`; anything else never leaves the device.
-fn check_id(id: &str) -> MailResult<()> {
+pub(crate) fn check_id(id: &str) -> MailResult<()> {
     if id.is_empty() || id.len() > 255 || !id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-') {
         return Err(invalid("bad mail id"));
     }
     Ok(())
+}
+
+/// A `Mailbox/get` list as mailboxes: Inbox first, then by role, the server's sort order and name.
+pub(crate) fn parse_mailboxes(list: &[Value]) -> Vec<Mailbox> {
+    let mut boxes: Vec<(u64, Mailbox)> = list
+        .iter()
+        .filter_map(|b| {
+            Some((
+                b.get("sortOrder").and_then(Value::as_u64).unwrap_or(0),
+                Mailbox {
+                    id: b.get("id")?.as_str()?.to_string(),
+                    name: b.get("name").and_then(Value::as_str).unwrap_or("").to_string(),
+                    role: b.get("role").and_then(Value::as_str).map(str::to_string),
+                    parent_id: b.get("parentId").and_then(Value::as_str).map(str::to_string),
+                    total: b.get("totalEmails").and_then(Value::as_u64).unwrap_or(0),
+                    unread: b.get("unreadEmails").and_then(Value::as_u64).unwrap_or(0),
+                },
+            ))
+        })
+        .collect();
+    boxes.sort_by(|(sa, a), (sb, b)| role_rank(a).cmp(&role_rank(b)).then(sa.cmp(sb)).then(a.name.to_lowercase().cmp(&b.name.to_lowercase())));
+    boxes.into_iter().map(|(_, b)| b).collect()
 }
 
 fn role_rank(b: &Mailbox) -> u8 {
@@ -413,7 +467,7 @@ fn role_rank(b: &Mailbox) -> u8 {
     }
 }
 
-fn addresses(v: Option<&Value>) -> Vec<Address> {
+pub(crate) fn addresses(v: Option<&Value>) -> Vec<Address> {
     v.and_then(Value::as_array)
         .into_iter()
         .flatten()
@@ -426,11 +480,21 @@ fn addresses(v: Option<&Value>) -> Vec<Address> {
         .collect()
 }
 
-fn unread(e: &Value) -> bool {
-    !e.get("keywords").and_then(|k| k.get("$seen")).and_then(Value::as_bool).unwrap_or(false)
+pub(crate) fn keyword(e: &Value, k: &str) -> bool {
+    e.get("keywords").and_then(|w| w.get(k)).and_then(Value::as_bool).unwrap_or(false)
 }
 
-fn text_of(e: &Value, key: &str) -> String {
+pub(crate) fn unread(e: &Value) -> bool {
+    !keyword(e, "$seen")
+}
+
+fn mailbox_ids(e: &Value) -> Vec<String> {
+    let mut ids: Vec<String> = e.get("mailboxIds").and_then(Value::as_object).into_iter().flatten().filter(|(_, v)| v.as_bool() == Some(true)).map(|(k, _)| k.clone()).collect();
+    ids.sort();
+    ids
+}
+
+pub(crate) fn text_of(e: &Value, key: &str) -> String {
     e.get(key).and_then(Value::as_str).unwrap_or("").to_string()
 }
 
@@ -466,7 +530,7 @@ fn body(e: &Value, list: &str, mime: &str) -> (Option<String>, bool) {
     ((!joined.trim().is_empty()).then_some(joined), truncated)
 }
 
-fn message(e: &Value) -> Message {
+pub(crate) fn message(e: &Value) -> Message {
     let (text, t1) = body(e, "textBody", "text/plain");
     let (html, t2) = body(e, "htmlBody", "text/html");
     let (html, remote_images) = match html {
@@ -483,10 +547,14 @@ fn message(e: &Value) -> Message {
         .into_iter()
         .flatten()
         .filter_map(|a| {
+            let name = a.get("name").and_then(Value::as_str).filter(|n| !n.is_empty()).map(str::to_string);
+            let mime = a.get("type").and_then(Value::as_str).unwrap_or("application/octet-stream").to_string();
             Some(Attachment {
                 blob_id: a.get("blobId")?.as_str()?.to_string(),
-                name: a.get("name").and_then(Value::as_str).filter(|n| !n.is_empty()).map(str::to_string),
-                mime: a.get("type").and_then(Value::as_str).unwrap_or("application/octet-stream").to_string(),
+                part_id: a.get("partId").and_then(Value::as_str).map(str::to_string),
+                refused: refused_before_fetch(name.as_deref(), Some(&mime)),
+                name,
+                mime,
                 size: a.get("size").and_then(Value::as_u64).unwrap_or(0),
                 cid: a.get("cid").and_then(Value::as_str).map(str::to_string),
             })
@@ -503,6 +571,9 @@ fn message(e: &Value) -> Message {
         received_at: text_of(e, "receivedAt"),
         sent_at: e.get("sentAt").and_then(Value::as_str).map(str::to_string),
         unread: unread(e),
+        draft: keyword(e, "$draft"),
+        uni_drafted: keyword(e, "$uni-drafted"),
+        mailbox_ids: mailbox_ids(e),
         text,
         html,
         remote_images,
@@ -694,6 +765,16 @@ mod tests {
             Link { url: "https://rsvp.example/e?a=1&b=2".into(), text: Some("RSVP here".into()) },
             Link { url: "http://plain.example/".into(), text: None },
         ]);
+    }
+
+    #[test]
+    fn no_write_method_ever_leaves_the_device() {
+        assert!(check_read_only(&json!([["Mailbox/get", {}, "m"], ["Email/query", {}, "q"], ["Email/get", {}, "g"], ["Thread/get", {}, "t"]])).is_ok());
+        for write in ["Email/set", "EmailSubmission/set", "Email/import", "Email/copy", "Mailbox/set", "Identity/set", "VacationResponse/set", "Principal/get", ""] {
+            let calls = json!([["Email/get", {}, "g"], [write, {}, "w"]]);
+            assert!(matches!(check_read_only(&calls), Err(MailError::Invalid { .. })), "{write} must be refused");
+        }
+        assert!(check_read_only(&json!({"not": "a list"})).is_err());
     }
 
     #[test]

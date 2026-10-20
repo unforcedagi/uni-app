@@ -8,6 +8,19 @@
 //! JMAP store: `Mailbox/get`, `Email/query` (inMailbox, receivedAt order,
 //! position/limit/total) and `Email/get` (ids or a `#ids` back-reference,
 //! body values on request), and `/mail/raw` for blobs.
+//!
+//! T-45 v2 ([`FakeBridge::start_shared`]): the bridge #mail is asked for. A key's
+//! session holds its own account and the ones shared with it; `/mail/session`
+//! lists them; every call names its `accountId`, and one outside the session
+//! is refused; `/mail/raw` and `/mail/triage` take an `accountId`. The JMAP store
+//! also does `Thread/get`, `collapseThreads`, a `text` filter,
+//! `inMailboxOtherThan`, and `*` in back-reference paths. A v1 bridge
+//! ([`FakeBridge::start`]) reads its one account whatever is asked, as the live
+//! one does today, and 404s the v2 paths.
+//!
+//! [`State::accept_writes`] makes it a server that would take writes: `Email/set`
+//! keyword patches are applied. The app's "never writes" tests run against that, so
+//! they prove the client sends none, not that the bridge refused them.
 #![allow(dead_code)]
 
 use std::collections::{HashMap, HashSet};
@@ -27,6 +40,8 @@ const READ_METHODS: &[&str] = &[
 
 pub struct Mail {
     pub account: String,
+    /// The JMAP `accountId`.
+    pub id: String,
     pub mailboxes: Vec<Value>,
     /// Full JMAP Email objects (with `textBody`, `htmlBody`, `attachments`, `bodyValues`).
     pub emails: Vec<Value>,
@@ -35,6 +50,16 @@ pub struct Mail {
 
 pub struct State {
     pub mail: Mail,
+    /// Accounts shared with this key (v2 only).
+    pub shared: Vec<Mail>,
+    /// The v2 bridge: `/mail/session`, `/mail/triage`, and `accountId` honoured (checked against the session).
+    pub v2: bool,
+    /// Forward and apply write methods instead of refusing them (see the module note).
+    pub accept_writes: bool,
+    /// Uni's triage notes, by (accountId, emailId).
+    pub triage: HashMap<(String, String), String>,
+    /// Every method call forwarded: its name and the `accountId` it named.
+    pub calls: Vec<(String, Option<String>)>,
     pub allow: HashSet<String>,
     /// The mail server behind the bridge is down: every call answers 502.
     pub server_down: bool,
@@ -54,10 +79,24 @@ pub struct FakeBridge {
 impl FakeBridge {
     /// Start on `127.0.0.1:port` (0 = any free port).
     pub async fn start(port: u16, allow: &[String], mail: Mail) -> FakeBridge {
+        Self::start_with(port, allow, mail, Vec::new(), false).await
+    }
+
+    /// The v2 bridge: `own` is the key's account, `shared` the accounts shared with it.
+    pub async fn start_shared(port: u16, allow: &[String], own: Mail, shared: Vec<Mail>) -> FakeBridge {
+        Self::start_with(port, allow, own, shared, true).await
+    }
+
+    async fn start_with(port: u16, allow: &[String], mail: Mail, shared: Vec<Mail>, v2: bool) -> FakeBridge {
         let listener = TcpListener::bind(("127.0.0.1", port)).await.unwrap();
         let url = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
         let state = Arc::new(Mutex::new(State {
             mail,
+            shared,
+            v2,
+            accept_writes: false,
+            triage: HashMap::new(),
+            calls: Vec::new(),
             allow: allow.iter().map(|k| k.to_lowercase()).collect(),
             server_down: false,
             forwarded: Vec::new(),
@@ -141,6 +180,27 @@ fn handle(st: &Mutex<State>, public: &str, request: &str, path: &str, auth: &str
         return err(502, "mail server: URLError");
     }
     match path {
+        "/mail/session" if s.v2 => {
+            let mut accounts = serde_json::Map::new();
+            for (m, personal) in std::iter::once((&s.mail, true)).chain(s.shared.iter().map(|m| (m, false))) {
+                accounts.insert(m.id.clone(), json!({ "name": m.account, "isPersonal": personal, "isReadOnly": false, "accountCapabilities": { "urn:ietf:params:jmap:mail": {} } }));
+            }
+            let body = json!({ "account": s.mail.account, "primaryAccounts": { "urn:ietf:params:jmap:mail": s.mail.id }, "accounts": accounts });
+            (200, "application/json", body.to_string().into_bytes())
+        }
+        "/mail/triage" if s.v2 => {
+            let account = req.get("accountId").and_then(Value::as_str).unwrap_or("");
+            if s.account(account).is_none() {
+                return err(400, "account not in this key's session");
+            }
+            let mut notes = serde_json::Map::new();
+            for id in req.get("emailIds").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str) {
+                if let Some(n) = s.triage.get(&(account.to_string(), id.to_string())) {
+                    notes.insert(id.to_string(), json!(n));
+                }
+            }
+            (200, "application/json", json!({ "notes": notes }).to_string().into_bytes())
+        }
         "/mail/jmap" => {
             let calls = req.get("calls").and_then(Value::as_array).cloned().unwrap_or_default();
             for c in &calls {
@@ -149,15 +209,22 @@ fn handle(st: &Mutex<State>, public: &str, request: &str, path: &str, auth: &str
                     return err(400, "malformed method call");
                 }
                 let name = c[0].as_str().unwrap_or("");
-                if !READ_METHODS.contains(&name) {
+                if !READ_METHODS.contains(&name) && !s.accept_writes {
                     return err(400, &format!("method not allowed (read-only bridge): {name}"));
                 }
             }
             let mut responses: Vec<Value> = Vec::new();
             for c in &calls {
                 let (name, args, id) = (c[0].as_str().unwrap().to_string(), &c[1], c[2].as_str().unwrap_or("").to_string());
+                let asked = args.get("accountId").and_then(Value::as_str).map(str::to_string);
                 s.forwarded.push(name.clone());
-                let answer = jmap(&s.mail, &name, args, &responses);
+                s.calls.push((name.clone(), asked.clone()));
+                // v1 reads its own account whatever is asked; v2 reads the one named, if it is in the session
+                let account = if s.v2 { asked.clone().unwrap_or_default() } else { s.mail.id.clone() };
+                let answer = match s.account_mut(&account) {
+                    None => Err("accountNotFound"),
+                    Some(mail) => jmap(mail, &name, args, &responses),
+                };
                 responses.push(match answer {
                     Ok(v) => json!([name, v, id]),
                     Err(t) => json!(["error", { "type": t }, id]),
@@ -170,13 +237,33 @@ fn handle(st: &Mutex<State>, public: &str, request: &str, path: &str, auth: &str
             if blob.is_empty() || blob.chars().any(|c| "/?#{} ".contains(c)) {
                 return err(400, "bad blobId");
             }
-            match s.mail.blobs.get(blob) {
+            let account = match (s.v2, req.get("accountId").and_then(Value::as_str)) {
+                (true, Some(a)) => a.to_string(),
+                _ => s.mail.id.clone(),
+            };
+            let Some(mail) = s.account(&account) else { return err(400, "account not in this key's session") };
+            match mail.blobs.get(blob) {
                 Some(b) => (200, "text/plain; charset=utf-8", b.clone()),
                 // Stalwart 404s an unknown blob; the bridge reports that as an upstream failure
                 None => err(502, "mail server: HTTPError"),
             }
         }
         _ => err(404, "not found"),
+    }
+}
+
+impl State {
+    fn account(&self, id: &str) -> Option<&Mail> {
+        std::iter::once(&self.mail).chain(self.shared.iter()).find(|m| m.id == id)
+    }
+
+    fn account_mut(&mut self, id: &str) -> Option<&mut Mail> {
+        std::iter::once(&mut self.mail).chain(self.shared.iter_mut()).find(|m| m.id == id)
+    }
+
+    /// Every email's keywords, by account and id: what a test compares before and after reading.
+    pub fn keywords(&self) -> Vec<(String, String, Value)> {
+        std::iter::once(&self.mail).chain(self.shared.iter()).flat_map(|m| m.emails.iter().map(|e| (m.id.clone(), e["id"].as_str().unwrap_or("").to_string(), e["keywords"].clone()))).collect()
     }
 }
 
@@ -215,7 +302,8 @@ fn verify_nip98(st: &Mutex<State>, header: &str, url: &str, body: &[u8]) -> Resu
     Ok(())
 }
 
-/// Resolve a JMAP `#name` back-reference (`/ids` only, which is all the app uses).
+/// Resolve a JMAP `#name` back-reference (RFC 8620 §3.7: a JSON pointer where `*` maps over an array, and arrays of
+/// arrays are flattened).
 fn back_ref(args: &Value, key: &str, earlier: &[Value]) -> Option<Value> {
     if let Some(v) = args.get(key) {
         return Some(v.clone());
@@ -223,15 +311,66 @@ fn back_ref(args: &Value, key: &str, earlier: &[Value]) -> Option<Value> {
     let r = args.get(format!("#{key}"))?;
     let (of, path) = (r.get("resultOf")?.as_str()?, r.get("path")?.as_str()?);
     let prev = earlier.iter().find(|p| p.get(2).and_then(Value::as_str) == Some(of))?;
-    prev.get(1)?.pointer(path).cloned()
+    if prev.get(0).and_then(Value::as_str) == Some("error") {
+        return None;
+    }
+    let parts: Vec<&str> = path.trim_start_matches('/').split('/').collect();
+    pointer(prev.get(1)?, &parts)
 }
 
-fn jmap(mail: &Mail, name: &str, args: &Value, earlier: &[Value]) -> Result<Value, &'static str> {
+fn pointer(v: &Value, parts: &[&str]) -> Option<Value> {
+    let Some((first, rest)) = parts.split_first() else { return Some(v.clone()) };
+    if *first == "*" {
+        let mut out = Vec::new();
+        for item in v.as_array()? {
+            match pointer(item, rest)? {
+                Value::Array(a) => out.extend(a),
+                x => out.push(x),
+            }
+        }
+        return Some(Value::Array(out));
+    }
+    let next = match v {
+        Value::Array(a) => a.get(first.parse::<usize>().ok()?)?,
+        Value::Object(o) => o.get(*first)?,
+        _ => return None,
+    };
+    pointer(next, rest)
+}
+
+/// Whether `e` contains `text` (case-insensitive) in its subject, addresses, preview, bodies or attachment names.
+fn matches_text(e: &Value, text: &str) -> bool {
+    let t = text.to_lowercase();
+    let mut hay = String::new();
+    for k in ["subject", "preview"] {
+        hay.push_str(e[k].as_str().unwrap_or(""));
+        hay.push(' ');
+    }
+    for k in ["from", "to"] {
+        for a in e[k].as_array().into_iter().flatten() {
+            hay.push_str(&format!("{} {} ", a["name"].as_str().unwrap_or(""), a["email"].as_str().unwrap_or("")));
+        }
+    }
+    for v in e["bodyValues"].as_object().into_iter().flatten().map(|(_, v)| v) {
+        hay.push_str(v["value"].as_str().unwrap_or(""));
+        hay.push(' ');
+    }
+    for a in e["attachments"].as_array().into_iter().flatten() {
+        hay.push_str(a["name"].as_str().unwrap_or(""));
+        hay.push(' ');
+    }
+    hay.to_lowercase().contains(&t)
+}
+
+fn jmap(mail: &mut Mail, name: &str, args: &Value, earlier: &[Value]) -> Result<Value, &'static str> {
+    let account = mail.id.clone();
     match name {
         "Mailbox/get" => {
+            let only: Option<Vec<String>> = args.get("ids").and_then(Value::as_array).map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect());
             let list: Vec<Value> = mail
                 .mailboxes
                 .iter()
+                .filter(|b| only.as_ref().is_none_or(|o| o.iter().any(|i| b["id"] == i.as_str())))
                 .map(|b| {
                     let id = b["id"].as_str().unwrap_or("");
                     let inside: Vec<&Value> = mail.emails.iter().filter(|e| e["mailboxIds"].get(id).is_some()).collect();
@@ -242,19 +381,32 @@ fn jmap(mail: &Mail, name: &str, args: &Value, earlier: &[Value]) -> Result<Valu
                     b
                 })
                 .collect();
-            Ok(json!({ "accountId": "a", "state": "1", "list": list, "notFound": [] }))
+            Ok(json!({ "accountId": account, "state": "1", "list": list, "notFound": [] }))
         }
         "Email/query" => {
-            let inbox = args.pointer("/filter/inMailbox").and_then(Value::as_str);
+            let filter = args.get("filter").cloned().unwrap_or(json!({}));
+            let inbox = filter.get("inMailbox").and_then(Value::as_str);
             if inbox.is_some_and(|m| !mail.mailboxes.iter().any(|b| b["id"] == m)) {
                 return Err("invalidArguments");
             }
-            let mut found: Vec<&Value> = mail.emails.iter().filter(|e| inbox.is_none_or(|m| e["mailboxIds"].get(m).is_some())).collect();
+            let other: Vec<&str> = filter.get("inMailboxOtherThan").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).collect();
+            let text = filter.get("text").and_then(Value::as_str);
+            let mut found: Vec<&Value> = mail
+                .emails
+                .iter()
+                .filter(|e| inbox.is_none_or(|m| e["mailboxIds"].get(m).is_some()))
+                .filter(|e| !e["mailboxIds"].as_object().is_some_and(|ids| !ids.is_empty() && ids.keys().all(|k| other.contains(&k.as_str()))))
+                .filter(|e| text.is_none_or(|t| matches_text(e, t)))
+                .collect();
             found.sort_by(|a, b| b["receivedAt"].as_str().cmp(&a["receivedAt"].as_str()));
+            if args.get("collapseThreads").and_then(Value::as_bool) == Some(true) {
+                let mut seen = HashSet::new();
+                found.retain(|e| seen.insert(e["threadId"].as_str().unwrap_or("").to_string()));
+            }
             let position = args.get("position").and_then(Value::as_u64).unwrap_or(0) as usize;
             let limit = args.get("limit").and_then(Value::as_u64).unwrap_or(256) as usize;
             let ids: Vec<&Value> = found.iter().skip(position).take(limit).map(|e| &e["id"]).collect();
-            let mut out = json!({ "accountId": "a", "queryState": "1", "canCalculateChanges": false, "position": position, "ids": ids });
+            let mut out = json!({ "accountId": account, "queryState": "1", "canCalculateChanges": false, "position": position, "ids": ids });
             if args.get("calculateTotal").and_then(Value::as_bool) == Some(true) {
                 out["total"] = json!(found.len());
             }
@@ -290,9 +442,46 @@ fn jmap(mail: &Mail, name: &str, args: &Value, earlier: &[Value]) -> Result<Valu
                 e["bodyValues"] = Value::Object(values);
                 list.push(e);
             }
-            Ok(json!({ "accountId": "a", "state": "1", "list": list, "notFound": not_found }))
+            Ok(json!({ "accountId": account, "state": "1", "list": list, "notFound": not_found }))
         }
-        _ => Ok(json!({ "accountId": "a", "list": [] })),
+        "Thread/get" => {
+            let ids = back_ref(args, "ids", earlier).ok_or("invalidResultReference")?;
+            let mut list = Vec::new();
+            let mut not_found = Vec::new();
+            let mut done = HashSet::new();
+            for id in ids.as_array().into_iter().flatten().filter_map(Value::as_str) {
+                if !done.insert(id) {
+                    continue;
+                }
+                let mut members: Vec<&Value> = mail.emails.iter().filter(|e| e["threadId"] == id).collect();
+                if members.is_empty() {
+                    not_found.push(id);
+                    continue;
+                }
+                members.sort_by(|a, b| a["receivedAt"].as_str().cmp(&b["receivedAt"].as_str()));
+                list.push(json!({ "id": id, "emailIds": members.iter().map(|e| &e["id"]).collect::<Vec<_>>() }));
+            }
+            Ok(json!({ "accountId": account, "state": "1", "list": list, "notFound": not_found }))
+        }
+        // only reached with accept_writes: a server that would take them
+        "Email/set" => {
+            let mut updated = serde_json::Map::new();
+            for (id, patch) in args.get("update").and_then(Value::as_object).into_iter().flatten() {
+                let Some(e) = mail.emails.iter_mut().find(|e| e["id"] == id.as_str()) else { continue };
+                for (k, v) in patch.as_object().into_iter().flatten() {
+                    if let Some(kw) = k.strip_prefix("keywords/") {
+                        if v.is_null() {
+                            e["keywords"].as_object_mut().map(|o| o.remove(kw));
+                        } else {
+                            e["keywords"][kw] = v.clone();
+                        }
+                    }
+                }
+                updated.insert(id.clone(), Value::Null);
+            }
+            Ok(json!({ "accountId": account, "updated": updated }))
+        }
+        _ => Ok(json!({ "accountId": account, "list": [] })),
     }
 }
 
@@ -362,5 +551,93 @@ pub fn sample_mail() -> Mail {
     blobs.insert("Bnotes-pdf".to_string(), include_bytes!("../fixtures/attachments/notes.pdf").to_vec());
     blobs.insert("Bbudget-docx".to_string(), include_bytes!("../fixtures/attachments/budget-ole.docx").to_vec());
     blobs.insert("Binvoice-svg".to_string(), br#"<svg xmlns="http://www.w3.org/2000/svg" onload="alert(document.domain)"><text y="20">Invoice</text></svg>"#.to_vec());
-    Mail { account: "owner@example.com".into(), mailboxes, emails, blobs }
+    Mail { account: "owner@example.com".into(), id: "a".into(), mailboxes, emails, blobs }
+}
+
+fn boxes(prefix: &str) -> Vec<Value> {
+    [("inbox", "Inbox"), ("drafts", "Drafts"), ("sent", "Sent"), ("archive", "Archive"), ("junk", "Junk"), ("trash", "Trash")]
+        .iter()
+        .map(|(role, name)| json!({ "id": format!("{prefix}-{role}"), "name": name, "role": role, "parentId": null, "sortOrder": 0 }))
+        .collect()
+}
+
+/// `email` in `thread`, with these keywords set.
+fn in_thread(mut e: Value, thread: &str, keywords: &[&str]) -> Value {
+    e["threadId"] = json!(thread);
+    for k in keywords {
+        e["keywords"][*k] = json!(true);
+    }
+    e
+}
+
+/// Two made-up accounts shared with each other, as #mail shares the test boxes: the owner's (Robin Vale,
+/// `robin@example.com`, account `A`) and Uni's (`uni@example.com`, account `U`). Their inboxes interleave in time.
+/// A three-message thread with a draft Uni left in Robin's Drafts; attachments that pass, fail on their bytes, and fail
+/// by name; words found in one account only (`marmalade` in A, also in A's Junk; `lighthouse` in U). Returns the two
+/// accounts and Uni's triage notes.
+pub fn shared_mail() -> (Mail, Mail, HashMap<(String, String), String>) {
+    let robin = ("Robin Vale", "robin@example.com");
+    let mut a = vec![
+        in_thread(email("a1", "A-inbox", ("Mara Quill", "mara@example.org"), "Planning the garden week", "2026-10-18T09:00:00Z", true,
+            "Hi Robin,\n\nShall we plan the garden week? I can bring the marmalade jars on Saturday.\n\nMara", None), "TA-plan", &[]),
+        in_thread(email("a2", "A-sent", robin, "Re: Planning the garden week", "2026-10-18T11:00:00Z", true,
+            "Saturday works. Bring the jars.\n\nRobin", None), "TA-plan", &[]),
+        in_thread(email("a3", "A-inbox", ("Mara Quill", "mara@example.org"), "Re: Planning the garden week", "2026-10-19T08:30:00Z", false,
+            "Great. One question: which day should we start the beds, Monday or Tuesday?\n\nMara", None), "TA-plan", &[]),
+        in_thread(email("a6", "A-drafts", robin, "Re: Planning the garden week", "2026-10-19T09:00:00Z", true,
+            "Monday suits me. See you then.\n\nRobin", None), "TA-plan", &["$draft", "$uni-drafted"]),
+        email("a4", "A-inbox", ("Theo Brandt", "theo@example.net"), "Workshop photos and slides", "2026-10-17T15:00:00Z", false,
+            "Here are the notes from the workshop, a proof of the poster, and the installer I mentioned.\n\nTheo", None),
+        email("a5", "A-inbox", ("Riverside Library", "library@example.org"), "Your hold is ready", "2026-10-16T10:00:00Z", true, "",
+            Some(r#"<h2>Your hold is ready</h2><p>Pick it up within seven days.</p><img src="https://tracker.example/open.gif"><p><a href="https://library.example/holds">See your holds</a></p>"#)),
+        email("a7", "A-junk", ("Prize Desk", "winner@spam.example"), "Free marmalade for life", "2026-10-15T03:00:00Z", false, "Claim now.", None),
+    ];
+    for e in a.iter_mut() {
+        e["to"] = json!([{ "name": robin.0, "email": robin.1 }]);
+    }
+    a[1]["to"] = json!([{ "name": "Mara Quill", "email": "mara@example.org" }]);
+    a[3]["to"] = json!([{ "name": "Mara Quill", "email": "mara@example.org" }]);
+    a[4]["hasAttachment"] = json!(true);
+    a[4]["attachments"] = json!([
+        { "partId": "3", "blobId": "Bnotes-pdf", "type": "application/pdf", "name": "workshop-notes.pdf", "size": 13401, "cid": null, "disposition": "attachment" },
+        { "partId": "4", "blobId": "Bproof-svg", "type": "image/png", "name": "poster-proof.png", "size": 160, "cid": null, "disposition": "attachment" },
+        { "partId": "5", "blobId": "Bsetup-exe", "type": "application/octet-stream", "name": "setup.exe", "size": 9000, "cid": null, "disposition": "attachment" },
+    ]);
+    let mut a_blobs = HashMap::new();
+    a_blobs.insert("Bnotes-pdf".to_string(), include_bytes!("../fixtures/attachments/notes.pdf").to_vec());
+    a_blobs.insert("Bproof-svg".to_string(), br#"<svg xmlns="http://www.w3.org/2000/svg" onload="alert(document.domain)"><text y="20">Poster</text></svg>"#.to_vec());
+    a_blobs.insert("Bsetup-exe".to_string(), b"MZ\x90\0\x03\0\0\0\x04\0\0\0\xFF\xFF".to_vec());
+
+    let uni = ("Uni", "uni@example.com");
+    let mut u = vec![
+        email("u1", "U-inbox", ("Monitor", "monitor@example.net"), "Server report for Tuesday", "2026-10-18T10:30:00Z", false,
+            "All checks passed. The lighthouse job ran twice.", None),
+        in_thread(email("u2", "U-inbox", ("Ada Moss", "ada@example.org"), "Question about the reading group", "2026-10-17T18:00:00Z", true,
+            "Hello Uni, is the reading group still on Thursday?\n\nAda", None), "TU-read", &[]),
+        in_thread(email("u3", "U-sent", uni, "Re: Question about the reading group", "2026-10-17T19:00:00Z", true,
+            "Yes, Thursday at six.", None), "TU-read", &[]),
+        in_thread(email("u5", "U-drafts", uni, "Re: Question about the reading group", "2026-10-18T08:00:00Z", true,
+            "A reminder for Thursday at six.", None), "TU-read", &["$draft"]),
+        email("u4", "U-inbox", ("Billing", "billing@example.com"), "Invoice for October", "2026-10-15T12:00:00Z", false,
+            "Your invoice is attached.", None),
+    ];
+    for e in u.iter_mut() {
+        e["to"] = json!([{ "name": uni.0, "email": uni.1 }]);
+    }
+    u[2]["to"] = json!([{ "name": "Ada Moss", "email": "ada@example.org" }]);
+    u[3]["to"] = json!([{ "name": "Ada Moss", "email": "ada@example.org" }]);
+    u[4]["hasAttachment"] = json!(true);
+    u[4]["attachments"] = json!([{ "partId": "3", "blobId": "Binvoice-pdf", "type": "application/pdf", "name": "invoice-october.pdf", "size": 13401, "cid": null, "disposition": "attachment" }]);
+    let mut u_blobs = HashMap::new();
+    u_blobs.insert("Binvoice-pdf".to_string(), include_bytes!("../fixtures/attachments/notes.pdf").to_vec());
+
+    let mut triage = HashMap::new();
+    triage.insert(("A".to_string(), "a3".to_string()), "Needs you: Mara asks which day to start.".to_string());
+    triage.insert(("A".to_string(), "a4".to_string()), "<b>Two files</b> pass the checks; setup.exe won't open.".to_string());
+    triage.insert(("U".to_string(), "u1".to_string()), "Routine. Nothing to do.".to_string());
+    (
+        Mail { account: "robin@example.com".into(), id: "A".into(), mailboxes: boxes("A"), emails: a, blobs: a_blobs },
+        Mail { account: "uni@example.com".into(), id: "U".into(), mailboxes: boxes("U"), emails: u, blobs: u_blobs },
+        triage,
+    )
 }

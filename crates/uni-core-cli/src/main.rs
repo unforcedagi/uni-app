@@ -8,7 +8,8 @@
 //! uni-core-cli show [--db path] [--limit N]
 //! uni-core-cli search <query> [--db path] [--limit N]
 //! uni-core-cli probe [--relay …] [--ephemeral]
-//! uni-core-cli mail [--bridge https://…:8452] [--sign-as <public url>] [--mailbox <id>]   read-only: mailboxes, or a mailbox's newest messages
+//! uni-core-cli mail [--bridge https://…:8452] [--sign-as <public url>] [--mailbox <id>] [--threads] [--search <text>] [--thread <account>/<id>]
+//!                                                                                         read-only: accounts and mailboxes, a list, a search, a thread
 //! ```
 //!
 //! The private key is read from `UNI_NSEC` or the macOS keyring (`uni-app`/`nsec`)
@@ -110,6 +111,15 @@ enum Cmd {
         /// List this mailbox's newest messages instead of the mailboxes.
         #[arg(long)]
         mailbox: Option<String>,
+        /// T-45 v2: the newest threads of every account's Inbox, merged.
+        #[arg(long)]
+        threads: bool,
+        /// T-45 v2: search every account (less Junk and Trash).
+        #[arg(long)]
+        search: Option<String>,
+        /// T-45 v2: read one thread, `<accountId>/<threadId>`; prints its messages' headers and whether each is still unread.
+        #[arg(long)]
+        thread: Option<String>,
     },
 }
 
@@ -347,7 +357,7 @@ async fn main() -> Result<()> {
             }
             Ok(())
         }
-        Cmd::Mail { bridge, sign_as, mailbox } => {
+        Cmd::Mail { bridge, sign_as, mailbox, threads, search, thread } => {
             let (bridge, alias) = match bridge {
                 Some(b) => (b, None),
                 None => uni_core::mail::default_bridge(),
@@ -364,12 +374,50 @@ async fn main() -> Result<()> {
                 println!("signing as: {public}");
                 mail = mail.signing_as(&public)?;
             }
+            let row = |t: &uni_core::mail::ThreadSummary| {
+                let from = t.from.first().map(|a| a.email.as_str()).unwrap_or("");
+                println!("{} {} {:<3} {:<10.10} {:<24.24} {:.50}  {}/{}", t.received_at, if t.unread { "●" } else { " " }, t.count, t.account_id, from, t.subject, t.account_id, t.thread_id);
+            };
+            if let Some(key) = thread {
+                let (account, id) = key.split_once('/').context("--thread is <accountId>/<threadId>")?;
+                let t = mail.thread(account, id).await?;
+                println!("thread {account}/{id}: {} message(s)", t.messages.len());
+                for m in &t.messages {
+                    let from = m.from.first().map(|a| a.email.as_str()).unwrap_or("");
+                    let kind = if m.draft { "draft " } else if m.unread { "unread" } else { "read  " };
+                    println!("{} {kind} {:<24.24} {:.50}  {} attachment(s), text {} B, html {} B", m.received_at, from, m.subject, m.attachments.len(), m.text.as_ref().map_or(0, String::len), m.html.as_ref().map_or(0, String::len));
+                }
+                return Ok(());
+            }
+            let overview = mail.overview().await?;
+            println!("login:      {} ({})", overview.login, if overview.multi { "v2 bridge: session accounts" } else { "v1 bridge: one account" });
+            if threads || search.is_some() {
+                let sources: Vec<uni_core::mail::Source> = overview
+                    .accounts
+                    .iter()
+                    .filter_map(|a| {
+                        let role = |r: &str| a.mailboxes.iter().find(|b| b.role.as_deref() == Some(r)).map(|b| b.id.clone());
+                        if search.is_some() {
+                            Some(uni_core::mail::Source { account_id: a.id.clone(), mailbox_id: None, exclude: ["junk", "trash"].iter().filter_map(|r| role(r)).collect(), position: 0 })
+                        } else {
+                            Some(uni_core::mail::Source { account_id: a.id.clone(), mailbox_id: Some(role("inbox")?), exclude: vec![], position: 0 })
+                        }
+                    })
+                    .collect();
+                let page = mail.threads(&sources, search.as_deref(), 20).await?;
+                println!("{} thread(s){}", page.total.map_or("?".into(), |t| t.to_string()), search.as_ref().map_or(String::new(), |q| format!(" matching {q:?}")));
+                for t in &page.threads {
+                    row(t);
+                }
+                return Ok(());
+            }
             match mailbox {
                 None => {
-                    let acct = mail.mailboxes().await?;
-                    println!("account:    {}", acct.account);
-                    for b in acct.mailboxes {
-                        println!("{:<24} {:>5} total {:>4} unread  {}", b.name, b.total, b.unread, b.id);
+                    for a in &overview.accounts {
+                        println!("account {} {:?} {}", a.id, a.who, a.name);
+                        for b in &a.mailboxes {
+                            println!("  {:<22} {:>5} total {:>4} unread  {}", b.name, b.total, b.unread, b.id);
+                        }
                     }
                 }
                 Some(id) => {

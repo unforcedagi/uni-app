@@ -303,6 +303,25 @@ fn refused(why: &str) -> MailError {
     invalid(format!("Uni didn't open this attachment: {why}. Open it in your mail client if you trust the sender."))
 }
 
+/// The checks made before anything is fetched (name, then declared type); the extension to save with.
+fn checked_before_fetch(name: Option<&str>, mime: Option<&str>) -> MailResult<String> {
+    let ext = openable_extension(name).map_err(|what| invalid(format!("Uni doesn't open {what} from mail: they could run as a program. Open it in your mail client if you trust the sender.")))?;
+    if let Some(why) = declared_mismatch(&ext, mime) {
+        return Err(refused(&why));
+    }
+    Ok(ext)
+}
+
+/// Why opening this attachment would be refused without fetching it (its name or declared type), in the words
+/// [`open_attachment`] would use; `None` when only its bytes can decide. The list shows it at once (T-45 v2).
+pub fn refused_before_fetch(name: Option<&str>, mime: Option<&str>) -> Option<String> {
+    match checked_before_fetch(name, mime) {
+        Ok(_) => None,
+        Err(MailError::Invalid { message }) => Some(message),
+        Err(e) => Some(e.to_string()),
+    }
+}
+
 /// How long an opened attachment is kept: long enough for its viewer to be done with it.
 const KEEP_OPENED: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
 
@@ -408,12 +427,21 @@ pub async fn open_attachment<O>(bridge: &MailBridge<'_>, cache: &Path, blob_id: 
 where
     O: FnOnce(&Path) -> std::result::Result<(), String>,
 {
-    let ext = openable_extension(name).map_err(|what| invalid(format!("Uni doesn't open {what} from mail: they could run as a program. Open it in your mail client if you trust the sender.")))?;
-    if let Some(why) = declared_mismatch(&ext, mime) {
-        return Err(refused(&why));
-    }
+    open_attachment_in(bridge, cache, None, blob_id, name, mime, open).await
+}
+
+/// [`open_attachment`] for a blob in `account` (T-45 v2: the shared mailbox is a second JMAP account);
+/// `None` is the bridge's own account.
+pub async fn open_attachment_in<O>(bridge: &MailBridge<'_>, cache: &Path, account: Option<&str>, blob_id: &str, name: Option<&str>, mime: Option<&str>, open: O) -> MailResult<PathBuf>
+where
+    O: FnOnce(&Path) -> std::result::Result<(), String>,
+{
+    let ext = checked_before_fetch(name, mime)?;
     check_id(blob_id)?;
-    let bytes = bridge.blob(blob_id).await?;
+    let bytes = match account {
+        Some(a) => bridge.blob_in(a, blob_id).await?,
+        None => bridge.blob(blob_id).await?,
+    };
     if let Some(why) = bytes_mismatch(&ext, &bytes) {
         return Err(refused(&why));
     }

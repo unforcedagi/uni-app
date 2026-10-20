@@ -1585,42 +1585,44 @@ where
     .map_err(mail_invalid)?
 }
 
-/// The account the bridge reads, and its mailboxes (Inbox first).
+/// The accounts this key reads (its own, and the one shared with it: T-45 v2) with their mailboxes.
 #[tauri::command]
-async fn mail_mailboxes(app: tauri::AppHandle) -> Result<uni_core::mail::MailAccount, MailError> {
-    mail_io(&app, |mail| tauri::async_runtime::block_on(mail.mailboxes())).await
+async fn mail_overview(app: tauri::AppHandle) -> Result<uni_core::mail::Overview, MailError> {
+    mail_io(&app, |mail| tauri::async_runtime::block_on(mail.overview())).await
 }
 
-/// One page of a mailbox, newest first.
+/// A page of threads from one or more accounts, merged newest first; `text` searches.
 #[tauri::command]
-async fn mail_messages(
-    app: tauri::AppHandle,
-    mailbox: String,
-    position: Option<u64>,
-) -> Result<uni_core::mail::MessagePage, MailError> {
-    mail_io(&app, move |mail| tauri::async_runtime::block_on(mail.messages(&mailbox, position.unwrap_or(0), uni_core::mail::PAGE_SIZE))).await
+async fn mail_threads(app: tauri::AppHandle, sources: Vec<uni_core::mail::Source>, text: Option<String>) -> Result<uni_core::mail::ThreadPage, MailError> {
+    mail_io(&app, move |mail| tauri::async_runtime::block_on(mail.threads(&sources, text.as_deref(), uni_core::mail::PAGE_SIZE))).await
 }
 
-/// One message to read: plain text, sanitized HTML, attachments.
+/// A thread to read, oldest first: plain text, sanitized HTML, attachments. `Email/get` only: nothing is marked read.
 #[tauri::command]
-async fn mail_message(app: tauri::AppHandle, id: String) -> Result<uni_core::mail::Message, MailError> {
-    mail_io(&app, move |mail| tauri::async_runtime::block_on(mail.message(&id))).await
+async fn mail_thread(app: tauri::AppHandle, account_id: String, thread_id: String) -> Result<uni_core::mail::Thread, MailError> {
+    mail_io(&app, move |mail| tauri::async_runtime::block_on(mail.thread(&account_id, &thread_id))).await
+}
+
+/// Uni's triage notes on these messages (display only), by email id.
+#[tauri::command]
+async fn mail_triage(app: tauri::AppHandle, account_id: String, email_ids: Vec<String>) -> Result<std::collections::HashMap<String, String>, MailError> {
+    mail_io(&app, move |mail| tauri::async_runtime::block_on(mail.triage(&account_id, &email_ids))).await
 }
 
 /// Fetch an attachment through the bridge into the cache and open it with
 /// the OS default handler, as `media_open` does for relay files. Mail comes
 /// from anyone, so only documents, images and media are opened, and only
 /// when the declared type and the bytes match the name
-/// ([`uni_core::mail::open_attachment`]): a file that could run as a program
+/// ([`uni_core::mail::open_attachment_in`]): a file that could run as a program
 /// is refused before it is fetched, a disguised one before it is written.
 #[tauri::command]
-async fn mail_attachment_open(app: tauri::AppHandle, blob_id: String, name: Option<String>, mime: Option<String>) -> Result<(), MailError> {
+async fn mail_attachment_open(app: tauri::AppHandle, account_id: Option<String>, blob_id: String, name: Option<String>, mime: Option<String>) -> Result<(), MailError> {
     use tauri_plugin_opener::OpenerExt;
     let dir = app.path().app_cache_dir().map_err(mail_invalid)?.join("mail");
     let opener = app.clone();
     mail_io(&app, move |mail| {
         let open = |path: &std::path::Path| opener.opener().open_path(path.to_string_lossy(), None::<&str>).map_err(|e| e.to_string());
-        tauri::async_runtime::block_on(uni_core::mail::open_attachment(mail, &dir, &blob_id, name.as_deref(), mime.as_deref(), open)).map(|_| ())
+        tauri::async_runtime::block_on(uni_core::mail::open_attachment_in(mail, &dir, account_id.as_deref(), &blob_id, name.as_deref(), mime.as_deref(), open)).map(|_| ())
     })
     .await
 }
@@ -2356,9 +2358,10 @@ pub fn run() {
             note_download,
             note_share,
             relay_origin,
-            mail_mailboxes,
-            mail_messages,
-            mail_message,
+            mail_overview,
+            mail_threads,
+            mail_thread,
+            mail_triage,
             mail_attachment_open,
             journal_config,
             journal_set_config,
