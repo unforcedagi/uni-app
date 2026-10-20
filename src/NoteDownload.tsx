@@ -12,7 +12,8 @@ export type DownloadableNote = NoteDates & { id: string; content?: string };
 /** The error as the user reads it: Rust's own "Couldn't save …" as it is, anything else after "Couldn't <what>:". */
 const said = (e: unknown, what: string) => /^Couldn't /.test(String(e)) ? String(e) : `Couldn't ${what}: ${String(e)}`;
 
-export default function NoteDownload({ note, title }: { note: DownloadableNote; title: string }) {
+/** `compact`: T-200's note beside the chat, whose bar is narrow: a short label, the same name for screen readers. */
+export default function NoteDownload({ note, title, compact = false }: { note: DownloadableNote; title: string; compact?: boolean }) {
   const android = platformName(currentUserAgent()) === "android";
   const [frontmatter, setFrontmatter] = useState(frontmatterPref);
   const [open, setOpen] = useState(false);
@@ -46,7 +47,7 @@ export default function NoteDownload({ note, title }: { note: DownloadableNote; 
   }
 
   return <div className="note-download" ref={box}>
-    <button className="note-action note-download-go" disabled={busy} onClick={() => void download()}>Download .md</button>
+    <button className="note-action note-download-go" disabled={busy} onClick={() => void download()} aria-label={compact ? "Download .md" : undefined} title={compact ? "Download .md" : undefined}>{compact ? "↓ .md" : "Download .md"}</button>
     <button className="note-action note-download-more" aria-label="Download options" aria-expanded={open} onClick={() => setOpen((o) => !o)}>▾</button>
     {open && <div className="note-download-menu" role="group" aria-label="Download settings">
       {android && <button onClick={() => void share()}>Share…</button>}

@@ -22,7 +22,7 @@ function openExternal(url: string) {
 
 export default function NoteView({ target, hub, onOpen, onBack, backLabel, onTitle, startEditing = false, onDirty, onCreate, onResolved, onRendered, onSearch, readOnly = false, backIcon = "←", actions, compact = false }: {
   /** T-200: a note beside the chat closes rather than goes back (×), carries the pane's own buttons, and keeps to reading and editing:
-   *  no New note, Copy markdown or Download in its narrow bar (Open as page has them). */
+   *  no New note or Copy markdown in its narrow bar (Open as page has them). T-204: Download .md stays, in short form. */
   backIcon?: string;
   actions?: ReactNode;
   compact?: boolean;
@@ -138,7 +138,7 @@ export default function NoteView({ target, hub, onOpen, onBack, backLabel, onTit
       {note && tools && !editing && editableExtension(note.extension) && <button className="note-action" onClick={() => setEditing(true)}>Edit</button>}
       {note && tools && !compact && <button className="note-action" onClick={() => onCreate(note.path?.includes("/") ? note.path.slice(0, note.path.lastIndexOf("/")) : "")}>New note</button>}
       {note && tools && !editing && !compact && <button className="note-action" onClick={() => void copyText(note.content ?? "", "Copied markdown")}>Copy markdown</button>}
-      {note && tools && !editing && !compact && isMarkdownNote(note.extension) && <NoteDownload note={note} title={heading} />}
+      {note && tools && !editing && isMarkdownNote(note.extension) && <NoteDownload note={note} title={heading} compact={compact} />}
       {actions}
     </header>
     {note && editing ? <NoteEditor vault={data!.vault} note={note} onDirty={onDirty} onCancel={() => setEditing(false)} onSaved={(updated) => { setData({ ...data!, note: { ...data!.note, ...updated } }); setEditing(false); }} /> : <div className="note-scroll">

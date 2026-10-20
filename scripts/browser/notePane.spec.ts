@@ -1,4 +1,5 @@
 import { test, expect, type Page, type Locator } from '@playwright/test';
+import { readFile } from 'node:fs/promises';
 import { PLAN, installNotePaneFixture } from './notePaneFixture';
 
 // T-200: a note linked in chat opens beside the chat (wide screens) or as a sheet over it (narrow screens, and always on Android: the
@@ -124,6 +125,20 @@ test('tap a note link, read it, quote and reply, send, close: same room, same dr
   expect(await inView(chip)).toBe(true);
   expect(Math.abs((await scrollOf(list)) - at)).toBeLessThanOrEqual(2);
   if (beside()) await expect(page.locator('.th-roomnav:not(.hidden)')).toBeVisible();
+});
+
+test('T-204: Download .md from the note beside the chat saves the note as stored, named by its title', async ({ page }) => {
+  const { chip } = await openRoom(page);
+  await tap(chip);
+  const pane = page.locator('.note-pane');
+  await expect(pane.locator('.note-body')).toContainText('Two dwarf apple trees');
+  const go = pane.getByRole('button', { name: 'Download .md' });
+  await expect(go).toBeInViewport();
+  const [file] = await Promise.all([page.waitForEvent('download'), tap(go)]);
+  expect(file.suggestedFilename()).toBe('Spring planting plan.md');
+  const stored = await page.evaluate((id) => (window as any).__TAURI_INTERNALS__.invoke('vault_note', { vault: 'uni', noteRef: id }).then((d: any) => d.note.content), PLAN);
+  expect((await readFile((await file.path())!)).equals(Buffer.from(stored, 'utf8'))).toBe(true);
+  await expect(page.getByText('Saved to ~/Downloads/Spring planting plan.md')).toBeVisible();
 });
 
 test('the note stays with its room; Back closes it first and Forward brings it back', async ({ page }) => {

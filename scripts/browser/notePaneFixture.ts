@@ -127,6 +127,14 @@ Rules: bring it back clean, say if it broke, and nobody takes the good saw home 
         const links = Object.keys(notes).filter((k) => n.content.includes(`[[${notes[k].path}]]`)).map((k) => ({ sourceId: key, targetId: k, targetNote: { id: k, path: notes[k].path } }));
         return { hub: HUB, vault: 'uni', note: { id: key, path: n.path, content: n.content, extension: 'md', createdAt: '2026-03-10T09:00:00Z', updatedAt: '2026-03-14T09:00:00Z', tags: [], links } };
       }
+      // T-204: what the Save dialog or Android's Downloads would get, as a real browser download of these bytes under this name.
+      case 'note_download': {
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(new Blob([new TextEncoder().encode(args.text)], { type: 'text/markdown' }));
+        a.download = args.name;
+        document.body.append(a); a.click(); a.remove();
+        return `~/Downloads/${args.name}`;
+      }
       default: return null;
     }
   };
