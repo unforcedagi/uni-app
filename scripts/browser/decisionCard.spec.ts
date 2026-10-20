@@ -179,6 +179,24 @@ test.describe('decision cards in the chat', () => {
     await expect(hosting.locator('.decision-result')).toHaveText('Decided: Managed · by you');
   });
 
+  test('a Forget while a won tap is still telling the room: nothing is posted', async ({ page }) => {
+    await seed(page);
+    await openAtlas(page);
+    await arrive(page, ASK);
+    const card = page.locator('.sr-chat .message .decision-card').first();
+    await expect(card.getByRole('button', { name: 'A', exact: true })).toBeVisible();
+    const before = (await posts(page)).length;
+    await page.evaluate(() => { (window as any).__membersDelay = 2500; });
+    await card.getByRole('button', { name: 'A', exact: true }).click();
+    await expect(card.getByText('Telling the room…')).toBeVisible();
+    await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Settings' }).click();
+    await page.getByRole('button', { name: 'Forget this device key' }).click();
+    await page.getByRole('button', { name: /^Tap again to forget/ }).click();
+    await expect.poll(() => page.evaluate(() => (window as any).__calls.some((c: any) => c.cmd === 'identity_forget'))).toBe(true);
+    await page.waitForTimeout(3500);
+    expect((await posts(page)).length).toBe(before);
+  });
+
   test('a ref to a note that is not a decision is only its chip', async ({ page }) => {
     await page.addInitScript(() => { (window as any).__seedTasks = [{ id: '01M5D0000000000000000000B1', path: 'Projects/Atlas/Plain note', extension: 'md', tags: [], createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-01T00:00:00Z', content: '# Plain', metadata: {} }]; });
     await openAtlas(page);

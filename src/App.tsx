@@ -1532,9 +1532,10 @@ function Conversations({ onForget }: { onForget: () => void }) {
     if (known) markerHits.current.set(m.ref, known);
     return known && !ids.includes(known) ? [...ids, known] : ids;
   };
-  /** A won tap's "Picked: …", as you, in the room the card is in, to Uni too (it is the room's answer). */
-  const postPick = (room: string) => async (body: string) => {
+  /** A won tap's "Picked: …", as you, in the room the card is in, to Uni too (it is the room's answer). Not after a Forget meanwhile. */
+  const postPick = (room: string) => async (body: string, current: () => boolean) => {
     const roster = await invoke<Member[]>("get_members", { channel: room }).catch(() => [] as Member[]);
+    if (!current()) return;
     const uni = findUniMember(roster);
     await invoke<Message>("post_message", { channel: room, body, replyTo: null, recipients: uni ? [uni.pubkey] : [] });
     setTick((n) => n + 1);

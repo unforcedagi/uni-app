@@ -32,8 +32,8 @@ function useDecision(id: string, vault: string): Entry | undefined {
 type Props = {
   id: string;
   vault: string;
-  /** Posts the room message for a won tap (as you, to the room the card is in). */
-  post: (body: string) => Promise<void>;
+  /** Posts the room message for a won tap (as you, to the room the card is in), unless `current()` says a Forget came meanwhile. */
+  post: (body: string, current: () => boolean) => Promise<void>;
 };
 
 export function DecisionCard({ id, vault, post }: Props) {
@@ -50,8 +50,9 @@ export function DecisionCard({ id, vault, post }: Props) {
     <button type="button" className="decision-retry" onClick={() => void store.load(id, vault)}>Try again</button></p> : null;
 
   const tell = async (body: string) => {
+    const gen = store.generation();
     setPhase("telling");
-    try { await post(body); setPhase("told"); } catch (e) { setError(`Couldn't tell the room: ${msg(e)}`); setPhase("untold"); }
+    try { await post(body, () => gen === store.generation()); setPhase("told"); } catch (e) { setError(`Couldn't tell the room: ${msg(e)}`); setPhase("untold"); }
   };
   const pick = async (option: string) => {
     setError(null); setPhase("saving");
