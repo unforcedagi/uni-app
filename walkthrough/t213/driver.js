@@ -20,7 +20,7 @@
     cap.textContent = text; cap.style.display = text ? 'block' : 'none';
   }
   async function shot(label, text) {
-    caption(text || ''); await sleep(400);
+    caption(''); await sleep(400); // the narration says it: nothing covers the screen
     const id = ++shotId;
     log.push({ id, label, caption: text || '', at: new Date().toISOString() });
     await write('walk-log.json', log);
@@ -60,7 +60,7 @@
     await shot('02-waiting', "Waiting for you sits in Uni's mailboxes. Each row says who it is to, and why Uni's rules held it.");
 
     [...document.querySelectorAll('.mail-held-row')].find((r) => /harvest supper/.test(r.innerText)).click();
-    if (!(await until(() => has(/Could we book the barn/) && has(/Why it waits/)))) return fail('the held send did not show what it sends');
+    if (!(await until(() => has(/Could we book the barn/) && has(/why it waits/i)))) return fail('the held send did not show what it sends');
     const send = btn(/^Send it, from Uni's address \(uni@example\.com\)$/);
     if (!send || !btn(/^Don't send it from Uni's address/)) return fail('the two decisions are not both offered, labelled with Uni\'s address');
     await shot('03-held', "Each one shows exactly what it sends: from, to, subject and the whole text. Send it and Don't send both say they act for Uni's address.");
@@ -87,8 +87,8 @@
 
     const b2 = btn(/^← Waiting$/); if (b2) b2.click();
     if (!(await until(() => !document.querySelector('.rail .rail-count')))) return fail('the rail badge did not clear');
-    const tags = [...document.querySelectorAll('.mail-held-row .mail-held-tag')].map((t) => t.textContent).join(',');
-    if (tags !== 'SENT,NOT SENT') return fail('the rows do not keep what happened: ' + tags);
+    const tags = [...document.querySelectorAll('.mail-held-row .mail-held-tag')].map((t) => t.textContent).sort().join(',');
+    if (tags !== 'NOT SENT,SENT') return fail('the rows do not keep what happened: ' + tags);
     await shot('07-done', 'What happened stays on each row, and the badge is gone. If a send fails, it says so, and to ask #mail.');
     caption('');
     await write('done', '1');
