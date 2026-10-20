@@ -2543,7 +2543,9 @@ test.describe('r17', () => {
     await expect(chat.locator('.approval-actions')).toHaveCount(0);
     await expect(chat.getByRole('button', { name: /Approve|Deny|This session|Always/ })).toHaveCount(0);
     const msg = chat.locator('.message').filter({ hasText: 'The hosting call is yours' });
-    await expect(msg).not.toContainText('T-140');
+    // the marker is not shown in the text; the card names the task it decides
+    await expect(msg.locator('.md')).not.toContainText('T-140');
+    await expect(msg.locator('.decision-kind')).toHaveText('Decision · T-140');
     await expect(msg.getByRole('group', { name: /^Pick one:/ }).getByRole('button')).toHaveText(['Self-host', 'Managed']);
     await expect(chat.locator('.message .decision-card')).toHaveCount(1);
     // the decision's sheet (Needs you) still answers it, with the same options

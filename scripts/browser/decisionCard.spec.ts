@@ -38,7 +38,8 @@ const ASK = `Your call on the garden page layout. Tap your pick: uni:${D1}`;
 
 test.describe('decision cards in the chat', () => {
   test('1. a room\'s message with uni:<id> of a decision note renders a card: the question, a button per option, the default marked', async ({ page }) => {
-    await seed(page);
+    // a decision in a private area: the shell never lists it, so only the message's ref can bring its card (the T-70 case)
+    await seed(page, { node: 'Areas/Sanctum' });
     await openAtlas(page);
     await arrive(page, ASK);
     const msg = page.locator('.sr-chat .message').filter({ hasText: 'Your call on the garden page layout' });
@@ -90,6 +91,7 @@ test.describe('decision cards in the chat', () => {
     await seed(page);
     await openAtlas(page);
     await arrive(page, ASK);
+    await arrive(page, `Reminder: uni:${D1}`);
     const card = page.locator('.sr-chat .message .decision-card').first();
     await expect(card.getByRole('button', { name: 'C', exact: true })).toBeVisible();
     // the room picks A in the vault after the card was read and before the tap
@@ -99,6 +101,8 @@ test.describe('decision cards in the chat', () => {
     await expect(card.locator('.decision-result')).toHaveText('Decided: A · by room');
     await expect(card.getByText('Already decided before your tap; nothing was sent.')).toBeVisible();
     expect((await stored(page)).decided).toBe('A');
+    // 3: the decision's other card shows the stored answer too, with nothing posted to refresh it
+    await expect(page.locator('.sr-chat .message .decision-card').nth(1).locator('.decision-result')).toHaveText('Decided: A · by room');
     await page.waitForTimeout(500);
     expect((await posts(page)).length).toBe(before);
     await shot(page, '04-lost');
