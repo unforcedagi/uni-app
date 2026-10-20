@@ -320,6 +320,9 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
   const search = useRef<HTMLInputElement>(null);
   /** The overview as last loaded, for callbacks that outlive a render (marking a thread read once it has loaded). */
   const overviewRef = useRef<Overview | null>(null);
+  /** The newest overview shown, by its number; and each overview's number, for the held sends read with it. */
+  const overviewSeq = useRef(0);
+  const overviewListing = useRef(new WeakMap<Overview, number>()).current;
   /** T-208 follow-up: each fresh list (not a further page) is a new generation; a triage answer for an older one is dropped. */
   const notesGen = useRef(0);
   const composeSeq = useRef(remembered.compose?.key ?? 0);
@@ -347,8 +350,14 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
   /** The accounts and their mailboxes. What was shown from an account no longer in the session goes with it. */
   const loadOverview = useCallback(async (): Promise<Overview | null> => {
     setBoxesProblem(null);
+    // numbered before it is asked: an answer older than one already shown is dropped, and the held sends read with
+    // it are ordered by when the bridge's session was read, not when its answer came (T-213)
+    const seq = beginListing();
     try {
       const o = await invoke<Overview>("mail_overview");
+      if (seq < overviewSeq.current) return overviewRef.current;
+      overviewSeq.current = seq;
+      overviewListing.set(o, seq);
       const known = (id: string) => o.accounts.some((a) => a.id === id);
       overviewRef.current = o;
       setOverview(o);
@@ -363,9 +372,9 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
     } catch (e) { setBoxesProblem(mailProblem(e)); return null; }
   }, []);
 
-  /** The sends held for you in each account where the bridge offers deciding them. */
+  /** The sends held for you in each account where the bridge offers deciding them, as of the session in `o`. */
   const loadHeld = useCallback(async (o: Overview) => {
-    const gen = heldGen(), seq = beginListing();
+    const gen = heldGen(), seq = overviewListing.get(o) ?? beginListing();
     const offered = o.accounts.filter(approvalOffered);
     keepAccounts(offered.map((a) => a.id), gen, seq);
     setHeldProblem(null);

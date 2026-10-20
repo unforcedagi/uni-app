@@ -82,6 +82,12 @@ assert.ok(!heldEntries().U.some((e) => e.item.op_id === "op-g"));
 keepAccounts(["U"], gen, beginListing());
 mergeListing("U", [held("op-g")], gen, beginListing());
 assert.equal(waitingCount(), 1, "offered again: listed again");
+// an overview asked before a newer one withdrew deciding, answered after it: neither its offer nor its listing lands
+const slowOverview = beginListing();
+keepAccounts([], gen, beginListing());
+keepAccounts(["U"], gen, slowOverview);
+mergeListing("U", [held("op-h")], gen, slowOverview);
+assert.equal(waitingCount(), 0, "the slow overview's offer is older than the withdrawal");
 // Forget: nothing kept, and an answer that left before it is dropped
 assert.ok(startDeciding("op-c"));
 forgetHeld();
