@@ -152,19 +152,19 @@ fn parked_list(v: &Value, account: &str) -> MailResult<Vec<Parked>> {
         return Err(invalid("the bridge answered about another account"));
     }
     let list = v.get("parked").and_then(Value::as_array).ok_or_else(|| invalid("the bridge's answer has no list of held sends"))?;
-    list.iter()
-        .map(|p| {
+    Ok(list
+        .iter()
+        .filter_map(|p| {
             let s = |k: &str| p.get(k).and_then(Value::as_str).map(str::to_string);
-            let op_id = s("opId").ok_or_else(|| invalid("a held send without an id"))?;
-            check_op_id(&op_id)?;
+            // a send without a usable id can't be decided from here: it is left out, never the whole list
+            let op_id = s("opId").filter(|o| check_op_id(o).is_ok())?;
             let fingerprint = s("fingerprint");
-            if fingerprint.as_deref().is_some_and(|f| !is_fingerprint(f)) {
-                return Err(invalid("a held send with a bad fingerprint"));
-            }
             let fields: Option<DraftFields> = p.get("fields").and_then(|f| serde_json::from_value(f.clone()).ok());
-            // without what it says and the fingerprint of it, there is nothing to approve: say why instead
-            let problem = s("problem").or_else(|| (fields.is_none() || fingerprint.is_none()).then(|| "the bridge didn't say what this send holds".to_string()));
-            Ok(Parked {
+            // without what it says and a fingerprint of it, there is nothing to approve: say why instead
+            let problem = s("problem")
+                .or_else(|| fingerprint.as_deref().is_some_and(|f| !is_fingerprint(f)).then(|| "the bridge's fingerprint for this send can't be read".to_string()))
+                .or_else(|| (fields.is_none() || fingerprint.is_none()).then(|| "the bridge didn't say what this send holds".to_string()));
+            Some(Parked {
                 draft_id: s("draftId"),
                 reason: s("reason"),
                 sent_by: s("sentBy"),
@@ -178,7 +178,7 @@ fn parked_list(v: &Value, account: &str) -> MailResult<Vec<Parked>> {
                 op_id,
             })
         })
-        .collect()
+        .collect())
 }
 
 /// The operations a session answer lists for `account` (unknown names dropped). A bridge without the write patch lists
@@ -479,7 +479,15 @@ mod tests {
         assert!(got[1].fingerprint.is_none() && got[1].problem.is_some(), "no content: not approvable");
         assert_eq!(got[2].problem.as_deref(), Some("the parked draft isn't there"));
         assert!(parked_list(&v, "A").is_err(), "an answer about another account");
-        assert!(parked_list(&json!({ "accountId": "U", "parked": [{ "opId": "x/y", "fingerprint": fp }] }), "U").is_err());
-        assert!(parked_list(&json!({ "accountId": "U", "parked": [{ "opId": "0123456789abcdef", "fingerprint": "AB".repeat(32) }] }), "U").is_err());
+        // one bad entry is left out or marked, never the whole list
+        let mixed = json!({ "accountId": "U", "parked": [
+            { "opId": "x/y", "fingerprint": fp, "fields": fields },
+            { "opId": "0123456789abcdef", "fingerprint": "AB".repeat(32), "fields": fields },
+            { "opId": "0123456789abcdeg", "fingerprint": fp, "fields": fields },
+        ] });
+        let got = parked_list(&mixed, "U").unwrap();
+        assert_eq!(got.iter().map(|p| p.op_id.as_str()).collect::<Vec<_>>(), ["0123456789abcdef", "0123456789abcdeg"]);
+        assert!(got[0].fingerprint.is_none() && got[0].problem.is_some(), "a fingerprint that can't be read: not approvable");
+        assert_eq!(got[1].fingerprint.as_deref(), Some(fp.as_str()));
     }
 }

@@ -4,7 +4,7 @@
 // The held sends Mail last listed, and what deciding each did, are kept here too, so the outcome stays on screen when
 // Mail is left and opened again (and goes with Forget).
 import { invoke } from "@tauri-apps/api/core";
-import { approvalOffered, can, type HeldOutcome, type Overview, type Parked } from "./mailCore";
+import { approvalOffered, can, type HeldOutcome, type Overview, type Parked } from "./mailCore.ts";
 
 /** One held send as Mail shows it: `listed` while the bridge still lists it as waiting; `outcome` once you decided. */
 export type HeldEntry = { item: Parked; outcome: HeldOutcome | null; listed: boolean };
@@ -19,16 +19,42 @@ export function heldEntries(): Record<string, HeldEntry[]> {
   return entries;
 }
 
-/** A fresh listing of `accountId`: what is listed now (an earlier failure is kept on it), then what was decided here and
- *  has left the list (its outcome stays). One that left without being decided here was decided elsewhere: it goes. */
-export function mergeListing(accountId: string, list: Parked[], forGen: number): void {
-  if (forGen !== gen) return;
+/** Sends whose decision is on its way to the bridge: one at a time each (a second tap does nothing), and kept through
+ *  any listing until the answer lands. */
+const deciding = new Set<string>();
+
+export function startDeciding(opId: string): boolean {
+  if (deciding.has(opId)) return false;
+  deciding.add(opId);
+  return true;
+}
+
+export function endDeciding(opId: string): void {
+  deciding.delete(opId);
+}
+
+/** Each listing is numbered when it is asked for; one that comes back after a newer one was merged is dropped. */
+let listings = 0;
+const merged: Record<string, number> = {};
+
+export function beginListing(): number {
+  lastCheck = Date.now();
+  return ++listings;
+}
+
+/** A fresh listing of `accountId`: what is listed now, then what has left the list but was decided here or is being
+ *  decided (its outcome stays, or is still to come). A decision made here outlives a listing that still shows the send
+ *  waiting (that listing was read before the decision). One that left without being decided here was decided elsewhere:
+ *  it goes. */
+export function mergeListing(accountId: string, list: Parked[], forGen: number, seq: number): void {
+  if (forGen !== gen || seq < (merged[accountId] ?? 0)) return;
+  merged[accountId] = seq;
   const before = entries[accountId] ?? [];
   const now: HeldEntry[] = list.map((item) => {
     const was = before.find((e) => e.item.op_id === item.op_id);
-    return { item, outcome: was?.outcome?.kind === "failed" ? was.outcome : null, listed: true };
+    return { item, outcome: was?.outcome ?? null, listed: true };
   });
-  for (const e of before) if (e.outcome && !list.some((p) => p.op_id === e.item.op_id)) now.push({ ...e, listed: false });
+  for (const e of before) if ((e.outcome || deciding.has(e.item.op_id)) && !list.some((p) => p.op_id === e.item.op_id)) now.push({ ...e, listed: false });
   entries = { ...entries, [accountId]: now };
 }
 
@@ -73,19 +99,22 @@ export function heldGen(): number {
 }
 
 /** Ask the bridge, unless it was asked less than `minGapMs` ago. */
+/** Ask the bridge, unless it (or Mail) asked less than `minGapMs` ago. The answer goes into the same store Mail reads,
+ *  so the badge and Mail always count the same way. */
 export async function checkHeld(minGapMs = 0): Promise<void> {
-  if (Date.now() - lastCheck < minGapMs) return;
-  lastCheck = Date.now();
-  const mine = gen;
+  if (lastCheck && Date.now() - lastCheck < minGapMs) return;
+  const mine = gen, seq = beginListing();
   try {
     const o = await invoke<Overview | null>("mail_overview");
     if (!o || !Array.isArray(o.accounts)) return;
-    let n = 0;
-    for (const a of o.accounts.filter((x) => approvalOffered(x) && can(x, "send.parked"))) {
+    const offered = o.accounts.filter(approvalOffered);
+    if (mine !== gen) return;
+    keepAccounts(offered.map((a) => a.id));
+    for (const a of offered.filter((x) => can(x, "send.parked"))) {
       const list = await invoke<Parked[] | null>("mail_parked", { accountId: a.id });
-      n += Array.isArray(list) ? list.length : 0;
+      if (Array.isArray(list)) mergeListing(a.id, list, mine, seq);
     }
-    setHeldCount(n, mine);
+    setHeldCount(waitingCount(), mine);
   } catch { /* unreachable, not allowed, no bridge: the badge stays as it was */ }
 }
 
@@ -93,6 +122,8 @@ export async function checkHeld(minGapMs = 0): Promise<void> {
 export function forgetHeld(): void {
   gen++;
   entries = {};
+  deciding.clear();
+  for (const k of Object.keys(merged)) delete merged[k];
   lastCheck = 0;
   count = 0;
   for (const f of subs) f(0);

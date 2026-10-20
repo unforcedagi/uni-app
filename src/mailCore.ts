@@ -308,7 +308,7 @@ const PENDING_KEY = "uni.mail.pending.v1";
 
 /** States a send can't leave by itself: the outcome is known. */
 export function settled(state: SendState): boolean {
-  return ["cleaned", "submitted", "refused", "failed", "awaiting-approval"].includes(state);
+  return ["cleaned", "submitted", "refused", "failed", "awaiting-approval", "declined"].includes(state);
 }
 
 export function readPending(store: Pick<Storage, "getItem"> | null): PendingSend[] {
@@ -379,7 +379,8 @@ export function approvalOffered(a: AccountBoxes | undefined): boolean {
 
 /** Send it is offered for this held send: the bridge offers it, and it shows the whole draft as it is now. */
 export function canApprove(a: AccountBoxes | undefined, p: Parked): boolean {
-  return can(a, "send.approve") && !!p.fingerprint && !!p.fields && !p.changed && !p.problem && p.plain !== false;
+  // only a draft the bridge says is plain text and nothing else: anything more would be sent unseen
+  return can(a, "send.approve") && !!p.fingerprint && !!p.fields && !p.changed && !p.problem && p.plain === true;
 }
 
 /** What deciding a held send did. `sent` and `declined` are final; `failed` says why and to ask #mail. */
@@ -391,8 +392,10 @@ export function approveOutcome(out: SendOutcome, uniAddress: string): HeldOutcom
       return { kind: "sent", text: `Sent from Uni's address (${uniAddress}).` };
     case "declined":
       return { kind: "declined", text: "Declined earlier. Nothing was sent." };
-    case "unknown": case "submitting":
+    case "unknown": case "submitting": case "reserved": case "drafting":
       return { kind: "failed", text: "Couldn't confirm it was sent: ask #mail. It won't be sent twice." };
+    case "awaiting-approval":
+      return { kind: "failed", text: "Not sent: it is still waiting. Ask #mail." };
     default:
       return { kind: "failed", text: `Couldn't send: ${out.reason ?? "the bridge refused it"}. Ask #mail.` };
   }
@@ -406,7 +409,8 @@ export function declineOutcome(out: SendOutcome): HeldOutcome {
 /** A call that failed: what the screen says. A 409 is the bridge's own sentence (the draft changed, already decided). */
 export function heldFailure(e: unknown, approving: boolean): HeldOutcome {
   const p = mailProblem(e);
-  const said = p.kind === "refused" && p.detail.startsWith("409") ? p.detail.replace(/^409:\s*/, "") : p.title.replace(/\.$/, "");
+  // a 404 or 409 here is the bridge's own sentence about this send (no such send, already decided, changed)
+  const said = p.kind === "refused" && /^40[49]:/.test(p.detail) ? p.detail.replace(/^40[49]:\s*/, "") : p.title.replace(/\.$/, "");
   const why = said.charAt(0).toLowerCase() + said.slice(1);
   return { kind: "failed", text: `${approving ? "Couldn't send" : "Couldn't decline it"}: ${why}. Ask #mail.` };
 }

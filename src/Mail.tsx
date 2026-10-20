@@ -22,7 +22,7 @@ import {
   type PendingSend, type SendOutcome, type Source, type ThreadPage, type ThreadSummary, type Who,
   approvalOffered, approveOutcome, canApprove, declineOutcome, heldFailure, type HeldOutcome, type Parked,
 } from "./mailCore";
-import { heldEntries, heldGen, keepAccounts, mergeListing, setHeldCount, setOutcome, waiting, waitingCount, type HeldEntry } from "./mailHeld";
+import { beginListing, endDeciding, heldEntries, heldGen, keepAccounts, mergeListing, setHeldCount, setOutcome, startDeciding, waiting, waitingCount, type HeldEntry } from "./mailHeld";
 import "./Mail.css";
 
 type List = { key: string; threads: ThreadSummary[]; next: Source[]; more: boolean; total: number | null };
@@ -242,7 +242,7 @@ function HeldView({ e, acct, onBack, onDecide }: { e: HeldEntry; acct: AccountBo
       <p className="mail-triage mail-held-why" role="note"><span className="eyebrow">Why it waits</span><span>{p.reason ?? "Uni's outbound rules want your approval."}</span></p>
       {p.changed && <p className="mail-draft-note mail-unverified" role="note"><span className="mail-draft-tag">CHANGED</span><span>This draft changed after Uni's rules held it, so the bridge won't send it. Don't send it, and ask Uni to send it again.</span></p>}
       {p.problem && <p className="mail-draft-note mail-unverified" role="note"><span className="mail-draft-tag">CAN'T SHOW IT</span><span>{p.problem}. Nothing can be sent from here; ask #mail.</span></p>}
-      {f && p.plain === false && <p className="mail-draft-note" role="note"><span>It has formatting or attachments this app can't show in full, so only Don't send is offered here.</span></p>}
+      {f && !p.problem && p.plain !== true && <p className="mail-draft-note" role="note"><span>It may have formatting or attachments this app can't show in full, so only Don't send is offered here.</span></p>}
       {f && <article className="mail-card mail-card-draft" aria-label="What it sends">
         <dl className="mail-headers">
           <dt>From</dt><dd>Uni &lt;{acct.name}&gt;</dd>
@@ -314,7 +314,6 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
   const [heldProblem, setHeldProblem] = useState<MailProblem | null>(null);
   const [heldLoading, setHeldLoading] = useState(false);
   const [openHeld, setOpenHeld] = useState<string | null>(null);
-  const deciding = useRef(new Set<string>());
   const search = useRef<HTMLInputElement>(null);
   /** The overview as last loaded, for callbacks that outlive a render (marking a thread read once it has loaded). */
   const overviewRef = useRef<Overview | null>(null);
@@ -363,13 +362,13 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
 
   /** The sends held for you in each account where the bridge offers deciding them. */
   const loadHeld = useCallback(async (o: Overview) => {
-    const gen = heldGen();
+    const gen = heldGen(), seq = beginListing();
     const offered = o.accounts.filter(approvalOffered);
     keepAccounts(offered.map((a) => a.id));
     setHeldProblem(null);
     setHeldLoading(true);
     try {
-      for (const a of offered.filter((x) => can(x, "send.parked"))) mergeListing(a.id, await invoke<Parked[]>("mail_parked", { accountId: a.id }), gen);
+      for (const a of offered.filter((x) => can(x, "send.parked"))) mergeListing(a.id, await invoke<Parked[]>("mail_parked", { accountId: a.id }), gen, seq);
     } catch (e) { if (gen === heldGen()) setHeldProblem(mailProblem(e)); }
     finally {
       if (alive.current) { setHeld(heldEntries()); setHeldLoading(false); }
@@ -560,8 +559,7 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
   /** Send or decline a held send, once: a second call for the same send while one is out does nothing (and the bridge
    *  answers a repeat of the same opId and fingerprint with the first outcome). What happened stays on the entry. */
   const decideHeld = async (accountId: string, p: Parked, kind: "approve" | "decline") => {
-    if (deciding.current.has(p.op_id)) return;
-    deciding.current.add(p.op_id);
+    if (!startDeciding(p.op_id)) return;
     const gen = heldGen();
     const acct = overviewRef.current?.accounts.find((a) => a.id === accountId);
     let outcome: HeldOutcome;
@@ -570,7 +568,7 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
         ? approveOutcome(await invoke<SendOutcome>("mail_send_approve", { accountId, opId: p.op_id, fingerprint: p.fingerprint }), acct?.name ?? "Uni's account")
         : declineOutcome(await invoke<SendOutcome>("mail_send_decline", { accountId, opId: p.op_id }));
     } catch (e) { outcome = heldFailure(e, kind === "approve"); }
-    finally { deciding.current.delete(p.op_id); }
+    finally { endDeciding(p.op_id); }
     setOutcome(accountId, p.op_id, outcome, gen);
     setHeldCount(waitingCount(), gen);
     if (alive.current) setHeld(heldEntries());

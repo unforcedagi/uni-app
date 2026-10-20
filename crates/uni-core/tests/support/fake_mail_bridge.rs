@@ -319,7 +319,6 @@ impl State {
         std::iter::once(&mut self.mail).chain(self.shared.iter_mut()).find(|m| m.id == id)
     }
 
-    /// Every email's keywords, by account and id: what a test compares before and after reading.
     /// Uni's account `account` parks a send for the owner: a draft to `to` in its Drafts and the send held, as the bridge
     /// does under a needs-aaron rule. Returns the opId.
     pub fn park(&mut self, account: &str, to: &str, subject: &str, text: &str, reason: &str) -> String {
@@ -338,6 +337,7 @@ impl State {
         op_id
     }
 
+    /// Every email's keywords, by account and id: what a test compares before and after reading.
     pub fn keywords(&self) -> Vec<(String, String, Value)> {
         std::iter::once(&self.mail).chain(self.shared.iter()).flat_map(|m| m.emails.iter().map(|e| (m.id.clone(), e["id"].as_str().unwrap_or("").to_string(), e["keywords"].clone()))).collect()
     }
