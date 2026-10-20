@@ -233,3 +233,34 @@ async fn no_write_method_is_ever_sent_and_nothing_is_marked_read() {
     }
     assert_eq!(s.keywords(), before, "no $seen (or any keyword) changed");
 }
+
+/// Codex review 1, P0: a bridge that lists both accounts but reads only the key's own (a half-done upgrade) must not show
+/// the owner's mail as Uni's. Every answer names its account, and a mismatch fails closed.
+#[tokio::test]
+async fn a_bridge_that_lists_both_accounts_but_reads_one_fails_closed() {
+    let keys = Keys::generate();
+    let fake = shared(&keys).await;
+    fake.state.lock().unwrap().honour_account = false;
+    let mail = MailBridge::new(&fake.url, &keys).unwrap();
+    let e = mail.overview().await.unwrap_err();
+    assert!(matches!(e, MailError::Invalid { ref message } if message.contains("answered for account A when asked about U")), "{e:?}");
+    assert!(mail.threads(&[inbox("A"), inbox("U")], None, 50).await.is_err());
+    assert!(mail.thread("U", "TU-read").await.is_err());
+    assert!(mail.threads(&[inbox("A")], None, 50).await.is_ok(), "its own account still reads");
+}
+
+/// Codex review 1, P0: an account shared with the key that the bridge doesn't name as Uni's is never listed or read.
+#[tokio::test]
+async fn a_shared_account_the_bridge_doesnt_name_is_not_shown() {
+    let keys = Keys::generate();
+    let (a, u, _) = shared_mail();
+    let (mut other, _, _) = shared_mail();
+    other.id = "Z".into();
+    other.account = "someone@example.com".into();
+    let fake = FakeBridge::start_shared(0, &[keys.public_key().to_hex()], a, vec![u, other]).await;
+    fake.state.lock().unwrap().roles = Some(serde_json::json!({ "A": "owner", "U": "uni" }));
+    let o = MailBridge::new(&fake.url, &keys).unwrap().overview().await.unwrap();
+    assert_eq!(o.accounts.iter().map(|a| (a.id.as_str(), a.who)).collect::<Vec<_>>(), [("A", Who::Owner), ("U", Who::Uni)]);
+    let read: Vec<_> = fake.state.lock().unwrap().calls.iter().filter_map(|(_, a)| a.clone()).collect();
+    assert!(!read.iter().any(|a| a == "Z"), "Z was never read: {read:?}");
+}

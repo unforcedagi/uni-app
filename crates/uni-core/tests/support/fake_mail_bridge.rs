@@ -14,7 +14,8 @@
 //! lists them; every call names its `accountId`, and one outside the session
 //! is refused; `/mail/raw` and `/mail/triage` take an `accountId`. The JMAP store
 //! also does `Thread/get`, `collapseThreads`, a `text` filter,
-//! `inMailboxOtherThan`, and `*` in back-reference paths. A v1 bridge
+//! `inMailboxOtherThan`, and `*` in back-reference paths. `/mail/session` adds a
+//! `roles` map (whose each account is). A v1 bridge
 //! ([`FakeBridge::start`]) reads its one account whatever is asked, as the live
 //! one does today, and 404s the v2 paths.
 //!
@@ -56,6 +57,11 @@ pub struct State {
     pub v2: bool,
     /// Forward and apply write methods instead of refusing them (see the module note).
     pub accept_writes: bool,
+    /// v2 only: `false` lists the shared accounts in `/mail/session` but reads the key's own account whatever is asked,
+    /// as a half-upgraded bridge would.
+    pub honour_account: bool,
+    /// v2 only: the `roles` map `/mail/session` gives (the key's own account `owner`, shared ones `uni` by default).
+    pub roles: Option<Value>,
     /// Uni's triage notes, by (accountId, emailId).
     pub triage: HashMap<(String, String), String>,
     /// Every method call forwarded: its name and the `accountId` it named.
@@ -95,6 +101,8 @@ impl FakeBridge {
             shared,
             v2,
             accept_writes: false,
+            honour_account: true,
+            roles: None,
             triage: HashMap::new(),
             calls: Vec::new(),
             allow: allow.iter().map(|k| k.to_lowercase()).collect(),
@@ -185,7 +193,15 @@ fn handle(st: &Mutex<State>, public: &str, request: &str, path: &str, auth: &str
             for (m, personal) in std::iter::once((&s.mail, true)).chain(s.shared.iter().map(|m| (m, false))) {
                 accounts.insert(m.id.clone(), json!({ "name": m.account, "isPersonal": personal, "isReadOnly": false, "accountCapabilities": { "urn:ietf:params:jmap:mail": {} } }));
             }
-            let body = json!({ "account": s.mail.account, "primaryAccounts": { "urn:ietf:params:jmap:mail": s.mail.id }, "accounts": accounts });
+            let roles = s.roles.clone().unwrap_or_else(|| {
+                let mut r = serde_json::Map::new();
+                r.insert(s.mail.id.clone(), json!("owner"));
+                for m in &s.shared {
+                    r.insert(m.id.clone(), json!("uni"));
+                }
+                Value::Object(r)
+            });
+            let body = json!({ "account": s.mail.account, "primaryAccounts": { "urn:ietf:params:jmap:mail": s.mail.id }, "accounts": accounts, "roles": roles });
             (200, "application/json", body.to_string().into_bytes())
         }
         "/mail/triage" if s.v2 => {
@@ -199,7 +215,7 @@ fn handle(st: &Mutex<State>, public: &str, request: &str, path: &str, auth: &str
                     notes.insert(id.to_string(), json!(n));
                 }
             }
-            (200, "application/json", json!({ "notes": notes }).to_string().into_bytes())
+            (200, "application/json", json!({ "accountId": account, "notes": notes }).to_string().into_bytes())
         }
         "/mail/jmap" => {
             let calls = req.get("calls").and_then(Value::as_array).cloned().unwrap_or_default();
@@ -220,7 +236,7 @@ fn handle(st: &Mutex<State>, public: &str, request: &str, path: &str, auth: &str
                 s.forwarded.push(name.clone());
                 s.calls.push((name.clone(), asked.clone()));
                 // v1 reads its own account whatever is asked; v2 reads the one named, if it is in the session
-                let account = if s.v2 { asked.clone().unwrap_or_default() } else { s.mail.id.clone() };
+                let account = if s.v2 && s.honour_account { asked.clone().unwrap_or_default() } else { s.mail.id.clone() };
                 let answer = match s.account_mut(&account) {
                     None => Err("accountNotFound"),
                     Some(mail) => jmap(mail, &name, args, &responses),

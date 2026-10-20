@@ -44,7 +44,7 @@ async function boot(page: Page, mode: Mode = 'ok') {
       msg('u5', 'U', 'TU-read', 'U-drafts', uni, ada, 'Re: Question about the reading group', '2026-10-18T08:00:00Z', { draft: true, text: 'A reminder for Thursday at six.' }),
       msg('u4', 'U', 'Tu4', 'U-inbox', a('Billing', 'billing@example.com'), uni, 'Invoice for October', '2026-10-15T12:00:00Z', { unread: true, text: 'Your invoice is attached.', attachments: [att('Binvoice-pdf', 'invoice-october.pdf', 'application/pdf', 13401)] }),
     ];
-    const notes: Record<string, string> = { 'A/a3': 'Needs you: Mara asks which day to start.', 'A/a4': '<b>Two files</b> pass the checks; setup.exe won\'t open.', 'U/u1': 'Routine. Nothing to do.' };
+    const notes: Record<string, string> = w.__notes = { 'A/a3': 'Needs you: Mara asks which day to start.', 'A/a4': '<b>Two files</b> pass the checks; setup.exe won\'t open.', 'U/u1': 'Routine. Nothing to do.' };
     const hay = (m: any) => [m.subject, m.text, m.html, ...m.from.map((x: any) => `${x.name} ${x.email}`), ...m.attachments.map((x: any) => x.name)].join(' ').toLowerCase();
     // Email/query with collapseThreads, per source, merged by time (what uni_core::mail::accounts::merge does)
     const threads = (sources: any[], text: string | null) => {
@@ -291,6 +291,18 @@ test('HTML renders sealed: no script runs and nothing remote loads', async ({ pa
   await page.getByRole('link', { name: /See your holds/ }).click();
   const opened = await page.evaluate(() => (window as any).__calls.find((c: any) => c.cmd === 'open_link')?.args);
   expect(opened).toEqual({ url: 'https://library.example/holds' });
+});
+
+/** Codex review 1, P1: a note Uni removed or changed is not left on screen after Refresh. */
+test("Refresh replaces Uni's triage notes: a removed one goes, a changed one changes", async ({ page }) => {
+  await boot(page);
+  await expect(rows(page).nth(0)).toContainText('Uni: Needs you: Mara asks which day to start.');
+  await expect(rows(page).nth(1)).toContainText('Uni: Routine. Nothing to do.');
+  await page.evaluate(() => { const n = (window as any).__notes; delete n['A/a3']; n['U/u1'] = 'Checked again: still routine.'; });
+  await page.getByRole('button', { name: 'Refresh' }).click();
+  await expect(rows(page).nth(1)).toContainText('Uni: Checked again: still routine.');
+  await expect(rows(page).nth(0)).not.toContainText('Needs you');
+  await expect(rows(page).nth(0).locator('.mail-row-preview')).toBeVisible();
 });
 
 test("Uni's own draft, in Uni's mail, reads as Uni's and not sent", async ({ page }) => {

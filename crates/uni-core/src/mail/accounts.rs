@@ -5,9 +5,16 @@
 //! account in the same session: the owner's key sees its own account (YOU)
 //! and Uni's (UNI); every call names the account it reads (`accountId`).
 //!
-//! The bridge answers `POST /mail/session` with the session's accounts. A
-//! bridge without it (v1, which reads one account whatever is asked) answers
-//! 404; then the session is that one account and nothing is shared.
+//! The bridge answers `POST /mail/session` with the session's accounts and a
+//! `roles` map saying whose each one is ([`parse_session`]). Whose mail it is
+//! is never guessed: the key's own account is the session's primary one, Uni's
+//! is the one the bridge names `uni`, and any other account is left out. A
+//! bridge without the endpoint (v1, which reads one account whatever is asked)
+//! answers 404; then the session is that one account and nothing is shared.
+//!
+//! Every answer is checked against the account it was asked about
+//! ([`answered_for`]): a bridge that lists two accounts but reads only one
+//! fails closed instead of showing one mailbox's mail as the other's.
 //!
 //! JMAP can't query across accounts, so the combined view is one request with
 //! one query per account, merged here by `receivedAt`, each account keeping its
@@ -130,11 +137,19 @@ const MAX_SEARCH: usize = 200;
 pub const MAX_TRIAGE: usize = 240;
 const MAIL_CAP: &str = "urn:ietf:params:jmap:mail";
 
-/// The session the bridge reports (`/mail/session`): its accounts that hold mail, the primary one as the owner's.
+/// The session the bridge reports (`/mail/session`): the JMAP session's `accounts` and `primaryAccounts`, plus the
+/// bridge's own `roles` map (`{accountId: "owner" | "uni"}`, from its principal map).
+///
+/// - YOU is the primary mail account: the principal this device's key reads as. If `roles` names it, it must be
+///   `owner` (a key that reads as Uni is not an owner device).
+/// - UNI is the one other account `roles` names `uni`; two are refused.
+/// - Any other account (unnamed, or named something else) is left out: not listed, never queried.
 pub fn parse_session(v: &Value) -> MailResult<MailSession> {
     let login = v.get("account").and_then(Value::as_str).unwrap_or_default().to_string();
     let accounts = v.get("accounts").and_then(Value::as_object).ok_or_else(|| invalid("no accounts in the mail session"))?;
-    let primary = v.pointer("/primaryAccounts").and_then(|p| p.get(MAIL_CAP)).and_then(Value::as_str);
+    let primary = v.pointer("/primaryAccounts").and_then(|p| p.get(MAIL_CAP)).and_then(Value::as_str).ok_or_else(|| invalid("the mail session names no account of its own"))?;
+    let roles = v.get("roles").and_then(Value::as_object);
+    let role = |id: &str| roles.and_then(|r| r.get(id)).and_then(Value::as_str);
     let mut out: Vec<SessionAccount> = Vec::new();
     for (id, a) in accounts {
         if check_id(id).is_err() {
@@ -144,18 +159,37 @@ pub fn parse_session(v: &Value) -> MailResult<MailSession> {
         if a.get("accountCapabilities").and_then(Value::as_object).is_some_and(|c| !c.contains_key(MAIL_CAP)) {
             continue;
         }
-        let own = match primary {
-            Some(p) => p == id,
-            None => a.get("isPersonal").and_then(Value::as_bool).unwrap_or(false),
+        let who = if id == primary {
+            if role(id).is_some_and(|r| r != "owner") {
+                return Err(invalid("this key reads a mailbox the bridge says isn't the owner's"));
+            }
+            Who::Owner
+        } else if role(id) == Some("uni") {
+            Who::Uni
+        } else {
+            continue;
         };
-        out.push(SessionAccount { id: id.clone(), name: a.get("name").and_then(Value::as_str).unwrap_or(id).to_string(), who: if own { Who::Owner } else { Who::Uni } });
+        out.push(SessionAccount { id: id.clone(), name: a.get("name").and_then(Value::as_str).unwrap_or(id).to_string(), who });
     }
-    let owners = out.iter().filter(|a| a.who == Who::Owner).count();
-    if owners != 1 {
-        return Err(invalid(format!("the mail session has {owners} accounts of its own (expected one)")));
+    if !out.iter().any(|a| a.who == Who::Owner) {
+        return Err(invalid("the mail session's own account isn't a mailbox"));
     }
-    out.sort_by(|a, b| (a.who != Who::Owner).cmp(&(b.who != Who::Owner)).then(a.name.cmp(&b.name)));
+    if out.iter().filter(|a| a.who == Who::Uni).count() > 1 {
+        return Err(invalid("the bridge names more than one mailbox as Uni's"));
+    }
+    out.sort_by_key(|a| a.who != Who::Owner);
     Ok(MailSession { login, accounts: out, multi: true })
+}
+
+/// Check that the answer to call `id` is about `account` (JMAP puts `accountId` in every `/get` and `/query` answer).
+/// A bridge that reads another account than the one asked (v1's override, say) is caught here, not shown.
+pub fn answered_for(r: &HashMap<String, Value>, id: &str, account: &str) -> MailResult<()> {
+    let Some(answer) = r.get(id) else { return Ok(()) };
+    match answer.get("accountId").and_then(Value::as_str) {
+        Some(a) if a == account => Ok(()),
+        Some(a) => Err(invalid(format!("the mail bridge answered for account {a} when asked about {account}"))),
+        None => Err(invalid(format!("the mail bridge's answer doesn't say which account it is about (asked about {account})"))),
+    }
 }
 
 /// Whether a bridge answer is "this path doesn't exist" (a v1 bridge without the v2 endpoints).
@@ -292,6 +326,7 @@ impl MailBridge<'_> {
         let (_, r) = self.jmap(Value::Array(calls)).await?;
         let mut accounts = Vec::new();
         for (i, a) in session.accounts.into_iter().enumerate() {
+            answered_for(&r, &format!("m{i}"), &a.id)?;
             let list = r.get(&format!("m{i}")).and_then(|m| m.get("list")).and_then(Value::as_array).ok_or_else(|| invalid("no mailbox list in the answer"))?;
             accounts.push(AccountBoxes { id: a.id, name: a.name, who: a.who, mailboxes: parse_mailboxes(list) });
         }
@@ -347,6 +382,9 @@ impl MailBridge<'_> {
         let list = |id: &str| r.get(id).and_then(|v| v.get("list")).and_then(Value::as_array).cloned().unwrap_or_default();
         let mut pages = Vec::new();
         for (i, s) in sources.iter().enumerate() {
+            for call in ["q", "e", "t", "k"] {
+                answered_for(&r, &format!("{call}{i}"), &s.account_id)?;
+            }
             let q = r.get(&format!("q{i}")).ok_or_else(|| invalid("no query answer"))?;
             let ids: Vec<&str> = q.get("ids").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).collect();
             let emails = list(&format!("e{i}"));
@@ -389,6 +427,8 @@ impl MailBridge<'_> {
             Err(MailError::Server { message }) if message.starts_with("invalidResultReference") => return Err(gone()),
             r => r?,
         };
+        answered_for(&r, "t", account)?;
+        answered_for(&r, "g", account)?;
         let ids: Vec<String> = r
             .get("t")
             .and_then(|t| t.get("list"))
@@ -434,6 +474,9 @@ impl MailBridge<'_> {
             Err(e) => return Err(e),
         };
         let v: Value = serde_json::from_slice(&raw).map_err(|e| invalid(format!("bad bridge answer: {e}")))?;
+        let answer = HashMap::from([("n".to_string(), v)]);
+        answered_for(&answer, "n", account)?;
+        let v = &answer["n"];
         Ok(v.get("notes")
             .and_then(Value::as_object)
             .into_iter()
@@ -460,19 +503,26 @@ mod tests {
         Source { account_id: account.into(), mailbox_id: Some(format!("{account}-inbox")), exclude: vec![], position }
     }
 
+    fn session(roles: Value, extra: Value) -> Value {
+        let mut accounts = json!({
+            "g": { "name": "uni@example.com", "isPersonal": false, "isReadOnly": false, "accountCapabilities": { "urn:ietf:params:jmap:mail": {} } },
+            "f": { "name": "robin@example.com", "isPersonal": true, "isReadOnly": false, "accountCapabilities": { "urn:ietf:params:jmap:mail": {}, "urn:ietf:params:jmap:submission": {} } },
+            "c": { "name": "calendar only", "isPersonal": false, "accountCapabilities": { "urn:ietf:params:jmap:calendars": {} } },
+            "../x": { "name": "bad id", "isPersonal": false }
+        });
+        for (k, v) in extra.as_object().into_iter().flatten() {
+            accounts[k] = v.clone();
+        }
+        json!({ "account": "robin@example.com", "primaryAccounts": { "urn:ietf:params:jmap:mail": "f" }, "accounts": accounts, "roles": roles })
+    }
+
+    fn whose(s: &MailSession) -> Vec<(&str, Who)> {
+        s.accounts.iter().map(|a| (a.id.as_str(), a.who)).collect()
+    }
+
     #[test]
-    fn a_session_lists_the_keys_own_account_first_and_the_shared_one_as_uni() {
-        let s = parse_session(&json!({
-            "account": "robin@example.com",
-            "primaryAccounts": { "urn:ietf:params:jmap:mail": "f", "urn:ietf:params:jmap:submission": "f" },
-            "accounts": {
-                "g": { "name": "uni@example.com", "isPersonal": false, "isReadOnly": false, "accountCapabilities": { "urn:ietf:params:jmap:mail": {} } },
-                "f": { "name": "robin@example.com", "isPersonal": true, "isReadOnly": false, "accountCapabilities": { "urn:ietf:params:jmap:mail": {}, "urn:ietf:params:jmap:submission": {} } },
-                "c": { "name": "calendar only", "isPersonal": false, "accountCapabilities": { "urn:ietf:params:jmap:calendars": {} } },
-                "../x": { "name": "bad id", "isPersonal": false }
-            }
-        }))
-        .unwrap();
+    fn a_session_lists_the_keys_own_account_first_and_the_one_the_bridge_names_uni() {
+        let s = parse_session(&session(json!({ "f": "owner", "g": "uni" }), json!({}))).unwrap();
         assert_eq!(s.login, "robin@example.com");
         assert!(s.multi);
         assert_eq!(s.accounts, vec![
@@ -481,19 +531,47 @@ mod tests {
         ]);
     }
 
+    /// Codex review 1, P0: a shared account is not Uni's because it is shared.
     #[test]
-    fn without_primary_accounts_the_personal_one_is_the_owners() {
-        let s = parse_session(&json!({ "account": "a@example.com", "accounts": {
-            "b": { "name": "b@example.com", "isPersonal": false }, "a": { "name": "a@example.com", "isPersonal": true } } })).unwrap();
-        assert_eq!(s.accounts.iter().map(|a| (a.id.as_str(), a.who)).collect::<Vec<_>>(), [("a", Who::Owner), ("b", Who::Uni)]);
+    fn an_account_the_bridge_doesnt_name_uni_is_left_out() {
+        let third = json!({ "h": { "name": "someone@example.com", "isPersonal": false, "accountCapabilities": { "urn:ietf:params:jmap:mail": {} } } });
+        let s = parse_session(&session(json!({ "f": "owner", "g": "uni" }), third.clone())).unwrap();
+        assert_eq!(whose(&s), [("f", Who::Owner), ("g", Who::Uni)], "the third shared account is not shown as Uni's");
+        let s = parse_session(&session(json!({ "f": "owner", "g": "uni", "h": "guest" }), third)).unwrap();
+        assert_eq!(whose(&s), [("f", Who::Owner), ("g", Who::Uni)]);
+        let s = parse_session(&session(json!({}), json!({}))).unwrap();
+        assert_eq!(whose(&s), [("f", Who::Owner)], "no roles: only the key's own mailbox");
+        let s = parse_session(&json!({ "account": "robin@example.com", "primaryAccounts": { "urn:ietf:params:jmap:mail": "f" }, "accounts": { "f": {}, "g": {} } })).unwrap();
+        assert_eq!(whose(&s), [("f", Who::Owner)], "no roles map at all: the same");
     }
 
     #[test]
-    fn a_session_needs_exactly_one_own_account() {
+    fn a_key_that_reads_as_uni_or_two_unis_is_refused() {
+        // reciprocal sharing seen from Uni's key: its primary account is Uni's, and the owner's is shared to it
+        let uni_key = json!({ "account": "uni@example.com", "primaryAccounts": { "urn:ietf:params:jmap:mail": "g" },
+            "accounts": { "g": { "name": "uni@example.com" }, "f": { "name": "robin@example.com" } }, "roles": { "g": "uni", "f": "owner" } });
+        assert!(parse_session(&uni_key).is_err(), "Uni's own mail must never be shown as YOU");
+        let two = json!({ "h": { "name": "other@example.com", "accountCapabilities": { "urn:ietf:params:jmap:mail": {} } } });
+        assert!(parse_session(&session(json!({ "f": "owner", "g": "uni", "h": "uni" }), two)).is_err());
+    }
+
+    #[test]
+    fn a_session_needs_its_own_mail_account() {
         assert!(parse_session(&json!({ "accounts": {} })).is_err());
-        assert!(parse_session(&json!({ "accounts": { "a": { "isPersonal": false } } })).is_err(), "only shared mail: whose is it?");
-        assert!(parse_session(&json!({ "accounts": { "a": { "isPersonal": true }, "b": { "isPersonal": true } } })).is_err());
+        assert!(parse_session(&json!({ "accounts": { "a": { "isPersonal": true } } })).is_err(), "no primary account: whose is it?");
+        assert!(parse_session(&json!({ "primaryAccounts": { "urn:ietf:params:jmap:mail": "z" }, "accounts": { "a": {} }, "roles": { "a": "uni" } })).is_err(), "the primary isn't listed");
         assert!(parse_session(&json!({ "nothing": 1 })).is_err());
+    }
+
+    #[test]
+    fn an_answer_about_another_account_is_refused() {
+        let mut r = HashMap::new();
+        r.insert("m0".to_string(), json!({ "accountId": "f", "list": [] }));
+        r.insert("m1".to_string(), json!({ "list": [] }));
+        assert!(answered_for(&r, "m0", "f").is_ok());
+        assert!(answered_for(&r, "m0", "g").is_err());
+        assert!(answered_for(&r, "m1", "f").is_err(), "an answer that doesn't say whose it is");
+        assert!(answered_for(&r, "absent", "f").is_ok(), "a missing answer is reported by its caller");
     }
 
     #[test]

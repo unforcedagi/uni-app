@@ -188,16 +188,20 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
     } catch (e) { setBoxesProblem(mailProblem(e)); }
   }, []);
 
-  /** Uni's notes for these rows, one call per account. Display only: a failure shows no notes. */
+  /** Uni's notes for these rows, one call per account. Each answer replaces what was shown for those rows, so a note
+   *  Uni removed goes on Refresh. Display only: a failure shows no notes for those rows. */
   const loadNotes = useCallback(async (threads: ThreadSummary[], seq: number) => {
     const by = new Map<string, string[]>();
     for (const t of threads) by.set(t.account_id, [...(by.get(t.account_id) ?? []), t.email_id]);
     for (const [accountId, emailIds] of by) {
-      try {
-        const got = await invoke<Record<string, string>>("mail_triage", { accountId, emailIds });
-        if (seq !== listSeq.current) return;
-        setNotes((cur) => { const next = { ...cur }; for (const [id, n] of Object.entries(got)) next[`${accountId}/${id}`] = n; return next; });
-      } catch { /* no notes */ }
+      const got = await invoke<Record<string, string>>("mail_triage", { accountId, emailIds }).catch(() => ({} as Record<string, string>));
+      if (seq !== listSeq.current) return;
+      setNotes((cur) => {
+        const next = { ...cur };
+        for (const id of emailIds) delete next[`${accountId}/${id}`];
+        for (const [id, n] of Object.entries(got)) if (emailIds.includes(id)) next[`${accountId}/${id}`] = n;
+        return next;
+      });
     }
   }, []);
 
