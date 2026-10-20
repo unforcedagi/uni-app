@@ -9,7 +9,7 @@
 // T-213: sends from Uni's address that its outbound rules hold for you are listed under "Waiting for you" in Uni's
 // mailboxes, where the bridge offers deciding them. Each shows what it sends and why it waits; Send it (bound to the
 // fingerprint of what is shown) and Don't send each take one confirm, never from Enter, and what happened stays shown.
-import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type FormEvent, type KeyboardEvent } from "react";
 import Composer, { WhoTag, type ComposeStart, type ComposerSnapshot } from "./MailCompose";
 import { invoke } from "@tauri-apps/api/core";
 import { copyText } from "./clipboard";
@@ -22,7 +22,7 @@ import {
   type PendingSend, type SendOutcome, type Source, type ThreadPage, type ThreadSummary, type Who,
   approvalOffered, approveOutcome, canApprove, declineOutcome, heldFailure, type HeldOutcome, type Parked,
 } from "./mailCore";
-import { beginListing, endDeciding, heldEntries, heldGen, keepAccounts, mergeListing, setHeldCount, setOutcome, startDeciding, waiting, waitingCount, type HeldEntry } from "./mailHeld";
+import { beginListing, endDeciding, heldEntries, heldGen, keepAccounts, mergeListing, onHeld, setOutcome, startDeciding, waiting, type HeldEntry } from "./mailHeld";
 import "./Mail.css";
 
 type List = { key: string; threads: ThreadSummary[]; next: Source[]; more: boolean; total: number | null };
@@ -310,7 +310,7 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
   const [busy, setBusy] = useState(false);
   const [actionProblem, setActionProblem] = useState<string | null>(null);
   /** T-213: Uni's sends held for you, per account (kept in mailHeld.ts, so outcomes outlive this view). */
-  const [held, setHeld] = useState<Record<string, HeldEntry[]>>(heldEntries);
+  const held = useSyncExternalStore(onHeld, heldEntries);
   const [heldProblem, setHeldProblem] = useState<MailProblem | null>(null);
   const [heldLoading, setHeldLoading] = useState(false);
   const [openHeld, setOpenHeld] = useState<string | null>(null);
@@ -364,16 +364,13 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
   const loadHeld = useCallback(async (o: Overview) => {
     const gen = heldGen(), seq = beginListing();
     const offered = o.accounts.filter(approvalOffered);
-    keepAccounts(offered.map((a) => a.id));
+    keepAccounts(offered.map((a) => a.id), gen);
     setHeldProblem(null);
     setHeldLoading(true);
     try {
       for (const a of offered.filter((x) => can(x, "send.parked"))) mergeListing(a.id, await invoke<Parked[]>("mail_parked", { accountId: a.id }), gen, seq);
     } catch (e) { if (gen === heldGen()) setHeldProblem(mailProblem(e)); }
-    finally {
-      if (alive.current) { setHeld(heldEntries()); setHeldLoading(false); }
-      setHeldCount(waitingCount(), gen);
-    }
+    finally { if (alive.current) setHeldLoading(false); }
   }, []);
 
   /** Uni's notes for these rows, one call per account. Each answer replaces what was shown for those rows, so a note
@@ -570,8 +567,6 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
     } catch (e) { outcome = heldFailure(e, kind === "approve"); }
     finally { endDeciding(p.op_id); }
     setOutcome(accountId, p.op_id, outcome, gen);
-    setHeldCount(waitingCount(), gen);
-    if (alive.current) setHeld(heldEntries());
     if (outcome.kind === "sent" && alive.current) void refresh();
   };
   const submitSearch = (e: FormEvent) => { e.preventDefault(); setQuery(typed.trim()); setPane("list"); };

@@ -1,14 +1,28 @@
-// T-213: how many of Uni's sends wait for you, for the Mail badge on the rail. Mail sets it each time it lists them; the
-// app also asks once soon after it starts and again when it comes back into view (at most every ten minutes), and only
-// where the bridge offers listing them. A failure leaves the badge as it was: the badge is a hint, Mail is the record.
-// The held sends Mail last listed, and what deciding each did, are kept here too, so the outcome stays on screen when
-// Mail is left and opened again (and goes with Forget).
+// T-213: Uni's sends held for you, one store for every view. It holds the sends last listed and what deciding each did,
+// so an outcome stays on screen when Mail is left and opened again, and reaches whichever Mail is open when it lands
+// (views subscribe: `onHeld`). The Mail badge on the rail is its count of sends still waiting. Mail lists them when it
+// opens and on Refresh; the app also asks once soon after it starts and again when it comes back into view (at most
+// every ten minutes), only where the bridge offers listing them. A failure leaves everything as it was. Forget empties it.
 import { invoke } from "@tauri-apps/api/core";
 import { approvalOffered, can, type HeldOutcome, type Overview, type Parked } from "./mailCore.ts";
 
 /** One held send as Mail shows it: `listed` while the bridge still lists it as waiting; `outcome` once you decided. */
 export type HeldEntry = { item: Parked; outcome: HeldOutcome | null; listed: boolean };
 let entries: Record<string, HeldEntry[]> = {};
+const viewers = new Set<() => void>();
+
+/** Subscribe to every change (for useSyncExternalStore with `heldEntries`). */
+export function onHeld(f: () => void): () => void {
+  viewers.add(f);
+  return () => { viewers.delete(f); };
+}
+
+/** After each change: every view, and the count for the badge. */
+function changed(): void {
+  const n = waitingCount();
+  if (n !== count) { count = n; for (const f of subs) f(n); }
+  for (const f of viewers) f();
+}
 
 /** Still yours to decide: listed, and not sent or declined here. */
 export function waiting(e: HeldEntry): boolean {
@@ -56,16 +70,20 @@ export function mergeListing(accountId: string, list: Parked[], forGen: number, 
   });
   for (const e of before) if ((e.outcome || deciding.has(e.item.op_id)) && !list.some((p) => p.op_id === e.item.op_id)) now.push({ ...e, listed: false });
   entries = { ...entries, [accountId]: now };
+  changed();
 }
 
 export function setOutcome(accountId: string, opId: string, outcome: HeldOutcome, forGen: number): void {
   if (forGen !== gen) return;
   entries = { ...entries, [accountId]: (entries[accountId] ?? []).map((e) => (e.item.op_id === opId ? { ...e, outcome } : e)) };
+  changed();
 }
 
 /** Accounts that are no longer offered lose their entries. */
-export function keepAccounts(ids: string[]): void {
+export function keepAccounts(ids: string[], forGen: number): void {
+  if (forGen !== gen || Object.keys(entries).every((id) => ids.includes(id))) return;
   entries = Object.fromEntries(Object.entries(entries).filter(([id]) => ids.includes(id)));
+  changed();
 }
 
 export function waitingCount(): number {
@@ -87,13 +105,6 @@ export function onHeldCount(f: (n: number) => void): () => void {
   return () => { subs.delete(f); };
 }
 
-/** Mail's own listing: `forGen` is `heldGen()` when it asked. */
-export function setHeldCount(n: number, forGen = gen): void {
-  if (forGen !== gen || n === count) return;
-  count = n;
-  for (const f of subs) f(n);
-}
-
 export function heldGen(): number {
   return gen;
 }
@@ -109,12 +120,11 @@ export async function checkHeld(minGapMs = 0): Promise<void> {
     if (!o || !Array.isArray(o.accounts)) return;
     const offered = o.accounts.filter(approvalOffered);
     if (mine !== gen) return;
-    keepAccounts(offered.map((a) => a.id));
+    keepAccounts(offered.map((a) => a.id), mine);
     for (const a of offered.filter((x) => can(x, "send.parked"))) {
       const list = await invoke<Parked[] | null>("mail_parked", { accountId: a.id });
       if (Array.isArray(list)) mergeListing(a.id, list, mine, seq);
     }
-    setHeldCount(waitingCount(), mine);
   } catch { /* unreachable, not allowed, no bridge: the badge stays as it was */ }
 }
 
@@ -125,6 +135,5 @@ export function forgetHeld(): void {
   deciding.clear();
   for (const k of Object.keys(merged)) delete merged[k];
   lastCheck = 0;
-  count = 0;
-  for (const f of subs) f(0);
+  changed();
 }

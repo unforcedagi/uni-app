@@ -81,6 +81,34 @@ test("a held send shows what it sends and why; Send it takes a confirm, never En
   expect(await submissions(page)).toHaveLength(1);
 });
 
+test('a decision still on its way when you leave Mail shows its outcome in the Mail you come back to, without Refresh', async ({ page }) => {
+  await boot(page, 'ok', { writes: true, held: true });
+  const h = await openHeld(page, BARN);
+  await page.evaluate(() => { (window as any).__decideDelay = 2500; });
+  await h.getByRole('button', { name: /^Send it/ }).click();
+  await h.getByRole('button', { name: "Yes, send from Uni's address" }).click();
+  const rail = page.getByRole('navigation', { name: 'Main navigation' });
+  await rail.getByRole('button', { name: 'Journal', exact: true }).click();
+  await expect(page.locator('.mail')).toHaveCount(0);
+  await rail.getByRole('button', { name: 'Mail', exact: true }).click();
+  const back = page.getByRole('button', { name: '← Waiting' }).filter({ visible: true });
+  if (await back.count()) await back.first().click();
+  await expect(heldRows(page).filter({ hasText: BARN })).toContainText('SENT', { timeout: 8000 });
+  await expect(badge(page)).toHaveText('1');
+  expect(await calls(page, 'mail_send_approve')).toHaveLength(1);
+  expect(await submissions(page)).toHaveLength(1);
+  // a failure leaves the count as it was, so nothing else redraws Mail: the store's own notice must
+  const q = await openHeld(page, QUOTE);
+  await page.evaluate(() => { (window as any).__decideFails = 1; });
+  await q.getByRole('button', { name: /^Send it/ }).click();
+  await q.getByRole('button', { name: "Yes, send from Uni's address" }).click();
+  await rail.getByRole('button', { name: 'Journal', exact: true }).click();
+  await rail.getByRole('button', { name: 'Mail', exact: true }).click();
+  if (await back.count()) await back.first().click();
+  await expect(heldRows(page).filter({ hasText: QUOTE })).toContainText("Couldn't send: the mail server didn't answer. Ask #mail.", { timeout: 8000 });
+  await expect(badge(page)).toHaveText('1');
+});
+
 test("Don't send takes a confirm, Cancel keeps it waiting, and declining sends nothing", async ({ page }) => {
   await boot(page, 'ok', { writes: true, held: true });
   const h = await openHeld(page, QUOTE);

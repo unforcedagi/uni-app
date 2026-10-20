@@ -296,7 +296,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const [held, setHeld] = useState(heldCount);
   useEffect(() => {
     const off = onHeldCount(setHeld);
-    const soon = window.setTimeout(() => void checkHeld(), 4000);
+    const soon = window.setTimeout(() => void checkHeld(60_000), 4000); // skipped when Mail has just listed them
     const visible = () => { if (document.visibilityState === "visible") void checkHeld(10 * 60_000); };
     document.addEventListener("visibilitychange", visible);
     return () => { off(); window.clearTimeout(soon); document.removeEventListener("visibilitychange", visible); };
