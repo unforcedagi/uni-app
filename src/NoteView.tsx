@@ -21,8 +21,8 @@ function openExternal(url: string) {
 }
 
 export default function NoteView({ target, hub, onOpen, onBack, backLabel, onTitle, startEditing = false, onDirty, onCreate, onResolved, onRendered, onSearch, readOnly = false, backIcon = "←", actions, compact = false }: {
-  /** T-200: a note beside the chat closes rather than goes back (×), carries the pane's own buttons, and is for reading: no Edit (the
-   *  pane has no unsaved-changes guard), New note or Copy markdown. */
+  /** T-200: a note beside the chat closes rather than goes back (×), carries the pane's own buttons, and keeps to reading and editing:
+   *  no New note or Copy markdown in its narrow bar. */
   backIcon?: string;
   actions?: ReactNode;
   compact?: boolean;
@@ -135,7 +135,7 @@ export default function NoteView({ target, hub, onOpen, onBack, backLabel, onTit
         <span className="note-back-arrow" aria-hidden="true">{backIcon}</span><span className="note-back-label">{backLabel}</span>
       </button>
       {note && !tools && <button className="note-action quiet" onClick={() => setAsNote(true)}>Open as a note</button>}
-      {note && tools && !editing && !compact && editableExtension(note.extension) && <button className="note-action" onClick={() => setEditing(true)}>Edit</button>}
+      {note && tools && !editing && editableExtension(note.extension) && <button className="note-action" onClick={() => setEditing(true)}>Edit</button>}
       {note && tools && !compact && <button className="note-action" onClick={() => onCreate(note.path?.includes("/") ? note.path.slice(0, note.path.lastIndexOf("/")) : "")}>New note</button>}
       {note && tools && !editing && !compact && <button className="note-action" onClick={() => void copyText(note.content ?? "", "Copied markdown")}>Copy markdown</button>}
       {note && tools && !editing && !compact && isMarkdownNote(note.extension) && <NoteDownload note={note} title={heading} />}

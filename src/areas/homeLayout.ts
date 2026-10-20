@@ -40,3 +40,8 @@ export const useShortTree = (): boolean => useSyncExternalStore(subscribeShortTr
 export const UPRIGHT_PHONE_QUERY = "(max-width: 599.98px)";
 const subscribeUpright = (f: () => void) => { const mq = window.matchMedia(UPRIGHT_PHONE_QUERY); mq.addEventListener("change", f); return () => mq.removeEventListener("change", f); };
 export const useUprightPhone = (): boolean => useSyncExternalStore(subscribeUpright, () => window.matchMedia(UPRIGHT_PHONE_QUERY).matches, () => false);
+
+/** T-200: a window wide enough to keep the room tree open beside the chat and a note beside it. Narrower, the tree folds to its icons. */
+export const TREE_BESIDE_NOTE_QUERY = "(min-width: 1400px)";
+const subscribeTreeBeside = (f: () => void) => { const mq = window.matchMedia(TREE_BESIDE_NOTE_QUERY); mq.addEventListener("change", f); return () => mq.removeEventListener("change", f); };
+export const useTreeBesideNote = (): boolean => useSyncExternalStore(subscribeTreeBeside, () => window.matchMedia(TREE_BESIDE_NOTE_QUERY).matches, () => true);

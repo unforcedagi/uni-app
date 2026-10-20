@@ -1,12 +1,8 @@
-import "./t200/boot";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
 import UpdateNotice from "./UpdateNotice";
 import { migrateHomeLayout } from "./areas/homeLayout";
-import { NOTE_MODE } from "./t200/mode";
-import { noteWindowParams } from "./t200/noteWindow";
-import NoteWindow from "./t200/NoteWindow";
 
 /** A render error in remote content must not blank the whole app. */
 class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { error: Error | null }> {
@@ -30,14 +26,11 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { err
 // T-124 r12: the room tree is the only layout; a saved Map, Octopus or Classic choice is dropped once, here.
 migrateHomeLayout();
 
-// T-200 C: a note window is the same app showing one note (only when the prototype flag is on).
-const noteWindow = NOTE_MODE === "window" ? noteWindowParams() : null;
-
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
     <ErrorBoundary>
-      {noteWindow ? <NoteWindow target={noteWindow.target} room={noteWindow.room} /> : <><App />
-      <UpdateNotice /></>}
+      <App />
+      <UpdateNotice />
     </ErrorBoundary>
   </React.StrictMode>,
 );

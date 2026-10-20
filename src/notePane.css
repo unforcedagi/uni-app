@@ -1,0 +1,20 @@
+/* T-200: a note beside or over the chat. No transitions or animation (the Daylight's e-ink redraws them badly). */
+.note-pane, .note-pane * { transition: none; animation: none; }
+.note-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg); z-index: 30; }
+.note-pane .note-view { flex: 1; min-height: 0; }
+.note-pane .note-page { padding: 20px 20px 40px; }
+.note-pane .note-title { font-size: 30px; }
+.note-pane .note-bar { min-height: 56px; padding: 6px 10px; gap: 6px; flex-wrap: wrap; justify-content: flex-start; }
+.note-pane .note-back { min-height: 44px; font-size: 15px; box-shadow: none; padding: 0 14px 0 10px; margin-right: auto; }
+.note-pane .note-action { padding: 0 12px; }
+.note-pane-quote:disabled { opacity: .45; }
+.note-pane-quote.ready { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+
+/* A, wide screens: a column right of the chat. The shell is a row: rail, conversation, note. */
+.note-pane-beside { position: relative; flex: none; align-self: stretch; max-width: calc(100vw - 520px); border-left: 1px solid var(--line-strong); padding-top: env(safe-area-inset-top); }
+.note-pane-handle { position: absolute; z-index: 2; left: -9px; top: 0; bottom: 0; width: 18px; display: flex; align-items: center; justify-content: center; touch-action: none; cursor: col-resize; }
+.note-pane-handle span { display: block; width: 4px; height: 48px; background: var(--line-strong); border-radius: 999px; }
+.note-pane-handle:focus-visible span, .note-pane-handle:hover span { background: var(--accent); }
+
+/* B, narrow screens and Android: over the message list, ending at the composer. */
+.note-pane-sheet { position: fixed; border: 2px solid var(--line-strong); border-bottom: 0; border-radius: 14px 14px 0 0; box-shadow: 0 -10px 28px -16px rgba(0, 0, 0, .35); overflow: hidden; }

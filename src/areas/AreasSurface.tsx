@@ -19,7 +19,7 @@ import { pickRoom } from "./areaLayout";
 import { childrenOf, parentPath, ROOT, rootNode, trail, UNI_CHANNEL } from "./treeCore";
 import { findUniRoom } from "../uniActions";
 import { useStoredSelfTest } from "../interface/selftest/useSelfTest";
-import { useRailHidden, useShortTree, useUprightPhone, useWide } from "./homeLayout";
+import { useRailHidden, useShortTree, useTreeBesideNote, useUprightPhone, useWide } from "./homeLayout";
 import { archivedRoomIds, projectCards, roomsList } from "./viewsCore";
 import { privateRoot, privateRootIn, roomSlug, roomView, treeRows } from "./treeRooms";
 import { publishRoomNodes, roomNodeMap } from "./roomLabels";
@@ -83,8 +83,11 @@ function ChatWait({ placeholder, retry }: { placeholder: string; retry: (() => v
  */
 const viaMemory: { path: string | null; via: string | null } = { path: null, via: null };
 
-export default function AreasSurface({ identity, path, loose = null, thread = null, rooms: hostRooms, roomsPending = false, actions, roomFor, onRoom, onOpenArea, onBackChange, onOverlayChange }: {
+export default function AreasSurface({ identity, path, loose = null, thread = null, rooms: hostRooms, roomsPending = false, actions, roomFor, onRoom, onOpenArea, onBackChange, onOverlayChange, noteBeside = false }: {
   identity: string | null;
+  /** T-200: a note is open beside the conversation. The chat keeps the room: the companion folds to its tab, and the tree to its icons
+   *  on a window under 1400px. Either unfolds again for as long as the note is open; the choices kept on this device stay as they were. */
+  noteBeside?: boolean;
   path: string | null;
   /** A room no node owns: shown in the same shell, with the companion saying it is not filed under an area yet. `path` is ignored. */
   loose?: string | null;
@@ -123,7 +126,14 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   /** r19: a wide window too short for the sidebar (920×360) has no room for a side panel either: the companion is the strip there, folded to
    *  one line that still says what is waiting ("Needs you · 2: <first action>"). */
   const stripCompanion = !wide || shortTree;
-  const [companionOpen, setCompanionOpen] = useCompanionOpen(stripCompanion ? "strip" : "side");
+  const [companionChoice, setCompanionChoice] = useCompanionOpen(stripCompanion ? "strip" : "side");
+  const [besideOpen, setBesideOpen] = useState({ companion: false, tree: false });
+  useEffect(() => { if (noteBeside) setBesideOpen({ companion: false, tree: false }); }, [noteBeside]);
+  const roomyTree = useTreeBesideNote();
+  const foldSide = noteBeside && !stripCompanion;
+  const companionOpen = foldSide ? besideOpen.companion : companionChoice;
+  const setCompanionOpen = foldSide ? (v: boolean) => setBesideOpen((b) => ({ ...b, companion: v })) : setCompanionChoice;
+  const treeFold = noteBeside && !roomyTree ? { folded: !besideOpen.tree, set: (open: boolean) => setBesideOpen((b) => ({ ...b, tree: open })) } : null;
   /** Phone: the room tree is the home and a level opens from it; Uni's own level is one tap on its row. */
   const [rootOpen, setRootOpenState] = useState(rootOpenMemory.open);
   const setRootOpen = (v: boolean) => { rootOpenMemory.open = v; setRootOpenState(v); };
@@ -298,8 +308,9 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
     retryChat?: (() => void) | null }) => {
     const replies = thread && o.chatRoom?.loaded ? o.chatRoom.messages.filter((m) => m.ref !== thread.root).length : null;
     const view = o.main ? "work" : thread ? "thread" : "room";
-    return <div className={`tree-home th-level ${wide ? "wide" : "phone"} th-rooms th-simple ${wide && (!o.companion || o.main || stripCompanion) ? "solo" : wide && !companionOpen ? "folded" : ""}`} data-layout="rooms" data-view={view}>
-      {sidebar && <RoomSidebar {...treeProps} selected={o.selected} selectedRoom={o.selectedRoom} nav={nav} />}
+    return <div className={`tree-home th-level ${wide ? "wide" : "phone"} th-rooms th-simple ${wide && (!o.companion || o.main || stripCompanion) ? "solo" : wide && !companionOpen ? "folded" : ""}`} data-layout="rooms" data-view={view}
+      style={sidebar && treeFold?.folded ? { "--th-nav-w": "34px" } as React.CSSProperties : undefined}>
+      {sidebar && <RoomSidebar {...treeProps} selected={o.selected} selectedRoom={o.selectedRoom} nav={nav} fold={treeFold} />}
       <section className="sr" aria-label={o.main ? `Work: ${o.title}` : `Conversation: ${o.title}`} data-node={o.node}>
         <header className="sr-head">
           {placesDrawer && <button ref={drawerOpener} type="button" className="sr-drawer" aria-label="Places" title="Rooms and places" aria-expanded={drawer} aria-controls="th-drawer" onClick={() => setDrawer(true)}><span aria-hidden="true" /></button>}

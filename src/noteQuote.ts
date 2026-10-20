@@ -1,4 +1,4 @@
-import { SHORTHAND_VAULTS, noteUrl } from "../vaultlinks.ts";
+import { SHORTHAND_VAULTS, noteUrl } from "./vaultlinks.ts";
 
 /** The note's link as chat writes it: `uni:<id>` (a chip in the room), or its hub URL for a vault the shorthand doesn't cover. */
 export function noteLink(vault: string, id: string, hub: string | null): string {

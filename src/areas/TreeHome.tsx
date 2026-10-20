@@ -161,12 +161,13 @@ export function TreeScreen({ status, column, nav, onHide, hideLabel = "Hide the 
 }
 
 /** The left column: width set by dragging its right edge (180 to 360px, remembered), or hidden down to a thin strip. */
-export function RoomSidebar({ nav, ...tree }: TreeProps & { nav?: NavControls | null }) {
+/** `fold` (T-200, a note beside the chat): folded or not for now, over the choice kept on this device. */
+export function RoomSidebar({ nav, fold = null, ...tree }: TreeProps & { nav?: NavControls | null; fold?: { folded: boolean; set: (open: boolean) => void } | null }) {
   const [sb, setSb] = useSidebar();
   const drag = useRef<{ x: number; w: number } | null>(null);
-  if (sb.hidden) return <div className="th-roomnav hidden"><button type="button" className="th-nb" aria-label="Show the sidebar" title="Show the sidebar" onClick={() => setSb({ hidden: false })}>›</button><NavButtons nav={nav ?? null} /></div>;
+  if (fold ? fold.folded : sb.hidden) return <div className="th-roomnav hidden"><button type="button" className="th-nb" aria-label="Show the sidebar" title="Show the sidebar" onClick={() => fold ? fold.set(true) : setSb({ hidden: false })}>›</button><NavButtons nav={nav ?? null} /></div>;
   return <div className="th-roomnav" data-width={sb.width}>
-    <TreeScreen column {...tree} nav={nav} onHide={() => setSb({ hidden: true })} />
+    <TreeScreen column {...tree} nav={nav} onHide={() => fold ? fold.set(false) : setSb({ hidden: true })} />
     <div className="th-resize" role="separator" aria-orientation="vertical" aria-label="Resize the sidebar" aria-valuemin={SIDEBAR_MIN} aria-valuemax={SIDEBAR_MAX} aria-valuenow={sb.width} tabIndex={0}
       onPointerDown={(e) => { drag.current = { x: e.clientX, w: sb.width }; e.currentTarget.setPointerCapture(e.pointerId); }}
       onPointerMove={(e) => { if (drag.current) setSb({ width: drag.current.w + e.clientX - drag.current.x }); }}
