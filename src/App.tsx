@@ -36,6 +36,7 @@ import { lastOwnMessage } from "./ownMessages";
 
 import { decisionIn, useDecisionLinks } from "./decisionLinks";
 import { DecisionCard, forgetDecisions } from "./DecisionCard";
+import { checkHeld, forgetHeld, heldCount, onHeldCount } from "./mailHeld";
 import { decisionRefsIn, unreferenced } from "./decisionView";
 import { findUniMember, findUniRoom, searchHandoffText } from "./uniActions";
 import Search from "./Search";
@@ -291,6 +292,15 @@ function Conversations({ onForget }: { onForget: () => void }) {
       setForYou({ count: countRecommendations(data.note.content ?? ""), updatedAt: updated, fresh: isRecommendationNew(updated, last) });
     } catch { /* keep the last successful count while offline */ }
   }
+  // T-213: Uni's sends held for you, counted on the rail's Mail button (Mail keeps the count current while it is open)
+  const [held, setHeld] = useState(heldCount);
+  useEffect(() => {
+    const off = onHeldCount(setHeld);
+    const soon = window.setTimeout(() => void checkHeld(), 4000);
+    const visible = () => { if (document.visibilityState === "visible") void checkHeld(10 * 60_000); };
+    document.addEventListener("visibilitychange", visible);
+    return () => { off(); window.clearTimeout(soon); document.removeEventListener("visibilitychange", visible); };
+  }, []);
   useEffect(() => {
     void refreshForYou();
     const visible = () => { if (document.visibilityState === "visible") void refreshForYou(); };
@@ -1461,7 +1471,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     // Two taps instead of window.confirm (unreliable in Android WebView).
     if (!forgetArmed) { setForgetArmed(true); return; }
     try { voiceMounted.current = false; await voiceQueue.current; await voiceOutbox.current.clear(); await invoke("identity_forget");
-      forgetDrafts(); invalidatePaths(); forgetAreas(); forgetDecisions();
+      forgetDrafts(); invalidatePaths(); forgetAreas(); forgetDecisions(); forgetHeld();
       try { for (const key of Object.keys(localStorage)) if (key.startsWith("uni.noteDraft.v1:") || key.startsWith("uni.vaultExpanded.v1:") || key === ALIASES_KEY) localStorage.removeItem(key); } catch { /* unavailable storage */ }
       onForget(); } catch (e) { voiceMounted.current = true; setError(String(e)); }
   }
@@ -1807,7 +1817,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     <nav ref={railRef} className="rail" aria-label="Main navigation">
       <button aria-label="Uni" aria-current={!panel && !searchOpen && (!topNote && shellOpen ? "page" : undefined)} onClick={() => openTarget(uniHome())}><i><UniIcon /></i><span>Uni</span></button>
       <button aria-label="Journal" aria-current={!panel && !searchOpen && (journalOpen && !topNote ? "page" : undefined)} onClick={() => openTarget({ kind: "journal", title: "Journal" })}><i><JournalIcon /></i><span>Journal</span></button>
-      <button aria-label="Mail" aria-current={!panel && !searchOpen && (active?.kind === "mail" && !topNote ? "page" : undefined)} onClick={() => openTarget({ kind: "mail", title: "Mail" })}><i><MailIcon /></i><span>Mail</span></button>
+      <button aria-label="Mail" aria-current={!panel && !searchOpen && (active?.kind === "mail" && !topNote ? "page" : undefined)} onClick={() => openTarget({ kind: "mail", title: "Mail" })} aria-describedby={held > 0 ? "rail-mail-held" : undefined}><i><MailIcon />{held > 0 && <span className="rail-count" aria-hidden="true">{held}</span>}</i><span>Mail</span>{held > 0 && <span id="rail-mail-held" hidden>{held} waiting for you</span>}</button>
       {showUniGlue(lifeVault) && <button aria-label="For you" aria-current={!panel && !searchOpen && (topNote?.ref === FOR_YOU_ID ? "page" : undefined)} onClick={openForYou}><i><StarIcon />{forYou.fresh && <span className="rail-dot" aria-label="Updated recommendations" />}</i><span>For you</span></button>}
       <button className="rail-vault" aria-label="Vault" aria-current={!panel && !searchOpen && (active?.kind === "vault" || (topNote && topNote.ref !== FOR_YOU_ID) ? "page" : undefined)} aria-expanded={panel === "vault"} onClick={() => { setSearchOpen(false); setPanel(panel === "vault" ? null : "vault"); }}><i>▤</i><span>Vault</span></button>
       <button className="rail-search" aria-label="Search" aria-expanded={searchOpen} onClick={() => { setPanel(null); setSearchQuery(""); setSearchScope({ vault: "", prefix: "" }); setSearchOpen(true); }}><i>⌕</i><span>Search</span></button>

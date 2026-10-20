@@ -2,7 +2,8 @@
 // reads, dates, sender labels, which accounts a list reads, and the sealed
 // document an HTML body renders in. T-210: which writes the bridge offers where,
 // who a message can be sent as, addresses typed in the composer, a reply's
-// fields, and the "not verified" rule. Nothing here calls the bridge.
+// fields, and the "not verified" rule. T-213: Uni's sends held for you, and what deciding one did. Nothing here calls
+// the bridge.
 
 export type Address = { name: string | null; email: string };
 export type Mailbox = { id: string; name: string; role: string | null; parent_id: string | null; total: number; unread: number };
@@ -32,11 +33,11 @@ export type ThreadSummary = {
 export type ThreadPage = { threads: ThreadSummary[]; next: Source[]; more: boolean; total: number | null };
 export type MailThread = { account_id: string; thread_id: string; messages: MailMessage[] };
 
-/** What a list shows: every account's Inbox at once, or one mailbox. */
-export type Scope = { kind: "all-inboxes" } | { kind: "mailbox"; accountId: string; mailboxId: string };
+/** What a list shows: every account's Inbox at once, one mailbox, or (T-213) the sends held for you in Uni's account. */
+export type Scope = { kind: "all-inboxes" } | { kind: "mailbox"; accountId: string; mailboxId: string } | { kind: "waiting"; accountId: string };
 
 export function scopeKey(s: Scope): string {
-  return s.kind === "all-inboxes" ? "all" : `${s.accountId}/${s.mailboxId}`;
+  return s.kind === "all-inboxes" ? "all" : s.kind === "waiting" ? `${s.accountId}/waiting` : `${s.accountId}/${s.mailboxId}`;
 }
 
 /** The tag on every row, group and header: a word, not a colour. */
@@ -55,6 +56,8 @@ function role(a: AccountBoxes, r: string): Mailbox | undefined {
 
 /** The accounts and mailboxes a list reads. A search reads the scope's accounts whole, less Junk and Trash. */
 export function sourcesFor(scope: Scope, o: Overview, searching: boolean): Source[] {
+  // the held sends aren't threads; a search from there searches Uni's mail
+  if (scope.kind === "waiting" && !searching) return [];
   const accounts = scope.kind === "all-inboxes" ? o.accounts : o.accounts.filter((a) => a.id === scope.accountId);
   return accounts.flatMap((a): Source[] => {
     if (searching) return [{ account_id: a.id, mailbox_id: null, exclude: ["junk", "trash"].flatMap((r) => role(a, r)?.id ?? []), position: 0 }];
@@ -70,15 +73,17 @@ export function allInboxesUnread(o: Overview): number {
 
 /** The list's heading. */
 export function scopeTitle(scope: Scope, o: Overview, query: string): string {
-  const acct = scope.kind === "mailbox" ? o.accounts.find((a) => a.id === scope.accountId) : undefined;
+  const acct = scope.kind !== "all-inboxes" ? o.accounts.find((a) => a.id === scope.accountId) : undefined;
+  if (scope.kind === "waiting" && !query) return "Waiting for you";
   if (query) return scope.kind === "all-inboxes" ? (o.accounts.length > 1 ? "Search: both mailboxes" : "Search: your mail") : `Search: ${acct?.who === "uni" ? "Uni's mail" : "your mail"}`;
-  if (scope.kind === "all-inboxes") return o.accounts.length > 1 ? "All inboxes" : "Inbox";
+  if (scope.kind !== "mailbox") return o.accounts.length > 1 ? "All inboxes" : "Inbox";
   const box = acct?.mailboxes.find((b) => b.id === scope.mailboxId);
   return `${acct?.who === "uni" ? "Uni" : "Your"} · ${box ? mailboxLabel(box) : "mailbox"}`;
 }
 
 /** The scope still exists in this overview (an account or mailbox can go). */
 export function scopeValid(scope: Scope, o: Overview): boolean {
+  if (scope.kind === "waiting") return approvalOffered(o.accounts.find((a) => a.id === scope.accountId));
   return scope.kind === "all-inboxes" || o.accounts.some((a) => a.id === scope.accountId && a.mailboxes.some((b) => b.id === scope.mailboxId));
 }
 
@@ -187,7 +192,7 @@ export type DraftFields = { to: Address[]; cc: Address[]; bcc: Address[]; subjec
 /** `fields` and `plain` (draft.review only): what the draft holds, read by the bridge from the same bytes as `fingerprint`. */
 export type Reviewed = { account_id: string; draft_id: string; thread_id: string | null; fingerprint: string; discard: string[]; uni_drafted: boolean;
   fields?: DraftFields | null; plain?: boolean | null };
-export type SendState = "drafting" | "reserved" | "submitting" | "submitted" | "cleaned" | "refused" | "awaiting-approval" | "failed" | "unknown";
+export type SendState = "drafting" | "reserved" | "submitting" | "submitted" | "cleaned" | "refused" | "awaiting-approval" | "failed" | "unknown" | "declined";
 export type SendOutcome = {
   op_id: string; account_id: string; draft_id: string | null; state: SendState; reason: string | null; submission_id: string | null;
   delivery: Record<string, string> | null; note: string | null;
@@ -344,6 +349,8 @@ export function sendOutcomeText(out: SendOutcome, who: Who): { text: string; don
       return { text: `Not sent: ${out.reason ?? "the bridge refused it"}.`, done: false, blocked: false };
     case "failed":
       return { text: `Not sent: ${out.reason ?? "the mail server refused it"}.`, done: true, blocked: true };
+    case "declined":
+      return { text: "Not sent: you declined it.", done: true, blocked: true };
     case "unknown": case "submitting": case "reserved": case "drafting":
       return { text: "Outcome unknown, checking. It won't be sent twice.", done: false, blocked: true };
   }
@@ -354,4 +361,52 @@ export function newOpId(): string {
   const bytes = new Uint8Array(16);
   crypto.getRandomValues(bytes);
   return `op-${Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")}`;
+}
+
+// ── T-213: Uni's sends held for you ──────────────────────────────────────────────────────────────────────────────────
+
+/** A send from Uni's account that its outbound rules hold for you (`uni_core::mail::Parked`). `fields` and `fingerprint`
+ *  are of the same bytes of the held draft: Send it sends exactly what is shown, or nothing. */
+export type Parked = {
+  op_id: string; draft_id: string | null; reason: string | null; sent_by: string | null; parked_at: string | null; recipients: string[];
+  fingerprint: string | null; changed: boolean; fields: DraftFields | null; plain: boolean | null; problem: string | null;
+};
+
+/** The held sends of this account are yours to decide: Uni's account, where the bridge offers approving or declining. */
+export function approvalOffered(a: AccountBoxes | undefined): boolean {
+  return !!a && a.who === "uni" && (can(a, "send.approve") || can(a, "send.decline"));
+}
+
+/** Send it is offered for this held send: the bridge offers it, and it shows the whole draft as it is now. */
+export function canApprove(a: AccountBoxes | undefined, p: Parked): boolean {
+  return can(a, "send.approve") && !!p.fingerprint && !!p.fields && !p.changed && !p.problem && p.plain !== false;
+}
+
+/** What deciding a held send did. `sent` and `declined` are final; `failed` says why and to ask #mail. */
+export type HeldOutcome = { kind: "sent" | "declined" | "failed"; text: string };
+
+export function approveOutcome(out: SendOutcome, uniAddress: string): HeldOutcome {
+  switch (out.state) {
+    case "cleaned": case "submitted":
+      return { kind: "sent", text: `Sent from Uni's address (${uniAddress}).` };
+    case "declined":
+      return { kind: "declined", text: "Declined earlier. Nothing was sent." };
+    case "unknown": case "submitting":
+      return { kind: "failed", text: "Couldn't confirm it was sent: ask #mail. It won't be sent twice." };
+    default:
+      return { kind: "failed", text: `Couldn't send: ${out.reason ?? "the bridge refused it"}. Ask #mail.` };
+  }
+}
+
+export function declineOutcome(out: SendOutcome): HeldOutcome {
+  return out.state === "declined" ? { kind: "declined", text: "Declined. Nothing was sent from Uni's address." }
+    : { kind: "failed", text: `Couldn't decline it: it is ${out.state}. Ask #mail.` };
+}
+
+/** A call that failed: what the screen says. A 409 is the bridge's own sentence (the draft changed, already decided). */
+export function heldFailure(e: unknown, approving: boolean): HeldOutcome {
+  const p = mailProblem(e);
+  const said = p.kind === "refused" && p.detail.startsWith("409") ? p.detail.replace(/^409:\s*/, "") : p.title.replace(/\.$/, "");
+  const why = said.charAt(0).toLowerCase() + said.slice(1);
+  return { kind: "failed", text: `${approving ? "Couldn't send" : "Couldn't decline it"}: ${why}. Ask #mail.` };
 }

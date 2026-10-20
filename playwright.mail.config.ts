@@ -5,7 +5,7 @@ const port = Number(process.env.MAIL_TEST_PORT || 1434);
 const daylight = (width: number, height: number) => ({ browserName: 'chromium' as const, viewport: { width, height }, isMobile: true, hasTouch: true, userAgent: devices['Galaxy Tab S4'].userAgent });
 export default defineConfig({
   outputDir: 'test-results/mail',
-  testDir: './scripts/browser', testMatch: /mail(-write)?\.spec\.ts$/, reporter: 'list',
+  testDir: './scripts/browser', testMatch: /mail(-write|-approve)?\.spec\.ts$/, reporter: 'list',
   use: { baseURL: `http://127.0.0.1:${port}`, colorScheme: 'light' },
   projects: [
     { name: 'desktop', use: { browserName: 'chromium', viewport: { width: 1440, height: 900 } } },

@@ -6,7 +6,10 @@
 // bridge without the write patch leaves Mail exactly as read-only as before. Opening a thread marks it read, Mark
 // unread undoes it; Flag; Archive (your own mail only); Reply, New and a Uni draft's review open the composer
 // (MailCompose.tsx), which saves, shows what will be sent, and sends it once.
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+// T-213: sends from Uni's address that its outbound rules hold for you are listed under "Waiting for you" in Uni's
+// mailboxes, where the bridge offers deciding them. Each shows what it sends and why it waits; Send it (bound to the
+// fingerprint of what is shown) and Don't send each take one confirm, never from Enter, and what happened stays shown.
+import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import Composer, { WhoTag, type ComposeStart, type ComposerSnapshot } from "./MailCompose";
 import { invoke } from "@tauri-apps/api/core";
 import { copyText } from "./clipboard";
@@ -17,7 +20,9 @@ import {
   scopeKey, scopeTitle, scopeValid, senderLabel, sourcesFor, subjectLabel, whoMail, writesOffered,
   type AccountBoxes, type MailAttachment, type MailLink, type MailMessage, type MailProblem, type MailThread, type Overview, type Scope,
   type PendingSend, type SendOutcome, type Source, type ThreadPage, type ThreadSummary, type Who,
+  approvalOffered, approveOutcome, canApprove, declineOutcome, heldFailure, type HeldOutcome, type Parked,
 } from "./mailCore";
+import { heldEntries, heldGen, keepAccounts, mergeListing, setHeldCount, setOutcome, waiting, waitingCount, type HeldEntry } from "./mailHeld";
 import "./Mail.css";
 
 type List = { key: string; threads: ThreadSummary[]; next: Source[]; more: boolean; total: number | null };
@@ -188,6 +193,86 @@ function ThreadView({ t, acct, overview, note, onBack, actions }: { t: MailThrea
   </section>;
 }
 
+/** Enter never decides a held send: only a tap, a click or Space. */
+const noEnter = (e: KeyboardEvent) => { if (e.key === "Enter") e.preventDefault(); };
+
+function heldTo(p: Parked): string {
+  const f = p.fields;
+  const list = f ? [...f.to, ...f.cc, ...f.bcc].map((a) => a.email) : p.recipients;
+  return list.length ? list.join(", ") : "(no recipients)";
+}
+
+function HeldRow({ e, selected, onOpen }: { e: HeldEntry; selected: boolean; onOpen: () => void }) {
+  const p = e.item;
+  const state = e.outcome && e.outcome.kind !== "failed" ? e.outcome.kind : waiting(e) ? "waiting" : "failed";
+  const tag = state === "sent" ? "SENT" : state === "declined" ? "NOT SENT" : state === "failed" ? "ASK #MAIL" : "WAITING";
+  return <li><button type="button" className={`mail-row mail-held-row held-${state} ${selected ? "selected" : ""}`} aria-current={selected ? "true" : undefined} onClick={onOpen}
+    aria-label={`${tag === "WAITING" ? "Waiting for you" : tag}. From Uni's address to ${heldTo(p)}: ${subjectLabel(p.fields?.subject ?? "")}`}>
+    <span className="mail-row-top"><WhoTag who="uni" /><span className="mail-from">To {heldTo(p)}</span><span className="mail-held-tag">{tag}</span></span>
+    <span className="mail-row-subject">{subjectLabel(p.fields?.subject ?? "")}</span>
+    <span className="mail-row-preview">{e.outcome?.text ?? p.reason ?? p.problem ?? ""}</span>
+  </button></li>;
+}
+
+/** A held send in full, and the two decisions on it. Each needs a second, deliberate tap; Enter does neither. */
+function HeldView({ e, acct, onBack, onDecide }: { e: HeldEntry; acct: AccountBoxes; onBack: () => void; onDecide: (kind: "approve" | "decline") => Promise<void> }) {
+  const [confirm, setConfirm] = useState<"approve" | "decline" | null>(null);
+  const [busy, setBusy] = useState(false);
+  const inflight = useRef(false);
+  const confirmBox = useRef<HTMLDivElement>(null);
+  const p = e.item, f = p.fields;
+  const open = waiting(e);
+  const approvable = canApprove(acct, p);
+  const declinable = can(acct, "send.decline");
+  const ask = (kind: "approve" | "decline") => { setConfirm(kind); requestAnimationFrame(() => confirmBox.current?.focus()); };
+  const go = async () => {
+    // a second tap while the first is on its way does nothing
+    if (inflight.current || !confirm) return;
+    inflight.current = true; setBusy(true);
+    try { await onDecide(confirm); } finally { inflight.current = false; setBusy(false); setConfirm(null); }
+  };
+  const from = `Uni's address (${acct.name})`;
+  return <section className="mail-thread mail-held" aria-label={`Held send: ${subjectLabel(f?.subject ?? "")}`}>
+    <div className="mail-thread-bar">
+      <button type="button" className="note-action mail-thread-back" onClick={onBack}>← Waiting</button>
+      <span className="mail-held-where"><WhoTag who="uni" address={acct.name} /> Held for you · not sent</span>
+    </div>
+    <div className="mail-thread-scroll">
+      <h2 className="mail-subject">{subjectLabel(f?.subject ?? "")}</h2>
+      <p className="mail-triage mail-held-why" role="note"><span className="eyebrow">Why it waits</span><span>{p.reason ?? "Uni's outbound rules want your approval."}</span></p>
+      {p.changed && <p className="mail-draft-note mail-unverified" role="note"><span className="mail-draft-tag">CHANGED</span><span>This draft changed after Uni's rules held it, so the bridge won't send it. Don't send it, and ask Uni to send it again.</span></p>}
+      {p.problem && <p className="mail-draft-note mail-unverified" role="note"><span className="mail-draft-tag">CAN'T SHOW IT</span><span>{p.problem}. Nothing can be sent from here; ask #mail.</span></p>}
+      {f && p.plain === false && <p className="mail-draft-note" role="note"><span>It has formatting or attachments this app can't show in full, so only Don't send is offered here.</span></p>}
+      {f && <article className="mail-card mail-card-draft" aria-label="What it sends">
+        <dl className="mail-headers">
+          <dt>From</dt><dd>Uni &lt;{acct.name}&gt;</dd>
+          <dt>To</dt><dd>{addressLine(f.to) || "(nobody)"}</dd>
+          {f.cc.length > 0 && <><dt>Cc</dt><dd>{addressLine(f.cc)}</dd></>}
+          {f.bcc.length > 0 && <><dt>Bcc</dt><dd>{addressLine(f.bcc)}</dd></>}
+          <dt>Subject</dt><dd>{subjectLabel(f.subject)}</dd>
+        </dl>
+        {f.text ? <PlainBody text={f.text} /> : <p className="empty">This message has no text.</p>}
+      </article>}
+      {e.outcome && <p className={`mail-held-outcome held-${e.outcome.kind}`} role="status">{e.outcome.text}</p>}
+      {open && (approvable || declinable) && (confirm
+        ? <div ref={confirmBox} tabIndex={-1} className="mail-held-confirm" role="group" aria-label={confirm === "approve" ? "Confirm sending" : "Confirm not sending"}>
+            <p>{confirm === "approve" ? `Send this from ${from} to ${heldTo(p)}? It goes out exactly as shown.` : `Don't send this? Nothing goes out from ${from}; Uni can change or drop the draft.`}</p>
+            <span className="mail-held-buttons">
+              <button type="button" className={confirm === "approve" ? "send mail-held-yes" : "note-action mail-held-yes"} disabled={busy} onKeyDown={noEnter} onClick={() => void go()}>
+                {busy ? (confirm === "approve" ? "Sending…" : "Declining…") : confirm === "approve" ? "Yes, send from Uni's address" : "Yes, don't send it"}</button>
+              <button type="button" className="note-quiet" disabled={busy} onKeyDown={noEnter} onClick={() => setConfirm(null)}>Cancel</button>
+            </span>
+          </div>
+        : <div className="mail-held-actions">
+            {approvable && <button type="button" className="send mail-held-send" onKeyDown={noEnter} onClick={() => ask("approve")} aria-label={`Send it, from ${from}`}>
+              <span>Send it</span><small>from Uni's address, {acct.name}</small></button>}
+            {declinable && <button type="button" className="note-action mail-held-decline" onKeyDown={noEnter} onClick={() => ask("decline")} aria-label={`Don't send it from ${from}`}>
+              <span>Don't send</span><small>nothing goes out from Uni's address</small></button>}
+          </div>)}
+    </div>
+  </section>;
+}
+
 function ThreadRow({ t, who, note, selected, onOpen }: { t: ThreadSummary; who: Who; note: string | null; selected: boolean; onOpen: () => void }) {
   const party = t.draft ? `To ${senderLabel(t.to)}` : senderLabel(t.from);
   return <li><button type="button" className={`mail-row ${t.unread ? "unread" : ""} ${selected ? "selected" : ""}`} aria-current={selected ? "true" : undefined} onClick={onOpen}
@@ -224,6 +309,12 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
   const [pendingNote, setPendingNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [actionProblem, setActionProblem] = useState<string | null>(null);
+  /** T-213: Uni's sends held for you, per account (kept in mailHeld.ts, so outcomes outlive this view). */
+  const [held, setHeld] = useState<Record<string, HeldEntry[]>>(heldEntries);
+  const [heldProblem, setHeldProblem] = useState<MailProblem | null>(null);
+  const [heldLoading, setHeldLoading] = useState(false);
+  const [openHeld, setOpenHeld] = useState<string | null>(null);
+  const deciding = useRef(new Set<string>());
   const search = useRef<HTMLInputElement>(null);
   /** The overview as last loaded, for callbacks that outlive a render (marking a thread read once it has loaded). */
   const overviewRef = useRef<Overview | null>(null);
@@ -268,6 +359,22 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
       });
       return o;
     } catch (e) { setBoxesProblem(mailProblem(e)); return null; }
+  }, []);
+
+  /** The sends held for you in each account where the bridge offers deciding them. */
+  const loadHeld = useCallback(async (o: Overview) => {
+    const gen = heldGen();
+    const offered = o.accounts.filter(approvalOffered);
+    keepAccounts(offered.map((a) => a.id));
+    setHeldProblem(null);
+    setHeldLoading(true);
+    try {
+      for (const a of offered.filter((x) => can(x, "send.parked"))) mergeListing(a.id, await invoke<Parked[]>("mail_parked", { accountId: a.id }), gen);
+    } catch (e) { if (gen === heldGen()) setHeldProblem(mailProblem(e)); }
+    finally {
+      if (alive.current) { setHeld(heldEntries()); setHeldLoading(false); }
+      setHeldCount(waitingCount(), gen);
+    }
   }, []);
 
   /** Uni's notes for these rows, one call per account. Each answer replaces what was shown for those rows, so a note
@@ -338,7 +445,7 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
   }, [markShown, loadOverview]);
 
   const listKey = overview ? `${scopeKey(scope)}?${query}` : "";
-  useEffect(() => { void loadOverview(); }, [loadOverview]);
+  useEffect(() => { void loadOverview().then((o) => { if (o) void loadHeld(o); }); }, [loadOverview, loadHeld]);
   useEffect(() => {
     if (!overview) return;
     setList((cur) => (cur?.key === listKey ? cur : null));
@@ -351,16 +458,18 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
   const accountOf = (id: string) => overview?.accounts.find((a) => a.id === id);
   const refresh = async () => {
     const o = await loadOverview();
+    if (o) void loadHeld(o);
     // the list reloads with the accounts the bridge has now (a scope that went is reset, and its effect reloads)
     if (o && scopeValid(scope, o)) void loadList(listKey, sourcesFor(scope, o, !!query), query, null);
     const now = openRef.current;
     if (o && now && o.accounts.some((a) => a.id === now.accountId)) void loadThread(now);
   };
-  const pick = (s: Scope) => { threadSeq.current++; setScope(s); setQuery(""); setTyped(""); setOpen(null); setThread(null); setThreadProblem(null); setPane("list"); };
+  const pick = (s: Scope) => { threadSeq.current++; setOpenHeld(null); setScope(s); setQuery(""); setTyped(""); setOpen(null); setThread(null); setThreadProblem(null); setPane("list"); };
   const openThread = (t: ThreadSummary) => {
     // a message being written stays: it waits behind the thread, with Resume
     if (compose && !compose.hidden) setCompose({ ...compose, hidden: true });
     markOnOpen.current = `${t.account_id}/${t.thread_id}`;
+    setOpenHeld(null);
     setOpen({ accountId: t.account_id, threadId: t.thread_id }); setPane("thread");
   };
   const [composeNote, setComposeNote] = useState<string | null>(null);
@@ -448,11 +557,37 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
       openDraft: acct.who === "owner" && canSendFrom(acct) ? (m: MailMessage) => startCompose({ kind: "draft", accountId: acct.id, draftId: m.id, fields: draftFields(m), uni: m.uni_drafted }) : null,
     } satisfies ThreadActions;
   };
+  /** Send or decline a held send, once: a second call for the same send while one is out does nothing (and the bridge
+   *  answers a repeat of the same opId and fingerprint with the first outcome). What happened stays on the entry. */
+  const decideHeld = async (accountId: string, p: Parked, kind: "approve" | "decline") => {
+    if (deciding.current.has(p.op_id)) return;
+    deciding.current.add(p.op_id);
+    const gen = heldGen();
+    const acct = overviewRef.current?.accounts.find((a) => a.id === accountId);
+    let outcome: HeldOutcome;
+    try {
+      outcome = kind === "approve"
+        ? approveOutcome(await invoke<SendOutcome>("mail_send_approve", { accountId, opId: p.op_id, fingerprint: p.fingerprint }), acct?.name ?? "Uni's account")
+        : declineOutcome(await invoke<SendOutcome>("mail_send_decline", { accountId, opId: p.op_id }));
+    } catch (e) { outcome = heldFailure(e, kind === "approve"); }
+    finally { deciding.current.delete(p.op_id); }
+    setOutcome(accountId, p.op_id, outcome, gen);
+    setHeldCount(waitingCount(), gen);
+    if (alive.current) setHeld(heldEntries());
+    if (outcome.kind === "sent" && alive.current) void refresh();
+  };
   const submitSearch = (e: FormEvent) => { e.preventDefault(); setQuery(typed.trim()); setPane("list"); };
   const toSearch = () => { setPane("list"); requestAnimationFrame(() => search.current?.focus()); };
   const title = overview ? scopeTitle(scope, overview, query) : "";
   const unreadAll = overview ? allInboxesUnread(overview) : 0;
   const openAcct = open ? accountOf(open.accountId) : undefined;
+  const waitingScope = scope.kind === "waiting" && !query ? scope : null;
+  const waitingAcct = waitingScope ? accountOf(waitingScope.accountId) : undefined;
+  const heldShown = waitingScope ? held[waitingScope.accountId] ?? [] : [];
+  const heldOpen = waitingScope && openHeld ? heldShown.find((e) => e.item.op_id === openHeld) : undefined;
+  const waitingIn = (id: string) => (held[id] ?? []).filter(waiting).length;
+  const heldAccount = overview?.accounts.find((a) => approvalOffered(a) && waitingIn(a.id) > 0);
+  const waitingAll = overview ? overview.accounts.reduce((n, a) => n + (approvalOffered(a) ? waitingIn(a.id) : 0), 0) : 0;
 
   const composing = !!compose && !compose.hidden;
   return <section className={`mail mail-a ${still ? "mail-still" : ""}`} aria-label="Mail" data-pane={pane} data-composing={composing && pane === "thread" ? "true" : undefined}>
@@ -471,6 +606,13 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
           </button>}
           {overview.accounts.map((a) => <div key={a.id} className={`mail-acct who-${a.who}`} role="group" aria-label={a.who === "uni" ? "Uni's mailboxes" : "Your mailboxes"}>
             <p className="mail-acct-head"><WhoTag who={a.who} /> <span>{a.name}</span></p>
+            {approvalOffered(a) && (() => {
+              const on = scope.kind === "waiting" && scope.accountId === a.id;
+              const n = waitingIn(a.id);
+              return <button type="button" className={`mail-box mail-box-waiting ${on ? "selected" : ""}`} aria-current={on ? "page" : undefined} onClick={() => pick({ kind: "waiting", accountId: a.id })}>
+                <span>Waiting for you</span>{n > 0 && <span className="mail-count mail-count-waiting" aria-label={`${n} waiting for you`}>{n}</span>}
+              </button>;
+            })()}
             {a.mailboxes.length === 0 && <p className="empty">No mailboxes.</p>}
             {a.mailboxes.map((b) => {
               const s: Scope = { kind: "mailbox", accountId: a.id, mailboxId: b.id };
@@ -488,7 +630,8 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
           <div className="mail-list-head">
             <button type="button" className="note-quiet mail-boxes-open" onClick={() => setPane("boxes")}>☰ Mailboxes</button>
             <strong>{title}</strong>
-            {list?.total != null && <small>{list.total} {list.total === 1 ? "thread" : "threads"}</small>}
+            {waitingScope ? <small>{heldShown.filter(waiting).length} waiting</small>
+              : list?.total != null && <small>{list.total} {list.total === 1 ? "thread" : "threads"}</small>}
           </div>
           <form className="mail-list-search" role="search" onSubmit={submitSearch}>
             <label className="mail-search"><span className="mail-sr">Search mail</span>
@@ -506,7 +649,16 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
               : <><button type="button" className="note-action" disabled>Check</button><small className="mail-note">The mail bridge doesn't offer checking sends now; they stay listed.</small></>}
           </div>}
           {pendingNote && <p className="mail-note mail-pending-note" role="status">{pendingNote}</p>}
-          <div className="mail-scroll">
+          {!waitingScope && heldAccount && <button type="button" className="mail-held-banner" onClick={() => pick({ kind: "waiting", accountId: heldAccount.id })}>
+            <span className="mail-held-tag">WAITING</span> {waitingAll === 1 ? "A send from Uni's address waits for you" : `${waitingAll} sends from Uni's address wait for you`} · Review</button>}
+          {waitingScope ? <div className="mail-scroll">
+            {heldProblem && <Problem p={heldProblem} onRetry={() => overview && void loadHeld(overview)} />}
+            {waitingAcct && !can(waitingAcct, "send.parked") && <p className="mail-note mail-held-unlisted" role="note">This mail bridge can't list Uni's held sends yet. Each one is also a task for you; ask #mail.</p>}
+            {heldShown.length === 0 && !heldProblem && waitingAcct && can(waitingAcct, "send.parked") && <p className="empty mail-empty">{heldLoading ? "Loading…" : "Nothing is waiting for you."}</p>}
+            {heldShown.length > 0 && <ul className="mail-rows" aria-label="Held sends">{heldShown.map((e) => <HeldRow key={e.item.op_id} e={e} selected={openHeld === e.item.op_id}
+              onOpen={() => { if (compose && !compose.hidden) setCompose({ ...compose, hidden: true }); threadSeq.current++; setOpen(null); setThread(null); setOpenHeld(e.item.op_id); setPane("thread"); }} />)}</ul>}
+          </div>
+          : <div className="mail-scroll">
             {listProblem && <Problem p={listProblem} onRetry={() => void loadList(listKey, sourcesFor(scope, overview, !!query), query, null)} />}
             {!listProblem && !list && listLoading && <p className="mail-loading" role="status">{query ? "Searching…" : "Loading threads…"}</p>}
             {list && list.threads.length === 0 && !listProblem && <p className="empty mail-empty">{query ? `Nothing matches “${query}”.` : "Nothing here."}</p>}
@@ -514,7 +666,7 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
             {list && list.threads.length > 0 && <ul className="mail-rows">{list.threads.flatMap((t) => { const a = accountOf(t.account_id); return a ? [<ThreadRow key={`${t.account_id}/${t.thread_id}`} t={t} who={a.who}
               note={notes[`${t.account_id}/${t.email_id}`] ?? null} selected={open?.accountId === t.account_id && open.threadId === t.thread_id} onOpen={() => openThread(t)} />] : []; })}</ul>}
             {list?.more && <p className="mail-more"><button type="button" className="note-quiet" disabled={listLoading} onClick={() => void loadList(listKey, list.next, query, list)}>{listLoading ? "Loading…" : "Load older threads"}</button></p>}
-          </div>
+          </div>}
         </section>
         <section className="mail-read" aria-label="Thread">
           {compose && <div className="mail-compose-wrap" hidden={compose.hidden}>
@@ -522,6 +674,9 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
             <Composer key={compose.key} composeKey={compose.key} overview={overview} start={compose.start} snapshot={compose.snapshot} onSnapshot={keepSnapshot}
               onClose={(changed) => endCompose(changed, compose.key)} onDone={() => endCompose(true, compose.key)} onPendingChange={pendingChanged} /></div>}
           {composing ? null
+          : heldOpen && waitingAcct ? <HeldView key={`${heldOpen.item.op_id}/${heldOpen.item.fingerprint ?? ""}`} e={heldOpen} acct={waitingAcct} onBack={() => setPane("list")}
+              onDecide={(kind) => decideHeld(waitingAcct.id, heldOpen.item, kind)} />
+          : waitingScope ? <p className="empty mail-pick">{heldShown.length ? "Pick a held send to see what it sends." : "Nothing is waiting for you."}</p>
           : threadProblem ? <div className="mail-scroll"><button type="button" className="note-action mail-thread-back" onClick={() => setPane("list")}>← Threads</button><Problem p={threadProblem} onRetry={() => open && void loadThread(open)} /></div>
           : thread && openAcct ? <>{compose?.hidden && <button type="button" className="mail-resume" onClick={resume}>✎ A message in progress · Resume</button>}<ThreadView key={`${thread.account_id}/${thread.thread_id}`} t={thread} acct={openAcct} overview={overview} note={threadNote} onBack={() => setPane("list")} actions={threadActions(thread, openAcct)} /></>
           : open && !openAcct ? <div className="mail-scroll"><button type="button" className="note-action mail-thread-back" onClick={() => setPane("list")}>← Threads</button><p className="empty mail-pick">This mailbox isn't shared with this device any more.</p></div>

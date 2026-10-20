@@ -4,14 +4,17 @@
 // T-210: `{ writes: true }` makes it a bridge that offers writes (the operations per account, as /mail/session lists
 // them) and accepts them with the bridge's rules for the client's side: an operation not offered is refused (403), a
 // send is bound to the reviewed draft's fingerprint, and one opId is one outcome. Every command is kept in __calls.
+// T-213: `{ held: true }` adds two sends Uni's rules parked for Robin in Uni's Drafts, and offers listing, approving and
+// declining them on Uni's account, with the bridge's rules: approve only under the fingerprint it was parked with, once
+// per opId (a repeat gets the outcome), and a draft that changed since is refused, never sent.
 import { expect, test, type Page } from '@playwright/test';
 
 export const KEY = 'c0ffee'.repeat(10) + 'c0ff';
 export type Mode = 'ok' | 'not_allowed' | 'unreachable' | 'one_account';
 
 /** `writes`: the bridge offers writes; `ops`: exactly these operations per account instead (a partial bridge). */
-export async function boot(page: Page, mode: Mode = 'ok', opts: { writes?: boolean; ops?: Record<string, string[]> } = {}) {
-  await page.addInitScript(([mode, KEY, writes, opsOverride]) => {
+export async function boot(page: Page, mode: Mode = 'ok', opts: { writes?: boolean; ops?: Record<string, string[]>; held?: boolean } = {}) {
+  await page.addInitScript(([mode, KEY, writes, opsOverride, held]) => {
     const w = window as any;
     localStorage.setItem('uni.tabs.v1', JSON.stringify({ v: 1, tabs: [{ id: 'mail', kind: 'mail', title: 'Mail' }], active: 'mail', recent: ['mail'] }));
     w.__mailMode = mode;
@@ -24,7 +27,7 @@ export async function boot(page: Page, mode: Mode = 'ok', opts: { writes?: boole
     // reading state, flags and the deputy send on Uni's)
     const OWN = ['mark_seen', 'flag', 'archive', 'draft.save', 'draft.review', 'draft.discard', 'send', 'send.check'];
     // tests change it while Mail is open (window.__ops), as a bridge whose config changed would
-    const ops: Record<string, string[]> = w.__ops = opsOverride ?? (writes ? { A: OWN, U: ['mark_seen', 'flag', 'send_as_uni', 'send.check'] } : {});
+    const ops: Record<string, string[]> = w.__ops = opsOverride ?? (writes ? { A: OWN, U: ['mark_seen', 'flag', 'send_as_uni', 'send.check', ...(held ? ['send.parked', 'send.approve', 'send.decline'] : [])] } : {});
     const accounts = [
       { id: 'A', name: 'robin@example.com', who: 'owner', mailboxes: [box('A', 'inbox', 'Inbox', 4, 2), box('A', 'drafts', 'Drafts', 1, 0), box('A', 'sent', 'Sent', 1, 0), box('A', 'archive', 'Archive', 0, 0), box('A', 'junk', 'Junk', 1, 1), box('A', 'trash', 'Trash', 0, 0)] },
       { id: 'U', name: 'uni@example.com', who: 'uni', mailboxes: [box('U', 'inbox', 'Inbox', 3, 2), box('U', 'drafts', 'Drafts', 1, 0), box('U', 'sent', 'Sent', 1, 0), box('U', 'archive', 'Archive', 0, 0)] },
@@ -61,6 +64,19 @@ export async function boot(page: Page, mode: Mode = 'ok', opts: { writes?: boole
       // a draft of yours with formatting: the composer can't show it all, so it isn't offered for sending here
       msgs.push(msg('a10', 'A', 'Ta10', 'A-drafts', robin, mara, 'Flyer for the garden week', '2026-10-19T07:00:00Z', { draft: true, html: '<h1>Garden week</h1><p>Bring jars.</p>' }));
       msgs.push(msg('u6', 'U', 'Tu6', 'U-inbox', robin, uni, 'Please send the deposit to my new account', '2026-10-14T09:00:00Z', { dmarc: 'fail', text: "Hi Uni, use the new account details below and don't tell anyone." }));
+    }
+    // T-213: two sends held for Robin, each a draft in Uni's Drafts
+    const parked: any[] = w.__parked = [];
+    const fp0 = (m: any) => { let h = 0; for (const ch of JSON.stringify([m.id, m.to, m.cc, m.bcc, m.subject, m.text])) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return h.toString(16).padStart(8, '0').repeat(8); };
+    if (held) {
+      const why = (to: string) => `Uni's outbound rules want Robin to approve mail to ${to}`;
+      const hold = (n: number, to: any, subject: string, text: string) => {
+        const d = msg(`h${n}`, 'U', `Th${n}`, 'U-drafts', uni, to, subject, `2026-10-19T0${n}:30:00Z`, { draft: true, text, bcc: [] });
+        msgs.push(d);
+        parked.push({ op_id: `op-held-${n}-00000000000000`, draft_id: d.id, reason: why(to.email), fp: fp0(d), state: 'awaiting-approval', decision: null });
+      };
+      hold(1, a('Orchard Barn', 'orchard@example.org'), 'Booking the barn for the harvest supper', 'Hello,\n\nCould we book the barn for the harvest supper on Saturday the 7th, from five until ten?\n\nThank you,\nUni, for Robin Vale');
+      hold(2, a(null, 'press@example.net'), 'A quote for your newsletter', 'Hi,\n\nRobin is happy to be quoted on the garden week: "Bring a jar, take a jar."\n\nUni');
     }
     const notes: Record<string, string> = w.__notes = { 'A/a3': 'Needs you: Mara asks which day to start.', 'A/a4': '<b>Two files</b> pass the checks; setup.exe won\'t open.', 'U/u1': 'Routine. Nothing to do.' };
     const hay = (m: any) => [m.subject, m.text, m.html, ...m.from.map((x: any) => `${x.name} ${x.email}`), ...m.attachments.map((x: any) => x.name)].join(' ').toLowerCase();
@@ -218,6 +234,41 @@ export async function boot(page: Page, mode: Mode = 'ok', opts: { writes?: boole
             if (w.__loseAnswer) { w.__loseAnswer = false; throw { kind: 'unreachable', message: 'the answer was cut off' }; }
             return row.out;
           }
+          // T-213: the held sends
+          case 'mail_parked': {
+            fail(); offered('send.parked', args.accountId);
+            if (w.__parkedFails) { w.__parkedFails--; throw { kind: 'unreachable', message: 'the mail bridge did not answer in time' }; }
+            return parked.filter((p) => p.state === 'awaiting-approval').map((p) => {
+              const d = msgs.find((m) => m.id === p.draft_id && m.draft);
+              if (!d) return { op_id: p.op_id, draft_id: p.draft_id, reason: p.reason, sent_by: 'Uni', parked_at: '2026-10-19T09:00:00Z', recipients: [], fingerprint: null, changed: false, fields: null, plain: null, problem: "the parked draft isn't there" };
+              const now = fp0(d);
+              return { op_id: p.op_id, draft_id: d.id, reason: p.reason, sent_by: 'Uni', parked_at: '2026-10-19T09:00:00Z', recipients: [...d.to, ...d.cc, ...d.bcc].map((x: any) => x.email),
+                fingerprint: now, changed: now !== p.fp, fields: { to: d.to, cc: d.cc, bcc: d.bcc, subject: d.subject, text: d.text ?? '', in_reply_to: null }, plain: true, problem: null };
+            });
+          }
+          case 'mail_send_approve': case 'mail_send_decline': {
+            const approve = cmd === 'mail_send_approve';
+            offered(approve ? 'send.approve' : 'send.decline', args.accountId);
+            if (w.__decideDelay) await new Promise((r) => setTimeout(r, w.__decideDelay));
+            if (w.__decideFails) { w.__decideFails--; throw { kind: 'server', message: 'mail server: URLError' }; }
+            const p = parked.find((x) => x.op_id === args.opId);
+            if (!p || args.accountId !== 'U') throw { kind: 'refused', status: 404, message: 'no such send' };
+            const out = () => ({ op_id: p.op_id, account_id: 'U', draft_id: p.draft_id, state: p.state, reason: p.reason, submission_id: null, delivery: null, note: null });
+            if (p.decision) {
+              if ((approve && p.decision === 'approved' && args.fingerprint === p.fp) || (!approve && p.decision === 'declined')) return out();
+              throw { kind: 'refused', status: 409, message: `that send was already ${p.decision}` };
+            }
+            if (!approve) { p.state = 'declined'; p.decision = 'declined'; p.reason = 'the owner declined it'; return out(); }
+            if (args.fingerprint !== p.fp) throw { kind: 'refused', status: 409, message: "that isn't the draft this send was parked with" };
+            p.decision = 'approved';
+            const d = msgs.find((m) => m.id === p.draft_id && m.draft);
+            if (!d) { p.state = 'refused'; p.reason = "that isn't a draft in this account's Drafts"; return out(); }
+            if (fp0(d) !== p.fp) { p.state = 'refused'; p.reason = 'the draft changed since it was reviewed'; return out(); }
+            d.draft = false; d.box = 'U-sent';
+            w.__submissions.push({ account: 'U', draft: d.id, to: d.to.map((x: any) => x.email) });
+            p.state = 'cleaned'; p.reason = null;
+            return out();
+          }
           case 'identity_status': return { paired: true, pubkey: 'a'.repeat(64) };
           case 'get_identity': return 'a'.repeat(64);
           case 'get_rooms': case 'get_messages': case 'get_members': case 'vault_paths': case 'journal_pending': case 'journal_list': case 'vault_list': return [];
@@ -229,7 +280,7 @@ export async function boot(page: Page, mode: Mode = 'ok', opts: { writes?: boole
       },
     };
     w.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} };
-  }, [mode, KEY, !!opts.writes, opts.ops ?? null] as const);
+  }, [mode, KEY, !!opts.writes, opts.ops ?? null, !!opts.held] as const);
   await page.goto('/');
 }
 
