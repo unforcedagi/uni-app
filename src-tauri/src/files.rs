@@ -174,6 +174,7 @@ pub async fn save_note<R: Runtime>(
         struct Saved {
             name: String,
         }
+        use tauri::Manager;
         let saved: Saved = handle(window.app_handle())?
             .run_mobile_plugin_async("saveTextToDownloads", Args { name, text, mime: "text/markdown" })
             .await
