@@ -4,8 +4,11 @@
 import { useSyncExternalStore } from "react";
 import { splitMarkers } from "./chatMarkers.ts";
 
-/** An open decision as the chat can name it: its note id, its title's id ("T-12"), and the task it decides (`task: T-130`). */
-export type KnownDecision = { id: string; tid: string | null; forTask: string | null };
+/**
+ * An open decision as the chat can name it: its note id, its title's id ("T-12"), the task it decides (`task: T-130`), and the room it
+ * belongs to (T-212: its own `room`, else its node's room), where it is listed when no message on screen names it.
+ */
+export type KnownDecision = { id: string; tid: string | null; forTask: string | null; channel?: string | null };
 
 /**
  * The open decision a message names, or null: a `[decision T-NN]` marker that matches a decision's title id or the task it decides, else the
@@ -31,11 +34,21 @@ let version = 0;
 const listeners = new Set<() => void>();
 const bump = () => { version++; for (const f of listeners) f(); };
 
+let gone: ((ids: string[]) => void) | null = null;
+let decided: (() => void) | null = null;
+/** T-212: told which open decisions the shell no longer lists (decided in its sheet, or elsewhere): the chat's cards re-read them. */
+export function onDecisionsGone(f: (ids: string[]) => void): void { gone = f; }
+/** T-212: a card decided one: the shell re-reads its task list (Needs you drops it). */
+export function setDecidedHook(f: (() => void) | null): void { decided = f; }
+export const decisionDecided = (): void => { decided?.(); };
+
 /** The room shell's open decisions (it holds the task list). Unchanged lists don't wake the chat. */
 export function publishDecisions(list: readonly KnownDecision[]): void {
-  const key = (l: readonly KnownDecision[]) => l.map((d) => `${d.id}|${d.tid}|${d.forTask}`).join("\n");
+  const key = (l: readonly KnownDecision[]) => l.map((d) => `${d.id}|${d.tid}|${d.forTask}|${d.channel ?? ""}`).join("\n");
   if (key(list) === key(known)) return;
+  const left = known.filter((d) => !list.some((n) => n.id === d.id)).map((d) => d.id);
   known = list; bump();
+  if (left.length) gone?.(left);
 }
 /** How a decision's sheet is opened (the room shell on screen); null when it goes. */
 export function setDecisionOpener(fn: ((id: string) => void) | null): void { opener = fn; bump(); }

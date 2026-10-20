@@ -609,6 +609,21 @@ Two proposals wait on a scope decision.
             t.metadata['state'] = args.to; Object.assign(t.metadata, args.metadata); t.updatedAt = new Date(Date.now() + taskNotes.length).toISOString(); t.lastUpdatedVia = 'api'; t.lastUpdatedBy = 'app-writer';
             return JSON.parse(JSON.stringify(t));
           }
+          // T-212: a decision card's tap, as the vault answers it: the stored answer when decided (nothing written), else the
+          // compare-and-set open -> decided with the tapped option
+          case 'vault_pick_decision': {
+            const t = taskNotes.find((x) => x.id === args.id);
+            if (!t || !t.tags.includes('decision')) throw 'only decision notes can be decided';
+            w.__picks = (w.__picks ?? 0) + 1;
+            const m = t.metadata;
+            if (m.state === 'decided') return { outcome: 'already_decided', decided: m.decided, decided_by: m.decided_by ?? null, title: '', note: JSON.parse(JSON.stringify(t)) };
+            if (m.state !== 'open') throw `this decision is "${m.state}", not open`;
+            const opt = (m.options ?? []).find((o: string) => o.toLowerCase() === String(args.option).toLowerCase());
+            if (!opt) throw `"${args.option}" is not one of this decision's options`;
+            Object.assign(m, { state: 'decided', decided: opt, decided_at: args.at, decided_by: args.by });
+            t.updatedAt = new Date(Date.now() + taskNotes.length).toISOString(); t.lastUpdatedVia = 'api';
+            return { outcome: 'picked', decided: opt, title: '', note: { ...JSON.parse(JSON.stringify(t)), content: undefined } };
+          }
           case 'vault_patch_meta': {
             const t = taskNotes.find((x) => x.id === args.id);
             if (!t) throw 'note not found: ' + args.id;

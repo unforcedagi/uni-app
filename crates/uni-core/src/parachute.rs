@@ -582,6 +582,32 @@ impl VaultClient {
         note_from(&v, id)
     }
 
+    /// T-212: one tap on a decision card. Reads the note, and when it is still open does the compare-and-set
+    /// (`state` open -> decided, with `decided`, `decided_at`, `decided_by`) against the revision just read. A note
+    /// already decided, or one that another tap decides between the read and the write, comes back as
+    /// [`Pick::AlreadyDecided`] with the stored answer, and nothing is written: only a [`Pick::Picked`] may tell the room.
+    pub async fn pick_decision(&self, vault: &str, id: &str, option: &str, by: &str, at: &str) -> Result<Pick> {
+        let note = self.get_note(vault, id).await?;
+        let option = match decision_state(&note, option)? {
+            Ok(option) => option,
+            Err(already) => return Ok(already),
+        };
+        let rev = note["updatedAt"].as_str().unwrap_or_default().to_string();
+        let title = decision_title(&note);
+        let md = json!({"decided": option, "decided_at": at, "decided_by": by});
+        match self.decide_note(vault, id, json!("open"), json!("decided"), md, &rev).await {
+            Ok(note) => Ok(Pick::Picked { decided: option, title, note }),
+            Err(e) => {
+                // lost the race (or the note moved): what is stored now decides what the card shows
+                let now = self.get_note(vault, id).await.map_err(|_| e)?;
+                match decision_state(&now, &option)? {
+                    Err(already) => Ok(already),
+                    Ok(_) => Err(Error::Conflict(format!("the decision changed since it was read; look again: {id}"))),
+                }
+            }
+        }
+    }
+
     /// Merge `metadata` into a note, guarded by the `updated_at` the caller last read. Only the `snoozed_until` key,
     /// and only on notes tagged `task` or `decision` (checked against the stored note, not the caller's claim).
     pub async fn patch_metadata(
@@ -1111,6 +1137,58 @@ fn decide_args(vault: &str, id: &str, from: &Value, to: &Value, metadata: Value,
     Ok(json!({"vault": vault, "id": id, "include_content": false, "metadata": metadata,
         "if_updated_at": if_updated_at,
         "state_transition": {"field": "state", "from": "open", "to": "decided"}}))
+}
+
+/// What one tap on a decision card did (T-212).
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "outcome", rename_all = "snake_case")]
+pub enum Pick {
+    /// This tap won the compare-and-set: the note is now decided as `decided`.
+    Picked { decided: String, title: String, note: Value },
+    /// The note was decided already (another tap, the room, an earlier tap): nothing was written.
+    AlreadyDecided { decided: String, decided_by: Option<String>, title: String, note: Value },
+}
+
+/// A decision's question for the room message: its `# heading`, else its path without folder and date.
+pub fn decision_title(note: &Value) -> String {
+    let heading = note["content"].as_str().and_then(|c| c.lines().find_map(|l| l.strip_prefix("# "))).map(str::trim);
+    let path = note["path"].as_str().unwrap_or_default();
+    let tail = path.rsplit('/').next().unwrap_or(path);
+    let tail = match tail.split_once(' ') {
+        Some((d, rest)) if d.len() == 10 && d.bytes().all(|b| b.is_ascii_digit() || b == b'-') => rest,
+        _ => tail,
+    };
+    heading.filter(|h| !h.is_empty()).unwrap_or(tail).chars().take(200).collect()
+}
+
+/// Is this note a decision that `option` can still be picked on? `Ok(Ok(option))` (the stored spelling) when it is open,
+/// `Ok(Err(AlreadyDecided))` when it has an answer, else an error: not a decision, no such option, or another state.
+fn decision_state(note: &Value, option: &str) -> Result<std::result::Result<String, Pick>> {
+    if !note["tags"].as_array().is_some_and(|t| t.iter().filter_map(Value::as_str).any(|t| t == "decision")) {
+        return Err(Error::Invalid("only decision notes can be decided".into()));
+    }
+    let m = &note["metadata"];
+    let title = decision_title(note);
+    if m["state"] == "decided" {
+        return Ok(Err(Pick::AlreadyDecided {
+            decided: m["decided"].as_str().unwrap_or_default().to_string(),
+            decided_by: m["decided_by"].as_str().map(str::to_string),
+            title,
+            note: note.clone(),
+        }));
+    }
+    if m["state"] != "open" {
+        return Err(Error::Invalid(format!("this decision is {}, not open", m["state"])));
+    }
+    let want = option.trim().to_lowercase();
+    m["options"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .find(|o| o.trim().to_lowercase() == want)
+        .map(|o| Ok(o.to_string()))
+        .ok_or_else(|| Error::Invalid(format!("{option:?} is not one of this decision's options")))
 }
 
 /// The one key an answered task may carry besides its new state (r26): the revision the answer was given against.
@@ -2138,5 +2216,145 @@ pub(crate) mod surface_tests {
             "keyword"
         );
         handle.join().unwrap();
+    }
+}
+
+/// T-212: a decision card's tap against a hub that keeps the note and enforces the vault's compare-and-set (`if_updated_at` and
+/// `state_transition`), so a lost race is a real lost race, not a scripted answer.
+#[cfg(test)]
+mod pick_tests {
+    use super::*;
+    use std::io::{BufRead, Read, Write};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
+
+    struct Hub {
+        note: Mutex<Value>,
+        updates: AtomicUsize,
+        /// Another tap that lands between this tap's read and its write (once).
+        race: Mutex<Option<Value>>,
+    }
+
+    fn hub(note: Value) -> (VaultClient, Arc<Hub>) {
+        let state = Arc::new(Hub { note: Mutex::new(note), updates: AtomicUsize::new(0), race: Mutex::new(None) });
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let s = state.clone();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { return };
+                let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
+                let mut length = 0;
+                loop {
+                    let mut line = String::new();
+                    if reader.read_line(&mut line).unwrap_or(0) == 0 || line == "\r\n" {
+                        break;
+                    }
+                    if let Some(n) = line.to_lowercase().strip_prefix("content-length:") {
+                        length = n.trim().parse().unwrap();
+                    }
+                }
+                let mut body = vec![0; length];
+                reader.read_exact(&mut body).unwrap();
+                let rpc: Value = serde_json::from_slice(&body).unwrap();
+                let args = &rpc["params"]["arguments"];
+                let answer = match rpc["params"]["name"].as_str().unwrap() {
+                    "query-notes" => Ok(json!({"notes": [s.note.lock().unwrap().clone()]})),
+                    "update-note" => {
+                        s.updates.fetch_add(1, Ordering::SeqCst);
+                        let mut n = s.note.lock().unwrap();
+                        if let Some(other) = s.race.lock().unwrap().take() {
+                            n["metadata"]["state"] = json!("decided");
+                            n["metadata"]["decided"] = other;
+                            n["metadata"]["decided_by"] = json!("room");
+                            n["updatedAt"] = json!("r-race");
+                        }
+                        let t = &args["state_transition"];
+                        if args["if_updated_at"] != n["updatedAt"] {
+                            Err("conflict: note d1 has been modified")
+                        } else if n["metadata"][t["field"].as_str().unwrap()] != t["from"] {
+                            Err("[transition_conflict] conflict: note d1 state is decided, not open")
+                        } else {
+                            n["metadata"]["state"] = t["to"].clone();
+                            for (k, v) in args["metadata"].as_object().unwrap() {
+                                n["metadata"][k] = v.clone();
+                            }
+                            n["updatedAt"] = json!(format!("r{}", s.updates.load(Ordering::SeqCst) + 1));
+                            Ok(n.clone())
+                        }
+                    }
+                    other => panic!("unexpected tool {other}"),
+                };
+                let body = match answer {
+                    Ok(v) => json!({"jsonrpc": "2.0", "id": 1, "result": {"content": [{"type": "text", "text": v.to_string()}]}}),
+                    Err(e) => json!({"jsonrpc": "2.0", "id": 1, "error": {"code": -32600, "message": e}}),
+                }
+                .to_string();
+                let _ = write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body);
+            }
+        });
+        let client = VaultClient::new(VaultConfig { hub: origin, vault: "scope-test".into() }, Keys::generate()).unwrap();
+        (client, state)
+    }
+
+    fn open_decision() -> Value {
+        json!({"id": "d1", "path": "Decisions/2026-10-09 Which layout?", "tags": ["decision"], "updatedAt": "r1",
+            "content": "# Which layout for the garden page?\n\n- A\n- B (default)\n- C\n",
+            "metadata": {"state": "open", "options": ["A", "B", "C"], "default": "B", "owner": "aaron"}})
+    }
+
+    #[tokio::test]
+    async fn a_tap_decides_once_and_a_second_tap_sees_the_answer_and_writes_nothing() {
+        crate::init_crypto();
+        let (client, hub) = hub(open_decision());
+        let at = "2026-10-09T10:00:00.000Z";
+        let won = client.pick_decision("scope-test", "d1", "b", "aaron", at).await.unwrap();
+        match won {
+            Pick::Picked { decided, title, .. } => assert_eq!((decided.as_str(), title.as_str()), ("B", "Which layout for the garden page?")),
+            other => panic!("{other:?}"),
+        }
+        let m = hub.note.lock().unwrap()["metadata"].clone();
+        assert_eq!((m["state"].as_str(), m["decided"].as_str(), m["decided_by"].as_str(), m["decided_at"].as_str()), (Some("decided"), Some("B"), Some("aaron"), Some(at)));
+        assert_eq!(hub.updates.load(Ordering::SeqCst), 1);
+        // the card on another device (or the same decision's second card) taps C: the stored B comes back and nothing is written
+        match client.pick_decision("scope-test", "d1", "C", "aaron", at).await.unwrap() {
+            Pick::AlreadyDecided { decided, decided_by, .. } => assert_eq!((decided.as_str(), decided_by.as_deref()), ("B", Some("aaron"))),
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(hub.updates.load(Ordering::SeqCst), 1);
+        assert_eq!(hub.note.lock().unwrap()["metadata"]["decided"], "B");
+    }
+
+    #[tokio::test]
+    async fn a_tap_that_loses_the_race_reports_the_winner_and_changes_nothing() {
+        crate::init_crypto();
+        let (client, hub) = hub(open_decision());
+        // the room picks A between this tap's read (open, r1) and its write
+        *hub.race.lock().unwrap() = Some(json!("A"));
+        match client.pick_decision("scope-test", "d1", "C", "aaron", "2026-10-09T10:00:00.000Z").await.unwrap() {
+            Pick::AlreadyDecided { decided, decided_by, .. } => assert_eq!((decided.as_str(), decided_by.as_deref()), ("A", Some("room"))),
+            other => panic!("{other:?}"),
+        }
+        let m = hub.note.lock().unwrap()["metadata"].clone();
+        assert_eq!((m["decided"].as_str(), m["decided_by"].as_str()), (Some("A"), Some("room")));
+        assert!(m.get("decided_at").is_none());
+    }
+
+    #[tokio::test]
+    async fn a_tap_on_something_that_is_not_an_open_option_writes_nothing() {
+        crate::init_crypto();
+        let (client, hub) = hub(open_decision());
+        assert!(client.pick_decision("scope-test", "d1", "D", "aaron", "t").await.is_err());
+        let mut task = open_decision();
+        task["tags"] = json!(["task"]);
+        *hub.note.lock().unwrap() = task;
+        assert!(client.pick_decision("scope-test", "d1", "A", "aaron", "t").await.is_err());
+        assert_eq!(hub.updates.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn the_title_is_the_question() {
+        assert_eq!(decision_title(&open_decision()), "Which layout for the garden page?");
+        assert_eq!(decision_title(&json!({"path": "Decisions/2026-10-09 Which layout?"})), "Which layout?");
     }
 }

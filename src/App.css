@@ -158,9 +158,31 @@ h1 { font-family: var(--serif); font-weight: 500; font-size: 34px; line-height: 
 .pill:hover { border-color: var(--line-strong); }
 .pill span { font-size: 11px; color: var(--muted); margin-left: 2px; }
 .pill.mine { border-color: var(--accent); background: var(--accent-soft); }
-/* r17: a message naming an open decision: one quiet way to its sheet, never answer buttons */
-.msg-decision-link { display: inline-block; margin-top: 6px; padding: 0; border: 0; background: none; color: var(--muted); font: inherit; font-size: 13px; cursor: pointer; text-decoration: underline; text-decoration-color: color-mix(in srgb, currentColor 35%, transparent); text-underline-offset: 3px; }
-.msg-decision-link:hover, .msg-decision-link:focus-visible { color: var(--accent); }
+/* T-212: a decision in the chat as a card: the question and one big button per option (the default labelled, never colour alone: the
+   Daylight is grayscale). Nothing moves: no transitions, so the e-ink screen redraws once per change. */
+.decision-cards { display: grid; gap: 8px; margin: 8px 0 4px; }
+.decision-card { margin: 0; padding: 12px 14px 14px; max-width: 520px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--surface); box-shadow: var(--shadow); transition: none; }
+p.decision-card.decision-loading { padding: 8px 12px; color: var(--muted); font-size: 13px; box-shadow: none; }
+.decision-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.decision-kind { color: var(--muted); font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+.decision-context { min-height: 32px; padding: 0 2px; border: 0; background: none; color: var(--text-soft); font: inherit; font-size: 13px; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.decision-q { margin: 4px 0 10px; font-family: var(--serif); font-size: 17px; line-height: 1.35; overflow-wrap: anywhere; }
+.decision-options { display: flex; flex-wrap: wrap; gap: 8px; }
+.decision-opt { flex: 1 1 88px; display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; min-height: 48px; min-width: 64px; padding: 6px 14px; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--bg); color: var(--text); font: inherit; font-size: 16px; font-weight: 600; cursor: pointer; transition: none; overflow-wrap: anywhere; }
+.decision-opt.dflt { border: 2px solid var(--accent); }
+.decision-opt:hover:not(:disabled), .decision-opt:focus-visible { background: var(--accent-soft); }
+.decision-opt:disabled { opacity: .55; cursor: default; }
+.decision-dflt { font-size: 11px; font-weight: 500; color: var(--muted); letter-spacing: .03em; text-transform: uppercase; }
+.decision-result { margin: 0; font-size: 15px; }
+.decision-by { color: var(--muted); }
+.decision-note { margin: 8px 0 0; color: var(--muted); font-size: 13px; }
+.decision-note.warn { color: var(--text); font-weight: 600; }
+.decision-retry { min-height: 40px; margin-left: 6px; padding: 0 14px; border: 1px solid var(--line-strong); border-radius: 999px; background: var(--bg); color: var(--text); font: inherit; font-size: 13px; }
+.room-decisions { margin: 12px 0 4px; }
+.room-decisions > summary { display: inline-flex; align-items: center; min-height: 40px; padding: 0 12px; border: 1px solid var(--line-strong); border-radius: 999px; color: var(--text-soft); font-size: 14px; cursor: pointer; list-style: none; }
+.room-decisions > summary::-webkit-details-marker { display: none; }
+.room-decisions > summary::after { content: " ›"; margin-left: 4px; }
+.room-decisions[open] > summary::after { content: " ⌄"; }
 
 /* T-176: Uni's secret request — a card with a masked field, never a chat message */
 .secret-card { margin: 8px 0 4px; padding: 14px 16px; max-width: 460px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--surface); box-shadow: var(--shadow); }

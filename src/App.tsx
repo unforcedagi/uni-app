@@ -8,7 +8,7 @@ import { SettingsIcon, UniIcon, JournalIcon, StarIcon, MailIcon } from "./Icons"
 import Mail from "./Mail";
 import { forgetAreas } from "./areas/useAreas";
 import { useLifeOsVault } from "./areas/useLifeOsVault";
-import { effectiveLifeVault, showUniGlue } from "./areas/profile";
+import { activeProfile, effectiveLifeVault, showUniGlue } from "./areas/profile";
 import { clearProjectBodies } from "./areas/projectBody";
 import AreasSurface from "./areas/LifeOsSurface";
 import type { Overlay } from "./areas/AreasSurface";
@@ -34,7 +34,9 @@ import { emojiLabel, type Reaction } from "./reactions";
 import { DeleteButton, InlineEditor } from "./InlineEditor";
 import { lastOwnMessage } from "./ownMessages";
 
-import { decisionIn, openDecision, useDecisionLinks } from "./decisionLinks";
+import { decisionIn, useDecisionLinks } from "./decisionLinks";
+import { DecisionCard } from "./DecisionCard";
+import { decisionRefsIn, unreferenced } from "./decisionCard";
 import { findUniMember, findUniRoom, searchHandoffText } from "./uniActions";
 import Search from "./Search";
 import Journal from "./Journal";
@@ -406,7 +408,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   }, [menuFor]);
   // Our own message currently open in the inline editor.
   const [editing, setEditing] = useState<string | null>(null);
-  // r17: one answer mechanism: a message that names an open decision links to its sheet ("Answer in Needs you ›"); no buttons in the chat
+  // T-212: a message that names a decision (`uni:<id>`, or a room's `[decision T-NN]` marker) carries its card, tappable in the chat
   const decisions = useDecisionLinks();
   // Latest bindings for syncPicker (called in the same tick as setBindings).
   const bindingsRef = useRef<Bindings>(new Map());
@@ -1520,10 +1522,33 @@ function Conversations({ onForget }: { onForget: () => void }) {
           <p className="compose-hint">Enter to send · Shift+Enter for a new line · @ to mention</p>
         </footer>
   </>;
-  /** r17: a message naming an open decision (its `[decision T-NN]` marker or its id) gets one quiet way to that decision's sheet. */
-  const decisionLink = (m: Message) => {
-    const id = decisionIn(m.body, decisions.known);
-    return id ? <button type="button" className="msg-decision-link" onClick={() => openDecision(id)}>Answer in Needs you</button> : null;
+  /** T-212: the decisions a message names: its `uni:<id>` refs (a card only if the note is a decision), then a known open decision its
+   *  `[decision T-NN]` marker or bare id names. */
+  const markerHits = useRef(new Map<string, string>());
+  const decisionIds = (m: Pick<Message, "ref" | "body">) => {
+    const ids = decisionRefsIn(m.body);
+    // a marker names an open decision; once decided the shell stops listing it, and the card stays (showing the answer)
+    const known = decisionIn(m.body, decisions.known) ?? markerHits.current.get(m.ref) ?? null;
+    if (known) markerHits.current.set(m.ref, known);
+    return known && !ids.includes(known) ? [...ids, known] : ids;
+  };
+  /** A won tap's "Picked: …", as you, in the room the card is in, to Uni too (it is the room's answer). */
+  const postPick = (room: string) => async (body: string) => {
+    const roster = await invoke<Member[]>("get_members", { channel: room }).catch(() => [] as Member[]);
+    const uni = findUniMember(roster);
+    await invoke<Message>("post_message", { channel: room, body, replyTo: null, recipients: uni ? [uni.pubkey] : [] });
+    setTick((n) => n + 1);
+  };
+  const decisionCards = (m: Message) => {
+    const ids = decisionIds(m), refs = decisionRefsIn(m.body);
+    return ids.length ? <div className="decision-cards">{ids.map((id) => <DecisionCard key={id} id={id} vault={refs.includes(id) ? "uni" : activeProfile().vault} post={postPick(m.channel)} />)}</div> : null;
+  };
+  /** The room's open decisions that no loaded message names, under its chat (folded: one line until opened). */
+  const roomDecisions = (room: string, list: Message[]) => {
+    const ids = unreferenced(decisions.known.map((d) => ({ id: d.id, channel: d.channel ?? null })), room, new Set(list.flatMap((m) => decisionIds(m))));
+    if (!ids.length) return null;
+    return <details className="room-decisions"><summary>{ids.length === 1 ? "1 open decision for this room" : `${ids.length} open decisions for this room`}</summary>
+      <div className="decision-cards">{ids.map((id) => <DecisionCard key={id} id={id} vault={activeProfile().vault} post={postPick(room)} />)}</div></details>;
   };
 
   /** T-176: a secret request becomes its card; a receipt shows only its human line. Null: the ordinary body. */
@@ -1548,7 +1573,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       {grouped ? <time className="gutter-time">{clock(m.ts)}</time> : <span className="message-avatar" style={{ background: `hsl(${150 + (hue(m.author) % 120) - 60} 22% 44%)` }} aria-hidden="true">{m.author_name[0]?.toUpperCase() ?? "?"}</span>}
       <div className="message-content">{!grouped && <div className="message-meta"><strong>{m.author_name}</strong><time>{clock(m.ts)}</time></div>}{editing === m.ref ? <InlineEditor key={m.ref} initial={m.body} onSave={(body) => actions.current.saveEdit(m, body)} onCancel={() => actions.current.cancelEdit()} /> : secretView(m) ?? <Body body={attachmentBody(m.body, m.media, relayOrigin)} mentions={m.mentions} me={identity} edited={m.edited} />}
         <Attachments body={m.body} media={m.media} />
-        {decisionLink(m)}
+        {decisionCards(m)}
         {m.reactions.length > 0 && <div className="reactions" aria-label="Reactions">{m.reactions.map((r) => <span key={r.emoji} className={`pill ${r.mine ? "mine" : ""}`} aria-label={`${emojiLabel(r.emoji)} ${r.count}${r.mine ? ", including yours" : ""}`}>{emojiLabel(r.emoji)} <span>{r.count}</span></span>)}</div>}
         {!inThread && m.reply_count > 0 && <button className="thread-summary" onClick={() => actions.current.openThread(m)} aria-label={`View thread with ${m.reply_count} ${m.reply_count === 1 ? "reply" : "replies"}`}>💬 {m.reply_count} {m.reply_count === 1 ? "reply" : "replies"}{m.last_reply_ts ? <span> · last {time(m.last_reply_ts)}</span> : null}</button>}
         <div className={`message-more ${menuFor === m.ref ? "open" : ""}`}>
@@ -1602,6 +1627,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       ? <p className="empty room-loading" role="alert">Couldn't load messages · <button type="button" className="pairing-secondary" onClick={() => setTick((n) => n + 1)}>Retry</button></p>
       : <p className="empty room-loading" role="status">Loading messages…</p>)}
     {renderList(messages, false)}
+    {currentView && fetchedView === currentView && channel && roomDecisions(channel, messages)}
   </>,
   // eslint-disable-next-line react-hooks/exhaustive-deps
   [messages, identity, menuFor, decisions.version, root, older, roomName, editing, focusRef, relayOrigin, fetchedView, failedView, currentView, busy, synced, secretRequesters, secretReceipts]);

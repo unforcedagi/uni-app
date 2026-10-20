@@ -5,7 +5,7 @@ import { useTasks } from "./useTasks";
 import { draftsUnder, runsUnder, type Run } from "./steerCore";
 import { CompanionSide, CompanionStrip, Stands, useCompanionOpen, type CompanionProps, type TaskLoad } from "./Companion";
 import { chatPlaceholder, confirmationOf, type Resolved, isMine, needsByRow, needsFeed, needsYou, privateNote, withWaiting, standsHeading, standsLine, asOfDate, daysSince, firstSentence, stateLine, uniPanel, type PrivateNeed } from "./simpleCore";
-import { ownRoom, type Steward } from "./talkCore";
+import { ownRoom, roomByName, type Steward } from "./talkCore";
 import type { Area } from "./areasCore";
 import { isMe, priorityOf, tasksUnder, type Task, type TaskNode } from "./taskCore";
 import type { RoomInfo } from "./TodayView";
@@ -33,7 +33,7 @@ import { Body } from "../MessageBody";
 import { projectBody } from "./projectBody";
 import { rootOpenMemory } from "./rootMemory";
 import { openDialog } from "./focusTrap";
-import { publishDecisions, setDecisionOpener } from "../decisionLinks";
+import { publishDecisions, setDecidedHook, setDecisionOpener } from "../decisionLinks";
 import { taskTitle } from "./whereCore";
 import type { NoteRef } from "./noteRefsCore";
 import "./areas.css";
@@ -235,12 +235,16 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   // The whole tree's tasks are loaded once (the room tree beside the room needs every row's dot) and each level takes its subtree.
   const tasks = useTasks(identity, "", fallback);
   const levelTasks = useMemo(() => (tasks.tree && node ? tasksUnder(tasks.tree, node.path, tasks.tasks) : tasks.tasks), [tasks.tree, tasks.tasks, node?.path]); // eslint-disable-line react-hooks/exhaustive-deps
-  // r17: one answer mechanism: the chat links a message that names an open decision to that decision's sheet here (never a private area's)
+  // r17: the chat knows the open decisions (never a private area's): a message naming one gets its card; T-212: each with its room (its own
+  // `room`, else its node's), where an open decision no message on screen names is listed under the chat
   useEffect(() => {
     const tree = data?.tree;
-    publishDecisions((tasks.all ?? []).filter((t) => t.kind === "decision" && t.state === "open" && !(tree && privateRoot(tree, t.node))).map((t) => ({ id: t.id, tid: taskTitle(t.title).id, forTask: t.forTask ?? null })));
-  }, [tasks.all, data?.tree]);
+    const roomOf = (t: { room?: string | null; node: string }) => roomByName(roomRefs, t.room)?.id ?? (tree ? roomView(tree, t.node, roomRefs, uniRef).target?.id : null) ?? null;
+    publishDecisions((tasks.all ?? []).filter((t) => t.kind === "decision" && t.state === "open" && !(tree && privateRoot(tree, t.node))).map((t) => ({ id: t.id, tid: taskTitle(t.title).id, forTask: t.forTask ?? null, channel: roomOf(t) })));
+  }, [tasks.all, data?.tree, roomRefs, uniRef]);
   useEffect(() => { setDecisionOpener((id) => { setWork(false); setDrawer(false); setAppOpen(false); setSheetId(id); }); return () => setDecisionOpener(null); }, []);
+  const refreshTasks = useRef(tasks.refresh); refreshTasks.current = tasks.refresh;
+  useEffect(() => { setDecidedHook(() => refreshTasks.current()); return () => setDecidedHook(null); }, []);
   /** The task list's health, for the companion and the tree. */
   const load: TaskLoad = { error: tasks.error, treeError: tasks.treeError, refreshing: tasks.refreshing, lastOk: tasks.lastOk, complete: tasks.complete, retry: tasks.refresh, savedAt: tasks.savedAt, slow: tasks.slow };
   // opening a room anywhere opens its node's one view

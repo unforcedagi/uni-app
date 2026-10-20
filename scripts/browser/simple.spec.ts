@@ -2531,7 +2531,7 @@ test.describe('r17', () => {
     await expect(sheet.locator('.task-house').getByRole('button', { name: 'Snooze until tomorrow' })).toBeVisible();
   });
 
-  test('one answer mechanism: no approval buttons under a chat message; a message naming a decision links to its sheet', async ({ page }) => {
+  test('no approval buttons under a chat message; T-212: a message naming a decision carries its card, the same answers as its sheet', async ({ page }) => {
     await boot(page);
     await openRoom(page, 'ATLAS');
     await page.evaluate(() => (window as any).__setTask('dq2', { task: 'T-140' }));
@@ -2544,16 +2544,12 @@ test.describe('r17', () => {
     await expect(chat.getByRole('button', { name: /Approve|Deny|This session|Always/ })).toHaveCount(0);
     const msg = chat.locator('.message').filter({ hasText: 'The hosting call is yours' });
     await expect(msg).not.toContainText('T-140');
-    const link = msg.getByRole('button', { name: 'Answer in Needs you' });
-    await expect(link).toBeVisible();
-    await expect(chat.getByRole('button', { name: 'Answer in Needs you' })).toHaveCount(1);
-    // no answers in the chat: the link opens the decision's own sheet, which answers through the vault
-    await expect(msg.locator('.cp-opt')).toHaveCount(0);
-    await link.click();
-    const sheet = sheetOf(page);
-    await expect(sheet.locator('.task-kind')).toHaveText(/^Decision/);
-    await expect(sheet.getByRole('group', { name: /^Decide:/ }).getByRole('button')).toHaveText(['Self-host', 'Managed']);
-    await expect(page.locator('.message').getByRole('button', { name: /^(Self-host|Managed)$/ })).toHaveCount(0);
+    await expect(msg.getByRole('group', { name: /^Pick one:/ }).getByRole('button')).toHaveText(['Self-host', 'Managed']);
+    await expect(chat.locator('.message .decision-card')).toHaveCount(1);
+    // the decision's sheet (Needs you) still answers it, with the same options
+    await openCompanion(page);
+    const sheet = await sheetAnswers(page, page.locator('.cp-body .cp-item').filter({ hasText: 'ATLAS hosting' }).first());
+    await expect(sheet.getByRole('button')).toHaveText(['Self-host', 'Managed']);
   });
 
   test('Uni\'s panel is lighter: at most three rows, then one "N more ›" to the work view (private items folded in, said in its tooltip); the work view keeps the full list', async ({ page }) => {
