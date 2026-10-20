@@ -500,3 +500,28 @@ test("while a draft is saving it can't be typed into, and a pending send's Check
   await expect(banner).toContainText("The mail bridge doesn't offer checking sends now; they stay listed.");
   expect(await calls(page, 'mail_send_check')).toEqual([]);
 });
+
+/** Codex review 3: a review without the draft's content (a bridge that returns only a fingerprint) opens nothing. */
+test("a draft whose review doesn't say what it holds isn't opened; while saving, Close can't be chosen", async ({ page }) => {
+  await boot(page, 'ok', { writes: true });
+  await rows(page).nth(0).click();
+  await page.evaluate(() => { (window as any).__reviewNoContent = true; });
+  await page.locator('.mail-card').last().getByRole('button', { name: 'Review and send it yourself…' }).click();
+  const c = page.getByRole('region', { name: "Review Uni's draft" });
+  await expect(c.getByText("This app can't show all of this draft")).toBeVisible();
+  await expect(c.getByRole('textbox')).toHaveCount(0);
+  await expect(c.getByRole('button', { name: /^Send/ })).toHaveCount(0);
+  await c.getByRole('button', { name: '✕ Close' }).click();
+  await page.evaluate(() => { (window as any).__reviewNoContent = false; (window as any).__saveDelay = 1200; });
+  await newButton(page).click();
+  const n = page.getByRole('region', { name: 'New message' });
+  await n.getByRole('radio', { name: /robin@example\.com/ }).check();
+  await n.getByRole('textbox', { name: 'Message' }).fill('Half a thought.');
+  await n.getByRole('button', { name: '✕ Close' }).click();
+  await page.getByRole('alertdialog', { name: 'Close without saving?' }).getByRole('button', { name: 'Save draft and close' }).click();
+  const ask = page.getByRole('alertdialog', { name: 'Close without saving?' });
+  await expect(ask.getByRole('button', { name: 'Close without saving' })).toBeDisabled();
+  await expect(ask.getByRole('button', { name: 'Keep writing' })).toBeDisabled();
+  await expect(page.getByRole('region', { name: 'New message' })).toHaveCount(0);
+  expect((await calls(page, 'mail_draft_save'))[0].fields.text).toBe('Half a thought.');
+});

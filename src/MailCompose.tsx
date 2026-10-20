@@ -105,9 +105,10 @@ export default function Composer({ overview, start, snapshot, onSnapshot, onClos
     setProblem(null); setStage({ kind: "opening" });
     invoke<Reviewed>("mail_draft_review", { accountId: start.accountId, draftId: start.draftId })
       .then((r) => {
-        if (r.plain === false) { setStage({ kind: "not-plain" }); return; }
-        // what the bridge read from the bytes it fingerprinted, not what the thread showed earlier
-        const f = r.fields ? { ...r.fields, in_reply_to: null } : start.fields;
+        // only what the bridge read from the bytes it fingerprinted is shown and sent; without that (or with more than
+        // plain text) the draft isn't opened here, never with what the thread showed earlier
+        if (r.plain !== true || !r.fields) { setStage({ kind: "not-plain" }); return; }
+        const f = { ...r.fields, in_reply_to: null };
         setRaw(rawOf(f)); setBaseline(rawOf(f)); setShowCc(f.cc.length > 0 || f.bcc.length > 0);
         setSaved({ accountId: start.accountId, draftId: r.draft_id, fingerprint: r.fingerprint, fields: f }); setDiscardAhead(r.discard); setStage({ kind: "edit" });
       })
@@ -253,7 +254,7 @@ export default function Composer({ overview, start, snapshot, onSnapshot, onClos
       </div>
       <div className="mail-scroll">
         {stage.kind === "opening" ? <p className="mail-loading" role="status">Opening the draft…</p>
-        : stage.kind === "not-plain" ? <p className="mail-note" role="status">This draft has formatting or attachments this app can't show in full: send it from your mail client.</p> : <>
+        : stage.kind === "not-plain" ? <p className="mail-note" role="status">This app can't show all of this draft (formatting, attachments, or the mail bridge didn't say what it holds): send it from your mail client.</p> : <>
           {problemBox}
           <p className="mail-note">The draft couldn't be opened for review, so it can't be edited or sent yet.</p>
           <p><button type="button" className="cp-retry" onClick={open}>Retry</button></p>
@@ -308,16 +309,16 @@ export default function Composer({ overview, start, snapshot, onSnapshot, onClos
 
   return <section className="mail-compose" aria-label={uniDraft ? "Review Uni's draft" : start.kind === "reply" ? "Reply" : start.kind === "draft" ? "Edit draft" : "New message"}>
     <div className="mail-compose-bar">
-      <button type="button" className="note-action" onClick={close}>✕ Close</button>
+      <button type="button" className="note-action" disabled={busy} onClick={close}>✕ Close</button>
       <strong className="mail-compose-title">{uniDraft ? "Uni's draft" : start.kind === "reply" ? "Reply" : start.kind === "draft" ? "Draft" : "New message"}</strong>
       {!asUni && acct && can(acct, "draft.save") && <button type="button" className="note-quiet" disabled={busy} onClick={() => void saveDraft()}>Save draft</button>}
       {sendBlock(() => void review(), false)}
     </div>
     {confirmClose && <div className="mail-confirm" role="alertdialog" aria-label="Close without saving?">
       <span>This message has changes that aren't saved.</span>
-      <button type="button" className="note-action" onClick={() => setConfirmClose(false)}>Keep writing</button>
-      {!asUni && acct && can(acct, "draft.save") && <button type="button" className="note-action" onClick={() => void saveDraft(true)}>Save draft and close</button>}
-      <button type="button" className="note-action" onClick={() => onClose(changed)}>Close without saving</button>
+      <button type="button" className="note-action" disabled={busy} onClick={() => setConfirmClose(false)}>Keep writing</button>
+      {!asUni && acct && can(acct, "draft.save") && <button type="button" className="note-action" disabled={busy} onClick={() => void saveDraft(true)}>Save draft and close</button>}
+      <button type="button" className="note-action" disabled={busy} onClick={() => onClose(changed)}>Close without saving</button>
     </div>}
     <div className="mail-scroll">
       {fromBlock}

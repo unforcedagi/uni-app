@@ -370,7 +370,11 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
     setComposeNote(null);
     setCompose({ key: ++composeSeq.current, start, hidden: false, snapshot: null }); setPane("thread");
   };
-  const endCompose = (changed: boolean) => { setCompose(null); setComposeNote(null); if (!openRef.current) setPane("list"); if (changed) void refresh(); };
+  /** Close the composer `key` (a late answer for one already gone closes nothing newer). */
+  const endCompose = (changed: boolean, key: number) => {
+    if (composeRef.current?.key === key) { setCompose(null); setComposeNote(null); if (!openRef.current) setPane("list"); }
+    if (changed) void refresh();
+  };
   const keepSnapshot = (snapshot: ComposerSnapshot) => { if (remembered.compose) remembered.compose = { ...remembered.compose, snapshot }; };
   const pendingChanged = () => setPending(readPending(typeof localStorage === "undefined" ? null : localStorage));
   /** Ask the bridge about each send whose outcome isn't known (a lost answer, or a composer closed before it came). */
@@ -510,7 +514,7 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
           {compose && <div className="mail-compose-wrap" hidden={compose.hidden}>
             {composeNote && !compose.hidden && <p className="mail-note mail-compose-note" role="status">{composeNote}</p>}
             <Composer key={compose.key} overview={overview} start={compose.start} snapshot={compose.snapshot} onSnapshot={keepSnapshot}
-              onClose={endCompose} onDone={() => endCompose(true)} onPendingChange={pendingChanged} /></div>}
+              onClose={(changed) => endCompose(changed, compose.key)} onDone={() => endCompose(true, compose.key)} onPendingChange={pendingChanged} /></div>}
           {composing ? null
           : threadProblem ? <div className="mail-scroll"><button type="button" className="note-action mail-thread-back" onClick={() => setPane("list")}>← Threads</button><Problem p={threadProblem} onRetry={() => open && void loadThread(open)} /></div>
           : thread && openAcct ? <>{compose?.hidden && <button type="button" className="mail-resume" onClick={resume}>✎ A message in progress · Resume</button>}<ThreadView key={`${thread.account_id}/${thread.thread_id}`} t={thread} acct={openAcct} overview={overview} note={threadNote} onBack={() => setPane("list")} actions={threadActions(thread, openAcct)} /></>

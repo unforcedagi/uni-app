@@ -168,7 +168,7 @@ export async function boot(page: Page, mode: Mode = 'ok', opts: { writes?: boole
             const discard = d.uni_drafted ? msgs.filter((m) => m !== d && m.account === d.account && m.thread_id === d.thread_id && m.draft && m.uni_drafted && rank(m) < rank(d)).map((m) => m.id) : [];
             const out: any = { account_id: args.accountId, draft_id: d.id, thread_id: d.thread_id, fingerprint: fp(d), discard, uni_drafted: d.uni_drafted };
             // a review says what the draft holds now, from the same version as the fingerprint
-            if (cmd === 'mail_draft_review') Object.assign(out, { fields: { to: d.to, cc: d.cc, bcc: d.bcc ?? [], subject: d.subject, text: d.text ?? '', in_reply_to: null }, plain: !d.html && d.attachments.length === 0 && !d.truncated });
+            if (cmd === 'mail_draft_review' && !w.__reviewNoContent) Object.assign(out, { fields: { to: d.to, cc: d.cc, bcc: d.bcc ?? [], subject: d.subject, text: d.text ?? '', in_reply_to: null }, plain: !d.html && d.attachments.length === 0 && !d.truncated });
             if (w.__saveDelay && cmd === 'mail_draft_save') await new Promise((r) => setTimeout(r, w.__saveDelay));
             return out;
           }
@@ -258,4 +258,3 @@ export async function shot(page: Page, name: string) {
 }
 
 export const mailCmds = (page: Page): Promise<string[]> => page.evaluate(() => (window as any).__calls.map((c: any) => c.cmd).filter((c: string) => c.startsWith('mail_')));
-
