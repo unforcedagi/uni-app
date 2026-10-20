@@ -30,9 +30,11 @@ function load(id: string, vault: string): Promise<void> {
   return p;
 }
 
-// Coming back to the app re-reads the open ones (the room or another device may have decided meanwhile), at most every 15 s each.
+// Coming back to the app re-reads the open ones (the room or another device may have decided meanwhile) and the ones that couldn't be
+// read (offline then), at most every 15 s each.
+const stale = (e: Entry) => (e.view?.state === "open" || (!e.view && !!e.error)) && Date.now() - e.read > 15_000;
 if (typeof window !== "undefined") window.addEventListener("focus", () => {
-  for (const [id, e] of entries) if (e.view?.state === "open" && Date.now() - e.read > 15_000) void load(id, e.vault);
+  for (const [id, e] of entries) if (stale(e)) void load(id, e.vault);
 });
 
 // An open decision the shell stops listing was decided (in its sheet, by the room): its cards re-read it.
@@ -41,7 +43,8 @@ onDecisionsGone((ids) => { for (const id of ids) { const e = entries.get(id); if
 const subscribe = (f: () => void) => { listeners.add(f); return () => { listeners.delete(f); }; };
 function useDecision(id: string, vault: string): Entry | undefined {
   useSyncExternalStore(subscribe, () => version, () => version);
-  useEffect(() => { if (!entries.has(id)) void load(id, vault); }, [id, vault]);
+  // a card shown again retries a read that failed (offline then)
+  useEffect(() => { const e = entries.get(id); if (!e || (!e.view && e.error)) void load(id, vault); }, [id, vault]);
   return entries.get(id);
 }
 
@@ -62,7 +65,8 @@ export function DecisionCard({ id, vault, post }: Props) {
   const d = entry?.view;
   // a ref to a note that is not a decision (or not read yet) is only its chip; a note that exists but can't be read now says so quietly
   if (!entry) return null;
-  if (!d) return entry.error && !/not found/i.test(entry.error) ? <p className="decision-card decision-loading">Couldn't read this note to show its decision: {entry.error}</p> : null;
+  if (!d) return entry.error && !/not found/i.test(entry.error) ? <p className="decision-card decision-loading">Couldn't read this note to show its decision: {entry.error}
+    <button type="button" className="decision-retry" onClick={() => void load(id, vault)}>Try again</button></p> : null;
 
   const tell = async (body: string) => {
     setPhase("telling");
@@ -72,7 +76,7 @@ export function DecisionCard({ id, vault, post }: Props) {
     setError(null); setPhase("saving");
     try {
       const r = await invoke<{ outcome: "picked" | "already_decided"; decided: string; decided_by?: string | null; note: unknown }>("vault_pick_decision",
-        { vault, id, option, by: activeProfile().me, at: new Date().toISOString() });
+        { vault, id, option, by: activeProfile().me, at: new Date().toISOString(), ifUpdatedAt: d.updatedAt });
       const now = parseDecisionNote(r.note);
       // the question stays the one read with its content (the write answers without it)
       const view: DecisionView = { ...d, updatedAt: now?.updatedAt ?? d.updatedAt, state: "decided", decided: r.decided, decidedBy: r.outcome === "picked" ? activeProfile().me : r.decided_by ?? now?.decidedBy ?? null };
@@ -81,7 +85,9 @@ export function DecisionCard({ id, vault, post }: Props) {
       if (r.outcome === "picked") { const body = pickedLine(r.decided, d); setLine(body); await tell(body); }
       else { setLost(true); setPhase("idle"); }
     } catch (e) {
-      setError(`Couldn't save your pick: ${msg(e)}`); setPhase("idle");
+      // a question changed since it was shown is never answered blind: the card shows the new one, and you tap again
+      setError(/changed since it was shown|modified since|conflict/i.test(msg(e)) ? "The question changed since you saw it. Here it is again; nothing was saved." : `Couldn't save your pick: ${msg(e)}`);
+      setPhase("idle");
       void load(id, vault);
     }
   };

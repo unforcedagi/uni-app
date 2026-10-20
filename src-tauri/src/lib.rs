@@ -2186,7 +2186,8 @@ async fn vault_decide(
     .await
 }
 
-/// T-212: one tap on a decision card in the chat. The vault's compare-and-set (`state` open -> decided) against the revision just read;
+/// T-212: one tap on a decision card in the chat. The vault's compare-and-set (`state` open -> decided) against the revision the card
+/// showed (`if_updated_at`: a question changed since is refused, never answered blind);
 /// `already_decided` (the stored answer, nothing written) when another tap or the room got there first. The card posts "Picked: …" in
 /// the room only for `picked`.
 #[tauri::command]
@@ -2197,13 +2198,14 @@ async fn vault_pick_decision(
     option: String,
     by: String,
     at: String,
+    if_updated_at: String,
 ) -> Result<uni_core::parachute::Pick, String> {
     let vault = vault
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty())
         .unwrap_or_else(|| vault_config(&app).vault);
     with_vault(&app, move |c| {
-        tauri::async_runtime::block_on(c.pick_decision(&vault, &id, &option, &by, &at)).map_err(|e| e.to_string())
+        tauri::async_runtime::block_on(c.pick_decision(&vault, &id, &option, &by, &at, &if_updated_at)).map_err(|e| e.to_string())
     })
     .await
 }

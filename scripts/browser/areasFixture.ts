@@ -620,6 +620,7 @@ Two proposals wait on a scope decision.
             if (m.state !== 'open') throw `this decision is "${m.state}", not open`;
             const opt = (m.options ?? []).find((o: string) => o.toLowerCase() === String(args.option).toLowerCase());
             if (!opt) throw `"${args.option}" is not one of this decision's options`;
+            if (!args.ifUpdatedAt || args.ifUpdatedAt !== t.updatedAt) throw `conflict: the decision changed since it was shown; look again: ${args.id}`;
             Object.assign(m, { state: 'decided', decided: opt, decided_at: args.at, decided_by: args.by });
             t.updatedAt = new Date(Date.now() + taskNotes.length).toISOString(); t.lastUpdatedVia = 'api';
             return { outcome: 'picked', decided: opt, title: '', note: { ...JSON.parse(JSON.stringify(t)), content: undefined } };

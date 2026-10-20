@@ -582,27 +582,30 @@ impl VaultClient {
         note_from(&v, id)
     }
 
-    /// T-212: one tap on a decision card. Reads the note, and when it is still open does the compare-and-set
-    /// (`state` open -> decided, with `decided`, `decided_at`, `decided_by`) against the revision just read. A note
-    /// already decided, or one that another tap decides between the read and the write, comes back as
+    /// T-212: one tap on a decision card. `shown` is the revision whose question the card showed: an open decision changed since
+    /// then is a [`Error::Conflict`] and nothing is written (the card re-reads and shows the new question, as the Areas sheet does).
+    /// When it is still open at that revision this is the compare-and-set (`state` open -> decided, with `decided`, `decided_at`,
+    /// `decided_by`). A note already decided, or one that another tap decides between the read and the write, comes back as
     /// [`Pick::AlreadyDecided`] with the stored answer, and nothing is written: only a [`Pick::Picked`] may tell the room.
-    pub async fn pick_decision(&self, vault: &str, id: &str, option: &str, by: &str, at: &str) -> Result<Pick> {
+    pub async fn pick_decision(&self, vault: &str, id: &str, option: &str, by: &str, at: &str, shown: &str) -> Result<Pick> {
         let note = self.get_note(vault, id).await?;
         let option = match decision_state(&note, option)? {
             Ok(option) => option,
             Err(already) => return Ok(already),
         };
-        let rev = note["updatedAt"].as_str().unwrap_or_default().to_string();
+        if shown.is_empty() || note["updatedAt"].as_str() != Some(shown) {
+            return Err(Error::Conflict(format!("the decision changed since it was shown; look again: {id}")));
+        }
         let title = decision_title(&note);
         let md = json!({"decided": option, "decided_at": at, "decided_by": by});
-        match self.decide_note(vault, id, json!("open"), json!("decided"), md, &rev).await {
+        match self.decide_note(vault, id, json!("open"), json!("decided"), md, shown).await {
             Ok(note) => Ok(Pick::Picked { decided: option, title, note }),
             Err(e) => {
                 // lost the race (or the note moved): what is stored now decides what the card shows
                 let now = self.get_note(vault, id).await.map_err(|_| e)?;
                 match decision_state(&now, &option)? {
                     Err(already) => Ok(already),
-                    Ok(_) => Err(Error::Conflict(format!("the decision changed since it was read; look again: {id}"))),
+                    Ok(_) => Err(Error::Conflict(format!("the decision changed since it was shown; look again: {id}"))),
                 }
             }
         }
@@ -2308,7 +2311,7 @@ mod pick_tests {
         crate::init_crypto();
         let (client, hub) = hub(open_decision());
         let at = "2026-10-09T10:00:00.000Z";
-        let won = client.pick_decision("scope-test", "d1", "b", "aaron", at).await.unwrap();
+        let won = client.pick_decision("scope-test", "d1", "b", "aaron", at, "r1").await.unwrap();
         match won {
             Pick::Picked { decided, title, .. } => assert_eq!((decided.as_str(), title.as_str()), ("B", "Which layout for the garden page?")),
             other => panic!("{other:?}"),
@@ -2317,7 +2320,7 @@ mod pick_tests {
         assert_eq!((m["state"].as_str(), m["decided"].as_str(), m["decided_by"].as_str(), m["decided_at"].as_str()), (Some("decided"), Some("B"), Some("aaron"), Some(at)));
         assert_eq!(hub.updates.load(Ordering::SeqCst), 1);
         // the card on another device (or the same decision's second card) taps C: the stored B comes back and nothing is written
-        match client.pick_decision("scope-test", "d1", "C", "aaron", at).await.unwrap() {
+        match client.pick_decision("scope-test", "d1", "C", "aaron", at, "r1").await.unwrap() {
             Pick::AlreadyDecided { decided, decided_by, .. } => assert_eq!((decided.as_str(), decided_by.as_deref()), ("B", Some("aaron"))),
             other => panic!("{other:?}"),
         }
@@ -2331,7 +2334,7 @@ mod pick_tests {
         let (client, hub) = hub(open_decision());
         // the room picks A between this tap's read (open, r1) and its write
         *hub.race.lock().unwrap() = Some(json!("A"));
-        match client.pick_decision("scope-test", "d1", "C", "aaron", "2026-10-09T10:00:00.000Z").await.unwrap() {
+        match client.pick_decision("scope-test", "d1", "C", "aaron", "2026-10-09T10:00:00.000Z", "r1").await.unwrap() {
             Pick::AlreadyDecided { decided, decided_by, .. } => assert_eq!((decided.as_str(), decided_by.as_deref()), ("A", Some("room"))),
             other => panic!("{other:?}"),
         }
@@ -2344,12 +2347,27 @@ mod pick_tests {
     async fn a_tap_on_something_that_is_not_an_open_option_writes_nothing() {
         crate::init_crypto();
         let (client, hub) = hub(open_decision());
-        assert!(client.pick_decision("scope-test", "d1", "D", "aaron", "t").await.is_err());
+        assert!(client.pick_decision("scope-test", "d1", "D", "aaron", "t", "r1").await.is_err());
         let mut task = open_decision();
         task["tags"] = json!(["task"]);
         *hub.note.lock().unwrap() = task;
-        assert!(client.pick_decision("scope-test", "d1", "A", "aaron", "t").await.is_err());
+        assert!(client.pick_decision("scope-test", "d1", "A", "aaron", "t", "r1").await.is_err());
         assert_eq!(hub.updates.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn a_question_changed_since_the_card_showed_it_is_not_answered() {
+        crate::init_crypto();
+        let mut note = open_decision();
+        note["updatedAt"] = json!("r2");
+        note["content"] = json!("# Which layout for the garden page, now with a fourth option?\n");
+        let (client, hub) = hub(note);
+        let e = client.pick_decision("scope-test", "d1", "A", "aaron", "t", "r1").await.unwrap_err();
+        assert!(matches!(e, Error::Conflict(_)), "{e}");
+        assert_eq!(hub.updates.load(Ordering::SeqCst), 0);
+        assert_eq!(hub.note.lock().unwrap()["metadata"]["state"], "open");
+        // read again (r2), the same tap goes through
+        assert!(matches!(client.pick_decision("scope-test", "d1", "A", "aaron", "t", "r2").await.unwrap(), Pick::Picked { .. }));
     }
 
     #[test]

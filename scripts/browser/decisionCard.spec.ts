@@ -108,6 +108,36 @@ test.describe('decision cards in the chat', () => {
     await shot(page, '04-lost');
   });
 
+  test('a question that changed after the card showed it is not answered: the card shows the new one, nothing is written or posted', async ({ page }) => {
+    await seed(page);
+    await openAtlas(page);
+    await arrive(page, ASK);
+    const card = page.locator('.sr-chat .message .decision-card').first();
+    await expect(card.getByRole('button', { name: 'A', exact: true })).toBeVisible();
+    await page.evaluate((d) => { const t = (window as any).__tasks.find((x: any) => x.id === d); t.content = '# Which layout for the garden page, and its menu?\n'; t.updatedAt = '2026-10-09T09:40:00.000Z'; }, D1);
+    const before = (await posts(page)).length;
+    await card.getByRole('button', { name: 'A', exact: true }).click();
+    await expect(card.getByRole('alert')).toHaveText('The question changed since you saw it. Here it is again; nothing was saved.');
+    await expect(card.locator('.decision-q')).toHaveText('Which layout for the garden page, and its menu?');
+    expect((await stored(page)).state).toBe('open');
+    expect((await posts(page)).length).toBe(before);
+    // tapped again, now on the question shown
+    await card.getByRole('button', { name: 'A', exact: true }).click();
+    await expect(card.locator('.decision-result')).toHaveText('Decided: A · by you');
+  });
+
+  test('a decision that could not be read (offline) is read again when the app comes back, and has Try again', async ({ page }) => {
+    await seed(page);
+    await page.addInitScript((d) => { (window as any).__noteFails = { [d]: true }; }, D1);
+    await openAtlas(page);
+    await arrive(page, ASK);
+    const msg = page.locator('.sr-chat .message').filter({ hasText: 'Your call on the garden page layout' });
+    await expect(msg.locator('.decision-loading')).toContainText("Couldn't read this note to show its decision");
+    await page.evaluate(() => { (window as any).__noteFails = {}; });
+    await msg.getByRole('button', { name: 'Try again' }).click();
+    await expect(msg.getByRole('group', { name: /^Pick one:/ })).toBeVisible();
+  });
+
   test('a room\'s [decision T-NN] marker gets the card too; an open decision of this room no message names is listed under the chat', async ({ page }) => {
     await seed(page);
     await openAtlas(page);
