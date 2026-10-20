@@ -601,10 +601,17 @@ impl VaultClient {
         match self.decide_note(vault, id, json!("open"), json!("decided"), md, shown).await {
             Ok(note) => Ok(Pick::Picked { decided: option, title, note }),
             Err(e) => {
-                // lost the race (or the note moved): what is stored now decides what the card shows
-                let now = self.get_note(vault, id).await.map_err(|_| e)?;
+                // lost the race (or the note moved, or the write failed): what is stored now decides what the card shows
+                let Ok(now) = self.get_note(vault, id).await else { return Err(e) };
+                let m = &now["metadata"];
+                // this very tap, whose answer was lost on the way back (same option, same stamp): it won
+                if m["state"] == "decided" && m["decided"] == option.as_str() && m["decided_by"] == by && m["decided_at"] == at {
+                    return Ok(Pick::Picked { decided: option, title, note: now });
+                }
                 match decision_state(&now, &option)? {
                     Err(already) => Ok(already),
+                    // still open at the revision shown: the write itself failed, and says why
+                    Ok(_) if now["updatedAt"].as_str() == Some(shown) => Err(e),
                     Ok(_) => Err(Error::Conflict(format!("the decision changed since it was shown; look again: {id}"))),
                 }
             }
@@ -2236,10 +2243,12 @@ mod pick_tests {
         updates: AtomicUsize,
         /// Another tap that lands between this tap's read and its write (once).
         race: Mutex<Option<Value>>,
+        /// The next update fails with this message, after applying the write when the flag is set (an answer lost on the way back).
+        fail_next: Mutex<Option<(bool, &'static str)>>,
     }
 
     fn hub(note: Value) -> (VaultClient, Arc<Hub>) {
-        let state = Arc::new(Hub { note: Mutex::new(note), updates: AtomicUsize::new(0), race: Mutex::new(None) });
+        let state = Arc::new(Hub { note: Mutex::new(note), updates: AtomicUsize::new(0), race: Mutex::new(None), fail_next: Mutex::new(None) });
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let origin = format!("http://{}", listener.local_addr().unwrap());
         let s = state.clone();
@@ -2273,7 +2282,17 @@ mod pick_tests {
                             n["updatedAt"] = json!("r-race");
                         }
                         let t = &args["state_transition"];
-                        if args["if_updated_at"] != n["updatedAt"] {
+                        let fail = s.fail_next.lock().unwrap().take();
+                        if let Some((apply, msg)) = fail {
+                            if apply {
+                                n["metadata"]["state"] = t["to"].clone();
+                                for (k, v) in args["metadata"].as_object().unwrap() {
+                                    n["metadata"][k] = v.clone();
+                                }
+                                n["updatedAt"] = json!("r-lost");
+                            }
+                            Err(msg)
+                        } else if args["if_updated_at"] != n["updatedAt"] {
                             Err("conflict: note d1 has been modified")
                         } else if n["metadata"][t["field"].as_str().unwrap()] != t["from"] {
                             Err("[transition_conflict] conflict: note d1 state is decided, not open")
@@ -2353,6 +2372,23 @@ mod pick_tests {
         *hub.note.lock().unwrap() = task;
         assert!(client.pick_decision("scope-test", "d1", "A", "aaron", "t", "r1").await.is_err());
         assert_eq!(hub.updates.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn a_write_that_fails_says_why_and_one_whose_answer_was_lost_still_won() {
+        crate::init_crypto();
+        // the vault refuses the write (the note unchanged): its own error, not "the question changed"
+        let (client, hub) = hub(open_decision());
+        *hub.fail_next.lock().unwrap() = Some((false, "MCP error -32603: database is locked"));
+        let e = client.pick_decision("scope-test", "d1", "A", "aaron", "t1", "r1").await.unwrap_err();
+        assert!(!matches!(e, Error::Conflict(_)) && e.to_string().contains("database is locked"), "{e}");
+        // the write lands but its answer is lost on the way back: the stored answer is this tap's own, so it won (and may tell the room)
+        *hub.fail_next.lock().unwrap() = Some((true, "connection reset"));
+        match client.pick_decision("scope-test", "d1", "A", "aaron", "t2", "r1").await.unwrap() {
+            Pick::Picked { decided, .. } => assert_eq!(decided, "A"),
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(hub.note.lock().unwrap()["metadata"]["decided_at"], "t2");
     }
 
     #[tokio::test]

@@ -197,6 +197,20 @@ test.describe('decision cards in the chat', () => {
     expect((await posts(page)).length).toBe(before);
   });
 
+  test('a decision listed under the chat (no message names it) is answered there: its card stays, says Decided and tells the room', async ({ page }) => {
+    await seed(page);
+    await openAtlas(page);
+    const list = page.locator('.sr-chat .room-decisions');
+    await list.locator('summary').click();
+    const hosting = list.getByRole('region', { name: /Decide the ATLAS hosting/ });
+    const before = (await posts(page)).length;
+    await hosting.getByRole('button', { name: 'Managed' }).click();
+    await expect(hosting.locator('.decision-result')).toHaveText('Decided: Managed · by you');
+    await expect(hosting.getByText('Sent to the room.')).toBeVisible();
+    const sent = (await posts(page)).slice(before);
+    expect(sent.map((p: any) => p.body)).toEqual([expect.stringMatching(/^Picked: Managed \(decision: .*ATLAS hosting\) uni:dq2$/)]);
+  });
+
   test('a ref to a note that is not a decision is only its chip', async ({ page }) => {
     await page.addInitScript(() => { (window as any).__seedTasks = [{ id: '01M5D0000000000000000000B1', path: 'Projects/Atlas/Plain note', extension: 'md', tags: [], createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-01T00:00:00Z', content: '# Plain', metadata: {} }]; });
     await openAtlas(page);

@@ -4,7 +4,8 @@
 import { parseDecisionNote, type DecisionView } from "./decisionCard.ts";
 
 export type Entry = { view: DecisionView | null; error: string | null; read: number; vault: string; id: string };
-const msg = (e: unknown) => (typeof e === "string" ? e : (e as Error)?.message ?? "failed").replace(/^Error:\s*/, "");
+/** An error as one line, without the "Error:" a thrown string or an invoke rejection may carry. */
+export const msg = (e: unknown): string => (typeof e === "string" ? e : (e as Error)?.message ?? "failed").replace(/^Error:\s*/, "");
 
 export function makeDecisionStore(read: (vault: string, id: string) => Promise<unknown>, now: () => number = Date.now) {
   const entries = new Map<string, Entry>();

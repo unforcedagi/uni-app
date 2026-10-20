@@ -1,7 +1,7 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { optionLabel, parseDecisionNote, pickedLine, type DecisionView } from "./decisionCard";
-import { makeDecisionStore, type Entry } from "./decisionStore";
+import { makeDecisionStore, msg, type Entry } from "./decisionStore";
 import { useNoteOpener } from "./noteLinks";
 import { activeProfile } from "./areas/profile";
 import { decisionDecided, onDecisionsGone } from "./decisionLinks";
@@ -12,7 +12,6 @@ import { decisionDecided, onDecisionsGone } from "./decisionLinks";
 // A tap that lost (the room or another device decided first) shows the stored answer and posts nothing.
 
 const store = makeDecisionStore((vault, id) => invoke<{ note: unknown }>("vault_note", { vault, noteRef: id }).then((r) => r.note));
-const msg = (e: unknown) => (typeof e === "string" ? e : (e as Error)?.message ?? "failed").replace(/^Error:\s*/, "");
 /** Forget: the cards' notes go with the identity that could read them. */
 export const forgetDecisions = (): void => store.forget();
 

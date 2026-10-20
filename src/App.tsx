@@ -1533,22 +1533,29 @@ function Conversations({ onForget }: { onForget: () => void }) {
     return known && !ids.includes(known) ? [...ids, known] : ids;
   };
   /** A won tap's "Picked: …", as you, in the room the card is in, to Uni too (it is the room's answer). Not after a Forget meanwhile. */
-  const postPick = (room: string) => async (body: string, current: () => boolean) => {
+  const postPick = (room: string, thread: string | null = null) => async (body: string, current: () => boolean) => {
     const roster = await invoke<Member[]>("get_members", { channel: room }).catch(() => [] as Member[]);
     if (!current()) return;
     const uni = findUniMember(roster);
-    await invoke<Message>("post_message", { channel: room, body, replyTo: null, recipients: uni ? [uni.pubkey] : [] });
+    // a card tapped in a thread answers in that thread, where it was asked
+    await invoke<Message>("post_message", { channel: room, body, replyTo: thread, recipients: uni ? [uni.pubkey] : [] });
     setTick((n) => n + 1);
   };
-  const decisionCards = (m: Message) => {
+  const decisionCards = (m: Message, inThread: boolean) => {
     const ids = decisionIds(m), refs = decisionRefsIn(m.body);
-    return ids.length ? <div className="decision-cards">{ids.map((id) => <DecisionCard key={id} id={id} vault={refs.includes(id) ? "uni" : activeProfile().vault} post={postPick(m.channel)} />)}</div> : null;
+    return ids.length ? <div className="decision-cards">{ids.map((id) => <DecisionCard key={id} id={id} vault={refs.includes(id) ? "uni" : activeProfile().vault} post={postPick(m.channel, inThread ? root : null)} />)}</div> : null;
   };
+  /** The decisions listed under this room's chat so far: one answered here stays (showing its answer, telling the room) until the room changes. */
+  const listedHere = useRef<{ room: string; ids: string[] }>({ room: "", ids: [] });
   /** The room's open decisions that no loaded message names, under its chat (folded: one line until opened). */
   const roomDecisions = (room: string, list: Message[]) => {
-    const ids = unreferenced(decisions.known.map((d) => ({ id: d.id, channel: d.channel ?? null })), room, new Set(list.flatMap((m) => decisionIds(m))));
+    const named = new Set(list.flatMap((m) => decisionIds(m)));
+    const open = unreferenced(decisions.known.map((d) => ({ id: d.id, channel: d.channel ?? null })), room, named);
+    if (listedHere.current.room !== room) listedHere.current = { room, ids: [] };
+    const ids = [...new Set([...listedHere.current.ids, ...open])].filter((id) => !named.has(id));
+    listedHere.current.ids = ids;
     if (!ids.length) return null;
-    return <details className="room-decisions"><summary>{ids.length === 1 ? "1 open decision for this room" : `${ids.length} open decisions for this room`}</summary>
+    return <details className="room-decisions"><summary>{!open.length ? "Decided here" : open.length === 1 ? "1 open decision for this room" : `${open.length} open decisions for this room`}</summary>
       <div className="decision-cards">{ids.map((id) => <DecisionCard key={id} id={id} vault={activeProfile().vault} post={postPick(room)} />)}</div></details>;
   };
 
@@ -1574,7 +1581,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       {grouped ? <time className="gutter-time">{clock(m.ts)}</time> : <span className="message-avatar" style={{ background: `hsl(${150 + (hue(m.author) % 120) - 60} 22% 44%)` }} aria-hidden="true">{m.author_name[0]?.toUpperCase() ?? "?"}</span>}
       <div className="message-content">{!grouped && <div className="message-meta"><strong>{m.author_name}</strong><time>{clock(m.ts)}</time></div>}{editing === m.ref ? <InlineEditor key={m.ref} initial={m.body} onSave={(body) => actions.current.saveEdit(m, body)} onCancel={() => actions.current.cancelEdit()} /> : secretView(m) ?? <Body body={attachmentBody(m.body, m.media, relayOrigin)} mentions={m.mentions} me={identity} edited={m.edited} />}
         <Attachments body={m.body} media={m.media} />
-        {decisionCards(m)}
+        {decisionCards(m, inThread)}
         {m.reactions.length > 0 && <div className="reactions" aria-label="Reactions">{m.reactions.map((r) => <span key={r.emoji} className={`pill ${r.mine ? "mine" : ""}`} aria-label={`${emojiLabel(r.emoji)} ${r.count}${r.mine ? ", including yours" : ""}`}>{emojiLabel(r.emoji)} <span>{r.count}</span></span>)}</div>}
         {!inThread && m.reply_count > 0 && <button className="thread-summary" onClick={() => actions.current.openThread(m)} aria-label={`View thread with ${m.reply_count} ${m.reply_count === 1 ? "reply" : "replies"}`}>💬 {m.reply_count} {m.reply_count === 1 ? "reply" : "replies"}{m.last_reply_ts ? <span> · last {time(m.last_reply_ts)}</span> : null}</button>}
         <div className={`message-more ${menuFor === m.ref ? "open" : ""}`}>
