@@ -570,7 +570,8 @@ fn in_thread(mut e: Value, thread: &str, keywords: &[&str]) -> Value {
     e
 }
 
-/// Two made-up accounts shared with each other, as #mail shares the test boxes: the owner's (Robin Vale,
+/// Two made-up accounts shared with each other, as #mail shares the test boxes (Uni's own draft in U is not `$seen`, so it
+/// must not make its thread unread): the owner's (Robin Vale,
 /// `robin@example.com`, account `A`) and Uni's (`uni@example.com`, account `U`). Their inboxes interleave in time.
 /// A three-message thread with a draft Uni left in Robin's Drafts; attachments that pass, fail on their bytes, and fail
 /// by name; words found in one account only (`marmalade` in A, also in A's Junk; `lighthouse` in U). Returns the two
@@ -616,7 +617,7 @@ pub fn shared_mail() -> (Mail, Mail, HashMap<(String, String), String>) {
             "Hello Uni, is the reading group still on Thursday?\n\nAda", None), "TU-read", &[]),
         in_thread(email("u3", "U-sent", uni, "Re: Question about the reading group", "2026-10-17T19:00:00Z", true,
             "Yes, Thursday at six.", None), "TU-read", &[]),
-        in_thread(email("u5", "U-drafts", uni, "Re: Question about the reading group", "2026-10-18T08:00:00Z", true,
+        in_thread(email("u5", "U-drafts", uni, "Re: Question about the reading group", "2026-10-18T08:00:00Z", false,
             "A reminder for Thursday at six.", None), "TU-read", &["$draft"]),
         email("u4", "U-inbox", ("Billing", "billing@example.com"), "Invoice for October", "2026-10-15T12:00:00Z", false,
             "Your invoice is attached.", None),
