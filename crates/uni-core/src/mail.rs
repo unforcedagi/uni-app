@@ -1,4 +1,4 @@
-//! Read-only mail (T-45) through the mail bridge on the hub's host.
+//! Mail (T-45) through the mail bridge on the hub's host: reads here, writes as named operations ([`write`], T-210).
 //!
 //! The bridge (`uni-mail-bridge`, tailnet port 8452) holds the mail
 //! credentials; the app never does. Each request is NIP-98 signed by the
@@ -7,9 +7,11 @@
 //! endpoints: `POST /mail/jmap {calls}` → JMAP `methodResponses`, and
 //! `POST /mail/raw {blobId}` → the blob's bytes (a message or an attachment).
 //!
-//! Nothing here writes: no send, no flag change, no delete. Opening a message
-//! does not mark it read. Every call goes through [`check_read_only`], so a
-//! write method never leaves the device, whatever the bridge would allow.
+//! No JMAP sent from here writes: every `/mail/jmap` call goes through
+//! [`check_read_only`], so a write method never leaves the device, whatever
+//! the bridge would allow. Writes (read state, flags, archive, drafts, send)
+//! are the bridge's named operations, and only those the bridge offers this
+//! key on that account ([`write`]).
 //!
 //! T-45 v2 ([`accounts`]): a key's session can hold a second, shared account
 //! (Uni's mailbox beside the owner's), read by `accountId`; see that module.
@@ -30,7 +32,9 @@ use serde_json::{json, Value};
 
 pub mod accounts;
 pub mod attachment;
+pub mod write;
 pub use accounts::{AccountBoxes, MailSession, Overview, SessionAccount, Source, Thread, ThreadPage, ThreadSummary, Who};
+pub use write::{DraftFields, Reviewed, SendOutcome, SendState};
 pub use attachment::{open_attachment, open_attachment_in, openable_extension, refused_before_fetch};
 
 /// Port the mail bridge listens on, on the hub's host (Tailscale Serve).
@@ -205,11 +209,19 @@ pub struct Message {
     pub from: Vec<Address>,
     pub to: Vec<Address>,
     pub cc: Vec<Address>,
+    /// A draft's Bcc (a received message has none).
+    #[serde(default)]
+    pub bcc: Vec<Address>,
     pub reply_to: Vec<Address>,
     pub subject: String,
     pub received_at: String,
     pub sent_at: Option<String>,
     pub unread: bool,
+    #[serde(default)]
+    pub flagged: bool,
+    /// The DMARC result the receiving side recorded ([`dmarc_result`]); `None` when no hop recorded one.
+    #[serde(default)]
+    pub dmarc: Option<String>,
     /// A draft (`$draft`): never sent.
     #[serde(default)]
     pub draft: bool,
@@ -566,11 +578,14 @@ pub(crate) fn message(e: &Value) -> Message {
         from: addresses(e.get("from")),
         to: addresses(e.get("to")),
         cc: addresses(e.get("cc")),
+        bcc: addresses(e.get("bcc")),
         reply_to: addresses(e.get("replyTo")),
         subject: text_of(e, "subject"),
         received_at: text_of(e, "receivedAt"),
         sent_at: e.get("sentAt").and_then(Value::as_str).map(str::to_string),
         unread: unread(e),
+        flagged: keyword(e, "$flagged"),
+        dmarc: dmarc_result(e),
         draft: keyword(e, "$draft"),
         uni_drafted: keyword(e, "$uni-drafted"),
         mailbox_ids: mailbox_ids(e),
@@ -581,6 +596,35 @@ pub(crate) fn message(e: &Value) -> Message {
         truncated: t1 || t2,
         attachments,
     }
+}
+
+/// The DMARC result in the message's topmost `Authentication-Results` or `ARC-Authentication-Results` header (JMAP
+/// `headers` lists them in order, newest hop first): the last hop that checked the sender, which for mail from outside
+/// is the inbound relay. A sender can add its own such header, but only below that one. `None` when there is no such
+/// header (mail delivered inside the mail server carries none); `"none"` when the header doesn't give a DMARC result.
+pub fn dmarc_result(e: &Value) -> Option<String> {
+    let header = e.get("headers")?.as_array()?.iter().find(|h| {
+        h.get("name").and_then(Value::as_str).is_some_and(|n| n.eq_ignore_ascii_case("authentication-results") || n.eq_ignore_ascii_case("arc-authentication-results"))
+    })?;
+    let value = header.get("value").and_then(Value::as_str).unwrap_or("");
+    // comments (in parentheses) are free text: drop them before reading the result
+    let mut plain = String::with_capacity(value.len());
+    let mut depth = 0usize;
+    for c in value.chars() {
+        match c {
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            c if depth == 0 => plain.push(c),
+            _ => {}
+        }
+    }
+    let lower = plain.to_ascii_lowercase();
+    let result = lower
+        .split(|c: char| c == ';' || c.is_whitespace())
+        .find_map(|t| t.strip_prefix("dmarc="))
+        .map(|r| r.chars().take_while(|c| c.is_ascii_alphanumeric()).collect::<String>())
+        .filter(|r| !r.is_empty());
+    Some(result.unwrap_or_else(|| "none".into()))
 }
 
 /// CSS properties kept in `style` attributes: layout and type only, none that take a URL.
@@ -775,6 +819,20 @@ mod tests {
             assert!(matches!(check_read_only(&calls), Err(MailError::Invalid { .. })), "{write} must be refused");
         }
         assert!(check_read_only(&json!({"not": "a list"})).is_err());
+    }
+
+    #[test]
+    fn the_dmarc_result_is_the_topmost_hops() {
+        let h = |list: Value| dmarc_result(&json!({ "headers": list }));
+        let ar = |name: &str, v: &str| json!({ "name": name, "value": v });
+        assert_eq!(h(json!([ar("Received", "x"), ar("ARC-Authentication-Results", " i=1; mx.relay.example; dkim=pass; dmarc=pass header.from=example.com")])).as_deref(), Some("pass"));
+        assert_eq!(h(json!([ar("Authentication-Results", " mx.relay.example; spf=pass; DMARC=Fail (p=NONE sp=NONE dmarc=pass) header.from=example.com")])).as_deref(), Some("fail"), "a comment can't say pass");
+        // a header the sender wrote sits below the relay's own
+        assert_eq!(h(json!([ar("ARC-Authentication-Results", " i=1; mx.relay.example; dmarc=fail"), ar("Authentication-Results", " mx.relay.example; dmarc=pass")])).as_deref(), Some("fail"));
+        assert_eq!(h(json!([ar("Authentication-Results", " mx.relay.example; spf=pass")])).as_deref(), Some("none"));
+        assert_eq!(h(json!([ar("Authentication-Results", " x; xdmarc=pass")])).as_deref(), Some("none"), "only the dmarc method itself");
+        assert_eq!(h(json!([ar("DKIM-Signature", "v=1")])), None, "delivered inside the server: nothing to read");
+        assert_eq!(dmarc_result(&json!({})), None);
     }
 
     #[test]

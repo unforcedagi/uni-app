@@ -415,6 +415,7 @@ async fn main() -> Result<()> {
                 None => {
                     for a in &overview.accounts {
                         println!("account {} {:?} {}", a.id, a.who, a.name);
+                        println!("  writes offered: {}", if a.operations.is_empty() { "none".to_string() } else { a.operations.join(", ") });
                         for b in &a.mailboxes {
                             println!("  {:<22} {:>5} total {:>4} unread  {}", b.name, b.total, b.unread, b.id);
                         }

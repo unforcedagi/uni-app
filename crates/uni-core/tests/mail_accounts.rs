@@ -53,7 +53,7 @@ async fn the_overview_lists_each_accounts_mailboxes_with_counts() {
     assert_eq!((a.id.as_str(), a.who, u.id.as_str(), u.who), ("A", Who::Owner, "U", Who::Uni));
     assert_eq!(a.mailboxes[0].role.as_deref(), Some("inbox"));
     assert_eq!((a.mailboxes[0].total, a.mailboxes[0].unread), (4, 2), "a1 a3 a4 a5; a3 and a4 unread");
-    assert_eq!((u.mailboxes[0].total, u.mailboxes[0].unread), (3, 2), "u1 u2 u4; u1 and u4 unread");
+    assert_eq!((u.mailboxes[0].total, u.mailboxes[0].unread), (4, 2), "u1 u2 u4 u6; u1 and u4 unread");
     // each account's Mailbox/get named that account
     let calls = fake.state.lock().unwrap().calls.clone();
     let boxes: Vec<_> = calls.iter().filter(|(m, _)| m == "Mailbox/get").map(|(_, a)| a.clone()).collect();
@@ -80,8 +80,8 @@ async fn the_combined_inbox_merges_both_accounts_newest_first_and_pages_each() {
     let fake = shared(&keys).await;
     let mail = MailBridge::new(&fake.url, &keys).unwrap();
     let all = mail.threads(&[inbox("A"), inbox("U")], None, 50).await.unwrap();
-    assert_eq!(ids(&all), ["A/TA-plan", "U/Tu1", "U/TU-read", "A/Ta4", "A/Ta5", "U/Tu4"]);
-    assert_eq!(all.total, Some(6));
+    assert_eq!(ids(&all), ["A/TA-plan", "U/Tu1", "U/TU-read", "A/Ta4", "A/Ta5", "U/Tu4", "U/Tu6"]);
+    assert_eq!(all.total, Some(7));
     assert!(!all.more);
     let plan = &all.threads[0];
     assert_eq!((plan.email_id.as_str(), plan.count, plan.unread), ("a3", 4, true), "the newest in the Inbox; four in the thread with Sent and Drafts");
@@ -92,7 +92,7 @@ async fn the_combined_inbox_merges_both_accounts_newest_first_and_pages_each() {
     // two at a time: each account carries on where it stopped
     let mut seen = Vec::new();
     let mut sources = vec![inbox("A"), inbox("U")];
-    for _ in 0..3 {
+    for _ in 0..4 {
         let page = mail.threads(&sources, None, 2).await.unwrap();
         seen.extend(ids(&page));
         sources = page.next;
@@ -101,7 +101,7 @@ async fn the_combined_inbox_merges_both_accounts_newest_first_and_pages_each() {
         }
     }
     assert_eq!(seen, ids(&all));
-    assert_eq!(sources.iter().map(|s| s.position).collect::<Vec<_>>(), [3, 3]);
+    assert_eq!(sources.iter().map(|s| s.position).collect::<Vec<_>>(), [3, 4]);
 }
 
 #[tokio::test]
@@ -277,7 +277,7 @@ async fn uni_s_key_reads_both_with_the_same_labels() {
     assert_eq!(o.login, "uni@example.com");
     assert_eq!(o.accounts.iter().map(|a| (a.id.as_str(), a.who)).collect::<Vec<_>>(), [("A", Who::Owner), ("U", Who::Uni)]);
     let all = mail.threads(&[inbox("A"), inbox("U")], None, 50).await.unwrap();
-    assert_eq!(ids(&all), ["A/TA-plan", "U/Tu1", "U/TU-read", "A/Ta4", "A/Ta5", "U/Tu4"]);
+    assert_eq!(ids(&all), ["A/TA-plan", "U/Tu1", "U/TU-read", "A/Ta4", "A/Ta5", "U/Tu4", "U/Tu6"]);
 }
 
 /// /code-review: a bridge answer missing part of a list is an error, not a quietly empty or wrongly-unread page.

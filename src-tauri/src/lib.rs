@@ -1545,10 +1545,10 @@ fn relay_origin(app: tauri::AppHandle) -> String {
         .to_string()
 }
 
-// ── Mail (T-45): read-only, through the mail bridge on the hub's host. Each
+// ── Mail (T-45): through the mail bridge on the hub's host. Each
 // request is NIP-98 signed with the device key; the bridge holds the mail
-// credentials, so the webview never sees one. Nothing here sends, flags or
-// deletes, and reading a message does not mark it read.
+// credentials, so the webview never sees one. Reading never writes; the
+// writes (T-210, below) are the bridge's named operations.
 
 use uni_core::mail::{MailBridge, MailError};
 
@@ -1625,6 +1625,70 @@ async fn mail_attachment_open(app: tauri::AppHandle, account_id: Option<String>,
         tauri::async_runtime::block_on(uni_core::mail::open_attachment_in(mail, &dir, account_id.as_deref(), &blob_id, name.as_deref(), mime.as_deref(), open)).map(|_| ())
     })
     .await
+}
+
+// T-210: writes are the bridge's named operations, run only where its session offers them
+// (`uni_core::mail::write`). Sending is save → review → send by id and fingerprint, once per opId.
+
+use uni_core::mail::{DraftFields, Reviewed, SendOutcome};
+
+/// Set or clear "read" ($seen) on these messages.
+#[tauri::command]
+async fn mail_mark_seen(app: tauri::AppHandle, account_id: String, email_ids: Vec<String>, seen: bool) -> Result<(), MailError> {
+    mail_io(&app, move |mail| tauri::async_runtime::block_on(mail.mark_seen(&account_id, &email_ids, seen))).await
+}
+
+#[tauri::command]
+async fn mail_flag(app: tauri::AppHandle, account_id: String, email_ids: Vec<String>, flagged: bool) -> Result<(), MailError> {
+    mail_io(&app, move |mail| tauri::async_runtime::block_on(mail.flag(&account_id, &email_ids, flagged))).await
+}
+
+/// Move these messages from the account's Inbox to its Archive.
+#[tauri::command]
+async fn mail_archive(app: tauri::AppHandle, account_id: String, email_ids: Vec<String>) -> Result<(), MailError> {
+    mail_io(&app, move |mail| tauri::async_runtime::block_on(mail.archive(&account_id, &email_ids))).await
+}
+
+/// Save a draft (over `replaces`, opened with fingerprint `base`); the answer is what to review before sending.
+#[tauri::command]
+async fn mail_draft_save(app: tauri::AppHandle, account_id: String, fields: DraftFields, replaces: Option<String>, base: Option<String>) -> Result<Reviewed, MailError> {
+    mail_io(&app, move |mail| {
+        let over = replaces.as_deref().zip(base.as_deref());
+        if replaces.is_some() && over.is_none() {
+            return Err(mail_invalid("replacing a draft needs the fingerprint it was opened with"));
+        }
+        tauri::async_runtime::block_on(mail.draft_save(&account_id, &fields, over))
+    })
+    .await
+}
+
+/// An existing draft as it is, for review: its fingerprint, and the Uni drafts sending it discards.
+#[tauri::command]
+async fn mail_draft_review(app: tauri::AppHandle, account_id: String, draft_id: String) -> Result<Reviewed, MailError> {
+    mail_io(&app, move |mail| tauri::async_runtime::block_on(mail.draft_review(&account_id, &draft_id))).await
+}
+
+#[tauri::command]
+async fn mail_draft_discard(app: tauri::AppHandle, account_id: String, draft_id: String) -> Result<(), MailError> {
+    mail_io(&app, move |mail| tauri::async_runtime::block_on(mail.draft_discard(&account_id, &draft_id))).await
+}
+
+/// Send the reviewed draft once, under the review's opId.
+#[tauri::command]
+async fn mail_send(app: tauri::AppHandle, account_id: String, op_id: String, reviewed: Reviewed) -> Result<SendOutcome, MailError> {
+    mail_io(&app, move |mail| tauri::async_runtime::block_on(mail.send(&account_id, &op_id, &reviewed))).await
+}
+
+/// The owner sends as Uni, through the bridge's deputy path and Uni's outbound rules.
+#[tauri::command]
+async fn mail_send_as_uni(app: tauri::AppHandle, account_id: String, op_id: String, fields: DraftFields) -> Result<SendOutcome, MailError> {
+    mail_io(&app, move |mail| tauri::async_runtime::block_on(mail.send_as_uni(&account_id, &op_id, &fields))).await
+}
+
+/// Where a send stands (an unknown outcome is checked with the mail server first).
+#[tauri::command]
+async fn mail_send_check(app: tauri::AppHandle, account_id: String, op_id: String) -> Result<SendOutcome, MailError> {
+    mail_io(&app, move |mail| tauri::async_runtime::block_on(mail.send_check(&account_id, &op_id))).await
 }
 
 // ── Journal: entries go straight to the Parachute vault, signed per request
@@ -2363,6 +2427,15 @@ pub fn run() {
             mail_thread,
             mail_triage,
             mail_attachment_open,
+            mail_mark_seen,
+            mail_flag,
+            mail_archive,
+            mail_draft_save,
+            mail_draft_review,
+            mail_draft_discard,
+            mail_send,
+            mail_send_as_uni,
+            mail_send_check,
             journal_config,
             journal_set_config,
             journal_save_text,

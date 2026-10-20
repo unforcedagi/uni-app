@@ -1,4 +1,4 @@
-//! T-45 v2: both mailboxes, read-only.
+//! T-45 v2: both mailboxes. Reads here; writes are the bridge's named operations ([`super::write`], T-210).
 //!
 //! The bridge maps each key to one mail principal. Stalwart shares the other
 //! mailbox with it (an ACL), and JMAP shows a shared mailbox as a second
@@ -22,7 +22,8 @@
 //!
 //! Reads only: `Mailbox/get`, `Email/query`, `Email/get`, `Thread/get`
 //! ([`super::check_read_only`] refuses anything else before it is sent).
-//! Nothing here sets `$seen`.
+//! Nothing here sets `$seen`. The session also says which write operations
+//! the bridge offers on each account ([`SessionAccount::operations`]).
 
 use std::collections::HashMap;
 
@@ -46,6 +47,9 @@ pub struct SessionAccount {
     /// The account's name in the session (its address).
     pub name: String,
     pub who: Who,
+    /// The write operations the bridge offers this key on this account (T-210); none on a bridge without them.
+    #[serde(default)]
+    pub operations: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -65,6 +69,9 @@ pub struct AccountBoxes {
     pub who: Who,
     /// Inbox first.
     pub mailboxes: Vec<Mailbox>,
+    /// The write operations the bridge offers here (T-210): the app enables a write only when it is listed.
+    #[serde(default)]
+    pub operations: Vec<String>,
 }
 
 /// Every account in the session with its mailboxes.
@@ -108,6 +115,9 @@ pub struct ThreadSummary {
     pub has_attachment: bool,
     pub draft: bool,
     pub uni_drafted: bool,
+    /// A message in the thread is flagged.
+    #[serde(default)]
+    pub flagged: bool,
 }
 
 /// A page of threads from one or more accounts, newest first.
@@ -164,7 +174,8 @@ pub fn parse_session(v: &Value) -> MailResult<MailSession> {
             Some("uni") => Who::Uni,
             _ => continue,
         };
-        out.push(SessionAccount { id: id.clone(), name: a.get("name").and_then(Value::as_str).unwrap_or(id).to_string(), who });
+        let operations = super::write::operations_of(v, id);
+        out.push(SessionAccount { id: id.clone(), name: a.get("name").and_then(Value::as_str).unwrap_or(id).to_string(), who, operations });
     }
     if let Some(p) = primary {
         if !out.iter().any(|a| a.id == p) {
@@ -201,6 +212,11 @@ fn not_found(e: &MailError) -> bool {
 
 /// Seconds since 1970 for an RFC 3339 time (`2026-10-18T07:12:00Z`, `…+02:00`, fractions ignored); `None` if it isn't one.
 pub fn rfc3339_seconds(s: &str) -> Option<i64> {
+    rfc3339_instant(s).map(|(secs, _)| secs)
+}
+
+/// An RFC 3339 time as (seconds since 1970, nanoseconds), so times within one second still order (T-208 follow-up).
+pub fn rfc3339_instant(s: &str) -> Option<(i64, u32)> {
     let b = s.as_bytes();
     if b.len() < 20 || b[4] != b'-' || b[7] != b'-' || !matches!(b[10], b'T' | b't' | b' ') || b[13] != b':' || b[16] != b':' {
         return None;
@@ -208,8 +224,14 @@ pub fn rfc3339_seconds(s: &str) -> Option<i64> {
     let num = |r: std::ops::Range<usize>| s.get(r)?.parse::<i64>().ok();
     let (y, mo, d, h, mi, se) = (num(0..4)?, num(5..7)?, num(8..10)?, num(11..13)?, num(14..16)?, num(17..19)?);
     let mut rest = s.get(19..)?;
+    let mut nanos = 0u32;
     if let Some(r) = rest.strip_prefix('.') {
-        rest = r.trim_start_matches(|c: char| c.is_ascii_digit());
+        let digits: String = r.chars().take_while(char::is_ascii_digit).collect();
+        if digits.is_empty() {
+            return None;
+        }
+        nanos = format!("{:0<9}", &digits[..digits.len().min(9)]).parse().ok()?;
+        rest = &r[digits.len()..];
     }
     let offset = match rest.as_bytes() {
         [b'Z' | b'z'] => 0,
@@ -227,22 +249,33 @@ pub fn rfc3339_seconds(s: &str) -> Option<i64> {
     let doy = (153 * (mo + if mo > 2 { -3 } else { 9 }) + 2) / 5 + d - 1;
     let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
     let days = era * 146_097 + doe - 719_468;
-    Some(days * 86_400 + h * 3600 + mi * 60 + se - offset)
+    Some((days * 86_400 + h * 3600 + mi * 60 + se - offset, nanos))
 }
 
-/// Merge each account's page (its source, its threads newest first, its total) into one page of at most `limit`,
-/// newest first. Each source's next position moves past only the threads this page took from it, so the next page
-/// carries on where this one stopped in every account. Ties keep the sources' order.
-pub fn merge(pages: Vec<(Source, Vec<ThreadSummary>, Option<u64>)>, limit: usize) -> ThreadPage {
-    let mut all: Vec<(usize, i64, ThreadSummary)> = Vec::new();
-    for (i, (_, threads, _)) in pages.iter().enumerate() {
-        for t in threads {
-            all.push((i, rfc3339_seconds(&t.received_at).unwrap_or(i64::MIN), t.clone()));
+/// One account's answer to a list query: its source, the rows it could show (each with its index in the query's ids,
+/// newest first), how many ids the query returned, and its total.
+#[derive(Debug, Clone)]
+pub struct SourcePage {
+    pub source: Source,
+    pub rows: Vec<(usize, ThreadSummary)>,
+    pub returned: usize,
+    pub total: Option<u64>,
+}
+
+/// Merge each account's page into one page of at most `limit`, newest first. Each source's next position moves past
+/// what this page used of it: up to the first row it didn't take, or past every id it returned when it took them all.
+/// So an id `Email/get` couldn't return (gone between the query and the get) is stepped over, never shown twice and
+/// never a cursor that doesn't move (T-208 follow-up). Ties keep the sources' order.
+pub fn merge(pages: Vec<SourcePage>, limit: usize) -> ThreadPage {
+    let mut all: Vec<(usize, Option<(i64, u32)>, ThreadSummary)> = Vec::new();
+    for (i, p) in pages.iter().enumerate() {
+        for (_, t) in &p.rows {
+            all.push((i, rfc3339_instant(&t.received_at), t.clone()));
         }
     }
     all.sort_by(|a, b| b.1.cmp(&a.1)); // stable: ties stay in source order, and each source's own order
     all.truncate(limit);
-    let mut taken = vec![0u64; pages.len()];
+    let mut taken = vec![0usize; pages.len()];
     for (i, _, _) in &all {
         taken[*i] += 1;
     }
@@ -251,14 +284,18 @@ pub fn merge(pages: Vec<(Source, Vec<ThreadSummary>, Option<u64>)>, limit: usize
     let next = pages
         .iter()
         .enumerate()
-        .map(|(i, (src, threads, t))| {
-            let position = src.position + taken[i];
-            more |= match t {
-                Some(t) => position < *t,
-                None => threads.len() as u64 > taken[i] || threads.len() >= limit,
+        .map(|(i, p)| {
+            let used = match p.rows.get(taken[i]) {
+                Some((index, _)) => *index,
+                None => p.returned,
             };
-            total = total.zip(*t).map(|(a, b)| a + b);
-            Source { position, ..src.clone() }
+            let position = p.source.position + used as u64;
+            more |= match p.total {
+                Some(t) => position < t,
+                None => taken[i] < p.rows.len() || p.returned >= limit,
+            };
+            total = total.zip(p.total).map(|(a, b)| a + b);
+            Source { position, ..p.source.clone() }
         })
         .collect();
     ThreadPage { threads: all.into_iter().map(|(_, _, t)| t).collect(), next, more, total }
@@ -272,6 +309,7 @@ fn thread_summary(account: &str, e: &Value, thread: Option<&Vec<String>>, states
     let members: Vec<&Value> = ids.iter().filter_map(|i| states.get(i).copied()).collect();
     let unread_any = if members.is_empty() { unread(e) && !keyword(e, "$draft") } else { members.iter().any(|m| unread(m) && !keyword(m, "$draft")) };
     let attach = e.get("hasAttachment").and_then(Value::as_bool).unwrap_or(false) || members.iter().any(|m| m.get("hasAttachment").and_then(Value::as_bool) == Some(true));
+    let flagged = keyword(e, "$flagged") || members.iter().any(|m| keyword(m, "$flagged"));
     ThreadSummary {
         account_id: account.to_string(),
         thread_id,
@@ -286,6 +324,7 @@ fn thread_summary(account: &str, e: &Value, thread: Option<&Vec<String>>, states
         has_attachment: attach,
         draft: keyword(e, "$draft"),
         uni_drafted: keyword(e, "$uni-drafted"),
+        flagged,
     }
 }
 
@@ -311,7 +350,7 @@ impl MailBridge<'_> {
                 let (login, r) = self.jmap(json!([["Mailbox/get", { "ids": [] }, "m"]])).await?;
                 let id = r.get("m").and_then(|m| m.get("accountId")).and_then(Value::as_str).ok_or_else(|| invalid("no account id in the answer"))?.to_string();
                 check_id(&id)?;
-                Ok(MailSession { accounts: vec![SessionAccount { id, name: login.clone(), who: Who::Owner }], login, multi: false })
+                Ok(MailSession { accounts: vec![SessionAccount { id, name: login.clone(), who: Who::Owner, operations: vec![] }], login, multi: false })
             }
             Err(e) => Err(e),
         }
@@ -331,7 +370,7 @@ impl MailBridge<'_> {
         for (i, a) in session.accounts.into_iter().enumerate() {
             answered_for(&r, &format!("m{i}"), &a.id)?;
             let list = r.get(&format!("m{i}")).and_then(|m| m.get("list")).and_then(Value::as_array).ok_or_else(|| invalid("no mailbox list in the answer"))?;
-            accounts.push(AccountBoxes { id: a.id, name: a.name, who: a.who, mailboxes: parse_mailboxes(list) });
+            accounts.push(AccountBoxes { id: a.id, name: a.name, who: a.who, mailboxes: parse_mailboxes(list), operations: a.operations });
         }
         Ok(Overview { login: session.login, multi: session.multi, accounts })
     }
@@ -403,13 +442,14 @@ impl MailBridge<'_> {
                 .collect();
             let states_list = list(&format!("k{i}"));
             let states: HashMap<String, &Value> = states_list.iter().filter_map(|e| Some((e.get("id")?.as_str()?.to_string(), e))).collect();
-            // Email/get may answer in any order; the query's order is newest first
-            let rows: Vec<ThreadSummary> = ids
+            // Email/get may answer in any order; the query's order is newest first. Each row keeps its place in the query.
+            let rows: Vec<(usize, ThreadSummary)> = ids
                 .iter()
-                .filter_map(|id| by_id.get(id))
-                .map(|e| thread_summary(&s.account_id, e, e.get("threadId").and_then(Value::as_str).and_then(|t| threads.get(t)), &states))
+                .enumerate()
+                .filter_map(|(n, id)| by_id.get(id).map(|e| (n, e)))
+                .map(|(n, e)| (n, thread_summary(&s.account_id, e, e.get("threadId").and_then(Value::as_str).and_then(|t| threads.get(t)), &states)))
                 .collect();
-            pages.push((s.clone(), rows, q.get("total").and_then(Value::as_u64)));
+            pages.push(SourcePage { source: s.clone(), rows, returned: ids.len(), total: q.get("total").and_then(Value::as_u64) });
         }
         Ok(merge(pages, limit as usize))
     }
@@ -423,8 +463,8 @@ impl MailBridge<'_> {
             ["Thread/get", { "accountId": account, "ids": [thread_id] }, "t"],
             ["Email/get", {
                 "accountId": account, "#ids": { "resultOf": "t", "name": "Thread/get", "path": "/list/0/emailIds" },
-                "properties": ["id", "threadId", "mailboxIds", "keywords", "from", "to", "cc", "replyTo", "subject", "receivedAt", "sentAt",
-                               "textBody", "htmlBody", "attachments", "bodyValues"],
+                "properties": ["id", "threadId", "mailboxIds", "keywords", "from", "to", "cc", "bcc", "replyTo", "subject", "receivedAt", "sentAt",
+                               "textBody", "htmlBody", "attachments", "bodyValues", "headers"],
                 "fetchTextBodyValues": true, "fetchHTMLBodyValues": true, "maxBodyValueBytes": MAX_BODY_VALUE_BYTES
             }, "g"]
         ]);
@@ -502,7 +542,7 @@ mod tests {
     fn row(account: &str, id: &str, at: &str) -> ThreadSummary {
         ThreadSummary {
             account_id: account.into(), thread_id: format!("T{id}"), email_id: id.into(), from: vec![], to: vec![], subject: id.into(), preview: String::new(),
-            received_at: at.into(), count: 1, unread: false, has_attachment: false, draft: false, uni_drafted: false,
+            received_at: at.into(), count: 1, unread: false, has_attachment: false, draft: false, uni_drafted: false, flagged: false,
         }
     }
 
@@ -533,8 +573,20 @@ mod tests {
         assert_eq!(s.login, "robin@example.com");
         assert!(s.multi);
         assert_eq!(s.accounts, vec![
-            SessionAccount { id: "f".into(), name: "robin@example.com".into(), who: Who::Owner },
-            SessionAccount { id: "g".into(), name: "uni@example.com".into(), who: Who::Uni },
+            SessionAccount { id: "f".into(), name: "robin@example.com".into(), who: Who::Owner, operations: vec![] },
+            SessionAccount { id: "g".into(), name: "uni@example.com".into(), who: Who::Uni, operations: vec![] },
+        ]);
+    }
+
+    /// T-210: the writes the bridge offers come with the session, per account; a bridge without them offers none.
+    #[test]
+    fn a_session_carries_the_operations_the_bridge_offers_per_account() {
+        let mut v = session(json!({ "f": "owner", "g": "uni" }), json!({}));
+        v["operations"] = json!({ "f": ["mark_seen", "draft.save", "send"], "g": ["mark_seen", "send_as_uni"], "c": ["send"] });
+        let s = parse_session(&v).unwrap();
+        assert_eq!(s.accounts.iter().map(|a| (a.id.as_str(), a.operations.clone())).collect::<Vec<_>>(), [
+            ("f", vec!["mark_seen".to_string(), "draft.save".into(), "send".into()]),
+            ("g", vec!["mark_seen".to_string(), "send_as_uni".into()]),
         ]);
     }
 
@@ -594,38 +646,75 @@ mod tests {
         }
     }
 
+    /// A source's page with every row at its own query position (nothing missing).
+    fn page(src: Source, rows: Vec<ThreadSummary>, total: Option<u64>) -> SourcePage {
+        SourcePage { source: src, returned: rows.len(), rows: rows.into_iter().enumerate().collect(), total }
+    }
+
     #[test]
     fn the_combined_view_merges_newest_first_and_pages_each_account_on_its_own() {
         // A has 3 threads, U has 2; their times interleave, and one of U's is in another offset
         let a = vec![row("A", "a1", "2026-10-18T10:00:00Z"), row("A", "a2", "2026-10-17T10:00:00Z")];
         let u = vec![row("U", "u1", "2026-10-18T13:30:00+02:00"), row("U", "u2", "2026-10-16T10:00:00Z")];
-        let page = merge(vec![(src("A", 0), a, Some(3)), (src("U", 0), u, Some(2))], 2);
-        assert_eq!(page.threads.iter().map(|t| t.email_id.as_str()).collect::<Vec<_>>(), ["u1", "a1"], "11:30Z before 10:00Z");
-        assert_eq!(page.next.iter().map(|s| (s.account_id.as_str(), s.position)).collect::<Vec<_>>(), [("A", 1), ("U", 1)]);
-        assert!(page.more);
-        assert_eq!(page.total, Some(5));
-        assert_eq!(page.next[0].mailbox_id.as_deref(), Some("A-inbox"), "the source is kept, only its position moves");
+        let p = merge(vec![page(src("A", 0), a, Some(3)), page(src("U", 0), u, Some(2))], 2);
+        assert_eq!(p.threads.iter().map(|t| t.email_id.as_str()).collect::<Vec<_>>(), ["u1", "a1"], "11:30Z before 10:00Z");
+        assert_eq!(p.next.iter().map(|s| (s.account_id.as_str(), s.position)).collect::<Vec<_>>(), [("A", 1), ("U", 1)]);
+        assert!(p.more);
+        assert_eq!(p.total, Some(5));
+        assert_eq!(p.next[0].mailbox_id.as_deref(), Some("A-inbox"), "the source is kept, only its position moves");
 
         // the next page starts each account where this one stopped
         let a = vec![row("A", "a2", "2026-10-17T10:00:00Z"), row("A", "a3", "2026-10-15T10:00:00Z")];
         let u = vec![row("U", "u2", "2026-10-16T10:00:00Z")];
-        let page = merge(vec![(page.next[0].clone(), a, Some(3)), (page.next[1].clone(), u, Some(2))], 2);
-        assert_eq!(page.threads.iter().map(|t| t.email_id.as_str()).collect::<Vec<_>>(), ["a2", "u2"]);
-        assert_eq!(page.next.iter().map(|s| s.position).collect::<Vec<_>>(), [2, 2]);
-        assert!(page.more, "a3 is still to come");
+        let p = merge(vec![page(p.next[0].clone(), a, Some(3)), page(p.next[1].clone(), u, Some(2))], 2);
+        assert_eq!(p.threads.iter().map(|t| t.email_id.as_str()).collect::<Vec<_>>(), ["a2", "u2"]);
+        assert_eq!(p.next.iter().map(|s| s.position).collect::<Vec<_>>(), [2, 2]);
+        assert!(p.more, "a3 is still to come");
 
-        let page = merge(vec![(page.next[0].clone(), vec![row("A", "a3", "2026-10-15T10:00:00Z")], Some(3)), (page.next[1].clone(), vec![], Some(2))], 2);
-        assert_eq!(page.threads.iter().map(|t| t.email_id.as_str()).collect::<Vec<_>>(), ["a3"]);
-        assert!(!page.more);
+        let p = merge(vec![page(p.next[0].clone(), vec![row("A", "a3", "2026-10-15T10:00:00Z")], Some(3)), page(p.next[1].clone(), vec![], Some(2))], 2);
+        assert_eq!(p.threads.iter().map(|t| t.email_id.as_str()).collect::<Vec<_>>(), ["a3"]);
+        assert!(!p.more);
     }
 
     #[test]
     fn ties_keep_the_accounts_order_and_an_uncounted_total_is_unknown() {
         let at = "2026-10-18T10:00:00Z";
-        let page = merge(vec![(src("A", 0), vec![row("A", "a1", at)], None), (src("U", 0), vec![row("U", "u1", at)], Some(1))], 10);
-        assert_eq!(page.threads.iter().map(|t| t.email_id.as_str()).collect::<Vec<_>>(), ["a1", "u1"]);
-        assert_eq!(page.total, None);
-        assert!(!page.more);
+        let p = merge(vec![page(src("A", 0), vec![row("A", "a1", at)], None), page(src("U", 0), vec![row("U", "u1", at)], Some(1))], 10);
+        assert_eq!(p.threads.iter().map(|t| t.email_id.as_str()).collect::<Vec<_>>(), ["a1", "u1"]);
+        assert_eq!(p.total, None);
+        assert!(!p.more);
+    }
+
+    /// T-208 follow-up (Codex r1–r3 P2): two accounts within one second still order by the fraction.
+    #[test]
+    fn times_within_one_second_order_by_their_fraction() {
+        assert_eq!(rfc3339_instant("2026-10-18T10:00:00.9Z"), Some((1_792_317_600, 900_000_000)));
+        assert_eq!(rfc3339_instant("2026-10-18T10:00:00.123456789123Z"), Some((1_792_317_600, 123_456_789)));
+        assert_eq!(rfc3339_instant("2026-10-18T10:00:00.Z"), None);
+        let p = merge(vec![page(src("A", 0), vec![row("A", "a1", "2026-10-18T10:00:00.100Z")], Some(1)), page(src("U", 0), vec![row("U", "u1", "2026-10-18T10:00:00.900Z")], Some(1))], 1);
+        assert_eq!(p.threads.iter().map(|t| t.email_id.as_str()).collect::<Vec<_>>(), ["u1"], ".900 is newer than .100");
+        assert_eq!(p.next.iter().map(|s| s.position).collect::<Vec<_>>(), [0, 1]);
+    }
+
+    /// T-208 follow-up (Codex r2–r3 P2): an id the query returned but Email/get didn't is stepped over, not repeated.
+    #[test]
+    fn ids_missing_from_email_get_still_move_the_cursor() {
+        // the query returned [a, b]; Email/get returned only b (at query index 1)
+        let missing_first = SourcePage { source: src("A", 0), rows: vec![(1, row("A", "b", "2026-10-18T09:00:00Z"))], returned: 2, total: Some(4) };
+        let p = merge(vec![missing_first], 2);
+        assert_eq!(p.threads.iter().map(|t| t.email_id.as_str()).collect::<Vec<_>>(), ["b"]);
+        assert_eq!(p.next[0].position, 2, "past a and b, not 1 (which would show b again)");
+        // every id gone: the cursor still moves, so Load older never loops on the same page
+        let all_gone = SourcePage { source: src("A", 2), rows: vec![], returned: 2, total: Some(4) };
+        let p = merge(vec![all_gone], 2);
+        assert_eq!((p.threads.len(), p.next[0].position, p.more), (0, 4, false));
+        // a row this page didn't take keeps its place: the missing ones before it are consumed, it is not
+        let a = SourcePage { source: src("A", 0), rows: vec![(1, row("A", "a2", "2026-10-18T09:00:00Z")), (3, row("A", "a4", "2026-10-15T09:00:00Z"))], returned: 4, total: Some(4) };
+        let u = page(src("U", 0), vec![row("U", "u1", "2026-10-17T09:00:00Z")], Some(1));
+        let p = merge(vec![a, u], 2);
+        assert_eq!(p.threads.iter().map(|t| t.email_id.as_str()).collect::<Vec<_>>(), ["a2", "u1"]);
+        assert_eq!(p.next.iter().map(|s| s.position).collect::<Vec<_>>(), [3, 1], "A resumes at a4 (index 3)");
+        assert!(p.more);
     }
 
     #[test]
