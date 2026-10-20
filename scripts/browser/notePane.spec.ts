@@ -258,3 +258,35 @@ test('beside: the folded tree unfolds to its own width, even when the sidebar is
   await expect(page.locator('.th-roomnav:not(.hidden)')).toBeVisible();
   expect(Math.round((await page.locator('.th-roomnav').boundingBox())!.width)).toBeGreaterThanOrEqual(250);
 });
+
+test('Open as page from far back in a long room comes back to the same spot, older messages and all', async ({ page }) => {
+  await openRoom(page);
+  await switchRoom(page, 'Archive');
+  await expect(page.getByRole('textbox', { name: 'Message Archive' })).toBeVisible();
+  await page.waitForTimeout(1700);
+  await tap(page.getByRole('button', { name: 'Load older messages' }));
+  const chip = page.locator('.message-list .note-chip', { hasText: 'Spring planting plan' }).first();
+  await expect(chip).toHaveCount(1);
+  await chip.scrollIntoViewIfNeeded();
+  await tap(chip);
+  const pane = page.locator('.note-pane');
+  await expect(pane.locator('.note-title')).toHaveText('Spring planting plan');
+  const at = await spotOf(chip);
+  await tap(pane.getByRole('button', { name: 'Open as page' }));
+  await expect(page.locator('.note-sheet .note-title')).toHaveText('Spring planting plan');
+  await back(page);
+  await expect(page.getByRole('textbox', { name: 'Message Archive' })).toBeVisible();
+  await expect(pane.locator('.note-title')).toHaveText('Spring planting plan');
+  await expect(chip).toHaveCount(1);
+  expect(Math.abs((await spotOf(chip)) - at)).toBeLessThanOrEqual(4);
+});
+
+test('an edit in the note goes with it to Open as page: the page opens in the editor with the draft', async ({ page }) => {
+  const { chip } = await openRoom(page);
+  await tap(chip);
+  const pane = page.locator('.note-pane');
+  await tap(pane.getByRole('button', { name: 'Edit' }));
+  await pane.getByRole('textbox', { name: 'Note content' }).fill('# Spring planting plan\n\nA changed line.');
+  await tap(pane.getByRole('button', { name: 'Open as page' }));
+  await expect(page.locator('.note-sheet').getByRole('textbox', { name: 'Note content' })).toHaveValue('# Spring planting plan\n\nA changed line.');
+});

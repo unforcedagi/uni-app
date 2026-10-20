@@ -715,7 +715,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const restoredView = useRef<string | null>(null);
   /** T-200: the spot in the chat that "Open as page" left (the first message in sight, and how far down it was), for the Back that comes
    *  back to it; `pinned` holds it there while late layout settles, as a fresh room is held at its newest message. */
-  const returnSpot = useRef<{ view: string; ref: string; offset: number } | null>(null);
+  const returnSpot = useRef<{ view: string; ref: string; offset: number; limit: number; seq: number } | null>(null);
   const pinned = useRef<{ ref: string; offset: number; until: number } | null>(null);
   // Following the newest message: content growth (images, late layout) keeps it pinned.
   const stickToEnd = useRef(true);
@@ -921,7 +921,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
   }, [channel, root, synced, tick, limit, loadRooms]);
 
   // New room: back to the default window; older pages load on demand.
-  useEffect(() => { setLimit(300); setOlder("idle"); setMenuFor(null); setEditing(null); asideAhead.current.clear(); }, [channel]);
+  // T-200: the room a note was opened as a page from comes back with the older messages it had loaded, so its spot is there to return to
+  useEffect(() => { const spot = returnSpot.current; setLimit(spot && channel && spot.view.startsWith(`${channel}|`) ? spot.limit : 300); setOlder("idle"); setMenuFor(null); setEditing(null); asideAhead.current.clear(); }, [channel]);
 
   useEffect(() => {
     if (!channel) { setMembers([]); return; }
@@ -939,12 +940,14 @@ function Conversations({ onForget }: { onForget: () => void }) {
     if (!el || !currentView || loadedView !== currentView || restoredView.current === currentView) return;
     // T-124 r2: a room always opens at its latest message (no remembered spot), and stays there while images and older pages settle
     // in, until the reader scrolls on purpose. T-200: except the room a note was opened as a page from, which comes back to its spot.
-    const spot = returnSpot.current;
-    returnSpot.current = null;
-    if (spot?.view === currentView && pinTo(el, spot)) {
+    const spot = returnSpot.current?.view === currentView ? returnSpot.current : null;
+    // the device's kept copy holds only the newest messages: a spot further back waits for the fetched window (below)
+    if (!spot || appliedSeq.current > spot.seq) returnSpot.current = null;
+    if (spot && pinTo(el, spot)) {
+      returnSpot.current = null;
       stickToEnd.current = false;
       settleUntil.current = 0;
-      pinned.current = { ...spot, until: Date.now() + SETTLE_MS };
+      pinned.current = { ref: spot.ref, offset: spot.offset, until: Date.now() + SETTLE_MS };
     } else {
       pinned.current = null;
       el.scrollTop = restoreTop(undefined, el.scrollHeight, el.clientHeight);
@@ -954,6 +957,16 @@ function Conversations({ onForget }: { onForget: () => void }) {
     restoredView.current = currentView;
     shownView.current = currentView;
   }, [listEl, currentView, loadedView, messages]);
+  // T-200: a spot that was not in the kept copy, once the fetched window is in
+  useLayoutEffect(() => {
+    const el = listEl, spot = returnSpot.current;
+    if (!el || !spot || spot.view !== currentView || appliedSeq.current <= spot.seq || restoredView.current !== currentView) return;
+    returnSpot.current = null;
+    if (!pinTo(el, spot)) return;
+    stickToEnd.current = false;
+    settleUntil.current = 0;
+    pinned.current = { ref: spot.ref, offset: spot.offset, until: Date.now() + SETTLE_MS };
+  }, [listEl, currentView, messages]);
 
   // Remember where the reader is, per view (only once that view is restored,
   // so a half-swapped list never overwrites a good mark).
@@ -1810,7 +1823,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       onOpenPage={(note, title) => {
         const el = listRef.current, top = el?.getBoundingClientRect().top ?? 0;
         const first = el ? [...el.querySelectorAll<HTMLElement>("[data-ref]")].find((m) => m.getBoundingClientRect().bottom > top) : undefined;
-        returnSpot.current = first && currentView ? { view: currentView, ref: first.dataset.ref!, offset: first.getBoundingClientRect().top - top } : null;
+        returnSpot.current = first && currentView ? { view: currentView, ref: first.dataset.ref!, offset: first.getBoundingClientRect().top - top, limit, seq: appliedSeq.current } : null;
         openTarget({ kind: "note", note, title }, "new");
       }}
       onDirty={(ref, dirty) => { const k = noteKey(ref); if (dirty) asideDirty.current.add(k); else asideDirty.current.delete(k); }} />}
