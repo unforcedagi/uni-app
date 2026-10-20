@@ -234,11 +234,12 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
   const markOnOpen = useRef<string | null>(null);
   /** The open thread and list now, for callbacks that finish later (an archive, a refresh). */
   const openRef = useRef<Open | null>(remembered.open);
+  const composeRef = useRef<Compose | null>(remembered.compose);
   /** The composer as kept here; its live text is in `remembered.compose.snapshot` (kept on every change, not rendered). */
   const setCompose = (c: Compose | null) => {
     const live = c && remembered.compose?.key === c.key ? remembered.compose.snapshot : c?.snapshot ?? null;
     const next = c ? { ...c, snapshot: live } : null;
-    remembered.compose = next; setComposeState(next);
+    remembered.compose = next; composeRef.current = next; setComposeState(next);
   };
   // a slow answer for a list or thread no longer shown is dropped
   const listSeq = useRef(0);
@@ -377,6 +378,7 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
     const store = typeof localStorage === "undefined" ? null : localStorage;
     const said: string[] = [];
     for (const p of readPending(store)) {
+      if (!can(overviewRef.current?.accounts.find((a) => a.id === p.account_id), "send.check")) { said.push("The mail bridge doesn't offer checking it now; it stays listed."); continue; }
       try {
         const out = await invoke<SendOutcome>("mail_send_check", { accountId: p.account_id, opId: p.op_id });
         if (settled(out.state)) { writePending(store, withoutPending(readPending(store), p.op_id)); said.push(sendOutcomeText(out, p.who).text); }
@@ -428,7 +430,8 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
       archive: can(acct, "archive") && inInbox.length > 0 ? () => void act("archive it", () => invoke("mail_archive", { accountId: o.accountId, emailIds: inInbox }), () => {
         // only if that thread is still the one shown: another opened since stays open
         const same = (c: Open | null) => !!c && c.accountId === o.accountId && c.threadId === o.threadId;
-        if (same(openRef.current)) { threadSeq.current++; openRef.current = null; setOpen(null); setThread(null); if (!compose || compose.hidden) setPane("list"); }
+        const c = composeRef.current;
+        if (same(openRef.current)) { threadSeq.current++; openRef.current = null; setOpen(null); setThread(null); if (!c || c.hidden) setPane("list"); }
         setList((cur) => (cur ? { ...cur, threads: cur.threads.filter((r) => !(r.account_id === o.accountId && r.thread_id === o.threadId)) } : cur));
         void refresh();
       }) : null,
@@ -488,7 +491,9 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
           {compose?.hidden && <button type="button" className="mail-resume" onClick={resume}>✎ A message in progress · Resume</button>}
           {pending.length > 0 && !composing && <div className="mail-pending" role="status">
             <span>{pending.length === 1 ? "A message you sent hasn't confirmed yet." : `${pending.length} messages you sent haven't confirmed yet.`} None goes out twice.</span>
-            <button type="button" className="note-action" onClick={() => void checkPending()}>Check</button>
+            {pending.some((p) => can(accountOf(p.account_id), "send.check"))
+              ? <button type="button" className="note-action" onClick={() => void checkPending()}>Check</button>
+              : <><button type="button" className="note-action" disabled>Check</button><small className="mail-note">The mail bridge doesn't offer checking sends now; they stay listed.</small></>}
           </div>}
           {pendingNote && <p className="mail-note mail-pending-note" role="status">{pendingNote}</p>}
           <div className="mail-scroll">

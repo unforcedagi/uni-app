@@ -636,7 +636,15 @@ fn op(s: &mut State, req: &Value) -> (u16, Value) {
             } else {
                 vec![]
             };
-            (200, json!({ "accountId": account, "draftId": e["id"], "threadId": e["threadId"], "fingerprint": fingerprint(e), "discard": discard, "uniDrafted": e["keywords"]["$uni-drafted"] == true }))
+            let mut out = json!({ "accountId": account, "draftId": e["id"], "threadId": e["threadId"], "fingerprint": fingerprint(e), "discard": discard, "uniDrafted": e["keywords"]["$uni-drafted"] == true });
+            if name == "draft.review" {
+                // what it holds, as the bridge reads it from the stored message
+                let text = e["textBody"].as_array().into_iter().flatten().filter_map(|p| e["bodyValues"][p["partId"].as_str()?]["value"].as_str()).collect::<Vec<_>>().join("");
+                let addrs = |k: &str| e[k].as_array().cloned().unwrap_or_default();
+                out["fields"] = json!({ "to": addrs("to"), "cc": addrs("cc"), "bcc": addrs("bcc"), "subject": e["subject"], "text": text });
+                out["plain"] = json!(e["htmlBody"].as_array().is_none_or(|h| h.iter().all(|p| p["type"] != "text/html")) && e["attachments"].as_array().is_none_or(|a| a.is_empty()));
+            }
+            (200, out)
         }
         "draft.discard" => {
             let id = req["draftId"].as_str().unwrap_or("");

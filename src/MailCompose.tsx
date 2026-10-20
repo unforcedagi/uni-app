@@ -11,7 +11,7 @@
 //
 // Mail keeps the composer while you look at a thread or leave Mail (`snapshot`), and Close asks before it drops text
 // that isn't saved.
-import { useEffect, useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   addressLine, can, canSendFrom, formatAddresses, mailProblem, newOpId, parseAddresses, readPending, sameFields, sendLabel, sendOutcomeText,
@@ -39,6 +39,8 @@ type Stage =
   | { kind: "edit" }
   | { kind: "opening" }
   | { kind: "open-failed" }
+  /** The stored draft has more than plain text: the review couldn't show all of it. */
+  | { kind: "not-plain" }
   | { kind: "busy"; what: string }
   | ({ kind: "review" } & Review)
   /** `lost`: the send got no answer; `absent`: the bridge has no record of it (it never arrived: nothing was sent). */
@@ -84,10 +86,15 @@ export default function Composer({ overview, start, snapshot, onSnapshot, onClos
   const locked = start.kind !== "new" || saved !== null;
   const dirty = (Object.keys(raw) as (keyof Raw)[]).some((k) => raw[k] !== baseline[k]);
   const setField = (k: keyof Raw) => (v: string) => { setRaw((r) => ({ ...r, [k]: v })); setConfirmClose(false); };
+  /** The review being sent or checked: if Mail goes away before the answer, it comes back as unknown, never editable. */
+  const inflight = useRef<Review | null>(null);
 
-  // Mail keeps what is being written while you look elsewhere (a send in flight is in the pending list, not here)
+  // Mail keeps what is being written while you look elsewhere. A send or check in flight is kept as an unknown
+  // outcome (Check again, no edit); a draft still opening opens again.
   useEffect(() => {
-    const keep: Stage = stage.kind === "busy" || stage.kind === "opening" ? { kind: "edit" } : stage;
+    const keep: Stage = stage.kind !== "busy" ? stage
+      : inflight.current && (stage.what === "Sending…" || stage.what === "Checking…") ? { kind: "outcome", ...inflight.current, out: unknownOut(inflight.current), lost: true }
+      : { kind: "edit" };
     onSnapshot({ from, raw, baseline, showCc, saved, discardAhead, stage: keep, dirty });
   }, [from, raw, baseline, showCc, saved, discardAhead, stage, dirty]);
 
@@ -97,7 +104,13 @@ export default function Composer({ overview, start, snapshot, onSnapshot, onClos
     if (start.kind !== "draft") return;
     setProblem(null); setStage({ kind: "opening" });
     invoke<Reviewed>("mail_draft_review", { accountId: start.accountId, draftId: start.draftId })
-      .then((r) => { setSaved({ accountId: start.accountId, draftId: r.draft_id, fingerprint: r.fingerprint, fields: start.fields }); setDiscardAhead(r.discard); setStage({ kind: "edit" }); })
+      .then((r) => {
+        if (r.plain === false) { setStage({ kind: "not-plain" }); return; }
+        // what the bridge read from the bytes it fingerprinted, not what the thread showed earlier
+        const f = r.fields ? { ...r.fields, in_reply_to: null } : start.fields;
+        setRaw(rawOf(f)); setBaseline(rawOf(f)); setShowCc(f.cc.length > 0 || f.bcc.length > 0);
+        setSaved({ accountId: start.accountId, draftId: r.draft_id, fingerprint: r.fingerprint, fields: f }); setDiscardAhead(r.discard); setStage({ kind: "edit" });
+      })
       .catch((e) => { setProblem(mailProblem(e)); setStage({ kind: "open-failed" }); });
   };
   useEffect(() => { if (stage.kind === "opening") open(); }, []);
@@ -140,8 +153,10 @@ export default function Composer({ overview, start, snapshot, onSnapshot, onClos
     if (asUni) { setStage({ kind: "review", fields: f, reviewed: null, opId: newOpId() }); return; }
     setStage({ kind: "busy", what: "Saving the draft to review it…" });
     try {
-      const r = saved && sameFields(saved.fields, f)
-        ? await invoke<Reviewed>("mail_draft_review", { accountId: saved.accountId, draftId: saved.draftId })
+      // unchanged: the draft as opened or saved, with that content's fingerprint (a fresh one could belong to a version
+      // changed elsewhere since, which this review never showed; the bridge refuses that send instead)
+      const r: Reviewed = saved && sameFields(saved.fields, f)
+        ? { account_id: saved.accountId, draft_id: saved.draftId, thread_id: null, fingerprint: saved.fingerprint, discard: discardAhead, uni_drafted: false }
         : await save(f);
       setSaved({ accountId: r.account_id, draftId: r.draft_id, fingerprint: r.fingerprint, fields: f });
       setDiscardAhead(r.discard);
@@ -157,6 +172,7 @@ export default function Composer({ overview, start, snapshot, onSnapshot, onClos
   const send = async (r: Review) => {
     if (!from || !acct) return;
     const s: Review = { fields: r.fields, reviewed: r.reviewed, opId: r.opId };
+    inflight.current = s;
     writePending(store(), withPending(readPending(store()), { account_id: from, op_id: s.opId, who: acct.who, at: new Date().toISOString() }));
     onPendingChange();
     setProblem(null); setStage({ kind: "busy", what: "Sending…" });
@@ -178,6 +194,7 @@ export default function Composer({ overview, start, snapshot, onSnapshot, onClos
 
   const check = async (s: Extract<Stage, { kind: "outcome" }>) => {
     if (!from) return;
+    inflight.current = { fields: s.fields, reviewed: s.reviewed, opId: s.opId };
     setProblem(null); setStage({ kind: "busy", what: "Checking…" });
     try {
       const out = await invoke<SendOutcome>("mail_send_check", { accountId: from, opId: s.opId });
@@ -217,7 +234,7 @@ export default function Composer({ overview, start, snapshot, onSnapshot, onClos
       : <span className="mail-compose-pick">
         {from === null && <span className="mail-note">Choose who it's from:</span>}
         {senders.map((a) => <label key={a.id} className={`mail-from-pick ${from === a.id ? "on" : ""}`}>
-          <input type="radio" name="mail-from" checked={from === a.id} onChange={() => setFrom(a.id)} />
+          <input type="radio" name="mail-from" checked={from === a.id} disabled={busy} onChange={() => setFrom(a.id)} />
           <WhoTag who={a.who} address={a.name} />
         </label>)}
       </span>}
@@ -228,14 +245,15 @@ export default function Composer({ overview, start, snapshot, onSnapshot, onClos
     <span>Sending this discards {plural(discardAhead.length, "Uni's 1 earlier draft", "Uni's # earlier drafts")} in this thread.</span></p>;
   const problemBox = problem && <div className="note-error mail-problem" role="alert"><p className="mail-problem-title">{problem.title}</p><p className="mail-problem-help">{problem.detail}</p></div>;
 
-  if (stage.kind === "opening" || stage.kind === "open-failed") {
+  if (stage.kind === "opening" || stage.kind === "open-failed" || stage.kind === "not-plain") {
     return <section className="mail-compose" aria-label={uniDraft ? "Review Uni's draft" : "Edit draft"}>
       <div className="mail-compose-bar">
         <button type="button" className="note-action" onClick={() => onClose(false)}>✕ Close</button>
         <strong className="mail-compose-title">{uniDraft ? "Uni's draft" : "Draft"}</strong>
       </div>
       <div className="mail-scroll">
-        {stage.kind === "opening" ? <p className="mail-loading" role="status">Opening the draft…</p> : <>
+        {stage.kind === "opening" ? <p className="mail-loading" role="status">Opening the draft…</p>
+        : stage.kind === "not-plain" ? <p className="mail-note" role="status">This draft has formatting or attachments this app can't show in full: send it from your mail client.</p> : <>
           {problemBox}
           <p className="mail-note">The draft couldn't be opened for review, so it can't be edited or sent yet.</p>
           <p><button type="button" className="cp-retry" onClick={open}>Retry</button></p>
@@ -309,13 +327,13 @@ export default function Composer({ overview, start, snapshot, onSnapshot, onClos
       {discardNote}
       {asUni && <p className="mail-note">As Uni: it goes from Uni's address, through Uni's outbound rules.</p>}
       <div className="mail-compose-fields">
-        <label><span>To</span><input type="text" inputMode="email" autoComplete="off" value={raw.to} onChange={(e) => setField("to")(e.target.value)} onKeyDown={noEnter} placeholder="name@example.com, …" /></label>
+        <label><span>To</span><input type="text" inputMode="email" autoComplete="off" readOnly={busy} value={raw.to} onChange={(e) => setField("to")(e.target.value)} onKeyDown={noEnter} placeholder="name@example.com, …" /></label>
         {showCc ? <>
-          <label><span>Cc</span><input type="text" inputMode="email" autoComplete="off" value={raw.cc} onChange={(e) => setField("cc")(e.target.value)} onKeyDown={noEnter} /></label>
-          <label><span>Bcc</span><input type="text" inputMode="email" autoComplete="off" value={raw.bcc} onChange={(e) => setField("bcc")(e.target.value)} onKeyDown={noEnter} /></label>
+          <label><span>Cc</span><input type="text" inputMode="email" autoComplete="off" readOnly={busy} value={raw.cc} onChange={(e) => setField("cc")(e.target.value)} onKeyDown={noEnter} /></label>
+          <label><span>Bcc</span><input type="text" inputMode="email" autoComplete="off" readOnly={busy} value={raw.bcc} onChange={(e) => setField("bcc")(e.target.value)} onKeyDown={noEnter} /></label>
         </> : <button type="button" className="note-quiet mail-cc-open" onClick={() => setShowCc(true)}>Cc / Bcc</button>}
-        <label><span>Subject</span><input type="text" value={raw.subject} onChange={(e) => setField("subject")(e.target.value)} onKeyDown={noEnter} /></label>
-        <label className="mail-compose-body"><span>Message</span><textarea value={raw.text} onChange={(e) => setField("text")(e.target.value)} rows={10} /></label>
+        <label><span>Subject</span><input type="text" readOnly={busy} value={raw.subject} onChange={(e) => setField("subject")(e.target.value)} onKeyDown={noEnter} /></label>
+        <label className="mail-compose-body"><span>Message</span><textarea readOnly={busy} value={raw.text} onChange={(e) => setField("text")(e.target.value)} rows={10} /></label>
       </div>
       {note && <p className="mail-note" role="status">{note}</p>}
       {stage.kind === "busy" && <p className="mail-loading" role="status">{stage.what}</p>}

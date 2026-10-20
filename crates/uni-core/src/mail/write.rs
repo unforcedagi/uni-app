@@ -74,6 +74,13 @@ pub struct Reviewed {
     pub fingerprint: String,
     pub discard: Vec<String>,
     pub uni_drafted: bool,
+    /// What the draft holds, read by the bridge from the same bytes as `fingerprint` (`draft.review` only): the composer
+    /// shows this, so what is reviewed is what the fingerprint sends.
+    #[serde(default)]
+    pub fields: Option<DraftFields>,
+    /// The draft is plain text and nothing else (no HTML, no attachments): only then can it be reviewed here in full.
+    #[serde(default)]
+    pub plain: Option<bool>,
 }
 
 /// Where a send stands. `Cleaned` and `Submitted` went out; `Unknown` is blocked until the bridge can tell.
@@ -201,6 +208,8 @@ fn reviewed(v: &Value, account: &str) -> MailResult<Reviewed> {
         fingerprint,
         discard: v.get("discard").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect(),
         uni_drafted: v.get("uniDrafted").and_then(Value::as_bool).unwrap_or(false),
+        fields: v.get("fields").and_then(|f| serde_json::from_value(f.clone()).ok()),
+        plain: v.get("plain").and_then(Value::as_bool),
     })
 }
 

@@ -98,6 +98,11 @@ async fn a_reviewed_draft_is_sent_once_whatever_the_retries() {
     let fields = DraftFields { to: to("mara@example.org"), subject: "Re: Planning the garden week".into(), text: "Monday.".into(), in_reply_to: Some("a3".into()), ..Default::default() };
     let r = mail.draft_save("A", &fields, None).await.unwrap();
     assert_eq!((r.account_id.as_str(), r.fingerprint.len(), r.thread_id.as_deref()), ("A", 64, Some("TA-plan")));
+    // a review says what the draft holds, with that content's fingerprint
+    let again = mail.draft_review("A", &r.draft_id).await.unwrap();
+    assert_eq!((again.fingerprint.as_str(), again.plain), (r.fingerprint.as_str(), Some(true)));
+    let shown = again.fields.unwrap();
+    assert_eq!((shown.to[0].email.as_str(), shown.subject.as_str(), shown.text.as_str()), ("mara@example.org", "Re: Planning the garden week", "Monday."));
     let op = "op-0123456789abcdef";
     let out = mail.send("A", op, &r).await.unwrap();
     assert_eq!((out.state, out.draft_id.as_deref()), (SendState::Cleaned, Some(r.draft_id.as_str())));

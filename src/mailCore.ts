@@ -184,7 +184,9 @@ export function mailSrcdoc(html: string): string {
 /** The fields the composer sends to Rust (`uni_core::mail::DraftFields`). There is no From: the bridge sets it. */
 export type DraftFields = { to: Address[]; cc: Address[]; bcc: Address[]; subject: string; text: string; in_reply_to: string | null };
 /** A saved draft as the bridge reports it, for review (`uni_core::mail::Reviewed`). */
-export type Reviewed = { account_id: string; draft_id: string; thread_id: string | null; fingerprint: string; discard: string[]; uni_drafted: boolean };
+/** `fields` and `plain` (draft.review only): what the draft holds, read by the bridge from the same bytes as `fingerprint`. */
+export type Reviewed = { account_id: string; draft_id: string; thread_id: string | null; fingerprint: string; discard: string[]; uni_drafted: boolean;
+  fields?: DraftFields | null; plain?: boolean | null };
 export type SendState = "drafting" | "reserved" | "submitting" | "submitted" | "cleaned" | "refused" | "awaiting-approval" | "failed" | "unknown";
 export type SendOutcome = {
   op_id: string; account_id: string; draft_id: string | null; state: SendState; reason: string | null; submission_id: string | null;

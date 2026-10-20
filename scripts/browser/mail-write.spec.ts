@@ -422,3 +422,81 @@ test('a new message saved as a draft keeps its sender: From locks once it is sav
   await c.getByRole('button', { name: 'Discard draft' }).click();
   expect((await calls(page, 'mail_draft_discard'))[0].accountId).toBe('A');
 });
+
+/** Codex review 2, P0: what the review shows and the fingerprint it sends are one version of the draft. */
+test('a draft is opened as the bridge reads it now, and a change made elsewhere after that is never sent unseen', async ({ page }) => {
+  await boot(page, 'ok', { writes: true });
+  await rows(page).nth(0).click();
+  const thread = page.getByRole('region', { name: 'Thread: Planning the garden week' });
+  await expect(thread.locator('.mail-card').last()).toContainText('Monday suits me. See you then.');
+  // changed in another mail client after the thread loaded: the composer shows the stored version, not the thread's
+  await page.evaluate(() => { (window as any).__msgs.find((m: any) => m.id === 'a6').text = 'Monday suits me. Bring the jars.\n\nRobin'; });
+  await thread.locator('.mail-card').last().getByRole('button', { name: 'Review and send it yourself…' }).click();
+  const c = page.getByRole('region', { name: "Review Uni's draft" });
+  await expect(c.getByRole('textbox', { name: 'Message' })).toHaveValue('Monday suits me. Bring the jars.\n\nRobin');
+  // changed again after it was opened: the review shows what was opened, and the bridge refuses the changed one
+  await page.evaluate(() => { (window as any).__msgs.find((m: any) => m.id === 'a6').text = 'Send the deposit to the new account.'; });
+  await c.getByRole('button', { name: /^Send as you/ }).click();
+  const review = page.getByRole('region', { name: 'Review before sending' });
+  await expect(review.locator('.mail-review-text')).toHaveText('Monday suits me. Bring the jars.\n\nRobin');
+  await review.getByRole('button', { name: /^Send as you/ }).click();
+  await expect(review.getByText('Not sent: the draft changed since it was reviewed.')).toBeVisible();
+  expect(await submissions(page)).toEqual([]);
+  expect(await calls(page, 'mail_draft_review')).toHaveLength(1, 'reviewing unchanged fields fetched no fresh fingerprint');
+});
+
+/** Codex review 2, P0: leaving Mail while a send is under way never comes back as an editable composer. */
+test('leaving Mail while a send is under way comes back as an unknown outcome, never editable', async ({ page }) => {
+  await boot(page, 'ok', { writes: true });
+  await newButton(page).click();
+  const c = page.getByRole('region', { name: 'New message' });
+  await c.getByRole('radio', { name: /uni@example\.com/ }).check();
+  await c.getByRole('textbox', { name: 'To' }).fill('ada@example.org');
+  await c.getByRole('textbox', { name: 'Message' }).fill('Thursday.');
+  await c.getByRole('button', { name: /^Send as Uni/ }).click();
+  await page.evaluate(() => { (window as any).__sendDelay = 1500; });
+  await page.getByRole('region', { name: 'Review before sending' }).getByRole('button', { name: /^Send as Uni/ }).click();
+  const rail = page.getByRole('navigation', { name: 'Main navigation' });
+  await rail.getByRole('button', { name: 'Journal', exact: true }).click();
+  await page.waitForTimeout(2000);
+  await rail.getByRole('button', { name: 'Mail', exact: true }).click();
+  const review = page.getByRole('region', { name: 'Review before sending' });
+  await expect(review.getByText("Outcome unknown, checking. It won't be sent twice.")).toBeVisible();
+  await expect(review.getByRole('button', { name: '← Edit' })).toHaveCount(0);
+  await expect(page.getByRole('textbox', { name: 'Message' })).toHaveCount(0);
+  await review.getByRole('button', { name: 'Check again' }).click();
+  await expect(review.getByText('Sent as Uni.')).toBeVisible();
+  expect(await submissions(page)).toHaveLength(1);
+  expect(await calls(page, 'mail_send_as_uni')).toHaveLength(1);
+});
+
+test("while a draft is saving it can't be typed into, and a pending send's Check needs the bridge to offer it", async ({ page }) => {
+  await boot(page, 'ok', { writes: true });
+  await newButton(page).click();
+  let c = page.getByRole('region', { name: 'New message' });
+  await c.getByRole('radio', { name: /robin@example\.com/ }).check();
+  await c.getByRole('textbox', { name: 'Message' }).fill('First words.');
+  await page.evaluate(() => { (window as any).__saveDelay = 1200; });
+  await c.getByRole('button', { name: 'Save draft' }).click();
+  await expect(c.getByRole('textbox', { name: 'Message' })).not.toBeEditable();
+  await expect(c.getByText('Saved in your Drafts.')).toBeVisible();
+  await expect(c.getByRole('textbox', { name: 'Message' })).toBeEditable();
+  await c.getByRole('button', { name: 'Discard draft' }).click();
+  // a send as Uni whose answer is lost, then the bridge stops offering checks: the banner keeps it, Check is off
+  await page.evaluate(() => { (window as any).__saveDelay = 0; });
+  await newButton(page).click();
+  c = page.getByRole('region', { name: 'New message' });
+  await c.getByRole('radio', { name: /uni@example\.com/ }).check();
+  await c.getByRole('textbox', { name: 'To' }).fill('ada@example.org');
+  await c.getByRole('button', { name: /^Send as Uni/ }).click();
+  await page.evaluate(() => { (window as any).__loseAnswer = true; });
+  const review = page.getByRole('region', { name: 'Review before sending' });
+  await review.getByRole('button', { name: /^Send as Uni/ }).click();
+  await review.getByRole('button', { name: 'Close' }).click();
+  await page.evaluate(() => { (window as any).__ops.U = ['mark_seen']; });
+  await page.getByRole('button', { name: 'Refresh' }).click();
+  const banner = page.locator('.mail-pending');
+  await expect(banner.getByRole('button', { name: 'Check' })).toBeDisabled();
+  await expect(banner).toContainText("The mail bridge doesn't offer checking sends now; they stay listed.");
+  expect(await calls(page, 'mail_send_check')).toEqual([]);
+});

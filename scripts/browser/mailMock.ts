@@ -84,7 +84,7 @@ export async function boot(page: Page, mode: Mode = 'ok', opts: { writes?: boole
       if (w.__mailMode === 'unreachable') throw { kind: 'unreachable', message: 'https://uni-1.example.ts.net:8452 is not answering (tailnet only)' };
     };
     // T-210 write helpers: what is offered, a draft's fingerprint, the send ledger
-    w.__n = 0; w.__saved = []; w.__submissions = [];
+    w.__n = 0; w.__saved = []; w.__submissions = []; w.__msgs = msgs;
     const sends: Record<string, any> = w.__sends = {};
     const offered = (op: string, account: string) => {
       if (!(w.__ops[account] ?? []).includes(op)) throw { kind: 'refused', status: 403, message: `the mail bridge doesn't offer ${op} on this mailbox` };
@@ -166,7 +166,11 @@ export async function boot(page: Page, mode: Mode = 'ok', opts: { writes?: boole
               w.__saved.push(f);
             }
             const discard = d.uni_drafted ? msgs.filter((m) => m !== d && m.account === d.account && m.thread_id === d.thread_id && m.draft && m.uni_drafted && rank(m) < rank(d)).map((m) => m.id) : [];
-            return { account_id: args.accountId, draft_id: d.id, thread_id: d.thread_id, fingerprint: fp(d), discard, uni_drafted: d.uni_drafted };
+            const out: any = { account_id: args.accountId, draft_id: d.id, thread_id: d.thread_id, fingerprint: fp(d), discard, uni_drafted: d.uni_drafted };
+            // a review says what the draft holds now, from the same version as the fingerprint
+            if (cmd === 'mail_draft_review') Object.assign(out, { fields: { to: d.to, cc: d.cc, bcc: d.bcc ?? [], subject: d.subject, text: d.text ?? '', in_reply_to: null }, plain: !d.html && d.attachments.length === 0 && !d.truncated });
+            if (w.__saveDelay && cmd === 'mail_draft_save') await new Promise((r) => setTimeout(r, w.__saveDelay));
+            return out;
           }
           case 'mail_draft_discard': {
             offered('draft.discard', args.accountId);
@@ -178,6 +182,7 @@ export async function boot(page: Page, mode: Mode = 'ok', opts: { writes?: boole
           case 'mail_send': case 'mail_send_as_uni': case 'mail_send_check': {
             offered(cmd === 'mail_send' ? 'send' : cmd === 'mail_send_as_uni' ? 'send_as_uni' : 'send.check', args.accountId);
             if (w.__sendFails) { w.__sendFails--; throw { kind: 'unreachable', message: 'the mail bridge did not answer in time' }; }
+            if (w.__sendDelay && cmd !== 'mail_send_check') await new Promise((r) => setTimeout(r, w.__sendDelay));
             const request = JSON.stringify({ accountId: args.accountId, reviewed: args.reviewed ?? null, fields: args.fields ?? null });
             const known = sends[args.opId];
             if (cmd === 'mail_send_check') {
