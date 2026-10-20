@@ -1531,6 +1531,87 @@ fn relay_origin(app: tauri::AppHandle) -> String {
         .to_string()
 }
 
+// ── Mail (T-45): read-only, through the mail bridge on the hub's host. Each
+// request is NIP-98 signed with the device key; the bridge holds the mail
+// credentials, so the webview never sees one. Nothing here sends, flags or
+// deletes, and reading a message does not mark it read.
+
+use uni_core::mail::{MailBridge, MailError};
+
+fn mail_invalid(message: impl ToString) -> MailError {
+    MailError::Invalid { message: message.to_string() }
+}
+
+/// The bridge origin and, for a hub with another name (T-137), the bridge
+/// there: `UNI_MAIL_URL` (a scratch or fake bridge, no alias), else port 8452
+/// on the hub's host.
+fn mail_base(app: &tauri::AppHandle) -> Result<(String, Option<String>), MailError> {
+    if let Ok(v) = std::env::var(uni_core::mail::MAIL_URL_ENV) {
+        if !v.trim().is_empty() {
+            return Ok((v.trim().to_string(), None));
+        }
+    }
+    let hub = vault_config(app).hub;
+    let base = uni_core::mail::mail_url(&hub).ok_or_else(|| mail_invalid(format!("no mail bridge for the hub {hub} (it must be https)")))?;
+    Ok((base, uni_core::hub::alias_of(&hub).and_then(|a| uni_core::mail::mail_url(&a))))
+}
+
+/// Run `f` with a bridge client on the device key, off the async executor.
+async fn mail_io<T, F>(app: &tauri::AppHandle, f: F) -> Result<T, MailError>
+where
+    T: Send + 'static,
+    F: FnOnce(&MailBridge) -> Result<T, MailError> + Send + 'static,
+{
+    secure_store::ensure_loaded(app).await.map_err(mail_invalid)?;
+    let (base, alias) = mail_base(app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let (keys, _) = uni_core::load_keys(false).map_err(mail_invalid)?;
+        f(&MailBridge::new(&base, &keys)?.with_alias(alias.as_deref()))
+    })
+    .await
+    .map_err(mail_invalid)?
+}
+
+/// The account the bridge reads, and its mailboxes (Inbox first).
+#[tauri::command]
+async fn mail_mailboxes(app: tauri::AppHandle) -> Result<uni_core::mail::MailAccount, MailError> {
+    mail_io(&app, |mail| tauri::async_runtime::block_on(mail.mailboxes())).await
+}
+
+/// One page of a mailbox, newest first.
+#[tauri::command]
+async fn mail_messages(
+    app: tauri::AppHandle,
+    mailbox: String,
+    position: Option<u64>,
+) -> Result<uni_core::mail::MessagePage, MailError> {
+    mail_io(&app, move |mail| tauri::async_runtime::block_on(mail.messages(&mailbox, position.unwrap_or(0), uni_core::mail::PAGE_SIZE))).await
+}
+
+/// One message to read: plain text, sanitized HTML, attachments.
+#[tauri::command]
+async fn mail_message(app: tauri::AppHandle, id: String) -> Result<uni_core::mail::Message, MailError> {
+    mail_io(&app, move |mail| tauri::async_runtime::block_on(mail.message(&id))).await
+}
+
+/// Fetch an attachment through the bridge into the cache and open it with
+/// the OS default handler, as `media_open` does for relay files. Mail comes
+/// from anyone, so only documents, images and media are opened, and only
+/// when the declared type and the bytes match the name
+/// ([`uni_core::mail::open_attachment`]): a file that could run as a program
+/// is refused before it is fetched, a disguised one before it is written.
+#[tauri::command]
+async fn mail_attachment_open(app: tauri::AppHandle, blob_id: String, name: Option<String>, mime: Option<String>) -> Result<(), MailError> {
+    use tauri_plugin_opener::OpenerExt;
+    let dir = app.path().app_cache_dir().map_err(mail_invalid)?.join("mail");
+    let opener = app.clone();
+    mail_io(&app, move |mail| {
+        let open = |path: &std::path::Path| opener.opener().open_path(path.to_string_lossy(), None::<&str>).map_err(|e| e.to_string());
+        tauri::async_runtime::block_on(uni_core::mail::open_attachment(mail, &dir, &blob_id, name.as_deref(), mime.as_deref(), open)).map(|_| ())
+    })
+    .await
+}
+
 // ── Journal: entries go straight to the Parachute vault, signed per request
 // with the same key that signs Buzz messages (NIP-98). The device queues each
 // entry first, so journaling works offline and survives app restarts.
@@ -2259,6 +2340,10 @@ pub fn run() {
             media_save,
             media_open,
             relay_origin,
+            mail_mailboxes,
+            mail_messages,
+            mail_message,
+            mail_attachment_open,
             journal_config,
             journal_set_config,
             journal_save_text,

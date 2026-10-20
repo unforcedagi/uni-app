@@ -623,7 +623,8 @@ h1 { font-family: var(--serif); font-weight: 500; font-size: 34px; line-height: 
 @media (max-width: 599px) {
   .shell { padding-bottom: calc(56px + env(safe-area-inset-bottom)); }
   .rail { position: absolute; left: 0; right: 0; bottom: 0; width: 100%; height: calc(56px + env(safe-area-inset-bottom)); padding: 0 4px env(safe-area-inset-bottom); flex-direction: row; justify-content: space-around; border-right: 0; border-top: 1px solid var(--line); gap: 0; overflow: visible; }
-  .rail button { width: calc(100% / 6); min-height: 56px; border-radius: 8px; }
+  /* T-45: the places share the bar evenly, however many there are (Mail made seven) */
+  .rail button { flex: 1 1 0; width: auto; min-width: 0; min-height: 56px; border-radius: 8px; }
   .rail .rail-settings { margin-top: 0; }
   .shell.composer-focused, .shell.journal-focus { padding-bottom: 0; }
   .shell.composer-focused .rail { display: none; }

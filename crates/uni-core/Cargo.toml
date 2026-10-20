@@ -29,6 +29,18 @@ webpki-roots = "1"
 # Re-encode images before upload so camera/screenshot metadata (EXIF, ICC,
 # XMP, pHYs) never reaches the relay, which rejects any metadata channel.
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
+# Mail (T-45): message HTML is sanitized here, before it reaches the webview.
+ammonia = "4"
+memchr = "2"
+# Attachments (T-45 fix 2): Office/OpenDocument files are read as zips, their
+# content types, relationships and manifests parsed, before anything opens them.
+zip = { version = "4.6", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+quick-xml = "0.42"
+crc32fast = "1"
+
+[target.'cfg(unix)'.dependencies]
+# The attachment cache: folders and files created relative to an opened folder, never through a symlink.
+rustix = { version = "1", features = ["fs", "process"] }
 
 [dev-dependencies]
 tempfile = "3"

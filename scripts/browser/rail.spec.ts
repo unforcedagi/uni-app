@@ -42,8 +42,8 @@ test('Rail surfaces, overlay panels, focus; rooms are in the tree (r12: no Rooms
     await expect(rail).toBeHidden();
     await input.blur();
     await expect(rail).toBeVisible();
-    // Uni, Journal, For you, Vault, Search and Settings: everything the drawer used to hold is on the rail or in the tree
-    await expect(rail.getByRole('button').filter({ visible: true })).toHaveCount(6);
+    // Uni, Journal, Mail (T-45), For you, Vault, Search and Settings: everything the drawer used to hold is on the rail or in the tree
+    await expect(rail.getByRole('button').filter({ visible: true })).toHaveCount(7);
   }
   await rail.getByRole('button', { name: 'Journal', exact: true }).click();
   const writing = page.getByRole('textbox', { name: 'Journal entry', exact: true });

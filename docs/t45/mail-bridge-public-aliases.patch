@@ -1,0 +1,59 @@
+--- a/server.py
++++ b/server.py
+@@ -12,7 +12,10 @@
+ Listens on 127.0.0.1 only; Tailscale Serve exposes it tailnet-only.
+ Config: ~/.config/uni/mail-bridge.json
+   {"user": "test@mail.example.com", "password_file": "~/.config/mail-bridge/password",
+-   "jmap": "https://127.0.0.1:8480", "public_url": "https://uni-1.example.ts.net:8452"}
++   "jmap": "https://127.0.0.1:8480", "public_url": "https://uni-1.example.ts.net:8452",
++   "public_aliases": ["https://uni.example.ts.net:8452"]}
++The app signs for the hub's host (T-137: `uni-1` now, `uni` after the tailnet
++rename), so either name is accepted while both exist.
+ Allowlist: ~/.config/uni/mail-allow (one hex pubkey per line).
+ """
+ import base64
+@@ -50,9 +53,14 @@
+     c = json.loads(CONF.read_text())
+     c.setdefault("jmap", "https://127.0.0.1:8480")
+     c.setdefault("public_url", "https://uni-1.example.ts.net:8452")
++    c.setdefault("public_aliases", [])
+     return c
+ 
+ 
++def public_urls(c: dict) -> list[str]:
++    return [c["public_url"], *c["public_aliases"]]
++
++
+ def allowed() -> set[str]:
+     if not ALLOW_FILE.exists():
+         return set()
+@@ -60,7 +68,7 @@
+     return {l for l in lines if len(l) == 64}
+ 
+ 
+-def verify_nip98(header: str, url: str, body: bytes) -> str:
++def verify_nip98(header: str, urls: list[str], body: bytes) -> str:
+     if not header.startswith("Nostr "):
+         raise ValueError("missing Nostr authorization")
+     ev = json.loads(base64.b64decode(header[6:] + "=" * (-len(header[6:]) % 4), altchars=b"-_"))
+@@ -75,7 +83,7 @@
+     if abs(time.time() - ev["created_at"]) > 120:
+         raise ValueError("stale authorization")
+     tags = {t[0]: t[1] for t in ev["tags"] if len(t) >= 2}
+-    if tags.get("u") != url or tags.get("method", "").upper() != "POST":
++    if tags.get("u") not in urls or tags.get("method", "").upper() != "POST":
+         raise ValueError("authorization is for a different request")
+     if tags.get("payload") != hashlib.sha256(body).hexdigest():
+         raise ValueError("payload hash mismatch")
+@@ -156,9 +164,9 @@
+             if n <= 0 or n > MAX_BODY:
+                 return self.send(413, b'{"error":"bad body size"}')
+             body = self.rfile.read(n)
+-            url = conf()["public_url"] + self.path
++            urls = [u + self.path for u in public_urls(conf())]
+             try:
+-                verify_nip98(self.headers.get("Authorization", ""), url, body)
++                verify_nip98(self.headers.get("Authorization", ""), urls, body)
+             except (ValueError, KeyError, json.JSONDecodeError) as e:
+                 return self.send(401, json.dumps({"error": str(e)}).encode())
+             req = json.loads(body)

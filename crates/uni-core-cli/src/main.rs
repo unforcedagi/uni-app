@@ -8,6 +8,7 @@
 //! uni-core-cli show [--db path] [--limit N]
 //! uni-core-cli search <query> [--db path] [--limit N]
 //! uni-core-cli probe [--relay …] [--ephemeral]
+//! uni-core-cli mail [--bridge https://…:8452] [--sign-as <public url>] [--mailbox <id>]   read-only: mailboxes, or a mailbox's newest messages
 //! ```
 //!
 //! The private key is read from `UNI_NSEC` or the macOS keyring (`uni-app`/`nsec`)
@@ -97,6 +98,18 @@ enum Cmd {
         ephemeral: bool,
         #[arg(long, env = "BUZZ_AUTH_TAG", hide_env_values = true)]
         auth_tag: Option<String>,
+    },
+    /// Read mail through the read-only mail bridge (T-45): the mailboxes, or the newest messages of one.
+    Mail {
+        /// Bridge origin [default: the bridge on the shipped hub's host].
+        #[arg(long, env = "UNI_MAIL_URL")]
+        bridge: Option<String>,
+        /// Sign for this public URL while connecting to --bridge (e.g. loopback on the bridge's host).
+        #[arg(long)]
+        sign_as: Option<String>,
+        /// List this mailbox's newest messages instead of the mailboxes.
+        #[arg(long)]
+        mailbox: Option<String>,
     },
 }
 
@@ -331,6 +344,39 @@ async fn main() -> Result<()> {
             let store = Store::open(&db)?;
             for it in store.timeline(limit)? {
                 print_item(&store, &it)?;
+            }
+            Ok(())
+        }
+        Cmd::Mail { bridge, sign_as, mailbox } => {
+            let bridge = match bridge {
+                Some(b) => b,
+                None => uni_core::mail::mail_url(uni_core::hub::HUB_ALIASES[0].0).context("no default mail bridge")?,
+            };
+            let (keys, source) = load_keys(false).context("loading identity")?;
+            println!("bridge:     {bridge}");
+            println!("key source: {}", key_source_label(source));
+            println!("pubkey:     {}", keys.public_key().to_hex());
+            let mut mail = uni_core::mail::MailBridge::new(&bridge, &keys)?;
+            if let Some(public) = sign_as {
+                println!("signing as: {public}");
+                mail = mail.signing_as(&public)?;
+            }
+            match mailbox {
+                None => {
+                    let acct = mail.mailboxes().await?;
+                    println!("account:    {}", acct.account);
+                    for b in acct.mailboxes {
+                        println!("{:<24} {:>5} total {:>4} unread  {}", b.name, b.total, b.unread, b.id);
+                    }
+                }
+                Some(id) => {
+                    let page = mail.messages(&id, 0, 10).await?;
+                    println!("{} message(s) in {id}", page.total.unwrap_or(0));
+                    for m in page.messages {
+                        let from = m.from.first().map(|a| a.email.as_str()).unwrap_or("");
+                        println!("{} {} {:<28.28} {:.60}", m.received_at, if m.unread { "●" } else { " " }, from, m.subject);
+                    }
+                }
             }
             Ok(())
         }

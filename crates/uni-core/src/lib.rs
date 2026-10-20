@@ -20,6 +20,7 @@
 //! - [`parachute`]: NIP-98-signed MCP client for the Parachute hub (journal notes).
 //! - [`journal`]: on-device outbox that sends journal entries to the vault.
 //! - [`secret`]: T-176 secret handoff — answer Uni's secret request with a NIP-59 gift wrap.
+//! - [`mail`]: read-only mail through the NIP-98 mail bridge (T-45).
 
 pub mod archive;
 pub mod backoff;
@@ -28,6 +29,7 @@ pub mod compose;
 pub mod identity;
 pub mod journal;
 pub mod live;
+pub mod mail;
 pub mod media;
 pub mod pairing;
 pub mod pairing_source;

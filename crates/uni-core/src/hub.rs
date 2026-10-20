@@ -89,17 +89,20 @@ pub fn hub_origins(hub: &str) -> Vec<String> {
     origin_of(hub).into_iter().chain(alias_of(hub)).collect()
 }
 
-/// The transcription endpoint on the hub's host: same scheme and host, port
-/// [`TRANSCRIBE_PORT`], path `/transcribe`. `None` for a hub that fails
-/// [`checked_origin`] (e.g. plain http to another machine).
-pub fn transcribe_url(hub: &str) -> Option<String> {
+/// A service on the hub's host: same scheme and host, `port` (transcription,
+/// the mail bridge). `None` for a hub that fails [`checked_origin`] (e.g.
+/// plain http to another machine).
+pub fn service_origin(hub: &str, port: u16) -> Option<String> {
     let mut u = url::Url::parse(&checked_origin(hub).ok()?).ok()?;
     u.host_str()?;
-    u.set_port(Some(TRANSCRIBE_PORT)).ok()?;
-    u.set_path("/transcribe");
-    u.set_query(None);
-    u.set_fragment(None);
-    Some(u.to_string())
+    u.set_port(Some(port)).ok()?;
+    Some(u.origin().ascii_serialization())
+}
+
+/// The transcription endpoint on the hub's host: port [`TRANSCRIBE_PORT`],
+/// path `/transcribe` ([`service_origin`]).
+pub fn transcribe_url(hub: &str) -> Option<String> {
+    Some(format!("{}/transcribe", service_origin(hub, TRANSCRIBE_PORT)?))
 }
 
 /// A failure to reach the host at all (DNS, refused, unroutable, TLS), as

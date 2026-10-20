@@ -4,7 +4,7 @@
 
 import type { VaultRef } from "./vaultlinks.ts";
 
-export type TabKind = "room" | "thread" | "note" | "journal" | "vault" | "areas" | "area";
+export type TabKind = "room" | "thread" | "note" | "journal" | "vault" | "areas" | "area" | "mail";
 /** `channel` on an `areas` (Uni) or `area` tab is the node's room: the one its chat pane shows. */
 export type Tab = { id: string; kind: TabKind; channel?: string; root?: string; note?: VaultRef; vault?: string; /** `area`: the node's note path (an `Areas/<Name>` area, or a project under one). */ path?: string; title: string;
   /** `area` (r15): the node has no room of its own and talks in an ancestor's (or Uni's). Unset until the shell knows. */
@@ -33,7 +33,7 @@ export type OpenMode = "focus" | "new" | "replace";
 export function sameTarget(a: TabTarget, b: TabTarget): boolean {
   if (a.kind !== b.kind) return false;
   switch (a.kind) {
-    case "journal": case "areas": return true;
+    case "journal": case "areas": case "mail": return true;
     case "area": return a.path === b.path;
     case "vault": return a.vault === b.vault;
     case "room": return a.channel === b.channel;
@@ -137,7 +137,7 @@ export function serializeTabs(s: Tabs): string {
   return JSON.stringify({ v: 1, tabs: s.tabs, active: s.active, recent: s.recent });
 }
 
-const KINDS: TabKind[] = ["room", "thread", "note", "journal", "vault", "areas", "area"];
+const KINDS: TabKind[] = ["room", "thread", "note", "journal", "vault", "areas", "area", "mail"];
 const str = (x: unknown): x is string => typeof x === "string" && x.length > 0;
 
 function validTab(x: unknown): Tab | null {
@@ -147,6 +147,7 @@ function validTab(x: unknown): Tab | null {
   const title = typeof t.title === "string" ? t.title : "";
   const kind = t.kind as TabKind;
   if (kind === "journal") return { id: t.id, kind, title: title || "Journal" };
+  if (kind === "mail") return { id: t.id, kind, title: "Mail" };
   // The areas tab is Uni's home (saved tabs from before were titled "Areas").
   if (kind === "areas") return { id: t.id, kind, title: "Uni", ...(str(t.channel) ? { channel: t.channel } : {}) };
   if (kind === "area") return typeof t.path === "string" && /^[^/.][^/]*(\/[^/.][^/]*)*$/.test(t.path) && t.path.length <= 300 ? { id: t.id, kind, path: t.path, title: title || t.path.split("/").pop()!, ...(str(t.channel) ? { channel: t.channel } : {}), ...(typeof t.borrowed === "boolean" ? { borrowed: t.borrowed } : {}) } : null;
