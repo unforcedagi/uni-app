@@ -103,7 +103,11 @@ Rules: bring it back clean, say if it broke, and nobody takes the good saw home 
         { id: 'workshop', name: 'Workshop', last_message: last(msgs.workshop).body, last_ts: last(msgs.workshop).ts, mentions: false, unread: 0 },
       ]; }
       case 'get_members': return [{ pubkey: UNI, name: 'Uni' }, { pubkey: ROBIN, name: 'Robin Vale' }, { pubkey: ME, name: 'You' }];
-      case 'get_messages': return args?.root ? [] : (msgs[args?.channel] ?? []).slice(-(args?.limit ?? 300));
+      case 'get_messages': {
+        // __notePane.slowBig: a window bigger than a room's first 300 answers late, so the smaller one lands first
+        if (w.__notePane.slowBig && (args?.limit ?? 300) > 300) await new Promise((r) => setTimeout(r, 800));
+        return args?.root ? [] : (msgs[args?.channel] ?? []).slice(-(args?.limit ?? 300));
+      }
       case 'load_older': if (args?.channel === 'archive' && !olderLoaded) { olderLoaded = true; return 120; } return 0;
       case 'refresh': return { pubkey: ME, total_items: 0, channel_errors: {}, truncated_channels: [] };
       case 'post_message': {

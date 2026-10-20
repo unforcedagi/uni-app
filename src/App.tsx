@@ -725,6 +725,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
   /** The view whose last read failed with nothing kept to show: the timeline says so, with Retry, instead of loading forever. */
   const [failedView, setFailedView] = useState<string | null>(null);
   const fetchSeq = useRef(0), appliedSeq = useRef(0), viewNow = useRef<string | null>(null);
+  /** T-200: how many messages the applied fetch asked for (a spot to return to waits for the window it was taken in). */
+  const appliedLimit = useRef(0);
   const [listEl, setListEl] = useState<HTMLDivElement | null>(null);
   const setList = useCallback((el: HTMLDivElement | null) => {
     listRef.current = el;
@@ -912,7 +914,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       if (kept) { mark("messagesCached"); setMessages(kept); setLoadedView(view); }
     }
     viewNow.current = view;
-    invoke<Message[]>("get_messages", { channel, root, limit }).then((rows) => { if (rows.length) mark("messages"); if (viewNow.current === view && seq > appliedSeq.current) { appliedSeq.current = seq; setMessages(rows); setLoadedView(view); setFetchedView(view); setFailedView(null); if (root === null) writeMessages(localStorage, whoRef.current, channel, rows); } }).catch((e) => { if (current) { setError(String(e)); setFailedView(view); } });
+    invoke<Message[]>("get_messages", { channel, root, limit }).then((rows) => { if (rows.length) mark("messages"); if (viewNow.current === view && seq > appliedSeq.current) { appliedSeq.current = seq; appliedLimit.current = limit; setMessages(rows); setLoadedView(view); setFetchedView(view); setFailedView(null); if (root === null) writeMessages(localStorage, whoRef.current, channel, rows); } }).catch((e) => { if (current) { setError(String(e)); setFailedView(view); } });
     // Viewing the room reads it (only while the app is actually on screen).
     if (document.visibilityState === "visible") {
       invoke("mark_read", { channel }).then(() => loadRooms()).catch(() => {});
@@ -942,7 +944,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     // in, until the reader scrolls on purpose. T-200: except the room a note was opened as a page from, which comes back to its spot.
     const spot = returnSpot.current?.view === currentView ? returnSpot.current : null;
     // the device's kept copy holds only the newest messages: a spot further back waits for the fetched window (below)
-    if (!spot || appliedSeq.current > spot.seq) returnSpot.current = null;
+    if (!spot || (appliedSeq.current > spot.seq && appliedLimit.current >= spot.limit)) returnSpot.current = null;
     if (spot && pinTo(el, spot)) {
       returnSpot.current = null;
       stickToEnd.current = false;
@@ -960,7 +962,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   // T-200: a spot that was not in the kept copy, once the fetched window is in
   useLayoutEffect(() => {
     const el = listEl, spot = returnSpot.current;
-    if (!el || !spot || spot.view !== currentView || appliedSeq.current <= spot.seq || restoredView.current !== currentView) return;
+    if (!el || !spot || spot.view !== currentView || appliedSeq.current <= spot.seq || appliedLimit.current < spot.limit || restoredView.current !== currentView) return;
     returnSpot.current = null;
     if (!pinTo(el, spot)) return;
     stickToEnd.current = false;

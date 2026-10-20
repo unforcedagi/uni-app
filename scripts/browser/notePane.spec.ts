@@ -274,6 +274,7 @@ test('Open as page from far back in a long room comes back to the same spot, old
   const at = await spotOf(chip);
   await tap(pane.getByRole('button', { name: 'Open as page' }));
   await expect(page.locator('.note-sheet .note-title')).toHaveText('Spring planting plan');
+  await page.evaluate(() => { (window as any).__notePane.slowBig = true; }); // the room's first 300 come back before the older window
   await back(page);
   await expect(page.getByRole('textbox', { name: 'Message Archive' })).toBeVisible();
   await expect(pane.locator('.note-title')).toHaveText('Spring planting plan');
