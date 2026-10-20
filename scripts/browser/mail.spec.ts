@@ -2,133 +2,8 @@
 // (crates/uni-core/tests/mail_accounts.rs runs those commands against a two-account JMAP double over real HTTP). The
 // made-up mail matches that double: Robin Vale's account A (YOU) and Uni's account U (UNI), shared with each other.
 // Run: npx playwright test --config playwright.mail.config.ts (desktop, phone, and the Daylight upright and sideways)
-import { expect, test, type Page } from '@playwright/test';
-
-const KEY = 'c0ffee'.repeat(10) + 'c0ff';
-type Mode = 'ok' | 'not_allowed' | 'unreachable' | 'one_account';
-
-async function boot(page: Page, mode: Mode = 'ok') {
-  await page.addInitScript(([mode, KEY]) => {
-    const w = window as any;
-    localStorage.setItem('uni.tabs.v1', JSON.stringify({ v: 1, tabs: [{ id: 'mail', kind: 'mail', title: 'Mail' }], active: 'mail', recent: ['mail'] }));
-    w.__mailMode = mode;
-    w.__calls = [] as { cmd: string; args: any }[];
-    const a = (name: string | null, email: string) => ({ name, email });
-    const robin = a('Robin Vale', 'robin@example.com'), uni = a('Uni', 'uni@example.com');
-    const mara = a('Mara Quill', 'mara@example.org'), theo = a('Theo Brandt', 'theo@example.net'), ada = a('Ada Moss', 'ada@example.org');
-    const box = (acct: string, role: string, name: string, total: number, unread: number) => ({ id: `${acct}-${role}`, name, role, parent_id: null, total, unread });
-    const accounts = [
-      { id: 'A', name: 'robin@example.com', who: 'owner', mailboxes: [box('A', 'inbox', 'Inbox', 4, 2), box('A', 'drafts', 'Drafts', 1, 0), box('A', 'sent', 'Sent', 1, 0), box('A', 'archive', 'Archive', 0, 0), box('A', 'junk', 'Junk', 1, 1), box('A', 'trash', 'Trash', 0, 0)] },
-      { id: 'U', name: 'uni@example.com', who: 'uni', mailboxes: [box('U', 'inbox', 'Inbox', 3, 2), box('U', 'drafts', 'Drafts', 1, 0), box('U', 'sent', 'Sent', 1, 0), box('U', 'archive', 'Archive', 0, 0)] },
-    ];
-    const msg = (id: string, acct: string, thread: string, box: string, from: any, to: any, subject: string, at: string, o: any = {}) => ({
-      id, thread_id: thread, account: acct, box, from: [from], to: [to], cc: [], reply_to: [], subject, received_at: at, sent_at: null,
-      unread: false, draft: false, uni_drafted: false, mailbox_ids: [box], text: null, html: null, remote_images: 0, links: [], truncated: false, attachments: [], ...o,
-    });
-    const att = (blob_id: string, name: string, mime: string, size: number, refused: string | null = null) => ({ blob_id, part_id: '3', name, mime, size, cid: null, refused });
-    const msgs = [
-      msg('a1', 'A', 'TA-plan', 'A-inbox', mara, robin, 'Planning the garden week', '2026-10-18T09:00:00Z', { text: 'Hi Robin,\n\nShall we plan the garden week? I can bring the marmalade jars on Saturday.\n\nMara' }),
-      msg('a2', 'A', 'TA-plan', 'A-sent', robin, mara, 'Re: Planning the garden week', '2026-10-18T11:00:00Z', { text: 'Saturday works. Bring the jars.\n\nRobin' }),
-      msg('a3', 'A', 'TA-plan', 'A-inbox', mara, robin, 'Re: Planning the garden week', '2026-10-19T08:30:00Z', { unread: true, text: 'Great. One question: which day should we start the beds, Monday or Tuesday?\n\nMara' }),
-      msg('a6', 'A', 'TA-plan', 'A-drafts', robin, mara, 'Re: Planning the garden week', '2026-10-19T09:00:00Z', { draft: true, uni_drafted: true, text: 'Monday suits me. See you then.\n\nRobin' }),
-      msg('a4', 'A', 'Ta4', 'A-inbox', theo, robin, 'Workshop photos and slides', '2026-10-17T15:00:00Z', { unread: true, text: 'Here are the notes from the workshop, a proof of the poster, and the installer I mentioned.\n\nTheo',
-        attachments: [att('Bnotes-pdf', 'workshop-notes.pdf', 'application/pdf', 13401), att('Bproof-svg', 'poster-proof.png', 'image/png', 160),
-          att('Bsetup-exe', 'setup.exe', 'application/octet-stream', 9000, "Uni doesn't open .exe files from mail: they could run as a program. Open it in your mail client if you trust the sender.")] }),
-      // as if the Rust sanitizer had missed everything: the sealed frame must still run no script and load nothing remote
-      msg('a5', 'A', 'Ta5', 'A-inbox', a('Riverside Library', 'library@example.org'), robin, 'Your hold is ready', '2026-10-16T10:00:00Z', { remote_images: 2, links: [{ url: 'https://library.example/holds', text: 'See your holds' }],
-        html: '<h2>Your hold is ready</h2><p id="p">Pick it up within seven days.</p><img src="/remote-pixel.gif"><img src="http://127.0.0.1:1434/remote-banner.png"><script>document.getElementById("p").textContent="SCRIPT RAN";parent.postMessage("script-ran","*")</script>' }),
-      // a reply the server filed as junk, in the same thread as an Inbox message
-      msg('a9', 'A', 'Ta5', 'A-junk', a('Riverside Library', 'library@example.org'), robin, 'Re: Your hold is ready', '2026-10-16T12:00:00Z', { text: 'Confirm your card at https://library-card.example/verify' }),
-      msg('a7', 'A', 'Ta7', 'A-junk', a('Prize Desk', 'winner@spam.example'), robin, 'Free marmalade for life', '2026-10-15T03:00:00Z', { unread: true, text: 'Claim now.' }),
-      msg('u1', 'U', 'Tu1', 'U-inbox', a('Monitor', 'monitor@example.net'), uni, 'Server report for Tuesday', '2026-10-18T10:30:00Z', { unread: true, text: 'All checks passed. The lighthouse job ran twice.' }),
-      msg('u2', 'U', 'TU-read', 'U-inbox', ada, uni, 'Question about the reading group', '2026-10-17T18:00:00Z', { text: 'Hello Uni, is the reading group still on Thursday?\n\nAda' }),
-      msg('u3', 'U', 'TU-read', 'U-sent', uni, ada, 'Re: Question about the reading group', '2026-10-17T19:00:00Z', { text: 'Yes, Thursday at six.' }),
-      msg('u5', 'U', 'TU-read', 'U-drafts', uni, ada, 'Re: Question about the reading group', '2026-10-18T08:00:00Z', { draft: true, text: 'A reminder for Thursday at six.' }),
-      msg('u4', 'U', 'Tu4', 'U-inbox', a('Billing', 'billing@example.com'), uni, 'Invoice for October', '2026-10-15T12:00:00Z', { unread: true, text: 'Your invoice is attached.', attachments: [att('Binvoice-pdf', 'invoice-october.pdf', 'application/pdf', 13401)] }),
-    ];
-    const notes: Record<string, string> = w.__notes = { 'A/a3': 'Needs you: Mara asks which day to start.', 'A/a4': '<b>Two files</b> pass the checks; setup.exe won\'t open.', 'U/u1': 'Routine. Nothing to do.' };
-    const hay = (m: any) => [m.subject, m.text, m.html, ...m.from.map((x: any) => `${x.name} ${x.email}`), ...m.attachments.map((x: any) => x.name)].join(' ').toLowerCase();
-    // Email/query with collapseThreads, per source, merged by time (what uni_core::mail::accounts::merge does)
-    const threads = (sources: any[], text: string | null) => {
-      const rows = sources.flatMap((s) => {
-        const hits = msgs.filter((m) => m.account === s.account_id && (s.mailbox_id ? m.box === s.mailbox_id : !s.exclude.includes(m.box)) && (!text || hay(m).includes(text.toLowerCase())))
-          .sort((x, y) => y.received_at.localeCompare(x.received_at));
-        const seen = new Set<string>();
-        return hits.filter((m) => !seen.has(m.thread_id) && seen.add(m.thread_id)).map((m) => {
-          const all = msgs.filter((x) => x.account === m.account && x.thread_id === m.thread_id);
-          return { account_id: m.account, thread_id: m.thread_id, email_id: m.id, from: m.from, to: m.to, subject: m.subject, preview: (m.text ?? m.subject).replace(/\s+/g, ' ').slice(0, 120),
-            received_at: m.received_at, count: all.length, unread: all.some((x) => x.unread && !x.draft), has_attachment: all.some((x) => x.attachments.length > 0), draft: m.draft, uni_drafted: m.uni_drafted };
-        });
-      }).sort((x, y) => y.received_at.localeCompare(x.received_at));
-      return { threads: rows, next: sources.map((s) => ({ ...s, position: rows.filter((r) => r.account_id === s.account_id).length })), more: false, total: rows.length };
-    };
-    const fail = () => {
-      if (w.__mailMode === 'not_allowed') throw { kind: 'not_allowed', message: 'pubkey not allowed', pubkey: KEY };
-      if (w.__mailMode === 'unreachable') throw { kind: 'unreachable', message: 'https://uni-1.example.ts.net:8452 is not answering (tailnet only)' };
-    };
-    w.__TAURI_INTERNALS__ = {
-      metadata: { currentWindow: { label: 'main' }, currentWebview: { label: 'main' } }, transformCallback: () => 1,
-      invoke: async (cmd: string, args: any) => {
-        w.__calls.push({ cmd, args });
-        switch (cmd) {
-          case 'mail_overview': fail();
-            return w.__mailMode === 'one_account' || w.__uniGone ? { login: 'robin@example.com', multi: w.__mailMode !== 'one_account', accounts: [accounts[0]] } : { login: 'robin@example.com', multi: true, accounts };
-          case 'mail_threads': fail();
-            if (w.__threadsDelay) await new Promise((r) => setTimeout(r, w.__threadsDelay));
-            if (w.__uniGone && args.sources.some((s: any) => s.account_id === 'U')) throw { kind: 'server', message: 'accountNotFound' };
-            return threads(args.sources, args.text);
-          case 'mail_thread': {
-            fail(); if (w.__threadFails) throw { kind: 'server', message: 'mail server: URLError' };
-            const list = msgs.filter((m) => m.account === args.accountId && m.thread_id === args.threadId).sort((x, y) => x.received_at.localeCompare(y.received_at));
-            if (!list.length) throw { kind: 'invalid', message: 'that thread is no longer in the mailbox' };
-            return { account_id: args.accountId, thread_id: args.threadId, messages: list };
-          }
-          case 'mail_triage': return Object.fromEntries(args.emailIds.filter((id: string) => notes[`${args.accountId}/${id}`]).map((id: string) => [id, notes[`${args.accountId}/${id}`]]));
-          // Rust decides (uni_core::mail::open_attachment_in, tested in crates/uni-core/tests/mail_attachment.rs and mail_accounts.rs);
-          // this stand-in returns its refusal word for word so the UI's handling of it is checked here
-          case 'mail_attachment_open':
-            if (args.blobId === 'Bproof-svg') throw { kind: 'invalid', message: "Uni didn't open this attachment: it is named .png but its contents are an SVG image (which can run script). Open it in your mail client if you trust the sender." };
-            return null;
-          case 'identity_status': return { paired: true, pubkey: 'a'.repeat(64) };
-          case 'get_identity': return 'a'.repeat(64);
-          case 'get_rooms': case 'get_messages': case 'get_members': case 'vault_paths': case 'journal_pending': case 'journal_list': case 'vault_list': return [];
-          case 'journal_flush': return { sent: [], remaining: 0, error: null };
-          case 'journal_config': return { hub: 'https://example.invalid', vault: 'uni' };
-          case 'refresh': return { pubkey: 'a'.repeat(64), total_items: 0, channel_errors: {}, truncated_channels: [] };
-          default: return null;
-        }
-      },
-    };
-    w.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} };
-  }, [mode, KEY] as const);
-  await page.goto('/');
-}
-
-const width = (page: Page) => page.viewportSize()?.width ?? 1440;
-/** One pane at a time (a phone). */
-const stacked = (page: Page) => width(page) < 700;
-/** The mailboxes sit behind ☰ (a phone, or the Daylight upright). */
-const boxesHidden = (page: Page) => width(page) < 1100;
-const mail = (page: Page) => page.getByRole('region', { name: 'Mail' }).last();
-const rows = (page: Page) => page.locator('.mail-row');
-
-async function pickBox(page: Page, group: "Your mailboxes" | "Uni's mailboxes" | null, name: string) {
-  if (boxesHidden(page)) await page.getByRole('button', { name: '☰ Mailboxes' }).click();
-  const nav = page.getByRole('navigation', { name: 'Mailboxes' });
-  await (group ? nav.getByRole('group', { name: group }) : nav).getByRole('button', { name: new RegExp(`^${name}`) }).click();
-}
-
-async function backToThreads(page: Page) {
-  if (stacked(page)) await page.getByRole('button', { name: '← Threads' }).first().click();
-}
-
-/** MAIL_SHOTS=<dir>: keep a screenshot of each step, for looking at (never committed). */
-async function shot(page: Page, name: string) {
-  const dir = process.env.MAIL_SHOTS;
-  if (dir) await page.screenshot({ path: `${dir}/${test.info().project.name}-${name}.png` });
-}
-
-const mailCmds = (page: Page): Promise<string[]> => page.evaluate(() => (window as any).__calls.map((c: any) => c.cmd).filter((c: string) => c.startsWith('mail_')));
+import { expect, test } from '@playwright/test';
+import { backToThreads, boot, boxesHidden, KEY, mail, mailCmds, pickBox, rows, shot, stacked } from './mailMock';
 
 test('the full flow: switch accounts and the combined view, open a thread, search, attachments, Send disabled', async ({ page }) => {
   await boot(page);
@@ -308,6 +183,19 @@ test("Refresh replaces Uni's triage notes: a removed one goes, a changed one cha
   await expect(rows(page).nth(1)).toContainText('Uni: Checked again: still routine.');
   await expect(rows(page).nth(0)).not.toContainText('Needs you');
   await expect(rows(page).nth(0).locator('.mail-row-preview')).toBeVisible();
+});
+
+/** T-208 follow-up (Codex r3 P2): a triage answer for the list before a Refresh, landing after it, is dropped. */
+test("an old triage answer that lands after Refresh doesn't bring back the old note", async ({ page }) => {
+  await page.addInitScript(() => { (window as any).__triageDelays = [2000]; });
+  await boot(page);
+  await expect(rows(page)).toHaveCount(6);
+  await page.evaluate(() => { (window as any).__notes['A/a3'] = 'Changed: Mara picked Monday.'; });
+  await page.getByRole('button', { name: 'Refresh' }).click();
+  await expect(rows(page).nth(0)).toContainText('Uni: Changed: Mara picked Monday.');
+  await page.waitForTimeout(2300);
+  await expect(rows(page).nth(0)).toContainText('Uni: Changed: Mara picked Monday.');
+  await expect(rows(page).nth(0)).not.toContainText('Needs you');
 });
 
 /** Codex review 2, P1: when Uni's mailbox leaves the session, Refresh drops its rows and its open thread; none turns YOU. */

@@ -103,6 +103,47 @@
 .mail-text { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 15px; line-height: 1.55; color: var(--text); max-width: 72ch; }
 .mail-html { width: 100%; min-height: 50vh; border: 1px solid var(--line); border-radius: var(--radius-sm); background: #fff; }
 
+/* T-210: what you can do to a thread, what a message says about where it came from */
+.mail-thread-tools > button { min-height: 44px; }
+.mail-action-problem { margin: 8px 14px 0; font-size: 14px; }
+.mail-row-flag { flex: none; font-size: 13px; color: var(--text); }
+.mail-flag-word { font-weight: 700; color: var(--text); }
+.mail-draft-open { align-self: flex-start; min-height: 44px; }
+.mail-unverified { border-left: 4px solid var(--danger, var(--th-ink)); padding-left: 10px; }
+.mail-unverified .mail-draft-tag { border-style: solid; border-width: 2px; }
+
+/* T-210: the composer. From and Send sit in the bar at the top, so a phone's keyboard never covers them. */
+.mail-compose { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
+.mail-compose-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 14px; border-bottom: 2px solid var(--th-ink); min-height: 56px; box-sizing: border-box; background: var(--bg); }
+.mail-compose-bar > button { min-height: 44px; }
+.mail-compose-title { flex: 1; min-width: 6em; }
+.mail-send-block { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 2px; margin-left: auto; }
+.mail-send { min-height: 44px; padding: 0 18px; font-weight: 700; }
+.mail-send:disabled { opacity: .55; cursor: not-allowed; }
+.mail-send-from { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; max-width: 32ch; text-align: right; }
+.mail-compose > .mail-scroll { padding: 14px 22px 40px; display: flex; flex-direction: column; gap: 12px; }
+.mail-compose-from { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 14px; }
+.mail-compose-label { color: var(--muted); min-width: 4.5em; }
+.mail-compose-pick { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.mail-from-pick { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 12px; border: 1.5px solid var(--line-strong, var(--line)); border-radius: 10px; cursor: pointer; }
+.mail-from-pick.on { border-color: var(--th-ink); box-shadow: inset 0 0 0 1.5px var(--th-ink); }
+.mail-from-pick input { width: 18px; height: 18px; margin: 0; }
+.mail-compose-fields { display: flex; flex-direction: column; gap: 8px; }
+.mail-compose-fields label { display: flex; align-items: flex-start; gap: 8px; }
+.mail-compose-fields label > span { color: var(--muted); font-size: 14px; min-width: 4.5em; padding-top: 12px; }
+.mail-compose-fields input, .mail-compose-fields textarea { flex: 1; min-width: 0; min-height: 44px; padding: 8px 12px; border: 1.5px solid var(--line-strong, var(--line)); border-radius: 10px; background: var(--surface); color: var(--text); font: 15px/1.5 var(--sans); box-sizing: border-box; }
+.mail-compose-fields textarea { min-height: 12em; resize: vertical; }
+.mail-cc-open { align-self: flex-start; min-height: 44px; }
+.mail-compose-discard { margin: 0; }
+.mail-review-headers { font-size: 14px; }
+.mail-review-text { margin: 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); white-space: pre-wrap; overflow-wrap: anywhere; font: 15px/1.55 var(--sans); color: var(--text); max-width: 72ch; }
+.mail-outcome { padding: 12px 14px; border: 2px solid var(--th-ink); border-radius: 10px; display: flex; flex-direction: column; gap: 6px; }
+.mail-outcome.state-refused, .mail-outcome.state-failed, .mail-outcome.state-unknown, .mail-outcome.state-awaiting-approval { border-style: dashed; }
+.mail-outcome-text { margin: 0; font-size: 16px; color: var(--text); font-weight: 600; }
+.mail-outcome-actions { display: flex; gap: 8px; margin: 0; }
+.mail-outcome-actions button { min-height: 44px; }
+.mail-delivery { margin: 0; padding-left: 18px; font-size: 13px; color: var(--text-soft); }
+
 /* the phone's bottom bar (B's): Search and New under the thumb */
 .mail-thumb { display: none; }
 .mail-list-new { display: flex; flex: none; }
@@ -130,4 +171,11 @@
   .mail-thumb > button { flex: 1; }
   .mail-thread-scroll { padding: 12px 14px 32px; }
   .mail-subject { font-size: 21px; }
+  .mail-compose > .mail-scroll { padding: 12px 14px 32px; }
+  .mail-compose-fields label { flex-direction: column; gap: 2px; }
+  .mail-compose-fields label > span { padding-top: 0; }
+  .mail-compose-fields input, .mail-compose-fields textarea { width: 100%; }
+  .mail-compose-pick { flex-direction: column; align-items: stretch; width: 100%; }
+  /* while composing, the bottom bar's New would replace the message being written */
+  .mail[data-composing="true"] .mail-thumb { display: none; }
 }

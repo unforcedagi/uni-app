@@ -1,16 +1,20 @@
-// Mail (T-45 v2): both mailboxes, read-only, in three panes (mailboxes | threads | thread) that stack on a phone. The
-// owner's own account is YOU, the one shared with it is UNI, and every row, group and header says which, in a word and
-// a shape (never colour alone: the Daylight is grayscale). Every call goes to Rust, which signs it for the mail bridge;
-// the webview never holds a mail credential. Nothing here sends, flags, moves or deletes, and opening a thread does not
-// mark it read. New and Reply are shown, disabled: sending comes later.
+// Mail (T-45 v2): both mailboxes in three panes (mailboxes | threads | thread) that stack on a phone. The owner's own
+// account is YOU, the one shared with it is UNI, and every row, group and header says which, in a word and a shape
+// (never colour alone: the Daylight is grayscale). Every call goes to Rust, which signs it for the mail bridge; the
+// webview never holds a mail credential.
+// T-210: writes are the bridge's named operations, and each control shows only where the bridge offers it (`can`): a
+// bridge without the write patch leaves Mail exactly as read-only as before. Opening a thread marks it read, Mark
+// unread undoes it; Flag; Archive (your own mail only); Reply, New and a Uni draft's review open the composer
+// (MailCompose.tsx), which saves, shows what will be sent, and sends it once.
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import Composer, { WhoTag, type ComposeStart } from "./MailCompose";
 import { invoke } from "@tauri-apps/api/core";
 import { copyText } from "./clipboard";
 import { splitLinks } from "./areas/linkText";
 import { formatSize } from "./media";
 import {
-  addressLine, allInboxesUnread, mailboxLabel, mailDate, mailDateLong, mailProblem, mailSrcdoc, scopeKey, scopeTitle, scopeValid, senderLabel,
-  sourcesFor, subjectLabel, whoMail, whoTag,
+  addressLine, allInboxesUnread, can, canSendFrom, draftFields, mailboxLabel, mailDate, mailDateLong, mailProblem, mailSrcdoc, notVerified, replyFields,
+  scopeKey, scopeTitle, scopeValid, senderLabel, sourcesFor, subjectLabel, whoMail, writesOffered,
   type AccountBoxes, type MailAttachment, type MailLink, type MailMessage, type MailProblem, type MailThread, type Overview, type Scope,
   type Source, type ThreadPage, type ThreadSummary, type Who,
 } from "./mailCore";
@@ -40,14 +44,7 @@ function Problem({ p, onRetry }: { p: MailProblem; onRetry: () => void }) {
   </div>;
 }
 
-/** YOU (filled) or UNI (dashed outline), with the address when `address` is given. */
-function WhoTag({ who, address }: { who: Who; address?: string }) {
-  return <span className={`mail-who who-${who}`} aria-label={address ? `${whoMail(who)}, ${address}` : whoMail(who)}>
-    {whoTag(who)}{address && <small>{address}</small>}
-  </span>;
-}
-
-/** New and Reply, shown so the place is learnt, and disabled until sending is built. `captioned` says so on the button. */
+/** New and Reply where the bridge doesn't offer sending (yet): shown so the place is learnt, disabled. `captioned` says so on the button. */
 function LaterButton({ label, className = "note-action", captioned }: { label: string; className?: string; captioned?: boolean }) {
   return <button type="button" className={`${className} mail-later ${captioned ? "captioned" : ""}`} disabled aria-disabled="true" title={LATER} aria-label={`${label}: ${LATER.toLowerCase()}`}>
     {captioned ? <><span>{label}</span><small>{LATER}</small></> : label}
@@ -90,12 +87,14 @@ function LinkList({ links }: { links: MailLink[] }) {
   </li>)}</ul></details>;
 }
 
-/** What a draft is, in words: whose, and that it was not sent. */
-function DraftTag({ m, who }: { m: MailMessage; who: Who }) {
-  if (who === "uni") return <p className="mail-draft-note"><span className="mail-draft-tag">UNI'S OWN DRAFT · NOT SENT</span><span>A draft in Uni's mail. You can read it here.</span></p>;
-  if (m.uni_drafted) return <p className="mail-draft-note" role="note"><span className="mail-draft-tag">DRAFT · BY UNI · NOT SENT</span>
-    <span>Uni wrote this in your Drafts. Uni can't send as you: nothing goes out unless you send it. {LATER} in this app.</span></p>;
-  return <p className="mail-draft-note"><span className="mail-draft-tag">DRAFT · NOT SENT</span></p>;
+/** What a draft is, in words: whose, and that it was not sent; and what you can do with it here. */
+function DraftTag({ m, acct, onOpen }: { m: MailMessage; acct: AccountBoxes; onOpen: (() => void) | null }) {
+  if (acct.who === "uni") return <p className="mail-draft-note"><span className="mail-draft-tag">UNI'S OWN DRAFT · NOT SENT</span><span>A draft in Uni's mail. You can read it here; only Uni sends it, under its rules.</span></p>;
+  if (m.uni_drafted) return <div className="mail-draft-note" role="note"><span className="mail-draft-tag">DRAFT · BY UNI · NOT SENT</span>
+    <span>Uni wrote this in your Drafts. Uni can't send as you: nothing goes out unless you send it.{!onOpen && ` ${LATER} in this app.`}</span>
+    {onOpen && <button type="button" className="note-action mail-draft-open" onClick={onOpen}>Review and send it yourself…</button>}</div>;
+  return <div className="mail-draft-note"><span className="mail-draft-tag">DRAFT · NOT SENT</span>
+    {onOpen && <button type="button" className="note-action mail-draft-open" onClick={onOpen}>Edit draft</button>}</div>;
 }
 
 /** Where a message of a thread lives, when that isn't somewhere you'd read it: a thread can reach into Junk and Trash. */
@@ -106,20 +105,24 @@ function placeOf(m: MailMessage, acct: AccountBoxes): "junk" | "trash" | null {
 }
 
 /** One message of a thread: headers, the body (plain text first, the sealed HTML on request), attachments. */
-function MessageCard({ m, acct, accountId }: { m: MailMessage; acct: AccountBoxes; accountId: string }) {
+function MessageCard({ m, acct, accountId, overview, onOpenDraft }: { m: MailMessage; acct: AccountBoxes; accountId: string; overview: Overview; onOpenDraft: ((m: MailMessage) => void) | null }) {
   const [formatted, setFormatted] = useState(!m.text && !!m.html);
   const showHtml = formatted && !!m.html;
-  const who = acct.who;
   const place = placeOf(m, acct);
+  const unverified = notVerified(m, overview);
   return <article id={`mail-msg-${m.id}`} className={`mail-card ${m.draft ? "mail-card-draft" : ""} ${m.unread && !m.draft ? "mail-card-unread" : ""}`} aria-label={m.draft ? `Draft: ${subjectLabel(m.subject)}` : `Message from ${addressLine(m.from) || "(no sender)"}`}>
-    {m.draft && <DraftTag m={m} who={who} />}
+    {m.draft && <DraftTag m={m} acct={acct} onOpen={onOpenDraft && (() => onOpenDraft(m))} />}
+    {!m.draft && m.uni_drafted && acct.who === "owner" && <p className="mail-draft-note mail-provenance"><span className="mail-draft-tag">DRAFTED BY UNI · SENT BY YOU</span></p>}
+    {unverified && <p className="mail-draft-note mail-unverified" role="note"><span className="mail-draft-tag">NOT VERIFIED</span>
+      <span>This says it is from you, but the server that received it couldn't confirm that (DMARC: {m.dmarc}). Treat what it asks with care.</span></p>}
     {place && <p className="mail-draft-note mail-place"><span className="mail-draft-tag">{place === "junk" ? "IN JUNK" : "IN TRASH"}</span>
       <span>{place === "junk" ? "The server filed this message as junk. Treat its links and attachments with care." : "This message is in the Trash."}</span></p>}
     <dl className="mail-headers">
       <dt>From</dt><dd>{addressLine(m.from) || "(no sender)"}</dd>
       {m.to.length > 0 && <><dt>To</dt><dd>{addressLine(m.to)}</dd></>}
       {m.cc.length > 0 && <><dt>Cc</dt><dd>{addressLine(m.cc)}</dd></>}
-      <dt>{m.draft ? "Saved" : "Date"}</dt><dd>{mailDateLong(m.sent_at || m.received_at)}{m.unread && !m.draft && <span className="mail-unread-word"> · unread</span>}</dd>
+      {m.draft && (m.bcc?.length ?? 0) > 0 && <><dt>Bcc</dt><dd>{addressLine(m.bcc!)}</dd></>}
+      <dt>{m.draft ? "Saved" : "Date"}</dt><dd>{mailDateLong(m.sent_at || m.received_at)}{m.unread && !m.draft && <span className="mail-unread-word"> · unread</span>}{m.flagged && <span className="mail-flag-word"> · ⚑ flagged</span>}</dd>
     </dl>
     {m.attachments.length > 0 && <ul className="mail-attachments" aria-label="Attachments">{m.attachments.map((a, i) => <AttachmentRow key={a.part_id ?? `${a.blob_id}-${i}`} accountId={accountId} a={a} />)}</ul>}
     {(m.text && m.html) || (showHtml && m.remote_images > 0) || m.truncated ? <div className="mail-body-bar">
@@ -135,23 +138,46 @@ function MessageCard({ m, acct, accountId }: { m: MailMessage; acct: AccountBoxe
   </article>;
 }
 
+/** What the thread bar can do; each is null where the bridge doesn't offer it on this account. */
+type ThreadActions = {
+  reply: (() => void) | null;
+  markUnread: (() => void) | null;
+  markRead: (() => void) | null;
+  flag: ((on: boolean) => void) | null;
+  archive: (() => void) | null;
+  openDraft: ((m: MailMessage) => void) | null;
+  busy: boolean;
+  problem: string | null;
+};
+
 /** The thread: subject, whose mail it is, Uni's triage note (labelled as Uni's), the messages oldest first. */
-function ThreadView({ t, acct, note, onBack }: { t: MailThread; acct: AccountBoxes; note: string | null; onBack: () => void }) {
+function ThreadView({ t, acct, overview, note, onBack, actions }: { t: MailThread; acct: AccountBoxes; overview: Overview; note: string | null; onBack: () => void; actions: ThreadActions }) {
   const real = t.messages.filter((m) => !m.draft);
   const subject = (real[0] ?? t.messages[0]).subject;
   const uniDraft = acct.who === "owner" ? [...t.messages].reverse().find((m) => m.draft && m.uni_drafted) : undefined;
+  const unread = real.some((m) => m.unread);
+  const flagged = t.messages.some((m) => m.flagged);
   return <section className="mail-thread" aria-label={`Thread: ${subjectLabel(subject)}`}>
     <div className="mail-thread-bar">
       <button type="button" className="note-action mail-thread-back" onClick={onBack}>← Threads</button>
-      <span className="mail-thread-tools"><LaterButton label="Reply" /><small className="mail-later-note">{LATER}</small></span>
+      <span className="mail-thread-tools">
+        {unread ? actions.markRead && <button type="button" className="note-quiet" disabled={actions.busy} onClick={actions.markRead}>Mark read</button>
+          : actions.markUnread && <button type="button" className="note-quiet" disabled={actions.busy} onClick={actions.markUnread}>Mark unread</button>}
+        {actions.flag && <button type="button" className="note-quiet" aria-pressed={flagged} disabled={actions.busy} onClick={() => actions.flag!(!flagged)}>{flagged ? "⚑ Unflag" : "⚐ Flag"}</button>}
+        {actions.archive && <button type="button" className="note-quiet" disabled={actions.busy} onClick={actions.archive}>Archive</button>}
+        {actions.reply
+          ? <button type="button" className="note-action mail-reply" onClick={actions.reply} aria-label={`Reply ${acct.who === "uni" ? "as Uni" : "as you"}, from ${acct.name}`}>Reply</button>
+          : <><LaterButton label="Reply" /><small className="mail-later-note">{LATER}</small></>}
+      </span>
     </div>
+    {actions.problem && <p className="note-error mail-action-problem" role="alert">{actions.problem}</p>}
     <div className="mail-thread-scroll">
       <h2 className="mail-subject">{subjectLabel(subject.replace(/^re:\s*/i, ""))}</h2>
       <p className="mail-thread-where"><WhoTag who={acct.who} address={acct.name} /> <span>{acct.who === "uni" ? "In Uni's mail" : "In your mail"} · {real.length} {real.length === 1 ? "message" : "messages"}</span></p>
       {note && <p className="mail-triage" role="note"><span className="eyebrow">Uni's triage note</span><span>{note}</span></p>}
       {uniDraft && <button type="button" className="mail-draft-hint" onClick={() => document.getElementById(`mail-msg-${uniDraft.id}`)?.scrollIntoView({ block: "start" })}>
         <span className="mail-draft-tag small">DRAFT BY UNI</span> Uni left a draft reply at the end of this thread. Not sent.</button>}
-      {t.messages.map((m) => <MessageCard key={m.id} m={m} acct={acct} accountId={t.account_id} />)}
+      {t.messages.map((m) => <MessageCard key={m.id} m={m} acct={acct} accountId={t.account_id} overview={overview} onOpenDraft={m.draft && acct.who === "owner" ? actions.openDraft : null} />)}
     </div>
   </section>;
 }
@@ -159,10 +185,11 @@ function ThreadView({ t, acct, note, onBack }: { t: MailThread; acct: AccountBox
 function ThreadRow({ t, who, note, selected, onOpen }: { t: ThreadSummary; who: Who; note: string | null; selected: boolean; onOpen: () => void }) {
   const party = t.draft ? `To ${senderLabel(t.to)}` : senderLabel(t.from);
   return <li><button type="button" className={`mail-row ${t.unread ? "unread" : ""} ${selected ? "selected" : ""}`} aria-current={selected ? "true" : undefined} onClick={onOpen}
-    aria-label={`${t.unread ? "Unread. " : ""}${whoMail(who)}. ${t.draft ? (t.uni_drafted ? "Draft by Uni. " : "Draft. ") : ""}${party}: ${subjectLabel(t.subject)}`}>
+    aria-label={`${t.unread ? "Unread. " : ""}${t.flagged ? "Flagged. " : ""}${whoMail(who)}. ${t.draft ? (t.uni_drafted ? "Draft by Uni. " : "Draft. ") : ""}${party}: ${subjectLabel(t.subject)}`}>
     <span className="mail-row-top">
       <WhoTag who={who} />
       <span className="mail-from">{t.unread && <span className="mail-dot" aria-hidden="true" />}{t.draft ? <em>{party}</em> : party}{t.count > 1 && <small> · {t.count}</small>}</span>
+      {t.flagged && <span className="mail-row-flag" aria-hidden="true">⚑</span>}
       <time dateTime={t.received_at}>{mailDate(t.received_at)}</time>
     </span>
     <span className="mail-row-subject">{t.uni_drafted && t.draft && <span className="mail-draft-tag small">DRAFT BY UNI</span>}{t.has_attachment && <span aria-label="Has attachment">📎 </span>}{subjectLabel(t.subject)}</span>
@@ -185,7 +212,15 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
   const [threadNote, setThreadNote] = useState<string | null>(null);
   const [threadProblem, setThreadProblem] = useState<MailProblem | null>(null);
   const [pane, setPane] = useState<Pane>(remembered.open ? "thread" : "list");
+  const [compose, setCompose] = useState<{ key: number; start: ComposeStart } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [actionProblem, setActionProblem] = useState<string | null>(null);
   const search = useRef<HTMLInputElement>(null);
+  /** The overview as last loaded, for callbacks that outlive a render (marking a thread read once it has loaded). */
+  const overviewRef = useRef<Overview | null>(null);
+  /** T-208 follow-up: each fresh list (not a further page) is a new generation; a triage answer for an older one is dropped. */
+  const notesGen = useRef(0);
+  const composeSeq = useRef(0);
   // a slow answer for a list or thread no longer shown is dropped
   const listSeq = useRef(0);
   const threadSeq = useRef(0);
@@ -198,6 +233,7 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
     try {
       const o = await invoke<Overview>("mail_overview");
       const known = (id: string) => o.accounts.some((a) => a.id === id);
+      overviewRef.current = o;
       setOverview(o);
       setScope((cur) => (scopeValid(cur, o) ? cur : { kind: "all-inboxes" }));
       setList((cur) => (cur && cur.threads.some((t) => !known(t.account_id)) ? { ...cur, threads: cur.threads.filter((t) => known(t.account_id)), more: false } : cur));
@@ -212,12 +248,12 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
 
   /** Uni's notes for these rows, one call per account. Each answer replaces what was shown for those rows, so a note
    *  Uni removed goes on Refresh. Display only: a failure shows no notes for those rows. */
-  const loadNotes = useCallback(async (threads: ThreadSummary[], key: string) => {
+  const loadNotes = useCallback(async (threads: ThreadSummary[], key: string, gen: number) => {
     const by = new Map<string, string[]>();
     for (const t of threads) by.set(t.account_id, [...(by.get(t.account_id) ?? []), t.email_id]);
     for (const [accountId, emailIds] of by) {
       const got = await invoke<Record<string, string>>("mail_triage", { accountId, emailIds }).catch(() => ({} as Record<string, string>));
-      if (key !== shownKey.current) return;
+      if (key !== shownKey.current || gen !== notesGen.current) return;
       setNotes((cur) => {
         const next = { ...cur };
         for (const id of emailIds) delete next[`${accountId}/${id}`];
@@ -230,6 +266,7 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
   const loadList = useCallback(async (key: string, sources: Source[], text: string, more: List | null) => {
     if (sources.length === 0) { setList({ key, threads: [], next: [], more: false, total: 0 }); return; }
     const seq = ++listSeq.current;
+    const gen = more ? notesGen.current : ++notesGen.current;
     shownKey.current = key;
     setListLoading(true);
     if (!more) setListProblem(null);
@@ -240,24 +277,38 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
         ? { key, total: page.total, next: page.next, more: page.more, threads: [...more.threads, ...page.threads.filter((t) => !more.threads.some((c) => c.account_id === t.account_id && c.thread_id === t.thread_id))] }
         : { key, total: page.total, next: page.next, more: page.more, threads: page.threads });
       setListProblem(null);
-      void loadNotes(page.threads, key);
+      void loadNotes(page.threads, key, gen);
     } catch (e) { if (seq === listSeq.current) setListProblem(mailProblem(e)); }
     finally { if (seq === listSeq.current) setListLoading(false); }
   }, [loadNotes]);
 
+  /** Mark these messages of the open thread read or unread, here and in its row. */
+  const markShown = useCallback((o: Open, ids: string[], unread: boolean) => {
+    setThread((cur) => (cur && cur.account_id === o.accountId && cur.thread_id === o.threadId ? { ...cur, messages: cur.messages.map((m) => (ids.includes(m.id) ? { ...m, unread } : m)) } : cur));
+    setList((cur) => (cur ? { ...cur, threads: cur.threads.map((r) => (r.account_id === o.accountId && r.thread_id === o.threadId ? { ...r, unread } : r)) } : cur));
+  }, []);
+
   const loadThread = useCallback(async (o: Open) => {
     const seq = ++threadSeq.current;
-    setThread(null); setThreadProblem(null); setThreadNote(null);
+    setThread(null); setThreadProblem(null); setThreadNote(null); setActionProblem(null);
     try {
       const t = await invoke<MailThread>("mail_thread", { accountId: o.accountId, threadId: o.threadId });
       if (seq !== threadSeq.current) return;
       setThread(t);
+      // opening a thread marks it read, where the bridge offers that (Mark unread undoes it)
+      const acct = overviewRef.current?.accounts.find((a) => a.id === t.account_id);
+      const unreadIds = t.messages.filter((m) => m.unread && !m.draft).map((m) => m.id);
+      if (can(acct, "mark_seen") && unreadIds.length > 0) {
+        void invoke("mail_mark_seen", { accountId: t.account_id, emailIds: unreadIds, seen: true })
+          .then(() => { markShown(o, unreadIds, false); void loadOverview(); })
+          .catch((e) => { if (seq === threadSeq.current) setActionProblem(`Couldn't mark it read: ${mailProblem(e).title}`); });
+      }
       const got = await invoke<Record<string, string>>("mail_triage", { accountId: t.account_id, emailIds: t.messages.map((m) => m.id) }).catch(() => ({} as Record<string, string>));
       if (seq !== threadSeq.current) return;
       const latest = [...t.messages].reverse().find((m) => got[m.id]);
       setThreadNote(latest ? got[latest.id] : null);
     } catch (e) { if (seq === threadSeq.current) setThreadProblem(mailProblem(e)); }
-  }, []);
+  }, [markShown, loadOverview]);
 
   const listKey = overview ? `${scopeKey(scope)}?${query}` : "";
   useEffect(() => { void loadOverview(); }, [loadOverview]);
@@ -278,17 +329,61 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
     if (o && open && o.accounts.some((a) => a.id === open.accountId)) void loadThread(open);
   };
   const pick = (s: Scope) => { threadSeq.current++; setScope(s); setQuery(""); setTyped(""); setOpen(null); setThread(null); setThreadProblem(null); setPane("list"); };
-  const openThread = (t: ThreadSummary) => { setOpen({ accountId: t.account_id, threadId: t.thread_id }); setPane("thread"); };
+  const openThread = (t: ThreadSummary) => { setCompose(null); setOpen({ accountId: t.account_id, threadId: t.thread_id }); setPane("thread"); };
+  const startCompose = (start: ComposeStart) => { setCompose({ key: ++composeSeq.current, start }); setPane("thread"); };
+  const endCompose = (changed: boolean) => { setCompose(null); if (!open) setPane("list"); if (changed) void refresh(); };
+  const senders = overview ? overview.accounts.filter(canSendFrom) : [];
+  const newMessage = () => {
+    // from a mailbox, its account (if it can send); from the combined view, nobody until you choose
+    const here = scope.kind === "mailbox" ? overview?.accounts.find((a) => a.id === scope.accountId) : undefined;
+    startCompose({ kind: "new", from: here && canSendFrom(here) ? here.id : null });
+  };
+
+  /** Run one write for the open thread; say what failed, in words. */
+  const act = async (what: string, run: () => Promise<unknown>, after: () => void) => {
+    setBusy(true); setActionProblem(null);
+    try { await run(); after(); }
+    catch (e) { const p = mailProblem(e); setActionProblem(`Couldn't ${what}. ${p.title} ${p.detail}`); }
+    finally { setBusy(false); }
+  };
+  const threadActions = (t: MailThread, acct: AccountBoxes) => {
+    const o: Open = { accountId: t.account_id, threadId: t.thread_id };
+    const real = t.messages.filter((m) => !m.draft);
+    const newest = real[real.length - 1] ?? t.messages[t.messages.length - 1];
+    const inbox = acct.mailboxes.find((b) => b.role === "inbox")?.id;
+    const inInbox = real.filter((m) => inbox && m.mailbox_ids.includes(inbox)).map((m) => m.id);
+    const flaggedIds = t.messages.filter((m) => m.flagged).map((m) => m.id);
+    const setFlag = (ids: string[], flagged: boolean) => {
+      setThread((cur) => (cur ? { ...cur, messages: cur.messages.map((m) => (ids.includes(m.id) ? { ...m, flagged } : m)) } : cur));
+      setList((cur) => (cur ? { ...cur, threads: cur.threads.map((r) => (r.account_id === o.accountId && r.thread_id === o.threadId ? { ...r, flagged } : r)) } : cur));
+    };
+    const mark = can(acct, "mark_seen");
+    return {
+      busy,
+      problem: actionProblem,
+      reply: canSendFrom(acct) ? () => startCompose({ kind: "reply", accountId: acct.id, fields: replyFields(t, acct) }) : null,
+      markUnread: mark && newest ? () => void act("mark it unread", () => invoke("mail_mark_seen", { accountId: o.accountId, emailIds: [newest.id], seen: false }), () => { markShown(o, [newest.id], true); void loadOverview(); }) : null,
+      markRead: mark ? () => { const ids = real.filter((m) => m.unread).map((m) => m.id); void act("mark it read", () => invoke("mail_mark_seen", { accountId: o.accountId, emailIds: ids, seen: true }), () => { markShown(o, ids, false); void loadOverview(); }); } : null,
+      flag: can(acct, "flag") && newest ? (on: boolean) => {
+        const ids = on ? [newest.id] : flaggedIds;
+        void act(on ? "flag it" : "unflag it", () => invoke("mail_flag", { accountId: o.accountId, emailIds: ids, flagged: on }), () => setFlag(ids, on));
+      } : null,
+      archive: can(acct, "archive") && inInbox.length > 0 ? () => void act("archive it", () => invoke("mail_archive", { accountId: o.accountId, emailIds: inInbox }), () => {
+        threadSeq.current++; setOpen(null); setThread(null); setPane("list"); void refresh();
+      }) : null,
+      openDraft: acct.who === "owner" && canSendFrom(acct) ? (m: MailMessage) => startCompose({ kind: "draft", accountId: acct.id, draftId: m.id, fields: draftFields(m), uni: m.uni_drafted }) : null,
+    } satisfies ThreadActions;
+  };
   const submitSearch = (e: FormEvent) => { e.preventDefault(); setQuery(typed.trim()); setPane("list"); };
   const toSearch = () => { setPane("list"); requestAnimationFrame(() => search.current?.focus()); };
   const title = overview ? scopeTitle(scope, overview, query) : "";
   const unreadAll = overview ? allInboxesUnread(overview) : 0;
   const openAcct = open ? accountOf(open.accountId) : undefined;
 
-  return <section className={`mail mail-a ${still ? "mail-still" : ""}`} aria-label="Mail" data-pane={pane}>
+  return <section className={`mail mail-a ${still ? "mail-still" : ""}`} aria-label="Mail" data-pane={pane} data-composing={compose && pane === "thread" ? "true" : undefined}>
     <header className="note-bar mail-bar">
       <button className="note-action" onClick={onBack}>← {backTo}</button>
-      <span className="mail-title"><strong>Mail</strong>{overview && <small className="mail-account" title="The address this device reads as">{overview.login} · read-only</small>}</span>
+      <span className="mail-title"><strong>Mail</strong>{overview && <small className="mail-account" title="The address this device reads as">{overview.login}{writesOffered(overview) ? "" : " · read-only"}</small>}</span>
       <button className="note-action" onClick={() => void refresh()} disabled={listLoading}>Refresh</button>
     </header>
     {boxesProblem && !overview ? <div className="mail-scroll"><Problem p={boxesProblem} onRetry={() => void loadOverview()} /></div>
@@ -326,7 +421,7 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
                 onChange={(e) => { setTyped(e.target.value); if (!e.target.value && query) setQuery(""); }} enterKeyHint="search" />
             </label>
             {query && <button type="button" className="note-quiet" onClick={() => { setTyped(""); setQuery(""); }}>Clear</button>}
-            <span className="mail-list-new"><LaterButton label="New" className="send mail-new" captioned /></span>
+            <span className="mail-list-new">{senders.length > 0 ? <button type="button" className="send mail-new" onClick={newMessage}>New</button> : <LaterButton label="New" className="send mail-new" captioned />}</span>
           </form>
           <div className="mail-scroll">
             {listProblem && <Problem p={listProblem} onRetry={() => void loadList(listKey, sourcesFor(scope, overview, !!query), query, null)} />}
@@ -339,8 +434,9 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
           </div>
         </section>
         <section className="mail-read" aria-label="Thread">
-          {threadProblem ? <div className="mail-scroll"><button type="button" className="note-action mail-thread-back" onClick={() => setPane("list")}>← Threads</button><Problem p={threadProblem} onRetry={() => open && void loadThread(open)} /></div>
-          : thread && openAcct ? <ThreadView key={`${thread.account_id}/${thread.thread_id}`} t={thread} acct={openAcct} note={threadNote} onBack={() => setPane("list")} />
+          {compose ? <Composer key={compose.key} overview={overview} start={compose.start} onClose={endCompose} onDone={() => endCompose(true)} />
+          : threadProblem ? <div className="mail-scroll"><button type="button" className="note-action mail-thread-back" onClick={() => setPane("list")}>← Threads</button><Problem p={threadProblem} onRetry={() => open && void loadThread(open)} /></div>
+          : thread && openAcct ? <ThreadView key={`${thread.account_id}/${thread.thread_id}`} t={thread} acct={openAcct} overview={overview} note={threadNote} onBack={() => setPane("list")} actions={threadActions(thread, openAcct)} />
           : open && !openAcct ? <div className="mail-scroll"><button type="button" className="note-action mail-thread-back" onClick={() => setPane("list")}>← Threads</button><p className="empty mail-pick">This mailbox isn't shared with this device any more.</p></div>
           : open ? <p className="mail-loading" role="status">Opening…</p>
           : <p className="empty mail-pick">Pick a thread to read it.</p>}
@@ -348,7 +444,7 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
       </div>
       <nav className="mail-thumb" aria-label="Mail actions">
         <button type="button" className="note-action" onClick={toSearch}>Search</button>
-        <LaterButton label="New" className="send mail-new" captioned />
+        {senders.length > 0 ? <button type="button" className="send mail-new" onClick={newMessage}>New</button> : <LaterButton label="New" className="send mail-new" captioned />}
       </nav>
     </>}
   </section>;

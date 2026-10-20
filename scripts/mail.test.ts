@@ -1,6 +1,10 @@
 // T-45 Mail, pure parts. Run: node --experimental-strip-types scripts/mail.test.ts (Node >= 22.6)
 import assert from "node:assert/strict";
 import {
+  can, canSendFrom, draftFields, formatAddresses, newOpId, notVerified, parseAddresses, replyFields, sameFields, sendLabel, sendOutcomeText, validAddress, writesOffered,
+  type AccountBoxes, type MailMessage, type MailThread, type SendOutcome,
+} from "../src/mailCore.ts";
+import {
   addressLine, allInboxesUnread, mailboxLabel, mailDate, MAIL_FRAME_CSP, mailProblem, mailSrcdoc, scopeTitle, scopeValid, senderLabel, sourcesFor, subjectLabel, whoTag,
   type Overview,
 } from "../src/mailCore.ts";
@@ -84,3 +88,68 @@ const saved = serializeTabs({ tabs: [{ id: "m", kind: "mail", title: "Mail" }], 
 assert.deepEqual(restoreTabs(saved, []).tabs, [{ id: "m", kind: "mail", title: "Mail" }]);
 
 console.log("ok   mail: problems, labels, sources and scopes, dates, sealed frame, tab");
+
+// ── T-210: writes ──
+// What the bridge offers decides what the app enables; nothing is offered by a bridge without the write patch.
+const own: AccountBoxes = { id: "A", name: "robin@example.com", who: "owner", mailboxes: [], operations: ["mark_seen", "flag", "archive", "draft.save", "draft.review", "draft.discard", "send", "send.check"] };
+const unis: AccountBoxes = { id: "U", name: "uni@example.com", who: "uni", mailboxes: [], operations: ["mark_seen", "flag", "send_as_uni", "send.check"] };
+const bare: AccountBoxes = { id: "A", name: "robin@example.com", who: "owner", mailboxes: [] };
+assert.equal(can(own, "archive"), true);
+assert.equal(can(unis, "archive"), false, "the owner never moves Uni's mail");
+assert.equal(can(bare, "mark_seen"), false);
+assert.equal(canSendFrom(own), true);
+assert.equal(canSendFrom(unis), true, "as Uni, through the deputy path");
+assert.equal(canSendFrom({ ...unis, operations: ["mark_seen"] }), false);
+assert.equal(canSendFrom({ ...own, operations: ["draft.save"] }), false, "saving alone isn't sending");
+assert.equal(canSendFrom(bare), false);
+assert.equal(writesOffered({ login: "x", multi: true, accounts: [bare, { ...unis, operations: [] }] }), false);
+assert.equal(writesOffered({ login: "x", multi: true, accounts: [bare, unis] }), true);
+assert.equal(sendLabel("owner"), "Send as you");
+assert.equal(sendLabel("uni"), "Send as Uni");
+
+// Addresses as typed: a bad one is named, never dropped; a quoted name may hold a comma; nothing smuggles a header.
+assert.deepEqual(parseAddresses("mara@example.org, Theo Brandt <theo@example.net>;\n\"Vale, Robin\" <robin@example.com>"), {
+  list: [{ name: null, email: "mara@example.org" }, { name: "Theo Brandt", email: "theo@example.net" }, { name: "Vale, Robin", email: "robin@example.com" }], bad: [] });
+assert.deepEqual(parseAddresses("mara@example.org, nobody, a@b").bad, ["nobody", "a@b"]);
+assert.deepEqual(parseAddresses("x@example.org\r\nBcc: spy@example.net"), { list: [{ name: null, email: "x@example.org" }], bad: ["Bcc: spy@example.net"] },
+  "a new line separates addresses; what follows it is named as not an address");
+assert.deepEqual(parseAddresses("  ,, "), { list: [], bad: [] });
+assert.equal(validAddress("robin@example.com"), true);
+for (const bad of ["robin", "robin@example", "a b@example.com", "<a@example.com>", "a@example.com\n"]) assert.equal(validAddress(bad), false, bad);
+const typed = "Theo Brandt <theo@example.net>, \"Vale, Robin\" <robin@example.com>, mara@example.org";
+assert.equal(formatAddresses(parseAddresses(typed).list), typed, "addresses round-trip through the editor");
+
+// A reply goes from the thread's mailbox to the newest message's Reply-To, else its sender; to the recipients when we sent it.
+const msg = (o: Partial<MailMessage>): MailMessage => ({ id: "m", thread_id: "t", from: [], to: [], cc: [], reply_to: [], subject: "Plans", received_at: "", sent_at: null,
+  unread: false, draft: false, uni_drafted: false, mailbox_ids: [], text: null, html: null, remote_images: 0, links: [], truncated: false, attachments: [], ...o });
+const mara = { name: "Mara Quill", email: "mara@example.org" }, robin = { name: "Robin Vale", email: "robin@example.com" };
+const thread = (messages: MailMessage[]): MailThread => ({ account_id: "A", thread_id: "t", messages });
+let r = replyFields(thread([msg({ id: "m1", from: [mara], subject: "Planning" }), msg({ id: "m2", from: [mara], subject: "Re: Planning", reply_to: [{ name: null, email: "list@example.org" }] }),
+  msg({ id: "d", draft: true, from: [robin] })]), own);
+assert.deepEqual([r.to, r.subject, r.in_reply_to], [[{ name: null, email: "list@example.org" }], "Re: Planning", "m2"]);
+r = replyFields(thread([msg({ id: "m1", from: [mara], subject: "Re: plans" }), msg({ id: "m2", from: [robin], to: [mara, robin] })]), own);
+assert.deepEqual([r.to, r.subject, r.in_reply_to], [[mara], "Re: plans", "m2"], "replying after our own message goes to whom it went to");
+const d = msg({ draft: true, to: [mara], cc: [robin], bcc: [], subject: "Re: x", text: "Monday." });
+assert.equal(sameFields(draftFields(d), { ...draftFields(d) }), true);
+assert.equal(sameFields(draftFields(d), { ...draftFields(d), text: "Tuesday." }), false);
+
+// #mail's ask: "not verified" on mail from the owner's address that came in and failed DMARC; nothing else.
+const ov = { login: "robin@example.com", multi: true, accounts: [own, unis] };
+assert.equal(notVerified(msg({ from: [robin], dmarc: "fail" }), ov), true);
+assert.equal(notVerified(msg({ from: [{ name: null, email: "ROBIN@example.com" }], dmarc: "none" }), ov), true);
+assert.equal(notVerified(msg({ from: [robin], dmarc: "pass" }), ov), false);
+assert.equal(notVerified(msg({ from: [robin], dmarc: null }), ov), false, "delivered inside the server: no result, no badge");
+assert.equal(notVerified(msg({ from: [mara], dmarc: "fail" }), ov), false, "someone else's mail isn't about the owner");
+assert.equal(notVerified(msg({ from: [robin], dmarc: "fail", draft: true }), ov), false);
+
+// A send's outcome in words; an unknown one has no Send button, and a refusal can be edited and tried again.
+const out = (state: SendOutcome["state"], reason: string | null = null): SendOutcome => ({ op_id: "op", account_id: "A", draft_id: "d", state, reason, submission_id: null, delivery: null, note: null });
+assert.equal(sendOutcomeText(out("cleaned"), "owner").text, "Sent as you.");
+assert.equal(sendOutcomeText(out("cleaned"), "uni").text, "Sent as Uni.");
+assert.deepEqual(sendOutcomeText(out("unknown"), "owner"), { text: "Outcome unknown, checking. It won't be sent twice.", done: false, blocked: true });
+assert.deepEqual(sendOutcomeText(out("refused", "the draft changed since it was reviewed"), "owner"), { text: "Not sent: the draft changed since it was reviewed.", done: false, blocked: false });
+assert.match(sendOutcomeText(out("awaiting-approval", "Uni's outbound rules want Aaron to approve mail to ada@example.org"), "uni").text, /waits in Uni's Drafts/);
+const op1 = newOpId(), op2 = newOpId();
+assert.match(op1, /^op-[0-9a-f]{32}$/);
+assert.notEqual(op1, op2);
+console.log("ok   mail (T-210): what is offered, addresses, replies, not verified, send outcomes");
