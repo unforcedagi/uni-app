@@ -1,6 +1,7 @@
 // T-212: what turns a room's message into a decision card, and what a won tap posts (the parsers; the card itself is decisionCard.spec.ts).
 import assert from "node:assert/strict";
-import { decisionRefsIn, parseDecisionNote, pickedLine, questionOf, unreferenced } from "../src/decisionView.ts";
+import { chatText, cleanNote, decisionRefsIn, noteLine, parseDecisionNote, pickedLine, questionOf, unreferenced } from "../src/decisionView.ts";
+import { parseMarkdown } from "../src/markdown.ts";
 import { makeDecisionStore } from "../src/decisionStore.ts";
 let failed = 0;
 const check = (n: string, f: () => void) => { try { f(); console.log("ok  ", n); } catch (e) { failed++; console.log("FAIL", n, e); } };
@@ -41,6 +42,33 @@ check("a won tap posts the pick without its marker, the question, and the ref", 
   assert.equal(pickedLine("B (default)", { id: ID, question: "Which  layout?" }), `Picked: B (decision: Which layout?) uni:${ID}`);
   assert.ok(pickedLine("A", { id: ID, question: "q".repeat(300) }).length <= 175);
 });
+// T-226: your words on a decision
+check("words go with a pick after an em dash; words alone say no pick yet, or what it was decided as when your tap lost", () => {
+  assert.equal(pickedLine("B (default)", { id: ID, question: "Which layout?" }, "  keep the menu left \n"), `Picked: B — keep the menu left (decision: Which layout?) uni:${ID}`);
+  assert.equal(pickedLine("B", { id: ID, question: "Which layout?" }, "  "), `Picked: B (decision: Which layout?) uni:${ID}`);
+  assert.equal(noteLine("ask first", { id: ID, state: "open", decided: null }), `Note on decision (no pick yet): ask first uni:${ID}`);
+  assert.equal(noteLine("ask first", { id: ID, state: "decided", decided: "A (default)" }), `Note on decision (decided already: A): ask first uni:${ID}`);
+});
+check("a note is stored as plain text: line breaks kept, control and direction-override characters dropped, trimmed", () => {
+  assert.equal(cleanNote(" a\r\nb\rc\u202e\u0007\td "), "a\nb\nc\td");
+  assert.equal(cleanNote(" \n "), "");
+});
+check("in the room a note reads as typed: markup is escaped and parses back to the same text, with no link, bold or heading", () => {
+  for (const t of ["<b>bold</b> [x](javascript:alert(1)) **loud** _u_ `c` ~~s~~ a|b \\ back", "one\n# head\n> quote\n- item\n+ plus\n1. first\n2) second", "3.5 and -5 and a-b"]) {
+    const tree = parseMarkdown(chatText(t));
+    assert.equal(tree.length, 1, JSON.stringify(tree));
+    const p = tree[0] as any;
+    assert.equal(p.t, "p");
+    assert.ok(p.c.every((n: any) => n.t === "text" || n.t === "br"), JSON.stringify(p.c));
+    assert.equal(p.c.map((n: any) => (n.t === "br" ? "\n" : n.v)).join(""), t);
+  }
+});
+check("a decision's words are read back: the pick's note and the notes added alone", () => {
+  const d = parseDecisionNote(note({ state: "decided", options: ["A", "B"], decided: "A", decided_note: "because", notes: [{ text: "first", at: "t1", by: "aaron" }, { text: " " }, "junk", null] }))!;
+  assert.equal(d.decidedNote, "because");
+  assert.deepEqual(d.notes, [{ text: "first", at: "t1", by: "aaron" }]);
+  assert.deepEqual(parseDecisionNote(note({ state: "open", options: ["A", "B"] }))!.notes, []);
+});
 check("the room lists its open decisions no message names", () => {
   const known = [{ id: "a", channel: "r1" }, { id: "b", channel: "r1" }, { id: "c", channel: "r2" }, { id: "d", channel: null }];
   assert.deepEqual(unreferenced(known, "r1", new Set(["a"])), ["b"]);
@@ -61,4 +89,8 @@ store.put(ID, "uni", { view: parseDecisionNote(note({ state: "decided", options:
 check("a tap's answer that comes back after Forget is not stored", () => assert.equal(store.get(ID, "uni"), undefined));
 store.put(ID, "uni", { view: parseDecisionNote(note({ state: "decided", options: ["A", "B"], decided: "A" })), error: null, read: 0 }, store.generation());
 check("one from this identity is", () => assert.equal(store.get(ID, "uni")?.view?.decided, "A"));
+store.setDraft(ID, "uni", "half a thought");
+check("unsent words are kept per decision and vault", () => { assert.equal(store.draft(ID, "uni"), "half a thought"); assert.equal(store.draft(ID, "life"), ""); });
+store.forget();
+check("Forget drops unsent words with the rest", () => assert.equal(store.draft(ID, "uni"), ""));
 if (failed) { console.log(`${failed} failed`); process.exit(1); }

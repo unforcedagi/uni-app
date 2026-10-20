@@ -587,7 +587,11 @@ impl VaultClient {
     /// When it is still open at that revision this is the compare-and-set (`state` open -> decided, with `decided`, `decided_at`,
     /// `decided_by`). A note already decided, or one that another tap decides between the read and the write, comes back as
     /// [`Pick::AlreadyDecided`] with the stored answer, and nothing is written: only a [`Pick::Picked`] may tell the room.
-    pub async fn pick_decision(&self, vault: &str, id: &str, option: &str, by: &str, at: &str, shown: &str) -> Result<Pick> {
+    /// T-226: `note` is what Aaron typed with the tap; it is stored as `decided_note` in the same compare-and-set, so a lost race
+    /// writes neither.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn pick_decision(&self, vault: &str, id: &str, option: &str, by: &str, at: &str, shown: &str, note: Option<&str>) -> Result<Pick> {
+        let words = decision_note_text(note)?;
         let note = self.get_note(vault, id).await?;
         let option = match decision_state(&note, option)? {
             Ok(option) => option,
@@ -597,7 +601,10 @@ impl VaultClient {
             return Err(Error::Conflict(format!("the decision changed since it was shown; look again: {id}")));
         }
         let title = decision_title(&note);
-        let md = json!({"decided": option, "decided_at": at, "decided_by": by});
+        let mut md = json!({"decided": option, "decided_at": at, "decided_by": by});
+        if let Some(words) = words {
+            md["decided_note"] = json!(words);
+        }
         match self.decide_note(vault, id, json!("open"), json!("decided"), md, shown).await {
             Ok(note) => Ok(Pick::Picked { decided: option, title, note }),
             Err(e) => {
@@ -616,6 +623,57 @@ impl VaultClient {
                 }
             }
         }
+    }
+
+    /// T-226: words on a decision with no pick (no option fits, or a tap lost the race and the words stay). They are appended to the
+    /// note's `notes` list as `{text, at, by}` and `state` is left alone, so the decision stays open and its cards stay tappable. The
+    /// append is written against the revision just read; when another write lands in between, the note is read again and the words
+    /// appended again, so they are never lost to a race. A retry whose first write landed (its answer lost) finds its own entry and
+    /// does not add it twice. Returns the stored note.
+    pub async fn note_decision(&self, vault: &str, id: &str, text: &str, by: &str, at: &str) -> Result<Value> {
+        check_vault(vault)?;
+        let Some(text) = decision_note_text(Some(text))? else {
+            return Err(Error::Invalid("the note is empty".into()));
+        };
+        if [by, at].iter().any(|s| s.trim().is_empty() || s.len() > 100) {
+            return Err(Error::Invalid("a note needs a short `by` and `at`".into()));
+        }
+        let entry = json!({"text": text, "at": at, "by": by});
+        for _ in 0..4 {
+            let note = self.get_note(vault, id).await?;
+            if !note["tags"].as_array().is_some_and(|t| t.iter().filter_map(Value::as_str).any(|t| t == "decision")) {
+                return Err(Error::Invalid("only decision notes take a note".into()));
+            }
+            let mut notes = note["metadata"]["notes"].as_array().cloned().unwrap_or_default();
+            if notes.contains(&entry) {
+                return Ok(note);
+            }
+            if notes.len() >= 200 {
+                return Err(Error::Invalid("this decision has too many notes already".into()));
+            }
+            let Some(rev) = note["updatedAt"].as_str().filter(|r| !r.is_empty()) else {
+                return Err(Error::Vault(format!("note {id} has no updatedAt")));
+            };
+            notes.push(entry.clone());
+            let args = json!({"vault": vault, "id": id, "metadata": {"notes": notes}, "if_updated_at": rev, "include_content": false});
+            let written = match self.rpc("update-note", args).await {
+                Ok(r) => r.map_err(save_error).and_then(|v| check_vault_errors(&v).and_then(|_| note_from(&v, id))),
+                Err(e) => Err(e),
+            };
+            match written {
+                Ok(note) => return Ok(note),
+                // another write landed between the read and this one: read again and append again
+                Err(Error::Conflict(_)) => continue,
+                Err(e) => {
+                    // the write may have landed with its answer lost on the way back
+                    match self.get_note(vault, id).await {
+                        Ok(now) if now["metadata"]["notes"].as_array().is_some_and(|n| n.contains(&entry)) => return Ok(now),
+                        _ => return Err(e),
+                    }
+                }
+            }
+        }
+        Err(Error::Conflict(format!("the decision kept changing while your note was saved; try again: {id}")))
     }
 
     /// Merge `metadata` into a note, guarded by the `updated_at` the caller last read. Only the `snoozed_until` key,
@@ -1213,12 +1271,42 @@ fn check_answered_patch(metadata: &Value) -> Result<()> {
     }
 }
 
+/// T-226: the longest note Aaron can add to a decision, in characters (the card counts down near it).
+pub const DECISION_NOTE_MAX: usize = 1000;
+
+/// A decision note as it is stored: plain text, line breaks kept, no control or direction-override characters (they could make the
+/// room message read other than it is), trimmed. `None` when nothing is left; an error when it is longer than [`DECISION_NOTE_MAX`].
+pub fn decision_note_text(note: Option<&str>) -> Result<Option<String>> {
+    let Some(note) = note else { return Ok(None) };
+    let text: String = note
+        .replace("\r\n", "\n")
+        .chars()
+        .map(|c| if c == '\r' { '\n' } else { c })
+        .filter(|&c| c == '\n' || c == '\t' || !(c.is_control() || matches!(c, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}' | '\u{200e}' | '\u{200f}')))
+        .collect();
+    let text = text.trim();
+    if text.is_empty() {
+        return Ok(None);
+    }
+    if text.chars().count() > DECISION_NOTE_MAX {
+        return Err(Error::Invalid(format!("a note on a decision is at most {DECISION_NOTE_MAX} characters")));
+    }
+    Ok(Some(text.to_string()))
+}
+
 fn check_decide_patch(metadata: &Value) -> Result<()> {
-    let obj = metadata.as_object().filter(|o| !o.is_empty() && o.keys().all(|k| matches!(k.as_str(), "decided" | "decided_at" | "decided_by" | "answered_rev")));
+    let obj = metadata
+        .as_object()
+        .filter(|o| !o.is_empty() && o.keys().all(|k| matches!(k.as_str(), "decided" | "decided_at" | "decided_by" | "answered_rev" | "decided_note")));
     let Some(obj) = obj else {
-        return Err(Error::Invalid("a decision takes only `decided`, `decided_at`, `decided_by` and `answered_rev`".into()));
+        return Err(Error::Invalid("a decision takes only `decided`, `decided_at`, `decided_by`, `decided_note` and `answered_rev`".into()));
     };
-    if obj.values().all(|v| v.as_str().is_some_and(|s| !s.trim().is_empty() && s.len() <= 500)) {
+    if let Some(n) = obj.get("decided_note") {
+        if !n.as_str().is_some_and(|s| decision_note_text(Some(s)).ok().flatten().as_deref() == Some(s)) {
+            return Err(Error::Invalid(format!("`decided_note` must be plain text of at most {DECISION_NOTE_MAX} characters")));
+        }
+    }
+    if obj.iter().filter(|(k, _)| *k != "decided_note").all(|(_, v)| v.as_str().is_some_and(|s| !s.trim().is_empty() && s.len() <= 500)) {
         Ok(())
     } else {
         Err(Error::Invalid("`decided`, `decided_at` and `decided_by` must be short strings".into()))
@@ -2245,10 +2333,12 @@ mod pick_tests {
         race: Mutex<Option<Value>>,
         /// The next update fails with this message, after applying the write when the flag is set (an answer lost on the way back).
         fail_next: Mutex<Option<(bool, &'static str)>>,
+        /// Another note appended between this note's read and its write (once).
+        race_note: Mutex<Option<Value>>,
     }
 
     fn hub(note: Value) -> (VaultClient, Arc<Hub>) {
-        let state = Arc::new(Hub { note: Mutex::new(note), updates: AtomicUsize::new(0), race: Mutex::new(None), fail_next: Mutex::new(None) });
+        let state = Arc::new(Hub { note: Mutex::new(note), updates: AtomicUsize::new(0), race: Mutex::new(None), fail_next: Mutex::new(None), race_note: Mutex::new(None) });
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let origin = format!("http://{}", listener.local_addr().unwrap());
         let s = state.clone();
@@ -2280,6 +2370,31 @@ mod pick_tests {
                             n["metadata"]["decided"] = other;
                             n["metadata"]["decided_by"] = json!("room");
                             n["updatedAt"] = json!("r-race");
+                        }
+                        // T-226: a note's append (no state change): written against the revision read, or refused; another
+                        // note may land first (once)
+                        if args.get("state_transition").is_none() {
+                            if let Some(other) = s.race_note.lock().unwrap().take() {
+                                n["metadata"]["notes"].as_array_mut().map(|a| a.push(other.clone())).unwrap_or_else(|| n["metadata"]["notes"] = json!([other]));
+                                n["updatedAt"] = json!("r-other-note");
+                            }
+                            let answer = if args["if_updated_at"] != n["updatedAt"] {
+                                Err("conflict: note d1 has been modified")
+                            } else {
+                                for (k, v) in args["metadata"].as_object().unwrap() {
+                                    n["metadata"][k] = v.clone();
+                                }
+                                n["updatedAt"] = json!(format!("r{}", s.updates.load(Ordering::SeqCst) + 1));
+                                Ok(n.clone())
+                            };
+                            drop(n);
+                            let body = match answer {
+                                Ok(v) => json!({"jsonrpc": "2.0", "id": 1, "result": {"content": [{"type": "text", "text": v.to_string()}]}}),
+                                Err(e) => json!({"jsonrpc": "2.0", "id": 1, "error": {"code": -32600, "message": e}}),
+                            }
+                            .to_string();
+                            let _ = write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body);
+                            continue;
                         }
                         let t = &args["state_transition"];
                         let fail = s.fail_next.lock().unwrap().take();
@@ -2330,7 +2445,7 @@ mod pick_tests {
         crate::init_crypto();
         let (client, hub) = hub(open_decision());
         let at = "2026-10-09T10:00:00.000Z";
-        let won = client.pick_decision("scope-test", "d1", "b", "aaron", at, "r1").await.unwrap();
+        let won = client.pick_decision("scope-test", "d1", "b", "aaron", at, "r1", None).await.unwrap();
         match won {
             Pick::Picked { decided, title, .. } => assert_eq!((decided.as_str(), title.as_str()), ("B", "Which layout for the garden page?")),
             other => panic!("{other:?}"),
@@ -2339,7 +2454,7 @@ mod pick_tests {
         assert_eq!((m["state"].as_str(), m["decided"].as_str(), m["decided_by"].as_str(), m["decided_at"].as_str()), (Some("decided"), Some("B"), Some("aaron"), Some(at)));
         assert_eq!(hub.updates.load(Ordering::SeqCst), 1);
         // the card on another device (or the same decision's second card) taps C: the stored B comes back and nothing is written
-        match client.pick_decision("scope-test", "d1", "C", "aaron", at, "r1").await.unwrap() {
+        match client.pick_decision("scope-test", "d1", "C", "aaron", at, "r1", None).await.unwrap() {
             Pick::AlreadyDecided { decided, decided_by, .. } => assert_eq!((decided.as_str(), decided_by.as_deref()), ("B", Some("aaron"))),
             other => panic!("{other:?}"),
         }
@@ -2353,7 +2468,7 @@ mod pick_tests {
         let (client, hub) = hub(open_decision());
         // the room picks A between this tap's read (open, r1) and its write
         *hub.race.lock().unwrap() = Some(json!("A"));
-        match client.pick_decision("scope-test", "d1", "C", "aaron", "2026-10-09T10:00:00.000Z", "r1").await.unwrap() {
+        match client.pick_decision("scope-test", "d1", "C", "aaron", "2026-10-09T10:00:00.000Z", "r1", None).await.unwrap() {
             Pick::AlreadyDecided { decided, decided_by, .. } => assert_eq!((decided.as_str(), decided_by.as_deref()), ("A", Some("room"))),
             other => panic!("{other:?}"),
         }
@@ -2366,11 +2481,11 @@ mod pick_tests {
     async fn a_tap_on_something_that_is_not_an_open_option_writes_nothing() {
         crate::init_crypto();
         let (client, hub) = hub(open_decision());
-        assert!(client.pick_decision("scope-test", "d1", "D", "aaron", "t", "r1").await.is_err());
+        assert!(client.pick_decision("scope-test", "d1", "D", "aaron", "t", "r1", None).await.is_err());
         let mut task = open_decision();
         task["tags"] = json!(["task"]);
         *hub.note.lock().unwrap() = task;
-        assert!(client.pick_decision("scope-test", "d1", "A", "aaron", "t", "r1").await.is_err());
+        assert!(client.pick_decision("scope-test", "d1", "A", "aaron", "t", "r1", None).await.is_err());
         assert_eq!(hub.updates.load(Ordering::SeqCst), 0);
     }
 
@@ -2380,11 +2495,11 @@ mod pick_tests {
         // the vault refuses the write (the note unchanged): its own error, not "the question changed"
         let (client, hub) = hub(open_decision());
         *hub.fail_next.lock().unwrap() = Some((false, "MCP error -32603: database is locked"));
-        let e = client.pick_decision("scope-test", "d1", "A", "aaron", "t1", "r1").await.unwrap_err();
+        let e = client.pick_decision("scope-test", "d1", "A", "aaron", "t1", "r1", None).await.unwrap_err();
         assert!(!matches!(e, Error::Conflict(_)) && e.to_string().contains("database is locked"), "{e}");
         // the write lands but its answer is lost on the way back: the stored answer is this tap's own, so it won (and may tell the room)
         *hub.fail_next.lock().unwrap() = Some((true, "connection reset"));
-        match client.pick_decision("scope-test", "d1", "A", "aaron", "t2", "r1").await.unwrap() {
+        match client.pick_decision("scope-test", "d1", "A", "aaron", "t2", "r1", None).await.unwrap() {
             Pick::Picked { decided, .. } => assert_eq!(decided, "A"),
             other => panic!("{other:?}"),
         }
@@ -2398,12 +2513,70 @@ mod pick_tests {
         note["updatedAt"] = json!("r2");
         note["content"] = json!("# Which layout for the garden page, now with a fourth option?\n");
         let (client, hub) = hub(note);
-        let e = client.pick_decision("scope-test", "d1", "A", "aaron", "t", "r1").await.unwrap_err();
+        let e = client.pick_decision("scope-test", "d1", "A", "aaron", "t", "r1", None).await.unwrap_err();
         assert!(matches!(e, Error::Conflict(_)), "{e}");
         assert_eq!(hub.updates.load(Ordering::SeqCst), 0);
         assert_eq!(hub.note.lock().unwrap()["metadata"]["state"], "open");
         // read again (r2), the same tap goes through
-        assert!(matches!(client.pick_decision("scope-test", "d1", "A", "aaron", "t", "r2").await.unwrap(), Pick::Picked { .. }));
+        assert!(matches!(client.pick_decision("scope-test", "d1", "A", "aaron", "t", "r2", None).await.unwrap(), Pick::Picked { .. }));
+    }
+
+    #[tokio::test]
+    async fn a_pick_with_words_stores_them_in_the_same_write_and_a_lost_race_stores_neither() {
+        crate::init_crypto();
+        let (client, hub) = self::hub(open_decision());
+        let at = "2026-10-09T10:00:00.000Z";
+        let words = "  B, but keep the menu on the left.\r\nAnd <b>no</b> carousel [x](javascript:alert(1))\u{202e}  ";
+        match client.pick_decision("scope-test", "d1", "B", "aaron", at, "r1", Some(words)).await.unwrap() {
+            Pick::Picked { decided, .. } => assert_eq!(decided, "B"),
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(hub.updates.load(Ordering::SeqCst), 1);
+        let m = hub.note.lock().unwrap()["metadata"].clone();
+        // stored as the plain text typed (line break kept, a direction override dropped), with the pick, in one update
+        assert_eq!((m["state"].as_str(), m["decided"].as_str(), m["decided_note"].as_str()),
+            (Some("decided"), Some("B"), Some("B, but keep the menu on the left.\nAnd <b>no</b> carousel [x](javascript:alert(1))")));
+
+        // the room decides A between this tap's read and its write: neither the pick nor the words are written
+        let (client, hub) = self::hub(open_decision());
+        *hub.race.lock().unwrap() = Some(json!("A"));
+        match client.pick_decision("scope-test", "d1", "C", "aaron", at, "r1", Some("C, because the room asked")).await.unwrap() {
+            Pick::AlreadyDecided { decided, .. } => assert_eq!(decided, "A"),
+            other => panic!("{other:?}"),
+        }
+        assert!(hub.note.lock().unwrap()["metadata"].get("decided_note").is_none());
+
+        // over the cap: refused before anything is read or written
+        let (client, hub) = self::hub(open_decision());
+        let long = "x".repeat(DECISION_NOTE_MAX + 1);
+        assert!(client.pick_decision("scope-test", "d1", "A", "aaron", at, "r1", Some(&long)).await.is_err());
+        assert_eq!((hub.updates.load(Ordering::SeqCst), hub.note.lock().unwrap()["metadata"]["state"].as_str()), (0, Some("open")));
+        // blank words are no words
+        assert!(matches!(client.pick_decision("scope-test", "d1", "A", "aaron", at, "r1", Some(" \n ")).await.unwrap(), Pick::Picked { .. }));
+        assert!(hub.note.lock().unwrap()["metadata"].get("decided_note").is_none());
+    }
+
+    #[tokio::test]
+    async fn words_alone_leave_the_decision_open_and_are_never_lost_to_a_race() {
+        crate::init_crypto();
+        let (client, hub) = hub(open_decision());
+        let n = client.note_decision("scope-test", "d1", "None of these: ask the gardeners first.", "aaron", "t1").await.unwrap();
+        assert_eq!(n["metadata"]["state"], "open");
+        assert_eq!(hub.note.lock().unwrap()["metadata"]["notes"], json!([{"text": "None of these: ask the gardeners first.", "at": "t1", "by": "aaron"}]));
+        // the room adds its own note between this note's read and its write: this one is appended again on the newer revision
+        *hub.race_note.lock().unwrap() = Some(json!({"text": "from the room", "at": "t2", "by": "room"}));
+        client.note_decision("scope-test", "d1", "Also: the path needs lights.", "aaron", "t3").await.unwrap();
+        let notes = hub.note.lock().unwrap()["metadata"]["notes"].clone();
+        let texts: Vec<_> = notes.as_array().unwrap().iter().map(|n| n["text"].as_str().unwrap().to_string()).collect();
+        assert_eq!(texts, ["None of these: ask the gardeners first.", "from the room", "Also: the path needs lights."]);
+        assert_eq!(hub.note.lock().unwrap()["metadata"]["state"], "open");
+        // the same note again (a retry whose first answer was lost) is not added twice
+        client.note_decision("scope-test", "d1", "Also: the path needs lights.", "aaron", "t3").await.unwrap();
+        assert_eq!(hub.note.lock().unwrap()["metadata"]["notes"].as_array().unwrap().len(), 3);
+        // empty or too long: refused
+        assert!(client.note_decision("scope-test", "d1", "   ", "aaron", "t4").await.is_err());
+        assert!(client.note_decision("scope-test", "d1", &"y".repeat(DECISION_NOTE_MAX + 1), "aaron", "t4").await.is_err());
+        assert_eq!(hub.note.lock().unwrap()["metadata"]["notes"].as_array().unwrap().len(), 3);
     }
 
     #[test]

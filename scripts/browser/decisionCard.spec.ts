@@ -220,3 +220,167 @@ test.describe('decision cards in the chat', () => {
     await expect(msg.locator('.decision-card')).toHaveCount(0);
   });
 });
+
+// T-226: a card takes your words too. With a tap they go with the pick (`decided_note`, same compare-and-set) and the room hears
+// "Picked: X — …"; alone ("Send note", Shift/Ctrl/Cmd+Enter) they are appended to the decision's `notes`, which stays open. Enter is a
+// new line, never a send. A tap that lost writes and posts nothing and keeps the words. Run as above.
+test.describe('your words on a decision card', () => {
+  const field = (card: ReturnType<Page['locator']>) => card.getByRole('textbox', { name: 'Add a note to this decision' });
+  const firstCard = async (page: Page) => {
+    await seed(page);
+    await openAtlas(page);
+    await arrive(page, ASK);
+    const card = page.locator('.sr-chat .message .decision-card').first();
+    await expect(card.getByRole('button', { name: 'C', exact: true })).toBeVisible();
+    return card;
+  };
+
+  test('a pick with words: both in one write; the room hears "Picked: B — <words>" as you, to Uni', async ({ page }) => {
+    const card = await firstCard(page);
+    const box = field(card);
+    await expect(box).toHaveAttribute('placeholder', 'Add a note…');
+    // big enough to tap on the Daylight, and nothing moves
+    expect((await box.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    expect(await box.evaluate((b) => getComputedStyle(b).transitionDuration)).toBe('0s');
+    await box.fill('B, but keep the menu on the left.');
+    const send = card.getByRole('button', { name: 'Send note' });
+    const sb = (await send.boundingBox())!; expect(sb.height).toBeGreaterThanOrEqual(44); expect(sb.width).toBeGreaterThanOrEqual(44);
+    expect(await send.evaluate((b) => getComputedStyle(b).transitionDuration)).toBe('0s');
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await shot(page, '11-words');
+    const before = (await posts(page)).length;
+    await card.getByRole('button', { name: 'B (default)' }).click();
+    await expect(card.locator('.decision-result')).toHaveText('Decided: B · by you');
+    await expect(card.locator('.decision-said')).toHaveText('B, but keep the menu on the left.');
+    const m = await stored(page);
+    expect([m.state, m.decided, m.decided_by, m.decided_note]).toEqual(['decided', 'B', 'aaron', 'B, but keep the menu on the left.']);
+    const sent = (await posts(page)).slice(before);
+    expect(sent.map((p: any) => [p.body, p.recipients])).toEqual([[`Picked: B — B, but keep the menu on the left. (decision: Which layout for the garden page?) uni:${D1}`, ['b'.repeat(64)]]]);
+    // the words went: no field is left on the decided card
+    await expect(field(card)).toHaveCount(0);
+    await shot(page, '12-picked-with-words');
+  });
+
+  test('words alone: Send note appends them, the decision stays open, the room hears "Note on decision (no pick yet): …"', async ({ page }) => {
+    const card = await firstCard(page);
+    const before = (await posts(page)).length;
+    await field(card).fill('None of these fit: ask the gardeners first.');
+    await card.getByRole('button', { name: 'Send note' }).click();
+    await expect(card.getByText('Note sent to the room.')).toBeVisible();
+    const m = await stored(page);
+    expect(m.state).toBe('open');
+    expect(m.decided ?? null).toBe(null);
+    expect(m.notes.map((n: any) => [n.text, n.by])).toEqual([['None of these fit: ask the gardeners first.', 'aaron']]);
+    const sent = (await posts(page)).slice(before);
+    expect(sent.map((p: any) => [p.channel, p.body, p.recipients])).toEqual([[BUILD, `Note on decision (no pick yet): None of these fit: ask the gardeners first. uni:${D1}`, ['b'.repeat(64)]]]);
+    // still open and tappable; the field is empty again and the note shows on the card
+    await expect(field(card)).toHaveValue('');
+    await expect(card.locator('.decision-notes')).toHaveText('You: None of these fit: ask the gardeners first.');
+    await shot(page, '13-note-alone');
+    // and a pick after it is written against the revision the note made (no "the question changed")
+    await card.getByRole('button', { name: 'A', exact: true }).click();
+    await expect(card.locator('.decision-result')).toHaveText('Decided: A · by you');
+  });
+
+  test('Enter is a new line and never sends; Shift+Enter and Ctrl+Enter send the words alone', async ({ page }) => {
+    const card = await firstCard(page);
+    const before = (await posts(page)).length;
+    const box = field(card);
+    await box.click();
+    await box.pressSequentially('line one');
+    await box.press('Enter');
+    await box.pressSequentially('line two');
+    await expect(box).toHaveValue('line one\nline two');
+    // it grew to fit the second line
+    expect((await box.boundingBox())!.height).toBeGreaterThan(50);
+    await page.waitForTimeout(300);
+    expect((await posts(page)).length).toBe(before);
+    expect((await stored(page)).notes).toBeUndefined();
+    await box.press('Shift+Enter');
+    await expect(card.getByText('Note sent to the room.')).toBeVisible();
+    expect((await stored(page)).notes.map((n: any) => n.text)).toEqual(['line one\nline two']);
+    await box.pressSequentially('and one more');
+    await box.press('Control+Enter');
+    await expect.poll(async () => (await stored(page)).notes.length).toBe(2);
+    const sent = (await posts(page)).slice(before).map((p: any) => p.body);
+    expect(sent).toEqual([`Note on decision (no pick yet): line one\nline two uni:${D1}`, `Note on decision (no pick yet): and one more uni:${D1}`]);
+    expect((await stored(page)).state).toBe('open');
+  });
+
+  test('a tap that lost the race writes and posts nothing and keeps the words; they survive a redraw and can go as a note', async ({ page }) => {
+    const card = await firstCard(page);
+    await arrive(page, `Reminder: uni:${D1}`);
+    await field(card).fill('C, so the path stays lit.');
+    // the same decision's other card shows the same unsent words (they live with the decision, not the card), and a redraw keeps them
+    const other = page.locator('.sr-chat .message .decision-card').nth(1);
+    await expect(field(other)).toHaveValue('C, so the path stays lit.');
+    await arrive(page, 'Something else entirely.');
+    await expect(field(card)).toHaveValue('C, so the path stays lit.');
+    await page.evaluate((d) => { const t = (window as any).__tasks.find((x: any) => x.id === d); Object.assign(t.metadata, { state: 'decided', decided: 'A', decided_by: 'room' }); t.updatedAt = '2026-10-09T09:30:00.000Z'; }, D1);
+    const before = (await posts(page)).length;
+    await card.getByRole('button', { name: 'C', exact: true }).click();
+    await expect(card.locator('.decision-result')).toHaveText('Decided: A · by room');
+    await expect(card.getByText(/Already decided before your tap; nothing was sent\. Your note is still here/)).toBeVisible();
+    await expect(field(card)).toHaveValue('C, so the path stays lit.');
+    const m = await stored(page);
+    expect([m.decided, m.decided_note, m.notes]).toEqual(['A', undefined, undefined]);
+    await page.waitForTimeout(500);
+    expect((await posts(page)).length).toBe(before);
+    await shot(page, '14-lost-keeps-words');
+    // sent on its own now: the room hears it, saying what it was decided as
+    await card.getByRole('button', { name: 'Send note' }).click();
+    await expect(card.getByText('Note sent to the room.')).toBeVisible();
+    expect((await posts(page)).slice(before).map((p: any) => p.body)).toEqual([`Note on decision (decided already: A): C, so the path stays lit. uni:${D1}`]);
+    expect((await stored(page)).notes.map((n: any) => n.text)).toEqual(['C, so the path stays lit.']);
+  });
+
+  test('a note that could not be saved stays in the field and nothing is posted', async ({ page }) => {
+    const card = await firstCard(page);
+    const before = (await posts(page)).length;
+    await field(card).fill('Ask again on Friday.');
+    await page.evaluate(() => { (window as any).__noteSaveFails = true; });
+    await card.getByRole('button', { name: 'Send note' }).click();
+    await expect(card.getByRole('alert')).toHaveText(/^Couldn't save your note: hub unreachable/);
+    await expect(field(card)).toHaveValue('Ask again on Friday.');
+    expect((await posts(page)).length).toBe(before);
+    await card.getByRole('button', { name: 'Send note' }).click();
+    await expect(card.getByText('Note sent to the room.')).toBeVisible();
+  });
+
+  test('the length cap: the field stops at 1000 characters and counts down from 900', async ({ page }) => {
+    const card = await firstCard(page);
+    const box = field(card);
+    await box.fill('x'.repeat(899));
+    await expect(card.locator('.decision-count')).toHaveCount(0);
+    await box.fill('x'.repeat(950));
+    await expect(card.locator('.decision-count')).toHaveText('50 characters left');
+    await box.fill('y'.repeat(1200));
+    await expect(box).toHaveValue('y'.repeat(1000));
+    await expect(card.locator('.decision-count')).toHaveText('1000 characters: the most a note takes');
+    await shot(page, '15-cap');
+    await card.getByRole('button', { name: 'A', exact: true }).click();
+    await expect(card.locator('.decision-result')).toHaveText('Decided: A · by you');
+    expect((await stored(page)).decided_note).toBe('y'.repeat(1000));
+  });
+
+  test('words that look like markup stay words: stored as typed, escaped in the room, shown as text', async ({ page }) => {
+    const card = await firstCard(page);
+    const words = '<b>bold</b> and [x](javascript:alert(1)) **loud**\n# not a heading';
+    await field(card).fill(words);
+    await card.getByRole('button', { name: 'Send note' }).click();
+    await expect(card.getByText('Note sent to the room.')).toBeVisible();
+    expect((await stored(page)).notes[0].text).toBe(words);
+    const body = (await posts(page)).at(-1).body;
+    expect(body).toBe(`Note on decision (no pick yet): <b>bold</b> and \\[x\\](javascript:alert(1)) \\*\\*loud\\*\\*\n\\# not a heading uni:${D1}`);
+    // in the chat: the words as typed, no link, no bold, no heading, no element from the text
+    const own = page.locator('.sr-chat .message').filter({ hasText: 'Note on decision (no pick yet)' });
+    const md = own.locator('.message-content > .md');
+    await expect(md).toContainText('<b>bold</b> and [x](javascript:alert(1)) **loud**');
+    await expect(md.locator('a[href^="javascript"], b, strong, em, .md-h')).toHaveCount(0);
+    await expect(md).toContainText('# not a heading');
+    // on the card too
+    await expect(card.locator('.decision-notes li')).toContainText('<b>bold</b> and [x](javascript:alert(1))');
+    await expect(card.locator('.decision-notes b')).toHaveCount(0);
+    await shot(page, '16-markup-as-text');
+  });
+});

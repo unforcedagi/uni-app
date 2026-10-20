@@ -16,7 +16,35 @@ export type DecisionView = {
   /** The revision the question was read at: a pick is written against it. */
   updatedAt: string;
   task: string | null;
+  /** T-226: the words written with the pick (`decided_note`), else null. */
+  decidedNote: string | null;
+  /** T-226: words added with no pick (`notes`: `{text, at, by}`), oldest first. */
+  notes: { text: string; at: string; by: string }[];
 };
+
+/** T-226: the longest note on a decision, in characters (the vault refuses longer; the field stops there and counts down near it). */
+export const NOTE_MAX = 1000;
+/** From here on the field shows how many characters are left. */
+export const NOTE_WARN = 900;
+
+/**
+ * A note as it is stored and sent: plain text with its line breaks, without control or direction-override characters (they could make
+ * the room message read other than it is), trimmed; the same as the vault side (`decision_note_text`). "" when nothing is left.
+ */
+export function cleanNote(text: string): string {
+  return (text ?? "").replace(/\r\n?/g, "\n").replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, "").trim();
+}
+
+/**
+ * A note as the room message carries it: the markdown marks escaped, so the chat shows the words as typed (a `[x](javascript:…)` or
+ * `**` stays text, never a link or bold), and a line can't start a heading, quote or list. Bare http(s) links stay links, as anywhere. The chat never renders HTML, so `<b>` is
+ * text already.
+ */
+export function chatText(text: string): string {
+  return cleanNote(text)
+    .replace(/[\\`*_[\]~|]/g, "\\$&")
+    .replace(/^(\s*)([#>]|[-+](?=\s|$)|\d+[.)](?=\s|$))/gm, (_, sp: string, mark: string) => `${sp}${mark.replace(/^[#>+-]|[.)]$/, "\\$&")}`);
+}
 
 const ULID = "[0-9A-HJKMNP-TV-Z]{26}";
 const REF = new RegExp(`(?<![\\w/:.@-])uni:(${ULID})(?![\\w/])`, "g");
@@ -53,16 +81,26 @@ export function parseDecisionNote(note: any): DecisionView | null {
   return {
     id: note.id, question: questionOf(note.content, note.path), options: [...new Set(raw)], dflt, state,
     decided: str(m.decided), decidedBy: str(m.decided_by), updatedAt: typeof note.updatedAt === "string" ? note.updatedAt : "", task: str(m.task),
+    decidedNote: str(m.decided_note),
+    notes: Array.isArray(m.notes) ? m.notes.flatMap((n: any) => n && typeof n.text === "string" && n.text.trim() ? [{ text: n.text, at: String(n.at ?? ""), by: String(n.by ?? "") }] : []) : [],
   };
 }
 
 /** How an option reads on its button: without the "(default)" it may carry; the default gets its own label. */
 export const optionLabel = (o: string): string => o.replace(DEFAULT_MARK, "") || o;
 
-/** What a won tap posts in the room, as you: the pick, the question, and the ref the room can look up. */
-export function pickedLine(option: string, d: Pick<DecisionView, "id" | "question">): string {
-  const q = d.question.replace(/\s+/g, " ").trim();
-  return `Picked: ${optionLabel(option)} (decision: ${q.length > 120 ? q.slice(0, 119) + "…" : q}) uni:${d.id}`;
+const shortQ = (question: string) => { const q = question.replace(/\s+/g, " ").trim(); return q.length > 120 ? q.slice(0, 119) + "…" : q; };
+
+/** What a won tap posts in the room, as you: the pick, your words with it (T-226, escaped), the question, and the ref the room can look up. */
+export function pickedLine(option: string, d: Pick<DecisionView, "id" | "question">, note = ""): string {
+  const words = chatText(note);
+  return `Picked: ${optionLabel(option)}${words ? ` — ${words}` : ""} (decision: ${shortQ(d.question)}) uni:${d.id}`;
+}
+
+/** T-226: what words sent with no pick post in the room, as you; a decision decided meanwhile (your tap lost) says what it was decided as. */
+export function noteLine(note: string, d: Pick<DecisionView, "id" | "state" | "decided">): string {
+  const head = d.state === "decided" && d.decided ? `Note on decision (decided already: ${chatText(optionLabel(d.decided))})` : "Note on decision (no pick yet)";
+  return `${head}: ${chatText(note)} uni:${d.id}`;
 }
 
 /**

@@ -2217,15 +2217,27 @@ async fn vault_pick_decision(
     by: String,
     at: String,
     if_updated_at: String,
+    note: Option<String>,
 ) -> Result<uni_core::parachute::Pick, String> {
     let vault = vault
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty())
         .unwrap_or_else(|| vault_config(&app).vault);
     with_vault(&app, move |c| {
-        tauri::async_runtime::block_on(c.pick_decision(&vault, &id, &option, &by, &at, &if_updated_at)).map_err(|e| e.to_string())
+        tauri::async_runtime::block_on(c.pick_decision(&vault, &id, &option, &by, &at, &if_updated_at, note.as_deref())).map_err(|e| e.to_string())
     })
     .await
+}
+
+/// T-226: Aaron's words on a decision with no pick: appended to its `notes`, the decision left open (re-read and appended again when
+/// another write lands first). The card posts "Note on decision …" in the room only after this returns.
+#[tauri::command]
+async fn vault_note_decision(app: tauri::AppHandle, vault: Option<String>, id: String, text: String, by: String, at: String) -> Result<serde_json::Value, String> {
+    let vault = vault
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| vault_config(&app).vault);
+    with_vault(&app, move |c| tauri::async_runtime::block_on(c.note_decision(&vault, &id, &text, &by, &at)).map_err(|e| e.to_string())).await
 }
 
 /// Merge `snoozed_until` into a task or decision, guarded by `if_updated_at` (the client refuses any other key or note).
@@ -2501,6 +2513,7 @@ pub fn run() {
             vault_patch_meta,
             vault_decide,
             vault_pick_decision,
+            vault_note_decision,
             app_version,
             vault_create,
             vault_save,

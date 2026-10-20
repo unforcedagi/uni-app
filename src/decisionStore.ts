@@ -10,6 +10,8 @@ export const msg = (e: unknown): string => (typeof e === "string" ? e : (e as Er
 export function makeDecisionStore(read: (vault: string, id: string) => Promise<unknown>, now: () => number = Date.now) {
   const entries = new Map<string, Entry>();
   const loading = new Map<string, Promise<void>>();
+  /** T-226: what you typed on a decision and haven't sent: kept here, not in a card, so a card drawn again (or a tap that lost) keeps it. */
+  const drafts = new Map<string, string>();
   const listeners = new Set<() => void>();
   let version = 0, generation = 0;
   const key = (vault: string, id: string) => `${vault}\u0000${id}`;
@@ -39,8 +41,11 @@ export function makeDecisionStore(read: (vault: string, id: string) => Promise<u
     refresh: (ms: number) => { for (const e of stale(ms)) void load(e.id, e.vault); },
     /** Re-read these ids where they are open (the shell stopped listing them: decided elsewhere). */
     gone: (ids: readonly string[]) => { for (const e of [...entries.values()]) if (e.view?.state === "open" && ids.includes(e.id)) void load(e.id, e.vault); },
-    /** Forget (a new identity): nothing read before shows again, and reads under way are dropped. */
-    forget: () => { generation++; entries.clear(); loading.clear(); bump(); },
+    /** The words typed on this decision and not sent yet ("" when none); shared by its cards. */
+    draft: (id: string, vault: string) => drafts.get(key(vault, id)) ?? "",
+    setDraft: (id: string, vault: string, text: string) => { const k = key(vault, id); if (text) drafts.set(k, text); else drafts.delete(k); bump(); },
+    /** Forget (a new identity): nothing read before shows again, and reads under way are dropped; unsent words go too. */
+    forget: () => { generation++; entries.clear(); loading.clear(); drafts.clear(); bump(); },
     subscribe: (f: () => void) => { listeners.add(f); return () => { listeners.delete(f); }; },
     version: () => version,
   };

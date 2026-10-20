@@ -621,9 +621,22 @@ Two proposals wait on a scope decision.
             const opt = (m.options ?? []).find((o: string) => o.toLowerCase() === String(args.option).toLowerCase());
             if (!opt) throw `"${args.option}" is not one of this decision's options`;
             if (!args.ifUpdatedAt || args.ifUpdatedAt !== t.updatedAt) throw `conflict: the decision changed since it was shown; look again: ${args.id}`;
-            Object.assign(m, { state: 'decided', decided: opt, decided_at: args.at, decided_by: args.by });
+            // T-226: the words with the pick are written in the same update, or not at all
+            if (args.note != null && (typeof args.note !== 'string' || !args.note.trim() || [...args.note].length > 1000)) throw 'invalid: a note on a decision is at most 1000 characters';
+            Object.assign(m, { state: 'decided', decided: opt, decided_at: args.at, decided_by: args.by }, args.note ? { decided_note: args.note } : {});
             t.updatedAt = new Date(Date.now() + taskNotes.length).toISOString(); t.lastUpdatedVia = 'api';
             return { outcome: 'picked', decided: opt, title: '', note: { ...JSON.parse(JSON.stringify(t)), content: undefined } };
+          }
+          // T-226: words alone on a decision: appended to its `notes`, its state left alone (the vault side re-reads and appends again when
+          // another write lands first, so the fixture only appends). `__noteSaveFails` makes the next save fail.
+          case 'vault_note_decision': {
+            const t = taskNotes.find((x) => x.id === args.id);
+            if (!t || !t.tags.includes('decision')) throw 'only decision notes take a note';
+            if (w.__noteSaveFails) { w.__noteSaveFails = false; throw 'hub unreachable: connection refused'; }
+            if (typeof args.text !== 'string' || !args.text.trim() || [...args.text].length > 1000) throw 'invalid: a note on a decision is at most 1000 characters';
+            (t.metadata.notes ??= []).push({ text: args.text, at: args.at, by: args.by });
+            t.updatedAt = new Date(Date.now() + taskNotes.length + t.metadata.notes.length).toISOString(); t.lastUpdatedVia = 'api';
+            return { ...JSON.parse(JSON.stringify(t)), content: undefined };
           }
           case 'vault_patch_meta': {
             const t = taskNotes.find((x) => x.id === args.id);
