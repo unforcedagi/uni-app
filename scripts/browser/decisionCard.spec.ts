@@ -54,10 +54,10 @@ test.describe('decision cards in the chat', () => {
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     // no motion for the e-ink screen
     expect(await pick.getByRole('button').first().evaluate((b) => getComputedStyle(b).transitionDuration)).toBe('0s');
+    await shot(page, '01-card');
     // its context: the decision's own note opens beside (or over) the chat
     await card.getByRole('button', { name: 'Context ›' }).click();
     await expect(page.locator('.note-pane, .note-view').first()).toBeVisible();
-    await shot(page, '01-card');
   });
 
   test('2. a tap sets the state (open -> decided, by you) and tells the room as you: "Picked: B …"; 3. a second card for it shows Decided', async ({ page }) => {
