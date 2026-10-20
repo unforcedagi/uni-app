@@ -98,19 +98,30 @@ function DraftTag({ m, who }: { m: MailMessage; who: Who }) {
   return <p className="mail-draft-note"><span className="mail-draft-tag">DRAFT · NOT SENT</span></p>;
 }
 
+/** Where a message of a thread lives, when that isn't somewhere you'd read it: a thread can reach into Junk and Trash. */
+function placeOf(m: MailMessage, acct: AccountBoxes): "junk" | "trash" | null {
+  const roles = m.mailbox_ids.map((id) => acct.mailboxes.find((b) => b.id === id)?.role);
+  for (const r of ["junk", "trash"] as const) if (roles.length > 0 && roles.every((x) => x === r)) return r;
+  return null;
+}
+
 /** One message of a thread: headers, the body (plain text first, the sealed HTML on request), attachments. */
-function MessageCard({ m, who, accountId }: { m: MailMessage; who: Who; accountId: string }) {
+function MessageCard({ m, acct, accountId }: { m: MailMessage; acct: AccountBoxes; accountId: string }) {
   const [formatted, setFormatted] = useState(!m.text && !!m.html);
   const showHtml = formatted && !!m.html;
+  const who = acct.who;
+  const place = placeOf(m, acct);
   return <article id={`mail-msg-${m.id}`} className={`mail-card ${m.draft ? "mail-card-draft" : ""} ${m.unread && !m.draft ? "mail-card-unread" : ""}`} aria-label={m.draft ? `Draft: ${subjectLabel(m.subject)}` : `Message from ${addressLine(m.from) || "(no sender)"}`}>
     {m.draft && <DraftTag m={m} who={who} />}
+    {place && <p className="mail-draft-note mail-place"><span className="mail-draft-tag">{place === "junk" ? "IN JUNK" : "IN TRASH"}</span>
+      <span>{place === "junk" ? "The server filed this message as junk. Treat its links and attachments with care." : "This message is in the Trash."}</span></p>}
     <dl className="mail-headers">
       <dt>From</dt><dd>{addressLine(m.from) || "(no sender)"}</dd>
       {m.to.length > 0 && <><dt>To</dt><dd>{addressLine(m.to)}</dd></>}
       {m.cc.length > 0 && <><dt>Cc</dt><dd>{addressLine(m.cc)}</dd></>}
       <dt>{m.draft ? "Saved" : "Date"}</dt><dd>{mailDateLong(m.sent_at || m.received_at)}{m.unread && !m.draft && <span className="mail-unread-word"> · unread</span>}</dd>
     </dl>
-    {m.attachments.length > 0 && <ul className="mail-attachments" aria-label="Attachments">{m.attachments.map((a) => <AttachmentRow key={a.blob_id} accountId={accountId} a={a} />)}</ul>}
+    {m.attachments.length > 0 && <ul className="mail-attachments" aria-label="Attachments">{m.attachments.map((a, i) => <AttachmentRow key={a.part_id ?? `${a.blob_id}-${i}`} accountId={accountId} a={a} />)}</ul>}
     {(m.text && m.html) || (showHtml && m.remote_images > 0) || m.truncated ? <div className="mail-body-bar">
       {m.text && m.html && <button type="button" className="note-quiet" aria-pressed={showHtml} onClick={() => setFormatted(!formatted)}>{showHtml ? "Show plain text" : "Show formatted"}</button>}
       {showHtml && m.remote_images > 0 && <span className="mail-note">{m.remote_images === 1 ? "1 remote image not loaded" : `${m.remote_images} remote images not loaded`}</span>}
@@ -140,7 +151,7 @@ function ThreadView({ t, acct, note, onBack }: { t: MailThread; acct: AccountBox
       {note && <p className="mail-triage" role="note"><span className="eyebrow">Uni's triage note</span><span>{note}</span></p>}
       {uniDraft && <button type="button" className="mail-draft-hint" onClick={() => document.getElementById(`mail-msg-${uniDraft.id}`)?.scrollIntoView({ block: "start" })}>
         <span className="mail-draft-tag small">DRAFT BY UNI</span> Uni left a draft reply at the end of this thread. Not sent.</button>}
-      {t.messages.map((m) => <MessageCard key={m.id} m={m} who={acct.who} accountId={t.account_id} />)}
+      {t.messages.map((m) => <MessageCard key={m.id} m={m} acct={acct} accountId={t.account_id} />)}
     </div>
   </section>;
 }
@@ -178,24 +189,35 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
   // a slow answer for a list or thread no longer shown is dropped
   const listSeq = useRef(0);
   const threadSeq = useRef(0);
+  /** The list being shown (scope and search): notes for it are kept while it pages, dropped when it changes. */
+  const shownKey = useRef("");
 
-  const loadOverview = useCallback(async () => {
+  /** The accounts and their mailboxes. What was shown from an account no longer in the session goes with it. */
+  const loadOverview = useCallback(async (): Promise<Overview | null> => {
     setBoxesProblem(null);
     try {
       const o = await invoke<Overview>("mail_overview");
+      const known = (id: string) => o.accounts.some((a) => a.id === id);
       setOverview(o);
       setScope((cur) => (scopeValid(cur, o) ? cur : { kind: "all-inboxes" }));
-    } catch (e) { setBoxesProblem(mailProblem(e)); }
+      setList((cur) => (cur && cur.threads.some((t) => !known(t.account_id)) ? { ...cur, threads: cur.threads.filter((t) => known(t.account_id)), more: false } : cur));
+      setOpen((cur) => {
+        if (!cur || known(cur.accountId)) return cur;
+        threadSeq.current++; setThread(null); setThreadProblem(null); setPane("list");
+        return null;
+      });
+      return o;
+    } catch (e) { setBoxesProblem(mailProblem(e)); return null; }
   }, []);
 
   /** Uni's notes for these rows, one call per account. Each answer replaces what was shown for those rows, so a note
    *  Uni removed goes on Refresh. Display only: a failure shows no notes for those rows. */
-  const loadNotes = useCallback(async (threads: ThreadSummary[], seq: number) => {
+  const loadNotes = useCallback(async (threads: ThreadSummary[], key: string) => {
     const by = new Map<string, string[]>();
     for (const t of threads) by.set(t.account_id, [...(by.get(t.account_id) ?? []), t.email_id]);
     for (const [accountId, emailIds] of by) {
       const got = await invoke<Record<string, string>>("mail_triage", { accountId, emailIds }).catch(() => ({} as Record<string, string>));
-      if (seq !== listSeq.current) return;
+      if (key !== shownKey.current) return;
       setNotes((cur) => {
         const next = { ...cur };
         for (const id of emailIds) delete next[`${accountId}/${id}`];
@@ -208,6 +230,7 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
   const loadList = useCallback(async (key: string, sources: Source[], text: string, more: List | null) => {
     if (sources.length === 0) { setList({ key, threads: [], next: [], more: false, total: 0 }); return; }
     const seq = ++listSeq.current;
+    shownKey.current = key;
     setListLoading(true);
     if (!more) setListProblem(null);
     try {
@@ -217,7 +240,7 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
         ? { key, total: page.total, next: page.next, more: page.more, threads: [...more.threads, ...page.threads.filter((t) => !more.threads.some((c) => c.account_id === t.account_id && c.thread_id === t.thread_id))] }
         : { key, total: page.total, next: page.next, more: page.more, threads: page.threads });
       setListProblem(null);
-      void loadNotes(page.threads, seq);
+      void loadNotes(page.threads, key);
     } catch (e) { if (seq === listSeq.current) setListProblem(mailProblem(e)); }
     finally { if (seq === listSeq.current) setListLoading(false); }
   }, [loadNotes]);
@@ -248,11 +271,11 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
   useEffect(() => { remembered.scope = scope; remembered.query = query; remembered.open = open; }, [scope, query, open]);
 
   const accountOf = (id: string) => overview?.accounts.find((a) => a.id === id);
-  const whoOf = (id: string): Who => accountOf(id)?.who ?? "owner";
-  const refresh = () => {
-    void loadOverview();
-    if (overview) void loadList(listKey, sourcesFor(scope, overview, !!query), query, null);
-    if (open) void loadThread(open);
+  const refresh = async () => {
+    const o = await loadOverview();
+    // the list reloads with the accounts the bridge has now (a scope that went is reset, and its effect reloads)
+    if (o && scopeValid(scope, o)) void loadList(listKey, sourcesFor(scope, o, !!query), query, null);
+    if (o && open && o.accounts.some((a) => a.id === open.accountId)) void loadThread(open);
   };
   const pick = (s: Scope) => { threadSeq.current++; setScope(s); setQuery(""); setTyped(""); setOpen(null); setThread(null); setThreadProblem(null); setPane("list"); };
   const openThread = (t: ThreadSummary) => { setOpen({ accountId: t.account_id, threadId: t.thread_id }); setPane("thread"); };
@@ -266,7 +289,7 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
     <header className="note-bar mail-bar">
       <button className="note-action" onClick={onBack}>← {backTo}</button>
       <span className="mail-title"><strong>Mail</strong>{overview && <small className="mail-account" title="The address this device reads as">{overview.login} · read-only</small>}</span>
-      <button className="note-action" onClick={refresh} disabled={listLoading}>Refresh</button>
+      <button className="note-action" onClick={() => void refresh()} disabled={listLoading}>Refresh</button>
     </header>
     {boxesProblem && !overview ? <div className="mail-scroll"><Problem p={boxesProblem} onRetry={() => void loadOverview()} /></div>
     : !overview ? <p className="mail-loading" role="status">Loading mail…</p>
@@ -309,14 +332,16 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
             {listProblem && <Problem p={listProblem} onRetry={() => void loadList(listKey, sourcesFor(scope, overview, !!query), query, null)} />}
             {!listProblem && !list && listLoading && <p className="mail-loading" role="status">{query ? "Searching…" : "Loading threads…"}</p>}
             {list && list.threads.length === 0 && !listProblem && <p className="empty mail-empty">{query ? `Nothing matches “${query}”.` : "Nothing here."}</p>}
-            {list && list.threads.length > 0 && <ul className="mail-rows">{list.threads.map((t) => <ThreadRow key={`${t.account_id}/${t.thread_id}`} t={t} who={whoOf(t.account_id)}
-              note={notes[`${t.account_id}/${t.email_id}`] ?? null} selected={open?.accountId === t.account_id && open.threadId === t.thread_id} onOpen={() => openThread(t)} />)}</ul>}
+            {/* a row is drawn only with the tag of an account the session names: never a guessed YOU */}
+            {list && list.threads.length > 0 && <ul className="mail-rows">{list.threads.flatMap((t) => { const a = accountOf(t.account_id); return a ? [<ThreadRow key={`${t.account_id}/${t.thread_id}`} t={t} who={a.who}
+              note={notes[`${t.account_id}/${t.email_id}`] ?? null} selected={open?.accountId === t.account_id && open.threadId === t.thread_id} onOpen={() => openThread(t)} />] : []; })}</ul>}
             {list?.more && <p className="mail-more"><button type="button" className="note-quiet" disabled={listLoading} onClick={() => void loadList(listKey, list.next, query, list)}>{listLoading ? "Loading…" : "Load older threads"}</button></p>}
           </div>
         </section>
         <section className="mail-read" aria-label="Thread">
           {threadProblem ? <div className="mail-scroll"><button type="button" className="note-action mail-thread-back" onClick={() => setPane("list")}>← Threads</button><Problem p={threadProblem} onRetry={() => open && void loadThread(open)} /></div>
           : thread && openAcct ? <ThreadView key={`${thread.account_id}/${thread.thread_id}`} t={thread} acct={openAcct} note={threadNote} onBack={() => setPane("list")} />
+          : open && !openAcct ? <div className="mail-scroll"><button type="button" className="note-action mail-thread-back" onClick={() => setPane("list")}>← Threads</button><p className="empty mail-pick">This mailbox isn't shared with this device any more.</p></div>
           : open ? <p className="mail-loading" role="status">Opening…</p>
           : <p className="empty mail-pick">Pick a thread to read it.</p>}
         </section>

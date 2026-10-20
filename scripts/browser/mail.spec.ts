@@ -37,6 +37,8 @@ async function boot(page: Page, mode: Mode = 'ok') {
       // as if the Rust sanitizer had missed everything: the sealed frame must still run no script and load nothing remote
       msg('a5', 'A', 'Ta5', 'A-inbox', a('Riverside Library', 'library@example.org'), robin, 'Your hold is ready', '2026-10-16T10:00:00Z', { remote_images: 2, links: [{ url: 'https://library.example/holds', text: 'See your holds' }],
         html: '<h2>Your hold is ready</h2><p id="p">Pick it up within seven days.</p><img src="/remote-pixel.gif"><img src="http://127.0.0.1:1434/remote-banner.png"><script>document.getElementById("p").textContent="SCRIPT RAN";parent.postMessage("script-ran","*")</script>' }),
+      // a reply the server filed as junk, in the same thread as an Inbox message
+      msg('a9', 'A', 'Ta5', 'A-junk', a('Riverside Library', 'library@example.org'), robin, 'Re: Your hold is ready', '2026-10-16T12:00:00Z', { text: 'Confirm your card at https://library-card.example/verify' }),
       msg('a7', 'A', 'Ta7', 'A-junk', a('Prize Desk', 'winner@spam.example'), robin, 'Free marmalade for life', '2026-10-15T03:00:00Z', { unread: true, text: 'Claim now.' }),
       msg('u1', 'U', 'Tu1', 'U-inbox', a('Monitor', 'monitor@example.net'), uni, 'Server report for Tuesday', '2026-10-18T10:30:00Z', { unread: true, text: 'All checks passed. The lighthouse job ran twice.' }),
       msg('u2', 'U', 'TU-read', 'U-inbox', ada, uni, 'Question about the reading group', '2026-10-17T18:00:00Z', { text: 'Hello Uni, is the reading group still on Thursday?\n\nAda' }),
@@ -70,8 +72,11 @@ async function boot(page: Page, mode: Mode = 'ok') {
         w.__calls.push({ cmd, args });
         switch (cmd) {
           case 'mail_overview': fail();
-            return w.__mailMode === 'one_account' ? { login: 'robin@example.com', multi: false, accounts: [accounts[0]] } : { login: 'robin@example.com', multi: true, accounts };
-          case 'mail_threads': fail(); return threads(args.sources, args.text);
+            return w.__mailMode === 'one_account' || w.__uniGone ? { login: 'robin@example.com', multi: w.__mailMode !== 'one_account', accounts: [accounts[0]] } : { login: 'robin@example.com', multi: true, accounts };
+          case 'mail_threads': fail();
+            if (w.__threadsDelay) await new Promise((r) => setTimeout(r, w.__threadsDelay));
+            if (w.__uniGone && args.sources.some((s: any) => s.account_id === 'U')) throw { kind: 'server', message: 'accountNotFound' };
+            return threads(args.sources, args.text);
           case 'mail_thread': {
             fail(); if (w.__threadFails) throw { kind: 'server', message: 'mail server: URLError' };
             const list = msgs.filter((m) => m.account === args.accountId && m.thread_id === args.threadId).sort((x, y) => x.received_at.localeCompare(y.received_at));
@@ -303,6 +308,36 @@ test("Refresh replaces Uni's triage notes: a removed one goes, a changed one cha
   await expect(rows(page).nth(1)).toContainText('Uni: Checked again: still routine.');
   await expect(rows(page).nth(0)).not.toContainText('Needs you');
   await expect(rows(page).nth(0).locator('.mail-row-preview')).toBeVisible();
+});
+
+/** Codex review 2, P1: when Uni's mailbox leaves the session, Refresh drops its rows and its open thread; none turns YOU. */
+test("Refresh after Uni's mailbox stops being shared shows none of it, and never as YOU", async ({ page }) => {
+  await boot(page);
+  await rows(page).nth(1).click();
+  await expect(page.getByRole('region', { name: 'Thread: Server report for Tuesday' })).toBeVisible();
+  await backToThreads(page);
+  // the list's reload is slow: until it lands, what is shown must already be only the mail of accounts still named
+  await page.evaluate(() => { (window as any).__uniGone = true; (window as any).__threadsDelay = 2500; });
+  await page.getByRole('button', { name: 'Refresh' }).click();
+  await expect(rows(page)).toHaveCount(3, { timeout: 1500 });
+  for (const t of await rows(page).locator('.mail-who').allInnerTexts()) expect(t).toBe('YOU');
+  await page.waitForTimeout(1500);
+  await expect(rows(page)).toHaveCount(3);
+  for (const t of await rows(page).locator('.mail-who').allInnerTexts()) expect(t).toBe('YOU');
+  await expect(page.getByText('Monitor')).toHaveCount(0);
+  await expect(page.getByRole('region', { name: 'Thread: Server report for Tuesday' })).toHaveCount(0);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+});
+
+/** /code-review: a thread can reach into Junk; a message there says so. */
+test('a message of a thread that sits in Junk says so', async ({ page }) => {
+  await boot(page);
+  await rows(page).nth(4).click();
+  const thread = page.getByRole('region', { name: 'Thread: Your hold is ready' });
+  await expect(thread.locator('.mail-card')).toHaveCount(2);
+  await expect(thread.locator('.mail-card').nth(0).locator('.mail-place')).toHaveCount(0);
+  await expect(thread.locator('.mail-card').nth(1)).toContainText('IN JUNK');
+  await expect(thread.locator('.mail-card').nth(1)).toContainText('filed this message as junk');
 });
 
 test("Uni's own draft, in Uni's mail, reads as Uni's and not sent", async ({ page }) => {

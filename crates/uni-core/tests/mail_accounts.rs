@@ -264,3 +264,31 @@ async fn a_shared_account_the_bridge_doesnt_name_is_not_shown() {
     let read: Vec<_> = fake.state.lock().unwrap().calls.iter().filter_map(|(_, a)| a.clone()).collect();
     assert!(!read.iter().any(|a| a == "Z"), "Z was never read: {read:?}");
 }
+
+/// Codex review 2, P1: Uni's key reads both mailboxes too, with the same labels: the owner's is YOU, Uni's own is UNI.
+#[tokio::test]
+async fn uni_s_key_reads_both_with_the_same_labels() {
+    let keys = Keys::generate();
+    let (a, u, _) = shared_mail();
+    let fake = FakeBridge::start_shared(0, &[keys.public_key().to_hex()], u, vec![a]).await;
+    fake.state.lock().unwrap().roles = Some(serde_json::json!({ "U": "uni", "A": "owner" }));
+    let mail = MailBridge::new(&fake.url, &keys).unwrap();
+    let o = mail.overview().await.unwrap();
+    assert_eq!(o.login, "uni@example.com");
+    assert_eq!(o.accounts.iter().map(|a| (a.id.as_str(), a.who)).collect::<Vec<_>>(), [("A", Who::Owner), ("U", Who::Uni)]);
+    let all = mail.threads(&[inbox("A"), inbox("U")], None, 50).await.unwrap();
+    assert_eq!(ids(&all), ["A/TA-plan", "U/Tu1", "U/TU-read", "A/Ta4", "A/Ta5", "U/Tu4"]);
+}
+
+/// /code-review: a bridge answer missing part of a list is an error, not a quietly empty or wrongly-unread page.
+#[tokio::test]
+async fn a_partial_answer_is_an_error() {
+    let keys = Keys::generate();
+    let fake = shared(&keys).await;
+    let mail = MailBridge::new(&fake.url, &keys).unwrap();
+    for part in ["e1", "t0", "k1"] {
+        fake.state.lock().unwrap().drop_answer = Some(part.into());
+        let e = mail.threads(&[inbox("A"), inbox("U")], None, 50).await.unwrap_err();
+        assert!(matches!(e, MailError::Invalid { ref message } if message.contains(part)), "{part}: {e:?}");
+    }
+}

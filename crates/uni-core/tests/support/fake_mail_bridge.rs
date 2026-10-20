@@ -62,6 +62,8 @@ pub struct State {
     pub honour_account: bool,
     /// v2 only: the `roles` map `/mail/session` gives (the key's own account `owner`, shared ones `uni` by default).
     pub roles: Option<Value>,
+    /// Leave the answer to this method call id out of `/mail/jmap` (a partial answer).
+    pub drop_answer: Option<String>,
     /// Uni's triage notes, by (accountId, emailId).
     pub triage: HashMap<(String, String), String>,
     /// Every method call forwarded: its name and the `accountId` it named.
@@ -103,6 +105,7 @@ impl FakeBridge {
             accept_writes: false,
             honour_account: true,
             roles: None,
+            drop_answer: None,
             triage: HashMap::new(),
             calls: Vec::new(),
             allow: allow.iter().map(|k| k.to_lowercase()).collect(),
@@ -245,7 +248,10 @@ fn handle(st: &Mutex<State>, public: &str, request: &str, path: &str, auth: &str
                     Ok(v) => json!([name, v, id]),
                     Err(t) => json!(["error", { "type": t }, id]),
                 });
+
             }
+            // a dropped answer could still be referred to inside the request; it just isn't sent back
+            responses.retain(|r| s.drop_answer.as_deref() != r.get(2).and_then(Value::as_str));
             (200, "application/json", json!({ "account": s.mail.account, "methodResponses": responses }).to_string().into_bytes())
         }
         "/mail/raw" => {
