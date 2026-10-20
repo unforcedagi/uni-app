@@ -88,6 +88,12 @@ keepAccounts([], gen, beginListing());
 keepAccounts(["U"], gen, slowOverview);
 mergeListing("U", [held("op-h")], gen, slowOverview);
 assert.equal(waitingCount(), 0, "the slow overview's offer is older than the withdrawal");
+// withdrawn, then offered again, while a listing from before the withdrawal is still out: it doesn't land
+const fromBefore = beginListing();
+keepAccounts([], gen, beginListing());
+keepAccounts(["U"], gen, beginListing());
+mergeListing("U", [held("op-i")], gen, fromBefore);
+assert.ok(!heldEntries().U.some((e) => e.item.op_id === "op-i"), "a listing from before the withdrawal is dropped");
 // Forget: nothing kept, and an answer that left before it is dropped
 assert.ok(startDeciding("op-c"));
 forgetHeld();

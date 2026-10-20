@@ -64,8 +64,9 @@ export function beginListing(): number {
  *  it goes. */
 export function mergeListing(accountId: string, list: Parked[], forGen: number, seq: number): void {
   if (forGen !== gen || seq < (merged[accountId] ?? 0)) return;
-  // a newer session said deciding isn't offered on this account: an answer read before that doesn't bring it back
-  if (offered.seq > seq && !offered.ids.includes(accountId)) return;
+  // only what was read with the newest session lands: an answer from before it (which may have withdrawn deciding here,
+  // and offered it again since) doesn't bring anything back
+  if (seq < offered.seq) return;
   merged[accountId] = seq;
   const before = entries[accountId] ?? [];
   const now: HeldEntry[] = list.map((item) => {
