@@ -2,7 +2,7 @@
 // window it asks the door for; what the door's key may do here (its session's ops: the Uni-unsafe ones, delete and
 // sending invites, are hidden from any key the door doesn't give them to); what an error says; and the snapshot kept
 // on the device so an offline Calendar still shows the last days it read, read-only.
-import { addDays, attendeeName, dayStart, instBounds, isoOf, mondayOf, zoned, type Attendee, type DoorInstance, type EventNote } from "./calCore.ts";
+import { addDays, attendeeName, dayKey, dayStart, instBounds, isoOf, mondayOf, wall, zoned, type Attendee, type DoorInstance, type EventNote } from "./calCore.ts";
 
 export type View = "day" | "week" | "agenda";
 export const AGENDA_DAYS = 21;
@@ -211,3 +211,14 @@ export function formTimes(f: FormTimes, tz: string): { start: string; end: strin
 
 /** An all-day event moved to start on `day`: as many days long as it was, whatever the clocks did. */
 export const allDayMoved = (start: string, end: string, day: string): { start: string; end: string } => ({ start: day, end: addDays(day, daysBetween(start, end)) });
+
+/**
+ * Where a drag puts an event's start: in its own column, the instant moved by the minutes (so a start in the hour a
+ * clock change repeats stays in the one it was); across columns, the same wall time that many days on, then the minutes.
+ */
+export function dragTarget(start: number, columns: number, minutes: number, tz: string): number {
+  if (columns === 0) return start + minutes * 60_000;
+  const w = wall(start, tz);
+  const [y, m, d] = addDays(dayKey(start, tz), columns).split("-").map(Number);
+  return zoned(y, m, d, w.h, w.mi, tz) + minutes * 60_000;
+}

@@ -3,7 +3,7 @@
 // invites" is offered, and reading typed attendees. Run: node --experimental-strip-types scripts/calendar.test.ts
 import assert from "node:assert/strict";
 import { layoutDay, type DoorInstance } from "../src/calendar/calCore.ts";
-import { allDayMoved, can, daysFor, FALLBACK_SESSION, formTimes, fromSnapshot, sameTime, invitesWaiting, MAX_WINDOWS, parseAttendees, parseSnapshot, remember, toShown, windowFor, type Session } from "../src/calendar/calView.ts";
+import { allDayMoved, can, dragTarget, daysFor, FALLBACK_SESSION, formTimes, fromSnapshot, sameTime, invitesWaiting, MAX_WINDOWS, parseAttendees, parseSnapshot, remember, toShown, windowFor, type Session } from "../src/calendar/calView.ts";
 
 const TZ = "America/Denver";
 let n = 0;
@@ -115,6 +115,15 @@ t("an all-day event moved over the clock change keeps its days; times compare ho
   assert.equal(sameTime("2026-10-22T22:00:00Z", "2026-10-22T22:30:00Z"), false);
   assert.equal(sameTime("2026-10-22", "2026-10-22"), true);
   assert.equal(sameTime("2026-10-22", "2026-10-23"), false);
+});
+
+t("a drag in its own column moves the instant; across columns, the same wall time days on", () => {
+  // the second 1:30 AM of Nov 1 (MST), a quarter hour later: still the second one
+  assert.equal(new Date(dragTarget(Date.parse("2026-11-01T08:30:00Z"), 0, 15, TZ)).toISOString(), "2026-11-01T08:45:00.000Z");
+  // 9 AM Saturday (MDT) to Sunday after the change: 9 AM MST
+  assert.equal(new Date(dragTarget(Date.parse("2026-10-31T15:00:00Z"), 1, 0, TZ)).toISOString(), "2026-11-01T16:00:00.000Z");
+  // the next-day piece of an event past midnight grabbed and moved back a column: a day earlier, same wall time
+  assert.equal(new Date(dragTarget(Date.parse("2026-10-22T05:00:00Z"), -1, 30, TZ)).toISOString(), "2026-10-21T05:30:00.000Z");
 });
 
 console.log(`${n} passed`);

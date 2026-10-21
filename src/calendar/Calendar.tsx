@@ -7,7 +7,7 @@
 // colour, so it reads on the Daylight, where nothing moves.
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { addDays, dayKey, dayLabel, dayStart, HOUR, layoutDay, MIN, rangeLabel, ruleLabel, timeLabel, wall, zoned, type EventNote, type Instance, type Scope, type Visibility } from "./calCore.ts";
-import { allDayMoved, inviteWords, asCalErr, attendeesText, can, daysBetween, daysFor, DEFAULT_TZ, formTimes, fromSnapshot, sameTime, inviteeLine, invitees, invitesWaiting, newOpId, parseAttendees, partstatWords, problemText, stepFor, toShown, who, windowFor, type CalErr, type Session, type Shown, type View } from "./calView.ts";
+import { allDayMoved, dragTarget, inviteWords, asCalErr, attendeesText, can, daysBetween, daysFor, DEFAULT_TZ, formTimes, fromSnapshot, sameTime, inviteeLine, invitees, invitesWaiting, newOpId, parseAttendees, partstatWords, problemText, stepFor, toShown, who, windowFor, type CalErr, type Session, type Shown, type View } from "./calView.ts";
 import { conflicts as readConflicts, doorAnswered, event as readEvent, events as readEvents, op as sendOp, readSnapshot, saveRead, session as readSession, type Conflict } from "./calDoor.ts";
 import "./Calendar.css";
 
@@ -86,9 +86,8 @@ function TimeGrid({ list, days, tz, today, now, canDrag, canNew, onOpen, onNew, 
     dragRef.current = null;
     setDrag(null);
     if (!r || !r.d.moved) return onOpen(inst);
-    // the event's own start, as many days on as the pointer moved columns, at the same wall time
-    const w = wall(r.inst.s, tz);
-    const start = fromLocal(addDays(dayKey(r.inst.s, tz), r.d.dayIdx - r.d.from), w.h, w.mi) + r.d.deltaMin * MIN;
+    // the event's own start, as many days on as the pointer moved columns, then the minutes
+    const start = dragTarget(r.inst.s, r.d.dayIdx - r.d.from, r.d.deltaMin, tz);
     if (start !== r.inst.s) onDrop(r.inst, start);
   };
 
