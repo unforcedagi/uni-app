@@ -133,7 +133,7 @@ test('relay failure: it says it is not enabled yet, and Try again posts', async 
   await confirm.getByRole('button', { name: 'Enable approvals', exact: true }).click();
   await expect(confirm.getByRole('alert')).toBeVisible();
   await shot(page, '03-failed');
-  await expect(confirm.getByRole('alert')).toHaveText(/Not enabled yet: relay unreachable: connection refused\. Trying again won't post it twice\./);
+  await expect(confirm.getByRole('alert')).toHaveText('Not enabled yet: relay unreachable: connection refused.');
   await expect(s.getByText('Approvals for Uni are on')).toHaveCount(0);
   await confirm.getByRole('button', { name: 'Try again' }).click();
   await expect(s.getByText('Approvals for Uni are on')).toBeVisible();
