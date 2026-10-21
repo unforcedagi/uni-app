@@ -474,14 +474,17 @@ test.describe('T-229 Calendar', () => {
     await expect(detail(page).getByText('Juniper Café', { exact: true })).toBeVisible();
     await detail(page).getByRole('button', { name: 'Delete…' }).click();
     await expect(detail(page).getByRole('group', { name: 'Delete event?' })).toBeVisible();
-    // elsewhere: it moved, and the door now takes this key as Uni's
-    d.door.touch('fx-lunch', { start: '2026-10-22T19:00:00Z', end: '2026-10-22T20:00:00Z', location: 'Juniper Café, upstairs' });
+    // the door now takes this key as Uni's (the event itself unchanged): the confirm goes
     d.door.role = 'uni';
+    await cal(page).getByRole('button', { name: 'Refresh' }).click();
+    await expect(cal(page).getByText('· as Uni')).toBeVisible();
+    await expect(detail(page).getByRole('group', { name: 'Delete event?' })).toHaveCount(0);
+    await expect(detail(page).getByRole('button', { name: /Delete/ })).toHaveCount(0);
+    // elsewhere it moved: the panel shows it as it is now
+    d.door.touch('fx-lunch', { start: '2026-10-22T19:00:00Z', end: '2026-10-22T20:00:00Z', location: 'Juniper Café, upstairs' });
     await cal(page).getByRole('button', { name: 'Refresh' }).click();
     await expect(detail(page).getByText('Thursday, Oct 22 · 1 PM – 2 PM')).toBeVisible();
     await expect(detail(page).getByText('Juniper Café, upstairs')).toBeVisible();
-    await expect(detail(page).getByRole('group', { name: 'Delete event?' })).toHaveCount(0);
-    await expect(detail(page).getByRole('button', { name: /Delete/ })).toHaveCount(0);
     expect(ops(d).some((o) => o.op === 'delete')).toBe(false);
   });
 
