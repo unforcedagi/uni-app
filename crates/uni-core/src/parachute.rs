@@ -1282,7 +1282,7 @@ pub fn decision_note_text(note: Option<&str>) -> Result<Option<String>> {
         .replace("\r\n", "\n")
         .chars()
         .map(|c| if c == '\r' { '\n' } else { c })
-        .filter(|&c| c == '\n' || c == '\t' || !(c.is_control() || matches!(c, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}' | '\u{200e}' | '\u{200f}')))
+        .filter(|&c| c == '\n' || c == '\t' || !(c.is_control() || matches!(c, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}' | '\u{200e}' | '\u{200f}' | '\u{061c}')))
         .collect();
     let text = text.trim();
     if text.is_empty() {
@@ -2526,7 +2526,7 @@ mod pick_tests {
         crate::init_crypto();
         let (client, hub) = self::hub(open_decision());
         let at = "2026-10-09T10:00:00.000Z";
-        let words = "  B, but keep the menu on the left.\r\nAnd <b>no</b> carousel [x](javascript:alert(1))\u{202e}  ";
+        let words = "  B, but keep the menu on the left.\r\nAnd <b>no</b> carousel\u{061c} [x](javascript:alert(1))\u{202e}  ";
         match client.pick_decision("scope-test", "d1", "B", "aaron", at, "r1", Some(words)).await.unwrap() {
             Pick::Picked { decided, .. } => assert_eq!(decided, "B"),
             other => panic!("{other:?}"),

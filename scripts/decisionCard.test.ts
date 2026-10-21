@@ -63,6 +63,14 @@ check("in the room a note reads as typed: markup is escaped and parses back to t
     assert.equal(p.c.map((n: any) => (n.t === "br" ? "\n" : n.v)).join(""), t);
   }
 });
+check("links and note refs in a note stay as typed; a rule line and a bidi mark don't get through", () => {
+  const link = (parseMarkdown(chatText("see https://example.com/a_b~c/x and uni:Projects/my_note"))[0] as any).c;
+  assert.deepEqual(link.filter((n: any) => n.t !== "text").map((n: any) => n.t === "link" ? n.href : n.ref.ref), ["https://example.com/a_b~c/x", "Projects/my_note"]);
+  const rule = parseMarkdown(chatText("a\n---\nb\n- - -"));
+  assert.equal(rule.length, 1, JSON.stringify(rule));
+  assert.equal(cleanNote("a\u061cb"), "ab");
+  assert.equal(cleanNote("half \ud83d"), "half");
+});
 check("a decision's words are read back: the pick's note and the notes added alone", () => {
   const d = parseDecisionNote(note({ state: "decided", options: ["A", "B"], decided: "A", decided_note: "because", notes: [{ text: "first", at: "t1", by: "aaron" }, { text: " " }, "junk", null] }))!;
   assert.equal(d.decidedNote, "because");
@@ -89,6 +97,23 @@ store.put(ID, "uni", { view: parseDecisionNote(note({ state: "decided", options:
 check("a tap's answer that comes back after Forget is not stored", () => assert.equal(store.get(ID, "uni"), undefined));
 store.put(ID, "uni", { view: parseDecisionNote(note({ state: "decided", options: ["A", "B"], decided: "A" })), error: null, read: 0 }, store.generation());
 check("one from this identity is", () => assert.equal(store.get(ID, "uni")?.view?.decided, "A"));
+// a read that started before a write and lands after it is dropped; a fresh read is not held up by one under way
+{
+  const reads: { done: (v: unknown) => void }[] = [];
+  const s2 = makeDecisionStore(() => new Promise((done) => reads.push({ done })));
+  void s2.load(ID, "uni");                                                   // an old read, under way
+  s2.put(ID, "uni", { view: parseDecisionNote(note({ state: "decided", options: ["A", "B"], decided: "B" })), error: null, read: 0 }, s2.generation());
+  reads[0].done(note({ state: "open", options: ["A", "B"] }));
+  await new Promise((r) => setTimeout(r, 0));
+  check("an older read does not undo a tap's answer", () => assert.equal(s2.get(ID, "uni")?.view?.decided, "B"));
+  void s2.load(ID, "uni"); void s2.load(ID, "uni", true);
+  check("a fresh read goes out even while one is under way", () => assert.equal(reads.length, 3));
+  reads[2].done(note({ state: "open", options: ["A", "B"], notes: [{ text: "new", at: "t", by: "aaron" }] }, { updatedAt: "r9" }));
+  await new Promise((r) => setTimeout(r, 0));
+  reads[1].done(note({ state: "open", options: ["A", "B"] }, { updatedAt: "r8" }));
+  await new Promise((r) => setTimeout(r, 0));
+  check("only the newest read lands", () => assert.equal(s2.get(ID, "uni")?.view?.updatedAt, "r9"));
+}
 store.setDraft(ID, "uni", "half a thought");
 check("unsent words are kept per decision and vault", () => { assert.equal(store.draft(ID, "uni"), "half a thought"); assert.equal(store.draft(ID, "life"), ""); });
 store.forget();

@@ -32,18 +32,28 @@ export const NOTE_WARN = 900;
  * the room message read other than it is), trimmed; the same as the vault side (`decision_note_text`). "" when nothing is left.
  */
 export function cleanNote(text: string): string {
-  return (text ?? "").replace(/\r\n?/g, "\n").replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, "").trim();
+  return (text ?? "").replace(/\r\n?/g, "\n")
+    .replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, "")
+    // a half emoji (a lone surrogate) is no character, and the vault can't take one
+    .replace(/[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g, "")
+    .trim();
 }
+
+/** Links and note refs in a note go as typed: an escape inside one would become part of its address. */
+const RAW = /(?:https?:\/\/|mailto:|(?:uni|unforced):)[^\s<>"'`]+/gi;
+const escMarks = (s: string) => s.replace(/[\\`*_[\]~|]/g, "\\$&");
 
 /**
  * A note as the room message carries it: the markdown marks escaped, so the chat shows the words as typed (a `[x](javascript:…)` or
- * `**` stays text, never a link or bold), and a line can't start a heading, quote or list. Bare http(s) links stay links, as anywhere. The chat never renders HTML, so `<b>` is
- * text already.
+ * `**` stays text, never a link or bold), and a line can't start a heading, quote, list or rule. Bare http(s) links and `uni:` note
+ * refs stay as typed (links, as anywhere). The chat never renders HTML, so `<b>` is text already.
  */
 export function chatText(text: string): string {
-  return cleanNote(text)
-    .replace(/[\\`*_[\]~|]/g, "\\$&")
-    .replace(/^(\s*)([#>]|[-+](?=\s|$)|\d+[.)](?=\s|$))/gm, (_, sp: string, mark: string) => `${sp}${mark.replace(/^[#>+-]|[.)]$/, "\\$&")}`);
+  const t = cleanNote(text);
+  let out = "", at = 0;
+  for (const m of t.matchAll(RAW)) { out += escMarks(t.slice(at, m.index)) + m[0]; at = m.index! + m[0].length; }
+  out += escMarks(t.slice(at));
+  return out.replace(/^(\s*)([#>+-]|\d+[.)](?=\s|$))/gm, (_, sp: string, mark: string) => `${sp}${mark.replace(/^[#>+-]|[.)]$/, "\\$&")}`);
 }
 
 const ULID = "[0-9A-HJKMNP-TV-Z]{26}";

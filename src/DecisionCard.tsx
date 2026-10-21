@@ -47,7 +47,7 @@ export function DecisionCard({ id, vault, post }: Props) {
   const [lost, setLost] = useState(false);
   /** What the last room message was: a pick (with or without words) or words alone. */
   const [sent, setSent] = useState<"pick" | "note">("pick");
-  const text = store.draft(id, vault);
+  const text = useSyncExternalStore(store.subscribeDrafts, () => store.draft(id, vault), () => store.draft(id, vault));
   const d = entry?.view;
   // a ref to a note that is not a decision (or not read yet) is only its chip; a note that exists but can't be read now says so quietly
   if (!entry) return null;
@@ -101,9 +101,10 @@ export function DecisionCard({ id, vault, post }: Props) {
       if (!current()) return;
       const now = parseDecisionNote(n);
       if (store.draft(id, vault) === text) store.setDraft(id, vault, "");
-      // the notes show now; the revision a pick is written against moves only with a full read (the question may have changed too)
+      // the notes show now; the revision a pick is written against moves only with a full read (the question may have changed too), a
+      // new one: a read already under way may predate the note
       store.put(id, vault, { view: { ...d, notes: now?.notes ?? d.notes }, error: null, read: Date.now() }, gen);
-      void store.load(id, vault);
+      void store.load(id, vault, true);
       const body = noteLine(words, now ?? d); setLine(body); setSent("note"); await tell(body);
     } catch (e) {
       if (!current()) return;
@@ -134,8 +135,9 @@ export function DecisionCard({ id, vault, post }: Props) {
     {d.decidedNote && <p className="decision-said">{d.decidedNote}</p>}
     {notes}
     {lost && <p className="decision-note" role="status">Already decided before your tap; nothing was sent.{text.trim() ? " Your note is still here: send it on its own." : ""}</p>}
-    {/* words left over (a tap that lost, or typed before it was decided elsewhere) can still go, as a note */}
-    {text && field}
+    {/* words left over (a tap that lost, or typed before it was decided elsewhere) can still go, as a note; after a lost tap the field
+        stays even when cleared to be retyped */}
+    {(text || lost) && field}
     {phase !== "untold" && error && <p className="decision-note warn" role="alert">{error}</p>}
     {told}
   </section>;
@@ -172,7 +174,7 @@ function NoteField({ text, busy, onText, onSend }: { text: string; busy: boolean
   return <div className="decision-say">
     <textarea ref={ref} className="decision-input" rows={1} maxLength={NOTE_MAX} value={text} readOnly={busy} placeholder="Add a note…"
       aria-label="Add a note to this decision" title="Tap an option to send it with your pick, or Send note (Shift+Enter) to send it alone"
-      onChange={(e) => onText(e.target.value.slice(0, NOTE_MAX))}
+      onChange={(e) => onText(e.target.value.length > NOTE_MAX ? e.target.value.slice(0, NOTE_MAX).replace(/[\ud800-\udbff]$/, "") : e.target.value)}
       onKeyDown={(e) => {
         if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
         e.stopPropagation();

@@ -327,6 +327,10 @@ test.describe('your words on a decision card', () => {
     await page.waitForTimeout(500);
     expect((await posts(page)).length).toBe(before);
     await shot(page, '14-lost-keeps-words');
+    // cleared to be retyped, the field stays
+    await field(card).fill('');
+    await expect(field(card)).toBeVisible();
+    await field(card).fill('C, so the path stays lit.');
     // sent on its own now: the room hears it, saying what it was decided as
     await card.getByRole('button', { name: 'Send note' }).click();
     await expect(card.getByText('Note sent to the room.')).toBeVisible();
