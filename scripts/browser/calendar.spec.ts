@@ -531,6 +531,20 @@ test.describe('T-229 Calendar', () => {
     expect(ops(d).some((o) => o.op === 'move')).toBe(false);
   });
 
+  test('one changed event of a series is edited from what it shows', async ({ page }) => {
+    const d = await boot(page);
+    await pickView(page, 'Agenda');
+    await cal(page).getByRole('button', { name: /^Studio hours \(late start\), Tuesday, Oct 27/ }).click();
+    await detail(page).getByRole('button', { name: 'Edit…' }).click();
+    const edit = page.getByRole('dialog', { name: 'Edit event' });
+    await expect(edit.getByLabel('Title')).toHaveValue('Studio hours (late start)');
+    await edit.getByLabel('Title').fill('Studio hours');
+    await edit.getByRole('button', { name: 'Save' }).click();
+    await page.getByRole('dialog', { name: 'Change a repeating event' }).getByRole('button', { name: 'This event' }).click();
+    await expect(page.getByRole('status').filter({ hasText: 'Saved “Studio hours”.' })).toBeVisible();
+    expect(ops(d).at(-1)).toMatchObject({ op: 'update', id: 'fx-studio', scope: 'this', recurrence_id: '2026-10-27T15:00:00Z', fields: { title: 'Studio hours' } });
+  });
+
   test('on the Daylight nothing moves', async ({ page }) => {
     test.skip(!test.info().project.name.startsWith('daylight'), 'the Daylight only');
     await boot(page);

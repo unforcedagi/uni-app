@@ -257,7 +257,9 @@ function EventForm({ sheet, tz, blocked, onClose, onSave }: { sheet: Sheet; tz: 
   const n = editing?.note;
   const series = !!editing?.inst.series;
   const hhmm = (ms: number) => { const w = wall(ms, tz); return `${pad(w.h)}:${pad(w.mi)}`; };
-  const [title, setTitle] = useState(n?.title ?? "");
+  // what one event of a series can change (its title, its place) starts from that event as shown, not the series
+  const shownTitle = editing ? editing.inst.title : "", shownWhere = editing ? editing.inst.location ?? "" : "";
+  const [title, setTitle] = useState(shownTitle);
   const [day, setDay] = useState(editing ? dayKey(editing.inst.s, tz) : (sheet as { day: string }).day);
   const [allDay, setAllDay] = useState(editing ? editing.inst.all_day : false);
   const [start, setStart] = useState(() => editing ? hhmm(editing.inst.s) : (sheet as { time: string }).time);
@@ -266,7 +268,7 @@ function EventForm({ sheet, tz, blocked, onClose, onSave }: { sheet: Sheet; tz: 
   const endOffset = editing && !editing.inst.all_day ? daysBetween(dayKey(editing.inst.s, tz), dayKey(editing.inst.e, tz)) : 0;
   const [lastDay, setLastDay] = useState(() => editing?.inst.all_day ? addDays(dayKey(editing.inst.e, tz), -1) : day);
   const [repeat, setRepeat] = useState("");
-  const [where, setWhere] = useState(n?.location ?? "");
+  const [where, setWhere] = useState(shownWhere);
   const [notes, setNotes] = useState(n?.description ?? "");
   const [people, setPeople] = useState(attendeesText(n?.attendees));
   const [vis, setVis] = useState<Visibility>(n?.visibility ?? "private");
@@ -295,7 +297,7 @@ function EventForm({ sheet, tz, blocked, onClose, onSave }: { sheet: Sheet; tz: 
     }
     // an edit sends only what changed; a new time goes as start and end together (the door wants both), and the
     // event keeps its own zone
-    const before: Record<string, unknown> = { title: n!.title, location: n!.location ?? "", description: n!.description ?? "", attendees: n!.attendees ?? [] };
+    const before: Record<string, unknown> = { title: shownTitle, location: shownWhere, description: n!.description ?? "", attendees: n!.attendees ?? [] };
     const changed = Object.keys(fields).filter((k) => JSON.stringify(fields[k]) !== JSON.stringify(before[k]));
     if (timeTouched && t && !("error" in t) && (allDay !== n!.all_day || !sameTime(t.start, n!.start) || !sameTime(t.end, n!.end))) {
       Object.assign(fields, { start: t.start, end: t.end, all_day: allDay });
