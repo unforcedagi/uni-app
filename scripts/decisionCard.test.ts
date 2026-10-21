@@ -67,10 +67,10 @@ check("links and note refs in a note stay as typed; a rule line and a bidi mark 
   const link = (parseMarkdown(chatText("see https://example.com/a_b~c/x and uni:Projects/my_note"))[0] as any).c;
   assert.deepEqual(link.filter((n: any) => n.t !== "text").map((n: any) => n.t === "link" ? n.href : n.ref.ref), ["https://example.com/a_b~c/x", "Projects/my_note"]);
   // what only looks like a link is escaped like any text (the chat doesn't link a bare mailto:)
-  for (const t of ["mailto:a**bold**", "https://example.com/x **loud** uni:Projects/a_b"]) {
+  for (const t of ["mailto:a**bold**", "https://example.com/x **loud** uni:Projects/a_b", "xhttps://example.com/a**bold**b", "a https://example.com/_x_ b"]) {
     const c = (parseMarkdown(chatText(t))[0] as any).c;
-    assert.ok(!c.some((n: any) => n.t === "strong" || n.t === "em"), JSON.stringify(c));
-    assert.equal(c.map((n: any) => n.t === "text" ? n.v : n.t === "link" ? n.href : n.t === "vaultlink" ? `uni:${n.ref.ref}` : "?").join(""), t);
+    assert.ok(c.every((n: any) => ["text", "br", "link", "vaultlink"].includes(n.t)), JSON.stringify(c));
+    if (!t.startsWith("x")) assert.equal(c.map((n: any) => n.t === "text" ? n.v : n.t === "link" ? n.href : n.t === "vaultlink" ? `uni:${n.ref.ref}` : "?").join(""), t);
   }
   const rule = parseMarkdown(chatText("a\n---\nb\n- - -"));
   assert.equal(rule.length, 1, JSON.stringify(rule));

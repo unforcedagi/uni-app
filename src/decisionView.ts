@@ -40,26 +40,26 @@ export function cleanNote(text: string): string {
     .trim();
 }
 
-/** What may be a link or note ref in a note: it goes as typed when the chat reads all of it as one (an escape inside would become part
- *  of its address), else it is escaped like the rest. */
+/** What may be a link or note ref in a note: an escape inside one would become part of its address, so it may go as typed. */
 const RAW = /(?:https?:\/\/|(?:uni|unforced):)[^\s<>"'`]+/gi;
 const escMarks = (s: string) => s.replace(/[\\`*_[\]~|]/g, "\\$&");
-const wholeLink = (token: string) => {
-  const b = parseMarkdown(token);
-  return b.length === 1 && b[0].t === "p" && b[0].c.length === 1 && (b[0].c[0].t === "link" || b[0].c[0].t === "vaultlink");
-};
+/** Line starts that would make a heading, quote, list or rule. */
+const escLines = (s: string) => s.replace(/^(\s*)([#>+-]|\d+[.)](?=\s|$))/gm, (_, sp: string, mark: string) => `${sp}${mark.replace(/^[#>+-]|[.)]$/, "\\$&")}`);
+/** Only words, line breaks and links: nothing in it is bold, code, a heading, a list or anything else the words didn't say. */
+const plainOnly = (md: string) => parseMarkdown(md).every((b) => b.t === "p" && b.c.every((n) => n.t === "text" || n.t === "br" || n.t === "link" || n.t === "vaultlink"));
 
 /**
  * A note as the room message carries it: the markdown marks escaped, so the chat shows the words as typed (a `[x](javascript:…)` or
  * `**` stays text, never a link or bold), and a line can't start a heading, quote, list or rule. A bare http(s) link or `uni:` note
- * ref the chat reads whole stays as typed (a link, as anywhere). The chat never renders HTML, so `<b>` is text already.
+ * ref stays as typed (a link, as anywhere), but only when the chat then reads the whole note as plain words and links; otherwise
+ * everything is escaped (a link may then read with a backslash, never as markup). The chat never renders HTML, so `<b>` is text.
  */
 export function chatText(text: string): string {
   const t = cleanNote(text);
-  let out = "", at = 0;
-  for (const m of t.matchAll(RAW)) { if (!wholeLink(m[0])) continue; out += escMarks(t.slice(at, m.index)) + m[0]; at = m.index! + m[0].length; }
-  out += escMarks(t.slice(at));
-  return out.replace(/^(\s*)([#>+-]|\d+[.)](?=\s|$))/gm, (_, sp: string, mark: string) => `${sp}${mark.replace(/^[#>+-]|[.)]$/, "\\$&")}`);
+  let kept = "", at = 0;
+  for (const m of t.matchAll(RAW)) { kept += escMarks(t.slice(at, m.index)) + m[0]; at = m.index! + m[0].length; }
+  kept = escLines(kept + escMarks(t.slice(at)));
+  return plainOnly(kept) ? kept : escLines(escMarks(t));
 }
 
 const ULID = "[0-9A-HJKMNP-TV-Z]{26}";
