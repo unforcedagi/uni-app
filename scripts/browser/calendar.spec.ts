@@ -378,6 +378,17 @@ test.describe('T-229 Calendar', () => {
     if (!beside(page)) await detail(page).getByRole('button', { name: 'Close event' }).click();
     await expect(cal(page).getByRole('group', { name: 'Wednesday, Oct 21' }).getByRole('button', { name: /^Night sky watch,/ })).toBeVisible();
     await expect(cal(page).getByRole('group', { name: 'Thursday, Oct 22' }).getByRole('button', { name: /^Night sky watch,/ })).toBeVisible();
+    if (test.info().project.name !== 'desktop') return;
+    // dragging the piece in Thursday's column a quarter hour down moves the event a quarter hour, not a day
+    const thu = cal(page).getByRole('group', { name: 'Thursday, Oct 22' }).getByRole('button', { name: /^Night sky watch,/ });
+    await thu.scrollIntoViewIfNeeded();
+    const piece = (await thu.boundingBox())!;
+    await page.mouse.move(piece.x + piece.width / 2, piece.y + 5);
+    await page.mouse.down();
+    for (let i = 1; i <= 4; i++) await page.mouse.move(piece.x + piece.width / 2, piece.y + 5 + 3 * i);
+    await page.mouse.up();
+    await expect(page.getByRole('status').filter({ hasText: 'Moved “Night sky watch”' })).toBeVisible();
+    expect(ops(d).at(-1)).toMatchObject({ op: 'move', start: '2026-10-22T05:15:00Z', end: '2026-10-22T07:15:00Z' });
   });
 
   test('an all-day event moved over the clock change keeps its days', async ({ page }) => {

@@ -47,7 +47,8 @@ const evClass = (i: Shown) => `cal-ev st-${i.status} show-${i.show_as} vis-${i.v
 
 // ── the time grid (day and week) ──────────────────────────────────────────────────────────────────────────────────
 
-type Drag = { key: string; dayIdx: number; deltaMin: number; moved: boolean };
+/** `from`: the column grabbed (an event past midnight has a piece in each day); `dayIdx`: the column under the pointer. */
+type Drag = { key: string; from: number; dayIdx: number; deltaMin: number; moved: boolean };
 
 function TimeGrid({ list, days, tz, today, now, canDrag, canNew, onOpen, onNew, onDrop }: { list: Shown[]; days: string[]; tz: string; today: string; now: number; canDrag: boolean; canNew: boolean;
   onOpen: (i: Shown) => void; onNew: (day: string, hhmm: string) => void; onDrop: (i: Shown, start: number) => void }) {
@@ -65,10 +66,10 @@ function TimeGrid({ list, days, tz, today, now, canDrag, canNew, onOpen, onNew, 
   const perDay = days.map((d) => { const ds = dayStart(d, tz), de = dayStart(addDays(d, 1), tz); return layoutDay(timed.filter((i) => i.s < de && i.e > ds).map((i) => ({ start: Math.max(i.s, ds), end: Math.min(i.e, de), i }))); });
 
   // a drag is for a mouse or a pen on a desktop; a touch opens the event, and its panel's Move moves it
-  const down = (e: React.PointerEvent, inst: Shown) => {
+  const down = (e: React.PointerEvent, inst: Shown, from: number) => {
     if (e.button !== 0 || !canDrag || e.pointerType === "touch" || inst.status === "cancelled") return;
     try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch { /* a pointer the browser doesn't track */ }
-    dragRef.current = { inst, x: e.clientX, y: e.clientY, d: { key: inst.key, dayIdx: 0, deltaMin: 0, moved: false } };
+    dragRef.current = { inst, x: e.clientX, y: e.clientY, d: { key: inst.key, from, dayIdx: from, deltaMin: 0, moved: false } };
   };
   const move = (e: React.PointerEvent) => {
     const r = dragRef.current;
@@ -77,7 +78,7 @@ function TimeGrid({ list, days, tz, today, now, canDrag, canNew, onOpen, onNew, 
     if (!r.d.moved && Math.hypot(dx, dy) < 6) return;
     const box = cols.current.getBoundingClientRect();
     const dayIdx = Math.max(0, Math.min(days.length - 1, Math.floor((e.clientX - box.left) / (box.width / days.length))));
-    r.d = { key: r.inst.key, dayIdx, deltaMin: Math.round(dy / (HOUR_PX / 4)) * 15, moved: true };
+    r.d = { key: r.inst.key, from: r.d.from, dayIdx, deltaMin: Math.round(dy / (HOUR_PX / 4)) * 15, moved: true };
     setDrag(r.d);
   };
   const up = (inst: Shown) => {
@@ -85,8 +86,9 @@ function TimeGrid({ list, days, tz, today, now, canDrag, canNew, onOpen, onNew, 
     dragRef.current = null;
     setDrag(null);
     if (!r || !r.d.moved) return onOpen(inst);
+    // the event's own start, as many days on as the pointer moved columns, at the same wall time
     const w = wall(r.inst.s, tz);
-    const start = fromLocal(days[r.d.dayIdx], w.h, w.mi) + r.d.deltaMin * MIN;
+    const start = fromLocal(addDays(dayKey(r.inst.s, tz), r.d.dayIdx - r.d.from), w.h, w.mi) + r.d.deltaMin * MIN;
     if (start !== r.inst.s) onDrop(r.inst, start);
   };
 
@@ -121,12 +123,12 @@ function TimeGrid({ list, days, tz, today, now, canDrag, canNew, onOpen, onNew, 
               const dragging = drag?.key === inst.key && drag.moved ? drag : null;
               const top = ((segS - dayStart(d, tz)) / HOUR) * HOUR_PX + (dragging ? (dragging.deltaMin / 60) * HOUR_PX : 0);
               const h = Math.max(20, ((segE - segS) / HOUR) * HOUR_PX - 2);
-              const shift = dragging ? dragging.dayIdx - di : 0;
+              const shift = dragging ? dragging.dayIdx - dragging.from : 0;
               const narrow = days.length > 1 && days.length < 7;
               const short = h < 40 || narrow || n > 1;
               return <button key={inst.key} className={`${evClass(inst)} cal-timed ${h < 40 ? "short" : ""} ${n > 1 || narrow ? "tight" : ""} ${dragging ? "dragging" : ""}`} data-key={inst.key}
                 style={{ top, height: h, left: `calc(${(col / n) * 100}% + ${shift * 100}% + 2px)`, width: `calc(${100 / n}% - 4px)` }}
-                aria-label={evLabel(inst, tz)} onPointerDown={(e) => down(e, inst)} onPointerMove={move} onPointerUp={() => up(inst)} onPointerCancel={() => { dragRef.current = null; setDrag(null); }}
+                aria-label={evLabel(inst, tz)} onPointerDown={(e) => down(e, inst, di)} onPointerMove={move} onPointerUp={() => up(inst)} onPointerCancel={() => { dragRef.current = null; setDrag(null); }}
                 onClick={(e) => { if (e.detail === 0) onOpen(inst); }}>
                 <span className="cal-ev-time">{timeLabel(dragging ? inst.s + dragging.deltaMin * MIN : inst.s, tz)}</span>
                 <span className="cal-ev-title">{inst.title}</span>
