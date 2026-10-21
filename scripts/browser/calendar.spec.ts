@@ -436,6 +436,41 @@ test.describe('T-229 Calendar', () => {
     expect(d.door.notes.get('fx-lunch')!.rev).toBe(3);
   });
 
+  test('a title-only edit leaves times with seconds alone', async ({ page }) => {
+    const d = await boot(page);
+    // written by another calendar app, to the second
+    d.door.touch('fx-ines', { start: '2026-10-22T17:00:30Z', end: '2026-10-22T17:30:30Z' });
+    await cal(page).getByRole('button', { name: 'Refresh' }).click();
+    await pickView(page, 'Agenda');
+    await cal(page).getByRole('button', { name: /^Call with Ines\?,/ }).click();
+    await detail(page).getByRole('button', { name: 'Edit…' }).click();
+    const edit = page.getByRole('dialog', { name: 'Edit event' });
+    await edit.getByLabel('Title').fill('Call with Ines');
+    await edit.getByRole('button', { name: 'Save' }).click();
+    await expect(detail(page)).toHaveAccessibleName('Event: Call with Ines');
+    expect(ops(d).at(-1).fields).toEqual({ title: 'Call with Ines' });
+    expect(d.door.notes.get('fx-ines')!.start).toBe('2026-10-22T17:00:30Z');
+  });
+
+  test('Refresh shows the open event as it is now, and what the key may do now', async ({ page }) => {
+    test.skip(!beside(page), 'the event panel covers Refresh on narrow screens');
+    const d = await boot(page);
+    await pickView(page, 'Agenda');
+    await cal(page).getByRole('button', { name: /^Lunch with Kai,/ }).click();
+    await expect(detail(page).getByText('Juniper Café', { exact: true })).toBeVisible();
+    await detail(page).getByRole('button', { name: 'Delete…' }).click();
+    await expect(detail(page).getByRole('group', { name: 'Delete event?' })).toBeVisible();
+    // elsewhere: it moved, and the door now takes this key as Uni's
+    d.door.touch('fx-lunch', { start: '2026-10-22T19:00:00Z', end: '2026-10-22T20:00:00Z', location: 'Juniper Café, upstairs' });
+    d.door.role = 'uni';
+    await cal(page).getByRole('button', { name: 'Refresh' }).click();
+    await expect(detail(page).getByText('Thursday, Oct 22 · 1 PM – 2 PM')).toBeVisible();
+    await expect(detail(page).getByText('Juniper Café, upstairs')).toBeVisible();
+    await expect(detail(page).getByRole('group', { name: 'Delete event?' })).toHaveCount(0);
+    await expect(detail(page).getByRole('button', { name: /Delete/ })).toHaveCount(0);
+    expect(ops(d).some((o) => o.op === 'delete')).toBe(false);
+  });
+
   test('on the Daylight nothing moves', async ({ page }) => {
     test.skip(!test.info().project.name.startsWith('daylight'), 'the Daylight only');
     await boot(page);

@@ -188,7 +188,9 @@ function Detail({ inst, note, sess, offline, tz, error, onClose, onEdit, onMove,
   const sharedList = shareText.split(",").map((x) => x.trim()).filter(Boolean);
   const visChanged = vis !== (note?.visibility ?? inst.visibility) || (vis === "shared" && sharedList.join(",") !== (note?.shared_with ?? []).join(","));
   const people = note?.attendees ?? inst.attendees ?? [];
-  const waiting = note ? invitesWaiting(note, sess) : false;
+  // the note read for this revision of the event (a door that doesn't say its revision: the latest read)
+  const fresh = !!note && (note.rev === undefined || note.rev === inst.rev);
+  const waiting = note && fresh ? invitesWaiting(note, sess) : false;
   const doMove = (e: React.FormEvent) => {
     e.preventDefault();
     const [y, m, d] = day.split("-").map(Number);
@@ -232,12 +234,12 @@ function Detail({ inst, note, sess, offline, tz, error, onClose, onEdit, onMove,
       </fieldset>}
       <div className="cal-actions"><button type="submit" className="primary">Move</button><button type="button" onClick={() => setMoving(false)}>Back</button></div>
     </form>
-    : deleting ? <div className="cal-confirm" role="group" aria-label="Delete event?">
+    : deleting && can(sess, "delete") ? <div className="cal-confirm" role="group" aria-label="Delete event?">
       <p>Delete “{inst.title}”{inst.series ? " and every event in its series" : ""}? The note leaves the vault. Cancelling keeps it.</p>
       <div className="cal-actions"><button className="danger" onClick={() => { setDeleting(false); onDelete(); }}>Delete</button><button onClick={() => setDeleting(false)}>Keep it</button></div>
     </div>
     : inst.status !== "cancelled" ? <div className="cal-actions">
-      {can(sess, "update") && <button onClick={onEdit} disabled={!note}>Edit…</button>}
+      {can(sess, "update") && <button onClick={onEdit} disabled={!fresh}>Edit…</button>}
       {can(sess, "move") && <button onClick={() => setMoving(true)}>Move…</button>}
       {can(sess, "cancel") && <button onClick={onCancel}>{inst.series ? "Cancel…" : "Cancel event"}</button>}
       {can(sess, "delete") && <button className="quiet-danger" onClick={() => setDeleting(true)}>Delete…</button>}
@@ -267,6 +269,8 @@ function EventForm({ sheet, tz, blocked, onClose, onSave }: { sheet: Sheet; tz: 
   const [people, setPeople] = useState(attendeesText(n?.attendees));
   const [vis, setVis] = useState<Visibility>(n?.visibility ?? "private");
   const [err, setErr] = useState<string | null>(null);
+  const [timeTouched, setTimeTouched] = useState(false);
+  const touched = <T,>(set: (v: T) => void) => (v: T) => { setTimeTouched(true); set(v); };
   const times = formTimes({ day, allDay, start, end, endOffset, lastDay: lastDay < day ? day : lastDay }, tz);
   const save = (e: React.FormEvent) => {
     e.preventDefault();
@@ -291,7 +295,7 @@ function EventForm({ sheet, tz, blocked, onClose, onSave }: { sheet: Sheet; tz: 
     // event keeps its own zone
     const before: Record<string, unknown> = { title: n!.title, location: n!.location ?? "", description: n!.description ?? "", attendees: n!.attendees ?? [] };
     const changed = Object.keys(fields).filter((k) => JSON.stringify(fields[k]) !== JSON.stringify(before[k]));
-    if (t && !("error" in t) && (allDay !== n!.all_day || !sameTime(t.start, n!.start) || !sameTime(t.end, n!.end))) {
+    if (timeTouched && t && !("error" in t) && (allDay !== n!.all_day || !sameTime(t.start, n!.start) || !sameTime(t.end, n!.end))) {
       Object.assign(fields, { start: t.start, end: t.end, all_day: allDay });
       changed.push("start", "end", "all_day");
     }
@@ -304,13 +308,13 @@ function EventForm({ sheet, tz, blocked, onClose, onSave }: { sheet: Sheet; tz: 
     <label>Title <input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder="What" /></label>
     {series ? <p className="cal-note">It repeats. To change its time, use Move.</p> : <>
       <div className="cal-row">
-        <label>{allDay ? "First day" : "Day"} <input type="date" value={day} onChange={(e) => { const was = daysBetween(day, lastDay); setDay(e.target.value); if (e.target.value) setLastDay(addDays(e.target.value, Math.max(0, was))); }} /></label>
-        {allDay && <label>Last day <input type="date" value={lastDay} min={day} onChange={(e) => setLastDay(e.target.value)} /></label>}
-        <label className="cal-check"><input type="checkbox" checked={allDay} onChange={(e) => setAllDay(e.target.checked)} /> All day</label>
+        <label>{allDay ? "First day" : "Day"} <input type="date" value={day} onChange={(e) => { const was = daysBetween(day, lastDay); setTimeTouched(true); setDay(e.target.value); if (e.target.value) setLastDay(addDays(e.target.value, Math.max(0, was))); }} /></label>
+        {allDay && <label>Last day <input type="date" value={lastDay} min={day} onChange={(e) => touched(setLastDay)(e.target.value)} /></label>}
+        <label className="cal-check"><input type="checkbox" checked={allDay} onChange={(e) => touched(setAllDay)(e.target.checked)} /> All day</label>
       </div>
       {!allDay && <div className="cal-row">
-        <label>Start <input type="time" step={900} value={start} onChange={(e) => setStart(e.target.value)} /></label>
-        <label>End <input type="time" step={900} value={end} onChange={(e) => setEnd(e.target.value)} /></label>
+        <label>Start <input type="time" step={900} value={start} onChange={(e) => touched(setStart)(e.target.value)} /></label>
+        <label>End <input type="time" step={900} value={end} onChange={(e) => touched(setEnd)(e.target.value)} /></label>
       </div>}
       {!allDay && !("error" in times) && times.endDay !== day && <p className="cal-note">Ends {dayLabel(times.endDay)}.</p>}
     </>}
@@ -395,6 +399,8 @@ export default function Calendar({ backTo, onBack }: { backTo: string; onBack: (
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [problem, setProblem] = useState<CalErr | null>(null);
   const [open, setOpen] = useState<Shown | null>(null);
+  const openRef = useRef<Shown | null>(null);
+  openRef.current = open;
   const [note, setNote] = useState<EventNote | null>(null);
   const [detailErr, setDetailErr] = useState<string | null>(null);
   const [sheet, setSheet] = useState<Sheet | null>(null);
@@ -419,6 +425,7 @@ export default function Calendar({ backTo, onBack }: { backTo: string; onBack: (
       const list = toShown(r.instances ?? []);
       setSess(s); doorAnswered(); saveRead(win.from, win.to, r.instances ?? [], s);
       setData({ from: win.from, to: win.to, list, complete: r.complete !== false }); setOffline(false); setProblem(null);
+      reconcile(list, false);
       readConflicts().then((c) => { if (n === seq.current) setConflictList(Array.isArray(c.conflicts) ? c.conflicts : []); }).catch(() => setConflictList([]));
       return list;
     } catch (e) {
@@ -430,6 +437,7 @@ export default function Calendar({ backTo, onBack }: { backTo: string; onBack: (
         setOffline(true); setSavedAt(snap?.at ?? null);
         if (!sess && snap?.session) setSess(snap.session);
         setData(got ? { from: win.from, to: win.to, list: toShown(got.instances), complete: got.complete } : null);
+        if (got) reconcile(toShown(got.instances), true);
         setProblem(got ? null : err);
       } else {
         setProblem(err);
@@ -452,13 +460,15 @@ export default function Calendar({ backTo, onBack }: { backTo: string; onBack: (
   }, [offline]);
   const openEvent = (i: Shown | null) => { setOpen(i); setDetailErr(null); void readNote(i); };
 
-  // after a reload, the open event is the same instance as it is now (it may have moved, or gone)
-  const reopen = (list: Shown[] | null, key?: string) => {
-    if (!list || !open) return;
-    const now = list.find((x) => x.key === (key ?? open.key)) ?? list.find((x) => x.id === open.id && x.recurrence_id === open.recurrence_id) ?? null;
+  // after every read (Refresh, a write, another week), the open event is the instance as it is now (it may have
+  // moved, or gone), and its note is read again
+  function reconcile(list: Shown[], offlineNow: boolean) {
+    const cur = openRef.current;
+    if (!cur) return;
+    const now = list.find((x) => x.key === cur.key) ?? list.find((x) => x.id === cur.id && x.recurrence_id === cur.recurrence_id) ?? null;
     setOpen(now);
-    void readNote(now);
-  };
+    if (!offlineNow) void readNote(now);
+  }
   useEffect(() => {
     if (!pendingOpen.current || !data) return;
     const hit = data.list.find((x) => x.id === pendingOpen.current);
@@ -474,6 +484,7 @@ export default function Calendar({ backTo, onBack }: { backTo: string; onBack: (
   const write = async (o: Record<string, unknown>, done: string, after?: (answer: { id?: string }) => void) => {
     if (busyRef.current) return;
     if (!writable) { setNotice("Nothing can change until the calendar door answers."); return; }
+    if (!can(sess, String(o.op))) { setNotice("This device's key can't do that here."); return; }
     busyRef.current = true;
     setBusy(true); setDetailErr(null);
     const body = JSON.stringify(o);
@@ -483,13 +494,12 @@ export default function Calendar({ backTo, onBack }: { backTo: string; onBack: (
       unanswered.current = null;
       setNotice(done);
       after?.(r);
-      const list = await load();
-      reopen(list);
+      await load();
     } catch (e) {
       const err = asCalErr(e);
       unanswered.current = err.kind === "unreachable" || err.kind === "server" ? { body, opId } : null;
       // whatever went wrong, the panel shows the event as the door has it now (a lost answer may have been applied)
-      reopen(await load());
+      await load();
       if (open) setDetailErr(problemText(err)); else setNotice(problemText(err));
     } finally { busyRef.current = false; setBusy(false); }
   };
@@ -576,7 +586,7 @@ export default function Calendar({ backTo, onBack }: { backTo: string; onBack: (
     <p className="cal-tz">Times in {tz}</p>
     {sheet && <EventForm sheet={sheet} tz={tz} blocked={!writable} onClose={() => setSheet(null)} onSave={saveForm} />}
     {ask && <ScopeAsk ask={ask} onClose={() => setAsk(null)} />}
-    {inviting && <InviteConfirm note={inviting} onClose={() => setInviting(null)} onSend={() => sendInvites(inviting)} />}
+    {inviting && can(sess, "send_invites") && <InviteConfirm note={inviting} onClose={() => setInviting(null)} onSend={() => sendInvites(inviting)} />}
     {notice && <p className="cal-notice" role="status">{notice}</p>}
   </section>;
 }
