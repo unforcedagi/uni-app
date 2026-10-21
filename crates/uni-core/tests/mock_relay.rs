@@ -2190,3 +2190,83 @@ async fn a_lying_relay_cannot_forge_a_secret_request_or_receipt() {
     let (res, ()) = tokio::join!(runner, driver);
     res.unwrap();
 }
+
+/// T-234: enabling approvals through the app's own path (`sealed::enroll`): signed by the synthetic identity, put
+/// only into a room the trusted Uni (`other` here) is in, sent again as the same event after a relay failure, and
+/// never twice. The relay's copy is checked field by field, as Uni's broker reads it.
+#[tokio::test]
+async fn enrollment_is_signed_routed_retried_and_published_once() {
+    use uni_core::sealed;
+    let f = fixture().await;
+    let store = Store::open_in_memory().unwrap();
+    sync_once(&f.url, &f.me, None, &store).await.unwrap();
+    let uni = f.other.public_key();
+    let dir = tempfile::tempdir().unwrap();
+    let record_path = dir.path().join("sealed-enrollment.json");
+    let now = nostr::Timestamp::now().as_secs();
+    let mut pending = None;
+    let enrollments = |relay: &MockRelay| -> Vec<Value> {
+        relay.events.lock().unwrap().iter().filter(|e| tag_values(e, "t") == vec![sealed::ENROLL_TAG]).cloned().collect()
+    };
+
+    // The status offers only the room Uni is in.
+    let st = sealed::status(&f.me, &uni, &store, &record_path).unwrap();
+    assert_eq!(st.rooms.iter().map(|r| r.id.clone()).collect::<Vec<_>>(), vec![f.ch_a.to_string()]);
+    assert!(st.enrolled.is_none());
+
+    // A room without Uni is refused before anything is signed or sent.
+    let err = sealed::enroll(&f.url, &f.me, None, &store, f.ch_b, &uni, &record_path, &mut pending, now).await.unwrap_err();
+    assert!(err.to_string().contains("isn't a member"), "{err}");
+    assert!(pending.is_none() && enrollments(&f.relay).is_empty());
+
+    // The relay can't be reached: an error, no record, the signed event kept for the retry.
+    let dead = { let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap(); format!("ws://{}", l.local_addr().unwrap()) };
+    assert!(sealed::enroll(&dead, &f.me, None, &store, f.ch_a, &uni, &record_path, &mut pending, now).await.is_err());
+    let first = pending.clone().expect("the signed enrollment is kept");
+    assert!(!record_path.exists());
+    assert!(sealed::status(&f.me, &uni, &store, &record_path).unwrap().enrolled.is_none());
+
+    // Retry: the same event, accepted once.
+    let record = sealed::enroll(&f.url, &f.me, None, &store, f.ch_a, &uni, &record_path, &mut pending, now + 30).await.unwrap();
+    assert_eq!(record.event_id, first.id.to_hex(), "the retry sends the same event");
+    assert!(pending.is_none());
+    let on_relay = enrollments(&f.relay);
+    assert_eq!(on_relay.len(), 1);
+    let ev = &on_relay[0];
+
+    // What the broker gets: kind 9 in Uni's room, signed by this identity, the documented fields, no mention of Uni.
+    let parsed: nostr::Event = serde_json::from_value(ev.clone()).unwrap();
+    parsed.verify().unwrap();
+    assert_eq!(ev["kind"], 9);
+    assert_eq!(ev["pubkey"], f.me.public_key().to_hex());
+    assert_eq!(tag_values(ev, "h"), vec![f.ch_a.to_string().as_str()]);
+    assert_eq!(tag_values(ev, "p"), vec![f.me.public_key().to_hex().as_str()]);
+    let seal_pub = sealed::derive_seal_key(&f.me).unwrap().public_key().to_hex();
+    let content: Value = serde_json::from_str(ev["content"].as_str().unwrap()).unwrap();
+    assert_eq!(content, json!({"v": 1, "seal_pub": seal_pub, "for": uni.to_hex()}));
+    assert_eq!(sealed::verify_enrollment(&parsed, &f.me.public_key(), &uni).unwrap().seal_pub, seal_pub);
+    assert!(!ev.to_string().contains(&f.me.secret_key().to_secret_hex()));
+    assert_eq!(
+        (record.identity.as_str(), record.uni.as_str(), record.seal_pub.as_str(), record.channel.as_str()),
+        (f.me.public_key().to_hex().as_str(), uni.to_hex().as_str(), seal_pub.as_str(), f.ch_a.to_string().as_str())
+    );
+
+    // Cross-check (run by hand): `T234_ENROLLMENT_OUT=<file>` writes this synthetic run's event and keys for the
+    // uni-ops reference broker (`sealed enroll`) and `app_sim`, which must accept it and derive the same key.
+    if let Ok(out) = std::env::var("T234_ENROLLMENT_OUT") {
+        let dump = json!({"event": ev, "me_sk": f.me.secret_key().to_secret_hex(), "uni_sk": f.other.secret_key().to_secret_hex()});
+        std::fs::write(out, dump.to_string()).unwrap();
+    }
+
+    // Enable again (a second tap, a restart): the record answers, nothing new is published.
+    let again = sealed::enroll(&f.url, &f.me, None, &store, f.ch_a, &uni, &record_path, &mut pending, now + 60).await.unwrap();
+    assert_eq!(again, record);
+    assert_eq!(enrollments(&f.relay).len(), 1);
+    assert_eq!(sealed::status(&f.me, &uni, &store, &record_path).unwrap().enrolled, Some(record));
+
+    // A failed send older than the retry window is signed afresh (Buzz refuses stale events).
+    let mut stale = Some(first);
+    let other_path = dir.path().join("other.json");
+    let fresh = sealed::enroll(&f.url, &f.me, None, &store, f.ch_a, &uni, &other_path, &mut stale, now + sealed::RETRY_SAME_EVENT_SECS + 1).await.unwrap();
+    assert_ne!(fresh.event_id, again.event_id);
+}
