@@ -28,7 +28,8 @@
     "test:sidebar": "playwright test --config playwright.sidebar.config.ts",
     "test:decisions": "playwright test --config playwright.decisions.config.ts",
     "test:calendar": "playwright test --config playwright.calendar.config.ts",
-    "test:chat": "playwright test --config playwright.chat.config.ts"
+    "test:chat": "playwright test --config playwright.chat.config.ts",
+    "test:approvals": "playwright test --config playwright.approvals.config.ts"
   },
   "dependencies": {
     "@openparachute/surface-client": "0.3.7",

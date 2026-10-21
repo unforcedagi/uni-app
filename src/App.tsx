@@ -70,6 +70,8 @@ import { Attachments, attachmentBody, useRelayOrigin, type MediaRef } from "./At
 import { activeQuery, filterMembers, insertMention, memberLabels, pruneBindings, resolveRecipients, type Bindings, type Member } from "./mentions";
 import { SmallLine } from "./areas/Companion";
 import { SecretRequestCard } from "./SecretRequestCard";
+import { SealedApprovals } from "./SealedApprovals";
+import { parseEnrollment } from "./sealedApprovals";
 import { parseSecretReceipt, parseSecretRequest, receiptFor, receiptsByRequest, secretCardsOn, withoutSecretBlock } from "./secretRequest";
 import NotePane, { usePaneShape } from "./NotePane";
 
@@ -1645,6 +1647,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
 
   /** T-176: a secret request becomes its card; a receipt shows only its human line. Null: the ordinary body. */
   const secretView = (m: Message) => {
+    // T-234: the enrollment Settings posted, in words rather than its JSON
+    if (parseEnrollment(m.body)) return <p className="sealed-enrolled-line"><span aria-hidden="true">🔑</span> {m.author === identity ? "You enabled" : `${m.author_name} enabled`} approvals for Uni</p>;
     if (!secretCards) return null;
     if (parseSecretRequest(m.body)) return <><Body body={withoutSecretBlock(m.body).split("\n")[0]} mentions={m.mentions} me={identity} edited={m.edited} />
       <SecretRequestCard channel={m.channel} requestRef={m.ref} authorName={m.author_name} receipts={(author, rid) => receiptFor(secretReceipts, author, rid)}
@@ -1907,7 +1911,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       {panel === "settings" && <div className="settings">
         <p className="connection" role="status">{status}{live ? <span className={`live ${live === "Live" ? "on" : ""}`}> · {live}</span> : null}</p>
       {identity && <p className="identity" title={npub ?? identity}>{myName ? <>Signed in as <strong>{myName}</strong></> : <>Public key <code>{npub ? `${npub.slice(0, 14)}…${npub.slice(-6)}` : `${identity.slice(0, 12)}…`}</code></>}<button className="identity-copy" onClick={() => void copyText(npub ?? identity, "Copied public key")} aria-label="Copy your public key">⧉</button></p>}
-        <UpdateSettings /><LifeOsVaultSetting vaults={vaults} /><PairDeviceButton onOpen={() => setPairSourceOpen(true)} /><button className="pairing-secondary" onClick={() => void forget()}>{forgetArmed ? "Tap again to forget — you'll need to re-pair" : "Forget this device key"}</button>{forgetArmed && <button className="pairing-secondary" onClick={() => setForgetArmed(false)}>Keep key</button>}
+        <UpdateSettings /><LifeOsVaultSetting vaults={vaults} /><SealedApprovals /><PairDeviceButton onOpen={() => setPairSourceOpen(true)} /><button className="pairing-secondary" onClick={() => void forget()}>{forgetArmed ? "Tap again to forget — you'll need to re-pair" : "Forget this device key"}</button>{forgetArmed && <button className="pairing-secondary" onClick={() => setForgetArmed(false)}>Keep key</button>}
         {/* r13: the machinery (the app sandbox's self-test, where the app connects) is for whoever builds Uni, not part of ordinary Settings */}
         <details className="settings-dev"><summary>Developer</summary>{hub && <p className="settings-dev-line">Notes hub: <code>{hub}</code></p>}{syncDetail && <p className="settings-dev-line">Last sync: {syncDetail}</p>}<AreaSelfTest /></details></div>}
       {searchOpen && <Search initialQuery={searchQuery} vaults={vaults} key={`${searchScope.vault}:${searchScope.prefix}`} initialVault={searchScope.vault} initialPathPrefix={searchScope.prefix} onOpen={openHit} onOpenNote={(n) => { setSearchOpen(false); openNote({ hub: null, vault: n.vault, ref: n.id }, null); }} onAskUni={askUniSearch} onClose={() => { setSearchOpen(false); if (topNote) setSidebarVisible(false); }} />}

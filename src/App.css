@@ -213,6 +213,18 @@ p.decision-card.decision-loading { padding: 8px 12px; color: var(--muted); font-
 .secret-status.ok { color: var(--text); } .secret-status.warn { color: var(--warn); }
 .secret-note { margin: 10px 0 0; font-size: 12px; color: var(--muted); }
 
+/* T-234: Settings → Approvals, and the enrollment as it shows in the room */
+.approvals { margin: 6px 0; }
+.approvals h2 { margin: 0 0 6px; font-family: var(--serif); font-size: 16px; font-weight: 500; }
+.approvals-note { margin: 0 0 10px; font-size: 13px; line-height: 1.5; color: var(--text-soft); }
+.approvals-confirm { padding: 14px 16px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--surface); box-shadow: var(--shadow); }
+.approvals-title { margin: 0 0 6px; font-family: var(--serif); font-size: 17px; }
+.approvals-confirm select { max-width: 100%; min-height: 36px; }
+.approvals-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.approvals-actions .pairing-secondary { min-height: 42px; }
+.approvals-enable { min-height: 42px; padding: 0 18px; border: 0; border-radius: 999px; background: var(--accent); color: var(--accent-ink); font-size: 14px; }
+.sealed-enrolled-line { margin: 2px 0; font-size: 14px; color: var(--text-soft); }
+
 .older { text-align: center; margin: 8px 0 4px; font-size: 12px; color: var(--muted); }
 .older button { border: 1px solid var(--line); background: var(--surface); color: var(--text-soft); border-radius: 999px; padding: 7px 16px; }
 .older button:hover { border-color: var(--line-strong); }
