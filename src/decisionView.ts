@@ -2,6 +2,7 @@
 // A room posts a line with `uni:<id>` of a `Decisions/…` note (tasks.py `decide new` prints it); the app reads that note and shows
 // the question with one button per option. A tap is a compare-and-set in the vault (open -> decided) and, only when that tap won,
 // a short message from you in the room ("Picked: B …") so the room's Uni session hears the answer.
+import { parseMarkdown } from "./markdown.ts";
 
 /** A decision note as the card shows it. */
 export type DecisionView = {
@@ -39,19 +40,24 @@ export function cleanNote(text: string): string {
     .trim();
 }
 
-/** Links and note refs in a note go as typed: an escape inside one would become part of its address. */
-const RAW = /(?:https?:\/\/|mailto:|(?:uni|unforced):)[^\s<>"'`]+/gi;
+/** What may be a link or note ref in a note: it goes as typed when the chat reads all of it as one (an escape inside would become part
+ *  of its address), else it is escaped like the rest. */
+const RAW = /(?:https?:\/\/|(?:uni|unforced):)[^\s<>"'`]+/gi;
 const escMarks = (s: string) => s.replace(/[\\`*_[\]~|]/g, "\\$&");
+const wholeLink = (token: string) => {
+  const b = parseMarkdown(token);
+  return b.length === 1 && b[0].t === "p" && b[0].c.length === 1 && (b[0].c[0].t === "link" || b[0].c[0].t === "vaultlink");
+};
 
 /**
  * A note as the room message carries it: the markdown marks escaped, so the chat shows the words as typed (a `[x](javascript:…)` or
- * `**` stays text, never a link or bold), and a line can't start a heading, quote, list or rule. Bare http(s) links and `uni:` note
- * refs stay as typed (links, as anywhere). The chat never renders HTML, so `<b>` is text already.
+ * `**` stays text, never a link or bold), and a line can't start a heading, quote, list or rule. A bare http(s) link or `uni:` note
+ * ref the chat reads whole stays as typed (a link, as anywhere). The chat never renders HTML, so `<b>` is text already.
  */
 export function chatText(text: string): string {
   const t = cleanNote(text);
   let out = "", at = 0;
-  for (const m of t.matchAll(RAW)) { out += escMarks(t.slice(at, m.index)) + m[0]; at = m.index! + m[0].length; }
+  for (const m of t.matchAll(RAW)) { if (!wholeLink(m[0])) continue; out += escMarks(t.slice(at, m.index)) + m[0]; at = m.index! + m[0].length; }
   out += escMarks(t.slice(at));
   return out.replace(/^(\s*)([#>+-]|\d+[.)](?=\s|$))/gm, (_, sp: string, mark: string) => `${sp}${mark.replace(/^[#>+-]|[.)]$/, "\\$&")}`);
 }
