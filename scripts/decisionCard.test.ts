@@ -84,7 +84,7 @@ check("fuzz (20000 notes): whatever is typed, the room shows exactly those words
   const bits = ["a", "b", " ", "\n", "*", "_", "~", "`", "[", "]", "(", ")", "<", ">", "#", "-", "+", "1.", "2)", "|", "\\", "!", "=",
     "https://example.com/", "http://x.example", "mailto:a@b.example", "uni:Projects/x", "unforced:abc", `uni:${ID}`, "[[", "]]",
     "<https://example.com>", "<mailto:a@b.example>", "**", "~~", "```", "javascript:alert(1)", "    ",
-    ...SHORTHAND_VAULTS.flatMap((v) => [`${v}:Projects/x`, `${v}:`, `\`${v}:a\``]), "HTTPS://example.com/", "UNI:Projects/y"];
+    ...SHORTHAND_VAULTS.flatMap((v) => [`${v}:Projects/x`, `${v}:`, `\`${v}:a\``]), "HTTPS://example.com/", "UNI:Projects/y", ":", "\t", "\"", "'", ":-:", " \"title\")"];
   let seed = 226;
   const rnd = (n: number) => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed % n; };
   for (let k = 0; k < 20000; k++) {
