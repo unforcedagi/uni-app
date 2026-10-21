@@ -66,7 +66,7 @@ function TimeGrid({ list, days, tz, today, now, canDrag, canNew, onOpen, onNew, 
   // a drag is for a mouse or a pen on a desktop; a touch opens the event, and its panel's Move moves it
   const down = (e: React.PointerEvent, inst: Shown) => {
     if (e.button !== 0 || !canDrag || e.pointerType === "touch" || inst.status === "cancelled") return;
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch { /* a pointer the browser doesn't track */ }
     dragRef.current = { inst, x: e.clientX, y: e.clientY, d: { key: inst.key, dayIdx: 0, deltaMin: 0, moved: false } };
   };
   const move = (e: React.PointerEvent) => {
@@ -429,10 +429,13 @@ export default function Calendar({ backTo, onBack }: { backTo: string; onBack: (
   useEffect(() => { void load(); }, [win.from, win.to]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // the open event's full note (description, who it's shared with, its people), read again after every write
+  const noteSeq = useRef(0);
   const readNote = useCallback(async (i: Shown | null) => {
-    setNote(null);
+    const n = ++noteSeq.current;
+    // the same event read again keeps what it showed until the new read lands; another event starts empty
+    setNote((cur) => (i && cur?.id === i.id ? cur : null));
     if (!i || offline) return;
-    try { setNote(await readEvent(i.id)); } catch (e) { setDetailErr(problemText(asCalErr(e))); }
+    try { const got = await readEvent(i.id); if (n === noteSeq.current) setNote(got); } catch (e) { if (n === noteSeq.current) setDetailErr(problemText(asCalErr(e))); }
   }, [offline]);
   const openEvent = (i: Shown | null) => { setOpen(i); setDetailErr(null); void readNote(i); };
 
