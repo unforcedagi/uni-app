@@ -7,7 +7,7 @@
 // colour, so it reads on the Daylight, where nothing moves.
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { addDays, dayKey, dayLabel, dayStart, HOUR, layoutDay, MIN, rangeLabel, ruleLabel, timeLabel, wall, zoned, type EventNote, type Instance, type Scope, type Visibility } from "./calCore.ts";
-import { allDayMoved, asCalErr, attendeesText, can, daysBetween, daysFor, DEFAULT_TZ, formTimes, fromSnapshot, sameTime, inviteeLine, invitees, invitesWaiting, newOpId, parseAttendees, partstatWords, problemText, stepFor, toShown, who, windowFor, type CalErr, type Session, type Shown, type View } from "./calView.ts";
+import { allDayMoved, inviteWords, asCalErr, attendeesText, can, daysBetween, daysFor, DEFAULT_TZ, formTimes, fromSnapshot, sameTime, inviteeLine, invitees, invitesWaiting, newOpId, parseAttendees, partstatWords, problemText, stepFor, toShown, who, windowFor, type CalErr, type Session, type Shown, type View } from "./calView.ts";
 import { conflicts as readConflicts, doorAnswered, event as readEvent, events as readEvents, op as sendOp, readSnapshot, saveRead, session as readSession, type Conflict } from "./calDoor.ts";
 import "./Calendar.css";
 
@@ -204,10 +204,11 @@ function Detail({ inst, note, sess, offline, tz, error, onClose, onEdit, onMove,
     <p className="cal-detail-when">{rangeLabel(asInst(inst), tz)}</p>
     <p className="cal-detail-marks"><Marks i={inst} />{inst.status === "confirmed" && <span className="cal-tag">CONFIRMED</span>}</p>
     {error && <p className="cal-error" role="alert">{error}</p>}
-    {waiting && <section className="cal-invites" aria-label="Invites">
-      <p><strong>Invites not sent.</strong> {invitees(note!).length === 1 ? "One person is" : `${invitees(note!).length} people are`} on this event; nothing goes to them until you send it.</p>
+    {waiting ? <section className="cal-invites" aria-label="Invites">
+      <p>{inviteWords(note!) ?? <><strong>Invites not sent.</strong> {invitees(note!).length === 1 ? "One person is" : `${invitees(note!).length} people are`} on this event; nothing goes to them until you send it.</>}</p>
       {writable && <button className="primary" onClick={onSendInvites}>Send invites…</button>}
-    </section>}
+    </section>
+    : note && fresh && inviteWords(note) && <p className="cal-note" role="status">{inviteWords(note)}</p>}
     <dl>
       <Field k="Time zone">{inst.tz}{inst.all_day ? " (all day)" : ""}</Field>
       {note?.rrule && <Field k="Repeats">{(() => { try { return ruleLabel(note.rrule); } catch { return note.rrule; } })()}{inst.recurrence_id ? " · this is one of them" : ""}</Field>}
@@ -531,7 +532,8 @@ export default function Calendar({ backTo, onBack }: { backTo: string; onBack: (
   };
   const setVisibility = (i: Shown, v: Visibility, shared: string[]) =>
     void write({ op: "update", id: i.id, base_rev: i.rev, fields: { visibility: v, shared_with: shared }, scope: "all" }, v === "private" ? "Now private: only you see it." : v === "public" ? "Now public." : `Shared with ${shared.length === 1 ? shared[0] : `${shared.length} people`}.`);
-  const sendInvites = (n: EventNote) => void write({ op: "send_invites", id: n.id }, "Invites are on their way, from your address.");
+  // the confirm names the revision it showed: the door sends only to the people on it (CONTRACT-CHANGES, cal-app 6)
+  const sendInvites = (n: EventNote) => void write({ op: "send_invites", id: n.id, base_rev: n.rev }, "Invites are on their way, from your address.");
   const deleteEvent = (i: Shown) => void write({ op: "delete", id: i.id, base_rev: i.rev }, `Deleted “${i.title}”.`, () => { setOpen(null); setNote(null); });
 
   useEffect(() => { if (!notice) return; const t = window.setTimeout(() => setNotice(null), 5000); return () => window.clearTimeout(t); }, [notice]);
@@ -579,14 +581,14 @@ export default function Calendar({ backTo, onBack }: { backTo: string; onBack: (
           : <TimeGrid key={`${view}:${days[0]}`} list={list} days={days} tz={tz} today={today} now={now} canDrag={writable && can(sess, "move") && !phone} canNew={writable && can(sess, "create")}
             onOpen={openEvent} onNew={(d, t) => setSheet({ kind: "new", day: d, time: t })} onDrop={(i, s) => moveTo(i, s, s + (i.e - i.s))} />}
       </div>
-      {open && <Detail key={open.key} inst={open} note={note} sess={sess} offline={!writable} tz={tz} error={detailErr} onClose={() => openEvent(null)}
+      {open && <Detail key={`${open.key}@${open.rev}`} inst={open} note={note} sess={sess} offline={!writable} tz={tz} error={detailErr} onClose={() => openEvent(null)}
         onEdit={() => note && setSheet({ kind: "edit", inst: open, note })} onMove={(s, e, sc) => moveTo(open, s, e, sc)} onCancel={() => cancel(open)} onDelete={() => deleteEvent(open)}
         onVisibility={(v, sh) => setVisibility(open, v, sh)} onSendInvites={() => note && setInviting(note)} />}
     </div>}
     <p className="cal-tz">Times in {tz}</p>
     {sheet && <EventForm sheet={sheet} tz={tz} blocked={!writable} onClose={() => setSheet(null)} onSave={saveForm} />}
     {ask && <ScopeAsk ask={ask} onClose={() => setAsk(null)} />}
-    {inviting && can(sess, "send_invites") && <InviteConfirm note={inviting} onClose={() => setInviting(null)} onSend={() => sendInvites(inviting)} />}
+    {inviting && can(sess, "send_invites") && note?.id === inviting.id && note.rev === inviting.rev && <InviteConfirm note={inviting} onClose={() => setInviting(null)} onSend={() => sendInvites(inviting)} />}
     {notice && <p className="cal-notice" role="status">{notice}</p>}
   </section>;
 }

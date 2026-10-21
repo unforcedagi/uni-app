@@ -121,13 +121,28 @@ export function invitees(n: Pick<EventNote, "attendees" | "organizer">): Attende
   return (n.attendees ?? []).filter((a) => addr(a.address) !== org);
 }
 
+type InviteFields = Pick<EventNote, "attendees" | "organizer" | "status" | "invite_pending" | "invite_state" | "invite_detail">;
+
 /**
- * Whether "Send invites" is offered: the key may send them, and the door marks the invites waiting
- * (`invite_pending`). A door that doesn't carry the mark: a tentative event with people to invite.
+ * Whether "Send invites" is offered: the key may send them, the door marks the invites waiting (`invite_pending`), and
+ * they aren't already on their way (`invite_state` queued). After a tap the door may say the event changed since
+ * (stale) or the send failed: then it is offered again. A door that doesn't carry the mark: a tentative event with
+ * people to invite.
  */
-export function invitesWaiting(n: Pick<EventNote, "attendees" | "organizer" | "status" | "invite_pending">, s: Session | null): boolean {
+export function invitesWaiting(n: InviteFields, s: Session | null): boolean {
   if (!can(s, "send_invites") || invitees(n).length === 0) return false;
+  if (n.invite_state === "queued" || n.invite_state === "sent") return false;
   return n.invite_pending === undefined ? n.status === "tentative" : n.invite_pending;
+}
+
+/** What the panel says about the invites, if anything. */
+export function inviteWords(n: InviteFields): string | null {
+  switch (n.invite_state) {
+    case "queued": return "Invites are on their way, from your address.";
+    case "stale": return "The event changed after you sent the invites; send them again.";
+    case "refused": case "failed": return `The invites didn't go${n.invite_detail ? `: ${n.invite_detail}` : ""}.`;
+    default: return null;
+  }
 }
 
 /** "Juno Park <juno@example.com>", for the confirm. */

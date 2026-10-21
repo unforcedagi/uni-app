@@ -40,6 +40,9 @@ export type EventNote = {
   calendar?: string;
   source?: string;
   invite_pending?: boolean;
+  /** The door's invite state after the owner's tap: queued, sent, stale (the event changed after; send again), refused, failed. */
+  invite_state?: string | null;
+  invite_detail?: string | null;
 };
 
 /** One changed instance of a series: its original start (RECURRENCE-ID), and what changed. */

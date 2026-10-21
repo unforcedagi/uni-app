@@ -84,6 +84,10 @@ t("Send invites is offered for invites the door marks waiting, to people other t
   // a door that doesn't carry the mark: a tentative event with people to invite
   assert.equal(invitesWaiting({ organizer: org, attendees: [juno], status: "tentative" }, owner), true);
   assert.equal(invitesWaiting({ organizer: org, attendees: [juno], status: "confirmed" }, owner), false);
+  // on their way, or sent: not again; the door says the event changed after the tap, or the send failed: again
+  assert.equal(invitesWaiting({ organizer: org, attendees: [juno], status: "tentative", invite_pending: true, invite_state: "queued" }, owner), false);
+  assert.equal(invitesWaiting({ organizer: org, attendees: [juno], status: "tentative", invite_pending: true, invite_state: "stale" }, owner), true);
+  assert.equal(invitesWaiting({ organizer: org, attendees: [juno], status: "tentative", invite_pending: true, invite_state: "failed" }, owner), true);
 });
 
 t("typed attendees: addresses only, the known ones keep their names and answers", () => {

@@ -227,8 +227,11 @@ test.describe('T-229 Calendar', () => {
     await page.getByRole('dialog', { name: 'Send invites?' }).getByRole('button', { name: 'Send invites' }).click();
     await expect(page.getByRole('status').filter({ hasText: 'Invites are on their way, from your address.' })).toBeVisible();
     expect(d.door.outbox).toEqual([{ id: 'ev-0001', to: ['mailto:juno@example.com', 'mailto:mara@example.com'] }]);
+    // on their way: not offered again
     await expect(box).toHaveCount(0);
-    expect(ops(d).filter((o) => o.op === 'send_invites')).toMatchObject([{ id: 'ev-0001' }]);
+    await expect(detail(page).getByRole('status')).toHaveText('Invites are on their way, from your address.');
+    await expect(detail(page).getByRole('button', { name: /Send invites/ })).toHaveCount(0);
+    expect(ops(d).filter((o) => o.op === 'send_invites')).toMatchObject([{ id: 'ev-0001', base_rev: 1 }]);
   });
 
   test('Uni\'s key sees no Delete and no Send invites', async ({ page }) => {
@@ -469,6 +472,52 @@ test.describe('T-229 Calendar', () => {
     await expect(detail(page).getByRole('group', { name: 'Delete event?' })).toHaveCount(0);
     await expect(detail(page).getByRole('button', { name: /Delete/ })).toHaveCount(0);
     expect(ops(d).some((o) => o.op === 'delete')).toBe(false);
+  });
+
+  test('the invite confirm sends only what it showed; a send the door calls stale is offered again', async ({ page }) => {
+    const d = await boot(page);
+    await cal(page).getByRole('button', { name: 'New event', exact: true }).click();
+    const form = page.getByRole('dialog', { name: 'New event' });
+    await form.getByLabel('Title').fill('Seed library planning');
+    await form.getByLabel('People to invite').fill('juno@example.com');
+    await form.getByRole('button', { name: 'Add event' }).click();
+    await detail(page).getByRole('button', { name: 'Send invites…' }).click();
+    await expect(page.getByRole('dialog', { name: 'Send invites?' }).getByRole('listitem')).toHaveText(['juno@example.com']);
+    // meanwhile someone else is added
+    const n = d.door.notes.get('ev-0001')!;
+    d.door.touch('ev-0001', { attendees: [...n.attendees!, { address: 'mailto:kai@example.com', partstat: 'NEEDS-ACTION' }] });
+    await page.getByRole('dialog', { name: 'Send invites?' }).getByRole('button', { name: 'Send invites' }).click();
+    await expect(detail(page).getByRole('alert')).toHaveText('It changed since you opened it. Here it is now; nothing was saved.');
+    expect(d.door.outbox).toEqual([]);
+    await expect(detail(page).getByText('kai@example.com')).toBeVisible();
+    // asked again, with everyone on it now
+    await detail(page).getByRole('button', { name: 'Send invites…' }).click();
+    await expect(page.getByRole('dialog', { name: 'Send invites?' }).getByRole('listitem')).toHaveText(['juno@example.com', 'kai@example.com']);
+    await page.getByRole('dialog', { name: 'Send invites?' }).getByRole('button', { name: 'Send invites' }).click();
+    await expect(detail(page).getByRole('status')).toHaveText('Invites are on their way, from your address.');
+    expect(d.door.outbox).toEqual([{ id: 'ev-0001', to: ['mailto:juno@example.com', 'mailto:kai@example.com'] }]);
+    // the door says the event changed after the tap: send again
+    d.door.touch('ev-0001', { invite_state: 'stale' });
+    if (beside(page)) await cal(page).getByRole('button', { name: 'Refresh' }).click();
+    else { await detail(page).getByRole('button', { name: 'Close event' }).click(); await cal(page).getByRole('button', { name: 'Refresh' }).click(); await ev(page, 'Seed library planning').click(); }
+    await expect(detail(page).getByRole('region', { name: 'Invites' })).toContainText('The event changed after you sent the invites; send them again.');
+    await expect(detail(page).getByRole('button', { name: 'Send invites…' })).toBeVisible();
+  });
+
+  test('a Move form open when the event changes elsewhere starts again from the event as it is now', async ({ page }) => {
+    test.skip(!beside(page), 'the event panel covers Refresh on narrow screens');
+    const d = await boot(page);
+    await pickView(page, 'Agenda');
+    await cal(page).getByRole('button', { name: /^Lunch with Kai,/ }).click();
+    await detail(page).getByRole('button', { name: 'Move…' }).click();
+    await detail(page).getByLabel('Start').fill('13:00');
+    d.door.touch('fx-lunch', { start: '2026-10-22T20:00:00Z', end: '2026-10-22T21:00:00Z' });
+    await cal(page).getByRole('button', { name: 'Refresh' }).click();
+    await expect(detail(page).getByText('Thursday, Oct 22 · 2 PM – 3 PM')).toBeVisible();
+    await expect(detail(page).getByRole('form', { name: 'Move event' })).toHaveCount(0);
+    await detail(page).getByRole('button', { name: 'Move…' }).click();
+    await expect(detail(page).getByLabel('Start')).toHaveValue('14:00');
+    expect(ops(d).some((o) => o.op === 'move')).toBe(false);
   });
 
   test('on the Daylight nothing moves', async ({ page }) => {

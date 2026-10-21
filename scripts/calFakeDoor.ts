@@ -130,9 +130,11 @@ export class FakeDoor {
     const n = this.notes.get(b.id);
     if (!n) return err(404, "no such event");
     if (b.op === "send_invites") {
-      if (!n.invite_pending) return err(409, "no invites are waiting on this event");
+      // as the door: queued for the mail adapter (invite_pending stays until it acks); bound to the revision shown
+      if (b.base_rev !== undefined && b.base_rev !== n.rev) return { status: 409, body: { error: "the event changed since it was read", current_rev: n.rev } };
+      if (!n.invite_pending || n.invite_state === "queued") return err(409, "no invites are waiting on this event");
       this.outbox.push({ id: n.id, to: (n.attendees ?? []).map((a) => a.address) });
-      this.notes.set(n.id, { ...n, invite_pending: false, rev: n.rev + 1 });
+      this.notes.set(n.id, { ...n, invite_state: "queued", rev: n.rev + 1 });
       return ok({ ok: true, opId: b.opId, id: n.id, rev: n.rev + 1, state: "queued" });
     }
     if (b.op === "rsvp") {
