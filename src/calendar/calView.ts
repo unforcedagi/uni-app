@@ -2,7 +2,7 @@
 // window it asks the door for; what the door's key may do here (its session's ops: the Uni-unsafe ones, delete and
 // sending invites, are hidden from any key the door doesn't give them to); what an error says; and the snapshot kept
 // on the device so an offline Calendar still shows the last days it read, read-only.
-import { addDays, attendeeName, dayStart, instBounds, isoOf, mondayOf, type Attendee, type DoorInstance, type EventNote } from "./calCore.ts";
+import { addDays, attendeeName, dayStart, instBounds, isoOf, mondayOf, zoned, type Attendee, type DoorInstance, type EventNote } from "./calCore.ts";
 
 export type View = "day" | "week" | "agenda";
 export const AGENDA_DAYS = 21;
@@ -160,3 +160,39 @@ export function newOpId(): string {
   const r = typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID().replace(/-/g, "") : `${Date.now().toString(16)}${Math.random().toString(16).slice(2)}`;
   return `app-${r.slice(0, 24)}`;
 }
+
+// ── times from a form ───────────────────────────────────────────────────────────────────────────────────────────────
+
+/** Whole days from one `YYYY-MM-DD` to another. */
+export function daysBetween(a: string, b: string): number {
+  const at = (k: string) => { const [y, m, d] = k.slice(0, 10).split("-").map(Number); return Date.UTC(y, m - 1, d); };
+  return Math.round((at(b) - at(a)) / 86_400_000);
+}
+
+/** Two `start`/`end` values name the same time: the same day, or the same instant however it is written. */
+export const sameTime = (a: string | undefined, b: string | undefined): boolean =>
+  a === b || (!!a && !!b && a.length > 10 && b.length > 10 && Date.parse(a) === Date.parse(b));
+
+export type FormTimes = { day: string; allDay: boolean; start: string; end: string; endOffset: number; lastDay: string };
+
+/**
+ * The times a form makes, in `tz`. Timed: the end is `endOffset` days after the start day (an event that ran over
+ * midnight keeps doing so), or the next day when it would otherwise not be after the start. All-day: from the first day
+ * to the last, inclusive (stored with the exclusive end).
+ */
+export function formTimes(f: FormTimes, tz: string): { start: string; end: string; endDay: string } | { error: string } {
+  if (f.allDay) {
+    if (f.lastDay < f.day) return { error: "The last day can't be before the first." };
+    return { start: f.day, end: addDays(f.lastDay, 1), endDay: f.lastDay };
+  }
+  const at = (day: string, hhmm: string) => { const [y, m, d] = day.split("-").map(Number); const [h, mi] = hhmm.split(":").map(Number); return zoned(y, m, d, h, mi, tz); };
+  const s = at(f.day, f.start);
+  let endDay = addDays(f.day, f.endOffset);
+  let e = at(endDay, f.end);
+  if (e <= s && f.endOffset === 0) { endDay = addDays(f.day, 1); e = at(endDay, f.end); }
+  if (e <= s) return { error: "It has to end after it starts." };
+  return { start: isoOf(s), end: isoOf(e), endDay };
+}
+
+/** An all-day event moved to start on `day`: as many days long as it was, whatever the clocks did. */
+export const allDayMoved = (start: string, end: string, day: string): { start: string; end: string } => ({ start: day, end: addDays(day, daysBetween(start, end)) });

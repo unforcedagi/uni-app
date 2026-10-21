@@ -12,10 +12,11 @@ export const FIXTURE: Fixture = JSON.parse(readFileSync(new URL('../fixtures/cal
 /** Wed 2026-10-21, 10:00 in Denver: inside the fixture's week (Mon 19 – Sun 25). */
 export const NOW = new Date('2026-10-21T16:00:00Z');
 
-export type Door = { door: FakeDoor; down: boolean; refuse: boolean };
+/** `fail`: reads answer this status. `lose`: the next op's answer never arrives, the op applied first ('after') or not ('before'). */
+export type Door = { door: FakeDoor; down: boolean; refuse: boolean; fail: number | null; lose: 'before' | 'after' | null };
 
 export async function boot(page: Page, opts: { role?: Role; conflict?: boolean; noSession?: boolean; open?: boolean } = {}): Promise<Door> {
-  const d: Door = { door: new FakeDoor(FIXTURE, { role: opts.role, conflict: opts.conflict }), down: false, refuse: false };
+  const d: Door = { door: new FakeDoor(FIXTURE, { role: opts.role, conflict: opts.conflict }), down: false, refuse: false, fail: null, lose: null };
   d.door.noSession = !!opts.noSession;
   await page.clock.setFixedTime(NOW);
   await page.route('**/__door/**', async (route) => {
@@ -24,6 +25,14 @@ export async function boot(page: Page, opts: { role?: Role; conflict?: boolean; 
     const url = new URL(req.url());
     const path = url.pathname.replace(/^\/__door/, '') + url.search;
     if (d.refuse) return route.fulfill({ status: 401, contentType: 'application/json', body: JSON.stringify({ error: 'pubkey not allowed' }) });
+    if (d.fail && req.method() === 'GET') return route.fulfill({ status: d.fail, contentType: 'application/json', body: JSON.stringify({ error: 'internal error' }) });
+    if (d.lose && req.method() === 'POST') {
+      const when = d.lose;
+      d.lose = null;
+      if (when === 'after') d.door.handle('POST', path, req.postDataJSON());
+      else d.door.log.push({ method: 'POST', path, body: req.postDataJSON(), role: d.door.role });
+      return route.abort('connectionreset');
+    }
     const r = d.door.handle(req.method(), path, req.method() === 'POST' ? req.postDataJSON() : undefined);
     await route.fulfill({ status: r.status, contentType: 'application/json', body: JSON.stringify(r.body) });
   });
@@ -40,7 +49,7 @@ export async function boot(page: Page, opts: { role?: Role; conflict?: boolean; 
       const message = j?.error ?? `error ${r.status}`;
       if (r.status === 401 || r.status === 403) throw { kind: 'not_allowed', message, pubkey: 'a'.repeat(64) };
       if (r.status === 409) throw { kind: 'stale', message, current_rev: j?.current_rev ?? null };
-      if (r.status >= 502 && r.status <= 504) throw { kind: 'server', message };
+      if (r.status >= 500 && r.status <= 599) throw { kind: 'server', message };
       throw { kind: 'refused', status: r.status, message };
     };
     w.__TAURI_INTERNALS__ = {

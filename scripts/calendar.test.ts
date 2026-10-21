@@ -3,7 +3,7 @@
 // invites" is offered, and reading typed attendees. Run: node --experimental-strip-types scripts/calendar.test.ts
 import assert from "node:assert/strict";
 import { layoutDay, type DoorInstance } from "../src/calendar/calCore.ts";
-import { can, daysFor, FALLBACK_SESSION, fromSnapshot, invitesWaiting, MAX_WINDOWS, parseAttendees, parseSnapshot, remember, toShown, windowFor, type Session } from "../src/calendar/calView.ts";
+import { allDayMoved, can, daysFor, FALLBACK_SESSION, formTimes, fromSnapshot, sameTime, invitesWaiting, MAX_WINDOWS, parseAttendees, parseSnapshot, remember, toShown, windowFor, type Session } from "../src/calendar/calView.ts";
 
 const TZ = "America/Denver";
 let n = 0;
@@ -91,6 +91,26 @@ t("typed attendees: addresses only, the known ones keep their names and answers"
   assert.deepEqual(parseAttendees("Juno@Example.com, kai@example.com kai@example.com", known), [known[0], { address: "mailto:kai@example.com", partstat: "NEEDS-ACTION" }]);
   assert.deepEqual(parseAttendees("juno@example.com, not an address"), { bad: "not" });
   assert.deepEqual(parseAttendees("  "), []);
+});
+
+t("form times: a late start ends the next day; a multi-day timed event keeps its days; all-day is first to last day", () => {
+  const f = { day: "2026-10-21", allDay: false, start: "23:30", end: "00:30", endOffset: 0, lastDay: "2026-10-21" };
+  assert.deepEqual(formTimes(f, TZ), { start: "2026-10-22T05:30:00Z", end: "2026-10-22T06:30:00Z", endDay: "2026-10-22" });
+  assert.deepEqual(formTimes({ ...f, start: "10:00", end: "11:00" }, TZ), { start: "2026-10-21T16:00:00Z", end: "2026-10-21T17:00:00Z", endDay: "2026-10-21" });
+  // two days long, a later start time than end time: still two days, not "ends before it starts"
+  assert.deepEqual(formTimes({ ...f, start: "18:00", end: "09:00", endOffset: 2 }, TZ), { start: "2026-10-22T00:00:00Z", end: "2026-10-23T15:00:00Z", endDay: "2026-10-23" });
+  assert.deepEqual(formTimes({ ...f, start: "10:00", end: "10:00", endOffset: 0 }, TZ), { start: "2026-10-21T16:00:00Z", end: "2026-10-22T16:00:00Z", endDay: "2026-10-22" });
+  assert.deepEqual(formTimes({ ...f, allDay: true, day: "2026-10-23", lastDay: "2026-10-25" }, TZ), { start: "2026-10-23", end: "2026-10-26", endDay: "2026-10-25" });
+  assert.deepEqual(formTimes({ ...f, allDay: true, day: "2026-10-23", lastDay: "2026-10-22" }, TZ), { error: "The last day can't be before the first." });
+});
+
+t("an all-day event moved over the clock change keeps its days; times compare however they're written", () => {
+  assert.deepEqual(allDayMoved("2026-10-23", "2026-10-26", "2026-10-31"), { start: "2026-10-31", end: "2026-11-03" });
+  assert.deepEqual(allDayMoved("2026-11-01", "2026-11-02", "2026-11-08"), { start: "2026-11-08", end: "2026-11-09" });
+  assert.equal(sameTime("2026-10-22T22:00:00.000Z", "2026-10-22T22:00:00Z"), true);
+  assert.equal(sameTime("2026-10-22T22:00:00Z", "2026-10-22T22:30:00Z"), false);
+  assert.equal(sameTime("2026-10-22", "2026-10-22"), true);
+  assert.equal(sameTime("2026-10-22", "2026-10-23"), false);
 });
 
 console.log(`${n} passed`);

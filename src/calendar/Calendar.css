@@ -140,6 +140,7 @@
 .cal-title small { color: var(--muted); font-size: 12px; }
 .cal-offline { display: inline-block; padding: 0 6px; border: 1.5px dashed var(--th-ink); border-radius: 4px; font: 700 10.5px/16px var(--th-mono, var(--mono)); letter-spacing: .06em; color: var(--th-ink); }
 .cal-offline-note { margin: 0; padding: 6px 14px; border-bottom: 1px solid var(--line); font-size: 13px; color: var(--text-soft); flex: none; }
+.cal-stale { margin: 0; padding: 8px 14px; border-bottom: 2px solid var(--th-ink); background: var(--th-card); font-size: 14px; flex: none; }
 .cal-problem, .cal-loading { padding: 28px 16px; text-align: center; color: var(--muted); }
 .cal-problem p { margin: 0 0 12px; color: var(--text); }
 .cal-empty { padding: 28px 0; color: var(--muted); text-align: center; }

@@ -51,8 +51,9 @@ function setSeen(v: boolean) {
 export const doorAnswered = () => setSeen(true);
 
 /**
- * Ask the door whether it takes this key. It answered: Calendar shows. It refused the key, or there is no door: it
- * hides. It can't be reached: as it was (an offline Calendar still shows its snapshot).
+ * Ask the door whether it takes this key. It answered: Calendar shows. It refused the key (401/403), or nothing there
+ * is a calendar door (404): it hides. Anything else (unreachable, a server error, a key store not ready yet): as it
+ * was, so an offline Calendar still shows its snapshot.
  */
 export async function probeCalendar(from: string, to: string): Promise<void> {
   try {
@@ -60,7 +61,7 @@ export async function probeCalendar(from: string, to: string): Promise<void> {
     setSeen(true);
   } catch (e) {
     const err = e as CalErr;
-    if (err.kind === "not_allowed" || err.kind === "refused" || err.kind === "invalid") setSeen(false);
+    if (err.kind === "not_allowed" || (err.kind === "refused" && err.status === 404)) setSeen(false);
   }
 }
 

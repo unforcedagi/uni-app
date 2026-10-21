@@ -89,6 +89,7 @@ fn handle(d: &Mutex<Door>, public: &str, method: &str, path: &str, auth: &str, b
     s.passed.push((method.to_string(), path.to_string(), parsed.clone()));
     let route = path.split('?').next().unwrap_or("");
     match (method, route) {
+        ("GET", "/cal/v1/conflicts") => (500, json!({ "ok": false, "error": "internal error" }).to_string()),
         ("GET", "/cal/v1/session") => (200, json!({ "role": "owner", "ops": ["create", "move"], "calendar": "aaron", "tz": "America/Denver" }).to_string()),
         ("GET", "/cal/v1/events") => (200, json!({ "complete": true, "instances": [] }).to_string()),
         ("GET", r) if r.starts_with("/cal/v1/event/") => (200, json!({ "id": &r[14..], "rev": s.rev }).to_string()),
@@ -207,5 +208,15 @@ async fn a_door_that_cannot_be_reached_is_unreachable() {
     match CalDoor::new(&format!("http://127.0.0.1:{port}"), &keys).unwrap().session().await {
         Err(CalError::Unreachable { .. }) => {}
         r => panic!("expected unreachable, got {r:?}"),
+    }
+}
+
+#[tokio::test]
+async fn a_door_that_fails_inside_is_a_server_error_not_a_refusal() {
+    let keys = Keys::generate();
+    let door = start(&[&keys]).await;
+    match CalDoor::new(&door.url, &keys).unwrap().conflicts().await {
+        Err(CalError::Server { message }) => assert_eq!(message, "internal error"),
+        r => panic!("expected server, got {r:?}"),
     }
 }

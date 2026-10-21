@@ -7,7 +7,7 @@
 // colour, so it reads on the Daylight, where nothing moves.
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { addDays, dayKey, dayLabel, dayStart, HOUR, layoutDay, MIN, rangeLabel, ruleLabel, timeLabel, wall, zoned, type EventNote, type Instance, type Scope, type Visibility } from "./calCore.ts";
-import { asCalErr, attendeesText, can, daysFor, DEFAULT_TZ, fromSnapshot, inviteeLine, invitees, invitesWaiting, newOpId, parseAttendees, partstatWords, problemText, stepFor, toShown, who, windowFor, type CalErr, type Session, type Shown, type View } from "./calView.ts";
+import { allDayMoved, asCalErr, attendeesText, can, daysBetween, daysFor, DEFAULT_TZ, formTimes, fromSnapshot, sameTime, inviteeLine, invitees, invitesWaiting, newOpId, parseAttendees, partstatWords, problemText, stepFor, toShown, who, windowFor, type CalErr, type Session, type Shown, type View } from "./calView.ts";
 import { conflicts as readConflicts, doorAnswered, event as readEvent, events as readEvents, op as sendOp, readSnapshot, saveRead, session as readSession, type Conflict } from "./calDoor.ts";
 import "./Calendar.css";
 
@@ -61,7 +61,8 @@ function TimeGrid({ list, days, tz, today, now, canDrag, canNew, onOpen, onNew, 
 
   const allDay = list.filter((i) => i.all_day || i.e - i.s >= DAY_MS);
   const timed = list.filter((i) => !allDay.includes(i));
-  const perDay = days.map((d) => layoutDay(timed.filter((i) => dayKey(i.s, tz) === d).map((i) => ({ start: i.s, end: i.e, i }))));
+  // a timed event shows on each day it covers (one that runs past midnight continues in the next column)
+  const perDay = days.map((d) => { const ds = dayStart(d, tz), de = dayStart(addDays(d, 1), tz); return layoutDay(timed.filter((i) => i.s < de && i.e > ds).map((i) => ({ start: Math.max(i.s, ds), end: Math.min(i.e, de), i }))); });
 
   // a drag is for a mouse or a pen on a desktop; a touch opens the event, and its panel's Move moves it
   const down = (e: React.PointerEvent, inst: Shown) => {
@@ -116,10 +117,10 @@ function TimeGrid({ list, days, tz, today, now, canDrag, canNew, onOpen, onNew, 
               aria-label={`New event ${dayLabel(d)} ${timeLabel(fromLocal(d, Math.floor(s / 2), s % 2 ? 30 : 0), tz)}`}
               onClick={() => onNew(d, `${pad(Math.floor(s / 2))}:${s % 2 ? "30" : "00"}`)} />)}
             {d === today && <div className="cal-now" style={{ top: ((now - dayStart(d, tz)) / HOUR) * HOUR_PX }} aria-label={`Now, ${timeLabel(now, tz)}`} role="img" />}
-            {perDay[di].map(({ inst: { i: inst }, col, cols: n }) => {
+            {perDay[di].map(({ inst: { i: inst, start: segS, end: segE }, col, cols: n }) => {
               const dragging = drag?.key === inst.key && drag.moved ? drag : null;
-              const top = ((inst.s - dayStart(d, tz)) / HOUR) * HOUR_PX + (dragging ? (dragging.deltaMin / 60) * HOUR_PX : 0);
-              const h = Math.max(20, ((inst.e - inst.s) / HOUR) * HOUR_PX - 2);
+              const top = ((segS - dayStart(d, tz)) / HOUR) * HOUR_PX + (dragging ? (dragging.deltaMin / 60) * HOUR_PX : 0);
+              const h = Math.max(20, ((segE - segS) / HOUR) * HOUR_PX - 2);
               const shift = dragging ? dragging.dayIdx - di : 0;
               const narrow = days.length > 1 && days.length < 7;
               const short = h < 40 || narrow || n > 1;
@@ -247,49 +248,53 @@ function Detail({ inst, note, sess, offline, tz, error, onClose, onEdit, onMove,
 
 // ── sheets: new and edit, which events, send invites ──────────────────────────────────────────────────────────────
 
-function EventForm({ sheet, tz, onClose, onSave }: { sheet: Sheet; tz: string; onClose: () => void; onSave: (fields: Record<string, unknown>, changedKeys: string[]) => void }) {
+function EventForm({ sheet, tz, blocked, onClose, onSave }: { sheet: Sheet; tz: string; blocked: boolean; onClose: () => void; onSave: (fields: Record<string, unknown>, changedKeys: string[]) => void }) {
   const editing = sheet.kind === "edit" ? sheet : null;
   const n = editing?.note;
   const series = !!editing?.inst.series;
-  const startMs = editing ? editing.inst.s : null;
+  const hhmm = (ms: number) => { const w = wall(ms, tz); return `${pad(w.h)}:${pad(w.mi)}`; };
   const [title, setTitle] = useState(n?.title ?? "");
   const [day, setDay] = useState(editing ? dayKey(editing.inst.s, tz) : (sheet as { day: string }).day);
   const [allDay, setAllDay] = useState(editing ? editing.inst.all_day : false);
-  const [start, setStart] = useState(() => { if (startMs !== null) { const w = wall(startMs, tz); return `${pad(w.h)}:${pad(w.mi)}`; } return (sheet as { time: string }).time; });
-  const [end, setEnd] = useState(() => { if (editing) { const w = wall(editing.inst.e, tz); return `${pad(w.h)}:${pad(w.mi)}`; } const [h, m] = (sheet as { time: string }).time.split(":").map(Number); return `${pad(Math.min(23, h + 1))}:${pad(m)}`; });
+  const [start, setStart] = useState(() => editing ? hhmm(editing.inst.s) : (sheet as { time: string }).time);
+  const [end, setEnd] = useState(() => { if (editing) return hhmm(editing.inst.e); const [h, m] = (sheet as { time: string }).time.split(":").map(Number); return `${pad((h + 1) % 24)}:${pad(m)}`; });
+  // a timed event that ends on a later day keeps doing so; an all-day one keeps its last day
+  const endOffset = editing && !editing.inst.all_day ? daysBetween(dayKey(editing.inst.s, tz), dayKey(editing.inst.e, tz)) : 0;
+  const [lastDay, setLastDay] = useState(() => editing?.inst.all_day ? addDays(dayKey(editing.inst.e, tz), -1) : day);
   const [repeat, setRepeat] = useState("");
   const [where, setWhere] = useState(n?.location ?? "");
   const [notes, setNotes] = useState(n?.description ?? "");
   const [people, setPeople] = useState(attendeesText(n?.attendees));
   const [vis, setVis] = useState<Visibility>(n?.visibility ?? "private");
   const [err, setErr] = useState<string | null>(null);
-  const at = (hhmm: string) => { const [y, m, d] = day.split("-").map(Number); const [h, mi] = hhmm.split(":").map(Number); return zoned(y, m, d, h, mi, tz); };
+  const times = formTimes({ day, allDay, start, end, endOffset, lastDay: lastDay < day ? day : lastDay }, tz);
   const save = (e: React.FormEvent) => {
     e.preventDefault();
+    if (blocked) return;
     if (!title.trim()) return setErr("Give it a title.");
     const att = parseAttendees(people, n?.attendees ?? []);
     if ("bad" in att) return setErr(`“${att.bad}” isn't an email address.`);
     const fields: Record<string, unknown> = { title: title.trim(), location: where.trim(), description: notes.trim(), attendees: att };
-    if (!series) {
-      const s = allDay ? day : iso(at(start));
-      const en = allDay ? addDays(day, 1) : iso(at(end));
-      if (!allDay && Date.parse(en) <= Date.parse(s)) return setErr("It has to end after it starts.");
-      Object.assign(fields, { start: s, end: en, all_day: allDay, tz });
-    }
+    const t = series ? null : formTimes({ day, allDay, start, end, endOffset, lastDay }, tz);
+    if (t && "error" in t) return setErr(t.error);
     if (!editing) {
       const wd = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"][(new Date(`${day}T12:00:00Z`).getUTCDay() + 6) % 7];
       const rrule = repeat === "weekly" ? `FREQ=WEEKLY;BYDAY=${wd}` : repeat === "weekdays" ? "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR" : repeat === "daily" ? "FREQ=DAILY" : undefined;
+      Object.assign(fields, { start: t!.start, end: t!.end, all_day: allDay, tz, visibility: vis });
       if (rrule) fields.rrule = rrule;
-      fields.visibility = vis;
       if (!where.trim()) delete fields.location;
       if (!notes.trim()) delete fields.description;
       if (!att.length) delete fields.attendees;
       return onSave(fields, Object.keys(fields));
     }
-    // an edit sends only what changed
-    const before: Record<string, unknown> = { title: n!.title, location: n!.location ?? "", description: n!.description ?? "", attendees: n!.attendees ?? [],
-      ...(series ? {} : { start: n!.start, end: n!.end, all_day: n!.all_day, tz: n!.tz }) };
+    // an edit sends only what changed; a new time goes as start and end together (the door wants both), and the
+    // event keeps its own zone
+    const before: Record<string, unknown> = { title: n!.title, location: n!.location ?? "", description: n!.description ?? "", attendees: n!.attendees ?? [] };
     const changed = Object.keys(fields).filter((k) => JSON.stringify(fields[k]) !== JSON.stringify(before[k]));
+    if (t && !("error" in t) && (allDay !== n!.all_day || !sameTime(t.start, n!.start) || !sameTime(t.end, n!.end))) {
+      Object.assign(fields, { start: t.start, end: t.end, all_day: allDay });
+      changed.push("start", "end", "all_day");
+    }
     if (!changed.length) return onClose();
     onSave(Object.fromEntries(changed.map((k) => [k, fields[k]])), changed);
   };
@@ -299,13 +304,15 @@ function EventForm({ sheet, tz, onClose, onSave }: { sheet: Sheet; tz: string; o
     <label>Title <input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder="What" /></label>
     {series ? <p className="cal-note">It repeats. To change its time, use Move.</p> : <>
       <div className="cal-row">
-        <label>Day <input type="date" value={day} onChange={(e) => setDay(e.target.value)} /></label>
+        <label>{allDay ? "First day" : "Day"} <input type="date" value={day} onChange={(e) => { const was = daysBetween(day, lastDay); setDay(e.target.value); if (e.target.value) setLastDay(addDays(e.target.value, Math.max(0, was))); }} /></label>
+        {allDay && <label>Last day <input type="date" value={lastDay} min={day} onChange={(e) => setLastDay(e.target.value)} /></label>}
         <label className="cal-check"><input type="checkbox" checked={allDay} onChange={(e) => setAllDay(e.target.checked)} /> All day</label>
       </div>
       {!allDay && <div className="cal-row">
         <label>Start <input type="time" step={900} value={start} onChange={(e) => setStart(e.target.value)} /></label>
         <label>End <input type="time" step={900} value={end} onChange={(e) => setEnd(e.target.value)} /></label>
       </div>}
+      {!allDay && !("error" in times) && times.endDay !== day && <p className="cal-note">Ends {dayLabel(times.endDay)}.</p>}
     </>}
     {!editing && <label>Repeats <select value={repeat} onChange={(e) => setRepeat(e.target.value)}>
       <option value="">Doesn't repeat</option><option value="daily">Every day</option><option value="weekly">Every week on this day</option><option value="weekdays">Every weekday</option>
@@ -319,7 +326,8 @@ function EventForm({ sheet, tz, onClose, onSave }: { sheet: Sheet; tz: string; o
     <label>Notes <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} /></label>
     <p className="cal-note">Times in {tz}.</p>
     {err && <p className="cal-error" role="alert">{err}</p>}
-    <div className="cal-actions"><button type="submit" className="primary">{editing ? "Save" : "Add event"}</button><button type="button" onClick={onClose}>Cancel</button></div>
+    {blocked && <p className="cal-note" role="status">The calendar door isn't answering: this can be saved once it does.</p>}
+    <div className="cal-actions"><button type="submit" className="primary" disabled={blocked}>{editing ? "Save" : "Add event"}</button><button type="button" onClick={onClose}>Cancel</button></div>
   </form></div>;
 }
 
@@ -399,10 +407,13 @@ export default function Calendar({ backTo, onBack }: { backTo: string; onBack: (
   const seq = useRef(0);
   const pendingOpen = useRef<string | null>(null);
 
-  const load = useCallback(async (): Promise<Shown[] | null> => {
+  // the session is read from the door when the place opens and on Refresh; a snapshot's is only for showing it offline
+  const sessLive = useRef(false);
+  const load = useCallback(async (fresh = false): Promise<Shown[] | null> => {
     const n = ++seq.current;
     try {
-      const s = sess && !sess.fallback && !offline ? sess : await readSession(win.from, win.to);
+      const s = sess && sessLive.current && !fresh ? sess : await readSession(win.from, win.to);
+      sessLive.current = true;
       const r = await readEvents(win.from, win.to);
       if (n !== seq.current) return null;
       const list = toShown(r.instances ?? []);
@@ -425,8 +436,10 @@ export default function Calendar({ backTo, onBack }: { backTo: string; onBack: (
       }
       return null;
     }
-  }, [win.from, win.to, sess, offline]);
+  }, [win.from, win.to, sess]);
   useEffect(() => { void load(); }, [win.from, win.to]); // eslint-disable-line react-hooks/exhaustive-deps
+  // offline, a pending question can't be answered: it closes (a form keeps what was typed, but can't save)
+  useEffect(() => { if (offline) { setAsk(null); setInviting(null); } }, [offline]);
 
   // the open event's full note (description, who it's shared with, its people), read again after every write
   const noteSeq = useRef(0);
@@ -452,28 +465,39 @@ export default function Calendar({ backTo, onBack }: { backTo: string; onBack: (
     if (hit) { pendingOpen.current = null; openEvent(hit); }
   }, [data]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /** One named op, sent with a fresh op id; then read again. A stale write changes nothing and shows the event as it is now. */
+  const busyRef = useRef(false);
+  const unanswered = useRef<{ body: string; opId: string } | null>(null);
+  /**
+   * One named op, then read again. A stale write changes nothing and shows the event as it is now. An op whose answer
+   * never came back is sent again under the same op id, so the door applies it once.
+   */
   const write = async (o: Record<string, unknown>, done: string, after?: (answer: { id?: string }) => void) => {
-    if (busy) return;
+    if (busyRef.current) return;
+    if (!writable) { setNotice("Nothing can change until the calendar door answers."); return; }
+    busyRef.current = true;
     setBusy(true); setDetailErr(null);
+    const body = JSON.stringify(o);
+    const opId = unanswered.current?.body === body ? unanswered.current.opId : newOpId();
     try {
-      const r = await sendOp({ ...o, opId: newOpId() });
+      const r = await sendOp({ ...o, opId });
+      unanswered.current = null;
       setNotice(done);
       after?.(r);
       const list = await load();
       reopen(list);
     } catch (e) {
       const err = asCalErr(e);
-      const list = await load();
-      if (err.kind === "stale") reopen(list);
+      unanswered.current = err.kind === "unreachable" || err.kind === "server" ? { body, opId } : null;
+      // whatever went wrong, the panel shows the event as the door has it now (a lost answer may have been applied)
+      reopen(await load());
       if (open) setDetailErr(problemText(err)); else setNotice(problemText(err));
-    } finally { setBusy(false); }
+    } finally { busyRef.current = false; setBusy(false); }
   };
 
   const base = (i: Shown) => ({ id: i.id, base_rev: i.rev, ...(i.recurrence_id ? { recurrence_id: i.recurrence_id } : {}) });
   const whenWords = (start: number, allDay: boolean) => allDay ? dayLabel(dayKey(start, tz)) : `${dayLabel(dayKey(start, tz), "short")}, ${timeLabel(start, tz)}`;
   const moveTo = (i: Shown, start: number, end: number, scope?: Scope) => {
-    const times = i.all_day ? { start: dayKey(start, tz), end: dayKey(end, tz) } : { start: iso(start), end: iso(end) };
+    const times = i.all_day ? allDayMoved(i.start, i.end, dayKey(start, tz)) : { start: iso(start), end: iso(end) };
     const run = (s: Scope) => void write({ op: "move", ...base(i), ...times, scope: s }, `Moved “${i.title}” to ${whenWords(start, i.all_day)}.`);
     if (i.series && !scope) setAsk({ verb: "Move", inst: i, thisOk: true, run });
     else run(scope ?? "all");
@@ -505,15 +529,17 @@ export default function Calendar({ backTo, onBack }: { backTo: string; onBack: (
   const md = (d: string) => dayLabel(d, "short").split(", ")[1];
   const label = view === "day" ? (phone ? dayLabel(focus, "short") : dayLabel(focus)) : view === "week" ? (phone ? `${md(days[0])} – ${md(days[days.length - 1])}` : `${dayLabel(days[0], "short")} – ${dayLabel(days[days.length - 1], "short")}`) : `From ${dayLabel(focus, "short")}`;
   const step = stepFor(view, phone);
-  const writable = !offline && !!sess;
-  const list = data?.list ?? [];
+  // what is on screen is this window's read; a failed read again leaves it shown, but nothing can change
+  const shown = data && data.from === win.from && data.to === win.to ? data : null;
+  const writable = !offline && !problem && !!sess && !!shown;
+  const list = shown?.list ?? [];
   const savedWords = savedAt ? `${dayLabel(dayKey(Date.parse(savedAt), tz), "short")}, ${timeLabel(Date.parse(savedAt), tz)}` : null;
 
   return <section className={`cal ${still ? "cal-still" : ""}`} aria-label="Calendar" aria-busy={busy || undefined}>
     <header className="note-bar cal-bar">
       <button className="note-action" onClick={onBack}>← {backTo}</button>
       <span className="cal-title"><strong>Calendar</strong>{offline && <span className="cal-offline" role="status">OFFLINE{savedWords ? ` · saved ${savedWords}` : ""}</span>}{sess?.role === "uni" && <small> · as Uni</small>}</span>
-      <button className="note-action" onClick={() => void load()}>{offline ? "Retry" : "Refresh"}</button>
+      <button className="note-action" onClick={() => void load(true)}>{offline ? "Retry" : "Refresh"}</button>
     </header>
     <div className="cal-head">
       <div className="cal-nav">
@@ -528,26 +554,27 @@ export default function Calendar({ backTo, onBack }: { backTo: string; onBack: (
       {conflictList.length > 0 && <button className="cal-conflicts-open" aria-expanded={conflictsOpen} onClick={() => setConflictsOpen(!conflictsOpen)}>Conflicts ({conflictList.length})</button>}
       {writable && can(sess, "create") && <button className="primary cal-new" onClick={() => setSheet({ kind: "new", day: days.includes(today) ? today : days[0], time: "10:00" })}>New event</button>}
     </div>
-    {offline && <p className="cal-offline-note" role="note">The calendar door isn't answering. This is what this device last read{data && !data.complete ? " (not all of these days were saved)" : ""}; nothing can change until it answers.</p>}
+    {offline && <p className="cal-offline-note" role="note">The calendar door isn't answering. This is what this device last read{shown && !shown.complete ? " (not all of these days were saved)" : ""}; nothing can change until it answers.</p>}
     {conflictsOpen && conflictList.length > 0 && <Conflicts list={conflictList} tz={tz} onClose={() => setConflictsOpen(false)} onOpen={(c) => {
       setConflictsOpen(false);
       const hit = list.find((x) => x.id === c.event_id);
       if (hit) openEvent(hit); else { pendingOpen.current = c.event_id; setFocus(dayKey(Date.parse(c.vault.start.length === 10 ? `${c.vault.start}T12:00:00Z` : c.vault.start), tz)); }
     }} />}
-    {problem && !data ? <div className="cal-problem" role="alert"><p>{problemText(problem)}</p><button onClick={() => void load()}>Retry</button></div>
-    : !data ? <p className="cal-loading" role="status">Loading the calendar…</p>
+    {problem && shown && <p className="cal-stale" role="alert">Couldn't read it again: {problemText(problem)} What's shown may be out of date; nothing can change. <button className="cal-link" onClick={() => void load(true)}>Retry</button></p>}
+    {problem && !shown ? <div className="cal-problem" role="alert"><p>{problemText(problem)}</p><button onClick={() => void load(true)}>Retry</button></div>
+    : !shown ? <p className="cal-loading" role="status">Loading the calendar…</p>
     : <div className={`cal-body ${open && beside ? "with-detail" : ""}`}>
       <div className="cal-main">
         {view === "agenda" ? <Agenda list={list} days={days} tz={tz} today={today} onOpen={openEvent} />
           : <TimeGrid key={`${view}:${days[0]}`} list={list} days={days} tz={tz} today={today} now={now} canDrag={writable && can(sess, "move") && !phone} canNew={writable && can(sess, "create")}
             onOpen={openEvent} onNew={(d, t) => setSheet({ kind: "new", day: d, time: t })} onDrop={(i, s) => moveTo(i, s, s + (i.e - i.s))} />}
       </div>
-      {open && <Detail key={open.key} inst={open} note={note} sess={sess} offline={offline} tz={tz} error={detailErr} onClose={() => openEvent(null)}
+      {open && <Detail key={open.key} inst={open} note={note} sess={sess} offline={!writable} tz={tz} error={detailErr} onClose={() => openEvent(null)}
         onEdit={() => note && setSheet({ kind: "edit", inst: open, note })} onMove={(s, e, sc) => moveTo(open, s, e, sc)} onCancel={() => cancel(open)} onDelete={() => deleteEvent(open)}
         onVisibility={(v, sh) => setVisibility(open, v, sh)} onSendInvites={() => note && setInviting(note)} />}
     </div>}
     <p className="cal-tz">Times in {tz}</p>
-    {sheet && <EventForm sheet={sheet} tz={tz} onClose={() => setSheet(null)} onSave={saveForm} />}
+    {sheet && <EventForm sheet={sheet} tz={tz} blocked={!writable} onClose={() => setSheet(null)} onSave={saveForm} />}
     {ask && <ScopeAsk ask={ask} onClose={() => setAsk(null)} />}
     {inviting && <InviteConfirm note={inviting} onClose={() => setInviting(null)} onSend={() => sendInvites(inviting)} />}
     {notice && <p className="cal-notice" role="status">{notice}</p>}

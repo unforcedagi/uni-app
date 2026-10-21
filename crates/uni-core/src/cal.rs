@@ -36,7 +36,7 @@ pub enum CalError {
     Stale { current_rev: Option<i64>, message: String },
     /// The door refused the request for another reason (bad input, an op it doesn't offer).
     Refused { status: u16, message: String },
-    /// The door or the vault behind it failed.
+    /// The door or the vault behind it failed (5xx).
     Server { message: String },
     /// Bad input, or an answer this client can't read.
     Invalid { message: String },
@@ -178,7 +178,7 @@ impl<'a> CalDoor<'a> {
         Err((false, match status.as_u16() {
             401 | 403 => CalError::NotAllowed { message, pubkey: self.keys.public_key().to_hex() },
             409 => CalError::Stale { current_rev: json.as_ref().and_then(|v| v.get("current_rev")).and_then(Value::as_i64), message },
-            502..=504 => CalError::Server { message },
+            500..=599 => CalError::Server { message },
             s => CalError::Refused { status: s, message },
         }))
     }

@@ -328,6 +328,114 @@ test.describe('T-229 Calendar', () => {
     await expect(detail(page).getByRole('button', { name: 'Delete…' })).toHaveCount(0);
   });
 
+  test('an edit keeps the event\'s days, and a new time goes as start and end together', async ({ page }) => {
+    const d = await boot(page);
+    await pickView(page, 'Agenda');
+    // a three-day all-day event, its title alone changed
+    await cal(page).getByRole('button', { name: /^Seed swap week,/ }).first().click();
+    await detail(page).getByRole('button', { name: 'Edit…' }).click();
+    let edit = page.getByRole('dialog', { name: 'Edit event' });
+    await expect(edit.getByLabel('First day')).toHaveValue('2026-10-23');
+    await expect(edit.getByLabel('Last day')).toHaveValue('2026-10-25');
+    await edit.getByLabel('Title').fill('Seed swap weekend');
+    await edit.getByRole('button', { name: 'Save' }).click();
+    await expect(detail(page)).toHaveAccessibleName('Event: Seed swap weekend');
+    expect(ops(d).at(-1).fields).toEqual({ title: 'Seed swap weekend' });
+    // a week later: still three days
+    await detail(page).getByRole('button', { name: 'Edit…' }).click();
+    edit = page.getByRole('dialog', { name: 'Edit event' });
+    await edit.getByLabel('First day').fill('2026-10-30');
+    await expect(edit.getByLabel('Last day')).toHaveValue('2026-11-01');
+    await edit.getByRole('button', { name: 'Save' }).click();
+    await expect(page.getByRole('status').filter({ hasText: 'Saved “Seed swap weekend”.' })).toBeVisible();
+    expect(ops(d).at(-1).fields).toEqual({ start: '2026-10-30', end: '2026-11-02', all_day: true });
+    if (!beside(page)) await detail(page).getByRole('button', { name: 'Close event' }).click();
+    // a timed event's end alone: start and end go together, and its zone isn't touched
+    await cal(page).getByRole('button', { name: /^Lunch with Kai,/ }).click();
+    await detail(page).getByRole('button', { name: 'Edit…' }).click();
+    edit = page.getByRole('dialog', { name: 'Edit event' });
+    await edit.getByLabel('End').fill('13:30');
+    await edit.getByRole('button', { name: 'Save' }).click();
+    await expect(detail(page).getByText('Thursday, Oct 22 · 12 PM – 1:30 PM')).toBeVisible();
+    expect(ops(d).at(-1).fields).toEqual({ start: '2026-10-22T18:00:00Z', end: '2026-10-22T19:30:00Z', all_day: false });
+  });
+
+  test('an event past midnight ends the next day and shows on both', async ({ page }) => {
+    const d = await boot(page);
+    await pickView(page, 'Week');
+    await cal(page).getByRole('button', { name: 'New event', exact: true }).click();
+    const form = page.getByRole('dialog', { name: 'New event' });
+    await form.getByLabel('Title').fill('Night sky watch');
+    await form.getByLabel('Start').fill('23:00');
+    await form.getByLabel('End').fill('01:00');
+    await expect(form.getByText('Ends Thursday, Oct 22.')).toBeVisible();
+    await form.getByRole('button', { name: 'Add event' }).click();
+    await expect(page.getByRole('status').filter({ hasText: 'Added “Night sky watch”.' })).toBeVisible();
+    expect(ops(d).at(-1).fields).toMatchObject({ start: '2026-10-22T05:00:00Z', end: '2026-10-22T07:00:00Z' });
+    if (!beside(page)) await detail(page).getByRole('button', { name: 'Close event' }).click();
+    await expect(cal(page).getByRole('group', { name: 'Wednesday, Oct 21' }).getByRole('button', { name: /^Night sky watch,/ })).toBeVisible();
+    await expect(cal(page).getByRole('group', { name: 'Thursday, Oct 22' }).getByRole('button', { name: /^Night sky watch,/ })).toBeVisible();
+  });
+
+  test('an all-day event moved over the clock change keeps its days', async ({ page }) => {
+    const d = await boot(page);
+    await pickView(page, 'Agenda');
+    await cal(page).getByRole('button', { name: /^Seed swap week,/ }).first().click();
+    await detail(page).getByRole('button', { name: 'Move…' }).click();
+    await detail(page).getByLabel('Day').fill('2026-10-31');
+    await detail(page).getByRole('button', { name: 'Move', exact: true }).click();
+    await expect(page.getByRole('status').filter({ hasText: 'Moved “Seed swap week”' })).toBeVisible();
+    expect(ops(d).at(-1)).toMatchObject({ op: 'move', start: '2026-10-31', end: '2026-11-03' });
+  });
+
+  test('a failed read leaves nothing writable and says so; old events never show on new days', async ({ page }) => {
+    const d = await boot(page);
+    await pickView(page, 'Week');
+    await expect(ev(page, 'Lunch with Kai')).toBeVisible();
+    d.fail = 500;
+    await cal(page).getByRole('button', { name: 'Refresh' }).click();
+    await expect(cal(page).getByRole('alert')).toContainText("Couldn't read it again: The calendar door couldn't do it: internal error.");
+    await expect(cal(page).getByRole('button', { name: 'New event', exact: true })).toHaveCount(0);
+    await ev(page, 'Lunch with Kai').click();
+    await expect(detail(page).getByRole('button', { name: 'Move…' })).toHaveCount(0);
+    await detail(page).getByRole('button', { name: 'Close event' }).click();
+    // the next days, unread: no events from the days before
+    await cal(page).getByRole('button', { name: 'Later' }).click();
+    await expect(cal(page).getByRole('alert')).toContainText("The calendar door couldn't do it");
+    await expect(cal(page).locator('.cal-ev')).toHaveCount(0);
+    d.fail = null;
+    await cal(page).getByRole('button', { name: 'Retry' }).click();
+    await expect(cal(page).getByRole('alert')).toHaveCount(0);
+    await expect(cal(page).getByRole('button', { name: 'New event', exact: true })).toBeVisible();
+  });
+
+  test('an op whose answer never came back is sent again under its op id, and the screen shows what happened', async ({ page }) => {
+    const d = await boot(page);
+    await pickView(page, 'Agenda');
+    await cal(page).getByRole('button', { name: /^Lunch with Kai,/ }).click();
+    // lost before the door saw it: still at noon; the same move again reuses its op id
+    d.lose = 'before';
+    await detail(page).getByRole('button', { name: 'Move…' }).click();
+    await detail(page).getByLabel('Start').fill('13:00');
+    await detail(page).getByRole('button', { name: 'Move', exact: true }).click();
+    await expect(detail(page).getByRole('alert')).toContainText("The calendar door isn't answering.");
+    await expect(detail(page).getByText('Thursday, Oct 22 · 12 PM – 1 PM')).toBeVisible();
+    await detail(page).getByRole('button', { name: 'Move…' }).click();
+    await detail(page).getByLabel('Start').fill('13:00');
+    await detail(page).getByRole('button', { name: 'Move', exact: true }).click();
+    await expect(detail(page).getByText('Thursday, Oct 22 · 1 PM – 2 PM')).toBeVisible();
+    const moves = ops(d).filter((o) => o.op === 'move');
+    expect(moves.length).toBe(2);
+    expect(moves[1].opId).toBe(moves[0].opId);
+    // lost after the door applied it: the read again shows it moved, written once
+    d.lose = 'after';
+    await detail(page).getByRole('button', { name: 'Move…' }).click();
+    await detail(page).getByLabel('Start').fill('15:00');
+    await detail(page).getByRole('button', { name: 'Move', exact: true }).click();
+    await expect(detail(page).getByText('Thursday, Oct 22 · 3 PM – 4 PM')).toBeVisible();
+    expect(d.door.notes.get('fx-lunch')!.rev).toBe(3);
+  });
+
   test('on the Daylight nothing moves', async ({ page }) => {
     test.skip(!test.info().project.name.startsWith('daylight'), 'the Daylight only');
     await boot(page);
