@@ -23,7 +23,12 @@ export function SealedApprovals() {
   const load = useCallback(() => {
     setLoadError(null);
     invoke<SealedStatus>("sealed_status")
-      .then((s) => { setSt(s); setRoom((r) => (s.rooms.some((x) => x.id === r) ? r : s.rooms[0]?.id ?? "")); })
+      .then((s) => {
+        // anything but a well-formed answer is a failed check, never a broken Settings panel
+        if (!s || typeof s.uni !== "string" || typeof s.seal_pub !== "string" || !Array.isArray(s.rooms)) { setLoadError("no answer from the app"); return; }
+        setSt(s);
+        setRoom((r) => (s.rooms.some((x) => x.id === r) ? r : s.rooms[0]?.id ?? ""));
+      })
       .catch((e) => setLoadError(enrollError(e)));
   }, []);
   useEffect(load, [load]);

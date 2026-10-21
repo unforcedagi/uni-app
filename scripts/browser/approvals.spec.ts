@@ -14,7 +14,7 @@ const msg = (ref: string, body: string, ts: number, author = UNI, name = 'Uni') 
   mentions_me: false, root: null, parent: null, mentions: [], reply_count: 0, last_reply_ts: null, edited: false, reactions: [] });
 
 type Room = { id: string; name: string; members: number };
-type Opts = { rooms?: Room[]; roomsLater?: Room[]; enrolled?: boolean; failures?: number; messages?: unknown[]; statusFails?: boolean; verified?: string[] };
+type Opts = { statusNull?: boolean; rooms?: Room[]; roomsLater?: Room[]; enrolled?: boolean; failures?: number; messages?: unknown[]; statusFails?: boolean; verified?: string[] };
 async function boot(page: Page, o: Opts = {}) {
   await page.addInitScript(({ ME, UNI, SEAL, o, at }) => {
     const w = window as any;
@@ -43,6 +43,7 @@ async function boot(page: Page, o: Opts = {}) {
           case 'secret_requesters': return [];
           case 'sealed_status':
             if (w.statusFails) { w.statusFails = false; throw 'identity: keyring locked'; }
+            if (o.statusNull) return null;
             { const out = { uni: UNI, seal_pub: SEAL, rooms, enrolled: w.enrolled }; if (o.roomsLater) rooms = o.roomsLater; return out; }
           case 'sealed_enrollment_line': return (o.verified ?? []).includes(args.reference) ? ME : null;
           case 'sealed_enroll':
@@ -166,6 +167,13 @@ test('status failure: says so and checks again', async ({ page }) => {
   await expect(s.getByText("Couldn't check approvals: identity: keyring locked")).toBeVisible();
   await s.getByRole('button', { name: 'Check again' }).click();
   await expect(s.getByRole('button', { name: 'Enable approvals for Uni' })).toBeVisible();
+});
+
+test('a malformed status never breaks Settings: the rest of it still works', async ({ page }) => {
+  await boot(page, { statusNull: true });
+  const s = await settings(page);
+  await expect(s.getByText("Couldn't check approvals: no answer from the app")).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Forget this device key' })).toBeVisible();
 });
 
 test('your verified enrollment shows in the room as words; a look-alike body stays an ordinary message', async ({ page }) => {
