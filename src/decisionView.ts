@@ -67,16 +67,22 @@ const readsAs = (md: string, words: string) => {
  * A note as the room message carries it: the markdown marks escaped, so the chat shows the words as typed (a `[x](javascript:…)` or
  * `**` stays text, never a link or bold), and a line can't start a heading, quote, list or rule. A bare http(s) link or `uni:` note
  * ref stays as typed (a link, as anywhere), but only when the chat then shows exactly the words typed, links reading as their own
- * address; otherwise
- * everything is escaped (a link may then read with a backslash, never as markup). The chat never renders HTML, so `<b>` is text.
+ * address; otherwise every mark is escaped and links are defused (see `defuse`). The chat never renders HTML, so `<b>` is text.
  */
 export function chatText(text: string): string {
   const t = cleanNote(text);
   let kept = "", at = 0;
   for (const m of t.matchAll(RAW)) { kept += escMarks(t.slice(at, m.index)) + m[0]; at = m.index! + m[0].length; }
   kept = escLines(kept + escMarks(t.slice(at)));
-  return readsAs(kept, t) ? kept : escLines(escMarks(t));
+  return readsAs(kept, t) ? kept : escLines(escMarks(defuse(t)));
 }
+
+/**
+ * The fallback's words can't start a link or note ref: an invisible zero-width space goes inside every `http:`, `https:`, `mailto:`,
+ * `uni:` and `unforced:` and after every `<`, so no link parse can swallow an escape (only for a note whose links would not have
+ * read as typed).
+ */
+export const defuse = (s: string): string => s.replace(/(https?|mailto|uni|unforced)(?=:)/gi, "$1\u200b").replace(/</g, "<\u200b");
 
 const ULID = "[0-9A-HJKMNP-TV-Z]{26}";
 const REF = new RegExp(`(?<![\\w/:.@-])uni:(${ULID})(?![\\w/])`, "g");
