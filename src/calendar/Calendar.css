@@ -1,34 +1,11 @@
 /* Uni Calendar prototype (T-229). Field Book tokens; shape and word before colour, so it reads in grayscale on the
    Daylight. Nothing of its own moves; in e-ink mode and on Android nothing moves at all. */
-html, body, #root { height: 100%; }
-body { overflow: hidden; }
-#root { display: flex; flex-direction: column; }
-
-/* the prototype strip */
-.proto-bar { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; padding: 4px 14px; border-bottom: 2px solid var(--th-ink); background: var(--th-ground); font: 13px var(--th-sans); flex: none; }
-.proto-what { display: flex; gap: 10px; align-items: baseline; min-width: 0; }
-.proto-what small { color: var(--muted); }
-.proto-toggle { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; border: 0; background: transparent; font-size: 13px; color: var(--text-soft); text-decoration: underline; text-underline-offset: 3px; padding: 0; }
-label.proto-toggle { text-decoration: none; }
-.proto-calls { position: absolute; z-index: 90; top: 100%; right: 8px; left: 8px; max-height: 60dvh; overflow: auto; margin: 0; padding: 10px 10px 10px 32px; background: var(--surface); border: 2px solid var(--th-ink); font: 12px/1.5 var(--th-mono, var(--mono)); }
-.proto-calls li { margin-bottom: 6px; }
-.proto-calls code { overflow-wrap: anywhere; }
-.proto-calls small { color: var(--muted); font-family: var(--sans); }
-@media (max-width: 599px) { .proto-what small { display: none; } .proto-bar { gap: 2px 10px; padding: 2px 10px; } }
-
-/* the shell: the app's rail, then one place */
-.cal-shell { position: relative; display: flex; flex: 1; min-height: 0; min-width: 0; background: var(--bg); }
-.cal-place { display: flex; flex: 1; min-width: 0; min-height: 0; }
-@media (max-width: 599px) { .cal-shell { padding-bottom: calc(56px + env(safe-area-inset-bottom)); } }
-
-.cal, .cal-chat, .cal-mail { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; position: relative; }
-.cal-mail { display: grid; place-items: center; padding: 20px; }
+.cal { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; position: relative; }
 .cal-note { color: var(--muted); font-size: 13px; margin: 0; }
 .cal-error { margin: 8px 0; padding: 8px 12px; border-left: 4px solid var(--danger); background: var(--surface); font-size: 14px; }
 .cal-link { min-height: 32px; padding: 0 2px; border: 0; background: none; color: var(--text); text-decoration: underline; text-underline-offset: 3px; font-size: 14px; }
 .cal-scroll-y { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; }
-.primary { background: var(--th-ink); color: var(--th-card); border: 1.5px solid var(--th-ink); }
-.cal :where(button:not(.icon-button, .cal-ev, .cal-slot, .cal-link, .decision-opt, .book-slot)), .cal-chat :where(button:not(.decision-opt, .cal-link)), .cal-sheet :where(button) { min-height: 40px; padding: 0 14px; border-radius: 10px; border: 1.5px solid var(--line-strong); background: var(--surface); font-size: 14px; }
+.cal :where(button:not(.icon-button, .cal-ev, .cal-slot, .cal-link, .note-action)), .cal-sheet :where(button) { min-height: 40px; padding: 0 14px; border-radius: 10px; border: 1.5px solid var(--line-strong); background: var(--surface); font-size: 14px; }
 .cal button.primary, .cal-sheet button.primary { background: var(--th-ink); color: var(--th-card); border-color: var(--th-ink); }
 
 /* header: range, view tabs, new */
@@ -154,40 +131,49 @@ label.proto-toggle { text-decoration: none; }
 .cal-conflict-sides { display: grid; gap: 4px; }
 .cal-conflict-sides small { color: var(--muted); }
 
-/* booking */
-.cal-booking { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 16px; padding: 14px; align-content: start; }
-.book-page { padding: 16px 18px; border: 2px solid var(--th-ink); border-radius: 14px; background: var(--th-card); min-width: 0; }
-.book-kicker { margin: 0; color: var(--muted); font-size: 12px; letter-spacing: .03em; }
-.book-page h2, .book-wire h2 { margin: 4px 0 4px; font: 600 21px var(--serif); }
-.book-sub { margin: 0 0 10px; color: var(--text-soft); font-size: 14px; }
-.book-day h3 { margin: 12px 0 6px; font-size: 14px; }
-.book-slots { display: flex; flex-wrap: wrap; gap: 6px; }
-.book-slot { min-height: 40px; min-width: 76px; padding: 0 10px; border: 1.5px solid var(--th-ink); border-radius: 8px; background: var(--surface); font-size: 14px; font-variant-numeric: tabular-nums; }
-.book-slot.picked { background: var(--th-ink); color: var(--th-card); }
-.book-form { display: grid; gap: 8px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line-strong); }
-.book-form p { margin: 0; font-weight: 600; }
-.book-form label { display: grid; gap: 4px; font-size: 14px; }
-.book-done p { margin: 8px 0; }
-.book-wire { min-width: 0; }
-.book-wire p { font-size: 14px; }
-.book-json { margin: 0 0 10px; padding: 10px; max-height: 360px; overflow: auto; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface); font: 12px/1.45 var(--th-mono, var(--mono)); white-space: pre-wrap; overflow-wrap: anywhere; }
-@media (max-width: 899px) { .cal-booking { grid-template-columns: minmax(0, 1fr); } }
-
-/* chat: Uni's proposals as tap-to-confirm cards */
-.cal-chat-list { padding: 12px max(14px, calc((100% - 720px) / 2)) 20px; display: flex; flex-direction: column; gap: 14px; }
-.cal-msg p { margin: 4px 0 8px; font-size: 15px; line-height: 1.45; }
-.cal-msg.you { align-self: flex-end; max-width: 85%; padding: 8px 12px; border-radius: 14px; background: var(--th-ink); color: var(--th-card); }
-.cal-msg.you p { margin: 0; }
-.cal-card-when { margin: -4px 0 10px; font-size: 14px; color: var(--text-soft); }
-.cal-composer { padding: 8px 14px; border-top: 1px solid var(--line); flex: none; }
-.cal-composer input { width: 100%; min-height: 44px; padding: 0 14px; border: 1.5px solid var(--line-strong); border-radius: 12px; background: var(--surface); }
+/* a notice after a write */
 .cal-notice { position: fixed; z-index: 60; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom)); transform: translateX(-50%); width: max-content; max-width: min(92vw, 560px); margin: 0; padding: 10px 16px; border: 2px solid var(--th-ink); border-radius: 10px; background: var(--th-card); color: var(--text); font-size: 14px; box-shadow: var(--shadow); }
 @media (max-width: 599px) { .cal-notice { bottom: calc(68px + env(safe-area-inset-bottom)); } }
 
-/* e-ink (and Android, where the Daylight lives): grayscale, no motion, heavier hairlines */
-html.eink { filter: grayscale(1) contrast(1.15); }
-html.eink *, html.eink *::before, html.eink *::after, html.android *, html.android *::before, html.android *::after { transition: none !important; animation: none !important; }
-html.eink * { box-shadow: none !important; }
-html.eink { --line: rgba(26, 25, 19, .4); --line-strong: rgba(26, 25, 19, .7); }
-html.eink .cal-ev.st-tentative { background: repeating-linear-gradient(135deg, #fff 0 5px, #bbb 5px 7px); }
-html.eink button:active:not(:disabled) { transform: none; }
+/* T-229 app: the bar, offline, problems */
+.cal-title { display: flex; flex-wrap: wrap; justify-content: center; align-items: baseline; gap: 2px 8px; min-width: 0; text-align: center; }
+.cal-title small { color: var(--muted); font-size: 12px; }
+.cal-offline { display: inline-block; padding: 0 6px; border: 1.5px dashed var(--th-ink); border-radius: 4px; font: 700 10.5px/16px var(--th-mono, var(--mono)); letter-spacing: .06em; color: var(--th-ink); }
+.cal-offline-note { margin: 0; padding: 6px 14px; border-bottom: 1px solid var(--line); font-size: 13px; color: var(--text-soft); flex: none; }
+.cal-problem, .cal-loading { padding: 28px 16px; text-align: center; color: var(--muted); }
+.cal-problem p { margin: 0 0 12px; color: var(--text); }
+.cal-empty { padding: 28px 0; color: var(--muted); text-align: center; }
+.cal button.danger { background: var(--danger, #8a1c1c); border-color: var(--danger, #8a1c1c); color: #fff; }
+.cal button.quiet-danger { color: var(--danger, #8a1c1c); }
+.cal-tag.tag-public { border-width: 2px; }
+.cal-tag.tag-shared { border-style: double; border-width: 3px; line-height: 12px; }
+.cal-ev.vis-public { border-top-width: 2px; }
+
+/* detail: invites, visibility, people */
+.cal-invites { margin: 0 0 12px; padding: 10px 12px; border: 2px dashed var(--th-ink); border-radius: 10px; font-size: 14px; }
+.cal-invites p { margin: 0 0 8px; }
+.cal-people-list { list-style: none; margin: 0; padding: 0; }
+.cal-people-list small { color: var(--muted); }
+.cal-desc { white-space: pre-wrap; }
+.cal-vis { display: grid; gap: 2px; margin: 0 0 12px; padding: 6px 10px 10px; border: 1px solid var(--line-strong); border-radius: 10px; }
+.cal-vis legend { font-size: 13px; color: var(--muted); padding: 0 4px; }
+.cal .cal-vis label.cal-radio { display: flex; align-items: flex-start; gap: 8px; min-height: 44px; padding-top: 10px; font-size: 14px; color: var(--text); }
+.cal-vis label.cal-radio small { display: block; color: var(--muted); font-size: 12.5px; }
+.cal-share { display: grid; gap: 4px; font-size: 14px; color: var(--text-soft); }
+.cal-share input { min-height: 44px; padding: 0 12px; border: 1.5px solid var(--line-strong); border-radius: 10px; background: var(--surface); color: var(--text); font-size: 16px; min-width: 0; }
+.cal-confirm p { margin: 0 0 4px; font-size: 14px; }
+.cal-invitees { margin: 0; padding-left: 20px; font-size: 14px; overflow-wrap: anywhere; }
+.cal-sheet textarea { padding: 8px 12px; border: 1.5px solid var(--line-strong); border-radius: 10px; background: var(--surface); color: var(--text); font: 16px var(--sans); min-width: 0; resize: vertical; }
+
+/* conflicts */
+.cal-conflicts-open { flex: none; }
+.cal-conflicts { margin: 8px 14px 0; padding: 10px 14px 12px; border: 2px solid var(--th-ink); border-radius: 12px; background: var(--th-card); flex: none; max-height: 45dvh; overflow-y: auto; }
+.cal-conflicts header { display: flex; justify-content: space-between; align-items: center; }
+.cal-conflicts h2 { margin: 0; font: 600 18px var(--serif); }
+.cal-conflicts ul { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 10px; }
+.cal-conflicts .cal-conflict { margin: 0; padding: 8px 0 0; border: 0; border-top: 1px solid var(--line); border-radius: 0; }
+
+/* the Daylight (Android) and e-ink: nothing moves, no shadows */
+.cal-still, .cal-still *, .cal-still *::before, .cal-still *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
+.cal-still * { box-shadow: none !important; }
+.cal-still .cal-notice { transform: none; left: 8px; right: 8px; width: auto; }

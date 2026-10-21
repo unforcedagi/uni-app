@@ -279,12 +279,13 @@ export function expand(notes: EventNote[], from: number, to: number): Instance[]
 
 // ── layout: side-by-side columns for overlapping events in one day ─────────────────────────────────────────────────
 
-export type Placed = { inst: Instance; col: number; cols: number };
+export type Placed<T> = { inst: T; col: number; cols: number };
 
-export function layoutDay(items: Instance[]): Placed[] {
+/** Columns for one day: overlapping events sit side by side, each cluster as wide as it needs. */
+export function layoutDay<T extends { start: number; end: number }>(items: T[]): Placed<T>[] {
   const sorted = [...items].sort((a, b) => a.start - b.start || b.end - a.end);
-  const out: Placed[] = [];
-  let cluster: Placed[] = [];
+  const out: Placed<T>[] = [];
+  let cluster: Placed<T>[] = [];
   let clusterEnd = -Infinity;
   const flush = () => { const n = Math.max(1, ...cluster.map((p) => p.col + 1)); for (const p of cluster) p.cols = n; out.push(...cluster); cluster = []; };
   for (const inst of sorted) {

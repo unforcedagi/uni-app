@@ -19,7 +19,7 @@ pub const CAL_PORT: u16 = 8490;
 /// Override for the door origin (a scratch or fake door). Never set in a shipped install.
 pub const CAL_URL_ENV: &str = "UNI_CAL_URL";
 /// The named operations this client sends (CONTRACT.md, "Signed-in API" and "Invitations").
-pub const OPS: &[&str] = &["create", "update", "move", "cancel", "delete", "rsvp", "send_invites", "resolve_conflict"];
+pub const OPS: &[&str] = &["create", "update", "move", "cancel", "delete", "rsvp", "send_invites"];
 
 const TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_ANSWER: usize = 16 * 1024 * 1024;

@@ -1,0 +1,331 @@
+{
+ "version": 1,
+ "about": "T-229: a copy of the calendar build's shared fixture (made-up events, names, addresses and places), with the organizer swapped for an example.com one because this repo is public. T-229 shared fixture. Every event, name, address and place here is made up. Times are UTC instants (or YYYY-MM-DD for all-day). US DST ends Sun 2026-11-01, so series in America/Denver shift from -06:00 to -07:00 there. `fixture_id` is a stable handle for tests; `uni-cal seed` stores it as metadata `fixture_id` and is idempotent on it. The door assigns id, path, uid, rev, sequence, span_* and source (import).",
+ "calendar": "aaron",
+ "tz": "America/Denver",
+ "organizer": {
+  "address": "mailto:robin@example.com",
+  "name": "Robin Vale"
+ },
+ "people": [
+  {
+   "ref": "People/Juno Park",
+   "address": "mailto:juno@example.com"
+  },
+  {
+   "ref": "People/Mara Quell",
+   "address": "mailto:mara@example.com"
+  },
+  {
+   "ref": "People/Tobias Fenn",
+   "address": "mailto:tobias@example.com"
+  },
+  {
+   "ref": "People/Kai Ondine",
+   "address": "mailto:kai@example.com"
+  },
+  {
+   "ref": "People/Ines Varga",
+   "address": "mailto:ines@example.com"
+  }
+ ],
+ "booking_hours": {
+  "path": "Settings/Booking hours",
+  "metadata": {
+   "tz": "America/Denver",
+   "hours": {
+    "MO": [
+     "09:00-12:00",
+     "13:00-17:00"
+    ],
+    "TU": [
+     "09:00-12:00",
+     "13:00-17:00"
+    ],
+    "WE": [
+     "09:00-12:00",
+     "13:00-17:00"
+    ],
+    "TH": [
+     "09:00-12:00",
+     "13:00-17:00"
+    ],
+    "FR": [
+     "09:00-12:00"
+    ]
+   }
+  },
+  "content": "Working hours the booking links offer. Times are local to `tz`."
+ },
+ "events": [
+  {
+   "fixture_id": "fx-studio",
+   "covers": [
+    "weekly-recurring",
+    "override",
+    "exdate",
+    "cross-dst",
+    "private"
+   ],
+   "title": "Studio hours",
+   "description": "Deep work. Phone off.",
+   "start": "2026-10-20T15:00:00Z",
+   "end": "2026-10-20T17:00:00Z",
+   "tz": "America/Denver",
+   "all_day": false,
+   "rrule": "FREQ=WEEKLY;BYDAY=TU,TH",
+   "exdates": [
+    "2026-10-29T15:00:00Z"
+   ],
+   "overrides": [
+    {
+     "recurrence_id": "2026-10-27T15:00:00Z",
+     "start": "2026-10-27T16:00:00Z",
+     "end": "2026-10-27T18:00:00Z",
+     "title": "Studio hours (late start)"
+    }
+   ],
+   "status": "confirmed",
+   "show_as": "busy",
+   "visibility": "private",
+   "location": "Home studio"
+  },
+  {
+   "fixture_id": "fx-reading",
+   "covers": [
+    "weekly-recurring",
+    "count",
+    "cross-dst",
+    "shared",
+    "attendees"
+   ],
+   "title": "Reading group",
+   "description": "This month: a made-up book about soil.",
+   "start": "2026-10-20T01:00:00Z",
+   "end": "2026-10-20T02:30:00Z",
+   "tz": "America/Denver",
+   "all_day": false,
+   "rrule": "FREQ=WEEKLY;BYDAY=MO;COUNT=6",
+   "status": "confirmed",
+   "show_as": "busy",
+   "visibility": "shared",
+   "shared_with": [
+    "People/Juno Park",
+    "mailto:ines@example.com"
+   ],
+   "location": "The Commons, room 2",
+   "attendees": [
+    {
+     "address": "mailto:juno@example.com",
+     "name": "Juno Park",
+     "partstat": "ACCEPTED",
+     "person": "People/Juno Park"
+    },
+    {
+     "address": "mailto:ines@example.com",
+     "name": "Ines Varga",
+     "partstat": "NEEDS-ACTION",
+     "person": "People/Ines Varga"
+    }
+   ]
+  },
+  {
+   "fixture_id": "fx-pages",
+   "covers": [
+    "daily-weekday-recurring",
+    "free",
+    "private"
+   ],
+   "title": "Morning pages",
+   "description": "Shown as free, so booking ignores it.",
+   "start": "2026-10-19T13:00:00Z",
+   "end": "2026-10-19T13:30:00Z",
+   "tz": "America/Denver",
+   "all_day": false,
+   "rrule": "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR",
+   "status": "confirmed",
+   "show_as": "free",
+   "visibility": "private"
+  },
+  {
+   "fixture_id": "fx-soil",
+   "covers": [
+    "single",
+    "public",
+    "attendees"
+   ],
+   "title": "Soil workshop",
+   "description": "Open workshop. Bring a jar of your garden soil.",
+   "start": "2026-10-22T00:00:00Z",
+   "end": "2026-10-22T02:00:00Z",
+   "tz": "America/Denver",
+   "all_day": false,
+   "status": "confirmed",
+   "show_as": "busy",
+   "visibility": "public",
+   "location": "The Commons, hall",
+   "attendees": [
+    {
+     "address": "mailto:tobias@example.com",
+     "name": "Tobias Fenn",
+     "partstat": "ACCEPTED",
+     "person": "People/Tobias Fenn"
+    },
+    {
+     "address": "mailto:mara@example.com",
+     "name": "Mara Quell",
+     "partstat": "TENTATIVE",
+     "person": "People/Mara Quell"
+    }
+   ]
+  },
+  {
+   "fixture_id": "fx-lunch",
+   "covers": [
+    "single",
+    "private",
+    "attendees"
+   ],
+   "title": "Lunch with Kai",
+   "start": "2026-10-22T18:00:00Z",
+   "end": "2026-10-22T19:00:00Z",
+   "tz": "America/Denver",
+   "all_day": false,
+   "status": "confirmed",
+   "show_as": "busy",
+   "visibility": "private",
+   "location": "Juniper Café",
+   "attendees": [
+    {
+     "address": "mailto:kai@example.com",
+     "name": "Kai Ondine",
+     "partstat": "ACCEPTED",
+     "person": "People/Kai Ondine"
+    }
+   ]
+  },
+  {
+   "fixture_id": "fx-ines",
+   "covers": [
+    "single",
+    "tentative",
+    "private"
+   ],
+   "title": "Call with Ines?",
+   "description": "A hold: Ines asked for a short call this week.",
+   "start": "2026-10-22T17:00:00Z",
+   "end": "2026-10-22T17:30:00Z",
+   "tz": "America/Denver",
+   "all_day": false,
+   "status": "tentative",
+   "show_as": "busy",
+   "visibility": "private"
+  },
+  {
+   "fixture_id": "fx-board",
+   "covers": [
+    "single",
+    "cancelled"
+   ],
+   "title": "Board call",
+   "start": "2026-10-22T19:00:00Z",
+   "end": "2026-10-22T20:00:00Z",
+   "tz": "America/Denver",
+   "all_day": false,
+   "status": "cancelled",
+   "show_as": "busy",
+   "visibility": "private"
+  },
+  {
+   "fixture_id": "fx-dentist",
+   "covers": [
+    "single",
+    "private",
+    "leak-canary"
+   ],
+   "title": "Dentist (private canary)",
+   "description": "A private event. Its title must never appear in a public feed, a share feed, freebusy or booking.",
+   "start": "2026-10-23T16:00:00Z",
+   "end": "2026-10-23T17:00:00Z",
+   "tz": "America/Denver",
+   "all_day": false,
+   "status": "confirmed",
+   "show_as": "busy",
+   "visibility": "private",
+   "location": "Made-up Dental, 1 Example St"
+  },
+  {
+   "fixture_id": "fx-garden",
+   "covers": [
+    "single",
+    "shared"
+   ],
+   "title": "Garden plot rota",
+   "start": "2026-10-23T20:30:00Z",
+   "end": "2026-10-23T21:00:00Z",
+   "tz": "America/Denver",
+   "all_day": false,
+   "status": "confirmed",
+   "show_as": "busy",
+   "visibility": "shared",
+   "shared_with": [
+    "People/Mara Quell"
+   ],
+   "location": "Call"
+  },
+  {
+   "fixture_id": "fx-seedswap",
+   "covers": [
+    "all-day",
+    "multi-day",
+    "free",
+    "public"
+   ],
+   "title": "Seed swap week",
+   "start": "2026-10-23",
+   "end": "2026-10-26",
+   "tz": "America/Denver",
+   "all_day": true,
+   "status": "confirmed",
+   "show_as": "free",
+   "visibility": "public",
+   "location": "The Commons"
+  },
+  {
+   "fixture_id": "fx-market",
+   "covers": [
+    "all-day",
+    "weekly-recurring",
+    "cross-dst"
+   ],
+   "title": "Market day",
+   "start": "2026-10-24",
+   "end": "2026-10-25",
+   "tz": "America/Denver",
+   "all_day": true,
+   "rrule": "FREQ=WEEKLY;BYDAY=SA;COUNT=4",
+   "status": "confirmed",
+   "show_as": "busy",
+   "visibility": "public",
+   "location": "Town square"
+  },
+  {
+   "fixture_id": "fx-openstudio",
+   "covers": [
+    "single",
+    "public",
+    "after-dst"
+   ],
+   "title": "Open studio afternoon",
+   "description": "Drop in, see the work in progress.",
+   "start": "2026-11-07T21:00:00Z",
+   "end": "2026-11-08T00:00:00Z",
+   "tz": "America/Denver",
+   "all_day": false,
+   "status": "confirmed",
+   "show_as": "busy",
+   "visibility": "public",
+   "location": "Home studio"
+  }
+ ]
+}
