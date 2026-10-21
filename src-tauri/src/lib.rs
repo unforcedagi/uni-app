@@ -1545,6 +1545,72 @@ fn relay_origin(app: tauri::AppHandle) -> String {
         .to_string()
 }
 
+// ── Calendar (T-229): through the calendar door on the hub's host. Each
+// request is NIP-98 signed with the device key, as Mail's are; the door is
+// the only writer of event notes, so the webview never holds a vault token.
+
+use uni_core::cal::{CalDoor, CalError};
+
+fn cal_invalid(message: impl ToString) -> CalError {
+    CalError::Invalid { message: message.to_string() }
+}
+
+/// `UNI_CAL_URL` (a scratch or fake door, no alias), else port 8490 on the hub's host, its new name first.
+fn cal_base(app: &tauri::AppHandle) -> Result<(String, Option<String>), CalError> {
+    if let Ok(v) = std::env::var(uni_core::cal::CAL_URL_ENV) {
+        if !v.trim().is_empty() {
+            return Ok((v.trim().to_string(), None));
+        }
+    }
+    let hub = vault_config(app).hub;
+    uni_core::cal::door_urls(&hub).ok_or_else(|| cal_invalid(format!("no calendar door for the hub {hub} (it must be https)")))
+}
+
+/// Run `f` with a door client on the device key, off the async executor.
+async fn cal_io<F>(app: &tauri::AppHandle, f: F) -> Result<serde_json::Value, CalError>
+where
+    F: FnOnce(&CalDoor) -> Result<serde_json::Value, CalError> + Send + 'static,
+{
+    secure_store::ensure_loaded(app).await.map_err(cal_invalid)?;
+    let (base, alias) = cal_base(app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let (keys, _) = uni_core::load_keys(false).map_err(cal_invalid)?;
+        f(&CalDoor::new(&base, &keys)?.with_alias(alias.as_deref()))
+    })
+    .await
+    .map_err(cal_invalid)?
+}
+
+/// What this key may do at the door (`{role, ops, calendar, tz}`); the Calendar place shows only when it answers.
+#[tauri::command]
+async fn cal_session(app: tauri::AppHandle) -> Result<serde_json::Value, CalError> {
+    cal_io(&app, |door| tauri::async_runtime::block_on(door.session())).await
+}
+
+/// The instances overlapping `[from, to)`, as the door expands them.
+#[tauri::command]
+async fn cal_events(app: tauri::AppHandle, from: String, to: String) -> Result<serde_json::Value, CalError> {
+    cal_io(&app, move |door| tauri::async_runtime::block_on(door.events(&from, &to))).await
+}
+
+/// One event note in full.
+#[tauri::command]
+async fn cal_event(app: tauri::AppHandle, id: String) -> Result<serde_json::Value, CalError> {
+    cal_io(&app, move |door| tauri::async_runtime::block_on(door.event(&id))).await
+}
+
+/// The conflict records the door keeps (`event-conflict` notes).
+#[tauri::command]
+async fn cal_conflicts(app: tauri::AppHandle) -> Result<serde_json::Value, CalError> {
+    cal_io(&app, |door| tauri::async_runtime::block_on(door.conflicts())).await
+}
+
+/// One named write (`create`, `move`, …); refused on the device unless it is one this app sends.
+#[tauri::command]
+async fn cal_op(app: tauri::AppHandle, op: serde_json::Value) -> Result<serde_json::Value, CalError> {
+    cal_io(&app, move |door| tauri::async_runtime::block_on(door.op(&op))).await
+}
+
 // ── Mail (T-45): through the mail bridge on the hub's host. Each
 // request is NIP-98 signed with the device key; the bridge holds the mail
 // credentials, so the webview never sees one. Reading never writes; the
@@ -2476,6 +2542,11 @@ pub fn run() {
             note_download,
             note_share,
             relay_origin,
+            cal_session,
+            cal_events,
+            cal_event,
+            cal_conflicts,
+            cal_op,
             mail_overview,
             mail_threads,
             mail_thread,

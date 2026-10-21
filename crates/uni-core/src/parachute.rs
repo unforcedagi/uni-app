@@ -43,6 +43,16 @@ const TIMEOUT: Duration = Duration::from_secs(60);
 /// rejected as `replayed`. A random `nonce` tag makes every id unique; the
 /// hub ignores its value (parachute-hub `docs/contracts/nip98-http-auth.md`).
 pub fn nip98_header(keys: &Keys, url: &str, method: &str, body: &[u8]) -> Result<String> {
+    nip98(keys, url, method, body, false)
+}
+
+/// [`nip98_header`] with a `payload` tag on every request, a GET's included (the hash of the empty body): what the
+/// calendar door (T-229) checks, as the mail bridge's verifier it copies does.
+pub fn nip98_header_with_payload(keys: &Keys, url: &str, method: &str, body: &[u8]) -> Result<String> {
+    nip98(keys, url, method, body, true)
+}
+
+fn nip98(keys: &Keys, url: &str, method: &str, body: &[u8], always_payload: bool) -> Result<String> {
     let tag = |parts: &[&str]| {
         Tag::parse(parts.iter().copied()).map_err(|e| Error::Invalid(e.to_string()))
     };
@@ -52,7 +62,7 @@ pub fn nip98_header(keys: &Keys, url: &str, method: &str, body: &[u8]) -> Result
         tag(&["method", &method.to_uppercase()])?,
         tag(&["nonce", &nonce])?,
     ];
-    if !body.is_empty() {
+    if always_payload || !body.is_empty() {
         tags.push(tag(&["payload", &sha256_hex(body)])?);
     }
     let event = EventBuilder::new(Kind::from(NIP98_KIND), "")
