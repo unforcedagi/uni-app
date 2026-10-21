@@ -45,13 +45,29 @@ const RAW = /(?:https?:\/\/|(?:uni|unforced):)[^\s<>"'`]+/gi;
 const escMarks = (s: string) => s.replace(/[\\`*_[\]~|]/g, "\\$&");
 /** Line starts that would make a heading, quote, list or rule. */
 const escLines = (s: string) => s.replace(/^(\s*)([#>+-]|\d+[.)](?=\s|$))/gm, (_, sp: string, mark: string) => `${sp}${mark.replace(/^[#>+-]|[.)]$/, "\\$&")}`);
-/** Only words, line breaks and links: nothing in it is bold, code, a heading, a list or anything else the words didn't say. */
-const plainOnly = (md: string) => parseMarkdown(md).every((b) => b.t === "p" && b.c.every((n) => n.t === "text" || n.t === "br" || n.t === "link" || n.t === "vaultlink"));
+/**
+ * The chat shows exactly these words (spacing aside): only paragraphs of text, line breaks and links that read as the address typed,
+ * nothing bold, code, a heading, a list, or a link labelled with other words.
+ */
+const readsAs = (md: string, words: string) => {
+  const shown: string[] = [];
+  const ok = parseMarkdown(md).every((b) => b.t === "p" && b.c.every((n) => {
+    if (n.t === "text") { shown.push(n.v); return true; }
+    if (n.t === "br") { shown.push("\n"); return true; }
+    if (n.t !== "link" && n.t !== "vaultlink") return false;
+    const label = n.c.length === 1 && n.c[0].t === "text" ? n.c[0].v : null;
+    if (label === null || (n.t === "link" && label !== n.href)) return false;
+    shown.push(label); return true;
+  }) && (shown.push(" "), true));
+  const flat = (x: string) => x.replace(/\s+/g, " ").trim();
+  return ok && flat(shown.join("")) === flat(words);
+};
 
 /**
  * A note as the room message carries it: the markdown marks escaped, so the chat shows the words as typed (a `[x](javascript:…)` or
  * `**` stays text, never a link or bold), and a line can't start a heading, quote, list or rule. A bare http(s) link or `uni:` note
- * ref stays as typed (a link, as anywhere), but only when the chat then reads the whole note as plain words and links; otherwise
+ * ref stays as typed (a link, as anywhere), but only when the chat then shows exactly the words typed, links reading as their own
+ * address; otherwise
  * everything is escaped (a link may then read with a backslash, never as markup). The chat never renders HTML, so `<b>` is text.
  */
 export function chatText(text: string): string {
@@ -59,7 +75,7 @@ export function chatText(text: string): string {
   let kept = "", at = 0;
   for (const m of t.matchAll(RAW)) { kept += escMarks(t.slice(at, m.index)) + m[0]; at = m.index! + m[0].length; }
   kept = escLines(kept + escMarks(t.slice(at)));
-  return plainOnly(kept) ? kept : escLines(escMarks(t));
+  return readsAs(kept, t) ? kept : escLines(escMarks(t));
 }
 
 const ULID = "[0-9A-HJKMNP-TV-Z]{26}";
