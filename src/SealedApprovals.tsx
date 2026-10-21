@@ -5,8 +5,9 @@ import { fingerprint } from "./secretRequest";
 import { enrollError, shortId, type EnrollmentRecord, type SealedStatus } from "./sealedApprovals";
 
 // T-234 Settings → Approvals. One confirm, then Rust signs and posts the enrollment (`sealed_enroll`); the sealing
-// key stays in Rust. A failed post says so and offers Try again, which resends the same signed event. Enable can't
-// run twice at once (here and in Rust), and once enrolled there is no Enable button, only the record.
+// key stays in Rust. A failure says so and offers Try again; Rust first looks for the earlier signed event on the
+// relay (its OK may have been lost), so a retry never posts a second one. Enable can't run twice at once (here and in
+// Rust), and once enrolled there is no Enable button, only the record.
 
 const day = (s: number) => new Date(s * 1000).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 
@@ -87,7 +88,7 @@ export function SealedApprovals() {
             {st.rooms.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
           </select></dd></>}
       </dl>
-      {phase === "failed" && <p className="secret-status warn" role="alert">Couldn't post it: {error}. Nothing was enabled.</p>}
+      {phase === "failed" && <p className="secret-status warn" role="alert">Not enabled yet: {error}. Trying again won't post it twice.</p>}
       <div className="approvals-actions">
         <button type="button" className="pairing-secondary" disabled={enabling} onClick={() => { setPhase("idle"); setError(null); }}>Cancel</button>
         <button type="button" className="approvals-enable" disabled={enabling || !room} onClick={() => void enable()}>

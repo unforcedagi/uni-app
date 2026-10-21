@@ -125,7 +125,7 @@ test('already enrolled at launch: the record, no button', async ({ page }) => {
   await expect(s.getByRole('button', { name: /Enable approvals/ })).toHaveCount(0);
 });
 
-test('relay failure: it says nothing was enabled, and Try again posts', async ({ page }) => {
+test('relay failure: it says it is not enabled yet, and Try again posts', async ({ page }) => {
   await boot(page, { failures: 1 });
   const s = await settings(page);
   await s.getByRole('button', { name: 'Enable approvals for Uni' }).click();
@@ -133,7 +133,7 @@ test('relay failure: it says nothing was enabled, and Try again posts', async ({
   await confirm.getByRole('button', { name: 'Enable approvals', exact: true }).click();
   await expect(confirm.getByRole('alert')).toBeVisible();
   await shot(page, '03-failed');
-  await expect(confirm.getByRole('alert')).toHaveText(/Couldn't post it: relay unreachable: connection refused\. Nothing was enabled\./);
+  await expect(confirm.getByRole('alert')).toHaveText(/Not enabled yet: relay unreachable: connection refused\. Trying again won't post it twice\./);
   await expect(s.getByText('Approvals for Uni are on')).toHaveCount(0);
   await confirm.getByRole('button', { name: 'Try again' }).click();
   await expect(s.getByText('Approvals for Uni are on')).toBeVisible();
