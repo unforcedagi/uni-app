@@ -1062,14 +1062,12 @@ fn trusted_uni() -> nostr::PublicKey {
     nostr::PublicKey::from_hex(uni_core::archive::UNI_PUBKEY).expect("the compiled-in Uni key is valid")
 }
 
-fn sealed_record_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    Ok(app.path().app_data_dir().map_err(|e| e.to_string())?.join("sealed-enrollment.json"))
+/// T-234: the app's data folder, where the enrollment record and a not-yet-confirmed enrollment are kept.
+fn sealed_state_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir)
 }
-
-/// T-234: the last signed enrollment the relay didn't confirm, sent again as the same event on Retry.
-static SEALED_PENDING: std::sync::Mutex<Option<nostr::Event>> = std::sync::Mutex::new(None);
-/// T-234: one enrollment at a time, however fast Enable is pressed.
-static SEALED_ENROLLING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// T-234 Settings → Approvals: Uni's key, the public half of this device's sealing key (derived here, in Rust, from
 /// the identity key), the rooms the enrollment can go into, and the enrollment already made. Public facts only.
@@ -1077,33 +1075,38 @@ static SEALED_ENROLLING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(
 async fn sealed_status(app: tauri::AppHandle) -> Result<uni_core::sealed::SealedStatus, String> {
     secure_store::ensure_loaded(&app).await?;
     let path = db_path(&app)?;
-    let record = sealed_record_path(&app)?;
+    let dir = sealed_state_dir(&app)?;
     blocking(move || {
         let (keys, _) = uni_core::load_keys(false).map_err(|e| e.to_string())?;
         let store = Store::open(path).map_err(|e| e.to_string())?;
-        uni_core::sealed::status(&keys, &trusted_uni(), &store, &record).map_err(|e| e.to_string())
+        uni_core::sealed::status(&keys, &trusted_uni(), &store, &dir).map_err(|e| e.to_string())
     })
     .await
 }
 
 /// T-234: "Enable approvals for Uni", after the person confirmed. Signs the enrollment with the identity key and
-/// publishes it in `channel` (a room Uni is in); the sealing key never leaves Rust. Returns the published record;
-/// a second call returns the same record without publishing again.
+/// publishes it in `channel`, a room Uni is in by the relay's roster; the sealing key never leaves Rust. Returns the
+/// record; a second or concurrent call returns the same record without publishing again (`sealed::enroll`).
 #[tauri::command]
 async fn sealed_enroll(app: tauri::AppHandle, channel: String) -> Result<uni_core::sealed::EnrollmentRecord, String> {
-    let _one = SEALED_ENROLLING
-        .try_lock()
-        .map_err(|_| "Already enabling approvals; wait for it to finish".to_string())?;
-    let record = sealed_record_path(&app)?;
+    let dir = sealed_state_dir(&app)?;
     relay_send_io(&app, move |url, keys, store| {
         let ch = room_id(&channel)?;
-        let mut pending = SEALED_PENDING.lock().unwrap_or_else(|e| e.into_inner()).take();
         let now = nostr::Timestamp::now().as_secs();
-        let out = tauri::async_runtime::block_on(uni_core::sealed::enroll(
-            url, keys, None, store, ch, &trusted_uni(), &record, &mut pending, now,
-        ));
-        *SEALED_PENDING.lock().unwrap_or_else(|e| e.into_inner()) = pending;
-        out.map_err(|e| e.to_string())
+        tauri::async_runtime::block_on(uni_core::sealed::enroll(url, keys, None, store, ch, &trusted_uni(), &dir, now))
+            .map_err(|e| e.to_string())
+    })
+    .await
+}
+
+/// T-234: the signer of message `reference` if it is a verified enrollment for the trusted Uni (the room shows it as
+/// a line only then; a body that merely looks like one stays an ordinary message).
+#[tauri::command]
+async fn sealed_enrollment_line(app: tauri::AppHandle, channel: String, reference: String) -> Result<Option<String>, String> {
+    let path = db_path(&app)?;
+    blocking(move || {
+        let store = Store::open(path).map_err(|e| e.to_string())?;
+        uni_core::sealed::stored_enrollment(&store, &channel, &reference, &trusted_uni()).map_err(|e| e.to_string())
     })
     .await
 }
@@ -2590,6 +2593,7 @@ pub fn run() {
             forget_secret,
             sealed_status,
             sealed_enroll,
+            sealed_enrollment_line,
             prepare_voice_message,
             mark_read,
             open_link,

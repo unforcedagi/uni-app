@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { copyText } from "./clipboard";
 import { fingerprint } from "./secretRequest";
@@ -71,7 +71,8 @@ export function SealedApprovals() {
       <p className="approvals-note">Uni can ask you here before it uses a locked credential, one job at a time.</p>
       {st.rooms.length
         ? <button type="button" className="pairing-secondary" onClick={() => setPhase("confirm")}>Enable approvals for Uni</button>
-        : <p className="secret-status warn" role="status">You and Uni don't share a room yet, so Uni couldn't read it. Join a room with Uni first.</p>}
+        : <><p className="secret-status warn" role="status">You and Uni don't share a room yet, so Uni couldn't read it. Join a room with Uni first.</p>
+          <button type="button" className="pairing-secondary" onClick={load}>Check again</button></>}
     </>}
     {phase !== "idle" && <div className="approvals-confirm" role="group" aria-label="Enable approvals for Uni">
       <p className="approvals-title"><span aria-hidden="true">🔑</span> Enable approvals for Uni</p>
@@ -94,4 +95,17 @@ export function SealedApprovals() {
       </div>
     </div>}
   </section>;
+}
+
+/** T-234: your own enrollment in the room, as a line. Drawn only when Rust has verified the kept signed event as an
+ *  enrollment for the trusted Uni (`sealed_enrollment_line`); until then, and for anything else, the ordinary message. */
+export function EnrollmentLine({ channel, reference, me, fallback }: { channel: string; reference: string; me: string | null; fallback: ReactNode }) {
+  const [signer, setSigner] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    invoke<string | null>("sealed_enrollment_line", { channel, reference }).then((s) => { if (live) setSigner(s ?? null); }, () => {});
+    return () => { live = false; };
+  }, [channel, reference]);
+  if (!signer || signer !== me) return <>{fallback}</>;
+  return <p className="sealed-enrolled-line"><span aria-hidden="true">🔑</span> You enabled approvals for Uni</p>;
 }

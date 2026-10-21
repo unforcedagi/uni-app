@@ -70,7 +70,7 @@ import { Attachments, attachmentBody, useRelayOrigin, type MediaRef } from "./At
 import { activeQuery, filterMembers, insertMention, memberLabels, pruneBindings, resolveRecipients, type Bindings, type Member } from "./mentions";
 import { SmallLine } from "./areas/Companion";
 import { SecretRequestCard } from "./SecretRequestCard";
-import { SealedApprovals } from "./SealedApprovals";
+import { EnrollmentLine, SealedApprovals } from "./SealedApprovals";
 import { parseEnrollment } from "./sealedApprovals";
 import { parseSecretReceipt, parseSecretRequest, receiptFor, receiptsByRequest, secretCardsOn, withoutSecretBlock } from "./secretRequest";
 import NotePane, { usePaneShape } from "./NotePane";
@@ -1648,7 +1648,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
   /** T-176: a secret request becomes its card; a receipt shows only its human line. Null: the ordinary body. */
   const secretView = (m: Message) => {
     // T-234: the enrollment Settings posted, in words rather than its JSON
-    if (parseEnrollment(m.body)) return <p className="sealed-enrolled-line"><span aria-hidden="true">🔑</span> {m.author === identity ? "You enabled" : `${m.author_name} enabled`} approvals for Uni</p>;
+    if (m.author === identity && parseEnrollment(m.body)) return <EnrollmentLine channel={m.channel} reference={m.ref} me={identity}
+      fallback={<Body body={m.body} mentions={m.mentions} me={identity} edited={m.edited} />} />;
     if (!secretCards) return null;
     if (parseSecretRequest(m.body)) return <><Body body={withoutSecretBlock(m.body).split("\n")[0]} mentions={m.mentions} me={identity} edited={m.edited} />
       <SecretRequestCard channel={m.channel} requestRef={m.ref} authorName={m.author_name} receipts={(author, rid) => receiptFor(secretReceipts, author, rid)}

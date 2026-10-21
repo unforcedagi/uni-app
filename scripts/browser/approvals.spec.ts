@@ -13,7 +13,8 @@ const now = () => Math.floor(Date.now() / 1000);
 const msg = (ref: string, body: string, ts: number, author = UNI, name = 'Uni') => ({ ref, channel: 'test', author, author_name: name, ts, body,
   mentions_me: false, root: null, parent: null, mentions: [], reply_count: 0, last_reply_ts: null, edited: false, reactions: [] });
 
-type Opts = { rooms?: { id: string; name: string; members: number }[]; enrolled?: boolean; failures?: number; messages?: unknown[]; statusFails?: boolean };
+type Room = { id: string; name: string; members: number };
+type Opts = { rooms?: Room[]; roomsLater?: Room[]; enrolled?: boolean; failures?: number; messages?: unknown[]; statusFails?: boolean; verified?: string[] };
 async function boot(page: Page, o: Opts = {}) {
   await page.addInitScript(({ ME, UNI, SEAL, o, at }) => {
     const w = window as any;
@@ -22,7 +23,7 @@ async function boot(page: Page, o: Opts = {}) {
     w.statusFails = !!o.statusFails;
     const record = { identity: ME, uni: UNI, seal_pub: SEAL, event_id: '9b13b2ae' + 'e'.repeat(56), channel: 'test', created_at: at };
     w.enrolled = o.enrolled ? record : null;
-    const rooms = o.rooms ?? [{ id: 'test', name: 'Test room', members: 2 }];
+    let rooms = o.rooms ?? [{ id: 'test', name: 'Test room', members: 2 }];
     w.__TAURI_INTERNALS__ = {
       metadata: { currentWindow: { label: 'main' }, currentWebview: { label: 'main' } },
       transformCallback: () => 1,
@@ -42,7 +43,8 @@ async function boot(page: Page, o: Opts = {}) {
           case 'secret_requesters': return [];
           case 'sealed_status':
             if (w.statusFails) { w.statusFails = false; throw 'identity: keyring locked'; }
-            return { uni: UNI, seal_pub: SEAL, rooms, enrolled: w.enrolled };
+            { const out = { uni: UNI, seal_pub: SEAL, rooms, enrolled: w.enrolled }; if (o.roomsLater) rooms = o.roomsLater; return out; }
+          case 'sealed_enrollment_line': return (o.verified ?? []).includes(args.reference) ? ME : null;
           case 'sealed_enroll':
             await new Promise((r) => setTimeout(r, 400));
             if (w.failures > 0) { w.failures--; throw 'relay unreachable: connection refused'; }
@@ -138,11 +140,13 @@ test('relay failure: it says nothing was enabled, and Try again posts', async ({
   expect((await enrolls(page)).map((c) => c.args)).toEqual([{ channel: 'test' }, { channel: 'test' }]);
 });
 
-test('no room shared with Uni: no button, and why', async ({ page }) => {
-  await boot(page, { rooms: [] });
+test('no room shared with Uni: no button, and why; Check again finds the room once it has synced', async ({ page }) => {
+  await boot(page, { rooms: [], roomsLater: [{ id: 'test', name: 'Test room', members: 2 }] });
   const s = await settings(page);
   await expect(s.getByText("You and Uni don't share a room yet")).toBeVisible();
   await expect(s.getByRole('button', { name: /Enable approvals/ })).toHaveCount(0);
+  await s.getByRole('button', { name: 'Check again' }).click();
+  await expect(s.getByRole('button', { name: 'Enable approvals for Uni' })).toBeVisible();
 });
 
 test('several rooms with Uni: the chosen one is where it is posted', async ({ page }) => {
@@ -164,9 +168,17 @@ test('status failure: says so and checks again', async ({ page }) => {
   await expect(s.getByRole('button', { name: 'Enable approvals for Uni' })).toBeVisible();
 });
 
-test('the enrollment shows in the room as words, not its JSON', async ({ page }) => {
+test('your verified enrollment shows in the room as words; a look-alike body stays an ordinary message', async ({ page }) => {
   const body = JSON.stringify({ v: 1, seal_pub: SEAL, for: UNI });
-  await boot(page, { messages: [msg('d'.repeat(64), body, now() - 60, ME, 'Robin')] });
-  await expect(page.getByText('You enabled approvals for Uni')).toBeVisible();
-  await expect(page.locator('.message', { hasText: 'seal_pub' })).toHaveCount(0);
+  const fake = JSON.stringify({ v: 1, seal_pub: 'ab'.repeat(32), for: 'cd'.repeat(32) });
+  await boot(page, { verified: ['d'.repeat(64)], messages: [
+    msg('d'.repeat(64), body, now() - 90, ME, 'Robin'),       // yours, verified in Rust
+    msg('e'.repeat(64), fake, now() - 60, ME, 'Robin'),       // yours, but Rust says it isn't an enrollment for Uni
+    msg('f'.repeat(64), body, now() - 30, 'b'.repeat(64), 'Mallory'), // another member's copy
+  ] });
+  await expect(page.getByText('You enabled approvals for Uni')).toHaveCount(1);
+  await expect(page.locator('.message', { hasText: 'abababab' })).toHaveCount(1);
+  await expect(page.locator('.message', { hasText: 'Mallory' }).filter({ hasText: 'seal_pub' })).toHaveCount(1);
+  expect((await calls(page)).filter((c) => c.cmd === 'sealed_enrollment_line').map((c) => c.args.reference).sort())
+    .toEqual(['d'.repeat(64), 'e'.repeat(64)]); // only your own messages are asked about
 });

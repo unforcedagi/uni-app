@@ -53,6 +53,10 @@ struct MockRelay {
     /// Pairing-relay mode: accept NIP-42 AUTH from any key (ephemeral
     /// NIP-AB session keys are never relay members).
     open_auth: std::sync::atomic::AtomicBool,
+    /// T-234: store the next EVENT, then drop the connection without its OK (an OK lost on the way back).
+    drop_next_ok: std::sync::atomic::AtomicBool,
+    /// T-234: refuse the next EVENT without storing it.
+    reject_next: std::sync::atomic::AtomicBool,
 }
 
 impl MockRelay {
@@ -67,6 +71,8 @@ impl MockRelay {
             connections: Mutex::new(0),
             closed_subs: Mutex::new(Vec::new()),
             open_auth: std::sync::atomic::AtomicBool::new(false),
+            drop_next_ok: std::sync::atomic::AtomicBool::new(false),
+            reject_next: std::sync::atomic::AtomicBool::new(false),
         })
     }
 
@@ -112,6 +118,11 @@ fn tag_values<'a>(ev: &'a Value, name: &str) -> Vec<&'a str> {
 }
 
 fn matches(filter: &Value, ev: &Value) -> bool {
+    if let Some(ids) = filter["ids"].as_array() {
+        if !ids.iter().any(|i| i.as_str() == ev["id"].as_str()) {
+            return false;
+        }
+    }
     if let Some(kinds) = filter["kinds"].as_array() {
         if !kinds.iter().any(|k| k.as_u64() == ev["kind"].as_u64()) {
             return false;
@@ -208,11 +219,16 @@ async fn serve(listener: TcpListener, relay: Arc<MockRelay>) {
                             "EVENT" => {
                                 let ev = &frame[1];
                                 let id = ev["id"].as_str().unwrap();
-                                let accepted = authed.as_deref() == ev["pubkey"].as_str()
+                                let rejected = relay.reject_next.swap(false, std::sync::atomic::Ordering::SeqCst);
+                                let accepted = !rejected && authed.as_deref() == ev["pubkey"].as_str()
                                     && ev["content"] != "reject-me"
                                     && serde_json::from_value::<nostr::Event>(ev.clone())
                                         .is_ok_and(|e| e.verify().is_ok());
                                 if accepted { relay.publish(ev.clone()); }
+                                if relay.drop_next_ok.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                                    let _ = ws.close(None).await;
+                                    return;
+                                }
                                 ws.send(Message::Text(json!(["OK", id, accepted,
                                     if accepted { "" } else { "restricted: rejected" }]).to_string().into())).await.unwrap();
                             }
@@ -2191,48 +2207,48 @@ async fn a_lying_relay_cannot_forge_a_secret_request_or_receipt() {
     res.unwrap();
 }
 
+/// T-234: what the relay holds that carries the enrollment tag.
+/// (by the fixture's `me`; the look-alikes another member posts are not counted)
+fn enrollments(relay: &MockRelay) -> Vec<Value> {
+    let me = relay.members.iter().next().unwrap().clone();
+    relay.events.lock().unwrap().iter().filter(|e| tag_values(e, "t") == vec![uni_core::sealed::ENROLL_TAG] && e["pubkey"] == me).cloned().collect()
+}
+
 /// T-234: enabling approvals through the app's own path (`sealed::enroll`): signed by the synthetic identity, put
-/// only into a room the trusted Uni (`other` here) is in, sent again as the same event after a relay failure, and
-/// never twice. The relay's copy is checked field by field, as Uni's broker reads it.
+/// only into a room the trusted Uni (`other` here) is in, and published once. The relay's copy is checked field by
+/// field, as Uni's broker reads it.
 #[tokio::test]
-async fn enrollment_is_signed_routed_retried_and_published_once() {
+async fn enrollment_is_signed_routed_and_published_once() {
     use uni_core::sealed;
     let f = fixture().await;
     let store = Store::open_in_memory().unwrap();
     sync_once(&f.url, &f.me, None, &store).await.unwrap();
     let uni = f.other.public_key();
     let dir = tempfile::tempdir().unwrap();
-    let record_path = dir.path().join("sealed-enrollment.json");
     let now = nostr::Timestamp::now().as_secs();
-    let mut pending = None;
-    let enrollments = |relay: &MockRelay| -> Vec<Value> {
-        relay.events.lock().unwrap().iter().filter(|e| tag_values(e, "t") == vec![sealed::ENROLL_TAG]).cloned().collect()
-    };
 
     // The status offers only the room Uni is in.
-    let st = sealed::status(&f.me, &uni, &store, &record_path).unwrap();
+    let st = sealed::status(&f.me, &uni, &store, dir.path()).unwrap();
     assert_eq!(st.rooms.iter().map(|r| r.id.clone()).collect::<Vec<_>>(), vec![f.ch_a.to_string()]);
     assert!(st.enrolled.is_none());
 
     // A room without Uni is refused before anything is signed or sent.
-    let err = sealed::enroll(&f.url, &f.me, None, &store, f.ch_b, &uni, &record_path, &mut pending, now).await.unwrap_err();
+    let err = sealed::enroll(&f.url, &f.me, None, &store, f.ch_b, &uni, dir.path(), now).await.unwrap_err();
     assert!(err.to_string().contains("isn't a member"), "{err}");
-    assert!(pending.is_none() && enrollments(&f.relay).is_empty());
+    assert!(enrollments(&f.relay).is_empty());
+    assert!(!dir.path().join(sealed::PENDING_FILE).exists());
 
-    // The relay can't be reached: an error, no record, the signed event kept for the retry.
+    // The relay can't be reached: an error, nothing recorded.
     let dead = { let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap(); format!("ws://{}", l.local_addr().unwrap()) };
-    assert!(sealed::enroll(&dead, &f.me, None, &store, f.ch_a, &uni, &record_path, &mut pending, now).await.is_err());
-    let first = pending.clone().expect("the signed enrollment is kept");
-    assert!(!record_path.exists());
-    assert!(sealed::status(&f.me, &uni, &store, &record_path).unwrap().enrolled.is_none());
+    assert!(sealed::enroll(&dead, &f.me, None, &store, f.ch_a, &uni, dir.path(), now).await.is_err());
+    assert!(sealed::status(&f.me, &uni, &store, dir.path()).unwrap().enrolled.is_none());
 
-    // Retry: the same event, accepted once.
-    let record = sealed::enroll(&f.url, &f.me, None, &store, f.ch_a, &uni, &record_path, &mut pending, now + 30).await.unwrap();
-    assert_eq!(record.event_id, first.id.to_hex(), "the retry sends the same event");
-    assert!(pending.is_none());
+    let record = sealed::enroll(&f.url, &f.me, None, &store, f.ch_a, &uni, dir.path(), now).await.unwrap();
     let on_relay = enrollments(&f.relay);
     assert_eq!(on_relay.len(), 1);
     let ev = &on_relay[0];
+    assert_eq!(record.event_id, ev["id"].as_str().unwrap());
+    assert!(!dir.path().join(sealed::PENDING_FILE).exists(), "the pending event goes once recorded");
 
     // What the broker gets: kind 9 in Uni's room, signed by this identity, the documented fields, no mention of Uni.
     let parsed: nostr::Event = serde_json::from_value(ev.clone()).unwrap();
@@ -2258,15 +2274,131 @@ async fn enrollment_is_signed_routed_retried_and_published_once() {
         std::fs::write(out, dump.to_string()).unwrap();
     }
 
+    // The room's line is drawn only from a kept, verified enrollment for this Uni.
+    assert_eq!(sealed::stored_enrollment(&store, &f.ch_a.to_string(), &record.event_id, &uni).unwrap(), Some(f.me.public_key().to_hex()));
+    assert_eq!(sealed::stored_enrollment(&store, &f.ch_a.to_string(), &record.event_id, &f.me.public_key()).unwrap(), None);
+    assert_eq!(sealed::stored_enrollment(&store, &f.ch_b.to_string(), &record.event_id, &uni).unwrap(), None);
+    // a member's look-alike body (no tag) and a tagged one for another key are ordinary messages
+    let body = ev["content"].as_str().unwrap();
+    let lookalike = signed(&f.other, 9, vec![h(f.ch_a), p(&f.other)], body, now);
+    let wrong_uni = signed(&f.other, 9, vec![h(f.ch_a), p(&f.other), named("t", sealed::ENROLL_TAG)],
+        &json!({"v": 1, "seal_pub": seal_pub, "for": f.other.public_key().to_hex().replace('a', "b")}).to_string(), now);
+    for fake in [lookalike, wrong_uni] {
+        f.relay.publish(fake.clone());
+        sync_once(&f.url, &f.me, None, &store).await.unwrap();
+        let id = fake["id"].as_str().unwrap();
+        assert!(store.message(&f.ch_a.to_string(), id).unwrap().is_some());
+        assert_eq!(sealed::stored_enrollment(&store, &f.ch_a.to_string(), id, &uni).unwrap(), None);
+    }
+
     // Enable again (a second tap, a restart): the record answers, nothing new is published.
-    let again = sealed::enroll(&f.url, &f.me, None, &store, f.ch_a, &uni, &record_path, &mut pending, now + 60).await.unwrap();
+    let again = sealed::enroll(&f.url, &f.me, None, &store, f.ch_a, &uni, dir.path(), now + 60).await.unwrap();
     assert_eq!(again, record);
     assert_eq!(enrollments(&f.relay).len(), 1);
-    assert_eq!(sealed::status(&f.me, &uni, &store, &record_path).unwrap().enrolled, Some(record));
+    assert_eq!(sealed::status(&f.me, &uni, &store, dir.path()).unwrap().enrolled, Some(record));
+}
 
-    // A failed send older than the retry window is signed afresh (Buzz refuses stale events).
-    let mut stale = Some(first);
-    let other_path = dir.path().join("other.json");
-    let fresh = sealed::enroll(&f.url, &f.me, None, &store, f.ch_a, &uni, &other_path, &mut stale, now + sealed::RETRY_SAME_EVENT_SECS + 1).await.unwrap();
-    assert_ne!(fresh.event_id, again.event_id);
+/// T-234: the relay stored the enrollment but its OK never came back. The retry finds it by id and records it; it
+/// isn't signed or sent again. The same when the relay had it but this device couldn't write its record.
+#[tokio::test]
+async fn a_lost_ok_or_a_failed_record_never_makes_a_second_enrollment() {
+    use uni_core::sealed;
+    let f = fixture().await;
+    let store = Store::open_in_memory().unwrap();
+    sync_once(&f.url, &f.me, None, &store).await.unwrap();
+    let uni = f.other.public_key();
+    let now = nostr::Timestamp::now().as_secs();
+
+    let dir = tempfile::tempdir().unwrap();
+    f.relay.drop_next_ok.store(true, std::sync::atomic::Ordering::SeqCst);
+    assert!(sealed::enroll(&f.url, &f.me, None, &store, f.ch_a, &uni, dir.path(), now).await.is_err());
+    assert_eq!(enrollments(&f.relay).len(), 1, "the relay has it");
+    assert!(sealed::status(&f.me, &uni, &store, dir.path()).unwrap().enrolled.is_none());
+    // much later, after a restart (only the files remain)
+    let record = sealed::enroll(&f.url, &f.me, None, &store, f.ch_a, &uni, dir.path(), now + 3600).await.unwrap();
+    assert_eq!(enrollments(&f.relay).len(), 1);
+    assert_eq!(record.event_id, enrollments(&f.relay)[0]["id"].as_str().unwrap());
+
+    // The relay takes it but the record can't be written: an error that says Uni has it, and the retry records the
+    // same event.
+    let dir = tempfile::tempdir().unwrap();
+    let f2 = fixture().await;
+    let store2 = Store::open_in_memory().unwrap();
+    sync_once(&f2.url, &f2.me, None, &store2).await.unwrap();
+    let uni2 = f2.other.public_key();
+    std::fs::create_dir(dir.path().join(sealed::RECORD_FILE)).unwrap(); // a folder where the file goes: rename fails
+    let err = sealed::enroll(&f2.url, &f2.me, None, &store2, f2.ch_a, &uni2, dir.path(), now).await.unwrap_err();
+    assert!(err.to_string().contains("Uni has the enrollment"), "{err}");
+    assert!(dir.path().join(sealed::PENDING_FILE).exists());
+    std::fs::remove_dir(dir.path().join(sealed::RECORD_FILE)).unwrap();
+    let record = sealed::enroll(&f2.url, &f2.me, None, &store2, f2.ch_a, &uni2, dir.path(), now + 30).await.unwrap();
+    assert_eq!(enrollments(&f2.relay).len(), 1);
+    assert_eq!(record.event_id, enrollments(&f2.relay)[0]["id"].as_str().unwrap());
+}
+
+/// T-234: refused by the relay, the retry sends the very same event while it is young; an old one is signed afresh.
+#[tokio::test]
+async fn a_refused_enrollment_is_resent_as_the_same_event_while_young() {
+    use uni_core::sealed;
+    let f = fixture().await;
+    let store = Store::open_in_memory().unwrap();
+    sync_once(&f.url, &f.me, None, &store).await.unwrap();
+    let uni = f.other.public_key();
+    let now = nostr::Timestamp::now().as_secs();
+    let pending_id = |dir: &std::path::Path| -> String {
+        let ev: Value = serde_json::from_str(&std::fs::read_to_string(dir.join(sealed::PENDING_FILE)).unwrap()).unwrap();
+        ev["id"].as_str().unwrap().to_string()
+    };
+
+    let dir = tempfile::tempdir().unwrap();
+    f.relay.reject_next.store(true, std::sync::atomic::Ordering::SeqCst);
+    assert!(sealed::enroll(&f.url, &f.me, None, &store, f.ch_a, &uni, dir.path(), now).await.is_err());
+    assert!(enrollments(&f.relay).is_empty());
+    let first = pending_id(dir.path());
+    let record = sealed::enroll(&f.url, &f.me, None, &store, f.ch_a, &uni, dir.path(), now + 30).await.unwrap();
+    assert_eq!(record.event_id, first, "the same event");
+
+    // (another second: at `now` this identity's event is the one already on the relay, same id)
+    let (dir, later) = (tempfile::tempdir().unwrap(), now + 100);
+    f.relay.reject_next.store(true, std::sync::atomic::Ordering::SeqCst);
+    assert!(sealed::enroll(&f.url, &f.me, None, &store, f.ch_a, &uni, dir.path(), later).await.is_err());
+    let old = pending_id(dir.path());
+    let record = sealed::enroll(&f.url, &f.me, None, &store, f.ch_a, &uni, dir.path(), later + sealed::RETRY_SAME_EVENT_SECS + 1).await.unwrap();
+    assert_ne!(record.event_id, old, "too old for the relay: signed afresh");
+}
+
+/// T-234: two Enables at once (two windows, a remounted Settings) publish one enrollment, and both get its record.
+#[tokio::test]
+async fn concurrent_enables_publish_once() {
+    use uni_core::sealed;
+    let f = fixture().await;
+    let store = Store::open_in_memory().unwrap();
+    sync_once(&f.url, &f.me, None, &store).await.unwrap();
+    let uni = f.other.public_key();
+    let dir = tempfile::tempdir().unwrap();
+    let now = nostr::Timestamp::now().as_secs();
+    let store2 = Store::open_in_memory().unwrap();
+    sync_once(&f.url, &f.me, None, &store2).await.unwrap();
+    let (a, b) = tokio::join!(
+        sealed::enroll(&f.url, &f.me, None, &store, f.ch_a, &uni, dir.path(), now),
+        sealed::enroll(&f.url, &f.me, None, &store2, f.ch_a, &uni, dir.path(), now + 1),
+    );
+    assert_eq!(a.unwrap(), b.unwrap());
+    assert_eq!(enrollments(&f.relay).len(), 1);
+}
+
+/// T-234: the cache says Uni is in the room, the relay's roster now says it isn't: refused, nothing sent.
+#[tokio::test]
+async fn enrollment_checks_the_relays_roster_not_the_cache() {
+    use uni_core::sealed;
+    let f = fixture().await;
+    let store = Store::open_in_memory().unwrap();
+    sync_once(&f.url, &f.me, None, &store).await.unwrap();
+    let uni = f.other.public_key();
+    let dir = tempfile::tempdir().unwrap();
+    f.relay.publish(signed(&f.relay_keys, 39002, vec![d(f.ch_a), p(&f.me)], "", 2));
+    assert!(sealed::status(&f.me, &uni, &store, dir.path()).unwrap().rooms.iter().any(|r| r.id == f.ch_a.to_string()));
+    let err = sealed::enroll(&f.url, &f.me, None, &store, f.ch_a, &uni, dir.path(), nostr::Timestamp::now().as_secs()).await.unwrap_err();
+    assert!(err.to_string().contains("isn't a member"), "{err}");
+    assert!(enrollments(&f.relay).is_empty());
 }
