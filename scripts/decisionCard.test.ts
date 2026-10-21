@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import { chatText, cleanNote, decisionRefsIn, noteLine, parseDecisionNote, pickedLine, questionOf, unreferenced } from "../src/decisionView.ts";
 import { parseMarkdown } from "../src/markdown.ts";
+import { SHORTHAND_VAULTS } from "../src/vaultlinks.ts";
 import { makeDecisionStore } from "../src/decisionStore.ts";
 let failed = 0;
 const check = (n: string, f: () => void) => { try { f(); console.log("ok  ", n); } catch (e) { failed++; console.log("FAIL", n, e); } };
@@ -67,7 +68,7 @@ check("links and note refs in a note stay as typed; a rule line and a bidi mark 
   const link = (parseMarkdown(chatText("see https://example.com/a_b~c/x and uni:Projects/my_note"))[0] as any).c;
   assert.deepEqual(link.filter((n: any) => n.t !== "text").map((n: any) => n.t === "link" ? n.href : n.ref.ref), ["https://example.com/a_b~c/x", "Projects/my_note"]);
   // what only looks like a link is escaped like any text (the chat doesn't link a bare mailto:)
-  for (const t of ["mailto:a**bold**", "https://example.com/x **loud** uni:Projects/a_b", "xhttps://example.com/a**bold**b", "a https://example.com/_x_ b", "xhttps://example.com/[**bold**](https://example.org)", "https://example.com/[x](https://example.org) y", "https://example.com/a`b`", "<mailto:a@example.com>"]) {
+  for (const t of ["mailto:a**bold**", "https://example.com/x **loud** uni:Projects/a_b", "xhttps://example.com/a**bold**b", "a https://example.com/_x_ b", "xhttps://example.com/[**bold**](https://example.org)", "https://example.com/[x](https://example.org) y", "https://example.com/a`b`", "<mailto:a@example.com>", "parachute:Projects/x`a`", "uni-1:Projects/x`a`"]) {
     const c = (parseMarkdown(chatText(t))[0] as any).c;
     assert.ok(c.every((n: any) => ["text", "br"].includes(n.t) || (["link", "vaultlink"].includes(n.t) && n.c.length === 1 && n.c[0].t === "text")), JSON.stringify(c));
     // what shows is what was typed
@@ -79,13 +80,14 @@ check("links and note refs in a note stay as typed; a rule line and a bidi mark 
   assert.equal(cleanNote("a\u061cb"), "ab");
   assert.equal(cleanNote("half \ud83d"), "half");
 });
-check("fuzz: whatever is typed, the room shows exactly those words, as text, line breaks and links reading as their address", () => {
+check("fuzz (20000 notes): whatever is typed, the room shows exactly those words, as text, line breaks and links reading as their address", () => {
   const bits = ["a", "b", " ", "\n", "*", "_", "~", "`", "[", "]", "(", ")", "<", ">", "#", "-", "+", "1.", "2)", "|", "\\", "!", "=",
     "https://example.com/", "http://x.example", "mailto:a@b.example", "uni:Projects/x", "unforced:abc", `uni:${ID}`, "[[", "]]",
-    "<https://example.com>", "<mailto:a@b.example>", "**", "~~", "```", "javascript:alert(1)", "    "];
+    "<https://example.com>", "<mailto:a@b.example>", "**", "~~", "```", "javascript:alert(1)", "    ",
+    ...SHORTHAND_VAULTS.flatMap((v) => [`${v}:Projects/x`, `${v}:`, `\`${v}:a\``]), "HTTPS://example.com/", "UNI:Projects/y"];
   let seed = 226;
   const rnd = (n: number) => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed % n; };
-  for (let k = 0; k < 6000; k++) {
+  for (let k = 0; k < 20000; k++) {
     let t = ""; for (let j = 1 + rnd(14); j > 0; j--) t += bits[rnd(bits.length)];
     const words = cleanNote(t);
     if (!words) continue;

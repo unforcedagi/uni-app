@@ -3,6 +3,7 @@
 // the question with one button per option. A tap is a compare-and-set in the vault (open -> decided) and, only when that tap won,
 // a short message from you in the room ("Picked: B …") so the room's Uni session hears the answer.
 import { parseMarkdown } from "./markdown.ts";
+import { SHORTHAND_VAULTS } from "./vaultlinks.ts";
 
 /** A decision note as the card shows it. */
 export type DecisionView = {
@@ -41,7 +42,9 @@ export function cleanNote(text: string): string {
 }
 
 /** What may be a link or note ref in a note: an escape inside one would become part of its address, so it may go as typed. */
-const RAW = /(?:https?:\/\/|(?:uni|unforced):)[^\s<>"'`]+/gi;
+/** The schemes and note-ref vaults the chat's parser links (its own list, so a vault added there is covered here). */
+const LINKERS = ["https?", "mailto", ...[...SHORTHAND_VAULTS].sort((a, b) => b.length - a.length).map((v) => v.replace(/[-]/g, "\\-"))].join("|");
+const RAW = new RegExp(`(?:https?:\\/\\/|(?:${SHORTHAND_VAULTS.map((v) => v.replace(/[-]/g, "\\-")).join("|")}):)[^\\s<>"'\`]+`, "gi");
 const escMarks = (s: string) => s.replace(/[\\`*_[\]~|]/g, "\\$&");
 /** Line starts that would make a heading, quote, list or rule. */
 const escLines = (s: string) => s.replace(/^(\s*)([#>+-]|\d+[.)](?=\s|$))/gm, (_, sp: string, mark: string) => `${sp}${mark.replace(/^[#>+-]|[.)]$/, "\\$&")}`);
@@ -78,11 +81,11 @@ export function chatText(text: string): string {
 }
 
 /**
- * The fallback's words can't start a link or note ref: an invisible zero-width space goes inside every `http:`, `https:`, `mailto:`,
- * `uni:` and `unforced:` and after every `<`, so no link parse can swallow an escape (only for a note whose links would not have
+ * The fallback's words can't start a link or note ref: an invisible zero-width space goes before the colon of every `http:`, `https:`,
+ * `mailto:` and shorthand vault (`uni:`, `parachute:`, …) and after every `<`, so no link parse can swallow an escape (only for a note whose links would not have
  * read as typed).
  */
-export const defuse = (s: string): string => s.replace(/(https?|mailto|uni|unforced)(?=:)/gi, "$1\u200b").replace(/</g, "<\u200b");
+export const defuse = (s: string): string => s.replace(new RegExp(`(${LINKERS})(?=:)`, "gi"), "$1\u200b").replace(/</g, "<\u200b");
 
 const ULID = "[0-9A-HJKMNP-TV-Z]{26}";
 const REF = new RegExp(`(?<![\\w/:.@-])uni:(${ULID})(?![\\w/])`, "g");
