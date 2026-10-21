@@ -37,6 +37,7 @@ pub mod pairing_source;
 pub mod hub;
 pub mod parachute;
 pub mod readstate;
+pub mod sealed;
 pub mod secret;
 pub mod store;
 pub mod sync;
