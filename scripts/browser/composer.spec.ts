@@ -149,6 +149,10 @@ test('Keyboard menu navigation, Mention and Attach', async ({ page }) => {
   await trigger.focus();
   await page.keyboard.press('ArrowDown');
   await page.keyboard.press('End');
+  // T-132: Discard draft is last (the draft holds "@"), Attach just above it
+  await expect(page.getByRole('menuitem', { name: 'Discard draft' })).toBeFocused();
+  await page.keyboard.press('ArrowUp');
+  await expect(page.getByRole('menuitem', { name: 'Attach file/photo' })).toBeFocused();
   const chooser = page.waitForEvent('filechooser');
   await page.keyboard.press('Enter');
   await (await chooser).setFiles([]);
