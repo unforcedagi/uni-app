@@ -412,8 +412,15 @@ async fn approval_messages(app: tauri::AppHandle) -> Result<Vec<ApprovalSourceVi
         let me = my_pubkey();
         store
             // the answers line every prompt ends with ("… or `/deny` to cancel."), the command prompt's and the smart-deny one's alike
-            // the newest 1000 a room: an outcome is matched to the oldest prompt still waiting, so a busy room must keep that prompt in view
-            .approval_messages("deny` to cancel.", since, me.as_deref(), 1000)
+            // and the first words of every outcome `parseOutcome` reads (approved, denied, timed out, expired, nothing pending); the
+            // newest 1000 a room, far more than a day of prompts
+            .approval_messages(
+                "deny` to cancel.",
+                &["✅ Command", "❌ Command", "⌛ ", "⚠️ Approval expired", "⚠ Approval expired", "No pending command"],
+                since,
+                me.as_deref(),
+                1000,
+            )
             .map(|rows| {
                 rows.into_iter()
                     .map(|m| ApprovalSourceView {

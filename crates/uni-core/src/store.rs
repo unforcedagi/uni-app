@@ -938,18 +938,25 @@ impl Store {
 
     /// T-161: what Hermes approval prompts are read from, across every room.
     /// In each room with a message containing `marker` (the prompt's header)
-    /// at or after `since`, not written by `me`: every message from the oldest
-    /// such one on (the answers and outcomes after it), the newest `per_room`
-    /// of them and every prompt itself, chronological (a busy room never
-    /// hides a prompt). Rooms with no prompt return nothing.
+    /// at or after `since`, not written by `me`: from the oldest such one on,
+    /// every prompt and every message that starts with one of `outcomes`
+    /// (Hermes's answers to a prompt), not written by `me`; the newest
+    /// `per_room` of them, chronological. Chat in between is never read: it
+    /// settles nothing, so a busy room can't push a prompt or its outcome out.
+    /// Rooms with no prompt return nothing.
     pub fn approval_messages(
         &self,
         marker: &str,
+        outcomes: &[&str],
         since: i64,
         me: Option<&str>,
         per_room: usize,
     ) -> Result<Vec<ConversationMessage>> {
-        let mut stmt = self.conn.prepare(
+        // ?1 marker, ?2 since, ?3 me, ?4 per_room, ?5… the outcomes' first words
+        let starts: String = (0..outcomes.len())
+            .map(|k| format!(" OR instr(ltrim(i.body, ' '||char(9,10,13)), ?{})=1", k + 5))
+            .collect();
+        let sql = format!(
             "WITH p AS (SELECT channel, MIN(ts) AS t0 FROM visible_items
                         WHERE source='buzz' AND ts>=?2 AND instr(body, ?1)>0 AND author<>?3
                         GROUP BY channel),
@@ -957,15 +964,20 @@ impl Store {
                           ROW_NUMBER() OVER (PARTITION BY i.channel ORDER BY i.ts DESC,i.ref DESC) AS n
                         FROM visible_items i JOIN p ON p.channel=i.channel
                         LEFT JOIN message_refs r ON r.ref=i.ref
-                        WHERE i.source='buzz' AND i.ts>=p.t0)
+                        WHERE i.source='buzz' AND i.ts>=p.t0 AND i.author<>?3 AND (instr(i.body, ?1)>0{starts}))
              SELECT source,ref,channel,author,ts,body,mentions_me,root,parent,edited FROM w
-             WHERE n<=?4 OR (instr(body, ?1)>0 AND author<>?3) ORDER BY channel, ts ASC, ref ASC",
-        )?;
+             WHERE n<=?4 ORDER BY channel, ts ASC, ref ASC"
+        );
+        let mut args: Vec<rusqlite::types::Value> = vec![
+            marker.to_string().into(),
+            since.into(),
+            me.unwrap_or("").to_string().into(),
+            (per_room.min(5000) as i64).into(),
+        ];
+        args.extend(outcomes.iter().map(|o| rusqlite::types::Value::from(o.to_string())));
+        let mut stmt = self.conn.prepare(&sql)?;
         let rows = stmt
-            .query_map(
-                params![marker, since, me.unwrap_or(""), per_room.min(5000) as i64],
-                row_to_message,
-            )?
+            .query_map(rusqlite::params_from_iter(args), row_to_message)?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         Ok(rows)
     }
@@ -1440,25 +1452,31 @@ mod tests {
             s.upsert_item(&Item { author: author.into(), body: body.into(), ..item(r, ch, ts) }).unwrap();
         };
         const P: &str = "needs your OK";
-        at("before", "c1", 5, "ag", "earlier chat");
+        const OUT: &[&str] = &["✅ Command", "❌ Command", "⌛ "];
+        at("before", "c1", 5, "ag", "✅ Command approved. (before any prompt)");
         at("p1", "c1", 10, "ag", "⚠️ **Hermes wants to run a command that needs your OK**");
         at("ans", "c1", 11, "me", "/approve");
         at("ok", "c1", 12, "ag", "✅ Command approved.");
-        at("reply", "c1", 13, "ag", "in a thread");
-        s.set_message_refs("reply", Some("p1"), Some("p1")).unwrap();
+        at("chat", "c1", 13, "ag", "Running it now.");
+        at("no", "c1", 14, "ag", "  ❌ Command denied.");
+        s.set_message_refs("no", Some("p1"), Some("p1")).unwrap();
         at("quiet", "c2", 20, "ag", "no prompt here");
         at("mine", "c3", 20, "me", "pasted: needs your OK");
         at("old", "c4", 1, "ag", "needs your OK");
         at("gone", "c5", 30, "ag", "needs your OK");
         s.upsert_aux("del", 5, "gone", "ag", 31, "").unwrap();
-        let got = s.approval_messages(P, 2, Some("me"), 50).unwrap();
+        let got = s.approval_messages(P, OUT, 2, Some("me"), 50).unwrap();
         let refs: Vec<&str> = got.iter().map(|m| m.item.r#ref.as_str()).collect();
-        // c1 from its prompt on (the user's answer too); not a room without one, the user's own, one before `since`, or a deleted one
-        assert_eq!(refs, vec!["p1", "ans", "ok", "reply"]);
-        assert_eq!(got[3].root.as_deref(), Some("p1"));
-        // the newest `per_room` and every prompt, still chronological: a busy room never hides a prompt
-        let capped = s.approval_messages(P, 2, Some("me"), 2).unwrap();
-        assert_eq!(capped.iter().map(|m| m.item.r#ref.as_str()).collect::<Vec<_>>(), vec!["p1", "ok", "reply"]);
+        // c1's prompt and the outcomes after it (one in a thread, one with leading space); not the user's reply, the chat, an outcome
+        // before the prompt, a room without one, the user's own, one before `since`, or a deleted one
+        assert_eq!(refs, vec!["p1", "ok", "no"]);
+        assert_eq!(got[2].root.as_deref(), Some("p1"));
+        // the chat in between is never counted: however busy the room, the newest `per_room` prompts and outcomes are what is read
+        for k in 0..20 {
+            at(&format!("busy{k}"), "c1", 15 + k, "ag", "Still working.");
+        }
+        let capped = s.approval_messages(P, OUT, 2, Some("me"), 3).unwrap();
+        assert_eq!(capped.iter().map(|m| m.item.r#ref.as_str()).collect::<Vec<_>>(), vec!["p1", "ok", "no"]);
     }
 
     #[test]

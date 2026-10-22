@@ -81,6 +81,12 @@ check("Codex P1: a late timeout notice never settles a newer prompt still open",
   const a = msg(P.three_answers_5min, 1000), b = msg(P.three_answers_5min, 1400);
   assert.deepEqual(pendingApprovals([a, b, msg(O.timed_out_5, 1401)], 1402).map((x) => x.ref), [b.ref]);
 });
+check("Codex round 2 P1: a timeout notice never settles a prompt whose window ends later, even by a minute", () => {
+  const a = msg(P.three_answers_5min, 1000), b = msg(P.three_answers_5min, 1150);
+  assert.deepEqual(pendingApprovals([a, b, msg(O.timed_out_5, 1401)], 1402).map((x) => x.ref), [b.ref]);
+  // its own notice, posted on the second its window ends, does settle it
+  assert.equal(pendingApprovals([b, msg(O.timed_out_5, 1450)], 1451).length, 0);
+});
 check("Codex P2: in one second, the prompt comes before the outcome whatever the refs", () => {
   const a = msg(P.three_answers_5min, 1000, { ref: "zz" });
   assert.equal(pendingApprovals([a, msg(O.approved, 1000, { ref: "aa" })], 1001).length, 0);

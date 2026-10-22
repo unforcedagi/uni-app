@@ -30,6 +30,8 @@ const HEADERS: Record<string, Approval["kind"]> = {
 const headerOf = (line: string): Approval["kind"] | null => HEADERS[line.trim().replace(/^⚠️?\s*/, "")] ?? null;
 /** seconds a prompt is still matched to outcomes after its window (the timeout notice can land a second late) */
 const GRACE = 60;
+/** a timeout notice is posted when the window is up: at most this many seconds early (whole-second times), never more */
+const EARLY = 2;
 const UNIT: Record<string, number> = { second: 1, minute: 60, hour: 3600, day: 86400 };
 
 /** The prompt a message is, or null. Only the gateway's exact shape counts: a message that only mentions `/approve` is not one. */
@@ -104,7 +106,7 @@ export function pendingApprovals(messages: readonly ApprovalSource[], now: numbe
         const root = m.root ?? null;
         const inThread = root !== null || list.some((a) => a.root === null) ? list.filter((a) => a.root === root) : list;
         // a timeout settles one whose window is up (or that stated none), never one still open; an answer, one still open
-        const due = (a: Approval) => a.deadline === null || a.deadline <= m.ts + GRACE;
+        const due = (a: Approval) => a.deadline === null || a.deadline <= m.ts + EARLY;
         const timedOut = m.body.trim().startsWith("⌛ Approval timed out after ");
         const fits = inThread.filter((a) => (timedOut ? due(a) : a.deadline === null || a.deadline > m.ts));
         const here = fits.length || timedOut ? fits : inThread;

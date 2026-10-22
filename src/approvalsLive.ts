@@ -34,10 +34,11 @@ export function useApprovals(opts: { identity: string | null; enabled: boolean; 
   useEffect(() => { if (opts.enabled) read(); else { rows.current = []; setList([]); } }, [opts.enabled, opts.identity, opts.synced, read]);
   useEffect(() => {
     if (!opts.enabled) return;
+    // at most one read each 150 ms, after the first message of a burst: steady traffic can't keep putting it off
     let t: number | undefined;
     const un = listen<{ kind: string }>("uni://live", (e) => {
       if (e.payload.kind !== "message" && e.payload.kind !== "edit" && e.payload.kind !== "delete") return;
-      window.clearTimeout(t); t = window.setTimeout(read, 150);
+      if (t === undefined) t = window.setTimeout(() => { t = undefined; read(); }, 150);
     });
     return () => { window.clearTimeout(t); void un.then((f) => f()); };
   }, [opts.enabled, read]);
