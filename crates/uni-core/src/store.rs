@@ -577,6 +577,17 @@ impl Store {
         Ok(())
     }
 
+    /// Mark a cached channel archived (the relay archived it after we cached
+    /// it). Only an existing row changes: a room this device never saw gets no
+    /// row. A later [`Store::upsert_channel`] of the live channel clears it.
+    pub fn mark_channel_archived(&self, id: &str, now: i64) -> Result<()> {
+        self.conn.execute(
+            "UPDATE channels SET archived = 1, updated_at = ?2 WHERE id = ?1",
+            params![id, now],
+        )?;
+        Ok(())
+    }
+
     /// Channel name by uuid string, if cached.
     pub fn channel_name(&self, id: &str) -> Result<Option<String>> {
         Ok(self
@@ -1324,6 +1335,21 @@ mod tests {
         assert_eq!(archived, 1);
         assert_eq!(s.channel_name("u1").unwrap().as_deref(), Some("Uni2"));
         assert_eq!(s.channel_name("nope").unwrap(), None);
+    }
+
+    #[test]
+    fn mark_channel_archived_only_touches_a_cached_row() {
+        let s = Store::open_in_memory().unwrap();
+        s.upsert_channel("u1", Some("Uni"), None, false, 1).unwrap();
+        s.mark_channel_archived("u1", 2).unwrap();
+        // An archived room this device never saw gets no row.
+        s.mark_channel_archived("u2", 2).unwrap();
+        assert!(s.rooms().unwrap().is_empty());
+        let rows: i64 = s
+            .conn
+            .query_row("SELECT COUNT(*) FROM channels", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(rows, 1);
     }
 
     #[test]

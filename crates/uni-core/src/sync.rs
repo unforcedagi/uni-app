@@ -278,7 +278,7 @@ pub async fn sync_once(
     tracing::info!(relay = relay_url, ms = t0.elapsed().as_millis() as u64, "authenticated (NIP-42)");
 
     let discovery = client.discover().await?;
-    tracing::info!(ms = t0.elapsed().as_millis() as u64, rooms = discovery.channels.len(), "sync: rooms discovered");
+    tracing::info!(ms = t0.elapsed().as_millis() as u64, rooms = discovery.channels.len(), archived = discovery.archived.len(), "sync: rooms discovered");
     let channels = discovery.channels;
     let now = nostr::Timestamp::now().as_secs() as i64;
     for ci in channels.values() {
@@ -290,6 +290,11 @@ pub async fn sync_once(
             now,
         )?;
         report.channels.insert(ci.id.to_string(), ci.name.clone());
+    }
+    // A room archived on the relay after we cached it leaves the room list.
+    // It is not in `channels`, so no history is fetched for it.
+    for ch in &discovery.archived {
+        store.mark_channel_archived(&ch.to_string(), now)?;
     }
     for (ch, members) in &discovery.members {
         store.replace_channel_members(&ch.to_string(), members)?;
