@@ -112,6 +112,7 @@ test('scrolled up: Jump to latest, counting what came in; a tap goes to the newe
   await page.mouse.wheel(0, -4000);
   await expect(jump).toHaveAccessibleName('Jump to latest');
   await page.evaluate(() => (window as any).__say('b'.repeat(64), 'A fourth line, in the same second.'));
+  expect(await page.evaluate(() => { const m = (window as any).__msgs; return m.at(-1).ts === m.at(-2).ts; })).toBe(true); // __say stamps the boot second
   await expect(jump).toHaveAccessibleName('Jump to latest, 1 new message');
 });
 
