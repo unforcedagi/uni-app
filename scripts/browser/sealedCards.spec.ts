@@ -263,6 +263,18 @@ test('a send that fails says so; Try again sends the same decision', async ({ pa
   expect((await answers(page)).map((s) => s.args.decision)).toEqual(['approve', 'approve']);
 });
 
+test('a send that failed and a card that then expired: Expired, and no Try again that could never work', async ({ page }) => {
+  await page.clock.install();
+  await boot(page, { messages: [msg('m1', single(), now() - 30)], cards: { m1: view([row({ class: 'routine', credential: 'r2-backups', ttl_s: 60, expires: now() + 120 })]) }, failures: 1 });
+  const c = card(page, 'Approve use of r2-backups');
+  await c.getByRole('button', { name: 'Approve' }).click();
+  await expect(c.getByText('Approved · not sent yet')).toBeVisible();
+  await expect(c.getByRole('button', { name: 'Try again' })).toBeVisible();
+  await page.clock.fastForward('03:00');
+  await expect(c.getByText('Expired', { exact: true })).toBeVisible();
+  await expect(c.getByRole('button', { name: 'Try again' })).toHaveCount(0);
+});
+
 test('a waiting card is flagged over the composer and Show brings it into view', async ({ page }) => {
   const waiting = [{ ref: 'm1', channel: 'test', root: null, ts: now() - 30, kind: 'single', credential: 'dns-zone', action: 'dns.edit', class: 'powerful', rows: 1, expires: now() + 900, fingerprint: '9b13b2ae' }];
   await boot(page, { messages: [msg('m1', single(), now() - 30)], cards: { m1: view([row()]) }, waiting });

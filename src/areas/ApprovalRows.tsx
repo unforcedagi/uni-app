@@ -3,6 +3,7 @@
 // for them); it leaves the list when Hermes answers it (approved, denied, timed out) or its own window ends.
 import { answersLine, commandLine, endsLine, type Approval } from "../approvals";
 import { useApprovalList } from "../approvalsLive";
+import { jobFingerprint } from "../sealedCardCore";
 
 const clock = (ts: number) => new Date(ts * 1000).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 
@@ -23,7 +24,7 @@ export function ApprovalRows({ approvals, className = "cp-list cp-approvals" }: 
           <span className="cp-approval-text">
             <span className="cp-approval-lead">{lead} in <b>{where}</b></span>
             <code className="cp-approval-cmd">{a.command}</code>
-            {w.kind === "single" && <small className={`cp-approval-why sealed-class-${w.class}`}>{w.class === "powerful" ? "Powerful: hold to approve" : "Routine"} · job {w.fingerprint.slice(0, 4)} {w.fingerprint.slice(4, 8)}</small>}
+            {w.kind === "single" && <small className={`cp-approval-why sealed-class-${w.class}`}>{w.class === "powerful" ? "Powerful: hold to approve" : "Routine"} · job {jobFingerprint(w.fingerprint)}</small>}
             <small className="cp-approval-how">{how}</small>
           </span>
         </button>

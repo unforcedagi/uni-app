@@ -853,11 +853,12 @@ function Conversations({ onForget }: { onForget: () => void }) {
   useLayoutEffect(() => { if (input.current) resizeComposer(input.current); }, [draft, asides, channel, notes.length]); // T-200: a note opening or closing changes the cap
   const focusComposer = useRef(false);
   // T-161: every room's Hermes approval prompts still waiting, for Needs you, the room and one notification each
-  const hermesApprovals = useApprovals({ identity, enabled: !!identity, synced, roomsReady: rooms.length > 0, roomName: (id) => roomsRef.current.find((r) => r.id === id)?.name ?? null,
-    looking: (ch, r) => document.hasFocus() && ch === channelRef.current && r === rootRef.current });
+  // T-161 and T-234: how both notify (the room's name; whether the user is already looking at it)
+  const notifyOpts = { synced, roomsReady: rooms.length > 0, roomName: (id: string) => roomsRef.current.find((r) => r.id === id)?.name ?? null,
+    looking: (ch: string, r: string | null) => document.hasFocus() && ch === channelRef.current && r === rootRef.current };
+  const hermesApprovals = useApprovals({ identity, enabled: !!identity, ...notifyOpts });
   // T-234: Uni's approval cards waiting for a tap join the same list (Needs you, the room's banner, the room's mark)
-  const sealedWaiting = useSealedWaiting({ enabled: !!identity, synced, roomsReady: rooms.length > 0, roomName: (id) => roomsRef.current.find((r) => r.id === id)?.name ?? null,
-    looking: (ch, r) => document.hasFocus() && ch === channelRef.current && r === rootRef.current });
+  const sealedWaiting = useSealedWaiting({ enabled: !!identity, ...notifyOpts });
   const approvals = useMemo(() => [...hermesApprovals, ...sealedWaiting].sort((a, b) => a.ts - b.ts), [hermesApprovals, sealedWaiting]);
 
   const loadRooms = useCallback(async (cached?: Room[]) => {

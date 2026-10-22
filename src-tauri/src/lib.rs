@@ -819,7 +819,8 @@ async fn identity_forget(app: tauri::AppHandle) -> Result<(), String> {
     let _ = live_stop();
     secure_store::forget(&app).await?;
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    for f in ["uni.db", "uni.db-wal", "uni.db-shm", "relay-url"] {
+    // T-234: what this identity answered (and any answer it signed but didn't send) goes with it
+    for f in ["uni.db", "uni.db-wal", "uni.db-shm", "relay-url", uni_core::sealed_card::ANSWERS_FILE] {
         let _ = std::fs::remove_file(dir.join(f));
     }
     Ok(())
@@ -1111,10 +1112,12 @@ async fn forget_secret(app: tauri::AppHandle, channel: String, request: String) 
     .await
 }
 
-/// T-234: the Uni key approvals are for. Compiled in, never taken from the webview or a message. A debug build (never
-/// a release) takes `UNI_DEBUG_TRUSTED_UNI` instead, so a walk can sign cards with a synthetic Uni key.
+/// T-234: the Uni key approvals are for. Compiled in, never taken from the webview or a message. Only a Linux debug
+/// build takes `UNI_DEBUG_TRUSTED_UNI` instead, so the headless walk can sign cards with a synthetic Uni key. Not
+/// `debug_assertions` alone: the released Android APK is a debug build (publish.sh `tauri android build --debug`), and
+/// no shipped build may read a trust root from its environment. Linux builds are never released.
 fn trusted_uni() -> nostr::PublicKey {
-    #[cfg(debug_assertions)]
+    #[cfg(all(debug_assertions, target_os = "linux"))]
     if let Some(k) = std::env::var("UNI_DEBUG_TRUSTED_UNI").ok().and_then(|s| nostr::PublicKey::from_hex(s.trim()).ok()) {
         return k;
     }

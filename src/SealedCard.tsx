@@ -137,7 +137,9 @@ export function SealedCard({ channel, reference }: { channel: string; reference:
   const rows = view.rows;
   const answered = rows.some((r) => r.answer);
   const unsent = rows.filter((r) => r.answer && !r.answer.sent);
-  const expired = !answered && expires !== null && now >= expires;
+  const pastAnswerBy = expires !== null && now >= expires;
+  // an answer that never reached Uni can't be sent once the card has expired: no Try again then
+  const expired = pastAnswerBy && (!answered || unsent.length > 0);
   const retry = unsent.length > 0 && !expired
     ? <button type="button" className="pairing-secondary" disabled={busy} onClick={() => void answer(unsent[0].answer!.decision, unsent.map((r) => r.rid))}>Try again</button>
     : null;

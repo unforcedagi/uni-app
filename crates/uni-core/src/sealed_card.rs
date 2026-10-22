@@ -457,7 +457,8 @@ impl Answers {
     }
 
     fn save(&mut self, dir: &Path, now: u64) -> Result<()> {
-        self.answers.retain(|a| a.expires + KEEP_AFTER_EXPIRY_SECS > now || !a.sent);
+        // an unsent answer past its card's expiry can never be taken (the broker refuses it), so it ages out the same way
+        self.answers.retain(|a| a.expires + KEEP_AFTER_EXPIRY_SECS > now);
         save_json(&dir.join(ANSWERS_FILE), self)
     }
 
@@ -585,10 +586,18 @@ pub async fn answer(
             let wrap = match kept.filter(|w| now.saturating_sub(w.created_at.as_secs()) <= RESEND_SAME_WRAP_SECS) {
                 Some(w) => w,
                 None => {
+                    // an error here still saves what this loop already sent, and closes the socket, below
                     let r = wanted.iter().find(|r| r.rid == a.rid).expect("filtered to wanted rows");
-                    let w = reply_wrap(identity, uni, &card.event_id, r, a.decision, now)?;
-                    answers.answers[i].wrap = Some(w.as_json());
-                    w
+                    match reply_wrap(identity, uni, &card.event_id, r, a.decision, now) {
+                        Ok(w) => {
+                            answers.answers[i].wrap = Some(w.as_json());
+                            w
+                        }
+                        Err(e) => {
+                            failed = Some(e);
+                            break;
+                        }
+                    }
                 }
             };
             match client.publish(wrap).await {
@@ -1061,6 +1070,18 @@ mod tests {
         assert!(answered(&ev.id, &r.rid, &"0".repeat(64), &"1".repeat(64)).replays(&c));
         assert!(answered(&other, &"9".repeat(32), &"0".repeat(64), &r.rpk.to_hex()).replays(&c));
         assert!(!answered(&other, &"9".repeat(32), &"0".repeat(64), &"1".repeat(64)).replays(&c));
+    }
+
+    #[test]
+    fn answers_age_out_a_week_after_their_card_sent_or_not() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = |rid: &str, sent: bool| Answer { card: "c".repeat(64), rid: rid.into(), request_digest: "d".repeat(64), rpk: "e".repeat(64),
+            decision: Decision::Approve, at: NOW, until: None, expires: NOW + 900, wrap: (!sent).then(|| "{}".into()), sent };
+        let mut answers = Answers { answers: vec![a("sent", true), a("unsent", false)] };
+        answers.save(dir.path(), NOW + 1000).unwrap();
+        assert_eq!(Answers::load(dir.path()).unwrap().answers.len(), 2, "kept for replay checks after expiry");
+        answers.save(dir.path(), NOW + 900 + KEEP_AFTER_EXPIRY_SECS).unwrap();
+        assert!(Answers::load(dir.path()).unwrap().answers.is_empty(), "an unsent answer can never be taken: it goes too");
     }
 
     #[test]
