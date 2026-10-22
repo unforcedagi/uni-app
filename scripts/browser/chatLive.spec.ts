@@ -128,3 +128,27 @@ test('following the newest message, the list stays at it when it gets shorter (a
   await expect(working(page)).toBeInViewport();
   await expect(page.getByRole('button', { name: /^Jump to latest/ })).toHaveCount(0);
 });
+
+test('scrolled up, then away and back: the room reopens at its newest, with no Jump to latest', async ({ page }) => {
+  await boot(page, { history: 60, eyes: false });
+  const list = page.getByRole('log', { name: 'Messages' });
+  const jump = page.getByRole('button', { name: /^Jump to latest/ });
+  await list.hover();
+  await page.mouse.wheel(0, -4000);
+  await expect(jump).toBeVisible();
+  const nav = page.getByRole('navigation', { name: 'Main navigation' });
+  await nav.getByRole('button', { name: 'Journal' }).click();
+  await expect(list).toHaveCount(0);
+  await nav.getByRole('button', { name: 'Uni' }).click();
+  await expect(page.getByText('Could you sort the seed list by sowing month?')).toBeInViewport();
+  await page.waitForTimeout(2000);
+  await expect(jump).toHaveCount(0);
+});
+
+test('Uni silent for over an hour with no progress ping: the working line lets go on its own', async ({ page }) => {
+  await page.clock.install();
+  await boot(page);
+  await expect(working(page)).toBeVisible();
+  await page.clock.fastForward('01:01:00');
+  await expect(working(page)).toHaveCount(0);
+});

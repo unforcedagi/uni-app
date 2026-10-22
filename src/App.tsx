@@ -995,6 +995,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       el.scrollTop = restoreTop(undefined, el.scrollHeight, el.clientHeight);
       stickToEnd.current = true;
       settleUntil.current = Date.now() + SETTLE_MS;
+      setAwayView(null); // T-132: reopened at the newest, whatever was left there before
     }
     restoredView.current = currentView;
     shownView.current = currentView;
@@ -1177,6 +1178,13 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const viewShown = !!currentView && loadedView === currentView;
   const working = viewShown ? workingOn(messages, identity, Date.now() / 1000) : null;
   const workingName = working ? labels.get(working.author) ?? members.find((m) => m.pubkey === working.author)?.name ?? "Uni" : null;
+  // with nothing else arriving, look again now and then, so work past its hour with no live ping is let go
+  const [, setWorkCheck] = useState(0);
+  useEffect(() => {
+    if (!working) return;
+    const t = window.setInterval(() => setWorkCheck((n) => n + 1), 30_000);
+    return () => clearInterval(t);
+  }, [!!working]); // eslint-disable-line react-hooks/exhaustive-deps
   // T-132: scrolled up, the newest is a tap away; messages from others that came in since you were at the end are counted on it.
   // A view seen for the first time (or come back to) counts from what it showed then.
   useLayoutEffect(() => {
