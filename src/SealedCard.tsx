@@ -85,6 +85,13 @@ export function SealedCard({ channel, reference }: { channel: string; reference:
   const [note, setNote] = useState<string | null>(null);
   const [off, setOff] = useState<Set<string>>(new Set());
   const sending = useRef(false);
+  // an answer on any card can change this one (the same request on another card is then a replay): read it again
+  const [again, setAgain] = useState(0);
+  useEffect(() => {
+    const bump = () => setAgain((n) => n + 1);
+    window.addEventListener(SEALED_CHANGED, bump);
+    return () => window.removeEventListener(SEALED_CHANGED, bump);
+  }, []);
 
   useEffect(() => {
     let live = true;
@@ -92,7 +99,7 @@ export function SealedCard({ channel, reference }: { channel: string; reference:
       .then((v) => { if (!live) return; if (!v || !Array.isArray(v.rows)) { setLoadError("no answer from the app"); return; } setView(v); setLoadError(null); })
       .catch((e) => { if (live) setLoadError(plainError(e)); });
     return () => { live = false; };
-  }, [channel, reference]);
+  }, [channel, reference, again]);
 
   const expires = view?.rows.length ? Math.min(...view.rows.map((r) => r.expires)) : null;
   const now = useNow(expires);

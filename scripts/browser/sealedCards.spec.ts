@@ -57,6 +57,7 @@ async function boot(page: Page, o: Opts) {
             const sent = w.failures <= 0;
             v.rows = v.rows.map((r: any) => args.rids.includes(r.rid) ? { ...r, answer: { decision: args.decision, at: t, until: args.decision === 'approve' ? t + r.ttl_s : null, sent } } : r);
             w.answered = true;
+            if (typeof w.__afterAnswer === 'function') w.__afterAnswer(cards);
             if (!sent) { w.failures--; throw 'relay unreachable: connection refused'; }
             return v;
           }
@@ -186,6 +187,17 @@ test('replayed and tampered cards: the reason Rust gives, nothing to tap', async
   await expect(page.locator('.sealed-card dl')).toHaveCount(0);
   await shot(page, 'refused');
   expect(await answers(page)).toHaveLength(0);
+});
+
+test('answering one card reads the others again: the same request on a second card is then a replay with no buttons', async ({ page }) => {
+  await boot(page, { messages: [msg('m1', single(), now() - 60), msg('m2', single('🔑 the same request again'), now() - 30)], cards: { m1: view([row()]), m2: view([row()]) } });
+  await page.addScriptTag({ content: "window.__afterAnswer = (cards) => { cards.m2 = { kind: 'single', event_id: 'e', refused: 'This card repeats a request that was already answered.', rows: [] }; };" });
+  const cards = page.locator('.sealed-card');
+  await expect(cards.getByRole('button', { name: 'Deny' })).toHaveCount(2);
+  await cards.first().getByRole('button', { name: 'Deny' }).click();
+  await expect(cards.first().getByRole('status')).toHaveText('Denied');
+  await expect(page.getByText('This card repeats a request that was already answered.')).toBeVisible();
+  await expect(page.locator('.sealed-card').getByRole('button', { name: /Deny|approve/i })).toHaveCount(0);
 });
 
 test('a permanent child token says so, with its purpose and destination', async ({ page }) => {
