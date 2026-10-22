@@ -27,7 +27,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { onBackButtonPress } from "@tauri-apps/api/app";
 import { announce, copyText, onCopied } from "./clipboard";
-import { forgetChatDrafts, loadChatDraft, saveChatDraft } from "./chatDrafts";
+import { CHAT_DRAFT_PREFIX, loadChatDraft, saveChatDraft } from "./chatDrafts";
 import { markFor, restoreTop, type ScrollMark } from "./noteText";
 import "./App.css";
 import { Body } from "./MessageBody";
@@ -135,6 +135,9 @@ type Picker = { start: number; query: string; index: number };
 
 function ComposerMenu({ onMention, onAttach, onDiscard, canDiscard, sending }: { onMention: () => void; onAttach: () => void; onDiscard: () => void; canDiscard: boolean; sending: boolean }) {
   const [open, setOpen] = useState(false);
+  /** Discard asks twice (it sits under Attach, and takes the whole draft): the first press arms it, the second discards. */
+  const [armed, setArmed] = useState(false);
+  useEffect(() => { if (!open) setArmed(false); }, [open]);
   const container = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLDivElement>(null);
@@ -175,7 +178,8 @@ function ComposerMenu({ onMention, onAttach, onDiscard, canDiscard, sending }: {
       <button role="menuitem" onClick={() => { setOpen(false); onMention(); }}><span aria-hidden="true">@</span> Mention</button>
       <button role="menuitem" disabled={sending} onClick={() => { setOpen(false); trigger.current?.focus(); onAttach(); }}><span aria-hidden="true">＋</span> Attach file/photo</button>
       {/* T-132: the text only; an attachment has its own × */}
-      <button role="menuitem" disabled={!canDiscard} onClick={() => { setOpen(false); trigger.current?.focus(); onDiscard(); }}><span aria-hidden="true">×</span> Discard draft</button>
+      <button role="menuitem" className={armed ? "compose-discard armed" : "compose-discard"} disabled={!canDiscard}
+        onClick={() => { if (!armed) { setArmed(true); return; } setOpen(false); trigger.current?.focus(); onDiscard(); }}><span aria-hidden="true">×</span> {armed ? "Tap again to discard" : "Discard draft"}</button>
     </div>}
   </div>;
 }
@@ -463,9 +467,18 @@ function Conversations({ onForget }: { onForget: () => void }) {
     identityRef.current = identity;
     if (!identity || prev === identity) return;
     if (prev) { drafts.current.clear(); bindingStore.current.clear(); }
-    else for (const [key, text] of drafts.current) if (text) storeDraft(key, text, bindingStore.current.get(key));
+    // text that came in before (typed, or put there by Say it) goes after the saved draft, never over it
+    else for (const [key, text] of drafts.current) {
+      const saved = loadChatDraft(identity, key);
+      if (saved && saved.text !== text) {
+        const mentions = new Map([...saved.mentions, ...(bindingStore.current.get(key) ?? [])]);
+        drafts.current.set(key, appendDraft(saved.text, text));
+        bindingStore.current.set(key, mentions);
+      }
+      if (drafts.current.get(key)) storeDraft(key, drafts.current.get(key)!, bindingStore.current.get(key));
+    }
     const key = activeScope.current;
-    if (key && !drafts.current.has(key)) {
+    if (key) {
       setDraft(scopeDraft(key));
       bindingsRef.current = bindingStore.current.get(key) ?? new Map();
       setBindings(bindingsRef.current);
@@ -1521,7 +1534,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
     if (nextChannel !== channel || nextRoot !== root) restoredView.current = null;
     const nextKey = nextChannel ? keyFor(nextChannel, nextRoot) : null;
     // Same scope again (a second tab on this room): the map already holds the live draft, and a caller may just have appended to it.
-    if (key && key !== nextKey) { drafts.current.set(key, draft); bindingStore.current.set(key, bindings); }
+    // (before the identity is known an empty composer only means its saved draft isn't read yet: that is not kept as the draft)
+    if (key && key !== nextKey && (identityRef.current || draft || drafts.current.has(key))) { drafts.current.set(key, draft); bindingStore.current.set(key, bindings); }
     activeScope.current = nextKey;
     setPending(nextKey ? pendingStore.current.get(nextKey) ?? [] : []);
     setJournalOpen(false);
@@ -1599,8 +1613,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
     // Two taps instead of window.confirm (unreliable in Android WebView).
     if (!forgetArmed) { setForgetArmed(true); return; }
     try { voiceMounted.current = false; await voiceQueue.current; await voiceOutbox.current.clear(); await invoke("identity_forget");
-      forgetDrafts(); forgetChatDrafts(); invalidatePaths(); forgetAreas(); forgetDecisions(); forgetHeld(); forgetCalendar();
-      try { for (const key of Object.keys(localStorage)) if (key.startsWith("uni.noteDraft.v1:") || key.startsWith("uni.vaultExpanded.v1:") || key === ALIASES_KEY) localStorage.removeItem(key); } catch { /* unavailable storage */ }
+      forgetDrafts(); invalidatePaths(); forgetAreas(); forgetDecisions(); forgetHeld(); forgetCalendar();
+      try { for (const key of Object.keys(localStorage)) if (key.startsWith("uni.noteDraft.v1:") || key.startsWith(CHAT_DRAFT_PREFIX) || key.startsWith("uni.vaultExpanded.v1:") || key === ALIASES_KEY) localStorage.removeItem(key); } catch { /* unavailable storage */ }
       onForget(); } catch (e) { voiceMounted.current = true; setError(String(e)); }
   }
 

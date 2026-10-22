@@ -5,21 +5,26 @@ import { copyText } from "./clipboard";
  *  When the clipboard refuses, the code opens in a selected, read-only box to copy by hand. Language and code are only ever text. */
 export function CodeBlock({ lang, code }: { lang: string; code: string }) {
   const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
+  /** Counts refusals, so a second one selects the code again. */
+  const [refused, setRefused] = useState(0);
   const manual = useRef<HTMLTextAreaElement>(null);
+  const button = useRef<HTMLButtonElement>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(timer.current), []);
-  useEffect(() => { if (state === "failed") { manual.current?.focus(); manual.current?.select(); } }, [state]);
+  useEffect(() => { if (refused) { manual.current?.focus(); manual.current?.select(); } }, [refused]);
   async function copy() {
     clearTimeout(timer.current);
-    const ok = await copyText(code, "Code copied");
+    // a refusal is said here, beside the code, not also in the toast
+    const ok = await copyText(code, "Code copied", null);
     setState(ok ? "copied" : "failed");
     if (ok) timer.current = setTimeout(() => setState("idle"), 2000);
+    else setRefused((n) => n + 1);
   }
   const what = lang ? `${lang} code` : "code";
   return <div className="md-code">
     <div className="md-code-bar">
       {lang && <span className="md-code-lang" title={lang}>{lang}</span>}
-      <button type="button" className="md-code-copy" data-state={state} onClick={() => void copy()}
+      <button ref={button} type="button" className="md-code-copy" data-state={state} onClick={() => void copy()}
         aria-label={state === "copied" ? `Copied ${what}` : `Copy ${what}`}>{state === "copied" ? "Copied" : "Copy"}</button>
     </div>
     {/* focusable so a keyboard can scroll a long line sideways */}
@@ -28,7 +33,7 @@ export function CodeBlock({ lang, code }: { lang: string; code: string }) {
       <p role="alert">Couldn't copy automatically. The code is selected below: press Ctrl+C (⌘C on a Mac), or long-press it and choose Copy.</p>
       <textarea ref={manual} readOnly value={code} aria-label={`The ${what}, to copy by hand`} spellCheck={false} wrap="off"
         rows={Math.min(8, code.split("\n").length)} onFocus={(e) => e.currentTarget.select()} />
-      <button type="button" className="md-code-done" onClick={() => setState("idle")}>Done</button>
+      <button type="button" className="md-code-done" onClick={() => { setState("idle"); button.current?.focus(); }}>Done</button>
     </div>}
   </div>;
 }

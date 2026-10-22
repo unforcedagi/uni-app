@@ -36,6 +36,7 @@ async function boot(page: Page) {
       workshop: [msg('w1', 'workshop', UNI, 100, 'The workshop room.')],
     };
     w.__posts = []; w.__clip = [];
+    w.__identityHeld = new Promise((resolve) => { w.releaseIdentity = resolve; });
     // the clipboard: the Tauri plugin first, then the browser's two ways; a refusal refuses all three
     const nav = navigator.clipboard;
     if (nav) nav.writeText = async (text: string) => { if (w.__clipRefuse) throw new DOMException('denied', 'NotAllowedError'); w.__clip.push(text); };
@@ -50,7 +51,8 @@ async function boot(page: Page) {
           case 'plugin:event|listen': (w.__listeners[args.event] ??= []).push(args.handler); return args.handler;
           case 'plugin:clipboard-manager|write_text': if (w.__clipRefuse) throw new Error('clipboard refused'); w.__clip.push(args.text); return null;
           case 'identity_status': return { paired: true, pubkey: id };
-          case 'get_identity': return id;
+          // a test can hold the identity back (the app learns it from get_identity or from a refresh), to type before it is known
+          case 'get_identity': if (sessionStorage.getItem('t.holdIdentity')) await w.__identityHeld; w.__idRead = (w.__idRead ?? 0) + 1; return id;
           case 'relay_origin': return 'https://example.invalid';
           case 'get_npub': return 'test';
           case 'get_rooms': return [{ id: 'garden', name: 'Garden', unread: 0 }, { id: 'workshop', name: 'Workshop', unread: 0 }];
@@ -65,7 +67,7 @@ async function boot(page: Page) {
           case 'vault_list': return ['uni'];
           case 'journal_config': return { hub: 'https://example.invalid', vault: 'uni' };
           case 'journal_flush': return { sent: [], remaining: 0, error: null };
-          case 'refresh': return { pubkey: id, total_items: 0, channel_errors: {}, truncated_channels: [] };
+          case 'refresh': if (sessionStorage.getItem('t.holdIdentity')) await w.__identityHeld; return { pubkey: id, total_items: 0, channel_errors: {}, truncated_channels: [] };
           default: return null;
         }
       },
@@ -95,7 +97,13 @@ async function reloadAs(page: Page, opts: Boot = {}) {
   await page.reload();
   await expect(composer(page)).toBeVisible();
   await expect(page.getByText('Two snippets for the planner.')).toBeVisible();
-  await page.waitForTimeout(300); // past the identity read, when a saved draft is put back
+  await identityRead(page);
+}
+
+/** Past the identity read and the render after it, when a saved draft is put back. */
+async function identityRead(page: Page) {
+  await page.waitForFunction(() => (window as any).__idRead > 0);
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
 }
 
 /** A room no node owns is under "Other rooms" in the room tree; a phone goes back to the tree first. */
@@ -162,8 +170,17 @@ test.describe('code blocks', () => {
     await expect(box).toBeFocused();
     expect(await box.evaluate((el: HTMLTextAreaElement) => [el.selectionStart, el.selectionEnd])).toEqual([0, PY.length]);
     await expect(page.getByRole('button', { name: 'Copied python code' })).toHaveCount(0);
+    // said once, beside the code: no toast saying it too
+    await expect(page.locator('.toast')).toHaveCount(0);
+    // a second refusal selects it again
+    await box.evaluate((el: HTMLTextAreaElement) => { el.setSelectionRange(0, 0); el.blur(); });
+    await press(page.getByRole('button', { name: 'Copy python code' }));
+    await expect(box).toBeFocused();
+    expect(await box.evaluate((el: HTMLTextAreaElement) => [el.selectionStart, el.selectionEnd])).toEqual([0, PY.length]);
     await press(page.getByRole('button', { name: 'Done' }));
     await expect(box).toHaveCount(0);
+    // focus goes back to Copy, not to the page
+    await expect(page.getByRole('button', { name: 'Copy python code' })).toBeFocused();
     // the clipboard back: Copy works again
     await page.evaluate(() => { (window as any).__clipRefuse = false; });
     await press(page.getByRole('button', { name: 'Copy python code' }));
@@ -282,8 +299,16 @@ test.describe('drafts', () => {
     await expect(page.getByRole('menuitem', { name: 'Discard draft' })).toBeDisabled();
     await press(more);
     await composer(page).fill(A);
+    // one press only arms it: the draft stays, and closing the menu disarms it
     await press(more);
     await press(page.getByRole('menuitem', { name: 'Discard draft' }));
+    await expect(page.getByRole('menuitem', { name: 'Tap again to discard' })).toBeVisible();
+    await expect(composer(page)).toHaveValue(A);
+    await press(more);
+    await expect(page.getByRole('menu')).toHaveCount(0);
+    await press(more);
+    await press(page.getByRole('menuitem', { name: 'Discard draft' }));
+    await press(page.getByRole('menuitem', { name: 'Tap again to discard' }));
     await expect(composer(page)).toHaveValue('');
     await expect(page.locator('.toast')).toHaveText('Draft discarded');
     expect(await posts(page)).toEqual([]);
@@ -304,6 +329,36 @@ test.describe('drafts', () => {
     await press(page.getByRole('button', { name: /Tap again to forget/ }));
     await expect(page.locator('.pairing-card')).toBeVisible();
     expect(await saved()).toBe(0);
+  });
+
+  test('before the identity is known: what is typed then goes after the saved draft, never over it', async ({ page }) => {
+    await boot(page);
+    await composer(page).fill(A);
+    // reload with the identity held back (the room tree waits for it too): Garden's saved draft can't be read yet
+    await page.evaluate(() => sessionStorage.setItem('t.holdIdentity', '1'));
+    await page.reload();
+    const garden = page.getByRole('textbox', { name: 'Message Garden' });
+    await expect(garden).toHaveValue('');
+    await garden.fill('Added before it loaded.');
+    await page.evaluate(() => { sessionStorage.removeItem('t.holdIdentity'); (window as any).releaseIdentity(); });
+    await identityRead(page);
+    await expect(garden).toHaveValue(A.trim() + '\n\nAdded before it loaded.');
+    await reloadAs(page);
+    await expect(composer(page)).toHaveValue(A.trim() + '\n\nAdded before it loaded.');
+  });
+
+  test('storage that starts refusing: an older saved copy never comes back as the draft', async ({ page }) => {
+    await boot(page);
+    await composer(page).fill(A);
+    // the device's storage fills up now; the next edit can't be saved
+    await page.evaluate(() => {
+      const set = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (key: string, value: string) { if (key.startsWith('uni.chatDraft')) throw new DOMException('full', 'QuotaExceededError'); return set.call(this, key, value); };
+    });
+    await composer(page).fill('Plan B, not saved.');
+    await expect(page.getByRole('status').filter({ hasText: "This device isn't saving drafts right now" })).toBeVisible();
+    await reloadAs(page);
+    await expect(composer(page)).toHaveValue('');
   });
 
   test('storage that refuses: typing, switching rooms and sending all still work, and the app says drafts are not being saved', async ({ page }) => {

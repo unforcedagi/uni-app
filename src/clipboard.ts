@@ -30,12 +30,13 @@ function execCopy(text: string): boolean {
   try { return document.execCommand("copy"); } catch { return false; } finally { ta.remove(); }
 }
 
-/** Copies `text`; announces `message` on success. Returns whether it worked. */
-export async function copyText(text: string, message = "Copied"): Promise<boolean> {
+/** Copies `text`; announces `message` on success, `failure` (unless null: the caller says it) on failure. Returns whether it worked. */
+export async function copyText(text: string, message = "Copied", failure: string | null = "Couldn't copy"): Promise<boolean> {
   let ok = false;
   try { await writeText(text); ok = true; } catch { /* not in Tauri, or plugin refused */ }
   if (!ok) { try { await navigator.clipboard.writeText(text); ok = true; } catch { /* insecure context */ } }
   if (!ok) ok = execCopy(text);
-  listeners.forEach((fn) => fn(ok ? message : "Couldn't copy"));
+  const notice = ok ? message : failure;
+  if (notice !== null) listeners.forEach((fn) => fn(notice));
   return ok;
 }

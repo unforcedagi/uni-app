@@ -28,12 +28,9 @@ export function saveChatDraft(identity: string, scope: string, text: string, men
     if (!text) localStorage.removeItem(key);
     else localStorage.setItem(key, JSON.stringify({ text, mentions: [...mentions] } satisfies StoredDraft));
     return true;
-  } catch { return false; }
-}
-
-/** Forget device key: every identity's saved drafts go. */
-export function forgetChatDrafts(): void {
-  try {
-    for (const key of Object.keys(localStorage)) if (key.startsWith(CHAT_DRAFT_PREFIX)) localStorage.removeItem(key);
-  } catch { /* unavailable storage holds none */ }
+  } catch {
+    // an older saved copy would come back after a reload as if it were the draft: it goes
+    try { localStorage.removeItem(storageKey(identity, scope)); } catch { /* nothing readable is left either */ }
+    return false;
+  }
 }
