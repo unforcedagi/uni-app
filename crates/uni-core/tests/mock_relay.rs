@@ -223,7 +223,8 @@ async fn serve(listener: TcpListener, relay: Arc<MockRelay>) {
                                 let ev = &frame[1];
                                 let id = ev["id"].as_str().unwrap();
                                 let rejected = relay.reject_next.swap(false, std::sync::atomic::Ordering::SeqCst);
-                                let accepted = !rejected && authed.as_deref() == ev["pubkey"].as_str()
+                                // like Buzz, a gift wrap (1059) is accepted whoever signed it: its signer is a throwaway key
+                                let accepted = !rejected && (authed.as_deref() == ev["pubkey"].as_str() || (authed.is_some() && ev["kind"] == 1059))
                                     && ev["content"] != "reject-me"
                                     && serde_json::from_value::<nostr::Event>(ev.clone())
                                         .is_ok_and(|e| e.verify().is_ok());
@@ -364,10 +365,12 @@ struct Fixture {
 }
 
 async fn fixture() -> Fixture {
+    fixture_with(Keys::generate(), Keys::generate(), Uuid::new_v4()).await
+}
+
+/// The fixture with these keys and Uni's room (T-234's crosscheck brings its own synthetic keys and room).
+async fn fixture_with(me: Keys, other: Keys, ch_a: Uuid) -> Fixture {
     let relay_keys = Keys::generate();
-    let me = Keys::generate();
-    let other = Keys::generate();
-    let ch_a = Uuid::new_v4();
     let ch_b = Uuid::new_v4();
     let ch_archived = Uuid::new_v4();
     let ch_not_mine = Uuid::new_v4();
@@ -2428,4 +2431,197 @@ async fn enrollment_checks_the_relays_roster_not_the_cache() {
     let err = sealed::enroll(&f.url, &f.me, None, &store, f.ch_a, &uni, dir.path(), nostr::Timestamp::now().as_secs()).await.unwrap_err();
     assert!(err.to_string().contains("isn't a member"), "{err}");
     assert!(enrollments(&f.relay).is_empty());
+}
+
+/// T-234 cards: a card as the broker builds it (uni-ops `sealed.py` `_fields`): the data key sealed to `seal_pub`.
+fn sealed_fields(seal_pub: &nostr::PublicKey, credential: &str, class: &str, action: &str, payload: Value, ttl_s: u64, expires: u64) -> (Value, Keys) {
+    use nostr::nips::nip44;
+    let one_time = Keys::generate();
+    let esk = Keys::generate();
+    let ct = format!("{:0>64}", credential.len());
+    let inner = json!({"v": 1, "name": credential, "class": class, "dek": "5a".repeat(32), "ct_sha256": ct}).to_string();
+    let dek_box = nip44::encrypt(esk.secret_key(), seal_pub, inner, nip44::Version::V2).unwrap();
+    let f = json!({
+        "v": 1, "rid": &Keys::generate().public_key().to_hex()[..32], "action": action, "credential": credential, "class": class,
+        "scope": format!("Synthetic {action} for the test"), "ttl_s": ttl_s, "uses": 1,
+        "payload_digest": uni_core::sealed_card::payload_digest(action, &payload).unwrap(), "payload": payload, "expires": expires,
+        "rpk": one_time.public_key().to_hex(), "box": {"epk": esk.public_key().to_hex(), "dek_box": dek_box, "ct_sha256": ct},
+    });
+    (f, one_time)
+}
+
+fn wraps(relay: &MockRelay) -> Vec<Value> {
+    relay.events.lock().unwrap().iter().filter(|e| e["kind"] == 1059).cloned().collect()
+}
+
+/// One card to answer: the event, the tap, and what must happen (None: answered; Some: the card's refusal line).
+struct CardCase {
+    event: Value,
+    decision: uni_core::sealed_card::Decision,
+    rids: Vec<String>,
+    expect: Option<String>,
+}
+
+/// T-234: Uni's cards answered through the app's own path (`sealed_card::answer`) against the mock relay: each request
+/// gets exactly one wrap, `p`-tagged to Uni, whatever the taps; a second tap sends nothing; a different second answer
+/// is refused; a card repeating an answered request is refused and sends nothing; refused cards send nothing.
+///
+/// Cross-check (run by `research/t234-sealed-creds/app/cards_crosscheck.py`): `T234_CARDS_IN=<file>` brings the
+/// synthetic keys, the room and the cards the reference broker made; `T234_CARDS_OUT=<file>` gets the wraps the relay
+/// took, for that broker's `on_wrap`.
+#[tokio::test]
+async fn sealed_cards_are_answered_once_through_the_relay() {
+    use uni_core::sealed_card::{self as card, Decision};
+    let input: Option<Value> = std::env::var("T234_CARDS_IN").ok().map(|p| serde_json::from_str(&std::fs::read_to_string(p).unwrap()).unwrap());
+    let key = |v: &Value, k: &str| Keys::new(nostr::SecretKey::from_hex(v[k].as_str().unwrap()).unwrap());
+    let (me, uni, room) = match &input {
+        Some(v) => (key(v, "me_sk"), key(v, "uni_sk"), v["channel"].as_str().unwrap().parse().unwrap()),
+        None => (Keys::generate(), Keys::generate(), Uuid::new_v4()),
+    };
+    let f = fixture_with(me, uni, room).await;
+    let uni = f.other.public_key();
+    let now = nostr::Timestamp::now().as_secs();
+    let seal_pub = uni_core::sealed::derive_seal_key(&f.me).unwrap().public_key();
+    let decision = |s: &str| if s == "deny" { Decision::Deny } else { Decision::Approve };
+
+    let cases: Vec<CardCase> = match &input {
+        Some(v) => v["cards"].as_array().unwrap().iter().map(|c| CardCase {
+            event: c["event"].clone(),
+            decision: decision(c["decision"].as_str().unwrap()),
+            rids: c["rids"].as_array().unwrap().iter().map(|r| r.as_str().unwrap().to_string()).collect(),
+            expect: c["expect"].as_str().map(str::to_string),
+        }).collect(),
+        None => {
+            let post = |body: String| signed(&f.other, 9, vec![h(f.ch_a), p(&f.other)], &body, now);
+            let single = |fl: &Value| post(format!("🔑 **Uni asks**\n\n```{}\n{}\n```", card::CARD_FENCE, fl));
+            let (dns, _) = sealed_fields(&seal_pub, "dns-zone", "powerful", "dns.edit", json!({"name": "demo", "zone": "example.org"}), 600, now + 900);
+            let (pages, _) = sealed_fields(&seal_pub, "pages-deploy", "routine", "deploy.pages", json!({"files": 3}), 3600, now + 900);
+            let (mint, _) = sealed_fields(&seal_pub, "cf-parent", "powerful", "mint.cloudflare",
+                json!({"v": 1, "template": "r2-read", "bucket": "example-bucket", "child_ttl_s": null, "purpose": "backups", "destination": "sealed:r2-backups", "then": "seal"}), 60, now + 900);
+            let rows: Vec<Value> = ["r2-a", "r2-b", "r2-c"].iter()
+                .map(|n| sealed_fields(&seal_pub, n, "routine", "r2.list", Value::Null, 50_400, now + 3600).0).collect();
+            let morning = post(format!("🔑 **Uni's morning card**\n\n```{}\n{}\n```", card::MORNING_FENCE, json!({"v": 1, "rows": rows})));
+            let rid = |fl: &Value| fl["rid"].as_str().unwrap().to_string();
+            // the dns request again under a new card (Uni signed it again, or a relay re-serves it): a replay
+            let replay = post(format!("again\n\n```{}\n{}\n```", card::CARD_FENCE, dns));
+            let expired = sealed_fields(&seal_pub, "late", "routine", "r2.list", Value::Null, 60, now - 1).0;
+            let forged = signed(&f.me, 9, vec![h(f.ch_a), p(&f.me)], &format!("```{}\n{}\n```", card::CARD_FENCE, pages), now);
+            vec![
+                CardCase { event: single(&dns), decision: Decision::Approve, rids: vec![rid(&dns)], expect: None },
+                CardCase { event: single(&pages), decision: Decision::Deny, rids: vec![rid(&pages)], expect: None },
+                CardCase { event: single(&mint), decision: Decision::Approve, rids: vec![rid(&mint)], expect: None },
+                CardCase { event: morning, decision: Decision::Approve, rids: vec![rid(&rows[0]), rid(&rows[2])], expect: None },
+                CardCase { event: replay, decision: Decision::Approve, rids: vec![rid(&dns)], expect: Some("This card repeats a request that was already answered.".into()) },
+                CardCase { event: single(&expired), decision: Decision::Approve, rids: vec![rid(&expired)], expect: Some("This card has expired.".into()) },
+                CardCase { event: forged, decision: Decision::Approve, rids: vec![rid(&pages)], expect: Some("Not signed by Uni.".into()) },
+            ]
+        }
+    };
+    for c in &cases {
+        f.relay.publish(c.event.clone());
+    }
+    let store = Store::open_in_memory().unwrap();
+    sync_once(&f.url, &f.me, None, &store).await.unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let room = f.ch_a.to_string();
+    let seal = uni_core::sealed::derive_seal_key(&f.me).unwrap();
+    let mut out = Vec::new();
+
+    // Needs you lists exactly the cards that can be answered now
+    let mut answerable: Vec<String> = cases.iter().filter(|c| c.expect.is_none()).map(|c| c.event["id"].as_str().unwrap().to_string()).collect();
+    let listed = card::waiting(&store, &f.me.public_key().to_hex(), &uni, &seal, &card::Answers::default(), now).unwrap();
+    let mut listed_ids: Vec<String> = listed.iter().map(|w| w.reference.clone()).collect();
+    listed_ids.retain(|id| !cases.iter().any(|c| c.event["id"] == *id && c.expect.as_deref() == Some("This card repeats a request that was already answered.")));
+    listed_ids.sort();
+    answerable.sort();
+    assert_eq!(listed_ids, answerable);
+
+    for c in &cases {
+        let id = c.event["id"].as_str().unwrap();
+        let before = wraps(&f.relay).len();
+        let answers = card::Answers::load(dir.path()).unwrap();
+        let ev = card::stored_card(&store, &room, id);
+        if let Some(why) = &c.expect {
+            if let Ok(ev) = &ev {
+                assert_eq!(card::view(ev, &uni, &seal, &answers, now).refused.as_deref(), Some(why.as_str()), "{id}");
+                let err = card::answer(&f.url, &f.me, None, ev, &uni, c.decision, &c.rids, dir.path(), now).await.unwrap_err();
+                assert!(err.to_string().ends_with(why.as_str()), "{err}");
+            }
+            assert_eq!(wraps(&f.relay).len(), before, "a refused card sends nothing");
+            continue;
+        }
+        let ev = ev.unwrap();
+        let v = card::view(&ev, &uni, &seal, &answers, now);
+        assert_eq!(v.refused, None, "{id}");
+        let got = card::answer(&f.url, &f.me, None, &ev, &uni, c.decision, &c.rids, dir.path(), now).await.unwrap();
+        assert_eq!(got.len(), c.rids.len());
+        assert!(got.iter().all(|a| a.sent && a.wrap.is_none() && a.decision == c.decision));
+        let new: Vec<Value> = wraps(&f.relay)[before..].to_vec();
+        assert_eq!(new.len(), c.rids.len(), "one wrap per request");
+        for w in &new {
+            assert_eq!(tag_values(w, "p"), vec![uni.to_hex().as_str()]);
+            assert!(!w.to_string().contains(&"5a".repeat(32)), "the data key is only inside the encryption");
+            out.push(json!({"card": id, "wrap": w}));
+        }
+        // a second tap (a double press, a reload): nothing new goes out
+        card::answer(&f.url, &f.me, None, &ev, &uni, c.decision, &c.rids, dir.path(), now + 1).await.unwrap();
+        assert_eq!(wraps(&f.relay).len(), before + c.rids.len());
+        // the other decision, or another row of the card: refused, nothing sent
+        let other = if c.decision == Decision::Approve { Decision::Deny } else { Decision::Approve };
+        assert!(card::answer(&f.url, &f.me, None, &ev, &uni, other, &c.rids, dir.path(), now + 2).await.is_err());
+        let v = card::view(&ev, &uni, &seal, &card::Answers::load(dir.path()).unwrap(), now);
+        if v.rows.len() > c.rids.len() {
+            let left: Vec<String> = v.rows.iter().filter(|r| r.answer.is_none()).map(|r| r.rid.clone()).collect();
+            assert!(card::answer(&f.url, &f.me, None, &ev, &uni, c.decision, &left, dir.path(), now + 2).await.is_err());
+        }
+        assert_eq!(wraps(&f.relay).len(), before + c.rids.len());
+        assert!(v.rows.iter().all(|r| r.answer.as_ref().map(|a| a.decision) == c.rids.contains(&r.rid).then_some(c.decision)));
+        // answered: no longer waiting in Needs you
+        let answers = card::Answers::load(dir.path()).unwrap();
+        assert!(!card::waiting(&store, &f.me.public_key().to_hex(), &uni, &seal, &answers, now).unwrap().iter().any(|w| w.reference == id));
+    }
+    if let Ok(path) = std::env::var("T234_CARDS_OUT") {
+        std::fs::write(path, json!({"wraps": out}).to_string()).unwrap();
+    }
+    // nothing secret was kept on disk: the answers file holds public facts only
+    let kept = std::fs::read_to_string(dir.path().join(card::ANSWERS_FILE)).unwrap();
+    assert!(!kept.contains(&"5a".repeat(32)) && !kept.contains(&f.me.secret_key().to_secret_hex()));
+}
+
+/// T-234 cards: the relay refuses the answer. Try again sends the very same wrap (the decision was kept before it
+/// went out), and nothing else; a dead relay leaves the answer kept and unsent.
+#[tokio::test]
+async fn a_refused_answer_is_retried_as_the_same_wrap() {
+    use uni_core::sealed_card::{self as card, Decision};
+    let f = fixture().await;
+    let uni = f.other.public_key();
+    let now = nostr::Timestamp::now().as_secs();
+    let seal_pub = uni_core::sealed::derive_seal_key(&f.me).unwrap().public_key();
+    let (fl, _) = sealed_fields(&seal_pub, "dns-zone", "powerful", "dns.edit", json!({"name": "demo"}), 600, now + 900);
+    let ev = signed(&f.other, 9, vec![h(f.ch_a), p(&f.other)], &format!("```{}\n{}\n```", card::CARD_FENCE, fl), now);
+    f.relay.publish(ev.clone());
+    let store = Store::open_in_memory().unwrap();
+    sync_once(&f.url, &f.me, None, &store).await.unwrap();
+    let ev = card::stored_card(&store, &f.ch_a.to_string(), ev["id"].as_str().unwrap()).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let rids = vec![fl["rid"].as_str().unwrap().to_string()];
+
+    let dead = { let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap(); format!("ws://{}", l.local_addr().unwrap()) };
+    assert!(card::answer(&dead, &f.me, None, &ev, &uni, Decision::Approve, &rids, dir.path(), now).await.is_err());
+    let kept = card::Answers::load(dir.path()).unwrap();
+    assert_eq!(kept.answers.len(), 1);
+    assert!(!kept.answers[0].sent);
+    let first: nostr::Event = serde_json::from_str(kept.answers[0].wrap.as_deref().unwrap()).unwrap();
+
+    f.relay.reject_next.store(true, std::sync::atomic::Ordering::SeqCst);
+    let err = card::answer(&f.url, &f.me, None, &ev, &uni, Decision::Approve, &rids, dir.path(), now + 5).await.unwrap_err();
+    assert!(err.to_string().contains("rejected"), "{err}");
+    assert!(wraps(&f.relay).is_empty());
+    // changing one's mind after a failed send isn't possible: one request, one decision
+    assert!(card::answer(&f.url, &f.me, None, &ev, &uni, Decision::Deny, &rids, dir.path(), now + 6).await.is_err());
+    card::answer(&f.url, &f.me, None, &ev, &uni, Decision::Approve, &rids, dir.path(), now + 10).await.unwrap();
+    let on_relay = wraps(&f.relay);
+    assert_eq!(on_relay.len(), 1);
+    assert_eq!(on_relay[0]["id"], first.id.to_hex(), "the same wrap");
+    assert!(card::Answers::load(dir.path()).unwrap().answers[0].sent);
 }

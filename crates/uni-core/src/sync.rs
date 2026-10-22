@@ -64,9 +64,12 @@ pub fn ingest_message(
         mentions_me: mentions(ev, me),
     };
     let inserted = store.upsert_item(&item)?;
-    if crate::secret::parse_request(&ev.content).is_some() || crate::sealed::has_enroll_tag(ev) {
-        // T-176: the secret path re-verifies this before it answers (see `secret::stored_request`); T-234: so does
-        // the room's enrollment line (`sealed::stored_enrollment`).
+    if crate::secret::parse_request(&ev.content).is_some()
+        || crate::sealed::has_enroll_tag(ev)
+        || crate::sealed_card::card_kind(&ev.content).is_some()
+    {
+        // T-176: the secret path re-verifies this before it answers (see `secret::stored_request`); T-234: so do
+        // the room's enrollment line (`sealed::stored_enrollment`) and Uni's approval cards (`sealed_card::stored_card`).
         store.put_signed_event(&item.r#ref, &ev.as_json())?;
     }
     store.set_message_mentions(&item.r#ref, &p_tags(ev))?;
