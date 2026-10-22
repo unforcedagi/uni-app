@@ -74,4 +74,11 @@ test('the task list failing to load still shows a waiting card in Needs you', as
   const row = page.locator('.cp-sealed').first();
   await expect(row.locator('.cp-approval-lead')).toHaveText("Uni's morning card in #garden-club");
   await expect(row.locator('.cp-approval-cmd')).toHaveText('Morning card · 3 routine credentials');
+  // and in the work view ("All of Uni's work"), where the list's failure is said again
+  const all = page.getByRole('button', { name: /All of Uni.s work/ });
+  if (await all.count()) {
+    await all.first().click();
+    await expect(page.locator('.wv').getByText("Couldn't load what needs you")).toBeVisible();
+    await expect(page.locator('.wv .cp-sealed .cp-approval-cmd')).toHaveText('Morning card · 3 routine credentials');
+  }
 });
