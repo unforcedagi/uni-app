@@ -106,6 +106,13 @@ test('scrolled up: Jump to latest, counting what came in; a tap goes to the newe
   await page.evaluate(() => (window as any).__say('b'.repeat(64), 'A third line, read as it lands.'));
   await expect(page.getByText('A third line, read as it lands.')).toBeInViewport();
   await expect(jump).toHaveCount(0);
+  // up again: a message in the same second as the last one seen still counts as new
+  await page.waitForTimeout(800);
+  await list.hover();
+  await page.mouse.wheel(0, -4000);
+  await expect(jump).toHaveAccessibleName('Jump to latest');
+  await page.evaluate(() => (window as any).__say('b'.repeat(64), 'A fourth line, in the same second.'));
+  await expect(jump).toHaveAccessibleName('Jump to latest, 1 new message');
 });
 
 test('following the newest message, the list stays at it when it gets shorter (a bar arriving above it, a smaller window)', async ({ page }) => {

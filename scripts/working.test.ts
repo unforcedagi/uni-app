@@ -37,6 +37,14 @@ check("a reply in its thread after the 👀: over", () =>
   assert.equal(workingOn([m("2", ME, 90, "ask", { reactions: eyes(UNI), last_reply_ts: NOW - 10 })], ME, NOW), null));
 check("a thread reply from before the 👀 does not end it", () =>
   assert.deepEqual(workingOn([m("2", ME, 900, "ask", { reactions: eyes([UNI, 60]), last_reply_ts: NOW - 800 })], ME, NOW), { author: UNI, since: NOW - 60 }));
+check("a newer message of yours answered in its thread, with no 👀 on it: over", () =>
+  assert.equal(workingOn([m("2", ME, 90, "ask", { reactions: eyes(UNI) }), m("3", ME, 30, "and also", { last_reply_ts: NOW - 10 })], ME, NOW), null));
+check("counted from their earliest 👀 on a message, in either form", () => {
+  const both = [{ emoji: "👀", count: 2, mine: null, by: [{ pubkey: SAM, ts: NOW - 100 }, { pubkey: UNI, ts: NOW - 50 }] }, { emoji: "👀\uFE0F", count: 1, mine: null, by: [{ pubkey: UNI, ts: NOW - 90 }] }];
+  assert.deepEqual(workingOn([m("2", ME, 120, "ask", { reactions: both }), m("3", ME, 30, "and also", { reactions: eyes([UNI, 20]) })], ME, NOW), { author: UNI, since: NOW - 90 });
+  const twice = [{ emoji: "👀", count: 1, mine: null, by: [{ pubkey: UNI, ts: NOW - 50 }] }, { emoji: "👀\uFE0F", count: 1, mine: null, by: [{ pubkey: UNI, ts: NOW - 90 }] }];
+  assert.deepEqual(workingOn([m("2", ME, 120, "ask", { reactions: twice })], ME, NOW), { author: UNI, since: NOW - 90 });
+});
 check("past an hour with no live ping: let go", () =>
   assert.equal(workingOn([m("2", ME, 3700, "ask", { reactions: eyes(UNI) })], ME, NOW), null));
 check("past an hour with Uni's ping still being edited: still working", () =>

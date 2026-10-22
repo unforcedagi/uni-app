@@ -752,12 +752,13 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const pinned = useRef<{ ref: string; offset: number; until: number } | null>(null);
   // Following the newest message: content growth (images, late layout) keeps it pinned.
   const stickToEnd = useRef(true);
-  /** T-132: the view the reader has scrolled up in (the jump-to-latest button shows there); the newest message they had seen at its end
-   *  and the newest on screen (by time, so a deleted one doesn't lose the place); a jump to the newest under way. */
+  /** T-132: the view the reader has scrolled up in (the jump-to-latest button shows there); per view, the newest message they had seen
+   *  at its end (with its time, so a deleted one doesn't lose the place); the newest on screen; until when a jump to the newest is under way. */
   const [awayView, setAwayView] = useState<string | null>(null);
-  const seenRef = useRef<{ view: string; ts: number } | null>(null);
-  const newestRef = useRef<{ view: string; ts: number } | null>(null);
-  const jumping = useRef(false);
+  type Seen = { view: string; ts: number; ref: string };
+  const seenRef = useRef(new Map<string, Seen>());
+  const newestRef = useRef<Seen | null>(null);
+  const jumpUntil = useRef(0);
   const [loadedView, setLoadedView] = useState<string | null>(null);
   /** The view whose messages the relay store has answered with (not just the device's kept copy): only then can a room be said to be empty. */
   const [fetchedView, setFetchedView] = useState<string | null>(null);
@@ -1017,19 +1018,19 @@ function Conversations({ onForget }: { onForget: () => void }) {
     const el = listEl;
     if (!el) return;
     // T-132: the reader's own input also ends a glide to a new message, so a scroll up under way then is theirs, not the glide's
-    const onUser = () => { settleUntil.current = 0; pinned.current = null; jumping.current = false; gliding.current = 0; };
+    const onUser = () => { settleUntil.current = 0; pinned.current = null; jumpUntil.current = 0; gliding.current = 0; };
     const onScroll = () => {
       const v = restoredView.current;
       if (!v || Date.now() < gliding.current) return;
       // Still settling after the open: a scroll that is not the reader's own is layout (older rows, images) moving the list. Stay at the end.
       if (Date.now() < settleUntil.current) { if (el.scrollHeight - el.scrollTop - el.clientHeight > 1) el.scrollTop = el.scrollHeight; return; }
       const mark = markFor(el.scrollTop, el.scrollHeight, el.clientHeight);
-      // T-132: a jump to the newest still gliding there is not the reader leaving the end
-      if (jumping.current && !mark.atEnd) return;
-      jumping.current = false;
+      // T-132: a jump to the newest still gliding there is not the reader leaving the end (one cut short is let go after a while)
+      if (Date.now() < jumpUntil.current && !mark.atEnd) return;
+      jumpUntil.current = 0;
       scrollMemory.current.set(v, mark);
       stickToEnd.current = mark.atEnd;
-      if (mark.atEnd && newestRef.current?.view === v) seenRef.current = newestRef.current;
+      if (mark.atEnd && newestRef.current?.view === v) seenRef.current.set(v, newestRef.current);
       setAwayView(mark.atEnd ? null : v);
     };
     el.addEventListener("scroll", onScroll, { passive: true });
@@ -1180,18 +1181,20 @@ function Conversations({ onForget }: { onForget: () => void }) {
   // A view seen for the first time (or come back to) counts from what it showed then.
   useLayoutEffect(() => {
     const last = messages[messages.length - 1];
-    newestRef.current = viewShown && currentView && last ? { view: currentView, ts: last.ts } : null;
-    if (newestRef.current && (stickToEnd.current || seenRef.current?.view !== currentView)) seenRef.current = newestRef.current;
+    newestRef.current = viewShown && currentView && last ? { view: currentView, ts: last.ts, ref: last.ref } : null;
+    if (newestRef.current && (stickToEnd.current || !seenRef.current.has(newestRef.current.view))) seenRef.current.set(newestRef.current.view, newestRef.current);
   });
   const away = viewShown && awayView === currentView;
-  const seen = away && seenRef.current?.view === currentView ? seenRef.current.ts : null;
-  const newSince = seen === null ? 0 : messages.filter((m) => m.ts > seen && m.author !== identity && !isWorkerStatus(m.body)).length;
+  const seen = away && currentView ? seenRef.current.get(currentView) : undefined;
+  const seenAt = seen ? messages.findIndex((m) => m.ref === seen.ref) : -1;
+  // after the seen message if it is still here (a reply in the same second counts), else after its time
+  const newSince = !seen ? 0 : messages.filter((m, i) => (seenAt >= 0 ? i > seenAt : m.ts > seen.ts) && m.author !== identity && !isWorkerStatus(m.body)).length;
   function jumpToLatest() {
     const el = listRef.current;
     if (!el) return;
     stickToEnd.current = true;
-    jumping.current = true;
-    if (newestRef.current) seenRef.current = newestRef.current;
+    jumpUntil.current = Date.now() + 2000;
+    if (newestRef.current) seenRef.current.set(newestRef.current.view, newestRef.current);
     setAwayView(null);
     el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
   }

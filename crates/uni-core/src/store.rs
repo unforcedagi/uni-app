@@ -1009,21 +1009,25 @@ impl Store {
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         let mut out: Vec<Reaction> = Vec::new();
+        let mut at: std::collections::HashMap<(String, String), usize> = std::collections::HashMap::new();
         for (target, emoji, author, ts, id) in rows {
             let mine = (Some(author.as_str()) == me).then_some(id);
-            match out.iter_mut().find(|g| g.target == target && g.emoji == emoji) {
+            match at.get(&(target.clone(), emoji.clone())).map(|&i| &mut out[i]) {
                 Some(g) => {
                     g.count += 1;
                     g.mine = g.mine.take().or(mine);
                     g.by.push(Reactor { pubkey: author, ts });
                 }
-                None => out.push(Reaction {
-                    target,
-                    emoji,
-                    count: 1,
-                    mine,
-                    by: vec![Reactor { pubkey: author, ts }],
-                }),
+                None => {
+                    at.insert((target.clone(), emoji.clone()), out.len());
+                    out.push(Reaction {
+                        target,
+                        emoji,
+                        count: 1,
+                        mine,
+                        by: vec![Reactor { pubkey: author, ts }],
+                    });
+                }
             }
         }
         Ok(out)
