@@ -312,6 +312,23 @@ p.decision-card.decision-loading { padding: 8px 12px; color: var(--muted); font-
 .md a { color: var(--turquoise); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
 .md code { font-family: var(--mono); font-size: 13px; background: var(--surface-3); border-radius: 5px; padding: 1px 5px; }
 .md pre.md-pre { background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 10px 12px; overflow-x: auto; margin: 8px 0; }
+/* T-132: a code block's bar (language, Copy) sits on top of it; a long line scrolls inside the block, never widening the message */
+.md .md-code { margin: 8px 0; min-width: 0; max-width: 100%; }
+.md .md-code pre.md-pre { margin: 0; border-radius: 0 0 var(--radius-sm) var(--radius-sm); max-width: 100%; }
+.md .md-code pre.md-pre:focus-visible { outline: 2px solid var(--turquoise); outline-offset: -2px; }
+.md-code-bar { display: flex; align-items: center; gap: 8px; min-height: 32px; padding: 0 4px 0 12px; background: var(--surface-3); border: 1px solid var(--line); border-bottom: 0; border-radius: var(--radius-sm) var(--radius-sm) 0 0; }
+.md-code-lang { font-family: var(--mono); font-size: 12px; color: var(--text-soft); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* a message that opens with a block: its ⋯ (top right of the message) would sit on Copy */
+.message-content .md > .md-code:first-child .md-code-bar { padding-right: 48px; }
+.md-code-copy { margin-left: auto; min-width: 64px; min-height: 32px; padding: 4px 12px; border: 0; border-radius: 6px; background: none; color: var(--text-soft); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
+.md-code-copy:hover { background: var(--surface-2); color: var(--text); }
+.md-code-copy:focus-visible { outline: 2px solid var(--turquoise); outline-offset: 1px; }
+.md-code-copy[data-state="copied"] { color: var(--forest, var(--text)); }
+.md-code-manual { margin-top: 6px; display: grid; gap: 6px; }
+.message-content .md .md-code-manual p { margin: 0; font-size: 13px; color: var(--text-soft); white-space: normal; }
+.md-code-manual textarea { width: 100%; box-sizing: border-box; font-family: var(--mono); font-size: 13px; padding: 8px 10px; border: 1px solid var(--turquoise); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--text); resize: vertical; white-space: pre; overflow-x: auto; }
+.md-code-done { justify-self: start; min-height: 32px; padding: 4px 14px; border: 1px solid var(--line); border-radius: 6px; background: none; color: var(--text); font: inherit; font-size: 13px; cursor: pointer; }
+@media (pointer: coarse) { .md-code-copy, .md-code-done { min-height: 40px; } }
 .md pre.md-pre code { background: none; padding: 0; white-space: pre; }
 .md blockquote { margin: 8px 0; padding: 2px 0 2px 14px; border-left: 2px solid var(--sky); color: var(--text-soft); font-family: var(--serif); font-size: 17px; font-style: italic; line-height: 1.5; }
 .md ul, .md ol { margin: 6px 0; padding-left: 22px; }

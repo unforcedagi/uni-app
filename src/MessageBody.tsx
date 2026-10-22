@@ -5,6 +5,7 @@ import { mentionSegments, type Member } from "./mentions";
 import { useNoteOpener } from "./noteLinks";
 import { splitMarkers } from "./chatMarkers";
 import { useNoteTitle } from "./areas/noteRefs";
+import { CodeBlock } from "./CodeBlock";
 
 const ULID = /^[0-9A-HJKMNP-TV-Z]{26}$/;
 /** A note cited by its bare id (`uni:01M…`) reads as the note's title (r14), never as the id: "a note" when it can't be read (the id stays in
@@ -56,7 +57,7 @@ export const Body = memo(function Body({ body, mentions, me, edited }: { body: s
     switch (b.t) {
       case "p": return <p key={k}>{inline(b.c, k)}</p>;
       case "h": return <p key={k} className={`md-h md-h${b.level}`}>{inline(b.c, k)}</p>;
-      case "code": return <pre key={k} className="md-pre"><code>{b.v}</code></pre>;
+      case "code": return <CodeBlock key={k} lang={b.lang} code={b.v} />;
       case "quote": return <blockquote key={k}>{blocks(b.c, k)}</blockquote>;
       case "hr": return <hr key={k} />;
       case "list": {
