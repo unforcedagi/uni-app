@@ -38,6 +38,7 @@ pub mod hub;
 pub mod parachute;
 pub mod readstate;
 pub mod sealed;
+pub mod sealed_card;
 pub mod secret;
 pub mod store;
 pub mod sync;

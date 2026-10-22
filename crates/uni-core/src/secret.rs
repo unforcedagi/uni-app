@@ -148,8 +148,9 @@ fn tag(parts: &[&str]) -> Result<Tag> {
 }
 
 /// NIP-59 rumor → seal (signed by `sender`) → gift wrap (signed by a fresh key),
-/// both layers NIP-44 v2 to `enc_to`; the wrap is `p`-tagged to `route`.
-fn wrap(
+/// both layers NIP-44 v2 to `enc_to`; the wrap is `p`-tagged to `route` and carries a NIP-40 `expiration`.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn wrap(
     sender: &Keys,
     route: &PublicKey,
     enc_to: &PublicKey,
@@ -157,6 +158,7 @@ fn wrap(
     content: &str,
     tags: Vec<Tag>,
     now: u64,
+    expiration: u64,
 ) -> Result<Event> {
     // The rumor's copy of `content` is zeroed however this returns, errors included.
     struct Rumor(UnsignedEvent);
@@ -187,7 +189,7 @@ fn wrap(
     EventBuilder::new(Kind::GiftWrap, wrapped)
         .tags([
             tag(&["p", &route.to_hex()])?,
-            tag(&["expiration", &(now + WRAP_LIFETIME_SECS).to_string()])?,
+            tag(&["expiration", &expiration.to_string()])?,
         ])
         .custom_created_at(Timestamp::from_secs(at))
         .sign_with_keys(&one_off)
@@ -222,7 +224,7 @@ fn rumor_id(rumor: &UnsignedEvent) -> Result<EventId> {
 
 /// `v` as JSON, written straight into one zeroizing buffer of `capacity` bytes. Sized for the worst case, the
 /// buffer never grows, so serializing leaves no smaller, reallocated copy of a secret behind.
-fn json_zeroizing<T: Serialize>(v: &T, capacity: usize) -> Result<Zeroizing<String>> {
+pub(crate) fn json_zeroizing<T: Serialize>(v: &T, capacity: usize) -> Result<Zeroizing<String>> {
     let mut buf = Zeroizing::new(Vec::with_capacity(capacity));
     serde_json::to_writer(&mut *buf, v).map_err(|e| Error::Invalid(format!("json: {e}")))?;
     let text = String::from_utf8(std::mem::take(&mut *buf)).map_err(|e| Error::Invalid(e.to_string()))?;
@@ -257,7 +259,7 @@ pub fn seal_delivery(sender: &Keys, asked: &Asked, value: &str, now: u64) -> Res
         tag(&["e", &asked.event_id.to_hex()])?,
         tag(&["p", &asked.requester.to_hex()])?,
     ];
-    wrap(sender, &asked.requester, &asked.one_time_key, KIND_SECRET_DELIVERY, &body, tags, now)
+    wrap(sender, &asked.requester, &asked.one_time_key, KIND_SECRET_DELIVERY, &body, tags, now, now + WRAP_LIFETIME_SECS)
 }
 
 /// The gift wrap asking the requester to forget what it stored for `asked`. It names the request
@@ -267,7 +269,7 @@ pub fn seal_forget(sender: &Keys, asked: &Asked, now: u64) -> Result<Event> {
     let (requester, r) = (&asked.requester, &asked.request);
     let body = serde_json::json!({ "v": 1, "name": r.name, "rid": r.rid }).to_string();
     let tags = vec![tag(&["p", &requester.to_hex()])?];
-    wrap(sender, requester, requester, KIND_SECRET_FORGET, &body, tags, now)
+    wrap(sender, requester, requester, KIND_SECRET_FORGET, &body, tags, now, now + WRAP_LIFETIME_SECS)
 }
 
 /// Publish a wrap over a NIP-42-authenticated socket (as this account; Buzz

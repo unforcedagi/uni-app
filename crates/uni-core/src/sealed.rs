@@ -60,6 +60,14 @@ impl SealKey {
         self.0.public_key()
     }
 
+    /// Open a NIP-44 box sealed to this key by `epk` (a credential's data key, CARD.md §3.5). The plaintext is zeroed
+    /// when dropped; nothing else can reach the secret half.
+    pub(crate) fn open_box(&self, epk: &PublicKey, payload: &str) -> Result<Zeroizing<String>> {
+        nostr::nips::nip44::decrypt(self.0.secret_key(), epk, payload)
+            .map(Zeroizing::new)
+            .map_err(|_| Error::Invalid("the box isn't sealed to this key".into()))
+    }
+
     #[cfg(test)]
     fn secret_hex(&self) -> String {
         self.0.secret_key().to_secret_hex()
@@ -185,7 +193,7 @@ pub fn load_record(path: &Path) -> Option<EnrollmentRecord> {
     serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()
 }
 
-fn save_json<T: Serialize>(path: &Path, value: &T) -> Result<()> {
+pub(crate) fn save_json<T: Serialize>(path: &Path, value: &T) -> Result<()> {
     let json = serde_json::to_vec_pretty(value).map_err(|e| Error::Invalid(e.to_string()))?;
     let tmp = path.with_extension("tmp");
     let write = || -> std::io::Result<()> {

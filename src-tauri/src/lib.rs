@@ -1111,8 +1111,13 @@ async fn forget_secret(app: tauri::AppHandle, channel: String, request: String) 
     .await
 }
 
-/// T-234: the Uni key approvals are for. Compiled in, never taken from the webview or a message.
+/// T-234: the Uni key approvals are for. Compiled in, never taken from the webview or a message. A debug build (never
+/// a release) takes `UNI_DEBUG_TRUSTED_UNI` instead, so a walk can sign cards with a synthetic Uni key.
 fn trusted_uni() -> nostr::PublicKey {
+    #[cfg(debug_assertions)]
+    if let Some(k) = std::env::var("UNI_DEBUG_TRUSTED_UNI").ok().and_then(|s| nostr::PublicKey::from_hex(s.trim()).ok()) {
+        return k;
+    }
     nostr::PublicKey::from_hex(uni_core::archive::UNI_PUBKEY).expect("the compiled-in Uni key is valid")
 }
 
@@ -1161,6 +1166,73 @@ async fn sealed_enrollment_line(app: tauri::AppHandle, channel: String, referenc
     blocking(move || {
         let store = Store::open(path).map_err(|e| e.to_string())?;
         uni_core::sealed::stored_enrollment(&store, &channel, &reference, &trusted_uni()).map_err(|e| e.to_string())
+    })
+    .await
+}
+
+/// T-234: Uni's approval card (or morning card) in message `reference`, checked in Rust from its kept signed event
+/// (CARD.md §3) against the compiled-in Uni key and this device's sealing key. The card draws only from this view: its
+/// rows when every check passed, else one line saying why and nothing to tap. No data key is in it.
+#[tauri::command]
+async fn sealed_card(app: tauri::AppHandle, channel: String, reference: String) -> Result<uni_core::sealed_card::CardView, String> {
+    secure_store::ensure_loaded(&app).await?;
+    let path = db_path(&app)?;
+    let dir = sealed_state_dir(&app)?;
+    blocking(move || {
+        let (keys, _) = uni_core::load_keys(false).map_err(|e| e.to_string())?;
+        let store = Store::open(path).map_err(|e| e.to_string())?;
+        let ev = uni_core::sealed_card::stored_card(&store, &channel, &reference).map_err(|e| e.to_string())?;
+        let seal = uni_core::sealed::derive_seal_key(&keys).map_err(|e| e.to_string())?;
+        let answers = uni_core::sealed_card::Answers::load(&dir).map_err(|e| e.to_string())?;
+        Ok(uni_core::sealed_card::view(&ev, &trusted_uni(), &seal, &answers, nostr::Timestamp::now().as_secs()))
+    })
+    .await
+}
+
+/// T-234: the person's tap on a card: `decision` ("approve" or "deny") for the requests `rids` of message `reference`.
+/// Rust checks the card again, refuses a replay or a second answer, opens the data key from the signed card's box and
+/// sends one NIP-59 wrap per request to its one-time key (kind 46042). Nothing secret comes from or goes to the
+/// webview. Returns the card's view after the answer.
+#[tauri::command]
+async fn sealed_answer(
+    app: tauri::AppHandle,
+    channel: String,
+    reference: String,
+    decision: String,
+    rids: Vec<String>,
+) -> Result<uni_core::sealed_card::CardView, String> {
+    use uni_core::sealed_card::{self as card, Decision};
+    let decision = match decision.as_str() {
+        "approve" => Decision::Approve,
+        "deny" => Decision::Deny,
+        _ => return Err("unknown decision".into()),
+    };
+    let dir = sealed_state_dir(&app)?;
+    relay_send_io(&app, move |url, keys, store| {
+        let ev = card::stored_card(store, &channel, &reference).map_err(|e| e.to_string())?;
+        let now = nostr::Timestamp::now().as_secs();
+        tauri::async_runtime::block_on(card::answer(url, keys, None, &ev, &trusted_uni(), decision, &rids, &dir, now))
+            .map_err(|e| e.to_string())?;
+        let seal = uni_core::sealed::derive_seal_key(keys).map_err(|e| e.to_string())?;
+        let answers = card::Answers::load(&dir).map_err(|e| e.to_string())?;
+        Ok(card::view(&ev, &trusted_uni(), &seal, &answers, now))
+    })
+    .await
+}
+
+/// T-234: the cards from Uni waiting for a tap in any room (checked, unanswered, not expired), for Needs you.
+#[tauri::command]
+async fn sealed_waiting(app: tauri::AppHandle) -> Result<Vec<uni_core::sealed_card::Waiting>, String> {
+    secure_store::ensure_loaded(&app).await?;
+    let path = db_path(&app)?;
+    let dir = sealed_state_dir(&app)?;
+    blocking(move || {
+        let (keys, _) = uni_core::load_keys(false).map_err(|e| e.to_string())?;
+        let store = Store::open(path).map_err(|e| e.to_string())?;
+        let seal = uni_core::sealed::derive_seal_key(&keys).map_err(|e| e.to_string())?;
+        let answers = uni_core::sealed_card::Answers::load(&dir).map_err(|e| e.to_string())?;
+        let now = nostr::Timestamp::now().as_secs();
+        uni_core::sealed_card::waiting(&store, &keys.public_key().to_hex(), &trusted_uni(), &seal, &answers, now).map_err(|e| e.to_string())
     })
     .await
 }
@@ -2649,6 +2721,9 @@ pub fn run() {
             sealed_status,
             sealed_enroll,
             sealed_enrollment_line,
+            sealed_card,
+            sealed_answer,
+            sealed_waiting,
             prepare_voice_message,
             mark_read,
             open_link,
