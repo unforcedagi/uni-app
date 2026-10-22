@@ -75,6 +75,8 @@ pub struct Reaction {
     pub count: i64,
     /// Our own live reaction event with this emoji, if any (needed to undo).
     pub mine: Option<String>,
+    /// T-132: who reacted (distinct pubkeys, first reaction first), so the chat can tell Uni's 👀 ("I'm on it") from anyone else's.
+    pub by: Vec<String>,
 }
 
 /// One local search hit: the visible message, its room label, and a short
@@ -977,7 +979,12 @@ impl Store {
         let marks = vec!["?"; targets.len()].join(",");
         let sql = format!(
             "SELECT target, content, COUNT(DISTINCT author), MIN(ts),
-                    MAX(CASE WHEN author = ?1 THEN id END)
+                    MAX(CASE WHEN author = ?1 THEN id END),
+                    (SELECT GROUP_CONCAT(author, ' ') FROM (
+                       SELECT b.author FROM aux_events b
+                       WHERE b.kind = 7 AND b.target = a.target AND b.content = a.content
+                         AND NOT EXISTS (SELECT 1 FROM aux_events d WHERE d.target = b.id AND d.kind IN (5, 9005))
+                       GROUP BY b.author ORDER BY MIN(b.ts), b.author))
              FROM aux_events a
              WHERE kind = 7 AND target IN ({marks})
                AND NOT EXISTS (SELECT 1 FROM aux_events d WHERE d.target = a.id AND d.kind IN (5, 9005))
@@ -994,6 +1001,10 @@ impl Store {
                     emoji: r.get(1)?,
                     count: r.get(2)?,
                     mine: r.get(4)?,
+                    by: r
+                        .get::<_, Option<String>>(5)?
+                        .map(|v| v.split(' ').map(str::to_string).collect())
+                        .unwrap_or_default(),
                 })
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -1178,11 +1189,13 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![("🔥", 2, Some("r3")), ("+", 1, Some("r4"))]
         );
+        assert_eq!(r[0].by, vec!["bob".to_string(), "me".to_string()]);
         s.upsert_aux("d1", 5, "r3", "me", 15, "").unwrap();
         s.upsert_aux("d2", 5, "r4", "me", 15, "").unwrap();
         let r = s.reactions(&t, Some("me")).unwrap();
         assert_eq!(r.len(), 1);
         assert_eq!((r[0].count, r[0].mine.as_deref()), (1, None));
+        assert_eq!(r[0].by, vec!["bob".to_string()]); // a withdrawn reaction is no longer someone's
         assert!(s.is_own_reaction("r1", "bob").unwrap());
         assert!(!s.is_own_reaction("r1", "me").unwrap());
         assert!(!s.is_own_reaction("m1", "aa").unwrap());

@@ -146,6 +146,8 @@ struct ReactionView {
     count: i64,
     /// Our own reaction event id with this emoji (tap again to undo).
     mine: Option<String>,
+    /// Who reacted (pubkeys, first first).
+    by: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -255,6 +257,7 @@ fn with_reactions(store: &Store, mut views: Vec<MessageView>) -> Result<Vec<Mess
                 emoji: r.emoji.clone(),
                 count: r.count,
                 mine: r.mine.clone(),
+                by: r.by.clone(),
             })
             .collect();
         v.media = media

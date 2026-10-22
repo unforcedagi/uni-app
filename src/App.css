@@ -727,3 +727,14 @@ p.decision-card.decision-loading { padding: 8px 12px; color: var(--muted); font-
 /* r26: the message being sent, in its thread, until it is delivered */
 .message.outgoing { opacity: .7; }
 .message.outgoing .outgoing-body { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* T-132: "Uni is working · 0:42" under the last message while Uni has your message in hand */
+.working-line { display: flex; align-items: center; gap: 8px; margin: 6px 0 2px; font: 500 12.5px/1.3 var(--sans); color: var(--muted); }
+.working-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--turquoise); flex: none; animation: working-pulse 1.4s var(--ease) infinite; }
+.working-clock time { font-variant-numeric: tabular-nums; }
+@keyframes working-pulse { 0%, 100% { opacity: .35; transform: scale(.85); } 50% { opacity: 1; transform: scale(1); } }
+/* T-132: scrolled up, a button over the composer goes back to the newest message (and counts what came in meanwhile) */
+.jump-latest { position: absolute; bottom: calc(100% + 10px); left: 50%; transform: translateX(-50%); z-index: 3; display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 14px 0 10px; border: 1px solid var(--line-strong); border-radius: 999px; background: var(--surface); color: var(--text); font: 500 13px/1 var(--sans); box-shadow: var(--shadow-lift); cursor: pointer; }
+.jump-latest svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.jump-latest.has-new { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.jump-latest:focus-visible { outline: 2px solid var(--accent-soft); outline-offset: 2px; }

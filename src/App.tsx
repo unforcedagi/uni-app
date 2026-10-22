@@ -35,6 +35,7 @@ import Pairing from "./Pairing";
 import { emojiLabel, type Reaction } from "./reactions";
 import { DeleteButton, InlineEditor } from "./InlineEditor";
 import { lastOwnMessage } from "./ownMessages";
+import { elapsed, workingOn } from "./working";
 
 import { decisionIn, useDecisionLinks } from "./decisionLinks";
 import { DecisionCard, forgetDecisions } from "./DecisionCard";
@@ -740,6 +741,10 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const pinned = useRef<{ ref: string; offset: number; until: number } | null>(null);
   // Following the newest message: content growth (images, late layout) keeps it pinned.
   const stickToEnd = useRef(true);
+  /** T-132: the view the reader has scrolled up in (the jump-to-latest button shows there), and the newest message they had seen at its end. */
+  const [awayView, setAwayView] = useState<string | null>(null);
+  const seenRef = useRef<string | null>(null);
+  const newestRef = useRef<string | null>(null);
   const [loadedView, setLoadedView] = useState<string | null>(null);
   /** The view whose messages the relay store has answered with (not just the device's kept copy): only then can a room be said to be empty. */
   const [fetchedView, setFetchedView] = useState<string | null>(null);
@@ -1007,6 +1012,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
       const mark = markFor(el.scrollTop, el.scrollHeight, el.clientHeight);
       scrollMemory.current.set(v, mark);
       stickToEnd.current = mark.atEnd;
+      if (mark.atEnd) seenRef.current = newestRef.current;
+      setAwayView(mark.atEnd ? null : v);
     };
     el.addEventListener("scroll", onScroll, { passive: true });
     const inputs = ["wheel", "touchstart", "keydown", "pointerdown"] as const;
@@ -1015,7 +1022,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
   }, [listEl]);
 
   // Images, fonts and embeds settle after first paint: while following the
-  // newest message, stay pinned to the end as the content grows.
+  // newest message, stay pinned to the end as the content grows. T-132: and as the list itself shrinks (a banner or bar above it
+  // arriving late), which moves no content and fires no scroll.
   useEffect(() => {
     if (!listEl || !stackEl || typeof ResizeObserver === "undefined") return;
     const ro = new ResizeObserver(() => {
@@ -1024,6 +1032,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       if (stickToEnd.current && restoredView.current && preserveScroll.current === null) listEl.scrollTop = listEl.scrollHeight;
     });
     ro.observe(stackEl);
+    ro.observe(listEl);
     return () => ro.disconnect();
   }, [listEl, stackEl]);
 
@@ -1146,6 +1155,32 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const typists = [...(typing.get(`${channel}|${root ?? ""}`)?.keys() ?? [])].filter((pk) => pk !== identity);
   const typingNames = typists.map((pk) => labels.get(pk) ?? members.find((m) => m.pubkey === pk)?.name ?? pk.slice(0, 8));
   const typingLine = typingNames.length === 0 ? null : typingNames.length === 1 ? `${typingNames[0]} is typing…` : typingNames.length === 2 ? `${typingNames[0]} and ${typingNames[1]} are typing…` : "Several people are typing…";
+  // T-132: "Uni is working · 0:42", from Uni's 👀 on your message until its reply; the clock ticks while it shows
+  const viewShown = !!currentView && loadedView === currentView;
+  const nowS = Date.now() / 1000;
+  const working = viewShown ? workingOn(messages, identity, nowS) : null;
+  const workingName = working ? labels.get(working.author) ?? members.find((m) => m.pubkey === working.author)?.name ?? "Uni" : null;
+  const [, setWorkClock] = useState(0);
+  useEffect(() => {
+    if (!working) return;
+    const t = window.setInterval(() => setWorkClock((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, [!!working]); // eslint-disable-line react-hooks/exhaustive-deps
+  // T-132: scrolled up, the newest is a tap away; messages from others that came in since you were at the end are counted on it
+  newestRef.current = viewShown ? messages[messages.length - 1]?.ref ?? null : null;
+  useEffect(() => { if (stickToEnd.current) seenRef.current = newestRef.current; });
+  const away = viewShown && awayView === currentView;
+  const seenAt = away ? messages.findIndex((m) => m.ref === seenRef.current) : -1;
+  const newSince = seenAt < 0 ? 0 : messages.slice(seenAt + 1).filter((m) => m.author !== identity && !isWorkerStatus(m.body)).length;
+  function jumpToLatest() {
+    const el = listRef.current;
+    if (!el) return;
+    stickToEnd.current = true;
+    seenRef.current = newestRef.current;
+    setAwayView(null);
+    gliding.current = Date.now() + 700;
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+  }
   const suggestions = picker ? filterMembers(members, picker.query, identity ?? undefined) : [];
 
   function scope() { return channel ? keyFor(channel, root) : null; }
@@ -1498,10 +1533,14 @@ function Conversations({ onForget }: { onForget: () => void }) {
           <div className="message-stack" ref={setStackEl}>
             <NoteOpener.Provider value={openFromChat}>{timeline}</NoteOpener.Provider>
             {outgoing && outgoing.key === keyFor(currentRoom.id, root) && <article className="message mine outgoing" aria-busy="true" data-outgoing="true"><span className="message-avatar" aria-hidden="true" /><div className="message-content"><div className="message-meta"><time>Sending…</time></div><p className="outgoing-body">{outgoing.body}</p></div></article>}
+            {working && <p className="working-line" role="status"><span className="working-dot" aria-hidden="true" /><span>{workingName} is working</span><span aria-hidden="true" className="working-clock"> · <time>{elapsed(nowS - working.since)}</time></span></p>}
             <div ref={scrollEnd} />
           </div>
         </div>
         <footer onFocusCapture={() => requestAnimationFrame(() => setComposerFocused(true))} onBlurCapture={(e) => { const composer = e.currentTarget; requestAnimationFrame(() => setComposerFocused(composer.contains(document.activeElement))); }} className="composer" onDragOver={(e) => { if (e.dataTransfer.types.includes("Files")) e.preventDefault(); }} onDrop={onDropFiles}>
+          {away && <button type="button" className={`jump-latest${newSince ? " has-new" : ""}`} onClick={jumpToLatest} aria-label={newSince ? `Jump to latest, ${newSince} new message${newSince === 1 ? "" : "s"}` : "Jump to latest"}>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M6 13l6 6 6-6" /></svg>{newSince ? <span>{newSince} new message{newSince === 1 ? "" : "s"}</span> : <span className="jump-latest-label">Latest</span>}
+          </button>}
           {checking && checking.channel === channel && <p className="checking-banner" role="status" title={checking.text}><SmallLine className="checking-text" text={checking.text} /><button type="button" className="checking-x" aria-label="Stop checking" onClick={() => setChecking(null)}>×</button></p>}
           {above}
           <input ref={fileInput} className="file-picker" type="file" multiple aria-label="Choose files to attach" onChange={(e) => { addFiles(Array.from(e.target.files ?? [])); e.target.value = ""; }} />
