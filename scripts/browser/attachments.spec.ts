@@ -56,6 +56,7 @@ test.beforeEach(async ({ page }) => {
             throw 'no preview in this test';
           case 'media_save': return `Downloads/${args.name}`;
           case 'media_open': return null;
+          case 'plugin:app|register_listener': if (args?.event === 'back-button') (w.backs ??= []).push(args.handler); return 1;
           default: return null;
         }
       },
@@ -142,4 +143,14 @@ test('Saving again makes another copy', async ({ page }) => {
   await expect(save).toBeEnabled();
   await press(page, save);
   await expect.poll(() => calls(page, 'media_save').then((c) => c.length)).toBe(2);
+});
+
+test('Android Back closes the image viewer and stays in the room (T-258)', async ({ page }) => {
+  await press(page, page.getByRole('button', { name: 'Open image garden.jpg' }));
+  const dialog = page.getByRole('dialog', { name: 'garden.jpg' });
+  await expect(dialog).toBeVisible();
+  await expect.poll(() => page.evaluate(() => ((window as any).backs ?? []).length)).toBeGreaterThan(0);
+  await page.evaluate(() => { const w = window as any; w.backs[w.backs.length - 1].onmessage({ canGoBack: false }); });
+  await expect(dialog).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Open image garden.jpg' })).toBeVisible();
 });

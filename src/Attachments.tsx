@@ -327,13 +327,8 @@ function VideoFull({ src, name, at, playing, events, onClose }: {
     if (el && document.fullscreenEnabled && el.requestFullscreen) void el.requestFullscreen().catch(() => {});
     // Capture, and stop it there: Escape here closes only this layer, never the panel or note behind it.
     const key = (e: KeyboardEvent) => {
-      if (e.key === "Escape") { e.preventDefault(); e.stopImmediatePropagation(); closeRef.current(); return; }
-      if (e.key === "Tab" && el) {
-        const stops = [...el.querySelectorAll<HTMLElement>("video, button")];
-        const i = stops.indexOf(document.activeElement as HTMLElement);
-        e.preventDefault();
-        stops[(i + (e.shiftKey ? stops.length - 1 : 1) + stops.length) % stops.length]?.focus();
-      }
+      // Tab is left alone, so it walks the player's own controls; the inert app behind keeps focus in the layer.
+      if (e.key === "Escape") { e.preventDefault(); e.stopImmediatePropagation(); closeRef.current(); }
     };
     // Leaving the platform's full screen (its own Esc, a swipe) closes the layer too, so one gesture is enough.
     const left = () => { if (!document.fullscreenElement) closeRef.current(); };

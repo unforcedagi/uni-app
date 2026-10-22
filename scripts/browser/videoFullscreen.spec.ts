@@ -128,10 +128,17 @@ test('Keyboard focus stays in the full-screen layer and returns to the button', 
   await page.keyboard.press('Enter');
   const full = layer(page);
   await expect(full.getByRole('button', { name: 'Close full screen' })).toBeFocused();
-  for (let i = 0; i < 4; i++) {
+  // Tab reaches the player (its native controls are in it), and never the app behind.
+  const seen = new Set<string>();
+  for (let i = 0; i < 6; i++) {
     await page.keyboard.press('Tab');
-    expect(await page.evaluate(() => !!document.activeElement?.closest('.video-full'))).toBe(true);
+    const at = await page.evaluate(() => { const a = document.activeElement; return a?.closest('#root') ? 'behind' : a?.closest('.video-full') ? a.tagName : 'outside'; });
+    expect(at).not.toBe('behind');
+    seen.add(at);
   }
+  expect(seen.has('VIDEO')).toBe(true);
+  // Escape from the player itself (past the last control Tab leaves the page for the browser's own UI).
+  await full.locator('video').focus();
   expect(await page.evaluate(() => (document.getElementById('root') as HTMLElement).inert)).toBe(true);
   await page.keyboard.press('Escape');
   await expect(full).toBeHidden();
