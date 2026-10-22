@@ -237,7 +237,7 @@ export function TaskSheet({ task, gone = false, nodeName, room, roomNamed, inRoo
       <div className="task-body">
       <p className="task-kind">{decision ? `Decision${dflt ? ` (${dflt})` : ""}` : "Task"}{` · in ${room ? `#${room.name.replace(/^#/, "")}` : nodeName(task.node)}`}</p>
       {/* r27: when it was asked, first: an unconfirmed request says so in this one quiet line (no cue, no "nothing related found") */}
-      {unconfirmed ? <p className="task-asked task-unconfirmed" data-fresh="unconfirmed" data-asked={reqAt?.at ?? undefined} data-kind={reqAt?.kind}>{unconfirmedLine(asked)}</p>
+      {unconfirmed ? <p className="task-asked task-unconfirmed" data-fresh="unconfirmed" data-asked={reqAt?.at ?? undefined} data-kind={reqAt?.kind}>{unconfirmedLine(asked, conf.why)}</p>
         : (asked || overdue) && <p className="task-asked" data-fresh={gated ? (fresh === "confirmed" ? "current" : "unconfirmed") : undefined} data-asked={reqAt?.at ?? undefined} data-kind={reqAt?.kind}>{capFirst((overdue ? dueLine(task.due) : asked) ?? "")}</p>}
       {/* r30: "Answer anyway" is the sheet's, directly after the reason the request isn't confirmed; it is never on a list row */}
       {gated && !ready && !moved && (decision ? !!dq?.answerable : true) && <p className="task-anyway-line"><button type="button" className="task-link task-anyway" onClick={() => setAnyway(true)}>{ANSWER_ANYWAY}</button></p>}

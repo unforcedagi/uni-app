@@ -661,7 +661,7 @@ export function Rechecks({ tasks, why, scope = "room", onTask, placeOf }: { task
     {open && <ul className="cp-recheck-list" aria-label="Requests that need confirming">{tasks.map((t) => {
       const place = placeOf?.(t) ?? null;
       const w = why?.[t.id] ?? null;
-      const reason = [reasonShort(t), place ? `in ${place}` : null].filter(Boolean).join(" · ");
+      const reason = [reasonShort(t, undefined, w), place ? `in ${place}` : null].filter(Boolean).join(" · ");
       // a request whose row leads with its title (no action in its step) shows the step under it, whole: no word of it is left out of the list
       const under = t.kind !== "decision" && rowLead(t).mode === "title" ? t.next.trim() : "";
       return <li key={t.id} className="cp-recheck-item" data-id={taskTitle(t.title).id ?? undefined} data-why={w ?? undefined}>

@@ -429,9 +429,14 @@ export function answerText(raw: string): string | null {
  */
 export type RecheckScope = "room" | "all";
 export const recheckLine = (n: number, scope: RecheckScope = "room"): string => `${n} ${n === 1 ? "request needs" : "requests need"} confirming ${scope === "all" ? "across all rooms" : "in this room"}`;
-/** Why a request is not confirmed, in a few words: "asked Oct 11" (the date of the newer of its `asked_at` and `confirmed_at`), or "no date". */
-export function reasonShort(t: Partial<Pick<Task, "asked" | "added">>, today = localDay()): string {
-  return askedLine(requestDate(t), today) ?? "no date";
+/**
+ * Why a request is not confirmed, in a few words: "asked Oct 11" (the date of the newer of its `asked_at` and `confirmed_at`), or "no date".
+ * T-145: its words changed since that stamp: "changed since asked Oct 11".
+ */
+export function reasonShort(t: Partial<Pick<Task, "asked" | "added">>, today = localDay(), why: RecheckWhy | null = null): string {
+  const asked = askedLine(requestDate(t), today);
+  if (why === "changed") return asked ? `changed since ${asked}` : "changed since asked";
+  return asked ?? "no date";
 }
 /** The empty Needs you: "Nothing needs you here" only when no ask is waiting to be confirmed either; else it says what is known: no ask is confirmed. */
 export const noneLine = (f: Pick<NeedsFeed, "recheck">): string => ((f.recheck?.length ?? 0) > 0 ? "No confirmed asks" : "Nothing needs you here.");
@@ -1398,17 +1403,30 @@ export function askStamp(at: string | null | undefined, nowMs = Date.now()): Ask
   else if (t - nowMs > CONFIRM_SKEW_MS) return "future";
   return nowMs - t > CONFIRM_DAYS * 86_400_000 ? "old" : "recent";
 }
-/** Why an ask is not confirmed, for the log and the tests. */
-export type RecheckWhy = "no-date" | "old" | "future";
+/** Why an ask is not confirmed, for the log and the tests. T-145: `changed`, its words are not the ones its stamp was written with. */
+export type RecheckWhy = "no-date" | "old" | "future" | "changed";
 export type Resolved = { state: Confirm; why: RecheckWhy | null };
-export function confirmationOf(t: { askedAt?: string | null; confirmedAt?: string | null }, nowMs = Date.now()): Resolved {
+/**
+ * T-145: a stamp vouches for the words it was written with. A record that carries `ask_sig` (the signature of `next` and `detail` written in the
+ * same update as `asked_at` or `confirmed_at`) is current only while the note still holds those words: an edit to them by any other write (a
+ * vault tool, a hand edit) leaves the stamp vouching for words that are gone, and the ask needs confirming until its room asks or confirms
+ * again. A record without `ask_sig` (written before tasks.py stamped it) is read by its stamp alone, as before.
+ */
+export function confirmationOf(t: { askedAt?: string | null; confirmedAt?: string | null; askSig?: string | null; sig?: string }, nowMs = Date.now()): Resolved {
+  if (t.askSig && t.askSig !== t.sig) return { state: "recheck", why: "changed" };
   const stamp = askStamp(currentAt(t, nowMs), nowMs);
   return stamp === "recent" ? { state: "confirmed", why: null } : { state: "recheck", why: stamp === "none" ? "no-date" : stamp };
 }
 /** A task whose record isn't asked about (or any task the feed hasn't resolved): unconfirmed, with no date to go on. */
 export const UNRESOLVED: Resolved = { state: "recheck", why: "no-date" };
-/** The one quiet line over an unconfirmed request, with its reason: "Asked Oct 11 · not confirmed since"; with no date "Not confirmed since it was written". */
-export const unconfirmedLine = (asked: string | null | undefined): string => (asked ? `${asked[0].toLocaleUpperCase()}${asked.slice(1)} · not confirmed since` : "Not confirmed since it was written");
+/**
+ * The one quiet line over an unconfirmed request, with its reason: "Asked Oct 11 · not confirmed since"; with no date "Not confirmed since it was
+ * written". T-145: words changed since the stamp: "Asked Oct 11 · changed since, not confirmed".
+ */
+export const unconfirmedLine = (asked: string | null | undefined, why: RecheckWhy | null = null): string => {
+  const tail = why === "changed" ? "changed since, not confirmed" : "not confirmed since";
+  return asked ? `${asked[0].toLocaleUpperCase()}${asked.slice(1)} · ${tail}` : why === "changed" ? "Changed since it was asked, not confirmed" : "Not confirmed since it was written";
+};
 /** Whether the approval answers (and "I did this") are offered as ready: only when the ask is confirmed, or after "Answer anyway". */
 export const answersReady = (c: Confirm, anyway: boolean): boolean => c === "confirmed" || anyway;
 export const ANSWER_ANYWAY = "Answer anyway";
