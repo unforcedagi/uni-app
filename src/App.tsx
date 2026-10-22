@@ -26,7 +26,8 @@ import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useSta
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { onBackButtonPress } from "@tauri-apps/api/app";
-import { copyText, onCopied } from "./clipboard";
+import { announce, copyText, onCopied } from "./clipboard";
+import { forgetChatDrafts, loadChatDraft, saveChatDraft } from "./chatDrafts";
 import { markFor, restoreTop, type ScrollMark } from "./noteText";
 import "./App.css";
 import { Body } from "./MessageBody";
@@ -132,7 +133,7 @@ function App() {
 
 type Picker = { start: number; query: string; index: number };
 
-function ComposerMenu({ onMention, onAttach, sending }: { onMention: () => void; onAttach: () => void; sending: boolean }) {
+function ComposerMenu({ onMention, onAttach, onDiscard, canDiscard, sending }: { onMention: () => void; onAttach: () => void; onDiscard: () => void; canDiscard: boolean; sending: boolean }) {
   const [open, setOpen] = useState(false);
   const container = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -173,6 +174,8 @@ function ComposerMenu({ onMention, onAttach, sending }: { onMention: () => void;
       }}>
       <button role="menuitem" onClick={() => { setOpen(false); onMention(); }}><span aria-hidden="true">@</span> Mention</button>
       <button role="menuitem" disabled={sending} onClick={() => { setOpen(false); trigger.current?.focus(); onAttach(); }}><span aria-hidden="true">＋</span> Attach file/photo</button>
+      {/* T-132: the text only; an attachment has its own × */}
+      <button role="menuitem" disabled={!canDiscard} onClick={() => { setOpen(false); trigger.current?.focus(); onDiscard(); }}><span aria-hidden="true">×</span> Discard draft</button>
     </div>}
   </div>;
 }
@@ -365,6 +368,9 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const [draft, setDraft] = useState("");
   const drafts = useRef(new Map<string, string>());
   const draftRevisions = useRef(new Map<string, number>());
+  /** T-132: drafts are saved per identity; until it is known nothing is read or saved (what is typed meanwhile is saved when it is). */
+  const identityRef = useRef<string | null>(null);
+  const [draftStorageWarning, setDraftStorageWarning] = useState("");
   const [pending, setPending] = useState<PendingFile[]>([]);
   const pendingStore = useRef(new Map<string, PendingFile[]>());
   const voiceQueue = useRef(Promise.resolve());
@@ -450,6 +456,22 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const bindingsRef = useRef<Bindings>(new Map());
   // Message actions go through a ref so the memoized list never holds stale closures.
   useEffect(() => { bindingsRef.current = bindings; }, [bindings]);
+  // T-132: once the identity is known, the open room shows its saved draft, and what was typed before then is saved under it.
+  // Another identity (never within one mount today: Forget unmounts) starts from its own drafts only.
+  useEffect(() => {
+    const prev = identityRef.current;
+    identityRef.current = identity;
+    if (!identity || prev === identity) return;
+    if (prev) { drafts.current.clear(); bindingStore.current.clear(); }
+    else for (const [key, text] of drafts.current) if (text) storeDraft(key, text, bindingStore.current.get(key));
+    const key = activeScope.current;
+    if (key && !drafts.current.has(key)) {
+      setDraft(scopeDraft(key));
+      bindingsRef.current = bindingStore.current.get(key) ?? new Map();
+      setBindings(bindingsRef.current);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [identity]);
   const actions = useRef({ openThread: (_m: Message) => {}, loadOlder: () => {}, saveEdit: (_m: Message, _b: string): Promise<void> => Promise.resolve(), cancelEdit: () => {}, deleteOwn: (_m: Message): Promise<void> => Promise.resolve() });
 
   const [searchOpen, setSearchOpen] = useState(false);
@@ -1381,9 +1403,38 @@ function Conversations({ onForget }: { onForget: () => void }) {
   }
   // Only edits advance identity. Saving/restoring a scope is not an edit, and
   // an edit back to the submitted text must still count as a new draft.
-  function editDraft(key: string, text: string) {
+  function editDraft(key: string, text: string, mentions?: Bindings) {
     drafts.current.set(key, text);
     draftRevisions.current.set(key, (draftRevisions.current.get(key) ?? 0) + 1);
+    storeDraft(key, text, mentions ?? bindingStore.current.get(key));
+  }
+  // T-132: kept on this device, so a reload gives the text back. Refused storage never blocks typing: the copy in memory stays.
+  function storeDraft(key: string, text: string, mentions?: Bindings) {
+    const owner = identityRef.current;
+    if (!owner) return;
+    setDraftStorageWarning(saveChatDraft(owner, key, text, mentions ?? []) ? "" : "This device isn't saving drafts right now. Your text is kept until the app closes.");
+  }
+  /** A scope's draft: the one in memory, else the one saved for this identity (read once). */
+  function scopeDraft(key: string): string {
+    if (drafts.current.has(key)) return drafts.current.get(key) ?? "";
+    const owner = identityRef.current;
+    if (!owner) return "";
+    const saved = loadChatDraft(owner, key);
+    drafts.current.set(key, saved?.text ?? "");
+    if (saved?.mentions.length) bindingStore.current.set(key, new Map(saved.mentions));
+    return saved?.text ?? "";
+  }
+  function discardDraft() {
+    const key = scope();
+    if (!key) return;
+    const none: Bindings = new Map();
+    bindingStore.current.set(key, none);
+    editDraft(key, "", none);
+    setDraft("");
+    bindingsRef.current = none;
+    setBindings(none);
+    setPicker(null);
+    announce("Draft discarded");
   }
 
   function updateDraft(text: string, caret: number | null) {
@@ -1394,10 +1445,9 @@ function Conversations({ onForget }: { onForget: () => void }) {
       void invoke("send_typing", { channel, root: root ?? null, parent: root ?? null }).catch(() => {});
     }
     const key = scope();
-    if (key) editDraft(key, text);
     const next = pruneBindings(text, bindingsRef.current);
     bindingsRef.current = next;
-    if (key) bindingStore.current.set(key, next);
+    if (key) { bindingStore.current.set(key, next); editDraft(key, text, next); }
     setBindings(next);
     syncPicker(text, caret);
   }
@@ -1415,11 +1465,10 @@ function Conversations({ onForget }: { onForget: () => void }) {
     const next = insertMention(draft, picker.start, caret, label);
     const key = scope();
     setDraft(next.text);
-    if (key) editDraft(key, next.text);
     const updated = new Map(pruneBindings(next.text, bindingsRef.current));
     updated.set(label, member.pubkey);
     bindingsRef.current = updated;
-    if (key) bindingStore.current.set(key, updated);
+    if (key) { bindingStore.current.set(key, updated); editDraft(key, next.text, updated); }
     setBindings(updated);
     setPicker(null);
     requestAnimationFrame(() => { el?.focus(); el?.setSelectionRange(next.caret, next.caret); });
@@ -1479,7 +1528,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     setNotes([]);
     setChannel(nextChannel);
     setRoot(nextRoot);
-    setDraft(nextKey ? drafts.current.get(nextKey) ?? "" : "");
+    setDraft(nextKey ? scopeDraft(nextKey) : "");
     setBindings(nextKey ? bindingStore.current.get(nextKey) ?? new Map() : new Map());
     setPicker(null);
     setError(null);
@@ -1524,8 +1573,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
       });
       // Do not erase text typed during an in-flight send or in another room.
       if ((draftRevisions.current.get(key) ?? 0) === revision) {
-        editDraft(key, "");
         bindingStore.current.set(key, new Map());
+        editDraft(key, "", new Map());
         if (activeScope.current === key) {
           setDraft("");
           bindingsRef.current = new Map();
@@ -1550,7 +1599,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     // Two taps instead of window.confirm (unreliable in Android WebView).
     if (!forgetArmed) { setForgetArmed(true); return; }
     try { voiceMounted.current = false; await voiceQueue.current; await voiceOutbox.current.clear(); await invoke("identity_forget");
-      forgetDrafts(); invalidatePaths(); forgetAreas(); forgetDecisions(); forgetHeld(); forgetCalendar();
+      forgetDrafts(); forgetChatDrafts(); invalidatePaths(); forgetAreas(); forgetDecisions(); forgetHeld(); forgetCalendar();
       try { for (const key of Object.keys(localStorage)) if (key.startsWith("uni.noteDraft.v1:") || key.startsWith("uni.vaultExpanded.v1:") || key === ALIASES_KEY) localStorage.removeItem(key); } catch { /* unavailable storage */ }
       onForget(); } catch (e) { voiceMounted.current = true; setError(String(e)); }
   }
@@ -1600,9 +1649,10 @@ function Conversations({ onForget }: { onForget: () => void }) {
             </div>)}
           </div>}
           {voiceStorageWarning && <p role="status">{voiceStorageWarning}</p>}
+          {draftStorageWarning && <p className="draft-storage" role="status">{draftStorageWarning}</p>}
           {voiceStatus && <p className="voice-status" role="status">{voiceStatus}</p>}
           <div className="compose-row">
-            <ComposerMenu key={`${channel}:${root}`} onMention={startMention} onAttach={() => fileInput.current?.click()} sending={sending} />
+            <ComposerMenu key={`${channel}:${root}`} onMention={startMention} onAttach={() => fileInput.current?.click()} onDiscard={discardDraft} canDiscard={!!draft} sending={sending} />
             <textarea ref={composerInput} aria-label={`Message ${currentRoom.name}`} value={draft} onChange={(e) => updateDraft(e.target.value, e.target.selectionStart)} onPaste={onPasteFiles} onSelect={(e) => syncPicker(e.currentTarget.value, e.currentTarget.selectionStart)} onBlur={() => setPicker(null)} onKeyDown={onKeyDown} maxLength={65536} rows={1} placeholder={isThread ? "Reply in thread…" : placeholder ?? "Message Uni…"} />
             {/* Uni hears every message in a room it is in, unless muted here: a small, visible switch (it was hidden with the old destination line) */}
             {uniInRoom && <button type="button" className={`compose-uni ${notifyUni ? "on" : ""}`} aria-pressed={notifyUni} onClick={() => setNotifyUni((v) => !v)}
@@ -1832,7 +1882,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   // Drafts only: the scope's draft is read when the room opens. Aaron presses Send.
   const composeInRoom = (id: string, text: string) => {
     const key = keyFor(id, null);
-    editDraft(key, appendDraft(drafts.current.get(key), text));
+    editDraft(key, appendDraft(scopeDraft(key), text));
     focusComposer.current = true;
     openTargetRef.current(roomTarget(id), "new");
   };
