@@ -170,8 +170,8 @@ test.describe('code blocks', () => {
     await expect(box).toBeFocused();
     expect(await box.evaluate((el: HTMLTextAreaElement) => [el.selectionStart, el.selectionEnd])).toEqual([0, PY.length]);
     await expect(page.getByRole('button', { name: 'Copied python code' })).toHaveCount(0);
-    // said once, beside the code: no toast saying it too
-    await expect(page.locator('.toast')).toHaveCount(0);
+    // said once, beside the code: no toast saying it too (counted now: a toast fades on its own, so waiting for none would pass anyway)
+    expect(await page.locator('.toast').count()).toBe(0);
     // a second refusal selects it again
     await box.evaluate((el: HTMLTextAreaElement) => { el.setSelectionRange(0, 0); el.blur(); });
     await press(page.getByRole('button', { name: 'Copy python code' }));
