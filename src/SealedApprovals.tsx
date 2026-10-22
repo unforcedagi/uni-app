@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { invoke } from "@tauri-apps/api/core";
 import { copyText } from "./clipboard";
 import { fingerprint } from "./secretRequest";
-import { enrollError, shortId, type EnrollmentRecord, type SealedStatus } from "./sealedApprovals";
+import { enrollError, shortId, type EnrollmentRecord, type SealedStatus } from "./sealedCore";
 
 // T-234 Settings → Approvals. One confirm, then Rust signs and posts the enrollment (`sealed_enroll`); the sealing
 // key stays in Rust. A failure says so and offers Try again; Rust first looks for the earlier signed event on the

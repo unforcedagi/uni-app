@@ -71,7 +71,7 @@ import { activeQuery, filterMembers, insertMention, memberLabels, pruneBindings,
 import { SmallLine } from "./areas/Companion";
 import { SecretRequestCard } from "./SecretRequestCard";
 import { EnrollmentLine, SealedApprovals } from "./SealedApprovals";
-import { parseEnrollment } from "./sealedApprovals";
+import { parseEnrollment } from "./sealedCore";
 import { parseSecretReceipt, parseSecretRequest, receiptFor, receiptsByRequest, secretCardsOn, withoutSecretBlock } from "./secretRequest";
 import NotePane, { usePaneShape } from "./NotePane";
 import { ApprovalsContext, useApprovals } from "./approvalsLive";
