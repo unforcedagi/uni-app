@@ -291,6 +291,21 @@ test.describe('drafts', () => {
     await expect(composer(page)).toHaveValue('');
   });
 
+  test('Forget device key removes every saved draft, of every identity', async ({ page }) => {
+    await boot(page);
+    await composer(page).fill(A);
+    await reloadAs(page, { identity: OTHER });
+    await composer(page).fill(B);
+    const saved = () => page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('uni.chatDraft.')).length);
+    expect(await saved()).toBe(2);
+    await composer(page).blur(); // a phone hides its bottom bar while the composer has focus
+    await press(page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Settings', exact: true }));
+    await press(page.getByRole('button', { name: 'Forget this device key', exact: true }));
+    await press(page.getByRole('button', { name: /Tap again to forget/ }));
+    await expect(page.locator('.pairing-card')).toBeVisible();
+    expect(await saved()).toBe(0);
+  });
+
   test('storage that refuses: typing, switching rooms and sending all still work, and the app says drafts are not being saved', async ({ page }) => {
     await page.addInitScript(() => sessionStorage.setItem('t.noStorage', '1'));
     await boot(page);
