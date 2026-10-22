@@ -67,6 +67,7 @@ async function boot(page: Page) {
           case 'vault_list': return ['uni'];
           case 'journal_config': return { hub: 'https://example.invalid', vault: 'uni' };
           case 'journal_flush': return { sent: [], remaining: 0, error: null };
+          case 'identity_forget': if (w.holdForget) await new Promise((resolve) => { w.finishForget = resolve; }); return null;
           case 'refresh': if (sessionStorage.getItem('t.holdIdentity')) await w.__identityHeld; return { pubkey: id, total_items: 0, channel_errors: {}, truncated_channels: [] };
           default: return null;
         }
@@ -393,6 +394,33 @@ test.describe('drafts', () => {
     await expect(page.locator('.pairing-card')).toBeVisible();
     expect(await saved()).toBe(0);
     // the send lands after the Forget
+    await page.evaluate(() => { (window as any).holdSend = false; (window as any).finishSend(); });
+    await expect.poll(() => posts(page)).toHaveLength(1);
+    await page.waitForTimeout(300);
+    expect(await saved()).toBe(0);
+  });
+
+  test('Forget confirmed before the identity arrives: the identity landing mid-Forget saves nothing, nor does the send after', async ({ page }) => {
+    await boot(page);
+    await composer(page).fill(INDENTED);
+    await page.evaluate(() => sessionStorage.setItem('t.holdIdentity', '1'));
+    await page.reload();
+    const garden = page.getByRole('textbox', { name: 'Message Garden' });
+    await garden.fill('Sent before it loaded.');
+    await page.evaluate(() => { (window as any).holdSend = true; (window as any).holdForget = true; });
+    await press(page.getByRole('button', { name: 'Send message', exact: true }));
+    await expect(page.locator('[data-outgoing="true"]')).toBeVisible();
+    await garden.blur();
+    const saved = () => page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('uni.chatDraft.')).length);
+    await press(page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Settings', exact: true }));
+    await press(page.getByRole('button', { name: 'Forget this device key', exact: true }));
+    await press(page.getByRole('button', { name: /Tap again to forget/ }));
+    // Forget is under way; now the identity arrives (the saved draft comes back in memory, and must not be saved again)
+    await page.evaluate(() => { sessionStorage.removeItem('t.holdIdentity'); (window as any).releaseIdentity(); });
+    await identityRead(page);
+    await page.evaluate(() => (window as any).finishForget());
+    await expect(page.locator('.pairing-card')).toBeVisible();
+    expect(await saved()).toBe(0);
     await page.evaluate(() => { (window as any).holdSend = false; (window as any).finishSend(); });
     await expect.poll(() => posts(page)).toHaveLength(1);
     await page.waitForTimeout(300);

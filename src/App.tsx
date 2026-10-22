@@ -374,6 +374,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const draftRevisions = useRef(new Map<string, number>());
   /** T-132: drafts are saved per identity; until it is known nothing is read or saved (what is typed meanwhile is saved when it is). */
   const identityRef = useRef<string | null>(null);
+  /** Set once Forget device key is confirmed: from then on no draft is saved, whatever arrives later (an identity, a send landing). */
+  const draftsForgotten = useRef(false);
   /** A scope whose saved draft was put back in front of text typed before the identity was known: a send of just that text, on its way
    *  meanwhile, gives back the saved draft (and only it) when it lands. */
   const restoredMerge = useRef(new Map<string, { revision: number; saved: string; added: string; mentions: Bindings }>());
@@ -1432,7 +1434,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   // T-132: kept on this device, so a reload gives the text back. Refused storage never blocks typing: the copy in memory stays.
   function storeDraft(key: string, text: string, mentions?: Bindings) {
     const owner = identityRef.current;
-    if (!owner) return;
+    if (!owner || draftsForgotten.current) return;
     setDraftStorageWarning(saveChatDraft(owner, key, text, mentions ?? []) ? "" : "This device isn't saving drafts right now. Your text is kept until the app closes.");
   }
   /** A scope's draft: the one in memory, else the one saved for this identity (read once). */
@@ -1630,13 +1632,13 @@ function Conversations({ onForget }: { onForget: () => void }) {
   async function forget() {
     // Two taps instead of window.confirm (unreliable in Android WebView).
     if (!forgetArmed) { setForgetArmed(true); return; }
-    // T-132: from here no draft is saved (a send still on its way would otherwise save one back after the wipe); a failed Forget gives it back
-    const owner = identityRef.current;
-    identityRef.current = null;
+    // T-132: from here no draft is saved (a send still on its way, or an identity arriving, would otherwise save one back after the wipe);
+    // a failed Forget gives saving back
+    draftsForgotten.current = true;
     try { voiceMounted.current = false; await voiceQueue.current; await voiceOutbox.current.clear(); await invoke("identity_forget");
       forgetDrafts(); invalidatePaths(); forgetAreas(); forgetDecisions(); forgetHeld(); forgetCalendar();
       try { for (const key of Object.keys(localStorage)) if (key.startsWith("uni.noteDraft.v1:") || key.startsWith(CHAT_DRAFT_PREFIX) || key.startsWith("uni.vaultExpanded.v1:") || key === ALIASES_KEY) localStorage.removeItem(key); } catch { /* unavailable storage */ }
-      onForget(); } catch (e) { voiceMounted.current = true; identityRef.current = owner; setError(String(e)); }
+      onForget(); } catch (e) { voiceMounted.current = true; draftsForgotten.current = false; setError(String(e)); }
   }
 
   const currentRoom = rooms.find((r) => r.id === channel);
