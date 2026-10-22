@@ -139,21 +139,33 @@ pub fn nostr_keys(secret: &str) -> Result<nostr::Keys, String> {
 
 /// Every source start performs a fresh native authentication. Release builds have no bypass.
 pub async fn authenticate<R: Runtime>(
-    _app: &AppHandle<R>,
-    _id: &str,
-    _cancelled: tokio::sync::watch::Receiver<Option<bool>>,
+    app: &AppHandle<R>,
+    id: &str,
+    cancelled: tokio::sync::watch::Receiver<Option<bool>>,
 ) -> Result<(), String> {
     #[cfg(debug_assertions)]
     if std::env::var("UNI_PAIR_NO_UNLOCK").as_deref() == Ok("1") {
         return Ok(());
     }
+    unlock(app, id, cancelled, "Pair a device", "Unlock to pair a device").await
+}
+
+/// The device's own unlock (biometric or screen lock), with `title` and `reason` shown by the system, never by the
+/// webview. T-234 approvals use it too (no bypass of any kind). Android and macOS; elsewhere an error.
+pub async fn unlock<R: Runtime>(
+    _app: &AppHandle<R>,
+    _id: &str,
+    _cancelled: tokio::sync::watch::Receiver<Option<bool>>,
+    _title: &str,
+    _reason: &str,
+) -> Result<(), String> {
     #[cfg(target_os = "android")]
     {
         let plugin = handle(_app)?;
         let mut cancelled = _cancelled;
         let authenticate = plugin.run_mobile_plugin_async::<serde_json::Value>(
             "authenticate",
-            serde_json::json!({"reason": "Unlock to pair a device", "authenticationId": _id}),
+            serde_json::json!({"title": _title, "reason": _reason, "authenticationId": _id}),
         );
         tokio::select! {
             biased;
@@ -171,6 +183,7 @@ pub async fn authenticate<R: Runtime>(
     }
     #[cfg(target_os = "macos")]
     {
+        let reason = _reason.to_string();
         return tauri::async_runtime::spawn_blocking(move || {
             use objc2_foundation::{NSError, NSString};
             use objc2_local_authentication::{LAContext, LAPolicy};
@@ -184,7 +197,7 @@ pub async fn authenticate<R: Runtime>(
             unsafe {
                 context.evaluatePolicy_localizedReason_reply(
                     LAPolicy::DeviceOwnerAuthentication,
-                    &NSString::from_str("Unlock to pair a device"),
+                    &NSString::from_str(&reason),
                     &reply,
                 );
             }
@@ -212,8 +225,5 @@ pub async fn authenticate<R: Runtime>(
         .map_err(|_| "Device unlock failed".to_string())?;
     }
     #[cfg(not(any(target_os = "android", target_os = "macos")))]
-    Err(
-        "Pair a device is unavailable: native device unlock is not implemented on this platform"
-            .into(),
-    )
+    Err(format!("{_title} is unavailable: native device unlock is not implemented on this platform"))
 }

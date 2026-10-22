@@ -1211,6 +1211,22 @@ async fn sealed_answer(
         _ => return Err("unknown decision".into()),
     };
     let dir = sealed_state_dir(&app)?;
+    if decision == Decision::Approve {
+        // the device's own confirm, before anything is recorded or sent: what it names comes from the checked card here
+        let (path, dir2, ch, re, ids) = (db_path(&app)?, dir.clone(), channel.clone(), reference.clone(), rids.clone());
+        secure_store::ensure_loaded(&app).await?;
+        let (title, reason) = blocking(move || {
+            let (keys, _) = uni_core::load_keys(false).map_err(|e| e.to_string())?;
+            let store = Store::open(path).map_err(|e| e.to_string())?;
+            let ev = card::stored_card(&store, &ch, &re).map_err(|e| e.to_string())?;
+            let seal = uni_core::sealed::derive_seal_key(&keys).map_err(|e| e.to_string())?;
+            let answers = card::Answers::load(&dir2).map_err(|e| e.to_string())?;
+            let view = card::view(&ev, &trusted_uni(), &seal, &answers, nostr::Timestamp::now().as_secs());
+            card::approval_summary(&view, &ids).map_err(|e| e.to_string())
+        })
+        .await?;
+        confirm_approval(&app, title, reason).await?;
+    }
     relay_send_io(&app, move |url, keys, store| {
         let ev = card::stored_card(store, &channel, &reference).map_err(|e| e.to_string())?;
         let now = nostr::Timestamp::now().as_secs();
@@ -1221,6 +1237,59 @@ async fn sealed_answer(
         Ok(card::view(&ev, &trusted_uni(), &seal, &answers, now))
     })
     .await
+}
+
+/// T-234 (Codex review 1, P0): an approval needs the person, not only the webview. The card's hold and tap are React; a
+/// script in the webview could call `sealed_answer` itself. So before a data key goes anywhere, Rust raises the
+/// device's own confirm, which no page can answer: the device unlock (biometric or screen lock) on Android and macOS,
+/// a native dialog on Linux (never released). Its words come from the checked card. One at a time.
+async fn confirm_approval(app: &tauri::AppHandle, title: String, reason: String) -> Result<(), String> {
+    static CONFIRMING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    let _one = CONFIRMING.try_lock().map_err(|_| "another approval is waiting for your confirmation".to_string())?;
+    // The headless walk (cage) can't press a native dialog's button. Only a Linux debug build, which is never released,
+    // lets `UNI_DEBUG_APPROVE_CONFIRMED=1` stand in for that press; it writes the confirm's words to the walk folder.
+    #[cfg(all(debug_assertions, target_os = "linux"))]
+    if std::env::var("UNI_DEBUG_APPROVE_CONFIRMED").as_deref() == Ok("1") {
+        if let Ok(dir) = std::env::var("UNI_T76_DIR") {
+            use std::io::Write;
+            let line = serde_json::json!({ "title": title, "reason": reason }).to_string();
+            let _ = std::fs::OpenOptions::new().create(true).append(true).open(std::path::Path::new(&dir).join("confirms.jsonl"))
+                .and_then(|mut f| writeln!(f, "{line}"));
+        }
+        return Ok(());
+    }
+    #[cfg(any(target_os = "android", target_os = "macos"))]
+    {
+        // never cancelled from here: the sender lives until the unlock answers
+        let (_keep, never) = tokio::sync::watch::channel(None);
+        let id = uuid::Uuid::new_v4().to_string();
+        secure_store::unlock(app, &id, never, &title, &reason).await.map_err(|e| format!("not approved: {e}"))
+    }
+    #[cfg(not(any(target_os = "android", target_os = "macos")))]
+    {
+        #[cfg(desktop)]
+        {
+            use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            app.dialog()
+                .message(reason)
+                .title(title)
+                .kind(MessageDialogKind::Warning)
+                .buttons(MessageDialogButtons::OkCancelCustom("Approve".into(), "Cancel".into()))
+                .show(move |ok| {
+                    let _ = tx.send(ok);
+                });
+            match rx.await {
+                Ok(true) => Ok(()),
+                _ => Err("not approved: cancelled on this device".into()),
+            }
+        }
+        #[cfg(not(desktop))]
+        {
+            let _ = (app, title, reason);
+            Err("approvals need a device unlock, which this platform doesn't have".into())
+        }
+    }
 }
 
 /// T-234: the cards from Uni waiting for a tap in any room (checked, unanswered, not expired), for Needs you.

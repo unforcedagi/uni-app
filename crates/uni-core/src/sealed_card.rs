@@ -709,6 +709,44 @@ pub fn view(ev: &Event, uni: &PublicKey, seal: &SealKey, answers: &Answers, now:
     CardView { kind: Some(card.kind), event_id: ev.id.to_hex(), refused: None, rows }
 }
 
+/// "45 s", "10 min", "14 h" (CARD.md §4), as the card shows a window.
+pub fn span(ttl: u64) -> String {
+    if ttl < 120 {
+        format!("{ttl} s")
+    } else if ttl < 7200 {
+        format!("{} min", ttl / 60)
+    } else {
+        let h = ttl as f64 / 3600.0;
+        if h.fract() == 0.0 { format!("{h:.0} h") } else { format!("{h:.1} h") }
+    }
+}
+
+/// What the device's own confirm says before an approval goes out: (title, reason), built here from the checked view and
+/// exactly the requests `rids` names, never from words the webview sends. Errors when a request isn't on the card or the
+/// card can't be approved.
+pub fn approval_summary(view: &CardView, rids: &[String]) -> Result<(String, String)> {
+    if let Some(why) = &view.refused {
+        return Err(Error::Invalid(why.clone()));
+    }
+    let rows: Vec<&RowView> = rids
+        .iter()
+        .map(|rid| view.rows.iter().find(|r| &r.rid == rid).ok_or_else(|| Error::Invalid("that request isn't on this card".into())))
+        .collect::<Result<_>>()?;
+    let uses = |n: u64| format!("{n} use{}", if n == 1 { "" } else { "s" });
+    let one = |r: &RowView| format!("{} · {}, {}, {}", r.credential, r.action, span(r.ttl_s), uses(r.uses));
+    match rows.as_slice() {
+        [] => Err(Error::Invalid("nothing was chosen".into())),
+        [r] if view.kind == Some(CardKind::Single) => {
+            let power = if r.class == Class::Powerful { "powerful " } else { "" };
+            Ok((format!("Approve a {power}credential"), format!("Uni: {}. Job {} {}.", one(r), &r.request_digest[..4], &r.request_digest[4..8])))
+        }
+        rs => Ok((
+            format!("Approve {} of Uni's morning grants", rs.len()),
+            rs.iter().map(|r| one(r)).collect::<Vec<_>>().join("; ") + ".",
+        )),
+    }
+}
+
 /// A card waiting for a tap, for Needs you.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Waiting {
@@ -1070,6 +1108,28 @@ mod tests {
         assert!(answered(&ev.id, &r.rid, &"0".repeat(64), &"1".repeat(64)).replays(&c));
         assert!(answered(&other, &"9".repeat(32), &"0".repeat(64), &r.rpk.to_hex()).replays(&c));
         assert!(!answered(&other, &"9".repeat(32), &"0".repeat(64), &"1".repeat(64)).replays(&c));
+    }
+
+    #[test]
+    fn the_confirm_names_exactly_what_is_approved() {
+        let w = world();
+        let (f, _) = fields(&w, "dns-zone", "powerful", 600, 1);
+        let ev = card(&w.uni, &f);
+        let v = view(&ev, &w.uni.public_key(), &w.seal, &Answers::default(), NOW);
+        let rid = f["rid"].as_str().unwrap().to_string();
+        let d = request_digest(&f).unwrap();
+        assert_eq!(approval_summary(&v, std::slice::from_ref(&rid)).unwrap(),
+            ("Approve a powerful credential".into(), format!("Uni: dns-zone · dns.edit, 10 min, 1 use. Job {} {}.", &d[..4], &d[4..8])));
+        assert!(approval_summary(&v, &["9".repeat(32)]).is_err(), "a request id that isn't on the card");
+        assert!(approval_summary(&v, &[]).is_err());
+        let rows: Vec<Value> = ["r2-a", "r2-b", "r2-c"].iter().map(|n| fields(&w, n, "routine", 50_400, 200).0).collect();
+        let m = view(&morning(&w.uni, &rows), &w.uni.public_key(), &w.seal, &Answers::default(), NOW);
+        let pick = [rows[0]["rid"].as_str().unwrap().to_string(), rows[2]["rid"].as_str().unwrap().to_string()];
+        assert_eq!(approval_summary(&m, &pick).unwrap(), ("Approve 2 of Uni's morning grants".into(),
+            "r2-a · dns.edit, 14 h, 200 uses; r2-c · dns.edit, 14 h, 200 uses.".into()));
+        let refused = view(&card(&Keys::generate(), &f), &w.uni.public_key(), &w.seal, &Answers::default(), NOW);
+        assert_eq!(approval_summary(&refused, &[rid]).unwrap_err().to_string(), "invalid: Not signed by Uni.");
+        assert_eq!([span(45), span(600), span(7200), span(5400 * 3)], ["45 s", "10 min", "2 h", "4.5 h"]);
     }
 
     #[test]

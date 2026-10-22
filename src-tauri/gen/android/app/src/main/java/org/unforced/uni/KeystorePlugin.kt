@@ -46,6 +46,8 @@ class NameArgs {
 
 @InvokeArg
 class AuthenticateArgs {
+  // T-234: approvals bring their own title; pairing sends none
+  var title: String? = null
   lateinit var reason: String
   lateinit var authenticationId: String
 }
@@ -82,12 +84,13 @@ class KeystorePlugin(private val activity: Activity) : Plugin(activity) {
       }
       val keyguard = activity.getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
       if (!keyguard.isDeviceSecure) {
-        invoke.reject("Set a screen lock to pair devices")
+        invoke.reject("Set a screen lock on this device first")
         return@runOnUiThread
       }
       try {
         val args = invoke.parseArgs(AuthenticateArgs::class.java)
         val reason = args.reason
+        val title = args.title ?: "Pair a device"
         authenticationId = args.authenticationId
         authenticating = invoke
         handler.postDelayed(timeout, 60_000)
@@ -95,8 +98,8 @@ class KeystorePlugin(private val activity: Activity) : Plugin(activity) {
           // STRONG | DEVICE_CREDENTIAL is unsupported through API 29.
           // The OS credential intent handles PIN, pattern, and password on API 24+.
           @Suppress("DEPRECATION")
-          val intent = keyguard.createConfirmDeviceCredentialIntent("Pair a device", reason)
-          if (intent == null) finishAuthentication(false, "Set a screen lock to pair devices")
+          val intent = keyguard.createConfirmDeviceCredentialIntent(title, reason)
+          if (intent == null) finishAuthentication(false, "Set a screen lock on this device first")
           else startActivityForResult(invoke, intent, "credentialResult")
         } else {
           val host = activity as? FragmentActivity
@@ -115,7 +118,7 @@ class KeystorePlugin(private val activity: Activity) : Plugin(activity) {
             })
           biometric = prompt
           prompt.authenticate(BiometricPrompt.PromptInfo.Builder()
-            .setTitle("Pair a device")
+            .setTitle(title)
             .setSubtitle(reason)
             .setAllowedAuthenticators(BIOMETRIC_STRONG or DEVICE_CREDENTIAL)
             .build())
