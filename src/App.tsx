@@ -374,6 +374,9 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const draftRevisions = useRef(new Map<string, number>());
   /** T-132: drafts are saved per identity; until it is known nothing is read or saved (what is typed meanwhile is saved when it is). */
   const identityRef = useRef<string | null>(null);
+  /** A scope whose saved draft was put back in front of text typed before the identity was known: a send of just that text, on its way
+   *  meanwhile, gives back the saved draft (and only it) when it lands. */
+  const restoredMerge = useRef(new Map<string, { revision: number; saved: string; added: string; mentions: Bindings }>());
   const [draftStorageWarning, setDraftStorageWarning] = useState("");
   const [pending, setPending] = useState<PendingFile[]>([]);
   const pendingStore = useRef(new Map<string, PendingFile[]>());
@@ -472,8 +475,13 @@ function Conversations({ onForget }: { onForget: () => void }) {
       const saved = loadChatDraft(identity, key);
       if (saved && saved.text !== text) {
         const mentions = new Map([...saved.mentions, ...(bindingStore.current.get(key) ?? [])]);
-        drafts.current.set(key, appendDraft(saved.text, text));
+        // joined as written: the saved text keeps every space (appendDraft trims)
+        drafts.current.set(key, text ? `${saved.text}\n\n${text}` : saved.text);
         bindingStore.current.set(key, mentions);
+        // a change of text, so a send on its way doesn't take it for its own and clear it
+        const revision = (draftRevisions.current.get(key) ?? 0) + 1;
+        draftRevisions.current.set(key, revision);
+        restoredMerge.current.set(key, { revision, saved: saved.text, added: text, mentions: new Map(saved.mentions) });
       }
       if (drafts.current.get(key)) storeDraft(key, drafts.current.get(key)!, bindingStore.current.get(key));
     }
@@ -1586,7 +1594,17 @@ function Conversations({ onForget }: { onForget: () => void }) {
         return items.filter((item) => !sentIds.includes(item.id));
       });
       // Do not erase text typed during an in-flight send or in another room.
-      if ((draftRevisions.current.get(key) ?? 0) === revision) {
+      const merge = restoredMerge.current.get(key);
+      if (merge && merge.added === snapshot && (draftRevisions.current.get(key) ?? 0) === merge.revision) {
+        // sent: the text typed before the saved draft came back; what stays is the saved draft
+        bindingStore.current.set(key, merge.mentions);
+        editDraft(key, merge.saved, merge.mentions);
+        if (activeScope.current === key) {
+          setDraft(merge.saved);
+          bindingsRef.current = merge.mentions;
+          setBindings(merge.mentions);
+        }
+      } else if ((draftRevisions.current.get(key) ?? 0) === revision) {
         bindingStore.current.set(key, new Map());
         editDraft(key, "", new Map());
         if (activeScope.current === key) {

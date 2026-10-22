@@ -331,9 +331,12 @@ test.describe('drafts', () => {
     expect(await saved()).toBe(0);
   });
 
-  test('before the identity is known: what is typed then goes after the saved draft, never over it', async ({ page }) => {
+  // a saved draft whose whitespace is the point: leading indent, trailing spaces, a trailing newline
+  const INDENTED = '    indented first line\n\tthen a tab   \n';
+
+  test('before the identity is known: what is typed then goes after the saved draft, which keeps every space', async ({ page }) => {
     await boot(page);
-    await composer(page).fill(A);
+    await composer(page).fill(INDENTED);
     // reload with the identity held back (the room tree waits for it too): Garden's saved draft can't be read yet
     await page.evaluate(() => sessionStorage.setItem('t.holdIdentity', '1'));
     await page.reload();
@@ -342,9 +345,31 @@ test.describe('drafts', () => {
     await garden.fill('Added before it loaded.');
     await page.evaluate(() => { sessionStorage.removeItem('t.holdIdentity'); (window as any).releaseIdentity(); });
     await identityRead(page);
-    await expect(garden).toHaveValue(A.trim() + '\n\nAdded before it loaded.');
+    await expect(garden).toHaveValue(INDENTED + '\n\nAdded before it loaded.');
     await reloadAs(page);
-    await expect(composer(page)).toHaveValue(A.trim() + '\n\nAdded before it loaded.');
+    await expect(composer(page)).toHaveValue(INDENTED + '\n\nAdded before it loaded.');
+  });
+
+  test('a send on its way while the saved draft comes back: the sent words go, the saved draft stays', async ({ page }) => {
+    await boot(page);
+    await composer(page).fill(INDENTED);
+    await page.evaluate(() => sessionStorage.setItem('t.holdIdentity', '1'));
+    await page.reload();
+    const garden = page.getByRole('textbox', { name: 'Message Garden' });
+    await expect(garden).toHaveValue('');
+    await garden.fill('Sent before it loaded.');
+    await page.evaluate(() => { (window as any).holdSend = true; });
+    await press(page.getByRole('button', { name: 'Send message', exact: true }));
+    await expect(page.locator('[data-outgoing="true"]')).toBeVisible();
+    // the identity arrives mid-send, and the saved draft comes back
+    await page.evaluate(() => { sessionStorage.removeItem('t.holdIdentity'); (window as any).releaseIdentity(); });
+    await identityRead(page);
+    await page.evaluate(() => { (window as any).holdSend = false; (window as any).finishSend(); });
+    await expect.poll(() => posts(page)).toEqual([{ channel: 'garden', body: 'Sent before it loaded.', replyTo: null }]);
+    await expect(page.locator('[data-outgoing="true"]')).toHaveCount(0);
+    await expect(garden).toHaveValue(INDENTED);
+    await reloadAs(page);
+    await expect(composer(page)).toHaveValue(INDENTED);
   });
 
   test('storage that starts refusing: an older saved copy never comes back as the draft', async ({ page }) => {
