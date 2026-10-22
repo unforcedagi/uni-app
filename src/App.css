@@ -320,6 +320,7 @@ p.decision-card.decision-loading { padding: 8px 12px; color: var(--muted); font-
 .md-code-lang { font-family: var(--mono); font-size: 12px; color: var(--text-soft); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* a message that opens with a block: its ⋯ (top right of the message) would sit on Copy */
 .message-content .md > .md-code:first-child .md-code-bar { padding-right: 48px; }
+.composer .draft-storage { color: var(--muted); font-size: 12px; line-height: 1.4; margin: 0 4px 6px; }
 .compose-menu .compose-discard.armed { color: var(--danger); font-weight: 600; }
 .md-code-copy { margin-left: auto; min-width: 64px; min-height: 32px; padding: 4px 12px; border: 0; border-radius: 6px; background: none; color: var(--text-soft); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
 .md-code-copy:hover { background: var(--surface-2); color: var(--text); }
