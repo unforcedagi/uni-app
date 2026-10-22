@@ -205,7 +205,7 @@ export function TaskSheet({ task, gone = false, nodeName, room, roomNamed, inRoo
   const [, bump] = useState(0);
   const moved = !gone && revisionMoved(opened.current.rev, task.updatedAt);
   /** Adopt the revision shown now as the one being answered. */
-  const reload = () => { opened.current = { id: task.id, rev: task.updatedAt }; setChanged(false); bump((n) => n + 1); };
+  const reload = () => { opened.current = { id: task.id, rev: task.updatedAt }; setChanged(false); setDecideError(null); setAnyway(false); bump((n) => n + 1); };
   useEffect(() => { if (moved) onStale?.(); }, [moved]); // eslint-disable-line react-hooks/exhaustive-deps
   const ready = answersReady(fresh, anyway) && !moved;
   const blockGap = unresolvedBlock(task.next, task.detail);
@@ -275,7 +275,7 @@ export function TaskSheet({ task, gone = false, nodeName, room, roomNamed, inRoo
       {tidy && !missing && !check && !checking && !unavailable && !waits && <p className="task-q-note task-tidy">{TIDY_SAYS[tidy]} It needs rewording by its room as one clear request, or closing. Nothing here is yours to do.</p>}
       {gone && <p className="task-gone" role="status">This is no longer open: it was done, decided or changed elsewhere.</p>}
       {/* T-145: a write refused for a newer revision offers the same Reload: the answers come back only for the revision now shown */}
-      {changed && !gone && <p className="task-gone task-changed" data-moved={moved || undefined} role="alert">This changed since you opened it. Nothing was saved; this is the latest.{moved && <> <button type="button" className="task-link" onClick={reload}>Reload</button></>}</p>}
+      {changed && !gone && <p className="task-gone task-changed" data-moved={moved || undefined} role="alert">This changed since you opened it. Nothing was saved; {moved ? <>this is the latest. <button type="button" className="task-link" onClick={reload}>Reload</button></> : "reading the latest…"}</p>}
       {moved && !changed && !decideError && <p className="task-gone task-changed" data-moved="true" role="alert">{CHANGED_SINCE}. This is the latest. <button type="button" className="task-link" onClick={reload}>Reload</button></p>}
       {/* r27: the note's own words (a preview link in them) are shown only when they say more than the heading: otherwise just the link */}
       {dq?.answerable && !unsure && dq.full !== dq.text && /https?:\/\/|\bwww\./.test(dq.full) && (repeatsHeading(dq.full, heading, decision ? rest : null) ? stepLinks(dq.full, true) : <div className="task-next"><NextText text={dq.full} vault={vault} onNote={(r) => { onClose(); onNote(r); }} /></div>)}
@@ -293,7 +293,7 @@ export function TaskSheet({ task, gone = false, nodeName, room, roomNamed, inRoo
           </>
           : <p className="task-q-note"><button type="button" className="task-link" onClick={() => { onClose(); onNote(asks.from ? { vault: asks.from.vault, id: asks.from.id } : { vault, id: task.id }); }}>{OPEN_TO_ANSWER} ›</button></p>}
       </section>}
-      {decideError && !gone && <p className="task-gone task-changed" role="alert">{decideError}</p>}
+      {decideError && !gone && <p className="task-gone task-changed" data-moved={moved || undefined} role="alert">{decideError}{moved && <> <button type="button" className="task-link" onClick={reload}>Reload</button></>}</p>}
       <dl className="task-facts">
         {/* r19: a record to tidy is Uni's to fix, never "Needs your decision"; r20: nor is one not read yet */}
         <dt>Status</dt><dd>{missing ? "Can't be checked: a note is missing" : decision && (checking || unavailable) ? "Not read yet" : tidy ? "Needs rewording by its room: not a request yet" : stateLine(task, (w) => isMe(w), OWNER)}</dd>

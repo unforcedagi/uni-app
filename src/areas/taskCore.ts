@@ -202,16 +202,28 @@ function askedOf(m: Record<string, unknown>): string | null {
 }
 
 /**
- * T-145: the signature of an ask's words, `v1:` and 16 hex digits: FNV-1a (64-bit) over the UTF-8 of `next`, U+001F, `detail`, each exactly as
- * stored (a missing or non-text field is empty). Not a secret and not a guard against forgery: it tells a stamp's words from words written
- * since. tasks.py computes the same (`ask_sig`), in the same write as the stamp; `scripts/simpleT145.test.ts` holds both to shared vectors.
+ * T-145: the signature of an ask's words, `v1:` and 16 hex digits: FNV-1a (64-bit) over the UTF-8 of `<bytes of next>:`, `next`, U+001F, `detail`. Each field as
+ * stored, with CR LF / CR read as LF and spaces, tabs and line breaks at its ends dropped (a store that re-ends lines or trims must not flip
+ * an ask to changed); a missing or non-text field is empty; a lone surrogate is U+FFFD. Not a secret and not a guard against forgery: it tells
+ * a stamp's words from words written since. tasks.py computes the same (`ask_sig`, proposed in T-145) in the same write as the stamp;
+ * `scripts/simpleT145.test.ts` holds both to shared vectors. 16-bit limbs, so a parse costs no BigInt per byte.
  */
+export const ASK_SIG_VERSION = "v1:";
+const sigPart = (v: unknown): string => (typeof v === "string" ? v.replace(/\r\n?/g, "\n").replace(/^[ \t\n]+|[ \t\n]+$/g, "") : "");
 export function askSig(next: unknown, detail: unknown): string {
-  const text = `${typeof next === "string" ? next : ""}\u001f${typeof detail === "string" ? detail : ""}`;
-  let h = BigInt("0xcbf29ce484222325");
-  const prime = BigInt("0x100000001b3"), mask = (BigInt(1) << BigInt(64)) - BigInt(1);
-  for (const b of new TextEncoder().encode(text)) h = ((h ^ BigInt(b)) * prime) & mask;
-  return `v1:${h.toString(16).padStart(16, "0")}`;
+  // the length of `next` in bytes leads, so no edit can move words across the boundary between the two fields
+  const enc = new TextEncoder(), n = enc.encode(sigPart(next)), d = enc.encode(sigPart(detail));
+  // h = h3:h2:h1:h0 (16 bits each), the offset basis 0xcbf29ce484222325; × 0x100000001b3 is × 0x1b3 plus the value shifted left 40 bits
+  let h0 = 0x2325, h1 = 0x8422, h2 = 0x9ce4, h3 = 0xcbf2;
+  const eat = (bytes: ArrayLike<number>) => {
+    for (let i = 0; i < bytes.length; i++) {
+      h0 ^= bytes[i];
+      const t0 = h0 * 0x1b3, t1 = h1 * 0x1b3 + (t0 >>> 16), t2 = h2 * 0x1b3 + (h0 << 8) + (t1 >>> 16), t3 = h3 * 0x1b3 + (h1 << 8) + (t2 >>> 16);
+      h0 = t0 & 0xffff; h1 = t1 & 0xffff; h2 = t2 & 0xffff; h3 = t3 & 0xffff;
+    }
+  };
+  eat(enc.encode(`${n.length}:`)); eat(n); eat([0x1f]); eat(d);
+  return ASK_SIG_VERSION + [h3, h2, h1, h0].map((x) => x.toString(16).padStart(4, "0")).join("");
 }
 
 export function parseTask(n: RawNote, tree: TaskTree): Task | null {

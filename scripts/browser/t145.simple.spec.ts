@@ -168,6 +168,33 @@ function suite(label: string, only: (page: Page) => string | null) {
       const d = (await calls(page, 'vault_decide')).at(-1);
       expect(d).toMatchObject({ id: 't145k6', from: 'open', to: 'decided', ifUpdatedAt: rev6, metadata: { decided: 'Teal', answered_rev: rev6 } });
     });
+
+    test('5: a decision answered against a revision that changed is refused and offers Reload; the answer after it records that revision', async ({ page }) => {
+      const skip = only(page); test.skip(!!skip, skip ?? '');
+      await boot(page);
+      await add(page, { id: 't145k7', title: 'Decide the placeholder shelf colour', tag: 'decision', next: 'Pick the placeholder shelf colour', meta: { options: ['Teal', 'Rust'] } });
+      await refresh(page, '2026-10-14T09:00:00.000Z');
+      await openRoom(page, 'Techne');
+      const needs = await needsYou(page);
+      await needs.locator('.cp-list > li.cp-item').filter({ hasText: 'shelf colour' }).locator('.cp-need').first().click();
+      const sheet = sheetOf(page);
+      await expect(sheet.getByRole('button', { name: 'Teal' })).toBeVisible();
+      const seen = await stampOf(page, 't145k7');
+      // the room re-asks with another option while the sheet is open; the tap is against the revision shown, so the vault refuses it
+      const NEXT = 'Pick the placeholder shelf colour (Rust is out of stock)';
+      await page.evaluate(([n, s]) => (window as any).__setTask('t145k7', { next: n, options: ['Teal', 'Sand'], asked_at: '2026-10-14T09:00:30.000Z', ask_sig: s }), [NEXT, askSig(NEXT, null)]);
+      await sheet.getByRole('button', { name: 'Teal' }).click();
+      await expect(sheet.locator('.task-changed')).toContainText(/changed or was decided elsewhere/);
+      expect(await stateOf(page, 't145k7')).toBe('open');
+      expect((await calls(page, 'vault_decide')).map((c: any) => c.ifUpdatedAt)).toEqual([seen]);
+      await expect(sheet.getByRole('button', { name: 'Teal' })).toHaveCount(0);
+      await sheet.getByRole('button', { name: 'Reload' }).click();
+      await expect(sheet.getByRole('button', { name: 'Sand' })).toBeVisible();
+      const now = await stampOf(page, 't145k7');
+      await sheet.getByRole('button', { name: 'Sand' }).click();
+      await expect(sheetOf(page)).toHaveCount(0);
+      expect((await calls(page, 'vault_decide')).at(-1)).toMatchObject({ id: 't145k7', ifUpdatedAt: now, metadata: { decided: 'Sand', answered_rev: now } });
+    });
   });
 }
 

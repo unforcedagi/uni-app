@@ -1,6 +1,6 @@
 // T-124 "Simple first" (pure, unit-tested in scripts/steer.test.ts): what the room's quiet companion says. One sentence for where
 // the room stands, at most three things that need the user (Now first), the chat composer's placeholder.
-import { isMe, PRIORITIES, type Task } from "./taskCore.ts";
+import { ASK_SIG_VERSION, isMe, PRIORITIES, type Task } from "./taskCore.ts";
 import { taskTitle, type Where } from "./whereCore.ts";
 import { ROOT } from "./treeCore.ts";
 import type { Run } from "./steerCore.ts";
@@ -1413,7 +1413,8 @@ export type Resolved = { state: Confirm; why: RecheckWhy | null };
  * again. A record without `ask_sig` (written before tasks.py stamped it) is read by its stamp alone, as before.
  */
 export function confirmationOf(t: { askedAt?: string | null; confirmedAt?: string | null; askSig?: string | null; sig?: string }, nowMs = Date.now()): Resolved {
-  if (t.askSig && t.askSig !== t.sig) return { state: "recheck", why: "changed" };
+  // a signature of a version this app doesn't compute is not read (the stamp decides), never taken for changed words
+  if (t.askSig && t.sig && t.askSig.startsWith(ASK_SIG_VERSION) && t.askSig !== t.sig) return { state: "recheck", why: "changed" };
   const stamp = askStamp(currentAt(t, nowMs), nowMs);
   return stamp === "recent" ? { state: "confirmed", why: null } : { state: "recheck", why: stamp === "none" ? "no-date" : stamp };
 }
