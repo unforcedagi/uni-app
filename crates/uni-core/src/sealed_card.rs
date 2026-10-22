@@ -401,10 +401,8 @@ pub fn check_card(ev: &Event, uni: &PublicKey, seal: &SealKey, now: u64) -> std:
             if rows.iter().any(|r| r.get("class").is_some_and(|c| c.as_str() != Some("routine"))) {
                 return Err(PowerfulOnMorning);
             }
+            // every row is then routine inside its box too (§3.6 refuses a misstated class)
             let rows = rows.iter().map(|r| check_request(r, seal, now)).collect::<std::result::Result<Vec<_>, _>>()?;
-            if rows.iter().any(|r| r.class != Class::Routine) {
-                return Err(PowerfulOnMorning);
-            }
             // one row per credential, each its own request and one-time key, all answered by the same time
             let distinct = |f: fn(&Request) -> String| {
                 let mut xs: Vec<String> = rows.iter().map(f).collect();
