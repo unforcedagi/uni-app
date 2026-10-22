@@ -188,7 +188,14 @@ pub fn load_record(path: &Path) -> Option<EnrollmentRecord> {
 fn save_json<T: Serialize>(path: &Path, value: &T) -> Result<()> {
     let json = serde_json::to_vec_pretty(value).map_err(|e| Error::Invalid(e.to_string()))?;
     let tmp = path.with_extension("tmp");
-    std::fs::write(&tmp, json).map_err(|e| Error::Invalid(e.to_string()))?;
+    let write = || -> std::io::Result<()> {
+        use std::io::Write;
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(&json)?;
+        // on disk before the rename, so a crash can't leave an empty record (and a second enrollment after it)
+        f.sync_all()
+    };
+    write().map_err(|e| Error::Invalid(e.to_string()))?;
     std::fs::rename(&tmp, path).map_err(|e| Error::Invalid(e.to_string()))
 }
 
@@ -280,7 +287,12 @@ pub async fn enroll(
     let mut client = crate::BuzzClient::connect(relay_url, identity, auth_tag).await?;
     let checked = async {
         if let Some(ev) = &pending {
-            let found = client.req_until_eose("sealed-pending", &[nostr::Filter::new().id(ev.id)]).await?;
+            // A relay that refuses the lookup (CLOSED) counts as "not found": the young event is then resent with
+            // the same id, so a refusal can't block every later retry.
+            let found = match client.req_until_eose("sealed-pending", &[nostr::Filter::new().id(ev.id)]).await {
+                Err(Error::SubscriptionClosed { .. }) => Vec::new(),
+                other => other?,
+            };
             if found.iter().any(|f| f.id == ev.id) {
                 return Ok(Some(ev.clone()));
             }

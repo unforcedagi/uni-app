@@ -7,8 +7,8 @@ import { enrollError, shortId, type EnrollmentRecord, type SealedStatus } from "
 // T-234 Settings → Approvals. One confirm, then Rust signs and posts the enrollment (`sealed_enroll`); the sealing
 // key stays in Rust. A failure says so and offers Try again; Rust first looks for the earlier signed event on the
 // relay (its OK may have been lost) and records it rather than posting again. (If that room has become unreadable to
-// you in between, a retry elsewhere can post a second one; its content is the same, so Uni learns nothing different.) Enable can't run twice at once (here and in
-// Rust), and once enrolled there is no Enable button, only the record.
+// you in between, a retry elsewhere can post a second one; its content is the same, so Uni learns nothing different.)
+// Enable can't run twice at once (here and in Rust), and once enrolled there is no Enable button, only the record.
 
 const day = (s: number) => new Date(s * 1000).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 
@@ -40,6 +40,8 @@ export function SealedApprovals() {
     setPhase("enabling");
     try {
       const rec = await invoke<EnrollmentRecord>("sealed_enroll", { channel: room });
+      // a record the panel can't show is read back from Rust's own record rather than trusted
+      if (!rec || typeof rec.event_id !== "string" || typeof rec.created_at !== "number") { setPhase("idle"); load(); return; }
       setSt((s) => (s ? { ...s, enrolled: rec } : s));
       setPhase("idle");
     } catch (e) {

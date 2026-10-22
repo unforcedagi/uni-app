@@ -57,6 +57,8 @@ struct MockRelay {
     drop_next_ok: std::sync::atomic::AtomicBool,
     /// T-234: refuse the next EVENT without storing it.
     reject_next: std::sync::atomic::AtomicBool,
+    /// T-234: answer an `ids`-only REQ with CLOSED (a relay that won't look an event up by id alone).
+    close_id_lookups: std::sync::atomic::AtomicBool,
 }
 
 impl MockRelay {
@@ -73,6 +75,7 @@ impl MockRelay {
             open_auth: std::sync::atomic::AtomicBool::new(false),
             drop_next_ok: std::sync::atomic::AtomicBool::new(false),
             reject_next: std::sync::atomic::AtomicBool::new(false),
+            close_id_lookups: std::sync::atomic::AtomicBool::new(false),
         })
     }
 
@@ -262,6 +265,11 @@ async fn serve(listener: TcpListener, relay: Arc<MockRelay>) {
                                             closed = Some("restricted: p-gated events require #p matching your pubkey");
                                         }
                                     }
+                                }
+                                if relay.close_id_lookups.load(std::sync::atomic::Ordering::SeqCst)
+                                    && filters.iter().any(|f| f["ids"].is_array() && f["kinds"].is_null())
+                                {
+                                    closed = Some("restricted: scope the query");
                                 }
                                 if let Some(reason) = closed {
                                     ws.send(Message::Text(json!(["CLOSED", sub, reason]).to_string().into()))
@@ -2365,6 +2373,25 @@ async fn a_refused_enrollment_is_resent_as_the_same_event_while_young() {
     let old = pending_id(dir.path());
     let record = sealed::enroll(&f.url, &f.me, None, &store, f.ch_a, &uni, dir.path(), later + sealed::RETRY_SAME_EVENT_SECS + 1).await.unwrap();
     assert_ne!(record.event_id, old, "too old for the relay: signed afresh");
+}
+
+/// T-234: a relay that refuses the lookup by id doesn't lock Try again out: the young event is resent, same id.
+#[tokio::test]
+async fn a_refused_lookup_still_lets_try_again_post_the_same_event() {
+    use uni_core::sealed;
+    let f = fixture().await;
+    let store = Store::open_in_memory().unwrap();
+    sync_once(&f.url, &f.me, None, &store).await.unwrap();
+    let uni = f.other.public_key();
+    let now = nostr::Timestamp::now().as_secs();
+    let dir = tempfile::tempdir().unwrap();
+    f.relay.reject_next.store(true, std::sync::atomic::Ordering::SeqCst);
+    assert!(sealed::enroll(&f.url, &f.me, None, &store, f.ch_a, &uni, dir.path(), now).await.is_err());
+    let ev: Value = serde_json::from_str(&std::fs::read_to_string(dir.path().join(sealed::PENDING_FILE)).unwrap()).unwrap();
+    f.relay.close_id_lookups.store(true, std::sync::atomic::Ordering::SeqCst);
+    let record = sealed::enroll(&f.url, &f.me, None, &store, f.ch_a, &uni, dir.path(), now + 30).await.unwrap();
+    assert_eq!(record.event_id, ev["id"].as_str().unwrap());
+    assert_eq!(enrollments(&f.relay).len(), 1);
 }
 
 /// T-234: two Enables at once (two windows, a remounted Settings) publish one enrollment, and both get its record.

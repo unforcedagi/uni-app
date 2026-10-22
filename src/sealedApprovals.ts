@@ -23,6 +23,6 @@ export const shortId = (id: string): string => `${id.slice(0, 4)} ${id.slice(4, 
 
 /** What a failed `sealed_enroll` says, in words. */
 export const enrollError = (e: unknown): string => {
-  const s = typeof e === "string" ? e : (e as Error)?.message ?? "";
-  return s.trim() || "it couldn't be posted";
+  const m = typeof e === "string" ? e : (e as Error)?.message;
+  return (typeof m === "string" ? m.trim() : "") || "it couldn't be posted";
 };
