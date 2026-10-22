@@ -803,7 +803,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   useLayoutEffect(() => { if (input.current) resizeComposer(input.current); }, [draft, asides, channel, notes.length]); // T-200: a note opening or closing changes the cap
   const focusComposer = useRef(false);
   // T-161: every room's Hermes approval prompts still waiting, for Needs you, the room and one notification each
-  const approvals = useApprovals({ identity, enabled: !!identity, synced, roomName: (id) => roomsRef.current.find((r) => r.id === id)?.name ?? null,
+  const approvals = useApprovals({ identity, enabled: !!identity, synced, roomsReady: rooms.length > 0, roomName: (id) => roomsRef.current.find((r) => r.id === id)?.name ?? null,
     looking: (ch) => document.hasFocus() && ch === channelRef.current });
 
   const loadRooms = useCallback(async (cached?: Room[]) => {
@@ -1665,6 +1665,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   };
 
   const waitingRefs = new Set(approvals.map((a) => a.ref));
+  const waitingKey = approvals.map((a) => a.ref).join(" ");
   const renderMessage = (m: Message, inThread: boolean, prev?: Message, newest = false) => {
     // r18: a progress ping from hours or days ago is folded away as a past update, never the room's live status
     if (isWorkerStatus(m.body) && !(inThread && m.ref === root) && editing !== m.ref && staleStatus(m, Date.now() / 1000, newest)) return <details key={m.ref} data-ref={m.ref} className="message status-line status-past">
@@ -1735,7 +1736,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     {currentView && fetchedView === currentView && channel && roomDecisions(channel, messages)}
   </>,
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  [messages, identity, menuFor, decisions.version, root, older, roomName, editing, focusRef, relayOrigin, fetchedView, failedView, currentView, busy, synced, secretRequesters, secretReceipts]);
+  [messages, identity, menuFor, decisions.version, root, older, roomName, editing, focusRef, relayOrigin, fetchedView, failedView, currentView, busy, synced, secretRequesters, secretReceipts, waitingKey]);
 
   const topNote = notes[notes.length - 1];
   // A top-level note Back closes its tab and returns to the last used tab.
@@ -1871,8 +1872,11 @@ function Conversations({ onForget }: { onForget: () => void }) {
   }), [openNote, loadRooms]);
   /** T-161: an approval prompt opens its room at the prompt with the composer focused; the user answers there (nothing is sent for them) */
   const openApproval = (a: Approval) => {
-    if (channelRef.current === a.channel && root === null) { focusTries.current = 0; setFocusRef(a.ref); input.current?.focus(); return; }
-    focusComposer.current = true; areaActions.openRoom(a.channel, a.ref);
+    if (channelRef.current === a.channel && root === a.root) { focusTries.current = 0; setFocusRef(a.ref); input.current?.focus(); return; }
+    focusComposer.current = true;
+    // a prompt posted as a reply is in its thread, never the room's timeline: it opens there, as a search hit does
+    if (a.root) { focusTries.current = 0; openTarget({ kind: "thread", channel: a.channel, root: a.root, title: `Thread · ${roomsRef.current.find((r) => r.id === a.channel)?.name ?? "Room"}` }, "focus"); setFocusRef(a.ref); }
+    else areaActions.openRoom(a.channel, a.ref);
   };
   const approvalsView = { list: approvals, open: openApproval, roomName: (id: string) => rooms.find((r) => r.id === id)?.name ?? null };
   const primaryVault = vaults.includes(lifeVault) ? lifeVault : vaults.includes("uni") ? "uni" : null;

@@ -396,7 +396,7 @@ Two proposals wait on a scope decision.
       notes.push(area('a-x-' + a.name, a.name, 'foreground', a.channel ?? 'ch-techne', `An area whose app is ${a.name}.`), { id: 'app-x-' + a.name, path: `Areas/${a.name}/app`, extension: 'html', content: a.html, ...(a.interface ? { metadata: { interface: a.interface } } : {}), updatedAt: '2026-10-07T00:00:00Z' },
         { id: 'n-x-' + a.name, path: `Areas/${a.name}/Alpha`, extension: 'md', content: '# Alpha', updatedAt: '2026-10-07T00:00:00Z' });
     }
-    const msg = (ref: string, channel: string, name: string, ago: number, body: string) => ({ ref, channel, author: name === 'Aaron' ? U : name === 'Priya' ? 'd'.repeat(64) : 'b'.repeat(64), author_name: name, ts: d.now - ago, body, mentions_me: false, root: null, parent: null, mentions: [], reply_count: 0, last_reply_ts: null, edited: false, reactions: [] });
+    const msg = (ref: string, channel: string, name: string, ago: number, body: string) => ({ ref, channel, author: name === 'Aaron' || name === 'Kit (you)' ? U : name === 'Priya' ? 'd'.repeat(64) : 'b'.repeat(64), author_name: name, ts: d.now - ago, body, mentions_me: false, root: null, parent: null, mentions: [], reply_count: 0, last_reply_ts: null, edited: false, reactions: [] });
     const msgs: Record<string, any[]> = {
       'ch-techne': [...[['Uni', 'Parked the font question until the frame can load web fonts.'], ['Aaron', 'Rail labels still feel tight on the phone.'], ['Uni', 'Checked contrast on meta text; muted needed a darker tone.'], ['Aaron', 'Fine. Keep the green accent.'], ['Uni', 'Sandbox self-test is wired into Settings.'], ['Aaron', 'Run it on the laptop first.']].map(([n, b], i) => msg('t0' + i, 'ch-techne', n, 86400 * (6 - i) + 7200, b)), msg('t1', 'ch-techne', 'Aaron', 86400, 'Scoping the area apps: one HTML note per area, sealed frame, bridge only.'), msg('t2', 'ch-techne', 'Uni', 5400, 'Drafted the bridge reference. Compose never sends, you stay in control.'), msg('t3', 'ch-techne', 'Aaron', 1800, 'Good. Ship Techne first, then the practice dashboard.')],
       'ch-unf': [msg('u1', 'ch-unf', 'Uni', 14000, 'Two proposals are waiting on a decision about scope.'), msg('u2', 'ch-unf', 'Aaron', 600, 'I will call them Thursday.')],
@@ -410,9 +410,11 @@ Two proposals wait on a scope decision.
     const rooms = [room('uni-room', 'Uni'), room('ch-techne', 'Techne'), ...(d.multiRoom ? [room('ch-cohere', 'Cohere')] : []), room('ch-unf', 'Unforced Dev'), room('ch-sad', 'Sanctum'), room('ch-atlas', 'Atlas'), room('ch-exp', 'Expression'), ...(d.strayRoom ? [room('ch-garden', 'garden-club')] : [])];
     // A message arriving over the live socket: stored, then announced like the real `uni://live` event.
     // r18: `ago` (seconds) and `edited` give a message from earlier (a progress ping from Monday)
-    w.__arrive = (channel: string, name: string, body: string, ago = 0, edited = false) => {
-      const m = { ...msg('live' + Math.random().toString(36).slice(2, 8), channel, name, ago, body), edited };
+    // T-161: `root`: the message arrives as a reply in that message's thread (kept out of the room's timeline, as the store does)
+    w.__arrive = (channel: string, name: string, body: string, ago = 0, edited = false, root: string | null = null) => {
+      const m = { ...msg('live' + Math.random().toString(36).slice(2, 8), channel, name, ago, body), edited, root, parent: root };
       (msgs[channel] ??= []).push(m);
+      if (root) { const top = msgs[channel].find((x: any) => x.ref === root); (threads[root] ??= top ? [top] : []).push(m); if (top) top.reply_count += 1; }
       const r = rooms.find((x) => x.id === channel); if (r) { r.last_message = body; r.last_ts = m.ts; }
       for (const h of w.__listeners['uni://live'] ?? []) w.__cbs[h]?.({ event: 'uni://live', id: 1, payload: { kind: 'message', channel, author: m.author } });
       return m.ref;
@@ -549,7 +551,7 @@ Two proposals wait on a scope decision.
           case 'get_identity': if (d.identityDelay) await new Promise((r) => setTimeout(r, d.identityDelay)); return U;
           case 'get_npub': return 'test';
           case 'get_rooms': if (d.roomsDelay) await new Promise((r) => setTimeout(r, d.roomsDelay)); w.__roomsResolved = true; return rooms;
-          case 'get_messages': if (args.limit === 200 && w.__lookupDelay) await new Promise((r) => setTimeout(r, w.__lookupDelay)); if (args.limit === 200 && w.__lookupFails) throw 'relay unreachable'; if (d.messagesDelay) await new Promise((r) => setTimeout(r, d.messagesDelay)); return args.root ? threads[args.root] ?? [] : (msgs[args.channel] ?? []).filter((m: any) => !(args.limit === 200 && !String(m.ref).startsWith('live'))).slice(-(args.limit ?? 300));
+          case 'get_messages': if (args.limit === 200 && w.__lookupDelay) await new Promise((r) => setTimeout(r, w.__lookupDelay)); if (args.limit === 200 && w.__lookupFails) throw 'relay unreachable'; if (d.messagesDelay) await new Promise((r) => setTimeout(r, d.messagesDelay)); return args.root ? threads[args.root] ?? [] : (msgs[args.channel] ?? []).filter((m: any) => !m.root && !(args.limit === 200 && !String(m.ref).startsWith('live'))).slice(-(args.limit ?? 300));
           // T-161: like the store's query: each room with an approval prompt (not the user's) in the last day, from its oldest prompt on
           case 'approval_messages': return Object.values(msgs).flatMap((list: any[]) => { const i = list.findIndex((m) => m.author !== U && String(m.body).includes('deny` to cancel.') && m.ts >= Date.now() / 1000 - 86400); return i < 0 ? [] : list.slice(i); });
           case 'get_members': if (w.__membersDelay) await new Promise((r) => setTimeout(r, w.__membersDelay)); return [{ pubkey: U, name: 'Aaron', named: true }, ...(d.uniMember ? [{ pubkey: 'c'.repeat(64), name: 'Uni', named: true }] : d.tasks ? [{ pubkey: 'b'.repeat(64), name: 'Uni', named: true }] : [])];

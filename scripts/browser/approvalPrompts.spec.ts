@@ -9,6 +9,8 @@ import { bootAreas } from './areasFixture';
 
 const fx = JSON.parse(readFileSync(new URL('../fixtures/approval-prompts.json', import.meta.url), 'utf8'));
 const ROOM = 'ch-garden';
+/** the fixture's user, by a made-up name */
+const ME = 'Kit (you)';
 const SHOTS = 'scripts/browser/__shots__/prompts';
 const wide = (page: Page) => (page.viewportSize()?.width ?? 0) >= 900 && (page.viewportSize()?.height ?? 0) >= 400;
 const android = (page: Page) => page.evaluate(() => /Android/i.test(navigator.userAgent));
@@ -34,7 +36,7 @@ const strip = (page: Page) => page.locator('.cp-line[aria-expanded="false"]');
 async function unfold(page: Page) { if (await strip(page).count()) await strip(page).click(); }
 const rows = (page: Page) => page.locator('.cp-approval');
 /** a message over the live socket, each one second after the one before (the fixture's own clock is the boot time) */
-const arrive = (page: Page, body: string, who = 'Uni', room = ROOM) => page.evaluate(([c, n, b]) => { const w = window as any; w.__k = (w.__k ?? 0) + 1; return w.__arrive(c, n, b, -w.__k); }, [room, who, body] as const);
+const arrive = (page: Page, body: string, who = 'Uni', room = ROOM, root: string | null = null) => page.evaluate(([c, n, b, r]) => { const w = window as any; w.__k = (w.__k ?? 0) + 1; return w.__arrive(c, n, b, -w.__k, false, r); }, [room, who, body, root] as const);
 /** the app has read the store since the last message arrived (the hook re-reads on each live message) */
 const reads = (page: Page) => page.evaluate(() => (window as any).__calls.filter((c: any) => c.cmd === 'approval_messages').length);
 async function settled(page: Page, before: number) { await expect.poll(() => reads(page)).toBeGreaterThan(before); await page.waitForTimeout(150); }
@@ -61,7 +63,7 @@ test.describe('a Hermes approval prompt, loudly', () => {
     else await expect.poll(() => page.evaluate(() => (window as any).__notes)).toEqual([{ title: 'Hermes in #garden-club', body: 'Needs your OK to run: git branch -D feature/example-cleanup' }]);
     // read again (a message elsewhere): still one row, and no second notification
     const n = await reads(page);
-    await arrive(page, 'Unrelated chatter in another room.', 'Aaron', 'ch-unf');
+    await arrive(page, 'Unrelated chatter in another room.', ME, 'ch-unf');
     await settled(page, n);
     await expect(row).toHaveCount(1);
     expect((await page.evaluate(() => (window as any).__notes.length))).toBeLessThanOrEqual(1);
@@ -75,7 +77,7 @@ test.describe('a Hermes approval prompt, loudly', () => {
     expect(await page.evaluate(() => (window as any).__calls.filter((c: any) => c.cmd === 'post_message').length)).toBe(0);
     await shot(page, '02-room');
     // Hermes says it was approved: the banner and the mark go
-    await arrive(page, '/approve', 'Aaron');
+    await arrive(page, '/approve', ME);
     await arrive(page, fx.outcomes.approved);
     await expect(page.locator('.approval-banner')).toHaveCount(0);
     await expect(page.locator('.message.approval-waiting')).toHaveCount(0);
@@ -88,7 +90,7 @@ test.describe('a Hermes approval prompt, loudly', () => {
       await expect(rows(page)).toHaveCount(1);
       // the user's own reply is not the outcome: it waits until Hermes answers
       const n = await reads(page);
-      await arrive(page, outcome === 'denied' ? '/deny' : '/approve', 'Aaron');
+      await arrive(page, outcome === 'denied' ? '/deny' : '/approve', ME);
       await settled(page, n);
       await expect(rows(page)).toHaveCount(1);
       await arrive(page, fx.outcomes[outcome]);
@@ -117,7 +119,7 @@ test.describe('a Hermes approval prompt, loudly', () => {
     const n = await reads(page);
     for (const body of Object.values(fx.not_prompts) as string[]) await arrive(page, body);
     // the user pasting a prompt is not Hermes asking
-    await arrive(page, fx.prompts.three_answers_5min, 'Aaron');
+    await arrive(page, fx.prompts.three_answers_5min, ME);
     await settled(page, n);
     await page.waitForTimeout(400);
     await expect(rows(page)).toHaveCount(0);
@@ -125,5 +127,23 @@ test.describe('a Hermes approval prompt, loudly', () => {
     await arrive(page, fx.prompts.smart_deny);
     await expect(rows(page)).toHaveCount(1);
     await expect(rows(page).locator('.cp-approval-lead')).toHaveText('Override needs your OK in #garden-club');
+  });
+
+  test('4. a prompt posted as a reply opens in its thread, where it is, with the composer focused', async ({ page }) => {
+    await boot(page);
+    const top = await arrive(page, 'Cleaning up the old example branches now.');
+    const ref = await arrive(page, fx.prompts.two_answers_30min, 'Uni', ROOM, top);
+    await unfold(page);
+    await expect(rows(page)).toHaveCount(1);
+    await rows(page).getByRole('button').click();
+    await expect(page.locator(`.message.approval-waiting[data-ref="${ref}"]`)).toBeVisible();
+    await expect(page.locator('.message.thread-root')).toContainText('Cleaning up the old example branches now.');
+    await expect.poll(() => composerFocused(page)).toBe(true);
+    await expect(page.getByRole('status').filter({ hasText: "isn't in the loaded history" })).toHaveCount(0);
+    // answered in the thread: it goes
+    await arrive(page, '/approve', ME, ROOM, top);
+    await arrive(page, fx.outcomes.approved, 'Uni', ROOM, top);
+    await expect(page.locator('.approval-banner')).toHaveCount(0);
+    await expect(page.locator('.message.approval-waiting')).toHaveCount(0);
   });
 });

@@ -384,10 +384,23 @@ async fn get_messages(
     .await
 }
 
+/// T-161: the slice of a message `src/approvals.ts` reads (`ApprovalSource`): no member names or mentions, so a read on every live
+/// message stays one query.
+#[derive(Serialize)]
+struct ApprovalSourceView {
+    #[serde(rename = "ref")]
+    id: String,
+    channel: String,
+    author: String,
+    ts: i64,
+    body: String,
+    root: Option<String>,
+}
+
 /// T-161: what Hermes approval prompts are read from (`src/approvals.ts` decides which still wait). Every room with a prompt in the last day,
 /// from its oldest prompt on: the answers and outcomes after it are the rest of the room's messages. Read-only, so no IO gate.
 #[tauri::command]
-async fn approval_messages(app: tauri::AppHandle) -> Result<Vec<MessageView>, String> {
+async fn approval_messages(app: tauri::AppHandle) -> Result<Vec<ApprovalSourceView>, String> {
     let path = db_path(&app)?;
     blocking(move || {
         let store = Store::open(path).map_err(|e| e.to_string())?;
@@ -399,11 +412,21 @@ async fn approval_messages(app: tauri::AppHandle) -> Result<Vec<MessageView>, St
         let me = my_pubkey();
         store
             // the answers line every prompt ends with ("… or `/deny` to cancel."), the command prompt's and the smart-deny one's alike
-            .approval_messages("deny` to cancel.", since, me.as_deref(), 300)
-            .map_err(|e| e.to_string())?
-            .into_iter()
-            .map(|m| view(&store, m))
-            .collect()
+            // the newest 1000 a room: an outcome is matched to the oldest prompt still waiting, so a busy room must keep that prompt in view
+            .approval_messages("deny` to cancel.", since, me.as_deref(), 1000)
+            .map(|rows| {
+                rows.into_iter()
+                    .map(|m| ApprovalSourceView {
+                        id: m.item.r#ref,
+                        channel: m.item.channel,
+                        author: m.item.author,
+                        ts: m.item.ts,
+                        body: m.item.body,
+                        root: m.root,
+                    })
+                    .collect()
+            })
+            .map_err(|e| e.to_string())
     })
     .await
 }

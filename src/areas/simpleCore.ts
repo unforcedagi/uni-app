@@ -194,8 +194,8 @@ export function uniPanel(feed: NeedsFeed, max = UNI_ROWS): NeedsFeed & { rest: n
   const privateCount = feed.privates.reduce((n, p) => n + p.count, 0);
   // r20: a decision still being read fills a row only where nothing owed is left to show; it is never counted
   const pending = (feed.pending ?? []).slice(0, Math.max(0, max - rows.length));
-  // r28: the waiting runs are shown in the panel itself, so they are not in "Show N more"
-  return { ...feed, rows, privates: [], total: feed.total, rest: Math.max(0, feed.total - rows.length - (feed.waiting?.length ?? 0)), privateCount, pending };
+  // r28: the waiting runs are shown in the panel itself, so they are not in "Show N more"; T-161: nor are the approval prompts
+  return { ...feed, rows, privates: [], total: feed.total, rest: Math.max(0, feed.total - rows.length - (feed.waiting?.length ?? 0) - (feed.approvals?.length ?? 0)), privateCount, pending };
 }
 /** "Includes 1 in a private area": the "N more ›" link's tooltip, when private items are folded into its count. */
 export const privateNote = (n: number): string | null => (n <= 0 ? null : n === 1 ? "Includes 1 item in a private area" : `Includes ${n} items in private areas`);

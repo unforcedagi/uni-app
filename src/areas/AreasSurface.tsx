@@ -442,8 +442,8 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   const runRoom = (r: Run) => r.channel ? rooms.find((x) => x.id === r.channel) ?? null : r.room ? rooms.find((x) => x.name.replace(/^#/, "").toLowerCase() === r.room!.toLowerCase()) ?? null : roomOfNode(r.node) ?? target;
   const runMissing = (r: Run) => !roomsPending && rooms.length > 0 && !!(r.channel || r.room) && !runRoom(r);
   const openRun = (r: Run) => { const room = runRoom(r); if (room) openAt(room, r.message ?? null); };
-  /** T-161: an approval prompt opens its room the same way, at the prompt */
-  const openApproval = (a: Approval) => { const room = rooms.find((x) => x.id === a.channel); if (room) openAt(room, a.ref); else approvalsAll.open(a); };
+  /** T-161: an approval prompt opens its room the same way, at the prompt (one in a thread, its thread: App's opener does that) */
+  const openApproval = (a: Approval) => { const room = rooms.find((x) => x.id === a.channel); if (room && !a.root) openAt(room, a.ref); else approvalsAll.open(a); };
   const openAt = (room: { id: string; name: string }, message: string | null) => {
     closeSheet(); stripSheet?.close(); setWork(false);
     const here = roomFor(room.id);

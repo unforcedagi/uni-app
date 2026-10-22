@@ -18,9 +18,13 @@ function allowed(): Promise<boolean> {
 
 /** Notify when a mention arrives and the user isn't already looking at it. */
 export async function notifyMention(opts: { author: string; room: string; preview: string; looking: boolean }) {
+  await notifyPlain({ ...opts, preview: markdownToText(opts.preview), fallback: "Mentioned you" });
+}
+/** T-161: the same notification, its text shown as written (a shell command is not markdown). */
+export async function notifyPlain(opts: { author: string; room: string; preview: string; looking: boolean; fallback?: string }) {
   if (opts.looking || !(await allowed())) return;
-  const body = markdownToText(opts.preview).replace(/\s+/g, " ").trim().slice(0, 140);
-  sendNotification({ title: `${opts.author} in #${opts.room}`, body: body || "Mentioned you" });
+  const body = opts.preview.replace(/\s+/g, " ").trim().slice(0, 140);
+  sendNotification({ title: `${opts.author} in #${opts.room.replace(/^#/, "")}`, body: body || opts.fallback || "" });
 }
 
 /** Dock badge = unread count (macOS; a no-op elsewhere). */
