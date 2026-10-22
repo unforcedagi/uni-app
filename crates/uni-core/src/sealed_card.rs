@@ -936,7 +936,8 @@ mod tests {
     fn incomplete_or_mistyped_fields_are_refused() {
         let w = world();
         let (f, _) = fields(&w, "cloudflare-dns", "powerful", 600, 1);
-        let changes: Vec<Box<dyn Fn(&mut Value)>> = vec![
+        type Change = Box<dyn Fn(&mut Value)>;
+        let changes: Vec<Change> = vec![
             Box::new(|g| { g.as_object_mut().unwrap().remove("payload"); }),
             Box::new(|g| { g.as_object_mut().unwrap().remove("rpk"); }),
             Box::new(|g| g["extra"] = json!("shown nowhere")),
