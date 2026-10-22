@@ -764,6 +764,8 @@ function Body({ stands, ready, note, load, feed, rest = 0, moreTitle = null, onP
     {/* r30: with no room above the footer for even its date line, the summary is below "All of X's work", folded */}
     {footStands && <Stands stands={stands!} folded />}</div>;
   const content = <>
+    {/* an approval waiting in a room (T-161, T-234) needs no task list: it shows while the list loads or fails */}
+    {!ready && <ApprovalRows approvals={feed.approvals ?? []} />}
     {!ready && (load?.error || load?.slow ? <LoadHealth load={load} ready={false} /> : <p className="cp-lede">Loading…</p>)}
     {ready && <section aria-label="Needs you" className="cp-sec" aria-busy={load?.refreshing || undefined}>
       <h3 className="cp-h">Needs you</h3>

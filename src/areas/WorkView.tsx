@@ -64,7 +64,9 @@ export function WorkView(p: WorkViewProps) {
   const running = live.filter((r) => !waitingOnYou(r));
   const done = doneLately(p.runs);
   const motion = running.length + p.drafts.length + p.others.length;
-  if (!p.ready) return <div className="wv">{p.load.error || p.load.slow ? <LoadHealth load={p.load} ready={false} /> : <p className="th-quiet" role="status">Loading…</p>}</div>;
+  // an approval waiting in a room (T-161, T-234) needs no task list: it shows while the list loads or fails
+  if (!p.ready) return <div className="wv"><ApprovalRows approvals={p.feed.approvals ?? []} className="cp-list cp-approvals wv-approvals" />
+    {p.load.error || p.load.slow ? <LoadHealth load={p.load} ready={false} /> : <p className="th-quiet" role="status">Loading…</p>}</div>;
   return <div className="wv" aria-label={`All of ${p.nodeName}'s work`}>
     <LoadHealth load={p.load} ready count={p.feed.total} />
     <section className="wv-sec" aria-label="Needs you" aria-busy={p.load.refreshing || undefined}>
