@@ -747,7 +747,7 @@ pub fn approval_summary(view: &CardView, rids: &[String]) -> Result<(String, Str
         [] => Err(Error::Invalid("nothing was chosen".into())),
         [r] if view.kind == Some(CardKind::Single) => {
             let power = if r.class == Class::Powerful { "powerful " } else { "" };
-            Ok((format!("Approve a {power}credential"), format!("Uni: {}. {}{} Exact {}.", one(r), r.scope, permanent(r), job(r))))
+            Ok((format!("Approve a {power}credential"), format!("Uni: {}. {}.{} Exact {}.", one(r), r.scope.trim_end_matches(['.', '!', '?']), permanent(r), job(r))))
         }
         rs => Ok((
             format!("Approve {} of Uni's morning grants", rs.len()),
@@ -1129,7 +1129,7 @@ mod tests {
         let d = request_digest(&f).unwrap();
         assert_eq!(approval_summary(&v, std::slice::from_ref(&rid)).unwrap(),
             ("Approve a powerful credential".into(),
-             format!("Uni: dns-zone · dns.edit, 10 min, 1 use. Add an A record for demo.example.org Exact job {} {}.", &d[..4], &d[4..8])));
+             format!("Uni: dns-zone · dns.edit, 10 min, 1 use. Add an A record for demo.example.org. Exact job {} {}.", &d[..4], &d[4..8])));
         assert!(approval_summary(&v, &["9".repeat(32)]).is_err(), "a request id that isn't on the card");
         assert!(approval_summary(&v, &[]).is_err());
         let rows: Vec<Value> = ["r2-a", "r2-b", "r2-c"].iter().map(|n| fields(&w, n, "routine", 50_400, 200).0).collect();
