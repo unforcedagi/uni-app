@@ -176,15 +176,17 @@ function RelayPlayer({ m }: { m: MediaRef }) {
   const pin = useRef(playerPin(pinCall)).current;
   useEffect(() => () => pin.dispose(), []);
   const { src, error, fail } = useRelayMedia((m) => relayStream(m).then((r) => { pin.loaded(r.sha); return r.src; }), m, go, retry);
-  // A playback error (format, or the cache file evicted) gives the pin back; a retry asks media_stream again.
+  const [full, setFull] = useState<{ at: number; playing: boolean } | null>(null);
+  // A playback error (format, or the cache file evicted) gives the pin back; a retry asks media_stream again,
+  // and plays in the message (the full-screen layer closes with the failure).
   const failed = (e: React.SyntheticEvent<HTMLMediaElement>) => {
     pin.release();
+    setFull(null);
     fail(playbackErrorText(e.currentTarget.error?.code));
   };
   const events = { onError: failed, onPlay: () => pin.play(), onEnded: () => pin.release() };
   const saver = useSave(m);
   const inline = useRef<HTMLVideoElement>(null);
-  const [full, setFull] = useState<{ at: number; playing: boolean } | null>(null);
   const openFull = () => {
     const v = inline.current;
     const at = v?.currentTime ?? 0;
@@ -279,9 +281,10 @@ function Lightbox({ src, alt, m, onClose }: { src: string; alt: string; m?: Medi
   const close = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     close.current?.focus();
-    const key = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    window.addEventListener("keydown", key);
-    return () => window.removeEventListener("keydown", key);
+    // Capture, and stop it there: Escape (and Android Back, which sends one) closes only the viewer.
+    const key = (e: KeyboardEvent) => { if (e.key === "Escape") { e.preventDefault(); e.stopImmediatePropagation(); onClose(); } };
+    window.addEventListener("keydown", key, true);
+    return () => window.removeEventListener("keydown", key, true);
   }, [onClose]);
   useEffect(() => { setModalOpen(+1); return () => setModalOpen(-1); }, []);
   return <div className="lightbox" role="dialog" aria-modal="true" aria-label={alt} onClick={onClose}>
@@ -315,16 +318,33 @@ function VideoFull({ src, name, at, playing, events, onClose }: {
   closeRef.current = close;
   useEffect(() => {
     const el = layer.current;
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    // The app behind is out of reach while the layer is up: no Tab, no screen reader, no stray tap.
+    const root = document.getElementById("root");
+    const wasInert = root?.inert ?? false;
+    if (root) root.inert = true;
     el?.querySelector<HTMLButtonElement>(".lightbox-close")?.focus();
     if (el && document.fullscreenEnabled && el.requestFullscreen) void el.requestFullscreen().catch(() => {});
     // Capture, and stop it there: Escape here closes only this layer, never the panel or note behind it.
-    const key = (e: KeyboardEvent) => { if (e.key === "Escape") { e.preventDefault(); e.stopImmediatePropagation(); closeRef.current(); } };
+    const key = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { e.preventDefault(); e.stopImmediatePropagation(); closeRef.current(); return; }
+      if (e.key === "Tab" && el) {
+        const stops = [...el.querySelectorAll<HTMLElement>("video, button")];
+        const i = stops.indexOf(document.activeElement as HTMLElement);
+        e.preventDefault();
+        stops[(i + (e.shiftKey ? stops.length - 1 : 1) + stops.length) % stops.length]?.focus();
+      }
+    };
     // Leaving the platform's full screen (its own Esc, a swipe) closes the layer too, so one gesture is enough.
     const left = () => { if (!document.fullscreenElement) closeRef.current(); };
     window.addEventListener("keydown", key, true);
     document.addEventListener("fullscreenchange", left);
     setModalOpen(+1);
-    return () => { window.removeEventListener("keydown", key, true); document.removeEventListener("fullscreenchange", left); setModalOpen(-1); };
+    return () => {
+      window.removeEventListener("keydown", key, true); document.removeEventListener("fullscreenchange", left); setModalOpen(-1);
+      if (root) root.inert = wasInert;
+      if (opener?.isConnected) opener.focus();
+    };
   }, []);
   const start = (e: React.SyntheticEvent<HTMLVideoElement>) => {
     const v = e.currentTarget;

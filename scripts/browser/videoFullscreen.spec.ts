@@ -83,14 +83,60 @@ test('Full screen fills the window with the video and keeps its place', async ({
   expect(Math.round(box.height)).toBe(vp.height);
   const top = await page.evaluate(([x, y]) => document.elementFromPoint(x, y)?.closest('.video-full') != null, [vp.width / 2, vp.height / 2]);
   expect(top).toBe(true);
-  // Same moment in the clip, and only one video plays.
+  // Same moment in the clip; paused stays paused.
   await expect.poll(() => player.evaluate((v: HTMLVideoElement) => v.currentTime)).toBeGreaterThan(2.4);
-  expect(await inline.evaluate((v: HTMLVideoElement) => v.paused)).toBe(true);
+  expect(await player.evaluate((v: HTMLVideoElement) => v.currentTime)).toBeLessThan(2.6);
+  expect(await player.evaluate((v: HTMLVideoElement) => v.paused)).toBe(true);
   // ✕ brings it back to the message, at the place it reached.
-  await player.evaluate((v: HTMLVideoElement) => { v.pause(); v.currentTime = 4; });
+  await player.evaluate((v: HTMLVideoElement) => { v.currentTime = 4; });
   await press(full.getByRole('button', { name: 'Close full screen' }));
   await expect(full).toBeHidden();
   await expect.poll(() => inline.evaluate((v: HTMLVideoElement) => v.currentTime)).toBeGreaterThan(3.9);
+  expect(await inline.evaluate((v: HTMLVideoElement) => v.currentTime)).toBeLessThan(4.1);
+});
+
+test('A playing video keeps playing full screen, and only that one plays', async ({ page }) => {
+  const inline = await open(page);
+  await inline.evaluate(async (v: HTMLVideoElement) => { v.muted = true; v.currentTime = 1; await v.play(); });
+  await expect.poll(() => inline.evaluate((v: HTMLVideoElement) => !v.paused)).toBe(true);
+  await press(page.getByRole('button', { name: 'Full screen: garden walk.webm' }));
+  const player = layer(page).locator('video');
+  await player.evaluate((v: HTMLVideoElement) => { v.muted = true; });
+  await expect.poll(() => player.evaluate((v: HTMLVideoElement) => !v.paused && v.currentTime > 1)).toBe(true);
+  expect(await player.evaluate((v: HTMLVideoElement) => v.currentTime)).toBeLessThan(5);
+  expect(await inline.evaluate((v: HTMLVideoElement) => v.paused)).toBe(true);
+});
+
+test('A playback failure closes full screen; Retry plays in the message', async ({ page }) => {
+  await open(page);
+  await press(page.getByRole('button', { name: 'Full screen: garden walk.webm' }));
+  await layer(page).locator('video').evaluate((v: HTMLVideoElement) => { v.src = '/__t258/missing.webm'; });
+  await expect(layer(page)).toBeHidden();
+  const retry = page.getByRole('button', { name: /garden walk\.webm/ }).filter({ hasText: 'tap to retry' });
+  await expect(retry).toBeVisible();
+  await press(retry);
+  await expect(page.locator('video.attachment-video')).toBeVisible();
+  await page.waitForTimeout(300);
+  await expect(layer(page)).toBeHidden();
+});
+
+test('Keyboard focus stays in the full-screen layer and returns to the button', async ({ page }) => {
+  test.skip(touch(), 'keyboard');
+  await open(page);
+  const btn = page.getByRole('button', { name: 'Full screen: garden walk.webm' });
+  await btn.focus();
+  await page.keyboard.press('Enter');
+  const full = layer(page);
+  await expect(full.getByRole('button', { name: 'Close full screen' })).toBeFocused();
+  for (let i = 0; i < 4; i++) {
+    await page.keyboard.press('Tab');
+    expect(await page.evaluate(() => !!document.activeElement?.closest('.video-full'))).toBe(true);
+  }
+  expect(await page.evaluate(() => (document.getElementById('root') as HTMLElement).inert)).toBe(true);
+  await page.keyboard.press('Escape');
+  await expect(full).toBeHidden();
+  await expect(btn).toBeFocused();
+  expect(await page.evaluate(() => (document.getElementById('root') as HTMLElement).inert)).toBe(false);
 });
 
 test('Escape closes only the full-screen video', async ({ page }) => {
