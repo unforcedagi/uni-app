@@ -936,6 +936,39 @@ impl Store {
         Ok(rows)
     }
 
+    /// T-161: what Hermes approval prompts are read from, across every room.
+    /// In each room with a message containing `marker` (the prompt's header)
+    /// at or after `since`, not written by `me`: every message from the oldest
+    /// such one on (the answers and outcomes after it), the newest `per_room`
+    /// of them, chronological. Rooms with no prompt return nothing.
+    pub fn approval_messages(
+        &self,
+        marker: &str,
+        since: i64,
+        me: Option<&str>,
+        per_room: usize,
+    ) -> Result<Vec<ConversationMessage>> {
+        let mut stmt = self.conn.prepare(
+            "WITH p AS (SELECT channel, MIN(ts) AS t0 FROM visible_items
+                        WHERE source='buzz' AND ts>=?2 AND instr(body, ?1)>0 AND author<>?3
+                        GROUP BY channel),
+                  w AS (SELECT i.source,i.ref,i.channel,i.author,i.ts,i.body,i.mentions_me,r.root,r.parent,i.edited,
+                          ROW_NUMBER() OVER (PARTITION BY i.channel ORDER BY i.ts DESC,i.ref DESC) AS n
+                        FROM visible_items i JOIN p ON p.channel=i.channel
+                        LEFT JOIN message_refs r ON r.ref=i.ref
+                        WHERE i.source='buzz' AND i.ts>=p.t0)
+             SELECT source,ref,channel,author,ts,body,mentions_me,root,parent,edited FROM w
+             WHERE n<=?4 ORDER BY channel, ts ASC, ref ASC",
+        )?;
+        let rows = stmt
+            .query_map(
+                params![marker, since, me.unwrap_or(""), per_room.min(5000) as i64],
+                row_to_message,
+            )?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
     /// Joined channels, sorted with Uni first and the most active rooms next.
     /// No unread counts (see [`Store::rooms_for`]).
     pub fn rooms(&self) -> Result<Vec<Room>> {
@@ -1397,6 +1430,34 @@ mod tests {
         assert_eq!(rooms[0].id, "c1");
         assert_eq!(rooms[0].last_message.as_deref(), Some("body orphan"));
         assert_eq!(rooms[1].id, "c2");
+    }
+
+    #[test]
+    fn approval_messages_read_each_room_from_its_oldest_prompt() {
+        let s = Store::open_in_memory().unwrap();
+        let at = |r: &str, ch: &str, ts: i64, author: &str, body: &str| {
+            s.upsert_item(&Item { author: author.into(), body: body.into(), ..item(r, ch, ts) }).unwrap();
+        };
+        const P: &str = "needs your OK";
+        at("before", "c1", 5, "ag", "earlier chat");
+        at("p1", "c1", 10, "ag", "⚠️ **Hermes wants to run a command that needs your OK**");
+        at("ans", "c1", 11, "me", "/approve");
+        at("ok", "c1", 12, "ag", "✅ Command approved.");
+        at("reply", "c1", 13, "ag", "in a thread");
+        s.set_message_refs("reply", Some("p1"), Some("p1")).unwrap();
+        at("quiet", "c2", 20, "ag", "no prompt here");
+        at("mine", "c3", 20, "me", "pasted: needs your OK");
+        at("old", "c4", 1, "ag", "needs your OK");
+        at("gone", "c5", 30, "ag", "needs your OK");
+        s.upsert_aux("del", 5, "gone", "ag", 31, "").unwrap();
+        let got = s.approval_messages(P, 2, Some("me"), 50).unwrap();
+        let refs: Vec<&str> = got.iter().map(|m| m.item.r#ref.as_str()).collect();
+        // c1 from its prompt on (the user's answer too); not a room without one, the user's own, one before `since`, or a deleted one
+        assert_eq!(refs, vec!["p1", "ans", "ok", "reply"]);
+        assert_eq!(got[3].root.as_deref(), Some("p1"));
+        // the newest `per_room`, still chronological
+        let capped = s.approval_messages(P, 2, Some("me"), 2).unwrap();
+        assert_eq!(capped.iter().map(|m| m.item.r#ref.as_str()).collect::<Vec<_>>(), vec!["ok", "reply"]);
     }
 
     #[test]

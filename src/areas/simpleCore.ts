@@ -4,6 +4,7 @@ import { ASK_SIG_VERSION, isMe, PRIORITIES, type Task } from "./taskCore.ts";
 import { taskTitle, type Where } from "./whereCore.ts";
 import { ROOT } from "./treeCore.ts";
 import type { Run } from "./steerCore.ts";
+import { commandLine, type Approval } from "../approvals.ts";
 
 /** The first sentence of the level's lede, as plain text and whole (a long one is clamped on screen, never cut here: it opens in full). */
 export function firstSentence(text: string | null | undefined): string {
@@ -112,7 +113,9 @@ export type NeedsFeed = { rows: Task[]; privates: PrivateNeed[]; total: number;
   /** r19: records Uni has to tidy (not real requests yet), outside private areas; never in `total`. */
   tidy?: Task[];
   /** r20: decisions not read yet ("Checking what's needed…"), outside private areas: shown after the rows, never in `total` or the dots. */
-  pending?: Task[] };
+  pending?: Task[];
+  /** T-161: Hermes approval prompts waiting in a room, first in the list and in `total` (a run is blocked on each) */
+  approvals?: Approval[] };
 
 /** Now before Soon (overdue first), then by due date (undated last), then a decision before a task, then by title. */
 export function rankNeeds(list: readonly Task[], today = localDay()): Task[] {
@@ -169,6 +172,13 @@ export function withWaiting(feed: NeedsFeed, runs: readonly Run[]): NeedsFeed {
   const names = new Set(waiting.map((r) => r.task?.toUpperCase()).filter(Boolean) as string[]);
   return { ...feed, waiting, total: feed.total + waiting.length, recheck: (feed.recheck ?? []).filter((t) => { const id = taskIdOf(t); return !(id && names.has(id)); }) };
 }
+
+/** T-161: the approval prompts waiting here join the feed, counted like every other ask (Uni's level holds every room's; a room's level, its own). */
+export function withApprovals(feed: NeedsFeed, approvals: readonly Approval[]): NeedsFeed {
+  return approvals.length ? { ...feed, approvals: [...approvals], total: feed.total + approvals.length } : feed;
+}
+/** "OK to run rm -rf /tmp/x?": an approval as the folded strip's line says it */
+export const approvalAsk = (a: Pick<Approval, "command">): string => `OK to run ${commandLine(a)}?`;
 
 /** Rows Uni's own panel shows (r17): the rest, private items included, are one "N more ›" to the work view. */
 export const UNI_ROWS = 3;

@@ -4,7 +4,7 @@ import { TaskSheet, UndoBar, ownerLabel } from "./NodeWork";
 import { useTasks } from "./useTasks";
 import { draftsUnder, runsUnder, type Run } from "./steerCore";
 import { CompanionSide, CompanionStrip, Stands, useCompanionOpen, type CompanionProps, type TaskLoad } from "./Companion";
-import { chatPlaceholder, confirmationOf, type Resolved, isMine, needsByRow, needsFeed, needsYou, privateNote, withWaiting, standsHeading, standsLine, asOfDate, daysSince, firstSentence, stateLine, uniPanel, type PrivateNeed } from "./simpleCore";
+import { chatPlaceholder, confirmationOf, type Resolved, isMine, needsByRow, needsFeed, needsYou, privateNote, withWaiting, withApprovals, standsHeading, standsLine, asOfDate, daysSince, firstSentence, stateLine, uniPanel, type PrivateNeed } from "./simpleCore";
 import { ownRoom, roomByName, type Steward } from "./talkCore";
 import type { Area } from "./areasCore";
 import { isMe, priorityOf, tasksUnder, type Task, type TaskNode } from "./taskCore";
@@ -36,6 +36,9 @@ import { openDialog } from "./focusTrap";
 import { publishDecisions, setDecidedHook, setDecisionOpener } from "../decisionLinks";
 import { taskTitle } from "./whereCore";
 import type { NoteRef } from "./noteRefsCore";
+import { ApprovalRows } from "./ApprovalRows";
+import { ApprovalsContext, useApprovalList } from "../approvalsLive";
+import type { Approval } from "../approvals";
 import "./areas.css";
 import "./tree.css";
 
@@ -129,6 +132,7 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   const stripCompanion = !wide || shortTree;
   const [companionChoice, setCompanionChoice] = useCompanionOpen(stripCompanion ? "strip" : "side");
   const [besideOpen, setBesideOpen] = useState({ companion: false, tree: false });
+  const approvalsAll = useApprovalList();
   useEffect(() => { if (noteBeside) setBesideOpen({ companion: false, tree: false }); }, [noteBeside]);
   const roomyTree = useTreeBesideNote();
   const foldSide = noteBeside && !stripCompanion;
@@ -380,7 +384,7 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
     {!!data?.truncated.length && <p className="areas-status" role="status">{data.truncated.join(", ")}: showing first 200 notes; more may exist.</p>}
   </>;
   if (treeHome && path === null && !rootOpen) {
-    return <div className="areas-home tree-home-wrap"><TreeScreen {...treeProps} status={<>{status}{railHidden && places.length > 0 && <div className="th-places-short">{placesRow}</div>}</>} />
+    return <div className="areas-home tree-home-wrap"><TreeScreen {...treeProps} status={<><ApprovalRows approvals={approvalsAll.list} className="cp-list cp-approvals th-approvals" />{status}{railHidden && places.length > 0 && <div className="th-places-short">{placesRow}</div>}</>} />
       <UndoBar undo={tasks.undo} notice={tasks.notice} onDismiss={tasks.dismissNotice} /></div>;
   }
   const stewardView: Steward = isRoot ? { room: uniRef, via: "own", from: null } : stewardOf(node.path);
@@ -412,7 +416,8 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   const taskTree = tasks.tree;
   const runs = taskTree ? runsUnder(taskTree, here, tasks.runs).filter((r) => !hidden(r.node)) : [];
   // r28 (Codex P2-6): a run waiting on the user's answer is in the same feed, counted once with the asks
-  const feed = withWaiting(feed0, runs);
+  // T-161: Uni's level holds every room's approval prompts; a level with a room of its own, that room's
+  const feed = withApprovals(withWaiting(feed0, runs), approvalsAll.list.filter((a) => isRoot || a.channel === target?.id));
   const panel = isRoot ? uniPanel(feed) : { ...feed, rest: 0, privateCount: 0 };
   const drafts = taskTree ? draftsUnder(taskTree, here, tasks.drafts).filter((d) => !hidden(d.node)) : [];
   const openPrivate = (o: PrivateNeed["open"]) => { closeSheet(); stripSheet?.close(); setWork(false); openPath(o.path); };
@@ -436,13 +441,14 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
    *  not among the rooms is "Room not found": never another room. */
   const runRoom = (r: Run) => r.channel ? rooms.find((x) => x.id === r.channel) ?? null : r.room ? rooms.find((x) => x.name.replace(/^#/, "").toLowerCase() === r.room!.toLowerCase()) ?? null : roomOfNode(r.node) ?? target;
   const runMissing = (r: Run) => !roomsPending && rooms.length > 0 && !!(r.channel || r.room) && !runRoom(r);
-  const openRun = (r: Run) => {
-    const room = runRoom(r);
-    if (!room) return;
+  const openRun = (r: Run) => { const room = runRoom(r); if (room) openAt(room, r.message ?? null); };
+  /** T-161: an approval prompt opens its room the same way, at the prompt */
+  const openApproval = (a: Approval) => { const room = rooms.find((x) => x.id === a.channel); if (room) openAt(room, a.ref); else approvalsAll.open(a); };
+  const openAt = (room: { id: string; name: string }, message: string | null) => {
     closeSheet(); stripSheet?.close(); setWork(false);
     const here = roomFor(room.id);
     if (here) here.compose(""); else actions.compose(room.id, "");
-    if (r.message) actions.focusMessage?.(r.message, room.id, null);
+    if (message) actions.focusMessage?.(message, room.id, null);
     // a room that was not open takes a moment to come up: its composer is focused as soon as it is that room's (never before)
     const want = room.name.replace(/^#/, "").toLowerCase();
     let tries = 0;
@@ -492,6 +498,6 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   const roomLevel = (app: AppView | null, openApp: ((e: React.MouseEvent) => void) | null) => shell({ title: node.name, door, context: app || workOpen ? undefined : context, node: node.name, crumbs,
     companion: chat ? companionProps : null, chatRoom: thread ? roomFor(thread.channel, thread.root) : roomFor(target?.id), placeholder, selected: node.path, sheet: sheetView, retryChat: target?.id ? () => actions.openRoom(target.id) : actions.retryRooms ?? null,
     main: app ? app.main : workOpen ? workMain : undefined, workBar: app ? app.bar : workBar, openApp, appOpen: !!app });
-  return <AreaView key={node.id} area={body !== null ? { ...node, body } : node} mode={mode} roomName={roomName} actions={appActions}
-    room={roomFor(nodeRoom)} open={appOpen} onOpen={setAppOpen} render={(app, openApp) => frame(<>{status}{roomLevel(app, openApp)}</>)} />;
+  return <ApprovalsContext.Provider value={{ ...approvalsAll, open: openApproval }}><AreaView key={node.id} area={body !== null ? { ...node, body } : node} mode={mode} roomName={roomName} actions={appActions}
+    room={roomFor(nodeRoom)} open={appOpen} onOpen={setAppOpen} render={(app, openApp) => frame(<>{status}{roomLevel(app, openApp)}</>)} /></ApprovalsContext.Provider>;
 }

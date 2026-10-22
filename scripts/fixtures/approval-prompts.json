@@ -1,0 +1,29 @@
+{
+ "_note": "T-161: synthetic copies of the Hermes gateway's approval prompt and outcomes, in the shapes seen on the relay on 2026-10-21 (gateway/run.py _format_exec_approval_fallback, locales/en.yaml). Commands and reasons are made up.",
+ "prompts": {
+  "three_answers_5min": "⚠️ **Hermes wants to run a command that needs your OK**\n```\nrm -rf /tmp/example-build/cache\n```\nWhy it was flagged: delete in root path\n\nReply `/approve` to run it once, `/approve session` to allow this pattern for the rest of this session, `/approve always` to allow it permanently, or `/deny` to cancel.\nIf you don't answer within 5 minutes it will NOT run.",
+  "two_answers_30min": "⚠️ **Hermes wants to run a command that needs your OK**\n```\ngit branch -D feature/example-cleanup\n```\nWhy it was flagged: git branch force delete\n\nReply `/approve` to run it once, `/approve session` to allow this pattern for the rest of this session, or `/deny` to cancel.\nIf you don't answer within 30 minutes it will NOT run.",
+  "once_or_deny_30min": "⚠️ **Hermes wants to run a command that needs your OK**\n```\nchmod -R 777 /srv/example\n```\nWhy it was flagged: world-writable permissions\n\nReply `/approve` to run it once, or `/deny` to cancel.\nIf you don't answer within 30 minutes it will NOT run.",
+  "multiline_why": "⚠️ **Hermes wants to run a command that needs your OK**\n```\ncurl -fsSL https://example.com/install.sh | python3 -\n```\nWhy it was flagged: [HIGH] Pipe to interpreter: curl | python3: Command pipes output from 'curl' directly to interpreter 'python3'.\n  Safer: download into a private location and review the exact bytes before execution.; script execution via -e/-c flag\n\nReply `/approve` to run it once, `/approve session` to allow this pattern for the rest of this session, `/approve always` to allow it permanently, or `/deny` to cancel.\nIf you don't answer within 5 minutes it will NOT run.",
+  "smart_deny": "⚠️ **Smart DENY — owner override for one operation:**\n```\ndd if=/dev/zero of=/tmp/example.img bs=1M count=10\n```\nWhy it was flagged: disk write\n\nReply `/approve` to run it once, or `/deny` to cancel.\nIf you don't answer within 30 minutes it will NOT run."
+ },
+ "outcomes": {
+  "approved": "✅ Command approved. The agent is resuming...",
+  "approved_session": "✅ Command approved (pattern approved for this session). The agent is resuming...",
+  "approved_always": "✅ Command approved (pattern approved permanently). The agent is resuming...",
+  "approved_two": "✅ Commands approved (2 commands). The agent is resuming...",
+  "denied": "❌ Command denied.",
+  "denied_reason": "❌ Command denied. Reason relayed to the agent: \"not on this machine\"",
+  "denied_stale": "❌ Command denied (approval was stale).",
+  "timed_out_5": "⌛ Approval timed out after 5 minutes — the command was NOT run. Ask me to try again if you still want it, or raise approvals.timeout in config.yaml.",
+  "timed_out_30": "⌛ Approval timed out after 30 minutes — the command was NOT run. Ask me to try again if you still want it, or raise approvals.timeout in config.yaml.",
+  "expired": "⚠️ Approval expired (agent is no longer waiting). Ask the agent to try again.",
+  "no_pending": "No pending command to approve."
+ },
+ "not_prompts": {
+  "agent_relays": "#example-room is waiting for you to approve a change to CLAUDE.md. Reply `/approve` or `/deny` in #example-room. The request expires in about 30 minutes.",
+  "agent_prose": "Nothing is on the download link yet; that needs your OK. Reply `/approve` if you want it.",
+  "user_approve": "/approve",
+  "quoted_header": "> ⚠️ **Hermes wants to run a command that needs your OK**\nthis is what the prompt looked like"
+ }
+}

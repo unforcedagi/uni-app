@@ -793,3 +793,15 @@
 .th-chip { all: unset; box-sizing: border-box; cursor: pointer; min-height: 26px; padding: 3px 9px; display: inline-flex; align-items: center; border: 1px solid var(--th-hair2); border-radius: 999px; font: 400 12px/1.2 var(--th-sans); color: var(--th-ink); background: var(--th-paper); }
 .th-chip b { font-weight: 600; }
 .th-chip:disabled { opacity: .5; cursor: default; }
+
+/* T-161: a Hermes approval prompt waiting on the user's OK: first in Needs you, marked so it can't be missed (--danger is the app's own) */
+.cp-approvals { margin: 2px 0 8px !important; }
+.cp-approval { list-style: none; }
+.cp-approval-open { display: flex; align-items: flex-start; gap: 10px; width: 100%; text-align: left; padding: 9px 10px !important; border: 1.5px solid var(--danger, #a4493d) !important; border-radius: 6px; background: color-mix(in srgb, var(--danger, #a4493d) 7%, transparent); color: var(--th-ink); font: 400 14px/1.35 var(--th-sans); cursor: pointer; }
+.cp-approval-open > i { flex: none; display: inline-grid; place-items: center; width: 18px; height: 18px; margin-top: 1px; border-radius: 50%; background: var(--danger, #a4493d); color: var(--th-card); font: 700 12px/1 var(--th-sans); font-style: normal; }
+.cp-approval-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1 1 auto; }
+.cp-approval-lead { font-weight: 600; }
+.cp-approval-cmd { font: 500 12.5px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--th-card); padding: 3px 6px; border-radius: 4px; }
+.cp-approval-why, .cp-approval-how { color: var(--th-mute); font-size: 12.5px; overflow-wrap: anywhere; }
+.cp-approval-open:hover .cp-approval-lead, .cp-approval-open:focus-visible .cp-approval-lead { text-decoration: underline; text-underline-offset: 3px; }
+.th-approvals { margin: 0 0 10px !important; padding: 0; }

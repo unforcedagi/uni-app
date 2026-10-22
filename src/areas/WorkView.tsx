@@ -14,6 +14,7 @@ import type { Task } from "./taskCore";
 import type { NoteRef } from "./noteRefsCore";
 import { useVaultProfile } from "./ProfileContext";
 import { taskTitle } from "./whereCore";
+import { ApprovalRows } from "./ApprovalRows";
 
 export type WorkViewProps = {
   nodeName: string;
@@ -68,7 +69,8 @@ export function WorkView(p: WorkViewProps) {
     <LoadHealth load={p.load} ready count={p.feed.total} />
     <section className="wv-sec" aria-label="Needs you" aria-busy={p.load.refreshing || undefined}>
       <h2 className="wv-h">Needs you <span className="wv-n" aria-label={countLabel(p.feed.total, p.load)} title={countLabel(p.feed.total, p.load)}>{countText(p.feed.total, p.load)}</span></h2>
-      {p.feed.total === 0 && !pending.length && !waiting.length ? <p className="cp-none">{noneLine(p.feed)}</p> : p.feed.total === 0 && !pending.length ? null : <ul className="cp-list">
+      <ApprovalRows approvals={p.feed.approvals ?? []} className="cp-list cp-approvals wv-approvals" />
+      {p.feed.total === 0 && !pending.length && !waiting.length ? <p className="cp-none">{noneLine(p.feed)}</p> : p.feed.rows.length + p.feed.privates.length + pending.length === 0 ? null : <ul className="cp-list">
         {p.feed.rows.map((t) => <NeedRow key={t.id} t={t} onTask={p.onTask} onDecide={p.onDecide} onNote={p.onNote} area={p.placeOf?.(t) ?? null} />)}
         {p.feed.privates.map((x) => <PrivateRow key={x.key} p={x} onPrivate={p.onPrivate} />)}
         {pending.map((t) => <NeedRow key={t.id} t={t} onTask={p.onTask} onDecide={p.onDecide} onNote={p.onNote} area={p.placeOf?.(t) ?? null} />)}
