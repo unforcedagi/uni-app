@@ -940,7 +940,8 @@ impl Store {
     /// In each room with a message containing `marker` (the prompt's header)
     /// at or after `since`, not written by `me`: every message from the oldest
     /// such one on (the answers and outcomes after it), the newest `per_room`
-    /// of them, chronological. Rooms with no prompt return nothing.
+    /// of them and every prompt itself, chronological (a busy room never
+    /// hides a prompt). Rooms with no prompt return nothing.
     pub fn approval_messages(
         &self,
         marker: &str,
@@ -958,7 +959,7 @@ impl Store {
                         LEFT JOIN message_refs r ON r.ref=i.ref
                         WHERE i.source='buzz' AND i.ts>=p.t0)
              SELECT source,ref,channel,author,ts,body,mentions_me,root,parent,edited FROM w
-             WHERE n<=?4 ORDER BY channel, ts ASC, ref ASC",
+             WHERE n<=?4 OR (instr(body, ?1)>0 AND author<>?3) ORDER BY channel, ts ASC, ref ASC",
         )?;
         let rows = stmt
             .query_map(
@@ -1455,9 +1456,9 @@ mod tests {
         // c1 from its prompt on (the user's answer too); not a room without one, the user's own, one before `since`, or a deleted one
         assert_eq!(refs, vec!["p1", "ans", "ok", "reply"]);
         assert_eq!(got[3].root.as_deref(), Some("p1"));
-        // the newest `per_room`, still chronological
+        // the newest `per_room` and every prompt, still chronological: a busy room never hides a prompt
         let capped = s.approval_messages(P, 2, Some("me"), 2).unwrap();
-        assert_eq!(capped.iter().map(|m| m.item.r#ref.as_str()).collect::<Vec<_>>(), vec!["ok", "reply"]);
+        assert_eq!(capped.iter().map(|m| m.item.r#ref.as_str()).collect::<Vec<_>>(), vec!["p1", "ok", "reply"]);
     }
 
     #[test]

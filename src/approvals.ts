@@ -80,11 +80,14 @@ export function parseOutcome(body: string): { n: number } | "all" | null {
 
 /**
  * The prompts still waiting at `now`, oldest first, read from stored messages (any rooms, any order). Per room and author, in time order: a
- * prompt waits; an outcome from that author settles the oldest one waiting in the same thread (else in the room: Hermes keys one session per
- * room here); a prompt whose stated window has passed is gone. `me`: the user's own messages are never prompts or outcomes.
+ * prompt waits; an outcome from that author settles the oldest one waiting in its own thread. One at the top of the room settles one in a
+ * thread when none waits at the top (Hermes keys one session per room here, and answers where it was answered); one inside a thread never
+ * settles a prompt outside it. A timeout notice settles only a prompt whose window is up. A prompt whose stated window has passed is gone.
+ * `me`: the user's own messages are never prompts or outcomes. Within one second a prompt comes before an outcome (an outcome follows a prompt).
  */
 export function pendingApprovals(messages: readonly ApprovalSource[], now: number, me: string | null = null): Approval[] {
-  const sorted = [...messages].sort((a, b) => a.ts - b.ts || (a.ref < b.ref ? -1 : a.ref > b.ref ? 1 : 0));
+  const isPrompt = new Map(messages.map((m) => [m.ref, parseApproval(m) ? 0 : 1]));
+  const sorted = [...messages].sort((a, b) => a.ts - b.ts || isPrompt.get(a.ref)! - isPrompt.get(b.ref)! || (a.ref < b.ref ? -1 : a.ref > b.ref ? 1 : 0));
   const waiting = new Map<string, Approval[]>();
   const seen = new Set<string>();
   for (const m of sorted) {
@@ -99,12 +102,12 @@ export function pendingApprovals(messages: readonly ApprovalSource[], now: numbe
       const out = parseOutcome(m.body);
       if (out) {
         const root = m.root ?? null;
-        const inThread = list.some((a) => a.root === root) ? list.filter((a) => a.root === root) : list;
-        // a timeout settles one whose window is up; an answer, one still open
-        const due = (a: Approval) => a.deadline !== null && a.deadline <= m.ts + GRACE;
+        const inThread = root !== null || list.some((a) => a.root === null) ? list.filter((a) => a.root === root) : list;
+        // a timeout settles one whose window is up (or that stated none), never one still open; an answer, one still open
+        const due = (a: Approval) => a.deadline === null || a.deadline <= m.ts + GRACE;
         const timedOut = m.body.trim().startsWith("⌛ Approval timed out after ");
         const fits = inThread.filter((a) => (timedOut ? due(a) : a.deadline === null || a.deadline > m.ts));
-        const here = fits.length ? fits : inThread;
+        const here = fits.length || timedOut ? fits : inThread;
         const settled = new Set(out === "all" ? here : here.slice(0, out.n));
         for (let i = list.length - 1; i >= 0; i--) if (settled.has(list[i])) list.splice(i, 1);
       }

@@ -782,6 +782,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const channelRef = useRef<string | null>(null);
   const roomsRef = useRef<Room[]>(rooms);
   channelRef.current = channel;
+  const rootRef = useRef<string | null>(root);
+  rootRef.current = root;
   const scrollEnd = useRef<HTMLDivElement>(null);
   const shownView = useRef<string | null>(null);
   // Uni is notified on every message in rooms it belongs to, unless muted.
@@ -804,7 +806,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const focusComposer = useRef(false);
   // T-161: every room's Hermes approval prompts still waiting, for Needs you, the room and one notification each
   const approvals = useApprovals({ identity, enabled: !!identity, synced, roomsReady: rooms.length > 0, roomName: (id) => roomsRef.current.find((r) => r.id === id)?.name ?? null,
-    looking: (ch) => document.hasFocus() && ch === channelRef.current });
+    looking: (ch, r) => document.hasFocus() && ch === channelRef.current && r === rootRef.current });
 
   const loadRooms = useCallback(async (cached?: Room[]) => {
     const rows = cached ?? await invoke<Room[]>("get_rooms");

@@ -14,7 +14,7 @@ export const useApprovalList = () => useContext(ApprovalsContext);
 const NOTIFIED_KEY = "uni:approvals-notified";
 const readNotified = (): string[] => { try { const v = JSON.parse(localStorage.getItem(NOTIFIED_KEY) ?? "[]"); return Array.isArray(v) ? v.filter((x) => typeof x === "string") : []; } catch { return []; } };
 
-export function useApprovals(opts: { identity: string | null; enabled: boolean; synced: number; roomsReady: boolean; roomName: (id: string) => string | null; looking: (channel: string) => boolean }): Approval[] {
+export function useApprovals(opts: { identity: string | null; enabled: boolean; synced: number; roomsReady: boolean; roomName: (id: string) => string | null; looking: (channel: string, root: string | null) => boolean }): Approval[] {
   const [list, setList] = useState<Approval[]>([]);
   const rows = useRef<ApprovalSource[]>([]);
   const optsRef = useRef(opts); optsRef.current = opts;
@@ -22,7 +22,9 @@ export function useApprovals(opts: { identity: string | null; enabled: boolean; 
   const applied = useRef(0);
   const decide = useCallback(() => setList((old) => {
     const next = pendingApprovals(rows.current, Date.now() / 1000, optsRef.current.identity);
-    return next.length === old.length && next.every((a, i) => a.ref === old[i].ref) ? old : next;
+    // the same prompts, unedited: keep the old list (an edited one has a new command or window, so it is replaced)
+    const same = (a: Approval, b: Approval) => a.ref === b.ref && a.command === b.command && a.why === b.why && a.deadline === b.deadline && a.answers.join() === b.answers.join();
+    return next.length === old.length && next.every((a, i) => same(a, old[i])) ? old : next;
   }), []);
   const read = useCallback(() => {
     const n = ++seq.current;
@@ -54,7 +56,7 @@ export function useApprovals(opts: { identity: string | null; enabled: boolean; 
     const fresh = list.filter((a) => !done.includes(a.ref));
     if (!fresh.length) return;
     localStorage.setItem(NOTIFIED_KEY, JSON.stringify([...done, ...fresh.map((a) => a.ref)].slice(-200)));
-    for (const a of fresh) void notifyPlain({ author: "Hermes", room: optsRef.current.roomName(a.channel) ?? "a room", preview: `Needs your OK to run: ${commandLine(a)}`, looking: optsRef.current.looking(a.channel) });
+    for (const a of fresh) void notifyPlain({ author: "Hermes", room: optsRef.current.roomName(a.channel) ?? "a room", preview: `Needs your OK to run: ${commandLine(a)}`, looking: optsRef.current.looking(a.channel, a.root) });
   }, [list, opts.roomsReady]);
   return list;
 }

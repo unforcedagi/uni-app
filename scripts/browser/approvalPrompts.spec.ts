@@ -35,8 +35,8 @@ async function boot(page: Page) {
 const strip = (page: Page) => page.locator('.cp-line[aria-expanded="false"]');
 async function unfold(page: Page) { if (await strip(page).count()) await strip(page).click(); }
 const rows = (page: Page) => page.locator('.cp-approval');
-/** a message over the live socket, each one second after the one before (the fixture's own clock is the boot time) */
-const arrive = (page: Page, body: string, who = 'Uni', room = ROOM, root: string | null = null) => page.evaluate(([c, n, b, r]) => { const w = window as any; w.__k = (w.__k ?? 0) + 1; return w.__arrive(c, n, b, -w.__k, false, r); }, [room, who, body, root] as const);
+/** a message over the live socket, each one second (and `later` more) after the one before (the fixture's own clock is the boot time) */
+const arrive = (page: Page, body: string, who = 'Uni', room = ROOM, root: string | null = null, later = 0) => page.evaluate(([c, n, b, r, l]) => { const w = window as any; w.__k = (w.__k ?? 0) + 1 + l; return w.__arrive(c, n, b, -w.__k, false, r); }, [room, who, body, root, later] as const);
 /** the app has read the store since the last message arrived (the hook re-reads on each live message) */
 const reads = (page: Page) => page.evaluate(() => (window as any).__calls.filter((c: any) => c.cmd === 'approval_messages').length);
 async function settled(page: Page, before: number) { await expect.poll(() => reads(page)).toBeGreaterThan(before); await page.waitForTimeout(150); }
@@ -83,9 +83,9 @@ test.describe('a Hermes approval prompt, loudly', () => {
     await expect(page.locator('.message.approval-waiting')).toHaveCount(0);
   });
 
-  test('2. it leaves Needs you when Hermes says approved, denied or timed out, and when its own window ends', async ({ page }) => {
+  test('2. it leaves Needs you when Hermes says approved, denied or timed out', async ({ page }) => {
     await boot(page); await unfold(page);
-    for (const outcome of ['approved', 'denied', 'timed_out_30'] as const) {
+    for (const outcome of ['approved', 'denied'] as const) {
       await arrive(page, fx.prompts.three_answers_5min);
       await expect(rows(page)).toHaveCount(1);
       // the user's own reply is not the outcome: it waits until Hermes answers
@@ -96,6 +96,11 @@ test.describe('a Hermes approval prompt, loudly', () => {
       await arrive(page, fx.outcomes[outcome]);
       await expect(rows(page), outcome).toHaveCount(0);
     }
+    // the timeout notice comes when the window it stated is up (five minutes on), and settles that prompt
+    await arrive(page, fx.prompts.three_answers_5min);
+    await expect(rows(page)).toHaveCount(1);
+    await arrive(page, fx.outcomes.timed_out_5, 'Uni', ROOM, null, 299);
+    await expect(rows(page), 'timed out').toHaveCount(0);
     // two at once: one approval settles the older, a plural one both
     await arrive(page, fx.prompts.three_answers_5min);
     await arrive(page, fx.prompts.once_or_deny_30min);
@@ -105,7 +110,10 @@ test.describe('a Hermes approval prompt, loudly', () => {
     await expect(rows(page).locator('.cp-approval-cmd')).toHaveText('chmod -R 777 /srv/example');
     await arrive(page, fx.outcomes.denied);
     await expect(rows(page)).toHaveCount(0);
-    // withdrawn with no message: it stays until the window it stated is up, then goes by itself
+  });
+
+  test('2b. withdrawn with no message, it stays until the window it stated is up, then goes by itself', async ({ page }) => {
+    await boot(page); await unfold(page);
     await arrive(page, fx.prompts.once_or_deny_30min);
     await expect(rows(page)).toHaveCount(1);
     await page.clock.fastForward('29:00');

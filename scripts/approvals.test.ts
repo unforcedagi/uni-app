@@ -70,6 +70,21 @@ check("rooms and threads are apart", () => {
   // an outcome at the top of a room settles a thread's prompt when nothing else waits there
   assert.equal(pendingApprovals([t, msg(O.approved, 1010)], 1011).length, 0);
 });
+check("Codex P1: an outcome inside another thread never settles a prompt outside it", () => {
+  const a = msg(P.three_answers_5min, 1000, { root: "rA" });
+  assert.deepEqual(pendingApprovals([a, msg(O.no_pending, 1010, { root: "rB" })], 1011).map((x) => x.ref), [a.ref]);
+  assert.deepEqual(pendingApprovals([a, msg(O.approved, 1010, { root: "rB" })], 1011).map((x) => x.ref), [a.ref]);
+  const top = msg(P.three_answers_5min, 1001);
+  assert.deepEqual(pendingApprovals([top, msg(O.denied, 1010, { root: "rB" })], 1011).map((x) => x.ref), [top.ref]);
+});
+check("Codex P1: a late timeout notice never settles a newer prompt still open", () => {
+  const a = msg(P.three_answers_5min, 1000), b = msg(P.three_answers_5min, 1400);
+  assert.deepEqual(pendingApprovals([a, b, msg(O.timed_out_5, 1401)], 1402).map((x) => x.ref), [b.ref]);
+});
+check("Codex P2: in one second, the prompt comes before the outcome whatever the refs", () => {
+  const a = msg(P.three_answers_5min, 1000, { ref: "zz" });
+  assert.equal(pendingApprovals([a, msg(O.approved, 1000, { ref: "aa" })], 1001).length, 0);
+});
 check("order and duplicates in the input don't matter", () => {
   const a = msg(P.three_answers_5min, 1000), o = msg(O.approved, 1010);
   assert.equal(pendingApprovals([o, a, a], 1011).length, 0);
