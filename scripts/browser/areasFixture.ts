@@ -550,6 +550,8 @@ Two proposals wait on a scope decision.
           case 'get_npub': return 'test';
           case 'get_rooms': if (d.roomsDelay) await new Promise((r) => setTimeout(r, d.roomsDelay)); w.__roomsResolved = true; return rooms;
           case 'get_messages': if (args.limit === 200 && w.__lookupDelay) await new Promise((r) => setTimeout(r, w.__lookupDelay)); if (args.limit === 200 && w.__lookupFails) throw 'relay unreachable'; if (d.messagesDelay) await new Promise((r) => setTimeout(r, d.messagesDelay)); return args.root ? threads[args.root] ?? [] : (msgs[args.channel] ?? []).filter((m: any) => !(args.limit === 200 && !String(m.ref).startsWith('live'))).slice(-(args.limit ?? 300));
+          // T-161: like the store's query: each room with an approval prompt (not the user's) in the last day, from its oldest prompt on
+          case 'approval_messages': return Object.values(msgs).flatMap((list: any[]) => { const i = list.findIndex((m) => m.author !== U && String(m.body).includes('deny` to cancel.') && m.ts >= Date.now() / 1000 - 86400); return i < 0 ? [] : list.slice(i); });
           case 'get_members': if (w.__membersDelay) await new Promise((r) => setTimeout(r, w.__membersDelay)); return [{ pubkey: U, name: 'Aaron', named: true }, ...(d.uniMember ? [{ pubkey: 'c'.repeat(64), name: 'Uni', named: true }] : d.tasks ? [{ pubkey: 'b'.repeat(64), name: 'Uni', named: true }] : [])];
           case 'vault_paths': return notes.map(rowOf);
           case 'vault_list': return d.lifeVault ? ['uni', d.lifeVault] : ['uni'];
