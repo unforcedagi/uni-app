@@ -13,11 +13,11 @@ async function boot(page: Page, opts: { history?: number; eyes?: boolean } = {})
     const msg = (author: string, ago: number, body: string, extra: Record<string, unknown> = {}) => ({ ref: `m${++n}`, channel: 'uni-room', author, author_name: author === ME ? 'Robin' : 'Uni', ts: now - ago, body, mentions_me: false, root: null, parent: null, mentions: [], reply_count: 0, last_reply_ts: null, edited: false, reactions: [], ...extra });
     w.__msgs = [];
     for (let i = history; i > 0; i--) w.__msgs.push(msg(i % 2 ? UNI : ME, 600 + i * 60, `Earlier note number ${i}: a line about the garden beds and the watering rota, long enough to wrap on a phone.`));
-    w.__msgs.push(msg(ME, 42, 'Could you sort the seed list by sowing month?', eyes ? { reactions: [{ emoji: '👀', count: 1, mine: null, by: [UNI] }] } : {}));
+    w.__msgs.push(msg(ME, 42, 'Could you sort the seed list by sowing month?', eyes ? { reactions: [{ emoji: '👀', count: 1, mine: null, by: [{ pubkey: UNI, ts: now - 40 }] }] } : {}));
     w.__cbs = []; w.__listeners = {};
     w.__live = (payload: any) => { for (const h of w.__listeners['uni://live'] ?? []) w.__cbs[h]?.({ event: 'uni://live', id: 1, payload }); };
     w.__say = (author: string, body: string) => { const m = msg(author, 0, body); w.__msgs.push(m); w.__live({ kind: 'message', channel: 'uni-room', author }); return m.ref; };
-    w.__eyes = (ref: string) => { const m = w.__msgs.find((x: any) => x.ref === ref); m.reactions = [{ emoji: '👀', count: 1, mine: null, by: [UNI] }]; w.__live({ kind: 'delete', channel: 'uni-room' }); };
+    w.__eyes = (ref: string) => { const m = w.__msgs.find((x: any) => x.ref === ref); m.reactions = [{ emoji: '👀', count: 1, mine: null, by: [{ pubkey: UNI, ts: Math.floor(Date.now() / 1000) }] }]; w.__live({ kind: 'delete', channel: 'uni-room' }); };
     w.__TAURI_INTERNALS__ = {
       metadata: { currentWindow: { label: 'main' }, currentWebview: { label: 'main' } },
       transformCallback: (cb: any) => { w.__cbs.push(cb); return w.__cbs.length - 1; },
@@ -52,9 +52,9 @@ const seconds = (text: string | null) => { const [m, s] = (text ?? '').split(' �
 test('Uni is working · m:ss from its 👀 on your message, through a progress ping, until its reply', async ({ page }) => {
   await boot(page);
   await expect(working(page)).toBeVisible();
-  // counted from the message it took (42 s before the room opened)
+  // counted from the 👀 (40 s before the room opened)
   await expect(working(page)).toHaveText(/^Uni is working · \d+:\d\d$/);
-  expect(seconds(await working(page).textContent())).toBeGreaterThanOrEqual(42);
+  expect(seconds(await working(page).textContent())).toBeGreaterThanOrEqual(40);
   await expect(working(page)).toHaveAttribute('role', 'status');
   // the clock runs
   const first = await working(page).textContent();
@@ -71,13 +71,13 @@ test('Uni is working · m:ss from its 👀 on your message, through a progress p
   await expect(working(page)).toHaveCount(0);
 });
 
-test('no 👀 yet: no working line; it shows as the 👀 lands', async ({ page }) => {
+test('no 👀 yet: no working line; it shows as the 👀 lands, counted from the 👀 and not from the message 42 s before', async ({ page }) => {
   await boot(page, { eyes: false });
   await page.waitForTimeout(1200);
   await expect(working(page)).toHaveCount(0);
   await page.evaluate(() => (window as any).__eyes((window as any).__msgs.at(-1).ref));
   await expect(working(page)).toHaveText(/^Uni is working · \d+:\d\d$/);
-  expect(seconds(await working(page).textContent())).toBeGreaterThanOrEqual(42);
+  expect(seconds(await working(page).textContent())).toBeLessThan(15);
 });
 
 test('scrolled up: Jump to latest, counting what came in; a tap goes to the newest', async ({ page }) => {
@@ -98,6 +98,8 @@ test('scrolled up: Jump to latest, counting what came in; a tap goes to the newe
   expect(Math.abs((await list.evaluate((el) => el.scrollTop)) - top)).toBeLessThan(4);
   await jump.click();
   await expect(page.getByText('Second of two new lines.')).toBeInViewport();
+  // the tap takes no focus, so the phone's bottom bar stays (focus in the composer hides it, moving the button from under the finger)
+  await expect(page.getByRole('navigation', { name: 'Main navigation' })).toBeVisible();
   await expect.poll(() => list.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight)).toBeLessThan(2);
   await expect(jump).toHaveCount(0);
   // following the end again: the next message glides in, no button

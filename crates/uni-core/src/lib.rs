@@ -57,7 +57,7 @@ pub use live::{run_live, LiveConfig, LiveEvent};
 pub use media::{fetch_media, is_relay_media_url, parse_imeta, MediaRef};
 pub use readstate::{publish_read_state, read_state_dirty};
 pub use store::{
-    ConversationMessage, Item, Member, Profile, Reaction, Room, SearchHit, Store, TimelineMessage,
+    ConversationMessage, Item, Member, Profile, Reaction, Reactor, Room, SearchHit, Store, TimelineMessage,
     SNIPPET_END, SNIPPET_START,
 };
 pub use sync::{ingest_channel_event, sync_older, sync_once, Ingested, SyncReport};

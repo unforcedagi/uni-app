@@ -75,8 +75,16 @@ pub struct Reaction {
     pub count: i64,
     /// Our own live reaction event with this emoji, if any (needed to undo).
     pub mine: Option<String>,
-    /// T-132: who reacted (distinct pubkeys, first reaction first), so the chat can tell Uni's 👀 ("I'm on it") from anyone else's.
-    pub by: Vec<String>,
+    /// T-132: who reacted and when they first did (first first), so the chat can tell Uni's 👀 ("I'm on it") from anyone else's
+    /// and count from it.
+    pub by: Vec<Reactor>,
+}
+
+/// One person's live reaction with an emoji: their key and when they first used it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Reactor {
+    pub pubkey: String,
+    pub ts: i64,
 }
 
 /// One local search hit: the visible message, its room label, and a short
@@ -976,39 +984,49 @@ impl Store {
         if targets.is_empty() {
             return Ok(Vec::new());
         }
+        // One row per (target, emoji, reactor), each reactor's first use first: folded below into one group per emoji, in the
+        // order each emoji was first used on its target.
         let marks = vec!["?"; targets.len()].join(",");
         let sql = format!(
-            "SELECT target, content, COUNT(DISTINCT author), MIN(ts),
-                    MAX(CASE WHEN author = ?1 THEN id END),
-                    (SELECT GROUP_CONCAT(author, ' ') FROM (
-                       SELECT b.author FROM aux_events b
-                       WHERE b.kind = 7 AND b.target = a.target AND b.content = a.content
-                         AND NOT EXISTS (SELECT 1 FROM aux_events d WHERE d.target = b.id AND d.kind IN (5, 9005))
-                       GROUP BY b.author ORDER BY MIN(b.ts), b.author))
+            "SELECT target, content, author, MIN(ts), MAX(id)
              FROM aux_events a
              WHERE kind = 7 AND target IN ({marks})
                AND NOT EXISTS (SELECT 1 FROM aux_events d WHERE d.target = a.id AND d.kind IN (5, 9005))
-             GROUP BY target, content
-             ORDER BY target, MIN(ts), content"
+             GROUP BY target, content, author
+             ORDER BY target, MIN(ts), content, author"
         );
         let mut stmt = self.conn.prepare(&sql)?;
-        let mut args: Vec<&dyn rusqlite::ToSql> = vec![&me];
-        args.extend(targets.iter().map(|t| t as &dyn rusqlite::ToSql));
+        let args: Vec<&dyn rusqlite::ToSql> = targets.iter().map(|t| t as &dyn rusqlite::ToSql).collect();
         let rows = stmt
             .query_map(args.as_slice(), |r| {
-                Ok(Reaction {
-                    target: r.get(0)?,
-                    emoji: r.get(1)?,
-                    count: r.get(2)?,
-                    mine: r.get(4)?,
-                    by: r
-                        .get::<_, Option<String>>(5)?
-                        .map(|v| v.split(' ').map(str::to_string).collect())
-                        .unwrap_or_default(),
-                })
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, i64>(3)?,
+                    r.get::<_, String>(4)?,
+                ))
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
-        Ok(rows)
+        let mut out: Vec<Reaction> = Vec::new();
+        for (target, emoji, author, ts, id) in rows {
+            let mine = (Some(author.as_str()) == me).then_some(id);
+            match out.iter_mut().find(|g| g.target == target && g.emoji == emoji) {
+                Some(g) => {
+                    g.count += 1;
+                    g.mine = g.mine.take().or(mine);
+                    g.by.push(Reactor { pubkey: author, ts });
+                }
+                None => out.push(Reaction {
+                    target,
+                    emoji,
+                    count: 1,
+                    mine,
+                    by: vec![Reactor { pubkey: author, ts }],
+                }),
+            }
+        }
+        Ok(out)
     }
 
     /// True when `id` is a kind-7 reaction signed by `me`.
@@ -1189,13 +1207,17 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![("🔥", 2, Some("r3")), ("+", 1, Some("r4"))]
         );
-        assert_eq!(r[0].by, vec!["bob".to_string(), "me".to_string()]);
+        fn by(x: &Reaction) -> Vec<(&str, i64)> {
+            x.by.iter().map(|b| (b.pubkey.as_str(), b.ts)).collect()
+        }
+        assert_eq!(by(&r[0]), vec![("bob", 11), ("me", 13)]); // a reactor once, at their first use
+        assert_eq!(by(&r[1]), vec![("me", 14)]);
         s.upsert_aux("d1", 5, "r3", "me", 15, "").unwrap();
         s.upsert_aux("d2", 5, "r4", "me", 15, "").unwrap();
         let r = s.reactions(&t, Some("me")).unwrap();
         assert_eq!(r.len(), 1);
         assert_eq!((r[0].count, r[0].mine.as_deref()), (1, None));
-        assert_eq!(r[0].by, vec!["bob".to_string()]); // a withdrawn reaction is no longer someone's
+        assert_eq!(by(&r[0]), vec![("bob", 11)]); // a withdrawn reaction is no longer someone's
         assert!(s.is_own_reaction("r1", "bob").unwrap());
         assert!(!s.is_own_reaction("r1", "me").unwrap());
         assert!(!s.is_own_reaction("m1", "aa").unwrap());

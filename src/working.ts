@@ -4,27 +4,33 @@
 import { isWorkerStatus, staleStatus, STATUS_STALE_S } from "./chatMarkers.ts";
 import type { Reaction } from "./reactions.ts";
 
-type Msg = { ref: string; author: string; ts: number; body: string; edited: boolean; reply_count: number; reactions: Reaction[] };
+type Msg = { ref: string; author: string; ts: number; body: string; edited: boolean; last_reply_ts: number | null; reactions: Reaction[] };
 
 /** The "I'm on it" reaction (with or without the emoji variation selector). */
 const ON_IT = /^👀️?$/u;
 
 /**
  * Who is working on your newest messages, and since when (seconds): one of your messages after the room's last real message from anyone
- * else carries a 👀 from someone else, who has not answered it (in the room or in its thread). Progress pings ("⏳ Working …") don't end
- * it. Past an hour with no live ping it is let go: a reply that never came is not shown as work going on.
+ * else carries a 👀 from someone else, who has not answered it. Counted from that 👀, the earliest of theirs on those messages; the newest
+ * 👀 says who. Progress pings ("⏳ Working …") don't end it; a reply in the message's thread after the 👀 does (whose it is isn't known here,
+ * and a line that stops early is better than one that runs on). Past an hour with no live ping of theirs it is let go: a reply that never
+ * came is not shown as work going on.
  */
 export function workingOn(messages: Msg[], me: string | null, nowS: number): { author: string; since: number } | null {
   if (!me) return null;
-  let found: { author: string; since: number } | null = null;
+  type Reactor = { pubkey: string; ts: number };
+  let found = null as { author: string; since: number } | null;
   const live = new Set<string>(); // who has a progress ping that still says something
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i];
     if (isWorkerStatus(m.body)) { if (!staleStatus(m, nowS, i === messages.length - 1)) live.add(m.author); continue; }
     if (m.author !== me) break;
-    if (m.reply_count > 0) break; // answered in its thread
-    const by = m.reactions.find((r) => ON_IT.test(r.emoji))?.by?.find((pk) => pk !== me);
-    if (by) found = { author: by, since: m.ts };
+    const eyes: Reactor[] = m.reactions.filter((r) => ON_IT.test(r.emoji)).flatMap((r) => r.by ?? []).filter((b) => b.pubkey !== me);
+    const who = found?.author;
+    const by: Reactor | undefined = who ? eyes.find((b) => b.pubkey === who) : eyes.reduce<Reactor | undefined>((a, b) => !a || b.ts > a.ts ? b : a, undefined);
+    if (!by) continue;
+    if ((m.last_reply_ts ?? 0) >= by.ts) break; // answered in its thread
+    found = { author: by.pubkey, since: Math.min(found?.since ?? Infinity, by.ts) };
   }
   if (!found) return null;
   return live.has(found.author) || nowS - found.since <= STATUS_STALE_S ? found : null;
