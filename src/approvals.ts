@@ -18,8 +18,10 @@ export type Approval = {
   answers: string[];
   /** when it stops waiting (unix seconds): the prompt's time plus the window it states; null when it states none */
   deadline: number | null;
-  /** "smart-deny": the owner-override prompt (run once or deny only) */
-  kind: "command" | "smart-deny";
+  /** "smart-deny": the owner-override prompt (run once or deny only); "sealed": Uni's approval card (T-234), answered on the card */
+  kind: "command" | "smart-deny" | "sealed";
+  /** T-234: the waiting card, when `kind` is "sealed" */
+  sealed?: import("./sealedCardCore").SealedWaiting;
 };
 
 const HEADERS: Record<string, Approval["kind"]> = {

@@ -72,6 +72,9 @@ import { activeQuery, filterMembers, insertMention, memberLabels, pruneBindings,
 import { SmallLine } from "./areas/Companion";
 import { SecretRequestCard } from "./SecretRequestCard";
 import { EnrollmentLine, SealedApprovals } from "./SealedApprovals";
+import { SealedCard } from "./SealedCard";
+import { sealedFence, sealedProse } from "./sealedCardCore";
+import { useSealedWaiting } from "./sealedLive";
 import { parseEnrollment } from "./sealedCore";
 import { parseSecretReceipt, parseSecretRequest, receiptFor, receiptsByRequest, secretCardsOn, withoutSecretBlock } from "./secretRequest";
 import NotePane, { usePaneShape } from "./NotePane";
@@ -850,8 +853,12 @@ function Conversations({ onForget }: { onForget: () => void }) {
   useLayoutEffect(() => { if (input.current) resizeComposer(input.current); }, [draft, asides, channel, notes.length]); // T-200: a note opening or closing changes the cap
   const focusComposer = useRef(false);
   // T-161: every room's Hermes approval prompts still waiting, for Needs you, the room and one notification each
-  const approvals = useApprovals({ identity, enabled: !!identity, synced, roomsReady: rooms.length > 0, roomName: (id) => roomsRef.current.find((r) => r.id === id)?.name ?? null,
+  const hermesApprovals = useApprovals({ identity, enabled: !!identity, synced, roomsReady: rooms.length > 0, roomName: (id) => roomsRef.current.find((r) => r.id === id)?.name ?? null,
     looking: (ch, r) => document.hasFocus() && ch === channelRef.current && r === rootRef.current });
+  // T-234: Uni's approval cards waiting for a tap join the same list (Needs you, the room's banner, the room's mark)
+  const sealedWaiting = useSealedWaiting({ enabled: !!identity, synced, roomsReady: rooms.length > 0, roomName: (id) => roomsRef.current.find((r) => r.id === id)?.name ?? null,
+    looking: (ch, r) => document.hasFocus() && ch === channelRef.current && r === rootRef.current });
+  const approvals = useMemo(() => [...hermesApprovals, ...sealedWaiting].sort((a, b) => a.ts - b.ts), [hermesApprovals, sealedWaiting]);
 
   const loadRooms = useCallback(async (cached?: Room[]) => {
     const rows = cached ?? await invoke<Room[]>("get_rooms");
@@ -1746,6 +1753,9 @@ function Conversations({ onForget }: { onForget: () => void }) {
     // T-234: the enrollment Settings posted, in words rather than its JSON
     if (m.author === identity && parseEnrollment(m.body)) return <EnrollmentLine channel={m.channel} reference={m.ref} me={identity}
       fallback={<Body body={m.body} mentions={m.mentions} me={identity} edited={m.edited} />} />;
+    // T-234: Uni's approval card; Rust checks who signed it and everything in it, and the card draws only from that
+    if (sealedFence(m.body)) return <><Body body={sealedProse(m.body)} mentions={m.mentions} me={identity} edited={m.edited} />
+      <SealedCard channel={m.channel} reference={m.ref} /></>;
     if (!secretCards) return null;
     if (parseSecretRequest(m.body)) return <><Body body={withoutSecretBlock(m.body).split("\n")[0]} mentions={m.mentions} me={identity} edited={m.edited} />
       <SecretRequestCard channel={m.channel} requestRef={m.ref} authorName={m.author_name} receipts={(author, rid) => receiptFor(secretReceipts, author, rid)}
@@ -1961,8 +1971,10 @@ function Conversations({ onForget }: { onForget: () => void }) {
   }), [openNote, loadRooms]);
   /** T-161: an approval prompt opens its room at the prompt with the composer focused; the user answers there (nothing is sent for them) */
   const openApproval = (a: Approval) => {
-    if (channelRef.current === a.channel && root === a.root) { focusTries.current = 0; setFocusRef(a.ref); input.current?.focus(); return; }
-    focusComposer.current = true;
+    // a Hermes prompt is answered in the composer; Uni's approval card (T-234) on the card itself
+    const typed = a.kind !== "sealed";
+    if (channelRef.current === a.channel && root === a.root) { focusTries.current = 0; setFocusRef(a.ref); if (typed) input.current?.focus(); return; }
+    focusComposer.current = typed;
     // a prompt posted as a reply is in its thread, never the room's timeline: it opens there, as a search hit does
     if (a.root) { focusTries.current = 0; openTarget({ kind: "thread", channel: a.channel, root: a.root, title: `Thread · ${roomsRef.current.find((r) => r.id === a.channel)?.name ?? "Room"}` }, "focus"); setFocusRef(a.ref); }
     else areaActions.openRoom(a.channel, a.ref);

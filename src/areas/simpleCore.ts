@@ -178,7 +178,7 @@ export function withApprovals(feed: NeedsFeed, approvals: readonly Approval[]): 
   return approvals.length ? { ...feed, approvals: [...approvals], total: feed.total + approvals.length } : feed;
 }
 /** "OK to run rm -rf /tmp/x?": an approval as the folded strip's line says it */
-export const approvalAsk = (a: Pick<Approval, "command">): string => `OK to run ${commandLine(a)}?`;
+export const approvalAsk = (a: Pick<Approval, "command"> & Partial<Pick<Approval, "kind">>): string => a.kind === "sealed" ? `Uni asks: ${commandLine(a)}` : `OK to run ${commandLine(a)}?`;
 
 /** Rows Uni's own panel shows (r17): the rest, private items included, are one "N more ›" to the work view. */
 export const UNI_ROWS = 3;

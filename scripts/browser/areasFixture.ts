@@ -542,6 +542,8 @@ Two proposals wait on a scope decision.
       metadata: { currentWindow: { label: 'main' }, currentWebview: { label: 'main' } }, transformCallback: (cb: any) => { w.__cbs.push(cb); return w.__cbs.length - 1; },
       invoke: async (cmd: string, args: any) => {
         w.__calls.push({ cmd, args });
+        // a spec's own commands (T-234's cards), set by an init script before this one; undefined falls through
+        if (typeof w.__extraInvoke === 'function') { const r = await w.__extraInvoke(cmd, args); if (r !== undefined) return r; }
         switch (cmd) {
           case 'webview_runtime': return 'wry test tauri test';
           case 'plugin:app|version': if (d.versionFails) throw 'version unavailable'; return 'dev';
