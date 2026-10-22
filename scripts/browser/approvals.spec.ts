@@ -14,13 +14,14 @@ const msg = (ref: string, body: string, ts: number, author = UNI, name = 'Uni') 
   mentions_me: false, root: null, parent: null, mentions: [], reply_count: 0, last_reply_ts: null, edited: false, reactions: [] });
 
 type Room = { id: string; name: string; members: number };
-type Opts = { statusNull?: boolean; rooms?: Room[]; roomsLater?: Room[]; enrolled?: boolean; failures?: number; messages?: unknown[]; statusFails?: boolean; verified?: string[] };
+type Opts = { statusNull?: boolean; rooms?: Room[]; roomsLater?: Room[]; enrolled?: boolean; failures?: number; messages?: unknown[]; statusFails?: boolean; verified?: string[]; hold?: boolean };
 async function boot(page: Page, o: Opts = {}) {
   await page.addInitScript(({ ME, UNI, SEAL, o, at }) => {
     const w = window as any;
     w.calls = [];
     w.failures = o.failures ?? 0;
     w.statusFails = !!o.statusFails;
+    w.held = []; // hold: an enroll waits here until the test lets it go (release), so its in-flight state can be checked
     const record = { identity: ME, uni: UNI, seal_pub: SEAL, event_id: '9b13b2ae' + 'e'.repeat(56), channel: 'test', created_at: at };
     w.enrolled = o.enrolled ? record : null;
     let rooms = o.rooms ?? [{ id: 'test', name: 'Test room', members: 2 }];
@@ -47,7 +48,7 @@ async function boot(page: Page, o: Opts = {}) {
             { const out = { uni: UNI, seal_pub: SEAL, rooms, enrolled: w.enrolled }; if (o.roomsLater) rooms = o.roomsLater; return out; }
           case 'sealed_enrollment_line': return (o.verified ?? []).includes(args.reference) ? ME : null;
           case 'sealed_enroll':
-            await new Promise((r) => setTimeout(r, 400));
+            await new Promise((r) => { if (o.hold) w.held.push(r); else setTimeout(r, 400); });
             if (w.failures > 0) { w.failures--; throw 'relay unreachable: connection refused'; }
             w.enrolled = { ...record, channel: args.channel };
             return w.enrolled;
@@ -63,6 +64,7 @@ async function boot(page: Page, o: Opts = {}) {
 // APPROVALS_SHOTS=<dir> also writes screenshots of the confirm and the enabled state there (synthetic data only).
 const shot = async (page: Page, name: string) => { if (process.env.APPROVALS_SHOTS) await page.screenshot({ path: `${process.env.APPROVALS_SHOTS}/${test.info().project.name}-${name}.png` }); };
 const calls = (page: Page) => page.evaluate(() => (window as any).calls as { cmd: string; args: any }[]);
+const release = (page: Page) => page.evaluate(() => (window as any).held.splice(0).forEach((r: () => void) => r()));
 const enrolls = async (page: Page) => (await calls(page)).filter((c) => c.cmd === 'sealed_enroll');
 const settings = async (page: Page) => {
   await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Settings', exact: true }).click();
@@ -72,7 +74,7 @@ const settings = async (page: Page) => {
 };
 
 test('enable: one confirm, then the enrollment is posted once and Settings says approvals are on', async ({ page }) => {
-  await boot(page);
+  await boot(page, { hold: true });
   const s = await settings(page);
   await s.getByRole('button', { name: 'Enable approvals for Uni' }).click();
   const confirm = s.getByRole('group', { name: 'Enable approvals for Uni' });
@@ -85,6 +87,7 @@ test('enable: one confirm, then the enrollment is posted once and Settings says 
   await confirm.getByRole('button', { name: 'Enable approvals', exact: true }).click();
   await expect(confirm.getByRole('button', { name: 'Enabling…' })).toBeDisabled();
   await expect(confirm.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+  await release(page);
   await expect(s.getByText('Approvals for Uni are on')).toBeVisible();
   await expect(s.getByText('9b13 b2ae')).toBeVisible();
   await shot(page, '02-enabled');
