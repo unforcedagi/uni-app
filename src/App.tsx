@@ -67,7 +67,7 @@ import { validateNotePath } from "./noteEdit";
 import { NoteOpener } from "./noteLinks";
 import { sameHub, type VaultRef } from "./vaultlinks";
 import { attachmentKind, formatSize } from "./media";
-import { Attachments, attachmentBody, useRelayOrigin, type MediaRef } from "./Attachments";
+import { Attachments, attachmentBody, modalCount, useRelayOrigin, type MediaRef } from "./Attachments";
 import { activeQuery, filterMembers, insertMention, memberLabels, pruneBindings, resolveRecipients, type Bindings, type Member } from "./mentions";
 import { SmallLine } from "./areas/Companion";
 import { SecretRequestCard } from "./SecretRequestCard";
@@ -1858,6 +1858,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const asideShown = !!asideRoom;
   const goBack = useRef<() => void>(() => {});
   goBack.current = () => {
+    // T-258: a full-window layer (video full screen, image viewer) closes first, as Escape closes it.
+    if (modalCount() > 0) { window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })); return; }
     if (journalFocus) { setJournalFocus(false); return; }
     if (panel) { setPanel(null); return; }
     if (searchOpen) { setSearchOpen(false); return; }
@@ -1870,7 +1872,9 @@ function Conversations({ onForget }: { onForget: () => void }) {
     if (activeTab(tabsRef.current)?.kind !== "areas") openTarget(origin(), "replace");
   };
   // At Uni's room tree (nothing open over it) the system's own Back runs: the app goes to the background.
-  const canGoBack = !!panel || journalFocus || notes.length > 0 || asideShown || searchOpen || !!root || hasAreaBack || (!!activeTab(tabs) && activeTab(tabs)!.kind !== "areas");
+  const [modalOpen, setModalOpenState] = useState(false);
+  useEffect(() => { const on = (e: Event) => setModalOpenState(((e as CustomEvent<number>).detail ?? 0) > 0); window.addEventListener("uni-modal", on); return () => window.removeEventListener("uni-modal", on); }, []);
+  const canGoBack = modalOpen || !!panel || journalFocus || notes.length > 0 || asideShown || searchOpen || !!root || hasAreaBack || (!!activeTab(tabs) && activeTab(tabs)!.kind !== "areas");
   // Ctrl+W (Linux, Windows) closes what is open over the place. r22 (Codex 6): on macOS the native menu's "Close Window" owns Cmd+W.
   const closeActiveRef = useRef(() => {});
   const goHistoryRef = useRef<(by: -1 | 1) => void>(() => {});

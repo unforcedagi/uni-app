@@ -12,7 +12,7 @@ export default defineConfig({
     { name: 'mobile', use: { browserName: 'chromium', viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true } },
     { name: 'desktop', use: { browserName: 'chromium', viewport: { width: 1280, height: 900 } } },
     // T-200: the Daylight (Android, so the note opens as a sheet at any width), upright and on its side
-    ...([['daylight-portrait', 1200, 1600], ['daylight-landscape', 1600, 1200]] as const).map(([name, width, height]) => ({ name, testMatch: /notePane\.spec\.ts/,
+    ...([['daylight-portrait', 1200, 1600], ['daylight-landscape', 1600, 1200]] as const).map(([name, width, height]) => ({ name, testMatch: /(notePane|videoFullscreen)\.spec\.ts/,
       use: { browserName: 'chromium' as const, viewport: { width, height }, isMobile: true, hasTouch: true, userAgent: DAYLIGHT_UA } })),
   ],
   webServer: { command: `node node_modules/vite/bin/vite.js build && node node_modules/vite/bin/vite.js preview --port ${port} --strictPort`, url: `http://127.0.0.1:${port}`, reuseExistingServer: false },

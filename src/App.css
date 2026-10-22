@@ -810,3 +810,7 @@ p.decision-card.decision-loading { padding: 8px 12px; color: var(--muted); font-
 .approval-banner-text code { font: 500 12px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .approval-banner-show { flex: none; padding: 3px 10px; border: 1px solid var(--danger); border-radius: 4px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
 .message.approval-waiting { box-shadow: inset 3px 0 0 var(--danger); }
+/* T-258: a video over the whole window, with the platform's full screen on top where it is allowed. */
+.video-full { background: #000; }
+.video-full-player { width: 100vw; height: 100vh; max-width: 100vw; max-height: 100vh; object-fit: contain; background: #000; }
+.video-full:fullscreen { width: 100vw; height: 100vh; }

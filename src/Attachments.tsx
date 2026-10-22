@@ -8,6 +8,7 @@
 // Downloads folder on desktop), and files open in the app for their type
 // (`media_open`); both say what happened, or why not, on the card (T-174).
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { createPortal } from "react-dom";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { pdfThumbnail } from "./pdfPreview";
 import { attachmentKind, collectAttachments, displayName, formatSize, imageLinks, mediaErrorText, parseDim, playbackErrorText, playerPin, relayMediaSha, stripAttachmentLines, type MediaRef } from "./media";
@@ -182,11 +183,26 @@ function RelayPlayer({ m }: { m: MediaRef }) {
   };
   const events = { onError: failed, onPlay: () => pin.play(), onEnded: () => pin.release() };
   const saver = useSave(m);
+  const inline = useRef<HTMLVideoElement>(null);
+  const [full, setFull] = useState<{ at: number; playing: boolean } | null>(null);
+  const openFull = () => {
+    const v = inline.current;
+    const at = v?.currentTime ?? 0;
+    const playing = !!v && !v.paused && !v.ended;
+    v?.pause();
+    setFull({ at, playing: playing || !v });
+  };
+  // Back in the message: carry on from where the full-screen view stopped (paused, so it never plays twice at once).
+  const closeFull = (at: number) => { setFull(null); requestAnimationFrame(() => { if (inline.current) inline.current.currentTime = at; }); };
   if (src) return <div className="attachment-media-group">
     {kind === "video"
-      ? <video className="attachment-video" src={src} controls playsInline autoPlay style={boxStyle(m.dim)} {...events} />
+      ? <video ref={inline} className="attachment-video" src={src} controls playsInline autoPlay={!full} style={boxStyle(m.dim)} {...events} />
       : <audio className="attachment-audio" src={src} controls autoPlay {...events} />}
-    <div className="attachment-actions"><SaveButton m={m} s={saver} className="attachment-save attachment-save-pill" /><SaveNote s={saver} /></div>
+    <div className="attachment-actions">
+      {kind === "video" && <button className="attachment-save attachment-save-pill attachment-fullscreen" onClick={openFull} aria-label={`Full screen: ${displayName(m)}`}>⛶ Full screen</button>}
+      <SaveButton m={m} s={saver} className="attachment-save attachment-save-pill" /><SaveNote s={saver} />
+    </div>
+    {full && <VideoFull src={src} name={displayName(m)} at={full.at} playing={full.playing} events={events} onClose={closeFull} />}
   </div>;
   const size = formatSize(m.size);
   return <div className="attachment-file-group">
@@ -267,12 +283,67 @@ function Lightbox({ src, alt, m, onClose }: { src: string; alt: string; m?: Medi
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
   }, [onClose]);
+  useEffect(() => { setModalOpen(+1); return () => setModalOpen(-1); }, []);
   return <div className="lightbox" role="dialog" aria-modal="true" aria-label={alt} onClick={onClose}>
     <img src={src} alt={alt} referrerPolicy="no-referrer" onClick={(e) => e.stopPropagation()} />
     <button ref={close} className="lightbox-close" onClick={onClose} aria-label="Close image">✕</button>
     {m && <LightboxSave m={m} />}
   </div>;
 }
+
+/**
+ * A video filling the whole window (T-258). The platform's own full-screen control can't be relied on: Android's
+ * WebView (wry's RustWebChromeClient) cancels every full-screen request, and other webviews vary. So the app shows
+ * its own: a fixed layer over everything, rendered at the body so no message ancestor can clip it. Where the
+ * Fullscreen API is allowed (desktop), the layer also asks to take the screen; refused or absent, the layer stays.
+ * Escape, ✕ and Android Back close it.
+ */
+function VideoFull({ src, name, at, playing, events, onClose }: {
+  src: string; name: string; at: number; playing: boolean;
+  events: React.VideoHTMLAttributes<HTMLVideoElement>; onClose: (at: number) => void;
+}) {
+  const layer = useRef<HTMLDivElement>(null);
+  const video = useRef<HTMLVideoElement>(null);
+  const shut = useRef(false);
+  const close = () => {
+    if (shut.current) return;
+    shut.current = true;
+    if (document.fullscreenElement) void document.exitFullscreen?.().catch(() => {});
+    onClose(video.current?.currentTime ?? at);
+  };
+  const closeRef = useRef(close);
+  closeRef.current = close;
+  useEffect(() => {
+    const el = layer.current;
+    el?.querySelector<HTMLButtonElement>(".lightbox-close")?.focus();
+    if (el && document.fullscreenEnabled && el.requestFullscreen) void el.requestFullscreen().catch(() => {});
+    // Capture, and stop it there: Escape here closes only this layer, never the panel or note behind it.
+    const key = (e: KeyboardEvent) => { if (e.key === "Escape") { e.preventDefault(); e.stopImmediatePropagation(); closeRef.current(); } };
+    // Leaving the platform's full screen (its own Esc, a swipe) closes the layer too, so one gesture is enough.
+    const left = () => { if (!document.fullscreenElement) closeRef.current(); };
+    window.addEventListener("keydown", key, true);
+    document.addEventListener("fullscreenchange", left);
+    setModalOpen(+1);
+    return () => { window.removeEventListener("keydown", key, true); document.removeEventListener("fullscreenchange", left); setModalOpen(-1); };
+  }, []);
+  const start = (e: React.SyntheticEvent<HTMLVideoElement>) => {
+    const v = e.currentTarget;
+    if (at > 0) v.currentTime = at;
+    if (playing) void v.play().catch(() => {});
+  };
+  return createPortal(<div ref={layer} className="lightbox video-full" role="dialog" aria-modal="true" aria-label={`${name}, full screen`}>
+    <video ref={video} className="video-full-player" src={src} controls playsInline onLoadedMetadata={start} {...events} />
+    <button className="lightbox-close" onClick={close} aria-label="Close full screen">✕</button>
+  </div>, document.body);
+}
+
+/** How many full-window layers are open; App lets Android Back close the top one. */
+let modals = 0;
+function setModalOpen(d: number) {
+  modals = Math.max(0, modals + d);
+  window.dispatchEvent(new CustomEvent("uni-modal", { detail: modals }));
+}
+export function modalCount(): number { return modals; }
 
 /** Save for a relay image, at the foot of the lightbox. */
 function LightboxSave({ m }: { m: MediaRef }) {
