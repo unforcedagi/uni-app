@@ -119,7 +119,7 @@ class KeystorePlugin(private val activity: Activity) : Plugin(activity) {
           biometric = prompt
           prompt.authenticate(BiometricPrompt.PromptInfo.Builder()
             .setTitle(title)
-            .setSubtitle(reason)
+            .setDescription(reason)
             .setAllowedAuthenticators(BIOMETRIC_STRONG or DEVICE_CREDENTIAL)
             .build())
         }

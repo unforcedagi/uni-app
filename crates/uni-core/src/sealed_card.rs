@@ -733,16 +733,25 @@ pub fn approval_summary(view: &CardView, rids: &[String]) -> Result<(String, Str
         .map(|rid| view.rows.iter().find(|r| &r.rid == rid).ok_or_else(|| Error::Invalid("that request isn't on this card".into())))
         .collect::<Result<_>>()?;
     let uses = |n: u64| format!("{n} use{}", if n == 1 { "" } else { "s" });
+    let job = |r: &RowView| format!("job {} {}", &r.request_digest[..4], &r.request_digest[4..8]);
     let one = |r: &RowView| format!("{} · {}, {}, {}", r.credential, r.action, span(r.ttl_s), uses(r.uses));
+    // a mint for a child that never expires says so here too (P3: `child_ttl_s: null`)
+    let permanent = |r: &RowView| {
+        if r.action == "mint.cloudflare" && r.payload.get("child_ttl_s").is_some_and(Value::is_null) {
+            " This makes a permanent token."
+        } else {
+            ""
+        }
+    };
     match rows.as_slice() {
         [] => Err(Error::Invalid("nothing was chosen".into())),
         [r] if view.kind == Some(CardKind::Single) => {
             let power = if r.class == Class::Powerful { "powerful " } else { "" };
-            Ok((format!("Approve a {power}credential"), format!("Uni: {}. Job {} {}.", one(r), &r.request_digest[..4], &r.request_digest[4..8])))
+            Ok((format!("Approve a {power}credential"), format!("Uni: {}. {}{} Exact {}.", one(r), r.scope, permanent(r), job(r))))
         }
         rs => Ok((
             format!("Approve {} of Uni's morning grants", rs.len()),
-            rs.iter().map(|r| one(r)).collect::<Vec<_>>().join("; ") + ".",
+            rs.iter().map(|r| format!("{} ({})", one(r), job(r))).collect::<Vec<_>>().join("; ") + ".",
         )),
     }
 }
@@ -1119,14 +1128,26 @@ mod tests {
         let rid = f["rid"].as_str().unwrap().to_string();
         let d = request_digest(&f).unwrap();
         assert_eq!(approval_summary(&v, std::slice::from_ref(&rid)).unwrap(),
-            ("Approve a powerful credential".into(), format!("Uni: dns-zone · dns.edit, 10 min, 1 use. Job {} {}.", &d[..4], &d[4..8])));
+            ("Approve a powerful credential".into(),
+             format!("Uni: dns-zone · dns.edit, 10 min, 1 use. Add an A record for demo.example.org Exact job {} {}.", &d[..4], &d[4..8])));
         assert!(approval_summary(&v, &["9".repeat(32)]).is_err(), "a request id that isn't on the card");
         assert!(approval_summary(&v, &[]).is_err());
         let rows: Vec<Value> = ["r2-a", "r2-b", "r2-c"].iter().map(|n| fields(&w, n, "routine", 50_400, 200).0).collect();
         let m = view(&morning(&w.uni, &rows), &w.uni.public_key(), &w.seal, &Answers::default(), NOW);
         let pick = [rows[0]["rid"].as_str().unwrap().to_string(), rows[2]["rid"].as_str().unwrap().to_string()];
+        let j = |r: &Value| { let d = request_digest(r).unwrap(); format!("job {} {}", &d[..4], &d[4..8]) };
         assert_eq!(approval_summary(&m, &pick).unwrap(), ("Approve 2 of Uni's morning grants".into(),
-            "r2-a · dns.edit, 14 h, 200 uses; r2-c · dns.edit, 14 h, 200 uses.".into()));
+            format!("r2-a · dns.edit, 14 h, 200 uses ({}); r2-c · dns.edit, 14 h, 200 uses ({}).", j(&rows[0]), j(&rows[2]))));
+        // a permanent child token is named in the confirm
+        let (mint, _) = {
+            let (mut g, k) = fields(&w, "cf-parent", "powerful", 60, 1);
+            g["action"] = json!("mint.cloudflare");
+            g["payload"] = json!({"template": "r2-read", "child_ttl_s": null});
+            g["payload_digest"] = json!(payload_digest("mint.cloudflare", &g["payload"]).unwrap());
+            (g, k)
+        };
+        let mv = view(&card(&w.uni, &mint), &w.uni.public_key(), &w.seal, &Answers::default(), NOW);
+        assert!(approval_summary(&mv, &[mint["rid"].as_str().unwrap().to_string()]).unwrap().1.contains("This makes a permanent token."));
         let refused = view(&card(&Keys::generate(), &f), &w.uni.public_key(), &w.seal, &Answers::default(), NOW);
         assert_eq!(approval_summary(&refused, &[rid]).unwrap_err().to_string(), "invalid: Not signed by Uni.");
         assert_eq!([span(45), span(600), span(7200), span(5400 * 3)], ["45 s", "10 min", "2 h", "4.5 h"]);
