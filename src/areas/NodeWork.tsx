@@ -204,6 +204,8 @@ export function TaskSheet({ task, gone = false, nodeName, room, roomNamed, inRoo
   else if (ownWrite.current && task.updatedAt !== opened.current.rev) { opened.current.rev = task.updatedAt; ownWrite.current = false; }
   const [, bump] = useState(0);
   const moved = !gone && revisionMoved(opened.current.rev, task.updatedAt);
+  /** Adopt the revision shown now as the one being answered. */
+  const reload = () => { opened.current = { id: task.id, rev: task.updatedAt }; setChanged(false); bump((n) => n + 1); };
   useEffect(() => { if (moved) onStale?.(); }, [moved]); // eslint-disable-line react-hooks/exhaustive-deps
   const ready = answersReady(fresh, anyway) && !moved;
   const blockGap = unresolvedBlock(task.next, task.detail);
@@ -272,8 +274,9 @@ export function TaskSheet({ task, gone = false, nodeName, room, roomNamed, inRoo
       {missing && <p className="task-q-note task-missing" role="status">A note this stands on isn't in the vault: it may have been moved, renamed or deleted. Nothing here is asked of you until it is found; open the task to see what it needs.</p>}
       {tidy && !missing && !check && !checking && !unavailable && !waits && <p className="task-q-note task-tidy">{TIDY_SAYS[tidy]} It needs rewording by its room as one clear request, or closing. Nothing here is yours to do.</p>}
       {gone && <p className="task-gone" role="status">This is no longer open: it was done, decided or changed elsewhere.</p>}
-      {changed && !gone && <p className="task-gone task-changed" role="alert">This changed since you opened it. Nothing was saved; this is the latest.</p>}
-      {moved && !changed && !decideError && <p className="task-gone task-changed" data-moved="true" role="alert">{CHANGED_SINCE}. This is the latest. <button type="button" className="task-link" onClick={() => { opened.current = { id: task.id, rev: task.updatedAt }; bump((n) => n + 1); }}>Reload</button></p>}
+      {/* T-145: a write refused for a newer revision offers the same Reload: the answers come back only for the revision now shown */}
+      {changed && !gone && <p className="task-gone task-changed" data-moved={moved || undefined} role="alert">This changed since you opened it. Nothing was saved; this is the latest.{moved && <> <button type="button" className="task-link" onClick={reload}>Reload</button></>}</p>}
+      {moved && !changed && !decideError && <p className="task-gone task-changed" data-moved="true" role="alert">{CHANGED_SINCE}. This is the latest. <button type="button" className="task-link" onClick={reload}>Reload</button></p>}
       {/* r27: the note's own words (a preview link in them) are shown only when they say more than the heading: otherwise just the link */}
       {dq?.answerable && !unsure && dq.full !== dq.text && /https?:\/\/|\bwww\./.test(dq.full) && (repeatsHeading(dq.full, heading, decision ? rest : null) ? stepLinks(dq.full, true) : <div className="task-next"><NextText text={dq.full} vault={vault} onNote={(r) => { onClose(); onNote(r); }} /></div>)}
       {dq && !dq.answerable && !reading && !unsure && <p className="task-next"><button type="button" className="task-link" onClick={() => { onClose(); onNote({ vault, id: task.id }); }}>Open the note to read the question ›</button></p>}
