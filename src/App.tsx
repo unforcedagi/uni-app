@@ -1630,10 +1630,13 @@ function Conversations({ onForget }: { onForget: () => void }) {
   async function forget() {
     // Two taps instead of window.confirm (unreliable in Android WebView).
     if (!forgetArmed) { setForgetArmed(true); return; }
+    // T-132: from here no draft is saved (a send still on its way would otherwise save one back after the wipe); a failed Forget gives it back
+    const owner = identityRef.current;
+    identityRef.current = null;
     try { voiceMounted.current = false; await voiceQueue.current; await voiceOutbox.current.clear(); await invoke("identity_forget");
       forgetDrafts(); invalidatePaths(); forgetAreas(); forgetDecisions(); forgetHeld(); forgetCalendar();
       try { for (const key of Object.keys(localStorage)) if (key.startsWith("uni.noteDraft.v1:") || key.startsWith(CHAT_DRAFT_PREFIX) || key.startsWith("uni.vaultExpanded.v1:") || key === ALIASES_KEY) localStorage.removeItem(key); } catch { /* unavailable storage */ }
-      onForget(); } catch (e) { voiceMounted.current = true; setError(String(e)); }
+      onForget(); } catch (e) { voiceMounted.current = true; identityRef.current = owner; setError(String(e)); }
   }
 
   const currentRoom = rooms.find((r) => r.id === channel);

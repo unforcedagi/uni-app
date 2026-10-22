@@ -372,6 +372,33 @@ test.describe('drafts', () => {
     await expect(composer(page)).toHaveValue(INDENTED);
   });
 
+  test('Forget device key while a send is on its way: nothing is saved again when the send lands', async ({ page }) => {
+    await boot(page);
+    await composer(page).fill(INDENTED);
+    await page.evaluate(() => sessionStorage.setItem('t.holdIdentity', '1'));
+    await page.reload();
+    const garden = page.getByRole('textbox', { name: 'Message Garden' });
+    await garden.fill('Sent before it loaded.');
+    await page.evaluate(() => { (window as any).holdSend = true; });
+    await press(page.getByRole('button', { name: 'Send message', exact: true }));
+    await expect(page.locator('[data-outgoing="true"]')).toBeVisible();
+    await page.evaluate(() => { sessionStorage.removeItem('t.holdIdentity'); (window as any).releaseIdentity(); });
+    await identityRead(page);
+    await expect(garden).toHaveValue(INDENTED + '\n\nSent before it loaded.');
+    await garden.blur(); // a phone hides its bottom bar while the composer has focus
+    const saved = () => page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('uni.chatDraft.')).length);
+    await press(page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Settings', exact: true }));
+    await press(page.getByRole('button', { name: 'Forget this device key', exact: true }));
+    await press(page.getByRole('button', { name: /Tap again to forget/ }));
+    await expect(page.locator('.pairing-card')).toBeVisible();
+    expect(await saved()).toBe(0);
+    // the send lands after the Forget
+    await page.evaluate(() => { (window as any).holdSend = false; (window as any).finishSend(); });
+    await expect.poll(() => posts(page)).toHaveLength(1);
+    await page.waitForTimeout(300);
+    expect(await saved()).toBe(0);
+  });
+
   test('storage that starts refusing: an older saved copy never comes back as the draft', async ({ page }) => {
     await boot(page);
     await composer(page).fill(A);
