@@ -56,9 +56,11 @@ export default function Journal({ rooms, uniRoomId, onShare, onBack, backTo = "U
   const [shared, setShared] = useState<Record<string, { id: string; name: string }[]>>({});
   /** T-263: the entry (its device entry id) just saved, offered to the area rooms until dismissed or the next save. */
   const [offer, setOffer] = useState<string | null>(null);
-  /** `note id room id` pairs on their way. */
+  /** `note id room id` pairs on their way (the ref also holds back a second tap before the re-render). */
   const [sending, setSending] = useState<Record<string, true>>({});
-  const areas = areaRooms(rooms, uniRoomId);
+  const inFlight = useRef(new Set<string>());
+  // without a hub there is no link, and a room must never get the entry's words instead
+  const areas = cfg?.hub ? areaRooms(rooms, uniRoomId) : [];
   const [settings, setSettings] = useState(false);
   /** The entry the same words were already saved as (a duplicate save shows it instead of adding one). */
   const [again, setAgain] = useState<string | null>(null);
@@ -172,7 +174,8 @@ export default function Journal({ rooms, uniRoomId, onShare, onBack, backTo = "U
         // this send is finished whatever the composer holds now; the composer clears only if it still holds these words
         if (send.current?.draft === draft) send.current = null;
         clearIf(rev, text);
-        setOffer(draft.entry_id);
+        // offered only when it reached the vault; a queued entry can still be sent from its menu later
+        if (!r.error) setOffer(draft.entry_id);
       }
       await afterFlush(r, "Journal entry", rev);
     } catch (e) { setError(String(e)); setStatus("Not saved · your text is still here"); }
@@ -200,8 +203,8 @@ export default function Journal({ rooms, uniRoomId, onShare, onBack, backTo = "U
       const bytes = new Uint8Array(await blob.arrayBuffer());
       const draft = newDraft(note, "voice");
       const r = await invoke<FlushReport>("journal_save_voice", bytes, { headers: { "x-entry": JSON.stringify(draft), "x-audio-mime": mime } });
-      // offered once its transcript lands (the menu waits for it too)
-      setOffer(draft.entry_id);
+      // offered once its transcript lands (the menu waits for it too), and only when it reached the vault
+      if (!r.error) setOffer(draft.entry_id);
       // the typed words went with the recording: clear them only if they are still what was sent
       if (clearIf(rev, submitted)) { setSame(null); send.current = null; }
       await afterFlush(r, "Journal entry");
@@ -225,7 +228,8 @@ export default function Journal({ rooms, uniRoomId, onShare, onBack, backTo = "U
 
   async function share(note: JournalNote, roomId: string, toUni: boolean) {
     const key = `${note.id} ${roomId}`;
-    if (!cfg || sending[key]) return;
+    if (!cfg || inFlight.current.has(key)) return;
+    inFlight.current.add(key);
     setShareFor(null);
     setSending((s) => ({ ...s, [key]: true }));
     setStatus(toUni ? "Passing to Uni…" : "Sending…");
@@ -234,9 +238,8 @@ export default function Journal({ rooms, uniRoomId, onShare, onBack, backTo = "U
       const name = toUni ? "Uni" : rooms.find((r) => r.id === roomId)?.name ?? "room";
       setShared((s) => ({ ...s, [note.id]: [...(s[note.id] ?? []).filter((x) => x.id !== roomId), { id: roomId, name }] }));
       setStatus(toUni ? "Passed to Uni in #Uni" : `Sent to #${name}`);
-      setError(null);
     } catch (e) { setError(String(e)); setStatus("Not sent"); }
-    finally { setSending((s) => { const { [key]: _, ...rest } = s; return rest; }); }
+    finally { inFlight.current.delete(key); setSending((s) => { const { [key]: _, ...rest } = s; return rest; }); }
   }
   const sentTo = (noteId: string, roomId: string) => !!shared[noteId]?.some((x) => x.id === roomId);
   /** One chip per area room: a tap sends the entry there; a sent room stays marked. */
@@ -298,7 +301,7 @@ export default function Journal({ rooms, uniRoomId, onShare, onBack, backTo = "U
             <button type="button" aria-expanded={shareFor === e.id} onClick={() => setShareFor(shareFor === e.id ? null : e.id)}>Share to a room…</button>
             {shareFor === e.id && <div className="share-picker" role="group" aria-label="Choose a room">
               {areas.map((r) => areaChip(e, r, () => setMenuFor(null)))}
-              {areas.length === 0 && <span className="empty">No area rooms cached. Refresh conversations first.</span>}
+              {areas.length === 0 && <span className="empty">{cfg?.hub ? "No area rooms cached. Refresh conversations first." : "Set the Parachute hub in Journal settings to send a link."}</span>}
             </div>}
           </div>}
         </div>}

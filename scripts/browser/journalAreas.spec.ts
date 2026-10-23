@@ -9,7 +9,7 @@ const HUB = 'https://hub.example.com', VAULT = 'demo';
 
 type Post = { channel: string; body: string; recipients: string[] };
 
-async function boot(page: Page) {
+async function boot(page: Page, hub = HUB) {
   await page.addInitScript(({ ME, UNI, SAM, HUB, VAULT }) => {
     const w = window as any;
     localStorage.setItem('uni.tabs.v1', JSON.stringify({ v: 1, tabs: [{ id: 'j', kind: 'journal', title: 'Journal' }], active: 'j', recent: ['j'] }));
@@ -61,7 +61,7 @@ async function boot(page: Page) {
       },
     };
     w.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} };
-  }, { ME, UNI, SAM, HUB, VAULT });
+  }, { ME, UNI, SAM, HUB: hub, VAULT });
   await page.goto('/');
   await expect(page.getByRole('textbox', { name: 'Journal entry' })).toBeVisible();
 }
@@ -153,4 +153,16 @@ test('the entry menu offers the same area rooms, and Pass to Uni still goes to #
   expect(sent.map((p) => p.channel)).toEqual(['workshop-room', 'uni-room']);
   expect(sent[1].recipients).toEqual([UNI]);
   expect(sent[1].body.startsWith("@Uni here's a journal entry.")).toBe(true);
+});
+
+test('with no hub set there is no link, so no room is offered and the entry\'s words are never posted', async ({ page }) => {
+  await boot(page, '');
+  const entry = await save(page, 'A private line that must stay in the journal.');
+  await expect(entry.getByRole('group', { name: 'Send to an area' })).toHaveCount(0);
+  await entry.getByRole('button', { name: 'More for this entry' }).click();
+  await entry.getByRole('button', { name: 'Share to a room…' }).click();
+  const picker = entry.getByRole('group', { name: 'Choose a room' });
+  await expect(picker.getByRole('button')).toHaveCount(0);
+  await expect(picker).toContainText('Set the Parachute hub');
+  expect(await posts(page)).toEqual([]);
 });

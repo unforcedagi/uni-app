@@ -1196,6 +1196,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
   // Journal → room, addressed to the room's Uni and p-tagged (Hermes in a group room wakes only on a mention); the entry itself
   // stays in the vault. #Uni needs its Uni; an area room without one gets the plain line (T-263).
   async function shareEntry(note: JournalNote, roomId: string, toUni: boolean, vault: string, journalHub: string) {
+    // an area room gets the link only: without a hub the message would carry the entry's words
+    if (!toUni && !journalHub) throw new Error("No Parachute hub set, so there's no link to send.");
     let label: string | null = null;
     const recipients: string[] = [];
     const roster = await invoke<Member[]>("get_members", { channel: roomId });
