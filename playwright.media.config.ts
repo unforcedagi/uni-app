@@ -6,6 +6,8 @@ const touch = (width: number, height: number, ua?: string) => ({ browserName: 'c
 export default defineConfig({
   outputDir: 'test-results/media',
   testDir: './scripts/browser', testMatch: /publishedMedia\.spec\.ts/, reporter: 'list', retries: 1,
+  // two workers: at four, under load, headless Chromium's renderer crashed mid-playback ("Target crashed"), never an assertion
+  workers: 2,
   // a test plays media without a tap (the player itself never autoplays: the spec asserts it)
   use: { baseURL: `http://127.0.0.1:${port}`, colorScheme: 'light', reducedMotion: 'reduce', launchOptions: { args: ['--autoplay-policy=no-user-gesture-required'] } },
   projects: [

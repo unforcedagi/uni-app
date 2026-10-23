@@ -30,7 +30,8 @@ test.beforeAll(({}, info) => {
   mkdirSync(dir, { recursive: true });
   const make = (name: string, args: string[]) => { const out = `${dir}/${name}`; if (!existsSync(out)) execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', ...args, out]); return out; };
   files = {
-    'garden-walk-0a1b2c3d.webm': { mime: 'video/webm', path: make('walk.webm', ['-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=15', '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000', '-t', '6', '-c:v', 'libvpx-vp9', '-b:v', '150k', '-c:a', 'libopus', '-shortest']) },
+    // wider than a phone, so a player that isn't held to its column overflows
+    'garden-walk-0a1b2c3d.webm': { mime: 'video/webm', path: make('walk640.webm', ['-f', 'lavfi', '-i', 'testsrc2=size=640x360:rate=15', '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000', '-t', '6', '-c:v', 'libvpx-vp9', '-b:v', '150k', '-c:a', 'libopus', '-shortest']) },
     'bird-call-1b2c3d4e.mp3': { mime: 'audio/mpeg', path: make('call.mp3', ['-f', 'lavfi', '-i', 'sine=frequency=330:duration=5', '-c:a', 'libmp3lame', '-b:a', '64k']) },
     'garden-map-2c3d4e5f.png': { mime: 'image/png', path: make('map.png', ['-f', 'lavfi', '-i', 'testsrc2=size=640x360', '-frames:v', '1']) },
   };
