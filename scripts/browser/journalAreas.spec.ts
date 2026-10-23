@@ -2,8 +2,8 @@ import { expect, test, type Page } from '@playwright/test';
 
 // T-263: after a journal entry is saved, a quiet "Send to an area?" row offers the area rooms as chips. Each tap posts one short
 // message with the entry's link to that room, addressed to the room's Uni (Hermes in a group room wakes only on a mention); a room
-// with no Uni gets the plain line. DMs and #Uni are not offered (archived rooms never reach the room list: the core drops them,
-// see crates/uni-core/tests/mock_relay.rs). Dismissing posts nothing. Synthetic rooms, people and words only.
+// with no Uni gets the plain line. DMs, rooms of unknown kind and #Uni are not offered (archived rooms never reach the room list:
+// the core drops them, see crates/uni-core/tests/mock_relay.rs). Dismissing posts nothing. Synthetic rooms, people and words only.
 const ME = 'a'.repeat(64), UNI = 'b'.repeat(64), SAM = 'c'.repeat(64);
 const HUB = 'https://hub.example.com', VAULT = 'demo';
 
@@ -22,8 +22,13 @@ async function boot(page: Page, hub = HUB) {
       { id: 'workshop-room', name: 'workshop', unread: 0, dm: false },
       { id: 'group-dm-room', name: 'Group DM (3)', unread: 0, dm: true },
       { id: 'library-room', name: 'library', unread: 0, dm: false },
+      // kind not known yet (cached before the app knew DMs, or just joined), and a row from a list an older app cached: never offered
+      { id: 'porch-room', name: 'porch', unread: 0, dm: null },
+      { id: 'attic-room', name: 'attic', unread: 0 },
     ];
-    const members: Record<string, unknown[]> = { 'uni-room': [robin, uni], 'garden-room': [robin, uni, sam], 'workshop-room': [robin, uni], 'library-room': [robin, sam], 'dm-room': [robin, sam], 'group-dm-room': [robin, sam, uni] };
+    w.__rooms = rooms;
+    w.__live = () => { for (const h of w.__listeners['uni://live'] ?? []) w.__cbs[h]?.({ event: 'uni://live', id: 1, payload: { kind: 'rooms', channel: null, status: null, author: null } }); };
+    const members: Record<string, unknown[]> = { 'uni-room': [robin, uni], 'garden-room': [robin, uni, sam], 'workshop-room': [robin, uni], 'library-room': [robin, sam], 'porch-room': [robin, uni], 'attic-room': [robin, uni], 'dm-room': [robin, sam], 'group-dm-room': [robin, sam, uni] };
     let n = 0;
     w.__TAURI_INTERNALS__ = {
       metadata: { currentWindow: { label: 'main' }, currentWebview: { label: 'main' } },
@@ -34,7 +39,7 @@ async function boot(page: Page, hub = HUB) {
           case 'identity_status': return { paired: true, pubkey: ME };
           case 'get_identity': return ME;
           case 'get_npub': return 'test';
-          case 'get_rooms': return rooms;
+          case 'get_rooms': return JSON.parse(JSON.stringify(rooms));
           case 'get_messages': return [];
           case 'get_members': return members[args.channel] ?? [];
           case 'post_message': {
@@ -165,4 +170,23 @@ test('with no hub set there is no link, so no room is offered and the entry\'s w
   await expect(picker.getByRole('button')).toHaveCount(0);
   await expect(picker).toContainText('Set the Parachute hub');
   expect(await posts(page)).toEqual([]);
+});
+
+test('a room the core learns is a DM leaves the chips when the room list is told, and is checked again before a send', async ({ page }) => {
+  await boot(page);
+  const entry = await save(page, 'Moved the seed trays to the porch shelf.');
+  const offer = entry.getByRole('group', { name: 'Send to an area' });
+  await expect(offer.getByRole('button', { name: /^Send to #/ })).toHaveText(['#garden', '#library', '#workshop']);
+
+  // the relay's metadata lands while the row is up: workshop is a DM; the live event re-reads the rooms
+  await page.evaluate(() => { const w = window as any; w.__rooms.find((r: any) => r.id === 'workshop-room').dm = true; w.__live(); });
+  await expect(offer.getByRole('button', { name: /^Send to #/ })).toHaveText(['#garden', '#library']);
+
+  // the core knows before the screen does (no event yet): the tap is refused, nothing is posted, and the chip goes
+  await page.evaluate(() => { (window as any).__rooms.find((r: any) => r.id === 'garden-room').dm = true; });
+  await offer.getByRole('button', { name: 'Send to #garden' }).click();
+  await expect(page.getByRole('alert')).toContainText("isn't an area room any more");
+  await expect(offer.getByRole('button', { name: /^Send to #/ })).toHaveText(['#library']);
+  expect(await posts(page)).toEqual([]);
+  await expect(entry.locator('.queued-tag')).toHaveCount(0);
 });

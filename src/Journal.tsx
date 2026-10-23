@@ -5,7 +5,7 @@ import { useRecorder } from "./recorder";
 import { areaRooms, entryText, greeting, mmss, newDraft, sameWordsLine, type FlushReport, type JournalDraft, type JournalNote, type QueuedEntry, type SameWords } from "./journalCore";
 import { forgetPublishOrigins } from "./PublishedPlayer";
 
-type Room = { id: string; name: string; dm?: boolean };
+type Room = { id: string; name: string; dm?: boolean | null };
 type VaultConfig = { hub: string; vault: string };
 /** Post `note` to a room, addressed to its Uni; `toUni`: the room is #Uni, so Uni must be there. Resolves when accepted. */
 export type ShareFn = (note: JournalNote, roomId: string, toUni: boolean, vault: string, hub: string) => Promise<void>;

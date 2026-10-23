@@ -84,6 +84,9 @@ pub enum LiveEvent {
     ChannelAdded { channel: Uuid },
     /// A kind-44101 notification removed us; its sub is closed.
     ChannelRemoved { channel: Uuid },
+    /// A joined channel's metadata (name, kind, archived) was stored: the
+    /// room list may have changed (a new DM is known as one only now).
+    ChannelMeta { channel: Uuid },
     /// Someone is typing in `channel` (thread `root`, if any). Not stored.
     Typing {
         channel: Uuid,
@@ -236,7 +239,7 @@ impl<'a, F: Fn(LiveEvent)> Session<'a, F> {
                 ci.name.as_deref(),
                 ci.description.as_deref(),
                 ci.archived,
-                Some(ci.dm),
+                ci.dm,
                 now,
             )?;
         }
@@ -496,7 +499,7 @@ impl<'a, F: Fn(LiveEvent)> Session<'a, F> {
                         ci.name.as_deref(),
                         ci.description.as_deref(),
                         false,
-                        Some(ci.dm),
+                        ci.dm,
                         now,
                     )?,
                     None => {
@@ -509,6 +512,7 @@ impl<'a, F: Fn(LiveEvent)> Session<'a, F> {
                             .upsert_channel(&ch.to_string(), None, None, true, now)?;
                     }
                 }
+                (self.emit)(LiveEvent::ChannelMeta { channel: ch });
             }
             return Ok(());
         }

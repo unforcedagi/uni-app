@@ -45,7 +45,7 @@ import { decisionRefsIn, unreferenced } from "./decisionView";
 import { findUniMember, findUniRoom, searchHandoffText } from "./uniActions";
 import Search from "./Search";
 import Journal from "./Journal";
-import { AREA_ASK, mmss, shareText, type JournalNote } from "./journalCore";
+import { AREA_ASK, areaRooms, mmss, shareText, type JournalNote } from "./journalCore";
 import { useRecorder, voiceFileName } from "./recorder";
 import { attachmentBlocksSend, enterInsertsNewline, manualAttachments } from "./composerCore";
 import PairSource, { PairDeviceButton } from "./PairSource";
@@ -82,7 +82,7 @@ import { ApprovalsContext, useApprovals } from "./approvalsLive";
 import { ApprovalBanner } from "./areas/ApprovalRows";
 import type { Approval } from "./approvals";
 
-type Room = { id: string; name: string; last_message: string | null; last_ts: number | null; mentions: boolean; unread: number; /** a direct message, not a room */ dm?: boolean };
+type Room = { id: string; name: string; last_message: string | null; last_ts: number | null; mentions: boolean; unread: number; /** a direct message, a room (false), or not known yet (null; absent in a list cached by an older app) */ dm?: boolean | null };
 type Message = { ref: string; channel: string; author: string; author_name: string; ts: number; body: string; mentions_me: boolean; root: string | null; parent: string | null; mentions: Member[]; reply_count: number; last_reply_ts: number | null; edited: boolean; reactions: Reaction[]; media?: MediaRef[] };
 type LivePayload = { kind: "message" | "edit" | "delete" | "rooms" | "profiles" | "status" | "typing"; channel: string | null; status: string | null; author: string | null; root?: string | null; notify?: { author_name: string; preview: string } };
 /** Buzz desktop: an indicator lives 8 s; send at most one every 3 s. */
@@ -1198,6 +1198,14 @@ function Conversations({ onForget }: { onForget: () => void }) {
   async function shareEntry(note: JournalNote, roomId: string, toUni: boolean, vault: string, journalHub: string) {
     // an area room gets the link only: without a hub the message would carry the entry's words
     if (!toUni && !journalHub) throw new Error("No Parachute hub set, so there's no link to send.");
+    // the chip may be older than what the core knows now (a room that turned out to be a DM, or was archived): ask again before posting
+    if (!toUni) {
+      const now = await invoke<Room[]>("get_rooms");
+      if (!areaRooms(now, findUniRoom(now)?.id ?? null).some((r) => r.id === roomId)) {
+        await loadRooms();
+        throw new Error("That isn't an area room any more, so nothing was sent.");
+      }
+    }
     let label: string | null = null;
     const recipients: string[] = [];
     const roster = await invoke<Member[]>("get_members", { channel: roomId });

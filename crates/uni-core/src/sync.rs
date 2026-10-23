@@ -287,7 +287,7 @@ pub async fn sync_once(
             ci.name.as_deref(),
             ci.description.as_deref(),
             ci.archived,
-            Some(ci.dm),
+            ci.dm,
             now,
         )?;
         report.channels.insert(ci.id.to_string(), ci.name.clone());

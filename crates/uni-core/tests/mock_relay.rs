@@ -468,8 +468,8 @@ async fn sync_lists_direct_messages_as_dms() {
     let f = fixture().await;
     let me_hex = f.me.public_key().to_hex();
     let store = Store::open_in_memory().unwrap();
-    let dm_of = |s: &Store| -> Vec<(String, bool)> {
-        let mut v: Vec<(String, bool)> = s
+    let dm_of = |s: &Store| -> Vec<(String, Option<bool>)> {
+        let mut v: Vec<(String, Option<bool>)> = s
             .rooms_for(Some(&me_hex))
             .unwrap()
             .into_iter()
@@ -479,7 +479,10 @@ async fn sync_lists_direct_messages_as_dms() {
         v
     };
     sync_once(&f.url, &f.me, None, &store).await.unwrap();
-    let mut rooms = vec![(f.ch_a.to_string(), false), (f.ch_b.to_string(), false)];
+    let mut rooms = vec![
+        (f.ch_a.to_string(), Some(false)),
+        (f.ch_b.to_string(), Some(false)),
+    ];
     rooms.sort();
     assert_eq!(dm_of(&store), rooms);
 
@@ -496,7 +499,10 @@ async fn sync_lists_direct_messages_as_dms() {
         2,
     ));
     sync_once(&f.url, &f.me, None, &store).await.unwrap();
-    let mut rooms = vec![(f.ch_a.to_string(), false), (f.ch_b.to_string(), true)];
+    let mut rooms = vec![
+        (f.ch_a.to_string(), Some(false)),
+        (f.ch_b.to_string(), Some(true)),
+    ];
     rooms.sort();
     assert_eq!(dm_of(&store), rooms);
 }
@@ -1317,6 +1323,72 @@ async fn live_auth_rejection_is_fatal_not_retried() {
         n_disc, 0,
         "policy rejection must not enter the backoff loop"
     );
+}
+
+/// T-263 (Codex py51n3jd P2): a DM joined while live is stored with its kind unknown, then marked a DM when its metadata lands, and
+/// that raises a room-list event, so a Journal chip offered in between is taken away.
+#[tokio::test]
+async fn live_new_dm_is_marked_when_its_metadata_lands_and_the_room_list_is_told() {
+    let f = fixture().await;
+    let store = Store::open_in_memory().unwrap();
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let (stop_tx, stop_rx) = watch::channel(false);
+    let url = f.url.clone();
+    let me = f.me.clone();
+    let store_ref = &store;
+    let runner = async move { run_live(live_cfg(&url), &me, None, store_ref, tx, stop_rx).await };
+    let driver = async {
+        let mut seen = Vec::new();
+        for _ in 0..2 {
+            assert!(
+                wait_for(&mut rx, &mut seen, Duration::from_secs(5), |e| matches!(
+                    e,
+                    LiveEvent::Eose { .. }
+                ))
+                .await
+            );
+        }
+        let ch_dm = Uuid::new_v4();
+        f.relay.grant_channel(ch_dm);
+        f.relay.publish(signed(
+            &f.relay_keys,
+            39000,
+            vec![
+                d(ch_dm),
+                named("name", "DM"),
+                vec!["hidden".into()],
+                named("t", "dm"),
+            ],
+            "",
+            700,
+        ));
+        f.relay.publish(signed(
+            &f.relay_keys,
+            44100,
+            vec![p(&f.me), h(ch_dm)],
+            "",
+            nostr::Timestamp::now().as_secs(),
+        ));
+        assert!(
+            wait_for(&mut rx, &mut seen, Duration::from_secs(5), |e| matches!(
+                e,
+                LiveEvent::ChannelMeta { channel } if *channel == ch_dm
+            ))
+            .await,
+            "{seen:?}"
+        );
+        let row = store
+            .rooms()
+            .unwrap()
+            .into_iter()
+            .find(|r| r.id == ch_dm.to_string())
+            .unwrap();
+        assert_eq!(row.dm, Some(true));
+        assert_eq!(row.name.as_deref(), Some("DM"));
+        stop_tx.send(true).unwrap();
+    };
+    let (res, ()) = tokio::join!(runner, driver);
+    res.unwrap();
 }
 
 #[tokio::test]

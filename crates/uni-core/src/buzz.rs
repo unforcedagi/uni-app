@@ -83,8 +83,9 @@ pub struct ChannelInfo {
     /// `archived=true` on the metadata event.
     pub archived: bool,
     /// A direct message: `t=dm` or `hidden` on the metadata event (as Buzz's
-    /// own `channel_type_from_tags` reads it).
-    pub dm: bool,
+    /// own `channel_type_from_tags` reads it). `None` until a metadata event
+    /// is seen: the kind is unknown, never assumed to be a room.
+    pub dm: Option<bool>,
 }
 
 /// Discovery output: joined, non-archived channels and their rosters, plus
@@ -598,7 +599,7 @@ pub fn merge_discovered_channels(uuids: Vec<Uuid>, meta: &[Event]) -> HashMap<Uu
                     name: None,
                     description: None,
                     archived: false,
-                    dm: false,
+                    dm: None,
                 },
             )
         })
@@ -627,7 +628,7 @@ pub fn merge_discovered_channels(uuids: Vec<Uuid>, meta: &[Event]) -> HashMap<Uu
                 ci.name = name;
                 ci.description = about;
                 ci.archived = archived;
-                ci.dm = dm;
+                ci.dm = Some(dm);
             }
         }
     }
@@ -740,10 +741,13 @@ mod tests {
             meta(hidden, vec![vec!["hidden"]]),
         ];
         let merged = merge_discovered_channels(vec![room, dm, group, hidden], &events);
-        assert!(!merged[&room].dm);
-        assert!(merged[&dm].dm);
-        assert!(merged[&group].dm);
-        assert!(merged[&hidden].dm);
+        assert_eq!(merged[&room].dm, Some(false));
+        assert_eq!(merged[&dm].dm, Some(true));
+        assert_eq!(merged[&group].dm, Some(true));
+        assert_eq!(merged[&hidden].dm, Some(true));
+        // no metadata event: the kind is unknown, not a room
+        let bare = Uuid::new_v4();
+        assert_eq!(merge_discovered_channels(vec![bare], &[])[&bare].dm, None);
     }
 
     #[test]
