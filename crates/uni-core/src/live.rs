@@ -231,11 +231,12 @@ impl<'a, F: Fn(LiveEvent)> Session<'a, F> {
         let channels = discovery.channels;
         let now = nostr::Timestamp::now().as_secs() as i64;
         for ci in channels.values() {
-            self.store.upsert_channel(
+            self.store.upsert_channel_kind(
                 &ci.id.to_string(),
                 ci.name.as_deref(),
                 ci.description.as_deref(),
                 ci.archived,
+                Some(ci.dm),
                 now,
             )?;
         }
@@ -490,11 +491,12 @@ impl<'a, F: Fn(LiveEvent)> Session<'a, F> {
                 let merged = merge_discovered_channels(vec![ch], std::slice::from_ref(&ev));
                 let now = nostr::Timestamp::now().as_secs() as i64;
                 match merged.get(&ch) {
-                    Some(ci) => self.store.upsert_channel(
+                    Some(ci) => self.store.upsert_channel_kind(
                         &ch.to_string(),
                         ci.name.as_deref(),
                         ci.description.as_deref(),
                         false,
+                        Some(ci.dm),
                         now,
                     )?,
                     None => {

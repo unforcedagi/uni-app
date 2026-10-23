@@ -174,6 +174,8 @@ struct RoomView {
     mentions: bool,
     /// Messages from others since the room was last viewed.
     unread: i64,
+    /// A direct message (the Journal sends entries only to rooms).
+    dm: bool,
 }
 
 #[derive(Serialize)]
@@ -345,6 +347,7 @@ async fn get_rooms(app: tauri::AppHandle) -> Result<Vec<RoomView>, String> {
                 last_ts: r.last_ts,
                 mentions: r.mentions,
                 unread: r.unread,
+                dm: r.dm,
             })
             .collect())
     })

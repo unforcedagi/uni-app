@@ -461,6 +461,46 @@ async fn fixture_with(me: Keys, other: Keys, ch_a: Uuid) -> Fixture {
     }
 }
 
+/// T-263: the Journal offers rooms, never direct messages. Sync reads Buzz's DM marks (`t=dm`, `hidden`) into the room
+/// list, and a room the relay later marks as a DM is listed as one on the next sync.
+#[tokio::test]
+async fn sync_lists_direct_messages_as_dms() {
+    let f = fixture().await;
+    let me_hex = f.me.public_key().to_hex();
+    let store = Store::open_in_memory().unwrap();
+    let dm_of = |s: &Store| -> Vec<(String, bool)> {
+        let mut v: Vec<(String, bool)> = s
+            .rooms_for(Some(&me_hex))
+            .unwrap()
+            .into_iter()
+            .map(|r| (r.id, r.dm))
+            .collect();
+        v.sort();
+        v
+    };
+    sync_once(&f.url, &f.me, None, &store).await.unwrap();
+    let mut rooms = vec![(f.ch_a.to_string(), false), (f.ch_b.to_string(), false)];
+    rooms.sort();
+    assert_eq!(dm_of(&store), rooms);
+
+    f.relay.replace(signed(
+        &f.relay_keys,
+        39000,
+        vec![
+            d(f.ch_b),
+            named("name", "DM"),
+            vec!["hidden".into()],
+            named("t", "dm"),
+        ],
+        "",
+        2,
+    ));
+    sync_once(&f.url, &f.me, None, &store).await.unwrap();
+    let mut rooms = vec![(f.ch_a.to_string(), false), (f.ch_b.to_string(), true)];
+    rooms.sort();
+    assert_eq!(dm_of(&store), rooms);
+}
+
 #[tokio::test]
 async fn compose_publishes_and_stores_only_relay_accepted_replies() {
     let f = fixture().await;

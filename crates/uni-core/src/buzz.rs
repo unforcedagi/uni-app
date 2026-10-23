@@ -82,6 +82,9 @@ pub struct ChannelInfo {
     pub description: Option<String>,
     /// `archived=true` on the metadata event.
     pub archived: bool,
+    /// A direct message: `t=dm` or `hidden` on the metadata event (as Buzz's
+    /// own `channel_type_from_tags` reads it).
+    pub dm: bool,
 }
 
 /// Discovery output: joined, non-archived channels and their rosters, plus
@@ -595,6 +598,7 @@ pub fn merge_discovered_channels(uuids: Vec<Uuid>, meta: &[Event]) -> HashMap<Uu
                     name: None,
                     description: None,
                     archived: false,
+                    dm: false,
                 },
             )
         })
@@ -605,6 +609,7 @@ pub fn merge_discovered_channels(uuids: Vec<Uuid>, meta: &[Event]) -> HashMap<Uu
         let mut name = None;
         let mut about = None;
         let mut archived = false;
+        let mut dm = false;
         for tag in ev.tags.iter() {
             let s = tag.as_slice();
             match (s.first().map(String::as_str), s.get(1)) {
@@ -612,6 +617,8 @@ pub fn merge_discovered_channels(uuids: Vec<Uuid>, meta: &[Event]) -> HashMap<Uu
                 (Some("name"), Some(v)) => name = Some(v.clone()),
                 (Some("about"), Some(v)) => about = Some(v.clone()),
                 (Some("archived"), Some(v)) => archived = v == "true",
+                (Some("t"), Some(v)) if v == "dm" => dm = true,
+                (Some("hidden"), _) => dm = true,
                 _ => {}
             }
         }
@@ -620,6 +627,7 @@ pub fn merge_discovered_channels(uuids: Vec<Uuid>, meta: &[Event]) -> HashMap<Uu
                 ci.name = name;
                 ci.description = about;
                 ci.archived = archived;
+                ci.dm = dm;
             }
         }
     }
@@ -712,6 +720,30 @@ mod tests {
         assert_eq!(merged[&a].description.as_deref(), Some("core"));
         assert!(!merged.contains_key(&b));
         assert!(merged[&c].name.is_none());
+    }
+
+    /// T-263: Buzz marks a DM with `t=dm` and `hidden` (buzz-admin writes both; buzz-acp reads either).
+    #[test]
+    fn discovery_merge_marks_direct_messages() {
+        let keys = Keys::generate();
+        let (room, dm, group, hidden) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
+        let meta = |ch: Uuid, extra: Vec<Vec<&str>>| {
+            let id = ch.to_string();
+            let mut tags = vec![vec!["d", id.as_str()], vec!["name", "x"]];
+            tags.extend(extra);
+            signed(39000, tags, "", &keys)
+        };
+        let events = vec![
+            meta(room, vec![vec!["public"], vec!["t", "stream"]]),
+            meta(dm, vec![vec!["private"], vec!["hidden"], vec!["t", "dm"]]),
+            meta(group, vec![vec!["t", "dm"]]),
+            meta(hidden, vec![vec!["hidden"]]),
+        ];
+        let merged = merge_discovered_channels(vec![room, dm, group, hidden], &events);
+        assert!(!merged[&room].dm);
+        assert!(merged[&dm].dm);
+        assert!(merged[&group].dm);
+        assert!(merged[&hidden].dm);
     }
 
     #[test]
