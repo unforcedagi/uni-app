@@ -5,7 +5,7 @@ import { makeDecisionStore, msg, type Entry } from "./decisionStore";
 import { useNoteOpener } from "./noteLinks";
 import { activeProfile } from "./areas/profile";
 import { decisionDecided, onDecisionsGone } from "./decisionLinks";
-import { publishedIn } from "./publishedMedia";
+import { inline, publishedIn } from "./publishedMedia";
 import { PublishedMedia, usePublishOrigins } from "./PublishedPlayer";
 
 // T-212: a decision in the chat as a card you can tap. The note is read once per decision and shared by every card of it (a message's
@@ -52,8 +52,12 @@ export function DecisionCard({ id, vault, post }: Props) {
   const text = useSyncExternalStore(store.subscribeDrafts, () => store.draft(id, vault), () => store.draft(id, vault));
   const d = entry?.view;
   const origins = usePublishOrigins();
-  // T-260: the published files the decision's note links, in place on the card (at most 3): its context is seen, not a link away
-  const files = useMemo(() => publishedIn(d?.body ?? "", origins).slice(0, 3), [d?.body, origins]);
+  // T-260: the published files the decision's note links, in place on the card: its context is seen, not a link away. Players
+  // first (at most 3), then pages and PDFs as links (at most 3), so links never crowd out a clip
+  const files = useMemo(() => {
+    const all = publishedIn(d?.body ?? "", origins);
+    return [...all.filter((m) => inline(m.kind)).slice(0, 3), ...all.filter((m) => !inline(m.kind)).slice(0, 3)];
+  }, [d?.body, origins]);
   // a ref to a note that is not a decision (or not read yet) is only its chip; a note that exists but can't be read now says so quietly
   if (!entry) return null;
   if (!d) return entry.error && !/not found/i.test(entry.error) ? <p className="decision-card decision-loading">Couldn't read this note to show its decision: {entry.error}

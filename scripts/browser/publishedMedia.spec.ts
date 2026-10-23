@@ -8,13 +8,15 @@ import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { test, expect, type Locator, type Page } from '@playwright/test';
 import { bootAreas } from './areasFixture';
 
-const BUILD = '7dcea809-25cd-4160-ba99-f0a56386adcb';
+/** The fixture's made-up Garden project's room (areasFixture `garden`). */
+const GARDEN = '5b0c4e8a-2f3d-4c1e-9a7b-6d8e0f1a2b3c';
 const ORIGIN = 'https://uni.example.ts.net:8444';
 const at = (name: string) => `${ORIGIN}/${name}`;
 const VIDEO = at('garden-walk-0a1b2c3d.webm');
 const AUDIO = at('bird-call-1b2c3d4e.mp3');
 const IMAGE = at('garden-map-2c3d4e5f.png');
 const PAGE = at('garden-plan-3d4e5f60.html');
+const PAGE_B = at('garden-budget-3d4e5f61.html');
 const DOC = at('garden-notes-4e5f6071.pdf');
 const GONE_VIDEO = at('gone-walk-5f607182.webm');
 const GONE_IMAGE = at('gone-map-60718293.png');
@@ -59,8 +61,9 @@ const NOTES = [
     content: `# Garden walk clip\n\n${VIDEO}\n\nA short clip of the garden walk.\n`,
     metadata: { url: VIDEO, sha256: 'ab'.repeat(32), bytes: 123456, mime: 'video/webm', kind: 'video', published: '2026-10-20', source_name: 'garden-walk.webm', node: 'Projects/Garden' } },
   { id: DEC, path: 'Decisions/2026-10-20 Which cut of the garden walk?', extension: 'md', tags: ['decision'], createdAt: T, updatedAt: T, lastUpdatedVia: 'api',
-    content: `# Which cut of the garden walk?\n\nWatch ${VIDEO} before you pick. The plan is ${PAGE}.\n\n- Short\n- Long (default)\n`,
-    metadata: { node: 'Projects/ATLAS', state: 'open', options: ['Short', 'Long'], default: 'Long', owner: 'aaron', asked: '2026-10-20', task: 'T-07',
+    // three links to pages and a PDF come first: they must not crowd the clip off the card
+    content: `# Which cut of the garden walk?\n\nThe plan is ${PAGE}, the budget ${PAGE_B} and the notes ${DOC}. Watch ${VIDEO} before you pick.\n\n- Short\n- Long (default)\n`,
+    metadata: { node: 'Projects/Garden', state: 'open', options: ['Short', 'Long'], default: 'Long', owner: 'aaron', asked: '2026-10-20', task: 'T-07',
       // the step names the clip (the task guards want what an ask names linked in it): the sheet has only the list's fields
       next: `Watch ${VIDEO}, then pick a cut.` } },
   { id: ASSETS, path: 'Notes/Garden assets', extension: 'md', tags: [], createdAt: T, updatedAt: T, lastUpdatedVia: 'api',
@@ -73,15 +76,19 @@ const NOTES = [
 async function open(page: Page, publish = true) {
   await page.addInitScript(([notes, origins]) => { (window as any).__seedTasks = notes; if (origins) (window as any).__publishOrigins = origins; }, [NOTES, publish ? [ORIGIN] : null] as const);
   await serve(page);
-  await bootAreas(page, 'seed', { briefs: true, tree: true, tasks: true, atlas: true, steer: true, pinned: true });
+  await bootAreas(page, 'seed', { tree: true, tasks: true, garden: true, pinned: true });
+  await toGarden(page);
+}
+/** The made-up Garden project's room, from the tree (the phone's drawer, or the rooms nav beside the chat). */
+async function toGarden(page: Page) {
   const nav = wide(page) ? page.locator('.th-roomnav') : page.locator('.th-phone-tree');
   if (!wide(page)) { await page.locator('.sr-drawer, .th-phone-tree').first().waitFor(); if (await page.locator('.sr-drawer').count() && !await page.locator('.th-drawer').count()) await page.locator('.sr-drawer').click(); }
   await nav.locator('.th-row.d1').first().waitFor();
   for (let i = 0; i < 12; i++) { const f = nav.locator('.th-fold[aria-expanded="false"]'); if (!await f.count()) break; await f.first().click(); }
-  await nav.locator('.th-go[aria-label^="ATLAS,"]').click();
-  await expect(page.locator('.sr')).toHaveAttribute('data-node', 'ATLAS');
+  await nav.locator('.th-go[data-path="Projects/Garden"]').click();
+  await expect(page.locator('.sr')).toHaveAttribute('data-node', 'Garden');
 }
-const arrive = (page: Page, body: string) => page.evaluate(([b, t]) => (window as any).__arrive(b, 'Uni', t), [BUILD, body] as const);
+const arrive = (page: Page, body: string) => page.evaluate(([b, t]) => (window as any).__arrive(b, 'Uni', t), [GARDEN, body] as const);
 /** Opens a note from a room message's chip: beside the chat (wide) or over it (phone). */
 async function openNote(page: Page, id: string, words: string): Promise<Locator> {
   await arrive(page, `${words} uni:${id}`);
@@ -170,6 +177,8 @@ test.describe('published media in notes and decisions', () => {
     await plays(card.locator('video'));
     // the page is a link to open, not a frame; the options are still the card's
     await expect(card.locator('iframe')).toHaveCount(0);
+    await expect(card.locator('.pub-link')).toHaveCount(3);
+    await expect(card.getByRole('link', { name: 'Open PDF: garden-notes-4e5f6071.pdf ↗' })).toBeVisible();
     await card.getByRole('link', { name: 'Open page: garden-plan-3d4e5f60.html ↗' }).click();
     expect(await page.evaluate(() => (window as any).__calls.filter((c: any) => c.cmd === 'open_link').map((c: any) => c.args.url))).toContain(PAGE);
     await expect(card.getByRole('group', { name: /^Pick one:/ }).getByRole('button')).toHaveText(['Short', 'Longdefault']);
@@ -198,6 +207,15 @@ test.describe('published media in notes and decisions', () => {
     await expect(media).toHaveCount(1);
     await plays(media);
     await fits(page, sheet);
+    // full screen over the sheet: Escape closes only the player's layer, the sheet stays (Codex r1)
+    await sheet.getByRole('button', { name: 'Full screen: garden-walk-0a1b2c3d.webm' }).click();
+    const layer = page.getByRole('dialog', { name: 'garden-walk-0a1b2c3d.webm, full screen' });
+    await expect(layer.locator('video')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(layer).toHaveCount(0);
+    await expect(sheet).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(sheet).toHaveCount(0);
   });
 
   test('a note\'s image shows (and opens large), its audio plays; a PDF, other hosts, lookalikes and script links stay links', async ({ page }) => {
@@ -239,6 +257,25 @@ test.describe('published media in notes and decisions', () => {
     await expect(image.getByRole('alert')).toContainText("This image didn't load");
     await expect(image.getByRole('link', { name: 'Open in browser ↗' })).toBeVisible();
     await fits(page, view);
+  });
+
+  test('a new hub in Settings is read again: a note that showed only a link plays once the hub serves published files', async ({ page }) => {
+    test.skip(!wide(page), 'the Journal settings are reached from the rail');
+    await open(page, false);
+    const view = await openNote(page, PUB, 'The garden walk clip is up:');
+    await expect(view.locator('.note-body a[href="' + VIDEO + '"]')).toHaveCount(1);
+    await expect(view.locator('video')).toHaveCount(0);
+    // the hub is changed to one that serves published files (the fixture answers with its origin from now on)
+    await page.evaluate((o) => { (window as any).__publishOrigins = [o]; }, ORIGIN);
+    await page.getByRole('button', { name: 'Journal', exact: true }).click();
+    await page.getByRole('button', { name: 'Journal settings' }).click();
+    await page.locator('.journal-settings').getByRole('button', { name: 'Save' }).click();
+    await expect(page.locator('.journal-settings')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Uni', exact: true }).first().click();
+    await toGarden(page);
+    const again = await openNote(page, PUB, 'Again, the garden walk clip:');
+    await expect(again.locator('video')).toHaveCount(1);
+    await plays(again.locator('video'));
   });
 
   test('with no publish origin (another hub, or none read), the same links are plain links', async ({ page }) => {

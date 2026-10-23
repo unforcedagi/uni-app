@@ -1,5 +1,5 @@
 // The task sheet (r13: live, its own action first, answers only beside the whole question) and the undo bar. Styling is in areas.css and tree.css.
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { cleanText } from "../interface/contract";
 import { isMe, ownerLabel, PRIORITIES, PRIORITY_LABEL, priorityOf, type Priority, type Task } from "./taskCore";
 import type { RoomRef } from "./talkCore";
@@ -232,7 +232,9 @@ export function TaskSheet({ task, gone = false, nodeName, room, roomNamed, inRoo
   /** r30: the step points at the detail's words ("Send Nico the message below"): they are the ask itself, shown under the heading */
   const carries = !!task.detail && !!pointsAt(task.next) && !refd;
   const detailParas = detailText ? detailText.split(/\n\s*\n/).map((para, i) => <p key={i}><DetailText text={para.trim()} vault={vault} onNote={(r) => { onClose(); onNote(r); }} /></p>) : null;
-  const files = publishedIn([task.title, dq?.full ?? task.ask ?? "", task.next ?? "", detailText ?? ""].join("\n\n"), origins).filter((m) => inline(m.kind)).slice(0, 3);
+  const askText = dq?.full ?? task.ask ?? "";
+  const files = useMemo(() => publishedIn([task.title, askText, task.next ?? "", detailText ?? ""].join("\n\n"), origins).filter((m) => inline(m.kind)).slice(0, 3),
+    [task.title, askText, task.next, detailText, origins]);
   /** r18: a decision with no stored options is answered in words, written like a tap: one revision-guarded write of `decided`. */
   const [words, setWords] = useState("");
   const typed = answerText(words);

@@ -11,6 +11,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { pdfThumbnail } from "./pdfPreview";
+import { holdTop } from "./areas/focusTrap";
 import { attachmentKind, collectAttachments, displayName, formatSize, imageLinks, mediaErrorText, parseDim, playbackErrorText, playerPin, relayMediaSha, stripAttachmentLines, type MediaRef } from "./media";
 
 export type { MediaRef } from "./media";
@@ -286,7 +287,8 @@ export function Lightbox({ src, alt, m, onClose }: { src: string; alt: string; m
     window.addEventListener("keydown", key, true);
     return () => window.removeEventListener("keydown", key, true);
   }, [onClose]);
-  useEffect(() => { setModalOpen(+1); return () => setModalOpen(-1); }, []);
+  // T-260: the top dialog while it is up (a task sheet under it keeps its Escape to itself)
+  useEffect(() => { setModalOpen(+1); const release = holdTop(); return () => { release(); setModalOpen(-1); }; }, []);
   return <div className="lightbox" role="dialog" aria-modal="true" aria-label={alt} onClick={onClose}>
     <img src={src} alt={alt} referrerPolicy="no-referrer" onClick={(e) => e.stopPropagation()} />
     <button ref={close} className="lightbox-close" onClick={onClose} aria-label="Close image">✕</button>
@@ -335,7 +337,10 @@ export function VideoFull({ src, name, at, playing, events, onClose }: {
     window.addEventListener("keydown", key, true);
     document.addEventListener("fullscreenchange", left);
     setModalOpen(+1);
+    // T-260: the top dialog while it is up, so a task sheet under it (a published clip plays there) ignores its Escape and Tab
+    const release = holdTop();
     return () => {
+      release();
       window.removeEventListener("keydown", key, true); document.removeEventListener("fullscreenchange", left); setModalOpen(-1);
       if (root) root.inert = wasInert;
       if (opener?.isConnected) opener.focus();

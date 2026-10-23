@@ -36,6 +36,14 @@ export const dialogOpen = (): boolean => stack.length > 0;
  * elements left live, the rail that switches the panels), and Escape closes it, only when it is the top dialog, before any other handler sees
  * the key. On close, focus goes back to what opened it (when that is still there and focus would otherwise be lost).
  */
+/**
+ * T-260: a layer over everything that handles its own keys (the full-screen video, the image viewer) is the top dialog while it is up,
+ * so a dialog under it (a task sheet) neither closes on its Escape nor traps its Tab. Returns the undo.
+ */
+export function holdTop(): () => void {
+  const me = Symbol("layer"); stack.push(me);
+  return () => { const i = stack.indexOf(me); if (i >= 0) stack.splice(i, 1); };
+}
 export function isolate(box: HTMLElement, keep: readonly (Element | null)[] = []): () => void {
   const marked: Element[] = [];
   const live = (el: Element) => keep.some((k) => k && (k === el || el.contains(k) || k.contains(el)));

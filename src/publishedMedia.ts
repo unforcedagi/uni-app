@@ -13,8 +13,6 @@ export type Published = {
   /** The URL as written (trimmed): its encoded path, query and fragment are kept. */
   url: string;
   kind: PublishedKind;
-  /** From a Published note's metadata, when it agrees with the kind; else null. */
-  mime: string | null;
   /** The file's name, decoded, for labels. */
   name: string;
 };
@@ -51,46 +49,41 @@ export function classifyPublished(raw: unknown, origins: readonly string[]): Pub
   try { name = decodeURIComponent(u.pathname.split("/").pop() ?? ""); } catch { return null; }
   if (!name || /[/\\\u0000-\u001f\u007f]/.test(name)) return null;
   const kind = TYPES[/\.([a-z0-9]{1,5})$/i.exec(name)?.[1]?.toLowerCase() ?? ""];
-  return kind ? { url, kind, mime: null, name } : null;
+  return kind ? { url, kind, name } : null;
 }
 
-const MIME_OF: Record<PublishedKind, (m: string) => boolean> = {
-  video: (m) => m.startsWith("video/"),
-  audio: (m) => m.startsWith("audio/"),
-  image: (m) => m.startsWith("image/") && m !== "image/svg+xml",
-  doc: (m) => m === "application/pdf",
-  page: (m) => m === "text/html" || m.startsWith("text/html;"),
-};
+/** The URL as the parser normalizes it (host case, percent-encoding): two spellings of one file are one key. */
+export const keyOf = (url: string): string => { try { return new URL(url).href; } catch { return url; } };
 
 /**
- * The file a Published note is for, from its metadata (`url`, `mime`, `kind`: the producer's contract), or null. The URL passes
- * {@link classifyPublished}; its type decides the kind, and the metadata's mime is kept only when it and `kind` agree with that.
+ * The file a Published note is for: its metadata `url` (the producer's contract; clients read the metadata, not the body), if it
+ * passes {@link classifyPublished}. The URL's own type decides the kind: the publisher only serves what its extension says, and a
+ * metadata `kind` or `mime` is never trusted over it.
  */
 export function publishedFromNote(note: { tags?: unknown; metadata?: unknown } | null | undefined, origins: readonly string[]): Published | null {
   if (!note || !Array.isArray(note.tags) || !note.tags.includes(PUBLISHED_TAG)) return null;
   const m = note.metadata && typeof note.metadata === "object" ? note.metadata as Record<string, unknown> : {};
-  const base = classifyPublished(m.url, origins);
-  if (!base) return null;
-  const mime = typeof m.mime === "string" ? m.mime.trim().toLowerCase() : "";
-  return { ...base, mime: m.kind === base.kind && mime && MIME_OF[base.kind](mime) ? mime : null };
+  return classifyPublished(m.url, origins);
 }
 
-/** The published files a markdown text links (bare, `<url>` or `[label](url)`), in order, each once. Code is not a link. */
+/**
+ * The published files a markdown text links (bare, `<url>` or `[label](url)`), in order, each once: where a note shows a player
+ * (paragraphs, list items, quotes; never code, a heading or a table cell, as {@link rehypePublished}).
+ */
 export function publishedIn(markdown: string, origins: readonly string[]): Published[] {
   if (!markdown || !origins.length) return [];
   const out: Published[] = [];
   const seen = new Set<string>();
   const add = (href: string) => {
     const p = classifyPublished(href, origins);
-    if (p && !seen.has(p.url)) { seen.add(p.url); out.push(p); }
+    if (p && !seen.has(keyOf(p.url))) { seen.add(keyOf(p.url)); out.push(p); }
   };
   const inl = (c: Inline[]): void => { for (const n of c) { if (n.t === "link") add(n.href); if ("c" in n) inl(n.c); } };
   const blk = (b: Block[]): void => {
     for (const x of b) {
-      if (x.t === "p" || x.t === "h") inl(x.c);
+      if (x.t === "p") inl(x.c);
       else if (x.t === "quote") blk(x.c);
       else if (x.t === "list") x.items.forEach(blk);
-      else if (x.t === "table") [x.head, ...x.rows].forEach((r) => r.forEach(inl));
     }
   };
   blk(parseMarkdown(markdown));
@@ -105,7 +98,7 @@ export type HastNode = { type: string; tagName?: string; value?: string; propert
 /** The element a player is drawn for (`components["published-media"]`); its data-* say what it plays. */
 export const PLAYER_TAG = "published-media";
 
-const player = (p: Published): HastNode => ({ type: "element", tagName: PLAYER_TAG, properties: { dataUrl: p.url, dataKind: p.kind, dataName: p.name, ...(p.mime ? { dataMime: p.mime } : {}) }, children: [] });
+const player = (p: Published): HastNode => ({ type: "element", tagName: PLAYER_TAG, properties: { dataUrl: p.url, dataKind: p.kind, dataName: p.name }, children: [] });
 /** Elements whose children are blocks that may hold a link alone in its paragraph. */
 const CONTAINERS = new Set(["root", "blockquote", "ul", "ol", "li", "div", "section", "details"]);
 /** Inline elements a link may sit in; code, and anything else, is not looked into. */
@@ -117,11 +110,12 @@ const target = (n: HastNode): string | null => n.type !== "element" ? null : n.t
  * rehype step: a link (or `![](…)`) to a published video, audio or image becomes its player. Alone in its paragraph or list item,
  * the player takes its place; in a sentence the link stays and the player follows the paragraph (or ends the item). Each file plays
  * once, where it is first linked; later links to it stay links. A file in `shown` already plays above the body (a Published note's
- * own): a paragraph that is only its link goes, and other mentions stay links. Table cells, headings and code are left alone.
+ * own): a paragraph that is only its link goes, and other mentions stay links. Table cells, headings and code are left alone. URLs
+ * are compared as the parser normalizes them ({@link keyOf}), so the renderer's percent-encoding or a host's case can't play one twice.
  */
 export function rehypePublished(opts: { origins: readonly string[]; shown?: readonly string[] }) {
   const origins = opts.origins;
-  const shown = new Set(opts.shown ?? []);
+  const shown = new Set((opts.shown ?? []).map(keyOf));
   return (tree: HastNode): void => {
     if (!origins.length) return;
     const seen = new Set<string>(shown);
@@ -130,7 +124,7 @@ export function rehypePublished(opts: { origins: readonly string[]; shown?: read
       for (const n of nodes) {
         if (n.type !== "element" || !INLINE.has(n.tagName ?? "")) continue;
         const p = classifyPublished(target(n), origins);
-        if (p && inline(p.kind) && !seen.has(p.url)) { seen.add(p.url); into.push(p); }
+        if (p && inline(p.kind) && !seen.has(keyOf(p.url))) { seen.add(keyOf(p.url)); into.push(p); }
         if (n.children) collect(n.children, into);
       }
     };
@@ -145,7 +139,9 @@ export function rehypePublished(opts: { origins: readonly string[]; shown?: read
       }
       return hits.length ? hits : null;
     };
-    const fresh = (p: Published | null) => !!p && inline(p.kind) && !seen.has(p.url);
+    const fresh = (p: Published | null) => !!p && inline(p.kind) && !seen.has(keyOf(p.url));
+    /** Distinct files (not one linked twice in the same run). */
+    const distinct = (ps: Published[]) => new Set(ps.map((p) => keyOf(p.url))).size === ps.length;
     const walk = (parent: HastNode) => {
       const out: HastNode[] = [];
       for (const child of parent.children ?? []) {
@@ -153,32 +149,39 @@ export function rehypePublished(opts: { origins: readonly string[]; shown?: read
         if (child.tagName === "p") {
           const kids = child.children ?? [];
           // only links to files already playing above: the line that repeats them goes
-          if (shown.size && alone(kids, (p) => !!p && shown.has(p.url))) continue;
+          if (shown.size && alone(kids, (p) => !!p && shown.has(keyOf(p.url)))) continue;
           const solo = alone(kids, fresh);
-          if (solo && new Set(solo.map((p) => p.url)).size === solo.length) { solo.forEach((p) => seen.add(p.url)); out.push(...solo.map(player)); continue; }
+          if (solo && distinct(solo)) { solo.forEach((p) => seen.add(keyOf(p.url))); out.push(...solo.map(player)); continue; }
           const found: Published[] = [];
           collect(kids, found);
           out.push(child, ...found.map(player));
           continue;
         }
         if (CONTAINERS.has(child.tagName ?? "")) {
-          walk(child);
+          // an item's own words come before the lists nested in it: a file they link plays there first
           if (child.tagName === "li") item(child);
+          walk(child);
         }
         out.push(child);
       }
       parent.children = out;
     };
-    /** A tight list item's own words (no paragraph): alone, the link is the player; in a sentence the player ends the item. */
+    /**
+     * A tight list item's own words (no paragraph), up to its first block (a nested list): alone, the link is the player; in a
+     * sentence the player follows the words, before any nested list.
+     */
     const item = (li: HastNode) => {
       const kids = li.children ?? [];
-      const words = kids.filter((n) => n.type === "text" || (n.type === "element" && INLINE.has(n.tagName ?? "")) || blank(n));
+      const isWord = (n: HastNode) => n.type === "text" || (n.type === "element" && INLINE.has(n.tagName ?? "")) || blank(n);
+      let end = 0;
+      while (end < kids.length && isWord(kids[end])) end++;
+      const words = kids.slice(0, end);
       if (!words.length) return;
-      const solo = words.length === kids.length ? alone(kids, fresh) : null;
-      if (solo && new Set(solo.map((p) => p.url)).size === solo.length) { solo.forEach((p) => seen.add(p.url)); li.children = solo.map(player); return; }
+      const solo = alone(words, fresh);
+      if (solo && distinct(solo)) { solo.forEach((p) => seen.add(keyOf(p.url))); li.children = [...solo.map(player), ...kids.slice(end)]; return; }
       const found: Published[] = [];
       collect(words, found);
-      if (found.length) li.children = [...kids, ...found.map(player)];
+      if (found.length) li.children = [...words, ...found.map(player), ...kids.slice(end)];
     };
     walk(tree);
   };

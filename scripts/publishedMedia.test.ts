@@ -1,7 +1,7 @@
 // Run: node --experimental-strip-types scripts/publishedMedia.test.ts (Node >= 22.6)
 // T-260: which links are published media the app plays inline, and where in a note the player goes. Synthetic hosts only.
 import assert from "node:assert/strict";
-import { classifyPublished, publishedFromNote, publishedIn, rehypePublished, PUBLISHED_TAG, type HastNode } from "../src/publishedMedia.ts";
+import { classifyPublished, keyOf, publishedFromNote, publishedIn, rehypePublished, PUBLISHED_TAG, type HastNode } from "../src/publishedMedia.ts";
 
 const O = "https://uni.example.ts.net:8444";
 const ORIGINS = [O, "https://uni-1.example.ts.net:8444"];
@@ -57,13 +57,13 @@ for (const bad of [
 assert.equal(classifyPublished(at("clip-0a1b2c3d.mp4"), []), null, "no hub, nothing plays inline");
 assert.equal(classifyPublished(at("clip-0a1b2c3d.mp4"), ["https://other.example.ts.net:8444"]), null);
 
-// ── a Published note: its metadata (url, mime, kind) is what plays ──────────────────────────────────────
+// ── a Published note: its metadata url is what plays; the URL's own type is its kind ──────────────────────
 const note = (metadata: Record<string, unknown>, tags = [PUBLISHED_TAG]) => ({ tags, metadata });
 const pub = publishedFromNote(note({ url: at("clip-0a1b2c3d.mp4"), mime: "video/mp4", kind: "video" }), ORIGINS)!;
-assert.deepEqual([pub.kind, pub.mime, pub.url], ["video", "video/mp4", at("clip-0a1b2c3d.mp4")]);
+assert.deepEqual([pub.kind, pub.url, pub.name], ["video", at("clip-0a1b2c3d.mp4"), "clip-0a1b2c3d.mp4"]);
 assert.equal(publishedFromNote(note({ url: at("voice-0a1b2c3d.m4a"), mime: "audio/mp4", kind: "audio" }), ORIGINS)?.kind, "audio");
 assert.equal(publishedFromNote(note({ url: at("plan-0a1b2c3d.pdf"), mime: "application/pdf", kind: "doc" }), ORIGINS)?.kind, "doc");
-// metadata that disagrees with itself is not trusted: the URL's own type decides
+// a metadata kind or mime is never trusted over the URL's type
 assert.equal(publishedFromNote(note({ url: at("clip-0a1b2c3d.mp4"), mime: "image/png", kind: "video" }), ORIGINS)?.kind, "video");
 assert.equal(publishedFromNote(note({ url: at("clip-0a1b2c3d.mp4"), mime: "video/mp4", kind: "image" }), ORIGINS)?.kind, "video");
 // an image by mime but SVG, or a URL off the publisher, never plays
@@ -89,6 +89,11 @@ const text = [
   `Elsewhere: https://www.example.org/clip.mp4 and ${at("flow-0a1b2c3d.png")}`,
 ].join("\n");
 assert.deepEqual(publishedIn(text, ORIGINS).map((p) => p.url), [at("clip-0a1b2c3d.mp4"), at("plan-0a1b2c3d.html"), at("voice-0a1b2c3d.mp3"), at("flow-0a1b2c3d.png")]);
+// counted where a note shows a player: a heading or a table cell is not (the note view leaves them links)
+assert.deepEqual(publishedIn(`## See ${at("clip-0a1b2c3d.mp4")}\n\n| a | b |\n|---|---|\n| ${at("clip-0a1b2c3d.webm")} | x |\n\n> ${at("flow-0a1b2c3d.png")}\n\n- ${at("voice-0a1b2c3d.mp3")}`, ORIGINS).map((p) => p.kind), ["image", "audio"]);
+// one file in two spellings (host case) is one file
+assert.equal(publishedIn(`${at("clip-0a1b2c3d.mp4")} and https://UNI.example.ts.net:8444/clip-0a1b2c3d.mp4`, ORIGINS).length, 1);
+assert.equal(keyOf("https://UNI.example.ts.net:8444/a%C3%A9-0a1b2c3d.mp4"), keyOf("https://uni.example.ts.net:8444/aé-0a1b2c3d.mp4"));
 assert.deepEqual(publishedIn(text, []), []);
 assert.deepEqual(publishedIn("", ORIGINS), []);
 
@@ -120,6 +125,9 @@ assert.deepEqual(shape(run(root(p(el("img", { src: V, alt: "" }))))), ["media:vi
 // a list item: alone it is the player, in a sentence the player follows within the item
 const li = (...c: HastNode[]) => el("li", {}, c);
 assert.deepEqual(shape(run(root(el("ul", {}, [li(a(V)), li(t("hear "), a(at("voice-0a1b2c3d.mp3")))])))), [{ ul: [{ li: ["media:video"] }, { li: ["hear ", { a: [at("voice-0a1b2c3d.mp3")] }, "media:audio"] }] }]);
+// a file in an item's words and again in a list nested under it: the player follows the item's words, before the nested list
+assert.deepEqual(shape(run(root(el("ul", {}, [li(t("watch "), a(V), el("ul", {}, [li(t("again "), a(V))]))])))), [{ ul: [{ li: ["watch ", { a: [V] }, "media:video", { ul: [{ li: ["again ", { a: [V] }] }] }] }] }]);
+assert.deepEqual(shape(run(root(el("ul", {}, [li(a(V), el("ul", {}, [li(t("more"))]))])))), [{ ul: [{ li: ["media:video", { ul: [{ li: ["more"] }] }] }] }]);
 // a loose list item (its words in a paragraph) and a quote are walked the same way
 assert.deepEqual(shape(run(root(el("blockquote", {}, [p(a(V))])))), [{ blockquote: ["media:video"] }]);
 // table cells, headings and code are never replaced
@@ -127,6 +135,10 @@ const cell = root(el("table", {}, [el("tr", {}, [el("td", {}, [a(V)])])]), el("h
 assert.deepEqual(shape(run(cell)), [{ table: [{ tr: [{ td: [{ a: [V] }] }] }] }, { h2: [{ a: [V] }] }, { pre: [{ code: [V] }] }]);
 // already shown above the body (a Published note's own file): its line goes, other mentions stay links, no second player
 assert.deepEqual(shape(run(root(p(a(V)), p(t("Made for "), a(V))), { shown: [V] })), [{ p: ["Made for ", { a: [V] }] }]);
+// ... also when the renderer wrote the body's URL another way (percent-encoded, another host case) than the metadata
+const raw = at("café-0a1b2c3d.mp4"), rendered = at("caf%C3%A9-0a1b2c3d.mp4");
+assert.deepEqual(shape(run(root(p(a(rendered))), { shown: [raw] })), []);
+assert.deepEqual(shape(run(root(p(a("https://UNI.example.ts.net:8444/clip-0a1b2c3d.mp4"))), { shown: [V] })), []);
 // no origins: nothing changes
 assert.deepEqual(shape(run(root(p(a(V))), { origins: [] })), [{ p: [{ a: [V] }] }]);
 // the player carries what it plays

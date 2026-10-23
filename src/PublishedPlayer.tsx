@@ -1,31 +1,37 @@
 // T-260 (not PublishedMedia.tsx: on a Mac that is publishedMedia.ts): a published file in a note or a decision, in place: a video or audio player with its controls, an image, or (a page or
 // PDF) a link that opens in the browser. One component for the note view and the decision card; which links qualify is
 // publishedMedia.ts. The webview loads the file from the hub's publish port itself: no autoplay, nothing fetched natively, no frame.
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState, useSyncExternalStore } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Lightbox, VideoFull } from "./Attachments";
 import { playbackErrorText } from "./media";
 import { classifyPublished, type Published, type PublishedKind } from "./publishedMedia";
 
-// ── The publish origins (the hub setting, read once) ───────────────────────────────────────────────────────
+// ── The publish origins (the hub setting: read once, again when it changes) ────────────────────────────────
 let origins: string[] | null = null;
-let loading: Promise<string[]> | null = null;
-function loadOrigins(): Promise<string[]> {
-  loading ??= invoke<{ publish_origins?: unknown }>("journal_config").then((c) => {
-    const list = Array.isArray(c?.publish_origins) ? c.publish_origins.filter((o): o is string => typeof o === "string") : [];
-    return (origins = list);
-  }, () => { loading = null; return []; });
-  return loading;
+let loading = false;
+/** Bumped by a hub change: a read started before it answers for the old hub and is dropped. */
+let gen = 0;
+const NONE: string[] = [];
+const listeners = new Set<() => void>();
+const tell = () => { for (const f of listeners) f(); };
+function load() {
+  if (origins || loading) return;
+  const g = gen;
+  loading = true;
+  invoke<{ publish_origins?: unknown }>("journal_config").then((c) => {
+    if (g !== gen) return;
+    origins = Array.isArray(c?.publish_origins) ? c.publish_origins.filter((o): o is string => typeof o === "string") : [];
+    tell();
+  }, () => {}).finally(() => { if (g === gen) loading = false; });
 }
-/** Where published files may play from: none until the hub setting is read (or when it can't be). */
+/** The hub setting changed: where published files play from is read again (until then, none). */
+export function forgetPublishOrigins(): void { gen++; origins = null; loading = false; tell(); if (listeners.size) load(); }
+const subscribe = (f: () => void) => { listeners.add(f); load(); return () => { listeners.delete(f); }; };
+const current = () => origins ?? NONE;
+/** Where published files may play from: none until the hub setting is read (or while it can't be; a later mount retries). */
 export function usePublishOrigins(): string[] {
-  const [o, setO] = useState<string[]>(origins ?? []);
-  useEffect(() => {
-    let live = true;
-    if (!origins) void loadOrigins().then((l) => { if (live) setO(l); });
-    return () => { live = false; };
-  }, []);
-  return o;
+  return useSyncExternalStore(subscribe, current, current);
 }
 
 const openExternal = (url: string) => { void invoke("open_link", { url }).catch(() => {}); };
@@ -85,8 +91,9 @@ function Picture({ m }: { m: Published }) {
 
 /** One published file, in place: a player, an image, or a link to open a page or PDF in the browser. */
 export function PublishedMedia({ m }: { m: Published }) {
-  if (m.kind === "video" || m.kind === "audio") return <Player m={m} />;
-  if (m.kind === "image") return <Picture m={m} />;
+  // keyed by the file: another file (a note's metadata changed in place) starts with a fresh player, error and viewer
+  if (m.kind === "video" || m.kind === "audio") return <Player key={m.url} m={m} />;
+  if (m.kind === "image") return <Picture key={m.url} m={m} />;
   return <p className="pub-media pub-link" data-kind={m.kind} data-url={m.url}><OpenOut m={m} label={`Open ${KIND_WORD[m.kind]}: ${m.name}`} /></p>;
 }
 
@@ -94,7 +101,5 @@ export function PublishedMedia({ m }: { m: Published }) {
 export function PublishedInNote(props: Record<string, unknown>) {
   const o = usePublishOrigins();
   const m = classifyPublished(props["data-url"], o);
-  if (!m) return null;
-  const mime = typeof props["data-mime"] === "string" ? props["data-mime"] : null;
-  return <PublishedMedia m={{ ...m, mime }} />;
+  return m ? <PublishedMedia m={m} /> : null;
 }

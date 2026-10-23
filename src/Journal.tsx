@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useRecorder } from "./recorder";
 import { entryText, greeting, mmss, newDraft, sameWordsLine, type FlushReport, type JournalDraft, type JournalNote, type QueuedEntry, type SameWords } from "./journalCore";
+import { forgetPublishOrigins } from "./PublishedPlayer";
 
 type Room = { id: string; name: string };
 type VaultConfig = { hub: string; vault: string };
@@ -285,7 +286,7 @@ function JournalSettings({ cfg, onSaved }: { cfg: VaultConfig; onSaved: (c: Vaul
   const [vault, setVault] = useState(cfg.vault);
   const [error, setError] = useState<string | null>(null);
   async function save() {
-    try { await invoke("journal_set_config", { hub, vault }); onSaved({ hub: hub.trim().replace(/\/+$/, ""), vault: vault.trim() }); }
+    try { await invoke("journal_set_config", { hub, vault }); forgetPublishOrigins(); onSaved({ hub: hub.trim().replace(/\/+$/, ""), vault: vault.trim() }); }
     catch (e) { setError(String(e)); }
   }
   return <div className="journal-settings">
