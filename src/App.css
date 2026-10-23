@@ -468,6 +468,12 @@ p.decision-card.decision-loading { padding: 8px 12px; color: var(--muted); font-
 .share-picker { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; animation: rise .25s var(--ease); }
 .share-picker button { background: var(--surface-2); border: 1px solid var(--line); border-radius: 999px; padding: 7px 14px; font-size: 13px; }
 .share-picker button:hover { border-color: var(--accent); color: var(--accent); }
+.share-picker button.sent { color: var(--muted); border-style: dashed; }
+.share-picker button:disabled:hover { border-color: var(--line); color: var(--muted); }
+/* T-263: the quiet "Send to an area?" row under a just-saved entry */
+.journal-offer { align-items: center; margin-top: 8px; }
+.journal-offer-label { font-size: 13px; color: var(--muted); }
+.share-picker .journal-offer-close { background: none; border-color: transparent; color: var(--muted); }
 .journal-settings { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; padding: 14px max(20px, calc((100% - 720px) / 2)); border-bottom: 1px solid var(--line); background: var(--surface-2); animation: rise .25s var(--ease); }
 .journal-settings label { display: flex; flex-direction: column; font-size: 12px; gap: 6px; color: var(--muted); flex: 1; min-width: 160px; }
 .journal-settings input { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 9px 12px; }

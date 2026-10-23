@@ -2,12 +2,12 @@ import { SettingsIcon, MicIcon } from "./Icons";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useRecorder } from "./recorder";
-import { entryText, greeting, mmss, newDraft, sameWordsLine, type FlushReport, type JournalDraft, type JournalNote, type QueuedEntry, type SameWords } from "./journalCore";
+import { areaRooms, entryText, greeting, mmss, newDraft, sameWordsLine, type FlushReport, type JournalDraft, type JournalNote, type QueuedEntry, type SameWords } from "./journalCore";
 import { forgetPublishOrigins } from "./PublishedPlayer";
 
-type Room = { id: string; name: string };
+type Room = { id: string; name: string; dm?: boolean };
 type VaultConfig = { hub: string; vault: string };
-/** Post `note` to a room; `toUni` addresses Uni there. Resolves when accepted. */
+/** Post `note` to a room, addressed to its Uni; `toUni`: the room is #Uni, so Uni must be there. Resolves when accepted. */
 export type ShareFn = (note: JournalNote, roomId: string, toUni: boolean, vault: string, hub: string) => Promise<void>;
 
 const PAGE = 30;
@@ -52,7 +52,13 @@ export default function Journal({ rooms, uniRoomId, onShare, onBack, backTo = "U
   const [shareFor, setShareFor] = useState<string | null>(null);
   /** r21 (Codex 6): the entry whose one menu is open. */
   const [menuFor, setMenuFor] = useState<string | null>(null);
-  const [shared, setShared] = useState<Record<string, string>>({});
+  /** The rooms each entry was sent to, in order. */
+  const [shared, setShared] = useState<Record<string, { id: string; name: string }[]>>({});
+  /** T-263: the entry (its device entry id) just saved, offered to the area rooms until dismissed or the next save. */
+  const [offer, setOffer] = useState<string | null>(null);
+  /** `note id room id` pairs on their way. */
+  const [sending, setSending] = useState<Record<string, true>>({});
+  const areas = areaRooms(rooms, uniRoomId);
   const [settings, setSettings] = useState(false);
   /** The entry the same words were already saved as (a duplicate save shows it instead of adding one). */
   const [again, setAgain] = useState<string | null>(null);
@@ -166,6 +172,7 @@ export default function Journal({ rooms, uniRoomId, onShare, onBack, backTo = "U
         // this send is finished whatever the composer holds now; the composer clears only if it still holds these words
         if (send.current?.draft === draft) send.current = null;
         clearIf(rev, text);
+        setOffer(draft.entry_id);
       }
       await afterFlush(r, "Journal entry", rev);
     } catch (e) { setError(String(e)); setStatus("Not saved · your text is still here"); }
@@ -191,7 +198,10 @@ export default function Journal({ rooms, uniRoomId, onShare, onBack, backTo = "U
     const submitted = live.current.text;
     try {
       const bytes = new Uint8Array(await blob.arrayBuffer());
-      const r = await invoke<FlushReport>("journal_save_voice", bytes, { headers: { "x-entry": JSON.stringify(newDraft(note, "voice")), "x-audio-mime": mime } });
+      const draft = newDraft(note, "voice");
+      const r = await invoke<FlushReport>("journal_save_voice", bytes, { headers: { "x-entry": JSON.stringify(draft), "x-audio-mime": mime } });
+      // offered once its transcript lands (the menu waits for it too)
+      setOffer(draft.entry_id);
       // the typed words went with the recording: clear them only if they are still what was sent
       if (clearIf(rev, submitted)) { setSame(null); send.current = null; }
       await afterFlush(r, "Journal entry");
@@ -214,16 +224,27 @@ export default function Journal({ rooms, uniRoomId, onShare, onBack, backTo = "U
   }
 
   async function share(note: JournalNote, roomId: string, toUni: boolean) {
-    if (!cfg) return;
+    const key = `${note.id} ${roomId}`;
+    if (!cfg || sending[key]) return;
     setShareFor(null);
-    setStatus(toUni ? "Passing to Uni…" : "Sharing…");
+    setSending((s) => ({ ...s, [key]: true }));
+    setStatus(toUni ? "Passing to Uni…" : "Sending…");
     try {
       await onShare(note, roomId, toUni, cfg.vault, cfg.hub);
-      const name = rooms.find((r) => r.id === roomId)?.name ?? "room";
-      setShared((s) => ({ ...s, [note.id]: toUni ? "Uni" : name }));
-      setStatus(toUni ? "Passed to Uni in #Uni" : `Shared to #${name}`);
-    } catch (e) { setError(String(e)); setStatus("Share failed"); }
+      const name = toUni ? "Uni" : rooms.find((r) => r.id === roomId)?.name ?? "room";
+      setShared((s) => ({ ...s, [note.id]: [...(s[note.id] ?? []).filter((x) => x.id !== roomId), { id: roomId, name }] }));
+      setStatus(toUni ? "Passed to Uni in #Uni" : `Sent to #${name}`);
+      setError(null);
+    } catch (e) { setError(String(e)); setStatus("Not sent"); }
+    finally { setSending((s) => { const { [key]: _, ...rest } = s; return rest; }); }
   }
+  const sentTo = (noteId: string, roomId: string) => !!shared[noteId]?.some((x) => x.id === roomId);
+  /** One chip per area room: a tap sends the entry there; a sent room stays marked. */
+  const areaChip = (e: JournalNote, r: Room, after?: () => void) => {
+    const sent = sentTo(e.id, r.id);
+    return <button key={r.id} type="button" className={sent ? "sent" : undefined} disabled={sent || !!sending[`${e.id} ${r.id}`]}
+      aria-label={sent ? `#${r.name}, sent` : `Send to #${r.name}`} onClick={() => { after?.(); void share(e, r.id, false); }}>{sent ? "✓ " : ""}#{r.name}</button>;
+  };
 
   const queuedOnly = queued.filter((q) => !q.note_id || !entries.some((e) => e.id === q.note_id));
 
@@ -260,18 +281,24 @@ export default function Journal({ rooms, uniRoomId, onShare, onBack, backTo = "U
       </article>)}
       {entries.length === 0 && queuedOnly.length === 0 && !loading && <p className="empty">No journal entries yet. Your first one is a tap away.</p>}
       {entries.map((e) => <article key={e.id} data-id={e.id} data-again={again === e.id || undefined} className="journal-entry">
-        <div className="journal-meta"><span>{e.source === "voice" ? <MicIcon /> : e.source === "text" ? "✎" : "•"} {when(e.created_at)}</span>{shared[e.id] && <span className="queued-tag">shared · {shared[e.id]}</span>}</div>
+        <div className="journal-meta"><span>{e.source === "voice" ? <MicIcon /> : e.source === "text" ? "✎" : "•"} {when(e.created_at)}</span>{shared[e.id]?.length ? <span className="queued-tag">shared · {shared[e.id].map((x) => x.name).join(", ")}</span> : null}</div>
         {e.pending ? <p className="journal-body pending">{entryText(e.content) ? <>{entryText(e.content)}<br /></> : null}<em>Transcribing…</em></p>
           : <p className="journal-body">{entryText(e.content)}</p>}
+        {/* T-263: right after a save, a quiet offer to send the entry to area rooms; it never blocks and posts nothing until a chip is tapped */}
+        {offer !== null && e.entry_id === offer && !e.pending && cfg && areas.length > 0 && <div className="share-picker journal-offer" role="group" aria-label="Send to an area">
+          <span className="journal-offer-label">Send to an area?</span>
+          {areas.map((r) => areaChip(e, r))}
+          <button type="button" className="journal-offer-close" onClick={() => setOffer(null)}>{shared[e.id]?.some((x) => x.id !== uniRoomId) ? "Done" : "Not now"}</button>
+        </div>}
         {/* r21 (Codex 6): no action strip repeated under every entry: one menu per entry, as in the chat ("⋯", then Pass to Uni, Share to a room) */}
         {!e.pending && <div className={`message-more journal-more ${menuFor === e.id ? "open" : ""}`}>
           <button type="button" className="message-more-go" aria-label="More for this entry" aria-expanded={menuFor === e.id} onClick={() => { setMenuFor(menuFor === e.id ? null : e.id); setShareFor(null); }}>⋯</button>
           {menuFor === e.id && <div className="message-menu" role="group" aria-label="Entry actions">
             <button type="button" onClick={() => { setMenuFor(null); if (uniRoomId) void share(e, uniRoomId, true); }} disabled={!uniRoomId}>Pass to Uni</button>
             <button type="button" aria-expanded={shareFor === e.id} onClick={() => setShareFor(shareFor === e.id ? null : e.id)}>Share to a room…</button>
-            {shareFor === e.id && <div className="share-picker" role="menu" aria-label="Choose a room">
-              {rooms.map((r) => <button key={r.id} role="menuitem" onClick={() => { setMenuFor(null); void share(e, r.id, false); }}>#{r.name}</button>)}
-              {rooms.length === 0 && <span className="empty">No rooms cached. Refresh conversations first.</span>}
+            {shareFor === e.id && <div className="share-picker" role="group" aria-label="Choose a room">
+              {areas.map((r) => areaChip(e, r, () => setMenuFor(null)))}
+              {areas.length === 0 && <span className="empty">No area rooms cached. Refresh conversations first.</span>}
             </div>}
           </div>}
         </div>}

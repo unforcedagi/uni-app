@@ -112,6 +112,17 @@ export function shareText(note: Pick<JournalNote, "id" | "path" | "content" | "c
   return uniLabel ? `${head}\n\n${quoted}\n\n— ${ref}` : `${quoted}\n\n— ${ref}`;
 }
 
+/** What an area room's Uni is asked when an entry is sent there (T-263): Hermes in a group room wakes only on a mention. */
+export const AREA_ASK = "New journal entry for this area. Take it in; reply only if something stands out.";
+
+/**
+ * The rooms an entry can be sent to (T-263): the area rooms, so no direct message and not #Uni (it has "Pass to Uni"). Archived
+ * rooms never reach the room list (the core drops them).
+ */
+export function areaRooms<R extends { id: string; dm?: boolean }>(rooms: readonly R[], uniRoomId: string | null): R[] {
+  return rooms.filter((r) => !r.dm && r.id !== uniRoomId);
+}
+
 /** A soft opening line for the journal, by time of day. */
 export function greeting(d: Date): string {
   const h = d.getHours();
