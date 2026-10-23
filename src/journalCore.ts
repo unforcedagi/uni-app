@@ -119,10 +119,11 @@ export const AREA_ASK = "New journal entry for this area. Take it in; reply only
  * The rooms an entry can be sent to (T-263): the area rooms, so no direct message and not #Uni (it has "Pass to Uni"). Only a room
  * known to be one: `dm` is null until the relay's metadata says (every channel cached before the app knew DMs, and a channel just
  * joined), and absent in a room list cached by an older app; neither is offered. Archived rooms never reach the room list (the core
- * drops them). By name: the room list reorders as messages land, and a chip must not move under the finger after a send.
+ * drops them). A room named Uni is never one, whichever room findUniRoom took. By name: the room list reorders as messages land,
+ * and a chip must not move under the finger after a send.
  */
 export function areaRooms<R extends { id: string; name: string; dm?: boolean | null }>(rooms: readonly R[], uniRoomId: string | null): R[] {
-  return rooms.filter((r) => r.dm === false && r.id !== uniRoomId).sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }) || a.id.localeCompare(b.id));
+  return rooms.filter((r) => r.dm === false && r.id !== uniRoomId && r.name.trim().toLowerCase() !== "uni").sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }) || a.id.localeCompare(b.id));
 }
 
 /** A soft opening line for the journal, by time of day. */

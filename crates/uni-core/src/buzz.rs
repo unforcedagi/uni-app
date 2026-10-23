@@ -605,6 +605,9 @@ pub fn merge_discovered_channels(uuids: Vec<Uuid>, meta: &[Event]) -> HashMap<Uu
         })
         .collect();
 
+    // oldest first, so a channel's newest metadata event is the one that stands (T-263: a stale one must not unmark a DM)
+    let mut meta: Vec<&Event> = meta.iter().collect();
+    meta.sort_by_key(|e| e.created_at);
     for ev in meta {
         let mut d = None;
         let mut name = None;
@@ -741,6 +744,18 @@ mod tests {
             meta(hidden, vec![vec!["hidden"]]),
         ];
         let merged = merge_discovered_channels(vec![room, dm, group, hidden], &events);
+        // the newest metadata event stands, whatever order the relay sends them in
+        let newer = EventBuilder::new(Kind::Custom(39000), "")
+            .tags([Tag::parse(["d", &room.to_string()]).unwrap(), Tag::parse(["t", "dm"]).unwrap()])
+            .custom_created_at(Timestamp::from_secs(2_000_000_000))
+            .sign_with_keys(&keys)
+            .unwrap();
+        let older = EventBuilder::new(Kind::Custom(39000), "")
+            .tags([Tag::parse(["d", &room.to_string()]).unwrap(), Tag::parse(["t", "stream"]).unwrap()])
+            .custom_created_at(Timestamp::from_secs(1_000_000_000))
+            .sign_with_keys(&keys)
+            .unwrap();
+        assert_eq!(merge_discovered_channels(vec![room], &[newer, older])[&room].dm, Some(true));
         assert_eq!(merged[&room].dm, Some(false));
         assert_eq!(merged[&dm].dm, Some(true));
         assert_eq!(merged[&group].dm, Some(true));
