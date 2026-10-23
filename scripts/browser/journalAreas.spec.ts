@@ -38,6 +38,8 @@ async function boot(page: Page) {
           case 'get_messages': return [];
           case 'get_members': return members[args.channel] ?? [];
           case 'post_message': {
+            // as the core does: the room list is ordered by the latest message
+            rooms.unshift(...rooms.splice(rooms.findIndex((r) => r.id === args.channel), 1));
             w.__posts.push({ channel: args.channel, body: args.body, recipients: args.recipients });
             return { ref: `p${w.__posts.length}`, channel: args.channel, author: ME, author_name: 'Robin', ts: Math.floor(Date.now() / 1000), body: args.body, mentions_me: false, root: null, parent: null, mentions: [], reply_count: 0, last_reply_ts: null, edited: false, reactions: [] };
           }
@@ -81,7 +83,7 @@ test('two area chips after a save post two messages, each with the link, address
   const offer = entry.getByRole('group', { name: 'Send to an area' });
   await expect(offer).toBeVisible();
   // only the area rooms: no DM, no group DM, not #Uni
-  await expect(offer.getByRole('button', { name: /^Send to #/ })).toHaveText(['#garden', '#workshop', '#library']);
+  await expect(offer.getByRole('button', { name: /^Send to #/ })).toHaveText(['#garden', '#library', '#workshop']);
   // nothing is sent until a chip is tapped
   expect(await posts(page)).toEqual([]);
 
@@ -89,6 +91,8 @@ test('two area chips after a save post two messages, each with the link, address
   await expect(offer.getByRole('button', { name: '#garden, sent' })).toBeDisabled();
   await offer.getByRole('button', { name: 'Send to #workshop' }).click();
   await expect(offer.getByRole('button', { name: '#workshop, sent' })).toBeDisabled();
+  // the chips keep their places while the room list reorders behind them
+  await expect(offer.getByRole('button', { name: /^(Send to )?#/ })).toHaveText(['✓ #garden', '#library', '✓ #workshop']);
 
   const id = await page.evaluate(() => (window as any).__notes[0].id as string);
   const sent = await posts(page);
@@ -138,7 +142,7 @@ test('the entry menu offers the same area rooms, and Pass to Uni still goes to #
   await entry.getByRole('button', { name: 'More for this entry' }).click();
   await entry.getByRole('button', { name: 'Share to a room…' }).click();
   const picker = entry.getByRole('group', { name: 'Choose a room' });
-  await expect(picker.getByRole('button')).toHaveText(['#garden', '#workshop', '#library']);
+  await expect(picker.getByRole('button')).toHaveText(['#garden', '#library', '#workshop']);
   await picker.getByRole('button', { name: 'Send to #workshop' }).click();
   await expect(entry.locator('.queued-tag')).toHaveText('shared · workshop');
 
