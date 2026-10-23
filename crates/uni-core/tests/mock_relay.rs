@@ -100,6 +100,18 @@ impl MockRelay {
         self.member_channels.lock().unwrap().insert(ch.to_string());
     }
 
+    /// Store an addressable event (kind 39000 metadata, say) the way the relay
+    /// does: it replaces the stored one with the same kind, author and `d` tag.
+    fn replace(&self, ev: Value) {
+        let same = |e: &Value| {
+            e["kind"] == ev["kind"]
+                && e["pubkey"] == ev["pubkey"]
+                && tag_values(e, "d") == tag_values(&ev, "d")
+        };
+        self.events.lock().unwrap().retain(|e| !same(e));
+        self.publish(ev);
+    }
+
     async fn start(self: &Arc<Self>) -> String {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("ws://{}", listener.local_addr().unwrap());
@@ -625,6 +637,86 @@ async fn sync_against_mock_relay() {
     assert_eq!(report2.fetched[&f.ch_a.to_string()], 1);
 }
 
+/// T-177: a room archived on the relay after this device cached it. Discovery
+/// drops archived rooms, so without an explicit mark the cached row stayed in
+/// the room list forever; unarchiving (the rollback) must bring it back.
+#[tokio::test]
+async fn sync_hides_a_cached_room_once_archived_and_shows_it_again_when_unarchived() {
+    let f = fixture().await;
+    let me_hex = f.me.public_key().to_hex();
+    let store = Store::open_in_memory().unwrap();
+    let b = f.ch_b.to_string();
+    // What `get_rooms` lists.
+    let listed = |s: &Store| -> Vec<String> {
+        let mut ids: Vec<String> = s
+            .rooms_for(Some(&me_hex))
+            .unwrap()
+            .into_iter()
+            .map(|r| r.id)
+            .collect();
+        ids.sort();
+        ids
+    };
+    let mut both = vec![f.ch_a.to_string(), b.clone()];
+    both.sort();
+
+    sync_once(&f.url, &f.me, None, &store).await.unwrap();
+    assert_eq!(listed(&store), both);
+
+    // A message lands after that sync, then the relay archives the room.
+    f.relay.publish(signed(
+        &f.other,
+        9,
+        vec![h(f.ch_b), p(&f.other)],
+        "b2 before the archive",
+        210,
+    ));
+    f.relay.replace(signed(
+        &f.relay_keys,
+        39000,
+        vec![
+            d(f.ch_b),
+            named("name", "heartbeat"),
+            named("archived", "true"),
+        ],
+        "",
+        2,
+    ));
+    let report = sync_once(&f.url, &f.me, None, &store).await.unwrap();
+    assert_eq!(
+        listed(&store),
+        vec![f.ch_a.to_string()],
+        "the archived room is still listed"
+    );
+    assert!(!report.channels.contains_key(&b), "{:?}", report.channels);
+    assert!(
+        !report.fetched.contains_key(&b),
+        "history fetched for an archived room"
+    );
+
+    // Unarchived: the next sync lists it again, under its name, and catches
+    // up from its watermark.
+    f.relay.replace(signed(
+        &f.relay_keys,
+        39000,
+        vec![d(f.ch_b), named("name", "heartbeat")],
+        "",
+        3,
+    ));
+    let report = sync_once(&f.url, &f.me, None, &store).await.unwrap();
+    assert_eq!(
+        listed(&store),
+        both,
+        "the unarchived room did not come back"
+    );
+    assert_eq!(report.channels[&b].as_deref(), Some("heartbeat"));
+    assert!(store
+        .room_messages(&b, 10)
+        .unwrap()
+        .iter()
+        .any(|m| m.item.body == "b2 before the archive"));
+}
+
 #[tokio::test]
 async fn sync_is_incremental_and_idempotent_across_new_events() {
     let f = fixture().await;
@@ -1022,6 +1114,105 @@ async fn live_reconnects_with_backoff_and_reauths() {
     let (r, _) = tokio::join!(runner, driver);
     r.unwrap();
     assert!(*f.relay.connections.lock().unwrap() >= 3);
+}
+
+/// T-177 in live mode: the relay pushes no metadata change to live subs, so
+/// an archive (or unarchive) reaches the room list on the next connection's
+/// discovery.
+#[tokio::test]
+async fn live_reconnect_hides_a_room_archived_meanwhile_and_shows_it_again_when_unarchived() {
+    let f = fixture().await;
+    let store = Store::open_in_memory().unwrap();
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let (stop_tx, stop_rx) = watch::channel(false);
+
+    let url = f.url.clone();
+    let me = f.me.clone();
+    let store_ref = &store;
+    let runner = async move { run_live(live_cfg(&url), &me, None, store_ref, tx, stop_rx).await };
+    let listed = |s: &Store| {
+        s.rooms()
+            .unwrap()
+            .iter()
+            .any(|r| r.id == f.ch_b.to_string())
+    };
+
+    let driver = async {
+        let mut seen = Vec::new();
+        for _ in 0..2 {
+            assert!(
+                wait_for(&mut rx, &mut seen, Duration::from_secs(5), |e| matches!(
+                    e,
+                    LiveEvent::Eose { .. }
+                ))
+                .await
+            );
+        }
+        assert!(listed(&store));
+
+        // Archived while we're connected; the next connection hides it and
+        // opens no sub for it (only the Uni room backfills).
+        f.relay.replace(signed(
+            &f.relay_keys,
+            39000,
+            vec![
+                d(f.ch_b),
+                named("name", "heartbeat"),
+                named("archived", "true"),
+            ],
+            "",
+            2,
+        ));
+        f.relay.drop_all();
+        assert!(
+            wait_for(&mut rx, &mut seen, Duration::from_secs(5), |e| matches!(
+                e,
+                LiveEvent::Connected { reconnect: 1 }
+            ))
+            .await,
+            "{seen:?}"
+        );
+        assert!(
+            wait_for(&mut rx, &mut seen, Duration::from_secs(5), |e| matches!(
+                e,
+                LiveEvent::Eose { channel } if *channel == f.ch_a
+            ))
+            .await,
+            "{seen:?}"
+        );
+        assert!(!listed(&store), "the archived room is still listed");
+
+        // Unarchived: the next connection lists it again and re-subscribes.
+        f.relay.replace(signed(
+            &f.relay_keys,
+            39000,
+            vec![d(f.ch_b), named("name", "heartbeat")],
+            "",
+            3,
+        ));
+        f.relay.drop_all();
+        assert!(
+            wait_for(&mut rx, &mut seen, Duration::from_secs(5), |e| matches!(
+                e,
+                LiveEvent::Eose { channel } if *channel == f.ch_b
+            ))
+            .await,
+            "{seen:?}"
+        );
+        assert!(listed(&store), "the unarchived room did not come back");
+
+        stop_tx.send(true).unwrap();
+        assert!(
+            wait_for(&mut rx, &mut seen, Duration::from_secs(5), |e| matches!(
+                e,
+                LiveEvent::Stopped { .. }
+            ))
+            .await
+        );
+    };
+
+    let (r, _) = tokio::join!(runner, driver);
+    r.unwrap();
 }
 
 #[tokio::test]

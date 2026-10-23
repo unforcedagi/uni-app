@@ -84,13 +84,18 @@ pub struct ChannelInfo {
     pub archived: bool,
 }
 
-/// Discovery output: joined, non-archived channels and their rosters.
+/// Discovery output: joined, non-archived channels and their rosters, plus
+/// the joined channels the relay reports archived.
 #[derive(Debug, Clone, Default)]
 pub struct Discovery {
     /// Channel metadata keyed by uuid.
     pub channels: HashMap<Uuid, ChannelInfo>,
     /// Member pubkeys (canonical hex, deduplicated, in tag order) per channel.
     pub members: HashMap<Uuid, Vec<String>>,
+    /// Joined channels whose metadata says `archived=true` (not in
+    /// `channels`). A device that cached one before it was archived marks
+    /// its row archived, so the room leaves the room list.
+    pub archived: Vec<Uuid>,
 }
 
 /// An authenticated relay connection.
@@ -203,9 +208,18 @@ impl BuzzClient {
             .custom_tags(d_tag, uuids.iter().map(|u| u.to_string()));
         let meta_events = self.req_until_eose("disc-meta", &[meta_filter]).await?;
 
-        let channels = merge_discovered_channels(uuids, &meta_events);
+        let channels = merge_discovered_channels(uuids.clone(), &meta_events);
+        // The merge drops a joined channel only when it is archived.
+        let archived = uuids
+            .into_iter()
+            .filter(|u| !channels.contains_key(u))
+            .collect();
         members.retain(|id, _| channels.contains_key(id));
-        Ok(Discovery { channels, members })
+        Ok(Discovery {
+            channels,
+            members,
+            archived,
+        })
     }
 
     /// Pull kind-9 history for one channel. `since` is exclusive-ish per NIP-01

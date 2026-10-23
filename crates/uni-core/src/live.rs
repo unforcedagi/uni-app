@@ -239,6 +239,10 @@ impl<'a, F: Fn(LiveEvent)> Session<'a, F> {
                 now,
             )?;
         }
+        // Archived since we cached it: hidden, and no sub is opened for it.
+        for ch in &discovery.archived {
+            self.store.mark_channel_archived(&ch.to_string(), now)?;
+        }
         for (ch, members) in &discovery.members {
             self.store
                 .replace_channel_members(&ch.to_string(), members)?;
