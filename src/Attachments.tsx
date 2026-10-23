@@ -11,7 +11,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { pdfThumbnail } from "./pdfPreview";
-import { holdTop } from "./areas/focusTrap";
+import { holdTop, trapTab } from "./areas/focusTrap";
 import { attachmentKind, collectAttachments, displayName, formatSize, imageLinks, mediaErrorText, parseDim, playbackErrorText, playerPin, relayMediaSha, stripAttachmentLines, type MediaRef } from "./media";
 
 export type { MediaRef } from "./media";
@@ -278,22 +278,43 @@ function LinkImage({ url, onOpen }: { url: string; onOpen: Open }) {
   </button>;
 }
 
+/**
+ * An image filling the window. T-260 (Codex r2): the same dialog contract as the full-screen video: rendered at the body, the app
+ * behind it inert, Tab and Shift+Tab kept among its own buttons, Escape (and Android Back, which sends one) closes only it, and focus
+ * goes back to what opened it.
+ */
 export function Lightbox({ src, alt, m, onClose }: { src: string; alt: string; m?: MediaRef; onClose: () => void }) {
+  const layer = useRef<HTMLDivElement>(null);
   const close = useRef<HTMLButtonElement>(null);
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
   useEffect(() => {
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const root = document.getElementById("root");
+    const wasInert = root?.inert ?? false;
+    if (root) root.inert = true;
     close.current?.focus();
-    // Capture, and stop it there: Escape (and Android Back, which sends one) closes only the viewer.
-    const key = (e: KeyboardEvent) => { if (e.key === "Escape") { e.preventDefault(); e.stopImmediatePropagation(); onClose(); } };
+    // Capture, and stop it there: Escape closes only the viewer; Tab stays in it.
+    const key = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { e.preventDefault(); e.stopImmediatePropagation(); closeRef.current(); }
+      else if (e.key === "Tab") trapTab(e, layer.current);
+    };
     window.addEventListener("keydown", key, true);
-    return () => window.removeEventListener("keydown", key, true);
-  }, [onClose]);
-  // T-260: the top dialog while it is up (a task sheet under it keeps its Escape to itself)
-  useEffect(() => { setModalOpen(+1); const release = holdTop(); return () => { release(); setModalOpen(-1); }; }, []);
-  return <div className="lightbox" role="dialog" aria-modal="true" aria-label={alt} onClick={onClose}>
+    setModalOpen(+1);
+    // T-260: the top dialog while it is up (a task sheet under it keeps its Escape and Tab to itself)
+    const release = holdTop();
+    return () => {
+      release(); setModalOpen(-1);
+      window.removeEventListener("keydown", key, true);
+      if (root) root.inert = wasInert;
+      if (opener?.isConnected) opener.focus();
+    };
+  }, []);
+  return createPortal(<div ref={layer} className="lightbox" role="dialog" aria-modal="true" aria-label={alt} onClick={onClose}>
     <img src={src} alt={alt} referrerPolicy="no-referrer" onClick={(e) => e.stopPropagation()} />
     <button ref={close} className="lightbox-close" onClick={onClose} aria-label="Close image">✕</button>
     {m && <LightboxSave m={m} />}
-  </div>;
+  </div>, document.body);
 }
 
 /**

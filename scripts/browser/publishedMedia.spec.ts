@@ -65,7 +65,7 @@ const NOTES = [
     content: `# Which cut of the garden walk?\n\nThe plan is ${PAGE}, the budget ${PAGE_B} and the notes ${DOC}. Watch ${VIDEO} before you pick.\n\n- Short\n- Long (default)\n`,
     metadata: { node: 'Projects/Garden', state: 'open', options: ['Short', 'Long'], default: 'Long', owner: 'aaron', asked: '2026-10-20', task: 'T-07',
       // the step names the clip (the task guards want what an ask names linked in it): the sheet has only the list's fields
-      next: `Watch ${VIDEO}, then pick a cut.` } },
+      next: `Watch ${VIDEO} and look at ${IMAGE}, then pick a cut.` } },
   { id: ASSETS, path: 'Notes/Garden assets', extension: 'md', tags: [], createdAt: T, updatedAt: T, lastUpdatedVia: 'api',
     content: [`# Garden assets`, ``, `The map:`, ``, IMAGE, ``, `- The call: ${AUDIO}`, `- The notes: ${DOC}`,
       `- Not ours: https://www.example.org/garden-walk.webm`, `- Lookalike: https://uni.example.ts.net.evil.example:8444/garden-walk-0a1b2c3d.webm`,
@@ -133,6 +133,25 @@ async function fits(page: Page, scope: Locator) {
     if (await player.count()) { const p = (await player.boundingBox())!; expect(p.width).toBeGreaterThanOrEqual(Math.min(200, b.width - 1)); expect(p.x + p.width).toBeLessThanOrEqual(b.x + b.width + 1); }
     for (const c of await f.locator('.pub-act, .pub-open').all()) { const cb = (await c.boundingBox())!; expect(cb.height).toBeGreaterThanOrEqual(44); }
   }
+}
+/**
+ * The image viewer is a dialog (Codex r2): Tab and Shift+Tab stay inside it, everything behind it is out of reach, Escape closes only
+ * it, and focus goes back to the button that opened it.
+ */
+async function viewerContract(page: Page, opener: Locator) {
+  await opener.click();
+  const box = page.getByRole('dialog', { name: 'garden-map-2c3d4e5f.png' });
+  await expect(box.locator('img')).toBeVisible();
+  const inBox = () => page.evaluate(() => !!document.activeElement?.closest('.lightbox'));
+  await expect.poll(inBox).toBe(true);
+  for (let i = 0; i < 4; i++) { await page.keyboard.press('Tab'); expect(await inBox()).toBe(true); }
+  for (let i = 0; i < 4; i++) { await page.keyboard.press('Shift+Tab'); expect(await inBox()).toBe(true); }
+  // the app behind is inert while it is up (no tap, no screen reader)
+  expect(await page.evaluate(() => (document.getElementById('root') as HTMLElement & { inert: boolean }).inert)).toBe(true);
+  await page.keyboard.press('Escape');
+  await expect(box).toHaveCount(0);
+  await expect(opener).toBeFocused();
+  expect(await page.evaluate(() => (document.getElementById('root') as HTMLElement & { inert: boolean }).inert)).toBe(false);
 }
 /** No player ever asked the app for a file: the webview loads it, never the app with your credentials. */
 const nativeFetches = (page: Page) => page.evaluate((o) => (window as any).__calls.filter((c: any) => /^media_/.test(c.cmd) || JSON.stringify(c.args ?? {}).includes(o) && c.cmd !== 'open_link').length, ORIGIN);
@@ -214,6 +233,9 @@ test.describe('published media in notes and decisions', () => {
     await page.keyboard.press('Escape');
     await expect(layer).toHaveCount(0);
     await expect(sheet).toBeVisible();
+    // the image the step links, opened full size over the sheet: a dialog of its own; the sheet stays and takes focus back
+    await viewerContract(page, sheet.getByRole('button', { name: 'Open image garden-map-2c3d4e5f.png' }));
+    await expect(sheet).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(sheet).toHaveCount(0);
   });
@@ -225,10 +247,7 @@ test.describe('published media in notes and decisions', () => {
     await expect(img).toHaveCount(1);
     await img.scrollIntoViewIfNeeded();
     await expect.poll(() => img.evaluate((i: HTMLImageElement) => i.complete ? i.naturalWidth : 0)).toBe(640);
-    await view.getByRole('button', { name: 'Open image garden-map-2c3d4e5f.png' }).click();
-    await expect(page.locator('.lightbox img')).toBeVisible();
-    await page.keyboard.press('Escape');
-    await expect(page.locator('.lightbox')).toHaveCount(0);
+    await viewerContract(page, view.getByRole('button', { name: 'Open image garden-map-2c3d4e5f.png' }));
     await plays(view.locator('figure.pub-audio audio'));
     // nothing else plays: one image, one audio, no video (code, other hosts, the lookalike and the other port are not ours)
     await expect(view.locator('.note-body video')).toHaveCount(0);
