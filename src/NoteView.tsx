@@ -4,7 +4,7 @@ import { editableExtension, beginEdit, isDirty } from "./noteEdit";
 import { backlinks } from "./backlinks";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { NoteRenderer, type LinkComponentProps } from "@openparachute/surface-render";
+import { NoteRenderer, type LinkComponentProps, type NoteRendererProps } from "@openparachute/surface-render";
 import type { NoteHit } from "./Search";
 import type { Note } from "@openparachute/surface-client";
 import { safeHref } from "./markdown";
@@ -12,9 +12,14 @@ import { copyText } from "./clipboard";
 import NoteDownload from "./NoteDownload";
 import { isMarkdownNote } from "./noteFile";
 import { bodyWithoutTitle, noteMeta, noteTitle } from "./noteText";
+import { inline, PLAYER_TAG, publishedFromNote, rehypePublished } from "./publishedMedia";
+import { PublishedInNote, PublishedMedia, usePublishOrigins } from "./PublishedPlayer";
 import { refCandidates, isNoteNotFound, noteUrl, parseNoteRoute, parseNoteUrl, wikilinkResolver, type VaultRef } from "./vaultlinks";
 
 type VaultNote = { hub: string; vault: string; note: Note & { extension?: string } };
+
+/** T-260: the player a published link in the body becomes (see rehypePublished). */
+const MEDIA_COMPONENTS = { [PLAYER_TAG]: PublishedInNote } as NoteRendererProps["components"];
 
 function openExternal(url: string) {
   void invoke("open_link", { url }).catch(() => {});
@@ -127,6 +132,11 @@ export default function NoteView({ target, hub, onOpen, onBack, backLabel, onTit
   // The H1 is the page title; render the rest so it isn't shown twice.
   const shown = useMemo(() => note ? { ...note, content: bodyWithoutTitle(note.content ?? "") } : null, [note]);
   const tags = note?.tags ?? [];
+  // T-260: a Published note plays its own file (its metadata) at the top; a published video, audio or image the body links plays
+  // where it is linked, once; pages and PDFs stay links
+  const origins = usePublishOrigins();
+  const own = useMemo(() => { const p = note ? publishedFromNote(note, origins) : null; return p && inline(p.kind) ? p : null; }, [note, origins]);
+  const rehype = useMemo(() => [[rehypePublished, { origins, shown: own ? [own.url] : [] }]] as NoteRendererProps["rehypePlugins"], [origins, own]);
   const inbound = backlinks(note?.id ?? "", note?.links);
 
   return <div className="note-view">
@@ -165,7 +175,8 @@ export default function NoteView({ target, hub, onOpen, onBack, backLabel, onTit
           </details>
         </div>}
         {shown && <>
-          <NoteRenderer note={shown} className="md note-body" resolve={resolve} linkComponent={Link} />
+          {own && <PublishedMedia m={own} />}
+          <NoteRenderer note={shown} className="md note-body" resolve={resolve} linkComponent={Link} rehypePlugins={rehype} components={MEDIA_COMPONENTS} />
           {tools && <details className="note-backlinks"><summary>Linked from ({inbound.length})</summary>
             {inbound.map((link) => <button className="vault-note" key={JSON.stringify([link.id, link.relationship])} onClick={() => onOpen({ hub: null, vault: data!.vault, ref: link.id }, null)}>{link.path} <small>· {link.relationship}</small></button>)}
           </details>}

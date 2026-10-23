@@ -99,6 +99,19 @@ pub fn service_origin(hub: &str, port: u16) -> Option<String> {
     Some(u.origin().ascii_serialization())
 }
 
+/// Port `uni-publish` serves published files on, on the hub's host (T-260).
+pub const PUBLISH_PORT: u16 = 8444;
+
+/// Where published files may come from: each name of this hub
+/// ([`hub_origins`]) on [`PUBLISH_PORT`], by [`service_origin`]'s rule. The app
+/// plays a note's media inline only from these.
+pub fn publish_origins(hub: &str) -> Vec<String> {
+    hub_origins(hub)
+        .iter()
+        .filter_map(|o| service_origin(o, PUBLISH_PORT))
+        .collect()
+}
+
 /// The transcription endpoint on the hub's host: port [`TRANSCRIBE_PORT`],
 /// path `/transcribe` ([`service_origin`]).
 pub fn transcribe_url(hub: &str) -> Option<String> {
@@ -147,6 +160,25 @@ mod tests {
             Some("https://hub.example.org:8445/transcribe")
         );
         assert_eq!(transcribe_url("not a url"), None);
+    }
+
+    #[test]
+    fn published_files_come_from_each_name_of_the_hub_on_8444() {
+        // T-260: uni-publish serves on the hub's host; both tailnet names are that host
+        assert_eq!(
+            publish_origins(&on(OLD, "/x")),
+            vec![on(OLD, ":8444"), on(NEW, ":8444")]
+        );
+        assert_eq!(publish_origins(NEW), vec![on(NEW, ":8444"), on(OLD, ":8444")]);
+        assert_eq!(
+            publish_origins("https://hub.example.org:8443"),
+            vec!["https://hub.example.org:8444".to_string()]
+        );
+        // never plain http to another machine; a hub on this device may be
+        assert!(publish_origins("http://hub.example.org").is_empty());
+        assert!(publish_origins(&OLD.replacen("https", "http", 1)).is_empty());
+        assert!(publish_origins("not a url").is_empty());
+        assert_eq!(publish_origins("http://127.0.0.1:1939"), vec!["http://127.0.0.1:8444".to_string()]);
     }
 
     #[test]

@@ -665,7 +665,8 @@ Two proposals wait on a scope decision.
             if (!n) throw 'note not found: ' + args.noteRef;
             return { hub: 'https://example.invalid', vault: args.vault ?? 'uni', note: { createdAt: '2026-09-01T00:00:00Z', tags: [], metadata: {}, ...n } };
           }
-          case 'journal_config': return { hub: 'https://example.invalid', vault: 'uni' };
+          // T-260: a spec may name where published files play from (__publishOrigins); none otherwise
+          case 'journal_config': return { hub: 'https://example.invalid', vault: 'uni', ...(w.__publishOrigins ? { publish_origins: w.__publishOrigins } : {}) };
           // r21: a spec may make both searches fail (__searchFails)
           // r21: a spec may offer pairing (__pairAvailable); its unlock never answers here, so the dialog stays on its first step
           case 'pair_source_available': return !!w.__pairAvailable;

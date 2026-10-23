@@ -22,6 +22,8 @@ export type DecisionView = {
   decidedNote: string | null;
   /** T-226: words added with no pick (`notes`: `{text, at, by}`), oldest first. */
   notes: { text: string; at: string; by: string }[];
+  /** T-260: the note's text as stored: the published files it links show on the card. */
+  body: string;
 };
 
 /** T-226: the longest note on a decision, in characters (the vault refuses longer; the field stops there and counts down near it). */
@@ -124,6 +126,7 @@ export function parseDecisionNote(note: any): DecisionView | null {
     decided: str(m.decided), decidedBy: str(m.decided_by), updatedAt: typeof note.updatedAt === "string" ? note.updatedAt : "", task: str(m.task),
     decidedNote: str(m.decided_note),
     notes: Array.isArray(m.notes) ? m.notes.flatMap((n: any) => n && typeof n.text === "string" && n.text.trim() ? [{ text: n.text, at: String(n.at ?? ""), by: String(n.by ?? "") }] : []) : [],
+    body: typeof note.content === "string" ? note.content : "",
   };
 }
 

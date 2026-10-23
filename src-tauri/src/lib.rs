@@ -2078,12 +2078,14 @@ fn migrate_retired_vault(cfg: &mut uni_core::parachute::VaultConfig) {
 }
 
 /// The hub setting as the UI sees it, with every origin that is this hub
-/// (T-137: links on either tailnet name open in-app).
+/// (T-137: links on either tailnet name open in-app), and the origins its
+/// published files come from (T-260: those play inline in a note).
 #[derive(Serialize)]
 struct HubSetting {
     hub: String,
     vault: String,
     hub_origins: Vec<String>,
+    publish_origins: Vec<String>,
 }
 
 #[tauri::command]
@@ -2091,6 +2093,7 @@ fn journal_config(app: tauri::AppHandle) -> HubSetting {
     let cfg = vault_config(&app);
     HubSetting {
         hub_origins: uni_core::hub::hub_origins(&cfg.hub),
+        publish_origins: uni_core::hub::publish_origins(&cfg.hub),
         hub: cfg.hub,
         vault: cfg.vault,
     }

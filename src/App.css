@@ -815,3 +815,17 @@ p.decision-card.decision-loading { padding: 8px 12px; color: var(--muted); font-
 .video-full-player { width: 100vw; height: 100vh; max-width: 100vw; max-height: 100vh; object-fit: contain; background: #000; }
 .video-full:fullscreen { width: 100vw; height: 100vh; }
 .attachment-fullscreen { min-height: 44px; }
+/* T-260: a published file in place (a note, a decision card, a task sheet): the column's width and never wider, the platform's own
+   controls, a name and a way out to the browser under it; no motion (the e-ink screen). */
+.pub-media { margin: 12px 0; max-width: 100%; min-width: 0; }
+.pub-player { display: block; width: 100%; max-height: min(70vh, 560px); border-radius: 12px; background: #000; }
+.pub-audio { display: block; width: 100%; max-width: 520px; min-height: 44px; }
+.pub-image-open { display: block; max-width: 100%; padding: 0; border: 0; background: none; cursor: zoom-in; }
+.pub-image-open img, .note-body .pub-image-open img { display: block; max-width: 100%; height: auto; max-height: 70vh; border-radius: 12px; }
+.pub-cap { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-top: 6px; font-size: 13px; line-height: 1.3; color: var(--muted); }
+.pub-name { flex: 1 1 8em; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pub-act { min-height: 44px; padding: 0 14px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--accent); font-size: 13px; transition: none; }
+.md a.pub-open, .pub-open { display: inline-flex; align-items: center; min-height: 44px; color: var(--accent); }
+.pub-error { margin: 6px 0 0; color: var(--danger); font-size: 13px; line-height: 1.4; overflow-wrap: anywhere; }
+.pub-error .pub-act { margin-left: 6px; }
+.decision-media .pub-media, .task-media .pub-media { margin: 8px 0; }

@@ -1,10 +1,12 @@
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { cleanNote, NOTE_MAX, NOTE_WARN, noteLine, optionLabel, parseDecisionNote, pickedLine, type DecisionView } from "./decisionView";
 import { makeDecisionStore, msg, type Entry } from "./decisionStore";
 import { useNoteOpener } from "./noteLinks";
 import { activeProfile } from "./areas/profile";
 import { decisionDecided, onDecisionsGone } from "./decisionLinks";
+import { publishedIn } from "./publishedMedia";
+import { PublishedMedia, usePublishOrigins } from "./PublishedPlayer";
 
 // T-212: a decision in the chat as a card you can tap. The note is read once per decision and shared by every card of it (a message's
 // card and the room's list, or the "Picked" message's own), so one tap shows "Decided" on all of them. A tap is the vault's
@@ -49,6 +51,9 @@ export function DecisionCard({ id, vault, post }: Props) {
   const [sent, setSent] = useState<"pick" | "note">("pick");
   const text = useSyncExternalStore(store.subscribeDrafts, () => store.draft(id, vault), () => store.draft(id, vault));
   const d = entry?.view;
+  const origins = usePublishOrigins();
+  // T-260: the published files the decision's note links, in place on the card (at most 3): its context is seen, not a link away
+  const files = useMemo(() => publishedIn(d?.body ?? "", origins).slice(0, 3), [d?.body, origins]);
   // a ref to a note that is not a decision (or not read yet) is only its chip; a note that exists but can't be read now says so quietly
   if (!entry) return null;
   if (!d) return entry.error && !/not found/i.test(entry.error) ? <p className="decision-card decision-loading">Couldn't read this note to show its decision: {entry.error}
@@ -124,11 +129,13 @@ export function DecisionCard({ id, vault, post }: Props) {
     {d.notes.slice(-3).map((n, i) => <li key={`${n.at}.${i}`}><span className="decision-by">{n.by === activeProfile().me ? "You" : n.by || "Note"}: </span>{n.text}</li>)}
   </ul> : null;
   const context = openNote ? <button type="button" className="decision-context" onClick={() => openNote({ hub: null, vault, ref: id }, null)}>Context ›</button> : null;
+  const media = files.length ? <div className="decision-media">{files.map((m) => <PublishedMedia key={m.url} m={m} />)}</div> : null;
   const head = <header className="decision-head"><span className="decision-kind">Decision{d.task ? ` · ${d.task}` : ""}</span>{context}</header>;
 
   if (d.state !== "open") return <section className="decision-card decided" aria-label={`Decision: ${d.question}`} data-state={d.state}>
     {head}
     <p className="decision-q">{d.question}</p>
+    {media}
     {d.state === "decided"
       ? <p className="decision-result" role="status">Decided: <strong>{d.decided ? optionLabel(d.decided) : "yes"}</strong>{d.decidedBy ? <span className="decision-by"> · by {d.decidedBy === activeProfile().me ? "you" : d.decidedBy}</span> : null}</p>
       : <p className="decision-result" role="status">No longer open.</p>}
@@ -145,6 +152,7 @@ export function DecisionCard({ id, vault, post }: Props) {
   return <section className="decision-card" aria-label={`Decision: ${d.question}`} data-state="open">
     {head}
     <p className="decision-q">{d.question}</p>
+    {media}
     {d.options.length >= 2
       ? <div className="decision-options" role="group" aria-label={`Pick one: ${d.question}`}>
           {d.options.map((o) => <button key={o} type="button" className={`decision-opt ${o === d.dflt ? "dflt" : ""}`}

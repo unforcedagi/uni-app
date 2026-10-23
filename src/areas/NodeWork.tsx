@@ -15,6 +15,8 @@ import { changedBy, vaultTasks } from "./vaultTasks";
 import { openDialog } from "./focusTrap";
 import { invoke } from "@tauri-apps/api/core";
 import { copyText } from "../clipboard";
+import { inline, publishedIn } from "../publishedMedia";
+import { PublishedMedia, usePublishOrigins } from "../PublishedPlayer";
 
 export { ownerLabel };
 const OWNER = (o: string) => ownerLabel(o);
@@ -85,6 +87,7 @@ export function TaskSheet({ task, gone = false, nodeName, room, roomNamed, inRoo
   const profileVault = useVaultProfile().vault;
   const vault = task.vault ?? profileVault;
   const decision = task.kind === "decision";
+  const origins = usePublishOrigins();
   const { id: tid, rest } = taskTitle(cleanText(task.title));
   // r14: a cut question not known at this revision is read from its note here, keyed by the note and its revision: a new revision drops the
   // old question at once, and the answers sit only beside a question read at the revision they will be written against
@@ -229,6 +232,7 @@ export function TaskSheet({ task, gone = false, nodeName, room, roomNamed, inRoo
   /** r30: the step points at the detail's words ("Send Nico the message below"): they are the ask itself, shown under the heading */
   const carries = !!task.detail && !!pointsAt(task.next) && !refd;
   const detailParas = detailText ? detailText.split(/\n\s*\n/).map((para, i) => <p key={i}><DetailText text={para.trim()} vault={vault} onNote={(r) => { onClose(); onNote(r); }} /></p>) : null;
+  const files = publishedIn([task.title, dq?.full ?? task.ask ?? "", task.next ?? "", detailText ?? ""].join("\n\n"), origins).filter((m) => inline(m.kind)).slice(0, 3);
   /** r18: a decision with no stored options is answered in words, written like a tap: one revision-guarded write of `decided`. */
   const [words, setWords] = useState("");
   const typed = answerText(words);
@@ -283,6 +287,8 @@ export function TaskSheet({ task, gone = false, nodeName, room, roomNamed, inRoo
       {/* the step itself, with its links to open, when the lead had to drop them (a URL, a linked note) or when it is not an action; never under "Check" */}
       {/* r27: a decision's step that only says its question again is not shown twice: its links stay */}
       {!unsure && task.next && !act && (!lead || linky(task.next)) && (decision && repeatsHeading(task.next, heading, rest) ? stepLinks(task.next, true) : <div className="task-next"><NextText text={task.next} vault={vault} onNote={(r) => { onClose(); onNote(r); }} /></div>)}
+      {/* T-260: a published video, audio or image the ask links plays here, in the sheet (its link stays, to open it elsewhere) */}
+      {files.length > 0 && <div className="task-media">{files.map((m) => <PublishedMedia key={m.url} m={m} />)}</div>}
       {!unsure && task.nextCut && <p className="task-next task-cut">(the note ends here · <button type="button" className="task-link" onClick={() => { onClose(); onNote({ vault, id: task.id }); }}>open the note</button>)</p>}
       {check && <p className="task-q-note">{decision ? "This decision stands on that note" : "Its questions came from that note"}, and it is {check.how === "superseded" ? "superseded" : "closed"}. If this still needs you, its note says what; if not, archive it.</p>}
       {asks && !unsure && <section className="task-questions" aria-label={asks.kind === "list" ? answerLabel(asks.items.length) : OPEN_TO_ANSWER}>

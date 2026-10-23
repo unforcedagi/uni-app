@@ -277,7 +277,7 @@ function LinkImage({ url, onOpen }: { url: string; onOpen: Open }) {
   </button>;
 }
 
-function Lightbox({ src, alt, m, onClose }: { src: string; alt: string; m?: MediaRef; onClose: () => void }) {
+export function Lightbox({ src, alt, m, onClose }: { src: string; alt: string; m?: MediaRef; onClose: () => void }) {
   const close = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     close.current?.focus();
@@ -299,9 +299,9 @@ function Lightbox({ src, alt, m, onClose }: { src: string; alt: string; m?: Medi
  * WebView (wry's RustWebChromeClient) cancels every full-screen request, and other webviews vary. So the app shows
  * its own: a fixed layer over everything, rendered at the body so no message ancestor can clip it. Where the
  * Fullscreen API is allowed (desktop), the layer also asks to take the screen; refused or absent, the layer stays.
- * Escape, ✕ and Android Back close it.
+ * Escape, ✕ and Android Back close it. T-260: a published video in a note opens the same layer.
  */
-function VideoFull({ src, name, at, playing, events, onClose }: {
+export function VideoFull({ src, name, at, playing, events, onClose }: {
   src: string; name: string; at: number; playing: boolean;
   events: React.VideoHTMLAttributes<HTMLVideoElement>; onClose: (at: number) => void;
 }) {
