@@ -40,7 +40,7 @@ import { elapsed, workingOn } from "./working";
 
 import { decisionIn, useDecisionLinks } from "./decisionLinks";
 import { DecisionCard, forgetDecisions } from "./DecisionCard";
-import { checkHeld, forgetHeld, heldCount, onHeldCount } from "./mailHeld";
+import { checkHeld, forgetHeld, heldCount, mailUnread, onHeldCount, onMailUnread } from "./mailHeld";
 import { decisionRefsIn, unreferenced } from "./decisionView";
 import { findUniMember, findUniRoom, searchHandoffText } from "./uniActions";
 import Search from "./Search";
@@ -330,6 +330,9 @@ function Conversations({ onForget }: { onForget: () => void }) {
   }, []);
   // T-213: Uni's sends held for you, counted on the rail's Mail button (Mail keeps the count current while it is open)
   const [held, setHeld] = useState(heldCount);
+  // T-208: and your Inbox's unread, from the same overview answers
+  const [unreadMail, setUnreadMail] = useState(mailUnread);
+  useEffect(() => onMailUnread(setUnreadMail), []);
   useEffect(() => {
     const off = onHeldCount(setHeld);
     const soon = window.setTimeout(() => void checkHeld(60_000), 4000); // skipped when Mail has just listed them
@@ -2032,7 +2035,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     <nav ref={railRef} className="rail" aria-label="Main navigation">
       <button aria-label="Uni" aria-current={!panel && !searchOpen && (!topNote && shellOpen ? "page" : undefined)} onClick={() => openTarget(uniHome())}><i><UniIcon /></i><span>Uni</span></button>
       <button aria-label="Journal" aria-current={!panel && !searchOpen && (journalOpen && !topNote ? "page" : undefined)} onClick={() => openTarget({ kind: "journal", title: "Journal" })}><i><JournalIcon /></i><span>Journal</span></button>
-      <button aria-label="Mail" aria-current={!panel && !searchOpen && (active?.kind === "mail" && !topNote ? "page" : undefined)} onClick={() => openTarget({ kind: "mail", title: "Mail" })} aria-describedby={held > 0 ? "rail-mail-held" : undefined}><i><MailIcon />{held > 0 && <span className="rail-count" aria-hidden="true">{held}</span>}</i><span>Mail</span>{held > 0 && <span id="rail-mail-held" hidden>{held} waiting for you</span>}</button>
+      <button aria-label="Mail" aria-current={!panel && !searchOpen && (active?.kind === "mail" && !topNote ? "page" : undefined)} onClick={() => openTarget({ kind: "mail", title: "Mail" })} aria-describedby={[held > 0 && "rail-mail-held", unreadMail > 0 && "rail-mail-unread"].filter(Boolean).join(" ") || undefined}><i><MailIcon />{held > 0 && <span className="rail-count" aria-hidden="true">{held}</span>}{unreadMail > 0 && <span className="rail-dot" aria-hidden="true" />}</i><span>Mail</span>{held > 0 && <span id="rail-mail-held" hidden>{held} waiting for you</span>}{unreadMail > 0 && <span id="rail-mail-unread" hidden>{unreadMail} unread in your Inbox</span>}</button>
       {calOn && <button aria-label="Calendar" aria-current={!panel && !searchOpen && (active?.kind === "calendar" && !topNote ? "page" : undefined)} onClick={() => openTarget({ kind: "calendar", title: "Calendar" })}><i><CalendarIcon /></i><span>Calendar</span></button>}
       {showUniGlue(lifeVault) && <button aria-label="For you" aria-current={!panel && !searchOpen && (topNote?.ref === FOR_YOU_ID ? "page" : undefined)} onClick={openForYou}><i><StarIcon />{forYou.fresh && <span className="rail-dot" aria-label="Updated recommendations" />}</i><span>For you</span></button>}
       <button className="rail-vault" aria-label="Vault" aria-current={!panel && !searchOpen && (active?.kind === "vault" || (topNote && topNote.ref !== FOR_YOU_ID) ? "page" : undefined)} aria-expanded={panel === "vault"} onClick={() => { setSearchOpen(false); setPanel(panel === "vault" ? null : "vault"); }}><i>▤</i><span>Vault</span></button>

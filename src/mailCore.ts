@@ -71,6 +71,12 @@ export function allInboxesUnread(o: Overview): number {
   return o.accounts.reduce((n, a) => n + (role(a, "inbox")?.unread ?? 0), 0);
 }
 
+/** Unread mail in your own Inbox (T-208): what the rail's badge shows. Uni's mail is Uni's to read; Junk and Trash
+ *  aren't mail you'd read. */
+export function yourInboxUnread(o: Overview): number {
+  return o.accounts.filter((a) => a.who === "owner").reduce((n, a) => n + (role(a, "inbox")?.unread ?? 0), 0);
+}
+
 /** The list's heading. */
 export function scopeTitle(scope: Scope, o: Overview, query: string): string {
   const acct = scope.kind !== "all-inboxes" ? o.accounts.find((a) => a.id === scope.accountId) : undefined;

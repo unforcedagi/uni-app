@@ -3,8 +3,9 @@
 // (views subscribe: `onHeld`). The Mail badge on the rail is its count of sends still waiting. Mail lists them when it
 // opens and on Refresh; the app also asks once soon after it starts and again when it comes back into view (at most
 // every ten minutes), only where the bridge offers listing them. A failure leaves everything as it was. Forget empties it.
+// T-208: the same overview answers give the rail's unread badge (your Inbox), the newest answer winning.
 import { invoke } from "@tauri-apps/api/core";
-import { approvalOffered, can, type HeldOutcome, type Overview, type Parked } from "./mailCore.ts";
+import { approvalOffered, can, yourInboxUnread, type HeldOutcome, type Overview, type Parked } from "./mailCore.ts";
 
 /** One held send as Mail shows it: `listed` while the bridge still lists it as waiting; `outcome` once you decided. */
 export type HeldEntry = { item: Parked; outcome: HeldOutcome | null; listed: boolean };
@@ -125,6 +126,30 @@ export function heldGen(): number {
   return gen;
 }
 
+let unread = 0;
+let unreadSeq = 0;
+const unreadSubs = new Set<(n: number) => void>();
+
+/** Unread mail in your Inbox, as of the newest overview read. */
+export function mailUnread(): number {
+  return unread;
+}
+
+export function onMailUnread(f: (n: number) => void): () => void {
+  unreadSubs.add(f);
+  return () => { unreadSubs.delete(f); };
+}
+
+/** An overview read as listing `seq` (from `beginListing`): an answer older than one already counted is dropped. */
+export function noteUnread(o: Overview, seq: number): void {
+  if (seq < unreadSeq) return;
+  unreadSeq = seq;
+  const n = yourInboxUnread(o);
+  if (n === unread) return;
+  unread = n;
+  for (const f of unreadSubs) f(n);
+}
+
 /** Ask the bridge, unless it was asked less than `minGapMs` ago. */
 /** Ask the bridge, unless it (or Mail) asked less than `minGapMs` ago. The answer goes into the same store Mail reads,
  *  so the badge and Mail always count the same way. */
@@ -136,6 +161,7 @@ export async function checkHeld(minGapMs = 0): Promise<void> {
     if (!o || !Array.isArray(o.accounts)) return;
     const decidable = o.accounts.filter(approvalOffered);
     if (mine !== gen) return;
+    noteUnread(o, seq);
     keepAccounts(decidable.map((a) => a.id), mine, seq);
     for (const a of decidable.filter((x) => can(x, "send.parked"))) {
       const list = await invoke<Parked[] | null>("mail_parked", { accountId: a.id });
@@ -152,5 +178,7 @@ export function forgetHeld(): void {
   for (const k of Object.keys(merged)) delete merged[k];
   offered = { ids: [], seq: 0 };
   lastCheck = 0;
+  unreadSeq = listings + 1; // nothing asked before Forget counts
+  if (unread !== 0) { unread = 0; for (const f of unreadSubs) f(0); }
   changed();
 }

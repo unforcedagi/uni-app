@@ -22,7 +22,7 @@ import {
   type PendingSend, type SendOutcome, type Source, type ThreadPage, type ThreadSummary, type Who,
   approvalOffered, approveOutcome, canApprove, declineOutcome, heldFailure, type HeldOutcome, type Parked,
 } from "./mailCore";
-import { beginListing, endDeciding, heldEntries, heldGen, keepAccounts, mergeListing, onHeld, setOutcome, startDeciding, waiting, type HeldEntry } from "./mailHeld";
+import { beginListing, endDeciding, heldEntries, heldGen, keepAccounts, mergeListing, noteUnread, onHeld, setOutcome, startDeciding, waiting, type HeldEntry } from "./mailHeld";
 import "./Mail.css";
 
 type List = { key: string; threads: ThreadSummary[]; next: Source[]; more: boolean; total: number | null };
@@ -362,6 +362,7 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
       if (seq < overviewSeq.current) return overviewRef.current;
       overviewSeq.current = seq;
       overviewListing.set(o, seq);
+      noteUnread(o, seq);
       const known = (id: string) => o.accounts.some((a) => a.id === id);
       overviewRef.current = o;
       setOverview(o);
