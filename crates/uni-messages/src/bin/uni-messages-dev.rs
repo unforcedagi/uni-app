@@ -171,8 +171,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
         .await
         .map_err(|e| e.to_string())?;
-    // nothing is signed out: each profile's session stays for the next run
-    drop(bridge);
+    // nothing is signed out: each profile's account stops, and stays saved for the next run
+    for (_, m) in bridge.profiles.lock().await.drain() {
+        m.shut_down().await;
+    }
     Ok(())
 }
 

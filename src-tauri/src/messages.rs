@@ -2,8 +2,9 @@
 //! on this device. Each command is a one-line call into the same core the dev bridge serves to the browser tests;
 //! updates go to the webview as the `messages://update` event. Tokens and keys stay in Rust.
 //!
-//! The store and the two secrets (store passphrase, session) live under the app's data folder in 0600 files; moving
-//! the secrets into the OS keychain and Android Keystore, as the device key is kept, is the next step (T-278 DESIGN.md).
+//! The store and the saved account (one record: session, store name, store key) live under the app's data folder, the
+//! record in a 0600 file; moving it into the OS keychain and Android Keystore, as the device key is kept, is the next
+//! step (T-278 DESIGN.md).
 
 use std::sync::Arc;
 

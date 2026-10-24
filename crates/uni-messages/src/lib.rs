@@ -53,10 +53,19 @@ const SUBSCRIBED_ROOMS: usize = 50;
 const ACCOUNT: &str = "account";
 /// What an earlier build saved as two separate secrets; removed when found.
 const LEGACY: [&str; 2] = ["session", "store-passphrase"];
-/// A command waits this long at most for a homeserver that keeps failing (the SDK's default is to retry for ever).
-const RETRY_FOR: Duration = Duration::from_secs(20);
-/// How long stopping an account's sync may take. Normally it is at once; see `Live::stop`.
+/// An ordinary request (anything but the sync's long poll, which sets its own) gives up after this. It is tried at most
+/// four times, with pauses of at most `RETRY_PAUSE` between (the SDK's default is to retry for up to 15 minutes).
+const REQUEST_FOR: Duration = Duration::from_secs(15);
+const RETRY_PAUSE: Duration = Duration::from_secs(5);
+/// A sign-in's login and a logout, all tries included. Account changes wait on these, so they are kept short.
+const LOGIN_FOR: Duration = Duration::from_secs(30);
+const LOGOUT_FOR: Duration = Duration::from_secs(10);
+/// How long the status waits for an account change under way before answering with the status as it is.
+const STATUS_WAIT: Duration = Duration::from_secs(2);
+/// How long stopping an account's sync may take, twice at most. Normally it is at once; see `Live::stop`.
 const STOP_FOR: Duration = Duration::from_secs(3);
+/// The crypto database in a store folder (matrix-sdk-sqlite's name for it): a store without it has no keys.
+const CRYPTO_DB: &str = "matrix-sdk-crypto.sqlite3";
 
 /// What the app is told about the account: whether it is signed in and whether the sync is live.
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -170,15 +179,20 @@ struct OpenRooms {
 
 impl Live {
     /// Stop the account's tasks and its sync. A sync stopped a moment after it started can miss the stop: matrix-sdk-ui's
-    /// sync loops listen for it only once they first run, and `SyncService::stop` then waits for a long poll that never
-    /// ends. So the wait is short. What always follows (the device's logout, or a token the homeserver already
-    /// refused) ends such a loop at its next request.
+    /// room-list loop listens for it only once it first runs, and `SyncService::stop` then waits for that loop, which
+    /// long-polls on. So if the stop hasn't finished after a moment, the room list's stop is sent again; by then the loop
+    /// listens, ends, and the sync service stops its encryption sync itself.
     async fn stop(mut self) -> Client {
         for t in self.tasks.drain(..) {
             t.abort();
         }
-        if tokio::time::timeout(STOP_FOR, self.sync.stop()).await.is_err() {
-            tracing::warn!("the sync didn't stop in {STOP_FOR:?}; it ends at its next request");
+        let sync = self.sync.clone();
+        let mut stopping = tokio::spawn(async move { sync.stop().await });
+        if tokio::time::timeout(STOP_FOR, &mut stopping).await.is_err() {
+            let _ = self.sync.room_list_service().stop_sync();
+            if tokio::time::timeout(STOP_FOR, &mut stopping).await.is_err() {
+                tracing::warn!("the sync didn't stop; it ends at its next failed request");
+            }
         }
         self.client
     }
@@ -190,7 +204,8 @@ pub struct Messages {
     secrets: Arc<dyn Secrets>,
     tx: broadcast::Sender<Update>,
     /// Account changes take turns on it: sign-in, sign-out, resume, a device ended on the homeserver. Held to the end of
-    /// each, a sign-in's login and a sign-out's logout included; nothing else waits on it.
+    /// each, a sign-in's login (`LOGIN_FOR`) and a logout (`LOGOUT_FOR`) included. Only the status waits on it, and for
+    /// `STATUS_WAIT` at most.
     lifecycle: tokio::sync::Mutex<()>,
     /// The signed-in account. Locked to swap it or to clone its client; never across a network call.
     live: tokio::sync::Mutex<Option<Live>>,
@@ -247,7 +262,7 @@ impl Messages {
             .homeserver_url(homeserver.as_str())
             // the address checked by `checked_homeserver` is the one used: a login answer can't move it elsewhere
             .respect_login_well_known(false)
-            .request_config(RequestConfig::short_retry().max_retry_time(RETRY_FOR))
+            .request_config(RequestConfig::short_retry().timeout(REQUEST_FOR).max_retry_time(RETRY_PAUSE))
             .sqlite_store_with_config_and_cache_path(SqliteStoreConfig::new(self.dir.join(store)).key(Some(&key)), None::<PathBuf>)
             .build()
             .await
@@ -267,7 +282,10 @@ impl Messages {
     /// messages last synced, and the sync catches up when the homeserver answers. An account that can't be reopened
     /// (its store or key is gone) comes back as signed out, with the reason, so the app offers sign-in.
     pub async fn resume(self: &Arc<Self>) -> Result<Status> {
-        let _turn = self.lifecycle.lock().await;
+        let Ok(_turn) = tokio::time::timeout(STATUS_WAIT, self.lifecycle.lock()).await else {
+            // an account change is under way, waiting on the homeserver: it sends its own status when it is done
+            return Ok(self.status());
+        };
         if self.live.lock().await.is_some() {
             return Ok(self.status());
         }
@@ -281,6 +299,11 @@ impl Messages {
         };
         let reopen = async {
             let record: Record = serde_json::from_str(&saved).map_err(from_store)?;
+            // a record whose store is gone would reopen over a new, empty store: no keys, and a device the homeserver
+            // already knows by others. Refused, and nothing is deleted; a new sign-in replaces it.
+            if !self.dir.join(&record.store).join(CRYPTO_DB).is_file() {
+                return Err(from_store("its store is gone"));
+            }
             let homeserver = checked_homeserver(&record.homeserver)?;
             let client = self.build_client(&homeserver, &record.store, &record.key).await?;
             client.matrix_auth().restore_session(record.session, RoomLoadSettings::default()).await.map_err(from_sdk)?;
@@ -322,23 +345,34 @@ impl Messages {
                 return Err(e);
             }
         };
-        if let Err(e) = client.matrix_auth().login_username(user, password).initial_device_display_name("Uni").send().await {
+        let login = client.matrix_auth().login_username(user, password).initial_device_display_name("Uni").send();
+        let login = match tokio::time::timeout(LOGIN_FOR, login).await {
+            Ok(answer) => answer.map(|_| ()).map_err(from_sdk),
+            Err(_) => Err(MessagesError::Unreachable { message: "The homeserver isn't answering.".into() }),
+        };
+        if let Err(e) = login {
             drop(client);
             self.remove_store(&store);
-            return Err(from_sdk(e));
+            return Err(e);
         }
         // signed in on the homeserver: a failure from here signs the new device out again
         let saved = async {
             let session = client.matrix_auth().session().ok_or_else(|| server("signed in without a session"))?;
             let sync = Self::sync_service(&client).await?;
             let record = Record { homeserver: homeserver.to_string(), session, store: store.clone(), key };
-            self.secrets.set(ACCOUNT, &serde_json::to_string(&record).map_err(from_store)?).map_err(from_store)?;
+            if let Err(e) = self.secrets.set(ACCOUNT, &serde_json::to_string(&record).map_err(from_store)?) {
+                // a save that failed may still have saved (a keychain that stored, then errored): the record decides
+                if self.saved_store().as_deref() != Some(store.as_str()) {
+                    return Err(from_store(e));
+                }
+                tracing::warn!("saving the account reported an error, but it is saved: {e}");
+            }
             Ok::<_, MessagesError>(sync)
         };
         let sync = match saved.await {
             Ok(sync) => sync,
             Err(e) => {
-                let _ = client.logout().await;
+                log_out(&client).await;
                 drop(client);
                 self.remove_store(&store);
                 return Err(e);
@@ -353,7 +387,7 @@ impl Messages {
         self.run(client, sync, &homeserver, store.clone()).await;
         if let Some(old) = old {
             // best effort: the previous device leaves the homeserver too
-            let _ = old.logout().await;
+            log_out(&old).await;
         }
         self.remove_stores(Some(&store));
         Ok(self.status())
@@ -365,13 +399,12 @@ impl Messages {
         // held across the logout: no sign-in can finish while it waits and be deleted below
         let _turn = self.lifecycle.lock().await;
         let old = self.live.lock().await.take();
-        let note = match old {
-            Some(l) => match l.stop().await.logout().await {
-                Ok(()) => None,
-                Err(_) => Some("Signed out on this device. The homeserver didn't confirm, so this device may still be listed there.".to_owned()),
-            },
-            None => None,
+        let confirmed = match old {
+            Some(l) => log_out(&l.stop().await).await,
+            None => true,
         };
+        let note = (!confirmed)
+            .then(|| "Signed out on this device. The homeserver didn't confirm, so this device may still be listed there.".to_owned());
         Ok(self.wipe(note).await)
     }
 
@@ -389,14 +422,21 @@ impl Messages {
         self.wipe(Some("This device was signed out on the homeserver. Sign in again.".into())).await;
     }
 
-    /// Forget the account here: the saved record, the open rooms, every store. Only under the lifecycle turn.
+    /// Forget the account here: the saved record, the open rooms, every store. The stores go only once the record is
+    /// gone, so a restart never finds a record without its store. Only under the lifecycle turn.
     async fn wipe(&self, note: Option<String>) -> Status {
-        let _ = self.secrets.delete(ACCOUNT);
+        let forgotten = self.secrets.delete(ACCOUNT);
         for name in LEGACY {
             let _ = self.secrets.delete(name);
         }
         self.forget_rooms(None).await;
-        self.remove_stores(None);
+        let note = match forgotten {
+            Ok(()) => {
+                self.remove_stores(None);
+                note
+            }
+            Err(e) => Some(format!("Signed out on this device, but its saved account couldn't be removed ({e}). Sign out again.")),
+        };
         let s = Status::signed_out(note);
         self.set_status(s.clone());
         let _ = self.tx.send(Update::Rooms { rooms: vec![] });
@@ -412,6 +452,23 @@ impl Messages {
         open.account = account;
         drop(open);
         self.rooms.lock().unwrap().clear();
+    }
+
+    /// Stop the running account without signing out, as the app does when it quits: the saved account stays, and the
+    /// next start picks it up.
+    pub async fn shut_down(self: &Arc<Self>) {
+        let _turn = self.lifecycle.lock().await;
+        let old = self.live.lock().await.take();
+        if let Some(l) = old {
+            l.stop().await;
+        }
+        self.forget_rooms(None).await;
+    }
+
+    /// The store the saved record names, if there is a readable one.
+    fn saved_store(&self) -> Option<String> {
+        let saved = self.secrets.get(ACCOUNT).ok().flatten()?;
+        serde_json::from_str::<Record>(&saved).ok().map(|r| r.store)
     }
 
     fn remove_store(&self, store: &str) {
@@ -461,13 +518,19 @@ impl Messages {
         let mut changes = client.subscribe_to_session_changes();
         let this = store.clone();
         let session_task = tokio::spawn(async move {
-            while let Ok(change) = changes.recv().await {
-                if let SessionChange::UnknownToken(_) = change {
-                    if let Some(me) = me.upgrade() {
-                        // its own task: ending the session aborts this one
-                        tokio::spawn(async move { me.ended_elsewhere(this).await });
+            loop {
+                match changes.recv().await {
+                    Ok(SessionChange::UnknownToken(_)) => {
+                        if let Some(me) = me.upgrade() {
+                            // its own task: ending the session aborts this one
+                            tokio::spawn(async move { me.ended_elsewhere(this).await });
+                        }
+                        break;
                     }
-                    break;
+                    Ok(_) => {}
+                    // the channel holds one change, so a burst (both syncs refused at once) skips some: read on
+                    Err(broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(broadcast::error::RecvError::Closed) => break,
                 }
             }
         });
@@ -654,6 +717,11 @@ impl Messages {
             _ => return Err(invalid(format!("no such command: {cmd}"))),
         })
     }
+}
+
+/// Log a device out, within `LOGOUT_FOR`; whether the homeserver confirmed it.
+async fn log_out(client: &Client) -> bool {
+    matches!(tokio::time::timeout(LOGOUT_FOR, client.logout()).await, Ok(Ok(())))
 }
 
 /// A store key from its hex form.

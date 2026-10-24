@@ -33,6 +33,19 @@ impl FileSecrets {
         }
         Ok(self.dir.join(name))
     }
+
+    /// Remove the temporary files an interrupted write of `name` left behind (a crash between writing and renaming):
+    /// they hold the value too. One writer per name at a time, as the account's changes take turns.
+    fn sweep(&self, name: &str) {
+        let Ok(entries) = fs::read_dir(&self.dir) else { return };
+        let prefix = format!(".{name}.");
+        for e in entries.flatten() {
+            let file = e.file_name().to_string_lossy().into_owned();
+            if file.starts_with(&prefix) && file.ends_with(".tmp") {
+                let _ = fs::remove_file(e.path());
+            }
+        }
+    }
 }
 
 fn private_dir(dir: &Path) -> Result<(), String> {
@@ -54,11 +67,14 @@ impl Secrets for FileSecrets {
         }
     }
 
-    /// Written whole to a new temporary file, synced, then renamed over the old one, and the folder synced: the rename
-    /// is the one step that changes the value.
+    /// Written whole to a new temporary file, synced, then renamed over the old one: the rename is the one step that
+    /// changes the value, so once it is done this reports success. The folder is synced after it; if that fails, the
+    /// new value is in place but might not survive a power cut, which is logged rather than reported (an error would
+    /// say the value didn't change, and it did).
     fn set(&self, name: &str, value: &str) -> Result<(), String> {
         let path = self.path(name)?;
         private_dir(&self.dir)?;
+        self.sweep(name);
         let tmp = self.dir.join(format!(".{name}.{}.tmp", random_hex(6)));
         let written = (|| {
             let mut opts = fs::OpenOptions::new();
@@ -71,19 +87,23 @@ impl Secrets for FileSecrets {
             let mut f = opts.open(&tmp)?;
             f.write_all(value.as_bytes())?;
             f.sync_all()?;
-            fs::rename(&tmp, &path)?;
-            #[cfg(unix)]
-            fs::File::open(&self.dir)?.sync_all()?;
-            Ok::<_, std::io::Error>(())
+            fs::rename(&tmp, &path)
         })();
-        written.map_err(|e| {
+        if let Err(e) = written {
             let _ = fs::remove_file(&tmp);
-            e.to_string()
-        })
+            return Err(e.to_string());
+        }
+        #[cfg(unix)]
+        if let Err(e) = fs::File::open(&self.dir).and_then(|d| d.sync_all()) {
+            tracing::warn!("the secrets folder wasn't synced after a write: {e}");
+        }
+        Ok(())
     }
 
     fn delete(&self, name: &str) -> Result<(), String> {
-        match fs::remove_file(self.path(name)?) {
+        let path = self.path(name)?;
+        self.sweep(name);
+        match fs::remove_file(path) {
             Ok(()) => Ok(()),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(e) => Err(e.to_string()),
@@ -124,5 +144,13 @@ mod tests {
         s.delete("session").unwrap();
         s.delete("session").unwrap();
         assert_eq!(s.get("session").unwrap(), None);
+
+        // an interrupted write's temporary file (it holds the value) goes with the next write, and with a delete
+        fs::write(tmp.path().join("secrets/.session.0a1b2c.tmp"), "one").unwrap();
+        s.set("session", "three").unwrap();
+        assert_eq!(fs::read_dir(tmp.path().join("secrets")).unwrap().count(), 1, "the leftover went with the write");
+        fs::write(tmp.path().join("secrets/.session.0a1b2c.tmp"), "three").unwrap();
+        s.delete("session").unwrap();
+        assert_eq!(fs::read_dir(tmp.path().join("secrets")).unwrap().count(), 0, "the leftover went with the delete");
     }
 }
