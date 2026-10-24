@@ -265,19 +265,29 @@ pub struct SourcePage {
 /// Merge each account's page into one page of at most `limit`, newest first. Each source's next position moves past
 /// what this page used of it: up to the first row it didn't take, or past every id it returned when it took them all.
 /// So an id `Email/get` couldn't return (gone between the query and the get) is stepped over, never shown twice and
-/// never a cursor that doesn't move (T-208 follow-up). Ties keep the sources' order.
+/// never a cursor that doesn't move (T-208 follow-up).
+///
+/// T-208: the merge only ever compares each source's next row, so what it takes of a source is always a prefix in that
+/// source's own order (the server's, which may round to the second or hold a time that can't be read). A global sort
+/// could take a source's second row and leave its first, and the next page would show the second again. The next rows
+/// order by the full time, newest first, then by message id, then by the sources' order.
 pub fn merge(pages: Vec<SourcePage>, limit: usize) -> ThreadPage {
-    let mut all: Vec<(usize, Option<(i64, u32)>, ThreadSummary)> = Vec::new();
-    for (i, p) in pages.iter().enumerate() {
-        for (_, t) in &p.rows {
-            all.push((i, rfc3339_instant(&t.received_at), t.clone()));
-        }
-    }
-    all.sort_by(|a, b| b.1.cmp(&a.1)); // stable: ties stay in source order, and each source's own order
-    all.truncate(limit);
+    let times: Vec<Vec<Option<(i64, u32)>>> = pages.iter().map(|p| p.rows.iter().map(|(_, t)| rfc3339_instant(&t.received_at)).collect()).collect();
     let mut taken = vec![0usize; pages.len()];
-    for (i, _, _) in &all {
-        taken[*i] += 1;
+    let mut threads = Vec::new();
+    while threads.len() < limit {
+        let head = |i: usize| (times[i][taken[i]], &pages[i].rows[taken[i]].1.email_id);
+        let Some(i) = (0..pages.len())
+            .filter(|&i| taken[i] < pages[i].rows.len())
+            .reduce(|best, i| {
+                let ((tb, idb), (ti, idi)) = (head(best), head(i));
+                if ti > tb || (ti == tb && idi < idb) { i } else { best }
+            })
+        else {
+            break;
+        };
+        threads.push(pages[i].rows[taken[i]].1.clone());
+        taken[i] += 1;
     }
     let mut more = false;
     let mut total = Some(0u64);
@@ -298,7 +308,7 @@ pub fn merge(pages: Vec<SourcePage>, limit: usize) -> ThreadPage {
             Source { position, ..p.source.clone() }
         })
         .collect();
-    ThreadPage { threads: all.into_iter().map(|(_, _, t)| t).collect(), next, more, total }
+    ThreadPage { threads, next, more, total }
 }
 
 /// A list row from the representative email `e`, its thread's email ids, and those emails' keywords.
@@ -721,6 +731,50 @@ mod tests {
         assert_eq!(p.threads.iter().map(|t| t.email_id.as_str()).collect::<Vec<_>>(), ["a2", "u1"]);
         assert_eq!(p.next.iter().map(|s| s.position).collect::<Vec<_>>(), [3, 1], "A resumes at a4 (index 3)");
         assert!(p.more);
+    }
+
+    /// T-208 item 1: within one second the accounts interleave by the full time, and an account's own order (the
+    /// server's, which may round to the second) is never turned round by the merge.
+    #[test]
+    fn within_a_second_the_accounts_interleave_and_each_keeps_its_own_order() {
+        let a = vec![row("A", "a1", "2026-10-18T10:00:00Z"), row("A", "a2", "2026-10-18T10:00:00.500Z")];
+        let u = vec![row("U", "u1", "2026-10-18T10:00:00.200Z"), row("U", "u2", "2026-10-18T09:59:59.900Z")];
+        let p = merge(vec![page(src("A", 0), a, Some(2)), page(src("U", 0), u, Some(2))], 10);
+        assert_eq!(p.threads.iter().map(|t| t.email_id.as_str()).collect::<Vec<_>>(), ["u1", "a1", "a2", "u2"]);
+        // the same instant in both accounts: the message id decides, whichever account was asked first
+        let at = "2026-10-18T10:00:00Z";
+        for flip in [false, true] {
+            let mut pages = vec![page(src("A", 0), vec![row("A", "m2", at)], Some(1)), page(src("U", 0), vec![row("U", "m1", "2026-10-18T12:00:00.000+02:00")], Some(1))];
+            if flip {
+                pages.reverse();
+            }
+            assert_eq!(merge(pages, 10).threads.iter().map(|t| t.email_id.as_str()).collect::<Vec<_>>(), ["m1", "m2"], "flipped: {flip}");
+        }
+    }
+
+    /// T-208 item 2: paging one row at a time through accounts whose own order differs within a second shows each thread
+    /// once: no repeat at a page boundary, none skipped.
+    #[test]
+    fn paging_across_a_page_boundary_never_repeats_or_skips() {
+        let a = vec![row("A", "a1", "2026-10-18T10:00:00Z"), row("A", "a2", "2026-10-18T10:00:00.500Z"), row("A", "a3", "2026-10-18T09:00:00Z")];
+        let u = vec![row("U", "u1", "2026-10-18T10:00:00.200Z"), row("U", "u2", "2026-10-18T08:00:00Z")];
+        let mut sources = vec![src("A", 0), src("U", 0)];
+        let mut seen = Vec::new();
+        for _ in 0..10 {
+            // each account answers from its position, as Email/query does
+            let pages = sources.iter().map(|s| {
+                let all = if s.account_id == "A" { &a } else { &u };
+                let rest: Vec<ThreadSummary> = all.iter().skip(s.position as usize).cloned().collect();
+                page(s.clone(), rest, Some(all.len() as u64))
+            });
+            let p = merge(pages.collect(), 1);
+            seen.extend(p.threads.iter().map(|t| t.email_id.clone()));
+            sources = p.next;
+            if !p.more {
+                break;
+            }
+        }
+        assert_eq!(seen, ["u1", "a1", "a2", "a3", "u2"]);
     }
 
     #[test]
