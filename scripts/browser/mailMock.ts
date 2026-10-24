@@ -81,19 +81,24 @@ export async function boot(page: Page, mode: Mode = 'ok', opts: { writes?: boole
     const notes: Record<string, string> = w.__notes = { 'A/a3': 'Needs you: Mara asks which day to start.', 'A/a4': '<b>Two files</b> pass the checks; setup.exe won\'t open.', 'U/u1': 'Routine. Nothing to do.' };
     const hay = (m: any) => [m.subject, m.text, m.html, ...m.from.map((x: any) => `${x.name} ${x.email}`), ...m.attachments.map((x: any) => x.name)].join(' ').toLowerCase();
     // Email/query with collapseThreads, per source, merged by time (what uni_core::mail::accounts::merge does)
+    // __pageSize: pages of that many, each account from its own position (as Email/query does), for Load older
     const threads = (sources: any[], text: string | null) => {
+      let total = 0;
       const rows = sources.flatMap((s) => {
         const hits = msgs.filter((m) => m.account === s.account_id && (s.mailbox_id ? m.box === s.mailbox_id : !s.exclude.includes(m.box)) && (!text || hay(m).includes(text.toLowerCase())))
           .sort((x, y) => y.received_at.localeCompare(x.received_at));
         const seen = new Set<string>();
-        return hits.filter((m) => !seen.has(m.thread_id) && seen.add(m.thread_id)).map((m) => {
+        const heads = hits.filter((m) => !seen.has(m.thread_id) && seen.add(m.thread_id));
+        total += heads.length;
+        return heads.slice(s.position).map((m) => {
           const all = msgs.filter((x) => x.account === m.account && x.thread_id === m.thread_id);
           return { account_id: m.account, thread_id: m.thread_id, email_id: m.id, from: m.from, to: m.to, subject: m.subject, preview: (m.text ?? m.subject).replace(/\s+/g, ' ').slice(0, 120),
-            received_at: m.received_at, count: all.length, unread: all.some((x) => x.unread && !x.draft), has_attachment: all.some((x) => x.attachments.length > 0), draft: m.draft, uni_drafted: m.uni_drafted,
+            received_at: m.received_at, count: all.length, unread: all.some((x) => x.unread && !x.draft && (!/-(junk|trash)$/.test(x.box) || x.box === s.mailbox_id)), has_attachment: all.some((x) => x.attachments.length > 0), draft: m.draft, uni_drafted: m.uni_drafted,
             flagged: all.some((x) => x.flagged) };
         });
       }).sort((x, y) => y.received_at.localeCompare(x.received_at));
-      return { threads: rows, next: sources.map((s) => ({ ...s, position: rows.filter((r) => r.account_id === s.account_id).length })), more: false, total: rows.length };
+      const shown = rows.slice(0, w.__pageSize ?? rows.length);
+      return { threads: shown, next: sources.map((s) => ({ ...s, position: s.position + shown.filter((r) => r.account_id === s.account_id).length })), more: shown.length < rows.length, total };
     };
     const fail = () => {
       if (w.__mailMode === 'not_allowed') throw { kind: 'not_allowed', message: 'pubkey not allowed', pubkey: KEY };

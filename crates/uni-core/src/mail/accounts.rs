@@ -265,19 +265,31 @@ pub struct SourcePage {
 /// Merge each account's page into one page of at most `limit`, newest first. Each source's next position moves past
 /// what this page used of it: up to the first row it didn't take, or past every id it returned when it took them all.
 /// So an id `Email/get` couldn't return (gone between the query and the get) is stepped over, never shown twice and
-/// never a cursor that doesn't move (T-208 follow-up). Ties keep the sources' order.
+/// never a cursor that doesn't move (T-208 follow-up).
+///
+/// T-208: the merge only ever compares each source's next row, so what it takes of a source is always a prefix in that
+/// source's own order (the server's, which may round to the second or hold a time that can't be read). A global sort
+/// could take a source's second row and leave its first, and the next page would show the second again. The next rows
+/// order by the full time, newest first, then by message id, then by the sources' order.
 pub fn merge(pages: Vec<SourcePage>, limit: usize) -> ThreadPage {
-    let mut all: Vec<(usize, Option<(i64, u32)>, ThreadSummary)> = Vec::new();
-    for (i, p) in pages.iter().enumerate() {
-        for (_, t) in &p.rows {
-            all.push((i, rfc3339_instant(&t.received_at), t.clone()));
-        }
-    }
-    all.sort_by(|a, b| b.1.cmp(&a.1)); // stable: ties stay in source order, and each source's own order
-    all.truncate(limit);
+    let times: Vec<Vec<Option<(i64, u32)>>> = pages.iter().map(|p| p.rows.iter().map(|(_, t)| rfc3339_instant(&t.received_at)).collect()).collect();
     let mut taken = vec![0usize; pages.len()];
-    for (i, _, _) in &all {
-        taken[*i] += 1;
+    let mut threads = Vec::new();
+    while threads.len() < limit {
+        // a time that can't be read can't be placed: it is taken at once, in its account's order, so it never holds back
+        // the rows after it
+        let head = |i: usize| ((times[i][taken[i]].is_none(), times[i][taken[i]]), &pages[i].rows[taken[i]].1.email_id);
+        let Some(i) = (0..pages.len())
+            .filter(|&i| taken[i] < pages[i].rows.len())
+            .reduce(|best, i| {
+                let ((tb, idb), (ti, idi)) = (head(best), head(i));
+                if ti > tb || (ti == tb && idi < idb) { i } else { best }
+            })
+        else {
+            break;
+        };
+        threads.push(pages[i].rows[taken[i]].1.clone());
+        taken[i] += 1;
     }
     let mut more = false;
     let mut total = Some(0u64);
@@ -298,16 +310,20 @@ pub fn merge(pages: Vec<SourcePage>, limit: usize) -> ThreadPage {
             Source { position, ..p.source.clone() }
         })
         .collect();
-    ThreadPage { threads: all.into_iter().map(|(_, _, t)| t).collect(), next, more, total }
+    ThreadPage { threads, next, more, total }
 }
 
-/// A list row from the representative email `e`, its thread's email ids, and those emails' keywords.
-fn thread_summary(account: &str, e: &Value, thread: Option<&Vec<String>>, states: &HashMap<String, &Value>) -> ThreadSummary {
+/// A list row from the representative email `e`, its thread's email ids, and those emails' keywords and mailboxes.
+/// `hidden`: the mailboxes (Junk and Trash, unless the list reads one) whose unread mail doesn't make the row unread.
+fn thread_summary(account: &str, e: &Value, thread: Option<&Vec<String>>, states: &HashMap<String, &Value>, hidden: &[String]) -> ThreadSummary {
     let thread_id = text_of(e, "threadId");
     let id = text_of(e, "id");
     let ids = thread.cloned().unwrap_or_else(|| vec![id.clone()]);
     let members: Vec<&Value> = ids.iter().filter_map(|i| states.get(i).copied()).collect();
-    let unread_any = if members.is_empty() { unread(e) && !keyword(e, "$draft") } else { members.iter().any(|m| unread(m) && !keyword(m, "$draft")) };
+    // T-208: a message only in Junk or Trash is not mail you'd read, so its unread doesn't light the dot
+    let only_hidden = |m: &Value| m.get("mailboxIds").and_then(Value::as_object).is_some_and(|b| !b.is_empty() && b.keys().all(|k| hidden.contains(k)));
+    let counts = |m: &Value| unread(m) && !keyword(m, "$draft") && !only_hidden(m);
+    let unread_any = if members.is_empty() { counts(e) } else { members.iter().any(|m| counts(m)) };
     let attach = e.get("hasAttachment").and_then(Value::as_bool).unwrap_or(false) || members.iter().any(|m| m.get("hasAttachment").and_then(Value::as_bool) == Some(true));
     let flagged = keyword(e, "$flagged") || members.iter().any(|m| keyword(m, "$flagged"));
     ThreadSummary {
@@ -423,14 +439,15 @@ impl MailBridge<'_> {
             }, format!("t{i}")]));
             calls.push(json!(["Email/get", {
                 "accountId": a, "#ids": { "resultOf": format!("t{i}"), "name": "Thread/get", "path": "/list/*/emailIds" },
-                "properties": ["id", "keywords", "hasAttachment"]
+                "properties": ["id", "keywords", "hasAttachment", "mailboxIds"]
             }, format!("k{i}")]));
+            calls.push(json!(["Mailbox/get", { "accountId": a, "ids": null, "properties": ["id", "role"] }, format!("b{i}")]));
         }
         let (_, r) = self.jmap(Value::Array(calls)).await?;
         let list = |id: &str| r.get(id).and_then(|v| v.get("list")).and_then(Value::as_array).cloned().unwrap_or_default();
         let mut pages = Vec::new();
         for (i, s) in sources.iter().enumerate() {
-            for call in ["q", "e", "t", "k"] {
+            for call in ["q", "e", "t", "k", "b"] {
                 let id = format!("{call}{i}");
                 if !r.contains_key(&id) {
                     return Err(invalid(format!("the mail bridge's answer is missing part of the list ({id})")));
@@ -448,12 +465,18 @@ impl MailBridge<'_> {
                 .collect();
             let states_list = list(&format!("k{i}"));
             let states: HashMap<String, &Value> = states_list.iter().filter_map(|e| Some((e.get("id")?.as_str()?.to_string(), e))).collect();
+            let hidden: Vec<String> = list(&format!("b{i}"))
+                .iter()
+                .filter(|b| matches!(b.get("role").and_then(Value::as_str), Some("junk" | "trash")))
+                .filter_map(|b| b.get("id")?.as_str().map(str::to_string))
+                .filter(|id| s.mailbox_id.as_deref() != Some(id.as_str()))
+                .collect();
             // Email/get may answer in any order; the query's order is newest first. Each row keeps its place in the query.
             let rows: Vec<(usize, ThreadSummary)> = ids
                 .iter()
                 .enumerate()
                 .filter_map(|(n, id)| by_id.get(id).map(|e| (n, e)))
-                .map(|(n, e)| (n, thread_summary(&s.account_id, e, e.get("threadId").and_then(Value::as_str).and_then(|t| threads.get(t)), &states)))
+                .map(|(n, e)| (n, thread_summary(&s.account_id, e, e.get("threadId").and_then(Value::as_str).and_then(|t| threads.get(t)), &states, &hidden)))
                 .collect();
             pages.push(SourcePage { source: s.clone(), rows, returned: ids.len(), total: q.get("total").and_then(Value::as_u64) });
         }
@@ -721,6 +744,61 @@ mod tests {
         assert_eq!(p.threads.iter().map(|t| t.email_id.as_str()).collect::<Vec<_>>(), ["a2", "u1"]);
         assert_eq!(p.next.iter().map(|s| s.position).collect::<Vec<_>>(), [3, 1], "A resumes at a4 (index 3)");
         assert!(p.more);
+    }
+
+    /// T-208 item 1: within one second the accounts interleave by the full time, and an account's own order (the
+    /// server's, which may round to the second) is never turned round by the merge.
+    #[test]
+    fn within_a_second_the_accounts_interleave_and_each_keeps_its_own_order() {
+        let a = vec![row("A", "a1", "2026-10-18T10:00:00Z"), row("A", "a2", "2026-10-18T10:00:00.500Z")];
+        let u = vec![row("U", "u1", "2026-10-18T10:00:00.200Z"), row("U", "u2", "2026-10-18T09:59:59.900Z")];
+        let p = merge(vec![page(src("A", 0), a, Some(2)), page(src("U", 0), u, Some(2))], 10);
+        assert_eq!(p.threads.iter().map(|t| t.email_id.as_str()).collect::<Vec<_>>(), ["u1", "a1", "a2", "u2"]);
+        // the same instant in both accounts: the message id decides, whichever account was asked first
+        let at = "2026-10-18T10:00:00Z";
+        for flip in [false, true] {
+            let mut pages = vec![page(src("A", 0), vec![row("A", "m2", at)], Some(1)), page(src("U", 0), vec![row("U", "m1", "2026-10-18T12:00:00.000+02:00")], Some(1))];
+            if flip {
+                pages.reverse();
+            }
+            assert_eq!(merge(pages, 10).threads.iter().map(|t| t.email_id.as_str()).collect::<Vec<_>>(), ["m1", "m2"], "flipped: {flip}");
+        }
+    }
+
+    /// T-208 item 2: paging one row at a time through accounts whose own order differs within a second shows each thread
+    /// once: no repeat at a page boundary, none skipped.
+    #[test]
+    fn paging_across_a_page_boundary_never_repeats_or_skips() {
+        let a = vec![row("A", "a1", "2026-10-18T10:00:00Z"), row("A", "a2", "2026-10-18T10:00:00.500Z"), row("A", "a3", "2026-10-18T09:00:00Z")];
+        let u = vec![row("U", "u1", "2026-10-18T10:00:00.200Z"), row("U", "u2", "2026-10-18T08:00:00Z")];
+        let mut sources = vec![src("A", 0), src("U", 0)];
+        let mut seen = Vec::new();
+        for _ in 0..10 {
+            // each account answers from its position, as Email/query does
+            let pages = sources.iter().map(|s| {
+                let all = if s.account_id == "A" { &a } else { &u };
+                let rest: Vec<ThreadSummary> = all.iter().skip(s.position as usize).cloned().collect();
+                page(s.clone(), rest, Some(all.len() as u64))
+            });
+            let p = merge(pages.collect(), 1);
+            seen.extend(p.threads.iter().map(|t| t.email_id.clone()));
+            sources = p.next;
+            if !p.more {
+                break;
+            }
+        }
+        assert_eq!(seen, ["u1", "a1", "a2", "a3", "u2"]);
+    }
+
+    /// Review: a row whose time can't be read is taken where its account put it, at once; it doesn't hold the rest of
+    /// that account back behind every other account's older mail.
+    #[test]
+    fn a_row_without_a_time_doesnt_hold_its_account_back() {
+        let a = vec![row("A", "x", ""), row("A", "a1", "2026-10-18T10:00:00Z")];
+        let u = vec![row("U", "u1", "2026-09-01T10:00:00Z"), row("U", "u2", "2026-08-01T10:00:00Z")];
+        let p = merge(vec![page(src("A", 0), a, Some(2)), page(src("U", 0), u, Some(2))], 2);
+        assert_eq!(p.threads.iter().map(|t| t.email_id.as_str()).collect::<Vec<_>>(), ["x", "a1"]);
+        assert_eq!(p.next.iter().map(|s| s.position).collect::<Vec<_>>(), [2, 0]);
     }
 
     #[test]

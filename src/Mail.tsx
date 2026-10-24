@@ -22,7 +22,7 @@ import {
   type PendingSend, type SendOutcome, type Source, type ThreadPage, type ThreadSummary, type Who,
   approvalOffered, approveOutcome, canApprove, declineOutcome, heldFailure, type HeldOutcome, type Parked,
 } from "./mailCore";
-import { beginListing, endDeciding, heldEntries, heldGen, keepAccounts, mergeListing, onHeld, setOutcome, startDeciding, waiting, type HeldEntry } from "./mailHeld";
+import { beginListing, endDeciding, heldEntries, heldGen, keepAccounts, mergeListing, noteUnread, onHeld, setOutcome, startDeciding, waiting, type HeldEntry } from "./mailHeld";
 import "./Mail.css";
 
 type List = { key: string; threads: ThreadSummary[]; next: Source[]; more: boolean; total: number | null };
@@ -325,6 +325,10 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
   const overviewListing = useRef(new WeakMap<Overview, number>()).current;
   /** T-208 follow-up: each fresh list (not a further page) is a new generation; a triage answer for an older one is dropped. */
   const notesGen = useRef(0);
+  /** T-208: triage calls by when they were asked, and for each row the call whose answer it shows: an older call that
+   *  answers later (a page asked again by Load older) never overwrites a newer one's note. */
+  const notesAsked = useRef(0);
+  const noteFrom = useRef(new Map<string, number>()).current;
   const composeSeq = useRef(remembered.compose?.key ?? 0);
   /** The thread just opened from the list: only that load marks it read (a Refresh or a reload doesn't undo Mark unread). */
   const markOnOpen = useRef<string | null>(null);
@@ -358,6 +362,7 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
       if (seq < overviewSeq.current) return overviewRef.current;
       overviewSeq.current = seq;
       overviewListing.set(o, seq);
+      noteUnread(o, seq);
       const known = (id: string) => o.accounts.some((a) => a.id === id);
       overviewRef.current = o;
       setOverview(o);
@@ -391,12 +396,16 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
     const by = new Map<string, string[]>();
     for (const t of threads) by.set(t.account_id, [...(by.get(t.account_id) ?? []), t.email_id]);
     for (const [accountId, emailIds] of by) {
-      const got = await invoke<Record<string, string>>("mail_triage", { accountId, emailIds }).catch(() => ({} as Record<string, string>));
+      const asked = ++notesAsked.current;
+      const got = await invoke<Record<string, string>>("mail_triage", { accountId, emailIds }).catch(() => null);
       if (key !== shownKey.current || gen !== notesGen.current) return;
+      const fresh = emailIds.filter((id) => (noteFrom.get(`${accountId}/${id}`) ?? 0) < asked);
+      // a failed call shows no notes but claims no row: an older answer that does arrive still counts
+      if (got) for (const id of fresh) noteFrom.set(`${accountId}/${id}`, asked);
       setNotes((cur) => {
         const next = { ...cur };
-        for (const id of emailIds) delete next[`${accountId}/${id}`];
-        for (const [id, n] of Object.entries(got)) if (emailIds.includes(id)) next[`${accountId}/${id}`] = n;
+        for (const id of fresh) delete next[`${accountId}/${id}`];
+        for (const id of fresh) if (got && Object.prototype.hasOwnProperty.call(got, id) && got[id]) next[`${accountId}/${id}`] = got[id];
         return next;
       });
     }
@@ -406,6 +415,7 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
     if (sources.length === 0) { setList({ key, threads: [], next: [], more: false, total: 0 }); return; }
     const seq = ++listSeq.current;
     const gen = more ? notesGen.current : ++notesGen.current;
+    if (!more) noteFrom.clear(); // an older list's answers are dropped by their generation
     shownKey.current = key;
     setListLoading(true);
     if (!more) setListProblem(null);

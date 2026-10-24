@@ -198,6 +198,28 @@ test("an old triage answer that lands after Refresh doesn't bring back the old n
   await expect(rows(page).nth(0)).not.toContainText('Needs you');
 });
 
+/** T-208 item 3: a slow triage answer for the first page, landing after Load older brought a newer note for the same
+ *  row (new mail moved the account's position back over it), doesn't put the old note back. */
+test("a stale triage answer doesn't overwrite a newer one for the same row", async ({ page }) => {
+  await page.addInitScript(() => { (window as any).__triageDelays = [2500]; (window as any).__pageSize = 3; });
+  await boot(page);
+  await expect(rows(page)).toHaveCount(3);
+  await page.evaluate(() => {
+    const w = window as any;
+    w.__notes['A/a3'] = 'Changed: Mara picked Monday.';
+    // new mail in your Inbox: your account's next page now starts at the garden thread again
+    w.__msgs.push({ id: 'a11', account: 'A', thread_id: 'Ta11', box: 'A-inbox', from: [{ name: 'Theo Brandt', email: 'theo@example.net' }], to: [{ name: 'Robin Vale', email: 'robin@example.com' }],
+      cc: [], reply_to: [], subject: 'Tools for Saturday', received_at: '2026-10-19T10:00:00Z', sent_at: null, unread: true, flagged: false, draft: false, uni_drafted: false,
+      mailbox_ids: ['A-inbox'], text: 'Bring the spades.', html: null, remote_images: 0, links: [], truncated: false, attachments: [], dmarc: null });
+  });
+  await page.getByRole('button', { name: 'Load older threads' }).click();
+  await expect(rows(page)).toHaveCount(5);
+  await expect(rows(page).nth(0)).toContainText('Uni: Changed: Mara picked Monday.');
+  await page.waitForTimeout(2800);
+  await expect(rows(page).nth(0)).toContainText('Uni: Changed: Mara picked Monday.');
+  await expect(rows(page).nth(0)).not.toContainText('Needs you');
+});
+
 /** Codex review 2, P1: when Uni's mailbox leaves the session, Refresh drops its rows and its open thread; none turns YOU. */
 test("Refresh after Uni's mailbox stops being shared shows none of it, and never as YOU", async ({ page }) => {
   await boot(page);

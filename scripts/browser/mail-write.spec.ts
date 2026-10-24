@@ -554,3 +554,21 @@ test('a save-and-close under way when you leave Mail finishes when you come back
   await rail.getByRole('button', { name: 'Mail', exact: true }).click();
   await expect(page.getByRole('region', { name: 'New message' }).getByRole('textbox', { name: 'Message' })).toHaveValue('Still here after leaving.');
 });
+
+/** T-208 item 5: the rail's Mail button carries an unread badge for your Inbox (not Uni's, not Junk or Trash), kept
+ *  current as you read. */
+test("the rail's Mail button shows your Inbox's unread, and follows reading", async ({ page }) => {
+  await boot(page, 'ok', { writes: true });
+  const button = page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Mail', exact: true });
+  // a3 and a4 in your Inbox; Uni's two unread and your Junk's one don't count
+  await expect(button).toHaveAccessibleDescription('2 unread in your Inbox');
+  await expect(button.locator('.rail-dot')).toHaveCount(1);
+  await row(page, 'Planning the garden week').click();
+  await expect(page.getByRole('region', { name: 'Thread: Planning the garden week' })).toBeVisible();
+  await expect(button).toHaveAccessibleDescription('1 unread in your Inbox');
+  await backToThreads(page);
+  await row(page, 'Workshop photos').click();
+  await expect(page.getByRole('region', { name: 'Thread: Workshop photos and slides' })).toBeVisible();
+  await expect(button).toHaveAccessibleDescription('');
+  await expect(button.locator('.rail-dot')).toHaveCount(0);
+});
