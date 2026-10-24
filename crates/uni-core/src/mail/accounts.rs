@@ -276,7 +276,9 @@ pub fn merge(pages: Vec<SourcePage>, limit: usize) -> ThreadPage {
     let mut taken = vec![0usize; pages.len()];
     let mut threads = Vec::new();
     while threads.len() < limit {
-        let head = |i: usize| (times[i][taken[i]], &pages[i].rows[taken[i]].1.email_id);
+        // a time that can't be read can't be placed: it is taken at once, in its account's order, so it never holds back
+        // the rows after it
+        let head = |i: usize| ((times[i][taken[i]].is_none(), times[i][taken[i]]), &pages[i].rows[taken[i]].1.email_id);
         let Some(i) = (0..pages.len())
             .filter(|&i| taken[i] < pages[i].rows.len())
             .reduce(|best, i| {
@@ -786,6 +788,17 @@ mod tests {
             }
         }
         assert_eq!(seen, ["u1", "a1", "a2", "a3", "u2"]);
+    }
+
+    /// Review: a row whose time can't be read is taken where its account put it, at once; it doesn't hold the rest of
+    /// that account back behind every other account's older mail.
+    #[test]
+    fn a_row_without_a_time_doesnt_hold_its_account_back() {
+        let a = vec![row("A", "x", ""), row("A", "a1", "2026-10-18T10:00:00Z")];
+        let u = vec![row("U", "u1", "2026-09-01T10:00:00Z"), row("U", "u2", "2026-08-01T10:00:00Z")];
+        let p = merge(vec![page(src("A", 0), a, Some(2)), page(src("U", 0), u, Some(2))], 2);
+        assert_eq!(p.threads.iter().map(|t| t.email_id.as_str()).collect::<Vec<_>>(), ["x", "a1"]);
+        assert_eq!(p.next.iter().map(|s| s.position).collect::<Vec<_>>(), [2, 0]);
     }
 
     #[test]

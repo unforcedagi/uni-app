@@ -128,14 +128,14 @@ export function heldGen(): number {
 
 let unread = 0;
 let unreadSeq = 0;
-const unreadSubs = new Set<(n: number) => void>();
+const unreadSubs = new Set<() => void>();
 
 /** Unread mail in your Inbox, as of the newest overview read. */
 export function mailUnread(): number {
   return unread;
 }
 
-export function onMailUnread(f: (n: number) => void): () => void {
+export function onMailUnread(f: () => void): () => void {
   unreadSubs.add(f);
   return () => { unreadSubs.delete(f); };
 }
@@ -147,7 +147,7 @@ export function noteUnread(o: Overview, seq: number): void {
   const n = yourInboxUnread(o);
   if (n === unread) return;
   unread = n;
-  for (const f of unreadSubs) f(n);
+  for (const f of unreadSubs) f();
 }
 
 /** Ask the bridge, unless it was asked less than `minGapMs` ago. */
@@ -179,6 +179,6 @@ export function forgetHeld(): void {
   offered = { ids: [], seq: 0 };
   lastCheck = 0;
   unreadSeq = listings + 1; // nothing asked before Forget counts
-  if (unread !== 0) { unread = 0; for (const f of unreadSubs) f(0); }
+  if (unread !== 0) { unread = 0; for (const f of unreadSubs) f(); }
   changed();
 }

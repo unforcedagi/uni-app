@@ -397,14 +397,15 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
     for (const t of threads) by.set(t.account_id, [...(by.get(t.account_id) ?? []), t.email_id]);
     for (const [accountId, emailIds] of by) {
       const asked = ++notesAsked.current;
-      const got = await invoke<Record<string, string>>("mail_triage", { accountId, emailIds }).catch(() => ({} as Record<string, string>));
+      const got = await invoke<Record<string, string>>("mail_triage", { accountId, emailIds }).catch(() => null);
       if (key !== shownKey.current || gen !== notesGen.current) return;
       const fresh = emailIds.filter((id) => (noteFrom.get(`${accountId}/${id}`) ?? 0) < asked);
-      for (const id of fresh) noteFrom.set(`${accountId}/${id}`, asked);
+      // a failed call shows no notes but claims no row: an older answer that does arrive still counts
+      if (got) for (const id of fresh) noteFrom.set(`${accountId}/${id}`, asked);
       setNotes((cur) => {
         const next = { ...cur };
         for (const id of fresh) delete next[`${accountId}/${id}`];
-        for (const id of fresh) if (Object.prototype.hasOwnProperty.call(got, id) && got[id]) next[`${accountId}/${id}`] = got[id];
+        for (const id of fresh) if (got && Object.prototype.hasOwnProperty.call(got, id) && got[id]) next[`${accountId}/${id}`] = got[id];
         return next;
       });
     }
@@ -414,6 +415,7 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
     if (sources.length === 0) { setList({ key, threads: [], next: [], more: false, total: 0 }); return; }
     const seq = ++listSeq.current;
     const gen = more ? notesGen.current : ++notesGen.current;
+    if (!more) noteFrom.clear(); // an older list's answers are dropped by their generation
     shownKey.current = key;
     setListLoading(true);
     if (!more) setListProblem(null);

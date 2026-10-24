@@ -331,8 +331,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   // T-213: Uni's sends held for you, counted on the rail's Mail button (Mail keeps the count current while it is open)
   const [held, setHeld] = useState(heldCount);
   // T-208: and your Inbox's unread, from the same overview answers
-  const [unreadMail, setUnreadMail] = useState(mailUnread);
-  useEffect(() => onMailUnread(setUnreadMail), []);
+  const unreadMail = useSyncExternalStore(onMailUnread, mailUnread, mailUnread);
   useEffect(() => {
     const off = onHeldCount(setHeld);
     const soon = window.setTimeout(() => void checkHeld(60_000), 4000); // skipped when Mail has just listed them
