@@ -2,12 +2,12 @@ import { test, expect, type Page, type Locator } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 import { PLAN, installNotePaneFixture } from './notePaneFixture';
 
-// T-200: a note linked in chat opens beside the chat (wide screens) or as a sheet over it (narrow screens, and always on Android: the
-// Daylight's portrait and landscape projects carry an Android user agent). Invented rooms and notes (notePaneFixture.ts); what is sent is
-// recorded in window.__notePane.sent.
+// T-200: a note linked in chat opens beside the chat (wide screens) or as a sheet over it (narrow screens, and on Android when upright:
+// the Daylight's portrait and landscape projects carry an Android user agent; T-273 put the note beside the chat on its side). Invented
+// rooms and notes (notePaneFixture.ts); what is sent is recorded in window.__notePane.sent. The handle that resizes either: splitSheet.spec.ts.
 const touch = () => !!test.info().project.use.hasTouch;
 const android = () => test.info().project.name.startsWith('daylight');
-const beside = () => test.info().project.name === 'desktop';
+const beside = () => test.info().project.name === 'desktop' || test.info().project.name === 'daylight-landscape';
 const tap = (l: Locator) => (touch() ? l.tap() : l.click());
 
 test.beforeEach(async ({ page }) => { await page.addInitScript(installNotePaneFixture); });
@@ -86,8 +86,9 @@ test('tap a note link, read it, quote and reply, send, close: same room, same dr
   await expect(list).toHaveCount(1);
   expect(await inView(chip)).toBe(true);
   if (beside()) {
-    // beside a note the chat keeps the room: the tree folds to its icons and the companion to its tab, rather than squeezing the chat
-    await expect(page.locator('.th-roomnav.hidden')).toBeVisible();
+    // beside a note the chat keeps the room: the tree folds to its icons (under 1400 px) and the companion to its tab, rather than
+    // squeezing the chat
+    await expect(page.locator(page.viewportSize()!.width < 1400 ? '.th-roomnav.hidden' : '.th-roomnav:not(.hidden)')).toBeVisible();
     await expect(page.locator('.cp.side.folded')).toBeVisible();
     expect((await list.boundingBox())!.width).toBeGreaterThan(380);
   } else {
@@ -211,7 +212,7 @@ test('an unsaved edit in the note asks before the note closes', async ({ page })
 });
 
 test('beside: the note\'s width is remembered', async ({ page }) => {
-  test.skip(!beside(), 'the column beside the chat is for wide screens off Android');
+  test.skip(!beside(), 'the column beside the chat is for wide screens (Android on its side)');
   const { chip } = await openRoom(page);
   await tap(chip);
   const pane = page.locator('.note-pane');
@@ -228,7 +229,7 @@ test('beside: the note\'s width is remembered', async ({ page }) => {
 });
 
 test('sheet: half or full height, ending at the composer, with the composer in sight', async ({ page }) => {
-  test.skip(beside(), 'the sheet is for narrow screens and Android');
+  test.skip(beside(), 'the sheet is for narrow screens and Android upright');
   const { box, chip } = await openRoom(page);
   await tap(chip);
   const pane = page.locator('.note-pane-sheet');
@@ -246,7 +247,7 @@ test('sheet: half or full height, ending at the composer, with the composer in s
 });
 
 test('sheet: with the Journal open in its own tab too, the sheet lies over the room, not the hidden Journal', async ({ page }) => {
-  test.skip(beside(), 'the sheet is for narrow screens and Android');
+  test.skip(beside(), 'the sheet is for narrow screens and Android upright');
   await openRoom(page);
   await tap(page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Journal' }));
   await expect(page.locator('.journal-list')).toBeVisible();
@@ -264,7 +265,7 @@ test('sheet: with the Journal open in its own tab too, the sheet lies over the r
 });
 
 test('beside: the folded tree unfolds to its own width, even when the sidebar is kept hidden', async ({ page }) => {
-  test.skip(!beside(), 'the column beside the chat is for wide screens off Android');
+  test.skip(!beside(), 'the column beside the chat is for wide screens (Android on its side)');
   await page.addInitScript(() => localStorage.setItem('uni.sidebar.v1', JSON.stringify({ width: 260, hidden: true })));
   const { chip } = await openRoom(page);
   await tap(chip);
