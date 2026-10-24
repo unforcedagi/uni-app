@@ -1,6 +1,7 @@
 // Run: node --experimental-strip-types scripts/vaultlinks.test.ts
 import assert from "node:assert/strict";
 import { parseInline, parseMarkdown, type Inline } from "../src/markdown.ts";
+import { timesReference } from "./timing.ts";
 import { refCandidates, isNoteNotFound, SHORTHAND_VAULTS, matchShorthandAt, noteRoute, noteUrl, parseNoteRoute, parseNoteUrl, parseShorthand, refLabel, sameHub, wikilinkResolver } from "../src/vaultlinks.ts";
 
 const HUB = "https://uni-1.example.ts.net";
@@ -167,21 +168,21 @@ assert.equal(parseInline("[[Title with spaces#Heading|alias]]").filter((n) => n.
 assert.equal(matchShorthandAt("uni:A/B dotted.title,part!word", 0)?.ref.ref, "A/B dotted.title,part!word");
 console.log("vaultlinks ok");
 
-// Timing under load: a quadratic regression is slow on every run, a busy machine only on some, so the fastest of five is what we bound.
-const fastest = (fn: () => void, runs = 5) => { let best = Infinity; for (let i = 0; i < runs; i++) { const t0 = performance.now(); fn(); best = Math.min(best, performance.now() - t0); } return best; };
+// Timing under load: each bound is a ratio to reference work timed in the same run (scripts/timing.ts), about 4× the
+// ratio measured on uni, so a busy machine passes and a 10× slower parser fails.
 
 // ── Adversarial: a long line of repeated refs must stay linear-ish ─────────
 {
   const big = "uni:A/B ".repeat(5000);
-  const ms = fastest(() => parseInline(big));
-  assert.ok(ms < 1500, `40k-char shorthand line took ${ms.toFixed(0)}ms`);
+  const x = timesReference(() => parseInline(big)); // about 4
+  assert.ok(x < 16, `40k-char shorthand line took ${x.toFixed(1)}× the reference work`);
 }
 
 // ── Adversarial: many unmatched `[[` must not rescan the whole message ─────
 {
   const big = "[[a ".repeat(16000); // 64 KiB, the relay's message cap
-  const ms = fastest(() => parseInline(big));
-  assert.ok(ms < 1500, `64k unmatched-wikilink line took ${ms.toFixed(0)}ms`);
+  const x = timesReference(() => parseInline(big)); // about 2.7
+  assert.ok(x < 11, `64k unmatched-wikilink line took ${x.toFixed(1)}× the reference work`);
 }
 // A real wikilink still parses after the bound.
 assert.equal((parseInline("see [[Projects/Priya/Phase 1 — work plan|the plan]] now").find((x) => x.t === "vaultlink") as any)?.ref.ref, "Projects/Priya/Phase 1 — work plan");
@@ -189,8 +190,9 @@ assert.equal((parseInline("see [[Projects/Priya/Phase 1 — work plan|the plan]]
 // ── Adversarial: recovery on a long whitespace run must not be quadratic ────
 {
   const { refCandidates } = await import("../src/vaultlinks.ts");
-  const ms = fastest(() => { refCandidates("Notes/First" + " ".repeat(64000) + "second third"); refCandidates("Notes/First" + " ".repeat(1000) + "second third"); });
-  assert.ok(ms < 200, `refCandidates on a 64k-space ref took ${ms.toFixed(0)}ms`);
+  const long = "Notes/First" + " ".repeat(64000) + "second third", short = "Notes/First" + " ".repeat(1000) + "second third";
+  const x = timesReference(() => { for (let i = 0; i < 2000; i++) { refCandidates(long); refCandidates(short); } }); // about 0.85
+  assert.ok(x < 3.5, `refCandidates on a 64k-space ref took ${x.toFixed(2)}× the reference work`);
   assert.deepEqual(refCandidates("Projects/Priya/Phase 1 — work plan then more"), ["Projects/Priya/Phase 1 — work plan then", "Projects/Priya/Phase 1 — work plan", "Projects/Priya/Phase 1 — work", "Projects/Priya/Phase 1 —", "Projects/Priya/Phase 1", "Projects/Priya/Phase"]);
 }
 

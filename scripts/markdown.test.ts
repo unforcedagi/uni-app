@@ -1,6 +1,7 @@
 // Run: node --experimental-strip-types scripts/markdown.test.ts (Node >= 22.6)
 import assert from "node:assert/strict";
 import { markdownToText, parseInline, parseMarkdown, safeHref } from "../src/markdown.ts";
+import { timesReference } from "./timing.ts";
 
 const t = (v: string) => ({ t: "text", v });
 
@@ -79,9 +80,11 @@ for (const s of [">".repeat(20000) + " x", "[".repeat(5000) + "a" + "](http://x)
   markdownToText(s);
 }
 {
-  const t0 = Date.now();
-  for (const s of ["*a ".repeat(20000), "_a ".repeat(20000), "~~a ".repeat(15000), "[a".repeat(20000)]) parseMarkdown(s);
-  assert.ok(Date.now() - t0 < 3000, `pathological emphasis took ${Date.now() - t0} ms`);
+  // A ratio to reference work timed in the same run (scripts/timing.ts), not wall time, so a busy machine passes;
+  // the bound is about 4× the ratio on uni, so a 10× slower parser fails.
+  const runs = ["*a ".repeat(20000), "_a ".repeat(20000), "~~a ".repeat(15000), "[a".repeat(20000)];
+  const x = timesReference(() => { for (const s of runs) parseMarkdown(s); }); // about 1.7
+  assert.ok(x < 7, `pathological emphasis took ${x.toFixed(1)}× the reference work`);
 }
 // Past the nesting cap content survives as text rather than vanishing.
 assert.ok(markdownToText(">".repeat(50) + " deep").includes("deep"));
