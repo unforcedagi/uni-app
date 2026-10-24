@@ -585,11 +585,25 @@ pub fn url_extension(url: &str) -> Option<&str> {
     .then_some(ext)
 }
 
+/// The longest saved name, in UTF-8 bytes. ext4 allows 255 bytes and eCryptfs
+/// 143; a long CJK or emoji name cut by characters went over (T-185). 120 leaves
+/// room for the " (12)" [`export_file`] adds to a name that is taken.
+pub const DOWNLOAD_NAME_BYTES: usize = 120;
+
+/// `s` cut to at most `max` UTF-8 bytes, never inside a character or after an emoji joiner.
+fn cap_bytes(s: &str, max: usize) -> &str {
+    if s.len() <= max {
+        return s;
+    }
+    let end = (0..=max).rev().find(|&i| s.is_char_boundary(i)).unwrap_or(0);
+    s[..end].trim_end_matches(['\u{200d}', '\u{fe0e}', '\u{fe0f}'])
+}
+
 /// T-174: the name an attachment is saved under where the user will find it
 /// (Downloads). The `imeta` filename without any folder part, characters file
-/// systems refuse, or leading/trailing dots and spaces, at most 120
-/// characters; when it has no extension (`notes`, `Meeting 10.18`), the
-/// URL's is added. Without a usable name: `<first 12 of the hash>.<ext>`.
+/// systems refuse, or leading/trailing dots and spaces, at most
+/// [`DOWNLOAD_NAME_BYTES`]; when it has no extension (`notes`, `Meeting 10.18`),
+/// the URL's is added. Without a usable name: `<first 12 of the hash>.<ext>`.
 pub fn download_name(filename: Option<&str>, url: &str, sha: &str) -> String {
     let ext = url_extension(url);
     let base = filename
@@ -612,12 +626,12 @@ pub fn download_name(filename: Option<&str>, url: &str, sha: &str) -> String {
     if let Some(ext) = ext.filter(|_| !has_ext) {
         name = format!("{name}.{ext}");
     }
-    if name.chars().count() > 120 {
+    if name.len() > DOWNLOAD_NAME_BYTES {
         // Keep the extension; shorten the stem.
         let (stem, ext) = name.rsplit_once('.').filter(|(_, e)| e.chars().count() <= 8).unwrap_or((&name, ""));
-        let keep = if ext.is_empty() { 120 } else { 120 - ext.chars().count() - 1 };
-        let stem: String = stem.chars().take(keep).collect();
-        name = if ext.is_empty() { stem } else { format!("{stem}.{ext}") };
+        let keep = if ext.is_empty() { DOWNLOAD_NAME_BYTES } else { DOWNLOAD_NAME_BYTES - ext.len() - 1 };
+        let stem = cap_bytes(stem, keep);
+        name = if ext.is_empty() { stem.to_string() } else { format!("{stem}.{ext}") };
     }
     name
 }
@@ -1648,6 +1662,23 @@ mod tests {
         let short = download_name(Some(&long), &url, sha);
         assert_eq!(short.chars().count(), 120);
         assert!(short.ends_with(".pdf"));
+        // T-185: the cap is in UTF-8 bytes, so a long CJK or emoji name still saves (ext4 allows 255 bytes).
+        for (title, unit) in [("長", 3), ("🌱", 4)] {
+            let long = format!("{}.pdf", title.repeat(200));
+            let short = download_name(Some(&long), &url, sha);
+            let (src, downloads) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+            std::fs::write(src.path().join("f"), b"x").unwrap();
+            let saved = export_file(&src.path().join("f"), downloads.path(), &short).unwrap();
+            assert_eq!(saved.file_name().unwrap().to_str(), Some(short.as_str()));
+            assert!(short.len() <= DOWNLOAD_NAME_BYTES, "{} bytes", short.len());
+            assert_eq!(short, format!("{}.pdf", title.repeat((DOWNLOAD_NAME_BYTES - 4) / unit)));
+        }
+        // No extension: the whole name is cut, never inside a character.
+        let bare = download_name(Some(&"é".repeat(200)), "https://relay.example/media/x", sha);
+        assert_eq!(bare, "é".repeat(DOWNLOAD_NAME_BYTES / 2));
+        // A cut that falls just after an emoji joiner drops the joiner too.
+        let family = format!("{}👩\u{200d}👩\u{200d}👧.pdf", "a".repeat(DOWNLOAD_NAME_BYTES - 4 - 7));
+        assert_eq!(download_name(Some(&family), &url, sha), format!("{}👩.pdf", "a".repeat(DOWNLOAD_NAME_BYTES - 4 - 7)));
         assert_eq!(url_extension(&url), Some("mp4"));
         assert_eq!(url_extension("https://relay.example/media/x.EXE"), None);
         assert_eq!(numbered("a.tar.gz", 2), "a.tar (2).gz");
