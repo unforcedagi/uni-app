@@ -1,6 +1,8 @@
 // T-204: a Parachute note downloaded as a .md file (unit-tested in
 // scripts/noteFile.test.ts; the Save itself is in src-tauri/src/files.rs).
 
+import type { NoteFormat } from "@openparachute/surface-render";
+
 /** Characters file systems refuse in a name (Windows' set covers Linux, macOS and Android). */
 const FORBIDDEN = /[/\\:*?"<>|]/g;
 const CONTROL = /[\u0000-\u001f\u007f-\u009f]/g;
@@ -43,6 +45,18 @@ export function downloadName(title: string | undefined, id: string): string {
 
 /** Only markdown notes download as .md (a note without an extension is markdown); others are not text for this. */
 export const isMarkdownNote = (extension: string | undefined) => ["md", "mdx", "markdown"].includes((extension ?? "md").replace(/^\./, "").toLowerCase());
+
+/**
+ * T-270: the renderer's format from the note's extension, so a dot in a folder name (`Projects/example.org/note`) is
+ * never read as one. An unknown or missing extension is left to surface-render, which decides from the path.
+ */
+export function noteFormat(extension: string | undefined): NoteFormat | undefined {
+  const ext = (extension ?? "").replace(/^\./, "").toLowerCase();
+  if (["md", "mdx", "markdown"].includes(ext)) return "markdown";
+  if (ext === "csv" || ext === "json") return ext;
+  if (ext === "yaml" || ext === "yml") return "yaml";
+  return undefined;
+}
 
 export type NoteDates = { path?: string | null; createdAt?: string | null; updatedAt?: string | null };
 
