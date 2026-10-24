@@ -404,7 +404,7 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
       setNotes((cur) => {
         const next = { ...cur };
         for (const id of fresh) delete next[`${accountId}/${id}`];
-        for (const id of fresh) if (Object.hasOwn(got, id) && got[id]) next[`${accountId}/${id}`] = got[id];
+        for (const id of fresh) if (Object.prototype.hasOwnProperty.call(got, id) && got[id]) next[`${accountId}/${id}`] = got[id];
         return next;
       });
     }
