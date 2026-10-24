@@ -174,6 +174,9 @@ struct RoomView {
     mentions: bool,
     /// Messages from others since the room was last viewed.
     unread: i64,
+    /// A direct message, a room (`false`), or not known yet (`null`): the
+    /// Journal sends entries only to rooms known to be rooms.
+    dm: Option<bool>,
 }
 
 #[derive(Serialize)]
@@ -345,6 +348,7 @@ async fn get_rooms(app: tauri::AppHandle) -> Result<Vec<RoomView>, String> {
                 last_ts: r.last_ts,
                 mentions: r.mentions,
                 unread: r.unread,
+                dm: r.dm,
             })
             .collect())
     })
@@ -613,7 +617,9 @@ fn live_payload(ev: &LiveEvent) -> Option<LivePayload> {
             None,
             None,
         ),
-        LiveEvent::ChannelAdded { channel } | LiveEvent::ChannelRemoved { channel } => {
+        LiveEvent::ChannelAdded { channel }
+        | LiveEvent::ChannelRemoved { channel }
+        | LiveEvent::ChannelMeta { channel } => {
             p("rooms", Some(channel.to_string()), None, None)
         }
         LiveEvent::Typing {

@@ -115,6 +115,9 @@ pub struct Room {
     pub mentions: bool,
     /// Visible messages from others newer than the local read marker.
     pub unread: i64,
+    /// A direct message (`Some(true)`), a room (`Some(false)`), or not
+    /// known yet (`None`).
+    pub dm: Option<bool>,
 }
 
 /// Cached kind-0 profile.
@@ -189,7 +192,8 @@ CREATE TABLE IF NOT EXISTS channels (
     name        TEXT,
     description TEXT,
     archived    INTEGER NOT NULL DEFAULT 0,
-    updated_at  INTEGER NOT NULL
+    updated_at  INTEGER NOT NULL,
+    dm          INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS sync_state (
@@ -409,6 +413,16 @@ impl Store {
                 "ALTER TABLE read_state ADD COLUMN publishable INTEGER NOT NULL DEFAULT 0",
             )?;
         }
+        // T-263: a direct message is marked, so the Journal offers only rooms. NULL = not known yet (every row cached before the column
+        // existed, DMs included), and the Journal offers only rows known to be rooms until discovery fills it in.
+        let has_dm: bool = conn.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('channels') WHERE name='dm'",
+            [],
+            |r| r.get::<_, i64>(0),
+        )? > 0;
+        if !has_dm {
+            conn.execute_batch("ALTER TABLE channels ADD COLUMN dm INTEGER")?;
+        }
         crate::journal::init_schema(&conn)?;
         Ok(Self { conn })
     }
@@ -557,7 +571,7 @@ impl Store {
         Ok(())
     }
 
-    /// Upsert a discovered channel.
+    /// Upsert a discovered channel. Its kind (DM or room) stays as stored.
     pub fn upsert_channel(
         &self,
         id: &str,
@@ -566,13 +580,29 @@ impl Store {
         archived: bool,
         now: i64,
     ) -> Result<()> {
+        self.upsert_channel_kind(id, name, description, archived, None, now)
+    }
+
+    /// Upsert a discovered channel; `dm: Some(_)` sets whether it is a
+    /// direct message, `None` keeps what is stored (a new row's kind is
+    /// unknown).
+    pub fn upsert_channel_kind(
+        &self,
+        id: &str,
+        name: Option<&str>,
+        description: Option<&str>,
+        archived: bool,
+        dm: Option<bool>,
+        now: i64,
+    ) -> Result<()> {
         self.conn.execute(
-            "INSERT INTO channels (id, name, description, archived, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5)
+            "INSERT INTO channels (id, name, description, archived, dm, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
              ON CONFLICT(id) DO UPDATE SET
                name = excluded.name, description = excluded.description,
-               archived = excluded.archived, updated_at = excluded.updated_at",
-            params![id, name, description, archived as i64, now],
+               archived = excluded.archived, dm = COALESCE(?5, channels.dm),
+               updated_at = excluded.updated_at",
+            params![id, name, description, archived as i64, dm.map(|d| d as i64), now],
         )?;
         Ok(())
     }
@@ -1012,7 +1042,8 @@ impl Store {
                 EXISTS(SELECT 1 FROM visible_items v WHERE v.source='buzz' AND v.channel=c.id AND v.mentions_me=1
                        AND v.ts > rs.read_ts AND v.author IS NOT ?1),
                 (SELECT COUNT(*) FROM visible_items v WHERE v.source='buzz' AND v.channel=c.id
-                       AND v.ts > rs.read_ts AND v.author IS NOT ?1)
+                       AND v.ts > rs.read_ts AND v.author IS NOT ?1),
+                c.dm
              FROM channels c LEFT JOIN read_state rs ON rs.channel=c.id
              WHERE archived=0
              ORDER BY CASE WHEN lower(c.name)='uni' THEN 0 ELSE 1 END,
@@ -1027,6 +1058,7 @@ impl Store {
                     last_ts: r.get(3)?,
                     mentions: r.get::<_, Option<i64>>(4)?.unwrap_or(0) != 0,
                     unread: r.get::<_, Option<i64>>(5)?.unwrap_or(0),
+                    dm: r.get::<_, Option<i64>>(6)?.map(|v| v != 0),
                 })
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -1350,6 +1382,38 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM channels", [], |r| r.get(0))
             .unwrap();
         assert_eq!(rows, 1);
+    }
+
+    /// T-263: a channel's kind is kept when a later write doesn't know it (a member-added event), a new row's kind is unknown, and
+    /// a database from before the `dm` column gains it on open with every cached row unknown: an old DM is never taken for a room.
+    #[test]
+    fn a_channel_keeps_its_kind_and_an_old_database_gains_it_unknown() {
+        let s = Store::open_in_memory().unwrap();
+        s.upsert_channel_kind("d1", Some("DM"), None, false, Some(true), 1).unwrap();
+        s.upsert_channel_kind("r1", Some("garden"), None, false, Some(false), 1).unwrap();
+        s.upsert_channel("n1", None, None, false, 1).unwrap();
+        s.upsert_channel("d1", None, None, false, 2).unwrap();
+        let dm = |s: &Store, id: &str| s.rooms().unwrap().into_iter().find(|r| r.id == id).unwrap().dm;
+        assert_eq!(dm(&s, "d1"), Some(true));
+        assert_eq!(dm(&s, "r1"), Some(false));
+        assert_eq!(dm(&s, "n1"), None);
+        s.upsert_channel_kind("d1", Some("DM"), None, false, Some(false), 3).unwrap();
+        assert_eq!(dm(&s, "d1"), Some(false));
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("old.db");
+        rusqlite::Connection::open(&path)
+            .unwrap()
+            .execute_batch(
+                "CREATE TABLE channels (id TEXT PRIMARY KEY, name TEXT, description TEXT, archived INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL);
+                 INSERT INTO channels (id, name, updated_at) VALUES ('d1', 'DM', 1), ('r1', 'garden', 1);",
+            )
+            .unwrap();
+        let old = Store::open(&path).unwrap();
+        assert_eq!(dm(&old, "d1"), None);
+        assert_eq!(dm(&old, "r1"), None);
+        old.upsert_channel_kind("d1", Some("DM"), None, false, Some(true), 2).unwrap();
+        assert_eq!(dm(&old, "d1"), Some(true));
     }
 
     #[test]

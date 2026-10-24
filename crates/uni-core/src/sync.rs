@@ -282,11 +282,12 @@ pub async fn sync_once(
     let channels = discovery.channels;
     let now = nostr::Timestamp::now().as_secs() as i64;
     for ci in channels.values() {
-        store.upsert_channel(
+        store.upsert_channel_kind(
             &ci.id.to_string(),
             ci.name.as_deref(),
             ci.description.as_deref(),
             ci.archived,
+            ci.dm,
             now,
         )?;
         report.channels.insert(ci.id.to_string(), ci.name.clone());
