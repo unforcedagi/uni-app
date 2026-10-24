@@ -1,4 +1,6 @@
 //! Shared Tauri conversation bridge. Signing and relay I/O remain in Rust.
+// T-278: matrix-sdk's futures nest deeper than the default limit allows when the Messages commands are built in.
+#![cfg_attr(feature = "messages", recursion_limit = "256")]
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tauri::{Emitter, Manager};
@@ -2678,6 +2680,8 @@ mod media_loopback;
 mod media_registry;
 mod pair_source;
 mod secure_store;
+#[cfg(feature = "messages")]
+mod messages;
 
 
 /// wry registers a `webkit.messageHandlers.ipc` script message handler in the default script world, which every
@@ -2754,6 +2758,8 @@ pub fn run() {
             }
             #[cfg(mobile)]
             mobile::setup(_app);
+            #[cfg(feature = "messages")]
+            messages::setup(_app)?;
             #[cfg(all(debug_assertions, target_os = "linux"))]
             t76::replace_window(_app)?;
             #[cfg(target_os = "linux")]
@@ -2872,7 +2878,27 @@ pub fn run() {
             app_version,
             vault_create,
             vault_save,
-            android_update_manifest
+            android_update_manifest,
+            #[cfg(feature = "messages")]
+            messages::messages_status,
+            #[cfg(feature = "messages")]
+            messages::messages_sign_in,
+            #[cfg(feature = "messages")]
+            messages::messages_sign_out,
+            #[cfg(feature = "messages")]
+            messages::messages_rooms,
+            #[cfg(feature = "messages")]
+            messages::messages_open,
+            #[cfg(feature = "messages")]
+            messages::messages_close,
+            #[cfg(feature = "messages")]
+            messages::messages_send,
+            #[cfg(feature = "messages")]
+            messages::messages_join,
+            #[cfg(feature = "messages")]
+            messages::messages_older,
+            #[cfg(feature = "messages")]
+            messages::messages_read
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

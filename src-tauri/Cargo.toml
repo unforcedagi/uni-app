@@ -17,6 +17,7 @@ tauri-build = { version = "2.0", features = [] }
 
 [dependencies]
 uni-core = { workspace = true }
+uni-messages = { path = "../crates/uni-messages", optional = true }
 tauri = { version = "2.4", features = [] }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -59,3 +60,6 @@ objc2 = "0.6"
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]
+# T-278 prototype: the Messages surface (Matrix, crates/uni-messages). Off by default, so nothing ships with it and the
+# Mac build's toolchain (1.89) never compiles matrix-sdk (it needs 1.93).
+messages = ["dep:uni-messages"]
