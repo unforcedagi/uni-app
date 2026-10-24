@@ -5,7 +5,7 @@ const DAYLIGHT_UA = 'Mozilla/5.0 (Linux; Android 13; DC-1 Build/TP1A; wv) AppleW
 export default defineConfig({
   outputDir: 'test-results/composer',
   testDir: './scripts/browser',
-  testIgnore: ['vault-sidebar.spec.ts', 'rail.spec.ts', 'screens.spec.ts', 'areas.spec.ts', 'interface.spec.ts', 'areaRoom.spec.ts', 'lifeos.spec.ts', 'tasks.spec.ts', 'lifeosVault.spec.ts', 'secret.spec.ts', 'chatLive.spec.ts', 'chatCraft.spec.ts', 'sealedCards.spec.ts', 'sealedNeedsYou.spec.ts', 'publishedMedia.spec.ts'], // dedicated sidebar, rail, chat-craft, card and published-media configs
+  testIgnore: ['vault-sidebar.spec.ts', 'rail.spec.ts', 'screens.spec.ts', 'areas.spec.ts', 'interface.spec.ts', 'areaRoom.spec.ts', 'lifeos.spec.ts', 'tasks.spec.ts', 'lifeosVault.spec.ts', 'secret.spec.ts', 'chatLive.spec.ts', 'chatCraft.spec.ts', 'sealedCards.spec.ts', 'sealedNeedsYou.spec.ts', 'publishedMedia.spec.ts', 'messages.spec.ts'], // dedicated sidebar, rail, chat-craft, card, published-media and messages configs
   reporter: 'list',
   use: { baseURL: `http://127.0.0.1:${port}`, trace: 'retain-on-failure', launchOptions: { args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] } },
   projects: [

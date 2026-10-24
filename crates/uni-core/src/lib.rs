@@ -31,6 +31,7 @@ pub mod identity;
 pub mod journal;
 pub mod live;
 pub mod mail;
+pub mod matrix_door;
 pub mod media;
 pub mod pairing;
 pub mod pairing_source;

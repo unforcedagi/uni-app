@@ -52,7 +52,8 @@ rm -rf "$STAGE"; mkdir -p "$STAGE"
 (
   source "$HOME/.config/uni/android.env"
   export PATH="$HOME/.cargo/bin:$PATH"
-  pnpm tauri android build --debug --apk --target aarch64 \
+  # Messages (T-278/T-282) ships on Android only: it needs Rust 1.93 (this box has newer); the Mac runner stays on 1.89.
+  pnpm tauri android build --debug --apk --target aarch64 --features messages \
     --config "{\"version\":\"$VERSION\",\"bundle\":{\"android\":{\"versionCode\":$CODE}}}" >"$STAGE/android.log" 2>&1
 ) & ANDROID_PID=$!
 MAC_RESULT=0; ANDROID_RESULT=0

@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/uni-core", "crates/uni-core-cli", "src-tauri"]
+members = ["crates/uni-core", "crates/uni-core-cli", "crates/uni-messages", "src-tauri"]
 resolver = "2"
 
 [workspace.package]
@@ -39,3 +39,8 @@ uni-core = { path = "crates/uni-core" }
 
 # buzz pins a fork of aws-creds for its relay; path-depending on buzz-sdk /
 # buzz-ws-client does not pull it in, so no patch section is needed here.
+
+# The Android release is a debug build (scripts/publish.sh). With full debug info for every dependency, Messages
+# (matrix-sdk) made the APK's Rust library about a gigabyte. Dependencies carry none; our own crates keep theirs.
+[profile.dev.package."*"]
+debug = false
