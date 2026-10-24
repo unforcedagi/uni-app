@@ -1,7 +1,7 @@
 // T-204: a Parachute note downloaded as a .md file (unit-tested in
 // scripts/noteFile.test.ts; the Save itself is in src-tauri/src/files.rs).
 
-import type { NoteFormat } from "@openparachute/surface-render";
+import { CODE_EXTENSIONS, type NoteFormat } from "@openparachute/surface-render";
 
 /** Characters file systems refuse in a name (Windows' set covers Linux, macOS and Android). */
 const FORBIDDEN = /[/\\:*?"<>|]/g;
@@ -47,15 +47,18 @@ export function downloadName(title: string | undefined, id: string): string {
 export const isMarkdownNote = (extension: string | undefined) => ["md", "mdx", "markdown"].includes((extension ?? "md").replace(/^\./, "").toLowerCase());
 
 /**
- * T-270: the renderer's format from the note's extension, so a dot in a folder name (`Projects/example.org/note`) is
- * never read as one. An unknown or missing extension is left to surface-render, which decides from the path.
+ * T-270: how a note renders, from the note's own extension, so a dot in a folder name (`Projects/example.org/note`) is
+ * never read as one. A note without an extension is markdown (as `isMarkdownNote` has it); a code extension carries its
+ * highlight language, which surface-render would otherwise read from the path. An unknown extension is left to
+ * surface-render.
  */
-export function noteFormat(extension: string | undefined): NoteFormat | undefined {
+export function noteRender(extension: string | undefined): { format?: NoteFormat; language?: string } {
   const ext = (extension ?? "").replace(/^\./, "").toLowerCase();
-  if (["md", "mdx", "markdown"].includes(ext)) return "markdown";
-  if (ext === "csv" || ext === "json") return ext;
-  if (ext === "yaml" || ext === "yml") return "yaml";
-  return undefined;
+  if (!ext || ["md", "mdx", "markdown"].includes(ext)) return { format: "markdown" };
+  if (ext === "csv" || ext === "json") return { format: ext };
+  if (ext === "yaml" || ext === "yml") return { format: "yaml" };
+  const language = CODE_EXTENSIONS[ext];
+  return language ? { format: "code", language } : {};
 }
 
 export type NoteDates = { path?: string | null; createdAt?: string | null; updatedAt?: string | null };

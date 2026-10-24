@@ -1,6 +1,6 @@
 // Run: node --experimental-strip-types scripts/noteFile.test.ts (Node >= 22.6)
 import assert from "node:assert/strict";
-import { downloadName, isMarkdownNote, markdownFile, MAX_STEM_BYTES } from "../src/noteFile.ts";
+import { downloadName, isMarkdownNote, markdownFile, MAX_STEM_BYTES, noteRender } from "../src/noteFile.ts";
 
 const bytes = (s: string) => new TextEncoder().encode(s).length;
 
@@ -48,3 +48,17 @@ assert.ok(isMarkdownNote(undefined) && isMarkdownNote("md") && isMarkdownNote(".
 assert.ok(!isMarkdownNote("canvas") && !isMarkdownNote("pdf") && !isMarkdownNote("json"));
 
 console.log("noteFile tests passed");
+
+// T-270: a note renders by its own extension, never by a dot in its folder. No extension is markdown; a code extension
+// carries its language; an extension the app doesn't know is left to surface-render.
+assert.deepEqual(noteRender(undefined), { format: "markdown" });
+assert.deepEqual(noteRender(""), { format: "markdown" });
+for (const ext of ["md", "MD", ".mdx", "markdown"]) assert.deepEqual(noteRender(ext), { format: "markdown" });
+assert.deepEqual(noteRender("csv"), { format: "csv" });
+assert.deepEqual(noteRender("json"), { format: "json" });
+assert.deepEqual(noteRender("yml"), { format: "yaml" });
+assert.deepEqual(noteRender("yaml"), { format: "yaml" });
+assert.deepEqual(noteRender("ts"), { format: "code", language: "typescript" });
+assert.deepEqual(noteRender(".PY"), { format: "code", language: "python" });
+assert.deepEqual(noteRender("xyz"), {});
+console.log("noteRender ok");

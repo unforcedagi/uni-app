@@ -4,13 +4,13 @@ import { editableExtension, beginEdit, isDirty } from "./noteEdit";
 import { backlinks } from "./backlinks";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { NoteRenderer, type LinkComponentProps, type NoteRendererProps } from "@openparachute/surface-render";
+import { CodeRenderer, NoteRenderer, type CodeOverrideProps, type LinkComponentProps, type NoteRendererProps } from "@openparachute/surface-render";
 import type { NoteHit } from "./Search";
 import type { Note } from "@openparachute/surface-client";
 import { safeHref } from "./markdown";
 import { copyText } from "./clipboard";
 import NoteDownload from "./NoteDownload";
-import { isMarkdownNote, noteFormat } from "./noteFile";
+import { isMarkdownNote, noteRender } from "./noteFile";
 import { bodyWithoutTitle, noteMeta, noteTitle } from "./noteText";
 import { inline, PLAYER_TAG, publishedFromNote, rehypePublished } from "./publishedMedia";
 import { PublishedInNote, PublishedMedia, usePublishOrigins } from "./PublishedPlayer";
@@ -138,6 +138,9 @@ export default function NoteView({ target, hub, onOpen, onBack, backLabel, onTit
   const own = useMemo(() => { const p = note ? publishedFromNote(note, origins) : null; return p && inline(p.kind) ? p : null; }, [note, origins]);
   const rehype = useMemo(() => [[rehypePublished, { origins, shown: own ? [own.url] : [] }]] as NoteRendererProps["rehypePlugins"], [origins, own]);
   const inbound = backlinks(note?.id ?? "", note?.links);
+  // T-270: render by the note's extension; a code note keeps the language its extension names
+  const render = useMemo(() => noteRender(note?.extension), [note?.extension]);
+  const overrides = useMemo(() => render.language ? { code: (p: CodeOverrideProps) => <CodeRenderer {...p} language={render.language!} /> } : undefined, [render.language]);
 
   return <div className="note-view">
     <header className="note-bar">
@@ -176,7 +179,7 @@ export default function NoteView({ target, hub, onOpen, onBack, backLabel, onTit
         </div>}
         {shown && <>
           {own && <PublishedMedia m={own} />}
-          <NoteRenderer note={shown} format={noteFormat(shown.extension)} className="md note-body" resolve={resolve} linkComponent={Link} rehypePlugins={rehype} components={MEDIA_COMPONENTS} />
+          <NoteRenderer note={shown} format={render.format} overrides={overrides} className="md note-body" resolve={resolve} linkComponent={Link} rehypePlugins={rehype} components={MEDIA_COMPONENTS} />
           {tools && <details className="note-backlinks"><summary>Linked from ({inbound.length})</summary>
             {inbound.map((link) => <button className="vault-note" key={JSON.stringify([link.id, link.relationship])} onClick={() => onOpen({ hub: null, vault: data!.vault, ref: link.id }, null)}>{link.path} <small>· {link.relationship}</small></button>)}
           </details>}

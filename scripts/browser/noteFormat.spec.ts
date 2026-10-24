@@ -2,7 +2,7 @@
 // by it, so `Projects/example.org/Launch plan` is markdown, not plain text.
 import { test, expect, type Page } from '@playwright/test';
 
-type Fake = { path: string; extension: string; content: string };
+type Fake = { path: string; extension?: string; content: string };
 
 async function boot(page: Page, note: Fake) {
   await page.addInitScript(({ note }) => {
@@ -45,4 +45,15 @@ test('a csv note in a folder with a dot in its name renders as a table', async (
   await boot(page, { path: 'Projects/example.org/budget', extension: 'csv', content: 'item,cost\nchairs,40' });
   await expect(page.locator('.note-body table')).toBeVisible();
   await expect(page.locator('.note-body td').first()).toHaveText('chairs');
+});
+
+test('a note with no extension in a folder with a dot in its name is markdown', async ({ page }) => {
+  await boot(page, { path: 'Projects/example.org/Launch plan', content: '# Launch plan\n\n## Goals\n\n- First step' });
+  await expect(page.locator('.note-body h2')).toHaveText('Goals');
+  await expect(page.locator('.note-body')).not.toContainText('## Goals');
+});
+
+test('a code note in a folder with a dot in its name is highlighted by its extension', async ({ page }) => {
+  await boot(page, { path: 'Projects/example.org/build', extension: 'ts', content: 'const answer: number = 42;' });
+  await expect(page.locator('.note-body pre code.language-typescript')).toHaveText('const answer: number = 42;');
 });
