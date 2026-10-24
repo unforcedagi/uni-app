@@ -24,9 +24,9 @@ cleanup_generated() {
 }
 trap cleanup_generated EXIT
 REPO_SLUG="unforcedagi/uni-app"
-# Legacy bridge: 0.1.2-0.1.5 installs poll the tailnet; keep those pointers current.
+# The tailnet download page (index.html here, shared by `tailscale serve`) offers the newest APK.
 SERVE="$HOME/.local/share/uni/apk"
-LEGACY_BASE="https://uni-1.taildf9ce2.ts.net:8443" # public-ok: the deployed legacy host (T-190, see CLAUDE.md)
+source scripts/release-check.sh
 [[ -z $(git status --porcelain) ]] || { echo 'Commit/clean changes before publishing' >&2; exit 1; }
 git fetch --quiet origin main --tags
 SHA="$(git rev-parse HEAD)"
@@ -41,6 +41,7 @@ python3 scripts/check-case-collisions.py
 python3 scripts/test_case_collisions.py
 python3 scripts/test_check_public.py
 python3 scripts/check-public.py
+python3 scripts/test_release_check.py
 pnpm typecheck
 pnpm test
 cargo test --workspace
@@ -49,6 +50,9 @@ STAGE="$TMPDIR/uni-release-$VERSION"
 rm -rf "$STAGE"; mkdir -p "$STAGE"
 # Build Android locally while the GitHub-hosted Mac runner builds the exact main commit.
 ( bash scripts/build-mac-hosted.sh "$SHA" "$VERSION" "$STAGE" >"$STAGE/mac.log" 2>&1 ) & MAC_PID=$!
+# T-207: Gradle updates the APK in place and can append a changed native library, leaving the old copy as dead space
+# (0.1.62 was 683 MB, 337 MB of it unused). A fresh APK every time.
+rm -rf src-tauri/gen/android/app/build/outputs/apk
 (
   source "$HOME/.config/uni/android.env"
   export PATH="$HOME/.cargo/bin:$PATH"
@@ -83,15 +87,18 @@ gh release create "$TAG" --repo "$REPO_SLUG" --target "$SHA" --latest \
   "$STAGE/Uni-mac-arm64.zip" "$STAGE/Uni.app.tar.gz" "$STAGE/Uni.app.tar.gz.sig" \
   "$STAGE/uni.apk" "$STAGE/latest.json" "$STAGE/android.json"
 git fetch --quiet origin --tags
-LIVE="$(curl -fsSL "https://github.com/$REPO_SLUG/releases/latest/download/latest.json" | python3 -c 'import json,sys;print(json.load(sys.stdin)["version"])')"
-[[ $LIVE == "$VERSION" ]] || { echo "GitHub latest is $LIVE, expected $VERSION" >&2; exit 1; }
-echo "GitHub releases/latest now serves $VERSION" >&2
-# Legacy tailnet bridge (atomic swaps). Remove once no device runs <= 0.1.5.
-mkdir -p "$SERVE/mac" "$SERVE/android"
-cp "$STAGE/uni.apk" "$SERVE/uni.apk.tmp" && mv "$SERVE/uni.apk.tmp" "$SERVE/uni.apk"
-cp "$STAGE/latest.json" "$SERVE/mac/latest.json.tmp" && mv "$SERVE/mac/latest.json.tmp" "$SERVE/mac/latest.json"
-printf '{"version": "%s", "url": "%s/uni.apk"}\n' "$VERSION" "$LEGACY_BASE" >"$SERVE/android/latest.json.tmp"
-mv "$SERVE/android/latest.json.tmp" "$SERVE/android/latest.json"
+# Read the release back by its tag, then at the address installed apps poll, which GitHub caches for a while. Neither
+# stops the run here: the tag exists now, so a later tick would never come back for the device installs below.
+RELEASE_READABLE=1
+if ! retry 6 5 release_serves "$REPO_SLUG" "$TAG" "$VERSION"; then
+  RELEASE_READABLE=0; echo "Release $TAG does not serve latest.json for $VERSION" >&2
+elif retry 7 10 release_is_latest "$REPO_SLUG" "$VERSION"; then echo "GitHub releases/latest now serves $VERSION" >&2
+else echo "Warning: GitHub releases/latest does not serve $VERSION yet; installed apps update once it does" >&2; fi
+# The tailnet download page (atomic swaps). It is a convenience: a failed copy never fails a published release.
+{ mkdir -p "$SERVE/android" &&
+  cp "$STAGE/uni.apk" "$SERVE/uni.apk.tmp" && mv "$SERVE/uni.apk.tmp" "$SERVE/uni.apk" &&
+  printf '{"version": "%s", "url": "uni.apk"}\n' "$VERSION" >"$SERVE/android/latest.json.tmp" &&
+  mv "$SERVE/android/latest.json.tmp" "$SERVE/android/latest.json"; } || echo "Warning: tailnet download page not updated ($SERVE)" >&2
 # Zero-touch install on each paired device (Daylight, Pixel 7) when wireless ADB is up
 # and Uni is not in the foreground. Never uninstalls: that would lose the device identity.
 while read -r NAME SERIAL; do
@@ -101,6 +108,7 @@ while read -r NAME SERIAL; do
   if timeout 900 adb -s "$SERIAL" install -r "$STAGE/uni.apk" </dev/null; then echo "$NAME: upgraded to $VERSION"
   else echo "$NAME: install failed; never uninstall, inspect signature" >&2; fi
 done < <(python3 scripts/connect-devices.py || true)
+((RELEASE_READABLE)) || { echo "Published $TAG, but it could not be read back by its tag: check the release" >&2; exit 1; }
 echo "Published $TAG ($SHA): https://github.com/$REPO_SLUG/releases/tag/$TAG"
 }
 main "$@"

@@ -7,8 +7,9 @@
 - If `origin/main` has no `uni-v*` tag, the watcher checks it out and runs `scripts/publish.sh`:
   1. Tests: case-collision check, `pnpm typecheck`, `pnpm test`, `cargo test --workspace`.
   2. Version: `scripts/next-version.py` gives one patch above the newest `uni-v*` tag, or `package.json`'s version if that is higher (edit it to jump minor/major). Android versionCode = `1000000 + major*100000 + minor*1000 + patch`. **The pipeline never commits to the repo**; the version is stamped at build time with `tauri --config`.
-  3. Builds in parallel: the Mac app on GitHub-hosted `macos-15` (arm64) from the exact `main` SHA and the Android APK on uni-1. The Mac workflow checks out Buzz at pinned `5669fdc`; no Mac mini connection is used.
+  3. Builds in parallel: the Mac app on GitHub-hosted `macos-15` (arm64) from the exact `main` SHA and the Android APK on uni-1. The APK is packaged fresh each time (`outputs/apk` is cleared first), so no dead space from an earlier build is shipped. The Mac workflow checks out Buzz at pinned `5669fdc`; no Mac mini connection is used.
   4. Publishes GitHub release `uni-vX.Y.Z` (marked latest) with `Uni-mac-arm64.zip`, `Uni.app.tar.gz` + `.sig`, `uni.apk`, `latest.json` (Mac updater manifest) and `android.json`. The tag is created last, so a failed build leaves nothing behind and the next tick retries.
+     It then reads the release back by its tag, and at `releases/latest/download/latest.json` (where installed apps look, cached by GitHub for a while), retrying both with backoff (`scripts/release-check.sh`). Neither skips the device step: a late "latest" only warns, and a release that can't be read by its tag fails the run after the devices.
   5. If the wireless ADB is up on a paired device (Daylight, Pixel 7) and Uni isn't in the foreground, installs the APK directly (never uninstalls).
 - Logs: `journalctl --user -u uni-updater.service`; build logs under `~/.cache/uni-release/uni-release-<version>/`.
 - Run by hand: `bash scripts/watch-main.sh`. Pause: `systemctl --user stop uni-updater.timer`.
@@ -16,7 +17,7 @@
 ## Devices
 - **Mac:** first install from the latest release's `Uni-mac-arm64.zip` (unzip, move to Applications, allow once in Privacy & Security; it is signed with a stable self-signed certificate, not notarized). The app checks `https://github.com/unforcedagi/uni-app/releases/latest/download/latest.json` at launch and every 6 hours, downloads and verifies the signed update, and offers **Restart**.
 - **Daylight:** the app checks `.../releases/latest/download/android.json` and shows **Download APK** for newer versions (Android requires one confirmation per install), unless the ADB path above already installed it. The APK is debug-signed with uni-1's `~/.android/debug.keystore`; keep that key or updates stop installing over the existing app.
-- Builds 0.1.2-0.1.5 poll the tailnet (the hub host on port 8443, `LEGACY_BASE` in `publish.sh`); `publish.sh` keeps those pointers current until those builds are gone.
+- **Tailnet download page:** `publish.sh` copies the APK to `~/.local/share/uni/apk` (shared on the tailnet by `tailscale serve`); a failed copy only warns. Builds 0.1.2-0.1.5 polled a host that is gone, so they no longer get pointers.
 
 Release builds run `scripts/check-release-dist.sh` as the Tauri `beforeBuildCommand`: it deletes `dist/`, builds with `UNI_T76` unset and fails if `__T76_MOCK` is in `dist/assets`.
 
