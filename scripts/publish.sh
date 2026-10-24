@@ -56,7 +56,7 @@ rm -rf src-tauri/gen/android/app/build/outputs/apk
 (
   source "$HOME/.config/uni/android.env"
   export PATH="$HOME/.cargo/bin:$PATH"
-  # Messages (T-278/T-282) ships on Android only: it needs Rust 1.93 (this box has newer); the Mac runner stays on 1.89.
+  # Messages needs Rust 1.93+; the Mac runner is pinned to 1.93.0 and builds it too.
   pnpm tauri android build --debug --apk --target aarch64 --features messages \
     --config "{\"version\":\"$VERSION\",\"bundle\":{\"android\":{\"versionCode\":$CODE}}}" >"$STAGE/android.log" 2>&1
 ) & ANDROID_PID=$!

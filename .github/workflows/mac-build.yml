@@ -65,9 +65,9 @@ jobs:
           node-version: '22'
           cache: pnpm
           cache-dependency-path: uni-app/pnpm-lock.yaml
-      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master, pinned; toolchain 1.89.0 below
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master, pinned; toolchain 1.93.0 below
         with:
-          toolchain: '1.89.0'
+          toolchain: '1.93.0'
           targets: aarch64-apple-darwin
       - name: Install frontend dependencies
         working-directory: uni-app
@@ -103,7 +103,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
         run: |
           set -euo pipefail
-          pnpm tauri build --bundles app --config "{\"version\":\"$VERSION\",\"bundle\":{\"macOS\":{\"signingIdentity\":\"$SIGN_ID\"}}}"
+          pnpm tauri build --bundles app --features messages --config "{\"version\":\"$VERSION\",\"bundle\":{\"macOS\":{\"signingIdentity\":\"$SIGN_ID\"}}}"
           app=target/release/bundle/macos/Uni.app
           [[ $(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist") == "$VERSION" ]]
           codesign --verify --deep --strict "$app"
