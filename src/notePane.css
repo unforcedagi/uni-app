@@ -12,9 +12,19 @@
 
 /* A, wide screens: a column right of the chat. The shell is a row: rail, conversation, note. */
 .note-pane-beside { position: relative; flex: none; align-self: stretch; max-width: calc(100vw - 520px); border-left: 1px solid var(--line-strong); padding-top: env(safe-area-inset-top); }
-.note-pane-handle { position: absolute; z-index: 2; left: -9px; top: 0; bottom: 0; width: 18px; display: flex; align-items: center; justify-content: center; touch-action: none; cursor: col-resize; }
-.note-pane-handle span { display: block; width: 4px; height: 48px; background: var(--line-strong); border-radius: 999px; }
-.note-pane-handle:focus-visible span, .note-pane-handle:hover span { background: var(--accent); }
+
+/* T-273: the handle that resizes either split (SplitHandle): a grip on the pane's edge toward the chat. Wide enough for a finger or a pen. */
+.split-handle { display: flex; align-items: center; justify-content: center; touch-action: none; user-select: none; -webkit-user-select: none; }
+.split-handle span { display: block; background: var(--line-strong); border-radius: 999px; }
+.split-handle:focus-visible { outline: none; }
+.split-handle:focus-visible span, .split-handle:hover span, .resizing .split-handle span { background: var(--accent); }
+.split-handle-x { position: absolute; z-index: 2; left: -11px; top: 0; bottom: 0; width: 22px; cursor: col-resize; }
+.split-handle-x span { width: 4px; height: 48px; }
+.split-handle-y { flex: none; height: 26px; margin-bottom: -6px; cursor: row-resize; }
+.split-handle-y span { width: 56px; height: 5px; }
+.split-handle-y:focus-visible span { outline: 2px solid var(--accent); outline-offset: 3px; }
+/* while the handle is held, the text under the pointer is not selected */
+.note-pane.resizing { user-select: none; -webkit-user-select: none; }
 
 /* B, narrow screens and Android: over the message list, ending at the composer. */
 .note-pane-sheet { position: fixed; border: 2px solid var(--line-strong); border-bottom: 0; border-radius: 14px 14px 0 0; box-shadow: 0 -10px 28px -16px rgba(0, 0, 0, .35); overflow: hidden; }

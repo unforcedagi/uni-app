@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import NoteView from "./NoteView";
+import SplitHandle from "./SplitHandle";
 import "./notePane.css";
 import type { VaultRef } from "./vaultlinks";
 import { noteLink, quoteBlock } from "./noteQuote";
@@ -9,9 +10,10 @@ export const BESIDE_MIN = 900;
 const isAndroid = () => /Android/i.test(navigator.userAgent);
 
 export type PaneShape = "beside" | "sheet";
-/** Beside the chat on a wide screen; a sheet over the chat on a narrow one, and always on Android (the Daylight too, whatever its width). */
+/** Beside the chat on a wide screen; a sheet over the chat on a narrow one. T-273: on Android only when it is on its side too (the Daylight
+ *  upright keeps the sheet, whatever its width). */
 export function usePaneShape(): PaneShape {
-  const query = `(min-width: ${BESIDE_MIN}px)`;
+  const query = `(min-width: ${BESIDE_MIN}px)${isAndroid() ? " and (orientation: landscape)" : ""}`;
   const [wide, setWide] = useState(() => window.matchMedia(query).matches);
   useEffect(() => {
     const q = window.matchMedia(query);
@@ -19,18 +21,27 @@ export function usePaneShape(): PaneShape {
     q.addEventListener("change", sync);
     return () => q.removeEventListener("change", sync);
   }, [query]);
-  return wide && !isAndroid() ? "beside" : "sheet";
+  return wide ? "beside" : "sheet";
 }
 
 const WIDTH_KEY = "uni.notePane.width", SHEET_KEY = "uni.notePane.sheet";
 const storedWidth = () => { try { const n = Number(localStorage.getItem(WIDTH_KEY)); return n > 0 ? n : 460; } catch { return 460; } };
 /** The chat keeps at least this much beside the note (with the tree and the companion folded to their icons). */
-const clampWidth = (w: number) => Math.max(320, Math.min(w, window.innerWidth - 520));
+const WIDTH_MIN = 320;
+const clampWidth = (w: number) => Math.max(WIDTH_MIN, Math.min(w, window.innerWidth - 520));
+/** T-273: the sheet's height as a share of the room's message list (1: full), remembered on this device. T-200 kept "half" or "full". */
+const storedSheet = () => {
+  try { const v = localStorage.getItem(SHEET_KEY); const n = v === "full" ? 1 : Number(v); return n > 0 && n <= 1 ? n : 0.5; } catch { return 0.5; }
+};
+/** The sheet's snap points, as shares of the list; full is the last. */
+const SHEET_SNAPS = [1 / 3, 1 / 2, 2 / 3, 1];
+const sheetMin = (area: number) => Math.min(area, Math.max(120, area / 5));
 
 /**
  * T-200: a note read next to the chat it was linked from. The chat stays mounted, so its scroll, draft and composer are untouched.
  * `beside`: a resizable column right of the chat, its width remembered. `sheet`: over the message list, ending at the composer's top edge,
- * at half or full height. No animation anywhere (e-ink).
+ * T-273: at any height its handle is dragged to (snapping near a third, a half, two thirds and full), remembered too; pulled past its
+ * bottom it closes. No animation anywhere (e-ink).
  */
 export default function NotePane({ shape, stack, hub, list, onOpen, onBack, onClose, onQuote, onOpenPage, onDirty, onSearch, layoutKey = "" }: {
   shape: PaneShape;
@@ -81,34 +92,21 @@ export default function NotePane({ shape, stack, hub, list, onOpen, onBack, onCl
     setPicked("");
   };
 
-  // beside: width in px; sheet: half or full height. Both remembered on this device.
+  // beside: width in px; sheet: a share of the list's height. Both remembered on this device once a drag or key settles them, not on every
+  // move. `live`: the size while the handle is held.
   const [width, setWidthState] = useState(() => clampWidth(storedWidth()));
   const widthRef = useRef(width);
   const setWidth = (w: number) => { widthRef.current = w; setWidthState(w); };
   const keep = (key: string, value: string) => { try { localStorage.setItem(key, value); } catch { /* private storage */ } };
-  const [full, setFull] = useState(() => { try { return localStorage.getItem(SHEET_KEY) === "full"; } catch { return false; } });
+  const [share, setShare] = useState(storedSheet);
+  const [live, setLive] = useState<number | null>(null);
+  const [vw, setVw] = useState(() => window.innerWidth);
   useEffect(() => {
-    const fit = () => setWidth(clampWidth(widthRef.current));
+    const fit = () => { setWidth(clampWidth(widthRef.current)); setVw(window.innerWidth); };
     window.addEventListener("resize", fit);
     return () => window.removeEventListener("resize", fit);
   }, []);
-  const drag = (e: React.PointerEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    const handle = e.currentTarget;
-    handle.setPointerCapture(e.pointerId);
-    const move = (ev: PointerEvent) => setWidth(clampWidth(window.innerWidth - ev.clientX));
-    // the width is kept once the drag ends, not on every move
-    const up = () => { keep(WIDTH_KEY, String(Math.round(widthRef.current))); handle.removeEventListener("pointermove", move); handle.removeEventListener("pointerup", up); handle.removeEventListener("pointercancel", up); };
-    handle.addEventListener("pointermove", move); handle.addEventListener("pointerup", up); handle.addEventListener("pointercancel", up);
-  };
-  const nudge = (e: React.KeyboardEvent) => {
-    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
-    e.preventDefault();
-    const step = e.shiftKey ? 80 : 24;
-    const w = clampWidth(widthRef.current + (e.key === "ArrowLeft" ? step : -step));
-    setWidth(w);
-    keep(WIDTH_KEY, String(Math.round(w)));
-  };
+  const keepShare = (s: number) => { const r = Math.round(s * 10000) / 10000; setShare(r); keep(SHEET_KEY, String(r)); };
 
   // sheet: sits exactly over the message list of the room underneath, ending at the composer's top edge.
   const [rect, setRect] = useState<{ left: number; width: number; top: number; bottom: number } | null>(null);
@@ -130,15 +128,23 @@ export default function NotePane({ shape, stack, hub, list, onOpen, onBack, onCl
     return () => { ro.disconnect(); window.removeEventListener("resize", measure); window.visualViewport?.removeEventListener("resize", measure); };
   }, [shape, layoutKey, list]);
 
-  const style: CSSProperties = shape === "beside" ? { width }
-    : rect ? { left: rect.left, width: rect.width, top: full ? rect.top : rect.top + (rect.bottom - rect.top) / 2, height: full ? rect.bottom - rect.top : (rect.bottom - rect.top) / 2 }
-    : { left: 0, right: 0, bottom: 0, height: full ? "85dvh" : "50dvh" };
+  const area = rect ? Math.max(0, rect.bottom - rect.top) : 0;
+  const height = live ?? Math.max(sheetMin(area), Math.min(area, share * area));
+  const full = share >= 0.999;
+  const style: CSSProperties = shape === "beside" ? { width: live ?? width }
+    : rect ? { left: rect.left, width: rect.width, top: rect.bottom - height, height }
+    : { left: 0, right: 0, bottom: 0, height: `${Math.round(share * 85)}dvh` };
+  const besideMax = Math.max(WIDTH_MIN, vw - 520);
+  const handle = shape === "beside"
+    ? <SplitHandle axis="x" size={live ?? width} min={WIDTH_MIN} max={besideMax} span={vw} snaps={SHEET_SNAPS.slice(0, -1).map((f) => f * vw)}
+      label="Resize the note (← →)" onDrag={setLive} onCommit={(w) => { setWidth(clampWidth(w)); keep(WIDTH_KEY, String(Math.round(clampWidth(w)))); }} />
+    : rect && area > 0 && <SplitHandle axis="y" size={height} min={sheetMin(area)} max={area} span={area} snaps={SHEET_SNAPS.map((f) => f * area)}
+      label="Resize the note (↑ ↓)" onDrag={setLive} onCommit={(h) => keepShare(h / area)} onDismiss={onClose} />;
   const title = titles[key] ?? top.ref.split("/").pop() ?? top.ref;
 
-  return <section ref={box} className={`note-pane note-pane-${shape}${shape === "sheet" ? (full ? " full" : " half") : ""}`} style={style} role="complementary" aria-label="Note beside the chat"
+  return <section ref={box} className={`note-pane note-pane-${shape}${shape === "sheet" && full ? " full" : ""}${live !== null ? " resizing" : ""}`} style={style} role="complementary" aria-label="Note beside the chat"
     onKeyDown={(e) => { if (e.key === "Escape" && !(e.target instanceof HTMLTextAreaElement)) { e.stopPropagation(); onClose(); } }}>
-    {shape === "beside" && <div className="note-pane-handle" role="separator" tabIndex={0} aria-orientation="vertical" aria-label="Resize the note (← →)" aria-valuenow={Math.round(width)}
-      onPointerDown={drag} onKeyDown={nudge}><span aria-hidden="true" /></div>}
+    {handle}
     <NoteView key={key} target={top} hub={hub} compact onOpen={onOpen}
       onBack={prev ? onBack : onClose} backIcon={prev ? "←" : "×"} backLabel={prev ? titles[`${prev.vault}:${prev.ref}`] ?? prev.ref.split("/").pop() ?? "note" : "Close note"}
       onTitle={(t) => setTitles((m) => m[key] === t ? m : { ...m, [key]: t })}
@@ -149,7 +155,7 @@ export default function NotePane({ shape, stack, hub, list, onOpen, onBack, onCl
           title={picked ? "Put the selected passage in your reply" : "Select a passage in the note first"}>Quote in reply</button>
         <button type="button" className="note-action quiet" onClick={() => onOpenPage(ids[key] ? { ...top, ref: ids[key] } : top, title)}>Open as page</button>
         {prev && <button type="button" className="note-action note-pane-close" aria-label="Close note" onClick={onClose}>×</button>}
-        {shape === "sheet" && <button type="button" className="note-action note-pane-size" aria-pressed={full} onClick={() => { keep(SHEET_KEY, full ? "half" : "full"); setFull(!full); }}>{full ? "Half" : "Full"}</button>}
+        {shape === "sheet" && <button type="button" className="note-action note-pane-size" aria-pressed={full} onClick={() => keepShare(full ? 0.5 : 1)}>{full ? "Half" : "Full"}</button>}
       </>} />
   </section>;
 }
