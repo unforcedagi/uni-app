@@ -145,14 +145,16 @@ export default function NotePane({ shape, stack, hub, list, onOpen, onBack, onCl
     return () => { ro.disconnect(); window.removeEventListener("resize", measure); window.visualViewport?.removeEventListener("resize", measure); };
   }, [shape, layoutKey, list]);
 
-  const shown = live ?? width;
+  const besideMax = Math.max(WIDTH_MIN, Math.min(widthMax(), shared - LIST_MIN));
+  // Codex a7a1r9o7: the width on screen gives way when the chat has less room than when it was set (the tree unfolded, a width kept from
+  // a roomier layout); the width kept on this device stays, for when there is room again
+  const shown = Math.min(live ?? width, besideMax);
   const area = rect ? Math.max(0, rect.bottom - rect.top) : 0;
   const height = live ?? Math.max(sheetMin(area), Math.min(area, share * area));
   const full = share >= 0.999;
   const style: CSSProperties = shape === "beside" ? { width: shown }
     : rect ? { left: rect.left, width: rect.width, top: rect.bottom - height, height }
     : { left: 0, right: 0, bottom: 0, height: full ? "85dvh" : `${Math.round(share * 100)}dvh` };
-  const besideMax = Math.max(WIDTH_MIN, Math.min(widthMax(), shared - LIST_MIN));
   // keyed by axis: turning the Daylight mid-drag drops that drag rather than handing a height to the column
   const handle = shape === "beside"
     ? <SplitHandle key="x" axis="x" size={shown} min={WIDTH_MIN} max={besideMax} span={vw} snaps={BESIDE_SNAPS.map((f) => f * vw)}

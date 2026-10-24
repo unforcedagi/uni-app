@@ -220,6 +220,48 @@ test.describe('beside', () => {
   });
 });
 
+test.describe('beside, when the chat has less room', () => {
+  /** The chat's list and the handle's numbers, after the layout settles. */
+  const state = async (page: Page, handle: Locator) => {
+    await page.waitForTimeout(150);
+    return { list: (await page.locator('.message-list').boundingBox())!.width, now: Number(await handle.getAttribute('aria-valuenow')), max: Number(await handle.getAttribute('aria-valuemax')) };
+  };
+
+  test('Codex a7a1r9o7: widened with the tree folded, then the tree unfolded, the note gives way so the chat keeps its width', async ({ page }) => {
+    test.skip(project() !== 'desktop', 'the tree folds beside a note under 1400 px, off Android');
+    const { handle } = await openNote(page);
+    await handle.focus();
+    await handle.press('End');
+    const wide = await width(page);
+    expect(wide).toBeGreaterThan(600);
+    await tap(page.locator('.th-roomnav').getByRole('button', { name: 'Show the sidebar' }));
+    await expect(page.locator('.th-roomnav:not(.hidden)')).toBeVisible();
+    const s = await state(page, handle);
+    expect(s.list).toBeGreaterThanOrEqual(378);
+    expect(s.now).toBeLessThanOrEqual(s.max);
+    expect(await width(page)).toBeLessThan(wide - 100);
+    // the arrows start from the width on screen, not the one it gave up
+    const w = await width(page);
+    await handle.press('ArrowRight');
+    expect(Math.abs(await width(page) - (w - 24))).toBeLessThanOrEqual(2);
+  });
+
+  test('Codex a7a1r9o7: a width kept from a roomier layout opens no wider than the chat allows', async ({ page }) => {
+    test.skip(!beside() && project() !== 'daylight-portrait', 'wide screens, and the Daylight turned on its side');
+    // the widest a 1600 px window allows with its tree folded: wider than the Daylight on its side leaves room for, tree and all
+    await page.addInitScript(() => localStorage.setItem('uni.notePane.width', '1080'));
+    const { pane, handle } = await openNote(page);
+    if (project() === 'daylight-portrait') {
+      await expect(pane).toHaveClass(/note-pane-sheet/);
+      await page.setViewportSize({ width: 1600, height: 1200 });
+      await expect(pane).toHaveClass(/note-pane-beside/);
+    }
+    const s = await state(page, handle);
+    expect(s.list).toBeGreaterThanOrEqual(378);
+    expect(s.now).toBeLessThanOrEqual(s.max);
+  });
+});
+
 test('on Android only a tablet on its side gets the column: a phone turned sideways keeps the sheet', async ({ page }) => {
   test.skip(project() !== 'daylight-portrait', 'needs the Android user agent, at sizes set here');
   const { pane } = await openNote(page);
