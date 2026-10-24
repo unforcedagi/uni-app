@@ -57,7 +57,7 @@ const ACCOUNT: &str = "account";
 const LEGACY: [&str; 2] = ["session", "store-passphrase"];
 /// An ordinary request (anything but the sync's long poll, which sets its own) gives up after this. It is tried at most
 /// four times, with pauses of at most `RETRY_PAUSE` between (the SDK's default is to retry for up to 15 minutes).
-const REQUEST_FOR: Duration = Duration::from_secs(15);
+pub(crate) const REQUEST_FOR: Duration = Duration::from_secs(15);
 const RETRY_PAUSE: Duration = Duration::from_secs(5);
 /// A sign-in's login and a logout, all tries included. Account changes wait on these, so they are kept short.
 const LOGIN_FOR: Duration = Duration::from_secs(30);
@@ -755,6 +755,10 @@ impl Messages {
             return Err(invalid("There's nothing to send."));
         }
         let (client, account) = self.client().await?;
+        if client.get_room(&room_id).is_some_and(|r| link::bridge_of(&r).is_some()) {
+            // a bridge's linking room: only link.rs says anything there, once and checked (never the send queue)
+            return Err(invalid("That is a bridge's linking room, not a conversation."));
+        }
         let timeline = self.timeline(&client, &account, &room_id).await?;
         timeline.send(RoomMessageEventContent::text_plain(body).into()).await.map_err(server)?;
         Ok(())

@@ -436,7 +436,11 @@ impl Messages {
         if !force && row.state != "unavailable" && row.answered_at + 60_000 > asked_at {
             return Ok(());
         }
-        self.send(room.room_id().as_str(), &format!("{} list-logins", net.prefix)).await?;
+        let own = client.user_id().ok_or_else(signed_out)?.to_owned();
+        let bot = bot_id(&own, net).ok_or_else(|| server("no bot address on this homeserver"))?;
+        if !matches!(say_once(client, &room, &own, &bot, &format!("{} list-logins", net.prefix)).await, Spoke::Sent) {
+            return Ok(());
+        }
         // a bot that has joined but doesn't answer: its bridge is down now
         let me = self.clone();
         let (net, account) = (*net, account.to_owned());
@@ -471,7 +475,7 @@ impl Messages {
             (None, Some(f)) => format!("login {f}"),
             (None, None) => "login".to_owned(),
         };
-        self.link_say(&net, &command).await
+        self.link_say(&net, &command, false).await
     }
 
     /// Answer the bot: the value its step asks for (a phone number, a code, cookies).
@@ -487,19 +491,20 @@ impl Messages {
         if BOT_COMMANDS.contains(&first.as_str()) {
             return Err(invalid(format!("The bridge would read a reply starting with \"{first}\" as its own command, not as your answer.")));
         }
-        self.link_say(&net, value).await
+        self.link_say(&net, value, true).await
     }
 
     /// Stop a login under way.
     pub async fn link_cancel(self: &Arc<Self>, id: &str) -> Result<LinkRow> {
         let net = network(id)?;
-        self.link_say(&net, "cancel").await
+        self.link_say(&net, "cancel", false).await
     }
 
     /// Say `text` to the bot. What is said here can be a login value (a code, a password, cookies), so it goes only
-    /// into a room that is safe for it (`safe_for_secrets`), checked again right before the send: a room that has
-    /// stopped being safe since it was picked is dropped and a fresh one made.
-    async fn link_say(self: &Arc<Self>, net: &Network, text: &str) -> Result<LinkRow> {
+    /// into a room that is safe for it (`safe_for_secrets`), and only through `say_once`: checked again right before,
+    /// sent once, never queued, never retried. A room that has stopped being safe is dropped and a fresh one made; a
+    /// send that fails is reported, and the value has to be typed again.
+    async fn link_say(self: &Arc<Self>, net: &Network, text: &str, secret: bool) -> Result<LinkRow> {
         let (client, account) = self.client().await?;
         let own = client.user_id().ok_or_else(signed_out)?.to_owned();
         let bot = bot_id(&own, net).ok_or_else(|| server("no bot address on this homeserver"))?;
@@ -508,11 +513,24 @@ impl Messages {
                 .link_room(&client, &account, net)
                 .await?
                 .ok_or_else(|| MessagesError::Unreachable { message: format!("The {} bridge isn't running.", net.name) })?;
-            if safe_for_secrets(&client, &room, &own, &bot).await {
-                self.send(room.room_id().as_str(), &format!("{} {text}", net.prefix)).await?;
-                return Ok(self.link_row(net));
+            match say_once(&client, &room, &own, &bot, &format!("{} {text}", net.prefix)).await {
+                Spoke::Sent => return Ok(self.link_row(net)),
+                Spoke::Unsafe => {
+                    self.link_creating.lock().await.remove(&(account.clone(), net.id));
+                }
+                Spoke::Failed(why) => {
+                    tracing::warn!("a message to the {} bridge didn't go: {why}", net.name);
+                    let message = if secret {
+                        "That didn't reach the bridge, and it wasn't kept or sent again. Type it again.".to_owned()
+                    } else {
+                        format!("That didn't reach the {} bridge. Try again.", net.name)
+                    };
+                    let mut row = self.link_row(net);
+                    row.note = Some(message.clone());
+                    self.set_link_row(row);
+                    return Err(invalid(message));
+                }
             }
-            self.link_creating.lock().await.remove(&(account.clone(), net.id));
         }
         Err(MessagesError::Refused { message: format!("No safe room with the {} bridge: nothing was sent.", net.name) })
     }
@@ -625,8 +643,8 @@ impl Messages {
                             return Ok(None);
                         }
                     }
-                    // encrypted from its first event, the bot the only one invited
-                    let r = client.create_dm(&bot).await.map_err(from_sdk)?;
+                    // encrypted from its first event, the bot the only one invited, and no one else can come in
+                    let r = create_link_room(client, &own, &bot).await?;
                     if !safe_for_secrets(client, &r, &own, &bot).await {
                         return Err(server("the new room with the bridge isn't encrypted"));
                     }
@@ -698,11 +716,12 @@ impl Messages {
                 let done = me.apply_exchange(&net, exchange);
                 if done && !was_done {
                     // a finished login: ask what is linked now, so the card says so
-                    let me = me.clone();
-                    let rid = room_id.clone();
+                    let (me, rid, bot) = (me.clone(), room_id.clone(), bot.clone());
                     tokio::spawn(async move {
                         tokio::time::sleep(Duration::from_secs(2)).await;
-                        let _ = me.send(rid.as_str(), &format!("{} list-logins", net.prefix)).await;
+                        let Ok((client, _)) = me.client().await else { return };
+                        let (Some(own), Some(room)) = (client.user_id().map(ToOwned::to_owned), client.get_room(&rid)) else { return };
+                        let _ = say_once(&client, &room, &own, &bot, &format!("{} list-logins", net.prefix)).await;
                     });
                 }
                 was_done = done;
@@ -817,20 +836,133 @@ async fn server_members(client: &Client, room: &Room) -> Option<HashMap<String, 
     Some(out)
 }
 
-/// Whether a room may hold login values for `bot`'s bridge: end-to-end encrypted, and its joined and invited members
-/// exactly us and the bot. Both asked of the homeserver, not this device's copy, so someone invited a moment ago
-/// counts. Anything that can't be checked counts as unsafe.
+/// Whether a room may hold login values for `bot`'s bridge, by its state as the homeserver has it now (not this
+/// device's copy, so someone invited a moment ago counts):
+/// - end-to-end encrypted (megolm);
+/// - its joined and invited members exactly us and the bot;
+/// - invite-only, history readable only from joining, and only we may invite (the bot can't bring anyone in).
+/// Anything that can't be checked counts as unsafe.
 async fn safe_for_secrets(client: &Client, room: &Room, own: &UserId, bot: &UserId) -> bool {
+    use matrix_sdk::ruma::api::client::state::get_state_events;
     if room.state() != RoomState::Joined {
         return false;
     }
-    if !matches!(room.latest_encryption_state().await, Ok(state) if state.is_encrypted()) {
-        return false;
+    let Ok(answer) = client.send(get_state_events::v3::Request::new(room.room_id().to_owned())).await else { return false };
+    let mut present = std::collections::BTreeSet::new();
+    let (mut encrypted, mut invite_only, mut joined_history) = (false, false, false);
+    let mut power: Option<serde_json::Value> = None;
+    let mut creators = std::collections::BTreeSet::new();
+    for ev in &answer.room_state {
+        let kind: Option<String> = ev.get_field("type").ok().flatten();
+        let key: Option<String> = ev.get_field("state_key").ok().flatten();
+        let content: Option<serde_json::Value> = ev.get_field("content").ok().flatten();
+        let (Some(kind), Some(key), Some(content)) = (kind, key, content) else { return false };
+        match kind.as_str() {
+            "m.room.member" if matches!(content["membership"].as_str(), Some("join" | "invite")) => {
+                present.insert(key);
+            }
+            "m.room.encryption" => encrypted = content["algorithm"] == "m.megolm.v1.aes-sha2",
+            "m.room.join_rules" => invite_only = content["join_rule"] == "invite",
+            "m.room.history_visibility" => joined_history = content["history_visibility"] == "joined",
+            "m.room.power_levels" => power = Some(content),
+            "m.room.create" => {
+                // room version 12: the creators have unlimited power, and aren't listed in the power levels
+                if let Some(sender) = ev.get_field::<String>("sender").ok().flatten() {
+                    creators.insert(sender);
+                }
+                for extra in content["additional_creators"].as_array().into_iter().flatten().filter_map(|v| v.as_str()) {
+                    creators.insert(extra.to_owned());
+                }
+            }
+            _ => {}
+        }
     }
-    let Some(members) = server_members(client, room).await else { return false };
-    let present: std::collections::BTreeSet<&str> =
-        members.iter().filter(|(_, m)| matches!(m.as_str(), "join" | "invite")).map(|(u, _)| u.as_str()).collect();
-    present == std::collections::BTreeSet::from([own.as_str(), bot.as_str()])
+    let members = present == std::collections::BTreeSet::from([own.to_string(), bot.to_string()]);
+    members && encrypted && invite_only && joined_history && power.is_some_and(|p| only_we_invite(&p, &creators, own, bot))
+}
+
+/// The power levels let us invite and nobody else in the room (the bot, or a newcomer at the default level).
+fn only_we_invite(p: &serde_json::Value, creators: &std::collections::BTreeSet<String>, own: &UserId, bot: &UserId) -> bool {
+    let users_default = p["users_default"].as_i64().unwrap_or(0);
+    let level = |u: &UserId| if creators.contains(u.as_str()) { i64::MAX } else { p["users"][u.as_str()].as_i64().unwrap_or(users_default) };
+    let invite = p["invite"].as_i64().unwrap_or(0);
+    level(own) >= invite && level(bot) < invite && users_default < invite
+}
+
+/// A room for one bridge: invite-only, encrypted from its first event, history only from joining, the bot the only
+/// one invited, and only us allowed to invite. The bot can redact (bridges take back what was typed into a password
+/// step), but not invite or change the room.
+async fn create_link_room(client: &Client, own: &UserId, bot: &UserId) -> Result<Room> {
+    use matrix_sdk::ruma::{api::client::room::create_room, serde::Raw};
+    let state = |v: serde_json::Value| Raw::new(&v).map(|r| r.cast_unchecked()).map_err(server);
+    let mut req = create_room::v3::Request::new();
+    req.invite = vec![bot.to_owned()];
+    req.is_direct = true;
+    req.preset = Some(create_room::v3::RoomPreset::PrivateChat);
+    req.initial_state = vec![
+        state(serde_json::json!({ "type": "m.room.encryption", "state_key": "", "content": { "algorithm": "m.megolm.v1.aes-sha2" } }))?,
+        state(serde_json::json!({ "type": "m.room.join_rules", "state_key": "", "content": { "join_rule": "invite" } }))?,
+        state(serde_json::json!({ "type": "m.room.history_visibility", "state_key": "", "content": { "history_visibility": "joined" } }))?,
+    ];
+    req.power_level_content_override = Some(
+        Raw::new(&serde_json::json!({
+            "users": { own.as_str(): 100, bot.as_str(): 50 },
+            "users_default": 0, "events_default": 0, "state_default": 100,
+            "invite": 100, "kick": 100, "ban": 100, "redact": 50,
+        }))
+        .map(|r| r.cast_unchecked())
+        .map_err(server)?,
+    );
+    client.create_room(req).await.map_err(from_sdk)
+}
+
+/// What `say_once` did.
+enum Spoke {
+    Sent,
+    /// The room isn't safe for it (now): nothing was sent.
+    Unsafe,
+    /// It was tried once and didn't go. Nothing is kept or tried again.
+    Failed(String),
+}
+
+/// Send `body` into a link room once: never through the send queue (it encrypts again on every retry, for whoever is
+/// in the room by then), but right after checking the room again, on the homeserver and on this device (whose view
+/// decides whom the room key goes to), with a new room key for exactly the two of us and no retry.
+async fn say_once(client: &Client, room: &Room, own: &UserId, bot: &UserId, body: &str) -> Spoke {
+    use matrix_sdk::{config::RequestConfig, ruma::events::room::message::RoomMessageEventContent, RoomMemberships};
+    if !safe_for_secrets(client, room, own, bot).await {
+        return Spoke::Unsafe;
+    }
+    // this device's view decides whom the room key goes to: fetched fresh from the homeserver now, it must be us and
+    // the bot, the bot joined (keys go to joined members only, history being "joined")
+    let started = std::time::Instant::now();
+    loop {
+        room.mark_members_missing();
+        if room.sync_members().await.is_err() {
+            return Spoke::Unsafe;
+        }
+        let Ok(members) = room.members_no_sync(RoomMemberships::JOIN | RoomMemberships::INVITE).await else { return Spoke::Unsafe };
+        let ids: std::collections::BTreeSet<String> = members.iter().map(|m| m.user_id().to_string()).collect();
+        if ids != std::collections::BTreeSet::from([own.to_string(), bot.to_string()]) {
+            return Spoke::Unsafe;
+        }
+        let bot_in = members.iter().any(|m| m.user_id() == bot && *m.membership() == MembershipState::Join);
+        if bot_in && room.encryption_state().is_encrypted() {
+            break;
+        }
+        if started.elapsed() > BOT_JOIN_WAIT {
+            return Spoke::Failed("this device doesn't see the bot in the room yet".into());
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+    if let Err(e) = room.discard_room_key().await {
+        return Spoke::Failed(e.to_string());
+    }
+    let once = RequestConfig::new().disable_retry().timeout(crate::REQUEST_FOR);
+    match room.send(RoomMessageEventContent::text_plain(body)).with_request_config(once).await {
+        Ok(_) => Spoke::Sent,
+        Err(e) => Spoke::Failed(e.to_string()),
+    }
 }
 
 /// Whether the bot has joined the room.

@@ -138,11 +138,16 @@ async fn login_values_go_only_into_an_encrypted_room_with_just_the_bot() {
     join(port, &mallory, &a).await;
     // B: just wren and the bot, marked as their DM, but not encrypted
     let b = create(port, &wren, json!({ "is_direct": true, "preset": "trusted_private_chat", "invite": [uid("signalbot")] })).await;
-    let direct = json!({ uid("signalbot"): [a.clone(), b.clone()] });
+    // D (review 2r8bmvox): encrypted, just wren and the bot, but made the ordinary way: anyone with the bot's power
+    // (trusted_private_chat gives it the creator's) could bring a third person in, and history is shared
+    let d = create(port, &wren, json!({ "is_direct": true, "preset": "trusted_private_chat", "invite": [uid("signalbot")],
+        "initial_state": [{ "type": "m.room.encryption", "state_key": "", "content": { "algorithm": "m.megolm.v1.aes-sha2" } }] })).await;
+    let direct = json!({ uid("signalbot"): [a.clone(), b.clone(), d.clone()] });
     http(port, "PUT", &format!("/_matrix/client/v3/user/{}/account_data/m.direct", esc(&uid("wren"))), Some(direct), Some(&wren)).await;
     until(20, "the bot is in A and B", || {
         let (bot, a, b) = (bot.clone(), a.clone(), b.clone());
-        async move { joined_rooms(port, &bot).await.contains(&a) && joined_rooms(port, &bot).await.contains(&b) }
+        let d = d.clone();
+        async move { let r = joined_rooms(port, &bot).await; r.contains(&a) && r.contains(&b) && r.contains(&d) }
     })
     .await;
     assert!(!encrypted(port, &wren, &b).await && encrypted(port, &wren, &a).await);
@@ -169,10 +174,26 @@ async fn login_values_go_only_into_an_encrypted_room_with_just_the_bot() {
     let got = landed(port, &wren, &before).await;
     assert!(!got.contains(&a), "sent into a room with a third member");
     assert!(!got.contains(&b), "sent into an unencrypted room");
+    assert!(!got.contains(&d), "sent into a room where the bot could invite someone");
     assert_eq!(got.len(), 1, "one fresh room gets it: {got:?}");
     let c = got[0].clone();
     assert!(encrypted(port, &wren, &c).await, "the fresh room is encrypted");
     assert_eq!(members(port, &wren, &c).await, BTreeSet::from([uid("wren"), uid("signalbot")]), "only wren and the bot");
+    // and no one else can come in: invite-only, history from joining, only wren may invite
+    let state = |kind: &'static str| {
+        let c = c.clone();
+        let wren = wren.clone();
+        async move { http(port, "GET", &format!("/_matrix/client/v3/rooms/{}/state/{kind}/", esc(&c)), None, Some(&wren)).await.unwrap().1 }
+    };
+    assert_eq!(state("m.room.join_rules").await["join_rule"], "invite");
+    assert_eq!(state("m.room.history_visibility").await["history_visibility"], "joined");
+    let p = state("m.room.power_levels").await;
+    let invite = p["invite"].as_i64().unwrap_or(0);
+    assert!(p["users"][uid("signalbot")].as_i64().unwrap_or(0) < invite && p["users_default"].as_i64().unwrap_or(0) < invite, "{p}");
+    // wren made the room: a creator (room version 12) or listed with power to invite
+    let create = state("m.room.create").await;
+    let wren_creator = create["creator"] == uid("wren").as_str() || create["room_version"].as_str().is_some_and(|v| v == "12");
+    assert!(wren_creator || p["users"][uid("wren")].as_i64().unwrap_or(0) >= invite, "{p}");
 
     // the safe room is now the one this device uses; someone else is invited into it: the next value doesn't go there
     let (status, r) = http(port, "POST", &format!("/_matrix/client/v3/rooms/{}/invite", esc(&c)), Some(json!({ "user_id": uid("mallory") })), Some(&wren)).await.unwrap();
@@ -181,7 +202,7 @@ async fn login_values_go_only_into_an_encrypted_room_with_just_the_bot() {
     m.link_send("signal", "123456").await.unwrap();
     let got = landed(port, &wren, &before).await;
     assert!(!got.contains(&c), "sent into the cached room after a third person was invited");
-    assert!(!got.contains(&a) && !got.contains(&b));
+    assert!(!got.contains(&a) && !got.contains(&b) && !got.contains(&d));
     assert_eq!(got.len(), 1, "another fresh room gets it: {got:?}");
     assert!(encrypted(port, &wren, &got[0]).await);
     assert_eq!(members(port, &wren, &got[0]).await, BTreeSet::from([uid("wren"), uid("signalbot")]));
