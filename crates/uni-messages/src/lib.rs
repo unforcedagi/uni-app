@@ -66,6 +66,10 @@ const LOGOUT_FOR: Duration = Duration::from_secs(10);
 const STATUS_WAIT: Duration = Duration::from_secs(2);
 /// How long stopping an account's sync may take, twice at most. Normally it is at once; see `Live::stop`.
 const STOP_FOR: Duration = Duration::from_secs(3);
+/// After a send failed for a reason that passes (the homeserver restarting, the network gone), the SDK pauses the
+/// room's send queue; it is turned back on after this, then twice as long each time, up to `QUEUE_RETRY_MAX`.
+const QUEUE_RETRY: Duration = Duration::from_secs(2);
+const QUEUE_RETRY_MAX: Duration = Duration::from_secs(30);
 /// The crypto database in a store folder (matrix-sdk-sqlite's name for it): a store without it has no keys.
 const CRYPTO_DB: &str = "matrix-sdk-crypto.sqlite3";
 
@@ -569,6 +573,35 @@ impl Messages {
             }
         });
 
+        // a send that failed for a reason that passes pauses its room's queue (matrix-sdk does that, so it doesn't spin);
+        // turn it back on after a moment, so messages written while the homeserver restarted go out after all, and
+        // later ones don't wait as "sending" forever
+        let queue = client.clone();
+        let mut errors = client.send_queue().subscribe_errors();
+        let queue_task = tokio::spawn(async move {
+            let mut pause = QUEUE_RETRY;
+            let mut last = std::time::Instant::now();
+            loop {
+                match errors.recv().await {
+                    Ok(e) if e.is_recoverable => {}
+                    Ok(_) => continue,
+                    Err(broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
+                // one outage pauses every room that tried to send: wait once, then wake them all together; if it
+                // fails again straight away, wait longer next time
+                if last.elapsed() > QUEUE_RETRY_MAX * 4 {
+                    pause = QUEUE_RETRY;
+                }
+                tokio::time::sleep(pause).await;
+                while errors.try_recv().is_ok() {}
+                last = std::time::Instant::now();
+                pause = (pause * 2).min(QUEUE_RETRY_MAX);
+                tracing::warn!("sending paused after a failure that passes; turning the send queues back on");
+                queue.send_queue().set_enabled(true).await;
+            }
+        });
+
         // the room list: every room not left, most recent first
         let me = Arc::downgrade(self);
         let rls = sync.room_list_service();
@@ -622,7 +655,7 @@ impl Messages {
         });
 
         sync.start().await;
-        *self.live.lock().await = Some(Live { client, sync, tasks: vec![status_task, session_task, rooms_task], store });
+        *self.live.lock().await = Some(Live { client, sync, tasks: vec![status_task, session_task, queue_task, rooms_task], store });
     }
 
     /// The room list as last synced.

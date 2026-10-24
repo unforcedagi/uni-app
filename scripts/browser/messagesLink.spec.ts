@@ -58,7 +58,7 @@ test.describe('T-282 Link an account, on the live bridges', () => {
       // (now that the cards have asked every bot, the list still holds no bot DM: checked again on the way back)
       const screen = page.getByRole('region', { name: 'Link an account' });
       await expect(screen).toBeVisible();
-      for (const n of ['Telegram', 'Signal', 'WhatsApp', 'Google Messages', 'Messenger', 'Instagram']) await expect(card(page, n)).toBeVisible();
+      for (const n of ['Signal', 'Telegram', 'WhatsApp', 'Google Messages', 'Messenger', 'Instagram']) await expect(card(page, n)).toBeVisible();
 
       // every running bridge answers what is linked: nothing, for a throwaway account
       for (const n of ['Signal', 'WhatsApp', 'Google Messages', 'Messenger', 'Instagram']) await expect(tag(card(page, n))).toHaveText('NOT LINKED', { timeout: 60_000 });

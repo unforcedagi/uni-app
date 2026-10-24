@@ -11,6 +11,8 @@
 
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
+use tokio::task::JoinHandle;
+
 use futures_util::StreamExt;
 use matrix_sdk::{
     ruma::{
@@ -32,10 +34,10 @@ pub struct Network {
     pub bot: &'static str,
 }
 
-/// In the order the Link screen shows them.
+/// In the order the Link screen shows them: the order to link in, least fragile first.
 pub const NETWORKS: [Network; 6] = [
-    Network { id: "telegram", name: "Telegram", bot: "telegrambot" },
     Network { id: "signal", name: "Signal", bot: "signalbot" },
+    Network { id: "telegram", name: "Telegram", bot: "telegrambot" },
     Network { id: "whatsapp", name: "WhatsApp", bot: "whatsappbot" },
     Network { id: "gmessages", name: "Google Messages", bot: "gmessagesbot" },
     Network { id: "messenger", name: "Messenger", bot: "messengerbot" },
@@ -44,7 +46,7 @@ pub const NETWORKS: [Network; 6] = [
 
 /// How long a bot may take to join its DM, or to answer `list-logins`, before its bridge counts as not running.
 const BOT_JOIN_WAIT: Duration = Duration::from_secs(15);
-const BOT_ANSWER_WAIT: Duration = Duration::from_secs(20);
+const BOT_ANSWER_WAIT: Duration = Duration::from_secs(30);
 
 fn network(id: &str) -> Result<Network> {
     NETWORKS.iter().copied().find(|n| n.id == id).ok_or_else(|| invalid("That isn't a network Messages can link."))
@@ -478,12 +480,7 @@ impl Messages {
                 tokio::time::sleep(Duration::from_millis(500)).await;
             }
             if bot_joined(&room, &bot).await {
-                if self.link_row(net).state == "unavailable" {
-                    let mut row = self.link_row(net);
-                    row.state = state_of(&row.accounts, row.known);
-                    row.note = None;
-                    self.set_link_row(row);
-                }
+                // a member bot may still be down: only its answer (apply_exchange) says it's running again
                 return Ok(Some(room));
             }
             // the bot never came (its bridge was down when it was invited, and an invite isn't sent again): leave this
@@ -520,8 +517,17 @@ impl Messages {
         let task = tokio::spawn(async move {
             let mut items = items;
             let mut was_done = false;
+            let mut paging: Option<JoinHandle<()>> = None;
             loop {
                 let Some(me) = me.upgrade() else { break };
+                // after a gap (the homeserver restarted, or the device slept) the window can start after our last
+                // message, and a reply can't be read without what it answers: load earlier messages until it's back
+                if !items.is_empty() && !items.iter().any(|i| i.as_event().is_some_and(|e| e.is_own())) && paging.as_ref().is_none_or(|p| p.is_finished()) {
+                    let t = timeline.clone();
+                    paging = Some(tokio::spawn(async move {
+                        let _ = t.paginate_backwards(20).await;
+                    }));
+                }
                 let exchange = read_exchange(&said_in(&items, &bot));
                 let done = me.apply_exchange(&net, exchange);
                 if done && !was_done {
