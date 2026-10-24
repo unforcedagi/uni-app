@@ -325,6 +325,10 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
   const overviewListing = useRef(new WeakMap<Overview, number>()).current;
   /** T-208 follow-up: each fresh list (not a further page) is a new generation; a triage answer for an older one is dropped. */
   const notesGen = useRef(0);
+  /** T-208: triage calls by when they were asked, and for each row the call whose answer it shows: an older call that
+   *  answers later (a page asked again by Load older) never overwrites a newer one's note. */
+  const notesAsked = useRef(0);
+  const noteFrom = useRef(new Map<string, number>()).current;
   const composeSeq = useRef(remembered.compose?.key ?? 0);
   /** The thread just opened from the list: only that load marks it read (a Refresh or a reload doesn't undo Mark unread). */
   const markOnOpen = useRef<string | null>(null);
@@ -391,12 +395,15 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
     const by = new Map<string, string[]>();
     for (const t of threads) by.set(t.account_id, [...(by.get(t.account_id) ?? []), t.email_id]);
     for (const [accountId, emailIds] of by) {
+      const asked = ++notesAsked.current;
       const got = await invoke<Record<string, string>>("mail_triage", { accountId, emailIds }).catch(() => ({} as Record<string, string>));
       if (key !== shownKey.current || gen !== notesGen.current) return;
+      const fresh = emailIds.filter((id) => (noteFrom.get(`${accountId}/${id}`) ?? 0) < asked);
+      for (const id of fresh) noteFrom.set(`${accountId}/${id}`, asked);
       setNotes((cur) => {
         const next = { ...cur };
-        for (const id of emailIds) delete next[`${accountId}/${id}`];
-        for (const [id, n] of Object.entries(got)) if (emailIds.includes(id)) next[`${accountId}/${id}`] = n;
+        for (const id of fresh) delete next[`${accountId}/${id}`];
+        for (const id of fresh) if (Object.hasOwn(got, id) && got[id]) next[`${accountId}/${id}`] = got[id];
         return next;
       });
     }
