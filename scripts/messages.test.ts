@@ -3,7 +3,7 @@
 // midnight and a sender's run breaks after five minutes; a rejection keeps the door's shape.
 // Run: node --experimental-strip-types scripts/messages.test.ts
 import assert from "node:assert/strict";
-import { applyLink, applyOpened, applyTimeline, asMessagesErr, previewLine, qrPath, shownItems, type LinkRow, type MessageRow, type RoomRow, type Thread } from "../src/messages/messagesView.ts";
+import { applyLink, applyOpened, applyTimeline, asMessagesErr, previewLine, qrPath, shownFlows, shownItems, type LinkRow, type MessageRow, type RoomRow, type Thread } from "../src/messages/messagesView.ts";
 
 let n = 0;
 const t = (name: string, f: () => void) => { f(); n++; console.log(`ok ${name}`); };
@@ -80,6 +80,12 @@ t("a card's update replaces only that network's card", () => {
   assert.deepEqual(applyLink(rows, row("whatsapp", "linked"))?.map((r) => r.state), ["checking", "linked"]);
   assert.equal(applyLink(null, row("signal", "linked")), null, "before the screen has its cards, an update waits for them");
   assert.deepEqual(applyLink(rows, row("matrix", "linked"))?.map((r) => r.network), ["signal", "whatsapp", "matrix"]);
+});
+
+t("Telegram's bot-token and raw-session logins aren't offered; every other way in is", () => {
+  const flows = ["phone", "qr", "bot", "manual"].map((id) => ({ id, description: id }));
+  assert.deepEqual(shownFlows("telegram", flows).map((f) => f.id), ["phone", "qr"]);
+  assert.equal(shownFlows("whatsapp", flows).length, 4);
 });
 
 console.log(`${n} messages view checks passed`);

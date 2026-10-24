@@ -5,7 +5,7 @@
 // token. Nothing completes by itself: every value is typed here, and every QR is scanned on your phone.
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { linkCancel, linkCheck, links as readLinks, linkSend, linkStart, telegramKeys } from "./messagesDoor.ts";
-import { asMessagesErr, linking, linkWords, NETWORK_INFO, problemText, qrPath, type LinkRow, type LinkStep, type MessagesErr } from "./messagesView.ts";
+import { asMessagesErr, linking, linkWords, NETWORK_INFO, problemText, qrPath, shownFlows, type LinkRow, type LinkStep, type MessagesErr } from "./messagesView.ts";
 
 function Qr({ modules, label }: { modules: string[]; label: string }) {
   const { size, d } = qrPath(modules);
@@ -74,7 +74,7 @@ function Step({ row, busy, act }: { row: LinkRow; busy: boolean; act: (f: () => 
   const n = row.network;
   switch (step.kind) {
     case "flows": return <div className="msgs-link-flows" role="group" aria-label={`Ways to link ${row.name}`}>
-      {step.flows.map((f) => <button key={f.id} type="button" className="msgs-link-flow" disabled={busy} onClick={() => act(() => linkStart(n, f.id))}>
+      {shownFlows(n, step.flows).map((f) => <button key={f.id} type="button" className="msgs-link-flow" disabled={busy} onClick={() => act(() => linkStart(n, f.id))}>
         <strong>{f.description}</strong>
       </button>)}
     </div>;

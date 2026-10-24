@@ -152,6 +152,11 @@ export const NETWORK_INFO: Record<string, { how: string; keep: string }> = {
   instagram: { how: "Your Instagram username and password, or cookies from instagram.com.", keep: "Fragile: Meta can flag a new login and ask for a check." },
 };
 
+/** Ways in a bridge offers that aren't for a person linking their own account: Telegram's bot-token login and its
+ * raw-session one ("advanced, do not use"). */
+const HIDDEN_FLOWS: Record<string, string[]> = { telegram: ["bot", "manual"] };
+export const shownFlows = (network: string, flows: Flow[]) => flows.filter((f) => !(HIDDEN_FLOWS[network] ?? []).includes(f.id));
+
 export function linkWords(s: LinkState): string {
   switch (s) {
     case "checking": return "CHECKING";

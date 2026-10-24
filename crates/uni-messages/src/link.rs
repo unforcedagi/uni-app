@@ -42,8 +42,9 @@ pub const NETWORKS: [Network; 6] = [
     Network { id: "instagram", name: "Instagram", bot: "instagrambot" },
 ];
 
-/// How long a bot may take to join its DM before the bridge counts as not running.
+/// How long a bot may take to join its DM, or to answer `list-logins`, before its bridge counts as not running.
 const BOT_JOIN_WAIT: Duration = Duration::from_secs(15);
+const BOT_ANSWER_WAIT: Duration = Duration::from_secs(20);
 
 fn network(id: &str) -> Result<Network> {
     NETWORKS.iter().copied().find(|n| n.id == id).ok_or_else(|| invalid("That isn't a network Messages can link."))
@@ -118,11 +119,14 @@ pub struct LinkRow {
     /// `list-logins` has answered since this account started.
     #[serde(skip)]
     known: bool,
+    /// How many times `list-logins` has answered: a check whose count hasn't moved got no answer.
+    #[serde(skip)]
+    answers: u64,
 }
 
 impl LinkRow {
     fn new(net: &Network) -> Self {
-        LinkRow { network: net.id, name: net.name, state: "checking", accounts: vec![], step: None, note: None, known: false }
+        LinkRow { network: net.id, name: net.name, state: "checking", accounts: vec![], step: None, note: None, known: false, answers: 0 }
     }
 }
 
@@ -330,7 +334,21 @@ impl Messages {
         if matches!(self.link_row(net).step, Some(LinkStep::Flows { .. } | LinkStep::Input { .. } | LinkStep::Qr { .. } | LinkStep::Code { .. } | LinkStep::Cookies { .. } | LinkStep::Waiting)) {
             return Ok(());
         }
-        self.send(room.room_id().as_str(), "list-logins").await
+        let before = self.link_row(net).answers;
+        self.send(room.room_id().as_str(), "list-logins").await?;
+        // a bot that has joined but doesn't answer: its bridge is down now
+        let me = self.clone();
+        let net = *net;
+        tokio::spawn(async move {
+            tokio::time::sleep(BOT_ANSWER_WAIT).await;
+            let mut row = me.link_row(&net);
+            if row.answers == before && row.step.is_none() {
+                row.state = "unavailable";
+                row.note = Some(format!("The {} bridge isn't answering on the homeserver.", net.name));
+                me.set_link_row(row);
+            }
+        });
+        Ok(())
     }
 
     /// Start linking: `login` (the bot lists its ways in, or starts the only one), `login <flow>`, or, for a login the
@@ -382,6 +400,14 @@ impl Messages {
         Ok(self.link_row(net))
     }
 
+    fn mark_unavailable(&self, net: &Network) {
+        let mut row = self.link_row(net);
+        row.state = "unavailable";
+        row.step = None;
+        row.note = Some(format!("The {} bridge isn't answering on the homeserver.", net.name));
+        self.set_link_row(row);
+    }
+
     fn link_rows(&self) -> Vec<LinkRow> {
         NETWORKS.iter().map(|n| self.link_row(n)).collect()
     }
@@ -407,52 +433,75 @@ impl Messages {
     async fn link_room(self: &Arc<Self>, client: &Client, account: &str, net: &Network) -> Result<Option<Room>> {
         let own = client.user_id().ok_or_else(signed_out)?.to_owned();
         let bot = bot_id(&own, net).ok_or_else(|| server("no bot address on this homeserver"))?;
-        // one at a time: continuwuity 26.9.1 gives two rooms created in the same moment by one account the same room id
-        // (a room id is the hash of its create event), so DMs made side by side would be one room with every bot in it
-        let mut made = self.link_creating.lock().await;
         let key = (account.to_owned(), net.id);
-        // the DM this account already made here: m.direct, which marks it, may not have synced back yet
-        let mut room = made.get(&key).and_then(|id| client.get_room(id)).filter(|r| r.state() == RoomState::Joined);
-        if room.is_none() {
-            let existing = client
-                .joined_rooms()
-                .into_iter()
-                .filter(|r| r.direct_targets().iter().any(|t| t.as_user_id() == Some(&*bot)))
-                .collect::<Vec<_>>();
-            for r in &existing {
-                if bot_joined(r, &bot).await {
-                    room = Some(r.clone());
-                    break;
+        let mut fresh_tried = false;
+        loop {
+            // one at a time: continuwuity 26.9.1 gives two rooms created in the same moment by one account the same room
+            // id (a room id is the hash of its create event), so DMs made side by side would be one room with every bot
+            let mut made = self.link_creating.lock().await;
+            // the DM this account already made here: m.direct, which marks it, may not have synced back yet
+            let mut room = made.get(&key).and_then(|id| client.get_room(id)).filter(|r| r.state() == RoomState::Joined);
+            if room.is_none() {
+                let existing = client
+                    .joined_rooms()
+                    .into_iter()
+                    .filter(|r| r.direct_targets().iter().any(|t| t.as_user_id() == Some(&*bot)))
+                    .collect::<Vec<_>>();
+                for r in &existing {
+                    if bot_joined(r, &bot).await {
+                        room = Some(r.clone());
+                        break;
+                    }
                 }
+                room = room.or_else(|| existing.into_iter().next());
             }
-            room = room.or_else(|| existing.into_iter().next());
-        }
-        let room = match room {
-            Some(r) => r,
-            None => client.create_dm(&bot).await.map_err(from_sdk)?,
-        };
-        made.insert(key, room.room_id().to_owned());
-        drop(made);
-        self.watch_link(client, account, net, &room, &bot).await?;
-        let started = std::time::Instant::now();
-        while !bot_joined(&room, &bot).await {
-            if started.elapsed() > BOT_JOIN_WAIT {
-                let mut row = self.link_row(net);
-                row.state = "unavailable";
-                row.step = None;
-                row.note = Some(format!("The {} bridge isn't answering on the homeserver.", net.name));
-                self.set_link_row(row);
+            let fresh = room.is_none();
+            let room = match room {
+                Some(r) => r,
+                None => {
+                    // a bot its bridge has never started has no account yet: no DM for it, so none waits on a dead invite
+                    if let Err(e) = client.account().fetch_user_profile_of(&bot).await {
+                        if e.as_client_api_error().is_some_and(|api| api.status_code.as_u16() == 404) {
+                            drop(made);
+                            self.mark_unavailable(net);
+                            return Ok(None);
+                        }
+                    }
+                    client.create_dm(&bot).await.map_err(from_sdk)?
+                }
+            };
+            made.insert(key.clone(), room.room_id().to_owned());
+            drop(made);
+            self.watch_link(client, account, net, &room, &bot).await?;
+            let started = std::time::Instant::now();
+            while !bot_joined(&room, &bot).await && started.elapsed() < BOT_JOIN_WAIT {
+                tokio::time::sleep(Duration::from_millis(500)).await;
+            }
+            if bot_joined(&room, &bot).await {
+                if self.link_row(net).state == "unavailable" {
+                    let mut row = self.link_row(net);
+                    row.state = state_of(&row.accounts, row.known);
+                    row.note = None;
+                    self.set_link_row(row);
+                }
+                return Ok(Some(room));
+            }
+            // the bot never came (its bridge was down when it was invited, and an invite isn't sent again): leave this
+            // DM, so a fresh one is made, which the running bridge sees. Once; if that one isn't joined either, the
+            // bridge isn't running.
+            self.link_creating.lock().await.remove(&key);
+            if let Some(t) = self.open.lock().await.links.remove(net.id) {
+                t.abort();
+            }
+            let _ = self.close(room.room_id().as_str()).await;
+            let _ = room.leave().await;
+            let _ = room.forget().await;
+            if fresh || fresh_tried {
+                self.mark_unavailable(net);
                 return Ok(None);
             }
-            tokio::time::sleep(Duration::from_millis(500)).await;
+            fresh_tried = true;
         }
-        if self.link_row(net).state == "unavailable" {
-            let mut row = self.link_row(net);
-            row.state = state_of(&row.accounts, row.known);
-            row.note = None;
-            self.set_link_row(row);
-        }
-        Ok(Some(room))
     }
 
     /// Follow the bot DM's timeline and keep `net`'s row up to date. Once per room and account.
@@ -508,12 +557,14 @@ impl Messages {
         let mut row = self.link_row(net);
         let mut done = false;
         match exchange {
-            Exchange::Idle | Exchange::Logins(None) => {}
+            // nothing new from the bot: the card stays as it is (a bridge found not running stays so)
+            Exchange::Idle | Exchange::Logins(None) => return false,
             Exchange::Logins(Some(accounts)) => {
                 row.step = None;
                 row.note = None;
                 row.accounts = accounts;
                 row.known = true;
+                row.answers += 1;
             }
             Exchange::Cancelled => {
                 row.step = None;
