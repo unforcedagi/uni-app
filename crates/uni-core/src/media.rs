@@ -630,7 +630,8 @@ pub fn download_name(filename: Option<&str>, url: &str, sha: &str) -> String {
         // Keep the extension; shorten the stem.
         let (stem, ext) = name.rsplit_once('.').filter(|(_, e)| e.chars().count() <= 8).unwrap_or((&name, ""));
         let keep = if ext.is_empty() { DOWNLOAD_NAME_BYTES } else { DOWNLOAD_NAME_BYTES - ext.len() - 1 };
-        let stem = cap_bytes(stem, keep);
+        // A cut can leave a trailing dot or space, which Windows and some share targets drop.
+        let stem = cap_bytes(stem, keep).trim_end_matches(|c: char| c == '.' || c.is_whitespace());
         name = if ext.is_empty() { stem.to_string() } else { format!("{stem}.{ext}") };
     }
     name
@@ -1676,6 +1677,9 @@ mod tests {
         // No extension: the whole name is cut, never inside a character.
         let bare = download_name(Some(&"é".repeat(200)), "https://relay.example/media/x", sha);
         assert_eq!(bare, "é".repeat(DOWNLOAD_NAME_BYTES / 2));
+        // A cut never leaves a trailing dot or space.
+        let dotted = format!("{}. 長長長.pdf", "a".repeat(DOWNLOAD_NAME_BYTES - 4 - 2));
+        assert_eq!(download_name(Some(&dotted), &url, sha), format!("{}.pdf", "a".repeat(DOWNLOAD_NAME_BYTES - 4 - 2)));
         // A cut that falls just after an emoji joiner drops the joiner too.
         let family = format!("{}👩\u{200d}👩\u{200d}👧.pdf", "a".repeat(DOWNLOAD_NAME_BYTES - 4 - 7));
         assert_eq!(download_name(Some(&family), &url, sha), format!("{}👩.pdf", "a".repeat(DOWNLOAD_NAME_BYTES - 4 - 7)));

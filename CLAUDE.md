@@ -45,8 +45,8 @@ a denylisted word in a commit message.
 
 `public-ok` on a line exempts it from the host/address patterns only, never from denylisted words. Use it only for
 shipped config that must hold the real value, and say why on the line. Today: the default hub and its alias
-(`src-tauri/src/lib.rs`, `crates/uni-core/src/hub.rs`), the legacy APK host (`scripts/publish.sh`,
-`scripts/devices.sh`), the transcription URL default (`services/transcribe/server.py`), and the guard's own tests.
+(`src-tauri/src/lib.rs`, `crates/uni-core/src/hub.rs`), the legacy APK host
+(`scripts/devices.sh`), the transcription URL default (`services/transcribe/server.py`), and the guard's own tests.
 
 ## Gates before a commit is ready
 
@@ -55,6 +55,7 @@ The same ones `publish.sh` runs before it builds a release:
 ```sh
 python3 scripts/check-case-collisions.py && python3 scripts/test_case_collisions.py
 python3 scripts/test_check_public.py && python3 scripts/check-public.py
+python3 scripts/test_release_check.py
 pnpm typecheck
 pnpm test
 cargo test --workspace

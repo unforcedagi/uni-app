@@ -86,11 +86,13 @@ gh release create "$TAG" --repo "$REPO_SLUG" --target "$SHA" --latest \
   "$STAGE/Uni-mac-arm64.zip" "$STAGE/Uni.app.tar.gz" "$STAGE/Uni.app.tar.gz.sig" \
   "$STAGE/uni.apk" "$STAGE/latest.json" "$STAGE/android.json"
 git fetch --quiet origin --tags
-# Read the release by its tag (GitHub caches releases/latest). A release that never serves its manifest is broken: stop.
-retry 6 5 release_serves "$REPO_SLUG" "$TAG" "$VERSION" || { echo "Release $TAG does not serve latest.json for $VERSION" >&2; exit 1; }
-# The tag exists now, so a later tick will not come back for the device installs below: a slow "latest" only warns.
-if retry 6 5 release_is_latest "$REPO_SLUG" "$TAG"; then echo "GitHub names $TAG the latest release" >&2
-else echo "Warning: GitHub does not name $TAG the latest release yet; installed apps update once it does" >&2; fi
+# Read the release back by its tag, then at the address installed apps poll, which GitHub caches for a while. Neither
+# stops the run here: the tag exists now, so a later tick would never come back for the device installs below.
+RELEASE_READABLE=1
+if ! retry 6 5 release_serves "$REPO_SLUG" "$TAG" "$VERSION"; then
+  RELEASE_READABLE=0; echo "Release $TAG does not serve latest.json for $VERSION" >&2
+elif retry 7 10 release_is_latest "$REPO_SLUG" "$VERSION"; then echo "GitHub releases/latest now serves $VERSION" >&2
+else echo "Warning: GitHub releases/latest does not serve $VERSION yet; installed apps update once it does" >&2; fi
 # The tailnet download page (atomic swaps). It is a convenience: a failed copy never fails a published release.
 { mkdir -p "$SERVE/android" &&
   cp "$STAGE/uni.apk" "$SERVE/uni.apk.tmp" && mv "$SERVE/uni.apk.tmp" "$SERVE/uni.apk" &&
@@ -105,6 +107,7 @@ while read -r NAME SERIAL; do
   if timeout 900 adb -s "$SERIAL" install -r "$STAGE/uni.apk" </dev/null; then echo "$NAME: upgraded to $VERSION"
   else echo "$NAME: install failed; never uninstall, inspect signature" >&2; fi
 done < <(python3 scripts/connect-devices.py || true)
+((RELEASE_READABLE)) || { echo "Published $TAG, but it could not be read back by its tag: check the release" >&2; exit 1; }
 echo "Published $TAG ($SHA): https://github.com/$REPO_SLUG/releases/tag/$TAG"
 }
 main "$@"

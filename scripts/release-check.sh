@@ -17,15 +17,19 @@ retry() {
   done
 }
 
+# manifest_version: the "version" of the JSON manifest on stdin; nothing for anything else.
+manifest_version() { python3 -c 'import json,sys;print(json.load(sys.stdin)["version"])' 2>/dev/null; }
+
 # release_serves REPO TAG VERSION: the release tagged TAG has a latest.json for VERSION.
 release_serves() {
-  local live
-  live="$(gh release download "$2" --repo "$1" --pattern latest.json --output - |
-    python3 -c 'import json,sys;print(json.load(sys.stdin)["version"])')" || return 1
-  [[ $live == "$3" ]]
+  local json
+  json="$(gh release download "$2" --repo "$1" --pattern latest.json --output -)" || return 1
+  [[ $(manifest_version <<<"$json") == "$3" ]]
 }
 
-# release_is_latest REPO TAG: GitHub names TAG the latest release, which is where installed apps look for updates.
+# release_is_latest REPO VERSION: the address installed apps poll for updates serves VERSION.
 release_is_latest() {
-  [[ $(gh api "repos/$1/releases/latest" --jq .tag_name) == "$2" ]]
+  local json
+  json="$(curl -fsSL "https://github.com/$1/releases/latest/download/latest.json")" || return 1
+  [[ $(manifest_version <<<"$json") == "$2" ]]
 }
