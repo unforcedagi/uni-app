@@ -5,7 +5,8 @@
 // DESIGN.md), not built. Shape and word before colour, so it reads on the Daylight, where nothing moves.
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type FormEvent, type KeyboardEvent } from "react";
 import { closeRoom, join, lastOpen, markRead, older, onUpdate, openRoom, rememberOpen, rooms as readRooms, send, signIn, signOut, status as readStatus } from "./messagesDoor.ts";
-import { applyOpened, applyTimeline, asMessagesErr, initials, previewLine, problemText, rowTime, sendWords, shownItems, statusWords, timeLabel, type MessagesErr, type RoomRow, type Status, type Thread } from "./messagesView.ts";
+import { applyLink, applyOpened, applyTimeline, asMessagesErr, initials, previewLine, problemText, rowTime, sendWords, shownItems, statusWords, timeLabel, type LinkRow, type MessagesErr, type RoomRow, type Status, type Thread } from "./messagesView.ts";
+import LinkAccounts from "./LinkAccounts.tsx";
 import { enterInsertsNewline } from "../composerCore";
 import "./Messages.css";
 
@@ -145,6 +146,9 @@ export default function Messages({ backTo, onBack }: { backTo: string; onBack: (
   const [pane, setPane] = useState<"list" | "thread">("list");
   const [problem, setProblem] = useState<MessagesErr | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  /** The Link screen (T-282) in place of the conversations, and its cards as the bridges last said. */
+  const [linkView, setLinkView] = useState(false);
+  const [linkRows, setLinkRows] = useState<LinkRow[] | null>(null);
   const seq = useRef(0);
   const openId = useRef<string | null>(null);
   const phone = useMedia(PHONE);
@@ -177,6 +181,7 @@ export default function Messages({ backTo, onBack }: { backTo: string; onBack: (
       if (!alive) return;
       if (u.kind === "status") setStatus(u.status);
       else if (u.kind === "rooms") setList(u.rooms);
+      else if (u.kind === "link") setLinkRows((rows) => applyLink(rows, u.link));
       else setThread((t) => applyTimeline(t, u.room_id, u.items));
     });
     void (async () => {
@@ -193,7 +198,8 @@ export default function Messages({ backTo, onBack }: { backTo: string; onBack: (
 
   const signedIn = !!status && status.state !== "signed_out";
   const openRow = thread ? list?.find((r) => r.id === thread.roomId) ?? null : null;
-  const out = async () => { try { setStatus(await signOut()); setList(null); setThread(null); openId.current = null; rememberOpen(null); } catch (err) { setProblem(asMessagesErr(err)); } };
+  const out = async () => { try { setStatus(await signOut()); setList(null); setThread(null); setLinkView(false); setLinkRows(null); openId.current = null; rememberOpen(null); } catch (err) { setProblem(asMessagesErr(err)); } };
+  const linkButton = <button type="button" className="note-quiet msgs-link-open" onClick={() => setLinkView(true)}>Link an account</button>;
 
   return <section className={`msgs ${still ? "msgs-still" : ""}`} aria-label="Messages" data-pane={pane}>
     <header className="note-bar msgs-bar">
@@ -203,12 +209,13 @@ export default function Messages({ backTo, onBack }: { backTo: string; onBack: (
     </header>
     {!status && !problem ? <p className="msgs-loading" role="status">Opening Messages…</p>
     : !signedIn ? <div className="msgs-scroll">{problem && <p className="msgs-problem" role="alert">{problemText(problem)}</p>}{status?.error && <p className="msgs-problem" role="status">{status.error}</p>}<SignIn onDone={(s) => { setStatus(s); void loadRooms(); }} /></div>
+    : linkView ? <LinkAccounts rows={linkRows} setRows={setLinkRows} onBack={() => setLinkView(false)} />
     : <div className="msgs-panes">
       <nav className="msgs-rooms" aria-label="Conversations">
-        <div className="msgs-rooms-head"><strong>Conversations</strong>{list && <small>{list.length}</small>}</div>
+        <div className="msgs-rooms-head"><strong>Conversations</strong>{list && <small>{list.length}</small>}{linkButton}</div>
         <div className="msgs-scroll">
           {!list ? <p className="msgs-loading" role="status">Loading conversations…</p>
-            : list.length === 0 ? <p className="empty">No conversations yet.</p>
+            : list.length === 0 ? <div className="empty msgs-empty"><p>No conversations yet.</p><p>Bring in your chats from Signal, WhatsApp, Telegram and others.</p><button type="button" className="send" onClick={() => setLinkView(true)}>Link an account</button></div>
             : <ul className="msgs-rows">{list.map((r) => <RoomItem key={r.id} r={r} now={now} selected={thread?.roomId === r.id} onOpen={() => void open(r.id)} />)}</ul>}
         </div>
       </nav>

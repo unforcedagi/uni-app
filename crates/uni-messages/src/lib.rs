@@ -12,9 +12,11 @@
 //! one. Everything else (sending, opening a room, the room list) never waits on a network call it doesn't make.
 #![recursion_limit = "256"]
 
+mod link;
 mod secrets;
 mod view;
 
+pub use link::{Flow, LinkRow, LinkStep, LinkedAccount, Network, NETWORKS};
 pub use secrets::{FileSecrets, Secrets};
 pub use view::{checked_homeserver, MessageKind, MessageRow, RoomRow, SendState};
 
@@ -92,6 +94,8 @@ pub enum Update {
     Rooms { rooms: Vec<RoomRow> },
     /// One open room's messages, oldest first, the whole loaded window each time.
     Timeline { room_id: String, items: Vec<MessageRow> },
+    /// One network's card on the Link screen (T-282).
+    Link { link: LinkRow },
 }
 
 /// The error shape the app's other doors use: `{ kind, message }`.
@@ -175,6 +179,8 @@ struct OpenRooms {
     /// replaced is not kept.
     account: Option<String>,
     rooms: HashMap<OwnedRoomId, OpenRoom>,
+    /// Each bridge bot's DM, watched for the Link screen (link.rs), by network.
+    links: HashMap<&'static str, JoinHandle<()>>,
 }
 
 impl Live {
@@ -217,6 +223,10 @@ pub struct Messages {
     status: StdMutex<Status>,
     /// The last room list, for `rooms()`.
     rooms: StdMutex<Vec<RoomRow>>,
+    /// The Link screen's cards, by network, as last read from the bridge bots.
+    links: StdMutex<link::LinkRows>,
+    /// Bot DMs are found or made one at a time (link.rs says why); the ones made here, by account and network.
+    link_creating: tokio::sync::Mutex<HashMap<(String, &'static str), OwnedRoomId>>,
 }
 
 impl Messages {
@@ -233,6 +243,8 @@ impl Messages {
             resubscribe: Arc::new(Notify::new()),
             status: StdMutex::new(Status::signed_out(None)),
             rooms: StdMutex::new(Vec::new()),
+            links: StdMutex::new(Default::default()),
+            link_creating: tokio::sync::Mutex::new(HashMap::new()),
         })
     }
 
@@ -449,9 +461,13 @@ impl Messages {
         for (_, r) in open.rooms.drain() {
             r.task.abort();
         }
+        for (_, t) in open.links.drain() {
+            t.abort();
+        }
         open.account = account;
         drop(open);
         self.rooms.lock().unwrap().clear();
+        self.links.lock().unwrap().clear();
     }
 
     /// Stop the running account without signing out, as the app does when it quits: the saved account stays, and the
@@ -559,7 +575,12 @@ impl Messages {
                     _ = resubscribe.notified() => false,
                 };
                 let Some(me) = me.upgrade() else { break };
-                let rooms: Vec<Room> = list.iter().map(|r: &matrix_sdk_ui::room_list_service::RoomListItem| (**r).clone()).collect();
+                // conversations only: a bridge's spaces and its bot's DM (linking, T-282) are not shown as conversations
+                let rooms: Vec<Room> = list
+                    .iter()
+                    .map(|r: &matrix_sdk_ui::room_list_service::RoomListItem| (**r).clone())
+                    .filter(|r| !r.is_space() && link::bridge_of(r).is_none())
+                    .collect();
                 // the most recent rooms and the open ones are subscribed: their latest message is known, and an open
                 // room gets every event. Compared as a set, so a reordering alone doesn't resubscribe.
                 let mut want: Vec<OwnedRoomId> = rooms.iter().take(SUBSCRIBED_ROOMS).map(|r| r.room_id().to_owned()).collect();
@@ -714,6 +735,11 @@ impl Messages {
             "messages_join" => to(&self.join(&s("roomId")).await?),
             "messages_older" => to(&self.older(&s("roomId")).await?),
             "messages_read" => to(&self.read(&s("roomId")).await?),
+            "messages_links" => to(&self.links().await?),
+            "messages_link_check" => to(&self.link_check(&s("network")).await?),
+            "messages_link_start" => to(&self.link_start(&s("network"), Some(&s("flow")), Some(&s("relogin"))).await?),
+            "messages_link_send" => to(&self.link_send(&s("network"), &s("value")).await?),
+            "messages_link_cancel" => to(&self.link_cancel(&s("network")).await?),
             _ => return Err(invalid(format!("no such command: {cmd}"))),
         })
     }

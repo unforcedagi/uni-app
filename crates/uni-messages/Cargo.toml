@@ -24,6 +24,8 @@ tracing = { workspace = true }
 url = { workspace = true }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 rand = "0.9"
+# the bridges' login QR codes, drawn by the app from their modules (link.rs)
+qrcode = { version = "0.14", default-features = false }
 axum = { version = "0.8", optional = true, default-features = false, features = ["http1", "json", "tokio", "query"] }
 clap = { workspace = true, optional = true }
 tracing-subscriber = { workspace = true, optional = true }

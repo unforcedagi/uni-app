@@ -98,3 +98,42 @@
   .msgs-thread-bar { padding: 8px 10px; }
   .msgs-msg { max-width: 86%; }
 }
+
+/* Link an account (T-282): one card per network, its state a word in a tag, its login step inside it */
+.msgs-link-open { margin-left: auto; padding: 0 10px; font-size: 13px; }
+.msgs-rooms-head strong { flex: none; }
+.msgs-empty { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.msgs-empty p { margin: 0; }
+.msgs-link { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.msgs-link-lead { max-width: 760px; margin: 14px auto 4px; padding: 0 18px; }
+.msgs-cards { list-style: none; margin: 0 auto; padding: 8px 18px 28px; max-width: 760px; display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+.msgs-card { display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; border: 1.5px solid var(--line-strong, var(--line)); border-radius: var(--radius); background: var(--surface); }
+.msgs-card.st-needs_attention { border-color: var(--th-ink); border-style: dashed; }
+.msgs-card-head { display: flex; align-items: center; gap: 10px; }
+.msgs-card-head h3 { flex: 1; margin: 0; font-family: var(--serif); font-weight: 500; font-size: 19px; }
+.msgs-link-tag.st-linked { background: var(--th-ink); color: var(--th-card); }
+.msgs-link-tag.st-needs_attention, .msgs-link-tag.st-unavailable, .msgs-link-tag.st-checking { border-style: dashed; }
+.msgs-card-how, .msgs-card-keep, .msgs-link-hint, .msgs-card-note { margin: 0; font-size: 13.5px; line-height: 1.45; color: var(--text-soft); }
+.msgs-card-keep { color: var(--muted); font-size: 12.5px; }
+.msgs-card-note { color: var(--text); padding-left: 10px; border-left: 3px solid var(--line-strong, var(--line)); white-space: pre-wrap; }
+.msgs-card-accounts { list-style: none; margin: 0; padding: 0; font-size: 14px; color: var(--text); }
+.msgs-card-accounts small { color: var(--muted); margin-left: 6px; }
+.msgs-link-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.msgs-link-actions .send, .msgs-link-actions .note-action { min-height: 44px; }
+.msgs-link-flows { display: flex; flex-direction: column; gap: 8px; }
+.msgs-link-flow { min-height: 44px; padding: 8px 12px; text-align: left; border: 1.5px solid var(--line-strong, var(--line)); border-radius: 10px; background: var(--bg); color: var(--text); font-size: 14px; }
+.msgs-link-flow strong { font-weight: 500; }
+.msgs-link-flow:hover { border-color: var(--th-ink); }
+.msgs-link-form { display: flex; flex-direction: column; gap: 8px; }
+.msgs-link-form label { display: flex; flex-direction: column; gap: 4px; font-size: 14px; color: var(--muted); }
+.msgs-link-form input, .msgs-link-form select, .msgs-link-form textarea { min-height: 44px; padding: 8px 12px; border: 1.5px solid var(--line-strong, var(--line)); border-radius: 10px; background: var(--bg); color: var(--text); font: 15px var(--sans); box-sizing: border-box; }
+.msgs-link-form textarea { font: 13px/1.4 var(--mono); resize: vertical; }
+.msgs-link-steps { margin: 0; padding-left: 20px; font-size: 13.5px; line-height: 1.5; color: var(--text-soft); }
+.msgs-link-qr { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.msgs-qr { width: min(280px, 78vw); height: auto; border: 1.5px solid var(--th-ink); border-radius: 6px; background: #fff; }
+.msgs-code { margin: 0; font: 700 26px/1.3 var(--th-mono, var(--mono)); letter-spacing: .08em; text-align: center; color: var(--text); }
+.msgs-link-done { margin: 0; font-size: 14px; color: var(--text); font-weight: 600; }
+@media (max-width: 699px) {
+  .msgs-cards { grid-template-columns: minmax(0, 1fr); padding: 8px 12px 24px; }
+  .msgs-link-bar { padding: 8px 10px; }
+}

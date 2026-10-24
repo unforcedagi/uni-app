@@ -2898,7 +2898,17 @@ pub fn run() {
             #[cfg(feature = "messages")]
             messages::messages_older,
             #[cfg(feature = "messages")]
-            messages::messages_read
+            messages::messages_read,
+            #[cfg(feature = "messages")]
+            messages::messages_links,
+            #[cfg(feature = "messages")]
+            messages::messages_link_check,
+            #[cfg(feature = "messages")]
+            messages::messages_link_start,
+            #[cfg(feature = "messages")]
+            messages::messages_link_send,
+            #[cfg(feature = "messages")]
+            messages::messages_link_cancel
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -3,7 +3,7 @@
 // midnight and a sender's run breaks after five minutes; a rejection keeps the door's shape.
 // Run: node --experimental-strip-types scripts/messages.test.ts
 import assert from "node:assert/strict";
-import { applyOpened, applyTimeline, asMessagesErr, previewLine, shownItems, type MessageRow, type RoomRow, type Thread } from "../src/messages/messagesView.ts";
+import { applyLink, applyOpened, applyTimeline, asMessagesErr, previewLine, qrPath, shownItems, type LinkRow, type MessageRow, type RoomRow, type Thread } from "../src/messages/messagesView.ts";
 
 let n = 0;
 const t = (name: string, f: () => void) => { f(); n++; console.log(`ok ${name}`); };
@@ -64,6 +64,22 @@ t("a command's rejection keeps the door's kind; anything else is a server proble
   assert.deepEqual(asMessagesErr({ kind: "refused", message: "M_FORBIDDEN" }), { kind: "refused", message: "M_FORBIDDEN" });
   assert.equal(asMessagesErr({ kind: "teleport", message: "x" }).kind, "server");
   assert.equal(asMessagesErr("Command messages_status not found").kind, "server");
+});
+
+t("a QR is drawn from its 0s and 1s only: runs of dark modules, inside the quiet zone", () => {
+  const { size, d } = qrPath(["110", "011", "000"]);
+  assert.equal(size, 11);
+  assert.equal(d, "M4 4h2v1h-2zM5 5h2v1h-2z");
+  // anything but a 1 is light: a row can't carry markup or a path command into the page
+  assert.equal(qrPath(['1"/><script>', "x1"]).d, "M4 4h1v1h-1zM5 5h1v1h-1z");
+});
+
+t("a card's update replaces only that network's card", () => {
+  const row = (network: string, state: LinkRow["state"]): LinkRow => ({ network, name: network, state, accounts: [], step: null, note: null });
+  const rows = [row("signal", "checking"), row("whatsapp", "checking")];
+  assert.deepEqual(applyLink(rows, row("whatsapp", "linked"))?.map((r) => r.state), ["checking", "linked"]);
+  assert.equal(applyLink(null, row("signal", "linked")), null, "before the screen has its cards, an update waits for them");
+  assert.deepEqual(applyLink(rows, row("matrix", "linked"))?.map((r) => r.network), ["signal", "whatsapp", "matrix"]);
 });
 
 console.log(`${n} messages view checks passed`);

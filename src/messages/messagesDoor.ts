@@ -4,7 +4,7 @@
 // Messages: only once a build that has it has answered.
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { asMessagesErr, OPEN_KEY, SEEN_KEY, type MessageRow, type RoomRow, type Status, type Update } from "./messagesView.ts";
+import { asMessagesErr, OPEN_KEY, SEEN_KEY, type LinkRow, type MessageRow, type RoomRow, type Status, type Update } from "./messagesView.ts";
 
 async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   try { return await invoke<T>(cmd, args); } catch (e) { throw asMessagesErr(e); }
@@ -20,6 +20,13 @@ export const send = (roomId: string, body: string) => call<null>("messages_send"
 export const join = (roomId: string) => call<null>("messages_join", { roomId });
 export const older = (roomId: string) => call<boolean>("messages_older", { roomId });
 export const markRead = (roomId: string) => call<null>("messages_read", { roomId });
+
+// linking accounts (T-282): each answers with the network's card; later changes arrive as `link` updates
+export const links = () => call<LinkRow[]>("messages_links");
+export const linkCheck = (network: string) => call<LinkRow>("messages_link_check", { network });
+export const linkStart = (network: string, flow?: string, relogin?: string) => call<LinkRow>("messages_link_start", { network, flow: flow ?? null, relogin: relogin ?? null });
+export const linkSend = (network: string, value: string) => call<LinkRow>("messages_link_send", { network, value });
+export const linkCancel = (network: string) => call<LinkRow>("messages_link_cancel", { network });
 
 /** Live updates: the room list, the open room's messages, the sync's status. */
 export function onUpdate(f: (u: Update) => void): () => void {

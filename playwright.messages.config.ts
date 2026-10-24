@@ -3,7 +3,8 @@ import { randomBytes } from 'node:crypto';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-// T-278 Messages against a live homeserver (scripts/browser/messages.spec.ts says what it needs).
+// T-278 Messages against a live homeserver (scripts/browser/messages.spec.ts says what it needs), and T-282's Link
+// screen against the live bridges (messagesLink.spec.ts).
 // MESSAGES_TEST_PORT / MESSAGES_BRIDGE_PORT: another worktree's preview may hold the defaults.
 const port = Number(process.env.MESSAGES_TEST_PORT || 5788);
 const bridgePort = Number(process.env.MESSAGES_BRIDGE_PORT || 5789);
@@ -13,7 +14,7 @@ process.env.MESSAGES_BRIDGE_DIR ||= mkdtempSync(join(tmpdir(), 'uni-messages-bri
 process.env.MESSAGES_BRIDGE_URL ||= `http://127.0.0.1:${bridgePort}`;
 export default defineConfig({
   outputDir: 'test-results/messages',
-  testDir: './scripts/browser', testMatch: /messages\.spec\.ts$/, reporter: 'list',
+  testDir: './scripts/browser', testMatch: /messages(Link)?\.spec\.ts$/, reporter: 'list',
   timeout: 120_000,
   use: { baseURL: `http://127.0.0.1:${port}`, colorScheme: 'light', trace: 'retain-on-failure' },
   projects: [

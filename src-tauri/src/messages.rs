@@ -9,7 +9,7 @@
 use std::sync::Arc;
 
 use tauri::{Emitter, Manager, Runtime, State};
-use uni_messages::{FileSecrets, MessageRow, Messages, MessagesError, RoomRow, Status};
+use uni_messages::{FileSecrets, LinkRow, MessageRow, Messages, MessagesError, RoomRow, Status};
 
 pub struct MessagesState(Arc<Messages>);
 
@@ -84,4 +84,31 @@ pub async fn messages_older(s: State<'_, MessagesState>, room_id: String) -> Res
 #[tauri::command]
 pub async fn messages_read(s: State<'_, MessagesState>, room_id: String) -> Result<(), MessagesError> {
     s.0.read(&room_id).await
+}
+
+// ── Linking accounts (T-282): the bridge bots' logins, read as steps (uni-messages link.rs) ──
+
+#[tauri::command]
+pub async fn messages_links(s: State<'_, MessagesState>) -> Result<Vec<LinkRow>, MessagesError> {
+    s.0.links().await
+}
+
+#[tauri::command]
+pub async fn messages_link_check(s: State<'_, MessagesState>, network: String) -> Result<LinkRow, MessagesError> {
+    s.0.link_check(&network).await
+}
+
+#[tauri::command]
+pub async fn messages_link_start(s: State<'_, MessagesState>, network: String, flow: Option<String>, relogin: Option<String>) -> Result<LinkRow, MessagesError> {
+    s.0.link_start(&network, flow.as_deref(), relogin.as_deref()).await
+}
+
+#[tauri::command]
+pub async fn messages_link_send(s: State<'_, MessagesState>, network: String, value: String) -> Result<LinkRow, MessagesError> {
+    s.0.link_send(&network, &value).await
+}
+
+#[tauri::command]
+pub async fn messages_link_cancel(s: State<'_, MessagesState>, network: String) -> Result<LinkRow, MessagesError> {
+    s.0.link_cancel(&network).await
 }

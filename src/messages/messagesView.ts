@@ -6,7 +6,7 @@ export type RoomRow = { id: string; name: string; preview: string | null; previe
 export type MessageKind = "text" | "notice" | "emote" | "media" | "undecryptable";
 export type SendState = "remote" | "sending" | "sent" | "failed";
 export type MessageRow = { key: string; event_id: string | null; sender: string; sender_name: string; own: boolean; ts: number; kind: MessageKind; body: string; state: SendState; encrypted: boolean; edited: boolean };
-export type Update = { kind: "status"; status: Status } | { kind: "rooms"; rooms: RoomRow[] } | { kind: "timeline"; room_id: string; items: MessageRow[] };
+export type Update = { kind: "status"; status: Status } | { kind: "rooms"; rooms: RoomRow[] } | { kind: "timeline"; room_id: string; items: MessageRow[] } | { kind: "link"; link: LinkRow };
 export type MessagesErr = { kind: "signed_out" | "unreachable" | "refused" | "invalid" | "server"; message: string };
 
 export const SEEN_KEY = "uni.messages.seen.v1";
@@ -124,4 +124,66 @@ export function statusWords(s: Status | null): string {
     case "error": return "NOT SYNCING";
     case "signed_out": return "SIGNED OUT";
   }
+}
+
+// ── Linking accounts (T-282): one card per network, read from its bridge bot by the Rust core (link.rs) ─────────────
+
+export type LinkState = "checking" | "linked" | "not_linked" | "needs_attention" | "unavailable";
+export type LinkedAccount = { id: string; name: string; state: string; attention: boolean };
+export type Flow = { id: string; description: string };
+export type LinkStep =
+  | { kind: "flows"; flows: Flow[] }
+  | { kind: "input"; name: string; description: string | null; options: string[]; optional: boolean; secret: boolean }
+  | { kind: "qr"; modules: string[] }
+  | { kind: "code"; code: string }
+  | { kind: "cookies"; url: string }
+  | { kind: "waiting" }
+  | { kind: "done"; text: string }
+  | { kind: "failed"; text: string };
+export type LinkRow = { network: string; name: string; state: LinkState; accounts: LinkedAccount[]; step: LinkStep | null; note: string | null };
+
+/** What each card says about its network: how you link it, and what keeps it linked. Plain words, no promises. */
+export const NETWORK_INFO: Record<string, { how: string; keep: string }> = {
+  telegram: { how: "Your phone number, then the code Telegram sends to your Telegram app.", keep: "Steady once linked. Secret chats don't come across." },
+  signal: { how: "Scan a QR code with Signal on your phone: Settings, Linked devices.", keep: "Open Signal on your phone at least every 30 days, or the link ends." },
+  whatsapp: { how: "Scan a QR code with WhatsApp on your phone: Linked devices. Or pair with a code.", keep: "Your phone must come online every couple of weeks." },
+  gmessages: { how: "Sign in to Google in a browser and paste its cookies here, then tap the matching emoji on your phone.", keep: "Your phone stays the hub: it must be on and online for texts to flow." },
+  messenger: { how: "Your Facebook username and password, or cookies from messenger.com.", keep: "Fragile: Meta can flag a new login and ask for a check. Two-factor sign-in helps." },
+  instagram: { how: "Your Instagram username and password, or cookies from instagram.com.", keep: "Fragile: Meta can flag a new login and ask for a check." },
+};
+
+export function linkWords(s: LinkState): string {
+  switch (s) {
+    case "checking": return "CHECKING";
+    case "linked": return "LINKED";
+    case "not_linked": return "NOT LINKED";
+    case "needs_attention": return "NEEDS ATTENTION";
+    case "unavailable": return "NOT RUNNING";
+  }
+}
+
+/** A card's update replaces that network's card only; an unknown network is added at the end. */
+export function applyLink(rows: LinkRow[] | null, row: LinkRow): LinkRow[] | null {
+  if (!rows) return rows;
+  return rows.some((r) => r.network === row.network) ? rows.map((r) => (r.network === row.network ? row : r)) : [...rows, row];
+}
+
+/** A login is under way: the card shows its step and a way to stop. */
+export const linking = (r: LinkRow) => !!r.step && r.step.kind !== "done" && r.step.kind !== "failed";
+
+/** The QR's dark modules as one SVG path, in module units, inside a 4-module quiet zone. Only 0 and 1 are read, so
+ * nothing from the bridge reaches the page as markup. */
+export function qrPath(modules: string[]): { size: number; d: string } {
+  const n = modules.length;
+  let d = "";
+  modules.forEach((row, y) => {
+    for (let x = 0; x < row.length; x++) {
+      if (row[x] !== "1") continue;
+      let run = 1;
+      while (row[x + run] === "1") run++;
+      d += `M${x + 4} ${y + 4}h${run}v1h-${run}z`;
+      x += run - 1;
+    }
+  });
+  return { size: n + 8, d };
 }

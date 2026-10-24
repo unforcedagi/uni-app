@@ -7601,6 +7601,7 @@ dependencies = [
  "futures-util",
  "matrix-sdk",
  "matrix-sdk-ui",
+ "qrcode",
  "rand 0.9.5",
  "rustls",
  "serde",
