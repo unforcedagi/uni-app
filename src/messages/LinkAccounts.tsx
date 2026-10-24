@@ -4,7 +4,7 @@
 // bridge's bot in an encrypted DM and reads its replies as steps (crates/uni-messages link.rs); nothing here holds a
 // token. Nothing completes by itself: every value is typed here, and every QR is scanned on your phone.
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { linkCancel, linkCheck, links as readLinks, linkSend, linkStart } from "./messagesDoor.ts";
+import { linkCancel, linkCheck, links as readLinks, linkSend, linkStart, telegramKeys } from "./messagesDoor.ts";
 import { asMessagesErr, linking, linkWords, NETWORK_INFO, problemText, qrPath, type LinkRow, type LinkStep, type MessagesErr } from "./messagesView.ts";
 
 function Qr({ modules, label }: { modules: string[]; label: string }) {
@@ -45,6 +45,27 @@ function Cookies({ url, onSend, busy }: { url: string; onSend: (v: string) => vo
     </ol>
     <label><span>cURL command or cookies (JSON)</span><textarea value={value} onChange={(e) => setValue(e.target.value)} rows={4} spellCheck={false} autoCapitalize="none" required /></label>
     <div className="msgs-link-actions"><button className="send" disabled={busy || !value.trim()}>Send</button></div>
+  </form>;
+}
+
+/** Telegram's bridge needs the owner's own app keys before it can start; the door on the box takes them. */
+function TelegramKeys({ onSaved, onProblem }: { onSaved: () => void; onProblem: (p: MessagesErr | null) => void }) {
+  const [apiId, setApiId] = useState("");
+  const [apiHash, setApiHash] = useState("");
+  const [busy, setBusy] = useState(false);
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    telegramKeys(apiId.trim(), apiHash.trim()).then(() => { setApiId(""); setApiHash(""); onProblem(null); onSaved(); }, (err) => onProblem(asMessagesErr(err))).finally(() => setBusy(false));
+  };
+  return <form className="msgs-link-form" onSubmit={submit} aria-label="Telegram app keys">
+    <ol className="msgs-link-steps">
+      <li>Sign in at <a href="https://my.telegram.org/apps" target="_blank" rel="noreferrer">my.telegram.org</a> with your phone number.</li>
+      <li>Under API development tools, create an app (any name). Copy its api_id and api_hash here.</li>
+    </ol>
+    <label><span>api_id</span><input value={apiId} onChange={(e) => setApiId(e.target.value)} inputMode="numeric" autoComplete="off" required /></label>
+    <label><span>api_hash</span><input value={apiHash} onChange={(e) => setApiHash(e.target.value)} autoComplete="off" autoCapitalize="none" spellCheck={false} required /></label>
+    <div className="msgs-link-actions"><button className="send" disabled={busy || !apiId.trim() || !apiHash.trim()}>{busy ? "Starting the bridge…" : "Save and start"}</button></div>
   </form>;
 }
 
@@ -90,6 +111,7 @@ function Card({ row, onProblem }: { row: LinkRow; onProblem: (p: MessagesErr | n
     {info && <p className="msgs-card-how">{info.how}</p>}
     {row.accounts.length > 0 && <ul className="msgs-card-accounts">{row.accounts.map((a) => <li key={a.id}>{a.name} <small>{a.attention ? "can't connect" : a.state === "CONNECTED" ? "connected" : a.state.toLowerCase().replace(/_/g, " ")}</small></li>)}</ul>}
     {row.state === "unavailable" && <p className="msgs-link-hint">{row.network === "telegram" ? "The Telegram bridge isn't running yet: it needs a key you make at my.telegram.org first." : `The ${row.name} bridge isn't running on the box.`}</p>}
+    {row.state === "unavailable" && row.network === "telegram" && <TelegramKeys onProblem={onProblem} onSaved={() => window.setTimeout(() => act(() => linkCheck(row.network)), 5000)} />}
     {row.note && going && <p className="msgs-card-note">{row.note}</p>}
     {row.note && !going && row.state !== "unavailable" && row.step?.kind !== "done" && <p className="msgs-card-note">{row.note}</p>}
     {row.step && <Step row={row} busy={busy} act={act} />}

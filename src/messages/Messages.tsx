@@ -4,7 +4,7 @@
 // arrives while you look. Agents don't read any of this: the thread says so, and "bring Uni in" is designed (T-278
 // DESIGN.md), not built. Shape and word before colour, so it reads on the Daylight, where nothing moves.
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type FormEvent, type KeyboardEvent } from "react";
-import { closeRoom, join, lastOpen, markRead, older, onUpdate, openRoom, rememberOpen, rooms as readRooms, send, signIn, signOut, status as readStatus } from "./messagesDoor.ts";
+import { closeRoom, join, lastOpen, markRead, older, onUpdate, openRoom, rememberOpen, rooms as readRooms, send, signIn, signInDevice, signOut, status as readStatus } from "./messagesDoor.ts";
 import { applyLink, applyOpened, applyTimeline, asMessagesErr, initials, previewLine, problemText, rowTime, sendWords, shownItems, statusWords, timeLabel, type LinkRow, type MessagesErr, type RoomRow, type Status, type Thread } from "./messagesView.ts";
 import LinkAccounts from "./LinkAccounts.tsx";
 import { enterInsertsNewline } from "../composerCore";
@@ -27,22 +27,27 @@ function SignIn({ onDone }: { onDone: (s: Status) => void }) {
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<MessagesErr | null>(null);
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
+  const run = async (f: () => Promise<Status>) => {
     setBusy(true); setProblem(null);
-    try { const s = await signIn(homeserver, user, password); setPassword(""); onDone(s); }
+    try { const s = await f(); setPassword(""); onDone(s); }
     catch (err) { setProblem(asMessagesErr(err)); }
     finally { setBusy(false); }
   };
-  return <form className="msgs-signin" onSubmit={(e) => void submit(e)} aria-label="Sign in to Messages">
+  const submit = (e: FormEvent) => { e.preventDefault(); void run(() => signIn(homeserver, user, password)); };
+  return <div className="msgs-signin">
     <h1>Sign in to Messages</h1>
     <p className="msgs-note">Your conversations with people, on your own homeserver. They stay on this device and the homeserver: <strong>Uni can't read them.</strong></p>
-    <label><span>Homeserver</span><input value={homeserver} onChange={(e) => setHomeserver(e.target.value)} placeholder="https://matrix.example.ts.net" autoComplete="url" inputMode="url" required /></label>
-    <label><span>Username</span><input value={user} onChange={(e) => setUser(e.target.value)} autoComplete="username" autoCapitalize="none" required /></label>
-    <label><span>Password</span><input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" required /></label>
+    <button type="button" className="send msgs-signin-go" disabled={busy} onClick={() => void run(signInDevice)}>{busy ? "Signing in…" : "Sign in with this device"}</button>
+    <p className="msgs-link-hint">Your box signs this device in with its own key. No password is typed or sent.</p>
     {problem && <p className="msgs-problem" role="alert">{problemText(problem)}</p>}
-    <button className="send msgs-signin-go" disabled={busy}>{busy ? "Signing in…" : "Sign in"}</button>
-  </form>;
+    <form className="msgs-signin-form" onSubmit={submit} aria-label="Sign in to Messages">
+      <h2>Or with a password</h2>
+      <label><span>Homeserver</span><input value={homeserver} onChange={(e) => setHomeserver(e.target.value)} placeholder="https://matrix.example.ts.net" autoComplete="url" inputMode="url" required /></label>
+      <label><span>Username</span><input value={user} onChange={(e) => setUser(e.target.value)} autoComplete="username" autoCapitalize="none" required /></label>
+      <label><span>Password</span><input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" required /></label>
+      <button className="note-action msgs-signin-go" disabled={busy}>Sign in</button>
+    </form>
+  </div>;
 }
 
 function RoomItem({ r, selected, now, onOpen }: { r: RoomRow; selected: boolean; now: number; onOpen: () => void }) {

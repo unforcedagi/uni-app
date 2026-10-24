@@ -2908,7 +2908,11 @@ pub fn run() {
             #[cfg(feature = "messages")]
             messages::messages_link_send,
             #[cfg(feature = "messages")]
-            messages::messages_link_cancel
+            messages::messages_link_cancel,
+            #[cfg(feature = "messages")]
+            messages::messages_sign_in_device,
+            #[cfg(feature = "messages")]
+            messages::messages_telegram_keys
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

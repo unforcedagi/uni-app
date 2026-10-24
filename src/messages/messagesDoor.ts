@@ -12,6 +12,10 @@ async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> 
 
 export const status = () => call<Status | null>("messages_status");
 export const signIn = (homeserver: string, user: string, password: string) => call<Status>("messages_sign_in", { homeserver, user, password });
+/** T-282: the Matrix door on the hub's host signs this device in (its device key, no password on the device). */
+export const signInDevice = () => call<Status>("messages_sign_in_device");
+/** T-282: the owner's Telegram app keys, to the door, which starts the Telegram bridge with them. */
+export const telegramKeys = (apiId: string, apiHash: string) => call<null>("messages_telegram_keys", { apiId, apiHash });
 export const signOut = () => call<Status>("messages_sign_out");
 export const rooms = () => call<RoomRow[]>("messages_rooms");
 export const openRoom = (roomId: string) => call<MessageRow[]>("messages_open", { roomId });

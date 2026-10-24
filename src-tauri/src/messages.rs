@@ -112,3 +112,41 @@ pub async fn messages_link_send(s: State<'_, MessagesState>, network: String, va
 pub async fn messages_link_cancel(s: State<'_, MessagesState>, network: String) -> Result<LinkRow, MessagesError> {
     s.0.link_cancel(&network).await
 }
+
+// ── Signing in with this device (T-282): the Matrix door on the hub's host trades a NIP-98 signature by the device
+// key for a one-time login token, so no Matrix password reaches the device. ──
+
+fn door_err(e: uni_core::matrix_door::DoorError) -> MessagesError {
+    use uni_core::matrix_door::DoorError;
+    match e {
+        DoorError::Unreachable(message) => MessagesError::Unreachable { message },
+        DoorError::Refused(message) => MessagesError::Refused { message },
+        DoorError::Failed(message) => MessagesError::Server { message },
+    }
+}
+
+/// The door's origins for this app's hub, and the device key to sign with.
+async fn door(app: &tauri::AppHandle) -> Result<(String, Option<String>, nostr::Keys), MessagesError> {
+    let invalid = |message: String| MessagesError::Invalid { message };
+    crate::secure_store::ensure_loaded(app).await.map_err(invalid)?;
+    let hub = crate::vault_config(app).hub;
+    let (base, alias) = uni_core::matrix_door::door_urls(&hub).ok_or_else(|| invalid(format!("no Matrix door for the hub {hub} (it must be https)")))?;
+    let keys = tauri::async_runtime::spawn_blocking(|| uni_core::load_keys(false).map(|(k, _)| k))
+        .await
+        .map_err(|e| invalid(e.to_string()))?
+        .map_err(|e| MessagesError::Refused { message: format!("This device has no key to sign in with yet: pair it first ({e}).") })?;
+    Ok((base, alias, keys))
+}
+
+#[tauri::command]
+pub async fn messages_sign_in_device(app: tauri::AppHandle, s: State<'_, MessagesState>) -> Result<Status, MessagesError> {
+    let (base, alias, keys) = door(&app).await?;
+    let login = uni_core::matrix_door::login(&base, alias.as_deref(), &keys).await.map_err(door_err)?;
+    s.0.sign_in_token(&login.homeserver, &login.login_token).await
+}
+
+#[tauri::command]
+pub async fn messages_telegram_keys(app: tauri::AppHandle, api_id: String, api_hash: String) -> Result<(), MessagesError> {
+    let (base, alias, keys) = door(&app).await?;
+    uni_core::matrix_door::telegram_keys(&base, alias.as_deref(), &keys, &api_id, &api_hash).await.map_err(door_err)
+}

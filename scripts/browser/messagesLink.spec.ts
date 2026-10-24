@@ -50,10 +50,12 @@ test.describe('T-282 Link an account, on the live bridges', () => {
     const list = page.getByRole('navigation', { name: 'Conversations' });
     await expect(list).toBeVisible({ timeout: 30_000 });
     try {
-      // the bots' DMs are linking, not conversations: a throwaway account that only has those has no conversations
-      await expect(list.getByText('No conversations yet.')).toBeVisible({ timeout: 20_000 });
+      // the bots' DMs are linking, not conversations: none is listed (their names are "<Network> bridge")
+      await expect(list.getByText(/No conversations yet\.|Pick a conversation\./).or(list.getByRole('list')).first()).toBeVisible({ timeout: 20_000 });
+      await expect(list.getByRole('button', { name: /bridge/i })).toHaveCount(0);
 
       await list.getByRole('button', { name: 'Link an account' }).first().click();
+      // (now that the cards have asked every bot, the list still holds no bot DM: checked again on the way back)
       const screen = page.getByRole('region', { name: 'Link an account' });
       await expect(screen).toBeVisible();
       for (const n of ['Telegram', 'Signal', 'WhatsApp', 'Google Messages', 'Messenger', 'Instagram']) await expect(card(page, n)).toBeVisible();
@@ -108,10 +110,15 @@ test.describe('T-282 Link an account, on the live bridges', () => {
       } else {
         await expect(tag(tg)).toHaveText('NOT RUNNING', { timeout: 60_000 });
         await expect(tg.getByText(/needs a key you make at my\.telegram\.org/)).toBeVisible();
+        // the keys go to the door on the box, which starts the bridge (not sent here: the dev bridge has no device key)
+        const keys = tg.getByRole('form', { name: 'Telegram app keys' });
+        await expect(keys.getByLabel('api_id')).toBeVisible();
+        await expect(keys.getByLabel('api_hash')).toBeVisible();
       }
 
-      // and back to the conversations
+      // and back to the conversations: still no bot DM among them, now that every bot has one
       await screen.getByRole('button', { name: '← Conversations' }).click();
+      await expect(list.getByRole('button', { name: /bridge/i })).toHaveCount(0);
       await expect(phone ? list : page.getByText('Pick a conversation.')).toBeVisible();
     } finally {
       // leave no device behind, and no login under way

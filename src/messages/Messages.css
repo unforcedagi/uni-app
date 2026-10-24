@@ -26,6 +26,10 @@
 .msgs-signin label { display: flex; flex-direction: column; gap: 4px; font-size: 14px; color: var(--muted); }
 .msgs-signin input { min-height: 44px; padding: 0 12px; border: 1.5px solid var(--line-strong, var(--line)); border-radius: 10px; background: var(--surface); color: var(--text); font: 15px var(--sans); }
 .msgs-signin-go { align-self: flex-start; min-height: 44px; }
+.msgs-signin-form { display: flex; flex-direction: column; gap: 12px; margin-top: 14px; padding-top: 16px; border-top: 1px dashed var(--line-strong, var(--line)); }
+.msgs-signin-form h2 { margin: 0; font-size: 15px; font-weight: 600; color: var(--text-soft); }
+.msgs-signin-form label { display: flex; flex-direction: column; gap: 4px; font-size: 14px; color: var(--muted); }
+.msgs-signin-form input { min-height: 44px; padding: 0 12px; border: 1.5px solid var(--line-strong, var(--line)); border-radius: 10px; background: var(--surface); color: var(--text); font: 15px var(--sans); }
 
 /* conversations */
 .msgs-rooms { display: flex; flex-direction: column; min-height: 0; min-width: 0; border-right: 1px solid var(--line); background: var(--surface-2); }

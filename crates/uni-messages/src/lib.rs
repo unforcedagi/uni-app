@@ -341,11 +341,25 @@ impl Messages {
     /// comes first; until the new account is saved, the old one keeps running and stays the saved one. Then the new
     /// one replaces it, and the old device leaves the homeserver.
     pub async fn sign_in(self: &Arc<Self>, homeserver: &str, user: &str, password: &str) -> Result<Status> {
-        let homeserver = checked_homeserver(homeserver)?;
         let user = user.trim();
         if user.is_empty() || password.is_empty() {
             return Err(invalid("Enter a username and a password."));
         }
+        self.sign_in_with(homeserver, Login::Password { user, password }).await
+    }
+
+    /// Sign in with a one-time login token (`m.login.token`), as the Matrix door on the owner's box hands one to this
+    /// device (T-282): the same new device, store and record as a password sign-in, and no password on the device.
+    pub async fn sign_in_token(self: &Arc<Self>, homeserver: &str, token: &str) -> Result<Status> {
+        let token = token.trim();
+        if token.is_empty() {
+            return Err(invalid("There's no sign-in token."));
+        }
+        self.sign_in_with(homeserver, Login::Token(token)).await
+    }
+
+    async fn sign_in_with(self: &Arc<Self>, homeserver: &str, how: Login<'_>) -> Result<Status> {
+        let homeserver = checked_homeserver(homeserver)?;
         // a sign-out still waiting for its logout finishes first, so it can't remove this sign-in afterwards
         let _turn = self.lifecycle.lock().await;
         let store = format!("store-{}", secrets::random_hex(6));
@@ -357,7 +371,11 @@ impl Messages {
                 return Err(e);
             }
         };
-        let login = client.matrix_auth().login_username(user, password).initial_device_display_name("Uni").send();
+        let builder = match how {
+            Login::Password { user, password } => client.matrix_auth().login_username(user, password),
+            Login::Token(token) => client.matrix_auth().login_token(token),
+        };
+        let login = builder.initial_device_display_name("Uni").send();
         let login = match tokio::time::timeout(LOGIN_FOR, login).await {
             Ok(answer) => answer.map(|_| ()).map_err(from_sdk),
             Err(_) => Err(MessagesError::Unreachable { message: "The homeserver isn't answering.".into() }),
@@ -727,6 +745,7 @@ impl Messages {
         Ok(match cmd {
             "messages_status" => to(&self.resume().await?),
             "messages_sign_in" => to(&self.sign_in(&s("homeserver"), &s("user"), &s("password")).await?),
+            "messages_sign_in_token" => to(&self.sign_in_token(&s("homeserver"), &s("token")).await?),
             "messages_sign_out" => to(&self.sign_out().await?),
             "messages_rooms" => to(&self.rooms().await?),
             "messages_open" => to(&self.open(&s("roomId")).await?),
@@ -743,6 +762,13 @@ impl Messages {
             _ => return Err(invalid(format!("no such command: {cmd}"))),
         })
     }
+}
+
+/// How a sign-in proves who it is.
+enum Login<'a> {
+    Password { user: &'a str, password: &'a str },
+    /// A one-time `m.login.token`.
+    Token(&'a str),
 }
 
 /// Log a device out, within `LOGOUT_FOR`; whether the homeserver confirmed it.
