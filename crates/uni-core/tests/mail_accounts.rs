@@ -292,3 +292,28 @@ async fn a_partial_answer_is_an_error() {
         assert!(matches!(e, MailError::Invalid { ref message } if message.contains(part)), "{part}: {e:?}");
     }
 }
+
+/// T-208 item 4: an unread message that sits only in Junk or Trash doesn't light its thread's unread dot in the Inbox;
+/// the Junk list itself still shows it unread.
+#[tokio::test]
+async fn unread_mail_in_junk_or_trash_doesnt_mark_an_inbox_thread_unread() {
+    let keys = Keys::generate();
+    let fake = shared(&keys).await;
+    {
+        let mut s = fake.state.lock().unwrap();
+        let mut junk = fake::email("a9", "A-junk", ("Riverside Library", "library@example.org"), "Re: Your hold is ready", "2026-10-16T12:00:00Z", false, "Confirm your card.", None);
+        junk["threadId"] = serde_json::json!("Ta5");
+        s.mail.emails.push(junk);
+        let mut trash = fake::email("u7", "U-trash", ("Ada Moss", "ada@example.org"), "Re: Question about the reading group", "2026-10-17T20:00:00Z", false, "Never mind.", None);
+        trash["threadId"] = serde_json::json!("TU-read");
+        s.shared[0].emails.push(trash);
+    }
+    let mail = MailBridge::new(&fake.url, &keys).unwrap();
+    let all = mail.threads(&[inbox("A"), inbox("U")], None, 50).await.unwrap();
+    let row = |id: &str| all.threads.iter().find(|t| t.thread_id == id).unwrap().clone();
+    assert_eq!((row("Ta5").count, row("Ta5").unread), (2, false), "a5 is read; a9 is unread but in Junk");
+    assert_eq!((row("TU-read").count, row("TU-read").unread), (4, false), "u7 is unread but in Trash");
+    assert!(row("TA-plan").unread, "an unread Inbox message still counts");
+    let junk = mail.threads(&[Source { mailbox_id: Some("A-junk".into()), ..inbox("A") }], None, 50).await.unwrap();
+    assert!(junk.threads.iter().find(|t| t.thread_id == "Ta5").unwrap().unread, "reading Junk, its unread message counts");
+}

@@ -311,13 +311,17 @@ pub fn merge(pages: Vec<SourcePage>, limit: usize) -> ThreadPage {
     ThreadPage { threads, next, more, total }
 }
 
-/// A list row from the representative email `e`, its thread's email ids, and those emails' keywords.
-fn thread_summary(account: &str, e: &Value, thread: Option<&Vec<String>>, states: &HashMap<String, &Value>) -> ThreadSummary {
+/// A list row from the representative email `e`, its thread's email ids, and those emails' keywords and mailboxes.
+/// `hidden`: the mailboxes (Junk and Trash, unless the list reads one) whose unread mail doesn't make the row unread.
+fn thread_summary(account: &str, e: &Value, thread: Option<&Vec<String>>, states: &HashMap<String, &Value>, hidden: &[String]) -> ThreadSummary {
     let thread_id = text_of(e, "threadId");
     let id = text_of(e, "id");
     let ids = thread.cloned().unwrap_or_else(|| vec![id.clone()]);
     let members: Vec<&Value> = ids.iter().filter_map(|i| states.get(i).copied()).collect();
-    let unread_any = if members.is_empty() { unread(e) && !keyword(e, "$draft") } else { members.iter().any(|m| unread(m) && !keyword(m, "$draft")) };
+    // T-208: a message only in Junk or Trash is not mail you'd read, so its unread doesn't light the dot
+    let only_hidden = |m: &Value| m.get("mailboxIds").and_then(Value::as_object).is_some_and(|b| !b.is_empty() && b.keys().all(|k| hidden.contains(k)));
+    let counts = |m: &Value| unread(m) && !keyword(m, "$draft") && !only_hidden(m);
+    let unread_any = if members.is_empty() { counts(e) } else { members.iter().any(|m| counts(m)) };
     let attach = e.get("hasAttachment").and_then(Value::as_bool).unwrap_or(false) || members.iter().any(|m| m.get("hasAttachment").and_then(Value::as_bool) == Some(true));
     let flagged = keyword(e, "$flagged") || members.iter().any(|m| keyword(m, "$flagged"));
     ThreadSummary {
@@ -433,14 +437,15 @@ impl MailBridge<'_> {
             }, format!("t{i}")]));
             calls.push(json!(["Email/get", {
                 "accountId": a, "#ids": { "resultOf": format!("t{i}"), "name": "Thread/get", "path": "/list/*/emailIds" },
-                "properties": ["id", "keywords", "hasAttachment"]
+                "properties": ["id", "keywords", "hasAttachment", "mailboxIds"]
             }, format!("k{i}")]));
+            calls.push(json!(["Mailbox/get", { "accountId": a, "ids": null, "properties": ["id", "role"] }, format!("b{i}")]));
         }
         let (_, r) = self.jmap(Value::Array(calls)).await?;
         let list = |id: &str| r.get(id).and_then(|v| v.get("list")).and_then(Value::as_array).cloned().unwrap_or_default();
         let mut pages = Vec::new();
         for (i, s) in sources.iter().enumerate() {
-            for call in ["q", "e", "t", "k"] {
+            for call in ["q", "e", "t", "k", "b"] {
                 let id = format!("{call}{i}");
                 if !r.contains_key(&id) {
                     return Err(invalid(format!("the mail bridge's answer is missing part of the list ({id})")));
@@ -458,12 +463,18 @@ impl MailBridge<'_> {
                 .collect();
             let states_list = list(&format!("k{i}"));
             let states: HashMap<String, &Value> = states_list.iter().filter_map(|e| Some((e.get("id")?.as_str()?.to_string(), e))).collect();
+            let hidden: Vec<String> = list(&format!("b{i}"))
+                .iter()
+                .filter(|b| matches!(b.get("role").and_then(Value::as_str), Some("junk" | "trash")))
+                .filter_map(|b| b.get("id")?.as_str().map(str::to_string))
+                .filter(|id| s.mailbox_id.as_deref() != Some(id.as_str()))
+                .collect();
             // Email/get may answer in any order; the query's order is newest first. Each row keeps its place in the query.
             let rows: Vec<(usize, ThreadSummary)> = ids
                 .iter()
                 .enumerate()
                 .filter_map(|(n, id)| by_id.get(id).map(|e| (n, e)))
-                .map(|(n, e)| (n, thread_summary(&s.account_id, e, e.get("threadId").and_then(Value::as_str).and_then(|t| threads.get(t)), &states)))
+                .map(|(n, e)| (n, thread_summary(&s.account_id, e, e.get("threadId").and_then(Value::as_str).and_then(|t| threads.get(t)), &states, &hidden)))
                 .collect();
             pages.push(SourcePage { source: s.clone(), rows, returned: ids.len(), total: q.get("total").and_then(Value::as_u64) });
         }

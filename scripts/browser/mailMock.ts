@@ -89,7 +89,7 @@ export async function boot(page: Page, mode: Mode = 'ok', opts: { writes?: boole
         return hits.filter((m) => !seen.has(m.thread_id) && seen.add(m.thread_id)).map((m) => {
           const all = msgs.filter((x) => x.account === m.account && x.thread_id === m.thread_id);
           return { account_id: m.account, thread_id: m.thread_id, email_id: m.id, from: m.from, to: m.to, subject: m.subject, preview: (m.text ?? m.subject).replace(/\s+/g, ' ').slice(0, 120),
-            received_at: m.received_at, count: all.length, unread: all.some((x) => x.unread && !x.draft), has_attachment: all.some((x) => x.attachments.length > 0), draft: m.draft, uni_drafted: m.uni_drafted,
+            received_at: m.received_at, count: all.length, unread: all.some((x) => x.unread && !x.draft && (!/-(junk|trash)$/.test(x.box) || x.box === s.mailbox_id)), has_attachment: all.some((x) => x.attachments.length > 0), draft: m.draft, uni_drafted: m.uni_drafted,
             flagged: all.some((x) => x.flagged) };
         });
       }).sort((x, y) => y.received_at.localeCompare(x.received_at));
