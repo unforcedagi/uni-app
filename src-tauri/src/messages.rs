@@ -42,7 +42,6 @@ pub async fn messages_status(s: State<'_, MessagesState>) -> Result<Status, Mess
 
 #[tauri::command]
 pub async fn messages_sign_in(s: State<'_, MessagesState>, homeserver: String, user: String, password: String) -> Result<Status, MessagesError> {
-    let password = zeroize::Zeroizing::new(password);
     s.0.sign_in(&homeserver, &user, &password).await
 }
 

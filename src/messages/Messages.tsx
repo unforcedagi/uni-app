@@ -3,7 +3,7 @@
 // list and one conversation side by side (one at a time on a phone), a composer under it, and live receive: a message
 // arrives while you look. Agents don't read any of this: the thread says so, and "bring Uni in" is designed (T-278
 // DESIGN.md), not built. Shape and word before colour, so it reads on the Daylight, where nothing moves.
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type FormEvent, type KeyboardEvent } from "react";
 import { closeRoom, join, lastOpen, markRead, older, onUpdate, openRoom, rememberOpen, rooms as readRooms, send, signIn, signOut, status as readStatus } from "./messagesDoor.ts";
 import { applyOpened, applyTimeline, asMessagesErr, initials, previewLine, problemText, rowTime, sendWords, shownItems, statusWords, timeLabel, type MessagesErr, type RoomRow, type Status, type Thread } from "./messagesView.ts";
 import { enterInsertsNewline } from "../composerCore";
@@ -12,6 +12,13 @@ import "./Messages.css";
 /** The Daylight's WebView says Android: nothing of Messages moves there. */
 const still = typeof navigator !== "undefined" && /Android/i.test(navigator.userAgent);
 const touchKeyboard = () => typeof navigator !== "undefined" && enterInsertsNewline(navigator.maxTouchPoints ?? 0, matchMedia("(pointer: coarse)").matches);
+/** One pane at a time below this width (Messages.css). */
+const PHONE = "(max-width: 699px)";
+
+function useMedia(q: string): boolean {
+  const sub = useCallback((f: () => void) => { const m = matchMedia(q); m.addEventListener("change", f); return () => m.removeEventListener("change", f); }, [q]);
+  return useSyncExternalStore(sub, () => matchMedia(q).matches, () => false);
+}
 
 function SignIn({ onDone }: { onDone: (s: Status) => void }) {
   const [homeserver, setHomeserver] = useState("");
@@ -51,10 +58,11 @@ function RoomItem({ r, selected, now, onOpen }: { r: RoomRow; selected: boolean;
   </button></li>;
 }
 
-function ThreadView({ room, thread, now, onBack, onProblem }: { room: RoomRow; thread: Thread; now: number; onBack: () => void; onProblem: (p: MessagesErr | null) => void }) {
+function ThreadView({ room, thread, now, visible, onBack, onProblem }: { room: RoomRow; thread: Thread; now: number; visible: boolean; onBack: () => void; onProblem: (p: MessagesErr | null) => void }) {
   const [draft, setDraft] = useState("");
-  const [sending, setSending] = useState(false);
   const [atStart, setAtStart] = useState(false);
+  /** Sends go one after another, in the order written; typing never waits for them. */
+  const sending = useRef<Promise<unknown>>(Promise.resolve());
   const [loadingOlder, setLoadingOlder] = useState(false);
   const log = useRef<HTMLDivElement | null>(null);
   const stuck = useRef(true);
@@ -67,22 +75,25 @@ function ThreadView({ room, thread, now, onBack, onProblem }: { room: RoomRow; t
     const el = log.current;
     if (el && stuck.current) el.scrollTop = el.scrollHeight;
   }, [items]);
-  // read up to here while it's on screen
+  // read up to here while it's on screen: not while a phone shows the list instead, nor in a hidden window
   const lastKey = items?.length ? items[items.length - 1].key : null;
   useEffect(() => {
-    if (!lastKey || room.invited || document.visibilityState !== "visible") return;
+    if (!lastKey || room.invited || !visible || document.visibilityState !== "visible") return;
     const t = window.setTimeout(() => void markRead(room.id).catch(() => {}), 600);
     return () => window.clearTimeout(t);
-  }, [lastKey, room.id, room.invited]);
+  }, [lastKey, room.id, room.invited, visible]);
 
-  const submit = async (e?: FormEvent) => {
+  const submit = (e?: FormEvent) => {
     e?.preventDefault();
     const body = draft.trim();
-    if (!body || sending) return;
-    setSending(true);
-    try { await send(room.id, body); setDraft(""); stuck.current = true; onProblem(null); }
-    catch (err) { onProblem(asMessagesErr(err)); }
-    finally { setSending(false); }
+    if (!body) return;
+    setDraft("");
+    stuck.current = true;
+    sending.current = sending.current.then(() => send(room.id, body)).then(() => onProblem(null), (err) => {
+      onProblem(asMessagesErr(err));
+      // what didn't go comes back to the composer, unless something new is being written there
+      setDraft((d) => (d.trim() ? d : body));
+    });
   };
   const key = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && !touchKeyboard()) { e.preventDefault(); void submit(); }
@@ -121,7 +132,7 @@ function ThreadView({ room, thread, now, onBack, onProblem }: { room: RoomRow; t
       <form className="msgs-compose" onSubmit={(e) => void submit(e)}>
         <label className="msgs-sr" htmlFor="msgs-draft">Message {room.name}</label>
         <textarea id="msgs-draft" value={draft} rows={1} placeholder={`Message ${room.name}`} onChange={(e) => setDraft(e.target.value)} onKeyDown={key} enterKeyHint="send" />
-        <button className="send msgs-send" disabled={!draft.trim() || sending}>Send</button>
+        <button className="send msgs-send" disabled={!draft.trim()}>Send</button>
       </form>
     </>}
   </section>;
@@ -136,6 +147,7 @@ export default function Messages({ backTo, onBack }: { backTo: string; onBack: (
   const [now, setNow] = useState(() => Date.now());
   const seq = useRef(0);
   const openId = useRef<string | null>(null);
+  const phone = useMedia(PHONE);
 
   const open = useCallback(async (roomId: string, show = true) => {
     const prev = openId.current;
@@ -154,7 +166,7 @@ export default function Messages({ backTo, onBack }: { backTo: string; onBack: (
       const r = await readRooms();
       setList(r);
       const last = lastOpen();
-      if (!openId.current && last && r.some((x) => x.id === last) && !matchMedia("(max-width: 699px)").matches) void open(last, false);
+      if (!openId.current && last && r.some((x) => x.id === last) && !matchMedia(PHONE).matches) void open(last, false);
     } catch (err) { setProblem(asMessagesErr(err)); }
   }, [open]);
 
@@ -190,7 +202,7 @@ export default function Messages({ backTo, onBack }: { backTo: string; onBack: (
       {signedIn ? <button className="note-quiet" onClick={() => void out()}>Sign out</button> : <span className="msgs-bar-gap" />}
     </header>
     {!status && !problem ? <p className="msgs-loading" role="status">Opening Messages…</p>
-    : !signedIn ? <div className="msgs-scroll">{problem && <p className="msgs-problem" role="alert">{problemText(problem)}</p>}<SignIn onDone={(s) => { setStatus(s); void loadRooms(); }} /></div>
+    : !signedIn ? <div className="msgs-scroll">{problem && <p className="msgs-problem" role="alert">{problemText(problem)}</p>}{status?.error && <p className="msgs-problem" role="status">{status.error}</p>}<SignIn onDone={(s) => { setStatus(s); void loadRooms(); }} /></div>
     : <div className="msgs-panes">
       <nav className="msgs-rooms" aria-label="Conversations">
         <div className="msgs-rooms-head"><strong>Conversations</strong>{list && <small>{list.length}</small>}</div>
@@ -202,7 +214,7 @@ export default function Messages({ backTo, onBack }: { backTo: string; onBack: (
       </nav>
       <div className="msgs-read">
         {problem && <p className="msgs-problem" role="alert">{problemText(problem)} <button type="button" className="note-quiet" onClick={() => setProblem(null)}>Dismiss</button></p>}
-        {thread && openRow ? <ThreadView key={thread.roomId} room={openRow} thread={thread} now={now} onBack={() => setPane("list")} onProblem={setProblem} />
+        {thread && openRow ? <ThreadView key={thread.roomId} room={openRow} thread={thread} now={now} visible={!phone || pane === "thread"} onBack={() => setPane("list")} onProblem={setProblem} />
           : thread ? <p className="msgs-loading" role="status">Opening…</p>
           : <p className="empty msgs-pick">Pick a conversation.</p>}
       </div>

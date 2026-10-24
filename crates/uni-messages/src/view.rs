@@ -136,7 +136,7 @@ pub(crate) async fn room_row(room: &Room, latest: &LatestEventValue) -> RoomRow 
 }
 
 /// The messages among a timeline's items, oldest first. State changes (joins, topic) and day dividers are left out.
-pub(crate) fn message_rows(items: &Vector<Arc<TimelineItem>>, _own: Option<&UserId>) -> Vec<MessageRow> {
+pub(crate) fn message_rows(items: &Vector<Arc<TimelineItem>>) -> Vec<MessageRow> {
     items
         .iter()
         .filter_map(|item| {

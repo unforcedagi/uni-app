@@ -44,13 +44,16 @@ function setSeen(v: boolean) {
   for (const f of subs) f();
 }
 
-/** A build with Messages answers `messages_status` with a status; one without has no such command (or a test double
- * answers nothing), and the rail stays as it was. */
+/** A build with Messages answers `messages_status`, so Messages shows. A build without it has no such command (or a
+ * test double answers nothing), so it hides. Any other failure leaves the rail as it was, so a store that won't
+ * reopen still leaves the way in to sign in again. */
 export async function probeMessages(): Promise<void> {
   try {
     const s = await status();
     setSeen(!!s && typeof s === "object" && typeof s.state === "string");
-  } catch { setSeen(false); }
+  } catch (e) {
+    if (/not found|unknown command|no such command/i.test(asMessagesErr(e).message)) setSeen(false);
+  }
 }
 
 /** The room open last, so leaving Messages and coming back lands in the same conversation. */
@@ -62,9 +65,9 @@ export function lastOpen(): string | null {
 }
 
 /** Forgetting the device key signs Messages out too: the homeserver drops this device, and its store and session
- * here are deleted. A build without Messages has nothing to sign out. */
+ * here are deleted. A build without Messages has no such command, and nothing to sign out. */
 export function forgetMessages() {
   rememberOpen(null);
-  if (seen) void signOut().catch(() => {});
+  void signOut().catch(() => {});
   setSeen(false);
 }

@@ -41,11 +41,11 @@ export function applyTimeline(t: Thread | null, roomId: string, items: MessageRo
   return { ...t, items };
 }
 
-/** The answer to opening a room counts only if that room is still the one open, at the same open. */
+/** The answer to opening a room counts only if that room is still the one open, at the same open, and no live
+ * update has landed since: each update carries the room's whole window, newer than the answer (an edit, a late
+ * decryption or a redaction can leave it the same length or shorter). */
 export function applyOpened(t: Thread | null, roomId: string, seq: number, items: MessageRow[]): Thread | null {
-  if (!t || t.roomId !== roomId || t.seq !== seq) return t;
-  // a live update may already have brought newer rows than the answer: keep the longer, newer window
-  if (t.items && t.items.length > items.length) return t;
+  if (!t || t.roomId !== roomId || t.seq !== seq || t.items !== null) return t;
   return { ...t, items };
 }
 

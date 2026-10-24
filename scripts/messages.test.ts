@@ -29,9 +29,13 @@ t("opening one room, then another: the first room's late answer is dropped", () 
   assert.deepEqual(applyOpened(second, "!b:example.com", 2, [msg("b1", "@mara:example.com", 1)])?.items?.map((m) => m.key), ["b1"]);
 });
 
-t("an answer slower than the live rows doesn't take newer messages away", () => {
-  const live: Thread = { roomId: "!a:example.com", seq: 1, items: [msg("a1", "@robin:example.com", 1), msg("a2", "@robin:example.com", 2)] };
-  assert.equal(applyOpened(live, "!a:example.com", 1, [msg("a1", "@robin:example.com", 1)]), live);
+t("an answer slower than the live rows doesn't take newer messages away, even at the same length or longer", () => {
+  // the live update brought the edit; the answer was read before it
+  const live: Thread = { roomId: "!a:example.com", seq: 1, items: [msg("a1", "@robin:example.com", 1, { body: "see you at 6", edited: true })] };
+  assert.equal(applyOpened(live, "!a:example.com", 1, [msg("a1", "@robin:example.com", 1, { body: "see you at 5" })]), live);
+  // the live update came after a redaction: one row fewer than the answer
+  const redacted: Thread = { roomId: "!a:example.com", seq: 1, items: [] };
+  assert.equal(applyOpened(redacted, "!a:example.com", 1, [msg("gone", "@robin:example.com", 1)]), redacted);
 });
 
 t("day dividers fall at local midnight; a run of one sender breaks after five minutes or on a new sender", () => {

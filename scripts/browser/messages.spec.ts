@@ -38,10 +38,11 @@ async function signIn(page: Page, a: Account) {
 const conversation = (page: Page, name: string) => page.getByRole('region', { name: `Conversation: ${name}` });
 const log = (page: Page, name: string) => page.getByRole('log', { name: `Messages with ${name}` });
 
+/** Open a fresh room and wait until it has finished opening (its empty state), so anything later can only arrive live. */
 async function openRoom(page: Page, name: string) {
   await page.getByRole('navigation', { name: 'Conversations' }).getByRole('button', { name: new RegExp(name) }).click({ timeout: 30_000 });
   await expect(conversation(page, name)).toBeVisible();
-  await expect(log(page, name)).toBeVisible();
+  await expect(log(page, name).getByText('No messages yet. Say hello.')).toBeVisible({ timeout: 20_000 });
 }
 
 test.describe('T-278 Messages on a live homeserver', () => {
@@ -67,9 +68,8 @@ test.describe('T-278 Messages on a live homeserver', () => {
       await signIn(a, users!.a);
       await signIn(b, users!.b);
 
-      // B is looking at the conversation before anything is sent
+      // B is looking at the conversation, finished opening, before anything is sent
       await openRoom(b, room);
-      await expect(log(b, room)).not.toContainText(text);
 
       await openRoom(a, room);
       const draft = conversation(a, room).getByRole('textbox', { name: `Message ${room}` });
@@ -90,7 +90,7 @@ test.describe('T-278 Messages on a live homeserver', () => {
       await expect(conversation(b, room).getByText("Uni can't read this conversation.")).toBeVisible();
     } finally {
       // leave no devices behind: signing out removes each test device on the homeserver
-      for (const p of [a, b]) await p.getByRole('button', { name: 'Sign out' }).click().catch(() => {});
+      for (const p of [a, b]) await p.getByRole('button', { name: 'Sign out' }).click({ timeout: 5_000 }).catch(() => {});
       await expect(a.getByRole('form', { name: 'Sign in to Messages' })).toBeVisible().catch(() => {});
       await expect(b.getByRole('form', { name: 'Sign in to Messages' })).toBeVisible().catch(() => {});
       await ctxA.close(); await ctxB.close();
