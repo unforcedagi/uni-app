@@ -111,7 +111,7 @@ function ThreadView({ room, thread, now, onBack, onProblem }: { room: RoomRow; t
         {!items ? <p className="msgs-loading" role="status">Opening…</p>
           : items.length === 0 ? <p className="empty">No messages yet. Say hello.</p>
           : shown.map((s) => s.kind === "day" ? <p key={s.key} className="msgs-day">{s.label}</p>
-            : <div key={s.key} className={`msgs-msg ${s.row.own ? "own" : "theirs"} ${s.first ? "first" : ""} ${s.last ? "last" : ""} kind-${s.row.kind} st-${s.row.state}`} data-key={s.row.key}>
+            : <div key={s.key} className={`msgs-msg ${s.row.own ? "own" : "theirs"} ${s.first ? "first" : ""} ${s.last ? "last" : ""} kind-${s.row.kind} st-${s.row.state}`} data-key={s.row.key} data-encrypted={s.row.encrypted ? "true" : undefined}>
               {s.first && !s.row.own && <p className="msgs-from"><strong>{s.row.sender_name}</strong> <time>{timeLabel(s.row.ts)}</time></p>}
               {s.first && s.row.own && <p className="msgs-from"><time>{timeLabel(s.row.ts)}</time></p>}
               <p className="msgs-body">{s.row.kind === "emote" ? `* ${s.row.sender_name} ${s.row.body}` : s.row.body}{s.row.edited && <small className="msgs-edited"> (edited)</small>}</p>

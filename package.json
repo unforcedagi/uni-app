@@ -30,7 +30,8 @@
     "test:published-media": "playwright test --config playwright.media.config.ts",
     "test:calendar": "playwright test --config playwright.calendar.config.ts",
     "test:chat": "playwright test --config playwright.chat.config.ts",
-    "test:approvals": "playwright test --config playwright.approvals.config.ts"
+    "test:approvals": "playwright test --config playwright.approvals.config.ts",
+    "test:messages": "playwright test --config playwright.messages.config.ts"
   },
   "dependencies": {
     "@openparachute/surface-client": "0.3.7",

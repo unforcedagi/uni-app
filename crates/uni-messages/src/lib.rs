@@ -360,6 +360,9 @@ impl Messages {
         }
         let room = live.client.get_room(room_id).ok_or_else(|| invalid("This account isn't in that room."))?;
         let timeline = Arc::new(room.timeline().await.map_err(|e| MessagesError::Server { message: e.to_string() })?);
+        // the members' names: sliding sync loads members lazily, so a sender shows by user id until they're fetched
+        let members = timeline.clone();
+        tokio::spawn(async move { members.fetch_members().await });
         let (items, mut stream) = timeline.subscribe().await;
         let me = Arc::downgrade(self);
         let id = room_id.to_string();
