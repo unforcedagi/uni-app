@@ -229,6 +229,8 @@ pub struct Messages {
     rooms: StdMutex<Vec<RoomRow>>,
     /// The Link screen's cards, by network, as last read from the bridge bots.
     links: StdMutex<link::LinkRows>,
+    /// The cards' revision counter (`LinkRow::rev`).
+    link_rev: std::sync::atomic::AtomicU64,
     /// Bot DMs are found or made one at a time (link.rs says why); the ones made here, by account and network.
     link_creating: tokio::sync::Mutex<HashMap<(String, &'static str), OwnedRoomId>>,
 }
@@ -248,6 +250,7 @@ impl Messages {
             status: StdMutex::new(Status::signed_out(None)),
             rooms: StdMutex::new(Vec::new()),
             links: StdMutex::new(Default::default()),
+            link_rev: std::sync::atomic::AtomicU64::new(0),
             link_creating: tokio::sync::Mutex::new(HashMap::new()),
         })
     }
@@ -670,6 +673,12 @@ impl Messages {
 
     /// The open room's timeline, built (from the local store) on first use, with its live updates forwarded.
     async fn timeline(self: &Arc<Self>, client: &Client, account: &str, room_id: &RoomId) -> Result<Arc<Timeline>> {
+        self.timeline_with(client, account, room_id, true).await
+    }
+
+    /// As `timeline`; `forward: false` (and any bridge bot's DM) keeps its rows in Rust: they are what is typed into a
+    /// login step, which the app's screen never shows as a conversation.
+    async fn timeline_with(self: &Arc<Self>, client: &Client, account: &str, room_id: &RoomId, forward: bool) -> Result<Arc<Timeline>> {
         let mut open = self.open.lock().await;
         if open.account.as_deref() != Some(account) {
             // the account changed since `client` was taken
@@ -679,6 +688,7 @@ impl Messages {
             return Ok(r.timeline.clone());
         }
         let room = client.get_room(room_id).ok_or_else(|| invalid("This account isn't in that room."))?;
+        let forward = forward && link::bridge_of(&room).is_none();
         let timeline = Arc::new(room.timeline().await.map_err(server)?);
         // the members' names: sliding sync loads members lazily, so a sender shows by user id until they're fetched
         let members = timeline.clone();
@@ -695,7 +705,9 @@ impl Messages {
                     d.apply(&mut items);
                 }
                 let Some(me) = me.upgrade() else { break };
-                let _ = me.tx.send(Update::Timeline { room_id: id.clone(), items: view::message_rows(&items) });
+                if forward {
+                    let _ = me.tx.send(Update::Timeline { room_id: id.clone(), items: view::message_rows(&items) });
+                }
             }
         });
         open.rooms.insert(room_id.to_owned(), OpenRoom { timeline: timeline.clone(), task });
@@ -708,6 +720,10 @@ impl Messages {
     pub async fn open(self: &Arc<Self>, room_id: &str) -> Result<Vec<MessageRow>> {
         let room_id = Self::room_id(room_id)?;
         let (client, account) = self.client().await?;
+        if client.get_room(&room_id).is_some_and(|r| link::bridge_of(&r).is_some()) {
+            // linking, not a conversation: what was typed there stays in Rust
+            return Err(invalid("That is a bridge's linking room, not a conversation."));
+        }
         let timeline = self.timeline(&client, &account, &room_id).await?;
         let mut rows = view::message_rows(&timeline.items().await);
         if rows.len() < 20 {
@@ -807,6 +823,10 @@ enum Login<'a> {
 /// Log a device out, within `LOGOUT_FOR`; whether the homeserver confirmed it.
 async fn log_out(client: &Client) -> bool {
     matches!(tokio::time::timeout(LOGOUT_FOR, client.logout()).await, Ok(Ok(())))
+}
+
+pub(crate) fn now_ms() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }
 
 /// A store key from its hex form.

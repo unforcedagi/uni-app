@@ -24,29 +24,44 @@ use matrix_sdk::{
 use matrix_sdk_ui::{eyeball_im::Vector, timeline::TimelineItem};
 use serde::Serialize;
 
-use crate::{from_sdk, invalid, server, signed_out, Messages, MessagesError, Result, Update};
+use crate::{from_sdk, invalid, now_ms, server, signed_out, Messages, MessagesError, Result, Update};
 
 /// One network and its bridge bot's localpart on our homeserver (uni-ops matrix/bridges.py names them).
+/// Every command goes with the bridge's command prefix (uni-ops matrix/bridges.py sets it): then it works in any DM
+/// with the bot, not only the one the bridge took as the account's management room.
 #[derive(Debug, Clone, Copy)]
 pub struct Network {
     pub id: &'static str,
     pub name: &'static str,
     pub bot: &'static str,
+    pub prefix: &'static str,
 }
 
 /// In the order the Link screen shows them: the order to link in, least fragile first.
 pub const NETWORKS: [Network; 6] = [
-    Network { id: "signal", name: "Signal", bot: "signalbot" },
-    Network { id: "telegram", name: "Telegram", bot: "telegrambot" },
-    Network { id: "whatsapp", name: "WhatsApp", bot: "whatsappbot" },
-    Network { id: "gmessages", name: "Google Messages", bot: "gmessagesbot" },
-    Network { id: "messenger", name: "Messenger", bot: "messengerbot" },
-    Network { id: "instagram", name: "Instagram", bot: "instagrambot" },
+    Network { id: "signal", name: "Signal", bot: "signalbot", prefix: "!signal" },
+    Network { id: "telegram", name: "Telegram", bot: "telegrambot", prefix: "!tg" },
+    Network { id: "whatsapp", name: "WhatsApp", bot: "whatsappbot", prefix: "!wa" },
+    Network { id: "gmessages", name: "Google Messages", bot: "gmessagesbot", prefix: "!gm" },
+    Network { id: "messenger", name: "Messenger", bot: "messengerbot", prefix: "!fb" },
+    Network { id: "instagram", name: "Instagram", bot: "instagrambot", prefix: "!ig" },
+];
+
+/// mautrix-go v0.32.0 bridgev2's commands and aliases (commands/processor.go and the files it lists).
+const BOT_COMMANDS: [&str; 46] = [
+    "help", "cancel", "debug-register-push", "debug-account-data", "debug-reset-network", "delete-portal",
+    "delete-all-portals", "set-management-room", "login", "relogin", "list-logins", "logout", "set-preferred-login",
+    "prefer", "set-relay", "unset-relay", "resolve-identifier", "start-chat", "pm", "create-group", "create", "search",
+    "create-portal", "id", "unbridge", "bridge", "sync-chat", "sync", "mute", "unmute", "delete-chat", "block-user",
+    "block", "unblock", "filter", "sudo", "doas", "do-as", "runas", "run-as", "doin", "do-in", "runin", "run-in",
+    "import-image-pack", "version",
 ];
 
 /// How long a bot may take to join its DM, or to answer `list-logins`, before its bridge counts as not running.
 const BOT_JOIN_WAIT: Duration = Duration::from_secs(15);
 const BOT_ANSWER_WAIT: Duration = Duration::from_secs(30);
+/// How long the Link screen's checks wait for a new sign-in's first sync.
+const FIRST_SYNC_WAIT: Duration = Duration::from_secs(10);
 
 fn network(id: &str) -> Result<Network> {
     NETWORKS.iter().copied().find(|n| n.id == id).ok_or_else(|| invalid("That isn't a network Messages can link."))
@@ -60,12 +75,21 @@ fn bot_id(own: &UserId, net: &Network) -> Option<OwnedUserId> {
 /// Which network's bot a room is a DM with, if it is one: such rooms are linking, not conversations.
 pub(crate) fn bridge_of(room: &Room) -> Option<&'static str> {
     let own = room.own_user_id();
+    let is_bot = |u: &UserId| NETWORKS.iter().find(|n| bot_id(own, n).as_deref() == Some(u)).map(|n| n.id);
     let targets = room.direct_targets();
-    if targets.len() != 1 {
-        return None;
+    if targets.len() == 1 {
+        if let Some(net) = targets.iter().next().and_then(|t| t.as_user_id()).and_then(is_bot) {
+            return Some(net);
+        }
     }
-    let target = targets.iter().next()?.as_user_id()?.to_owned();
-    NETWORKS.iter().find(|n| bot_id(own, n).as_deref() == Some(&*target)).map(|n| n.id)
+    // a DM just made here, before m.direct has synced back: us and a bot, and no one else
+    if targets.is_empty() && room.active_members_count() <= 2 {
+        let heroes = room.heroes();
+        if heroes.len() == 1 {
+            return is_bot(&heroes[0].user_id);
+        }
+    }
+    None
 }
 
 /// One linked account, as `list-logins` names it.
@@ -106,6 +130,13 @@ pub enum LinkStep {
     Failed { text: String },
 }
 
+impl LinkStep {
+    /// A login is under way: the bot waits for the person, or the person for the bot.
+    pub fn in_progress(&self) -> bool {
+        !matches!(self, LinkStep::Done { .. } | LinkStep::Failed { .. })
+    }
+}
+
 /// One network on the Link screen.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct LinkRow {
@@ -118,17 +149,19 @@ pub struct LinkRow {
     pub step: Option<LinkStep>,
     /// The bot's words that go with the step (its instructions), or its last word on something that went wrong.
     pub note: Option<String>,
+    /// Goes up with every change, so the app keeps the newest of a command's answer and an update that crossed it.
+    pub rev: u64,
     /// `list-logins` has answered since this account started.
     #[serde(skip)]
     known: bool,
-    /// How many times `list-logins` has answered: a check whose count hasn't moved got no answer.
+    /// When `list-logins` last answered (the answer's own time, ms): a check asked after it got no answer yet.
     #[serde(skip)]
-    answers: u64,
+    answered_at: u64,
 }
 
 impl LinkRow {
     fn new(net: &Network) -> Self {
-        LinkRow { network: net.id, name: net.name, state: "checking", accounts: vec![], step: None, note: None, known: false, answers: 0 }
+        LinkRow { network: net.id, name: net.name, state: "checking", accounts: vec![], step: None, note: None, rev: 0, known: false, answered_at: 0 }
     }
 }
 
@@ -136,6 +169,8 @@ impl LinkRow {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Said {
     pub own: bool,
+    /// Milliseconds since the epoch.
+    pub ts: u64,
     pub image: bool,
     pub body: String,
     pub html: Option<String>,
@@ -146,8 +181,8 @@ pub(crate) struct Said {
 pub(crate) enum Exchange {
     /// Nothing asked yet.
     Idle,
-    /// `list-logins` was asked; `None` until it answers.
-    Logins(Option<Vec<LinkedAccount>>),
+    /// `list-logins` was asked; `None` until it answers, then the logins and the answer's time.
+    Logins(Option<(Vec<LinkedAccount>, u64)>),
     /// A login, or a value sent into one.
     Login { step: LinkStep, note: Option<String> },
     /// `cancel` (or nothing under way anymore).
@@ -231,7 +266,7 @@ pub(crate) fn read_exchange(said: &[Said]) -> Exchange {
     let asked = said[last_own].body.trim().to_lowercase();
     let replies: Vec<&Said> = said[last_own + 1..].iter().filter(|s| !s.own).collect();
     if asked == "list-logins" {
-        return Exchange::Logins(replies.iter().find_map(|r| read_logins(&r.body)));
+        return Exchange::Logins(replies.iter().find_map(|r| read_logins(&r.body).map(|a| (a, r.ts))));
     }
     if asked == "cancel" {
         return Exchange::Cancelled;
@@ -251,8 +286,8 @@ pub(crate) fn read_exchange(said: &[Said]) -> Exchange {
             step = LinkStep::Flows { flows: read_flows(body) };
         } else if body.starts_with("Please enter your ") {
             step = read_input(body);
-        } else if let Some(url) = body.strip_prefix("Login URL:") {
-            step = LinkStep::Cookies { url: url.trim().trim_start_matches('<').trim_end_matches('>').to_owned() };
+        } else if let Some(rest) = body.strip_prefix("Login URL:") {
+            step = LinkStep::Cookies { url: login_url(rest) };
         } else if r.html.as_deref().is_some_and(|h| h.trim_start().starts_with("<code>")) || emoji_only(body) {
             step = LinkStep::Code { code: body.to_owned() };
         } else if body.starts_with("Login cancelled") {
@@ -276,6 +311,18 @@ pub(crate) fn read_exchange(said: &[Said]) -> Exchange {
     Exchange::Login { step, note }
 }
 
+/// The link in "Login URL: <https://…>": the first word, without its angle brackets, if it is an https URL; else
+/// empty (the card then says where to sign in without a link).
+fn login_url(rest: &str) -> String {
+    let word = rest.trim().split_whitespace().next().unwrap_or_default();
+    let word = word.trim_start_matches('<');
+    let word = word.split('>').next().unwrap_or_default();
+    match url::Url::parse(word) {
+        Ok(u) if u.scheme() == "https" && u.host_str().is_some() => u.to_string(),
+        _ => String::new(),
+    }
+}
+
 /// The QR's modules, one string per row.
 fn qr_modules(data: &str) -> Option<Vec<String>> {
     let code = qrcode::QrCode::with_error_correction_level(data.as_bytes(), qrcode::EcLevel::L).ok()?;
@@ -295,13 +342,19 @@ fn said_in(items: &Vector<Arc<TimelineItem>>, bot: &UserId) -> Vec<Said> {
                 return None;
             }
             let msg = ev.content().as_message()?;
-            let (image, body, html) = match msg.msgtype() {
+            let (image, mut body, html) = match msg.msgtype() {
                 MessageType::Image(i) => (true, i.body.clone(), None),
                 MessageType::Notice(n) => (false, n.body.clone(), n.formatted.as_ref().map(|f| f.body.clone())),
                 MessageType::Text(t) => (false, t.body.clone(), t.formatted.as_ref().map(|f| f.body.clone())),
                 _ => return None,
             };
-            Some(Said { own, image, body, html })
+            if own {
+                // what we said, without the bridge's command prefix: "!signal list-logins" is "list-logins"
+                if let Some(rest) = body.strip_prefix('!').and_then(|b| b.split_once(' ')).map(|(_, rest)| rest.to_owned()) {
+                    body = rest;
+                }
+            }
+            Some(Said { own, ts: u64::from(ev.timestamp().0), image, body, html })
         })
         .collect()
 }
@@ -311,15 +364,24 @@ impl Messages {
     pub async fn links(self: &Arc<Self>) -> Result<Vec<LinkRow>> {
         let (client, account) = self.client().await?;
         let rows = self.link_rows();
-        for net in NETWORKS {
-            let me = self.clone();
-            let (client, account) = (client.clone(), account.clone());
-            tokio::spawn(async move {
-                if let Err(e) = me.link_check_with(&client, &account, &net).await {
-                    tracing::warn!("checking {}: {e}", net.id);
-                }
-            });
-        }
+        let me = self.clone();
+        tokio::spawn(async move {
+            // a device that has just signed in hasn't synced its rooms yet: looking for the bots' DMs before that would
+            // make new ones
+            let started = std::time::Instant::now();
+            while me.status().state != "live" && started.elapsed() < FIRST_SYNC_WAIT {
+                tokio::time::sleep(Duration::from_millis(250)).await;
+            }
+            for net in NETWORKS {
+                let me = me.clone();
+                let (client, account) = (client.clone(), account.clone());
+                tokio::spawn(async move {
+                    if let Err(e) = me.link_check_with(&client, &account, &net, false).await {
+                        tracing::warn!("checking {}: {e}", net.id);
+                    }
+                });
+            }
+        });
         Ok(rows)
     }
 
@@ -327,24 +389,32 @@ impl Messages {
     pub async fn link_check(self: &Arc<Self>, id: &str) -> Result<LinkRow> {
         let net = network(id)?;
         let (client, account) = self.client().await?;
-        self.link_check_with(&client, &account, &net).await?;
+        self.link_check_with(&client, &account, &net, true).await?;
         Ok(self.link_row(&net))
     }
 
-    async fn link_check_with(self: &Arc<Self>, client: &Client, account: &str, net: &Network) -> Result<()> {
+    async fn link_check_with(self: &Arc<Self>, client: &Client, account: &str, net: &Network, force: bool) -> Result<()> {
         let Some(room) = self.link_room(client, account, net).await? else { return Ok(()) };
-        if matches!(self.link_row(net).step, Some(LinkStep::Flows { .. } | LinkStep::Input { .. } | LinkStep::Qr { .. } | LinkStep::Code { .. } | LinkStep::Cookies { .. } | LinkStep::Waiting)) {
+        let row = self.link_row(net);
+        if row.step.as_ref().is_some_and(LinkStep::in_progress) {
             return Ok(());
         }
-        let before = self.link_row(net).answers;
-        self.send(room.room_id().as_str(), "list-logins").await?;
+        let asked_at = now_ms();
+        // the screen opening again within a minute doesn't ask again; "Check again" always does
+        if !force && row.state != "unavailable" && row.answered_at + 60_000 > asked_at {
+            return Ok(());
+        }
+        self.send(room.room_id().as_str(), &format!("{} list-logins", net.prefix)).await?;
         // a bot that has joined but doesn't answer: its bridge is down now
         let me = self.clone();
-        let net = *net;
+        let (net, account) = (*net, account.to_owned());
         tokio::spawn(async move {
             tokio::time::sleep(BOT_ANSWER_WAIT).await;
+            if me.client().await.map(|(_, a)| a) != Ok(account) {
+                return;
+            }
             let mut row = me.link_row(&net);
-            if row.answers == before && row.step.is_none() {
+            if row.answered_at < asked_at.saturating_sub(5_000) && row.step.is_none() {
                 row.state = "unavailable";
                 row.note = Some(format!("The {} bridge isn't answering on the homeserver.", net.name));
                 me.set_link_row(row);
@@ -379,9 +449,11 @@ impl Messages {
         if value.is_empty() {
             return Err(invalid("There's nothing to send."));
         }
-        // a value that reads as a command would be run as one: the step's fields are never commands
-        if matches!(value.split_whitespace().next(), Some("cancel" | "login" | "relogin" | "logout" | "list-logins" | "help")) {
-            return Err(invalid("That reads as a command to the bridge, not an answer."));
+        // the bridge runs any message whose first word is one of its commands as that command, in any case, even in
+        // the middle of a login step (mautrix-go bridgev2 commands/processor.go): such a value can't be sent as an answer
+        let first = value.split_whitespace().next().unwrap_or_default().to_lowercase();
+        if BOT_COMMANDS.contains(&first.as_str()) {
+            return Err(invalid(format!("The bridge would read a reply starting with \"{first}\" as its own command, not as your answer.")));
         }
         self.link_say(&net, value).await
     }
@@ -398,7 +470,7 @@ impl Messages {
             .link_room(&client, &account, net)
             .await?
             .ok_or_else(|| MessagesError::Unreachable { message: format!("The {} bridge isn't running.", net.name) })?;
-        self.send(room.room_id().as_str(), text).await?;
+        self.send(room.room_id().as_str(), &format!("{} {text}", net.prefix)).await?;
         Ok(self.link_row(net))
     }
 
@@ -418,12 +490,15 @@ impl Messages {
         self.links.lock().unwrap().get(net.id).cloned().unwrap_or_else(|| LinkRow::new(net))
     }
 
-    fn set_link_row(&self, row: LinkRow) {
+    fn set_link_row(&self, mut row: LinkRow) {
         let changed = {
             let mut all = self.links.lock().unwrap();
-            let changed = all.get(row.network) != Some(&row);
-            all.insert(row.network, row.clone());
-            changed
+            let same = all.get(row.network).is_some_and(|prev| LinkRow { rev: prev.rev, ..row.clone() } == *prev);
+            if !same {
+                row.rev = self.link_rev.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+                all.insert(row.network, row.clone());
+            }
+            !same
         };
         if changed {
             let _ = self.tx.send(Update::Link { link: row });
@@ -444,18 +519,40 @@ impl Messages {
             // the DM this account already made here: m.direct, which marks it, may not have synced back yet
             let mut room = made.get(&key).and_then(|id| client.get_room(id)).filter(|r| r.state() == RoomState::Joined);
             if room.is_none() {
-                let existing = client
-                    .joined_rooms()
-                    .into_iter()
-                    .filter(|r| r.direct_targets().iter().any(|t| t.as_user_id() == Some(&*bot)))
-                    .collect::<Vec<_>>();
-                for r in &existing {
-                    if bot_joined(r, &bot).await {
-                        room = Some(r.clone());
-                        break;
+                // marked as a DM with the bot, or just the two of us in it
+                let mut existing = Vec::new();
+                for r in client.joined_rooms() {
+                    let marked = r.direct_targets().iter().any(|t| t.as_user_id() == Some(&*bot));
+                    if marked || (r.joined_members_count() == 2 && !r.is_space() && bot_joined(&r, &bot).await) {
+                        existing.push(r);
                     }
                 }
-                room = room.or_else(|| existing.into_iter().next());
+                if existing.is_empty() {
+                    // a device that has just signed in may not have loaded every room yet: the account's own list of
+                    // DMs on the server says whether there is one to wait for, instead of making another
+                    existing = server_dms(client, &bot).await;
+                }
+                if existing.len() > 1 {
+                    // more than one DM with this bot (two devices each made one before seeing the other's): keep the
+                    // one where the bot spoke last, which is the one it answers in, and leave the others
+                    let mut scored = Vec::new();
+                    for r in existing {
+                        scored.push((bot_spoke_at(&r, &bot).await, r));
+                    }
+                    scored.sort_by_key(|(at, _)| std::cmp::Reverse(*at));
+                    let mut rest = scored.into_iter().map(|(_, r)| r);
+                    room = rest.next();
+                    for extra in rest {
+                        let bot = bot.clone();
+                        tokio::spawn(async move {
+                            let _ = extra.kick_user(&bot, Some("a duplicate DM; another one with this bot is kept")).await;
+                            let _ = extra.leave().await;
+                            let _ = extra.forget().await;
+                        });
+                    }
+                } else {
+                    room = existing.into_iter().next();
+                }
             }
             let fresh = room.is_none();
             let room = match room {
@@ -491,6 +588,8 @@ impl Messages {
                 t.abort();
             }
             let _ = self.close(room.room_id().as_str()).await;
+            // take the invite back first, so the bridge, when it does start, doesn't join a room nobody is in
+            let _ = room.kick_user(&bot, Some("the bridge didn't answer; a new DM replaces this one")).await;
             let _ = room.leave().await;
             let _ = room.forget().await;
             if fresh || fresh_tried {
@@ -507,7 +606,9 @@ impl Messages {
         if self.open.lock().await.links.contains_key(net.id) {
             return Ok(());
         }
-        let timeline = self.timeline(client, account, &room_id).await?;
+        // not forwarded to the app as a conversation: what is typed into a login step (a password, a code, cookies)
+        // stays in Rust
+        let timeline = self.timeline_with(client, account, &room_id, false).await?;
         if timeline.items().await.len() < 10 {
             let _ = timeline.paginate_backwards(20).await;
         }
@@ -536,7 +637,7 @@ impl Messages {
                     let rid = room_id.clone();
                     tokio::spawn(async move {
                         tokio::time::sleep(Duration::from_secs(2)).await;
-                        let _ = me.send(rid.as_str(), "list-logins").await;
+                        let _ = me.send(rid.as_str(), &format!("{} list-logins", net.prefix)).await;
                     });
                 }
                 was_done = done;
@@ -565,12 +666,12 @@ impl Messages {
         match exchange {
             // nothing new from the bot: the card stays as it is (a bridge found not running stays so)
             Exchange::Idle | Exchange::Logins(None) => return false,
-            Exchange::Logins(Some(accounts)) => {
+            Exchange::Logins(Some((accounts, at))) => {
                 row.step = None;
                 row.note = None;
                 row.accounts = accounts;
                 row.known = true;
-                row.answers += 1;
+                row.answered_at = row.answered_at.max(at);
             }
             Exchange::Cancelled => {
                 row.step = None;
@@ -601,6 +702,43 @@ fn state_of(accounts: &[LinkedAccount], known: bool) -> &'static str {
     }
 }
 
+/// The account's DMs with `bot` as the homeserver has them (m.direct), once this device has them as joined rooms
+/// (it waits a little for the sync to bring them). Empty if there are none, or they don't arrive.
+async fn server_dms(client: &Client, bot: &UserId) -> Vec<Room> {
+    use matrix_sdk::ruma::events::{direct::DirectEventContent, GlobalAccountDataEventType};
+    let Ok(Some(raw)) = client.account().fetch_account_data(GlobalAccountDataEventType::Direct).await else { return vec![] };
+    let Ok(direct) = raw.deserialize_as_unchecked::<DirectEventContent>() else { return vec![] };
+    let ids: Vec<_> = direct.iter().filter(|(k, _)| k.as_user_id() == Some(bot)).flat_map(|(_, v)| v.clone()).collect();
+    if ids.is_empty() {
+        return vec![];
+    }
+    let started = std::time::Instant::now();
+    loop {
+        // rooms left long ago stay listed in m.direct and never arrive here: the first joined one is enough
+        let joined: Vec<Room> = ids.iter().filter_map(|id| client.get_room(id)).filter(|r| r.state() == RoomState::Joined).collect();
+        if !joined.is_empty() || started.elapsed() > FIRST_SYNC_WAIT {
+            return joined;
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+}
+
+/// When the bot last sent anything in the room (ms), from the newest page of its events: their senders and times are
+/// readable without decrypting them. 0 if it hasn't, or the page can't be had.
+async fn bot_spoke_at(room: &Room, bot: &UserId) -> u64 {
+    let Ok(page) = room.messages(matrix_sdk::room::MessagesOptions::backward()).await else { return 0 };
+    page.chunk
+        .iter()
+        .filter_map(|e| {
+            let raw = e.raw();
+            let sender: Option<OwnedUserId> = raw.get_field("sender").ok().flatten();
+            let ts: Option<u64> = raw.get_field("origin_server_ts").ok().flatten();
+            (sender.as_deref() == Some(bot)).then_some(ts).flatten()
+        })
+        .max()
+        .unwrap_or(0)
+}
+
 /// Whether the bot has joined the room.
 async fn bot_joined(room: &Room, bot: &UserId) -> bool {
     if room.state() != RoomState::Joined {
@@ -617,23 +755,23 @@ mod tests {
     use super::*;
 
     fn own(b: &str) -> Said {
-        Said { own: true, image: false, body: b.into(), html: None }
+        Said { own: true, ts: 1, image: false, body: b.into(), html: None }
     }
     fn bot(b: &str) -> Said {
-        Said { own: false, image: false, body: b.into(), html: None }
+        Said { own: false, ts: 2, image: false, body: b.into(), html: None }
     }
 
     #[test]
     fn logins_linked_unlinked_and_needing_attention() {
         assert_eq!(read_exchange(&[own("list-logins")]), Exchange::Logins(None));
-        assert_eq!(read_exchange(&[own("list-logins"), bot("You're not logged in")]), Exchange::Logins(Some(vec![])));
+        assert_eq!(read_exchange(&[own("list-logins"), bot("You're not logged in")]), Exchange::Logins(Some((vec![], 2))));
         let two = "\n* `4917` (Alex Example) - `CONNECTED`\n* `5550` (+1 555 0100) - `BAD_CREDENTIALS`";
-        let Exchange::Logins(Some(a)) = read_exchange(&[own("list-logins"), bot(two)]) else { panic!() };
+        let Exchange::Logins(Some((a, _))) = read_exchange(&[own("list-logins"), bot(two)]) else { panic!() };
         assert_eq!(a.len(), 2);
         assert_eq!((a[0].id.as_str(), a[0].name.as_str(), a[0].state.as_str(), a[0].attention), ("4917", "Alex Example", "CONNECTED", false));
         assert!(a[1].attention);
         // a name with parentheses in it
-        let Exchange::Logins(Some(a)) = read_exchange(&[own("list-logins"), bot("* `x1` (Sam (work)) - `CONNECTED`")]) else { panic!() };
+        let Exchange::Logins(Some((a, _))) = read_exchange(&[own("list-logins"), bot("* `x1` (Sam (work)) - `CONNECTED`")]) else { panic!() };
         assert_eq!(a[0].name, "Sam (work)");
     }
 
@@ -650,22 +788,43 @@ mod tests {
         assert!(secret);
 
         // instructions first, then the QR as an image whose body is the code's data
-        let qr = Said { own: false, image: true, body: "2@example-pairing-data".into(), html: None };
+        let qr = Said { own: false, ts: 2, image: true, body: "2@example-pairing-data".into(), html: None };
         let Exchange::Login { step: LinkStep::Qr { modules }, note } = read_exchange(&[own("login qr"), bot("Scan the QR code on your phone"), qr]) else { panic!() };
         assert_eq!(note.as_deref(), Some("Scan the QR code on your phone"));
         assert!(modules.len() >= 21 && modules.iter().all(|r| r.len() == modules.len()));
 
-        let code = Said { own: false, image: false, body: "ABCD-EFGH".into(), html: Some("<code>ABCD-EFGH</code>".into()) };
+        let code = Said { own: false, ts: 2, image: false, body: "ABCD-EFGH".into(), html: Some("<code>ABCD-EFGH</code>".into()) };
         assert!(matches!(read_exchange(&[own("+15550100"), code]), Exchange::Login { step: LinkStep::Code { code }, .. } if code == "ABCD-EFGH"));
         assert!(matches!(read_exchange(&[own("login google"), bot("🦊 🍕 🚲")]), Exchange::Login { step: LinkStep::Code { .. }, .. }));
 
         let Exchange::Login { step, .. } = read_exchange(&[own("login messenger"), bot("Login URL: <https://www.messenger.com/>")]) else { panic!() };
         assert_eq!(step, LinkStep::Cookies { url: "https://www.messenger.com/".into() });
+        // only an https link is offered; anything else leaves the card without one
+        for odd in ["Login URL: accounts.example.com", "Login URL: <javascript:alert(1)>", "Login URL: <http://example.com/>"] {
+            let Exchange::Login { step, .. } = read_exchange(&[own("login"), bot(odd)]) else { panic!() };
+            assert_eq!(step, LinkStep::Cookies { url: String::new() }, "{odd}");
+        }
+        let Exchange::Login { step, .. } = read_exchange(&[own("login"), bot("Login URL: <https://example.com/a> then paste")]) else { panic!() };
+        assert_eq!(step, LinkStep::Cookies { url: "https://example.com/a".into() });
 
         assert!(matches!(read_exchange(&[own("1234"), bot("Successfully logged in as +1 555 0100")]), Exchange::Login { step: LinkStep::Done { .. }, .. }));
         assert_eq!(read_exchange(&[own("login qr"), bot("Login cancelled.")]), Exchange::Cancelled);
         assert_eq!(read_exchange(&[own("cancel")]), Exchange::Cancelled);
         assert_eq!(read_exchange(&[bot("Hello, I'm a bridge bot.")]), Exchange::Idle);
+    }
+
+    #[tokio::test]
+    async fn a_reply_the_bridge_would_run_as_its_own_command_is_never_sent() {
+        let dir = tempfile::tempdir().unwrap();
+        let m = Messages::new(dir.path().join("data"), Arc::new(crate::FileSecrets::new(dir.path().join("secrets"))));
+        // any case: the bridge lowercases the first word (phone keyboards capitalise it)
+        for value in ["Cancel", "logout 4917", "HELP me 123", "Sync now", "pm @someone"] {
+            let e = m.link_send("signal", value).await.unwrap_err();
+            assert!(matches!(e, MessagesError::Invalid { .. }), "{value}: {e:?}");
+        }
+        // an ordinary answer gets past the guard (and then needs a signed-in account)
+        assert!(matches!(m.link_send("signal", "+1 555 0100").await, Err(MessagesError::SignedOut { .. })));
+        assert!(matches!(m.link_send("signal", "helpful-passphrase").await, Err(MessagesError::SignedOut { .. })));
     }
 
     #[test]

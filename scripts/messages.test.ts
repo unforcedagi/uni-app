@@ -3,7 +3,7 @@
 // midnight and a sender's run breaks after five minutes; a rejection keeps the door's shape.
 // Run: node --experimental-strip-types scripts/messages.test.ts
 import assert from "node:assert/strict";
-import { applyLink, applyOpened, applyTimeline, asMessagesErr, previewLine, qrPath, shownFlows, shownItems, type LinkRow, type MessageRow, type RoomRow, type Thread } from "../src/messages/messagesView.ts";
+import { applyLink, applyOpened, applyTimeline, asMessagesErr, linkHost, mergeLinks, previewLine, qrPath, shownFlows, shownItems, type LinkRow, type MessageRow, type RoomRow, type Thread } from "../src/messages/messagesView.ts";
 
 let n = 0;
 const t = (name: string, f: () => void) => { f(); n++; console.log(`ok ${name}`); };
@@ -75,17 +75,36 @@ t("a QR is drawn from its 0s and 1s only: runs of dark modules, inside the quiet
 });
 
 t("a card's update replaces only that network's card", () => {
-  const row = (network: string, state: LinkRow["state"]): LinkRow => ({ network, name: network, state, accounts: [], step: null, note: null });
+  const row = (network: string, state: LinkRow["state"], rev = 1): LinkRow => ({ network, name: network, state, accounts: [], step: null, note: null, rev });
   const rows = [row("signal", "checking"), row("whatsapp", "checking")];
   assert.deepEqual(applyLink(rows, row("whatsapp", "linked"))?.map((r) => r.state), ["checking", "linked"]);
-  assert.equal(applyLink(null, row("signal", "linked")), null, "before the screen has its cards, an update waits for them");
+  assert.deepEqual(applyLink(null, row("signal", "linked")).map((r) => r.state), ["linked"], "an update before the cards is kept");
   assert.deepEqual(applyLink(rows, row("matrix", "linked"))?.map((r) => r.network), ["signal", "whatsapp", "matrix"]);
+  // a command's answer older than the update that crossed it doesn't bring the card back
+  const after = applyLink([row("signal", "not_linked", 7)], row("signal", "checking", 5));
+  assert.equal(after[0].state, "not_linked");
 });
 
 t("Telegram's bot-token and raw-session logins aren't offered; every other way in is", () => {
   const flows = ["phone", "qr", "bot", "manual"].map((id) => ({ id, description: id }));
   assert.deepEqual(shownFlows("telegram", flows).map((f) => f.id), ["phone", "qr"]);
   assert.equal(shownFlows("whatsapp", flows).length, 4);
+});
+
+t("the answer to opening the screen never overwrites an update that came while it was on its way", () => {
+  const row = (network: string, state: LinkRow["state"], rev = 0): LinkRow => ({ network, name: network, state, accounts: [], step: null, note: null, rev });
+  // Telegram's bot doesn't exist: its card turns NOT RUNNING before the snapshot (all "checking") arrives
+  const early = applyLink(null, row("telegram", "unavailable", 3));
+  const merged = mergeLinks([row("signal", "checking"), row("telegram", "checking")], early);
+  assert.deepEqual(merged.map((r) => [r.network, r.state]), [["signal", "checking"], ["telegram", "unavailable"]]);
+  assert.deepEqual(mergeLinks([row("signal", "checking")], null).map((r) => r.state), ["checking"]);
+});
+
+t("a sign-in link is shown only as an https host; anything else, no link and no crash", () => {
+  assert.equal(linkHost("https://accounts.example.com/AccountChooser"), "accounts.example.com");
+  assert.equal(linkHost("accounts.example.com"), null);
+  assert.equal(linkHost("javascript:alert(1)"), null);
+  assert.equal(linkHost(""), null);
 });
 
 console.log(`${n} messages view checks passed`);

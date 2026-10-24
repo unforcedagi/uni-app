@@ -140,7 +140,7 @@ export type LinkStep =
   | { kind: "waiting" }
   | { kind: "done"; text: string }
   | { kind: "failed"; text: string };
-export type LinkRow = { network: string; name: string; state: LinkState; accounts: LinkedAccount[]; step: LinkStep | null; note: string | null };
+export type LinkRow = { network: string; name: string; state: LinkState; accounts: LinkedAccount[]; step: LinkStep | null; note: string | null; rev: number };
 
 /** What each card says about its network: how you link it, and what keeps it linked. Plain words, no promises. */
 export const NETWORK_INFO: Record<string, { how: string; keep: string }> = {
@@ -167,10 +167,23 @@ export function linkWords(s: LinkState): string {
   }
 }
 
-/** A card's update replaces that network's card only; an unknown network is added at the end. */
-export function applyLink(rows: LinkRow[] | null, row: LinkRow): LinkRow[] | null {
-  if (!rows) return rows;
-  return rows.some((r) => r.network === row.network) ? rows.map((r) => (r.network === row.network ? row : r)) : [...rows, row];
+/** A card's update replaces that network's card only, unless the card shown is newer (a command's answer and an
+ * update can cross: each carries the core's revision); an unknown network is added at the end. One that arrives
+ * before the screen has its cards is kept. */
+export function applyLink(rows: LinkRow[] | null, row: LinkRow): LinkRow[] {
+  if (!rows) return [row];
+  return rows.some((r) => r.network === row.network) ? rows.map((r) => (r.network === row.network && row.rev >= r.rev ? row : r)) : [...rows, row];
+}
+
+/** The answer to opening the screen (every card, as the core knew them when asked), merged with the updates that came
+ * while it was on its way: the newer of each pair is kept. In the answer's order. */
+export function mergeLinks(snapshot: LinkRow[], newer: LinkRow[] | null): LinkRow[] {
+  return (newer ?? []).reduce((rows, r) => applyLink(rows, r), snapshot);
+}
+
+/** The host of a sign-in link, or null if it isn't one. */
+export function linkHost(url: string): string | null {
+  try { const u = new URL(url); return u.protocol === "https:" ? u.host : null; } catch { return null; }
 }
 
 /** A login is under way: the card shows its step and a way to stop. */

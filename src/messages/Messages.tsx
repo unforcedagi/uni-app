@@ -214,7 +214,7 @@ export default function Messages({ backTo, onBack }: { backTo: string; onBack: (
     </header>
     {!status && !problem ? <p className="msgs-loading" role="status">Opening Messages…</p>
     : !signedIn ? <div className="msgs-scroll">{problem && <p className="msgs-problem" role="alert">{problemText(problem)}</p>}{status?.error && <p className="msgs-problem" role="status">{status.error}</p>}<SignIn onDone={(s) => { setStatus(s); void loadRooms(); }} /></div>
-    : linkView ? <LinkAccounts rows={linkRows} setRows={setLinkRows} onBack={() => setLinkView(false)} />
+    : linkView ? <LinkAccounts rows={linkRows} setRows={setLinkRows} onBack={() => { setLinkView(false); setLinkRows(null); }} />
     : <div className="msgs-panes">
       <nav className="msgs-rooms" aria-label="Conversations">
         <div className="msgs-rooms-head"><strong>Conversations</strong>{list && <small>{list.length}</small>}{linkButton}</div>

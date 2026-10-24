@@ -5,7 +5,7 @@
 // token. Nothing completes by itself: every value is typed here, and every QR is scanned on your phone.
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { linkCancel, linkCheck, links as readLinks, linkSend, linkStart, telegramKeys } from "./messagesDoor.ts";
-import { asMessagesErr, linking, linkWords, NETWORK_INFO, problemText, qrPath, shownFlows, type LinkRow, type LinkStep, type MessagesErr } from "./messagesView.ts";
+import { applyLink, asMessagesErr, linkHost, linking, linkWords, mergeLinks, NETWORK_INFO, problemText, qrPath, shownFlows, type LinkRow, type LinkStep, type MessagesErr } from "./messagesView.ts";
 
 function Qr({ modules, label }: { modules: string[]; label: string }) {
   const { size, d } = qrPath(modules);
@@ -37,9 +37,10 @@ function Field({ step, onSend, busy }: { step: Extract<LinkStep, { kind: "input"
 
 function Cookies({ url, onSend, busy }: { url: string; onSend: (v: string) => void; busy: boolean }) {
   const [value, setValue] = useState("");
+  const host = linkHost(url);
   return <form className="msgs-link-form" onSubmit={(e) => { e.preventDefault(); if (value.trim()) { onSend(value.trim()); setValue(""); } }}>
     <ol className="msgs-link-steps">
-      <li>In a browser, sign in at <a href={url} target="_blank" rel="noreferrer">{new URL(url).host}</a>. A computer's browser is easiest.</li>
+      <li>In a browser, sign in {host ? <>at <a href={url} target="_blank" rel="noreferrer">{host}</a></> : "where the bridge's message says"}. A computer's browser is easiest.</li>
       <li>Open its developer tools, Network tab. Reload, right-click the first request, and copy it as cURL.</li>
       <li>Paste it here. Only the sign-in cookies are kept, by the bridge on your box.</li>
     </ol>
@@ -69,7 +70,7 @@ function TelegramKeys({ onSaved, onProblem }: { onSaved: () => void; onProblem: 
   </form>;
 }
 
-function Step({ row, busy, act }: { row: LinkRow; busy: boolean; act: (f: () => Promise<unknown>) => void }) {
+function Step({ row, busy, act }: { row: LinkRow; busy: boolean; act: (f: () => Promise<LinkRow | null>) => void }) {
   const step = row.step!;
   const n = row.network;
   switch (step.kind) {
@@ -94,12 +95,13 @@ function Step({ row, busy, act }: { row: LinkRow; busy: boolean; act: (f: () => 
   }
 }
 
-function Card({ row, onProblem }: { row: LinkRow; onProblem: (p: MessagesErr | null) => void }) {
+function Card({ row, onRow, onProblem }: { row: LinkRow; onRow: (r: LinkRow) => void; onProblem: (p: MessagesErr | null) => void }) {
   const [busy, setBusy] = useState(false);
   const info = NETWORK_INFO[row.network];
-  const act = (f: () => Promise<unknown>) => {
+  // each action answers with the card as the core has it now; later changes come as updates
+  const act = (f: () => Promise<LinkRow | null>) => {
     setBusy(true);
-    f().then(() => onProblem(null), (e) => onProblem(asMessagesErr(e))).finally(() => setBusy(false));
+    f().then((r) => { if (r && r.network === row.network) onRow(r); onProblem(null); }, (e) => onProblem(asMessagesErr(e))).finally(() => setBusy(false));
   };
   const attention = row.accounts.find((a) => a.attention);
   const going = linking(row);
@@ -125,13 +127,14 @@ function Card({ row, onProblem }: { row: LinkRow; onProblem: (p: MessagesErr | n
   </li>;
 }
 
-export default function LinkAccounts({ rows, setRows, onBack }: { rows: LinkRow[] | null; setRows: (r: LinkRow[]) => void; onBack: () => void }) {
+export default function LinkAccounts({ rows, setRows, onBack }: { rows: LinkRow[] | null; setRows: (f: (rows: LinkRow[] | null) => LinkRow[] | null) => void; onBack: () => void }) {
   const [problem, setProblem] = useState<MessagesErr | null>(null);
+  const [asking, setAsking] = useState(true);
   const asked = useRef(false);
   useEffect(() => {
     if (asked.current) return;
     asked.current = true;
-    readLinks().then(setRows, (e) => setProblem(asMessagesErr(e)));
+    readLinks().then((snap) => setRows((cur) => mergeLinks(snap, cur)), (e) => setProblem(asMessagesErr(e))).finally(() => setAsking(false));
   }, [setRows]);
   return <section className="msgs-link" aria-label="Link an account">
     <div className="msgs-thread-bar msgs-link-bar">
@@ -141,8 +144,8 @@ export default function LinkAccounts({ rows, setRows, onBack }: { rows: LinkRow[
     <div className="msgs-scroll">
       <p className="msgs-note msgs-link-lead">Bring your chats from other apps into Messages. Each link runs through a bridge on your own box. A bridge has to read a message to pass it on, so for linked apps, end-to-end protection ends at your box.</p>
       {problem && <p className="msgs-problem" role="alert">{problemText(problem)} <button type="button" className="note-quiet" onClick={() => setProblem(null)}>Dismiss</button></p>}
-      {!rows ? <p className="msgs-loading" role="status">Asking the bridges…</p>
-        : <ul className="msgs-cards">{rows.map((r) => <Card key={r.network} row={r} onProblem={setProblem} />)}</ul>}
+      {!rows || asking ? <p className="msgs-loading" role="status">Asking the bridges…</p>
+        : <ul className="msgs-cards">{rows.map((r) => <Card key={r.network} row={r} onRow={(row) => setRows((cur) => applyLink(cur, row))} onProblem={setProblem} />)}</ul>}
     </div>
   </section>;
 }
