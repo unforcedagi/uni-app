@@ -200,16 +200,33 @@ test.describe('beside', () => {
     expect(Math.abs(await width(page) - w1)).toBeLessThanOrEqual(2);
   });
 
-  test('keyboard: arrows widen and narrow it, Home and End go to its least and most', async ({ page }) => {
+  test('keyboard: arrows widen and narrow it, Home and End go to its least and most, the chat kept readable', async ({ page }) => {
     const { handle } = await openNote(page);
     const w0 = await width(page), vw = viewport(page).width;
     await handle.focus();
     await handle.press('ArrowLeft');
     expect(Math.abs(await width(page) - (w0 + 24))).toBeLessThanOrEqual(2);
+    // End: as wide as it goes, the window less 520 px, or less if the chat's own list would get narrower than 380 px (the Daylight on its
+    // side keeps its tree unfolded)
     await handle.press('End');
-    expect(Math.abs(await width(page) - (vw - 520))).toBeLessThanOrEqual(2);
+    const list = (await page.locator('.message-list').boundingBox())!.width, most = await width(page);
+    expect(most).toBeGreaterThan(w0 + 100);
+    expect(most).toBeLessThanOrEqual(vw - 520 + 1);
+    expect(list).toBeGreaterThanOrEqual(378);
+    expect(Math.min(Math.abs(most - (vw - 520)), Math.abs(list - 380))).toBeLessThanOrEqual(2);
     await handle.press('Home');
     expect(Math.abs(await width(page) - 320)).toBeLessThanOrEqual(2);
     await expect(handle).toHaveAttribute('aria-valuenow', String(Math.round(320 / vw * 100)));
   });
+});
+
+test('on Android only a tablet on its side gets the column: a phone turned sideways keeps the sheet', async ({ page }) => {
+  test.skip(project() !== 'daylight-portrait', 'needs the Android user agent, at sizes set here');
+  const { pane } = await openNote(page);
+  await expect(pane).toHaveClass(/note-pane-sheet/);
+  await page.setViewportSize({ width: 915, height: 412 }); // a phone on its side
+  await expect(pane).toHaveClass(/note-pane-sheet/);
+  await page.setViewportSize({ width: 1600, height: 1200 }); // the Daylight on its side
+  await expect(pane).toHaveClass(/note-pane-beside/);
+  await expect(pane.getByRole('separator', { name: /Resize the note/ })).toHaveAttribute('aria-orientation', 'vertical');
 });
