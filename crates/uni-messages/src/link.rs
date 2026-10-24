@@ -260,8 +260,40 @@ const PROBLEMS: [&str; 12] = [
     "This login flow requires a client",
 ];
 
-/// Read the bot's replies to our last message. `said` is the DM, oldest first.
+/// Refusals after which the bridge still waits for the same field (mautrix-go bridgev2 commands/login.go returns
+/// without clearing its command state): the field stays open for a corrected value.
+const RETRY_SAME_FIELD: [&str; 4] = ["Invalid value", "Missing some keys", "Some keys can't be extracted", "Failed to parse"];
+
+fn retry_same_field(note: &str) -> bool {
+    RETRY_SAME_FIELD.iter().any(|p| note.starts_with(p))
+}
+
+/// Read the bot's replies to our last message. `said` is the DM, oldest first. A refusal of a value the field is still
+/// waiting for keeps that field (walking back over earlier refusals to the prompt they answer), with the refusal as
+/// its note.
 pub(crate) fn read_exchange(said: &[Said]) -> Exchange {
+    let latest = read_one(said);
+    let Exchange::Login { step: LinkStep::Waiting, note: Some(problem) } = &latest else { return latest };
+    if !retry_same_field(problem) {
+        return latest;
+    }
+    let mut cut = said.iter().rposition(|s| s.own).unwrap_or(0);
+    loop {
+        match read_one(&said[..cut]) {
+            Exchange::Login { step: step @ (LinkStep::Input { .. } | LinkStep::Cookies { .. }), .. } => {
+                return Exchange::Login { step, note: Some(problem.clone()) };
+            }
+            Exchange::Login { step: LinkStep::Waiting, note: Some(p) } if retry_same_field(&p) => {
+                let Some(prev) = said[..cut].iter().rposition(|s| s.own) else { return latest };
+                cut = prev;
+            }
+            _ => return latest,
+        }
+    }
+}
+
+/// The replies to our last message alone.
+fn read_one(said: &[Said]) -> Exchange {
     let Some(last_own) = said.iter().rposition(|s| s.own) else { return Exchange::Idle };
     let asked = said[last_own].body.trim().to_lowercase();
     let replies: Vec<&Said> = said[last_own + 1..].iter().filter(|s| !s.own).collect();
@@ -297,7 +329,7 @@ pub(crate) fn read_exchange(said: &[Said]) -> Exchange {
             note = None;
         } else if PROBLEMS.iter().any(|p| body.starts_with(p)) {
             // a refused value keeps its field open; a failed login ends the login
-            if body.starts_with("Login failed") || body.starts_with("Failed to") {
+            if body.starts_with("Login failed") || (body.starts_with("Failed to") && !retry_same_field(body)) {
                 step = LinkStep::Failed { text: body.to_owned() };
             } else if body.starts_with("Invalid login flow") {
                 step = LinkStep::Flows { flows: read_flows(body) };
@@ -464,14 +496,25 @@ impl Messages {
         self.link_say(&net, "cancel").await
     }
 
+    /// Say `text` to the bot. What is said here can be a login value (a code, a password, cookies), so it goes only
+    /// into a room that is safe for it (`safe_for_secrets`), checked again right before the send: a room that has
+    /// stopped being safe since it was picked is dropped and a fresh one made.
     async fn link_say(self: &Arc<Self>, net: &Network, text: &str) -> Result<LinkRow> {
         let (client, account) = self.client().await?;
-        let room = self
-            .link_room(&client, &account, net)
-            .await?
-            .ok_or_else(|| MessagesError::Unreachable { message: format!("The {} bridge isn't running.", net.name) })?;
-        self.send(room.room_id().as_str(), &format!("{} {text}", net.prefix)).await?;
-        Ok(self.link_row(net))
+        let own = client.user_id().ok_or_else(signed_out)?.to_owned();
+        let bot = bot_id(&own, net).ok_or_else(|| server("no bot address on this homeserver"))?;
+        for _ in 0..2 {
+            let room = self
+                .link_room(&client, &account, net)
+                .await?
+                .ok_or_else(|| MessagesError::Unreachable { message: format!("The {} bridge isn't running.", net.name) })?;
+            if safe_for_secrets(&client, &room, &own, &bot).await {
+                self.send(room.room_id().as_str(), &format!("{} {text}", net.prefix)).await?;
+                return Ok(self.link_row(net));
+            }
+            self.link_creating.lock().await.remove(&(account.clone(), net.id));
+        }
+        Err(MessagesError::Refused { message: format!("No safe room with the {} bridge: nothing was sent.", net.name) })
     }
 
     fn mark_unavailable(&self, net: &Network) {
@@ -518,6 +561,13 @@ impl Messages {
             let mut made = self.link_creating.lock().await;
             // the DM this account already made here: m.direct, which marks it, may not have synced back yet
             let mut room = made.get(&key).and_then(|id| client.get_room(id)).filter(|r| r.state() == RoomState::Joined);
+            if let Some(r) = &room {
+                if !safe_for_secrets(client, r, &own, &bot).await {
+                    // gained a member, say: never used again for this bridge
+                    made.remove(&key);
+                    room = None;
+                }
+            }
             if room.is_none() {
                 // marked as a DM with the bot, or just the two of us in it
                 let mut existing = Vec::new();
@@ -532,6 +582,15 @@ impl Messages {
                     // DMs on the server says whether there is one to wait for, instead of making another
                     existing = server_dms(client, &bot).await;
                 }
+                // only a room safe for login values: encrypted, with exactly us and the bot in it. Others (a DM someone
+                // else was added to, an unencrypted one) are left as they are and never used here.
+                let mut safe = Vec::new();
+                for r in existing {
+                    if safe_for_secrets(client, &r, &own, &bot).await {
+                        safe.push(r);
+                    }
+                }
+                let existing = safe;
                 if existing.len() > 1 {
                     // more than one DM with this bot (two devices each made one before seeing the other's): keep the
                     // one where the bot spoke last, which is the one it answers in, and leave the others
@@ -566,17 +625,22 @@ impl Messages {
                             return Ok(None);
                         }
                     }
-                    client.create_dm(&bot).await.map_err(from_sdk)?
+                    // encrypted from its first event, the bot the only one invited
+                    let r = client.create_dm(&bot).await.map_err(from_sdk)?;
+                    if !safe_for_secrets(client, &r, &own, &bot).await {
+                        return Err(server("the new room with the bridge isn't encrypted"));
+                    }
+                    r
                 }
             };
             made.insert(key.clone(), room.room_id().to_owned());
             drop(made);
             self.watch_link(client, account, net, &room, &bot).await?;
             let started = std::time::Instant::now();
-            while !bot_joined(&room, &bot).await && started.elapsed() < BOT_JOIN_WAIT {
+            while !bot_joined_now(client, &room, &bot).await && started.elapsed() < BOT_JOIN_WAIT {
                 tokio::time::sleep(Duration::from_millis(500)).await;
             }
-            if bot_joined(&room, &bot).await {
+            if bot_joined_now(client, &room, &bot).await {
                 // a member bot may still be down: only its answer (apply_exchange) says it's running again
                 return Ok(Some(room));
             }
@@ -584,7 +648,7 @@ impl Messages {
             // DM, so a fresh one is made, which the running bridge sees. Once; if that one isn't joined either, the
             // bridge isn't running.
             self.link_creating.lock().await.remove(&key);
-            if let Some(t) = self.open.lock().await.links.remove(net.id) {
+            if let Some((_, t)) = self.open.lock().await.links.remove(net.id) {
                 t.abort();
             }
             let _ = self.close(room.room_id().as_str()).await;
@@ -603,7 +667,7 @@ impl Messages {
     /// Follow the bot DM's timeline and keep `net`'s row up to date. Once per room and account.
     async fn watch_link(self: &Arc<Self>, client: &Client, account: &str, net: &Network, room: &Room, bot: &UserId) -> Result<()> {
         let room_id = room.room_id().to_owned();
-        if self.open.lock().await.links.contains_key(net.id) {
+        if self.open.lock().await.links.get(net.id).is_some_and(|(watched, _)| *watched == room_id) {
             return Ok(());
         }
         // not forwarded to the app as a conversation: what is typed into a login step (a password, a code, cookies)
@@ -615,6 +679,7 @@ impl Messages {
         let (items, mut stream) = timeline.subscribe().await;
         let me = Arc::downgrade(self);
         let (net, bot) = (*net, bot.to_owned());
+        let watched = room_id.clone();
         let task = tokio::spawn(async move {
             let mut items = items;
             let mut was_done = false;
@@ -653,7 +718,7 @@ impl Messages {
             task.abort();
             return Err(signed_out());
         }
-        if let Some(old) = open.links.insert(net.id, task) {
+        if let Some((_, old)) = open.links.insert(net.id, (watched, task)) {
             old.abort();
         }
         Ok(())
@@ -739,12 +804,48 @@ async fn bot_spoke_at(room: &Room, bot: &UserId) -> u64 {
         .unwrap_or(0)
 }
 
+/// The room's members as the homeserver has them now: user id → membership. `None` if it can't be asked.
+async fn server_members(client: &Client, room: &Room) -> Option<HashMap<String, String>> {
+    use matrix_sdk::ruma::api::client::membership::get_member_events;
+    let answer = client.send(get_member_events::v3::Request::new(room.room_id().to_owned())).await.ok()?;
+    let mut out = HashMap::new();
+    for ev in &answer.chunk {
+        let key: String = ev.get_field("state_key").ok().flatten()?;
+        let content: serde_json::Value = ev.get_field("content").ok().flatten()?;
+        out.insert(key, content["membership"].as_str()?.to_owned());
+    }
+    Some(out)
+}
+
+/// Whether a room may hold login values for `bot`'s bridge: end-to-end encrypted, and its joined and invited members
+/// exactly us and the bot. Both asked of the homeserver, not this device's copy, so someone invited a moment ago
+/// counts. Anything that can't be checked counts as unsafe.
+async fn safe_for_secrets(client: &Client, room: &Room, own: &UserId, bot: &UserId) -> bool {
+    if room.state() != RoomState::Joined {
+        return false;
+    }
+    if !matches!(room.latest_encryption_state().await, Ok(state) if state.is_encrypted()) {
+        return false;
+    }
+    let Some(members) = server_members(client, room).await else { return false };
+    let present: std::collections::BTreeSet<&str> =
+        members.iter().filter(|(_, m)| matches!(m.as_str(), "join" | "invite")).map(|(u, _)| u.as_str()).collect();
+    present == std::collections::BTreeSet::from([own.as_str(), bot.as_str()])
+}
+
 /// Whether the bot has joined the room.
 async fn bot_joined(room: &Room, bot: &UserId) -> bool {
     if room.state() != RoomState::Joined {
         return false;
     }
     matches!(room.get_member_no_sync(bot).await, Ok(Some(m)) if *m.membership() == MembershipState::Join)
+}
+
+/// As `bot_joined`, and if this device hasn't seen the join yet, as the homeserver has it.
+async fn bot_joined_now(client: &Client, room: &Room, bot: &UserId) -> bool {
+    bot_joined(room, bot).await
+        || (room.state() == RoomState::Joined
+            && server_members(client, room).await.is_some_and(|m| m.get(bot.as_str()).map(String::as_str) == Some("join")))
 }
 
 /// The rows by network, for `Messages`.
@@ -827,12 +928,32 @@ mod tests {
         assert!(matches!(m.link_send("signal", "helpful-passphrase").await, Err(MessagesError::SignedOut { .. })));
     }
 
+    /// Codex review lk82bn43, P2: in the order the bridge really writes it (login, its prompt, our value, its refusal),
+    /// the field that's still waiting stays, with the refusal as its note, so the value can be corrected.
+    #[test]
+    fn a_refused_value_keeps_the_field_that_still_waits_for_it() {
+        let ask = "Please enter your Phone number\nInclude the country code with +";
+        let said = [own("login phone"), bot(ask), own("+1"), bot("Invalid value: too short")];
+        let Exchange::Login { step, note } = read_exchange(&said) else { panic!() };
+        assert!(matches!(&step, LinkStep::Input { name, .. } if name == "Phone number"), "the phone field is still there: {step:?}");
+        assert_eq!(note.as_deref(), Some("Invalid value: too short"));
+        // a second wrong try in a row: still the same field
+        let said = [own("login phone"), bot(ask), own("+1"), bot("Invalid value: too short"), own("+12"), bot("Invalid value: still too short")];
+        let Exchange::Login { step, note } = read_exchange(&said) else { panic!() };
+        assert!(matches!(step, LinkStep::Input { .. }));
+        assert_eq!(note.as_deref(), Some("Invalid value: still too short"));
+        // the cookie step: an unreadable paste leaves the paste box (the bridge keeps waiting for cookies)
+        let said = [own("login messenger"), bot("Login URL: <https://www.messenger.com/>"), own("not json"), bot("Failed to parse input as JSON: invalid character")];
+        let Exchange::Login { step, note } = read_exchange(&said) else { panic!() };
+        assert!(matches!(step, LinkStep::Cookies { .. }), "{step:?}");
+        assert!(note.unwrap().starts_with("Failed to parse"));
+        // while the corrected value is on its way, the bridge hasn't answered: waiting
+        let said = [own("login phone"), bot(ask), own("+1"), bot("Invalid value: too short"), own("+15550100")];
+        assert!(matches!(read_exchange(&said), Exchange::Login { step: LinkStep::Waiting, .. }));
+    }
+
     #[test]
     fn problems_keep_a_field_open_or_end_the_login() {
-        let ask = bot("Please enter your Phone number");
-        let Exchange::Login { step, note } = read_exchange(&[own("+1"), ask.clone(), bot("Invalid value: too short")]) else { panic!() };
-        assert!(matches!(step, LinkStep::Input { .. }), "a refused value keeps the field");
-        assert_eq!(note.as_deref(), Some("Invalid value: too short"));
         let Exchange::Login { step, .. } = read_exchange(&[own("login qr"), bot("Login failed: timed out")]) else { panic!() };
         assert_eq!(step, LinkStep::Failed { text: "Login failed: timed out".into() });
         let Exchange::Login { step, note } = read_exchange(&[own("login"), bot("You already have an ongoing login. You can use `cancel` to cancel it.")]) else { panic!() };

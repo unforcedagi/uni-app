@@ -184,7 +184,7 @@ struct OpenRooms {
     account: Option<String>,
     rooms: HashMap<OwnedRoomId, OpenRoom>,
     /// Each bridge bot's DM, watched for the Link screen (link.rs), by network.
-    links: HashMap<&'static str, JoinHandle<()>>,
+    links: HashMap<&'static str, (OwnedRoomId, JoinHandle<()>)>,
 }
 
 impl Live {
@@ -486,7 +486,7 @@ impl Messages {
         for (_, r) in open.rooms.drain() {
             r.task.abort();
         }
-        for (_, t) in open.links.drain() {
+        for (_, (_, t)) in open.links.drain() {
             t.abort();
         }
         open.account = account;
