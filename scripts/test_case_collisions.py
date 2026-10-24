@@ -17,6 +17,10 @@ class CaseCollisionsTest(unittest.TestCase):
         # imports leave the extension off, so on macOS "./Search" can resolve to search.ts (uni-v0.1.62's Mac build)
         self.assertEqual(module.collisions(["src/Search.tsx", "src/search.ts"]), [("src/Search.tsx", "src/search.ts")])
 
+    def test_extension_removed_names_collide(self):
+        # T-255: compared with extensions off, Foo.ts and foo.tsx are one name, whichever extension is longer
+        self.assertEqual(module.collisions(["src/Foo.ts", "src/foo.tsx"]), [("src/Foo.ts", "src/foo.tsx")])
+
     def test_same_stem_same_case_is_fine(self):
         self.assertEqual(module.collisions(["src/Foo.ts", "src/Foo.tsx"]), [])
 
