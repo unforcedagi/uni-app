@@ -1,4 +1,4 @@
-//! Where an account's two secrets live: the store passphrase and the session (access token and device id).
+//! Where the saved account lives: one record with its session (access token, device id), store name and store key.
 
 use std::{
     fs,
@@ -12,6 +12,7 @@ use rand::RngCore;
 /// as it keeps the device key (DESIGN.md, "On the device"); the prototype uses [`FileSecrets`].
 pub trait Secrets: Send + Sync + 'static {
     fn get(&self, name: &str) -> Result<Option<String>, String>;
+    /// Replace the value in one step: whatever happens (a full disk, a crash), it is the old value or the new one.
     fn set(&self, name: &str, value: &str) -> Result<(), String>;
     fn delete(&self, name: &str) -> Result<(), String>;
 }
@@ -53,20 +54,32 @@ impl Secrets for FileSecrets {
         }
     }
 
+    /// Written whole to a new temporary file, synced, then renamed over the old one, and the folder synced: the rename
+    /// is the one step that changes the value.
     fn set(&self, name: &str, value: &str) -> Result<(), String> {
         let path = self.path(name)?;
         private_dir(&self.dir)?;
-        let tmp = path.with_extension("tmp");
-        let mut opts = fs::OpenOptions::new();
-        opts.write(true).create(true).truncate(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            opts.mode(0o600);
-        }
-        let mut f = opts.open(&tmp).map_err(|e| e.to_string())?;
-        f.write_all(value.as_bytes()).and_then(|_| f.sync_all()).map_err(|e| e.to_string())?;
-        fs::rename(&tmp, &path).map_err(|e| e.to_string())
+        let tmp = self.dir.join(format!(".{name}.{}.tmp", random_hex(6)));
+        let written = (|| {
+            let mut opts = fs::OpenOptions::new();
+            opts.write(true).create_new(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                opts.mode(0o600);
+            }
+            let mut f = opts.open(&tmp)?;
+            f.write_all(value.as_bytes())?;
+            f.sync_all()?;
+            fs::rename(&tmp, &path)?;
+            #[cfg(unix)]
+            fs::File::open(&self.dir)?.sync_all()?;
+            Ok::<_, std::io::Error>(())
+        })();
+        written.map_err(|e| {
+            let _ = fs::remove_file(&tmp);
+            e.to_string()
+        })
     }
 
     fn delete(&self, name: &str) -> Result<(), String> {
@@ -97,6 +110,7 @@ mod tests {
         s.set("session", "one").unwrap();
         s.set("session", "two").unwrap();
         assert_eq!(s.get("session").unwrap().as_deref(), Some("two"));
+        assert_eq!(fs::read_dir(tmp.path().join("secrets")).unwrap().count(), 1, "no temporary file is left behind");
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;

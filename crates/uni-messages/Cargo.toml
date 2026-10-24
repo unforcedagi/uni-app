@@ -31,6 +31,9 @@ rustls = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile = "3"
+# tests/lifecycle.rs: a fake homeserver on 127.0.0.1, so the account's lifecycle runs against something it can't tell apart
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "time"] }
 
 [[bin]]
 name = "uni-messages-dev"
