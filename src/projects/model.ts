@@ -160,7 +160,7 @@ export function span(ms: number): string {
   if (m < 60) return `${m} min`;
   const h = Math.floor(m / 60);
   if (h < 3) return m % 60 ? `${h} h ${m % 60} min` : `${h} h`;
-  if (h < 24) return `${Math.round(m / 60)} h`;
+  if (Math.round(m / 60) < 24) return `${Math.round(m / 60)} h`;
   const d = Math.round(h / 24);
   return d === 1 ? "1 day" : `${d} days`;
 }

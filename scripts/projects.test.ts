@@ -91,7 +91,7 @@ check("states are said in words, never ids", () => {
   w = finishSession(w, "s", NOW + 50 * MIN, "Done.");
   assert.equal(stateWords(w.sessions[0], NOW + 50 * MIN + 3 * 86_400_000), "Finished 3 days ago");
   assert.equal(ago(10_000), "just now"); assert.equal(ago(5 * MIN), "5 min ago");
-  assert.equal(span(70 * MIN), "1 h 10 min"); assert.equal(span(5 * 60 * MIN + 10 * MIN), "5 h"); assert.equal(span(20_000), "just now");
+  assert.equal(span(70 * MIN), "1 h 10 min"); assert.equal(span(5 * 60 * MIN + 10 * MIN), "5 h"); assert.equal(span(23 * 60 * MIN + 40 * MIN), "1 day"); assert.equal(span(20_000), "just now");
 });
 check("the timeline places runs and talk inside its window, and clips what falls outside", () => {
   let w = startSession(empty(), "p", "Go", NOW - 60 * MIN, "s");

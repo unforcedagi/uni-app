@@ -20,6 +20,7 @@ export function installDemoBackend() {
   for (const m of demoTalk(now)) (msgs[m.channel] ??= []).push(toMsg(m));
   const cbs: ((e: unknown) => void)[] = [];
   const listeners: Record<string, number[]> = {};
+  const unlisten = (event: string, id: number) => { listeners[event] = (listeners[event] ?? []).filter((h) => h !== id); };
   const live = (channel: string, author: string) => { for (const h of listeners["uni://live"] ?? []) cbs[h]?.({ event: "uni://live", id: 1, payload: { kind: "message", channel, status: null, author } }); };
   let n = 0;
   const say = (channel: string, mine: boolean, body: string) => {
@@ -55,7 +56,7 @@ export function installDemoBackend() {
         case "plugin:app|version": return "prototype";
         case "plugin:app|register_listener": return null;
         case "plugin:event|listen": (listeners[args.event] ??= []).push(args.handler); return args.handler;
-        case "plugin:event|unlisten": return null;
+        case "plugin:event|unlisten": unlisten(args.event, args.eventId); return null;
         case "identity_status": return { paired: true, pubkey: ME };
         case "get_identity": return ME;
         case "get_npub": return "prototype";
@@ -90,5 +91,5 @@ export function installDemoBackend() {
       }
     },
   };
-  w.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} };
+  w.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: (event: string, id: number) => unlisten(event, id) };
 }

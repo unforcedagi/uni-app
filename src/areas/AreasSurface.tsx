@@ -41,7 +41,7 @@ import { ApprovalsContext, useApprovalList } from "../approvalsLive";
 import type { Approval } from "../approvals";
 import "./areas.css";
 import { PROJECTS_PROTO } from "../projects/flag";
-import { useWork } from "../projects/store";
+import { getWork } from "../projects/store";
 import { FrontDoor, type Door } from "../projects/FrontDoor";
 import { ProjectStrip } from "../projects/ProjectStrip";
 import { ProjectSheet } from "../projects/ProjectSheet";
@@ -185,7 +185,6 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   const [stripSheet, setStripSheet] = useState<{ close: () => void } | null>(null);
   /** T-301: the project opened in place over its area's room (the prototype build only). */
   const [projectOpen, setProjectOpen] = useState<string | null>(null);
-  const projects = useWork();
   const closeProject = () => setProjectOpen(null);
   const toTree = () => { setRootOpen(false); onOpenArea(null, "Uni", uniRoom); };
   const back = loose ? (treeHome ? toTree : null) : path ? (treeHome ? toTree : () => {
@@ -402,7 +401,7 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
     const doors: Door[] = (data ? childrenOf(data.tree, ROOT) : []).map((a) => {
       const v = roomView(data!.tree, a.path, roomRefs, uniRef);
       const st = tasks.tree?.stands.get(a.path)?.text ?? (typeof a.metadata.stands === "string" ? a.metadata.stands : null);
-      return { path: a.path, name: a.name, slug: v.own && v.slash ? v.slash.replace(/^#/, "") : null, stands: st, lastTs: rooms.find((r) => r.id === v.target?.id)?.last_ts ?? null };
+      return { path: a.path, name: a.name, slug: v.own && v.slash ? v.slash.replace(/^#/, "") : null, stands: st, lastTs: v.own ? rooms.find((r) => r.id === v.target?.id)?.last_ts ?? null : null };
     });
     return <div className="areas-home tree-home-wrap">{status}<FrontDoor doors={doors} onOpen={(p) => openPath(p)} /></div>;
   }
@@ -519,10 +518,11 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   const door = !chat ? "" : nodeView.own && nodeView.slash ? `#${nodeView.slash.replace(/^#/, "")}` : "";
   // the area's app, when open, is the view in the chat's place (r14); otherwise the work view when it is open, else the conversation
   // T-301: the area's projects (the prototype build only): a strip under the header, and the one opened, in place over the room
-  const protoArea = PROJECTS_PROTO ? projects.areas.find((a) => a.path === node.path) ?? null : null;
-  const strip = protoArea ? <ProjectStrip area={protoArea} onOpen={(id) => { closeSheet(); setProjectOpen(id); }} /> : null;
-  const talk = (roomFor(target?.id)?.messages ?? []).map((m) => m.ts * 1000);
-  const projectSheet = projectOpen ? <ProjectSheet key={projectOpen} project={projectOpen} talk={talk} onClose={closeProject} /> : null;
+  // (the areas never change while the app runs, so the surface reads them once rather than following every session's step)
+  const protoArea = PROJECTS_PROTO ? getWork().areas.find((a) => a.path === node.path) ?? null : null;
+  const strip = protoArea ? <ProjectStrip area={protoArea} onOpen={(id) => { closeSheet(); stripSheet?.close(); setProjectOpen(id); }} /> : null;
+  // the timeline's talk is the area's own room only (never a borrowed one's)
+  const projectSheet = projectOpen ? <ProjectSheet key={projectOpen} project={projectOpen} talk={nodeView.own ? (roomFor(target?.id)?.messages ?? []).map((m) => m.ts * 1000) : []} onClose={closeProject} /> : null;
   const roomLevel = (app: AppView | null, openApp: ((e: React.MouseEvent) => void) | null) => shell({ title: node.name, door, context: app || workOpen ? undefined : context, node: node.name, crumbs, strip,
     companion: chat ? companionProps : null, chatRoom: thread ? roomFor(thread.channel, thread.root) : roomFor(target?.id), placeholder, selected: node.path, sheet: <>{sheetView}{projectSheet}</>, retryChat: target?.id ? () => actions.openRoom(target.id) : actions.retryRooms ?? null,
     main: app ? app.main : workOpen ? workMain : undefined, workBar: app ? app.bar : workBar, openApp, appOpen: !!app });
