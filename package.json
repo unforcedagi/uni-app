@@ -31,7 +31,8 @@
     "test:calendar": "playwright test --config playwright.calendar.config.ts",
     "test:chat": "playwright test --config playwright.chat.config.ts",
     "test:approvals": "playwright test --config playwright.approvals.config.ts",
-    "test:messages": "playwright test --config playwright.messages.config.ts"
+    "test:messages": "playwright test --config playwright.messages.config.ts",
+    "test:roomrestore": "playwright test --config playwright.roomrestore.config.ts"
   },
   "dependencies": {
     "@openparachute/surface-client": "0.3.7",

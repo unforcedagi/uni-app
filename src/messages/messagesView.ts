@@ -11,6 +11,8 @@ export type MessagesErr = { kind: "signed_out" | "unreachable" | "refused" | "in
 
 export const SEEN_KEY = "uni.messages.seen.v1";
 export const OPEN_KEY = "uni.messages.open.v1";
+/** T-294: whether a phone was showing that conversation ("thread") or the list, so coming back shows the same. */
+export const PANE_KEY = "uni.messages.pane.v1";
 
 /** A rejection from a `messages_*` command, in the door's shape (a missing command or a broken IPC is "server"). */
 export function asMessagesErr(e: unknown): MessagesErr {

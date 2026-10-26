@@ -4,7 +4,7 @@
 // arrives while you look. Agents don't read any of this: the thread says so, and "bring Uni in" is designed (T-278
 // DESIGN.md), not built. Shape and word before colour, so it reads on the Daylight, where nothing moves.
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type FormEvent, type KeyboardEvent } from "react";
-import { closeRoom, join, lastOpen, markRead, older, onUpdate, openRoom, rememberOpen, rooms as readRooms, send, signIn, signInDevice, signOut, status as readStatus } from "./messagesDoor.ts";
+import { closeRoom, draftFor, join, keepDraft, keepReadSpot, lastOpen, lastPane, markRead, older, onUpdate, openRoom, readSpot, rememberOpen, rememberPane, rooms as readRooms, send, signIn, signInDevice, signOut, status as readStatus } from "./messagesDoor.ts";
 import { applyLink, applyOpened, applyTimeline, asMessagesErr, initials, previewLine, problemText, rowTime, sendWords, shownItems, statusWords, timeLabel, type LinkRow, type MessagesErr, type RoomRow, type Status, type Thread } from "./messagesView.ts";
 import LinkAccounts from "./LinkAccounts.tsx";
 import { enterInsertsNewline } from "../composerCore";
@@ -65,13 +65,16 @@ function RoomItem({ r, selected, now, onOpen }: { r: RoomRow; selected: boolean;
 }
 
 function ThreadView({ room, thread, now, visible, onBack, onProblem }: { room: RoomRow; thread: Thread; now: number; visible: boolean; onBack: () => void; onProblem: (p: MessagesErr | null) => void }) {
-  const [draft, setDraft] = useState("");
+  // T-294: the draft and the spot this conversation was left with come back with it
+  const [draft, setDraft] = useState(() => draftFor(room.id));
+  useEffect(() => keepDraft(room.id, draft), [room.id, draft]);
   const [atStart, setAtStart] = useState(false);
   /** Sends go one after another, in the order written; typing never waits for them. */
   const sending = useRef<Promise<unknown>>(Promise.resolve());
   const [loadingOlder, setLoadingOlder] = useState(false);
   const log = useRef<HTMLDivElement | null>(null);
-  const stuck = useRef(true);
+  const leftAt = useRef(readSpot(room.id));
+  const stuck = useRef(leftAt.current === undefined);
   const items = thread.items;
   const shown = items ? shownItems(items, now) : [];
   const lastOwn = items ? [...items].reverse().find((m) => m.own) : undefined;
@@ -79,7 +82,9 @@ function ThreadView({ room, thread, now, visible, onBack, onProblem }: { room: R
   // follow the conversation while you're at its end; leave it alone while you read back
   useLayoutEffect(() => {
     const el = log.current;
-    if (el && stuck.current) el.scrollTop = el.scrollHeight;
+    if (!el || !items?.length) return;
+    if (leftAt.current !== undefined) { el.scrollTop = el.scrollHeight - el.clientHeight - leftAt.current; leftAt.current = undefined; }
+    else if (stuck.current) el.scrollTop = el.scrollHeight;
   }, [items]);
   // read up to here while it's on screen: not while a phone shows the list instead, nor in a hidden window
   const lastKey = items?.length ? items[items.length - 1].key : null;
@@ -123,7 +128,11 @@ function ThreadView({ room, thread, now, visible, onBack, onProblem }: { room: R
     </div>
     : <>
       <div className="msgs-log" ref={log} role="log" aria-label={`Messages with ${room.name}`} aria-live="polite"
-        onScroll={(e) => { const el = e.currentTarget; stuck.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48; }}>
+        onScroll={(e) => {
+          const el = e.currentTarget, fromEnd = el.scrollHeight - el.scrollTop - el.clientHeight;
+          stuck.current = fromEnd < 48;
+          if (leftAt.current === undefined) keepReadSpot(room.id, stuck.current ? null : fromEnd);
+        }}>
         {items && !atStart && items.length > 0 && <p className="msgs-older"><button type="button" className="note-quiet" disabled={loadingOlder} onClick={() => void loadOlder()}>{loadingOlder ? "Loading…" : "Load earlier messages"}</button></p>}
         {!items ? <p className="msgs-loading" role="status">Opening…</p>
           : items.length === 0 ? <p className="empty">No messages yet. Say hello.</p>
@@ -165,7 +174,7 @@ export default function Messages({ backTo, onBack }: { backTo: string; onBack: (
     openId.current = roomId;
     rememberOpen(roomId);
     setThread({ roomId, seq: n, items: null });
-    if (show) setPane("thread");
+    if (show) { setPane("thread"); rememberPane("thread"); }
     try { const rows = await openRoom(roomId); setThread((t) => applyOpened(t, roomId, n, rows)); setProblem(null); }
     catch (err) { setProblem(asMessagesErr(err)); }
   }, []);
@@ -175,7 +184,11 @@ export default function Messages({ backTo, onBack }: { backTo: string; onBack: (
       const r = await readRooms();
       setList(r);
       const last = lastOpen();
-      if (!openId.current && last && r.some((x) => x.id === last) && !matchMedia(PHONE).matches) void open(last, false);
+      // T-294: a phone comes back to the conversation it was showing, not the list
+      if (!openId.current && last && r.some((x) => x.id === last)) {
+        if (!matchMedia(PHONE).matches) void open(last, false);
+        else if (lastPane() === "thread") void open(last);
+      }
     } catch (err) { setProblem(asMessagesErr(err)); }
   }, [open]);
 
@@ -226,7 +239,7 @@ export default function Messages({ backTo, onBack }: { backTo: string; onBack: (
       </nav>
       <div className="msgs-read">
         {problem && <p className="msgs-problem" role="alert">{problemText(problem)} <button type="button" className="note-quiet" onClick={() => setProblem(null)}>Dismiss</button></p>}
-        {thread && openRow ? <ThreadView key={thread.roomId} room={openRow} thread={thread} now={now} visible={!phone || pane === "thread"} onBack={() => setPane("list")} onProblem={setProblem} />
+        {thread && openRow ? <ThreadView key={thread.roomId} room={openRow} thread={thread} now={now} visible={!phone || pane === "thread"} onBack={() => { setPane("list"); rememberPane("list"); }} onProblem={setProblem} />
           : thread ? <p className="msgs-loading" role="status">Opening…</p>
           : <p className="empty msgs-pick">Pick a conversation.</p>}
       </div>

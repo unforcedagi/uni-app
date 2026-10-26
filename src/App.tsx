@@ -54,7 +54,7 @@ import PairSource, { PairDeviceButton } from "./PairSource";
 import { UpdateSettings } from "./UpdateNotice";
 import { watchLostIpc } from "./ipcLost";
 import { currentUserAgent, platformName } from "./interface/selftest/gate";
-import { activeTab, closeTab, EMPTY_TABS, focusTab, isSurface, LAST_ROOM_KEY, lastRoomOf, restorePlace, LEGACY_TABS_KEY, migrateLegacyTabs, navigateNoteTab, nextAfterClose, openTab, persistable, recordingTabCanClose, restoreTabs, serializeTabs, updateTab, TABS_KEY, type Tabs, type Tab, type TabTarget, type OpenMode } from "./tabs";
+import { activeTab, closeTab, EMPTY_TABS, focusTab, isSurface, isUniSide, LAST_ROOM_KEY, lastRoomOf, restorePlace, LEGACY_TABS_KEY, migrateLegacyTabs, navigateNoteTab, nextAfterClose, openTab, persistable, recordingTabCanClose, readUniPlace, restoreTabs, serializeTabs, serializeUniPlace, updateTab, TABS_KEY, UNI_PLACE_KEY, viewOf, type Tabs, type Tab, type TabTarget, type OpenMode, type ReturnSpot } from "./tabs";
 import { canBack as histCanBack, canForward as histCanForward, EMPTY_HISTORY, placeKey, RECENT_SHOWN, recent as histRecent, step as histStep, visit as histVisit, type History } from "./navHistory";
 import { NavContext, type NavControls } from "./navContext";
 import { useRailHidden } from "./areas/homeLayout";
@@ -240,6 +240,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const [hasOverlay, setHasOverlay] = useState(false);
   const setOverlay = useCallback((o: Overlay | null) => { overlayRef.current = o; setHasOverlay(!!o?.history); }, []);
   const tabsReady = useRef(false);
+  /** The place on screen is one the app restored or opened, not the Uni it paints before the saved place is read. */
+  const placeSettled = useRef(false);
   const [vaults, setVaults] = useState<string[]>([]);
   const [vaultError, setVaultError] = useState<string | null>(null);
   const [vaultRefresh, setVaultRefresh] = useState(0);
@@ -606,6 +608,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
   // The places visited, for Back and Forward (Alt+←/→ and the sidebar's two buttons).
   const [hist, setHist] = useState<History>(EMPTY_HISTORY);
   const histRef = useRef<History>(EMPTY_HISTORY);
+  /** T-294: the last place on Uni's side (see `origin`). */
+  const uniPlace = useRef<TabTarget | null>(null);
   function pushHistory(t: Tab | TabTarget) {
     const next = histVisit(histRef.current, t);
     if (next !== histRef.current) { histRef.current = next; setHist(next); }
@@ -637,9 +641,23 @@ function Conversations({ onForget }: { onForget: () => void }) {
         const cur = activeTab(next); const last = cur ? lastRoomOf(cur) : null;
         if (last) localStorage.setItem(LAST_ROOM_KEY, last);
       } catch { /* private storage */ }
+      placeSettled.current = true;
+      const cur = activeTab(next);
+      if (cur && isUniSide(cur)) keepUniPlace(cur, null);
     }
   }
+  /** T-294: the place on Uni's side, kept for the way back to it (in memory, and on the device for a restart), with the spot in its conversation. */
+  function keepUniPlace(t: Tab, spot: ReturnSpot | null) {
+    const { id: _id, ...target } = t;
+    uniPlace.current = target;
+    try { localStorage.setItem(UNI_PLACE_KEY, serializeUniPlace(target, spot)); } catch { /* private storage: this session still has it */ }
+  }
   function switchToTab(tab: Tab | null) {
+    // T-294: leaving Uni's side (for Messages, Mail, the Journal…) keeps where the reader was in its conversation, for the way back. Any other
+    // place on Uni's side opens at its newest (T-124 r2), and drops a spot kept for another.
+    const from = activeTab(tabsRef.current);
+    if (placeSettled.current && from && isUniSide(from) && tab && !isUniSide(tab)) { const spot = spotNow(); returnSpot.current = spot; keepUniPlace(from, spot); }
+    else if (tab && isUniSide(tab) && returnSpot.current && returnSpot.current.view !== viewOf(tab)) returnSpot.current = null;
     setComposerFocused(false);
     setPanel(null);
     setSearchOpen(false);
@@ -811,7 +829,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const restoredView = useRef<string | null>(null);
   /** T-200: the spot in the chat that "Open as page" left (the first message in sight, and how far down it was), for the Back that comes
    *  back to it; `pinned` holds it there while late layout settles, as a fresh room is held at its newest message. */
-  const returnSpot = useRef<{ view: string; ref: string; offset: number; limit: number; seq: number } | null>(null);
+  const returnSpot = useRef<(ReturnSpot & { seq: number }) | null>(null);
   const pinned = useRef<{ ref: string; offset: number; until: number } | null>(null);
   // Following the newest message: content growth (images, late layout) keeps it pinned.
   const stickToEnd = useRef(true);
@@ -837,6 +855,27 @@ function Conversations({ onForget }: { onForget: () => void }) {
     setListEl(el);
   }, []);
   const [stackEl, setStackEl] = useState<HTMLDivElement | null>(null);
+  /** The spot the reader is at in the conversation on screen (the first message in sight, and how far down it is); none at its newest. */
+  function spotNow(): (ReturnSpot & { seq: number }) | null {
+    const el = listRef.current, view = restoredView.current;
+    if (!el || !view || !el.isConnected || markFor(el.scrollTop, el.scrollHeight, el.clientHeight).atEnd) return null;
+    const top = el.getBoundingClientRect().top;
+    const first = [...el.querySelectorAll<HTMLElement>("[data-ref]")].find((m) => m.getBoundingClientRect().bottom > top);
+    return first ? { view, ref: first.dataset.ref!, offset: first.getBoundingClientRect().top - top, limit, seq: appliedSeq.current } : null;
+  }
+  const spotNowRef = useRef(spotNow);
+  spotNowRef.current = spotNow;
+  // T-294: put away (the system may close the app from there), the room's spot is kept with its place, so a restart comes back to it
+  useEffect(() => {
+    const keep = () => {
+      if (document.visibilityState !== "hidden" || !placeSettled.current) return;
+      const cur = activeTab(tabsRef.current);
+      if (cur && isUniSide(cur)) keepUniPlace(cur, spotNowRef.current());
+    };
+    document.addEventListener("visibilitychange", keep);
+    window.addEventListener("pagehide", keep);
+    return () => { document.removeEventListener("visibilitychange", keep); window.removeEventListener("pagehide", keep); };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const channelRef = useRef<string | null>(null);
   const roomsRef = useRef<Room[]>(rooms);
   channelRef.current = channel;
@@ -888,6 +927,10 @@ function Conversations({ onForget }: { onForget: () => void }) {
       let lastRoom: string | null = null;
       try { lastRoom = localStorage.getItem(LAST_ROOM_KEY); } catch { /* private storage */ }
       next = restorePlace(next, lastRoom, ids, () => crypto.randomUUID());
+      // T-294: Uni's side's last place (the way back from Messages, Mail, the Journal), and its spot, which the room comes back to
+      let place = null;
+      try { place = readUniPlace(localStorage.getItem(UNI_PLACE_KEY), ids); } catch { /* private storage */ }
+      if (place) { uniPlace.current = place.target; returnSpot.current = place.spot ? { ...place.spot, seq: -1 } : null; }
       if (!activeTab(next)) {
         const uni = rows.some((r) => r.id === UNI_CHANNEL) ? UNI_CHANNEL : findUniRoom(rows)?.id;
         // The app opens to Uni: its home page, with the Uni room attached as the chat. Without a Uni room (an account that has none) it opens the first room.
@@ -1666,7 +1709,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     draftsForgotten.current = true;
     try { voiceMounted.current = false; await voiceQueue.current; await voiceOutbox.current.clear(); await invoke("identity_forget");
       forgetDrafts(); invalidatePaths(); forgetAreas(); forgetDecisions(); forgetHeld(); forgetCalendar(); forgetMessages();
-      try { for (const key of Object.keys(localStorage)) if (key.startsWith("uni.noteDraft.v1:") || key.startsWith(CHAT_DRAFT_PREFIX) || key.startsWith("uni.vaultExpanded.v1:") || key === ALIASES_KEY) localStorage.removeItem(key); } catch { /* unavailable storage */ }
+      try { for (const key of Object.keys(localStorage)) if (key.startsWith("uni.noteDraft.v1:") || key.startsWith(CHAT_DRAFT_PREFIX) || key.startsWith("uni.vaultExpanded.v1:") || key === ALIASES_KEY || key === UNI_PLACE_KEY) localStorage.removeItem(key); } catch { /* unavailable storage */ }
       onForget(); } catch (e) { voiceMounted.current = true; draftsForgotten.current = false; setError(String(e)); }
   }
 
@@ -1871,10 +1914,11 @@ function Conversations({ onForget }: { onForget: () => void }) {
   // Uni's chat room: the id the home page attaches (the Uni room by id, else the room named Uni).
   const uniHomeRoom = () => (roomsRef.current.some((r) => r.id === UNI_CHANNEL) ? UNI_CHANNEL : findUniRoom(roomsRef.current)?.id ?? null);
   const uniHome = (): TabTarget => ({ kind: "areas", title: "Uni", ...(uniHomeRoom() ? { channel: uniHomeRoom()! } : {}) });
-  /** r22 (Codex 2): the place (Uni, an area, a room) a utility was opened from: Journal's and the Vault's Back return there, not always to Uni.
-   *  Kept for this session only; a reopened utility returns to Uni. */
+  /** r22 (Codex 2): the last Uni or area opened, which a room's own Back (a phone's) goes up to. Kept for this session only. */
   const originRef = useRef<TabTarget | null>(null);
-  const origin = (): TabTarget => originRef.current ?? uniHome();
+  /** T-294: the place on Uni's side a utility was opened from (Uni, an area, a room, a thread; kept on the device): the Back of the Journal, the
+   *  Vault, Mail, Calendar and Messages, and the rail's Uni, return there, not always to Uni. */
+  const origin = (): TabTarget => uniPlace.current ?? uniHome();
   const asideRoom = channel && chatOnScreen(activeTab(tabs), channel, notes.length) && listEl?.isConnected && asides[channel] ? channel : null;
   const asideShown = !!asideRoom;
   const goBack = useRef<() => void>(() => {});
@@ -1890,7 +1934,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
     if (root && channel) { openTarget(roomTarget(channel), "focus"); return; }
     // A level goes up, a room on a phone goes back to the room tree (Uni's own level, opened from the tree, too); anything else goes to Uni.
     if (areaBack.current) { areaBack.current(); return; }
-    if (activeTab(tabsRef.current)?.kind !== "areas") openTarget(origin(), "replace");
+    const cur = activeTab(tabsRef.current);
+    if (cur?.kind !== "areas") openTarget(cur && isUniSide(cur) ? originRef.current ?? uniHome() : origin(), "replace");
   };
   // At Uni's room tree (nothing open over it) the system's own Back runs: the app goes to the background.
   const [modalOpen, setModalOpenState] = useState(false);
@@ -1943,11 +1988,12 @@ function Conversations({ onForget }: { onForget: () => void }) {
   }, [canGoBack]);
   const active = activeTab(tabs);
   useEffect(() => { if (active && (active.kind === "areas" || active.kind === "area")) { const { id: _id, ...t } = active; originRef.current = t; } }, [active]);
-  const originTitle = originRef.current?.title || "Uni";
+  const originTitle = uniPlace.current?.title || "Uni";
   const journalTab = tabs.tabs.find((t) => t.kind === "journal");
   const areasOpen = active?.kind === "areas" || active?.kind === "area";
   /** Every room opens in the room shell (tree, conversation, companion): a node's room, a room no node owns ("Other rooms"), a thread. */
   const shellOpen = areasOpen || active?.kind === "room" || active?.kind === "thread";
+  const uniShown = !panel && !searchOpen && !topNote && shellOpen;
   const threadNode = active?.kind === "thread" && active.channel ? roomNodes.get(active.channel) ?? null : null;
   const shellPath = active?.kind === "area" ? active.path ?? null : threadNode && threadNode.path !== "" ? threadNode.path : null;
   const shellLoose = active?.kind === "room" || (active?.kind === "thread" && !threadNode) ? active.channel ?? null : null;
@@ -2041,7 +2087,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
     journalRecording && journalTab ? { title: "Journal", elapsed: journalRecording.elapsed, tabId: journalTab.id, stop: journalRecording.stop, phase: "recording" as const } : null;
   return <ApprovalsContext.Provider value={approvalsView}><NavContext.Provider value={navControls}><NoteOpener.Provider value={openNote}><main className={`shell ${(!sidebarVisible && (channel || journalOpen || shellOpen || (active?.kind === "note" || active?.kind === "vault" || active?.kind === "mail" || active?.kind === "calendar" || active?.kind === "messages"))) ? "in-room" : ""} ${topNote ? "note-open" : ""} ${panel ? `panel-open panel-${panel}` : ""} ${searchOpen ? "search-open" : ""} ${composerFocused ? "composer-focused" : ""} ${journalFocus && journalOpen ? "journal-focus" : ""} ${railHidden ? "rail-off" : ""} ${asideShown ? `note-aside note-aside-${paneShape}` : ""}`}>
     <nav ref={railRef} className="rail" aria-label="Main navigation">
-      <button aria-label="Uni" aria-current={!panel && !searchOpen && (!topNote && shellOpen ? "page" : undefined)} onClick={() => openTarget(uniHome())}><i><UniIcon /></i><span>Uni</span></button>
+      {/* T-294: from another side (Messages, Mail…) Uni goes back to where you were on its side; at Uni already, home to Uni */}
+      <button aria-label="Uni" aria-current={uniShown ? "page" : undefined} onClick={() => openTarget(uniShown ? uniHome() : origin())}><i><UniIcon /></i><span>Uni</span></button>
       <button aria-label="Journal" aria-current={!panel && !searchOpen && (journalOpen && !topNote ? "page" : undefined)} onClick={() => openTarget({ kind: "journal", title: "Journal" })}><i><JournalIcon /></i><span>Journal</span></button>
       <button aria-label="Mail" aria-current={!panel && !searchOpen && (active?.kind === "mail" && !topNote ? "page" : undefined)} onClick={() => openTarget({ kind: "mail", title: "Mail" })} aria-describedby={[held > 0 && "rail-mail-held", unreadMail > 0 && "rail-mail-unread"].filter(Boolean).join(" ") || undefined}><i><MailIcon />{held > 0 && <span className="rail-count" aria-hidden="true">{held}</span>}{unreadMail > 0 && <span className="rail-dot" aria-hidden="true" />}</i><span>Mail</span>{held > 0 && <span id="rail-mail-held" hidden>{held} waiting for you</span>}{unreadMail > 0 && <span id="rail-mail-unread" hidden>{unreadMail} unread in your Inbox</span>}</button>
       {calOn && <button aria-label="Calendar" aria-current={!panel && !searchOpen && (active?.kind === "calendar" && !topNote ? "page" : undefined)} onClick={() => openTarget({ kind: "calendar", title: "Calendar" })}><i><CalendarIcon /></i><span>Calendar</span></button>}
@@ -2097,9 +2144,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       }}
       onBack={() => backAside(asideRoom)} onClose={() => backAside(asideRoom, true)}
       onOpenPage={(note, title) => {
-        const el = listRef.current, top = el?.getBoundingClientRect().top ?? 0;
-        const first = el ? [...el.querySelectorAll<HTMLElement>("[data-ref]")].find((m) => m.getBoundingClientRect().bottom > top) : undefined;
-        returnSpot.current = first && currentView ? { view: currentView, ref: first.dataset.ref!, offset: first.getBoundingClientRect().top - top, limit, seq: appliedSeq.current } : null;
+        returnSpot.current = spotNow();
         openTarget({ kind: "note", note, title }, "new");
       }}
       onDirty={(ref, dirty) => { const k = noteKey(ref); if (dirty) asideDirty.current.add(k); else asideDirty.current.delete(k); }} />}

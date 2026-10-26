@@ -1,6 +1,6 @@
 // Run: node --experimental-strip-types scripts/tabs.test.ts
 import assert from "node:assert/strict";
-import { isRealRoom, lastRoomOf, restorePlace, activeTab, closeTab, EMPTY_TABS, focusTab, MAX_TABS, navigateNoteTab, nextAfterClose, openTab, recordingTabCanClose, restoreTabs, sameTarget, serializeTabs, updateTab, type TabTarget, type Tabs } from "../src/tabs.ts";
+import { isRealRoom, isUniSide, lastRoomOf, readUniPlace, restorePlace, serializeUniPlace, viewOf, activeTab, closeTab, EMPTY_TABS, focusTab, MAX_TABS, navigateNoteTab, nextAfterClose, openTab, recordingTabCanClose, restoreTabs, sameTarget, serializeTabs, updateTab, type TabTarget, type Tabs } from "../src/tabs.ts";
 import { claimRecording, recordingHolder, releaseRecording, RecordingBusy } from "../src/recLock.ts";
 
 let n = 0;
@@ -231,6 +231,31 @@ assert.equal(activeTab(restoreTabs(serializeTabs(resolvedTab), []))?.note?.ref, 
   assert.equal(restorePlace(own, null, [], id), own);
   const unknown = saved({ kind: "area", path: "Areas/Expression", title: "Expression" });
   assert.equal(restorePlace(unknown, null, [], id), unknown);
+}
+
+
+// T-294: Uni's side's last place, as kept on the device. It comes back with its spot when the place still exists.
+{
+  const area: TabTarget = { kind: "area", path: "Projects/Lantern", title: "Lantern", channel: "ch-lantern", borrowed: false };
+  const spot = { view: "ch-lantern|null", ref: "m12", offset: -14, limit: 300 };
+  assert.deepEqual(readUniPlace(serializeUniPlace({ ...area, id: "t9" } as never, spot), ["ch-lantern"]), { target: area, spot });
+  // a thread's spot is the thread's view
+  const th = thread("ch-lantern", "r1");
+  assert.equal(viewOf(th), "ch-lantern|r1");
+  assert.deepEqual(readUniPlace(serializeUniPlace(th, { ...spot, view: "ch-lantern|r1" }), ["ch-lantern"])?.spot?.view, "ch-lantern|r1");
+  // a spot from another conversation is not this place's: it is never written, and never read back
+  assert.equal(readUniPlace(serializeUniPlace(area, { ...spot, view: "ch-other|null" }), ["ch-lantern"])?.spot, null);
+  assert.equal(readUniPlace(JSON.stringify({ v: 1, target: area, spot: { ...spot, view: "ch-other|null" } }), ["ch-lantern"])?.spot, null);
+  // a room that has gone: a room's place is dropped; an area keeps its place without the room (and so without a spot)
+  assert.equal(readUniPlace(serializeUniPlace(room("ch-gone"), { ...spot, view: "ch-gone|null" }), ["ch-lantern"]), null);
+  assert.deepEqual(readUniPlace(serializeUniPlace(area, spot), []), { target: { kind: "area", path: "Projects/Lantern", title: "Lantern" }, spot: null });
+  // only Uni's side is a place to go back to; anything malformed is nothing
+  assert.equal(readUniPlace(JSON.stringify({ v: 1, target: { kind: "messages", title: "Messages" }, spot: null }), []), null);
+  assert.equal(readUniPlace(JSON.stringify({ v: 1, target: journal, spot: null }), []), null);
+  for (const raw of [null, "", "{", "[]", "null", JSON.stringify({ v: 1 }), JSON.stringify({ v: 1, target: "Uni" })]) assert.equal(readUniPlace(raw, ["ch-lantern"]), null);
+  for (const bad of [{ ...spot, ref: "" }, { ...spot, offset: "4" }, { ...spot, offset: null }, { ...spot, limit: 0 }, { ...spot, limit: 2.5 }, { ...spot, ref: "x".repeat(201) }])
+    assert.equal(readUniPlace(JSON.stringify({ v: 1, target: area, spot: bad }), ["ch-lantern"])?.spot, null);
+  assert.deepEqual(["areas", "area", "room", "thread", "journal", "messages", "mail", "calendar", "note", "vault"].filter((kind) => isUniSide({ kind: kind as TabTarget["kind"] })), ["areas", "area", "room", "thread"]);
 }
 
 console.log("tabs tests passed");

@@ -236,3 +236,37 @@ export function restorePlace(s: Tabs, lastRoom: string | null, roomIds: Iterable
   const { id: _id, ...t } = hit;
   return openTab(rest, t, "new", newId);
 }
+
+// ── T-294: the Uni side's last place ───────────────────────────────────────────────────────────────────────────────────
+// Uni's rooms and the utilities beside them (Messages, Mail, Calendar, the Journal) are sides of one app: going to one and coming back finds
+// the other where it was left. Uni's side is kept here: its last place, and the spot in that place's conversation when it wasn't at the newest.
+
+export const UNI_PLACE_KEY = "uni.place.v1";
+/** A place on Uni's side: Uni, an area, a room, a thread. */
+export const isUniSide = (t: Pick<Tab, "kind">): boolean => t.kind === "areas" || t.kind === "area" || t.kind === "room" || t.kind === "thread";
+/** The conversation a place shows, as the App names it (`channel|root`); none without a room. */
+export const viewOf = (t: Pick<Tab, "channel" | "root">): string | null => t.channel ? `${t.channel}|${t.root ?? null}` : null;
+/** Where the reader was: the first message in sight, how far below the list's top it starts, and how many messages were loaded then. */
+export type ReturnSpot = { view: string; ref: string; offset: number; limit: number };
+export type UniPlace = { target: TabTarget; spot: ReturnSpot | null };
+
+export function serializeUniPlace(t: Tab | TabTarget, spot: ReturnSpot | null): string {
+  const { id: _id, ...target } = t as Tab;
+  return JSON.stringify({ v: 1, target, spot: spot && spot.view === viewOf(target) ? { view: spot.view, ref: spot.ref, offset: spot.offset, limit: spot.limit } : null });
+}
+
+/** The saved place, if it is still a place on Uni's side (a room that is gone is dropped, as a saved tab's is); its spot only if it is that place's own. */
+export function readUniPlace(raw: string | null, roomIds: Iterable<string>): UniPlace | null {
+  if (!raw) return null;
+  let data: { target?: unknown; spot?: unknown };
+  try { data = JSON.parse(raw); } catch { return null; }
+  if (!data || typeof data !== "object" || !data.target || typeof data.target !== "object") return null;
+  const hit = activeTab(restoreTabs(JSON.stringify({ v: 1, tabs: [{ ...data.target, id: "place" }], active: "place", recent: [] }), roomIds));
+  if (!hit || !isUniSide(hit)) return null;
+  const { id: _id, ...target } = hit;
+  const s = data.spot as Partial<ReturnSpot> | null | undefined;
+  const spot = s && typeof s === "object" && s.view === viewOf(target) && typeof s.ref === "string" && s.ref.length > 0 && s.ref.length <= 200
+    && typeof s.offset === "number" && Number.isFinite(s.offset) && Number.isInteger(s.limit) && s.limit! > 0 && s.limit! <= 10_000
+    ? { view: s.view, ref: s.ref, offset: s.offset, limit: s.limit! } : null;
+  return { target, spot };
+}

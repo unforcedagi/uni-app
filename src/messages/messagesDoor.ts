@@ -4,7 +4,7 @@
 // Messages: only once a build that has it has answered.
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { asMessagesErr, OPEN_KEY, SEEN_KEY, type LinkRow, type MessageRow, type RoomRow, type Status, type Update } from "./messagesView.ts";
+import { asMessagesErr, OPEN_KEY, PANE_KEY, SEEN_KEY, type LinkRow, type MessageRow, type RoomRow, type Status, type Update } from "./messagesView.ts";
 
 async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   try { return await invoke<T>(cmd, args); } catch (e) { throw asMessagesErr(e); }
@@ -67,13 +67,32 @@ export async function probeMessages(): Promise<void> {
   }
 }
 
-/** The room open last, so leaving Messages and coming back lands in the same conversation. */
+/** The room open last, so leaving Messages and coming back lands in the same conversation. None (sign-out, Forget) drops the rest of
+ * Messages' place too: the pane, the drafts, the spots. */
 export function rememberOpen(roomId: string | null) {
-  try { if (roomId) localStorage.setItem(OPEN_KEY, roomId); else localStorage.removeItem(OPEN_KEY); } catch { /* unavailable storage */ }
+  try { if (roomId) localStorage.setItem(OPEN_KEY, roomId); else { localStorage.removeItem(OPEN_KEY); localStorage.removeItem(PANE_KEY); } } catch { /* unavailable storage */ }
+  if (!roomId) { drafts.clear(); readTo.clear(); }
 }
 export function lastOpen(): string | null {
   try { return localStorage.getItem(OPEN_KEY); } catch { return null; }
 }
+
+// T-294: the rest of Messages' place, for the way back from Uni's side. Whether a phone showed the conversation or the list is kept on the
+// device. Each conversation's unsent draft, and how far up it was read, are kept for this session only: in memory, so nothing anyone wrote
+// in a private conversation is put in the webview's storage.
+export function rememberPane(pane: "list" | "thread") {
+  try { localStorage.setItem(PANE_KEY, pane); } catch { /* unavailable storage */ }
+}
+export function lastPane(): "list" | "thread" {
+  try { return localStorage.getItem(PANE_KEY) === "thread" ? "thread" : "list"; } catch { return "list"; }
+}
+const drafts = new Map<string, string>();
+export const draftFor = (roomId: string): string => drafts.get(roomId) ?? "";
+export function keepDraft(roomId: string, text: string) { if (text) drafts.set(roomId, text); else drafts.delete(roomId); }
+/** How far above its newest message a conversation was left (px); none at its end. */
+const readTo = new Map<string, number>();
+export const readSpot = (roomId: string): number | undefined => readTo.get(roomId);
+export function keepReadSpot(roomId: string, fromEnd: number | null) { if (fromEnd == null) readTo.delete(roomId); else readTo.set(roomId, fromEnd); }
 
 /** Forgetting the device key signs Messages out too: the homeserver drops this device, and its store and session
  * here are deleted. A build without Messages has no such command, and nothing to sign out. */
