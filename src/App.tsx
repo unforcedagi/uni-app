@@ -16,6 +16,7 @@ import { activeProfile, effectiveLifeVault, showUniGlue } from "./areas/profile"
 import { clearProjectBodies } from "./areas/projectBody";
 import AreasSurface from "./areas/LifeOsSurface";
 import type { Overlay } from "./areas/AreasSurface";
+import { PROJECTS_PROTO } from "./projects/flag";
 import { rootOpenMemory } from "./areas/rootMemory";
 import { UNI_CHANNEL } from "./areas/treeCore";
 import type { NoteRef } from "./areas/noteRefsCore";
@@ -892,7 +893,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
         const uni = rows.some((r) => r.id === UNI_CHANNEL) ? UNI_CHANNEL : findUniRoom(rows)?.id;
         // The app opens to Uni: its home page, with the Uni room attached as the chat. Without a Uni room (an account that has none) it opens the first room.
         const target: TabTarget = readLastSurface(localStorage) === "journal" ? { kind: "journal", title: "Journal" }
-          : uni ? { kind: "areas", title: "Uni", channel: uni } : rows[0] ? { kind: "room", channel: rows[0].id, title: rows[0].name } : { kind: "areas", title: "Uni" };
+          : uni ? { kind: "areas", title: "Uni", channel: uni } : PROJECTS_PROTO ? { kind: "areas", title: "Uni" } : rows[0] ? { kind: "room", channel: rows[0].id, title: rows[0].name } : { kind: "areas", title: "Uni" };
         next = openTab(next, target, "new", () => crypto.randomUUID());
       }
       // Note stacks are reconstructed from their saved top-level tab target.
