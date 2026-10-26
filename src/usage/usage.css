@@ -1,0 +1,27 @@
+/* T-295: the Claude accounts card in Settings. Small, calm, bold numbers. */
+.usage-card { margin: 0 4px 6px; padding: 12px 14px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); display: flex; flex-direction: column; gap: 10px; }
+.usage-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.usage-head h2 { margin: 0; font: 600 13px/1.2 var(--sans); letter-spacing: .04em; text-transform: uppercase; color: var(--text-soft); }
+.usage-age { font-size: 11px; color: var(--muted); }
+.usage-age.stale { color: var(--warn); }
+.usage-row { display: flex; flex-direction: column; gap: 4px; }
+.usage-name { font: 700 15px/1.2 var(--sans); color: var(--text); }
+.usage-meter { display: grid; grid-template-columns: 54px 40px 1fr; grid-template-rows: auto auto; column-gap: 8px; align-items: center; }
+.usage-k { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.usage-pct { font: 700 15px/1.1 var(--sans); font-variant-numeric: tabular-nums; color: var(--text); text-align: right; }
+.usage-bar { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.usage-bar > i { display: block; height: 100%; border-radius: 3px; background: var(--turquoise); }
+.usage-meter.full .usage-pct { color: var(--danger); }
+.usage-meter.full .usage-bar > i { background: var(--danger); }
+.usage-sub { grid-column: 3; display: flex; flex-wrap: wrap; column-gap: 10px; min-width: 0; font-size: 12px; color: var(--text-soft); margin: 0; }
+.usage-sub > span { white-space: nowrap; }
+.usage-ahead { color: var(--warn); font-weight: 600; }
+.usage-on { color: var(--text-soft); }
+.usage-pick { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+.usage-seg { display: inline-flex; border: 1px solid var(--line-strong); border-radius: 999px; overflow: hidden; }
+.usage-seg > button { min-width: 44px; min-height: 36px; padding: 0 12px; border: 0; background: transparent; color: var(--text-soft); font: 600 13px var(--sans); cursor: pointer; }
+.usage-seg > button + button { border-left: 1px solid var(--line); }
+.usage-seg > button[aria-checked="true"] { background: var(--accent); color: var(--accent-ink); }
+.usage-seg > button:disabled { cursor: default; }
+.usage-next { margin: 0; font-size: 12px; color: var(--text-soft); }
+.usage-error { color: var(--danger); }

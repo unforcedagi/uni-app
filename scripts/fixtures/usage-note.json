@@ -1,0 +1,25 @@
+{
+  "id": "usage-note-1",
+  "path": "System/Claude accounts",
+  "tags": ["system", "usage", "claude-accounts"],
+  "updatedAt": "2026-10-26T17:58:00.000Z",
+  "metadata": {
+    "account_preference": "auto",
+    "claude_accounts": {
+      "version": 1,
+      "read_at": "2026-10-26T17:45:13+00:00",
+      "written_at": "2026-10-26T17:46:00+00:00",
+      "stop": 95,
+      "preference": "auto",
+      "accounts": [
+        { "name": "a", "signed_in": true, "read_at": "2026-10-26T17:45:10+00:00",
+          "session": { "used": 0, "resets_at": null },
+          "week": { "used": 8, "resets_at": "2026-10-30T13:00:00+00:00" } },
+        { "name": "b", "signed_in": true, "read_at": "2026-10-26T17:45:13+00:00",
+          "session": { "used": 62, "resets_at": "2026-10-26T21:20:00+00:00" },
+          "week": { "used": 71, "resets_at": "2026-10-31T14:00:00+00:00" } }
+      ],
+      "next": { "account": "a", "how": "auto", "why": "a has the most week left per hour before its weekly reset" }
+    }
+  }
+}

@@ -716,6 +716,39 @@ impl VaultClient {
         note_from(&v, id)
     }
 
+    /// T-295: set which Claude account new workers prefer (`auto` or an account name) on the launcher's usage note,
+    /// guarded by the `updated_at` the card read. Only that note (its path and tag, checked against the stored note)
+    /// and only `account_preference` with the time it was set; the launcher validates the name against its own list.
+    pub async fn set_account_preference(
+        &self,
+        vault: &str,
+        id: &str,
+        preference: &str,
+        set_at: &str,
+        if_updated_at: &str,
+    ) -> Result<Value> {
+        check_vault(vault)?;
+        check_account_preference(preference, set_at)?;
+        if id.trim().is_empty() || if_updated_at.is_empty() {
+            return Err(Error::Invalid("the preference needs the note id and the updatedAt it was read at".into()));
+        }
+        let note = self.get_note(vault, id).await?;
+        let tagged = note["tags"].as_array().is_some_and(|t| t.iter().any(|t| t.as_str() == Some(USAGE_NOTE_TAG)));
+        if note["path"].as_str() != Some(USAGE_NOTE_PATH) || !tagged {
+            return Err(Error::Invalid("the account preference lives only on the Claude accounts note".into()));
+        }
+        let v = self
+            .rpc(
+                "update-note",
+                json!({"vault": vault, "id": id, "include_content": false, "if_updated_at": if_updated_at,
+                    "metadata": {"account_preference": preference, "account_preference_set_at": set_at}}),
+            )
+            .await?
+            .map_err(save_error)?;
+        check_vault_errors(&v)?;
+        note_from(&v, id)
+    }
+
     /// Discover readable vaults through the same signed fan-out door.
     pub async fn list_vaults(&self) -> Result<Vec<String>> {
         let v = self
@@ -1175,6 +1208,23 @@ pub fn valid_vault_name(v: &str) -> bool {
 }
 
 /// A snooze patch holds exactly one key, `snoozed_until`, a `YYYY-MM-DD` date or null (to clear).
+/// T-295: the launcher's usage note (`mts usage-note` writes it) and the tag it carries.
+pub const USAGE_NOTE_PATH: &str = "System/Claude accounts";
+pub const USAGE_NOTE_TAG: &str = "claude-accounts";
+
+/// `auto` or an account name as the launcher spells them (`[a-z][a-z0-9]{0,15}`), and an RFC 3339 time.
+fn check_account_preference(preference: &str, set_at: &str) -> Result<()> {
+    let b = preference.as_bytes();
+    let name = !b.is_empty() && b.len() <= 16 && b[0].is_ascii_lowercase() && b.iter().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit());
+    if !name {
+        return Err(Error::Invalid("the preference is `auto` or an account name".into()));
+    }
+    if crate::mail::accounts::rfc3339_seconds(set_at).is_none() {
+        return Err(Error::Invalid("the preference's time must be an RFC 3339 timestamp".into()));
+    }
+    Ok(())
+}
+
 fn check_snooze_patch(metadata: &Value) -> Result<()> {
     let obj = metadata.as_object().filter(|o| o.len() == 1 && o.contains_key("snoozed_until"));
     let Some(obj) = obj else {
@@ -2073,6 +2123,37 @@ pub(crate) mod surface_tests {
         ] {
             assert!(client.patch_metadata("scope-test", "t1", meta, "t1").await.is_err());
         }
+        handle.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn the_account_preference_is_set_only_on_the_usage_note() {
+        crate::init_crypto();
+        let note = json!({"id":"u1","path":"System/Claude accounts","tags":["system","claude-accounts"],"updatedAt":"r1"});
+        let (client, handle) = server(vec![
+            ("query-notes", json!({"vault":"scope-test","id":"u1","include_links":true}), json!({"notes":[note]})),
+            (
+                "update-note",
+                json!({"vault":"scope-test","id":"u1","include_content":false,"if_updated_at":"r1",
+                    "metadata":{"account_preference":"b","account_preference_set_at":"2026-01-02T03:04:05Z"}}),
+                json!({"id":"u1","path":"System/Claude accounts","updatedAt":"r2"}),
+            ),
+            (
+                "query-notes",
+                json!({"vault":"scope-test","id":"j1","include_links":true}),
+                json!({"notes":[{"id":"j1","path":"Journal/x","tags":["claude-accounts"]}]}),
+            ),
+        ]);
+        let done = client.set_account_preference("scope-test", "u1", "b", "2026-01-02T03:04:05Z", "r1").await.unwrap();
+        assert_eq!(done["updatedAt"], "r2");
+        // refused before any request: a value that isn't auto or a name, a bad time, no revision
+        for (p, at, rev) in [("B", "2026-01-02T03:04:05Z", "r2"), ("../b", "2026-01-02T03:04:05Z", "r2"), ("", "2026-01-02T03:04:05Z", "r2"),
+            ("b", "yesterday", "r2"), ("b", "2026-01-02T03:04:05Z", "")] {
+            assert!(client.set_account_preference("scope-test", "u1", p, at, rev).await.is_err(), "{p} {at} {rev}");
+        }
+        // another note, even one with the tag, is refused after reading it
+        let err = client.set_account_preference("scope-test", "j1", "a", "2026-01-02T03:04:05Z", "r1").await.unwrap_err();
+        assert!(err.to_string().contains("Claude accounts note"), "{err}");
         handle.join().unwrap();
     }
 
