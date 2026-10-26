@@ -31,8 +31,9 @@ export type Project = {
   about: string;
 };
 
-/** `waiting`: it ended needing you (blocked, or a decision); `failed`: it ended without finishing. */
-export type SessionState = "running" | "finished" | "stopped" | "waiting" | "failed";
+/** `waiting`: it ended needing you (blocked, or a decision); `failed`: it ended without finishing; `silent`: its note still says running,
+ *  but nothing has been heard from it for hours (its end is the last time it was heard from; it is not counted as working). */
+export type SessionState = "running" | "finished" | "stopped" | "waiting" | "failed" | "silent";
 
 export type Session = {
   id: string;
@@ -187,7 +188,7 @@ export const ago = (ms: number) => { const s = span(ms); return s === "just now"
 export function stateWords(s: Session, now: number): string {
   if (isLive(s)) return `Working · ${span(now - s.startedAt)}`;
   const when = s.endedAt ? ago(now - s.endedAt) : "";
-  const word = { running: "Working", finished: "Finished", stopped: "Stopped", waiting: "Needs you · ended", failed: "Didn't finish ·" }[s.state];
+  const word = { running: "Working", finished: "Finished", stopped: "Stopped", waiting: "Needs you · ended", failed: "Didn't finish ·", silent: "Silent · last heard" }[s.state];
   return `${word} ${when}`.trim();
 }
 

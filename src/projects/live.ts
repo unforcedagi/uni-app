@@ -65,8 +65,19 @@ export function resultWords(summary: unknown, state: SessionState): string | nul
   return words && state !== "running" ? words : null;
 }
 
+/** A running note's worker counts as working while it was heard from this recently (mts writes `doing_at` at least once a minute while
+ *  tools run; one long command can hold it quiet a while), or, before it has said anything, this long after it started. */
+export const HEARD_MS = 2 * 3_600_000;
+export const UNHEARD_START_MS = 3 * 3_600_000;
+
+/** Words a room wrote for a person, without the task numbers in them ("T-265 civic data…", "(T-257)"). */
+export function plainWords(text: string): string {
+  const t = text.replace(/\s*\((?:T-\d+[a-z]?(?:,\s*)?)+\)/gi, "").replace(/\bT-\d+[a-z]?\b:?\s*/gi, "").replace(/\s{2,}/g, " ").trim();
+  return t.charAt(0).toUpperCase() + t.slice(1);
+}
+
 /** Areas, projects and sessions from the vault's node, run and task notes. Nothing here throws on odd data: odd notes are skipped or gaps. */
-export function workFrom(src: Sources): LiveWork {
+export function workFrom(src: Sources, now = Date.now()): LiveWork {
   const byKey = new Map<string, RawNote>();
   for (const n of src.nodes) { const id = str(n.id), path = str(n.path); if (id) byKey.set(id, n); if (path) byKey.set(path, n); }
   const keyOf = (n: RawNote) => str(n.id) ?? str(n.path) ?? "";
@@ -150,9 +161,12 @@ export function workFrom(src: Sources): LiveWork {
       ?? (viaFolder?.length === 1 ? viaFolder[0] : null);
     if (!project) continue;
     // a run stopped by hand closes as failed with the launcher's "stopped" line: it was stopped, not a failure
-    const state = sessionState(m.state) === "failed" && /: stopped$/.test(str(m.summary) ?? "") ? "stopped" : sessionState(m.state);
+    const said = time(m.doing_at);
+    const heard = said !== null ? now - said < HEARD_MS : now - startedAt < UNHEARD_START_MS;
+    const noted = sessionState(m.state) === "failed" && /: stopped$/.test(str(m.summary) ?? "") ? "stopped" : sessionState(m.state);
+    const state = noted === "running" && !heard ? "silent" : noted;
     const live = state === "running";
-    const ended = live ? null : time(m.ended_at) ?? time(r.updatedAt) ?? startedAt;
+    const ended = live ? null : state === "silent" ? said ?? startedAt : time(m.ended_at) ?? time(r.updatedAt) ?? startedAt;
     const title = plainTitle((str(r.path) ?? "").replace(/^Runs\/\d{4}-\d{2}-\d{2}\s*/, ""));
     const ask = title || (task ? taskTitle.get(task) : null) || "A session";
     const steps = typeof m.steps === "number" && Number.isFinite(m.steps) ? Math.max(0, Math.floor(m.steps)) : 0;

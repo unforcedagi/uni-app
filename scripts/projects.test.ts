@@ -3,7 +3,7 @@
 // has no live sessions. Then the same rules on the vault's own shapes (workFrom), and the words the room is sent.
 import assert from "node:assert/strict";
 import { ModelError, ago, archivePlan, archiveProject, cannotStart, isLive, liveInArea, liveSessions, makeProject, problems, restoreProject, sessionsOf, span, startSession, stateWords, stepSession, stopSession, finishSession, timeline, timelineWindow, type Area, type Work } from "../src/projects/model.ts";
-import { plainTitle, resultWords, workFrom } from "../src/projects/live.ts";
+import { HEARD_MS, plainTitle, plainWords, resultWords, workFrom } from "../src/projects/live.ts";
 import { actionMessage } from "../src/projects/actions.ts";
 import { DEMO_AREAS, demoVault } from "./browser/projectsWorld.ts";
 let failed = 0;
@@ -115,7 +115,7 @@ check("the timeline places runs and talk inside its window, and clips what falls
 });
 // ------------------------------------------------------------------------------------------ the vault's own shapes (T-302)
 const vault = demoVault(NOW);
-const live = workFrom({ nodes: vault.nodes, runs: vault.runs, tasks: vault.tasks });
+const live = workFrom({ nodes: vault.nodes, runs: vault.runs, tasks: vault.tasks }, NOW);
 const P = (name: string) => live.projects.find((p) => p.name === name)!;
 const S = (id: string) => live.sessions.find((s) => s.id === id)!;
 check("the made-up world holds every rule: seven areas, seven rooms, live sessions in more than one area", () => {
@@ -128,7 +128,7 @@ check("from the vault: a project's one area is up its parent chain; a link to an
   assert.equal(P("Riverbend co-op site").area, "area-workshop");
   assert.equal(P("Co-op kiosk").area, "area-workshop", "a project under a project lives in its parent's area");
   assert.equal(projectsInArea("area-town").includes("Riverbend co-op site"), false);
-  const moved = workFrom({ nodes: vault.nodes.map((n) => (n.id === "p-coop" ? { ...n, metadata: { ...n.metadata, parent: "nowhere" } } : n)), runs: [], tasks: [] });
+  const moved = workFrom({ nodes: vault.nodes.map((n) => (n.id === "p-coop" ? { ...n, metadata: { ...n.metadata, parent: "nowhere" } } : n)), runs: [], tasks: [] }, NOW);
   assert.ok(!moved.projects.some((p) => p.id === "p-coop") && moved.gaps.some((g) => g.name === "Riverbend co-op site" && g.why === "no area"), "no area: a gap, not a project");
 });
 function projectsInArea(area: string) { return live.projects.filter((p) => p.area === area).map((p) => p.name); }
@@ -136,7 +136,7 @@ check("from the vault: a project without a folder is a gap, named, never a proje
   assert.ok(!live.projects.some((p) => p.name === "Shop signs"));
   assert.deepEqual(live.gaps, [{ name: "Shop signs", area: "area-workshop", why: "no folder" }]);
   assert.equal(P("Nightly backups").folder, "~/ops/backups", "the repo field stands in for a folder");
-  const relative = workFrom({ nodes: vault.nodes.map((n) => (n.id === "p-seeds" ? { ...n, metadata: { ...n.metadata, folder: "seed-library" } } : n)), runs: [], tasks: [] });
+  const relative = workFrom({ nodes: vault.nodes.map((n) => (n.id === "p-seeds" ? { ...n, metadata: { ...n.metadata, folder: "seed-library" } } : n)), runs: [], tasks: [] }, NOW);
   assert.ok(relative.gaps.some((g) => g.name === "Seed library catalogue"), "a relative folder is no folder");
   assert.equal(P("Old zine archive").status, "archived"); assert.equal(P("Co-op kiosk").status, "resting");
 });
@@ -145,7 +145,7 @@ check("from the vault: many sessions on one project, any number live; a run find
   assert.equal(S("run-mail").project, "p-mail", "filed on the area, run in the project's folder");
   assert.equal(S("run-restore").project, "p-backups", "through its task's node");
   assert.equal(live.sessions.some((s) => s.id === "run-loose"), false, "on an area, in no project's folder: not under a project");
-  const twoFolders = workFrom({ nodes: [...vault.nodes, { ...vault.nodes.find((n) => n.id === "p-mail")!, id: "p-mail2", path: "Projects/Mail again" }], runs: vault.runs, tasks: vault.tasks });
+  const twoFolders = workFrom({ nodes: [...vault.nodes, { ...vault.nodes.find((n) => n.id === "p-mail")!, id: "p-mail2", path: "Projects/Mail again" }], runs: vault.runs, tasks: vault.tasks }, NOW);
   assert.equal(twoFolders.sessions.some((s) => s.id === "run-mail"), false, "a folder two projects share names neither");
 });
 check("from the vault: a session says what it is doing in words, its steps, and what it left; never a task number or a run id", () => {
@@ -161,6 +161,27 @@ check("from the vault: a session says what it is doing in words, its steps, and 
   assert.doesNotMatch(words, /\bT-\d+|\bmts\b|\b[a-z]{4}[a-z0-9]{4}\b:|run-|\bresume\b/);
   assert.equal(plainTitle("T-302 (2)"), ""); assert.equal(plainTitle("T-288 (resume hsb0mug1)"), ""); assert.equal(plainTitle("LVB week 9 page + homework"), "LVB week 9 page + homework");
   assert.equal(resultWords("mts abcd1234: failed", "failed"), null);
+});
+check("a note that still says running but hasn't been heard from for hours is silent, not working (and has an end: when it was last heard)", () => {
+  const at = (ms: number) => new Date(NOW - ms).toISOString();
+  const base = vault.runs.find((r) => r.id === "run-events")!;
+  const runs = [
+    { ...base, id: "r-heard", metadata: { ...base.metadata, doing_at: at(HEARD_MS - MIN) } },
+    { ...base, id: "r-quiet", metadata: { ...base.metadata, doing_at: at(HEARD_MS + MIN) } },
+    { ...base, id: "r-new", metadata: { ...base.metadata, doing_at: undefined, started_at: at(60 * MIN) } },
+    { ...base, id: "r-old", metadata: { ...base.metadata, doing_at: undefined, started_at: at(11 * 86_400_000) } },
+  ];
+  const w = workFrom({ nodes: vault.nodes, runs, tasks: vault.tasks }, NOW);
+  const st = (id: string) => w.sessions.find((s) => s.id === id)!;
+  assert.deepEqual(["r-heard", "r-quiet", "r-new", "r-old"].map((id) => st(id).state), ["running", "silent", "running", "silent"]);
+  assert.equal(st("r-quiet").endedAt, NOW - HEARD_MS - MIN); assert.equal(st("r-old").endedAt, NOW - 11 * 86_400_000);
+  assert.deepEqual(liveSessions(w, "p-coop").map((s) => s.id).sort(), ["r-heard", "r-new"]);
+  assert.deepEqual(problems(w), []);
+  assert.equal(stateWords(st("r-old"), NOW), "Silent · last heard 11 days ago");
+});
+check("a room's own words lose their task numbers on screen", () => {
+  assert.equal(plainWords("T-265 civic data layer in fix pass; Commons app (T-257) paused."), "Civic data layer in fix pass; Commons app paused.");
+  assert.equal(plainWords("Nothing to strip here."), "Nothing to strip here.");
 });
 check("the room is sent plain words: the project, the session's line and when it started; never an id", () => {
   const coop = P("Riverbend co-op site"), ev = S("run-events");

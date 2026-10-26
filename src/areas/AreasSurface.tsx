@@ -42,6 +42,7 @@ import "./areas.css";
 import { FrontDoor, type Door } from "../projects/FrontDoor";
 import { ProjectStrip } from "../projects/ProjectStrip";
 import { ProjectSheet } from "../projects/ProjectSheet";
+import { plainWords } from "../projects/live";
 import "./tree.css";
 
 const USER_AGENT = currentUserAgent();
@@ -291,7 +292,9 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
     if (p === ROOT) { setRootOpen(true); onOpenArea(null, "Uni", uniRoom); return; }
     const n = data?.tree.nodes.get(p); if (n) open(n);
   };
-  const navRows = data ? treeRows(data.tree, roomRefs, uniRef) : [{ key: "~uni", via: null, path: ROOT, name: "Uni", depth: 0, kind: "root" as const, slash: uniRef ? uniRef.name : null, heldBy: null, heldNode: null, own: !!uniRef, trunk: [], last: true }];
+  // T-302: the tree's Uni row is the front door, not the archived Uni room: it names no channel
+  const navRows = (data ? treeRows(data.tree, roomRefs, uniRef) : [{ key: "~uni", via: null, path: ROOT, name: "Uni", depth: 0, kind: "root" as const, slash: null, heldBy: null, heldNode: null, own: false, trunk: [], last: true }])
+    .map((r) => (r.kind === "root" ? { ...r, slash: null } : r));
   /** A row's dot is its own node's needs-you items (a parent never lights up for its children's), by the companion's one rule; an item on a
    *  node with no row counts on its nearest ancestor's (r13), so the dots under a level add up to its Needs you. */
   const rowPaths = useMemo(() => new Set(navRows.map((r) => r.path)), [navRows.map((r) => r.path).join("\n")]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -392,7 +395,8 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   if (path === null && doorAreas.length) {
     const doors: Door[] = doorAreas.map((a) => {
       const v = roomView(data!.tree, a.path, roomRefs, uniRef);
-      const st = privateRoot(data!.tree, a.path) ? null : tasks.tree?.stands.get(a.path)?.text ?? (typeof a.metadata.stands === "string" ? a.metadata.stands : null);
+      const raw = privateRoot(data!.tree, a.path) ? null : tasks.tree?.stands.get(a.path)?.text ?? (typeof a.metadata.stands === "string" ? a.metadata.stands : null);
+      const st = raw ? plainWords(raw) : null;
       return { path: a.path, name: a.name, slug: v.own && v.slash ? v.slash.replace(/^#/, "") : null, stands: st, lastTs: v.own ? rooms.find((r) => r.id === v.target?.id)?.last_ts ?? null : null };
     });
     return <div className="areas-home tree-home-wrap">{status}<ApprovalRows approvals={approvalsAll.list} className="cp-list cp-approvals th-approvals" /><FrontDoor doors={doors} onOpen={(p) => openPath(p)} />
