@@ -10,6 +10,7 @@ dist/
 
 /shots/
 dist-lifeos-vault/
+dist-usage/
 
 # This repo is public (see CLAUDE.md). Screenshots and videos are test outputs, never committed.
 __shots__/

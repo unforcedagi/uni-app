@@ -2601,6 +2601,23 @@ async fn vault_patch_meta(
     .await
 }
 
+/// T-295: which Claude account new workers prefer (`auto` or an account name), on the launcher's usage note only.
+#[tauri::command]
+async fn usage_set_preference(
+    app: tauri::AppHandle,
+    vault: String,
+    id: String,
+    preference: String,
+    set_at: String,
+    if_updated_at: String,
+) -> Result<serde_json::Value, String> {
+    with_vault(&app, move |c| {
+        tauri::async_runtime::block_on(c.set_account_preference(&vault, &id, &preference, &set_at, &if_updated_at))
+            .map_err(|e| e.to_string())
+    })
+    .await
+}
+
 #[tauri::command]
 async fn vault_create(
     app: tauri::AppHandle,
@@ -2872,6 +2889,7 @@ pub fn run() {
             vault_subtree_tasks,
             vault_transition,
             vault_patch_meta,
+            usage_set_preference,
             vault_decide,
             vault_pick_decision,
             vault_note_decision,
