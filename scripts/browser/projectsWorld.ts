@@ -47,7 +47,7 @@ export function demoTalk(now: number): DemoMessage[] {
 /** The world at time `now`: the vault's notes (node, run, task, the usage note) as the app reads them. */
 export function demoVault(now: number) {
   const iso = (minAgo: number) => new Date(now - minAgo * MIN).toISOString();
-  const nodes: Note[] = [note(ROOT, "Uni", ["node"], {})];
+  const nodes: Note[] = [note(ROOT, "Uni", ["uni", "node"], {})];
   for (const a of DEMO_AREAS) nodes.push(note(`area-${a.id}`, `Areas/${a.name}`, ["node", "area"], { parent: ROOT, channel: a.room, room: slugOf(a.name), status: "foreground", stands: a.stands, stands_at: iso(3 * 60) }));
   const project = (id: string, area: string, name: string, md: Record<string, unknown>) => nodes.push(note(id, `Projects/${name}`, ["node", "project"], { parent: area.startsWith("p-") ? area : `area-${area}`, status: "active", ...md }));
   project("p-coop", "workshop", "Riverbend co-op site", { folder: "~/work/riverbend-site", summary: "The co-op's site: events, about, donate.",
