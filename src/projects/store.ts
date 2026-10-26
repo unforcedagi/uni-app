@@ -3,7 +3,7 @@
 // finishes. Nothing here calls a worker; the real source (the run ledger) would replace `demoWork` and the simulation.
 import { useSyncExternalStore } from "react";
 import { FRESH_RESULT, FRESH_STEPS, demoWork } from "./demoData";
-import { finishSession, isLive, retireSession, startSession, stepSession, stopSession, type Session, type Work } from "./model";
+import { finishSession, isLive, restoreSession, retireSession, startSession, stepSession, stopSession, type Session, type Work } from "./model";
 
 type Listener = () => void;
 export type WorkEvent = { kind: "finished"; session: Session };
@@ -51,6 +51,7 @@ export const workActions = {
   },
   stop(id: string, at = Date.now()) { script.delete(id); set(stopSession(work, id, at)); },
   retire(id: string, at = Date.now()) { script.delete(id); set(retireSession(work, id, at)); },
+  restore(id: string) { set(restoreSession(work, id)); },
 };
 
 export const getWork = () => work;

@@ -96,9 +96,8 @@
 .pj-now { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 6px 0 2px; font-style: italic; }
 .pj-ticks { display: inline-flex; gap: 3px; }
 .pj-ticks i { width: 6px; height: 12px; border-radius: 1px; background: var(--th-ink); }
-.pj-ticks i.now { background: var(--th-sap); animation: pj-pulse 1.6s ease-in-out infinite; }
-@keyframes pj-pulse { 50% { opacity: .35; } }
-@media (prefers-reduced-motion: reduce) { .pj-ticks i.now { animation: none; } }
+/* the step under way: a taller, hollow mark (the app never loops an animation; still on an e-paper screen too) */
+.pj-ticks i.now { height: 14px; background: var(--th-card); box-shadow: inset 0 0 0 2px var(--th-sap); }
 .pj-result { margin: 4px 0 2px; color: var(--th-ink); }
 .pj-row { display: flex; align-items: center; gap: 6px 14px; flex-wrap: wrap; margin-top: 8px; }
 .pj-gap { flex: 1; }
@@ -111,6 +110,7 @@
 .pj-retired { margin-top: 14px; }
 .pj-retired summary { cursor: pointer; min-height: 36px; display: flex; align-items: center; font: 600 11px var(--th-mono); letter-spacing: .14em; text-transform: uppercase; color: var(--th-ink2); }
 .pj-retired ul { list-style: none; margin: 0; padding: 0; }
-.pj-retired li { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px dashed var(--th-hair2); color: var(--th-ink2); }
+.pj-retired li { display: grid; grid-template-columns: 1fr auto; align-items: baseline; gap: 2px 12px; padding: 8px 0; border-bottom: 1px dashed var(--th-hair2); color: var(--th-ink2); }
+.pj-retired li .pj-link { grid-column: 1; justify-self: start; min-height: 28px; font-size: 13px; }
 .pj-retired small { flex: none; font: 500 12px var(--th-mono); color: var(--th-mute); }
 @media (pointer: coarse) { .pj-row .task-do { min-height: 44px; } .pj-link { min-height: 44px; } }

@@ -1,7 +1,7 @@
 // T-301: the work model's rules. A project lives in exactly one area and has a folder; a project holds any number of sessions, and any
 // number of them may be live; stop, finish and retire change only the session they name.
 import assert from "node:assert/strict";
-import { ModelError, isLive, liveInArea, liveSessions, makeProject, problems, retireSession, retiredOf, sessionsOf, span, startSession, stateWords, stepSession, stopSession, finishSession, timeline, timelineWindow, type Area, type Work } from "../src/projects/model.ts";
+import { ModelError, ago, isLive, restoreSession, liveInArea, liveSessions, makeProject, problems, retireSession, retiredOf, sessionsOf, span, startSession, stateWords, stepSession, stopSession, finishSession, timeline, timelineWindow, type Area, type Work } from "../src/projects/model.ts";
 import { DEMO_AREAS, demoWork } from "../src/projects/demoData.ts";
 let failed = 0;
 const check = (n: string, f: () => void) => { try { f(); console.log("ok  ", n); } catch (e) { failed++; console.log("FAIL", n, e); } };
@@ -61,6 +61,9 @@ check("retire puts a session away: a live one is stopped first; it leaves the li
   assert.equal(s2.state, "stopped"); assert.equal(s2.retired, true); assert.equal(s2.endedAt, NOW + 5 * MIN);
   assert.deepEqual(sessionsOf(w, "p").map((s) => s.id), ["s1"]);
   assert.deepEqual(retiredOf(w, "p").map((s) => s.id), ["s2"]);
+  const back = restoreSession(w, "s2");
+  assert.deepEqual(sessionsOf(back, "p").map((s) => s.id), ["s1", "s2"], "brought back: in the list again");
+  assert.equal(back.sessions.find((s) => s.id === "s2")!.state, "stopped", "brought back stopped: retiring stopped it for good");
   w = finishSession(w, "s1", NOW + 6 * MIN, "Done.");
   w = retireSession(w, "s1", NOW + 7 * MIN);
   assert.equal(w.sessions.find((s) => s.id === "s1")!.state, "finished", "a finished session stays finished when retired");
@@ -87,6 +90,7 @@ check("states are said in words, never ids", () => {
   assert.equal(stateWords(w.sessions[0], NOW + 49 * MIN), "Working · 49 min");
   w = finishSession(w, "s", NOW + 50 * MIN, "Done.");
   assert.equal(stateWords(w.sessions[0], NOW + 50 * MIN + 3 * 86_400_000), "Finished 3 days ago");
+  assert.equal(ago(10_000), "just now"); assert.equal(ago(5 * MIN), "5 min ago");
   assert.equal(span(70 * MIN), "1 h 10 min"); assert.equal(span(5 * 60 * MIN + 10 * MIN), "5 h"); assert.equal(span(20_000), "just now");
 });
 check("the timeline places runs and talk inside its window, and clips what falls outside", () => {
@@ -99,6 +103,9 @@ check("the timeline places runs and talk inside its window, and clips what falls
   assert.deepEqual(t.runs.map((r) => r.id), ["s"]);
   assert.ok(Math.abs(t.runs[0].x - 7 / 8) < 1e-9 && Math.abs(t.runs[0].x + t.runs[0].w - 1) < 1e-9 && t.runs[0].live);
   assert.equal(t.talk.length, 1);
+  const busy = startSession(startSession(w, "p", "Beside it", NOW - 30 * MIN, "b"), "p", "After", NOW - 5 * MIN, "c");
+  const both = timeline(stopSession(busy, "b", NOW - 10 * MIN).sessions, [], win.from, win.to).runs;
+  assert.deepEqual(both.map((r) => [r.id, r.lane]), [["s", 0], ["b", 1], ["c", 1]], "runs at the same time get lanes; a lane is reused once free");
   const quiet = timelineWindow([w.sessions[1]], NOW);
   assert.equal(quiet.from, NOW - 96 * 60 * MIN, "nothing recent: back to the latest session, at most 4 days");
 });

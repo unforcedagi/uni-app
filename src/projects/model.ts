@@ -150,6 +150,9 @@ export const retireSession = (w: Work, id: string, at: number): Work => {
   return put(stopped, id, (s) => ({ ...s, retired: true }));
 };
 
+/** Brings a retired session back to the project's list, as it was when it was retired (a session stopped on retiring stays stopped). */
+export const restoreSession = (w: Work, id: string): Work => put(w, id, (s) => ({ ...s, retired: false }));
+
 /** How long, said plainly: "4 min", "1 h 10 min", "5 h", "2 days" (minutes only while they matter). */
 export function span(ms: number): string {
   const m = Math.max(0, Math.round(ms / 60000));
@@ -162,12 +165,25 @@ export function span(ms: number): string {
   return d === 1 ? "1 day" : `${d} days`;
 }
 
+/** "just now", "5 min ago", "3 days ago". */
+export const ago = (ms: number) => { const s = span(ms); return s === "just now" ? s : `${s} ago`; };
+
 /** A session's state in one or two words, for a person (never an id). */
 export function stateWords(s: Session, now: number): string {
   if (isLive(s)) return `Working · ${span(now - s.startedAt)}`;
-  const ago = s.endedAt ? span(now - s.endedAt) : "";
-  const when = ago === "just now" ? "just now" : `${ago} ago`;
+  const when = s.endedAt ? ago(now - s.endedAt) : "";
   return s.state === "finished" ? `Finished ${when}` : `Stopped ${when}`;
+}
+
+/** Sessions that ran at the same time each get a lane of their own (the first lane free when it started). */
+function lanes(sessions: readonly Session[], to: number) {
+  const ends: number[] = [];
+  return [...sessions].sort((a, b) => a.startedAt - b.startedAt).map((s) => {
+    let lane = ends.findIndex((e) => e <= s.startedAt);
+    if (lane < 0) lane = ends.length;
+    ends[lane] = s.endedAt ?? to;
+    return { s, lane };
+  });
 }
 
 /**
@@ -178,7 +194,7 @@ export function timeline(sessions: readonly Session[], talk: readonly number[], 
   const len = Math.max(1, to - from);
   const at = (t: number) => Math.min(1, Math.max(0, (t - from) / len));
   return {
-    runs: sessions.filter((s) => (s.endedAt ?? to) >= from && s.startedAt <= to).map((s) => ({ id: s.id, live: isLive(s), x: at(s.startedAt), w: Math.max(0.006, at(s.endedAt ?? to) - at(s.startedAt)) })),
+    runs: lanes(sessions.filter((s) => (s.endedAt ?? to) >= from && s.startedAt <= to), to).map(({ s, lane }) => ({ id: s.id, live: isLive(s), lane, x: at(s.startedAt), w: Math.max(0.006, at(s.endedAt ?? to) - at(s.startedAt)) })),
     talk: talk.filter((t) => t >= from && t <= to).map(at),
   };
 }

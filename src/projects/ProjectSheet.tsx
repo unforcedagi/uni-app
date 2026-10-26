@@ -3,7 +3,7 @@
 // finished ones with what came back), a fresh session, and Retire. Nothing here names an id.
 import { useEffect, useId, useRef, useState } from "react";
 import { openDialog } from "../areas/focusTrap";
-import { areaOf, isLive, retiredOf, sessionsOf, span, stateWords, timeline, timelineWindow, type Session } from "./model";
+import { ago, areaOf, isLive, retiredOf, sessionsOf, span, stateWords, timeline, timelineWindow, type Session } from "./model";
 import { useWork, workActions } from "./store";
 import "./projects.css";
 
@@ -51,10 +51,11 @@ function Timeline({ sessions, talk, now }: { sessions: readonly Session[]; talk:
   const t = timeline(sessions, talk, from, now);
   if (!t.runs.length) return null;
   const pct = (x: number) => `${(x * 100).toFixed(2)}%`;
+  const lanes = Math.max(1, ...t.runs.map((r) => r.lane + 1));
   return <figure className="pj-time" aria-label={`When the sessions ran, against the room's talk, over the last ${span(now - from)}`}>
-    <div className="pj-time-track">
+    <div className="pj-time-track" style={{ height: 18 + lanes * 11 }}>
       {t.talk.map((x, i) => <i key={`t${i}`} className="pj-talk" style={{ left: pct(x) }} />)}
-      {t.runs.map((r) => <i key={r.id} className={`pj-run ${r.live ? "live" : ""}`} style={{ left: pct(r.x), width: pct(r.w) }} />)}
+      {t.runs.map((r) => <i key={r.id} className={`pj-run ${r.live ? "live" : ""}`} style={{ left: pct(r.x), width: pct(r.w), bottom: 3 + r.lane * 11 }} />)}
     </div>
     <figcaption><span>{span(now - from)} ago</span><span className="pj-key"><i className="pj-talk-key" />the room talked <i className="pj-run-key" />a session ran</span><span>now</span></figcaption>
   </figure>;
@@ -97,14 +98,16 @@ export function ProjectSheet({ project, talk, onClose }: { project: string; talk
         </div>
         {asking && <form className="pj-new" onSubmit={(e) => { e.preventDefault(); start(); }}>
           <label htmlFor={`${titleId}-ask`}>What should it do?</label>
-          <textarea id={`${titleId}-ask`} rows={2} value={ask} autoFocus placeholder={`In ${p.folder}…`} onChange={(e) => setAsk(e.target.value)} />
+          <textarea id={`${titleId}-ask`} rows={2} value={ask} autoFocus placeholder={`In ${p.folder}…`} onChange={(e) => setAsk(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); start(); } }} />
           <div className="pj-row"><span className="pj-gap" /><button type="button" className="task-do quiet" onClick={() => { setAsking(false); setAsk(""); }}>Cancel</button>
             <button type="submit" className="task-do primary" disabled={!ask.trim()}>Start</button></div>
         </form>}
         {sessions.length === 0 && !asking && <p className="cp-none">No sessions yet. Start one when there is something to do here.</p>}
         <ul className="pj-list">{sessions.map((s) => <SessionCard key={s.id} s={s} now={now} />)}</ul>
         {retired.length > 0 && <details className="pj-retired"><summary>Retired · {retired.length}</summary>
-          <ul>{retired.map((s) => <li key={s.id} data-session={s.id}><span>{s.ask}</span><small>{s.endedAt ? `ended ${span(now - s.endedAt)} ago` : ""}</small></li>)}</ul></details>}
+          <ul>{retired.map((s) => <li key={s.id} data-session={s.id}><span>{s.ask}</span><small>{s.endedAt ? `ended ${ago(now - s.endedAt)}` : ""}</small>
+            <button type="button" className="pj-link" onClick={() => workActions.restore(s.id)}>Bring back</button></li>)}</ul></details>}
       </section>
     </div>
   </div>;
