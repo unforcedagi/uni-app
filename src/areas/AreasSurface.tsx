@@ -21,7 +21,6 @@ import { findUniRoom } from "../uniActions";
 import { useStoredSelfTest } from "../interface/selftest/useSelfTest";
 import { storedSidebarWidth } from "./sidebarState";
 import { useRailHidden, useShortTree, useTreeBesideNote, useUprightPhone, useWide } from "./homeLayout";
-import { archivedRoomIds, projectCards, roomsList } from "./viewsCore";
 import { privateRoot, privateRootIn, roomSlug, roomView, treeRows } from "./treeRooms";
 import { publishRoomNodes, roomNodeMap } from "./roomLabels";
 import { useNav, type NavControls } from "../navContext";
@@ -40,8 +39,6 @@ import { ApprovalRows } from "./ApprovalRows";
 import { ApprovalsContext, useApprovalList } from "../approvalsLive";
 import type { Approval } from "../approvals";
 import "./areas.css";
-import { PROJECTS_PROTO } from "../projects/flag";
-import { getWork } from "../projects/store";
 import { FrontDoor, type Door } from "../projects/FrontDoor";
 import { ProjectStrip } from "../projects/ProjectStrip";
 import { ProjectSheet } from "../projects/ProjectSheet";
@@ -183,7 +180,7 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   const [appOpen, setAppOpen] = useState(false);
   /** r20 (Codex 5): the narrow companion's sheet is a foreground surface like the task sheet: every Back closes it first. */
   const [stripSheet, setStripSheet] = useState<{ close: () => void } | null>(null);
-  /** T-301: the project opened in place over its area's room (the prototype build only). */
+  /** T-301/T-302: the project opened in place over its area's room. */
   const [projectOpen, setProjectOpen] = useState<string | null>(null);
   const closeProject = () => setProjectOpen(null);
   const toTree = () => { setRootOpen(false); onOpenArea(null, "Uni", uniRoom); };
@@ -300,15 +297,8 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   const rowPaths = useMemo(() => new Set(navRows.map((r) => r.path)), [navRows.map((r) => r.path).join("\n")]); // eslint-disable-line react-hooks/exhaustive-deps
   const navNeeds = useMemo(() => needsByRow(tasks.tasks, rowPaths, (p) => tasks.tree?.parent.get(p) ?? data?.tree.parent.get(p), confirm.of, tasks.runs), [tasks.tasks, tasks.runs, rowPaths, tasks.tree, data?.tree, confirm.of]); // eslint-disable-line react-hooks/exhaustive-deps
   const openRoomFromTree = (id: string) => { setDrawer(false); actions.openRoom(id); };
-  // T-140: Rooms (by last message) and Projects (cards with link chips) read the app's own room list, whose `last_ts` the live push keeps current
-  const lists = useMemo(() => {
-    if (!chat || !data || !owned) return undefined;
-    const stamps = rooms.map((r) => ({ id: r.id, name: r.name, last_ts: r.last_ts }));
-    const { live, archived } = roomsList(stamps, archivedRoomIds(data.tree, roomRefs, owned));
-    return { live, archived, cards: projectCards(data.tree, stamps, uniRef), now: Math.floor(Date.now() / 1000) };
-  }, [chat, data, owned, rooms, roomRefs, uniRef]);
-  // T-301: the prototype drops the Rooms / Projects / Areas lens: projects live inside their area's room now
-  const treeProps = { chat, rows: navRows, needs: navNeeds, onOpen: openPath, others, onOpenRoom: openRoomFromTree, load, needsReady: tasks.ready, lists: PROJECTS_PROTO ? undefined : lists };
+  // T-301/T-302: no Rooms / Projects / Areas lens: projects live inside their area's room now
+  const treeProps = { chat, rows: navRows, needs: navNeeds, onOpen: openPath, others, onOpenRoom: openRoomFromTree, load, needsReady: tasks.ready };
   /** The app's own places (Journal, Vault, Search, Settings), for where the rail is out of reach: the drawer and a short screen's tree. */
   const places = nav?.places ?? [];
   // r17: Places holds only what the shell is not already showing: the app's places only while the rail is hidden (Codex P2-4)
@@ -396,14 +386,17 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
     {!data && error && <p className="note-error" role="alert">Couldn't load areas: {error}</p>}
     {!!data?.truncated.length && <p className="areas-status" role="status">{data.truncated.join(", ")}: showing first 200 notes; more may exist.</p>}
   </>;
-  // T-301: the front door. Uni opens on every area's room, each with one line on where it stands (the prototype build only).
-  if (PROJECTS_PROTO && path === null) {
-    const doors: Door[] = (data ? childrenOf(data.tree, ROOT) : []).map((a) => {
+  // T-301/T-302: the front door. Uni opens on every area's room, each with one line on where it stands (a private area's own words stay
+  // inside it), a mark where sessions are working, and a quiet usage line. A vault with no areas yet keeps the tree home below.
+  const doorAreas = data ? childrenOf(data.tree, ROOT) : [];
+  if (path === null && doorAreas.length) {
+    const doors: Door[] = doorAreas.map((a) => {
       const v = roomView(data!.tree, a.path, roomRefs, uniRef);
-      const st = tasks.tree?.stands.get(a.path)?.text ?? (typeof a.metadata.stands === "string" ? a.metadata.stands : null);
+      const st = privateRoot(data!.tree, a.path) ? null : tasks.tree?.stands.get(a.path)?.text ?? (typeof a.metadata.stands === "string" ? a.metadata.stands : null);
       return { path: a.path, name: a.name, slug: v.own && v.slash ? v.slash.replace(/^#/, "") : null, stands: st, lastTs: v.own ? rooms.find((r) => r.id === v.target?.id)?.last_ts ?? null : null };
     });
-    return <div className="areas-home tree-home-wrap">{status}<FrontDoor doors={doors} onOpen={(p) => openPath(p)} /></div>;
+    return <div className="areas-home tree-home-wrap">{status}<ApprovalRows approvals={approvalsAll.list} className="cp-list cp-approvals th-approvals" /><FrontDoor doors={doors} onOpen={(p) => openPath(p)} />
+      {railHidden && places.length > 0 && <div className="th-places-short">{placesRow}</div>}</div>;
   }
   if (treeHome && path === null && !rootOpen) {
     return <div className="areas-home tree-home-wrap"><TreeScreen {...treeProps} status={<><ApprovalRows approvals={approvalsAll.list} className="cp-list cp-approvals th-approvals" />{status}{railHidden && places.length > 0 && <div className="th-places-short">{placesRow}</div>}</>} />
@@ -517,12 +510,10 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   /** The room's channel, once (r14): its own (`#cohere`). */
   const door = !chat ? "" : nodeView.own && nodeView.slash ? `#${nodeView.slash.replace(/^#/, "")}` : "";
   // the area's app, when open, is the view in the chat's place (r14); otherwise the work view when it is open, else the conversation
-  // T-301: the area's projects (the prototype build only): a strip under the header, and the one opened, in place over the room
-  // (the areas never change while the app runs, so the surface reads them once rather than following every session's step)
-  const protoArea = PROJECTS_PROTO ? getWork().areas.find((a) => a.path === node.path) ?? null : null;
-  const strip = protoArea ? <ProjectStrip area={protoArea} onOpen={(id) => { closeSheet(); stripSheet?.close(); setProjectOpen(id); }} /> : null;
+  // T-301/T-302: the area's projects: a strip under the header (an area's room only), and the one opened, in place over the room
+  const strip = !isRoot ? <ProjectStrip areaPath={node.path} onOpen={(id) => { closeSheet(); stripSheet?.close(); setProjectOpen(id); }} /> : null;
   // the timeline's talk is the area's own room only (never a borrowed one's)
-  const projectSheet = projectOpen ? <ProjectSheet key={projectOpen} project={projectOpen} talk={nodeView.own ? (roomFor(target?.id)?.messages ?? []).map((m) => m.ts * 1000) : []} onClose={closeProject} /> : null;
+  const projectSheet = projectOpen ? <ProjectSheet key={projectOpen} project={projectOpen} room={target ? { id: target.id, name: target.name } : null} talk={nodeView.own ? (roomFor(target?.id)?.messages ?? []).map((m) => m.ts * 1000) : []} onClose={closeProject} /> : null;
   const roomLevel = (app: AppView | null, openApp: ((e: React.MouseEvent) => void) | null) => shell({ title: node.name, door, context: app || workOpen ? undefined : context, node: node.name, crumbs, strip,
     companion: chat ? companionProps : null, chatRoom: thread ? roomFor(thread.channel, thread.root) : roomFor(target?.id), placeholder, selected: node.path, sheet: <>{sheetView}{projectSheet}</>, retryChat: target?.id ? () => actions.openRoom(target.id) : actions.retryRooms ?? null,
     main: app ? app.main : workOpen ? workMain : undefined, workBar: app ? app.bar : workBar, openApp, appOpen: !!app });

@@ -1,7 +1,9 @@
-// T-301: the front door. Tapping Uni shows every area's room, each with one line on where it stands. Calm: a name, a line, when the
-// room last talked, and a small mark when work is live there. No counts of tasks, no ids.
+// T-301/T-302: the front door. Tapping Uni shows every area's room, each with one line on where it stands. Calm: a name, a line, when
+// the room last talked, and a small mark when sessions are working there. No counts of tasks, no ids. Under them, one quiet line on
+// the Claude accounts, which opens the full card.
 import { liveInArea, span } from "./model";
 import { useWork } from "./store";
+import { UsageLine } from "./UsageLine";
 import "./projects.css";
 
 export type Door = { path: string; name: string; slug: string | null; stands: string | null; lastTs: number | null };
@@ -12,10 +14,10 @@ const today = () => new Date().toLocaleDateString(undefined, { weekday: "long", 
 const talked = (now: number, ts: number) => { const s = span(now - ts * 1000); return s === "just now" ? "talking now" : `talked ${s} ago`; };
 
 export function FrontDoor({ doors, onOpen }: { doors: readonly Door[]; onOpen: (path: string) => void }) {
-  const work = useWork();
+  const { work } = useWork();
   const now = Date.now();
   const areaAt = new Map(work.areas.map((a) => [a.path, a]));
-  return <div className="fd" data-proto="front-door">
+  return <div className="fd" data-place="front-door">
     <header className="fd-head">
       <p className="fd-date">{today()}</p>
       <h1 className="fd-title">Uni</h1>
@@ -34,5 +36,6 @@ export function FrontDoor({ doors, onOpen }: { doors: readonly Door[]; onOpen: (
         </button>
       </li>;
     })}</ul></nav>
+    <UsageLine />
   </div>;
 }

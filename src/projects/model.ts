@@ -1,10 +1,12 @@
-// T-301: the work model, small and explicit. Pure data and rules, no React, no storage.
+// T-301/T-302: the work model, small and explicit. Pure data and rules, no React, no storage.
 //
 // - An Area is a room: one area, one room, seven of them. The conversation is the area's heart.
 // - A Project lives in exactly one area, and always has a folder on disk where its work happens.
 // - A Session is one Claude Code worker run on a project. A project holds any number of sessions, and any number of them may be live
-//   at once. A session runs, then finishes (with a result) or is stopped. Retiring a session puts it away for good: it is no longer
-//   one of the project's sessions to look at or pick up, and a live one is stopped as it is retired.
+//   at once. A session runs, then finishes (with a result), stops, or ends waiting on you. A session that has ended is the project's
+//   history; there is no separate "retire".
+// - Archiving is for projects only: an archived project leaves its room's strip, keeps its folder and history, can be brought back,
+//   takes no new sessions, and has no live ones (archiving one with live sessions asks to stop them first).
 
 export type Area = {
   id: string;
@@ -15,7 +17,7 @@ export type Area = {
   room: string;
 };
 
-export type ProjectStatus = "active" | "resting" | "done";
+export type ProjectStatus = "active" | "resting" | "archived";
 
 export type Project = {
   id: string;
@@ -29,24 +31,23 @@ export type Project = {
   about: string;
 };
 
-export type SessionState = "running" | "finished" | "stopped";
-
-/** One step of a session's story, in plain words. */
-export type Step = { at: number; text: string };
+/** `waiting`: it ended needing you (blocked, or a decision); `failed`: it ended without finishing. */
+export type SessionState = "running" | "finished" | "stopped" | "waiting" | "failed";
 
 export type Session = {
   id: string;
   project: string;
   state: SessionState;
-  /** Put away for good (see the top of this file). Independent of `state`: a finished or stopped session may be retired. */
-  retired: boolean;
   /** What the session was asked to do, in one line. */
   ask: string;
-  /** What it is doing now (live), or the last thing it did. */
-  now: string;
+  /** What it is doing now (live), or the last thing it did; null when it hasn't said. */
+  now: string | null;
+  /** When `now` was last said (live sessions). */
+  nowAt: number | null;
   startedAt: number;
   endedAt: number | null;
-  story: Step[];
+  /** How many steps it has taken (the ticks). */
+  steps: number;
   /** What came back (finished sessions). */
   result: string | null;
   /** A walkthrough video, when the session left one. */
@@ -95,6 +96,7 @@ export function problems(w: Work): string[] {
     if (s.state === "running" && s.endedAt !== null) out.push(`session ${s.id} is running but has ended`);
     if (s.state !== "running" && s.endedAt === null) out.push(`session ${s.id} has stopped running but has no end`);
   }
+  for (const p of w.projects) if (p.status === "archived" && liveSessions(w, p.id).length) out.push(`${p.name} is archived but has live sessions`);
   return out;
 }
 
@@ -107,51 +109,64 @@ export const liveInArea = (w: Work, area: string) => {
   return w.sessions.filter((s) => here.has(s.project) && isLive(s));
 };
 
-/** A project's sessions in the order a person reads them: live ones first (newest first), then the rest by when they ended; retired ones are left out. */
+/** A project's sessions in the order a person reads them: live ones first (newest first), then the rest by when they ended. */
 export function sessionsOf(w: Work, project: string): Session[] {
-  const mine = w.sessions.filter((s) => s.project === project && !s.retired);
+  const mine = w.sessions.filter((s) => s.project === project);
   const live = mine.filter(isLive).sort((a, b) => b.startedAt - a.startedAt);
   const done = mine.filter((s) => !isLive(s)).sort((a, b) => (b.endedAt ?? 0) - (a.endedAt ?? 0));
   return [...live, ...done];
 }
-export const retiredOf = (w: Work, project: string) => w.sessions.filter((s) => s.project === project && s.retired).sort((a, b) => (b.endedAt ?? 0) - (a.endedAt ?? 0));
 
 const put = (w: Work, id: string, change: (s: Session) => Session): Work => {
   if (!w.sessions.some((s) => s.id === id)) throw new ModelError(`no session ${id}`);
   return { ...w, sessions: w.sessions.map((s) => (s.id === id ? change(s) : s)) };
 };
 
+/** Why a project can't take a new session, or null when it can (any number may run at once: the others are never in the way). */
+export function cannotStart(p: Project): string | null {
+  return p.status === "archived" ? `${p.name} is archived; bring it back before starting a session` : null;
+}
+
 /** Starts a fresh session on a project. The project's other sessions, live or not, are left as they are. */
 export function startSession(w: Work, project: string, ask: string, at: number, id: string): Work {
   const p = w.projects.find((x) => x.id === project);
   if (!p) throw new ModelError(`no project ${project}`);
-  if (p.status === "done") throw new ModelError(`${p.name} is done; open it again before starting a session`);
+  const no = cannotStart(p);
+  if (no) throw new ModelError(no);
   if (!ask.trim()) throw new ModelError("a session needs something to do");
   if (w.sessions.some((s) => s.id === id)) throw new ModelError(`a session ${id} already exists`);
-  const s: Session = { id, project, state: "running", retired: false, ask: ask.trim(), now: "Reading the brief and the folder.", startedAt: at, endedAt: null, story: [{ at, text: "Started in " + p.folder + "." }], result: null, video: null };
+  const s: Session = { id, project, state: "running", ask: ask.trim(), now: null, nowAt: null, startedAt: at, endedAt: null, steps: 0, result: null, video: null };
   return { ...w, sessions: [...w.sessions, s] };
 }
 
-/** A live session takes a step: the story grows and its one line says what it is doing now. A session that isn't live takes none. */
+/** A live session takes a step: its one line says what it is doing now. A session that isn't live takes none. */
 export const stepSession = (w: Work, id: string, text: string, at: number): Work =>
-  put(w, id, (s) => (isLive(s) ? { ...s, now: text, story: [...s.story, { at, text }] } : s));
+  put(w, id, (s) => (isLive(s) ? { ...s, now: text, nowAt: at, steps: s.steps + 1 } : s));
 
 /** Stops a live session where it is. Stopping one that isn't live changes nothing. */
 export const stopSession = (w: Work, id: string, at: number): Work =>
-  put(w, id, (s) => (isLive(s) ? { ...s, state: "stopped", endedAt: at, now: "Stopped by you.", story: [...s.story, { at, text: "Stopped by you." }] } : s));
+  put(w, id, (s) => (isLive(s) ? { ...s, state: "stopped", endedAt: at } : s));
 
 /** A live session finishes with what it came back with. */
 export const finishSession = (w: Work, id: string, at: number, result: string, video: string | null = null): Work =>
-  put(w, id, (s) => (isLive(s) ? { ...s, state: "finished", endedAt: at, now: result, result, video, story: [...s.story, { at, text: "Finished." }] } : s));
+  put(w, id, (s) => (isLive(s) ? { ...s, state: "finished", endedAt: at, result, video } : s));
 
-/** Retires a session: a live one is stopped first, then it is put away. */
-export const retireSession = (w: Work, id: string, at: number): Work => {
-  const stopped = stopSession(w, id, at);
-  return put(stopped, id, (s) => ({ ...s, retired: true }));
-};
+/** What archiving a project asks first: nothing, or to stop its live sessions (an archived project has none). */
+export function archivePlan(w: Work, project: string): { stopFirst: Session[] } {
+  if (!w.projects.some((p) => p.id === project)) throw new ModelError(`no project ${project}`);
+  return { stopFirst: liveSessions(w, project) };
+}
 
-/** Brings a retired session back to the project's list, as it was when it was retired (a session stopped on retiring stays stopped). */
-export const restoreSession = (w: Work, id: string): Work => put(w, id, (s) => ({ ...s, retired: false }));
+/** Archives a project: refused while it has live sessions (they are stopped first). Its folder and its sessions are kept. */
+export function archiveProject(w: Work, project: string): Work {
+  const { stopFirst } = archivePlan(w, project);
+  if (stopFirst.length) throw new ModelError(`stop its ${stopFirst.length} live session${stopFirst.length === 1 ? "" : "s"} first`);
+  return { ...w, projects: w.projects.map((p) => (p.id === project ? { ...p, status: "archived" } : p)) };
+}
+
+/** Brings an archived project back: active again, its history as it was. */
+export const restoreProject = (w: Work, project: string): Work =>
+  ({ ...w, projects: w.projects.map((p) => (p.id === project && p.status === "archived" ? { ...p, status: "active" } : p)) });
 
 /** How long, said plainly: "4 min", "1 h 10 min", "5 h", "2 days" (minutes only while they matter). */
 export function span(ms: number): string {
@@ -172,7 +187,8 @@ export const ago = (ms: number) => { const s = span(ms); return s === "just now"
 export function stateWords(s: Session, now: number): string {
   if (isLive(s)) return `Working · ${span(now - s.startedAt)}`;
   const when = s.endedAt ? ago(now - s.endedAt) : "";
-  return s.state === "finished" ? `Finished ${when}` : `Stopped ${when}`;
+  const word = { running: "Working", finished: "Finished", stopped: "Stopped", waiting: "Needs you · ended", failed: "Didn't finish ·" }[s.state];
+  return `${word} ${when}`.trim();
 }
 
 /** Sessions that ran at the same time each get a lane of their own (the first lane free when it started). */

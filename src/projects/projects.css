@@ -1,4 +1,4 @@
-/* T-301: the front door, the projects strip and the project sheet. Field Book tokens (tree.css); shape and words over colour, so they
+/* T-301/T-302: the front door, the projects strip and the project sheet. Field Book tokens (tree.css); shape and words over colour, so they
    read the same on an e-paper screen. */
 
 /* ------------------------------------------------------------------ the front door */
@@ -25,6 +25,12 @@
   .fd-name { font-size: 21px; }
 }
 @media (prefers-reduced-motion: reduce) { .fd-door { transition: none; } .fd-door:hover { transform: none; } }
+/* the usage line: one quiet line under the rooms, which opens the accounts card */
+.fd-usage { all: unset; box-sizing: border-box; display: block; max-width: 980px; margin: 22px auto 0; padding: 10px 2px; cursor: pointer; font: 500 13px var(--th-mono); color: var(--th-ink2); border-top: 1px dashed var(--th-hair2); width: 100%; }
+.fd-usage:hover { color: var(--th-ink); text-decoration: underline; text-underline-offset: 3px; }
+.fd-usage:focus-visible { outline: 2px solid var(--th-ink); outline-offset: 2px; }
+.fd-usage-sheet .pj-close { position: absolute; top: 14px; right: 14px; }
+.fd-usage-sheet .usage-card { margin: 0; border: 0; padding: 4px 0 0; }
 
 /* ------------------------------------------------------------------ the projects strip */
 .ps { display: flex; align-items: center; gap: 4px 10px; flex-wrap: wrap; padding: 8px clamp(12px, 3vw, 28px); border-bottom: 1px solid var(--th-hair2); background: var(--th-paper); }
@@ -38,6 +44,8 @@
 .ps-tab:hover { background: var(--th-paper); }
 .ps-tab.resting { border-style: dashed; color: var(--th-ink2); }
 .ps-tab small { font: 600 11px var(--th-mono); color: var(--th-ink2); }
+.ps-tab.archived, .ps-more { border-style: dotted; color: var(--th-ink2); }
+.ps-gap { align-self: center; font: 400 13px var(--th-sans); font-style: italic; color: var(--th-mute); white-space: nowrap; }
 @media (max-width: 599px) {
   .ps { flex-wrap: nowrap; padding: 4px 12px; }
   .ps-list { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding: 4px 2px; }
@@ -104,13 +112,23 @@
 .pj-row .task-do { width: auto; min-height: 38px; padding: 0 14px; }
 .pj-link { all: unset; cursor: pointer; min-height: 32px; display: inline-flex; align-items: center; font: 500 14px var(--th-sans); color: var(--th-ink); text-decoration: underline; text-decoration-color: var(--th-hair); text-underline-offset: 3px; }
 .pj-link:focus-visible { outline: 2px solid var(--th-ink); outline-offset: 2px; }
-.pj-story { list-style: none; margin: 10px 0 0; padding: 0 0 0 12px; border-left: 2px solid var(--th-ink); display: grid; gap: 6px; }
-.pj-story li { display: grid; grid-template-columns: 76px 1fr; gap: 8px; font-size: 14px; }
-.pj-story time { font: 500 12px var(--th-mono); color: var(--th-mute); padding-top: 2px; }
-.pj-retired { margin-top: 14px; }
-.pj-retired summary { cursor: pointer; min-height: 36px; display: flex; align-items: center; font: 600 11px var(--th-mono); letter-spacing: .14em; text-transform: uppercase; color: var(--th-ink2); }
-.pj-retired ul { list-style: none; margin: 0; padding: 0; }
-.pj-retired li { display: grid; grid-template-columns: 1fr auto; align-items: baseline; gap: 2px 12px; padding: 8px 0; border-bottom: 1px dashed var(--th-hair2); color: var(--th-ink2); }
-.pj-retired li .pj-link { grid-column: 1; justify-self: start; min-height: 28px; font-size: 13px; }
-.pj-retired small { flex: none; font: 500 12px var(--th-mono); color: var(--th-mute); }
+.pj-earlier { margin-top: 14px; }
+.pj-earlier summary { cursor: pointer; min-height: 36px; display: flex; align-items: center; font: 600 11px var(--th-mono); letter-spacing: .14em; text-transform: uppercase; color: var(--th-ink2); }
+.pj-earlier ul { list-style: none; margin: 0; padding: 0; }
+.pj-earlier li { display: grid; grid-template-columns: 1fr auto; align-items: baseline; gap: 2px 12px; padding: 8px 0; border-bottom: 1px dashed var(--th-hair2); color: var(--th-ink2); }
+.pj-earlier small { flex: none; font: 500 12px var(--th-mono); color: var(--th-mute); }
+.pj-session.waiting .pj-state i { background: var(--th-card); box-shadow: inset 0 0 0 2px var(--th-ink); }
+.pj-session.failed .pj-state i { background: none; box-shadow: none; width: 9px; height: 2px; border-radius: 0; background: var(--th-ink2); }
+.pj-now small { font: 500 12px var(--th-mono); font-style: normal; color: var(--th-mute); }
+.pj-ticks small { margin-left: 4px; font: 600 11px var(--th-mono); font-style: normal; }
+.pj-hint { margin: 2px 0; font-size: 14px; color: var(--th-ink2); }
+.pj-asked { margin: 8px 0 0; padding: 6px 10px; border: 1.5px dashed var(--th-ink); border-radius: 8px; font: 500 13px var(--th-sans); }
+/* an action, shown word for word before it is posted */
+.pj-confirm { flex-basis: 100%; margin-top: 8px; padding: 10px 12px; border: 1.5px solid var(--th-ink); border-radius: 12px; background: var(--th-card); }
+.pj-confirm-to { margin: 0 0 6px; font: 600 11px var(--th-mono); letter-spacing: .1em; text-transform: uppercase; color: var(--th-ink2); }
+.pj-confirm-text { margin: 0; padding-left: 10px; border-left: 3px solid var(--th-ink); font: 400 15px / 1.45 var(--th-sans); }
+.pj-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-top: 22px; padding-top: 12px; border-top: 1.5px solid var(--th-ink); }
+.pj-foot .pj-hint { flex: 1; min-width: 200px; }
+.pj-foot .task-do { width: auto; min-height: 38px; padding: 0 14px; }
+.pj-add { width: auto; min-height: 40px; }
 @media (pointer: coarse) { .pj-row .task-do { min-height: 44px; } .pj-link { min-height: 44px; } }

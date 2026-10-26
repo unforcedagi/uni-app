@@ -34,8 +34,7 @@
     "test:messages": "playwright test --config playwright.messages.config.ts",
     "test:roomrestore": "playwright test --config playwright.roomrestore.config.ts",
     "test:usage": "node --experimental-strip-types scripts/usage.test.ts && playwright test --config playwright.usage.config.ts",
-    "test:projects": "playwright test --config playwright.projects.config.ts",
-    "build:proto": "VITE_T301_PROTO=1 vite build --outDir dist-t301"
+    "test:projects": "playwright test --config playwright.projects.config.ts"
   },
   "dependencies": {
     "@openparachute/surface-client": "0.3.7",

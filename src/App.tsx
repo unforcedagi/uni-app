@@ -16,7 +16,6 @@ import { activeProfile, effectiveLifeVault, showUniGlue } from "./areas/profile"
 import { clearProjectBodies } from "./areas/projectBody";
 import AreasSurface from "./areas/LifeOsSurface";
 import type { Overlay } from "./areas/AreasSurface";
-import { PROJECTS_PROTO } from "./projects/flag";
 import { rootOpenMemory } from "./areas/rootMemory";
 import { UNI_CHANNEL } from "./areas/treeCore";
 import type { NoteRef } from "./areas/noteRefsCore";
@@ -943,9 +942,10 @@ function Conversations({ onForget }: { onForget: () => void }) {
       if (place) { uniPlace.current = place.target; returnSpot.current = place.spot ? { ...place.spot, seq: -1 } : null; }
       if (!activeTab(next)) {
         const uni = rows.some((r) => r.id === UNI_CHANNEL) ? UNI_CHANNEL : findUniRoom(rows)?.id;
-        // The app opens to Uni: its home page, with the Uni room attached as the chat. Without a Uni room (an account that has none) it opens the first room.
+        // The app opens to Uni: the front door of the area rooms (T-302: the archived Uni room is no longer the home, so none is attached).
+        // Without a Uni room (an account that has none) it opens the first room.
         const target: TabTarget = readLastSurface(localStorage) === "journal" ? { kind: "journal", title: "Journal" }
-          : uni ? { kind: "areas", title: "Uni", channel: uni } : PROJECTS_PROTO ? { kind: "areas", title: "Uni" } : rows[0] ? { kind: "room", channel: rows[0].id, title: rows[0].name } : { kind: "areas", title: "Uni" };
+          : uni ? { kind: "areas", title: "Uni" } : rows[0] ? { kind: "room", channel: rows[0].id, title: rows[0].name } : { kind: "areas", title: "Uni" };
         next = openTab(next, target, "new", () => crypto.randomUUID());
       }
       // Note stacks are reconstructed from their saved top-level tab target.
@@ -1921,9 +1921,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
   // search, thread, Journal, room) before leaving it. The listener is only
   // registered while there is somewhere to go back to, so at the room list
   // the system default runs (the app goes to the background, as usual).
-  // Uni's chat room: the id the home page attaches (the Uni room by id, else the room named Uni).
-  const uniHomeRoom = () => (roomsRef.current.some((r) => r.id === UNI_CHANNEL) ? UNI_CHANNEL : findUniRoom(roomsRef.current)?.id ?? null);
-  const uniHome = (): TabTarget => ({ kind: "areas", title: "Uni", ...(uniHomeRoom() ? { channel: uniHomeRoom()! } : {}) });
+  // T-302: Uni's home is the front door of the area rooms; the archived Uni room is no longer attached to it.
+  const uniHome = (): TabTarget => ({ kind: "areas", title: "Uni" });
   /** r22 (Codex 2): the last Uni or area opened, which a room's own Back (a phone's) goes up to. Kept for this session only. */
   const originRef = useRef<TabTarget | null>(null);
   /** T-294: the place on Uni's side a utility was opened from (Uni, an area, a room, a thread; kept on the device): the Back of the Journal, the
