@@ -130,18 +130,35 @@ test('following the newest message, the list stays at it when it gets shorter (a
   await expect(page.getByRole('button', { name: /^Jump to latest/ })).toHaveCount(0);
 });
 
-test('scrolled up, then away and back: the room reopens at its newest, with no Jump to latest', async ({ page }) => {
+// T-294 (option A, replacing T-124 r2 here): away to another screen (the Journal) and back with Uni, the room comes back where it was being
+// read, with Jump to latest; read to the end first, and it comes back at its newest, with no Jump to latest
+test('scrolled up, then away and back: the room comes back at the same spot; at its newest, at its newest', async ({ page }) => {
   await boot(page, { history: 60, eyes: false });
   const list = page.getByRole('log', { name: 'Messages' });
   const jump = page.getByRole('button', { name: /^Jump to latest/ });
+  const newest = page.getByText('Could you sort the seed list by sowing month?');
+  /** the first message in sight, and how far below the list's top it starts */
+  const reading = () => list.evaluate((el) => { const top = el.getBoundingClientRect().top; const m = [...el.querySelectorAll<HTMLElement>('[data-ref]')].find((x) => x.getBoundingClientRect().bottom > top + 1)!; return { ref: m.dataset.ref, offset: Math.round(m.getBoundingClientRect().top - top) }; });
   await list.hover();
   await page.mouse.wheel(0, -4000);
   await expect(jump).toBeVisible();
+  await page.waitForTimeout(300);
+  const was = await reading();
   const nav = page.getByRole('navigation', { name: 'Main navigation' });
   await nav.getByRole('button', { name: 'Journal' }).click();
   await expect(list).toHaveCount(0);
   await nav.getByRole('button', { name: 'Uni' }).click();
-  await expect(page.getByText('Could you sort the seed list by sowing month?')).toBeInViewport();
+  await expect.poll(async () => (await reading()).ref).toBe(was.ref);
+  expect(Math.abs((await reading()).offset - was.offset)).toBeLessThan(8);
+  await expect(newest).not.toBeInViewport();
+  await expect(jump).toBeVisible();
+  // read to the end, then away and back: the newest, and no Jump to latest
+  await jump.click();
+  await expect(newest).toBeInViewport();
+  await nav.getByRole('button', { name: 'Journal' }).click();
+  await expect(list).toHaveCount(0);
+  await nav.getByRole('button', { name: 'Uni' }).click();
+  await expect(newest).toBeInViewport();
   await page.waitForTimeout(2000);
   await expect(jump).toHaveCount(0);
 });
