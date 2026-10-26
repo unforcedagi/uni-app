@@ -16,15 +16,16 @@ const eventListeners = new Set<(e: WorkEvent) => void>();
 let timer: ReturnType<typeof setInterval> | null = null;
 let fresh = 0;
 
-/** How often a simulated session takes its next step. */
+/** How often a simulated session takes its next step. `?pace=<ms>` in the address sets it (2000 to 60000), to watch a run go by faster. */
 export const STEP_MS = 7000;
+const pace = () => { const v = Number(typeof location === "undefined" ? NaN : new URLSearchParams(location.search).get("pace")); return v >= 2000 && v <= 60000 ? v : STEP_MS; };
 
 const set = (next: Work) => { work = next; for (const l of listeners) l(); };
 
 export function loadDemo(now = Date.now()) {
   script.clear();
   set(demoWork(now));
-  if (!timer && typeof window !== "undefined") timer = setInterval(tick, STEP_MS);
+  if (!timer && typeof window !== "undefined") timer = setInterval(tick, pace());
 }
 
 /** One beat of the simulation: each session started here takes its next step, or finishes. Seeded live sessions keep their line. */
