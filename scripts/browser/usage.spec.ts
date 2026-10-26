@@ -78,7 +78,7 @@ test.describe('fixture', () => {
     await card.screenshot({ path: info.outputPath('usage-card.png') });
   });
 
-  test('the preference is one control: it sets the note, and a note the launcher rewrote meanwhile is read again', async ({ page }) => {
+  test('the preference is one control: it sets the note, and a note the launcher rewrote meanwhile is read again', async ({ page }, info) => {
     await page.clock.setFixedTime(NOW);
     const w: World = { note: structuredClone(FIXTURE), conflictOnce: true, calls: [] };
     await boot(page, w);
@@ -90,6 +90,7 @@ test.describe('fixture', () => {
     expect(sets.map((c) => [c.args.preference, c.args.ifUpdatedAt])).toEqual([['b', FIXTURE.updatedAt], ['b', 'later']]);
     expect(Number.isNaN(Date.parse(sets[1].args.setAt))).toBe(false);
     expect(w.note.metadata.account_preference).toBe('b');
+    await card.screenshot({ path: info.outputPath('usage-card-b.png') });
     await card.getByRole('radio', { name: 'Auto' }).click();
     await expect(card.getByRole('radio', { name: 'Auto' })).toHaveAttribute('aria-checked', 'true');
     expect(w.note.metadata.account_preference).toBe('auto');

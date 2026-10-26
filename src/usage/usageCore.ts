@@ -59,8 +59,9 @@ function parts(d: Date, tz?: string) {
 /** "3:20pm" today, "Fri 7am" later in the week, in the device's zone (or `tz`). */
 export function resetText(iso: string | null, now: Date, tz?: string): string | null {
   if (!iso) return null;
-  const t = new Date(iso);
-  if (Number.isNaN(t.getTime())) return null;
+  const raw = new Date(iso).getTime();
+  if (Number.isNaN(raw)) return null;
+  const t = new Date(Math.round(raw / 60_000) * 60_000); // the meter says 06:59:59.6 for a 7:00 reset
   const p = parts(t, tz), n = parts(now, tz);
   const clock = `${p.hour}${p.minute === "00" ? "" : `:${p.minute}`}${p.ampm}`;
   if (p.day === n.day) return clock;

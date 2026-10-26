@@ -31,6 +31,7 @@ t("the same instant reads in the zone it is shown in", () => {
   assert.equal(resetText("2026-10-30T13:00:00+00:00", NOW, "Europe/Berlin"), "Fri 2pm");
   assert.equal(resetText("2026-10-27T13:00:00+00:00", NOW, TZ), "tomorrow 7am");
   assert.equal(resetText("not a time", NOW, TZ), null);
+  assert.equal(resetText("2026-10-30T12:59:59.653710+00:00", NOW, TZ), "Fri 7am"); // to the nearest minute
 });
 
 t("pace is even use over the 168 h week, ahead only past it by more than 5 points", () => {
