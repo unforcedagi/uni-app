@@ -16,6 +16,8 @@ __shots__/
 walkthrough/**/*.png
 walkthrough/**/*.webm
 walkthrough/**/*.mp4
+# a walkthrough recorder's run output (film, voice, scene marks)
+walkthrough/**/runs/
 # Run notes go to the vault or $TMPDIR, never into the repo.
 REPORT-*.md
 BRIEF-*.md
