@@ -89,10 +89,11 @@ export function lastPane(): "list" | "thread" {
 const drafts = new Map<string, string>();
 export const draftFor = (roomId: string): string => drafts.get(roomId) ?? "";
 export function keepDraft(roomId: string, text: string) { if (text) drafts.set(roomId, text); else drafts.delete(roomId); }
-/** How far above its newest message a conversation was left (px); none at its end. */
-const readTo = new Map<string, number>();
-export const readSpot = (roomId: string): number | undefined => readTo.get(roomId);
-export function keepReadSpot(roomId: string, fromEnd: number | null) { if (fromEnd == null) readTo.delete(roomId); else readTo.set(roomId, fromEnd); }
+/** Where a conversation was left: the first message in sight, and how far below the top it was (px); none at its end. */
+export type ReadSpot = { key: string; offset: number };
+const readTo = new Map<string, ReadSpot>();
+export const readSpot = (roomId: string): ReadSpot | undefined => readTo.get(roomId);
+export function keepReadSpot(roomId: string, spot: ReadSpot | null) { if (!spot) readTo.delete(roomId); else readTo.set(roomId, spot); }
 
 /** Forgetting the device key signs Messages out too: the homeserver drops this device, and its store and session
  * here are deleted. A build without Messages has no such command, and nothing to sign out. */

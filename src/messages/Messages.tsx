@@ -83,7 +83,11 @@ function ThreadView({ room, thread, now, visible, onBack, onProblem }: { room: R
   useLayoutEffect(() => {
     const el = log.current;
     if (!el || !items?.length) return;
-    if (leftAt.current !== undefined) { el.scrollTop = el.scrollHeight - el.clientHeight - leftAt.current; leftAt.current = undefined; }
+    const left = leftAt.current;
+    const at = left && el.querySelector<HTMLElement>(`[data-key="${CSS.escape(left.key)}"]`);
+    if (at) { el.scrollTop += at.getBoundingClientRect().top - el.getBoundingClientRect().top - left.offset; leftAt.current = undefined; }
+    // the message it was left at isn't in this window (only the newest page came back): the end, as a fresh open
+    else if (left) { leftAt.current = undefined; stuck.current = true; el.scrollTop = el.scrollHeight; }
     else if (stuck.current) el.scrollTop = el.scrollHeight;
   }, [items]);
   // read up to here while it's on screen: not while a phone shows the list instead, nor in a hidden window
@@ -102,8 +106,9 @@ function ThreadView({ room, thread, now, visible, onBack, onProblem }: { room: R
     stuck.current = true;
     sending.current = sending.current.then(() => send(room.id, body)).then(() => onProblem(null), (err) => {
       onProblem(asMessagesErr(err));
-      // what didn't go comes back to the composer, unless something new is being written there
+      // what didn't go comes back to the composer, unless something new is being written there (kept for the conversation even if it was left meanwhile)
       setDraft((d) => (d.trim() ? d : body));
+      if (!draftFor(room.id).trim()) keepDraft(room.id, body);
     });
   };
   const key = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -131,7 +136,10 @@ function ThreadView({ room, thread, now, visible, onBack, onProblem }: { room: R
         onScroll={(e) => {
           const el = e.currentTarget, fromEnd = el.scrollHeight - el.scrollTop - el.clientHeight;
           stuck.current = fromEnd < 48;
-          if (leftAt.current === undefined) keepReadSpot(room.id, stuck.current ? null : fromEnd);
+          if (leftAt.current !== undefined) return;
+          const top = el.getBoundingClientRect().top;
+          const first = stuck.current ? undefined : [...el.querySelectorAll<HTMLElement>("[data-key]")].find((m) => m.getBoundingClientRect().bottom > top);
+          keepReadSpot(room.id, first ? { key: first.dataset.key!, offset: first.getBoundingClientRect().top - top } : null);
         }}>
         {items && !atStart && items.length > 0 && <p className="msgs-older"><button type="button" className="note-quiet" disabled={loadingOlder} onClick={() => void loadOlder()}>{loadingOlder ? "Loading…" : "Load earlier messages"}</button></p>}
         {!items ? <p className="msgs-loading" role="status">Opening…</p>
@@ -174,7 +182,7 @@ export default function Messages({ backTo, onBack }: { backTo: string; onBack: (
     openId.current = roomId;
     rememberOpen(roomId);
     setThread({ roomId, seq: n, items: null });
-    if (show) { setPane("thread"); rememberPane("thread"); }
+    if (show) { setPane("thread"); if (matchMedia(PHONE).matches) rememberPane("thread"); }
     try { const rows = await openRoom(roomId); setThread((t) => applyOpened(t, roomId, n, rows)); setProblem(null); }
     catch (err) { setProblem(asMessagesErr(err)); }
   }, []);

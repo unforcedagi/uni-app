@@ -25,8 +25,8 @@ async function fakeMessages(page: Page) {
       switch (cmd) {
         case 'messages_status': return { state: 'live', user_id: '@aaron:example.org', homeserver: 'https://matrix.example.org', error: null };
         case 'messages_rooms': return [room('!sam:example.org', 'Sam Example', 'See you then'), room('!kit:example.org', 'Kit Sample', 'Thanks!')];
-        // Kit's conversation is long enough to read back in
-        case 'messages_open': return Array.from({ length: args.roomId.startsWith('!kit') ? 40 : 4 }, (_, i) => line(i, args.roomId));
+        // Kit's conversation is long enough to read back in, and two more lines have come by the time it is opened again
+        case 'messages_open': { const kit = args.roomId.startsWith('!kit'); const n = kit ? 40 + 2 * Math.min(w.__kitOpens = (w.__kitOpens ?? -1) + 1, 1) : 4; return Array.from({ length: n }, (_, i) => line(i, args.roomId)); }
         case 'messages_close': case 'messages_read': case 'messages_send': return null;
         default: return undefined;
       }
@@ -162,18 +162,23 @@ test.describe('T-294 back to the room you were in', () => {
     const log = page.getByRole('log', { name: 'Messages with Kit Sample' });
     await expect(log).toContainText('Line 40 from Sam');
     const fromEnd = () => log.evaluate((el) => Math.round(el.scrollHeight - el.scrollTop - el.clientHeight));
+    /** The first message in sight, and how far below the top it starts. */
+    const reading = () => log.evaluate((el) => { const top = el.getBoundingClientRect().top; const m = [...el.querySelectorAll<HTMLElement>('[data-key]')].find((x) => x.getBoundingClientRect().bottom > top + 1)!; return { key: m.dataset.key, offset: Math.round(m.getBoundingClientRect().top - top) }; });
     const box2 = (await log.boundingBox())!;
     await page.mouse.move(box2.x + box2.width / 2, box2.y + box2.height / 2);
     for (let i = 0; i < 3; i++) { await page.mouse.wheel(0, -200); await page.waitForTimeout(60); }
     await expect.poll(fromEnd).toBeGreaterThan(300);
     await page.waitForTimeout(200);
-    const left = await fromEnd();
+    const left = await reading();
     await rail(page).getByRole('button', { name: 'Uni', exact: true }).click();
     await expect(page.locator('.sr')).toHaveAttribute('data-node', 'ATLAS');
     await rail(page).getByRole('button', { name: 'Messages' }).click();
     await expect(page.getByRole('region', { name: 'Conversation: Kit Sample' })).toBeVisible();
     await expect(box).toHaveValue('Running ten minutes late');
-    await expect(log).toContainText('Line 40 from Sam');
-    expect(Math.abs(await fromEnd() - left)).toBeLessThan(8);
+    // back at the message it was read to, though two newer lines came in meanwhile
+    await expect(log).toContainText('Line 42 from Sam');
+    const now = await reading();
+    expect(now.key).toBe(left.key);
+    expect(Math.abs(now.offset - left.offset)).toBeLessThan(8);
   });
 });

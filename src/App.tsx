@@ -54,7 +54,7 @@ import PairSource, { PairDeviceButton } from "./PairSource";
 import { UpdateSettings } from "./UpdateNotice";
 import { watchLostIpc } from "./ipcLost";
 import { currentUserAgent, platformName } from "./interface/selftest/gate";
-import { activeTab, closeTab, EMPTY_TABS, focusTab, isSurface, isUniSide, LAST_ROOM_KEY, lastRoomOf, restorePlace, LEGACY_TABS_KEY, migrateLegacyTabs, navigateNoteTab, nextAfterClose, openTab, persistable, recordingTabCanClose, readUniPlace, restoreTabs, serializeTabs, serializeUniPlace, updateTab, TABS_KEY, UNI_PLACE_KEY, viewOf, type Tabs, type Tab, type TabTarget, type OpenMode, type ReturnSpot } from "./tabs";
+import { activeTab, closeTab, EMPTY_TABS, focusTab, isSurface, isUniSide, LAST_ROOM_KEY, lastRoomOf, restorePlace, LEGACY_TABS_KEY, migrateLegacyTabs, navigateNoteTab, nextAfterClose, openTab, persistable, recordingTabCanClose, readUniPlace, restoreTabs, sameTarget, serializeTabs, serializeUniPlace, updateTab, TABS_KEY, UNI_PLACE_KEY, viewOf, type Tabs, type Tab, type TabTarget, type OpenMode, type ReturnSpot } from "./tabs";
 import { canBack as histCanBack, canForward as histCanForward, EMPTY_HISTORY, placeKey, RECENT_SHOWN, recent as histRecent, step as histStep, visit as histVisit, type History } from "./navHistory";
 import { NavContext, type NavControls } from "./navContext";
 import { useRailHidden } from "./areas/homeLayout";
@@ -642,8 +642,9 @@ function Conversations({ onForget }: { onForget: () => void }) {
         if (last) localStorage.setItem(LAST_ROOM_KEY, last);
       } catch { /* private storage */ }
       placeSettled.current = true;
+      // a new place on Uni's side is kept (at its newest); the same place again keeps the spot already saved for it
       const cur = activeTab(next);
-      if (cur && isUniSide(cur)) keepUniPlace(cur, null);
+      if (cur && isUniSide(cur)) { const { id: _id, ...t } = cur; if (uniPlace.current && sameTarget(t, uniPlace.current)) uniPlace.current = t; else keepUniPlace(cur, null); }
     }
   }
   /** T-294: the place on Uni's side, kept for the way back to it (in memory, and on the device for a restart), with the spot in its conversation. */
@@ -656,7 +657,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     // T-294: leaving Uni's side (for Messages, Mail, the Journal…) keeps where the reader was in its conversation, for the way back. Any other
     // place on Uni's side opens at its newest (T-124 r2), and drops a spot kept for another.
     const from = activeTab(tabsRef.current);
-    if (placeSettled.current && from && isUniSide(from) && tab && !isUniSide(tab)) { const spot = spotNow(); returnSpot.current = spot; keepUniPlace(from, spot); }
+    if (placeSettled.current && from && isUniSide(from) && tab && !isUniSide(tab)) { const spot = spotOf(from); returnSpot.current = spot; keepUniPlace(from, spot); }
     else if (tab && isUniSide(tab) && returnSpot.current && returnSpot.current.view !== viewOf(tab)) returnSpot.current = null;
     setComposerFocused(false);
     setPanel(null);
@@ -855,22 +856,29 @@ function Conversations({ onForget }: { onForget: () => void }) {
     setListEl(el);
   }, []);
   const [stackEl, setStackEl] = useState<HTMLDivElement | null>(null);
-  /** The spot the reader is at in the conversation on screen (the first message in sight, and how far down it is); none at its newest. */
-  function spotNow(): (ReturnSpot & { seq: number }) | null {
+  /** The spot the reader is at in the conversation on screen (the first message in sight, and how far down it is); null at its newest,
+   *  undefined with no conversation on screen to read one from. */
+  function spotNow(): (ReturnSpot & { seq: number }) | null | undefined {
     const el = listRef.current, view = restoredView.current;
-    if (!el || !view || !el.isConnected || markFor(el.scrollTop, el.scrollHeight, el.clientHeight).atEnd) return null;
+    if (!el || !view || !el.isConnected) return undefined;
+    if (markFor(el.scrollTop, el.scrollHeight, el.clientHeight).atEnd) return null;
     const top = el.getBoundingClientRect().top;
     const first = [...el.querySelectorAll<HTMLElement>("[data-ref]")].find((m) => m.getBoundingClientRect().bottom > top);
     return first ? { view, ref: first.dataset.ref!, offset: first.getBoundingClientRect().top - top, limit, seq: appliedSeq.current } : null;
   }
-  const spotNowRef = useRef(spotNow);
-  spotNowRef.current = spotNow;
+  /** A place's spot: read from its conversation when that is on screen, else the one still waiting to be applied to it (a restart's). */
+  function spotOf(t: Tab): (ReturnSpot & { seq: number }) | null {
+    const view = viewOf(t), now = restoredView.current === view ? spotNow() : undefined;
+    return now !== undefined ? now : returnSpot.current?.view === view ? returnSpot.current : null;
+  }
+  const spotOfRef = useRef(spotOf);
+  spotOfRef.current = spotOf;
   // T-294: put away (the system may close the app from there), the room's spot is kept with its place, so a restart comes back to it
   useEffect(() => {
     const keep = () => {
       if (document.visibilityState !== "hidden" || !placeSettled.current) return;
       const cur = activeTab(tabsRef.current);
-      if (cur && isUniSide(cur)) keepUniPlace(cur, spotNowRef.current());
+      if (cur && isUniSide(cur)) keepUniPlace(cur, spotOfRef.current(cur));
     };
     document.addEventListener("visibilitychange", keep);
     window.addEventListener("pagehide", keep);
@@ -2144,7 +2152,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       }}
       onBack={() => backAside(asideRoom)} onClose={() => backAside(asideRoom, true)}
       onOpenPage={(note, title) => {
-        returnSpot.current = spotNow();
+        returnSpot.current = spotNow() ?? null;
         openTarget({ kind: "note", note, title }, "new");
       }}
       onDirty={(ref, dirty) => { const k = noteKey(ref); if (dirty) asideDirty.current.add(k); else asideDirty.current.delete(k); }} />}

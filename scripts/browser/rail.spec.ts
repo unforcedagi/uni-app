@@ -93,7 +93,11 @@ test('Rail surfaces, overlay panels, focus; rooms are in the tree (r12: no Rooms
     await rail.getByRole('button', { name: 'Journal', exact: true }).click();
     await page.reload();
     await expect(writing).toHaveValue('A little room to think.');
+    // T-294: from the Journal, Uni goes back to the room you were in; Uni again, at Uni, goes home
     await rail.getByRole('button', { name: 'Uni', exact: true }).click();
+    await expect(page.locator('.sr-title')).toHaveText('#Garden');
+    await rail.getByRole('button', { name: 'Uni', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Uni', level: 1 })).toBeVisible();
     await page.reload();
     await expect(page.getByRole('heading', { name: 'Uni', level: 1 })).toBeVisible();
     await page.evaluate(() => { (window as any).updated = '2026-10-02T12:00:00Z'; (window as any).content += '\n- A new suggestion'; document.dispatchEvent(new Event('visibilitychange')); });
