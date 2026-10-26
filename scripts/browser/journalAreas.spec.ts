@@ -104,7 +104,7 @@ test('two area chips after a save post two messages, each with the link, address
   expect(sent.map((p) => p.channel)).toEqual(['garden-room', 'workshop-room']);
   for (const p of sent) {
     expect(p.recipients).toEqual([UNI]);
-    expect(p.body).toBe(`@Uni New journal entry for this area. Take it in; reply only if something stands out.\n\n${link(id)}`);
+    expect(p.body).toBe(`@Uni New journal entry.\n\n${link(id)}`);
   }
   // the tag names every room it went to; the row stays until dismissed and says so
   await expect(entry.locator('.queued-tag')).toHaveText('shared · garden, workshop');

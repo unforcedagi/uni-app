@@ -113,7 +113,7 @@ export function shareText(note: Pick<JournalNote, "id" | "path" | "content" | "c
 }
 
 /** What an area room's Uni is asked when an entry is sent there (T-263): Hermes in a group room wakes only on a mention. */
-export const AREA_ASK = "New journal entry for this area. Take it in; reply only if something stands out.";
+export const AREA_ASK = "New journal entry.";
 
 /**
  * The rooms an entry can be sent to (T-263): the area rooms, so no direct message and not #Uni (it has "Pass to Uni"). Only a room

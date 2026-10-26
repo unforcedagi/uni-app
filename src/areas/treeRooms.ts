@@ -9,9 +9,10 @@ import { ownRoom, steward, type RoomNode, type RoomRef } from "./talkCore.ts";
 export const roomSlug = (name: string) => name.trim().replace(/^#/, "");
 
 /** Nodes whose words and titles are never shown in a new place, only counts (the T-111 privacy rule). "sanctum" is the fixtures'
- *  private area; the owner's own is kept as a hash of its lowercased name, so this public repo doesn't name it (T-190). */
+ *  private area; the owner's own are kept as hashes of their lowercased names, so this public repo doesn't name them (T-190).
+ *  T-293: the life area that absorbed the older private areas is the second hash; the older entries stay for notes not yet moved. */
 const PRIVATE = new Set(["relationships", "sanctum"]);
-const PRIVATE_HASHED = new Set([0x4c19dafd]);
+const PRIVATE_HASHED = new Set([0x4c19dafd, 0x251215f1]);
 /** 32-bit FNV-1a: enough to recognise one known name, not to hide it from someone who guesses it. */
 export function fnv1a(s: string): number {
   let h = 0x811c9dc5;

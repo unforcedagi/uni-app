@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { parseArea, parseProject } from "../src/areas/areasCore.ts";
 import { buildTree, ROOT } from "../src/areas/treeCore.ts";
 import { ownRoom } from "../src/areas/talkCore.ts";
-import { fnv1a, isPrivateName, isPrivateNode, privateRoot, roomSlug, roomView, treeRows } from "../src/areas/treeRooms.ts";
+import { fnv1a, isPrivateName, isPrivateNode, privateRoot, privateRootIn, roomSlug, roomView, treeRows } from "../src/areas/treeRooms.ts";
 import { parseBrief } from "../src/areas/briefCore.ts";
 import { HOME_LAYOUT_KEY, migrateHomeLayout } from "../src/areas/homeLayout.ts";
 
@@ -120,5 +120,17 @@ check("T-190: private names: the two plain ones, any case; the owner's own by a 
   assert.equal(fnv1a(""), 0x811c9dc5); assert.equal(fnv1a("a"), 0xe40c292c); assert.equal(fnv1a("foobar"), 0xbf9cf968);
   assert.equal(isPrivateName("Sanctum"), true); assert.equal(isPrivateName("RELATIONSHIPS"), true);
   for (const n of ["Techne", "Boulder", "Parachute", "Sanctums", ""]) assert.equal(isPrivateName(n), false, n);
+});
+check("T-293: a private area that absorbed its parts: items repointed to it are private by that area, a part filed under it is no node", () => {
+  // A former part keeps its note at Areas/<Area>/<Part> without the area tag; even tagged, a nested path is never an area.
+  const part = (id: string, tags: string[]) => parseArea({ id, path: "Areas/Sanctum/Practice", tags, content: "# Practice", metadata: { room: "sanctum" } });
+  assert.equal(part("x-1", []), null); assert.equal(part("x-2", ["area"]), null);
+  const t = buildTree([area("a-sad", "Sanctum", { room: "sanctum" }), area("a-bou", "Boulder", { room: "boulder" })]);
+  assert.deepEqual([...t.nodes.keys()].sort(), ["Areas/Boulder", "Areas/Sanctum"]);
+  // A task, decision or draft whose node was the part now names the area, so the feed sees it as the area's (tree read or not).
+  assert.deepEqual(privateRoot(t, "Areas/Sanctum"), { path: "Areas/Sanctum", name: "Sanctum" });
+  const byPath = new Map([...t.nodes.values()].map((n) => [n.path, { path: n.path, name: n.name }]));
+  assert.deepEqual(privateRootIn({ byPath, parent: new Map() }, "Areas/Sanctum"), { path: "Areas/Sanctum", name: "Sanctum" });
+  assert.equal(privateRoot(t, "Areas/Boulder"), null);
 });
 if (failed) { console.log(`\n${failed} failed`); process.exit(1); }
