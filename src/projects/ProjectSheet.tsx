@@ -73,7 +73,8 @@ const askedWords = (a: Asked, now: number) => `Asked the room to ${a.kind === "f
 
 function SessionCard({ s, all, now, asked }: { s: Session; all: readonly Session[]; now: number; asked: Asked | null }) {
   const live = isLive(s);
-  const why = whyWords(s, all);
+  // "alongside" says why there are several while they work; in the history it is noise (a fresh start or a pick-up stays)
+  const why = live || s.why?.kind !== "alongside" ? whyWords(s, all) : null;
   return <li className={`pj-session ${s.state}`} data-session={s.id} data-state={s.state}>
     <p className="pj-state"><i aria-hidden="true" />{stateWords(s, now)}</p>
     <h3 className="pj-ask">{s.ask}</h3>

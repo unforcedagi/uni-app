@@ -3,7 +3,7 @@
 // has no live sessions. Then the same rules on the vault's own shapes (workFrom), and the words the room is sent.
 import assert from "node:assert/strict";
 import { ModelError, ago, whyWords, archivePlan, archiveProject, cannotStart, isLive, liveInArea, liveSessions, makeProject, problems, restoreProject, sessionsOf, span, startSession, stateWords, stepSession, stopSession, finishSession, timeline, timelineWindow, type Area, type Work } from "../src/projects/model.ts";
-import { HEARD_MS, plainTitle, plainWords, resultWords, workFrom } from "../src/projects/live.ts";
+import { HEARD_MS, plainTitle, plainWords, resultWords, sessionState, workFrom } from "../src/projects/live.ts";
 import { actionMessage } from "../src/projects/actions.ts";
 import { DEMO_AREAS, demoVault } from "./browser/projectsWorld.ts";
 let failed = 0;
@@ -161,6 +161,8 @@ check("from the vault: a session says what it is doing in words, its steps, and 
   assert.doesNotMatch(words, /\bT-\d+|\bmts\b|\b[a-z]{4}[a-z0-9]{4}\b:|run-|\bresume\b/);
   assert.equal(plainTitle("T-302 (2)"), ""); assert.equal(plainTitle("T-288 (resume hsb0mug1)"), ""); assert.equal(plainTitle("LVB week 9 page + homework"), "LVB week 9 page + homework");
   assert.equal(resultWords("mts abcd1234: failed", "failed"), null);
+  assert.equal(resultWords("closed by T-302 tidy: unit gone", "failed"), "Its worker was gone; closed when the old runs were tidied.");
+  assert.equal(sessionState("lost"), "failed", "a run closed because its worker was gone didn't finish");
 });
 check("a note that still says running but hasn't been heard from for hours is silent, not working (and has an end: when it was last heard)", () => {
   const at = (ms: number) => new Date(NOW - ms).toISOString();

@@ -40,7 +40,7 @@ export function sessionState(v: unknown): SessionState {
     case "running": case "queued": case "stalled": return "running";
     case "done": return "finished";
     case "blocked": case "decision": return "waiting";
-    case "failed": return "failed";
+    case "failed": case "lost": return "failed";
     default: return "stopped";
   }
 }
@@ -64,6 +64,7 @@ export function resultWords(summary: unknown, state: SessionState): string | nul
   if (file) return `Left ${lastName(file)}.`;
   if (/evidence: commit [0-9a-f]{6,}/.test(s)) return "Left a commit.";
   if (/^unverified:/.test(s)) return "Says it finished; nothing it left could be checked yet.";
+  if (/unit gone/.test(s)) return "Its worker was gone; closed when the old runs were tidied.";
   // the launcher's bare state line says nothing the state word doesn't
   if (/^mts [a-z0-9]{8}: \w+$/.test(s)) return null;
   const words = plainTitle(s.replace(/\bmts [a-z0-9]{8}:?\s*/g, "").replace(/\brun=[a-z0-9]{8}\b/g, ""));
