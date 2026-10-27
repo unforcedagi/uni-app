@@ -324,6 +324,8 @@ check("codex tt6oiyni: a quoted password with spaces and a long numeric token ar
   assert.equal(redact("token=12345678901234567890"), `token=${HIDDEN}`);
   assert.equal(redact("API_KEY=123456"), `API_KEY=${HIDDEN}`);
   assert.equal(redact("api_tokens=4096"), `api_tokens=${HIDDEN}`);
+  assert.equal(redact("Set token=12345678901234567890."), `Set token=${HIDDEN}.`);
+  assert.equal(redact("Budget max_tokens=4096."), "Budget max_tokens=4096.");
   for (const plain of ["max_tokens=4096", "tokens: 12000", "input_tokens=980 output_tokens=120", "token_count=33"]) assert.equal(redact(plain), plain);
   // a secret split by "; " in what it left is still hidden whole
   assert.ok(leftItems('the config, password="a; b c"').every((i) => !/\bb c\b/.test(i.text)));

@@ -26,7 +26,12 @@ const COUNTER = /^(?:(?:(?:max|min|num|total|input|output|prompt|completion|cach
 export function redact(text: string): string {
   let t = text;
   for (const r of SECRETS) t = t.replace(r, HIDDEN);
-  return t.replace(BEARER, (_, kind: string) => `${kind} ${HIDDEN}`).replace(NAMED, (all, name: string, sep: string, value: string) => (COUNTER.test(name) && /^\d{1,9}$/.test(value) ? all : `${name}${sep}${HIDDEN}`));
+  return t.replace(BEARER, (_, kind: string) => `${kind} ${HIDDEN}`).replace(NAMED, (all, name: string, sep: string, raw: string) => {
+    // a sentence's closing punctuation is not part of an unquoted value
+    const [, value, tail] = /^["']/.test(raw) ? [raw, raw, ""] : /^([\s\S]*?)([.:!?)]*)$/.exec(raw)!;
+    if (COUNTER.test(name) && /^\d{1,9}$/.test(value)) return all;
+    return `${name}${sep}${value ? HIDDEN : ""}${tail}`;
+  });
 }
 
 /** One line of the session's stream: a step it took, or something it wrote. `at` is null when the line has no time. */
