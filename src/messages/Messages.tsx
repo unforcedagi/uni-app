@@ -7,6 +7,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExter
 import { closeRoom, draftFor, draftsEpoch, forgetPlace, join, keepDraft, keepReadSpot, lastOpen, lastPane, lastTab, links as readLinks, markRead, older, onUpdate, openRoom, readSpot, rememberOpen, rememberPane, rememberTab, unsentBack, rooms as readRooms, send, signIn, signInDevice, signOut, status as readStatus } from "./messagesDoor.ts";
 import { applyLink, mergeLinks, applyOpened, applyTimeline, asMessagesErr, initials, messageTabs, networkInfo, networkOf, previewLine, problemText, rowTime, sendWords, shownItems, shownTab, statusWords, tabName, tabRows, timeLabel, type LinkRow, type MessagesErr, type RoomRow, type Status, type Tab, type TabId, type Thread } from "./messagesView.ts";
 import LinkAccounts from "./LinkAccounts.tsx";
+import { Attachment, Lightbox, MessageText, Quote, Reactions } from "./MessageParts.tsx";
 import { enterInsertsNewline } from "../composerCore";
 import "./Messages.css";
 
@@ -109,7 +110,18 @@ function ThreadView({ room, thread, now, visible, onBack, onProblem }: { room: R
   /** Sends go one after another, in the order written; typing never waits for them. */
   const sending = useRef<Promise<unknown>>(Promise.resolve());
   const [loadingOlder, setLoadingOlder] = useState(false);
+  /** T-313: a picture opened large. */
+  const [large, setLarge] = useState<{ url: string; alt: string } | null>(null);
   const log = useRef<HTMLDivElement | null>(null);
+  /** T-313: a reply's quote goes to the message it answers, when it's loaded here; that message is marked a moment. */
+  const [marked, setMarked] = useState<string | null>(null);
+  const goTo = (eventId: string) => {
+    const el = log.current?.querySelector<HTMLElement>(`[data-event="${CSS.escape(eventId)}"]`);
+    if (!el) return;
+    el.scrollIntoView({ block: "center" });
+    setMarked(eventId);
+    window.setTimeout(() => setMarked((m) => (m === eventId ? null : m)), 2000);
+  };
   const leftAt = useRef(readSpot(room.id));
   const stuck = useRef(leftAt.current === undefined);
   const items = thread.items;
@@ -187,10 +199,20 @@ function ThreadView({ room, thread, now, visible, onBack, onProblem }: { room: R
         {!items ? <p className="msgs-loading" role="status">Opening…</p>
           : items.length === 0 ? <p className="empty">No messages yet. Say hello.</p>
           : shown.map((s) => s.kind === "day" ? <p key={s.key} className="msgs-day">{s.label}</p>
-            : <div key={s.key} className={`msgs-msg ${s.row.own ? "own" : "theirs"} ${s.first ? "first" : ""} ${s.last ? "last" : ""} kind-${s.row.kind} st-${s.row.state}`} data-key={s.row.key} data-encrypted={s.row.encrypted ? "true" : undefined}>
+            : <div key={s.key} className={`msgs-msg ${s.row.own ? "own" : "theirs"} ${s.first ? "first" : ""} ${s.last ? "last" : ""} kind-${s.row.kind} st-${s.row.state} ${s.row.media ? "has-media" : ""} ${marked && marked === s.row.event_id ? "marked" : ""}`}
+              data-key={s.row.key} data-event={s.row.event_id ?? undefined} data-encrypted={s.row.encrypted ? "true" : undefined}>
               {s.first && !s.row.own && <p className="msgs-from"><strong>{s.row.sender_name}</strong> <time>{timeLabel(s.row.ts)}</time></p>}
               {s.first && s.row.own && <p className="msgs-from"><time>{timeLabel(s.row.ts)}</time></p>}
-              <p className="msgs-body">{s.row.kind === "emote" ? `* ${s.row.sender_name} ${s.row.body}` : s.row.body}{s.row.edited && <small className="msgs-edited"> (edited)</small>}</p>
+              {s.row.media ? <div className="msgs-body msgs-media">
+                  {s.row.reply && <Quote reply={s.row.reply} onGo={goTo} />}
+                  <Attachment roomId={room.id} row={s.row} onPicture={(url, alt) => setLarge({ url, alt })} />
+                  {s.row.media.caption && <p className="msgs-caption"><MessageText text={s.row.media.caption} /></p>}
+                </div>
+                : <p className="msgs-body">
+                  {s.row.reply && <Quote reply={s.row.reply} onGo={goTo} />}
+                  <MessageText text={s.row.kind === "emote" ? `* ${s.row.sender_name} ${s.row.body}` : s.row.body} after={s.row.edited && <small className="msgs-edited"> (edited)</small>} />
+                </p>}
+              {s.row.reactions && <Reactions reactions={s.row.reactions} />}
               {s.row.own && s.row.key === lastOwn?.key && sendWords(s.row.state) && <p className="msgs-state">{sendWords(s.row.state)}</p>}
             </div>)}
       </div>
@@ -200,6 +222,7 @@ function ThreadView({ room, thread, now, visible, onBack, onProblem }: { room: R
         <button className="send msgs-send" disabled={!draft.trim()}>Send</button>
       </form>
     </>}
+    {large && <Lightbox url={large.url} alt={large.alt} onClose={() => setLarge(null)} />}
   </section>;
 }
 

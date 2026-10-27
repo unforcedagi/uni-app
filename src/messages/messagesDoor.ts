@@ -4,7 +4,7 @@
 // Messages: only once a build that has it has answered.
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { asMessagesErr, OPEN_KEY, PANE_KEY, SEEN_KEY, TAB_KEY, type LinkRow, type MessageRow, type RoomRow, type Status, type Update } from "./messagesView.ts";
+import { asMessagesErr, OPEN_KEY, PANE_KEY, SEEN_KEY, TAB_KEY, type LinkRow, type MessageRow, type RoomRow, type Status, type Transcript, type Update } from "./messagesView.ts";
 
 async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   try { return await invoke<T>(cmd, args); } catch (e) { throw asMessagesErr(e); }
@@ -24,6 +24,83 @@ export const send = (roomId: string, body: string) => call<null>("messages_send"
 export const join = (roomId: string) => call<null>("messages_join", { roomId });
 export const older = (roomId: string) => call<boolean>("messages_older", { roomId });
 export const markRead = (roomId: string) => call<null>("messages_read", { roomId });
+/** T-313: an attachment's bytes (raw IPC: an ArrayBuffer), fetched and decrypted by the core by its event. */
+export const mediaBytes = (roomId: string, eventId: string) => call<ArrayBuffer>("messages_media", { roomId, eventId });
+/** T-313: a voice message's words, transcribed once on the owner's box and kept by the core. */
+export const transcript = (roomId: string, eventId: string) => call<Transcript>("messages_transcript", { roomId, eventId });
+/** T-313: open an attachment in the app the system picks for it. */
+export const openFile = (roomId: string, eventId: string) => call<null>("messages_open_file", { roomId, eventId });
+
+// ── T-313: attachments on screen. Their bytes are kept in memory as object URLs (never in the webview's storage, since they
+// are a private conversation's), a few at a time, and all dropped when the account goes. ──────────────────────────────
+
+const MEDIA_KEEP = 40;
+const MEDIA_KEEP_BYTES = 150 * 1024 * 1024;
+type Kept = { url: string; size: number };
+const shown = new Map<string, Kept>();
+const fetching = new Map<string, Promise<string>>();
+/** How many attachments on screen hold each URL: one in use is never revoked. */
+const holding = new Map<string, number>();
+let mediaEpoch = 0;
+const mediaKey = (roomId: string, eventId: string) => `${roomId}\u0000${eventId}`;
+
+/** An object URL for an attachment, typed `mime` (as the core said it may be). Asked twice, fetched once. */
+export function mediaUrl(roomId: string, eventId: string, mime: string): Promise<string> {
+  const key = mediaKey(roomId, eventId);
+  const kept = shown.get(key);
+  if (kept) { shown.delete(key); shown.set(key, kept); return Promise.resolve(kept.url); }
+  const going = fetching.get(key);
+  if (going) return going;
+  const at = mediaEpoch;
+  const p = mediaBytes(roomId, eventId).then((buf) => {
+    // signed out meanwhile: these bytes were the old account's
+    if (at !== mediaEpoch) throw asMessagesErr({ kind: "signed_out", message: "Signed out." });
+    const url = URL.createObjectURL(new Blob([buf], { type: mime }));
+    shown.set(key, { url, size: buf.byteLength });
+    let total = 0;
+    for (const k of shown.values()) total += k.size;
+    for (const [k, v] of [...shown]) {
+      if (shown.size <= MEDIA_KEEP && total <= MEDIA_KEEP_BYTES) break;
+      // the oldest no longer on screen goes
+      if (holding.has(k)) continue;
+      shown.delete(k); total -= v.size; URL.revokeObjectURL(v.url);
+    }
+    return url;
+  }).finally(() => fetching.delete(key));
+  fetching.set(key, p);
+  return p;
+}
+
+/** An attachment on screen holds its URL until it goes (the returned function). */
+export function holdMedia(roomId: string, eventId: string): () => void {
+  const key = mediaKey(roomId, eventId);
+  holding.set(key, (holding.get(key) ?? 0) + 1);
+  let held = true;
+  return () => { if (!held) return; held = false; const n = (holding.get(key) ?? 1) - 1; if (n > 0) holding.set(key, n); else holding.delete(key); };
+}
+
+const words = new Map<string, Transcript>();
+const transcribing = new Map<string, Promise<Transcript>>();
+/** A voice message's words: asked of the core once per session (which keeps them across restarts). */
+export function wordsFor(roomId: string, eventId: string): Promise<Transcript> {
+  const key = mediaKey(roomId, eventId);
+  const known = words.get(key);
+  if (known) return Promise.resolve(known);
+  const going = transcribing.get(key);
+  if (going) return going;
+  const at = mediaEpoch;
+  const p = transcript(roomId, eventId).then((t) => { if (at === mediaEpoch) words.set(key, t); return t; }).finally(() => transcribing.delete(key));
+  transcribing.set(key, p);
+  return p;
+}
+export const knownWords = (roomId: string, eventId: string) => words.get(mediaKey(roomId, eventId));
+
+/** The account went: its attachments and words leave memory too. */
+export function forgetMedia() {
+  mediaEpoch++;
+  for (const v of shown.values()) URL.revokeObjectURL(v.url);
+  shown.clear(); fetching.clear(); words.clear(); transcribing.clear(); holding.clear();
+}
 
 // linking accounts (T-282): each answers with the network's card; later changes arrive as `link` updates
 export const links = () => call<LinkRow[]>("messages_links");
@@ -71,7 +148,7 @@ export async function probeMessages(): Promise<void> {
  * Messages' place too: the pane, the tab, the drafts, the spots. */
 export function rememberOpen(roomId: string | null) {
   try { if (roomId) localStorage.setItem(OPEN_KEY, roomId); else { localStorage.removeItem(OPEN_KEY); localStorage.removeItem(PANE_KEY); localStorage.removeItem(TAB_KEY); } } catch { /* unavailable storage */ }
-  if (!roomId) { drafts.clear(); readTo.clear(); draftEpoch++; }
+  if (!roomId) { drafts.clear(); readTo.clear(); draftEpoch++; forgetMedia(); }
 }
 /** The one way Messages' place for an account is dropped: Forget (forgetMessages), the Sign out button, and a sign-out from the
  * homeserver all come here, so they can't drift apart. */

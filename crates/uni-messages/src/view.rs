@@ -258,6 +258,11 @@ fn content_words(content: &TimelineItemContent) -> Option<(MessageKind, String, 
         MessageType::Emote(e) => (MessageKind::Emote, e.body.clone()),
         MessageType::Image(i) => (MessageKind::Media, named("Photo", i.filename())),
         MessageType::Video(v) => (MessageKind::Media, named("Video", v.filename())),
+        // T-313: a recorded voice message reads as one, with its length, as a chat app's list says it
+        MessageType::Audio(a) if a.voice.is_some() => {
+            let secs = a.info.as_deref().and_then(|i| i.duration).map(|d| d.as_secs());
+            (MessageKind::Media, secs.map_or("Voice message".into(), |s| format!("Voice message ({}:{:02})", s / 60, s % 60)))
+        }
         MessageType::Audio(a) => (MessageKind::Media, named("Audio", a.filename())),
         MessageType::File(f) => (MessageKind::Media, named("File", f.filename())),
         MessageType::Location(_) => (MessageKind::Media, "Location".into()),

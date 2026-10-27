@@ -173,6 +173,8 @@ async fn voice_pictures_files_replies_and_reactions_arrive_and_a_voice_message_i
     // the voice message: marked as one, its length and type as sent
     let v = row(&rows, &voice).unwrap().media.clone().unwrap();
     assert_eq!((v.kind, v.mime.as_str(), v.duration_ms, v.size), (MediaKind::Voice, "audio/ogg", Some(2500), Some(audio.len() as u64)));
+    // and the room list's preview and the row's words say so, with its length
+    assert_eq!(row(&rows, &voice).unwrap().body, "Voice message (0:02)");
     // a picture declared as SVG is never handed over as one (it can carry script): plain bytes
     let p = row(&rows, &picture).unwrap().media.clone().unwrap();
     assert_eq!((p.kind, p.mime.as_str(), p.width, p.height), (MediaKind::Image, "application/octet-stream", Some(640), Some(480)));
