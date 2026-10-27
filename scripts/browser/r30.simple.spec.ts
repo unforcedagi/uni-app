@@ -203,25 +203,6 @@ test.describe('r30 confirming', () => {
     await expect(sheet.getByRole('button', { name: 'I did this' })).toBeVisible();
   });
 
-  test('4: all of Uni\'s work counts across all rooms', async ({ page }) => {
-    test.skip(!wide(page), 'work view');
-    await boot(page);
-    await add(page, { id: 'r1', title: 'T-911 Placeholder one', node: 'Areas/Techne', asked_at: null, meta: { next: NEXT('jade') } });
-    await add(page, { id: 'r2', title: 'T-912 Placeholder two', node: 'Projects/Atlas Institute', asked_at: null, meta: { next: NEXT('onyx') } });
-    await refresh(page);
-    await page.locator('.th-go[aria-label^="Uni,"]').first().click();
-    await openCompanion(page);
-    const line = page.locator('.cp-body .cp-recheck-line');
-    await expect(line).toHaveText(/^\d+ requests need confirming across all rooms\+$/);
-    const all = Number((await line.innerText()).match(/\d+/)![0]);
-    expect(all).toBeGreaterThanOrEqual(2);
-    await openWork(page);
-    await expect(section(page, 'Needs you').locator('.cp-recheck-line')).toHaveText(`${all} requests need confirming across all rooms+`);
-    // another room's work counts its own, and says so: fewer than all of them
-    await openRoom(page, 'Atlas Institute');
-    await openWork(page);
-    await expect(section(page, 'Needs you').locator('.cp-recheck-line')).toHaveText(/^1 request needs confirming in this room\+$/);
-  });
 });
 test.describe('r30 waiting runs', () => {
   const composerFocused = (page: Page) => page.evaluate(() => document.activeElement?.tagName === 'TEXTAREA' && !!document.activeElement.closest('.composer'));
@@ -232,7 +213,7 @@ test.describe('r30 waiting runs', () => {
     await page.evaluate((r) => (window as any).__addRun('wr1', 'Areas/Techne', '', 'Waiting on your answer in #Techne: Ship the placeholder 0.1.46?', 'decision', { room: 'techne', message_ref: r }), ref);
     await refresh(page);
     // from another room: Uni's own
-    await page.locator('.th-go[aria-label^="Uni,"]').first().click();
+    await openRoom(page, 'Boulder'); // T-302 round 2: Uni's level is gone with #Uni; Boulder's holds these tasks
     await openWork(page);
     const run = section(page, 'Needs you').locator('.cp-waiting > li');
     await expect(run).toHaveCount(1);

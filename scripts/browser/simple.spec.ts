@@ -153,11 +153,7 @@ test.describe('simple', () => {
   test('where it stands is the node\'s own sentence, never a count or the description', async ({ page }) => {
     await boot(page);
     await showTree(page); // T-302: on a phone the tree is in a room's Places drawer
-    await scope(page).locator('.th-go[aria-label^="Uni,"]').click();
-    await expect(page.locator('.sr-title')).toHaveText('Uni');
-    await openCompanion(page);
-    await expect(page.locator('.cp-lede')).toContainText('Atlas and COhere are moving');
-    await expect(page.locator('.cp-lede')).not.toContainText(/need you|areas/);
+    // (T-302 round 2: Uni's own line went with #Uni; the areas' lines are on the front door, checked in projects.spec)
     await openRoom(page, 'Learn Vibe Build');
     await openCompanion(page);
     await expect(page.locator('.cp-lede')).toContainText('Cohort two starts Oct 15');
@@ -173,8 +169,7 @@ test.describe('simple', () => {
     await boot(page);
     await showTree(page); // T-302: on a phone the tree is in a room's Places drawer
     if (!wide(page)) await expect(page.locator('.th-phone-tree')).toBeVisible();
-    await scope(page).locator('.th-go[aria-label^="Uni,"]').click();
-    await expect(page.locator('.sr-title')).toHaveText('Uni');
+    await openRoom(page, 'Boulder'); // T-302 round 2: Uni's level is gone with #Uni; Boulder's holds these tasks
     await openCompanion(page);
     const needs = page.locator('.cp-body').getByRole('region', { name: 'Needs you' });
     // r17: Uni's panel is at most three rows; everything else is one "N more ›" to the work view, which lists every one
@@ -222,7 +217,7 @@ test.describe('simple', () => {
     test.skip(!wide(page), 'side panel');
     await page.setViewportSize({ width: 1280, height: 720 });
     await boot(page);
-    await scope(page).locator('.th-go[aria-label^="Uni,"]').click();
+    await openRoom(page, 'Boulder'); // T-302 round 2: Uni's level is gone with #Uni; Boulder's holds these tasks
     await openCompanion(page);
     expect(await page.locator('.cp-body .cp-item').count()).toBeGreaterThanOrEqual(2);
     await expect(page.locator('.cp-body')).not.toContainText(/https?:\/\//);
@@ -258,7 +253,7 @@ test.describe('simple', () => {
     test.skip(!wide(page), 'side panel');
     await page.setViewportSize({ width: 1280, height: 720 });
     await boot(page);
-    await scope(page).locator('.th-go[aria-label^="Uni,"]').click();
+    await openRoom(page, 'Boulder'); // T-302 round 2: Uni's level is gone with #Uni; Boulder's holds these tasks
     await openCompanion(page);
     await expect(page.locator('.cp-body').getByRole('button', { name: 'Decide', exact: true })).toHaveCount(0);
     const dec = page.locator('.cp-item').filter({ hasText: 'Decide the COhere venue' }).locator('.cp-need.decision');
@@ -278,7 +273,7 @@ test.describe('simple', () => {
     test.skip(!wide(page), 'side panel');
     await page.setViewportSize({ width: 1280, height: 600 });
     await boot(page);
-    await scope(page).locator('.th-go[aria-label^="Uni,"]').click();
+    await openRoom(page, 'Boulder'); // T-302 round 2: Uni's level is gone with #Uni; Boulder's holds these tasks
     await openCompanion(page);
     const foot = page.locator('.cp-all');
     const side = (await page.locator('.cp.side').boundingBox())!;
@@ -359,7 +354,7 @@ test.describe('simple', () => {
   test('the footer link keeps the long form at any width; detail lines wrap; a short summary stays whole when narrow', async ({ page }) => {
     test.skip(!wide(page), 'side panel');
     await boot(page);
-    await scope(page).locator('.th-go[aria-label^="Uni,"]').click();
+    await openRoom(page, 'Boulder'); // T-302 round 2: Uni's level is gone with #Uni; Boulder's holds these tasks
     await openCompanion(page);
     await expect(page.locator('.cp-all-t')).toContainText('All of');
     await page.setViewportSize({ width: 900, height: 700 });
@@ -859,14 +854,15 @@ test.describe('simple', () => {
     test.skip(!wide(page), 'sidebar column');
     await boot(page);
     const nav = scope(page);
-    // default: folded, except the area holding the open room (Uni is open: no area holds it)
+    const here = await page.locator('.sr-title').textContent(); // T-302: the room the front door's first door opened
+    // default: folded, except the area holding the open room
     await expect(nav.locator('.th-row.d2')).toHaveCount(0);
     await expect(nav.locator('.th-fold[aria-expanded="false"]').first()).toBeVisible();
     // a folded area shows the dot for what is under it
     await expect(nav.locator('.th-go[aria-label^="Atlas,"] .th-dot')).toHaveCount(1);
     await nav.locator('.th-fold[data-path="Areas/Atlas"]').click();
     await expect(nav.locator('.th-go[aria-label^="ATLAS,"]')).toBeVisible();
-    await expect(page.locator('.sr-title')).toHaveText('Uni'); // the chevron did not open the room
+    await expect(page.locator('.sr-title')).toHaveText(here!); // the chevron did not open the room
     await expect(nav.locator('.th-go[aria-label^="Atlas,"] .th-dot')).toHaveCount(0);
     await nav.locator('.th-go[aria-label^="Atlas,"]').click(); // the name opens it
     await expect(page.locator('.sr-title')).toHaveText('Atlas');
@@ -929,6 +925,7 @@ test.describe('simple', () => {
   test('r7: Back and Forward over the places visited (Alt+←/→ and the two buttons), with a short Recent list', async ({ page }) => {
     test.skip(!wide(page), 'sidebar column');
     await boot(page);
+    const first = await page.locator('.sr-title').textContent(); // T-302: the room the front door's first door opened
     await openRoom(page, 'ATLAS');
     await openRoom(page, 'Learn Vibe Build');
     const nav = page.locator('.th-roomnav');
@@ -939,11 +936,10 @@ test.describe('simple', () => {
     await expect(page.locator('.sr-title')).toHaveText('Learn Vibe Build');
     await page.keyboard.press('Alt+ArrowLeft');
     await page.keyboard.press('Alt+ArrowLeft');
-    await expect(page.locator('.sr-title')).toHaveText('Uni');
-    // (T-302: the way to Uni's level passed the front door and a room, so Back is still possible here)
+    await expect(page.locator('.sr-title')).toHaveText(first!);
     await expect(nav.getByRole('button', { name: 'Forward' })).toBeEnabled();
     const recent = nav.getByRole('region', { name: 'Recent' });
-    await expect(recent.locator('button')).toHaveText(['Learn Vibe Build', 'ATLAS', 'Techne']); // T-302: and the room the way in passed
+    await expect(recent.locator('button')).toHaveText(['Learn Vibe Build', 'ATLAS']);
     await recent.getByRole('button', { name: 'ATLAS' }).click();
     await expect(page.locator('.sr-title')).toHaveText('ATLAS');
   });
@@ -991,7 +987,7 @@ test.describe('simple', () => {
   test('r7: a long next step is clamped within its row; the row opens its sheet with all of it (r19: in the work view as in the companion, never More in place)', async ({ page }) => {
     test.skip(!wide(page), 'side panel');
     await boot(page, { longNext: true });
-    await scope(page).locator('.th-go[aria-label^="Uni,"]').click();
+    await openRoom(page, 'Boulder'); // T-302 round 2: Uni's level is gone with #Uni; Boulder's holds these tasks
     await openCompanion(page);
     await expect(page.locator('.cp-body .cp-row-more, .cp-body .cp-item .cp-more-next')).toHaveCount(0);
     await openWorkView(page); await narrowWork(page);
@@ -1009,7 +1005,7 @@ test.describe('simple', () => {
   test('r7: opening a task without a title worth reading or a next step says to open it', async ({ page }) => {
     test.skip(!wide(page), 'side panel');
     await boot(page, { bareTask: true });
-    await scope(page).locator('.th-go[aria-label^="Uni,"]').click();
+    await openRoom(page, 'Boulder'); // T-302 round 2: Uni's level is gone with #Uni; Boulder's holds these tasks
     await openCompanion(page);
     const item = page.locator('.cp-item').filter({ hasText: 'Taxes' });
     await expect(item.locator('.cp-open-to-see')).toHaveText("Open to see what's needed");
@@ -1035,28 +1031,10 @@ test.describe('simple', () => {
     await expect(page.locator('.sr-chat [aria-label="Loading messages"]')).toHaveCount(0);
   });
 
-  test('r8: Uni opens as its chat room even when the rooms list arrives late; Recent never lists the current place or one twice', async ({ page }) => {
-    test.skip(!wide(page), 'sidebar column');
-    await boot(page, { roomsDelay: 1500 });
-    await scope(page).locator('.th-go[aria-label^="Uni"]').first().click();
-    // no dashboard while the rooms load: the room, then its conversation and the companion
-    await expect(page.locator('.sr-title')).toHaveText('Uni');
-    await expect(page.locator('[data-view="room"]')).toBeVisible();
-    await expect(page.getByText('no room', { exact: true })).toHaveCount(0);
-    await expect(page.locator('.sr-door')).toHaveText('#Uni', { timeout: 8000 });
-    await expect(page.locator('.sr-chat textarea')).toBeVisible();
-    await expect(page.locator('.sr-chat-wait')).toHaveCount(0);
-    await expect(companion(page)).toBeVisible();
-    const recent = page.locator('.th-roomnav').getByRole('region', { name: 'Recent' });
-    const names = await recent.locator('button').allTextContents();
-    expect(new Set(names).size).toBe(names.length);
-    expect(names).not.toContain('Uni');
-  });
-
   test('r8: a decision whose title was cut short shows the full question from its note', async ({ page }) => {
     test.skip(!wide(page), 'side panel');
     await boot(page, { cutDecision: true });
-    await scope(page).locator('.th-go[aria-label^="Uni,"]').click();
+    await openRoom(page, 'Boulder'); // T-302 round 2: Uni's level is gone with #Uni; Boulder's holds these tasks
     await openCompanion(page);
     const item = page.locator('.cp-item').filter({ hasText: 'after-event' });
     // r18: in the companion a long "Your call" is cut on a whole word; its sheet has the whole question from the note
@@ -1086,7 +1064,7 @@ test.describe('simple', () => {
   test('r9/r18: a decision without options is "Your call", answered in words in its sheet through the CAS path; never buttons built from its wording', async ({ page }) => {
     test.skip(!wide(page), 'side panel');
     await boot(page, { cutDecision: true });
-    await scope(page).locator('.th-go[aria-label^="Uni,"]').click();
+    await openRoom(page, 'Boulder'); // T-302 round 2: Uni's level is gone with #Uni; Boulder's holds these tasks
     await openCompanion(page);
     const item = page.locator('.cp-item').filter({ hasText: 'after-event' });
     await expect(item.getByText('Your call')).toBeVisible();
@@ -1124,7 +1102,7 @@ test.describe('simple', () => {
   test('r9: an overdue task stays listed, first, with a quiet "was due" line', async ({ page }) => {
     test.skip(!wide(page), 'side panel');
     await boot(page, { pastDue: true });
-    await scope(page).locator('.th-go[aria-label^="Uni,"]').click();
+    await openRoom(page, 'Boulder'); // T-302 round 2: Uni's level is gone with #Uni; Boulder's holds these tasks
     await openCompanion(page);
     const first = page.locator('.cp-item').first();
     await expect(first).toContainText('COhere festival readiness');
@@ -1197,7 +1175,7 @@ test.describe('simple', () => {
   test('r10: a row clamps and a tap shows all of it in its sheet (r19: no in-place More anywhere)', async ({ page }) => {
     test.skip(!wide(page), 'side panel');
     await boot(page, { crowded: true });
-    await scope(page).locator('.th-go[aria-label^="Uni,"]').click();
+    await openRoom(page, 'Boulder'); // T-302 round 2: Uni's level is gone with #Uni; Boulder's holds these tasks
     await openWorkView(page); await narrowWork(page);
     await expect(page.locator('.sr-work .cp-row-more, .sr-work .cp-item .cp-more-next')).toHaveCount(0);
     // r30: the row is the whole step, both sentences of it; the sheet's heading says the same
@@ -1210,7 +1188,7 @@ test.describe('simple', () => {
   test('r10: a row says its state once: no "waiting, waiting on" in the opened item, no repeat of the row\'s label', async ({ page }) => {
     test.skip(!wide(page), 'side panel');
     await boot(page);
-    await scope(page).locator('.th-go[aria-label^="Uni,"]').click();
+    await openRoom(page, 'Boulder'); // T-302 round 2: Uni's level is gone with #Uni; Boulder's holds these tasks
     await openCompanion(page);
     const row = page.locator('.cp-item').filter({ hasText: 'COhere festival readiness' }).first();
     await row.locator('.cp-need').click();
@@ -1226,11 +1204,11 @@ test.describe('simple', () => {
     test.skip(!wide(page), 'sidebar column');
     await boot(page);
     const go = (n: string) => scope(page).locator(`.th-go[aria-label^="${n},"]`).first().click();
-    await go('Uni'); await go('Techne'); await go('Uni'); await go('Techne'); await go('Uni');
+    await go('Atlas'); await go('Techne'); await go('Atlas'); await go('Techne'); await go('Atlas'); // T-302: Uni's row is gone with #Uni
     const recent = page.locator('.th-roomnav').getByRole('region', { name: 'Recent' });
     const names = await recent.locator('button').allTextContents();
     expect(new Set(names).size).toBe(names.length);
-    expect(names).not.toContain('Uni');
+    expect(names).not.toContain('Atlas');
     const h = (await recent.boundingBox())!.height;
     await go('Techne');
     expect((await recent.boundingBox())!.height).toBe(h);
@@ -1239,7 +1217,7 @@ test.describe('simple', () => {
   test('r10: scrolled to the end, the sidebar\'s last row is whole and sits above Recent', async ({ page }) => {
     test.skip(!wide(page), 'sidebar column');
     await boot(page);
-    await openRoom(page, 'ATLAS'); await openRoom(page, 'Uni'); // Recent shows once there is somewhere to go back to
+    await openRoom(page, 'ATLAS'); await openRoom(page, 'Boulder'); // Recent shows once there is somewhere to go back to
     const wrap = page.locator('.th-column .th-rows-wrap');
     await wrap.evaluate((el) => { el.scrollTop = el.scrollHeight; });
     const last = page.locator('.th-column .th-row').last();
@@ -1285,7 +1263,7 @@ test.describe('simple', () => {
       localStorage.setItem(`uni.asks.v2:${w}|uni`, JSON.stringify([['dq9', { ask: 'Should Uni add the after-event prompt on Wednesday?', at: '2026-10-10T08:00:00.000Z' }]]));
     }, who);
     await boot(page, { cutDecision: true, queryDelay: 0 });
-    await scope(page).locator('.th-go[aria-label^="Uni,"]').click();
+    await openRoom(page, 'Boulder'); // T-302 round 2: Uni's level is gone with #Uni; Boulder's holds these tasks
     await openCompanion(page);
     const item = page.locator('.cp-item').filter({ hasText: 'after-event prompt' });
     // r18: no stored options: "Your call", no Yes/No from its question mark
@@ -1311,8 +1289,7 @@ test.describe('simple', () => {
     await expect(page.locator('.sr-title')).toHaveText('ATLAS');
     await expect(nav.locator('.th-go[aria-label^="ATLAS,"]')).toBeVisible();
     // leaving folds it again, and nothing was written to the device
-    await nav.locator('.th-go[aria-label^="Uni,"]').click();
-    await expect(page.locator('.sr-title')).toHaveText('Uni');
+    await openRoom(page, 'Boulder'); // T-302 round 2: Uni's level is gone with #Uni; Boulder's holds these tasks
     await expect(nav.locator('.th-go[aria-label^="ATLAS,"]')).toHaveCount(0);
     expect(await page.evaluate(() => JSON.parse(localStorage.getItem('uni.tree.folds.v1')!)['Areas/Atlas'])).toBe(false);
     // an area Aaron opens himself stays open after he leaves
@@ -1384,10 +1361,10 @@ test.describe('simple', () => {
     if (wide(page)) {
       await nav.locator('.th-others .th-fold').click();
       await expect(nav.locator('.th-other')).toHaveCount(0);
-      await nav.locator('.th-go[aria-label^="Uni,"]').click();
+      await openRoom(page, 'Boulder'); // T-302 round 2: Uni's level is gone with #Uni; Boulder's holds these tasks
       await nav.getByRole('region', { name: 'Recent' }).getByRole('button', { name: /garden-club/ }).click();
       await expect(nav.locator('.th-other.sel')).toBeVisible();
-      await nav.locator('.th-go[aria-label^="Uni,"]').click();
+      await openRoom(page, 'Boulder'); // T-302 round 2: Uni's level is gone with #Uni; Boulder's holds these tasks
       await expect(nav.locator('.th-other')).toHaveCount(0);
     }
     expect(await fits(page)).toBe(true);
@@ -1539,18 +1516,6 @@ test.describe('simple', () => {
     }
   });
 
-  test('r12: Uni\'s own panel is Uni\'s items plus at most three from the areas: never a "+25 more"', async ({ page }) => {
-    await boot(page, { crowded: true });
-    await showTree(page); // T-302: on a phone the tree is in a room's Places drawer
-    await scope(page).locator('.th-go[aria-label^="Uni,"]').click();
-    await openCompanion(page);
-    await expect(page.locator('.cp-item').first()).toBeVisible();
-    // r17: at most three rows; what doesn't fit, and everything else, is one "N more ›" to the work view, never "+N in areas"
-    expect(await page.locator('.cp-body .cp-item').count()).toBeLessThanOrEqual(3);
-    await expect(page.locator('.cp-body .cp-more-rows:not(.cp-more-all), .cp-body .cp-more-areas')).toHaveCount(0);
-    await expect(page.getByRole('button', { name: /^All of Uni's work/ })).toBeVisible();
-  });
-
   test('r12: "Uni listening" is a small visible switch in the composer; muted, a message does not notify Uni', async ({ page }) => {
     await boot(page, { uniMember: true });
     await openRoom(page, 'ATLAS');
@@ -1576,7 +1541,7 @@ test.describe('simple', () => {
     await nav.locator('.th-row:has(.th-go[aria-label^="Techne,"]) ~ .th-row .th-go[aria-label^="Workshop,"]').first().click();
     await expect(page.locator('.sr')).toHaveAttribute('data-node', 'Workshop');
     await nav.locator('.th-row:has(.th-go[aria-label^="Atlas,"]) ~ .th-row .th-go[aria-label^="Workshop,"]').first().click();
-    await nav.locator('.th-go[aria-label^="Uni,"]').click();
+    await openRoom(page, 'Boulder'); // T-302 round 2: Uni's level is gone with #Uni; Boulder's holds these tasks
     const recent = nav.getByRole('region', { name: 'Recent' }).getByRole('button');
     await expect(recent.filter({ hasText: /^Workshop/ })).toHaveText(['Workshop · Atlas', 'Workshop · Techne']);
   });
@@ -1645,42 +1610,6 @@ test.describe('simple', () => {
     await expect(taskDialog(page)).toHaveCount(0);
     await expect(page.locator('.note-sheet')).toBeVisible();
     expect(await calls(page, 'vault_decide')).toHaveLength(0);
-  });
-
-  test('r13: one count: the companion (with "+N in areas" and private items), the dots and the work view say the same number; Someday is apart', async ({ page }) => {
-    test.skip(!wide(page), 'the dots are read from the sidebar');
-    await boot(page, { privateTasks: true, cutDecision: true });
-    for (const [name, top] of [['Uni', null], ['Techne', 'Areas/Techne'], ['COhere 2026', 'Projects/COhere/COhere 2026']] as const) {
-      await openRoom(page, name);
-      await openCompanion(page);
-      await expect(page.locator('.cp-body')).not.toContainText(/counted but not named/);
-      const panel = await panelCount(page);
-      const dots = await dotSum(page, top);
-      await page.getByRole('button', { name: /^All of .*'s work/ }).click();
-      const work = Number(await page.locator('.sr-work section[aria-label="Needs you"] .wv-n').innerText());
-      expect({ name, panel, dots }).toEqual({ name, panel: work, dots: work });
-      // the work view keeps Someday apart, folded, and never in that number
-      const later = page.locator('.sr-work section[aria-label="Later"]');
-      if (await later.count()) { await expect(later.locator('.wv-fold')).toHaveAttribute('aria-expanded', 'false'); await expect(page.locator('section[aria-label="Needs you"]')).not.toContainText(/Send the Q4 invoice|Find a teacher/); }
-      await page.getByRole('button', { name: 'Back to chat' }).click();
-    }
-    // r14/r17: from Uni's work view a private area is one line, "Sanctum: N for you" (r21: no "›"), opening that area (the panel folds it into "N more"); inside it, its items are ordinary rows
-    await openRoom(page, 'Uni');
-    await openCompanion(page);
-    await expect(page.locator('.cp-body .cp-privates')).toHaveCount(0);
-    await page.getByRole('button', { name: /^All of .*'s work/ }).click();
-    const priv = page.locator('.sr-work .cp-private');
-    await expect(priv).toHaveText('In Sanctum: 1 thing for you · open Sanctum');
-    await expect(page.locator('.sr-work')).not.toContainText(/Sit twenty minutes|Before breakfast|A private item/);
-    await priv.click();
-    await expect(page.locator('.sr-title')).toHaveText('Sanctum');
-    await openCompanion(page);
-    await expect(page.locator('.cp-privates')).toHaveCount(0);
-    const row = page.locator('.cp-body .cp-item').filter({ hasText: 'Sit twenty minutes' });
-    await expect(row).toHaveCount(1);
-    await row.locator('.cp-need').first().click();
-    await expect(taskDialog(page)).toContainText('Sit twenty minutes');
-    await expect(taskDialog(page).getByRole('button', { name: 'I did this' })).toBeVisible();
   });
 
   test('r13: the work view is inside the room shell: same header and crumbs, "‹ Back to chat", the companion\'s rows, no counters or priority pickers', async ({ page }) => {
@@ -1964,33 +1893,6 @@ test.describe('r14', () => {
     await expect.poll(async () => (await calls(page, 'vault_decide')).length).toBe(2);
     expect((await calls(page, 'vault_decide'))[1].ifUpdatedAt).toBe(rev);
     expect((await calls(page, 'vault_decide'))[1].metadata.decided).toBe('No, keep it');
-  });
-
-  test('private areas: from above, counted (r17: in Uni\'s "N more", and one line in its work view); inside the area, real rows with their actions and the sheet', async ({ page }) => {
-    await boot(page, { privateTasks: true });
-    await openRoom(page, 'Uni');
-    await openCompanion(page);
-    await expect(page.locator('.cp-body .cp-privates')).toHaveCount(0);
-    await expect(page.locator('.cp-body')).not.toContainText(/Sit twenty minutes|Before breakfast|A private item/);
-    await page.getByRole('button', { name: /^All of .*'s work/ }).click();
-    await expect(page.locator('.sr-work .cp-private')).toHaveText('In Sanctum: 1 thing for you · open Sanctum');
-    await expect(page.locator('.sr-work')).not.toContainText(/Sit twenty minutes|Find a teacher|A private item/);
-    await expect(page.locator('.sr-work .cp-privates, .sr-work .cp-private')).toHaveCount(1);
-    await page.locator('.sr-work .cp-private').click();
-    await expect(page.locator('.sr-title')).toHaveText('Sanctum');
-    await openCompanion(page);
-    await expect(page.locator('.cp-body .cp-private')).toHaveCount(0);
-    const row = page.locator('.cp-body .cp-item').filter({ hasText: 'Sit twenty minutes' });
-    await expect(row).toContainText('Before breakfast');
-    await row.locator('.cp-need, .cp-lead').first().click();
-    const sheet = taskDialog(page);
-    await expect(sheet).toContainText('Sit twenty minutes');
-    await expect(sheet.getByRole('button', { name: 'I did this' })).toBeVisible();
-    await sheet.getByRole('button', { name: 'Close' }).click();
-    // its Someday item is in Later, inside the area, by name
-    await page.getByRole('button', { name: /^All of .*'s work/ }).click();
-    await page.locator('.sr-work .wv-fold').click();
-    await expect(page.locator('.sr-work')).toContainText('Find a teacher');
   });
 
   test('chat: a cited note reads as its title (or "a note"), a table renders, and task-state markers are not shown', async ({ page }) => {
@@ -2569,32 +2471,6 @@ test.describe('r17', () => {
     await expect(sheet.getByRole('button')).toHaveText(['Self-host', 'Managed']);
   });
 
-  test('Uni\'s panel is lighter: at most three rows, then one "N more ›" to the work view (private items folded in, said in its tooltip); the work view keeps the full list', async ({ page }) => {
-    await boot(page, { crowded: true, privateTasks: true });
-    await openRoom(page, 'Uni');
-    await openCompanion(page);
-    const body = page.locator('.cp-body').last();
-    const needs = body.locator('section[aria-label="Needs you"]');
-    const shown = await needs.locator('.cp-list > .cp-item').count();
-    expect(shown).toBeGreaterThanOrEqual(1);
-    expect(shown).toBeLessThanOrEqual(3);
-    await expect(needs.locator('.cp-privates, .cp-private')).toHaveCount(0);
-    await expect(needs).not.toContainText(/Sanctum: \d+ for you|in areas/);
-    const more = needs.locator('.cp-more');
-    await expect(more).toHaveCount(1);
-    // r21: "Show N more", no "›"
-    await expect(more).toHaveText(/^Show \d+ more$/);
-    await expect(more).toHaveAttribute('title', 'Includes 1 item in a private area');
-    const n = Number((await more.innerText()).match(/\d+/)![0]);
-    await more.click();
-    const wv = page.locator('.sr-work section[aria-label="Needs you"]');
-    await expect(wv).toBeVisible();
-    const total = Number(await wv.locator('.wv-n').innerText());
-    expect(shown + n).toBe(total);
-    expect(await wv.locator('.cp-item').count()).toBe(total); // every named row, and one line for the private area's one item
-    await expect(wv.locator('.cp-private')).toHaveText('In Sanctum: 1 thing for you · open Sanctum');
-  });
-
   test('a short window\'s strip sheet keeps "All of …\'s work" in sight however long the list, and closing it gives focus back to the strip', async ({ page }) => {
     for (const [w, h] of [[800, 600], [740, 360]] as const) {
       await page.setViewportSize({ width: w, height: h });
@@ -2789,26 +2665,6 @@ test.describe('r18', () => {
     const reads = (await calls(page, 'vault_note')).filter((a: any) => a.noteRef === '01M3ZYXCP9QEM2GS0E5THMXXX9');
     expect(reads.length).toBeGreaterThan(0);
     expect(reads.every((a: any) => a.vault === 'parachute')).toBe(true);
-  });
-
-  test('Uni\'s companion: exactly three rows and one "N more ›", no per-row More; small print one line; a row opens its sheet', async ({ page }) => {
-    await boot(page, { crowded: true, privateTasks: true, longNext: true });
-    await openRoom(page, 'Uni');
-    await openCompanion(page);
-    const needs = page.locator('.cp-body').last().locator('section[aria-label="Needs you"]');
-    // the side panel shows at most three (r30: a row is its whole step, so a short panel keeps two whole rows); the phone's inline strip keeps the rows that fit beside the conversation (r16), the rest in "N more"
-    if (wide(page)) { const n = await needs.locator('.cp-list > .cp-item').count(); expect(n).toBeGreaterThanOrEqual(2); expect(n).toBeLessThanOrEqual(3); }
-    else expect(await needs.locator('.cp-list > .cp-item').count()).toBeLessThanOrEqual(3);
-    await expect(needs.locator('.cp-more')).toHaveCount(1);
-    await expect(needs.locator('.cp-more')).toHaveText(/^Show \d+ more$/);
-    await expect(needs.locator('.cp-row-more, .cp-item .cp-more-next')).toHaveCount(0);
-    for (const u of await needs.locator('.cp-under, .cp-meta').all()) {
-      const lines = await u.evaluate((e) => Math.round(e.getBoundingClientRect().height / (parseFloat(getComputedStyle(e).lineHeight) || 16)));
-      // r22: when it was asked is on every row; rather than push out where the row belongs, the date part may take a second line
-      expect(lines).toBeLessThanOrEqual(2);
-    }
-    await needs.locator('.cp-list > .cp-item').first().locator('.cp-need').first().click();
-    await expect(sheetOf(page)).toBeVisible();
   });
 
   test('r18, r29: the summary carries its date and room: "Last written Oct 13 by #room:" in the companion and the work view, below Needs you; the heading adds no second date', async ({ page }) => {
@@ -3536,19 +3392,6 @@ test.describe('r21', () => {
     expect(logged.join('\n')).toMatch(/Mail: approve a test week, not an immediate cutover/);
   });
 
-  test('no "›" on any row or link row: rows, "Sanctum: 1 for you", "Show N more"', async ({ page }) => {
-    await boot(page, { crowded: true, privateTasks: true });
-    await openRoom(page, 'Uni');
-    await openCompanion(page);
-    const body = page.locator('.cp-body').last();
-    await expect(body.locator('.cp-more')).toHaveText(/^Show \d+ more$/);
-    for (const el of await body.locator('.cp-item, .cp-more').all()) expect(await el.innerText()).not.toContain('›');
-    await body.locator('.cp-more').click();
-    const wv = page.locator('.sr-work');
-    await expect(wv.locator('.cp-private')).toHaveText('In Sanctum: 1 thing for you · open Sanctum');
-    for (const el of await wv.locator('.cp-item, .cp-more').all()) expect(await el.innerText()).not.toContain('›');
-  });
-
   test('one target per visible request (Codex 10): every row is one keyboard-focusable button that opens its sheet, with nothing clickable inside it', async ({ page }) => {
     await boot(page, { crowded: true, ulidNext: true, longNext: true });
     await seed(page, 'Areas/Techne');
@@ -3836,27 +3679,6 @@ test.describe('r22', () => {
     expect(await calls(page, 'vault_transition')).toHaveLength(0);
   });
 
-  test('private areas show the action, not the content: "In Sanctum: …" for a short work imperative, else "In Sanctum: 1 thing for you · open Sanctum"; never the item\'s other words', async ({ page }) => {
-    await page.addInitScript(() => {
-      const w = window as any;
-      w.__sawPrivate = false;
-      new MutationObserver(() => { if (/Placeholder memory|placeholder week/.test(document.body?.innerText ?? '')) w.__sawPrivate = true; }).observe(document, { subtree: true, childList: true, characterData: true });
-    });
-    await boot(page, { privateTasks: true });
-    await add(page, { id: 'pa', title: 'T-301 Placeholder memory note', node: 'Areas/Sanctum', meta: { priority: 'now', next: 'Book the placeholder appointment' } });
-    await add(page, { id: 'pb', title: 'T-302 Placeholder memory of the week', node: 'Areas/Sanctum', meta: { priority: 'now', next: 'Placeholder feeling about the placeholder week' } });
-    await refresh(page, '2026-10-14T09:00:00.000Z');
-    await openRoom(page, 'Uni');
-    await openWork(page);
-    const priv = page.locator('.sr-work .cp-private-item');
-    await expect(priv).toHaveText(['In Sanctum: Book the placeholder appointment', 'In Sanctum: 1 more thing for you · open Sanctum']); // r28: an unconfirmed ask in a private area is not named outside it at all (the fixture's own is 8 days old at this clock)
-    await expect(page.locator('.sr-work')).not.toContainText(/Sit twenty minutes|Before breakfast|Placeholder memory|placeholder week/);
-    expect(await page.evaluate(() => (window as any).__sawPrivate)).toBe(false);
-    await page.screenshot({ path: `${SHOTS}/r22-private-${page.viewportSize()?.width}.png` }).catch(() => {});
-    // each opens the area, where its items are ordinary rows with their sheets
-    await priv.first().locator('button').click();
-    await expect(page.locator('.sr-title')).toHaveText('Sanctum');
-  });
 });
 
 test.describe('r23', () => {

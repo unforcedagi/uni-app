@@ -124,7 +124,7 @@ test.describe('r31 one date and one count', () => {
     await expect(page.locator('.cp-body li.cp-item').filter({ hasText: 'placeholder number two' }).locator('.cp-asked-line, .cp-sub-when').first()).toContainText('asked');
   });
 
-  test('2: the same list says the same count in Uni\'s panel and COhere\'s, at every width; "Show N more" is the count minus the rows shown', async ({ page }) => {
+  test('2: the same list says the same count in Techne\'s panel and its work view, at every width; "Show N more" is the count minus the rows shown', async ({ page }) => {
     test.skip(!wide(page), 'side panel');
     await page.setViewportSize({ width: 1280, height: 720 });
     await boot(page);
@@ -139,8 +139,7 @@ test.describe('r31 one date and one count', () => {
     await page.setViewportSize({ width: 1280, height: 520 });
     await refresh(page);
     await expect.poll(async () => { const t = page.locator('.cp-body li.cp-item').filter({ hasText: 'morning-practice' }); return (await t.count()) ? await t.locator('.cp-item-more').first().innerText().catch(() => '') : 'none'; }).toMatch(/^(10 \w+ in all|none)$/);
-    await page.locator('.th-go[aria-label^="Uni,"]').first().click();
-    await expect(page.locator('.sr')).toHaveAttribute('data-node', 'Uni');
+    // T-302 round 2: Uni's own panel is gone with #Uni; Techne's own panel says the same count the same way
     const side = page.locator('.cp.side .cp-body section[aria-label="Needs you"]');
     await expect(side.locator('.cp-more')).toHaveCount(1);
     const shown = await side.locator('.cp-list > li.cp-item').count() + await side.locator('.cp-waiting > li').count();
@@ -164,14 +163,14 @@ test.describe('r31 a waiting run opens its room by channel id', () => {
       w.__addRun('wc2', 'Areas/Techne', '', 'Waiting on your answer in #Gone: Say go on the vanished one?', 'decision', { room: 'techne', channel: 'ch-does-not-exist' });
     }, ref);
     await refresh(page);
-    await page.locator('.th-go[aria-label^="Uni,"]').first().click();
+    await openRoom(page, 'Techne'); // T-302 round 2: the runs' own area (Uni's level is gone with #Uni)
     await openWork(page);
     const runs = section(page, 'Needs you').locator('.cp-waiting > li');
     await expect(runs).toHaveCount(2);
     const gone = runs.filter({ hasText: 'vanished one' });
     await expect(gone.locator('small').last()).toHaveText('Room not found');
     await gone.getByRole('button').click();
-    await expect(page.locator('.sr')).toHaveAttribute('data-node', 'Uni');
+    await expect(page.locator('.sr')).toHaveAttribute('data-node', 'Techne');
     await expect(page.locator('.sr-work')).toBeVisible();
     // the one with a good channel id opens that room at its message, whatever its room name says
     const ok = runs.filter({ hasText: 'placeholder 0.1.47' });

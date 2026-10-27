@@ -718,13 +718,12 @@ export async function leaveFrontDoor(page: Page) {
   await page.locator('[data-place="front-door"], .sr, .th-phone-tree').first().waitFor();
   if (await frontDoor(page).isVisible()) { await page.locator('.fd-door').first().click(); await expect(page.locator('.sr').first()).toBeVisible(); }
 }
-/** T-302: where the old home put a test, reached the way a person now does: on a window with the tree beside the room, Uni's own level
- *  (the tree's Uni row); elsewhere, a room (its Places drawer holds the tree, opened by the test's own helpers). */
+/** T-302: where the old home put a test, reached the way a person now does: a room (the first door), with the room tree beside it on a wide
+ *  window and in its Places drawer otherwise. (Round 2: Uni's own level is gone with #Uni.) */
 export async function toOldHome(page: Page) {
   // a page that isn't on the front door (no chat, no areas, not signed in) is already where the old home put it
   if (!(await frontDoor(page).waitFor({ timeout: 3000 }).then(() => true, () => false))) return;
   await leaveFrontDoor(page);
-  if (isWide(page)) { await page.locator('.th-roomnav .th-go[aria-label^="Uni, room"]').first().click(); await expect(page.locator('.sr').first()).toHaveAttribute('data-node', 'Uni'); }
 }
 /** Shows the room tree: from the front door through the first room, and on a phone the Places drawer. */
 export async function showTree(page: Page) {

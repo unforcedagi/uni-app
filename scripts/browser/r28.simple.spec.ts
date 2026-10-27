@@ -159,7 +159,7 @@ test.describe('r28', () => {
     for (let i = 0; i < 6; i++) await add(page, { id: `m${i}`, title: `T-64${i} Placeholder many ${i}`, node: i % 2 ? 'Areas/Techne' : 'Projects/ATLAS', meta: { next: `Say go on many number ${i} of the placeholder rows` } });
     await page.evaluate(() => (window as any).__addRun('rm1', 'Areas/Techne', '', 'Waiting on your answer in #Uni: Pick the placeholder color?', 'decision'));
     await refresh(page);
-    await openRoom(page, 'Uni').catch(async () => { await page.locator('.th-go[aria-label^="Uni,"]').first().click(); });
+    await openRoom(page, 'Boulder'); // T-302 round 2: Uni's level is gone with #Uni
     const side = page.locator('.cp.side .cp-body');
     await expect(side.locator('section[aria-label="Needs you"] .cp-item').first()).toBeVisible();
     await openWork(page);
@@ -212,7 +212,7 @@ test.describe('r28', () => {
     // Uni's own summary, with an ask written on Uni after it
     await add(page, { id: 'u2', title: 'T-682 Placeholder on Uni', node: 'Uni', asked_at: '2026-10-14T08:30:00.000Z', meta: { next: 'Say go on uni itself' } });
     await refresh(page, '2026-10-14T09:15:00.000Z');
-    await page.locator('.th-go[aria-label^="Uni,"]').first().click();
+    await openRoom(page, 'Boulder'); // T-302 round 2: Uni's level is gone with #Uni; Boulder's holds these tasks
     await expect(page.locator('.cp.side .cp-asof')).toHaveText(/^Last written (Oct \d+ )?by #Uni:$/);
     await expect(page.locator('.cp-stale, [data-stale], [data-stale-why]')).toHaveCount(0);
   });
@@ -226,7 +226,7 @@ test.describe('r28', () => {
     await expect.poll(async () => (await logged())[0] ?? '').toMatch(/^recheck: (T-\d+ ?)+$|^recheck: none$/);
     await openRoom(page, 'Techne');
     await refresh(page, '2026-10-14T09:10:00.000Z');
-    await openRoom(page, 'Uni').catch(() => {});
+    await openRoom(page, 'Boulder').catch(() => {});
     expect((await logged()).length, 'once per launch, not once per list read').toBe(1);
     expect((await logged())[0]).toMatch(/^recheck: /);
   });

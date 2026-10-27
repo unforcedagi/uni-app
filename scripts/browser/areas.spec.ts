@@ -94,11 +94,34 @@ test.describe('seed apps and navigation', () => {
     await page.reload();
     // 0.1.46: launch reopens the place you were in.
     await expect(page.locator('.sr')).toHaveAttribute('data-node', 'Sanctum'); // r15: a borrowed room's heading is the room
-    // r13: below 900px the room's header opens the drawer, whose tree holds Uni
-    if (await page.locator('.sr-drawer').count()) await page.locator('.sr-drawer').click();
-    await card(page, 'Uni').click();
+    // T-302 round 2: the tree has no Uni row (#Uni is archived); the rail's Uni is the way to the front door
+    if (await page.locator('.sr-drawer').count()) { await page.locator('.sr-drawer').click(); await expect(page.locator('.th-drawer .th-go[aria-label^="Uni,"]')).toHaveCount(0); await page.keyboard.press('Escape'); }
+    else await expect(page.locator('.th-roomnav .th-go[aria-label^="Uni,"]')).toHaveCount(0);
+    await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Uni', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Uni', level: 1 })).toBeVisible();
+    await expect(page.locator('[data-place="front-door"]')).toBeVisible();
   });
+});
+
+test('T-302 round 2: what needs you, across the areas, is one line on the front door; a private area is a count there, its words stay inside', async ({ page }) => {
+  await bootAreas(page, 'seed', { tree: true, tasks: true, briefs: true, privateTasks: true, pinned: true });
+  const needs = page.getByRole('region', { name: 'Needs you' });
+  const line = needs.getByRole('button', { name: /^Needs you · \d+/ });
+  await expect(line).toBeVisible();
+  await expect(page.locator('[data-place="front-door"]')).not.toContainText(/Sit twenty|Find a teacher|T-3[12]/);
+  await line.click();
+  await expect(needs.getByRole('button', { name: /^In Sanctum: \d+ things? for you$/ })).toBeVisible();
+  await expect(needs).not.toContainText(/Sit twenty|Find a teacher|T-\d+/);
+  // an item names where it sits and opens there
+  const row = needs.getByRole('button').filter({ hasText: 'COhere festival readiness' });
+  await expect(row).toContainText('COhere 2026');
+  await row.click();
+  await expect(page.locator('.sr').first()).toHaveAttribute('data-node', 'COhere 2026');
+  // inside the private area its items are its own rows, with their words
+  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Uni', exact: true }).click();
+  await page.getByRole('region', { name: 'Needs you' }).getByRole('button', { name: /^Needs you/ }).click();
+  await page.getByRole('region', { name: 'Needs you' }).getByRole('button', { name: /^In Sanctum/ }).click();
+  await expect(page.locator('.sr').first()).toHaveAttribute('data-node', 'Sanctum');
 });
 
 test.describe('dark theme', () => {
