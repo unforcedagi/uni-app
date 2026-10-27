@@ -81,6 +81,8 @@ const CRYPTO_DB: &str = "matrix-sdk-crypto.sqlite3";
 /// may take. The limit holds while the bytes arrive (download.rs).
 pub const MAX_MEDIA: u64 = 100 * 1024 * 1024;
 pub(crate) const MEDIA_FOR: Duration = Duration::from_secs(120);
+/// How long quitting waits for an attachment copy being written to remove itself.
+const QUIT_WAIT: Duration = Duration::from_secs(2);
 /// The largest voice message sent to be transcribed (the transcription service's own limit).
 pub const MAX_TRANSCRIBE: usize = 25 * 1024 * 1024;
 /// How long a transcription may take: the service runs near real time on a CPU.
@@ -284,7 +286,7 @@ pub struct Messages {
     /// The largest attachment fetched (`MAX_MEDIA` unless lowered).
     media_max: std::sync::atomic::AtomicU64,
     /// Decrypted copies written for the system's viewer, by account; they go when it does (copies.rs).
-    copies: StdMutex<copies::Copies>,
+    copies: Arc<StdMutex<copies::Copies>>,
 }
 
 impl Messages {
@@ -308,7 +310,7 @@ impl Messages {
             transcribing: StdMutex::new(HashMap::new()),
             transcribe_turns: Arc::new(tokio::sync::Semaphore::new(TRANSCRIBING)),
             media_max: std::sync::atomic::AtomicU64::new(MAX_MEDIA),
-            copies: StdMutex::new(Default::default()),
+            copies: Arc::new(StdMutex::new(Default::default())),
         })
     }
 
@@ -914,32 +916,27 @@ impl Messages {
     pub async fn write_copy(self: &Arc<Self>, room_id: &str, event_id: &str, file: &Path) -> Result<String> {
         let (client, account, _, source, media) = self.media_message(room_id, event_id).await?;
         let bytes = self.bytes_of(&client, source, &media, self.media_limit()).await?;
-        self.copies.lock().unwrap().add(&account, file);
-        let written = {
-            let file = file.to_owned();
-            tokio::task::spawn_blocking(move || {
-                if let Some(dir) = file.parent() {
-                    std::fs::create_dir_all(dir)?;
-                }
-                std::fs::write(&file, &bytes)
-            })
-            .await
-        };
-        if let Err(e) = written.map_err(|e| e.to_string()).and_then(|w| w.map_err(|e| e.to_string())) {
-            self.copies.lock().unwrap().remove(file);
-            return Err(server(format!("couldn't write the file to open: {e}")));
+        let ticket = self.copies.lock().unwrap().add(&account, file).ok_or_else(|| MessagesError::Server { message: "The app is closing.".into() })?;
+        match copies::write_copy(self.copies.clone(), ticket, file.to_owned(), bytes, || {}).await {
+            Ok(true) => {}
+            // ended while it was written (signed out, replaced, or the app quitting): its writer removed it
+            Ok(false) => return Err(signed_out()),
+            Err(e) => return Err(server(format!("couldn't write the file to open: {e}"))),
         }
         let now = self.live.lock().await.as_ref().map(|l| l.store.clone());
-        if !self.copies.lock().unwrap().settle(file, &account, now.as_deref()) {
+        if !self.copies.lock().unwrap().settle(ticket, file, &account, now.as_deref()) {
             return Err(signed_out());
         }
         Ok(media.mime)
     }
 
-    /// T-313: the app is quitting: every copy goes now (a quit without this, as Android may kill the app, leaves them to
-    /// the app's next start, which removes them).
+    /// T-313: the app is quitting: every copy goes now, none is written from here on, and a write under way is waited for
+    /// (up to `QUIT_WAIT`) while it removes what it wrote (copies.rs). A quit without this, as Android may kill the app,
+    /// leaves them to the app's next start, which removes them.
     pub fn drop_copies(&self) {
-        self.copies.lock().unwrap().sweep(None);
+        if !copies::close_and_wait(&self.copies, QUIT_WAIT) {
+            tracing::warn!("a copy was still being written as the app quit; the next start removes it");
+        }
     }
 
     /// T-313: done with a copy `write_copy` made: removed now.
