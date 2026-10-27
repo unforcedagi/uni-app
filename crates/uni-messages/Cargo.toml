@@ -11,11 +11,15 @@ publish = false
 
 [features]
 # The dev-only HTTP bridge (src/bin/uni-messages-dev.rs) that lets a plain browser and Playwright drive this crate.
-dev-bridge = ["dep:axum", "dep:clap", "dep:rustls", "dep:tracing-subscriber", "tokio/rt-multi-thread", "tokio/signal"]
+# T-313: `--transcribe-hub` transcribes voice messages as the app does (uni-core's client for uni-transcribe);
+# `--transcribe-url` sends them to a stand-in on this machine.
+dev-bridge = ["dep:axum", "dep:clap", "dep:rustls", "dep:tracing-subscriber", "dep:uni-core", "dep:nostr", "dep:reqwest", "tokio/rt-multi-thread", "tokio/signal"]
 
 [dependencies]
 matrix-sdk = { version = "=0.18.0", default-features = false, features = ["e2e-encryption", "sqlite", "automatic-room-key-forwarding"] }
 matrix-sdk-ui = { version = "=0.18.0", default-features = false }
+# T-313: the media store and the attachment decryptor, for a download that keeps its size limit (download.rs)
+matrix-sdk-base = { version = "=0.18.0", default-features = false, features = ["e2e-encryption"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
@@ -30,6 +34,9 @@ axum = { version = "0.8", optional = true, default-features = false, features = 
 clap = { workspace = true, optional = true }
 tracing-subscriber = { workspace = true, optional = true }
 rustls = { workspace = true, optional = true }
+uni-core = { path = "../uni-core", optional = true }
+nostr = { workspace = true, optional = true }
+reqwest = { version = "0.13", optional = true, default-features = false, features = ["rustls-no-provider"] }
 
 [dev-dependencies]
 tempfile = "3"

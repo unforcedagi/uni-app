@@ -122,13 +122,18 @@ pub fn bootstrap_token(dir: &Path) -> Option<String> {
 
 /// A fresh homeserver in `dir`, answering, named `server_name`.
 pub async fn start(bin: PathBuf, dir: &Path, server_name: &str) -> Homeserver {
+    start_with(bin, dir, server_name, "").await
+}
+
+/// As `start`, with more `[global]` settings (lines of TOML).
+pub async fn start_with(bin: PathBuf, dir: &Path, server_name: &str, extra: &str) -> Homeserver {
     let port = free_port();
     std::fs::write(
         dir.join("hs.toml"),
         format!(
             "[global]\nserver_name = \"{server_name}\"\naddress = [\"127.0.0.1\"]\nport = {port}\ndatabase_path = \"{}\"\n\
              allow_federation = false\nallow_registration = true\nregistration_token = \"{REGISTRATION_TOKEN}\"\n\
-             allow_announcements_check = false\ntrusted_servers = []\nlog = \"info\"\n",
+             allow_announcements_check = false\ntrusted_servers = []\nlog = \"info\"\n{extra}",
             dir.join("db").display()
         ),
     )
@@ -171,4 +176,22 @@ pub async fn register(hs: &Homeserver, user: &str, first: bool) -> String {
 /// A room id, escaped for a URL path.
 pub fn esc(id: &str) -> String {
     id.replace('!', "%21").replace(':', "%3A").replace('@', "%40")
+}
+
+/// Upload `bytes` as `mime` with `token`: its `mxc://` address.
+pub async fn upload(port: u16, token: &str, bytes: &[u8], mime: &str) -> String {
+    let mut s = tokio::net::TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+    let head = format!(
+        "POST /_matrix/media/v3/upload HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\nContent-Type: {mime}\r\nAuthorization: Bearer {token}\r\nContent-Length: {}\r\n\r\n",
+        bytes.len()
+    );
+    s.write_all(head.as_bytes()).await.unwrap();
+    s.write_all(bytes).await.unwrap();
+    let mut out = Vec::new();
+    s.read_to_end(&mut out).await.unwrap();
+    let text = String::from_utf8_lossy(&out);
+    let (head, rest) = text.split_once("\r\n\r\n").unwrap();
+    let rest = if head.to_ascii_lowercase().contains("transfer-encoding: chunked") { dechunk(rest) } else { rest.to_owned() };
+    let v: Value = serde_json::from_str(&rest).unwrap_or(Value::Null);
+    v["content_uri"].as_str().unwrap_or_else(|| panic!("upload: {head} {rest}")).to_owned()
 }

@@ -7600,9 +7600,12 @@ dependencies = [
  "clap",
  "futures-util",
  "matrix-sdk",
+ "matrix-sdk-base",
  "matrix-sdk-ui",
+ "nostr",
  "qrcode",
  "rand 0.9.5",
+ "reqwest",
  "rustls",
  "serde",
  "serde_json",
@@ -7611,6 +7614,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "uni-core",
  "url",
 ]
 

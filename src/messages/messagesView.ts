@@ -5,7 +5,15 @@ export type Status = { state: "signed_out" | "connecting" | "live" | "offline" |
 export type RoomRow = { id: string; name: string; preview: string | null; preview_own: boolean; ts: number | null; unread: number; encrypted: boolean; invited: boolean; inviter: string | null; direct: boolean; network?: string };
 export type MessageKind = "text" | "notice" | "emote" | "media" | "undecryptable";
 export type SendState = "remote" | "sending" | "sent" | "failed";
-export type MessageRow = { key: string; event_id: string | null; sender: string; sender_name: string; own: boolean; ts: number; kind: MessageKind; body: string; state: SendState; encrypted: boolean; edited: boolean };
+/** T-313: what a media message carries (the bytes come from `messages_media`, by its event). `mime` is the type the core lets
+ * the webview give the bytes: an SVG or anything unknown comes as `application/octet-stream`, shown as a file. */
+export type MediaKind = "image" | "video" | "audio" | "voice" | "file";
+export type Media = { kind: MediaKind; name: string; mime: string; size: number | null; duration_ms: number | null; width: number | null; height: number | null; caption: string | null };
+export type Reply = { event_id: string; sender_name: string | null; text: string | null; unavailable?: boolean };
+export type Reaction = { key: string; count: number; own: boolean };
+export type Transcript = { text: string };
+export type MessageRow = { key: string; event_id: string | null; sender: string; sender_name: string; own: boolean; ts: number; kind: MessageKind; body: string; state: SendState; encrypted: boolean; edited: boolean;
+  media?: Media | null; reply?: Reply | null; reactions?: Reaction[] };
 export type Update = { kind: "status"; status: Status } | { kind: "rooms"; rooms: RoomRow[] } | { kind: "timeline"; room_id: string; items: MessageRow[] } | { kind: "link"; link: LinkRow };
 export type MessagesErr = { kind: "signed_out" | "unreachable" | "refused" | "invalid" | "server"; message: string };
 
@@ -271,4 +279,134 @@ export function qrPath(modules: string[]): { size: number; d: string } {
     }
   });
   return { size: n + 8, d };
+}
+
+// ── T-313: what a message shows besides its words ──────────────────────────────────────────────────────────────────
+
+export type TextPart = { t: "text"; v: string } | { t: "link"; v: string; href: string };
+
+/** Longest link made from a message's text, after its `https://` or `www.`; past it the rest is words. */
+export const LINK_MAX = 2048;
+/** A link's start: `http://`, `https://` or `www.` at the start of a word, then what a URL can hold. One pass, each start tried
+ * once in O(1) and each match bounded by LINK_MAX, so a long message is linear (no backtracking regex, no rescan per start). */
+const LINK_RE = new RegExp(`\\b(?:https?://|www\\.)[^\\s<>"'\`\\u0000-\\u001f\\u007f]{1,${LINK_MAX}}`, "giu");
+const TRAILING = new Set([".", ",", ";", ":", "!", "?", "*", "_", "~", "'", '"', "…", "”", "’", "»"]);
+
+/** Where a found link ends: trailing punctuation belongs to the sentence, and a closing bracket only if the link opened one.
+ * One backward pass, with the brackets counted once first. */
+function trimLink(raw: string): string {
+  let open = 0, close = 0, sqOpen = 0, sqClose = 0;
+  for (const c of raw) { if (c === "(") open++; else if (c === ")") close++; else if (c === "[") sqOpen++; else if (c === "]") sqClose++; }
+  let end = raw.length;
+  while (end > 0) {
+    const c = raw[end - 1];
+    if (TRAILING.has(c)) { end--; continue; }
+    if (c === ")" && close > open) { close--; end--; continue; }
+    if (c === "]" && sqClose > sqOpen) { sqClose--; end--; continue; }
+    break;
+  }
+  return raw.slice(0, end);
+}
+
+/** The link a found address opens: http(s) only, with a host, else none. `www.` is taken as https. */
+export function linkHref(found: string): string | null {
+  const www = /^www\./i.test(found);
+  // "www." needs a name and an ending after it: www.example.com
+  if (www && !/^www\.[^./?#]+\.[^./?#]/i.test(found)) return null;
+  const url = www ? `https://${found}` : found;
+  try {
+    const u = new URL(url);
+    if ((u.protocol !== "https:" && u.protocol !== "http:") || !u.hostname || u.username || u.password) return null;
+    return u.href;
+  } catch { return null; }
+}
+
+/** A message's text, its web links made tappable (T-313). Only http and https open; the words shown are exactly the words sent
+ * (the parts join back to the text). Bridged chats send plain text, so nothing else (markdown, HTML) is read into it. */
+export function linkify(text: string): TextPart[] {
+  const out: TextPart[] = [];
+  let at = 0;
+  LINK_RE.lastIndex = 0;
+  for (let m = LINK_RE.exec(text); m; m = LINK_RE.exec(text)) {
+    const found = trimLink(m[0]);
+    const href = linkHref(found);
+    if (!href) continue;
+    if (m.index > at) out.push({ t: "text", v: text.slice(at, m.index) });
+    out.push({ t: "link", v: found, href });
+    at = m.index + found.length;
+    LINK_RE.lastIndex = at;
+  }
+  if (at < text.length) out.push({ t: "text", v: text.slice(at) });
+  return out;
+}
+
+/** A long message shows its start and "Read more": past FOLD_CHARS characters or FOLD_LINES lines. */
+export const FOLD_CHARS = 1200;
+export const FOLD_LINES = 18;
+const FOLD_TO_CHARS = 700, FOLD_TO_LINES = 10;
+
+/** The start a long message shows folded (cut at a space where one is near), or null when it is short enough to show whole. */
+export function foldedStart(text: string): string | null {
+  let lines = 1, tenth = -1;
+  for (let i = 0; i < text.length && lines <= FOLD_LINES; i++) if (text.charCodeAt(i) === 10) { lines++; if (lines === FOLD_TO_LINES + 1) tenth = i; }
+  if (text.length <= FOLD_CHARS && lines <= FOLD_LINES) return null;
+  if (tenth >= 0 && tenth < FOLD_TO_CHARS) return text.slice(0, tenth).trimEnd();
+  let end = Math.min(text.length, FOLD_TO_CHARS);
+  // a space near the cut, looked for only that near (the scan is bounded)
+  const space = text.lastIndexOf(" ", end);
+  if (space > end - 80 && space > 0) end = space;
+  return text.slice(0, end).trimEnd();
+}
+
+/** "0:07", "12:30", "1:02:03". */
+export function clock(seconds: number | null | undefined): string {
+  if (seconds == null || !Number.isFinite(seconds) || seconds < 0) return "0:00";
+  const s = Math.floor(seconds), h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), r = s % 60;
+  return h ? `${h}:${String(m).padStart(2, "0")}:${String(r).padStart(2, "0")}` : `${m}:${String(r).padStart(2, "0")}`;
+}
+
+/** "3.4 MB", "820 KB", "512 B". */
+export function sizeWords(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n) || n < 0) return "";
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/** How a media message shows: a picture inline, a player, a video, or a file card. A picture or sound whose type the core
+ * didn't pass (SVG, unknown) is a file: the webview never renders bytes it can't be sure of. */
+export function mediaShape(m: Media): "image" | "voice" | "audio" | "video" | "file" {
+  if (m.kind === "image" && m.mime.startsWith("image/")) return "image";
+  if ((m.kind === "voice" || m.kind === "audio") && m.mime.startsWith("audio/")) return m.kind;
+  if (m.kind === "video" && m.mime.startsWith("video/")) return "video";
+  return "file";
+}
+
+/** A picture's box before it loads: its shape as sent, at most `maxW` × `maxH` css px. */
+export function pictureBox(m: Pick<Media, "width" | "height">, maxW = 320, maxH = 360): { width: number; height: number } {
+  const w = m.width ?? 0, h = m.height ?? 0;
+  if (!(w > 0 && h > 0)) return { width: maxW, height: Math.round(maxW * 0.75) };
+  const k = Math.min(1, maxW / w, maxH / h);
+  return { width: Math.max(48, Math.round(w * k)), height: Math.max(48, Math.round(h * k)) };
+}
+
+/** The size a picture is shown at: the event's, unless the picture itself (`own`, once loaded) says it's missing or wrong
+ * (a different shape), when the picture's own is used. */
+export function pictureSize(m: Pick<Media, "width" | "height">, own: { width: number; height: number } | null): Pick<Media, "width" | "height"> {
+  if (!own) return m;
+  const w = m.width ?? 0, h = m.height ?? 0;
+  if (w > 0 && h > 0 && Math.abs(w / h - own.width / own.height) <= 0.02 * (own.width / own.height)) return m;
+  return own;
+}
+
+/** A reaction for a screen reader: "🌱, 2 people, you too". */
+export function reactionName(r: Reaction): string {
+  const who = r.count === 1 ? (r.own ? "you" : "1 person") : `${r.count} people${r.own ? ", you too" : ""}`;
+  return `${r.key}, ${who}`;
+}
+
+/** A file card's second line: "PDF · 3.4 MB". */
+export function fileLine(m: Media): string {
+  const ext = /\.([a-z0-9]{1,8})$/i.exec(m.name)?.[1]?.toUpperCase() ?? "";
+  return [ext, sizeWords(m.size)].filter(Boolean).join(" · ");
 }

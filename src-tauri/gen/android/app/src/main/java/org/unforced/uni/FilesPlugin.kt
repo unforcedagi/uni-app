@@ -71,11 +71,15 @@ class FilesPlugin(private val activity: Activity) : Plugin(activity) {
     return if (dot > 0) "${name.substring(0, dot)} ($n)${name.substring(dot)}" else "$name ($n)"
   }
 
-  /** Only files in the app's media cache, the one folder the FileProvider shares (res/xml/file_paths.xml). */
+  /** Only files in the app's media cache, the one folder the FileProvider shares (res/xml/file_paths.xml): directly in it,
+   *  or (T-313) in one of Messages' per-launch copies directories inside it (`media/msgs-open-<random>/`: the prefix is
+   *  uni-messages' `copies::DIR_PREFIX`; keep the two the same). */
   private fun mediaFile(path: String): File? {
     val media = File(activity.cacheDir, "media").canonicalFile
     val file = File(path).canonicalFile
-    return file.takeIf { it.parentFile == media && it.isFile }
+    val parent = file.parentFile ?: return null
+    val inMedia = parent == media || (parent.parentFile == media && parent.name.startsWith("msgs-open-"))
+    return file.takeIf { inMedia && it.isFile }
   }
 
   @Command

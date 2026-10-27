@@ -8,15 +8,37 @@
 
 use std::sync::Arc;
 
-use tauri::{Emitter, Manager, Runtime, State};
-use uni_messages::{FileSecrets, LinkRow, MessageRow, Messages, MessagesError, RoomRow, Status};
+use tauri::{Emitter, Manager, State};
+use uni_messages::{FileSecrets, LinkRow, MessageRow, Messages, MessagesError, RoomRow, Status, Transcriber, Transcribing, Transcript};
 
 pub struct MessagesState(Arc<Messages>);
 
+/// T-313: voice messages are transcribed where Buzz's are: uni-transcribe on the hub's host (faster-whisper), reached
+/// with the device key (NIP-98), so no token lives here and the audio goes nowhere but the owner's own box.
+struct HubTranscriber(tauri::AppHandle);
+
+impl Transcriber for HubTranscriber {
+    fn transcribe(&self, audio: Vec<u8>, mime: String) -> Transcribing {
+        let app = self.0.clone();
+        Box::pin(async move { crate::transcribe_audio(&app, audio, mime).await.map(|t| t.text) })
+    }
+}
+
+/// How long an attachment opened from Messages stays on disk for its viewer (it goes sooner with its account, at quit,
+/// and at the latest at the next start: uni-messages copies.rs).
+const OPENED_FOR: std::time::Duration = std::time::Duration::from_secs(10 * 60);
+
 /// Make the account's door and forward its updates to the webview.
-pub fn setup<R: Runtime>(app: &tauri::App<R>) -> Result<(), Box<dyn std::error::Error>> {
+pub fn setup(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let dir = app.path().app_data_dir()?.join("messages");
     let messages = Messages::new(dir.join("data"), Arc::new(FileSecrets::new(dir.join("secrets"))));
+    messages.set_transcriber(Arc::new(HubTranscriber(app.handle().clone())));
+    // attachments are opened from a directory of this launch's own under the media cache (the folder Android's
+    // FileProvider shares, files.rs; pruning leaves its subdirectories alone); what earlier launches left there goes now,
+    // before any command can run
+    if let Ok(dir) = crate::media_cache_dir(app.handle()) {
+        messages.set_copies_dir(&dir);
+    }
     let mut rx = messages.subscribe();
     let handle = app.handle().clone();
     tauri::async_runtime::spawn(async move {
@@ -34,6 +56,13 @@ pub fn setup<R: Runtime>(app: &tauri::App<R>) -> Result<(), Box<dyn std::error::
     });
     app.manage(MessagesState(messages));
     Ok(())
+}
+
+/// The app is quitting: the attachments opened from Messages go now.
+pub fn on_exit(app: &tauri::AppHandle) {
+    if let Some(s) = app.try_state::<MessagesState>() {
+        s.0.drop_copies();
+    }
 }
 
 #[tauri::command]
@@ -84,6 +113,35 @@ pub async fn messages_older(s: State<'_, MessagesState>, room_id: String) -> Res
 #[tauri::command]
 pub async fn messages_read(s: State<'_, MessagesState>, room_id: String) -> Result<(), MessagesError> {
     s.0.read(&room_id).await
+}
+
+// ── Attachments (T-313): fetched by the core through the homeserver's authenticated media, decrypted in Rust ──
+
+/// An attachment's bytes, as raw IPC (an `ArrayBuffer` in the webview, which plays or shows it from memory).
+#[tauri::command]
+pub async fn messages_media(s: State<'_, MessagesState>, room_id: String, event_id: String) -> Result<tauri::ipc::Response, MessagesError> {
+    Ok(tauri::ipc::Response::new(s.0.media(&room_id, &event_id).await?.bytes))
+}
+
+/// A voice message's words, transcribed once on the owner's box and kept in the account's encrypted store.
+#[tauri::command]
+pub async fn messages_transcript(s: State<'_, MessagesState>, room_id: String, event_id: String) -> Result<Transcript, MessagesError> {
+    s.0.transcript(&room_id, &event_id).await
+}
+
+/// Open an attachment in the app the system picks for its type: written, decrypted, into this launch's copies directory
+/// by the core (`write_copy`, which fails closed: copies.rs), handed over (desktop: the default app; Android: a
+/// content:// URI, see files.rs), and removed after `OPENED_FOR`.
+#[tauri::command]
+pub async fn messages_open_file(app: tauri::AppHandle, s: State<'_, MessagesState>, room_id: String, event_id: String) -> Result<(), MessagesError> {
+    let (file, mime) = s.0.write_copy(&room_id, &event_id).await?;
+    let opened = crate::files::open(&app, &file, Some(mime.as_str())).await.map_err(|message| MessagesError::Server { message });
+    let messages = s.0.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(OPENED_FOR).await;
+        messages.drop_copy(&file);
+    });
+    opened
 }
 
 // ── Linking accounts (T-282): the bridge bots' logins, read as steps (uni-messages link.rs) ──

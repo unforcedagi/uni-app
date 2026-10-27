@@ -1626,7 +1626,17 @@ async fn voice_transcribe(
         .and_then(|v| v.to_str().ok())
         .unwrap_or("audio/webm")
         .to_string();
-    let audio = bytes.clone();
+    transcribe_audio(&app, bytes.clone(), mime).await
+}
+
+/// Transcribe `audio` on the hub's host with the device key: a voice message being sent (above) or, T-313, one that
+/// arrived in Messages (messages.rs).
+pub(crate) async fn transcribe_audio(
+    app: &tauri::AppHandle,
+    audio: Vec<u8>,
+    mime: String,
+) -> Result<uni_core::transcribe::Transcript, String> {
+    let app = app.clone();
     secure_store::ensure_loaded(&app).await?;
     let cfg = vault_config(&app);
     // the vault client's rule: https, or http only on this device (never audio over plain http)
@@ -2918,6 +2928,12 @@ pub fn run() {
             #[cfg(feature = "messages")]
             messages::messages_read,
             #[cfg(feature = "messages")]
+            messages::messages_media,
+            #[cfg(feature = "messages")]
+            messages::messages_transcript,
+            #[cfg(feature = "messages")]
+            messages::messages_open_file,
+            #[cfg(feature = "messages")]
             messages::messages_links,
             #[cfg(feature = "messages")]
             messages::messages_link_check,
@@ -2932,8 +2948,15 @@ pub fn run() {
             #[cfg(feature = "messages")]
             messages::messages_telegram_keys
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app, _event| {
+            // T-313: decrypted attachments opened from Messages don't outlive the app
+            #[cfg(feature = "messages")]
+            if let tauri::RunEvent::Exit = _event {
+                messages::on_exit(_app);
+            }
+        });
 }
 
 #[cfg(test)]
