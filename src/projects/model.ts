@@ -53,7 +53,12 @@ export type Session = {
   result: string | null;
   /** A walkthrough video, when the session left one. */
   video: string | null;
+  /** Why it started, when its run note says (round 2): a fresh start of an earlier session, a pick-up where one stopped, or one more beside
+   *  others that were working. `of` is the earlier session's id (never shown: its one line is). */
+  why: SessionWhy | null;
 };
+
+export type SessionWhy = { kind: "fresh" | "resume"; of: string | null } | { kind: "alongside"; others: number };
 
 export type Work = { areas: Area[]; projects: Project[]; sessions: Session[] };
 
@@ -136,7 +141,7 @@ export function startSession(w: Work, project: string, ask: string, at: number, 
   if (no) throw new ModelError(no);
   if (!ask.trim()) throw new ModelError("a session needs something to do");
   if (w.sessions.some((s) => s.id === id)) throw new ModelError(`a session ${id} already exists`);
-  const s: Session = { id, project, state: "running", ask: ask.trim(), now: null, nowAt: null, startedAt: at, endedAt: null, steps: 0, result: null, video: null };
+  const s: Session = { id, project, state: "running", ask: ask.trim(), now: null, nowAt: null, startedAt: at, endedAt: null, steps: 0, result: null, video: null, why: null };
   return { ...w, sessions: [...w.sessions, s] };
 }
 
@@ -190,6 +195,16 @@ export function stateWords(s: Session, now: number): string {
   const when = s.endedAt ? ago(now - s.endedAt) : "";
   const word = { running: "Working", finished: "Finished", stopped: "Stopped", waiting: "Needs you · ended", failed: "Didn't finish ·", silent: "Silent · last heard" }[s.state];
   return `${word} ${when}`.trim();
+}
+
+/** Why a session started, in plain words, naming the earlier one by its line (null: nothing to say). */
+export function whyWords(s: Session, all: readonly Session[]): string | null {
+  const w = s.why;
+  if (!w) return null;
+  if (w.kind === "alongside") return `Started alongside ${w.others} other session${w.others === 1 ? "" : "s"} working here`;
+  const of = w.of ? all.find((x) => x.id === w.of) : undefined;
+  if (w.kind === "fresh") return of ? `A fresh start of “${of.ask}”, with a handoff` : "A fresh start of an earlier session, with a handoff";
+  return of ? `Picks up where “${of.ask}” stopped` : "Picks up where an earlier session stopped";
 }
 
 /** Sessions that ran at the same time each get a lane of their own (the first lane free when it started). */

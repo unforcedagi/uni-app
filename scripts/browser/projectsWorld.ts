@@ -67,13 +67,15 @@ export function demoVault(now: number) {
     note("t-901", "Tasks/T-901 Make the events page read like a noticeboard", ["task"], { node: "p-coop", state: "doing", owner: "uni" }),
     note("t-902", "Tasks/T-902 Weekly restore test", ["task"], { node: "p-backups", state: "done", owner: "uni" }),
     note("t-903", "Tasks/T-903 Copy the mail service onto the new box", ["task"], { node: "p-mail", state: "doing", owner: "uni" }),
+    // one thing that needs you (the front door's line), asked an hour ago
+    note("t-904", "Tasks/T-904 Choose the photo for the about page", ["task"], { node: "p-coop", state: "open", owner: "aaron", next: "Pick one of the three in the folder", asked_at: iso(60) }),
   ];
   const runs: Note[] = [];
   const run = (id: string, title: string, md: Record<string, unknown>) => runs.push(note(id, `Runs/2026-10-20 ${title}`, ["run"], { worker: `mts-${id.slice(-8).padStart(8, "x")}`, ...md }));
   run("run-events", "T-901", { node: "p-coop", task: "T-901", state: "running", started_at: iso(49), doing_now: "Recording the walkthrough on phone and desktop", doing_at: iso(2), steps: 31, room: "workshop", channel: "demo-workshop" });
-  run("run-donate", "Donate page with a sliding amount", { node: "p-coop", state: "running", started_at: iso(20), doing_now: "Editing Donate.tsx", doing_at: iso(1), steps: 9, room: "workshop", channel: "demo-workshop" });
+  run("run-donate", "Donate page with a sliding amount", { node: "p-coop", fresh_from: "dnteold1", state: "running", started_at: iso(20), doing_now: "Editing Donate.tsx", doing_at: iso(1), steps: 9, room: "workshop", channel: "demo-workshop" });
   run("run-about", "Rebuild the about page from the coordinator's letter", { node: "p-coop", state: "done", started_at: iso(3 * 24 * 60), ended_at: iso(3 * 24 * 60 - 70), summary: "mts aaaabbbb: completed, evidence: file /home/someone/work/riverbend-site/ABOUT.md", video: "https://example.com/walkthrough/about-page" });
-  run("run-donate-old", "Try a donate button (resume ccccdddd)", { node: "p-coop", state: "failed", started_at: iso(26 * 60), ended_at: iso(26 * 60 - 15), summary: "mts ccccdddd: stopped" });
+  run("run-donate-old", "Try a donate button (resume ccccdddd)", { node: "p-coop", attempt: "dnteold1", state: "failed", started_at: iso(26 * 60), ended_at: iso(26 * 60 - 15), summary: "mts ccccdddd: stopped" });
   run("run-catalogue", "Estimate a catalogue from the spreadsheet", { node: "p-seeds", state: "blocked", started_at: iso(21 * 60), ended_at: iso(19 * 60), summary: "mts eeeeffff: blocked" });
   // filed on the area, but run in the mail move's folder: it belongs to the mail move
   run("run-mail", "T-903", { node: "area-engine", state: "running", started_at: iso(3 * 60 - 3), doing_now: "Checking yesterday's mail arrived in full on the new box", doing_at: iso(9), steps: 64, folder: "~/ops/mail-move" });

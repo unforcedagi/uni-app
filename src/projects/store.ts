@@ -31,7 +31,7 @@ let tasks: { rows: RawNote[]; at: number } | null = null;
 let inflight: Promise<void> | null = null;
 let loadedFor: string | null = null;
 
-const cacheKey = (vault: string) => `uni.work.v1:${vault}`;
+const cacheKey = (vault: string) => `uni.work.v2:${vault}`;
 function readCache(vault: string): LiveWork | null {
   try { const w = JSON.parse(localStorage.getItem(cacheKey(vault)) ?? "null"); return w && Array.isArray(w.areas) && Array.isArray(w.projects) && Array.isArray(w.sessions) ? { gaps: [], ...w } : null; } catch { return null; }
 }

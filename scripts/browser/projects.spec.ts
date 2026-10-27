@@ -47,6 +47,24 @@ test('the front door is Uni: the seven rooms, where each stands, a mark where se
   await expect(card).toHaveCount(0);
 });
 
+test('round 2: what needs you is one quiet line above the rooms, which opens in place; the room tree has no Uni row', async ({ page }) => {
+  await bootProjects(page);
+  await page.goto('/');
+  const line = page.getByRole('region', { name: 'Needs you' }).getByRole('button', { name: /^Needs you · 1/ });
+  await expect(line).toBeVisible();
+  await expect(page.getByText('Choose the photo for the about page')).toHaveCount(0);
+  await line.click();
+  const item = page.getByRole('region', { name: 'Needs you' }).getByRole('button', { name: /Choose the photo for the about page/ });
+  await expect(item).toContainText('Riverbend co-op site');
+  await expect(page.getByRole('region', { name: 'Needs you' })).not.toContainText(NO_IDS);
+  await shot(page, '01b-needs-you');
+  await item.click();
+  await expect(page.locator('.sr-title')).toHaveText('Riverbend co-op site');
+  // the archived Uni room is no place of the tree
+  if ((page.viewportSize()?.width ?? 0) >= 900) await expect(page.locator('.th-roomnav .th-go[aria-label^="Uni,"]')).toHaveCount(0);
+  else { await page.getByRole('button', { name: 'Places' }).click(); await expect(page.locator('.th-drawer .th-go[aria-label^="Uni,"]')).toHaveCount(0); }
+});
+
 test('a room keeps its chat at the heart, with one strip of its projects: archived behind one tab, a missing folder named', async ({ page }) => {
   await openRoom(page);
   await expect(page.getByText('Keep their own words on the cards, please. No rewriting.')).toBeVisible();
@@ -78,17 +96,40 @@ test('a project opens in place: its folder, its live sessions first with what ea
   await expect(events.locator('.pj-ticks')).toHaveAttribute('aria-label', '31 steps so far');
   await expect(cards.filter({ hasText: 'Rebuild the about page' })).toContainText('Left ABOUT.md.');
   await expect(cards.filter({ hasText: 'Rebuild the about page' }).getByRole('link', { name: 'Watch the walkthrough' })).toHaveAttribute('href', 'https://example.com/walkthrough/about-page');
-  await expect(cards.filter({ hasText: 'Try a donate button' }).locator('.pj-state')).toContainText(/Stopped/);
+  await expect(cards.filter({ has: page.locator('h3', { hasText: 'Try a donate button' }) }).locator('.pj-state')).toContainText(/Stopped/);
   await expect(s).not.toContainText(NO_IDS);
   await shot(page, '04-project');
+});
+
+/** The sheet's one "…" menu: pick an item by its words; nothing is posted until Post. */
+async function ask(s: ReturnType<typeof sheet>, item: RegExp | string) {
+  await s.getByRole('button', { name: 'Actions' }).click();
+  await s.getByRole('list', { name: 'Ask the room' }).getByRole('button', { name: item }).click();
+}
+
+test('the sheet is for watching: no action buttons on it, each session says why it started, and one quiet menu holds what can be asked', async ({ page }) => {
+  await openRoom(page);
+  const s = await openProject(page, /Riverbend co-op site/);
+  await expect(s.locator('.pj-session button, .pj-row .task-do')).toHaveCount(0);
+  const donate = s.locator('.pj-session').filter({ hasText: 'Donate page with a sliding amount' });
+  await expect(donate.locator('.pj-why')).toHaveText('A fresh start of “Try a donate button”, with a handoff');
+  await expect(s.locator('.pj-session').filter({ hasText: 'Make the events page' }).locator('.pj-why')).toHaveCount(0);
+  await expect(s.getByRole('list', { name: 'Ask the room' })).toHaveCount(0);
+  await s.getByRole('button', { name: 'Actions' }).click();
+  await expect(s.getByRole('list', { name: 'Ask the room' }).getByRole('button')).toHaveText([
+    'Stop “Donate page with a sliding amount”', 'Fresh start of “Donate page with a sliding amount”',
+    'Stop “Make the events page read like a noticeboard”', 'Fresh start of “Make the events page read like a noticeboard”',
+    'Add a session', 'Archive (stops its sessions first)']);
+  await shot(page, '04b-menu');
+  expect(await posted(page)).toEqual([]);
 });
 
 test('Stop asks the room in plain words, shown before it is posted; the room stops it and the session moves to the history', async ({ page }) => {
   await openRoom(page);
   const s = await openProject(page, /Riverbend co-op site/);
   const events = s.locator('.pj-session').filter({ hasText: 'Make the events page read like a noticeboard' });
-  await events.getByRole('button', { name: 'Stop' }).click();
-  const confirm = events.getByRole('group', { name: /Stop: what will be posted/ });
+  await ask(s, /^Stop “Make the events page/);
+  const confirm = s.getByRole('group', { name: /Stop: what will be posted/ });
   await expect(confirm).toContainText('Posts in #workshop, as you:');
   await expect(confirm.locator('blockquote')).toHaveText(/^Stop the session on “Make the events page read like a noticeboard” \(started .+\) on Riverbend co-op site\.$/);
   await shot(page, '05-stop-confirm');
@@ -112,20 +153,18 @@ test('Stop asks the room in plain words, shown before it is posted; the room sto
 test('Add a session runs alongside the ones working, and Fresh start ends one and starts the next with a handoff', async ({ page }) => {
   await openRoom(page);
   const s = await openProject(page, /Riverbend co-op site/);
-  await s.getByRole('button', { name: 'Add a session' }).click();
+  await ask(s, 'Add a session');
   await expect(s.getByText('It runs alongside the 2 already working; nothing is stopped.')).toBeVisible();
-  await s.getByLabel('What should it do?').fill('Print the  poster\nfor Saturday');
-  await s.getByRole('button', { name: 'Add a session' }).click();
+  await s.getByLabel('What should the new session do?').fill('Print the  poster\nfor Saturday');
   await expect(s.locator('blockquote')).toHaveText('Add a session on Riverbend co-op site, in ~/work/riverbend-site, alongside any already running: Print the poster for Saturday');
   await s.getByRole('button', { name: 'Post' }).click();
   await expect(s.getByRole('status')).toHaveText(/^Asked the room to add a session · /);
   expect((await posted(page))[0].body).toBe('Add a session on Riverbend co-op site, in ~/work/riverbend-site, alongside any already running: Print the poster for Saturday');
   await expect(s.getByRole('heading', { name: 'Sessions · 2 working' })).toBeVisible();
   // Fresh start
-  const donate = s.locator('.pj-session').filter({ hasText: 'Donate page with a sliding amount' });
-  await donate.getByRole('button', { name: 'Fresh start' }).click();
-  await expect(donate.locator('blockquote')).toHaveText(/^Fresh start on Riverbend co-op site: end the session on “Donate page with a sliding amount” \(started .+\) and start a new session on the same project, with a short handoff of where it got to\.$/);
-  await donate.getByRole('button', { name: 'Post' }).click();
+  await ask(s, /^Fresh start of “Donate page/);
+  await expect(s.locator('blockquote')).toHaveText(/^Fresh start on Riverbend co-op site: end the session on “Donate page with a sliding amount” \(started .+\) and start a new session on the same project, with a short handoff of where it got to\.$/);
+  await s.getByRole('button', { name: 'Post' }).click();
   await expect(s.locator('.pj-session[data-state="running"]').filter({ hasText: 'Reading the handoff' })).toBeVisible({ timeout: 15_000 });
   await expect(s.getByRole('heading', { name: 'Sessions · 2 working' })).toBeVisible();
 });
@@ -133,22 +172,24 @@ test('Add a session runs alongside the ones working, and Fresh start ends one an
 test('Archive is the project\'s: with live sessions it asks to stop them first; it leaves the strip and can be brought back', async ({ page }) => {
   await openRoom(page);
   const s = await openProject(page, /Riverbend co-op site/);
-  await expect(s.getByText('Archiving asks the room to stop its 2 working sessions first.')).toBeVisible();
-  await s.getByRole('button', { name: 'Archive' }).click();
+  await ask(s, 'Archive (stops its sessions first)');
   await expect(s.locator('blockquote')).toHaveText('Archive the project Riverbend co-op site. It has 2 live sessions: stop them first. Keep its folder and its history.');
   await s.getByRole('button', { name: 'Post' }).click();
   await expect(s.getByText('· archived')).toBeVisible({ timeout: 15_000 });
   await expect(s.getByRole('heading', { name: 'Sessions' })).toBeVisible();
-  await expect(s.getByRole('button', { name: 'Add a session' })).toHaveCount(0);
+  await s.getByRole('button', { name: 'Actions' }).click();
+  await expect(s.getByRole('list', { name: 'Ask the room' }).getByRole('button')).toHaveText(['Bring back']);
   await page.keyboard.press('Escape');
   await expect(strip(page).getByRole('button', { name: 'Archived · 2' })).toBeVisible();
   await expect(strip(page).locator('.ps-tab[data-project="p-coop"]')).toHaveCount(0);
   await strip(page).getByRole('button', { name: 'Archived · 2' }).click();
   const back = await openProject(page, /Riverbend co-op site, archived/);
-  await back.getByRole('button', { name: 'Bring back' }).click();
+  await ask(back, 'Bring back');
   await expect(back.locator('blockquote')).toHaveText('Bring back the project Riverbend co-op site from the archive.');
   await back.getByRole('button', { name: 'Post' }).click();
-  await expect(back.getByRole('button', { name: 'Add a session' })).toBeVisible({ timeout: 15_000 });
+  await expect(back.getByText('· archived')).toHaveCount(0, { timeout: 15_000 });
+  await back.getByRole('button', { name: 'Actions' }).click();
+  await expect(back.getByRole('list', { name: 'Ask the room' }).getByRole('button', { name: 'Add a session' })).toBeVisible();
 });
 
 test('a session filed on its area but run in a project\'s folder shows under that project', async ({ page }) => {

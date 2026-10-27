@@ -2,7 +2,7 @@
 // any number of them may be live; stop and finish change only the session they name; archiving is for projects, and an archived project
 // has no live sessions. Then the same rules on the vault's own shapes (workFrom), and the words the room is sent.
 import assert from "node:assert/strict";
-import { ModelError, ago, archivePlan, archiveProject, cannotStart, isLive, liveInArea, liveSessions, makeProject, problems, restoreProject, sessionsOf, span, startSession, stateWords, stepSession, stopSession, finishSession, timeline, timelineWindow, type Area, type Work } from "../src/projects/model.ts";
+import { ModelError, ago, whyWords, archivePlan, archiveProject, cannotStart, isLive, liveInArea, liveSessions, makeProject, problems, restoreProject, sessionsOf, span, startSession, stateWords, stepSession, stopSession, finishSession, timeline, timelineWindow, type Area, type Work } from "../src/projects/model.ts";
 import { HEARD_MS, plainTitle, plainWords, resultWords, workFrom } from "../src/projects/live.ts";
 import { actionMessage } from "../src/projects/actions.ts";
 import { DEMO_AREAS, demoVault } from "./browser/projectsWorld.ts";
@@ -134,7 +134,7 @@ check("from the vault: a project's one area is up its parent chain; a link to an
 function projectsInArea(area: string) { return live.projects.filter((p) => p.area === area).map((p) => p.name); }
 check("from the vault: a project without a folder is a gap, named, never a project (an archived one isn't a gap)", () => {
   assert.ok(!live.projects.some((p) => p.name === "Shop signs"));
-  assert.deepEqual(live.gaps, [{ name: "Shop signs", area: "area-workshop", why: "no folder" }]);
+  assert.deepEqual(live.gaps, [{ name: "Shop signs", area: "area-workshop", areaPath: "Areas/Workshop", why: "no folder" }]);
   assert.equal(P("Nightly backups").folder, "~/ops/backups", "the repo field stands in for a folder");
   const relative = workFrom({ nodes: vault.nodes.map((n) => (n.id === "p-seeds" ? { ...n, metadata: { ...n.metadata, folder: "seed-library" } } : n)), runs: [], tasks: [] }, NOW);
   assert.ok(relative.gaps.some((g) => g.name === "Seed library catalogue"), "a relative folder is no folder");
@@ -193,6 +193,35 @@ check("review fixes: a folder matches however it is spelled; a [[link]] parent i
   assert.equal(w.sessions.find((s) => s.id === "run-mail")?.now, "Checking the copy");
   assert.equal(w.projects.find((p) => p.id === "p-kiosk")?.area, "area-workshop");
   assert.equal(w.sessions.find((s) => s.id === "run-kiosk-part")?.project, "p-kiosk");
+});
+check("review finding 7: an area note with no room keeps its projects named, as gaps under that area", () => {
+  const nodes = vault.nodes.map((n) => (n.id === "area-engine" ? { ...n, metadata: { ...n.metadata, channel: undefined } } : n));
+  const w = workFrom({ nodes, runs: [], tasks: [] }, NOW);
+  assert.equal(w.areas.some((a) => a.path === "Areas/Engine Room"), false);
+  assert.deepEqual(w.gaps.filter((g) => g.areaPath === "Areas/Engine Room").map((g) => [g.name, g.why]), [["Mail move", "area has no room"], ["Nightly backups", "area has no room"]]);
+  assert.deepEqual(problems(w), []);
+});
+check("round 2: why a session started, from its run note: a fresh start of an earlier one, a pick-up, or one beside others", () => {
+  const don = S("run-donate");
+  assert.deepEqual(don.why, { kind: "fresh", of: "run-donate-old" });
+  assert.equal(whyWords(don, live.sessions), "A fresh start of “Try a donate button”, with a handoff");
+  assert.equal(S("run-events").why, null, "the first one working says nothing");
+  const base = vault.runs.find((r) => r.id === "run-events")!;
+  const at = (min: number) => new Date(NOW - min * MIN).toISOString();
+  const runs = [
+    { ...base, id: "r-a", metadata: { ...base.metadata, started_at: at(50), doing_at: at(1) } },
+    { ...base, id: "r-b", metadata: { ...base.metadata, started_at: at(40), doing_at: at(1) } },
+    { ...base, id: "r-c", metadata: { ...base.metadata, started_at: at(30), doing_at: at(1) } },
+    { ...base, id: "r-d", path: "Runs/2026-10-20 Pick it up (resume abcd1234)", metadata: { ...base.metadata, started_at: at(20), doing_at: at(1) } },
+    { ...base, id: "r-e", metadata: { ...base.metadata, attempt: "abcd1234", state: "failed", started_at: at(90), ended_at: at(60) } },
+  ];
+  const w = workFrom({ nodes: vault.nodes, runs, tasks: vault.tasks }, NOW);
+  const st = (id: string) => w.sessions.find((x) => x.id === id)!;
+  assert.deepEqual([st("r-a").why, st("r-b").why, st("r-c").why], [null, { kind: "alongside", others: 1 }, { kind: "alongside", others: 2 }]);
+  assert.equal(whyWords(st("r-c"), w.sessions), "Started alongside 2 other sessions working here");
+  assert.deepEqual(st("r-d").why, { kind: "resume", of: "r-e" });
+  assert.match(whyWords(st("r-d"), w.sessions)!, /^Picks up where “.+” stopped$/);
+  assert.doesNotMatch(w.sessions.map((x) => whyWords(x, w.sessions) ?? "").join(" "), /abcd1234|r-[a-e]\b/);
 });
 check("the room is sent plain words: the project, the session's line and when it started; never an id", () => {
   const coop = P("Riverbend co-op site"), ev = S("run-events");

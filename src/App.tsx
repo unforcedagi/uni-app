@@ -692,7 +692,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
     if (target.kind !== "room" || !target.channel) return target;
     const n = nodeOfRoom(target.channel);
     if (!n) return target;
-    if (n.path === "") { setRootOpenMemory(true); return { kind: "areas", title: "Uni", channel: target.channel }; }
+    // T-302 round 2: the archived Uni room is no place of the tree any more: it opens as a room of its own (from search or a link)
+    if (n.path === "") return target;
     return { kind: "area", path: n.path, title: n.name, channel: target.channel };
   }
   /** `fromHistory`: Back and Forward move through the places visited; they do not add to them. */

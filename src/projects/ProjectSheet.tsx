@@ -1,11 +1,12 @@
-// T-301/T-302: a project, opened in place over its room (a sheet on a phone, a drawer beside the room on a wide screen). Its folder, a
-// thin line of when its sessions ran against when the room talked, its sessions (live ones first: what each is doing now and its steps;
-// then its history, with what each left), and what you can ask: Stop, Fresh start, Add a session, Archive, Bring back. Every action
-// is a message in the area's room, shown word for word before it is posted; the room's Uni does it. Nothing here names an id.
+// T-301/T-302: a project, opened in place over its room (a sheet on a phone, a drawer beside the room on a wide screen). It is for
+// watching (round 2: Uni decides how sessions are used): its folder, a thin line of when its sessions ran against when the room talked,
+// its sessions (live ones first: what each is doing now, its steps, and why it started when there is more than one; then its history,
+// with what each left). What you can still ask (Stop, Fresh start, Add a session, Archive, Bring back) sits behind one small "…" menu;
+// each is a message in the area's room, shown word for word before it is posted, and the room's Uni does it. Nothing here names an id.
 import { useEffect, useId, useRef, useState } from "react";
 import { openDialog } from "../areas/focusTrap";
 import { actionLabel, actionMessage, postAction, type Action } from "./actions";
-import { ago, archivePlan, areaOf, cannotStart, isLive, sessionsOf, span, stateWords, timeline, timelineWindow, type Project, type Session } from "./model";
+import { ago, archivePlan, areaOf, cannotStart, isLive, sessionsOf, span, stateWords, timeline, timelineWindow, whyWords, type Session } from "./model";
 import { noteAsked, useWork, type Asked } from "./store";
 import "./projects.css";
 
@@ -31,45 +32,56 @@ function Ticks({ s }: { s: Session }) {
   </span>;
 }
 
-/** One action, two steps: the button, then the exact words and where they go, with Post and Cancel. */
-function Ask({ action, room, primary, onPosted, asked }: { action: Action; room: { id: string; name: string } | null; primary?: boolean; onPosted: () => void; asked: Asked | null }) {
-  const [open, setOpen] = useState(false);
+type Room = { id: string; name: string };
+
+/** An action picked from the menu: the exact words and where they go, with Post and Cancel. Nothing is posted before Post. */
+function Confirm({ action, room, onPosted, onCancel }: { action: Action; room: Room | null; onPosted: () => void; onCancel: () => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  if (asked) return null;
-  if (!open) return <button type="button" className={`task-do ${primary ? "primary" : "quiet"} pj-act`} data-act={action.kind} disabled={!room} onClick={() => setOpen(true)}>{actionLabel[action.kind]}</button>;
   const post = async () => {
     if (!room) return;
     setBusy(true); setError(null);
-    try { await postAction(room.id, action); setOpen(false); onPosted(); } catch { setError("Couldn't post that. Try again in a moment."); } finally { setBusy(false); }
+    try { await postAction(room.id, action); onPosted(); } catch { setError("Couldn't post that. Try again in a moment."); } finally { setBusy(false); }
   };
-  return <div className="pj-confirm" role="group" aria-label={`${actionLabel[action.kind]}: what will be posted`}>
+  return <div className="pj-confirm" role="group" aria-label={`${actionLabel[action.kind]}: what will be posted`} data-act={action.kind}>
     <p className="pj-confirm-to">Posts in #{room?.name.replace(/^#/, "")}, as you:</p>
     <blockquote className="pj-confirm-text">{actionMessage(action)}</blockquote>
     {error && <p className="note-error" role="alert">{error}</p>}
     <div className="pj-row"><span className="pj-gap" />
-      <button type="button" className="task-do quiet" onClick={() => { setOpen(false); setError(null); }}>Cancel</button>
-      <button type="button" className="task-do primary pj-post" disabled={busy} onClick={() => void post()}>{busy ? "Posting…" : "Post"}</button>
+      <button type="button" className="task-do quiet" onClick={onCancel}>Cancel</button>
+      <button type="button" className="task-do primary pj-post" disabled={busy || !room} onClick={() => void post()}>{busy ? "Posting…" : "Post"}</button>
     </div>
+  </div>;
+}
+
+/** What the menu offers: per live session Stop and Fresh start (named by its line), then Add a session, then Archive or Bring back. */
+type Pick = { key: string; label: string; act: Action["kind"]; action: Action | null };
+
+/** The one small "…" menu: a list of what can be asked; picking one shows its words (Confirm) before anything is posted. */
+function ActionsMenu({ picks, onPick }: { picks: readonly Pick[]; onPick: (p: Pick) => void }) {
+  const [open, setOpen] = useState(false);
+  const menuId = useId();
+  if (!picks.length) return null;
+  return <div className="pj-menu">
+    <button type="button" className="pj-more" aria-label="Actions" aria-haspopup="true" aria-expanded={open} aria-controls={menuId} onClick={() => setOpen(!open)}>…</button>
+    {open && <ul id={menuId} className="pj-menu-list" aria-label="Ask the room">{picks.map((p) =>
+      <li key={p.key}><button type="button" data-act={p.act} onClick={() => { setOpen(false); onPick(p); }}>{p.label}</button></li>)}</ul>}
   </div>;
 }
 
 const askedWords = (a: Asked, now: number) => `Asked the room to ${a.kind === "fresh" ? "start it fresh" : a.kind === "stop" ? "stop it" : a.kind === "archive" ? "archive it" : a.kind === "restore" ? "bring it back" : "add a session"} · ${ago(now - a.at)}`;
 
-function SessionCard({ s, p, now, room, asked }: { s: Session; p: Project; now: number; room: { id: string; name: string } | null; asked: Asked | null }) {
+function SessionCard({ s, all, now, asked }: { s: Session; all: readonly Session[]; now: number; asked: Asked | null }) {
   const live = isLive(s);
+  const why = whyWords(s, all);
   return <li className={`pj-session ${s.state}`} data-session={s.id} data-state={s.state}>
     <p className="pj-state"><i aria-hidden="true" />{stateWords(s, now)}</p>
     <h3 className="pj-ask">{s.ask}</h3>
+    {why && <p className="pj-why">{why}</p>}
     {live && <p className="pj-now"><Ticks s={s} /><span>{s.now ?? "Working; it hasn't said on what yet."}</span>{s.nowAt && <small>{ago(now - s.nowAt)}</small>}</p>}
     {s.result && <p className="pj-result">{s.result}</p>}
     {asked && <p className="pj-asked" role="status">{askedWords(asked, now)}</p>}
-    {(s.video || live) && <div className="pj-row">
-      {s.video && <a className="pj-link" href={s.video} target="_blank" rel="noreferrer">Watch the walkthrough</a>}
-      <span className="pj-gap" />
-      {live && <Ask action={{ kind: "fresh", project: p, session: s }} room={room} asked={asked} onPosted={() => noteAsked(s.id, "fresh")} />}
-      {live && <Ask action={{ kind: "stop", project: p, session: s }} room={room} asked={asked} primary onPosted={() => noteAsked(s.id, "stop")} />}
-    </div>}
+    {s.video && <div className="pj-row"><a className="pj-link" href={s.video} target="_blank" rel="noreferrer">Watch the walkthrough</a></div>}
   </li>;
 }
 
@@ -89,12 +101,12 @@ function Timeline({ sessions, talk, now }: { sessions: readonly Session[]; talk:
   </figure>;
 }
 
-export function ProjectSheet({ project, talk, room, roomName, onClose }: { project: string; talk: readonly number[]; room: { id: string; name: string } | null;
+export function ProjectSheet({ project, talk, room, roomName, onClose }: { project: string; talk: readonly number[]; room: Room | null;
   /** A room's name by its id (the area's own room may not be the one under the sheet). */ roomName: (id: string) => string | null; onClose: () => void }) {
   const { work, asked, ready } = useWork();
   const now = useNow();
   const p = work.projects.find((x) => x.id === project);
-  const [adding, setAdding] = useState(false);
+  const [pick, setPick] = useState<Pick | null>(null);
   const [ask, setAsk] = useState("");
   const box = useRef<HTMLDivElement>(null);
   const wrap = useRef<HTMLDivElement>(null);
@@ -115,8 +127,24 @@ export function ProjectSheet({ project, talk, room, roomName, onClose }: { proje
   const earlier = ended.slice(recent.length);
   const projectAsked = asked.get(p.id) ?? null;
   const addAsked = asked.get(`add:${p.id}`) ?? null;
-  const blocked = cannotStart(p);
-  const addAction: Action = { kind: "add", project: p, ask: ask.trim() || "…" };
+  const short = (t: string) => (t.length > 48 ? `${t.slice(0, 47).trimEnd()}…` : t);
+  const picks: Pick[] = !to ? [] : [
+    ...liveOnes.filter((s) => !asked.get(s.id)).flatMap((s): Pick[] => [
+      { key: `stop:${s.id}`, label: `Stop “${short(s.ask)}”`, act: "stop", action: { kind: "stop", project: p, session: s } },
+      { key: `fresh:${s.id}`, label: `Fresh start of “${short(s.ask)}”`, act: "fresh", action: { kind: "fresh", project: p, session: s } },
+    ]),
+    ...(cannotStart(p) || addAsked ? [] : [{ key: "add", label: "Add a session", act: "add" as const, action: null }]),
+    ...(projectAsked ? [] : p.status === "archived"
+      ? [{ key: "restore", label: "Bring back", act: "restore" as const, action: { kind: "restore" as const, project: p } }]
+      : [{ key: "archive", label: liveOnes.length ? "Archive (stops its sessions first)" : "Archive", act: "archive" as const, action: { kind: "archive" as const, project: p, live: archivePlan(work, p.id).stopFirst } }]),
+  ];
+  const done = () => { setPick(null); setAsk(""); };
+  const posted = (pk: Pick) => {
+    if (pk.act === "stop" || pk.act === "fresh") noteAsked((pk.action as { session: Session }).session.id, pk.act);
+    else if (pk.act === "add") noteAsked(`add:${p.id}`, "add");
+    else noteAsked(p.id, pk.act);
+    done();
+  };
   return <div ref={wrap} className="pj-wrap" data-place="project-sheet">
     <button type="button" className="task-backdrop" aria-label="Close the project" tabIndex={-1} onClick={onClose} />
     <div ref={box} className="pj" role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1}>
@@ -126,35 +154,31 @@ export function ProjectSheet({ project, talk, room, roomName, onClose }: { proje
           <h2 id={titleId}>{p.name}</h2>
           {p.about && <p className="pj-about">{p.about}</p>}
         </div>
+        <ActionsMenu picks={picks} onPick={(pk) => { setAsk(""); setPick(pk); }} />
         <button type="button" className="pj-close" aria-label="Close" onClick={onClose}>×</button>
       </header>
+      {pick && (pick.act === "add"
+        ? <form className="pj-new" onSubmit={(e) => e.preventDefault()}>
+          <label htmlFor={`${titleId}-ask`}>What should the new session do?</label>
+          <textarea id={`${titleId}-ask`} rows={2} value={ask} autoFocus placeholder={`In ${p.folder}…`} onChange={(e) => setAsk(e.target.value)} />
+          {ask.trim() ? <Confirm action={{ kind: "add", project: p, ask }} room={to} onPosted={() => posted(pick)} onCancel={done} />
+            : <><p className="pj-hint">It runs alongside {liveOnes.length ? `the ${liveOnes.length} already working` : "anything else"}; nothing is stopped.</p>
+              <div className="pj-row"><span className="pj-gap" /><button type="button" className="task-do quiet" onClick={done}>Cancel</button></div></>}
+        </form>
+        : pick.action && <Confirm action={pick.action} room={to} onPosted={() => posted(pick)} onCancel={done} />)}
       <p className="pj-folder"><span>Folder</span><code>{p.folder}</code></p>
       <Timeline sessions={sessions} talk={talk} now={now} />
       <section className="pj-sessions" aria-label="Sessions">
         <div className="pj-sessions-head">
           <h3 className="cp-h">Sessions{liveOnes.length ? ` · ${liveOnes.length} working` : ""}</h3>
-          {!blocked && !adding && <button type="button" className="task-do primary pj-add" onClick={() => setAdding(true)}>Add a session</button>}
         </div>
-        {adding && <form className="pj-new" onSubmit={(e) => e.preventDefault()}>
-          <label htmlFor={`${titleId}-ask`}>What should it do?</label>
-          <textarea id={`${titleId}-ask`} rows={2} value={ask} autoFocus placeholder={`In ${p.folder}…`} onChange={(e) => setAsk(e.target.value)} />
-          {ask.trim() ? <Ask action={addAction} room={to} asked={null} primary onPosted={() => { noteAsked(`add:${p.id}`, "add"); setAsk(""); setAdding(false); }} />
-            : <p className="pj-hint">It runs alongside {liveOnes.length ? `the ${liveOnes.length} already working` : "anything else"}; nothing is stopped.</p>}
-          <div className="pj-row"><span className="pj-gap" /><button type="button" className="task-do quiet" onClick={() => { setAdding(false); setAsk(""); }}>Cancel</button></div>
-        </form>}
         {addAsked && <p className="pj-asked" role="status">{askedWords(addAsked, now)}</p>}
         {projectAsked && <p className="pj-asked" role="status">{askedWords(projectAsked, now)}</p>}
-        {sessions.length === 0 && !adding && <p className="cp-none">No sessions yet.</p>}
-        <ul className="pj-list">{[...liveOnes, ...recent].map((s) => <SessionCard key={s.id} s={s} p={p} now={now} room={to} asked={asked.get(s.id) ?? null} />)}</ul>
+        {sessions.length === 0 && <p className="cp-none">No sessions yet.</p>}
+        <ul className="pj-list">{[...liveOnes, ...recent].map((s) => <SessionCard key={s.id} s={s} all={sessions} now={now} asked={asked.get(s.id) ?? null} />)}</ul>
         {earlier.length > 0 && <details className="pj-earlier"><summary>Earlier · {earlier.length}</summary>
           <ul>{earlier.map((s) => <li key={s.id} data-session={s.id}><span>{s.ask}</span><small>{stateWords(s, now)}</small></li>)}</ul></details>}
       </section>
-      <footer className="pj-foot">
-        {p.status === "archived"
-          ? <Ask action={{ kind: "restore", project: p }} room={to} asked={projectAsked} onPosted={() => noteAsked(p.id, "restore")} />
-          : <><p className="pj-hint">{liveOnes.length ? `Archiving asks the room to stop its ${liveOnes.length} working session${liveOnes.length === 1 ? "" : "s"} first.` : "Archiving keeps the folder and the history; it can be brought back."}</p>
-            <Ask action={{ kind: "archive", project: p, live: archivePlan(work, p.id).stopFirst }} room={to} asked={projectAsked} onPosted={() => noteAsked(p.id, "archive")} /></>}
-      </footer>
     </div>
   </div>;
 }

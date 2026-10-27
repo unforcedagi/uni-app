@@ -10,7 +10,9 @@ import type { RawNote } from "../areas/taskCore.ts";
 import { isPrivateName } from "../areas/treeRooms.ts";
 import { isFolder, makeProject, ModelError, type Area, type Project, type ProjectStatus, type Session, type SessionState, type Work } from "./model.ts";
 
-export type Gap = { name: string; area: string | null; why: "no folder" | "no area" };
+/** A project the model can't take, named so it is never silently missing. `areaPath`: the area it sits under (even one with no room), so
+ *  that area's strip can name it. */
+export type Gap = { name: string; area: string | null; areaPath: string | null; why: "no folder" | "no area" | "area has no room" };
 export type LiveArea = Area & { private: boolean };
 export type LiveWork = Work & { areas: LiveArea[]; gaps: Gap[] };
 export type Sources = { nodes: readonly RawNote[]; runs: readonly RawNote[]; tasks: readonly RawNote[] };
@@ -95,13 +97,15 @@ export function workFrom(src: Sources, now = Date.now()): LiveWork {
     areas.push({ id: keyOf(n), name, path: str(n.path)!, room, private: isPrivateName(name) });
   }
   const areaIds = new Set(areas.map((a) => a.id));
-  /** The first area up a node's parent chain (a project under a project lives in its parent's area). */
+  /** Every area note by key, with or without a room (review finding 7: one without is still where its projects sit). */
+  const areaPathOf = new Map(areaNotes.map((n) => [keyOf(n), str(n.path)!]));
+  /** The first area note up a node's parent chain (a project under a project lives in its parent's area). */
   const areaUp = (n: RawNote): string | null => {
     const seen = new Set<string>();
     let cur: RawNote | undefined = n;
     while (cur && !seen.has(keyOf(cur))) {
       seen.add(keyOf(cur));
-      if (areaIds.has(keyOf(cur))) return keyOf(cur);
+      if (areaPathOf.has(keyOf(cur))) return keyOf(cur);
       const up = str(meta(cur).parent);
       cur = up ? byKey.get(unlink(up)) : undefined;
     }
@@ -114,13 +118,16 @@ export function workFrom(src: Sources, now = Date.now()): LiveWork {
     if (!path || !tags.includes("project") || tags.includes("area")) continue;
     const m = meta(n);
     if (str(m.merged_into)) continue;
-    const name = lastName(path), area = areaUp(n);
+    const name = lastName(path), up = areaUp(n);
+    const area = up && areaIds.has(up) ? up : null;
+    const areaPath = up ? areaPathOf.get(up) ?? null : null;
     const folder = str(m.folder) ?? (isFolder(m.repo) ? str(m.repo) : null);
+    if (up && !area) { if (statusOf(m.status) !== "archived") gaps.push({ name, area: null, areaPath, why: "area has no room" }); continue; }
     try {
       projects.push(makeProject({ id: keyOf(n), area: area ?? "", name, folder, status: statusOf(m.status), about: plainWords(str(m.summary) ?? "") }, areas));
     } catch (e) {
       if (!(e instanceof ModelError)) throw e;
-      if (statusOf(m.status) !== "archived") gaps.push({ name, area, why: area ? "no folder" : "no area" });
+      if (statusOf(m.status) !== "archived") gaps.push({ name, area, areaPath, why: area ? "no folder" : "no area" });
     }
   }
   const projectIds = new Set(projects.map((p) => p.id));
@@ -153,6 +160,10 @@ export function workFrom(src: Sources, now = Date.now()): LiveWork {
     taskTitle.set(id, plainTitle(path.replace(/^Tasks\//, "").replace(/∕/g, "/")));
   }
   const sessions: Session[] = [];
+  const byAttempt = new Map<string, string>();
+  const asked = new Map<string, { kind: "fresh" | "resume"; attempt: string }>();
+  /** The mts run id a run note belongs to: its `attempt`, else the run id in an mts worker unit `mts-<run>`. */
+  const attemptOf = (m: Record<string, unknown>) => str(m.attempt) ?? /^mts-([a-z0-9]{8})$/.exec(str(m.worker) ?? "")?.[1] ?? null;
   for (const r of src.runs) {
     const m = meta(r), id = keyOf(r);
     const startedAt = time(m.started_at);
@@ -179,7 +190,20 @@ export function workFrom(src: Sources, now = Date.now()): LiveWork {
       startedAt, endedAt: ended, steps,
       result: live ? null : resultWords(m.summary, state),
       video: str(m.video) && /^https:\/\//.test(str(m.video)!) ? str(m.video) : null,
+      why: null,
     });
+    const att = attemptOf(m);
+    if (att) byAttempt.set(att, id);
+    const fresh = str(m.fresh_from), resumes = str(m.resumes) ?? /\(resume ([a-z0-9]{8})\)/.exec(str(r.path) ?? "")?.[1] ?? null;
+    if (fresh || resumes) asked.set(id, { kind: fresh ? "fresh" : "resume", attempt: (fresh ?? resumes)! });
+  }
+  // round 2: why each session started. The run note's fresh_from / resumes name an earlier attempt; otherwise, one that started while
+  // others were working on the same project is one more beside them.
+  for (const s of sessions) {
+    const a = asked.get(s.id);
+    if (a) { s.why = { kind: a.kind, of: byAttempt.get(a.attempt) ?? null }; continue; }
+    const others = sessions.filter((o) => o !== s && o.project === s.project && o.startedAt < s.startedAt && (o.endedAt ?? Infinity) > s.startedAt).length;
+    if (others) s.why = { kind: "alongside", others };
   }
   return { areas, projects, sessions, gaps };
 }

@@ -16,11 +16,13 @@ export function ProjectStrip({ areaPath, onOpen }: { areaPath: string; onOpen: (
   const [showArchived, setShowArchived] = useState(false);
   const setFolded = (v: boolean) => { setFoldedState(v); try { localStorage.setItem(FOLD_KEY, v ? "1" : "0"); } catch { /* private storage */ } };
   const area = work.areas.find((a) => a.path === areaPath);
-  if (!area) return null;
+  const gaps = work.gaps.filter((g) => g.areaPath === areaPath);
+  // an area whose note names no room has no projects the model can hold: its strip still names them (review finding 7)
+  if (!area) return gaps.length ? <section className="ps" aria-label="Projects here" data-place="project-strip"><span className="ps-label">Projects</span>
+    <span className="ps-gap">{gaps.map((g) => g.name).join(", ")}: this area has no room yet</span></section> : null;
   const all = projectsIn(work, area.id);
   const projects = all.filter((p) => p.status !== "archived");
   const archived = all.filter((p) => p.status === "archived");
-  const gaps = work.gaps.filter((g) => g.area === area.id);
   if (!projects.length && !archived.length && !gaps.length) return null;
   const live = projects.reduce((n, p) => n + liveSessions(work, p.id).length, 0);
   const tab = (p: (typeof all)[number]) => {

@@ -39,7 +39,7 @@ import { ApprovalRows } from "./ApprovalRows";
 import { ApprovalsContext, useApprovalList } from "../approvalsLive";
 import type { Approval } from "../approvals";
 import "./areas.css";
-import { FrontDoor, type Door } from "../projects/FrontDoor";
+import { FrontDoor, type Door, type Needs } from "../projects/FrontDoor";
 import { ProjectStrip } from "../projects/ProjectStrip";
 import { ProjectSheet } from "../projects/ProjectSheet";
 import { plainWords } from "../projects/live";
@@ -291,6 +291,7 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   const toUni = () => onOpenArea(null, "Uni", null);
   /** A door of the front door: the area's room, or (before the rooms list has arrived) the room its note names, so the chat opens when it can. */
   const openDoor = (p: string) => {
+    if (p === ROOT) return toUni();
     const n = data?.tree.nodes.get(p);
     if (!n) return openPath(p);
     setDrawer(false); viaMemory.path = p; viaMemory.via = null; setRootOpen(false);
@@ -298,10 +299,14 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   };
   const openPath = (p: string, through?: string | null) => {
     setDrawer(false); viaMemory.path = p; viaMemory.via = through ?? null;
+    if (p === ROOT && chat) { toUni(); return; }
     if (p === ROOT) { setRootOpen(true); onOpenArea(null, "Uni", uniRoom); return; }
     const n = data?.tree.nodes.get(p); if (n) open(n);
   };
-  const navRows = data ? treeRows(data.tree, roomRefs, uniRef) : [{ key: "~uni", via: null, path: ROOT, name: "Uni", depth: 0, kind: "root" as const, slash: uniRef ? uniRef.name : null, heldBy: null, heldNode: null, own: !!uniRef, trunk: [], last: true }];
+  // T-302 round 2: #Uni is archived, so with chat the tree has no Uni row (the front door is Uni; the archived room's chat isn't a place
+  // in the tree). A profile without chat keeps its root row: Uni's level is its only view of all the work.
+  const navRows0 = data ? treeRows(data.tree, roomRefs, uniRef) : [{ key: "~uni", via: null, path: ROOT, name: "Uni", depth: 0, kind: "root" as const, slash: uniRef ? uniRef.name : null, heldBy: null, heldNode: null, own: !!uniRef, trunk: [], last: true }];
+  const navRows = chat ? navRows0.filter((r) => r.kind !== "root") : navRows0;
   /** A row's dot is its own node's needs-you items (a parent never lights up for its children's), by the companion's one rule; an item on a
    *  node with no row counts on its nearest ancestor's (r13), so the dots under a level add up to its Needs you. */
   const rowPaths = useMemo(() => new Set(navRows.map((r) => r.path)), [navRows.map((r) => r.path).join("\n")]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -400,14 +405,21 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   // inside it), a mark where sessions are working, and a quiet usage line. A vault with no areas yet, or a profile without chat (no rooms
   // to open), keeps the tree home below.
   const doorAreas = chat && data ? childrenOf(data.tree, ROOT) : [];
-  if (path === null && doorAreas.length && !rootOpen) {
+  if (path === null && doorAreas.length) {
     const doors: Door[] = doorAreas.map((a) => {
       const v = roomView(data!.tree, a.path, roomRefs, uniRef);
       const raw = privateRoot(data!.tree, a.path) ? null : tasks.tree?.stands.get(a.path)?.text ?? (typeof a.metadata.stands === "string" ? a.metadata.stands : null);
       const st = raw ? plainWords(raw) : null;
       return { path: a.path, name: a.name, slug: v.own && v.slash ? v.slash.replace(/^#/, "") : null, stands: st, lastTs: v.own ? rooms.find((r) => r.id === v.target?.id)?.last_ts ?? null : null };
     });
-    return <div className="areas-home tree-home-wrap">{status}<ApprovalRows approvals={approvalsAll.list} className="cp-list cp-approvals th-approvals" /><FrontDoor doors={doors} onOpen={openDoor} />
+    // T-302 round 2: what needs you, across the areas, as one quiet line above the rooms (a private area's items stay a count, its words inside)
+    const privAt = (p: string) => privateRoot(data!.tree, p) ?? (tasks.tree ? privateRootIn(tasks.tree, p) : null);
+    const allNeeds = needsFeed(tasks.tasks, privAt, null, undefined, confirm.of);
+    const needs: Needs = {
+      rows: allNeeds.rows.map((t) => ({ id: t.id, title: taskTitle(t.title).rest || t.title, where: data!.tree.nodes.get(t.node)?.name ?? null, path: t.node })),
+      privates: allNeeds.privates.map((g) => ({ place: g.place, count: g.count, path: g.open.path })),
+    };
+    return <div className="areas-home tree-home-wrap">{status}<ApprovalRows approvals={approvalsAll.list} className="cp-list cp-approvals th-approvals" /><FrontDoor doors={doors} needs={needs} onOpen={openDoor} />
       {railHidden && places.length > 0 && <div className="th-places-short">{placesRow}</div>}</div>;
   }
   if (treeHome && path === null && !rootOpen) {
