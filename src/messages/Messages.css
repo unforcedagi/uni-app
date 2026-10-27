@@ -145,9 +145,9 @@
 .msgs-file-open { min-height: 40px; }
 .msgs-msg.own .msgs-file-open, .msgs-msg.own .msgs-words-ask { color: var(--th-card); border-color: var(--th-card); background: transparent; }
 .msgs-file .msgs-media-problem { grid-column: 1 / -1; }
-.msgs-lightbox { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: 56px 12px 12px; background: rgba(0, 0, 0, .88); }
-.msgs-lightbox img { max-width: 100%; max-height: calc(100vh - 80px); object-fit: contain; }
-.msgs-lightbox-close { position: absolute; top: calc(10px + env(safe-area-inset-top)); right: 12px; min-height: 40px; background: var(--th-card); }
+.msgs-lightbox { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: 64px 12px 16px; background: #000; }
+.msgs-lightbox img { max-width: 100%; max-height: calc(100vh - 88px); object-fit: contain; }
+.msgs-lightbox .msgs-lightbox-close { position: absolute; top: calc(12px + env(safe-area-inset-top)); right: 12px; min-height: 44px; padding: 0 18px; border: 2px solid #fff; border-radius: 999px; background: #000; color: #fff; font: 600 15px var(--sans); }
 
 .msgs-compose { display: flex; align-items: flex-end; gap: 8px; padding: 8px max(12px, calc((100% - 760px) / 2)) calc(10px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: var(--bg); }
 .msgs-compose textarea { flex: 1; min-width: 0; min-height: 44px; max-height: 40vh; padding: 10px 14px; border: 1.5px solid var(--line-strong, var(--line)); border-radius: 22px; background: var(--surface); color: var(--text); font: 15px/1.45 var(--sans); resize: none; box-sizing: border-box; field-sizing: content; }
