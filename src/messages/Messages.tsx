@@ -111,7 +111,7 @@ function ThreadView({ room, thread, now, visible, onBack, onProblem }: { room: R
   const sending = useRef<Promise<unknown>>(Promise.resolve());
   const [loadingOlder, setLoadingOlder] = useState(false);
   /** T-313: a picture opened large. */
-  const [large, setLarge] = useState<{ url: string; alt: string } | null>(null);
+  const [large, setLarge] = useState<{ url: string; alt: string; eventId: string } | null>(null);
   const log = useRef<HTMLDivElement | null>(null);
   /** T-313: a reply's quote goes to the message it answers, when it's loaded here; that message is marked a moment. */
   const [marked, setMarked] = useState<string | null>(null);
@@ -205,7 +205,7 @@ function ThreadView({ room, thread, now, visible, onBack, onProblem }: { room: R
               {s.first && s.row.own && <p className="msgs-from"><time>{timeLabel(s.row.ts)}</time></p>}
               {s.row.media ? <div className="msgs-body msgs-media">
                   {s.row.reply && <Quote reply={s.row.reply} onGo={goTo} />}
-                  <Attachment roomId={room.id} row={s.row} onPicture={(url, alt) => setLarge({ url, alt })} />
+                  <Attachment roomId={room.id} row={s.row} onPicture={(url, alt, eventId) => setLarge({ url, alt, eventId })} />
                   {s.row.media.caption && <p className="msgs-caption"><MessageText text={s.row.media.caption} /></p>}
                 </div>
                 : <p className="msgs-body">
@@ -222,7 +222,7 @@ function ThreadView({ room, thread, now, visible, onBack, onProblem }: { room: R
         <button className="send msgs-send" disabled={!draft.trim()}>Send</button>
       </form>
     </>}
-    {large && <Lightbox url={large.url} alt={large.alt} onClose={() => setLarge(null)} />}
+    {large && <Lightbox url={large.url} alt={large.alt} roomId={room.id} eventId={large.eventId} onClose={() => setLarge(null)} />}
   </section>;
 }
 

@@ -62,6 +62,13 @@ pub fn setup(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// The app is quitting: the attachments opened from Messages go now.
+pub fn on_exit(app: &tauri::AppHandle) {
+    if let Some(s) = app.try_state::<MessagesState>() {
+        s.0.drop_copies();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #[test]

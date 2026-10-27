@@ -390,6 +390,15 @@ export function pictureBox(m: Pick<Media, "width" | "height">, maxW = 320, maxH 
   return { width: Math.max(48, Math.round(w * k)), height: Math.max(48, Math.round(h * k)) };
 }
 
+/** The size a picture is shown at: the event's, unless the picture itself (`own`, once loaded) says it's missing or wrong
+ * (a different shape), when the picture's own is used. */
+export function pictureSize(m: Pick<Media, "width" | "height">, own: { width: number; height: number } | null): Pick<Media, "width" | "height"> {
+  if (!own) return m;
+  const w = m.width ?? 0, h = m.height ?? 0;
+  if (w > 0 && h > 0 && Math.abs(w / h - own.width / own.height) <= 0.02 * (own.width / own.height)) return m;
+  return own;
+}
+
 /** A reaction for a screen reader: "🌱, 2 people, you too". */
 export function reactionName(r: Reaction): string {
   const who = r.count === 1 ? (r.own ? "you" : "1 person") : `${r.count} people${r.own ? ", you too" : ""}`;

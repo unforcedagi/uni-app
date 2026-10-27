@@ -22,8 +22,14 @@ use matrix_sdk_base::media::store::IgnoreMediaRetentionPolicy;
 
 use crate::{invalid, MessagesError, Result, MEDIA_FOR};
 
-fn too_big() -> MessagesError {
-    invalid("This attachment is too large to open here.")
+/// What a refused download says, so a caller can tell "too large" from the other refusals.
+pub(crate) const TOO_LARGE: &str = "This attachment is too large to open here.";
+/// The largest download also kept in the account's media store (voice notes and pictures, not every large file: the
+/// store's copy is one more in memory while it is written).
+const KEEP_MAX: usize = 20 * 1024 * 1024;
+
+pub(crate) fn too_big() -> MessagesError {
+    invalid(TOO_LARGE)
 }
 
 fn unreachable() -> MessagesError {
@@ -49,7 +55,9 @@ async fn fetch(client: &Client, mxc: &MxcUri, max: u64) -> Result<Vec<u8>> {
     let versions = client.supported_versions().await.map_err(|_| unreachable())?;
     let authenticated = authenticated_media::get_content::v1::Request::PATH_BUILDER.is_supported(&versions);
     let url = download_url(&client.homeserver(), mxc, authenticated)?;
-    let mut request = client.http_client().get(url);
+    // the account's client gives up on a request after REQUEST_FOR (15 s); a download takes as long as it takes, up to
+    // MEDIA_FOR, as the SDK's own download did
+    let mut request = client.http_client().get(url).timeout(MEDIA_FOR);
     if authenticated {
         let token = client.access_token().ok_or_else(crate::signed_out)?;
         request = request.bearer_auth(token);
@@ -68,7 +76,7 @@ async fn fetch(client: &Client, mxc: &MxcUri, max: u64) -> Result<Vec<u8>> {
     if answer.content_length().is_some_and(|n| n > max) {
         return Err(too_big());
     }
-    let mut bytes = Vec::new();
+    let mut bytes = Vec::with_capacity(answer.content_length().unwrap_or(0) as usize);
     while let Some(chunk) = answer.chunk().await.map_err(|_| unreachable())? {
         if bytes.len() as u64 + chunk.len() as u64 > max {
             // dropping the answer closes the connection: nothing more is read
@@ -96,10 +104,11 @@ pub(crate) async fn download(client: &Client, source: MediaSource, max: u64) -> 
             MediaSource::Encrypted(file) => {
                 // the ciphertext is as long as the file
                 let sealed = fetch(client, &file.url, max).await?;
+                let len = sealed.len();
                 let mut cursor = std::io::Cursor::new(sealed);
                 let mut reader = matrix_sdk_base::crypto::AttachmentDecryptor::new(&mut cursor, file.as_ref().clone().into())
                     .map_err(|_| invalid("That attachment can't be decrypted."))?;
-                let mut open = Vec::new();
+                let mut open = Vec::with_capacity(len);
                 reader.read_to_end(&mut open).map_err(|_| invalid("That attachment can't be decrypted (it isn't the file that was sent)."))?;
                 Ok(open)
             }
@@ -110,8 +119,10 @@ pub(crate) async fn download(client: &Client, source: MediaSource, max: u64) -> 
         Ok(got) => got?,
         Err(_) => return Err(MessagesError::Unreachable { message: "The attachment took too long to download.".into() }),
     };
-    if let Ok(store) = client.media_store().lock().await {
-        let _ = store.add_media_content(&request, bytes.clone(), IgnoreMediaRetentionPolicy::No).await;
+    if bytes.len() <= KEEP_MAX {
+        if let Ok(store) = client.media_store().lock().await {
+            let _ = store.add_media_content(&request, bytes.clone(), IgnoreMediaRetentionPolicy::No).await;
+        }
     }
     Ok(bytes)
 }
@@ -165,7 +176,9 @@ mod tests {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
         tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-        let client = Client::builder().homeserver_url(&url).build().await.unwrap();
+        // as the app builds it, with its short limit for an ordinary request (REQUEST_FOR), shortened further here
+        let config = matrix_sdk::config::RequestConfig::short_retry().timeout(std::time::Duration::from_secs(1));
+        let client = Client::builder().homeserver_url(&url).request_config(config).build().await.unwrap();
         let session = MatrixSession {
             meta: SessionMeta { user_id: owned_user_id!("@pat:example.org"), device_id: owned_device_id!("MADEUP") },
             tokens: SessionTokens { access_token: "made-up-token".into(), refresh_token: None },
@@ -208,6 +221,28 @@ mod tests {
         let got = tokio::time::timeout(std::time::Duration::from_secs(20), download(&client, MediaSource::Plain(owned_mxc_uri!("mxc://example.org/big")), max)).await;
         assert!(matches!(got, Ok(Err(MessagesError::Invalid { .. }))), "{got:?}");
         assert_eq!(s.authorized.load(SeqCst), 2);
+    }
+
+    /// A file that takes 3 s to arrive, 64 KB at a time.
+    async fn slow() -> impl IntoResponse {
+        let stream = futures_util::stream::unfold(0u32, |n| async move {
+            if n == 6 {
+                return None;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            Some((Ok::<_, std::io::Error>(bytes_of(64 * 1024)), n + 1))
+        });
+        Body::from_stream(stream)
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_download_slower_than_an_ordinary_request_still_arrives() {
+        let app = Router::new()
+            .route("/_matrix/client/versions", get(|| async { Json(json!({ "versions": ["v1.11"], "unstable_features": {} })) }))
+            .route("/_matrix/client/v1/media/download/example.org/slow", get(slow));
+        let client = client_on(app).await;
+        let got = download(&client, MediaSource::Plain(owned_mxc_uri!("mxc://example.org/slow")), 1024 * 1024).await;
+        assert_eq!(got.map(|b| b.len()).ok(), Some(6 * 64 * 1024));
     }
 
     #[test]

@@ -6,7 +6,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { holdMedia, knownWords, mediaUrl, openFile, wordsFor } from "./messagesDoor.ts";
-import { asMessagesErr, clock, fileLine, foldedStart, linkify, mediaShape, pictureBox, reactionName, sizeWords, type Media, type MessageRow, type Reaction, type Reply } from "./messagesView.ts";
+import { asMessagesErr, clock, fileLine, foldedStart, linkify, mediaShape, pictureBox, pictureSize, reactionName, sizeWords, type Media, type MessageRow, type Reaction, type Reply } from "./messagesView.ts";
 
 const openLink = (href: string) => { void invoke("open_link", { url: href }).catch(() => {}); };
 
@@ -37,15 +37,19 @@ function useSeen<T extends Element>(): [RefObject<T | null>, boolean] {
   return [ref, seen];
 }
 
-/** Whether an element is on screen now, or near it (`margin`): it changes both ways, unlike useSeen. */
-function useOnScreen<T extends Element>(margin = "400px"): [RefObject<T | null>, boolean] {
+/** Whether an element is on screen now, or just about (`margin`): it changes both ways, unlike useSeen. The margin is
+ * small on purpose: what's held is what's on screen (only that may pass the cache's limits), so a wide margin of large
+ * pictures would hold too much. */
+function useOnScreen<T extends Element>(margin = "100px"): [RefObject<T | null>, boolean] {
   const ref = useRef<T | null>(null);
   const [on, setOn] = useState(false);
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
     if (typeof IntersectionObserver === "undefined") { setOn(true); return; }
-    const io = new IntersectionObserver((es) => setOn(es[es.length - 1].isIntersecting), { rootMargin: margin });
+    // the conversation scrolls inside its own box: the margin is measured from it, not the window
+    const root = el.closest(".msgs-log");
+    const io = new IntersectionObserver((es) => setOn(es[es.length - 1].isIntersecting), { root, rootMargin: margin });
     io.observe(el);
     return () => io.disconnect();
   }, [margin]);
@@ -98,13 +102,15 @@ function Player({ roomId, eventId, media, label }: { roomId: string; eventId: st
     if (Number.isFinite(el.duration) && el.duration > 0) setLength(el.duration);
     const p = pending.current;
     pending.current = { play: false, seek: null };
-    if (p.seek != null) el.currentTime = p.seek;
+    // back after it was let go: where the bar says it was
+    const to = p.seek ?? (at > 0 ? at : null);
+    if (to != null) el.currentTime = to;
     if (p.play) { playOnly(el); void el.play().catch(() => {}); }
   };
   const toggle = () => {
     const el = audio.current;
     // not here (yet, or let go): fetched, then played from where it was left
-    if (!url || !el) { pending.current = { play: true, seek: pending.current.seek ?? (at > 0 ? at : null) }; setWant(true); if (problem) retry(); return; }
+    if (!url || !el) { pending.current = { play: true, seek: pending.current.seek }; setWant(true); if (problem) retry(); return; }
     if (el.paused) { playOnly(el); void el.play().catch(() => {}); } else el.pause();
   };
   const seek = (v: number) => {
@@ -125,7 +131,7 @@ function Player({ roomId, eventId, media, label }: { roomId: string; eventId: st
     <span className="msgs-time" aria-hidden="true">{at > 0 || playing ? `${clock(at)} / ${clock(length)}` : clock(length)}</span>
     {url && <audio ref={audio} src={url} preload="auto" onLoadedMetadata={ready} onDurationChange={() => { const el = audio.current; if (el && Number.isFinite(el.duration) && el.duration > 0) setLength(el.duration); }}
       onTimeUpdate={() => setAt(audio.current?.currentTime ?? 0)} onPlay={() => { setPlaying(true); setBroken(null); }}
-      onPause={() => { setPlaying(false); if (audio.current) pending.current.seek = audio.current.currentTime || null; }}
+      onPause={() => setPlaying(false)}
       onEnded={() => { setPlaying(false); setAt(0); if (audio.current) audio.current.currentTime = 0; }}
       onError={() => { setPlaying(false); setBroken("This device can't play this recording."); }} />}
     {(problem || broken) && <p className="msgs-media-problem" role="status">{broken ?? `Couldn't load it: ${problem}`}</p>}
@@ -159,11 +165,13 @@ function Words({ roomId, eventId, auto }: { roomId: string; eventId: string; aut
 function Picture({ roomId, eventId, media, onOpen }: { roomId: string; eventId: string; media: Media; onOpen: (url: string) => void }) {
   const [ref, onScreen] = useOnScreen<HTMLButtonElement>();
   const { url, problem, retry } = useMediaUrl(roomId, eventId, media.mime, onScreen);
-  const box = pictureBox(media);
+  /** The picture's own size once it has loaded (the event's can be missing or wrong): let go and shown again, it keeps it. */
+  const [own, setOwn] = useState<{ width: number; height: number } | null>(null);
+  const box = pictureBox(pictureSize(media, own));
   const alt = media.caption ?? media.name ?? "Photo";
-  return <button ref={ref} type="button" className="msgs-picture" style={{ width: box.width, height: box.height }} aria-label={`Photo: ${alt}. Open large`}
+  return <button ref={ref} type="button" className="msgs-picture" style={{ width: box.width, height: url ? undefined : box.height }} aria-label={`Photo: ${alt}. Open large`}
     onClick={() => (url ? onOpen(url) : problem ? retry() : undefined)}>
-    {url ? <img src={url} alt="" width={box.width} height={box.height} />
+    {url ? <img src={url} alt="" width={box.width} height={box.height} onLoad={(e) => { const i = e.currentTarget; if (i.naturalWidth && i.naturalHeight) setOwn({ width: i.naturalWidth, height: i.naturalHeight }); }} />
       : <span className="msgs-picture-wait">{problem ? `Couldn't load the photo. Tap to try again.` : "Photo"}</span>}
   </button>;
 }
@@ -173,13 +181,18 @@ function Video({ roomId, eventId, media }: { roomId: string; eventId: string; me
   const [want, setWant] = useState(false);
   const [ref, onScreen] = useOnScreen<HTMLDivElement>();
   const [playing, setPlaying] = useState(false);
-  // held while it plays or is on screen; paused off screen it's let go, and tapping again fetches it back
+  // held while it plays or is on screen; paused off screen it's let go, and comes back paused where it was
   const { url, problem, retry } = useMediaUrl(roomId, eventId, media.mime, want && (onScreen || playing));
+  /** Play once it's here: only right after a tap, never because it scrolled back into view. */
+  const start = useRef(false);
+  const left = useRef(0);
   const box = pictureBox(media);
   useEffect(() => { if (!url) setPlaying(false); }, [url]);
-  return <div ref={ref} className="msgs-video-box">{url ? <video className="msgs-video" src={url} controls autoPlay playsInline width={box.width}
-    onPlay={(e) => { playOnly(e.currentTarget); setPlaying(true); }} onPause={() => setPlaying(false)} onEnded={() => setPlaying(false)} />
-  : <button type="button" className="msgs-video-wait" style={{ width: box.width, height: box.height }} disabled={want && onScreen && !problem} onClick={() => { setWant(true); if (problem) retry(); }}>
+  return <div ref={ref} className="msgs-video-box">{url ? <video className="msgs-video" src={url} controls playsInline width={box.width}
+    onLoadedMetadata={(e) => { const v = e.currentTarget; if (left.current > 0) v.currentTime = left.current; if (start.current) { start.current = false; playOnly(v); void v.play().catch(() => {}); } }}
+    onTimeUpdate={(e) => { left.current = e.currentTarget.currentTime; }}
+    onPlay={(e) => { playOnly(e.currentTarget); setPlaying(true); }} onPause={() => setPlaying(false)} onEnded={() => { setPlaying(false); left.current = 0; }} />
+  : <button type="button" className="msgs-video-wait" style={{ width: box.width, height: url ? undefined : box.height }} disabled={want && onScreen && !problem} onClick={() => { start.current = true; setWant(true); if (problem) retry(); }}>
     <span aria-hidden="true">▶</span> {problem ? "Couldn't load the video. Try again" : want && onScreen ? "Loading the video…" : `Play video${media.duration_ms ? `, ${clock(media.duration_ms / 1000)}` : ""}${media.size ? ` (${sizeWords(media.size)})` : ""}`}
   </button>}</div>;
 }
@@ -201,12 +214,12 @@ function FileCard({ roomId, eventId, media }: { roomId: string; eventId: string;
 }
 
 /** The attachment of a media message, as its shape says. */
-export function Attachment({ roomId, row, onPicture }: { roomId: string; row: MessageRow; onPicture: (url: string, alt: string) => void }) {
+export function Attachment({ roomId, row, onPicture }: { roomId: string; row: MessageRow; onPicture: (url: string, alt: string, eventId: string) => void }) {
   const media = row.media;
   if (!media || !row.event_id) return null;
   const id = row.event_id;
   switch (mediaShape(media)) {
-    case "image": return <Picture roomId={roomId} eventId={id} media={media} onOpen={(url) => onPicture(url, media.caption ?? media.name)} />;
+    case "image": return <Picture roomId={roomId} eventId={id} media={media} onOpen={(url) => onPicture(url, media.caption ?? media.name, id)} />;
     case "voice": return <div className="msgs-voice"><Player roomId={roomId} eventId={id} media={media} label="voice message" /><Words roomId={roomId} eventId={id} auto /></div>;
     case "audio": return <div className="msgs-voice"><p className="msgs-audio-name">{media.name}</p><Player roomId={roomId} eventId={id} media={media} label={media.name || "audio"} /><Words roomId={roomId} eventId={id} auto={false} /></div>;
     case "video": return <Video roomId={roomId} eventId={id} media={media} />;
@@ -232,8 +245,10 @@ export function Reactions({ reactions }: { reactions: Reaction[] }) {
 }
 
 /** A picture, large, over the conversation: Escape, the button or a tap outside it closes. */
-export function Lightbox({ url, alt, onClose }: { url: string; alt: string; onClose: () => void }) {
+export function Lightbox({ url, alt, roomId, eventId, onClose }: { url: string; alt: string; roomId: string; eventId: string; onClose: () => void }) {
   const close = useRef<HTMLButtonElement | null>(null);
+  // open large, the picture is held, wherever its message has scrolled to
+  useEffect(() => holdMedia(roomId, eventId), [roomId, eventId]);
   useEffect(() => {
     close.current?.focus();
     const key = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };

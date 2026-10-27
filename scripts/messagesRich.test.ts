@@ -4,7 +4,7 @@
 // can't freeze the conversation.
 // Run: node --experimental-strip-types scripts/messagesRich.test.ts
 import assert from "node:assert/strict";
-import { clock, fileLine, foldedStart, linkHref, linkify, LINK_MAX, mediaShape, pictureBox, reactionName, sizeWords, type Media, type TextPart } from "../src/messages/messagesView.ts";
+import { clock, fileLine, pictureSize, foldedStart, linkHref, linkify, LINK_MAX, mediaShape, pictureBox, reactionName, sizeWords, type Media, type TextPart } from "../src/messages/messagesView.ts";
 
 let n = 0;
 const t = (name: string, f: () => void) => { f(); n++; console.log(`ok ${name}`); };
@@ -143,6 +143,15 @@ t("a picture keeps its shape before it loads, inside 320 × 360", () => {
   assert.deepEqual(pictureBox({ width: 100, height: 50 }), { width: 100, height: 50 });
   assert.deepEqual(pictureBox({ width: null, height: null }), { width: 320, height: 240 });
   assert.deepEqual(pictureBox({ width: 10_000, height: 1 }), { width: 320, height: 48 });
+});
+
+t("a picture keeps the size its event gives unless the picture's own shape says otherwise", () => {
+  const sent = { width: 640, height: 480 };
+  assert.deepEqual(pictureSize(sent, null), sent);
+  assert.deepEqual(pictureSize(sent, { width: 64, height: 48 }), sent);
+  // a portrait photo whose event gave no size, or the wrong one: its own
+  assert.deepEqual(pictureSize({ width: null, height: null }, { width: 3000, height: 4000 }), { width: 3000, height: 4000 });
+  assert.deepEqual(pictureSize(sent, { width: 3000, height: 4000 }), { width: 3000, height: 4000 });
 });
 
 t("a reaction reads as who reacted", () => {

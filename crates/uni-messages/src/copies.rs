@@ -1,6 +1,7 @@
 //! T-313 (Codex review 9b8p17d9, P1): the decrypted copies of attachments written for the system's viewer, by the
 //! account they belong to. They go when that account does (signed out, ended on the homeserver, replaced by another
-//! sign-in, or the app quitting): `sweep` runs as the account ends, and a copy finished after that is removed by
+//! sign-in) and when the app quits (`Messages::drop_copies`; one killed instead leaves them to its next start, which
+//! removes them): `sweep` runs as the account ends, and a copy finished after that is removed by
 //! `settle` instead of being handed over. A copy is registered before it is written, so a sweep while it is written
 //! can't miss it.
 

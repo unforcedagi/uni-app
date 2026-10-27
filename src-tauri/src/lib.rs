@@ -2948,8 +2948,15 @@ pub fn run() {
             #[cfg(feature = "messages")]
             messages::messages_telegram_keys
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app, _event| {
+            // T-313: decrypted attachments opened from Messages don't outlive the app
+            #[cfg(feature = "messages")]
+            if let tauri::RunEvent::Exit = _event {
+                messages::on_exit(_app);
+            }
+        });
 }
 
 #[cfg(test)]

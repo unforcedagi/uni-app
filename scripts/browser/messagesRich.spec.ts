@@ -52,6 +52,7 @@ async function boot(page: Page, signedOut = false, photos = 0, photoBytes = 0) {
         reactions: [{ key: '🌱', count: 2, own: true }, { key: '👍', count: 1, own: false }] }),
       m({ kind: 'media', body: 'Voice message (0:02)', media: media({ kind: 'voice', name: 'Voice message.ogg', mime: 'audio/wav', size: tone.byteLength, duration_ms: 2000 }) }),
       m({ body: 'About that, never mind.', reply: { event_id: '$gone', sender_name: null, text: null, unavailable: true } }),
+      m({ kind: 'media', body: 'Video: walk.webm', media: media({ kind: 'video', name: 'walk.webm', mime: 'video/webm', size: tone.byteLength, duration_ms: 2000, width: 640, height: 360 }) }),
     ];
     for (let k = 0; k < (nPhotos as number); k++) w.__thread.push(m({ kind: 'media', body: 'Photo', media: media({ kind: 'image', name: `photo-${k}.png`, mime: 'image/png', size: null, width: 640, height: 480 }) }));
     // every object URL the page makes and hasn't let go of, with its size: what attachments hold in memory
@@ -79,7 +80,7 @@ async function boot(page: Page, signedOut = false, photos = 0, photoBytes = 0) {
           case 'messages_media': {
             const row = w.__thread.find((r: any) => r.event_id === args.eventId);
             await new Promise((r) => setTimeout(r, 50));
-            if (row?.media?.kind !== 'image') return tone.slice(0);
+            if (row?.media?.kind !== 'image') return tone.slice(0); // a video here is the same sound: the browser plays it
             if (!padTo) return picture.slice(0);
             const big = new Uint8Array(padTo as number);
             big.set(new Uint8Array(picture));
@@ -312,4 +313,37 @@ test('Codex 9b8p17d9: a voice message keeps playing off screen; paused and let g
   await voice.getByRole('button', { name: /^Play voice message/ }).click();
   await expect.poll(() => voice.locator('audio').evaluate((a: HTMLAudioElement) => a.currentTime)).toBeGreaterThan(stopped);
   await expect(voice.getByRole('button', { name: 'Pause voice message' })).toBeVisible();
+});
+
+test('Codex 9b8p17d9 review: a paused video scrolled away comes back paused where it was, not playing from the start', async ({ page }) => {
+  await boot(page, false, 30);
+  const video = msg(page, '$e11');
+  await video.scrollIntoViewIfNeeded();
+  await video.getByRole('button', { name: /^Play video/ }).click();
+  const el = video.locator('video');
+  await expect.poll(() => el.evaluate((v: HTMLVideoElement) => !v.paused && v.currentTime)).toBeGreaterThan(0.5);
+  const at = await el.evaluate((v: HTMLVideoElement) => { v.pause(); return v.currentTime; });
+  await log(page).evaluate((l) => { l.scrollTop = l.scrollHeight; });
+  await expect(el).toHaveCount(0);
+  await video.scrollIntoViewIfNeeded();
+  await expect(el).toBeAttached();
+  await expect.poll(() => el.evaluate((v: HTMLVideoElement) => v.readyState)).toBeGreaterThan(0);
+  await page.waitForTimeout(400);
+  expect(await el.evaluate((v: HTMLVideoElement) => v.paused)).toBe(true);
+  expect(Math.abs(await el.evaluate((v: HTMLVideoElement) => v.currentTime) - at)).toBeLessThan(0.3);
+});
+
+test('Codex 9b8p17d9 review: a photo open large keeps its picture while its message scrolls away and others load', async ({ page }) => {
+  await boot(page, false, 70);
+  const photo = msg(page, '$e4').getByRole('button', { name: /^Photo: Seedlings/ });
+  await photo.scrollIntoViewIfNeeded();
+  await expect(photo.locator('img')).toBeAttached();
+  await photo.click();
+  const large = page.getByRole('dialog', { name: 'Photo: Seedlings by the window' });
+  const src = await large.locator('img').getAttribute('src');
+  // underneath, the conversation pages through every other picture
+  await page.evaluate(() => (document.querySelector('.msgs-lightbox') as HTMLElement).style.pointerEvents = 'none');
+  await scrollThrough(page);
+  expect(await page.evaluate((u) => (window as any).__live.has(u), src)).toBe(true);
+  await expect.poll(() => large.locator('img').evaluate((i: HTMLImageElement) => i.complete && i.naturalWidth)).toBe(64);
 });

@@ -889,7 +889,7 @@ impl Messages {
     /// and stopped while it arrives if it turns out to be (download.rs).
     async fn bytes_of(&self, client: &Client, source: matrix_sdk::ruma::events::room::MediaSource, media: &Media, max: u64) -> Result<Vec<u8>> {
         if media.size.is_some_and(|n| n > max) {
-            return Err(invalid("This attachment is too large to open here."));
+            return Err(download::too_big());
         }
         download::download(client, source, max).await
     }
@@ -936,6 +936,12 @@ impl Messages {
         Ok(media.mime)
     }
 
+    /// T-313: the app is quitting: every copy goes now (a quit without this, as Android may kill the app, leaves them to
+    /// the app's next start, which removes them).
+    pub fn drop_copies(&self) {
+        self.copies.lock().unwrap().sweep(None);
+    }
+
     /// T-313: done with a copy `write_copy` made: removed now.
     pub fn drop_copy(&self, file: &Path) {
         self.copies.lock().unwrap().remove(file);
@@ -967,7 +973,7 @@ impl Messages {
             // the turn is taken before the download, so waiting asks don't each hold a clip in memory
             let _slot = self.transcribe_turns.clone().acquire_owned().await.map_err(server)?;
             let audio = self.bytes_of(&client, source, &media, (MAX_TRANSCRIBE as u64).min(self.media_limit())).await.map_err(|e| match e {
-                MessagesError::Invalid { .. } => invalid("This recording is too long to transcribe."),
+                MessagesError::Invalid { message } if message == download::TOO_LARGE => invalid("This recording is too long to transcribe."),
                 e => e,
             })?;
             let text = match tokio::time::timeout(TRANSCRIBE_FOR, transcriber.transcribe(audio, media.mime.clone())).await {

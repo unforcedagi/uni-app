@@ -40,7 +40,7 @@ type Kept = { url: string; size: number };
 const shown = new Map<string, Kept>();
 const fetching = new Map<string, Promise<string>>();
 /** How many attachments hold each URL (one on screen, or playing; MessageParts' useMediaUrl): one in use is never revoked,
- * and the rest are kept within MEDIA_KEEP and MEDIA_KEEP_BYTES. */
+ * and the rest are kept within MEDIA_KEEP and MEDIA_KEEP_BYTES. Only what's on screen at once can pass those limits. */
 const holding = new Map<string, number>();
 let mediaEpoch = 0;
 const mediaKey = (roomId: string, eventId: string) => `${roomId}\u0000${eventId}`;
