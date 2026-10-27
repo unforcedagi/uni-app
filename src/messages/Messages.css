@@ -53,9 +53,10 @@
 
 /* T-310 tabs: All, then one per network, across the top. The one you're on is ink-filled (a shape, not a colour, for
    the Daylight); a count is how many conversations wait for you; "!" is a link to do again. */
-.msgs-tabs { grid-column: 1 / -1; grid-row: 1; display: flex; align-items: center; gap: 10px; min-width: 0; padding: 8px 16px; border-bottom: 1px solid var(--line); background: var(--bg); }
-.msgs-tablist { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
-.msgs-tab { display: inline-flex; align-items: center; gap: 7px; min-height: 40px; padding: 0 14px; border: 1.5px solid transparent; border-radius: 999px; background: transparent; color: var(--text-soft); font: 500 14px var(--sans); white-space: nowrap; cursor: pointer; }
+.msgs-tabs { grid-column: 1 / -1; grid-row: 1; display: flex; align-items: center; gap: 10px; min-width: 0; padding: 8px 16px; border-bottom: 1px solid var(--line); background: var(--bg); overflow-x: auto; scrollbar-width: none; overscroll-behavior-x: contain; }
+.msgs-tabs::-webkit-scrollbar { display: none; }
+.msgs-tablist { display: flex; flex: none; gap: 2px; }
+.msgs-tab { flex: none; display: inline-flex; align-items: center; gap: 7px; min-height: 40px; padding: 0 13px; border: 1.5px solid transparent; border-radius: 999px; background: transparent; color: var(--text-soft); font: 500 14px var(--sans); white-space: nowrap; cursor: pointer; }
 .msgs-tab:hover { border-color: var(--line-strong, var(--line)); }
 .msgs-tab:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-soft); }
 .msgs-tab[aria-selected="true"] { background: var(--th-ink); border-color: var(--th-ink); color: var(--th-card); }
@@ -63,7 +64,10 @@
 .msgs-tab[aria-selected="true"] .msgs-tab-count { background: var(--th-card); border-color: var(--th-card); color: var(--th-ink); }
 .msgs-tab-alert { display: grid; place-items: center; width: 18px; height: 18px; border: 1.5px dashed currentColor; border-radius: 50%; font: 700 11px/1 var(--sans); }
 .msgs-tabs .msgs-link-open { margin-left: auto; flex: none; white-space: nowrap; }
+/* a Daylight on its side, or a narrow window: the tabs keep the row, the link says less */
+@media (min-width: 700px) and (max-width: 979px) { .msgs-link-more { display: none; } }
 .msgs-attention { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin: 10px 14px 4px; padding: 8px 12px; border: 1.5px dashed var(--th-ink); border-radius: 12px; font-size: 14px; color: var(--text); }
+.msgs-attention .note-action { min-height: 36px; margin-left: auto; }
 .msgs-tab-empty { padding: 28px 16px; text-align: center; color: var(--muted); font-family: var(--serif); font-style: italic; font-size: 17px; }
 
 /* the conversation */
@@ -113,10 +117,7 @@
   .msgs-panes { grid-template-columns: minmax(0, 1fr); }
   .msgs-rooms, .msgs-read { display: none; border-right: 0; }
   /* the tabs scroll sideways above the list, and give way to an open conversation */
-  .msgs-tabs { padding: 6px 10px; overflow-x: auto; scrollbar-width: none; overscroll-behavior-x: contain; }
-  .msgs-tabs::-webkit-scrollbar { display: none; }
-  .msgs-tablist { flex-wrap: nowrap; }
-  .msgs-tab { flex: none; }
+  .msgs-tabs { padding: 6px 10px; }
   .msgs[data-pane="thread"] .msgs-tabs { display: none; }
   .msgs[data-pane="list"] .msgs-rooms, .msgs[data-pane="thread"] .msgs-read { display: flex; }
   .msgs-thread-back { display: inline-flex; align-items: center; }

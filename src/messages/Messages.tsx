@@ -90,7 +90,7 @@ function TabStrip({ tabs, tab, onPick, onLink }: { tabs: Tab[]; tab: TabId; onPi
         {t.attention && <span className="msgs-tab-alert" aria-hidden="true">!</span>}
       </button>)}
     </div>
-    <button type="button" className="note-quiet msgs-link-open" onClick={onLink}>+ Link another network</button>
+    <button type="button" className="note-quiet msgs-link-open" aria-label="Link another network" onClick={onLink}>+ Link<span className="msgs-link-more"> another network</span></button>
   </div>;
 }
 
@@ -288,7 +288,7 @@ export default function Messages({ backTo, onBack }: { backTo: string; onBack: (
           {!list ? <p className="msgs-loading" role="status">Loading conversations…</p>
             : list.length === 0 ? <div className="empty msgs-empty"><p>No conversations yet.</p><p>Bring in your chats from Signal, WhatsApp, Telegram and others.</p><button type="button" className="send" onClick={() => setLinkView(true)}>Link an account</button></div>
             : <>
-              {current?.attention && <p className="msgs-attention" role="note">{current.label} needs linking again. <button type="button" className="note-quiet" onClick={() => setLinkView(true)}>Link again</button></p>}
+              {current?.attention && <p className="msgs-attention" role="note">{current.label} needs linking again. <button type="button" className="note-action" onClick={() => setLinkView(true)}>Link again</button></p>}
               {rows.length === 0 ? <p className="empty msgs-tab-empty">Nothing from {current?.label ?? "here"} yet. Chats show here as they come in.</p>
                 : <ul className="msgs-rows">{rows.map((r) => <RoomItem key={r.id} r={r} now={now} mark={tab === "all" && tabs.length > 2} selected={thread?.roomId === r.id} onOpen={() => void open(r.id)} />)}</ul>}
             </>}
