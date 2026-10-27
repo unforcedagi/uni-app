@@ -93,6 +93,8 @@ t("a long or hostile message links in linear time", () => {
     ("see https://example.com/x, " ).repeat(8_000),
     "h".repeat(200_000),
     "https://" + ".".repeat(200_000),
+    // many links, each near LINK_MAX and ending in brackets to trim: a per-step recount is quadratic in each
+    ("https://a" + ")".repeat(2000) + " ").repeat(100),
   ];
   for (const s of shapes) {
     const took = ms(() => linkify(s));
