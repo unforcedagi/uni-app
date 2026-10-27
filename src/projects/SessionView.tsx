@@ -5,7 +5,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ago, isLive, stateWords, whyWords, type Project, type Session } from "./model";
 import { useFeed, type FeedState } from "./feed";
-import { answerDraft, askOf, endWords, leftItems, needsYou, redact, type FeedItem } from "./sessionWords";
+import { answerDraft, askOf, endWords, leftItems, needsYou, type FeedItem } from "./sessionWords";
 
 /** Steps shown at most (the note keeps the last 60). */
 const SHOWN = 60;
@@ -38,7 +38,7 @@ function LiveView({ s, feed, now }: { s: Session; feed: FeedState; now: number }
     {feed.items.length > 0 ? <Steps items={feed.items} live />
       : <p className="pj-hint sv-empty">{!s.feed ? "This session doesn't share its steps yet (it started before they were kept)."
         : !feed.ready ? "Reading its steps…" : feed.error ? "Couldn't read its steps. Trying again in a moment." : "No steps yet. They show here as it works."}</p>}
-    <p className="pj-now sv-now"><span>{s.now ? `Now: ${redact(s.now)}` : "Working; it hasn't said on what yet."}</span>{s.nowAt && <small>{ago(now - s.nowAt)}</small>}</p>
+    <p className="pj-now sv-now"><span>{s.now ? `Now: ${s.now}` : "Working; it hasn't said on what yet."}</span>{s.nowAt && <small>{ago(now - s.nowAt)}</small>}</p>
   </section>;
 }
 
@@ -67,12 +67,12 @@ export function SessionView({ s, all, project, now, roomName, onAnswer, onBack, 
   const end = endWords(s, now);
   const left = leftItems(s.end?.left);
   const needs = needsYou(s);
-  const did = s.end?.did ? redact(s.end.did) : null;
+  const did = s.end?.did ?? null;
   const reported = !!(s.end?.did || s.end?.left || s.end?.needs);
-  return <section className={`sv pj-session ${s.state}`} aria-label={`Session: ${redact(s.ask)}`} data-place="session-view" data-session={s.id} data-state={s.state}>
+  return <section className={`sv pj-session ${s.state}`} aria-label={`Session: ${s.ask}`} data-place="session-view" data-session={s.id} data-state={s.state}>
     <button ref={back} type="button" className="sv-back" onClick={onBack}><i className="ps-chev" aria-hidden="true" />Sessions</button>
     <p className="pj-state"><i aria-hidden="true" />{stateWords(s, now)}</p>
-    <h3 className="sv-ask">{redact(s.ask)}</h3>
+    <h3 className="sv-ask">{s.ask}</h3>
     {why && <p className="pj-why">{why}</p>}
     {asked && <p className="pj-asked" role="status">{asked}</p>}
     {live ? <LiveView s={s} feed={feed} now={now} /> : <>
@@ -85,9 +85,9 @@ export function SessionView({ s, all, project, now, roomName, onAnswer, onBack, 
       {did && <Part title="What it did"><p>{did}</p></Part>}
       {left.length > 0 && <Part title="What it left"><ul className="sv-left">{left.map((it, i) => <li key={i}>
         {it.url ? <a className="pj-link" href={it.url} target="_blank" rel="noreferrer">{it.text}</a> : <span>{it.text}</span>}</li>)}</ul></Part>}
-      {s.end?.needs && !needs && <Part title="What it needs"><p>{redact(s.end.needs)}</p></Part>}
-      {s.end?.checks && <details className="sv-more"><summary>How it checked</summary><p>{redact(s.end.checks)}</p></details>}
-      {!reported && <>{s.result && <p className="pj-result">{redact(s.result)}</p>}<p className="pj-hint">Its note has no report (it ended before reports were kept, or it left none).</p></>}
+      {s.end?.needs && !needs && <Part title="What it needs"><p>{s.end.needs}</p></Part>}
+      {s.end?.checks && <details className="sv-more"><summary>How it checked</summary><p>{s.end.checks}</p></details>}
+      {!reported && <>{s.result && <p className="pj-result">{s.result}</p>}<p className="pj-hint">Its note has no report (it ended before reports were kept, or it left none).</p></>}
       {s.video && <div className="pj-row"><a className="pj-link" href={s.video} target="_blank" rel="noreferrer">Watch the walkthrough</a></div>}
       {s.feed && <EndedSteps id={s.feed} />}
     </>}

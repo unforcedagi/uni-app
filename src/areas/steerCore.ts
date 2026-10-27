@@ -3,6 +3,7 @@
 import { ROOT } from "./treeCore.ts";
 import { refKey, stripExt } from "./refs.ts";
 import { subtreePaths, type RawNote, type Task, type TaskTree } from "./taskCore.ts";
+import { redactRaw } from "../projects/sessionWords.ts";
 
 const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);
 const meta = (n: RawNote) => (n.metadata && typeof n.metadata === "object" ? n.metadata : {}) as Record<string, unknown>;
@@ -106,8 +107,10 @@ export function parseRuns(notes: readonly RawNote[], tree: TaskTree): Run[] {
     if (!state || !(RUN_STATES as readonly string[]).includes(state) || node === null) continue;
     // T-125 run notes: `summary`, `worker`, `started_at`, `ended_at`. The 0.1.44 ledger: `what`, `by`, `started`, `updated`. Never the note's path.
     const task = str(m.task);
-    out.push({ id, path, node, task, what: str(m.summary) ?? str(m.what) ?? (task ? `Working on ${task}` : "Working on it"), by: str(m.worker) ?? str(m.by) ?? "", state: state as RunState,
-      started: str(m.started_at) ?? str(m.started), updated: str(m.ended_at) ?? str(m.updated) ?? str(n.updatedAt), result: str(m.result), room: str(m.room)?.replace(/^#/, "") ?? null, channel: str(m.channel), message: str(m.message_ref) });
+    // T-304: a run note's words (its closing line, what it says it is doing, what it came back with) through redactRaw, raw, first
+    const said = (v: unknown) => str(typeof v === "string" ? redactRaw(v) : v);
+    out.push({ id, path, node, task, what: said(m.summary) ?? said(m.what) ?? (task ? `Working on ${task}` : "Working on it"), by: str(m.worker) ?? str(m.by) ?? "", state: state as RunState,
+      started: str(m.started_at) ?? str(m.started), updated: str(m.ended_at) ?? str(m.updated) ?? str(n.updatedAt), result: said(m.result), room: str(m.room)?.replace(/^#/, "") ?? null, channel: str(m.channel), message: str(m.message_ref) });
   }
   return out;
 }

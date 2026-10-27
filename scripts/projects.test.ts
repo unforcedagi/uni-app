@@ -5,8 +5,10 @@ import assert from "node:assert/strict";
 import { ModelError, ago, whyWords, archivePlan, archiveProject, cannotStart, isLive, liveInArea, liveSessions, makeProject, problems, restoreProject, sessionsOf, span, startSession, stateWords, stepSession, stopSession, finishSession, timeline, timelineWindow, type Area, type Work } from "../src/projects/model.ts";
 import { HEARD_MS, freshen, plainTitle, plainWords, resultWords, sessionState, workFrom } from "../src/projects/live.ts";
 import { actionMessage } from "../src/projects/actions.ts";
-import { HIDDEN, REDACT_RULES, answerDraft, askOf, endWords, leftItems, parseFeed, redact } from "../src/projects/sessionWords.ts";
+import { FOLD, HIDDEN, REDACT_RULES, answerDraft, askOf, endWords, leftItems, parseFeed, redactRaw } from "../src/projects/sessionWords.ts";
 import { existsSync, readFileSync } from "node:fs";
+import { parseRuns } from "../src/areas/steerCore.ts";
+import { buildTaskTree, parseNodes } from "../src/areas/taskCore.ts";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { endWhy } from "../src/projects/live.ts";
@@ -286,8 +288,8 @@ check("didn't finish says why, in a sentence: stopped on purpose, failed, ran ou
   assert.equal(head("run-catalogue"), "Stopped to ask you something.");
   assert.equal(head("run-handbook"), "Says it finished, but nothing it left could be checked yet.");
   assert.equal(head("run-about"), "Finished.");
-  const s = { ...S("run-donate-old"), end: { why: "failed" as const, note: "exit status 1; Bearer abcdefghijklmnopqrstu", resumesAt: null, did: null, left: null, checks: null, needs: null } };
-  assert.equal(endWords(s, NOW)!.more, `What went wrong: exit status 1; ${HIDDEN}`);
+  const s = { ...S("run-donate-old"), end: { why: "failed" as const, note: "exit status 1", resumesAt: null, did: null, left: null, checks: null, needs: null } };
+  assert.equal(endWords(s, NOW)!.more, "What went wrong: exit status 1");
   for (const why of ["turns", "context"] as const) assert.match(endWords({ ...s, end: { ...s.end, why } }, NOW)!.head, /ran out of room/);
   assert.match(endWords({ ...s, end: { ...s.end, why: "lost" } }, NOW)!.head, /worker was lost/);
   assert.match(endWords({ ...s, state: "silent", end: null }, NOW)!.head, /nothing has been heard from it/);
@@ -327,26 +329,59 @@ const expand = (t: string) => t.replace(/\{\{(.+?)\*(\d+)\}\}/g, (_, x: string, 
 const vcases: { from: string; name: string; in: string; out: string }[] = vdoc.cases.map((c: any) => ({ ...c, in: expand(c.in), out: expand(c.out) }));
 check("redaction: the rules are the shared ones (the same list as mts)", () => {
   assert.deepEqual(REDACT_RULES, vdoc.rules);
+  assert.deepEqual(FOLD, vdoc.fold);
   assert.equal(HIDDEN, vdoc.hidden);
 });
 check("redaction: every shared case (both reviews and the addendum), from the first secret-like key or shape to the end", () => {
-  for (const c of vcases) assert.equal(redact(c.in), c.out, `${c.from}: ${c.name}`);
+  for (const c of vcases) assert.equal(redactRaw(c.in), c.out, `${c.from}: ${c.name}`);
 });
 check("redaction: the vectors file is mts's (when an mts checkout is at MTS_DIR or ~/Code/mts-launcher)", () => {
   const peer = join(process.env.MTS_DIR ?? join(homedir(), "Code/mts-launcher"), "tests/redaction_vectors.json");
   if (!existsSync(peer)) { console.log(`skip: no mts copy at ${peer}`); return; }
   assert.equal(readFileSync(peer, "utf8"), readFileSync(VECTORS, "utf8"));
 });
-check("redaction on screen: a step, what it left, and a link: nothing of a secret, across lines too", () => {
+/** The pieces (4+ letters or digits) of a case's hidden part that show, as whole words, in `out` (and aren't in its visible part). */
+function leaks(c: { in: string; out: string }, out: string): string[] {
+  const shown = c.out.endsWith(HIDDEN) ? c.out.slice(0, c.out.length - HIDDEN.length) : c.out, gone = c.in.slice(shown.length);
+  return [...gone.matchAll(/[\p{L}\p{N}_]{4,}/gu)].map((m) => m[0])
+    .filter((w) => !shown.includes(w) && new RegExp(`(?<![\\p{L}\\p{N}_])${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}_])`, "u").test(out));
+}
+check("redaction, the full real path: a run note holding each case in every field, read by workFrom, and all the view says of it", () => {
+  const base = vault.runs.find((r) => r.id === "run-catalogue")!;
   for (const c of vcases.filter((x) => x.out !== x.in)) {
-    const one = c.in.replace(/\s+/g, " ");
-    assert.equal(parseFeed(`- 2026-10-27T10:00:00Z · said · ${one}`)[0]?.text ?? "", redact(one), c.name);
-    // what it left: no piece (4+ characters) of the hidden part shows, unless the visible part has it too
-    const shown = c.out.slice(0, c.out.length - HIDDEN.length), gone = c.in.slice(shown.length);
-    const left = leftItems(c.in).map((i) => i.text).join("\n");
-    for (const piece of gone.split(/[^A-Za-z0-9]+/).filter((w) => w.length >= 4 && !shown.includes(w))) assert.ok(!left.includes(piece), `${c.name}: ${piece}`);
+    const one = c.in.replace(/\n/g, " ");
+    const runs = (["blocked", "running"] as const).map((state, i) => ({ ...base, id: `r-${i}`, path: `Runs/2026-10-20 ${one}`,
+      metadata: { ...base.metadata, state, doing_now: c.in, doing_at: new Date(NOW - MIN).toISOString(), summary: `mts abcd1234: completed, evidence: file /w/${c.in}`,
+        end_note: c.in, video: `https://example.com/${c.in}`, ended: "failed", report: { summary: c.in, artifacts: c.in, checks: c.in, open: c.in } } }));
+    const w = workFrom({ nodes: vault.nodes, runs, tasks: vault.tasks }, NOW);
+    const shown: string[] = [];
+    for (const s of w.sessions) {
+      const e = endWords(s, NOW);
+      shown.push(s.ask, s.now ?? "", s.result ?? "", s.video ?? "", ...Object.values(s.end ?? {}).map((v) => (typeof v === "string" ? v : "")),
+        e?.head ?? "", e?.more ?? "", askOf(s), answerDraft(s, "A project"), ...leftItems(s.end?.left).flatMap((i) => [i.text, i.url ?? ""]));
+    }
+    assert.equal(w.sessions.length, 2, c.name);
+    // the words this test wraps around each case (the link's host, the closing line's) and the view's own words (the Answer draft's
+    // "About the session on … which asks") are not the case's
+    const wrap = new Set(["https", "example", "evidence", "file", "completed", "abcd1234", "About", "session", "which", "asks"]);
+    assert.deepEqual(leaks(c, shown.join("\n")).filter((x) => !wrap.has(x)), [], `${c.from}: ${c.name}`);
   }
-  assert.deepEqual(leftItems("the config\npassword: violet\nmeadow phrase").map((i) => i.text), ["the config", HIDDEN]);
-  assert.deepEqual(leftItems("https://example.com/share?token=abc123"), [{ text: `https://example.com/share?${HIDDEN}`, url: null }], "a link that carried a secret is not a link");
+});
+check("redaction, the full real path: the area's running list (parseRuns) reads a run note's words through redactRaw too", () => {
+  const { nodes, rootPath } = parseNodes([{ id: "u", path: "Uni", tags: ["uni"], metadata: {} }, { id: "a", path: "Areas/Larder", tags: ["area"], metadata: { parent: "Uni" } }] as never, "uni");
+  const tree = buildTaskTree(nodes, rootPath);
+  for (const c of vcases.filter((x) => x.out !== x.in)) {
+    const runs = parseRuns([{ id: "r1", path: "Runs/x", tags: ["run"], metadata: { state: "running", node: "Areas/Larder", summary: c.in, result: c.in } }] as never, tree);
+    assert.equal(runs.length, 1, c.name);
+    assert.deepEqual(leaks(c, `${runs[0].what}\n${runs[0].result ?? ""}`), [], `${c.from}: ${c.name}`);
+  }
+});
+check("redaction, the full real path: a steps note holding each case, read by parseFeed", () => {
+  for (const c of vcases.filter((x) => x.out !== x.in)) {
+    const one = c.in.replace(/\n/g, " ");
+    const items = parseFeed(`# Steps\n\n- 2026-10-27T10:00:00Z · said · ${one}\n- 2026-10-27T10:00:01Z · step · ${one}\n`);
+    assert.equal(items.length, 2, c.name);
+    assert.deepEqual(leaks(c, items.map((i) => i.text).join("\n")), [], `${c.from}: ${c.name}`);
+  }
 });
 if (failed) process.exit(1);

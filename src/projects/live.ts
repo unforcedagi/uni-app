@@ -8,6 +8,7 @@
 //   repo `folder` names. What it is doing now is `doing_now` (mts writes it while it runs); words, never ids.
 import type { RawNote } from "../areas/taskCore.ts";
 import { isPrivateName } from "../areas/treeRooms.ts";
+import { redactRaw } from "./sessionWords.ts";
 import { END_WHYS, isFolder, makeProject, ModelError, type Area, type EndWhy, type Project, type ProjectStatus, type Session, type SessionEnd, type SessionState, type Work } from "./model.ts";
 
 /** A project the model can't take, named so it is never silently missing. `areaPath`: the area it sits under (even one with no room), so
@@ -62,7 +63,7 @@ export function resultWords(summary: unknown, state: SessionState): string | nul
   if (!s) return null;
   const file = /evidence: file (\S+)/.exec(s)?.[1];
   if (file) return `Left ${lastName(file)}.`;
-  if (/evidence: commit [0-9a-f]{6,}/.test(s)) return "Left a commit.";
+  if (/evidence: commit (?:[0-9a-f]{6,}|\[hidden\])/.test(s)) return "Left a commit.";
   if (/^unverified:/.test(s)) return "Says it finished; nothing it left could be checked yet.";
   if (/unit gone/.test(s)) return "Its worker was gone; closed when the old runs were tidied.";
   // the launcher's bare state line says nothing the state word doesn't
@@ -121,6 +122,16 @@ export const heardFrom = (s: Pick<Session, "nowAt" | "startedAt">, now: number) 
 export function freshen<W extends Work>(w: W, now = Date.now()): W {
   if (!w.sessions.some((s) => s.state === "running" && !heardFrom(s, now))) return w;
   return { ...w, sessions: w.sessions.map((s) => (s.state === "running" && !heardFrom(s, now) ? { ...s, state: "silent" as const, endedAt: s.nowAt ?? s.startedAt, now: null } : s)) };
+}
+
+/** The words of a run note's metadata through redactRaw (raw, before anything else); its ids, times, counts and states as they are. */
+const SAID = ["doing_now", "summary", "end_note", "video"] as const;
+function saidSafe(m: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...m };
+  for (const k of SAID) if (typeof m[k] === "string") out[k] = redactRaw(m[k] as string);
+  if (m.report && typeof m.report === "object" && !Array.isArray(m.report))
+    out.report = Object.fromEntries(Object.entries(m.report as Record<string, unknown>).map(([k, v]) => [k, typeof v === "string" ? redactRaw(v) : null]));
+  return out;
 }
 
 /** Areas, projects and sessions from the vault's node, run and task notes. Nothing here throws on odd data: odd notes are skipped or gaps. */
@@ -206,8 +217,11 @@ export function workFrom(src: Sources, now = Date.now()): LiveWork {
   const asked = new Map<string, { kind: "fresh" | "resume"; attempt: string }>();
   /** The mts run id a run note belongs to: its `attempt`, else the run id in an mts worker unit `mts-<run>`. */
   const attemptOf = (m: Record<string, unknown>) => str(m.attempt) ?? /^mts-([a-z0-9]{8})$/.exec(str(m.worker) ?? "")?.[1] ?? null;
-  for (const r of src.runs) {
-    const m = meta(r), id = keyOf(r);
+  for (const r0 of src.runs) {
+    // T-304: what a run note says in words (its title, what it is doing, its closing line, its report, its end note, its link) goes
+    // through redactRaw first, raw, as the note is read: nothing later (plainWords, plainTitle, a cut) sees it unredacted
+    const r = { ...r0, path: typeof r0.path === "string" ? redactRaw(r0.path) : r0.path };
+    const m = saidSafe(meta(r0)), id = keyOf(r);
     const startedAt = time(m.started_at);
     if (!id || startedAt === null) continue;
     const task = str(m.task)?.toUpperCase() ?? null;

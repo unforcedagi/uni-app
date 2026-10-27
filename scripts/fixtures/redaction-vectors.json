@@ -1,5 +1,5 @@
 {
- "about": "T-304: the redaction rules mts and the uni-app share, and the cases both test suites run. Everything from the first secret-like key or key shape to the end of the text is hidden. Made-up values only; {{x*n}} repeats x n times (so no key-shaped literal is committed). The same file is tests/redaction_vectors.json in mts-launcher and scripts/fixtures/redaction-vectors.json in uni-app.",
+ "about": "T-304: the redaction rules mts and the uni-app share, and the cases both test suites run. The text is matched after NFKD, with marks and invisible format characters dropped and lookalike letters folded to Latin (fold); everything from the first secret-like key or key shape to the end of the text is hidden. Made-up values only; {{x*n}} repeats x n times (so no key-shaped literal is committed). The same file is tests/redaction_vectors.json in mts-launcher and scripts/fixtures/redaction-vectors.json in uni-app.",
  "hidden": "[hidden]",
  "rules": [
   {
@@ -24,11 +24,25 @@
    "mix": false
   },
   {
-   "name": "key-shape",
-   "re": "(?<![A-Za-z0-9])(?:sk-[A-Za-z0-9_-]{6,}|gh[pousr]_[A-Za-z0-9]{6,}|github_pat_|xox[abprse]-|nsec1[02-9ac-hj-np-z]{6,}|eyJ[A-Za-z0-9_-]{6,}|AIza[0-9A-Za-z_-]{10,}|(?:AKIA|ASIA)[0-9A-Z]{12,})",
+   "name": "key-prefix",
+   "re": "sk-(?:ant|proj|live|test|svcacct|admin)-|gh[pousr]_[A-Za-z0-9]{6,}|github_pat_|xox[abprse]-|nsec1[02-9ac-hj-np-z]{6,}|eyJ[A-Za-z0-9_-]{10,}|AIza[0-9A-Za-z_-]{10,}|(?:AKIA|ASIA)[0-9A-Z]{12,}",
    "flags": "",
    "guard": null,
    "mix": false
+  },
+  {
+   "name": "sk-key",
+   "re": "(?<![A-Za-z0-9])sk-[A-Za-z0-9_-]{6,}",
+   "flags": "",
+   "guard": null,
+   "mix": false
+  },
+  {
+   "name": "sk-run",
+   "re": "sk-[A-Za-z0-9_-]{20,}",
+   "flags": "",
+   "guard": null,
+   "mix": true
   },
   {
    "name": "url-credentials",
@@ -52,6 +66,70 @@
    "mix": true
   }
  ],
+ "fold": {
+  "\u0430": "a",
+  "\u0435": "e",
+  "\u043e": "o",
+  "\u0440": "p",
+  "\u0441": "c",
+  "\u0443": "y",
+  "\u0445": "x",
+  "\u0455": "s",
+  "\u0456": "i",
+  "\u0458": "j",
+  "\u0501": "d",
+  "\u051b": "q",
+  "\u051d": "w",
+  "\u04bb": "h",
+  "\u04cf": "l",
+  "\u043a": "k",
+  "\u043c": "m",
+  "\u0442": "t",
+  "\u0432": "b",
+  "\u043d": "h",
+  "\u0410": "A",
+  "\u0412": "B",
+  "\u0415": "E",
+  "\u041a": "K",
+  "\u041c": "M",
+  "\u041d": "H",
+  "\u041e": "O",
+  "\u0420": "P",
+  "\u0421": "C",
+  "\u0422": "T",
+  "\u0425": "X",
+  "\u0423": "Y",
+  "\u0405": "S",
+  "\u0406": "I",
+  "\u0408": "J",
+  "\u03b1": "a",
+  "\u03bf": "o",
+  "\u03c1": "p",
+  "\u03c4": "t",
+  "\u03c5": "u",
+  "\u03bd": "v",
+  "\u03ba": "k",
+  "\u03b9": "i",
+  "\u03b5": "e",
+  "\u0391": "A",
+  "\u0392": "B",
+  "\u0395": "E",
+  "\u0396": "Z",
+  "\u0397": "H",
+  "\u0399": "I",
+  "\u039a": "K",
+  "\u039c": "M",
+  "\u039d": "N",
+  "\u039f": "O",
+  "\u03a1": "P",
+  "\u03a4": "T",
+  "\u03a5": "Y",
+  "\u03a7": "X",
+  "\u0131": "i",
+  "\u0237": "j",
+  "\u0251": "a",
+  "\u0261": "g"
+ },
  "cases": [
   {
    "from": "tt6oiyni",
@@ -118,6 +196,78 @@
    "name": "env assignment",
    "in": "export API_KEY=abc123",
    "out": "export [hidden]"
+  },
+  {
+   "from": "gayyub1d",
+   "name": "a fenced password in a report field",
+   "in": "```PASSWORD=\"violet\n    meadow phrase\"",
+   "out": "```[hidden]"
+  },
+  {
+   "from": "gayyub1d",
+   "name": "a key shape glued to a word",
+   "in": "buildsk-ant-abc123",
+   "out": "[hidden]"
+  },
+  {
+   "from": "gayyub1d",
+   "name": "a key shape glued to a word, in a Read label",
+   "in": "Reading buildsk-ant-abc123",
+   "out": "Reading [hidden]"
+  },
+  {
+   "from": "gayyub1d",
+   "name": "a key shape glued to a word, in a Bash label",
+   "in": "Running buildsk-ant-abc123",
+   "out": "Running [hidden]"
+  },
+  {
+   "from": "gayyub1d",
+   "name": "fullwidth password",
+   "in": "\uff50\uff41\uff53\uff53\uff57\uff4f\uff52\uff44=violet meadow phrase",
+   "out": "[hidden]"
+  },
+  {
+   "from": "gayyub1d",
+   "name": "a zero-width space inside password",
+   "in": "pass\u200bword=violet meadow phrase",
+   "out": "[hidden]"
+  },
+  {
+   "from": "gayyub1d",
+   "name": "a Cyrillic a in password",
+   "in": "p\u0430ssword=violet meadow phrase",
+   "out": "[hidden]"
+  },
+  {
+   "from": "gayyub1d",
+   "name": "fullwidth password after words",
+   "in": "Note: \uff50\uff41\uff53\uff53\uff57\uff4f\uff52\uff44=violet",
+   "out": "Note: [hidden]"
+  },
+  {
+   "from": "gayyub1d",
+   "name": "a Greek o in token",
+   "in": "Set t\u03bfken=abc123 now",
+   "out": "Set [hidden]"
+  },
+  {
+   "from": "gayyub1d",
+   "name": "accents on password",
+   "in": "p\u00e4ssw\u00f6rd: violet meadow",
+   "out": "[hidden]"
+  },
+  {
+   "from": "gayyub1d",
+   "name": "a soft hyphen inside password",
+   "in": "pass\u00adword=violet",
+   "out": "[hidden]"
+  },
+  {
+   "from": "gayyub1d",
+   "name": "a bare sk- key glued to a word",
+   "in": "buildsk-{{a1*12}}",
+   "out": "[hidden]"
   },
   {
    "from": "shapes",
@@ -295,15 +445,33 @@
   },
   {
    "from": "plain",
-   "name": "完了",
-   "in": "完了",
-   "out": "完了"
+   "name": "\u5b8c\u4e86",
+   "in": "\u5b8c\u4e86",
+   "out": "\u5b8c\u4e86"
   },
   {
    "from": "plain",
    "name": "line one",
    "in": "line one\nline two",
    "out": "line one\nline two"
+  },
+  {
+   "from": "plain",
+   "name": "the risk-assessment is done",
+   "in": "the risk-assessment is done",
+   "out": "the risk-assessment is done"
+  },
+  {
+   "from": "plain",
+   "name": "Editing task-list.tsx",
+   "in": "Editing task-list.tsx",
+   "out": "Editing task-list.tsx"
+  },
+  {
+   "from": "plain",
+   "name": "Reading caf\u00e9.md",
+   "in": "Reading caf\u00e9.md",
+   "out": "Reading caf\u00e9.md"
   },
   {
    "from": "plain",
