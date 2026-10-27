@@ -12,8 +12,9 @@ const LONG_END = 'and that is the whole plan for the beds.';
 
 /** The app's IPC with Messages' door faked: one conversation holding every kind of message. Calls are counted in
  * `__calls`; `__failWords` makes the next transcript ask fail once. */
-async function boot(page: Page, signedOut = false) {
-  await page.addInitScript(([png, words, longEnd, out]) => {
+/** `photos`: that many more pictures at the end of Robin's conversation, each `photoBytes` long (a picture, padded). */
+async function boot(page: Page, signedOut = false, photos = 0, photoBytes = 0) {
+  await page.addInitScript(([png, words, longEnd, out, nPhotos, padTo]) => {
     const w = window as any;
     localStorage.setItem('uni.tabs.v1', JSON.stringify({ v: 1, tabs: [{ id: 'messages', kind: 'messages', title: 'Messages' }], active: 'messages', recent: ['messages'] }));
     localStorage.setItem('uni.messages.seen.v1', '1');
@@ -52,6 +53,13 @@ async function boot(page: Page, signedOut = false) {
       m({ kind: 'media', body: 'Voice message (0:02)', media: media({ kind: 'voice', name: 'Voice message.ogg', mime: 'audio/wav', size: tone.byteLength, duration_ms: 2000 }) }),
       m({ body: 'About that, never mind.', reply: { event_id: '$gone', sender_name: null, text: null, unavailable: true } }),
     ];
+    for (let k = 0; k < (nPhotos as number); k++) w.__thread.push(m({ kind: 'media', body: 'Photo', media: media({ kind: 'image', name: `photo-${k}.png`, mime: 'image/png', size: null, width: 640, height: 480 }) }));
+    // every object URL the page makes and hasn't let go of, with its size: what attachments hold in memory
+    w.__live = new Map<string, number>();
+    w.__made = 0;
+    const make = URL.createObjectURL.bind(URL), revoke = URL.revokeObjectURL.bind(URL);
+    URL.createObjectURL = (b: Blob) => { const u = make(b); w.__live.set(u, b.size); w.__made++; return u; };
+    URL.revokeObjectURL = (u: string) => { w.__live.delete(u); revoke(u); };
     const callbacks = new Map<number, (e: unknown) => void>();
     const listeners = new Map<number, { event: string; handler: number }>();
     let nextId = 1;
@@ -71,7 +79,11 @@ async function boot(page: Page, signedOut = false) {
           case 'messages_media': {
             const row = w.__thread.find((r: any) => r.event_id === args.eventId);
             await new Promise((r) => setTimeout(r, 50));
-            return row?.media?.kind === 'image' ? picture.slice(0) : tone.slice(0);
+            if (row?.media?.kind !== 'image') return tone.slice(0);
+            if (!padTo) return picture.slice(0);
+            const big = new Uint8Array(padTo as number);
+            big.set(new Uint8Array(picture));
+            return big.buffer;
           }
           case 'messages_transcript': {
             await new Promise((r) => setTimeout(r, 80));
@@ -93,7 +105,7 @@ async function boot(page: Page, signedOut = false) {
       },
     };
     w.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: (_event: string, id: number) => listeners.delete(id) };
-  }, [PNG, WORDS, LONG_END, signedOut] as const);
+  }, [PNG, WORDS, LONG_END, signedOut, photos, photoBytes] as const);
   await page.goto('/');
   if (signedOut) return;
   await page.getByRole('navigation', { name: 'Conversations' }).getByRole('button', { name: /Robin Vale/ }).click({ timeout: 15_000 });
@@ -240,4 +252,64 @@ test('signing in: a "live" that arrives before the sign-in answer is not undone 
   // nothing more will come: the core sends a status only when it changes
   await page.waitForTimeout(500);
   await expect(page.locator('.msgs-live')).toHaveText('LIVE');
+});
+
+/** Scroll Robin's conversation from its start to its end, a screen at a time, each screen's pictures loaded before the next. */
+async function scrollThrough(page: Page) {
+  const el = log(page);
+  await el.evaluate((l) => { l.scrollTop = 0; });
+  for (let i = 0; i < 400; i++) {
+    await expect.poll(() => el.evaluate((l) => {
+      const box = l.getBoundingClientRect();
+      return [...l.querySelectorAll('.msgs-picture')].filter((p) => { const r = p.getBoundingClientRect(); return r.bottom > box.top && r.top < box.bottom; })
+        .every((p) => !!p.querySelector('img'));
+    }), { timeout: 10_000 }).toBe(true);
+    const done = await el.evaluate((l) => { const end = l.scrollTop + l.clientHeight >= l.scrollHeight - 2; l.scrollTop += l.clientHeight * 0.8; return end; });
+    if (done) break;
+  }
+}
+const live = (page: Page) => page.evaluate(() => { const w = window as any; return { count: w.__live.size as number, bytes: [...w.__live.values()].reduce((a: number, b: number) => a + b, 0) as number, made: w.__made as number }; });
+
+test('Codex 9b8p17d9: paging through many pictures keeps at most 40 in memory', async ({ page }) => {
+  await boot(page, false, 70);
+  await scrollThrough(page);
+  const after = await live(page);
+  // every picture was shown, and no more than the limit is held
+  expect(after.made).toBeGreaterThanOrEqual(70);
+  expect(after.count).toBeLessThanOrEqual(40);
+  // a picture scrolled away is let go (its placeholder keeps its place); scrolled back to, it shows again
+  await expect(msg(page, '$e4').locator('img')).toHaveCount(0);
+  await msg(page, '$e4').scrollIntoViewIfNeeded();
+  await expect.poll(() => msg(page, '$e4').locator('img').evaluate((i: HTMLImageElement) => i.complete && i.naturalWidth)).toBe(64);
+  expect((await live(page)).count).toBeLessThanOrEqual(40);
+});
+
+test('Codex 9b8p17d9: paging through large pictures keeps at most 150 MB in memory', async ({ page }, info) => {
+  test.skip(info.project.name !== 'desktop', 'one size is enough: 240 MB of pictures');
+  await boot(page, false, 12, 20 * 1024 * 1024);
+  await scrollThrough(page);
+  const after = await live(page);
+  expect(after.made).toBeGreaterThanOrEqual(12);
+  expect(after.bytes).toBeLessThanOrEqual(150 * 1024 * 1024);
+});
+
+test('Codex 9b8p17d9: a voice message keeps playing off screen; paused and let go, it plays on from where it stopped', async ({ page }) => {
+  await boot(page, false, 30);
+  const voice = msg(page, '$e3');
+  const away = () => log(page).evaluate((l) => { l.scrollTop = l.scrollHeight; });
+  await voice.scrollIntoViewIfNeeded();
+  await voice.getByRole('button', { name: /^Play voice message/ }).click();
+  await expect(voice.getByRole('button', { name: 'Pause voice message' })).toBeAttached();
+  await away();
+  // off screen, and still sounding: held while it plays
+  const t1 = await voice.locator('audio').evaluate((a: HTMLAudioElement) => a.currentTime);
+  await expect.poll(() => voice.locator('audio').evaluate((a: HTMLAudioElement) => !a.paused && a.currentTime)).toBeGreaterThan(Math.max(t1, 0.5));
+  const stopped = await voice.locator('audio').evaluate((a: HTMLAudioElement) => { a.pause(); return a.currentTime; });
+  expect(stopped).toBeGreaterThan(0.2);
+  // paused off screen: let go
+  await expect(voice.locator('audio')).toHaveCount(0);
+  await voice.scrollIntoViewIfNeeded();
+  await voice.getByRole('button', { name: /^Play voice message/ }).click();
+  await expect.poll(() => voice.locator('audio').evaluate((a: HTMLAudioElement) => a.currentTime)).toBeGreaterThan(stopped);
+  await expect(voice.getByRole('button', { name: 'Pause voice message' })).toBeVisible();
 });

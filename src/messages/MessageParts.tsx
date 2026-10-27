@@ -37,20 +37,37 @@ function useSeen<T extends Element>(): [RefObject<T | null>, boolean] {
   return [ref, seen];
 }
 
-/** An attachment's object URL, once asked for (`want`), held while this is on screen. */
-function useMediaUrl(roomId: string, eventId: string, mime: string, want: boolean): { url: string | null; problem: string | null; retry: () => void } {
+/** Whether an element is on screen now, or near it (`margin`): it changes both ways, unlike useSeen. */
+function useOnScreen<T extends Element>(margin = "400px"): [RefObject<T | null>, boolean] {
+  const ref = useRef<T | null>(null);
+  const [on, setOn] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (typeof IntersectionObserver === "undefined") { setOn(true); return; }
+    const io = new IntersectionObserver((es) => setOn(es[es.length - 1].isIntersecting), { rootMargin: margin });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [margin]);
+  return [ref, on];
+}
+
+/** An attachment's object URL while `active` (Codex review 9b8p17d9: on screen, or playing). It is held only then: once it
+ * isn't, it is let go (the element shows its placeholder) and the cache may drop it within its limits; active again,
+ * it is asked for again (from the cache, or fetched). */
+function useMediaUrl(roomId: string, eventId: string, mime: string, active: boolean): { url: string | null; problem: string | null; retry: () => void } {
   const [url, setUrl] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [tries, setTries] = useState(0);
-  useEffect(() => holdMedia(roomId, eventId), [roomId, eventId]);
   useEffect(() => {
-    if (!want || url) return;
+    if (!active) { setUrl(null); return; }
+    const release = holdMedia(roomId, eventId);
     let alive = true;
     setProblem(null);
     mediaUrl(roomId, eventId, mime).then((u) => { if (alive) setUrl(u); }, (e) => { if (alive) setProblem(asMessagesErr(e).message); });
-    return () => { alive = false; };
-  }, [roomId, eventId, mime, want, url, tries]);
-  return { url, problem, retry: () => setTries((n) => n + 1) };
+    return () => { alive = false; release(); };
+  }, [roomId, eventId, mime, active, tries]);
+  return { url: active ? url : null, problem, retry: () => setTries((n) => n + 1) };
 }
 
 /** One player sounds at a time: starting one pauses the one before. */
@@ -64,9 +81,11 @@ function playOnly(el: HTMLMediaElement) {
  * clip says its own (a voice note's container often doesn't). */
 function Player({ roomId, eventId, media, label }: { roomId: string; eventId: string; media: Media; label: string }) {
   const [want, setWant] = useState(false);
-  const { url, problem, retry } = useMediaUrl(roomId, eventId, media.mime, want);
-  const audio = useRef<HTMLAudioElement | null>(null);
+  const [box, onScreen] = useOnScreen<HTMLDivElement>();
   const [playing, setPlaying] = useState(false);
+  // the clip is held while it plays, or while it's on screen once asked for; paused off screen, it's let go
+  const { url, problem, retry } = useMediaUrl(roomId, eventId, media.mime, want && (onScreen || playing));
+  const audio = useRef<HTMLAudioElement | null>(null);
   const [at, setAt] = useState(0);
   const [length, setLength] = useState<number | null>(media.duration_ms != null ? media.duration_ms / 1000 : null);
   const [broken, setBroken] = useState<string | null>(null);
@@ -84,7 +103,8 @@ function Player({ roomId, eventId, media, label }: { roomId: string; eventId: st
   };
   const toggle = () => {
     const el = audio.current;
-    if (!url || !el) { pending.current.play = true; setWant(true); if (problem) retry(); return; }
+    // not here (yet, or let go): fetched, then played from where it was left
+    if (!url || !el) { pending.current = { play: true, seek: pending.current.seek ?? (at > 0 ? at : null) }; setWant(true); if (problem) retry(); return; }
     if (el.paused) { playOnly(el); void el.play().catch(() => {}); } else el.pause();
   };
   const seek = (v: number) => {
@@ -94,9 +114,9 @@ function Player({ roomId, eventId, media, label }: { roomId: string; eventId: st
     else { pending.current.seek = v; setWant(true); }
   };
   const max = length ?? 0;
-  const loading = want && !url && !problem;
+  const loading = want && pending.current.play && !url && !problem;
   const name = playing ? `Pause ${label}` : `Play ${label}${length != null ? `, ${clock(length)}` : ""}`;
-  return <div className={`msgs-player ${playing ? "playing" : ""}`}>
+  return <div ref={box} className={`msgs-player ${playing ? "playing" : ""}`}>
     <button type="button" className="msgs-play" aria-label={name} disabled={loading} onClick={toggle}>
       <span aria-hidden="true">{loading ? "…" : playing ? "❚❚" : "▶"}</span>
     </button>
@@ -104,7 +124,8 @@ function Player({ roomId, eventId, media, label }: { roomId: string; eventId: st
       aria-label={`Position in ${label}`} aria-valuetext={`${clock(at)} of ${clock(length)}`} onChange={(e) => seek(Number(e.target.value))} />
     <span className="msgs-time" aria-hidden="true">{at > 0 || playing ? `${clock(at)} / ${clock(length)}` : clock(length)}</span>
     {url && <audio ref={audio} src={url} preload="auto" onLoadedMetadata={ready} onDurationChange={() => { const el = audio.current; if (el && Number.isFinite(el.duration) && el.duration > 0) setLength(el.duration); }}
-      onTimeUpdate={() => setAt(audio.current?.currentTime ?? 0)} onPlay={() => { setPlaying(true); setBroken(null); }} onPause={() => setPlaying(false)}
+      onTimeUpdate={() => setAt(audio.current?.currentTime ?? 0)} onPlay={() => { setPlaying(true); setBroken(null); }}
+      onPause={() => { setPlaying(false); if (audio.current) pending.current.seek = audio.current.currentTime || null; }}
       onEnded={() => { setPlaying(false); setAt(0); if (audio.current) audio.current.currentTime = 0; }}
       onError={() => { setPlaying(false); setBroken("This device can't play this recording."); }} />}
     {(problem || broken) && <p className="msgs-media-problem" role="status">{broken ?? `Couldn't load it: ${problem}`}</p>}
@@ -136,11 +157,11 @@ function Words({ roomId, eventId, auto }: { roomId: string; eventId: string; aut
 
 /** A picture: its shape held while it loads, then shown; a tap opens it large. */
 function Picture({ roomId, eventId, media, onOpen }: { roomId: string; eventId: string; media: Media; onOpen: (url: string) => void }) {
-  const [ref, seen] = useSeen<HTMLButtonElement>();
-  const { url, problem, retry } = useMediaUrl(roomId, eventId, media.mime, seen);
+  const [ref, onScreen] = useOnScreen<HTMLButtonElement>();
+  const { url, problem, retry } = useMediaUrl(roomId, eventId, media.mime, onScreen);
   const box = pictureBox(media);
   const alt = media.caption ?? media.name ?? "Photo";
-  return <button ref={ref} type="button" className="msgs-picture" style={{ width: box.width, height: url ? undefined : box.height }} aria-label={`Photo: ${alt}. Open large`}
+  return <button ref={ref} type="button" className="msgs-picture" style={{ width: box.width, height: box.height }} aria-label={`Photo: ${alt}. Open large`}
     onClick={() => (url ? onOpen(url) : problem ? retry() : undefined)}>
     {url ? <img src={url} alt="" width={box.width} height={box.height} />
       : <span className="msgs-picture-wait">{problem ? `Couldn't load the photo. Tap to try again.` : "Photo"}</span>}
@@ -150,12 +171,17 @@ function Picture({ roomId, eventId, media, onOpen }: { roomId: string; eventId: 
 /** A video plays inline once tapped (fetched then). */
 function Video({ roomId, eventId, media }: { roomId: string; eventId: string; media: Media }) {
   const [want, setWant] = useState(false);
-  const { url, problem, retry } = useMediaUrl(roomId, eventId, media.mime, want);
+  const [ref, onScreen] = useOnScreen<HTMLDivElement>();
+  const [playing, setPlaying] = useState(false);
+  // held while it plays or is on screen; paused off screen it's let go, and tapping again fetches it back
+  const { url, problem, retry } = useMediaUrl(roomId, eventId, media.mime, want && (onScreen || playing));
   const box = pictureBox(media);
-  if (url) return <video className="msgs-video" src={url} controls autoPlay playsInline width={box.width} onPlay={(e) => playOnly(e.currentTarget)} />;
-  return <button type="button" className="msgs-video-wait" style={{ width: box.width, height: box.height }} disabled={want && !problem} onClick={() => { setWant(true); if (problem) retry(); }}>
-    <span aria-hidden="true">▶</span> {problem ? "Couldn't load the video. Try again" : want ? "Loading the video…" : `Play video${media.duration_ms ? `, ${clock(media.duration_ms / 1000)}` : ""}${media.size ? ` (${sizeWords(media.size)})` : ""}`}
-  </button>;
+  useEffect(() => { if (!url) setPlaying(false); }, [url]);
+  return <div ref={ref} className="msgs-video-box">{url ? <video className="msgs-video" src={url} controls autoPlay playsInline width={box.width}
+    onPlay={(e) => { playOnly(e.currentTarget); setPlaying(true); }} onPause={() => setPlaying(false)} onEnded={() => setPlaying(false)} />
+  : <button type="button" className="msgs-video-wait" style={{ width: box.width, height: box.height }} disabled={want && onScreen && !problem} onClick={() => { setWant(true); if (problem) retry(); }}>
+    <span aria-hidden="true">▶</span> {problem ? "Couldn't load the video. Try again" : want && onScreen ? "Loading the video…" : `Play video${media.duration_ms ? `, ${clock(media.duration_ms / 1000)}` : ""}${media.size ? ` (${sizeWords(media.size)})` : ""}`}
+  </button>}</div>;
 }
 
 /** A file: its name, type and size, and Open (the app the system picks). */

@@ -39,7 +39,8 @@ const MEDIA_KEEP_BYTES = 150 * 1024 * 1024;
 type Kept = { url: string; size: number };
 const shown = new Map<string, Kept>();
 const fetching = new Map<string, Promise<string>>();
-/** How many attachments on screen hold each URL: one in use is never revoked. */
+/** How many attachments hold each URL (one on screen, or playing; MessageParts' useMediaUrl): one in use is never revoked,
+ * and the rest are kept within MEDIA_KEEP and MEDIA_KEEP_BYTES. */
 const holding = new Map<string, number>();
 let mediaEpoch = 0;
 const mediaKey = (roomId: string, eventId: string) => `${roomId}\u0000${eventId}`;
@@ -71,7 +72,7 @@ export function mediaUrl(roomId: string, eventId: string, mime: string): Promise
   return p;
 }
 
-/** An attachment on screen holds its URL until it goes (the returned function). */
+/** An attachment on screen (or playing) holds its URL until it isn't (the returned function). */
 export function holdMedia(roomId: string, eventId: string): () => void {
   const key = mediaKey(roomId, eventId);
   holding.set(key, (holding.get(key) ?? 0) + 1);
