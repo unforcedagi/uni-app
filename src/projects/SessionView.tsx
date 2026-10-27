@@ -3,12 +3,20 @@
 // ended in a sentence, then its report in plain words: what it did, what it left (links where they are links) and what it needs; one that
 // needs you shows the exact ask and a way to answer it in the area's room (the words go in the composer; nothing is sent for you).
 // T-319: the whole session, not its last minutes: "Load earlier steps" (or scrolling to the top of the list) loads the part before.
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ago, isLive, stateWords, whyWords, type Project, type Session } from "./model";
 import { hasEarlier, loadEarlier, useFeed, type FeedState } from "./feed";
 import { answerDraft, askOf, endWords, leftItems, needsYou, type FeedItem } from "./sessionWords";
 
 const clock = (t: number) => new Date(t).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+
+/** One line. The lines held before the steps note's own keep their objects across reads, so only the note's lines render again. */
+const Line = memo(function Line({ it }: { it: FeedItem }) {
+  return <li className={`sv-${it.kind}`} data-kind={it.kind}>
+    {it.at !== null && <time dateTime={new Date(it.at).toISOString()}>{clock(it.at)}</time>}
+    <span>{it.text}</span>
+  </li>;
+});
 
 /** The steps, newest last, in a box of their own that stays at the newest unless you have scrolled up to read. Above it, a way to the
  *  session's earlier steps while there are more; loaded, they go in above the ones you were reading, which stay where they were. */
@@ -27,34 +35,39 @@ function Steps({ id, feed, live }: { id: string; feed: FeedState; live: boolean 
     if (was.first !== null && first !== null && first < was.first) {
       const added = b.scrollHeight - was.height;
       // asked for with the button: show where the earlier steps meet the ones you had; scrolled to the top: keep your place
-      b.scrollTop = asked.current ? Math.max(0, added - b.clientHeight / 2) : was.top + added;
+      // (never quite the top: that would load the next part by itself)
+      b.scrollTop = asked.current ? Math.max(12, added - b.clientHeight / 2) : was.top + added;
       asked.current = false;
       pinned.current = b.scrollHeight - b.scrollTop - b.clientHeight < 24;
     } else if (pinned.current) b.scrollTop = b.scrollHeight;
     last.current = { first, height: b.scrollHeight, top: b.scrollTop };
   }, [items]);
   const earlier = (byButton: boolean) => { if (!more || feed.earlier.loading) return; asked.current = byButton; void loadEarlier(id); };
-  // keyed by what each line is, not where it sits: when the note drops its oldest line the rest stay put (and aren't read out again)
+  // keyed by which line of the session it is (T-319: numbered for good); a note from before T-319 by what each line is, not where it
+  // sits: when that note drops its oldest line the rest stay put
   const seen = new Map<string, number>();
-  const keys = items.map((it) => { const k = `${it.at ?? "x"}|${it.kind}|${it.text}`; const n = seen.get(k) ?? 0; seen.set(k, n + 1); return `${k}|${n}`; });
+  const keys = feed.pages ? items.map((it) => `n${it.n}`)
+    : items.map((it) => { const k = `${it.at ?? "x"}|${it.kind}|${it.text}`; const n = seen.get(k) ?? 0; seen.set(k, n + 1); return `${k}|${n}`; });
   const dropped = feed.pages?.dropped ?? 0;
+  const newest = items[items.length - 1];
   return <>
     {more ? <p className="sv-earlier"><button type="button" className="task-do" disabled={feed.earlier.loading} onClick={() => earlier(true)}>
         {feed.earlier.loading ? "Loading earlier steps…" : "Load earlier steps"}</button>
         {feed.earlier.error && <small role="status">{feed.earlier.error} Try again.</small>}</p>
-      : feed.held && feed.pages && dropped > 0 && feed.held.from <= dropped ? <p className="pj-hint sv-earlier">Its first {dropped} steps are no longer kept.</p>
-      : feed.held && feed.pages?.parts.length && feed.held.from === 0 ? <p className="pj-hint sv-earlier">From its first step.</p> : null}
-    <ol ref={box} className="sv-steps" aria-label={live ? "What it is doing, newest last" : "What it did, newest last"} aria-live={live ? "polite" : undefined}
+      : !feed.held || !feed.pages || feed.held.from === 0 ? (feed.pages?.parts.length && feed.held?.from === 0 ? <p className="pj-hint sv-earlier">From its first step.</p> : null)
+      : <p className="pj-hint sv-earlier">{dropped > 0 && feed.held.from <= dropped ? `Its first ${dropped} steps are no longer kept.`
+        : feed.earlier.error ?? "Its earlier steps can't be loaded here."}</p>}
+    {/* the newest line is read out as it comes (not the earlier ones loaded above) */}
+    {live && <p className="sv-sr" aria-live="polite">{newest ? newest.text : ""}</p>}
+    <ol ref={box} className="sv-steps" aria-label={live ? "What it is doing, newest last" : "What it did, newest last"}
       tabIndex={0} onScroll={(e) => {
         const b = e.currentTarget;
         pinned.current = b.scrollHeight - b.scrollTop - b.clientHeight < 24;
         last.current.top = b.scrollTop;
-        if (b.scrollTop < 8 && b.scrollHeight > b.clientHeight + 8) earlier(false);
+        // scrolled to the top: the part before, unless the last try failed (then only the button tries again)
+        if (b.scrollTop < 8 && b.scrollHeight > b.clientHeight + 8 && !feed.earlier.error) earlier(false);
       }}>
-      {items.map((it, i) => <li key={keys[i]} className={`sv-${it.kind}`} data-kind={it.kind}>
-        {it.at !== null && <time dateTime={new Date(it.at).toISOString()}>{clock(it.at)}</time>}
-        <span>{it.text}</span>
-      </li>)}
+      {items.map((it, i) => <Line key={keys[i]} it={it} />)}
     </ol>
   </>;
 }

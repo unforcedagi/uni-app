@@ -134,6 +134,7 @@ try {
     const f = feed.feedSnapshot("long");
     assert.deepEqual(f.items.map((i) => i.text), ["Line 3.", "Line 4."]);
     assert.equal(f.earlier.error, "Those steps are no longer kept.");
+    assert.ok(!feed.hasEarlier(f), "not offered again while the steps note still lists it");
   });
 } finally { await server.close(); }
 if (failed) process.exit(1);

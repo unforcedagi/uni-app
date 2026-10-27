@@ -15,6 +15,8 @@ function cached(): UsageNote | null {
 }
 let note: UsageNote | null | undefined; // undefined: not read from the device yet
 let generation = 0;
+// T-319: reads are numbered as they are sent; an answer older than one already shown is not shown over it
+let sent = 0, shown = 0;
 const listeners = new Set<() => void>();
 const emit = () => { for (const l of listeners) l(); };
 const subscribe = (l: () => void) => { listeners.add(l); return () => { listeners.delete(l); }; };
@@ -22,11 +24,13 @@ const get = () => (note === undefined ? (note = cached()) : note);
 
 /** Reads the note again; resolves to it, or null when it can't be read (offline, no note: what was shown stays). */
 export async function loadUsage(): Promise<UsageNote | null> {
-  const mine = generation;
+  const mine = generation, ticket = ++sent;
   try {
     const r = await invoke<{ note: UsageNote }>("vault_note", { vault: USAGE_VAULT, noteRef: USAGE_NOTE });
     const n = r?.note && typeof r.note.id === "string" ? r.note : null;
     if (mine !== generation || !n) return null; // forgotten meanwhile: a late answer doesn't come back
+    if (ticket < shown) return n;               // a newer read has landed: this one is read, but not shown over it
+    shown = ticket;
     note = n;
     try { localStorage.setItem(CACHE_KEY, JSON.stringify({ id: n.id, path: n.path, metadata: n.metadata, updatedAt: n.updatedAt })); } catch { /* unavailable storage */ }
     emit();
@@ -62,15 +66,18 @@ export function useUsageNote(): { note: UsageNote | null; load: () => Promise<Us
 export function useUsageRefresh(): { busy: boolean; failed: boolean; refresh: () => void } {
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
-  const live = useRef(true);
+  const live = useRef(true), going = useRef(false);
   useEffect(() => { live.current = true; return () => { live.current = false; }; }, []);
   // any read that lands (this one, focus, the timer) clears a failure shown before it
   const n = useSyncExternalStore(subscribe, get, get);
   useEffect(() => { setFailed(false); }, [n]);
   const refresh = useCallback(() => {
-    if (busy) return;
+    if (going.current) return;
+    going.current = true;
+    const mine = generation;
     setBusy(true); setFailed(false);
-    void loadUsage().then((n) => { if (live.current) { setBusy(false); setFailed(!n); } });
-  }, [busy]);
+    // forgotten meanwhile is not a failure to read
+    void loadUsage().then((n) => { going.current = false; if (live.current) { setBusy(false); setFailed(!n && mine === generation); } });
+  }, []);
   return { busy, failed, refresh };
 }

@@ -18,11 +18,12 @@ import { feedPages, parseFeed, partBefore, withHead, withPart, type FeedItem, ty
 export type FeedState = { items: FeedItem[]; ready: boolean; error: string | null;
   /** When it was last read. */ at: number | null;
   /** T-319: what the steps note says of the whole session (null: a note from before), and the run of lines held. */ pages: FeedPages | null; held: Held | null;
-  /** Loading an earlier part: under way, or why it failed. */ earlier: { loading: boolean; error: string | null } };
+  /** Loading an earlier part: under way, or why it failed; `gone`: a part mts has since reused for later lines (nothing before its end
+   *  can be loaded until the steps note stops listing it). */ earlier: { loading: boolean; error: string | null; gone: number | null } };
 /** How often an open live view reads the steps again (mts writes them at most every 15 s). */
 export const FEED_MS = 10_000;
 
-const NONE: FeedState = { items: [], ready: false, error: null, at: null, pages: null, held: null, earlier: { loading: false, error: null } };
+const NONE: FeedState = { items: [], ready: false, error: null, at: null, pages: null, held: null, earlier: { loading: false, error: null, gone: null } };
 let owner: string | null = null;
 let vault = "";
 let generation = 0;
@@ -79,11 +80,11 @@ export function loadEarlier(id: string): Promise<void> {
   const running = inflight.get(key);
   if (running) return running;
   const cur = feeds.get(id);
-  const part = cur?.held ? partBefore(cur.pages, cur.held.from) : null;
-  if (!owner || !part) return Promise.resolve();
+  const part = cur ? nextPart(cur) : null;
+  if (!owner || !cur || !part) return Promise.resolve();
   const mine = generation, from = vault;
   const set = (patch: (was: FeedState) => Partial<FeedState>) => { const was = feeds.get(id) ?? NONE; feeds = new Map(feeds).set(id, { ...was, ...patch(was) }); };
-  set(() => ({ earlier: { loading: true, error: null } }));
+  set((was) => ({ earlier: { ...was.earlier, loading: true, error: null } }));
   emit();
   let p: Promise<void> | undefined;
   p = (async () => {
@@ -92,18 +93,19 @@ export function loadEarlier(id: string): Promise<void> {
       if (mine !== generation) return;
       const md = (r?.note?.metadata ?? {}) as Record<string, unknown>;
       if (md.first !== part.first) {
-        set(() => ({ earlier: { loading: false, error: "Those steps are no longer kept." } }));
+        set(() => ({ earlier: { loading: false, error: "Those steps are no longer kept.", gone: part.first + part.n } }));
         void readFeed(id);
         return;
       }
       const lines = parseFeed(r?.note?.content ?? "", part.first);
       set((was) => {
         const held = was.held ? withPart(was.held, part, lines) : null;
-        return held ? { held, items: held.items, earlier: { loading: false, error: null } } : { earlier: { loading: false, error: null } };
+        const earlier = { ...was.earlier, loading: false, error: null };
+        return held ? { held, items: held.items, earlier } : { earlier };
       });
     } catch {
       if (mine !== generation) return;
-      set(() => ({ earlier: { loading: false, error: "Couldn't load earlier steps." } }));
+      set((was) => ({ earlier: { ...was.earlier, loading: false, error: "Couldn't load earlier steps." } }));
     } finally {
       if (mine === generation && inflight.get(key) === p) inflight.delete(key);
       if (mine === generation) emit();
@@ -113,8 +115,14 @@ export function loadEarlier(id: string): Promise<void> {
   return p!;
 }
 
+/** The part to load next for this state: the one just before what is held, unless it is one mts has reused since it was listed. */
+function nextPart(f: FeedState) {
+  const p = f.held ? partBefore(f.pages, f.held.from) : null;
+  return p && !(f.earlier.gone !== null && p.first < f.earlier.gone) ? p : null;
+}
+
 /** Whether there is an earlier part to load for this state. */
-export const hasEarlier = (f: FeedState) => !!(f.held && partBefore(f.pages, f.held.from));
+export const hasEarlier = (f: FeedState) => !!nextPart(f);
 
 /** What the screen would see for a steps note now (for the store's own test). */
 export const feedSnapshot = (id: string): FeedState => feeds.get(id) ?? NONE;
