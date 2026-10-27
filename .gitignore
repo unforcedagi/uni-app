@@ -6,6 +6,7 @@ node_modules
 dist/
 # T-301: the prototype build (pnpm build:proto, the projects Playwright run) and the preview's copy
 /dist-projects/
+/dist-walk304/
 
 /test-results/
 /playwright-report/
