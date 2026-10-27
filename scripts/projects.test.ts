@@ -183,6 +183,17 @@ check("a room's own words lose their task numbers on screen", () => {
   assert.equal(plainWords("T-265 civic data layer in fix pass; Commons app (T-257) paused."), "Civic data layer in fix pass; Commons app paused.");
   assert.equal(plainWords("Nothing to strip here."), "Nothing to strip here.");
 });
+check("review fixes: a folder matches however it is spelled; a [[link]] parent is followed; a worker's line loses its task numbers", () => {
+  const base = vault.runs.find((r) => r.id === "run-mail")!;
+  const runs = [{ ...base, metadata: { ...base.metadata, folder: "/home/someone/ops/mail-move/", doing_now: "T-903 checking the copy" } }];
+  const nodes = vault.nodes.map((n) => (n.id === "p-kiosk" ? { ...n, metadata: { ...n.metadata, parent: "[[Projects/Riverbend co-op site]]" } } : n));
+  const part = { ...vault.nodes[0], id: "n-part", path: "Projects/Co-op kiosk/Screens", tags: ["node"], metadata: { parent: "[[Projects/Co-op kiosk]]" } };
+  const w = workFrom({ nodes: [...nodes, part], runs: [...runs, { ...base, id: "run-kiosk-part", metadata: { ...base.metadata, node: "n-part", folder: undefined } }], tasks: [] }, NOW);
+  assert.equal(w.sessions.find((s) => s.id === "run-mail")?.project, "p-mail");
+  assert.equal(w.sessions.find((s) => s.id === "run-mail")?.now, "Checking the copy");
+  assert.equal(w.projects.find((p) => p.id === "p-kiosk")?.area, "area-workshop");
+  assert.equal(w.sessions.find((s) => s.id === "run-kiosk-part")?.project, "p-kiosk");
+});
 check("the room is sent plain words: the project, the session's line and when it started; never an id", () => {
   const coop = P("Riverbend co-op site"), ev = S("run-events");
   const stop = actionMessage({ kind: "stop", project: coop, session: ev }, NOW);

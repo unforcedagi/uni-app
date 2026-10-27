@@ -20,6 +20,9 @@ const meta = (n: RawNote): Record<string, unknown> => (n.metadata && typeof n.me
 const tagsOf = (n: RawNote): string[] => (Array.isArray(n.tags) ? n.tags.filter((t): t is string => typeof t === "string") : []);
 const time = (v: unknown): number | null => { const s = str(v); const t = s ? Date.parse(s) : NaN; return Number.isFinite(t) ? t : null; };
 const lastName = (path: string) => path.split("/").pop() ?? path;
+const unlink = (ref: string) => ref.replace(/^\[\[|\]\]$/g, "");
+/** One spelling for a folder: `~/` for a home folder, no trailing slash (mts writes `~/Code/x`; a note may hold `/home/u/Code/x/`). */
+export const folderKey = (f: string) => f.trim().replace(/^\/(?:home|Users)\/[^/]+\//, "~/").replace(/\/+$/, "");
 
 /** The vault's words for a project's state, as the model's three. */
 export function statusOf(v: unknown): ProjectStatus {
@@ -100,7 +103,7 @@ export function workFrom(src: Sources, now = Date.now()): LiveWork {
       seen.add(keyOf(cur));
       if (areaIds.has(keyOf(cur))) return keyOf(cur);
       const up = str(meta(cur).parent);
-      cur = up ? byKey.get(up.replace(/^\[\[|\]\]$/g, "")) : undefined;
+      cur = up ? byKey.get(unlink(up)) : undefined;
     }
     return null;
   };
@@ -114,7 +117,7 @@ export function workFrom(src: Sources, now = Date.now()): LiveWork {
     const name = lastName(path), area = areaUp(n);
     const folder = str(m.folder) ?? (isFolder(m.repo) ? str(m.repo) : null);
     try {
-      projects.push(makeProject({ id: keyOf(n), area: area ?? "", name, folder, status: statusOf(m.status), about: str(m.summary) ?? "" }, areas));
+      projects.push(makeProject({ id: keyOf(n), area: area ?? "", name, folder, status: statusOf(m.status), about: plainWords(str(m.summary) ?? "") }, areas));
     } catch (e) {
       if (!(e instanceof ModelError)) throw e;
       if (statusOf(m.status) !== "archived") gaps.push({ name, area, why: area ? "no folder" : "no area" });
@@ -123,7 +126,7 @@ export function workFrom(src: Sources, now = Date.now()): LiveWork {
   const projectIds = new Set(projects.map((p) => p.id));
   const projectOfNode = (ref: string | null): string | null => {
     if (!ref) return null;
-    const n = byKey.get(ref.replace(/^\[\[|\]\]$/g, ""));
+    const n = byKey.get(unlink(ref));
     if (!n) return null;
     // the node itself, or the nearest project up its chain (a run filed on a project's part)
     const seen = new Set<string>();
@@ -133,12 +136,12 @@ export function workFrom(src: Sources, now = Date.now()): LiveWork {
       if (projectIds.has(keyOf(cur))) return keyOf(cur);
       if (areaIds.has(keyOf(cur))) return null;
       const up = str(meta(cur).parent);
-      cur = up ? byKey.get(up) : undefined;
+      cur = up ? byKey.get(unlink(up)) : undefined;
     }
     return null;
   };
   const byFolder = new Map<string, string[]>();
-  for (const p of projects) byFolder.set(p.folder, [...(byFolder.get(p.folder) ?? []), p.id]);
+  for (const p of projects) byFolder.set(folderKey(p.folder), [...(byFolder.get(folderKey(p.folder)) ?? []), p.id]);
   const taskNode = new Map<string, string>();
   const taskTitle = new Map<string, string>();
   for (const t of src.tasks) {
@@ -156,7 +159,7 @@ export function workFrom(src: Sources, now = Date.now()): LiveWork {
     if (!id || startedAt === null) continue;
     const task = str(m.task)?.toUpperCase() ?? null;
     const folder = str(m.folder);
-    const viaFolder = folder ? byFolder.get(folder) : undefined;
+    const viaFolder = folder ? byFolder.get(folderKey(folder)) : undefined;
     const project = projectOfNode(str(m.project)) ?? projectOfNode(str(m.node)) ?? (task ? projectOfNode(taskNode.get(task) ?? null) : null)
       ?? (viaFolder?.length === 1 ? viaFolder[0] : null);
     if (!project) continue;
@@ -172,7 +175,7 @@ export function workFrom(src: Sources, now = Date.now()): LiveWork {
     const steps = typeof m.steps === "number" && Number.isFinite(m.steps) ? Math.max(0, Math.floor(m.steps)) : 0;
     sessions.push({
       id, project, state, ask,
-      now: live ? str(m.doing_now) : null, nowAt: live ? time(m.doing_at) : null,
+      now: live && str(m.doing_now) ? plainWords(str(m.doing_now)!) : null, nowAt: live ? time(m.doing_at) : null,
       startedAt, endedAt: ended, steps,
       result: live ? null : resultWords(m.summary, state),
       video: str(m.video) && /^https:\/\//.test(str(m.video)!) ? str(m.video) : null,

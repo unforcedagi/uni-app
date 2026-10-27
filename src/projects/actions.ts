@@ -46,7 +46,8 @@ export const actionLabel: Record<Action["kind"], string> = { stop: "Stop", fresh
 
 /** Posts the action's message in the room as you, addressed to the room's Uni (when it is there). Resolves when the relay took it. */
 export async function postAction(room: string, a: Action): Promise<void> {
-  const roster = await invoke<Member[]>("get_members", { channel: room }).catch(() => [] as Member[]);
+  // the room's Uni is addressed (as every message to it is); a roster that can't be read stops the post rather than send it to no one
+  const roster = await invoke<Member[]>("get_members", { channel: room });
   const uni = findUniMember(roster);
   await invoke("post_message", { channel: room, body: actionMessage(a), replyTo: null, recipients: uni ? [uni.pubkey] : [] });
 }

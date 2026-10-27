@@ -89,8 +89,9 @@ function Timeline({ sessions, talk, now }: { sessions: readonly Session[]; talk:
   </figure>;
 }
 
-export function ProjectSheet({ project, talk, room, onClose }: { project: string; talk: readonly number[]; room: { id: string; name: string } | null; onClose: () => void }) {
-  const { work, asked } = useWork();
+export function ProjectSheet({ project, talk, room, roomName, onClose }: { project: string; talk: readonly number[]; room: { id: string; name: string } | null;
+  /** A room's name by its id (the area's own room may not be the one under the sheet). */ roomName: (id: string) => string | null; onClose: () => void }) {
+  const { work, asked, ready } = useWork();
   const now = useNow();
   const p = work.projects.find((x) => x.id === project);
   const [adding, setAdding] = useState(false);
@@ -99,17 +100,21 @@ export function ProjectSheet({ project, talk, room, onClose }: { project: string
   const wrap = useRef<HTMLDivElement>(null);
   const closeRef = useRef(onClose); closeRef.current = onClose;
   const titleId = useId();
-  useEffect(() => (box.current && wrap.current ? openDialog(box.current, () => closeRef.current(), { root: wrap.current, initial: box.current }) : undefined), []);
+  const shown = !!p;
+  useEffect(() => (shown && box.current && wrap.current ? openDialog(box.current, () => closeRef.current(), { root: wrap.current, initial: box.current }) : undefined), [shown]);
+  // a project that is gone after a read (merged, its folder taken away) closes its sheet rather than leaving an empty one
+  useEffect(() => { if (!shown && ready) closeRef.current(); }, [shown, ready]);
   if (!p) return null;
   const area = areaOf(work, p);
   // the area's own room is where its actions go (the room this sheet is over, when it is the area's)
-  const to = area ? (room && room.id === area.room ? room : { id: area.room, name: room?.name ?? area.name }) : room;
+  const to = area ? (room && room.id === area.room ? room : { id: area.room, name: roomName(area.room) ?? area.name }) : room;
   const sessions = sessionsOf(work, p.id);
   const liveOnes = sessions.filter(isLive);
   const ended = sessions.filter((s) => !isLive(s));
   const recent = ended.filter((s, i) => i < RECENT || now - (s.endedAt ?? 0) < DAY);
   const earlier = ended.slice(recent.length);
   const projectAsked = asked.get(p.id) ?? null;
+  const addAsked = asked.get(`add:${p.id}`) ?? null;
   const blocked = cannotStart(p);
   const addAction: Action = { kind: "add", project: p, ask: ask.trim() || "…" };
   return <div ref={wrap} className="pj-wrap" data-place="project-sheet">
@@ -133,10 +138,11 @@ export function ProjectSheet({ project, talk, room, onClose }: { project: string
         {adding && <form className="pj-new" onSubmit={(e) => e.preventDefault()}>
           <label htmlFor={`${titleId}-ask`}>What should it do?</label>
           <textarea id={`${titleId}-ask`} rows={2} value={ask} autoFocus placeholder={`In ${p.folder}…`} onChange={(e) => setAsk(e.target.value)} />
-          {ask.trim() ? <Ask action={addAction} room={to} asked={null} primary onPosted={() => { noteAsked(p.id, "add"); setAsk(""); setAdding(false); }} />
+          {ask.trim() ? <Ask action={addAction} room={to} asked={null} primary onPosted={() => { noteAsked(`add:${p.id}`, "add"); setAsk(""); setAdding(false); }} />
             : <p className="pj-hint">It runs alongside {liveOnes.length ? `the ${liveOnes.length} already working` : "anything else"}; nothing is stopped.</p>}
           <div className="pj-row"><span className="pj-gap" /><button type="button" className="task-do quiet" onClick={() => { setAdding(false); setAsk(""); }}>Cancel</button></div>
         </form>}
+        {addAsked && <p className="pj-asked" role="status">{askedWords(addAsked, now)}</p>}
         {projectAsked && <p className="pj-asked" role="status">{askedWords(projectAsked, now)}</p>}
         {sessions.length === 0 && !adding && <p className="cp-none">No sessions yet.</p>}
         <ul className="pj-list">{[...liveOnes, ...recent].map((s) => <SessionCard key={s.id} s={s} p={p} now={now} room={to} asked={asked.get(s.id) ?? null} />)}</ul>

@@ -80,7 +80,11 @@ export async function bootProjects(page: Page, opts: Boot = {}) {
           case 'vault_paths': return notes.nodes.map((x: any) => ({ id: x.id, path: x.path, extension: 'md', updatedAt: x.updatedAt }));
           case 'vault_list': return ['uni'];
           case 'vault_query': return page(byTag(args.tag), args);
-          case 'vault_query_meta': return [];
+          case 'vault_query_meta': {
+            // the indexed operators the app uses on run notes: eq and gte
+            const ok = (n: any) => Object.entries(args.metadata ?? {}).every(([k, c]: [string, any]) => { const v = n.metadata?.[k]; return 'eq' in c ? v === c.eq : 'gte' in c ? v != null && v >= c.gte : false; });
+            return page(byTag(args.tag).filter(ok), args);
+          }
           case 'vault_subtree_nodes': return JSON.parse(JSON.stringify(notes.nodes));
           case 'vault_subtree_tasks': return [];
           case 'vault_note': {
