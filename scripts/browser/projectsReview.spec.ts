@@ -5,6 +5,7 @@ import { bootProjects } from './projectsFixture.ts';
 
 const A = 'a'.repeat(64), B = 'b'.repeat(64);
 const MIN = 60_000;
+const shot = (page: Page, name: string) => page.screenshot({ path: `__shots__/t319/${test.info().project.name}-${name}.png` });
 const workKeys = (page: Page) => page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('uni.work.')));
 const door = (page: Page, name: string) => page.getByRole('navigation', { name: 'Rooms' }).getByRole('button', { name: new RegExp(`^${name}\\b`) });
 const rail = (page: Page) => page.getByRole('navigation', { name: 'Main navigation' });
@@ -107,7 +108,7 @@ test('P2: the usage line and the card read the note again (focus, and every few 
   await bootProjects(page);
   await home(page);
   const line = page.locator('.fd-usage');
-  await expect(line).toHaveText('Claude: A 41% of the week · B 12% of the week · new work to B');
+  await expect(line).toHaveText('Claude: A 41% of the week · B 12% of the week · new work to B · as of 6 min ago');
   const setUsage = (week: number, readMinAgo: number) => page.evaluate(([week, ago]) => {
     const u = (window as any).__world.usage; const at = new Date(Date.now() - ago * 60_000).toISOString();
     const doc = u.metadata.claude_accounts; doc.read_at = at; doc.accounts[0].read_at = at; doc.accounts[0].week.used = week;
@@ -115,11 +116,11 @@ test('P2: the usage line and the card read the note again (focus, and every few 
   // coming back to the window reads it again
   await setUsage(55, 1);
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
-  await expect(line).toHaveText('Claude: A 55% of the week · B 12% of the week · new work to B');
-  // a reading three hours old says so
+  await expect(line).toHaveText('Claude: A 55% of the week · B 12% of the week · new work to B · as of 1 min ago');
+  // T-319: a reading three hours old is not shown as current: the line says so plainly, without its numbers
   await setUsage(55, 180);
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
-  await expect(line).toHaveText(/ · last reading 3 h ago$/);
+  await expect(line).toHaveText('Claude: no fresh usage reading; the last one is from 3 h ago');
   // the full card, left open, reads it again every few minutes
   await setUsage(60, 1);
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
@@ -129,6 +130,39 @@ test('P2: the usage line and the card read the note again (focus, and every few 
   await setUsage(70, 1);
   await page.clock.fastForward(5 * MIN + 1000);
   await expect(card).toContainText('70%');
+});
+
+test('T-319: the usage line says how old its reading is, says plainly when it is old, and Refresh reads the note again now', async ({ page }) => {
+  await bootProjects(page);
+  await page.addInitScript(() => {
+    // count the reads of the usage note, and make its reading 28 hours old before the app's first read
+    const w = window as any, inv = w.__TAURI_INTERNALS__.invoke;
+    const doc = w.__world.usage.metadata.claude_accounts, at = new Date(Date.now() - 28 * 60 * 60_000).toISOString();
+    doc.read_at = at; for (const a of doc.accounts) a.read_at = at;
+    w.__usageReads = 0;
+    w.__TAURI_INTERNALS__.invoke = async (cmd: string, args: any) => { if (cmd === 'vault_note' && args?.noteRef === 'System/Claude accounts') w.__usageReads++; return inv(cmd, args); };
+  });
+  await home(page);
+  const line = page.locator('.fd-usage');
+  await expect(line).toHaveText('Claude: no fresh usage reading; the last one is from 28 h ago');
+  await expect(line).not.toContainText('%');
+  await line.scrollIntoViewIfNeeded();
+  await shot(page, 'usage-stale');
+  // the launcher writes a new reading; Refresh reads it at once (no waiting for the next few minutes, no leaving the window)
+  await page.evaluate(() => {
+    const doc = (window as any).__world.usage.metadata.claude_accounts, at = new Date(Date.now() - 2 * 60_000).toISOString();
+    doc.read_at = at; for (const a of doc.accounts) a.read_at = at; doc.accounts[0].week.used = 47;
+  });
+  const reads = await page.evaluate(() => (window as any).__usageReads as number);
+  await page.getByRole('button', { name: 'Refresh Claude usage' }).click();
+  await expect(line).toHaveText('Claude: A 47% of the week · B 12% of the week · new work to B · as of 2 min ago');
+  expect(await page.evaluate(() => (window as any).__usageReads as number)).toBeGreaterThan(reads);
+  await shot(page, 'usage-fresh');
+  // the card, opened from the line: as of when, and its own Refresh
+  await line.click();
+  const card = page.getByRole('dialog', { name: 'Claude accounts' });
+  await expect(card.locator('.usage-age')).toHaveText('As of 2 min ago');
+  await expect(card.getByRole('button', { name: 'Refresh Claude usage' })).toBeVisible();
 });
 
 test('review f97fx1ji P3: a task list longer than the pages read still places a session found only through its task', async ({ page }) => {

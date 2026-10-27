@@ -25,3 +25,10 @@
 .usage-seg > button:disabled { cursor: default; }
 .usage-next { margin: 0; font-size: 12px; color: var(--text-soft); }
 .usage-error { color: var(--danger); }
+/* T-319: refresh by hand; an old reading says so and its numbers fade */
+.usage-head { flex-wrap: wrap; align-items: center; }
+.usage-when { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; }
+.usage-refresh { min-height: 32px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: 999px; background: transparent; color: var(--text-soft); font: 600 12px var(--sans); cursor: pointer; }
+.usage-refresh:disabled { cursor: default; opacity: .7; }
+.usage-stale { margin: 0; padding: 8px 10px; border-left: 3px solid var(--warn); font-size: 13px; color: var(--text); }
+.usage-row.old { opacity: .55; }

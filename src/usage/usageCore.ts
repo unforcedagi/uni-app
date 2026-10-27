@@ -6,8 +6,9 @@ export const USAGE_VAULT = "uni";
 export const USAGE_NOTE = "System/Claude accounts";
 export const USAGE_TAG = "claude-accounts";
 const WEEK_H = 168;
-/** A reading older than this says so: the meter writes every 15 min, the note follows within minutes. */
-export const STALE_MIN = 45;
+/** A reading older than this is not shown as current (T-319: it says so plainly instead): the meter reads every 15 min, and the note
+ *  follows within 15 more. */
+export const STALE_MIN = 60;
 
 export type UsageWindow = { used: number | null; resets_at: string | null };
 export type UsageAccount = { name: string; signed_in?: boolean; read_at?: string | null; session?: UsageWindow | null; week?: UsageWindow | null };

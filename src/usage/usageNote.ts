@@ -2,7 +2,7 @@
 // when shown, again every few minutes while it is, and whenever the window comes back to view or focus, so the numbers and the account new
 // work goes to don't sit hours old. Forget drops the device copy and what is in memory.
 import { invoke } from "@tauri-apps/api/core";
-import { useCallback, useEffect, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { USAGE_NOTE, USAGE_VAULT } from "./usageCore";
 
 export type UsageNote = { id: string; path?: string; metadata?: unknown; updatedAt?: string };
@@ -55,4 +55,22 @@ export function useUsageNote(): { note: UsageNote | null; load: () => Promise<Us
   }, []);
   const load = useCallback(() => loadUsage(), []);
   return { note: n ?? null, load };
+}
+
+/** T-319: a refresh asked for by hand (the line's and the card's Refresh): reads the note again now, and says while it does and when it
+ *  couldn't. */
+export function useUsageRefresh(): { busy: boolean; failed: boolean; refresh: () => void } {
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const live = useRef(true);
+  useEffect(() => { live.current = true; return () => { live.current = false; }; }, []);
+  // any read that lands (this one, focus, the timer) clears a failure shown before it
+  const n = useSyncExternalStore(subscribe, get, get);
+  useEffect(() => { setFailed(false); }, [n]);
+  const refresh = useCallback(() => {
+    if (busy) return;
+    setBusy(true); setFailed(false);
+    void loadUsage().then((n) => { if (live.current) { setBusy(false); setFailed(!n); } });
+  }, [busy]);
+  return { busy, failed, refresh };
 }

@@ -4,7 +4,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 import { ageText, accountLabel, howText, USAGE_VAULT, usageView, type Meter } from "./usageCore";
-import { useUsageNote, type UsageNote as Note } from "./usageNote";
+import { useUsageNote, useUsageRefresh, type UsageNote as Note } from "./usageNote";
 import "./usage.css";
 
 function MeterLine({ label, m, extra }: { label: string; m: Meter; extra?: React.ReactNode }) {
@@ -20,6 +20,7 @@ function MeterLine({ label, m, extra }: { label: string; m: Meter; extra?: React
 export default function ClaudeUsage() {
   // T-302 round 3: the readings are read again while the card is shown (every few minutes, and on focus/visibility), not only once
   const { note, load } = useUsageNote();
+  const { busy, failed, refresh } = useUsageRefresh();
   const [now, setNow] = useState(() => new Date());
   const [saving, setSaving] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -55,8 +56,14 @@ export default function ClaudeUsage() {
   const shown = saving ?? view.preference;
   return <section className="usage-card" aria-label="Claude accounts">
     <header className="usage-head"><h2>Claude accounts</h2>
-      <span className={`usage-age ${view.stale ? "stale" : ""}`}>{view.stale ? `Last reading ${ageText(view.readAt, now)}` : `Updated ${ageText(view.readAt, now)}`}</span></header>
-    {view.rows.map((r) => <div className="usage-row" key={r.name} aria-label={r.label}>
+      <span className="usage-when"><span className={`usage-age ${view.stale ? "stale" : ""}`}>{view.stale ? `Last reading ${ageText(view.readAt, now)}` : `As of ${ageText(view.readAt, now)}`}</span>
+        <button type="button" className="usage-refresh" aria-label="Refresh Claude usage" disabled={busy} onClick={refresh}>{busy ? "Checking…" : "Refresh"}</button></span></header>
+    {failed && <p className="usage-error" role="status">Couldn't read the usage note just now; these are from the last read.</p>}
+    {/* T-319: an old reading is not shown as current */}
+    {view.stale && <p className="usage-stale" role="note">{view.readAt
+      ? `No fresh reading: these numbers are from ${ageText(view.readAt, now)} and may be out of date. A new one comes every 15 minutes; if this stays, the usage meter on the host has stopped.`
+      : "No reading yet."}</p>}
+    {view.rows.map((r) => <div className={`usage-row ${view.stale ? "old" : ""}`} key={r.name} aria-label={r.label}>
       <strong className="usage-name">{r.label}</strong>
       {r.missing ? <p className="usage-sub">No reading yet</p> : <>
         <MeterLine label="Session" m={r.session} />

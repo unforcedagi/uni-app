@@ -69,6 +69,12 @@ t("an old reading says how old", () => {
   assert.equal(ageText("2026-10-26T17:48:00Z", NOW), "12 min ago");
 });
 
+t("T-319: a reading is current up to an hour old, and stale after", () => {
+  assert.equal(usageView(md((d) => { d.read_at = "2026-10-26T17:01:00+00:00"; }), NOW, TZ)!.stale, false);
+  assert.equal(usageView(md((d) => { d.read_at = "2026-10-26T16:59:00+00:00"; }), NOW, TZ)!.stale, true);
+  assert.equal(usageView(md((d) => { d.read_at = null; }), NOW, TZ)!.stale, true, "no reading time: never current");
+});
+
 t("not a usage note, or bad account names: nothing, or only the good ones", () => {
   assert.equal(usageView({}, NOW, TZ), null);
   assert.equal(usageView({ claude_accounts: { accounts: [] } }, NOW, TZ), null);

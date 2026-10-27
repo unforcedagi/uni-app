@@ -38,7 +38,13 @@
 .fd-status { max-width: 980px; margin: 18px auto 0; font: 500 12px var(--th-mono); color: var(--th-ink2); }
 .fd-usage.stale { font-style: italic; }
 /* the usage line: one quiet line under the rooms, which opens the accounts card */
-.fd-usage { all: unset; box-sizing: border-box; display: block; max-width: 980px; margin: 22px auto 0; padding: 10px 2px; cursor: pointer; font: 500 13px var(--th-mono); color: var(--th-ink2); border-top: 1px dashed var(--th-hair2); width: 100%; }
+.fd-usage-row { display: flex; align-items: center; gap: 10px; max-width: 980px; margin: 22px auto 0; border-top: 1px dashed var(--th-hair2); }
+.fd-usage { all: unset; box-sizing: border-box; display: block; flex: 1; min-width: 0; padding: 10px 2px; cursor: pointer; font: 500 13px var(--th-mono); color: var(--th-ink2); }
+/* T-319: refresh the reading now */
+.fd-usage-refresh { all: unset; box-sizing: border-box; flex: none; min-height: 40px; min-width: 44px; padding: 0 10px; cursor: pointer; text-align: center; font: 600 12px var(--th-mono); color: var(--th-ink2); border: 1px solid var(--th-hair2); border-radius: 999px; }
+.fd-usage-refresh:hover { color: var(--th-ink); }
+.fd-usage-refresh:focus-visible { outline: 2px solid var(--th-ink); outline-offset: 2px; }
+.fd-usage-refresh:disabled { cursor: default; opacity: .7; }
 .fd-usage:hover { color: var(--th-ink); text-decoration: underline; text-underline-offset: 3px; }
 .fd-usage:focus-visible { outline: 2px solid var(--th-ink); outline-offset: 2px; }
 .fd-usage-sheet .pj-close { position: absolute; top: 14px; right: 14px; }

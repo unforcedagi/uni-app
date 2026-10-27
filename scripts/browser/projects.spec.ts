@@ -34,7 +34,7 @@ test('the front door is Uni: the seven rooms, where each stands, a mark where se
   await expect(door(page, 'Engine Room').locator('.fd-live')).toHaveText('1 working');
   await expect(door(page, 'Hearth').locator('.fd-live')).toHaveCount(0);
   const usage = page.getByRole('button', { name: /^Claude:/ });
-  await expect(usage).toHaveText('Claude: A 41% of the week · B 12% of the week · new work to B');
+  await expect(usage).toHaveText('Claude: A 41% of the week · B 12% of the week · new work to B · as of 6 min ago');
   await expect(page.locator('[data-place="front-door"]')).not.toContainText(NO_IDS);
   await shot(page, '01-front-door');
   // the usage line opens the full card, in place

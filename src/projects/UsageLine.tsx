@@ -4,19 +4,23 @@ import { useEffect, useRef, useState } from "react";
 import { openDialog } from "../areas/focusTrap";
 import ClaudeUsage from "../usage/ClaudeUsage";
 import { ageText, usageView } from "../usage/usageCore";
-import { useUsageNote } from "../usage/usageNote";
+import { useUsageNote, useUsageRefresh } from "../usage/usageNote";
 
-/** "Claude: A 34% of the week · B 12% · new work to B" (a full account says so); an old reading ends with when it was taken. */
+/** "Claude: A 34% of the week · B 12% · new work to B · as of 6 min ago" (a full account says so). T-319: a reading over an hour old is not
+ *  shown as current: the line says there is no fresh one, and how old the last is, instead of its numbers. */
 export function usageLine(metadata: unknown, now: Date): string | null {
   const v = usageView(metadata, now);
   if (!v || !v.rows.length) return null;
+  if (v.stale) return v.readAt ? `Claude: no fresh usage reading; the last one is from ${ageText(v.readAt, now)}` : "Claude: no usage reading yet";
   const parts = v.rows.map((r) => `${r.name.toUpperCase()} ${r.missing ? "no reading" : r.week.full || r.session.full ? "full" : `${r.week.text} of the week`}`);
-  return `Claude: ${parts.join(" · ")}${v.next ? ` · new work to ${v.next.label.replace(/^Account /, "")}` : ""}${v.stale ? ` · last reading ${ageText(v.readAt, now)}` : ""}`;
+  return `Claude: ${parts.join(" · ")}${v.next ? ` · new work to ${v.next.label.replace(/^Account /, "")}` : ""} · as of ${ageText(v.readAt, now)}`;
 }
 
 export function UsageLine() {
-  // T-302 round 3: read again every few minutes while shown and on focus/visibility (useUsageNote); the clock keeps "last reading" true
+  // T-302 round 3: read again every few minutes while shown and on focus/visibility (useUsageNote); the clock keeps "as of" true.
+  // T-319: and on asking (Refresh beside the line).
   const { note } = useUsageNote();
+  const { busy, failed, refresh } = useUsageRefresh();
   const [now, setNow] = useState(() => new Date());
   const [open, setOpen] = useState(false);
   useEffect(() => { const t = window.setInterval(() => setNow(new Date()), 60_000); return () => window.clearInterval(t); }, []);
@@ -24,7 +28,11 @@ export function UsageLine() {
   const line = note ? usageLine(note.metadata, now) : null;
   if (!line) return null;
   return <>
-    <button type="button" className={`fd-usage ${usageView(note!.metadata, now)?.stale ? "stale" : ""}`} aria-haspopup="dialog" onClick={() => setOpen(true)}>{line}</button>
+    <div className="fd-usage-row">
+      <button type="button" className={`fd-usage ${usageView(note!.metadata, now)?.stale ? "stale" : ""}`} aria-haspopup="dialog" onClick={() => setOpen(true)}>{line}</button>
+      <button type="button" className="fd-usage-refresh" aria-label="Refresh Claude usage" disabled={busy} onClick={refresh}>{busy ? "Checking…" : "Refresh"}</button>
+    </div>
+    {failed && <p className="fd-status" role="status">Couldn't read the usage note just now; showing the last one read.</p>}
     {open && <UsageSheet onClose={() => setOpen(false)} />}
   </>;
 }

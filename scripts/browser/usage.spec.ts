@@ -72,7 +72,7 @@ test.describe('fixture', () => {
     await expect(b).toContainText('Session62%');
     await expect(b).toContainText('resets 3:20pm');
     await expect(b).toContainText('resets Sat 8amahead of pace');
-    await expect(card).toContainText('Updated 15 min ago');
+    await expect(card).toContainText('As of 15 min ago');
     await expect(card.getByRole('radio', { name: 'Auto' })).toHaveAttribute('aria-checked', 'true');
     await expect(card.getByRole('status')).toHaveText('Next worker: Account A (auto)');
     await card.screenshot({ path: info.outputPath('usage-card.png') });
@@ -94,6 +94,33 @@ test.describe('fixture', () => {
     await card.getByRole('radio', { name: 'Auto' }).click();
     await expect(card.getByRole('radio', { name: 'Auto' })).toHaveAttribute('aria-checked', 'true');
     expect(w.note.metadata.account_preference).toBe('auto');
+  });
+
+  test('T-319: a reading over an hour old says so plainly, not as current; Refresh reads the note again and shows the new one', async ({ page }, info) => {
+    await page.clock.setFixedTime(NOW);
+    const old = structuredClone(FIXTURE);
+    old.metadata.claude_accounts.read_at = '2026-10-25T14:00:00+00:00';            // 28 h before NOW
+    for (const a of old.metadata.claude_accounts.accounts) a.read_at = '2026-10-25T14:00:00+00:00';
+    const w: World = { note: old, conflictOnce: false, calls: [] };
+    await boot(page, w);
+    const card = await openSettings(page);
+    await expect(card.locator('.usage-age')).toHaveText('Last reading 28 h ago');
+    await expect(card.getByRole('note')).toHaveText(/^No fresh reading: these numbers are from 28 h ago and may be out of date\./);
+    await expect(card.locator('.usage-row.old')).toHaveCount(2);
+    await card.screenshot({ path: info.outputPath('usage-card-stale.png') });
+    // the launcher writes a fresh reading; Refresh reads the note again
+    w.note = structuredClone(FIXTURE);
+    const reads = w.calls.filter((c) => c.cmd === 'vault_note').length;
+    await card.getByRole('button', { name: 'Refresh Claude usage' }).click();
+    await expect(card.locator('.usage-age')).toHaveText('As of 15 min ago');
+    await expect(card.getByRole('note')).toHaveCount(0);
+    await expect(card.locator('.usage-row.old')).toHaveCount(0);
+    expect(w.calls.filter((c) => c.cmd === 'vault_note').length).toBeGreaterThan(reads);
+    // a refresh that can't read the note says so, and keeps what was shown
+    w.note = null;
+    await card.getByRole('button', { name: 'Refresh Claude usage' }).click();
+    await expect(card.getByRole('status').filter({ hasText: "Couldn't read the usage note just now" })).toBeVisible();
+    await expect(card.getByLabel('Account B')).toContainText('Session62%');
   });
 
   test('no usage note on this install: Settings has no card', async ({ page }) => {
