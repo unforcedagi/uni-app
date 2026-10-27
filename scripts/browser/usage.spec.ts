@@ -123,6 +123,21 @@ test.describe('fixture', () => {
     await expect(card.getByLabel('Account B')).toContainText('Session62%');
   });
 
+  test('Codex zwmejvyc P2: one account\'s old reading is said on its own row, even while the other\'s is fresh', async ({ page }, info) => {
+    await page.clock.setFixedTime(NOW);
+    const mixed = structuredClone(FIXTURE);
+    mixed.metadata.claude_accounts.accounts[0].read_at = '2026-10-24T18:00:00+00:00';   // 48 h before NOW; B's stays fresh
+    await boot(page, { note: mixed, conflictOnce: false, calls: [] });
+    const card = await openSettings(page);
+    await expect(card.locator('.usage-age')).toHaveText('As of 15 min ago');
+    const a = card.getByLabel('Account A'), b = card.getByLabel('Account B');
+    await expect(a).toHaveClass(/\bold\b/);
+    await expect(a).toContainText('No fresh reading for this account: these are from 2 days ago.');
+    await expect(b).not.toHaveClass(/\bold\b/);
+    await expect(b).not.toContainText('No fresh reading');
+    await card.screenshot({ path: info.outputPath('usage-card-mixed.png') });
+  });
+
   test('no usage note on this install: Settings has no card', async ({ page }) => {
     await boot(page, { note: null, conflictOnce: false, calls: [] });
     await page.getByRole('button', { name: 'Settings', exact: true }).click();

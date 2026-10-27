@@ -2,7 +2,7 @@
 // (scripts/fixtures/usage-note.json). Run: node --experimental-strip-types scripts/usage.test.ts
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { ageText, pace, parseDoc, resetText, usageView } from "../src/usage/usageCore.ts";
+import { ageText, pace, parseDoc, resetText, usageLineText, usageView } from "../src/usage/usageCore.ts";
 
 const NOTE = JSON.parse(readFileSync(new URL("./fixtures/usage-note.json", import.meta.url), "utf8"));
 const TZ = "America/Denver";
@@ -62,17 +62,33 @@ t("the preference: the note's value when it is auto or an account; the next acco
   assert.equal(usageView(md(() => {}, "z"), NOW, TZ)!.preference, "auto");
 });
 
+const readAll = (d: any, at: string) => { d.read_at = at; for (const a of d.accounts) a.read_at = at; };
 t("an old reading says how old", () => {
-  const v = usageView(md((d) => { d.read_at = "2026-10-26T16:00:00+00:00"; }), NOW, TZ)!;
+  const v = usageView(md((d) => readAll(d, "2026-10-26T16:00:00+00:00")), NOW, TZ)!;
   assert.equal(v.stale, true);
   assert.equal(ageText(v.readAt, NOW), "2 h ago");
   assert.equal(ageText("2026-10-26T17:48:00Z", NOW), "12 min ago");
 });
 
 t("T-319: a reading is current up to an hour old, and stale after", () => {
-  assert.equal(usageView(md((d) => { d.read_at = "2026-10-26T17:01:00+00:00"; }), NOW, TZ)!.stale, false);
-  assert.equal(usageView(md((d) => { d.read_at = "2026-10-26T16:59:00+00:00"; }), NOW, TZ)!.stale, true);
-  assert.equal(usageView(md((d) => { d.read_at = null; }), NOW, TZ)!.stale, true, "no reading time: never current");
+  assert.equal(usageView(md((d) => readAll(d, "2026-10-26T17:01:00+00:00")), NOW, TZ)!.stale, false);
+  assert.equal(usageView(md((d) => readAll(d, "2026-10-26T16:59:00+00:00")), NOW, TZ)!.stale, true);
+  assert.equal(usageView(md((d) => { for (const a of d.accounts) a.read_at = null; }), NOW, TZ)!.stale, true, "no reading time: never current");
+});
+
+t("Codex zwmejvyc P2: one fresh account doesn't make another's 48-hour-old reading current", () => {
+  // as mts writes it: the note's read_at is the newest account's
+  const v = usageView(md((d) => { d.read_at = "2026-10-26T17:50:00+00:00"; d.accounts[0].read_at = "2026-10-24T18:00:00+00:00"; d.accounts[0].week.used = 88;
+    d.accounts[1].read_at = "2026-10-26T17:50:00+00:00"; }), NOW, TZ)!;
+  assert.deepEqual(v.rows.map((r) => [r.name, r.stale]), [["a", true], ["b", false]]);
+  assert.equal(v.stale, false);
+  assert.equal(v.someStale, true);
+  const line = usageLineText(v, NOW)!;
+  assert.ok(!line.includes("88%"), "A's old 88% is not shown as current");
+  assert.equal(line, "Claude: A no fresh reading (2 days old) · B 71% of the week · new work to A · as of 10 min ago");
+  // as of: the oldest of the numbers shown, never only the newest
+  const both = usageView(md((d) => { d.accounts[0].read_at = "2026-10-26T17:20:00+00:00"; d.accounts[1].read_at = "2026-10-26T17:50:00+00:00"; }), NOW, TZ)!;
+  assert.equal(ageText(both.readAt, NOW), "40 min ago");
 });
 
 t("not a usage note, or bad account names: nothing, or only the good ones", () => {

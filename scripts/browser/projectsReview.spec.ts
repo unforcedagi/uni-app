@@ -111,7 +111,7 @@ test('P2: the usage line and the card read the note again (focus, and every few 
   await expect(line).toHaveText('Claude: A 41% of the week · B 12% of the week · new work to B · as of 6 min ago');
   const setUsage = (week: number, readMinAgo: number) => page.evaluate(([week, ago]) => {
     const u = (window as any).__world.usage; const at = new Date(Date.now() - ago * 60_000).toISOString();
-    const doc = u.metadata.claude_accounts; doc.read_at = at; doc.accounts[0].read_at = at; doc.accounts[0].week.used = week;
+    const doc = u.metadata.claude_accounts; doc.read_at = at; for (const a of doc.accounts) a.read_at = at; doc.accounts[0].week.used = week;
   }, [week, readMinAgo] as const);
   // coming back to the window reads it again
   await setUsage(55, 1);

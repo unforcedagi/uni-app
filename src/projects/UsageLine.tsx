@@ -3,18 +3,11 @@
 import { useEffect, useRef, useState } from "react";
 import { openDialog } from "../areas/focusTrap";
 import ClaudeUsage from "../usage/ClaudeUsage";
-import { ageText, usageView } from "../usage/usageCore";
+import { usageLineText, usageView } from "../usage/usageCore";
 import { useUsageNote, useUsageRefresh } from "../usage/usageNote";
 
-/** "Claude: A 34% of the week · B 12% · new work to B · as of 6 min ago" (a full account says so). T-319: a reading over an hour old is not
- *  shown as current: the line says there is no fresh one, and how old the last is, instead of its numbers. */
-export function usageLine(metadata: unknown, now: Date): string | null {
-  const v = usageView(metadata, now);
-  if (!v || !v.rows.length) return null;
-  if (v.stale) return v.readAt ? `Claude: no fresh usage reading; the last one is from ${ageText(v.readAt, now)}` : "Claude: no usage reading yet";
-  const parts = v.rows.map((r) => `${r.name.toUpperCase()} ${r.missing ? "no reading" : r.week.full || r.session.full ? "full" : `${r.week.text} of the week`}`);
-  return `Claude: ${parts.join(" · ")}${v.next ? ` · new work to ${v.next.label.replace(/^Account /, "")}` : ""} · as of ${ageText(v.readAt, now)}`;
-}
+/** The line for the note's metadata at `now` (usageLineText); null: no line. */
+export const usageLine = (metadata: unknown, now: Date): string | null => usageLineText(usageView(metadata, now), now);
 
 export function UsageLine() {
   // T-302 round 3: read again every few minutes while shown and on focus/visibility (useUsageNote); the clock keeps "as of" true.

@@ -16,8 +16,14 @@ export type UsageDoc = { version: number; read_at: string | null; stop: number |
   next: { account: string; how: string; why?: string | null } };
 
 export type Meter = { pct: number | null; text: string; reset: string | null; full: boolean };
-export type Row = { name: string; label: string; session: Meter; week: Meter & { pace: "on pace" | "ahead of pace" | null }; missing: boolean };
-export type View = { rows: Row[]; choices: string[]; preference: string; next: { label: string; how: string } | null; readAt: string | null; stale: boolean };
+/** A row's `stale`: its own reading is over STALE_MIN old, or it has none (Codex zwmejvyc P2: each account's reading is its own; one
+ *  fresh account doesn't make another's old numbers current). */
+export type Row = { name: string; label: string; session: Meter; week: Meter & { pace: "on pace" | "ahead of pace" | null }; missing: boolean;
+  readAt: string | null; stale: boolean };
+/** `stale`: no account has a fresh reading. `readAt`: the oldest fresh reading (what "as of" means for every number shown); when none is
+ *  fresh, the newest there is. */
+export type View = { rows: Row[]; choices: string[]; preference: string; next: { label: string; how: string } | null; readAt: string | null; stale: boolean;
+  /** some account's reading is old (or missing) while another's is fresh */ someStale: boolean };
 
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
 const str = (v: unknown): string | null => (typeof v === "string" && v ? v : null);
@@ -93,19 +99,23 @@ export function usageView(metadata: unknown, now: Date, tz?: string): View | nul
     const passed = (x: UsageWindow | null | undefined) => !!x?.resets_at && new Date(x.resets_at).getTime() <= now.getTime();
     const sUsed = s ? (passed(s) ? 0 : s.used) : null;
     const wUsed = w ? (passed(w) ? 0 : w.used) : null;
+    const age = a.read_at ? (now.getTime() - new Date(a.read_at).getTime()) / 60_000 : NaN;
     return {
-      name: a.name, label: accountLabel(a.name), missing: !a.read_at,
+      name: a.name, label: accountLabel(a.name), missing: !a.read_at, readAt: a.read_at ?? null, stale: !(age <= STALE_MIN),
       session: { pct: sUsed, text: pctText(sUsed), reset: sUsed ? resetText(s?.resets_at ?? null, now, tz) : null, full: sUsed !== null && sUsed >= stop },
       week: { pct: wUsed, text: pctText(wUsed), reset: w && !passed(w) ? resetText(w.resets_at, now, tz) : null, full: wUsed !== null && wUsed >= stop,
         pace: w && !passed(w) ? pace(wUsed, w.resets_at, now) : null },
     };
   });
   const preference = preferenceOf(metadata, doc);
-  const readAt = doc.read_at;
-  const age = readAt ? (now.getTime() - new Date(readAt).getTime()) / 60_000 : Infinity;
+  const t = (iso: string | null) => (iso ? new Date(iso).getTime() : NaN);
+  const fresh = rows.filter((r) => !r.stale), dated = rows.filter((r) => Number.isFinite(t(r.readAt)));
+  const readAt = fresh.length ? fresh.reduce((a, r) => (t(r.readAt) < t(a.readAt) ? r : a)).readAt
+    : dated.length ? dated.reduce((a, r) => (t(r.readAt) > t(a.readAt) ? r : a)).readAt : null;
   // the note's next account was decided with the note's preference: shown only while that is still the one set
   const next = doc.next.account && doc.preference === preference ? { label: accountLabel(doc.next.account), how: doc.next.how } : null;
-  return { rows, choices: ["auto", ...doc.accounts.filter((a) => a.signed_in !== false).map((a) => a.name)], preference, next, readAt, stale: !(age <= STALE_MIN) };
+  return { rows, choices: ["auto", ...doc.accounts.filter((a) => a.signed_in !== false).map((a) => a.name)], preference, next, readAt,
+    stale: !fresh.length, someStale: !!fresh.length && fresh.length < rows.length };
 }
 
 /** "12 min ago", "3 h ago": how old the reading is. */
@@ -113,6 +123,17 @@ export function ageText(iso: string | null, now: Date): string {
   if (!iso) return "no reading yet";
   const m = Math.max(0, Math.round((now.getTime() - new Date(iso).getTime()) / 60_000));
   return m < 1 ? "just now" : m < 90 ? `${m} min ago` : m < 48 * 60 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} days ago`;
+}
+
+/** The front door's line: "Claude: A 34% of the week · B 12% of the week · new work to B · as of 6 min ago" (a full account says so).
+ *  T-319: an old reading is never shown as current. With none fresh, the line says so instead of numbers; an account whose own reading is
+ *  old says so in its place, and "as of" is the oldest of the numbers shown. */
+export function usageLineText(v: View | null, now: Date): string | null {
+  if (!v || !v.rows.length) return null;
+  if (v.stale) return v.readAt ? `Claude: no fresh usage reading; the last one is from ${ageText(v.readAt, now)}` : "Claude: no usage reading yet";
+  const parts = v.rows.map((r) => `${r.name.toUpperCase()} ${r.missing ? "no reading" : r.stale ? `no fresh reading (${ageText(r.readAt, now).replace(/ ago$/, " old")})`
+    : r.week.full || r.session.full ? "full" : `${r.week.text} of the week`}`);
+  return `Claude: ${parts.join(" · ")}${v.next ? ` · new work to ${v.next.label.replace(/^Account /, "")}` : ""} · as of ${ageText(v.readAt, now)}`;
 }
 
 export const howText = (how: string) => (how === "preference" ? "your choice" : how === "auto" ? "auto" : how === "default" ? "default" : how);
