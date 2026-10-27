@@ -73,7 +73,14 @@ export function resolveProfile(vault: string, note: Partial<VaultProfile> | null
 // ── The module's current profile, for code that is not a React component (task parsing, the Tauri-facing data layer).
 let active: VaultProfile = defaultProfile();
 export const activeProfile = (): VaultProfile => active;
-export function setActiveProfile(p: VaultProfile): void { active = p; }
+const profileListeners = new Set<() => void>();
+/** T-302: told, synchronously, whenever the active vault changes (the data layer drops what belonged to the old one at once). */
+export const onVaultChange = (l: () => void) => { profileListeners.add(l); return () => { profileListeners.delete(l); }; };
+export function setActiveProfile(p: VaultProfile): void {
+  const was = active.vault;
+  active = p;
+  if (p.vault !== was) for (const l of profileListeners) l();
+}
 
 /** Owner classification helpers shared by taskCore and the labels. */
 export const isMe = (owner: string, p: VaultProfile = active) => owner === p.me;

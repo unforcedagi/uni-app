@@ -71,7 +71,7 @@ export async function probeMessages(): Promise<void> {
  * Messages' place too: the pane, the drafts, the spots. */
 export function rememberOpen(roomId: string | null) {
   try { if (roomId) localStorage.setItem(OPEN_KEY, roomId); else { localStorage.removeItem(OPEN_KEY); localStorage.removeItem(PANE_KEY); } } catch { /* unavailable storage */ }
-  if (!roomId) { drafts.clear(); readTo.clear(); }
+  if (!roomId) { drafts.clear(); readTo.clear(); draftEpoch++; }
 }
 export function lastOpen(): string | null {
   try { return localStorage.getItem(OPEN_KEY); } catch { return null; }
@@ -87,8 +87,19 @@ export function lastPane(): "list" | "thread" {
   try { return localStorage.getItem(PANE_KEY) === "thread" ? "thread" : "list"; } catch { return "list"; }
 }
 const drafts = new Map<string, string>();
+/** T-302 review f97fx1ji: bumped by sign-out and Forget (rememberOpen(null)). A send begun before them that fails after can't put its
+ *  words back: the drafts belong to the account that was signed in, and the next account may open the same room. */
+let draftEpoch = 0;
+export const draftsEpoch = () => draftEpoch;
 export const draftFor = (roomId: string): string => drafts.get(roomId) ?? "";
 export function keepDraft(roomId: string, text: string) { if (text) drafts.set(roomId, text); else drafts.delete(roomId); }
+/** A send that failed gives its words back to the conversation's draft (unless something new is there), only if the account it was
+ *  sent from is still the one here (`at`: draftsEpoch() when it was sent). Returns whether it did. */
+export function unsentBack(roomId: string, body: string, at: number): boolean {
+  if (at !== draftEpoch) return false;
+  if (!draftFor(roomId).trim()) keepDraft(roomId, body);
+  return true;
+}
 /** Where a conversation was left: the first message in sight, and how far below the top it was (px); none at its end. */
 export type ReadSpot = { key: string; offset: number };
 const readTo = new Map<string, ReadSpot>();

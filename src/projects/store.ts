@@ -11,7 +11,7 @@
 //   ages as the vault would. A failed read keeps what was shown, says when it is from, and the working counts say "at <time>".
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useSyncExternalStore } from "react";
-import { activeProfile } from "../areas/profile";
+import { activeProfile, onVaultChange } from "../areas/profile";
 import type { RawNote } from "../areas/taskCore";
 import { allPages } from "../areas/vaultTasks";
 import { freshen, workFrom, type LiveWork, type Sources } from "./live";
@@ -47,8 +47,9 @@ const RUN_WINDOWS: readonly [number, number][] = [[0, 2], [2, 7], [7, 21], [21, 
 const BLANK: WorkState = { work: EMPTY, ready: false, error: null, at: null, partial: [], asked: new Map() };
 let state: WorkState = BLANK;
 const listeners = new Set<() => void>();
-const set = (next: Partial<WorkState>) => { state = { ...state, ...next }; for (const l of listeners) l(); };
-let tasks: { rows: RawNote[]; at: number } | null = null;
+const emit = () => { for (const l of listeners) l(); };
+const set = (next: Partial<WorkState>) => { state = { ...state, ...next }; emit(); };
+let tasks: { rows: RawNote[]; whole: boolean; at: number } | null = null;
 let inflight: Promise<void> | null = null;
 /** Whose work this is: the identity, set by the app (null: signed out or not known yet, so nothing is read or shown). */
 let identity: string | null = null;
@@ -57,6 +58,8 @@ let loadedFor: string | null = null;
 /** Bumped by Forget and by a change of owner: a read begun under an older generation is dropped when it lands. */
 let generation = 0;
 const later = new Set<ReturnType<typeof setTimeout>>();
+/** The owner the app is on now (identity and the active vault, read at this moment). */
+const currentOwner = () => ownerOf(identity, activeProfile().vault);
 
 const ownerOf = (id: string | null, vault: string) => (id && vault ? `${id}:${vault}` : null);
 const CACHE_PREFIX = "uni.work.";
@@ -95,6 +98,34 @@ async function readRuns(vault: string, at: number): Promise<{ rows: RawNote[]; p
   return { rows, partial };
 }
 
+const taskIdIn = (path: unknown) => (typeof path === "string" ? /^Tasks\/(T-\d+[a-z]?)\b/i.exec(path)?.[1]?.toUpperCase() ?? null : null);
+/** At most this many tasks are looked up one by one in a read (the rest wait for the next read, and are counted as not placed). */
+const FILL_MAX = 40;
+/** The tasks named by runs that don't land under a project, looked up one by one (the note list's paths, then each note). `missing`: the
+ *  sessions still without a project because their task couldn't be read (one that doesn't exist at all isn't missing: there is nothing to
+ *  read). */
+async function fillTasks(vault: string, runs: readonly RawNote[], nodes: readonly RawNote[], have: readonly RawNote[]): Promise<{ rows: RawNote[]; missing: number }> {
+  const placed = new Set(workFrom({ nodes, runs, tasks: have }).sessions.map((x) => x.id));
+  const known = new Set(have.map((t) => taskIdIn(t.path)));
+  const want = new Map<string, number>();
+  for (const r of runs) {
+    const t = (r.metadata as Record<string, unknown> | undefined)?.task;
+    const id = typeof t === "string" ? t.toUpperCase() : null;
+    if (id && !known.has(id) && !placed.has(r.id as string)) want.set(id, (want.get(id) ?? 0) + 1);
+  }
+  if (!want.size) return { rows: [], missing: 0 };
+  const count = (ids: Iterable<string>) => [...ids].reduce((n, id) => n + (want.get(id) ?? 0), 0);
+  let paths: { id: string; path: string }[];
+  try { paths = await invoke<{ id: string; path: string }[]>("vault_paths", { vault }); } catch { return { rows: [], missing: count(want.keys()) }; }
+  const at = new Map<string, string>();
+  for (const p of paths) { const id = taskIdIn(p.path); if (id && want.has(id) && !at.has(id)) at.set(id, p.id); }
+  const ids = [...at.keys()];
+  const got = await Promise.all(ids.slice(0, FILL_MAX).map((id) => invoke<{ note: RawNote }>("vault_note", { vault, noteRef: at.get(id) }).then((r) => r?.note ?? null, () => null)));
+  const rows = got.filter((n): n is RawNote => !!n);
+  const found = new Set(rows.map((n) => taskIdIn(n.path)));
+  return { rows, missing: count(ids.filter((id) => !found.has(id))) };
+}
+
 /** Reads the work again (one at a time; a call while a read is out waits for it). A failed read keeps what was shown and says so. */
 export function refreshWork(): Promise<void> {
   const vault = activeProfile().vault;
@@ -103,22 +134,35 @@ export function refreshWork(): Promise<void> {
   if (!owner) return Promise.resolve();
   if (inflight) return inflight;
   const mine = generation;
-  const current = () => mine === generation;
+  // dropped if Forget, another identity or another vault came since this read began (checked again before anything is shown or kept)
+  const current = () => mine === generation && currentOwner() === owner;
   let p: Promise<void> | undefined;
   p = (async () => {
     try {
       const fresh = !tasks || Date.now() - tasks.at > TASKS_MS;
       const t0 = Date.now();
-      const [nodes, runs, taskRows] = await Promise.all([
+      const [nodes, runs, taskRead] = await Promise.all([
         allPages(page(vault, "node")), readRuns(vault, t0),
-        fresh ? allPages(page(vault, "task")).then((r) => r.rows).catch(() => tasks?.rows ?? []) : Promise.resolve(tasks!.rows),
+        fresh ? allPages(page(vault, "task")).then((r) => ({ rows: r.rows, whole: r.complete }), () => ({ rows: tasks?.rows ?? [], whole: false }))
+          : Promise.resolve({ rows: tasks!.rows, whole: tasks!.whole }),
       ]);
       // Forget, or another identity or vault, since this read began: its answer is not this owner's, so it is dropped
       if (!current()) return;
-      if (fresh) tasks = { rows: taskRows, at: Date.now() };
+      let taskRows = taskRead.rows;
+      let missing = 0;
+      // review f97fx1ji P3: a task list longer than the pages read (or one that failed) can leave a run with no project; the tasks those
+      // runs name are looked up one by one, and what still can't be found is said
+      if (!taskRead.whole) {
+        const fill = await fillTasks(vault, runs.rows, nodes.rows, taskRows);
+        if (!current()) return;
+        taskRows = [...taskRows, ...fill.rows];
+        missing = fill.missing;
+      }
+      if (fresh || !taskRead.whole) tasks = { rows: taskRows, whole: taskRead.whole, at: fresh ? Date.now() : tasks!.at };
       const src: Sources = { nodes: nodes.rows, runs: runs.rows, tasks: taskRows };
       const work = workFrom(src);
-      const partial = [...(nodes.complete ? [] : ["Some projects aren't loaded"]), ...runs.partial];
+      const partial = [...(nodes.complete ? [] : ["Some projects aren't loaded"]), ...runs.partial,
+        ...(missing ? [`${missing} session${missing === 1 ? "" : "s"} couldn't be placed under a project`] : [])];
       writeCache(owner, { work, at: t0, partial });
       set({ work, ready: true, error: null, at: t0, partial, asked: settle(state.asked, work) });
     } catch (e) {
@@ -130,15 +174,24 @@ export function refreshWork(): Promise<void> {
 }
 
 /** The work of a new owner (or none): what this device kept for that owner, never another's. Reads still out are dropped. */
-function adopt(owner: string | null) {
+function adopt(owner: string | null, notify = true) {
   generation++;
   loadedFor = owner; tasks = null; inflight = null;
   for (const t of later) clearTimeout(t);
   later.clear();
   const saved = owner ? readCache(owner) : null;
-  state = { ...BLANK, asked: new Map() };
-  set(saved ? { work: freshen(saved.work), at: saved.at, partial: saved.partial } : {});
+  state = { ...BLANK, asked: new Map(), ...(saved ? { work: freshen(saved.work), at: saved.at, partial: saved.partial } : {}) };
+  if (notify) emit();
 }
+
+// Review f97fx1ji P1: the vault changes during a render (ProfileContext); the old vault's work is dropped at that moment (a read of it
+// still out is then of an older generation), and the screen is told just after, outside the render.
+onVaultChange(() => {
+  const owner = currentOwner();
+  if (owner === loadedFor) return;
+  adopt(owner, false);
+  queueMicrotask(() => { emit(); if (owner && users > 0 && owner === currentOwner()) void refreshWork(); });
+});
 
 /** The app's identity (null when signed out or not read yet). Called on every change; another identity sees none of this one's work. */
 export function setWorkOwner(id: string | null) {
@@ -196,7 +249,11 @@ export function asOf(s: Pick<WorkState, "at" | "error">, nowMs = Date.now()): st
 }
 
 const subscribe = (l: () => void) => { listeners.add(l); return () => { listeners.delete(l); }; };
-const get = () => state;
+/** What the screen sees: the work only while it is the current owner's (an identity or vault change is never shown the old one's). */
+const NONE: WorkState = { ...BLANK };
+const get = () => (loadedFor === currentOwner() ? state : NONE);
+/** What the screen would see now (for code outside React, and the store's own test). */
+export const workSnapshot = (): WorkState => get();
 let users = 0;
 let timer: ReturnType<typeof setInterval> | null = null;
 let clock: ReturnType<typeof setInterval> | null = null;

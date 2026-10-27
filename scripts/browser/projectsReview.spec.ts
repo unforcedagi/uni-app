@@ -130,3 +130,29 @@ test('P2: the usage line and the card read the note again (focus, and every few 
   await page.clock.fastForward(5 * MIN + 1000);
   await expect(card).toContainText('70%');
 });
+
+test('review f97fx1ji P3: a task list longer than the pages read still places a session found only through its task', async ({ page }) => {
+  await bootProjects(page, { bigTasks: 2100 });
+  await home(page);
+  await door(page, 'Engine Room').click();
+  await page.locator('[data-place="project-strip"] .ps-tab[data-project="p-backups"]').click();
+  const sheet = page.getByRole('dialog', { name: 'Nightly backups' });
+  await expect(sheet.locator('.pj-session')).toContainText('Left a commit.');
+  await expect(page.locator('.pj-status')).toHaveCount(0);
+});
+
+test('review f97fx1ji P3: when that task can\'t be read either, it says a session couldn\'t be placed (never a quiet success)', async ({ page }) => {
+  await bootProjects(page, { bigTasks: 2100 });
+  await page.addInitScript(() => sessionStorage.setItem('t.nopaths', '1'));
+  await home(page);
+  await expect(page.locator('.fd-status')).toHaveText("1 session couldn't be placed under a project");
+});
+
+test('review f97fx1ji P3: a task read that fails is not taken as the whole list: the session is still placed through its own task', async ({ page }) => {
+  await page.addInitScript(() => sessionStorage.setItem('t.tasksfail', '1'));
+  await bootProjects(page);
+  await home(page);
+  await door(page, 'Engine Room').click();
+  await page.locator('[data-place="project-strip"] .ps-tab[data-project="p-backups"]').click();
+  await expect(page.getByRole('dialog', { name: 'Nightly backups' }).locator('.pj-session')).toContainText('Left a commit.');
+});

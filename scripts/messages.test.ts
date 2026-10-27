@@ -3,6 +3,7 @@
 // midnight and a sender's run breaks after five minutes; a rejection keeps the door's shape.
 // Run: node --experimental-strip-types scripts/messages.test.ts
 import assert from "node:assert/strict";
+import { draftFor, draftsEpoch, keepDraft, rememberOpen, unsentBack } from "../src/messages/messagesDoor.ts";
 import { applyLink, applyOpened, applyTimeline, asMessagesErr, linkHost, mergeLinks, previewLine, qrPath, shownFlows, shownItems, type LinkRow, type MessageRow, type RoomRow, type Thread } from "../src/messages/messagesView.ts";
 
 let n = 0;
@@ -105,6 +106,24 @@ t("a sign-in link is shown only as an https host; anything else, no link and no 
   assert.equal(linkHost("accounts.example.com"), null);
   assert.equal(linkHost("javascript:alert(1)"), null);
   assert.equal(linkHost(""), null);
+});
+
+t("review f97fx1ji: a send that fails after sign-out or Forget never puts its words back for the next account", () => {
+  rememberOpen(null);
+  const sentAt = draftsEpoch();
+  // signed in, a send is on its way; it fails while still signed in: the words come back to the room's draft
+  assert.equal(unsentBack("!room:example.org", "first words", sentAt), true);
+  assert.equal(draftFor("!room:example.org"), "first words");
+  // something new being written wins over the failed words
+  keepDraft("!room:example.org", "newer");
+  unsentBack("!room:example.org", "first words", sentAt);
+  assert.equal(draftFor("!room:example.org"), "newer");
+  // another send; then sign-out (or Forget) clears the drafts before it fails
+  const before = draftsEpoch();
+  rememberOpen(null);
+  assert.equal(draftFor("!room:example.org"), "");
+  assert.equal(unsentBack("!room:example.org", "private words", before), false);
+  assert.equal(draftFor("!room:example.org"), "", "the next account opening the same room finds no draft");
 });
 
 console.log(`${n} messages view checks passed`);

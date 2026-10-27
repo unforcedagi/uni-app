@@ -10,7 +10,8 @@ import { workFrom } from '../../src/projects/live.ts';
 
 export type LiveRead = { nodes: any[]; runs: any[]; tasks: any[]; usage: any | null; rooms: { id: string; name: string }[] };
 /** `bigRuns`: this many more finished runs, a month old, listed before every other run (a ledger longer than the pages the app reads). */
-export type Boot = { live?: LiveRead; bigRuns?: number };
+export type Boot = { live?: LiveRead; bigRuns?: number;
+  /** this many more tasks, listed before every other task (a task list longer than the pages the app reads) */ bigTasks?: number };
 
 export async function bootProjects(page: Page, opts: Boot = {}) {
   const now = Date.now();
@@ -22,6 +23,7 @@ export async function bootProjects(page: Page, opts: Boot = {}) {
     const old = new Date(now - 30 * 86_400_000).toISOString(), done = new Date(now - 30 * 86_400_000 + 600_000).toISOString();
     world.runs = [...Array.from({ length: opts.bigRuns }, (_, i) => ({ id: `run-old-${i}`, path: `Runs/2026-09-20 Old tidy ${i}`, tags: ['run'], metadata: { node: 'p-seeds', state: 'done', started_at: old, ended_at: done, summary: 'mts aaaabbbb: completed' }, createdAt: old, updatedAt: done })), ...world.runs];
   }
+  if (opts.bigTasks) world.tasks = [...Array.from({ length: opts.bigTasks }, (_, i) => ({ id: `t-old-${i}`, path: `Tasks/T-${5000 + i} Old placeholder ${i}`, tags: ['task'], metadata: { node: 'p-seeds', state: 'done', owner: 'uni' }, createdAt: '2026-09-01T00:00:00.000Z', updatedAt: '2026-09-01T00:00:00.000Z' })), ...world.tasks];
   const data = { now, world, asks, talk: opts.live ? [] : demoTalk(now), readOnly: !!opts.live };
   await page.addInitScript((d: any) => {
     const w = window as any;
@@ -34,7 +36,7 @@ export async function bootProjects(page: Page, opts: Boot = {}) {
     w.__posted = [];
     w.__held = [];
     w.__releaseRuns = () => { w.__holdRuns = false; for (const r of w.__held.splice(0)) r(); };
-    const offline = (tag: string) => sessionStorage.getItem('t.offline') === '1' && ['node', 'run', 'task'].includes(tag);
+    const offline = (tag: string) => (sessionStorage.getItem('t.offline') === '1' && ['node', 'run', 'task'].includes(tag)) || (sessionStorage.getItem('t.tasksfail') === '1' && tag === 'task');
     const hold = async (tag: string) => {
       // 't.hang': the work's reads never answer (a network that hangs rather than fails)
       if (sessionStorage.getItem('t.hang') === '1' && ['node', 'run', 'task'].includes(tag)) await new Promise(() => {});
@@ -94,7 +96,7 @@ export async function bootProjects(page: Page, opts: Boot = {}) {
           case 'get_messages': return args.root ? [] : (msgs[args.channel] ?? []).slice(-(args.limit ?? 300));
           case 'approval_messages': return [];
           case 'get_members': return [{ pubkey: ME, name: 'Robin', named: true }, { pubkey: UNI, name: 'Uni', named: true }];
-          case 'vault_paths': return notes.nodes.map((x: any) => ({ id: x.id, path: x.path, extension: 'md', updatedAt: x.updatedAt }));
+          case 'vault_paths': if (sessionStorage.getItem('t.nopaths') === '1') throw 'offline'; return [...notes.nodes, ...notes.tasks].map((x: any) => ({ id: x.id, path: x.path, extension: 'md', updatedAt: x.updatedAt }));
           case 'vault_list': return ['uni'];
           case 'vault_query': if (offline(args.tag)) throw 'offline'; await hold(args.tag); return page(byTag(args.tag), args);
           case 'vault_query_meta': {
@@ -109,7 +111,7 @@ export async function bootProjects(page: Page, opts: Boot = {}) {
           case 'vault_subtree_tasks': return [];
           case 'vault_note': {
             if (args.noteRef === 'System/Claude accounts') { if (!notes.usage) throw 'note not found'; return { hub: 'https://example.invalid', vault: 'uni', note: JSON.parse(JSON.stringify(notes.usage)) }; }
-            const x = notes.nodes.find((y: any) => y.id === args.noteRef || y.path === args.noteRef);
+            const x = [...notes.nodes, ...notes.tasks].find((y: any) => y.id === args.noteRef || y.path === args.noteRef);
             if (!x) throw 'note not found: ' + args.noteRef;
             return { hub: 'https://example.invalid', vault: 'uni', note: { ...x, extension: 'md', content: `# ${x.path.split('/').pop()}\n` } };
           }

@@ -4,7 +4,7 @@
 // arrives while you look. Agents don't read any of this: the thread says so, and "bring Uni in" is designed (T-278
 // DESIGN.md), not built. Shape and word before colour, so it reads on the Daylight, where nothing moves.
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type FormEvent, type KeyboardEvent } from "react";
-import { closeRoom, draftFor, join, keepDraft, keepReadSpot, lastOpen, lastPane, markRead, older, onUpdate, openRoom, readSpot, rememberOpen, rememberPane, rooms as readRooms, send, signIn, signInDevice, signOut, status as readStatus } from "./messagesDoor.ts";
+import { closeRoom, draftFor, draftsEpoch, join, keepDraft, keepReadSpot, lastOpen, lastPane, markRead, older, onUpdate, openRoom, readSpot, rememberOpen, rememberPane, unsentBack, rooms as readRooms, send, signIn, signInDevice, signOut, status as readStatus } from "./messagesDoor.ts";
 import { applyLink, applyOpened, applyTimeline, asMessagesErr, initials, previewLine, problemText, rowTime, sendWords, shownItems, statusWords, timeLabel, type LinkRow, type MessagesErr, type RoomRow, type Status, type Thread } from "./messagesView.ts";
 import LinkAccounts from "./LinkAccounts.tsx";
 import { enterInsertsNewline } from "../composerCore";
@@ -104,11 +104,13 @@ function ThreadView({ room, thread, now, visible, onBack, onProblem }: { room: R
     if (!body) return;
     setDraft("");
     stuck.current = true;
+    const at = draftsEpoch();
     sending.current = sending.current.then(() => send(room.id, body)).then(() => onProblem(null), (err) => {
+      // signed out or forgotten since it was sent: the words belonged to that account, so they are not put back anywhere
+      if (!unsentBack(room.id, body, at)) return;
       onProblem(asMessagesErr(err));
       // what didn't go comes back to the composer, unless something new is being written there (kept for the conversation even if it was left meanwhile)
       setDraft((d) => (d.trim() ? d : body));
-      if (!draftFor(room.id).trim()) keepDraft(room.id, body);
     });
   };
   const key = (e: KeyboardEvent<HTMLTextAreaElement>) => {
