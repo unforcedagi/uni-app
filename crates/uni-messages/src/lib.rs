@@ -18,7 +18,7 @@ mod view;
 
 pub use link::{Flow, LinkRow, LinkStep, LinkedAccount, Network, NETWORKS};
 pub use secrets::{FileSecrets, Secrets};
-pub use view::{checked_homeserver, MessageKind, MessageRow, RoomRow, SendState};
+pub use view::{checked_homeserver, safe_mime, Media, MediaKind, MessageKind, MessageRow, Reaction, Reply, RoomRow, SendState};
 
 use std::{
     collections::HashMap,
@@ -31,7 +31,11 @@ use futures_util::StreamExt;
 use matrix_sdk::{
     authentication::matrix::MatrixSession,
     config::RequestConfig,
-    ruma::{api::client::receipt::create_receipt::v3::ReceiptType, events::room::message::RoomMessageEventContent, OwnedRoomId, RoomId},
+    media::{MediaFormat, MediaRequestParameters},
+    ruma::{
+        api::client::receipt::create_receipt::v3::ReceiptType, events::room::message::RoomMessageEventContent, EventId, OwnedEventId, OwnedRoomId,
+        RoomId,
+    },
     store::RoomLoadSettings,
     Client, Room, RoomState, SessionChange, SqliteStoreConfig,
 };
@@ -72,6 +76,41 @@ const QUEUE_RETRY: Duration = Duration::from_secs(2);
 const QUEUE_RETRY_MAX: Duration = Duration::from_secs(30);
 /// The crypto database in a store folder (matrix-sdk-sqlite's name for it): a store without it has no keys.
 const CRYPTO_DB: &str = "matrix-sdk-crypto.sqlite3";
+/// T-313: the largest attachment fetched for the app, and how long its download may take.
+pub const MAX_MEDIA: u64 = 100 * 1024 * 1024;
+const MEDIA_FOR: Duration = Duration::from_secs(120);
+/// The largest voice message sent to be transcribed (the transcription service's own limit).
+pub const MAX_TRANSCRIBE: usize = 25 * 1024 * 1024;
+/// How long a transcription may take: the service runs near real time on a CPU.
+const TRANSCRIBE_FOR: Duration = Duration::from_secs(300);
+/// Transcriptions running at once; the rest wait their turn.
+const TRANSCRIBING: usize = 2;
+/// Where a voice message's transcript is kept: in the account's encrypted store, by event.
+const TRANSCRIPT_KEY: &str = "uni.transcript.v1:";
+/// Replied-to messages fetched for one room's open, at most (a room scrolled back far fetches more as it loads).
+const REPLY_FETCHES: usize = 50;
+
+/// T-313: turns a voice message into words. The app's is uni-transcribe on the owner's box (faster-whisper, reached
+/// with the device key: src-tauri's messages.rs); the tests use their own. Answers the words, or why not.
+pub trait Transcriber: Send + Sync {
+    fn transcribe(&self, audio: Vec<u8>, mime: String) -> Transcribing;
+}
+
+/// A transcription under way.
+pub type Transcribing = std::pin::Pin<Box<dyn std::future::Future<Output = std::result::Result<String, String>> + Send>>;
+
+/// A voice message's words, as transcribed once and kept.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Transcript {
+    pub text: String,
+}
+
+/// An attachment's bytes, decrypted, with the type the app may give them (`view::safe_mime`) and its file name.
+pub struct Fetched {
+    pub bytes: Vec<u8>,
+    pub mime: String,
+    pub name: String,
+}
 
 /// What the app is told about the account: whether it is signed in and whether the sync is live.
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -233,6 +272,12 @@ pub struct Messages {
     link_rev: std::sync::atomic::AtomicU64,
     /// Bot DMs are found or made one at a time (link.rs says why); the ones made here, by account and network.
     link_creating: tokio::sync::Mutex<HashMap<(String, &'static str), OwnedRoomId>>,
+    /// T-313: what turns voice messages into words, if this device has one.
+    transcriber: StdMutex<Option<Arc<dyn Transcriber>>>,
+    /// One transcription per voice message at a time: a second ask waits for the first, then reads what it kept.
+    transcribing: StdMutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    /// At most `TRANSCRIBING` sent to the transcriber at once.
+    transcribe_turns: Arc<tokio::sync::Semaphore>,
 }
 
 impl Messages {
@@ -252,7 +297,15 @@ impl Messages {
             links: StdMutex::new(Default::default()),
             link_rev: std::sync::atomic::AtomicU64::new(0),
             link_creating: tokio::sync::Mutex::new(HashMap::new()),
+            transcriber: StdMutex::new(None),
+            transcribing: StdMutex::new(HashMap::new()),
+            transcribe_turns: Arc::new(tokio::sync::Semaphore::new(TRANSCRIBING)),
         })
+    }
+
+    /// T-313: how this device turns voice messages into words. Without one, `transcript` says it can't.
+    pub fn set_transcriber(&self, t: Arc<dyn Transcriber>) {
+        *self.transcriber.lock().unwrap() = Some(t);
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<Update> {
@@ -703,17 +756,23 @@ impl Messages {
         let (items, mut stream) = timeline.subscribe().await;
         let me = Arc::downgrade(self);
         let id = room_id.to_string();
+        let user = client.user_id().map(ToOwned::to_owned);
+        let replies = timeline.clone();
         let task = tokio::spawn(async move {
             // live receive: every change to the room's timeline (a message arriving, our own echo turning into the
             // sent event, an edit, a late decryption) goes to the app as the room's rows
             let mut items = items;
+            let mut asked = std::collections::HashSet::new();
+            fetch_replies(&replies, &view::message_rows(&items, user.as_deref()), &mut asked);
             while let Some(diffs) = stream.next().await {
                 for d in diffs {
                     d.apply(&mut items);
                 }
                 let Some(me) = me.upgrade() else { break };
                 if forward {
-                    let _ = me.tx.send(Update::Timeline { room_id: id.clone(), items: view::message_rows(&items) });
+                    let rows = view::message_rows(&items, user.as_deref());
+                    fetch_replies(&replies, &rows, &mut asked);
+                    let _ = me.tx.send(Update::Timeline { room_id: id.clone(), items: rows });
                 }
             }
         });
@@ -732,12 +791,13 @@ impl Messages {
             return Err(invalid("That is a bridge's linking room, not a conversation."));
         }
         let timeline = self.timeline(&client, &account, &room_id).await?;
-        let mut rows = view::message_rows(&timeline.items().await);
+        let me = client.user_id();
+        let mut rows = view::message_rows(&timeline.items().await, me);
         if rows.len() < 20 {
             // a fresh room shows its start; an older one, its last screenful. A failed page is not fatal: what is
             // loaded is shown, and "Load earlier messages" can ask again.
             if timeline.paginate_backwards(30).await.is_ok() {
-                rows = view::message_rows(&timeline.items().await);
+                rows = view::message_rows(&timeline.items().await, me);
             }
         }
         Ok(rows)
@@ -790,6 +850,80 @@ impl Messages {
         timeline.paginate_backwards(30).await.map_err(server)
     }
 
+    /// T-313: an open room's media message: where its bytes are and what it is. Only a message the room's timeline
+    /// holds: the app names an event, never a media address, so it can't make this fetch anything else.
+    async fn media_message(self: &Arc<Self>, room_id: &str, event_id: &str) -> Result<(Client, OwnedEventId, matrix_sdk::ruma::events::room::MediaSource, Media)> {
+        let room_id = Self::room_id(room_id)?;
+        let event_id = EventId::parse(event_id).map_err(|_| invalid("That isn't an event id."))?;
+        let (client, account) = self.client().await?;
+        if client.get_room(&room_id).is_some_and(|r| link::bridge_of(&r).is_some()) {
+            return Err(invalid("That is a bridge's linking room, not a conversation."));
+        }
+        let timeline = self.timeline(&client, &account, &room_id).await?;
+        let item = timeline.item_by_event_id(&event_id).await.ok_or_else(|| invalid("That message isn't loaded here."))?;
+        let (source, media) = view::media_of(&item).ok_or_else(|| invalid("That message has no attachment."))?;
+        Ok((client, event_id, source, media))
+    }
+
+    /// T-313: an attachment's bytes, through the account's own client: the homeserver's authenticated media download
+    /// (with the account's token, which never leaves Rust), decrypted here for an encrypted room, and kept in the
+    /// account's encrypted media store so it is fetched once.
+    pub async fn media(self: &Arc<Self>, room_id: &str, event_id: &str) -> Result<Fetched> {
+        let (client, _, source, media) = self.media_message(room_id, event_id).await?;
+        let bytes = download(&client, source, media.size).await?;
+        Ok(Fetched { bytes, mime: media.mime, name: media.name })
+    }
+
+    /// T-313: a voice message's words. Transcribed once, by this device's transcriber, and kept in the account's
+    /// encrypted store, so a second ask (this session or after a restart) reads them back. Two asks at once share one
+    /// transcription. A failure isn't kept: asking again tries again.
+    pub async fn transcript(self: &Arc<Self>, room_id: &str, event_id: &str) -> Result<Transcript> {
+        let (client, event_id, source, media) = self.media_message(room_id, event_id).await?;
+        if !matches!(media.kind, MediaKind::Voice | MediaKind::Audio) {
+            return Err(invalid("Only a voice message or audio is transcribed."));
+        }
+        let key = format!("{TRANSCRIPT_KEY}{event_id}");
+        let gate = self.transcribing.lock().unwrap().entry(key.clone()).or_default().clone();
+        let _turn = gate.lock().await;
+        let done = async {
+            if let Some(kept) = client.state_store().get_custom_value(key.as_bytes()).await.map_err(from_store)? {
+                return serde_json::from_slice::<Transcript>(&kept).map_err(from_store);
+            }
+            let transcriber = self.transcriber.lock().unwrap().clone().ok_or_else(|| MessagesError::Unreachable {
+                message: "Transcription isn't available on this device.".into(),
+            })?;
+            if media.size.is_some_and(|n| n > MAX_TRANSCRIBE as u64) {
+                return Err(invalid("This recording is too long to transcribe."));
+            }
+            let audio = download(&client, source, media.size).await?;
+            if audio.len() > MAX_TRANSCRIBE {
+                return Err(invalid("This recording is too long to transcribe."));
+            }
+            let _slot = self.transcribe_turns.clone().acquire_owned().await.map_err(server)?;
+            let text = match tokio::time::timeout(TRANSCRIBE_FOR, transcriber.transcribe(audio, media.mime.clone())).await {
+                Ok(Ok(text)) => text.trim().to_owned(),
+                Ok(Err(e)) => return Err(MessagesError::Unreachable { message: format!("Couldn't transcribe it: {e}") }),
+                Err(_) => return Err(MessagesError::Unreachable { message: "Transcribing took too long.".into() }),
+            };
+            let t = Transcript { text };
+            let kept = serde_json::to_vec(&t).map_err(from_store)?;
+            // the account may have been signed out meanwhile: its store is gone with it, and so are these words
+            if self.client().await.is_ok_and(|(c, _)| c.user_id() == client.user_id()) {
+                client.state_store().set_custom_value_no_read(key.as_bytes(), kept).await.map_err(from_store)?;
+            }
+            Ok(t)
+        }
+        .await;
+        drop(_turn);
+        // the gate goes once nobody waits on it
+        let mut gates = self.transcribing.lock().unwrap();
+        if gates.get(&key).is_some_and(|g| Arc::strong_count(g) == 2) {
+            gates.remove(&key);
+        }
+        drop(gate);
+        done
+    }
+
     /// Mark an open room read up to its latest message.
     pub async fn read(self: &Arc<Self>, room_id: &str) -> Result<()> {
         let room_id = Self::room_id(room_id)?;
@@ -814,6 +948,7 @@ impl Messages {
             "messages_join" => to(&self.join(&s("roomId")).await?),
             "messages_older" => to(&self.older(&s("roomId")).await?),
             "messages_read" => to(&self.read(&s("roomId")).await?),
+            "messages_transcript" => to(&self.transcript(&s("roomId"), &s("eventId")).await?),
             "messages_links" => to(&self.links().await?),
             "messages_link_check" => to(&self.link_check(&s("network")).await?),
             "messages_link_start" => to(&self.link_start(&s("network"), Some(&s("flow")), Some(&s("relogin"))).await?),
@@ -829,6 +964,40 @@ enum Login<'a> {
     Password { user: &'a str, password: &'a str },
     /// A one-time `m.login.token`.
     Token(&'a str),
+}
+
+/// An attachment's bytes, within `MEDIA_FOR`, refused past `MAX_MEDIA` (before the download when its event gives a size).
+async fn download(client: &Client, source: matrix_sdk::ruma::events::room::MediaSource, size: Option<u64>) -> Result<Vec<u8>> {
+    let too_big = || invalid("This attachment is too large to open here.");
+    if size.is_some_and(|n| n > MAX_MEDIA) {
+        return Err(too_big());
+    }
+    let request = MediaRequestParameters { source, format: MediaFormat::File };
+    let bytes = match tokio::time::timeout(MEDIA_FOR, client.media().get_media_content(&request, true)).await {
+        Ok(Ok(b)) => b,
+        Ok(Err(e)) => return Err(from_sdk(e)),
+        Err(_) => return Err(MessagesError::Unreachable { message: "The attachment took too long to download.".into() }),
+    };
+    if bytes.len() as u64 > MAX_MEDIA {
+        return Err(too_big());
+    }
+    Ok(bytes)
+}
+
+/// Ask the homeserver for the messages replies answer that the timeline doesn't hold yet, each once per open room and
+/// at most `REPLY_FETCHES`; each arrives as a timeline change, so the reply shows its quote.
+fn fetch_replies(timeline: &Arc<Timeline>, rows: &[MessageRow], asked: &mut std::collections::HashSet<String>) {
+    for r in rows {
+        let (Some(reply), Some(id)) = (&r.reply, &r.event_id) else { continue };
+        if reply.text.is_some() || asked.len() >= REPLY_FETCHES || !asked.insert(id.clone()) {
+            continue;
+        }
+        let Ok(id) = EventId::parse(id) else { continue };
+        let t = timeline.clone();
+        tokio::spawn(async move {
+            let _ = t.fetch_details_for_event(&id).await;
+        });
+    }
 }
 
 /// Log a device out, within `LOGOUT_FOR`; whether the homeserver confirmed it.

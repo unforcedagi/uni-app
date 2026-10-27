@@ -11,7 +11,8 @@ publish = false
 
 [features]
 # The dev-only HTTP bridge (src/bin/uni-messages-dev.rs) that lets a plain browser and Playwright drive this crate.
-dev-bridge = ["dep:axum", "dep:clap", "dep:rustls", "dep:tracing-subscriber", "tokio/rt-multi-thread", "tokio/signal"]
+# T-313: `--transcribe-hub` transcribes voice messages as the app does (uni-core's client for uni-transcribe).
+dev-bridge = ["dep:axum", "dep:clap", "dep:rustls", "dep:tracing-subscriber", "dep:uni-core", "dep:nostr", "tokio/rt-multi-thread", "tokio/signal"]
 
 [dependencies]
 matrix-sdk = { version = "=0.18.0", default-features = false, features = ["e2e-encryption", "sqlite", "automatic-room-key-forwarding"] }
@@ -30,6 +31,8 @@ axum = { version = "0.8", optional = true, default-features = false, features = 
 clap = { workspace = true, optional = true }
 tracing-subscriber = { workspace = true, optional = true }
 rustls = { workspace = true, optional = true }
+uni-core = { path = "../uni-core", optional = true }
+nostr = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile = "3"

@@ -3,6 +3,8 @@
 //!
 //! - `POST /p/<profile>/invoke/<command>` with the command's arguments as JSON: its answer, or `{kind, message}` (400).
 //! - `GET /p/<profile>/events?token=…`: the updates as server-sent events, one JSON `Update` each.
+//! - T-313: `messages_media` answers the attachment's bytes (`application/octet-stream`), as the app's command answers
+//!   raw IPC; with `--transcribe-hub`, voice messages are transcribed as the app does it.
 //!
 //! A profile is one account with its own store (`<dir>/<profile>`), so two pages can be two people. It listens on
 //! 127.0.0.1 only, answers only requests carrying the run's token, and allows only the one web origin it is given.
@@ -26,7 +28,7 @@ use clap::Parser;
 use futures_util::{stream, Stream};
 use serde_json::{json, Value};
 use tokio::sync::{broadcast::error::RecvError, Mutex};
-use uni_messages::{FileSecrets, Messages, MessagesError};
+use uni_messages::{FileSecrets, Messages, MessagesError, Transcriber, Transcribing};
 
 #[derive(Parser)]
 struct Args {
@@ -42,6 +44,23 @@ struct Args {
     /// Every request must carry it; from the environment so it stays out of `ps`.
     #[arg(long, env = "UNI_MESSAGES_DEV_TOKEN", hide_env_values = true)]
     token: String,
+    /// T-313: transcribe voice messages on this hub's host, as the app does (uni-transcribe, NIP-98 signed with this
+    /// machine's key: `UNI_NSEC` or the keyring). Without it, a voice message's transcript says it isn't available.
+    #[arg(long)]
+    transcribe_hub: Option<String>,
+}
+
+/// The app's transcription path (src-tauri's `transcribe_audio`), from this machine.
+struct HubTranscriber {
+    hub: String,
+    keys: nostr::Keys,
+}
+
+impl Transcriber for HubTranscriber {
+    fn transcribe(&self, audio: Vec<u8>, mime: String) -> Transcribing {
+        let (hub, keys) = (self.hub.clone(), self.keys.clone());
+        Box::pin(async move { uni_core::transcribe::transcribe_on_hub(&hub, &keys, audio, &mime, None).await.map(|t| t.text).map_err(|e| e.to_string()) })
+    }
 }
 
 struct Bridge {
@@ -49,6 +68,7 @@ struct Bridge {
     token: String,
     origin: HeaderValue,
     profiles: Mutex<HashMap<String, Arc<Messages>>>,
+    transcriber: Option<Arc<HubTranscriber>>,
 }
 
 fn valid_profile(p: &str) -> bool {
@@ -70,7 +90,11 @@ impl Bridge {
             all.entry(name.to_owned())
                 .or_insert_with(|| {
                     let dir = self.dir.join(name);
-                    Messages::new(dir.join("data"), Arc::new(FileSecrets::new(dir.join("secrets"))))
+                    let m = Messages::new(dir.join("data"), Arc::new(FileSecrets::new(dir.join("secrets"))));
+                    if let Some(t) = &self.transcriber {
+                        m.set_transcriber(t.clone());
+                    }
+                    m
                 })
                 .clone(),
         )
@@ -106,6 +130,14 @@ async fn invoke(State(b): State<Arc<Bridge>>, Path((profile, cmd)): Path<(String
         return b.cors(StatusCode::NOT_FOUND.into_response());
     };
     let args: Value = if body.is_empty() { json!({}) } else { serde_json::from_slice(&body).unwrap_or(json!({})) };
+    if cmd == "messages_media" {
+        let s = |k: &str| args.get(k).and_then(Value::as_str).unwrap_or_default().to_owned();
+        let r = match m.media(&s("roomId"), &s("eventId")).await {
+            Ok(f) => ([(header::CONTENT_TYPE, "application/octet-stream")], f.bytes).into_response(),
+            Err(e) => error(StatusCode::BAD_REQUEST, &e),
+        };
+        return b.cors(r);
+    }
     let r = match m.call(&cmd, &args).await {
         Ok(v) => axum::Json(v).into_response(),
         Err(e) => error(StatusCode::BAD_REQUEST, &e),
@@ -150,7 +182,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err("the token must be at least 16 characters".into());
     }
     let origin = HeaderValue::from_str(&args.origin).map_err(|_| "bad --origin")?;
-    let bridge = Arc::new(Bridge { dir: args.dir, token: args.token, origin, profiles: Mutex::new(HashMap::new()) });
+    let transcriber = match args.transcribe_hub {
+        Some(hub) => {
+            let (keys, _) = uni_core::load_keys(false).map_err(|e| format!("--transcribe-hub needs this machine's key: {e}"))?;
+            Some(Arc::new(HubTranscriber { hub, keys }))
+        }
+        None => None,
+    };
+    let bridge = Arc::new(Bridge { dir: args.dir, token: args.token, origin, profiles: Mutex::new(HashMap::new()), transcriber });
     let app = Router::new()
         .route("/p/{profile}/invoke/{cmd}", post(invoke).options(preflight))
         .route("/p/{profile}/events", get(events).options(preflight))

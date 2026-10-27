@@ -3,12 +3,15 @@
 use std::sync::Arc;
 
 use matrix_sdk::{
-    ruma::{events::room::message::MessageType, UserId},
+    ruma::{
+        events::room::{message::MessageType, MediaSource},
+        UInt, UserId,
+    },
     Room, RoomState,
 };
 use matrix_sdk_ui::{
     eyeball_im::Vector,
-    timeline::{EventSendState, LatestEventValue, TimelineDetails, TimelineItem, TimelineItemContent},
+    timeline::{EventSendState, EventTimelineItem, LatestEventValue, TimelineDetails, TimelineItem, TimelineItemContent},
 };
 use serde::Serialize;
 use url::{Host, Url};
@@ -43,7 +46,8 @@ pub enum MessageKind {
     Text,
     Notice,
     Emote,
-    /// A photo, video, voice message or file: shown by its kind and name (the prototype doesn't fetch media).
+    /// A photo, video, voice message or file: `MessageRow::media` says which, and the app fetches it by its event
+    /// (`Messages::media`).
     Media,
     /// An encrypted message this device has no key for (yet).
     Undecryptable,
@@ -77,6 +81,168 @@ pub struct MessageRow {
     pub state: SendState,
     pub encrypted: bool,
     pub edited: bool,
+    /// T-313: what a media message carries, for its player or preview.
+    pub media: Option<Media>,
+    /// T-313: the message this one answers.
+    pub reply: Option<Reply>,
+    /// T-313: its reactions, one per emoji, in the order they first came.
+    pub reactions: Vec<Reaction>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MediaKind {
+    Image,
+    Video,
+    Audio,
+    /// A recorded voice message (MSC3245, as the bridges mark them).
+    Voice,
+    File,
+}
+
+/// A media message's attachment, as its event describes it. The bytes come from `Messages::media`.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct Media {
+    pub kind: MediaKind,
+    /// Its file name, at most `NAME_MAX` characters.
+    pub name: String,
+    /// The type the app may give the bytes (`safe_mime`): never one a webview would run.
+    pub mime: String,
+    pub size: Option<u64>,
+    pub duration_ms: Option<u64>,
+    pub width: Option<u64>,
+    pub height: Option<u64>,
+    /// Words sent with it, if any (not its file name).
+    pub caption: Option<String>,
+}
+
+/// The message a reply answers: who wrote it and its words, once known (`None` while it is fetched).
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct Reply {
+    pub event_id: String,
+    pub sender_name: Option<String>,
+    /// At most `QUOTE_MAX` characters.
+    pub text: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct Reaction {
+    /// The emoji (or the words) reacted with, at most `REACTION_MAX` characters.
+    pub key: String,
+    pub count: usize,
+    /// One of them is yours.
+    pub own: bool,
+}
+
+const NAME_MAX: usize = 120;
+const QUOTE_MAX: usize = 200;
+const REACTION_MAX: usize = 16;
+
+/// At most `max` characters, with "…" if cut.
+fn clip(s: &str, max: usize) -> String {
+    match s.char_indices().nth(max) {
+        Some((at, _)) => format!("{}…", &s[..at]),
+        None => s.to_owned(),
+    }
+}
+
+/// The type the app may hand a webview with the bytes: a picture (never SVG, which can carry script), sound or video
+/// as declared, anything else as plain bytes. The declared type is only a hint the app passes on, so it is checked
+/// for shape too (no parameters, no spaces).
+pub fn safe_mime(kind: MediaKind, declared: Option<&str>) -> String {
+    let d = declared.unwrap_or_default().trim().to_ascii_lowercase();
+    let shaped = !d.is_empty()
+        && d.len() <= 100
+        && d.split_once('/').is_some_and(|(a, b)| !a.is_empty() && !b.is_empty())
+        && d.bytes().all(|c| c.is_ascii_alphanumeric() || b"/.+-_".contains(&c));
+    let fits = match kind {
+        MediaKind::Image => d.starts_with("image/") && !d.starts_with("image/svg"),
+        MediaKind::Video => d.starts_with("video/"),
+        MediaKind::Audio | MediaKind::Voice => d.starts_with("audio/"),
+        MediaKind::File => false,
+    };
+    if shaped && fits {
+        return d;
+    }
+    match kind {
+        // a voice message the bridge didn't type is Ogg Opus, as WhatsApp and Signal send them
+        MediaKind::Voice => "audio/ogg".into(),
+        _ => "application/octet-stream".into(),
+    }
+}
+
+fn int(n: Option<UInt>) -> Option<u64> {
+    n.map(u64::from)
+}
+
+/// A media message's source and description; `None` for anything else.
+pub(crate) fn media_of(ev: &EventTimelineItem) -> Option<(MediaSource, Media)> {
+    let msg = ev.content().as_message()?;
+    let caption = |c: Option<&str>| c.map(str::trim).filter(|c| !c.is_empty()).map(|c| clip(c, 4000));
+    let (kind, source, name, mime, size, duration, w, h, cap) = match msg.msgtype() {
+        MessageType::Image(i) => {
+            let info = i.info.as_deref();
+            (MediaKind::Image, i.source.clone(), i.filename(), info.and_then(|x| x.mimetype.clone()), int(info.and_then(|x| x.size)), None, int(info.and_then(|x| x.width)), int(info.and_then(|x| x.height)), caption(i.caption()))
+        }
+        MessageType::Video(v) => {
+            let info = v.info.as_deref();
+            let dur = info.and_then(|x| x.duration).map(|d| d.as_millis() as u64);
+            (MediaKind::Video, v.source.clone(), v.filename(), info.and_then(|x| x.mimetype.clone()), int(info.and_then(|x| x.size)), dur, int(info.and_then(|x| x.width)), int(info.and_then(|x| x.height)), caption(v.caption()))
+        }
+        MessageType::Audio(a) => {
+            let info = a.info.as_deref();
+            let dur = info.and_then(|x| x.duration).map(|d| d.as_millis() as u64);
+            let kind = if is_voice(ev) { MediaKind::Voice } else { MediaKind::Audio };
+            (kind, a.source.clone(), a.filename(), info.and_then(|x| x.mimetype.clone()), int(info.and_then(|x| x.size)), dur, None, None, caption(a.caption()))
+        }
+        MessageType::File(f) => {
+            let info = f.info.as_deref();
+            (MediaKind::File, f.source.clone(), f.filename(), info.and_then(|x| x.mimetype.clone()), int(info.and_then(|x| x.size)), None, None, None, caption(f.caption()))
+        }
+        _ => return None,
+    };
+    let name = clip(name.trim(), NAME_MAX);
+    let mime = safe_mime(kind, mime.as_deref());
+    Some((source, Media { kind, name, mime, size, duration_ms: duration, width: w, height: h, caption: cap }))
+}
+
+/// A voice message: the MSC3245 mark the bridges put on a recorded clip (read from the event as sent, so it holds
+/// whichever of ruma's unstable features are on).
+fn is_voice(ev: &EventTimelineItem) -> bool {
+    #[derive(serde::Deserialize)]
+    struct Raw {
+        content: Marks,
+    }
+    #[derive(serde::Deserialize)]
+    struct Marks {
+        #[serde(rename = "org.matrix.msc3245.voice")]
+        voice: Option<serde::de::IgnoredAny>,
+        #[serde(rename = "org.matrix.msc3245.voice.v2")]
+        voice2: Option<serde::de::IgnoredAny>,
+    }
+    let Some(raw) = ev.latest_json().or_else(|| ev.original_json()) else { return false };
+    raw.deserialize_as_unchecked::<Raw>().is_ok_and(|r| r.content.voice.is_some() || r.content.voice2.is_some())
+}
+
+/// What a reply answers, as far as it is known.
+fn reply_of(content: &TimelineItemContent) -> Option<Reply> {
+    let details = content.in_reply_to()?;
+    let (sender_name, text) = match &details.event {
+        TimelineDetails::Ready(e) => {
+            let words = content_words(&e.content).map(|(_, w, _)| clip(w.trim(), QUOTE_MAX));
+            (Some(name_of(&e.sender_profile, &e.sender)), words.or_else(|| Some("Message".into())))
+        }
+        _ => (None, None),
+    };
+    Some(Reply { event_id: details.event_id.to_string(), sender_name, text })
+}
+
+fn reactions_of(content: &TimelineItemContent, me: Option<&UserId>) -> Vec<Reaction> {
+    let Some(all) = content.reactions() else { return vec![] };
+    all.iter()
+        .filter(|(_, by)| !by.is_empty())
+        .map(|(key, by)| Reaction { key: clip(key, REACTION_MAX), count: by.len(), own: me.is_some_and(|me| by.contains_key(me)) })
+        .collect()
 }
 
 /// A message's content in words, for a list preview and for media without a viewer.
@@ -144,7 +310,8 @@ pub(crate) async fn room_row(room: &Room, latest: &LatestEventValue, network: Op
 }
 
 /// The messages among a timeline's items, oldest first. State changes (joins, topic) and day dividers are left out.
-pub(crate) fn message_rows(items: &Vector<Arc<TimelineItem>>) -> Vec<MessageRow> {
+/// `me`: the account, to tell its reactions.
+pub(crate) fn message_rows(items: &Vector<Arc<TimelineItem>>, me: Option<&UserId>) -> Vec<MessageRow> {
     items
         .iter()
         .filter_map(|item| {
@@ -170,6 +337,9 @@ pub(crate) fn message_rows(items: &Vector<Arc<TimelineItem>>) -> Vec<MessageRow>
                 state,
                 encrypted: ev.encryption_info().is_some() || kind == MessageKind::Undecryptable,
                 edited,
+                media: media_of(ev).map(|(_, m)| m),
+                reply: reply_of(ev.content()),
+                reactions: reactions_of(ev.content(), me),
             })
         })
         .collect()
