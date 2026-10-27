@@ -46,8 +46,34 @@ struct Args {
     token: String,
     /// T-313: transcribe voice messages on this hub's host, as the app does (uni-transcribe, NIP-98 signed with this
     /// machine's key: `UNI_NSEC` or the keyring). Without it, a voice message's transcript says it isn't available.
-    #[arg(long)]
+    #[arg(long, conflicts_with = "transcribe_url")]
     transcribe_hub: Option<String>,
+    /// T-313, for walkthroughs and tests: send voice messages to a transcriber on this machine instead (`http://127.0.0.1…`):
+    /// POST the audio, answer `{"text": …}`.
+    #[arg(long)]
+    transcribe_url: Option<String>,
+}
+
+/// A transcriber on this machine (a stand-in running the same model as uni-transcribe, without its sign-in).
+struct LocalTranscriber {
+    url: String,
+    http: reqwest::Client,
+}
+
+impl Transcriber for LocalTranscriber {
+    fn transcribe(&self, audio: Vec<u8>, mime: String) -> Transcribing {
+        let (url, http) = (self.url.clone(), self.http.clone());
+        Box::pin(async move {
+            let r = http.post(&url).header("content-type", mime).body(audio).send().await.map_err(|e| e.to_string())?;
+            let status = r.status();
+            let body = r.text().await.map_err(|e| e.to_string())?;
+            if !status.is_success() {
+                return Err(format!("the transcriber answered {status}"));
+            }
+            let v: Value = serde_json::from_str(&body).map_err(|e| e.to_string())?;
+            v["text"].as_str().map(str::to_owned).ok_or_else(|| "the transcriber gave no text".into())
+        })
+    }
 }
 
 /// The app's transcription path (src-tauri's `transcribe_audio`), from this machine.
@@ -68,7 +94,7 @@ struct Bridge {
     token: String,
     origin: HeaderValue,
     profiles: Mutex<HashMap<String, Arc<Messages>>>,
-    transcriber: Option<Arc<HubTranscriber>>,
+    transcriber: Option<Arc<dyn Transcriber>>,
 }
 
 fn valid_profile(p: &str) -> bool {
@@ -182,12 +208,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err("the token must be at least 16 characters".into());
     }
     let origin = HeaderValue::from_str(&args.origin).map_err(|_| "bad --origin")?;
-    let transcriber = match args.transcribe_hub {
-        Some(hub) => {
+    let transcriber: Option<Arc<dyn Transcriber>> = match (args.transcribe_hub, args.transcribe_url) {
+        (Some(hub), _) => {
             let (keys, _) = uni_core::load_keys(false).map_err(|e| format!("--transcribe-hub needs this machine's key: {e}"))?;
             Some(Arc::new(HubTranscriber { hub, keys }))
         }
-        None => None,
+        (None, Some(url)) => {
+            if !(url.starts_with("http://127.0.0.1:") || url.starts_with("http://localhost:")) {
+                return Err("--transcribe-url is for a transcriber on this machine (http://127.0.0.1:…)".into());
+            }
+            let http = reqwest::Client::builder().timeout(std::time::Duration::from_secs(300)).build()?;
+            Some(Arc::new(LocalTranscriber { url, http }))
+        }
+        (None, None) => None,
     };
     let bridge = Arc::new(Bridge { dir: args.dir, token: args.token, origin, profiles: Mutex::new(HashMap::new()), transcriber });
     let app = Router::new()

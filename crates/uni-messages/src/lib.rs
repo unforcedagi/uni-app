@@ -902,7 +902,11 @@ impl Messages {
             let _slot = self.transcribe_turns.clone().acquire_owned().await.map_err(server)?;
             let text = match tokio::time::timeout(TRANSCRIBE_FOR, transcriber.transcribe(audio, media.mime.clone())).await {
                 Ok(Ok(text)) => text.trim().to_owned(),
-                Ok(Err(e)) => return Err(MessagesError::Unreachable { message: format!("Couldn't transcribe it: {e}") }),
+                Ok(Err(e)) => {
+                    // the detail (an HTTP answer, a host) is for the log; the person reads that it didn't work this time
+                    tracing::warn!("transcribing a voice message failed: {e}");
+                    return Err(MessagesError::Unreachable { message: "Couldn't transcribe it right now.".into() });
+                }
                 Err(_) => return Err(MessagesError::Unreachable { message: "Transcribing took too long.".into() }),
             };
             let t = Transcript { text };
