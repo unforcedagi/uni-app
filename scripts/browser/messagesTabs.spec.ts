@@ -7,7 +7,7 @@ import { expect, test, type Page } from '@playwright/test';
 
 /** The app's Tauri IPC with Messages' door faked: signed in, seven conversations on five networks, sent out of order
  * (the app sorts them), and the Link screen's cards. `__push` sends a live update, as the core does. */
-async function boot(page: Page) {
+async function boot(page: Page, before?: () => void) {
   await page.addInitScript(() => {
     const w = window as any;
     localStorage.setItem('uni.tabs.v1', JSON.stringify({ v: 1, tabs: [{ id: 'messages', kind: 'messages', title: 'Messages' }], active: 'messages', recent: ['messages'] }));
@@ -61,8 +61,10 @@ async function boot(page: Page) {
     };
     w.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: (_event: string, id: number) => listeners.delete(id) };
   });
+  // a test's own changes to the made-up world, before the app starts
+  if (before) await page.addInitScript(before);
   await page.goto('/');
-  await expect(tablist(page)).toBeVisible({ timeout: 15_000 });
+  await expect(tablist(page).or(page.getByText('No conversations yet.')).first()).toBeVisible({ timeout: 15_000 });
 }
 
 const tablist = (page: Page) => page.getByRole('tablist', { name: 'Networks' });
@@ -224,4 +226,23 @@ test('review tnli7wiq P1: a sign-out from the homeserver drops the drafts, a fai
   await expect(conv('Mara Quill').getByRole('textbox')).toHaveValue('');
   await openConv('Allotment group');
   await expect(conv('Allotment group').getByRole('textbox')).toHaveValue('');
+});
+
+test('review y6zqabu2: with no conversations yet, linked networks still have their tabs and a link to redo still says so', async ({ page }) => {
+  await boot(page, () => { (window as any).__rooms = []; });
+  await expect(tablist(page).getByRole('tab')).toHaveText([/^All$/, /^Signal$/, /^Telegram\s*!$/, /^WhatsApp$/, /^SMS$/]);
+  // All: the link to redo, with its way to fix it; and no "Link an account" call, since apps are linked
+  await expect(list(page).getByRole('note')).toHaveText(/Telegram needs linking again/);
+  await expect(list(page)).toContainText('Chats from your linked apps show here as they come in.');
+  await list(page).getByRole('button', { name: 'Link again' }).click();
+  await expect(page.getByRole('region', { name: 'Link an account' })).toBeVisible();
+  await page.getByRole('region', { name: 'Link an account' }).getByRole('button', { name: '← Conversations' }).click();
+  await tab(page, 'Signal').click();
+  await expect(list(page)).toContainText('Nothing from Signal yet.');
+});
+
+test('with no conversations and nothing linked, the first step is to link an account', async ({ page }) => {
+  await boot(page, () => { const w = window as any; w.__rooms = []; w.__links = w.__links.map((l: any) => ({ ...l, state: 'not_linked' })); });
+  await expect(list(page).getByRole('button', { name: 'Link an account' })).toBeVisible();
+  await expect(tablist(page)).toHaveCount(0);
 });

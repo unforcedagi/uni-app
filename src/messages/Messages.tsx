@@ -301,6 +301,10 @@ export default function Messages({ backTo, onBack }: { backTo: string; onBack: (
   const tab = shownTab(tabPick, tabs);
   const rows = list ? tabRows(list, tab) : [];
   const current = tabs.find((t) => t.id === tab);
+  /** The tabs show while the list loads, once there are conversations, or when a network has its own tab with none yet (linked, or its
+   * link to redo): how the links stand never waits for a first conversation. */
+  const strip = !list || list.length > 0 || tabs.length > 1;
+  const anyLinked = !!linkRows?.some((l) => l.state === "linked" || l.state === "needs_attention");
   const pickTab = (t: TabId) => { setTabPick(t); rememberTab(t); };
   // back on a tab, or back to the list on a phone: where that tab's list was left
   useLayoutEffect(() => { if (listEl.current) listEl.current.scrollTop = listAt.current.get(tab) ?? 0; }, [tab, pane, linkView, !!list]);
@@ -315,15 +319,19 @@ export default function Messages({ backTo, onBack }: { backTo: string; onBack: (
     : !signedIn ? <div className="msgs-scroll">{problem && <p className="msgs-problem" role="alert">{problemText(problem)}</p>}{status?.error && <p className="msgs-problem" role="status">{status.error}</p>}<SignIn onDone={(s) => { setStatus(s); loadLinks(); void loadRooms(); }} /></div>
     : linkView ? <LinkAccounts rows={linkRows} setRows={setLinkRows} onBack={() => setLinkView(false)} />
     : <div className="msgs-panes">
-      {(!list || list.length > 0) && <TabStrip tabs={tabs} tab={tab} onPick={pickTab} onLink={() => setLinkView(true)} />}
+      {strip && <TabStrip tabs={tabs} tab={tab} onPick={pickTab} onLink={() => setLinkView(true)} />}
       <nav className="msgs-rooms" aria-label="Conversations">
-        <div className="msgs-scroll" id="msgs-list" role={list?.length ? "tabpanel" : undefined} aria-label={current ? `${current.id === "all" ? "All conversations" : current.label}` : undefined}
+        <div className="msgs-scroll" id="msgs-list" role={strip ? "tabpanel" : undefined} aria-label={current ? `${current.id === "all" ? "All conversations" : current.label}` : undefined}
           ref={listEl} onScroll={(e) => listAt.current.set(tab, e.currentTarget.scrollTop)}>
           {!list ? <p className="msgs-loading" role="status">Loading conversations…</p>
-            : list.length === 0 ? <div className="empty msgs-empty"><p>No conversations yet.</p><p>Bring in your chats from Signal, WhatsApp, Telegram and others.</p><button type="button" className="send" onClick={() => setLinkView(true)}>Link an account</button></div>
             : <>
               {current?.attention && <p className="msgs-attention" role="note">{current.label} needs linking again. <button type="button" className="note-action" onClick={() => setLinkView(true)}>Link again</button></p>}
-              {rows.length === 0 ? <p className="empty msgs-tab-empty">Nothing from {current?.label ?? "here"} yet. Chats show here as they come in.</p>
+              {/* on All, with nothing anywhere: each link to redo says so here too, and a linked network's chats are on their way */}
+              {list.length === 0 && tab === "all" && tabs.filter((t) => t.attention).map((t) => <p key={t.id} className="msgs-attention" role="note">{t.label} needs linking again. <button type="button" className="note-action" onClick={() => setLinkView(true)}>Link again</button></p>)}
+              {list.length === 0 && tab === "all" ? (anyLinked
+                ? <div className="empty msgs-empty"><p>No conversations yet.</p><p>Chats from your linked apps show here as they come in.</p></div>
+                : <div className="empty msgs-empty"><p>No conversations yet.</p><p>Bring in your chats from Signal, WhatsApp, Telegram and others.</p><button type="button" className="send" onClick={() => setLinkView(true)}>Link an account</button></div>)
+              : rows.length === 0 ? <p className="empty msgs-tab-empty">Nothing from {current?.label ?? "here"} yet. Chats show here as they come in.</p>
                 : <ul className="msgs-rows">{rows.map((r) => <RoomItem key={r.id} r={r} now={now} mark={tab === "all" && tabs.length > 2} selected={thread?.roomId === r.id} onOpen={() => void open(r.id)} />)}</ul>}
             </>}
         </div>
