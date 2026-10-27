@@ -6,7 +6,6 @@ import { test, expect, type Page } from '@playwright/test';
 import { bootAreas } from './areasFixture';
 
 const ROOM = 'ch-garden';
-const wide = (page: Page) => (page.viewportSize()?.width ?? 0) >= 900 && (page.viewportSize()?.height ?? 0) >= 400;
 const android = (page: Page) => page.evaluate(() => /Android/i.test(navigator.userAgent));
 const BODY = '🔑 **Uni asks to use dns-zone** (powerful)\nFor: dns.edit. Add an A record for demo.example.org\nOpen this in the Uni app to see exactly what it unlocks.\n\n```uni-sealed-approval\n{"v": 1}\n```';
 
@@ -25,12 +24,8 @@ async function boot(page: Page, failTasks = false) {
     };
   });
   await bootAreas(page, 'seed', { tree: true, tasks: true, briefs: true, strayRoom: true, queryFails: failTasks ? ['task'] : [] });
-  if (wide(page)) {
-    const nav = page.locator('.th-roomnav');
-    await nav.locator('.th-row.d1').first().waitFor();
-    await nav.locator('.th-go[aria-label^="Uni,"]').first().click();
-    await expect(page.locator('.sr')).toHaveAttribute('data-node', 'Uni');
-  } else await page.locator('.th-phone-tree, .cp.strip').first().waitFor();
+  // T-302: Uni's home is the front door; its "Waiting on your OK" list holds the waiting cards from every room
+  await page.locator('[data-place="front-door"]').waitFor();
 }
 const strip = (page: Page) => page.locator('.cp-line[aria-expanded="false"]');
 
@@ -70,7 +65,7 @@ test('the task list failing to load still shows a waiting card in Needs you', as
     w.__waiting = [{ ref: r, channel: room, root: null, ts: Math.floor(Date.now() / 1000), kind: 'morning', credential: null, action: null, class: 'routine', rows: 3, expires: Math.floor(Date.now() / 1000) + 900, fingerprint: '0aa11bbc' }];
     w.__arrive(room, 'Uni', 'and one more line', -1, false, null); }, [ROOM, BODY.replace('uni-sealed-approval', 'uni-sealed-morning')] as const);
   if (await strip(page).count()) await strip(page).click();
-  await expect(page.getByText("Couldn't load what needs you").first()).toBeVisible();
+  // (the front door holds no task list, so there is no "Couldn't load" line to say; the card shows all the same)
   const row = page.locator('.cp-sealed').first();
   await expect(row.locator('.cp-approval-lead')).toHaveText("Uni's morning card in #garden-club");
   await expect(row.locator('.cp-approval-cmd')).toHaveText('Morning card · 3 routine credentials');

@@ -42,7 +42,8 @@ test.describe('chat optional (profile.chat.provider null)', () => {
 
   test('chat buzz (the uni vault) keeps the room and its composer', async ({ page }) => {
     await boot(page, 'buzz');
-    if (!wide(page)) await page.getByRole('button', { name: /^Uni,/ }).first().click();
+    // T-302: with chat, Uni's home is the front door of the rooms; a room keeps its composer
+    await page.locator('.fd-door').first().click();
     await expect(page.locator('.sr-chat').getByRole('textbox', { name: /^Message / })).toBeVisible();
   });
 });

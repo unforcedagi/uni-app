@@ -390,8 +390,9 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
     {!!data?.truncated.length && <p className="areas-status" role="status">{data.truncated.join(", ")}: showing first 200 notes; more may exist.</p>}
   </>;
   // T-301/T-302: the front door. Uni opens on every area's room, each with one line on where it stands (a private area's own words stay
-  // inside it), a mark where sessions are working, and a quiet usage line. A vault with no areas yet keeps the tree home below.
-  const doorAreas = data ? childrenOf(data.tree, ROOT) : [];
+  // inside it), a mark where sessions are working, and a quiet usage line. A vault with no areas yet, or a profile without chat (no rooms
+  // to open), keeps the tree home below.
+  const doorAreas = chat && data ? childrenOf(data.tree, ROOT) : [];
   if (path === null && doorAreas.length) {
     const doors: Door[] = doorAreas.map((a) => {
       const v = roomView(data!.tree, a.path, roomRefs, uniRef);
