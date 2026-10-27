@@ -1,38 +1,57 @@
-//! T-313 (Codex review 9b8p17d9, P1; lwoggo26, P2): the decrypted copies of attachments written for the system's
-//! viewer, by the account they belong to. They go when that account does (signed out, ended on the homeserver, replaced
-//! by another sign-in) and when the app quits (`Messages::drop_copies`; one killed instead leaves them to its next
-//! start, which removes them).
+//! T-313 (Codex reviews 9b8p17d9, lwoggo26, 61pbw7g4): the decrypted copies of attachments written for the system's
+//! viewer. They fail closed:
 //!
-//! Each copy is registered, with a ticket, before a byte is written. Whatever ends it (`sweep` as an account ends, or
-//! as the app quits) takes the ticket back. A write stands only if its ticket is still registered when it has finished:
-//! the writer checks that itself, on its own thread, right after writing, and removes its file if not (if the thread
-//! fails, its file goes too). So a copy written after the cleanup that should have removed it, the account unchanged
-//! or not, is removed by its writer. Quitting waits a moment for writes under way to finish that check.
+//! - **One directory per launch.** Every copy is written in `<base>/msgs-open-<random>/`, made for this launch. Quit
+//!   removes the whole directory; the next start removes any `msgs-open-*` directory an earlier launch left (one killed
+//!   before it could quit) before Messages opens.
+//! - **A latch, under the lock the sweep takes.** Copies may be registered only for the account in force (`open_for`),
+//!   and none once the app is closing. Ending an account (sign-out, ended on the homeserver, replaced by another
+//!   sign-in, the app stopping) and quitting set the latch first, then sweep, in one critical section. Each sign-in's
+//!   account name is new, so an account's latch never opens again; quit's is for good.
+//! - **The ticket comes before the download, the write happens under the lock.** An open registers its ticket before
+//!   it fetches a byte (refused at once if the latch is set). When its bytes are here, the write itself runs under the
+//!   registry's lock, after checking the ticket still stands; a ticket the latch took back drops the bytes unwritten. So
+//!   no write can land after the sweep, and one that landed before it is in the directory the sweep removes.
 
 use std::{
+    io::Write,
     path::{Path, PathBuf},
-    sync::{Arc, Condvar, Mutex, MutexGuard},
-    time::{Duration, Instant},
+    sync::{Arc, Mutex, MutexGuard},
 };
+
+/// The per-launch directories' names start with this.
+pub const DIR_PREFIX: &str = "msgs-open-";
 
 #[derive(Default)]
 pub(crate) struct Copies {
+    /// Registered copies: ticket, account, file.
     files: Vec<(u64, String, PathBuf)>,
     next: u64,
-    /// Copies registered and not yet checked after writing: quit waits for them. Counted from `add`, so no write can
-    /// start unseen between its ticket and its count.
-    writing: usize,
+    /// This launch's directory, once set; none: files can't be opened here.
+    dir: Option<PathBuf>,
+    /// The account copies may be registered for; none between accounts.
+    account: Option<String>,
+    /// The app is quitting: nothing is registered or written again.
+    closing: bool,
 }
 
-/// A registered copy: what `finish_write` and `settle` check.
+/// A registered copy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Ticket(u64);
 
-/// The registry and the signal a quit waits on. A poisoned lock is taken as it is: cleanup must still run.
+/// Why a copy can't be registered.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Refused {
+    /// The app is quitting, or the account the open began with has ended.
+    Closed,
+    /// No directory for copies on this device.
+    NoDir,
+}
+
+/// The registry. A poisoned lock is taken as it is: cleanup must still run.
 #[derive(Default)]
 pub(crate) struct Registry {
     copies: Mutex<Copies>,
-    settled: Condvar,
 }
 
 impl Registry {
@@ -42,22 +61,85 @@ impl Registry {
 }
 
 impl Copies {
-    /// A copy about to be written for `account`; counted as being written until `finish_write`.
-    pub(crate) fn add(&mut self, account: &str, file: &Path) -> Ticket {
+    /// Use `<base>/msgs-open-<random>/` for this launch's copies, after removing every copies directory an earlier launch
+    /// left in `base`. Its path.
+    pub(crate) fn set_dir(&mut self, base: &Path) -> PathBuf {
+        clear_leftovers(base, self.dir.as_deref());
+        let dir = base.join(format!("{DIR_PREFIX}{}", crate::secrets::random_hex(8)));
+        self.dir = Some(dir.clone());
+        dir
+    }
+
+    /// From now on copies may be registered for `account` (an account starts running), unless the app is quitting.
+    pub(crate) fn open_for(&mut self, account: &str) {
+        self.account = Some(account.to_owned());
+    }
+
+    /// The account in force ends: latch first (nothing more registers for it), then every copy goes.
+    pub(crate) fn end_account(&mut self) {
+        self.account = None;
+        self.sweep();
+    }
+
+    /// The app quits: latch for good, every copy goes, and this launch's directory with them.
+    pub(crate) fn close(&mut self) {
+        self.closing = true;
+        self.account = None;
+        self.sweep();
+        if let Some(dir) = &self.dir {
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+
+    fn sweep(&mut self) {
+        for (_, _, f) in std::mem::take(&mut self.files) {
+            let _ = std::fs::remove_file(f);
+        }
+    }
+
+    /// A copy named `name` about to be fetched for `account`: its ticket and the file it will be, or why not.
+    pub(crate) fn register(&mut self, account: &str, name: &str) -> Result<(Ticket, PathBuf), Refused> {
+        if self.closing || self.account.as_deref() != Some(account) {
+            return Err(Refused::Closed);
+        }
+        let file = self.dir.as_ref().ok_or(Refused::NoDir)?.join(name);
         self.next += 1;
-        self.writing += 1;
-        self.files.push((self.next, account.to_owned(), file.to_owned()));
-        Ticket(self.next)
+        self.files.push((self.next, account.to_owned(), file.clone()));
+        Ok((Ticket(self.next), file))
     }
 
     fn holds(&self, t: Ticket) -> bool {
         self.files.iter().any(|(id, _, _)| *id == t.0)
     }
 
-    /// The copy `t` doesn't stand: its registration and its file go.
-    fn forget(&mut self, t: Ticket, file: &Path) {
-        self.files.retain(|(id, _, _)| *id != t.0);
-        let _ = std::fs::remove_file(file);
+    fn forget(&mut self, t: Ticket) {
+        if let Some(at) = self.files.iter().position(|(id, _, _)| *id == t.0) {
+            let (_, _, f) = self.files.remove(at);
+            let _ = std::fs::remove_file(f);
+        }
+    }
+
+    /// The bytes for `ticket` are here: written now, if it still stands; else dropped unwritten. Whether it stands. Runs
+    /// under the registry's lock (the caller holds it), so no sweep can come between the check and the write.
+    fn write_now(&mut self, ticket: Ticket, bytes: &[u8]) -> std::io::Result<bool> {
+        let Some(file) = self.files.iter().find(|(id, _, _)| *id == ticket.0).map(|(_, _, f)| f.clone()) else { return Ok(false) };
+        if self.closing {
+            self.forget(ticket);
+            return Ok(false);
+        }
+        let wrote = file.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|_| {
+            let mut out = std::fs::OpenOptions::new().write(true).create_new(true).open(&file)?;
+            out.write_all(bytes)
+        });
+        if wrote.is_err() {
+            self.forget(ticket);
+        }
+        wrote.map(|_| true)
+    }
+
+    /// The open with `ticket` gave up (its download failed): its registration goes.
+    pub(crate) fn abandon(&mut self, ticket: Ticket) {
+        self.forget(ticket);
     }
 
     /// Done with `file`: removed from disk and from the list.
@@ -66,35 +148,9 @@ impl Copies {
         let _ = std::fs::remove_file(file);
     }
 
-    /// The account in force is now `keep` (none: signed out, or the app quitting): every copy of another account is
-    /// removed, and its ticket taken back, so one still being written removes itself when it finishes.
-    pub(crate) fn sweep(&mut self, keep: Option<&str>) {
-        let (gone, kept): (Vec<_>, Vec<_>) = std::mem::take(&mut self.files).into_iter().partition(|(_, a, _)| Some(a.as_str()) != keep);
-        self.files = kept;
-        for (_, _, f) in gone {
-            let _ = std::fs::remove_file(f);
-        }
-    }
-
-    /// The copy `ticket` has finished writing to `file` (or failed): it stands only if its ticket is still registered;
-    /// else whatever ended it ran while it was written, and the file is removed here. Whether it stands.
-    pub(crate) fn finish_write(&mut self, ticket: Ticket, file: &Path, ok: bool) -> bool {
-        self.writing = self.writing.saturating_sub(1);
-        if ok && self.holds(ticket) {
-            return true;
-        }
-        self.forget(ticket, file);
-        false
-    }
-
-    /// `file` (ticket `ticket`, written for `mine`) is checked again as it's handed over; `now` is the account in force. It
-    /// may be handed over only if its ticket is still registered and its account is still in force; else it is removed.
-    pub(crate) fn settle(&mut self, ticket: Ticket, file: &Path, mine: &str, now: Option<&str>) -> bool {
-        if self.holds(ticket) && now == Some(mine) {
-            return true;
-        }
-        self.forget(ticket, file);
-        false
+    /// Whether `ticket` still stands as its copy is handed over.
+    pub(crate) fn stands(&self, ticket: Ticket) -> bool {
+        self.holds(ticket)
     }
 
     #[cfg(test)]
@@ -103,196 +159,175 @@ impl Copies {
     }
 }
 
-/// Write `bytes` to `file` as the copy `ticket` (from `add`), on a blocking thread: create, write, then check the ticket
-/// at once, under the registry's lock, removing the file if it no longer stands. `before_write` runs on that thread
-/// first (tests hold a write there). Whether the copy stands.
-pub(crate) async fn write_copy(
-    reg: Arc<Registry>,
-    ticket: Ticket,
-    file: PathBuf,
-    bytes: Vec<u8>,
-    before_write: impl FnOnce() + Send + 'static,
-) -> Result<bool, String> {
+/// A file name for the disk: the event's name with anything a path could use removed, never hidden, never empty.
+pub(crate) fn file_name(name: &str) -> String {
+    let clean: String = name.chars().filter(|c| !c.is_control() && !matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|')).collect();
+    let clean = clean.trim().trim_start_matches('.').trim();
+    let clean: String = clean.chars().take(100).collect();
+    if clean.is_empty() {
+        "attachment".into()
+    } else {
+        clean
+    }
+}
+
+/// Remove every copies directory in `base` but `keep`: what earlier launches left.
+pub(crate) fn clear_leftovers(base: &Path, keep: Option<&Path>) {
+    for e in std::fs::read_dir(base).into_iter().flatten().flatten() {
+        let path = e.path();
+        let ours = e.file_name().to_string_lossy().starts_with(DIR_PREFIX);
+        let dir = std::fs::symlink_metadata(&path).is_ok_and(|m| m.is_dir());
+        if ours && dir && Some(path.as_path()) != keep {
+            let _ = std::fs::remove_dir_all(&path);
+        }
+    }
+}
+
+/// Write `bytes` as the copy `ticket`, on a blocking thread, under the registry's lock (see `write_now`).
+/// `before_write` runs on that thread, holding the lock, first (tests hold a write there). Whether the copy stands.
+pub(crate) async fn write_copy(reg: Arc<Registry>, ticket: Ticket, bytes: Vec<u8>, before_write: impl FnOnce() + Send + 'static) -> Result<bool, String> {
     let joined = tokio::task::spawn_blocking({
-        let (reg, file) = (reg.clone(), file.clone());
+        let reg = reg.clone();
         move || {
+            let mut c = reg.lock();
             before_write();
-            let wrote = file.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|_| std::fs::write(&file, &bytes));
-            let stands = reg.lock().finish_write(ticket, &file, wrote.is_ok());
-            reg.settled.notify_all();
-            wrote.map(|_| stands).map_err(|e| e.to_string())
+            c.write_now(ticket, &bytes).map_err(|e| e.to_string())
         }
     })
     .await;
     match joined {
         Ok(r) => r,
         Err(e) => {
-            // the thread didn't finish its check (it panicked, or the runtime is going): nothing it wrote stands
-            reg.lock().finish_write(ticket, &file, false);
-            reg.settled.notify_all();
+            // the thread didn't finish (it panicked, or the runtime is going): nothing it wrote stands
+            reg.lock().forget(ticket);
             Err(e.to_string())
         }
     }
 }
 
-/// Quit: every copy goes (its ticket taken back), then wait up to `wait` for writes under way to finish their check (each
-/// removes its own file). Whether none was left under way. Nothing is closed for good: if the app goes on after all,
-/// opening a file works again.
-pub(crate) fn close_and_wait(reg: &Registry, wait: Duration) -> bool {
-    let mut c = reg.lock();
-    c.sweep(None);
-    let end = Instant::now() + wait;
-    while c.writing > 0 {
-        let left = end.saturating_duration_since(Instant::now());
-        if left.is_zero() {
-            return false;
-        }
-        c = reg.settled.wait_timeout(c, left).unwrap_or_else(|e| e.into_inner()).0;
-    }
-    true
-}
-
 #[cfg(test)]
 mod tests {
-    use std::sync::mpsc;
+    use std::{sync::mpsc, time::Duration};
 
     use super::*;
 
-    fn write(p: &Path) {
-        std::fs::write(p, b"made-up attachment").unwrap();
+    fn setup() -> (tempfile::TempDir, Arc<Registry>, PathBuf) {
+        let base = tempfile::tempdir().unwrap();
+        let reg = Arc::new(Registry::default());
+        let dir = reg.lock().set_dir(base.path());
+        reg.lock().open_for("store-a");
+        (base, reg, dir)
     }
 
-    #[test]
-    fn copies_go_with_their_account_and_one_finished_after_it_ended_is_never_handed_over() {
-        let dir = tempfile::tempdir().unwrap();
-        let (a1, a2, b1) = (dir.path().join("a1"), dir.path().join("a2"), dir.path().join("b1"));
-        let mut c = Copies::default();
-
-        // the account ends: its copies go, another account's stay
-        c.add("store-a", &a1);
-        write(&a1);
-        let tb = c.add("store-b", &b1);
-        write(&b1);
-        c.sweep(Some("store-b"));
-        assert!(!a1.exists() && b1.exists());
-        assert_eq!(c.len(), 1);
-
-        // a copy still being written as its account ends: the sweep can't see a file yet, then the write lands; the
-        // check after it removes it rather than hand it over
-        let t = c.add("store-a", &a2);
-        c.sweep(None);
-        assert!(!b1.exists());
-        write(&a2);
-        assert!(!c.settle(t, &a2, "store-a", None));
-        assert!(!a2.exists());
-        assert!(!c.settle(tb, &b1, "store-b", Some("store-b")), "a swept copy was handed over");
-        // replaced by another sign-in meanwhile: the same
-        let t = c.add("store-a", &a2);
-        write(&a2);
-        assert!(!c.settle(t, &a2, "store-a", Some("store-c")));
-        assert!(!a2.exists());
-        assert_eq!(c.len(), 0);
-
-        // still the account in force: handed over, and removed when done with
-        let t = c.add("store-c", &a1);
-        write(&a1);
-        assert!(c.settle(t, &a1, "store-c", Some("store-c")));
-        assert!(a1.exists());
-        c.remove(&a1);
-        assert!(!a1.exists());
-        assert_eq!(c.len(), 0);
-    }
-
-    #[test]
-    fn codex_lwoggo26_a_copy_written_after_quit_cleanup_is_removed_even_though_its_account_is_unchanged() {
-        let dir = tempfile::tempdir().unwrap();
-        let late = dir.path().join("late");
-        let mut c = Copies::default();
-        let t = c.add("store-a", &late);
-        // the app quits while the copy is still being written: the cleanup finds no file yet
-        c.sweep(None);
-        // the write lands after it; the account is still the one in force
-        write(&late);
-        assert!(!c.finish_write(t, &late, true), "a copy finished after quit cleanup stood");
-        assert!(!late.exists(), "a decrypted copy outlived quit cleanup");
-        assert!(!c.settle(t, &late, "store-a", Some("store-a")));
-    }
-
-    /// The race itself, in order every time: a real write, on its thread, held just before it writes while the app's quit
-    /// cleanup runs; then let go. However the two fall, no copy is left, and quit waited for the write's check.
+    /// Review 61pbw7g4, the order it named, every time: the ticket is taken, the download is under way, the app quits,
+    /// and only then do the bytes arrive. Nothing is written, and nothing new registers.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn codex_lwoggo26_quit_while_a_copy_is_written_leaves_no_file_and_waits_for_the_writer() {
-        let dir = tempfile::tempdir().unwrap();
-        let file = dir.path().join("sub").join("plan.pdf");
-        let copies = Arc::new(Registry::default());
-        let t = copies.lock().add("store-a", &file);
-        let (at_write, held) = (mpsc::channel::<()>(), mpsc::channel::<()>());
-        let (reached, go) = (at_write.0, held.1);
-        let writer = tokio::spawn(write_copy(copies.clone(), t, file.clone(), b"made-up decrypted bytes".to_vec(), move || {
-            reached.send(()).unwrap();
-            go.recv().unwrap();
+    async fn a_download_that_completes_after_quit_cleanup_leaves_no_file() {
+        let (_base, reg, dir) = setup();
+        let (ticket, file) = reg.lock().register("store-a", "plan.pdf").unwrap();
+        // ... downloading ...
+        reg.lock().close();
+        // the bytes arrive
+        assert_eq!(write_copy(reg.clone(), ticket, b"made-up decrypted bytes".to_vec(), || {}).await, Ok(false));
+        assert!(!file.exists(), "a decrypted copy was written after quit cleanup");
+        assert!(!dir.exists(), "quit left this launch's directory (or the late write made it again)");
+        assert_eq!(reg.lock().register("store-a", "other.pdf"), Err(Refused::Closed));
+        assert_eq!(reg.lock().len(), 0);
+    }
+
+    /// The same order for an account that ends (signed out, replaced): its open never writes, and never registers again,
+    /// even if it asks under its old account's name.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_download_that_completes_after_its_account_ended_leaves_no_file() {
+        let (_base, reg, _dir) = setup();
+        let (ticket, file) = reg.lock().register("store-a", "plan.pdf").unwrap();
+        reg.lock().end_account();
+        assert_eq!(write_copy(reg.clone(), ticket, b"made-up".to_vec(), || {}).await, Ok(false));
+        assert!(!file.exists());
+        assert_eq!(reg.lock().register("store-a", "again.pdf"), Err(Refused::Closed));
+        // the next account opens files as before
+        reg.lock().open_for("store-b");
+        let (t, f) = reg.lock().register("store-b", "plan.pdf").unwrap();
+        assert_eq!(write_copy(reg.clone(), t, b"made-up".to_vec(), || {}).await, Ok(true));
+        assert!(f.exists() && reg.lock().stands(t));
+        // and it goes when that account does
+        reg.lock().end_account();
+        assert!(!f.exists() && !reg.lock().stands(t));
+    }
+
+    /// A write under way when the app quits: quit waits for that one write (it holds the lock), then removes it with the
+    /// directory. Held on the writer's thread so the order is the same every time.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn quit_during_a_write_removes_it_with_the_directory() {
+        let (_base, reg, dir) = setup();
+        let (ticket, file) = reg.lock().register("store-a", "plan.pdf").unwrap();
+        let (reached_tx, reached) = mpsc::channel::<()>();
+        let (go, go_rx) = mpsc::channel::<()>();
+        let writer = tokio::spawn(write_copy(reg.clone(), ticket, b"made-up decrypted bytes".to_vec(), move || {
+            reached_tx.send(()).unwrap();
+            go_rx.recv().unwrap();
         }));
-        at_write.1.recv().unwrap();
-        // quit, with the writer held before its write: close at once, then wait for it; let it go while quit waits
+        reached.recv().unwrap();
         let quitting = {
-            let copies = copies.clone();
-            std::thread::spawn(move || close_and_wait(&copies, Duration::from_secs(5)))
+            let reg = reg.clone();
+            std::thread::spawn(move || reg.lock().close())
         };
         std::thread::sleep(Duration::from_millis(50));
         assert!(!quitting.is_finished(), "quit didn't wait for the write under way");
-        held.0.send(()).unwrap();
-        assert!(quitting.join().unwrap(), "quit gave up waiting");
-        assert_eq!(writer.await.unwrap(), Ok(false));
-        assert!(!file.exists(), "a decrypted copy written during quit cleanup survived it");
-        assert_eq!(copies.lock().len(), 0);
+        go.send(()).unwrap();
+        quitting.join().unwrap();
+        assert_eq!(writer.await.unwrap(), Ok(true));
+        assert!(!file.exists() && !dir.exists(), "a copy written as the app quit survived it");
     }
 
-    /// The plain case still stands: written while nothing ends it.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn a_copy_written_while_nothing_ends_it_stands() {
-        let dir = tempfile::tempdir().unwrap();
-        let file = dir.path().join("plan.pdf");
-        let copies = Arc::new(Registry::default());
-        let t = copies.lock().add("store-a", &file);
-        assert_eq!(write_copy(copies.clone(), t, file.clone(), b"made-up".to_vec(), || {}).await, Ok(true));
-        assert!(file.exists());
-        assert!(close_and_wait(&copies, Duration::from_secs(1)));
-        assert!(!file.exists());
-        // the app goes on after all: a new copy opens as before
-        let t = copies.lock().add("store-a", &file);
-        assert_eq!(write_copy(copies.clone(), t, file.clone(), b"made-up".to_vec(), || {}).await, Ok(true));
-        assert!(file.exists());
-    }
-
-    /// Counted from its ticket: a quit between the ticket and the write still waits for it.
-    #[test]
-    fn a_ticket_counts_as_a_write_under_way_until_it_is_checked() {
-        let dir = tempfile::tempdir().unwrap();
-        let file = dir.path().join("plan.pdf");
-        let reg = Registry::default();
-        let t = reg.lock().add("store-a", &file);
-        assert!(!close_and_wait(&reg, Duration::from_millis(50)), "quit didn't see a write that had its ticket");
-        write(&file);
-        assert!(!reg.lock().finish_write(t, &file, true));
-        assert!(!file.exists());
-        assert!(close_and_wait(&reg, Duration::from_millis(50)));
-    }
-
-    /// The writer's thread panics after writing: its file still goes, and quit doesn't wait on it for good.
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn a_writer_that_panics_leaves_no_file() {
-        let dir = tempfile::tempdir().unwrap();
-        let file = dir.path().join("plan.pdf");
-        let reg = Arc::new(Registry::default());
-        let t = reg.lock().add("store-a", &file);
-        let f = file.clone();
-        let got = write_copy(reg.clone(), t, file.clone(), b"made-up".to_vec(), move || {
-            write(&f);
-            panic!("made-up failure on the writer's thread");
-        })
-        .await;
+    async fn a_writer_that_panics_leaves_no_registration() {
+        let (_base, reg, _dir) = setup();
+        let (ticket, file) = reg.lock().register("store-a", "plan.pdf").unwrap();
+        let got = write_copy(reg.clone(), ticket, b"made-up".to_vec(), || panic!("made-up failure on the writer's thread")).await;
         assert!(got.is_err());
-        assert!(!file.exists(), "a panicking writer left its file");
-        assert!(close_and_wait(&reg, Duration::from_millis(50)));
+        assert!(!file.exists() && !reg.lock().stands(ticket));
+        // and the lock it poisoned still works for cleanup
+        reg.lock().close();
+    }
+
+    /// The next start, before Messages opens: what earlier launches left is removed; anything else in the folder stays.
+    #[test]
+    fn the_next_start_removes_copies_an_earlier_launch_left() {
+        let base = tempfile::tempdir().unwrap();
+        let left = base.path().join(format!("{DIR_PREFIX}0123abcd"));
+        std::fs::create_dir_all(&left).unwrap();
+        std::fs::write(left.join("plan.pdf"), b"made-up decrypted bytes").unwrap();
+        let cached = base.path().join("0f".repeat(32));
+        std::fs::write(&cached, b"another feature's cache").unwrap();
+        // a file that only looks like one of ours stays: only directories are copies
+        let lookalike = base.path().join(format!("{DIR_PREFIX}note.txt"));
+        std::fs::write(&lookalike, b"x").unwrap();
+        let reg = Registry::default();
+        let dir = reg.lock().set_dir(base.path());
+        assert!(!left.exists(), "an earlier launch's copies survived the next start");
+        assert!(cached.exists() && lookalike.exists());
+        assert!(dir.starts_with(base.path()) && dir.file_name().unwrap().to_string_lossy().starts_with(DIR_PREFIX));
+    }
+
+    #[test]
+    fn an_attachment_name_stays_one_plain_file() {
+        assert_eq!(file_name("voice note.ogg"), "voice note.ogg");
+        assert_eq!(file_name("../../.bashrc"), "bashrc");
+        assert_eq!(file_name("a/b\\c:d.pdf"), "abcd.pdf");
+        assert_eq!(file_name("..."), "attachment");
+        assert_eq!(file_name("\u{0}\n"), "attachment");
+        assert_eq!(file_name(&"x".repeat(300)).len(), 100);
+    }
+
+    #[test]
+    fn nothing_registers_without_a_directory_or_for_another_account() {
+        let reg = Registry::default();
+        reg.lock().open_for("store-a");
+        assert_eq!(reg.lock().register("store-a", "x"), Err(Refused::NoDir));
+        let base = tempfile::tempdir().unwrap();
+        reg.lock().set_dir(base.path());
+        assert_eq!(reg.lock().register("store-b", "x"), Err(Refused::Closed));
+        assert!(reg.lock().register("store-a", "x").is_ok());
     }
 }

@@ -81,8 +81,6 @@ const CRYPTO_DB: &str = "matrix-sdk-crypto.sqlite3";
 /// may take. The limit holds while the bytes arrive (download.rs).
 pub const MAX_MEDIA: u64 = 100 * 1024 * 1024;
 pub(crate) const MEDIA_FOR: Duration = Duration::from_secs(120);
-/// How long quitting waits for an attachment copy being written to remove itself.
-const QUIT_WAIT: Duration = Duration::from_secs(2);
 /// The largest voice message sent to be transcribed (the transcription service's own limit).
 pub const MAX_TRANSCRIBE: usize = 25 * 1024 * 1024;
 /// How long a transcription may take: the service runs near real time on a CPU.
@@ -489,6 +487,8 @@ impl Messages {
             }
         };
         // saved: this is the device's account now. The old one stops, the new one runs; nothing here can fail.
+        // the old account's attachments are latched shut first (copies.rs)
+        self.copies.lock().end_account();
         let old = self.live.lock().await.take();
         let old = match old {
             Some(l) => Some(l.stop().await),
@@ -506,6 +506,8 @@ impl Messages {
     /// Sign out: the device is removed on the homeserver if it answers, and the store and the saved account here are
     /// deleted either way. If the homeserver didn't confirm, the status says so.
     pub async fn sign_out(self: &Arc<Self>) -> Result<Status> {
+        // first of all, before waiting for anything: no attachment opens for this account any more, and its copies go
+        self.copies.lock().end_account();
         // held across the logout: no sign-in can finish while it waits and be deleted below
         let _turn = self.lifecycle.lock().await;
         let old = self.live.lock().await.take();
@@ -528,6 +530,7 @@ impl Messages {
         }
         let Some(l) = live.take() else { return };
         drop(live);
+        self.copies.lock().end_account();
         l.stop().await;
         self.wipe(Some("This device was signed out on the homeserver. Sign in again.".into())).await;
     }
@@ -562,8 +565,14 @@ impl Messages {
         for (_, (_, t)) in open.links.drain() {
             t.abort();
         }
-        // the attachments opened for another account go with it (and all of them when none is in force)
-        self.copies.lock().sweep(account.as_deref());
+        // the attachments opened for the account before go with it (latched, then swept); the next opens for this one
+        {
+            let mut copies = self.copies.lock();
+            copies.end_account();
+            if let Some(a) = &account {
+                copies.open_for(a);
+            }
+        }
         open.account = account;
         drop(open);
         self.rooms.lock().unwrap().clear();
@@ -573,6 +582,7 @@ impl Messages {
     /// Stop the running account without signing out, as the app does when it quits: the saved account stays, and the
     /// next start picks it up.
     pub async fn shut_down(self: &Arc<Self>) {
+        self.copies.lock().end_account();
         let _turn = self.lifecycle.lock().await;
         let old = self.live.lock().await.take();
         if let Some(l) = old {
@@ -905,39 +915,52 @@ impl Messages {
         Ok(Fetched { bytes, mime: media.mime, name: media.name })
     }
 
-    /// T-313: what a media message carries (its name, type, size), without fetching it.
-    pub async fn media_info(self: &Arc<Self>, room_id: &str, event_id: &str) -> Result<Media> {
-        Ok(self.media_message(room_id, event_id).await?.4)
+    /// T-313: where this launch keeps the attachments it opens: `<base>/msgs-open-<random>/`, after removing what earlier
+    /// launches left there (copies.rs). Call it before Messages is used. The directory's path.
+    pub fn set_copies_dir(&self, base: &Path) -> PathBuf {
+        self.copies.lock().set_dir(base)
     }
 
-    /// T-313: write an attachment, decrypted, to `file`, for the system's viewer; answers the type it may be opened as.
-    /// The copy belongs to the account: it is removed when the account ends (copies.rs), and one finished after its
-    /// account ended is removed and refused, never handed over. `drop_copy` removes it sooner.
-    pub async fn write_copy(self: &Arc<Self>, room_id: &str, event_id: &str, file: &Path) -> Result<String> {
+    /// T-313: write an attachment, decrypted, for the system's viewer: its file (in this launch's copies directory) and
+    /// the type it may be opened as. Fails closed (copies.rs): the copy is registered before its download starts, and
+    /// refused if its account has ended or the app is quitting; bytes that arrive after that are dropped unwritten. A
+    /// copy goes with its account, at quit, and at the latest at the next start. `drop_copy` removes it sooner.
+    pub async fn write_copy(self: &Arc<Self>, room_id: &str, event_id: &str) -> Result<(PathBuf, String)> {
         let (client, account, _, source, media) = self.media_message(room_id, event_id).await?;
-        let bytes = self.bytes_of(&client, source, &media, self.media_limit()).await?;
-        let ticket = self.copies.lock().add(&account, file);
         let ended = || invalid("Messages signed out or closed while the file was being opened.");
-        match copies::write_copy(self.copies.clone(), ticket, file.to_owned(), bytes, || {}).await {
+        let name = format!("{}-{}", secrets::random_hex(6), copies::file_name(&media.name));
+        let (ticket, file) = self.copies.lock().register(&account, &name).map_err(|r| match r {
+            copies::Refused::Closed => ended(),
+            copies::Refused::NoDir => invalid("Files can't be opened on this device."),
+        })?;
+        let bytes = match self.bytes_of(&client, source, &media, self.media_limit()).await {
+            Ok(b) => b,
+            Err(e) => {
+                self.copies.lock().abandon(ticket);
+                return Err(e);
+            }
+        };
+        match copies::write_copy(self.copies.clone(), ticket, bytes, || {}).await {
             Ok(true) => {}
-            // ended while it was written (signed out, replaced, or the app quitting): its writer removed it
+            // ended while it was fetched (signed out, replaced, or the app quitting): never written
             Ok(false) => return Err(ended()),
             Err(e) => return Err(server(format!("couldn't write the file to open: {e}"))),
         }
+        // handed over only while it still stands for the account in force
         let now = self.live.lock().await.as_ref().map(|l| l.store.clone());
-        if !self.copies.lock().settle(ticket, file, &account, now.as_deref()) {
+        let mut copies = self.copies.lock();
+        if !copies.stands(ticket) || now.as_deref() != Some(account.as_str()) {
+            copies.abandon(ticket);
             return Err(ended());
         }
-        Ok(media.mime)
+        Ok((file, media.mime))
     }
 
-    /// T-313: the app is quitting: every copy goes now, none is written from here on, and a write under way is waited for
-    /// (up to `QUIT_WAIT`) while it removes what it wrote (copies.rs). A quit without this, as Android may kill the app,
-    /// leaves them to the app's next start, which removes them.
+    /// T-313: the app is quitting: latched for good, every copy goes, and this launch's copies directory with them. A
+    /// write under way finishes first (it holds the registry's lock) and goes with the directory. A quit without this,
+    /// as Android may kill the app, leaves them to the next start, which removes them.
     pub fn drop_copies(&self) {
-        if !copies::close_and_wait(&self.copies, QUIT_WAIT) {
-            tracing::warn!("a copy was still being written as the app quit; the next start removes it");
-        }
+        self.copies.lock().close();
     }
 
     /// T-313: done with a copy `write_copy` made: removed now.

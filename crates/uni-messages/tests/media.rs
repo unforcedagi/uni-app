@@ -158,6 +158,9 @@ async fn voice_pictures_files_replies_and_reactions_arrive_and_a_voice_message_i
     let app = dir.join("app");
     let m = Messages::new(app.join("data"), Arc::new(FileSecrets::new(app.join("secrets"))));
     m.set_transcriber(Arc::new(stand.clone()));
+    // where the app keeps the attachments it opens (src-tauri: the media cache): a directory per launch
+    let cache = dir.join("cache");
+    let first_launch = m.set_copies_dir(&cache);
     m.sign_in(&hs.url(), "pat", "pw-0123456789").await.unwrap();
     until(30, "the room is listed", || {
         let (m, id) = (m.clone(), room.clone());
@@ -218,10 +221,12 @@ async fn voice_pictures_files_replies_and_reactions_arrive_and_a_voice_message_i
     assert_eq!(m.media(&room, &sizeless).await.unwrap().bytes, big);
 
     // a copy for the system's viewer: written, decrypted; gone when the app quits (below)
-    let copies = dir.join("copies");
-    let quit_copy = copies.join("voice-1.ogg");
-    assert_eq!(m.write_copy(&room, &voice, &quit_copy).await.unwrap(), "audio/ogg");
+    let (quit_copy, mime) = m.write_copy(&room, &voice).await.unwrap();
+    assert_eq!(mime, "audio/ogg");
+    assert!(quit_copy.starts_with(&first_launch) && quit_copy.to_string_lossy().ends_with("-Voice message.ogg"), "{}", quit_copy.display());
     assert_eq!(std::fs::read(&quit_copy).unwrap(), audio);
+    // files in this launch's directory only
+    let files_in = |d: &std::path::Path| std::fs::read_dir(d).map(|r| r.count()).unwrap_or(0);
 
     // only sound is transcribed
     assert!(matches!(m.transcript(&room, &file).await, Err(MessagesError::Invalid { .. })));
@@ -249,6 +254,12 @@ async fn voice_pictures_files_replies_and_reactions_arrive_and_a_voice_message_i
     drop(m);
     let m = Messages::new(app.join("data"), Arc::new(FileSecrets::new(app.join("secrets"))));
     m.set_transcriber(Arc::new(stand.clone()));
+    // the next start: an earlier launch's copies directory goes before Messages opens, whatever it holds
+    std::fs::create_dir_all(&first_launch).unwrap();
+    std::fs::write(first_launch.join("left-behind.pdf"), &pdf).unwrap();
+    let copies = m.set_copies_dir(&cache);
+    assert!(!first_launch.exists(), "an earlier launch's copies survived the next start");
+    assert_ne!(copies, first_launch);
     m.resume().await.unwrap();
     until(30, "the room is listed again", || {
         let (m, id) = (m.clone(), room.clone());
@@ -260,8 +271,7 @@ async fn voice_pictures_files_replies_and_reactions_arrive_and_a_voice_message_i
     assert_eq!(stand.calls.load(SeqCst), 2, "transcribed again after a restart");
 
     // signed out, the copies go with the account (and the copy was this account's, written after a restart)
-    let out_copy = copies.join("plan-1.pdf");
-    m.write_copy(&room, &file, &out_copy).await.unwrap();
+    let (out_copy, _) = m.write_copy(&room, &file).await.unwrap();
     assert_eq!(std::fs::read(&out_copy).unwrap(), pdf);
     // and the kept words go with the account's store; signed in again, it is a new device and a new store
     m.sign_out().await.unwrap();
@@ -282,10 +292,9 @@ async fn voice_pictures_files_replies_and_reactions_arrive_and_a_voice_message_i
 
     // a copy being written as the account signs out: however the two fall, no copy is left once both are done
     for round in 0..3 {
-        let racing = copies.join(format!("race-{round}.pdf"));
-        let (wrote, out) = tokio::join!(m.write_copy(&room, &file, &racing), m.sign_out());
+        let (wrote, out) = tokio::join!(m.write_copy(&room, &file), m.sign_out());
         out.unwrap();
-        assert!(!racing.exists(), "round {round}: a copy outlived sign-out (written: {})", wrote.is_ok());
+        assert_eq!(files_in(&copies), 0, "round {round}: a copy outlived sign-out (written: {})", wrote.is_ok());
         m.sign_in(&hs.url(), "pat", "pw-0123456789").await.unwrap();
         until(30, "the file is loaded after signing in again", || {
             let (m, id, file) = (m.clone(), room.clone(), file.clone());
@@ -293,5 +302,12 @@ async fn voice_pictures_files_replies_and_reactions_arrive_and_a_voice_message_i
         })
         .await;
     }
+
+    // the app quits with an open under way: whichever way they fall, nothing is left, the directory included, and
+    // nothing opens after
+    let (_, ()) = tokio::join!(m.write_copy(&room, &file), async { m.drop_copies() });
+    assert!(!copies.exists(), "the copies directory outlived quit");
+    assert!(matches!(m.write_copy(&room, &file).await, Err(MessagesError::Invalid { .. })));
+    assert!(!copies.exists(), "an open after quit made the copies directory again");
     m.shut_down().await;
 }
