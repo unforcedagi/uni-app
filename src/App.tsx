@@ -11,6 +11,8 @@ import { calShown, forgetCalendar, onCalShown, probeCalendar } from "./calendar/
 import Messages from "./messages/Messages";
 import { forgetMessages, messagesShown, onMessagesShown, probeMessages } from "./messages/messagesDoor";
 import { forgetAreas } from "./areas/useAreas";
+import { forgetWork, setWorkOwner } from "./projects/store";
+import { forgetUsage } from "./usage/usageNote";
 import { useLifeOsVault } from "./areas/useLifeOsVault";
 import { activeProfile, effectiveLifeVault, showUniGlue } from "./areas/profile";
 import { clearProjectBodies } from "./areas/projectBody";
@@ -386,7 +388,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const secretReceipts = useMemo(() => secretCards ? receiptsByRequest(messages) : new Map(), [secretCards, messages]);
   const [members, setMembers] = useState<Member[]>([]);
   const [identity, setIdentity] = useState<string | null>(null);
-  useLayoutEffect(() => { clearProjectBodies(); }, [identity]);
+  useLayoutEffect(() => { clearProjectBodies(); setWorkOwner(identity); }, [identity]);
   const [draft, setDraft] = useState("");
   const drafts = useRef(new Map<string, string>());
   const draftRevisions = useRef(new Map<string, number>());
@@ -1727,7 +1729,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     // a failed Forget gives saving back
     draftsForgotten.current = true;
     try { voiceMounted.current = false; await voiceQueue.current; await voiceOutbox.current.clear(); await invoke("identity_forget");
-      forgetDrafts(); invalidatePaths(); forgetAreas(); forgetDecisions(); forgetHeld(); forgetCalendar(); forgetMessages();
+      forgetDrafts(); invalidatePaths(); forgetAreas(); forgetDecisions(); forgetHeld(); forgetCalendar(); forgetMessages(); forgetWork(); forgetUsage();
       try { for (const key of Object.keys(localStorage)) if (key.startsWith("uni.noteDraft.v1:") || key.startsWith(CHAT_DRAFT_PREFIX) || key.startsWith("uni.vaultExpanded.v1:") || key === ALIASES_KEY || key === UNI_PLACE_KEY) localStorage.removeItem(key); } catch { /* unavailable storage */ }
       onForget(); } catch (e) { voiceMounted.current = true; draftsForgotten.current = false; setError(String(e)); }
   }

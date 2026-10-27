@@ -3,7 +3,7 @@
 // (round 2: #Uni is archived, so this is where it lives); under them, one quiet line on the Claude accounts, which opens the full card.
 import { useState } from "react";
 import { liveInArea, span } from "./model";
-import { useWork } from "./store";
+import { asOf, useWork } from "./store";
 import { UsageLine } from "./UsageLine";
 import "./projects.css";
 
@@ -33,8 +33,11 @@ const today = () => new Date().toLocaleDateString(undefined, { weekday: "long", 
 const talked = (now: number, ts: number) => { const s = span(now - ts * 1000); return s === "just now" ? "talking now" : `talked ${s} ago`; };
 
 export function FrontDoor({ doors, needs, onOpen }: { doors: readonly Door[]; needs?: Needs; onOpen: (path: string) => void }) {
-  const { work } = useWork();
+  const ws = useWork();
+  const { work } = ws;
   const now = Date.now();
+  // round 3: a read that failed, or a saved copy not read again yet, is "as of" its time; the working counts say so too
+  const at = asOf(ws, now);
   const areaAt = new Map(work.areas.map((a) => [a.path, a]));
   return <div className="fd" data-place="front-door">
     <header className="fd-head">
@@ -48,14 +51,15 @@ export function FrontDoor({ doors, needs, onOpen }: { doors: readonly Door[]; ne
       const live = a ? liveInArea(work, a.id).length : 0;
       return <li key={d.path}>
         <button type="button" className="fd-door" data-path={d.path} onClick={() => onOpen(d.path)}
-          aria-label={`${d.name}${live ? `, ${live} working` : ""}${d.stands ? `. ${d.stands}` : ""}`}>
+          aria-label={`${d.name}${live ? `, ${live} working${at ? ` at ${at}` : ""}` : ""}${d.stands ? `. ${d.stands}` : ""}`}>
           <span className="fd-name">{d.name}</span>
-          {live > 0 && <span className="fd-live" title={`${live} session${live === 1 ? "" : "s"} working`}><i aria-hidden="true" />{live} working</span>}
+          {live > 0 && <span className="fd-live" title={`${live} session${live === 1 ? "" : "s"} working`}><i aria-hidden="true" />{live} working{at ? ` at ${at}` : ""}</span>}
           {d.stands && <span className="fd-stands">{d.stands}</span>}
           <span className="fd-foot">{d.slug && <span className="fd-slug">#{d.slug}</span>}{d.lastTs && <span className="fd-when">{talked(now, d.lastTs)}</span>}</span>
         </button>
       </li>;
     })}</ul></nav>
+    {(at || ws.partial.length > 0) && <p className="fd-status" role="status">{[at && `${ws.error ? "Couldn't refresh · " : ""}As of ${at}`, ...ws.partial].filter(Boolean).join(" · ")}</p>}
     <UsageLine />
   </div>;
 }

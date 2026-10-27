@@ -82,6 +82,18 @@ export function plainWords(text: string): string {
   return t.charAt(0).toUpperCase() + t.slice(1);
 }
 
+/** Whether a running session is still heard from at `now`: its last word (`nowAt`, from doing_at) within HEARD_MS, or, before it has said
+ *  anything, its start within UNHEARD_START_MS. */
+export const heardFrom = (s: Pick<Session, "nowAt" | "startedAt">, now: number) => (s.nowAt !== null ? now - s.nowAt < HEARD_MS : now - s.startedAt < UNHEARD_START_MS);
+
+/** The work as it stands at `now`: a running session no one has heard from is silent, not working (its end is the last time it was heard
+ *  from). Applied to every read and, on a timer, to what is on screen, so a copy kept while offline ages the way the vault would. Returns
+ *  the same object when nothing changed. */
+export function freshen<W extends Work>(w: W, now = Date.now()): W {
+  if (!w.sessions.some((s) => s.state === "running" && !heardFrom(s, now))) return w;
+  return { ...w, sessions: w.sessions.map((s) => (s.state === "running" && !heardFrom(s, now) ? { ...s, state: "silent" as const, endedAt: s.nowAt ?? s.startedAt, now: null } : s)) };
+}
+
 /** Areas, projects and sessions from the vault's node, run and task notes. Nothing here throws on odd data: odd notes are skipped or gaps. */
 export function workFrom(src: Sources, now = Date.now()): LiveWork {
   const byKey = new Map<string, RawNote>();
@@ -176,12 +188,11 @@ export function workFrom(src: Sources, now = Date.now()): LiveWork {
       ?? (viaFolder?.length === 1 ? viaFolder[0] : null);
     if (!project) continue;
     // a run stopped by hand closes as failed with the launcher's "stopped" line: it was stopped, not a failure
-    const said = time(m.doing_at);
-    const heard = said !== null ? now - said < HEARD_MS : now - startedAt < UNHEARD_START_MS;
-    const noted = sessionState(m.state) === "failed" && /: stopped$/.test(str(m.summary) ?? "") ? "stopped" : sessionState(m.state);
-    const state = noted === "running" && !heard ? "silent" : noted;
+    // a note marked running stays "running" here with its heartbeat (nowAt); freshen() below decides, from the clock, whether it is
+    // still heard from (the same rule re-applied to a saved copy, so a cached session can't stay "working" forever)
+    const state = sessionState(m.state) === "failed" && /: stopped$/.test(str(m.summary) ?? "") ? "stopped" : sessionState(m.state);
     const live = state === "running";
-    const ended = live ? null : state === "silent" ? said ?? startedAt : time(m.ended_at) ?? time(r.updatedAt) ?? startedAt;
+    const ended = live ? null : time(m.ended_at) ?? time(r.updatedAt) ?? startedAt;
     const title = plainTitle((str(r.path) ?? "").replace(/^Runs\/\d{4}-\d{2}-\d{2}\s*/, ""));
     const ask = title || (task ? taskTitle.get(task) : null) || "A session";
     const steps = typeof m.steps === "number" && Number.isFinite(m.steps) ? Math.max(0, Math.floor(m.steps)) : 0;
@@ -206,5 +217,5 @@ export function workFrom(src: Sources, now = Date.now()): LiveWork {
     const others = sessions.filter((o) => o !== s && o.project === s.project && o.startedAt < s.startedAt && (o.endedAt ?? Infinity) > s.startedAt).length;
     if (others) s.why = { kind: "alongside", others };
   }
-  return { areas, projects, sessions, gaps };
+  return freshen({ areas, projects, sessions, gaps }, now);
 }

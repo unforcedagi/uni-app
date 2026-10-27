@@ -2,16 +2,10 @@
 // door as every note (`vault_note`), shows each account's session and week at a glance, and sets which account new
 // workers prefer (`usage_set_preference`). No note on this install (or no vault): the card isn't there.
 import { invoke } from "@tauri-apps/api/core";
-import { useCallback, useEffect, useState } from "react";
-import { ageText, accountLabel, howText, USAGE_NOTE, USAGE_VAULT, usageView, type Meter } from "./usageCore";
+import { useEffect, useState } from "react";
+import { ageText, accountLabel, howText, USAGE_VAULT, usageView, type Meter } from "./usageCore";
+import { useUsageNote, type UsageNote as Note } from "./usageNote";
 import "./usage.css";
-
-type Note = { id: string; path?: string; metadata?: unknown; updatedAt?: string };
-const CACHE_KEY = "uni.usage.v1";
-
-function cached(): Note | null {
-  try { const n = JSON.parse(localStorage.getItem(CACHE_KEY) ?? "null"); return n && typeof n.id === "string" ? n : null; } catch { return null; }
-}
 
 function MeterLine({ label, m, extra }: { label: string; m: Meter; extra?: React.ReactNode }) {
   const pct = m.pct === null ? 0 : Math.max(0, Math.min(100, m.pct));
@@ -24,27 +18,17 @@ function MeterLine({ label, m, extra }: { label: string; m: Meter; extra?: React
 }
 
 export default function ClaudeUsage() {
-  const [note, setNote] = useState<Note | null>(cached);
+  // T-302 round 3: the readings are read again while the card is shown (every few minutes, and on focus/visibility), not only once
+  const { note, load } = useUsageNote();
   const [now, setNow] = useState(() => new Date());
   const [saving, setSaving] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async (): Promise<Note | null> => {
-    try {
-      const r = await invoke<{ note: Note }>("vault_note", { vault: USAGE_VAULT, noteRef: USAGE_NOTE });
-      const n = r?.note && typeof r.note.id === "string" ? r.note : null;
-      setNote(n);
-      setNow(new Date());
-      try { if (n) localStorage.setItem(CACHE_KEY, JSON.stringify({ id: n.id, path: n.path, metadata: n.metadata, updatedAt: n.updatedAt })); } catch { /* unavailable storage */ }
-      return n;
-    } catch { return null; /* offline or no such note: keep what we had */ }
-  }, []);
-
+  useEffect(() => { setNow(new Date()); }, [note]);
   useEffect(() => {
-    void load();
     const t = window.setInterval(() => setNow(new Date()), 60_000);
     return () => window.clearInterval(t);
-  }, [load]);
+  }, []);
 
   const view = note ? usageView(note.metadata, now) : null;
   if (!note || !view) return null;

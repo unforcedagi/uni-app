@@ -1,37 +1,30 @@
 // T-302: one quiet line on the front door: how much of each Claude account's week is used, and where new work goes. It reads the same
 // note the Settings card does (System/Claude accounts, over the signed vault door) and opens that card in place. No note: no line.
-import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useRef, useState } from "react";
 import { openDialog } from "../areas/focusTrap";
 import ClaudeUsage from "../usage/ClaudeUsage";
-import { USAGE_NOTE, USAGE_VAULT, usageView } from "../usage/usageCore";
+import { ageText, usageView } from "../usage/usageCore";
+import { useUsageNote } from "../usage/usageNote";
 
-type Note = { id: string; metadata?: unknown };
-const CACHE_KEY = "uni.usage.v1";
-const cached = (): Note | null => { try { const n = JSON.parse(localStorage.getItem(CACHE_KEY) ?? "null"); return n && typeof n.id === "string" ? n : null; } catch { return null; } };
-
-/** "Claude: A 34% of the week · B 12% · new work to B" (a full account says so). */
+/** "Claude: A 34% of the week · B 12% · new work to B" (a full account says so); an old reading ends with when it was taken. */
 export function usageLine(metadata: unknown, now: Date): string | null {
   const v = usageView(metadata, now);
   if (!v || !v.rows.length) return null;
   const parts = v.rows.map((r) => `${r.name.toUpperCase()} ${r.missing ? "no reading" : r.week.full || r.session.full ? "full" : `${r.week.text} of the week`}`);
-  return `Claude: ${parts.join(" · ")}${v.next ? ` · new work to ${v.next.label.replace(/^Account /, "")}` : ""}`;
+  return `Claude: ${parts.join(" · ")}${v.next ? ` · new work to ${v.next.label.replace(/^Account /, "")}` : ""}${v.stale ? ` · last reading ${ageText(v.readAt, now)}` : ""}`;
 }
 
 export function UsageLine() {
-  const [note, setNote] = useState<Note | null>(cached);
+  // T-302 round 3: read again every few minutes while shown and on focus/visibility (useUsageNote); the clock keeps "last reading" true
+  const { note } = useUsageNote();
+  const [now, setNow] = useState(() => new Date());
   const [open, setOpen] = useState(false);
-  useEffect(() => {
-    let live = true;
-    invoke<{ note: Note }>("vault_note", { vault: USAGE_VAULT, noteRef: USAGE_NOTE })
-      .then((r) => { if (live && r?.note && typeof r.note.id === "string") setNote(r.note); })
-      .catch(() => { /* offline or no note: keep what we had */ });
-    return () => { live = false; };
-  }, [open]);
-  const line = note ? usageLine(note.metadata, new Date()) : null;
+  useEffect(() => { const t = window.setInterval(() => setNow(new Date()), 60_000); return () => window.clearInterval(t); }, []);
+  useEffect(() => { setNow(new Date()); }, [note]);
+  const line = note ? usageLine(note.metadata, now) : null;
   if (!line) return null;
   return <>
-    <button type="button" className="fd-usage" aria-haspopup="dialog" onClick={() => setOpen(true)}>{line}</button>
+    <button type="button" className={`fd-usage ${usageView(note!.metadata, now)?.stale ? "stale" : ""}`} aria-haspopup="dialog" onClick={() => setOpen(true)}>{line}</button>
     {open && <UsageSheet onClose={() => setOpen(false)} />}
   </>;
 }

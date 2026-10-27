@@ -3,7 +3,7 @@
 // has no live sessions. Then the same rules on the vault's own shapes (workFrom), and the words the room is sent.
 import assert from "node:assert/strict";
 import { ModelError, ago, whyWords, archivePlan, archiveProject, cannotStart, isLive, liveInArea, liveSessions, makeProject, problems, restoreProject, sessionsOf, span, startSession, stateWords, stepSession, stopSession, finishSession, timeline, timelineWindow, type Area, type Work } from "../src/projects/model.ts";
-import { HEARD_MS, plainTitle, plainWords, resultWords, sessionState, workFrom } from "../src/projects/live.ts";
+import { HEARD_MS, freshen, plainTitle, plainWords, resultWords, sessionState, workFrom } from "../src/projects/live.ts";
 import { actionMessage } from "../src/projects/actions.ts";
 import { DEMO_AREAS, demoVault } from "./browser/projectsWorld.ts";
 let failed = 0;
@@ -180,6 +180,16 @@ check("a note that still says running but hasn't been heard from for hours is si
   assert.deepEqual(liveSessions(w, "p-coop").map((s) => s.id).sort(), ["r-heard", "r-new"]);
   assert.deepEqual(problems(w), []);
   assert.equal(stateWords(st("r-old"), NOW), "Silent · last heard 11 days ago");
+});
+check("round 3: a saved copy ages by the clock: freshen makes a session no one has heard from silent, and leaves the rest as they were", () => {
+  const saved = JSON.parse(JSON.stringify(live));
+  assert.equal(freshen(saved, NOW), saved, "nothing to change: the same object");
+  const later = freshen(saved, NOW + HEARD_MS);
+  assert.deepEqual(liveSessions(later, "p-coop"), [], "both co-op sessions were heard 1-2 min before NOW: silent at NOW + 2 h");
+  const ev = later.sessions.find((s: { id: string }) => s.id === "run-events")!;
+  assert.equal(ev.state, "silent"); assert.equal(ev.endedAt, S("run-events").nowAt);
+  assert.equal(later.sessions.find((s: { id: string }) => s.id === "run-about")!.state, "finished");
+  assert.deepEqual(problems(later), []);
 });
 check("a room's own words lose their task numbers on screen", () => {
   assert.equal(plainWords("T-265 civic data layer in fix pass; Commons app (T-257) paused."), "Civic data layer in fix pass; Commons app paused.");

@@ -9,7 +9,8 @@ import { demoTalk, demoVault, DEMO_AREAS, slugOf } from './projectsWorld.ts';
 import { workFrom } from '../../src/projects/live.ts';
 
 export type LiveRead = { nodes: any[]; runs: any[]; tasks: any[]; usage: any | null; rooms: { id: string; name: string }[] };
-export type Boot = { live?: LiveRead };
+/** `bigRuns`: this many more finished runs, a month old, listed before every other run (a ledger longer than the pages the app reads). */
+export type Boot = { live?: LiveRead; bigRuns?: number };
 
 export async function bootProjects(page: Page, opts: Boot = {}) {
   const now = Date.now();
@@ -17,12 +18,28 @@ export async function bootProjects(page: Page, opts: Boot = {}) {
   const world = opts.live ?? { ...demoVault(now), rooms: [{ id: 'demo-uni', name: 'uni' }, ...DEMO_AREAS.map((a) => ({ id: a.room, name: slugOf(a.name) }))] };
   // what the room's Uni needs to find a session from the message's words: its one line, as the app shows it
   const asks = Object.fromEntries(workFrom({ nodes: world.nodes, runs: world.runs, tasks: world.tasks }).sessions.map((s) => [s.id, s.ask]));
+  if (opts.bigRuns) {
+    const old = new Date(now - 30 * 86_400_000).toISOString(), done = new Date(now - 30 * 86_400_000 + 600_000).toISOString();
+    world.runs = [...Array.from({ length: opts.bigRuns }, (_, i) => ({ id: `run-old-${i}`, path: `Runs/2026-09-20 Old tidy ${i}`, tags: ['run'], metadata: { node: 'p-seeds', state: 'done', started_at: old, ended_at: done, summary: 'mts aaaabbbb: completed' }, createdAt: old, updatedAt: done })), ...world.runs];
+  }
   const data = { now, world, asks, talk: opts.live ? [] : demoTalk(now), readOnly: !!opts.live };
   await page.addInitScript((d: any) => {
     const w = window as any;
-    const ME = 'a'.repeat(64), UNI = 'c'.repeat(64);
+    // round 3 test seams: sessionStorage 't.identity' signs in as another key; 't.offline' fails the work's reads (node, run, task), 't.hang'
+    // never answers them;
+    // window.__holdRuns holds run reads until __releaseRuns(); __world is the vault, to change a note mid-test
+    const ME = sessionStorage.getItem('t.identity') ?? 'a'.repeat(64), UNI = 'c'.repeat(64);
     const notes = d.world;
+    w.__world = notes;
     w.__posted = [];
+    w.__held = [];
+    w.__releaseRuns = () => { w.__holdRuns = false; for (const r of w.__held.splice(0)) r(); };
+    const offline = (tag: string) => sessionStorage.getItem('t.offline') === '1' && ['node', 'run', 'task'].includes(tag);
+    const hold = async (tag: string) => {
+      // 't.hang': the work's reads never answer (a network that hangs rather than fails)
+      if (sessionStorage.getItem('t.hang') === '1' && ['node', 'run', 'task'].includes(tag)) await new Promise(() => {});
+      if (tag === 'run' && w.__holdRuns) await new Promise((r) => w.__held.push(r));
+    };
     const msgs: Record<string, any[]> = {};
     const toMsg = (m: any) => ({ ref: m.ref, channel: m.channel, author: m.mine ? ME : UNI, author_name: m.mine ? 'Robin' : 'Uni', ts: m.ts, body: m.body, mentions_me: false, root: null, parent: null, mentions: [], reply_count: 0, last_reply_ts: null, edited: false, reactions: [] });
     for (const m of d.talk) (msgs[m.channel] ??= []).push(toMsg(m));
@@ -79,16 +96,19 @@ export async function bootProjects(page: Page, opts: Boot = {}) {
           case 'get_members': return [{ pubkey: ME, name: 'Robin', named: true }, { pubkey: UNI, name: 'Uni', named: true }];
           case 'vault_paths': return notes.nodes.map((x: any) => ({ id: x.id, path: x.path, extension: 'md', updatedAt: x.updatedAt }));
           case 'vault_list': return ['uni'];
-          case 'vault_query': return page(byTag(args.tag), args);
+          case 'vault_query': if (offline(args.tag)) throw 'offline'; await hold(args.tag); return page(byTag(args.tag), args);
           case 'vault_query_meta': {
-            // the indexed operators the app uses on run and task notes: eq, gte and in
-            const ok = (n: any) => Object.entries(args.metadata ?? {}).every(([k, c]: [string, any]) => { const v = n.metadata?.[k]; return 'eq' in c ? v === c.eq : 'gte' in c ? v != null && v >= c.gte : 'in' in c ? c.in.includes(v) : false; });
+            if (offline(args.tag)) throw 'offline';
+            await hold(args.tag);
+            // the indexed operators the app uses on run and task notes: eq, gte, lt and in (several on one field: all of them)
+            const op: Record<string, (v: any, x: any) => boolean> = { eq: (v, x) => v === x, gte: (v, x) => v != null && v >= x, lt: (v, x) => v != null && v < x, in: (v, x) => x.includes(v) };
+            const ok = (n: any) => Object.entries(args.metadata ?? {}).every(([k, c]: [string, any]) => Object.entries(c).every(([o, x]) => op[o]?.(n.metadata?.[k], x) ?? false));
             return page(byTag(args.tag).filter(ok), args);
           }
           case 'vault_subtree_nodes': return JSON.parse(JSON.stringify(notes.nodes));
           case 'vault_subtree_tasks': return [];
           case 'vault_note': {
-            if (args.noteRef === 'System/Claude accounts') { if (!notes.usage) throw 'note not found'; return { hub: 'https://example.invalid', vault: 'uni', note: notes.usage }; }
+            if (args.noteRef === 'System/Claude accounts') { if (!notes.usage) throw 'note not found'; return { hub: 'https://example.invalid', vault: 'uni', note: JSON.parse(JSON.stringify(notes.usage)) }; }
             const x = notes.nodes.find((y: any) => y.id === args.noteRef || y.path === args.noteRef);
             if (!x) throw 'note not found: ' + args.noteRef;
             return { hub: 'https://example.invalid', vault: 'uni', note: { ...x, extension: 'md', content: `# ${x.path.split('/').pop()}\n` } };

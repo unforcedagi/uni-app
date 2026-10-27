@@ -7,7 +7,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { openDialog } from "../areas/focusTrap";
 import { actionLabel, actionMessage, postAction, type Action } from "./actions";
 import { ago, archivePlan, areaOf, cannotStart, isLive, sessionsOf, span, stateWords, timeline, timelineWindow, whyWords, type Session } from "./model";
-import { noteAsked, useWork, type Asked } from "./store";
+import { asOf, noteAsked, useWork, type Asked } from "./store";
 import "./projects.css";
 
 const DAY = 86_400_000;
@@ -104,7 +104,8 @@ function Timeline({ sessions, talk, now }: { sessions: readonly Session[]; talk:
 
 export function ProjectSheet({ project, talk, room, roomName, onClose }: { project: string; talk: readonly number[]; room: Room | null;
   /** A room's name by its id (the area's own room may not be the one under the sheet). */ roomName: (id: string) => string | null; onClose: () => void }) {
-  const { work, asked, ready } = useWork();
+  const ws = useWork();
+  const { work, asked, ready } = ws;
   const now = useNow();
   const p = work.projects.find((x) => x.id === project);
   const [pick, setPick] = useState<Pick | null>(null);
@@ -118,6 +119,7 @@ export function ProjectSheet({ project, talk, room, roomName, onClose }: { proje
   // a project that is gone after a read (merged, its folder taken away) closes its sheet rather than leaving an empty one
   useEffect(() => { if (!shown && ready) closeRef.current(); }, [shown, ready]);
   if (!p) return null;
+  const at = asOf(ws, now);
   const area = areaOf(work, p);
   // the area's own room is where its actions go (the room this sheet is over, when it is the area's)
   const to = area ? (room && room.id === area.room ? room : { id: area.room, name: roomName(area.room) ?? area.name }) : room;
@@ -171,8 +173,9 @@ export function ProjectSheet({ project, talk, room, roomName, onClose }: { proje
       <Timeline sessions={sessions} talk={talk} now={now} />
       <section className="pj-sessions" aria-label="Sessions">
         <div className="pj-sessions-head">
-          <h3 className="cp-h">Sessions{liveOnes.length ? ` · ${liveOnes.length} working` : ""}</h3>
+          <h3 className="cp-h">Sessions{liveOnes.length ? ` · ${liveOnes.length} working${at ? ` at ${at}` : ""}` : ""}</h3>
         </div>
+        {(at || ws.partial.length > 0) && <p className="pj-hint pj-status" role="status">{[at && `${ws.error ? "Couldn't refresh · " : ""}As of ${at}`, ...ws.partial].filter(Boolean).join(" · ")}</p>}
         {addAsked && <p className="pj-asked" role="status">{askedWords(addAsked, now)}</p>}
         {projectAsked && <p className="pj-asked" role="status">{askedWords(projectAsked, now)}</p>}
         {sessions.length === 0 && <p className="cp-none">No sessions yet.</p>}

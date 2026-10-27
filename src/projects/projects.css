@@ -34,6 +34,9 @@
 .fd-needs-list button { all: unset; box-sizing: border-box; width: 100%; min-height: 40px; padding: 6px 2px; display: flex; justify-content: space-between; gap: 12px; cursor: pointer; font: 400 15px / 1.35 var(--th-sans); border-bottom: 1px dotted var(--th-hair2); }
 .fd-needs-list small { flex: none; font: 500 12px var(--th-mono); color: var(--th-mute); }
 .fd-needs-list button:focus-visible { outline: 2px solid var(--th-ink); outline-offset: 2px; }
+/* round 3: what the read couldn't cover, or how old it is: quiet words, no colour */
+.fd-status { max-width: 980px; margin: 18px auto 0; font: 500 12px var(--th-mono); color: var(--th-ink2); }
+.fd-usage.stale { font-style: italic; }
 /* the usage line: one quiet line under the rooms, which opens the accounts card */
 .fd-usage { all: unset; box-sizing: border-box; display: block; max-width: 980px; margin: 22px auto 0; padding: 10px 2px; cursor: pointer; font: 500 13px var(--th-mono); color: var(--th-ink2); border-top: 1px dashed var(--th-hair2); width: 100%; }
 .fd-usage:hover { color: var(--th-ink); text-decoration: underline; text-underline-offset: 3px; }

@@ -4,7 +4,7 @@ import { defineConfig } from '@playwright/test';
 const port = Number(process.env.PROJECTS_TEST_PORT ?? 1438);
 export default defineConfig({
   outputDir: 'test-results/projects',
-  testDir: './scripts/browser', testMatch: process.env.PROJECTS_LIVE ? /projectsLive\.spec\.ts/ : /projects\.spec\.ts/, reporter: 'list',
+  testDir: './scripts/browser', testMatch: process.env.PROJECTS_LIVE ? /projectsLive\.spec\.ts/ : /projects(Review)?\.spec\.ts/, reporter: 'list',
   use: { baseURL: `http://127.0.0.1:${port}`, colorScheme: 'light', reducedMotion: 'reduce' },
   projects: [
     { name: 'phone', use: { browserName: 'chromium', viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true } },
