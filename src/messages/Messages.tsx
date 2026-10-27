@@ -4,8 +4,8 @@
 // arrives while you look. Agents don't read any of this: the thread says so, and "bring Uni in" is designed (T-278
 // DESIGN.md), not built. Shape and word before colour, so it reads on the Daylight, where nothing moves.
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type FormEvent, type KeyboardEvent } from "react";
-import { closeRoom, draftFor, draftsEpoch, join, keepDraft, keepReadSpot, lastOpen, lastPane, lastTab, markRead, older, onUpdate, openRoom, readSpot, rememberOpen, rememberPane, rememberTab, unsentBack, rooms as readRooms, send, signIn, signInDevice, signOut, status as readStatus } from "./messagesDoor.ts";
-import { applyLink, applyOpened, applyTimeline, asMessagesErr, initials, messageTabs, networkInfo, networkOf, previewLine, problemText, rowTime, sendWords, shownItems, shownTab, statusWords, tabName, tabRows, timeLabel, type LinkRow, type MessagesErr, type RoomRow, type Status, type Tab, type TabId, type Thread } from "./messagesView.ts";
+import { closeRoom, draftFor, draftsEpoch, forgetPlace, join, keepDraft, keepReadSpot, lastOpen, lastPane, lastTab, links as readLinks, markRead, older, onUpdate, openRoom, readSpot, rememberOpen, rememberPane, rememberTab, unsentBack, rooms as readRooms, send, signIn, signInDevice, signOut, status as readStatus } from "./messagesDoor.ts";
+import { applyLink, mergeLinks, applyOpened, applyTimeline, asMessagesErr, initials, messageTabs, networkInfo, networkOf, previewLine, problemText, rowTime, sendWords, shownItems, shownTab, statusWords, tabName, tabRows, timeLabel, type LinkRow, type MessagesErr, type RoomRow, type Status, type Tab, type TabId, type Thread } from "./messagesView.ts";
 import LinkAccounts from "./LinkAccounts.tsx";
 import { enterInsertsNewline } from "../composerCore";
 import "./Messages.css";
@@ -220,6 +220,8 @@ export default function Messages({ backTo, onBack }: { backTo: string; onBack: (
   const listEl = useRef<HTMLDivElement | null>(null);
   const seq = useRef(0);
   const openId = useRef<string | null>(null);
+  /** Moves on when the account ends (or Messages closes): an answer asked for before then is dropped. */
+  const gen = useRef(0);
   const phone = useMedia(PHONE);
 
   const open = useCallback(async (roomId: string, show = true) => {
@@ -232,6 +234,25 @@ export default function Messages({ backTo, onBack }: { backTo: string; onBack: (
     if (show) { setPane("thread"); if (matchMedia(PHONE).matches) rememberPane("thread"); }
     try { const rows = await openRoom(roomId); setThread((t) => applyOpened(t, roomId, n, rows)); setProblem(null); }
     catch (err) { setProblem(asMessagesErr(err)); }
+  }, []);
+
+  /** The account is gone, whoever ended it (the Sign out button, or the homeserver): everything Messages held for it goes the one way
+   * Forget takes too (forgetPlace: the open room, the pane, the tab, the drafts and spots, and the drafts' epoch), and so does what is
+   * on screen. */
+  const accountGone = useCallback(() => {
+    gen.current++;
+    setList(null); setThread(null); setPane("list"); setLinkView(false); setLinkRows(null); setTabPick(null);
+    listAt.current.clear();
+    openId.current = null;
+    forgetPlace();
+  }, []);
+
+  /** T-310: how each network's link stands, asked once as Messages opens (and as the app comes back), so a link to redo shows its mark
+   * and a linked network with no chats has its tab without the Link screen being opened. Quiet: a failure shows nothing (the core asks
+   * each bridge at most once a minute; its answers come as `link` updates). */
+  const loadLinks = useCallback(() => {
+    const g = gen.current;
+    readLinks().then((snap) => { if (g === gen.current) setLinkRows((cur) => mergeLinks(snap, cur)); }, () => {});
   }, []);
 
   const loadRooms = useCallback(async () => {
@@ -252,7 +273,7 @@ export default function Messages({ backTo, onBack }: { backTo: string; onBack: (
     // live receive: the room list, the open room's messages and the sync's status, as they change
     const off = onUpdate((u) => {
       if (!alive) return;
-      if (u.kind === "status") { setStatus(u.status); if (u.status.state === "signed_out") setLinkRows(null); }
+      if (u.kind === "status") { setStatus(u.status); if (u.status.state === "signed_out") accountGone(); }
       else if (u.kind === "rooms") setList(u.rooms);
       else if (u.kind === "link") setLinkRows((rows) => applyLink(rows, u.link));
       else setThread((t) => applyTimeline(t, u.room_id, u.items));
@@ -262,16 +283,20 @@ export default function Messages({ backTo, onBack }: { backTo: string; onBack: (
         const s = await readStatus();
         if (!alive) return;
         setStatus(s);
-        if (s && s.state !== "signed_out") await loadRooms();
+        if (s && s.state !== "signed_out") { loadLinks(); await loadRooms(); }
+        else accountGone();
       } catch (err) { if (alive) setProblem(asMessagesErr(err)); }
     })();
     const tick = window.setInterval(() => setNow(Date.now()), 60_000);
-    return () => { alive = false; off(); window.clearInterval(tick); if (openId.current) void closeRoom(openId.current).catch(() => {}); };
-  }, [loadRooms]);
+    // the app put away and back: ask again (still quiet, and at most once a minute per bridge in the core)
+    const back = () => { if (document.visibilityState === "visible") void readStatus().then((s) => { if (alive && s && s.state !== "signed_out") loadLinks(); }, () => {}); };
+    document.addEventListener("visibilitychange", back);
+    return () => { alive = false; gen.current++; off(); window.clearInterval(tick); document.removeEventListener("visibilitychange", back); if (openId.current) void closeRoom(openId.current).catch(() => {}); };
+  }, [loadRooms, loadLinks, accountGone]);
 
   const signedIn = !!status && status.state !== "signed_out";
   const openRow = thread ? list?.find((r) => r.id === thread.roomId) ?? null : null;
-  const out = async () => { try { setStatus(await signOut()); setList(null); setThread(null); setLinkView(false); setLinkRows(null); setTabPick(null); listAt.current.clear(); openId.current = null; rememberOpen(null); } catch (err) { setProblem(asMessagesErr(err)); } };
+  const out = async () => { try { setStatus(await signOut()); accountGone(); } catch (err) { setProblem(asMessagesErr(err)); } };
   const tabs = list ? messageTabs(list, linkRows) : [];
   const tab = shownTab(tabPick, tabs);
   const rows = list ? tabRows(list, tab) : [];
@@ -287,7 +312,7 @@ export default function Messages({ backTo, onBack }: { backTo: string; onBack: (
       {signedIn ? <button className="note-quiet" onClick={() => void out()}>Sign out</button> : <span className="msgs-bar-gap" />}
     </header>
     {!status && !problem ? <p className="msgs-loading" role="status">Opening Messages…</p>
-    : !signedIn ? <div className="msgs-scroll">{problem && <p className="msgs-problem" role="alert">{problemText(problem)}</p>}{status?.error && <p className="msgs-problem" role="status">{status.error}</p>}<SignIn onDone={(s) => { setStatus(s); void loadRooms(); }} /></div>
+    : !signedIn ? <div className="msgs-scroll">{problem && <p className="msgs-problem" role="alert">{problemText(problem)}</p>}{status?.error && <p className="msgs-problem" role="status">{status.error}</p>}<SignIn onDone={(s) => { setStatus(s); loadLinks(); void loadRooms(); }} /></div>
     : linkView ? <LinkAccounts rows={linkRows} setRows={setLinkRows} onBack={() => setLinkView(false)} />
     : <div className="msgs-panes">
       {(!list || list.length > 0) && <TabStrip tabs={tabs} tab={tab} onPick={pickTab} onLink={() => setLinkView(true)} />}

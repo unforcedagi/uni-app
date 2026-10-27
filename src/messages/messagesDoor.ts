@@ -73,6 +73,9 @@ export function rememberOpen(roomId: string | null) {
   try { if (roomId) localStorage.setItem(OPEN_KEY, roomId); else { localStorage.removeItem(OPEN_KEY); localStorage.removeItem(PANE_KEY); localStorage.removeItem(TAB_KEY); } } catch { /* unavailable storage */ }
   if (!roomId) { drafts.clear(); readTo.clear(); draftEpoch++; }
 }
+/** The one way Messages' place for an account is dropped: Forget (forgetMessages), the Sign out button, and a sign-out from the
+ * homeserver all come here, so they can't drift apart. */
+export const forgetPlace = () => rememberOpen(null);
 export function lastOpen(): string | null {
   try { return localStorage.getItem(OPEN_KEY); } catch { return null; }
 }
@@ -116,7 +119,7 @@ export function keepReadSpot(roomId: string, spot: ReadSpot | null) { if (!spot)
 /** Forgetting the device key signs Messages out too: the homeserver drops this device, and its store and session
  * here are deleted. A build without Messages has no such command, and nothing to sign out. */
 export function forgetMessages() {
-  rememberOpen(null);
+  forgetPlace();
   void signOut().catch(() => {});
   setSeen(false);
 }

@@ -42,9 +42,11 @@ async function boot(page: Page) {
           case 'messages_sign_out': return { state: 'signed_out', user_id: null, homeserver: null, error: null };
           case 'messages_sign_in_device': return { state: 'live', user_id: '@lee:example.org', homeserver: 'https://matrix.example.org', error: null };
           case 'messages_open': return Array.from({ length: 4 }, (_, i) => line(i, args.roomId));
-          case 'messages_links': return w.__links;
+          case 'messages_links': w.__linkReads = (w.__linkReads ?? 0) + 1; return w.__links;
           case 'messages_link_check': return w.__links.find((l: any) => l.network === args.network);
-          case 'messages_close': case 'messages_read': case 'messages_send': return null;
+          // a send can be held, to fail later (w.__failSend()), as one on its way when the account ends
+          case 'messages_send': return w.__holdSends ? new Promise((_, no) => { w.__failSend = () => no({ kind: 'unreachable', message: 'The homeserver went away.' }); }) : null;
+          case 'messages_close': case 'messages_read': return null;
           case 'plugin:event|listen': { const id = nextId++; listeners.set(id, { event: args.event, handler: args.handler }); return id; }
           case 'plugin:event|unlisten': listeners.delete(args.eventId); return null;
           case 'identity_status': return { paired: true, pubkey: 'a'.repeat(64) };
@@ -71,9 +73,8 @@ const phone = (page: Page) => (page.viewportSize()?.width ?? 0) < 700;
 
 test('All, then one tab per linked network in a fixed order, each with how many conversations wait', async ({ page }) => {
   await boot(page);
-  // Messenger and Instagram aren't linked and have nothing: no tab. Telegram's link card isn't known until the Link
-  // screen is opened, but it has a conversation, so it has a tab.
-  await expect(tablist(page).getByRole('tab')).toHaveText([/^All\s*3$/, /^Signal\s*1$/, /^Telegram$/, /^WhatsApp\s*1$/, /^SMS$/, /^Matrix\s*1$/]);
+  // Messenger and Instagram aren't linked and have nothing: no tab. Telegram's link needs doing again: its "!".
+  await expect(tablist(page).getByRole('tab')).toHaveText([/^All\s*3$/, /^Signal\s*1$/, /^Telegram\s*!$/, /^WhatsApp\s*1$/, /^SMS$/, /^Matrix\s*1$/]);
   await expect(tab(page, 'All')).toHaveAttribute('aria-selected', 'true');
   await expect(tab(page, 'WhatsApp')).toHaveAccessibleName('WhatsApp, 1 new'); // Mara's two messages are one conversation
   // All: every conversation, newest first, each with its network's word
@@ -173,4 +174,54 @@ test('signing out forgets the tab: the next sign-in starts on All', async ({ pag
   await expect(tab(page, 'All')).toHaveAttribute('aria-selected', 'true');
   await page.reload();
   await expect(tab(page, 'All')).toHaveAttribute('aria-selected', 'true', { timeout: 15_000 });
+});
+
+test('review tnli7wiq P2: how each link stands is asked as Messages opens, once, without opening the Link screen', async ({ page }) => {
+  await boot(page);
+  // Telegram's link needs doing again: its tab and the tab itself say so, though the Link screen was never opened
+  await expect(tab(page, 'Telegram')).toHaveAccessibleName('Telegram, needs linking again');
+  await tab(page, 'Telegram').click();
+  await expect(list(page).getByRole('note')).toHaveText(/Telegram needs linking again/);
+  // asked once on the way in, not on every render
+  await tab(page, 'Signal').click(); await tab(page, 'All').click();
+  expect(await page.evaluate(() => (window as any).__linkReads)).toBe(1);
+  // Instagram linked elsewhere, nothing from it yet: coming back to Messages, it has its tab
+  // (init scripts run in the order added: boot's has made the cards by now)
+  await page.addInitScript(() => { const w = window as any; w.__links = w.__links.map((l: any) => (l.network === 'instagram' ? { ...l, state: 'linked' } : l)); });
+  await page.reload();
+  await tab(page, 'Instagram').click({ timeout: 15_000 });
+  await expect(list(page)).toContainText('Nothing from Instagram yet.');
+});
+
+test('review tnli7wiq P1: a sign-out from the homeserver drops the drafts, a failed send\'s words, and the tab, as the Sign out button does', async ({ page }, info) => {
+  await boot(page);
+  const conv = (name: string) => page.getByRole('region', { name: `Conversation: ${name}` });
+  const openConv = async (name: string) => {
+    if (phone(page) && await page.getByRole('button', { name: '← Conversations' }).isVisible()) await page.getByRole('button', { name: '← Conversations' }).click();
+    await list(page).getByRole('button', { name: new RegExp(name) }).click();
+    await expect(conv(name)).toBeVisible();
+  };
+  await tab(page, 'WhatsApp').click();
+  // a send to Mara is on its way when the account ends
+  await page.evaluate(() => { (window as any).__holdSends = true; });
+  await openConv('Mara Quill');
+  const toMara = conv('Mara Quill').getByRole('textbox');
+  await toMara.fill('Words that never went');
+  if (info.project.use.hasTouch) await conv('Mara Quill').getByRole('button', { name: 'Send' }).click(); else await toMara.press('Enter');
+  await expect(toMara).toHaveValue('');
+  // and half a reply waits in another conversation
+  await openConv('Allotment group');
+  await conv('Allotment group').getByRole('textbox').fill('Half a reply about the shed');
+  // the homeserver ends the session (another device signed it out, or the token was revoked)
+  await page.evaluate(() => (window as any).__push({ kind: 'status', status: { state: 'signed_out', user_id: null, homeserver: null, error: null } }));
+  await expect(page.getByRole('button', { name: 'Sign in with this device' })).toBeVisible();
+  // the send fails only now
+  await page.evaluate(() => { const w = window as any; w.__holdSends = false; w.__failSend(); });
+  // someone signs in on this device: nothing of the last account's is there
+  await page.getByRole('button', { name: 'Sign in with this device' }).click();
+  await expect(tab(page, 'All')).toHaveAttribute('aria-selected', 'true');
+  await openConv('Mara Quill');
+  await expect(conv('Mara Quill').getByRole('textbox')).toHaveValue('');
+  await openConv('Allotment group');
+  await expect(conv('Allotment group').getByRole('textbox')).toHaveValue('');
 });
