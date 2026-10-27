@@ -2,7 +2,7 @@
 // The rows come from the Rust side (crates/uni-messages): the webview never holds a Matrix token or key.
 
 export type Status = { state: "signed_out" | "connecting" | "live" | "offline" | "error"; user_id: string | null; homeserver: string | null; error: string | null };
-export type RoomRow = { id: string; name: string; preview: string | null; preview_own: boolean; ts: number | null; unread: number; encrypted: boolean; invited: boolean; inviter: string | null; direct: boolean };
+export type RoomRow = { id: string; name: string; preview: string | null; preview_own: boolean; ts: number | null; unread: number; encrypted: boolean; invited: boolean; inviter: string | null; direct: boolean; network?: string };
 export type MessageKind = "text" | "notice" | "emote" | "media" | "undecryptable";
 export type SendState = "remote" | "sending" | "sent" | "failed";
 export type MessageRow = { key: string; event_id: string | null; sender: string; sender_name: string; own: boolean; ts: number; kind: MessageKind; body: string; state: SendState; encrypted: boolean; edited: boolean };
@@ -13,6 +13,8 @@ export const SEEN_KEY = "uni.messages.seen.v1";
 export const OPEN_KEY = "uni.messages.open.v1";
 /** T-294: whether a phone was showing that conversation ("thread") or the list, so coming back shows the same. */
 export const PANE_KEY = "uni.messages.pane.v1";
+/** T-310: the tab this device was on. */
+export const TAB_KEY = "uni.messages.tab.v1";
 
 /** A rejection from a `messages_*` command, in the door's shape (a missing command or a broken IPC is "server"). */
 export function asMessagesErr(e: unknown): MessagesErr {
@@ -126,6 +128,69 @@ export function statusWords(s: Status | null): string {
     case "error": return "NOT SYNCING";
     case "signed_out": return "SIGNED OUT";
   }
+}
+
+// ── Tabs (T-310): All, then one per network ─────────────────────────────────────────────────────────────────────────
+
+/** The networks, in the order their tabs stand: the Link screen's order, then plain Matrix, then what can't be told.
+ * `mark` is the word a row carries in All, so you can tell where someone wrote from without colour. */
+export const NETWORK_TABS = [
+  { id: "signal", label: "Signal", mark: "SIG" },
+  { id: "telegram", label: "Telegram", mark: "TG" },
+  { id: "whatsapp", label: "WhatsApp", mark: "WA" },
+  { id: "gmessages", label: "SMS", mark: "SMS" },
+  { id: "messenger", label: "Messenger", mark: "FB" },
+  { id: "instagram", label: "Instagram", mark: "IG" },
+  { id: "matrix", label: "Matrix", mark: "MX" },
+  { id: "other", label: "Other", mark: "" },
+] as const;
+export type NetworkId = (typeof NETWORK_TABS)[number]["id"];
+export type TabId = "all" | NetworkId;
+/** `count`: its conversations. `waiting`: how many of them have something unread, or are an invite. `attention`: its
+ * link needs doing again. */
+export type Tab = { id: TabId; label: string; count: number; waiting: number; attention: boolean };
+
+const NETWORK_IDS: readonly string[] = NETWORK_TABS.map((n) => n.id);
+/** The network a conversation came through; one the core couldn't tell (or didn't say) is Other. */
+export const networkOf = (r: RoomRow): NetworkId => (r.network && NETWORK_IDS.includes(r.network) ? r.network as NetworkId : "other");
+export const networkInfo = (id: NetworkId) => NETWORK_TABS.find((n) => n.id === id)!;
+/** Something there for you: an unread message, or an invite. */
+export const waiting = (r: RoomRow) => r.unread > 0 || r.invited;
+
+/** Newest first; a conversation with no time yet goes last. Ties keep the order the core sent. */
+export function newestFirst(rows: RoomRow[]): RoomRow[] {
+  return [...rows].sort((a, b) => (a.ts === b.ts ? 0 : a.ts == null ? 1 : b.ts == null ? -1 : b.ts - a.ts));
+}
+
+/** All, then a tab for each network that has a conversation here or that its Link card says is linked (or needs linking
+ * again), in NETWORK_TABS' order. A network with nothing linked has no tab. Only one network and nothing wrong with it:
+ * All alone, since its tab would be the same list. */
+export function messageTabs(rows: RoomRow[], links: LinkRow[] | null): Tab[] {
+  const nets: Tab[] = [];
+  for (const n of NETWORK_TABS) {
+    const mine = rows.filter((r) => networkOf(r) === n.id);
+    const card = links?.find((l) => l.network === n.id);
+    const attention = card?.state === "needs_attention";
+    if (!mine.length && card?.state !== "linked" && !attention) continue;
+    nets.push({ id: n.id, label: n.label, count: mine.length, waiting: mine.filter(waiting).length, attention });
+  }
+  const all: Tab = { id: "all", label: "All", count: rows.length, waiting: rows.filter(waiting).length, attention: false };
+  return nets.length === 1 && !nets[0].attention ? [all] : [all, ...nets];
+}
+
+/** A tab's conversations, newest first. */
+export function tabRows(rows: RoomRow[], tab: TabId): RoomRow[] {
+  return newestFirst(tab === "all" ? rows : rows.filter((r) => networkOf(r) === tab));
+}
+
+/** The tab to show: the one this device was on, if it is still there; else All. */
+export function shownTab(stored: string | null, tabs: Tab[]): TabId {
+  return tabs.find((t) => t.id === stored)?.id ?? "all";
+}
+
+/** A tab's name for a screen reader: "Signal, 2 unread". */
+export function tabName(t: Tab): string {
+  return [t.label, t.waiting ? `${t.waiting} unread` : "", t.attention ? "needs linking again" : ""].filter(Boolean).join(", ");
 }
 
 // ── Linking accounts (T-282): one card per network, read from its bridge bot by the Rust core (link.rs) ─────────────

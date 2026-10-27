@@ -32,6 +32,9 @@ pub struct RoomRow {
     /// Who invited you, for an invite.
     pub inviter: Option<String>,
     pub direct: bool,
+    /// T-310: the network it comes through (`signal`, `whatsapp`, …, from link.rs), `matrix` for a plain Matrix
+    /// conversation, or `other` when it can't be told.
+    pub network: &'static str,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
@@ -113,12 +116,12 @@ pub(crate) async fn room_row(room: &Room, latest: &LatestEventValue) -> RoomRow 
         Ok(n) => n.to_string(),
         Err(_) => room.room_id().to_string(),
     };
-    let (preview, preview_own, ts, inviter) = match latest {
-        LatestEventValue::None => (None, false, None, None),
-        LatestEventValue::Remote { timestamp, is_own, content, .. } => (content_words(content).map(|c| c.1), *is_own, Some(ms(*timestamp)), None),
-        LatestEventValue::Local { timestamp, content, .. } => (content_words(content).map(|c| c.1), true, Some(ms(*timestamp)), None),
+    let (preview, preview_own, ts, inviter, inviter_id) = match latest {
+        LatestEventValue::None => (None, false, None, None, None),
+        LatestEventValue::Remote { timestamp, is_own, content, .. } => (content_words(content).map(|c| c.1), *is_own, Some(ms(*timestamp)), None, None),
+        LatestEventValue::Local { timestamp, content, .. } => (content_words(content).map(|c| c.1), true, Some(ms(*timestamp)), None, None),
         LatestEventValue::RemoteInvite { timestamp, inviter, inviter_profile } => {
-            (None, false, Some(ms(*timestamp)), inviter.as_ref().map(|u| name_of(inviter_profile, u)))
+            (None, false, Some(ms(*timestamp)), inviter.as_ref().map(|u| name_of(inviter_profile, u)), inviter.as_deref())
         }
     };
     RoomRow {
@@ -132,6 +135,7 @@ pub(crate) async fn room_row(room: &Room, latest: &LatestEventValue) -> RoomRow 
         invited: room.state() == RoomState::Invited,
         inviter,
         direct: room.is_direct().await.unwrap_or(false),
+        network: crate::link::network_of(room, inviter_id).await,
     }
 }
 

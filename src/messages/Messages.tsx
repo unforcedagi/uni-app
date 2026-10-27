@@ -4,8 +4,8 @@
 // arrives while you look. Agents don't read any of this: the thread says so, and "bring Uni in" is designed (T-278
 // DESIGN.md), not built. Shape and word before colour, so it reads on the Daylight, where nothing moves.
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type FormEvent, type KeyboardEvent } from "react";
-import { closeRoom, draftFor, join, keepDraft, keepReadSpot, lastOpen, lastPane, markRead, older, onUpdate, openRoom, readSpot, rememberOpen, rememberPane, rooms as readRooms, send, signIn, signInDevice, signOut, status as readStatus } from "./messagesDoor.ts";
-import { applyLink, applyOpened, applyTimeline, asMessagesErr, initials, previewLine, problemText, rowTime, sendWords, shownItems, statusWords, timeLabel, type LinkRow, type MessagesErr, type RoomRow, type Status, type Thread } from "./messagesView.ts";
+import { closeRoom, draftFor, join, keepDraft, keepReadSpot, lastOpen, lastPane, lastTab, markRead, older, onUpdate, openRoom, readSpot, rememberOpen, rememberPane, rememberTab, rooms as readRooms, send, signIn, signInDevice, signOut, status as readStatus } from "./messagesDoor.ts";
+import { applyLink, applyOpened, applyTimeline, asMessagesErr, initials, messageTabs, networkInfo, networkOf, previewLine, problemText, rowTime, sendWords, shownItems, shownTab, statusWords, tabName, tabRows, timeLabel, type LinkRow, type MessagesErr, type RoomRow, type Status, type Tab, type TabId, type Thread } from "./messagesView.ts";
 import LinkAccounts from "./LinkAccounts.tsx";
 import { enterInsertsNewline } from "../composerCore";
 import "./Messages.css";
@@ -50,11 +50,14 @@ function SignIn({ onDone }: { onDone: (s: Status) => void }) {
   </div>;
 }
 
-function RoomItem({ r, selected, now, onOpen }: { r: RoomRow; selected: boolean; now: number; onOpen: () => void }) {
+function RoomItem({ r, selected, now, mark, onOpen }: { r: RoomRow; selected: boolean; now: number; mark: boolean; onOpen: () => void }) {
+  const net = networkInfo(networkOf(r));
   return <li><button type="button" className={`msgs-row ${selected ? "selected" : ""} ${r.unread > 0 ? "unread" : ""} ${r.invited ? "invite" : ""}`} aria-current={selected ? "page" : undefined} onClick={onOpen}>
     <span className="msgs-avatar" aria-hidden="true">{initials(r.name)}</span>
     <span className="msgs-row-text">
-      <span className="msgs-row-top"><strong className="msgs-row-name">{r.name}</strong><time>{rowTime(r.ts, now)}</time></span>
+      <span className="msgs-row-top"><strong className="msgs-row-name">{r.name}</strong>
+        {mark && net.mark && <><span className="msgs-net" aria-hidden="true">{net.mark}</span><span className="msgs-sr">on {net.label}</span></>}
+        <time>{rowTime(r.ts, now)}</time></span>
       <span className="msgs-row-bottom">
         {r.invited && <span className="msgs-tag">INVITE</span>}
         <span className="msgs-row-preview">{previewLine(r)}</span>
@@ -62,6 +65,33 @@ function RoomItem({ r, selected, now, onOpen }: { r: RoomRow; selected: boolean;
       </span>
     </span>
   </button></li>;
+}
+
+/** T-310: All, then one tab per network; "Link another network" quietly at the end. Arrow keys move along the tabs. */
+function TabStrip({ tabs, tab, onPick, onLink }: { tabs: Tab[]; tab: TabId; onPick: (t: TabId) => void; onLink: () => void }) {
+  const strip = useRef<HTMLDivElement | null>(null);
+  // the tab you're on stays in sight on a phone's sideways strip
+  useLayoutEffect(() => { strip.current?.querySelector<HTMLElement>('[aria-selected="true"]')?.scrollIntoView({ block: "nearest", inline: "nearest" }); }, [tab]);
+  const key = (e: KeyboardEvent<HTMLDivElement>) => {
+    const step = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+    if (!step) return;
+    e.preventDefault();
+    const at = tabs.findIndex((t) => t.id === tab);
+    const next = tabs[(at + step + tabs.length) % tabs.length];
+    onPick(next.id);
+    strip.current?.querySelector<HTMLElement>(`[data-tab="${next.id}"]`)?.focus();
+  };
+  return <div className="msgs-tabs" ref={strip}>
+    <div className="msgs-tablist" role="tablist" aria-label="Networks" onKeyDown={key}>
+      {tabs.map((t) => <button key={t.id} type="button" role="tab" data-tab={t.id} aria-selected={t.id === tab} aria-controls="msgs-list" tabIndex={t.id === tab ? 0 : -1}
+        aria-label={tabName(t)} className={`msgs-tab ${t.attention ? "attention" : ""}`} onClick={() => onPick(t.id)}>
+        <span>{t.label}</span>
+        {t.waiting > 0 && <span className="msgs-tab-count" aria-hidden="true">{t.waiting}</span>}
+        {t.attention && <span className="msgs-tab-alert" aria-hidden="true">!</span>}
+      </button>)}
+    </div>
+    <button type="button" className="note-quiet msgs-link-open" onClick={onLink}>+ Link another network</button>
+  </div>;
 }
 
 function ThreadView({ room, thread, now, visible, onBack, onProblem }: { room: RoomRow; thread: Thread; now: number; visible: boolean; onBack: () => void; onProblem: (p: MessagesErr | null) => void }) {
@@ -78,6 +108,9 @@ function ThreadView({ room, thread, now, visible, onBack, onProblem }: { room: R
   const items = thread.items;
   const shown = items ? shownItems(items, now) : [];
   const lastOwn = items ? [...items].reverse().find((m) => m.own) : undefined;
+  // a reply goes out the way the conversation came in: the composer says which network
+  const net = networkOf(room);
+  const to = net === "matrix" || net === "other" ? `Message ${room.name}` : `Message ${room.name} on ${networkInfo(net).label}`;
 
   // follow the conversation while you're at its end; leave it alone while you read back
   useLayoutEffect(() => {
@@ -153,8 +186,8 @@ function ThreadView({ room, thread, now, visible, onBack, onProblem }: { room: R
             </div>)}
       </div>
       <form className="msgs-compose" onSubmit={(e) => void submit(e)}>
-        <label className="msgs-sr" htmlFor="msgs-draft">Message {room.name}</label>
-        <textarea id="msgs-draft" value={draft} rows={1} placeholder={`Message ${room.name}`} onChange={(e) => setDraft(e.target.value)} onKeyDown={key} enterKeyHint="send" />
+        <label className="msgs-sr" htmlFor="msgs-draft">{to}</label>
+        <textarea id="msgs-draft" value={draft} rows={1} placeholder={to} onChange={(e) => setDraft(e.target.value)} onKeyDown={key} enterKeyHint="send" />
         <button className="send msgs-send" disabled={!draft.trim()}>Send</button>
       </form>
     </>}
@@ -171,6 +204,11 @@ export default function Messages({ backTo, onBack }: { backTo: string; onBack: (
   /** The Link screen (T-282) in place of the conversations, and its cards as the bridges last said. */
   const [linkView, setLinkView] = useState(false);
   const [linkRows, setLinkRows] = useState<LinkRow[] | null>(null);
+  /** T-310: the tab picked on this device; shown while it has a tab (else All, without forgetting the pick). */
+  const [tabPick, setTabPick] = useState<string | null>(lastTab);
+  /** Each tab's place in the list, for this session. */
+  const listAt = useRef(new Map<string, number>());
+  const listEl = useRef<HTMLDivElement | null>(null);
   const seq = useRef(0);
   const openId = useRef<string | null>(null);
   const phone = useMedia(PHONE);
@@ -225,7 +263,13 @@ export default function Messages({ backTo, onBack }: { backTo: string; onBack: (
   const signedIn = !!status && status.state !== "signed_out";
   const openRow = thread ? list?.find((r) => r.id === thread.roomId) ?? null : null;
   const out = async () => { try { setStatus(await signOut()); setList(null); setThread(null); setLinkView(false); setLinkRows(null); openId.current = null; rememberOpen(null); } catch (err) { setProblem(asMessagesErr(err)); } };
-  const linkButton = <button type="button" className="note-quiet msgs-link-open" onClick={() => setLinkView(true)}>Link an account</button>;
+  const tabs = list ? messageTabs(list, linkRows) : [];
+  const tab = shownTab(tabPick, tabs);
+  const rows = list ? tabRows(list, tab) : [];
+  const current = tabs.find((t) => t.id === tab);
+  const pickTab = (t: TabId) => { setTabPick(t); rememberTab(t); };
+  // back on a tab, or back to the list on a phone: where that tab's list was left
+  useLayoutEffect(() => { if (listEl.current) listEl.current.scrollTop = listAt.current.get(tab) ?? 0; }, [tab, pane, linkView, !!list]);
 
   return <section className={`msgs ${still ? "msgs-still" : ""}`} aria-label="Messages" data-pane={pane}>
     <header className="note-bar msgs-bar">
@@ -235,14 +279,19 @@ export default function Messages({ backTo, onBack }: { backTo: string; onBack: (
     </header>
     {!status && !problem ? <p className="msgs-loading" role="status">Opening Messages…</p>
     : !signedIn ? <div className="msgs-scroll">{problem && <p className="msgs-problem" role="alert">{problemText(problem)}</p>}{status?.error && <p className="msgs-problem" role="status">{status.error}</p>}<SignIn onDone={(s) => { setStatus(s); void loadRooms(); }} /></div>
-    : linkView ? <LinkAccounts rows={linkRows} setRows={setLinkRows} onBack={() => { setLinkView(false); setLinkRows(null); }} />
+    : linkView ? <LinkAccounts rows={linkRows} setRows={setLinkRows} onBack={() => setLinkView(false)} />
     : <div className="msgs-panes">
+      {list && list.length > 0 && <TabStrip tabs={tabs} tab={tab} onPick={pickTab} onLink={() => setLinkView(true)} />}
       <nav className="msgs-rooms" aria-label="Conversations">
-        <div className="msgs-rooms-head"><strong>Conversations</strong>{list && <small>{list.length}</small>}{linkButton}</div>
-        <div className="msgs-scroll">
+        <div className="msgs-scroll" id="msgs-list" role={list?.length ? "tabpanel" : undefined} aria-label={current ? `${current.id === "all" ? "All conversations" : current.label}` : undefined}
+          ref={listEl} onScroll={(e) => listAt.current.set(tab, e.currentTarget.scrollTop)}>
           {!list ? <p className="msgs-loading" role="status">Loading conversations…</p>
             : list.length === 0 ? <div className="empty msgs-empty"><p>No conversations yet.</p><p>Bring in your chats from Signal, WhatsApp, Telegram and others.</p><button type="button" className="send" onClick={() => setLinkView(true)}>Link an account</button></div>
-            : <ul className="msgs-rows">{list.map((r) => <RoomItem key={r.id} r={r} now={now} selected={thread?.roomId === r.id} onOpen={() => void open(r.id)} />)}</ul>}
+            : <>
+              {current?.attention && <p className="msgs-attention" role="note">{current.label} needs linking again. <button type="button" className="note-quiet" onClick={() => setLinkView(true)}>Link again</button></p>}
+              {rows.length === 0 ? <p className="empty msgs-tab-empty">Nothing from {current?.label ?? "here"} yet. Chats show here as they come in.</p>
+                : <ul className="msgs-rows">{rows.map((r) => <RoomItem key={r.id} r={r} now={now} mark={tab === "all" && tabs.length > 2} selected={thread?.roomId === r.id} onOpen={() => void open(r.id)} />)}</ul>}
+            </>}
         </div>
       </nav>
       <div className="msgs-read">
