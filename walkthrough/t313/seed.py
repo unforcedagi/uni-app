@@ -41,7 +41,7 @@ def register(user, token):
     step = api('POST', '/_matrix/client/v3/register', {'username': user, 'password': PW})
     r = api('POST', '/_matrix/client/v3/register', {'username': user, 'password': PW,
             'auth': {'type': 'm.login.registration_token', 'token': token, 'session': step['session']}})
-    api('PUT', f"/_matrix/client/v3/profile/{urllib.parse.quote(r['user_id'])}/displayname", {'displayname': user.capitalize() + {'robin': ' Vale', 'kit': ' Sample', 'pat': ' Example'}[user]}, r['access_token'])
+    api('PUT', f"/_matrix/client/v3/profile/{urllib.parse.quote(r['user_id'])}/displayname", {'displayname': user.capitalize() + {'robin': ' Vale', 'kit': ' Sample', 'pat': ' Example', 'warden': ''}[user]}, r['access_token'])
     return r['user_id'], r['access_token']
 
 
@@ -109,7 +109,9 @@ def pdf():
     return out
 
 
-pat_id, pat = register('pat', BOOT)
+# the first account is the homeserver's admin, with its own admin room: a throwaway one, so Pat's list holds only people
+register('warden', BOOT)
+pat_id, pat = register('pat', REG)
 robin_id, robin = register('robin', REG)
 kit_id, kit = register('kit', REG)
 

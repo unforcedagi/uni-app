@@ -224,13 +224,18 @@ fn is_voice(ev: &EventTimelineItem) -> bool {
     raw.deserialize_as_unchecked::<Raw>().is_ok_and(|r| r.content.voice.is_some() || r.content.voice2.is_some())
 }
 
-/// What a reply answers, as far as it is known.
-fn reply_of(content: &TimelineItemContent) -> Option<Reply> {
+/// What a reply answers, as far as it is known. `names`: the senders' names the timeline already has, for a quoted event
+/// whose own profile isn't loaded (it would show by user id).
+fn reply_of(content: &TimelineItemContent, names: &std::collections::HashMap<&UserId, String>) -> Option<Reply> {
     let details = content.in_reply_to()?;
     let (sender_name, text) = match &details.event {
         TimelineDetails::Ready(e) => {
             let words = content_words(&e.content).map(|(_, w, _)| clip(w.trim(), QUOTE_MAX));
-            (Some(name_of(&e.sender_profile, &e.sender)), words.or_else(|| Some("Message".into())))
+            let name = match &e.sender_profile {
+                TimelineDetails::Ready(_) => name_of(&e.sender_profile, &e.sender),
+                _ => names.get::<&UserId>(&&*e.sender).cloned().unwrap_or_else(|| name_of(&e.sender_profile, &e.sender)),
+            };
+            (Some(name), words.or_else(|| Some("Message".into())))
         }
         _ => (None, None),
     };
@@ -317,6 +322,12 @@ pub(crate) async fn room_row(room: &Room, latest: &LatestEventValue, network: Op
 /// The messages among a timeline's items, oldest first. State changes (joins, topic) and day dividers are left out.
 /// `me`: the account, to tell its reactions.
 pub(crate) fn message_rows(items: &Vector<Arc<TimelineItem>>, me: Option<&UserId>) -> Vec<MessageRow> {
+    let names: std::collections::HashMap<&UserId, String> = items
+        .iter()
+        .filter_map(|i| i.as_event())
+        .filter(|e| matches!(e.sender_profile(), TimelineDetails::Ready(_)))
+        .map(|e| (e.sender(), name_of(e.sender_profile(), e.sender())))
+        .collect();
     items
         .iter()
         .filter_map(|item| {
@@ -343,7 +354,7 @@ pub(crate) fn message_rows(items: &Vector<Arc<TimelineItem>>, me: Option<&UserId
                 encrypted: ev.encryption_info().is_some() || kind == MessageKind::Undecryptable,
                 edited,
                 media: media_of(ev).map(|(_, m)| m),
-                reply: reply_of(ev.content()),
+                reply: reply_of(ev.content(), &names),
                 reactions: reactions_of(ev.content(), me),
             })
         })

@@ -246,6 +246,8 @@ export default function Messages({ backTo, onBack }: { backTo: string; onBack: (
   /** Moves on when the account ends (or Messages closes): an answer asked for before then is dropped. */
   const gen = useRef(0);
   const phone = useMedia(PHONE);
+  /** T-313: counts status updates, so a status read can tell an update came while it was asked. */
+  const statusSeq = useRef(0);
 
   const open = useCallback(async (roomId: string, show = true) => {
     const prev = openId.current;
@@ -296,7 +298,7 @@ export default function Messages({ backTo, onBack }: { backTo: string; onBack: (
     // live receive: the room list, the open room's messages and the sync's status, as they change
     const off = onUpdate((u) => {
       if (!alive) return;
-      if (u.kind === "status") { setStatus(u.status); if (u.status.state === "signed_out") accountGone(); }
+      if (u.kind === "status") { statusSeq.current++; setStatus(u.status); if (u.status.state === "signed_out") accountGone(); }
       else if (u.kind === "rooms") setList(u.rooms);
       else if (u.kind === "link") setLinkRows((rows) => applyLink(rows, u.link));
       else setThread((t) => applyTimeline(t, u.room_id, u.items));
@@ -318,6 +320,14 @@ export default function Messages({ backTo, onBack }: { backTo: string; onBack: (
   }, [loadRooms, loadLinks, accountGone]);
 
   const signedIn = !!status && status.state !== "signed_out";
+  /** T-313: the sign-in's answer is the status as it was when it began syncing; a "live" the core sent before the answer came back
+   * (it sends one only on a change) would be undone by it, and the bar would say CONNECTING for good. So the status is asked for
+   * again, and taken unless an update has come since. */
+  const onSignedIn = (s: Status) => {
+    setStatus(s); loadLinks(); void loadRooms();
+    const at = statusSeq.current;
+    void readStatus().then((now) => { if (now && at === statusSeq.current) setStatus(now); }, () => {});
+  };
   const openRow = thread ? list?.find((r) => r.id === thread.roomId) ?? null : null;
   const out = async () => { try { setStatus(await signOut()); accountGone(); } catch (err) { setProblem(asMessagesErr(err)); } };
   const tabs = list ? messageTabs(list, linkRows) : [];
@@ -339,7 +349,7 @@ export default function Messages({ backTo, onBack }: { backTo: string; onBack: (
       {signedIn ? <button className="note-quiet" onClick={() => void out()}>Sign out</button> : <span className="msgs-bar-gap" />}
     </header>
     {!status && !problem ? <p className="msgs-loading" role="status">Opening Messages…</p>
-    : !signedIn ? <div className="msgs-scroll">{problem && <p className="msgs-problem" role="alert">{problemText(problem)}</p>}{status?.error && <p className="msgs-problem" role="status">{status.error}</p>}<SignIn onDone={(s) => { setStatus(s); loadLinks(); void loadRooms(); }} /></div>
+    : !signedIn ? <div className="msgs-scroll">{problem && <p className="msgs-problem" role="alert">{problemText(problem)}</p>}{status?.error && <p className="msgs-problem" role="status">{status.error}</p>}<SignIn onDone={onSignedIn} /></div>
     : linkView ? <LinkAccounts rows={linkRows} setRows={setLinkRows} onBack={() => setLinkView(false)} />
     : <div className="msgs-panes">
       {strip && <TabStrip tabs={tabs} tab={tab} onPick={pickTab} onLink={() => setLinkView(true)} />}

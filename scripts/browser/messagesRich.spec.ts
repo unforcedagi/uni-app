@@ -12,12 +12,13 @@ const LONG_END = 'and that is the whole plan for the beds.';
 
 /** The app's IPC with Messages' door faked: one conversation holding every kind of message. Calls are counted in
  * `__calls`; `__failWords` makes the next transcript ask fail once. */
-async function boot(page: Page) {
-  await page.addInitScript(([png, words, longEnd]) => {
+async function boot(page: Page, signedOut = false) {
+  await page.addInitScript(([png, words, longEnd, out]) => {
     const w = window as any;
     localStorage.setItem('uni.tabs.v1', JSON.stringify({ v: 1, tabs: [{ id: 'messages', kind: 'messages', title: 'Messages' }], active: 'messages', recent: ['messages'] }));
     localStorage.setItem('uni.messages.seen.v1', '1');
     w.__calls = [] as { cmd: string; args: any }[];
+    w.__signedOut = out;
     const now = Date.now(), min = 60_000;
     const room = (id: string, name: string, ago: number, preview: string) =>
       ({ id: `!${id}:example.org`, name, preview, preview_own: false, ts: now - ago * min, unread: 0, encrypted: true, invited: false, inviter: null, direct: true, network: 'signal' });
@@ -53,13 +54,17 @@ async function boot(page: Page) {
     const callbacks = new Map<number, (e: unknown) => void>();
     const listeners = new Map<number, { event: string; handler: number }>();
     let nextId = 1;
+    w.__push = (payload: unknown) => { for (const [id, l] of listeners) if (l.event === 'messages://update') callbacks.get(l.handler)?.({ event: l.event, id, payload }); };
+    const me = { user_id: '@pat:example.org', homeserver: 'https://matrix.example.org', error: null };
     w.__TAURI_INTERNALS__ = {
       metadata: { currentWindow: { label: 'main' }, currentWebview: { label: 'main' } },
       transformCallback: (cb: (e: unknown) => void) => { const id = nextId++; callbacks.set(id, cb); return id; },
       invoke: async (cmd: string, args: any) => {
         w.__calls.push({ cmd, args });
         switch (cmd) {
-          case 'messages_status': return { state: 'live', user_id: '@pat:example.org', homeserver: 'https://matrix.example.org', error: null };
+          case 'messages_status': return w.__signedOut ? { state: 'signed_out', user_id: null, homeserver: null, error: null } : { state: 'live', ...me };
+          // the core starts syncing as it signs in, and says "live" (on a change only) before its answer is back
+          case 'messages_sign_in': w.__signedOut = false; w.__push({ kind: 'status', status: { state: 'live', ...me } }); await new Promise((r) => setTimeout(r, 150)); return { state: 'connecting', ...me };
           case 'messages_rooms': return w.__rooms;
           case 'messages_open': return args.roomId === R ? w.__thread : [m({ body: 'Thanks!', sender_name: 'Kit' })];
           case 'messages_media': {
@@ -87,8 +92,9 @@ async function boot(page: Page) {
       },
     };
     w.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: (_event: string, id: number) => listeners.delete(id) };
-  }, [PNG, WORDS, LONG_END] as const);
+  }, [PNG, WORDS, LONG_END, signedOut] as const);
   await page.goto('/');
+  if (signedOut) return;
   await page.getByRole('navigation', { name: 'Conversations' }).getByRole('button', { name: /Robin Vale/ }).click({ timeout: 15_000 });
   await expect(log(page).getByText('Saturday works.')).toBeVisible();
 }
@@ -217,4 +223,17 @@ test('a reply quotes what it answers and goes to it; reactions sit under the bub
   // nothing in the conversation is wider than the screen
   const overflow = await log(page).evaluate((el) => el.scrollWidth - el.clientWidth);
   expect(overflow).toBeLessThanOrEqual(1);
+});
+
+test('signing in: a "live" that arrives before the sign-in answer is not undone by it', async ({ page }) => {
+  await boot(page, true);
+  const form = page.getByRole('form', { name: 'Sign in to Messages' });
+  await form.getByLabel('Homeserver').fill('https://matrix.example.org');
+  await form.getByLabel('Username').fill('pat');
+  await form.getByLabel('Password').fill('made-up-password');
+  await form.getByRole('button', { name: 'Sign in' }).click();
+  await expect(page.getByRole('navigation', { name: 'Conversations' }).getByRole('button', { name: /Robin Vale/ })).toBeVisible();
+  // nothing more will come: the core sends a status only when it changes
+  await page.waitForTimeout(500);
+  await expect(page.locator('.msgs-live')).toHaveText('LIVE');
 });

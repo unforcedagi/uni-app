@@ -32,8 +32,12 @@ export async function boot(page: Page, profile: string, bridge: Bridge) {
       transformCallback: (cb: (e: unknown) => void) => { const id = nextId++; callbacks.set(id, cb); return id; },
       invoke: async (cmd: string, args: any) => {
         w.__calls.push(cmd);
+        // opening a file is the system's: a browser has nothing to hand it to (T-313)
+        if (cmd === 'messages_open_file') return null;
         if (cmd.startsWith('messages_')) {
           const r = await fetch(`${base}/invoke/${cmd}`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify(args ?? {}) });
+          // T-313: an attachment's bytes come back raw, as the app's command answers them (an ArrayBuffer)
+          if (r.ok && cmd === 'messages_media') return await r.arrayBuffer();
           const body = await r.json().catch(() => null);
           if (!r.ok) throw body ?? { kind: 'server', message: `bridge answered ${r.status}` };
           return body;
