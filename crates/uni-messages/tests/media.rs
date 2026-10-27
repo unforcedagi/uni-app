@@ -303,8 +303,8 @@ async fn voice_pictures_files_replies_and_reactions_arrive_and_a_voice_message_i
         .await;
     }
 
-    // the app quits with an open under way: whichever way they fall, nothing is left, the directory included, and
-    // nothing opens after
+    // the app quits while an open is downloading (this order every time: the open starts, quit runs to the end, then the
+    // bytes arrive; copies.rs tests the other orders): nothing is left, the directory included, and nothing opens after
     let (_, ()) = tokio::join!(m.write_copy(&room, &file), async { m.drop_copies() });
     assert!(!copies.exists(), "the copies directory outlived quit");
     assert!(matches!(m.write_copy(&room, &file).await, Err(MessagesError::Invalid { .. })));

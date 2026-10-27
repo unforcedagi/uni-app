@@ -19,13 +19,13 @@ use std::{
     sync::{Arc, Mutex, MutexGuard},
 };
 
-/// The per-launch directories' names start with this.
+/// The per-launch directories' names start with this. Android's FilesPlugin.mediaFile spells it too: keep them the same.
 pub const DIR_PREFIX: &str = "msgs-open-";
 
 #[derive(Default)]
 pub(crate) struct Copies {
-    /// Registered copies: ticket, account, file.
-    files: Vec<(u64, String, PathBuf)>,
+    /// Registered copies: ticket, file.
+    files: Vec<(u64, PathBuf)>,
     next: u64,
     /// This launch's directory, once set; none: files can't be opened here.
     dir: Option<PathBuf>,
@@ -70,9 +70,12 @@ impl Copies {
         dir
     }
 
-    /// From now on copies may be registered for `account` (an account starts running), unless the app is quitting.
+    /// From now on copies may be registered for `account` (an account starts running). Not after quit: that latch is
+    /// for good.
     pub(crate) fn open_for(&mut self, account: &str) {
-        self.account = Some(account.to_owned());
+        if !self.closing {
+            self.account = Some(account.to_owned());
+        }
     }
 
     /// The account in force ends: latch first (nothing more registers for it), then every copy goes.
@@ -92,7 +95,7 @@ impl Copies {
     }
 
     fn sweep(&mut self) {
-        for (_, _, f) in std::mem::take(&mut self.files) {
+        for (_, f) in std::mem::take(&mut self.files) {
             let _ = std::fs::remove_file(f);
         }
     }
@@ -104,17 +107,19 @@ impl Copies {
         }
         let file = self.dir.as_ref().ok_or(Refused::NoDir)?.join(name);
         self.next += 1;
-        self.files.push((self.next, account.to_owned(), file.clone()));
+        self.files.push((self.next, file.clone()));
         Ok((Ticket(self.next), file))
     }
 
-    fn holds(&self, t: Ticket) -> bool {
-        self.files.iter().any(|(id, _, _)| *id == t.0)
+    /// Whether `ticket` still stands (as its copy is handed over).
+    pub(crate) fn stands(&self, t: Ticket) -> bool {
+        self.files.iter().any(|(id, _)| *id == t.0)
     }
 
-    fn forget(&mut self, t: Ticket) {
-        if let Some(at) = self.files.iter().position(|(id, _, _)| *id == t.0) {
-            let (_, _, f) = self.files.remove(at);
+    /// The copy `t` doesn't stand (its open gave up, or it ended): its registration and its file go.
+    pub(crate) fn forget(&mut self, t: Ticket) {
+        if let Some(at) = self.files.iter().position(|(id, _)| *id == t.0) {
+            let (_, f) = self.files.remove(at);
             let _ = std::fs::remove_file(f);
         }
     }
@@ -122,7 +127,7 @@ impl Copies {
     /// The bytes for `ticket` are here: written now, if it still stands; else dropped unwritten. Whether it stands. Runs
     /// under the registry's lock (the caller holds it), so no sweep can come between the check and the write.
     fn write_now(&mut self, ticket: Ticket, bytes: &[u8]) -> std::io::Result<bool> {
-        let Some(file) = self.files.iter().find(|(id, _, _)| *id == ticket.0).map(|(_, _, f)| f.clone()) else { return Ok(false) };
+        let Some(file) = self.files.iter().find(|(id, _)| *id == ticket.0).map(|(_, f)| f.clone()) else { return Ok(false) };
         if self.closing {
             self.forget(ticket);
             return Ok(false);
@@ -137,20 +142,10 @@ impl Copies {
         wrote.map(|_| true)
     }
 
-    /// The open with `ticket` gave up (its download failed): its registration goes.
-    pub(crate) fn abandon(&mut self, ticket: Ticket) {
-        self.forget(ticket);
-    }
-
     /// Done with `file`: removed from disk and from the list.
     pub(crate) fn remove(&mut self, file: &Path) {
-        self.files.retain(|(_, _, f)| f != file);
+        self.files.retain(|(_, f)| f != file);
         let _ = std::fs::remove_file(file);
-    }
-
-    /// Whether `ticket` still stands as its copy is handed over.
-    pub(crate) fn stands(&self, ticket: Ticket) -> bool {
-        self.holds(ticket)
     }
 
     #[cfg(test)]
@@ -232,6 +227,9 @@ mod tests {
         assert!(!file.exists(), "a decrypted copy was written after quit cleanup");
         assert!(!dir.exists(), "quit left this launch's directory (or the late write made it again)");
         assert_eq!(reg.lock().register("store-a", "other.pdf"), Err(Refused::Closed));
+        // an account starting after quit doesn't reopen it
+        reg.lock().open_for("store-b");
+        assert_eq!(reg.lock().register("store-b", "other.pdf"), Err(Refused::Closed));
         assert_eq!(reg.lock().len(), 0);
     }
 

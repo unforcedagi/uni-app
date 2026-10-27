@@ -72,7 +72,8 @@ class FilesPlugin(private val activity: Activity) : Plugin(activity) {
   }
 
   /** Only files in the app's media cache, the one folder the FileProvider shares (res/xml/file_paths.xml): directly in it,
-   *  or (T-313) in one of Messages' per-launch copies directories inside it (`media/msgs-open-<random>/`). */
+   *  or (T-313) in one of Messages' per-launch copies directories inside it (`media/msgs-open-<random>/`: the prefix is
+   *  uni-messages' `copies::DIR_PREFIX`; keep the two the same). */
   private fun mediaFile(path: String): File? {
     val media = File(activity.cacheDir, "media").canonicalFile
     val file = File(path).canonicalFile

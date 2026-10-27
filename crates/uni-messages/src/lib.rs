@@ -506,7 +506,8 @@ impl Messages {
     /// Sign out: the device is removed on the homeserver if it answers, and the store and the saved account here are
     /// deleted either way. If the homeserver didn't confirm, the status says so.
     pub async fn sign_out(self: &Arc<Self>) -> Result<Status> {
-        // first of all, before waiting for anything: no attachment opens for this account any more, and its copies go
+        // before waiting for anything: no attachment opens for the account in force any more, and its copies go (a sign-in
+        // finishing while this waits for its turn opens its own, which go with it at the wipe below)
         self.copies.lock().end_account();
         // held across the logout: no sign-in can finish while it waits and be deleted below
         let _turn = self.lifecycle.lock().await;
@@ -936,7 +937,7 @@ impl Messages {
         let bytes = match self.bytes_of(&client, source, &media, self.media_limit()).await {
             Ok(b) => b,
             Err(e) => {
-                self.copies.lock().abandon(ticket);
+                self.copies.lock().forget(ticket);
                 return Err(e);
             }
         };
@@ -950,7 +951,7 @@ impl Messages {
         let now = self.live.lock().await.as_ref().map(|l| l.store.clone());
         let mut copies = self.copies.lock();
         if !copies.stands(ticket) || now.as_deref() != Some(account.as_str()) {
-            copies.abandon(ticket);
+            copies.forget(ticket);
             return Err(ended());
         }
         Ok((file, media.mime))
