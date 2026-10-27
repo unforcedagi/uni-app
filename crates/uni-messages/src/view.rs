@@ -123,6 +123,8 @@ pub struct Reply {
     pub sender_name: Option<String>,
     /// At most `QUOTE_MAX` characters.
     pub text: Option<String>,
+    /// It couldn't be fetched (deleted, not visible to this account, or the homeserver didn't give it).
+    pub unavailable: bool,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -220,6 +222,10 @@ fn is_voice(ev: &EventTimelineItem) -> bool {
         #[serde(rename = "org.matrix.msc3245.voice.v2")]
         voice2: Option<serde::de::IgnoredAny>,
     }
+    // ruma reads the first version's mark; only an event without it is read again, for the second's
+    if ev.content().as_message().is_some_and(|m| matches!(m.msgtype(), MessageType::Audio(a) if a.voice.is_some())) {
+        return true;
+    }
     let Some(raw) = ev.latest_json().or_else(|| ev.original_json()) else { return false };
     raw.deserialize_as_unchecked::<Raw>().is_ok_and(|r| r.content.voice.is_some() || r.content.voice2.is_some())
 }
@@ -239,7 +245,8 @@ fn reply_of(content: &TimelineItemContent, names: &std::collections::HashMap<&Us
         }
         _ => (None, None),
     };
-    Some(Reply { event_id: details.event_id.to_string(), sender_name, text })
+    let unavailable = matches!(details.event, TimelineDetails::Error(_));
+    Some(Reply { event_id: details.event_id.to_string(), sender_name, text, unavailable })
 }
 
 fn reactions_of(content: &TimelineItemContent, me: Option<&UserId>) -> Vec<Reaction> {

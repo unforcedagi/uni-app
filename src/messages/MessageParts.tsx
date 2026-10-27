@@ -193,7 +193,7 @@ export function Quote({ reply, onGo }: { reply: Reply; onGo: (eventId: string) =
   return <button type="button" className="msgs-quote" onClick={() => onGo(reply.event_id)}>
     <span className="msgs-sr">In reply to </span>
     <strong>{reply.sender_name ?? "a message"}</strong>
-    <span className="msgs-quote-text">{reply.text ?? "Loading the message it answers…"}</span>
+    <span className="msgs-quote-text">{reply.text ?? (reply.unavailable ? "The message it answers isn't available." : "Loading the message it answers…")}</span>
   </button>;
 }
 
@@ -201,7 +201,7 @@ export function Quote({ reply, onGo }: { reply: Reply; onGo: (eventId: string) =
 export function Reactions({ reactions }: { reactions: Reaction[] }) {
   if (!reactions.length) return null;
   return <ul className="msgs-reactions" aria-label="Reactions">
-    {reactions.map((r) => <li key={r.key} className={r.own ? "own" : ""} aria-label={reactionName(r)}><span aria-hidden="true">{r.key}{r.count > 1 ? ` ${r.count}` : ""}</span></li>)}
+    {reactions.map((r, i) => <li key={`${i}:${r.key}`} className={r.own ? "own" : ""} aria-label={reactionName(r)}><span aria-hidden="true">{r.key}{r.count > 1 ? ` ${r.count}` : ""}</span></li>)}
   </ul>;
 }
 

@@ -9,7 +9,7 @@ export type SendState = "remote" | "sending" | "sent" | "failed";
  * the webview give the bytes: an SVG or anything unknown comes as `application/octet-stream`, shown as a file. */
 export type MediaKind = "image" | "video" | "audio" | "voice" | "file";
 export type Media = { kind: MediaKind; name: string; mime: string; size: number | null; duration_ms: number | null; width: number | null; height: number | null; caption: string | null };
-export type Reply = { event_id: string; sender_name: string | null; text: string | null };
+export type Reply = { event_id: string; sender_name: string | null; text: string | null; unavailable?: boolean };
 export type Reaction = { key: string; count: number; own: boolean };
 export type Transcript = { text: string };
 export type MessageRow = { key: string; event_id: string | null; sender: string; sender_name: string; own: boolean; ts: number; kind: MessageKind; body: string; state: SendState; encrypted: boolean; edited: boolean;

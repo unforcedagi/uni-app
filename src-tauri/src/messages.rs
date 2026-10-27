@@ -24,9 +24,10 @@ impl Transcriber for HubTranscriber {
     }
 }
 
-/// Where an attachment being opened is written, decrypted, for the app the system picks: a folder of its own per open,
-/// under the app's cache, removed after `OPENED_FOR` (and all of it at the next start).
-const OPENED_DIR: &str = "messages-open";
+/// An attachment being opened is written, decrypted, into the media cache (the one folder Android's FileProvider shares
+/// with a viewer, files.rs), as `msg-<random>-<name>`: pinned against the cache's pruning while a viewer may still read it,
+/// removed after `OPENED_FOR`, and any left by an earlier run removed at the next start.
+const OPENED_PREFIX: &str = "msg-";
 const OPENED_FOR: std::time::Duration = std::time::Duration::from_secs(10 * 60);
 
 /// Make the account's door and forward its updates to the webview.
@@ -34,9 +35,13 @@ pub fn setup(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let dir = app.path().app_data_dir()?.join("messages");
     let messages = Messages::new(dir.join("data"), Arc::new(FileSecrets::new(dir.join("secrets"))));
     messages.set_transcriber(Arc::new(HubTranscriber(app.handle().clone())));
-    if let Ok(cache) = app.path().app_cache_dir() {
+    if let Ok(dir) = crate::media_cache_dir(app.handle()) {
         // what earlier runs opened: their viewers are long done with it
-        let _ = std::fs::remove_dir_all(cache.join(OPENED_DIR));
+        for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+            if e.file_name().to_string_lossy().starts_with(OPENED_PREFIX) {
+                let _ = std::fs::remove_file(e.path());
+            }
+        }
     }
     let mut rx = messages.subscribe();
     let handle = app.handle().clone();
@@ -143,25 +148,40 @@ fn disk_name(name: &str) -> String {
     if clean.is_empty() { "attachment".into() } else { clean }
 }
 
-/// Open an attachment in the app the system picks for its type: written, decrypted, to a folder of its own under the
-/// app's cache, handed over (desktop: the default app; Android: a content:// URI, see files.rs), removed later.
+/// Open an attachment in the app the system picks for its type: written, decrypted, into the media cache, handed over
+/// (desktop: the default app; Android: a content:// URI, see files.rs), removed later.
 #[tauri::command]
 pub async fn messages_open_file(app: tauri::AppHandle, s: State<'_, MessagesState>, room_id: String, event_id: String) -> Result<(), MessagesError> {
+    use crate::media_registry::{lock, MEDIA};
     let fail = |message: String| MessagesError::Server { message };
     let got = s.0.media(&room_id, &event_id).await?;
-    let dir = app.path().app_cache_dir().map_err(|e| fail(e.to_string()))?.join(OPENED_DIR).join(uuid::Uuid::new_v4().simple().to_string());
-    let file = dir.join(disk_name(&got.name));
+    let dir = crate::media_cache_dir(&app).map_err(fail)?;
+    let id = uuid::Uuid::new_v4().simple().to_string();
+    let name = format!("{OPENED_PREFIX}{}-{}", &id[..12], disk_name(&got.name));
+    let file = dir.join(&name);
+    lock(&MEDIA).pin(&name);
+    let release = {
+        let (name, file) = (name.clone(), file.clone());
+        move || {
+            lock(&MEDIA).release(&name);
+            let _ = std::fs::remove_file(&file);
+        }
+    };
     let written = {
         let (dir, file) = (dir.clone(), file.clone());
         tauri::async_runtime::spawn_blocking(move || std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&file, &got.bytes)))
             .await
-            .map_err(|e| fail(e.to_string()))?
+            .map_err(|e| fail(e.to_string()))
+            .and_then(|w| w.map_err(|e| fail(format!("Couldn't write the file to open: {e}"))))
     };
-    written.map_err(|e| fail(format!("Couldn't write the file to open: {e}")))?;
+    if let Err(e) = written {
+        release();
+        return Err(e);
+    }
     let opened = crate::files::open(&app, &file, Some(got.mime.as_str())).await.map_err(fail);
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(OPENED_FOR).await;
-        let _ = std::fs::remove_dir_all(dir);
+        release();
     });
     opened
 }

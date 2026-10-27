@@ -50,6 +50,7 @@ async function boot(page: Page, signedOut = false) {
       m({ own: true, sender: '@pat:example.org', sender_name: 'Pat', state: 'sent', body: 'Saturday works.', reply: { event_id: '$e1', sender_name: 'Robin', text: 'The menu is at https://example.com/menu, see you at noon.' },
         reactions: [{ key: '🌱', count: 2, own: true }, { key: '👍', count: 1, own: false }] }),
       m({ kind: 'media', body: 'Voice message (0:02)', media: media({ kind: 'voice', name: 'Voice message.ogg', mime: 'audio/wav', size: tone.byteLength, duration_ms: 2000 }) }),
+      m({ body: 'About that, never mind.', reply: { event_id: '$gone', sender_name: null, text: null, unavailable: true } }),
     ];
     const callbacks = new Map<number, (e: unknown) => void>();
     const listeners = new Map<number, { event: string; handler: number }>();
@@ -213,6 +214,9 @@ test('a reply quotes what it answers and goes to it; reactions sit under the bub
   await expect(reactions).toHaveText(['🌱 2', '👍']);
   await expect(reactions.first()).toHaveAccessibleName('🌱, 2 people, you too');
   await expect(reactions.first()).toHaveClass(/own/);
+
+  // a quote whose message can't be fetched says so, instead of loading for good
+  await expect(msg(page, '$e10').getByRole('button', { name: /^In reply to/ })).toContainText("The message it answers isn't available.");
 
   const long = msg(page, '$e7');
   await long.scrollIntoViewIfNeeded();

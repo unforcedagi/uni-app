@@ -87,8 +87,9 @@ const TRANSCRIBE_FOR: Duration = Duration::from_secs(300);
 const TRANSCRIBING: usize = 2;
 /// Where a voice message's transcript is kept: in the account's encrypted store, by event.
 const TRANSCRIPT_KEY: &str = "uni.transcript.v1:";
-/// Replied-to messages fetched for one room's open, at most (a room scrolled back far fetches more as it loads).
-const REPLY_FETCHES: usize = 50;
+/// Replied-to messages asked for at once, at most: the rest are asked for with the room's next change (a page loaded, a
+/// message arriving, an answer coming back), so a long history is fetched a batch at a time.
+const REPLY_FETCHES: usize = 20;
 
 /// T-313: turns a voice message into words. The app's is uni-transcribe on the owner's box (faster-whisper, reached
 /// with the device key: src-tauri's messages.rs); the tests use their own. Answers the words, or why not.
@@ -884,6 +885,8 @@ impl Messages {
         }
         let key = format!("{TRANSCRIPT_KEY}{event_id}");
         let gate = self.transcribing.lock().unwrap().entry(key.clone()).or_default().clone();
+        // the gate goes once nobody holds it, however this ask ends (answered, failed, or dropped by its caller)
+        let _gone = GateGuard { gates: &self.transcribing, key: key.clone(), gate: gate.clone() };
         let _turn = gate.lock().await;
         let done = async {
             if let Some(kept) = client.state_store().get_custom_value(key.as_bytes()).await.map_err(from_store)? {
@@ -895,11 +898,12 @@ impl Messages {
             if media.size.is_some_and(|n| n > MAX_TRANSCRIBE as u64) {
                 return Err(invalid("This recording is too long to transcribe."));
             }
+            // the turn is taken before the download, so waiting asks don't each hold a clip in memory
+            let _slot = self.transcribe_turns.clone().acquire_owned().await.map_err(server)?;
             let audio = download(&client, source, media.size).await?;
             if audio.len() > MAX_TRANSCRIBE {
                 return Err(invalid("This recording is too long to transcribe."));
             }
-            let _slot = self.transcribe_turns.clone().acquire_owned().await.map_err(server)?;
             let text = match tokio::time::timeout(TRANSCRIBE_FOR, transcriber.transcribe(audio, media.mime.clone())).await {
                 Ok(Ok(text)) => text.trim().to_owned(),
                 Ok(Err(e)) => {
@@ -919,11 +923,6 @@ impl Messages {
         }
         .await;
         drop(_turn);
-        // the gate goes once nobody waits on it
-        let mut gates = self.transcribing.lock().unwrap();
-        if gates.get(&key).is_some_and(|g| Arc::strong_count(g) == 2) {
-            gates.remove(&key);
-        }
         drop(gate);
         done
     }
@@ -970,6 +969,23 @@ enum Login<'a> {
     Token(&'a str),
 }
 
+/// Removes a voice message's transcription gate when the last ask holding it ends.
+struct GateGuard<'a> {
+    gates: &'a StdMutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    key: String,
+    gate: Arc<tokio::sync::Mutex<()>>,
+}
+
+impl Drop for GateGuard<'_> {
+    fn drop(&mut self) {
+        let mut gates = self.gates.lock().unwrap();
+        // the map's, this guard's and the caller's own: nobody else holds it
+        if gates.get(&self.key).is_some_and(|g| Arc::ptr_eq(g, &self.gate) && Arc::strong_count(g) <= 3) {
+            gates.remove(&self.key);
+        }
+    }
+}
+
 /// An attachment's bytes, within `MEDIA_FOR`, refused past `MAX_MEDIA` (before the download when its event gives a size).
 async fn download(client: &Client, source: matrix_sdk::ruma::events::room::MediaSource, size: Option<u64>) -> Result<Vec<u8>> {
     let too_big = || invalid("This attachment is too large to open here.");
@@ -991,11 +1007,18 @@ async fn download(client: &Client, source: matrix_sdk::ruma::events::room::Media
 /// Ask the homeserver for the messages replies answer that the timeline doesn't hold yet, each once per open room and
 /// at most `REPLY_FETCHES`; each arrives as a timeline change, so the reply shows its quote.
 fn fetch_replies(timeline: &Arc<Timeline>, rows: &[MessageRow], asked: &mut std::collections::HashSet<String>) {
-    for r in rows {
+    let mut now = 0;
+    // newest first: what's on screen when a room opens
+    for r in rows.iter().rev() {
         let (Some(reply), Some(id)) = (&r.reply, &r.event_id) else { continue };
-        if reply.text.is_some() || asked.len() >= REPLY_FETCHES || !asked.insert(id.clone()) {
+        if reply.text.is_some() || reply.unavailable || asked.contains(id) {
             continue;
         }
+        if now == REPLY_FETCHES {
+            break;
+        }
+        now += 1;
+        asked.insert(id.clone());
         let Ok(id) = EventId::parse(id) else { continue };
         let t = timeline.clone();
         tokio::spawn(async move {

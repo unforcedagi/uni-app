@@ -12,7 +12,8 @@ ROOT=$(cd "$D/../.." && pwd)
 W=${T313_WALK_DIR:-${TMPDIR:-/tmp}/t313-walk}
 STUDIO=~/studio/.venv/bin/python
 WHISPER=~/.local/share/uni/transcribe-gpu/venv/bin/python
-VT=~/Code/uni-ops/research/t299-video-taste/tools/vt.py
+# the video toolkit (voice, mix, encode, qa): set T313_VT where it lives
+VT=${T313_VT:-~/Code/uni-ops/research/t299-video-taste/tools/vt.py}
 free() { python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])'; }
 
 case "${1:-}" in

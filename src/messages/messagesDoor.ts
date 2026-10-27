@@ -66,7 +66,7 @@ export function mediaUrl(roomId: string, eventId: string, mime: string): Promise
       shown.delete(k); total -= v.size; URL.revokeObjectURL(v.url);
     }
     return url;
-  }).finally(() => fetching.delete(key));
+  }).finally(() => { if (fetching.get(key) === p) fetching.delete(key); });
   fetching.set(key, p);
   return p;
 }
@@ -89,7 +89,9 @@ export function wordsFor(roomId: string, eventId: string): Promise<Transcript> {
   const going = transcribing.get(key);
   if (going) return going;
   const at = mediaEpoch;
-  const p = transcript(roomId, eventId).then((t) => { if (at === mediaEpoch) words.set(key, t); return t; }).finally(() => transcribing.delete(key));
+  // an ask from before a sign-out mustn't remove the next account's ask for the same message
+  const p: Promise<Transcript> = transcript(roomId, eventId).then((t) => { if (at === mediaEpoch) words.set(key, t); return t; })
+    .finally(() => { if (transcribing.get(key) === p) transcribing.delete(key); });
   transcribing.set(key, p);
   return p;
 }
