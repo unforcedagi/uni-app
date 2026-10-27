@@ -40,7 +40,7 @@ test('walk', async ({ page }) => {
   await hold(9000);
   await page.evaluate(() => {
     const f = (window as any).__world.feeds.find((x: any) => x.id === 'feed-events');
-    f.content += `- ${new Date().toISOString()} · step · Writing the report\n- ${new Date().toISOString()} · said · The walkthrough is recorded. Writing the report now.\n`;
+    f.content += `- ${new Date().toISOString()} · step · Writing REPORT.md\n- ${new Date().toISOString()} · said · The walkthrough is recorded. Writing the report now.\n`;
   });
   await expect(view(page).locator('.sv-steps li').last()).toContainText('Writing the report now', { timeout: 15_000 });
   await mark('arrives');
