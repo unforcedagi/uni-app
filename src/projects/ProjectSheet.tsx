@@ -3,11 +3,14 @@
 // its sessions (live ones first: what each is doing now, its steps, and why it started when there is more than one; then its history,
 // with what each left). What you can still ask (Stop, Fresh start, Add a session, Archive, Bring back) sits behind one small "…" menu;
 // each is a message in the area's room, shown word for word before it is posted, and the room's Uni does it. Nothing here names an id.
+// T-304: every session opens in place (SessionView): a live view of a working one, the report and why it ended of one that has ended, and
+// the exact ask of one that needs you, with a way to answer it in the room.
 import { useEffect, useId, useRef, useState } from "react";
 import { openDialog } from "../areas/focusTrap";
 import { actionLabel, actionMessage, postAction, type Action } from "./actions";
 import { ago, archivePlan, areaOf, cannotStart, isLive, sessionsOf, span, stateWords, timeline, timelineWindow, whyWords, type Session } from "./model";
 import { asOf, noteAsked, useWork, type Asked } from "./store";
+import { SessionView } from "./SessionView";
 import "./projects.css";
 
 const DAY = 86_400_000;
@@ -71,13 +74,13 @@ function ActionsMenu({ picks, onPick }: { picks: readonly Pick[]; onPick: (p: Pi
 
 const askedWords = (a: Asked, now: number) => `Asked the room to ${a.kind === "fresh" ? "start it fresh" : a.kind === "stop" ? "stop it" : a.kind === "archive" ? "archive it" : a.kind === "restore" ? "bring it back" : "add a session"} · ${ago(now - a.at)}`;
 
-function SessionCard({ s, all, now, asked }: { s: Session; all: readonly Session[]; now: number; asked: Asked | null }) {
+function SessionCard({ s, all, now, asked, onOpen }: { s: Session; all: readonly Session[]; now: number; asked: Asked | null; onOpen: () => void }) {
   const live = isLive(s);
   // "alongside" says why there are several while they work; in the history it is noise (a fresh start or a pick-up stays)
   const why = live || s.why?.kind !== "alongside" ? whyWords(s, all) : null;
   return <li className={`pj-session ${s.state}`} data-session={s.id} data-state={s.state}>
     <p className="pj-state"><i aria-hidden="true" />{stateWords(s, now)}</p>
-    <h3 className="pj-ask">{s.ask}</h3>
+    <h3 className="pj-ask"><button type="button" className="pj-open" onClick={onOpen}><span>{s.ask}</span><i className="ps-chev" aria-hidden="true" /></button></h3>
     {why && <p className="pj-why">{why}</p>}
     {live && <p className="pj-now"><Ticks s={s} /><span>{s.now ?? "Working; it hasn't said on what yet."}</span>{s.nowAt && <small>{ago(now - s.nowAt)}</small>}</p>}
     {s.result && <p className="pj-result">{s.result}</p>}
@@ -102,14 +105,18 @@ function Timeline({ sessions, talk, now }: { sessions: readonly Session[]; talk:
   </figure>;
 }
 
-export function ProjectSheet({ project, talk, room, roomName, onClose }: { project: string; talk: readonly number[]; room: Room | null;
-  /** A room's name by its id (the area's own room may not be the one under the sheet). */ roomName: (id: string) => string | null; onClose: () => void }) {
+export function ProjectSheet({ project, talk, room, roomName, onClose, onAnswer }: { project: string; talk: readonly number[]; room: Room | null;
+  /** A room's name by its id (the area's own room may not be the one under the sheet). */ roomName: (id: string) => string | null; onClose: () => void;
+  /** T-304: puts words in a room's composer (and closes the sheet), to answer a session that needs you. */ onAnswer?: (room: string, text: string) => void }) {
   const ws = useWork();
   const { work, asked, ready } = ws;
   const now = useNow();
   const p = work.projects.find((x) => x.id === project);
   const [pick, setPick] = useState<Pick | null>(null);
   const [ask, setAsk] = useState("");
+  /** T-304: the session opened in place of the list (null: the list). */
+  const [opened, setOpened] = useState<string | null>(null);
+  const backTo = useRef<string | null>(null);
   const box = useRef<HTMLDivElement>(null);
   const wrap = useRef<HTMLDivElement>(null);
   const closeRef = useRef(onClose); closeRef.current = onClose;
@@ -118,6 +125,12 @@ export function ProjectSheet({ project, talk, room, roomName, onClose }: { proje
   useEffect(() => (shown && box.current && wrap.current ? openDialog(box.current, () => closeRef.current(), { root: wrap.current, initial: box.current }) : undefined), [shown]);
   // a project that is gone after a read (merged, its folder taken away) closes its sheet rather than leaving an empty one
   useEffect(() => { if (!shown && ready) closeRef.current(); }, [shown, ready]);
+  // back from a session: the list, scrolled to where it was, with that session's line focused
+  useEffect(() => {
+    if (opened || !backTo.current) return;
+    box.current?.querySelector<HTMLButtonElement>(`[data-session="${CSS.escape(backTo.current)}"] button`)?.focus();
+    backTo.current = null;
+  }, [opened]);
   if (!p) return null;
   const at = asOf(ws, now);
   const area = areaOf(work, p);
@@ -142,6 +155,8 @@ export function ProjectSheet({ project, talk, room, roomName, onClose }: { proje
       : [{ key: "archive", label: liveOnes.length ? "Archive (stops its sessions first)" : "Archive", act: "archive" as const, action: { kind: "archive" as const, project: p, live: archivePlan(work, p.id).stopFirst } }]),
   ];
   const done = () => { setPick(null); setAsk(""); };
+  const open = (id: string) => { backTo.current = id; setOpened(id); if (box.current) box.current.scrollTop = 0; };
+  const openedSession = opened ? sessions.find((s) => s.id === opened) ?? null : null;
   const posted = (pk: Pick) => {
     if (pk.act === "stop" || pk.act === "fresh") noteAsked((pk.action as { session: Session }).session.id, pk.act);
     else if (pk.act === "add") noteAsked(`add:${p.id}`, "add");
@@ -169,6 +184,9 @@ export function ProjectSheet({ project, talk, room, roomName, onClose }: { proje
               <div className="pj-row"><span className="pj-gap" /><button type="button" className="task-do quiet" onClick={done}>Cancel</button></div></>}
         </form>
         : pick.action && <Confirm action={pick.action} room={to} onPosted={() => posted(pick)} onCancel={done} />)}
+      {openedSession ? <SessionView s={openedSession} all={sessions} project={p} now={now} roomName={to?.name ?? null}
+        asked={asked.get(openedSession.id) ? askedWords(asked.get(openedSession.id)!, now) : null}
+        onAnswer={to && onAnswer ? (text) => onAnswer(to.id, text) : null} onBack={() => setOpened(null)} /> : <>
       <p className="pj-folder"><span>Folder</span><code>{p.folder}</code></p>
       <Timeline sessions={sessions} talk={talk} now={now} />
       <section className="pj-sessions" aria-label="Sessions">
@@ -179,10 +197,10 @@ export function ProjectSheet({ project, talk, room, roomName, onClose }: { proje
         {addAsked && <p className="pj-asked" role="status">{askedWords(addAsked, now)}</p>}
         {projectAsked && <p className="pj-asked" role="status">{askedWords(projectAsked, now)}</p>}
         {sessions.length === 0 && <p className="cp-none">No sessions yet.</p>}
-        <ul className="pj-list">{[...liveOnes, ...recent].map((s) => <SessionCard key={s.id} s={s} all={sessions} now={now} asked={asked.get(s.id) ?? null} />)}</ul>
-        {earlier.length > 0 && <details className="pj-earlier"><summary>Earlier · {earlier.length}</summary>
-          <ul>{earlier.map((s) => <li key={s.id} data-session={s.id}><span>{s.ask}</span><small>{stateWords(s, now)}</small></li>)}</ul></details>}
-      </section>
+        <ul className="pj-list">{[...liveOnes, ...recent].map((s) => <SessionCard key={s.id} s={s} all={sessions} now={now} asked={asked.get(s.id) ?? null} onOpen={() => open(s.id)} />)}</ul>
+        {earlier.length > 0 && <details className="pj-earlier" open={earlier.some((s) => s.id === backTo.current) || undefined}><summary>Earlier · {earlier.length}</summary>
+          <ul>{earlier.map((s) => <li key={s.id} data-session={s.id}><button type="button" onClick={() => open(s.id)}><span>{s.ask}</span><small>{stateWords(s, now)}</small></button></li>)}</ul></details>}
+      </section></>}
     </div>
   </div>;
 }

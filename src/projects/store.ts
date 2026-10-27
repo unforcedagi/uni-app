@@ -7,6 +7,7 @@
 //   drops the copy, what is in memory, the pending asks and any read still out (a late answer can't put it back).
 // - A read that stops short (a list longer than the pages read) says so ("Some older sessions aren't loaded"), and run notes are read in
 //   date windows, newest first, so the recent and working ones are whole even in a large vault.
+// - T-304: a session's steps (feed.ts) follow the same owner: adopt() hands it on, so Forget and a change of owner drop them too.
 // - Sessions keep their heartbeat; what counts as working is worked out again from the clock every minute, so a copy kept while offline
 //   ages as the vault would. A failed read keeps what was shown, says when it is from, and the working counts say "at <time>".
 import { invoke } from "@tauri-apps/api/core";
@@ -16,6 +17,7 @@ import type { RawNote } from "../areas/taskCore";
 import { allPages } from "../areas/vaultTasks";
 import { freshen, workFrom, type LiveWork, type Sources } from "./live";
 import type { Action } from "./actions";
+import { setFeedOwner } from "./feed";
 
 export type Asked = { kind: Action["kind"]; at: number; state: string | null };
 export type WorkState = {
@@ -177,6 +179,8 @@ export function refreshWork(): Promise<void> {
 function adopt(owner: string | null, notify = true) {
   generation++;
   loadedFor = owner; tasks = null; inflight = null;
+  // T-304: a session's steps are the same owner's, and go with the work
+  setFeedOwner(owner, owner ? activeProfile().vault : "");
   for (const t of later) clearTimeout(t);
   later.clear();
   const saved = owner ? readCache(owner) : null;

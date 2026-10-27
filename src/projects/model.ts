@@ -56,7 +56,21 @@ export type Session = {
   /** Why it started, when its run note says (round 2): a fresh start of an earlier session, a pick-up where one stopped, or one more beside
    *  others that were working. `of` is the earlier session's id (never shown: its one line is). */
   why: SessionWhy | null;
+  /** T-304: what its run note says of its end (mts writes it when the run ends); null while it runs, or on a note that says nothing. */
+  end: SessionEnd | null;
+  /** T-304: the note holding its steps (mts keeps it while the session works); null when there is none. */
+  feed: string | null;
 };
+
+/** Why a session ended, in mts's one word: `done` (with something to show for it), `unverified` (says it finished; nothing it left could
+ *  be checked), `blocked` (stopped to ask you), `stopped` (on purpose), `killed` (cut off), `limit` (the account's session limit), `turns`
+ *  (every turn it was given), `context` (its conversation grew too long), `failed`, `lost` (its worker was gone), `never_started`. */
+export type EndWhy = "done" | "unverified" | "blocked" | "stopped" | "killed" | "limit" | "turns" | "context" | "failed" | "lost" | "never_started";
+export const END_WHYS: readonly EndWhy[] = ["done", "unverified", "blocked", "stopped", "killed", "limit", "turns", "context", "failed", "lost", "never_started"];
+
+/** A session's end as its run note keeps it: why, a short note on what went wrong, when it picks up again, and its report's four parts
+ *  (what it did, what it left, how it checked, what it needs). */
+export type SessionEnd = { why: EndWhy | null; note: string | null; resumesAt: number | null; did: string | null; left: string | null; checks: string | null; needs: string | null };
 
 export type SessionWhy = { kind: "fresh" | "resume"; of: string | null } | { kind: "alongside"; others: number };
 
@@ -141,7 +155,7 @@ export function startSession(w: Work, project: string, ask: string, at: number, 
   if (no) throw new ModelError(no);
   if (!ask.trim()) throw new ModelError("a session needs something to do");
   if (w.sessions.some((s) => s.id === id)) throw new ModelError(`a session ${id} already exists`);
-  const s: Session = { id, project, state: "running", ask: ask.trim(), now: null, nowAt: null, startedAt: at, endedAt: null, steps: 0, result: null, video: null, why: null };
+  const s: Session = { id, project, state: "running", ask: ask.trim(), now: null, nowAt: null, startedAt: at, endedAt: null, steps: 0, result: null, video: null, why: null, end: null, feed: null };
   return { ...w, sessions: [...w.sessions, s] };
 }
 

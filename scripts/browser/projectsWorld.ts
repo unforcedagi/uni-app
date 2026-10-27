@@ -2,6 +2,7 @@
 // in every state, a few tasks, each room's recent talk and a Claude accounts note. Everything here is invented (this repo is public);
 // nothing is read from a vault, a relay or a run ledger. The unit tests and the browser fixture both read it through the app's own
 // `workFrom`, so what they check is what the live app does with the same shapes.
+// T-304: run notes carry their end (`ended`, `report`, `resumes_at`) and `feed`, the note of steps mts keeps beside them (`feeds`).
 
 const MIN = 60_000;
 const ROOT = "node-uni";
@@ -72,11 +73,18 @@ export function demoVault(now: number) {
   ];
   const runs: Note[] = [];
   const run = (id: string, title: string, md: Record<string, unknown>) => runs.push(note(id, `Runs/2026-10-20 ${title}`, ["run"], { worker: `mts-${id.slice(-8).padStart(8, "x")}`, ...md }));
-  run("run-events", "T-901", { node: "p-coop", task: "T-901", state: "running", started_at: iso(49), doing_now: "Recording the walkthrough on phone and desktop", doing_at: iso(2), steps: 31, room: "workshop", channel: "demo-workshop" });
+  run("run-events", "T-901", { node: "p-coop", task: "T-901", state: "running", started_at: iso(49), doing_now: "Recording the walkthrough on phone and desktop", doing_at: iso(2), steps: 31, room: "workshop", channel: "demo-workshop", feed: "feed-events" });
   run("run-donate", "Donate page with a sliding amount", { node: "p-coop", fresh_from: "dnteold1", state: "running", started_at: iso(20), doing_now: "Editing Donate.tsx", doing_at: iso(1), steps: 9, room: "workshop", channel: "demo-workshop" });
-  run("run-about", "Rebuild the about page from the coordinator's letter", { node: "p-coop", state: "done", started_at: iso(3 * 24 * 60), ended_at: iso(3 * 24 * 60 - 70), summary: "mts aaaabbbb: completed, evidence: file /home/someone/work/riverbend-site/ABOUT.md", video: "https://example.com/walkthrough/about-page" });
+  run("run-about", "Rebuild the about page from the coordinator's letter", { node: "p-coop", state: "done", started_at: iso(3 * 24 * 60), ended_at: iso(3 * 24 * 60 - 70), summary: "mts aaaabbbb: completed, evidence: file /home/someone/work/riverbend-site/ABOUT.md", video: "https://example.com/walkthrough/about-page",
+    ended: "done", feed: "feed-about", report: { summary: "Rebuilt the about page from the coordinator's letter, in her words. Three short sections: who we are, where we meet, how to join.",
+      artifacts: "- `ABOUT.md` in ~/work/riverbend-site\n- https://example.com/riverbend/about (the preview)\n- commit 1a2b3c4", checks: "Read it on a phone and a desktop; the links all open.", open: "none" } });
   run("run-donate-old", "Try a donate button (resume ccccdddd)", { node: "p-coop", attempt: "dnteold1", state: "failed", started_at: iso(26 * 60), ended_at: iso(26 * 60 - 15), summary: "mts ccccdddd: stopped" });
-  run("run-catalogue", "Estimate a catalogue from the spreadsheet", { node: "p-seeds", state: "blocked", started_at: iso(21 * 60), ended_at: iso(19 * 60), summary: "mts eeeeffff: blocked" });
+  run("run-catalogue", "Estimate a catalogue from the spreadsheet", { node: "p-seeds", state: "blocked", started_at: iso(21 * 60), ended_at: iso(19 * 60), summary: "mts eeeeffff: blocked",
+    ended: "blocked", report: { summary: "Read the spreadsheet: 412 rows. Three columns disagree on what counts as one variety.", artifacts: "none",
+      checks: "Counted the rows twice with API_KEY=made-up-key-123 in the import.", open: "Should a variety with two names be one entry or two? I need that before I can count them." } });
+  // ran out of room on the account's session limit; it picks up again by itself in 40 minutes
+  run("run-labels", "Print labels for the spring packets", { node: "p-seeds", state: "failed", started_at: iso(5 * 60), ended_at: iso(4 * 60), summary: "mts mmmmnnnn: failed",
+    ended: "limit", resumes_at: iso(-40), report: { summary: "Laid out 40 of the 96 labels." } });
   // filed on the area, but run in the mail move's folder: it belongs to the mail move
   run("run-mail", "T-903", { node: "area-engine", state: "running", started_at: iso(3 * 60 - 3), doing_now: "Checking yesterday's mail arrived in full on the new box", doing_at: iso(9), steps: 64, folder: "~/ops/mail-move" });
   // filed on a task whose node is the project (no node of its own on the run)
@@ -92,5 +100,22 @@ export function demoVault(now: number) {
       next: { account: "b", how: "auto", why: "most week left per hour" } },
     account_preference: "auto",
   }, iso(6));
-  return { nodes, runs, tasks, usage };
+  // T-304: the steps mts keeps beside a run note, as the note holds them (one line each: time · step|said · words)
+  const feedOf = (id: string, run: string, lines: [number, "step" | "said", string][]) => note(id, `Runs/Steps/2026-10-20 ${run}`, ["run-feed"], { run_note: run },
+    iso(lines[lines.length - 1]?.[0] ?? 0));
+  const feedContent = (lines: [number, "step" | "said", string][]) => "# Steps\n\nWhat the session did, newest last. Written by mts while it runs.\n\n" +
+    lines.map(([ago, kind, text]) => `- ${iso(ago)} · ${kind} · ${text}`).join("\n") + "\n";
+  const EVENTS: [number, "step" | "said", string][] = [
+    [46, "said", "I'll start from the events page as it stands, then make the cards read like notices pinned to a board."],
+    [45, "step", "Reading EventsPage.tsx"], [43, "step", "Searching the code"], [40, "step", "Editing EventCard.tsx"],
+    [36, "said", "The cards now keep the co-op's own words. Next: a column layout that wraps like a noticeboard on a phone."],
+    [33, "step", "Editing events.css"], [30, "step", "Run the tests"], [27, "step", "Run the build"],
+    [22, "said", "Tests and the build pass. One card had a very long title; it now wraps instead of running off the edge."],
+    [18, "step", "Editing EventCard.tsx"], [12, "step", "Run the tests"],
+    [6, "said", "Recording the walkthrough on a phone and a desktop now. The token=abc123 in the old config is gone."],
+    [2, "step", "Recording the walkthrough on phone and desktop"],
+  ];
+  const ABOUT: [number, "step" | "said", string][] = [[3 * 24 * 60 + 5, "said", "Reading the coordinator's letter first."], [3 * 24 * 60 - 60, "step", "Writing ABOUT.md"], [3 * 24 * 60 - 69, "said", "Done. The page is in her words."]];
+  const feeds = [{ ...feedOf("feed-events", "run-events", EVENTS), content: feedContent(EVENTS) }, { ...feedOf("feed-about", "run-about", ABOUT), content: feedContent(ABOUT) }];
+  return { nodes, runs, tasks, usage, feeds };
 }

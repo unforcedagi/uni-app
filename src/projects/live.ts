@@ -8,7 +8,7 @@
 //   repo `folder` names. What it is doing now is `doing_now` (mts writes it while it runs); words, never ids.
 import type { RawNote } from "../areas/taskCore.ts";
 import { isPrivateName } from "../areas/treeRooms.ts";
-import { isFolder, makeProject, ModelError, type Area, type Project, type ProjectStatus, type Session, type SessionState, type Work } from "./model.ts";
+import { END_WHYS, isFolder, makeProject, ModelError, type Area, type EndWhy, type Project, type ProjectStatus, type Session, type SessionEnd, type SessionState, type Work } from "./model.ts";
 
 /** A project the model can't take, named so it is never silently missing. `areaPath`: the area it sits under (even one with no room), so
  *  that area's strip can name it. */
@@ -69,6 +69,35 @@ export function resultWords(summary: unknown, state: SessionState): string | nul
   if (/^mts [a-z0-9]{8}: \w+$/.test(s)) return null;
   const words = plainTitle(s.replace(/\bmts [a-z0-9]{8}:?\s*/g, "").replace(/\brun=[a-z0-9]{8}\b/g, ""));
   return words && state !== "running" ? words : null;
+}
+
+/** T-304: why a run ended, from what its note says: mts's `ended` word (since T-304), else the launcher's closing line ("mts x: stopped",
+ *  "unverified: …") and the note's state, for notes written before. Null when it says nothing (or it is still running). */
+export function endWhy(ended: unknown, summary: unknown, state: SessionState): EndWhy | null {
+  const e = str(ended);
+  if (e && (END_WHYS as readonly string[]).includes(e)) return e as EndWhy;
+  if (state === "running") return null;
+  const s = str(summary) ?? "";
+  if (/^unverified:/.test(s)) return "unverified";
+  const word = /^mts [a-z0-9]{8}: (\w+)/.exec(s)?.[1];
+  if (word === "stopped" || word === "killed") return word;
+  if (word === "unknown") return "lost";
+  if (word === "failed_to_start") return "never_started";
+  if (state === "finished") return "done";
+  if (state === "waiting") return "blocked";
+  if (state === "failed") return word === "failed" || !word ? "failed" : null;
+  return null;
+}
+
+/** T-304: a run note's end: why (endWhy), the report mts copied onto it (its four parts, each plain text) and when it picks up again. */
+export function sessionEnd(m: Record<string, unknown>, state: SessionState): SessionEnd | null {
+  if (state === "running") return null;
+  const rep = m.report && typeof m.report === "object" && !Array.isArray(m.report) ? (m.report as Record<string, unknown>) : {};
+  // a part that says "none" says nothing
+  const part = (v: unknown) => { const t = str(v); return t && !/^\W*(none|n\/?a|nothing|-)?\W*$/i.test(t) ? t : null; };
+  const end: SessionEnd = { why: endWhy(m.ended, m.summary, state), note: str(m.end_note), resumesAt: time(m.resumes_at),
+    did: part(rep.summary), left: part(rep.artifacts), checks: part(rep.checks), needs: part(rep.open) };
+  return Object.values(end).some((v) => v !== null) ? end : null;
 }
 
 /** A running note's worker counts as working while it was heard from this recently (mts writes `doing_at` at least once a minute while
@@ -203,6 +232,8 @@ export function workFrom(src: Sources, now = Date.now()): LiveWork {
       result: live ? null : resultWords(m.summary, state),
       video: str(m.video) && /^https:\/\//.test(str(m.video)!) ? str(m.video) : null,
       why: null,
+      end: sessionEnd(m, state),
+      feed: str(m.feed),
     });
     const att = attemptOf(m);
     if (att) byAttempt.set(att, id);

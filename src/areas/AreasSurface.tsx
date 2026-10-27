@@ -410,7 +410,8 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
       const v = roomView(data!.tree, a.path, roomRefs, uniRef);
       const raw = privateRoot(data!.tree, a.path) ? null : tasks.tree?.stands.get(a.path)?.text ?? (typeof a.metadata.stands === "string" ? a.metadata.stands : null);
       const st = raw ? plainWords(raw) : null;
-      return { path: a.path, name: a.name, slug: v.own && v.slash ? v.slash.replace(/^#/, "") : null, stands: st, lastTs: v.own ? rooms.find((r) => r.id === v.target?.id)?.last_ts ?? null : null };
+      return { path: a.path, name: a.name, slug: v.own && v.slash ? v.slash.replace(/^#/, "") : null, stands: st, lastTs: v.own ? rooms.find((r) => r.id === v.target?.id)?.last_ts ?? null : null,
+        room: v.own ? v.target?.id ?? null : null };
     });
     // T-302 round 2: what needs you, across the areas, as one quiet line above the rooms (a private area's items stay a count, its words inside)
     const privAt = (p: string) => privateRoot(data!.tree, p) ?? (tasks.tree ? privateRootIn(tasks.tree, p) : null);
@@ -419,7 +420,7 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
       rows: allNeeds.rows.map((t) => ({ id: t.id, title: taskTitle(t.title).rest || t.title, where: data!.tree.nodes.get(t.node)?.name ?? null, path: t.node })),
       privates: allNeeds.privates.map((g) => ({ place: g.place, count: g.count, path: g.open.path })),
     };
-    return <div className="areas-home tree-home-wrap">{status}<ApprovalRows approvals={approvalsAll.list} className="cp-list cp-approvals th-approvals" /><FrontDoor doors={doors} needs={needs} onOpen={openDoor} />
+    return <div className="areas-home tree-home-wrap">{status}<ApprovalRows approvals={approvalsAll.list} className="cp-list cp-approvals th-approvals" /><FrontDoor doors={doors} needs={needs} onOpen={openDoor} me={identity} />
       {railHidden && places.length > 0 && <div className="th-places-short">{placesRow}</div>}</div>;
   }
   if (treeHome && path === null && !rootOpen) {
@@ -537,7 +538,8 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   // T-301/T-302: the area's projects: a strip under the header (an area's room only), and the one opened, in place over the room
   const strip = !isRoot ? <ProjectStrip areaPath={node.path} onOpen={(id) => { closeSheet(); stripSheet?.close(); setProjectOpen(id); }} /> : null;
   // the timeline's talk is the area's own room only (never a borrowed one's)
-  const projectSheet = projectOpen ? <ProjectSheet key={projectOpen} project={projectOpen} room={target ? { id: target.id, name: target.name } : null} roomName={(id) => roomRefs.find((r) => r.id === id)?.name ?? null} talk={nodeView.own ? (roomFor(target?.id)?.messages ?? []).map((m) => m.ts * 1000) : []} onClose={closeProject} /> : null;
+  const projectSheet = projectOpen ? <ProjectSheet key={projectOpen} project={projectOpen} room={target ? { id: target.id, name: target.name } : null} roomName={(id) => roomRefs.find((r) => r.id === id)?.name ?? null} talk={nodeView.own ? (roomFor(target?.id)?.messages ?? []).map((m) => m.ts * 1000) : []} onClose={closeProject}
+    onAnswer={(roomId, text) => { closeProject(); sayIn(roomId, text); }} /> : null;
   const roomLevel = (app: AppView | null, openApp: ((e: React.MouseEvent) => void) | null) => shell({ title: node.name, door, context: app || workOpen ? undefined : context, node: node.name, crumbs, strip,
     companion: chat ? companionProps : null, chatRoom: thread ? roomFor(thread.channel, thread.root) : roomFor(target?.id), placeholder, selected: node.path, sheet: <>{sheetView}{projectSheet}</>, retryChat: target?.id ? () => actions.openRoom(target.id) : actions.retryRooms ?? null,
     main: app ? app.main : workOpen ? workMain : undefined, workBar: app ? app.bar : workBar, openApp, appOpen: !!app });

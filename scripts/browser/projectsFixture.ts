@@ -8,7 +8,7 @@ import type { Page } from '@playwright/test';
 import { demoTalk, demoVault, DEMO_AREAS, slugOf } from './projectsWorld.ts';
 import { workFrom } from '../../src/projects/live.ts';
 
-export type LiveRead = { nodes: any[]; runs: any[]; tasks: any[]; usage: any | null; rooms: { id: string; name: string }[] };
+export type LiveRead = { nodes: any[]; runs: any[]; tasks: any[]; usage: any | null; rooms: { id: string; name: string }[]; feeds?: any[] };
 /** `bigRuns`: this many more finished runs, a month old, listed before every other run (a ledger longer than the pages the app reads). */
 export type Boot = { live?: LiveRead; bigRuns?: number;
   /** this many more tasks, listed before every other task (a task list longer than the pages the app reads) */ bigTasks?: number };
@@ -49,6 +49,9 @@ export async function bootProjects(page: Page, opts: Boot = {}) {
     const live = (channel: string, author: string) => { for (const h of listeners['uni://live'] ?? []) cbs[h]?.({ event: 'uni://live', id: 1, payload: { kind: 'message', channel, status: null, author } }); };
     let n = 0;
     const say = (channel: string, mine: boolean, body: string) => { const m = toMsg({ ref: `live-${++n}`, channel, mine, ts: Math.floor(Date.now() / 1000), body }); (msgs[channel] ??= []).push(m); live(channel, m.author); return m; };
+    // T-304: you ask in a room and its Uni takes it (👀 on your message): a turn under way, until __reply
+    w.__turn = (channel: string, body: string) => { const m = say(channel, true, body); m.reactions = [{ emoji: '👀', count: 1, mine: null, by: [{ pubkey: UNI, ts: m.ts + 1 }] }]; return m.ref; };
+    w.__reply = (channel: string, body: string) => say(channel, false, body).ref;
     const iso = () => new Date().toISOString();
     /** The room's Uni, doing what the message asks (as it would with mts and the vault). */
     const act = (channel: string, body: string) => {
@@ -111,6 +114,9 @@ export async function bootProjects(page: Page, opts: Boot = {}) {
           case 'vault_subtree_tasks': return [];
           case 'vault_note': {
             if (args.noteRef === 'System/Claude accounts') { if (!notes.usage) throw 'note not found'; return { hub: 'https://example.invalid', vault: 'uni', note: JSON.parse(JSON.stringify(notes.usage)) }; }
+            // T-304: a session's steps note (window.__feedReads counts the reads; 't.feedfail' fails them)
+            const f = (notes.feeds ?? []).find((y: any) => y.id === args.noteRef);
+            if (f) { w.__feedReads = (w.__feedReads ?? 0) + 1; if (sessionStorage.getItem('t.feedfail') === '1') throw 'offline'; return { hub: 'https://example.invalid', vault: args.vault, note: JSON.parse(JSON.stringify({ ...f, extension: 'md' })) }; }
             const x = [...notes.nodes, ...notes.tasks].find((y: any) => y.id === args.noteRef || y.path === args.noteRef);
             if (!x) throw 'note not found: ' + args.noteRef;
             return { hub: 'https://example.invalid', vault: 'uni', note: { ...x, extension: 'md', content: `# ${x.path.split('/').pop()}\n` } };

@@ -110,7 +110,8 @@ async function ask(s: ReturnType<typeof sheet>, item: RegExp | string) {
 test('the sheet is for watching: no action buttons on it, each session says why it started, and one quiet menu holds what can be asked', async ({ page }) => {
   await openRoom(page);
   const s = await openProject(page, /Riverbend co-op site/);
-  await expect(s.locator('.pj-session button, .pj-row .task-do')).toHaveCount(0);
+  // T-304: a session's line opens it (watching, not an action)
+  await expect(s.locator('.pj-session button:not(.pj-open), .pj-row .task-do')).toHaveCount(0);
   const donate = s.locator('.pj-session').filter({ hasText: 'Donate page with a sliding amount' });
   await expect(donate.locator('.pj-why')).toHaveText('A fresh start of “Try a donate button”, with a handoff');
   await expect(s.locator('.pj-session').filter({ hasText: 'Make the events page' }).locator('.pj-why')).toHaveCount(0);

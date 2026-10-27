@@ -5,6 +5,8 @@ import assert from "node:assert/strict";
 import { ModelError, ago, whyWords, archivePlan, archiveProject, cannotStart, isLive, liveInArea, liveSessions, makeProject, problems, restoreProject, sessionsOf, span, startSession, stateWords, stepSession, stopSession, finishSession, timeline, timelineWindow, type Area, type Work } from "../src/projects/model.ts";
 import { HEARD_MS, freshen, plainTitle, plainWords, resultWords, sessionState, workFrom } from "../src/projects/live.ts";
 import { actionMessage } from "../src/projects/actions.ts";
+import { HIDDEN, answerDraft, askOf, endWords, leftItems, parseFeed, redact } from "../src/projects/sessionWords.ts";
+import { endWhy } from "../src/projects/live.ts";
 import { DEMO_AREAS, demoVault } from "./browser/projectsWorld.ts";
 let failed = 0;
 const check = (n: string, f: () => void) => { try { f(); console.log("ok  ", n); } catch (e) { failed++; console.log("FAIL", n, e); } };
@@ -245,5 +247,83 @@ check("the room is sent plain words: the project, the session's line and when it
   assert.equal(actionMessage({ kind: "archive", project: P("Seed library catalogue"), live: [] }, NOW), "Archive the project Seed library catalogue. Keep its folder and its history.");
   assert.equal(actionMessage({ kind: "restore", project: P("Old zine archive") }, NOW), "Bring back the project Old zine archive from the archive.");
   for (const s of live.sessions) assert.ok(!actionMessage({ kind: "stop", project: P("Mail move"), session: s }, NOW).includes(s.id));
+});
+// ------------------------------------------------------------------------------------------ a session, zoomed in (T-304)
+check("why it ended: mts's word when the note has it; the closing line and the state for notes written before", () => {
+  assert.equal(endWhy("limit", "mts abcd1234: failed", "failed"), "limit");
+  assert.equal(endWhy("nonsense", "mts abcd1234: stopped", "stopped"), "stopped", "an unknown word is not trusted");
+  assert.equal(endWhy(null, "mts abcd1234: killed", "failed"), "killed");
+  assert.equal(endWhy(null, "mts abcd1234: unknown", "failed"), "lost");
+  assert.equal(endWhy(null, "mts abcd1234: failed_to_start", "failed"), "never_started");
+  assert.equal(endWhy(null, "unverified: mts abcd1234 completed, no artifact", "waiting"), "unverified");
+  assert.equal(endWhy(null, "mts abcd1234: completed, evidence: commit abc1234", "finished"), "done");
+  assert.equal(endWhy(null, "mts abcd1234: blocked", "waiting"), "blocked");
+  assert.equal(endWhy(null, "mts abcd1234: failed", "failed"), "failed");
+  assert.equal(endWhy(null, null, "running"), null);
+});
+check("from the vault: the report mts copied onto the run note, in its four parts; a live session has no end", () => {
+  const c = S("run-catalogue").end!;
+  assert.equal(c.why, "blocked");
+  assert.match(c.needs!, /^Should a variety with two names be one entry or two\?/);
+  assert.match(c.did!, /^Read the spreadsheet/);
+  assert.equal(S("run-events").end, null); assert.equal(S("run-events").feed, "feed-events");
+  assert.equal(S("run-labels").end!.why, "limit"); assert.equal(S("run-labels").end!.resumesAt, NOW + 40 * MIN);
+  assert.equal(S("run-donate-old").end!.why, "stopped", "an older note: why, from its closing line");
+  assert.equal(S("run-restore").end!.did, null, "an older note has no report");
+  assert.equal(S("run-about").end!.needs, null, "a part that says none says nothing");
+});
+check("didn't finish says why, in a sentence: stopped on purpose, failed, ran out of room (and when it picks up again), lost", () => {
+  const head = (id: string) => endWords(S(id), NOW)!.head;
+  assert.equal(head("run-donate-old"), "Didn't finish: it was stopped on purpose.");
+  assert.equal(head("run-labels"), "Didn't finish: it ran out of room: the Claude account reached its session limit.");
+  assert.match(endWords(S("run-labels"), NOW)!.more!, /^It picks up again by itself at /);
+  assert.equal(head("run-catalogue"), "Stopped to ask you something.");
+  assert.equal(head("run-handbook"), "Says it finished, but nothing it left could be checked yet.");
+  assert.equal(head("run-about"), "Finished.");
+  const s = { ...S("run-donate-old"), end: { why: "failed" as const, note: "exit status 1; Bearer abcdefghijklmnopqrstu", resumesAt: null, did: null, left: null, checks: null, needs: null } };
+  assert.equal(endWords(s, NOW)!.more, `What went wrong: exit status 1; Bearer ${HIDDEN}`);
+  for (const why of ["turns", "context"] as const) assert.match(endWords({ ...s, end: { ...s.end, why } }, NOW)!.head, /ran out of room/);
+  assert.match(endWords({ ...s, end: { ...s.end, why: "lost" } }, NOW)!.head, /worker was lost/);
+  assert.match(endWords({ ...s, state: "silent", end: null }, NOW)!.head, /nothing has been heard from it/);
+  assert.equal(endWords(S("run-events"), NOW), null);
+});
+check("one that needs you: the exact ask, and the words that answer it in the room (which session, what it asked)", () => {
+  assert.equal(askOf(S("run-catalogue")), "Should a variety with two names be one entry or two? I need that before I can count them.");
+  assert.match(askOf(S("run-handbook")), /^It says it finished, but nothing it left could be checked/);
+  assert.equal(askOf({ ...S("run-catalogue"), end: null }), "It ended needing you, but its note doesn't say what.");
+  assert.equal(answerDraft(S("run-catalogue"), "Seed library catalogue"),
+    "About the session on “Estimate a catalogue from the spreadsheet” (Seed library catalogue), which asks: “Should a variety with two names be one entry or two? I need that before I can count them.” — ");
+  const long = { ...S("run-catalogue"), end: { ...S("run-catalogue").end!, needs: "word ".repeat(80) } };
+  assert.ok(answerDraft(long, "X").length < 260, "a long ask is cut short in the draft");
+});
+check("what it left: one item a line, a link only where the line holds an https link; bullets and backticks go; none is nothing", () => {
+  assert.deepEqual(leftItems(S("run-about").end!.left), [
+    { text: "ABOUT.md in ~/work/riverbend-site", url: null },
+    { text: "https://example.com/riverbend/about (the preview)", url: "https://example.com/riverbend/about" },
+    { text: "commit 1a2b3c4", url: null }]);
+  assert.deepEqual(leftItems("none"), []);
+  assert.deepEqual(leftItems("javascript:alert(1); http://example.com/x").map((i) => i.url), [null, null], "only https opens");
+  assert.deepEqual(leftItems("1. the PR https://example.com/pr/7."), [{ text: "the PR https://example.com/pr/7.", url: "https://example.com/pr/7" }]);
+});
+check("the steps note, read back: time, step or said, words; anything else in the note is left out; secrets are hidden", () => {
+  const items = parseFeed(vault.feeds.find((f) => f.id === "feed-events")!.content);
+  assert.equal(items.length, 13);
+  assert.deepEqual(items.slice(0, 2).map((i) => [i.kind, i.at]), [["said", NOW - 46 * MIN], ["step", NOW - 45 * MIN]]);
+  assert.equal(items[1].text, "Reading EventsPage.tsx");
+  assert.ok(items.every((i) => !i.text.includes("abc123")), "token=… is hidden");
+  assert.deepEqual(parseFeed("# Steps\n\n- not a line\n- - · step · No time\n- 2026-10-27T10:00:00Z · shout · no\n"), [{ at: null, kind: "step", text: "No time" }]);
+  assert.deepEqual(parseFeed(null), []);
+});
+check("anything that looks like a key is hidden; plain work words are left alone", () => {
+  for (const secret of ["sk-ant-api03-" + "a1B2".repeat(10), "ghp_" + "x".repeat(36), "xoxb-1234567890-abcdefghij", "AKIA" + "A".repeat(16), "nsec1" + "q".repeat(58),
+    "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.c2lnbmF0dXJlX2hlcmU", "ab".repeat(32)]) {
+    const out = redact(`use ${secret} now`);
+    assert.ok(!out.includes(secret) && out.includes(HIDDEN), secret.slice(0, 6));
+  }
+  assert.equal(redact("Authorization: Bearer abcdefghijklmnop1234"), `Authorization: Bearer ${HIDDEN}`);
+  assert.equal(redact('API_KEY=abc123 and "password": "hunter22"'), `API_KEY=${HIDDEN} and "password": ${HIDDEN}`);
+  assert.ok(!redact("-----BEGIN RSA PRIVATE KEY-----\nMIIEsecret\n-----END RSA PRIVATE KEY-----").includes("MIIE"));
+  for (const plain of ["Editing src/projects/store.ts", "commit 1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b in ~/work/site", "The token expired, so I signed in again.", "Run the tests"])
+    assert.equal(redact(plain), plain);
 });
 if (failed) process.exit(1);
