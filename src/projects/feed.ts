@@ -44,6 +44,7 @@ export function setFeedOwner(next: string | null, nextVault: string) {
   generation++;
   feeds = new Map();
   inflight.clear();
+  epochs.clear();                                   // the generation drops every read out; no note id of the last owner is kept
   // told just after: the store may set the owner during a render (a vault change), when nothing may be told at once
   queueMicrotask(emit);
 }
@@ -105,8 +106,9 @@ export function loadEarlier(id: string): Promise<void> {
       const lines = parseFeed(r?.note?.content ?? "", part.first);
       set((was) => {
         const held = was.held ? withPart(was.held, part, lines) : null;
-        const earlier = { ...was.earlier, loading: false, error: null };
-        return held ? { held, items: held.items, earlier } : { earlier };
+        // a part that can't go in front (it would hold more than a view may, or no longer reaches): not offered again
+        if (!held || held === was.held) return { earlier: { loading: false, error: "No earlier steps can be shown here.", gone: part.first + part.n } };
+        return { held, items: held.items, earlier: { ...was.earlier, loading: false, error: null } };
       });
     } catch {
       if (mine !== generation || ep !== epoch(id)) return;

@@ -6,9 +6,6 @@ import ClaudeUsage from "../usage/ClaudeUsage";
 import { usageLineText, usageView } from "../usage/usageCore";
 import { useUsageNote, useUsageRefresh } from "../usage/usageNote";
 
-/** The line for the note's metadata at `now` (usageLineText); null: no line. */
-export const usageLine = (metadata: unknown, now: Date): string | null => usageLineText(usageView(metadata, now), now);
-
 export function UsageLine() {
   // T-302 round 3: read again every few minutes while shown and on focus/visibility (useUsageNote); the clock keeps "as of" true.
   // T-319: and on asking (Refresh beside the line).
@@ -18,11 +15,12 @@ export function UsageLine() {
   const [open, setOpen] = useState(false);
   useEffect(() => { const t = window.setInterval(() => setNow(new Date()), 60_000); return () => window.clearInterval(t); }, []);
   useEffect(() => { setNow(new Date()); }, [note]);
-  const line = note ? usageLine(note.metadata, now) : null;
+  const view = note ? usageView(note.metadata, now) : null;
+  const line = usageLineText(view, now);
   if (!line) return null;
   return <>
     <div className="fd-usage-row">
-      <button type="button" className={`fd-usage ${usageView(note!.metadata, now)?.stale ? "stale" : ""}`} aria-haspopup="dialog" onClick={() => setOpen(true)}>{line}</button>
+      <button type="button" className={`fd-usage ${view?.stale || view?.someStale ? "stale" : ""}`} aria-haspopup="dialog" onClick={() => setOpen(true)}>{line}</button>
       <button type="button" className="fd-usage-refresh" aria-label="Refresh Claude usage" disabled={busy} onClick={refresh}>{busy ? "Checking…" : "Refresh"}</button>
     </div>
     {failed && <p className="fd-status" role="status">Couldn't read the usage note just now; showing the last one read.</p>}

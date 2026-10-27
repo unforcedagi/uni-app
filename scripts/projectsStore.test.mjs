@@ -161,5 +161,21 @@ try {
     assert.equal(feed.feedSnapshot("long").items.length, 2, "opened again: read again");
     four();
   });
+
+  await check("a part that can't go in front of the steps is not offered again (no load that changes nothing, over and over)", async () => {
+    store.setWorkOwner(null); store.setWorkOwner("A");
+    // a note listing a part that would make the view hold more than HELD_MAX lines
+    FEED.uni.huge = { content: line(0, "Line 5440."), metadata: { first: 5440, total: 5500, dropped: 0, parts: [{ id: "huge1", first: 0, n: 5440 }] } };
+    FEED.uni.huge1 = { content: line(0, "Line 0."), metadata: { first: 0, part: 1 } };
+    const release = feed.holdFeed("huge");
+    await feed.readFeed("huge");
+    assert.ok(feed.hasEarlier(feed.feedSnapshot("huge")));
+    await feed.loadEarlier("huge");
+    const f = feed.feedSnapshot("huge");
+    assert.equal(f.earlier.error, "No earlier steps can be shown here.");
+    assert.ok(!feed.hasEarlier(f), "not offered again");
+    assert.deepEqual(f.items.map((i) => i.text), ["Line 5440."]);
+    release();
+  });
 } finally { await server.close(); }
 if (failed) process.exit(1);

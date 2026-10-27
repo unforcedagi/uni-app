@@ -105,7 +105,7 @@ test.describe('fixture', () => {
     await boot(page, w);
     const card = await openSettings(page);
     await expect(card.locator('.usage-age')).toHaveText('Last reading 28 h ago');
-    await expect(card.getByRole('note')).toHaveText(/^No fresh reading: these numbers are from 28 h ago and may be out of date\./);
+    await expect(card.getByRole('note')).toHaveText(/^No fresh reading: the last one is from 28 h ago, and these numbers may be out of date\./);
     await expect(card.locator('.usage-row.old')).toHaveCount(2);
     await card.screenshot({ path: info.outputPath('usage-card-stale.png') });
     // the launcher writes a fresh reading; Refresh reads the note again
@@ -136,6 +136,20 @@ test.describe('fixture', () => {
     await expect(b).not.toHaveClass(/\bold\b/);
     await expect(b).not.toContainText('No fresh reading');
     await card.screenshot({ path: info.outputPath('usage-card-mixed.png') });
+  });
+
+  test('every reading old, some older than others: the card gives the newest, and each older one says its own age', async ({ page }) => {
+    await page.clock.setFixedTime(NOW);
+    const old = structuredClone(FIXTURE);
+    old.metadata.claude_accounts.read_at = '2026-10-26T16:00:00+00:00';
+    old.metadata.claude_accounts.accounts[0].read_at = '2026-10-24T18:00:00+00:00';   // 2 days
+    old.metadata.claude_accounts.accounts[1].read_at = '2026-10-26T16:00:00+00:00';   // 2 h
+    await boot(page, { note: old, conflictOnce: false, calls: [] });
+    const card = await openSettings(page);
+    await expect(card.locator('.usage-age')).toHaveText('Last reading 2 h ago');
+    await expect(card.getByRole('note')).toHaveText(/^No fresh reading: the last one is from 2 h ago,/);
+    await expect(card.getByLabel('Account A')).toContainText('No fresh reading for this account: these are from 2 days ago.');
+    await expect(card.getByLabel('Account B')).not.toContainText('No fresh reading for this account');
   });
 
   test('no usage note on this install: Settings has no card', async ({ page }) => {

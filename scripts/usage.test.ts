@@ -91,6 +91,14 @@ t("Codex zwmejvyc P2: one fresh account doesn't make another's 48-hour-old readi
   assert.equal(ageText(both.readAt, NOW), "40 min ago");
 });
 
+t("a signed-out account is neither fresh nor stale: it says so, and the others decide", () => {
+  const v = usageView(md((d) => { d.accounts[1].signed_in = false; d.accounts[1].read_at = "2026-10-21T18:00:00+00:00"; }), NOW, TZ)!;
+  assert.deepEqual(v.rows.map((r) => [r.name, r.stale, r.out]), [["a", false, false], ["b", false, true]]);
+  assert.equal(v.stale, false);
+  assert.equal(v.someStale, false);
+  assert.equal(usageLineText(v, NOW), "Claude: A 8% of the week · B signed out · new work to A · as of 15 min ago");
+});
+
 t("not a usage note, or bad account names: nothing, or only the good ones", () => {
   assert.equal(usageView({}, NOW, TZ), null);
   assert.equal(usageView({ claude_accounts: { accounts: [] } }, NOW, TZ), null);

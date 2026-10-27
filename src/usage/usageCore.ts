@@ -19,7 +19,8 @@ export type Meter = { pct: number | null; text: string; reset: string | null; fu
 /** A row's `stale`: its own reading is over STALE_MIN old, or it has none (Codex zwmejvyc P2: each account's reading is its own; one
  *  fresh account doesn't make another's old numbers current). */
 export type Row = { name: string; label: string; session: Meter; week: Meter & { pace: "on pace" | "ahead of pace" | null }; missing: boolean;
-  readAt: string | null; stale: boolean };
+  readAt: string | null; stale: boolean;
+  /** signed out: it is never read again, so its last numbers are neither current nor stale, only old (and not counted either way) */ out: boolean };
 /** `stale`: no account has a fresh reading. `readAt`: the oldest fresh reading (what "as of" means for every number shown); when none is
  *  fresh, the newest there is. */
 export type View = { rows: Row[]; choices: string[]; preference: string; next: { label: string; how: string } | null; readAt: string | null; stale: boolean;
@@ -100,8 +101,9 @@ export function usageView(metadata: unknown, now: Date, tz?: string): View | nul
     const sUsed = s ? (passed(s) ? 0 : s.used) : null;
     const wUsed = w ? (passed(w) ? 0 : w.used) : null;
     const age = a.read_at ? (now.getTime() - new Date(a.read_at).getTime()) / 60_000 : NaN;
+    const out = a.signed_in === false;
     return {
-      name: a.name, label: accountLabel(a.name), missing: !a.read_at, readAt: a.read_at ?? null, stale: !(age <= STALE_MIN),
+      name: a.name, label: accountLabel(a.name), missing: !a.read_at, readAt: a.read_at ?? null, stale: !out && !(age <= STALE_MIN), out,
       session: { pct: sUsed, text: pctText(sUsed), reset: sUsed ? resetText(s?.resets_at ?? null, now, tz) : null, full: sUsed !== null && sUsed >= stop },
       week: { pct: wUsed, text: pctText(wUsed), reset: w && !passed(w) ? resetText(w.resets_at, now, tz) : null, full: wUsed !== null && wUsed >= stop,
         pace: w && !passed(w) ? pace(wUsed, w.resets_at, now) : null },
@@ -109,13 +111,13 @@ export function usageView(metadata: unknown, now: Date, tz?: string): View | nul
   });
   const preference = preferenceOf(metadata, doc);
   const t = (iso: string | null) => (iso ? new Date(iso).getTime() : NaN);
-  const fresh = rows.filter((r) => !r.stale), dated = rows.filter((r) => Number.isFinite(t(r.readAt)));
+  const active = rows.filter((r) => !r.out), fresh = active.filter((r) => !r.stale), dated = active.filter((r) => Number.isFinite(t(r.readAt)));
   const readAt = fresh.length ? fresh.reduce((a, r) => (t(r.readAt) < t(a.readAt) ? r : a)).readAt
     : dated.length ? dated.reduce((a, r) => (t(r.readAt) > t(a.readAt) ? r : a)).readAt : null;
   // the note's next account was decided with the note's preference: shown only while that is still the one set
   const next = doc.next.account && doc.preference === preference ? { label: accountLabel(doc.next.account), how: doc.next.how } : null;
   return { rows, choices: ["auto", ...doc.accounts.filter((a) => a.signed_in !== false).map((a) => a.name)], preference, next, readAt,
-    stale: !fresh.length, someStale: !!fresh.length && fresh.length < rows.length };
+    stale: !fresh.length, someStale: !!fresh.length && fresh.length < active.length };
 }
 
 /** "12 min ago", "3 h ago": how old the reading is. */
@@ -131,7 +133,7 @@ export function ageText(iso: string | null, now: Date): string {
 export function usageLineText(v: View | null, now: Date): string | null {
   if (!v || !v.rows.length) return null;
   if (v.stale) return v.readAt ? `Claude: no fresh usage reading; the last one is from ${ageText(v.readAt, now)}` : "Claude: no usage reading yet";
-  const parts = v.rows.map((r) => `${r.name.toUpperCase()} ${r.missing ? "no reading" : r.stale ? `no fresh reading (${ageText(r.readAt, now).replace(/ ago$/, " old")})`
+  const parts = v.rows.map((r) => `${r.name.toUpperCase()} ${r.out ? "signed out" : r.missing ? "no reading" : r.stale ? `no fresh reading (${ageText(r.readAt, now).replace(/ ago$/, " old")})`
     : r.week.full || r.session.full ? "full" : `${r.week.text} of the week`}`);
   return `Claude: ${parts.join(" · ")}${v.next ? ` · new work to ${v.next.label.replace(/^Account /, "")}` : ""} · as of ${ageText(v.readAt, now)}`;
 }

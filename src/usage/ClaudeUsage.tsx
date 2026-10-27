@@ -61,13 +61,14 @@ export default function ClaudeUsage() {
     {failed && <p className="usage-error" role="status">Couldn't read the usage note just now; these are from the last read.</p>}
     {/* T-319: an old reading is not shown as current */}
     {view.stale && <p className="usage-stale" role="note">{view.readAt
-      ? `No fresh reading: these numbers are from ${ageText(view.readAt, now)} and may be out of date. A new one comes every 15 minutes; if this stays, the usage meter on the host has stopped.`
+      ? `No fresh reading: the last one is from ${ageText(view.readAt, now)}, and these numbers may be out of date. A new one comes every 15 minutes; if this stays, the usage meter on the host has stopped.`
       : "No reading yet."}</p>}
-    {view.rows.map((r) => <div className={`usage-row ${r.stale ? "old" : ""}`} key={r.name} aria-label={r.label}>
+    {view.rows.map((r) => <div className={`usage-row ${r.stale || r.out ? "old" : ""}`} key={r.name} aria-label={r.label}>
       <strong className="usage-name">{r.label}</strong>
       {r.missing ? <p className="usage-sub">No reading yet</p> : <>
-        {/* one account's old reading while another's is fresh: said on its own row */}
-        {r.stale && !view.stale && <p className="usage-row-stale">No fresh reading for this account: these are from {ageText(r.readAt, now)}.</p>}
+        {/* an account whose reading is older than the one the header gives: said on its own row */}
+        {r.out ? <p className="usage-row-stale">Signed out: these are its last numbers, from {ageText(r.readAt, now)}.</p>
+          : r.stale && r.readAt !== view.readAt && <p className="usage-row-stale">No fresh reading for this account: these are from {ageText(r.readAt, now)}.</p>}
         <MeterLine label="Session" m={r.session} />
         <MeterLine label="Week" m={r.week} extra={r.week.pace && <span className={r.week.pace === "ahead of pace" ? "usage-ahead" : "usage-on"}>{r.week.pace}</span>} />
       </>}
