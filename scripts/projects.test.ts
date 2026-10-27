@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { ModelError, ago, whyWords, archivePlan, archiveProject, cannotStart, isLive, liveInArea, liveSessions, makeProject, problems, restoreProject, sessionsOf, span, startSession, stateWords, stepSession, stopSession, finishSession, timeline, timelineWindow, type Area, type Work } from "../src/projects/model.ts";
 import { HEARD_MS, freshen, plainTitle, plainWords, resultWords, sessionState, workFrom } from "../src/projects/live.ts";
 import { actionMessage } from "../src/projects/actions.ts";
-import { DASHES, FOLD, HIDDEN, LABEL, PHRASES, REDACT_RULES, answerDraft, askOf, endWords, labelOk, leftItems, parseFeed, redactRaw, safeStep } from "../src/projects/sessionWords.ts";
+import { DASHES, FOLD, HIDDEN, LABEL, PHRASES, REDACT_RULES, answerDraft, askOf, endWords, feedPages, labelOk, leftItems, parseFeed, partBefore, redactRaw, safeStep, withHead, withPart, type FeedItem } from "../src/projects/sessionWords.ts";
 import { existsSync, readFileSync } from "node:fs";
 import { parseRuns } from "../src/areas/steerCore.ts";
 import { buildTaskTree, parseNodes } from "../src/areas/taskCore.ts";
@@ -320,8 +320,45 @@ check("the steps note, read back: time, step or said, words; anything else in th
   assert.deepEqual(items.slice(0, 2).map((i) => [i.kind, i.at]), [["said", NOW - 46 * MIN], ["step", NOW - 45 * MIN]]);
   assert.equal(items[1].text, "Reading EventsPage.tsx");
   assert.ok(items.every((i) => !i.text.includes("abc123")), "token=… is hidden");
-  assert.deepEqual(parseFeed("# Steps\n\n- not a line\n- - · step · Running pnpm\n- 2026-10-27T10:00:00Z · shout · no\n"), [{ at: null, kind: "step", text: "Running pnpm" }]);
+  assert.deepEqual(parseFeed("# Steps\n\n- not a line\n- - · step · Running pnpm\n- 2026-10-27T10:00:00Z · shout · no\n"), [{ at: null, kind: "step", text: "Running pnpm", n: 0 }]);
   assert.deepEqual(parseFeed(null), []);
+});
+// T-319: the whole session, a part at a time. Lines are numbered from the session's first; what is held is always one run of them.
+const L = (n: number): FeedItem => ({ at: null, kind: "said", text: `line ${n}`, n });
+const run = (a: number, b: number) => Array.from({ length: b - a }, (_, i) => L(a + i));
+check("T-319: a steps note's lines are numbered from its first, even past a line that shows nothing", () => {
+  const items = parseFeed("# Steps\n\n- - · said · one\n- - · said ·    \n- - · step · Running pnpm\n", 390);
+  assert.deepEqual(items.map((i) => [i.n, i.text]), [[390, "one"], [392, "Running pnpm"]]);
+});
+check("T-319: the steps note's metadata, checked: parts one after another up to its first line; a bad one drops itself and those before", () => {
+  assert.equal(feedPages({ run_note: "R1" }), null, "a note from before T-319");
+  assert.equal(feedPages({ first: 10, total: 5 }), null);
+  const parts = [{ id: "p1", first: 0, n: 200 }, { id: "p2", first: 200, n: 200 }];
+  assert.deepEqual(feedPages({ first: 390, total: 450, dropped: 0, parts }), { first: 390, total: 450, dropped: 0, parts });
+  assert.deepEqual(feedPages({ first: 390, total: 450, parts: [{ id: "../x", first: 0, n: 200 }, parts[1]] })!.parts, [parts[1]]);
+  assert.deepEqual(feedPages({ first: 390, total: 450, parts: [parts[0], { id: "p2", first: 201, n: 200 }] })!.parts, []);
+  assert.deepEqual(feedPages({ first: 450, total: 460, parts })!.parts, [], "a gap before the note's first line: no parts");
+  assert.deepEqual(feedPages({ first: 100, total: 460, parts: [parts[0], { id: "p2", first: 200, n: 200 }] })!.parts, [], "a part after the note's first");
+});
+check("T-319: a new read keeps what was held when it reaches the note's first line, and only then", () => {
+  const pages = (first: number, total: number) => ({ first, total, dropped: 0, parts: [] });
+  const held = { items: run(200, 450), from: 200, to: 450 };
+  const next = withHead(held, run(400, 452), pages(400, 452));
+  assert.deepEqual(next.items.map((i) => i.n), run(200, 452).map((i) => i.n), "every line once, in order");
+  assert.deepEqual([next.from, next.to], [200, 452]);
+  // the view was away while 100 more lines were written: the held ones don't reach the note's first, so only the note's show
+  assert.deepEqual(withHead(held, run(492, 552), pages(492, 552)), { items: run(492, 552), from: 492, to: 552 });
+  assert.deepEqual(withHead(null, run(0, 3), pages(0, 3)), { items: run(0, 3), from: 0, to: 3 });
+});
+check("T-319: the part before what is held goes in front of it, its overlap left out; one that doesn't reach it changes nothing", () => {
+  const pages = { first: 390, total: 450, dropped: 0, parts: [{ id: "p1", first: 0, n: 200 }, { id: "p2", first: 200, n: 200 }] };
+  const held = { items: run(390, 450), from: 390, to: 450 };
+  assert.deepEqual(partBefore(pages, 390), pages.parts[1]);
+  const more = withPart(held, pages.parts[1], run(200, 400));
+  assert.deepEqual(more.items.map((i) => i.n), run(200, 450).map((i) => i.n));
+  assert.equal(partBefore(pages, more.from), pages.parts[0]);
+  assert.equal(partBefore(pages, 0), null);
+  assert.equal(withPart(held, pages.parts[0], run(0, 200)), held, "part 1 doesn't reach line 390");
 });
 // T-304 (redaction-strategy addendum: fail closed): the app's second net runs the same rules as mts, on the same cases (one file, shared)
 const VECTORS = new URL("./fixtures/redaction-vectors.json", import.meta.url);

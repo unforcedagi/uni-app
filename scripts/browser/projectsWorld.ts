@@ -45,6 +45,12 @@ export function demoTalk(now: number): DemoMessage[] {
   return DEMO_AREAS.flatMap((a) => (TALK[a.id] ?? []).map((l, i) => ({ ref: `${a.id}-${i}`, channel: a.room, mine: l.who === "me", ts: Math.floor((now - l.ago * MIN) / 1000), body: l.text })));
 }
 
+/** T-319: a long session's lines, made up: a step or a sentence each, numbered so a test can tell them apart. */
+export const LONG_LINES: ["step" | "said", string][] = Array.from({ length: 450 }, (_, i) => i === 120 ? ["said", "Line 120: the token=made-up-321 is gone from the config."]
+  : i % 3 === 0 ? ["said", `Line ${i}: checked the gallery cards.`] : ["step", `Editing card-${i}.css`]);
+/** What the screen shows for LONG_LINES[i]. */
+export const longShown = (i: number) => (i === 120 ? "Line 120: the [hidden]" : LONG_LINES[i][1]);
+
 /** The world at time `now`: the vault's notes (node, run, task, the usage note) as the app reads them. */
 export function demoVault(now: number) {
   const iso = (minAgo: number) => new Date(now - minAgo * MIN).toISOString();
@@ -116,6 +122,13 @@ export function demoVault(now: number) {
     [4, "step", "Updating its to-do list"], [2, "step", "Running npx"],
   ];
   const ABOUT: [number, "step" | "said", string][] = [[3 * 24 * 60 + 5, "said", "Reading the coordinator's letter first."], [3 * 24 * 60 - 60, "step", "Writing ABOUT.md"], [3 * 24 * 60 - 69, "said", "Done. The page is in her words."]];
-  const feeds = [{ ...feedOf("feed-events", "run-events", EVENTS), content: feedContent(EVENTS) }, { ...feedOf("feed-about", "run-about", ABOUT), content: feedContent(ABOUT) }];
+  const feeds: (Note & { content: string })[] = [{ ...feedOf("feed-events", "run-events", EVENTS), content: feedContent(EVENTS) }, { ...feedOf("feed-about", "run-about", ABOUT), content: feedContent(ABOUT) }];
+  // T-319: a long session's steps, as mts keeps them: 450 lines, the first 400 in two part notes, the steps note holding the last 60 and
+  // listing the parts. No run note points at it here (a test adds one with `moreRuns`). Line 120 carries a made-up secret.
+  const long = LONG_LINES.map((l, i): [number, "step" | "said", string] => [300 - i * 0.5, l[0], l[1]]);
+  const partOf = (k: number) => ({ ...note(`feed-long-${k + 1}`, `Runs/Steps/2026-10-20 run-long part ${k + 1}`, ["run-feed"], { run_note: "run-long", part: k + 1, first: k * 200 }),
+    content: feedContent(long.slice(k * 200, k * 200 + 200)) });
+  feeds.push({ ...note("feed-long", "Runs/Steps/2026-10-20 run-long", ["run-feed"], { run_note: "run-long", first: 390, total: 450, dropped: 0,
+    parts: [{ id: "feed-long-1", first: 0, n: 200 }, { id: "feed-long-2", first: 200, n: 200 }] }), content: feedContent(long.slice(390)) }, partOf(0), partOf(1));
   return { nodes, runs, tasks, usage, feeds };
 }

@@ -19,7 +19,7 @@ globalThis.window = {
       if (hold) await new Promise((r) => held.push(r));
       if (cmd === "vault_query") return args.tag === "node" ? (NODES[args.vault] ?? []).slice(args.offset ?? 0) : [];
       if (cmd === "vault_query_meta") return [];
-      if (cmd === "vault_note") return { note: { id: args.noteRef, content: FEED[args.vault]?.[args.noteRef] ?? "" } };
+      if (cmd === "vault_note") { const f = FEED[args.vault]?.[args.noteRef] ?? ""; return { note: { id: args.noteRef, ...(typeof f === "string" ? { content: f } : f) } }; }
       return null;
     },
     transformCallback: () => 0,
@@ -94,6 +94,46 @@ try {
     hold = false; for (const r of held.splice(0)) r();
     await p; await settle();
     assert.deepEqual(feed.feedSnapshot("f1").items, [], "A's steps are not shown to B");
+  });
+
+  // T-319: a long session's steps note lists an earlier part; loading it follows the same owner rules, and a new read keeps it
+  const line = (n, t) => `- 2026-10-27T10:00:${String(n % 60).padStart(2, "0")}Z · said · ${t}\n`;
+  FEED.uni.long = { content: line(0, "Line 3.") + line(1, "Line 4."), metadata: { first: 3, total: 5, dropped: 0, parts: [{ id: "long1", first: 0, n: 3 }] } };
+  FEED.uni.long1 = { content: line(0, "Line 0.") + line(1, "Line 1.") + line(2, "Line 2."), metadata: { first: 0, part: 1 } };
+  await check("T-319: an earlier part loads in front of the steps, and the next read of the steps note keeps it", async () => {
+    profile.setActiveProfile(uni);
+    store.setWorkOwner(null); store.setWorkOwner("A");
+    await feed.readFeed("long");
+    assert.ok(feed.hasEarlier(feed.feedSnapshot("long")));
+    await feed.loadEarlier("long");
+    assert.deepEqual(feed.feedSnapshot("long").items.map((i) => i.text), ["Line 0.", "Line 1.", "Line 2.", "Line 3.", "Line 4."]);
+    assert.ok(!feed.hasEarlier(feed.feedSnapshot("long")));
+    FEED.uni.long = { content: line(1, "Line 4.") + line(2, "Line 5."), metadata: { first: 4, total: 6, dropped: 0, parts: [{ id: "long1", first: 0, n: 3 }] } };
+    await feed.readFeed("long");
+    assert.deepEqual(feed.feedSnapshot("long").items.map((i) => i.n), [0, 1, 2, 3, 4, 5]);
+    FEED.uni.long = { content: line(0, "Line 3.") + line(1, "Line 4."), metadata: { first: 3, total: 5, dropped: 0, parts: [{ id: "long1", first: 0, n: 3 }] } };
+  });
+
+  await check("T-319: an earlier part still out when another identity comes is dropped when it lands", async () => {
+    store.setWorkOwner(null); store.setWorkOwner("A");
+    await feed.readFeed("long");
+    hold = true;
+    const p = feed.loadEarlier("long");
+    await settle();
+    store.setWorkOwner("B");
+    hold = false; for (const r of held.splice(0)) r();
+    await p; await settle();
+    assert.deepEqual(feed.feedSnapshot("long").items, [], "A's earlier steps are not shown to B");
+  });
+
+  await check("T-319: a part note mts has since reused for later lines is not shown as the earlier ones", async () => {
+    store.setWorkOwner(null); store.setWorkOwner("A");
+    await feed.readFeed("long");
+    FEED.uni.long1 = { content: line(0, "Line 9."), metadata: { first: 9, part: 4 } };
+    await feed.loadEarlier("long");
+    const f = feed.feedSnapshot("long");
+    assert.deepEqual(f.items.map((i) => i.text), ["Line 3.", "Line 4."]);
+    assert.equal(f.earlier.error, "Those steps are no longer kept.");
   });
 } finally { await server.close(); }
 if (failed) process.exit(1);

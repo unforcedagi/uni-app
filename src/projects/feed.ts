@@ -5,17 +5,24 @@
 //
 // Like the work (store.ts), the steps belong to one identity on one vault: the store sets the owner, and a change of owner or Forget drops
 // every step read so far and any read still out. Steps are kept in memory only, never on the device.
+//
+// T-319: the whole session. mts keeps every line (numbered from the session's first, for good) and closes them into part notes, and the
+// steps note lists those parts. A view holds one run of lines: the steps note's, and the earlier parts loaded before them on asking
+// (loadEarlier), each through parseFeed (the one redactor) like the steps note itself. A new read of the steps note keeps what was held
+// when it reaches the note's first line, so lines don't vanish when a part closes. A note from before T-319 is read as before.
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useSyncExternalStore } from "react";
 import type { RawNote } from "../areas/taskCore";
-import { parseFeed, type FeedItem } from "./sessionWords";
+import { feedPages, parseFeed, partBefore, withHead, withPart, type FeedItem, type FeedPages, type Held } from "./sessionWords";
 
 export type FeedState = { items: FeedItem[]; ready: boolean; error: string | null;
-  /** When it was last read. */ at: number | null };
+  /** When it was last read. */ at: number | null;
+  /** T-319: what the steps note says of the whole session (null: a note from before), and the run of lines held. */ pages: FeedPages | null; held: Held | null;
+  /** Loading an earlier part: under way, or why it failed. */ earlier: { loading: boolean; error: string | null } };
 /** How often an open live view reads the steps again (mts writes them at most every 15 s). */
 export const FEED_MS = 10_000;
 
-const NONE: FeedState = { items: [], ready: false, error: null, at: null };
+const NONE: FeedState = { items: [], ready: false, error: null, at: null, pages: null, held: null, earlier: { loading: false, error: null } };
 let owner: string | null = null;
 let vault = "";
 let generation = 0;
@@ -46,7 +53,12 @@ export function readFeed(id: string): Promise<void> {
     try {
       const r = await invoke<{ note: RawNote & { content?: string } }>("vault_note", { vault: from, noteRef: id });
       if (mine !== generation) return;
-      feeds = new Map(feeds).set(id, { items: parseFeed(r?.note?.content ?? ""), ready: true, error: null, at: Date.now() });
+      const was = feeds.get(id) ?? NONE;
+      const pages = feedPages(r?.note?.metadata);
+      const lines = parseFeed(r?.note?.content ?? "", pages?.first ?? 0);
+      // what was held is read against the note as it is now (the earlier parts loaded meanwhile stay)
+      const held = pages ? withHead(was.held, lines, pages) : null;
+      feeds = new Map(feeds).set(id, { ...was, items: held ? held.items : lines, ready: true, error: null, at: Date.now(), pages, held });
     } catch (e) {
       if (mine !== generation) return;
       const was = feeds.get(id) ?? NONE;
@@ -59,6 +71,50 @@ export function readFeed(id: string): Promise<void> {
   inflight.set(id, p);
   return p!;
 }
+
+/** T-319: loads the part of the session just before the lines held (one load at a time per note). A part that no longer holds those
+ *  lines (mts reuses its oldest part's note past the lines it keeps) is not shown: the steps note is read again for the parts it lists. */
+export function loadEarlier(id: string): Promise<void> {
+  const key = `earlier:${id}`;
+  const running = inflight.get(key);
+  if (running) return running;
+  const cur = feeds.get(id);
+  const part = cur?.held ? partBefore(cur.pages, cur.held.from) : null;
+  if (!owner || !part) return Promise.resolve();
+  const mine = generation, from = vault;
+  const set = (patch: (was: FeedState) => Partial<FeedState>) => { const was = feeds.get(id) ?? NONE; feeds = new Map(feeds).set(id, { ...was, ...patch(was) }); };
+  set(() => ({ earlier: { loading: true, error: null } }));
+  emit();
+  let p: Promise<void> | undefined;
+  p = (async () => {
+    try {
+      const r = await invoke<{ note: RawNote & { content?: string } }>("vault_note", { vault: from, noteRef: part.id });
+      if (mine !== generation) return;
+      const md = (r?.note?.metadata ?? {}) as Record<string, unknown>;
+      if (md.first !== part.first) {
+        set(() => ({ earlier: { loading: false, error: "Those steps are no longer kept." } }));
+        void readFeed(id);
+        return;
+      }
+      const lines = parseFeed(r?.note?.content ?? "", part.first);
+      set((was) => {
+        const held = was.held ? withPart(was.held, part, lines) : null;
+        return held ? { held, items: held.items, earlier: { loading: false, error: null } } : { earlier: { loading: false, error: null } };
+      });
+    } catch {
+      if (mine !== generation) return;
+      set(() => ({ earlier: { loading: false, error: "Couldn't load earlier steps." } }));
+    } finally {
+      if (mine === generation && inflight.get(key) === p) inflight.delete(key);
+      if (mine === generation) emit();
+    }
+  })();
+  inflight.set(key, p);
+  return p!;
+}
+
+/** Whether there is an earlier part to load for this state. */
+export const hasEarlier = (f: FeedState) => !!(f.held && partBefore(f.pages, f.held.from));
 
 /** What the screen would see for a steps note now (for the store's own test). */
 export const feedSnapshot = (id: string): FeedState => feeds.get(id) ?? NONE;

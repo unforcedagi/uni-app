@@ -129,22 +129,79 @@ export function safeStep(text: string): string {
   return "A step";
 }
 
-/** One line of the session's stream: a step it took, or something it wrote. `at` is null when the line has no time. */
-export type FeedItem = { at: number | null; kind: "step" | "said"; text: string };
+/** One line of the session's stream: a step it took, or something it wrote. `at` is null when the line has no time. `n`: which line of
+ *  the session it is (T-319: mts numbers them from the first, for good), counted from the note's `first`. */
+export type FeedItem = { at: number | null; kind: "step" | "said"; text: string; n: number };
 
-/** The steps note's lines, `- <time> · <step|said> · <text>`, oldest first. Anything else in the note is left out. */
-export function parseFeed(content: string | null | undefined): FeedItem[] {
+/** The steps note's lines, `- <time> · <step|said> · <text>`, oldest first; line i is the session's line `first + i`. Anything else in
+ *  the note is left out. */
+export function parseFeed(content: string | null | undefined, first = 0): FeedItem[] {
   const out: FeedItem[] = [];
+  let i = 0;
   for (const line of (content ?? "").split("\n")) {
-    const m = /^- (\S+) · (step|said) · (.+)$/.exec(line.trimEnd());
+    // a line counts (it is a line of the session) even when its words are empty; only a line with words shows
+    const m = /^- (\S+) · (step|said) ·(?: (.*))?$/.exec(line.trimEnd());
     if (!m) continue;
+    const n = first + i++;
     const t = Date.parse(m[1]);
     // raw first: the line's words exactly as the note holds them; a step is then shown only as a phrase with a plain label
-    const said = redactRaw(m[3]).trim();
+    const said = redactRaw(m[3] ?? "").trim();
     const text = m[2] === "step" ? safeStep(said) : said;
-    if (text) out.push({ at: Number.isFinite(t) ? t : null, kind: m[2] as FeedItem["kind"], text });
+    if (text) out.push({ at: Number.isFinite(t) ? t : null, kind: m[2] as FeedItem["kind"], text, n });
   }
   return out;
+}
+
+/** T-319: a part of the session's earlier lines, on a note of its own: `n` lines from line `first`. */
+export type FeedPart = { id: string; first: number; n: number };
+/** What a steps note's metadata says of the whole session: its lines start at `first` of `total`; `parts` hold the earlier ones, oldest
+ *  first; the first `dropped` are no longer kept. Null for a note from before T-319 (the last lines only, numbered from that note). */
+export type FeedPages = { first: number; total: number; dropped: number; parts: FeedPart[] };
+
+const count = (v: unknown): number | null => (typeof v === "number" && Number.isInteger(v) && v >= 0 ? v : null);
+const NOTE_ID = /^[A-Za-z0-9_-]{1,128}$/;
+
+/** The steps note's metadata, checked. Parts must be whole (an id, numbers), one after another, and reach the note's first line; a bad
+ *  one drops itself and every part before it, so what is listed is always one run of lines up to the note's own. */
+export function feedPages(metadata: unknown): FeedPages | null {
+  const md = (metadata && typeof metadata === "object" ? metadata : {}) as Record<string, unknown>;
+  const first = count(md.first), total = count(md.total);
+  if (first === null || total === null || first > total) return null;
+  let parts: FeedPart[] = [];
+  for (const p of Array.isArray(md.parts) ? md.parts : []) {
+    const o = (p && typeof p === "object" ? p : {}) as Record<string, unknown>;
+    const id = typeof o.id === "string" && NOTE_ID.test(o.id) ? o.id : null, f = count(o.first), n = count(o.n);
+    const prev = parts[parts.length - 1];
+    if (!id || f === null || !n || f >= first || (prev && prev.first + prev.n !== f)) { parts = []; continue; }
+    parts.push({ id, first: f, n });
+  }
+  const last = parts[parts.length - 1];
+  if (last && last.first + last.n < first) parts = [];
+  return { first, total, dropped: count(md.dropped) ?? 0, parts };
+}
+
+/** The lines held for a session: `items`, oldest first, covering the session's lines `from` up to (not including) `to`. */
+export type Held = { items: FeedItem[]; from: number; to: number };
+
+/** A new read of the steps note over what was held: what was held before the note's first line stays when it reaches that line (no gap
+ *  between); else only the note's lines show. */
+export function withHead(held: Held | null, head: readonly FeedItem[], pages: FeedPages): Held {
+  if (held && held.from < pages.first && held.to >= pages.first)
+    return { items: [...held.items.filter((it) => it.n < pages.first), ...head], from: held.from, to: pages.total };
+  return { items: [...head], from: pages.first, to: pages.total };
+}
+
+/** The part just before what is held: the one to load next, or null when no part is listed before it. */
+export function partBefore(pages: FeedPages | null, from: number): FeedPart | null {
+  let best: FeedPart | null = null;
+  for (const p of pages?.parts ?? []) if (p.first < from && (!best || p.first > best.first)) best = p;
+  return best;
+}
+
+/** An earlier part's lines put before what is held, when the part reaches it; else what was held, as it was. */
+export function withPart(held: Held, part: FeedPart, lines: readonly FeedItem[]): Held {
+  if (!(part.first < held.from && part.first + part.n >= held.from)) return held;
+  return { items: [...lines.filter((it) => it.n < held.from), ...held.items], from: part.first, to: held.to };
 }
 
 const clock = (t: number) => new Date(t).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });

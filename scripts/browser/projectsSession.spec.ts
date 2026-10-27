@@ -4,6 +4,7 @@
 // work on your message. The native side is projectsFixture.ts (a made-up vault and rooms in the page; nothing leaves it).
 import { expect, test, type Page } from '@playwright/test';
 import { bootProjects, type Boot } from './projectsFixture.ts';
+import { longShown } from './projectsWorld.ts';
 
 const shot = (page: Page, name: string) => page.screenshot({ path: `__shots__/t304/${test.info().project.name}-${name}.png` });
 const door = (page: Page, name: string) => page.getByRole('navigation', { name: 'Rooms' }).getByRole('button', { name: new RegExp(`^${name}\\b`) });
@@ -63,6 +64,43 @@ test('a working session opens to a live view: its steps and what it wrote, newes
   const after = await page.evaluate(() => (window as any).__feedReads as number);
   await page.waitForTimeout(11_000);
   expect(await page.evaluate(() => (window as any).__feedReads as number)).toBe(after);
+});
+
+test('T-319: a long session scrolls back to its first step: Load earlier, then scrolling to the top; new steps keep coming', async ({ page }) => {
+  const sheet = await openProject(page, 'Workshop', /Riverbend co-op site/, { moreRuns: (now) => [{ id: 'run-long', path: 'Runs/2026-10-20 Sort the gallery by season', tags: ['run'],
+    createdAt: new Date(now - 300 * 60_000).toISOString(), updatedAt: new Date(now).toISOString(),
+    metadata: { node: 'p-coop', state: 'running', started_at: new Date(now - 300 * 60_000).toISOString(), doing_now: 'Editing card-449.css', doing_at: new Date(now - 60_000).toISOString(), steps: 300, feed: 'feed-long' } }] });
+  await openSession(page, sheet, 'Sort the gallery by season');
+  const v = view(page);
+  const steps = v.getByRole('list', { name: 'What it is doing, newest last' });
+  const range = (a: number, b: number) => Array.from({ length: b - a }, (_, i) => longShown(a + i));
+  // the steps note's own lines: the last 60
+  await expect(steps.locator('li span')).toHaveText(range(390, 450));
+  await expect(steps.locator('li').last()).toBeInViewport();
+  await shot(page, '08-long-newest');
+  // the part before, on asking: every line once, in order, and the place where they meet in view
+  await v.getByRole('button', { name: 'Load earlier steps' }).click();
+  await expect(steps.locator('li span')).toHaveText(range(200, 450));
+  await expect(steps.locator('li span').filter({ hasText: /^Line 390:/ })).toBeInViewport();
+  await shot(page, '09-long-earlier');
+  // scrolling to the top of the list loads the first part: the session from its first step, the secret in it hidden
+  await steps.evaluate((b) => { b.scrollTop = 0; b.dispatchEvent(new Event('scroll')); });
+  await expect(steps.locator('li span')).toHaveText(range(0, 450));
+  await expect(v.getByRole('button', { name: 'Load earlier steps' })).toHaveCount(0);
+  await expect(v).toContainText('From its first step.');
+  await expect(v).toContainText('Line 120: the [hidden]');
+  await expect(v).not.toContainText('made-up-321');
+  // scrolled there, you keep your place: the line you were at stays in view, and the ones just loaded wait above it
+  await expect(steps.locator('li span').filter({ hasText: /^Editing card-200\.css$/ })).toBeInViewport();
+  await expect(steps.locator('li span').first()).not.toBeInViewport();
+  await shot(page, '10-long-first');
+  // mts writes another step (and the steps note moves on): the next read adds it, and what was loaded stays
+  await page.evaluate(() => {
+    const f = (window as any).__world.feeds.find((x: any) => x.id === 'feed-long');
+    f.content += `- ${new Date().toISOString()} · said · Line 450: sorted by season.\n`; f.metadata.total = 451;
+  });
+  await expect(steps.locator('li').last()).toContainText('Line 450: sorted by season.', { timeout: 15_000 });
+  await expect(steps.locator('li')).toHaveCount(451);
 });
 
 test('an earlier session opens from the Earlier list, and Back finds that list as it was', async ({ page }) => {
