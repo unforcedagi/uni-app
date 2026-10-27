@@ -109,6 +109,8 @@ async fn voice_pictures_files_replies_and_reactions_arrive_and_a_voice_message_i
     let port = hs.port;
     let pat = register(&hs, "pat", true).await;
     let sam = register(&hs, "sam", false).await;
+    let (status, r) = http(port, "PUT", &format!("/_matrix/client/v3/profile/{}/displayname", esc(&format!("@sam:{SERVER}"))), Some(json!({ "displayname": "Sam Rowan" })), Some(&sam)).await.unwrap();
+    assert_eq!(status, 200, "{r}");
     let (_, room) = http(port, "POST", "/_matrix/client/v3/createRoom", Some(json!({ "name": "Garden plans", "preset": "private_chat", "invite": [format!("@pat:{SERVER}")] })), Some(&sam)).await.unwrap();
     let room = room["room_id"].as_str().unwrap().to_owned();
     let (status, r) = http(port, "POST", &format!("/_matrix/client/v3/join/{}", esc(&room)), Some(json!({})), Some(&pat)).await.unwrap();
@@ -184,7 +186,7 @@ async fn voice_pictures_files_replies_and_reactions_arrive_and_a_voice_message_i
     assert_eq!((f.kind, f.name.as_str(), f.mime.as_str(), f.caption.as_deref()), (MediaKind::File, "planting-plan.pdf", "application/octet-stream", None));
     // the reply quotes who it answers and what they said; the reactions count both people, one of them Pat
     let q = row(&rows, &reply).unwrap().reply.clone().unwrap();
-    assert_eq!((q.event_id.as_str(), q.sender_name.as_deref(), q.text.as_deref()), (first.as_str(), Some("sam"), Some("Are the beans in yet?")));
+    assert_eq!((q.event_id.as_str(), q.sender_name.as_deref(), q.text.as_deref()), (first.as_str(), Some("Sam Rowan"), Some("Are the beans in yet?")));
     let x = &row(&rows, &first).unwrap().reactions;
     assert_eq!((x.len(), x[0].key.as_str(), x[0].count, x[0].own), (1, "🌱", 2, true));
     assert!(row(&rows, &first).unwrap().media.is_none());
