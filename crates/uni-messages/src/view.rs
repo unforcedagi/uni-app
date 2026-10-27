@@ -111,7 +111,8 @@ fn name_of(profile: &TimelineDetails<matrix_sdk_ui::timeline::Profile>, user: &U
     }
 }
 
-pub(crate) async fn room_row(room: &Room, latest: &LatestEventValue) -> RoomRow {
+/// `network`: the room's network if it is known already (link.rs reads it otherwise).
+pub(crate) async fn room_row(room: &Room, latest: &LatestEventValue, network: Option<&'static str>) -> RoomRow {
     let name = match room.display_name().await {
         Ok(n) => n.to_string(),
         Err(_) => room.room_id().to_string(),
@@ -135,7 +136,10 @@ pub(crate) async fn room_row(room: &Room, latest: &LatestEventValue) -> RoomRow 
         invited: room.state() == RoomState::Invited,
         inviter,
         direct: room.is_direct().await.unwrap_or(false),
-        network: crate::link::network_of(room, inviter_id).await,
+        network: match network {
+            Some(n) => n,
+            None => crate::link::network_of(room, inviter_id).await,
+        },
     }
 }
 

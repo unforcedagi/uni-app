@@ -71,7 +71,14 @@ function RoomItem({ r, selected, now, mark, onOpen }: { r: RoomRow; selected: bo
 function TabStrip({ tabs, tab, onPick, onLink }: { tabs: Tab[]; tab: TabId; onPick: (t: TabId) => void; onLink: () => void }) {
   const strip = useRef<HTMLDivElement | null>(null);
   // the tab you're on stays in sight on a phone's sideways strip
-  useLayoutEffect(() => { strip.current?.querySelector<HTMLElement>('[aria-selected="true"]')?.scrollIntoView({ block: "nearest", inline: "nearest" }); }, [tab]);
+  useLayoutEffect(() => {
+    const el = strip.current, on = el?.querySelector<HTMLElement>('[aria-selected="true"]');
+    if (!el || !on) return;
+    // the strip alone scrolls: nothing around it moves
+    const left = on.getBoundingClientRect().left - el.getBoundingClientRect().left + el.scrollLeft, right = left + on.offsetWidth;
+    if (left < el.scrollLeft) el.scrollLeft = left;
+    else if (right > el.scrollLeft + el.clientWidth) el.scrollLeft = right - el.clientWidth;
+  }, [tab]);
   const key = (e: KeyboardEvent<HTMLDivElement>) => {
     const step = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
     if (!step) return;
@@ -243,7 +250,7 @@ export default function Messages({ backTo, onBack }: { backTo: string; onBack: (
     // live receive: the room list, the open room's messages and the sync's status, as they change
     const off = onUpdate((u) => {
       if (!alive) return;
-      if (u.kind === "status") setStatus(u.status);
+      if (u.kind === "status") { setStatus(u.status); if (u.status.state === "signed_out") setLinkRows(null); }
       else if (u.kind === "rooms") setList(u.rooms);
       else if (u.kind === "link") setLinkRows((rows) => applyLink(rows, u.link));
       else setThread((t) => applyTimeline(t, u.room_id, u.items));
@@ -262,7 +269,7 @@ export default function Messages({ backTo, onBack }: { backTo: string; onBack: (
 
   const signedIn = !!status && status.state !== "signed_out";
   const openRow = thread ? list?.find((r) => r.id === thread.roomId) ?? null : null;
-  const out = async () => { try { setStatus(await signOut()); setList(null); setThread(null); setLinkView(false); setLinkRows(null); openId.current = null; rememberOpen(null); } catch (err) { setProblem(asMessagesErr(err)); } };
+  const out = async () => { try { setStatus(await signOut()); setList(null); setThread(null); setLinkView(false); setLinkRows(null); setTabPick(null); listAt.current.clear(); openId.current = null; rememberOpen(null); } catch (err) { setProblem(asMessagesErr(err)); } };
   const tabs = list ? messageTabs(list, linkRows) : [];
   const tab = shownTab(tabPick, tabs);
   const rows = list ? tabRows(list, tab) : [];
@@ -281,7 +288,7 @@ export default function Messages({ backTo, onBack }: { backTo: string; onBack: (
     : !signedIn ? <div className="msgs-scroll">{problem && <p className="msgs-problem" role="alert">{problemText(problem)}</p>}{status?.error && <p className="msgs-problem" role="status">{status.error}</p>}<SignIn onDone={(s) => { setStatus(s); void loadRooms(); }} /></div>
     : linkView ? <LinkAccounts rows={linkRows} setRows={setLinkRows} onBack={() => setLinkView(false)} />
     : <div className="msgs-panes">
-      {list && list.length > 0 && <TabStrip tabs={tabs} tab={tab} onPick={pickTab} onLink={() => setLinkView(true)} />}
+      {(!list || list.length > 0) && <TabStrip tabs={tabs} tab={tab} onPick={pickTab} onLink={() => setLinkView(true)} />}
       <nav className="msgs-rooms" aria-label="Conversations">
         <div className="msgs-scroll" id="msgs-list" role={list?.length ? "tabpanel" : undefined} aria-label={current ? `${current.id === "all" ? "All conversations" : current.label}` : undefined}
           ref={listEl} onScroll={(e) => listAt.current.set(tab, e.currentTarget.scrollTop)}>

@@ -39,6 +39,8 @@ async function boot(page: Page) {
         switch (cmd) {
           case 'messages_status': return { state: 'live', user_id: '@pat:example.org', homeserver: 'https://matrix.example.org', error: null };
           case 'messages_rooms': return w.__rooms;
+          case 'messages_sign_out': return { state: 'signed_out', user_id: null, homeserver: null, error: null };
+          case 'messages_sign_in_device': return { state: 'live', user_id: '@lee:example.org', homeserver: 'https://matrix.example.org', error: null };
           case 'messages_open': return Array.from({ length: 4 }, (_, i) => line(i, args.roomId));
           case 'messages_links': return w.__links;
           case 'messages_link_check': return w.__links.find((l: any) => l.network === args.network);
@@ -73,7 +75,7 @@ test('All, then one tab per linked network in a fixed order, each with how many 
   // screen is opened, but it has a conversation, so it has a tab.
   await expect(tablist(page).getByRole('tab')).toHaveText([/^All\s*3$/, /^Signal\s*1$/, /^Telegram$/, /^WhatsApp\s*1$/, /^SMS$/, /^Matrix\s*1$/]);
   await expect(tab(page, 'All')).toHaveAttribute('aria-selected', 'true');
-  await expect(tab(page, 'WhatsApp')).toHaveAccessibleName('WhatsApp, 1 unread'); // Mara's two messages are one conversation
+  await expect(tab(page, 'WhatsApp')).toHaveAccessibleName('WhatsApp, 1 new'); // Mara's two messages are one conversation
   // All: every conversation, newest first, each with its network's word
   await expect(names(page)).toHaveText(['Mara Quill', 'Robin Vale', 'Sam Example', 'Corner Bakery', 'Book club', 'Jun Park', 'Allotment group']);
   await expect(list(page).locator('.msgs-net')).toHaveText(['WA', 'SIG', 'MX', 'SMS', 'SIG', 'TG', 'WA']);
@@ -159,6 +161,16 @@ test('a message arriving moves its conversation up and counts on its tab and on 
     w.__push({ kind: 'rooms', rooms });
   });
   await expect(names(page)).toHaveText(['Book club', 'Robin Vale']);
-  await expect(tab(page, 'Signal')).toHaveAccessibleName('Signal, 2 unread');
-  await expect(tab(page, 'All')).toHaveAccessibleName('All, 4 unread');
+  await expect(tab(page, 'Signal')).toHaveAccessibleName('Signal, 2 new');
+  await expect(tab(page, 'All')).toHaveAccessibleName('All, 4 new');
+});
+
+test('signing out forgets the tab: the next sign-in starts on All', async ({ page }) => {
+  await boot(page);
+  await tab(page, 'WhatsApp').click();
+  await page.getByRole('button', { name: 'Sign out' }).click();
+  await page.getByRole('button', { name: 'Sign in with this device' }).click();
+  await expect(tab(page, 'All')).toHaveAttribute('aria-selected', 'true');
+  await page.reload();
+  await expect(tab(page, 'All')).toHaveAttribute('aria-selected', 'true', { timeout: 15_000 });
 });

@@ -140,7 +140,7 @@ t("counts: conversations waiting for you (unread or an invite), not messages; Al
   const tabs = messageTabs(rows, null);
   assert.deepEqual(tabs.map((t) => [t.id, t.waiting]), [["all", 3], ["signal", 2], ["whatsapp", 1], ["matrix", 0]]);
   assert.equal(tabs.slice(1).reduce((n, t) => n + t.waiting, 0), tabs[0].waiting);
-  assert.equal(tabName(tabs[1]), "Signal, 2 unread");
+  assert.equal(tabName(tabs[1]), "Signal, 2 new");
   assert.equal(tabName(tabs[3]), "Matrix");
   assert.equal(tabName({ id: "telegram", label: "Telegram", count: 0, waiting: 0, attention: true }), "Telegram, needs linking again");
 });

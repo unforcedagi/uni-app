@@ -616,6 +616,9 @@ impl Messages {
             futures_util::pin_mut!(stream);
             let mut list = matrix_sdk_ui::eyeball_im::Vector::new();
             let mut subscribed: Vec<OwnedRoomId> = Vec::new();
+            // T-310: each room's network, once known: it doesn't change, so a new message doesn't read every room's
+            // power levels again. Not kept while it can't be told ("other"): the room's state may still be on its way.
+            let mut networks: HashMap<OwnedRoomId, &'static str> = HashMap::new();
             loop {
                 // the list changed, or a room was opened or closed
                 let list_changed = tokio::select! {
@@ -649,7 +652,11 @@ impl Messages {
                 if list_changed {
                     let mut rows = Vec::with_capacity(rooms.len());
                     for r in &rooms {
-                        rows.push(view::room_row(r, &RoomExt::latest_event(r).await).await);
+                        let row = view::room_row(r, &RoomExt::latest_event(r).await, networks.get(r.room_id()).copied()).await;
+                        if row.network != "other" {
+                            networks.insert(r.room_id().to_owned(), row.network);
+                        }
+                        rows.push(row);
                     }
                     *me.rooms.lock().unwrap() = rows.clone();
                     let _ = me.tx.send(Update::Rooms { rooms: rows });

@@ -188,9 +188,9 @@ export function shownTab(stored: string | null, tabs: Tab[]): TabId {
   return tabs.find((t) => t.id === stored)?.id ?? "all";
 }
 
-/** A tab's name for a screen reader: "Signal, 2 unread". */
+/** A tab's name for a screen reader: "Signal, 2 new" (unread, or an invite). */
 export function tabName(t: Tab): string {
-  return [t.label, t.waiting ? `${t.waiting} unread` : "", t.attention ? "needs linking again" : ""].filter(Boolean).join(", ");
+  return [t.label, t.waiting ? `${t.waiting} new` : "", t.attention ? "needs linking again" : ""].filter(Boolean).join(", ");
 }
 
 // ── Linking accounts (T-282): one card per network, read from its bridge bot by the Rust core (link.rs) ─────────────
