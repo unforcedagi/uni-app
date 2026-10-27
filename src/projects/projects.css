@@ -49,6 +49,8 @@
 .fd-usage:focus-visible { outline: 2px solid var(--th-ink); outline-offset: 2px; }
 .fd-usage-sheet .pj-close { position: absolute; top: 14px; right: 14px; }
 .fd-usage-sheet .usage-card { margin: 0; border: 0; padding: 4px 0 0; }
+/* T-319: the card's Refresh keeps clear of the sheet's close button */
+.fd-usage-sheet .usage-head { padding-right: 52px; }
 
 /* ------------------------------------------------------------------ the projects strip */
 .ps { display: flex; align-items: center; gap: 4px 10px; flex-wrap: wrap; padding: 8px clamp(12px, 3vw, 28px); border-bottom: 1px solid var(--th-hair2); background: var(--th-paper); }

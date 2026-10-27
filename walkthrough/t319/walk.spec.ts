@@ -1,4 +1,5 @@
-// T-319 walkthrough driver: the usage line saying plainly that its reading is old, Refresh reading the note again, the card's "as of";
+// T-319 walkthrough driver: the usage line saying plainly that its reading is old, Refresh reading the note again, the card's "as of",
+// one account's old reading said on its own row;
 // then a long session scrolled back to its first step. Writes marks.json (seconds into the video at each scene's start) and stills
 // NN-*.png to the run's output dir; narrate.py cuts and voices them. Made-up world only (scripts/browser/projectsWorld.ts).
 import { test, expect, type Page } from '@playwright/test';
@@ -47,7 +48,18 @@ test('walk', async ({ page }) => {
   await expect(page.getByRole('dialog', { name: 'Claude accounts' }).locator('.usage-age')).toHaveText('As of 2 min ago');
   await mark('card');
   await hold(8000);
+
+  // one account's meter stops while the other's keeps going: that account says so on its own row
+  await page.evaluate(() => {
+    const doc = (window as any).__world.usage.metadata.claude_accounts;
+    doc.accounts[0].read_at = new Date(Date.now() - 48 * 60 * 60_000).toISOString();
+  });
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await expect(page.getByRole('dialog', { name: 'Claude accounts' }).getByLabel('Account A')).toContainText('No fresh reading for this account');
+  await mark('one-old');
+  await hold(9000);
   await page.keyboard.press('Escape');
+  await expect(line).toContainText('A no fresh reading (2 days old)');
 
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.locator('.fd-door[data-path="Areas/Workshop"]').click();

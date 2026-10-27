@@ -13,6 +13,7 @@ LINES = {
     'stale': "This is the Uni app with made-up data. At the bottom of the front door is the Claude usage line. Its last reading here is twenty-eight hours old, so instead of showing old numbers as if they were current, it says so plainly.",
     'refresh': "The launcher now writes that reading every fifteen minutes. The app reads it again on its own, and Refresh reads it right now. The line comes back with its numbers, and says how old they are.",
     'card': "The full card says the same: as of two minutes ago, with its own Refresh. An old reading there is marked as old and its numbers fade.",
+    'one-old': "Each account's reading counts on its own. Here account A's meter has stopped while B's keeps going, so A says so on its own row, and the line says it too, instead of borrowing B's freshness.",
     'long': "Now a long Claude Code session. Its live view opens on the newest sixty steps, as before.",
     'earlier': "Load earlier steps brings in the two hundred before them, and keeps your place where they meet.",
     'first': "Scrolling to the top loads the next part, back to the session's very first step. The launcher keeps up to five thousand steps per session, in parts, and anything that looks like a key is still hidden.",
