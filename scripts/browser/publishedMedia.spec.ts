@@ -6,7 +6,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { test, expect, type Locator, type Page } from '@playwright/test';
-import { bootAreas } from './areasFixture';
+import { bootAreas, leaveFrontDoor } from './areasFixture';
 
 /** The fixture's made-up Garden project's room (areasFixture `garden`). */
 const GARDEN = '5b0c4e8a-2f3d-4c1e-9a7b-6d8e0f1a2b3c';
@@ -82,6 +82,7 @@ async function open(page: Page, publish = true) {
 /** The made-up Garden project's room, from the tree (the phone's drawer, or the rooms nav beside the chat). */
 async function toGarden(page: Page) {
   const nav = wide(page) ? page.locator('.th-roomnav') : page.locator('.th-phone-tree');
+  await leaveFrontDoor(page); // T-302: the tree is in a room
   if (!wide(page)) { await page.locator('.sr-drawer, .th-phone-tree').first().waitFor(); if (await page.locator('.sr-drawer').count() && !await page.locator('.th-drawer').count()) await page.locator('.sr-drawer').click(); }
   await nav.locator('.th-row.d1').first().waitFor();
   for (let i = 0; i < 12; i++) { const f = nav.locator('.th-fold[aria-expanded="false"]'); if (!await f.count()) break; await f.first().click(); }

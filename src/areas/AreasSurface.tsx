@@ -30,7 +30,7 @@ import { WorkView } from "./WorkView";
 import { LoadHealth } from "./LoadHealth";
 import { Body } from "../MessageBody";
 import { projectBody } from "./projectBody";
-import { rootOpenMemory } from "./rootMemory";
+import { onRootOpen, rootOpenMemory, setRootOpenMemory } from "./rootMemory";
 import { openDialog } from "./focusTrap";
 import { publishDecisions, setDecidedHook, setDecisionOpener } from "../decisionLinks";
 import { taskTitle } from "./whereCore";
@@ -144,7 +144,8 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   const treeFold = noteBeside && !roomyTree ? { folded: !besideOpen.tree, set: (open: boolean) => setBesideOpen((b) => ({ ...b, tree: open })) } : null;
   /** Phone: the room tree is the home and a level opens from it; Uni's own level is one tap on its row. */
   const [rootOpen, setRootOpenState] = useState(rootOpenMemory.open);
-  const setRootOpen = (v: boolean) => { rootOpenMemory.open = v; setRootOpenState(v); };
+  const setRootOpen = (v: boolean) => setRootOpenMemory(v);
+  useEffect(() => onRootOpen(setRootOpenState), []);
   const phoneTree = !wide;
   /** The tree as a full-screen home (a phone held upright). A short window (the rail hidden: 740×360) opens on the room instead, with Places in
    *  its header (r15): the tree is the drawer there. r20: so does every size that isn't an upright phone (800×600 opened on the tree). */
@@ -184,11 +185,12 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   /** T-301/T-302: the project opened in place over its area's room. */
   const [projectOpen, setProjectOpen] = useState<string | null>(null);
   const closeProject = () => setProjectOpen(null);
-  const toTree = () => { setRootOpen(false); onOpenArea(null, "Uni", uniRoom); };
+  // T-302: Uni's home (no room attached) is the front door; Uni's own level is the home with its room (the tree's Uni row)
+  const toTree = () => { setRootOpen(false); onOpenArea(null, "Uni", null); };
   const back = loose ? (treeHome ? toTree : null) : path ? (treeHome ? toTree : () => {
     const up = data ? data.tree.nodes.get(parentPath(data.tree, path, via)) : null;
-    onOpenArea(up?.path ?? null, up?.name ?? "Uni", up ? pickRoom(withRoom(up).rooms, null) : uniRoom);
-  }) : treeHome && rootOpen ? () => setRootOpen(false) : null;
+    onOpenArea(up?.path ?? null, up?.name ?? "Uni", up ? pickRoom(withRoom(up).rooms, null) : null);
+  }) : rootOpen ? () => setRootOpen(false) : null;
   /** What is over the place, top first: the sheet (modal), then the drawer, then the work view (only when the chat is there to go back to). */
   const workOver = work && chat;
   // the drawer is closed by every Back first (r14), its own Back button excepted (that one goes back a place as it closes)
@@ -286,15 +288,20 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   }, [tasks.ready, tasks.tasks, tasks.savedAt]); // eslint-disable-line react-hooks/exhaustive-deps
   const decide = (t: Task, o: string) => void tasks.decide(t, o);
   const open = (a: Area) => { setRootOpen(false); const w = withRoom(a); onOpenArea(w.path, w.name, pickRoom(w.rooms, null)); };
-  const toUni = () => onOpenArea(null, "Uni", uniRoom);
+  const toUni = () => onOpenArea(null, "Uni", null);
+  /** A door of the front door: the area's room, or (before the rooms list has arrived) the room its note names, so the chat opens when it can. */
+  const openDoor = (p: string) => {
+    const n = data?.tree.nodes.get(p);
+    if (!n) return openPath(p);
+    setDrawer(false); viaMemory.path = p; viaMemory.via = null; setRootOpen(false);
+    onOpenArea(n.path, n.name, pickRoom(withRoom(n).rooms, null) ?? n.channels[0] ?? null);
+  };
   const openPath = (p: string, through?: string | null) => {
     setDrawer(false); viaMemory.path = p; viaMemory.via = through ?? null;
     if (p === ROOT) { setRootOpen(true); onOpenArea(null, "Uni", uniRoom); return; }
     const n = data?.tree.nodes.get(p); if (n) open(n);
   };
-  // T-302: the tree's Uni row is the front door, not the archived Uni room: it names no channel
-  const navRows = (data ? treeRows(data.tree, roomRefs, uniRef) : [{ key: "~uni", via: null, path: ROOT, name: "Uni", depth: 0, kind: "root" as const, slash: null, heldBy: null, heldNode: null, own: false, trunk: [], last: true }])
-    .map((r) => (r.kind === "root" ? { ...r, slash: null } : r));
+  const navRows = data ? treeRows(data.tree, roomRefs, uniRef) : [{ key: "~uni", via: null, path: ROOT, name: "Uni", depth: 0, kind: "root" as const, slash: uniRef ? uniRef.name : null, heldBy: null, heldNode: null, own: !!uniRef, trunk: [], last: true }];
   /** A row's dot is its own node's needs-you items (a parent never lights up for its children's), by the companion's one rule; an item on a
    *  node with no row counts on its nearest ancestor's (r13), so the dots under a level add up to its Needs you. */
   const rowPaths = useMemo(() => new Set(navRows.map((r) => r.path)), [navRows.map((r) => r.path).join("\n")]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -393,14 +400,14 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   // inside it), a mark where sessions are working, and a quiet usage line. A vault with no areas yet, or a profile without chat (no rooms
   // to open), keeps the tree home below.
   const doorAreas = chat && data ? childrenOf(data.tree, ROOT) : [];
-  if (path === null && doorAreas.length) {
+  if (path === null && doorAreas.length && !rootOpen) {
     const doors: Door[] = doorAreas.map((a) => {
       const v = roomView(data!.tree, a.path, roomRefs, uniRef);
       const raw = privateRoot(data!.tree, a.path) ? null : tasks.tree?.stands.get(a.path)?.text ?? (typeof a.metadata.stands === "string" ? a.metadata.stands : null);
       const st = raw ? plainWords(raw) : null;
       return { path: a.path, name: a.name, slug: v.own && v.slash ? v.slash.replace(/^#/, "") : null, stands: st, lastTs: v.own ? rooms.find((r) => r.id === v.target?.id)?.last_ts ?? null : null };
     });
-    return <div className="areas-home tree-home-wrap">{status}<ApprovalRows approvals={approvalsAll.list} className="cp-list cp-approvals th-approvals" /><FrontDoor doors={doors} onOpen={(p) => openPath(p)} />
+    return <div className="areas-home tree-home-wrap">{status}<ApprovalRows approvals={approvalsAll.list} className="cp-list cp-approvals th-approvals" /><FrontDoor doors={doors} onOpen={openDoor} />
       {railHidden && places.length > 0 && <div className="th-places-short">{placesRow}</div>}</div>;
   }
   if (treeHome && path === null && !rootOpen) {

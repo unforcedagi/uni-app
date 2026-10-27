@@ -2,7 +2,7 @@
 // Run: NESTED_TEST_PORT=5681 npx playwright test --config playwright.nested.config.ts
 import { mkdir } from 'node:fs/promises';
 import { test, expect, type Page } from '@playwright/test';
-import { bootAreas } from './areasFixture';
+import { bootAreas, showTree } from './areasFixture';
 
 const SHOTS = 'scripts/browser/__shots__/nested';
 const BUILD = '7dcea809-25cd-4160-ba99-f0a56386adcb';
@@ -18,6 +18,7 @@ const boot = (page: Page) => bootAreas(page, 'seed', { briefs: true, tree: true,
 test.describe('nested rooms', () => {
   test('the tree names the project rooms under atlas without doubling, and the Open action opens that room', async ({ page }) => {
     await boot(page);
+    await showTree(page); // T-302: the tree is in a room (beside it, or the Places drawer on a phone)
     const scope = wide(page) ? page.locator('.th-roomnav') : page.locator('.th-phone-tree');
     for (let i = 0; i < 12; i++) { await scope.locator('.th-row.d1').first().waitFor(); const f = scope.locator('.th-fold[aria-expanded="false"]'); if (!await f.count()) break; await f.first().click(); }
     await expect(scope.locator('.th-go[aria-label^="Atlas,"]')).toContainText('atlas');
@@ -54,6 +55,7 @@ test.describe('nested rooms', () => {
     await boot(page);
     await expect(page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Rooms', exact: true })).toHaveCount(0);
     await expect(page.locator('.rooms nav .room')).toHaveCount(0);
+    await showTree(page);
     const scope = wide(page) ? page.locator('.th-roomnav') : page.locator('.th-phone-tree');
     for (let i = 0; i < 12; i++) { await scope.locator('.th-row.d1').first().waitFor(); const f = scope.locator('.th-fold[aria-expanded="false"]'); if (!await f.count()) break; await f.first().click(); }
     for (const t of await scope.locator('.th-other .th-go').allInnerTexts()) expect(t).not.toMatch(/atlas/);

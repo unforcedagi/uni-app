@@ -1,13 +1,14 @@
 // T-124 r30: the words Aaron reads are the words stored, and every row can be acted on.
 // Run: SIMPLE_TEST_PORT=5711 npx playwright test --config playwright.simple.config.ts r30
 import { test, expect, type Locator, type Page } from '@playwright/test';
-import { bootAreas } from './areasFixture';
+import { bootAreas, leaveFrontDoor, toOldHome } from './areasFixture';
 import { readFileSync } from 'node:fs';
 
 const wide = (page: Page) => (page.viewportSize()?.width ?? 0) >= 900;
 const treeBeside = (page: Page) => wide(page) && (page.viewportSize()?.height ?? 0) >= 400;
 const base = { briefs: true, tree: true, tasks: true, atlas: true, steer: true, pinned: true } as const;
-const boot = (page: Page, extra: Parameters<typeof bootAreas>[2] = {}) => bootAreas(page, 'seed', { ...base, ...extra });
+/** T-302: the app opens on the front door; a test starts where the old home put it (toOldHome) */
+const boot = async (page: Page, extra: Parameters<typeof bootAreas>[2] = {}) => { await bootAreas(page, 'seed', { ...base, ...extra }); await toOldHome(page); };
 const scope = (page: Page) => (treeBeside(page) ? page.locator('.th-roomnav') : page.locator('.th-phone-tree'));
 async function unfoldAll(page: Page) {
   await scope(page).locator('.th-row.d1').first().waitFor();
@@ -15,6 +16,7 @@ async function unfoldAll(page: Page) {
 }
 async function openRoom(page: Page, name: string) {
   if (!wide(page) && await page.locator('.cp-sheet').count()) { await page.keyboard.press('Escape'); await expect(page.locator('.cp-sheet')).toHaveCount(0); }
+  await leaveFrontDoor(page); // T-302: the tree is in a room
   if (!treeBeside(page)) { await page.locator('.sr-drawer, .th-phone-tree').first().waitFor(); if (await page.locator('.sr-drawer').count() && !await page.locator('.th-drawer').count()) await page.locator('.sr-drawer').click(); }
   await unfoldAll(page);
   await scope(page).locator(`.th-go[aria-label^="${name},"]`).click();

@@ -3,7 +3,7 @@
 // Run: DECISIONS_TEST_PORT=5731 npx playwright test --config playwright.decisions.config.ts
 import { mkdir } from 'node:fs/promises';
 import { test, expect, type Page } from '@playwright/test';
-import { bootAreas } from './areasFixture';
+import { bootAreas, leaveFrontDoor } from './areasFixture';
 
 const BUILD = '7dcea809-25cd-4160-ba99-f0a56386adcb';
 const D1 = '01M5D0000000000000000000A1';
@@ -21,6 +21,7 @@ const seed = (page: Page, extra: Record<string, unknown> = {}) => page.addInitSc
 async function openAtlas(page: Page) {
   await bootAreas(page, 'seed', { briefs: true, tree: true, tasks: true, atlas: true, steer: true, pinned: true });
   const nav = wide(page) ? page.locator('.th-roomnav') : page.locator('.th-phone-tree');
+  await leaveFrontDoor(page); // T-302: the tree is in a room
   if (!wide(page)) { await page.locator('.sr-drawer, .th-phone-tree').first().waitFor(); if (await page.locator('.sr-drawer').count() && !await page.locator('.th-drawer').count()) await page.locator('.sr-drawer').click(); }
   await nav.locator('.th-row.d1').first().waitFor();
   for (let i = 0; i < 12; i++) { const f = nav.locator('.th-fold[aria-expanded="false"]'); if (!await f.count()) break; await f.first().click(); }

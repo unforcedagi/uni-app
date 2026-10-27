@@ -713,6 +713,19 @@ const frontDoor = (page: Page) => page.locator('[data-place="front-door"]');
 const treeRow = (page: Page, name: string) => page.locator(isWide(page) ? '.th-roomnav' : '.th-drawer .th-phone-tree').locator(`.th-go[aria-label^="${name},"]`);
 /** A node's way in: its door on the front door, else its row in the room tree. */
 export const areaCard = (page: Page, name: string) => page.locator(`.fd-door[data-path="Areas/${name}"]`).or(treeRow(page, name));
+/** T-302: from the front door into the first room (where the room tree is); elsewhere, nothing. */
+export async function leaveFrontDoor(page: Page) {
+  await page.locator('[data-place="front-door"], .sr, .th-phone-tree').first().waitFor();
+  if (await frontDoor(page).isVisible()) { await page.locator('.fd-door').first().click(); await expect(page.locator('.sr').first()).toBeVisible(); }
+}
+/** T-302: where the old home put a test, reached the way a person now does: on a window with the tree beside the room, Uni's own level
+ *  (the tree's Uni row); elsewhere, a room (its Places drawer holds the tree, opened by the test's own helpers). */
+export async function toOldHome(page: Page) {
+  // a page that isn't on the front door (no chat, no areas, not signed in) is already where the old home put it
+  if (!(await frontDoor(page).waitFor({ timeout: 3000 }).then(() => true, () => false))) return;
+  await leaveFrontDoor(page);
+  if (isWide(page)) { await page.locator('.th-roomnav .th-go[aria-label^="Uni, room"]').first().click(); await expect(page.locator('.sr').first()).toHaveAttribute('data-node', 'Uni'); }
+}
 /** Shows the room tree: from the front door through the first room, and on a phone the Places drawer. */
 export async function showTree(page: Page) {
   await page.locator('[data-place="front-door"], .sr').first().waitFor();

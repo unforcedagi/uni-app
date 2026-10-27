@@ -5,7 +5,7 @@
 // The rooms are the areas fixture's made-up ones; Messages' Rust door is faked (`messages_*`), with made-up people.
 // Run: npx playwright test --config playwright.roomrestore.config.ts
 import { test, expect, type Page } from '@playwright/test';
-import { bootAreas } from './areasFixture';
+import { bootAreas, leaveFrontDoor } from './areasFixture';
 
 const wide = (page: Page) => (page.viewportSize()?.width ?? 0) >= 900 && (page.viewportSize()?.height ?? 0) >= 400;
 const rail = (page: Page) => page.getByRole('navigation', { name: 'Main navigation' });
@@ -43,6 +43,7 @@ async function boot(page: Page) {
 
 /** Open a room from the room tree (a phone opens the tree first, from the room's header). */
 async function openRoom(page: Page, name: string) {
+  await leaveFrontDoor(page); // T-302: the tree is in a room
   if (!wide(page)) { await page.locator('.sr-drawer, .th-phone-tree').first().waitFor(); if (await page.locator('.sr-drawer').count() && !await page.locator('.th-drawer').count()) await page.locator('.sr-drawer').click(); }
   const tree = page.locator(wide(page) ? '.th-roomnav' : '.th-phone-tree, .th-drawer').first();
   await tree.locator('.th-row.d1').first().waitFor();

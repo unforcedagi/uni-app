@@ -4,7 +4,7 @@
 // Run: SIMPLE_TEST_PORT=5711 npx playwright test --config playwright.simple.config.ts
 import { mkdir } from 'node:fs/promises';
 import { test, expect, type Page } from '@playwright/test';
-import { bootAreas } from './areasFixture';
+import { bootAreas, leaveFrontDoor, showTree, toOldHome } from './areasFixture';
 
 const SHOTS = 'scripts/browser/__shots__/simple';
 /** r27: `__arrive(…, -426600)` puts a message at 2026-10-14 08:30Z (the fixture's clock is pinned at Oct 9 10:00Z): after a record written at 08:00 that day */
@@ -34,13 +34,15 @@ async function answersOpen(sheet: ReturnType<Page['locator']>) {
 /** r28: the task's sheet (a phone's strip panel is a dialog too, and it stays under a task's sheet) */
 const taskDialog = (page: Page) => page.getByRole('dialog').filter({ has: page.locator('.task-kind') });
 const base = { briefs: true, tree: true, tasks: true, atlas: true, steer: true, pinned: true } as const;
-const boot = (page: Page, extra: Parameters<typeof bootAreas>[2] = {}) => bootAreas(page, 'seed', { ...base, ...extra });
+/** T-302: the app opens on the front door; a test starts where the old home put it (toOldHome) */
+const boot = async (page: Page, extra: Parameters<typeof bootAreas>[2] = {}) => { await bootAreas(page, 'seed', { ...base, ...extra }); await toOldHome(page); };
 const scope = (page: Page) => (treeBeside(page) ? page.locator('.th-roomnav') : page.locator('.th-phone-tree'));
 /** Open a room from the rooms list (phone: back to the list first when a room is open). */
 async function openRoom(page: Page, name: string) {
   // r16: the strip's sheet is modal over the room: close it first, as a person would
   if (!wide(page) && await page.locator('.cp-sheet').count()) { await page.keyboard.press('Escape'); await expect(page.locator('.cp-sheet')).toHaveCount(0); }
   // r13: below 900px the tree is the phone's home and, from a room, the drawer the room's header opens
+  await leaveFrontDoor(page); // T-302: the tree is in a room
   if (!treeBeside(page)) { await page.locator('.sr-drawer, .th-phone-tree').first().waitFor(); if (await page.locator('.sr-drawer').count() && !await page.locator('.th-drawer').count()) await page.locator('.sr-drawer').click(); }
   await unfoldAll(page);
   await scope(page).locator(`.th-go[aria-label^="${name},"]`).click();
@@ -150,6 +152,7 @@ test.describe('simple', () => {
 
   test('where it stands is the node\'s own sentence, never a count or the description', async ({ page }) => {
     await boot(page);
+    await showTree(page); // T-302: on a phone the tree is in a room's Places drawer
     await scope(page).locator('.th-go[aria-label^="Uni,"]').click();
     await expect(page.locator('.sr-title')).toHaveText('Uni');
     await openCompanion(page);
@@ -168,6 +171,7 @@ test.describe('simple', () => {
 
   test('every item that needs you is reachable (whole rows, the rest behind "+N more ›"); "Everything here" goes to the full page', async ({ page }) => {
     await boot(page);
+    await showTree(page); // T-302: on a phone the tree is in a room's Places drawer
     if (!wide(page)) await expect(page.locator('.th-phone-tree')).toBeVisible();
     await scope(page).locator('.th-go[aria-label^="Uni,"]').click();
     await expect(page.locator('.sr-title')).toHaveText('Uni');
@@ -440,6 +444,8 @@ test.describe('simple', () => {
     await expect(page.getByRole('button', { name: /^(⤓ )?Keep|Ask Uni about|Reply in thread|React/ })).toHaveCount(0);
     // the ⋯ is on the message's edge and quiet (hidden until hover with a mouse)
     const more = first.getByRole('button', { name: /^More actions for/ });
+    // T-302: on a phone the room was opened from the Places drawer; a tap elsewhere ends that tap's hover over the first message
+    if (!wide(page)) await page.mouse.move(1, 1);
     if (wide(page)) await expect(more).toHaveCSS('opacity', '0'); else expect(Number(await more.evaluate((e) => getComputedStyle(e).opacity))).toBeLessThan(0.6);
     await first.hover();
     await more.click();
@@ -504,6 +510,7 @@ test.describe('simple', () => {
 
   test('nested rooms still nest, and jumping to a child and back works', async ({ page }) => {
     await boot(page);
+    await showTree(page); // T-302: on a phone the tree is in a room's Places drawer
     await unfoldAll(page);
     const rows = scope(page).locator('.th-row');
     expect(await rows.evaluateAll((els) => els.map((e) => [e.querySelector('b')?.textContent, [...e.classList].find((c) => /^d\d$/.test(c))]))).toEqual(expect.arrayContaining([['Atlas', 'd1'], ['ATLAS', 'd2'], ['Learn Vibe Build', 'd2'], ['Techne', 'd1'], ['COhere 2026', 'd2']]));
@@ -531,6 +538,7 @@ test.describe('simple', () => {
 
   test('the rooms list is quiet: names, rooms in small type, one dot for "needs you", no counters', async ({ page }) => {
     await boot(page);
+    await showTree(page); // T-302: on a phone the tree is in a room's Places drawer
     await expect(scope(page).locator('.th-tag, .th-open, .th-stump, .th-door')).toHaveCount(0);
     await expect(scope(page).locator('.th-dot').first()).toBeVisible();
     // folded, an area still shows the dot for what is under it
@@ -835,6 +843,7 @@ test.describe('simple', () => {
 
   test('r7: a room line is the room\'s real name; no constructed slash path in the DOM', async ({ page }) => {
     await boot(page, { multiRoom: true });
+    await showTree(page); // T-302: on a phone the tree is in a room's Places drawer
     await unfoldAll(page);
     await expect(page.locator('body')).not.toContainText('boulder/cohere');
     await expect(scope(page).locator('.th-go[aria-label^="COhere"] .th-sub').first()).toHaveText('#Cohere'); // r13: the channel's own name, as it is
@@ -931,10 +940,10 @@ test.describe('simple', () => {
     await page.keyboard.press('Alt+ArrowLeft');
     await page.keyboard.press('Alt+ArrowLeft');
     await expect(page.locator('.sr-title')).toHaveText('Uni');
-    await expect(nav.getByRole('button', { name: 'Back' })).toBeDisabled();
+    // (T-302: the way to Uni's level passed the front door and a room, so Back is still possible here)
     await expect(nav.getByRole('button', { name: 'Forward' })).toBeEnabled();
     const recent = nav.getByRole('region', { name: 'Recent' });
-    await expect(recent.locator('button')).toHaveText(['Learn Vibe Build', 'ATLAS']);
+    await expect(recent.locator('button')).toHaveText(['Learn Vibe Build', 'ATLAS', 'Techne']); // T-302: and the room the way in passed
     await recent.getByRole('button', { name: 'ATLAS' }).click();
     await expect(page.locator('.sr-title')).toHaveText('ATLAS');
   });
@@ -1339,6 +1348,7 @@ test.describe('simple', () => {
   // ---------------------------------------------------------------------------------------------- r12: one app
   test('r12: a saved Map, Octopus or Classic choice opens the room layout, and the setting is dropped', async ({ page }) => {
     await boot(page, { savedLayout: 'tree' });
+    await showTree(page); // T-302: on a phone the tree is in a room's Places drawer
     await expect(scope(page)).toBeVisible();
     await expect(page.locator('.node-stage, .th-stage, .th-classic')).toHaveCount(0);
     expect(await page.evaluate(() => localStorage.getItem('uni.home.layout.v1'))).toBeNull();
@@ -1351,6 +1361,7 @@ test.describe('simple', () => {
 
   test('r12: a room no node owns is under "Other rooms" (folded) and opens in the same room shell', async ({ page }) => {
     await boot(page, { strayRoom: true });
+    await showTree(page); // T-302: on a phone the tree is in a room's Places drawer
     const nav = scope(page);
     await nav.locator('.th-row.d1').first().waitFor();
     const group = nav.locator('.th-others');
@@ -1530,6 +1541,7 @@ test.describe('simple', () => {
 
   test('r12: Uni\'s own panel is Uni\'s items plus at most three from the areas: never a "+25 more"', async ({ page }) => {
     await boot(page, { crowded: true });
+    await showTree(page); // T-302: on a phone the tree is in a room's Places drawer
     await scope(page).locator('.th-go[aria-label^="Uni,"]').click();
     await openCompanion(page);
     await expect(page.locator('.cp-item').first()).toBeVisible();
@@ -1822,7 +1834,7 @@ test.describe('simple', () => {
     await expect(page.getByRole('alert')).toHaveText(/Couldn't read your key/);
     await expect(page.getByText(/pair/i)).toHaveCount(0);
     await page.getByRole('button', { name: 'Retry' }).click();
-    await expect(page.locator('.sr-title, .th-phone-tree').first()).toBeVisible();
+    await expect(page.locator('.sr-title, .th-phone-tree, [data-place="front-door"]').first()).toBeVisible(); // T-302: or the front door
   });
 
   test('r13: a known room is never a blank timeline while its first read is under way', async ({ page }) => {
@@ -2143,11 +2155,15 @@ test.describe('r15', () => {
     await expect(page.getByText(/at least/)).toHaveCount(0);
   });
 
-  test('740×360: the first screen is the room, with Places in its header, not a full-screen list of places', async ({ page }) => {
+  // T-302: the first screen is the front door at every size; a door opens its room, with Places in its header
+  test('740×360: the first screen is the front door, and a room opened from it has Places in its header, not a full-screen list of places', async ({ page }) => {
     await page.setViewportSize({ width: 740, height: 360 });
-    await boot(page);
+    await bootAreas(page, 'seed', base);
     await expect(page.getByRole('navigation', { name: 'Main navigation' })).toBeHidden();
-    await expect(page.locator('.sr')).toHaveAttribute('data-node', 'Uni');
+    await expect(page.locator('[data-place="front-door"]')).toBeVisible();
+    expect(await fits(page)).toBe(true);
+    await page.locator('.fd-door[data-path="Areas/Techne"]').click();
+    await expect(page.locator('.sr')).toHaveAttribute('data-node', 'Techne');
     await expect(page.locator('.sr-chat')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Places' })).toBeVisible();
     await expect(page.locator('.th-phone-tree')).toHaveCount(0);
@@ -2208,9 +2224,8 @@ test.describe('r15', () => {
     if (wide(page)) await expect(page.locator('.th-roomnav')).toBeVisible();
     else await expect(page.getByRole('button', { name: 'Places' })).toBeVisible();
     await page.getByRole('button', { name: 'Open Uni' }).click();
-    // a phone held upright opens Uni on its tree; elsewhere Uni's room
-    if (wide(page)) await expect(page.locator('.sr')).toHaveAttribute('data-node', 'Uni');
-    else await expect(page.locator('.th-phone-tree')).toBeVisible();
+    // T-302: Uni's home is the front door at every size
+    await expect(page.locator('[data-place="front-door"]')).toBeVisible();
   });
 });
 
@@ -3318,12 +3333,14 @@ test.describe('r20', () => {
   });
 
   for (const size of [{ width: 800, height: 600 }, { width: 740, height: 360 }]) {
-    test(`P2 ${size.width}×${size.height} opens on the chat; Places is a drawer you open, and a room picked there lands on its chat`, async ({ page }) => {
+    test(`P2 ${size.width}×${size.height} opens on the front door, a door lands on its chat; Places is a drawer you open, and a room picked there lands on its chat`, async ({ page }) => {
       await page.setViewportSize(size);
-      await boot(page);
-      await expect(page.locator('.sr')).toHaveAttribute('data-node', 'Uni');
+      await bootAreas(page, 'seed', base);
+      await expect(page.locator('[data-place="front-door"]')).toBeVisible(); // T-302: the first screen at every size
+      await page.locator('.fd-door[data-path="Areas/Atlas"]').click();
+      await expect(page.locator('.sr')).toHaveAttribute('data-node', 'Atlas');
       await expect(page.locator('.sr-chat')).toBeVisible();
-      await expect(page.locator('.th-phone-tree, .areas-home')).toHaveCount(0);
+      await expect(page.locator('.th-phone-tree, [data-place="front-door"]')).toHaveCount(0);
       const places = page.getByRole('button', { name: 'Places' });
       await expect(places).toBeVisible();
       await places.click();
@@ -3573,12 +3590,14 @@ test.describe('r21', () => {
   test('P2 (Codex 9) a cold launch shows a quiet chat while the conversation opens (never a status panel), and says so past 8 s with Retry', async ({ page }) => {
     // (an upright phone launches on the tree; its landscape launches on the chat, as every other size does)
     if (!wide(page)) await page.setViewportSize({ width: 740, height: 360 });
-    await boot(page, { roomsDelay: 9500 });
+    // T-302: the app launches on the front door (it paints from the areas, not the rooms); a room opened before the rooms list arrives
+    await bootAreas(page, 'seed', { ...base, roomsDelay: 9500 });
+    await page.locator('.fd-door').first().click();
     const chat = page.locator('.sr-chat');
     await expect(chat).toHaveAttribute('data-chat', 'waiting');
     await expect(chat.locator('.sr-chat-wait-line')).toHaveText('Opening the conversation…');
     // (the room's name once the rooms list says it)
-    await expect(chat.locator('.sr-chat-wait-composer')).toHaveText(/^Message #?Uni$/);
+    await expect(chat.locator('.sr-chat-wait-composer')).toHaveText(/^Message /);
     await expect(page.getByText('Opening the room…')).toHaveCount(0);
     await expect(chat.locator('.sr-chat-wait-line')).toHaveText('Still opening the conversation · Retry', { timeout: 10_000 });
     await expect(chat).toHaveAttribute('data-chat', 'open', { timeout: 10_000 });

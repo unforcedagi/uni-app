@@ -4,7 +4,7 @@
 // (The "Where we are" census, its Now/Soon/Someday buckets and the per-row priority selects were deleted in r13.)
 import { mkdir } from 'node:fs/promises';
 import { test, expect, type Page } from '@playwright/test';
-import { bootAreas } from './areasFixture';
+import { bootAreas, leaveFrontDoor } from './areasFixture';
 
 const SHOTS = 'scripts/browser/__shots__/roomsnav';
 const wide = (page: Page) => (page.viewportSize()?.width ?? 0) >= 900;
@@ -33,6 +33,7 @@ async function full(page: Page) {
 /** Open a node by name: a row of the left column (wide), or a row of the room tree / a child in the panel (phone). */
 /** r7: areas start folded; open every fold so any row can be clicked. */
 async function unfoldTree(page: Page) {
+  await leaveFrontDoor(page); // T-302: Uni's home is the front door; the tree is in a room
   if (!wide(page) && await page.locator('.sr-drawer').count() && !await page.locator('.th-drawer').count()) await page.locator('.sr-drawer').click();
   const tree = page.locator('.th-roomnav, .th-phone-tree').first();
   if (!await tree.count()) return;
@@ -53,7 +54,8 @@ const needs = (page: Page) => work(page).getByRole('region', { name: 'Needs you'
 const priority = async (page: Page) => { const d = page.getByRole('dialog'); if (await d.locator('.task-details:not([open]) > summary').count()) await d.locator('.task-details > summary').click(); return d.getByRole('group', { name: 'Priority' }); };
 
 test.describe('rooms nav', () => {
-  test('the room tree is the home on both screens: a column beside the panel on Daylight, the home on the phone', async ({ page }) => {
+  // T-302: Uni's home is the front door of the rooms; the room tree is in every room
+  test('the room tree is in a room on both screens: a column beside it on Daylight, the Places drawer on the phone', async ({ page }) => {
     await boot(page);
     await unfoldTree(page);
     if (wide(page)) {
@@ -61,8 +63,6 @@ test.describe('rooms nav', () => {
       await expect(nav).toBeVisible();
       await expect(page.locator('.sr')).toBeVisible();
       await expect(page.locator('.node-stage')).toHaveCount(0);
-      await title(page, 'Uni');
-      await expect(nav.locator('.th-go[aria-current="page"]')).toHaveAttribute('data-path', '');
       for (const n of ['Boulder', 'COhere 2026', 'Techne', 'Unforced Development']) await expect(nav.locator(`.th-go[aria-label^="${n},"]`)).toBeVisible();
       await expect(nav.locator('.th-go[aria-label^="COhere 2026,"]')).toContainText('#Cohere');
       await expect(nav.locator('.th-go[aria-label^="Boulder Civic Calendar,"]')).not.toContainText('held by');
@@ -72,13 +72,14 @@ test.describe('rooms nav', () => {
       await expect(nav).toBeVisible();
       await expect(nav.locator('.th-go[aria-current="page"]')).toHaveAttribute('aria-label', /^Techne,/);
     } else {
-      await expect(page.locator('.th-phone-tree')).toBeVisible();
-      await expect(page.locator('.th-go[aria-label^="COhere 2026,"]')).toContainText('#Cohere');
-      await expect(page.locator('.th-go[aria-label^="Techne,"] .th-dot')).toBeVisible();
-      for (const b of await page.locator('.th-go').all()) expect((await b.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+      const tree = page.locator('.th-drawer .th-phone-tree');
+      await expect(tree).toBeVisible();
+      await expect(tree.locator('.th-go[aria-label^="COhere 2026,"]')).toContainText('#Cohere');
+      await expect(tree.locator('.th-go[aria-label^="Techne,"] .th-dot')).toBeVisible();
+      for (const b of await tree.locator('.th-go').all()) expect((await b.boundingBox())!.height).toBeGreaterThanOrEqual(44);
     }
     expect(await fits(page)).toBe(true);
-    await shot(page, 'home');
+    await shot(page, 'tree');
   });
 
   test('Boulder → COhere 2026: each work view lists its own subtree; seen from above a row says where it sits', async ({ page }) => {
@@ -158,25 +159,11 @@ test.describe('rooms nav', () => {
     expect(await page.evaluate(() => (window as any).__tasks.find((t: any) => t.id === 'k3').metadata.priority)).toBe('someday');
   });
 
-  test('Uni\'s work view is all of it, across the areas: each row says where it sits', async ({ page }) => {
+  // T-302: "one line by place from above" was Uni's level, which went with the Uni room as home; the front door shows a private area's name only
+  test('private areas: the tree never shows their items; inside the area they are its rows; they are counted', async ({ page }) => {
     await boot(page);
-    if (!wide(page)) await expect(page.locator('.th-phone-tree')).toBeVisible();
-    await go(page, 'Uni');
-    await title(page, 'Uni');
-    await expect(row(page, 'T-33')).toHaveCount(1);
-    await expect(work(page).getByRole('region', { name: 'Needs you' })).toHaveCount(1);
-    await shot(page, 'root');
-  });
-
-  test('private areas are one line by place from above; inside the area they are its rows; they are counted', async ({ page }) => {
-    await boot(page);
-    if (!wide(page)) await expect(page.locator('.th-phone-tree')).not.toContainText(/T-3[12]/);
-    await go(page, 'Uni');
-    await title(page, 'Uni');
-    await expect(work(page)).not.toContainText(/Sit twenty|Find a teacher|T-31|T-32/);
-    await expect(needs(page).locator('.cp-private')).toHaveText('In Sanctum: 1 thing for you · open Sanctum'); // r21: no "›" on a link row; r22: the private line
-    await expect(work(page)).toContainText(/One item in a private area is not listed here/);
-    if (wide(page)) await expect(page.locator('.th-roomnav')).not.toContainText(/T-3[12]/);
+    await unfoldTree(page);
+    await expect(page.locator(wide(page) ? '.th-roomnav' : '.th-drawer .th-phone-tree')).not.toContainText(/T-3[12]|Sit twenty/);
     // r14: the area itself, opened by Aaron: its items are ordinary rows, with their titles
     await go(page, 'Sanctum');
     await title(page, 'Sanctum');

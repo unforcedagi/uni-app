@@ -12,7 +12,6 @@ const ROOM = 'ch-garden';
 /** the fixture's user, by a made-up name */
 const ME = 'Kit (you)';
 const SHOTS = 'scripts/browser/__shots__/prompts';
-const wide = (page: Page) => (page.viewportSize()?.width ?? 0) >= 900 && (page.viewportSize()?.height ?? 0) >= 400;
 const android = (page: Page) => page.evaluate(() => /Android/i.test(navigator.userAgent));
 
 async function boot(page: Page) {
@@ -23,13 +22,8 @@ async function boot(page: Page) {
     w.Notification = class { static permission = 'granted'; static requestPermission = async () => 'granted'; constructor(title: string, o: { body?: string } = {}) { w.__notes.push({ title, body: o.body ?? '' }); } };
   });
   await bootAreas(page, 'seed', { tree: true, tasks: true, briefs: true, strayRoom: true });
-  // Uni's level holds every room's prompts: beside the tree on a wide screen, the tree home itself on a phone
-  if (wide(page)) {
-    const nav = page.locator('.th-roomnav');
-    await nav.locator('.th-row.d1').first().waitFor();
-    await nav.locator('.th-go[aria-label^="Uni,"]').first().click();
-    await expect(page.locator('.sr')).toHaveAttribute('data-node', 'Uni');
-  } else await page.locator('.th-phone-tree, .cp.strip').first().waitFor();
+  // T-302: Uni's home, the front door, holds every room's prompts ("Waiting on your OK")
+  await page.locator('[data-place="front-door"]').waitFor();
 }
 /** the Daylight upright opens on Uni's level with Needs you folded to one line: open it */
 const strip = (page: Page) => page.locator('.cp-line[aria-expanded="false"]');

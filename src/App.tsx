@@ -16,7 +16,7 @@ import { activeProfile, effectiveLifeVault, showUniGlue } from "./areas/profile"
 import { clearProjectBodies } from "./areas/projectBody";
 import AreasSurface from "./areas/LifeOsSurface";
 import type { Overlay } from "./areas/AreasSurface";
-import { rootOpenMemory } from "./areas/rootMemory";
+import { setRootOpenMemory } from "./areas/rootMemory";
 import { UNI_CHANNEL } from "./areas/treeCore";
 import type { NoteRef } from "./areas/noteRefsCore";
 import AreaSelfTest from "./interface/selftest/SelfTest";
@@ -241,6 +241,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const [hasOverlay, setHasOverlay] = useState(false);
   const setOverlay = useCallback((o: Overlay | null) => { overlayRef.current = o; setHasOverlay(!!o?.history); }, []);
   const tabsReady = useRef(false);
+  /** T-302: a place opened before the rooms list arrived (the front door paints from the areas first): the restore keeps it. */
+  const openedEarly = useRef(false);
   /** The place on screen is one the app restored or opened, not the Uni it paints before the saved place is read. */
   const placeSettled = useRef(false);
   const [vaults, setVaults] = useState<string[]>([]);
@@ -685,14 +687,17 @@ function Conversations({ onForget }: { onForget: () => void }) {
   }
   /** A room that a node owns opens as that node: one view of a room, wherever it is opened from (the tree, search, a note link, a needs-you item). */
   function resolveTarget(target: TabTarget): TabTarget {
+    // T-302: Uni with its room attached is Uni's own level; Uni without one is the front door (whichever way it is reached: Back, the rail)
+    if (target.kind === "areas") { setRootOpenMemory(!!target.channel); return target; }
     if (target.kind !== "room" || !target.channel) return target;
     const n = nodeOfRoom(target.channel);
     if (!n) return target;
-    if (n.path === "") { rootOpenMemory.open = true; return { kind: "areas", title: "Uni", channel: target.channel }; }
+    if (n.path === "") { setRootOpenMemory(true); return { kind: "areas", title: "Uni", channel: target.channel }; }
     return { kind: "area", path: n.path, title: n.name, channel: target.channel };
   }
   /** `fromHistory`: Back and Forward move through the places visited; they do not add to them. */
   function openTarget(target: TabTarget, mode: OpenMode = "focus", confirmed = false, fromHistory = false) {
+    if (!tabsReady.current) openedEarly.current = true;
     target = resolveTarget(target);
     if (target.note) target = { ...target, note: resolveNote(target.note, aliases.current) };
     // No tab strip: a place replaces the one you were on (a second tab never shows the same room). The Journal keeps its own tab (its page and any recording stay alive), and a place opened from it goes beside it.
@@ -931,11 +936,11 @@ function Conversations({ onForget }: { onForget: () => void }) {
       const ids = rows.map((r) => r.id);
       let saved: string | null = null, legacy: string | null = null;
       try { saved = localStorage.getItem(TABS_KEY); if (!saved) legacy = localStorage.getItem(LEGACY_TABS_KEY); } catch { /* private storage */ }
-      let next = saved ? restoreTabs(saved, ids) : migrateLegacyTabs(legacy, ids);
+      let next = openedEarly.current && activeTab(tabsRef.current) ? tabsRef.current : saved ? restoreTabs(saved, ids) : migrateLegacyTabs(legacy, ids);
       // a node that only borrows a room (r15) reopens on the last room actually opened, else on Uni
       let lastRoom: string | null = null;
       try { lastRoom = localStorage.getItem(LAST_ROOM_KEY); } catch { /* private storage */ }
-      next = restorePlace(next, lastRoom, ids, () => crypto.randomUUID());
+      if (!openedEarly.current) next = restorePlace(next, lastRoom, ids, () => crypto.randomUUID());
       // T-294: Uni's side's last place (the way back from Messages, Mail, the Journal), and its spot, which the room comes back to
       let place = null;
       try { place = readUniPlace(localStorage.getItem(UNI_PLACE_KEY), ids); } catch { /* private storage */ }
@@ -948,6 +953,9 @@ function Conversations({ onForget }: { onForget: () => void }) {
           : uni ? { kind: "areas", title: "Uni" } : rows[0] ? { kind: "room", channel: rows[0].id, title: rows[0].name } : { kind: "areas", title: "Uni" };
         next = openTab(next, target, "new", () => crypto.randomUUID());
       }
+      // T-302: a restored Uni place is Uni's own level when it carries its room, else the front door (as resolveTarget decides for an open)
+      const restored = activeTab(next);
+      if (restored?.kind === "areas") setRootOpenMemory(!!restored.channel);
       // Note stacks are reconstructed from their saved top-level tab target.
       switchToTabRef.current(activeTab(next));
       // Restoring the first tab preserves the viewport-specific sidebar default.
@@ -1921,8 +1929,9 @@ function Conversations({ onForget }: { onForget: () => void }) {
   // search, thread, Journal, room) before leaving it. The listener is only
   // registered while there is somewhere to go back to, so at the room list
   // the system default runs (the app goes to the background, as usual).
-  // T-302: Uni's home is the front door of the area rooms; the archived Uni room is no longer attached to it.
-  const uniHome = (): TabTarget => ({ kind: "areas", title: "Uni" });
+  // T-302: Uni's home is the front door of the area rooms (Uni's own level, with its room, is a row of the tree); asking for the home
+  // closes that level wherever it is open.
+  const uniHome = (): TabTarget => { setRootOpenMemory(false); return { kind: "areas", title: "Uni" }; };
   /** r22 (Codex 2): the last Uni or area opened, which a room's own Back (a phone's) goes up to. Kept for this session only. */
   const originRef = useRef<TabTarget | null>(null);
   /** T-294: the place on Uni's side a utility was opened from (Uni, an area, a room, a thread; kept on the device): the Back of the Journal, the
