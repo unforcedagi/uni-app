@@ -8,7 +8,7 @@
 //   repo `folder` names. What it is doing now is `doing_now` (mts writes it while it runs); words, never ids.
 import type { RawNote } from "../areas/taskCore.ts";
 import { isPrivateName } from "../areas/treeRooms.ts";
-import { redactRaw } from "./sessionWords.ts";
+import { redactRaw, safeStep } from "./sessionWords.ts";
 import { END_WHYS, isFolder, makeProject, ModelError, type Area, type EndWhy, type Project, type ProjectStatus, type Session, type SessionEnd, type SessionState, type Work } from "./model.ts";
 
 /** A project the model can't take, named so it is never silently missing. `areaPath`: the area it sits under (even one with no room), so
@@ -241,7 +241,7 @@ export function workFrom(src: Sources, now = Date.now()): LiveWork {
     const steps = typeof m.steps === "number" && Number.isFinite(m.steps) ? Math.max(0, Math.floor(m.steps)) : 0;
     sessions.push({
       id, project, state, ask,
-      now: live && str(m.doing_now) ? plainWords(str(m.doing_now)!) : null, nowAt: live ? time(m.doing_at) : null,
+      now: live && str(m.doing_now) ? safeStep(str(m.doing_now)!) : null, nowAt: live ? time(m.doing_at) : null,
       startedAt, endedAt: ended, steps,
       result: live ? null : resultWords(m.summary, state),
       video: str(m.video) && /^https:\/\//.test(str(m.video)!) ? str(m.video) : null,

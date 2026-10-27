@@ -1,68 +1,59 @@
 {
- "about": "T-304: the redaction rules mts and the uni-app share, and the cases both test suites run. The text is matched after NFKD, with marks and invisible format characters dropped and lookalike letters folded to Latin (fold); everything from the first secret-like key or key shape to the end of the text is hidden. Made-up values only; {{x*n}} repeats x n times (so no key-shaped literal is committed). The same file is tests/redaction_vectors.json in mts-launcher and scripts/fixtures/redaction-vectors.json in uni-app.",
+ "about": "T-304: the redaction rules mts and the uni-app share, and the cases both test suites run. The text is matched after NFKD, with marks and invisible format characters dropped, lookalike letters folded to Latin (fold) and every dash (Pd, and dashes) read as -; everything from the first secret-like word (anywhere, even inside a word) or key shape to the end of the text is hidden. A step line is a fixed phrase (phrases) with a label only when the label passes LABEL: ASCII chars only, tokens (split) at most max_token long, at most max_mixed when they mix letters and digits, under entropy_max bits a character from entropy_from long, at most max_case_turns lower-to-upper turns, and unchanged by the redactor. Made-up values only; {{x*n}} repeats x n times (so no key-shaped literal is committed). The same file is tests/redaction_vectors.json in mts-launcher and scripts/fixtures/redaction-vectors.json in uni-app.",
  "hidden": "[hidden]",
  "rules": [
   {
    "name": "secret-word",
-   "re": "(?:passw(?:or)?d|passphrase|passcode|secret|token|credential|authorization|bearer|api[_-]?key|access[_-]?key|private[ _-]?key)s?",
+   "re": "pass(?:word|wd|phrase|code)|secret|token|api[ _-]?key|access[ _-]?key|bearer|credential|private|authori[sz]ation",
    "flags": "i",
-   "guard": "not-lower",
    "mix": false
   },
   {
    "name": "short-key",
    "re": "(?<![A-Za-z])(?:pass|pwd|pw|cookie|auth)s?(?=\\s*[\"']?\\s*[:=])",
    "flags": "i",
-   "guard": null,
    "mix": false
   },
   {
    "name": "key-block",
    "re": "-----BEGIN",
    "flags": "",
-   "guard": null,
    "mix": false
   },
   {
    "name": "key-prefix",
    "re": "sk-(?:ant|proj|live|test|svcacct|admin)-|gh[pousr]_[A-Za-z0-9]{6,}|github_pat_|xox[abprse]-|nsec1[02-9ac-hj-np-z]{6,}|eyJ[A-Za-z0-9_-]{10,}|AIza[0-9A-Za-z_-]{10,}|(?:AKIA|ASIA)[0-9A-Z]{12,}",
    "flags": "",
-   "guard": null,
    "mix": false
   },
   {
    "name": "sk-key",
    "re": "(?<![A-Za-z0-9])sk-[A-Za-z0-9_-]{6,}",
    "flags": "",
-   "guard": null,
    "mix": false
   },
   {
-   "name": "sk-run",
-   "re": "sk-[A-Za-z0-9_-]{20,}",
+   "name": "sk-mixed",
+   "re": "sk-[A-Za-z0-9_-]{6,}",
    "flags": "",
-   "guard": null,
    "mix": true
   },
   {
    "name": "url-credentials",
    "re": "://[^/\\s:@]+:[^/\\s@]+@",
    "flags": "",
-   "guard": null,
    "mix": false
   },
   {
    "name": "hex-run",
    "re": "[0-9a-fA-F]{32,}",
    "flags": "",
-   "guard": null,
    "mix": false
   },
   {
    "name": "base64-run",
    "re": "[A-Za-z0-9+/=]{32,}",
    "flags": "",
-   "guard": null,
    "mix": true
   }
  ],
@@ -130,6 +121,93 @@
   "\u0251": "a",
   "\u0261": "g"
  },
+ "dashes": "\u2212\u2043",
+ "label": {
+  "chars": "[A-Za-z0-9/._-]",
+  "max_len": 64,
+  "split": "[/._-]",
+  "max_token": 32,
+  "max_mixed": 12,
+  "entropy_from": 12,
+  "entropy_max": 3.5,
+  "max_case_turns": 3
+ },
+ "phrases": [
+  {
+   "tools": [
+    "Bash"
+   ],
+   "bare": "Running a command",
+   "with": "Running {}"
+  },
+  {
+   "tools": [
+    "Edit",
+    "MultiEdit",
+    "NotebookEdit"
+   ],
+   "bare": "Editing a file",
+   "with": "Editing {}"
+  },
+  {
+   "tools": [
+    "Write"
+   ],
+   "bare": "Writing a file",
+   "with": "Writing {}"
+  },
+  {
+   "tools": [
+    "Read"
+   ],
+   "bare": "Reading a file",
+   "with": "Reading {}"
+  },
+  {
+   "tools": [
+    "Grep",
+    "Glob"
+   ],
+   "bare": "Searching the code",
+   "with": null
+  },
+  {
+   "tools": [
+    "WebSearch"
+   ],
+   "bare": "Searching the web",
+   "with": null
+  },
+  {
+   "tools": [
+    "WebFetch"
+   ],
+   "bare": "Reading a web page",
+   "with": null
+  },
+  {
+   "tools": [
+    "Task",
+    "Agent"
+   ],
+   "bare": "Handing off a part of the work",
+   "with": null
+  },
+  {
+   "tools": [
+    "TodoWrite"
+   ],
+   "bare": "Updating its to-do list",
+   "with": null
+  },
+  {
+   "tools": [
+    "Skill"
+   ],
+   "bare": "Using a skill",
+   "with": "Using the {} skill"
+  }
+ ],
  "cases": [
   {
    "from": "tt6oiyni",
@@ -196,6 +274,60 @@
    "name": "env assignment",
    "in": "export API_KEY=abc123",
    "out": "export [hidden]"
+  },
+  {
+   "from": "zabogff4",
+   "name": "a bare sk- key glued to a word",
+   "in": "buildsk-abc123xyz",
+   "out": "[hidden]"
+  },
+  {
+   "from": "zabogff4",
+   "name": "it, in a Read label",
+   "in": "Reading buildsk-abc123xyz",
+   "out": "Reading [hidden]"
+  },
+  {
+   "from": "zabogff4",
+   "name": "it, in a Bash label",
+   "in": "Running buildsk-abc123xyz",
+   "out": "Running [hidden]"
+  },
+  {
+   "from": "zabogff4",
+   "name": "api key with a space",
+   "in": "api key=violet meadow phrase",
+   "out": "[hidden]"
+  },
+  {
+   "from": "zabogff4",
+   "name": "a secret word with a lowercase suffix",
+   "in": "passwordvalue=violet meadow phrase",
+   "out": "[hidden]"
+  },
+  {
+   "from": "zabogff4",
+   "name": "nonbreaking hyphens in a key",
+   "in": "sk\u2011ant\u2011abc123",
+   "out": "[hidden]"
+  },
+  {
+   "from": "zabogff4",
+   "name": "other dash variants in a key",
+   "in": "use sk\u2010ant\u2212abc123 and sk\u2013proj\u2014abc",
+   "out": "use [hidden]"
+  },
+  {
+   "from": "zabogff4",
+   "name": "apikey run together",
+   "in": "myapikey: violet",
+   "out": "[hidden]"
+  },
+  {
+   "from": "zabogff4",
+   "name": "a secret word inside a word, in a field",
+   "in": "Checked the tokenvalue violet meadow",
+   "out": "Checked the [hidden]"
   },
   {
    "from": "gayyub1d",
@@ -384,6 +516,30 @@
    "out": "Loaded the [hidden]"
   },
   {
+   "from": "over-hide",
+   "name": "a word with secret in it",
+   "in": "Secretary: Jo",
+   "out": "[hidden]"
+  },
+  {
+   "from": "over-hide",
+   "name": "a word with token in it",
+   "in": "Tokenizer tests pass",
+   "out": "[hidden]"
+  },
+  {
+   "from": "over-hide",
+   "name": "a word with password in it",
+   "in": "A passwordless login",
+   "out": "A [hidden]"
+  },
+  {
+   "from": "over-hide",
+   "name": "a word with private in it",
+   "in": "Spoke privately",
+   "out": "Spoke [hidden]"
+  },
+  {
    "from": "plain",
    "name": "Editing store.ts",
    "in": "Editing store.ts",
@@ -421,27 +577,9 @@
   },
   {
    "from": "plain",
-   "name": "Secretary: Jo",
-   "in": "Secretary: Jo",
-   "out": "Secretary: Jo"
-  },
-  {
-   "from": "plain",
-   "name": "Tokenizer tests pass",
-   "in": "Tokenizer tests pass",
-   "out": "Tokenizer tests pass"
-  },
-  {
-   "from": "plain",
    "name": "compass: north",
    "in": "compass: north",
    "out": "compass: north"
-  },
-  {
-   "from": "plain",
-   "name": "A passwordless login",
-   "in": "A passwordless login",
-   "out": "A passwordless login"
   },
   {
    "from": "plain",
@@ -490,6 +628,402 @@
    "name": "Ran it in 1234 ms",
    "in": "Ran it in 1234 ms",
    "out": "Ran it in 1234 ms"
+  }
+ ],
+ "label_cases": [
+  {
+   "name": "plain",
+   "label": "store.ts",
+   "ok": true
+  },
+  {
+   "name": "plain",
+   "label": "EventCard.tsx",
+   "ok": true
+  },
+  {
+   "name": "plain",
+   "label": "pnpm",
+   "ok": true
+  },
+  {
+   "name": "plain",
+   "label": "git",
+   "ok": true
+  },
+  {
+   "name": "plain",
+   "label": ".env",
+   "ok": true
+  },
+  {
+   "name": "plain",
+   "label": "README.md",
+   "ok": true
+  },
+  {
+   "name": "plain",
+   "label": "walk.spec.ts",
+   "ok": true
+  },
+  {
+   "name": "plain",
+   "label": "code-review",
+   "ok": true
+  },
+  {
+   "name": "plain",
+   "label": "src/projects/live.ts",
+   "ok": true
+  },
+  {
+   "name": "plain",
+   "label": "test_feed.py",
+   "ok": true
+  },
+  {
+   "name": "plain",
+   "label": "v2.ts",
+   "ok": true
+  },
+  {
+   "name": "plain",
+   "label": "ABOUT.md",
+   "ok": true
+  },
+  {
+   "name": "a key shape glued to a word",
+   "label": "buildsk-abc123xyz",
+   "ok": false
+  },
+  {
+   "name": "a long letters-and-digits run",
+   "label": "abc123def456ghi",
+   "ok": false
+  },
+  {
+   "name": "a token over 32",
+   "label": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "ok": false
+  },
+  {
+   "name": "random letters",
+   "label": "qZxWvTyRuPsOnMlK",
+   "ok": false
+  },
+  {
+   "name": "random lowercase letters",
+   "label": "qzxwvtyrupsonmlk",
+   "ok": false
+  },
+  {
+   "name": "hex",
+   "label": "9f86d081884c7d65",
+   "ok": false
+  },
+  {
+   "name": "non-ASCII",
+   "label": "caf\u00e9.md",
+   "ok": false
+  },
+  {
+   "name": "fullwidth",
+   "label": "\uff50\uff4e\uff50\uff4d",
+   "ok": false
+  },
+  {
+   "name": "a space",
+   "label": "two words",
+   "ok": false
+  },
+  {
+   "name": "an equals sign",
+   "label": "KEY=abc",
+   "ok": false
+  },
+  {
+   "name": "a secret word",
+   "label": "secrets.json",
+   "ok": false
+  },
+  {
+   "name": "a nonbreaking hyphen",
+   "label": "sk\u2011ant",
+   "ok": false
+  },
+  {
+   "name": "a key prefix",
+   "label": "sk-ant-abc",
+   "ok": false
+  },
+  {
+   "name": "brackets",
+   "label": "[hidden]",
+   "ok": false
+  },
+  {
+   "name": "empty",
+   "label": "",
+   "ok": false
+  },
+  {
+   "name": "too long",
+   "label": "a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/",
+   "ok": false
+  },
+  {
+   "name": "case churn",
+   "label": "aBcDeFgH.ts",
+   "ok": false
+  }
+ ],
+ "step_cases": [
+  {
+   "name": "a command: its program only",
+   "tool": "Bash",
+   "input": {
+    "command": "pnpm test --filter x",
+    "description": "Run with Bearer abc123"
+   },
+   "out": "Running pnpm"
+  },
+  {
+   "name": "setup and wrappers skipped",
+   "tool": "Bash",
+   "input": {
+    "command": "cd /w && timeout 60 /usr/bin/git push"
+   },
+   "out": "Running git"
+  },
+  {
+   "name": "a secret before the program",
+   "tool": "Bash",
+   "input": {
+    "command": "cd /w && API_KEY=abc123 git push"
+   },
+   "out": "Running a command"
+  },
+  {
+   "name": "an assignment first",
+   "tool": "Bash",
+   "input": {
+    "command": "env FOO=bar pnpm test"
+   },
+   "out": "Running a command"
+  },
+  {
+   "name": "zabogff4: api key in a command",
+   "tool": "Bash",
+   "input": {
+    "command": "api key=violet meadow phrase"
+   },
+   "out": "Running a command"
+  },
+  {
+   "name": "zabogff4: a glued key as the program",
+   "tool": "Bash",
+   "input": {
+    "command": "buildsk-abc123xyz --go"
+   },
+   "out": "Running a command"
+  },
+  {
+   "name": "not a plain name",
+   "tool": "Bash",
+   "input": {
+    "command": "$(cat .env)"
+   },
+   "out": "Running a command"
+  },
+  {
+   "name": "a file",
+   "tool": "Edit",
+   "input": {
+    "file_path": "/w/src/Sheet.tsx",
+    "old_string": "token=abc",
+    "new_string": "x"
+   },
+   "out": "Editing Sheet.tsx"
+  },
+  {
+   "name": "a dotfile",
+   "tool": "Write",
+   "input": {
+    "file_path": "/w/.env",
+    "content": "PASSWORD=violet meadow"
+   },
+   "out": "Writing .env"
+  },
+  {
+   "name": "a secret-named file",
+   "tool": "Read",
+   "input": {
+    "file_path": "/w/secrets.json"
+   },
+   "out": "Reading a file"
+  },
+  {
+   "name": "zabogff4: a glued key as a file",
+   "tool": "Read",
+   "input": {
+    "file_path": "/w/buildsk-abc123xyz"
+   },
+   "out": "Reading a file"
+  },
+  {
+   "name": "a non-ASCII file",
+   "tool": "Read",
+   "input": {
+    "file_path": "/w/caf\u00e9.md"
+   },
+   "out": "Reading a file"
+  },
+  {
+   "name": "a random file name",
+   "tool": "Read",
+   "input": {
+    "file_path": "/w/qZxWvTyRuPsOnMlK.json"
+   },
+   "out": "Reading a file"
+  },
+  {
+   "name": "a web page",
+   "tool": "WebFetch",
+   "input": {
+    "url": "https://example.com/?token=abc"
+   },
+   "out": "Reading a web page"
+  },
+  {
+   "name": "a handoff",
+   "tool": "Agent",
+   "input": {
+    "description": "Check the password: violet",
+    "prompt": "x"
+   },
+   "out": "Handing off a part of the work"
+  },
+  {
+   "name": "the to-do list",
+   "tool": "TodoWrite",
+   "input": {
+    "todos": [
+     {
+      "content": "Rotate API_KEY=abc",
+      "status": "in_progress"
+     }
+    ]
+   },
+   "out": "Updating its to-do list"
+  },
+  {
+   "name": "a skill",
+   "tool": "Skill",
+   "input": {
+    "skill": "code-review"
+   },
+   "out": "Using the code-review skill"
+  },
+  {
+   "name": "a skill with spaces",
+   "tool": "Skill",
+   "input": {
+    "skill": "x y z"
+   },
+   "out": "Using a skill"
+  },
+  {
+   "name": "a search",
+   "tool": "Grep",
+   "input": {
+    "pattern": "password"
+   },
+   "out": "Searching the code"
+  },
+  {
+   "name": "a tool it doesn't know",
+   "tool": "mcp__a__b",
+   "input": {
+    "q": 1
+   },
+   "out": null
+  }
+ ],
+ "step_lines": [
+  {
+   "name": "as written",
+   "in": "Running pnpm",
+   "out": "Running pnpm"
+  },
+  {
+   "name": "as written",
+   "in": "Editing EventCard.tsx",
+   "out": "Editing EventCard.tsx"
+  },
+  {
+   "name": "as written",
+   "in": "Reading a file",
+   "out": "Reading a file"
+  },
+  {
+   "name": "as written",
+   "in": "Searching the code",
+   "out": "Searching the code"
+  },
+  {
+   "name": "as written",
+   "in": "Using the code-review skill",
+   "out": "Using the code-review skill"
+  },
+  {
+   "name": "as written",
+   "in": "Updating its to-do list",
+   "out": "Updating its to-do list"
+  },
+  {
+   "name": "as written",
+   "in": "Writing .env",
+   "out": "Writing .env"
+  },
+  {
+   "name": "a key as a label",
+   "in": "Reading buildsk-abc123xyz",
+   "out": "Reading a file"
+  },
+  {
+   "name": "words as a label",
+   "in": "Running meadow phrase",
+   "out": "Running a command"
+  },
+  {
+   "name": "a secret word as a label",
+   "in": "Reading secrets.json",
+   "out": "Reading a file"
+  },
+  {
+   "name": "non-ASCII",
+   "in": "Editing caf\u00e9.md",
+   "out": "Editing a file"
+  },
+  {
+   "name": "hidden",
+   "in": "Running [hidden]",
+   "out": "Running a command"
+  },
+  {
+   "name": "a skill's odd name",
+   "in": "Using the x y skill",
+   "out": "Using a skill"
+  },
+  {
+   "name": "not a phrase",
+   "in": "Recording the walkthrough on phone",
+   "out": "A step"
+  },
+  {
+   "name": "an old description",
+   "in": "Run the tests with token=abc",
+   "out": "A step"
   }
  ]
 }

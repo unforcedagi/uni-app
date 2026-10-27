@@ -196,6 +196,6 @@ test('Archive is the project\'s: with live sessions it asks to stop them first; 
 test('a session filed on its area but run in a project\'s folder shows under that project', async ({ page }) => {
   await openRoom(page, 'Engine Room');
   const s = await openProject(page, /Mail move/);
-  await expect(s.locator('.pj-session[data-state="running"]')).toContainText("Checking yesterday's mail arrived in full on the new box");
+  await expect(s.locator('.pj-session[data-state="running"]')).toContainText('Running rsync');
   await expect(s.locator('.pj-ticks')).toHaveAttribute('aria-label', '64 steps so far');
 });

@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { ModelError, ago, whyWords, archivePlan, archiveProject, cannotStart, isLive, liveInArea, liveSessions, makeProject, problems, restoreProject, sessionsOf, span, startSession, stateWords, stepSession, stopSession, finishSession, timeline, timelineWindow, type Area, type Work } from "../src/projects/model.ts";
 import { HEARD_MS, freshen, plainTitle, plainWords, resultWords, sessionState, workFrom } from "../src/projects/live.ts";
 import { actionMessage } from "../src/projects/actions.ts";
-import { FOLD, HIDDEN, REDACT_RULES, answerDraft, askOf, endWords, leftItems, parseFeed, redactRaw } from "../src/projects/sessionWords.ts";
+import { DASHES, FOLD, HIDDEN, LABEL, PHRASES, REDACT_RULES, answerDraft, askOf, endWords, labelOk, leftItems, parseFeed, redactRaw, safeStep } from "../src/projects/sessionWords.ts";
 import { existsSync, readFileSync } from "node:fs";
 import { parseRuns } from "../src/areas/steerCore.ts";
 import { buildTaskTree, parseNodes } from "../src/areas/taskCore.ts";
@@ -209,7 +209,8 @@ check("review fixes: a folder matches however it is spelled; a [[link]] parent i
   const part = { ...vault.nodes[0], id: "n-part", path: "Projects/Co-op kiosk/Screens", tags: ["node"], metadata: { parent: "[[Projects/Co-op kiosk]]" } };
   const w = workFrom({ nodes: [...nodes, part], runs: [...runs, { ...base, id: "run-kiosk-part", metadata: { ...base.metadata, node: "n-part", folder: undefined } }], tasks: [] }, NOW);
   assert.equal(w.sessions.find((s) => s.id === "run-mail")?.project, "p-mail");
-  assert.equal(w.sessions.find((s) => s.id === "run-mail")?.now, "Checking the copy");
+  // T-304 (allowlist): what it is doing is shown only as a step phrase; free words (with or without a task number) are not
+  assert.equal(w.sessions.find((s) => s.id === "run-mail")?.now, "A step");
   assert.equal(w.projects.find((p) => p.id === "p-kiosk")?.area, "area-workshop");
   assert.equal(w.sessions.find((s) => s.id === "run-kiosk-part")?.project, "p-kiosk");
 });
@@ -319,7 +320,7 @@ check("the steps note, read back: time, step or said, words; anything else in th
   assert.deepEqual(items.slice(0, 2).map((i) => [i.kind, i.at]), [["said", NOW - 46 * MIN], ["step", NOW - 45 * MIN]]);
   assert.equal(items[1].text, "Reading EventsPage.tsx");
   assert.ok(items.every((i) => !i.text.includes("abc123")), "token=… is hidden");
-  assert.deepEqual(parseFeed("# Steps\n\n- not a line\n- - · step · No time\n- 2026-10-27T10:00:00Z · shout · no\n"), [{ at: null, kind: "step", text: "No time" }]);
+  assert.deepEqual(parseFeed("# Steps\n\n- not a line\n- - · step · Running pnpm\n- 2026-10-27T10:00:00Z · shout · no\n"), [{ at: null, kind: "step", text: "Running pnpm" }]);
   assert.deepEqual(parseFeed(null), []);
 });
 // T-304 (redaction-strategy addendum: fail closed): the app's second net runs the same rules as mts, on the same cases (one file, shared)
@@ -330,6 +331,20 @@ const vcases: { from: string; name: string; in: string; out: string }[] = vdoc.c
 check("redaction: the rules are the shared ones (the same list as mts)", () => {
   assert.deepEqual(REDACT_RULES, vdoc.rules);
   assert.deepEqual(FOLD, vdoc.fold);
+  assert.equal(DASHES, vdoc.dashes);
+  assert.deepEqual(LABEL, vdoc.label);
+  assert.deepEqual(PHRASES, vdoc.phrases);
+});
+check("allowlist: every shared label case (shown only when known plain)", () => {
+  for (const c of vdoc.label_cases) assert.equal(labelOk(c.label), c.ok, `${c.name}: ${c.label}`);
+});
+check("allowlist: every shared step line (a phrase as written, the phrase alone, or A step)", () => {
+  for (const c of vdoc.step_lines) assert.equal(safeStep(c.in), c.out, c.name);
+  // what mts writes for each shared step case passes the app's net unchanged
+  for (const c of vdoc.step_cases.filter((x: any) => x.out)) assert.equal(safeStep(c.out), c.out, c.name);
+  // and through the steps note
+  assert.deepEqual(parseFeed("- 2026-10-27T10:00:00Z · step · Reading buildsk-abc123xyz\n- 2026-10-27T10:00:01Z · step · Running meadow phrase\n").map((i) => i.text),
+    ["Reading a file", "Running a command"]);
   assert.equal(HIDDEN, vdoc.hidden);
 });
 check("redaction: every shared case (both reviews and the addendum), from the first secret-like key or shape to the end", () => {

@@ -86,7 +86,7 @@ export function demoVault(now: number) {
   run("run-labels", "Print labels for the spring packets", { node: "p-seeds", state: "failed", started_at: iso(5 * 60), ended_at: iso(4 * 60), summary: "mts mmmmnnnn: failed",
     ended: "limit", resumes_at: iso(-40), report: { summary: "Laid out 40 of the 96 labels." } });
   // filed on the area, but run in the mail move's folder: it belongs to the mail move
-  run("run-mail", "T-903", { node: "area-engine", state: "running", started_at: iso(3 * 60 - 3), doing_now: "Checking yesterday's mail arrived in full on the new box", doing_at: iso(9), steps: 64, folder: "~/ops/mail-move" });
+  run("run-mail", "T-903", { node: "area-engine", state: "running", started_at: iso(3 * 60 - 3), doing_now: "Running rsync", doing_at: iso(9), steps: 64, folder: "~/ops/mail-move" });
   // filed on a task whose node is the project (no node of its own on the run)
   run("run-restore", "T-902", { task: "T-902", node: "unknown-node", state: "done", started_at: iso(9 * 60 + 20), ended_at: iso(9 * 60 + 2), summary: "mts gggghhhh: completed, evidence: commit 1a2b3c4 in /home/someone/ops/backups" });
   run("run-shorter", "Find a shorter second reading on the same idea", { node: "p-week7", state: "running", started_at: iso(2 * 60 - 2), steps: 0 });
