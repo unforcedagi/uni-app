@@ -213,7 +213,7 @@ test.describe('r30 waiting runs', () => {
     await page.evaluate((r) => (window as any).__addRun('wr1', 'Areas/Techne', '', 'Waiting on your answer in #Techne: Ship the placeholder 0.1.46?', 'decision', { room: 'techne', message_ref: r }), ref);
     await refresh(page);
     // from another room: Uni's own
-    await openRoom(page, 'Boulder'); // T-302 round 2: Uni's level is gone with #Uni; Boulder's holds these tasks
+    await openRoom(page, 'Techne'); // T-302 round 2: Uni's level is gone with #Uni; Techne's holds these tasks (COhere is under it)
     await openWork(page);
     const run = section(page, 'Needs you').locator('.cp-waiting > li');
     await expect(run).toHaveCount(1);

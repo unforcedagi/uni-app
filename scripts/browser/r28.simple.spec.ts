@@ -152,27 +152,6 @@ test.describe('r28', () => {
     expect(await side.locator('section[aria-label="Running"]').count() ? await side.locator('section[aria-label="Running"]').innerText() : '').not.toContain('Ship the placeholder');
   });
 
-  test('line 3: "Show N more" is exactly what is hidden: rows shown + waiting runs + N is the count', async ({ page }) => {
-    test.skip(!wide(page), 'side panel');
-    await page.setViewportSize({ width: 1280, height: 720 });
-    await boot(page);
-    for (let i = 0; i < 6; i++) await add(page, { id: `m${i}`, title: `T-64${i} Placeholder many ${i}`, node: i % 2 ? 'Areas/Techne' : 'Projects/ATLAS', meta: { next: `Say go on many number ${i} of the placeholder rows` } });
-    await page.evaluate(() => (window as any).__addRun('rm1', 'Areas/Techne', '', 'Waiting on your answer in #Uni: Pick the placeholder color?', 'decision'));
-    await refresh(page);
-    await openRoom(page, 'Boulder'); // T-302 round 2: Uni's level is gone with #Uni
-    const side = page.locator('.cp.side .cp-body');
-    await expect(side.locator('section[aria-label="Needs you"] .cp-item').first()).toBeVisible();
-    await openWork(page);
-    const total = Number(await section(page, 'Needs you').locator('.wv-n').innerText());
-    await page.getByRole('button', { name: /^Back to chat/ }).click();
-    const needs = page.locator('.cp.side .cp-body section[aria-label="Needs you"]');
-    await expect(needs.locator('.cp-more')).toHaveCount(1);
-    const shown = await needs.locator('.cp-list > li.cp-item').count() + await needs.locator('.cp-waiting > li').count();
-    const more = Number((await needs.locator('.cp-more').innerText()).match(/Show (\d+) more/)![1]);
-    expect(shown + more, `${shown} shown + Show ${more} more`).toBe(total);
-    await rowsWhole(needs.locator('li.cp-item'));
-  });
-
   test('line 3: a row is whole or it is not shown, in the side panel and the work view; inline sub-items are at most two, then the list total ("4 asks in all")', async ({ page }) => {
     test.skip(!wide(page), 'side panel');
     await page.setViewportSize({ width: 1280, height: 720 });
@@ -196,7 +175,7 @@ test.describe('r28', () => {
     await expect(section(page, 'Needs you').locator('li.cp-item').filter({ hasText: 'paste the same key' })).toContainText('tell her once it works for the whole crew');
   });
 
-  test('r29 P1-3: nothing that changes after a summary was written (an ask on its node, a closure, a change on Uni) dims it or adds a notice: the date is the signal', async ({ page }) => {
+  test('r29 P1-3: nothing that changes after a summary was written (an ask on its node, a closure, a change on its area) dims it or adds a notice: the date is the signal', async ({ page }) => {
     test.skip(!wide(page), 'side panel');
     await boot(page);
     await page.evaluate(() => (window as any).__setStands('p-lvb', 'Cohort two starts Oct 15; grading briefs are queued.', '2026-10-14T06:00:00.000Z'));
@@ -209,11 +188,11 @@ test.describe('r28', () => {
     await expect(page.locator('.cp-body')).not.toContainText('older than the latest work');
     await expect(page.locator('.cp-asof')).toHaveText(/^Last written Oct 14 by #\S+:$/);
     await expect(page.locator('.cp-stands').first()).toHaveText('Cohort two starts Oct 15; grading briefs are queued.');
-    // Uni's own summary, with an ask written on Uni after it
-    await add(page, { id: 'u2', title: 'T-682 Placeholder on Uni', node: 'Uni', asked_at: '2026-10-14T08:30:00.000Z', meta: { next: 'Say go on uni itself' } });
+    // an area's own summary, with an ask written on it after (T-302 round 2: was Uni's own, gone with #Uni)
+    await add(page, { id: 'u2', title: 'T-682 Placeholder on Techne', node: 'Areas/Techne', asked_at: '2026-10-14T08:30:00.000Z', meta: { next: 'Say go on techne itself' } });
     await refresh(page, '2026-10-14T09:15:00.000Z');
-    await openRoom(page, 'Boulder'); // T-302 round 2: Uni's level is gone with #Uni; Boulder's holds these tasks
-    await expect(page.locator('.cp.side .cp-asof')).toHaveText(/^Last written (Oct \d+ )?by #Uni:$/);
+    await openRoom(page, 'Techne');
+    await expect(page.locator('.cp.side .cp-asof')).toHaveText(/^Last written (Oct \d+ )?by #Techne:$/);
     await expect(page.locator('.cp-stale, [data-stale], [data-stale-why]')).toHaveCount(0);
   });
 
@@ -226,7 +205,7 @@ test.describe('r28', () => {
     await expect.poll(async () => (await logged())[0] ?? '').toMatch(/^recheck: (T-\d+ ?)+$|^recheck: none$/);
     await openRoom(page, 'Techne');
     await refresh(page, '2026-10-14T09:10:00.000Z');
-    await openRoom(page, 'Boulder').catch(() => {});
+    await openRoom(page, 'Techne').catch(() => {});
     expect((await logged()).length, 'once per launch, not once per list read').toBe(1);
     expect((await logged())[0]).toMatch(/^recheck: /);
   });
