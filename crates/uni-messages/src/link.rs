@@ -35,16 +35,18 @@ pub struct Network {
     pub name: &'static str,
     pub bot: &'static str,
     pub prefix: &'static str,
+    /// The localpart its ghosts (the people it brings in) start with.
+    pub ghost: &'static str,
 }
 
 /// In the order the Link screen shows them: the order to link in, least fragile first.
 pub const NETWORKS: [Network; 6] = [
-    Network { id: "signal", name: "Signal", bot: "signalbot", prefix: "!signal" },
-    Network { id: "telegram", name: "Telegram", bot: "telegrambot", prefix: "!tg" },
-    Network { id: "whatsapp", name: "WhatsApp", bot: "whatsappbot", prefix: "!wa" },
-    Network { id: "gmessages", name: "Google Messages", bot: "gmessagesbot", prefix: "!gm" },
-    Network { id: "messenger", name: "Messenger", bot: "messengerbot", prefix: "!fb" },
-    Network { id: "instagram", name: "Instagram", bot: "instagrambot", prefix: "!ig" },
+    Network { id: "signal", name: "Signal", bot: "signalbot", prefix: "!signal", ghost: "signal_" },
+    Network { id: "telegram", name: "Telegram", bot: "telegrambot", prefix: "!tg", ghost: "telegram_" },
+    Network { id: "whatsapp", name: "WhatsApp", bot: "whatsappbot", prefix: "!wa", ghost: "whatsapp_" },
+    Network { id: "gmessages", name: "Google Messages", bot: "gmessagesbot", prefix: "!gm", ghost: "gmessages_" },
+    Network { id: "messenger", name: "Messenger", bot: "messengerbot", prefix: "!fb", ghost: "messenger_" },
+    Network { id: "instagram", name: "Instagram", bot: "instagrambot", prefix: "!ig", ghost: "instagram_" },
 ];
 
 /// mautrix-go v0.32.0 bridgev2's commands and aliases (commands/processor.go and the files it lists).
@@ -90,6 +92,39 @@ pub(crate) fn bridge_of(room: &Room) -> Option<&'static str> {
         }
     }
     None
+}
+
+/// T-310: which network a conversation is on, from what the room says about who made it and who is in it: a bridge's
+/// rooms are made by its bot, which keeps a power level there, and the people in them are its ghosts (`signal_…` on our
+/// server). The bridges' own `m.bridge` state isn't among what sliding sync brings, so it isn't read. `inviter`: who
+/// sent an invite, for a room not yet joined.
+pub(crate) async fn network_of(room: &Room, inviter: Option<&UserId>) -> &'static str {
+    let mut signs: Vec<OwnedUserId> = room.creators().unwrap_or_default();
+    if let Ok(levels) = room.power_levels().await {
+        signs.extend(levels.users.into_keys());
+    }
+    signs.extend(room.service_members().unwrap_or_default());
+    signs.extend(room.heroes().into_iter().map(|h| h.user_id));
+    signs.extend(room.direct_targets().iter().filter_map(|t| t.as_user_id()).map(ToOwned::to_owned));
+    signs.extend(inviter.map(ToOwned::to_owned));
+    network_from(room.own_user_id(), &signs)
+}
+
+/// The network every bridge sign among `signs` agrees on. `matrix` when there is none (a plain Matrix conversation);
+/// `other` when nothing about the room is known yet, or the signs name two networks.
+pub(crate) fn network_from(own: &UserId, signs: &[OwnedUserId]) -> &'static str {
+    let ours = |u: &UserId| u.server_name() == own.server_name();
+    let mut found: Option<&'static str> = None;
+    for u in signs.iter().filter(|u| ours(u)) {
+        let local = u.localpart();
+        let Some(net) = NETWORKS.iter().find(|n| local == n.bot || local.starts_with(n.ghost)) else { continue };
+        match found {
+            None => found = Some(net.id),
+            Some(f) if f != net.id => return "other",
+            Some(_) => {}
+        }
+    }
+    found.unwrap_or(if signs.is_empty() { "other" } else { "matrix" })
 }
 
 /// One linked account, as `list-logins` names it.
@@ -992,6 +1027,29 @@ mod tests {
     }
     fn bot(b: &str) -> Said {
         Said { own: false, ts: 2, image: false, body: b.into(), html: None }
+    }
+
+    fn ids(v: &[&str]) -> Vec<OwnedUserId> {
+        v.iter().map(|u| UserId::parse(*u).unwrap()).collect()
+    }
+
+    #[test]
+    fn a_conversation_is_on_the_network_its_bridge_signs_say() {
+        let me = UserId::parse("@pat:example.org").unwrap();
+        let on = |v: &[&str]| network_from(&me, &ids(v));
+        // made by a bridge's bot, with its ghosts in it
+        assert_eq!(on(&["@signalbot:example.org", "@pat:example.org", "@signal_0f3a:example.org"]), "signal");
+        assert_eq!(on(&["@whatsappbot:example.org"]), "whatsapp");
+        assert_eq!(on(&["@gmessages_15550100:example.org", "@pat:example.org"]), "gmessages");
+        // a plain Matrix conversation: people, no bridge
+        assert_eq!(on(&["@pat:example.org", "@sam:example.org", "@kit:elsewhere.example"]), "matrix");
+        // a ghost-like name on another server is a person there, not our bridge
+        assert_eq!(on(&["@pat:example.org", "@telegram_42:elsewhere.example"]), "matrix");
+        // a room we made, alone in it so far
+        assert_eq!(on(&["@pat:example.org"]), "matrix");
+        // signs of two networks, or nothing known about the room yet: other
+        assert_eq!(on(&["@signalbot:example.org", "@telegram_42:example.org"]), "other");
+        assert_eq!(on(&[]), "other");
     }
 
     #[test]

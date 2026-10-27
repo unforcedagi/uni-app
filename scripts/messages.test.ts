@@ -4,7 +4,7 @@
 // Run: node --experimental-strip-types scripts/messages.test.ts
 import assert from "node:assert/strict";
 import { draftFor, draftsEpoch, keepDraft, rememberOpen, unsentBack } from "../src/messages/messagesDoor.ts";
-import { applyLink, applyOpened, applyTimeline, asMessagesErr, linkHost, mergeLinks, previewLine, qrPath, shownFlows, shownItems, type LinkRow, type MessageRow, type RoomRow, type Thread } from "../src/messages/messagesView.ts";
+import { applyLink, applyOpened, applyTimeline, asMessagesErr, linkHost, mergeLinks, messageTabs, networkOf, newestFirst, previewLine, qrPath, shownFlows, shownItems, shownTab, tabName, tabRows, type LinkRow, type MessageRow, type RoomRow, type Thread } from "../src/messages/messagesView.ts";
 
 let n = 0;
 const t = (name: string, f: () => void) => { f(); n++; console.log(`ok ${name}`); };
@@ -124,6 +124,68 @@ t("review f97fx1ji: a send that fails after sign-out or Forget never puts its wo
   assert.equal(draftFor("!room:example.org"), "");
   assert.equal(unsentBack("!room:example.org", "private words", before), false);
   assert.equal(draftFor("!room:example.org"), "", "the next account opening the same room finds no draft");
+});
+
+// ── T-310 tabs: All, then one per network ──
+
+const chat = (id: string, network: string | undefined, ts: number | null, over: Partial<RoomRow> = {}): RoomRow => room({ id: `!${id}:example.com`, name: id, network, ts, ...over });
+const card = (network: string, state: LinkRow["state"]): LinkRow => ({ network, name: network, state, accounts: [], step: null, note: null, rev: 1 });
+const tabsOf = (rows: RoomRow[], links: LinkRow[] | null = null) => messageTabs(rows, links).map((t) => `${t.id}:${t.count}/${t.waiting}${t.attention ? "!" : ""}`);
+
+t("tabs: All first, then each network with a conversation, in a fixed order (not by activity)", () => {
+  const rows = [chat("mara", "whatsapp", 50), chat("sam", "matrix", 40), chat("robin", "signal", 30), chat("jun", "telegram", 20)];
+  assert.deepEqual(tabsOf(rows), ["all:4/0", "signal:1/0", "telegram:1/0", "whatsapp:1/0", "matrix:1/0"]);
+  // nothing from SMS, Messenger or Instagram, and no card says they're linked: no tab for them
+  assert.ok(!tabsOf(rows).some((t) => /gmessages|messenger|instagram|other/.test(t)));
+});
+
+t("tabs: a linked network with no chats yet has its tab; not linked or not running has none; needing a new link is marked", () => {
+  const rows = [chat("sam", "matrix", 40), chat("robin", "signal", 30)];
+  const links = [card("signal", "linked"), card("telegram", "needs_attention"), card("whatsapp", "not_linked"), card("gmessages", "linked"), card("instagram", "unavailable"), card("messenger", "checking")];
+  assert.deepEqual(tabsOf(rows, links), ["all:2/0", "signal:1/0", "telegram:0/0!", "gmessages:0/0", "matrix:1/0"]);
+});
+
+t("tabs: one network alone is All alone (its tab would be the same list), unless its link needs doing again", () => {
+  assert.deepEqual(tabsOf([chat("sam", "matrix", 2), chat("kit", "matrix", 1)]), ["all:2/0"]);
+  assert.deepEqual(tabsOf([], [card("signal", "linked")]), ["all:0/0"]);
+  assert.deepEqual(tabsOf([chat("robin", "signal", 1)], [card("signal", "needs_attention")]), ["all:1/0", "signal:1/0!"]);
+});
+
+t("counts: conversations waiting for you (unread or an invite), not messages; All's is every network's together", () => {
+  const rows = [
+    chat("robin", "signal", 5, { unread: 12 }), chat("book club", "signal", 4, { unread: 3 }), chat("ines", "signal", 3),
+    chat("mara", "whatsapp", 2, { invited: true, inviter: "Mara Quill" }), chat("sam", "matrix", 1),
+  ];
+  const tabs = messageTabs(rows, null);
+  assert.deepEqual(tabs.map((t) => [t.id, t.waiting]), [["all", 3], ["signal", 2], ["whatsapp", 1], ["matrix", 0]]);
+  assert.equal(tabs.slice(1).reduce((n, t) => n + t.waiting, 0), tabs[0].waiting);
+  assert.equal(tabName(tabs[1]), "Signal, 2 new");
+  assert.equal(tabName(tabs[3]), "Matrix");
+  assert.equal(tabName({ id: "telegram", label: "Telegram", count: 0, waiting: 0, attention: true }), "Telegram, needs linking again");
+});
+
+t("a tab's list is newest first; one with no time yet goes last; equal times keep the core's order", () => {
+  const rows = [chat("old", "signal", 10), chat("none", "signal", null), chat("new", "signal", 30), chat("wa", "whatsapp", 40), chat("tie-a", "signal", 20), chat("tie-b", "signal", 20)];
+  assert.deepEqual(tabRows(rows, "signal").map((r) => r.name), ["new", "tie-a", "tie-b", "old", "none"]);
+  assert.deepEqual(tabRows(rows, "all").map((r) => r.name), ["wa", "new", "tie-a", "tie-b", "old", "none"]);
+  assert.deepEqual(newestFirst([chat("a", "x", null), chat("b", "x", null)]).map((r) => r.name), ["a", "b"]);
+  assert.equal(rows[0].name, "old", "the core's list isn't reordered in place");
+});
+
+t("a conversation whose network can't be told (or an older core that doesn't say) is under Other", () => {
+  assert.equal(networkOf(chat("x", undefined, 1)), "other");
+  assert.equal(networkOf(chat("x", "carrier-pigeon", 1)), "other");
+  assert.equal(networkOf(chat("x", "gmessages", 1)), "gmessages");
+  assert.deepEqual(tabsOf([chat("robin", "signal", 2), chat("x", undefined, 1)]), ["all:2/0", "signal:1/0", "other:1/0"]);
+  assert.deepEqual(tabRows([chat("robin", "signal", 2), chat("x", "carrier-pigeon", 1)], "other").map((r) => r.name), ["x"]);
+});
+
+t("the tab this device was on comes back while it has a tab; else All, the pick kept for when it's back", () => {
+  const tabs = messageTabs([chat("robin", "signal", 2), chat("mara", "whatsapp", 1)], null);
+  assert.equal(shownTab("whatsapp", tabs), "whatsapp");
+  assert.equal(shownTab("telegram", tabs), "all");
+  assert.equal(shownTab(null, tabs), "all");
+  assert.equal(shownTab("whatsapp", messageTabs([chat("robin", "signal", 2)], null)), "all");
 });
 
 console.log(`${n} messages view checks passed`);

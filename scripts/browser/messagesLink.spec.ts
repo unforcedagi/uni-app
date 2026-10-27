@@ -54,7 +54,7 @@ test.describe('T-282 Link an account, on the live bridges', () => {
       await expect(list.getByText(/No conversations yet\.|Pick a conversation\./).or(list.getByRole('list')).first()).toBeVisible({ timeout: 20_000 });
       await expect(list.getByRole('button', { name: /bridge/i })).toHaveCount(0);
 
-      await list.getByRole('button', { name: 'Link an account' }).first().click();
+      await page.getByRole('button', { name: 'Link another network' }).or(list.getByRole('button', { name: 'Link an account' })).first().click();
       // (now that the cards have asked every bot, the list still holds no bot DM: checked again on the way back)
       const screen = page.getByRole('region', { name: 'Link an account' });
       await expect(screen).toBeVisible();

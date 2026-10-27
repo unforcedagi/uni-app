@@ -4,7 +4,7 @@
 // Messages: only once a build that has it has answered.
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { asMessagesErr, OPEN_KEY, PANE_KEY, SEEN_KEY, type LinkRow, type MessageRow, type RoomRow, type Status, type Update } from "./messagesView.ts";
+import { asMessagesErr, OPEN_KEY, PANE_KEY, SEEN_KEY, TAB_KEY, type LinkRow, type MessageRow, type RoomRow, type Status, type Update } from "./messagesView.ts";
 
 async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   try { return await invoke<T>(cmd, args); } catch (e) { throw asMessagesErr(e); }
@@ -68,9 +68,9 @@ export async function probeMessages(): Promise<void> {
 }
 
 /** The room open last, so leaving Messages and coming back lands in the same conversation. None (sign-out, Forget) drops the rest of
- * Messages' place too: the pane, the drafts, the spots. */
+ * Messages' place too: the pane, the tab, the drafts, the spots. */
 export function rememberOpen(roomId: string | null) {
-  try { if (roomId) localStorage.setItem(OPEN_KEY, roomId); else { localStorage.removeItem(OPEN_KEY); localStorage.removeItem(PANE_KEY); } } catch { /* unavailable storage */ }
+  try { if (roomId) localStorage.setItem(OPEN_KEY, roomId); else { localStorage.removeItem(OPEN_KEY); localStorage.removeItem(PANE_KEY); localStorage.removeItem(TAB_KEY); } } catch { /* unavailable storage */ }
   if (!roomId) { drafts.clear(); readTo.clear(); draftEpoch++; }
 }
 export function lastOpen(): string | null {
@@ -85,6 +85,13 @@ export function rememberPane(pane: "list" | "thread") {
 }
 export function lastPane(): "list" | "thread" {
   try { return localStorage.getItem(PANE_KEY) === "thread" ? "thread" : "list"; } catch { return "list"; }
+}
+/** T-310: the tab this device was on (All, or a network), kept on the device. */
+export function rememberTab(tab: string) {
+  try { localStorage.setItem(TAB_KEY, tab); } catch { /* unavailable storage */ }
+}
+export function lastTab(): string | null {
+  try { return localStorage.getItem(TAB_KEY); } catch { return null; }
 }
 const drafts = new Map<string, string>();
 /** T-302 review f97fx1ji: bumped by sign-out and Forget (rememberOpen(null)). A send begun before them that fails after can't put its
