@@ -6,37 +6,44 @@ import { ago, type EndWhy, type Session } from "./model.ts";
 
 /** What stands in for a hidden secret. */
 export const HIDDEN = "[hidden]";
-const SECRETS: readonly RegExp[] = [
-  /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g,
-  /\bsk-(?:ant-)?[A-Za-z0-9_-]{16,}/g,
-  /\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})/g,
-  /\bxox[abprs]-[A-Za-z0-9-]{10,}/g,
-  /\bAKIA[0-9A-Z]{16}\b/g,
-  /\bnsec1[02-9ac-hj-np-z]{20,}/g,
-  /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{4,}/g,
-  /\b[0-9a-fA-F]{64}\b/g,
+/** One rule of the redactor: a pattern; `guard: "not-lower"`: a hit followed by a lowercase letter is a word, not a key (secretary,
+ *  tokenizer, passwordless); `mix`: a run counts only with a letter and a digit in it. */
+export type RedactRule = { name: string; re: string; flags: string; guard: "not-lower" | null; mix: boolean };
+/**
+ * T-304 (fail closed): everything from the first secret-like key (password, secret, token, authorization, bearer, api_key, …) or key
+ * shape (sk-, ghp_, xox, AKIA, a JWT, a key block, long hex or base64 runs, credentials in a URL) to the END of the text is hidden, the
+ * key's own name with it. No parsing of quotes or values: over-hiding is fine, leaking any part of a secret is not. The same rules as
+ * mts's (which hides them before they leave the machine; this is the second net); both test suites run the same cases
+ * (scripts/fixtures/redaction-vectors.json).
+ */
+export const REDACT_RULES: readonly RedactRule[] = [
+  {"name": "secret-word", "re": "(?:passw(?:or)?d|passphrase|passcode|secret|token|credential|authorization|bearer|api[_-]?key|access[_-]?key|private[ _-]?key)s?", "flags": "i", "guard": "not-lower", "mix": false},
+  {"name": "short-key", "re": "(?<![A-Za-z])(?:pass|pwd|pw|cookie|auth)s?(?=\\s*[\"']?\\s*[:=])", "flags": "i", "guard": null, "mix": false},
+  {"name": "key-block", "re": "-----BEGIN", "flags": "", "guard": null, "mix": false},
+  {"name": "key-shape", "re": "(?<![A-Za-z0-9])(?:sk-[A-Za-z0-9_-]{6,}|gh[pousr]_[A-Za-z0-9]{6,}|github_pat_|xox[abprse]-|nsec1[02-9ac-hj-np-z]{6,}|eyJ[A-Za-z0-9_-]{6,}|AIza[0-9A-Za-z_-]{10,}|(?:AKIA|ASIA)[0-9A-Z]{12,})", "flags": "", "guard": null, "mix": false},
+  {"name": "url-credentials", "re": "://[^/\\s:@]+:[^/\\s@]+@", "flags": "", "guard": null, "mix": false},
+  {"name": "hex-run", "re": "[0-9a-fA-F]{32,}", "flags": "", "guard": null, "mix": false},
+  {"name": "base64-run", "re": "[A-Za-z0-9+/=]{32,}", "flags": "", "guard": null, "mix": true},
 ];
-const BEARER = /\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]{12,}/gi;
-/** A password-like key (password, passphrase, pass, passcode, pwd, secret; with prefixes and suffixes like DB_PASS, SECRET_KEY): a quoted
- *  value is hidden to its closing quote, an unquoted one to the end of the line (a passphrase has spaces; over-hiding a step line is fine,
- *  leaking the tail of a passphrase is not). */
-const PASSWORD = /\b((?:[A-Za-z0-9]+[_-])*(?:pass(?:word|wd|phrase|code)?|pwd|secret)s?(?:[_-][A-Za-z0-9]+)*)(["']?[ \t]*[:=][ \t]*)("[^"\n]*"|'[^'\n]*'|\S[^\n]*)/gi;
-/** `token=…`, `"password": "two words"`, `API_KEY: …`: the name stays, the value goes, quoted values whole (spaces too). */
-const NAMED = /\b([A-Z0-9_]*(?:api[_-]?key|secret|token|passw(?:or)?d|pwd|private[_-]?key|credential)s?)(["']?\s*[:=]\s*)("[^"\n]+"|'[^'\n]+'|[^\s,;"']+)/gi;
-/** The one exception: a known token counter with a short number (`max_tokens=4096`, `input_tokens: 980`, `token_count=33`). */
-const COUNTER = /^(?:(?:(?:max|min|num|total|input|output|prompt|completion|cache_read_input|cache_creation_input)_?)?tokens|(?:max|min|num|total)_?token|tokens?_(?:count|used|limit|budget))$/i;
+const RULES = REDACT_RULES.map((r) => ({ rx: new RegExp(r.re, `${r.flags}g`), r }));
+const KEY_CHAR = /[A-Za-z0-9_-]/;
 
-/** Anything that looks like a key, token or password, as [hidden]. */
+/** The text up to the first secret-like key or key shape (and the rest of the word it starts in), then [hidden]. */
 export function redact(text: string): string {
-  let t = text;
-  for (const r of SECRETS) t = t.replace(r, HIDDEN);
-  t = t.replace(PASSWORD, (_, name: string, sep: string) => `${name}${sep}${HIDDEN}`);
-  return t.replace(BEARER, (_, kind: string) => `${kind} ${HIDDEN}`).replace(NAMED, (all, name: string, sep: string, raw: string) => {
-    // a sentence's closing punctuation is not part of an unquoted value
-    const [, value, tail] = /^["']/.test(raw) ? [raw, raw, ""] : /^([\s\S]*?)([.:!?)]*)$/.exec(raw)!;
-    if (COUNTER.test(name) && /^\d{1,9}$/.test(value)) return all;
-    return `${name}${sep}${value ? HIDDEN : ""}${tail}`;
-  });
+  let first: number | null = null;
+  for (const { rx, r } of RULES) {
+    for (const m of text.matchAll(rx)) {
+      const at = m.index!, end = at + m[0].length;
+      if (first !== null && at >= first) break;
+      if (r.guard === "not-lower" && end < text.length && text[end] >= "a" && text[end] <= "z") continue;
+      if (r.mix && !(/[A-Za-z]/.test(m[0]) && /[0-9]/.test(m[0]))) continue;
+      first = at;
+      break;
+    }
+  }
+  if (first === null) return text;
+  while (first > 0 && KEY_CHAR.test(text[first - 1])) first--;
+  return text.slice(0, first) + HIDDEN;
 }
 
 /** One line of the session's stream: a step it took, or something it wrote. `at` is null when the line has no time. */

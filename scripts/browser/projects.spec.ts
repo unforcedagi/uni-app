@@ -92,7 +92,7 @@ test('a project opens in place: its folder, its live sessions first with what ea
   await expect(cards.nth(1)).toHaveAttribute('data-state', 'running');
   await expect(s.getByRole('heading', { name: 'Sessions · 2 working' })).toBeVisible();
   const events = cards.filter({ hasText: 'Make the events page read like a noticeboard' });
-  await expect(events).toContainText('Recording the walkthrough on phone and desktop');
+  await expect(events).toContainText('Running npx');
   await expect(events.locator('.pj-ticks')).toHaveAttribute('aria-label', '31 steps so far');
   await expect(cards.filter({ hasText: 'Rebuild the about page' })).toContainText('Left ABOUT.md.');
   await expect(cards.filter({ hasText: 'Rebuild the about page' }).getByRole('link', { name: 'Watch the walkthrough' })).toHaveAttribute('href', 'https://example.com/walkthrough/about-page');
@@ -166,7 +166,7 @@ test('Add a session runs alongside the ones working, and Fresh start ends one an
   await ask(s, /^Fresh start of “Donate page/);
   await expect(s.locator('blockquote')).toHaveText(/^Fresh start on Riverbend co-op site: end the session on “Donate page with a sliding amount” \(started .+\) and start a new session on the same project, with a short handoff of where it got to\.$/);
   await s.getByRole('button', { name: 'Post' }).click();
-  await expect(s.locator('.pj-session[data-state="running"]').filter({ hasText: 'Reading the handoff' })).toBeVisible({ timeout: 15_000 });
+  await expect(s.locator('.pj-session[data-state="running"]').filter({ hasText: 'Reading HANDOFF.md' })).toBeVisible({ timeout: 15_000 });
   await expect(s.getByRole('heading', { name: 'Sessions · 2 working' })).toBeVisible();
 });
 

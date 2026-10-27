@@ -1,0 +1,327 @@
+{
+ "about": "T-304: the redaction rules mts and the uni-app share, and the cases both test suites run. Everything from the first secret-like key or key shape to the end of the text is hidden. Made-up values only; {{x*n}} repeats x n times (so no key-shaped literal is committed). The same file is tests/redaction_vectors.json in mts-launcher and scripts/fixtures/redaction-vectors.json in uni-app.",
+ "hidden": "[hidden]",
+ "rules": [
+  {
+   "name": "secret-word",
+   "re": "(?:passw(?:or)?d|passphrase|passcode|secret|token|credential|authorization|bearer|api[_-]?key|access[_-]?key|private[ _-]?key)s?",
+   "flags": "i",
+   "guard": "not-lower",
+   "mix": false
+  },
+  {
+   "name": "short-key",
+   "re": "(?<![A-Za-z])(?:pass|pwd|pw|cookie|auth)s?(?=\\s*[\"']?\\s*[:=])",
+   "flags": "i",
+   "guard": null,
+   "mix": false
+  },
+  {
+   "name": "key-block",
+   "re": "-----BEGIN",
+   "flags": "",
+   "guard": null,
+   "mix": false
+  },
+  {
+   "name": "key-shape",
+   "re": "(?<![A-Za-z0-9])(?:sk-[A-Za-z0-9_-]{6,}|gh[pousr]_[A-Za-z0-9]{6,}|github_pat_|xox[abprse]-|nsec1[02-9ac-hj-np-z]{6,}|eyJ[A-Za-z0-9_-]{6,}|AIza[0-9A-Za-z_-]{10,}|(?:AKIA|ASIA)[0-9A-Z]{12,})",
+   "flags": "",
+   "guard": null,
+   "mix": false
+  },
+  {
+   "name": "url-credentials",
+   "re": "://[^/\\s:@]+:[^/\\s@]+@",
+   "flags": "",
+   "guard": null,
+   "mix": false
+  },
+  {
+   "name": "hex-run",
+   "re": "[0-9a-fA-F]{32,}",
+   "flags": "",
+   "guard": null,
+   "mix": false
+  },
+  {
+   "name": "base64-run",
+   "re": "[A-Za-z0-9+/=]{32,}",
+   "flags": "",
+   "guard": null,
+   "mix": true
+  }
+ ],
+ "cases": [
+  {
+   "from": "tt6oiyni",
+   "name": "quoted password with spaces",
+   "in": "password=\"violet meadow phrase\" then",
+   "out": "[hidden]"
+  },
+  {
+   "from": "tt6oiyni",
+   "name": "numeric token",
+   "in": "Set token=12345678901234567890.",
+   "out": "Set [hidden]"
+  },
+  {
+   "from": "unquoted",
+   "name": "unquoted password with spaces",
+   "in": "password: violet meadow phrase",
+   "out": "[hidden]"
+  },
+  {
+   "from": "fepuc9a7",
+   "name": "escaped quote in a JSON password",
+   "in": "{\"password\":\"violet\\\" meadow phrase\"}",
+   "out": "{\"[hidden]"
+  },
+  {
+   "from": "fepuc9a7",
+   "name": "quoted multiline env value",
+   "in": "PASSWORD=\"violet\nmeadow phrase\"",
+   "out": "[hidden]"
+  },
+  {
+   "from": "fepuc9a7",
+   "name": "wrapped API key",
+   "in": "Key is sk-ant-abc123\nDEFGHIJKLMNOPQRSTUVWXYZ123456 ok",
+   "out": "Key is [hidden]"
+  },
+  {
+   "from": "fepuc9a7",
+   "name": "short Bearer credential",
+   "in": "Authorization: Bearer abc123",
+   "out": "[hidden]"
+  },
+  {
+   "from": "fepuc9a7",
+   "name": "plain JSON password",
+   "in": "{\"user\":\"robin\",\"password\":\"hunter22\"}",
+   "out": "{\"user\":\"robin\",\"[hidden]"
+  },
+  {
+   "from": "fepuc9a7",
+   "name": "long Bearer credential",
+   "in": "curl -H \"Bearer {{abcdefgh*2}}1234\"",
+   "out": "curl -H \"[hidden]"
+  },
+  {
+   "from": "fepuc9a7",
+   "name": "token in a URL",
+   "in": "Calling https://example.com/api?token=abc&x=1 now",
+   "out": "Calling https://example.com/api?[hidden]"
+  },
+  {
+   "from": "fepuc9a7",
+   "name": "env assignment",
+   "in": "export API_KEY=abc123",
+   "out": "export [hidden]"
+  },
+  {
+   "from": "shapes",
+   "name": "anthropic",
+   "in": "use sk-ant-api03-{{a1B2*10}} now",
+   "out": "use [hidden]"
+  },
+  {
+   "from": "shapes",
+   "name": "github",
+   "in": "use ghp_{{x*36}} now",
+   "out": "use [hidden]"
+  },
+  {
+   "from": "shapes",
+   "name": "slack",
+   "in": "use xoxb-{{1*10}}-{{a*10}} now",
+   "out": "use [hidden]"
+  },
+  {
+   "from": "shapes",
+   "name": "aws",
+   "in": "use AKIA{{A*16}} now",
+   "out": "use [hidden]"
+  },
+  {
+   "from": "shapes",
+   "name": "nostr",
+   "in": "use nsec1{{q*58}} now",
+   "out": "use [hidden]"
+  },
+  {
+   "from": "shapes",
+   "name": "jwt",
+   "in": "use eyJ{{h*12}}.eyJ{{s*12}}.{{c*12}} now",
+   "out": "use [hidden]"
+  },
+  {
+   "from": "shapes",
+   "name": "hex key",
+   "in": "key {{ab*32}} now",
+   "out": "key [hidden]"
+  },
+  {
+   "from": "shapes",
+   "name": "private key block",
+   "in": "-----BEGIN RSA PRIVATE KEY-----\nMII{{E*20}}\n-----END RSA PRIVATE KEY-----",
+   "out": "[hidden]"
+  },
+  {
+   "from": "shapes",
+   "name": "base64 run",
+   "in": "blob {{Zm9vYmFy*6}} end",
+   "out": "blob [hidden]"
+  },
+  {
+   "from": "shapes",
+   "name": "credentials in a URL",
+   "in": "git clone https://robin:hunter2@example.com/repo",
+   "out": "git clone [hidden]"
+  },
+  {
+   "from": "names",
+   "name": "two named secrets",
+   "in": "API_KEY=abc123 and \"password\": \"hunter22\"",
+   "out": "[hidden]"
+  },
+  {
+   "from": "names",
+   "name": "prefixed pass",
+   "in": "DB_PASS=correct horse battery",
+   "out": "[hidden]"
+  },
+  {
+   "from": "names",
+   "name": "secret key",
+   "in": "SECRET_KEY=abc def",
+   "out": "[hidden]"
+  },
+  {
+   "from": "names",
+   "name": "pwd value",
+   "in": "pwd=a b c",
+   "out": "[hidden]"
+  },
+  {
+   "from": "names",
+   "name": "cookie header",
+   "in": "Cookie: session=abc",
+   "out": "[hidden]"
+  },
+  {
+   "from": "over-hide",
+   "name": "a full commit id",
+   "in": "commit 1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b in ~/work/site",
+   "out": "commit [hidden]"
+  },
+  {
+   "from": "over-hide",
+   "name": "the word token",
+   "in": "The token expired, so I signed in again.",
+   "out": "The [hidden]"
+  },
+  {
+   "from": "over-hide",
+   "name": "a token counter",
+   "in": "Budget max_tokens=4096.",
+   "out": "Budget [hidden]"
+  },
+  {
+   "from": "over-hide",
+   "name": "the word secrets",
+   "in": "Loaded the secrets file",
+   "out": "Loaded the [hidden]"
+  },
+  {
+   "from": "plain",
+   "name": "Editing store.ts",
+   "in": "Editing store.ts",
+   "out": "Editing store.ts"
+  },
+  {
+   "from": "plain",
+   "name": "Running pnpm",
+   "in": "Running pnpm",
+   "out": "Running pnpm"
+  },
+  {
+   "from": "plain",
+   "name": "Running pwd",
+   "in": "Running pwd",
+   "out": "Running pwd"
+  },
+  {
+   "from": "plain",
+   "name": "commit 1a2b3c4 in ~/work/site",
+   "in": "commit 1a2b3c4 in ~/work/site",
+   "out": "commit 1a2b3c4 in ~/work/site"
+  },
+  {
+   "from": "plain",
+   "name": "the passport is on the desk",
+   "in": "the passport is on the desk",
+   "out": "the passport is on the desk"
+  },
+  {
+   "from": "plain",
+   "name": "bypass: on for the test",
+   "in": "bypass: on for the test",
+   "out": "bypass: on for the test"
+  },
+  {
+   "from": "plain",
+   "name": "Secretary: Jo",
+   "in": "Secretary: Jo",
+   "out": "Secretary: Jo"
+  },
+  {
+   "from": "plain",
+   "name": "Tokenizer tests pass",
+   "in": "Tokenizer tests pass",
+   "out": "Tokenizer tests pass"
+  },
+  {
+   "from": "plain",
+   "name": "compass: north",
+   "in": "compass: north",
+   "out": "compass: north"
+  },
+  {
+   "from": "plain",
+   "name": "A passwordless login",
+   "in": "A passwordless login",
+   "out": "A passwordless login"
+  },
+  {
+   "from": "plain",
+   "name": "完了",
+   "in": "完了",
+   "out": "完了"
+  },
+  {
+   "from": "plain",
+   "name": "line one",
+   "in": "line one\nline two",
+   "out": "line one\nline two"
+  },
+  {
+   "from": "plain",
+   "name": "Wrote walkthrough/t304/runs/walk-walk-da",
+   "in": "Wrote walkthrough/t304/runs/walk-walk-daylight",
+   "out": "Wrote walkthrough/t304/runs/walk-walk-daylight"
+  },
+  {
+   "from": "plain",
+   "name": "Reading a web page",
+   "in": "Reading a web page",
+   "out": "Reading a web page"
+  },
+  {
+   "from": "plain",
+   "name": "Ran it in 1234 ms",
+   "in": "Ran it in 1234 ms",
+   "out": "Ran it in 1234 ms"
+  }
+ ]
+}

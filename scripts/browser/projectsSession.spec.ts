@@ -35,13 +35,13 @@ test('a working session opens to a live view: its steps and what it wrote, newes
   const v = view(page);
   await expect(v.getByRole('region', { name: 'Live' })).toContainText('Live');
   const steps = v.getByRole('list', { name: 'What it is doing, newest last' });
-  await expect(steps.locator('li')).toHaveCount(13);
+  await expect(steps.locator('li')).toHaveCount(14);
   await expect(steps.locator('li').first()).toContainText("I'll start from the events page as it stands");
-  await expect(steps.locator('li').last()).toContainText('Recording the walkthrough on phone and desktop');
+  await expect(steps.locator('li').last()).toContainText('Running npx');
   await expect(steps.locator('li[data-kind="said"]')).toHaveCount(4);
   // a secret in what it wrote never reaches the screen
   await expect(v).not.toContainText('abc123');
-  await expect(v).toContainText('token=[hidden]');
+  await expect(v).toContainText('Recording the walkthrough on a phone and a desktop now. The [hidden]');
   await expect(v).not.toContainText(NO_IDS);
   // the newest step is in view, at the bottom of its box
   await expect(steps.locator('li').last()).toBeInViewport();
@@ -100,7 +100,7 @@ test('a session that needs you shows the exact ask, and Answer puts it in the ro
   await expect(needs.locator('blockquote')).toHaveText('Should a variety with two names be one entry or two? I need that before I can count them.');
   await expect(v.getByRole('region', { name: 'What it did' })).toContainText('Read the spreadsheet: 412 rows.');
   await v.locator('summary', { hasText: 'How it checked' }).click();
-  await expect(v).toContainText('API_KEY=[hidden]');
+  await expect(v).toContainText('Counted the rows twice with [hidden]');
   await expect(v).not.toContainText('made-up-key-123');
   await expect(v).not.toContainText(NO_IDS);
   await shot(page, '03-needs-you');
@@ -150,7 +150,7 @@ test('a steps note that can\'t be read says so, and the rest of the view still s
   const sheet = await openProject(page, 'Workshop', /Riverbend co-op site/);
   await openSession(page, sheet, 'Make the events page read like a noticeboard');
   await expect(view(page)).toContainText("Couldn't read its steps. Trying again in a moment.");
-  await expect(view(page).locator('.sv-now')).toContainText('Now: Recording the walkthrough on phone and desktop');
+  await expect(view(page).locator('.sv-now')).toContainText('Now: Running npx');
 });
 
 test('the front door\'s working mark counts the room\'s Uni at work on your message, not only sessions', async ({ page }) => {

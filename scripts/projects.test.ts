@@ -5,7 +5,10 @@ import assert from "node:assert/strict";
 import { ModelError, ago, whyWords, archivePlan, archiveProject, cannotStart, isLive, liveInArea, liveSessions, makeProject, problems, restoreProject, sessionsOf, span, startSession, stateWords, stepSession, stopSession, finishSession, timeline, timelineWindow, type Area, type Work } from "../src/projects/model.ts";
 import { HEARD_MS, freshen, plainTitle, plainWords, resultWords, sessionState, workFrom } from "../src/projects/live.ts";
 import { actionMessage } from "../src/projects/actions.ts";
-import { HIDDEN, answerDraft, askOf, endWords, leftItems, parseFeed, redact } from "../src/projects/sessionWords.ts";
+import { HIDDEN, REDACT_RULES, answerDraft, askOf, endWords, leftItems, parseFeed, redact } from "../src/projects/sessionWords.ts";
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { endWhy } from "../src/projects/live.ts";
 import { DEMO_AREAS, demoVault } from "./browser/projectsWorld.ts";
 let failed = 0;
@@ -153,7 +156,7 @@ check("from the vault: many sessions on one project, any number live; a run find
 check("from the vault: a session says what it is doing in words, its steps, and what it left; never a task number or a run id", () => {
   const ev = S("run-events");
   assert.equal(ev.ask, "Make the events page read like a noticeboard", "a run titled only by its task takes the task's words");
-  assert.equal(ev.now, "Recording the walkthrough on phone and desktop"); assert.equal(ev.steps, 31); assert.equal(ev.endedAt, null);
+  assert.equal(ev.now, "Running npx"); assert.equal(ev.steps, 31); assert.equal(ev.endedAt, null);
   assert.equal(S("run-about").result, "Left ABOUT.md."); assert.equal(S("run-about").video, "https://example.com/walkthrough/about-page");
   assert.equal(S("run-restore").result, "Left a commit.");
   assert.equal(S("run-handbook").result, "Says it finished; nothing it left could be checked yet.");
@@ -284,7 +287,7 @@ check("didn't finish says why, in a sentence: stopped on purpose, failed, ran ou
   assert.equal(head("run-handbook"), "Says it finished, but nothing it left could be checked yet.");
   assert.equal(head("run-about"), "Finished.");
   const s = { ...S("run-donate-old"), end: { why: "failed" as const, note: "exit status 1; Bearer abcdefghijklmnopqrstu", resumesAt: null, did: null, left: null, checks: null, needs: null } };
-  assert.equal(endWords(s, NOW)!.more, `What went wrong: exit status 1; Bearer ${HIDDEN}`);
+  assert.equal(endWords(s, NOW)!.more, `What went wrong: exit status 1; ${HIDDEN}`);
   for (const why of ["turns", "context"] as const) assert.match(endWords({ ...s, end: { ...s.end, why } }, NOW)!.head, /ran out of room/);
   assert.match(endWords({ ...s, end: { ...s.end, why: "lost" } }, NOW)!.head, /worker was lost/);
   assert.match(endWords({ ...s, state: "silent", end: null }, NOW)!.head, /nothing has been heard from it/);
@@ -307,55 +310,43 @@ check("what it left: one item a line, a link only where the line holds an https 
   assert.deepEqual(leftItems("none"), []);
   assert.deepEqual(leftItems("javascript:alert(1); http://example.com/x").map((i) => i.url), [null, null], "only https opens");
   assert.deepEqual(leftItems("1. the PR https://example.com/pr/7."), [{ text: "the PR https://example.com/pr/7.", url: "https://example.com/pr/7" }]);
-  assert.deepEqual(leftItems("https://example.com/share?token=abc123"), [{ text: `https://example.com/share?token=${HIDDEN}`, url: null }], "a link that carried a secret is not a link");
 });
 check("the steps note, read back: time, step or said, words; anything else in the note is left out; secrets are hidden", () => {
   const items = parseFeed(vault.feeds.find((f) => f.id === "feed-events")!.content);
-  assert.equal(items.length, 13);
+  assert.equal(items.length, 14);
   assert.deepEqual(items.slice(0, 2).map((i) => [i.kind, i.at]), [["said", NOW - 46 * MIN], ["step", NOW - 45 * MIN]]);
   assert.equal(items[1].text, "Reading EventsPage.tsx");
   assert.ok(items.every((i) => !i.text.includes("abc123")), "token=… is hidden");
   assert.deepEqual(parseFeed("# Steps\n\n- not a line\n- - · step · No time\n- 2026-10-27T10:00:00Z · shout · no\n"), [{ at: null, kind: "step", text: "No time" }]);
   assert.deepEqual(parseFeed(null), []);
 });
-check("codex tt6oiyni: a quoted password with spaces and a long numeric token are hidden; known counters keep their numbers", () => {
-  assert.equal(redact('password="violet meadow phrase" then'), `password=${HIDDEN} then`);
-  assert.equal(redact("secret: 'two words'"), `secret: ${HIDDEN}`);
-  assert.equal(redact("token=12345678901234567890"), `token=${HIDDEN}`);
-  assert.equal(redact("API_KEY=123456"), `API_KEY=${HIDDEN}`);
-  assert.equal(redact("api_tokens=4096"), `api_tokens=${HIDDEN}`);
-  assert.equal(redact("Set token=12345678901234567890."), `Set token=${HIDDEN}.`);
-  assert.equal(redact("Budget max_tokens=4096."), "Budget max_tokens=4096.");
-  for (const plain of ["max_tokens=4096", "tokens: 12000", "input_tokens=980 output_tokens=120", "token_count=33"]) assert.equal(redact(plain), plain);
-  // a secret split by "; " in what it left is still hidden whole
-  assert.ok(leftItems('the config, password="a; b c"').every((i) => !/\bb c\b/.test(i.text)));
-  // through the steps note too
-  assert.deepEqual(parseFeed('- 2026-10-27T10:00:00Z · said · Set token=12345678901234567890 and password="violet meadow phrase".').map((i) => i.text),
-    [`Set token=${HIDDEN} and password=${HIDDEN}.`]);
+// T-304 (redaction-strategy addendum: fail closed): the app's second net runs the same rules as mts, on the same cases (one file, shared)
+const VECTORS = new URL("./fixtures/redaction-vectors.json", import.meta.url);
+const vdoc = JSON.parse(readFileSync(VECTORS, "utf8"));
+const expand = (t: string) => t.replace(/\{\{(.+?)\*(\d+)\}\}/g, (_, x: string, n: string) => x.repeat(Number(n)));
+const vcases: { from: string; name: string; in: string; out: string }[] = vdoc.cases.map((c: any) => ({ ...c, in: expand(c.in), out: expand(c.out) }));
+check("redaction: the rules are the shared ones (the same list as mts)", () => {
+  assert.deepEqual(REDACT_RULES, vdoc.rules);
+  assert.equal(HIDDEN, vdoc.hidden);
 });
-check("a password-like key with an unquoted value is hidden to the end of the line; ordinary words are left alone", () => {
-  assert.equal(redact("password: violet meadow phrase"), `password: ${HIDDEN}`);
-  assert.equal(redact("Set password: hunter two and restart.\nnext line"), `Set password: ${HIDDEN}\nnext line`);
-  assert.equal(redact("DB_PASS=correct horse battery"), `DB_PASS=${HIDDEN}`);
-  assert.equal(redact("passphrase = open sesame now"), `passphrase = ${HIDDEN}`);
-  assert.equal(redact("client_secret: two words"), `client_secret: ${HIDDEN}`);
-  assert.equal(redact("SECRET_KEY=abc def"), `SECRET_KEY=${HIDDEN}`);
-  assert.equal(redact("pwd=a b c"), `pwd=${HIDDEN}`);
-  assert.equal(redact('passcode: "1 2 3" then'), `passcode: ${HIDDEN} then`);
-  for (const plain of ["bypass: on for the test", "passport: on the desk", "the password was reset", "Secretary: Jo"]) assert.equal(redact(plain), plain);
-  assert.deepEqual(parseFeed("- 2026-10-27T10:00:00Z · step · Signed in with password: violet meadow phrase").map((i) => i.text), [`Signed in with password: ${HIDDEN}`]);
-  assert.deepEqual(leftItems("the config\npassword: violet meadow phrase").map((i) => i.text), ["the config", `password: ${HIDDEN}`]);
+check("redaction: every shared case (both reviews and the addendum), from the first secret-like key or shape to the end", () => {
+  for (const c of vcases) assert.equal(redact(c.in), c.out, `${c.from}: ${c.name}`);
 });
-check("anything that looks like a key is hidden; plain work words are left alone", () => {
-  for (const secret of ["sk-ant-api03-" + "a1B2".repeat(10), "ghp_" + "x".repeat(36), "xoxb-1234567890-abcdefghij", "AKIA" + "A".repeat(16), "nsec1" + "q".repeat(58),
-    "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.c2lnbmF0dXJlX2hlcmU", "ab".repeat(32)]) {
-    const out = redact(`use ${secret} now`);
-    assert.ok(!out.includes(secret) && out.includes(HIDDEN), secret.slice(0, 6));
+check("redaction: the vectors file is mts's (when an mts checkout is at MTS_DIR or ~/Code/mts-launcher)", () => {
+  const peer = join(process.env.MTS_DIR ?? join(homedir(), "Code/mts-launcher"), "tests/redaction_vectors.json");
+  if (!existsSync(peer)) { console.log(`skip: no mts copy at ${peer}`); return; }
+  assert.equal(readFileSync(peer, "utf8"), readFileSync(VECTORS, "utf8"));
+});
+check("redaction on screen: a step, what it left, and a link: nothing of a secret, across lines too", () => {
+  for (const c of vcases.filter((x) => x.out !== x.in)) {
+    const one = c.in.replace(/\s+/g, " ");
+    assert.equal(parseFeed(`- 2026-10-27T10:00:00Z · said · ${one}`)[0]?.text ?? "", redact(one), c.name);
+    // what it left: no piece (4+ characters) of the hidden part shows, unless the visible part has it too
+    const shown = c.out.slice(0, c.out.length - HIDDEN.length), gone = c.in.slice(shown.length);
+    const left = leftItems(c.in).map((i) => i.text).join("\n");
+    for (const piece of gone.split(/[^A-Za-z0-9]+/).filter((w) => w.length >= 4 && !shown.includes(w))) assert.ok(!left.includes(piece), `${c.name}: ${piece}`);
   }
-  assert.equal(redact("Authorization: Bearer abcdefghijklmnop1234"), `Authorization: Bearer ${HIDDEN}`);
-  assert.equal(redact('API_KEY=abc123 and "password": "hunter22"'), `API_KEY=${HIDDEN} and "password": ${HIDDEN}`);
-  assert.ok(!redact("-----BEGIN RSA PRIVATE KEY-----\nMIIEsecret\n-----END RSA PRIVATE KEY-----").includes("MIIE"));
-  for (const plain of ["Editing src/projects/store.ts", "max_tokens=4096 and tokens: 12000", "commit 1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b in ~/work/site", "The token expired, so I signed in again.", "Run the tests"])
-    assert.equal(redact(plain), plain);
+  assert.deepEqual(leftItems("the config\npassword: violet\nmeadow phrase").map((i) => i.text), ["the config", HIDDEN]);
+  assert.deepEqual(leftItems("https://example.com/share?token=abc123"), [{ text: `https://example.com/share?${HIDDEN}`, url: null }], "a link that carried a secret is not a link");
 });
 if (failed) process.exit(1);

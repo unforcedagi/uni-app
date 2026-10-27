@@ -73,7 +73,7 @@ export function demoVault(now: number) {
   ];
   const runs: Note[] = [];
   const run = (id: string, title: string, md: Record<string, unknown>) => runs.push(note(id, `Runs/2026-10-20 ${title}`, ["run"], { worker: `mts-${id.slice(-8).padStart(8, "x")}`, ...md }));
-  run("run-events", "T-901", { node: "p-coop", task: "T-901", state: "running", started_at: iso(49), doing_now: "Recording the walkthrough on phone and desktop", doing_at: iso(2), steps: 31, room: "workshop", channel: "demo-workshop", feed: "feed-events" });
+  run("run-events", "T-901", { node: "p-coop", task: "T-901", state: "running", started_at: iso(49), doing_now: "Running npx", doing_at: iso(2), steps: 31, room: "workshop", channel: "demo-workshop", feed: "feed-events" });
   run("run-donate", "Donate page with a sliding amount", { node: "p-coop", fresh_from: "dnteold1", state: "running", started_at: iso(20), doing_now: "Editing Donate.tsx", doing_at: iso(1), steps: 9, room: "workshop", channel: "demo-workshop" });
   run("run-about", "Rebuild the about page from the coordinator's letter", { node: "p-coop", state: "done", started_at: iso(3 * 24 * 60), ended_at: iso(3 * 24 * 60 - 70), summary: "mts aaaabbbb: completed, evidence: file /home/someone/work/riverbend-site/ABOUT.md", video: "https://example.com/walkthrough/about-page",
     ended: "done", feed: "feed-about", report: { summary: "Rebuilt the about page from the coordinator's letter, in her words. Three short sections: who we are, where we meet, how to join.",
@@ -109,11 +109,11 @@ export function demoVault(now: number) {
     [46, "said", "I'll start from the events page as it stands, then make the cards read like notices pinned to a board."],
     [45, "step", "Reading EventsPage.tsx"], [43, "step", "Searching the code"], [40, "step", "Editing EventCard.tsx"],
     [36, "said", "The cards now keep the co-op's own words. Next: a column layout that wraps like a noticeboard on a phone."],
-    [33, "step", "Editing events.css"], [30, "step", "Run the tests"], [27, "step", "Run the build"],
+    [33, "step", "Editing events.css"], [30, "step", "Running pnpm"], [27, "step", "Running vite"],
     [22, "said", "Tests and the build pass. One card had a very long title; it now wraps instead of running off the edge."],
-    [18, "step", "Editing EventCard.tsx"], [12, "step", "Run the tests"],
+    [18, "step", "Editing EventCard.tsx"], [12, "step", "Running pnpm"],
     [6, "said", "Recording the walkthrough on a phone and a desktop now. The token=abc123 in the old config is gone."],
-    [2, "step", "Recording the walkthrough on phone and desktop"],
+    [4, "step", "Updating its to-do list"], [2, "step", "Running npx"],
   ];
   const ABOUT: [number, "step" | "said", string][] = [[3 * 24 * 60 + 5, "said", "Reading the coordinator's letter first."], [3 * 24 * 60 - 60, "step", "Writing ABOUT.md"], [3 * 24 * 60 - 69, "said", "Done. The page is in her words."]];
   const feeds = [{ ...feedOf("feed-events", "run-events", EVENTS), content: feedContent(EVENTS) }, { ...feedOf("feed-about", "run-about", ABOUT), content: feedContent(ABOUT) }];

@@ -68,7 +68,7 @@ export async function bootProjects(page: Page, opts: Boot = {}) {
           const r = runFor(stop ? stop[1] : fresh![2]);
           if (!r) return void say(channel, false, "I couldn't find that session.");
           Object.assign(r.metadata, { state: 'failed', ended_at: iso(), summary: 'mts zzzzzzzz: stopped' }); r.updatedAt = iso();
-          if (fresh) notes.runs.push({ ...r, id: r.id + '-fresh', path: r.path + ' (fresh)', metadata: { ...r.metadata, state: 'running', started_at: iso(), ended_at: undefined, summary: undefined, steps: 0, doing_now: 'Reading the handoff' } });
+          if (fresh) notes.runs.push({ ...r, id: r.id + '-fresh', path: r.path + ' (fresh)', metadata: { ...r.metadata, state: 'running', started_at: iso(), ended_at: undefined, summary: undefined, steps: 0, doing_now: 'Reading HANDOFF.md' } });
           say(channel, false, fresh ? 'Stopped it and started a fresh one with a handoff.' : 'Stopped it.');
         } else if (archive || restore) {
           const p = nodeNamed((archive ?? restore)![1]);
