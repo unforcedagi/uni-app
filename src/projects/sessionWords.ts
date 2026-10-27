@@ -183,11 +183,17 @@ export function feedPages(metadata: unknown): FeedPages | null {
 /** The lines held for a session: `items`, oldest first, covering the session's lines `from` up to (not including) `to`. */
 export type Held = { items: FeedItem[]; from: number; to: number };
 
+/** The most lines a view holds (Codex zwmejvyc P2): what mts keeps (25 parts of 200, and the steps note's own, under 200), with room. */
+export const HELD_MAX = 5_400;
+
 /** A new read of the steps note over what was held: what was held before the note's first line stays when it reaches that line (no gap
- *  between); else only the note's lines show. */
+ *  between); else only the note's lines show. Lines mts no longer keeps (`dropped`), and any past HELD_MAX, go. */
 export function withHead(held: Held | null, head: readonly FeedItem[], pages: FeedPages): Held {
-  if (held && held.from < pages.first && held.to >= pages.first)
-    return { items: [...held.items.filter((it) => it.n < pages.first), ...head], from: held.from, to: pages.total };
+  const floor = Math.max(pages.dropped, pages.total - HELD_MAX);
+  if (held && held.from < pages.first && held.to >= pages.first) {
+    const kept = held.items.filter((it) => it.n < pages.first && it.n >= floor);
+    return { items: [...kept, ...head], from: Math.max(held.from, Math.min(floor, pages.first)), to: pages.total };
+  }
   return { items: [...head], from: pages.first, to: pages.total };
 }
 
@@ -201,6 +207,7 @@ export function partBefore(pages: FeedPages | null, from: number): FeedPart | nu
 /** An earlier part's lines put before what is held, when the part reaches it; else what was held, as it was. */
 export function withPart(held: Held, part: FeedPart, lines: readonly FeedItem[]): Held {
   if (!(part.first < held.from && part.first + part.n >= held.from)) return held;
+  if (held.to - part.first > HELD_MAX) return held;   // never more than a view may hold
   return { items: [...lines.filter((it) => it.n < held.from), ...held.items], from: part.first, to: held.to };
 }
 

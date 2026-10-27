@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { ModelError, ago, whyWords, archivePlan, archiveProject, cannotStart, isLive, liveInArea, liveSessions, makeProject, problems, restoreProject, sessionsOf, span, startSession, stateWords, stepSession, stopSession, finishSession, timeline, timelineWindow, type Area, type Work } from "../src/projects/model.ts";
 import { HEARD_MS, freshen, plainTitle, plainWords, resultWords, sessionState, workFrom } from "../src/projects/live.ts";
 import { actionMessage } from "../src/projects/actions.ts";
-import { DASHES, FOLD, HIDDEN, LABEL, PHRASES, REDACT_RULES, answerDraft, askOf, endWords, feedPages, labelOk, leftItems, parseFeed, partBefore, redactRaw, safeStep, withHead, withPart, type FeedItem } from "../src/projects/sessionWords.ts";
+import { DASHES, FOLD, HIDDEN, LABEL, PHRASES, REDACT_RULES, answerDraft, askOf, endWords, feedPages, HELD_MAX, labelOk, leftItems, parseFeed, partBefore, redactRaw, safeStep, withHead, withPart, type FeedItem } from "../src/projects/sessionWords.ts";
 import { existsSync, readFileSync } from "node:fs";
 import { parseRuns } from "../src/areas/steerCore.ts";
 import { buildTaskTree, parseNodes } from "../src/areas/taskCore.ts";
@@ -349,6 +349,22 @@ check("T-319: a new read keeps what was held when it reaches the note's first li
   // the view was away while 100 more lines were written: the held ones don't reach the note's first, so only the note's show
   assert.deepEqual(withHead(held, run(492, 552), pages(492, 552)), { items: run(492, 552), from: 492, to: 552 });
   assert.deepEqual(withHead(null, run(0, 3), pages(0, 3)), { items: run(0, 3), from: 0, to: 3 });
+});
+check("Codex zwmejvyc P2: a live view left open on a long session holds no more than mts keeps, and never past HELD_MAX", () => {
+  // mts's ring: parts of 200, 25 kept; the steps note holds the lines since the last part (at least 60). Read every 50 lines up to 8,000.
+  let held: ReturnType<typeof withHead> | null = null;
+  for (let total = 50; total <= 8_000; total += 50) {
+    const written = Math.floor(total / 200), first = Math.min(written * 200, Math.max(0, total - 60)), lo = Math.max(0, written - 25);
+    held = withHead(held, run(first, total), { first, total, dropped: lo * 200, parts: [] });
+    assert.ok(held.items.length <= HELD_MAX, `at ${total}: ${held.items.length} lines held`);
+    assert.ok(held.items.every((it) => it.n >= lo * 200), `at ${total}: a line mts no longer keeps is still held`);
+    assert.equal(held.from, held.items[0].n);
+  }
+  assert.equal(held!.items.length, 5_000, "lines 3,000 to 7,999: the 25 parts kept");
+  // a note that says it keeps everything still can't make a view hold more than HELD_MAX
+  const big = withHead({ items: run(0, 9_000), from: 0, to: 9_000 }, run(9_000, 9_060), { first: 9_000, total: 9_060, dropped: 0, parts: [] });
+  assert.equal(big.items.length, HELD_MAX);
+  assert.equal(big.from, 9_060 - HELD_MAX);
 });
 check("T-319: the part before what is held goes in front of it, its overlap left out; one that doesn't reach it changes nothing", () => {
   const pages = { first: 390, total: 450, dropped: 0, parts: [{ id: "p1", first: 0, n: 200 }, { id: "p2", first: 200, n: 200 }] };

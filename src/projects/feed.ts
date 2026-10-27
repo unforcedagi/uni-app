@@ -29,6 +29,11 @@ let vault = "";
 let generation = 0;
 let feeds = new Map<string, FeedState>();
 const inflight = new Map<string, Promise<void>>();
+// Codex zwmejvyc P2: a session's steps are kept only while a view shows them. Each view holds its note (holdFeed); when the last lets go,
+// its lines are dropped, and a read still out for them lands nowhere (the note's epoch moved on).
+const users = new Map<string, number>();
+const epochs = new Map<string, number>();
+const epoch = (id: string) => epochs.get(id) ?? 0;
 const listeners = new Set<() => void>();
 const emit = () => { for (const l of listeners) l(); };
 
@@ -48,12 +53,12 @@ export function readFeed(id: string): Promise<void> {
   if (!owner) return Promise.resolve();
   const running = inflight.get(id);
   if (running) return running;
-  const mine = generation, from = vault;
+  const mine = generation, from = vault, ep = epoch(id);
   let p: Promise<void> | undefined;
   p = (async () => {
     try {
       const r = await invoke<{ note: RawNote & { content?: string } }>("vault_note", { vault: from, noteRef: id });
-      if (mine !== generation) return;
+      if (mine !== generation || ep !== epoch(id)) return;
       const was = feeds.get(id) ?? NONE;
       const pages = feedPages(r?.note?.metadata);
       const lines = parseFeed(r?.note?.content ?? "", pages?.first ?? 0);
@@ -61,7 +66,7 @@ export function readFeed(id: string): Promise<void> {
       const held = pages ? withHead(was.held, lines, pages) : null;
       feeds = new Map(feeds).set(id, { ...was, items: held ? held.items : lines, ready: true, error: null, at: Date.now(), pages, held });
     } catch (e) {
-      if (mine !== generation) return;
+      if (mine !== generation || ep !== epoch(id)) return;
       const was = feeds.get(id) ?? NONE;
       feeds = new Map(feeds).set(id, { ...was, ready: true, error: String(e) });
     } finally {
@@ -82,7 +87,7 @@ export function loadEarlier(id: string): Promise<void> {
   const cur = feeds.get(id);
   const part = cur ? nextPart(cur) : null;
   if (!owner || !cur || !part) return Promise.resolve();
-  const mine = generation, from = vault;
+  const mine = generation, from = vault, ep = epoch(id);
   const set = (patch: (was: FeedState) => Partial<FeedState>) => { const was = feeds.get(id) ?? NONE; feeds = new Map(feeds).set(id, { ...was, ...patch(was) }); };
   set((was) => ({ earlier: { ...was.earlier, loading: true, error: null } }));
   emit();
@@ -90,7 +95,7 @@ export function loadEarlier(id: string): Promise<void> {
   p = (async () => {
     try {
       const r = await invoke<{ note: RawNote & { content?: string } }>("vault_note", { vault: from, noteRef: part.id });
-      if (mine !== generation) return;
+      if (mine !== generation || ep !== epoch(id)) return;
       const md = (r?.note?.metadata ?? {}) as Record<string, unknown>;
       if (md.first !== part.first) {
         set(() => ({ earlier: { loading: false, error: "Those steps are no longer kept.", gone: part.first + part.n } }));
@@ -104,7 +109,7 @@ export function loadEarlier(id: string): Promise<void> {
         return held ? { held, items: held.items, earlier } : { earlier };
       });
     } catch {
-      if (mine !== generation) return;
+      if (mine !== generation || ep !== epoch(id)) return;
       set((was) => ({ earlier: { ...was.earlier, loading: false, error: "Couldn't load earlier steps." } }));
     } finally {
       if (mine === generation && inflight.get(key) === p) inflight.delete(key);
@@ -124,6 +129,22 @@ function nextPart(f: FeedState) {
 /** Whether there is an earlier part to load for this state. */
 export const hasEarlier = (f: FeedState) => !!nextPart(f);
 
+/** A view holds a steps note while it shows it; the returned function lets go. When no view holds it, its lines are dropped. */
+export function holdFeed(id: string): () => void {
+  users.set(id, (users.get(id) ?? 0) + 1);
+  let held = true;
+  return () => {
+    if (!held) return;
+    held = false;
+    const left = (users.get(id) ?? 1) - 1;
+    if (left > 0) { users.set(id, left); return; }
+    users.delete(id);
+    epochs.set(id, epoch(id) + 1);
+    inflight.delete(id); inflight.delete(`earlier:${id}`);
+    if (feeds.has(id)) { feeds = new Map(feeds); feeds.delete(id); queueMicrotask(emit); }
+  };
+}
+
 /** What the screen would see for a steps note now (for the store's own test). */
 export const feedSnapshot = (id: string): FeedState => feeds.get(id) ?? NONE;
 
@@ -135,12 +156,13 @@ export function useFeed(id: string | null, live: boolean): FeedState {
   const gen = useSyncExternalStore(subscribe, () => generation, () => generation);
   useEffect(() => {
     if (!id) return;
+    const release = holdFeed(id);
     void readFeed(id);
-    if (!live) return;
+    if (!live) return release;
     const t = setInterval(() => { if (document.visibilityState === "visible") void readFeed(id); }, FEED_MS);
     const onVisible = () => { if (document.visibilityState === "visible") void readFeed(id); };
     document.addEventListener("visibilitychange", onVisible);
-    return () => { clearInterval(t); document.removeEventListener("visibilitychange", onVisible); };
+    return () => { clearInterval(t); document.removeEventListener("visibilitychange", onVisible); release(); };
   }, [id, live, gen]);
   const get = () => (id ? feeds.get(id) ?? NONE : NONE);
   return useSyncExternalStore(subscribe, get, get);

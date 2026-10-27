@@ -136,5 +136,30 @@ try {
     assert.equal(f.earlier.error, "Those steps are no longer kept.");
     assert.ok(!feed.hasEarlier(f), "not offered again while the steps note still lists it");
   });
+
+  await check("Codex zwmejvyc P2: a session's steps are dropped when the last view showing them closes, and a read still out lands nowhere", async () => {
+    store.setWorkOwner(null); store.setWorkOwner("A");
+    FEED.uni.long1 = { content: line(0, "Line 0.") + line(1, "Line 1.") + line(2, "Line 2."), metadata: { first: 0, part: 1 } };
+    const one = feed.holdFeed("long"), two = feed.holdFeed("long");
+    await feed.readFeed("long");
+    await feed.loadEarlier("long");
+    assert.equal(feed.feedSnapshot("long").items.length, 5);
+    one();
+    assert.equal(feed.feedSnapshot("long").items.length, 5, "another view still shows them");
+    two();
+    assert.deepEqual(feed.feedSnapshot("long").items, [], "closed: nothing kept");
+    const three = feed.holdFeed("long");
+    hold = true;
+    const p = feed.readFeed("long");
+    await settle();
+    three();
+    hold = false; for (const r of held.splice(0)) r();
+    await p; await settle();
+    assert.deepEqual(feed.feedSnapshot("long").items, [], "the read that was out when it closed is not kept");
+    const four = feed.holdFeed("long");
+    await feed.readFeed("long");
+    assert.equal(feed.feedSnapshot("long").items.length, 2, "opened again: read again");
+    four();
+  });
 } finally { await server.close(); }
 if (failed) process.exit(1);
