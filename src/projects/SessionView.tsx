@@ -69,10 +69,10 @@ export function SessionView({ s, all, project, now, roomName, onAnswer, onBack, 
   const needs = needsYou(s);
   const did = s.end?.did ? redact(s.end.did) : null;
   const reported = !!(s.end?.did || s.end?.left || s.end?.needs);
-  return <section className={`sv pj-session ${s.state}`} aria-label={`Session: ${s.ask}`} data-place="session-view" data-session={s.id} data-state={s.state}>
+  return <section className={`sv pj-session ${s.state}`} aria-label={`Session: ${redact(s.ask)}`} data-place="session-view" data-session={s.id} data-state={s.state}>
     <button ref={back} type="button" className="sv-back" onClick={onBack}><i className="ps-chev" aria-hidden="true" />Sessions</button>
     <p className="pj-state"><i aria-hidden="true" />{stateWords(s, now)}</p>
-    <h3 className="sv-ask">{s.ask}</h3>
+    <h3 className="sv-ask">{redact(s.ask)}</h3>
     {why && <p className="pj-why">{why}</p>}
     {asked && <p className="pj-asked" role="status">{asked}</p>}
     {live ? <LiveView s={s} feed={feed} now={now} /> : <>

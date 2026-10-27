@@ -318,6 +318,19 @@ check("the steps note, read back: time, step or said, words; anything else in th
   assert.deepEqual(parseFeed("# Steps\n\n- not a line\n- - · step · No time\n- 2026-10-27T10:00:00Z · shout · no\n"), [{ at: null, kind: "step", text: "No time" }]);
   assert.deepEqual(parseFeed(null), []);
 });
+check("codex tt6oiyni: a quoted password with spaces and a long numeric token are hidden; known counters keep their numbers", () => {
+  assert.equal(redact('password="violet meadow phrase" then'), `password=${HIDDEN} then`);
+  assert.equal(redact("secret: 'two words'"), `secret: ${HIDDEN}`);
+  assert.equal(redact("token=12345678901234567890"), `token=${HIDDEN}`);
+  assert.equal(redact("API_KEY=123456"), `API_KEY=${HIDDEN}`);
+  assert.equal(redact("api_tokens=4096"), `api_tokens=${HIDDEN}`);
+  for (const plain of ["max_tokens=4096", "tokens: 12000", "input_tokens=980 output_tokens=120", "token_count=33"]) assert.equal(redact(plain), plain);
+  // a secret split by "; " in what it left is still hidden whole
+  assert.ok(leftItems('the config, password="a; b c"').every((i) => !/\bb c\b/.test(i.text)));
+  // through the steps note too
+  assert.deepEqual(parseFeed('- 2026-10-27T10:00:00Z · said · Set token=12345678901234567890 and password="violet meadow phrase".').map((i) => i.text),
+    [`Set token=${HIDDEN} and password=${HIDDEN}.`]);
+});
 check("anything that looks like a key is hidden; plain work words are left alone", () => {
   for (const secret of ["sk-ant-api03-" + "a1B2".repeat(10), "ghp_" + "x".repeat(36), "xoxb-1234567890-abcdefghij", "AKIA" + "A".repeat(16), "nsec1" + "q".repeat(58),
     "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.c2lnbmF0dXJlX2hlcmU", "ab".repeat(32)]) {

@@ -17,14 +17,16 @@ const SECRETS: readonly RegExp[] = [
   /\b[0-9a-fA-F]{64}\b/g,
 ];
 const BEARER = /\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]{12,}/gi;
-/** `token=…`, `"password": "…"`, `API_KEY: …`: the name stays, the value goes (a plain number stays: `max_tokens=4096`). */
-const NAMED = /\b([A-Z0-9_]*(?:api[_-]?key|secret|token|passw(?:or)?d|pwd|private[_-]?key|credential)s?)(["']?\s*[:=]\s*)(?!\d+\b)(?:"[^"\s]+"|'[^'\s]+'|[^\s,;"']+)/gi;
+/** `token=…`, `"password": "two words"`, `API_KEY: …`: the name stays, the value goes, quoted values whole (spaces too). */
+const NAMED = /\b([A-Z0-9_]*(?:api[_-]?key|secret|token|passw(?:or)?d|pwd|private[_-]?key|credential)s?)(["']?\s*[:=]\s*)("[^"\n]+"|'[^'\n]+'|[^\s,;"']+)/gi;
+/** The one exception: a known token counter with a short number (`max_tokens=4096`, `input_tokens: 980`, `token_count=33`). */
+const COUNTER = /^(?:(?:(?:max|min|num|total|input|output|prompt|completion|cache_read_input|cache_creation_input)_?)?tokens|(?:max|min|num|total)_?token|tokens?_(?:count|used|limit|budget))$/i;
 
 /** Anything that looks like a key, token or password, as [hidden]. */
 export function redact(text: string): string {
   let t = text;
   for (const r of SECRETS) t = t.replace(r, HIDDEN);
-  return t.replace(BEARER, (_, kind: string) => `${kind} ${HIDDEN}`).replace(NAMED, (_, name: string, sep: string) => `${name}${sep}${HIDDEN}`);
+  return t.replace(BEARER, (_, kind: string) => `${kind} ${HIDDEN}`).replace(NAMED, (all, name: string, sep: string, value: string) => (COUNTER.test(name) && /^\d{1,9}$/.test(value) ? all : `${name}${sep}${HIDDEN}`));
 }
 
 /** One line of the session's stream: a step it took, or something it wrote. `at` is null when the line has no time. */
@@ -82,7 +84,7 @@ export const needsYou = (s: Session) => s.state === "waiting";
 /** What it left, one item a line: a link where the line holds one (https only), the line's words otherwise. Bullets and backticks go. */
 export function leftItems(left: string | null | undefined): { text: string; url: string | null }[] {
   const out: { text: string; url: string | null }[] = [];
-  for (const raw of (left ?? "").split(/\n|;\s+/)) {
+  for (const raw of redact(left ?? "").split(/\n|;\s+/)) {
     const line = redact(raw.replace(/^\s*(?:[-*•]|\d+[.)])\s+/, "").replace(/`/g, "").trim());
     if (!line || /^(none|n\/?a|nothing|-)\.?$/i.test(line)) continue;
     const url = /\bhttps:\/\/[^\s<>()"']+[^\s<>()"'.,;:!?]/.exec(line)?.[0] ?? null;
