@@ -3,8 +3,8 @@
 
 POST /transcribe  body = raw audio (webm/opus, mp4/aac, ogg, wav...)
 Authorization: Nostr <base64 NIP-98 event>, signed by an allowlisted pubkey.
-The event must be kind 27235 with u = the public URL, method = POST and
-payload = sha256(body), created within the last 120 seconds.
+The event must be kind 27235 with u = one of the public URLs, method = POST
+and payload = sha256(body), created within the last 120 seconds.
 Response: {"text", "language", "duration", "seconds"}.
 
 Listens on 127.0.0.1 only; Tailscale Serve exposes it tailnet-only.
@@ -24,14 +24,21 @@ from coincurve import PublicKeyXOnly
 from faster_whisper import WhisperModel
 
 PORT = int(os.environ.get("UNI_TRANSCRIBE_PORT", "1950"))
-PUBLIC_URL = os.environ.get("UNI_TRANSCRIBE_URL", "https://uni-1.taildf9ce2.ts.net:8445/transcribe")  # public-ok: the deployed host (T-190, see CLAUDE.md)
+# T-313: every name the service answers to. The tailnet rename (uni-1 -> uni, T-137) left both in use, and a client signs
+# for the name it reached: once uni-1 stopped resolving, the app reached uni and every request was refused as "for a
+# different request". UNI_TRANSCRIBE_URLS (comma-separated) or the older single UNI_TRANSCRIBE_URL overrides the default.
+PUBLIC_URLS = [u.strip() for u in os.environ.get("UNI_TRANSCRIBE_URLS", os.environ.get("UNI_TRANSCRIBE_URL", ",".join([
+    "https://uni-1.taildf9ce2.ts.net:8445/transcribe",  # public-ok: the deployed host (T-190, see CLAUDE.md)
+    "https://uni.taildf9ce2.ts.net:8445/transcribe",  # public-ok: its new name (T-137)
+]))).split(",") if u.strip()]
 MODEL = os.environ.get("UNI_WHISPER_MODEL", "small")
 MAX_BYTES = 25 * 1024 * 1024
 ALLOW_FILE = Path.home() / ".config/uni/transcribe-allow"
 SEEN: dict[str, float] = {}
 SEEN_LOCK = threading.Lock()
 MODEL_LOCK = threading.Lock()
-model = WhisperModel(MODEL, device="cpu", compute_type="int8", cpu_threads=4)
+# loaded at start (main), so the request checks can be tested without it
+model = None
 
 
 def allowed() -> set[str]:
@@ -57,7 +64,7 @@ def verify_nip98(header: str, body: bytes) -> str:
     if abs(time.time() - ev["created_at"]) > 120:
         raise ValueError("stale authorization")
     tags = {t[0]: t[1] for t in ev["tags"] if len(t) >= 2}
-    if tags.get("u") != PUBLIC_URL or tags.get("method", "").upper() != "POST":
+    if tags.get("u") not in PUBLIC_URLS or tags.get("method", "").upper() != "POST":
         raise ValueError("authorization is for a different request")
     if tags.get("payload") != hashlib.sha256(body).hexdigest():
         raise ValueError("payload hash mismatch")
@@ -118,5 +125,6 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    print(f"uni-transcribe: model={MODEL} on 127.0.0.1:{PORT}, public {PUBLIC_URL}", flush=True)
+    model = WhisperModel(MODEL, device="cpu", compute_type="int8", cpu_threads=4)
+    print(f"uni-transcribe: model={MODEL} on 127.0.0.1:{PORT}, public {', '.join(PUBLIC_URLS)}", flush=True)
     ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
