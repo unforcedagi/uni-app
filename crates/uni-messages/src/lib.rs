@@ -286,7 +286,7 @@ pub struct Messages {
     /// The largest attachment fetched (`MAX_MEDIA` unless lowered).
     media_max: std::sync::atomic::AtomicU64,
     /// Decrypted copies written for the system's viewer, by account; they go when it does (copies.rs).
-    copies: Arc<StdMutex<copies::Copies>>,
+    copies: Arc<copies::Registry>,
 }
 
 impl Messages {
@@ -310,7 +310,7 @@ impl Messages {
             transcribing: StdMutex::new(HashMap::new()),
             transcribe_turns: Arc::new(tokio::sync::Semaphore::new(TRANSCRIBING)),
             media_max: std::sync::atomic::AtomicU64::new(MAX_MEDIA),
-            copies: Arc::new(StdMutex::new(Default::default())),
+            copies: Arc::new(Default::default()),
         })
     }
 
@@ -563,7 +563,7 @@ impl Messages {
             t.abort();
         }
         // the attachments opened for another account go with it (and all of them when none is in force)
-        self.copies.lock().unwrap().sweep(account.as_deref());
+        self.copies.lock().sweep(account.as_deref());
         open.account = account;
         drop(open);
         self.rooms.lock().unwrap().clear();
@@ -916,16 +916,17 @@ impl Messages {
     pub async fn write_copy(self: &Arc<Self>, room_id: &str, event_id: &str, file: &Path) -> Result<String> {
         let (client, account, _, source, media) = self.media_message(room_id, event_id).await?;
         let bytes = self.bytes_of(&client, source, &media, self.media_limit()).await?;
-        let ticket = self.copies.lock().unwrap().add(&account, file).ok_or_else(|| MessagesError::Server { message: "The app is closing.".into() })?;
+        let ticket = self.copies.lock().add(&account, file);
+        let ended = || invalid("Messages signed out or closed while the file was being opened.");
         match copies::write_copy(self.copies.clone(), ticket, file.to_owned(), bytes, || {}).await {
             Ok(true) => {}
             // ended while it was written (signed out, replaced, or the app quitting): its writer removed it
-            Ok(false) => return Err(signed_out()),
+            Ok(false) => return Err(ended()),
             Err(e) => return Err(server(format!("couldn't write the file to open: {e}"))),
         }
         let now = self.live.lock().await.as_ref().map(|l| l.store.clone());
-        if !self.copies.lock().unwrap().settle(ticket, file, &account, now.as_deref()) {
-            return Err(signed_out());
+        if !self.copies.lock().settle(ticket, file, &account, now.as_deref()) {
+            return Err(ended());
         }
         Ok(media.mime)
     }
@@ -941,7 +942,7 @@ impl Messages {
 
     /// T-313: done with a copy `write_copy` made: removed now.
     pub fn drop_copy(&self, file: &Path) {
-        self.copies.lock().unwrap().remove(file);
+        self.copies.lock().remove(file);
     }
 
     /// T-313: a voice message's words. Transcribed once, by this device's transcriber, and kept in the account's
