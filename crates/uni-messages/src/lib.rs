@@ -12,6 +12,8 @@
 //! one. Everything else (sending, opening a room, the room list) never waits on a network call it doesn't make.
 #![recursion_limit = "256"]
 
+mod copies;
+mod download;
 mod link;
 mod secrets;
 mod view;
@@ -31,7 +33,6 @@ use futures_util::StreamExt;
 use matrix_sdk::{
     authentication::matrix::MatrixSession,
     config::RequestConfig,
-    media::{MediaFormat, MediaRequestParameters},
     ruma::{
         api::client::receipt::create_receipt::v3::ReceiptType, events::room::message::RoomMessageEventContent, EventId, OwnedEventId, OwnedRoomId,
         RoomId,
@@ -76,9 +77,10 @@ const QUEUE_RETRY: Duration = Duration::from_secs(2);
 const QUEUE_RETRY_MAX: Duration = Duration::from_secs(30);
 /// The crypto database in a store folder (matrix-sdk-sqlite's name for it): a store without it has no keys.
 const CRYPTO_DB: &str = "matrix-sdk-crypto.sqlite3";
-/// T-313: the largest attachment fetched for the app, and how long its download may take.
+/// T-313: the largest attachment fetched for the app (`Messages::set_media_limit` lowers it), and how long its download
+/// may take. The limit holds while the bytes arrive (download.rs).
 pub const MAX_MEDIA: u64 = 100 * 1024 * 1024;
-const MEDIA_FOR: Duration = Duration::from_secs(120);
+pub(crate) const MEDIA_FOR: Duration = Duration::from_secs(120);
 /// The largest voice message sent to be transcribed (the transcription service's own limit).
 pub const MAX_TRANSCRIBE: usize = 25 * 1024 * 1024;
 /// How long a transcription may take: the service runs near real time on a CPU.
@@ -279,6 +281,10 @@ pub struct Messages {
     transcribing: StdMutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
     /// At most `TRANSCRIBING` sent to the transcriber at once.
     transcribe_turns: Arc<tokio::sync::Semaphore>,
+    /// The largest attachment fetched (`MAX_MEDIA` unless lowered).
+    media_max: std::sync::atomic::AtomicU64,
+    /// Decrypted copies written for the system's viewer, by account; they go when it does (copies.rs).
+    copies: StdMutex<copies::Copies>,
 }
 
 impl Messages {
@@ -301,7 +307,18 @@ impl Messages {
             transcriber: StdMutex::new(None),
             transcribing: StdMutex::new(HashMap::new()),
             transcribe_turns: Arc::new(tokio::sync::Semaphore::new(TRANSCRIBING)),
+            media_max: std::sync::atomic::AtomicU64::new(MAX_MEDIA),
+            copies: StdMutex::new(Default::default()),
         })
+    }
+
+    /// T-313: the largest attachment this device fetches, at most `MAX_MEDIA` (a device with less memory, or a test).
+    pub fn set_media_limit(&self, max: u64) {
+        self.media_max.store(max.min(MAX_MEDIA), std::sync::atomic::Ordering::Relaxed);
+    }
+
+    fn media_limit(&self) -> u64 {
+        self.media_max.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// T-313: how this device turns voice messages into words. Without one, `transcript` says it can't.
@@ -543,6 +560,8 @@ impl Messages {
         for (_, (_, t)) in open.links.drain() {
             t.abort();
         }
+        // the attachments opened for another account go with it (and all of them when none is in force)
+        self.copies.lock().unwrap().sweep(account.as_deref());
         open.account = account;
         drop(open);
         self.rooms.lock().unwrap().clear();
@@ -853,7 +872,7 @@ impl Messages {
 
     /// T-313: an open room's media message: where its bytes are and what it is. Only a message the room's timeline
     /// holds: the app names an event, never a media address, so it can't make this fetch anything else.
-    async fn media_message(self: &Arc<Self>, room_id: &str, event_id: &str) -> Result<(Client, OwnedEventId, matrix_sdk::ruma::events::room::MediaSource, Media)> {
+    async fn media_message(self: &Arc<Self>, room_id: &str, event_id: &str) -> Result<(Client, String, OwnedEventId, matrix_sdk::ruma::events::room::MediaSource, Media)> {
         let room_id = Self::room_id(room_id)?;
         let event_id = EventId::parse(event_id).map_err(|_| invalid("That isn't an event id."))?;
         let (client, account) = self.client().await?;
@@ -863,23 +882,70 @@ impl Messages {
         let timeline = self.timeline(&client, &account, &room_id).await?;
         let item = timeline.item_by_event_id(&event_id).await.ok_or_else(|| invalid("That message isn't loaded here."))?;
         let (source, media) = view::media_of(&item).ok_or_else(|| invalid("That message has no attachment."))?;
-        Ok((client, event_id, source, media))
+        Ok((client, account, event_id, source, media))
+    }
+
+    /// An attachment's bytes, within this device's limit: refused before the download when its event says it is larger,
+    /// and stopped while it arrives if it turns out to be (download.rs).
+    async fn bytes_of(&self, client: &Client, source: matrix_sdk::ruma::events::room::MediaSource, media: &Media, max: u64) -> Result<Vec<u8>> {
+        if media.size.is_some_and(|n| n > max) {
+            return Err(invalid("This attachment is too large to open here."));
+        }
+        download::download(client, source, max).await
     }
 
     /// T-313: an attachment's bytes, through the account's own client: the homeserver's authenticated media download
     /// (with the account's token, which never leaves Rust), decrypted here for an encrypted room, and kept in the
     /// account's encrypted media store so it is fetched once.
     pub async fn media(self: &Arc<Self>, room_id: &str, event_id: &str) -> Result<Fetched> {
-        let (client, _, source, media) = self.media_message(room_id, event_id).await?;
-        let bytes = download(&client, source, media.size).await?;
+        let (client, _, _, source, media) = self.media_message(room_id, event_id).await?;
+        let bytes = self.bytes_of(&client, source, &media, self.media_limit()).await?;
         Ok(Fetched { bytes, mime: media.mime, name: media.name })
+    }
+
+    /// T-313: what a media message carries (its name, type, size), without fetching it.
+    pub async fn media_info(self: &Arc<Self>, room_id: &str, event_id: &str) -> Result<Media> {
+        Ok(self.media_message(room_id, event_id).await?.4)
+    }
+
+    /// T-313: write an attachment, decrypted, to `file`, for the system's viewer; answers the type it may be opened as.
+    /// The copy belongs to the account: it is removed when the account ends (copies.rs), and one finished after its
+    /// account ended is removed and refused, never handed over. `drop_copy` removes it sooner.
+    pub async fn write_copy(self: &Arc<Self>, room_id: &str, event_id: &str, file: &Path) -> Result<String> {
+        let (client, account, _, source, media) = self.media_message(room_id, event_id).await?;
+        let bytes = self.bytes_of(&client, source, &media, self.media_limit()).await?;
+        self.copies.lock().unwrap().add(&account, file);
+        let written = {
+            let file = file.to_owned();
+            tokio::task::spawn_blocking(move || {
+                if let Some(dir) = file.parent() {
+                    std::fs::create_dir_all(dir)?;
+                }
+                std::fs::write(&file, &bytes)
+            })
+            .await
+        };
+        if let Err(e) = written.map_err(|e| e.to_string()).and_then(|w| w.map_err(|e| e.to_string())) {
+            self.copies.lock().unwrap().remove(file);
+            return Err(server(format!("couldn't write the file to open: {e}")));
+        }
+        let now = self.live.lock().await.as_ref().map(|l| l.store.clone());
+        if !self.copies.lock().unwrap().settle(file, &account, now.as_deref()) {
+            return Err(signed_out());
+        }
+        Ok(media.mime)
+    }
+
+    /// T-313: done with a copy `write_copy` made: removed now.
+    pub fn drop_copy(&self, file: &Path) {
+        self.copies.lock().unwrap().remove(file);
     }
 
     /// T-313: a voice message's words. Transcribed once, by this device's transcriber, and kept in the account's
     /// encrypted store, so a second ask (this session or after a restart) reads them back. Two asks at once share one
     /// transcription. A failure isn't kept: asking again tries again.
     pub async fn transcript(self: &Arc<Self>, room_id: &str, event_id: &str) -> Result<Transcript> {
-        let (client, event_id, source, media) = self.media_message(room_id, event_id).await?;
+        let (client, _, event_id, source, media) = self.media_message(room_id, event_id).await?;
         if !matches!(media.kind, MediaKind::Voice | MediaKind::Audio) {
             return Err(invalid("Only a voice message or audio is transcribed."));
         }
@@ -900,10 +966,10 @@ impl Messages {
             }
             // the turn is taken before the download, so waiting asks don't each hold a clip in memory
             let _slot = self.transcribe_turns.clone().acquire_owned().await.map_err(server)?;
-            let audio = download(&client, source, media.size).await?;
-            if audio.len() > MAX_TRANSCRIBE {
-                return Err(invalid("This recording is too long to transcribe."));
-            }
+            let audio = self.bytes_of(&client, source, &media, (MAX_TRANSCRIBE as u64).min(self.media_limit())).await.map_err(|e| match e {
+                MessagesError::Invalid { .. } => invalid("This recording is too long to transcribe."),
+                e => e,
+            })?;
             let text = match tokio::time::timeout(TRANSCRIBE_FOR, transcriber.transcribe(audio, media.mime.clone())).await {
                 Ok(Ok(text)) => text.trim().to_owned(),
                 Ok(Err(e)) => {
@@ -984,24 +1050,6 @@ impl Drop for GateGuard<'_> {
             gates.remove(&self.key);
         }
     }
-}
-
-/// An attachment's bytes, within `MEDIA_FOR`, refused past `MAX_MEDIA` (before the download when its event gives a size).
-async fn download(client: &Client, source: matrix_sdk::ruma::events::room::MediaSource, size: Option<u64>) -> Result<Vec<u8>> {
-    let too_big = || invalid("This attachment is too large to open here.");
-    if size.is_some_and(|n| n > MAX_MEDIA) {
-        return Err(too_big());
-    }
-    let request = MediaRequestParameters { source, format: MediaFormat::File };
-    let bytes = match tokio::time::timeout(MEDIA_FOR, client.media().get_media_content(&request, true)).await {
-        Ok(Ok(b)) => b,
-        Ok(Err(e)) => return Err(from_sdk(e)),
-        Err(_) => return Err(MessagesError::Unreachable { message: "The attachment took too long to download.".into() }),
-    };
-    if bytes.len() as u64 > MAX_MEDIA {
-        return Err(too_big());
-    }
-    Ok(bytes)
 }
 
 /// Ask the homeserver for the messages replies answer that the timeline doesn't hold yet, each once per open room and

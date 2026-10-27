@@ -135,6 +135,13 @@ async fn voice_pictures_files_replies_and_reactions_arrive_and_a_voice_message_i
     let file = send(port, &sam, &room, "m.room.message", json!({
         "msgtype": "m.file", "body": "planting-plan.pdf", "url": pdf_mxc, "info": { "mimetype": "application/pdf", "size": pdf.len() }
     }), 3).await;
+    // Codex review 9b8p17d9: files larger than their events say (one understates its size, one gives none)
+    let big = vec![9u8; 64 * 1024];
+    let big_mxc = upload(port, &sam, &big, "application/pdf").await;
+    let understated = send(port, &sam, &room, "m.room.message", json!({
+        "msgtype": "m.file", "body": "small.pdf", "url": big_mxc, "info": { "mimetype": "application/pdf", "size": 100 }
+    }), 20).await;
+    let sizeless = send(port, &sam, &room, "m.room.message", json!({ "msgtype": "m.file", "body": "unsized.pdf", "url": big_mxc }), 21).await;
     let first = send(port, &sam, &room, "m.room.message", json!({ "msgtype": "m.text", "body": "Are the beans in yet?" }), 4).await;
     let reply = send(port, &pat, &room, "m.room.message", json!({
         "msgtype": "m.text", "body": "Not yet, Saturday.", "m.relates_to": { "m.in_reply_to": { "event_id": first } }
@@ -160,7 +167,7 @@ async fn voice_pictures_files_replies_and_reactions_arrive_and_a_voice_message_i
     let ready = |rows: &[MessageRow]| {
         let quoted = row(rows, &reply).and_then(|r| r.reply.as_ref()).is_some_and(|q| q.text.is_some());
         let reacted = row(rows, &first).is_some_and(|r| r.reactions.first().is_some_and(|x| x.count == 2));
-        quoted && reacted && row(rows, &voice).is_some()
+        quoted && reacted && row(rows, &voice).is_some() && row(rows, &sizeless).is_some()
     };
     let mut rows = Vec::new();
     for _ in 0..60 {
@@ -200,6 +207,22 @@ async fn voice_pictures_files_replies_and_reactions_arrive_and_a_voice_message_i
     assert!(matches!(m.media(&room, &first).await, Err(MessagesError::Invalid { .. })));
     assert!(matches!(m.media(&room, "$not-here:media.test.localhost").await, Err(MessagesError::Invalid { .. })));
     assert!(m.media("!elsewhere:media.test.localhost", &voice).await.is_err());
+    // past this device's limit, whatever the event says: refused (download.rs stops reading at the limit)
+    m.set_media_limit(16 * 1024);
+    for (event, what) in [(&understated, "understated"), (&sizeless, "no size")] {
+        let got = m.media(&room, event).await;
+        assert!(matches!(got, Err(MessagesError::Invalid { ref message }) if message.contains("too large")), "{what}: {:?}", got.map(|f| f.bytes.len()));
+    }
+    assert_eq!(m.media(&room, &voice).await.unwrap().bytes, audio);
+    m.set_media_limit(uni_messages::MAX_MEDIA);
+    assert_eq!(m.media(&room, &sizeless).await.unwrap().bytes, big);
+
+    // a copy for the system's viewer: written, decrypted; gone when the app quits (below)
+    let copies = dir.join("copies");
+    let quit_copy = copies.join("voice-1.ogg");
+    assert_eq!(m.write_copy(&room, &voice, &quit_copy).await.unwrap(), "audio/ogg");
+    assert_eq!(std::fs::read(&quit_copy).unwrap(), audio);
+
     // only sound is transcribed
     assert!(matches!(m.transcript(&room, &file).await, Err(MessagesError::Invalid { .. })));
     assert_eq!(stand.calls.load(SeqCst), 0);
@@ -222,6 +245,7 @@ async fn voice_pictures_files_replies_and_reactions_arrive_and_a_voice_message_i
 
     // after a restart (the app quit, a new one over the same store): still kept, not transcribed again
     m.shut_down().await;
+    assert!(!quit_copy.exists(), "a copy outlived the app's account");
     drop(m);
     let m = Messages::new(app.join("data"), Arc::new(FileSecrets::new(app.join("secrets"))));
     m.set_transcriber(Arc::new(stand.clone()));
@@ -235,8 +259,13 @@ async fn voice_pictures_files_replies_and_reactions_arrive_and_a_voice_message_i
     assert_eq!(m.transcript(&room, &voice).await.unwrap().text, words);
     assert_eq!(stand.calls.load(SeqCst), 2, "transcribed again after a restart");
 
-    // signed out, the kept words go with the account's store; signed in again, it is a new device and a new store
+    // signed out, the copies go with the account (and the copy was this account's, written after a restart)
+    let out_copy = copies.join("plan-1.pdf");
+    m.write_copy(&room, &file, &out_copy).await.unwrap();
+    assert_eq!(std::fs::read(&out_copy).unwrap(), pdf);
+    // and the kept words go with the account's store; signed in again, it is a new device and a new store
     m.sign_out().await.unwrap();
+    assert!(!out_copy.exists(), "a decrypted copy outlived sign-out");
     m.sign_in(&hs.url(), "pat", "pw-0123456789").await.unwrap();
     until(30, "the room is listed after signing in again", || {
         let (m, id) = (m.clone(), room.clone());
@@ -250,5 +279,19 @@ async fn voice_pictures_files_replies_and_reactions_arrive_and_a_voice_message_i
     .await;
     assert_eq!(m.transcript(&room, &voice).await.unwrap().text, words);
     assert_eq!(stand.calls.load(SeqCst), 3, "a new sign-in kept the old account's words");
+
+    // a copy being written as the account signs out: however the two fall, no copy is left once both are done
+    for round in 0..3 {
+        let racing = copies.join(format!("race-{round}.pdf"));
+        let (wrote, out) = tokio::join!(m.write_copy(&room, &file, &racing), m.sign_out());
+        out.unwrap();
+        assert!(!racing.exists(), "round {round}: a copy outlived sign-out (written: {})", wrote.is_ok());
+        m.sign_in(&hs.url(), "pat", "pw-0123456789").await.unwrap();
+        until(30, "the file is loaded after signing in again", || {
+            let (m, id, file) = (m.clone(), room.clone(), file.clone());
+            async move { m.open(&id).await.is_ok_and(|rows| row(&rows, &file).is_some()) }
+        })
+        .await;
+    }
     m.shut_down().await;
 }

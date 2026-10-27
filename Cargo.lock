@@ -7600,6 +7600,7 @@ dependencies = [
  "clap",
  "futures-util",
  "matrix-sdk",
+ "matrix-sdk-base",
  "matrix-sdk-ui",
  "nostr",
  "qrcode",

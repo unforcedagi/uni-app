@@ -148,40 +148,39 @@ fn disk_name(name: &str) -> String {
     if clean.is_empty() { "attachment".into() } else { clean }
 }
 
-/// Open an attachment in the app the system picks for its type: written, decrypted, into the media cache, handed over
-/// (desktop: the default app; Android: a content:// URI, see files.rs), removed later.
+/// Open an attachment in the app the system picks for its type: written, decrypted, into the media cache (the core's
+/// `write_copy`, which removes it when the account ends and never hands over one finished after), handed over
+/// (desktop: the default app; Android: a content:// URI, see files.rs), and removed after `OPENED_FOR`.
 #[tauri::command]
 pub async fn messages_open_file(app: tauri::AppHandle, s: State<'_, MessagesState>, room_id: String, event_id: String) -> Result<(), MessagesError> {
     use crate::media_registry::{lock, MEDIA};
     let fail = |message: String| MessagesError::Server { message };
-    let got = s.0.media(&room_id, &event_id).await?;
     let dir = crate::media_cache_dir(&app).map_err(fail)?;
+    // the event's file name, made one plain name, after a prefix of this open's own
+    let media = s.0.media_info(&room_id, &event_id).await?;
     let id = uuid::Uuid::new_v4().simple().to_string();
-    let name = format!("{OPENED_PREFIX}{}-{}", &id[..12], disk_name(&got.name));
-    let file = dir.join(&name);
+    let name = format!("{OPENED_PREFIX}{}-{}", &id[..12], disk_name(&media.name));
+    let named = dir.join(&name);
+    // pinned against the media cache's pruning for as long as a viewer may read it
     lock(&MEDIA).pin(&name);
     let release = {
-        let (name, file) = (name.clone(), file.clone());
-        move || {
+        let messages = s.0.clone();
+        move |file: &std::path::Path| {
+            messages.drop_copy(file);
             lock(&MEDIA).release(&name);
-            let _ = std::fs::remove_file(&file);
         }
     };
-    let written = {
-        let (dir, file) = (dir.clone(), file.clone());
-        tauri::async_runtime::spawn_blocking(move || std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&file, &got.bytes)))
-            .await
-            .map_err(|e| fail(e.to_string()))
-            .and_then(|w| w.map_err(|e| fail(format!("Couldn't write the file to open: {e}"))))
+    let mime = match s.0.write_copy(&room_id, &event_id, &named).await {
+        Ok(m) => m,
+        Err(e) => {
+            release(&named);
+            return Err(e);
+        }
     };
-    if let Err(e) = written {
-        release();
-        return Err(e);
-    }
-    let opened = crate::files::open(&app, &file, Some(got.mime.as_str())).await.map_err(fail);
+    let opened = crate::files::open(&app, &named, Some(mime.as_str())).await.map_err(fail);
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(OPENED_FOR).await;
-        release();
+        release(&named);
     });
     opened
 }
