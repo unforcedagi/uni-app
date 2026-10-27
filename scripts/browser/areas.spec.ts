@@ -12,11 +12,12 @@ const calls = (page: Page, cmd: string) => page.evaluate((c) => (window as any).
 test.describe('seed apps and navigation', () => {
   test.beforeEach(async ({ page }) => bootAreas(page, 'seed'));
 
-  test('home is the room tree: the areas, foreground first', async ({ page }, info) => {
+  test('home is the front door: a door per area room, foreground first; a private area shows its name only', async ({ page }, info) => {
     await openAreas(page);
-    const names = await page.locator((page.viewportSize()?.width ?? 0) >= 900 ? '.th-roomnav' : '.th-phone-tree').locator('.th-row.d0 .th-go, .th-row.d1 .th-go').evaluateAll((els) => els.map((e) => (e.getAttribute('aria-label') ?? '').split(',')[0]));
-    expect(names.slice(0, 3)).toEqual(['Uni', 'Techne', 'Unforced Development']);
+    const names = await page.locator('.fd-door .fd-name').allTextContents();
+    expect(names.slice(0, 2)).toEqual(['Techne', 'Unforced Development']);
     expect(names).toEqual(expect.arrayContaining(['Atlas', 'Expression', 'Relationships', 'Sanctum']));
+    await expect(page.locator('.fd-door[data-path="Areas/Sanctum"] .fd-stands')).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Refresh areas' })).toHaveCount(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await mkdir('shots/t74', { recursive: true });

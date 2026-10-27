@@ -3,7 +3,7 @@
 // and a Boulder project with no room of its own.
 import { mkdir } from 'node:fs/promises';
 import { test, expect, type Page } from '@playwright/test';
-import { bootAreas } from './areasFixture';
+import { bootAreas, showTree } from './areasFixture';
 
 const SHOTS = 'scripts/browser/__shots__/t88';
 const calls = (page: Page, cmd: string) => page.evaluate((c) => (window as any).__calls.filter((x: any) => x.cmd === c).map((x: any) => x.args), cmd);
@@ -18,10 +18,10 @@ const shot = async (page: Page, name: string) => {
   await tag.evaluate((n) => n.remove());
 };
 const wide = (page: Page) => (page.viewportSize()?.width ?? 0) >= 900;
-const scope = (page: Page) => (wide(page) ? page.locator('.th-roomnav') : page.locator('.th-phone-tree'));
-/** Open a node's room from the tree (r12: the tree is the only way in; a phone goes back to the tree first). */
+const scope = (page: Page) => (wide(page) ? page.locator('.th-roomnav') : page.locator('.th-drawer .th-phone-tree'));
+/** Open a node's room from the tree (T-302: the tree is in a room, beside it or in a phone's Places drawer). */
 async function open(page: Page, name: string) {
-  if (!wide(page) && await page.locator('.sr-drawer, .th-back').count()) await page.locator('.sr-drawer, .th-back').first().click();
+  await showTree(page);
   await scope(page).locator('.th-row.d1').first().waitFor();
   for (let i = 0; i < 12; i++) { const f = scope(page).locator('.th-fold[aria-expanded="false"]'); if (!await f.count()) break; await f.first().click(); }
   await scope(page).locator(`.th-go[aria-label^="${name},"]`).click();
@@ -43,11 +43,8 @@ for (const nearOff of [false, true]) {
   test.describe(`ids${nearOff ? ' (two-query fallback)' : ''}`, () => {
     test.beforeEach(async ({ page }) => { await bootAreas(page, 'seed', { briefs: true, tree: true, tasks: true, ids: true, boulder: true, nearOff, pinned: true }); });
 
+    // T-302: Uni's own level (every area's work at once) went with the Uni room as home; the areas' counts are the check now
     test('the tree and the counts are the same with ids as with paths', async ({ page }) => {
-      await open(page, 'Uni');
-      await work(page);
-      await expect.poll(() => total(page)).toBe('11');
-      await shot(page, 'uni');
       await open(page, 'Techne');
       await work(page);
       await expect.poll(() => total(page)).toBe('7');
@@ -74,9 +71,7 @@ test.describe('stewardship', () => {
   const door = (page: Page) => page.locator('.sr-door');
   const composer = (page: Page) => page.locator('.sr-chat').getByRole('textbox', { name: /^Message / });
 
-  test('Uni names its own room; Boulder is found by channel id although the metadata says #civics', async ({ page }) => {
-    await open(page, 'Uni');
-    await expect(door(page)).toHaveText('#Uni'); // r13: the channel's own name
+  test('Boulder is found by channel id although the metadata says #civics', async ({ page }) => {
     await open(page, 'Boulder');
     await expect(door(page)).toHaveText('#boulder');
     await expect(composer(page)).toHaveAttribute('placeholder', 'Message #boulder');
@@ -101,12 +96,7 @@ test.describe('stewardship', () => {
     await expect(page.locator('.sr-title')).toHaveText('Boulder Civic Calendar'); // r20 (Codex 6): the node stays the heading
     await expect(page.locator('.sr-context')).toHaveText('Chat in #boulder · no room of its own yet');
     await expect(composer(page)).toHaveAttribute('placeholder', 'Message #boulder');
-    // seen from Uni, its task offers its steward's room
-    await open(page, 'Uni');
-    await work(page);
-    await page.locator('.sr-work .cp-item').filter({ hasText: 'Add the November dates' }).locator('.cp-need').click();
-    await expect(page.getByRole('button', { name: 'Open in #boulder' })).toBeVisible();
-    await page.keyboard.press('Escape');
+    // (T-302: "seen from Uni, its task offers its steward's room" went with Uni's own level; from Boulder it is already in that room)
     await shot(page, 'inherited-steward');
   });
 });

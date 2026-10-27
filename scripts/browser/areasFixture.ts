@@ -715,6 +715,7 @@ const treeRow = (page: Page, name: string) => page.locator(isWide(page) ? '.th-r
 export const areaCard = (page: Page, name: string) => page.locator(`.fd-door[data-path="Areas/${name}"]`).or(treeRow(page, name));
 /** Shows the room tree: from the front door through the first room, and on a phone the Places drawer. */
 export async function showTree(page: Page) {
+  await page.locator('[data-place="front-door"], .sr').first().waitFor();
   if (await frontDoor(page).isVisible()) { await page.locator('.fd-door').first().click(); await expect(page.locator('.sr').first()).toBeVisible(); }
   if (!isWide(page) && !(await page.locator('.th-drawer').isVisible())) await page.locator('.sr-drawer').first().click();
 }
@@ -724,6 +725,7 @@ export async function showTree(page: Page) {
  */
 export async function openAreaPage(page: Page, name: string, opts: { app?: boolean } = {}) {
   const door = page.locator(`.fd-door[data-path="Areas/${name}"]`);
+  await page.locator('[data-place="front-door"], .sr').first().waitFor();
   if (!(await frontDoor(page).isVisible() && await door.count())) await showTree(page);
   if (await door.isVisible()) await door.click(); else await treeRow(page, name).click();
   // r15: a node in a borrowed room is headed by the room; the place opened is the shell's data-node

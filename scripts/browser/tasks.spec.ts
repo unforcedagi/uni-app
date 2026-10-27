@@ -71,7 +71,7 @@ test.describe('tasks in the work view', () => {
   });
 
   test('Open in #room (from another room) opens that room in its shell', async ({ page }) => {
-    await workPage(page, 'Uni');
+    await workPage(page, 'Techne'); // a project's task, seen from its area's work view, opens the project's own room
     await openTask(page, 'T-65');
     await page.getByRole('button', { name: 'Open in #Cohere' }).click();
     await expect(page.locator('.sr-title')).toHaveText('COhere 2026');
@@ -139,8 +139,8 @@ test.describe('tasks in the work view', () => {
 
 test('a task title is text, never markup', async ({ page }) => {
   await bootAreas(page, 'seed', { briefs: true, tree: true, tasks: true });
-  await page.evaluate(() => { (window as any).__tasks.push({ id: 'x1', path: 'Tasks/<img src=x onerror=window.__pwn=1> bold', extension: 'md', tags: ['task'], updatedAt: 'T', metadata: { node: 'Uni', state: 'open', owner: 'aaron', next: '<b>hi</b>' } }); });
-  await workPage(page, 'Uni');
+  await page.evaluate(() => { (window as any).__tasks.push({ id: 'x1', path: 'Tasks/<img src=x onerror=window.__pwn=1> bold', extension: 'md', tags: ['task'], updatedAt: 'T', metadata: { node: 'Areas/Techne', state: 'open', owner: 'aaron', next: '<b>hi</b>' } }); });
+  await workPage(page, 'Techne'); // T-302: Uni's own level went with the Uni room as home; an area's work view reads the same rows
   await expect(page.locator('.sr-work .cp-title', { hasText: '<img src=x' })).toBeVisible();
   expect(await page.evaluate(() => (window as any).__pwn)).toBeUndefined();
   expect(await page.locator('.sr-work img, .cp-item img').count()).toBe(0);

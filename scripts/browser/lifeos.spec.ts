@@ -1,14 +1,14 @@
 // T-80: Areas as a life OS view, after r12: the device cache and one-query loading, node statuses, the App tab beside the room, and Back
 // through the levels. (Today, the Brief page, the map and the room switcher were deleted with the Map, Octopus and Classic layouts.)
 import { test, expect, type Page } from '@playwright/test';
-import { areaCard, bootAreas, openAreaPage, openAreasHome } from './areasFixture';
+import { areaCard, bootAreas, openAreaPage, openAreasHome, showTree } from './areasFixture';
 
 const calls = (page: Page, cmd: string) => page.evaluate((c) => (window as any).__calls.filter((x: any) => x.cmd === c), cmd);
 const isDesktop = (page: Page) => (page.viewportSize()?.width ?? 0) >= 900;
-const tree = (page: Page) => page.locator(isDesktop(page) ? '.th-roomnav' : '.th-phone-tree');
+const tree = (page: Page) => page.locator(isDesktop(page) ? '.th-roomnav' : '.th-drawer .th-phone-tree');
 /** Unfold every area of the room tree, so a project's row can be clicked. */
 async function unfold(page: Page) {
-  if (!isDesktop(page) && await page.locator('.sr-drawer, .th-back').count()) await page.locator('.sr-drawer, .th-back').first().click();
+  await showTree(page); // T-302: the tree is in a room (beside it, or in a phone's Places drawer)
   await tree(page).locator('.th-row.d1').first().waitFor();
   for (let i = 0; i < 12; i++) { const f = tree(page).locator('.th-fold[aria-expanded="false"]'); if (!await f.count()) break; await f.first().click(); }
 }
@@ -160,7 +160,8 @@ test('path brief beats a newer metadata-only note; limit is visible', async ({ p
   await expect(areaCard(page, 'Cached')).toBeVisible({ timeout: 700 });
   expect(await page.evaluate(() => (window as any).__roomsResolved)).toBeUndefined();
   await expect(page.getByRole('heading', { name: 'Uni', level: 1 })).toBeVisible();
-  if (isDesktop(page)) await expect(page.locator('.sr-chat')).toBeVisible({ timeout: 8000 });
+  // T-302: the home is the front door (no Uni room beside it)
+  await expect(page.locator('[data-place="front-door"]')).toBeVisible();
  });
  test('system Back follows parent levels and the project body is read once', async ({ page }) => {
   await bootAreas(page, 'seed', { tree: true, briefs: true });
@@ -168,11 +169,13 @@ test('path brief beats a newer metadata-only note; limit is visible', async ({ p
   await page.locator('.th-note summary').click();
   await expect(page.locator('.th-note')).toContainText('The festival: venue, crew and the schedule.');
   const back = () => page.evaluate(() => { const w = window as any; w.__cbs[w.__backHandler.id]({ message: {}, index: w.__backIndex ?? 0 }); w.__backIndex = (w.__backIndex ?? 0) + 1; });
-  await back(); // the work page closes back to the room
-  await expect(page.locator('.sr-title')).toHaveText('COhere 2026');
+  // each Back closes what is over the place, then goes up a level: the work page, the project's room, its area, Uni's front door
+  // (T-302: the way in passes through the front door and a room first, so the presses are counted by what they reach, not one by one)
+  const backTo = async (seen: () => Promise<boolean>) => { for (let i = 0; i < 4 && !(await seen()); i++) { await back(); await page.waitForTimeout(250); } expect(await seen()).toBe(true); };
+  await backTo(async () => !(await page.locator('.sr-work').isVisible()) && (await page.locator('.sr-title').textContent()) === 'COhere 2026');
   expect((await calls(page, 'vault_note')).filter((c: any) => c.args.noteRef === 'p-cohere')).toHaveLength(1);
-  if (isDesktop(page)) { await back(); await expect(page.locator('.sr-title')).toHaveText('Techne'); await back(); await expect(page.locator('.sr-title')).toHaveText('Uni'); }
-  else { await back(); await expect(page.locator('.th-phone-tree')).toBeVisible(); }
+  if (isDesktop(page)) await backTo(async () => (await page.locator('.sr-title').textContent().catch(() => null)) === 'Techne');
+  await backTo(() => page.locator('[data-place="front-door"]').isVisible());
  });
 
 for (const status of ['archived', 'done', 'dormant']) test(`area and project status ${status} controls the tree's rows`, async ({ page }) => {
@@ -210,8 +213,9 @@ test('failed project refresh retains previous projects and stale marker', async 
   });
   await page.clock.install(); await page.clock.fastForward(31000);
   await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
-  // r13: the four area queries and the task tree's (re-read with every refresh); r16: the run and draft reads start beside it
-  await expect.poll(() => page.evaluate(() => (window as any).__pendingAreas.length)).toBe(7);
+  // r13: the four area queries and the task tree's (re-read with every refresh); r16: the run and draft reads start beside it;
+  // T-302: and the front door's work read (its node notes; its run reads are metadata queries)
+  await expect.poll(() => page.evaluate(() => (window as any).__pendingAreas.length)).toBe(8);
   await expect(page.locator('.areas-status')).toHaveCount(0);
   await page.evaluate(async () => { for (const resolve of (window as any).__pendingAreas) await resolve(); });
  });
