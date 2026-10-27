@@ -85,7 +85,7 @@ export function endWhy(ended: unknown, summary: unknown, state: SessionState): E
   if (word === "failed_to_start") return "never_started";
   if (state === "finished") return "done";
   if (state === "waiting") return "blocked";
-  if (state === "failed") return word === "failed" || !word ? "failed" : null;
+  if (state === "failed") return "failed";
   return null;
 }
 
@@ -94,7 +94,7 @@ export function sessionEnd(m: Record<string, unknown>, state: SessionState): Ses
   if (state === "running") return null;
   const rep = m.report && typeof m.report === "object" && !Array.isArray(m.report) ? (m.report as Record<string, unknown>) : {};
   // a part that says "none" says nothing
-  const part = (v: unknown) => { const t = str(v); return t && !/^\W*(none|n\/?a|nothing|-)?\W*$/i.test(t) ? t : null; };
+  const part = (v: unknown) => { const t = str(v); return t && !/^[^\p{L}\p{N}]*(none|n\/?a|nothing)?[^\p{L}\p{N}]*$/iu.test(t) ? t : null; };
   const end: SessionEnd = { why: endWhy(m.ended, m.summary, state), note: str(m.end_note), resumesAt: time(m.resumes_at),
     did: part(rep.summary), left: part(rep.artifacts), checks: part(rep.checks), needs: part(rep.open) };
   return Object.values(end).some((v) => v !== null) ? end : null;

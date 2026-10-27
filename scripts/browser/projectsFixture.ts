@@ -11,7 +11,8 @@ import { workFrom } from '../../src/projects/live.ts';
 export type LiveRead = { nodes: any[]; runs: any[]; tasks: any[]; usage: any | null; rooms: { id: string; name: string }[]; feeds?: any[] };
 /** `bigRuns`: this many more finished runs, a month old, listed before every other run (a ledger longer than the pages the app reads). */
 export type Boot = { live?: LiveRead; bigRuns?: number;
-  /** this many more tasks, listed before every other task (a task list longer than the pages the app reads) */ bigTasks?: number };
+  /** this many more tasks, listed before every other task (a task list longer than the pages the app reads) */ bigTasks?: number;
+  /** T-304: more run notes, made from the clock at boot */ moreRuns?: (now: number) => any[] };
 
 export async function bootProjects(page: Page, opts: Boot = {}) {
   const now = Date.now();
@@ -23,6 +24,7 @@ export async function bootProjects(page: Page, opts: Boot = {}) {
     const old = new Date(now - 30 * 86_400_000).toISOString(), done = new Date(now - 30 * 86_400_000 + 600_000).toISOString();
     world.runs = [...Array.from({ length: opts.bigRuns }, (_, i) => ({ id: `run-old-${i}`, path: `Runs/2026-09-20 Old tidy ${i}`, tags: ['run'], metadata: { node: 'p-seeds', state: 'done', started_at: old, ended_at: done, summary: 'mts aaaabbbb: completed' }, createdAt: old, updatedAt: done })), ...world.runs];
   }
+  if (opts.moreRuns) world.runs = [...world.runs, ...opts.moreRuns(now)];
   if (opts.bigTasks) world.tasks = [...Array.from({ length: opts.bigTasks }, (_, i) => ({ id: `t-old-${i}`, path: `Tasks/T-${5000 + i} Old placeholder ${i}`, tags: ['task'], metadata: { node: 'p-seeds', state: 'done', owner: 'uni' }, createdAt: '2026-09-01T00:00:00.000Z', updatedAt: '2026-09-01T00:00:00.000Z' })), ...world.tasks];
   const data = { now, world, asks, talk: opts.live ? [] : demoTalk(now), readOnly: !!opts.live };
   await page.addInitScript((d: any) => {

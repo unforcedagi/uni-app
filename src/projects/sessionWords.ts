@@ -17,8 +17,8 @@ const SECRETS: readonly RegExp[] = [
   /\b[0-9a-fA-F]{64}\b/g,
 ];
 const BEARER = /\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]{12,}/gi;
-/** `token=…`, `"password": "…"`, `API_KEY: …`: the name stays, the value goes. */
-const NAMED = /\b([A-Z0-9_]*(?:api[_-]?key|secret|token|passw(?:or)?d|pwd|private[_-]?key|credential)s?)(["']?\s*[:=]\s*)(?:"[^"\s]+"|'[^'\s]+'|[^\s,;"']+)/gi;
+/** `token=…`, `"password": "…"`, `API_KEY: …`: the name stays, the value goes (a plain number stays: `max_tokens=4096`). */
+const NAMED = /\b([A-Z0-9_]*(?:api[_-]?key|secret|token|passw(?:or)?d|pwd|private[_-]?key|credential)s?)(["']?\s*[:=]\s*)(?!\d+\b)(?:"[^"\s]+"|'[^'\s]+'|[^\s,;"']+)/gi;
 
 /** Anything that looks like a key, token or password, as [hidden]. */
 export function redact(text: string): string {
@@ -86,7 +86,8 @@ export function leftItems(left: string | null | undefined): { text: string; url:
     const line = redact(raw.replace(/^\s*(?:[-*•]|\d+[.)])\s+/, "").replace(/`/g, "").trim());
     if (!line || /^(none|n\/?a|nothing|-)\.?$/i.test(line)) continue;
     const url = /\bhttps:\/\/[^\s<>()"']+[^\s<>()"'.,;:!?]/.exec(line)?.[0] ?? null;
-    out.push({ text: line, url });
+    // a link that carried a secret is not a link any more
+    out.push({ text: line, url: url && !url.includes(HIDDEN) ? url : null });
   }
   return out;
 }
@@ -95,5 +96,5 @@ export function leftItems(left: string | null | undefined): { text: string; url:
 export function answerDraft(s: Session, project: string): string {
   const ask = askOf(s).replace(/\s+/g, " ").trim();
   const short = ask.length > 160 ? `${ask.slice(0, 159).trimEnd()}…` : ask;
-  return `About the session on “${s.ask}” (${project}), which asks: “${short}” — `;
+  return `About the session on “${redact(s.ask)}” (${project}), which asks: “${short}” — `;
 }

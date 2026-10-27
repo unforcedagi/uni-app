@@ -117,6 +117,8 @@ export function ProjectSheet({ project, talk, room, roomName, onClose, onAnswer 
   /** T-304: the session opened in place of the list (null: the list). */
   const [opened, setOpened] = useState<string | null>(null);
   const backTo = useRef<string | null>(null);
+  /** Whether "Earlier" is open: kept here, so going into an earlier session and back finds it as it was. */
+  const [earlierOpen, setEarlierOpen] = useState(false);
   const box = useRef<HTMLDivElement>(null);
   const wrap = useRef<HTMLDivElement>(null);
   const closeRef = useRef(onClose); closeRef.current = onClose;
@@ -157,6 +159,8 @@ export function ProjectSheet({ project, talk, room, roomName, onClose, onAnswer 
   const done = () => { setPick(null); setAsk(""); };
   const open = (id: string) => { backTo.current = id; setOpened(id); if (box.current) box.current.scrollTop = 0; };
   const openedSession = opened ? sessions.find((s) => s.id === opened) ?? null : null;
+  // a session gone after a read (merged, moved) closes its view: back to the list, nothing left half-open
+  if (opened && !openedSession) { setOpened(null); backTo.current = null; }
   const posted = (pk: Pick) => {
     if (pk.act === "stop" || pk.act === "fresh") noteAsked((pk.action as { session: Session }).session.id, pk.act);
     else if (pk.act === "add") noteAsked(`add:${p.id}`, "add");
@@ -198,7 +202,7 @@ export function ProjectSheet({ project, talk, room, roomName, onClose, onAnswer 
         {projectAsked && <p className="pj-asked" role="status">{askedWords(projectAsked, now)}</p>}
         {sessions.length === 0 && <p className="cp-none">No sessions yet.</p>}
         <ul className="pj-list">{[...liveOnes, ...recent].map((s) => <SessionCard key={s.id} s={s} all={sessions} now={now} asked={asked.get(s.id) ?? null} onOpen={() => open(s.id)} />)}</ul>
-        {earlier.length > 0 && <details className="pj-earlier" open={earlier.some((s) => s.id === backTo.current) || undefined}><summary>Earlier · {earlier.length}</summary>
+        {earlier.length > 0 && <details className="pj-earlier" open={earlierOpen} onToggle={(e) => setEarlierOpen(e.currentTarget.open)}><summary>Earlier · {earlier.length}</summary>
           <ul>{earlier.map((s) => <li key={s.id} data-session={s.id}><button type="button" onClick={() => open(s.id)}><span>{s.ask}</span><small>{stateWords(s, now)}</small></button></li>)}</ul></details>}
       </section></>}
     </div>

@@ -539,7 +539,7 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   const strip = !isRoot ? <ProjectStrip areaPath={node.path} onOpen={(id) => { closeSheet(); stripSheet?.close(); setProjectOpen(id); }} /> : null;
   // the timeline's talk is the area's own room only (never a borrowed one's)
   const projectSheet = projectOpen ? <ProjectSheet key={projectOpen} project={projectOpen} room={target ? { id: target.id, name: target.name } : null} roomName={(id) => roomRefs.find((r) => r.id === id)?.name ?? null} talk={nodeView.own ? (roomFor(target?.id)?.messages ?? []).map((m) => m.ts * 1000) : []} onClose={closeProject}
-    onAnswer={(roomId, text) => { closeProject(); sayIn(roomId, text); }} /> : null;
+    onAnswer={chat ? (roomId, text) => { closeProject(); sayIn(roomId, text); } : undefined} /> : null;
   const roomLevel = (app: AppView | null, openApp: ((e: React.MouseEvent) => void) | null) => shell({ title: node.name, door, context: app || workOpen ? undefined : context, node: node.name, crumbs, strip,
     companion: chat ? companionProps : null, chatRoom: thread ? roomFor(thread.channel, thread.root) : roomFor(target?.id), placeholder, selected: node.path, sheet: <>{sheetView}{projectSheet}</>, retryChat: target?.id ? () => actions.openRoom(target.id) : actions.retryRooms ?? null,
     main: app ? app.main : workOpen ? workMain : undefined, workBar: app ? app.bar : workBar, openApp, appOpen: !!app });

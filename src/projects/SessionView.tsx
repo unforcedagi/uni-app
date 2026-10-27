@@ -17,9 +17,12 @@ function Steps({ items, live }: { items: readonly FeedItem[]; live: boolean }) {
   const pinned = useRef(true);
   useLayoutEffect(() => { const b = box.current; if (b && pinned.current) b.scrollTop = b.scrollHeight; }, [items]);
   const shown = items.slice(-SHOWN);
+  // keyed by what each line is, not where it sits: when the note drops its oldest line the rest stay put (and aren't read out again)
+  const seen = new Map<string, number>();
+  const keys = shown.map((it) => { const k = `${it.at ?? "x"}|${it.kind}|${it.text}`; const n = seen.get(k) ?? 0; seen.set(k, n + 1); return `${k}|${n}`; });
   return <ol ref={box} className="sv-steps" aria-label={live ? "What it is doing, newest last" : "What it did, newest last"} aria-live={live ? "polite" : undefined}
     tabIndex={0} onScroll={(e) => { const b = e.currentTarget; pinned.current = b.scrollHeight - b.scrollTop - b.clientHeight < 24; }}>
-    {shown.map((it, i) => <li key={`${it.at ?? "x"}-${i}`} className={`sv-${it.kind}`} data-kind={it.kind}>
+    {shown.map((it, i) => <li key={keys[i]} className={`sv-${it.kind}`} data-kind={it.kind}>
       {it.at !== null && <time dateTime={new Date(it.at).toISOString()}>{clock(it.at)}</time>}
       <span>{it.text}</span>
     </li>)}
@@ -35,7 +38,7 @@ function LiveView({ s, feed, now }: { s: Session; feed: FeedState; now: number }
     {feed.items.length > 0 ? <Steps items={feed.items} live />
       : <p className="pj-hint sv-empty">{!s.feed ? "This session doesn't share its steps yet (it started before they were kept)."
         : !feed.ready ? "Reading its steps…" : feed.error ? "Couldn't read its steps. Trying again in a moment." : "No steps yet. They show here as it works."}</p>}
-    <p className="pj-now sv-now"><span>{s.now ? `Now: ${s.now}` : "Working; it hasn't said on what yet."}</span>{s.nowAt && <small>{ago(now - s.nowAt)}</small>}</p>
+    <p className="pj-now sv-now"><span>{s.now ? `Now: ${redact(s.now)}` : "Working; it hasn't said on what yet."}</span>{s.nowAt && <small>{ago(now - s.nowAt)}</small>}</p>
   </section>;
 }
 
@@ -84,7 +87,7 @@ export function SessionView({ s, all, project, now, roomName, onAnswer, onBack, 
         {it.url ? <a className="pj-link" href={it.url} target="_blank" rel="noreferrer">{it.text}</a> : <span>{it.text}</span>}</li>)}</ul></Part>}
       {s.end?.needs && !needs && <Part title="What it needs"><p>{redact(s.end.needs)}</p></Part>}
       {s.end?.checks && <details className="sv-more"><summary>How it checked</summary><p>{redact(s.end.checks)}</p></details>}
-      {!reported && <>{s.result && <p className="pj-result">{s.result}</p>}<p className="pj-hint">Its note has no report (it ended before reports were kept, or it left none).</p></>}
+      {!reported && <>{s.result && <p className="pj-result">{redact(s.result)}</p>}<p className="pj-hint">Its note has no report (it ended before reports were kept, or it left none).</p></>}
       {s.video && <div className="pj-row"><a className="pj-link" href={s.video} target="_blank" rel="noreferrer">Watch the walkthrough</a></div>}
       {s.feed && <EndedSteps id={s.feed} />}
     </>}

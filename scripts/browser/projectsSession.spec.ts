@@ -3,7 +3,7 @@
 // one that didn't finish says why; a finished one shows what it left, with links. The front door's working mark counts the room's Uni at
 // work on your message. The native side is projectsFixture.ts (a made-up vault and rooms in the page; nothing leaves it).
 import { expect, test, type Page } from '@playwright/test';
-import { bootProjects } from './projectsFixture.ts';
+import { bootProjects, type Boot } from './projectsFixture.ts';
 
 const shot = (page: Page, name: string) => page.screenshot({ path: `__shots__/t304/${test.info().project.name}-${name}.png` });
 const door = (page: Page, name: string) => page.getByRole('navigation', { name: 'Rooms' }).getByRole('button', { name: new RegExp(`^${name}\\b`) });
@@ -12,8 +12,8 @@ const view = (page: Page) => page.locator('[data-place="session-view"]');
 const posted = (page: Page) => page.evaluate(() => (window as any).__posted as unknown[]);
 const NO_IDS = /\bT-\d+|\brun-|\bfeed-|\bmts\b|\bp-coop|\bresume\b|zzzzzzzz/;
 
-async function openProject(page: Page, room: string, project: RegExp) {
-  await bootProjects(page);
+async function openProject(page: Page, room: string, project: RegExp, boot: Boot = {}) {
+  await bootProjects(page, boot);
   await page.goto('/');
   await door(page, room).click();
   await expect(page.locator('.sr-title')).toHaveText(room);
@@ -63,6 +63,25 @@ test('a working session opens to a live view: its steps and what it wrote, newes
   const after = await page.evaluate(() => (window as any).__feedReads as number);
   await page.waitForTimeout(11_000);
   expect(await page.evaluate(() => (window as any).__feedReads as number)).toBe(after);
+});
+
+test('an earlier session opens from the Earlier list, and Back finds that list as it was', async ({ page }) => {
+  // more ended sessions than the recent five, a week old: they go under Earlier
+  const sheet = await openProject(page, 'Workshop', /Riverbend co-op site/, { moreRuns: (now) => Array.from({ length: 6 }, (_, i) => {
+    const t = (m: number) => new Date(now - m * 60_000).toISOString();
+    return { id: `old-${i}`, path: `Runs/2026-10-10 Tidy the old flyers ${i}`, tags: ['run'], createdAt: t(9000), updatedAt: t(9000),
+      metadata: { node: 'p-coop', state: 'done', started_at: t(9000 + i * 10), ended_at: t(8990 + i * 10), summary: 'mts aaaabbbb: completed', ended: 'done', report: { summary: `Tidied batch ${i}.` } } };
+  }) });
+  const earlier = sheet.locator('.pj-earlier');
+  await earlier.locator('summary').click();
+  await openSession(page, sheet, 'Tidy the old flyers 5');
+  await expect(view(page).getByRole('region', { name: 'What it did' })).toHaveText(/Tidied batch 5\./);
+  await view(page).getByRole('button', { name: 'Sessions' }).click();
+  await expect(earlier).toHaveAttribute('open', '');
+  await expect(earlier.getByRole('button', { name: /^Tidy the old flyers 5/ })).toBeFocused();
+  // still open after the sheet's clock re-renders it
+  await page.waitForTimeout(16_000);
+  await expect(earlier).toHaveAttribute('open', '');
 });
 
 test('a working session from before steps were kept says so, and still shows what it is doing now', async ({ page }) => {

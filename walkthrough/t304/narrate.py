@@ -13,7 +13,7 @@ LINES = {
     'door': "This is the Uni app at the Daylight's size, with made-up rooms. Workshop says three working: two Claude Code sessions, and Uni answering a message I just sent there. Before, that mark only counted sessions.",
     'project': "I open the co-op site project. Its sessions are listed as before, but now every line opens.",
     'live': "This one is working. It opens to a live view: each step it takes, and what it writes, newest at the bottom. Anything that looks like a key is hidden.",
-    'arrives': "While it's open, new steps come in on their own, about every fifteen seconds. Here it moves on to writing its report.",
+    'arrives': "While it's open, new steps come in on their own, within about twenty seconds. Here it moves on to writing its report.",
     'stopped': "An older session didn't finish. Now it says why: it was stopped on purpose.",
     'finished': "A finished one shows its report in plain words: what it did, what it left, with the link to open, and its steps if you want them.",
     'limit': "This one ran out of room. The Claude account hit its session limit, and it says when it will pick up again by itself.",

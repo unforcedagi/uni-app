@@ -259,6 +259,7 @@ check("why it ended: mts's word when the note has it; the closing line and the s
   assert.equal(endWhy(null, "mts abcd1234: completed, evidence: commit abc1234", "finished"), "done");
   assert.equal(endWhy(null, "mts abcd1234: blocked", "waiting"), "blocked");
   assert.equal(endWhy(null, "mts abcd1234: failed", "failed"), "failed");
+  assert.equal(endWhy(null, "mts abcd1234: error", "failed"), "failed", "any other word on a failed note: failed (its end note still shows)");
   assert.equal(endWhy(null, null, "running"), null);
 });
 check("from the vault: the report mts copied onto the run note, in its four parts; a live session has no end", () => {
@@ -271,6 +272,8 @@ check("from the vault: the report mts copied onto the run note, in its four part
   assert.equal(S("run-donate-old").end!.why, "stopped", "an older note: why, from its closing line");
   assert.equal(S("run-restore").end!.did, null, "an older note has no report");
   assert.equal(S("run-about").end!.needs, null, "a part that says none says nothing");
+  const other = workFrom({ nodes: vault.nodes, runs: vault.runs.map((r) => (r.id === "run-catalogue" ? { ...r, metadata: { ...r.metadata, report: { summary: "完了", open: "✅ n/a" } } } : r)), tasks: vault.tasks }, NOW);
+  assert.equal(other.sessions.find((s) => s.id === "run-catalogue")!.end!.did, "完了", "words in any script are words");
 });
 check("didn't finish says why, in a sentence: stopped on purpose, failed, ran out of room (and when it picks up again), lost", () => {
   const head = (id: string) => endWords(S(id), NOW)!.head;
@@ -304,6 +307,7 @@ check("what it left: one item a line, a link only where the line holds an https 
   assert.deepEqual(leftItems("none"), []);
   assert.deepEqual(leftItems("javascript:alert(1); http://example.com/x").map((i) => i.url), [null, null], "only https opens");
   assert.deepEqual(leftItems("1. the PR https://example.com/pr/7."), [{ text: "the PR https://example.com/pr/7.", url: "https://example.com/pr/7" }]);
+  assert.deepEqual(leftItems("https://example.com/share?token=abc123"), [{ text: `https://example.com/share?token=${HIDDEN}`, url: null }], "a link that carried a secret is not a link");
 });
 check("the steps note, read back: time, step or said, words; anything else in the note is left out; secrets are hidden", () => {
   const items = parseFeed(vault.feeds.find((f) => f.id === "feed-events")!.content);
@@ -323,7 +327,7 @@ check("anything that looks like a key is hidden; plain work words are left alone
   assert.equal(redact("Authorization: Bearer abcdefghijklmnop1234"), `Authorization: Bearer ${HIDDEN}`);
   assert.equal(redact('API_KEY=abc123 and "password": "hunter22"'), `API_KEY=${HIDDEN} and "password": ${HIDDEN}`);
   assert.ok(!redact("-----BEGIN RSA PRIVATE KEY-----\nMIIEsecret\n-----END RSA PRIVATE KEY-----").includes("MIIE"));
-  for (const plain of ["Editing src/projects/store.ts", "commit 1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b in ~/work/site", "The token expired, so I signed in again.", "Run the tests"])
+  for (const plain of ["Editing src/projects/store.ts", "max_tokens=4096 and tokens: 12000", "commit 1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b in ~/work/site", "The token expired, so I signed in again.", "Run the tests"])
     assert.equal(redact(plain), plain);
 });
 if (failed) process.exit(1);
