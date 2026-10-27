@@ -241,7 +241,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const [hasOverlay, setHasOverlay] = useState(false);
   const setOverlay = useCallback((o: Overlay | null) => { overlayRef.current = o; setHasOverlay(!!o?.history); }, []);
   const tabsReady = useRef(false);
-  /** T-302: a place opened before the rooms list arrived (the front door paints from the areas first): the restore keeps it. */
+  /** T-302: an area opened before the rooms list arrived (a door of the front door, which paints from the areas first): the restore keeps it. */
   const openedEarly = useRef(false);
   /** The place on screen is one the app restored or opened, not the Uni it paints before the saved place is read. */
   const placeSettled = useRef(false);
@@ -697,8 +697,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
   }
   /** `fromHistory`: Back and Forward move through the places visited; they do not add to them. */
   function openTarget(target: TabTarget, mode: OpenMode = "focus", confirmed = false, fromHistory = false) {
-    if (!tabsReady.current) openedEarly.current = true;
     target = resolveTarget(target);
+    if (!tabsReady.current && target.kind === "area") openedEarly.current = true;
     if (target.note) target = { ...target, note: resolveNote(target.note, aliases.current) };
     // No tab strip: a place replaces the one you were on (a second tab never shows the same room). The Journal keeps its own tab (its page and any recording stay alive), and a place opened from it goes beside it.
     if (isSurface(target) && target.kind !== "journal" && mode === "new") mode = "focus";
