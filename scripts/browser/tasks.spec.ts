@@ -3,7 +3,7 @@
 // (The octopus node view, its task groups and its talk bar were deleted with the old layouts; roomsnav and simple cover the rest.)
 import { mkdir } from 'node:fs/promises';
 import { test, expect, type Page } from '@playwright/test';
-import { areaCard, bootAreas } from './areasFixture';
+import { areaCard, bootAreas, showTree } from './areasFixture';
 
 const SHOTS = 'scripts/browser/__shots__/t86';
 const isDesktop = (page: Page) => (page.viewportSize()?.width ?? 0) >= 900;
@@ -13,10 +13,11 @@ const row = (page: Page, id: string) => page.locator('.sr-work .cp-item').filter
 /** Open a row's task sheet. */
 const openTask = (page: Page, id: string) => page.locator(`.sr-work .cp-need[data-id="${id}"]`).click();
 const infinite = (page: Page) => page.evaluate(() => document.getAnimations().filter((a) => { const t = a.effect?.getComputedTiming(); return !t || t.iterations === Infinity || !Number.isFinite(t.endTime as number); }).length);
-const tree = (page: Page) => page.locator(isDesktop(page) ? '.th-roomnav' : '.th-phone-tree');
+const tree = (page: Page) => page.locator(isDesktop(page) ? '.th-roomnav' : '.th-drawer .th-phone-tree');
 /** A node's work page, from its room in the tree. */
 async function workPage(page: Page, name: string) {
-  if (!isDesktop(page) && await page.locator('.sr-drawer, .th-back').count()) await page.locator('.sr-drawer, .th-back').first().click();
+  // T-302: the tree is in a room (beside it, or in a phone's Places drawer), not Uni's home
+  await showTree(page);
   await tree(page).locator('.th-row.d1').first().waitFor();
   for (let i = 0; i < 12; i++) { const f = tree(page).locator('.th-fold[aria-expanded="false"]'); if (!await f.count()) break; await f.first().click(); }
   await areaCard(page, name).click();

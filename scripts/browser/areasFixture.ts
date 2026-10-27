@@ -703,19 +703,29 @@ Two proposals wait on a scope decision.
 }
 
 const railOf = (page: Page) => page.getByRole('navigation', { name: 'Main navigation' });
-/** Uni (the app opens there; the rail's Uni button comes back to it): the Uni room beside the tree, or the room tree itself on a phone. */
+/** Uni (the app opens there; the rail's Uni button comes back to it): the front door of the area rooms (T-302). */
 export const openAreasHome = async (page: Page) => { await railOf(page).getByRole('button', { name: 'Uni', exact: true }).click(); await expect(page.getByRole('heading', { name: 'Uni', level: 1 })).toBeVisible(); };
 /** The room tree sits beside the room (r17: on a wide window at least 400px tall); otherwise it is the phone's home or the Places drawer. */
 const isWide = (page: Page) => (page.viewportSize()?.width ?? 0) >= 900 && (page.viewportSize()?.height ?? 0) >= 400;
-/** A node's row in the room tree (r12: the tree is the only way to an area; the map and its arms are gone). */
-export const areaCard = (page: Page, name: string) => page.locator(isWide(page) ? '.th-roomnav' : '.th-phone-tree').locator(`.th-go[aria-label^="${name},"]`);
+/** T-302: Uni's home is the front door (a door per area room); the room tree is in a room: beside it on a wide window, in the Places drawer
+ *  on a phone. */
+const frontDoor = (page: Page) => page.locator('[data-place="front-door"]');
+const treeRow = (page: Page, name: string) => page.locator(isWide(page) ? '.th-roomnav' : '.th-drawer .th-phone-tree').locator(`.th-go[aria-label^="${name},"]`);
+/** A node's way in: its door on the front door, else its row in the room tree. */
+export const areaCard = (page: Page, name: string) => page.locator(`.fd-door[data-path="Areas/${name}"]`).or(treeRow(page, name));
+/** Shows the room tree: from the front door through the first room, and on a phone the Places drawer. */
+export async function showTree(page: Page) {
+  if (await frontDoor(page).isVisible()) { await page.locator('.fd-door').first().click(); await expect(page.locator('.sr').first()).toBeVisible(); }
+  if (!isWide(page) && !(await page.locator('.th-drawer').isVisible())) await page.locator('.sr-drawer').first().click();
+}
 /**
- * Opens an area from the room tree and, when it has a sealed app, its app (r14: "App ›" in the room's header).
+ * Opens an area from the front door (or a node from the room tree) and, when it has a sealed app, its app (r14: "App ›" in the room's header).
  * `app: false` stays in the room; `true` requires the app; the default presses it when it shows up.
  */
 export async function openAreaPage(page: Page, name: string, opts: { app?: boolean } = {}) {
-  if (!isWide(page)) { const back = page.locator('.sr-drawer, .note-back[aria-label^="Back to"]').first(); if (await back.count() && !(await page.locator('.th-phone-tree').count())) await back.click(); }
-  await areaCard(page, name).click();
+  const door = page.locator(`.fd-door[data-path="Areas/${name}"]`);
+  if (!(await frontDoor(page).isVisible() && await door.count())) await showTree(page);
+  if (await door.isVisible()) await door.click(); else await treeRow(page, name).click();
   // r15: a node in a borrowed room is headed by the room; the place opened is the shell's data-node
   await expect.poll(async () => [await page.locator('.sr').first().getAttribute('data-node').catch(() => null), await page.locator('.sr-title').or(page.locator('.area-bar-title')).first().textContent().catch(() => null)]).toContain(name);
   if (opts.app === false) return;
