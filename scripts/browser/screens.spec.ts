@@ -38,9 +38,9 @@ test('All reading surfaces fit the screen', async ({ page }, info) => {
     await page.locator('.th-places:visible').getByRole('button', { name, exact: true }).click();
   };
   const openPanel = (name: 'Settings' | 'Search') => place(name);
-  // the seeded Uni-room tab turns into Uni's own place once the tree is read (one remount): measure after that
-  await expect(page.locator('.sr-title')).toHaveText('Uni');
-  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('uni.tabs.v2') ?? '{"tabs":[]}').tabs[0]?.kind)).toBe('areas');
+  // T-302 round 2: the seeded Uni-room tab stays a room (the archived Uni room is no level of the tree any more): measure once it is saved
+  await expect(page.locator('.sr-title')).toHaveText('#Uni');
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('uni.tabs.v2') ?? '{"tabs":[]}').tabs[0]?.kind)).toBe('room');
   await page.waitForTimeout(300);
   for (const control of [page.getByRole('textbox', { name: 'Message Uni' }), page.getByRole('button', { name: 'Record a voice message' }), page.getByRole('button', { name: 'Send message', exact: true })]) await fits(control, true);
   expect((await page.locator('.message-list').boundingBox())!.height).toBeGreaterThan(100);
