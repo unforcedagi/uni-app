@@ -17,6 +17,10 @@ const SECRETS: readonly RegExp[] = [
   /\b[0-9a-fA-F]{64}\b/g,
 ];
 const BEARER = /\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]{12,}/gi;
+/** A password-like key (password, passphrase, pass, passcode, pwd, secret; with prefixes and suffixes like DB_PASS, SECRET_KEY): a quoted
+ *  value is hidden to its closing quote, an unquoted one to the end of the line (a passphrase has spaces; over-hiding a step line is fine,
+ *  leaking the tail of a passphrase is not). */
+const PASSWORD = /\b((?:[A-Za-z0-9]+[_-])*(?:pass(?:word|wd|phrase|code)?|pwd|secret)s?(?:[_-][A-Za-z0-9]+)*)(["']?[ \t]*[:=][ \t]*)("[^"\n]*"|'[^'\n]*'|\S[^\n]*)/gi;
 /** `token=…`, `"password": "two words"`, `API_KEY: …`: the name stays, the value goes, quoted values whole (spaces too). */
 const NAMED = /\b([A-Z0-9_]*(?:api[_-]?key|secret|token|passw(?:or)?d|pwd|private[_-]?key|credential)s?)(["']?\s*[:=]\s*)("[^"\n]+"|'[^'\n]+'|[^\s,;"']+)/gi;
 /** The one exception: a known token counter with a short number (`max_tokens=4096`, `input_tokens: 980`, `token_count=33`). */
@@ -26,6 +30,7 @@ const COUNTER = /^(?:(?:(?:max|min|num|total|input|output|prompt|completion|cach
 export function redact(text: string): string {
   let t = text;
   for (const r of SECRETS) t = t.replace(r, HIDDEN);
+  t = t.replace(PASSWORD, (_, name: string, sep: string) => `${name}${sep}${HIDDEN}`);
   return t.replace(BEARER, (_, kind: string) => `${kind} ${HIDDEN}`).replace(NAMED, (all, name: string, sep: string, raw: string) => {
     // a sentence's closing punctuation is not part of an unquoted value
     const [, value, tail] = /^["']/.test(raw) ? [raw, raw, ""] : /^([\s\S]*?)([.:!?)]*)$/.exec(raw)!;

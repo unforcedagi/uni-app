@@ -333,6 +333,19 @@ check("codex tt6oiyni: a quoted password with spaces and a long numeric token ar
   assert.deepEqual(parseFeed('- 2026-10-27T10:00:00Z · said · Set token=12345678901234567890 and password="violet meadow phrase".').map((i) => i.text),
     [`Set token=${HIDDEN} and password=${HIDDEN}.`]);
 });
+check("a password-like key with an unquoted value is hidden to the end of the line; ordinary words are left alone", () => {
+  assert.equal(redact("password: violet meadow phrase"), `password: ${HIDDEN}`);
+  assert.equal(redact("Set password: hunter two and restart.\nnext line"), `Set password: ${HIDDEN}\nnext line`);
+  assert.equal(redact("DB_PASS=correct horse battery"), `DB_PASS=${HIDDEN}`);
+  assert.equal(redact("passphrase = open sesame now"), `passphrase = ${HIDDEN}`);
+  assert.equal(redact("client_secret: two words"), `client_secret: ${HIDDEN}`);
+  assert.equal(redact("SECRET_KEY=abc def"), `SECRET_KEY=${HIDDEN}`);
+  assert.equal(redact("pwd=a b c"), `pwd=${HIDDEN}`);
+  assert.equal(redact('passcode: "1 2 3" then'), `passcode: ${HIDDEN} then`);
+  for (const plain of ["bypass: on for the test", "passport: on the desk", "the password was reset", "Secretary: Jo"]) assert.equal(redact(plain), plain);
+  assert.deepEqual(parseFeed("- 2026-10-27T10:00:00Z · step · Signed in with password: violet meadow phrase").map((i) => i.text), [`Signed in with password: ${HIDDEN}`]);
+  assert.deepEqual(leftItems("the config\npassword: violet meadow phrase").map((i) => i.text), ["the config", `password: ${HIDDEN}`]);
+});
 check("anything that looks like a key is hidden; plain work words are left alone", () => {
   for (const secret of ["sk-ant-api03-" + "a1B2".repeat(10), "ghp_" + "x".repeat(36), "xoxb-1234567890-abcdefghij", "AKIA" + "A".repeat(16), "nsec1" + "q".repeat(58),
     "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.c2lnbmF0dXJlX2hlcmU", "ab".repeat(32)]) {
