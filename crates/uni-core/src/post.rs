@@ -101,7 +101,11 @@ fn tag(parts: &[&str]) -> Result<Tag> {
 }
 
 /// Sign Aaron's approval of exactly this post, to go out from `not_before` for [`VALID_FOR_S`].
-pub fn approval_event(keys: &Keys, vault: &str, note: &str, p: &Post, not_before: u64, now: u64) -> Result<Event> {
+/// `gen` is how many of this key's verdicts the note has had before this one ([`verdicts`]): the poster takes the
+/// approval only while it is the newest, so any later stop (Not this, Edit) or approval cancels it, whatever the post
+/// or any clock says.
+#[allow(clippy::too_many_arguments)]
+pub fn approval_event(keys: &Keys, vault: &str, note: &str, p: &Post, gen: usize, not_before: u64, now: u64) -> Result<Event> {
     let d = digest(vault, note, p, &[]);
     let tags = vec![
         tag(&["domain", DOMAIN])?,
@@ -113,6 +117,7 @@ pub fn approval_event(keys: &Keys, vault: &str, note: &str, p: &Post, not_before
         tag(&["provenance", &p.provenance])?,
         tag(&["piece", &p.piece])?,
         tag(&["digest", &d])?,
+        tag(&["gen", &gen.to_string()])?,
         tag(&["not_before", &not_before.to_string()])?,
         tag(&["expiration", &(not_before + VALID_FOR_S).to_string()])?,
     ];
@@ -229,6 +234,27 @@ pub fn versions_in(v: &Value, vault: &str) -> Result<(Vec<Value>, usize)> {
     Ok((page["versions"].as_array().cloned().unwrap_or_default(), total as usize))
 }
 
+/// How many distinct verdicts (approvals and stops) this key signed for this note, in its history and on it now (each
+/// verified). A planted or copied one only raises the count, and a count the poster doesn't also find is refused: it
+/// can block, never free.
+pub fn verdicts(versions: &[Value], note: &Value, note_id: &str, me: &nostr::PublicKey) -> usize {
+    let mut seen = std::collections::BTreeSet::new();
+    for m in versions.iter().map(|v| &v["metadata"]).chain(std::iter::once(&note["metadata"])) {
+        let Some(ev) = stored_event(&m["approval_event"]) else { continue };
+        let is = |k: &str, v: &str| ev.tags.iter().any(|t| t.as_slice() == [k.to_string(), v.to_string()]);
+        if ev.pubkey == *me && ev.kind == Kind::from(KIND) && is("domain", DOMAIN) && is("note", note_id) {
+            seen.insert(ev.id.to_hex());
+        }
+    }
+    seen.len()
+}
+
+fn stored_event(v: &Value) -> Option<Event> {
+    let ev = Event::from_json(v.as_str()?).ok()?;
+    ev.verify().ok()?;
+    Some(ev)
+}
+
 /// The id of the approval event stored on the note, if any.
 pub fn approval_id(note: &Value) -> String {
     note["metadata"]["approval_event"]
@@ -301,7 +327,9 @@ impl VaultClient {
             Some(t) => t.max(now),
             None => now,
         };
-        let ev = approval_event(keys, vault, id, &p, not_before, now)?;
+        // every verdict so far, counted from the history read at the revision this approval is written against
+        let gen = verdicts(&self.note_versions(vault, id).await?, &note, id, &keys.public_key());
+        let ev = approval_event(keys, vault, id, &p, gen, not_before, now)?;
         let d = digest(vault, id, &p, &[]);
         let v = self.call("update-note", approve_args(vault, id, &ev, &d, scheduled_for, if_updated_at)).await?;
         crate::parachute::check_vault_errors(&v)?;
@@ -395,7 +423,7 @@ mod tests {
         let keys = Keys::generate();
         let n = uni_post();
         let p = check_approvable(&n, "2026-10-29T10:00:00.000Z").unwrap();
-        let ev = approval_event(&keys, "uni", "01TESTNOTE", &p, 1_800_000_100, 1_800_000_000).unwrap();
+        let ev = approval_event(&keys, "uni", "01TESTNOTE", &p, 2, 1_800_000_100, 1_800_000_000).unwrap();
         ev.verify().unwrap();
         assert_eq!(ev.kind, Kind::from(KIND));
         assert_eq!(ev.content, p.body);
@@ -406,6 +434,7 @@ mod tests {
         assert_eq!(t("account"), "uni");
         assert_eq!(t("piece"), "");
         assert_eq!(t("digest"), digest("uni", "01TESTNOTE", &p, &[]));
+        assert_eq!(t("gen"), "2");
         assert_eq!(t("not_before"), "1800000100");
         assert_eq!(t("expiration"), (1_800_000_100 + VALID_FOR_S).to_string());
     }
@@ -442,7 +471,7 @@ mod tests {
     fn approve_args_are_one_compare_and_set_with_the_signature() {
         let keys = Keys::generate();
         let p = Post::from_note(&uni_post());
-        let ev = approval_event(&keys, "uni", "01TESTNOTE", &p, 1_800_000_000, 1_800_000_000).unwrap();
+        let ev = approval_event(&keys, "uni", "01TESTNOTE", &p, 0, 1_800_000_000, 1_800_000_000).unwrap();
         let a = approve_args("uni", "01TESTNOTE", &ev, "d", None, "2026-10-29T10:00:00.000Z");
         assert_eq!(a["state_transition"], json!({"field": "state", "from": "proposed", "to": "approved"}));
         assert_eq!(a["if_updated_at"], "2026-10-29T10:00:00.000Z");
@@ -475,7 +504,7 @@ mod tests {
         assert!(!claimed(&[]));
         let keys = Keys::generate();
         let p = Post::from_note(&uni_post());
-        let ev = approval_event(&keys, "uni", "01TESTNOTE", &p, 1_800_000_000, 1_800_000_000).unwrap();
+        let ev = approval_event(&keys, "uni", "01TESTNOTE", &p, 0, 1_800_000_000, 1_800_000_000).unwrap();
         let mut n = uni_post();
         n["metadata"]["approval_event"] = json!(ev.as_json());
         assert_eq!(approval_id(&n), ev.id.to_hex());
@@ -491,6 +520,29 @@ mod tests {
         assert!(versions_in(&hub, "other").is_err());
         assert!(versions_in(&json!({"notes": []}), "uni").is_err());
         assert!(versions_in(&json!({"versions": []}), "uni").is_err());
+    }
+
+    #[test]
+    fn an_approval_counts_every_verdict_this_key_signed_for_the_note() {
+        let me = Keys::generate();
+        let other = Keys::generate();
+        let r = |k: &Keys, note: &str, t: u64| json!({"metadata": {"approval_event": reject_event(k, "uni", note, &"d".repeat(64), t).unwrap().as_json()}});
+        let r1 = r(&me, "01TESTNOTE", 1_800_000_000);
+        let versions = vec![r1.clone(), r1.clone(), r(&me, "01TESTNOTE", 1_800_000_001), r(&other, "01TESTNOTE", 1_800_000_002),
+            r(&me, "01OTHER", 1_800_000_003), json!({"metadata": {"approval_event": "{not json"}})];
+        let now = json!({"metadata": {"approval_event": null}});
+        // two distinct rejects by this key for this note; a copy, another key, another note and junk don't count
+        assert_eq!(verdicts(&versions, &now, "01TESTNOTE", &me.public_key()), 2);
+        // an approval counts too: only the newest verdict can post
+        let p = Post::from_note(&uni_post());
+        let a = approval_event(&me, "uni", "01TESTNOTE", &p, 2, 1_800_000_010, 1_800_000_010).unwrap();
+        let with_a = json!({"metadata": {"approval_event": a.as_json()}});
+        assert_eq!(verdicts(&versions, &with_a, "01TESTNOTE", &me.public_key()), 3);
+        let mut forged = r1.clone();
+        let mut ev: Value = serde_json::from_str(forged["metadata"]["approval_event"].as_str().unwrap()).unwrap();
+        ev["sig"] = json!("0".repeat(128));
+        forged["metadata"]["approval_event"] = json!(ev.to_string());
+        assert_eq!(verdicts(&[forged], &now, "01TESTNOTE", &me.public_key()), 0);
     }
 
     #[test]
