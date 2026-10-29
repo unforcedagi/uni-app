@@ -96,6 +96,12 @@ pub fn digest(vault: &str, note: &str, p: &Post, media: &[String]) -> String {
     sha256_hex(&bytes)
 }
 
+/// Every verdict is its own event, even two identical taps in the same second: the poster counts distinct verdicts
+/// (only the newest can post), so two stops must never collapse into one id.
+fn nonce() -> String {
+    uuid::Uuid::new_v4().simple().to_string()
+}
+
 fn tag(parts: &[&str]) -> Result<Tag> {
     Tag::parse(parts.iter().copied()).map_err(|e| Error::Invalid(e.to_string()))
 }
@@ -118,6 +124,7 @@ pub fn approval_event(keys: &Keys, vault: &str, note: &str, p: &Post, gen: usize
         tag(&["piece", &p.piece])?,
         tag(&["digest", &d])?,
         tag(&["gen", &gen.to_string()])?,
+        tag(&["nonce", &nonce()])?,
         tag(&["not_before", &not_before.to_string()])?,
         tag(&["expiration", &(not_before + VALID_FOR_S).to_string()])?,
     ];
@@ -138,6 +145,7 @@ pub fn reject_event(keys: &Keys, vault: &str, note: &str, digest: &str, now: u64
         tag(&["vault", vault])?,
         tag(&["note", note])?,
         tag(&["digest", digest])?,
+        tag(&["nonce", &nonce()])?,
     ];
     EventBuilder::new(Kind::from(KIND), "")
         .tags(tags)
@@ -543,6 +551,19 @@ mod tests {
         ev["sig"] = json!("0".repeat(128));
         forged["metadata"]["approval_event"] = json!(ev.to_string());
         assert_eq!(verdicts(&[forged], &now, "01TESTNOTE", &me.public_key()), 0);
+    }
+
+    #[test]
+    fn two_stops_of_the_same_post_in_the_same_second_are_two_verdicts() {
+        let keys = Keys::generate();
+        let d = "d".repeat(64);
+        let a = reject_event(&keys, "uni", "01TESTNOTE", &d, 1_800_000_000).unwrap();
+        let b = reject_event(&keys, "uni", "01TESTNOTE", &d, 1_800_000_000).unwrap();
+        assert_ne!(a.id, b.id, "the second stop must count, or an approval between them survives it");
+        let p = Post::from_note(&uni_post());
+        let x = approval_event(&keys, "uni", "01TESTNOTE", &p, 1, 1_800_000_000, 1_800_000_000).unwrap();
+        let y = approval_event(&keys, "uni", "01TESTNOTE", &p, 1, 1_800_000_000, 1_800_000_000).unwrap();
+        assert_ne!(x.id, y.id);
     }
 
     #[test]
