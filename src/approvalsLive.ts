@@ -19,11 +19,12 @@ export const APPROVAL_WINDOW_S = 86_400;
 
 /**
  * The prompts waiting, and (T-335) how each other prompt the store read ended, by the same reading over every room and thread. `ended` is
- * null until the store has answered once.
+ * null until the store has answered once; `failed` says the last read failed (so a prompt's state is unknown, not waiting).
  */
-export function useApprovals(opts: { identity: string | null; enabled: boolean; synced: number; roomsReady: boolean; roomName: (id: string) => string | null; looking: (channel: string, root: string | null) => boolean }): { list: Approval[]; ended: Map<string, ApprovalOutcome> | null } {
+export function useApprovals(opts: { identity: string | null; enabled: boolean; synced: number; roomsReady: boolean; roomName: (id: string) => string | null; looking: (channel: string, root: string | null) => boolean }): { list: Approval[]; ended: Map<string, ApprovalOutcome> | null; failed: boolean } {
   const [list, setList] = useState<Approval[]>([]);
   const [ended, setEnded] = useState<Map<string, ApprovalOutcome> | null>(null);
+  const [failed, setFailed] = useState(false);
   const rows = useRef<ApprovalSource[]>([]);
   const optsRef = useRef(opts); optsRef.current = opts;
   const seq = useRef(0);
@@ -41,9 +42,10 @@ export function useApprovals(opts: { identity: string | null; enabled: boolean; 
   const read = useCallback(() => {
     const n = ++seq.current;
     // any answer newer than the one applied counts (never only the latest: under steady traffic that one may never land)
-    invoke<ApprovalSource[] | null>("approval_messages").then((r) => { if (n <= applied.current) return; applied.current = n; rows.current = r ?? []; decide(); }).catch(() => {});
+    invoke<ApprovalSource[] | null>("approval_messages").then((r) => { if (n <= applied.current) return; applied.current = n; rows.current = r ?? []; setFailed(false); decide(); })
+      .catch(() => { if (n > applied.current) setFailed(true); });
   }, [decide]);
-  useEffect(() => { if (opts.enabled) read(); else { rows.current = []; setList([]); setEnded(null); } }, [opts.enabled, opts.identity, opts.synced, read]);
+  useEffect(() => { if (opts.enabled) read(); else { rows.current = []; setList([]); setEnded(null); setFailed(false); } }, [opts.enabled, opts.identity, opts.synced, read]);
   useEffect(() => {
     if (!opts.enabled) return;
     // at most one read each 150 ms, after the first message of a burst: steady traffic can't keep putting it off
@@ -71,5 +73,5 @@ export function useApprovals(opts: { identity: string | null; enabled: boolean; 
     localStorage.setItem(NOTIFIED_KEY, JSON.stringify([...done, ...fresh.map((a) => a.ref)].slice(-200)));
     for (const a of fresh) void notifyPlain({ author: "Hermes", room: optsRef.current.roomName(a.channel) ?? "a room", preview: `Needs your OK to run: ${commandLine(a)}`, looking: optsRef.current.looking(a.channel, a.root) });
   }, [list, opts.roomsReady]);
-  return { list, ended };
+  return { list, ended, failed };
 }

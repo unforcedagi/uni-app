@@ -177,4 +177,27 @@ test.describe('a Hermes approval prompt, loudly', () => {
     await expect(card.getByRole('status')).toHaveText('Denied');
     await expect(card.locator('summary')).toHaveText(/^✕Denied · git branch -D feature\/example-cleanup · \d{1,2}:\d{2}/);
   });
+  test('6. T-335: a prompt older than the store\'s day is no longer waiting, with no outcome guessed; one the store couldn\'t read is unknown, never waiting', async ({ page }) => {
+    await boot(page);
+    const fresh = await arrive(page, fx.prompts.two_answers_30min);
+    // two days ago, its window long over; the store's read (a day) never sees it
+    const old = await page.evaluate(([c, b]) => (window as any).__arrive(c, 'Uni', b, 2 * 86400), [ROOM, fx.prompts.once_or_deny_30min] as const);
+    await unfold(page);
+    await expect(rows(page)).toHaveCount(1);
+    await rows(page).getByRole('button').click();
+    const oldCard = page.locator(`.message[data-ref="${old}"] .cc`);
+    await expect(oldCard.getByRole('status')).toHaveText('No longer waiting');
+    await expect(oldCard.locator('summary')).toHaveText('–No longer waiting · chmod -R 777 /srv/example');
+    await expect(page.locator(`.message[data-ref="${fresh}"] .cc`)).toHaveClass(/cc-pending/);
+    // the store can't be read: a new prompt says so, and is not drawn as waiting
+    await page.evaluate(() => { (window as any).__approvalsFail = true; });
+    const next = await arrive(page, fx.prompts.smart_deny);
+    const nextCard = page.locator(`.message[data-ref="${next}"] .cc`);
+    await expect(nextCard.getByRole('status')).toHaveText("Couldn't check whether it still waits");
+    await expect(nextCard).not.toHaveClass(/cc-pending/);
+    // read again: it waits
+    await page.evaluate(() => { (window as any).__approvalsFail = false; });
+    await arrive(page, 'Chatter that makes the app read again.', ME);
+    await expect(nextCard).toHaveClass(/cc-pending/);
+  });
 });

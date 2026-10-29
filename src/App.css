@@ -294,7 +294,7 @@ p.decision-card.decision-loading { padding: 8px 12px; color: var(--muted); font-
 .cc-done .secret-status, .cc-done > .pairing-secondary { margin: 4px 0; }
 .cc-quiet { padding: 0; border: 0; background: none; box-shadow: none; }
 .cc-quiet .cc-row { min-height: 32px; color: var(--muted); font-size: 13.5px; }
-.cc-quiet .cc-title { font-weight: 600; color: var(--text-soft); }
+.cc-quiet .cc-title { min-width: 0; font-weight: 600; color: var(--text-soft); overflow-wrap: anywhere; }
 .cc-quiet .cc-status { margin: 0; font-size: 13.5px; }
 .cc-cmd { font-family: var(--mono); font-size: 13px; font-weight: 500; }
 .message-content .cc :is(.sealed-releases, .sealed-warn, .secret-status, .secret-trust p, .approvals-note, .secret-note, .secret-purpose) { font-size: 13px; line-height: 1.45; }
