@@ -97,6 +97,7 @@ function Card({ p, vault, busy, setBusy, onDone }: { p: PostCard; vault: string;
     </>}
     {p.state === "approved" && <div className="tp-actions"><span className="tp-status">{waitingLine(p)}</span>
       <button disabled={!!busy} onClick={() => void act("drop", "post_drop", {}, "Stopped. It won't go out.")}>Not this</button></div>}
+    {p.state === "posting" && <p className="tp-status">{waitingLine(p)}</p>}
     {p.state === "posted" && <p className="tp-status">Posted{p.postedUrl && <> · <a href={p.postedUrl} onClick={(e) => { e.preventDefault(); openLink(p.postedUrl!); }}>open</a></>}</p>}
     {p.state === "taken-down" && <p className="tp-status">Taken down</p>}
     {p.state === "failed" && <p className="tp-status tp-failed">Didn't post: {p.failedReason ?? "no reason given"}</p>}

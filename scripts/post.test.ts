@@ -40,6 +40,11 @@ assert.equal(reviewCount(posts), 2);
 assert.equal(reviewCount(posts, "Areas/Garden"), 1);
 assert.deepEqual(queue(posts, "Areas/Garden").waiting.map((p) => p.id), ["a1"]); // a project under the area counts
 
+// a post the poster has claimed is going out: in Going out, with no Not this
+const claimed = parsePosts([note("c1", { state: "posting" })]);
+assert.deepEqual(queue(claimed).waiting.map((p) => p.id), ["c1"]);
+assert.equal(waitingLine(claimed[0]), "Going out now");
+
 // schedule: a future local time only
 const now = new Date("2026-10-29T12:00:00");
 assert.equal(scheduleAt("", now), null);

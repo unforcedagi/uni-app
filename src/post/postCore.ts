@@ -4,7 +4,7 @@
 // poster, which checks the signature itself.
 
 export type Account = "aaron" | "uni";
-export type PostState = "proposed" | "approved" | "posted" | "failed" | "dropped" | "taken-down";
+export type PostState = "proposed" | "approved" | "posting" | "posted" | "failed" | "dropped" | "taken-down";
 export type PostCard = {
   id: string; path: string; updatedAt: string;
   account: Account; platform: string; provenance: string; piece: string; body: string; state: PostState;
@@ -15,7 +15,7 @@ export type PostCard = {
 
 type RawNote = { id?: unknown; path?: unknown; updatedAt?: unknown; tags?: unknown; content?: unknown; metadata?: unknown };
 
-const STATES: PostState[] = ["proposed", "approved", "posted", "failed", "dropped", "taken-down"];
+const STATES: PostState[] = ["proposed", "approved", "posting", "posted", "failed", "dropped", "taken-down"];
 const s = (v: unknown): string => (typeof v === "string" ? v : "");
 const opt = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v : null);
 
@@ -79,7 +79,8 @@ export function queue(posts: PostCard[], node: string | null = null, keep = 10):
     // oldest proposal first: the queue is cleared in one sitting, in the order it filled
     review: mine.filter((p) => p.state === "proposed").sort(asc((p) => p.updatedAt)),
     // soonest out first
-    waiting: mine.filter((p) => p.state === "approved").sort(asc((p) => p.scheduledFor ?? p.approvedAt ?? p.updatedAt)),
+    // posting: the poster has claimed it and is sending it now
+    waiting: mine.filter((p) => p.state === "approved" || p.state === "posting").sort(asc((p) => p.scheduledFor ?? p.approvedAt ?? p.updatedAt)),
     // newest first
     done: mine.filter((p) => p.state === "posted" || p.state === "failed" || p.state === "taken-down")
       .sort(asc((p) => p.postedAt ?? p.updatedAt)).reverse().slice(0, keep),
@@ -93,6 +94,7 @@ export function reviewCount(posts: PostCard[], node: string | null = null): numb
 
 /** "Goes out within a minute" or "Goes out Fri 31 Oct, 09:00". */
 export function waitingLine(p: PostCard, now: Date = new Date()): string {
+  if (p.state === "posting") return "Going out now";
   if (p.scheduledFor) {
     const t = new Date(p.scheduledFor);
     if (!Number.isNaN(t.getTime()) && t.getTime() > now.getTime() + 60_000) {

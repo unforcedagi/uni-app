@@ -184,6 +184,17 @@ pub fn check_approvable(note: &Value, if_updated_at: &str) -> Result<Post> {
     Ok(p)
 }
 
+/// Whether "Not this" can still stop the post. Once the poster has claimed it (`posting`, its compare-and-set from
+/// `approved`), it is going out; ours, from `approved`, would fail anyway, and this says why instead.
+pub fn check_droppable(note: &Value) -> Result<Post> {
+    let p = Post::from_note(note);
+    match p.state.as_str() {
+        "proposed" | "approved" => Ok(p),
+        "posting" => Err(Error::Invalid("it's already going out; once it's posted it can be taken down".into())),
+        s => Err(Error::Invalid(format!("this post is {s:?}; only a proposed or approved post can be stopped"))),
+    }
+}
+
 /// The update-note arguments for an approval: the state compare-and-set, the signed event, the digest.
 pub fn approve_args(vault: &str, id: &str, ev: &Event, digest: &str, scheduled_for: Option<u64>, if_updated_at: &str) -> Value {
     json!({"vault": vault, "id": id, "include_content": false, "if_updated_at": if_updated_at,
@@ -231,12 +242,10 @@ impl VaultClient {
             return Err(Error::Invalid("only post notes".into()));
         }
         at_revision(&note, if_updated_at)?;
-        let p = Post::from_note(&note);
+        let p = check_droppable(&note)?;
         let mut meta = json!({"dropped_at": iso(now)});
-        match p.state.as_str() {
-            "proposed" => {}
-            "approved" => meta["approval_event"] = json!(reject_event(keys, vault, id, now)?.as_json()),
-            s => return Err(Error::Invalid(format!("this post is {s:?}; only a proposed or approved post can be dropped"))),
+        if p.state == "approved" {
+            meta["approval_event"] = json!(reject_event(keys, vault, id, now)?.as_json());
         }
         let args = json!({"vault": vault, "id": id, "include_content": false, "if_updated_at": if_updated_at,
             "state_transition": {"field": "state", "from": p.state, "to": "dropped"}, "metadata": meta});
@@ -366,6 +375,18 @@ mod tests {
         let stored = Event::from_json(a["metadata"]["approval_event"].as_str().unwrap()).unwrap();
         stored.verify().unwrap();
         assert_eq!(stored.id, ev.id);
+    }
+
+    #[test]
+    fn a_post_the_poster_has_claimed_cant_be_stopped_quietly() {
+        let mut n = uni_post();
+        assert!(check_droppable(&n).is_ok());
+        n["metadata"]["state"] = json!("approved");
+        assert!(check_droppable(&n).is_ok());
+        n["metadata"]["state"] = json!("posting");
+        assert!(check_droppable(&n).unwrap_err().to_string().contains("already going out"));
+        n["metadata"]["state"] = json!("posted");
+        assert!(check_droppable(&n).is_err());
     }
 
     #[test]
