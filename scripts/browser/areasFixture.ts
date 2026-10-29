@@ -425,8 +425,8 @@ Two proposals wait on a scope decision.
         { id: 'p-glaze', path: 'Projects/Glaze Tests', extension: 'md', tags: ['project'], metadata: { status: 'foreground', parent: 'Areas/Kiln Studio', channel: 'ch-glaze' }, updatedAt: '2026-10-07T12:00:00Z', content: '# Glaze Tests\n\nTest tiles for the spring glazes.' });
       for (const k of Object.keys(msgs)) delete msgs[k];
       Object.assign(msgs, {
-        'ch-north': [msg('n1', 'ch-north', 'Uni', 7200, 'The hedge cutting is booked for next week.'), msg('n2', 'ch-north', 'Aaron', 3600, 'Good. Leave the far corner wild.')],
-        'ch-kiln': [msg('k1', 'ch-kiln', 'Uni', 5400, 'The bisque firing finished overnight.'), msg('k2', 'ch-kiln', 'Aaron', 1800, 'Unload it after lunch.')],
+        'ch-north': [msg('n1', 'ch-north', 'Uni', 7200, 'The hedge cutting is booked for next week.'), msg('n2', 'ch-north', 'Kit (you)', 3600, 'Good. Leave the far corner wild.')],
+        'ch-kiln': [msg('k1', 'ch-kiln', 'Uni', 5400, 'The bisque firing finished overnight.'), msg('k2', 'ch-kiln', 'Kit (you)', 1800, 'Unload it after lunch.')],
         'ch-glaze': [msg('g1', 'ch-glaze', 'Uni', 4000, 'Three test tiles came out glossy, one crawled.')],
         'ch-allot': [msg('l1', 'ch-allot', 'Rowan', 9000, 'The water butt is full again.')],
       });
