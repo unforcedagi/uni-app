@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { answersLine, parseApproval, parseOutcome, pendingApprovals, type ApprovalSource } from "../src/approvals.ts";
+import { answersLine, approvalOutcomes, parseApproval, parseOutcome, pendingApprovals, type ApprovalSource } from "../src/approvals.ts";
 import { uniPanel, withApprovals, type NeedsFeed } from "../src/areas/simpleCore.ts";
 let failed = 0;
 const check = (n: string, f: () => void) => { try { f(); console.log("ok  ", n); } catch (e) { failed++; console.log("FAIL", n, e); } };
@@ -102,5 +102,29 @@ check("Uni's panel shows its approval prompts itself: they are counted once, and
   assert.equal(p.total, 2);
   assert.equal(p.rest, 0, "nothing else is owed: no stray \"1 more\" under the prompts");
   assert.equal(p.rows.length + (p.approvals?.length ?? 0) + p.rest, p.total, "what is shown plus 'Show N more' is exactly the count");
+});
+check("T-335: how each prompt ended, for its one line in the room", () => {
+  const out = (ms: ApprovalSource[], now: number) => Object.fromEntries([...approvalOutcomes(ms, now, ME)].map(([k, v]) => [k, [v.outcome, v.at]]));
+  const a = msg(P.three_answers_5min, 1000), b = msg(P.two_answers_30min, 1010), c = msg(P.once_or_deny_30min, 1020, { channel: "ch-2" });
+  // approved settles the oldest; the next waits (not in the map)
+  assert.deepEqual(out([a, b, msg(O.approved, 1100)], 1101), { [a.ref]: ["approved", 1100] });
+  assert.deepEqual(out([a, b, msg(O.approved_two, 1100)], 1101), { [a.ref]: ["approved", 1100], [b.ref]: ["approved", 1100] });
+  assert.deepEqual(out([a, msg(O.denied, 1100)], 1101), { [a.ref]: ["denied", 1100] });
+  assert.deepEqual(out([a, msg(O.denied_stale, 1100)], 1101), { [a.ref]: ["denied", 1100] });
+  assert.deepEqual(out([a, msg(O.timed_out_5, 1300)], 1301), { [a.ref]: ["timed-out", 1300] });
+  assert.deepEqual(out([a, msg(O.no_pending, 1100)], 1101), { [a.ref]: ["gone", 1100] });
+  // no answer at all: still waiting inside its window, expired at its deadline after it
+  assert.deepEqual(out([a], 1299), {});
+  assert.deepEqual(out([a], 1300), { [a.ref]: ["expired", 1300] });
+  // a prompt that ran out before a later outcome came is expired, and that outcome answers the next one
+  assert.deepEqual(out([a, b, msg(O.denied, 1400)], 1401), { [a.ref]: ["expired", 1300], [b.ref]: ["denied", 1400] });
+  // another room's answer never ends this one
+  assert.deepEqual(out([c, msg(O.approved, 1100)], 1101), {});
+  // the same reading as pendingApprovals: a prompt is either waiting or ended, never both, never neither
+  const all = [a, b, c, msg(O.approved, 1100), msg(O.timed_out_30, 2820, { channel: "ch-2" })];
+  for (const now of [1101, 1500, 2900]) {
+    const waiting = new Set(pendingApprovals(all, now, ME).map((x) => x.ref)), ended = approvalOutcomes(all, now, ME);
+    for (const p of [a, b, c]) assert.equal(waiting.has(p.ref) !== ended.has(p.ref), true, `${p.ref} at ${now}`);
+  }
 });
 if (failed) { console.log(`${failed} failed`); process.exit(1); }

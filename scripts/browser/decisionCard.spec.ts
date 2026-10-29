@@ -72,6 +72,14 @@ test.describe('decision cards in the chat', () => {
     const before = (await posts(page)).length;
     await cards.first().getByRole('button', { name: 'B (default)' }).click();
     await expect(cards.first().locator('.decision-result')).toHaveText('Decided: B · by you');
+    // T-335: decided, the card is one closed line ("✓ Decided: B · by you · the question"); it opens to the question and its context
+    await expect(cards.first().locator('summary')).toHaveText('✓Decided: B · by you · Which layout for the garden page?');
+    await expect(cards.first().locator('details')).not.toHaveAttribute('open');
+    await expect(cards.first().locator('.decision-q')).toBeHidden();
+    await cards.first().locator('summary').click();
+    await expect(cards.first().locator('.decision-q')).toBeVisible();
+    await expect(cards.first().getByRole('button', { name: 'Context ›' })).toBeVisible();
+    await expect(cards.first().getByRole('group', { name: /^Pick one:/ })).toHaveCount(0);
     const m = await stored(page);
     expect([m.state, m.decided, m.decided_by, m.decided_at]).toEqual(['decided', 'B', 'aaron', '2026-10-09T10:00:00.000Z']);
     const sent = (await posts(page)).slice(before);

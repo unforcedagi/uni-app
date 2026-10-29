@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { DoneCard, PendingCard, QuietCard } from "./CompactCard";
 import {
   SEALED_CHANGED, childToken, jobFingerprint, payloadEntries, payloadField, plainError, releasesLine, shortText, span, windowText,
   type SealedCardView, type SealedRow,
@@ -128,10 +129,8 @@ export function SealedCard({ channel, reference }: { channel: string; reference:
   const title = morning ? "Uni's morning card" : "Approve use of a credential";
   if (!view || view.refused || !view.rows.length) {
     const why = loadError ?? view?.refused ?? null;
-    return <section className="sealed-card sealed-greyed" aria-label={`${title} (${why ? "can't be approved" : "checking"})`}>
-      <header><span aria-hidden="true">🔑</span> <strong>{title}</strong></header>
-      <p className={`secret-status ${why ? "warn" : ""}`} role="status">{why ?? "Checking this card…"}</p>
-    </section>;
+    return <QuietCard className="sealed-card sealed-greyed" label={`${title} (${why ? "can't be approved" : "checking"})`} icon="🔑" title={title}
+      status={why ?? "Checking this card…"} warn={!!why} />;
   }
 
   const rows = view.rows;
@@ -150,9 +149,10 @@ export function SealedCard({ channel, reference }: { channel: string; reference:
     const child = childToken(r);
     const purpose = payloadField(r, "purpose"), destination = payloadField(r, "destination");
     const releases = releasesLine(r);
-    const status = answerLine(r);
-    return <section className={`sealed-card ${r.class} ${expired ? "sealed-greyed" : ""}`} aria-label={`Approve use of ${r.credential}`}>
-      <header><span aria-hidden="true">🔑</span> <strong>{title}</strong> <Badge cls={r.class} /></header>
+    // T-335: what it's for, in the card's own checked words: a mint's purpose, else its scope
+    const what = purpose ?? r.scope;
+    const warn = child?.permanent && <p className="sealed-warn" role="note"><span aria-hidden="true">⚠️</span> This makes a <strong>permanent token</strong>. It keeps working until someone revokes it.</p>;
+    const facts = <>
       <dl className="secret-facts sealed-facts">
         <dt>Credential</dt><dd><code>{r.credential}</code></dd>
         <dt>Action</dt><dd><code>{r.action}</code></dd>
@@ -164,50 +164,63 @@ export function SealedCard({ channel, reference }: { channel: string; reference:
         <dt>Payload</dt><dd><Payload payload={r.payload} /></dd>
         <dt>Exact job</dt><dd><code>{jobFingerprint(r.request_digest)}</code> (fingerprint)</dd>
         <dt>Answer by</dt><dd>{clock(r.expires)}</dd>
+        {r.answer?.decision === "approve" && r.answer.sent && <><dt>Open until</dt><dd>{clock(r.answer.until ?? r.answer.at)}</dd></>}
       </dl>
-      {child?.permanent && <p className="sealed-warn" role="note"><span aria-hidden="true">⚠️</span> This makes a <strong>permanent token</strong>. It keeps working until someone revokes it.</p>}
-      {releases && <p className="sealed-releases">{releases}</p>}
-      {status && <p className="secret-status ok" role="status">{status}</p>}
-      {expired && <p className="secret-status warn" role="status">Expired</p>}
-      {failure}
-      {!answered && !expired && <div className="sealed-actions">
+      {r.answer && releases && <p className="sealed-releases">{releases}</p>}
+    </>;
+    const label = `Approve use of ${r.credential}`;
+    const cls = `sealed-card ${r.class}`;
+    if (answered || expired) {
+      const a = r.answer;
+      const status = expired ? "Expired" : `${a?.decision === "deny" ? "Denied" : "Approved"}${a?.sent ? "" : " · not sent yet"}`;
+      return <DoneCard className={`${cls} ${expired ? "sealed-greyed" : ""}`} label={label} mark={expired ? "⌛" : a?.decision === "deny" ? "✕" : "✓"}
+        status={status} what={what} when={expired ? clock(r.expires) : a ? clock(a.at) : null} details={facts}
+        after={<>{failure}{retry}</>} />;
+    }
+    return <PendingCard className={cls} label={label} icon="🔑" what={what}
+      meta={<><span className="cc-where">{r.credential}</span> · {span(r.ttl_s)}{r.class === "powerful" && <> · <Badge cls="powerful" /></>} · </>}
+      actions={<div className="sealed-actions">
         <button type="button" className="pairing-secondary sealed-deny" disabled={busy} onClick={() => void answer("deny", [r.rid])}>Deny</button>
         {r.class === "powerful"
           ? <HoldButton label="Hold to approve" disabled={busy} onDone={() => void answer("approve", [r.rid])} onCancel={() => setNote("Cancelled: nothing was sent. Hold for a second to approve.")} />
           : <button type="button" className="sealed-approve" disabled={busy} onClick={() => void answer("approve", [r.rid])}>Approve</button>}
       </div>}
-      {note && !answered && <p className="secret-status" role="status">{note}</p>}
-      {retry}
-    </section>;
+      below={<>{warn}{releases && <p className="sealed-releases">{releases}</p>}{note && <p className="secret-status" role="status">{note}</p>}{failure}</>}
+      details={facts} />;
   }
 
   const chosen = rows.filter((r) => !off.has(r.rid));
-  return <section className={`sealed-card sealed-morning routine ${expired ? "sealed-greyed" : ""}`} aria-label={title}>
-    <header><span aria-hidden="true">🔑</span> <strong>{title}</strong> <Badge cls="routine" /></header>
-    <p className="approvals-note">Each row is its own grant, open for its window from your tap. Switch off any you don't want today.</p>
-    <ul className="sealed-rows">{rows.map((r) => {
-      const status = answerLine(r) ?? (answered ? "Left out" : null);
-      return <li key={r.rid} className={off.has(r.rid) && !answered ? "sealed-row-off" : ""}>
-        {!answered && !expired && <input type="checkbox" role="switch" className="sealed-switch" checked={!off.has(r.rid)} disabled={busy}
-          aria-label={`Grant ${r.credential} for ${r.action}`}
-          onChange={(e) => setOff((s) => { const n = new Set(s); if (e.target.checked) n.delete(r.rid); else n.add(r.rid); return n; })} />}
-        <div className="sealed-row-text">
-          <span><code>{r.credential}</code> · <code>{r.action}</code></span>
-          <span className="sealed-scope">{r.scope}</span>
-          <small>Window {windowText(r.ttl_s, r.uses)} · Exact job <code>{jobFingerprint(r.request_digest)}</code></small>
-          {r.payload !== null && <Payload payload={r.payload} />}
-          {status && <small className="sealed-row-status" role="status">{status}</small>}
-        </div>
-      </li>;
-    })}</ul>
-    <p className="approvals-note">Answer by {clock(expires ?? 0)}</p>
-    {expired && <p className="secret-status warn" role="status">Expired</p>}
-    {failure}
-    {!answered && !expired && <div className="sealed-actions">
+  const names = rows.map((r) => r.credential).join(", ");
+  const list = (live: boolean) => <ul className="sealed-rows">{rows.map((r) => {
+    const status = answerLine(r) ?? (answered ? "Left out" : null);
+    return <li key={r.rid} className={off.has(r.rid) && !answered ? "sealed-row-off" : ""}>
+      {live && <input type="checkbox" role="switch" className="sealed-switch" checked={!off.has(r.rid)} disabled={busy}
+        aria-label={`Grant ${r.credential} for ${r.action}`}
+        onChange={(e) => setOff((s) => { const n = new Set(s); if (e.target.checked) n.delete(r.rid); else n.add(r.rid); return n; })} />}
+      <div className="sealed-row-text">
+        <span><code>{r.credential}</code> · <code>{r.action}</code></span>
+        <span className="sealed-scope">{r.scope}</span>
+        <small>Window {windowText(r.ttl_s, r.uses)} · Exact job <code>{jobFingerprint(r.request_digest)}</code></small>
+        {r.payload !== null && <Payload payload={r.payload} />}
+        {status && <small className="sealed-row-status">{status}</small>}
+      </div>
+    </li>;
+  })}</ul>;
+  if (answered || expired) {
+    const approved = rows.filter((r) => r.answer?.decision === "approve").length;
+    const status = expired ? "Expired" : unsent.length ? `${approved ? "Approved" : "Denied"} · not sent yet` : approved ? `Approved ${approved} of ${rows.length}` : "Denied";
+    const at = Math.max(...rows.map((r) => r.answer?.at ?? 0));
+    return <DoneCard className={`sealed-card sealed-morning routine ${expired ? "sealed-greyed" : ""}`} label={title} mark={expired ? "⌛" : approved ? "✓" : "✕"}
+      status={status} what="Morning card" when={expired ? clock(expires ?? 0) : at ? clock(at) : null}
+      details={<>{list(false)}<p className="approvals-note">Answer by {clock(expires ?? 0)}</p></>} after={<>{failure}{retry}</>} />;
+  }
+  return <PendingCard className="sealed-card sealed-morning routine" label={title} icon="🔑" what={`Morning card: ${names}`}
+    meta={<>{rows.length} routine · answer by {clock(expires ?? 0)} · </>}
+    actions={<div className="sealed-actions">
       <button type="button" className="pairing-secondary sealed-deny" disabled={busy} onClick={() => void answer("deny", rows.map((r) => r.rid))}>Deny all</button>
       <button type="button" className="sealed-approve" disabled={busy || !chosen.length} onClick={() => void answer("approve", chosen.map((r) => r.rid))}>
         {chosen.length ? `Approve ${chosen.length} of ${rows.length}` : "Nothing chosen"}</button>
     </div>}
-    {retry}
-  </section>;
+    below={failure}
+    details={<><p className="approvals-note">Each row is its own grant, open for its window from your tap. Switch off any you don't want today.</p>{list(true)}</>} />;
 }

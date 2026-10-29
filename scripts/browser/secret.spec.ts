@@ -72,6 +72,9 @@ test('a request becomes a masked card; the value goes only to send_secret and le
   const card = page.getByRole('region', { name: 'Secret request: Tailscale API token' });
   await expect(card).toBeVisible();
   await expect(page.locator('.message', { hasText: 'uni-secret-request' })).toHaveCount(0); // the machine block is not shown
+  // T-335: one row (what, where it's kept), the facts behind details
+  await expect(card.locator('.cc-what')).toHaveText('Tailscale API token');
+  await expect(card.locator('dl')).toHaveCount(0);
   // Not yet trusted: a fingerprint and a Trust button, no field.
   await expect(card.getByRole('button', { name: /Trust Uni \(cccc cccc cccc cccc\)/ })).toBeVisible();
   await expect(card.locator('input')).toHaveCount(0);
@@ -88,6 +91,8 @@ test('a request becomes a masked card; the value goes only to send_secret and le
   await card.getByRole('button', { name: 'Send sealed' }).click();
   await expect(card.getByText('Sealed and sent to Uni')).toBeVisible();
   await shot(page, '04-sent-waiting');
+  await card.getByRole('button', { name: 'details' }).click();
+  await expect(card.locator('dt', { hasText: /^Sealed to$/ }).locator('+ dd')).toHaveText('Uni · cccc cccc cccc cccc');
 
   const c = await calls(page);
   expect(c.find((x) => x.cmd === 'secret_pin')?.args).toEqual({ channel: 'test', request: 'd'.repeat(64) }); // the key comes from Rust
@@ -107,6 +112,11 @@ test('a stored receipt flips the card; Forget asks Uni to delete it', async ({ p
   const stored = msg('b'.repeat(64), fx.stored.content, now() - 30);
   await boot(page, { messages: [ask, msg('d'.repeat(64), request, now() - 60), stored], trusted: true });
   const card = page.getByRole('region', { name: 'Secret request: Tailscale API token' });
+  // T-335: stored is one closed line; it opens to what was stored and the Forget button
+  await expect(card.locator('summary')).toHaveText(/^🔒Stored · Tailscale API token · until \w{3} \d{1,2}, \d{4}$/);
+  await expect(card.locator('details')).not.toHaveAttribute('open');
+  await expect(card.getByRole('button', { name: 'Ask Uni to forget it' })).toBeHidden();
+  await card.locator('summary').click();
   await expect(card.getByText(/Stored as tailscale-api until/)).toBeVisible();
   await expect(card.locator('input')).toHaveCount(0);
   await expect(page.locator('.message', { hasText: 'uni-secret-stored' })).toHaveCount(0);
@@ -125,7 +135,7 @@ test('once Uni is trusted, someone else named "Uni" gets no field and no Trust b
   await boot(page, { messages: [fake, fakeStored], signed: { ['d'.repeat(64)]: impostor }, trusted: true });
   const card = page.getByRole('region', { name: 'Secret request: Tailscale API token' });
   await expect(card.getByText(/This isn't the key you trust for secrets/)).toBeVisible();
-  await expect(card.getByRole('button')).toHaveCount(0);
+  await expect(card.getByRole('button', { name: /Trust|Send/ })).toHaveCount(0);
   await expect(card.locator('input')).toHaveCount(0);
   await expect(card.getByText(/Stored as/)).toHaveCount(0);
 });

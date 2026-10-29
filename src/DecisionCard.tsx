@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { cleanNote, NOTE_MAX, NOTE_WARN, noteLine, optionLabel, parseDecisionNote, pickedLine, type DecisionView } from "./decisionView";
 import { makeDecisionStore, msg, type Entry } from "./decisionStore";
 import { useNoteOpener } from "./noteLinks";
+import { DoneCard } from "./CompactCard";
 import { activeProfile } from "./areas/profile";
 import { decisionDecided, onDecisionsGone } from "./decisionLinks";
 import { inline, publishedIn } from "./publishedMedia";
@@ -136,22 +137,29 @@ export function DecisionCard({ id, vault, post }: Props) {
   const media = files.length ? <div className="decision-media">{files.map((m) => <PublishedMedia key={m.url} m={m} />)}</div> : null;
   const head = <header className="decision-head"><span className="decision-kind">Decision{d.task ? ` · ${d.task}` : ""}</span>{context}</header>;
 
-  if (d.state !== "open") return <section className="decision-card decided" aria-label={`Decision: ${d.question}`} data-state={d.state}>
-    {head}
-    <p className="decision-q">{d.question}</p>
-    {media}
-    {d.state === "decided"
-      ? <p className="decision-result" role="status">Decided: <strong>{d.decided ? optionLabel(d.decided) : "yes"}</strong>{d.decidedBy ? <span className="decision-by"> · by {d.decidedBy === activeProfile().me ? "you" : d.decidedBy}</span> : null}</p>
-      : <p className="decision-result" role="status">No longer open.</p>}
-    {d.decidedNote && <p className="decision-said">{d.decidedNote}</p>}
-    {notes}
-    {lost && <p className="decision-note" role="status">Already decided before your tap; nothing was sent.{text.trim() ? " Your note is still here: send it on its own." : ""}</p>}
-    {/* words left over (a tap that lost, or typed before it was decided elsewhere) can still go, as a note; after a lost tap the field
-        stays even when cleared to be retyped */}
-    {(text || lost) && field}
-    {phase !== "untold" && error && <p className="decision-note warn" role="alert">{error}</p>}
-    {told}
-  </section>;
+  // T-335: decided (or no longer open): one quiet line that opens to the question, its context and what was said
+  if (d.state !== "open") {
+    const answer = d.state === "decided" ? `Decided: ${d.decided ? optionLabel(d.decided) : "yes"}${d.decidedBy ? ` · by ${d.decidedBy === activeProfile().me ? "you" : d.decidedBy}` : ""}` : "No longer open";
+    return <DoneCard className="decision-card decided" label={`Decision: ${d.question}`} mark={d.state === "decided" ? "✓" : "–"} status={answer} what={d.question}
+      details={<>
+        {head}
+        <p className="decision-q">{d.question}</p>
+        {media}
+        {d.state === "decided"
+          ? <p className="decision-result">Decided: <strong>{d.decided ? optionLabel(d.decided) : "yes"}</strong>{d.decidedBy ? <span className="decision-by"> · by {d.decidedBy === activeProfile().me ? "you" : d.decidedBy}</span> : null}</p>
+          : <p className="decision-result">No longer open.</p>}
+        {d.decidedNote && <p className="decision-said">{d.decidedNote}</p>}
+        {notes}
+      </>}
+      after={<>
+        {lost && <p className="decision-note" role="status">Already decided before your tap; nothing was sent.{text.trim() ? " Your note is still here: send it on its own." : ""}</p>}
+        {/* words left over (a tap that lost, or typed before it was decided elsewhere) can still go, as a note; after a lost tap the field
+            stays even when cleared to be retyped */}
+        {(text || lost) && field}
+        {phase !== "untold" && error && <p className="decision-note warn" role="alert">{error}</p>}
+        {told}
+      </>} />;
+  }
 
   return <section className="decision-card" aria-label={`Decision: ${d.question}`} data-state="open">
     {head}

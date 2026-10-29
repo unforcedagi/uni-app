@@ -85,7 +85,8 @@ import { parseSecretReceipt, parseSecretRequest, receiptFor, receiptsByRequest, 
 import NotePane, { usePaneShape } from "./NotePane";
 import { ApprovalsContext, useApprovals } from "./approvalsLive";
 import { ApprovalBanner } from "./areas/ApprovalRows";
-import type { Approval } from "./approvals";
+import { approvalOutcomes, parseApproval, type Approval } from "./approvals";
+import { ApprovalPromptCard } from "./ApprovalPromptCard";
 
 type Room = { id: string; name: string; last_message: string | null; last_ts: number | null; mentions: boolean; unread: number; /** a direct message, a room (false), or not known yet (null; absent in a list cached by an older app) */ dm?: boolean | null };
 type Message = { ref: string; channel: string; author: string; author_name: string; ts: number; body: string; mentions_me: boolean; root: string | null; parent: string | null; mentions: Member[]; reply_count: number; last_reply_ts: number | null; edited: boolean; reactions: Reaction[]; media?: MediaRef[] };
@@ -1851,6 +1852,15 @@ function Conversations({ onForget }: { onForget: () => void }) {
 
   const waitingRefs = new Set(approvals.map((a) => a.ref));
   const waitingKey = approvals.map((a) => a.ref).join(" ");
+  // T-335: how each Hermes prompt in view ended, read from the room's own messages, for its one line
+  const promptOutcomes = useMemo(() => approvalOutcomes(messages, Date.now() / 1000, identity),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [messages, identity, waitingKey]);
+  /** T-335: a Hermes approval prompt drawn as its short card (waiting until Needs you or its room says it ended). Null: not a prompt. */
+  const promptView = (m: Message) => {
+    const a = m.author === identity ? null : parseApproval(m);
+    return a ? <ApprovalPromptCard a={a} ended={waitingRefs.has(m.ref) ? undefined : promptOutcomes.get(m.ref)} /> : null;
+  };
   const renderMessage = (m: Message, inThread: boolean, prev?: Message, newest = false) => {
     // r18: a progress ping from hours or days ago is folded away as a past update, never the room's live status
     if (isWorkerStatus(m.body) && !(inThread && m.ref === root) && editing !== m.ref && staleStatus(m, Date.now() / 1000, newest)) return <details key={m.ref} data-ref={m.ref} className="message status-line status-past">
@@ -1862,7 +1872,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     const grouped = !!prev && prev.author === m.author && m.ts - prev.ts < 300 && !(inThread && prev.ref === root);
     return <article key={m.ref} data-ref={m.ref} className={`message ${m.ref === focusRef ? "search-focus" : ""} ${grouped ? "grouped" : ""} ${m.author === identity ? "mine" : ""} ${m.mentions_me ? "highlight" : ""} ${inThread && m.ref === root ? "thread-root" : ""} ${waitingRefs.has(m.ref) ? "approval-waiting" : ""}`}>
       {grouped ? <time className="gutter-time">{clock(m.ts)}</time> : <span className="message-avatar" style={{ background: `hsl(${150 + (hue(m.author) % 120) - 60} 22% 44%)` }} aria-hidden="true">{m.author_name[0]?.toUpperCase() ?? "?"}</span>}
-      <div className="message-content">{!grouped && <div className="message-meta"><strong>{m.author_name}</strong><time>{clock(m.ts)}</time></div>}{editing === m.ref ? <InlineEditor key={m.ref} initial={m.body} onSave={(body) => actions.current.saveEdit(m, body)} onCancel={() => actions.current.cancelEdit()} /> : secretView(m) ?? <Body body={attachmentBody(m.body, m.media, relayOrigin)} mentions={m.mentions} me={identity} edited={m.edited} />}
+      <div className="message-content">{!grouped && <div className="message-meta"><strong>{m.author_name}</strong><time>{clock(m.ts)}</time></div>}{editing === m.ref ? <InlineEditor key={m.ref} initial={m.body} onSave={(body) => actions.current.saveEdit(m, body)} onCancel={() => actions.current.cancelEdit()} /> : promptView(m) ?? secretView(m) ?? <Body body={attachmentBody(m.body, m.media, relayOrigin)} mentions={m.mentions} me={identity} edited={m.edited} />}
         <Attachments body={m.body} media={m.media} />
         {decisionCards(m, inThread)}
         {m.reactions.length > 0 && <div className="reactions" aria-label="Reactions">{m.reactions.map((r) => <span key={r.emoji} className={`pill ${r.mine ? "mine" : ""}`} aria-label={`${emojiLabel(r.emoji)} ${r.count}${r.mine ? ", including yours" : ""}`}>{emojiLabel(r.emoji)} <span>{r.count}</span></span>)}</div>}

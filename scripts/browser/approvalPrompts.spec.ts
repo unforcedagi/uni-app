@@ -70,11 +70,25 @@ test.describe('a Hermes approval prompt, loudly', () => {
     await expect.poll(() => composerFocused(page)).toBe(true);
     expect(await page.evaluate(() => (window as any).__calls.filter((c: any) => c.cmd === 'post_message').length)).toBe(0);
     await shot(page, '02-room');
+    // T-335: in the room the prompt is one short row: the command, how to answer; the full command and why behind details
+    const pc = prompt.getByRole('region', { name: 'Hermes needs your OK: git branch -D feature/example-cleanup' });
+    await expect(pc.locator('.cc-what')).toHaveText('git branch -D feature/example-cleanup');
+    await expect(pc.locator('.cc-meta')).toHaveText(/^Hermes needs your OK · reply \/approve, \/approve session or \/deny · ends \d{1,2}:\d{2}\s?[AP]M · details$/);
+    await expect(pc.getByText(/Why it was flagged/)).toHaveCount(0);
+    await pc.getByRole('button', { name: 'details' }).click();
+    await expect(pc.getByText('Why it was flagged: git branch force delete')).toBeVisible();
+    // still answered in words: no approve button in the chat
+    await expect(pc.getByRole('button', { name: /approve|deny/i })).toHaveCount(0);
     // Hermes says it was approved: the banner and the mark go
     await arrive(page, '/approve', ME);
     await arrive(page, fx.outcomes.approved);
     await expect(page.locator('.approval-banner')).toHaveCount(0);
     await expect(page.locator('.message.approval-waiting')).toHaveCount(0);
+    // T-335: and the prompt folds to one line saying how it ended
+    const done = page.locator(`.message[data-ref="${ref}"] .cc-done`);
+    await expect(done.locator('summary')).toHaveText(/^✓Approved · git branch -D feature\/example-cleanup · \d{2}:\d{2}/);
+    await expect(done.locator('details')).not.toHaveAttribute('open');
+    await shot(page, '03-room-answered');
   });
 
   test('2. it leaves Needs you when Hermes says approved, denied or timed out', async ({ page }) => {
@@ -147,5 +161,6 @@ test.describe('a Hermes approval prompt, loudly', () => {
     await arrive(page, fx.outcomes.approved, 'Uni', ROOM, top);
     await expect(page.locator('.approval-banner')).toHaveCount(0);
     await expect(page.locator('.message.approval-waiting')).toHaveCount(0);
+    await expect(page.locator(`.message[data-ref="${ref}"] .cc-done`).getByRole('status')).toHaveText('Approved');
   });
 });

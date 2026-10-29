@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { DoneCard, PendingCard, QuietCard } from "./CompactCard";
 import { fingerprint, type SecretReceipt, type SecretRequest } from "./secretRequest";
 
 // T-176: Uni's request for a secret, as a card with a masked field. The value goes only to the `send_secret`
@@ -33,10 +34,8 @@ export function SecretRequestCard({ channel, requestRef, authorName, receipts, p
     return () => { live = false; };
   }, [channel, requestRef]);
 
-  if (!verified) return <section className="secret-card" aria-label="Secret request (unverified)">
-    <header><span aria-hidden="true">🔐</span> <strong>Secret request</strong></header>
-    <p className={`secret-status ${unverified ? "warn" : ""}`} role="status">{unverified ? `Can't answer: ${unverified}` : "Checking who signed this request…"}</p>
-  </section>;
+  if (!verified) return <QuietCard className="secret-card" label="Secret request (unverified)" icon="🔐" title="Secret request"
+    status={unverified ? `Can't answer: ${unverified}` : "Checking who signed this request…"} warn={!!unverified} />;
 
   const { author, request } = verified;
   const trusted = pins.includes(author);
@@ -68,40 +67,52 @@ export function SecretRequestCard({ channel, requestRef, authorName, receipts, p
     }
   };
 
-  const status = receipt?.state === "stored" ? <p className="secret-status ok" role="status">🔒 Stored as <code>{request.name}</code>{receipt.until ? <> until {day(receipt.until)}</> : null}. {authorName} only sees the name.</p>
-    : receipt?.state === "forgotten" ? <p className="secret-status" role="status">🗑️ Forgotten: {authorName} deleted it.</p>
-    : receipt?.state === "refused" ? <p className="secret-status warn" role="status">⚠️ Not kept: {receipt.reason ?? "refused"}</p>
-    : phase === "sent" ? <p className="secret-status" role="status">Sealed and sent to {authorName}. Waiting for {authorName} to confirm…</p>
-    : null;
-
-  return <section className="secret-card" aria-label={`Secret request: ${request.label}`}>
-    <header><span aria-hidden="true">🔐</span> <strong>{request.label}</strong></header>
+  const facts = <>
     {request.purpose && <p className="secret-purpose">{request.purpose}</p>}
     <dl className="secret-facts">
       <dt>Kept</dt><dd><code>{request.store}</code> on uni, {request.keep_days} days</dd>
       <dt>Sealed to</dt><dd>{authorName} · <code>{fingerprint(author)}</code></dd>
     </dl>
-    {status}
-    {!receipt && phase !== "sent" && (!trusted
-      ? pins.length === 0
-        ? <div className="secret-trust">
-            <p>The app hasn't been told to trust this key for secrets. Check the fingerprint with {authorName} first.</p>
-            <button type="button" className="pairing-secondary" onClick={onTrust}>Trust {authorName} ({fingerprint(author)})</button>
-          </div>
-        : <p className="secret-status warn" role="status">This isn't the key you trust for secrets, whatever its name says. Don't
-            answer it here. Only the key you trusted before may ask; another one goes in the app's secret-requesters file by hand.</p>
-      : expired
-        ? <p className="secret-status warn">This request has expired. Ask {authorName} for a new one.</p>
-        : <form className="secret-form" onSubmit={(e) => { e.preventDefault(); if (value) void send(); }}>
-            <input type="password" aria-label={`Value for ${request.label}`} placeholder="Paste or type it here" value={value}
-              onChange={(e) => setValue(e.target.value)} autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}
-              data-1p-ignore="" data-lpignore="true" disabled={phase === "sending"} />
-            <button type="submit" disabled={!value || phase === "sending"}>{phase === "sending" ? "Sealing…" : "Send sealed"}</button>
-          </form>)}
-    {receipt?.state === "stored" && trusted && phase !== "forget-sent" &&
-      <button type="button" className="secret-forget" onClick={() => void forget()} disabled={phase === "forgetting"}>Ask {authorName} to forget it</button>}
-    {phase === "forget-sent" && receipt?.state !== "forgotten" && <p className="secret-status">Asked {authorName} to forget it…</p>}
-    {error && <p className="secret-status warn" role="alert">{error}</p>}
     <p className="secret-note">Never goes into chat: it's sealed on this device and only {authorName}'s store can open it.</p>
-  </section>;
+  </>;
+  const label = `Secret request: ${request.label}`;
+  const errorLine = error && <p className="secret-status warn" role="alert">{error}</p>;
+
+  // T-335: answered (stored, forgotten, refused) or expired: one line that opens to the facts
+  if (receipt) {
+    const forgetting = receipt.state === "stored" && trusted && phase !== "forget-sent"
+      && <button type="button" className="secret-forget" onClick={() => void forget()} disabled={phase === "forgetting"}>Ask {authorName} to forget it</button>;
+    const [mark, status, when] = receipt.state === "stored" ? ["🔒", "Stored", receipt.until ? `until ${day(receipt.until)}` : null]
+      : receipt.state === "forgotten" ? ["🗑️", "Forgotten", null] : ["⚠️", `Not kept: ${receipt.reason ?? "refused"}`, null];
+    const said = receipt.state === "stored" ? <p className="secret-status ok">Stored as <code>{request.name}</code>{receipt.until ? <> until {day(receipt.until)}</> : null}. {authorName} only sees the name.</p>
+      : receipt.state === "forgotten" ? <p className="secret-status">{authorName} deleted it.</p> : null;
+    return <DoneCard className="secret-card" label={label} mark={mark} status={status} what={request.label} when={when}
+      details={<>{said}{facts}{forgetting}</>}
+      after={<>{phase === "forget-sent" && receipt.state !== "forgotten" && <p className="secret-status">Asked {authorName} to forget it…</p>}{errorLine}</>} />;
+  }
+  if (expired && phase !== "sent") return <DoneCard className="secret-card" label={label} mark="⌛" status="Expired" what={request.label}
+    when={null} details={<><p className="secret-status warn">This request has expired. Ask {authorName} for a new one.</p>{facts}</>} />;
+
+  return <PendingCard className="secret-card" label={label} icon="🔐" what={request.label}
+    meta={<>kept as <code>{request.store}</code>, {request.keep_days} days · </>}
+    below={<>
+      {phase === "sent"
+        ? <p className="secret-status" role="status">Sealed and sent to {authorName}. Waiting for {authorName} to confirm…</p>
+        : !trusted
+          ? pins.length === 0
+            ? <div className="secret-trust">
+                <p>The app hasn't been told to trust this key for secrets. Check the fingerprint with {authorName} first.</p>
+                <button type="button" className="pairing-secondary" onClick={onTrust}>Trust {authorName} ({fingerprint(author)})</button>
+              </div>
+            : <p className="secret-status warn" role="status">This isn't the key you trust for secrets, whatever its name says. Don't
+                answer it here. Only the key you trusted before may ask; another one goes in the app's secret-requesters file by hand.</p>
+          : <form className="secret-form" onSubmit={(e) => { e.preventDefault(); if (value) void send(); }}>
+              <input type="password" aria-label={`Value for ${request.label}`} placeholder="Paste or type it here" value={value}
+                onChange={(e) => setValue(e.target.value)} autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}
+                data-1p-ignore="" data-lpignore="true" disabled={phase === "sending"} />
+              <button type="submit" disabled={!value || phase === "sending"}>{phase === "sending" ? "Sealing…" : "Send sealed"}</button>
+            </form>}
+      {errorLine}
+    </>}
+    details={facts} />;
 }

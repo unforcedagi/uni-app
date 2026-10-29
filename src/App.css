@@ -259,6 +259,40 @@ p.decision-card.decision-loading { padding: 8px 12px; color: var(--muted); font-
 .sealed-row-text small { color: var(--muted); }
 .sealed-row-status { color: var(--text) !important; }
 .sealed-enrolled-line { margin: 2px 0; font-size: 14px; color: var(--text-soft); }
+/* T-335: compact cards. Waiting: one row (what, where/how long, the buttons), facts behind "details". Answered: one quiet line. */
+.cc { margin: 6px 0 4px; max-width: 560px; }
+.cc-pending { padding: 8px 10px 8px 12px; }
+.cc .cc-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 0; }
+.cc-icon { flex: none; font-size: 15px; }
+.cc-text { display: flex; flex-direction: column; flex: 1 1 180px; min-width: 0; }
+.cc-what { overflow: hidden; font-family: var(--sans); font-size: 14px; font-weight: 600; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
+.cc-meta { color: var(--muted); font-size: 12.5px; line-height: 1.4; overflow-wrap: anywhere; }
+.cc-meta .sealed-badge { margin-left: 0; padding: 0 6px; font-size: 10px; }
+.cc-toggle { padding: 0; border: 0; background: none; color: var(--text-soft); font: inherit; font-size: 12.5px; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.cc-actions { flex: none; margin-left: auto; }
+.cc-actions .sealed-actions, .cc-actions .cc-buttons { flex-wrap: nowrap; margin: 0; gap: 6px; }
+.cc-actions .sealed-approve, .cc-actions .pairing-secondary { min-height: 40px; padding: 0 14px; }
+.cc-details { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+.cc-details[hidden] { display: none; }
+.cc-pending .sealed-warn, .cc-pending .sealed-releases, .cc-pending .secret-status { margin: 6px 0 0; }
+.cc-done { padding: 0; border: 0; border-left: 0 !important; background: none; box-shadow: none; opacity: 1; }
+.cc-done > details > summary { display: flex; align-items: baseline; gap: 0; min-height: 32px; padding: 4px 0; color: var(--muted); font-size: 13.5px; cursor: pointer; list-style: none; }
+.cc-done > details > summary::-webkit-details-marker { display: none; }
+.cc-done > details > summary::after { content: "▸"; margin-left: 8px; color: var(--muted); font-size: 11px; }
+.cc-done > details[open] > summary::after { content: "▾"; }
+.cc-done .cc-mark { flex: none; width: 1.3em; color: var(--forest); }
+.cc-done .cc-status { flex: none; color: var(--text-soft); font-weight: 600; }
+.cc-done .cc-what { flex: 0 1 auto; min-width: 0; font-size: 13.5px; font-weight: 400; color: var(--muted); }
+.cc-done .cc-sep, .cc-done .cc-when { flex: none; white-space: pre; }
+.cc-done > details > .cc-details { margin: 2px 0 6px; padding: 8px 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); }
+.cc-done .secret-status, .cc-done > .pairing-secondary { margin: 4px 0; }
+.cc-quiet { padding: 0; border: 0; background: none; box-shadow: none; }
+.cc-quiet .cc-row { min-height: 32px; color: var(--muted); font-size: 13.5px; }
+.cc-quiet .cc-title { font-weight: 600; color: var(--text-soft); }
+.cc-quiet .cc-status { margin: 0; font-size: 13.5px; }
+.cc-cmd { font-family: var(--mono); font-size: 13px; font-weight: 500; }
+.message-content .cc :is(.sealed-releases, .sealed-warn, .secret-status, .secret-trust p, .approvals-note, .secret-note, .secret-purpose) { font-size: 13px; line-height: 1.45; }
+.cc-pre { margin: 0 0 6px; padding: 8px; max-height: 240px; overflow: auto; border-radius: 8px; background: var(--bg); font-family: var(--mono); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
 
 .older { text-align: center; margin: 8px 0 4px; font-size: 12px; color: var(--muted); }
 .older button { border: 1px solid var(--line); background: var(--surface); color: var(--text-soft); border-radius: 999px; padding: 7px 16px; }

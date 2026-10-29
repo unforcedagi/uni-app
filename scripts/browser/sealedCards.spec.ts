@@ -73,6 +73,10 @@ async function boot(page: Page, o: Opts) {
 const calls = (page: Page) => page.evaluate(() => (window as any).calls as { cmd: string; args: any }[]);
 const answers = async (page: Page) => (await calls(page)).filter((c) => c.cmd === 'sealed_answer');
 const card = (page: Page, name: string) => page.getByRole('region', { name, exact: true });
+/** T-335: a waiting card's facts are behind its "details" toggle, closed until asked for */
+const details = async (c: ReturnType<typeof card>) => { await c.getByRole('button', { name: 'details', exact: true }).click(); await expect(c.locator('.cc-details')).toBeVisible(); };
+/** T-335: an answered card is one line, closed */
+const line = (c: ReturnType<typeof card>) => c.locator('details > summary');
 const shot = async (page: Page, name: string) => { if (process.env.CARDS_SHOTS) await page.screenshot({ path: `${process.env.CARDS_SHOTS}/${test.info().project.name}-${name}.png` }); };
 /** press and hold the button for `ms` with the pointer, as a finger or a mouse does */
 async function hold(page: Page, button: ReturnType<Page['getByRole']>, ms: number) {
@@ -89,6 +93,16 @@ test('approve a powerful card: every field from the view, a click does nothing, 
   const c = card(page, 'Approve use of dns-zone');
   await expect(c).toBeVisible();
   await expect(c.getByText('POWERFUL')).toBeVisible();
+  // T-335: one row: what (the checked scope), where and how long, the buttons; the facts are closed
+  await expect(c.locator('.cc-what')).toHaveText('Add an A record for demo.example.org');
+  await expect(c.locator('.cc-meta')).toHaveText(/^dns-zone · 10 min · POWERFUL · details$/);
+  await expect(c.locator('dl')).toHaveCount(0);
+  await expect(c.getByRole('button', { name: 'details' })).toHaveAttribute('aria-expanded', 'false');
+  // tapping the row itself answers nothing
+  await c.locator('.cc-what').click();
+  await c.locator('.cc-meta').click({ position: { x: 2, y: 2 } });
+  expect(await answers(page)).toHaveLength(0);
+  await details(c);
   for (const [k, v] of [['Credential', 'dns-zone'], ['Action', 'dns.edit'], ['Scope', 'Add an A record for demo.example.org'], ['Window', '10 min, 1 use'], ['Exact job', '9b13 b2ae (fingerprint)']]) {
     await expect(c.locator('dt', { hasText: new RegExp(`^${k}$`) }).locator('+ dd')).toHaveText(v);
   }
@@ -110,8 +124,15 @@ test('approve a powerful card: every field from the view, a click does nothing, 
   await page.waitForTimeout(1300);
   expect(await answers(page)).toHaveLength(0);
   await hold(page, approve, 1300);
-  await expect(c.getByRole('status')).toHaveText(/^Approved · open until \d{2}:\d{2}/);
-  await expect(c.getByRole('button')).toHaveCount(1); // only "more": no Deny, no approve
+  // T-335: answered, it is one closed line: "✓ Approved · what · time"; opening it shows the facts and still nothing to answer
+  await expect(c.getByRole('status')).toHaveText('Approved');
+  await expect(line(c)).toHaveText(/^✓Approved · Add an A record for demo\.example\.org · \d{1,2}:\d{2}(\s?[AP]M)?$/);
+  await expect(c.locator('details')).not.toHaveAttribute('open');
+  await expect(c.locator('dl')).toBeHidden();
+  await expect(c.getByRole('button', { name: /Deny|approve/i })).toHaveCount(0);
+  await line(c).click();
+  await expect(c.locator('dt', { hasText: /^Open until$/ }).locator('+ dd')).toHaveText(/^\d{2}:\d{2}/);
+  await expect(c.getByRole('button', { name: /Deny|approve/i })).toHaveCount(0);
   const sent = await answers(page);
   expect(sent).toHaveLength(1);
   // the webview names the card and the request, never a key
@@ -133,7 +154,7 @@ test('cancel: letting go before a second sends nothing and says so; the card sta
   await page.keyboard.down('Space');
   await page.waitForTimeout(1300);
   await page.keyboard.up('Space');
-  await expect(c.getByRole('status')).toHaveText(/^Approved · open until/);
+  await expect(c.getByRole('status')).toHaveText('Approved');
   expect(await answers(page)).toHaveLength(1);
 });
 
@@ -151,11 +172,14 @@ test('a routine card is approved with a plain tap, with no powerful warning', as
   const r = row({ credential: 'pages-deploy', action: 'deploy.pages', class: 'routine', ttl_s: 3600, uses: 3, scope: 'Deploy the example site', payload: null });
   await boot(page, { messages: [msg('m1', single(), now() - 30)], cards: { m1: view([r]) } });
   const c = card(page, 'Approve use of pages-deploy');
-  await expect(c.getByText('ROUTINE')).toBeVisible();
+  await expect(c.locator('.cc-meta')).toHaveText('pages-deploy · 60 min · details');
+  await expect(c.locator('.sealed-badge')).toHaveCount(0);
   await expect(c.locator('.sealed-releases')).toHaveCount(0);
+  await details(c);
   await expect(c.locator('dt', { hasText: /^Window$/ }).locator('+ dd')).toHaveText('60 min, 3 uses');
   await c.getByRole('button', { name: 'Approve' }).click();
-  await expect(c.getByRole('status')).toHaveText(/^Approved · open until/);
+  await expect(c.getByRole('status')).toHaveText('Approved');
+  await expect(line(c)).toHaveText(/^✓Approved · Deploy the example site · \d{1,2}:\d{2}(\s?[AP]M)?$/);
   expect((await answers(page)).map((s) => s.args.decision)).toEqual(['approve']);
 });
 
@@ -171,6 +195,7 @@ test('expired: greyed with the reason and no buttons; one that expires while ope
   await expect(open.getByRole('button', { name: 'Deny' })).toBeVisible();
   await page.clock.fastForward('03:00');
   await expect(open.getByText('Expired', { exact: true })).toBeVisible();
+  await expect(line(open)).toHaveText(/^⌛Expired · Add an A record for demo\.example\.org · \d{1,2}:\d{2}(\s?[AP]M)?$/);
   await expect(open.getByRole('button', { name: /Deny|approve/i })).toHaveCount(0);
   await shot(page, 'expired');
   expect(await answers(page)).toHaveLength(0);
@@ -206,13 +231,17 @@ test('a permanent child token says so, with its purpose and destination', async 
   const short = row({ rid: 'r3'.padEnd(32, '0'), credential: 'cf-parent2', action: 'mint.cloudflare', ttl_s: 60, scope: 'Mint a one-hour child', payload: { template: 'r2-read', child_ttl_s: 3600 } });
   await boot(page, { messages: [msg('m1', single(), now() - 60), msg('m2', single(), now() - 30)], cards: { m1: view([mint]), m2: view([short]) } });
   const c = card(page, 'Approve use of cf-parent');
+  // the warning stays in sight on the closed card; the purpose is what it's for
   await expect(c.getByRole('note')).toHaveText(/This makes a permanent token\. It keeps working until someone revokes it\./);
+  await expect(c.locator('.cc-what')).toHaveText('nightly backup check');
+  await details(c);
   await expect(c.locator('dt', { hasText: /^Child token$/ }).locator('+ dd')).toHaveText('permanent');
   await expect(c.locator('dt', { hasText: /^Purpose$/ }).locator('+ dd')).toHaveText('nightly backup check');
   await expect(c.locator('dt', { hasText: /^Destination$/ }).locator('+ dd')).toHaveText('sealed:example-r2-read');
   await expect(c.locator('dt', { hasText: /^Window$/ }).locator('+ dd')).toHaveText('60 s, 1 use');
   const s = card(page, 'Approve use of cf-parent2');
   await expect(s.getByRole('note')).toHaveCount(0);
+  await details(s);
   await expect(s.locator('dt', { hasText: /^Child token$/ }).locator('+ dd')).toHaveText('expires after 60 min');
   await shot(page, 'permanent');
 });
@@ -221,6 +250,10 @@ test('the morning card: each routine kind is its own grant; switching one off le
   const rows = ['r2-backups', 'pages-deploy', 'dns-read'].map((n, i) => row({ rid: `m${i}`.padEnd(32, '0'), credential: n, action: ['r2.list', 'deploy.pages', 'dns.read'][i], class: 'routine', ttl_s: 50400, uses: 200, scope: `Routine ${n} for today`, payload: null, request_digest: `${i}0aa11bb`.padEnd(64, 'c'), expires: now() + 3600 }));
   await boot(page, { messages: [msg('m1', fence('uni-sealed-morning', "🔑 **Uni's morning card**: 3 routine credential(s) for today"), now() - 30)], cards: { m1: view(rows, 'morning') } });
   const c = card(page, "Uni's morning card");
+  // T-335: one row naming every credential, the count on its button; the per-row switches are behind details
+  await expect(c.locator('.cc-what')).toHaveText('Morning card: r2-backups, pages-deploy, dns-read');
+  await expect(c.getByRole('switch')).toHaveCount(0);
+  await details(c);
   const switches = c.getByRole('switch');
   await expect(switches).toHaveCount(3);
   for (const r of rows) await expect(c.getByRole('switch', { name: `Grant ${r.credential} for ${r.action}` })).toBeChecked();
@@ -231,6 +264,9 @@ test('the morning card: each routine kind is its own grant; switching one off le
   await c.getByRole('switch', { name: 'Grant pages-deploy for deploy.pages' }).uncheck();
   await shot(page, 'morning-before');
   await c.getByRole('button', { name: 'Approve 2 of 3' }).click();
+  await expect(line(c)).toHaveText(/^✓Approved 2 of 3 · Morning card · \d{1,2}:\d{2}(\s?[AP]M)?$/);
+  await expect(c.locator('details')).not.toHaveAttribute('open');
+  await line(c).click();
   await expect(c.getByText(/^Approved · open until/)).toHaveCount(2);
   await expect(c.getByText('Left out')).toHaveCount(1);
   await expect(c.getByRole('switch')).toHaveCount(0);
@@ -243,11 +279,14 @@ test('the morning card: all switched off sends nothing; Deny all denies every ro
   const rows = ['r2-backups', 'dns-read'].map((n, i) => row({ rid: `n${i}`.padEnd(32, '0'), credential: n, class: 'routine', ttl_s: 3600, payload: null, expires: now() + 3600 }));
   await boot(page, { messages: [msg('m1', fence('uni-sealed-morning', "🔑 **Uni's morning card**"), now() - 30)], cards: { m1: view(rows, 'morning') } });
   const c = card(page, "Uni's morning card");
+  await details(c);
   await expect(c.getByRole('switch')).toHaveCount(2);
   for (const s of await c.getByRole('switch').all()) await s.uncheck();
   await expect(c.getByRole('button', { name: 'Nothing chosen' })).toBeDisabled();
   await c.getByRole('button', { name: 'Deny all' }).click();
-  await expect(c.getByText('Denied', { exact: true })).toHaveCount(2);
+  await expect(c.getByRole('status')).toHaveText('Denied');
+  await line(c).click();
+  await expect(c.locator('.sealed-row-status')).toHaveText(['Denied', 'Denied']);
   expect((await answers(page)).map((s) => [s.args.decision, s.args.rids])).toEqual([['deny', rows.map((r) => r.rid)]]);
 });
 
@@ -259,7 +298,8 @@ test('a send that fails says so; Try again sends the same decision', async ({ pa
   await expect(c.getByText('Approved · not sent yet')).toBeVisible();
   await expect(c.getByRole('button', { name: /^(Approve|Deny)$/ })).toHaveCount(0);
   await c.getByRole('button', { name: 'Try again' }).click();
-  await expect(c.getByRole('status')).toHaveText(/^Approved · open until/);
+  await expect(c.getByRole('status')).toHaveText('Approved');
+  await expect(c.getByRole('button', { name: 'Try again' })).toHaveCount(0);
   expect((await answers(page)).map((s) => s.args.decision)).toEqual(['approve', 'approve']);
 });
 

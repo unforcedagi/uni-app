@@ -90,6 +90,30 @@ export function parseOutcome(body: string): { n: number } | "all" | null {
  * `me`: the user's own messages are never prompts or outcomes. Within one second a prompt comes before an outcome (an outcome follows a prompt).
  */
 export function pendingApprovals(messages: readonly ApprovalSource[], now: number, me: string | null = null): Approval[] {
+  return [...walk(messages, me).waiting.values()].flat().filter((a) => a.deadline === null || a.deadline > now).sort((a, b) => a.ts - b.ts);
+}
+
+/** T-335: how a prompt ended, for its one line in the room. "gone": the gateway said nothing was waiting after all. */
+export type ApprovalOutcome = { outcome: "approved" | "denied" | "timed-out" | "expired" | "gone"; at: number };
+
+const outcomeOf = (body: string): ApprovalOutcome["outcome"] => {
+  const b = body.trim();
+  return b.startsWith("✅") ? "approved" : b.startsWith("❌") ? "denied" : b.startsWith("⌛ Approval timed out after ") ? "timed-out" : "gone";
+};
+
+/**
+ * T-335: the prompts in `messages` that are no longer waiting at `now`, and how each ended, by the same reading as `pendingApprovals`
+ * (an outcome settles the oldest one waiting; a prompt whose own window has passed with no answer has expired). A prompt still waiting,
+ * or one whose answer isn't among `messages`, is not in the map.
+ */
+export function approvalOutcomes(messages: readonly ApprovalSource[], now: number, me: string | null = null): Map<string, ApprovalOutcome> {
+  const { waiting, settled } = walk(messages, me);
+  for (const a of [...waiting.values()].flat()) if (a.deadline !== null && a.deadline <= now) settled.set(a.ref, { outcome: "expired", at: a.deadline });
+  return settled;
+}
+
+function walk(messages: readonly ApprovalSource[], me: string | null): { waiting: Map<string, Approval[]>; settled: Map<string, ApprovalOutcome> } {
+  const settledAt = new Map<string, ApprovalOutcome>();
   const isPrompt = new Map(messages.map((m) => [m.ref, parseApproval(m) ? 0 : 1]));
   const sorted = [...messages].sort((a, b) => a.ts - b.ts || isPrompt.get(a.ref)! - isPrompt.get(b.ref)! || (a.ref < b.ref ? -1 : a.ref > b.ref ? 1 : 0));
   const waiting = new Map<string, Approval[]>();
@@ -99,7 +123,11 @@ export function pendingApprovals(messages: readonly ApprovalSource[], now: numbe
     seen.add(m.ref);
     const key = `${m.channel}\n${m.author}`;
     // a prompt is kept a little past its window: the gateway's own timeout notice comes at the deadline, and settles that prompt, not the next
-    const list = (waiting.get(key) ?? []).filter((a) => a.deadline === null || a.deadline + GRACE > m.ts);
+    const list = (waiting.get(key) ?? []).filter((a) => {
+      const keep = a.deadline === null || a.deadline + GRACE > m.ts;
+      if (!keep) settledAt.set(a.ref, { outcome: "expired", at: a.deadline! });
+      return keep;
+    });
     const prompt = parseApproval(m);
     if (prompt) list.push(prompt);
     else {
@@ -113,12 +141,12 @@ export function pendingApprovals(messages: readonly ApprovalSource[], now: numbe
         const fits = inThread.filter((a) => (timedOut ? due(a) : a.deadline === null || a.deadline > m.ts));
         const here = fits.length || timedOut ? fits : inThread;
         const settled = new Set(out === "all" ? here : here.slice(0, out.n));
-        for (let i = list.length - 1; i >= 0; i--) if (settled.has(list[i])) list.splice(i, 1);
+        for (let i = list.length - 1; i >= 0; i--) if (settled.has(list[i])) { settledAt.set(list[i].ref, { outcome: outcomeOf(m.body), at: m.ts }); list.splice(i, 1); }
       }
     }
     waiting.set(key, list);
   }
-  return [...waiting.values()].flat().filter((a) => a.deadline === null || a.deadline > now).sort((a, b) => a.ts - b.ts);
+  return { waiting, settled: settledAt };
 }
 
 /** "/approve or /deny", "/approve, /approve session or /deny": the answers a prompt takes, for the row. */
