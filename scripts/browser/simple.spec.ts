@@ -2462,7 +2462,7 @@ test.describe('r17', () => {
     const msg = chat.locator('.message').filter({ hasText: 'The hosting call is yours' });
     // the marker is not shown in the text; the card names the task it decides
     await expect(msg.locator('.md')).not.toContainText('T-140');
-    await expect(msg.locator('.decision-kind')).toHaveText('Decision · T-140');
+    await expect(msg.locator('.decision-card .cc-meta')).toContainText('Decision · T-140'); // T-335: the compact card's meta line
     await expect(msg.getByRole('group', { name: /^Pick one:/ }).getByRole('button')).toHaveText(['Self-host', 'Managed']);
     await expect(chat.locator('.message .decision-card')).toHaveCount(1);
     // the decision's sheet (Needs you) still answers it, with the same options
