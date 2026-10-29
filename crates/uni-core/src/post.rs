@@ -497,6 +497,9 @@ mod tests {
         assert_eq!((v.chars().count(), x_weight(&v)), (85, 51));
         assert_eq!(x_weight(&"🌱".repeat(150)), 300);
         assert_eq!(x_weight("http:// plain"), 13);
+        // a link ends at Python's whitespace: U+0085 ends it, U+FEFF doesn't
+        assert_eq!(x_weight(&format!("{} http://b\u{85}{}", "a".repeat(250), "c".repeat(10))), 285);
+        assert_eq!(x_weight(&format!("{} http://b\u{feff}{}", "a".repeat(250), "c".repeat(10))), 274);
     }
 
     /// Pinned in uni-ops tests/test_uni_post_live.py (CROSS_VECTOR_X): a Bluesky post with its X copy.

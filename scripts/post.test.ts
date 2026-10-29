@@ -35,6 +35,9 @@ const v = `Grow 🌱 slowly, 漢字 too: https://example.com/${"a".repeat(40)} �
 assert.deepEqual([[...v].length, xWeight(v)], [85, 51]);
 assert.equal(xWeight("🌱".repeat(150)), 300);
 assert.equal(xWeight("http:// plain"), 13);
+// a link ends at Python's whitespace: U+0085 ends it, U+FEFF doesn't (pinned with the poster and the Rust)
+assert.equal(xWeight(`${"a".repeat(250)} http://b\u0085${"c".repeat(10)}`), 285);
+assert.equal(xWeight(`${"a".repeat(250)} http://b\ufeff${"c".repeat(10)}`), 274);
 assert.match(blocked(parsePost(note("a", { crosspost: ["x"], body: "🌱".repeat(150) }))!)!, /X counts this as 300/);
 assert.equal(blocked(parsePost(note("a", { body: "🌱".repeat(150) }))!), null);
 assert.equal(blocked(parsePost(note("a", { crosspost: ["x"], body: `${"y".repeat(200)} https://example.com/${"a".repeat(70)}` }))!), null);

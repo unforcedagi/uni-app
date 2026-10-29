@@ -61,7 +61,8 @@ const weigh = (s: string) => [...s].reduce((n, c) => n + (X_LIGHT.some(([a, b]) 
 /** X's weighted count, as the poster counts it: every http(s) link is 23, most emoji and CJK are 2. */
 export function xWeight(body: string): number {
   let n = 0, last = 0;
-  for (const m of body.matchAll(/https?:\/\/[^\s\x1c-\x1f<>"“”]+/gu)) {
+  // the poster's link pattern, with Python's whitespace spelled out (JS \s differs: it has U+FEFF, lacks U+0085)
+  for (const m of body.matchAll(/https?:\/\/[^\t-\r \x1c-\x1f\x85\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000<>"“”]+/gu)) {
     n += weigh(body.slice(last, m.index)) + 23;
     last = m.index! + m[0].length;
   }
