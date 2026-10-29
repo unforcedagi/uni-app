@@ -43,6 +43,7 @@ test('the front door counts what waits; the queue shows each post as it will loo
   await boot(page);
   const line = page.getByRole('button', { name: 'To post · 3' });
   await expect(line).toBeVisible();
+  if (process.env.T335_SHOTS) await page.screenshot({ path: `${process.env.T335_SHOTS}/${test.info().project.name}-front-door.png` });
   await line.click();
   const q = page.getByRole('region', { name: 'To post' });
   await expect(q.getByRole('heading', { name: 'To review · 3' })).toBeVisible();
@@ -78,6 +79,7 @@ test('Approve, Schedule, Edit and Not this each make one call naming the post an
   const when = new Date(Date.now() + 2 * 86400_000); when.setSeconds(0, 0);
   const local = new Date(when.getTime() - when.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
   await mine.locator('input[type="datetime-local"]').fill(local);
+  if (process.env.T335_SHOTS) { await mine.scrollIntoViewIfNeeded(); await page.screenshot({ path: `${process.env.T335_SHOTS}/${test.info().project.name}-schedule.png` }); }
   await mine.getByRole('button', { name: 'Approve for then' }).click();
   await expect(page.getByRole('heading', { name: 'Going out · 2' })).toBeVisible();
   const sched = (await calls(page, 'post_approve'))[1];
@@ -97,6 +99,7 @@ test('Edit on Aaron\'s post takes his words; on Uni\'s post it is a note to Uni,
   const uni = card(page, 'Uni build log');
   await uni.getByRole('button', { name: 'Edit' }).click();
   await expect(uni.locator('.tp-form label')).toContainText('A note to Uni');
+  if (process.env.T335_SHOTS) { await uni.locator('textarea').fill('Shorter, and drop the second number.'); await page.screenshot({ path: `${process.env.T335_SHOTS}/${test.info().project.name}-edit-note.png` }); }
   await uni.locator('textarea').fill('Shorter, and drop the second number.');
   await uni.getByRole('button', { name: 'Send to Uni' }).click();
   await expect(page.getByRole('status').filter({ hasText: 'Sent to Uni.' })).toBeVisible();

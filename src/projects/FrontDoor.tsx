@@ -2,7 +2,7 @@
 // the room last talked, and a small mark when sessions are working there. No ids. Above the rooms, one quiet line on what needs you
 // (round 2: #Uni is archived, so this is where it lives); under them, one quiet line on the Claude accounts, which opens the full card.
 // T-304: the working mark counts the room's Uni at work on your message too, not only Claude Code sessions.
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { liveInArea, span } from "./model";
 import { asOf, useWork } from "./store";
 import { useRoomTurns } from "./roomTurns";
@@ -55,9 +55,10 @@ function workingWords(sessions: number, turn: boolean): string {
   return turn ? `Uni is answering here${s ? ` and ${s}` : ""}` : s;
 }
 
-export function FrontDoor({ doors, needs, onOpen, me = null, newRooms = [], onOpenRoom }: { doors: readonly Door[]; needs?: Needs; onOpen: (path: string) => void;
+export function FrontDoor({ doors, needs, onOpen, me = null, newRooms = [], onOpenRoom, toPost = null }: { doors: readonly Door[]; needs?: Needs; onOpen: (path: string) => void;
   /** T-335: rooms outside the doors with something new, and how to open one. */ newRooms?: readonly NewRoom[]; onOpenRoom?: (id: string) => void;
-  /** Your key: a turn is the room's Uni at work on your message. */ me?: string | null }) {
+  /** Your key: a turn is the room's Uni at work on your message. */ me?: string | null;
+  /** T-335: the To post queue's one quiet line, under what needs you */ toPost?: ReactNode }) {
   const ws = useWork();
   const turns = useRoomTurns(doors.map((d) => ({ room: d.room ?? null, lastTs: d.lastTs })), me);
   const { work } = ws;
@@ -72,6 +73,7 @@ export function FrontDoor({ doors, needs, onOpen, me = null, newRooms = [], onOp
       <p className="fd-sub">Your rooms</p>
     </header>
     {needs && <NeedsLine needs={needs} onOpen={onOpen} />}
+    {toPost && <div className="fd-topost">{toPost}</div>}
     {onOpenRoom && <NewLine rooms={newRooms} onOpen={onOpenRoom} />}
     <nav aria-label="Rooms"><ul className="fd-doors">{doors.map((d) => {
       const a = areaAt.get(d.path);

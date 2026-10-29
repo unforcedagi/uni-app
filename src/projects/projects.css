@@ -27,6 +27,9 @@
 @media (prefers-reduced-motion: reduce) { .fd-door { transition: none; } .fd-door:hover { transform: none; } }
 /* what needs you: one quiet line above the rooms, which opens the list in place */
 .fd-needs { max-width: 980px; margin: 0 auto 16px; border-bottom: 1px dashed var(--th-hair2); }
+/* T-335: the To post line sits under Needs you, in its voice */
+.fd-topost { max-width: 980px; margin: -8px auto 16px; }
+.fd-topost .tp-line { font: 600 13px var(--th-mono); letter-spacing: .06em; color: var(--th-ink); min-height: 40px; }
 .fd-needs-line { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 10px; min-height: 40px; cursor: pointer; font: 600 13px var(--th-mono); letter-spacing: .06em; color: var(--th-ink); }
 .fd-needs-line[aria-expanded="false"] .ps-chev { transform: rotate(-45deg); }
 .fd-needs-line:focus-visible { outline: 2px solid var(--th-ink); outline-offset: 2px; }
