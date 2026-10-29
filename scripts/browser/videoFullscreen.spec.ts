@@ -244,6 +244,22 @@ test('T-335 Codex r1: leaving the window full screen the platform\'s way (a Mac\
   expect(await windowCalls(page)).toEqual([true]);
 });
 
+test('T-335 Codex r2: a refusal that comes after the layer closed never takes the window', async ({ page }) => {
+  test.skip(android(), 'Android: the layer is the full screen');
+  // the webview says yes to asking, then refuses late
+  await page.addInitScript(() => {
+    Element.prototype.requestFullscreen = () => new Promise((_, no) => setTimeout(() => no(new TypeError('refused')), 400));
+  });
+  await open(page);
+  await press(page.getByRole('button', { name: 'Full screen: garden walk.webm' }));
+  await expect(layer(page)).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(layer(page)).toBeHidden();
+  await page.waitForTimeout(900);
+  expect(await windowCalls(page)).toEqual([]);
+  expect(await windowState(page)).toBe(false);
+});
+
 test('T-335 Codex r1: a resize while the window stays full screen leaves the layer up', async ({ page }) => {
   test.skip(android(), 'Android: the layer is the full screen');
   await page.addInitScript(() => { Object.defineProperty(Document.prototype, 'fullscreenEnabled', { get: () => false }); });

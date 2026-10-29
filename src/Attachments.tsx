@@ -353,7 +353,9 @@ export function VideoFull({ src, name, at, playing, events, onClose }: {
     el?.querySelector<HTMLButtonElement>(".lightbox-close")?.focus();
     // this layer's claim on the window's full screen (one object per run, so a stale run can't give back a newer one's)
     const me = {};
-    const takeWindow = () => holdWindow(me, () => closeRef.current());
+    let disposed = false;
+    // a refusal can come after the layer closed: then there is nothing to take the window for
+    const takeWindow = () => { if (!disposed) holdWindow(me, () => closeRef.current()); };
     if (!android()) {
       if (el && document.fullscreenEnabled && el.requestFullscreen) void el.requestFullscreen().catch(takeWindow);
       else takeWindow();
@@ -372,6 +374,7 @@ export function VideoFull({ src, name, at, playing, events, onClose }: {
     const release = holdTop();
     return () => {
       release();
+      disposed = true;
       releaseWindow(me);
       window.removeEventListener("keydown", key, true); document.removeEventListener("fullscreenchange", left); setModalOpen(-1);
       if (root) root.inert = wasInert;
