@@ -32,6 +32,7 @@ export function placeKey(t: TabTarget): string {
     case "area": return `area:${t.path ?? ""}`;
     case "thread": return `thread:${t.channel ?? ""}:${t.root ?? ""}`;
     case "room": return `room:${t.channel ?? ""}`;
+    case "posts": return `posts:${t.path ?? ""}`;
     default: return t.kind;
   }
 }

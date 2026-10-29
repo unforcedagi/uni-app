@@ -1,0 +1,32 @@
+/* T-335: the To post queue. Calm: one column, the post as it will look, whose voice in a word and a shape. */
+.tp-page { display: flex; flex-direction: column; gap: 12px; padding: 0 16px 32px; max-width: 640px; margin: 0 auto; width: 100%; overflow-y: auto; }
+.tp-bar { display: flex; align-items: center; gap: 12px; justify-content: space-between; }
+.tp-title small { opacity: 0.7; }
+.tp-h { font-size: 0.95rem; font-weight: 600; margin: 16px 0 0; opacity: 0.8; }
+.tp-empty, .tp-said { opacity: 0.75; margin: 4px 0; }
+.tp-card { border: 1px solid var(--border, #d8d4cc); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 10px; background: var(--surface, #fff); }
+.tp-meta { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 0.85rem; }
+.tp-badge { font-weight: 600; padding: 2px 8px; border-radius: 999px; border: 1px solid currentColor; }
+.tp-badge-uni { border-style: dashed; }
+.tp-where { opacity: 0.75; }
+.tp-preview { border: 1px solid var(--border, #e4e0d8); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 6px; }
+.tp-who { display: flex; gap: 8px; align-items: center; }
+.tp-avatar { width: 28px; height: 28px; border-radius: 50%; display: inline-grid; place-items: center; border: 1px solid currentColor; font-size: 0.8rem; }
+.tp-body { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.45; }
+.tp-count { align-self: flex-end; opacity: 0.6; }
+.tp-count.over { opacity: 1; font-weight: 700; }
+.tp-why, .tp-piece { margin: 0; font-size: 0.9rem; opacity: 0.8; }
+.tp-blocked { margin: 0; font-weight: 600; }
+.tp-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.tp-form { display: flex; flex-direction: column; gap: 8px; }
+.tp-form label { display: flex; flex-direction: column; gap: 6px; font-size: 0.9rem; }
+.tp-form textarea { font: inherit; padding: 8px; border-radius: 8px; }
+.tp-status { margin: 0; opacity: 0.85; }
+.tp-error { margin: 0; font-weight: 600; }
+.tp-line { align-self: flex-start; background: none; border: none; padding: 4px 0; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; font: inherit; }
+.tp-actions button { background: transparent; border: 1px solid var(--line); color: var(--text-soft); border-radius: 999px; min-height: 44px; padding: 0 16px; font-size: 14px; }
+.tp-actions button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.tp-actions button.primary { background: var(--th-ink, #222); color: var(--th-card, #fff); border-color: var(--th-ink, #222); }
+.tp-actions button:disabled { opacity: 0.45; cursor: default; }
+.tp-card { border-color: var(--line, #d8d4cc); }
+.tp-preview { border-color: var(--line, #e4e0d8); }

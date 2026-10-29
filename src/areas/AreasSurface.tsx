@@ -27,6 +27,8 @@ import { rolledUnread, unreadByPath, unreadByRoom, withApprovalNeeds } from "./r
 import { useNav, type NavControls } from "../navContext";
 import { useVaultProfile } from "./ProfileContext";
 import { Crumbs, RoomSidebar, TreeScreen } from "./TreeHome";
+import { ToPostLine } from "../post/ToPost";
+import { showUniGlue } from "./profile";
 import { WorkView } from "./WorkView";
 import { LoadHealth } from "./LoadHealth";
 import { Body } from "../MessageBody";
@@ -57,7 +59,9 @@ export type ShellActions = Omit<AreaActions, "openNote"> & { openNote(ref: NoteR
   /** r21 (Codex 9): read the rooms list again (a conversation slow to open before its room is known) */
   retryRooms?: () => void;
   /** r24: scroll to and mark a message of the room open now ("Check in #room first" goes to the first message about the request) */
-  focusMessage?: (ref: string | null, room?: string, checking?: string | null) => void };
+  focusMessage?: (ref: string | null, room?: string, checking?: string | null) => void;
+  /** T-335: open the To post queue (one area's posts when `node` is given) */
+  openPosts?: (node?: string | null) => void };
 
 /**
  * What is open over the place (the task sheet, the work view, the drawer): Android Back closes it first. `modal` (the sheet) holds Alt+arrow
@@ -119,6 +123,9 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   const chat = profile.chat.provider === "buzz";
   /** A note named by path or id in this vault (a brief's link, the area app's), opened in this vault, never in another. */
   const openHere = (ref: string) => actions.openNote({ vault: profile.vault, id: ref });
+  // T-335: the To post queue's quiet count, on Uni's vault only (posts are Uni glue): the front door, and each area's work view
+  const postsLine = (node: string | null) => actions.openPosts && showUniGlue(profile.vault)
+    ? <ToPostLine vault={profile.vault} node={node} onOpen={() => actions.openPosts!(node)} /> : null;
   const appActions: AreaActions = { ...actions, openNote: openHere };
   const rooms = useMemo<RoomInfo[]>(() => (chat ? hostRooms : []), [chat, hostRooms]);
   const { data, error, loading, signingIn, retry: retryAreas } = useAreas(identity);
@@ -436,7 +443,7 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
       rows: allNeeds.rows.map((t) => ({ id: t.id, title: taskTitle(t.title).rest || t.title, where: data!.tree.nodes.get(t.node)?.name ?? null, path: t.node })),
       privates: allNeeds.privates.map((g) => ({ place: g.place, count: g.count, path: g.open.path })),
     };
-    return <div className="areas-home tree-home-wrap">{status}<ApprovalRows approvals={approvalsAll.list} className="cp-list cp-approvals th-approvals" /><FrontDoor doors={doors} needs={needs} onOpen={openDoor} me={identity} newRooms={newRooms} onOpenRoom={openRoomFromTree} />
+    return <div className="areas-home tree-home-wrap">{status}<ApprovalRows approvals={approvalsAll.list} className="cp-list cp-approvals th-approvals" />{postsLine(null)}<FrontDoor doors={doors} needs={needs} onOpen={openDoor} me={identity} newRooms={newRooms} onOpenRoom={openRoomFromTree} />
       {railHidden && places.length > 0 && <div className="th-places-short">{placesRow}</div>}</div>;
   }
   if (treeHome && path === null && !rootOpen) {
@@ -542,8 +549,9 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
     {askRoom && <p className="th-fresh wv-fresh"><button type="button" className="th-link" onClick={() => actions.compose(askRoom, refreshDraft(node.name, isRoot ? "" : node.path))}>Ask Uni to update this summary</button></p>}
   </div> : null;
   const foot = node.kind === "project" && body ? <details className="th-note wv-note"><summary>Project note</summary><Body body={body} mentions={[]} me={null} /></details> : null;
+  const workTop = isRoot || privateRoot(data!.tree, node.path) ? top : <>{top}{postsLine(node.path)}</>;
   const workMain = <WorkView nodeName={node.name} feed={feed} others={othersHere} later={later} runs={runs} drafts={drafts} privateOther={privateOther} ready={tasks.ready && privacyKnown} load={load} activity={tasks.activity}
-    onTask={openSheet} onRun={openRun} runMissing={runMissing} scopeAll={isRoot} onDecide={decide} onNote={actions.openNote} onPrivate={openPrivate} placeOf={placeOf} top={top} foot={foot} />;
+    onTask={openSheet} onRun={openRun} runMissing={runMissing} scopeAll={isRoot} onDecide={decide} onNote={actions.openNote} onPrivate={openPrivate} placeOf={placeOf} top={workTop} foot={foot} />;
   const workOpen = work || !chat || noRoom;
   const workBar = workOpen ? <div className="sr-thread sr-workbar">{chat && !noRoom && <button type="button" className="sr-thread-back sr-work-back" onClick={() => setWork(false)}><span aria-hidden="true">‹</span> Back to chat</button>}
     <span className="sr-thread-label">{`All of ${node.name}'s work`}</span></div> : null;

@@ -37,6 +37,7 @@ pub mod pairing;
 pub mod pairing_source;
 pub mod hub;
 pub mod parachute;
+pub mod post;
 pub mod readstate;
 pub mod sealed;
 pub mod sealed_card;

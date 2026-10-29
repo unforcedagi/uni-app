@@ -2534,6 +2534,64 @@ async fn vault_transition(
     .await
 }
 
+/// T-335: Approve (or Schedule) one post in the To post queue. Rust re-reads the note, checks it (a proposed post at the
+/// revision shown, in a voice its account may carry), raises this device's own confirm naming what will go out, then
+/// signs Aaron's approval over exactly what's stored and writes it in the compare-and-set that moves it to `approved`.
+#[tauri::command]
+async fn post_approve(
+    app: tauri::AppHandle,
+    vault: String,
+    id: String,
+    if_updated_at: String,
+    scheduled_for: Option<u64>,
+) -> Result<serde_json::Value, String> {
+    let (v2, id2, at2) = (vault.clone(), id.clone(), if_updated_at.clone());
+    let (title, reason) = with_vault(&app, move |c| {
+        let note = tauri::async_runtime::block_on(c.get_note(&v2, &id2)).map_err(|e| e.to_string())?;
+        uni_core::post::check_approvable(&note, &at2).map_err(|e| e.to_string())?;
+        Ok(("Approve this post?".to_string(), uni_core::post::summary(&note)))
+    })
+    .await?;
+    confirm_approval(&app, title, reason).await?;
+    // signed over the note as re-read after the confirm, still at the revision shown (a change meanwhile is a conflict)
+    with_vault(&app, move |c| {
+        let (keys, _) = uni_core::load_keys(false).map_err(|e| e.to_string())?;
+        let now = nostr::Timestamp::now().as_secs();
+        tauri::async_runtime::block_on(c.post_approve(&keys, &vault, &id, &if_updated_at, scheduled_for, now))
+            .map_err(|e| e.to_string())
+    })
+    .await
+}
+
+/// T-335: "Not this" on a post. An approved one gets a signed reject the poster records.
+#[tauri::command]
+async fn post_drop(app: tauri::AppHandle, vault: String, id: String, if_updated_at: String) -> Result<serde_json::Value, String> {
+    with_vault(&app, move |c| {
+        let (keys, _) = uni_core::load_keys(false).map_err(|e| e.to_string())?;
+        let now = nostr::Timestamp::now().as_secs();
+        tauri::async_runtime::block_on(c.post_drop(&keys, &vault, &id, &if_updated_at, now)).map_err(|e| e.to_string())
+    })
+    .await
+}
+
+/// T-335: Edit. Aaron's own post takes his new words (and goes back to proposed); a post in Uni's voice takes his
+/// note to Uni instead, so his wording never appears under Uni's name.
+#[tauri::command]
+async fn post_edit(
+    app: tauri::AppHandle,
+    vault: String,
+    id: String,
+    if_updated_at: String,
+    text: String,
+) -> Result<serde_json::Value, String> {
+    with_vault(&app, move |c| {
+        let (keys, _) = uni_core::load_keys(false).map_err(|e| e.to_string())?;
+        let now = nostr::Timestamp::now().as_secs();
+        tauri::async_runtime::block_on(c.post_edit(&keys, &vault, &id, &if_updated_at, &text, now)).map_err(|e| e.to_string())
+    })
+    .await
+}
+
 /// The running app's version (r14): Settings reads it here when the app plugin's `getVersion` can't answer.
 #[tauri::command]
 fn app_version(app: tauri::AppHandle) -> String {
@@ -2898,6 +2956,9 @@ pub fn run() {
             vault_subtree_nodes,
             vault_subtree_tasks,
             vault_transition,
+            post_approve,
+            post_drop,
+            post_edit,
             vault_patch_meta,
             usage_set_preference,
             vault_decide,

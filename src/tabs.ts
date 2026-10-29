@@ -4,7 +4,7 @@
 
 import type { VaultRef } from "./vaultlinks.ts";
 
-export type TabKind = "room" | "thread" | "note" | "journal" | "vault" | "areas" | "area" | "mail" | "calendar" | "messages";
+export type TabKind = "room" | "thread" | "note" | "journal" | "vault" | "areas" | "area" | "mail" | "calendar" | "messages" | "posts";
 /** `channel` on an `areas` (Uni) or `area` tab is the node's room: the one its chat pane shows. */
 export type Tab = { id: string; kind: TabKind; channel?: string; root?: string; note?: VaultRef; vault?: string; /** `area`: the node's note path (an `Areas/<Name>` area, or a project under one). */ path?: string; title: string;
   /** `area` (r15): the node has no room of its own and talks in an ancestor's (or Uni's). Unset until the shell knows. */
@@ -35,6 +35,8 @@ export function sameTarget(a: TabTarget, b: TabTarget): boolean {
   switch (a.kind) {
     case "journal": case "areas": case "mail": case "calendar": case "messages": return true;
     case "area": return a.path === b.path;
+    // T-335: the To post queue, all of it or one area's
+    case "posts": return (a.path ?? "") === (b.path ?? "");
     case "vault": return a.vault === b.vault;
     case "room": return a.channel === b.channel;
     case "thread": return a.channel === b.channel && a.root === b.root;
@@ -137,7 +139,7 @@ export function serializeTabs(s: Tabs): string {
   return JSON.stringify({ v: 1, tabs: s.tabs, active: s.active, recent: s.recent });
 }
 
-const KINDS: TabKind[] = ["room", "thread", "note", "journal", "vault", "areas", "area", "mail", "calendar", "messages"];
+const KINDS: TabKind[] = ["room", "thread", "note", "journal", "vault", "areas", "area", "mail", "calendar", "messages", "posts"];
 const str = (x: unknown): x is string => typeof x === "string" && x.length > 0;
 
 function validTab(x: unknown): Tab | null {
@@ -150,6 +152,7 @@ function validTab(x: unknown): Tab | null {
   if (kind === "mail") return { id: t.id, kind, title: "Mail" };
   if (kind === "calendar") return { id: t.id, kind, title: "Calendar" };
   if (kind === "messages") return { id: t.id, kind, title: "Messages" };
+  if (kind === "posts") return { id: t.id, kind, title: "To post", ...(typeof t.path === "string" && /^[^/.][^/]*(\/[^/.][^/]*)*$/.test(t.path) && t.path.length <= 300 ? { path: t.path } : {}) };
   // The areas tab is Uni's home (saved tabs from before were titled "Areas").
   if (kind === "areas") return { id: t.id, kind, title: "Uni", ...(str(t.channel) ? { channel: t.channel } : {}) };
   if (kind === "area") return typeof t.path === "string" && /^[^/.][^/]*(\/[^/.][^/]*)*$/.test(t.path) && t.path.length <= 300 ? { id: t.id, kind, path: t.path, title: title || t.path.split("/").pop()!, ...(str(t.channel) ? { channel: t.channel } : {}), ...(typeof t.borrowed === "boolean" ? { borrowed: t.borrowed } : {}) } : null;

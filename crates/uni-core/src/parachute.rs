@@ -942,7 +942,7 @@ pub fn validate_note_path(path: &str) -> Result<()> {
     Ok(())
 }
 
-fn check_vault_errors(v: &Value) -> Result<()> {
+pub(crate) fn check_vault_errors(v: &Value) -> Result<()> {
     if let Some((name, error)) = vault_errors(v).into_iter().next() {
         return Err(Error::Vault(format!("{name}: {error}")));
     }
@@ -1380,7 +1380,7 @@ fn has_task_tag(note: &Value) -> bool {
 }
 
 /// The single note in a query-notes-by-id response, or the vault's error.
-fn note_from(v: &Value, r: &str) -> Result<Value> {
+pub(crate) fn note_from(v: &Value, r: &str) -> Result<Value> {
     let note = notes_in(v)
         .into_iter()
         .next()
