@@ -195,13 +195,12 @@ pub fn check_droppable(note: &Value) -> Result<Post> {
     }
 }
 
-/// Whether the poster has claimed this approval: a version in the note's history in state `posting` naming it. A vault
-/// writer can reset the state afterwards, but can't erase the history (that takes an admin token), so the claim stays.
-pub fn claimed(versions: &[Value], approval_id: &str) -> bool {
-    !approval_id.is_empty()
-        && versions.iter().any(|v| {
-            v["metadata"]["state"].as_str() == Some("posting") && v["metadata"]["posting_approval"].as_str() == Some(approval_id)
-        })
+/// Whether the poster ever claimed this post: a version in the note's history in state `posting`. A vault writer can
+/// reset the state and blank the approval afterwards, but can't erase the history (that takes an admin token). A post
+/// the poster has claimed never becomes stoppable again (it goes to posted or failed), so any claim at all means the
+/// app must not say "Stopped", whatever the note says now.
+pub fn claimed(versions: &[Value]) -> bool {
+    versions.iter().any(|v| v["metadata"]["state"].as_str() == Some("posting"))
 }
 
 /// One page of a history read: the vault's own answer (`{versions, total}`), or the hub's fan-out of it
@@ -275,11 +274,8 @@ impl VaultClient {
     /// An approved post the poster has claimed can't be stopped: say so instead of showing "Stopped". Read at the
     /// revision the caller then writes against, so a claim can't land between this and that compare-and-set.
     async fn not_claimed(&self, vault: &str, note: &Value) -> Result<()> {
-        if Post::from_note(note).state != "approved" {
-            return Ok(());
-        }
         let id = note["id"].as_str().unwrap_or_default();
-        if claimed(&self.note_versions(vault, id).await?, &approval_id(note)) {
+        if claimed(&self.note_versions(vault, id).await?) {
             return Err(Error::Invalid(GOING_OUT.into()));
         }
         Ok(())
@@ -313,10 +309,9 @@ impl VaultClient {
         at_revision(&note, if_updated_at)?;
         let p = check_droppable(&note)?;
         self.not_claimed(vault, &note).await?;
-        let mut meta = json!({"dropped_at": iso(now)});
-        if p.state == "approved" {
-            meta["approval_event"] = json!(reject_event(keys, vault, id, now)?.as_json());
-        }
+        // always a signed reject, even for a post that looks proposed: a writer may have reset an approved one, and
+        // the reject in the history is what keeps any earlier approval from being restored and used
+        let meta = json!({"dropped_at": iso(now), "approval_event": reject_event(keys, vault, id, now)?.as_json()});
         let args = json!({"vault": vault, "id": id, "include_content": false, "if_updated_at": if_updated_at,
             "state_transition": {"field": "state", "from": p.state, "to": "dropped"}, "metadata": meta});
         let v = self.call("update-note", args).await?;
@@ -349,9 +344,8 @@ impl VaultClient {
         } else {
             json!({"feedback": text, "feedback_at": iso(now)})
         };
-        if p.state == "approved" {
-            meta["approval_event"] = json!(reject_event(keys, vault, id, now)?.as_json());
-        }
+        // always a signed reject (see post_drop): no earlier approval of this post can come back
+        meta["approval_event"] = json!(reject_event(keys, vault, id, now)?.as_json());
         let to = if p.account == "aaron" { "proposed" } else { "dropped" };
         let args = json!({"vault": vault, "id": id, "include_content": false, "if_updated_at": if_updated_at,
             "state_transition": {"field": "state", "from": p.state, "to": to}, "metadata": meta});
@@ -461,22 +455,21 @@ mod tests {
     }
 
     #[test]
-    fn a_claim_in_the_history_means_going_out_even_after_a_reset() {
+    fn any_claim_in_the_history_means_going_out_whatever_the_note_says_now() {
+        let older = json!({"version_ix": 0, "metadata": {"state": "proposed"}});
+        let claim = json!({"version_ix": 1, "metadata": {"state": "posting", "posting_approval": "a".repeat(64)}});
+        // a claim on another approval id, or with the current approval blanked, still counts
+        let blank = json!({"version_ix": 1, "metadata": {"state": "posting"}});
+        assert!(claimed(&[older.clone(), claim]));
+        assert!(claimed(&[older.clone(), blank]));
+        assert!(!claimed(&[older]));
+        assert!(!claimed(&[]));
         let keys = Keys::generate();
         let p = Post::from_note(&uni_post());
         let ev = approval_event(&keys, "uni", "01TESTNOTE", &p, 1_800_000_000, 1_800_000_000).unwrap();
         let mut n = uni_post();
-        n["metadata"]["state"] = json!("approved");
         n["metadata"]["approval_event"] = json!(ev.as_json());
-        let id = approval_id(&n);
-        assert_eq!(id, ev.id.to_hex());
-        let claim = json!({"version_ix": 1, "metadata": {"state": "posting", "posting_approval": id}});
-        let older = json!({"version_ix": 0, "metadata": {"state": "proposed"}});
-        assert!(claimed(&[older.clone(), claim], &id));
-        assert!(!claimed(&[older.clone()], &id));
-        let other = json!({"version_ix": 1, "metadata": {"state": "posting", "posting_approval": "f".repeat(64)}});
-        assert!(!claimed(&[older, other], &id));
-        assert!(!claimed(&[], ""));
+        assert_eq!(approval_id(&n), ev.id.to_hex());
     }
 
     #[test]

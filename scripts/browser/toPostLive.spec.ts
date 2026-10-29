@@ -16,7 +16,9 @@ const bridge = async (path: string, body: unknown) => {
 };
 
 test('Approve in the queue posts it on the Bluesky server; the takedown removes it', async ({ page }) => {
-  test.setTimeout(240_000);
+  // --live waits for a person's tap on the key card (up to 15 min); the loopback run's phone is simulated
+  const wait = Number(process.env.T335_POST_WAIT_MS ?? 150_000);
+  test.setTimeout(wait + 90_000);
   // the page's CSP keeps it from calling other ports, so the bridge is reached from the test process
   await page.exposeFunction('__t335', (cmd: string, args: unknown) => bridge('/invoke', { cmd, args }));
   await page.addInitScript(() => {
@@ -43,7 +45,7 @@ test('Approve in the queue posts it on the Bluesky server; the takedown removes 
   await expect(async () => {
     await page.getByRole('button', { name: 'Refresh', exact: true }).click();
     await expect(page.locator('.tp-card.tp-posted').filter({ hasText: TEXT }).locator('.tp-status')).toHaveText('Posted · open', { timeout: 3000 });
-  }).toPass({ timeout: 150_000, intervals: [2000] });
+  }).toPass({ timeout: wait, intervals: [2000] });
   const id = await page.evaluate((t) => (window as any).__calls.filter((c: any) => c.cmd === 'post_approve').map((c: any) => c.args.id)[0], TEXT);
   const posted = await bridge('/record', { id });
   expect(posted.text).toBe(TEXT);
