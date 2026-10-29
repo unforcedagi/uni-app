@@ -203,4 +203,24 @@ test.describe('a Hermes approval prompt, loudly', () => {
     await arrive(page, 'Chatter that makes the app read again.', ME);
     await expect(nextCard).toHaveClass(/cc-pending/);
   });
+  test('7. T-335: an older read that lands after a newer one failed leaves the state unknown', async ({ page }) => {
+    await boot(page);
+    const ref = await arrive(page, fx.prompts.two_answers_30min);
+    await unfold(page);
+    await rows(page).getByRole('button').click();
+    const card = page.locator(`.message[data-ref="${ref}"] .cc`);
+    await expect(card).toHaveClass(/cc-pending/);
+    // the next read is slow and succeeds; the one after it fails at once
+    await page.evaluate(() => { (window as any).__approvalsPlan = [{ ms: 1500, fail: false }, { ms: 0, fail: true }]; });
+    const n = await reads(page);
+    await arrive(page, 'First chatter.', ME);
+    await expect.poll(() => reads(page)).toBe(n + 1);
+    await arrive(page, 'Second chatter.', ME);
+    await expect.poll(() => reads(page)).toBe(n + 2);
+    await expect(card.getByRole('status')).toHaveText("Couldn't check whether it still waits");
+    // the slow, older read lands now: still unknown
+    await page.waitForTimeout(1800);
+    await expect(card.getByRole('status')).toHaveText("Couldn't check whether it still waits");
+    await expect(card).not.toHaveClass(/cc-pending/);
+  });
 });

@@ -90,7 +90,7 @@ export function parseOutcome(body: string): { n: number } | "all" | null {
  * `me`: the user's own messages are never prompts or outcomes. Within one second a prompt comes before an outcome (an outcome follows a prompt).
  */
 export function pendingApprovals(messages: readonly ApprovalSource[], now: number, me: string | null = null): Approval[] {
-  return [...walk(messages, me).waiting.values()].flat().filter((a) => a.deadline === null || a.deadline > now).sort((a, b) => a.ts - b.ts);
+  return readApprovals(messages, now, me).pending;
 }
 
 /** T-335: how a prompt ended, for its one line in the room. "gone": the gateway said nothing was waiting after all. */
@@ -107,9 +107,18 @@ const outcomeOf = (body: string): ApprovalOutcome["outcome"] => {
  * or one whose answer isn't among `messages`, is not in the map.
  */
 export function approvalOutcomes(messages: readonly ApprovalSource[], now: number, me: string | null = null): Map<string, ApprovalOutcome> {
+  return readApprovals(messages, now, me).ended;
+}
+
+/** Both at once, from one reading: the prompts waiting at `now` (`pendingApprovals`) and how the others ended (`approvalOutcomes`). */
+export function readApprovals(messages: readonly ApprovalSource[], now: number, me: string | null = null): { pending: Approval[]; ended: Map<string, ApprovalOutcome> } {
   const { waiting, settled } = walk(messages, me);
-  for (const a of [...waiting.values()].flat()) if (a.deadline !== null && a.deadline <= now) settled.set(a.ref, { outcome: "expired", at: a.deadline });
-  return settled;
+  const pending: Approval[] = [];
+  for (const a of [...waiting.values()].flat()) {
+    if (a.deadline === null || a.deadline > now) pending.push(a);
+    else settled.set(a.ref, { outcome: "expired", at: a.deadline });
+  }
+  return { pending: pending.sort((a, b) => a.ts - b.ts), ended: settled };
 }
 
 function walk(messages: readonly ApprovalSource[], me: string | null): { waiting: Map<string, Approval[]>; settled: Map<string, ApprovalOutcome> } {

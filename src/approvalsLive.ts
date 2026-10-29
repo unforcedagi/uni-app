@@ -4,7 +4,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { approvalOutcomes, commandLine, pendingApprovals, type Approval, type ApprovalOutcome, type ApprovalSource } from "./approvals";
+import { commandLine, readApprovals, type Approval, type ApprovalOutcome, type ApprovalSource } from "./approvals";
 import { notifyPlain } from "./desktopNotify";
 
 export type ApprovalsView = { list: Approval[]; /** opens the prompt's room at its message, the composer focused */ open: (a: Approval) => void; roomName: (id: string) => string | null };
@@ -29,10 +29,10 @@ export function useApprovals(opts: { identity: string | null; enabled: boolean; 
   const optsRef = useRef(opts); optsRef.current = opts;
   const seq = useRef(0);
   const applied = useRef(0);
+  /** the newest read that failed: an older read that lands after it doesn't make the state known again */
+  const failedAt = useRef(0);
   const decide = useCallback(() => {
-    const now = Date.now() / 1000;
-    const next = pendingApprovals(rows.current, now, optsRef.current.identity);
-    const out = approvalOutcomes(rows.current, now, optsRef.current.identity);
+    const { pending: next, ended: out } = readApprovals(rows.current, Date.now() / 1000, optsRef.current.identity);
     const key = (m: Map<string, ApprovalOutcome>) => [...m].map(([k, v]) => `${k} ${v.outcome} ${v.at}`).sort().join("\n");
     setEnded((was) => (was && key(was) === key(out) ? was : out));
     // the same prompts, unedited: keep the old list (an edited one has a new command or window, so it is replaced)
@@ -42,10 +42,10 @@ export function useApprovals(opts: { identity: string | null; enabled: boolean; 
   const read = useCallback(() => {
     const n = ++seq.current;
     // any answer newer than the one applied counts (never only the latest: under steady traffic that one may never land)
-    invoke<ApprovalSource[] | null>("approval_messages").then((r) => { if (n <= applied.current) return; applied.current = n; rows.current = r ?? []; setFailed(false); decide(); })
-      .catch(() => { if (n > applied.current) setFailed(true); });
+    invoke<ApprovalSource[] | null>("approval_messages").then((r) => { if (n <= applied.current) return; applied.current = n; rows.current = r ?? []; setFailed(failedAt.current > n); decide(); })
+      .catch(() => { failedAt.current = Math.max(failedAt.current, n); if (n > applied.current) setFailed(true); });
   }, [decide]);
-  useEffect(() => { if (opts.enabled) read(); else { rows.current = []; setList([]); setEnded(null); setFailed(false); } }, [opts.enabled, opts.identity, opts.synced, read]);
+  useEffect(() => { if (opts.enabled) read(); else { rows.current = []; failedAt.current = 0; setList([]); setEnded(null); setFailed(false); } }, [opts.enabled, opts.identity, opts.synced, read]);
   useEffect(() => {
     if (!opts.enabled) return;
     // at most one read each 150 ms, after the first message of a burst: steady traffic can't keep putting it off

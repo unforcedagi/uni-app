@@ -192,9 +192,6 @@ test.describe('published media in notes and decisions', () => {
     await arrive(page, `Your call on the garden walk cut. uni:${DEC}`);
     const card = page.locator('.sr-chat .message').filter({ hasText: 'Your call on the garden walk cut' }).getByRole('region', { name: 'Decision: Which cut of the garden walk?' });
     await expect(card).toBeVisible();
-    // T-335: the card is one short row; its clip and links are behind details
-    await expect(card.locator('video')).toHaveCount(0);
-    await card.getByRole('button', { name: 'details', exact: true }).click();
     await expect(card.locator('video')).toHaveCount(1);
     await expect(card.locator('figure.pub-video')).toHaveAttribute('data-url', VIDEO);
     await plays(card.locator('video'));

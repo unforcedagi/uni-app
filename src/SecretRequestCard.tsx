@@ -92,7 +92,7 @@ export function SecretRequestCard({ channel, requestRef, authorName, receipts, p
       after={<>{phase === "forget-sent" && receipt.state !== "forgotten" && <p className="secret-status">Asked {authorName} to forget it…</p>}{errorLine}</>} />;
   }
   if (expired && phase !== "sent") return <DoneCard className="secret-card" label={label} mark="⌛" status="Expired" what={request.label}
-    when={null} details={<><p className="secret-status warn">This request has expired. Ask {authorName} for a new one.</p>{facts}</>} />;
+    when={null} details={<><p className="secret-status warn">This request has expired. Ask {authorName} for a new one.</p>{facts}</>} after={errorLine} />;
 
   return <PendingCard className="secret-card" label={label} icon="🔐" what={request.label}
     meta={<>kept as <code>{request.store}</code>, {request.keep_days} days · </>}

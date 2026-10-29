@@ -1863,10 +1863,14 @@ function Conversations({ onForget }: { onForget: () => void }) {
     if (!a) return null;
     const ended = promptsEnded?.get(m.ref);
     if (ended) return <ApprovalPromptCard a={a} state={ended} />;
-    if (m.ts <= Date.now() / 1000 - APPROVAL_WINDOW_S) return <ApprovalPromptCard a={a} state="past" />;
+    const now = Date.now() / 1000;
+    // its own window is over, or it is older than the store's read: not waiting, however it ended
+    if (m.ts <= now - APPROVAL_WINDOW_S || (a.deadline !== null && a.deadline <= now)) return <ApprovalPromptCard a={a} state="past" />;
     if (promptsFailed) return <ApprovalPromptCard a={a} state="unchecked" />;
-    // not in the store's last read: one that has just come is read again within a moment
-    return <ApprovalPromptCard a={a} state={waitingRefs.has(m.ref) ? "waiting" : "checking"} />;
+    if (waitingRefs.has(m.ref)) return <ApprovalPromptCard a={a} state="waiting" />;
+    // not in the store's last read: one that has just come is read again within a moment; one a minute old that still isn't, the read
+    // doesn't reach (a room past its newest 1000), so its state is unknown
+    return <ApprovalPromptCard a={a} state={promptsEnded && m.ts < now - 60 ? "unchecked" : "checking"} />;
   };
   const endedKey = `${promptsEnded ? [...promptsEnded].map(([k, v]) => `${k}${v.outcome}`).join(" ") : "-"}${promptsFailed ? "!" : ""}`;
   const renderMessage = (m: Message, inThread: boolean, prev?: Message, newest = false) => {

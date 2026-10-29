@@ -267,6 +267,7 @@ p.decision-card.decision-loading { padding: 8px 12px; color: var(--muted); font-
 .cc-text { display: flex; flex-direction: column; flex: 1 1 180px; min-width: 0; }
 .cc-what { overflow: hidden; font-family: var(--sans); font-size: 14px; font-weight: 600; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
 .cc-meta { color: var(--muted); font-size: 12.5px; line-height: 1.4; overflow-wrap: anywhere; }
+.cc-meta code { font-family: var(--mono); font-size: 12px; }
 .cc-meta .sealed-badge { margin-left: 0; padding: 0 6px; font-size: 10px; }
 .cc-toggle { padding: 0; border: 0; background: none; color: var(--text-soft); font: inherit; font-size: 12.5px; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
 .cc-actions { flex: none; margin-left: auto; }

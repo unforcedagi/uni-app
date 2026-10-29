@@ -23,7 +23,7 @@ export function ApprovalPromptCard({ a, state }: { a: Approval; state: PromptSta
   if (state === "checking" || state === "unchecked") return <QuietCard className="approval-card" label={label} icon="⚠️" title={cmd}
     status={state === "checking" ? "Checking whether it still waits…" : "Couldn't check whether it still waits"} warn={state === "unchecked"} />;
   if (state === "past") return <DoneCard className="approval-card" label={label} mark="–" status="No longer waiting" what={<code className="cc-cmd">{cmd}</code>}
-    details={<>{details}<p className="approvals-note">Older than a day: the app no longer reads how it ended.</p></>} />;
+    details={<>{details}<p className="approvals-note">The app can't read how it ended.</p></>} />;
   if (state !== "waiting") {
     const [mark, status] = ENDED[state.outcome];
     return <DoneCard className="approval-card" label={label} mark={mark} status={status} what={<code className="cc-cmd">{cmd}</code>}

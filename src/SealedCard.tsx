@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { DoneCard, PendingCard, QuietCard } from "./CompactCard";
+import { clockTime as clock, DoneCard, PendingCard, QuietCard } from "./CompactCard";
 import {
   SEALED_CHANGED, childToken, jobFingerprint, payloadEntries, payloadField, plainError, releasesLine, shortText, span, windowText,
   type SealedCardView, type SealedRow,
@@ -14,8 +14,6 @@ import {
 // answered once (Rust refuses a second answer); a failed send keeps the decision and offers Try again.
 
 export const HOLD_MS = 1000;
-
-const clock = (ts: number) => new Date(ts * 1000).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
 
 function useNow(until: number | null): number {
   const [now, setNow] = useState(() => Date.now() / 1000);
@@ -172,13 +170,14 @@ export function SealedCard({ channel, reference }: { channel: string; reference:
     const cls = `sealed-card ${r.class}`;
     if (answered || expired) {
       const a = r.answer;
-      const status = expired ? "Expired" : `${a?.decision === "deny" ? "Denied" : "Approved"}${a?.sent ? "" : " · not sent yet"}`;
+      // an answer kept but never sent, then expired, says so: it never reached Uni
+      const status = expired ? (a ? `Expired · ${a.decision === "deny" ? "denial" : "approval"} not sent` : "Expired") : `${a?.decision === "deny" ? "Denied" : "Approved"}${a?.sent ? "" : " · not sent yet"}`;
       return <DoneCard className={`${cls} ${expired ? "sealed-greyed" : ""}`} label={label} mark={expired ? "⌛" : a?.decision === "deny" ? "✕" : "✓"}
         status={status} what={what} when={expired ? clock(r.expires) : a ? clock(a.at) : null} details={facts}
         after={<>{failure}{retry}</>} />;
     }
     return <PendingCard className={cls} label={label} icon="🔑" what={what}
-      meta={<><span className="cc-where">{r.credential}</span> · {span(r.ttl_s)}{r.class === "powerful" && <> · <Badge cls="powerful" /></>} · </>}
+      meta={<><span className="cc-where">{r.credential}</span> · <code className="cc-action">{r.action}</code> · {span(r.ttl_s)}{r.class === "powerful" && <> · <Badge cls="powerful" /></>} · </>}
       actions={<div className="sealed-actions">
         <button type="button" className="pairing-secondary sealed-deny" disabled={busy} onClick={() => void answer("deny", [r.rid])}>Deny</button>
         {r.class === "powerful"
@@ -208,7 +207,7 @@ export function SealedCard({ channel, reference }: { channel: string; reference:
   })}</ul>;
   if (answered || expired) {
     const approved = rows.filter((r) => r.answer?.decision === "approve").length;
-    const status = expired ? "Expired" : unsent.length ? `${approved ? "Approved" : "Denied"} · not sent yet` : approved ? `Approved ${approved} of ${rows.length}` : "Denied";
+    const status = expired ? (unsent.length ? `Expired · ${approved ? "approval" : "denial"} not sent` : "Expired") : unsent.length ? `${approved ? "Approved" : "Denied"} · not sent yet` : approved ? `Approved ${approved} of ${rows.length}` : "Denied";
     const at = Math.max(...rows.map((r) => r.answer?.at ?? 0));
     return <DoneCard className={`sealed-card sealed-morning routine ${expired ? "sealed-greyed" : ""}`} label={title} mark={expired ? "⌛" : approved ? "✓" : "✕"}
       status={status} what="Morning card" when={expired ? clock(expires ?? 0) : at ? clock(at) : null}

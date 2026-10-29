@@ -95,7 +95,7 @@ test('approve a powerful card: every field from the view, a click does nothing, 
   await expect(c.getByText('POWERFUL')).toBeVisible();
   // T-335: one row: what (the checked scope), where and how long, the buttons; the facts are closed
   await expect(c.locator('.cc-what')).toHaveText('Add an A record for demo.example.org');
-  await expect(c.locator('.cc-meta')).toHaveText(/^dns-zone · 10 min · POWERFUL · details$/);
+  await expect(c.locator('.cc-meta')).toHaveText(/^dns-zone · dns\.edit · 10 min · POWERFUL · details$/);
   await expect(c.locator('dl')).toHaveCount(0);
   await expect(c.getByRole('button', { name: 'details' })).toHaveAttribute('aria-expanded', 'false');
   // tapping the row itself answers nothing
@@ -172,7 +172,7 @@ test('a routine card is approved with a plain tap, with no powerful warning', as
   const r = row({ credential: 'pages-deploy', action: 'deploy.pages', class: 'routine', ttl_s: 3600, uses: 3, scope: 'Deploy the example site', payload: null });
   await boot(page, { messages: [msg('m1', single(), now() - 30)], cards: { m1: view([r]) } });
   const c = card(page, 'Approve use of pages-deploy');
-  await expect(c.locator('.cc-meta')).toHaveText('pages-deploy · 60 min · details');
+  await expect(c.locator('.cc-meta')).toHaveText('pages-deploy · deploy.pages · 60 min · details');
   await expect(c.locator('.sealed-badge')).toHaveCount(0);
   await expect(c.locator('.sealed-releases')).toHaveCount(0);
   await details(c);
@@ -311,7 +311,8 @@ test('a send that failed and a card that then expired: Expired, and no Try again
   await expect(c.getByText('Approved · not sent yet')).toBeVisible();
   await expect(c.getByRole('button', { name: 'Try again' })).toBeVisible();
   await page.clock.fastForward('03:00');
-  await expect(c.getByText('Expired', { exact: true })).toBeVisible();
+  // T-335: the line says the approval never reached Uni
+  await expect(c.getByRole('status')).toHaveText('Expired · approval not sent');
   await expect(c.getByRole('button', { name: 'Try again' })).toHaveCount(0);
 });
 

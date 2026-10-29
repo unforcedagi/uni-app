@@ -161,11 +161,12 @@ export function DecisionCard({ id, vault, post }: Props) {
       </>} />;
   }
 
-  // T-335: open, one short row: the question, its task and Context, the options under it. Its media and notes are behind details; so is the
-  // words field, which shows anyway once it holds words (they go with a tap, so they are never out of sight)
+  // T-335: open, one short row: the question, its task and Context, then its media (T-260: what it's about is seen) and the options. Its
+  // notes are behind details; so is the words field, which shows anyway once it holds words (they go with a tap, so never out of sight)
   return <PendingCard className="decision-card" label={`Decision: ${d.question}`} icon="❓" what={<span className="decision-q">{d.question}</span>}
     meta={<>Decision{d.task ? ` · ${d.task}` : ""}{context && <> · {context}</>} · </>}
     below={(open) => <>
+      {media}
       {d.options.length >= 2
         ? <div className="decision-options" role="group" aria-label={`Pick one: ${d.question}`}>
             {d.options.map((o) => <button key={o} type="button" className={`decision-opt ${o === d.dflt ? "dflt" : ""}`}
@@ -179,7 +180,7 @@ export function DecisionCard({ id, vault, post }: Props) {
       {phase !== "untold" && error && <p className="decision-note warn" role="alert">{error}</p>}
       {told}
     </>}
-    details={<>{media}{notes}</>} />;
+    details={notes} />;
 }
 
 /**
