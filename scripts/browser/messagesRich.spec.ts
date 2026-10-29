@@ -396,3 +396,22 @@ test('T-335: a video in a conversation opens full screen and comes back where it
   await expect.poll(() => inline.evaluate((v: HTMLVideoElement) => v.currentTime)).toBeGreaterThan(3.9);
   expect(await inline.evaluate((v: HTMLVideoElement) => v.paused)).toBe(true);
 });
+
+test('T-335 review: a video played to its end full screen is back at its start in the message, as when it ends there', async ({ page }) => {
+  await boot(page, false);
+  const clip = readFileSync(fileURLToPath(new URL('./fixtures/t258-clip.webm', import.meta.url))).toString('base64');
+  await page.evaluate((b64) => { (window as any).__clip = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)).buffer; }, clip);
+  const video = msg(page, '$e11');
+  await video.scrollIntoViewIfNeeded();
+  await video.getByRole('button', { name: /^Play video/ }).click();
+  const inline = video.locator('video');
+  await expect.poll(() => inline.evaluate((v: HTMLVideoElement) => !v.paused)).toBe(true);
+  await video.getByRole('button', { name: 'Full screen: walk.webm' }).click();
+  const player = page.getByRole('dialog', { name: 'walk.webm, full screen' }).locator('video');
+  await expect.poll(() => player.evaluate((v: HTMLVideoElement) => v.readyState)).toBeGreaterThanOrEqual(1);
+  await player.evaluate(async (v: HTMLVideoElement) => { v.muted = true; v.currentTime = Math.max(0, v.duration - 0.4); await v.play(); });
+  await expect.poll(() => player.evaluate((v: HTMLVideoElement) => v.ended)).toBe(true);
+  await page.keyboard.press('Escape');
+  await expect.poll(() => inline.evaluate((v: HTMLVideoElement) => v.currentTime)).toBeLessThan(0.1);
+  expect(await inline.evaluate((v: HTMLVideoElement) => v.paused)).toBe(true);
+});

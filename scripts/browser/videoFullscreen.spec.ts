@@ -48,8 +48,10 @@ async function open(page: Page) {
           case 'journal_config': return { hub: 'test' };
           case 'refresh': return { pubkey: 'a'.repeat(64), total_items: 1, channel_errors: {}, truncated_channels: [] };
           case 'media_stream': return { sha: MP4, url: `${location.origin}/__t258/clip.webm` };
-          // T-335: the desktop window's full screen (the test may say it is full screen already)
-          case 'plugin:window|is_fullscreen': return !!w.windowFull;
+          // T-335: the desktop window's full screen, as state (the test may say it is full screen already, or make the
+          // native calls slow with `ipcDelay`)
+          case 'plugin:window|is_fullscreen': if (w.ipcDelay) await new Promise((r) => setTimeout(r, w.ipcDelay)); return !!w.windowFull;
+          case 'plugin:window|set_fullscreen': if (w.ipcDelay) await new Promise((r) => setTimeout(r, w.ipcDelay)); w.windowFull = !!args.value; return null;
           // Android Back: the app registers a handler; the test calls it as the system would.
           case 'plugin:app|register_listener': if (args?.event === 'back-button') w.backs.push(args.handler); return 1;
           default: return null;
@@ -171,6 +173,7 @@ test('Android Back closes the full-screen video and stays in the room', async ({
 // T-335: a Mac had no full screen for a video. Where the webview allows it, the layer takes the screen itself; where it
 // refuses (WKWebView without `fullScreenEnabled`), the window goes full screen and comes back; Android is never asked.
 const android = () => /Android/i.test(test.info().project.use.userAgent ?? '');
+const windowState = (page: Page) => page.evaluate(() => !!(window as any).windowFull);
 const windowCalls = (page: Page) => page.evaluate(() => (window as any).calls.filter((c: any) => c.cmd === 'plugin:window|set_fullscreen').map((c: any) => c.args.value));
 
 test('T-335: on desktop the full-screen video takes the screen, and leaving it closes the layer', async ({ page }) => {
@@ -195,10 +198,61 @@ test('T-335: where the webview refuses full screen, the window goes full screen 
   await press(page.getByRole('button', { name: 'Full screen: garden walk.webm' }));
   await expect(layer(page)).toBeVisible();
   await expect.poll(() => windowCalls(page)).toEqual([true]);
+  expect(await windowState(page)).toBe(true);
   expect(await page.evaluate(() => document.fullscreenElement)).toBeNull();
   await page.keyboard.press('Escape');
   await expect(layer(page)).toBeHidden();
   await expect.poll(() => windowCalls(page)).toEqual([true, false]);
+  expect(await windowState(page)).toBe(false);
+});
+
+test('T-335 Codex r1: closing one full-screen video and opening the next keeps the window full screen, slow native calls or not', async ({ page }) => {
+  test.skip(android(), 'Android: the layer is the full screen');
+  await page.addInitScript(() => { Object.defineProperty(Document.prototype, 'fullscreenEnabled', { get: () => false }); });
+  await open(page);
+  await page.evaluate(() => { (window as any).ipcDelay = 150; });
+  const btn = page.getByRole('button', { name: 'Full screen: garden walk.webm' });
+  await press(btn);
+  await expect(layer(page)).toBeVisible();
+  // out and straight back in, while the first one's calls are still on their way
+  await page.keyboard.press('Escape');
+  await expect(layer(page)).toBeHidden();
+  await press(btn);
+  await expect(layer(page)).toBeVisible();
+  await page.waitForTimeout(1200);
+  expect(await windowState(page)).toBe(true);
+  await expect(layer(page)).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(layer(page)).toBeHidden();
+  await expect.poll(() => windowState(page)).toBe(false);
+});
+
+test('T-335 Codex r1: leaving the window full screen the platform\'s way (a Mac\'s green button) closes the layer', async ({ page }) => {
+  test.skip(android(), 'Android: the layer is the full screen');
+  await page.addInitScript(() => { Object.defineProperty(Document.prototype, 'fullscreenEnabled', { get: () => false }); });
+  await open(page);
+  await press(page.getByRole('button', { name: 'Full screen: garden walk.webm' }));
+  await expect.poll(() => windowState(page)).toBe(true);
+  await page.waitForTimeout(100);
+  // the window comes out of full screen by itself, and resizes
+  await page.evaluate(() => { (window as any).windowFull = false; window.dispatchEvent(new Event('resize')); });
+  await expect(layer(page)).toBeHidden();
+  await expect(page.locator('video.attachment-video')).toBeVisible();
+  expect(await page.evaluate(() => (document.getElementById('root') as HTMLElement).inert)).toBe(false);
+  // nothing to give back: it is already out
+  await page.waitForTimeout(300);
+  expect(await windowCalls(page)).toEqual([true]);
+});
+
+test('T-335 Codex r1: a resize while the window stays full screen leaves the layer up', async ({ page }) => {
+  test.skip(android(), 'Android: the layer is the full screen');
+  await page.addInitScript(() => { Object.defineProperty(Document.prototype, 'fullscreenEnabled', { get: () => false }); });
+  await open(page);
+  await press(page.getByRole('button', { name: 'Full screen: garden walk.webm' }));
+  await expect.poll(() => windowState(page)).toBe(true);
+  await page.evaluate(() => window.dispatchEvent(new Event('resize')));
+  await page.waitForTimeout(800);
+  await expect(layer(page)).toBeVisible();
 });
 
 test('T-335: a window already full screen is left full screen when the video closes', async ({ page }) => {
@@ -213,6 +267,7 @@ test('T-335: a window already full screen is left full screen when the video clo
   await expect(layer(page)).toBeHidden();
   await page.waitForTimeout(200);
   expect(await windowCalls(page)).toEqual([]);
+  expect(await windowState(page)).toBe(true);
 });
 
 test('T-335: on Android the layer stays up (its WebView would enter and leave full screen at once)', async ({ page }) => {

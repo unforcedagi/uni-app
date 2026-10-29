@@ -351,8 +351,9 @@ export function VideoFull({ src, name, at, playing, events, onClose }: {
     const wasInert = root?.inert ?? false;
     if (root) root.inert = true;
     el?.querySelector<HTMLButtonElement>(".lightbox-close")?.focus();
-    let gone = false, ownWindow = false;
-    const takeWindow = () => void windowFull(true).then((took) => { ownWindow = took; if (gone && took) void windowFull(false); });
+    // this layer's claim on the window's full screen (one object per run, so a stale run can't give back a newer one's)
+    const me = {};
+    const takeWindow = () => holdWindow(me, () => closeRef.current());
     if (!android()) {
       if (el && document.fullscreenEnabled && el.requestFullscreen) void el.requestFullscreen().catch(takeWindow);
       else takeWindow();
@@ -371,8 +372,7 @@ export function VideoFull({ src, name, at, playing, events, onClose }: {
     const release = holdTop();
     return () => {
       release();
-      gone = true;
-      if (ownWindow) void windowFull(false);
+      releaseWindow(me);
       window.removeEventListener("keydown", key, true); document.removeEventListener("fullscreenchange", left); setModalOpen(-1);
       if (root) root.inert = wasInert;
       if (opener?.isConnected) opener.focus();
@@ -391,15 +391,51 @@ export function VideoFull({ src, name, at, playing, events, onClose }: {
 
 const android = () => /Android/i.test(navigator.userAgent);
 
-/** The desktop window in or out of full screen (T-335); true when this call changed it. A window that was already full
- * screen is left alone (not ours to undo); outside Tauri, or refused, nothing changes. */
-async function windowFull(on: boolean): Promise<boolean> {
-  try {
+/**
+ * The desktop window's full screen while a video layer holds it (T-335), for a webview that refuses its own. One holder at
+ * a time, and every change waits for the one before, so closing one layer and opening the next (or an effect run twice)
+ * never gives the window back under the open one. A window that was full screen already is left as it was. Leaving it
+ * the platform's way (a Mac's green button) closes the layer; tao says so only once the move ends, hence the wait.
+ */
+let windowHolder: object | null = null;
+let windowOurs = false;
+let windowQueue: Promise<void> = Promise.resolve();
+/** Each holder's resize watch, stopped when it lets go. */
+const windowWatch = new Map<object, () => void>();
+const windowStep = (step: () => Promise<void>) => { windowQueue = windowQueue.then(step).catch(() => {}); };
+
+function holdWindow(who: object, onLeft: () => void) {
+  windowHolder = who;
+  windowStep(async () => {
+    if (windowHolder !== who || windowOurs) return;
     const w = getCurrentWindow();
-    if (on && await w.isFullscreen()) return false;
-    await w.setFullscreen(on);
-    return true;
-  } catch { return false; }
+    if (await w.isFullscreen()) return;
+    await w.setFullscreen(true);
+    windowOurs = true;
+  });
+  let settle = 0;
+  const resized = () => {
+    clearTimeout(settle);
+    settle = window.setTimeout(() => windowStep(async () => {
+      if (windowHolder !== who || !windowOurs || await getCurrentWindow().isFullscreen()) return;
+      windowOurs = false;
+      onLeft();
+    }), 400);
+  };
+  window.addEventListener("resize", resized);
+  windowWatch.set(who, () => { clearTimeout(settle); window.removeEventListener("resize", resized); });
+}
+
+function releaseWindow(who: object) {
+  windowWatch.get(who)?.();
+  windowWatch.delete(who);
+  if (windowHolder !== who) return;
+  windowHolder = null;
+  windowStep(async () => {
+    if (windowHolder || !windowOurs) return;
+    windowOurs = false;
+    await getCurrentWindow().setFullscreen(false);
+  });
 }
 
 /** How many full-window layers are open; App lets Android Back close the top one. */

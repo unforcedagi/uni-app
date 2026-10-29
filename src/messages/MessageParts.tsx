@@ -183,6 +183,7 @@ function Video({ roomId, eventId, media }: { roomId: string; eventId: string; me
   const [ref, onScreen] = useOnScreen<HTMLDivElement>();
   const [playing, setPlaying] = useState(false);
   const [full, setFull] = useState<{ at: number; playing: boolean } | null>(null);
+  const [broken, setBroken] = useState(false);
   // held while it plays, is on screen or is full screen; paused off screen it's let go, and comes back paused where it was
   const { url, problem, retry } = useMediaUrl(roomId, eventId, media.mime, want && (onScreen || playing || !!full));
   /** Play once it's here: only right after a tap, never because it scrolled back into view. */
@@ -199,15 +200,24 @@ function Video({ roomId, eventId, media }: { roomId: string; eventId: string; me
     v?.pause();
     setFull({ at: v?.currentTime ?? left.current, playing: was });
   };
-  const closeFull = (at: number) => { setFull(null); left.current = at; requestAnimationFrame(() => { if (inline.current) inline.current.currentTime = at; }); };
+  /** Played to its end full screen: back here it starts over, as it does when it ends here. */
+  const endedFull = useRef(false);
+  const closeFull = (at: number) => {
+    const to = endedFull.current ? 0 : at;
+    endedFull.current = false;
+    setFull(null); left.current = to; requestAnimationFrame(() => { if (inline.current) inline.current.currentTime = to; });
+  };
+  // a clip this device can't play says so under it (full screen closes with it)
+  const failed = () => { setFull(null); setPlaying(false); setBroken(true); };
   return <div ref={ref} className="msgs-video-box">{url ? <>
     <video ref={inline} className="msgs-video" src={url} controls playsInline width={box.width}
       onLoadedMetadata={(e) => { const v = e.currentTarget; if (left.current > 0) v.currentTime = left.current; if (start.current) { start.current = false; playOnly(v); void v.play().catch(() => {}); } }}
       onTimeUpdate={(e) => { left.current = e.currentTarget.currentTime; }}
-      onPlay={(e) => { playOnly(e.currentTarget); setPlaying(true); }} onPause={() => setPlaying(false)} onEnded={() => { setPlaying(false); left.current = 0; }} />
-    <button type="button" className="note-action msgs-video-full" aria-label={`Full screen: ${name}`} onClick={openFull}>⛶ Full screen</button>
+      onPlay={(e) => { playOnly(e.currentTarget); setPlaying(true); setBroken(false); }} onPause={() => setPlaying(false)} onEnded={() => { setPlaying(false); left.current = 0; }} onError={failed} />
+    {broken ? <p className="msgs-media-problem" role="status">This device can't play this video.</p>
+      : <button type="button" className="note-action msgs-video-full" aria-label={`Full screen: ${name}`} onClick={openFull}>⛶ Full screen</button>}
     {full && <VideoFull src={url} name={name} at={full.at} playing={full.playing} onClose={closeFull}
-      events={{ onPlay: (e) => playOnly(e.currentTarget), onError: () => setFull(null) }} />}
+      events={{ onPlay: (e) => { endedFull.current = false; playOnly(e.currentTarget); }, onEnded: () => { endedFull.current = true; }, onError: failed }} />}
   </>
   : <button type="button" className="msgs-video-wait" style={{ width: box.width, height: url ? undefined : box.height }} disabled={want && onScreen && !problem} onClick={() => { start.current = true; setWant(true); if (problem) retry(); }}>
     <span aria-hidden="true">▶</span> {problem ? "Couldn't load the video. Try again" : want && onScreen ? "Loading the video…" : `Play video${media.duration_ms ? `, ${clock(media.duration_ms / 1000)}` : ""}${media.size ? ` (${sizeWords(media.size)})` : ""}`}
