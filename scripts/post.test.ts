@@ -1,6 +1,6 @@
 // T-335: the To post queue's pure rules. Run: node --experimental-strip-types scripts/post.test.ts
 import assert from "node:assert/strict";
-import { blocked, editMode, parsePost, parsePosts, queue, reviewCount, scheduleAt, voice, waitingLine, where } from "../src/post/postCore.ts";
+import { blocked, editMode, parsePost, parsePosts, queue, reviewCount, scheduleAt, voice, waitingLine, where, xWeight } from "../src/post/postCore.ts";
 
 const note = (id: string, meta: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({
   id, path: `Posts/${id}`, updatedAt: `2026-10-29T10:00:0${id.length % 10}.000Z`, tags: ["post"],
@@ -29,7 +29,15 @@ assert.match(blocked(parsePost(note("a", { account: "aaron", provenance: "aaron-
 // a Bluesky post with its X copy: the card names both, and the text must fit both
 assert.equal(where(parsePost(note("a", { crosspost: ["x"] }))!), "Bluesky + X · Uni's account");
 assert.equal(where(parsePost(note("a", {}))!), "Bluesky · Uni's account");
-assert.match(blocked(parsePost(note("a", { crosspost: ["x"], body: "x".repeat(281) }))!)!, /281 characters; Bluesky \+ X allows 280/);
+assert.match(blocked(parsePost(note("a", { crosspost: ["x"], body: "x".repeat(281) }))!)!, /X counts this as 281 characters .*X allows 280/);
+// X's own count, pinned with the poster (uni-ops X_WEIGHT_VECTOR) and the Rust: links 23, emoji and CJK 2
+const v = `Grow 🌱 slowly, 漢字 too: https://example.com/${"a".repeat(40)} é`;
+assert.deepEqual([[...v].length, xWeight(v)], [85, 51]);
+assert.equal(xWeight("🌱".repeat(150)), 300);
+assert.equal(xWeight("http:// plain"), 13);
+assert.match(blocked(parsePost(note("a", { crosspost: ["x"], body: "🌱".repeat(150) }))!)!, /X counts this as 300/);
+assert.equal(blocked(parsePost(note("a", { body: "🌱".repeat(150) }))!), null);
+assert.equal(blocked(parsePost(note("a", { crosspost: ["x"], body: `${"y".repeat(200)} https://example.com/${"a".repeat(70)}` }))!), null);
 assert.equal(blocked(parsePost(note("a", { crosspost: ["x"], body: "x".repeat(280) }))!), null);
 for (const [cp, platform] of [[["bluesky"], "x"], [["mastodon"], "bluesky"], [["x", "x"], "bluesky"], ["x", "bluesky"]] as const) {
   assert.match(blocked(parsePost(note("a", { crosspost: cp, platform }))!)!, /only to X/, `${cp} on ${platform}`);

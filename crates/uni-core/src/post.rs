@@ -64,6 +64,48 @@ pub fn max_chars(platform: &str) -> usize {
     }
 }
 
+/// X's weighted count, as the poster counts it (uni-ops post/postcore.py `length`): every http(s) link is 23, code
+/// points in X's light ranges are 1, everything else (most emoji, CJK) is 2.
+pub fn x_weight(body: &str) -> usize {
+    const LIGHT: [(u32, u32); 4] = [(0, 4351), (8192, 8205), (8208, 8223), (8242, 8247)];
+    let w = |s: &str| s.chars().map(|c| if LIGHT.iter().any(|&(a, b)| (a..=b).contains(&(c as u32))) { 1 } else { 2 }).sum::<usize>();
+    // the poster's link pattern: https?://[^\s<>"“”]+
+    let stop = |c: char| c.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&c) || "<>\"“”".contains(c);
+    let (mut n, mut rest) = (0, body);
+    while let Some(p) = [rest.find("http://"), rest.find("https://")].into_iter().flatten().min() {
+        let scheme = if rest[p..].starts_with("https://") { 8 } else { 7 };
+        let tail = &rest[p + scheme..];
+        let end = tail.find(stop).unwrap_or(tail.len());
+        if end == 0 {
+            n += w(&rest[..p + scheme]);
+        } else {
+            n += w(&rest[..p]) + 23;
+        }
+        rest = &tail[end..];
+    }
+    n + w(rest)
+}
+
+/// The text's length as `target` counts it: code points (never fewer than Bluesky's graphemes), or X's weighted count.
+pub fn count(target: &str, body: &str) -> usize {
+    if target == "x" { x_weight(body) } else { body.chars().count() }
+}
+
+/// The text fits every place the post goes, each by its own count.
+fn fits(p: &Post, body: &str) -> Result<()> {
+    for t in p.targets() {
+        let (n, limit) = (count(t, body), max_chars(t));
+        if n > limit {
+            return Err(Error::Invalid(if t == "x" {
+                format!("X counts this as {n} characters (a link is 23, emoji and CJK 2); X allows {limit}")
+            } else {
+                format!("{n} characters; {t} allows {limit}")
+            }));
+        }
+    }
+    Ok(())
+}
+
 /// A post note's fields as stored (missing strings are empty).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Post {
@@ -107,10 +149,6 @@ impl Post {
         std::iter::once(self.platform.as_str()).chain(self.crosspost.iter().flatten().map(|t| t.as_str())).collect()
     }
 
-    /// The tightest length limit of every place it goes, in code points (the poster also weighs X's count).
-    pub fn limit(&self) -> usize {
-        self.targets().into_iter().map(max_chars).min().unwrap_or(0)
-    }
 }
 
 /// sha256 over the post as it would go out (`media` are the attachments' sha256s, in order).
@@ -223,10 +261,7 @@ pub fn check_approvable(note: &Value, if_updated_at: &str) -> Result<Post> {
     if p.body.trim().is_empty() {
         return Err(Error::Invalid("nothing to post".into()));
     }
-    let n = p.body.chars().count();
-    if n > p.limit() {
-        return Err(Error::Invalid(format!("{n} characters; {} allows {}", p.targets().join(" + "), p.limit())));
-    }
+    fits(&p, &p.body)?;
     if !p.media.is_empty() {
         return Err(Error::Invalid("posts with media can't go out yet".into()));
     }
@@ -413,9 +448,7 @@ impl VaultClient {
             return Err(Error::Invalid("write 1 to 4000 characters".into()));
         }
         let mut meta = if p.account == "aaron" {
-            if text.chars().count() > p.limit() {
-                return Err(Error::Invalid(format!("{} allows {} characters", p.targets().join(" + "), p.limit())));
-            }
+            fits(&p, text)?;
             json!({"body": text, "provenance": "aaron-typed", "edited_at": iso(now), "digest": null, "approval_event": null})
         } else {
             json!({"feedback": text, "feedback_at": iso(now)})
@@ -457,6 +490,15 @@ mod tests {
         assert_eq!(digest("uni", "01TESTNOTE", &p, &[]), CROSS_VECTOR);
     }
 
+    /// Pinned in uni-ops tests/test_uni_post_live.py (X_WEIGHT_VECTOR) and scripts/post.test.ts: X's count of one text.
+    #[test]
+    fn x_counts_links_as_23_and_emoji_and_cjk_as_2_like_the_poster() {
+        let v = format!("Grow 🌱 slowly, 漢字 too: https://example.com/{} é", "a".repeat(40));
+        assert_eq!((v.chars().count(), x_weight(&v)), (85, 51));
+        assert_eq!(x_weight(&"🌱".repeat(150)), 300);
+        assert_eq!(x_weight("http:// plain"), 13);
+    }
+
     /// Pinned in uni-ops tests/test_uni_post_live.py (CROSS_VECTOR_X): a Bluesky post with its X copy.
     const CROSS_VECTOR_X: &str = "54b42895903105b7d991174f26775d4d4b82aaa0db1043f80d45f62bd46c67c7";
 
@@ -482,8 +524,13 @@ mod tests {
         let base = |cp: Value, platform: &str, body: String| note(json!({"state": "proposed", "account": "uni",
             "platform": platform, "provenance": "uni", "piece": "", "body": body, "media": [], "crosspost": cp}));
         let e = check_approvable(&base(json!(["x"]), "bluesky", "y".repeat(281)), "2026-10-29T10:00:00.000Z").unwrap_err();
-        assert!(e.to_string().contains("bluesky + x allows 280"), "{e}");
+        assert!(e.to_string().contains("X allows 280"), "{e}");
         assert!(check_approvable(&base(json!(["x"]), "bluesky", "y".repeat(280)), "2026-10-29T10:00:00.000Z").is_ok());
+        // 150 emoji: 150 code points for Bluesky, 300 for X; a long link is 23 for X, so 290 code points can fit both
+        assert!(check_approvable(&base(json!(["x"]), "bluesky", "🌱".repeat(150)), "2026-10-29T10:00:00.000Z").is_err());
+        assert!(check_approvable(&base(json!([]), "bluesky", "🌱".repeat(150)), "2026-10-29T10:00:00.000Z").is_ok());
+        let long_link = format!("{} https://example.com/{}", "y".repeat(200), "a".repeat(70));
+        assert!(check_approvable(&base(json!(["x"]), "bluesky", long_link), "2026-10-29T10:00:00.000Z").is_ok());
         for (cp, platform) in [(json!(["bluesky"]), "x"), (json!(["mastodon"]), "bluesky"), (json!(["x", "x"]), "bluesky"), (json!("x"), "bluesky"), (json!([1]), "bluesky")] {
             assert!(check_approvable(&base(cp.clone(), platform, "hi".into()), "2026-10-29T10:00:00.000Z").is_err(), "{cp} on {platform}");
         }

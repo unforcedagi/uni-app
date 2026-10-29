@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { splitLinks } from "../areas/linkText";
-import { blocked, editMode, limit as limitOf, parsePosts, PLATFORM_LABEL, queue, scheduleAt, targets, voice, waitingLine, where, type PostCard } from "./postCore";
+import { blocked, counts, editMode, parsePosts, PLATFORM_LABEL, queue, scheduleAt, targets, voice, waitingLine, where, type PostCard } from "./postCore";
 import "./ToPost.css";
 
 const PAGE = 200;
@@ -34,7 +34,8 @@ function Text({ text }: { text: string }) {
 
 /** The post as it will look on the platform: who, the text with its links, and the count against the limit. */
 function Preview({ p }: { p: PostCard }) {
-  const n = [...p.body].length, limit = limitOf(p);
+  // the count that binds hardest of every place it goes (X weighs links, emoji and CJK its own way)
+  const { n, limit } = counts(p).reduce((a, b) => (b.n / b.limit > a.n / a.limit ? b : a));
   return <div className={`tp-preview tp-on-${p.platform}`}>
     <div className="tp-who"><span className="tp-avatar" aria-hidden="true">{p.account === "aaron" ? "A" : "U"}</span>
       <span><strong>{p.account === "aaron" ? "You" : "Uni"}</strong><small> · {targets(p).map((t) => PLATFORM_LABEL[t] ?? t).join(" + ")}</small></span></div>

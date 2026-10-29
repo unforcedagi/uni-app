@@ -55,9 +55,22 @@ export function targets(p: PostCard): string[] {
   return [p.platform, ...(p.crosspost ?? [])];
 }
 
-/** The tightest limit of every place it goes (code points; the poster also weighs X's count). */
-export function limit(p: PostCard): number {
-  return Math.min(...targets(p).map((t) => LIMIT[t] ?? 0));
+const X_LIGHT: [number, number][] = [[0, 4351], [8192, 8205], [8208, 8223], [8242, 8247]];
+const weigh = (s: string) => [...s].reduce((n, c) => n + (X_LIGHT.some(([a, b]) => c.codePointAt(0)! >= a && c.codePointAt(0)! <= b) ? 1 : 2), 0);
+
+/** X's weighted count, as the poster counts it: every http(s) link is 23, most emoji and CJK are 2. */
+export function xWeight(body: string): number {
+  let n = 0, last = 0;
+  for (const m of body.matchAll(/https?:\/\/[^\s\x1c-\x1f<>"“”]+/gu)) {
+    n += weigh(body.slice(last, m.index)) + 23;
+    last = m.index! + m[0].length;
+  }
+  return n + weigh(body.slice(last));
+}
+
+/** How each place it goes counts the text, against its limit (code points; X's own weighting). */
+export function counts(p: PostCard): { target: string; n: number; limit: number }[] {
+  return targets(p).map((t) => ({ target: t, n: t === "x" ? xWeight(p.body) : [...p.body].length, limit: LIMIT[t] ?? 0 }));
 }
 
 /** Where it goes, in words: "Bluesky + X · your account". */
@@ -77,8 +90,11 @@ export function blocked(p: PostCard): string | null {
   const cp = p.crosspost;
   if (!cp || cp.some((t, i) => p.platform !== "bluesky" || t !== "x" || cp.indexOf(t) !== i)) return "Only a Bluesky post can carry a copy, and only to X.";
   if (!p.body.trim()) return "There's nothing to post.";
-  const n = [...p.body].length;
-  if (n > limit(p)) return `${n} characters; ${targets(p).map((t) => PLATFORM_LABEL[t] ?? t).join(" + ")} allows ${limit(p)}.`;
+  for (const c of counts(p)) {
+    if (c.n > c.limit) return c.target === "x"
+      ? `X counts this as ${c.n} characters (a link is 23, emoji and CJK 2); X allows ${c.limit}.`
+      : `${c.n} characters; ${PLATFORM_LABEL[c.target] ?? c.target} allows ${c.limit}.`;
+  }
   if (p.media.length) return "Posts with pictures or video can't go out yet.";
   if (p.provenance === "aaron-excerpt" && !p.piece) return "An excerpt must link the piece it quotes.";
   return null;
