@@ -195,6 +195,9 @@ test.describe('a Hermes approval prompt, loudly', () => {
     const nextCard = page.locator(`.message[data-ref="${next}"] .cc`);
     await expect(nextCard.getByRole('status')).toHaveText("Couldn't check whether it still waits");
     await expect(nextCard).not.toHaveClass(/cc-pending/);
+    // and the one the list still holds as waiting may have been answered since: unknown too, not waiting
+    await expect(page.locator(`.message[data-ref="${fresh}"] .cc`).getByRole('status')).toHaveText("Couldn't check whether it still waits");
+    await expect(page.locator(`.message[data-ref="${fresh}"] .cc`)).not.toHaveClass(/cc-pending/);
     // read again: it waits
     await page.evaluate(() => { (window as any).__approvalsFail = false; });
     await arrive(page, 'Chatter that makes the app read again.', ME);

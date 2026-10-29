@@ -1854,19 +1854,19 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const waitingKey = approvals.map((a) => a.ref).join(" ");
   /**
    * T-335: a Hermes approval prompt drawn as its short card. Its state comes from the same store read as Needs you (every room and thread),
-   * never from the loaded timeline alone (a room's list has no thread replies). Older than that read: no longer waiting, outcome unknown
-   * (Needs you doesn't list it either). Before the store has answered, or when it couldn't be read: unknown, never drawn as waiting.
-   * Null: not a prompt.
+   * never from the loaded timeline alone (a room's list has no thread replies). An outcome once read stands. Older than that read: no
+   * longer waiting, outcome unknown (Needs you doesn't list it either). Before the store has answered, or when its last read failed (an
+   * answer may have come since the list was read): unknown, never drawn as waiting. Null: not a prompt.
    */
   const promptView = (m: Message) => {
     const a = m.author === identity ? null : parseApproval(m);
     if (!a) return null;
-    if (waitingRefs.has(m.ref)) return <ApprovalPromptCard a={a} state="waiting" />;
     const ended = promptsEnded?.get(m.ref);
     if (ended) return <ApprovalPromptCard a={a} state={ended} />;
     if (m.ts <= Date.now() / 1000 - APPROVAL_WINDOW_S) return <ApprovalPromptCard a={a} state="past" />;
-    // not in the store's last read (one that has just come is read again within a moment)
-    return <ApprovalPromptCard a={a} state={promptsFailed ? "unchecked" : "checking"} />;
+    if (promptsFailed) return <ApprovalPromptCard a={a} state="unchecked" />;
+    // not in the store's last read: one that has just come is read again within a moment
+    return <ApprovalPromptCard a={a} state={waitingRefs.has(m.ref) ? "waiting" : "checking"} />;
   };
   const endedKey = `${promptsEnded ? [...promptsEnded].map(([k, v]) => `${k}${v.outcome}`).join(" ") : "-"}${promptsFailed ? "!" : ""}`;
   const renderMessage = (m: Message, inThread: boolean, prev?: Message, newest = false) => {
