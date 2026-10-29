@@ -114,6 +114,8 @@ test.describe('decision cards in the chat', () => {
     expect(box.x + box.width).toBeLessThanOrEqual(cardBox.x + cardBox.width + 1);
     expect(await line.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    // nor does it widen the chat: the message list never scrolls sideways
+    expect(await page.locator('.sr-chat .message-list').evaluate((el) => [el.scrollWidth <= el.clientWidth + 1, el.scrollLeft])).toEqual([true, 0]);
   });
 
   test('4. a lost race: the room decided first; the tap shows the stored pick and posts nothing', async ({ page }) => {

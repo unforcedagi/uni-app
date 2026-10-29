@@ -260,7 +260,8 @@ p.decision-card.decision-loading { padding: 8px 12px; color: var(--muted); font-
 .sealed-row-status { color: var(--text) !important; }
 .sealed-enrolled-line { margin: 2px 0; font-size: 14px; color: var(--text-soft); }
 /* T-335: compact cards. Waiting: one row (what, where/how long, the buttons), facts behind "details". Answered: one quiet line. */
-.cc { margin: 6px 0 4px; max-width: 560px; }
+/* min-width 0: a card is a grid item in .decision-cards, and its one no-wrap line must not widen the grid past the chat */
+.cc { min-width: 0; margin: 6px 0 4px; max-width: 560px; }
 .cc-pending { padding: 8px 10px 8px 12px; }
 .cc .cc-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 0; }
 .cc-icon { flex: none; font-size: 15px; }
