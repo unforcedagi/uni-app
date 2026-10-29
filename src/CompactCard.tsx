@@ -4,9 +4,12 @@ import { useId, useState, type ReactNode } from "react";
 // small "details" toggle, closed. Once answered, expired or gone: one quiet line ("✓ Approved · … · 12:04") that opens to the facts.
 // The answered line is a disclosure only: nothing in it answers anything, so a tap on a collapsed card can never approve.
 
-/** The waiting row. `actions` are the card's own buttons, untouched; `below` is what must stay in sight (a warning, a form). */
+/**
+ * The waiting row. `actions` are the card's own buttons, untouched; `below` is what must stay in sight (a warning, a form, a decision's
+ * options), or a function of whether the details are open, for what shows only then or when it holds something.
+ */
 export function PendingCard({ className, label, icon, what, meta, actions, below, details }: {
-  className: string; label: string; icon: string; what: ReactNode; meta: ReactNode; actions?: ReactNode; below?: ReactNode; details: ReactNode;
+  className: string; label: string; icon: string; what: ReactNode; meta: ReactNode; actions?: ReactNode; below?: ReactNode | ((open: boolean) => ReactNode); details: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const id = useId();
@@ -19,7 +22,7 @@ export function PendingCard({ className, label, icon, what, meta, actions, below
       </span>
       {actions && <div className="cc-actions">{actions}</div>}
     </div>
-    {below}
+    {typeof below === "function" ? below(open) : below}
     <div id={id} className="cc-details" hidden={!open}>{open && details}</div>
   </section>;
 }

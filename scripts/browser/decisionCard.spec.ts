@@ -46,7 +46,10 @@ test.describe('decision cards in the chat', () => {
     const msg = page.locator('.sr-chat .message').filter({ hasText: 'Your call on the garden page layout' });
     const card = msg.getByRole('region', { name: 'Decision: Which layout for the garden page?' });
     await expect(card).toBeVisible();
-    await expect(card.locator('.decision-kind')).toHaveText('Decision · T-07');
+    // T-335: one short row: the question, its task and Context, the options under it; the words field behind details
+    await expect(card.locator('.cc-what')).toHaveText('Which layout for the garden page?');
+    await expect(card.locator('.cc-meta')).toHaveText('Decision · T-07 · Context › · details');
+    await expect(card.getByRole('textbox')).toHaveCount(0);
     const pick = card.getByRole('group', { name: /^Pick one:/ });
     await expect(pick.getByRole('button')).toHaveText(['A', 'Bdefault', 'C']);
     await expect(pick.getByRole('button', { name: 'B (default)' })).toHaveClass(/dflt/);
@@ -94,6 +97,23 @@ test.describe('decision cards in the chat', () => {
     const own = page.locator('.sr-chat .message').filter({ hasText: 'Picked: B' });
     await expect(own.locator('.decision-card .decision-result')).toHaveText('Decided: B · by you');
     await shot(page, '02-decided');
+  });
+
+  test('T-335: a decided card with a long answer is still one line that fits the screen', async ({ page }) => {
+    const long = 'Keep the long garden walk with every bed named, the shed, the pond and the gate';
+    await seed(page, { options: ['A', long], default: 'A' });
+    await openAtlas(page);
+    await arrive(page, ASK);
+    const card = page.locator('.sr-chat .message .decision-card').first();
+    await card.getByRole('button', { name: long, exact: true }).click();
+    const line = card.locator('summary');
+    await expect(line.getByRole('status')).toHaveText(`Decided: ${long} · by you`);
+    // one line, inside the card and the screen: the status and the question are cut, never pushed out
+    const box = (await line.boundingBox())!, cardBox = (await card.boundingBox())!;
+    expect(box.height).toBeLessThan(40);
+    expect(box.x + box.width).toBeLessThanOrEqual(cardBox.x + cardBox.width + 1);
+    expect(await line.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   });
 
   test('4. a lost race: the room decided first; the tap shows the stored pick and posts nothing', async ({ page }) => {
@@ -241,6 +261,8 @@ test.describe('your words on a decision card', () => {
     await arrive(page, ASK);
     const card = page.locator('.sr-chat .message .decision-card').first();
     await expect(card.getByRole('button', { name: 'C', exact: true })).toBeVisible();
+    // T-335: the words field is behind the card's details
+    await card.getByRole('button', { name: 'details', exact: true }).click();
     return card;
   };
 

@@ -163,4 +163,18 @@ test.describe('a Hermes approval prompt, loudly', () => {
     await expect(page.locator('.message.approval-waiting')).toHaveCount(0);
     await expect(page.locator(`.message[data-ref="${ref}"] .cc-done`).getByRole('status')).toHaveText('Approved');
   });
+  test('5. T-335: a prompt in a thread answered at the top of the room shows how it ended, in the thread', async ({ page }) => {
+    await boot(page);
+    const top = await arrive(page, 'Tidying the example branches next.');
+    const ref = await arrive(page, fx.prompts.two_answers_30min, 'Uni', ROOM, top);
+    await unfold(page);
+    await rows(page).getByRole('button').click();
+    const card = page.locator(`.message[data-ref="${ref}"] .cc`);
+    await expect(card).toHaveClass(/cc-pending/);
+    // Hermes answers at the top of the room (nothing else waits there): the thread's own messages don't hold that answer
+    await arrive(page, fx.outcomes.denied);
+    await expect(page.locator('.approval-banner')).toHaveCount(0);
+    await expect(card.getByRole('status')).toHaveText('Denied');
+    await expect(card.locator('summary')).toHaveText(/^✕Denied · git branch -D feature\/example-cleanup · \d{1,2}:\d{2}/);
+  });
 });

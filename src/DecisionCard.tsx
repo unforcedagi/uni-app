@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { cleanNote, NOTE_MAX, NOTE_WARN, noteLine, optionLabel, parseDecisionNote, pickedLine, type DecisionView } from "./decisionView";
 import { makeDecisionStore, msg, type Entry } from "./decisionStore";
 import { useNoteOpener } from "./noteLinks";
-import { DoneCard } from "./CompactCard";
+import { DoneCard, PendingCard } from "./CompactCard";
 import { activeProfile } from "./areas/profile";
 import { decisionDecided, onDecisionsGone } from "./decisionLinks";
 import { inline, publishedIn } from "./publishedMedia";
@@ -161,24 +161,25 @@ export function DecisionCard({ id, vault, post }: Props) {
       </>} />;
   }
 
-  return <section className="decision-card" aria-label={`Decision: ${d.question}`} data-state="open">
-    {head}
-    <p className="decision-q">{d.question}</p>
-    {media}
-    {d.options.length >= 2
-      ? <div className="decision-options" role="group" aria-label={`Pick one: ${d.question}`}>
-          {d.options.map((o) => <button key={o} type="button" className={`decision-opt ${o === d.dflt ? "dflt" : ""}`}
-            aria-label={o === d.dflt ? `${optionLabel(o)} (default)` : optionLabel(o)} disabled={busy} onClick={() => void pick(o)}>
-            <span>{optionLabel(o)}</span>{o === d.dflt && <span className="decision-dflt">default</span>}
-          </button>)}
-        </div>
-      : <p className="decision-note">This decision has no options to tap; answer it in words.</p>}
-    {notes}
-    {field}
-    {phase === "saving" && <p className="decision-note" role="status">Saving your pick…</p>}
-    {phase !== "untold" && error && <p className="decision-note warn" role="alert">{error}</p>}
-    {told}
-  </section>;
+  // T-335: open, one short row: the question, its task and Context, the options under it. Its media and notes are behind details; so is the
+  // words field, which shows anyway once it holds words (they go with a tap, so they are never out of sight)
+  return <PendingCard className="decision-card" label={`Decision: ${d.question}`} icon="❓" what={<span className="decision-q">{d.question}</span>}
+    meta={<>Decision{d.task ? ` · ${d.task}` : ""}{context && <> · {context}</>} · </>}
+    below={(open) => <>
+      {d.options.length >= 2
+        ? <div className="decision-options" role="group" aria-label={`Pick one: ${d.question}`}>
+            {d.options.map((o) => <button key={o} type="button" className={`decision-opt ${o === d.dflt ? "dflt" : ""}`}
+              aria-label={o === d.dflt ? `${optionLabel(o)} (default)` : optionLabel(o)} disabled={busy} onClick={() => void pick(o)}>
+              <span>{optionLabel(o)}</span>{o === d.dflt && <span className="decision-dflt">default</span>}
+            </button>)}
+          </div>
+        : <p className="decision-note">This decision has no options to tap; answer it in words.</p>}
+      {(open || text || d.options.length < 2) && field}
+      {phase === "saving" && <p className="decision-note" role="status">Saving your pick…</p>}
+      {phase !== "untold" && error && <p className="decision-note warn" role="alert">{error}</p>}
+      {told}
+    </>}
+    details={<>{media}{notes}</>} />;
 }
 
 /**

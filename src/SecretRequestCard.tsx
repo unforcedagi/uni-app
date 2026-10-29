@@ -85,7 +85,8 @@ export function SecretRequestCard({ channel, requestRef, authorName, receipts, p
     const [mark, status, when] = receipt.state === "stored" ? ["🔒", "Stored", receipt.until ? `until ${day(receipt.until)}` : null]
       : receipt.state === "forgotten" ? ["🗑️", "Forgotten", null] : ["⚠️", `Not kept: ${receipt.reason ?? "refused"}`, null];
     const said = receipt.state === "stored" ? <p className="secret-status ok">Stored as <code>{request.name}</code>{receipt.until ? <> until {day(receipt.until)}</> : null}. {authorName} only sees the name.</p>
-      : receipt.state === "forgotten" ? <p className="secret-status">{authorName} deleted it.</p> : null;
+      : receipt.state === "forgotten" ? <p className="secret-status">{authorName} deleted it.</p>
+      : <p className="secret-status warn">Not kept: {receipt.reason ?? "refused"}</p>;
     return <DoneCard className="secret-card" label={label} mark={mark} status={status} what={request.label} when={when}
       details={<>{said}{facts}{forgetting}</>}
       after={<>{phase === "forget-sent" && receipt.state !== "forgotten" && <p className="secret-status">Asked {authorName} to forget it…</p>}{errorLine}</>} />;

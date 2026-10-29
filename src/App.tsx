@@ -83,9 +83,9 @@ import { useSealedWaiting } from "./sealedLive";
 import { parseEnrollment } from "./sealedCore";
 import { parseSecretReceipt, parseSecretRequest, receiptFor, receiptsByRequest, secretCardsOn, withoutSecretBlock } from "./secretRequest";
 import NotePane, { usePaneShape } from "./NotePane";
-import { ApprovalsContext, useApprovals } from "./approvalsLive";
+import { APPROVAL_WINDOW_S, ApprovalsContext, useApprovals } from "./approvalsLive";
 import { ApprovalBanner } from "./areas/ApprovalRows";
-import { approvalOutcomes, parseApproval, type Approval } from "./approvals";
+import { parseApproval, type Approval } from "./approvals";
 import { ApprovalPromptCard } from "./ApprovalPromptCard";
 
 type Room = { id: string; name: string; last_message: string | null; last_ts: number | null; mentions: boolean; unread: number; /** a direct message, a room (false), or not known yet (null; absent in a list cached by an older app) */ dm?: boolean | null };
@@ -923,7 +923,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   // T-161 and T-234: how both notify (the room's name; whether the user is already looking at it)
   const notifyOpts = { synced, roomsReady: rooms.length > 0, roomName: (id: string) => roomsRef.current.find((r) => r.id === id)?.name ?? null,
     looking: (ch: string, r: string | null) => document.hasFocus() && ch === channelRef.current && r === rootRef.current };
-  const hermesApprovals = useApprovals({ identity, enabled: !!identity, ...notifyOpts });
+  const { list: hermesApprovals, ended: promptsEnded } = useApprovals({ identity, enabled: !!identity, ...notifyOpts });
   // T-234: Uni's approval cards waiting for a tap join the same list (Needs you, the room's banner, the room's mark)
   const sealedWaiting = useSealedWaiting({ enabled: !!identity, ...notifyOpts });
   const approvals = useMemo(() => [...hermesApprovals, ...sealedWaiting].sort((a, b) => a.ts - b.ts), [hermesApprovals, sealedWaiting]);
@@ -1852,15 +1852,21 @@ function Conversations({ onForget }: { onForget: () => void }) {
 
   const waitingRefs = new Set(approvals.map((a) => a.ref));
   const waitingKey = approvals.map((a) => a.ref).join(" ");
-  // T-335: how each Hermes prompt in view ended, read from the room's own messages, for its one line
-  const promptOutcomes = useMemo(() => approvalOutcomes(messages, Date.now() / 1000, identity),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [messages, identity, waitingKey]);
-  /** T-335: a Hermes approval prompt drawn as its short card (waiting until Needs you or its room says it ended). Null: not a prompt. */
+  /**
+   * T-335: a Hermes approval prompt drawn as its short card. How it ended comes from the same store read as Needs you (every room and
+   * thread), never from the loaded timeline alone (a room's list has no thread replies). One older than that read is no longer waiting;
+   * until the store has answered, a prompt is drawn as waiting. Null: not a prompt.
+   */
   const promptView = (m: Message) => {
     const a = m.author === identity ? null : parseApproval(m);
-    return a ? <ApprovalPromptCard a={a} ended={waitingRefs.has(m.ref) ? undefined : promptOutcomes.get(m.ref)} /> : null;
+    if (!a) return null;
+    const now = Date.now() / 1000;
+    const old = m.ts <= now - APPROVAL_WINDOW_S;
+    const ended = waitingRefs.has(m.ref) ? undefined
+      : promptsEnded?.get(m.ref) ?? (old ? { outcome: a.deadline !== null && a.deadline <= now ? "expired" as const : "gone" as const, at: a.deadline !== null && a.deadline <= now ? a.deadline : m.ts } : undefined);
+    return <ApprovalPromptCard a={a} ended={ended} />;
   };
+  const endedKey = promptsEnded ? [...promptsEnded].map(([k, v]) => `${k}${v.outcome}`).join(" ") : "";
   const renderMessage = (m: Message, inThread: boolean, prev?: Message, newest = false) => {
     // r18: a progress ping from hours or days ago is folded away as a past update, never the room's live status
     if (isWorkerStatus(m.body) && !(inThread && m.ref === root) && editing !== m.ref && staleStatus(m, Date.now() / 1000, newest)) return <details key={m.ref} data-ref={m.ref} className="message status-line status-past">
@@ -1931,7 +1937,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     {currentView && fetchedView === currentView && channel && roomDecisions(channel, messages)}
   </>,
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  [messages, identity, menuFor, decisions.version, root, older, roomName, editing, focusRef, relayOrigin, fetchedView, failedView, currentView, busy, synced, secretRequesters, secretReceipts, waitingKey]);
+  [messages, identity, menuFor, decisions.version, root, older, roomName, editing, focusRef, relayOrigin, fetchedView, failedView, currentView, busy, synced, secretRequesters, secretReceipts, waitingKey, endedKey]);
 
   const topNote = notes[notes.length - 1];
   // A top-level note Back closes its tab and returns to the last used tab.

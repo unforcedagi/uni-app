@@ -274,15 +274,21 @@ p.decision-card.decision-loading { padding: 8px 12px; color: var(--muted); font-
 .cc-actions .sealed-approve, .cc-actions .pairing-secondary { min-height: 40px; padding: 0 14px; }
 .cc-details { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
 .cc-details[hidden] { display: none; }
+.cc-pending > .cc-details:empty { display: none; }
+.cc .cc-what .decision-q { margin: 0; font-family: var(--serif); font-size: 16px; font-weight: 500; }
+.cc-pending.decision-card .cc-what { white-space: normal; overflow-wrap: anywhere; }
+.cc-pending .decision-options { margin-top: 8px; }
+.cc-pending .decision-context { min-height: 0; padding: 0; font-size: 12.5px; }
+.cc-pending .decision-say { margin-top: 8px; }
 .cc-pending .sealed-warn, .cc-pending .sealed-releases, .cc-pending .secret-status { margin: 6px 0 0; }
 .cc-done { padding: 0; border: 0; border-left: 0 !important; background: none; box-shadow: none; opacity: 1; }
-.cc-done > details > summary { display: flex; align-items: baseline; gap: 0; min-height: 32px; padding: 4px 0; color: var(--muted); font-size: 13.5px; cursor: pointer; list-style: none; }
+.cc-done > details > summary { display: flex; max-width: 100%; align-items: baseline; gap: 0; min-height: 32px; padding: 4px 0; color: var(--muted); font-size: 13.5px; cursor: pointer; list-style: none; }
 .cc-done > details > summary::-webkit-details-marker { display: none; }
 .cc-done > details > summary::after { content: "▸"; margin-left: 8px; color: var(--muted); font-size: 11px; }
 .cc-done > details[open] > summary::after { content: "▾"; }
 .cc-done .cc-mark { flex: none; width: 1.3em; color: var(--forest); }
-.cc-done .cc-status { flex: none; color: var(--text-soft); font-weight: 600; }
-.cc-done .cc-what { flex: 0 1 auto; min-width: 0; font-size: 13.5px; font-weight: 400; color: var(--muted); }
+.cc-done .cc-status { flex: 0 1 auto; min-width: 3em; overflow: hidden; color: var(--text-soft); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.cc-done .cc-what { flex: 0 1 auto; min-width: 2em; overflow: hidden; font-size: 13.5px; font-weight: 400; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
 .cc-done .cc-sep, .cc-done .cc-when { flex: none; white-space: pre; }
 .cc-done > details > .cc-details { margin: 2px 0 6px; padding: 8px 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); }
 .cc-done .secret-status, .cc-done > .pairing-secondary { margin: 4px 0; }

@@ -4,7 +4,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { commandLine, pendingApprovals, type Approval, type ApprovalSource } from "./approvals";
+import { approvalOutcomes, commandLine, pendingApprovals, type Approval, type ApprovalOutcome, type ApprovalSource } from "./approvals";
 import { notifyPlain } from "./desktopNotify";
 
 export type ApprovalsView = { list: Approval[]; /** opens the prompt's room at its message, the composer focused */ open: (a: Approval) => void; roomName: (id: string) => string | null };
@@ -14,24 +14,36 @@ export const useApprovalList = () => useContext(ApprovalsContext);
 const NOTIFIED_KEY = "uni:approvals-notified";
 const readNotified = (): string[] => { try { const v = JSON.parse(localStorage.getItem(NOTIFIED_KEY) ?? "[]"); return Array.isArray(v) ? v.filter((x) => typeof x === "string") : []; } catch { return []; } };
 
-export function useApprovals(opts: { identity: string | null; enabled: boolean; synced: number; roomsReady: boolean; roomName: (id: string) => string | null; looking: (channel: string, root: string | null) => boolean }): Approval[] {
+/** How far back `approval_messages` reads (lib.rs: a day): a prompt older than that is in neither the list nor `ended`. */
+export const APPROVAL_WINDOW_S = 86_400;
+
+/**
+ * The prompts waiting, and (T-335) how each other prompt the store read ended, by the same reading over every room and thread. `ended` is
+ * null until the store has answered once.
+ */
+export function useApprovals(opts: { identity: string | null; enabled: boolean; synced: number; roomsReady: boolean; roomName: (id: string) => string | null; looking: (channel: string, root: string | null) => boolean }): { list: Approval[]; ended: Map<string, ApprovalOutcome> | null } {
   const [list, setList] = useState<Approval[]>([]);
+  const [ended, setEnded] = useState<Map<string, ApprovalOutcome> | null>(null);
   const rows = useRef<ApprovalSource[]>([]);
   const optsRef = useRef(opts); optsRef.current = opts;
   const seq = useRef(0);
   const applied = useRef(0);
-  const decide = useCallback(() => setList((old) => {
-    const next = pendingApprovals(rows.current, Date.now() / 1000, optsRef.current.identity);
+  const decide = useCallback(() => {
+    const now = Date.now() / 1000;
+    const next = pendingApprovals(rows.current, now, optsRef.current.identity);
+    const out = approvalOutcomes(rows.current, now, optsRef.current.identity);
+    const key = (m: Map<string, ApprovalOutcome>) => [...m].map(([k, v]) => `${k} ${v.outcome} ${v.at}`).sort().join("\n");
+    setEnded((was) => (was && key(was) === key(out) ? was : out));
     // the same prompts, unedited: keep the old list (an edited one has a new command or window, so it is replaced)
     const same = (a: Approval, b: Approval) => a.ref === b.ref && a.command === b.command && a.why === b.why && a.deadline === b.deadline && a.answers.join() === b.answers.join();
-    return next.length === old.length && next.every((a, i) => same(a, old[i])) ? old : next;
-  }), []);
+    setList((old) => (next.length === old.length && next.every((a, i) => same(a, old[i])) ? old : next));
+  }, []);
   const read = useCallback(() => {
     const n = ++seq.current;
     // any answer newer than the one applied counts (never only the latest: under steady traffic that one may never land)
     invoke<ApprovalSource[] | null>("approval_messages").then((r) => { if (n <= applied.current) return; applied.current = n; rows.current = r ?? []; decide(); }).catch(() => {});
   }, [decide]);
-  useEffect(() => { if (opts.enabled) read(); else { rows.current = []; setList([]); } }, [opts.enabled, opts.identity, opts.synced, read]);
+  useEffect(() => { if (opts.enabled) read(); else { rows.current = []; setList([]); setEnded(null); } }, [opts.enabled, opts.identity, opts.synced, read]);
   useEffect(() => {
     if (!opts.enabled) return;
     // at most one read each 150 ms, after the first message of a burst: steady traffic can't keep putting it off
@@ -59,5 +71,5 @@ export function useApprovals(opts: { identity: string | null; enabled: boolean; 
     localStorage.setItem(NOTIFIED_KEY, JSON.stringify([...done, ...fresh.map((a) => a.ref)].slice(-200)));
     for (const a of fresh) void notifyPlain({ author: "Hermes", room: optsRef.current.roomName(a.channel) ?? "a room", preview: `Needs your OK to run: ${commandLine(a)}`, looking: optsRef.current.looking(a.channel, a.root) });
   }, [list, opts.roomsReady]);
-  return list;
+  return { list, ended };
 }
