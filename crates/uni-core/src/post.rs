@@ -15,7 +15,8 @@
 //! `["uni-post/1", vault, note, account, platform, provenance, piece, body, [media sha256...], [[name, value]...]]`
 //! (serde_json's escaping is NIP-01's, which the poster's Python writes byte for byte; the cross vector below is pinned
 //! on both sides). The last element is empty except for an essay record (`atproto-site`), where it is
-//! `[["published_at", ..], ["site_path", ..], ["title", ..]]`.
+//! `[["published_at", ..], ["site_path", ..], ["title", ..]]`, and for a Bluesky post with an X copy
+//! (`crosspost: ["x"]`), where it is `[["crosspost", "x"]]`: one approval names every place the post goes.
 //!
 //! The voice rule is checked here and again by the poster: Aaron's account carries only his words, Uni's only Uni's.
 //! Ported in shape from T-179's X drafts (`xdraft.rs` on `feat/t179-x-drafts`), without its "go" handshake: a post
@@ -42,6 +43,11 @@ pub const MAX_SCHEDULE_AHEAD_S: u64 = 60 * 24 * 3600;
 pub const ACCOUNTS: [&str; 2] = ["aaron", "uni"];
 pub const PLATFORMS: [&str; 3] = ["bluesky", "x", "atproto-site"];
 pub const SITE_FIELDS: [&str; 3] = ["published_at", "site_path", "title"];
+/// Where a post may also go under the same approval: a Bluesky post may carry a copy on X (the poster's CROSSPOST).
+pub fn crosspost_ok(platform: &str, to: &[String]) -> bool {
+    let mut seen = std::collections::BTreeSet::new();
+    to.iter().all(|t| platform == "bluesky" && t == "x" && seen.insert(t.clone()))
+}
 
 /// Who may speak on which account: Aaron's account carries only his words; Uni's account only Uni's.
 pub fn voice_ok(account: &str, provenance: &str) -> bool {
@@ -68,6 +74,9 @@ pub struct Post {
     pub body: String,
     pub state: String,
     pub media: Vec<String>,
+    /// Other platforms it goes to under the same approval, after `platform` (only `["x"]` on Bluesky for now).
+    /// `None` when the note's value isn't a list of strings: such a post can't be approved.
+    pub crosspost: Option<Vec<String>>,
     pub extra: Vec<(String, String)>,
 }
 
@@ -76,13 +85,31 @@ impl Post {
         let m = &note["metadata"];
         let s = |k: &str| m[k].as_str().unwrap_or_default().to_string();
         let platform = s("platform");
+        let crosspost = match &m["crosspost"] {
+            Value::Null => Some(vec![]),
+            Value::Array(a) => a.iter().map(|v| v.as_str().map(String::from)).collect(),
+            _ => None,
+        };
         let extra = if platform == "atproto-site" {
             SITE_FIELDS.iter().map(|k| (k.to_string(), s(k))).collect()
         } else {
-            vec![]
+            match &crosspost {
+                Some(c) if !c.is_empty() => vec![("crosspost".to_string(), c.join(","))],
+                _ => vec![],
+            }
         };
         let media = m["media"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect()).unwrap_or_default();
-        Post { account: s("account"), platform, provenance: s("provenance"), piece: s("piece"), body: s("body"), state: s("state"), media, extra }
+        Post { account: s("account"), platform, provenance: s("provenance"), piece: s("piece"), body: s("body"), state: s("state"), media, crosspost, extra }
+    }
+
+    /// Every platform it goes to, the primary first.
+    pub fn targets(&self) -> Vec<&str> {
+        std::iter::once(self.platform.as_str()).chain(self.crosspost.iter().flatten().map(|t| t.as_str())).collect()
+    }
+
+    /// The tightest length limit of every place it goes, in code points (the poster also weighs X's count).
+    pub fn limit(&self) -> usize {
+        self.targets().into_iter().map(max_chars).min().unwrap_or(0)
     }
 }
 
@@ -122,6 +149,7 @@ pub fn approval_event(keys: &Keys, vault: &str, note: &str, p: &Post, gen: usize
         tag(&["platform", &p.platform])?,
         tag(&["provenance", &p.provenance])?,
         tag(&["piece", &p.piece])?,
+        tag(&["crosspost", &p.crosspost.clone().unwrap_or_default().join(",")])?,
         tag(&["digest", &d])?,
         tag(&["gen", &gen.to_string()])?,
         tag(&["nonce", &nonce()])?,
@@ -179,6 +207,9 @@ pub fn check_approvable(note: &Value, if_updated_at: &str) -> Result<Post> {
     if !ACCOUNTS.contains(&p.account.as_str()) || !PLATFORMS.contains(&p.platform.as_str()) {
         return Err(Error::Invalid("the post names no known account or platform".into()));
     }
+    if !p.crosspost.as_deref().is_some_and(|c| crosspost_ok(&p.platform, c)) {
+        return Err(Error::Invalid("only a Bluesky post can carry a copy, and only to X".into()));
+    }
     if !voice_ok(&p.account, &p.provenance) {
         return Err(Error::Invalid(if p.account == "aaron" {
             "Uni's words never go out under your name; this post can't be approved".into()
@@ -193,8 +224,8 @@ pub fn check_approvable(note: &Value, if_updated_at: &str) -> Result<Post> {
         return Err(Error::Invalid("nothing to post".into()));
     }
     let n = p.body.chars().count();
-    if n > max_chars(&p.platform) {
-        return Err(Error::Invalid(format!("{n} characters; {} allows {}", p.platform, max_chars(&p.platform))));
+    if n > p.limit() {
+        return Err(Error::Invalid(format!("{n} characters; {} allows {}", p.targets().join(" + "), p.limit())));
     }
     if !p.media.is_empty() {
         return Err(Error::Invalid("posts with media can't go out yet".into()));
@@ -291,7 +322,7 @@ pub fn summary(note: &Value) -> String {
     let p = Post::from_note(note);
     let who = if p.account == "aaron" { "your account" } else { "Uni's account" };
     let first: String = p.body.chars().take(120).collect();
-    format!("Post on {} as {who}:\n\n{first}{}", p.platform, if p.body.chars().count() > 120 { "…" } else { "" })
+    format!("Post on {} as {who}:\n\n{first}{}", p.targets().join(" + "), if p.body.chars().count() > 120 { "…" } else { "" })
 }
 
 impl VaultClient {
@@ -382,8 +413,8 @@ impl VaultClient {
             return Err(Error::Invalid("write 1 to 4000 characters".into()));
         }
         let mut meta = if p.account == "aaron" {
-            if text.chars().count() > max_chars(&p.platform) {
-                return Err(Error::Invalid(format!("{} allows {} characters", p.platform, max_chars(&p.platform))));
+            if text.chars().count() > p.limit() {
+                return Err(Error::Invalid(format!("{} allows {} characters", p.targets().join(" + "), p.limit())));
             }
             json!({"body": text, "provenance": "aaron-typed", "edited_at": iso(now), "digest": null, "approval_event": null})
         } else {
@@ -421,9 +452,41 @@ mod tests {
         let p = Post {
             account: "aaron".into(), platform: "bluesky".into(), provenance: "aaron-excerpt".into(),
             piece: "https://example.com/p".into(), body: "“Slow is smooth.” https://example.com/p".into(),
-            state: "proposed".into(), media: vec![], extra: vec![],
+            state: "proposed".into(), media: vec![], crosspost: Some(vec![]), extra: vec![],
         };
         assert_eq!(digest("uni", "01TESTNOTE", &p, &[]), CROSS_VECTOR);
+    }
+
+    /// Pinned in uni-ops tests/test_uni_post_live.py (CROSS_VECTOR_X): a Bluesky post with its X copy.
+    const CROSS_VECTOR_X: &str = "54b42895903105b7d991174f26775d4d4b82aaa0db1043f80d45f62bd46c67c7";
+
+    #[test]
+    fn the_x_copy_is_in_the_digest_and_the_approval() {
+        let n = note(json!({"state": "proposed", "account": "uni", "platform": "bluesky", "provenance": "uni", "piece": "",
+            "body": "Uni's build log.", "media": [], "crosspost": ["x"]}));
+        let p = check_approvable(&n, "2026-10-29T10:00:00.000Z").unwrap();
+        assert_eq!(p.targets(), ["bluesky", "x"]);
+        assert_eq!(digest("uni", "01TESTNOTE", &p, &[]), CROSS_VECTOR_X);
+        let alone = Post::from_note(&uni_post());
+        assert_ne!(digest("uni", "01TESTNOTE", &alone, &[]), digest("uni", "01TESTNOTE", &Post { body: alone.body.clone(), ..p.clone() }, &[]));
+        let keys = Keys::generate();
+        let ev = approval_event(&keys, "uni", "01TESTNOTE", &p, 0, 1_800_000_000, 1_800_000_000).unwrap();
+        assert!(ev.tags.iter().any(|t| t.as_slice() == ["crosspost", "x"]));
+        let ev = approval_event(&keys, "uni", "01TESTNOTE", &alone, 0, 1_800_000_000, 1_800_000_000).unwrap();
+        assert!(ev.tags.iter().any(|t| t.as_slice() == ["crosspost", ""]));
+        assert!(summary(&n).starts_with("Post on bluesky + x as Uni's account"));
+    }
+
+    #[test]
+    fn a_copy_must_fit_x_and_go_only_from_bluesky_to_x() {
+        let base = |cp: Value, platform: &str, body: String| note(json!({"state": "proposed", "account": "uni",
+            "platform": platform, "provenance": "uni", "piece": "", "body": body, "media": [], "crosspost": cp}));
+        let e = check_approvable(&base(json!(["x"]), "bluesky", "y".repeat(281)), "2026-10-29T10:00:00.000Z").unwrap_err();
+        assert!(e.to_string().contains("bluesky + x allows 280"), "{e}");
+        assert!(check_approvable(&base(json!(["x"]), "bluesky", "y".repeat(280)), "2026-10-29T10:00:00.000Z").is_ok());
+        for (cp, platform) in [(json!(["bluesky"]), "x"), (json!(["mastodon"]), "bluesky"), (json!(["x", "x"]), "bluesky"), (json!("x"), "bluesky"), (json!([1]), "bluesky")] {
+            assert!(check_approvable(&base(cp.clone(), platform, "hi".into()), "2026-10-29T10:00:00.000Z").is_err(), "{cp} on {platform}");
+        }
     }
 
     #[test]

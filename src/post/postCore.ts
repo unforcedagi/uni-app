@@ -8,6 +8,8 @@ export type PostState = "proposed" | "approved" | "posting" | "posted" | "failed
 export type PostCard = {
   id: string; path: string; updatedAt: string;
   account: Account; platform: string; provenance: string; piece: string; body: string; state: PostState;
+  /** Other places it goes under the same approval (only ["x"] on a Bluesky post); null when the note's value is bad. */
+  crosspost: string[] | null; crosspostUrl: string | null; crosspostFailed: string | null;
   media: string[]; node: string | null; why: string | null;
   scheduledFor: string | null; approvedAt: string | null; postedUrl: string | null; postedAt: string | null;
   failedReason: string | null; feedback: string | null;
@@ -31,6 +33,8 @@ export function parsePost(n: RawNote): PostCard | null {
   if ((account !== "aaron" && account !== "uni") || !STATES.includes(state)) return null;
   return {
     id: n.id, path: s(n.path), updatedAt: s(n.updatedAt), account, platform: s(m.platform), provenance: s(m.provenance),
+    crosspost: m.crosspost == null ? [] : Array.isArray(m.crosspost) && m.crosspost.every((x) => typeof x === "string") ? m.crosspost as string[] : null,
+    crosspostUrl: opt(m.crosspost_x_url), crosspostFailed: opt(m.crosspost_x_failed),
     piece: s(m.piece), body: s(m.body), state, media: Array.isArray(m.media) ? m.media.filter((x): x is string => typeof x === "string") : [],
     node: opt(m.node), why: opt(m.why), scheduledFor: opt(m.scheduled_for), approvedAt: opt(m.approved_at),
     postedUrl: opt(m.posted_url), postedAt: opt(m.posted_at), failedReason: opt(m.failed_reason), feedback: opt(m.feedback),
@@ -46,9 +50,19 @@ export function voice(p: PostCard): "Your voice" | "Uni's voice" {
   return p.account === "aaron" ? "Your voice" : "Uni's voice";
 }
 
-/** Where it goes, in words: "Bluesky · your account". */
+/** Every place it goes, the primary first. */
+export function targets(p: PostCard): string[] {
+  return [p.platform, ...(p.crosspost ?? [])];
+}
+
+/** The tightest limit of every place it goes (code points; the poster also weighs X's count). */
+export function limit(p: PostCard): number {
+  return Math.min(...targets(p).map((t) => LIMIT[t] ?? 0));
+}
+
+/** Where it goes, in words: "Bluesky + X · your account". */
 export function where(p: PostCard): string {
-  return `${PLATFORM_LABEL[p.platform] ?? p.platform} · ${p.account === "aaron" ? "your account" : "Uni's account"}`;
+  return `${targets(p).map((t) => PLATFORM_LABEL[t] ?? t).join(" + ")} · ${p.account === "aaron" ? "your account" : "Uni's account"}`;
 }
 
 /** The voice rule, as the poster enforces it: Aaron's account carries only his words, Uni's only Uni's. */
@@ -60,9 +74,11 @@ export function voiceOk(p: PostCard): boolean {
 export function blocked(p: PostCard): string | null {
   if (!voiceOk(p)) return p.account === "aaron" ? "Uni's words never go out under your name." : "Your words never go out under Uni's name.";
   if (!(p.platform in LIMIT)) return "This platform isn't one the poster knows.";
+  const cp = p.crosspost;
+  if (!cp || cp.some((t, i) => p.platform !== "bluesky" || t !== "x" || cp.indexOf(t) !== i)) return "Only a Bluesky post can carry a copy, and only to X.";
   if (!p.body.trim()) return "There's nothing to post.";
   const n = [...p.body].length;
-  if (n > LIMIT[p.platform]) return `${n} characters; ${PLATFORM_LABEL[p.platform]} allows ${LIMIT[p.platform]}.`;
+  if (n > limit(p)) return `${n} characters; ${targets(p).map((t) => PLATFORM_LABEL[t] ?? t).join(" + ")} allows ${limit(p)}.`;
   if (p.media.length) return "Posts with pictures or video can't go out yet.";
   if (p.provenance === "aaron-excerpt" && !p.piece) return "An excerpt must link the piece it quotes.";
   return null;

@@ -1,6 +1,6 @@
 // T-335: the To post queue's pure rules. Run: node --experimental-strip-types scripts/post.test.ts
 import assert from "node:assert/strict";
-import { blocked, editMode, parsePost, parsePosts, queue, reviewCount, scheduleAt, voice, waitingLine } from "../src/post/postCore.ts";
+import { blocked, editMode, parsePost, parsePosts, queue, reviewCount, scheduleAt, voice, waitingLine, where } from "../src/post/postCore.ts";
 
 const note = (id: string, meta: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({
   id, path: `Posts/${id}`, updatedAt: `2026-10-29T10:00:0${id.length % 10}.000Z`, tags: ["post"],
@@ -25,6 +25,16 @@ assert.match(blocked(parsePost(note("a", { body: "x".repeat(301) }))!)!, /301 ch
 assert.equal(blocked(parsePost(note("a", { body: "é".repeat(300) }))!), null); // code points, not bytes
 assert.match(blocked(parsePost(note("a", { media: ["att1"] }))!)!, /can't go out yet/);
 assert.match(blocked(parsePost(note("a", { account: "aaron", provenance: "aaron-excerpt" }))!)!, /link the piece/);
+
+// a Bluesky post with its X copy: the card names both, and the text must fit both
+assert.equal(where(parsePost(note("a", { crosspost: ["x"] }))!), "Bluesky + X · Uni's account");
+assert.equal(where(parsePost(note("a", {}))!), "Bluesky · Uni's account");
+assert.match(blocked(parsePost(note("a", { crosspost: ["x"], body: "x".repeat(281) }))!)!, /281 characters; Bluesky \+ X allows 280/);
+assert.equal(blocked(parsePost(note("a", { crosspost: ["x"], body: "x".repeat(280) }))!), null);
+for (const [cp, platform] of [[["bluesky"], "x"], [["mastodon"], "bluesky"], [["x", "x"], "bluesky"], ["x", "bluesky"]] as const) {
+  assert.match(blocked(parsePost(note("a", { crosspost: cp, platform }))!)!, /only to X/, `${cp} on ${platform}`);
+}
+assert.equal(parsePost(note("a", { state: "posted", crosspost: ["x"], crosspost_x_failed: "X 503" }))!.crosspostFailed, "X 503");
 
 // the queue: review, waiting, done; dropped ones leave; one area's posts only
 const posts = parsePosts([

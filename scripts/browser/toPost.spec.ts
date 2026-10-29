@@ -8,13 +8,13 @@ import { bootAreas } from './areasFixture';
 const meta = (m: Record<string, unknown>) => ({ state: 'proposed', platform: 'bluesky', piece: '', media: [], ...m });
 const POSTS = [
   { id: 'post-uni', path: 'Posts/build log', tags: ['post'], updatedAt: '2026-10-29T10:00:01.000Z',
-    metadata: meta({ account: 'uni', provenance: 'uni', body: 'Uni build log, week 44: 12 tests went red before the fix, 0 after. Notes: https://example.com/log/44', why: 'The weekly build log.' }) },
+    metadata: meta({ account: 'uni', provenance: 'uni', body: 'Uni build log, week 44: 12 tests went red before the fix, 0 after. Notes: https://example.com/log/44', why: 'The weekly build log.', crosspost: ['x'] }) },
   { id: 'post-mine', path: 'Posts/excerpt', tags: ['post'], updatedAt: '2026-10-29T10:00:02.000Z',
     metadata: meta({ account: 'aaron', provenance: 'aaron-excerpt', piece: 'https://example.com/pieces/slow-work', body: '“The garden doesn’t hurry.” https://example.com/pieces/slow-work' }) },
   { id: 'post-wrong', path: 'Posts/wrong voice', tags: ['post'], updatedAt: '2026-10-29T10:00:03.000Z',
     metadata: meta({ account: 'aaron', provenance: 'uni', body: 'A sentence Uni wrote, proposed for the wrong account.' }) },
   { id: 'post-done', path: 'Posts/done', tags: ['post'], updatedAt: '2026-10-28T10:00:00.000Z',
-    metadata: meta({ account: 'uni', provenance: 'uni', state: 'posted', body: 'An older post.', posted_url: 'https://example.com/p/1', posted_at: '2026-10-28T10:00:00Z' }) },
+    metadata: meta({ account: 'uni', provenance: 'uni', state: 'posted', body: 'An older post.', posted_url: 'https://example.com/p/1', posted_at: '2026-10-28T10:00:00Z', crosspost: ['x'], crosspost_x_failed: 'X 503: Service Unavailable' }) },
 ];
 
 async function boot(page: Page) {
@@ -49,8 +49,9 @@ test('the front door counts what waits; the queue shows each post as it will loo
   await expect(q.getByRole('heading', { name: 'To review · 3' })).toBeVisible();
   const uni = card(page, 'Uni build log');
   await expect(uni.locator('.tp-badge')).toHaveText('◆ Uni\'s voice');
-  await expect(uni.locator('.tp-where')).toHaveText('Bluesky · Uni\'s account');
-  await expect(uni.locator('.tp-count')).toHaveText(/^\d+\/300$/);
+  // one approval covers Bluesky and its copy on X: the card names both, and counts against the tighter limit
+  await expect(uni.locator('.tp-where')).toHaveText('Bluesky + X · Uni\'s account');
+  await expect(uni.locator('.tp-count')).toHaveText(/^\d+\/280$/);
   await expect(uni.locator('.tp-body a')).toHaveText('example.com/log/44');
   const mine = card(page, 'The garden doesn’t hurry');
   await expect(mine.locator('.tp-badge')).toHaveText('● Your voice');
@@ -61,6 +62,8 @@ test('the front door counts what waits; the queue shows each post as it will loo
   await expect(wrong.getByRole('button', { name: 'Approve' })).toBeDisabled();
   await expect(wrong.getByRole('button', { name: 'Schedule' })).toBeDisabled();
   await expect(page.locator('.tp-posted')).toContainText('Posted · open');
+  // the X copy failed: said on its own line; the Bluesky post stands (the poster never posts it again)
+  await expect(page.locator('.tp-posted .tp-failed')).toHaveText('The X copy didn\'t post: X 503: Service Unavailable');
   if (process.env.T335_SHOTS) await page.screenshot({ path: `${process.env.T335_SHOTS}/${test.info().project.name}-queue.png`, fullPage: true });
 });
 

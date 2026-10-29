@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { splitLinks } from "../areas/linkText";
-import { blocked, editMode, LIMIT, parsePosts, PLATFORM_LABEL, queue, scheduleAt, voice, waitingLine, where, type PostCard } from "./postCore";
+import { blocked, editMode, limit as limitOf, parsePosts, PLATFORM_LABEL, queue, scheduleAt, targets, voice, waitingLine, where, type PostCard } from "./postCore";
 import "./ToPost.css";
 
 const PAGE = 200;
@@ -34,10 +34,10 @@ function Text({ text }: { text: string }) {
 
 /** The post as it will look on the platform: who, the text with its links, and the count against the limit. */
 function Preview({ p }: { p: PostCard }) {
-  const n = [...p.body].length, limit = LIMIT[p.platform];
+  const n = [...p.body].length, limit = limitOf(p);
   return <div className={`tp-preview tp-on-${p.platform}`}>
     <div className="tp-who"><span className="tp-avatar" aria-hidden="true">{p.account === "aaron" ? "A" : "U"}</span>
-      <span><strong>{p.account === "aaron" ? "You" : "Uni"}</strong><small> · {PLATFORM_LABEL[p.platform] ?? p.platform}</small></span></div>
+      <span><strong>{p.account === "aaron" ? "You" : "Uni"}</strong><small> · {targets(p).map((t) => PLATFORM_LABEL[t] ?? t).join(" + ")}</small></span></div>
     <p className="tp-body"><Text text={p.body} /></p>
     {limit && limit < 10_000 && <small className={`tp-count ${n > limit ? "over" : ""}`}>{n}/{limit}</small>}
   </div>;
@@ -98,7 +98,9 @@ function Card({ p, vault, busy, setBusy, onDone }: { p: PostCard; vault: string;
     {p.state === "approved" && <div className="tp-actions"><span className="tp-status">{waitingLine(p)}</span>
       <button disabled={!!busy} onClick={() => void act("drop", "post_drop", {}, "Stopped. It won't go out.")}>Not this</button></div>}
     {p.state === "posting" && <p className="tp-status">{waitingLine(p)}</p>}
-    {p.state === "posted" && <p className="tp-status">Posted{p.postedUrl && <> · <a href={p.postedUrl} onClick={(e) => { e.preventDefault(); openLink(p.postedUrl!); }}>open</a></>}</p>}
+    {p.state === "posted" && <p className="tp-status">Posted{p.postedUrl && <> · <a href={p.postedUrl} onClick={(e) => { e.preventDefault(); openLink(p.postedUrl!); }}>open</a></>}
+      {p.crosspostUrl && <> · <a href={p.crosspostUrl} onClick={(e) => { e.preventDefault(); openLink(p.crosspostUrl!); }}>open on X</a></>}</p>}
+    {(p.state === "posted" || p.state === "taken-down") && p.crosspostFailed && <p className="tp-status tp-failed">The X copy didn't post: {p.crosspostFailed}</p>}
     {p.state === "taken-down" && <p className="tp-status">Taken down</p>}
     {p.state === "failed" && <p className="tp-status tp-failed">Didn't post: {p.failedReason ?? "no reason given"}</p>}
     {err && <p className="tp-error" role="alert">{err}</p>}
