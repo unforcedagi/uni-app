@@ -10,6 +10,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { pdfThumbnail } from "./pdfPreview";
 import { holdTop, trapTab } from "./areas/focusTrap";
 import { attachmentKind, collectAttachments, displayName, formatSize, imageLinks, mediaErrorText, parseDim, playbackErrorText, playerPin, relayMediaSha, stripAttachmentLines, type MediaRef } from "./media";
@@ -323,6 +324,9 @@ export function Lightbox({ src, alt, m, onClose }: { src: string; alt: string; m
  * its own: a fixed layer over everything, rendered at the body so no message ancestor can clip it. Where the
  * Fullscreen API is allowed (desktop), the layer also asks to take the screen; refused or absent, the layer stays.
  * Escape, ✕ and Android Back close it. T-260: a published video in a note opens the same layer.
+ * T-335: a Mac's WKWebView allows it only with `fullScreenEnabled` (tauri.conf.json `macOSPrivateApi`). Where the webview
+ * still refuses on desktop, the window itself goes full screen while the layer is up, and comes back when it closes.
+ * Android is never asked: its WebView enters and leaves at once, which would close the layer as it opened.
  */
 export function VideoFull({ src, name, at, playing, events, onClose }: {
   src: string; name: string; at: number; playing: boolean;
@@ -347,7 +351,12 @@ export function VideoFull({ src, name, at, playing, events, onClose }: {
     const wasInert = root?.inert ?? false;
     if (root) root.inert = true;
     el?.querySelector<HTMLButtonElement>(".lightbox-close")?.focus();
-    if (el && document.fullscreenEnabled && el.requestFullscreen) void el.requestFullscreen().catch(() => {});
+    let gone = false, ownWindow = false;
+    const takeWindow = () => void windowFull(true).then((took) => { ownWindow = took; if (gone && took) void windowFull(false); });
+    if (!android()) {
+      if (el && document.fullscreenEnabled && el.requestFullscreen) void el.requestFullscreen().catch(takeWindow);
+      else takeWindow();
+    }
     // Capture, and stop it there: Escape here closes only this layer, never the panel or note behind it.
     const key = (e: KeyboardEvent) => {
       // Tab is left alone, so it walks the player's own controls; the inert app behind keeps focus in the layer.
@@ -362,6 +371,8 @@ export function VideoFull({ src, name, at, playing, events, onClose }: {
     const release = holdTop();
     return () => {
       release();
+      gone = true;
+      if (ownWindow) void windowFull(false);
       window.removeEventListener("keydown", key, true); document.removeEventListener("fullscreenchange", left); setModalOpen(-1);
       if (root) root.inert = wasInert;
       if (opener?.isConnected) opener.focus();
@@ -376,6 +387,19 @@ export function VideoFull({ src, name, at, playing, events, onClose }: {
     <video ref={video} className="video-full-player" src={src} controls playsInline onLoadedMetadata={start} {...events} />
     <button className="lightbox-close" onClick={close} aria-label="Close full screen">✕</button>
   </div>, document.body);
+}
+
+const android = () => /Android/i.test(navigator.userAgent);
+
+/** The desktop window in or out of full screen (T-335); true when this call changed it. A window that was already full
+ * screen is left alone (not ours to undo); outside Tauri, or refused, nothing changes. */
+async function windowFull(on: boolean): Promise<boolean> {
+  try {
+    const w = getCurrentWindow();
+    if (on && await w.isFullscreen()) return false;
+    await w.setFullscreen(on);
+    return true;
+  } catch { return false; }
 }
 
 /** How many full-window layers are open; App lets Android Back close the top one. */

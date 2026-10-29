@@ -48,6 +48,8 @@ async function open(page: Page) {
           case 'journal_config': return { hub: 'test' };
           case 'refresh': return { pubkey: 'a'.repeat(64), total_items: 1, channel_errors: {}, truncated_channels: [] };
           case 'media_stream': return { sha: MP4, url: `${location.origin}/__t258/clip.webm` };
+          // T-335: the desktop window's full screen (the test may say it is full screen already)
+          case 'plugin:window|is_fullscreen': return !!w.windowFull;
           // Android Back: the app registers a handler; the test calls it as the system would.
           case 'plugin:app|register_listener': if (args?.event === 'back-button') w.backs.push(args.handler); return 1;
           default: return null;
@@ -164,4 +166,70 @@ test('Android Back closes the full-screen video and stays in the room', async ({
   await page.evaluate(() => { const w = window as any; w.backs[w.backs.length - 1].onmessage({ canGoBack: false }); });
   await expect(layer(page)).toBeHidden();
   await expect(page.getByText('A walk round the garden')).toBeVisible();
+});
+
+// T-335: a Mac had no full screen for a video. Where the webview allows it, the layer takes the screen itself; where it
+// refuses (WKWebView without `fullScreenEnabled`), the window goes full screen and comes back; Android is never asked.
+const android = () => /Android/i.test(test.info().project.use.userAgent ?? '');
+const windowCalls = (page: Page) => page.evaluate(() => (window as any).calls.filter((c: any) => c.cmd === 'plugin:window|set_fullscreen').map((c: any) => c.args.value));
+
+test('T-335: on desktop the full-screen video takes the screen, and leaving it closes the layer', async ({ page }) => {
+  test.skip(android(), 'Android: the layer is the full screen');
+  await open(page);
+  await press(page.getByRole('button', { name: 'Full screen: garden walk.webm' }));
+  const full = layer(page);
+  await expect(full).toBeVisible();
+  await expect.poll(() => page.evaluate(() => document.fullscreenElement?.classList.contains('video-full') ?? false)).toBe(true);
+  expect(await windowCalls(page)).toEqual([]);
+  // the platform's own way out (a Mac's Esc, the green button) closes the layer with it
+  await page.evaluate(() => document.exitFullscreen());
+  await expect(full).toBeHidden();
+  await expect(page.locator('video.attachment-video')).toBeVisible();
+});
+
+test('T-335: where the webview refuses full screen, the window goes full screen and comes back on close', async ({ page }) => {
+  test.skip(android(), 'Android: the layer is the full screen');
+  // a Mac before T-335: WKWebView without `fullScreenEnabled` says no full screen at all
+  await page.addInitScript(() => { Object.defineProperty(Document.prototype, 'fullscreenEnabled', { get: () => false }); });
+  await open(page);
+  await press(page.getByRole('button', { name: 'Full screen: garden walk.webm' }));
+  await expect(layer(page)).toBeVisible();
+  await expect.poll(() => windowCalls(page)).toEqual([true]);
+  expect(await page.evaluate(() => document.fullscreenElement)).toBeNull();
+  await page.keyboard.press('Escape');
+  await expect(layer(page)).toBeHidden();
+  await expect.poll(() => windowCalls(page)).toEqual([true, false]);
+});
+
+test('T-335: a window already full screen is left full screen when the video closes', async ({ page }) => {
+  test.skip(android(), 'Android: the layer is the full screen');
+  await page.addInitScript(() => { Object.defineProperty(Document.prototype, 'fullscreenEnabled', { get: () => false }); });
+  await open(page);
+  await page.evaluate(() => { (window as any).windowFull = true; });
+  await press(page.getByRole('button', { name: 'Full screen: garden walk.webm' }));
+  await expect(layer(page)).toBeVisible();
+  await page.waitForTimeout(200);
+  await page.keyboard.press('Escape');
+  await expect(layer(page)).toBeHidden();
+  await page.waitForTimeout(200);
+  expect(await windowCalls(page)).toEqual([]);
+});
+
+test('T-335: on Android the layer stays up (its WebView would enter and leave full screen at once)', async ({ page }) => {
+  test.skip(!android(), 'Android only');
+  // wry's RustWebChromeClient: every request enters, then is cancelled straight away
+  await page.addInitScript(() => {
+    Element.prototype.requestFullscreen = function (this: Element) {
+      (window as any).asked = true;
+      document.dispatchEvent(new Event('fullscreenchange'));
+      return Promise.resolve();
+    };
+  });
+  await open(page);
+  await press(page.getByRole('button', { name: 'Full screen: garden walk.webm' }));
+  await expect(layer(page)).toBeVisible();
+  await page.waitForTimeout(400);
+  await expect(layer(page)).toBeVisible();
+  expect(await page.evaluate(() => (window as any).asked ?? false)).toBe(false);
+  expect(await windowCalls(page)).toEqual([]);
 });

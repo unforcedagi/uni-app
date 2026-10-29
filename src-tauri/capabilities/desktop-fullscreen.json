@@ -1,0 +1,8 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "desktop-fullscreen",
+  "description": "T-335: a full-screen video takes the whole window full screen where the webview refuses its own full screen, and gives it back on close.",
+  "platforms": ["macOS", "linux", "windows"],
+  "windows": ["main"],
+  "permissions": ["core:window:allow-set-fullscreen", "core:window:allow-is-fullscreen"]
+}

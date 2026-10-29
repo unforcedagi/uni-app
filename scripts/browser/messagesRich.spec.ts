@@ -5,6 +5,8 @@
 // made-up people and sounds (no homeserver); what the app does with them is its own.
 // Run: npx playwright test --config playwright.messagestabs.config.ts messagesRich
 import { expect, test, type Page } from '@playwright/test';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAEAAAAAwCAIAAAAuKetIAAAAf0lEQVR42u3PsQmAMBRFUcdxCIdwHCdxOmtrRxBBECXEpPJLDrzyvuJ0y7r9eh0AAAAAAAAAAAAAQLuAYR6qDtH6A1D1idafgPJPtP4CFH6i9TdAySda/wS8fqL1CUD+E61PAzKfaD0AAAAAQOOAaex/PQAAAAAAAAAAAIDvtgO+CzGaBKHRAgAAAABJRU5ErkJggg==';
 const WORDS = 'Bring the green umbrella, it might rain later.';
@@ -80,6 +82,7 @@ async function boot(page: Page, signedOut = false, photos = 0, photoBytes = 0) {
           case 'messages_media': {
             const row = w.__thread.find((r: any) => r.event_id === args.eventId);
             await new Promise((r) => setTimeout(r, 50));
+            if (row?.media?.kind === 'video' && w.__clip) return w.__clip.slice(0); // T-335: a real clip, when the test gives one
             if (row?.media?.kind !== 'image') return tone.slice(0); // a video here is the same sound: the browser plays it
             if (!padTo) return picture.slice(0);
             const big = new Uint8Array(padTo as number);
@@ -346,4 +349,50 @@ test('Codex 9b8p17d9 review: a photo open large keeps its picture while its mess
   await scrollThrough(page);
   expect(await page.evaluate((u) => (window as any).__live.has(u), src)).toBe(true);
   await expect.poll(() => large.locator('img').evaluate((i: HTMLImageElement) => i.complete && i.naturalWidth)).toBe(64);
+});
+
+test('T-335: a video in a conversation opens full screen and comes back where it stopped', async ({ page }) => {
+  await boot(page, false, 30);
+  // a real (made-up) clip in place of the tone, so there is a picture to fill the screen with
+  const clip = readFileSync(fileURLToPath(new URL('./fixtures/t258-clip.webm', import.meta.url))).toString('base64');
+  await page.evaluate((b64) => { (window as any).__clip = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)).buffer; }, clip);
+  const touch = test.info().project.name !== 'desktop';
+  const press = (l: ReturnType<Page['locator']>) => (touch ? l.tap() : l.click());
+  const video = msg(page, '$e11');
+  await video.scrollIntoViewIfNeeded();
+  await press(video.getByRole('button', { name: /^Play video/ }));
+  const inline = video.locator('video');
+  await expect.poll(() => inline.evaluate((v: HTMLVideoElement) => !v.paused && v.currentTime)).toBeGreaterThan(0.3);
+  await inline.evaluate((v: HTMLVideoElement) => { v.pause(); v.currentTime = 2.5; });
+  // the control sits with the video, in reach
+  const go = video.getByRole('button', { name: 'Full screen: walk.webm' });
+  await expect(go).toBeVisible();
+  await press(go);
+  const full = page.getByRole('dialog', { name: 'walk.webm, full screen' });
+  await expect(full).toBeVisible();
+  const player = full.locator('video');
+  await expect.poll(() => player.evaluate((v: HTMLVideoElement) => v.readyState)).toBeGreaterThanOrEqual(1);
+  const vp = page.viewportSize()!;
+  const box = (await player.boundingBox())!;
+  expect(Math.round(box.width)).toBe(vp.width);
+  expect(Math.round(box.height)).toBe(vp.height);
+  expect(await player.evaluate((v: HTMLVideoElement) => v.currentTime)).toBeCloseTo(2.5, 1);
+  // a desktop webview takes the screen; the Daylight's (Android) is never asked, the layer is its full screen
+  const android = /Android/i.test(test.info().project.use.userAgent ?? '');
+  await expect.poll(() => page.evaluate(() => document.fullscreenElement?.classList.contains('video-full') ?? false)).toBe(!android);
+  // the conversation under it moves on (new pictures load): the clip full screen is still held, and plays
+  await log(page).evaluate((l) => { l.scrollTop = l.scrollHeight; });
+  await page.waitForTimeout(300);
+  const src = await player.getAttribute('src');
+  expect(await page.evaluate((u) => (window as any).__live.has(u), src)).toBe(true);
+  await player.evaluate(async (v: HTMLVideoElement) => { v.muted = true; v.currentTime = 3; await v.play(); });
+  await expect.poll(() => player.evaluate((v: HTMLVideoElement) => !v.paused && v.currentTime)).toBeGreaterThan(3.1);
+  await player.evaluate((v: HTMLVideoElement) => { v.pause(); v.currentTime = 4; });
+  // Escape brings it back to the message, paused where it stopped, and the screen is the app's again
+  await page.keyboard.press('Escape');
+  await expect(full).toBeHidden();
+  await expect.poll(() => page.evaluate(() => document.fullscreenElement)).toBeNull();
+  await video.scrollIntoViewIfNeeded();
+  await expect.poll(() => inline.evaluate((v: HTMLVideoElement) => v.currentTime)).toBeGreaterThan(3.9);
+  expect(await inline.evaluate((v: HTMLVideoElement) => v.paused)).toBe(true);
 });

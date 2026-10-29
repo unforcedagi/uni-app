@@ -18,7 +18,9 @@ tauri-build = { version = "2.0", features = [] }
 [dependencies]
 uni-core = { workspace = true }
 uni-messages = { path = "../crates/uni-messages", optional = true }
-tauri = { version = "2.4", features = [] }
+# T-335: `macos-private-api` (with `app.macOSPrivateApi` in tauri.conf.json) turns on wry's `fullscreen`, which sets
+# WKWebView's `fullScreenEnabled`. Without it a Mac has no full screen for a video at all. Not for the App Store; Uni isn't.
+tauri = { version = "2.4", features = ["macos-private-api"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 url = { workspace = true }

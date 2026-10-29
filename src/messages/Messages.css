@@ -137,6 +137,7 @@
 .msgs-picture-wait { display: grid; place-items: center; height: 100%; padding: 8px; font-size: 13px; border: 1.5px dashed var(--line-strong, var(--line)); border-radius: inherit; box-sizing: border-box; }
 .msgs-video-box { max-width: 100%; }
 .msgs-video { display: block; max-width: 100%; border-radius: calc(var(--radius) - 4px); background: #000; }
+.msgs-video-full { margin-top: 6px; }
 .msgs-video-wait { display: flex; align-items: center; justify-content: center; gap: 8px; max-width: 100%; padding: 8px; border: 1.5px dashed currentColor; border-radius: calc(var(--radius) - 4px); background: transparent; color: inherit; font-size: 14px; }
 .msgs-file { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; min-width: min(260px, 64vw); padding: 4px; }
 .msgs-file-mark { display: grid; place-items: center; width: 42px; height: 50px; border: 1.5px solid currentColor; border-radius: 4px 12px 4px 4px; font: 700 10.5px/1 var(--th-mono, var(--mono)); letter-spacing: .04em; }

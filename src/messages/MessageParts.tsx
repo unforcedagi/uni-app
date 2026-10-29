@@ -5,6 +5,7 @@
 // nothing animates, so it reads on the Daylight.
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import { VideoFull } from "../Attachments";
 import { holdMedia, knownWords, mediaUrl, openFile, wordsFor } from "./messagesDoor.ts";
 import { asMessagesErr, clock, fileLine, foldedStart, linkify, mediaShape, pictureBox, pictureSize, reactionName, sizeWords, type Media, type MessageRow, type Reaction, type Reply } from "./messagesView.ts";
 
@@ -176,22 +177,38 @@ function Picture({ roomId, eventId, media, onOpen }: { roomId: string; eventId: 
   </button>;
 }
 
-/** A video plays inline once tapped (fetched then). */
+/** A video plays inline once tapped (fetched then). T-335: Full screen opens it in the same layer as an attached video. */
 function Video({ roomId, eventId, media }: { roomId: string; eventId: string; media: Media }) {
   const [want, setWant] = useState(false);
   const [ref, onScreen] = useOnScreen<HTMLDivElement>();
   const [playing, setPlaying] = useState(false);
-  // held while it plays or is on screen; paused off screen it's let go, and comes back paused where it was
-  const { url, problem, retry } = useMediaUrl(roomId, eventId, media.mime, want && (onScreen || playing));
+  const [full, setFull] = useState<{ at: number; playing: boolean } | null>(null);
+  // held while it plays, is on screen or is full screen; paused off screen it's let go, and comes back paused where it was
+  const { url, problem, retry } = useMediaUrl(roomId, eventId, media.mime, want && (onScreen || playing || !!full));
   /** Play once it's here: only right after a tap, never because it scrolled back into view. */
   const start = useRef(false);
   const left = useRef(0);
+  const inline = useRef<HTMLVideoElement>(null);
   const box = pictureBox(media);
+  const name = media.name || "video";
   useEffect(() => { if (!url) setPlaying(false); }, [url]);
-  return <div ref={ref} className="msgs-video-box">{url ? <video className="msgs-video" src={url} controls playsInline width={box.width}
-    onLoadedMetadata={(e) => { const v = e.currentTarget; if (left.current > 0) v.currentTime = left.current; if (start.current) { start.current = false; playOnly(v); void v.play().catch(() => {}); } }}
-    onTimeUpdate={(e) => { left.current = e.currentTarget.currentTime; }}
-    onPlay={(e) => { playOnly(e.currentTarget); setPlaying(true); }} onPause={() => setPlaying(false)} onEnded={() => { setPlaying(false); left.current = 0; }} />
+  // full screen carries on from here (playing if it was), and back here paused where it stopped, so only one plays
+  const openFull = () => {
+    const v = inline.current;
+    const was = !!v && !v.paused && !v.ended;
+    v?.pause();
+    setFull({ at: v?.currentTime ?? left.current, playing: was });
+  };
+  const closeFull = (at: number) => { setFull(null); left.current = at; requestAnimationFrame(() => { if (inline.current) inline.current.currentTime = at; }); };
+  return <div ref={ref} className="msgs-video-box">{url ? <>
+    <video ref={inline} className="msgs-video" src={url} controls playsInline width={box.width}
+      onLoadedMetadata={(e) => { const v = e.currentTarget; if (left.current > 0) v.currentTime = left.current; if (start.current) { start.current = false; playOnly(v); void v.play().catch(() => {}); } }}
+      onTimeUpdate={(e) => { left.current = e.currentTarget.currentTime; }}
+      onPlay={(e) => { playOnly(e.currentTarget); setPlaying(true); }} onPause={() => setPlaying(false)} onEnded={() => { setPlaying(false); left.current = 0; }} />
+    <button type="button" className="note-action msgs-video-full" aria-label={`Full screen: ${name}`} onClick={openFull}>⛶ Full screen</button>
+    {full && <VideoFull src={url} name={name} at={full.at} playing={full.playing} onClose={closeFull}
+      events={{ onPlay: (e) => playOnly(e.currentTarget), onError: () => setFull(null) }} />}
+  </>
   : <button type="button" className="msgs-video-wait" style={{ width: box.width, height: url ? undefined : box.height }} disabled={want && onScreen && !problem} onClick={() => { start.current = true; setWant(true); if (problem) retry(); }}>
     <span aria-hidden="true">▶</span> {problem ? "Couldn't load the video. Try again" : want && onScreen ? "Loading the video…" : `Play video${media.duration_ms ? `, ${clock(media.duration_ms / 1000)}` : ""}${media.size ? ` (${sizeWords(media.size)})` : ""}`}
   </button>}</div>;

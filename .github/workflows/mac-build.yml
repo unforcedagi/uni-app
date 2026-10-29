@@ -108,6 +108,9 @@ jobs:
           [[ $(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist") == "$VERSION" ]]
           codesign --verify --deep --strict "$app"
           codesign -dr - "$app" 2>&1 | grep -qi "$SIGN_ID"
+          # T-335: a video's full screen on a Mac needs WKWebView's fullScreenEnabled, which wry sets only when built
+          # with tauri's macos-private-api (tauri.conf.json macOSPrivateApi). The key is in the binary only then.
+          grep -aq fullScreenEnabled "$app"/Contents/MacOS/* || { echo 'Uni.app is built without fullScreenEnabled (macOSPrivateApi)'; exit 1; }
           mkdir -p mac-output
           ditto -c -k --keepParent "$app" mac-output/Uni-mac-arm64.zip
           cp target/release/bundle/macos/Uni.app.tar.gz{,.sig} mac-output/
