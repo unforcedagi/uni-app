@@ -64,6 +64,7 @@ test('the front door counts what waits; the queue shows each post as it will loo
   await expect(page.locator('.tp-posted')).toContainText('Posted · open');
   // the X copy failed: said on its own line; the Bluesky post stands (the poster never posts it again)
   await expect(page.locator('.tp-posted .tp-failed')).toHaveText('The X copy didn\'t post: X 503: Service Unavailable');
+  if (process.env.T335_SHOTS) await page.locator('.tp-posted').screenshot({ path: `${process.env.T335_SHOTS}/${test.info().project.name}-x-copy-failed.png` });
   if (process.env.T335_SHOTS) await page.screenshot({ path: `${process.env.T335_SHOTS}/${test.info().project.name}-queue.png`, fullPage: true });
 });
 
