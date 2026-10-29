@@ -128,6 +128,9 @@ setInterval(() => { uni.chat.draft('INJECTED BY APP ' + Date.now()).catch(() => 
 type Variant = 'seed' | 'test';
 
 export type BootOpts = {
+  /** T-335: rooms start with these unread counts (by room id; `at`: one of them mentions you), and the fixture keeps count like the store does:
+   *  a message from someone else adds one, `mark_read` clears the room. Absent: every room reads 0 and nothing is counted (the older specs). */
+  unread?: Record<string, number | { n: number; at?: boolean }>;
   /** Metadata of the vault's `.parachute/life-os` profile note (e.g. `{ chat: { provider: null } }`); absent: no profile note, Uni's own profile. */
   profileNote?: Record<string, unknown>;
   /** Open the Life OS surface on this other vault (the fixture answers its vault calls from the uni data; no profile note = the pack defaults, chat null). */
@@ -247,7 +250,7 @@ export async function bootAreas(page: Page, variant: Variant = 'seed', opts: Boo
   const now = Math.floor((opts.pinned ? pinnedAt : Date.now()) / 1000);
   const data = {
     profileNote: opts.profileNote ?? null, lifeVault: opts.lifeVault ?? null, now, variant, selftest: opts.selftest ?? true, ipcLeak: opts.ipcLeak ?? false, hostile: hostileApp(opts.ports ?? { http: 9, udp: 9 }), benign: BENIGN, techne: seed('techne'), unforced: seed('unforced'), seedMeta,
-    apps: opts.apps ?? [], multiRoom: !!opts.multiRoom || !!opts.tree, tree: !!opts.tree, tasks: !!opts.tasks, briefs: !!opts.briefs, queryDelay: opts.queryDelay ?? 0, identityDelay: opts.identityDelay ?? 0, identityFails: opts.identityFails ?? 0, roomsDelay: opts.roomsDelay ?? 0, messagesDelay: opts.messagesDelay ?? 0, nodeStatuses: opts.nodeStatuses ?? {}, nearOff: !!opts.nearOff, ids: !!opts.ids, boulder: !!opts.boulder, savedLayout: opts.savedLayout ?? null, strayRoom: !!opts.strayRoom, thread: !!opts.thread, manyTasks: opts.manyTasks ?? 0, uniMember: !!opts.uniMember, twins: !!opts.twins, underBoulder: !!opts.underBoulder, priya: !!opts.priya, links: !!opts.links, atlas: !!opts.atlas, garden: !!opts.garden, steer: !!opts.steer, longChat: !!opts.longChat, longNext: !!opts.longNext, bareTask: !!opts.bareTask, cutDecision: !!opts.cutDecision, cutNoAsk: !!opts.cutNoAsk, longAsk: !!opts.longAsk, previewAsk: !!opts.previewAsk, crowded: !!opts.crowded, ulidNext: !!opts.ulidNext, vaultNotes: !!opts.vaultNotes, pastDue: !!opts.pastDue, tallLast: !!opts.tallLast, privateTasks: !!opts.privateTasks, deviceCache: opts.deviceCache ?? null, queryFails: opts.queryFails ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null, mode: opts.mode ?? 'sealed', grantedUnder: opts.grantedUnder ?? (opts.mode ?? 'sealed'),
+    apps: opts.apps ?? [], multiRoom: !!opts.multiRoom || !!opts.tree, tree: !!opts.tree, tasks: !!opts.tasks, briefs: !!opts.briefs, queryDelay: opts.queryDelay ?? 0, identityDelay: opts.identityDelay ?? 0, identityFails: opts.identityFails ?? 0, roomsDelay: opts.roomsDelay ?? 0, messagesDelay: opts.messagesDelay ?? 0, nodeStatuses: opts.nodeStatuses ?? {}, nearOff: !!opts.nearOff, ids: !!opts.ids, boulder: !!opts.boulder, savedLayout: opts.savedLayout ?? null, strayRoom: !!opts.strayRoom, thread: !!opts.thread, manyTasks: opts.manyTasks ?? 0, uniMember: !!opts.uniMember, twins: !!opts.twins, underBoulder: !!opts.underBoulder, priya: !!opts.priya, links: !!opts.links, atlas: !!opts.atlas, garden: !!opts.garden, steer: !!opts.steer, longChat: !!opts.longChat, longNext: !!opts.longNext, bareTask: !!opts.bareTask, cutDecision: !!opts.cutDecision, cutNoAsk: !!opts.cutNoAsk, longAsk: !!opts.longAsk, previewAsk: !!opts.previewAsk, crowded: !!opts.crowded, ulidNext: !!opts.ulidNext, vaultNotes: !!opts.vaultNotes, pastDue: !!opts.pastDue, tallLast: !!opts.tallLast, privateTasks: !!opts.privateTasks, deviceCache: opts.deviceCache ?? null, queryFails: opts.queryFails ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, unread: opts.unread ?? null, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null, mode: opts.mode ?? 'sealed', grantedUnder: opts.grantedUnder ?? (opts.mode ?? 'sealed'),
   };
   // Pre-granted apps: the grant key is the SHA-256 of the RESOLVED default needs plus the app's html.
   const preGrant = [
@@ -409,7 +412,12 @@ Two proposals wait on a scope decision.
     if (d.strayRoom) msgs['ch-garden'] = [msg('g1', 'ch-garden', 'Uni', 7200, 'Seed order is in for the spring beds.'), msg('g2', 'ch-garden', 'Aaron', 3600, 'Thanks. Ask about the compost delivery too.')];
     const lastOf = (c: string) => msgs[c]?.[msgs[c].length - 1];
     const room = (id: string, name: string, unread = 0) => ({ id, name, unread, mentions: false, last_message: lastOf(id)?.body ?? null, last_ts: lastOf(id)?.ts ?? null });
-    const rooms = [room('uni-room', 'Uni'), room('ch-techne', 'Techne'), ...(d.multiRoom ? [room('ch-cohere', 'Cohere')] : []), room('ch-unf', 'Unforced Dev'), room('ch-sad', 'Sanctum'), room('ch-atlas', 'Atlas'), room('ch-exp', 'Expression'), ...(d.strayRoom ? [room('ch-garden', 'garden-club')] : [])];
+    const rooms: any[] = [room('uni-room', 'Uni'), room('ch-techne', 'Techne'), ...(d.multiRoom ? [room('ch-cohere', 'Cohere')] : []), room('ch-unf', 'Unforced Dev'), room('ch-sad', 'Sanctum'), room('ch-atlas', 'Atlas'), room('ch-exp', 'Expression'), ...(d.strayRoom ? [room('ch-garden', 'garden-club')] : [])];
+    // T-335: the store's unread count, when a spec asks for it (`unread`): seeded per room, one more per message from someone else, cleared by mark_read
+    if (d.unread) for (const r of rooms) { const u = d.unread[r.id]; if (u !== undefined) { r.unread = typeof u === 'number' ? u : u.n; r.mentions = typeof u === 'number' ? false : !!u.at; } }
+    const announceRooms = () => { for (const h of w.__listeners['uni://live'] ?? []) w.__cbs[h]?.({ event: 'uni://live', id: 1, payload: { kind: 'rooms' } }); };
+    /** T-335: a message that names you, in a room you are not in (the store's `mentions_me`): the room's count goes up and it is marked as mentioning you. */
+    w.__mention = (channel: string, name: string, body: string) => { const ref = w.__arrive(channel, name, body); const r = rooms.find((x) => x.id === channel); if (r && r.unread > 0) r.mentions = true; announceRooms(); return ref; };
     // A message arriving over the live socket: stored, then announced like the real `uni://live` event.
     // r18: `ago` (seconds) and `edited` give a message from earlier (a progress ping from Monday)
     // T-161: `root`: the message arrives as a reply in that message's thread (kept out of the room's timeline, as the store does)
@@ -417,7 +425,7 @@ Two proposals wait on a scope decision.
       const m = { ...msg('live' + Math.random().toString(36).slice(2, 8), channel, name, ago, body), edited, root, parent: root };
       (msgs[channel] ??= []).push(m);
       if (root) { const top = msgs[channel].find((x: any) => x.ref === root); (threads[root] ??= top ? [top] : []).push(m); if (top) top.reply_count += 1; }
-      const r = rooms.find((x) => x.id === channel); if (r) { r.last_message = body; r.last_ts = m.ts; }
+      const r = rooms.find((x) => x.id === channel); if (r) { r.last_message = body; r.last_ts = m.ts; if (d.unread && m.author !== U) r.unread += 1; }
       for (const h of w.__listeners['uni://live'] ?? []) w.__cbs[h]?.({ event: 'uni://live', id: 1, payload: { kind: 'message', channel, author: m.author } });
       return m.ref;
     };
@@ -559,7 +567,7 @@ Two proposals wait on a scope decision.
           case 'identity_status': if ((w.__identityFails = (w.__identityFails ?? d.identityFails) - 1) >= 0) throw 'keyring: platform failure'; return { paired: true, pubkey: U };
           case 'get_identity': if (d.identityDelay) await new Promise((r) => setTimeout(r, d.identityDelay)); return U;
           case 'get_npub': return 'test';
-          case 'get_rooms': if (d.roomsDelay) await new Promise((r) => setTimeout(r, d.roomsDelay)); w.__roomsResolved = true; return rooms;
+          case 'get_rooms': if (d.roomsDelay) await new Promise((r) => setTimeout(r, d.roomsDelay)); w.__roomsResolved = true; return d.unread ? rooms.map((r) => ({ ...r })) : rooms; // T-335: fresh rows, like the store, so a changed count re-renders
           case 'get_messages': if (args.limit === 200 && w.__lookupDelay) await new Promise((r) => setTimeout(r, w.__lookupDelay)); if (args.limit === 200 && w.__lookupFails) throw 'relay unreachable'; if (d.messagesDelay) await new Promise((r) => setTimeout(r, d.messagesDelay)); return args.root ? threads[args.root] ?? [] : (msgs[args.channel] ?? []).filter((m: any) => !m.root && !(args.limit === 200 && !String(m.ref).startsWith('live'))).slice(-(args.limit ?? 300));
           // T-161: like the store's query: each room with an approval prompt (not the user's) in the last day, from its oldest prompt on
           case 'approval_messages': return Object.values(msgs).flatMap((list: any[]) => { const i = list.findIndex((m) => m.author !== U && String(m.body).includes('deny` to cancel.') && m.ts >= Date.now() / 1000 - 86400); return i < 0 ? [] : list.slice(i); });
@@ -690,6 +698,8 @@ Two proposals wait on a scope decision.
           case 'search_messages': return [];
           case 'journal_flush': return w.__flushReport ?? { sent: [], remaining: 0, error: null };
           case 'refresh': if (d.identityDelay) await new Promise((r) => setTimeout(r, d.identityDelay)); return { pubkey: U, total_items: 0, channel_errors: {}, truncated_channels: [] };
+          // T-335: like the store: the room's marker moves to its newest message, so nothing in it is unread (and the rooms list is re-read)
+          case 'mark_read': { if (d.unread) { const r = rooms.find((x) => x.id === args.channel); if (r) { r.unread = 0; r.mentions = false; } } return null; }
           default: return null;
         }
       },

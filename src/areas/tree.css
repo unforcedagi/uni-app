@@ -805,3 +805,13 @@
 .cp-approval-why, .cp-approval-how { color: var(--th-mute); font-size: 12.5px; overflow-wrap: anywhere; }
 .cp-approval-open:hover .cp-approval-lead, .cp-approval-open:focus-visible .cp-approval-lead { text-decoration: underline; text-underline-offset: 3px; }
 .th-approvals { margin: 0 0 10px !important; padding: 0; }
+/* T-335: a room's new messages, a small count at the row's end: outlined, filled when one mentions you, dashed when it is inside a folded area */
+.th-new { flex: none; min-width: 22px; height: 20px; padding: 0 6px; box-sizing: border-box; display: inline-grid; place-items: center; border: 1.5px solid var(--th-ink); border-radius: 10px; font: 700 11.5px/1 var(--th-sans); font-variant-numeric: tabular-nums; color: var(--th-ink); background: var(--th-card); }
+.th-new.at { background: var(--th-ink); color: var(--th-card); }
+.th-new.inside { border-style: dashed; border-color: var(--th-ink2); color: var(--th-ink2); background: none; font-weight: 600; }
+.th-new.inside.at { border-style: solid; }
+.th-go:has(.th-new:not(.inside)) .th-name b { color: var(--th-ink); }
+.th-new + .th-dot { margin-left: -2px; }
+/* T-335: the Places button (below 900px) carries a mark when another room has something new */
+.sr-drawer { position: relative; }
+.sr-drawer-new { position: absolute; top: 9px; right: 8px; width: 9px; height: 9px; border-radius: 50%; background: var(--th-ink); box-shadow: 0 0 0 2px var(--th-paper); }

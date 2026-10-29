@@ -7,6 +7,7 @@ import type { NavControls } from "../navContext";
 import { useSidebarView, ancestorsOf, hasKids, isOpen, recentLabels, RECENT_FULL_PX, rolledNeeds, SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN, useFolds, useSidebar, visibleRows } from "./sidebarState";
 import type { TaskLoad } from "./Companion";
 import { LoadHealth } from "./LoadHealth";
+import { rolledUnread, unreadShort, unreadWords, type Unread } from "./roomUnread";
 
 // ---------------------------------------------------------------------------------------------- the phone's tree
 
@@ -24,14 +25,21 @@ export type TreeProps = {
   others?: readonly OtherRoom[]; selectedRoom?: string; onOpenRoom?: (id: string) => void;
   /** Whether the dots can be trusted: a failed first load says so (no dots at all), a failed refresh keeps them with a quiet Retry. */
   load?: TaskLoad; needsReady?: boolean;
+  /** T-335: what is new in each row's own room (by node path), and in each of the "Other rooms" (by room id), with what needs you there. */
+  unread?: ReadonlyMap<string, Unread>; otherUnread?: ReadonlyMap<string, Unread>; otherNeeds?: ReadonlyMap<string, number>;
 };
+
+/** T-335: a room's new messages, as a small count at the row's end (filled when one mentions you; hollow when it is inside a folded area). */
+const NewCount = ({ u, inside = false }: { u: Unread; inside?: boolean }) =>
+  <span className={`th-new${u.mention ? " at" : ""}${inside ? " inside" : ""}`} title={inside ? `${unreadWords(u)} inside` : unreadWords(u)} aria-hidden="true">{unreadShort(u.n)}</span>;
+const newWords = (u: Unread | null, inside: boolean) => (u ? `, ${inside ? `${u.n} new inside${u.mention ? ", mentions you" : ""}` : unreadWords(u)}` : "");
 
 /**
  * The rooms list: Uni, then every area with its projects beneath, then "Other rooms". A row is the node's name; the room line under it is
  * the room's real channel name (nothing for a node with no room of its own). Areas fold: the chevron folds, the name opens. A folded row
  * still shows the dot when anything under it needs you.
  */
-export function RoomTree({ chat = true, rows, needs, onOpen, selected, others = [], selectedRoom, onOpenRoom }: TreeProps) {
+export function RoomTree({ chat = true, rows, needs, onOpen, selected, others = [], selectedRoom, onOpenRoom, unread, otherUnread, otherNeeds }: TreeProps) {
   const [folds, setFold, reveal] = useFolds();
   const inOthers = !!selectedRoom && others.some((o) => o.id === selectedRoom);
   const key = [...ancestorsOf(rows, selected), ...(inOthers ? [OTHER_ROOMS] : [])].join("\n");
@@ -47,6 +55,10 @@ export function RoomTree({ chat = true, rows, needs, onOpen, selected, others = 
     const inside = !open && rolledNeeds(rows, needs, i) - n > 0;
     const dot = n > 0 || inside;
     const dotTitle = n > 0 ? (inside ? "Needs you, and so does something inside" : "Needs you") : "Something inside needs you";
+    // T-335: an open row shows its own room's new messages (its rows below carry theirs); a folded one, everything inside it too
+    const ownNew = unread?.get(r.path) ?? null;
+    const shownNew = unread ? (open ? ownNew : rolledUnread(rows, unread, i)) : null;
+    const newInside = !!shownNew && !ownNew;
     const sub = chat && r.own && r.slash ? `#${r.slash}` : "";
     const heldBy = chat && !r.own && r.heldBy ? `in #${r.heldBy}` : "";
     return <li key={r.key} className={`th-row d${Math.min(r.depth, 4)} ${selected === r.path ? "sel" : ""} ${kids ? "has-kids" : ""}`} data-open={kids ? String(open) : undefined}>
@@ -54,23 +66,37 @@ export function RoomTree({ chat = true, rows, needs, onOpen, selected, others = 
         ? <button type="button" className="th-fold" data-path={r.path} aria-expanded={open} aria-label={`${open ? "Fold" : "Unfold"} ${r.name}`} title={`${open ? "Hide" : "Show"} what is inside ${r.name} (${kidCount(rows, i)})`} onClick={() => setFold(r.path, !open)}><i aria-hidden="true" /></button>
         : <span className="th-fold-gap" aria-hidden="true" />)}
       <button type="button" className="th-go" data-path={r.path} data-via={r.via ?? undefined} aria-current={selected === r.path ? "page" : undefined} onClick={() => onOpen(r.path, r.via)} title={heldBy || undefined}
-        aria-label={`${r.name}${chat ? `, ${sub ? `room ${sub}` : "no channel of its own"}` : ""}${dot ? `, ${n ? `${n} need${n === 1 ? "s" : ""} you` : "something inside needs you"}` : ""}`}>
+        aria-label={`${r.name}${chat ? `, ${sub ? `room ${sub}` : "no channel of its own"}` : ""}${dot ? `, ${n ? `${n} need${n === 1 ? "s" : ""} you` : "something inside needs you"}` : ""}${newWords(shownNew, newInside)}`}>
         <span className="th-name"><b>{r.name}</b>{sub && <small className="th-sub">{sub}</small>}</span>
+        {shownNew && <NewCount u={shownNew} inside={newInside} />}
         {dot && <i className={`th-dot ${n > 0 ? "" : "inside"}`} title={dotTitle} aria-hidden="true" />}
       </button>
     </li>;
   })}
-  {others.length > 0 && <li className="th-row th-others d1 has-kids" data-open={String(othersOpen)}>
+  {others.length > 0 && (() => {
+    const folded = othersNew(others, otherUnread); const need = others.some((o) => (otherNeeds?.get(o.id) ?? 0) > 0);
+    return <li className="th-row th-others d1 has-kids" data-open={String(othersOpen)}>
     <button type="button" className="th-fold" data-path={OTHER_ROOMS} aria-expanded={othersOpen} aria-label={`${othersOpen ? "Fold" : "Unfold"} Other rooms`} title={othersOpen ? "Fold" : "Unfold"} onClick={() => setFold(OTHER_ROOMS, !othersOpen)}><i aria-hidden="true" /></button>
-    <button type="button" className="th-go th-others-go" aria-label={`Other rooms, ${others.length} not filed under an area`} onClick={() => setFold(OTHER_ROOMS, !othersOpen)}><span className="th-name"><b>Other rooms</b></span></button>
-  </li>}
-  {othersOpen && others.map((o) => <li key={`room:${o.id}`} className={`th-row th-other d2 ${selectedRoom === o.id ? "sel" : ""}`}>
+    <button type="button" className="th-go th-others-go" aria-label={`Other rooms, ${others.length} not filed under an area${!othersOpen && need ? ", something inside needs you" : ""}${othersOpen ? "" : newWords(folded, true)}`} onClick={() => setFold(OTHER_ROOMS, !othersOpen)}><span className="th-name"><b>Other rooms</b></span>
+      {!othersOpen && folded && <NewCount u={folded} inside />}{!othersOpen && need && <i className="th-dot inside" title="Something inside needs you" aria-hidden="true" />}</button>
+  </li>;
+  })()}
+  {othersOpen && others.map((o) => { const u = otherUnread?.get(o.id) ?? null; const k = otherNeeds?.get(o.id) ?? 0;
+    return <li key={`room:${o.id}`} className={`th-row th-other d2 ${selectedRoom === o.id ? "sel" : ""}`}>
     <span className="th-fold-gap" aria-hidden="true" />
-    <button type="button" className="th-go" data-room={o.id} aria-current={selectedRoom === o.id ? "page" : undefined} aria-label={`#${roomSlug(o.name)}, not filed under an area`} onClick={() => onOpenRoom?.(o.id)}>
+    <button type="button" className="th-go" data-room={o.id} aria-current={selectedRoom === o.id ? "page" : undefined} aria-label={`#${roomSlug(o.name)}, not filed under an area${k ? `, ${k} need${k === 1 ? "s" : ""} you` : ""}${newWords(u, false)}`} onClick={() => onOpenRoom?.(o.id)}>
       <span className="th-name"><b>#{roomSlug(o.name)}</b></span>
+      {u && <NewCount u={u} />}{k > 0 && <i className="th-dot" title="Needs you" aria-hidden="true" />}
     </button>
-  </li>)}
+  </li>; })}
   </ul></nav>;
+}
+
+/** Everything new in the "Other rooms" together, for the folded group's count. */
+function othersNew(others: readonly OtherRoom[], by: ReadonlyMap<string, Unread> | undefined): Unread | null {
+  let n = 0, mention = false;
+  for (const o of others) { const u = by?.get(o.id); if (u) { n += u.n; mention ||= u.mention; } }
+  return n > 0 ? { n, mention } : null;
 }
 
 /** How many rows sit directly inside row `i` (a chevron is only drawn when there are some). */

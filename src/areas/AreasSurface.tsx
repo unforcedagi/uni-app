@@ -19,10 +19,11 @@ import { pickRoom } from "./areaLayout";
 import { childrenOf, parentPath, ROOT, rootNode, trail, UNI_CHANNEL } from "./treeCore";
 import { findUniRoom } from "../uniActions";
 import { useStoredSelfTest } from "../interface/selftest/useSelfTest";
-import { storedSidebarWidth } from "./sidebarState";
+import { rolledNeeds, storedSidebarWidth } from "./sidebarState";
 import { useRailHidden, useShortTree, useTreeBesideNote, useUprightPhone, useWide } from "./homeLayout";
 import { privateRoot, privateRootIn, roomSlug, roomView, treeRows } from "./treeRooms";
 import { publishRoomNodes, roomNodeMap } from "./roomLabels";
+import { rolledUnread, unreadByPath, unreadByRoom, withApprovalNeeds } from "./roomUnread";
 import { useNav, type NavControls } from "../navContext";
 import { useVaultProfile } from "./ProfileContext";
 import { Crumbs, RoomSidebar, TreeScreen } from "./TreeHome";
@@ -39,7 +40,7 @@ import { ApprovalRows } from "./ApprovalRows";
 import { ApprovalsContext, useApprovalList } from "../approvalsLive";
 import type { Approval } from "../approvals";
 import "./areas.css";
-import { FrontDoor, type Door, type Needs } from "../projects/FrontDoor";
+import { FrontDoor, type Door, type Needs, type NewRoom } from "../projects/FrontDoor";
 import { ProjectStrip } from "../projects/ProjectStrip";
 import { ProjectSheet } from "../projects/ProjectSheet";
 import { plainWords } from "../projects/live";
@@ -311,9 +312,17 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
    *  node with no row counts on its nearest ancestor's (r13), so the dots under a level add up to its Needs you. */
   const rowPaths = useMemo(() => new Set(navRows.map((r) => r.path)), [navRows.map((r) => r.path).join("\n")]); // eslint-disable-line react-hooks/exhaustive-deps
   const navNeeds = useMemo(() => needsByRow(tasks.tasks, rowPaths, (p) => tasks.tree?.parent.get(p) ?? data?.tree.parent.get(p), confirm.of, tasks.runs), [tasks.tasks, tasks.runs, rowPaths, tasks.tree, data?.tree, confirm.of]); // eslint-disable-line react-hooks/exhaustive-deps
+  // T-335: what is new in each room (the rooms list's counts; opening a room marks it read, which clears them), and the approval prompts
+  // waiting in each room beside the tasks that need you: on the owning node's row, or on the room itself when no node owns it
+  const newByRoom = useMemo(() => unreadByRoom(rooms), [rooms]);
+  const newByPath = useMemo(() => unreadByPath(newByRoom, owned ?? new Map()), [newByRoom, owned]);
+  const needsAt = useMemo(() => withApprovalNeeds(navNeeds, approvalsAll.list, owned), [navNeeds, approvalsAll.list, owned]);
+  /** The room on screen (it is being marked read), so the Places mark only says what is new elsewhere. */
+  const hereRoom = loose ?? thread?.channel ?? hostRoom;
+  const newElsewhere = [...newByRoom.keys()].some((id) => id !== hereRoom && id !== uniRoom);
   const openRoomFromTree = (id: string) => { setDrawer(false); actions.openRoom(id); };
   // T-301/T-302: no Rooms / Projects / Areas lens: projects live inside their area's room now
-  const treeProps = { chat, rows: navRows, needs: navNeeds, onOpen: openPath, others, onOpenRoom: openRoomFromTree, load, needsReady: tasks.ready };
+  const treeProps = { chat, rows: navRows, needs: needsAt.byPath, onOpen: openPath, others, onOpenRoom: openRoomFromTree, load, needsReady: tasks.ready, unread: newByPath, otherUnread: newByRoom, otherNeeds: needsAt.byRoom };
   /** The app's own places (Journal, Vault, Search, Settings), for where the rail is out of reach: the drawer and a short screen's tree. */
   const places = nav?.places ?? [];
   // r17: Places holds only what the shell is not already showing: the app's places only while the rail is hidden (Codex P2-4)
@@ -339,7 +348,8 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
       {sidebar && <RoomSidebar {...treeProps} selected={o.selected} selectedRoom={o.selectedRoom} nav={nav} fold={treeFold} />}
       <section className="sr" aria-label={o.main ? `Work: ${o.title}` : `Conversation: ${o.title}`} data-node={o.node}>
         <header className="sr-head">
-          {placesDrawer && <button ref={drawerOpener} type="button" className="sr-drawer" aria-label="Places" title="Rooms and places" aria-expanded={drawer} aria-controls="th-drawer" onClick={() => setDrawer(true)}><span aria-hidden="true" /></button>}
+          {placesDrawer && <button ref={drawerOpener} type="button" className="sr-drawer" aria-label="Places" title={newElsewhere ? "Rooms and places · new messages in other rooms" : "Rooms and places"} aria-describedby={newElsewhere ? "sr-drawer-new" : undefined} aria-expanded={drawer} aria-controls="th-drawer" onClick={() => setDrawer(true)}><span aria-hidden="true" />
+            {newElsewhere && <><i className="sr-drawer-new" aria-hidden="true" /><span id="sr-drawer-new" hidden>New messages in other rooms</span></>}</button>}
           <div className="sr-titles">
             {(o.door || o.crumbs) && <div className="sr-meta">{o.crumbs}{o.door && <span className="sr-door">{o.door}</span>}</div>}
             <h1 className="sr-title">{o.title}</h1>
@@ -408,11 +418,16 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
   if (path === null && doorAreas.length) {
     const doors: Door[] = doorAreas.map((a) => {
       const v = roomView(data!.tree, a.path, roomRefs, uniRef);
+      const i = navRows.findIndex((r) => r.path === a.path && r.depth === 1);
       const raw = privateRoot(data!.tree, a.path) ? null : tasks.tree?.stands.get(a.path)?.text ?? (typeof a.metadata.stands === "string" ? a.metadata.stands : null);
       const st = raw ? plainWords(raw) : null;
       return { path: a.path, name: a.name, slug: v.own && v.slash ? v.slash.replace(/^#/, "") : null, stands: st, lastTs: v.own ? rooms.find((r) => r.id === v.target?.id)?.last_ts ?? null : null,
-        room: v.own ? v.target?.id ?? null : null };
+        room: v.own ? v.target?.id ?? null : null,
+        // T-335: everything new in the area's rooms (its own and its projects'), and what needs you there (tasks and approval prompts)
+        ...(i >= 0 ? { unread: rolledUnread(navRows, newByPath, i), needs: rolledNeeds(navRows, needsAt.byPath, i) } : {}) };
     });
+    /** T-335: rooms no area holds (not the archived #Uni) with something new, newest first: each one tap into its room. */
+    const newRooms: NewRoom[] = owned ? rooms.filter((r) => !owned.has(r.id) && r.id !== uniRoom && newByRoom.has(r.id)).sort((a, b) => (b.last_ts ?? 0) - (a.last_ts ?? 0)).map((r) => ({ id: r.id, name: r.name, unread: newByRoom.get(r.id)! })) : [];
     // T-302 round 2: what needs you, across the areas, as one quiet line above the rooms (a private area's items stay a count, its words inside)
     const privAt = (p: string) => privateRoot(data!.tree, p) ?? (tasks.tree ? privateRootIn(tasks.tree, p) : null);
     const allNeeds = needsFeed(tasks.tasks, privAt, null, undefined, confirm.of);
@@ -420,7 +435,7 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
       rows: allNeeds.rows.map((t) => ({ id: t.id, title: taskTitle(t.title).rest || t.title, where: data!.tree.nodes.get(t.node)?.name ?? null, path: t.node })),
       privates: allNeeds.privates.map((g) => ({ place: g.place, count: g.count, path: g.open.path })),
     };
-    return <div className="areas-home tree-home-wrap">{status}<ApprovalRows approvals={approvalsAll.list} className="cp-list cp-approvals th-approvals" /><FrontDoor doors={doors} needs={needs} onOpen={openDoor} me={identity} />
+    return <div className="areas-home tree-home-wrap">{status}<ApprovalRows approvals={approvalsAll.list} className="cp-list cp-approvals th-approvals" /><FrontDoor doors={doors} needs={needs} onOpen={openDoor} me={identity} newRooms={newRooms} onOpenRoom={openRoomFromTree} />
       {railHidden && places.length > 0 && <div className="th-places-short">{placesRow}</div>}</div>;
   }
   if (treeHome && path === null && !rootOpen) {

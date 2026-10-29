@@ -7,10 +7,14 @@ import { liveInArea, span } from "./model";
 import { asOf, useWork } from "./store";
 import { useRoomTurns } from "./roomTurns";
 import { UsageLine } from "./UsageLine";
+import { unreadShort, unreadWords, type Unread } from "../areas/roomUnread";
 import "./projects.css";
 
 export type Door = { path: string; name: string; slug: string | null; stands: string | null; lastTs: number | null;
-  /** The area's own room (its id), where a turn of the room's Uni is looked for; null when it has none of its own. */ room?: string | null };
+  /** The area's own room (its id), where a turn of the room's Uni is looked for; null when it has none of its own. */ room?: string | null;
+  /** T-335: what is new in the area's rooms (its own and its projects'), and how many things there need you. */ unread?: Unread | null; needs?: number };
+/** T-335: a room outside the doors (one no area holds) with something new in it. */
+export type NewRoom = { id: string; name: string; unread: Unread };
 /** What needs you across the areas: each item's own words and where it sits; a private area's items only as a count. */
 export type Needs = { rows: { id: string; title: string; where: string | null; path: string }[]; privates: { place: string; count: number; path: string }[] };
 
@@ -30,6 +34,16 @@ function NeedsLine({ needs, onOpen }: { needs: Needs; onOpen: (path: string) => 
   </section>;
 }
 
+/** T-335: the rooms no door holds that have something new, each one tap into its room. Nothing when there is nothing new there. */
+function NewLine({ rooms, onOpen }: { rooms: readonly NewRoom[]; onOpen: (id: string) => void }) {
+  if (!rooms.length) return null;
+  return <section className="fd-new" aria-label="New in other rooms">
+    <span className="fd-new-h">New in other rooms</span>
+    <ul>{rooms.map((r) => <li key={r.id}><button type="button" data-room={r.id} aria-label={`#${r.name.replace(/^#/, "")}, ${unreadWords(r.unread)}`} onClick={() => onOpen(r.id)}>
+      #{r.name.replace(/^#/, "")}<span className={`fd-count${r.unread.mention ? " at" : ""}`} aria-hidden="true">{unreadShort(r.unread.n)}</span></button></li>)}</ul>
+  </section>;
+}
+
 const today = () => new Date().toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" });
 
 /** When the room last talked, in words ("talked 3 h ago"). */
@@ -41,7 +55,8 @@ function workingWords(sessions: number, turn: boolean): string {
   return turn ? `Uni is answering here${s ? ` and ${s}` : ""}` : s;
 }
 
-export function FrontDoor({ doors, needs, onOpen, me = null }: { doors: readonly Door[]; needs?: Needs; onOpen: (path: string) => void;
+export function FrontDoor({ doors, needs, onOpen, me = null, newRooms = [], onOpenRoom }: { doors: readonly Door[]; needs?: Needs; onOpen: (path: string) => void;
+  /** T-335: rooms outside the doors with something new, and how to open one. */ newRooms?: readonly NewRoom[]; onOpenRoom?: (id: string) => void;
   /** Your key: a turn is the room's Uni at work on your message. */ me?: string | null }) {
   const ws = useWork();
   const turns = useRoomTurns(doors.map((d) => ({ room: d.room ?? null, lastTs: d.lastTs })), me);
@@ -57,6 +72,7 @@ export function FrontDoor({ doors, needs, onOpen, me = null }: { doors: readonly
       <p className="fd-sub">Your rooms</p>
     </header>
     {needs && <NeedsLine needs={needs} onOpen={onOpen} />}
+    {onOpenRoom && <NewLine rooms={newRooms} onOpen={onOpenRoom} />}
     <nav aria-label="Rooms"><ul className="fd-doors">{doors.map((d) => {
       const a = areaAt.get(d.path);
       const sessions = a ? liveInArea(work, a.id).length : 0;
@@ -64,11 +80,17 @@ export function FrontDoor({ doors, needs, onOpen, me = null }: { doors: readonly
       const live = sessions + (turn ? 1 : 0);
       // the sessions' count is as of the work's read; a turn is read from the room now
       const when = sessions && at ? ` at ${at}` : "";
+      const u = d.unread ?? null; const k = d.needs ?? 0;
+      const marks = [u && unreadWords(u), k > 0 && `${k} need${k === 1 ? "s" : ""} you`].filter(Boolean).join(", ");
       return <li key={d.path}>
         <button type="button" className="fd-door" data-path={d.path} onClick={() => onOpen(d.path)}
-          aria-label={`${d.name}${live ? `, ${workingWords(sessions, turn)}${when}` : ""}${d.stands ? `. ${d.stands}` : ""}`}>
+          aria-label={`${d.name}${marks ? `, ${marks}` : ""}${live ? `, ${workingWords(sessions, turn)}${when}` : ""}${d.stands ? `. ${d.stands}` : ""}`}>
           <span className="fd-name">{d.name}</span>
           {live > 0 && <span className="fd-live" data-turn={turn || undefined} title={workingWords(sessions, turn)}><i aria-hidden="true" />{live} working{when}</span>}
+          {marks && <span className="fd-marks" aria-hidden="true">
+            {u && <span className={`fd-new-n${u.mention ? " at" : ""}`} title={unreadWords(u)}>{unreadShort(u.n)} new{u.mention ? " · @you" : ""}</span>}
+            {k > 0 && <span className="fd-need-n" title={`${k} need${k === 1 ? "s" : ""} you`}><i />{k} for you</span>}
+          </span>}
           {d.stands && <span className="fd-stands">{d.stands}</span>}
           <span className="fd-foot">{d.slug && <span className="fd-slug">#{d.slug}</span>}{d.lastTs && <span className="fd-when">{talked(now, d.lastTs)}</span>}</span>
         </button>
