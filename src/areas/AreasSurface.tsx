@@ -423,8 +423,9 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
       const st = raw ? plainWords(raw) : null;
       return { path: a.path, name: a.name, slug: v.own && v.slash ? v.slash.replace(/^#/, "") : null, stands: st, lastTs: v.own ? rooms.find((r) => r.id === v.target?.id)?.last_ts ?? null : null,
         room: v.own ? v.target?.id ?? null : null,
-        // T-335: everything new in the area's rooms (its own and its projects'), and what needs you there (tasks and approval prompts)
-        ...(i >= 0 ? { unread: rolledUnread(navRows, newByPath, i), needs: rolledNeeds(navRows, needsAt.byPath, i) } : {}) };
+        // T-335: everything new in the area's rooms (its own and its projects'); what needs you is what its Needs you lists: the tasks
+        // under it, and the approval prompts in its own room (a project's own room's prompts are in that project's, Codex T-335 P2)
+        ...(i >= 0 ? { unread: rolledUnread(navRows, newByPath, i), needs: rolledNeeds(navRows, navNeeds, i) + (v.own && v.target ? approvalsAll.list.filter((x) => x.channel === v.target!.id).length : 0) } : {}) };
     });
     /** T-335: rooms no area holds (not the archived #Uni) with something new, newest first: each one tap into its room. */
     const newRooms: NewRoom[] = owned ? rooms.filter((r) => !owned.has(r.id) && r.id !== uniRoom && newByRoom.has(r.id)).sort((a, b) => (b.last_ts ?? 0) - (a.last_ts ?? 0)).map((r) => ({ id: r.id, name: r.name, unread: newByRoom.get(r.id)! })) : [];

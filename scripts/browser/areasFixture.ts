@@ -131,6 +131,9 @@ export type BootOpts = {
   /** T-335: rooms start with these unread counts (by room id; `at`: one of them mentions you), and the fixture keeps count like the store does:
    *  a message from someone else adds one, `mark_read` clears the room. Absent: every room reads 0 and nothing is counted (the older specs). */
   unread?: Record<string, number | { n: number; at?: boolean }>;
+  /** T-335: `unread`: a small made-up world of its own instead of the seed's areas and rooms: North Field, Kiln Studio (with its project
+   *  Glaze Tests in a room of its own), Still Water (no room) and #allotment, a room no area holds. No tasks. */
+  world?: 'unread';
   /** Metadata of the vault's `.parachute/life-os` profile note (e.g. `{ chat: { provider: null } }`); absent: no profile note, Uni's own profile. */
   profileNote?: Record<string, unknown>;
   /** Open the Life OS surface on this other vault (the fixture answers its vault calls from the uni data; no profile note = the pack defaults, chat null). */
@@ -250,7 +253,7 @@ export async function bootAreas(page: Page, variant: Variant = 'seed', opts: Boo
   const now = Math.floor((opts.pinned ? pinnedAt : Date.now()) / 1000);
   const data = {
     profileNote: opts.profileNote ?? null, lifeVault: opts.lifeVault ?? null, now, variant, selftest: opts.selftest ?? true, ipcLeak: opts.ipcLeak ?? false, hostile: hostileApp(opts.ports ?? { http: 9, udp: 9 }), benign: BENIGN, techne: seed('techne'), unforced: seed('unforced'), seedMeta,
-    apps: opts.apps ?? [], multiRoom: !!opts.multiRoom || !!opts.tree, tree: !!opts.tree, tasks: !!opts.tasks, briefs: !!opts.briefs, queryDelay: opts.queryDelay ?? 0, identityDelay: opts.identityDelay ?? 0, identityFails: opts.identityFails ?? 0, roomsDelay: opts.roomsDelay ?? 0, messagesDelay: opts.messagesDelay ?? 0, nodeStatuses: opts.nodeStatuses ?? {}, nearOff: !!opts.nearOff, ids: !!opts.ids, boulder: !!opts.boulder, savedLayout: opts.savedLayout ?? null, strayRoom: !!opts.strayRoom, thread: !!opts.thread, manyTasks: opts.manyTasks ?? 0, uniMember: !!opts.uniMember, twins: !!opts.twins, underBoulder: !!opts.underBoulder, priya: !!opts.priya, links: !!opts.links, atlas: !!opts.atlas, garden: !!opts.garden, steer: !!opts.steer, longChat: !!opts.longChat, longNext: !!opts.longNext, bareTask: !!opts.bareTask, cutDecision: !!opts.cutDecision, cutNoAsk: !!opts.cutNoAsk, longAsk: !!opts.longAsk, previewAsk: !!opts.previewAsk, crowded: !!opts.crowded, ulidNext: !!opts.ulidNext, vaultNotes: !!opts.vaultNotes, pastDue: !!opts.pastDue, tallLast: !!opts.tallLast, privateTasks: !!opts.privateTasks, deviceCache: opts.deviceCache ?? null, queryFails: opts.queryFails ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, unread: opts.unread ?? null, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null, mode: opts.mode ?? 'sealed', grantedUnder: opts.grantedUnder ?? (opts.mode ?? 'sealed'),
+    apps: opts.apps ?? [], multiRoom: !!opts.multiRoom || !!opts.tree, tree: !!opts.tree, tasks: !!opts.tasks, briefs: !!opts.briefs, queryDelay: opts.queryDelay ?? 0, identityDelay: opts.identityDelay ?? 0, identityFails: opts.identityFails ?? 0, roomsDelay: opts.roomsDelay ?? 0, messagesDelay: opts.messagesDelay ?? 0, nodeStatuses: opts.nodeStatuses ?? {}, nearOff: !!opts.nearOff, ids: !!opts.ids, boulder: !!opts.boulder, savedLayout: opts.savedLayout ?? null, strayRoom: !!opts.strayRoom, thread: !!opts.thread, manyTasks: opts.manyTasks ?? 0, uniMember: !!opts.uniMember, twins: !!opts.twins, underBoulder: !!opts.underBoulder, priya: !!opts.priya, links: !!opts.links, atlas: !!opts.atlas, garden: !!opts.garden, steer: !!opts.steer, longChat: !!opts.longChat, longNext: !!opts.longNext, bareTask: !!opts.bareTask, cutDecision: !!opts.cutDecision, cutNoAsk: !!opts.cutNoAsk, longAsk: !!opts.longAsk, previewAsk: !!opts.previewAsk, crowded: !!opts.crowded, ulidNext: !!opts.ulidNext, vaultNotes: !!opts.vaultNotes, pastDue: !!opts.pastDue, tallLast: !!opts.tallLast, privateTasks: !!opts.privateTasks, deviceCache: opts.deviceCache ?? null, queryFails: opts.queryFails ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, unread: opts.unread ?? null, world: opts.world ?? null, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null, mode: opts.mode ?? 'sealed', grantedUnder: opts.grantedUnder ?? (opts.mode ?? 'sealed'),
   };
   // Pre-granted apps: the grant key is the SHA-256 of the RESOLVED default needs plus the app's html.
   const preGrant = [
@@ -413,6 +416,22 @@ Two proposals wait on a scope decision.
     const lastOf = (c: string) => msgs[c]?.[msgs[c].length - 1];
     const room = (id: string, name: string, unread = 0) => ({ id, name, unread, mentions: false, last_message: lastOf(id)?.body ?? null, last_ts: lastOf(id)?.ts ?? null });
     const rooms: any[] = [room('uni-room', 'Uni'), room('ch-techne', 'Techne'), ...(d.multiRoom ? [room('ch-cohere', 'Cohere')] : []), room('ch-unf', 'Unforced Dev'), room('ch-sad', 'Sanctum'), room('ch-atlas', 'Atlas'), room('ch-exp', 'Expression'), ...(d.strayRoom ? [room('ch-garden', 'garden-club')] : [])];
+    // T-335: the made-up world (`world: 'unread'`), in place of the seed's areas, rooms and messages
+    if (d.world === 'unread') {
+      notes.splice(0, notes.length,
+        area('a-north', 'North Field', 'foreground', 'ch-north', 'Hedges, paths and the long meadow.'),
+        area('a-kiln', 'Kiln Studio', 'foreground', 'ch-kiln', 'Firing days and the shared studio.'),
+        area('a-still', 'Still Water', 'foreground', '', 'A quiet area with no room of its own.'),
+        { id: 'p-glaze', path: 'Projects/Glaze Tests', extension: 'md', tags: ['project'], metadata: { status: 'foreground', parent: 'Areas/Kiln Studio', channel: 'ch-glaze' }, updatedAt: '2026-10-07T12:00:00Z', content: '# Glaze Tests\n\nTest tiles for the spring glazes.' });
+      for (const k of Object.keys(msgs)) delete msgs[k];
+      Object.assign(msgs, {
+        'ch-north': [msg('n1', 'ch-north', 'Uni', 7200, 'The hedge cutting is booked for next week.'), msg('n2', 'ch-north', 'Aaron', 3600, 'Good. Leave the far corner wild.')],
+        'ch-kiln': [msg('k1', 'ch-kiln', 'Uni', 5400, 'The bisque firing finished overnight.'), msg('k2', 'ch-kiln', 'Aaron', 1800, 'Unload it after lunch.')],
+        'ch-glaze': [msg('g1', 'ch-glaze', 'Uni', 4000, 'Three test tiles came out glossy, one crawled.')],
+        'ch-allot': [msg('l1', 'ch-allot', 'Rowan', 9000, 'The water butt is full again.')],
+      });
+      rooms.splice(0, rooms.length, room('uni-room', 'Uni'), room('ch-north', 'north-field'), room('ch-kiln', 'kiln-studio'), room('ch-glaze', 'glaze-tests'), room('ch-allot', 'allotment'));
+    }
     // T-335: the store's unread count, when a spec asks for it (`unread`): seeded per room, one more per message from someone else, cleared by mark_read
     if (d.unread) for (const r of rooms) { const u = d.unread[r.id]; if (u !== undefined) { r.unread = typeof u === 'number' ? u : u.n; r.mentions = typeof u === 'number' ? false : !!u.at; } }
     const announceRooms = () => { for (const h of w.__listeners['uni://live'] ?? []) w.__cbs[h]?.({ event: 'uni://live', id: 1, payload: { kind: 'rooms' } }); };
