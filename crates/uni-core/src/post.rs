@@ -190,10 +190,48 @@ pub fn check_droppable(note: &Value) -> Result<Post> {
     let p = Post::from_note(note);
     match p.state.as_str() {
         "proposed" | "approved" => Ok(p),
-        "posting" => Err(Error::Invalid("it's already going out; once it's posted it can be taken down".into())),
+        "posting" => Err(Error::Invalid(GOING_OUT.into())),
         s => Err(Error::Invalid(format!("this post is {s:?}; only a proposed or approved post can be stopped"))),
     }
 }
+
+/// Whether the poster has claimed this approval: a version in the note's history in state `posting` naming it. A vault
+/// writer can reset the state afterwards, but can't erase the history (that takes an admin token), so the claim stays.
+pub fn claimed(versions: &[Value], approval_id: &str) -> bool {
+    !approval_id.is_empty()
+        && versions.iter().any(|v| {
+            v["metadata"]["state"].as_str() == Some("posting") && v["metadata"]["posting_approval"].as_str() == Some(approval_id)
+        })
+}
+
+/// One page of a history read: the vault's own answer (`{versions, total}`), or the hub's fan-out of it
+/// (`{results: [{vault, notes: {versions, total}}]}`). Any other shape is an error, never "no history": an empty
+/// list would read as "not claimed" and let Not this say Stopped.
+pub fn versions_in(v: &Value, vault: &str) -> Result<(Vec<Value>, usize)> {
+    let page = if v["versions"].is_array() {
+        v
+    } else {
+        v["results"]
+            .as_array()
+            .and_then(|r| r.iter().find(|x| x["vault"].as_str() == Some(vault)))
+            .map(|x| &x["notes"])
+            .filter(|n| n["versions"].is_array())
+            .ok_or_else(|| Error::Vault("the vault's history answer has a shape this app doesn't know".into()))?
+    };
+    let total = page["total"].as_u64().ok_or_else(|| Error::Vault("the vault's history answer has no total".into()))?;
+    Ok((page["versions"].as_array().cloned().unwrap_or_default(), total as usize))
+}
+
+/// The id of the approval event stored on the note, if any.
+pub fn approval_id(note: &Value) -> String {
+    note["metadata"]["approval_event"]
+        .as_str()
+        .and_then(|s| serde_json::from_str::<Value>(s).ok())
+        .and_then(|e| e["id"].as_str().map(String::from))
+        .unwrap_or_default()
+}
+
+const GOING_OUT: &str = "it's already going out; once it's posted it can be taken down";
 
 /// The update-note arguments for an approval: the state compare-and-set, the signed event, the digest.
 pub fn approve_args(vault: &str, id: &str, ev: &Event, digest: &str, scheduled_for: Option<u64>, if_updated_at: &str) -> Value {
@@ -216,6 +254,37 @@ pub fn summary(note: &Value) -> String {
 }
 
 impl VaultClient {
+    /// Every version in a note's history (the vault keeps each superseded state, metadata included).
+    pub async fn note_versions(&self, vault: &str, id: &str) -> Result<Vec<Value>> {
+        let mut out: Vec<Value> = vec![];
+        for page in 0..20 {
+            let v = self
+                .call("query-notes", json!({"vault": vault, "versions": {"note_id": id, "limit": 200, "offset": page * 200}}))
+                .await?;
+            crate::parachute::check_vault_errors(&v)?;
+            let (rows, total) = versions_in(&v, vault)?;
+            let n = rows.len();
+            out.extend(rows);
+            if n == 0 || out.len() >= total {
+                return Ok(out);
+            }
+        }
+        Err(Error::Vault(format!("more than 4000 versions of {id}")))
+    }
+
+    /// An approved post the poster has claimed can't be stopped: say so instead of showing "Stopped". Read at the
+    /// revision the caller then writes against, so a claim can't land between this and that compare-and-set.
+    async fn not_claimed(&self, vault: &str, note: &Value) -> Result<()> {
+        if Post::from_note(note).state != "approved" {
+            return Ok(());
+        }
+        let id = note["id"].as_str().unwrap_or_default();
+        if claimed(&self.note_versions(vault, id).await?, &approval_id(note)) {
+            return Err(Error::Invalid(GOING_OUT.into()));
+        }
+        Ok(())
+    }
+
     /// Approve (or schedule) one post: re-read it, check it, sign over exactly what's stored, and write the signature in
     /// the compare-and-set that moves it to `approved`.
     #[allow(clippy::too_many_arguments)]
@@ -243,6 +312,7 @@ impl VaultClient {
         }
         at_revision(&note, if_updated_at)?;
         let p = check_droppable(&note)?;
+        self.not_claimed(vault, &note).await?;
         let mut meta = json!({"dropped_at": iso(now)});
         if p.state == "approved" {
             meta["approval_event"] = json!(reject_event(keys, vault, id, now)?.as_json());
@@ -267,6 +337,7 @@ impl VaultClient {
         if p.state != "proposed" && p.state != "approved" {
             return Err(Error::Invalid(format!("this post is {:?}; it can't be edited", p.state)));
         }
+        self.not_claimed(vault, &note).await?;
         if text.trim().is_empty() || text.chars().count() > 4000 {
             return Err(Error::Invalid("write 1 to 4000 characters".into()));
         }
@@ -387,6 +458,37 @@ mod tests {
         assert!(check_droppable(&n).unwrap_err().to_string().contains("already going out"));
         n["metadata"]["state"] = json!("posted");
         assert!(check_droppable(&n).is_err());
+    }
+
+    #[test]
+    fn a_claim_in_the_history_means_going_out_even_after_a_reset() {
+        let keys = Keys::generate();
+        let p = Post::from_note(&uni_post());
+        let ev = approval_event(&keys, "uni", "01TESTNOTE", &p, 1_800_000_000, 1_800_000_000).unwrap();
+        let mut n = uni_post();
+        n["metadata"]["state"] = json!("approved");
+        n["metadata"]["approval_event"] = json!(ev.as_json());
+        let id = approval_id(&n);
+        assert_eq!(id, ev.id.to_hex());
+        let claim = json!({"version_ix": 1, "metadata": {"state": "posting", "posting_approval": id}});
+        let older = json!({"version_ix": 0, "metadata": {"state": "proposed"}});
+        assert!(claimed(&[older.clone(), claim], &id));
+        assert!(!claimed(&[older.clone()], &id));
+        let other = json!({"version_ix": 1, "metadata": {"state": "posting", "posting_approval": "f".repeat(64)}});
+        assert!(!claimed(&[older, other], &id));
+        assert!(!claimed(&[], ""));
+    }
+
+    #[test]
+    fn a_history_answer_is_read_from_the_hub_fan_out_and_an_unknown_shape_is_an_error() {
+        let row = json!({"version_ix": 0, "metadata": {"state": "posting"}});
+        let hub = json!({"vaults_queried": ["uni"], "results": [{"vault": "uni", "notes": {"versions": [row], "total": 1}}]});
+        assert_eq!(versions_in(&hub, "uni").unwrap().0.len(), 1);
+        let direct = json!({"versions": [], "total": 0});
+        assert_eq!(versions_in(&direct, "uni").unwrap(), (vec![], 0));
+        assert!(versions_in(&hub, "other").is_err());
+        assert!(versions_in(&json!({"notes": []}), "uni").is_err());
+        assert!(versions_in(&json!({"versions": []}), "uni").is_err());
     }
 
     #[test]

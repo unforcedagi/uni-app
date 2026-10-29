@@ -5,6 +5,7 @@
 //! UNI_NSEC=<hex> cargo run -p uni-core --example post_verdict -- <hub> <vault> <note-id> <updatedAt> drop
 //! UNI_NSEC=<hex> cargo run -p uni-core --example post_verdict -- <hub> <vault> <note-id> <updatedAt> edit <text>
 //! UNI_NSEC=<hex> cargo run -p uni-core --example post_verdict -- <hub> <vault> <note-id> - get
+//! UNI_NSEC=<hex> cargo run -p uni-core --example post_verdict -- <hub> <vault> <note-id> - versions
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let a: Vec<String> = std::env::args().collect();
@@ -15,6 +16,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let now = nostr::Timestamp::now().as_secs();
     let out = match a.get(5).map(String::as_str) {
         Some("get") => client.get_note(&a[2], &a[3]).await,
+        Some("versions") => client.note_versions(&a[2], &a[3]).await.map(serde_json::Value::from),
         Some("approve") => {
             let at = a.get(6).and_then(|t| t.parse::<u64>().ok());
             client.post_approve(&keys, &a[2], &a[3], &a[4], at, now).await
