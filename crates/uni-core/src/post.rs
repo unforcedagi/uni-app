@@ -123,9 +123,17 @@ pub fn approval_event(keys: &Keys, vault: &str, note: &str, p: &Post, not_before
         .map_err(|e| Error::Invalid(format!("signing failed: {e}")))
 }
 
-/// Sign "not this": the poster records it and never uses an older approval of the note.
-pub fn reject_event(keys: &Keys, vault: &str, note: &str, now: u64) -> Result<Event> {
-    let tags = vec![tag(&["domain", DOMAIN])?, tag(&["verdict", "reject"])?, tag(&["vault", vault])?, tag(&["note", note])?];
+/// Sign "not this" over the digest of the post as it stands: that exact post can never go out again, whatever any
+/// clock says (the poster keeps every reject it ever sees for the note, from the note and its whole history). Only an
+/// edited post, with a new digest and a fresh approval, can.
+pub fn reject_event(keys: &Keys, vault: &str, note: &str, digest: &str, now: u64) -> Result<Event> {
+    let tags = vec![
+        tag(&["domain", DOMAIN])?,
+        tag(&["verdict", "reject"])?,
+        tag(&["vault", vault])?,
+        tag(&["note", note])?,
+        tag(&["digest", digest])?,
+    ];
     EventBuilder::new(Kind::from(KIND), "")
         .tags(tags)
         .custom_created_at(Timestamp::from(now))
@@ -311,7 +319,8 @@ impl VaultClient {
         self.not_claimed(vault, &note).await?;
         // always a signed reject, even for a post that looks proposed: a writer may have reset an approved one, and
         // the reject in the history is what keeps any earlier approval from being restored and used
-        let meta = json!({"dropped_at": iso(now), "approval_event": reject_event(keys, vault, id, now)?.as_json()});
+        let d = digest(vault, id, &p, &[]);
+        let meta = json!({"dropped_at": iso(now), "approval_event": reject_event(keys, vault, id, &d, now)?.as_json()});
         let args = json!({"vault": vault, "id": id, "include_content": false, "if_updated_at": if_updated_at,
             "state_transition": {"field": "state", "from": p.state, "to": "dropped"}, "metadata": meta});
         let v = self.call("update-note", args).await?;
@@ -345,7 +354,7 @@ impl VaultClient {
             json!({"feedback": text, "feedback_at": iso(now)})
         };
         // always a signed reject (see post_drop): no earlier approval of this post can come back
-        meta["approval_event"] = json!(reject_event(keys, vault, id, now)?.as_json());
+        meta["approval_event"] = json!(reject_event(keys, vault, id, &digest(vault, id, &p, &[]), now)?.as_json());
         let to = if p.account == "aaron" { "proposed" } else { "dropped" };
         let args = json!({"vault": vault, "id": id, "include_content": false, "if_updated_at": if_updated_at,
             "state_transition": {"field": "state", "from": p.state, "to": to}, "metadata": meta});
@@ -487,10 +496,12 @@ mod tests {
     #[test]
     fn a_reject_names_the_note_and_is_not_an_approval() {
         let keys = Keys::generate();
-        let ev = reject_event(&keys, "uni", "01TESTNOTE", 1_800_000_000).unwrap();
+        let ev = reject_event(&keys, "uni", "01TESTNOTE", &"d".repeat(64), 1_800_000_000).unwrap();
         ev.verify().unwrap();
         assert!(ev.tags.iter().any(|t| t.as_slice() == ["verdict", "reject"]));
-        assert!(!ev.tags.iter().any(|t| t.as_slice()[0] == "digest"));
+        // it names the exact post it stops, so that post can never go out again
+        assert!(ev.tags.iter().any(|t| t.as_slice() == ["digest".to_string(), "d".repeat(64)]));
+        assert!(!ev.tags.iter().any(|t| t.as_slice()[0] == "not_before"));
     }
 
     #[test]
