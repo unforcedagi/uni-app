@@ -72,7 +72,8 @@ test.describe('unread by room', () => {
     await door(page, 'North Field').click();
     await expect.poll(() => marked(page)).toContain('ch-north');
     // the phone's Places button says another room has something new
-    if (!wide(page)) { await expect(page.locator('.sr-drawer')).toHaveAccessibleDescription('New messages in other rooms'); await shot(page, 'places-mark'); }
+    // its words are for a screen reader only: never drawn over the room's header
+    if (!wide(page)) { await expect(page.locator('.sr-drawer')).toHaveAccessibleDescription('New messages in other rooms'); await expect(page.locator('#sr-drawer-new')).toBeHidden(); await expect(page.locator('.sr-drawer-new')).toBeVisible(); await shot(page, 'places-mark'); }
     await places(page); await unfold(page);
     await expect(row(page, 'Areas/North Field').locator('.th-new')).toHaveCount(0);
     await expect(row(page, 'Areas/Kiln Studio').locator('.th-new')).toHaveText('2');
