@@ -16,6 +16,8 @@ import androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_STRONG
 import androidx.biometric.BiometricManager.Authenticators.DEVICE_CREDENTIAL
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
 import app.tauri.annotation.ActivityCallback
 import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
@@ -73,7 +75,10 @@ class KeystorePlugin(private val activity: Activity) : Plugin(activity) {
     handler.removeCallbacks(timeout)
     biometric?.cancelAuthentication()
     biometric = null
-    if (success) pending.resolve() else pending.reject(message)
+    if (success) {
+      unlockedAt.set(leftScreen.get())
+      pending.resolve()
+    } else pending.reject(message)
   }
 
   @Command
@@ -130,9 +135,12 @@ class KeystorePlugin(private val activity: Activity) : Plugin(activity) {
     }
   }
 
-  // T-335: each time the app leaves the screen (another app, home, screen off or locked), and the unlock's own screen.
-  // Rust reads this after an approval's unlock and again at the next tap: once it has moved, the few minutes in which a
-  // routine approval needs no unlock are over. Kept for the process, so a recreated activity counts on.
+  // T-335: the unlock grace (src-tauri/src/unlock_grace.rs). `leftScreen` counts each time the app leaves the screen
+  // (another app, home, screen off or locked, and the unlock's own screen); `unlockedAt` is that count when the last
+  // device unlock passed. Rust starts a grace only while the app is on the screen and hasn't left it since the unlock,
+  // and ends it once the count moves. Both live for the process, so a recreated activity counts on.
+  private val waitingForScreen = mutableListOf<Invoke>()
+
   override fun onPause() {
     leftScreen.incrementAndGet()
   }
@@ -141,15 +149,39 @@ class KeystorePlugin(private val activity: Activity) : Plugin(activity) {
     leftScreen.incrementAndGet()
   }
 
-  @Command
-  fun lifecycleEpoch(invoke: Invoke) {
+  override fun onResume() {
+    val waiting = waitingForScreen.toList()
+    waitingForScreen.clear()
+    waiting.forEach { answerLifecycle(it, true) }
+  }
+
+  private fun answerLifecycle(invoke: Invoke, resumed: Boolean) {
     val out = JSObject()
     out.put("epoch", leftScreen.get())
+    out.put("resumed", resumed)
+    val at = unlockedAt.get()
+    if (at >= 0) out.put("unlocked", at)
     invoke.resolve(out)
+  }
+
+  @Command
+  fun lifecycle(invoke: Invoke) {
+    activity.runOnUiThread {
+      val wait = invoke.getArgs().optBoolean("wait", false)
+      val resumed = (activity as? LifecycleOwner)?.lifecycle?.currentState?.isAtLeast(Lifecycle.State.RESUMED) == true
+      if (resumed || !wait) {
+        answerLifecycle(invoke, resumed)
+      } else {
+        // the unlock's own screen is closing: give the app up to two seconds to come back
+        waitingForScreen.add(invoke)
+        handler.postDelayed({ if (waitingForScreen.remove(invoke)) answerLifecycle(invoke, false) }, 2_000)
+      }
+    }
   }
 
   companion object {
     private val leftScreen = AtomicLong(0)
+    private val unlockedAt = AtomicLong(-1)
   }
 
   @Command

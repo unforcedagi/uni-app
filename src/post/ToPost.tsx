@@ -6,7 +6,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { splitLinks } from "../areas/linkText";
-import { GraceHint } from "../UnlockGrace";
 import { GRACE_CHANGED } from "../unlockGraceCore";
 import { blocked, counts, editMode, parsePosts, PLATFORM_LABEL, queue, scheduleAt, targets, voice, waitingLine, where, type PostCard } from "./postCore";
 import "./ToPost.css";
@@ -67,7 +66,8 @@ function Card({ p, vault, busy, setBusy, onDone }: { p: PostCard; vault: string;
       setMode("none"); onDone(done);
     } catch (e) { setErr(String(e).replace(/^(invalid|conflict|vault): /, "")); } finally {
       setBusy(null);
-      // an approval may have just unlocked this device: the other cards' "Unlocked · N min" reads again
+      // a post always asks for the device unlock, which starts the grace for routine credential cards: their
+      // "Unlocked · N min" reads again (T-335)
       if (cmd === "post_approve") window.dispatchEvent(new Event(GRACE_CHANGED));
     }
   };
@@ -84,7 +84,6 @@ function Card({ p, vault, busy, setBusy, onDone }: { p: PostCard; vault: string;
         <button disabled={!!why || !!busy} onClick={() => setMode("schedule")}>Schedule</button>
         <button disabled={!!busy} onClick={() => setMode("edit")}>Edit</button>
         <button disabled={!!busy} onClick={() => void act("drop", "post_drop", {}, "Dropped. It won't go out.")}>Not this</button>
-        <GraceHint on={!why} />
       </div>}
       {mode === "schedule" && <div className="tp-form">
         <label>Goes out at <input type="datetime-local" value={when} onChange={(e) => setWhen(e.target.value)} /></label>

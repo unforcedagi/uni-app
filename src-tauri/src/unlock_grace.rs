@@ -24,27 +24,27 @@ use tauri::{AppHandle, Runtime};
 
 /// How long a device unlock covers routine approvals, from the unlock.
 pub const GRACE: Duration = Duration::from_secs(300);
-/// The awake and wall clocks may drift this far apart before it counts as a sleep.
+/// The awake and wall clocks may drift this far apart before it counts as a sleep. A backstop: the watchers see a
+/// sleep coming.
 const SKEW: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone, Copy)]
 struct Stamp {
     awake: Instant,
     wall: SystemTime,
-    epoch: u64,
+    /// [`GENERATION`] when the unlock was asked for.
+    generation: u64,
+    /// Android: how many times the app had left the screen, at the unlock. Desktop: 0.
+    screen: u64,
 }
 
 static STAMP: Mutex<Option<Stamp>> = Mutex::new(None);
-/// Desktop: moved by the lock watchers. (Android keeps its own in Kotlin.)
-#[cfg_attr(target_os = "android", allow(dead_code))]
-static EPOCH: AtomicU64 = AtomicU64::new(0);
-/// Desktop: whether a lock watcher is running. With none, there's no grace.
-#[cfg_attr(target_os = "android", allow(dead_code))]
-static WATCHING: AtomicBool = AtomicBool::new(false);
+/// Moved by everything Rust sees that ends the grace: a lock or sleep the desktop watchers report, and a key change.
+static GENERATION: AtomicU64 = AtomicU64::new(0);
 
-/// What's left of the grace stamped `s`, seen at `awake`, `wall` and lock epoch `epoch`; None once it's over.
-fn left(s: &Stamp, awake: Instant, wall: SystemTime, epoch: u64) -> Option<Duration> {
-    if epoch != s.epoch {
+/// What's left of the grace stamped `s`, seen at `awake`, `wall`, `generation` and `screen`; None once it's over.
+fn left(s: &Stamp, awake: Instant, wall: SystemTime, generation: u64, screen: u64) -> Option<Duration> {
+    if generation != s.generation || screen != s.screen {
         return None;
     }
     let up = awake.checked_duration_since(s.awake)?;
@@ -57,45 +57,58 @@ fn left(s: &Stamp, awake: Instant, wall: SystemTime, epoch: u64) -> Option<Durat
     GRACE.checked_sub(up.max(by_wall)).filter(|d| !d.is_zero())
 }
 
-/// The device locked, slept or left the screen: the grace ends now, and any stamped before stays ended.
-#[cfg_attr(target_os = "android", allow(dead_code))]
-pub fn locked() {
-    EPOCH.fetch_add(1, Ordering::SeqCst);
-    clear();
-}
-
-pub fn clear() {
+/// The device locked or slept, a watcher stopped, or the key changed: the grace ends now, and an unlock asked for
+/// before this starts none.
+pub fn end() {
+    GENERATION.fetch_add(1, Ordering::SeqCst);
     if let Ok(mut s) = STAMP.lock() {
         *s = None;
     }
 }
 
-/// The lock epoch now; None where nothing watches for a lock (then there's no grace).
-async fn epoch<R: Runtime>(_app: &AppHandle<R>) -> Option<u64> {
+/// Where the screen stands now: Android, how many times the app has left it; desktop, 0 while the lock watchers run.
+/// None: no grace (no watcher; Android couldn't say).
+async fn screen_now<R: Runtime>(_app: &AppHandle<R>) -> Option<u64> {
     #[cfg(target_os = "android")]
     {
-        crate::secure_store::lifecycle_epoch(_app).await.ok()
+        crate::secure_store::lifecycle(_app, false).await.ok().map(|l| l.epoch)
     }
     #[cfg(not(target_os = "android"))]
     {
-        WATCHING.load(Ordering::SeqCst).then(|| EPOCH.load(Ordering::SeqCst))
+        watching().then_some(0)
     }
 }
 
-/// A device unlock for an approval just succeeded: routine approvals need no other for [`GRACE`].
-pub async fn grant<R: Runtime>(app: &AppHandle<R>) {
-    // the epoch is read after the unlock, so a lock during it (or the unlock's own screen) is already counted
-    let Some(epoch) = epoch(app).await else { return clear() };
-    if let Ok(mut s) = STAMP.lock() {
-        *s = Some(Stamp { awake: Instant::now(), wall: SystemTime::now(), epoch });
+/// Where the screen stands just after an unlock passed, if a grace may start from it. Android: the app is back on
+/// the screen and hasn't left it since the unlock (a power press right after the fingerprint starts nothing).
+async fn screen_after_unlock<R: Runtime>(_app: &AppHandle<R>) -> Option<u64> {
+    #[cfg(target_os = "android")]
+    {
+        let l = crate::secure_store::lifecycle(_app, true).await.ok()?;
+        (l.resumed && l.unlocked == Some(l.epoch)).then_some(l.epoch)
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        watching().then_some(0)
+    }
+}
+
+/// An unlock asked for at `generation` just passed: routine approvals need no other for [`GRACE`], unless the grace
+/// was ended while it was asked.
+async fn grant<R: Runtime>(app: &AppHandle<R>, generation: u64) {
+    let Some(screen) = screen_after_unlock(app).await else { return };
+    let Ok(mut s) = STAMP.lock() else { return };
+    // `end` moves the generation before it takes this lock: either it's seen here, or it clears what's stored
+    if GENERATION.load(Ordering::SeqCst) == generation {
+        *s = Some(Stamp { awake: Instant::now(), wall: SystemTime::now(), generation, screen });
     }
 }
 
 /// How long the grace has left; None when there is none (and then it's gone for good).
 pub async fn remaining<R: Runtime>(app: &AppHandle<R>) -> Option<Duration> {
-    let epoch = epoch(app).await;
+    let screen = screen_now(app).await;
     let mut s = STAMP.lock().ok()?;
-    let left = s.as_ref().zip(epoch).and_then(|(st, e)| left(st, Instant::now(), SystemTime::now(), e));
+    let left = s.as_ref().zip(screen).and_then(|(st, sc)| left(st, Instant::now(), SystemTime::now(), GENERATION.load(Ordering::SeqCst), sc));
     if left.is_none() {
         *s = None;
     }
@@ -109,6 +122,7 @@ pub async fn confirm_unless_graced<R: Runtime>(
     fresh: bool,
     confirm: impl std::future::Future<Output = Result<(), String>>,
 ) -> Result<bool, String> {
+    let generation = GENERATION.load(Ordering::SeqCst);
     if !fresh {
         if let Some(left) = remaining(app).await {
             tracing::info!(left_s = left.as_secs(), "approval: routine, within the unlock grace; no device unlock");
@@ -116,11 +130,34 @@ pub async fn confirm_unless_graced<R: Runtime>(
         }
     }
     confirm.await?;
-    grant(app).await;
+    grant(app, generation).await;
     Ok(true)
 }
 
-/// Start this platform's lock watcher (desktop; Android needs none). Call once, from setup, on the main thread.
+/// Desktop: the lock watchers that must all be running for a grace (see `watch`).
+#[cfg_attr(target_os = "android", allow(dead_code))]
+static WATCHERS: [AtomicBool; 2] = [AtomicBool::new(false), AtomicBool::new(false)];
+
+#[cfg_attr(target_os = "android", allow(dead_code))]
+fn watching() -> bool {
+    #[cfg(target_os = "macos")]
+    return WATCHERS[0].load(Ordering::SeqCst);
+    #[cfg(target_os = "linux")]
+    return WATCHERS.iter().all(|w| w.load(Ordering::SeqCst));
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    false
+}
+
+/// A watcher started (`on`) or stopped; one stopping ends the grace.
+#[cfg_attr(not(any(target_os = "macos", target_os = "linux")), allow(dead_code))]
+fn watcher(i: usize, on: bool) {
+    WATCHERS[i].store(on, Ordering::SeqCst);
+    if !on {
+        end();
+    }
+}
+
+/// Start this platform's lock watchers (desktop; Android needs none). Call once, from setup, on the main thread.
 pub fn watch() {
     #[cfg(target_os = "macos")]
     mac::watch();
@@ -133,24 +170,35 @@ mod mac {
     use std::ptr::NonNull;
 
     use block2::RcBlock;
-    use objc2_foundation::{NSDistributedNotificationCenter, NSNotification, NSOperationQueue, NSString};
+    use objc2_app_kit::{NSWorkspace, NSWorkspaceScreensDidSleepNotification, NSWorkspaceSessionDidResignActiveNotification,
+        NSWorkspaceWillSleepNotification};
+    use objc2_foundation::{NSDistributedNotificationCenter, NSNotification, NSNotificationCenter, NSNotificationName,
+        NSOperationQueue, NSString};
 
-    /// Posted by the system when the screen locks, and when the screen saver starts (which may lock it).
+    /// Posted to every app when the screen locks, and when the screen saver starts (which may lock it).
     const LOCKS: [&str; 2] = ["com.apple.screenIsLocked", "com.apple.screensaver.didstart"];
 
+    fn observe(center: &NSNotificationCenter, name: &NSNotificationName, queue: &NSOperationQueue) {
+        let block = RcBlock::new(|_: NonNull<NSNotification>| super::end());
+        // SAFETY: no object filter; the main queue; the block only touches atomics and a mutex, from any thread.
+        let observer = unsafe { center.addObserverForName_object_queue_usingBlock(Some(name), None, Some(queue), &block) };
+        // watched for the life of the app
+        std::mem::forget(observer);
+    }
+
     pub fn watch() {
-        let center = NSDistributedNotificationCenter::defaultCenter();
         let queue = NSOperationQueue::mainQueue();
+        let distributed = NSDistributedNotificationCenter::defaultCenter();
         for name in LOCKS {
-            let block = RcBlock::new(|_: NonNull<NSNotification>| super::locked());
-            // SAFETY: no object filter; the main queue; the block only touches atomics and a mutex, from any thread.
-            let observer = unsafe {
-                center.addObserverForName_object_queue_usingBlock(Some(&NSString::from_str(name)), None, Some(&queue), &block)
-            };
-            // watched for the life of the app
-            std::mem::forget(observer);
+            observe(&distributed, &NSString::from_str(name), &queue);
         }
-        super::WATCHING.store(true, std::sync::atomic::Ordering::SeqCst);
+        // the machine going to sleep, its screens sleeping, and a switch to another user
+        let workspace = NSWorkspace::sharedWorkspace().notificationCenter();
+        // SAFETY: AppKit's notification name constants, read once.
+        for name in unsafe { [NSWorkspaceWillSleepNotification, NSWorkspaceScreensDidSleepNotification, NSWorkspaceSessionDidResignActiveNotification] } {
+            observe(&workspace, name, &queue);
+        }
+        super::watcher(0, true);
     }
 }
 
@@ -163,53 +211,71 @@ mod linux {
     use dbus::message::MatchRule;
     use dbus::Message;
 
-    /// logind on the system bus (the lock everyone has), then the desktop's screen saver on the session bus. The grace
-    /// is on once logind is watched.
+    const LOGIND: &str = "org.freedesktop.login1";
+
+    /// Two watchers, both needed for a grace: logind on the system bus (Lock, LockedHint, PrepareForSleep; it must be
+    /// running, and leaving the bus stops the watcher) and the desktop's screen saver on the session bus
+    /// (ActiveChanged). A watcher that can't start or whose bus goes away ends the grace. A locker that tells neither
+    /// (one run directly, not through `loginctl lock-session`) isn't seen.
     pub fn watch() {
         let _ = std::thread::Builder::new().name("unlock-grace-logind".into()).spawn(|| {
-            let Ok(bus) = Connection::new_system() else { return };
+            let Ok(bus) = Connection::new_system() else { return super::watcher(0, false) };
             let lock = bus.add_match(MatchRule::new_signal("org.freedesktop.login1.Session", "Lock"), |(): (), _: &Connection, _: &Message| {
-                super::locked();
+                super::end();
                 true
             });
             // either edge: going to sleep, or waking from it
             let sleep = bus.add_match(MatchRule::new_signal("org.freedesktop.login1.Manager", "PrepareForSleep"), |_: (bool,), _: &Connection, _: &Message| {
-                super::locked();
+                super::end();
                 true
             });
             let hint = bus.add_match(
                 MatchRule::new_signal("org.freedesktop.DBus.Properties", "PropertiesChanged"),
                 |(iface, changed, _): (String, PropMap, Vec<String>), _: &Connection, _: &Message| {
                     if iface == "org.freedesktop.login1.Session" && changed.get("LockedHint").and_then(|v| v.as_i64()).is_some_and(|b| b != 0) {
-                        super::locked();
+                        super::end();
                     }
                     true
                 },
             );
-            if lock.is_err() || sleep.is_err() || hint.is_err() {
-                return;
+            // logind leaving the bus (or coming back as another process): nothing watches until it is seen again
+            let gone = bus.add_match(
+                MatchRule::new_signal("org.freedesktop.DBus", "NameOwnerChanged"),
+                |(name, _, new): (String, String, String), _: &Connection, _: &Message| {
+                    if name == LOGIND {
+                        super::watcher(0, false);
+                        super::watcher(0, !new.is_empty());
+                    }
+                    true
+                },
+            );
+            let running = bus
+                .with_proxy("org.freedesktop.DBus", "/org/freedesktop/DBus", Duration::from_secs(5))
+                .method_call::<(bool,), _, _, _>("org.freedesktop.DBus", "NameHasOwner", (LOGIND,))
+                .is_ok_and(|(on,)| on);
+            if lock.is_err() || sleep.is_err() || hint.is_err() || gone.is_err() || !running {
+                return super::watcher(0, false);
             }
-            super::WATCHING.store(true, std::sync::atomic::Ordering::SeqCst);
-            loop {
-                if bus.process(Duration::from_secs(3600)).is_err() {
-                    // the watcher is gone: no more grace
-                    super::WATCHING.store(false, std::sync::atomic::Ordering::SeqCst);
-                    super::locked();
-                    return;
-                }
-            }
+            super::watcher(0, true);
+            while bus.process(Duration::from_secs(3600)).is_ok() {}
+            super::watcher(0, false);
         });
         let _ = std::thread::Builder::new().name("unlock-grace-screensaver".into()).spawn(|| {
-            let Ok(bus) = Connection::new_session() else { return };
+            let Ok(bus) = Connection::new_session() else { return super::watcher(1, false) };
             for iface in ["org.freedesktop.ScreenSaver", "org.gnome.ScreenSaver"] {
-                let _ = bus.add_match(MatchRule::new_signal(iface, "ActiveChanged"), |(on,): (bool,), _: &Connection, _: &Message| {
+                let added = bus.add_match(MatchRule::new_signal(iface, "ActiveChanged"), |(on,): (bool,), _: &Connection, _: &Message| {
                     if on {
-                        super::locked();
+                        super::end();
                     }
                     true
                 });
+                if added.is_err() {
+                    return super::watcher(1, false);
+                }
             }
+            super::watcher(1, true);
             while bus.process(Duration::from_secs(3600)).is_ok() {}
+            super::watcher(1, false);
         });
     }
 }
@@ -220,13 +286,17 @@ mod tests {
 
     const S: fn(u64) -> Duration = Duration::from_secs;
 
-    fn at(s: &Stamp, awake: u64, wall: u64, epoch: u64) -> Option<Duration> {
-        left(s, s.awake + S(awake), s.wall + S(wall), epoch)
+    fn at(s: &Stamp, awake: u64, wall: u64, generation: u64) -> Option<Duration> {
+        left(s, s.awake + S(awake), s.wall + S(wall), generation, s.screen)
+    }
+
+    fn stamp(generation: u64) -> Stamp {
+        Stamp { awake: Instant::now(), wall: SystemTime::now(), generation, screen: 3 }
     }
 
     #[test]
     fn five_minutes_from_the_unlock_then_it_asks_again() {
-        let s = Stamp { awake: Instant::now(), wall: SystemTime::now(), epoch: 7 };
+        let s = stamp(7);
         assert_eq!(at(&s, 0, 0, 7), Some(S(300)));
         assert_eq!(at(&s, 60, 60, 7), Some(S(240)), "4 min left after one");
         assert_eq!(at(&s, 299, 299, 7), Some(S(1)));
@@ -238,14 +308,15 @@ mod tests {
     }
 
     #[test]
-    fn a_lock_sleep_or_clock_change_ends_it() {
-        let s = Stamp { awake: Instant::now(), wall: SystemTime::now(), epoch: 7 };
-        assert_eq!(at(&s, 10, 10, 8), None, "locked or left the screen since");
+    fn a_lock_sleep_background_or_clock_change_ends_it() {
+        let s = stamp(7);
+        assert_eq!(at(&s, 10, 10, 8), None, "locked, slept (a watcher saw it) or the key changed since");
+        assert_eq!(left(&s, s.awake, s.wall, 7, 4), None, "Android: the app left the screen since");
         assert_eq!(at(&s, 10, 13, 7), None, "slept 3 s: the awake clock stopped");
         assert_eq!(at(&s, 10, 70, 7), None, "slept a minute, well within the five");
-        assert_eq!(left(&s, s.awake + S(10), s.wall - S(1), 7), None, "the wall clock went back");
-        assert_eq!(left(&s, s.awake, s.wall, 7), Some(S(300)));
+        assert_eq!(left(&s, s.awake + S(10), s.wall - S(1), 7, 3), None, "the wall clock went back");
         assert_eq!(at(&s, 13, 10, 7), None, "the wall clock lagged");
+        assert_eq!(left(&s, s.awake, s.wall, 7, 3), Some(S(300)));
     }
 
     /// The tests below share the process-wide grace: they take turns.
@@ -259,22 +330,32 @@ mod tests {
         st.wall -= S(wall);
     }
 
+    fn all_watching(on: bool) {
+        for i in 0..WATCHERS.len() {
+            watcher(i, on);
+        }
+    }
+
+    #[cfg(not(target_os = "android"))]
     #[test]
     fn the_gate_routine_within_five_minutes_goes_through_powerful_always_asks() {
         let _turn = TURN.lock().unwrap_or_else(|e| e.into_inner());
         let app = tauri::test::mock_app();
         let app = app.handle();
         let asks = AtomicU64::new(0);
-        let ask = |ok: bool| {
+        // the device's confirm: counts itself, passes or not, and may run `meanwhile` while it is up
+        let ask = |ok: bool, meanwhile: fn()| {
             let asks = &asks;
             async move {
                 asks.fetch_add(1, Ordering::SeqCst);
+                meanwhile();
                 if ok { Ok(()) } else { Err("not approved: cancelled".to_string()) }
             }
         };
-        let gate = |fresh: bool| tauri::async_runtime::block_on(confirm_unless_graced(app, fresh, ask(true))).unwrap();
-        WATCHING.store(true, Ordering::SeqCst);
-        clear();
+        let gate_with = |fresh: bool, meanwhile: fn()| tauri::async_runtime::block_on(confirm_unless_graced(app, fresh, ask(true, meanwhile))).unwrap();
+        let gate = |fresh: bool| gate_with(fresh, || {});
+        all_watching(true);
+        end();
 
         assert!(gate(false), "the first routine approval asks");
         assert!(!gate(false) && !gate(false), "routine ones right after: no prompt");
@@ -290,31 +371,41 @@ mod tests {
 
         age(30, 90);
         assert!(gate(false), "slept a minute: asks");
-        locked();
+        end();
         assert!(gate(false), "locked: asks");
         assert!(!gate(false));
 
-        // a confirm that fails starts nothing; a refused routine one asks next time too
-        clear();
-        assert!(tauri::async_runtime::block_on(confirm_unless_graced(app, false, ask(false))).is_err());
+        // locked, or the key forgotten or replaced, while the unlock was up: that unlock starts nothing
+        end();
+        assert!(gate_with(false, end));
+        assert!(gate(false), "the lock during the unlock won");
+        end();
+        assert!(gate_with(true, end));
+        assert!(gate(false));
+
+        // a confirm that fails starts nothing
+        end();
+        assert!(tauri::async_runtime::block_on(confirm_unless_graced(app, false, ask(false, || {}))).is_err());
         assert!(gate(false), "nothing was granted by the cancelled one");
 
-        // nothing watching for a lock: no grace at all
-        WATCHING.store(false, Ordering::SeqCst);
-        assert!(gate(false) && gate(false));
+        // a watcher stopping ends it; with one not running there's no grace at all
+        assert!(!gate(false));
+        watcher(0, false);
         assert!(tauri::async_runtime::block_on(remaining(app)).is_none());
-        WATCHING.store(true, Ordering::SeqCst);
-        clear();
+        assert!(gate(false) && gate(false));
+        all_watching(true);
+        end();
     }
 
     /// The real buses: a logind Lock, LockedHint and PrepareForSleep, and a ScreenSaver ActiveChanged, sent with
-    /// `dbus-send`, each move the epoch. Needs a system and a session bus: `cargo test -p uni-app-tauri -- --ignored`.
+    /// `dbus-send`, each end the grace. Needs a system bus with logind, and a session bus:
+    /// `cargo test -p uni-app-tauri -- --ignored`.
     #[cfg(target_os = "linux")]
     #[test]
     #[ignore]
-    fn the_linux_watcher_sees_a_lock() {
+    fn the_linux_watchers_see_a_lock() {
         let _turn = TURN.lock().unwrap_or_else(|e| e.into_inner());
-        WATCHING.store(false, Ordering::SeqCst);
+        all_watching(false);
         watch();
         let wait = |what: &str, done: &dyn Fn() -> bool| {
             let until = Instant::now() + S(5);
@@ -323,8 +414,7 @@ mod tests {
                 std::thread::sleep(Duration::from_millis(20));
             }
         };
-        wait("the watcher started", &|| WATCHING.load(Ordering::SeqCst));
-        std::thread::sleep(Duration::from_millis(300)); // the session bus watcher too
+        wait("both watchers started", &watching);
         let send = |args: &[&str]| assert!(std::process::Command::new("dbus-send").args(args).status().unwrap().success());
         for (what, args) in [
             ("Lock", vec!["--system", "--type=signal", "/org/freedesktop/login1/session/t335", "org.freedesktop.login1.Session.Lock"]),
@@ -333,31 +423,17 @@ mod tests {
                 "string:org.freedesktop.login1.Session", "dict:string:variant:LockedHint,boolean:true", "array:string:"]),
             ("ActiveChanged", vec!["--session", "--type=signal", "/org/freedesktop/ScreenSaver", "org.freedesktop.ScreenSaver.ActiveChanged", "boolean:true"]),
         ] {
-            let before = EPOCH.load(Ordering::SeqCst);
+            let before = GENERATION.load(Ordering::SeqCst);
             send(&args);
-            wait(what, &|| EPOCH.load(Ordering::SeqCst) > before);
+            wait(what, &|| GENERATION.load(Ordering::SeqCst) > before);
         }
         // an unlocked hint and a screen saver going off are no lock
-        let before = EPOCH.load(Ordering::SeqCst);
+        let before = GENERATION.load(Ordering::SeqCst);
         send(&["--system", "--type=signal", "/org/freedesktop/login1/session/t335", "org.freedesktop.DBus.Properties.PropertiesChanged",
             "string:org.freedesktop.login1.Session", "dict:string:variant:LockedHint,boolean:false", "array:string:"]);
         send(&["--session", "--type=signal", "/org/freedesktop/ScreenSaver", "org.freedesktop.ScreenSaver.ActiveChanged", "boolean:false"]);
         std::thread::sleep(Duration::from_millis(500));
-        assert_eq!(EPOCH.load(Ordering::SeqCst), before);
-    }
-
-    #[test]
-    fn locked_ends_a_grace_and_one_stamped_before_it() {
-        let _turn = TURN.lock().unwrap_or_else(|e| e.into_inner());
-        // the shared state: the watchers' path, without an app (desktop epoch)
-        WATCHING.store(true, Ordering::SeqCst);
-        let before = EPOCH.load(Ordering::SeqCst);
-        *STAMP.lock().unwrap() = Some(Stamp { awake: Instant::now(), wall: SystemTime::now(), epoch: before });
-        locked();
-        assert!(STAMP.lock().unwrap().is_none());
-        assert_eq!(EPOCH.load(Ordering::SeqCst), before + 1);
-        // a stamp taken with the old epoch (a grant racing the lock) is over too
-        let raced = Stamp { awake: Instant::now(), wall: SystemTime::now(), epoch: before };
-        assert_eq!(left(&raced, raced.awake, raced.wall, EPOCH.load(Ordering::SeqCst)), None);
+        assert_eq!(GENERATION.load(Ordering::SeqCst), before);
+        assert!(watching());
     }
 }

@@ -2567,8 +2567,9 @@ async fn post_approve(
         Ok(("Approve this post?".to_string(), uni_core::post::summary(&note)))
     })
     .await?;
-    // a post is routine: no hold, no key released (T-335)
-    confirm_approval(&app, title, reason, false).await?;
+    // T-335: a post always asks. Its words are a vault note the webview can write, not a card Uni signed: within an
+    // unlock grace, a script in the webview could otherwise publish anything in Aaron's name with no one there.
+    confirm_approval(&app, title, reason, true).await?;
     // signed over the note as re-read after the confirm, still at the revision shown (a change meanwhile is a conflict)
     with_vault(&app, move |c| {
         let (keys, _) = uni_core::load_keys(false).map_err(|e| e.to_string())?;

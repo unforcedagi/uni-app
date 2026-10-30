@@ -121,20 +121,16 @@ test('Edit on Aaron\'s post takes his words; on Uni\'s post it is a note to Uni,
   await expect(card(page, 'My own sentence, typed by me.').getByRole('button', { name: 'Approve' })).toBeEnabled();
 });
 
-test('after an Approve, the other posts it could approve say "Unlocked · 5 min", and only while Rust says so', async ({ page }) => {
+test('a post never says "Unlocked": it always asks for the device unlock, even just after one', async ({ page }) => {
   await boot(page);
+  await page.evaluate(() => { (window as any).__grace = 240; });
   await page.getByRole('button', { name: 'To post · 3' }).click();
   const mine = card(page, 'The garden doesn’t hurry');
   await expect(mine.getByRole('button', { name: 'Approve' })).toBeVisible();
-  await expect(page.locator('.cc-grace')).toHaveCount(0);
   await card(page, 'Uni build log').getByRole('button', { name: 'Approve' }).click();
   await expect(page.getByRole('status').filter({ hasText: 'Approved. It goes out within a minute.' })).toBeVisible();
-  await expect(mine.locator('.cc-grace')).toHaveText('Unlocked · 5 min');
-  // a post that can't be approved never says it
-  await expect(card(page, 'wrong account').locator('.cc-grace')).toHaveCount(0);
-  if (process.env.T335_SHOTS) { await mine.scrollIntoViewIfNeeded(); await page.screenshot({ path: `${process.env.T335_SHOTS}/${test.info().project.name}-post-unlocked.png` }); }
-  // the webview only names the post: whether it asks for the unlock is Rust's
+  await expect(page.getByText(/Unlocked/)).toHaveCount(0);
+  // the webview only names the post: Rust asks for the unlock every time (lib.rs post_approve)
   expect(await calls(page, 'post_approve')).toEqual([{ vault: 'uni', id: 'post-uni', ifUpdatedAt: '2026-10-29T10:00:01.000Z' }]);
-  await page.evaluate(() => { (window as any).__grace = null; window.dispatchEvent(new Event('focus')); });
-  await expect(mine.locator('.cc-grace')).toHaveCount(0);
+  expect((await calls(page, 'unlock_grace'))).toHaveLength(0);
 });
