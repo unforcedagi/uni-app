@@ -192,10 +192,10 @@ test.describe('fixture', () => {
     await expect(aWeek).not.toHaveClass(/\b(paused|full)\b/);
     await expect(aWeek.locator('.usage-spend')).toHaveText('spending to 100%');
     await expect(aWeek.locator('.usage-spend')).toHaveAttribute('title', 'spending to 100% before Tue 07:00 reset');
-    // it fits the card: not cut off at the edge
-    const box = async (l: typeof aWeek) => (await l.boundingBox())!;
-    const [spend, edge] = [await box(aWeek.locator('.usage-spend')), await box(card)];
-    expect(spend.x + spend.width).toBeLessThanOrEqual(edge.x + edge.width);
+    // it fits inside the card's content box, padding excluded (it ran off the narrow card at 287 px on desktop)
+    const spend = (await aWeek.locator('.usage-spend').boundingBox())!;
+    const edge = await card.evaluate((e) => e.getBoundingClientRect().right - parseFloat(getComputedStyle(e).paddingRight) - parseFloat(getComputedStyle(e).borderRightWidth));
+    expect(spend.x + spend.width).toBeLessThanOrEqual(edge + 0.5);
     await expect(bWeek.locator('.usage-pct')).toHaveText('Paused · 96%');
     await expect(bWeek.locator('.usage-spend')).toHaveCount(0);
     await card.screenshot({ path: info.outputPath('usage-card-spending.png') });
