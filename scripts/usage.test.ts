@@ -83,6 +83,26 @@ t("T-335: the session pauses and fills the same way, and a full meter outranks a
   assert.equal(usageLineText(two, NOW)!.split(" · ")[0], "Claude: A paused at 98%", "the higher of the two");
 });
 
+// T-335: Claude Ultra has no 5-hour limit; the launcher says so per account (stop.session_limit false) and the session is info only
+t("T-335: a session the launcher doesn't count is never paused or full, on the card or the front door; the week still is", () => {
+  const off = (used: number, week = 40) => usageView(md((d) => {
+    d.accounts[0].session = { used, resets_at: "2026-10-26T20:00:00+00:00" }; d.accounts[0].week.used = week;
+    d.accounts[0].stop = { session: null, week: 95, why: null, session_limit: false };
+  }), NOW, TZ)!;
+  for (const used of [96, 99, 100]) {
+    const v = off(used), s = v.rows[0].session;
+    assert.deepEqual([s.pct, s.paused, s.full, s.headroom, s.info], [used, false, false, null, true], `session at ${used}`);
+    assert.equal(usageLineText(v, NOW)!.split(" · ")[0], "Claude: A 40% of the week", `front door at ${used}`);
+  }
+  assert.equal(off(99, 100).rows[0].week.full, true);
+  assert.equal(usageLineText(off(99, 100), NOW)!.split(" · ")[0], "Claude: A full");
+  assert.equal(usageLineText(off(99, 96), NOW)!.split(" · ")[0], "Claude: A paused at 96%");
+  // an older note (no session_limit) or the switch on: the session pauses as before
+  const on = usageView(md((d) => { d.accounts[0].session = { used: 96, resets_at: "2026-10-26T20:00:00+00:00" };
+    d.accounts[0].stop = { session: 95, week: 95, why: null, session_limit: true }; }), NOW, TZ)!;
+  assert.deepEqual([on.rows[0].session.paused, on.rows[0].session.info], [true, false]);
+});
+
 // T-335: in a week's last hours the launcher spends it to 100 (98 for the chat account); the note says so per account
 const WHY = "spending to 100% before Fri 07:00 reset";
 const lifted = (used: number, stop: unknown) => usageView(md((d) => { d.accounts[0].week.used = used; d.accounts[0].stop = stop; }), NOW, TZ)!;

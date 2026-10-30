@@ -10,7 +10,7 @@ import "./usage.css";
 function MeterLine({ label, m, extra = [] }: { label: string; m: Meter; extra?: React.ReactNode[] }) {
   const pct = m.pct === null ? 0 : Math.max(0, Math.min(100, m.pct));
   // T-335: at the launcher's stop it is paused (muted, with the headroom it keeps); "Full" only at a real 100
-  return <div className={`usage-meter ${m.full ? "full" : m.paused ? "paused" : ""}`} title={m.headroom ?? undefined}>
+  return <div className={`usage-meter ${m.full ? "full" : m.paused ? "paused" : m.info ? "info" : ""}`} title={m.headroom ?? undefined}>
     <span className="usage-k">{label}</span>
     <b className="usage-pct">{m.full ? "Full" : m.paused ? `Paused · ${m.text}` : m.text}</b>
     <span className="usage-bar" aria-hidden="true"><i style={{ width: `${pct}%` }} /></span>
@@ -70,7 +70,8 @@ export default function ClaudeUsage() {
         {/* an account whose reading is older than the one the header gives: said on its own row */}
         {r.out ? <p className="usage-row-stale">Signed out: these are its last numbers, from {ageText(r.readAt, now)}.</p>
           : r.stale && r.readAt !== view.readAt && <p className="usage-row-stale">No fresh reading for this account: these are from {ageText(r.readAt, now)}.</p>}
-        <MeterLine label="Session" m={r.session} />
+        {/* T-335: Claude Ultra has no 5-hour limit; where the launcher doesn't count the session, its number is info */}
+        <MeterLine label="Session" m={r.session} extra={[r.session.info && <span className="usage-info">info, not a limit</span>]} />
         {/* T-335: in a week's last hours the launcher spends it past the flat stop; the card says so instead of "Paused" */}
         <MeterLine label="Week" m={r.week} extra={[r.week.pace && <span className={r.week.pace === "ahead of pace" ? "usage-ahead" : "usage-on"}>{r.week.pace}</span>,
           r.week.spending !== null && <span className="usage-spend" title={r.week.why ?? undefined}>spending to {r.week.spending}%</span>]} />

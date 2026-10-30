@@ -177,6 +177,28 @@ test.describe('fixture', () => {
     await card.screenshot({ path: info.outputPath('usage-card-paused.png') });
   });
 
+  test('T-335: a session the launcher does not count (Claude Ultra) shows its number as info, never Paused or Full', async ({ page }, info) => {
+    await page.clock.setFixedTime(NOW);
+    const n = structuredClone(FIXTURE);
+    for (const [i, used] of [[0, 99], [1, 100]] as const) {
+      const acc = n.metadata.claude_accounts.accounts[i];
+      acc.session.used = used;
+      acc.stop = { session: null, week: 95, why: null, session_limit: false };
+    }
+    await boot(page, { note: n, conflictOnce: false, calls: [] });
+    const card = await openSettings(page);
+    for (const [label, text] of [['Account A', '99%'], ['Account B', '100%']]) {
+      const s = card.getByLabel(label).locator('.usage-meter').nth(0);
+      await expect(s.locator('.usage-pct')).toHaveText(text);
+      await expect(s).not.toHaveClass(/\b(paused|full)\b/);
+      await expect(s).toHaveClass(/\binfo\b/);
+      await expect(s.locator('.usage-info')).toHaveText('info, not a limit');
+    }
+    await expect(card).not.toContainText('Paused');
+    await expect(card).not.toContainText('Full');
+    await card.screenshot({ path: info.outputPath('usage-card-session-info.png') });
+  });
+
   test('T-335: in the last hours before its reset, a week the launcher spends to 100 is not Paused, and the card says why', async ({ page }, info) => {
     await page.clock.setFixedTime(NOW);
     const n = structuredClone(FIXTURE);

@@ -13,7 +13,9 @@ export const STALE_MIN = 60;
 export type UsageWindow = { used: number | null; resets_at: string | null };
 /** T-335: the stops a launch now really uses for this account (mts lifts the week stop to 100, or 98 for the chat account, in the
  *  week's last hours, and says why). A number, or null for no stop; undefined: the note doesn't say (an older mts), so the note's `stop`. */
-export type AccountStop = { session?: number | null; week?: number | null; why: string | null };
+export type AccountStop = { session?: number | null; week?: number | null; why: string | null;
+  /** T-335: false when the account's 5-hour session pauses nothing (Claude Ultra has no such limit): its meter is info only */
+  session_limit?: boolean };
 export type UsageAccount = { name: string; signed_in?: boolean; read_at?: string | null; session?: UsageWindow | null; week?: UsageWindow | null;
   stop?: AccountStop | null };
 export type UsageDoc = { version: number; read_at: string | null; stop: number | null; accounts: UsageAccount[]; preference: string;
@@ -23,7 +25,8 @@ export type UsageDoc = { version: number; read_at: string | null; stop: number |
  *  `full` only at a real 100. */
 export type Meter = { pct: number | null; text: string; reset: string | null; paused: boolean; full: boolean; headroom: string | null;
   /** T-335: the stop the launcher has lifted this meter to (above the note's flat one), and its reason as the note gives it */
-  spending: number | null; why: string | null };
+  spending: number | null; why: string | null;
+  /** T-335: a number to know, not a limit (the launcher doesn't count this session): never paused or full */ info?: boolean };
 /** A row's `stale`: its own reading is over STALE_MIN old, or it has none (Codex zwmejvyc P2: each account's reading is its own; one
  *  fresh account doesn't make another's old numbers current). */
 export type Row = { name: string; label: string; session: Meter; week: Meter & { pace: "on pace" | "ahead of pace" | null }; missing: boolean;
@@ -45,7 +48,7 @@ const ownStop = (v: unknown): number | null | undefined => (v === null ? null : 
 function accountStop(v: unknown): AccountStop | null {
   if (!v || typeof v !== "object") return null;
   const o = v as Record<string, unknown>;
-  return { session: ownStop(o.session), week: ownStop(o.week), why: str(o.why) };
+  return { session: ownStop(o.session), week: ownStop(o.week), why: str(o.why), ...(o.session_limit === false ? { session_limit: false } : {}) };
 }
 
 /** The note's `claude_accounts` metadata, checked; null when the note isn't one (another install, an older writer). */
@@ -128,10 +131,12 @@ export function usageView(metadata: unknown, now: Date, tz?: string): View | nul
     const age = a.read_at ? (now.getTime() - new Date(a.read_at).getTime()) / 60_000 : NaN;
     const out = a.signed_in === false;
     // the account's own stops when the note gives them (T-335), else the note's flat one, as before
+    const sInfo = a.stop?.session_limit === false; // T-335: the launcher doesn't count this session (Claude Ultra)
     const sStop = a.stop?.session !== undefined ? a.stop.session : doc.stop, wStop = a.stop?.week !== undefined ? a.stop.week : doc.stop;
     return {
       name: a.name, label: accountLabel(a.name), missing: !a.read_at, readAt: a.read_at ?? null, stale: !out && !(age <= STALE_MIN), out,
-      session: { pct: sUsed, text: pctText(sUsed), reset: sUsed ? resetText(s?.resets_at ?? null, now, tz) : null, ...level(sUsed, sStop, doc.stop) },
+      session: { pct: sUsed, text: pctText(sUsed), reset: sUsed ? resetText(s?.resets_at ?? null, now, tz) : null,
+        ...(sInfo ? { ...level(null, null, null), info: true } : { ...level(sUsed, sStop, doc.stop), info: false }) },
       week: { pct: wUsed, text: pctText(wUsed), reset: w && !passed(w) ? resetText(w.resets_at, now, tz) : null, ...level(wUsed, wStop, doc.stop, a.stop?.why ?? null),
         pace: w && !passed(w) ? pace(wUsed, w.resets_at, now) : null },
     };
