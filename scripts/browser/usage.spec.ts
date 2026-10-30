@@ -190,8 +190,12 @@ test.describe('fixture', () => {
     const aWeek = card.getByLabel('Account A').locator('.usage-meter').nth(1), bWeek = card.getByLabel('Account B').locator('.usage-meter').nth(1);
     await expect(aWeek.locator('.usage-pct')).toHaveText('96%');
     await expect(aWeek).not.toHaveClass(/\b(paused|full)\b/);
-    await expect(aWeek.locator('.usage-spend')).toHaveText('spending to 100% before the reset');
+    await expect(aWeek.locator('.usage-spend')).toHaveText('spending to 100%');
     await expect(aWeek.locator('.usage-spend')).toHaveAttribute('title', 'spending to 100% before Tue 07:00 reset');
+    // it fits the card: not cut off at the edge
+    const box = async (l: typeof aWeek) => (await l.boundingBox())!;
+    const [spend, edge] = [await box(aWeek.locator('.usage-spend')), await box(card)];
+    expect(spend.x + spend.width).toBeLessThanOrEqual(edge.x + edge.width);
     await expect(bWeek.locator('.usage-pct')).toHaveText('Paused · 96%');
     await expect(bWeek.locator('.usage-spend')).toHaveCount(0);
     await card.screenshot({ path: info.outputPath('usage-card-spending.png') });

@@ -73,7 +73,7 @@ export default function ClaudeUsage() {
         <MeterLine label="Session" m={r.session} />
         {/* T-335: in a week's last hours the launcher spends it past the flat stop; the card says so instead of "Paused" */}
         <MeterLine label="Week" m={r.week} extra={[r.week.pace && <span className={r.week.pace === "ahead of pace" ? "usage-ahead" : "usage-on"}>{r.week.pace}</span>,
-          r.week.spending !== null && <span className="usage-spend" title={r.week.why ?? undefined}>spending to {r.week.spending}% before the reset</span>]} />
+          r.week.spending !== null && <span className="usage-spend" title={r.week.why ?? undefined}>spending to {r.week.spending}%</span>]} />
       </>}
     </div>)}
     <div className="usage-pick" role="radiogroup" aria-label="New workers use">
