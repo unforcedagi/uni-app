@@ -22,6 +22,7 @@
 .usage-sub > span { white-space: nowrap; }
 .usage-ahead { color: var(--warn); font-weight: 600; }
 .usage-on { color: var(--text-soft); }
+.usage-spend { color: var(--text-soft); }
 .usage-pick { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 8px; padding-top: 8px; border-top: 1px solid var(--line); }
 .usage-seg { display: inline-flex; border: 1px solid var(--line-strong); border-radius: 999px; overflow: hidden; }
 .usage-seg > button { min-width: 44px; min-height: 36px; padding: 0 12px; border: 0; background: transparent; color: var(--text-soft); font: 600 13px var(--sans); cursor: pointer; }

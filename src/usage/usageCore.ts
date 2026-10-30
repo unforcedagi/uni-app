@@ -11,13 +11,19 @@ const WEEK_H = 168;
 export const STALE_MIN = 60;
 
 export type UsageWindow = { used: number | null; resets_at: string | null };
-export type UsageAccount = { name: string; signed_in?: boolean; read_at?: string | null; session?: UsageWindow | null; week?: UsageWindow | null };
+/** T-335: the stops a launch now really uses for this account (mts lifts the week stop to 100, or 98 for the chat account, in the
+ *  week's last hours, and says why). A number, or null for no stop; undefined: the note doesn't say (an older mts), so the note's `stop`. */
+export type AccountStop = { session?: number | null; week?: number | null; why: string | null };
+export type UsageAccount = { name: string; signed_in?: boolean; read_at?: string | null; session?: UsageWindow | null; week?: UsageWindow | null;
+  stop?: AccountStop | null };
 export type UsageDoc = { version: number; read_at: string | null; stop: number | null; accounts: UsageAccount[]; preference: string;
   next: { account: string; how: string; why?: string | null } };
 
 /** T-335: `paused` at or over the launcher's pacing stop but under 100 (it keeps the rest as headroom for rooms; `headroom` says so),
  *  `full` only at a real 100. */
-export type Meter = { pct: number | null; text: string; reset: string | null; paused: boolean; full: boolean; headroom: string | null };
+export type Meter = { pct: number | null; text: string; reset: string | null; paused: boolean; full: boolean; headroom: string | null;
+  /** T-335: the stop the launcher has lifted this meter to (above the note's flat one), and its reason as the note gives it */
+  spending: number | null; why: string | null };
 /** A row's `stale`: its own reading is over STALE_MIN old, or it has none (Codex zwmejvyc P2: each account's reading is its own; one
  *  fresh account doesn't make another's old numbers current). */
 export type Row = { name: string; label: string; session: Meter; week: Meter & { pace: "on pace" | "ahead of pace" | null }; missing: boolean;
@@ -34,6 +40,13 @@ const NAME = /^[a-z][a-z0-9]{0,15}$/;
 
 /** The launcher's pacing stop, a percent in (0, 100]; anything else is no stop (Codex r1: -1 or 101 would pause at nonsense). */
 const stopOf = (v: unknown): number | null => { const n = num(v); return n !== null && n > 0 && n <= 100 ? n : null; };
+/** An account's own stop: null is the launcher's "no stop"; anything that isn't a stop or null is left out (the note's stop stands). */
+const ownStop = (v: unknown): number | null | undefined => (v === null ? null : stopOf(v) ?? undefined);
+function accountStop(v: unknown): AccountStop | null {
+  if (!v || typeof v !== "object") return null;
+  const o = v as Record<string, unknown>;
+  return { session: ownStop(o.session), week: ownStop(o.week), why: str(o.why) };
+}
 
 /** The note's `claude_accounts` metadata, checked; null when the note isn't one (another install, an older writer). */
 export function parseDoc(metadata: unknown): UsageDoc | null {
@@ -47,7 +60,7 @@ export function parseDoc(metadata: unknown): UsageDoc | null {
   const accounts = d.accounts.flatMap((a): UsageAccount[] => {
     const o = a as Record<string, unknown>;
     return o && typeof o.name === "string" && NAME.test(o.name)
-      ? [{ name: o.name, signed_in: o.signed_in !== false, read_at: str(o.read_at), session: win(o.session), week: win(o.week) }] : [];
+      ? [{ name: o.name, signed_in: o.signed_in !== false, read_at: str(o.read_at), session: win(o.session), week: win(o.week), stop: accountStop(o.stop) }] : [];
   });
   if (!accounts.length) return null;
   const nx = (d.next ?? {}) as Record<string, unknown>;
@@ -95,17 +108,17 @@ export function pace(used: number | null, resetsAt: string | null, now: Date): "
 // under 100 never reads "100%": 99.6 is 99% until it is really full
 const pctText = (v: number | null) => (v === null ? "–" : `${v < 100 ? Math.min(99, Math.round(v)) : Math.round(v)}%`);
 
-/** A meter's state against the stop: paused from the stop up to 100, full at 100. */
-function level(used: number | null, stop: number) {
-  const full = used !== null && used >= 100, paused = used !== null && !full && used >= stop;
-  return { paused, full, headroom: paused ? `keeping ${Math.round(100 - stop)}% headroom for rooms` : null };
+/** A meter's state against its stop: paused from the stop up to 100, full at 100. `flat`: the note's stop, which `stop` may lift. */
+function level(used: number | null, stop: number | null, flat: number | null, why: string | null = null) {
+  const full = used !== null && used >= 100, paused = used !== null && !full && stop !== null && used >= stop;
+  const spending = why && stop !== null && (flat === null || stop > flat) ? stop : null;
+  return { paused, full, headroom: paused ? `keeping ${Math.round(100 - stop!)}% headroom for rooms` : null, spending, why: spending === null ? null : why };
 }
 
 /** What the card shows, from the note's metadata at `now`. Null: no usage note to show. */
 export function usageView(metadata: unknown, now: Date, tz?: string): View | null {
   const doc = parseDoc(metadata);
   if (!doc) return null;
-  const stop = doc.stop ?? 100;
   const rows = doc.accounts.map((a): Row => {
     const s = a.session, w = a.week;
     // a window whose reset has passed is empty until the next reading
@@ -114,10 +127,12 @@ export function usageView(metadata: unknown, now: Date, tz?: string): View | nul
     const wUsed = w ? (passed(w) ? 0 : w.used) : null;
     const age = a.read_at ? (now.getTime() - new Date(a.read_at).getTime()) / 60_000 : NaN;
     const out = a.signed_in === false;
+    // the account's own stops when the note gives them (T-335), else the note's flat one, as before
+    const sStop = a.stop?.session !== undefined ? a.stop.session : doc.stop, wStop = a.stop?.week !== undefined ? a.stop.week : doc.stop;
     return {
       name: a.name, label: accountLabel(a.name), missing: !a.read_at, readAt: a.read_at ?? null, stale: !out && !(age <= STALE_MIN), out,
-      session: { pct: sUsed, text: pctText(sUsed), reset: sUsed ? resetText(s?.resets_at ?? null, now, tz) : null, ...level(sUsed, stop) },
-      week: { pct: wUsed, text: pctText(wUsed), reset: w && !passed(w) ? resetText(w.resets_at, now, tz) : null, ...level(wUsed, stop),
+      session: { pct: sUsed, text: pctText(sUsed), reset: sUsed ? resetText(s?.resets_at ?? null, now, tz) : null, ...level(sUsed, sStop, doc.stop) },
+      week: { pct: wUsed, text: pctText(wUsed), reset: w && !passed(w) ? resetText(w.resets_at, now, tz) : null, ...level(wUsed, wStop, doc.stop, a.stop?.why ?? null),
         pace: w && !passed(w) ? pace(wUsed, w.resets_at, now) : null },
     };
   });

@@ -83,6 +83,38 @@ t("T-335: the session pauses and fills the same way, and a full meter outranks a
   assert.equal(usageLineText(two, NOW)!.split(" · ")[0], "Claude: A paused at 98%", "the higher of the two");
 });
 
+// T-335: in a week's last hours the launcher spends it to 100 (98 for the chat account); the note says so per account
+const WHY = "spending to 100% before Fri 07:00 reset";
+const lifted = (used: number, stop: unknown) => usageView(md((d) => { d.accounts[0].week.used = used; d.accounts[0].stop = stop; }), NOW, TZ)!;
+t("T-335: an account the launcher spends to 100 is not paused at 96, and says why", () => {
+  const v = lifted(96, { session: 95, week: 100, why: WHY }), w = v.rows[0].week;
+  assert.deepEqual([w.text, w.paused, w.full, w.headroom, w.spending, w.why], ["96%", false, false, null, 100, WHY]);
+  assert.equal(usageLineText(v, NOW)!.split(" · ")[0], "Claude: A 96% of the week");
+  assert.deepEqual([lifted(99.6, { session: 95, week: 100, why: WHY }).rows[0].week.paused, lifted(100, { session: 95, week: 100, why: WHY }).rows[0].week.full], [false, true]);
+  // the other account keeps the flat stop it was given
+  assert.deepEqual([v.rows[1].week.spending, v.rows[1].week.why], [null, null]);
+});
+
+t("T-335: the chat account stops at 98 even then, with 2% headroom", () => {
+  const why = "spending to 98% before Fri 07:00 reset (the chat account keeps 2%)";
+  const at = (used: number) => lifted(used, { session: 95, week: 98, why }).rows[0].week;
+  assert.deepEqual([at(97).paused, at(98).paused, at(98).headroom, at(98).spending], [false, true, "keeping 2% headroom for rooms", 98]);
+});
+
+t("T-335: the session keeps its own stop; an old note, or a bad stop, behaves as before", () => {
+  const v = usageView(md((d) => { d.accounts[0].session = { used: 96, resets_at: "2026-10-26T20:00:00+00:00" }; d.accounts[0].week.used = 96;
+    d.accounts[0].stop = { session: 95, week: 100, why: WHY }; }), NOW, TZ)!;
+  assert.deepEqual([v.rows[0].session.paused, v.rows[0].week.paused], [true, false]);
+  assert.equal(usageLineText(v, NOW)!.split(" · ")[0], "Claude: A paused at 96%");
+  // no stop on the account (an older mts): the note's flat stop, as today
+  assert.deepEqual([lifted(96, undefined).rows[0].week.paused, lifted(96, undefined).rows[0].week.spending], [true, null]);
+  // junk falls back to the note's stop; an explicit null is the launcher's "no stop"
+  for (const junk of ["x", 7, { week: "100" }, { week: 150 }, { week: -1 }]) assert.equal(lifted(96, junk).rows[0].week.paused, true, JSON.stringify(junk));
+  assert.deepEqual([lifted(99, { session: null, week: null, why: null }).rows[0].week.paused], [false]);
+  // a why without a lift is not shown as spending
+  assert.deepEqual([lifted(50, { session: 95, week: 95, why: WHY }).rows[0].week.spending], [null]);
+});
+
 t("the preference: the note's value when it is auto or an account; the next account only while it was decided with it", () => {
   const b = usageView(md(() => {}, "b"), NOW, TZ)!;
   assert.equal(b.preference, "b");

@@ -177,6 +177,26 @@ test.describe('fixture', () => {
     await card.screenshot({ path: info.outputPath('usage-card-paused.png') });
   });
 
+  test('T-335: in the last hours before its reset, a week the launcher spends to 100 is not Paused, and the card says why', async ({ page }, info) => {
+    await page.clock.setFixedTime(NOW);
+    const n = structuredClone(FIXTURE);
+    const a0 = n.metadata.claude_accounts.accounts[0], b0 = n.metadata.claude_accounts.accounts[1];
+    a0.week = { used: 96, resets_at: '2026-10-27T13:00:00+00:00' };
+    a0.stop = { session: 95, week: 100, why: 'spending to 100% before Tue 07:00 reset' };
+    b0.week.used = 96;
+    b0.stop = { session: 95, week: 95, why: null };
+    await boot(page, { note: n, conflictOnce: false, calls: [] });
+    const card = await openSettings(page);
+    const aWeek = card.getByLabel('Account A').locator('.usage-meter').nth(1), bWeek = card.getByLabel('Account B').locator('.usage-meter').nth(1);
+    await expect(aWeek.locator('.usage-pct')).toHaveText('96%');
+    await expect(aWeek).not.toHaveClass(/\b(paused|full)\b/);
+    await expect(aWeek.locator('.usage-spend')).toHaveText('spending to 100% before the reset');
+    await expect(aWeek.locator('.usage-spend')).toHaveAttribute('title', 'spending to 100% before Tue 07:00 reset');
+    await expect(bWeek.locator('.usage-pct')).toHaveText('Paused · 96%');
+    await expect(bWeek.locator('.usage-spend')).toHaveCount(0);
+    await card.screenshot({ path: info.outputPath('usage-card-spending.png') });
+  });
+
   test('no usage note on this install: Settings has no card', async ({ page }) => {
     await boot(page, { note: null, conflictOnce: false, calls: [] });
     await page.getByRole('button', { name: 'Settings', exact: true }).click();

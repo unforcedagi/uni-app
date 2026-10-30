@@ -7,14 +7,14 @@ import { ageText, accountLabel, howText, USAGE_VAULT, usageView, type Meter } fr
 import { useUsageNote, useUsageRefresh, type UsageNote as Note } from "./usageNote";
 import "./usage.css";
 
-function MeterLine({ label, m, extra }: { label: string; m: Meter; extra?: React.ReactNode }) {
+function MeterLine({ label, m, extra = [] }: { label: string; m: Meter; extra?: React.ReactNode[] }) {
   const pct = m.pct === null ? 0 : Math.max(0, Math.min(100, m.pct));
   // T-335: at the launcher's stop it is paused (muted, with the headroom it keeps); "Full" only at a real 100
   return <div className={`usage-meter ${m.full ? "full" : m.paused ? "paused" : ""}`} title={m.headroom ?? undefined}>
     <span className="usage-k">{label}</span>
     <b className="usage-pct">{m.full ? "Full" : m.paused ? `Paused · ${m.text}` : m.text}</b>
     <span className="usage-bar" aria-hidden="true"><i style={{ width: `${pct}%` }} /></span>
-    <span className="usage-sub">{[m.reset && `resets ${m.reset}`, extra].filter(Boolean).map((x, i) => <span key={i}>{x}</span>)}</span>
+    <span className="usage-sub">{[m.reset && `resets ${m.reset}`, ...extra].filter(Boolean).map((x, i) => <span key={i}>{x}</span>)}</span>
   </div>;
 }
 
@@ -71,7 +71,9 @@ export default function ClaudeUsage() {
         {r.out ? <p className="usage-row-stale">Signed out: these are its last numbers, from {ageText(r.readAt, now)}.</p>
           : r.stale && r.readAt !== view.readAt && <p className="usage-row-stale">No fresh reading for this account: these are from {ageText(r.readAt, now)}.</p>}
         <MeterLine label="Session" m={r.session} />
-        <MeterLine label="Week" m={r.week} extra={r.week.pace && <span className={r.week.pace === "ahead of pace" ? "usage-ahead" : "usage-on"}>{r.week.pace}</span>} />
+        {/* T-335: in a week's last hours the launcher spends it past the flat stop; the card says so instead of "Paused" */}
+        <MeterLine label="Week" m={r.week} extra={[r.week.pace && <span className={r.week.pace === "ahead of pace" ? "usage-ahead" : "usage-on"}>{r.week.pace}</span>,
+          r.week.spending !== null && <span className="usage-spend" title={r.week.why ?? undefined}>spending to {r.week.spending}% before the reset</span>]} />
       </>}
     </div>)}
     <div className="usage-pick" role="radiogroup" aria-label="New workers use">
