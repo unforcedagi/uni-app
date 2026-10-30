@@ -28,6 +28,7 @@ import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
 import java.security.KeyStore
+import java.util.concurrent.atomic.AtomicLong
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -127,6 +128,28 @@ class KeystorePlugin(private val activity: Activity) : Plugin(activity) {
         finishAuthentication(false, "Device unlock is unavailable")
       }
     }
+  }
+
+  // T-335: each time the app leaves the screen (another app, home, screen off or locked), and the unlock's own screen.
+  // Rust reads this after an approval's unlock and again at the next tap: once it has moved, the few minutes in which a
+  // routine approval needs no unlock are over. Kept for the process, so a recreated activity counts on.
+  override fun onPause() {
+    leftScreen.incrementAndGet()
+  }
+
+  override fun onStop() {
+    leftScreen.incrementAndGet()
+  }
+
+  @Command
+  fun lifecycleEpoch(invoke: Invoke) {
+    val out = JSObject()
+    out.put("epoch", leftScreen.get())
+    invoke.resolve(out)
+  }
+
+  companion object {
+    private val leftScreen = AtomicLong(0)
   }
 
   @Command

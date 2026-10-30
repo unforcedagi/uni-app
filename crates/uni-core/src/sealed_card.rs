@@ -50,6 +50,8 @@ pub const MORNING_MAX_ROWS: usize = 20;
 pub const RESEND_SAME_WRAP_SECS: u64 = 600;
 /// Answers are kept this long after their card expired, then dropped from the file.
 const KEEP_AFTER_EXPIRY_SECS: u64 = 7 * 86_400;
+/// T-335: a child token that outlives this is long-lived, and minting one always asks for the device unlock.
+pub const LONG_LIVED_CHILD_S: u64 = 86_400;
 const PAYLOAD_VERSION: &str = "uni-sealed-payload/v1";
 const REQUEST_VERSION: &str = "uni-sealed-request/v1";
 /// The fields of one request (CARD.md §2), exactly.
@@ -659,6 +661,8 @@ pub struct RowView {
     pub request_digest: String,
     pub expires: u64,
     pub answer: Option<AnswerView>,
+    /// T-335: approving it always asks for the device unlock, even just after one ([`always_unlock`]).
+    pub always_unlock: bool,
 }
 
 /// What the card shows: its rows when every check passed, else the one-line reason and nothing to tap.
@@ -704,6 +708,7 @@ pub fn view(ev: &Event, uni: &PublicKey, seal: &SealKey, answers: &Answers, now:
                 .iter()
                 .find(|a| a.rid == r.rid)
                 .map(|a| AnswerView { decision: a.decision, at: a.at, until: a.until, sent: a.sent }),
+            always_unlock: always_unlock(r.class, &r.action, &r.payload),
         })
         .collect();
     CardView { kind: Some(card.kind), event_id: ev.id.to_hex(), refused: None, rows }
@@ -754,6 +759,28 @@ pub fn approval_summary(view: &CardView, rids: &[String]) -> Result<(String, Str
             rs.iter().map(|r| format!("{} ({})", one(r), job(r))).collect::<Vec<_>>().join("; ") + ".",
         )),
     }
+}
+
+/// T-335: whether approving a request always needs the device's own unlock, even within the few minutes after one: a
+/// powerful credential (the one-second hold), or a mint whose child token is permanent, long-lived or of no stated
+/// lifetime (the permanent-token warning). Everything else is routine.
+pub fn always_unlock(class: Class, action: &str, payload: &Value) -> bool {
+    if class == Class::Powerful {
+        return true;
+    }
+    let child = payload.get("child_ttl_s");
+    if action.starts_with("mint.") || child.is_some() {
+        return !child.and_then(Value::as_u64).is_some_and(|t| t <= LONG_LIVED_CHILD_S);
+    }
+    false
+}
+
+/// T-335: whether approving `rids` on this card needs a fresh device unlock: any chosen request that always does, and
+/// anything that can't be approved at all (refused, a request not on the card, nothing chosen) errs the same way.
+pub fn needs_fresh_unlock(view: &CardView, rids: &[String]) -> bool {
+    view.refused.is_some()
+        || rids.is_empty()
+        || rids.iter().any(|rid| view.rows.iter().find(|r| &r.rid == rid).is_none_or(|r| r.always_unlock))
 }
 
 /// A card waiting for a tap, for Needs you.
@@ -1151,6 +1178,48 @@ mod tests {
         let refused = view(&card(&Keys::generate(), &f), &w.uni.public_key(), &w.seal, &Answers::default(), NOW);
         assert_eq!(approval_summary(&refused, &[rid]).unwrap_err().to_string(), "invalid: Not signed by Uni.");
         assert_eq!([span(45), span(600), span(7200), span(5400 * 3)], ["45 s", "10 min", "2 h", "4.5 h"]);
+    }
+
+    #[test]
+    fn routine_requests_may_skip_a_fresh_unlock_powerful_and_long_lived_never() {
+        let w = world();
+        let at = |f: &Value| view(&card(&w.uni, f), &w.uni.public_key(), &w.seal, &Answers::default(), NOW);
+        let rid = |f: &Value| vec![f["rid"].as_str().unwrap().to_string()];
+        let mint = |class: &str, child: Value| {
+            let (mut g, _) = fields(&w, "cf-parent", class, 60, 1);
+            g["action"] = json!("mint.cloudflare");
+            g["payload"] = match child { Value::String(_) => json!({"template": "r2-read"}), t => json!({"template": "r2-read", "child_ttl_s": t}) };
+            g["payload_digest"] = json!(payload_digest("mint.cloudflare", &g["payload"]).unwrap());
+            g
+        };
+        let (routine, _) = fields(&w, "pages-deploy", "routine", 600, 1);
+        let v = at(&routine);
+        assert!(!v.rows[0].always_unlock && !needs_fresh_unlock(&v, &rid(&routine)), "a routine request");
+        let (powerful, _) = fields(&w, "cloudflare-dns", "powerful", 600, 1);
+        let v = at(&powerful);
+        assert!(v.rows[0].always_unlock && needs_fresh_unlock(&v, &rid(&powerful)), "a powerful one: the hold");
+        // a routine mint: short child yes; a day is the edge; permanent, longer, unstated or not a number: always
+        for (child, always) in [(json!(3600), false), (json!(LONG_LIVED_CHILD_S), false), (json!(LONG_LIVED_CHILD_S + 1), true),
+            (Value::Null, true), (json!("absent"), true), (json!(-1), true), (json!(true), true)] {
+            let g = mint("routine", child.clone());
+            let v = at(&g);
+            assert_eq!(v.refused, None, "{child}");
+            assert_eq!((v.rows[0].always_unlock, needs_fresh_unlock(&v, &rid(&g))), (always, always), "child_ttl_s {child}");
+        }
+        // a stray child_ttl_s on any action counts too
+        let (mut odd, _) = fields(&w, "pages-deploy", "routine", 600, 1);
+        odd["payload"] = json!({"child_ttl_s": null});
+        odd["payload_digest"] = json!(payload_digest("dns.edit", &odd["payload"]).unwrap());
+        assert!(at(&odd).rows[0].always_unlock);
+        // the morning card: only the rows chosen count; a request not on the card, nothing chosen or a refused card ask
+        let rows = vec![fields(&w, "r2-a", "routine", 50_400, 200).0, mint("routine", Value::Null)];
+        let m = view(&morning(&w.uni, &rows), &w.uni.public_key(), &w.seal, &Answers::default(), NOW);
+        assert_eq!(m.refused, None);
+        assert!(!needs_fresh_unlock(&m, &rid(&rows[0])));
+        assert!(needs_fresh_unlock(&m, &[rid(&rows[0]), rid(&rows[1])].concat()), "a permanent mint among the chosen");
+        assert!(needs_fresh_unlock(&m, &["9".repeat(32)]) && needs_fresh_unlock(&m, &[]));
+        let refused = view(&card(&Keys::generate(), &routine), &w.uni.public_key(), &w.seal, &Answers::default(), NOW);
+        assert!(needs_fresh_unlock(&refused, &rid(&routine)));
     }
 
     #[test]

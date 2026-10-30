@@ -17,19 +17,20 @@ const msg = (ref: string, body: string, ts: number, author = UNI, name = 'Uni') 
 const fence = (lang: string, prose: string) => `${prose}\nOpen this in the Uni app to see exactly what it unlocks.\n\n\`\`\`${lang}\n{"v": 1}\n\`\`\``;
 const single = (prose = '🔑 **Uni asks to use dns-zone** (powerful)') => fence('uni-sealed-approval', prose);
 
-type Row = { rid: string; action: string; credential: string; class: 'routine' | 'powerful'; scope: string; ttl_s: number; uses: number; payload: unknown; request_digest: string; expires: number; answer: null };
+type Row = { rid: string; action: string; credential: string; class: 'routine' | 'powerful'; scope: string; ttl_s: number; uses: number; payload: unknown; request_digest: string; expires: number; answer: null; always_unlock?: boolean };
 const row = (o: Partial<Row> = {}): Row => ({ rid: 'r1'.padEnd(32, '0'), action: 'dns.edit', credential: 'dns-zone', class: 'powerful', scope: 'Add an A record for demo.example.org',
   ttl_s: 600, uses: 1, payload: { type: 'A', name: 'demo', content: '192.0.2.7', zone: 'example.org', note: 'https://example.org/' + 'x'.repeat(90) },
   request_digest: '9b13b2ae' + 'f'.repeat(56), expires: now() + 900, answer: null, ...o });
 const view = (rows: Row[], kind: 'single' | 'morning' = 'single') => ({ kind, event_id: 'e'.repeat(64), refused: null, rows });
 const refused = (why: string, kind: 'single' | 'morning' = 'single') => ({ kind, event_id: 'e'.repeat(64), refused: why, rows: [] });
 
-type Opts = { messages: unknown[]; cards: Record<string, unknown>; failures?: number; waiting?: unknown[] };
+type Opts = { messages: unknown[]; cards: Record<string, unknown>; failures?: number; waiting?: unknown[]; grace?: number | null };
 async function boot(page: Page, o: Opts) {
   await page.addInitScript(({ ME, UNI, o }) => {
     const w = window as any;
     w.calls = [];
     w.failures = o.failures ?? 0;
+    w.grace = o.grace ?? null;
     const cards = o.cards as Record<string, any>;
     w.__TAURI_INTERNALS__ = {
       metadata: { currentWindow: { label: 'main' }, currentWebview: { label: 'main' } },
@@ -50,6 +51,8 @@ async function boot(page: Page, o: Opts) {
           case 'secret_requesters': return [];
           case 'sealed_waiting': return w.answered ? [] : (o.waiting ?? []);
           case 'sealed_card': return cards[args.reference] ?? null;
+          // T-335: Rust's unlock grace, in seconds; an approve that passed starts one, as the real device unlock would
+          case 'unlock_grace': return w.grace;
           case 'sealed_answer': {
             await new Promise((r) => setTimeout(r, 200));
             const v = cards[args.reference];
@@ -57,6 +60,7 @@ async function boot(page: Page, o: Opts) {
             const sent = w.failures <= 0;
             v.rows = v.rows.map((r: any) => args.rids.includes(r.rid) ? { ...r, answer: { decision: args.decision, at: t, until: args.decision === 'approve' ? t + r.ttl_s : null, sent } } : r);
             w.answered = true;
+            if (args.decision === 'approve') w.grace = 300;
             if (typeof w.__afterAnswer === 'function') w.__afterAnswer(cards);
             if (!sent) { w.failures--; throw 'relay unreachable: connection refused'; }
             return v;
@@ -326,4 +330,36 @@ test('a waiting card is flagged over the composer and Show brings it into view',
   await expect(page.locator('article.approval-waiting[data-ref="m1"]')).toHaveCount(1);
   await card(page, 'Approve use of dns-zone').getByRole('button', { name: 'Deny' }).click();
   await expect(banner).toHaveCount(0);
+});
+
+test('the unlock grace: a routine card says "Unlocked · 4 min"; a powerful card, a permanent mint and a morning card choosing one never do', async ({ page }) => {
+  const routine = row({ rid: 'g1'.padEnd(32, '0'), credential: 'pages-deploy', action: 'deploy.pages', class: 'routine', ttl_s: 3600, uses: 3, scope: 'Deploy the example site', payload: null, always_unlock: false });
+  const powerful = row({ rid: 'g2'.padEnd(32, '0'), always_unlock: true });
+  const mint = row({ rid: 'g3'.padEnd(32, '0'), credential: 'cf-parent', action: 'mint.cloudflare', class: 'routine', ttl_s: 60, scope: 'Mint a permanent read-only token', payload: { template: 'r2-read', child_ttl_s: null }, always_unlock: true });
+  const rows = [
+    row({ rid: 'g4'.padEnd(32, '0'), credential: 'r2-backups', action: 'r2.list', class: 'routine', ttl_s: 50400, uses: 200, scope: 'List backups', payload: null, expires: now() + 3600, always_unlock: false }),
+    row({ rid: 'g5'.padEnd(32, '0'), credential: 'cf-child', action: 'mint.cloudflare', class: 'routine', ttl_s: 60, uses: 1, scope: 'Mint a permanent token', payload: { child_ttl_s: null }, expires: now() + 3600, always_unlock: true }),
+  ];
+  await boot(page, { grace: 4 * 60 - 5, messages: [msg('m1', single(), now() - 90), msg('m2', single(), now() - 70), msg('m3', single(), now() - 50),
+    msg('m4', fence('uni-sealed-morning', "🔑 **Uni's morning card**"), now() - 30)], cards: { m1: view([routine]), m2: view([powerful]), m3: view([mint]), m4: view(rows, 'morning') } });
+  const r = card(page, 'Approve use of pages-deploy');
+  await expect(r.locator('.cc-meta')).toHaveText('pages-deploy · deploy.pages · 60 min · Unlocked · 4 min · details');
+  await expect(card(page, 'Approve use of dns-zone').locator('.cc-meta')).toHaveText(/^dns-zone · dns\.edit · 10 min · POWERFUL · details$/);
+  await expect(card(page, 'Approve use of cf-parent').locator('.cc-grace')).toHaveCount(0);
+  await expect(card(page, 'Approve use of cf-parent').getByRole('note')).toContainText('permanent token');
+  // the morning card: only what is chosen counts; switch the permanent mint off and the rest would go on the tap
+  const m = card(page, "Uni's morning card");
+  await expect(m.locator('.cc-grace')).toHaveCount(0);
+  await details(m);
+  await m.getByRole('switch', { name: 'Grant cf-child for mint.cloudflare' }).uncheck();
+  await expect(m.locator('.cc-grace')).toHaveText('Unlocked · 4 min');
+  await shot(page, 'grace');
+  // Rust ends it (five minutes, a lock, a sleep): the hint goes at the next read
+  await page.evaluate(() => { (window as any).grace = null; window.dispatchEvent(new Event('focus')); });
+  await expect(page.locator('.cc-grace')).toHaveCount(0);
+  // an approval that passed starts one; the webview still sends only the card and the request ids
+  await r.getByRole('button', { name: 'Approve' }).click();
+  await expect(r.getByRole('status')).toHaveText('Approved');
+  await expect(m.locator('.cc-grace')).toHaveText('Unlocked · 5 min');
+  expect((await answers(page)).map((a) => a.args)).toEqual([{ channel: 'test', reference: 'm1', decision: 'approve', rids: [routine.rid] }]);
 });

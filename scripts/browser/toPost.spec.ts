@@ -27,6 +27,9 @@ async function boot(page: Page) {
     };
     w.__extraInvoke = async (cmd: string, args: any) => {
       if (cmd === 'vault_query' && args.tag === 'post') return w.__posts.map((p: any) => ({ ...p, metadata: { ...p.metadata } }));
+      // T-335: Rust's unlock grace; an Approve that passed starts one, as the real device unlock would
+      if (cmd === 'unlock_grace') return w.__grace ?? null;
+      if (cmd === 'post_approve') w.__grace = 300;
       if (cmd === 'post_approve') return write(args.id, args.ifUpdatedAt, { state: 'approved', approved_at: new Date().toISOString(), scheduled_for: args.scheduledFor ? new Date(args.scheduledFor * 1000).toISOString() : null });
       if (cmd === 'post_drop') return write(args.id, args.ifUpdatedAt, { state: 'dropped' });
       if (cmd === 'post_edit') return write(args.id, args.ifUpdatedAt, find(args.id).metadata.account === 'aaron' ? { body: args.text, provenance: 'aaron-typed' } : { feedback: args.text, state: 'dropped' });
@@ -116,4 +119,22 @@ test('Edit on Aaron\'s post takes his words; on Uni\'s post it is a note to Uni,
   await mine.getByRole('button', { name: 'Save' }).click();
   await expect(card(page, 'My own sentence, typed by me.').locator('.tp-badge')).toHaveText('● Your voice');
   await expect(card(page, 'My own sentence, typed by me.').getByRole('button', { name: 'Approve' })).toBeEnabled();
+});
+
+test('after an Approve, the other posts it could approve say "Unlocked · 5 min", and only while Rust says so', async ({ page }) => {
+  await boot(page);
+  await page.getByRole('button', { name: 'To post · 3' }).click();
+  const mine = card(page, 'The garden doesn’t hurry');
+  await expect(mine.getByRole('button', { name: 'Approve' })).toBeVisible();
+  await expect(page.locator('.cc-grace')).toHaveCount(0);
+  await card(page, 'Uni build log').getByRole('button', { name: 'Approve' }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Approved. It goes out within a minute.' })).toBeVisible();
+  await expect(mine.locator('.cc-grace')).toHaveText('Unlocked · 5 min');
+  // a post that can't be approved never says it
+  await expect(card(page, 'wrong account').locator('.cc-grace')).toHaveCount(0);
+  if (process.env.T335_SHOTS) { await mine.scrollIntoViewIfNeeded(); await page.screenshot({ path: `${process.env.T335_SHOTS}/${test.info().project.name}-post-unlocked.png` }); }
+  // the webview only names the post: whether it asks for the unlock is Rust's
+  expect(await calls(page, 'post_approve')).toEqual([{ vault: 'uni', id: 'post-uni', ifUpdatedAt: '2026-10-29T10:00:01.000Z' }]);
+  await page.evaluate(() => { (window as any).__grace = null; window.dispatchEvent(new Event('focus')); });
+  await expect(mine.locator('.cc-grace')).toHaveCount(0);
 });

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { clockTime as clock, DoneCard, PendingCard, QuietCard } from "./CompactCard";
+import { GraceHint } from "./UnlockGrace";
 import {
-  SEALED_CHANGED, childToken, jobFingerprint, payloadEntries, payloadField, plainError, releasesLine, shortText, span, windowText,
+  SEALED_CHANGED, childToken, jobFingerprint, payloadEntries, payloadField, plainError, releasesLine, shortText, span, tapOnly, windowText,
   type SealedCardView, type SealedRow,
 } from "./sealedCardCore";
 
@@ -177,7 +178,7 @@ export function SealedCard({ channel, reference }: { channel: string; reference:
         after={<>{failure}{retry}</>} />;
     }
     return <PendingCard className={cls} label={label} icon="🔑" what={what}
-      meta={<><span className="cc-where">{r.credential}</span> · <code className="cc-action">{r.action}</code> · {span(r.ttl_s)}{r.class === "powerful" && <> · <Badge cls="powerful" /></>} · </>}
+      meta={<><span className="cc-where">{r.credential}</span> · <code className="cc-action">{r.action}</code> · {span(r.ttl_s)}{r.class === "powerful" && <> · <Badge cls="powerful" /></>} · <GraceHint on={tapOnly([r])} sep /></>}
       actions={<div className="sealed-actions">
         <button type="button" className="pairing-secondary sealed-deny" disabled={busy} onClick={() => void answer("deny", [r.rid])}>Deny</button>
         {r.class === "powerful"
@@ -214,7 +215,7 @@ export function SealedCard({ channel, reference }: { channel: string; reference:
       details={<>{list(false)}<p className="approvals-note">Answer by {clock(expires ?? 0)}</p></>} after={<>{failure}{retry}</>} />;
   }
   return <PendingCard className="sealed-card sealed-morning routine" label={title} icon="🔑" what={`Morning card: ${names}`}
-    meta={<>{rows.length} routine · answer by {clock(expires ?? 0)} · </>}
+    meta={<>{rows.length} routine · answer by {clock(expires ?? 0)} · <GraceHint on={tapOnly(chosen)} sep /></>}
     actions={<div className="sealed-actions">
       <button type="button" className="pairing-secondary sealed-deny" disabled={busy} onClick={() => void answer("deny", rows.map((r) => r.rid))}>Deny all</button>
       <button type="button" className="sealed-approve" disabled={busy || !chosen.length} onClick={() => void answer("approve", chosen.map((r) => r.rid))}>

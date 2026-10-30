@@ -270,6 +270,9 @@ p.decision-card.decision-loading { padding: 8px 12px; color: var(--muted); font-
 .cc-meta { color: var(--muted); font-size: 12.5px; line-height: 1.4; overflow-wrap: anywhere; }
 .cc-meta code { font-family: var(--mono); font-size: 12px; }
 .cc-meta .sealed-badge { margin-left: 0; padding: 0 6px; font-size: 10px; }
+/* T-335: "Unlocked · 4 min": quiet, one piece, words only (the Daylight is grayscale) */
+.cc-grace { white-space: nowrap; }
+.tp-actions .cc-grace { color: var(--muted); font-size: 12.5px; }
 .cc-toggle { padding: 0; border: 0; background: none; color: var(--text-soft); font: inherit; font-size: 12.5px; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
 .cc-actions { flex: none; margin-left: auto; }
 .cc-actions .sealed-actions, .cc-actions .cc-buttons { flex-wrap: nowrap; margin: 0; gap: 6px; }

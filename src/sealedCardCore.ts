@@ -7,7 +7,13 @@ export type SealedAnswer = { decision: "approve" | "deny"; at: number; until: nu
 export type SealedRow = {
   rid: string; action: string; credential: string; class: SealedClass; scope: string; ttl_s: number; uses: number;
   payload: unknown; request_digest: string; expires: number; answer: SealedAnswer | null;
+  /** T-335: approving it always asks for the device unlock, even just after one (Rust's `always_unlock`). */
+  always_unlock?: boolean;
 };
+
+/** T-335: approving these rows would need only the tap while the unlock grace lasts (Rust decides, at the tap). */
+export const tapOnly = (rows: Pick<SealedRow, "class" | "always_unlock">[]): boolean =>
+  rows.length > 0 && rows.every((r) => r.class === "routine" && r.always_unlock === false);
 export type SealedCardView = { kind: "single" | "morning" | null; event_id: string; refused: string | null; rows: SealedRow[] };
 /** A card waiting for a tap in some room (`sealed_waiting`), for Needs you. */
 export type SealedWaiting = {

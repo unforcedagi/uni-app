@@ -1223,17 +1223,18 @@ async fn sealed_answer(
         // the device's own confirm, before anything is recorded or sent: what it names comes from the checked card here
         let (path, dir2, ch, re, ids) = (db_path(&app)?, dir.clone(), channel.clone(), reference.clone(), rids.clone());
         secure_store::ensure_loaded(&app).await?;
-        let (title, reason) = blocking(move || {
+        let (title, reason, fresh) = blocking(move || {
             let (keys, _) = uni_core::load_keys(false).map_err(|e| e.to_string())?;
             let store = Store::open(path).map_err(|e| e.to_string())?;
             let ev = card::stored_card(&store, &ch, &re).map_err(|e| e.to_string())?;
             let seal = uni_core::sealed::derive_seal_key(&keys).map_err(|e| e.to_string())?;
             let answers = card::Answers::load(&dir2).map_err(|e| e.to_string())?;
             let view = card::view(&ev, &trusted_uni(), &seal, &answers, nostr::Timestamp::now().as_secs());
-            card::approval_summary(&view, &ids).map_err(|e| e.to_string())
+            let (title, reason) = card::approval_summary(&view, &ids).map_err(|e| e.to_string())?;
+            Ok((title, reason, card::needs_fresh_unlock(&view, &ids)))
         })
         .await?;
-        confirm_approval(&app, title, reason).await?;
+        confirm_approval(&app, title, reason, fresh).await?;
     }
     relay_send_io(&app, move |url, keys, store| {
         let ev = card::stored_card(store, &channel, &reference).map_err(|e| e.to_string())?;
@@ -1251,7 +1252,14 @@ async fn sealed_answer(
 /// script in the webview could call `sealed_answer` itself. So before a data key goes anywhere, Rust raises the
 /// device's own confirm, which no page can answer: the device unlock (biometric or screen lock) on Android and macOS,
 /// a native dialog on Linux (never released). Its words come from the checked card. One at a time.
-async fn confirm_approval(app: &tauri::AppHandle, title: String, reason: String) -> Result<(), String> {
+///
+/// T-335: a routine approval (`fresh` false) within a few minutes of the last one of these that passed goes through
+/// without it (`unlock_grace`); a powerful one always asks.
+async fn confirm_approval(app: &tauri::AppHandle, title: String, reason: String, fresh: bool) -> Result<(), String> {
+    unlock_grace::confirm_unless_graced(app, fresh, ask_device(app, title, reason)).await.map(|_| ())
+}
+
+async fn ask_device(app: &tauri::AppHandle, title: String, reason: String) -> Result<(), String> {
     static CONFIRMING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
     let _one = CONFIRMING.try_lock().map_err(|_| "another approval is waiting for your confirmation".to_string())?;
     // The headless walk (cage) can't press a native dialog's button. Only a Linux debug build, which is never released,
@@ -1298,6 +1306,13 @@ async fn confirm_approval(app: &tauri::AppHandle, title: String, reason: String)
             Err("approvals need a device unlock, which this platform doesn't have".into())
         }
     }
+}
+
+/// T-335: seconds left in which a routine approval needs no device unlock, for the card's "Unlocked · 4 min"; None
+/// when there are none. Only a hint: Rust decides at the tap.
+#[tauri::command]
+async fn unlock_grace(app: tauri::AppHandle) -> Option<u64> {
+    unlock_grace::remaining(&app).await.map(|d| d.as_secs())
 }
 
 /// T-234: the cards from Uni waiting for a tap in any room (checked, unanswered, not expired), for Needs you.
@@ -2552,7 +2567,8 @@ async fn post_approve(
         Ok(("Approve this post?".to_string(), uni_core::post::summary(&note)))
     })
     .await?;
-    confirm_approval(&app, title, reason).await?;
+    // a post is routine: no hold, no key released (T-335)
+    confirm_approval(&app, title, reason, false).await?;
     // signed over the note as re-read after the confirm, still at the revision shown (a change meanwhile is a conflict)
     with_vault(&app, move |c| {
         let (keys, _) = uni_core::load_keys(false).map_err(|e| e.to_string())?;
@@ -2765,6 +2781,7 @@ mod media_loopback;
 mod media_registry;
 mod pair_source;
 mod secure_store;
+mod unlock_grace;
 #[cfg(feature = "messages")]
 mod messages;
 
@@ -2857,6 +2874,7 @@ pub fn run() {
                     }
                 }
             }
+            unlock_grace::watch();
             tracing::info!(version = %_app.package_info().version, "setup complete; opening window");
             Ok(())
         })
@@ -2896,6 +2914,7 @@ pub fn run() {
             sealed_card,
             sealed_answer,
             sealed_waiting,
+            unlock_grace,
             prepare_voice_message,
             mark_read,
             open_link,

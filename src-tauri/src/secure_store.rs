@@ -48,6 +48,8 @@ fn handle<R: Runtime>(app: &AppHandle<R>) -> Result<tauri::plugin::PluginHandle<
 
 /// Persist `nsec` (already validated) for future launches.
 pub async fn save<R: Runtime>(_app: &AppHandle<R>, nsec: &Zeroizing<String>) -> Result<(), String> {
+    // T-335: another key (or none): no approval rides on an unlock given for the old one
+    crate::unlock_grace::clear();
     #[cfg(target_os = "android")]
     {
         #[derive(serde::Serialize)]
@@ -110,6 +112,8 @@ pub async fn ensure_loaded<R: Runtime>(_app: &AppHandle<R>) -> Result<(), String
 
 /// Delete the stored key and drop it from memory.
 pub async fn forget<R: Runtime>(_app: &AppHandle<R>) -> Result<(), String> {
+    // T-335: another key (or none): no approval rides on an unlock given for the old one
+    crate::unlock_grace::clear();
     #[cfg(target_os = "android")]
     {
         #[derive(serde::Serialize)]
@@ -131,6 +135,21 @@ pub async fn forget<R: Runtime>(_app: &AppHandle<R>) -> Result<(), String> {
     }
     uni_core::clear_device_keys();
     Ok(())
+}
+
+/// T-335: how many times the app has left the screen (paused or stopped) since it started; the unlock grace ends when
+/// this moves.
+#[cfg(target_os = "android")]
+pub async fn lifecycle_epoch<R: Runtime>(app: &AppHandle<R>) -> Result<u64, String> {
+    #[derive(serde::Deserialize)]
+    struct Epoch {
+        epoch: u64,
+    }
+    let e: Epoch = handle(app)?
+        .run_mobile_plugin_async("lifecycleEpoch", serde_json::json!({}))
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(e.epoch)
 }
 
 pub fn nostr_keys(secret: &str) -> Result<nostr::Keys, String> {
