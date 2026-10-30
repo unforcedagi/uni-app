@@ -108,8 +108,10 @@ async fn grant<R: Runtime>(app: &AppHandle<R>, generation: u64) {
 pub async fn remaining<R: Runtime>(app: &AppHandle<R>) -> Option<Duration> {
     let screen = screen_now(app).await;
     let mut s = STAMP.lock().ok()?;
-    let left = s.as_ref().zip(screen).and_then(|(st, sc)| left(st, Instant::now(), SystemTime::now(), GENERATION.load(Ordering::SeqCst), sc));
-    if left.is_none() {
+    let st = (*s)?;
+    let left = screen.and_then(|sc| left(&st, Instant::now(), SystemTime::now(), GENERATION.load(Ordering::SeqCst), sc));
+    // over, unless the screen was read before a newer unlock stamped this (the count only goes up)
+    if left.is_none() && screen.is_none_or(|sc| sc >= st.screen) {
         *s = None;
     }
     left
@@ -212,11 +214,13 @@ mod linux {
     use dbus::Message;
 
     const LOGIND: &str = "org.freedesktop.login1";
+    /// The screen saver services a desktop's locker reports through (bus name = interface).
+    const SCREENSAVERS: [&str; 2] = ["org.freedesktop.ScreenSaver", "org.gnome.ScreenSaver"];
 
-    /// Two watchers, both needed for a grace: logind on the system bus (Lock, LockedHint, PrepareForSleep; it must be
-    /// running, and leaving the bus stops the watcher) and the desktop's screen saver on the session bus
-    /// (ActiveChanged). A watcher that can't start or whose bus goes away ends the grace. A locker that tells neither
-    /// (one run directly, not through `loginctl lock-session`) isn't seen.
+    /// Two watchers, both needed for a grace: logind on the system bus (Lock, LockedHint, PrepareForSleep) and the
+    /// desktop's screen saver on the session bus (ActiveChanged). Each service must be running, and leaving its bus
+    /// stops its watcher, which ends the grace. So a desktop with no screen saver service (a compositor whose locker
+    /// runs on its own) has no grace: its lock could go unseen. A locker that tells neither still isn't seen.
     pub fn watch() {
         let _ = std::thread::Builder::new().name("unlock-grace-logind".into()).spawn(|| {
             let Ok(bus) = Connection::new_system() else { return super::watcher(0, false) };
@@ -262,7 +266,25 @@ mod linux {
         });
         let _ = std::thread::Builder::new().name("unlock-grace-screensaver".into()).spawn(|| {
             let Ok(bus) = Connection::new_session() else { return super::watcher(1, false) };
-            for iface in ["org.freedesktop.ScreenSaver", "org.gnome.ScreenSaver"] {
+            let owned = |name: &str| {
+                bus.with_proxy("org.freedesktop.DBus", "/org/freedesktop/DBus", Duration::from_secs(5))
+                    .method_call::<(bool,), _, _, _>("org.freedesktop.DBus", "NameHasOwner", (name,))
+                    .is_ok_and(|(on,)| on)
+            };
+            let gone = bus.add_match(
+                MatchRule::new_signal("org.freedesktop.DBus", "NameOwnerChanged"),
+                |(name, _, new): (String, String, String), _: &Connection, _: &Message| {
+                    if SCREENSAVERS.contains(&name.as_str()) {
+                        super::watcher(1, false);
+                        super::watcher(1, !new.is_empty());
+                    }
+                    true
+                },
+            );
+            if gone.is_err() || !SCREENSAVERS.iter().any(|n| owned(n)) {
+                return super::watcher(1, false);
+            }
+            for iface in SCREENSAVERS {
                 let added = bus.add_match(MatchRule::new_signal(iface, "ActiveChanged"), |(on,): (bool,), _: &Connection, _: &Message| {
                     if on {
                         super::end();
@@ -336,10 +358,14 @@ mod tests {
         }
     }
 
-    #[cfg(not(target_os = "android"))]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     #[test]
     fn the_gate_routine_within_five_minutes_goes_through_powerful_always_asks() {
         let _turn = TURN.lock().unwrap_or_else(|e| e.into_inner());
+        // `age` moves the awake clock back past five minutes; a host up for less can't
+        if Instant::now().checked_sub(S(600)).is_none() {
+            return eprintln!("skipped: up for under 10 minutes");
+        }
         let app = tauri::test::mock_app();
         let app = app.handle();
         let asks = AtomicU64::new(0);
@@ -406,6 +432,12 @@ mod tests {
     fn the_linux_watchers_see_a_lock() {
         let _turn = TURN.lock().unwrap_or_else(|e| e.into_inner());
         all_watching(false);
+        // a screen saver service on the session bus, as GNOME and KDE have (this test's own process holds the name)
+        let saver = dbus::blocking::Connection::new_session().unwrap();
+        let name = "org.freedesktop.ScreenSaver";
+        if saver.request_name(name, false, false, true).unwrap() != dbus::blocking::stdintf::org_freedesktop_dbus::RequestNameReply::PrimaryOwner {
+            return eprintln!("skipped: {name} is already owned here");
+        }
         watch();
         let wait = |what: &str, done: &dyn Fn() -> bool| {
             let until = Instant::now() + S(5);
@@ -435,5 +467,8 @@ mod tests {
         std::thread::sleep(Duration::from_millis(500));
         assert_eq!(GENERATION.load(Ordering::SeqCst), before);
         assert!(watching());
+        // the screen saver service leaving the bus: no grace, and what there was ends
+        saver.release_name(name).unwrap();
+        wait("the screen saver gone", &|| !watching() && GENERATION.load(Ordering::SeqCst) > before);
     }
 }

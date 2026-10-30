@@ -770,7 +770,8 @@ pub fn always_unlock(class: Class, action: &str, payload: &Value) -> bool {
     }
     let child = payload.get("child_ttl_s");
     if action.starts_with("mint.") || child.is_some() {
-        return !child.and_then(Value::as_u64).is_some_and(|t| t <= LONG_LIVED_CHILD_S);
+        // 0 is "no expiry" to many token APIs: as permanent
+        return !child.and_then(Value::as_u64).is_some_and(|t| t > 0 && t <= LONG_LIVED_CHILD_S);
     }
     false
 }
@@ -1200,7 +1201,7 @@ mod tests {
         assert!(v.rows[0].always_unlock && needs_fresh_unlock(&v, &rid(&powerful)), "a powerful one: the hold");
         // a routine mint: short child yes; a day is the edge; permanent, longer, unstated or not a number: always
         for (child, always) in [(json!(3600), false), (json!(LONG_LIVED_CHILD_S), false), (json!(LONG_LIVED_CHILD_S + 1), true),
-            (Value::Null, true), (json!("absent"), true), (json!(-1), true), (json!(true), true)] {
+            (Value::Null, true), (json!("absent"), true), (json!(-1), true), (json!(0), true), (json!(true), true)] {
             let g = mint("routine", child.clone());
             let v = at(&g);
             assert_eq!(v.refused, None, "{child}");
