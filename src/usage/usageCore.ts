@@ -17,7 +17,9 @@ export type AccountStop = { session?: number | null; week?: number | null; why: 
   /** T-335: false when the account's 5-hour session pauses nothing (Claude Ultra has no such limit): its meter is info only */
   session_limit?: boolean };
 export type UsageAccount = { name: string; signed_in?: boolean; read_at?: string | null; session?: UsageWindow | null; week?: UsageWindow | null;
-  stop?: AccountStop | null };
+  stop?: AccountStop | null;
+  /** T-335: a run on it ended on Claude Code's own session-limit text; the launcher skips it until this reset */
+  limit_hit?: { resets_at: string } | null };
 export type UsageDoc = { version: number; read_at: string | null; stop: number | null; accounts: UsageAccount[]; preference: string;
   next: { account: string; how: string; why?: string | null } };
 
@@ -51,6 +53,8 @@ function accountStop(v: unknown): AccountStop | null {
   return { session: ownStop(o.session), week: ownStop(o.week), why: str(o.why), ...(o.session_limit === false ? { session_limit: false } : {}) };
 }
 
+const hitOf = (v: unknown) => { const r = str((v as Record<string, unknown> | null)?.resets_at); return r ? { resets_at: r } : null; };
+
 /** The note's `claude_accounts` metadata, checked; null when the note isn't one (another install, an older writer). */
 export function parseDoc(metadata: unknown): UsageDoc | null {
   const d = (metadata as Record<string, unknown> | null)?.claude_accounts as Record<string, unknown> | undefined;
@@ -63,7 +67,8 @@ export function parseDoc(metadata: unknown): UsageDoc | null {
   const accounts = d.accounts.flatMap((a): UsageAccount[] => {
     const o = a as Record<string, unknown>;
     return o && typeof o.name === "string" && NAME.test(o.name)
-      ? [{ name: o.name, signed_in: o.signed_in !== false, read_at: str(o.read_at), session: win(o.session), week: win(o.week), stop: accountStop(o.stop) }] : [];
+      ? [{ name: o.name, signed_in: o.signed_in !== false, read_at: str(o.read_at), session: win(o.session), week: win(o.week), stop: accountStop(o.stop),
+        limit_hit: hitOf(o.limit_hit) }] : [];
   });
   if (!accounts.length) return null;
   const nx = (d.next ?? {}) as Record<string, unknown>;
@@ -131,12 +136,16 @@ export function usageView(metadata: unknown, now: Date, tz?: string): View | nul
     const age = a.read_at ? (now.getTime() - new Date(a.read_at).getTime()) / 60_000 : NaN;
     const out = a.signed_in === false;
     // the account's own stops when the note gives them (T-335), else the note's flat one, as before
-    const sInfo = a.stop?.session_limit === false; // T-335: the launcher doesn't count this session (Claude Ultra)
+    // T-335: a real session limit, until its reset, is full; else, where the launcher doesn't count the session (Claude Ultra), it is info
+    const hitAt = a.limit_hit ? new Date(a.limit_hit.resets_at).getTime() : NaN, hit = hitAt > now.getTime();
+    const sInfo = !hit && a.stop?.session_limit === false;
     const sStop = a.stop?.session !== undefined ? a.stop.session : doc.stop, wStop = a.stop?.week !== undefined ? a.stop.week : doc.stop;
+    const QUIET = { paused: false, headroom: null, spending: null, why: null };
     return {
       name: a.name, label: accountLabel(a.name), missing: !a.read_at, readAt: a.read_at ?? null, stale: !out && !(age <= STALE_MIN), out,
-      session: { pct: sUsed, text: pctText(sUsed), reset: sUsed ? resetText(s?.resets_at ?? null, now, tz) : null,
-        ...(sInfo ? { ...level(null, null, null), info: true } : { ...level(sUsed, sStop, doc.stop), info: false }) },
+      session: hit ? { pct: sUsed, text: pctText(sUsed), reset: resetText(a.limit_hit!.resets_at, now, tz), ...QUIET, full: true, info: false }
+        : { pct: sUsed, text: pctText(sUsed), reset: sUsed ? resetText(s?.resets_at ?? null, now, tz) : null,
+          ...(sInfo ? { ...QUIET, full: false, info: true } : { ...level(sUsed, sStop, doc.stop), info: false }) },
       week: { pct: wUsed, text: pctText(wUsed), reset: w && !passed(w) ? resetText(w.resets_at, now, tz) : null, ...level(wUsed, wStop, doc.stop, a.stop?.why ?? null),
         pace: w && !passed(w) ? pace(wUsed, w.resets_at, now) : null },
     };

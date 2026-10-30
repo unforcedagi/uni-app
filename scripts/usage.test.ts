@@ -103,6 +103,19 @@ t("T-335: a session the launcher doesn't count is never paused or full, on the c
   assert.deepEqual([on.rows[0].session.paused, on.rows[0].session.info], [true, false]);
 });
 
+t("T-335: a real session limit the launcher recorded shows the session Full until its reset, even as info", () => {
+  const hit = (resets: string) => usageView(md((d) => {
+    d.accounts[0].session = { used: 30, resets_at: "2026-10-26T20:00:00+00:00" };
+    d.accounts[0].stop = { session: null, week: 95, why: null, session_limit: false };
+    d.accounts[0].limit_hit = { resets_at: resets, run: "abcd1234" };
+  }), NOW, TZ)!;
+  const v = hit("2026-10-26T21:00:00+00:00"), s = v.rows[0].session;
+  assert.deepEqual([s.full, s.paused, s.info, s.reset], [true, false, false, "3pm"]);
+  assert.equal(usageLineText(v, NOW)!.split(" · ")[0], "Claude: A full");
+  const past = hit("2026-10-26T17:00:00+00:00").rows[0].session;   // reset passed: info again
+  assert.deepEqual([past.full, past.info], [false, true]);
+});
+
 // T-335: in a week's last hours the launcher spends it to 100 (98 for the chat account); the note says so per account
 const WHY = "spending to 100% before Fri 07:00 reset";
 const lifted = (used: number, stop: unknown) => usageView(md((d) => { d.accounts[0].week.used = used; d.accounts[0].stop = stop; }), NOW, TZ)!;
