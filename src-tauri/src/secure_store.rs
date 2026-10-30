@@ -47,9 +47,15 @@ fn handle<R: Runtime>(app: &AppHandle<R>) -> Result<tauri::plugin::PluginHandle<
 }
 
 /// Persist `nsec` (already validated) for future launches.
-pub async fn save<R: Runtime>(_app: &AppHandle<R>, nsec: &Zeroizing<String>) -> Result<(), String> {
-    // T-335: another key (or none): no approval rides on an unlock given for the old one
+pub async fn save<R: Runtime>(app: &AppHandle<R>, nsec: &Zeroizing<String>) -> Result<(), String> {
+    // T-335: another key: no approval rides on an unlock given for the old one, nor on one asked for while it changed
     crate::unlock_grace::end();
+    let done = save_key(app, nsec).await;
+    crate::unlock_grace::end();
+    done
+}
+
+async fn save_key<R: Runtime>(_app: &AppHandle<R>, nsec: &Zeroizing<String>) -> Result<(), String> {
     #[cfg(target_os = "android")]
     {
         #[derive(serde::Serialize)]
@@ -111,9 +117,15 @@ pub async fn ensure_loaded<R: Runtime>(_app: &AppHandle<R>) -> Result<(), String
 }
 
 /// Delete the stored key and drop it from memory.
-pub async fn forget<R: Runtime>(_app: &AppHandle<R>) -> Result<(), String> {
-    // T-335: another key (or none): no approval rides on an unlock given for the old one
+pub async fn forget<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
+    // T-335: no key: as for `save`
     crate::unlock_grace::end();
+    let done = forget_key(app).await;
+    crate::unlock_grace::end();
+    done
+}
+
+async fn forget_key<R: Runtime>(_app: &AppHandle<R>) -> Result<(), String> {
     #[cfg(target_os = "android")]
     {
         #[derive(serde::Serialize)]

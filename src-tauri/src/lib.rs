@@ -873,6 +873,8 @@ async fn pairing_confirm(app: tauri::AppHandle) -> Result<PairingDone, String> {
     secure_store::save(&app, &identity.nsec).await?;
     let keys = secure_store::nostr_keys(&identity.nsec)?;
     uni_core::set_device_keys(keys);
+    // T-335: the key in memory changed too: end any unlock grace again, after it
+    unlock_grace::end();
     if let Some(relay) = &identity.relay_url {
         let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
