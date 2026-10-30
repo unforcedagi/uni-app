@@ -32,6 +32,9 @@ const num = (v: unknown): number | null => (typeof v === "number" && Number.isFi
 const str = (v: unknown): string | null => (typeof v === "string" && v ? v : null);
 const NAME = /^[a-z][a-z0-9]{0,15}$/;
 
+/** The launcher's pacing stop, a percent in (0, 100]; anything else is no stop (Codex r1: -1 or 101 would pause at nonsense). */
+const stopOf = (v: unknown): number | null => { const n = num(v); return n !== null && n > 0 && n <= 100 ? n : null; };
+
 /** The note's `claude_accounts` metadata, checked; null when the note isn't one (another install, an older writer). */
 export function parseDoc(metadata: unknown): UsageDoc | null {
   const d = (metadata as Record<string, unknown> | null)?.claude_accounts as Record<string, unknown> | undefined;
@@ -48,7 +51,7 @@ export function parseDoc(metadata: unknown): UsageDoc | null {
   });
   if (!accounts.length) return null;
   const nx = (d.next ?? {}) as Record<string, unknown>;
-  return { version: num(d.version) ?? 1, read_at: str(d.read_at), stop: num(d.stop), accounts, preference: str(d.preference) ?? "auto",
+  return { version: num(d.version) ?? 1, read_at: str(d.read_at), stop: stopOf(d.stop), accounts, preference: str(d.preference) ?? "auto",
     next: { account: str(nx.account) ?? "", how: str(nx.how) ?? "", why: str(nx.why) } };
 }
 

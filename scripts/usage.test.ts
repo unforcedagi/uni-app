@@ -66,6 +66,11 @@ t("T-335: under the stop is neither; at or over it but under 100 is paused, not 
   assert.equal(atWeek(94).rows[0].week.headroom, null);
   assert.equal(atWeek(90, 90).rows[0].week.headroom, "keeping 10% headroom for rooms");
   assert.deepEqual([atWeek(99, null).rows[0].week.paused, atWeek(99, null).rows[0].week.full], [false, false], "no stop: nothing pauses before 100");
+  // Codex r1: a stop outside (0, 100] is not one: nothing pauses, and no headroom over 100 or under 0 is claimed
+  for (const odd of [-1, 0, 101]) {
+    assert.deepEqual([atWeek(5, odd).rows[0].week.paused, atWeek(99, odd).rows[0].week.paused, atWeek(100, odd).rows[0].week.full], [false, false, true], `stop ${odd}`);
+  }
+  assert.equal(parseDoc(md((d) => { d.stop = 150; }))!.stop, null);
 });
 
 t("T-335: the session pauses and fills the same way, and a full meter outranks a paused one on the front door", () => {
