@@ -152,6 +152,31 @@ test.describe('fixture', () => {
     await expect(card.getByLabel('Account B')).not.toContainText('No fresh reading for this account');
   });
 
+  test('T-335: at the stop a meter says Paused, muted, with the headroom it keeps; Full only at 100', async ({ page }, info) => {
+    await page.clock.setFixedTime(NOW);
+    const n = structuredClone(FIXTURE);
+    n.metadata.claude_accounts.accounts[0].week.used = 95;
+    n.metadata.claude_accounts.accounts[1].session.used = 100;
+    n.metadata.claude_accounts.accounts[1].week.used = 94;
+    await boot(page, { note: n, conflictOnce: false, calls: [] });
+    const card = await openSettings(page);
+    const a = card.getByLabel('Account A'), b = card.getByLabel('Account B');
+    const aWeek = a.locator('.usage-meter').nth(1), bSession = b.locator('.usage-meter').nth(0), bWeek = b.locator('.usage-meter').nth(1);
+    await expect(aWeek.locator('.usage-pct')).toHaveText('Paused · 95%');
+    await expect(aWeek).toHaveClass(/\bpaused\b/);
+    await expect(aWeek).not.toHaveClass(/\bfull\b/);
+    await expect(aWeek).toHaveAttribute('title', 'keeping 5% headroom for rooms');
+    await expect(bSession.locator('.usage-pct')).toHaveText('Full');
+    await expect(bSession).toHaveClass(/\bfull\b/);
+    await expect(bWeek.locator('.usage-pct')).toHaveText('94%');
+    await expect(bWeek).not.toHaveClass(/\b(paused|full)\b/);
+    // the distinction is visible: paused is muted, full keeps the danger colour
+    const color = (l: typeof aWeek) => l.locator('.usage-pct').evaluate((e) => getComputedStyle(e).color);
+    expect(await color(aWeek)).not.toBe(await color(bSession));
+    expect(await color(aWeek)).not.toBe(await color(bWeek));
+    await card.screenshot({ path: info.outputPath('usage-card-paused.png') });
+  });
+
   test('no usage note on this install: Settings has no card', async ({ page }) => {
     await boot(page, { note: null, conflictOnce: false, calls: [] });
     await page.getByRole('button', { name: 'Settings', exact: true }).click();

@@ -15,7 +15,9 @@ export type UsageAccount = { name: string; signed_in?: boolean; read_at?: string
 export type UsageDoc = { version: number; read_at: string | null; stop: number | null; accounts: UsageAccount[]; preference: string;
   next: { account: string; how: string; why?: string | null } };
 
-export type Meter = { pct: number | null; text: string; reset: string | null; full: boolean };
+/** T-335: `paused` at or over the launcher's pacing stop but under 100 (it keeps the rest as headroom for rooms; `headroom` says so),
+ *  `full` only at a real 100. */
+export type Meter = { pct: number | null; text: string; reset: string | null; paused: boolean; full: boolean; headroom: string | null };
 /** A row's `stale`: its own reading is over STALE_MIN old, or it has none (Codex zwmejvyc P2: each account's reading is its own; one
  *  fresh account doesn't make another's old numbers current). */
 export type Row = { name: string; label: string; session: Meter; week: Meter & { pace: "on pace" | "ahead of pace" | null }; missing: boolean;
@@ -87,7 +89,14 @@ export function pace(used: number | null, resetsAt: string | null, now: Date): "
   return used > even + 5 ? "ahead of pace" : "on pace";
 }
 
-const pctText = (v: number | null) => (v === null ? "–" : `${Math.round(v)}%`);
+// under 100 never reads "100%": 99.6 is 99% until it is really full
+const pctText = (v: number | null) => (v === null ? "–" : `${v < 100 ? Math.min(99, Math.round(v)) : Math.round(v)}%`);
+
+/** A meter's state against the stop: paused from the stop up to 100, full at 100. */
+function level(used: number | null, stop: number) {
+  const full = used !== null && used >= 100, paused = used !== null && !full && used >= stop;
+  return { paused, full, headroom: paused ? `keeping ${Math.round(100 - stop)}% headroom for rooms` : null };
+}
 
 /** What the card shows, from the note's metadata at `now`. Null: no usage note to show. */
 export function usageView(metadata: unknown, now: Date, tz?: string): View | null {
@@ -104,8 +113,8 @@ export function usageView(metadata: unknown, now: Date, tz?: string): View | nul
     const out = a.signed_in === false;
     return {
       name: a.name, label: accountLabel(a.name), missing: !a.read_at, readAt: a.read_at ?? null, stale: !out && !(age <= STALE_MIN), out,
-      session: { pct: sUsed, text: pctText(sUsed), reset: sUsed ? resetText(s?.resets_at ?? null, now, tz) : null, full: sUsed !== null && sUsed >= stop },
-      week: { pct: wUsed, text: pctText(wUsed), reset: w && !passed(w) ? resetText(w.resets_at, now, tz) : null, full: wUsed !== null && wUsed >= stop,
+      session: { pct: sUsed, text: pctText(sUsed), reset: sUsed ? resetText(s?.resets_at ?? null, now, tz) : null, ...level(sUsed, stop) },
+      week: { pct: wUsed, text: pctText(wUsed), reset: w && !passed(w) ? resetText(w.resets_at, now, tz) : null, ...level(wUsed, stop),
         pace: w && !passed(w) ? pace(wUsed, w.resets_at, now) : null },
     };
   });
@@ -127,14 +136,18 @@ export function ageText(iso: string | null, now: Date): string {
   return m < 1 ? "just now" : m < 90 ? `${m} min ago` : m < 48 * 60 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} days ago`;
 }
 
-/** The front door's line: "Claude: A 34% of the week · B 12% of the week · new work to B · as of 6 min ago" (a full account says so).
+/** A paused account on the front door: "paused at 96%", the higher of its paused meters. */
+const pausedText = (r: Row) => `paused at ${[r.session, r.week].filter((m) => m.paused).reduce((a, m) => ((m.pct ?? 0) > (a.pct ?? 0) ? m : a)).text}`;
+
+/** The front door's line: "Claude: A 34% of the week · B 12% of the week · new work to B · as of 6 min ago" (a full account says so;
+ *  T-335: one at the pacing stop says "paused at 95%").
  *  T-319: an old reading is never shown as current. With none fresh, the line says so instead of numbers; an account whose own reading is
  *  old says so in its place, and "as of" is the oldest of the numbers shown. */
 export function usageLineText(v: View | null, now: Date): string | null {
   if (!v || !v.rows.length) return null;
   if (v.stale) return v.readAt ? `Claude: no fresh usage reading; the last one is from ${ageText(v.readAt, now)}` : "Claude: no usage reading yet";
   const parts = v.rows.map((r) => `${r.name.toUpperCase()} ${r.out ? "signed out" : r.missing ? "no reading" : r.stale ? `no fresh reading (${ageText(r.readAt, now).replace(/ ago$/, " old")})`
-    : r.week.full || r.session.full ? "full" : `${r.week.text} of the week`}`);
+    : r.week.full || r.session.full ? "full" : r.week.paused || r.session.paused ? pausedText(r) : `${r.week.text} of the week`}`);
   return `Claude: ${parts.join(" · ")}${v.next ? ` · new work to ${v.next.label.replace(/^Account /, "")}` : ""} · as of ${ageText(v.readAt, now)}`;
 }
 

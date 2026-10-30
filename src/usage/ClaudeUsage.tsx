@@ -9,9 +9,10 @@ import "./usage.css";
 
 function MeterLine({ label, m, extra }: { label: string; m: Meter; extra?: React.ReactNode }) {
   const pct = m.pct === null ? 0 : Math.max(0, Math.min(100, m.pct));
-  return <div className={`usage-meter ${m.full ? "full" : ""}`}>
+  // T-335: at the launcher's stop it is paused (muted, with the headroom it keeps); "Full" only at a real 100
+  return <div className={`usage-meter ${m.full ? "full" : m.paused ? "paused" : ""}`} title={m.headroom ?? undefined}>
     <span className="usage-k">{label}</span>
-    <b className="usage-pct">{m.full ? "Full" : m.text}</b>
+    <b className="usage-pct">{m.full ? "Full" : m.paused ? `Paused · ${m.text}` : m.text}</b>
     <span className="usage-bar" aria-hidden="true"><i style={{ width: `${pct}%` }} /></span>
     <span className="usage-sub">{[m.reset && `resets ${m.reset}`, extra].filter(Boolean).map((x, i) => <span key={i}>{x}</span>)}</span>
   </div>;

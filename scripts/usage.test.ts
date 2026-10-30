@@ -47,10 +47,35 @@ t("a window whose reset has passed is empty until the next reading", () => {
   assert.deepEqual([v.rows[1].session.text, v.rows[1].session.reset], ["0%", null]);
 });
 
-t("at or over the stop is full", () => {
-  const v = usageView(md((d) => { d.accounts[0].session = { used: 95, resets_at: "2026-10-26T20:00:00+00:00" }; }), NOW, TZ)!;
-  assert.equal(v.rows[0].session.full, true);
-  assert.equal(v.rows[1].session.full, false);
+// T-335: at the pacing stop (95) the launcher pauses an account and keeps the rest as headroom for rooms; only a real 100 is full
+const atWeek = (used: number, stop: number | null = 95) => usageView(md((d) => { d.stop = stop; d.accounts[0].week.used = used; }), NOW, TZ)!;
+t("T-335: under the stop is neither; at or over it but under 100 is paused, not full; 100 is full", () => {
+  const cases: [number, string, boolean, boolean, string][] = [
+    [94, "94%", false, false, "A 94% of the week"],
+    [95, "95%", true, false, "A paused at 95%"],
+    [99, "99%", true, false, "A paused at 99%"],
+    [99.6, "99%", true, false, "A paused at 99%"],   // never "100%" while it isn't
+    [100, "100%", false, true, "A full"],
+  ];
+  for (const [used, text, paused, full, front] of cases) {
+    const v = atWeek(used), w = v.rows[0].week;
+    assert.deepEqual([w.text, w.paused, w.full], [text, paused, full], `week at ${used}`);
+    assert.equal(usageLineText(v, NOW)!.split(" · ")[0], `Claude: ${front}`, `front door at ${used}`);
+  }
+  assert.equal(atWeek(95).rows[0].week.headroom, "keeping 5% headroom for rooms");
+  assert.equal(atWeek(94).rows[0].week.headroom, null);
+  assert.equal(atWeek(90, 90).rows[0].week.headroom, "keeping 10% headroom for rooms");
+  assert.deepEqual([atWeek(99, null).rows[0].week.paused, atWeek(99, null).rows[0].week.full], [false, false], "no stop: nothing pauses before 100");
+});
+
+t("T-335: the session pauses and fills the same way, and a full meter outranks a paused one on the front door", () => {
+  const v = usageView(md((d) => { d.accounts[0].session = { used: 96, resets_at: "2026-10-26T20:00:00+00:00" }; }), NOW, TZ)!;
+  assert.deepEqual([v.rows[0].session.paused, v.rows[0].session.full, v.rows[1].session.paused], [true, false, false]);
+  assert.equal(usageLineText(v, NOW)!.split(" · ")[0], "Claude: A paused at 96%");
+  const both = usageView(md((d) => { d.accounts[0].session = { used: 100, resets_at: "2026-10-26T20:00:00+00:00" }; d.accounts[0].week.used = 97; }), NOW, TZ)!;
+  assert.equal(usageLineText(both, NOW)!.split(" · ")[0], "Claude: A full");
+  const two = usageView(md((d) => { d.accounts[0].session = { used: 96, resets_at: "2026-10-26T20:00:00+00:00" }; d.accounts[0].week.used = 98; }), NOW, TZ)!;
+  assert.equal(usageLineText(two, NOW)!.split(" · ")[0], "Claude: A paused at 98%", "the higher of the two");
 });
 
 t("the preference: the note's value when it is auto or an account; the next account only while it was decided with it", () => {
