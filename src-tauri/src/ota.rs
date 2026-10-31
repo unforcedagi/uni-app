@@ -172,8 +172,24 @@ pub struct State {
 }
 
 impl State {
+    /// The state, failing closed: an unreadable `state.json`, or bundles on disk with no `state.json`, is an error,
+    /// because a lost floor would let an older signed bundle back in.
+    fn load_checked(dir: &Path) -> Result<State, String> {
+        match std::fs::read(dir.join("state.json")) {
+            Ok(b) => serde_json::from_slice(&b).map_err(|e| format!("state.json unreadable: {e}")),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                if ["current.tar.gz", "next.tar.gz"].iter().any(|f| dir.join(f).exists()) {
+                    Err("bundles on disk but no state.json".into())
+                } else {
+                    Ok(State::default())
+                }
+            }
+            Err(e) => Err(format!("state.json: {e}")),
+        }
+    }
+    /// Only after [`activate`] has run this launch, which repairs or resets the state.
     fn load(dir: &Path) -> State {
-        std::fs::read(dir.join("state.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+        Self::load_checked(dir).unwrap_or_default()
     }
     fn save(&self, dir: &Path) {
         let tmp = dir.join("state.json.tmp");
@@ -214,7 +230,23 @@ fn claimed_version(archive: &[u8]) -> Option<String> {
 /// At launch: promote a staged bundle, then pick the bundle to serve, if any. Every failure falls back to the built-in
 /// web layer and is logged.
 pub fn activate(dir: &Path, pubkey: &str, builtin: &semver::Version, shell_api: u32) -> Option<Bundle> {
-    let mut state = State::load(dir);
+    let mut state = match State::load_checked(dir) {
+        Ok(s) => s,
+        Err(e) => {
+            // Start over without the bundles, keeping the newest version they claim as the floor (unverified, so it
+            // can only make the floor stricter).
+            let floor = ["current", "next"]
+                .iter()
+                .filter_map(|n| read_pair(dir, n).and_then(|(a, _)| claimed_version(&a)))
+                .filter_map(|v| semver::Version::parse(&v).ok())
+                .max();
+            log(format!("{e}; dropping installed bundles, built-in web layer {builtin}"));
+            remove_pair(dir, "current");
+            remove_pair(dir, "next");
+            State { floor: floor.map(|v| v.to_string()), ..State::default() }.save(dir);
+            return None;
+        }
+    };
     if let Some((archive, sig)) = read_pair(dir, "next") {
         match open(pubkey, &archive, &sig, builtin, shell_api).and_then(|b| match state.floor() {
             Some(f) if b.version <= f => Err(format!("bundle {} is not newer than {f}, already used here", b.meta.version)),
@@ -347,7 +379,7 @@ pub async fn check(
     let manifest: Manifest =
         serde_json::from_slice(&fetch(&client, &base, 64 * 1024).await?).map_err(|e| format!("manifest: {e}"))?;
     let offered = semver::Version::parse(&manifest.version).map_err(|e| format!("manifest version: {e}"))?;
-    let state = State::load(dir);
+    let state = State::load_checked(dir)?;
     let staged = read_pair(dir, "next").and_then(|(a, _)| claimed_version(&a)).and_then(|v| semver::Version::parse(&v).ok());
     if let Some(newest) = not_new(&state, builtin, active, staged.as_ref(), &offered) {
         return Ok(CheckResult::UpToDate { version: newest.to_string() });
@@ -364,6 +396,8 @@ pub async fn check(
         return Err(format!("manifest says {}, the signed bundle says {}", manifest.version, bundle.meta.version));
     }
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    // state.json first: bundles on disk without it read as lost state at the next launch.
+    state.save(dir);
     for (name, bytes) in [("next.tar.gz.sig.tmp", sig.as_bytes()), ("next.tar.gz.tmp", archive.as_slice())] {
         std::fs::write(dir.join(name), bytes).map_err(|e| e.to_string())?;
     }
@@ -598,7 +632,11 @@ mod tests {
         semver::Version::parse(s).unwrap()
     }
 
+    /// As the app does it: state.json exists (launch writes it) before any bundle lands.
     fn put(dir: &Path, name: &str, archive: &[u8], sig: &str) {
+        if !dir.join("state.json").exists() {
+            State::default().save(dir);
+        }
         std::fs::write(dir.join(format!("{name}.tar.gz")), archive).unwrap();
         std::fs::write(dir.join(format!("{name}.tar.gz.sig")), sig).unwrap();
     }
@@ -724,6 +762,26 @@ mod tests {
         assert_eq!(state.floor.as_deref(), Some("0.1.86"));
         assert!(not_new(&state, &v("0.1.84"), None, None, &v("0.1.85")).is_some());
         assert!(not_new(&state, &v("0.1.84"), None, None, &v("0.1.87")).is_none());
+    }
+
+    #[test]
+    fn a_lost_or_corrupt_state_fails_closed_and_keeps_the_floor() {
+        let k = key();
+        let (a85, a86) = (bundle("0.1.85", 1), bundle("0.1.86", 1));
+        for damage in ["corrupt", "missing"] {
+            let dir = tempfile::tempdir().unwrap();
+            put(dir.path(), "next", &a86, &sign(&k, &a86));
+            assert!(activate(dir.path(), &k.pk, &v("0.1.84"), 1).is_some());
+            match damage {
+                "corrupt" => std::fs::write(dir.path().join("state.json"), b"{not json").unwrap(),
+                _ => std::fs::remove_file(dir.path().join("state.json")).unwrap(),
+            }
+            assert!(activate(dir.path(), &k.pk, &v("0.1.84"), 1).is_none(), "{damage}: built-in");
+            assert!(!dir.path().join("current.tar.gz").exists(), "{damage}: bundles dropped");
+            assert_eq!(State::load(dir.path()).floor.as_deref(), Some("0.1.86"), "{damage}: floor kept");
+            put(dir.path(), "next", &a85, &sign(&k, &a85));
+            assert!(activate(dir.path(), &k.pk, &v("0.1.84"), 1).is_none(), "{damage}: the older one stays out");
+        }
     }
 
     #[test]
