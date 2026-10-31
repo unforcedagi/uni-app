@@ -45,7 +45,3 @@ uni-core = { path = "crates/uni-core" }
 [profile.dev.package."*"]
 debug = false
 
-# T-305: the Android APK is a release build of this profile (scripts/publish.sh), as is the Mac app. Strip the symbol
-# tables and debug info: the debug build's Rust library alone was 544 MB.
-[profile.release]
-strip = true

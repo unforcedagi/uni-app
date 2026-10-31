@@ -24,8 +24,8 @@ cleanup_generated() {
 }
 trap cleanup_generated EXIT
 REPO_SLUG="unforcedagi/uni-app"
-# T-305: the largest APK this publishes (the release build is well under it).
-APK_MAX_BYTES=$((80 * 1024 * 1024))
+# T-305: the largest APK this publishes. The release build is about 24 MB; a debug or unstripped one is far over.
+APK_MAX_BYTES=$((60 * 1024 * 1024))
 # The tailnet download page (index.html here, shared by `tailscale serve`) offers the newest APK.
 SERVE="$HOME/.local/share/uni/apk"
 source scripts/release-check.sh
@@ -52,18 +52,8 @@ STAGE="$TMPDIR/uni-release-$VERSION"
 rm -rf "$STAGE"; mkdir -p "$STAGE"
 # Build Android locally while the GitHub-hosted Mac runner builds the exact main commit.
 ( bash scripts/build-mac-hosted.sh "$SHA" "$VERSION" "$STAGE" >"$STAGE/mac.log" 2>&1 ) & MAC_PID=$!
-# T-207: Gradle updates the APK in place and can append a changed native library, leaving the old copy as dead space
-# (0.1.62 was 683 MB, 337 MB of it unused). A fresh APK every time.
-rm -rf src-tauri/gen/android/app/build/outputs/apk
-(
-  source "$HOME/.config/uni/android.env"
-  export PATH="$HOME/.cargo/bin:$PATH"
-  # Messages needs Rust 1.93+; the Mac runner is pinned to 1.93.0 and builds it too.
-  # T-305: a release build (optimized, stripped; signed with the same key, see app/build.gradle.kts). The debug build
-  # shipped until 0.1.83 was 553 MB, 544 MB of it the unoptimized Rust library and its debug info.
-  pnpm tauri android build --apk --target aarch64 --features messages \
-    --config "{\"version\":\"$VERSION\",\"bundle\":{\"android\":{\"versionCode\":$CODE}}}" >"$STAGE/android.log" 2>&1
-) & ANDROID_PID=$!
+# Android: scripts/android-release-build.sh (release build, size flags, fresh APK; T-207, T-305).
+( bash scripts/android-release-build.sh "$VERSION" "$CODE" >"$STAGE/android.log" 2>&1 ) & ANDROID_PID=$!
 MAC_RESULT=0; ANDROID_RESULT=0
 wait "$MAC_PID" || MAC_RESULT=$?
 wait "$ANDROID_PID" || ANDROID_RESULT=$?

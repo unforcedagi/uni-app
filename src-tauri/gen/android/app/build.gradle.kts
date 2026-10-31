@@ -61,6 +61,11 @@ android {
             )
         }
     }
+    // T-305: compress the Rust library inside the APK. An update is a full download, and deflate halves the library;
+    // Android unpacks it once at install instead of mapping it from the APK.
+    packaging {
+        jniLibs.useLegacyPackaging = true
+    }
     kotlinOptions {
         jvmTarget = "1.8"
     }
