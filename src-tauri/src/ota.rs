@@ -158,6 +158,7 @@ pub fn open(pubkey: &str, archive: &[u8], sig: &str, builtin: &semver::Version, 
 
 /// The bundle directory's bookkeeping (`state.json`).
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
 pub struct State {
     /// The version on trial: promoted, not yet reported ready.
     pub trial: Option<String>,
@@ -165,6 +166,9 @@ pub struct State {
     pub boots: u32,
     /// Versions dropped here (failed checks, refused by their own code, never ready). Never fetched again.
     pub rejected: Vec<String>,
+    /// The newest version ever promoted here. Nothing older is used again, even if it is signed and the bundle that
+    /// set the floor is gone: a channel can't roll a device back to an old bundle.
+    pub floor: Option<String>,
 }
 
 impl State {
@@ -176,6 +180,9 @@ impl State {
         if std::fs::write(&tmp, serde_json::to_vec(self).unwrap_or_default()).is_ok() {
             let _ = std::fs::rename(&tmp, dir.join("state.json"));
         }
+    }
+    fn floor(&self) -> Option<semver::Version> {
+        self.floor.as_deref().and_then(|v| semver::Version::parse(v).ok())
     }
     fn reject(&mut self, version: &str) {
         if !self.rejected.iter().any(|v| v == version) {
@@ -209,7 +216,10 @@ fn claimed_version(archive: &[u8]) -> Option<String> {
 pub fn activate(dir: &Path, pubkey: &str, builtin: &semver::Version, shell_api: u32) -> Option<Bundle> {
     let mut state = State::load(dir);
     if let Some((archive, sig)) = read_pair(dir, "next") {
-        match open(pubkey, &archive, &sig, builtin, shell_api) {
+        match open(pubkey, &archive, &sig, builtin, shell_api).and_then(|b| match state.floor() {
+            Some(f) if b.version <= f => Err(format!("bundle {} is not newer than {f}, already used here", b.meta.version)),
+            _ => Ok(b),
+        }) {
             Ok(b) => {
                 let ok = std::fs::rename(dir.join("next.tar.gz"), dir.join("current.tar.gz")).is_ok()
                     && std::fs::rename(dir.join("next.tar.gz.sig"), dir.join("current.tar.gz.sig")).is_ok();
@@ -217,6 +227,7 @@ pub fn activate(dir: &Path, pubkey: &str, builtin: &semver::Version, shell_api: 
                     log(format!("promoted staged bundle {} (on trial)", b.meta.version));
                     state.trial = Some(b.meta.version.clone());
                     state.boots = 0;
+                    state.floor = Some(b.meta.version.clone());
                 } else {
                     log("could not promote the staged bundle");
                     remove_pair(dir, "next");
@@ -233,7 +244,10 @@ pub fn activate(dir: &Path, pubkey: &str, builtin: &semver::Version, shell_api: 
     }
     let chosen = match read_pair(dir, "current") {
         None => None,
-        Some((archive, sig)) => match open(pubkey, &archive, &sig, builtin, shell_api) {
+        Some((archive, sig)) => match open(pubkey, &archive, &sig, builtin, shell_api).and_then(|b| match state.floor() {
+            Some(f) if b.version < f => Err(format!("bundle {} is older than {f}, already used here", b.meta.version)),
+            _ => Ok(b),
+        }) {
             Ok(b) if state.trial.as_deref() == Some(b.meta.version.as_str()) && state.boots >= MAX_UNCONFIRMED_BOOTS => {
                 log(format!("bundle {} started {} times without reporting ready; dropped", b.meta.version, state.boots));
                 state.reject(&b.meta.version);
@@ -303,6 +317,20 @@ pub enum CheckResult {
     Staged { version: String },
 }
 
+/// The newest version this device has or has had, when `offered` is no newer (or was dropped here); `None` when
+/// `offered` is worth fetching.
+fn not_new(
+    state: &State,
+    builtin: &semver::Version,
+    active: Option<&semver::Version>,
+    staged: Option<&semver::Version>,
+    offered: &semver::Version,
+) -> Option<semver::Version> {
+    let floor = state.floor();
+    let newest = [Some(builtin), active, staged, floor.as_ref()].into_iter().flatten().max().cloned().unwrap_or_else(|| builtin.clone());
+    (*offered <= newest || state.rejected.contains(&offered.to_string())).then_some(newest)
+}
+
 /// Fetches the channel's manifest and, when it names a newer bundle this shell can run, downloads, verifies and
 /// stages it as `next.*` for the next launch.
 pub async fn check(
@@ -321,8 +349,7 @@ pub async fn check(
     let offered = semver::Version::parse(&manifest.version).map_err(|e| format!("manifest version: {e}"))?;
     let state = State::load(dir);
     let staged = read_pair(dir, "next").and_then(|(a, _)| claimed_version(&a)).and_then(|v| semver::Version::parse(&v).ok());
-    let newest = [Some(builtin), active, staged.as_ref()].into_iter().flatten().max().cloned().unwrap_or_else(|| builtin.clone());
-    if offered <= newest || state.rejected.contains(&manifest.version) {
+    if let Some(newest) = not_new(&state, builtin, active, staged.as_ref(), &offered) {
         return Ok(CheckResult::UpToDate { version: newest.to_string() });
     }
     if manifest.api != shell_api {
@@ -355,6 +382,7 @@ pub struct Ota {
     dropped: AtomicBool,
     dir: OnceLock<PathBuf>,
     builtin: OnceLock<semver::Version>,
+    wait: Duration,
 }
 
 impl Ota {
@@ -365,13 +393,18 @@ impl Ota {
             dropped: AtomicBool::new(false),
             dir: OnceLock::new(),
             builtin: OnceLock::new(),
+            wait: SETUP_WAIT,
         })
     }
 
-    fn init(&self, dir: PathBuf, builtin: semver::Version) {
+    fn init(&self, dir: PathBuf, builtin: semver::Version, pubkey: &str) {
         let _ = std::fs::create_dir_all(&dir);
-        let chosen = activate(&dir, PUBKEY, &builtin, SHELL_API);
-        let _ = self.chosen.set(chosen);
+        if self.chosen.get().is_some() {
+            log("setup came after the first page request; the built-in web layer stays for this launch");
+        } else if self.chosen.set(activate(&dir, pubkey, &builtin, SHELL_API)).is_err() {
+            // A page request timed out while this ran and fixed the built-in layer; the bundle stays for next launch.
+            log("setup finished after the first page request timed out; the built-in web layer stays for this launch");
+        }
         let _ = self.dir.set(dir);
         let _ = self.builtin.set(builtin);
         let (lock, cvar) = &self.ready;
@@ -379,7 +412,8 @@ impl Ota {
         cvar.notify_all();
     }
 
-    /// The bundle being served, once launch has chosen. Waits briefly for that choice; on timeout, none.
+    /// The bundle being served, once launch has chosen. Waits briefly for that choice. On timeout the built-in layer
+    /// is fixed for the whole launch, so one page never mixes built-in and bundle files.
     fn active(&self) -> Option<&Bundle> {
         if self.dropped.load(Ordering::Acquire) {
             return None;
@@ -387,9 +421,9 @@ impl Ota {
         if self.chosen.get().is_none() {
             let (lock, cvar) = &self.ready;
             let guard = lock.lock().unwrap_or_else(|e| e.into_inner());
-            let _ = cvar.wait_timeout_while(guard, SETUP_WAIT, |ready| !*ready);
+            let _ = cvar.wait_timeout_while(guard, self.wait, |ready| !*ready);
         }
-        self.chosen.get().and_then(Option::as_ref)
+        self.chosen.get_or_init(|| None).as_ref()
     }
 }
 
@@ -425,7 +459,7 @@ impl<R: Runtime> Assets<R> for OtaAssets<R> {
         self.builtin.setup(app);
         let builtin = app.package_info().version.clone();
         match app.path().app_data_dir() {
-            Ok(d) => self.ota.init(d.join("ota"), builtin),
+            Ok(d) => self.ota.init(d.join("ota"), builtin, PUBKEY),
             Err(e) => {
                 log(format!("no app data dir ({e}); serving the built-in web layer"));
                 let _ = self.ota.chosen.set(None);
@@ -670,6 +704,42 @@ mod tests {
         t[n / 2] ^= 1;
         put(dir.path(), "current", &t, &sig);
         assert!(activate(dir.path(), &k.pk, &v("0.1.84"), 1).is_none());
+    }
+
+    #[test]
+    fn an_older_signed_bundle_is_never_used_again() {
+        let k = key();
+        let dir = tempfile::tempdir().unwrap();
+        let (a85, a86) = (bundle("0.1.85", 1), bundle("0.1.86", 1));
+        put(dir.path(), "next", &a86, &sign(&k, &a86));
+        assert_eq!(activate(dir.path(), &k.pk, &v("0.1.84"), 1).unwrap().meta.version, "0.1.86");
+        // 0.1.86 is lost (cleared, refused later); the channel replays the older 0.1.85, validly signed.
+        remove_pair(dir.path(), "current");
+        put(dir.path(), "next", &a85, &sign(&k, &a85));
+        assert!(activate(dir.path(), &k.pk, &v("0.1.84"), 1).is_none());
+        put(dir.path(), "current", &a85, &sign(&k, &a85));
+        assert!(activate(dir.path(), &k.pk, &v("0.1.84"), 1).is_none());
+        // And a check won't fetch it.
+        let state = State::load(dir.path());
+        assert_eq!(state.floor.as_deref(), Some("0.1.86"));
+        assert!(not_new(&state, &v("0.1.84"), None, None, &v("0.1.85")).is_some());
+        assert!(not_new(&state, &v("0.1.84"), None, None, &v("0.1.87")).is_none());
+    }
+
+    #[test]
+    fn a_page_request_before_setup_fixes_the_built_in_layer_for_the_launch() {
+        let k = key();
+        let dir = tempfile::tempdir().unwrap();
+        let a = bundle("0.1.85", 1);
+        put(dir.path(), "current", &a, &sign(&k, &a));
+        let mut late = Ota::new();
+        Arc::get_mut(&mut late).unwrap().wait = Duration::from_millis(10);
+        assert!(late.active().is_none(), "setup hasn't run: built-in");
+        late.init(dir.path().to_path_buf(), v("0.1.84"), &k.pk);
+        assert!(late.active().is_none(), "still built-in for this launch");
+        let on_time = Ota::new();
+        on_time.init(dir.path().to_path_buf(), v("0.1.84"), &k.pk);
+        assert_eq!(on_time.active().unwrap().meta.version, "0.1.85");
     }
 
     #[test]
