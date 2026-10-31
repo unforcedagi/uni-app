@@ -43,6 +43,9 @@ assert.deepEqual(resolveRecipients(`@${qual} hi`, new Map([[qual, k("d")]]), dup
 // Deleting the label drops its binding.
 assert.equal(pruneBindings("hi there", bound).size, 0);
 assert.equal(pruneBindings("@Uni Bot x", bound).size, 1);
+// T-335: nothing dropped is the same map, so typing doesn't hand the room a new one each key
+assert.equal(pruneBindings("@Uni Bot x", pruneBindings("@Uni Bot x", bound)), pruneBindings("@Uni Bot x", bound));
+const none = new Map(); assert.equal(pruneBindings("hi", none), none);
 
 // Rendering highlights only tagged recipients.
 assert.deepEqual(mentionSegments("ask @Uni and @Aaron", [uni]), [

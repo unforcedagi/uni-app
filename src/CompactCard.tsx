@@ -49,5 +49,6 @@ export function QuietCard({ className, label, icon, title, status, warn }: { cla
   </section>;
 }
 
-/** "12:04", as the cards say a time. */
-export const clockTime = (ts: number): string => new Date(ts * 1000).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+/** "12:04", as the cards say a time. One formatter, made once (T-335: one per call was slow in a long room). */
+const clockFormat = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" });
+export const clockTime = (ts: number): string => clockFormat.format(new Date(ts * 1000));

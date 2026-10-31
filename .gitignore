@@ -42,3 +42,4 @@ hermes-plugin/
 
 # T-313: the gaps list a run leaves (it quotes the brief)
 GAPS*.md
+/dist-typing/

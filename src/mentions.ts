@@ -140,10 +140,12 @@ export function resolveRecipients(text: string, bindings: Bindings, members: Mem
   return { recipients };
 }
 
-/** Drop bindings whose `@label` no longer appears in `text`. */
+/** Drop bindings whose `@label` no longer appears in `text`. Nothing dropped: the same map (T-335: a new one each key redrew the room). */
 export function pruneBindings(text: string, bindings: Bindings): Bindings {
+  if (!bindings.size) return bindings;
   const present = new Set(occurrences(text, [...bindings.keys()]).map((o) => o.label.toLowerCase()));
-  return new Map([...bindings].filter(([l]) => present.has(l.toLowerCase())));
+  const kept = [...bindings].filter(([l]) => present.has(l.toLowerCase()));
+  return kept.length === bindings.size ? bindings : new Map(kept);
 }
 
 export type Segment = { text: string; mention?: string };

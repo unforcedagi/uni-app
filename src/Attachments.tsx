@@ -7,7 +7,7 @@
 // can be saved where the user finds it (`media_save`: Android's Downloads, the
 // Downloads folder on desktop), and files open in the app for their type
 // (`media_open`); both say what happened, or why not, on the card (T-174).
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { memo, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -457,8 +457,9 @@ function LightboxSave({ m }: { m: MediaRef }) {
   </div>;
 }
 
-/** Attachments and image-link previews for one message. */
-export function Attachments({ body, media }: { body: string; media: MediaRef[] | undefined }) {
+/** Attachments and image-link previews for one message. T-335: memoized, so a room's redraw doesn't parse every message's links again
+ *  (a re-read keeps unchanged messages, and so their `media`, as the same objects). */
+export const Attachments = memo(function Attachments({ body, media }: { body: string; media: MediaRef[] | undefined }) {
   const relayOrigin = useRelayOrigin();
   const [open, setOpen] = useState<{ src: string; alt: string; m?: MediaRef } | null>(null);
   const items = collectAttachments(body, media ?? [], relayOrigin);
@@ -480,4 +481,4 @@ export function Attachments({ body, media }: { body: string; media: MediaRef[] |
     {links.map((u) => <LinkImage key={u} url={u} onOpen={onOpen} />)}
     {open && <Lightbox src={open.src} alt={open.alt} m={open.m} onClose={() => setOpen(null)} />}
   </div>;
-}
+});

@@ -1,5 +1,6 @@
 import { mark } from "./startupTrace";
 import { readMessages, readRooms, readWho, writeMessages, writeRooms, writeWho } from "./chatCache";
+import { keepSame } from "./keepSame";
 import { nodeOfRoom, useRoomNodes } from "./areas/roomLabels";
 import { isNetworkError, netError } from "./netError";
 import { voiceRetryDelay } from "./voiceRetry";
@@ -27,7 +28,8 @@ import LifeOsVaultSetting from "./areas/LifeOsVaultSetting";
 import { appendDraft } from "./areas/composeDraft";
 import { openDialog } from "./areas/focusTrap";
 import { FOR_YOU_ID, FOR_YOU_OPENED_KEY, countRecommendations, isRecommendationNew, readLastSurface, saveLastSurface } from "./railCore";
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode, type TextareaHTMLAttributes } from "react";
+import { draftBox, type DraftBox } from "./draftBox";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { onBackButtonPress } from "@tauri-apps/api/app";
@@ -105,7 +107,11 @@ const MAX_FILE_BYTES = 25 * 1024 * 1024;
 const MAX_ATTACHMENTS = 20;
 const OTHER_VAULTS_KEY = "uni:other-vaults-expanded";
 
-const time = (ts: number) => new Date(ts * 1000).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+// T-335: one formatter each, made once: `toLocaleString` with options builds a new one per call, and a room redraw called it per message
+// (it was most of the cost of drawing a long room)
+const timeFormat = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+const clockFormat = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
+const time = (ts: number) => timeFormat.format(new Date(ts * 1000));
 const keyFor = (channel: string, root: string | null) => `${channel}:${root ?? "room"}`;
 const dayKey = (ts: number) => new Date(ts * 1000).toDateString();
 function dayLabel(ts: number) {
@@ -115,7 +121,7 @@ function dayLabel(ts: number) {
   if (d.toDateString() === y.toDateString()) return "Yesterday";
   return d.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric", year: d.getFullYear() === today.getFullYear() ? undefined : "numeric" });
 }
-const clock = (ts: number) => new Date(ts * 1000).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+const clock = (ts: number) => clockFormat.format(new Date(ts * 1000));
 // Stable per-author hue for letter avatars.
 const hue = (pk: string) => parseInt(pk.slice(0, 6), 16) % 360;
 
@@ -218,14 +224,55 @@ function pinTo(list: HTMLElement, at: { ref: string; offset: number }): boolean 
   return true;
 }
 
+/** T-335: an out-of-flow copy of the composer that its text is measured in. Sizing the field itself (height auto, then read back) re-laid out
+ *  the whole room column, every message in it, on every key. It holds the text only while measuring. */
+let gauge: HTMLTextAreaElement | null = null;
+let gaugeStyle = "";
+// `width` is the layout width (transforms don't change it), border-box like the field
+const GAUGED = ["width", "fontFamily", "fontSize", "fontWeight", "fontStyle", "fontStretch", "fontVariant", "fontKerning", "fontFeatureSettings",
+  "fontVariationSettings", "letterSpacing", "wordSpacing", "textTransform", "textIndent", "lineHeight", "paddingTop", "paddingRight",
+  "paddingBottom", "paddingLeft", "borderTopWidth", "borderRightWidth", "borderBottomWidth", "borderLeftWidth", "borderTopStyle",
+  "borderRightStyle", "borderBottomStyle", "borderLeftStyle", "boxSizing", "whiteSpace", "overflowWrap", "wordBreak", "tabSize"] as const;
+
 function resizeComposer(el: HTMLTextAreaElement) {
-  el.style.height = "auto";
   const style = getComputedStyle(el);
   // T-200: with a note open beside or over the chat the composer stops at three lines (a quote scrolls inside it), so it never squeezes the pane
   const lines = el.closest(".note-aside") ? 3 : 6;
-  const maxHeight = parseFloat(style.lineHeight) * lines + parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
-  el.style.height = `${Math.min(el.scrollHeight, maxHeight)}px`;
-  el.style.overflowY = el.scrollHeight > maxHeight ? "auto" : "hidden";
+  // and never past the field's own CSS cap (64px on a short landscape window), where it scrolls instead
+  const cssCap = parseFloat(style.maxHeight);
+  const maxHeight = Math.min(parseFloat(style.lineHeight) * lines + parseFloat(style.paddingTop) + parseFloat(style.paddingBottom), Number.isFinite(cssCap) ? cssCap : Infinity);
+  if (!gauge?.isConnected) {
+    gauge = document.createElement("textarea");
+    gauge.setAttribute("aria-hidden", "true");
+    gauge.tabIndex = -1;
+    gauge.rows = 1;
+    gauge.style.cssText = "position:fixed;left:-10000px;top:0;visibility:hidden;pointer-events:none;height:0;min-height:0;max-height:none;overflow:hidden;contain:layout style;";
+    document.body.appendChild(gauge);
+    gaugeStyle = "";
+  }
+  // the field's styles copied only when they change (a resize, a media query), not on every key
+  const next = GAUGED.map((p) => style[p]).join("|");
+  if (next !== gaugeStyle) { for (const p of GAUGED) gauge.style[p] = style[p]; gaugeStyle = next; }
+  gauge.value = el.value;
+  const content = gauge.scrollHeight;
+  gauge.value = "";
+  // written only when it changes: the same height is no new layout
+  const height = `${Math.min(content, maxHeight)}px`, overflow = content > maxHeight ? "auto" : "hidden";
+  if (el.style.height !== height) el.style.height = height;
+  if (el.style.overflowY !== overflow) el.style.overflowY = overflow;
+}
+
+/** T-335: the composer's textarea, drawn from the draft box: a keystroke redraws this field (and sizes it), nothing else. */
+function ComposerField({ box, inputRef, ...props }: { box: DraftBox; inputRef: (el: HTMLTextAreaElement | null) => (() => void) | void } & Omit<TextareaHTMLAttributes<HTMLTextAreaElement>, "value">) {
+  const value = useSyncExternalStore(box.subscribe, box.get, box.get);
+  const own = useRef<HTMLTextAreaElement | null>(null);
+  const ref = useCallback((el: HTMLTextAreaElement | null) => {
+    own.current = el;
+    const cleanup = inputRef(el);
+    return () => { own.current = null; if (cleanup) cleanup(); else inputRef(null); };
+  }, [inputRef]);
+  useLayoutEffect(() => { if (own.current) resizeComposer(own.current); }, [value]);
+  return <textarea ref={ref} value={value} {...props} />;
 }
 
 function Conversations({ onForget }: { onForget: () => void }) {
@@ -391,7 +438,12 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const [members, setMembers] = useState<Member[]>([]);
   const [identity, setIdentity] = useState<string | null>(null);
   useLayoutEffect(() => { clearProjectBodies(); setWorkOwner(identity); }, [identity]);
-  const [draft, setDraft] = useState("");
+  // T-335: the composer's text (draftBox.ts): a keystroke redraws the composer field only; this view redraws when it turns empty or blank
+  const [box] = useState(() => draftBox());
+  const setDraft = box.set;
+  const draftShape = () => { const t = box.get(); return !t ? "empty" : !t.trim() ? "blank" : "text"; };
+  const draftState = useSyncExternalStore(box.subscribe, draftShape, draftShape);
+  const hasDraft = draftState !== "empty", draftBlank = draftState !== "text";
   const drafts = useRef(new Map<string, string>());
   const draftRevisions = useRef(new Map<string, number>());
   /** T-132: drafts are saved per identity; until it is known nothing is read or saved (what is typed meanwhile is saved when it is). */
@@ -918,7 +970,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     observer.observe(el);
     return () => { observer.disconnect(); input.current = null; };
   }, []);
-  useLayoutEffect(() => { if (input.current) resizeComposer(input.current); }, [draft, asides, channel, notes.length]); // T-200: a note opening or closing changes the cap
+  useLayoutEffect(() => { if (input.current) resizeComposer(input.current); }, [asides, channel, notes.length]); // T-200: a note opening or closing changes the cap (the field sizes itself as text changes)
   const focusComposer = useRef(false);
   // T-161: every room's Hermes approval prompts still waiting, for Needs you, the room and one notification each
   // T-161 and T-234: how both notify (the room's name; whether the user is already looking at it)
@@ -929,12 +981,18 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const sealedWaiting = useSealedWaiting({ enabled: !!identity, ...notifyOpts });
   const approvals = useMemo(() => [...hermesApprovals, ...sealedWaiting].sort((a, b) => a.ts - b.ts), [hermesApprovals, sealedWaiting]);
 
+  /** Whose rooms list this run has written to the device's copy. */
+  const roomsSavedFor = useRef<string | null>(null);
   const loadRooms = useCallback(async (cached?: Room[]) => {
-    const rows = cached ?? await invoke<Room[]>("get_rooms");
-    if (rows.length) mark(cached ? "roomsCached" : "rooms");
-    setRooms(rows);
-    roomsRef.current = rows;
-    if (!cached) { writeRooms(localStorage, whoRef.current, rows); setUnreadBadge(rows.reduce((n, r) => n + (r.unread || 0), 0)); }
+    const fresh = cached ?? await invoke<Room[]>("get_rooms");
+    if (fresh.length) mark(cached ? "roomsCached" : "rooms");
+    // T-335: every live event re-reads the rooms; the same list (and each unchanged room) stays the object already drawn, so nothing redraws for it
+    const rows = keepSame(roomsRef.current, fresh, (r) => r.id);
+    const changed = rows !== roomsRef.current;
+    if (changed) { setRooms(rows); roomsRef.current = rows; }
+    // the device's copy: written on a change, and once for each identity (the first read can come before the identity is known)
+    if (!cached && whoRef.current && (changed || roomsSavedFor.current !== whoRef.current)) { writeRooms(localStorage, whoRef.current, rows); roomsSavedFor.current = whoRef.current; }
+    if (!cached) setUnreadBadge(rows.reduce((n, r) => n + (r.unread || 0), 0));
     if (!tabsReady.current) {
       tabsReady.current = true;
       // 0.1.46: no tab strip. The app reopens to the place it was last on (v2 holds just that); v1's set of tabs is ignored beyond its active surface.
@@ -1093,7 +1151,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       if (kept) { mark("messagesCached"); setMessages(kept); setLoadedView(view); }
     }
     viewNow.current = view;
-    invoke<Message[]>("get_messages", { channel, root, limit }).then((rows) => { if (rows.length) mark("messages"); if (viewNow.current === view && seq > appliedSeq.current) { appliedSeq.current = seq; appliedLimit.current = limit; setMessages(rows); setLoadedView(view); setFetchedView(view); setFailedView(null); if (root === null) writeMessages(localStorage, whoRef.current, channel, rows); } }).catch((e) => { if (current) { setError(String(e)); setFailedView(view); } });
+    invoke<Message[]>("get_messages", { channel, root, limit }).then((rows) => { if (rows.length) mark("messages"); if (viewNow.current === view && seq > appliedSeq.current) { appliedSeq.current = seq; appliedLimit.current = limit; setMessages((old) => keepSame(old, rows, (m) => m.ref)); setLoadedView(view); setFetchedView(view); setFailedView(null); if (root === null) writeMessages(localStorage, whoRef.current, channel, rows); } }).catch((e) => { if (current) { setError(String(e)); setFailedView(view); } });
     // Viewing the room reads it (only while the app is actually on screen).
     if (document.visibilityState === "visible") {
       invoke("mark_read", { channel }).then(() => loadRooms()).catch(() => {});
@@ -1563,10 +1621,10 @@ function Conversations({ onForget }: { onForget: () => void }) {
       void invoke("send_typing", { channel, root: root ?? null, parent: root ?? null }).catch(() => {});
     }
     const key = scope();
+    // T-335: nothing dropped is the same map, so the view isn't redrawn for it
     const next = pruneBindings(text, bindingsRef.current);
-    bindingsRef.current = next;
     if (key) { bindingStore.current.set(key, next); editDraft(key, text, next); }
-    setBindings(next);
+    if (next !== bindingsRef.current) { bindingsRef.current = next; setBindings(next); }
     syncPicker(text, caret);
   }
 
@@ -1578,6 +1636,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   function choose(member: Member) {
     if (!picker) return;
     const el = input.current;
+    const draft = box.get();
     const caret = el?.selectionStart ?? draft.length;
     const label = labels.get(member.pubkey) ?? member.name;
     const next = insertMention(draft, picker.start, caret, label);
@@ -1594,6 +1653,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
 
   function startMention() {
     const el = input.current;
+    const draft = box.get();
     const caret = el?.selectionStart ?? draft.length;
     const before = draft.slice(0, caret);
     const prefix = before && !/\s$/.test(before) ? " @" : "@";
@@ -1622,7 +1682,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       }
     }
     if (picker && e.key === "Escape") { e.preventDefault(); setPicker(null); return; }
-    if (e.key === "ArrowUp" && !draft) {
+    if (e.key === "ArrowUp" && !box.get()) {
       // Slack/Buzz convention: ArrowUp in an empty composer edits your last message.
       const last = lastOwnMessage(messages, identity);
       if (last) { e.preventDefault(); setEditing(last.ref); }
@@ -1633,6 +1693,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
 
   function navigate(nextChannel: string | null, nextRoot: string | null) {
     const key = scope();
+    const draft = box.get();
     // Save the spot in the view we're leaving; the next view restores its own.
     const leaving = restoredView.current, el = listRef.current;
     if (leaving && el) scrollMemory.current.set(leaving, markFor(el.scrollTop, el.scrollHeight, el.clientHeight));
@@ -1660,6 +1721,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   }
 
   async function send() {
+    const draft = box.get();
     // Refs/session state cover events before React commits the disabled controls.
     if (!channel || activeScope.current !== keyFor(channel, root) || sendingRef.current ||
         recordingOrigin.current || recorder.isBusy() || (!draft.trim() && !pending.length)) return;
@@ -1784,15 +1846,15 @@ function Conversations({ onForget }: { onForget: () => void }) {
           {draftStorageWarning && <p className="draft-storage" role="status">{draftStorageWarning}</p>}
           {voiceStatus && <p className="voice-status" role="status">{voiceStatus}</p>}
           <div className="compose-row">
-            <ComposerMenu key={`${channel}:${root}`} onMention={startMention} onAttach={() => fileInput.current?.click()} onDiscard={discardDraft} canDiscard={!!draft} sending={sending} />
-            <textarea ref={composerInput} aria-label={`Message ${currentRoom.name}`} value={draft} onChange={(e) => updateDraft(e.target.value, e.target.selectionStart)} onPaste={onPasteFiles} onSelect={(e) => syncPicker(e.currentTarget.value, e.currentTarget.selectionStart)} onBlur={() => setPicker(null)} onKeyDown={onKeyDown} maxLength={65536} rows={1} placeholder={isThread ? "Reply in thread…" : placeholder ?? "Message Uni…"} />
+            <ComposerMenu key={`${channel}:${root}`} onMention={startMention} onAttach={() => fileInput.current?.click()} onDiscard={discardDraft} canDiscard={hasDraft} sending={sending} />
+            <ComposerField box={box} inputRef={composerInput} aria-label={`Message ${currentRoom.name}`} onChange={(e) => updateDraft(e.target.value, e.target.selectionStart)} onPaste={onPasteFiles} onSelect={(e) => syncPicker(e.currentTarget.value, e.currentTarget.selectionStart)} onBlur={() => setPicker(null)} onKeyDown={onKeyDown} maxLength={65536} rows={1} placeholder={isThread ? "Reply in thread…" : placeholder ?? "Message Uni…"} />
             {/* Uni hears every message in a room it is in, unless muted here: a small, visible switch (it was hidden with the old destination line) */}
             {uniInRoom && <button type="button" className={`compose-uni ${notifyUni ? "on" : ""}`} aria-pressed={notifyUni} onClick={() => setNotifyUni((v) => !v)}
               aria-label={notifyUni ? "Uni is listening. Mute Uni for your messages" : "Uni is muted. Let Uni listen again"} title={notifyUni ? "Uni hears what you send here. Tap to mute." : "Uni is muted: your messages don't notify Uni. Tap to let Uni listen."}>{notifyUni ? "Uni listening" : "Uni muted"}</button>}
             <button className={`address-toggle compose-icon mic ${recorder.recording && recordingOrigin.current?.key === scope() ? "recording" : ""}`} onClick={() => void toggleRecording()} disabled={sending || (recorder.busy && (!recorder.recording || recordingOrigin.current?.key !== scope()))} aria-pressed={recorder.recording && recordingOrigin.current?.key === scope()} aria-label={recorder.recording && recordingOrigin.current?.key === scope() ? "Stop recording voice message" : "Record a voice message"} title={recorder.recording && recordingOrigin.current?.key === scope() ? "Stop recording" : "Voice message"}>
               {recorder.recording && recordingOrigin.current?.key === scope() ? <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" fill="currentColor" /></svg> : <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3" /><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8" /></svg>}
             </button>
-            <button className="send compose-icon" disabled={(!draft.trim() && !pending.some((f) => !f.voice && f.state === "ready")) || manualAttachments(pending).some(attachmentBlocksSend) || sending || recorder.busy} onClick={() => void send()} aria-label="Send message" title={sending ? "Sending…" : "Send message"} aria-busy={sending}>
+            <button className="send compose-icon" disabled={(draftBlank && !pending.some((f) => !f.voice && f.state === "ready")) || manualAttachments(pending).some(attachmentBlocksSend) || sending || recorder.busy} onClick={() => void send()} aria-label="Send message" title={sending ? "Sending…" : "Send message"} aria-busy={sending}>
               {sending ? <span aria-hidden="true">…</span> : <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 7-7 7 7M12 5v14" /></svg>}
             </button>
           </div>
@@ -2056,7 +2118,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const composeHere = (text: string) => {
     const key = scope();
     if (!key) return;
-    const next = appendDraft(drafts.current.get(key) ?? draft, text);
+    const next = appendDraft(drafts.current.get(key) ?? box.get(), text);
     editDraft(key, next);
     setDraft(next);
     requestAnimationFrame(() => input.current?.focus());

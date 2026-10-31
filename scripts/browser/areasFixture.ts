@@ -134,6 +134,10 @@ export type BootOpts = {
   /** T-335: `unread`: a small made-up world of its own instead of the seed's areas and rooms: North Field, Kiln Studio (with its project
    *  Glaze Tests in a room of its own), Still Water (no room) and #allotment, a room no area holds. No tasks. */
   world?: 'unread';
+  /** T-335 typing lag (with `world: 'unread'`): every room of the made-up world holds this many messages (prose, markdown, code, links,
+   *  Hermes approval prompts and their outcomes, progress pings, upkeep notes, reactions, threads), and 40 more rooms of 200 each, a few
+   *  with something new. The history a long-used install carries. */
+  big?: number;
   /** Metadata of the vault's `.parachute/life-os` profile note (e.g. `{ chat: { provider: null } }`); absent: no profile note, Uni's own profile. */
   profileNote?: Record<string, unknown>;
   /** Open the Life OS surface on this other vault (the fixture answers its vault calls from the uni data; no profile note = the pack defaults, chat null). */
@@ -253,7 +257,7 @@ export async function bootAreas(page: Page, variant: Variant = 'seed', opts: Boo
   const now = Math.floor((opts.pinned ? pinnedAt : Date.now()) / 1000);
   const data = {
     profileNote: opts.profileNote ?? null, lifeVault: opts.lifeVault ?? null, now, variant, selftest: opts.selftest ?? true, ipcLeak: opts.ipcLeak ?? false, hostile: hostileApp(opts.ports ?? { http: 9, udp: 9 }), benign: BENIGN, techne: seed('techne'), unforced: seed('unforced'), seedMeta,
-    apps: opts.apps ?? [], multiRoom: !!opts.multiRoom || !!opts.tree, tree: !!opts.tree, tasks: !!opts.tasks, briefs: !!opts.briefs, queryDelay: opts.queryDelay ?? 0, identityDelay: opts.identityDelay ?? 0, identityFails: opts.identityFails ?? 0, roomsDelay: opts.roomsDelay ?? 0, messagesDelay: opts.messagesDelay ?? 0, nodeStatuses: opts.nodeStatuses ?? {}, nearOff: !!opts.nearOff, ids: !!opts.ids, boulder: !!opts.boulder, savedLayout: opts.savedLayout ?? null, strayRoom: !!opts.strayRoom, thread: !!opts.thread, manyTasks: opts.manyTasks ?? 0, uniMember: !!opts.uniMember, twins: !!opts.twins, underBoulder: !!opts.underBoulder, priya: !!opts.priya, links: !!opts.links, atlas: !!opts.atlas, garden: !!opts.garden, steer: !!opts.steer, longChat: !!opts.longChat, longNext: !!opts.longNext, bareTask: !!opts.bareTask, cutDecision: !!opts.cutDecision, cutNoAsk: !!opts.cutNoAsk, longAsk: !!opts.longAsk, previewAsk: !!opts.previewAsk, crowded: !!opts.crowded, ulidNext: !!opts.ulidNext, vaultNotes: !!opts.vaultNotes, pastDue: !!opts.pastDue, tallLast: !!opts.tallLast, privateTasks: !!opts.privateTasks, deviceCache: opts.deviceCache ?? null, queryFails: opts.queryFails ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, unread: opts.unread ?? null, world: opts.world ?? null, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null, mode: opts.mode ?? 'sealed', grantedUnder: opts.grantedUnder ?? (opts.mode ?? 'sealed'),
+    apps: opts.apps ?? [], multiRoom: !!opts.multiRoom || !!opts.tree, tree: !!opts.tree, tasks: !!opts.tasks, briefs: !!opts.briefs, queryDelay: opts.queryDelay ?? 0, identityDelay: opts.identityDelay ?? 0, identityFails: opts.identityFails ?? 0, roomsDelay: opts.roomsDelay ?? 0, messagesDelay: opts.messagesDelay ?? 0, nodeStatuses: opts.nodeStatuses ?? {}, nearOff: !!opts.nearOff, ids: !!opts.ids, boulder: !!opts.boulder, savedLayout: opts.savedLayout ?? null, strayRoom: !!opts.strayRoom, thread: !!opts.thread, manyTasks: opts.manyTasks ?? 0, uniMember: !!opts.uniMember, twins: !!opts.twins, underBoulder: !!opts.underBoulder, priya: !!opts.priya, links: !!opts.links, atlas: !!opts.atlas, garden: !!opts.garden, steer: !!opts.steer, longChat: !!opts.longChat, longNext: !!opts.longNext, bareTask: !!opts.bareTask, cutDecision: !!opts.cutDecision, cutNoAsk: !!opts.cutNoAsk, longAsk: !!opts.longAsk, previewAsk: !!opts.previewAsk, crowded: !!opts.crowded, ulidNext: !!opts.ulidNext, vaultNotes: !!opts.vaultNotes, pastDue: !!opts.pastDue, tallLast: !!opts.tallLast, privateTasks: !!opts.privateTasks, deviceCache: opts.deviceCache ?? null, queryFails: opts.queryFails ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, unread: opts.unread ?? null, world: opts.world ?? null, big: opts.big ?? 0, bigFx: opts.big ? JSON.parse(readFileSync(new URL('../fixtures/approval-prompts.json', import.meta.url), 'utf8')) : null, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null, mode: opts.mode ?? 'sealed', grantedUnder: opts.grantedUnder ?? (opts.mode ?? 'sealed'),
   };
   // Pre-granted apps: the grant key is the SHA-256 of the RESOLVED default needs plus the app's html.
   const preGrant = [
@@ -431,6 +435,42 @@ Two proposals wait on a scope decision.
         'ch-allot': [msg('l1', 'ch-allot', 'Rowan', 9000, 'The water butt is full again.')],
       });
       rooms.splice(0, rooms.length, room('uni-room', 'Uni'), room('ch-north', 'north-field'), room('ch-kiln', 'kiln-studio'), room('ch-glaze', 'glaze-tests'), room('ch-allot', 'allotment'));
+      if (d.big) {
+        // T-335 typing lag: a long-used install's history, made up. Deterministic, so every run renders the same timeline.
+        const fx = d.bigFx;
+        const prompts = Object.values(fx.prompts) as string[], outcomes = Object.values(fx.outcomes) as string[];
+        const who = ['Uni', 'Kit (you)', 'Rowan', 'Uni', 'Priya'];
+        const prose = [
+          'The hedge cutting is booked for next week; the far corner stays wild.',
+          'Here is the plan:\n\n1. Bisque the test tiles\n2. **Glaze** three of them\n3. Fire to cone 6\n\nSee https://example.com/kiln/notes for the schedule.',
+          'Checked the readings:\n\n```\ncone 6  1222C  ok\ncone 8  1260C  slow\n```\n\nThe slow one needs a longer hold.',
+          'Short one.',
+          '> quoted from yesterday\n\nAgreed, the shared shelf goes by the window. [[Areas/Kiln Studio/Plan|the plan]] has the details.',
+          '| tile | glaze | result |\n| --- | --- | --- |\n| A | celadon | glossy |\n| B | tenmoku | crawled |\n| C | shino | matte |',
+          'A longer note about the meadow paths. '.repeat(12).trim(),
+          // a reply the length Uni's often are: a heading, bullets, a code block, links, a table
+          '## Firing plan for the week\n\nI checked the kiln log and the glaze notes. Here is where things stand:\n\n- **Monday**: bisque load, cone 04, about 9 hours with a slow start.\n- **Wednesday**: glaze load for the test tiles (celadon, tenmoku, shino).\n- **Friday**: unload and photograph, then sort what goes to the shelf.\n\nThe controller program I set:\n\n```\nseg 1  100C/h  to 600C\nseg 2  150C/h  to 1000C\nseg 3   60C/h  to 1222C  hold 10m\n```\n\n| tile | clay | glaze | note |\n| --- | --- | --- | --- |\n| 1 | stoneware | celadon | thin coat |\n| 2 | stoneware | tenmoku | dip twice |\n| 3 | porcelain | shino | wax the foot |\n\nOpen questions:\n\n1. Do we keep the spy hole open for the first two hours?\n2. Is the shelf by the window free on Friday?\n\nNotes are in [[Areas/Kiln Studio/Plan|the plan]] and https://example.com/kiln/log has the raw readings. ' + 'The rest is detail for whoever unloads: let it cool below 100C before opening, wear the gloves, and check every tile for crawling before it goes on the shelf. '.repeat(3),
+        ];
+        const fill = (channel: string, n: number, tag: string) => {
+          const list: any[] = [];
+          for (let i = 0; i < n; i++) {
+            const ago = (n - i) * 600 + 60;
+            const k = i % 37;
+            const body = k === 5 ? prompts[i % prompts.length] : k === 6 ? outcomes[i % outcomes.length] : k === 11 ? '⏳ Working — 4 min on the glaze table' : k === 17 ? 'Usage guard: spending is on pace for the week.' : prose[i % prose.length];
+            const author = k === 5 || k === 6 || k === 11 || k === 17 ? 'Uni' : who[i % who.length];
+            const m = msg(`${tag}${i}`, channel, author, ago, body);
+            if (i % 9 === 0) m.reactions = [{ emoji: '👍', count: 2, mine: i % 18 === 0 }];
+            if (i % 50 === 0) { m.reply_count = 3; m.last_reply_ts = m.ts + 120; }
+            if (i % 13 === 0) m.mentions_me = true;
+            list.push(m);
+          }
+          return list;
+        };
+        for (const id of ['uni-room', 'ch-north', 'ch-kiln', 'ch-glaze', 'ch-allot']) msgs[id] = [...fill(id, d.big, `${id}-b`), ...(msgs[id] ?? [])];
+        for (let r = 0; r < 40; r++) { const id = `ch-big${r}`; msgs[id] = fill(id, 200, `${id}-b`); }
+        rooms.splice(0, rooms.length, room('uni-room', 'Uni'), room('ch-north', 'north-field'), room('ch-kiln', 'kiln-studio'), room('ch-glaze', 'glaze-tests'), room('ch-allot', 'allotment'),
+          ...Array.from({ length: 40 }, (_, r) => room(`ch-big${r}`, `side-room-${r}`, r % 7 === 0 ? 3 : 0)));
+      }
     }
     // T-335: the store's unread count, when a spec asks for it (`unread`): seeded per room, one more per message from someone else, cleared by mark_read
     if (d.unread) for (const r of rooms) { const u = d.unread[r.id]; if (u !== undefined) { r.unread = typeof u === 'number' ? u : u.n; r.mentions = typeof u === 'number' ? false : !!u.at; } }
@@ -486,6 +526,28 @@ Two proposals wait on a scope decision.
     // r19: tasks (and their notes) present from the very first read, set by an init script before boot: a fresh device's first list
     if (Array.isArray(w.__seedTasks)) taskNotes.push(...w.__seedTasks);
     w.__tasks = taskNotes;
+    // T-335 typing lag: the made-up world at a long-used install's size (needs `tasks`): 12 more areas of 6 projects each, ten tasks a
+    // project (some Aaron's, some a room's, some waiting on him), and two dozen open decisions. The world's own rooms hold the big history.
+    if (d.world === 'unread' && d.big && d.tasks) {
+      taskNotes.splice(0, taskNotes.length);
+      const states = ['open', 'doing', 'waiting', 'open', 'open'];
+      for (let a = 0; a < 12; a++) {
+        notes.push(area(`a-big${a}`, `Field ${a}`, a % 4 === 3 ? 'background' : 'foreground', `ch-big${a}`, `Made-up area ${a}.`));
+        for (let p = 0; p < 6; p++) {
+          const proj = `Projects/Plot ${a}-${p}`;
+          notes.push({ id: `p-big${a}-${p}`, path: proj, extension: 'md', tags: ['project'], updatedAt: '2026-10-07T12:00:00Z', content: `# Plot ${a}-${p}\n\nA made-up project.`,
+            metadata: { status: 'foreground', parent: `Areas/Field ${a}`, ...(p === 0 ? { channel: `ch-big${12 + a}` } : {}) } });
+          for (let t = 0; t < 10; t++) {
+            const state = states[(a + p + t) % states.length];
+            taskNotes.push(mk(`bt${a}-${p}-${t}`, `T-${1000 + a * 100 + p * 10 + t} Job ${t} on plot ${a}-${p}`, proj, {
+              state, owner: t % 3 === 0 ? 'aaron' : `room:plot-${a}`, ...(state === 'waiting' ? { waiting_on: t % 2 ? 'aaron' : 'external' } : {}),
+              ...(t % 4 === 0 ? { priority: ['now', 'soon', 'someday'][t % 3], next: `Check the beds on plot ${a}-${p} before the frost.` } : {}),
+              ...(t === 7 ? { due: '2026-10-12' } : {}) }));
+          }
+          if (p % 3 === 0) taskNotes.push(mk(`bd${a}-${p}`, `Decide the cover crop for plot ${a}-${p}`, proj, { priority: 'soon' }, 'decision'));
+        }
+      }
+    }
     // a tag whose read fails; tests change it while the app runs (a refresh that fails, then a Retry that works)
     w.__queryFails = [...d.queryFails];
     const BOULDER = '9f5dd143-96b1-440a-ab71-812219cdfaa1';
@@ -587,7 +649,7 @@ Two proposals wait on a scope decision.
           case 'get_identity': if (d.identityDelay) await new Promise((r) => setTimeout(r, d.identityDelay)); return U;
           case 'get_npub': return 'test';
           case 'get_rooms': if (d.roomsDelay) await new Promise((r) => setTimeout(r, d.roomsDelay)); w.__roomsResolved = true; return d.unread ? rooms.map((r) => ({ ...r })) : rooms; // T-335: fresh rows, like the store, so a changed count re-renders
-          case 'get_messages': if (args.limit === 200 && w.__lookupDelay) await new Promise((r) => setTimeout(r, w.__lookupDelay)); if (args.limit === 200 && w.__lookupFails) throw 'relay unreachable'; if (d.messagesDelay) await new Promise((r) => setTimeout(r, d.messagesDelay)); return args.root ? threads[args.root] ?? [] : (msgs[args.channel] ?? []).filter((m: any) => !m.root && !(args.limit === 200 && !String(m.ref).startsWith('live'))).slice(-(args.limit ?? 300));
+          case 'get_messages': if (args.limit === 200 && w.__lookupDelay) await new Promise((r) => setTimeout(r, w.__lookupDelay)); if (args.limit === 200 && w.__lookupFails) throw 'relay unreachable'; if (d.messagesDelay) await new Promise((r) => setTimeout(r, d.messagesDelay)); { const rows = args.root ? threads[args.root] ?? [] : (msgs[args.channel] ?? []).filter((m: any) => !m.root && !(args.limit === 200 && !String(m.ref).startsWith('live'))).slice(-(args.limit ?? 300)); return d.big ? JSON.parse(JSON.stringify(rows)) : rows; } // T-335: `big` answers as IPC does, with new objects every read
           // T-161: like the store's query: each room with an approval prompt (not the user's) in the last day, from its oldest prompt on
           case 'approval_messages': {
             // T-335: a planned read can be slow and/or fail, to prove reads that land out of order
