@@ -23,7 +23,7 @@ import { rolledNeeds, storedSidebarWidth } from "./sidebarState";
 import { useRailHidden, useShortTree, useTreeBesideNote, useUprightPhone, useWide } from "./homeLayout";
 import { privateRoot, privateRootIn, roomSlug, roomView, treeRows } from "./treeRooms";
 import { publishRoomNodes, roomNodeMap } from "./roomLabels";
-import { rolledUnread, unreadByPath, unreadByRoom, withApprovalNeeds } from "./roomUnread";
+import { approvalsAt, rolledUnread, unreadByPath, unreadByRoom } from "./roomUnread";
 import { useNav, type NavControls } from "../navContext";
 import { useVaultProfile } from "./ProfileContext";
 import { Crumbs, RoomSidebar, TreeScreen } from "./TreeHome";
@@ -38,7 +38,7 @@ import { openDialog } from "./focusTrap";
 import { publishDecisions, setDecidedHook, setDecisionOpener } from "../decisionLinks";
 import { taskTitle } from "./whereCore";
 import type { NoteRef } from "./noteRefsCore";
-import { ApprovalRows } from "./ApprovalRows";
+import { ApprovalElsewhere, ApprovalRows } from "./ApprovalRows";
 import { ApprovalsContext, useApprovalList } from "../approvalsLive";
 import type { Approval } from "../approvals";
 import "./areas.css";
@@ -319,17 +319,17 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
    *  node with no row counts on its nearest ancestor's (r13), so the dots under a level add up to its Needs you. */
   const rowPaths = useMemo(() => new Set(navRows.map((r) => r.path)), [navRows.map((r) => r.path).join("\n")]); // eslint-disable-line react-hooks/exhaustive-deps
   const navNeeds = useMemo(() => needsByRow(tasks.tasks, rowPaths, (p) => tasks.tree?.parent.get(p) ?? data?.tree.parent.get(p), confirm.of, tasks.runs), [tasks.tasks, tasks.runs, rowPaths, tasks.tree, data?.tree, confirm.of]); // eslint-disable-line react-hooks/exhaustive-deps
-  // T-335: what is new in each room (the rooms list's counts; opening a room marks it read, which clears them), and the approval prompts
-  // waiting in each room beside the tasks that need you: on the owning node's row, or on the room itself when no node owns it
+  // T-335: what is new in each room (the rooms list's counts; opening a room marks it read, which clears them), and the approvals waiting
+  // in each room (the key badge, apart from the tasks' dot): on the owning node's row, or on the room itself when no node owns it
   const newByRoom = useMemo(() => unreadByRoom(rooms), [rooms]);
   const newByPath = useMemo(() => unreadByPath(newByRoom, owned ?? new Map()), [newByRoom, owned]);
-  const needsAt = useMemo(() => withApprovalNeeds(navNeeds, approvalsAll.list, owned), [navNeeds, approvalsAll.list, owned]);
+  const asksAt = useMemo(() => approvalsAt(approvalsAll.list, owned), [approvalsAll.list, owned]);
   /** The room on screen (it is being marked read), so the Places mark only says what is new elsewhere. */
   const hereRoom = loose ?? thread?.channel ?? hostRoom;
   const newElsewhere = [...newByRoom.keys()].some((id) => id !== hereRoom && id !== uniRoom);
   const openRoomFromTree = (id: string) => { setDrawer(false); actions.openRoom(id); };
   // T-301/T-302: no Rooms / Projects / Areas lens: projects live inside their area's room now
-  const treeProps = { chat, rows: navRows, needs: needsAt.byPath, onOpen: openPath, others, onOpenRoom: openRoomFromTree, load, needsReady: tasks.ready, unread: newByPath, otherUnread: newByRoom, otherNeeds: needsAt.byRoom };
+  const treeProps = { chat, rows: navRows, needs: navNeeds, asks: asksAt.byPath, onOpen: openPath, others, onOpenRoom: openRoomFromTree, load, needsReady: tasks.ready, unread: newByPath, otherUnread: newByRoom, otherAsks: asksAt.byRoom };
   /** The app's own places (Journal, Vault, Search, Settings), for where the rail is out of reach: the drawer and a short screen's tree. */
   const places = nav?.places ?? [];
   // r17: Places holds only what the shell is not already showing: the app's places only while the rail is hidden (Codex P2-4)
@@ -364,6 +364,8 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
           </div>
           {o.openApp && !o.appOpen && <button type="button" className="sr-app" aria-label={`Open the ${o.title} app`} onClick={o.openApp}>App ›</button>}
         </header>
+        {/* T-335: an approval waiting in another room is said here, in every room, so a card that landed elsewhere is never missed */}
+        <ApprovalElsewhere approvals={approvalsAll.list} here={o.chatRoom?.id ?? hereRoom ?? null} />
         {thread && !o.main && <div className="sr-thread"><button type="button" className="sr-thread-back" onClick={() => actions.openRoom(thread.channel)}><span aria-hidden="true">‹</span> Back to the room</button>
           <span className="sr-thread-label">Thread{replies !== null ? ` · ${replies} ${replies === 1 ? "reply" : "replies"}` : ""}</span></div>}
         {o.workBar}

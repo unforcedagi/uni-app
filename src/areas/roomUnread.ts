@@ -36,11 +36,12 @@ export function rolledUnread(rows: readonly FoldRow[], byPath: ReadonlyMap<strin
 }
 
 /**
- * The approval prompts waiting in each room, added to the tree's needs-you counts: a prompt in a room a node owns counts on that node's row,
- * a prompt in any other room on that room (by id, for "Other rooms").
+ * T-335: the approvals waiting in each room (Hermes prompts and Uni's cards), for the rooms list's key badge: one in a room a node owns
+ * counts on that node's row, one in any other room on that room (by id, for "Other rooms"). Kept apart from the tasks' needs-you dot,
+ * so a row says which it is.
  */
-export function withApprovalNeeds(needs: ReadonlyMap<string, number>, approvals: readonly { channel: string }[], owned: ReadonlyMap<string, { path: string }> | null): { byPath: Map<string, number>; byRoom: Map<string, number> } {
-  const byPath = new Map(needs); const byRoom = new Map<string, number>();
+export function approvalsAt(approvals: readonly { channel: string }[], owned: ReadonlyMap<string, { path: string }> | null): { byPath: Map<string, number>; byRoom: Map<string, number> } {
+  const byPath = new Map<string, number>(); const byRoom = new Map<string, number>();
   for (const a of approvals) {
     const p = owned?.get(a.channel)?.path;
     if (p !== undefined) byPath.set(p, (byPath.get(p) ?? 0) + 1);
@@ -48,6 +49,20 @@ export function withApprovalNeeds(needs: ReadonlyMap<string, number>, approvals:
   }
   return { byPath, byRoom };
 }
+
+/** A folded row's approvals: its own room's plus every row's under it, each node once (a project linked to two areas is one room). */
+export function rolledAsks(rows: readonly { path: string; depth: number }[], byPath: ReadonlyMap<string, number>, i: number): number {
+  let n = byPath.get(rows[i].path) ?? 0;
+  const seen = new Set([rows[i].path]);
+  for (let j = i + 1; j < rows.length && rows[j].depth > rows[i].depth; j++) {
+    const p = rows[j].path; if (seen.has(p)) continue; seen.add(p);
+    n += byPath.get(p) ?? 0;
+  }
+  return n;
+}
+
+/** "1 approval waiting" / "2 approvals waiting": a row's words for a screen reader and a tooltip. */
+export const asksWords = (n: number) => `${n} approval${n === 1 ? "" : "s"} waiting`;
 
 /** "3 new" / "3 new, mentions you": a row's or a door's words for a screen reader and a tooltip. */
 export const unreadWords = (u: Unread) => `${u.n} new${u.mention ? ", mentions you" : ""}`;

@@ -817,3 +817,17 @@
 /* its words are for a screen reader only: the hamburger's `.sr-drawer span` rule would otherwise draw them */
 .sr-drawer span[hidden] { display: none; }
 .sr-drawer-new { position: absolute; top: 9px; right: 8px; width: 9px; height: 9px; border-radius: 50%; background: var(--th-ink); box-shadow: 0 0 0 2px var(--th-paper); }
+
+/* T-335: an approval waiting in another room, said at the top of the room you are in; one tap opens that room at the card */
+.approval-elsewhere { all: unset; box-sizing: border-box; flex: none; display: flex; align-items: center; gap: 10px; min-height: 44px; margin: 0 max(24px, calc((100% - 720px) / 2)) 8px; padding: 6px 12px; border: 1.5px solid var(--danger); border-radius: 6px; background: color-mix(in srgb, var(--danger) 7%, transparent); font: 500 13.5px/1.3 var(--th-sans); color: var(--th-ink); cursor: pointer; }
+.th-simple.phone .approval-elsewhere { margin: 0 14px 6px; }
+.approval-elsewhere:focus-visible { outline: 2px solid var(--th-ink); outline-offset: 2px; }
+.approval-elsewhere > i { flex: none; font-style: normal; }
+.approval-elsewhere-text { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 6px; }
+.approval-elsewhere-text b { font-weight: 700; }
+.approval-elsewhere-text small { font-size: 12.5px; color: var(--th-ink2); }
+.approval-elsewhere-go { flex: none; font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
+/* T-335: the rooms list's key: an approval waiting in that room (the dot stays the tasks'); hollow when it is inside a folded row */
+.th-ask { flex: none; height: 20px; padding: 0 5px; box-sizing: border-box; display: inline-flex; align-items: center; gap: 2px; border: 1.5px solid var(--danger); border-radius: 10px; font: 700 11.5px/1 var(--th-sans); font-variant-numeric: tabular-nums; color: var(--th-ink); background: color-mix(in srgb, var(--danger) 10%, var(--th-card)); }
+.th-ask.inside { border-style: dashed; background: none; }
+.th-ask + .th-new { margin-left: 4px; }

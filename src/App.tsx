@@ -54,7 +54,7 @@ import { AREA_ASK, areaRooms, mmss, shareText, type JournalNote } from "./journa
 import { useRecorder, voiceFileName } from "./recorder";
 import { attachmentBlocksSend, enterInsertsNewline, manualAttachments } from "./composerCore";
 import PairSource, { PairDeviceButton } from "./PairSource";
-import { UpdateSettings } from "./UpdateNotice";
+import { UpdateBanner, UpdateSettings } from "./UpdateNotice";
 import ClaudeUsage from "./usage/ClaudeUsage";
 import { watchLostIpc } from "./ipcLost";
 import { currentUserAgent, platformName } from "./interface/selftest/gate";
@@ -2171,6 +2171,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
       </div>
     </aside>
     <section className="conversation" aria-label={journalOpen ? "Journal" : active?.kind === "mail" ? "Mail" : active?.kind === "calendar" ? "Calendar" : active?.kind === "messages" ? "Messages" : active?.kind === "posts" ? "To post" : shellOpen ? "Uni" : active?.kind === "note" ? "Note" : "Conversation"}>
+      {/* T-335: an update is a line at the top, in the flow: never over the composer */}
+      <UpdateBanner />
       {journalTab && <div className="journal-tab-content" hidden={!journalOpen} onFocusCapture={(e) => { if (e.target instanceof HTMLTextAreaElement) requestAnimationFrame(() => setComposerFocused(true)); }} onBlurCapture={(e) => { const journal = e.currentTarget; requestAnimationFrame(() => setComposerFocused(journal.contains(document.activeElement) && document.activeElement instanceof HTMLTextAreaElement)); }}><Journal focus={journalFocus} onFocus={() => setJournalFocus((v) => !v)} rooms={rooms} uniRoomId={findUniRoom(rooms)?.id ?? null} onShare={shareEntry} backTo={originTitle} onBack={() => openTarget(origin())} onRecordingChange={(on, elapsed, stop) => { journalRecordingRef.current = on; setJournalRecording(on ? { elapsed, stop } : null); }} /></div>}
       {active?.kind === "mail" ? <Mail backTo={originTitle} onBack={() => openTarget(origin())} />
       : active?.kind === "calendar" ? <Calendar backTo={originTitle} onBack={() => openTarget(origin())} />

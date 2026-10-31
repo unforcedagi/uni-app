@@ -2,6 +2,7 @@
 // A row opens the room at the prompt with the composer focused (r30's one answer mechanism: the user answers in the chat, nothing is sent
 // for them); it leaves the list when Hermes answers it (approved, denied, timed out) or its own window ends.
 import { answersLine, commandLine, endsLine, type Approval } from "../approvals";
+import { elsewhereText, waitingElsewhere } from "../approvalsElsewhere";
 import { useApprovalList } from "../approvalsLive";
 import { jobFingerprint } from "../sealedCardCore";
 
@@ -58,4 +59,21 @@ export function ApprovalBanner({ approvals, onShow }: { approvals: readonly Appr
     <span className="approval-banner-text"><b>Hermes needs your OK</b> to run <code>{commandLine(a)}</code>. Reply {answersLine(a)} below · {endsLine(a, clock)}{approvals.length > 1 ? ` · ${approvals.length - 1} more waiting` : ""}</span>
     <button type="button" className="approval-banner-show" onClick={() => onShow(a)}>Show</button>
   </div>;
+}
+
+/**
+ * T-335: at the top of the room you are in, one line for every approval waiting in another room ("Approval waiting in #kiln"). A tap
+ * opens that room at the card (the soonest to end); the line goes when nothing waits elsewhere (answered, timed out or expired).
+ */
+export function ApprovalElsewhere({ approvals, here }: { approvals: readonly Approval[]; here: string | null }) {
+  const { open, roomName } = useApprovalList();
+  const e = waitingElsewhere(approvals, here);
+  if (!e) return null;
+  const text = elsewhereText(e, roomName);
+  const ends = e.first.deadline === null ? "" : ` · first ${endsLine(e.first, clock)}`;
+  return <button type="button" className="approval-elsewhere" data-ref={e.first.ref} data-channel={e.first.channel} aria-label={`${text}${ends}. Show it`} onClick={() => open(e.first)}>
+    <i aria-hidden="true">{e.first.kind === "sealed" ? "🔑" : "!"}</i>
+    <span className="approval-elsewhere-text"><b>{text}</b>{ends && <small>{ends}</small>}</span>
+    <span className="approval-elsewhere-go" aria-hidden="true">Show ›</span>
+  </button>;
 }

@@ -91,14 +91,37 @@ export function UpdateSettings() {
   </div>;
 }
 
-export default function UpdateNotice() {
-  const { state: s } = useUpdater();
+/** The update checks: at start and every 6 h. Mounted once, beside the app (main.tsx); it draws nothing itself. */
+export default function UpdateChecks() {
   useEffect(() => {
     void checkForUpdates(false);
     const timer = window.setInterval(() => void checkForUpdates(false), 6 * 60 * 60 * 1000);
     return () => window.clearInterval(timer);
   }, []);
-  if (s.kind === "ready") return <div className="update-notice" role="status"><span>Update ready</span><button onClick={() => void restartToUpdate()}>Restart</button></div>;
-  if (s.kind === "available") return <div className="update-notice" role="status"><span>Update available</span><button onClick={() => openApkDownload(s.url)}>Download APK</button></div>;
   return null;
+}
+
+// "Later" hides the line for this version until the app restarts; a newer one shows it again.
+let laterFor: string | null = null;
+const laterListeners = new Set<() => void>();
+const laterSnapshot = () => laterFor;
+function subscribeLater(l: () => void) { laterListeners.add(l); return () => { laterListeners.delete(l); }; }
+
+/**
+ * T-335: an update, said in one line at the top of the main pane, in the page's flow: it pushes the room down rather than sitting over
+ * it, so it never covers the composer or its Send button (it used to float bottom-right, over Send on a phone).
+ */
+export function UpdateBanner() {
+  const { state: s } = useUpdater();
+  const later = useSyncExternalStore(subscribeLater, laterSnapshot, laterSnapshot);
+  if (s.kind !== "ready" && s.kind !== "available") return null;
+  const version = s.version ?? "";
+  if (later !== null && later === version) return null;
+  const hide = () => { laterFor = version; laterListeners.forEach((l) => l()); };
+  return <div className="update-notice" role="status">
+    <span className="update-notice-text">{s.kind === "ready" ? "Update ready" : "Update available"}{version ? <small> · Uni {version}</small> : null}</span>
+    {s.kind === "ready" ? <button type="button" className="update-notice-go" onClick={() => void restartToUpdate()}>Restart</button>
+      : <button type="button" className="update-notice-go" onClick={() => openApkDownload(s.url)}>Download APK</button>}
+    <button type="button" className="update-notice-later" onClick={hide}>Later</button>
+  </div>;
 }
