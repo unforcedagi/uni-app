@@ -33,6 +33,11 @@ qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 tauri-plugin-opener = "2"
 tauri-plugin-clipboard-manager = "~2.3.3"
 reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "json"] }
+minisign-verify = "0.2"
+tar = "0.4"
+flate2 = "1"
+semver = "1"
+base64 = "0.22"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tracing-subscriber = { workspace = true }
@@ -65,8 +70,10 @@ block2 = "0.6"
 objc2 = "0.6"
 
 [dev-dependencies]
+minisign = "0.7"
 # T-335: the unlock grace's gate is tested against a mock app handle.
 tauri = { version = "2.4", features = ["test"] }
+tempfile = "3"
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]

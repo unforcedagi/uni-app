@@ -3027,6 +3027,7 @@ mod files;
 #[cfg(any(target_os = "linux", target_os = "android"))]
 mod media_loopback;
 mod media_registry;
+mod ota;
 mod pair_source;
 mod secure_store;
 mod unlock_grace;
@@ -3088,7 +3089,11 @@ pub fn run() {
     #[cfg(mobile)]
     mobile::init_runtime();
     uni_core::init_crypto();
+    // T-305 spike: a verified over-the-air web bundle, when one is installed, is served in place of the built-in one.
+    let mut context = tauri::generate_context!();
+    let ota = ota::wrap(&mut context);
     tauri::Builder::default()
+        .manage(ota)
         .plugin(secure_store::init())
         .plugin(files::init())
         .plugin(tauri_plugin_opener::init())
@@ -3253,6 +3258,10 @@ pub fn run() {
             vault_create,
             vault_save,
             android_update_manifest,
+            ota::ota_status,
+            ota::ota_ready,
+            ota::ota_reject,
+            ota::ota_check,
             #[cfg(feature = "messages")]
             messages::messages_status,
             #[cfg(feature = "messages")]
@@ -3294,7 +3303,7 @@ pub fn run() {
             #[cfg(feature = "messages")]
             messages::messages_telegram_keys
         ])
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building tauri application")
         .run(|_app, _event| {
             // T-313: decrypted attachments opened from Messages don't outlive the app
