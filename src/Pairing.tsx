@@ -1,4 +1,5 @@
 import { pairingFailure } from "./pairingCore";
+import WebVersion from "./WebVersion";
 import { VoiceOutbox } from "./voiceOutbox";
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
@@ -99,6 +100,7 @@ export default function Pairing({ onPaired }: { onPaired: (pubkey: string) => vo
         <p className="pairing-note">Your key is sent encrypted, end to end, and kept in this device's secure storage.</p>
         <p className="pairing-note">Buzz desktop can sign this device in too: its Settings → Pair mobile device.</p>
       </details>
+      <p className="pairing-note"><WebVersion className="pairing-web-version" /></p>
     </div>
   </main>;
 }

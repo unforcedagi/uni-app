@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import App from "./App";
 import UpdateNotice from "./UpdateNotice";
 import { migrateHomeLayout } from "./areas/homeLayout";
+import { otaBoot, otaRendered } from "./ota";
 
 /** A render error in remote content must not blank the whole app. */
 class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { error: Error | null }> {
@@ -26,11 +27,21 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { err
 // T-124 r12: the room tree is the only layout; a saved Map, Octopus or Classic choice is dropped once, here.
 migrateHomeLayout();
 
-ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
-  <React.StrictMode>
-    <ErrorBoundary>
-      <App />
-      <UpdateNotice />
-    </ErrorBoundary>
-  </React.StrictMode>,
-);
+/** T-305: mounted beside App, so it commits only when the first render did not throw. */
+function OtaReady() {
+  React.useEffect(() => otaRendered(), []);
+  return null;
+}
+
+void otaBoot().then((ok) => {
+  if (!ok) return;
+  ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
+    <React.StrictMode>
+      <ErrorBoundary>
+        <App />
+        <UpdateNotice />
+        <OtaReady />
+      </ErrorBoundary>
+    </React.StrictMode>,
+  );
+});
