@@ -24,6 +24,19 @@ android {
         versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
         versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")
     }
+    // T-305: releases are release builds (optimized, stripped Rust library), signed with the one key installed apps
+    // trust: the keystore Gradle's debug signing has always used, $ANDROID_USER_HOME/debug.keystore (cert
+    // 6E:9F:4F:94…22:46:B6:3D, see ~/.config/uni/android.env). Unlike debug signing, a missing keystore fails the
+    // build here instead of silently creating a new key.
+    signingConfigs {
+        create("release") {
+            val home = System.getenv("ANDROID_USER_HOME") ?: "${System.getProperty("user.home")}/.android"
+            storeFile = file("$home/debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
     buildTypes {
         getByName("debug") {
             manifestPlaceholders["usesCleartextTraffic"] = "true"
@@ -37,7 +50,10 @@ android {
             }
         }
         getByName("release") {
-            isMinifyEnabled = true
+            signingConfig = signingConfigs.getByName("release")
+            // T-305: no R8. Rust finds the Kotlin classes (RustWebView, Ipc, the plugins) by name over JNI, and the
+            // dex is a few MB of a release; shrinking it is not worth a class renamed out from under the shell.
+            isMinifyEnabled = false
             proguardFiles(
                 *fileTree(".") { include("**/*.pro") }
                     .plus(getDefaultProguardFile("proguard-android-optimize.txt"))

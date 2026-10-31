@@ -40,7 +40,12 @@ uni-core = { path = "crates/uni-core" }
 # buzz pins a fork of aws-creds for its relay; path-depending on buzz-sdk /
 # buzz-ws-client does not pull it in, so no patch section is needed here.
 
-# The Android release is a debug build (scripts/publish.sh). With full debug info for every dependency, Messages
-# (matrix-sdk) made the APK's Rust library about a gigabyte. Dependencies carry none; our own crates keep theirs.
+# Local debug builds (Android QA, desktop dev). With full debug info for every dependency, Messages (matrix-sdk) made
+# a debug APK's Rust library about a gigabyte. Dependencies carry none; our own crates keep theirs.
 [profile.dev.package."*"]
 debug = false
+
+# T-305: the Android APK is a release build of this profile (scripts/publish.sh), as is the Mac app. Strip the symbol
+# tables and debug info: the debug build's Rust library alone was 544 MB.
+[profile.release]
+strip = true

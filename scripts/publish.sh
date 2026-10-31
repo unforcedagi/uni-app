@@ -24,6 +24,8 @@ cleanup_generated() {
 }
 trap cleanup_generated EXIT
 REPO_SLUG="unforcedagi/uni-app"
+# T-305: the largest APK this publishes (the release build is well under it).
+APK_MAX_BYTES=$((80 * 1024 * 1024))
 # The tailnet download page (index.html here, shared by `tailscale serve`) offers the newest APK.
 SERVE="$HOME/.local/share/uni/apk"
 source scripts/release-check.sh
@@ -57,7 +59,9 @@ rm -rf src-tauri/gen/android/app/build/outputs/apk
   source "$HOME/.config/uni/android.env"
   export PATH="$HOME/.cargo/bin:$PATH"
   # Messages needs Rust 1.93+; the Mac runner is pinned to 1.93.0 and builds it too.
-  pnpm tauri android build --debug --apk --target aarch64 --features messages \
+  # T-305: a release build (optimized, stripped; signed with the same key, see app/build.gradle.kts). The debug build
+  # shipped until 0.1.83 was 553 MB, 544 MB of it the unoptimized Rust library and its debug info.
+  pnpm tauri android build --apk --target aarch64 --features messages \
     --config "{\"version\":\"$VERSION\",\"bundle\":{\"android\":{\"versionCode\":$CODE}}}" >"$STAGE/android.log" 2>&1
 ) & ANDROID_PID=$!
 MAC_RESULT=0; ANDROID_RESULT=0
@@ -70,7 +74,10 @@ if (( MAC_RESULT || ANDROID_RESULT )); then
   exit 1
 fi
 for f in Uni-mac-arm64.zip Uni.app.tar.gz Uni.app.tar.gz.sig; do test -s "$STAGE/$f"; done
-cp "$(pwd)/src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk" "$STAGE/uni.apk"
+cp "$(pwd)/src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk" "$STAGE/uni.apk"
+# T-305: every update is a full download over a phone's connection. A debug or unstripped build is ten times this.
+APK_BYTES="$(stat -c %s "$STAGE/uni.apk")"
+(( APK_BYTES <= APK_MAX_BYTES )) || { echo "APK is $APK_BYTES bytes, over the $APK_MAX_BYTES limit: a debug or unstripped build?" >&2; exit 1; }
 BADGING="$("$HOME/Android/Sdk/build-tools/35.0.0/aapt" dump badging "$STAGE/uni.apk" | head -1)"
 [[ $BADGING == *"versionCode='$CODE'"*"versionName='$VERSION'"* ]] || { echo "APK not stamped $VERSION/$CODE: $BADGING" >&2; exit 1; }
 # Installed apps trust only the original signing key (~/.config/.android/debug.keystore, set via ANDROID_USER_HOME
