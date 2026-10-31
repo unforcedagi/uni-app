@@ -184,8 +184,8 @@ impl State {
                 }
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                if ["current.tar.gz", "next.tar.gz"].iter().any(|f| dir.join(f).exists()) {
-                    Err("bundles on disk but no state.json".into())
+                if ["current.tar.gz", "next.tar.gz", "floor"].iter().any(|f| dir.join(f).exists()) {
+                    Err("bundles or a floor on disk but no state.json".into())
                 } else {
                     Ok(State::default())
                 }
@@ -194,6 +194,12 @@ impl State {
         }
     }
     fn save(&self, dir: &Path) {
+        // The floor is also kept on its own (`floor`), so damage to state.json alone can't lose it.
+        if let Some(f) = &self.floor {
+            if std::fs::write(dir.join("floor.tmp"), f).is_ok() {
+                let _ = std::fs::rename(dir.join("floor.tmp"), dir.join("floor"));
+            }
+        }
         let tmp = dir.join("state.json.tmp");
         if std::fs::write(&tmp, serde_json::to_vec(self).unwrap_or_default()).is_ok() {
             let _ = std::fs::rename(&tmp, dir.join("state.json"));
@@ -240,6 +246,7 @@ pub fn activate(dir: &Path, pubkey: &str, builtin: &semver::Version, shell_api: 
             let floor = ["current", "next"]
                 .iter()
                 .filter_map(|n| read_pair(dir, n).and_then(|(a, _)| claimed_version(&a)))
+                .chain(std::fs::read_to_string(dir.join("floor")).ok().map(|f| f.trim().to_string()))
                 .filter_map(|v| semver::Version::parse(&v).ok())
                 .max();
             log(format!("{e}; dropping installed bundles, built-in web layer {builtin}"));
@@ -786,6 +793,14 @@ mod tests {
             put(dir.path(), "next", &a85, &sign(&k, &a85));
             assert!(activate(dir.path(), &k.pk, &v("0.1.84"), 1).is_none(), "{damage}: the older one stays out");
         }
+        // state.json damaged after the bundle that set the floor is already gone: the floor file still holds it.
+        let dir = tempfile::tempdir().unwrap();
+        put(dir.path(), "next", &a86, &sign(&k, &a86));
+        assert!(activate(dir.path(), &k.pk, &v("0.1.84"), 1).is_some());
+        remove_pair(dir.path(), "current");
+        std::fs::write(dir.path().join("state.json"), b"{not json").unwrap();
+        assert!(activate(dir.path(), &k.pk, &v("0.1.84"), 1).is_none());
+        assert_eq!(State::load_checked(dir.path()).unwrap().floor.as_deref(), Some("0.1.86"));
         // A floor that isn't a version is damage too.
         let dir = tempfile::tempdir().unwrap();
         put(dir.path(), "current", &a85, &sign(&k, &a85));
