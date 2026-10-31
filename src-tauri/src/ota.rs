@@ -176,7 +176,13 @@ impl State {
     /// because a lost floor would let an older signed bundle back in.
     fn load_checked(dir: &Path) -> Result<State, String> {
         match std::fs::read(dir.join("state.json")) {
-            Ok(b) => serde_json::from_slice(&b).map_err(|e| format!("state.json unreadable: {e}")),
+            Ok(b) => {
+                let state: State = serde_json::from_slice(&b).map_err(|e| format!("state.json unreadable: {e}"))?;
+                match &state.floor {
+                    Some(f) if semver::Version::parse(f).is_err() => Err(format!("state.json floor {f:?} is not a version")),
+                    _ => Ok(state),
+                }
+            }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 if ["current.tar.gz", "next.tar.gz"].iter().any(|f| dir.join(f).exists()) {
                     Err("bundles on disk but no state.json".into())
@@ -186,10 +192,6 @@ impl State {
             }
             Err(e) => Err(format!("state.json: {e}")),
         }
-    }
-    /// Only after [`activate`] has run this launch, which repairs or resets the state.
-    fn load(dir: &Path) -> State {
-        Self::load_checked(dir).unwrap_or_default()
     }
     fn save(&self, dir: &Path) {
         let tmp = dir.join("state.json.tmp");
@@ -551,7 +553,8 @@ pub fn ota_status(app: tauri::AppHandle, ota: tauri::State<'_, Arc<Ota>>) -> Sta
 #[tauri::command]
 pub fn ota_ready(ota: tauri::State<'_, Arc<Ota>>) {
     let (Some(dir), Some(b)) = (ota.dir.get(), ota.active()) else { return };
-    let mut state = State::load(dir);
+    // Unreadable now: leave it; the next launch fails closed.
+    let Ok(mut state) = State::load_checked(dir) else { return };
     if state.trial.as_deref() == Some(b.meta.version.as_str()) {
         state.trial = None;
         state.boots = 0;
@@ -565,9 +568,10 @@ pub fn ota_ready(ota: tauri::State<'_, Arc<Ota>>) {
 pub fn ota_reject(window: tauri::WebviewWindow, ota: tauri::State<'_, Arc<Ota>>, reason: String) -> Result<(), String> {
     let (Some(dir), Some(b)) = (ota.dir.get(), ota.active()) else { return Ok(()) };
     log(format!("bundle {} refused by its own code: {reason}; reloading the built-in web layer", b.meta.version));
-    let mut state = State::load(dir);
-    state.reject(&b.meta.version);
-    state.save(dir);
+    if let Ok(mut state) = State::load_checked(dir) {
+        state.reject(&b.meta.version);
+        state.save(dir);
+    }
     remove_pair(dir, "current");
     ota.dropped.store(true, Ordering::Release);
     window.eval("location.reload()").map_err(|e| e.to_string())
@@ -700,7 +704,7 @@ mod tests {
         let b = activate(dir.path(), &k.pk, &v("0.1.84"), 1).unwrap();
         assert_eq!(b.meta.version, "0.1.85");
         assert!(!dir.path().join("next.tar.gz").exists() && dir.path().join("current.tar.gz").exists());
-        assert_eq!(State::load(dir.path()).trial.as_deref(), Some("0.1.85"));
+        assert_eq!(State::load_checked(dir.path()).unwrap().trial.as_deref(), Some("0.1.85"));
     }
 
     #[test]
@@ -713,7 +717,7 @@ mod tests {
             assert!(activate(dir.path(), &k.pk, &v("0.1.84"), 1).is_some());
         }
         assert!(activate(dir.path(), &k.pk, &v("0.1.84"), 1).is_none(), "never ready: back to built-in");
-        assert_eq!(State::load(dir.path()).rejected, vec!["0.1.85".to_string()]);
+        assert_eq!(State::load_checked(dir.path()).unwrap().rejected, vec!["0.1.85".to_string()]);
         assert!(!dir.path().join("current.tar.gz").exists());
     }
 
@@ -758,7 +762,7 @@ mod tests {
         put(dir.path(), "current", &a85, &sign(&k, &a85));
         assert!(activate(dir.path(), &k.pk, &v("0.1.84"), 1).is_none());
         // And a check won't fetch it.
-        let state = State::load(dir.path());
+        let state = State::load_checked(dir.path()).unwrap();
         assert_eq!(state.floor.as_deref(), Some("0.1.86"));
         assert!(not_new(&state, &v("0.1.84"), None, None, &v("0.1.85")).is_some());
         assert!(not_new(&state, &v("0.1.84"), None, None, &v("0.1.87")).is_none());
@@ -778,10 +782,17 @@ mod tests {
             }
             assert!(activate(dir.path(), &k.pk, &v("0.1.84"), 1).is_none(), "{damage}: built-in");
             assert!(!dir.path().join("current.tar.gz").exists(), "{damage}: bundles dropped");
-            assert_eq!(State::load(dir.path()).floor.as_deref(), Some("0.1.86"), "{damage}: floor kept");
+            assert_eq!(State::load_checked(dir.path()).unwrap().floor.as_deref(), Some("0.1.86"), "{damage}: floor kept");
             put(dir.path(), "next", &a85, &sign(&k, &a85));
             assert!(activate(dir.path(), &k.pk, &v("0.1.84"), 1).is_none(), "{damage}: the older one stays out");
         }
+        // A floor that isn't a version is damage too.
+        let dir = tempfile::tempdir().unwrap();
+        put(dir.path(), "current", &a85, &sign(&k, &a85));
+        std::fs::write(dir.path().join("state.json"), br#"{"floor":"not-a-version"}"#).unwrap();
+        assert!(activate(dir.path(), &k.pk, &v("0.1.84"), 1).is_none());
+        assert!(!dir.path().join("current.tar.gz").exists());
+        assert_eq!(State::load_checked(dir.path()).unwrap().floor.as_deref(), Some("0.1.85"));
     }
 
     #[test]
