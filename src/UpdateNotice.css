@@ -5,6 +5,7 @@
 .update-notice button { flex: none; min-height: 36px; border: 1px solid #ffffff55; background: #ffffff22; color: inherit; border-radius: 6px; padding: 6px 10px; font: inherit; cursor: pointer; }
 .update-notice .update-notice-later { background: none; border-color: transparent; text-decoration: underline; text-underline-offset: 3px; }
 .update-notice button:focus-visible { outline: 2px solid white; }
+@media (pointer: coarse) { .update-notice button { min-height: 44px; } }
 
 /* Settings: version + Check for updates (uses App.css variables). */
 .update-settings { display: flex; flex-direction: column; gap: 8px; padding-bottom: 6px; border-bottom: 1px solid var(--line, #0001); margin-bottom: 4px; }

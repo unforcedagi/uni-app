@@ -9,7 +9,7 @@ import { bootAreas } from './areasFixture';
 const SHOTS = process.env.ELSEWHERE_SHOTS ?? '';
 const shot = async (page: Page, name: string) => { if (!SHOTS) return; await mkdir(SHOTS, { recursive: true }); await page.screenshot({ path: `${SHOTS}/${test.info().project.name}-${name}.png` }); };
 const android = (page: Page) => page.evaluate(() => /Android/i.test(navigator.userAgent));
-const APK = 'https://github.com/unforcedagi/uni-app/releases/download/uni-v0.1.99/uni.apk';
+const APK = 'https://example.com/releases/uni-v0.1.99/uni.apk'; // made up: the app's own command checks the real host
 
 async function boot(page: Page) {
   await page.addInitScript((apk) => {
@@ -57,6 +57,8 @@ test('the update line is at the top, in the flow, and never over the composer or
   expect(s.x + s.width).toBeLessThanOrEqual(vp.width);
   // what is at Send's centre is Send itself, not the notice
   expect(await page.evaluate(([x, y]) => !!document.elementFromPoint(x, y)?.closest('button.send'), [s.x + s.width / 2, s.y + s.height / 2])).toBe(true);
+  // a finger's target on a touch screen
+  if (await page.evaluate(() => matchMedia('(pointer: coarse)').matches)) for (const b of await notice.getByRole('button').all()) expect((await b.boundingBox())!.height).toBeGreaterThanOrEqual(44);
   await shot(page, '05-update-line');
 
   await notice.getByRole('button', { name: onAndroid ? 'Download APK' : 'Restart' }).click();
