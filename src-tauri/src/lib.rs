@@ -1124,8 +1124,8 @@ async fn forget_secret(app: tauri::AppHandle, channel: String, request: String) 
 
 /// T-234: the Uni key approvals are for. Compiled in, never taken from the webview or a message. Only a Linux debug
 /// build takes `UNI_DEBUG_TRUSTED_UNI` instead, so the headless walk can sign cards with a synthetic Uni key. Not
-/// `debug_assertions` alone: the released Android APK is a debug build (publish.sh `tauri android build --debug`), and
-/// no shipped build may read a trust root from its environment. Linux builds are never released.
+/// `debug_assertions` alone: Android debug builds go onto real devices for QA (and were the released APK until T-305),
+/// and no build on a device may read a trust root from its environment. Linux builds are never released.
 fn trusted_uni() -> nostr::PublicKey {
     #[cfg(all(debug_assertions, target_os = "linux"))]
     if let Some(k) = std::env::var("UNI_DEBUG_TRUSTED_UNI").ok().and_then(|s| nostr::PublicKey::from_hex(s.trim()).ok()) {
