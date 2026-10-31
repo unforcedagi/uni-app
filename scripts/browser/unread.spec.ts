@@ -134,7 +134,8 @@ test.describe('unread by room', () => {
     // in Kiln Studio, its Needs you holds its own room's prompt; the tree puts the other on Glaze Tests' row
     await door(page, 'Kiln Studio').click();
     await places(page); await unfold(page);
-    await expect(row(page, GLAZE)).toHaveAttribute('aria-label', /1 needs you/);
-    await expect(row(page, 'Areas/Kiln Studio')).toHaveAttribute('aria-label', /1 needs you/);
+    await expect(row(page, GLAZE)).toHaveAttribute('aria-label', /1 approval waiting/);
+    await expect(row(page, GLAZE).locator('.th-ask')).toBeVisible();
+    await expect(row(page, 'Areas/Kiln Studio')).toHaveAttribute('aria-label', /1 approval waiting/);
   });
 });
