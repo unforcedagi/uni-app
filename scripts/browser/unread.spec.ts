@@ -86,17 +86,19 @@ test.describe('unread by room', () => {
     await expect(row(page, 'Areas/North Field').locator('.th-new')).toHaveCount(0);
     await shot(page, 'live-arrival');
 
-    // an approval prompt in #allotment needs you: the room carries the needs-you dot beside its count
+    // an approval prompt in #allotment: the room carries the approval key beside its count (T-335: the dot is the tasks')
     await prompt(page, 'ch-allot');
     const others = tree(page).locator('.th-others-go');
     // folded, "Other rooms" carries what is inside it; open, each room its own
     if ((await tree(page).locator('.th-fold[data-path="~other-rooms"]').getAttribute('aria-expanded')) === 'true') await others.click();
-    await expect(others).toHaveAttribute('aria-label', /something inside needs you, 4 new inside$/);
+    await expect(others).toHaveAttribute('aria-label', /1 approval waiting inside, 4 new inside$/);
+    await expect(others.locator('.th-ask.inside')).toBeVisible();
     await expect(others.locator('.th-new.inside')).toHaveText('4');
     await shot(page, 'other-rooms-folded');
     await others.click();
-    await expect(roomRow(page, 'ch-allot')).toHaveAttribute('aria-label', /1 needs you, 4 new$/);
-    await expect(roomRow(page, 'ch-allot').locator('.th-dot')).toBeVisible();
+    await expect(roomRow(page, 'ch-allot')).toHaveAttribute('aria-label', /1 approval waiting, 4 new$/);
+    await expect(roomRow(page, 'ch-allot').locator('.th-ask')).toBeVisible();
+    await expect(roomRow(page, 'ch-allot').locator('.th-dot')).toHaveCount(0);
     await shot(page, 'other-rooms');
 
     // read Kiln Studio from the tree: it clears; then #allotment
@@ -108,8 +110,8 @@ test.describe('unread by room', () => {
     await expect.poll(() => marked(page)).toContain('ch-allot');
     await places(page);
     await expect(roomRow(page, 'ch-allot').locator('.th-new')).toHaveCount(0);
-    // the prompt still needs you (reading a room doesn't answer it)
-    await expect(roomRow(page, 'ch-allot').locator('.th-dot')).toBeVisible();
+    // the prompt still waits (reading a room doesn't answer it)
+    await expect(roomRow(page, 'ch-allot').locator('.th-ask')).toBeVisible();
     // Glaze Tests is the last room with something new; reading it leaves nothing, and the Places mark goes
     await row(page, GLAZE).click();
     await expect.poll(() => marked(page)).toContain('ch-glaze');
