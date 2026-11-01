@@ -9,8 +9,8 @@
 .fd-sub { margin: 0 0 4px; font: 400 15px var(--th-sans); color: var(--th-ink2); }
 .fd-doors { list-style: none; margin: 0 auto; padding: 0; max-width: 980px; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 14px; }
 .fd-door { all: unset; box-sizing: border-box; width: 100%; min-height: 136px; padding: 18px 18px 14px; display: grid; grid-template-columns: 1fr auto; grid-template-rows: auto 1fr auto; gap: 6px 10px; cursor: pointer;
-  background: var(--th-card); border: 1.5px solid var(--th-ink); border-radius: var(--th-door); transition: transform .18s var(--ease), box-shadow .18s var(--ease); }
-.fd-door:hover { transform: translateY(-2px); box-shadow: 0 3px 0 var(--th-ink); }
+  background: var(--th-card); border: 1.5px solid var(--th-ink); border-radius: var(--th-door); transition: background-color .15s ease; }
+.fd-door:hover { background: var(--th-paper); }
 .fd-door:focus-visible { outline: 3px solid var(--th-ink); outline-offset: 3px; }
 .fd-name { font: 600 23px / 1.15 var(--th-serif); }
 .fd-live { align-self: start; display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px 3px 7px; border: 1.5px solid var(--th-ink); border-radius: 999px; font: 600 12px var(--th-sans); white-space: nowrap; }
@@ -24,7 +24,6 @@
   .fd-door { min-height: 0; padding: 14px 14px 10px; }
   .fd-name { font-size: 21px; }
 }
-@media (prefers-reduced-motion: reduce) { .fd-door { transition: none; } .fd-door:hover { transform: none; } }
 /* what needs you: one quiet line above the rooms, which opens the list in place */
 .fd-needs { max-width: 980px; margin: 0 auto 16px; border-bottom: 1px dashed var(--th-hair2); }
 /* T-335: the To post line sits under Needs you, in its voice */

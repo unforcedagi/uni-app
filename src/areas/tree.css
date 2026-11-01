@@ -3,7 +3,7 @@
    dry ochre ("sap") for things climbing the tree, everything shape-coded first so it reads in grayscale on the Daylight.
    Objects: .th-tag (needs you: a hang tag) · .th-door (a room: an arch; dashed = held)
    · .th-sap (an update climbing) · .th-slip (a message in the room's ledger) · .th-guides (nesting: a trunk with branch ticks).
-   Motion: none of its own. The map's one zoom (NodeStage, <= 300 ms) is the only transition; reduced motion drops it. */
+   Motion: none of its own beyond the fold chevron's turn; reduced motion and Calm (Settings) drop it. */
 @font-face { font-family: "Fraunces"; font-weight: 400; font-display: swap; src: url(./fonts/fraunces-400.woff2) format("woff2"); }
 @font-face { font-family: "Fraunces"; font-weight: 600 800; font-display: swap; src: url(./fonts/fraunces-600.woff2) format("woff2"); }
 @font-face { font-family: "Quattro"; font-weight: 400 500; font-display: swap; src: url(./fonts/quattro-400.woff2) format("woff2"); }
