@@ -73,6 +73,7 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
   const [lastOk, setLastOk] = useState<number | null>(() => scoped(owner).at ?? initial?.at ?? null);
   const [notice, setNotice] = useState<string | null>(null);
   const [undo, setUndo] = useState<Undo | null>(null);
+  const [leaving, setLeaving] = useState<ReadonlySet<string>>(new Set());
   const [gone, setGone] = useState<ReadonlySet<string>>(new Set());
   const [n, setN] = useState(0);
   // The dispatch ledger and the draft notes: read with the tree-wide load (the node page's Running and Drafts), empty when the vault has none.
@@ -84,6 +85,7 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
   const [activity, setActivity] = useState<Activity>(() => scoped(owner).activity);
   /** r19: each task's check of the notes it stands on (see `checkOf`). */
   const [checks, setChecks] = useState<Map<string, CheckState>>(() => scoped(owner).checks ?? new Map());
+  const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastLoad = useRef<number | null>(null);
   const epoch = useRef(0);
@@ -210,7 +212,7 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
   }, [refresh]);
   /** Re-read when the last read is older than `gapMs` (a room was opened: its list must not be a stale copy). */
   const refreshIfStale = useCallback((gapMs = FOCUS_GAP_MS) => { if (shouldReload(lastLoad.current, Date.now(), gapMs)) refresh(); }, [refresh]);
-  useEffect(() => () => { if (undoTimer.current) clearTimeout(undoTimer.current); }, []);
+  useEffect(() => () => { for (const t of timers.current.values()) clearTimeout(t); if (undoTimer.current) clearTimeout(undoTimer.current); }, []);
 
   const now = new Date();
   /** r19: each row with its check as of this render (a check past CHECK_TTL reads as checking again; only Needs-you rows are checked). */
@@ -233,9 +235,19 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
     const mem = memory.tasks.get(nodePath);
     if (mem) memory.tasks.set(nodePath, { ...mem, list: mem.list.map((t) => (t.id === id ? f(t) : t)) });
   };
-  // T-335: a task done, archived or snoozed leaves the list at once (its exit animation went with the old task rows; nothing waits for one)
-  const hide = (id: string) => setGone((s) => new Set(s).add(id));
+  // T-335: a task done, archived or snoozed leaves on the next task, not 240 ms later: its exit animation went with the old task rows. Still
+  // a timeout, not at once: the sheet reads `leaving` as "not gone yet" for that turn, as every reduced-motion run of the specs always had.
+  const hide = (id: string) => {
+    setLeaving((s) => new Set(s).add(id));
+    timers.current.set(id, setTimeout(() => {
+      timers.current.delete(id);
+      setLeaving((s) => { const c = new Set(s); c.delete(id); return c; });
+      setGone((s) => new Set(s).add(id));
+    }, 0));
+  };
   const restore = (id: string) => {
+    clearTimeout(timers.current.get(id)); timers.current.delete(id);
+    setLeaving((s) => { const c = new Set(s); c.delete(id); return c; });
     setGone((s) => { const c = new Set(s); c.delete(id); return c; });
   };
   const offerUndo = (u: Undo) => {
@@ -349,7 +361,7 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
     } });
   }, [nodePath]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  return { tree, tasks: visible, all: checked, runs, drafts, closed: closedTasks, setPriority, decide, counts, truncated, treeTruncated, error, treeError, loading, notice, undo, act, refresh, refreshIfStale, dismissNotice: () => setNotice(null), ready: list !== null, now,
+  return { tree, tasks: visible, all: checked, runs, drafts, closed: closedTasks, setPriority, decide, leaving, counts, truncated, treeTruncated, error, treeError, loading, notice, undo, act, refresh, refreshIfStale, dismissNotice: () => setNotice(null), ready: list !== null, now,
     /** The rows are the device's copy from this moment (ms), not yet read again this session (r16). */
     savedAt,
     /** The current read has run past SLOW_MS: "Still loading · Retry" (r16). */
