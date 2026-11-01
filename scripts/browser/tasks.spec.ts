@@ -126,7 +126,7 @@ test.describe('tasks in the work view', () => {
     await page.waitForTimeout(400);
     expect(await infinite(page)).toBe(0);
     await page.keyboard.press('Escape');
-    const css = await page.evaluate(() => [...document.styleSheets].flatMap((s) => { try { return [...s.cssRules]; } catch { return []; } }).filter((r) => /infinite/.test(r.cssText) && /task|undo|work/.test(r.cssText)).length);
+    const css = await page.evaluate(() => [...document.styleSheets].flatMap((s) => { try { return [...s.cssRules]; } catch { return []; } }).filter((r) => /infinite/.test(r.cssText) && /\.(task|undo|work)\b/.test(r.cssText) /* a class of the work view (\.working-dot is the chat's "Uni is working") */).length);
     expect(css).toBe(0);
     test.skip(info.project.name !== 'desktop', 'sizes are set inside this test');
     for (const [w, h] of [[1600, 1200], [1200, 1600], [390, 844]]) {

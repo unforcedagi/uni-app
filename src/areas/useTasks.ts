@@ -11,7 +11,6 @@ import { forgetTitles, setTitleOwner, warmTitles } from "./noteRefs";
 import { savedTasks } from "./savedTasks";
 import { checkOf, liveRuns, retryState, wouldNeedYou, type CheckState } from "./simpleCore";
 import type { FailureKind } from "./taskCore";
-import { calmMotion } from "../motion";
 
 export type TaskAction = "done" | "archive" | "snooze";
 /** What a write came to (r16): the sheet waits for it, and on a conflict stays open with the latest copy. */
@@ -21,8 +20,6 @@ export const UNDO_MS = 5000;
 /** How often an open window re-reads the tasks, and how stale a list may be when the window or a room is opened. */
 export const POLL_MS = 60_000;
 export const FOCUS_GAP_MS = 10_000;
-/** One finite exit animation; none when calm (Settings → Calm screen, reduced motion: src/motion.ts). */
-export const LEAVE_MS = 240;
 /** r19: the event a row's or a sheet's Retry sends ("Couldn't check · Retry"): every open list reads its sources again. */
 export const RECHECK = "uni:recheck";
 export const requestRecheck = () => { try { window.dispatchEvent(new Event(RECHECK)); } catch { /* no window */ } };
@@ -76,7 +73,6 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
   const [lastOk, setLastOk] = useState<number | null>(() => scoped(owner).at ?? initial?.at ?? null);
   const [notice, setNotice] = useState<string | null>(null);
   const [undo, setUndo] = useState<Undo | null>(null);
-  const [leaving, setLeaving] = useState<ReadonlySet<string>>(new Set());
   const [gone, setGone] = useState<ReadonlySet<string>>(new Set());
   const [n, setN] = useState(0);
   // The dispatch ledger and the draft notes: read with the tree-wide load (the node page's Running and Drafts), empty when the vault has none.
@@ -88,7 +84,6 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
   const [activity, setActivity] = useState<Activity>(() => scoped(owner).activity);
   /** r19: each task's check of the notes it stands on (see `checkOf`). */
   const [checks, setChecks] = useState<Map<string, CheckState>>(() => scoped(owner).checks ?? new Map());
-  const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastLoad = useRef<number | null>(null);
   const epoch = useRef(0);
@@ -215,7 +210,7 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
   }, [refresh]);
   /** Re-read when the last read is older than `gapMs` (a room was opened: its list must not be a stale copy). */
   const refreshIfStale = useCallback((gapMs = FOCUS_GAP_MS) => { if (shouldReload(lastLoad.current, Date.now(), gapMs)) refresh(); }, [refresh]);
-  useEffect(() => () => { for (const t of timers.current.values()) clearTimeout(t); if (undoTimer.current) clearTimeout(undoTimer.current); }, []);
+  useEffect(() => () => { if (undoTimer.current) clearTimeout(undoTimer.current); }, []);
 
   const now = new Date();
   /** r19: each row with its check as of this render (a check past CHECK_TTL reads as checking again; only Needs-you rows are checked). */
@@ -238,18 +233,9 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
     const mem = memory.tasks.get(nodePath);
     if (mem) memory.tasks.set(nodePath, { ...mem, list: mem.list.map((t) => (t.id === id ? f(t) : t)) });
   };
-  const hide = (id: string) => {
-    const wait = calmMotion() ? 0 : LEAVE_MS;
-    setLeaving((s) => new Set(s).add(id));
-    timers.current.set(id, setTimeout(() => {
-      timers.current.delete(id);
-      setLeaving((s) => { const c = new Set(s); c.delete(id); return c; });
-      setGone((s) => new Set(s).add(id));
-    }, wait));
-  };
+  // T-335: a task done, archived or snoozed leaves the list at once (its exit animation went with the old task rows; nothing waits for one)
+  const hide = (id: string) => setGone((s) => new Set(s).add(id));
   const restore = (id: string) => {
-    clearTimeout(timers.current.get(id)); timers.current.delete(id);
-    setLeaving((s) => { const c = new Set(s); c.delete(id); return c; });
     setGone((s) => { const c = new Set(s); c.delete(id); return c; });
   };
   const offerUndo = (u: Undo) => {
@@ -363,7 +349,7 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
     } });
   }, [nodePath]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  return { tree, tasks: visible, all: checked, runs, drafts, closed: closedTasks, setPriority, decide, leaving, counts, truncated, treeTruncated, error, treeError, loading, notice, undo, act, refresh, refreshIfStale, dismissNotice: () => setNotice(null), ready: list !== null, now,
+  return { tree, tasks: visible, all: checked, runs, drafts, closed: closedTasks, setPriority, decide, counts, truncated, treeTruncated, error, treeError, loading, notice, undo, act, refresh, refreshIfStale, dismissNotice: () => setNotice(null), ready: list !== null, now,
     /** The rows are the device's copy from this moment (ms), not yet read again this session (r16). */
     savedAt,
     /** The current read has run past SLOW_MS: "Still loading · Retry" (r16). */
