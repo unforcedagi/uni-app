@@ -33,8 +33,6 @@ type Compose = { key: number; start: ComposeStart; hidden: boolean; snapshot: Co
 const remembered: { scope: Scope; query: string; open: Open | null; compose: Compose | null } = { scope: { kind: "all-inboxes" }, query: "", open: null, compose: null };
 /** A phone shows one pane at a time; a narrow tablet shows the boxes in place of the list. */
 type Pane = "boxes" | "list" | "thread";
-/** The Daylight (and every Android device): no motion at all. Each frame of an animation is an e-ink redraw. */
-const still = typeof navigator !== "undefined" && /Android/i.test(navigator.userAgent);
 const LATER = "Sending comes later";
 
 function openLink(url: string) {
@@ -605,7 +603,7 @@ export default function Mail({ onBack, backTo = "Uni" }: { onBack: () => void; b
   const waitingAll = overview ? overview.accounts.reduce((n, a) => n + (approvalOffered(a) ? waitingIn(a.id) : 0), 0) : 0;
 
   const composing = !!compose && !compose.hidden;
-  return <section className={`mail mail-a ${still ? "mail-still" : ""}`} aria-label="Mail" data-pane={pane} data-composing={composing && pane === "thread" ? "true" : undefined}>
+  return <section className="mail mail-a" aria-label="Mail" data-pane={pane} data-composing={composing && pane === "thread" ? "true" : undefined}>
     <header className="note-bar mail-bar">
       <button className="note-action" onClick={onBack}>← {backTo}</button>
       <span className="mail-title"><strong>Mail</strong>{overview && <small className="mail-account" title="The address this device reads as">{overview.login}{writesOffered(overview) ? "" : " · read-only"}</small>}</span>

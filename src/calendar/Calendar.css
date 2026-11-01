@@ -1,5 +1,5 @@
 /* Uni Calendar prototype (T-229). Field Book tokens; shape and word before colour, so it reads in grayscale on the
-   Daylight. Nothing of its own moves; in e-ink mode and on Android nothing moves at all. */
+   Daylight. Nothing of its own moves; when calm (src/motion.ts) nothing moves at all. */
 .cal { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; position: relative; }
 .cal-note { color: var(--muted); font-size: 13px; margin: 0; }
 .cal-error { margin: 8px 0; padding: 8px 12px; border-left: 4px solid var(--danger); background: var(--surface); font-size: 14px; }
@@ -174,7 +174,6 @@
 .cal-conflicts ul { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 10px; }
 .cal-conflicts .cal-conflict { margin: 0; padding: 8px 0 0; border: 0; border-top: 1px solid var(--line); border-radius: 0; }
 
-/* the Daylight (Android) and e-ink: nothing moves, no shadows */
-.cal-still, .cal-still *, .cal-still *::before, .cal-still *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
+/* calm (Settings → Calm screen, reduced motion; the Daylight): nothing moves (App.css) and no shadows */
 .cal-still * { box-shadow: none !important; }
 .cal-still .cal-notice { transform: none; left: 8px; right: 8px; width: auto; }

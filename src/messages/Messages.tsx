@@ -11,8 +11,6 @@ import { Attachment, Lightbox, MessageText, Quote, Reactions } from "./MessagePa
 import { enterInsertsNewline } from "../composerCore";
 import "./Messages.css";
 
-/** The Daylight's WebView says Android: nothing of Messages moves there. */
-const still = typeof navigator !== "undefined" && /Android/i.test(navigator.userAgent);
 const touchKeyboard = () => typeof navigator !== "undefined" && enterInsertsNewline(navigator.maxTouchPoints ?? 0, matchMedia("(pointer: coarse)").matches);
 /** One pane at a time below this width (Messages.css). */
 const PHONE = "(max-width: 699px)";
@@ -342,7 +340,7 @@ export default function Messages({ backTo, onBack }: { backTo: string; onBack: (
   // back on a tab, or back to the list on a phone: where that tab's list was left
   useLayoutEffect(() => { if (listEl.current) listEl.current.scrollTop = listAt.current.get(tab) ?? 0; }, [tab, pane, linkView, !!list]);
 
-  return <section className={`msgs ${still ? "msgs-still" : ""}`} aria-label="Messages" data-pane={pane}>
+  return <section className="msgs" aria-label="Messages" data-pane={pane}>
     <header className="note-bar msgs-bar">
       <button className="note-action" onClick={onBack}>← {backTo}</button>
       <span className="msgs-title"><strong>Messages</strong>{signedIn && <small className="msgs-account">{status?.user_id} · <span className={`msgs-live st-${status?.state}`} role="status">{statusWords(status)}</span></small>}</span>

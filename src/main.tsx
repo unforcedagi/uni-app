@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import App from "./App";
 import UpdateChecks from "./UpdateNotice";
 import { migrateHomeLayout } from "./areas/homeLayout";
+import { startMotion } from "./motion";
 
 /** A render error in remote content must not blank the whole app. */
 class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { error: Error | null }> {
@@ -25,6 +26,8 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { err
 
 // T-124 r12: the room tree is the only layout; a saved Map, Octopus or Classic choice is dropped once, here.
 migrateHomeLayout();
+// T-335: calm or not, on the root before the first paint
+startMotion();
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>

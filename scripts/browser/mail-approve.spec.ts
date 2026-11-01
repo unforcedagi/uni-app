@@ -211,6 +211,8 @@ test("nothing about held sends shows unless the bridge offers deciding them; eac
 
 test('on the Daylight the held send and its confirm move nothing, and every target is at least 44 px', async ({ page }, info) => {
   test.skip(!info.project.name.startsWith('daylight'), 'the Daylight');
+  // T-335: the Daylight is calm by its Settings switch (Calm screen), not by its user agent
+  await page.addInitScript(() => localStorage.setItem('uni.motion', 'calm'));
   await boot(page, 'ok', { writes: true, held: true });
   const check = async () => {
     const moving = await page.evaluate(() => [...document.querySelectorAll('.mail *')].filter((el) => {

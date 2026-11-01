@@ -1,6 +1,6 @@
 /* Mail (T-45 v2): mailboxes | threads | thread. Three panes on a wide screen, two (threads | thread) on a narrow
    tablet, one at a time on a phone with Search and New in a bottom bar. Shape and word before colour, so it reads in
-   grayscale on the Daylight. Nothing of its own moves; on Android nothing moves at all. */
+   grayscale on the Daylight. Nothing of its own moves; when calm (src/motion.ts) nothing moves at all. */
 .mail { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; position: relative; }
 .mail-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .mail-title { display: flex; flex-direction: column; align-items: center; min-width: 0; text-align: center; }
@@ -181,8 +181,6 @@
 .mail-thumb { display: none; }
 .mail-list-new { display: flex; flex: none; }
 
-/* Android (the Daylight): no motion, so no e-ink redraws between frames */
-.mail-still, .mail-still *, .mail-still *::before, .mail-still *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
 
 /* a narrow tablet (the Daylight upright): threads | thread, the mailboxes in place of the threads */
 @media (max-width: 1099px) {

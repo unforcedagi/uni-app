@@ -11,6 +11,7 @@ import { forgetTitles, setTitleOwner, warmTitles } from "./noteRefs";
 import { savedTasks } from "./savedTasks";
 import { checkOf, liveRuns, retryState, wouldNeedYou, type CheckState } from "./simpleCore";
 import type { FailureKind } from "./taskCore";
+import { calmMotion } from "../motion";
 
 export type TaskAction = "done" | "archive" | "snooze";
 /** What a write came to (r16): the sheet waits for it, and on a conflict stays open with the latest copy. */
@@ -20,7 +21,7 @@ export const UNDO_MS = 5000;
 /** How often an open window re-reads the tasks, and how stale a list may be when the window or a room is opened. */
 export const POLL_MS = 60_000;
 export const FOCUS_GAP_MS = 10_000;
-/** One finite exit animation; none when the user prefers reduced motion. */
+/** One finite exit animation; none when calm (Settings → Calm screen, reduced motion: src/motion.ts). */
 export const LEAVE_MS = 240;
 /** r19: the event a row's or a sheet's Retry sends ("Couldn't check · Retry"): every open list reads its sources again. */
 export const RECHECK = "uni:recheck";
@@ -29,7 +30,6 @@ export const requestRecheck = () => { try { window.dispatchEvent(new Event(RECHE
 export const SLOW_MS = 8000;
 /** The test build may shorten it (`window.__slowMs`); never in a release build. */
 const slowMs = (): number => (import.meta.env.VITE_AREAS_TESTHOOKS === "1" && typeof window !== "undefined" && Number((window as unknown as { __slowMs?: number }).__slowMs)) || SLOW_MS;
-const reduced = () => typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 
 // Memory for this session only, scoped to the signed-in identity and cleared on Forget: tasks are Aaron's private work.
 /** Running and Drafts' own read (r16): read yet, the last failure, when they last read cleanly. */
@@ -239,7 +239,7 @@ export function useTasks(identity: string | null, nodePath: string, fallback: re
     if (mem) memory.tasks.set(nodePath, { ...mem, list: mem.list.map((t) => (t.id === id ? f(t) : t)) });
   };
   const hide = (id: string) => {
-    const wait = reduced() ? 0 : LEAVE_MS;
+    const wait = calmMotion() ? 0 : LEAVE_MS;
     setLeaving((s) => new Set(s).add(id));
     timers.current.set(id, setTimeout(() => {
       timers.current.delete(id);

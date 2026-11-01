@@ -157,8 +157,6 @@
 .msgs-send { min-height: 44px; }
 .msgs-send:disabled { opacity: .55; cursor: not-allowed; }
 
-/* Android (the Daylight): no motion, so no e-ink redraws between frames */
-.msgs-still, .msgs-still *, .msgs-still *::before, .msgs-still *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
 
 /* a phone: one pane at a time */
 @media (max-width: 699px) {

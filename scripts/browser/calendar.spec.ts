@@ -550,6 +550,8 @@ test.describe('T-229 Calendar', () => {
 
   test('on the Daylight nothing moves', async ({ page }) => {
     test.skip(!test.info().project.name.startsWith('daylight'), 'the Daylight only');
+    // T-335: the Daylight is calm by its Settings switch (Calm screen), not by its user agent
+    await page.addInitScript(() => localStorage.setItem('uni.motion', 'calm'));
     await boot(page);
     await expect(cal(page)).toHaveClass(/cal-still/);
     await pickView(page, 'Week');

@@ -90,6 +90,8 @@ import { APPROVAL_WINDOW_S, ApprovalsContext, useApprovals } from "./approvalsLi
 import { ApprovalBanner } from "./areas/ApprovalRows";
 import { parseApproval, type Approval } from "./approvals";
 import { ApprovalPromptCard } from "./ApprovalPromptCard";
+import MotionSetting from "./MotionSetting";
+import { scrollMotion } from "./motion";
 
 type Room = { id: string; name: string; last_message: string | null; last_ts: number | null; mentions: boolean; unread: number; /** a direct message, a room (false), or not known yet (null; absent in a list cached by an older app) */ dm?: boolean | null };
 type Message = { ref: string; channel: string; author: string; author_name: string; ts: number; body: string; mentions_me: boolean; root: string | null; parent: string | null; mentions: Member[]; reply_count: number; last_reply_ts: number | null; edited: boolean; reactions: Reaction[]; media?: MediaRef[] };
@@ -1263,8 +1265,10 @@ function Conversations({ onForget }: { onForget: () => void }) {
     if (focusRef || !listRef.current) return;
     // Only new messages in the view you're already reading (and following) glide in.
     if (!currentView || restoredView.current !== currentView || loadedView !== currentView || !stickToEnd.current) return;
-    gliding.current = Date.now() + 700;
-    scrollEnd.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    // T-335: calm (the Daylight, reduced motion) jumps: no glide to wait out
+    const behavior = scrollMotion();
+    if (behavior === "smooth") gliding.current = Date.now() + 700;
+    scrollEnd.current?.scrollIntoView({ behavior, block: "end" });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages.length]);
 
@@ -1412,7 +1416,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     jumpUntil.current = Date.now() + 2000;
     if (newestRef.current) seenRef.current.set(newestRef.current.view, newestRef.current);
     setAwayView(null);
-    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    el.scrollTo({ top: el.scrollHeight, behavior: scrollMotion() });
   }
   const suggestions = picker ? filterMembers(members, picker.query, identity ?? undefined) : [];
 
@@ -2214,7 +2218,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       {panel === "settings" && <div className="settings">
         <p className="connection" role="status">{status}{live ? <span className={`live ${live === "Live" ? "on" : ""}`}> · {live}</span> : null}</p>
       {identity && <p className="identity" title={npub ?? identity}>{myName ? <>Signed in as <strong>{myName}</strong></> : <>Public key <code>{npub ? `${npub.slice(0, 14)}…${npub.slice(-6)}` : `${identity.slice(0, 12)}…`}</code></>}<button className="identity-copy" onClick={() => void copyText(npub ?? identity, "Copied public key")} aria-label="Copy your public key">⧉</button></p>}
-        <ClaudeUsage /><UpdateSettings /><LifeOsVaultSetting vaults={vaults} /><SealedApprovals /><PairDeviceButton onOpen={() => setPairSourceOpen(true)} /><button className="pairing-secondary" onClick={() => void forget()}>{forgetArmed ? "Tap again to forget — you'll need to re-pair" : "Forget this device key"}</button>{forgetArmed && <button className="pairing-secondary" onClick={() => setForgetArmed(false)}>Keep key</button>}
+        <ClaudeUsage /><UpdateSettings /><MotionSetting /><LifeOsVaultSetting vaults={vaults} /><SealedApprovals /><PairDeviceButton onOpen={() => setPairSourceOpen(true)} /><button className="pairing-secondary" onClick={() => void forget()}>{forgetArmed ? "Tap again to forget — you'll need to re-pair" : "Forget this device key"}</button>{forgetArmed && <button className="pairing-secondary" onClick={() => setForgetArmed(false)}>Keep key</button>}
         {/* r13: the machinery (the app sandbox's self-test, where the app connects) is for whoever builds Uni, not part of ordinary Settings */}
         <details className="settings-dev"><summary>Developer</summary>{hub && <p className="settings-dev-line">Notes hub: <code>{hub}</code></p>}{syncDetail && <p className="settings-dev-line">Last sync: {syncDetail}</p>}<AreaSelfTest /></details></div>}
       {searchOpen && <Search initialQuery={searchQuery} vaults={vaults} key={`${searchScope.vault}:${searchScope.prefix}`} initialVault={searchScope.vault} initialPathPrefix={searchScope.prefix} onOpen={openHit} onOpenNote={(n) => { setSearchOpen(false); openNote({ hub: null, vault: n.vault, ref: n.id }, null); }} onAskUni={askUniSearch} onClose={() => { setSearchOpen(false); if (topNote) setSidebarVisible(false); }} />}

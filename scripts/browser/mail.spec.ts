@@ -122,6 +122,8 @@ test('the full flow: switch accounts and the combined view, open a thread, searc
 
 test('on the Daylight nothing in Mail moves, and every target is at least 44 px', async ({ page }, info) => {
   test.skip(!info.project.name.startsWith('daylight'), 'the Daylight');
+  // T-335: the Daylight is calm by its Settings switch (Calm screen), not by its user agent
+  await page.addInitScript(() => localStorage.setItem('uni.motion', 'calm'));
   await boot(page);
   await expect(rows(page)).toHaveCount(6);
   if (boxesHidden(page)) await page.getByRole('button', { name: '☰ Mailboxes' }).click();

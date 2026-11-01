@@ -136,7 +136,8 @@
 .undo-note { font-weight: 500; padding: 8px 8px 8px 16px; }
 .undo-go, .undo-x { all: unset; box-sizing: border-box; min-width: 48px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; font-weight: 700; text-decoration: underline; cursor: pointer; color: inherit; }
 .undo-go:focus-visible, .undo-x:focus-visible { outline: 3px solid var(--th-paper); outline-offset: -4px; }
-@media (prefers-reduced-motion: reduce) { .task-row.leaving, .task-sheet { animation: none; } .task-row.leaving { opacity: 0; max-height: 0; } }
+@media (prefers-reduced-motion: reduce), (update: slow) { .task-row.leaving, .task-sheet { animation: none; } .task-row.leaving { opacity: 0; max-height: 0; } }
+:root[data-motion="calm"] .task-row.leaving { opacity: 0; max-height: 0; }
 
 /* r17: Archive and Snooze are housekeeping: a small quiet row under the real action, never as heavy as it */
 .task-house { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 10px 0 0; padding: 0 2px; }

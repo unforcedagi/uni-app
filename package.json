@@ -36,7 +36,8 @@
     "test:usage": "node --experimental-strip-types scripts/usage.test.ts && playwright test --config playwright.usage.config.ts",
     "test:projects": "playwright test --config playwright.projects.config.ts",
     "test:unread": "playwright test --config playwright.unread.config.ts",
-    "test:typing": "playwright test --config playwright.typing.config.ts"
+    "test:typing": "playwright test --config playwright.typing.config.ts",
+    "test:motion": "playwright test --config playwright.motion.config.ts"
   },
   "dependencies": {
     "@openparachute/surface-client": "0.3.7",
