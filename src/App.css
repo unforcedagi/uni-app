@@ -825,6 +825,9 @@ p.decision-card.decision-loading { padding: 8px 12px; color: var(--muted); font-
 /* T-335: a setting that is on or off: the box and its words, one 44px target */
 .settings-check { display: flex; align-items: flex-start; gap: 10px; min-height: 44px; padding: 6px 0; font-size: 14px; color: var(--text); cursor: pointer; }
 .settings-check input { flex: none; width: 20px; height: 20px; margin: 1px 0 0; accent-color: var(--accent); }
+/* a box, not a text field: no field glow after a tap; the keyboard's ring only */
+.settings-check input:focus { box-shadow: none; }
+.settings-check input:focus-visible { outline: 2px solid var(--turquoise); outline-offset: 2px; }
 .settings-check small { display: block; margin-top: 2px; font-size: 12px; line-height: 1.4; color: var(--muted); }
 .settings-dev { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 4px; }
 .settings-dev > summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; color: var(--text-soft); font-size: 14px; }
