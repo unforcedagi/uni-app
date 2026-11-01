@@ -132,3 +132,13 @@ test('the system asking for reduced motion is calm without the switch, and Setti
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await expect.poll(() => calmOnRoot(page)).toBeNull();
 });
+
+test('storage refusing the choice still calms this session', async ({ page }, info) => {
+  test.skip(info.project.name !== 'desktop', 'logic, not layout');
+  await boot(page);
+  await openSettings(page);
+  await page.evaluate(() => { Storage.prototype.setItem = () => { throw new DOMException('full', 'QuotaExceededError'); }; });
+  await page.getByRole('checkbox', { name: /Calm screen/ }).check();
+  await expect(page.getByRole('checkbox', { name: /Calm screen/ })).toBeChecked();
+  expect(await calmOnRoot(page)).toBe('calm');
+});

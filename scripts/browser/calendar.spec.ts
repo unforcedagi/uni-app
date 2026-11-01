@@ -548,6 +548,14 @@ test.describe('T-229 Calendar', () => {
     expect(ops(d).at(-1)).toMatchObject({ op: 'update', id: 'fx-studio', scope: 'this', recurrence_id: '2026-10-27T15:00:00Z', fields: { title: 'Studio hours' } });
   });
 
+  test('reduced motion alone stills the Calendar but keeps its shadows (the e-ink look is for a slow screen)', async ({ page }) => {
+    test.skip(test.info().project.name !== 'desktop', 'a Mac with Reduce motion');
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await boot(page);
+    expect(await page.evaluate(() => document.documentElement.dataset.motion)).toBe('calm');
+    await expect(cal(page)).not.toHaveClass(/cal-still/);
+  });
+
   test('on the Daylight nothing moves', async ({ page }) => {
     test.skip(!test.info().project.name.startsWith('daylight'), 'the Daylight only');
     // T-335: the Daylight is calm by its Settings switch (Calm screen), not by its user agent

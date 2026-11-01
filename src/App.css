@@ -65,9 +65,9 @@ textarea:focus, input:focus { outline: none; border-color: var(--accent); box-sh
 
 @keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
-/* T-335: calm: nothing moves. Settings → Calm screen sets `data-motion` (src/motion.ts); the system's reduced motion and a slow-refresh
-   screen do it here too, before any script. On the Daylight each frame of motion is a slow redraw, so instant reads best. */
-@media (prefers-reduced-motion: reduce), (update: slow) { *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
+/* T-335: calm: nothing moves. The root's `data-motion` (src/motion.ts, set before the first render) says so for Settings → Calm screen, the
+   system's reduced motion and a slow-refresh screen; the one place to still something is here. On the Daylight each frame of motion is a
+   slow redraw, so instant reads best. */
 :root[data-motion="calm"] *, :root[data-motion="calm"] *::before, :root[data-motion="calm"] *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 
 /* ── Shell ─────────────────────────────────────────────────── */
@@ -252,7 +252,6 @@ p.decision-card.decision-loading { padding: 8px 12px; color: var(--muted); font-
 .sealed-hold.holding .sealed-hold-fill { transform: scaleX(1); transition: transform 1s linear; }
 /* calm: no fill (one that jumps full would say done while the hold still runs); "Keep holding…" says it */
 :root[data-motion="calm"] .sealed-hold-fill { display: none; }
-@media (prefers-reduced-motion: reduce), (update: slow) { .sealed-hold-fill { display: none; } }
 .sealed-hold-label { position: relative; }
 .sealed-rows { margin: 0 0 8px; padding: 0; list-style: none; }
 .sealed-rows li { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; border-top: 1px solid var(--line); }

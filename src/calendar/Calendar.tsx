@@ -9,7 +9,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { addDays, dayKey, dayLabel, dayStart, HOUR, layoutDay, MIN, rangeLabel, ruleLabel, timeLabel, wall, zoned, type EventNote, type Instance, type Scope, type Visibility } from "./calCore.ts";
 import { allDayMoved, dragTarget, inviteWords, asCalErr, attendeesText, can, daysBetween, daysFor, DEFAULT_TZ, formTimes, fromSnapshot, sameTime, inviteeLine, invitees, invitesWaiting, newOpId, parseAttendees, partstatWords, problemText, stepFor, toShown, who, windowFor, type CalErr, type Session, type Shown, type View } from "./calView.ts";
 import { conflicts as readConflicts, doorAnswered, event as readEvent, events as readEvents, op as sendOp, readSnapshot, saveRead, session as readSession, type Conflict } from "./calDoor.ts";
-import { useCalmMotion } from "../motion";
+import { useCalmScreen } from "../motion";
 import "./Calendar.css";
 
 const HOUR_PX = 48;
@@ -386,8 +386,8 @@ function Conflicts({ list, tz, onOpen, onClose }: { list: Conflict[]; tz: string
 
 export default function Calendar({ backTo, onBack }: { backTo: string; onBack: () => void }) {
   const phone = useMedia("(max-width: 599px)");
-  // calm (the Daylight: Settings → Calm screen, or reduced motion): nothing moves (App.css) and no shadows
-  const still = useCalmMotion();
+  // a slow screen (the Daylight: Settings → Calm screen): no shadows either. Its stillness is the root's (App.css), reduced motion's too
+  const still = useCalmScreen();
   const wide = useMedia("(min-width: 900px)");
   const beside = useMedia("(min-width: 1000px)");
   const [sess, setSess] = useState<Session | null>(() => readSnapshot()?.session ?? null);

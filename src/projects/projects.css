@@ -85,7 +85,6 @@
   .pj { width: min(560px, 46vw); max-height: none; height: 100%; border: 0; border-left: 2px solid var(--th-ink); border-radius: 0; padding: 26px 28px 28px; animation: pj-side .24s var(--ease); }
 }
 @keyframes pj-side { from { transform: translateX(28px); opacity: 0; } }
-@media (prefers-reduced-motion: reduce) { .pj { animation: none; } }
 .pj-head { display: flex; align-items: flex-start; gap: 12px; justify-content: space-between; }
 .pj-head h2 { margin: 2px 0 4px; font: 600 27px / 1.15 var(--th-serif); }
 .pj-about { margin: 0; color: var(--th-ink2); }

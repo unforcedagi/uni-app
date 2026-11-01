@@ -156,8 +156,7 @@
 
 /* settings */
 
-/* calm: nothing here animates on its own; the task exit and the sheet are the app's own finite ones */
-@media (prefers-reduced-motion: reduce) { .tree-home *, .tree-home *::before, .tree-home *::after { transition: none !important; animation: none !important; } }
+/* calm: nothing here animates on its own; the sheet's entrance is the app's own, and calm (App.css) stills it */
 
 /* the undo bar sits above the pinned composer, never over it */
 .tree-home .undo-bar { bottom: calc(76px + 92px + env(safe-area-inset-bottom)); }
@@ -348,7 +347,6 @@
 .cp.strip .cp-body { padding: 0 16px 18px; }
 .cp.strip.open .cp-line-text { font: 500 13px var(--th-sans); color: var(--th-mute); }
 /* the full node page's way back to the conversation sits where its room line is */
-@media (prefers-reduced-motion: reduce) { .cp *, .sr * { transition: none !important; animation: none !important; } }
 /* the chat as part of the same look: graphite avatars (no per-author hue), no destination line (the placeholder names the room) */
 .message-avatar, .avatar { background: var(--th-ink2) !important; color: var(--th-card); }
 
