@@ -363,3 +363,37 @@ test('the unlock grace: a routine card says "Unlocked · 4 min"; a powerful card
   await expect(m.locator('.cc-grace')).toHaveText('Unlocked · 5 min');
   expect((await answers(page)).map((a) => a.args)).toEqual([{ channel: 'test', reference: 'm1', decision: 'approve', rids: [routine.rid] }]);
 });
+
+test('T-335 the hold fill grows by transform (no layout per frame); calm shows no fill, the words carry it, and the hold still sends once', async ({ page }) => {
+  // held with the keyboard (Space): a held mouse at some widths is let go by the label's own resize ("Keep holding…"), a separate matter
+  const powerful = { messages: [msg('m1', single('🔑 **Uni asks to use something harmless** (routine)'), now() - 30)], cards: { m1: view([row()]) } };
+  await page.emulateMedia({ reducedMotion: 'no-preference' }); // this config runs calm (reduced motion); the Mac and the Pixel don't
+  await boot(page, powerful);
+  let approve = card(page, 'Approve use of dns-zone').getByRole('button', { name: 'Hold to approve: press and hold' });
+  await approve.focus();
+  await page.keyboard.down(' ');
+  await page.waitForTimeout(450);
+  // halfway: the fill spans the button and is scaled partway, from the left
+  const mid = await approve.locator('.sealed-hold-fill').evaluate((f) => { const s = getComputedStyle(f); return { scale: new DOMMatrix(s.transform).a, origin: s.transformOrigin.split(' ')[0], box: f.getBoundingClientRect().width / (f.parentElement as HTMLElement).getBoundingClientRect().width }; });
+  await page.keyboard.up(' ');
+  expect(mid.scale).toBeGreaterThan(0.1);
+  expect(mid.scale).toBeLessThan(0.9);
+  expect(mid.origin).toBe('0px');
+  expect(Math.abs(mid.box - mid.scale)).toBeLessThan(0.15); // what shows is its transform: the box itself keeps the button's width
+  expect(await answers(page)).toHaveLength(0);
+
+  // calm (Settings → Calm screen): no fill at all, rather than one that jumps full while the hold still runs
+  await page.addInitScript(() => localStorage.setItem('uni.motion', 'calm'));
+  await page.reload();
+  await expect(page.getByRole('textbox', { name: 'Message Test room' })).toBeVisible();
+  approve = card(page, 'Approve use of dns-zone').getByRole('button', { name: 'Hold to approve: press and hold' });
+  await approve.focus();
+  await page.keyboard.down(' ');
+  await expect(approve).toHaveText('Keep holding…');
+  // read once, while held (a polling expect would pass once the hold ends and the fill collapses)
+  expect(await approve.locator('.sealed-hold-fill').evaluate((f) => getComputedStyle(f).display)).toBe('none');
+  await page.waitForTimeout(1300);
+  await page.keyboard.up(' ');
+  await expect(card(page, 'Approve use of dns-zone').getByRole('status')).toHaveText('Approved');
+  expect(await answers(page)).toHaveLength(1);
+});
