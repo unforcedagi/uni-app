@@ -105,20 +105,20 @@ test('Calm screen in Settings stills everything, now and after a restart; off ag
   expect((await moving(page)).transitions).toBeGreaterThan(0);
 });
 
-test('calm, Jump to latest jumps: the newest message is there at once, no glide', async ({ page }) => {
+test('calm, Jump to latest jumps: a press takes you to the newest message at once, no glide', async ({ page }, info) => {
   await boot(page, { history: 80, calm: true });
   const list = page.getByRole('log', { name: 'Messages' });
   await list.hover();
   await page.mouse.wheel(0, -6000);
   const jump = page.getByRole('button', { name: /^Jump to latest/ });
   await expect(jump).toBeVisible();
-  // the tap, and one frame later: at the end already (a glide over this distance takes a few hundred ms)
-  const gap = await jump.evaluate((b) => new Promise<number>((done) => {
-    const el = document.querySelector('[role="log"][aria-label="Messages"]') as HTMLElement;
-    (b as HTMLButtonElement).click();
-    requestAnimationFrame(() => done(el.scrollHeight - el.scrollTop - el.clientHeight));
-  }));
-  expect(gap).toBeLessThan(2);
+  // a real press at its centre (a finger, or the mouse): with nothing moving, pressing it must not move it out from under the press
+  const b = (await jump.boundingBox())!;
+  if (info.project.use.hasTouch) await page.touchscreen.tap(b.x + b.width / 2, b.y + b.height / 2);
+  else await page.mouse.click(b.x + b.width / 2, b.y + b.height / 2);
+  // and at the end at once (a glide over this distance takes a few hundred ms)
+  await page.waitForTimeout(100);
+  expect(await list.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight)).toBeLessThan(2);
 });
 
 test('the system asking for reduced motion is calm without the switch, and Settings says so', async ({ page }) => {
