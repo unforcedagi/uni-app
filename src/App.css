@@ -202,13 +202,15 @@ p.decision-card.decision-loading { padding: 8px 12px; color: var(--muted); font-
 .secret-facts { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 0 0 10px; font-size: 13px; color: var(--muted); }
 .secret-facts dt { font-weight: 600; } .secret-facts dd { margin: 0; overflow-wrap: anywhere; }
 .secret-facts code, .secret-status code { font-family: var(--mono); font-size: 12px; }
-.secret-form { display: flex; gap: 8px; }
-.secret-form input { flex: 1; min-width: 0; min-height: 42px; padding: 0 12px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--bg); color: var(--text); font-family: var(--mono); font-size: 14px; }
+.secret-form { display: flex; flex-wrap: wrap; gap: 8px; }
+.secret-field { position: relative; flex: 1 1 220px; display: flex; }
+.secret-form input { flex: 1; min-width: 0; min-height: 42px; padding: 0 46px 0 12px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--bg); color: var(--text); font-family: var(--mono); font-size: 14px; }
 .secret-form input:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
 .secret-form button, .secret-forget { min-height: 42px; padding: 0 16px; border: 0; border-radius: 999px; background: var(--accent); color: var(--accent-ink); font: inherit; font-size: 14px; }
 .secret-form button:disabled { opacity: .45; }
-.secret-form .secret-reveal { flex: none; width: 42px; padding: 0; display: grid; place-items: center; border: 1px solid var(--line-strong); background: transparent; color: var(--text-soft); }
-.secret-form .secret-reveal[aria-pressed="true"] { border-color: var(--text); color: var(--text); }
+.secret-form > button[type="submit"] { margin-left: auto; }
+.secret-form .secret-reveal { position: absolute; top: 0; right: 0; bottom: 0; width: 44px; min-height: 0; padding: 0; display: grid; place-items: center; border-radius: 0 10px 10px 0; background: transparent; color: var(--text-soft); }
+.secret-form .secret-reveal[aria-pressed="true"] { color: var(--text); }
 .secret-form .secret-reveal .mono-icon { width: 20px; height: 20px; }
 .secret-forget { margin-top: 8px; background: transparent; border: 1px solid var(--line-strong); color: var(--text-soft); }
 .secret-trust p { margin: 0 0 8px; font-size: 13px; color: var(--text-soft); }

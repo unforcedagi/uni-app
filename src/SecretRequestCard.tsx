@@ -119,15 +119,17 @@ export function SecretRequestCard({ channel, requestRef, authorName, receipts, p
             : <p className="secret-status warn" role="status">This isn't the key you trust for secrets, whatever its name says. Don't
                 answer it here. Only the key you trusted before may ask; another one goes in the app's secret-requesters file by hand.</p>
           : <form className="secret-form" onSubmit={(e) => { e.preventDefault(); if (value) void send(); }}>
-              <input id={`secret-${requestRef}`} type={shown ? "text" : "password"} aria-label={`Value for ${request.label}`}
-                placeholder="Paste or type it here" value={value}
-                onChange={(e) => setValue(e.target.value)} autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}
-                data-1p-ignore="" data-lpignore="true" disabled={phase === "sending"} />
-              <button type="button" className="secret-reveal" aria-label="Show what you typed" aria-pressed={shown}
-                aria-controls={`secret-${requestRef}`} title={shown ? "Hide" : "Show"} disabled={phase === "sending"}
-                onPointerDown={(e) => e.preventDefault()} onClick={() => setShown((v) => !v)}>
-                {shown ? <EyeOffIcon /> : <EyeIcon />}
-              </button>
+              <span className="secret-field">
+                <input id={`secret-${requestRef}`} type={shown ? "text" : "password"} aria-label={`Value for ${request.label}`}
+                  placeholder="Paste or type it here" value={value}
+                  onChange={(e) => setValue(e.target.value)} autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}
+                  data-1p-ignore="" data-lpignore="true" disabled={phase === "sending"} />
+                <button type="button" className="secret-reveal" aria-label="Show what you typed" aria-pressed={shown}
+                  aria-controls={`secret-${requestRef}`} title={shown ? "Hide" : "Show"} disabled={phase === "sending"}
+                  onPointerDown={(e) => e.preventDefault()} onClick={() => setShown((v) => !v)}>
+                  {shown ? <EyeOffIcon /> : <EyeIcon />}
+                </button>
+              </span>
               <button type="submit" disabled={!value || phase === "sending"}>{phase === "sending" ? "Sealing…" : "Send sealed"}</button>
             </form>}
       {errorLine}
