@@ -826,6 +826,107 @@ mod tests {
         assert_eq!(on_time.active().unwrap().meta.version, "0.1.85");
     }
 
+    /// A channel served over real HTTP on 127.0.0.1, so tests run the shell's own `check`.
+    struct Channel {
+        dir: tempfile::TempDir,
+        url: String,
+    }
+
+    fn channel() -> Channel {
+        use std::io::Write as _;
+        let dir = tempfile::tempdir().unwrap();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://127.0.0.1:{}/manifest.json", listener.local_addr().unwrap().port());
+        let root = dir.path().to_path_buf();
+        std::thread::spawn(move || {
+            for mut s in listener.incoming().flatten() {
+                let mut buf = [0u8; 4096];
+                let n = s.read(&mut buf).unwrap_or(0);
+                let req = String::from_utf8_lossy(&buf[..n]).to_string();
+                let path = req.split_whitespace().nth(1).unwrap_or("/").trim_start_matches('/').to_string();
+                let (code, body) = match std::fs::read(root.join(&path)) {
+                    Ok(b) => ("200 OK", b),
+                    Err(_) => ("404 Not Found", Vec::new()),
+                };
+                let _ = write!(s, "HTTP/1.1 {code}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len());
+                let _ = s.write_all(&body);
+            }
+        });
+        Channel { dir, url }
+    }
+
+    impl Channel {
+        /// Publishes a signed bundle as the channel's newest release.
+        fn publish(&self, k: &Key, version: &str) {
+            let a = bundle(version, 1);
+            let name = format!("web-{version}.tar.gz");
+            std::fs::write(self.dir.path().join(&name), &a).unwrap();
+            std::fs::write(self.dir.path().join(format!("{name}.sig")), sign(k, &a)).unwrap();
+            let m = format!(r#"{{"version":"{version}","api":1,"archive":"{name}","signature":"{name}.sig"}}"#);
+            std::fs::write(self.dir.path().join("manifest.json"), m).unwrap();
+        }
+        /// What the channel serves now, to serve again later (a replay).
+        fn snapshot(&self) -> HashMap<String, Vec<u8>> {
+            std::fs::read_dir(self.dir.path())
+                .unwrap()
+                .flatten()
+                .map(|e| (e.file_name().to_string_lossy().to_string(), std::fs::read(e.path()).unwrap()))
+                .collect()
+        }
+        fn serve_again(&self, files: &HashMap<String, Vec<u8>>) {
+            for (n, b) in files {
+                std::fs::write(self.dir.path().join(n), b).unwrap();
+            }
+        }
+    }
+
+    fn run_check(dir: &Path, ch: &Channel, k: &Key, builtin: &str) -> Result<CheckResult, String> {
+        tauri::async_runtime::block_on(check(dir, &ch.url, &k.pk, &v(builtin), None, 1))
+    }
+
+    #[test]
+    fn after_double_damage_the_channel_cannot_replay_an_older_release() {
+        let (k, ch, dir) = (key(), channel(), tempfile::tempdir().unwrap());
+        ch.publish(&k, "0.1.85");
+        let old = ch.snapshot();
+        ch.publish(&k, "0.1.86");
+        assert_eq!(run_check(dir.path(), &ch, &k, "0.1.84"), Ok(CheckResult::Staged { version: "0.1.86".into() }));
+        assert_eq!(activate(dir.path(), &k.pk, &v("0.1.84"), 1).unwrap().meta.version, "0.1.86");
+        // The bundle is lost, then both of the floor's records are damaged (Codex r5 P2).
+        remove_pair(dir.path(), "current");
+        std::fs::write(dir.path().join("state.json"), b"{not json").unwrap();
+        std::fs::write(dir.path().join("floor"), b"\xff garbage").unwrap();
+        assert!(activate(dir.path(), &k.pk, &v("0.1.84"), 1).is_none());
+        // The channel, or anyone between it and the device, serves the older release again. It is validly signed.
+        ch.serve_again(&old);
+        let r = run_check(dir.path(), &ch, &k, "0.1.84");
+        assert!(!matches!(r, Ok(CheckResult::Staged { .. })), "the older release was staged: {r:?}");
+        assert!(activate(dir.path(), &k.pk, &v("0.1.84"), 1).is_none());
+    }
+
+    #[test]
+    fn a_wiped_device_does_not_take_a_release_the_channel_stopped_signing() {
+        let (k, ch, dir) = (key(), channel(), tempfile::tempdir().unwrap());
+        // 0.1.85 was published long ago and superseded; the device has no record of anything (data wiped).
+        ch.publish(&k, "0.1.85");
+        let r = run_check(dir.path(), &ch, &k, "0.1.84");
+        assert!(!matches!(r, Ok(CheckResult::Staged { .. })), "a long-superseded release was staged: {r:?}");
+    }
+
+    #[test]
+    fn a_manifest_the_pinned_key_did_not_sign_is_refused() {
+        let (k, other, ch, dir) = (key(), key(), channel(), tempfile::tempdir().unwrap());
+        // A validly signed bundle, but the pointer to it comes from someone else.
+        ch.publish(&k, "0.1.85");
+        let forged = ch.snapshot();
+        ch.publish(&other, "0.1.85");
+        let mut files = ch.snapshot();
+        files.insert("web-0.1.85.tar.gz.sig".into(), forged["web-0.1.85.tar.gz.sig"].clone());
+        ch.serve_again(&files);
+        let r = run_check(dir.path(), &ch, &k, "0.1.84");
+        assert!(!matches!(r, Ok(CheckResult::Staged { .. })), "staged from a manifest the key did not sign: {r:?}");
+    }
+
     #[test]
     fn only_https_or_local_http_urls() {
         let ok = |s: &str| allowed_url(&url::Url::parse(s).unwrap());
