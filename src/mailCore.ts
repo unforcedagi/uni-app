@@ -398,8 +398,8 @@ export function heldShownWhole(p: Parked): boolean {
 
 /** Send it is offered for this held send: the bridge offers it, and it shows the whole draft as it is now. */
 export function canApprove(a: AccountBoxes | undefined, p: Parked): boolean {
-  // a listed file this app won't open still counts as shown: its name, type and size are, and its bytes are bound to the
-  // fingerprint the approval sends, as the bridge's own allowlist decided what may be attached at all
+  // a listed file this app won't open still counts as shown: its name, type and size stay on screen, and its bytes are
+  // bound to the fingerprint the approval sends (the bridge checks a file's type only when draft.save attaches it)
   return can(a, "send.approve") && !!p.fingerprint && !!p.fields && !p.changed && !p.problem && heldShownWhole(p);
 }
 

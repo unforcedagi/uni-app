@@ -68,20 +68,22 @@ function AttachmentRow({ accountId, a }: { accountId: string; a: MailAttachment 
     open={() => invoke("mail_attachment_open", { accountId, blobId: a.blob_id, name: a.name, mime: a.mime })} />;
 }
 
-/** One file with its kind and size; a tap opens it in the system's viewer (`open`), after Rust's checks. */
-function FileRow({ name, mime, size, early, open: opener }: { name: string; mime: string; size: number; early: string | null; open: () => Promise<unknown> }) {
+/** One file with its kind and size, which stay shown whatever happens; a tap opens it in the system's viewer (`open`),
+ *  after Rust's checks. `onRefused`: the checks refused it (its bytes, or the listing changed), not a network failure. */
+function FileRow({ name, mime, size, early, open: opener, onRefused }: { name: string; mime: string; size: number; early: string | null; open: () => Promise<unknown>; onRefused?: () => void }) {
   const [state, setState] = useState<"idle" | "opening" | "opened" | "error">("idle");
   const [error, setError] = useState("");
   const open = async () => {
     setState("opening");
     try { await opener(); setState("opened"); }
-    catch (e) { const p = mailProblem(e); setError(p.kind === "invalid" ? p.detail : p.title); setState("error"); }
+    catch (e) { const p = mailProblem(e); setError(p.kind === "invalid" ? p.detail : p.title); setState("error"); if (p.kind === "invalid") onRefused?.(); }
   };
   const refused = early !== null || state === "error";
+  const facts = [fileKind(name, mime), formatSize(size)].filter(Boolean).join(" · ");
   return <li className={`mail-attachment-item ${refused ? "refused" : ""}`}>
-    <button type="button" className="attachment-file mail-attachment" disabled={early !== null || state === "opening"} onClick={() => void open()} aria-label={early ? `${name} won't open` : `Open ${name}`}>
+    <button type="button" className="attachment-file mail-attachment" disabled={early !== null || state === "opening"} onClick={() => void open()} aria-label={`${early ? `${name} won't open` : `Open ${name}`}, ${facts}`}>
       <span aria-hidden="true">{refused ? "⊘" : mime === "application/pdf" ? "📄" : "📎"}</span><span className="attachment-name">{name}</span>
-      <small>{refused ? "Not opened" : state === "opening" ? "Opening…" : [fileKind(name, mime), formatSize(size), "Open"].filter(Boolean).join(" · ")}</small>
+      <small>{facts} · {refused ? "Not opened" : state === "opening" ? "Opening…" : "Open"}</small>
     </button>
     {early && <small className="mail-att-why" role="status">{early}</small>}
     {!early && state === "error" && <small className="mail-att-why" role="status">{error}</small>}
@@ -222,12 +224,14 @@ function HeldRow({ e, selected, onOpen }: { e: HeldEntry; selected: boolean; onO
 /** A held send in full, and the two decisions on it. Each needs a second, deliberate tap; Enter does neither. */
 function HeldView({ e, acct, onBack, onDecide }: { e: HeldEntry; acct: AccountBoxes; onBack: () => void; onDecide: (kind: "approve" | "decline") => Promise<void> }) {
   const [confirm, setConfirm] = useState<"approve" | "decline" | null>(null);
+  // a file that failed its checks when opened: Send it isn't offered for this listing (a new one remounts the view)
+  const [failedFile, setFailedFile] = useState(false);
   const [busy, setBusy] = useState(false);
   const inflight = useRef(false);
   const confirmBox = useRef<HTMLDivElement>(null);
   const p = e.item, f = p.fields;
   const open = waiting(e);
-  const approvable = canApprove(acct, p);
+  const approvable = canApprove(acct, p) && !failedFile;
   const declinable = can(acct, "send.decline");
   // a confirm stands only while its own operation is offered (the bridge's session can change on Refresh)
   const allowed = (kind: "approve" | "decline" | null) => (kind === "approve" ? approvable : kind === "decline" ? declinable : false);
@@ -263,9 +267,10 @@ function HeldView({ e, acct, onBack, onDecide }: { e: HeldEntry; acct: AccountBo
         </dl>
         {files.length > 0 && <ul className="mail-attachments" aria-label={`Files it sends (${files.length})`}>{files.map((x, i) => <FileRow key={`${i}-${x.sha256}`} name={x.name} mime={x.mime} size={x.size}
           early={x.refused ?? (p.draft_id ? null : "The held draft can't be found, so this file can't be opened here.")}
-          open={() => invoke("mail_held_file_open", { accountId: acct.id, draftId: p.draft_id, index: i, file: x })} />)}</ul>}
+          open={() => invoke("mail_held_file_open", { accountId: acct.id, draftId: p.draft_id, index: i, file: x })} onRefused={() => setFailedFile(true)} />)}</ul>}
         {f.text ? <PlainBody text={f.text} /> : <p className="empty">This message has no text.</p>}
       </article>}
+      {failedFile && open && <p className="mail-draft-note mail-unverified" role="note"><span className="mail-draft-tag">FILE NOT CHECKED</span><span>A file didn't pass the checks when opened, so Send it isn't offered. Don't send it, and ask Uni.</span></p>}
       {e.outcome && <p className={`mail-held-outcome held-${e.outcome.kind}`} role="status">{e.outcome.text}</p>}
       {open && (approvable || declinable) && (asking
         ? <div ref={confirmBox} tabIndex={-1} className="mail-held-confirm" role="group" aria-label={asking === "approve" ? "Confirm sending" : "Confirm not sending"}>

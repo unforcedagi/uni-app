@@ -176,6 +176,9 @@
 .mail-held-outcome { margin: 0; padding: 12px 14px; border: 2px solid var(--th-ink); border-radius: 10px; font-size: 16px; font-weight: 600; color: var(--text); }
 .mail-held-outcome.held-failed { border-style: dashed; }
 .mail-held-unlisted { margin: 14px; }
+/* T-335: a held file's whole name, wrapped, is part of what you approve */
+.mail-held .attachment-file { flex-wrap: wrap; }
+.mail-held .attachment-file .attachment-name { flex: 1 1 10em; white-space: normal; overflow-wrap: anywhere; }
 
 /* the phone's bottom bar (B's): Search and New under the thumb */
 .mail-thumb { display: none; }

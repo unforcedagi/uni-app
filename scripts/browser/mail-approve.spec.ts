@@ -246,7 +246,7 @@ test('a held send with files lists each file, opens one with a tap, and Send it 
   const h = await openHeld(page, ROTA);
   const files = h.getByRole('list', { name: 'Files it sends (2)' });
   await expect(files.getByRole('listitem')).toHaveCount(2);
-  await expect(files.getByRole('button', { name: 'Open volunteer-rota.csv' })).toContainText('volunteer-rota.csvCSV · 412 B · Open');
+  await expect(files.getByRole('button', { name: 'Open volunteer-rota.csv, CSV · 412 B' })).toContainText('volunteer-rota.csvCSV · 412 B · Open');
   await expect(files.getByRole('button', { name: 'Open supper-budget.pdf' })).toContainText('supper-budget.pdfPDF · 13 KB · Open');
   await expect(h.getByText("only Don't send is offered here")).toHaveCount(0);
   await shot(page, 'f1-held-with-files');
@@ -276,7 +276,39 @@ test("a file whose bytes aren't the listed ones doesn't open, and says so", asyn
   await page.evaluate(() => { (window as any).__heldChanged = true; });
   await h.getByRole('button', { name: 'Open supper-budget.pdf' }).click();
   await expect(h.getByRole('list', { name: 'Files it sends (2)' }).getByRole('status')).toHaveText('This held send changed since it was listed: refresh Mail and look again.');
-  await expect(h.getByRole('button', { name: 'Open supper-budget.pdf' })).toContainText('Not opened');
+  await expect(h.getByRole('button', { name: 'Open supper-budget.pdf' })).toContainText('PDF · 13 KB · Not opened');
+  // the listing it was shown is stale: Send it waits for a new one, Don't send stays
+  await expect(h.getByRole('button', { name: /^Send it/ })).toHaveCount(0);
+  await expect(h.getByRole('note').filter({ hasText: 'FILE NOT CHECKED' })).toContainText("so Send it isn't offered");
+  await expect(h.getByRole('button', { name: /^Don't send/ })).toBeVisible();
+});
+
+test("a file whose contents don't match its name withholds Send it; a network failure doesn't", async ({ page }) => {
+  await boot(page, 'ok', { writes: true, held: true, heldFiles: true });
+  const h = await openHeld(page, ROTA);
+  await page.evaluate(() => { (window as any).__heldBadBytes = true; });
+  await h.getByRole('button', { name: 'Open volunteer-rota.csv' }).click();
+  await expect(h.getByRole('list', { name: 'Files it sends (2)' }).getByRole('status')).toContainText("contents don't match its name");
+  await expect(h.getByRole('button', { name: /^Send it/ })).toHaveCount(0);
+  // another held send is a fresh view: nothing carried over
+  const q = await openHeld(page, QUOTE);
+  await expect(q.getByRole('button', { name: /^Send it/ })).toBeVisible();
+});
+
+test("a file this app won't open is still listed with its kind, size and whole name, and the send can be approved", async ({ page }) => {
+  await page.addInitScript(() => { (window as any).__heldRefusedFile = true; });
+  await boot(page, 'ok', { writes: true, held: true, heldFiles: true });
+  const h = await openHeld(page, ROTA);
+  const json = 'harvest-supper-volunteer-contacts-and-dietary-notes-for-the-kitchen-team.json';
+  const row = h.getByRole('list', { name: 'Files it sends (3)' }).getByRole('listitem').filter({ hasText: json });
+  await expect(row.getByRole('button', { name: `${json} won't open, JSON · 3.0 MB` })).toBeDisabled();
+  await expect(row).toContainText('JSON · 3.0 MB · Not opened');
+  await expect(row.getByRole('status')).toHaveText("This app doesn't open this kind of file, so you can't look inside it here. It is sent as listed.");
+  // the whole name shows (wrapped), never cut off
+  const name = row.locator('.attachment-name');
+  expect(await name.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+  await expect(h.getByRole('button', { name: "Send it with 3 files, from Uni's address (uni@example.com)" })).toBeVisible();
+  await shot(page, 'f4-file-that-wont-open');
 });
 
 test("a held send whose files the bridge doesn't list (an older bridge) offers only Don't send", async ({ page }) => {

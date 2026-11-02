@@ -82,6 +82,9 @@ export async function boot(page: Page, mode: Mode = 'ok', opts: { writes?: boole
       if (heldFiles) hold(3, a('Juniper Hall', 'bookings@example.org'), 'The rota and the budget for the harvest supper', 'Hello,\n\nAttached are the volunteer rota and the budget for the harvest supper, as promised.\n\nUni, for Robin Vale', [
         { name: 'volunteer-rota.csv', mime: 'text/csv', size: 412, sha256: '1f'.repeat(32), refused: null },
         { name: 'supper-budget.pdf', mime: 'application/pdf', size: 13401, sha256: '2e'.repeat(32), refused: null },
+        // `__heldRefusedFile` (set before boot): a third file of a kind this app doesn't open, with a long name
+        ...(w.__heldRefusedFile ? [{ name: 'harvest-supper-volunteer-contacts-and-dietary-notes-for-the-kitchen-team.json', mime: 'application/json', size: 3145728, sha256: '3d'.repeat(32),
+          refused: "This app doesn't open this kind of file, so you can't look inside it here. It is sent as listed." }] : []),
       ]);
     }
     const notes: Record<string, string> = w.__notes = { 'A/a3': 'Needs you: Mara asks which day to start.', 'A/a4': '<b>Two files</b> pass the checks; setup.exe won\'t open.', 'U/u1': 'Routine. Nothing to do.' };
@@ -157,6 +160,7 @@ export async function boot(page: Page, mode: Mode = 'ok', opts: { writes?: boole
           // T-335: Rust checks the bytes against the listed SHA-256 (crates/uni-core/tests/mail_write.rs); `__heldChanged`
           // answers as it does when they aren't the listed ones
           case 'mail_held_file_open':
+            if (w.__heldBadBytes) throw { kind: 'invalid', message: "This file's contents don't match its name, so Uni didn't open it. Ask Uni about it before you send." };
             if (w.__heldChanged) throw { kind: 'invalid', message: 'This held send changed since it was listed: refresh Mail and look again.' };
             return null;
           case 'mail_attachment_open':

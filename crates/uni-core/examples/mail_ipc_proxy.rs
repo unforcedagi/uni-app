@@ -106,6 +106,10 @@ async fn answer(ctx: &Ctx, mut sock: tokio::net::TcpStream, origin: &str) {
         if let Some(i) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
             let head = String::from_utf8_lossy(&buf[..i]).to_ascii_lowercase();
             let len = head.lines().find_map(|l| l.strip_prefix("content-length:").and_then(|v| v.trim().parse::<usize>().ok())).unwrap_or(0);
+            // a command's arguments are small: anything over 1 MB isn't one
+            if len > 1 << 20 {
+                return;
+            }
             break (i + 4, len);
         }
     };
