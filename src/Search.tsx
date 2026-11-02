@@ -5,7 +5,8 @@
 // hub can't be reached. See docs/ask-everything.md.
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { groupByRoom, hitTarget, snippetSegments } from "./searchCore";
+import { groupByRoom, hitTarget, plainSnippet, snippetSegments } from "./searchCore";
+import type { NavRecent } from "./navContext";
 
 export type NoteHit = { vault: string; id: string; path: string; snippet: string; score: number | null; mode: "meaning" | "keyword" };
 
@@ -24,8 +25,24 @@ function Snippet({ text }: { text: string }) {
   return <>{snippetSegments(text).map((s, i) => s.hit ? <mark key={i}>{s.text}</mark> : <span key={i}>{s.text}</span>)}</>;
 }
 
-export default function Search({ onOpen, onOpenNote, onAskUni, onClose, vaults, initialQuery = "", initialVault = "", initialPathPrefix = "" }: {
+/** T-335 glow-up: ↑ and ↓ move between the results (and from the field to the first); Enter opens the one in focus. */
+function moveFocus(e: React.KeyboardEvent<HTMLElement>) {
+  if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+  const items = [...e.currentTarget.querySelectorAll<HTMLElement>(".search-hit, .search-recent button")];
+  if (!items.length) return;
+  const at = items.indexOf(document.activeElement as HTMLElement);
+  const field = e.currentTarget.querySelector<HTMLInputElement>("input[type=search]");
+  e.preventDefault();
+  if (e.key === "ArrowUp" && at <= 0) { field?.focus(); return; }
+  items[e.key === "ArrowDown" ? Math.min(items.length - 1, at + 1) : at - 1]?.focus();
+}
+
+export default function Search({ onOpen, onOpenNote, onAskUni, onClose, vaults, initialQuery = "", initialVault = "", initialPathPrefix = "", onQuery, recent = [] }: {
   vaults: string[];
+  /** T-335 glow-up: each change of the query, so Find can open on it again */
+  onQuery?: (query: string) => void;
+  /** T-335 glow-up: the places visited lately, shown before anything is typed */
+  recent?: readonly NavRecent[];
   initialQuery?: string;
   initialVault?: string;
   initialPathPrefix?: string;
@@ -94,10 +111,10 @@ export default function Search({ onOpen, onOpenNote, onAskUni, onClose, vaults, 
   // r15: inside the utility frame (its title and Close are the frame's): one field that shrinks with the panel, plain words, and the
   // narrowing (how notes match, which vault, which folder) folded under "Narrow" so a narrow panel never scrolls sideways
   const narrowed = mode !== "meaning" || !!vault || !!pathPrefix;
-  return <section className="search-view" aria-label="Search conversations and notes">
+  return <section className="search-view" aria-label="Search conversations and notes" onKeyDown={moveFocus}>
     <div className="search-bar">
       <label className="search-field"><span aria-hidden="true">✧</span>
-        <input ref={input} type="search" value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Escape") onClose(); }}
+        <input ref={input} type="search" value={query} onChange={(e) => { setQuery(e.target.value); onQuery?.(e.target.value); }} onKeyDown={(e) => { if (e.key === "Escape") onClose(); }}
           placeholder="Conversations and notes" aria-label="Search conversations and notes" autoCapitalize="off" autoCorrect="off" spellCheck={false} maxLength={500} />
       </label>
     </div>
@@ -108,6 +125,10 @@ export default function Search({ onOpen, onOpenNote, onAskUni, onClose, vaults, 
       <label>Folder <input value={pathPrefix} placeholder="Any folder" onChange={(e) => setPathPrefix(e.target.value)} /></label></div>
     </details>
     <div className="search-results" aria-live="polite">
+      {!q && recent.length > 0 && <>
+        <h2 className="search-recent-h">Recent places</h2>
+        <ul className="search-recent">{recent.slice(0, 5).map((r) => <li key={r.key}><button type="button" onClick={() => { r.go(); onClose(); }}>{r.title}</button></li>)}</ul>
+      </>}
       {!q && <div className="search-empty">
         <p><strong>Search conversations and notes.</strong> Every room and thread on this device, including edits.</p>
         <p>Notes are found by what they mean, or by their exact words.</p>
@@ -135,7 +156,7 @@ export default function Search({ onOpen, onOpenNote, onAskUni, onClose, vaults, 
           {notes.map((n) => <button key={`${n.vault}:${n.id}`} className="search-hit" onClick={() => onOpenNote(n)}
             aria-label={`Note ${n.path || n.id} in ${n.vault}`}>
             <span className="search-hit-meta"><strong>{n.path.split("/").pop() || n.id}</strong><span className="search-tag">{n.vault}</span></span>
-            <span className="search-snippet">{n.path.includes("/") && <span className="search-path">{n.path.split("/").slice(0, -1).join("/")} · </span>}{n.snippet}</span>
+            <span className="search-snippet">{n.path.includes("/") && <span className="search-path">{n.path.split("/").slice(0, -1).join("/")} · </span>}{plainSnippet(n.snippet)}</span>
           </button>)}
         </div>}
         {noteState === "error" && <div className="search-notes">
@@ -145,5 +166,6 @@ export default function Search({ onOpen, onOpenNote, onAskUni, onClose, vaults, 
         </div>}
       </>}
     </div>
+    <p className="search-keys" aria-hidden="true"><span><kbd>↑</kbd><kbd>↓</kbd>move</span><span><kbd>↵</kbd>open</span><span><kbd>esc</kbd>close</span></p>
   </section>;
 }

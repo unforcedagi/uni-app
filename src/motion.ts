@@ -36,6 +36,9 @@ function apply() {
   if (typeof document === "undefined") return;
   if (calmMotion()) document.documentElement.dataset.motion = "calm";
   else delete document.documentElement.dataset.motion;
+  // T-335 glow-up: a slow screen (the Daylight) reads in ink: black on white, hairlines, states by shape (glow.css)
+  if (calmScreen()) document.documentElement.dataset.screen = "ink";
+  else delete document.documentElement.dataset.screen;
   listeners.forEach((f) => f());
 }
 

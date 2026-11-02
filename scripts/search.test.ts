@@ -1,6 +1,6 @@
 // Run: node --experimental-strip-types scripts/search.test.ts
 import assert from "node:assert/strict";
-import { groupByRoom, hitTarget, snippetSegments, SNIPPET_END as E, SNIPPET_START as S } from "../src/searchCore.ts";
+import { groupByRoom, hitTarget, plainSnippet, snippetSegments, SNIPPET_END as E, SNIPPET_START as S } from "../src/searchCore.ts";
 
 assert.deepEqual(snippetSegments(`now about the ${S}fcm${E} ${S}gateway${E}`), [
   { text: "now about the ", hit: false },
@@ -28,3 +28,10 @@ assert.deepEqual(hitTarget({ ref: "r", channel: "c", root: null }), { channel: "
 assert.deepEqual(hitTarget({ ref: "r", channel: "c", root: "r" }), { channel: "c", root: null, focus: "r" });
 
 console.log("search tests passed");
+
+// T-335 glow-up: a note's snippet reads as prose: no heading marks, stars, backticks or link brackets, the link's words kept.
+assert.equal(plainSnippet("## Now\n\nThe **coop** paperwork is signed. See [[Areas/Kiln Studio/Plan|the plan]] and [notes](https://example.com/n)."),
+  "Now The coop paperwork is signed. See the plan and notes.");
+assert.equal(plainSnippet("- first `cone 6`\n- second [[Glaze Tests]]"), "first cone 6 second Glaze Tests");
+assert.equal(plainSnippet("Issue #12 stays"), "Issue #12 stays");
+

@@ -46,6 +46,18 @@ function NewLine({ rooms, onOpen }: { rooms: readonly NewRoom[]; onOpen: (id: st
 
 const today = () => new Date().toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" });
 
+const WORDS = ["No", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten", "Eleven", "Twelve"];
+const count = (n: number) => WORDS[n] ?? String(n);
+/** T-335 glow-up: the day in one or two short sentences: what needs you, then what is moving. */
+export function statement(needs: number, moving: number): string[] {
+  const first = needs ? `${count(needs)} thing${needs === 1 ? " needs" : "s need"} you.` : "Nothing needs you.";
+  const second = moving ? `${count(moving)} place${moving === 1 ? " is" : "s are"} moving.` : needs ? "The rest is quiet." : "All quiet.";
+  return [first, second];
+}
+
+/** Uni's mark: a one-breath brush circle. */
+const Enso = () => <svg className="enso" viewBox="0 0 40 40" width="22" height="22" aria-hidden="true"><path pathLength="100" d="M29.5 8.8C24.6 5.2 14.8 5 9.3 11.6 4.6 17.3 5.6 27.4 12.6 32.2c7.2 4.9 17.4 2.9 21.2-4.3 3.3-6.3 1.6-13.4-3.1-17.4" /></svg>;
+
 /** When the room last talked, in words ("talked 3 h ago"). */
 const talked = (now: number, ts: number) => { const s = span(now - ts * 1000); return s === "just now" ? "talking now" : `talked ${s} ago`; };
 
@@ -55,7 +67,8 @@ function workingWords(sessions: number, turn: boolean): string {
   return turn ? `Uni is answering here${s ? ` and ${s}` : ""}` : s;
 }
 
-export function FrontDoor({ doors, needs, onOpen, me = null, newRooms = [], onOpenRoom, toPost = null }: { doors: readonly Door[]; needs?: Needs; onOpen: (path: string) => void;
+export function FrontDoor({ doors, needs, onOpen, me = null, newRooms = [], onOpenRoom, toPost = null, above = null }: { doors: readonly Door[]; needs?: Needs; onOpen: (path: string) => void;
+  /** T-335 glow-up: what sits between the day's sentence and the places (the All composer) */ above?: ReactNode;
   /** T-335: rooms outside the doors with something new, and how to open one. */ newRooms?: readonly NewRoom[]; onOpenRoom?: (id: string) => void;
   /** Your key: a turn is the room's Uni at work on your message. */ me?: string | null;
   /** T-335: the To post queue's one quiet line, under what needs you */ toPost?: ReactNode }) {
@@ -66,15 +79,20 @@ export function FrontDoor({ doors, needs, onOpen, me = null, newRooms = [], onOp
   // round 3: a read that failed, or a saved copy not read again yet, is "as of" its time; the working counts say so too
   const at = asOf(ws, now);
   const areaAt = new Map(work.areas.map((a) => [a.path, a]));
+  // T-335 glow-up: how many places are moving (a session or the room's Uni at work), for the home's one sentence
+  const liveOf = (d: Door) => { const a = areaAt.get(d.path); return (a ? liveInArea(work, a.id).length : 0) + (d.room && turns.has(d.room) ? 1 : 0); };
+  const moving = doors.filter((d) => liveOf(d) > 0).length;
+  const needN = needs ? needs.rows.length + needs.privates.reduce((k, p) => k + p.count, 0) : 0;
   return <div className="fd" data-place="front-door">
     <header className="fd-head">
-      <p className="fd-date">{today()}</p>
-      <h1 className="fd-title">Uni</h1>
-      <p className="fd-sub">Your rooms</p>
+      <div className="fd-mark"><h1 className="fd-title"><Enso />Uni</h1><span className="fd-date">{today()}</span></div>
+      <p className="fd-statement">{statement(needN, moving).map((line) => <span key={line}>{line}</span>)}</p>
     </header>
     {needs && <NeedsLine needs={needs} onOpen={onOpen} />}
     {toPost && <div className="fd-topost">{toPost}</div>}
     {onOpenRoom && <NewLine rooms={newRooms} onOpen={onOpenRoom} />}
+    {above}
+    <h2 className="fd-places-h">Places</h2>
     <nav aria-label="Rooms"><ul className="fd-doors">{doors.map((d) => {
       const a = areaAt.get(d.path);
       const sessions = a ? liveInArea(work, a.id).length : 0;
@@ -85,8 +103,9 @@ export function FrontDoor({ doors, needs, onOpen, me = null, newRooms = [], onOp
       const u = d.unread ?? null; const k = d.needs ?? 0;
       const marks = [u && unreadWords(u), k > 0 && `${k} need${k === 1 ? "s" : ""} you`].filter(Boolean).join(", ");
       return <li key={d.path}>
-        <button type="button" className="fd-door" data-path={d.path} onClick={() => onOpen(d.path)}
+        <button type="button" className="fd-door" data-path={d.path} data-sign={k > 0 ? "needs" : live > 0 ? "running" : u ? "new" : "quiet"} onClick={() => onOpen(d.path)}
           aria-label={`${d.name}${marks ? `, ${marks}` : ""}${live ? `, ${workingWords(sessions, turn)}${when}` : ""}${d.stands ? `. ${d.stands}` : ""}`}>
+          <span className="fd-sign" aria-hidden="true"><i /></span>
           <span className="fd-name">{d.name}</span>
           {live > 0 && <span className="fd-live" data-turn={turn || undefined} title={workingWords(sessions, turn)}><i aria-hidden="true" />{live} working{when}</span>}
           {marks && <span className="fd-marks" aria-hidden="true">

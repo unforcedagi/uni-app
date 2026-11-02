@@ -1,0 +1,315 @@
+/* T-335 glow-up: "a warm book with a living edge". The look in one file: its tokens (the --g-* names), its fonts, and the few
+   component rules that make home, a room and find read like the study's prototypes. The app's older names (--th-* from the Field
+   Book, --bg/--text/... in App.css) read these tokens, so every surface takes the new look; the rules below only reshape what a token
+   can't (two voices in messages, the home's statement and places, the find sheet).
+   Two voices in type: Uni and everyone else write in Literata, a reading serif; Aaron and the interface in Instrument Sans. Fraunces
+   only for place names and the home's one big line; mono only for code, never for labels.
+   Modes: day (default), night (the system's dark), ink (the Daylight: Settings → Calm screen or a slow screen; src/motion.ts sets
+   :root[data-screen="ink"]). The living accent follows the time of day (:root[data-tide], src/glow/tide.ts).
+   Interface platform: these tokens are the Uni bundle's; theme.get for area interfaces should read the same values. */
+
+@font-face { font-family: "Literata"; font-style: normal; font-weight: 300 800; font-display: swap; src: url(./fonts/Literata-normal-latin-ext.woff2) format("woff2"); unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF; }
+@font-face { font-family: "Literata"; font-style: normal; font-weight: 300 800; font-display: swap; src: url(./fonts/Literata-normal-latin.woff2) format("woff2"); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+@font-face { font-family: "Literata"; font-style: italic; font-weight: 300 800; font-display: swap; src: url(./fonts/Literata-italic-latin.woff2) format("woff2"); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+@font-face { font-family: "Instrument Sans"; font-style: normal; font-weight: 400 700; font-display: swap; src: url(./fonts/InstrumentSans-normal-latin-ext.woff2) format("woff2"); unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF; }
+@font-face { font-family: "Instrument Sans"; font-style: normal; font-weight: 400 700; font-display: swap; src: url(./fonts/InstrumentSans-normal-latin.woff2) format("woff2"); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+/* the glow-up's Fraunces (variable, 300-800) under its own name, so the Field Book's static Fraunces faces never mix in */
+@font-face { font-family: "Fraunces Glow"; font-style: normal; font-weight: 300 800; font-display: swap; src: url(./fonts/Fraunces-normal-latin-ext.woff2) format("woff2"); unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF; }
+@font-face { font-family: "Fraunces Glow"; font-style: normal; font-weight: 300 800; font-display: swap; src: url(./fonts/Fraunces-normal-latin.woff2) format("woff2"); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+@font-face { font-family: "JetBrains Mono"; font-style: normal; font-weight: 400 600; font-display: swap; src: url(./fonts/JetBrainsMono-normal-latin.woff2) format("woff2"); }
+
+/* ── Tokens ─────────────────────────────────────────────────── */
+/* :root:root outranks tree.css and App.css whatever order the bundle puts them in */
+:root:root {
+  --g-font-uni: "Literata", "Iowan Old Style", Georgia, serif;
+  --g-font-display: "Fraunces Glow", "Literata", Georgia, serif;
+  --g-font-ui: "Instrument Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --g-font-code: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  --g-text-uni: 17px; --g-lead-uni: 1.65;
+  --g-text-me: 16px; --g-lead-me: 1.5;
+  --g-measure: 66ch;
+
+  --g-ground: #f2ede2;   /* the page */
+  --g-paper: #fbf8f1;    /* raised: composer, cards, Aaron's words */
+  --g-sunk: #e9e3d5;     /* wells: search field, code, the rail's pressed place */
+  --g-ink: #1d1a16;      /* 15.6:1 on the ground */
+  --g-ink-2: #5e574d;    /* 6.3:1 */
+  --g-ink-3: #7a7266;    /* times and hints only, 4.5:1 */
+  --g-line: rgba(29, 26, 22, .11);
+  --g-line-strong: rgba(29, 26, 22, .22);
+  --g-shadow-1: 0 1px 2px rgba(40, 30, 15, .06), 0 4px 16px rgba(40, 30, 15, .05);
+  --g-shadow-2: 0 2px 6px rgba(40, 30, 15, .08), 0 18px 48px rgba(40, 30, 15, .12);
+  --g-accent: #4f6b3a;   /* moss by day; the tide changes it */
+  --g-accent-soft: rgba(79, 107, 58, .12);
+  --g-needs: #a8571c;    /* needs you: ochre, and always a filled shape */
+  --g-needs-soft: rgba(168, 87, 28, .12);
+  --g-focus: #2f6fb3;
+  --g-hair: 1px;
+  --g-ease: cubic-bezier(.22, .8, .2, 1);
+  --g-t-quick: 140ms; --g-t-state: 220ms;
+
+  /* the Field Book's names, read everywhere */
+  --th-ground: var(--g-sunk); --th-paper: var(--g-ground); --th-card: var(--g-paper);
+  --th-ink: var(--g-ink); --th-ink2: #3f3a33; --th-mute: var(--g-ink-2);
+  --th-ring: rgba(29, 26, 22, .07);
+  --th-sap: var(--g-needs); --th-sap-soft: var(--g-needs-soft);
+  --th-hair: var(--g-line-strong); --th-hair2: var(--g-line);
+  --th-serif: var(--g-font-display); --th-sans: var(--g-font-ui); --th-mono: var(--g-font-ui);
+  /* App.css's names */
+  --mono: var(--g-font-code);
+  --shadow: var(--g-shadow-1); --shadow-lift: var(--g-shadow-2);
+  --ease: var(--g-ease);
+  --turquoise: var(--g-accent);
+  --mine: var(--g-paper);
+  --highlight: var(--g-accent-soft);
+}
+:root:root[data-tide="dawn"] { --g-accent: #a35a2a; --g-accent-soft: rgba(163, 90, 42, .12); }
+:root:root[data-tide="dusk"] { --g-accent: #46508a; --g-accent-soft: rgba(70, 80, 138, .13); }
+
+/* Night: deep water with one warm lamp. */
+@media (prefers-color-scheme: dark) {
+  :root:root, :root:root[data-tide] {
+    --g-ground: #11161a; --g-paper: #182026; --g-sunk: #0c1013;
+    --g-ink: #ece6da; --g-ink-2: #a9a296; --g-ink-3: #8a8478;
+    --g-line: rgba(236, 230, 218, .10); --g-line-strong: rgba(236, 230, 218, .2);
+    --g-shadow-1: 0 1px 2px rgba(0, 0, 0, .3); --g-shadow-2: 0 18px 48px rgba(0, 0, 0, .45);
+    --g-accent: #d6a75c; --g-accent-soft: rgba(214, 167, 92, .14);
+    --g-needs: #e08a4f; --g-needs-soft: rgba(224, 138, 79, .15);
+    --g-focus: #79aef0;
+    --th-ink2: #d4cdbf; --th-ring: rgba(236, 230, 218, .08);
+  }
+}
+
+/* Ink: the Daylight's reflective screen. Pure white and black, 1.5px hairlines, states by shape, larger reading text, no shadows. */
+:root:root[data-screen="ink"], :root:root[data-screen="ink"][data-tide] {
+  --g-ground: #ffffff; --g-paper: #ffffff; --g-sunk: #f0f0f0;
+  --g-ink: #000000; --g-ink-2: #262626; --g-ink-3: #4a4a4a;
+  --g-line: rgba(0, 0, 0, .35); --g-line-strong: rgba(0, 0, 0, .7);
+  --g-shadow-1: none; --g-shadow-2: none;
+  --g-accent: #000000; --g-accent-soft: rgba(0, 0, 0, .08);
+  --g-needs: #000000; --g-needs-soft: rgba(0, 0, 0, .1);
+  --g-focus: #000000; --g-hair: 1.5px;
+  --g-text-uni: 18px; --g-text-me: 17px;
+  --th-ink2: #1a1a1a; --th-ring: rgba(0, 0, 0, .08);
+  color-scheme: light;
+}
+
+/* ── Base ───────────────────────────────────────────────────── */
+:root:root { font-family: var(--g-font-ui); }
+body { font-family: var(--g-font-ui); text-rendering: optimizeLegibility; }
+::selection { background: var(--g-accent-soft); }
+:focus-visible { outline-color: var(--g-focus); }
+/* labels speak in sentence case: no capitals shouted in a monospace */
+.eyebrow, .area-mark, .work-head, .work-group h3, .task-decide, .task-kind, .th-cap, .th-h, .tree-home .work-head, .th-line small,
+.tree-home .task-meta, .tree-home .undo-go, .tree-home .suggestion-go, .th-colname, .th-ctx, .run-what small, .chg, .th-recent h2, .wv-h,
+.decision-kind, .decision-dflt, .search-section, .cal-dflt, .usage-head h2, .fd-date, .ps-fold, .pj-folder span, .pj-state, .pj-earlier summary,
+.pj-confirm-to, .sv-back, .sv-needs h4, .sv-part h4, .sv-more summary, .sv-live-head, .run-chip {
+  text-transform: none !important; letter-spacing: 0 !important;
+}
+
+/* ── The rail: quiet glyphs, the current place on a soft well ── */
+.rail { background: var(--g-ground) !important; border-color: var(--g-line) !important; }
+.rail button { color: var(--g-ink-2); font-family: var(--g-font-ui); }
+.rail button span { font-size: 11px; letter-spacing: -.005em; white-space: nowrap; }
+.rail button i { color: var(--g-ink-2) !important; }
+.rail button:hover { background: transparent !important; box-shadow: none !important; color: var(--g-ink); }
+.rail button:hover i { background: var(--g-sunk); }
+.rail button[aria-current="page"], .rail button[aria-expanded="true"] { color: var(--g-ink) !important; font-weight: 600; }
+.rail button[aria-current="page"] i, .rail button[aria-expanded="true"] i { background: var(--g-sunk) !important; color: var(--g-ink) !important; }
+.rail-count { background: var(--g-needs) !important; color: #fff !important; }
+@media (max-width: 599px) {
+  .rail button span { font-size: 10px; letter-spacing: -.01em; }
+}
+
+/* ── Messages: Uni's words set like a book, Aaron's in the margin ── */
+.message { gap: 0; padding: 14px 0 4px; }
+.message.grouped { padding-top: 2px; }
+.message-avatar, .message .gutter-time { display: none !important; }
+.message-content { max-width: min(100%, var(--g-measure)); padding: 0; }
+.message-meta { gap: 8px; margin-bottom: 2px; }
+.message-meta strong { color: var(--g-ink-2); font: 600 13px/1.3 var(--g-font-ui); }
+.message-meta time { color: var(--g-ink-3); font: 400 12px/1.3 var(--g-font-ui); font-variant-numeric: tabular-nums; }
+.message:not(.mine) .message-content p, .message:not(.mine) .message-content .md,
+.message:not(.mine) .message-content li, .message:not(.mine) .message-content td {
+  font-family: var(--g-font-uni); font-size: var(--g-text-uni); line-height: var(--g-lead-uni); font-optical-sizing: auto; color: var(--g-ink);
+}
+.message:not(.mine) .message-content p { margin: 2px 0 10px; }
+.message:not(.mine) .message-content p:last-child { margin-bottom: 4px; }
+.message.mine { justify-content: flex-end; }
+.message.mine .message-content {
+  margin-left: auto; width: fit-content; max-width: min(84%, 52ch);
+  background: var(--g-paper); border: var(--g-hair) solid var(--g-line); border-radius: 18px 18px 6px 18px; padding: 8px 14px 8px;
+}
+.message.mine .message-meta strong { display: none; }
+/* Aaron's own time sits outside his words, shown on hover or focus (it is in the message's menu and its label either way) */
+.message.mine .message-content { position: relative; }
+.message.mine .message-meta { position: absolute; right: calc(100% + 10px); bottom: 9px; margin: 0; opacity: 0; transition: opacity var(--g-t-quick) var(--g-ease); white-space: nowrap; }
+.message.mine:hover .message-meta, .message.mine:focus-within .message-meta { opacity: 1; }
+.message.mine .message-content p, .message.mine .message-content .md { font: 400 var(--g-text-me)/var(--g-lead-me) var(--g-font-ui); }
+.message.mine .message-content p { margin: 2px 0; }
+.message.mine .message-more { right: auto; left: 0; }
+.message.highlight:not(.mine) .message-content { background: none; padding: 0; border-radius: 0; box-shadow: inset 3px 0 0 var(--g-accent); padding-left: 14px; }
+.message.mine.highlight .message-content { background: var(--g-paper); }
+.message-content .md code { font-family: var(--g-font-code); font-size: .82em; background: var(--g-sunk); }
+.message-content .md pre, .message-content .md pre code { font-family: var(--g-font-code); font-size: 13px; line-height: 1.55; }
+.message-content .md blockquote { font-family: var(--g-font-uni); border-left-color: var(--g-line-strong); }
+.message-content .md .md-h { font-family: var(--g-font-uni); font-weight: 650; }
+.day-divider { font: italic 400 14px/1.3 var(--g-font-uni); color: var(--g-ink-3); margin: 26px 0 6px; }
+.day-divider::before, .day-divider::after { background: var(--g-line); }
+.message.status-line { font: 400 13px/1.4 var(--g-font-ui); color: var(--g-ink-2); opacity: 1; }
+.mention { color: var(--g-ink); background: var(--g-accent-soft); }
+.mention.mention-me { color: var(--g-paper); background: var(--g-accent); }
+.message-more-go { color: var(--g-ink-3); }
+.message-menu, .compose-menu { border-color: var(--g-line-strong); background: var(--g-paper); box-shadow: var(--g-shadow-2); border-radius: 14px; }
+
+/* ── The composer: one pill, the same everywhere ── */
+.composer { background: var(--g-ground); border-top: 0; }
+.compose-row { background: var(--g-paper); border: var(--g-hair) solid var(--g-line-strong); border-radius: 26px; padding: 4px; box-shadow: var(--g-shadow-1); }
+.compose-row:focus-within { border-color: var(--g-accent); box-shadow: 0 0 0 4px var(--g-accent-soft), var(--g-shadow-1); }
+.compose-row textarea { font-family: var(--g-font-ui); color: var(--g-ink); }
+.compose-row textarea::placeholder { color: var(--g-ink-3); opacity: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.compose-uni { font: 500 12px/1 var(--g-font-ui); color: var(--g-ink-3); }
+.compose-uni.on { color: var(--g-ink-2); }
+.send { background: var(--g-ink); color: var(--g-ground); }
+.send:disabled { opacity: .32; }
+@media (max-width: 599px) {
+  /* "Uni listening" is a word, not a column: on a phone it shrinks to the ensō's ring, its label read aloud */
+  .compose-uni { font-size: 0; width: 34px; min-width: 34px; padding: 0; display: grid; place-items: center; }
+  .compose-uni::before { content: ""; width: 12px; height: 12px; border-radius: 50%; box-shadow: inset 0 0 0 1.6px var(--g-ink-3); }
+  .compose-uni.on::before { box-shadow: inset 0 0 0 2px var(--g-accent); }
+}
+
+/* ── A room: a place you step into ── */
+.sr-title { font: 560 28px/1.12 var(--g-font-display); letter-spacing: -.012em; font-variation-settings: "opsz" 72, "SOFT" 60; color: var(--g-ink); }
+.sr .th-crumbs, .sr .th-crumb, .sr-door, .sr-context { font-family: var(--g-font-ui); color: var(--g-ink-3); }
+.sr-head { border-bottom: 0; }
+.th-level.wide .th-panel, .th-level.th-rooms.wide .th-panel { border-left: var(--g-hair) solid var(--g-line) !important; }
+.th-foot { border-top: var(--g-hair) solid var(--g-line); background: var(--g-ground); }
+.th-treehead { border-bottom: var(--g-hair) solid var(--g-line); }
+.th-treehead .note-title, .th-head .note-title { font: 560 32px/1.08 var(--g-font-display); letter-spacing: -.015em; }
+.th-name b { font-family: var(--g-font-display); font-weight: 520; }
+.th-row.d0 .th-name b { font-weight: 580; }
+.th-guide.run::before, .th-guide.branch::before { border-left-color: var(--g-line-strong); border-left-width: 1px; }
+.th-guide.branch::after { border-top-color: var(--g-line-strong); border-top-width: 1px; }
+.th-row.sel .th-go { background: var(--g-paper); box-shadow: inset 3px 0 0 var(--g-accent); border-radius: 0 10px 10px 0; }
+.th-row.sel .th-name b { text-decoration: none; }
+.th-h, .tree-home .work-head { font: 600 13px/1.3 var(--g-font-ui); color: var(--g-ink-2); }
+.th-h::after, .tree-home .work-head::after { background: var(--g-line); }
+.th-lede, .cp-lede { font-family: var(--g-font-uni); }
+.cp-sheet { border-top: var(--g-hair) solid var(--g-line-strong); border-radius: 18px 18px 0 0; box-shadow: var(--g-shadow-2); }
+.th-door { border: var(--g-hair) solid var(--g-line-strong); border-radius: 999px; padding: 4px 11px; background: var(--g-paper); font: 500 13px/1.2 var(--g-font-ui); }
+.th-tag { background: var(--g-needs); }
+.cp-dot, .fd-live i, .ps-dot, .pj-state i { background: var(--g-needs); }
+
+/* ── Home: the day in one sentence, then the places ── */
+.fd { background: var(--g-ground); padding: clamp(28px, 7vh, 88px) clamp(20px, 5vw, 64px) 56px; }
+.fd-head, .fd-needs, .fd-new, .fd-topost, .fd-doors, .fd-status, .fd-usage-row, .fd-places-h, .fd-all { max-width: 720px; }
+.fd-head { display: block; border-bottom: 0; padding-bottom: 0; margin-bottom: 18px; }
+.fd-mark { display: flex; align-items: center; gap: 10px; margin: 0 0 14px; }
+.fd-title { display: inline-flex; align-items: center; gap: 8px; margin: 0; font: 600 15px/1 var(--g-font-ui) !important; letter-spacing: 0; color: var(--g-ink); }
+.fd-date { margin: 0 !important; font: 400 14px/1 var(--g-font-ui) !important; color: var(--g-ink-2) !important; }
+.fd-date::before { content: "·"; margin-right: 10px; color: var(--g-ink-3); }
+.fd-statement { margin: 0; font: 520 clamp(34px, 6.4vw, 58px)/1.04 var(--g-font-display); font-variation-settings: "SOFT" 100, "opsz" 144; letter-spacing: -.022em; text-wrap: balance; color: var(--g-ink); }
+.fd-statement span { display: block; }
+.fd-needs { border-bottom: 0; margin: 0 auto 8px; }
+.fd-needs-line, .fd-new-h, .fd-topost .tp-line { font: 500 14px/1.3 var(--g-font-ui) !important; color: var(--g-ink-2) !important; }
+.fd-needs-line { gap: 8px; }
+.fd-needs-line::before { content: ""; width: 9px; height: 9px; border-radius: 50%; background: var(--g-needs); }
+.fd-needs-list button { font: 400 15.5px/1.45 var(--g-font-uni); border-bottom: var(--g-hair) solid var(--g-line); }
+.fd-needs-list small { font: 400 12.5px var(--g-font-ui); color: var(--g-ink-3); }
+.fd-new { border-bottom: 0; }
+.fd-new button { border-color: var(--g-line-strong); background: var(--g-paper); font: 500 13.5px var(--g-font-ui); }
+.fd-count { border-width: 1px; font-family: var(--g-font-ui); }
+.fd-places-h { margin: 40px auto 6px; font: 500 14px/1.3 var(--g-font-ui); color: var(--g-ink-2); }
+/* places: a table of contents for a life, not a grid of cards */
+.fd-doors { display: block; border-top: var(--g-hair) solid var(--g-line); }
+.fd-doors > li { border-bottom: var(--g-hair) solid var(--g-line); }
+.fd-door {
+  min-height: 0; padding: 16px 14px 17px; margin: 0 -14px; width: calc(100% + 28px);
+  display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; grid-template-rows: auto; column-gap: 12px; row-gap: 4px; align-items: baseline;
+  border: 0 !important; border-radius: 14px; background: transparent !important; box-shadow: none !important;
+  transition: background-color var(--g-t-quick) var(--g-ease);
+}
+.fd-door:has(.fd-marks) { grid-template-rows: auto; }
+@media (hover: hover) { .fd-door:hover { background: var(--g-paper) !important; } }
+.fd-door:active { background: var(--g-paper) !important; }
+.fd-sign { grid-row: 1; grid-column: 1; align-self: center; display: flex; justify-content: center; }
+.fd-sign i { display: block; width: 7px; height: 7px; border-radius: 50%; background: var(--g-line-strong); }
+.fd-door[data-sign="running"] .fd-sign i { width: 11px; height: 11px; background: none; box-shadow: inset 0 0 0 2px var(--g-accent); }
+.fd-door[data-sign="needs"] .fd-sign i { width: 11px; height: 11px; background: var(--g-needs); box-shadow: 0 0 0 3px var(--g-needs-soft); }
+.fd-name { grid-row: 1; grid-column: 2; font: 520 25px/1.15 var(--g-font-display) !important; font-variation-settings: "opsz" 72, "SOFT" 50; letter-spacing: -.01em; color: var(--g-ink); }
+.fd-door[data-sign="quiet"] .fd-name { font-size: 21px !important; font-weight: 440 !important; color: var(--g-ink-2); }
+.fd-live { grid-row: 1; grid-column: 3; align-self: center; border: 0; padding: 0; font: 500 13px/1.2 var(--g-font-ui); color: var(--g-ink-2); }
+.fd-live i { background: none !important; width: 9px; height: 9px; box-shadow: inset 0 0 0 1.8px var(--g-accent) !important; }
+.fd-marks { grid-column: 2 / -1; gap: 6px; }
+.fd-new-n, .fd-need-n { padding: 2px 9px; border-width: 1px; font: 600 12px/1.4 var(--g-font-ui); }
+.fd-new-n { border-color: var(--g-line-strong); }
+.fd-new-n.at { background: var(--g-ink); color: var(--g-ground); border-color: var(--g-ink); }
+.fd-need-n { border-color: var(--g-needs); color: var(--g-needs); }
+.fd-need-n i { background: var(--g-needs); }
+.fd-stands { grid-column: 2 / -1; font: 400 15.5px/1.5 var(--g-font-uni) !important; color: var(--g-ink-2); text-wrap: pretty; }
+.fd-door[data-sign="quiet"] .fd-stands { color: var(--g-ink-3); font-size: 15px !important; }
+.fd-foot { grid-column: 2 / -1; padding-top: 0; border-top: 0; font: 400 12.5px/1.3 var(--g-font-ui) !important; color: var(--g-ink-3); justify-content: flex-start; gap: 14px; }
+.fd-status, .fd-usage, .fd-usage-refresh { font-family: var(--g-font-ui) !important; }
+.fd-usage-row { border-top: 0; margin-top: 28px; }
+@media (max-width: 599px) {
+  .fd { padding: 26px 20px 40px; }
+  .fd-door { padding: 14px 10px 15px; margin: 0 -10px; width: calc(100% + 20px); column-gap: 10px; grid-template-columns: 16px minmax(0, 1fr) auto; }
+  .fd-name { font-size: 22px !important; }
+  .fd-door[data-sign="quiet"] .fd-name { font-size: 19px !important; }
+}
+
+/* ── Find: one sheet over the page ── */
+.search-view { font-family: var(--g-font-ui); }
+.search-field { background: var(--g-sunk) !important; border: var(--g-hair) solid transparent !important; border-radius: 12px; box-shadow: none !important; }
+.search-field:focus-within { border-color: var(--g-accent) !important; box-shadow: 0 0 0 3px var(--g-accent-soft) !important; }
+.search-field input, .search-field input:focus { border: 0 !important; box-shadow: none !important; background: transparent; }
+.search-field input::-webkit-search-cancel-button { filter: grayscale(1); opacity: .55; }
+.search-field input { font: 400 17px/1.4 var(--g-font-ui); color: var(--g-ink); }
+.search-section { font: 600 13px/1.3 var(--g-font-ui) !important; color: var(--g-ink-2) !important; margin: 20px 10px 6px; }
+.search-group h3 { font: 560 18px/1.2 var(--g-font-display); }
+.search-hit { border-radius: 12px; }
+.search-hit:hover, .search-hit:focus-visible { background: var(--g-accent-soft); }
+.search-snippet { font: 400 15px/1.55 var(--g-font-uni); color: var(--g-ink); }
+.search-hit-meta strong { font: 600 13px var(--g-font-ui); }
+.search-hit-meta time, .search-tag { font: 400 12px var(--g-font-ui); color: var(--g-ink-3); }
+.search-snippet mark, .search-view mark { background: var(--g-accent-soft); color: inherit; border-radius: 4px; padding: 0 2px; box-shadow: inset 0 -1.5px 0 var(--g-accent); }
+.search-empty { font: 400 15px/1.55 var(--g-font-uni); color: var(--g-ink-2); }
+.search-recent { margin: 6px 0 0; padding: 0; list-style: none; }
+.search-recent-h { margin: 18px 10px 4px; font: 600 13px/1.3 var(--g-font-ui); color: var(--g-ink-2); }
+.search-recent button { all: unset; box-sizing: border-box; width: 100%; min-height: 44px; display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; cursor: pointer; font: 520 17px/1.2 var(--g-font-display); color: var(--g-ink); }
+.search-recent button:hover, .search-recent button:focus-visible { background: var(--g-accent-soft); }
+.search-recent button:focus-visible { outline: 2px solid var(--g-focus); outline-offset: -2px; }
+.search-keys { display: none; }
+@media (min-width: 900px) {
+  /* a centred sheet on a wide window, the page dimmed behind it (the panel frame keeps its dialog role, title and Close) */
+  .shell.search-open .rooms {
+    position: fixed; z-index: 60; inset: 9vh auto auto 50%; transform: translateX(-50%);
+    width: min(760px, calc(100vw - 160px)); max-height: 80vh; height: auto; flex: none;
+    border: var(--g-hair) solid var(--g-line-strong); border-radius: 18px; background: var(--g-paper); box-shadow: var(--g-shadow-2);
+    overflow: hidden; display: flex; flex-direction: column; padding-top: 0;
+  }
+  .shell.search-open .rooms .search-view { min-height: 0; flex: 1; display: flex; flex-direction: column; }
+  .shell.search-open .rooms .search-results { overflow-y: auto; min-height: 0; }
+  .shell.search-open .panel-scrim { display: block !important; position: fixed; inset: 0; z-index: 55; background: rgba(29, 26, 22, .18); border: 0; }
+  .search-keys { display: flex; gap: 14px; justify-content: flex-end; padding: 10px 16px; border-top: var(--g-hair) solid var(--g-line); font: 400 12px var(--g-font-ui); color: var(--g-ink-3); }
+  .search-keys kbd { font: 500 11px var(--g-font-ui); border: 1px solid var(--g-line-strong); border-radius: 5px; padding: 1px 5px; margin-right: 4px; }
+}
+
+/* ── Night and ink touches ── */
+@media (prefers-color-scheme: dark) {
+  .fd { background: radial-gradient(70% 40% at 50% -6%, rgba(214, 167, 92, .07), transparent 72%), var(--g-ground); }
+}
+:root[data-screen="ink"] .fd { background: var(--g-ground); }
+:root[data-screen="ink"] .message.mine .message-content, :root[data-screen="ink"] .compose-row { border-color: var(--g-ink); box-shadow: none; }
+:root[data-screen="ink"] .fd-door[data-sign="needs"] .fd-sign i { box-shadow: none; width: 12px; height: 12px; }
+:root[data-screen="ink"] .fd-door[data-sign="running"] .fd-sign i { box-shadow: inset 0 0 0 2px #000; }
+:root[data-screen="ink"] .fd-need-n { color: #000; border-color: #000; border-width: 1.5px; }
+:root[data-screen="ink"] .fd-needs-line::before { background: #000; }
+:root[data-screen="ink"] .shell.search-open .panel-scrim { background: rgba(0, 0, 0, .12); }
+
+/* ── The ensō: Uni's mark. Drawn once while Uni thinks; rests as a closed stroke. ── */
+.enso { flex: none; overflow: visible; }
+.enso path { fill: none; stroke: var(--g-accent); stroke-width: 3.4; stroke-linecap: round; }
+.enso.drawing path { stroke-dasharray: 100; stroke-dashoffset: 100; animation: g-enso 1600ms var(--g-ease) forwards; }
+@keyframes g-enso { to { stroke-dashoffset: 8; } }

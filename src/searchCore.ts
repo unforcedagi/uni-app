@@ -52,3 +52,9 @@ export function hitTarget(m: { ref: string; channel: string; root: string | null
   const inThread = !!m.root && m.root !== m.ref;
   return { channel: m.channel, root: inThread ? m.root : null, focus: m.ref };
 }
+
+/** T-335 glow-up: a note's snippet as clean prose: no heading marks, emphasis stars or link brackets. */
+export function plainSnippet(text: string): string {
+  return text.replace(/\[\[([^\]|]*\|)?([^\]]*)\]\]/g, "$2").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/(^|\s)#{1,6}\s+/g, "$1")
+    .replace(/(\*\*|__|\*|`)/g, "").replace(/^\s*[-*]\s+/gm, "").replace(/\s+/g, " ").trim();
+}

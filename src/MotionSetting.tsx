@@ -6,6 +6,6 @@ export default function MotionSetting() {
   const system = useCalmBySystem();
   return <label className="settings-check">
     <input type="checkbox" checked={chosen} onChange={(e) => setCalmChosen(e.target.checked)} />
-    <span>Calm screen<small>{system && !chosen ? "Already calm: this device asks for less motion." : "Nothing moves or glides; for a slow screen like the Daylight."}</small></span>
+    <span>Calm screen<small>{system && !chosen ? "Already calm: this device asks for less motion." : "Nothing moves or glides, and pages turn to black ink on white; for a slow screen like the Daylight."}</small></span>
   </label>;
 }

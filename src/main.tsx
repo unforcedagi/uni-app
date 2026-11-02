@@ -4,6 +4,9 @@ import App from "./App";
 import UpdateChecks from "./UpdateNotice";
 import { migrateHomeLayout } from "./areas/homeLayout";
 import { startMotion } from "./motion";
+import { startTide } from "./glow/tide";
+// T-335 glow-up: the look's tokens and fonts, after every other stylesheet the entry pulls in
+import "./glow/glow.css";
 
 /** A render error in remote content must not blank the whole app. */
 class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { error: Error | null }> {
@@ -28,6 +31,8 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { err
 migrateHomeLayout();
 // T-335: calm or not, on the root before the first paint
 startMotion();
+// T-335 glow-up: the accent's hue for the time of day
+startTide();
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
