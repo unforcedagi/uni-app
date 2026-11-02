@@ -152,6 +152,11 @@ test('the eye shows and hides what was typed; the value sent is unchanged, and i
   });
   await expect(field).toHaveAttribute('type', 'password');
   await expect(eye).toHaveAttribute('aria-pressed', 'false');
+  // ...and when the window loses focus (switching apps on a desktop)
+  await press();
+  await expect(field).toHaveAttribute('type', 'text');
+  await page.evaluate(() => window.dispatchEvent(new Event('blur')));
+  await expect(field).toHaveAttribute('type', 'password');
 
   // Shown, then Send; the first send fails, so the field comes back: empty and hidden.
   await press();

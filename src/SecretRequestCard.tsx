@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { DoneCard, PendingCard, QuietCard } from "./CompactCard";
 import { EyeIcon, EyeOffIcon } from "./Icons";
@@ -13,7 +13,7 @@ import { fingerprint, type SecretReceipt, type SecretRequest } from "./secretReq
 // signed by any other key (a member who calls itself "Uni") gets a warning, not a button. `send_secret` re-checks both
 // in Rust, and `secret_pin` refuses a second key.
 // T-335: the eye button shows what was typed, to check it. It starts hidden and hides again on Send and when the app goes
-// to the background. Only the same input's type flips (never a remount): Chromium on Android then tells the keyboard it's a
+// to the background or the window loses focus. Only the same input's type flips (never a remount): Chromium on Android then tells the keyboard it's a
 // visible password (TYPE_TEXT_VARIATION_VISIBLE_PASSWORD), so suggestions and learning stay off while it's shown.
 
 type Props = {
@@ -31,11 +31,16 @@ export function SecretRequestCard({ channel, requestRef, authorName, receipts, p
   const [phase, setPhase] = useState<"idle" | "sending" | "sent" | "forgetting" | "forget-sent">("idle");
   const [error, setError] = useState<string | null>(null);
   const [shown, setShown] = useState(false);
+  const fieldId = useId();
   useEffect(() => {
-    const hide = () => { if (document.visibilityState === "hidden") setShown(false); };
-    document.addEventListener("visibilitychange", hide);
-    return () => document.removeEventListener("visibilitychange", hide);
-  }, []);
+    if (!shown) return;
+    const hide = () => setShown(false);
+    const away = () => { if (document.visibilityState === "hidden") hide(); };
+    document.addEventListener("visibilitychange", away);
+    window.addEventListener("pagehide", hide);
+    window.addEventListener("blur", hide);
+    return () => { document.removeEventListener("visibilitychange", away); window.removeEventListener("pagehide", hide); window.removeEventListener("blur", hide); };
+  }, [shown]);
   useEffect(() => {
     let live = true;
     invoke<Verified>("secret_request", { channel, request: requestRef })
@@ -120,12 +125,12 @@ export function SecretRequestCard({ channel, requestRef, authorName, receipts, p
                 answer it here. Only the key you trusted before may ask; another one goes in the app's secret-requesters file by hand.</p>
           : <form className="secret-form" onSubmit={(e) => { e.preventDefault(); if (value) void send(); }}>
               <span className="secret-field">
-                <input id={`secret-${requestRef}`} type={shown ? "text" : "password"} aria-label={`Value for ${request.label}`}
+                <input id={fieldId} type={shown ? "text" : "password"} aria-label={`Value for ${request.label}`}
                   placeholder="Paste or type it here" value={value}
                   onChange={(e) => setValue(e.target.value)} autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}
                   data-1p-ignore="" data-lpignore="true" disabled={phase === "sending"} />
                 <button type="button" className="secret-reveal" aria-label="Show what you typed" aria-pressed={shown}
-                  aria-controls={`secret-${requestRef}`} title={shown ? "Hide" : "Show"} disabled={phase === "sending"}
+                  aria-controls={fieldId} disabled={phase === "sending"}
                   onPointerDown={(e) => e.preventDefault()} onClick={() => setShown((v) => !v)}>
                   {shown ? <EyeOffIcon /> : <EyeIcon />}
                 </button>
