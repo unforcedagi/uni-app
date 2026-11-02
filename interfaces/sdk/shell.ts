@@ -3,8 +3,7 @@
 // Any agent can build its own interface on this: a bundle of HTML, JS and CSS, signed with the agent's key, that
 // talks to the person's shell only through these calls. The shell grants each interface capabilities by name
 // (`rooms.read`, `rooms.send`, ...); a call outside the grants is refused by the shell, not by this file.
-import { invoke } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { Channel, invoke } from "@tauri-apps/api/core";
 
 /** The shell command API this bundle was built against. A shell with another one is refused at boot. */
 export const SHELL_API = 1;
@@ -48,10 +47,14 @@ export const shell = {
     letters: (channel: string, limit = 40) => call<Letter[]>("get_messages", { channel, root: null, limit }),
     send: (channel: string, body: string) => call<Letter>("post_message", { channel, body, replyTo: null, recipients: [] }),
     markRead: (channel: string) => call<void>("mark_read", { channel }),
-    /** New messages, edits and room changes as they happen. The payload says where, not what: re-read the room. */
-    async watch(on: (p: Live) => void): Promise<UnlistenFn> {
+    /** New messages, edits and room changes as they happen, sent to this page only (an interface can't listen to
+     *  the app's events). The payload says where, not what: re-read the room. */
+    async watch(on: (p: Live) => void): Promise<() => void> {
       await call("live_start").catch(() => {});
-      return listen<Live>("uni://live", (e) => on(e.payload));
+      const events = new Channel<Live>();
+      events.onmessage = on;
+      await call("live_watch", { onEvent: events });
+      return () => { events.onmessage = () => {}; };
     },
   },
   interfaces: {

@@ -71,7 +71,7 @@ pub fn capability(cmd: &str) -> Option<&'static str> {
         #[cfg(all(debug_assertions, target_os = "linux"))]
         c if c.starts_with("t76_") => "shell",
         "identity_status" | "get_identity" | "get_npub" => "identity.read",
-        "get_rooms" | "get_messages" | "get_members" | "refresh" | "mark_read" | "load_older" | "search" | "live_start" | "live_stop" | "relay_origin" => "rooms.read",
+        "get_rooms" | "get_messages" | "get_members" | "refresh" | "mark_read" | "load_older" | "search" | "live_start" | "live_stop" | "live_watch" | "relay_origin" => "rooms.read",
         "post_message" | "send_typing" => "rooms.send",
         "edit_message" | "delete_message" => "rooms.edit",
         "vault_note" | "vault_search" | "vault_list" | "vault_paths" | "vault_query" | "vault_query_meta" | "vault_subtree_nodes" | "vault_subtree_tasks" => "vault.read",

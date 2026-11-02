@@ -297,6 +297,10 @@ async function openPlace(id: string) {
 }
 
 function drawSheet(room: Room, loading: boolean) {
+  // A redraw (a letter arriving, say) keeps the letter being written, and the caret in it.
+  const old = sheet.dataset.room === room.id ? sheet.querySelector<HTMLTextAreaElement>(".compose textarea") : null;
+  const draft = old ? { value: old.value, focused: document.activeElement === old, start: old.selectionStart, end: old.selectionEnd } : null;
+  sheet.dataset.room = room.id;
   sheet.replaceChildren();
   const head = el("div", { class: "sheet-head" });
   head.append(el("h2", {}, room.name));
@@ -323,12 +327,18 @@ function drawSheet(room: Room, loading: boolean) {
   box.addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); form.requestSubmit(); } });
   sheet.append(head, list, form);
   list.scrollTop = list.scrollHeight;
+  if (draft) {
+    box.value = draft.value;
+    if (draft.focused) { box.focus(); box.setSelectionRange(draft.start, draft.end); }
+  }
 }
 
 function closePlace() {
+  const was = app.open;
   app.open = null;
   sheet.hidden = true;
-  (meadow.querySelector(`[data-room="${CSS.escape(app.rooms[0]?.id ?? "")}"]`) as SVGGElement | null)?.focus();
+  delete sheet.dataset.room;
+  (meadow.querySelector(`.place[data-room="${CSS.escape(was ?? "")}"]`) as SVGGElement | null)?.focus();
 }
 
 async function sendLetter(room: Room, box: HTMLTextAreaElement, button: HTMLButtonElement) {
@@ -357,7 +367,7 @@ function fly(from: { x: number; y: number }, id: string, way: "out" | "in") {
   const box = meadow.getBoundingClientRect(), vb = meadow.viewBox.baseVal;
   const k = vb.width ? box.width / vb.width : 1;
   const to = { x: box.left + place.head.x * k, y: box.top + place.head.y * k };
-  const [a, b] = way === "out" ? [from, to] : [to, from].reverse() as [typeof from, typeof from];
+  const [a, b] = [from, to];
   const moth = el("div", { class: `moth ${way}`, "aria-hidden": "true" });
   moth.innerHTML = `<svg viewBox="-20 -14 40 28"><path class="wing" d="M0 0 C -6 -14 -20 -12 -16 -2 C -14 4 -6 4 0 0Z"/><path class="wing r" d="M0 0 C 6 -14 20 -12 16 -2 C 14 4 6 4 0 0Z"/><path class="wing low" d="M0 1 C -5 8 -12 10 -10 4Z"/><path class="wing low r" d="M0 1 C 5 8 12 10 10 4Z"/><ellipse rx="1.6" ry="6" cy="1" fill="#3b3a2c"/></svg>`;
   document.body.append(moth);

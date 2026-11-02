@@ -572,6 +572,21 @@ static LIVE: std::sync::Mutex<Option<uni_core::live::StopSender>> = std::sync::M
 static OUTBOX: std::sync::Mutex<Option<tokio::sync::mpsc::UnboundedSender<nostr::Event>>> =
     std::sync::Mutex::new(None);
 
+/// T-305: installed interfaces' pages that asked for live events (`live_watch`), each by its webview's label.
+static LIVE_WATCHERS: std::sync::Mutex<Vec<(String, tauri::ipc::Channel<LivePayload>)>> = std::sync::Mutex::new(Vec::new());
+
+/// T-305: live events for an installed interface's page. Interface windows may not listen to app events (an event
+/// goes to every window that listens, whatever its grants); this sends them through the gate instead, only to the
+/// page that asked, and only while its interface may read rooms (checked again on every event). Uni's pages keep
+/// listening to `uni://live`.
+#[tauri::command]
+fn live_watch(webview: tauri::Webview, on_event: tauri::ipc::Channel<LivePayload>) {
+    if let Ok(mut watchers) = LIVE_WATCHERS.lock() {
+        watchers.retain(|(label, _)| label != webview.label());
+        watchers.push((webview.label().to_string(), on_event));
+    }
+}
+
 #[derive(Clone, Serialize)]
 struct LivePayload {
     /// `message`, `edit`, `delete`, `rooms`, `profiles`, `status`.
@@ -727,6 +742,11 @@ async fn live_start(app: tauri::AppHandle) -> Result<bool, String> {
                                         preview,
                                     });
                                 }
+                            }
+                            if let Ok(mut watchers) = LIVE_WATCHERS.lock() {
+                                use tauri::Manager;
+                                let gate = forward_app.state::<std::sync::Arc<ota::Ota>>();
+                                watchers.retain(|(label, ch)| gate.permit(label, "live_watch").is_ok() && ch.send(payload.clone()).is_ok());
                             }
                             let _ = forward_app.emit("uni://live", payload);
                         }
@@ -2824,8 +2844,8 @@ fn webview_runtime() -> String {
 /// ICE/TURN request. WebKitGTK ships with `enable-webrtc` off; this makes that
 /// explicit so a build or distro default can't silently turn it on. The
 /// in-app sandbox self-test (src/interface/selftest) is the proof, not this call.
-#[cfg(target_os = "linux")]
-/// T-305: the same Linux hardening as the configured windows get at setup, for a window opened later (an interface's).
+/// Then the window's `ipc` message handler is closed (`close_ipc_handler`). Every window gets both: the configured
+/// ones at setup, and T-305's interface windows when they open.
 #[cfg(target_os = "linux")]
 pub(crate) fn harden_window(window: &tauri::WebviewWindow) {
     use webkit2gtk::{SettingsExt, WebViewExt};
@@ -2836,19 +2856,6 @@ pub(crate) fn harden_window(window: &tauri::WebviewWindow) {
         }
     });
     close_ipc_handler(window);
-}
-
-fn disable_webrtc(app: &tauri::App) {
-    use tauri::Manager;
-    use webkit2gtk::{SettingsExt, WebViewExt};
-    for (_, window) in app.webview_windows() {
-        let _ = window.with_webview(|webview| {
-            if let Some(settings) = webview.inner().settings() {
-                settings.set_enable_webrtc(false);
-                settings.set_enable_media_stream(false);
-            }
-        });
-    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -2899,12 +2906,9 @@ pub fn run() {
             t76::replace_window(_app)?;
             #[cfg(target_os = "linux")]
             {
-                disable_webrtc(_app);
-                {
-                    use tauri::Manager;
-                    for (_, window) in _app.webview_windows() {
-                        close_ipc_handler(&window);
-                    }
+                use tauri::Manager;
+                for (_, window) in _app.webview_windows() {
+                    harden_window(&window);
                 }
             }
             // T-305: the interface the person left showing opens in its own window in place of Uni's.
@@ -2963,6 +2967,7 @@ pub fn run() {
             live_start,
             send_typing,
             live_stop,
+            live_watch,
             load_older,
             edit_message,
             delete_message,

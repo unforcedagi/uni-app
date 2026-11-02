@@ -1,11 +1,9 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "interfaces",
-  "description": "T-305: an installed interface's own window (`iface-<id>`). Live events only: no clipboard, notifications or other plugins. App commands pass the shell's own gate, which allows only what the person granted that interface (src/iface.rs).",
+  "description": "T-305: an installed interface's own window (`iface-<id>`). No plugins at all, not even event listening: an app event goes to every window that listens, whatever its grants, so live events reach an interface through the gated `live_watch` command instead. App commands pass the shell's own gate, which allows only what the person granted that interface (src/iface.rs).",
   "windows": [
     "iface-*"
   ],
-  "permissions": [
-    "core:event:default"
-  ]
+  "permissions": []
 }

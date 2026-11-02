@@ -30,6 +30,7 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, OnceLock, RwLock};
 use std::time::Duration;
 
@@ -534,8 +535,9 @@ pub struct Choice {
 }
 
 impl Choice {
+    const BUILT_IN: Choice = Choice { bundle: None, dir: None };
     fn built_in() -> Choice {
-        Choice { bundle: None, dir: None }
+        Choice::BUILT_IN
     }
 }
 
@@ -559,6 +561,7 @@ pub const SCHEME: &str = "iface";
 const IFACE_CSP: &str = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src ipc: http://ipc.localhost; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'";
 
 /// The URL of interface `id`'s page `path`.
+#[cfg_attr(mobile, allow(dead_code))]
 pub fn iface_url(id: &str, path: &str) -> url::Url {
     #[cfg(any(windows, target_os = "android"))]
     let base = format!("http://{SCHEME}.localhost/");
@@ -641,17 +644,25 @@ fn activate_iface(root: &Path, id: &str) -> Result<Live, String> {
     let i = iface::find(root, id).ok_or_else(|| format!("interface {id} is not installed"))?;
     let dir = iface::dir(root, id);
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    // Held before its records are touched: starting it would put it on trial, and retries would wear it out. What it
+    // says it needs is read unverified here; that can only hold a bundle back, never let one in.
+    let held = |b: &Bundle| b.meta.requires.iter().find(|c| !i.grants.contains(c)).map(|c| format!("interface {id} {} needs {c}, which the person hasn't granted; held", b.meta.version));
+    if let Some(e) = ["next", "current"].iter().find_map(|n| read_pair(&dir, n).and_then(|(a, _)| unpack(&a).ok())).as_ref().and_then(held) {
+        return Err(e);
+    }
     let b = activate(&dir, &i.pubkey, &none_built_in(), SHELL_API).ok_or_else(|| format!("interface {id} has no bundle it can serve"))?;
-    if let Some(c) = b.meta.requires.iter().find(|c| !i.grants.contains(c)) {
-        return Err(format!("interface {id} {} needs {c}, which the person hasn't granted; held", b.meta.version));
+    if let Some(e) = held(&b) {
+        return Err(e);
     }
     Ok(Live { bundle: Arc::new(b), dir, grants: i.grants })
 }
 
 /// Shared between the asset provider, the command gate and the commands.
 pub struct Ota {
-    /// Uni's web layer, chosen once per launch (`None` until then); replaced only when Uni's own bundle is refused.
-    choice: RwLock<Option<Arc<Choice>>>,
+    /// Uni's web layer, chosen once per launch.
+    chosen: OnceLock<Choice>,
+    /// Set when Uni's bundle is refused at runtime: everything after is served from the built-in assets.
+    dropped: AtomicBool,
     /// Installed interfaces running now, by id. Each has its own window; the gate finds a caller's grants here.
     live: RwLock<HashMap<String, Arc<Live>>>,
     ready: (Mutex<bool>, Condvar),
@@ -664,7 +675,8 @@ pub struct Ota {
 impl Ota {
     fn new() -> Arc<Ota> {
         Arc::new(Ota {
-            choice: RwLock::new(None),
+            chosen: OnceLock::new(),
+            dropped: AtomicBool::new(false),
             live: RwLock::new(HashMap::new()),
             ready: (Mutex::new(false), Condvar::new()),
             root: OnceLock::new(),
@@ -675,15 +687,11 @@ impl Ota {
 
     fn init(&self, root: PathBuf, builtin: semver::Version, pubkey: &str) {
         let _ = std::fs::create_dir_all(&root);
-        if self.choice.read().unwrap_or_else(|e| e.into_inner()).is_some() {
+        if self.chosen.get().is_some() {
             log("setup came after the first page request; the built-in web layer stays for this launch");
         } else {
             let bundle = activate(&root, pubkey, &builtin, SHELL_API).map(Arc::new);
-            let chosen = Choice { dir: bundle.as_ref().map(|_| root.clone()), bundle };
-            let mut slot = self.choice.write().unwrap_or_else(|e| e.into_inner());
-            if slot.is_none() {
-                *slot = Some(Arc::new(chosen));
-            } else {
+            if self.chosen.set(Choice { dir: bundle.as_ref().map(|_| root.clone()), bundle }).is_err() {
                 // A page request timed out while this ran and fixed the built-in layer; the bundle stays for next launch.
                 log("setup finished after the first page request timed out; the built-in web layer stays for this launch");
             }
@@ -697,18 +705,16 @@ impl Ota {
 
     /// Uni's web layer, once launch has chosen. Waits briefly for that choice. On timeout the built-in layer is
     /// fixed for the whole launch, so one page never mixes built-in and bundle files.
-    fn current(&self) -> Arc<Choice> {
-        if let Some(c) = self.choice.read().unwrap_or_else(|e| e.into_inner()).as_ref() {
-            return c.clone();
+    fn current(&self) -> &Choice {
+        if self.dropped.load(Ordering::Acquire) {
+            return &Choice::BUILT_IN;
         }
-        let (lock, cvar) = &self.ready;
-        let guard = lock.lock().unwrap_or_else(|e| e.into_inner());
-        let _ = cvar.wait_timeout_while(guard, self.wait, |ready| !*ready);
-        self.choice.write().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(|| Arc::new(Choice::built_in())).clone()
-    }
-
-    fn set(&self, c: Choice) {
-        *self.choice.write().unwrap_or_else(|e| e.into_inner()) = Some(Arc::new(c));
+        if self.chosen.get().is_none() {
+            let (lock, cvar) = &self.ready;
+            let guard = lock.lock().unwrap_or_else(|e| e.into_inner());
+            let _ = cvar.wait_timeout_while(guard, self.wait, |ready| !*ready);
+        }
+        self.chosen.get_or_init(Choice::built_in)
     }
 
     fn live(&self, id: &str) -> Option<Arc<Live>> {
@@ -764,7 +770,7 @@ impl<R: Runtime> Assets<R> for OtaAssets<R> {
             Ok(d) => self.ota.init(d.join("ota"), builtin, PUBKEY),
             Err(e) => {
                 log(format!("no app data dir ({e}); serving the built-in web layer"));
-                self.ota.set(Choice::built_in());
+                let _ = self.ota.chosen.set(Choice::built_in());
                 let (lock, cvar) = &self.ota.ready;
                 *lock.lock().unwrap_or_else(|e| e.into_inner()) = true;
                 cvar.notify_all();
@@ -775,16 +781,14 @@ impl<R: Runtime> Assets<R> for OtaAssets<R> {
     fn get(&self, key: &AssetKey) -> Option<Cow<'_, [u8]>> {
         match &self.ota.current().bundle {
             // Only the bundle's own files: never a built-in file mixed into a bundle's page.
-            Some(b) => b.get(key.as_ref()).map(|bytes| Cow::Owned(bytes.to_vec())),
+            Some(b) => b.get(key.as_ref()).map(Cow::Borrowed),
             None => self.builtin.get(key),
         }
     }
 
     fn iter(&self) -> Box<AssetsIter<'_>> {
         match &self.ota.current().bundle {
-            Some(b) => Box::new(
-                b.files.iter().map(|(k, v)| (Cow::Owned(format!("/{k}")), Cow::Owned(v.clone()))).collect::<Vec<_>>().into_iter(),
-            ),
+            Some(b) => Box::new(b.files.iter().map(|(k, v)| (Cow::Owned(format!("/{k}")), Cow::Borrowed(v.as_slice())))),
             None => self.builtin.iter(),
         }
     }
@@ -862,7 +866,7 @@ pub fn ota_reject(app: tauri::AppHandle, window: tauri::WebviewWindow, ota: taur
         remove_pair(&dir, "current");
     }
     if id == UNI {
-        ota.set(Choice::built_in());
+        ota.dropped.store(true, Ordering::Release);
         return window.eval("location.reload()").map_err(|e| e.to_string());
     }
     ota.live.write().unwrap_or_else(|e| e.into_inner()).remove(&id);
@@ -933,15 +937,24 @@ pub async fn iface_use(app: tauri::AppHandle, window: tauri::WebviewWindow, ota:
     if iface_of(window.label()) == id {
         return Ok(());
     }
+    if cfg!(mobile) {
+        return Err("switching interfaces needs a window per interface; not on mobile yet".into());
+    }
     if id != UNI {
         if let Err(e) = start_iface(&ota, root, &id).await {
             log(&e);
             return Err(format!("{e}; Uni stays"));
         }
     }
+    // Recorded only once its window is open, so the next launch never reaches for an interface that didn't open.
+    if let Err(e) = replace_window(&app, &window, &id) {
+        log(format!("interface {id} window: {e}"));
+        ota.live.write().unwrap_or_else(|e| e.into_inner()).remove(&id);
+        return Err(format!("{id} couldn't open: {e}"));
+    }
     iface::set_active(root, &id);
     log(format!("switched to interface {id}"));
-    replace_window(&app, &window, &id)
+    Ok(())
 }
 
 /// At launch, after the windows from the config exist: when the person left an installed interface showing, start
@@ -960,7 +973,11 @@ pub fn open_active(app: &tauri::App, ota: &Ota) {
                 Ok(()) => uni.iter().for_each(|w| {
                     let _ = w.destroy();
                 }),
-                Err(e) => log(format!("interface {id} window: {e}")),
+                Err(e) => {
+                    log(format!("interface {id} window: {e}; Uni instead"));
+                    ota.live.write().unwrap_or_else(|e| e.into_inner()).remove(&id);
+                    iface::set_active(root, UNI);
+                }
             }
         }
         Err(e) => {
@@ -1511,7 +1528,6 @@ mod tests {
         // Garden steps aside (ota_reject) or asks for Uni (iface_use): the shell stops it and opens Uni's window.
         // Until its window is gone, Garden's document is still running and can still call the shell (Codex iface-r1 P1).
         ota.live.write().unwrap().remove("garden");
-        ota.set(Choice::built_in());
         assert!(ota.permit("iface-garden", "journal_save_text").is_err(), "Garden's still-running document got a Uni-only command");
         assert!(ota.permit("iface-garden", "post_message").is_err(), "a stopped interface keeps no grants");
         assert_eq!(ota.permit("iface-garden", "ota_status"), Ok(()));
@@ -1526,7 +1542,7 @@ mod tests {
         let a = bundle("0.1.0", 1);
         let b = open(&k.pk, &a, &sign(&k, &a), &none_built_in(), 1).unwrap();
         ota.live.write().unwrap().insert("garden".into(), Arc::new(Live { bundle: Arc::new(b), dir: PathBuf::new(), grants: vec![] }));
-        ota.set(Choice::built_in());
+        let _ = ota.chosen.set(Choice::built_in());
         // Not on Uni's own scheme, where any Uni page could fetch it or load it as a script, with Uni's powers
         // (Codex iface-r2 P1).
         let assets = OtaAssets::<tauri::test::MockRuntime> { builtin: Box::new(NoAssets), ota: ota.clone() };

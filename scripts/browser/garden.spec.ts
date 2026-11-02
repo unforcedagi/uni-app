@@ -25,7 +25,8 @@ async function boot(page: Page, opts: { shellApi?: number; deny?: string[] } = {
     };
     w.calls = [];
     w.__cbs = []; w.__listeners = {};
-    w.__live = (payload: any) => { for (const h of w.__listeners['uni://live'] ?? []) w.__cbs[h]?.({ event: 'uni://live', id: 1, payload }); };
+    w.__watchers = [];
+    w.__live = (payload: any) => { for (const c of w.__watchers) c.onmessage(payload); };
     w.__arrive = (channel: string, who: string, body: string) => {
       (w.__letters[channel] ??= []).push(letter(channel, who, 0, body));
       const r = w.__rooms.find((x: any) => x.id === channel); r.unread += 1; r.last_ts = Math.floor(Date.now() / 1000); r.last_message = body;
@@ -36,10 +37,11 @@ async function boot(page: Page, opts: { shellApi?: number; deny?: string[] } = {
       transformCallback: (cb: any) => { w.__cbs.push(cb); return w.__cbs.length - 1; },
       invoke: async (cmd: string, args: any) => {
         w.calls.push({ cmd, args });
-        const cap = ({ get_rooms: 'rooms.read', get_messages: 'rooms.read', refresh: 'rooms.read', mark_read: 'rooms.read', live_start: 'rooms.read', post_message: 'rooms.send' } as Record<string, string>)[cmd];
+        const cap = ({ get_rooms: 'rooms.read', get_messages: 'rooms.read', refresh: 'rooms.read', mark_read: 'rooms.read', live_start: 'rooms.read', live_watch: 'rooms.read', post_message: 'rooms.send' } as Record<string, string>)[cmd];
         if (cap && deny.includes(cap)) throw `not granted: ${cap} (interface garden)`;
         switch (cmd) {
-          case 'plugin:event|listen': (w.__listeners[args.event] ??= []).push(args.handler); return args.handler;
+          case 'plugin:event|listen': throw 'event.listen not allowed (an interface window has no plugins)';
+          case 'live_watch': w.__watchers.push(args.onEvent); return null;
           case 'ota_status': return { shell_api: shellApi, iface: 'garden', builtin: '0.1.84', active: { version: '0.1.0', api: 1 }, channel: null };
           case 'get_rooms': return JSON.parse(JSON.stringify(w.__rooms));
           case 'get_messages': return JSON.parse(JSON.stringify(w.__letters[args.channel] ?? []));
@@ -87,14 +89,21 @@ test('a place opens to its letters, and a letter sent goes to that room through 
   await shot(page, '03-sent');
 });
 
-test('a letter arriving live adds a firefly to its place and shows in the open room', async ({ page }) => {
+test('a letter arriving live adds a firefly to its place and shows in the open room, keeping the letter being written', async ({ page }) => {
   await boot(page);
   await expect(flies(page, 'r-shop')).toHaveCount(2);
+  await expect.poll(() => page.evaluate(() => (window as any).__watchers.length)).toBe(1);
   await page.evaluate(() => (window as any).__arrive('r-shop', 'Ilse', 'Clamps are back on the wall.'));
   await expect(flies(page, 'r-shop')).toHaveCount(3);
   await place(page, 'Night Walks').click();
+  const box = page.getByRole('textbox', { name: 'Write a letter to Night Walks' });
+  await box.fill('Half a letter');
   await page.evaluate(() => (window as any).__arrive('r-walks', 'Juniper', 'Two owls tonight.'));
   await expect(page.getByRole('region', { name: 'Letters in Night Walks' }).getByText('Two owls tonight.')).toBeVisible();
+  await expect(box).toHaveValue('Half a letter');
+  await expect(box).toBeFocused();
+  await page.getByRole('button', { name: 'Close letters' }).click();
+  await expect(place(page, 'Night Walks')).toBeFocused();
 });
 
 test('Back to Uni asks the shell to switch interfaces', async ({ page }) => {
