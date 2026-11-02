@@ -4,7 +4,7 @@
 // Recipe (all test accounts and throwaway keys; a scratch copy of the bridge with its own ledger, spool and rules):
 //   1. a scratch bridge whose rules hold mail to the test owner's address for approval;
 //   2. scripts/browser/mail-live-park.py parks a send with two files as the test "uni" key -> park.json;
-//   3. mail_ipc_proxy <port> <scratch bridge> <owner key file> <cache dir>;
+//   3. mail_ipc_proxy <port> <scratch bridge> <owner key file> <cache dir> http://127.0.0.1:<MAIL_LIVE_PORT or 1436>;
 //   4. MAIL_LIVE_PROXY=http://127.0.0.1:<port> MAIL_LIVE_PARK=park.json MAIL_LIVE_FILES=<dir of the two files>
 //      [MAIL_LIVE_SHOTS=<dir>] npx playwright test --config playwright.maillive.config.ts
 // It checks: the files are listed with their names, kinds and sizes; opening one hands the opener exactly the listed

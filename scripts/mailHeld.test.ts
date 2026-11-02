@@ -34,7 +34,7 @@ for (const [why, p] of [["files but plain", held("op-a", { plain: true, files: [
   assert.equal(canApprove(uni(ALL), p), false, why);
 }
 assert.equal(canApprove(uni(ALL), held("op-a", { files: undefined })), true, "a listing from before files: plain text as before");
-assert.deepEqual(["rota.csv", "Budget.PDF", "notes", "scan"].map((n, i) => fileKind(n, ["text/csv", "application/pdf", "text/plain", "application/octet-stream"][i])), ["CSV", "PDF", "PLAIN", "File"]);
+assert.deepEqual(["rota.csv", "Budget.PDF", "notes", "scan"].map((n, i) => fileKind(n, ["text/csv", "application/pdf", "text/plain", "application/octet-stream"][i])), ["CSV", "PDF", "Text", "File"]);
 assert.equal(fileKind("sheet", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"), "File");
 
 // what each answer says

@@ -445,40 +445,56 @@ where
     if let Some(why) = bytes_mismatch(&ext, &bytes) {
         return Err(refused(&why));
     }
-    let path = write_private(cache, &saved_name(name, &ext), &bytes).map_err(|e| invalid(format!("Uni couldn't save this attachment safely: {e}")))?;
-    open(&path).map_err(invalid)?;
-    Ok(path)
+    write_and_open(cache, &saved_name(name, &ext), &bytes, "attachment", open)
 }
 
 /// T-335: open file `index` of the held send whose draft is `draft_id` in Uni's account `account`, as `send.parked`
-/// listed it (`file`). The draft is read now and the file found at its place (its name and size must be the listed
-/// ones); its bytes must have the listed SHA-256, so what opens is exactly what approving sends. Then the same gates as
-/// any attachment from mail: name and type before the fetch, bytes before anything is written.
+/// listed it (`file`). The draft is read now and the file found among its attachments by its bytes: the one at that
+/// place first, then any other of the listed size. Only bytes with the listed SHA-256 open, so what opens is exactly
+/// what approving sends. Then the same gates as any file from mail: name and type before the fetch, bytes before
+/// anything is written.
 pub async fn open_held_file_in<O>(bridge: &MailBridge<'_>, cache: &Path, account: &str, draft_id: &str, index: usize, file: &super::HeldFile, open: O) -> MailResult<PathBuf>
 where
     O: FnOnce(&Path) -> std::result::Result<(), String>,
 {
-    let ext = checked_before_fetch(Some(&file.name), Some(&file.mime))?;
+    let held = |what: &str| invalid(format!("This app doesn't open {what} here, so you can't look inside this file. It is sent as listed."));
+    let ext = openable_extension(Some(&file.name)).map_err(|what| held(&what))?;
+    if declared_mismatch(&ext, Some(&file.mime)).is_some() {
+        return Err(held("a file whose type doesn't match its name"));
+    }
     check_id(account)?;
     check_id(draft_id)?;
     let calls = serde_json::json!([["Email/get", { "accountId": account, "ids": [draft_id], "properties": ["id", "attachments"] }, "g"]]);
     let (_, r) = bridge.jmap(calls).await?;
     super::accounts::answered_for(&r, "g", account)?;
     let changed = || invalid("This held send changed since it was listed: refresh Mail and look again.");
-    let draft = r.get("g").and_then(|g| g.get("list")).and_then(serde_json::Value::as_array).and_then(|l| l.first()).ok_or_else(changed)?;
-    let part = draft.get("attachments").and_then(serde_json::Value::as_array).and_then(|a| a.get(index)).ok_or_else(changed)?;
-    let blob_id = part.get("blobId").and_then(serde_json::Value::as_str).ok_or_else(changed)?;
-    if part.get("name").and_then(serde_json::Value::as_str) != Some(file.name.as_str()) || part.get("size").and_then(serde_json::Value::as_u64) != Some(file.size) {
-        return Err(changed());
+    let parts = r.get("g").and_then(|g| g.get("list")).and_then(serde_json::Value::as_array).and_then(|l| l.first())
+        .and_then(|d| d.get("attachments")).and_then(serde_json::Value::as_array).ok_or_else(changed)?;
+    let size_fits = |p: &serde_json::Value| p.get("size").and_then(serde_json::Value::as_u64).is_none_or(|n| n == file.size);
+    let candidates = parts.get(index).into_iter().chain(parts.iter().enumerate().filter(|(i, _)| *i != index).map(|(_, p)| p)).filter(|p| size_fits(p));
+    let mut found = None;
+    for part in candidates {
+        let Some(blob_id) = part.get("blobId").and_then(serde_json::Value::as_str) else { continue };
+        let bytes = bridge.blob_in(account, blob_id).await?;
+        if crate::media::sha256_hex(&bytes) == file.sha256 {
+            found = Some(bytes);
+            break;
+        }
     }
-    let bytes = bridge.blob_in(account, blob_id).await?;
-    if crate::media::sha256_hex(&bytes) != file.sha256 {
-        return Err(changed());
+    let bytes = found.ok_or_else(changed)?;
+    if bytes_mismatch(&ext, &bytes).is_some() {
+        return Err(invalid("This file's contents don't match its name, so Uni didn't open it. Ask Uni about it before you send."));
     }
-    if let Some(why) = bytes_mismatch(&ext, &bytes) {
-        return Err(refused(&why));
-    }
-    let path = write_private(cache, &saved_name(Some(&file.name), &ext), &bytes).map_err(|e| invalid(format!("Uni couldn't save this file safely: {e}")))?;
+    write_and_open(cache, &saved_name(Some(&file.name), &ext), &bytes, "file", open)
+}
+
+/// Write checked bytes as `name` in a new folder of their own in `cache` and hand the file to `open` (`what`: the
+/// word for it in a failure).
+fn write_and_open<O>(cache: &Path, name: &str, bytes: &[u8], what: &str, open: O) -> MailResult<PathBuf>
+where
+    O: FnOnce(&Path) -> std::result::Result<(), String>,
+{
+    let path = write_private(cache, name, bytes).map_err(|e| invalid(format!("Uni couldn't save this {what} safely: {e}")))?;
     open(&path).map_err(invalid)?;
     Ok(path)
 }

@@ -241,7 +241,7 @@ function HeldView({ e, acct, onBack, onDecide }: { e: HeldEntry; acct: AccountBo
   };
   const from = `Uni's address (${acct.name})`;
   const files = p.files ?? [];
-  const withFiles = files.length ? `, with ${files.length === 1 ? "its file" : `its ${files.length} files`}` : "";
+  const withFiles = files.length ? `, with its ${files.length === 1 ? "file" : filesWord(files.length)}` : "";
   return <section className="mail-thread mail-held" aria-label={`Held send: ${subjectLabel(f?.subject ?? "")}`}>
     <div className="mail-thread-bar">
       <button type="button" className="note-action mail-thread-back" onClick={onBack}>← Waiting</button>

@@ -5,8 +5,11 @@
 //! system opener: the answer is the opened file's name and SHA-256, so a test can compare it with what it sent.
 //! `t335_fetch_back {"text": …}` lists every message matching `text` in every account, with each attachment's SHA-256
 //! as fetched now: the proof that the sent copy carries the files byte for byte.
+//! It answers only the page it serves (`origin`, the Vite preview of playwright.maillive.config.ts by default) and
+//! callers with no Origin (curl, the spec's own Node side), and only JSON bodies, so another page in the same browser
+//! can't drive it: a form post has no JSON type, and a fetch from elsewhere carries its own Origin.
 //! Usage:
-//!   cargo run -p uni-core --example mail_ipc_proxy -- <port> <bridge url> <key file> <cache dir> [allowed origin]
+//!   cargo run -p uni-core --example mail_ipc_proxy -- <port> <bridge url> <key file> <cache dir> [origin]
 
 use std::path::{Path, PathBuf};
 
@@ -114,6 +117,15 @@ async fn answer(ctx: &Ctx, mut sock: tokio::net::TcpStream, origin: &str) {
         buf.extend_from_slice(&chunk[..n]);
     }
     let preflight = buf.starts_with(b"OPTIONS");
+    let head = String::from_utf8_lossy(&buf[..head_end]).to_ascii_lowercase();
+    let header = |name: &str| head.lines().find_map(|l| l.strip_prefix(name).map(|v| v.trim().to_string()));
+    let foreign = header("origin:").is_some_and(|o| o != origin.to_ascii_lowercase());
+    let json_body = header("content-type:").is_some_and(|t| t.starts_with("application/json"));
+    if foreign || (!preflight && !json_body) {
+        eprintln!("refused a request from {:?} ({:?})", header("origin:"), header("content-type:"));
+        let _ = sock.write_all(b"HTTP/1.1 403 Forbidden\r\ncontent-length: 0\r\nconnection: close\r\n\r\n").await;
+        return;
+    }
     let body = if preflight {
         String::new()
     } else {
@@ -142,7 +154,7 @@ async fn main() {
     let key = std::fs::read_to_string(args.next().expect(usage)).expect("key file");
     let keys = Keys::parse(key.trim()).expect("a 64-hex secret key");
     let cache = PathBuf::from(args.next().expect(usage));
-    let origin = args.next().unwrap_or_else(|| "*".into());
+    let origin = args.next().unwrap_or_else(|| "http://127.0.0.1:1436".into());
     eprintln!("mail_ipc_proxy on 127.0.0.1:{port} -> {bridge} as {}", keys.public_key().to_hex());
     let ctx = std::sync::Arc::new(Ctx { bridge, keys, cache });
     let listener = TcpListener::bind(("127.0.0.1", port)).await.expect("bind");

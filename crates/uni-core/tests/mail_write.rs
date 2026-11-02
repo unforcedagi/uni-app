@@ -306,16 +306,16 @@ async fn a_held_send_with_files_lists_them_opens_only_the_listed_bytes_and_appro
     assert_eq!(opened.as_deref(), Some(path.as_path()));
     assert_eq!(std::fs::read(&path).unwrap(), pdf);
     assert_eq!(path.file_name().unwrap(), "notes.pdf");
-    // the file at that place isn't the listed one (another name, or a listing for another index): nothing opens
     let opens = |i: usize, f: uni_core::mail::HeldFile| {
         let mail = &mail;
         let dir = cache.path().to_path_buf();
-        async move { uni_core::mail::open_held_file_in(mail, &dir, "U", draft, i, &f, |_| panic!("must not open")).await }
+        async move { uni_core::mail::open_held_file_in(mail, &dir, "U", draft, i, &f, |_| Ok(())).await }
     };
-    for (i, f) in [(0, h.files[1].clone()), (2, h.files[0].clone())] {
-        let e = opens(i, f).await.unwrap_err();
-        assert!(e.to_string().contains("changed since it was listed"), "{e}");
-    }
+    // found by its bytes, not its place: a listing whose order differs from the server's still opens the listed file
+    let p = opens(0, h.files[1].clone()).await.unwrap();
+    assert_eq!(std::fs::read(&p).unwrap(), pdf);
+    let p = opens(7, h.files[0].clone()).await.unwrap();
+    assert_eq!(std::fs::read(&p).unwrap(), csv);
     // the bytes on the server aren't the ones listed: nothing is written or opened
     let before = std::fs::read_dir(cache.path()).unwrap().count();
     {
@@ -326,6 +326,10 @@ async fn a_held_send_with_files_lists_them_opens_only_the_listed_bytes_and_appro
     let e = opens(0, h.files[0].clone()).await.unwrap_err();
     assert!(e.to_string().contains("changed since it was listed"), "{e}");
     assert_eq!(std::fs::read_dir(cache.path()).unwrap().count(), before);
+    // a listed file Uni won't open is refused before anything is fetched, in words for a file it is asking to send
+    let html = uni_core::mail::HeldFile { name: "page.html".into(), mime: "text/html".into(), ..h.files[0].clone() };
+    let e = opens(0, html).await.unwrap_err();
+    assert!(e.to_string().contains("It is sent as listed"), "{e}");
 
     // approve: by opId and the one fingerprint, nothing else; sent once
     let fp = h.fingerprint.clone().unwrap();

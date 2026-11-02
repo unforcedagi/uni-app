@@ -398,15 +398,17 @@ export function heldShownWhole(p: Parked): boolean {
 
 /** Send it is offered for this held send: the bridge offers it, and it shows the whole draft as it is now. */
 export function canApprove(a: AccountBoxes | undefined, p: Parked): boolean {
+  // a listed file this app won't open still counts as shown: its name, type and size are, and its bytes are bound to the
+  // fingerprint the approval sends, as the bridge's own allowlist decided what may be attached at all
   return can(a, "send.approve") && !!p.fingerprint && !!p.fields && !p.changed && !p.problem && heldShownWhole(p);
 }
 
-/** A file's kind in a word or two, from its name (the type the message declares when the name has none). */
+/** A file's kind in a word: its extension, or (a name without one) a plain word for the type it declares. */
 export function fileKind(name: string, mime: string): string {
   const ext = /\.([A-Za-z0-9]{1,8})$/.exec(name)?.[1];
   if (ext) return ext.toUpperCase();
-  const sub = mime.split(";")[0].split("/")[1] ?? "";
-  return sub && sub.length <= 10 && sub !== "octet-stream" ? sub.toUpperCase() : "File";
+  const type = mime.split(";")[0].trim().toLowerCase();
+  return type === "application/pdf" ? "PDF" : type.startsWith("image/") ? "Image" : type.startsWith("text/") ? "Text" : "File";
 }
 
 /** What deciding a held send did. `sent` and `declined` are final; `failed` says why and to ask #mail. */

@@ -169,17 +169,22 @@ pub struct HeldFile {
 /// The most files a held send is listed with here (the bridge takes at most 10).
 const MAX_HELD_FILES: usize = 20;
 
-/// A file name that reads as what it is: no control or bidi-formatting characters, which could make `x.exe` look
-/// like `exe.x`. The bridge strips them when it saves a draft; a listing that still has them isn't trusted.
+/// A file name that reads as what it is: no control, bidi-formatting or invisible characters, which could make
+/// `x.exe` look like `exe.x` or hide part of a name. The bridge strips them when it saves a draft; a listing that still has them isn't trusted.
 fn honest_name(name: &str) -> bool {
     !name.trim().is_empty()
         && name.chars().count() <= 255
-        && !name.chars().any(|c| c.is_control() || matches!(c, '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' | '\u{FEFF}' | '\u{061C}'))
+        && !name.chars().any(|c| {
+            c.is_control()
+                || matches!(c, '\u{00AD}' | '\u{034F}' | '\u{061C}' | '\u{115F}' | '\u{1160}' | '\u{17B4}' | '\u{17B5}' | '\u{180B}'..='\u{180F}'
+                    | '\u{200B}'..='\u{200F}' | '\u{2028}'..='\u{202E}' | '\u{2060}'..='\u{206F}' | '\u{3164}' | '\u{FE00}'..='\u{FE0F}' | '\u{FEFF}'
+                    | '\u{FFA0}' | '\u{FFF0}'..='\u{FFFB}' | '\u{E0000}'..='\u{E0FFF}')
+        })
 }
 
 /// `fields.attachments` of a `send.parked` entry: the files, or why they can't be shown (then nothing is approvable).
 fn held_files(fields: Option<&Value>) -> Result<Vec<HeldFile>, String> {
-    let Some(list) = fields.and_then(|f| f.get("attachments")) else { return Ok(Vec::new()) };
+    let Some(list) = fields.and_then(|f| f.get("attachments")).filter(|l| !l.is_null()) else { return Ok(Vec::new()) };
     let unreadable = || "the bridge's list of files for this send can't be read".to_string();
     let list = list.as_array().ok_or_else(unreadable)?;
     if list.len() > MAX_HELD_FILES {
@@ -192,10 +197,15 @@ fn held_files(fields: Option<&Value>) -> Result<Vec<HeldFile>, String> {
             if !honest_name(name) {
                 return Err("a file name has hidden characters".to_string());
             }
-            let mime = s("type").unwrap_or("application/octet-stream").to_ascii_lowercase();
+            let mime = match a.get("type") {
+                None | Some(Value::Null) => "application/octet-stream".to_string(),
+                Some(t) => t.as_str().ok_or_else(unreadable)?.to_ascii_lowercase(),
+            };
             let size = a.get("size").and_then(Value::as_u64).ok_or_else(unreadable)?;
             let sha256 = s("sha256").filter(|h| is_fingerprint(h)).ok_or_else(unreadable)?;
-            Ok(HeldFile { refused: super::refused_before_fetch(Some(name), Some(&mime)), name: name.to_string(), mime, size, sha256: sha256.to_string() })
+            // the same gate as opening any file from mail, in words for a file Uni is asking to send
+            let refused = super::refused_before_fetch(Some(name), Some(&mime)).map(|_| "This app doesn't open this kind of file, so you can't look inside it here. It is sent as listed.".to_string());
+            Ok(HeldFile { refused, name: name.to_string(), mime, size, sha256: sha256.to_string() })
         })
         .collect()
 }
@@ -217,7 +227,11 @@ fn parked_list(v: &Value, account: &str) -> MailResult<Vec<Parked>> {
             let op_id = s("opId").filter(|o| check_op_id(o).is_ok())?;
             let fingerprint = s("fingerprint");
             let fields: Option<DraftFields> = p.get("fields").and_then(|f| serde_json::from_value(f.clone()).ok());
-            let files = held_files(p.get("fields"));
+            let plain = p.get("plain").and_then(Value::as_bool);
+            // files go with a send that is text plus files and nothing else: the bridge says so with plain false
+            let files = held_files(p.get("fields")).and_then(|f| {
+                if f.is_empty() || plain == Some(false) { Ok(f) } else { Err("the bridge's answer about this send's files contradicts itself".to_string()) }
+            });
             // without what it says and a fingerprint of it, there is nothing to approve: say why instead
             let problem = s("problem")
                 .or_else(|| fingerprint.as_deref().is_some_and(|f| !is_fingerprint(f)).then(|| "the bridge's fingerprint for this send can't be read".to_string()))
@@ -232,7 +246,7 @@ fn parked_list(v: &Value, account: &str) -> MailResult<Vec<Parked>> {
                 fingerprint: if problem.is_some() { None } else { fingerprint },
                 changed: p.get("changed").and_then(Value::as_bool).unwrap_or(false),
                 fields: if problem.is_some() { None } else { fields },
-                plain: p.get("plain").and_then(Value::as_bool),
+                plain,
                 files: if problem.is_some() { Vec::new() } else { files.unwrap_or_default() },
                 problem,
                 op_id,
@@ -573,6 +587,17 @@ mod tests {
         let plain = json!({ "accountId": "U", "parked": [{ "opId": "0123456789abcdef", "fingerprint": fp, "plain": true,
             "fields": { "to": [], "cc": [], "bcc": [], "subject": "s", "text": "t" } }] });
         assert!(parked_list(&plain, "U").unwrap()[0].files.is_empty());
+        let mut null = plain.clone();
+        null["parked"][0]["fields"]["attachments"] = Value::Null;
+        let got = parked_list(&null, "U").unwrap();
+        assert!(got[0].problem.is_none() && got[0].files.is_empty(), "no list is no files");
+        // files with a plain verdict, or none: the answer contradicts itself, so nothing is approvable
+        for verdict in [json!(true), Value::Null] {
+            let mut v = with(json!([{ "name": "rota.csv", "type": "text/csv", "size": 1, "sha256": h1 }]));
+            v["parked"][0]["plain"] = verdict;
+            let got = parked_list(&v, "U").unwrap();
+            assert!(got[0].problem.is_some() && got[0].fingerprint.is_none() && got[0].files.is_empty());
+        }
         // anything that doesn't read as a file list: marked, no fields, no files, so nothing to approve
         for bad in [
             json!("rota.csv"),
@@ -582,6 +607,9 @@ mod tests {
             json!([{ "type": "text/csv", "size": 1, "sha256": h1 }]),
             json!([{ "name": "invoice\u{202E}fdp.exe", "type": "application/pdf", "size": 1, "sha256": h1 }]),
             json!([{ "name": "a\nb.csv", "type": "text/csv", "size": 1, "sha256": h1 }]),
+            json!([{ "name": "a\u{2028}b.csv", "type": "text/csv", "size": 1, "sha256": h1 }]),
+            json!([{ "name": "a\u{E0041}b.csv", "type": "text/csv", "size": 1, "sha256": h1 }]),
+            json!([{ "name": "a.csv", "type": 5, "size": 1, "sha256": h1 }]),
             json!(vec![json!({ "name": "a.csv", "type": "text/csv", "size": 1, "sha256": h1 }); 21]),
         ] {
             let got = parked_list(&with(bad.clone()), "U").unwrap();
