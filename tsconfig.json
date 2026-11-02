@@ -16,6 +16,6 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src"],
+  "include": ["src", "interfaces/sdk", "interfaces/garden/main.ts"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

@@ -8,6 +8,10 @@ const rust = readFileSync(new URL("../src-tauri/src/ota.rs", import.meta.url), "
 const m = rust.match(/^pub const SHELL_API: u32 = (\d+);$/m);
 assert.ok(m, "SHELL_API not found in ota.rs");
 assert.equal(Number(m[1]), SHELL_API, "src/ota.ts and src-tauri/src/ota.rs disagree on SHELL_API");
+// The interface SDK (interfaces/sdk/shell.ts, what other agents' bundles build on) says the same number.
+const sdk = readFileSync(new URL("../interfaces/sdk/shell.ts", import.meta.url), "utf8").match(/^export const SHELL_API = (\d+);$/m);
+assert.ok(sdk, "SHELL_API not found in interfaces/sdk/shell.ts");
+assert.equal(Number(sdk[1]), SHELL_API, "interfaces/sdk/shell.ts and src/ota.ts disagree on SHELL_API");
 // ota-bundle.sh reads the number from this exact line.
 assert.match(readFileSync(new URL("../src/ota.ts", import.meta.url), "utf8"), /^export const SHELL_API = \d+;$/m);
 

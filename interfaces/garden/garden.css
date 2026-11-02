@@ -1,0 +1,96 @@
+/* Garden: a night meadow. Moss and loam under a moon; blooms in fireweed, bluebell, marigold and lichen; letters on
+   pale lichen paper in a book face. One moment of motion: the moth that carries a letter. */
+:root {
+  --sky: #10232a;
+  --dusk: #1a3a3a;
+  --moss: #25493f;
+  --loam: #13271f;
+  --paper: #e6ebdd;
+  --ink: #22302a;
+  --glow: #f4f08a;
+  --moon: #f7f1d6;
+  --book: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", "URW Palladio L", "P052", Georgia, serif;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--sky); color: var(--moon); font-family: var(--book); }
+body { overflow: hidden; }
+#garden { position: fixed; inset: 0; background: radial-gradient(120% 70% at 78% 8%, #23484a 0%, var(--dusk) 30%, var(--sky) 62%); }
+
+.meadow { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.star { fill: var(--moon); animation: twinkle var(--tw) ease-in-out infinite alternate; }
+.blade { stroke: #3a6a52; stroke-width: 1.1; fill: none; stroke-linecap: round; opacity: .7; }
+.stem { stroke: #6b9c6a; stroke-width: 3; fill: none; stroke-linecap: round; }
+.stem.fern { stroke: #5d9a62; stroke-width: 2.6; }
+.ray { stroke: #d8d2bb; stroke-width: .9; opacity: .8; }
+.cap { filter: drop-shadow(0 0 6px currentColor); }
+.shade { fill: #08130f; opacity: .45; }
+
+.place { cursor: pointer; outline: none; }
+.place .hit { fill: transparent; }
+.place .halo { fill: none; stroke: none; pointer-events: none; }
+.place:hover .halo { fill: rgba(247, 241, 214, .06); }
+.place:focus-visible .halo { stroke: var(--moon); stroke-width: 2; stroke-dasharray: 4 6; }
+.place .plant { transition: transform .5s cubic-bezier(.2, .8, .2, 1); transform-origin: 0 0; }
+.place:hover .plant, .place:focus-visible .plant { transform: rotate(-2.5deg); }
+.path { fill: none; stroke: #b9a77a; stroke-opacity: .22; stroke-width: 9; stroke-linecap: round; stroke-dasharray: 1 16; }
+.name { cursor: pointer; fill: var(--moon); font: italic 18px var(--book); text-anchor: middle; paint-order: stroke; stroke: rgba(8, 19, 15, .85); stroke-width: 4px; stroke-linejoin: round; }
+.empty { fill: var(--moon); font: italic 20px var(--book); text-anchor: middle; opacity: .85; }
+.called { fill: none; stroke-width: 2; opacity: .9; animation: call 2.6s ease-out infinite; transform-box: fill-box; transform-origin: center; }
+
+.orbit { animation: orbit var(--d) linear infinite var(--dir); animation-delay: var(--o); transform-origin: 0 0; }
+.fly { animation: twinkle var(--tw) ease-in-out infinite alternate; }
+
+.top { position: absolute; top: 0; left: 0; right: 0; display: flex; justify-content: space-between; align-items: flex-start; gap: 16px;
+  padding: max(18px, env(safe-area-inset-top)) max(22px, env(safe-area-inset-right)) 0 max(22px, env(safe-area-inset-left)); pointer-events: none; }
+.title h1 { margin: 0; font-weight: 400; font-style: italic; font-size: clamp(40px, 7vw, 76px); line-height: .95; letter-spacing: -.01em; color: var(--moon); }
+.summary { margin: 6px 0 0 3px; font-size: 17px; opacity: .78; }
+.door { pointer-events: auto; font: 16px var(--book); color: var(--ink); background: var(--paper); border: 0; border-radius: 999px 999px 999px 999px;
+  padding: 11px 18px 11px 16px; min-height: 44px; cursor: pointer; box-shadow: 0 6px 20px rgba(0, 0, 0, .35); }
+.door::before { content: ""; display: inline-block; width: 10px; height: 14px; margin-right: 9px; vertical-align: -1px;
+  border: 1.6px solid var(--ink); border-bottom: 0; border-radius: 6px 6px 0 0; }
+.door:focus-visible, .send:focus-visible, .close:focus-visible, textarea:focus-visible { outline: 3px solid var(--glow); outline-offset: 2px; }
+
+.sheet { position: absolute; left: 50%; bottom: 0; transform: translateX(-50%); width: min(640px, 100%); max-height: min(66vh, 640px); display: flex; flex-direction: column;
+  background: var(--paper); color: var(--ink); border-radius: 22px 22px 0 0; box-shadow: 0 -18px 50px rgba(0, 0, 0, .45);
+  background-image: repeating-linear-gradient(90deg, rgba(34, 48, 42, .025) 0 1px, transparent 1px 7px), repeating-linear-gradient(0deg, rgba(34, 48, 42, .02) 0 1px, transparent 1px 11px);
+  border-top: 6px solid var(--bloom); padding-bottom: env(safe-area-inset-bottom); animation: rise .38s cubic-bezier(.2, .8, .2, 1); }
+.sheet[hidden] { display: none; }
+.sheet-head { display: flex; justify-content: space-between; align-items: baseline; padding: 18px 22px 6px; }
+.sheet-head h2 { margin: 0; font-weight: 400; font-style: italic; font-size: 30px; }
+.close { font: 15px var(--book); background: none; border: 0; color: var(--ink); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; min-height: 44px; padding: 0 4px; }
+.letters { list-style: none; margin: 0; padding: 6px 22px 10px; overflow-y: auto; flex: 1; }
+.letter { background: #f3f5ec; border-radius: 4px; padding: 14px 16px 10px; margin: 0 0 12px; box-shadow: 0 1px 0 rgba(34, 48, 42, .12), 0 6px 14px rgba(34, 48, 42, .08); transform: rotate(var(--tilt)); }
+.letter .body { margin: 0; font-size: 18px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+.letter .sig { margin: 8px 0 0; display: flex; justify-content: flex-end; gap: 10px; font-style: italic; font-size: 15px; color: #4a5a52; }
+.letter .when { opacity: .8; }
+.none { font-style: italic; font-size: 17px; padding: 8px 0 16px; color: #4a5a52; }
+.compose { display: flex; gap: 10px; padding: 10px 22px 18px; border-top: 1px solid rgba(34, 48, 42, .14); }
+.compose textarea { flex: 1; resize: none; font: 17px/1.45 var(--book); color: var(--ink); background: #f7f8f1; border: 1px solid rgba(34, 48, 42, .25); border-radius: 12px; padding: 10px 12px; }
+.send { font: 16px var(--book); color: var(--ink); background: var(--bloom); border: 0; border-radius: 12px; padding: 0 18px; min-height: 44px; cursor: pointer; }
+.send:disabled { opacity: .6; }
+.status { position: absolute; left: 22px; bottom: 14px; margin: 0; font-style: italic; font-size: 16px; color: var(--moon); text-shadow: 0 1px 3px #000; pointer-events: none; }
+.sheet:not([hidden]) ~ .status { bottom: calc(min(66vh, 640px) + 10px); }
+
+.moth { position: fixed; left: -20px; top: -14px; width: 40px; height: 28px; pointer-events: none; z-index: 10; filter: drop-shadow(0 0 8px rgba(244, 240, 138, .7)); }
+.moth svg { width: 100%; height: 100%; overflow: visible; }
+.moth .wing { fill: var(--paper); stroke: #b9c2ad; stroke-width: .6; animation: flap .16s ease-in-out infinite alternate; transform-origin: 0 0; }
+.moth .wing.r { animation-direction: alternate-reverse; }
+.moth .wing.low { fill: #d6ddca; }
+
+@keyframes orbit { to { transform: rotate(360deg); } }
+@keyframes twinkle { from { opacity: .35; } to { opacity: 1; } }
+@keyframes call { from { transform: scale(.7); opacity: .9; } to { transform: scale(1.5); opacity: 0; } }
+@keyframes rise { from { transform: translate(-50%, 40px); opacity: 0; } }
+@keyframes flap { from { transform: scaleY(1); } to { transform: scaleY(.35); } }
+
+@media (max-width: 520px) {
+  .sheet { max-height: 72vh; }
+  .sheet:not([hidden]) ~ .status { bottom: calc(72vh + 8px); }
+  .summary { font-size: 15px; }
+  .name { font-size: 15px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .star, .fly, .orbit, .called, .sheet, .moth .wing { animation: none; }
+  .place .plant { transition: none; }
+}

@@ -1,0 +1,5 @@
+{
+  "id": "garden",
+  "name": "Garden",
+  "requires": ["rooms.read", "rooms.send"]
+}

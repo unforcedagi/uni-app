@@ -8,6 +8,8 @@ export const SHELL_API = 1;
 export type OtaStatus = {
   shell_api: number;
   builtin: string;
+  /** The interface being served: "uni", or an installed interface's id. */
+  iface?: string;
   active: { version: string; api: number } | null;
   channel: string | null;
 };

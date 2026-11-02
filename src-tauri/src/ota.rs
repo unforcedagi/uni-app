@@ -30,14 +30,15 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Condvar, Mutex, OnceLock};
+use std::sync::{Arc, Condvar, Mutex, OnceLock, RwLock};
 use std::time::Duration;
 
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use tauri::utils::assets::{AssetKey, AssetsIter, CspHash};
 use tauri::{Assets, Manager, Runtime};
+
+use crate::iface::{self, UNI};
 
 /// The shell's command API, as seen by the web layer. Bump it with any change to the command set or a command's
 /// arguments or result. `src/ota.ts` holds the same number (checked by `scripts/ota.test.ts`).
@@ -76,6 +77,9 @@ fn log(msg: impl AsRef<str>) {
 pub struct Meta {
     pub version: String,
     pub api: u32,
+    /// Capabilities the bundle needs (an installed interface's). One that needs more than the person granted is held.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub requires: Vec<String>,
 }
 
 /// A verified, unpacked bundle.
@@ -457,6 +461,7 @@ fn not_new(
 pub async fn check(
     dir: &Path,
     channel: &str,
+    channel_id: &str,
     pubkey: &str,
     builtin: &semver::Version,
     active: Option<&semver::Version>,
@@ -466,7 +471,7 @@ pub async fn check(
     uni_core::init_crypto();
     let client = uni_core::media::https_client_following_redirects(Duration::from_secs(30)).map_err(|e| e.to_string())?;
     let served = fetch(&client, &base, 64 * 1024).await?;
-    let (manifest, digest) = read_manifest(pubkey, &served, CHANNEL_ID, now_secs())?;
+    let (manifest, digest) = read_manifest(pubkey, &served, channel_id, now_secs())?;
     let offered = semver::Version::parse(&manifest.version).map_err(|e| format!("manifest version: {e}"))?;
     // Is it new to this device? Decided on the records as they are now, and the floor raised before any download.
     {
@@ -516,13 +521,60 @@ pub async fn check(
     Ok(CheckResult::Staged { version: bundle.meta.version })
 }
 
-/// Shared between the asset provider and the commands.
+/// An installed interface has no web layer built into the app: any signed version of it is newer than nothing.
+fn none_built_in() -> semver::Version {
+    semver::Version::new(0, 0, 0)
+}
+
+/// What is being served: Uni (its built-in web layer or its own bundle) or an interface the person installed.
+pub struct Choice {
+    pub iface: String,
+    pub bundle: Option<Arc<Bundle>>,
+    /// The served bundle's records directory.
+    dir: Option<PathBuf>,
+    /// What it may use; `None` for Uni, the shell's own interface, which may use everything.
+    pub grants: Option<Vec<String>>,
+}
+
+impl Choice {
+    fn built_in() -> Choice {
+        Choice { iface: UNI.into(), bundle: None, dir: None, grants: None }
+    }
+}
+
+/// The choice for interface `id`: its bundle activated (a staged one promoted), else Uni. Records which one it is.
+fn choose(root: &Path, builtin: &semver::Version, uni_key: &str, id: &str) -> Choice {
+    if id != UNI {
+        match iface::find(root, id) {
+            Some(i) => {
+                let dir = iface::dir(root, id);
+                let _ = std::fs::create_dir_all(&dir);
+                match activate(&dir, &i.pubkey, &none_built_in(), SHELL_API) {
+                    Some(b) => match b.meta.requires.iter().find(|c| !i.grants.contains(c)) {
+                        None => {
+                            iface::set_active(root, id);
+                            return Choice { iface: id.into(), bundle: Some(Arc::new(b)), dir: Some(dir), grants: Some(i.grants) };
+                        }
+                        Some(c) => log(format!("interface {id} {} needs {c}, which the person hasn't granted; held, Uni instead", b.meta.version)),
+                    },
+                    None => log(format!("interface {id} has no bundle it can serve; Uni instead")),
+                }
+            }
+            None => log(format!("interface {id} is not installed; Uni instead")),
+        }
+    }
+    iface::set_active(root, UNI);
+    let bundle = activate(root, uni_key, builtin, SHELL_API).map(Arc::new);
+    Choice { iface: UNI.into(), dir: bundle.as_ref().map(|_| root.to_path_buf()), bundle, grants: None }
+}
+
+/// Shared between the asset provider, the command gate and the commands.
 pub struct Ota {
-    chosen: OnceLock<Option<Bundle>>,
+    /// `None` until launch has chosen. Replaced whole on a switch or a refusal, so a page never mixes two layers.
+    choice: RwLock<Option<Arc<Choice>>>,
     ready: (Mutex<bool>, Condvar),
-    /// Set when the active bundle is refused at runtime: everything after is served from the built-in assets.
-    dropped: AtomicBool,
-    dir: OnceLock<PathBuf>,
+    /// The `ota` directory: Uni's own records, `interfaces.json`, `active`, and `iface/<id>/` per interface.
+    root: OnceLock<PathBuf>,
     builtin: OnceLock<semver::Version>,
     wait: Duration,
 }
@@ -530,46 +582,59 @@ pub struct Ota {
 impl Ota {
     fn new() -> Arc<Ota> {
         Arc::new(Ota {
-            chosen: OnceLock::new(),
+            choice: RwLock::new(None),
             ready: (Mutex::new(false), Condvar::new()),
-            dropped: AtomicBool::new(false),
-            dir: OnceLock::new(),
+            root: OnceLock::new(),
             builtin: OnceLock::new(),
             wait: SETUP_WAIT,
         })
     }
 
-    fn init(&self, dir: PathBuf, builtin: semver::Version, pubkey: &str) {
-        let _ = std::fs::create_dir_all(&dir);
-        if self.chosen.get().is_some() {
+    fn init(&self, root: PathBuf, builtin: semver::Version, pubkey: &str) {
+        let _ = std::fs::create_dir_all(&root);
+        if self.choice.read().unwrap_or_else(|e| e.into_inner()).is_some() {
             log("setup came after the first page request; the built-in web layer stays for this launch");
-        } else if self.chosen.set(activate(&dir, pubkey, &builtin, SHELL_API)).is_err() {
-            // A page request timed out while this ran and fixed the built-in layer; the bundle stays for next launch.
-            log("setup finished after the first page request timed out; the built-in web layer stays for this launch");
+        } else {
+            let chosen = choose(&root, &builtin, pubkey, &iface::active(&root));
+            let mut slot = self.choice.write().unwrap_or_else(|e| e.into_inner());
+            if slot.is_none() {
+                *slot = Some(Arc::new(chosen));
+            } else {
+                // A page request timed out while this ran and fixed the built-in layer; the bundle stays for next launch.
+                log("setup finished after the first page request timed out; the built-in web layer stays for this launch");
+            }
         }
-        let _ = self.dir.set(dir);
+        let _ = self.root.set(root);
         let _ = self.builtin.set(builtin);
         let (lock, cvar) = &self.ready;
         *lock.lock().unwrap_or_else(|e| e.into_inner()) = true;
         cvar.notify_all();
     }
 
-    /// The bundle being served, once launch has chosen. Waits briefly for that choice. On timeout the built-in layer
-    /// is fixed for the whole launch, so one page never mixes built-in and bundle files.
-    fn active(&self) -> Option<&Bundle> {
-        if self.dropped.load(Ordering::Acquire) {
-            return None;
+    /// What is served now, once launch has chosen. Waits briefly for that choice. On timeout the built-in layer is
+    /// fixed for the whole launch, so one page never mixes built-in and bundle files.
+    fn current(&self) -> Arc<Choice> {
+        if let Some(c) = self.choice.read().unwrap_or_else(|e| e.into_inner()).as_ref() {
+            return c.clone();
         }
-        if self.chosen.get().is_none() {
-            let (lock, cvar) = &self.ready;
-            let guard = lock.lock().unwrap_or_else(|e| e.into_inner());
-            let _ = cvar.wait_timeout_while(guard, self.wait, |ready| !*ready);
-        }
-        self.chosen.get_or_init(|| None).as_ref()
+        let (lock, cvar) = &self.ready;
+        let guard = lock.lock().unwrap_or_else(|e| e.into_inner());
+        let _ = cvar.wait_timeout_while(guard, self.wait, |ready| !*ready);
+        self.choice.write().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(|| Arc::new(Choice::built_in())).clone()
+    }
+
+    fn set(&self, c: Choice) {
+        *self.choice.write().unwrap_or_else(|e| e.into_inner()) = Some(Arc::new(c));
+    }
+
+    /// The command gate: may the interface being served call `cmd`?
+    pub fn permit(&self, cmd: &str) -> Result<(), String> {
+        let c = self.current();
+        iface::permit(&c.iface, c.grants.as_deref(), cmd)
     }
 }
 
-/// The app's asset provider: the active bundle's files, else the ones built in.
+/// The app's asset provider: the served bundle's files, else the ones built in.
 pub struct OtaAssets<R: Runtime> {
     builtin: Box<dyn Assets<R>>,
     ota: Arc<Ota>,
@@ -604,7 +669,7 @@ impl<R: Runtime> Assets<R> for OtaAssets<R> {
             Ok(d) => self.ota.init(d.join("ota"), builtin, PUBKEY),
             Err(e) => {
                 log(format!("no app data dir ({e}); serving the built-in web layer"));
-                let _ = self.ota.chosen.set(None);
+                self.ota.set(Choice::built_in());
                 let (lock, cvar) = &self.ota.ready;
                 *lock.lock().unwrap_or_else(|e| e.into_inner()) = true;
                 cvar.notify_all();
@@ -613,22 +678,24 @@ impl<R: Runtime> Assets<R> for OtaAssets<R> {
     }
 
     fn get(&self, key: &AssetKey) -> Option<Cow<'_, [u8]>> {
-        match self.ota.active() {
+        match &self.ota.current().bundle {
             // Only the bundle's own files: never a built-in file mixed into a bundle's page.
-            Some(b) => b.get(key.as_ref()).map(Cow::Borrowed),
+            Some(b) => b.get(key.as_ref()).map(|bytes| Cow::Owned(bytes.to_vec())),
             None => self.builtin.get(key),
         }
     }
 
     fn iter(&self) -> Box<AssetsIter<'_>> {
-        match self.ota.active() {
-            Some(b) => Box::new(b.files.iter().map(|(k, v)| (Cow::Owned(format!("/{k}")), Cow::Borrowed(v.as_slice())))),
+        match &self.ota.current().bundle {
+            Some(b) => Box::new(
+                b.files.iter().map(|(k, v)| (Cow::Owned(format!("/{k}")), Cow::Owned(v.clone()))).collect::<Vec<_>>().into_iter(),
+            ),
             None => self.builtin.iter(),
         }
     }
 
     fn csp_hashes(&self, html_path: &AssetKey) -> Box<dyn Iterator<Item = CspHash<'_>> + '_> {
-        match self.ota.active() {
+        match &self.ota.current().bundle {
             // A bundle's HTML has no build-time nonce tokens or inline-script hashes; the configured CSP applies as is.
             Some(_) => Box::new(std::iter::empty()),
             None => self.builtin.csp_hashes(html_path),
@@ -640,6 +707,8 @@ impl<R: Runtime> Assets<R> for OtaAssets<R> {
 pub struct Status {
     shell_api: u32,
     builtin: String,
+    /// The interface being served (`uni` or an installed one's id).
+    iface: String,
     /// The bundle being served, if not the built-in web layer.
     active: Option<Meta>,
     channel: Option<&'static str>,
@@ -647,10 +716,12 @@ pub struct Status {
 
 #[tauri::command]
 pub fn ota_status(app: tauri::AppHandle, ota: tauri::State<'_, Arc<Ota>>) -> Status {
+    let c = ota.current();
     Status {
         shell_api: SHELL_API,
         builtin: app.package_info().version.to_string(),
-        active: ota.active().map(|b| b.meta.clone()),
+        iface: c.iface.clone(),
+        active: c.bundle.as_ref().map(|b| b.meta.clone()),
         channel: CHANNEL,
     }
 }
@@ -658,7 +729,8 @@ pub fn ota_status(app: tauri::AppHandle, ota: tauri::State<'_, Arc<Ota>>) -> Sta
 /// The page booted: the bundle on trial is kept.
 #[tauri::command]
 pub fn ota_ready(ota: tauri::State<'_, Arc<Ota>>) {
-    let (Some(dir), Some(b)) = (ota.dir.get(), ota.active()) else { return };
+    let c = ota.current();
+    let (Some(dir), Some(b)) = (&c.dir, &c.bundle) else { return };
     // Unreadable now: leave it; the next launch fails closed.
     let _records = records();
     let Ok(mut state) = State::load_checked(dir) else { return };
@@ -666,36 +738,90 @@ pub fn ota_ready(ota: tauri::State<'_, Arc<Ota>>) {
         state.trial = None;
         state.boots = 0;
         state.save(dir);
-        log(format!("bundle {} reported ready; kept", b.meta.version));
+        log(format!("{} bundle {} reported ready; kept", c.iface, b.meta.version));
     }
 }
 
-/// The bundle's own code refused this shell (its API differs). Drop it and reload with the built-in web layer.
+/// The bundle's own code refused this shell (its API differs). Drop it and reload with Uni's built-in web layer.
 #[tauri::command]
 pub fn ota_reject(window: tauri::WebviewWindow, ota: tauri::State<'_, Arc<Ota>>, reason: String) -> Result<(), String> {
-    let (Some(dir), Some(b)) = (ota.dir.get(), ota.active()) else { return Ok(()) };
-    log(format!("bundle {} refused by its own code: {reason}; reloading the built-in web layer", b.meta.version));
-    let _records = records();
-    if let Ok(mut state) = State::load_checked(dir) {
-        state.reject(&b.meta.version);
-        state.save(dir);
+    let c = ota.current();
+    let (Some(dir), Some(b)) = (&c.dir, &c.bundle) else { return Ok(()) };
+    log(format!("{} bundle {} refused by its own code: {reason}; reloading the built-in web layer", c.iface, b.meta.version));
+    {
+        let _records = records();
+        if let Ok(mut state) = State::load_checked(dir) {
+            state.reject(&b.meta.version);
+            state.save(dir);
+        }
+        remove_pair(dir, "current");
     }
-    remove_pair(dir, "current");
-    ota.dropped.store(true, Ordering::Release);
+    if let Some(root) = ota.root.get() {
+        iface::set_active(root, UNI);
+    }
+    ota.set(Choice::built_in());
     window.eval("location.reload()").map_err(|e| e.to_string())
 }
 
-/// Look for a newer bundle on the build's channel and stage it for the next launch.
+/// Look for a newer bundle of the interface being served, on its channel, and stage it for the next launch.
 #[tauri::command]
 pub async fn ota_check(ota: tauri::State<'_, Arc<Ota>>) -> Result<CheckResult, String> {
-    let Some(channel) = CHANNEL else { return Ok(CheckResult::Off) };
-    let (Some(dir), Some(builtin)) = (ota.dir.get(), ota.builtin.get()) else { return Err("not set up".into()) };
-    let active = ota.active().map(|b| b.version.clone());
-    let r = check(dir, channel, PUBKEY, builtin, active.as_ref(), SHELL_API).await;
+    let c = ota.current();
+    let (Some(root), Some(builtin)) = (ota.root.get(), ota.builtin.get()) else { return Err("not set up".into()) };
+    let active = c.bundle.as_ref().map(|b| b.version.clone());
+    let r = if c.iface == UNI {
+        let Some(channel) = CHANNEL else { return Ok(CheckResult::Off) };
+        check(root, channel, CHANNEL_ID, PUBKEY, builtin, active.as_ref(), SHELL_API).await
+    } else {
+        let i = iface::find(root, &c.iface).ok_or("interface not installed")?;
+        check(&iface::dir(root, &i.id), &i.channel, &i.id, &i.pubkey, &none_built_in(), active.as_ref(), SHELL_API).await
+    };
     if let Err(e) = &r {
-        log(format!("check failed: {e}"));
+        log(format!("{} check failed: {e}", c.iface));
     }
     r
+}
+
+#[derive(Serialize)]
+pub struct IfaceView {
+    id: String,
+    name: String,
+    active: bool,
+    grants: Vec<String>,
+}
+
+/// Uni and the interfaces the person installed, with the one showing marked.
+#[tauri::command]
+pub fn iface_list(ota: tauri::State<'_, Arc<Ota>>) -> Vec<IfaceView> {
+    let showing = ota.current().iface.clone();
+    let mut list = vec![IfaceView { id: UNI.into(), name: "Uni".into(), active: showing == UNI, grants: vec!["everything".into()] }];
+    if let Some(root) = ota.root.get() {
+        list.extend(iface::installed(root).into_iter().map(|i| IfaceView { active: showing == i.id, id: i.id, name: i.name, grants: i.grants }));
+    }
+    list
+}
+
+/// Switch to another interface and reload into it. An installed interface with no bundle yet is fetched from its
+/// channel first, verified with its own pinned key. If it can't start, Uni stays and the error says why.
+#[tauri::command]
+pub async fn iface_use(window: tauri::WebviewWindow, ota: tauri::State<'_, Arc<Ota>>, id: String) -> Result<(), String> {
+    let (Some(root), Some(builtin)) = (ota.root.get(), ota.builtin.get()) else { return Err("not set up".into()) };
+    if id != UNI {
+        let i = iface::find(root, &id).ok_or_else(|| format!("{id} is not installed"))?;
+        let dir = iface::dir(root, &id);
+        if !dir.join("current.tar.gz").exists() && !dir.join("next.tar.gz").exists() {
+            std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+            log(format!("interface {id}: first use, fetching its bundle from its channel"));
+            check(&dir, &i.channel, &i.id, &i.pubkey, &none_built_in(), None, SHELL_API).await.map_err(|e| format!("{} couldn't be fetched: {e}", i.name))?;
+        }
+    }
+    let chosen = choose(root, builtin, PUBKEY, &id);
+    if chosen.iface != id {
+        return Err(format!("{id} couldn't start; Uni stays"));
+    }
+    log(format!("switched to interface {id}"));
+    ota.set(chosen);
+    window.eval("location.replace('/')").map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -758,7 +884,7 @@ mod tests {
         let k = key();
         let a = bundle("0.1.85", 1);
         let b = open(&k.pk, &a, &sign(&k, &a), &v("0.1.84"), 1).unwrap();
-        assert_eq!(b.meta, Meta { version: "0.1.85".into(), api: 1 });
+        assert_eq!(b.meta, Meta { version: "0.1.85".into(), api: 1, requires: vec![] });
         assert_eq!(b.get("/index.html"), Some(&b"<html>web 0.1.85</html>"[..]));
         assert_eq!(b.get("assets/app.js"), Some(&b"1"[..]));
     }
@@ -919,12 +1045,12 @@ mod tests {
         put(dir.path(), "current", &a, &sign(&k, &a));
         let mut late = Ota::new();
         Arc::get_mut(&mut late).unwrap().wait = Duration::from_millis(10);
-        assert!(late.active().is_none(), "setup hasn't run: built-in");
+        assert!(late.current().bundle.is_none(), "setup hasn't run: built-in");
         late.init(dir.path().to_path_buf(), v("0.1.84"), &k.pk);
-        assert!(late.active().is_none(), "still built-in for this launch");
+        assert!(late.current().bundle.is_none(), "still built-in for this launch");
         let on_time = Ota::new();
         on_time.init(dir.path().to_path_buf(), v("0.1.84"), &k.pk);
-        assert_eq!(on_time.active().unwrap().meta.version, "0.1.85");
+        assert_eq!(on_time.current().bundle.as_ref().unwrap().meta.version, "0.1.85");
     }
 
     /// A channel served over real HTTP on 127.0.0.1, so tests run the shell's own `check`.
@@ -1017,7 +1143,7 @@ mod tests {
     const DAY: u64 = 24 * 3600;
 
     fn run_check(dir: &Path, ch: &Channel, k: &Key, builtin: &str) -> Result<CheckResult, String> {
-        tauri::async_runtime::block_on(check(dir, &ch.url, &k.pk, &v(builtin), None, 1))
+        tauri::async_runtime::block_on(check(dir, &ch.url, CHANNEL_ID, &k.pk, &v(builtin), None, 1))
     }
 
     #[test]
@@ -1094,7 +1220,7 @@ mod tests {
             let hold = old_ch.dir.path().join("web-0.1.85.tar.gz.hold");
             std::fs::write(&hold, b"").unwrap();
             let (d, url, pk) = (dir.path().to_path_buf(), old_ch.url.clone(), k.pk.clone());
-            let slow = std::thread::spawn(move || tauri::async_runtime::block_on(check(&d, &url, &pk, &v("0.1.84"), None, 1)));
+            let slow = std::thread::spawn(move || tauri::async_runtime::block_on(check(&d, &url, CHANNEL_ID, &pk, &v("0.1.84"), None, 1)));
             while !old_ch.dir.path().join("web-0.1.85.tar.gz.asked").exists() {
                 std::thread::sleep(Duration::from_millis(10));
             }
@@ -1131,6 +1257,40 @@ mod tests {
         // The real one still goes through.
         ch.publish(&k, "0.1.85");
         assert_eq!(run_check(dir.path(), &ch, &k, "0.1.84"), Ok(CheckResult::Staged { version: "0.1.85".into() }));
+    }
+
+    #[test]
+    fn an_installed_interface_runs_only_its_own_agents_bundles_within_its_grants() {
+        let (uni, agent) = (key(), key());
+        let root = tempfile::tempdir().unwrap();
+        let installed = |grants: &[&str]| {
+            let i = iface::Installed { id: "garden".into(), name: "Garden".into(), channel: "https://example.com/m.json".into(), pubkey: agent.pk.clone(), grants: grants.iter().map(|g| g.to_string()).collect() };
+            std::fs::write(root.path().join("interfaces.json"), serde_json::to_vec(&vec![i]).unwrap()).unwrap();
+        };
+        let garden = |version: &str| {
+            let meta = format!(r#"{{"version":"{version}","api":1,"requires":["rooms.read","rooms.send"]}}"#);
+            archive(&[("uni-bundle.json", meta.as_bytes()), ("index.html", b"<html>garden</html>")])
+        };
+        let dir = iface::dir(root.path(), "garden");
+        std::fs::create_dir_all(&dir).unwrap();
+        installed(&["rooms.read", "rooms.send"]);
+        // Signed with Uni's key, not the agent's the person pinned: refused, Uni shows.
+        let a = garden("0.1.0");
+        put(&dir, "next", &a, &sign(&uni, &a));
+        let c = choose(root.path(), &v("0.1.84"), &uni.pk, "garden");
+        assert_eq!((c.iface.as_str(), c.bundle.is_none()), (UNI, true));
+        assert_eq!(iface::active(root.path()), UNI);
+        // Signed by the agent: served, with the person's grants and nothing more.
+        let a = garden("0.1.1");
+        put(&dir, "next", &a, &sign(&agent, &a));
+        let c = choose(root.path(), &v("0.1.84"), &uni.pk, "garden");
+        assert_eq!(c.bundle.as_ref().unwrap().get("index.html"), Some(&b"<html>garden</html>"[..]));
+        assert_eq!(c.grants.as_deref(), Some(&["rooms.read".to_string(), "rooms.send".to_string()][..]));
+        assert_eq!(iface::active(root.path()), "garden");
+        // The person takes back rooms.send: the bundle that needs it is held, Uni shows.
+        installed(&["rooms.read"]);
+        let c = choose(root.path(), &v("0.1.84"), &uni.pk, "garden");
+        assert_eq!((c.iface.as_str(), c.bundle.is_none()), (UNI, true));
     }
 
     #[test]

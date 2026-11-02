@@ -2782,6 +2782,7 @@ mod files;
 #[cfg(any(target_os = "linux", target_os = "android"))]
 mod media_loopback;
 mod media_registry;
+mod iface;
 mod ota;
 mod pair_source;
 mod secure_store;
@@ -2848,7 +2849,7 @@ pub fn run() {
     let mut context = tauri::generate_context!();
     let ota = ota::wrap(&mut context);
     tauri::Builder::default()
-        .manage(ota)
+        .manage(ota.clone())
         .plugin(secure_store::init())
         .plugin(files::init())
         .plugin(tauri_plugin_opener::init())
@@ -2886,7 +2887,11 @@ pub fn run() {
             tracing::info!(version = %_app.package_info().version, "setup complete; opening window");
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![
+        // T-305 interface platform spike: every app command passes the gate first. Uni may call anything; an installed
+        // interface only what the person granted it (src/iface.rs).
+        .invoke_handler({
+            let gate = ota.clone();
+            let handler: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
             #[cfg(all(debug_assertions, target_os = "linux"))]
             t76::t76_write,
             #[cfg(all(debug_assertions, target_os = "linux"))]
@@ -2999,6 +3004,8 @@ pub fn run() {
             ota::ota_ready,
             ota::ota_reject,
             ota::ota_check,
+            ota::iface_list,
+            ota::iface_use,
             #[cfg(feature = "messages")]
             messages::messages_status,
             #[cfg(feature = "messages")]
@@ -3039,7 +3046,15 @@ pub fn run() {
             messages::messages_sign_in_device,
             #[cfg(feature = "messages")]
             messages::messages_telegram_keys
-        ])
+            ];
+            move |invoke: tauri::ipc::Invoke<tauri::Wry>| match gate.permit(invoke.message.command()) {
+                Ok(()) => handler(invoke),
+                Err(e) => {
+                    invoke.resolver.reject(e);
+                    true
+                }
+            }
+        })
         .build(context)
         .expect("error while building tauri application")
         .run(|_app, _event| {

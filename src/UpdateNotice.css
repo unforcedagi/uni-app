@@ -7,3 +7,6 @@
 .update-version { font-size: 13px; color: var(--muted, #666); font-family: var(--mono, monospace); }
 .update-status { margin: 0; font-size: 13px; color: var(--text-soft, inherit); overflow-wrap: anywhere; user-select: text; }
 .update-status.error { color: var(--danger, #b3261e); }
+/* T-305 interface platform spike: the Interface setting */
+.iface-picker { display: flex; flex-direction: column; gap: 6px; }
+.iface-row { display: flex; flex-direction: column; gap: 2px; }

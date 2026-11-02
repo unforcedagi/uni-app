@@ -35,7 +35,8 @@
     "test:roomrestore": "playwright test --config playwright.roomrestore.config.ts",
     "test:usage": "node --experimental-strip-types scripts/usage.test.ts && playwright test --config playwright.usage.config.ts",
     "test:projects": "playwright test --config playwright.projects.config.ts",
-    "test:unread": "playwright test --config playwright.unread.config.ts"
+    "test:unread": "playwright test --config playwright.unread.config.ts",
+    "build:garden": "vite build --config interfaces/garden/vite.config.ts"
   },
   "dependencies": {
     "@openparachute/surface-client": "0.3.7",
