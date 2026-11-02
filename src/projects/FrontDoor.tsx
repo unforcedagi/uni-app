@@ -2,7 +2,8 @@
 // the room last talked, and a small mark when sessions are working there. No ids. Above the rooms, one quiet line on what needs you
 // (round 2: #Uni is archived, so this is where it lives); under them, one quiet line on the Claude accounts, which opens the full card.
 // T-304: the working mark counts the room's Uni at work on your message too, not only Claude Code sessions.
-import { useState, type ReactNode } from "react";
+import { useCallback, useMemo, useState, type ReactNode } from "react";
+import { AllComposer, AllFeed, roomWords, useRoomsFeed, type AllRoom } from "../all/AllView";
 import { liveInArea, span } from "./model";
 import { asOf, useWork } from "./store";
 import { useRoomTurns } from "./roomTurns";
@@ -46,6 +47,9 @@ function NewLine({ rooms, onOpen }: { rooms: readonly NewRoom[]; onOpen: (id: st
 
 const today = () => new Date().toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" });
 
+const VIEW_KEY = "uni.home.view";
+const NONE: readonly AllRoom[] = [];
+
 const WORDS = ["No", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten", "Eleven", "Twelve"];
 const count = (n: number) => WORDS[n] ?? String(n);
 /** T-335 glow-up: the day in one or two short sentences: what needs you, then what is moving. */
@@ -67,8 +71,9 @@ function workingWords(sessions: number, turn: boolean): string {
   return turn ? `Uni is answering here${s ? ` and ${s}` : ""}` : s;
 }
 
-export function FrontDoor({ doors, needs, onOpen, me = null, newRooms = [], onOpenRoom, toPost = null, above = null }: { doors: readonly Door[]; needs?: Needs; onOpen: (path: string) => void;
-  /** T-335 glow-up: what sits between the day's sentence and the places (the All composer) */ above?: ReactNode;
+export function FrontDoor({ doors, needs, onOpen, me = null, newRooms = [], onOpenRoom, toPost = null, all = null }: { doors: readonly Door[]; needs?: Needs; onOpen: (path: string) => void;
+  /** T-335 All view: the areas' own rooms (a private area's stay out) and how to open one at a message; null: no composer, no All. */
+  all?: { rooms: readonly AllRoom[]; onOpenAt: (room: string, ref?: string) => void } | null;
   /** T-335: rooms outside the doors with something new, and how to open one. */ newRooms?: readonly NewRoom[]; onOpenRoom?: (id: string) => void;
   /** Your key: a turn is the room's Uni at work on your message. */ me?: string | null;
   /** T-335: the To post queue's one quiet line, under what needs you */ toPost?: ReactNode }) {
@@ -79,20 +84,42 @@ export function FrontDoor({ doors, needs, onOpen, me = null, newRooms = [], onOp
   // round 3: a read that failed, or a saved copy not read again yet, is "as of" its time; the working counts say so too
   const at = asOf(ws, now);
   const areaAt = new Map(work.areas.map((a) => [a.path, a]));
+  // T-335 All view: the home shows the places or every room at once; the choice is the device's, kept across visits
+  const [view, setView] = useState<"places" | "all">(() => { try { return all && localStorage.getItem(VIEW_KEY) === "all" ? "all" : "places"; } catch { return "places"; } });
+  const choose = useCallback((v: "places" | "all") => { setView(v); try { localStorage.setItem(VIEW_KEY, v); } catch { /* this session only */ } }, []);
+  // the rooms' recent messages: the feed in All; in Places only once the composer is used (for the route's words)
+  const [wantWords, setWantWords] = useState(false);
+  const allRooms = all?.rooms ?? NONE;
+  const feed = useRoomsFeed(allRooms, !!all && (view === "all" || wantWords));
+  const words = useMemo(() => roomWords(feed.byRoom), [feed.byRoom]);
+  const openAt = all?.onOpenAt;
+  const tabs = all && <div className="fd-tabs" role="tablist" aria-label="Home">
+    <button type="button" role="tab" aria-selected={view === "places"} onClick={() => choose("places")}>Places</button>
+    <button type="button" role="tab" aria-selected={view === "all"} onClick={() => choose("all")}>All rooms</button>
+  </div>;
+  const composer = all && <AllComposer rooms={allRooms} words={words} onOpen={(id) => openAt?.(id)} onFocus={() => setWantWords(true)} onSent={feed.reread} place={view} />;
   // T-335 glow-up: how many places are moving (a session or the room's Uni at work), for the home's one sentence
   const liveOf = (d: Door) => { const a = areaAt.get(d.path); return (a ? liveInArea(work, a.id).length : 0) + (d.room && turns.has(d.room) ? 1 : 0); };
   const moving = doors.filter((d) => liveOf(d) > 0).length;
   const needN = needs ? needs.rows.length + needs.privates.reduce((k, p) => k + p.count, 0) : 0;
-  return <div className="fd" data-place="front-door">
+  if (all && view === "all") return <div className="fd fd-all" data-place="front-door" data-view="all">
+    <header className="fd-head fd-allhead">
+      <div className="fd-mark"><h1 className="fd-title"><Enso />Uni</h1><span className="fd-date">{today()}</span></div>
+      {tabs}
+    </header>
+    <AllFeed rooms={allRooms} byRoom={feed.byRoom} loaded={feed.loaded} failed={feed.failed} me={me} onOpen={(room, ref) => openAt?.(room, ref)} />
+    {composer}
+  </div>;
+  return <div className="fd" data-place="front-door" data-view="places">
     <header className="fd-head">
       <div className="fd-mark"><h1 className="fd-title"><Enso />Uni</h1><span className="fd-date">{today()}</span></div>
       <p className="fd-statement">{statement(needN, moving).map((line) => <span key={line}>{line}</span>)}</p>
     </header>
+    {composer}
     {needs && <NeedsLine needs={needs} onOpen={onOpen} />}
     {toPost && <div className="fd-topost">{toPost}</div>}
     {onOpenRoom && <NewLine rooms={newRooms} onOpen={onOpenRoom} />}
-    {above}
-    <h2 className="fd-places-h">Places</h2>
+    {tabs ?? <h2 className="fd-places-h">Places</h2>}
     <nav aria-label="Rooms"><ul className="fd-doors">{doors.map((d) => {
       const a = areaAt.get(d.path);
       const sessions = a ? liveInArea(work, a.id).length : 0;

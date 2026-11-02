@@ -42,6 +42,7 @@ import { ApprovalElsewhere, ApprovalRows } from "./ApprovalRows";
 import { ApprovalsContext, useApprovalList } from "../approvalsLive";
 import type { Approval } from "../approvals";
 import "./areas.css";
+import type { AllRoom } from "../all/AllView";
 import { FrontDoor, type Door, type Needs, type NewRoom } from "../projects/FrontDoor";
 import { ProjectStrip } from "../projects/ProjectStrip";
 import { ProjectSheet } from "../projects/ProjectSheet";
@@ -445,7 +446,10 @@ export default function AreasSurface({ identity, path, loose = null, thread = nu
       rows: allNeeds.rows.map((t) => ({ id: t.id, title: taskTitle(t.title).rest || t.title, where: data!.tree.nodes.get(t.node)?.name ?? null, path: t.node })),
       privates: allNeeds.privates.map((g) => ({ place: g.place, count: g.count, path: g.open.path })),
     };
-    return <div className="areas-home tree-home-wrap">{status}<ApprovalRows approvals={approvalsAll.list} className="cp-list cp-approvals th-approvals" /><FrontDoor doors={doors} needs={needs} onOpen={openDoor} me={identity} newRooms={newRooms} onOpenRoom={openRoomFromTree} toPost={postsLine(null)} />
+    // T-335 All view: every area's own room, interleaved, with a composer that routes; a private area stays out of it
+    const allRooms: AllRoom[] = doors.filter((d) => d.room && !privateRoot(data!.tree, d.path)).map((d) => ({ id: d.room!, name: d.name, slug: d.slug, stands: d.stands, lastTs: d.lastTs }));
+    const all = allRooms.length ? { rooms: allRooms, onOpenAt: (room: string, ref?: string) => { setDrawer(false); (actions.openRoom as (id: string, focus?: string | null) => void)(room, ref ?? null); } } : null;
+    return <div className="areas-home tree-home-wrap">{status}<ApprovalRows approvals={approvalsAll.list} className="cp-list cp-approvals th-approvals" /><FrontDoor doors={doors} needs={needs} onOpen={openDoor} me={identity} newRooms={newRooms} onOpenRoom={openRoomFromTree} toPost={postsLine(null)} all={all} />
       {railHidden && places.length > 0 && <div className="th-places-short">{placesRow}</div>}</div>;
   }
   if (treeHome && path === null && !rootOpen) {

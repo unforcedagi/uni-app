@@ -138,6 +138,9 @@ export type BootOpts = {
    *  Hermes approval prompts and their outcomes, progress pings, upkeep notes, reactions, threads), and 40 more rooms of 200 each, a few
    *  with something new. The history a long-used install carries. */
   big?: number;
+  /** T-335 glow-up (with `world: 'unread'`): a fuller made-up life for the new home and the All view: Bee Garden, Choir and Long Table join
+   *  North Field and Kiln Studio, each with a line on where it stands and two days of talk, plus the private Sanctum (kept out of All). */
+  glow?: boolean;
   /** Metadata of the vault's `.parachute/life-os` profile note (e.g. `{ chat: { provider: null } }`); absent: no profile note, Uni's own profile. */
   profileNote?: Record<string, unknown>;
   /** Open the Life OS surface on this other vault (the fixture answers its vault calls from the uni data; no profile note = the pack defaults, chat null). */
@@ -257,7 +260,7 @@ export async function bootAreas(page: Page, variant: Variant = 'seed', opts: Boo
   const now = Math.floor((opts.pinned ? pinnedAt : Date.now()) / 1000);
   const data = {
     profileNote: opts.profileNote ?? null, lifeVault: opts.lifeVault ?? null, now, variant, selftest: opts.selftest ?? true, ipcLeak: opts.ipcLeak ?? false, hostile: hostileApp(opts.ports ?? { http: 9, udp: 9 }), benign: BENIGN, techne: seed('techne'), unforced: seed('unforced'), seedMeta,
-    apps: opts.apps ?? [], multiRoom: !!opts.multiRoom || !!opts.tree, tree: !!opts.tree, tasks: !!opts.tasks, briefs: !!opts.briefs, queryDelay: opts.queryDelay ?? 0, identityDelay: opts.identityDelay ?? 0, identityFails: opts.identityFails ?? 0, roomsDelay: opts.roomsDelay ?? 0, messagesDelay: opts.messagesDelay ?? 0, nodeStatuses: opts.nodeStatuses ?? {}, nearOff: !!opts.nearOff, ids: !!opts.ids, boulder: !!opts.boulder, savedLayout: opts.savedLayout ?? null, strayRoom: !!opts.strayRoom, thread: !!opts.thread, manyTasks: opts.manyTasks ?? 0, uniMember: !!opts.uniMember, twins: !!opts.twins, underBoulder: !!opts.underBoulder, priya: !!opts.priya, links: !!opts.links, atlas: !!opts.atlas, garden: !!opts.garden, steer: !!opts.steer, longChat: !!opts.longChat, longNext: !!opts.longNext, bareTask: !!opts.bareTask, cutDecision: !!opts.cutDecision, cutNoAsk: !!opts.cutNoAsk, longAsk: !!opts.longAsk, previewAsk: !!opts.previewAsk, crowded: !!opts.crowded, ulidNext: !!opts.ulidNext, vaultNotes: !!opts.vaultNotes, pastDue: !!opts.pastDue, tallLast: !!opts.tallLast, privateTasks: !!opts.privateTasks, deviceCache: opts.deviceCache ?? null, queryFails: opts.queryFails ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, unread: opts.unread ?? null, world: opts.world ?? null, big: opts.big ?? 0, bigFx: opts.big ? JSON.parse(readFileSync(new URL('../fixtures/approval-prompts.json', import.meta.url), 'utf8')) : null, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null, mode: opts.mode ?? 'sealed', grantedUnder: opts.grantedUnder ?? (opts.mode ?? 'sealed'),
+    apps: opts.apps ?? [], multiRoom: !!opts.multiRoom || !!opts.tree, tree: !!opts.tree, tasks: !!opts.tasks, briefs: !!opts.briefs, queryDelay: opts.queryDelay ?? 0, identityDelay: opts.identityDelay ?? 0, identityFails: opts.identityFails ?? 0, roomsDelay: opts.roomsDelay ?? 0, messagesDelay: opts.messagesDelay ?? 0, nodeStatuses: opts.nodeStatuses ?? {}, nearOff: !!opts.nearOff, ids: !!opts.ids, boulder: !!opts.boulder, savedLayout: opts.savedLayout ?? null, strayRoom: !!opts.strayRoom, thread: !!opts.thread, manyTasks: opts.manyTasks ?? 0, uniMember: !!opts.uniMember, twins: !!opts.twins, underBoulder: !!opts.underBoulder, priya: !!opts.priya, links: !!opts.links, atlas: !!opts.atlas, garden: !!opts.garden, steer: !!opts.steer, longChat: !!opts.longChat, longNext: !!opts.longNext, bareTask: !!opts.bareTask, cutDecision: !!opts.cutDecision, cutNoAsk: !!opts.cutNoAsk, longAsk: !!opts.longAsk, previewAsk: !!opts.previewAsk, crowded: !!opts.crowded, ulidNext: !!opts.ulidNext, vaultNotes: !!opts.vaultNotes, pastDue: !!opts.pastDue, tallLast: !!opts.tallLast, privateTasks: !!opts.privateTasks, deviceCache: opts.deviceCache ?? null, queryFails: opts.queryFails ?? [], granted: opts.granted ?? true, webrtcOff: (opts.webrtc ?? 'off') === 'off', grantSeed: {} as Record<string, { scope: string; html: string }>, unread: opts.unread ?? null, world: opts.world ?? null, glow: !!opts.glow, big: opts.big ?? 0, bigFx: opts.big ? JSON.parse(readFileSync(new URL('../fixtures/approval-prompts.json', import.meta.url), 'utf8')) : null, stripCsp: !!opts.stripCsp, versionFails: !!opts.versionFails, passUa: opts.passUa ?? null, mode: opts.mode ?? 'sealed', grantedUnder: opts.grantedUnder ?? (opts.mode ?? 'sealed'),
   };
   // Pre-granted apps: the grant key is the SHA-256 of the RESOLVED default needs plus the app's html.
   const preGrant = [
@@ -471,6 +474,28 @@ Two proposals wait on a scope decision.
         rooms.splice(0, rooms.length, room('uni-room', 'Uni'), room('ch-north', 'north-field'), room('ch-kiln', 'kiln-studio'), room('ch-glaze', 'glaze-tests'), room('ch-allot', 'allotment'),
           ...Array.from({ length: 40 }, (_, r) => room(`ch-big${r}`, `side-room-${r}`, r % 7 === 0 ? 3 : 0)));
       }
+    }
+    // T-335 glow-up: a fuller made-up world for the new home and the All view (`glow`, with `world: 'unread'`)
+    if (d.world === 'unread' && d.glow) {
+      const stands: Record<string, string> = { 'a-north': 'Gravel for the gate path arrives Wednesday; the hedge is booked.', 'a-kiln': 'Glaze tests are out of the kiln: three glossy, one crawled.' };
+      for (const n of notes) if (stands[n.id]) n.metadata = { ...n.metadata, stands: stands[n.id] };
+      const more = [
+        ['a-bees', 'Bee Garden', 'ch-bees', 'Hives, the swarm box and the honey harvest.', 'Honey looks ready for Saturday; jars still to find.'],
+        ['a-choir', 'Choir', 'ch-choir', 'Tuesday rehearsals and the winter set.', 'The hall is held on Tuesdays; the winter set is printed.'],
+        ['a-table', 'Long Table', 'ch-table', 'The Saturday supper club.', 'Nine yes and two maybe for Saturday; the soup is yours.'],
+      ];
+      for (const [id, name, ch, purpose, st] of more) { const a = area(id, name, 'foreground', ch, purpose); a.metadata = { ...a.metadata, stands: st }; notes.push(a); }
+      notes.push(area('a-sad', 'Sanctum', 'background', 'ch-sad', 'Daily practice.'));
+      const H = 3600;
+      Object.assign(msgs, {
+        'ch-north': [msg('n1', 'ch-north', 'Uni', 26 * H, 'The hedge cutting is booked for Thursday; the far corner stays wild, as you asked.'), msg('n2', 'ch-north', 'Kit (you)', 25 * H, 'Good. The path by the gate needs gravel too.'), msg('n3', 'ch-north', 'Uni', 3 * H, 'Gravel is ordered: two tonnes, arriving Wednesday morning.')],
+        'ch-kiln': [msg('k1', 'ch-kiln', 'Uni', 22 * H, 'The bisque firing finished overnight. Twelve pots, one crack.'), msg('k2', 'ch-kiln', 'Kit (you)', 21 * H, 'Unload it after lunch. Keep the cracked one for glaze tests.'), msg('k3', 'ch-kiln', 'Uni', 50 * 60, 'Three glaze tiles came out glossy and one crawled. Photos are in the studio log.')],
+        'ch-bees': [msg('b1', 'ch-bees', 'Uni', 20 * H, 'Hive two is heavy with honey; the swarm box is still empty.'), msg('b2', 'ch-bees', 'Uni', 2 * H, 'The honey harvest looks ready for Saturday. Shall I ask the neighbours for jars?')],
+        'ch-choir': [msg('c1', 'ch-choir', 'Kit (you)', 28 * H, 'Can we move rehearsal to the hall?'), msg('c2', 'ch-choir', 'Uni', 27 * H, 'The hall is free on Tuesdays from seven. I have held it for the next four weeks.'), msg('c3', 'ch-choir', 'Uni', 30 * 60, 'Sheet music for the winter set is printed: twenty-four copies.')],
+        'ch-table': [msg('t1', 'ch-table', 'Uni', 5 * H, "Saturday's supper: nine yes, two maybe. The soup is on you."), msg('t2', 'ch-table', 'Kit (you)', 4 * H, 'Leek and potato, then.')],
+        'ch-sad': [msg('s1', 'ch-sad', 'Kit (you)', 9 * H, 'Sat twenty minutes. Restless but stayed.')],
+      });
+      rooms.splice(0, rooms.length, room('uni-room', 'Uni'), room('ch-north', 'north-field'), room('ch-kiln', 'kiln-studio'), room('ch-glaze', 'glaze-tests'), room('ch-bees', 'bee-garden'), room('ch-choir', 'choir'), room('ch-table', 'long-table'), room('ch-sad', 'sanctum'), room('ch-allot', 'allotment'));
     }
     // T-335: the store's unread count, when a spec asks for it (`unread`): seeded per room, one more per message from someone else, cleared by mark_read
     if (d.unread) for (const r of rooms) { const u = d.unread[r.id]; if (u !== undefined) { r.unread = typeof u === 'number' ? u : u.n; r.mentions = typeof u === 'number' ? false : !!u.at; } }

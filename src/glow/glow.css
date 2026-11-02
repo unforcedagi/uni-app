@@ -203,7 +203,7 @@ body { font-family: var(--g-font-ui); text-rendering: optimizeLegibility; }
 
 /* ── Home: the day in one sentence, then the places ── */
 .fd { background: var(--g-ground); padding: clamp(28px, 7vh, 88px) clamp(20px, 5vw, 64px) 56px; }
-.fd-head, .fd-needs, .fd-new, .fd-topost, .fd-doors, .fd-status, .fd-usage-row, .fd-places-h, .fd-all { max-width: 720px; }
+.fd-head, .fd-needs, .fd-new, .fd-topost, .fd-doors, .fd-status, .fd-usage-row, .fd-places-h { max-width: 720px; }
 .fd-head { display: block; border-bottom: 0; padding-bottom: 0; margin-bottom: 18px; }
 .fd-mark { display: flex; align-items: center; gap: 10px; margin: 0 0 14px; }
 .fd-title { display: inline-flex; align-items: center; gap: 8px; margin: 0; font: 600 15px/1 var(--g-font-ui) !important; letter-spacing: 0; color: var(--g-ink); }
@@ -313,3 +313,4 @@ body { font-family: var(--g-font-ui); text-rendering: optimizeLegibility; }
 .enso path { fill: none; stroke: var(--g-accent); stroke-width: 3.4; stroke-linecap: round; }
 .enso.drawing path { stroke-dasharray: 100; stroke-dashoffset: 100; animation: g-enso 1600ms var(--g-ease) forwards; }
 @keyframes g-enso { to { stroke-dashoffset: 8; } }
+.fd-door[data-sign="new"] .fd-sign i { width: 8px; height: 8px; background: var(--g-ink-2); }
