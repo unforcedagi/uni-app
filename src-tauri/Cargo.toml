@@ -38,6 +38,7 @@ tar = "0.4"
 flate2 = "1"
 semver = "1"
 base64 = "0.22"
+sha2 = "0.10"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tracing-subscriber = { workspace = true }

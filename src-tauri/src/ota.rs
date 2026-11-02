@@ -17,6 +17,13 @@
 //! - **Versions.** A bundle carries a release version (`0.1.85`). It is used only while it is newer than the web layer
 //!   built into the app, so installing a newer APK always wins over an older bundle.
 //!
+//! - **Channel.** The channel's `manifest.json` is signed by the same pinned key and expires (TUF's timestamp role).
+//!   A check stages only what a manifest the key signed, still in date, names, and only if that manifest is no older
+//!   than one this device already took. So a replayed or frozen channel can serve at most what the key signed in the
+//!   last [`expires` window](Manifest::expires), even on a device whose own records are gone. When the device's
+//!   records are damaged, it takes only a manifest signed after the damage (it fails closed until the next signing).
+//!   Expiry gates fetching only: a bundle already installed keeps working offline.
+//!
 //! The channel is off unless the build sets `UNI_OTA_CHANNEL` (a URL to `manifest.json`). Release builds don't.
 
 use std::borrow::Cow;
@@ -42,6 +49,9 @@ pub const PUBKEY: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6ID
 
 /// Where this build looks for bundles, if anywhere. Set at build time only.
 pub const CHANNEL: Option<&str> = option_env!("UNI_OTA_CHANNEL");
+
+/// The name a manifest must carry, so a manifest signed for another channel or interface can't be served here.
+pub const CHANNEL_ID: &str = "uni";
 
 /// A bundle started this many times without reporting ready is dropped.
 pub const MAX_UNCONFIRMED_BOOTS: u32 = 2;
@@ -169,6 +179,9 @@ pub struct State {
     /// The newest version ever promoted here. Nothing older is used again, even if it is signed and the bundle that
     /// set the floor is gone: a channel can't roll a device back to an old bundle.
     pub floor: Option<String>,
+    /// A manifest issued before this (unix seconds) is refused: the newest manifest this device took, or the moment
+    /// its records were found damaged.
+    pub manifest_floor: u64,
 }
 
 impl State {
@@ -242,17 +255,18 @@ pub fn activate(dir: &Path, pubkey: &str, builtin: &semver::Version, shell_api: 
         Ok(s) => s,
         Err(e) => {
             // Start over without the bundles, keeping the newest version they claim as the floor (unverified, so it
-            // can only make the floor stricter).
+            // can only make the floor stricter). What was lost can't be known, so from now on only a manifest signed
+            // after this moment is taken: a replay of anything older stays out, whatever the damage was.
             let floor = ["current", "next"]
                 .iter()
                 .filter_map(|n| read_pair(dir, n).and_then(|(a, _)| claimed_version(&a)))
                 .chain(std::fs::read_to_string(dir.join("floor")).ok().map(|f| f.trim().to_string()))
                 .filter_map(|v| semver::Version::parse(&v).ok())
                 .max();
-            log(format!("{e}; dropping installed bundles, built-in web layer {builtin}"));
+            log(format!("{e}; dropping installed bundles, built-in web layer {builtin}; waiting for a newly signed manifest"));
             remove_pair(dir, "current");
             remove_pair(dir, "next");
-            State { floor: floor.map(|v| v.to_string()), ..State::default() }.save(dir);
+            State { floor: floor.map(|v| v.to_string()), manifest_floor: now_secs(), ..State::default() }.save(dir);
             return None;
         }
     };
@@ -316,13 +330,56 @@ pub fn activate(dir: &Path, pubkey: &str, builtin: &semver::Version, shell_api: 
     chosen
 }
 
-/// The channel's pointer to its newest bundle. Unsigned: everything it points at is checked against the signature.
-#[derive(Debug, Deserialize)]
+fn now_secs() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+}
+
+/// `manifest.json` as served: `signed` is the [`Manifest`]'s JSON text, `signature` a `tauri signer sign` signature
+/// over exactly those bytes, by the pinned key.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Envelope {
+    pub signed: String,
+    pub signature: String,
+}
+
+/// The channel's signed pointer to its newest bundle.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Manifest {
+    /// [`CHANNEL_ID`] of the channel this was signed for.
+    pub channel: String,
+    /// When it was signed, unix seconds. A device never takes a manifest older than one it already took.
+    pub issued: u64,
+    /// Unix seconds after which it is refused. The publisher re-signs well before then, unchanged bundle or not, so
+    /// a channel that stops (or is held back) is noticed rather than trusted forever.
+    pub expires: u64,
     pub version: String,
     pub api: u32,
     pub archive: String,
+    /// SHA-256 of the archive, hex.
+    pub sha256: String,
     pub signature: String,
+}
+
+/// Verifies a served `manifest.json` and checks it is meant for this channel, in date, and no older than `floor`.
+pub fn read_manifest(pubkey: &str, served: &[u8], channel: &str, now: u64, floor: u64) -> Result<Manifest, String> {
+    let env: Envelope = serde_json::from_slice(served).map_err(|e| format!("manifest: {e}"))?;
+    verify(pubkey, env.signed.as_bytes(), &env.signature).map_err(|e| format!("manifest {e}"))?;
+    let m: Manifest = serde_json::from_str(&env.signed).map_err(|e| format!("manifest: {e}"))?;
+    if m.channel != channel {
+        return Err(format!("manifest is for channel {:?}, not {channel:?}", m.channel));
+    }
+    if now >= m.expires {
+        return Err(format!("manifest expired at {} (now {now}); the channel has not re-signed it", m.expires));
+    }
+    if m.issued < floor {
+        return Err(format!("manifest issued at {} is older than one this device already took ({floor})", m.issued));
+    }
+    Ok(m)
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::Digest as _;
+    sha2::Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// Bundle URLs: https, or plain http to this machine / the emulator's host only (local spikes).
@@ -385,10 +442,15 @@ pub async fn check(
     let base = url::Url::parse(channel).map_err(|e| format!("channel: {e}"))?;
     uni_core::init_crypto();
     let client = uni_core::media::https_client_following_redirects(Duration::from_secs(30)).map_err(|e| e.to_string())?;
-    let manifest: Manifest =
-        serde_json::from_slice(&fetch(&client, &base, 64 * 1024).await?).map_err(|e| format!("manifest: {e}"))?;
+    let served = fetch(&client, &base, 64 * 1024).await?;
+    let mut state = State::load_checked(dir)?;
+    let manifest = read_manifest(pubkey, &served, CHANNEL_ID, now_secs(), state.manifest_floor)?;
     let offered = semver::Version::parse(&manifest.version).map_err(|e| format!("manifest version: {e}"))?;
-    let state = State::load_checked(dir)?;
+    if manifest.issued > state.manifest_floor {
+        state.manifest_floor = manifest.issued;
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+        state.save(dir);
+    }
     let staged = read_pair(dir, "next").and_then(|(a, _)| claimed_version(&a)).and_then(|v| semver::Version::parse(&v).ok());
     if let Some(newest) = not_new(&state, builtin, active, staged.as_ref(), &offered) {
         return Ok(CheckResult::UpToDate { version: newest.to_string() });
@@ -398,13 +460,15 @@ pub async fn check(
         return Ok(CheckResult::NeedsNewerApp { version: manifest.version, api: manifest.api });
     }
     let archive = fetch(&client, &base.join(&manifest.archive).map_err(|e| e.to_string())?, MAX_ARCHIVE_BYTES).await?;
+    if sha256_hex(&archive) != manifest.sha256.to_ascii_lowercase() {
+        return Err(format!("bundle {} does not match the manifest's hash", manifest.version));
+    }
     let sig = String::from_utf8(fetch(&client, &base.join(&manifest.signature).map_err(|e| e.to_string())?, 16 * 1024).await?)
         .map_err(|_| "signature is not text".to_string())?;
     let bundle = open(pubkey, &archive, &sig, builtin, shell_api)?;
     if bundle.meta.version != manifest.version {
         return Err(format!("manifest says {}, the signed bundle says {}", manifest.version, bundle.meta.version));
     }
-    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     // state.json first: bundles on disk without it read as lost state at the next launch.
     state.save(dir);
     for (name, bytes) in [("next.tar.gz.sig.tmp", sig.as_bytes()), ("next.tar.gz.tmp", archive.as_slice())] {
@@ -856,14 +920,31 @@ mod tests {
     }
 
     impl Channel {
-        /// Publishes a signed bundle as the channel's newest release.
-        fn publish(&self, k: &Key, version: &str) {
+        /// Publishes a signed bundle as the channel's newest release, in a manifest signed `age` seconds ago that is
+        /// good for `ttl` seconds from then.
+        fn publish_at(&self, k: &Key, version: &str, age: u64, ttl: u64) {
             let a = bundle(version, 1);
             let name = format!("web-{version}.tar.gz");
             std::fs::write(self.dir.path().join(&name), &a).unwrap();
             std::fs::write(self.dir.path().join(format!("{name}.sig")), sign(k, &a)).unwrap();
-            let m = format!(r#"{{"version":"{version}","api":1,"archive":"{name}","signature":"{name}.sig"}}"#);
-            std::fs::write(self.dir.path().join("manifest.json"), m).unwrap();
+            let issued = now_secs() - age;
+            let m = Manifest {
+                channel: CHANNEL_ID.into(),
+                issued,
+                expires: issued + ttl,
+                version: version.into(),
+                api: 1,
+                archive: name.clone(),
+                sha256: sha256_hex(&a),
+                signature: format!("{name}.sig"),
+            };
+            let signed = serde_json::to_string(&m).unwrap();
+            let env = Envelope { signature: sign(k, signed.as_bytes()), signed };
+            std::fs::write(self.dir.path().join("manifest.json"), serde_json::to_vec(&env).unwrap()).unwrap();
+        }
+        /// Signed a minute ago, good for a week.
+        fn publish(&self, k: &Key, version: &str) {
+            self.publish_at(k, version, 60, 7 * DAY);
         }
         /// What the channel serves now, to serve again later (a replay).
         fn snapshot(&self) -> HashMap<String, Vec<u8>> {
@@ -880,6 +961,8 @@ mod tests {
         }
     }
 
+    const DAY: u64 = 24 * 3600;
+
     fn run_check(dir: &Path, ch: &Channel, k: &Key, builtin: &str) -> Result<CheckResult, String> {
         tauri::async_runtime::block_on(check(dir, &ch.url, &k.pk, &v(builtin), None, 1))
     }
@@ -887,7 +970,8 @@ mod tests {
     #[test]
     fn after_double_damage_the_channel_cannot_replay_an_older_release() {
         let (k, ch, dir) = (key(), channel(), tempfile::tempdir().unwrap());
-        ch.publish(&k, "0.1.85");
+        // Still in date: only the damage rule can keep it out.
+        ch.publish_at(&k, "0.1.85", 3600, 7 * DAY);
         let old = ch.snapshot();
         ch.publish(&k, "0.1.86");
         assert_eq!(run_check(dir.path(), &ch, &k, "0.1.84"), Ok(CheckResult::Staged { version: "0.1.86".into() }));
@@ -908,7 +992,7 @@ mod tests {
     fn a_wiped_device_does_not_take_a_release_the_channel_stopped_signing() {
         let (k, ch, dir) = (key(), channel(), tempfile::tempdir().unwrap());
         // 0.1.85 was published long ago and superseded; the device has no record of anything (data wiped).
-        ch.publish(&k, "0.1.85");
+        ch.publish_at(&k, "0.1.85", 30 * DAY, 7 * DAY);
         let r = run_check(dir.path(), &ch, &k, "0.1.84");
         assert!(!matches!(r, Ok(CheckResult::Staged { .. })), "a long-superseded release was staged: {r:?}");
     }
@@ -925,6 +1009,31 @@ mod tests {
         ch.serve_again(&files);
         let r = run_check(dir.path(), &ch, &k, "0.1.84");
         assert!(!matches!(r, Ok(CheckResult::Staged { .. })), "staged from a manifest the key did not sign: {r:?}");
+    }
+
+    #[test]
+    fn a_manifest_for_another_channel_or_another_archive_is_refused() {
+        let (k, ch, dir) = (key(), channel(), tempfile::tempdir().unwrap());
+        ch.publish(&k, "0.1.85");
+        // Same key, but signed for another channel.
+        let env: Envelope = serde_json::from_slice(&std::fs::read(ch.dir.path().join("manifest.json")).unwrap()).unwrap();
+        let mut m: Manifest = serde_json::from_str(&env.signed).unwrap();
+        m.channel = "elsewhere".into();
+        let signed = serde_json::to_string(&m).unwrap();
+        let env = Envelope { signature: sign(&k, signed.as_bytes()), signed };
+        std::fs::write(ch.dir.path().join("manifest.json"), serde_json::to_vec(&env).unwrap()).unwrap();
+        let r = run_check(dir.path(), &ch, &k, "0.1.84");
+        assert!(r.as_ref().is_err_and(|e| e.contains("channel")), "{r:?}");
+        // The archive behind the manifest swapped for another validly signed one.
+        ch.publish(&k, "0.1.85");
+        let other = archive(&[("uni-bundle.json", br#"{"version":"0.1.85","api":1}"#), ("index.html", b"other")]);
+        std::fs::write(ch.dir.path().join("web-0.1.85.tar.gz"), &other).unwrap();
+        std::fs::write(ch.dir.path().join("web-0.1.85.tar.gz.sig"), sign(&k, &other)).unwrap();
+        let r = run_check(dir.path(), &ch, &k, "0.1.84");
+        assert!(r.as_ref().is_err_and(|e| e.contains("hash")), "{r:?}");
+        // The real one still goes through.
+        ch.publish(&k, "0.1.85");
+        assert_eq!(run_check(dir.path(), &ch, &k, "0.1.84"), Ok(CheckResult::Staged { version: "0.1.85".into() }));
     }
 
     #[test]

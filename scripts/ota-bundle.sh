@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# T-305 spike: build the web layer (dist/) as a signed over-the-air bundle, plus the channel's manifest.json.
+# T-305 spike: build the web layer (dist/) as a signed over-the-air bundle, plus the channel's signed, expiring
+# manifest.json (scripts/ota-manifest.sh).
 #   UNI_OTA_KEY=<tauri signer private key file> scripts/ota-bundle.sh <version> <out-dir>
 # The version must be newer than the app it targets (src-tauri/src/ota.rs uses only bundles newer than the built-in
 # web layer). The API is SHELL_API from src/ota.ts; a bundle runs only on a shell with the same API.
@@ -17,5 +18,5 @@ NAME="web-$VERSION.tar.gz"
 tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -C dist -cf - . | gzip -n -9 > "$OUT/$NAME"
 ./node_modules/.bin/tauri signer sign -f "$UNI_OTA_KEY" -p "" "$OUT/$NAME" >/dev/null
 test -s "$OUT/$NAME.sig"
-printf '{"version":"%s","api":%s,"archive":"%s","signature":"%s.sig"}\n' "$VERSION" "$API" "$NAME" "$NAME" > "$OUT/manifest.json"
+bash scripts/ota-manifest.sh "$OUT" "$VERSION" "$API" "$NAME"
 echo "ota-bundle: $OUT/$NAME ($(stat -c %s "$OUT/$NAME") bytes), API $API"

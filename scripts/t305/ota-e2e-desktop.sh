@@ -23,7 +23,7 @@ pack() { # <dir> <version> <out-dir>: tar+sign a prepared dist dir, write a mani
   mkdir -p "$3"; local name="web-$2.tar.gz"
   tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -C "$1" -cf - . | gzip -n -9 > "$3/$name"
   SIGN "$3/$name"
-  printf '{"version":"%s","api":%s,"archive":"%s","signature":"%s.sig"}\n' "$2" "$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["api"])' "$1/uni-bundle.json")" "$name" "$name" > "$3/manifest.json"
+  bash "$ROOT/scripts/ota-manifest.sh" "$3" "$2" "$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["api"])' "$1/uni-bundle.json")" "$name"
 }
 # 0.1.87: valid, then one byte flipped after signing.
 D=$(mktemp -d); tar -xzf "$OUT/bundles/n/web-0.1.85.tar.gz" -C "$D"; echo '{"version":"0.1.87","api":1}' > "$D/uni-bundle.json"
