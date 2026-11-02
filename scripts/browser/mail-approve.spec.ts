@@ -293,6 +293,10 @@ test("a file whose contents don't match its name withholds Send it; a network fa
   // another held send is a fresh view: nothing carried over
   const q = await openHeld(page, QUOTE);
   await expect(q.getByRole('button', { name: /^Send it/ })).toBeVisible();
+  // coming back to the first doesn't offer Send it again
+  const again = await openHeld(page, ROTA);
+  await expect(again.getByRole('note').filter({ hasText: 'FILE NOT CHECKED' })).toBeVisible();
+  await expect(again.getByRole('button', { name: /^Send it/ })).toHaveCount(0);
 });
 
 test("a file this app won't open is still listed with its kind, size and whole name, and the send can be approved", async ({ page }) => {

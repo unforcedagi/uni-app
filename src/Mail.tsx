@@ -200,6 +200,9 @@ function ThreadView({ t, acct, overview, note, onBack, actions }: { t: MailThrea
 /** Enter never decides a held send: only a tap, a click or Space. */
 const noEnter = (e: KeyboardEvent) => { if (e.key === "Enter") e.preventDefault(); };
 
+/** Held sends (opId/fingerprint) with a file that failed its checks when opened. */
+const failedHeld = new Set<string>();
+
 const filesWord = (n: number) => (n === 1 ? "1 file" : `${n} files`);
 
 function heldTo(p: Parked): string {
@@ -224,8 +227,10 @@ function HeldRow({ e, selected, onOpen }: { e: HeldEntry; selected: boolean; onO
 /** A held send in full, and the two decisions on it. Each needs a second, deliberate tap; Enter does neither. */
 function HeldView({ e, acct, onBack, onDecide }: { e: HeldEntry; acct: AccountBoxes; onBack: () => void; onDecide: (kind: "approve" | "decline") => Promise<void> }) {
   const [confirm, setConfirm] = useState<"approve" | "decline" | null>(null);
-  // a file that failed its checks when opened: Send it isn't offered for this listing (a new one remounts the view)
-  const [failedFile, setFailedFile] = useState(false);
+  // a file that failed its checks when opened: Send it isn't offered for this send as listed (its opId and fingerprint),
+  // remembered while the app runs, so leaving the view and coming back doesn't offer it again
+  const heldKey = `${e.item.op_id}/${e.item.fingerprint ?? ""}`;
+  const [failedFile, setFailedFile] = useState(() => failedHeld.has(heldKey));
   const [busy, setBusy] = useState(false);
   const inflight = useRef(false);
   const confirmBox = useRef<HTMLDivElement>(null);
@@ -267,7 +272,7 @@ function HeldView({ e, acct, onBack, onDecide }: { e: HeldEntry; acct: AccountBo
         </dl>
         {files.length > 0 && <ul className="mail-attachments" aria-label={`Files it sends (${files.length})`}>{files.map((x, i) => <FileRow key={`${i}-${x.sha256}`} name={x.name} mime={x.mime} size={x.size}
           early={x.refused ?? (p.draft_id ? null : "The held draft can't be found, so this file can't be opened here.")}
-          open={() => invoke("mail_held_file_open", { accountId: acct.id, draftId: p.draft_id, index: i, file: x })} onRefused={() => setFailedFile(true)} />)}</ul>}
+          open={() => invoke("mail_held_file_open", { accountId: acct.id, draftId: p.draft_id, index: i, file: x })} onRefused={() => { failedHeld.add(heldKey); setFailedFile(true); }} />)}</ul>}
         {f.text ? <PlainBody text={f.text} /> : <p className="empty">This message has no text.</p>}
       </article>}
       {failedFile && open && <p className="mail-draft-note mail-unverified" role="note"><span className="mail-draft-tag">FILE NOT CHECKED</span><span>A file didn't pass the checks when opened, so Send it isn't offered. Don't send it, and ask Uni.</span></p>}
