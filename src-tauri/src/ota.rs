@@ -526,52 +526,70 @@ fn none_built_in() -> semver::Version {
     semver::Version::new(0, 0, 0)
 }
 
-/// What is being served: Uni (its built-in web layer or its own bundle) or an interface the person installed.
+/// Uni's own web layer for this launch: its bundle, or the one built in (`bundle: None`).
 pub struct Choice {
-    pub iface: String,
     pub bundle: Option<Arc<Bundle>>,
     /// The served bundle's records directory.
     dir: Option<PathBuf>,
-    /// What it may use; `None` for Uni, the shell's own interface, which may use everything.
-    pub grants: Option<Vec<String>>,
 }
 
 impl Choice {
     fn built_in() -> Choice {
-        Choice { iface: UNI.into(), bundle: None, dir: None, grants: None }
+        Choice { bundle: None, dir: None }
     }
 }
 
-/// The choice for interface `id`: its bundle activated (a staged one promoted), else Uni. Records which one it is.
-fn choose(root: &Path, builtin: &semver::Version, uni_key: &str, id: &str) -> Choice {
-    if id != UNI {
-        match iface::find(root, id) {
-            Some(i) => {
-                let dir = iface::dir(root, id);
-                let _ = std::fs::create_dir_all(&dir);
-                match activate(&dir, &i.pubkey, &none_built_in(), SHELL_API) {
-                    Some(b) => match b.meta.requires.iter().find(|c| !i.grants.contains(c)) {
-                        None => {
-                            iface::set_active(root, id);
-                            return Choice { iface: id.into(), bundle: Some(Arc::new(b)), dir: Some(dir), grants: Some(i.grants) };
-                        }
-                        Some(c) => log(format!("interface {id} {} needs {c}, which the person hasn't granted; held, Uni instead", b.meta.version)),
-                    },
-                    None => log(format!("interface {id} has no bundle it can serve; Uni instead")),
-                }
-            }
-            None => log(format!("interface {id} is not installed; Uni instead")),
-        }
+/// An installed interface that is running: its verified bundle and what the person granted it.
+#[derive(Debug)]
+pub struct Live {
+    pub bundle: Arc<Bundle>,
+    dir: PathBuf,
+    pub grants: Vec<String>,
+}
+
+/// An interface's window label (`iface-garden`), and back. Uni's windows are any others (`main`, the harness's `t76`).
+pub const WINDOW_PREFIX: &str = "iface-";
+/// Where an interface's files are served: `/__iface/<id>/...`, on the same scheme as Uni's, apart from Uni's paths.
+pub const PATH_PREFIX: &str = "/__iface/";
+
+/// Which interface a webview belongs to, by its label: fixed when the shell opens it, whatever it later loads.
+pub fn iface_of(label: &str) -> &str {
+    label.strip_prefix(WINDOW_PREFIX).unwrap_or(UNI)
+}
+
+/// May the webview labelled `label` load `url`? Pages of the app's own scheme are Uni's, except `/__iface/<id>/...`,
+/// which are that interface's. Uni's webviews never load an interface's pages (they would run with Uni's powers);
+/// an interface's webview loads only its own pages, nothing else at all.
+pub fn may_navigate(label: &str, url: &url::Url) -> bool {
+    let app_page = matches!(url.scheme(), "tauri" | "asset") || url.host_str() == Some("tauri.localhost") || cfg!(debug_assertions) && url.host_str() == Some("localhost");
+    let id = iface_of(label);
+    let own = format!("{PATH_PREFIX}{id}/");
+    let allowed = if id == UNI { !(app_page && url.path().starts_with(PATH_PREFIX)) } else { app_page && url.path().starts_with(&own) };
+    if !allowed {
+        log(format!("{label}: navigation to {url} refused"));
     }
-    iface::set_active(root, UNI);
-    let bundle = activate(root, uni_key, builtin, SHELL_API).map(Arc::new);
-    Choice { iface: UNI.into(), dir: bundle.as_ref().map(|_| root.to_path_buf()), bundle, grants: None }
+    allowed
+}
+
+/// Activates installed interface `id`: its bundle verified against its agent's pinned key (a staged one promoted),
+/// within what the person granted.
+fn activate_iface(root: &Path, id: &str) -> Result<Live, String> {
+    let i = iface::find(root, id).ok_or_else(|| format!("interface {id} is not installed"))?;
+    let dir = iface::dir(root, id);
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let b = activate(&dir, &i.pubkey, &none_built_in(), SHELL_API).ok_or_else(|| format!("interface {id} has no bundle it can serve"))?;
+    if let Some(c) = b.meta.requires.iter().find(|c| !i.grants.contains(c)) {
+        return Err(format!("interface {id} {} needs {c}, which the person hasn't granted; held", b.meta.version));
+    }
+    Ok(Live { bundle: Arc::new(b), dir, grants: i.grants })
 }
 
 /// Shared between the asset provider, the command gate and the commands.
 pub struct Ota {
-    /// `None` until launch has chosen. Replaced whole on a switch or a refusal, so a page never mixes two layers.
+    /// Uni's web layer, chosen once per launch (`None` until then); replaced only when Uni's own bundle is refused.
     choice: RwLock<Option<Arc<Choice>>>,
+    /// Installed interfaces running now, by id. Each has its own window; the gate finds a caller's grants here.
+    live: RwLock<HashMap<String, Arc<Live>>>,
     ready: (Mutex<bool>, Condvar),
     /// The `ota` directory: Uni's own records, `interfaces.json`, `active`, and `iface/<id>/` per interface.
     root: OnceLock<PathBuf>,
@@ -583,6 +601,7 @@ impl Ota {
     fn new() -> Arc<Ota> {
         Arc::new(Ota {
             choice: RwLock::new(None),
+            live: RwLock::new(HashMap::new()),
             ready: (Mutex::new(false), Condvar::new()),
             root: OnceLock::new(),
             builtin: OnceLock::new(),
@@ -595,7 +614,8 @@ impl Ota {
         if self.choice.read().unwrap_or_else(|e| e.into_inner()).is_some() {
             log("setup came after the first page request; the built-in web layer stays for this launch");
         } else {
-            let chosen = choose(&root, &builtin, pubkey, &iface::active(&root));
+            let bundle = activate(&root, pubkey, &builtin, SHELL_API).map(Arc::new);
+            let chosen = Choice { dir: bundle.as_ref().map(|_| root.clone()), bundle };
             let mut slot = self.choice.write().unwrap_or_else(|e| e.into_inner());
             if slot.is_none() {
                 *slot = Some(Arc::new(chosen));
@@ -611,7 +631,7 @@ impl Ota {
         cvar.notify_all();
     }
 
-    /// What is served now, once launch has chosen. Waits briefly for that choice. On timeout the built-in layer is
+    /// Uni's web layer, once launch has chosen. Waits briefly for that choice. On timeout the built-in layer is
     /// fixed for the whole launch, so one page never mixes built-in and bundle files.
     fn current(&self) -> Arc<Choice> {
         if let Some(c) = self.choice.read().unwrap_or_else(|e| e.into_inner()).as_ref() {
@@ -627,14 +647,25 @@ impl Ota {
         *self.choice.write().unwrap_or_else(|e| e.into_inner()) = Some(Arc::new(c));
     }
 
-    /// The command gate: may the interface being served call `cmd`?
-    pub fn permit(&self, cmd: &str) -> Result<(), String> {
-        let c = self.current();
-        iface::permit(&c.iface, c.grants.as_deref(), cmd)
+    fn live(&self, id: &str) -> Option<Arc<Live>> {
+        self.live.read().unwrap_or_else(|e| e.into_inner()).get(id).cloned()
+    }
+
+    /// The command gate: may a call from the webview labelled `label` run `cmd`? An interface's webview is that
+    /// interface for its whole life, so a switch or a refusal never lends its document Uni's powers. An interface
+    /// that is no longer running keeps only the shell's own calls.
+    pub fn permit(&self, label: &str, cmd: &str) -> Result<(), String> {
+        let id = iface_of(label);
+        if id == UNI {
+            return Ok(());
+        }
+        let grants = self.live(id).map(|l| l.grants.clone()).unwrap_or_default();
+        iface::permit(id, Some(&grants), cmd)
     }
 }
 
-/// The app's asset provider: the served bundle's files, else the ones built in.
+/// The app's asset provider: an interface's files under `/__iface/<id>/`, Uni's everywhere else (its bundle, else
+/// the ones built in).
 pub struct OtaAssets<R: Runtime> {
     builtin: Box<dyn Assets<R>>,
     ota: Arc<Ota>,
@@ -678,6 +709,12 @@ impl<R: Runtime> Assets<R> for OtaAssets<R> {
     }
 
     fn get(&self, key: &AssetKey) -> Option<Cow<'_, [u8]>> {
+        if let Some(rest) = key.as_ref().strip_prefix(PATH_PREFIX) {
+            // Only a running interface's own files: never Uni's, never another interface's.
+            let (id, path) = rest.split_once('/').unwrap_or((rest, "index.html"));
+            let live = self.ota.live(id)?;
+            return live.bundle.get(if path.is_empty() { "index.html" } else { path }).map(|b| Cow::Owned(b.to_vec()));
+        }
         match &self.ota.current().bundle {
             // Only the bundle's own files: never a built-in file mixed into a bundle's page.
             Some(b) => b.get(key.as_ref()).map(|bytes| Cow::Owned(bytes.to_vec())),
@@ -695,6 +732,9 @@ impl<R: Runtime> Assets<R> for OtaAssets<R> {
     }
 
     fn csp_hashes(&self, html_path: &AssetKey) -> Box<dyn Iterator<Item = CspHash<'_>> + '_> {
+        if html_path.as_ref().starts_with(PATH_PREFIX) {
+            return Box::new(std::iter::empty());
+        }
         match &self.ota.current().bundle {
             // A bundle's HTML has no build-time nonce tokens or inline-script hashes; the configured CSP applies as is.
             Some(_) => Box::new(std::iter::empty()),
@@ -707,77 +747,91 @@ impl<R: Runtime> Assets<R> for OtaAssets<R> {
 pub struct Status {
     shell_api: u32,
     builtin: String,
-    /// The interface being served (`uni` or an installed one's id).
+    /// The calling page's interface (`uni` or an installed one's id).
     iface: String,
-    /// The bundle being served, if not the built-in web layer.
+    /// The bundle being served to it, if not Uni's built-in web layer.
     active: Option<Meta>,
     channel: Option<&'static str>,
 }
 
+/// The calling page's bundle and its records directory, if it runs a bundle.
+fn served(ota: &Ota, label: &str) -> Option<(String, Arc<Bundle>, PathBuf)> {
+    match iface_of(label) {
+        UNI => {
+            let c = ota.current();
+            Some((UNI.to_string(), c.bundle.clone()?, c.dir.clone()?))
+        }
+        id => ota.live(id).map(|l| (id.to_string(), l.bundle.clone(), l.dir.clone())),
+    }
+}
+
 #[tauri::command]
-pub fn ota_status(app: tauri::AppHandle, ota: tauri::State<'_, Arc<Ota>>) -> Status {
-    let c = ota.current();
+pub fn ota_status(app: tauri::AppHandle, webview: tauri::Webview, ota: tauri::State<'_, Arc<Ota>>) -> Status {
+    let id = iface_of(webview.label()).to_string();
     Status {
         shell_api: SHELL_API,
         builtin: app.package_info().version.to_string(),
-        iface: c.iface.clone(),
-        active: c.bundle.as_ref().map(|b| b.meta.clone()),
+        active: served(&ota, webview.label()).map(|(_, b, _)| b.meta.clone()),
+        iface: id,
         channel: CHANNEL,
     }
 }
 
 /// The page booted: the bundle on trial is kept.
 #[tauri::command]
-pub fn ota_ready(ota: tauri::State<'_, Arc<Ota>>) {
-    let c = ota.current();
-    let (Some(dir), Some(b)) = (&c.dir, &c.bundle) else { return };
+pub fn ota_ready(webview: tauri::Webview, ota: tauri::State<'_, Arc<Ota>>) {
+    let Some((id, b, dir)) = served(&ota, webview.label()) else { return };
     // Unreadable now: leave it; the next launch fails closed.
     let _records = records();
-    let Ok(mut state) = State::load_checked(dir) else { return };
+    let Ok(mut state) = State::load_checked(&dir) else { return };
     if state.trial.as_deref() == Some(b.meta.version.as_str()) {
         state.trial = None;
         state.boots = 0;
-        state.save(dir);
-        log(format!("{} bundle {} reported ready; kept", c.iface, b.meta.version));
+        state.save(&dir);
+        log(format!("{id} bundle {} reported ready; kept", b.meta.version));
     }
 }
 
-/// The bundle's own code refused this shell (its API differs). Drop it and reload with Uni's built-in web layer.
+/// The bundle's own code refused this shell (its API differs). Drop it: Uni's page reloads with the built-in web
+/// layer; an interface's window closes and Uni opens.
 #[tauri::command]
-pub fn ota_reject(window: tauri::WebviewWindow, ota: tauri::State<'_, Arc<Ota>>, reason: String) -> Result<(), String> {
-    let c = ota.current();
-    let (Some(dir), Some(b)) = (&c.dir, &c.bundle) else { return Ok(()) };
-    log(format!("{} bundle {} refused by its own code: {reason}; reloading the built-in web layer", c.iface, b.meta.version));
+pub fn ota_reject(app: tauri::AppHandle, window: tauri::WebviewWindow, ota: tauri::State<'_, Arc<Ota>>, reason: String) -> Result<(), String> {
+    let Some((id, b, dir)) = served(&ota, window.label()) else { return Ok(()) };
+    log(format!("{id} bundle {} refused by its own code: {reason}", b.meta.version));
     {
         let _records = records();
-        if let Ok(mut state) = State::load_checked(dir) {
+        if let Ok(mut state) = State::load_checked(&dir) {
             state.reject(&b.meta.version);
-            state.save(dir);
+            state.save(&dir);
         }
-        remove_pair(dir, "current");
+        remove_pair(&dir, "current");
     }
+    if id == UNI {
+        ota.set(Choice::built_in());
+        return window.eval("location.reload()").map_err(|e| e.to_string());
+    }
+    ota.live.write().unwrap_or_else(|e| e.into_inner()).remove(&id);
     if let Some(root) = ota.root.get() {
         iface::set_active(root, UNI);
     }
-    ota.set(Choice::built_in());
-    window.eval("location.reload()").map_err(|e| e.to_string())
+    replace_window(&app, &window, UNI)
 }
 
-/// Look for a newer bundle of the interface being served, on its channel, and stage it for the next launch.
+/// Look for a newer bundle of the calling page's interface, on its channel, and stage it for its next start.
 #[tauri::command]
-pub async fn ota_check(ota: tauri::State<'_, Arc<Ota>>) -> Result<CheckResult, String> {
-    let c = ota.current();
+pub async fn ota_check(webview: tauri::Webview, ota: tauri::State<'_, Arc<Ota>>) -> Result<CheckResult, String> {
     let (Some(root), Some(builtin)) = (ota.root.get(), ota.builtin.get()) else { return Err("not set up".into()) };
-    let active = c.bundle.as_ref().map(|b| b.version.clone());
-    let r = if c.iface == UNI {
+    let id = iface_of(webview.label()).to_string();
+    let active = served(&ota, webview.label()).map(|(_, b, _)| b.version.clone());
+    let r = if id == UNI {
         let Some(channel) = CHANNEL else { return Ok(CheckResult::Off) };
         check(root, channel, CHANNEL_ID, PUBKEY, builtin, active.as_ref(), SHELL_API).await
     } else {
-        let i = iface::find(root, &c.iface).ok_or("interface not installed")?;
+        let i = iface::find(root, &id).ok_or("interface not installed")?;
         check(&iface::dir(root, &i.id), &i.channel, &i.id, &i.pubkey, &none_built_in(), active.as_ref(), SHELL_API).await
     };
     if let Err(e) = &r {
-        log(format!("{} check failed: {e}", c.iface));
+        log(format!("{id} check failed: {e}"));
     }
     r
 }
@@ -790,10 +844,10 @@ pub struct IfaceView {
     grants: Vec<String>,
 }
 
-/// Uni and the interfaces the person installed, with the one showing marked.
+/// Uni and the interfaces the person installed, with the calling page's own marked.
 #[tauri::command]
-pub fn iface_list(ota: tauri::State<'_, Arc<Ota>>) -> Vec<IfaceView> {
-    let showing = ota.current().iface.clone();
+pub fn iface_list(webview: tauri::Webview, ota: tauri::State<'_, Arc<Ota>>) -> Vec<IfaceView> {
+    let showing = iface_of(webview.label()).to_string();
     let mut list = vec![IfaceView { id: UNI.into(), name: "Uni".into(), active: showing == UNI, grants: vec!["everything".into()] }];
     if let Some(root) = ota.root.get() {
         list.extend(iface::installed(root).into_iter().map(|i| IfaceView { active: showing == i.id, id: i.id, name: i.name, grants: i.grants }));
@@ -801,27 +855,105 @@ pub fn iface_list(ota: tauri::State<'_, Arc<Ota>>) -> Vec<IfaceView> {
     list
 }
 
-/// Switch to another interface and reload into it. An installed interface with no bundle yet is fetched from its
-/// channel first, verified with its own pinned key. If it can't start, Uni stays and the error says why.
+/// Starts installed interface `id`: fetched from its channel on first use, verified with its agent's pinned key.
+async fn start_iface(ota: &Ota, root: &Path, id: &str) -> Result<(), String> {
+    let i = iface::find(root, id).ok_or_else(|| format!("{id} is not installed"))?;
+    let dir = iface::dir(root, id);
+    if !dir.join("current.tar.gz").exists() && !dir.join("next.tar.gz").exists() {
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        log(format!("interface {id}: first use, fetching its bundle from its channel"));
+        check(&dir, &i.channel, &i.id, &i.pubkey, &none_built_in(), None, SHELL_API).await.map_err(|e| format!("{} couldn't be fetched: {e}", i.name))?;
+    }
+    let live = activate_iface(root, id)?;
+    log(format!("interface {id} {} started", live.bundle.meta.version));
+    ota.live.write().unwrap_or_else(|e| e.into_inner()).insert(id.to_string(), Arc::new(live));
+    Ok(())
+}
+
+/// Switch to another interface. Each interface has its own window, so the page that asked keeps its own powers
+/// until its window is gone. If the interface can't start, the caller stays and the error says why.
 #[tauri::command]
-pub async fn iface_use(window: tauri::WebviewWindow, ota: tauri::State<'_, Arc<Ota>>, id: String) -> Result<(), String> {
-    let (Some(root), Some(builtin)) = (ota.root.get(), ota.builtin.get()) else { return Err("not set up".into()) };
+pub async fn iface_use(app: tauri::AppHandle, window: tauri::WebviewWindow, ota: tauri::State<'_, Arc<Ota>>, id: String) -> Result<(), String> {
+    let Some(root) = ota.root.get() else { return Err("not set up".into()) };
+    if iface_of(window.label()) == id {
+        return Ok(());
+    }
     if id != UNI {
-        let i = iface::find(root, &id).ok_or_else(|| format!("{id} is not installed"))?;
-        let dir = iface::dir(root, &id);
-        if !dir.join("current.tar.gz").exists() && !dir.join("next.tar.gz").exists() {
-            std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-            log(format!("interface {id}: first use, fetching its bundle from its channel"));
-            check(&dir, &i.channel, &i.id, &i.pubkey, &none_built_in(), None, SHELL_API).await.map_err(|e| format!("{} couldn't be fetched: {e}", i.name))?;
+        if let Err(e) = start_iface(&ota, root, &id).await {
+            log(&e);
+            return Err(format!("{e}; Uni stays"));
         }
     }
-    let chosen = choose(root, builtin, PUBKEY, &id);
-    if chosen.iface != id {
-        return Err(format!("{id} couldn't start; Uni stays"));
-    }
+    iface::set_active(root, &id);
     log(format!("switched to interface {id}"));
-    ota.set(chosen);
-    window.eval("location.replace('/')").map_err(|e| e.to_string())
+    replace_window(&app, &window, &id)
+}
+
+/// At launch, after the windows from the config exist: when the person left an installed interface showing, start
+/// it in its own window in place of Uni's. Offline, it starts from the device.
+pub fn open_active(app: &tauri::App, ota: &Ota) {
+    let Some(root) = ota.root.get() else { return };
+    let id = iface::active(root);
+    if id == UNI {
+        return;
+    }
+    match activate_iface(root, &id) {
+        Ok(live) => {
+            ota.live.write().unwrap_or_else(|e| e.into_inner()).insert(id.clone(), Arc::new(live));
+            let uni: Vec<_> = app.webview_windows().into_values().collect();
+            match open_window(app.handle(), &id) {
+                Ok(()) => uni.iter().for_each(|w| {
+                    let _ = w.destroy();
+                }),
+                Err(e) => log(format!("interface {id} window: {e}")),
+            }
+        }
+        Err(e) => {
+            log(format!("{e}; Uni instead"));
+            iface::set_active(root, UNI);
+        }
+    }
+}
+
+/// Opens interface `id`'s window (Uni's is `main`) and closes `old`.
+fn replace_window(app: &tauri::AppHandle, old: &tauri::WebviewWindow, id: &str) -> Result<(), String> {
+    open_window(app, id)?;
+    old.destroy().map_err(|e| e.to_string())
+}
+
+/// A window for interface `id`, from the configured window: Uni's at `/`, an installed interface's at
+/// `/__iface/<id>/` with its own label and, on desktop, its own browser storage.
+fn open_window(app: &tauri::AppHandle, id: &str) -> Result<(), String> {
+    #[cfg(mobile)]
+    {
+        let _ = (app, id);
+        Err("switching interfaces needs a window per interface; not on mobile yet".into())
+    }
+    #[cfg(desktop)]
+    {
+        let mut cfg = app.config().app.windows.first().cloned().ok_or("no window in config")?;
+        let label = if id == UNI { "main".to_string() } else { format!("{WINDOW_PREFIX}{id}") };
+        if app.get_webview_window(&label).is_some() {
+            return Ok(());
+        }
+        cfg.label = label.clone();
+        cfg.url = tauri::WebviewUrl::App(if id == UNI { "index.html".into() } else { format!("{}{id}/index.html", &PATH_PREFIX[1..]).into() });
+        let mut b = tauri::WebviewWindowBuilder::from_config(app, &cfg).map_err(|e| e.to_string())?;
+        if id != UNI {
+            if let Ok(d) = app.path().app_data_dir() {
+                b = b.data_directory(d.join("iface-web").join(id));
+            }
+        }
+        #[cfg(all(debug_assertions, target_os = "linux"))]
+        if let Some(script) = crate::t76::init_script() {
+            b = b.initialization_script(&script);
+        }
+        let w = b.build().map_err(|e| e.to_string())?;
+        #[cfg(target_os = "linux")]
+        crate::harden_window(&w);
+        let _ = w;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -1277,32 +1409,49 @@ mod tests {
         // Signed with Uni's key, not the agent's the person pinned: refused, Uni shows.
         let a = garden("0.1.0");
         put(&dir, "next", &a, &sign(&uni, &a));
-        let c = choose(root.path(), &v("0.1.84"), &uni.pk, "garden");
-        assert_eq!((c.iface.as_str(), c.bundle.is_none()), (UNI, true));
-        assert_eq!(iface::active(root.path()), UNI);
+        assert!(activate_iface(root.path(), "garden").unwrap_err().contains("no bundle"));
         // Signed by the agent: served, with the person's grants and nothing more.
         let a = garden("0.1.1");
         put(&dir, "next", &a, &sign(&agent, &a));
-        let c = choose(root.path(), &v("0.1.84"), &uni.pk, "garden");
-        assert_eq!(c.bundle.as_ref().unwrap().get("index.html"), Some(&b"<html>garden</html>"[..]));
-        assert_eq!(c.grants.as_deref(), Some(&["rooms.read".to_string(), "rooms.send".to_string()][..]));
-        assert_eq!(iface::active(root.path()), "garden");
+        let c = activate_iface(root.path(), "garden").unwrap();
+        assert_eq!(c.bundle.get("index.html"), Some(&b"<html>garden</html>"[..]));
+        assert_eq!(c.grants, vec!["rooms.read".to_string(), "rooms.send".to_string()]);
         // The person takes back rooms.send: the bundle that needs it is held, Uni shows.
         installed(&["rooms.read"]);
-        let c = choose(root.path(), &v("0.1.84"), &uni.pk, "garden");
-        assert_eq!((c.iface.as_str(), c.bundle.is_none()), (UNI, true));
+        assert!(activate_iface(root.path(), "garden").unwrap_err().contains("needs rooms.send"));
     }
 
     #[test]
     fn a_document_of_an_installed_interface_never_gets_unis_powers_during_a_switch() {
         let ota = Ota::new();
-        let garden = Choice { iface: "garden".into(), bundle: None, dir: None, grants: Some(vec!["rooms.read".into(), "rooms.send".into()]) };
-        ota.set(garden);
-        assert!(ota.permit("journal_save_text").is_err());
-        // Garden steps aside (ota_reject) or asks for Uni (iface_use): the shell swaps what it serves, then reloads.
-        // Until the reload lands, Garden's document is still running and can still call the shell (Codex iface-r1 P1).
+        let k = key();
+        let a = bundle("0.1.0", 1);
+        let b = open(&k.pk, &a, &sign(&k, &a), &none_built_in(), 1).unwrap();
+        let garden = Live { bundle: Arc::new(b), dir: PathBuf::new(), grants: vec!["rooms.read".into(), "rooms.send".into()] };
+        ota.live.write().unwrap().insert("garden".into(), Arc::new(garden));
+        assert_eq!(ota.permit("iface-garden", "post_message"), Ok(()));
+        assert!(ota.permit("iface-garden", "journal_save_text").is_err());
+        // Garden steps aside (ota_reject) or asks for Uni (iface_use): the shell stops it and opens Uni's window.
+        // Until its window is gone, Garden's document is still running and can still call the shell (Codex iface-r1 P1).
+        ota.live.write().unwrap().remove("garden");
         ota.set(Choice::built_in());
-        assert!(ota.permit("journal_save_text").is_err(), "Garden's still-running document got a Uni-only command");
+        assert!(ota.permit("iface-garden", "journal_save_text").is_err(), "Garden's still-running document got a Uni-only command");
+        assert!(ota.permit("iface-garden", "post_message").is_err(), "a stopped interface keeps no grants");
+        assert_eq!(ota.permit("iface-garden", "ota_status"), Ok(()));
+        // Uni's own windows may call anything.
+        assert_eq!(ota.permit("main", "journal_save_text"), Ok(()));
+    }
+
+    #[test]
+    fn each_webview_stays_inside_its_own_interface() {
+        let u = |s: &str| url::Url::parse(s).unwrap();
+        assert!(may_navigate("main", &u("tauri://localhost/index.html")));
+        assert!(!may_navigate("main", &u("tauri://localhost/__iface/garden/index.html")), "Uni's window would run Garden with Uni's powers");
+        assert!(may_navigate("iface-garden", &u("tauri://localhost/__iface/garden/index.html")));
+        assert!(!may_navigate("iface-garden", &u("tauri://localhost/index.html")));
+        assert!(!may_navigate("iface-garden", &u("tauri://localhost/__iface/other/index.html")));
+        assert!(!may_navigate("iface-garden", &u("https://example.com/")));
+        assert!(!may_navigate("iface-garden", &u("http://tauri.localhost/__iface/gardenx/index.html")));
     }
 
     #[test]

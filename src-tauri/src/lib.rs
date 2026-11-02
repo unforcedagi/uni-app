@@ -2825,6 +2825,19 @@ fn webview_runtime() -> String {
 /// explicit so a build or distro default can't silently turn it on. The
 /// in-app sandbox self-test (src/interface/selftest) is the proof, not this call.
 #[cfg(target_os = "linux")]
+/// T-305: the same Linux hardening as the configured windows get at setup, for a window opened later (an interface's).
+#[cfg(target_os = "linux")]
+pub(crate) fn harden_window(window: &tauri::WebviewWindow) {
+    use webkit2gtk::{SettingsExt, WebViewExt};
+    let _ = window.with_webview(|webview| {
+        if let Some(settings) = webview.inner().settings() {
+            settings.set_enable_webrtc(false);
+            settings.set_enable_media_stream(false);
+        }
+    });
+    close_ipc_handler(window);
+}
+
 fn disable_webrtc(app: &tauri::App) {
     use tauri::Manager;
     use webkit2gtk::{SettingsExt, WebViewExt};
@@ -2850,6 +2863,12 @@ pub fn run() {
     let ota = ota::wrap(&mut context);
     tauri::Builder::default()
         .manage(ota.clone())
+        // T-305: each webview stays inside its own interface's pages.
+        .plugin(
+            tauri::plugin::Builder::<tauri::Wry>::new("iface-nav")
+                .on_navigation(|webview, url| ota::may_navigate(webview.label(), url))
+                .build(),
+        )
         .plugin(secure_store::init())
         .plugin(files::init())
         .plugin(tauri_plugin_opener::init())
@@ -2883,12 +2902,17 @@ pub fn run() {
                     }
                 }
             }
+            // T-305: the interface the person left showing opens in its own window in place of Uni's.
+            {
+                use tauri::Manager;
+                ota::open_active(_app, &_app.state::<std::sync::Arc<ota::Ota>>());
+            }
             unlock_grace::watch();
             tracing::info!(version = %_app.package_info().version, "setup complete; opening window");
             Ok(())
         })
-        // T-305 interface platform spike: every app command passes the gate first. Uni may call anything; an installed
-        // interface only what the person granted it (src/iface.rs).
+        // T-305 interface platform spike: every app command passes the gate first, by the calling webview: Uni's may
+        // call anything, an installed interface's (its own window, for its whole life) only what the person granted.
         .invoke_handler({
             let gate = ota.clone();
             let handler: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
@@ -3047,7 +3071,7 @@ pub fn run() {
             #[cfg(feature = "messages")]
             messages::messages_telegram_keys
             ];
-            move |invoke: tauri::ipc::Invoke<tauri::Wry>| match gate.permit(invoke.message.command()) {
+            move |invoke: tauri::ipc::Invoke<tauri::Wry>| match gate.permit(invoke.message.webview_ref().label(), invoke.message.command()) {
                 Ok(()) => handler(invoke),
                 Err(e) => {
                     invoke.resolver.reject(e);

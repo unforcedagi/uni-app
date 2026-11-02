@@ -45,6 +45,7 @@ if (window.top === window) (function () {
     await log(`ota_status: interface ${status.iface}, bundle ${status.active ? status.active.version : 'built in'}`);
 
     if (phase === 'uni-start' && !garden) {
+      localStorage.setItem('drive-probe', 'set by Uni');
       await room('Seed Library');
       await shot('01-uni');
       press(await until('Settings', () => document.querySelector('button[aria-label="Settings"]')));
@@ -70,6 +71,13 @@ if (window.top === window) (function () {
       // The shell's gate: Garden was granted rooms.read and rooms.send only.
       const denied = await call('vault_list').then(() => 'allowed', (e) => String(e));
       await log(`vault_list from Garden: ${denied}`);
+      // Its window has no plugins, its own browser storage, and can't load Uni's pages.
+      const clip = await call('plugin:clipboard-manager|write_text', { text: 'from Garden' }).then(() => 'allowed', (e) => String(e));
+      await log(`clipboard from Garden: ${clip.includes('not allowed') ? 'refused' : clip}`);
+      await log(`Uni's storage seen from Garden: ${localStorage.getItem('drive-probe') ?? 'nothing'}`);
+      const a = document.createElement('a'); a.href = '/index.html'; document.body.append(a); a.click();
+      await sleep(1500);
+      await log(`after trying to open Uni's page in Garden's window: ${document.getElementById('garden') ? 'still Garden' : 'navigated away'}`);
       const seeds = [...document.querySelectorAll('.place')].find((p) => p.getAttribute('aria-label').startsWith('Seed Library'));
       seeds.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       await until('letters', () => document.querySelectorAll('.letter').length >= 4);

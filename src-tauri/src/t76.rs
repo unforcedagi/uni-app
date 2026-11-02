@@ -31,6 +31,12 @@ pub fn t76_read(name: String) -> Result<Option<String>, String> {
     Ok(std::fs::read_to_string(dir.join(name)).ok())
 }
 
+/// The init script, for a window opened later (T-305: an interface's own window), when the harness is on.
+pub fn init_script() -> Option<String> {
+    dir()?;
+    std::fs::read_to_string(std::env::var_os("UNI_T76_INIT")?).ok()
+}
+
 /// Replace the configured window with one that carries the init script. The new window gets the same WebRTC settings as production.
 pub fn replace_window(app: &App) -> Result<(), Box<dyn std::error::Error>> {
     let Some(init) = std::env::var_os("UNI_T76_INIT") else { return Ok(()) };
