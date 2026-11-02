@@ -205,6 +205,7 @@ p.decision-card.decision-loading { padding: 8px 12px; color: var(--muted); font-
 .secret-form { display: flex; flex-wrap: wrap; gap: 8px; }
 .secret-field { position: relative; flex: 1 1 220px; display: flex; }
 .secret-form input { flex: 1; min-width: 0; min-height: 42px; padding: 0 46px 0 12px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--bg); color: var(--text); font-family: var(--mono); font-size: 14px; }
+.secret-form input::-ms-reveal { display: none; } /* WebView2's own eye: ours hides itself again */
 .secret-form input:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
 .secret-form > button, .secret-forget { min-height: 42px; padding: 0 16px; border: 0; border-radius: 999px; background: var(--accent); color: var(--accent-ink); font: inherit; font-size: 14px; }
 .secret-form > button { margin-left: auto; }

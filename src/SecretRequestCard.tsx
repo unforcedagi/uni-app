@@ -1,4 +1,5 @@
 import { useEffect, useId, useState } from "react";
+import { flushSync } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { DoneCard, PendingCard, QuietCard } from "./CompactCard";
 import { EyeIcon, EyeOffIcon } from "./Icons";
@@ -30,17 +31,6 @@ export function SecretRequestCard({ channel, requestRef, authorName, receipts, p
   const [value, setValue] = useState("");
   const [phase, setPhase] = useState<"idle" | "sending" | "sent" | "forgetting" | "forget-sent">("idle");
   const [error, setError] = useState<string | null>(null);
-  const [shown, setShown] = useState(false);
-  const fieldId = useId();
-  useEffect(() => {
-    if (!shown) return;
-    const hide = () => setShown(false);
-    const away = () => { if (document.visibilityState === "hidden") hide(); };
-    document.addEventListener("visibilitychange", away);
-    window.addEventListener("pagehide", hide);
-    window.addEventListener("blur", hide);
-    return () => { document.removeEventListener("visibilitychange", away); window.removeEventListener("pagehide", hide); window.removeEventListener("blur", hide); };
-  }, [shown]);
   useEffect(() => {
     let live = true;
     invoke<Verified>("secret_request", { channel, request: requestRef })
@@ -60,7 +50,6 @@ export function SecretRequestCard({ channel, requestRef, authorName, receipts, p
   const send = async () => {
     const v = value;
     setValue("");
-    setShown(false);
     setError(null);
     setPhase("sending");
     try {
@@ -123,21 +112,35 @@ export function SecretRequestCard({ channel, requestRef, authorName, receipts, p
               </div>
             : <p className="secret-status warn" role="status">This isn't the key you trust for secrets, whatever its name says. Don't
                 answer it here. Only the key you trusted before may ask; another one goes in the app's secret-requesters file by hand.</p>
-          : <form className="secret-form" onSubmit={(e) => { e.preventDefault(); if (value) void send(); }}>
-              <span className="secret-field">
-                <input id={fieldId} type={shown ? "text" : "password"} aria-label={`Value for ${request.label}`}
-                  placeholder="Paste or type it here" value={value}
-                  onChange={(e) => setValue(e.target.value)} autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}
-                  data-1p-ignore="" data-lpignore="true" disabled={phase === "sending"} />
-                <button type="button" className="secret-reveal" aria-label="Show what you typed" aria-pressed={shown}
-                  aria-controls={fieldId} disabled={phase === "sending"}
-                  onPointerDown={(e) => e.preventDefault()} onClick={() => setShown((v) => !v)}>
-                  {shown ? <EyeOffIcon /> : <EyeIcon />}
-                </button>
-              </span>
-              <button type="submit" disabled={!value || phase === "sending"}>{phase === "sending" ? "Sealing…" : "Send sealed"}</button>
-            </form>}
+          : <SecretForm label={request.label} value={value} setValue={setValue} sending={phase === "sending"} onSend={() => void send()} />}
       {errorLine}
     </>}
     details={facts} />;
+}
+
+// T-335: the field and its eye. `shown` lives here, so it goes with the form whenever the card stops offering it.
+function SecretForm({ label, value, setValue, sending, onSend }: { label: string; value: string; setValue: (v: string) => void; sending: boolean; onSend: () => void }) {
+  const [shown, setShown] = useState(false);
+  const fieldId = useId();
+  useEffect(() => {
+    if (!shown) return;
+    const hide = () => flushSync(() => setShown(false)); // re-masked before the page is snapshotted or left
+    const away = () => { if (document.visibilityState === "hidden") hide(); };
+    document.addEventListener("visibilitychange", away);
+    window.addEventListener("pagehide", hide);
+    window.addEventListener("blur", hide);
+    return () => { document.removeEventListener("visibilitychange", away); window.removeEventListener("pagehide", hide); window.removeEventListener("blur", hide); };
+  }, [shown]);
+  return <form className="secret-form" onSubmit={(e) => { e.preventDefault(); if (value) { setShown(false); onSend(); } }}>
+    <span className="secret-field">
+      <input id={fieldId} type={shown ? "text" : "password"} aria-label={`Value for ${label}`} placeholder="Paste or type it here" value={value}
+        onChange={(e) => setValue(e.target.value)} autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}
+        data-1p-ignore="" data-lpignore="true" disabled={sending} />
+      <button type="button" className="secret-reveal" aria-label="Show what you typed" aria-pressed={shown} aria-controls={fieldId}
+        disabled={sending} onPointerDown={(e) => e.preventDefault()} onClick={() => setShown((v) => !v)}>
+        {shown ? <EyeOffIcon /> : <EyeIcon />}
+      </button>
+    </span>
+    <button type="submit" disabled={!value || sending}>{sending ? "Sealing…" : "Send sealed"}</button>
+  </form>;
 }
