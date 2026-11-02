@@ -67,6 +67,9 @@ const SHELL: &[&str] = &["ota_status", "ota_ready", "ota_reject", "ota_check", "
 pub fn capability(cmd: &str) -> Option<&'static str> {
     Some(match cmd {
         c if SHELL.contains(&c) => "shell",
+        // The real-webview harness's own commands (src/t76.rs): debug Linux builds only, inert without UNI_T76_DIR.
+        #[cfg(all(debug_assertions, target_os = "linux"))]
+        c if c.starts_with("t76_") => "shell",
         "identity_status" | "get_identity" | "get_npub" => "identity.read",
         "get_rooms" | "get_messages" | "get_members" | "refresh" | "mark_read" | "load_older" | "search" | "live_start" | "live_stop" | "relay_origin" => "rooms.read",
         "post_message" | "send_typing" => "rooms.send",
@@ -106,7 +109,7 @@ mod tests {
         assert_eq!(permit("garden", g, "vault_note").unwrap_err(), "not granted: vault.read (interface garden)");
         assert!(permit("garden", g, "edit_message").unwrap_err().contains("rooms.edit"));
         // The shell's own powers are never granted to an agent's interface, whatever its grants say.
-        let all: Vec<String> = ["sealed_answer", "pairing_confirm", "send_secret", "identity_forget", "mail_send", "journal_save_text", "t76_write"].map(String::from).to_vec();
+        let all: Vec<String> = ["sealed_answer", "pairing_confirm", "send_secret", "identity_forget", "mail_send", "journal_save_text"].map(String::from).to_vec();
         for cmd in ["sealed_answer", "pairing_confirm", "send_secret", "identity_forget", "mail_send", "journal_save_text", "a_command_added_later"] {
             assert!(permit("garden", Some(&all), cmd).unwrap_err().contains("Uni's own"), "{cmd}");
         }

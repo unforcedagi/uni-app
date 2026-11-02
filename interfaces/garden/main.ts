@@ -280,7 +280,10 @@ async function openPlace(id: string) {
   const room = app.rooms.find((r) => r.id === id);
   if (!room) return;
   sheet.hidden = false;
-  sheet.style.setProperty("--bloom", app.places.get(id)?.bloom ?? BLOOMS[0]);
+  const place = app.places.get(id);
+  sheet.style.setProperty("--bloom", place?.bloom ?? BLOOMS[0]);
+  // On a wide screen the letters open on the side away from the place, so it stays in view.
+  sheet.dataset.side = place && place.x > (meadow.viewBox.baseVal.width || window.innerWidth) / 2 ? "left" : "right";
   sheet.setAttribute("aria-label", `Letters in ${room.name}`);
   drawSheet(room, true);
   try {

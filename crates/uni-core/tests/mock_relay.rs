@@ -2421,6 +2421,58 @@ async fn serve_for_the_walk() {
     serve(listener, relay).await;
 }
 
+/// T-305 interface platform spike: serves five rooms of made-up neighbours for the Garden interface's real-shell run
+/// (scripts/t305/iface-e2e-desktop.sh), until killed. `MOCK_MEMBER_HEX` (the member's public key), `MOCK_PORT`, and
+/// `MOCK_TRIGGER`: when that file appears, three neighbours write new letters, a second apart, live.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn serve_for_the_garden() {
+    let member = std::env::var("MOCK_MEMBER_HEX").expect("MOCK_MEMBER_HEX");
+    let port = std::env::var("MOCK_PORT").unwrap_or_else(|_| "19392".into());
+    let relay_keys = Keys::generate();
+    let people: Vec<(Keys, &str)> = ["Maren", "Tobias", "Ilse", "Juniper"].into_iter().map(|n| (Keys::generate(), n)).collect();
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+    let rooms: [(&str, &[(usize, u64, &str)]); 5] = [
+        ("Seed Library", &[(0, 5400, "I left the squash seeds in the blue tin. Take what you need and write the variety on the lid."), (1, 900, "Took six. Planting them by the fence where the light stays longest."), (2, 300, "The beans came up overnight.")]),
+        ("Night Walks", &[(3, 1800, "Owls by the north gate again."), (0, 1500, "Same time tomorrow? Bring the red torch.")]),
+        ("Kitchen Table", &[(1, 7200, "Soup on Thursday? I have too many leeks.")]),
+        ("Workshop", &[(2, 10800, "The bench vise is fixed."), (3, 10000, "Clamps are back on the wall.")]),
+        ("Pond", &[(0, 86400, "Frogspawn, finally.")]),
+    ];
+    let chans: Vec<Uuid> = rooms.iter().map(|_| Uuid::new_v4()).collect();
+    let mut events = Vec::new();
+    for (k, name) in &people {
+        events.push(signed(k, 0, vec![], &format!(r#"{{"name":"{name}"}}"#), now - 90_000));
+    }
+    for ((name, letters), ch) in rooms.iter().zip(&chans) {
+        let mut roster = vec![d(*ch), vec!["p".into(), member.clone()]];
+        roster.extend(people.iter().map(|(k, _)| p(k)));
+        events.push(signed(&relay_keys, 39002, roster, "", now - 90_000));
+        events.push(signed(&relay_keys, 39000, vec![d(*ch), named("name", name)], "", now - 90_000));
+        for (who, ago, body) in letters.iter() {
+            events.push(signed(&people[*who].0, 9, vec![h(*ch), p(&people[*who].0)], body, now - ago));
+        }
+    }
+    let relay = MockRelay::new(vec![member], chans.clone(), events);
+    if let Ok(trigger) = std::env::var("MOCK_TRIGGER") {
+        let (relay, chans) = (relay.clone(), chans.clone());
+        tokio::spawn(async move {
+            while !std::path::Path::new(&trigger).exists() {
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            }
+            for (room, who, body) in [(1, 3, "Two owls tonight, low over the pond."), (3, 2, "Someone left a jar of wildflower honey by the lathe."), (0, 0, "Marigold seeds are drying on the windowsill.")] {
+                let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+                relay.publish(signed(&people[who].0, 9, vec![h(chans[room]), p(&people[who].0)], body, at));
+                println!("live letter in room {room}");
+                tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+            }
+        });
+    }
+    let listener = TcpListener::bind(format!("127.0.0.1:{port}")).await.unwrap();
+    println!("serving ws://127.0.0.1:{port}");
+    serve(listener, relay).await;
+}
+
 /// T-176 (Codex review P1): a relay that lies about who wrote a secret request. It serves Uni's real
 /// request, the same request with its one-time key swapped for the relay's own, a request it signed
 /// itself but labelled as Uni's, a forged "stored" receipt and a forged edit. Through the real sync and

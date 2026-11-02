@@ -1,5 +1,9 @@
 /* Garden: a night meadow. Moss and loam under a moon; blooms in fireweed, bluebell, marigold and lichen; letters on
    pale lichen paper in a book face. One moment of motion: the moth that carries a letter. */
+/* Cormorant Garamond (SIL OFL), the same files Uni ships; bundled so the meadow reads the same on every device. */
+@font-face { font-family: "Garden Book"; font-style: italic; font-weight: 400; font-display: swap; src: url("../../src/assets/fonts/CormorantGaramond-italic-400.woff2") format("woff2"); }
+@font-face { font-family: "Garden Book"; font-style: italic; font-weight: 500; font-display: swap; src: url("../../src/assets/fonts/CormorantGaramond-italic-500.woff2") format("woff2"); }
+@font-face { font-family: "Garden Book"; font-style: normal; font-weight: 500; font-display: swap; src: url("../../src/assets/fonts/CormorantGaramond-normal-500.woff2") format("woff2"); }
 :root {
   --sky: #10232a;
   --dusk: #1a3a3a;
@@ -9,11 +13,11 @@
   --ink: #22302a;
   --glow: #f4f08a;
   --moon: #f7f1d6;
-  --book: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", "URW Palladio L", "P052", Georgia, serif;
+  --book: "Garden Book", "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", "URW Palladio L", "P052", Georgia, serif;
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
-html, body { margin: 0; height: 100%; background: var(--sky); color: var(--moon); font-family: var(--book); }
+html, body { margin: 0; height: 100%; background: var(--sky); color: var(--moon); font-family: var(--book); font-weight: 500; }
 body { overflow: hidden; }
 #garden { position: fixed; inset: 0; background: radial-gradient(120% 70% at 78% 8%, #23484a 0%, var(--dusk) 30%, var(--sky) 62%); }
 
@@ -34,7 +38,7 @@ body { overflow: hidden; }
 .place .plant { transition: transform .5s cubic-bezier(.2, .8, .2, 1); transform-origin: 0 0; }
 .place:hover .plant, .place:focus-visible .plant { transform: rotate(-2.5deg); }
 .path { fill: none; stroke: #b9a77a; stroke-opacity: .22; stroke-width: 9; stroke-linecap: round; stroke-dasharray: 1 16; }
-.name { cursor: pointer; fill: var(--moon); font: italic 18px var(--book); text-anchor: middle; paint-order: stroke; stroke: rgba(8, 19, 15, .85); stroke-width: 4px; stroke-linejoin: round; }
+.name { cursor: pointer; fill: var(--moon); font: italic 500 20px var(--book); text-anchor: middle; paint-order: stroke; stroke: rgba(8, 19, 15, .85); stroke-width: 4px; stroke-linejoin: round; }
 .empty { fill: var(--moon); font: italic 20px var(--book); text-anchor: middle; opacity: .85; }
 .called { fill: none; stroke-width: 2; opacity: .9; animation: call 2.6s ease-out infinite; transform-box: fill-box; transform-origin: center; }
 
@@ -44,8 +48,8 @@ body { overflow: hidden; }
 .top { position: absolute; top: 0; left: 0; right: 0; display: flex; justify-content: space-between; align-items: flex-start; gap: 16px;
   padding: max(18px, env(safe-area-inset-top)) max(22px, env(safe-area-inset-right)) 0 max(22px, env(safe-area-inset-left)); pointer-events: none; }
 .title h1 { margin: 0; font-weight: 400; font-style: italic; font-size: clamp(40px, 7vw, 76px); line-height: .95; letter-spacing: -.01em; color: var(--moon); }
-.summary { margin: 6px 0 0 3px; font-size: 17px; opacity: .78; }
-.door { pointer-events: auto; font: 16px var(--book); color: var(--ink); background: var(--paper); border: 0; border-radius: 999px 999px 999px 999px;
+.summary { margin: 6px 0 0 3px; font-size: 19px; opacity: .8; }
+.door { pointer-events: auto; font: 500 18px var(--book); color: var(--ink); background: var(--paper); border: 0; border-radius: 999px 999px 999px 999px;
   padding: 11px 18px 11px 16px; min-height: 44px; cursor: pointer; box-shadow: 0 6px 20px rgba(0, 0, 0, .35); }
 .door::before { content: ""; display: inline-block; width: 10px; height: 14px; margin-right: 9px; vertical-align: -1px;
   border: 1.6px solid var(--ink); border-bottom: 0; border-radius: 6px 6px 0 0; }
@@ -58,21 +62,21 @@ body { overflow: hidden; }
 .sheet[hidden] { display: none; }
 .sheet-head { display: flex; justify-content: space-between; align-items: baseline; padding: 18px 22px 6px; }
 .sheet-head h2 { margin: 0; font-weight: 400; font-style: italic; font-size: 30px; }
-.close { font: 15px var(--book); background: none; border: 0; color: var(--ink); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; min-height: 44px; padding: 0 4px; }
+.close { font: 500 17px var(--book); background: none; border: 0; color: var(--ink); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; min-height: 44px; padding: 0 4px; }
 .letters { list-style: none; margin: 0; padding: 6px 22px 10px; overflow-y: auto; flex: 1; }
 .letter { background: #f3f5ec; border-radius: 4px; padding: 14px 16px 10px; margin: 0 0 12px; box-shadow: 0 1px 0 rgba(34, 48, 42, .12), 0 6px 14px rgba(34, 48, 42, .08); transform: rotate(var(--tilt)); }
-.letter .body { margin: 0; font-size: 18px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
-.letter .sig { margin: 8px 0 0; display: flex; justify-content: flex-end; gap: 10px; font-style: italic; font-size: 15px; color: #4a5a52; }
+.letter .body { margin: 0; font-size: 20px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.letter .sig { margin: 8px 0 0; display: flex; justify-content: flex-end; gap: 10px; font-style: italic; font-size: 17px; color: #4a5a52; }
 .letter .when { opacity: .8; }
 .none { font-style: italic; font-size: 17px; padding: 8px 0 16px; color: #4a5a52; }
 .compose { display: flex; gap: 10px; padding: 10px 22px 18px; border-top: 1px solid rgba(34, 48, 42, .14); }
-.compose textarea { flex: 1; resize: none; font: 17px/1.45 var(--book); color: var(--ink); background: #f7f8f1; border: 1px solid rgba(34, 48, 42, .25); border-radius: 12px; padding: 10px 12px; }
-.send { font: 16px var(--book); color: var(--ink); background: var(--bloom); border: 0; border-radius: 12px; padding: 0 18px; min-height: 44px; cursor: pointer; }
+.compose textarea { flex: 1; resize: none; font: 500 19px/1.4 var(--book); color: var(--ink); background: #f7f8f1; border: 1px solid rgba(34, 48, 42, .25); border-radius: 12px; padding: 10px 12px; }
+.send { font: 500 18px var(--book); color: var(--ink); background: var(--bloom); border: 0; border-radius: 12px; padding: 0 18px; min-height: 44px; cursor: pointer; }
 .send:disabled { opacity: .6; }
-.status { position: absolute; left: 22px; bottom: 14px; margin: 0; font-style: italic; font-size: 16px; color: var(--moon); text-shadow: 0 1px 3px #000; pointer-events: none; }
+.status { position: absolute; left: 22px; bottom: 14px; margin: 0; font-style: italic; font-size: 18px; color: var(--moon); text-shadow: 0 1px 3px #000; pointer-events: none; }
 .sheet:not([hidden]) ~ .status { bottom: calc(min(66vh, 640px) + 10px); }
 
-.moth { position: fixed; left: -20px; top: -14px; width: 40px; height: 28px; pointer-events: none; z-index: 10; filter: drop-shadow(0 0 8px rgba(244, 240, 138, .7)); }
+.moth { position: fixed; left: -32px; top: -22px; width: 64px; height: 44px; pointer-events: none; z-index: 10; filter: drop-shadow(0 0 8px rgba(244, 240, 138, .7)); }
 .moth svg { width: 100%; height: 100%; overflow: visible; }
 .moth .wing { fill: var(--paper); stroke: #b9c2ad; stroke-width: .6; animation: flap .16s ease-in-out infinite alternate; transform-origin: 0 0; }
 .moth .wing.r { animation-direction: alternate-reverse; }
@@ -84,11 +88,19 @@ body { overflow: hidden; }
 @keyframes rise { from { transform: translate(-50%, 40px); opacity: 0; } }
 @keyframes flap { from { transform: scaleY(1); } to { transform: scaleY(.35); } }
 
+@media (min-width: 900px) {
+  .sheet { top: 136px; bottom: 24px; left: auto; right: 24px; transform: none; width: min(460px, 42vw); max-height: none; border-radius: 22px;
+    border-top: 0; border-left: 6px solid var(--bloom); animation-name: slide; }
+  .sheet[data-side="left"] { right: auto; left: 24px; border-left: 0; border-right: 6px solid var(--bloom); }
+  .sheet:not([hidden]) ~ .status { bottom: 14px; }
+  .sheet[data-side="left"]:not([hidden]) ~ .status { left: auto; right: 22px; }
+  @keyframes slide { from { opacity: 0; translate: 0 24px; } }
+}
 @media (max-width: 520px) {
   .sheet { max-height: 72vh; }
   .sheet:not([hidden]) ~ .status { bottom: calc(72vh + 8px); }
   .summary { font-size: 15px; }
-  .name { font-size: 15px; }
+  .name { font-size: 17px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .star, .fly, .orbit, .called, .sheet, .moth .wing { animation: none; }
