@@ -10,6 +10,9 @@ OUT=${1:?out dir}; VERSION=${2:?version}; API=${3:?api}; NAME=${4:?archive}; CHA
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 TTL=${UNI_OTA_TTL:-604800}
 [[ -s $OUT/$NAME && -s $OUT/$NAME.sig ]] || { echo "ota-manifest: $OUT/$NAME or its .sig missing" >&2; exit 1; }
+# A device refuses a second manifest from the same second (one second can't order two): wait out this one, so two
+# runs in a row never share a second.
+[[ -n ${UNI_OTA_ISSUED:-} ]] || sleep 1
 SIGNED=$(mktemp); trap 'rm -f "$SIGNED" "$SIGNED.sig"' EXIT
 python3 -I - "$OUT/$NAME" "$VERSION" "$API" "$NAME" "$CHANNEL" "$TTL" "${UNI_OTA_ISSUED:-}" > "$SIGNED" <<'PY'
 import hashlib, json, sys, time

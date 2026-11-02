@@ -182,6 +182,17 @@ pub struct State {
     /// A manifest issued before this (unix seconds) is refused: the newest manifest this device took, or the moment
     /// its records were found damaged.
     pub manifest_floor: u64,
+    /// SHA-256 of the signed text of the manifest that set `manifest_floor`. Another manifest from the same second is
+    /// refused: one second can't order two manifests. `None` after damage: only a later second is taken.
+    pub manifest_digest: Option<String>,
+}
+
+/// Held around every read-and-save of a bundle directory's records (launch, checks, ready, reject), so a slower
+/// check can't save stale records over a newer one's. Never held across a download.
+static RECORDS: Mutex<()> = Mutex::new(());
+
+fn records() -> std::sync::MutexGuard<'static, ()> {
+    RECORDS.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 impl State {
@@ -251,6 +262,7 @@ fn claimed_version(archive: &[u8]) -> Option<String> {
 /// At launch: promote a staged bundle, then pick the bundle to serve, if any. Every failure falls back to the built-in
 /// web layer and is logged.
 pub fn activate(dir: &Path, pubkey: &str, builtin: &semver::Version, shell_api: u32) -> Option<Bundle> {
+    let _records = records();
     let mut state = match State::load_checked(dir) {
         Ok(s) => s,
         Err(e) => {
@@ -360,8 +372,9 @@ pub struct Manifest {
     pub signature: String,
 }
 
-/// Verifies a served `manifest.json` and checks it is meant for this channel, in date, and no older than `floor`.
-pub fn read_manifest(pubkey: &str, served: &[u8], channel: &str, now: u64, floor: u64) -> Result<Manifest, String> {
+/// Verifies a served `manifest.json` and checks it is meant for this channel and in date. Returns it with the digest
+/// of its signed text. Whether it is new enough for this device is [`admits`].
+pub fn read_manifest(pubkey: &str, served: &[u8], channel: &str, now: u64) -> Result<(Manifest, String), String> {
     let env: Envelope = serde_json::from_slice(served).map_err(|e| format!("manifest: {e}"))?;
     verify(pubkey, env.signed.as_bytes(), &env.signature).map_err(|e| format!("manifest {e}"))?;
     let m: Manifest = serde_json::from_str(&env.signed).map_err(|e| format!("manifest: {e}"))?;
@@ -371,10 +384,20 @@ pub fn read_manifest(pubkey: &str, served: &[u8], channel: &str, now: u64, floor
     if now >= m.expires {
         return Err(format!("manifest expired at {} (now {now}); the channel has not re-signed it", m.expires));
     }
-    if m.issued < floor {
-        return Err(format!("manifest issued at {} is older than one this device already took ({floor})", m.issued));
+    Ok((m, sha256_hex(env.signed.as_bytes())))
+}
+
+/// A manifest is new enough for this device when it was issued after the floor, or is the very manifest that set it.
+fn admits(state: &State, m: &Manifest, digest: &str) -> Result<(), String> {
+    let floor = state.manifest_floor;
+    if m.issued > floor || (m.issued == floor && state.manifest_digest.as_deref() == Some(digest)) {
+        return Ok(());
     }
-    Ok(m)
+    Err(format!("manifest issued at {} is not newer than the one this device already took ({floor})", m.issued))
+}
+
+fn staged_version(dir: &Path) -> Option<semver::Version> {
+    read_pair(dir, "next").and_then(|(a, _)| claimed_version(&a)).and_then(|v| semver::Version::parse(&v).ok())
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {
@@ -443,17 +466,22 @@ pub async fn check(
     uni_core::init_crypto();
     let client = uni_core::media::https_client_following_redirects(Duration::from_secs(30)).map_err(|e| e.to_string())?;
     let served = fetch(&client, &base, 64 * 1024).await?;
-    let mut state = State::load_checked(dir)?;
-    let manifest = read_manifest(pubkey, &served, CHANNEL_ID, now_secs(), state.manifest_floor)?;
+    let (manifest, digest) = read_manifest(pubkey, &served, CHANNEL_ID, now_secs())?;
     let offered = semver::Version::parse(&manifest.version).map_err(|e| format!("manifest version: {e}"))?;
-    if manifest.issued > state.manifest_floor {
-        state.manifest_floor = manifest.issued;
-        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-        state.save(dir);
-    }
-    let staged = read_pair(dir, "next").and_then(|(a, _)| claimed_version(&a)).and_then(|v| semver::Version::parse(&v).ok());
-    if let Some(newest) = not_new(&state, builtin, active, staged.as_ref(), &offered) {
-        return Ok(CheckResult::UpToDate { version: newest.to_string() });
+    // Is it new to this device? Decided on the records as they are now, and the floor raised before any download.
+    {
+        let _records = records();
+        let mut state = State::load_checked(dir)?;
+        admits(&state, &manifest, &digest)?;
+        if manifest.issued > state.manifest_floor {
+            state.manifest_floor = manifest.issued;
+            state.manifest_digest = Some(digest.clone());
+            std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+            state.save(dir);
+        }
+        if let Some(newest) = not_new(&state, builtin, active, staged_version(dir).as_ref(), &offered) {
+            return Ok(CheckResult::UpToDate { version: newest.to_string() });
+        }
     }
     if manifest.api != shell_api {
         log(format!("bundle {offered} needs shell API {}, this shell has {shell_api}: needs a newer app", manifest.api));
@@ -468,6 +496,13 @@ pub async fn check(
     let bundle = open(pubkey, &archive, &sig, builtin, shell_api)?;
     if bundle.meta.version != manifest.version {
         return Err(format!("manifest says {}, the signed bundle says {}", manifest.version, bundle.meta.version));
+    }
+    // The download took time: another check may have taken a newer manifest or staged a newer bundle meanwhile.
+    let _records = records();
+    let state = State::load_checked(dir)?;
+    admits(&state, &manifest, &digest).map_err(|e| format!("{e}; taken while this one downloaded"))?;
+    if let Some(newest) = not_new(&state, builtin, active, staged_version(dir).as_ref(), &offered) {
+        return Ok(CheckResult::UpToDate { version: newest.to_string() });
     }
     // state.json first: bundles on disk without it read as lost state at the next launch.
     state.save(dir);
@@ -625,6 +660,7 @@ pub fn ota_status(app: tauri::AppHandle, ota: tauri::State<'_, Arc<Ota>>) -> Sta
 pub fn ota_ready(ota: tauri::State<'_, Arc<Ota>>) {
     let (Some(dir), Some(b)) = (ota.dir.get(), ota.active()) else { return };
     // Unreadable now: leave it; the next launch fails closed.
+    let _records = records();
     let Ok(mut state) = State::load_checked(dir) else { return };
     if state.trial.as_deref() == Some(b.meta.version.as_str()) {
         state.trial = None;
@@ -639,6 +675,7 @@ pub fn ota_ready(ota: tauri::State<'_, Arc<Ota>>) {
 pub fn ota_reject(window: tauri::WebviewWindow, ota: tauri::State<'_, Arc<Ota>>, reason: String) -> Result<(), String> {
     let (Some(dir), Some(b)) = (ota.dir.get(), ota.active()) else { return Ok(()) };
     log(format!("bundle {} refused by its own code: {reason}; reloading the built-in web layer", b.meta.version));
+    let _records = records();
     if let Ok(mut state) = State::load_checked(dir) {
         state.reject(&b.meta.version);
         state.save(dir);
@@ -1044,23 +1081,31 @@ mod tests {
 
     #[test]
     fn a_slow_check_of_an_older_manifest_cannot_stage_under_a_newer_floor() {
-        let (k, old_ch, new_ch) = (key(), channel(), channel());
-        let dir = tempfile::tempdir().unwrap();
-        old_ch.publish_at(&k, "0.1.85", 3600, 7 * DAY);
-        new_ch.publish_at(&k, "0.1.86", 60, 7 * DAY);
-        // The check of the older manifest is held at its download while a check of the newer one runs (Codex p2-r1).
-        let hold = old_ch.dir.path().join("web-0.1.85.tar.gz.hold");
-        std::fs::write(&hold, b"").unwrap();
-        let (d, url, pk) = (dir.path().to_path_buf(), old_ch.url.clone(), k.pk.clone());
-        let slow = std::thread::spawn(move || tauri::async_runtime::block_on(check(&d, &url, &pk, &v("0.1.84"), None, 1)));
-        while !old_ch.dir.path().join("web-0.1.85.tar.gz.asked").exists() {
-            std::thread::sleep(Duration::from_millis(10));
+        // The newer check either stages its bundle or only gets as far as its manifest (its download fails).
+        for newer_downloads in [true, false] {
+            let (k, old_ch, new_ch) = (key(), channel(), channel());
+            let dir = tempfile::tempdir().unwrap();
+            old_ch.publish_at(&k, "0.1.85", 3600, 7 * DAY);
+            new_ch.publish_at(&k, "0.1.86", 60, 7 * DAY);
+            if !newer_downloads {
+                std::fs::remove_file(new_ch.dir.path().join("web-0.1.86.tar.gz")).unwrap();
+            }
+            // The check of the older manifest is held at its download while a check of the newer one runs (Codex p2-r1).
+            let hold = old_ch.dir.path().join("web-0.1.85.tar.gz.hold");
+            std::fs::write(&hold, b"").unwrap();
+            let (d, url, pk) = (dir.path().to_path_buf(), old_ch.url.clone(), k.pk.clone());
+            let slow = std::thread::spawn(move || tauri::async_runtime::block_on(check(&d, &url, &pk, &v("0.1.84"), None, 1)));
+            while !old_ch.dir.path().join("web-0.1.85.tar.gz.asked").exists() {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            let newer = run_check(dir.path(), &new_ch, &k, "0.1.84");
+            assert_eq!(newer.is_ok(), newer_downloads, "{newer:?}");
+            std::fs::remove_file(&hold).unwrap();
+            let r = slow.join().unwrap();
+            assert!(!matches!(r, Ok(CheckResult::Staged { .. })), "newer downloads {newer_downloads}: the older release was staged: {r:?}");
+            let served = activate(dir.path(), &k.pk, &v("0.1.84"), 1).map(|b| b.meta.version);
+            assert_eq!(served.as_deref(), newer_downloads.then_some("0.1.86"));
         }
-        assert_eq!(run_check(dir.path(), &new_ch, &k, "0.1.84"), Ok(CheckResult::Staged { version: "0.1.86".into() }));
-        std::fs::remove_file(&hold).unwrap();
-        let r = slow.join().unwrap();
-        assert!(!matches!(r, Ok(CheckResult::Staged { .. })), "the older release was staged over the newer: {r:?}");
-        assert_eq!(activate(dir.path(), &k.pk, &v("0.1.84"), 1).unwrap().meta.version, "0.1.86");
     }
 
     #[test]
