@@ -232,3 +232,59 @@ test('on the Daylight the held send and its confirm move nothing, and every targ
   await expect(h.getByRole('group', { name: 'Confirm sending' })).toBeVisible();
   await check();
 });
+
+// T-335: a held send with files. Each file is listed (name, type, size) and opens with a tap; Send it is offered as for
+// plain text, says it sends the files, and approves by the one fingerprint that covers them.
+const ROTA = 'The rota and the budget for the harvest supper';
+
+test('a held send with files lists each file, opens one with a tap, and Send it sends it with its files under the one fingerprint', async ({ page }) => {
+  await boot(page, 'ok', { writes: true, held: true, heldFiles: true });
+  await expect(badge(page)).toHaveText('3');
+  await page.getByRole('button', { name: /wait for you · Review$/ }).click();
+  await expect(heldRows(page).filter({ hasText: ROTA })).toHaveAccessibleName(`Waiting for you. From Uni's address to bookings@example.org: ${ROTA}, with 2 files`);
+  await expect(heldRows(page).filter({ hasText: ROTA })).toContainText('📎 2 · ');
+  const h = await openHeld(page, ROTA);
+  const files = h.getByRole('list', { name: 'Files it sends (2)' });
+  await expect(files.getByRole('listitem')).toHaveCount(2);
+  await expect(files.getByRole('button', { name: 'Open volunteer-rota.csv' })).toContainText('volunteer-rota.csvCSV · 412 B · Open');
+  await expect(files.getByRole('button', { name: 'Open supper-budget.pdf' })).toContainText('supper-budget.pdfPDF · 13 KB · Open');
+  await expect(h.getByText("only Don't send is offered here")).toHaveCount(0);
+  await shot(page, 'f1-held-with-files');
+
+  // a tap opens that file: by the draft, its place and what the listing said, so Rust checks the bytes are those
+  await files.getByRole('button', { name: 'Open volunteer-rota.csv' }).click();
+  await expect(files.getByRole('status')).toHaveText('Passed the attachment checks; opened.');
+  expect(await calls(page, 'mail_held_file_open')).toEqual([{ accountId: 'U', draftId: 'h3', index: 0, file: { name: 'volunteer-rota.csv', mime: 'text/csv', size: 412, sha256: '1f'.repeat(32), refused: null } }]);
+
+  const send = h.getByRole('button', { name: "Send it with 2 files, from Uni's address (uni@example.com)" });
+  await expect(send).toContainText("with 2 files, from Uni's address, uni@example.com");
+  await send.click();
+  const confirm = h.getByRole('group', { name: 'Confirm sending' });
+  await expect(confirm).toContainText("Send this from Uni's address (uni@example.com) to bookings@example.org, with its 2 files? It goes out exactly as shown, files included.");
+  await shot(page, 'f2-confirm-with-files');
+  await confirm.getByRole('button', { name: "Yes, send from Uni's address" }).click();
+  await expect(h.getByRole('status').filter({ hasText: 'Sent' })).toHaveText("Sent from Uni's address (uni@example.com).");
+  expect(await calls(page, 'mail_send_approve')).toEqual([{ accountId: 'U', opId: 'op-held-3-00000000000000', fingerprint: await parkedFp(page, 2) }]);
+  expect(await submissions(page)).toEqual([{ account: 'U', draft: 'h3', to: ['bookings@example.org'] }]);
+  await expect(badge(page)).toHaveText('2');
+  await shot(page, 'f3-sent-with-files');
+});
+
+test("a file whose bytes aren't the listed ones doesn't open, and says so", async ({ page }) => {
+  await boot(page, 'ok', { writes: true, held: true, heldFiles: true });
+  const h = await openHeld(page, ROTA);
+  await page.evaluate(() => { (window as any).__heldChanged = true; });
+  await h.getByRole('button', { name: 'Open supper-budget.pdf' }).click();
+  await expect(h.getByRole('list', { name: 'Files it sends (2)' }).getByRole('status')).toHaveText('This held send changed since it was listed: refresh Mail and look again.');
+  await expect(h.getByRole('button', { name: 'Open supper-budget.pdf' })).toContainText('Not opened');
+});
+
+test("a held send whose files the bridge doesn't list (an older bridge) offers only Don't send", async ({ page }) => {
+  await page.addInitScript(() => { (window as any).__oldBridge = true; });
+  await boot(page, 'ok', { writes: true, held: true, heldFiles: true });
+  const h = await openHeld(page, ROTA);
+  await expect(h.getByRole('note').filter({ hasText: "only Don't send is offered here" })).toBeVisible();
+  await expect(h.getByRole('list', { name: /^Files it sends/ })).toHaveCount(0);
+  await expect(h.getByRole('button', { name: /^Send it/ })).toHaveCount(0);
+  await expect(h.getByRole('button', { name: /^Don't send/ })).toBeVisible();
+});

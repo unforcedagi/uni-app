@@ -2066,6 +2066,20 @@ async fn mail_parked(app: tauri::AppHandle, account_id: String) -> Result<Vec<un
     mail_io(&app, move |mail| tauri::async_runtime::block_on(mail.parked(&account_id))).await
 }
 
+/// T-335: open file `index` of a held send, as the listing showed it (`file`): only if its bytes are the listed ones,
+/// then through the same gates as any attachment from mail ([`uni_core::mail::open_held_file_in`]).
+#[tauri::command]
+async fn mail_held_file_open(app: tauri::AppHandle, account_id: String, draft_id: String, index: usize, file: uni_core::mail::HeldFile) -> Result<(), MailError> {
+    use tauri_plugin_opener::OpenerExt;
+    let dir = app.path().app_cache_dir().map_err(mail_invalid)?.join("mail");
+    let opener = app.clone();
+    mail_io(&app, move |mail| {
+        let open = |path: &std::path::Path| opener.opener().open_path(path.to_string_lossy(), None::<&str>).map_err(|e| e.to_string());
+        tauri::async_runtime::block_on(uni_core::mail::open_held_file_in(mail, &dir, &account_id, &draft_id, index, &file, open)).map(|_| ())
+    })
+    .await
+}
+
 /// Approve a parked send: exactly the draft whose fingerprint you were shown, once per opId.
 #[tauri::command]
 async fn mail_send_approve(app: tauri::AppHandle, account_id: String, op_id: String, fingerprint: String) -> Result<SendOutcome, MailError> {
@@ -2949,6 +2963,7 @@ pub fn run() {
             mail_thread,
             mail_triage,
             mail_attachment_open,
+            mail_held_file_open,
             mail_mark_seen,
             mail_flag,
             mail_archive,

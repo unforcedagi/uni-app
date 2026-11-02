@@ -279,3 +279,59 @@ async fn declining_sends_nothing_and_a_bridge_without_the_operations_gets_none()
     }
     assert_eq!(ops_sent(&fake).len(), before);
 }
+
+/// T-335: a held send with files lists each one, opens one only when its bytes are the listed ones, and approving sends
+/// the whole message, files included, under the one fingerprint.
+#[tokio::test]
+async fn a_held_send_with_files_lists_them_opens_only_the_listed_bytes_and_approves_once() {
+    let keys = Keys::generate();
+    let fake = approving(&keys).await;
+    let csv = b"day,who\nMonday,Mara\nTuesday,Theo\n".to_vec();
+    let pdf = include_bytes!("fixtures/attachments/notes.pdf").to_vec();
+    fake.state.lock().unwrap().park_with_files("U", "ask@example.org", "The rota and the notes", "Both attached.", "Uni's outbound rules want Robin to approve mail to ask@example.org",
+        &[("rota.csv", "text/csv", csv.clone()), ("notes.pdf", "application/pdf", pdf.clone())]);
+    let mail = MailBridge::new(&fake.url, &keys).unwrap();
+    let held = mail.parked("U").await.unwrap();
+    let h = held.iter().find(|p| !p.files.is_empty()).unwrap();
+    assert_eq!((h.plain, h.problem.as_deref()), (Some(false), None));
+    assert_eq!(h.files.iter().map(|f| (f.name.as_str(), f.mime.as_str(), f.size)).collect::<Vec<_>>(), [("rota.csv", "text/csv", csv.len() as u64), ("notes.pdf", "application/pdf", pdf.len() as u64)]);
+    assert_eq!(h.files[0].sha256, uni_core::media::sha256_hex(&csv));
+    assert!(held.iter().filter(|p| p.op_id != h.op_id).all(|p| p.files.is_empty() && p.plain == Some(true)), "a plain held send lists no files");
+
+    // opening reads the draft now and hands the opener exactly the listed bytes
+    let cache = tempfile::tempdir().unwrap();
+    let draft = h.draft_id.as_deref().unwrap();
+    let mut opened = None;
+    let path = uni_core::mail::open_held_file_in(&mail, cache.path(), "U", draft, 1, &h.files[1], |p| { opened = Some(p.to_path_buf()); Ok(()) }).await.unwrap();
+    assert_eq!(opened.as_deref(), Some(path.as_path()));
+    assert_eq!(std::fs::read(&path).unwrap(), pdf);
+    assert_eq!(path.file_name().unwrap(), "notes.pdf");
+    // the file at that place isn't the listed one (another name, or a listing for another index): nothing opens
+    let opens = |i: usize, f: uni_core::mail::HeldFile| {
+        let mail = &mail;
+        let dir = cache.path().to_path_buf();
+        async move { uni_core::mail::open_held_file_in(mail, &dir, "U", draft, i, &f, |_| panic!("must not open")).await }
+    };
+    for (i, f) in [(0, h.files[1].clone()), (2, h.files[0].clone())] {
+        let e = opens(i, f).await.unwrap_err();
+        assert!(e.to_string().contains("changed since it was listed"), "{e}");
+    }
+    // the bytes on the server aren't the ones listed: nothing is written or opened
+    let before = std::fs::read_dir(cache.path()).unwrap().count();
+    {
+        let mut s = fake.state.lock().unwrap();
+        let u = s.shared.iter_mut().find(|m| m.id == "U").unwrap();
+        u.blobs.insert(format!("B{draft}-f0"), b"day,who\nMonday,Mallory\nTuesday,Theo\n"[..csv.len()].to_vec());
+    }
+    let e = opens(0, h.files[0].clone()).await.unwrap_err();
+    assert!(e.to_string().contains("changed since it was listed"), "{e}");
+    assert_eq!(std::fs::read_dir(cache.path()).unwrap().count(), before);
+
+    // approve: by opId and the one fingerprint, nothing else; sent once
+    let fp = h.fingerprint.clone().unwrap();
+    assert_eq!(mail.send_approve("U", &h.op_id, &fp).await.unwrap().state, SendState::Cleaned);
+    let s = fake.state.lock().unwrap();
+    assert_eq!(s.submissions.len(), 1);
+    let asked = s.op_log.iter().find(|o| o["op"] == "send.approve").unwrap();
+    assert_eq!((asked["fingerprint"].as_str(), asked.get("fields"), asked.get("attachments")), (Some(fp.as_str()), None, None));
+}

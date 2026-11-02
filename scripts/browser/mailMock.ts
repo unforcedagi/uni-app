@@ -7,14 +7,16 @@
 // T-213: `{ held: true }` adds two sends Uni's rules parked for Robin in Uni's Drafts, and offers listing, approving and
 // declining them on Uni's account, with the bridge's rules: approve only under the fingerprint it was parked with, once
 // per opId (a repeat gets the outcome), and a draft that changed since is refused, never sent.
+// T-335: `{ held: true, heldFiles: true }` adds a third held send, text plus two files, listed as the Rust command lists
+// them (name, type, size, SHA-256; `plain` false). `__oldBridge` lists it as an older bridge would: not plain, no files.
 import { expect, test, type Page } from '@playwright/test';
 
 export const KEY = 'c0ffee'.repeat(10) + 'c0ff';
 export type Mode = 'ok' | 'not_allowed' | 'unreachable' | 'one_account';
 
 /** `writes`: the bridge offers writes; `ops`: exactly these operations per account instead (a partial bridge). */
-export async function boot(page: Page, mode: Mode = 'ok', opts: { writes?: boolean; ops?: Record<string, string[]>; held?: boolean } = {}) {
-  await page.addInitScript(([mode, KEY, writes, opsOverride, held]) => {
+export async function boot(page: Page, mode: Mode = 'ok', opts: { writes?: boolean; ops?: Record<string, string[]>; held?: boolean; heldFiles?: boolean } = {}) {
+  await page.addInitScript(([mode, KEY, writes, opsOverride, held, heldFiles]) => {
     const w = window as any;
     localStorage.setItem('uni.tabs.v1', JSON.stringify({ v: 1, tabs: [{ id: 'mail', kind: 'mail', title: 'Mail' }], active: 'mail', recent: ['mail'] }));
     w.__mailMode = mode;
@@ -67,16 +69,20 @@ export async function boot(page: Page, mode: Mode = 'ok', opts: { writes?: boole
     }
     // T-213: two sends held for Robin, each a draft in Uni's Drafts
     const parked: any[] = w.__parked = [];
-    const fp0 = (m: any) => { let h = 0; for (const ch of JSON.stringify([m.id, m.to, m.cc, m.bcc, m.subject, m.text])) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return h.toString(16).padStart(8, '0').repeat(8); };
+    const fp0 = (m: any) => { let h = 0; for (const ch of JSON.stringify([m.id, m.to, m.cc, m.bcc, m.subject, m.text, m.files ?? null])) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return h.toString(16).padStart(8, '0').repeat(8); };
     if (held) {
       const why = (to: string) => `Uni's outbound rules want Robin to approve mail to ${to}`;
-      const hold = (n: number, to: any, subject: string, text: string) => {
-        const d = msg(`h${n}`, 'U', `Th${n}`, 'U-drafts', uni, to, subject, `2026-10-19T0${n}:30:00Z`, { draft: true, text, bcc: [] });
+      const hold = (n: number, to: any, subject: string, text: string, files?: any[]) => {
+        const d = msg(`h${n}`, 'U', `Th${n}`, 'U-drafts', uni, to, subject, `2026-10-19T0${n}:30:00Z`, { draft: true, text, bcc: [], ...(files ? { files, has_attachment: true } : {}) });
         msgs.push(d);
         parked.push({ op_id: `op-held-${n}-00000000000000`, draft_id: d.id, reason: why(to.email), fp: fp0(d), state: 'awaiting-approval', decision: null });
       };
       hold(1, a('Orchard Barn', 'orchard@example.org'), 'Booking the barn for the harvest supper', 'Hello,\n\nCould we book the barn for the harvest supper on Saturday the 7th, from five until ten?\n\nThank you,\nUni, for Robin Vale');
       hold(2, a(null, 'press@example.net'), 'A quote for your newsletter', 'Hi,\n\nRobin is happy to be quoted on the garden week: "Bring a jar, take a jar."\n\nUni');
+      if (heldFiles) hold(3, a('Juniper Hall', 'bookings@example.org'), 'The rota and the budget for the harvest supper', 'Hello,\n\nAttached are the volunteer rota and the budget for the harvest supper, as promised.\n\nUni, for Robin Vale', [
+        { name: 'volunteer-rota.csv', mime: 'text/csv', size: 412, sha256: '1f'.repeat(32), refused: null },
+        { name: 'supper-budget.pdf', mime: 'application/pdf', size: 13401, sha256: '2e'.repeat(32), refused: null },
+      ]);
     }
     const notes: Record<string, string> = w.__notes = { 'A/a3': 'Needs you: Mara asks which day to start.', 'A/a4': '<b>Two files</b> pass the checks; setup.exe won\'t open.', 'U/u1': 'Routine. Nothing to do.' };
     const hay = (m: any) => [m.subject, m.text, m.html, ...m.from.map((x: any) => `${x.name} ${x.email}`), ...m.attachments.map((x: any) => x.name)].join(' ').toLowerCase();
@@ -148,6 +154,11 @@ export async function boot(page: Page, mode: Mode = 'ok', opts: { writes?: boole
             return Object.fromEntries(args.emailIds.filter((id: string) => notes[`${args.accountId}/${id}`]).map((id: string) => [id, notes[`${args.accountId}/${id}`]]));
           // Rust decides (uni_core::mail::open_attachment_in, tested in crates/uni-core/tests/mail_attachment.rs and mail_accounts.rs);
           // this stand-in returns its refusal word for word so the UI's handling of it is checked here
+          // T-335: Rust checks the bytes against the listed SHA-256 (crates/uni-core/tests/mail_write.rs); `__heldChanged`
+          // answers as it does when they aren't the listed ones
+          case 'mail_held_file_open':
+            if (w.__heldChanged) throw { kind: 'invalid', message: 'This held send changed since it was listed: refresh Mail and look again.' };
+            return null;
           case 'mail_attachment_open':
             if (args.blobId === 'Bproof-svg') throw { kind: 'invalid', message: "Uni didn't open this attachment: it is named .png but its contents are an SVG image (which can run script). Open it in your mail client if you trust the sender." };
             return null;
@@ -248,7 +259,8 @@ export async function boot(page: Page, mode: Mode = 'ok', opts: { writes?: boole
               if (!d) return { op_id: p.op_id, draft_id: p.draft_id, reason: p.reason, sent_by: 'Uni', parked_at: '2026-10-19T09:00:00Z', recipients: [], fingerprint: null, changed: false, fields: null, plain: null, problem: "the parked draft isn't there" };
               const now = fp0(d);
               return { op_id: p.op_id, draft_id: d.id, reason: p.reason, sent_by: 'Uni', parked_at: '2026-10-19T09:00:00Z', recipients: [...d.to, ...d.cc, ...d.bcc].map((x: any) => x.email),
-                fingerprint: now, changed: now !== p.fp, fields: { to: d.to, cc: d.cc, bcc: d.bcc, subject: d.subject, text: d.text ?? '', in_reply_to: null }, plain: true, problem: null };
+                fingerprint: now, changed: now !== p.fp, fields: { to: d.to, cc: d.cc, bcc: d.bcc, subject: d.subject, text: d.text ?? '', in_reply_to: null },
+                plain: !d.files?.length, files: w.__oldBridge ? [] : d.files ?? [], problem: null };
             });
           }
           case 'mail_send_approve': case 'mail_send_decline': {
@@ -285,7 +297,7 @@ export async function boot(page: Page, mode: Mode = 'ok', opts: { writes?: boole
       },
     };
     w.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} };
-  }, [mode, KEY, !!opts.writes, opts.ops ?? null, !!opts.held] as const);
+  }, [mode, KEY, !!opts.writes, opts.ops ?? null, !!opts.held, !!opts.heldFiles] as const);
   await page.goto('/');
 }
 

@@ -376,17 +376,37 @@ export function newOpId(): string {
 export type Parked = {
   op_id: string; draft_id: string | null; reason: string | null; sent_by: string | null; parked_at: string | null; recipients: string[];
   fingerprint: string | null; changed: boolean; fields: DraftFields | null; plain: boolean | null; problem: string | null;
+  /** T-335: the files it sends, in order, when it is text plus files and nothing else (`plain` is then false). */
+  files?: HeldFile[];
 };
+/** One file of a held send (`uni_core::mail::HeldFile`), from the same bytes as the fingerprint. `refused`: why Uni won't
+ *  open it (its name or type); it is sent either way. */
+export type HeldFile = { name: string; mime: string; size: number; sha256: string; refused?: string | null };
 
 /** The held sends of this account are yours to decide: Uni's account, where the bridge offers approving or declining. */
 export function approvalOffered(a: AccountBoxes | undefined): boolean {
   return !!a && a.who === "uni" && (can(a, "send.approve") || can(a, "send.decline"));
 }
 
+/** Everything the held send carries is shown: plain text and nothing else, or (T-335) text plus the files the bridge
+ *  listed, each with its name, type and size. Anything else (formatting, a file the bridge couldn't list) would be sent
+ *  unseen. */
+export function heldShownWhole(p: Parked): boolean {
+  const files = p.files?.length ?? 0;
+  return p.plain === true ? files === 0 : p.plain === false && files > 0;
+}
+
 /** Send it is offered for this held send: the bridge offers it, and it shows the whole draft as it is now. */
 export function canApprove(a: AccountBoxes | undefined, p: Parked): boolean {
-  // only a draft the bridge says is plain text and nothing else: anything more would be sent unseen
-  return can(a, "send.approve") && !!p.fingerprint && !!p.fields && !p.changed && !p.problem && p.plain === true;
+  return can(a, "send.approve") && !!p.fingerprint && !!p.fields && !p.changed && !p.problem && heldShownWhole(p);
+}
+
+/** A file's kind in a word or two, from its name (the type the message declares when the name has none). */
+export function fileKind(name: string, mime: string): string {
+  const ext = /\.([A-Za-z0-9]{1,8})$/.exec(name)?.[1];
+  if (ext) return ext.toUpperCase();
+  const sub = mime.split(";")[0].split("/")[1] ?? "";
+  return sub && sub.length <= 10 && sub !== "octet-stream" ? sub.toUpperCase() : "File";
 }
 
 /** What deciding a held send did. `sent` and `declined` are final; `failed` says why and to ask #mail. */

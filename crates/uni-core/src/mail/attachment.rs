@@ -450,6 +450,39 @@ where
     Ok(path)
 }
 
+/// T-335: open file `index` of the held send whose draft is `draft_id` in Uni's account `account`, as `send.parked`
+/// listed it (`file`). The draft is read now and the file found at its place (its name and size must be the listed
+/// ones); its bytes must have the listed SHA-256, so what opens is exactly what approving sends. Then the same gates as
+/// any attachment from mail: name and type before the fetch, bytes before anything is written.
+pub async fn open_held_file_in<O>(bridge: &MailBridge<'_>, cache: &Path, account: &str, draft_id: &str, index: usize, file: &super::HeldFile, open: O) -> MailResult<PathBuf>
+where
+    O: FnOnce(&Path) -> std::result::Result<(), String>,
+{
+    let ext = checked_before_fetch(Some(&file.name), Some(&file.mime))?;
+    check_id(account)?;
+    check_id(draft_id)?;
+    let calls = serde_json::json!([["Email/get", { "accountId": account, "ids": [draft_id], "properties": ["id", "attachments"] }, "g"]]);
+    let (_, r) = bridge.jmap(calls).await?;
+    super::accounts::answered_for(&r, "g", account)?;
+    let changed = || invalid("This held send changed since it was listed: refresh Mail and look again.");
+    let draft = r.get("g").and_then(|g| g.get("list")).and_then(serde_json::Value::as_array).and_then(|l| l.first()).ok_or_else(changed)?;
+    let part = draft.get("attachments").and_then(serde_json::Value::as_array).and_then(|a| a.get(index)).ok_or_else(changed)?;
+    let blob_id = part.get("blobId").and_then(serde_json::Value::as_str).ok_or_else(changed)?;
+    if part.get("name").and_then(serde_json::Value::as_str) != Some(file.name.as_str()) || part.get("size").and_then(serde_json::Value::as_u64) != Some(file.size) {
+        return Err(changed());
+    }
+    let bytes = bridge.blob_in(account, blob_id).await?;
+    if crate::media::sha256_hex(&bytes) != file.sha256 {
+        return Err(changed());
+    }
+    if let Some(why) = bytes_mismatch(&ext, &bytes) {
+        return Err(refused(&why));
+    }
+    let path = write_private(cache, &saved_name(Some(&file.name), &ext), &bytes).map_err(|e| invalid(format!("Uni couldn't save this file safely: {e}")))?;
+    open(&path).map_err(invalid)?;
+    Ok(path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -15,6 +15,11 @@
 //! key lists those (`send.parked`, read-only), then approves one (`send.approve`, bound to the fingerprint of the bytes it
 //! was shown, so a draft that changed since is refused) or declines it (`send.decline`: nothing is sent). Both are once
 //! per opId: a retry gets the first outcome.
+//!
+//! T-335: a held send may carry files (the bridge's `draft.save` takes attachments). `send.parked` lists each one (name,
+//! type, size, SHA-256 of its bytes) from the same bytes as the fingerprint, and the approval binds to the whole message,
+//! files included. [`Parked::files`] carries that list; [`super::attachment::open_held_file_in`] opens one of them only
+//! if its bytes are the ones listed.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -140,7 +145,59 @@ pub struct Parked {
     pub fields: Option<DraftFields>,
     /// Plain text and nothing else, so `fields` is all of it.
     pub plain: Option<bool>,
+    /// T-335: the files it sends, in order, when it is text plus files and nothing else (`plain` is then false). Empty
+    /// for a plain-text send, and for a bridge that doesn't list files.
+    #[serde(default)]
+    pub files: Vec<HeldFile>,
     pub problem: Option<String>,
+}
+
+/// One file of a held send, as `send.parked` lists it: read by the bridge from the same bytes as the fingerprint.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HeldFile {
+    pub name: String,
+    pub mime: String,
+    /// Bytes, decoded.
+    pub size: u64,
+    /// SHA-256 of the decoded bytes, lowercase hex: opening the file checks its bytes against this.
+    pub sha256: String,
+    /// Why Uni won't open it (its name or type), in the words opening would use; `None` when only its bytes decide.
+    #[serde(default)]
+    pub refused: Option<String>,
+}
+
+/// The most files a held send is listed with here (the bridge takes at most 10).
+const MAX_HELD_FILES: usize = 20;
+
+/// A file name that reads as what it is: no control or bidi-formatting characters, which could make `x.exe` look
+/// like `exe.x`. The bridge strips them when it saves a draft; a listing that still has them isn't trusted.
+fn honest_name(name: &str) -> bool {
+    !name.trim().is_empty()
+        && name.chars().count() <= 255
+        && !name.chars().any(|c| c.is_control() || matches!(c, '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' | '\u{FEFF}' | '\u{061C}'))
+}
+
+/// `fields.attachments` of a `send.parked` entry: the files, or why they can't be shown (then nothing is approvable).
+fn held_files(fields: Option<&Value>) -> Result<Vec<HeldFile>, String> {
+    let Some(list) = fields.and_then(|f| f.get("attachments")) else { return Ok(Vec::new()) };
+    let unreadable = || "the bridge's list of files for this send can't be read".to_string();
+    let list = list.as_array().ok_or_else(unreadable)?;
+    if list.len() > MAX_HELD_FILES {
+        return Err(format!("it has {} files, more than this app shows", list.len()));
+    }
+    list.iter()
+        .map(|a| {
+            let s = |k: &str| a.get(k).and_then(Value::as_str);
+            let name = s("name").ok_or_else(unreadable)?;
+            if !honest_name(name) {
+                return Err("a file name has hidden characters".to_string());
+            }
+            let mime = s("type").unwrap_or("application/octet-stream").to_ascii_lowercase();
+            let size = a.get("size").and_then(Value::as_u64).ok_or_else(unreadable)?;
+            let sha256 = s("sha256").filter(|h| is_fingerprint(h)).ok_or_else(unreadable)?;
+            Ok(HeldFile { refused: super::refused_before_fetch(Some(name), Some(&mime)), name: name.to_string(), mime, size, sha256: sha256.to_string() })
+        })
+        .collect()
 }
 
 fn is_fingerprint(f: &str) -> bool {
@@ -160,10 +217,12 @@ fn parked_list(v: &Value, account: &str) -> MailResult<Vec<Parked>> {
             let op_id = s("opId").filter(|o| check_op_id(o).is_ok())?;
             let fingerprint = s("fingerprint");
             let fields: Option<DraftFields> = p.get("fields").and_then(|f| serde_json::from_value(f.clone()).ok());
+            let files = held_files(p.get("fields"));
             // without what it says and a fingerprint of it, there is nothing to approve: say why instead
             let problem = s("problem")
                 .or_else(|| fingerprint.as_deref().is_some_and(|f| !is_fingerprint(f)).then(|| "the bridge's fingerprint for this send can't be read".to_string()))
-                .or_else(|| (fields.is_none() || fingerprint.is_none()).then(|| "the bridge didn't say what this send holds".to_string()));
+                .or_else(|| (fields.is_none() || fingerprint.is_none()).then(|| "the bridge didn't say what this send holds".to_string()))
+                .or_else(|| files.as_ref().err().cloned());
             Some(Parked {
                 draft_id: s("draftId"),
                 reason: s("reason"),
@@ -174,6 +233,7 @@ fn parked_list(v: &Value, account: &str) -> MailResult<Vec<Parked>> {
                 changed: p.get("changed").and_then(Value::as_bool).unwrap_or(false),
                 fields: if problem.is_some() { None } else { fields },
                 plain: p.get("plain").and_then(Value::as_bool),
+                files: if problem.is_some() { Vec::new() } else { files.unwrap_or_default() },
                 problem,
                 op_id,
             })
@@ -489,5 +549,43 @@ mod tests {
         assert_eq!(got.iter().map(|p| p.op_id.as_str()).collect::<Vec<_>>(), ["0123456789abcdef", "0123456789abcdeg"]);
         assert!(got[0].fingerprint.is_none() && got[0].problem.is_some(), "a fingerprint that can't be read: not approvable");
         assert_eq!(got[1].fingerprint.as_deref(), Some(fp.as_str()));
+    }
+
+    /// T-335: the files of a held send come through whole, or the send is marked and offers nothing to approve.
+    #[test]
+    fn a_held_send_lists_its_files_or_says_why_it_cant() {
+        let (fp, h1, h2) = ("ab".repeat(32), "01".repeat(32), "c3".repeat(32));
+        let with = |files: Value| json!({ "accountId": "U", "parked": [{ "opId": "0123456789abcdef", "fingerprint": fp, "plain": false,
+            "fields": { "to": [{ "name": null, "email": "ask@example.org" }], "cc": [], "bcc": [], "subject": "Rotas", "text": "Both attached.", "attachments": files } }] });
+        let got = parked_list(&with(json!([
+            { "name": "rota-week-1.csv", "type": "text/csv", "size": 412, "sha256": h1 },
+            { "name": "budget.xlsx", "type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "size": 9001, "sha256": h2 },
+        ])), "U").unwrap();
+        let p = &got[0];
+        assert_eq!(p.problem, None);
+        assert_eq!(p.files.iter().map(|f| (f.name.as_str(), f.size, f.sha256.as_str())).collect::<Vec<_>>(), [("rota-week-1.csv", 412, h1.as_str()), ("budget.xlsx", 9001, h2.as_str())]);
+        assert_eq!(p.files[0].mime, "text/csv");
+        assert!(p.files.iter().all(|f| f.refused.is_none()));
+        // a file Uni won't open is still listed (it is sent either way), with why it won't open
+        let got = parked_list(&with(json!([{ "name": "notes.html", "type": "text/html", "size": 10, "sha256": h1 }])), "U").unwrap();
+        assert!(got[0].problem.is_none() && got[0].files[0].refused.is_some());
+        // no files listed (an older bridge, or a plain send): none
+        let plain = json!({ "accountId": "U", "parked": [{ "opId": "0123456789abcdef", "fingerprint": fp, "plain": true,
+            "fields": { "to": [], "cc": [], "bcc": [], "subject": "s", "text": "t" } }] });
+        assert!(parked_list(&plain, "U").unwrap()[0].files.is_empty());
+        // anything that doesn't read as a file list: marked, no fields, no files, so nothing to approve
+        for bad in [
+            json!("rota.csv"),
+            json!([{ "name": "rota.csv", "type": "text/csv", "size": 1 }]),
+            json!([{ "name": "rota.csv", "type": "text/csv", "size": 1, "sha256": "AB".repeat(32) }]),
+            json!([{ "name": "rota.csv", "type": "text/csv", "size": -1, "sha256": h1 }]),
+            json!([{ "type": "text/csv", "size": 1, "sha256": h1 }]),
+            json!([{ "name": "invoice\u{202E}fdp.exe", "type": "application/pdf", "size": 1, "sha256": h1 }]),
+            json!([{ "name": "a\nb.csv", "type": "text/csv", "size": 1, "sha256": h1 }]),
+            json!(vec![json!({ "name": "a.csv", "type": "text/csv", "size": 1, "sha256": h1 }); 21]),
+        ] {
+            let got = parked_list(&with(bad.clone()), "U").unwrap();
+            assert!(got[0].problem.is_some() && got[0].fields.is_none() && got[0].fingerprint.is_none() && got[0].files.is_empty(), "{bad}");
+        }
     }
 }

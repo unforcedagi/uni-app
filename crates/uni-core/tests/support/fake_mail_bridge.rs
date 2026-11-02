@@ -322,6 +322,12 @@ impl State {
     /// Uni's account `account` parks a send for the owner: a draft to `to` in its Drafts and the send held, as the bridge
     /// does under a needs-aaron rule. Returns the opId.
     pub fn park(&mut self, account: &str, to: &str, subject: &str, text: &str, reason: &str) -> String {
+        self.park_with_files(account, to, subject, text, reason, &[])
+    }
+
+    /// T-335: [`State::park`] for a draft that is text plus `files` (name, type, bytes), as the bridge's `draft.save`
+    /// makes it: each an attachment part with its own blob. `send.parked` lists them (name, type, size, SHA-256).
+    pub fn park_with_files(&mut self, account: &str, to: &str, subject: &str, text: &str, reason: &str, files: &[(&str, &str, Vec<u8>)]) -> String {
         let n = self.parked.len() + 1;
         let (op_id, id) = (format!("op-park-{n:04}-0000000000"), format!("p{n}"));
         let mail = self.account_mut(account).expect("no such account");
@@ -329,6 +335,14 @@ impl State {
         let mut e = email(&id, &format!("{account}-drafts"), ("Uni", &address), subject, &format!("2026-10-19T{:02}:15:00Z", 8 + n % 12), true, text, None);
         e["to"] = json!([{ "name": null, "email": to }]);
         e["keywords"]["$draft"] = json!(true);
+        let mut parts = Vec::new();
+        for (i, (name, mime, bytes)) in files.iter().enumerate() {
+            let blob = format!("B{id}-f{i}");
+            parts.push(json!({ "partId": format!("{}", i + 2), "blobId": blob, "type": mime, "name": name, "size": bytes.len(), "cid": null, "disposition": "attachment" }));
+            mail.blobs.insert(blob, bytes.clone());
+        }
+        e["hasAttachment"] = json!(!files.is_empty());
+        e["attachments"] = json!(parts);
         let fp = fingerprint(&e);
         mail.emails.push(e);
         let out = json!({ "opId": op_id, "accountId": account, "draftId": id, "state": "awaiting-approval", "reason": reason });
@@ -563,7 +577,7 @@ fn jmap(mail: &mut Mail, name: &str, args: &Value, earlier: &[Value]) -> Result<
 
 /// What `draft.save` fingerprints: the message as stored (its addresses, subject and body), not its keywords or mailbox.
 fn fingerprint(e: &Value) -> String {
-    let stored = json!([e["from"], e["to"], e["cc"], e["bcc"], e["subject"], e["bodyValues"], e["inReplyTo"]]);
+    let stored = json!([e["from"], e["to"], e["cc"], e["bcc"], e["subject"], e["bodyValues"], e["inReplyTo"], e["attachments"]]);
     uni_core::media::sha256_hex(stored.to_string().as_bytes())
 }
 
@@ -772,8 +786,13 @@ fn op(s: &mut State, req: &Value) -> (u16, Value) {
                         let text = e["textBody"].as_array().into_iter().flatten().filter_map(|p| e["bodyValues"][p["partId"].as_str()?]["value"].as_str()).collect::<Vec<_>>().join("");
                         let addrs = |k: &str| e[k].as_array().cloned().unwrap_or_default();
                         item["recipients"] = json!(["to", "cc", "bcc"].iter().flat_map(|k| addrs(k)).filter_map(|a| a["email"].as_str().map(str::to_string)).collect::<Vec<_>>());
-                        item["fields"] = json!({ "to": addrs("to"), "cc": addrs("cc"), "bcc": addrs("bcc"), "subject": e["subject"], "text": text });
-                        item["plain"] = json!(true);
+                        // T-335: text plus files lists the files, from the same bytes as the fingerprint, and isn't plain
+                        let files: Vec<Value> = e["attachments"].as_array().into_iter().flatten().map(|a| {
+                            let bytes = a["blobId"].as_str().and_then(|b| mail.blobs.get(b)).cloned().unwrap_or_default();
+                            json!({ "name": a["name"], "type": a["type"], "size": bytes.len(), "sha256": uni_core::media::sha256_hex(&bytes) })
+                        }).collect();
+                        item["plain"] = json!(files.is_empty());
+                        item["fields"] = json!({ "to": addrs("to"), "cc": addrs("cc"), "bcc": addrs("bcc"), "subject": e["subject"], "text": text, "attachments": files });
                         item["changed"] = json!(&fp != parked_fp);
                         item["fingerprint"] = json!(fp);
                     }

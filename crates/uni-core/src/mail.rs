@@ -34,8 +34,8 @@ pub mod accounts;
 pub mod attachment;
 pub mod write;
 pub use accounts::{AccountBoxes, MailSession, Overview, SessionAccount, Source, Thread, ThreadPage, ThreadSummary, Who};
-pub use write::{DraftFields, Parked, Reviewed, SendOutcome, SendState};
-pub use attachment::{open_attachment, open_attachment_in, openable_extension, refused_before_fetch};
+pub use write::{DraftFields, HeldFile, Parked, Reviewed, SendOutcome, SendState};
+pub use attachment::{open_attachment, open_attachment_in, open_held_file_in, openable_extension, refused_before_fetch};
 
 /// Port the mail bridge listens on, on the hub's host (Tailscale Serve).
 pub const MAIL_PORT: u16 = 8452;

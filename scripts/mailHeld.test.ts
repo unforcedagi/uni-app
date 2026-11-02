@@ -1,7 +1,7 @@
 // T-213 Uni's sends held for you, pure parts: when Send it is offered, what each answer says, and how the store keeps
 // what you decided through listings. Run: node --experimental-strip-types scripts/mailHeld.test.ts (Node >= 22.6)
 import assert from "node:assert/strict";
-import { approvalOffered, approveOutcome, canApprove, declineOutcome, heldFailure, settled, type AccountBoxes, type Parked, type SendOutcome } from "../src/mailCore.ts";
+import { approvalOffered, approveOutcome, canApprove, declineOutcome, fileKind, heldFailure, settled, type AccountBoxes, type HeldFile, type Parked, type SendOutcome } from "../src/mailCore.ts";
 import { beginListing, endDeciding, forgetHeld, heldEntries, heldGen, keepAccounts, mergeListing, setOutcome, startDeciding, waitingCount } from "../src/mailHeld.ts";
 
 const uni = (operations: string[]): AccountBoxes => ({ id: "U", name: "uni@example.com", who: "uni", mailboxes: [], operations });
@@ -24,6 +24,18 @@ for (const [why, p] of [["plain unknown", held("op-a", { plain: null })], ["not 
   assert.equal(canApprove(uni(ALL), p), false, why);
 }
 assert.equal(canApprove(uni(["send.parked", "send.decline"]), held("op-a")), false, "not offered");
+
+// T-335: text plus files the bridge listed is shown whole too; files with a plain verdict, or a not-plain send without
+// its files listed (formatting, or an older bridge), is not
+const file = (name: string): HeldFile => ({ name, mime: "text/csv", size: 412, sha256: "1f".repeat(32), refused: null });
+assert.equal(canApprove(uni(ALL), held("op-a", { plain: false, files: [file("rota.csv"), file("budget.csv")] })), true, "text plus listed files");
+for (const [why, p] of [["files but plain", held("op-a", { plain: true, files: [file("rota.csv")] })], ["files, plain unknown", held("op-a", { plain: null, files: [file("rota.csv")] })],
+  ["not plain, no files listed", held("op-a", { plain: false, files: [] })], ["files but changed", held("op-a", { plain: false, files: [file("rota.csv")], changed: true })]] as const) {
+  assert.equal(canApprove(uni(ALL), p), false, why);
+}
+assert.equal(canApprove(uni(ALL), held("op-a", { files: undefined })), true, "a listing from before files: plain text as before");
+assert.deepEqual(["rota.csv", "Budget.PDF", "notes", "scan"].map((n, i) => fileKind(n, ["text/csv", "application/pdf", "text/plain", "application/octet-stream"][i])), ["CSV", "PDF", "PLAIN", "File"]);
+assert.equal(fileKind("sheet", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"), "File");
 
 // what each answer says
 const out = (state: SendOutcome["state"], reason: string | null = null): SendOutcome => ({ op_id: "op-a", account_id: "U", draft_id: "h1", state, reason, submission_id: null, delivery: null, note: null });

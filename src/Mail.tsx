@@ -20,7 +20,7 @@ import {
   scopeKey, scopeTitle, scopeValid, senderLabel, sourcesFor, subjectLabel, whoMail, writesOffered,
   type AccountBoxes, type MailAttachment, type MailLink, type MailMessage, type MailProblem, type MailThread, type Overview, type Scope,
   type PendingSend, type SendOutcome, type Source, type ThreadPage, type ThreadSummary, type Who,
-  approvalOffered, approveOutcome, canApprove, declineOutcome, heldFailure, type HeldOutcome, type Parked,
+  approvalOffered, approveOutcome, canApprove, declineOutcome, fileKind, heldFailure, heldShownWhole, type HeldOutcome, type Parked,
 } from "./mailCore";
 import { beginListing, endDeciding, heldEntries, heldGen, keepAccounts, mergeListing, noteUnread, onHeld, setOutcome, startDeciding, waiting, type HeldEntry } from "./mailHeld";
 import "./Mail.css";
@@ -64,20 +64,24 @@ function PlainBody({ text }: { text: string }) {
 
 /** v1's gates, unchanged: a name/type refusal shows at once and fetches nothing; the bytes are checked on Open. */
 function AttachmentRow({ accountId, a }: { accountId: string; a: MailAttachment }) {
+  return <FileRow name={a.name || "attachment"} mime={a.mime} size={a.size} early={a.refused ?? null}
+    open={() => invoke("mail_attachment_open", { accountId, blobId: a.blob_id, name: a.name, mime: a.mime })} />;
+}
+
+/** One file with its kind and size; a tap opens it in the system's viewer (`open`), after Rust's checks. */
+function FileRow({ name, mime, size, early, open: opener }: { name: string; mime: string; size: number; early: string | null; open: () => Promise<unknown> }) {
   const [state, setState] = useState<"idle" | "opening" | "opened" | "error">("idle");
   const [error, setError] = useState("");
-  const name = a.name || "attachment";
-  const early = a.refused ?? null;
   const open = async () => {
     setState("opening");
-    try { await invoke("mail_attachment_open", { accountId, blobId: a.blob_id, name: a.name, mime: a.mime }); setState("opened"); }
+    try { await opener(); setState("opened"); }
     catch (e) { const p = mailProblem(e); setError(p.kind === "invalid" ? p.detail : p.title); setState("error"); }
   };
   const refused = early !== null || state === "error";
   return <li className={`mail-attachment-item ${refused ? "refused" : ""}`}>
     <button type="button" className="attachment-file mail-attachment" disabled={early !== null || state === "opening"} onClick={() => void open()} aria-label={early ? `${name} won't open` : `Open ${name}`}>
-      <span aria-hidden="true">{refused ? "⊘" : a.mime === "application/pdf" ? "📄" : "📎"}</span><span className="attachment-name">{name}</span>
-      <small>{refused ? "Not opened" : state === "opening" ? "Opening…" : [formatSize(a.size), "Open"].filter(Boolean).join(" · ")}</small>
+      <span aria-hidden="true">{refused ? "⊘" : mime === "application/pdf" ? "📄" : "📎"}</span><span className="attachment-name">{name}</span>
+      <small>{refused ? "Not opened" : state === "opening" ? "Opening…" : [fileKind(name, mime), formatSize(size), "Open"].filter(Boolean).join(" · ")}</small>
     </button>
     {early && <small className="mail-att-why" role="status">{early}</small>}
     {!early && state === "error" && <small className="mail-att-why" role="status">{error}</small>}
@@ -194,6 +198,8 @@ function ThreadView({ t, acct, overview, note, onBack, actions }: { t: MailThrea
 /** Enter never decides a held send: only a tap, a click or Space. */
 const noEnter = (e: KeyboardEvent) => { if (e.key === "Enter") e.preventDefault(); };
 
+const filesWord = (n: number) => (n === 1 ? "1 file" : `${n} files`);
+
 function heldTo(p: Parked): string {
   const f = p.fields;
   const list = f ? [...f.to, ...f.cc, ...f.bcc].map((a) => a.email) : p.recipients;
@@ -204,10 +210,11 @@ function HeldRow({ e, selected, onOpen }: { e: HeldEntry; selected: boolean; onO
   const p = e.item;
   const state = e.outcome && e.outcome.kind !== "failed" ? e.outcome.kind : waiting(e) ? "waiting" : "failed";
   const tag = state === "sent" ? "SENT" : state === "declined" ? "NOT SENT" : state === "failed" ? "ASK #MAIL" : "WAITING";
+  const files = p.files?.length ?? 0;
   return <li><button type="button" className={`mail-row mail-held-row held-${state} ${selected ? "selected" : ""}`} aria-current={selected ? "true" : undefined} onClick={onOpen}
-    aria-label={`${tag === "WAITING" ? "Waiting for you" : tag}. From Uni's address to ${heldTo(p)}: ${subjectLabel(p.fields?.subject ?? "")}`}>
+    aria-label={`${tag === "WAITING" ? "Waiting for you" : tag}. From Uni's address to ${heldTo(p)}: ${subjectLabel(p.fields?.subject ?? "")}${files ? `, with ${filesWord(files)}` : ""}`}>
     <span className="mail-row-top"><WhoTag who="uni" /><span className="mail-from">To {heldTo(p)}</span><span className="mail-held-tag">{tag}</span></span>
-    <span className="mail-row-subject">{subjectLabel(p.fields?.subject ?? "")}</span>
+    <span className="mail-row-subject">{files > 0 && <span aria-hidden="true">📎 {files} · </span>}{subjectLabel(p.fields?.subject ?? "")}</span>
     <span className="mail-row-preview">{e.outcome?.text ?? p.reason ?? p.problem ?? ""}</span>
   </button></li>;
 }
@@ -233,6 +240,8 @@ function HeldView({ e, acct, onBack, onDecide }: { e: HeldEntry; acct: AccountBo
     try { await onDecide(asking); } finally { inflight.current = false; setBusy(false); setConfirm(null); }
   };
   const from = `Uni's address (${acct.name})`;
+  const files = p.files ?? [];
+  const withFiles = files.length ? `, with ${files.length === 1 ? "its file" : `its ${files.length} files`}` : "";
   return <section className="mail-thread mail-held" aria-label={`Held send: ${subjectLabel(f?.subject ?? "")}`}>
     <div className="mail-thread-bar">
       <button type="button" className="note-action mail-thread-back" onClick={onBack}>← Waiting</button>
@@ -243,7 +252,7 @@ function HeldView({ e, acct, onBack, onDecide }: { e: HeldEntry; acct: AccountBo
       <p className="mail-triage mail-held-why" role="note"><span className="eyebrow">Why it waits</span><span>{p.reason ?? "Uni's outbound rules want your approval."}</span></p>
       {p.changed && <p className="mail-draft-note mail-unverified" role="note"><span className="mail-draft-tag">CHANGED</span><span>This draft changed after Uni's rules held it, so the bridge won't send it. Don't send it, and ask Uni to send it again.</span></p>}
       {p.problem && <p className="mail-draft-note mail-unverified" role="note"><span className="mail-draft-tag">CAN'T SHOW IT</span><span>{p.problem}. Nothing can be sent from here; ask #mail.</span></p>}
-      {f && !p.problem && p.plain !== true && <p className="mail-draft-note" role="note"><span>It may have formatting or attachments this app can't show in full, so only Don't send is offered here.</span></p>}
+      {f && !p.problem && !heldShownWhole(p) && <p className="mail-draft-note" role="note"><span>It may have formatting or attachments this app can't show in full, so only Don't send is offered here.</span></p>}
       {f && <article className="mail-card mail-card-draft" aria-label="What it sends">
         <dl className="mail-headers">
           <dt>From</dt><dd>Uni &lt;{acct.name}&gt;</dd>
@@ -252,12 +261,15 @@ function HeldView({ e, acct, onBack, onDecide }: { e: HeldEntry; acct: AccountBo
           {f.bcc.length > 0 && <><dt>Bcc</dt><dd>{addressLine(f.bcc)}</dd></>}
           <dt>Subject</dt><dd>{subjectLabel(f.subject)}</dd>
         </dl>
+        {files.length > 0 && <ul className="mail-attachments" aria-label={`Files it sends (${files.length})`}>{files.map((x, i) => <FileRow key={`${i}-${x.sha256}`} name={x.name} mime={x.mime} size={x.size}
+          early={x.refused ?? (p.draft_id ? null : "The held draft can't be found, so this file can't be opened here.")}
+          open={() => invoke("mail_held_file_open", { accountId: acct.id, draftId: p.draft_id, index: i, file: x })} />)}</ul>}
         {f.text ? <PlainBody text={f.text} /> : <p className="empty">This message has no text.</p>}
       </article>}
       {e.outcome && <p className={`mail-held-outcome held-${e.outcome.kind}`} role="status">{e.outcome.text}</p>}
       {open && (approvable || declinable) && (asking
         ? <div ref={confirmBox} tabIndex={-1} className="mail-held-confirm" role="group" aria-label={asking === "approve" ? "Confirm sending" : "Confirm not sending"}>
-            <p>{asking === "approve" ? `Send this from ${from} to ${heldTo(p)}? It goes out exactly as shown.` : `Don't send this? Nothing goes out from ${from}; Uni can change or drop the draft.`}</p>
+            <p>{asking === "approve" ? `Send this from ${from} to ${heldTo(p)}${withFiles}? It goes out exactly as shown${files.length ? ", files included" : ""}.` : `Don't send this? Nothing goes out from ${from}; Uni can change or drop the draft.`}</p>
             <span className="mail-held-buttons">
               <button type="button" className={asking === "approve" ? "send mail-held-yes" : "note-action mail-held-yes"} disabled={busy} onKeyDown={noEnter} onClick={() => void go()}>
                 {busy ? (asking === "approve" ? "Sending…" : "Declining…") : asking === "approve" ? "Yes, send from Uni's address" : "Yes, don't send it"}</button>
@@ -265,8 +277,8 @@ function HeldView({ e, acct, onBack, onDecide }: { e: HeldEntry; acct: AccountBo
             </span>
           </div>
         : <div className="mail-held-actions">
-            {approvable && <button type="button" className="send mail-held-send" onKeyDown={noEnter} onClick={() => ask("approve")} aria-label={`Send it, from ${from}`}>
-              <span>Send it</span><small>from Uni's address, {acct.name}</small></button>}
+            {approvable && <button type="button" className="send mail-held-send" onKeyDown={noEnter} onClick={() => ask("approve")} aria-label={`Send it${files.length ? ` with ${filesWord(files.length)}` : ""}, from ${from}`}>
+              <span>Send it</span><small>{files.length > 0 && `with ${filesWord(files.length)}, `}from Uni's address, {acct.name}</small></button>}
             {declinable && <button type="button" className="note-action mail-held-decline" onKeyDown={noEnter} onClick={() => ask("decline")} aria-label={`Don't send it from ${from}`}>
               <span>Don't send</span><small>nothing goes out from Uni's address</small></button>}
           </div>)}
