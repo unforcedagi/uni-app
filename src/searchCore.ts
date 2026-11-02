@@ -56,5 +56,7 @@ export function hitTarget(m: { ref: string; channel: string; root: string | null
 /** T-335 glow-up: a note's snippet as clean prose: no heading marks, emphasis stars or link brackets. */
 export function plainSnippet(text: string): string {
   return text.replace(/\[\[([^\]|]*\|)?([^\]]*)\]\]/g, "$2").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/(^|\s)#{1,6}\s+/g, "$1")
-    .replace(/(\*\*|__|\*|`)/g, "").replace(/^\s*[-*]\s+/gm, "").replace(/\s+/g, " ").trim();
+    .replace(/^\s*[-*]\s+/gm, "").replace(/(^|[\s(])\*\*([^*\n]+?)\*\*(?=$|[\s).,;:!?])/g, "$1$2")
+    .replace(/(^|[\s(])__([^_\n]+?)__(?=$|[\s).,;:!?])/g, "$1$2").replace(/(^|[\s(])\*([^*\s][^*\n]*?)\*(?=$|[\s).,;:!?])/g, "$1$2")
+    .replace(/`([^`]*)`/g, "$1").replace(/\s+/g, " ").trim();
 }

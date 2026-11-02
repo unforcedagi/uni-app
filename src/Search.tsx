@@ -28,6 +28,8 @@ function Snippet({ text }: { text: string }) {
 /** T-335 glow-up: ↑ and ↓ move between the results (and from the field to the first); Enter opens the one in focus. */
 function moveFocus(e: React.KeyboardEvent<HTMLElement>) {
   if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+  // only from the query field or a result: the Narrow controls (a select, the folder field) keep their own arrow keys
+  if (!(e.target instanceof HTMLElement) || !e.target.matches("input[type=search], .search-hit, .search-recent button")) return;
   const items = [...e.currentTarget.querySelectorAll<HTMLElement>(".search-hit, .search-recent button")];
   if (!items.length) return;
   const at = items.indexOf(document.activeElement as HTMLElement);
@@ -69,6 +71,8 @@ export default function Search({ onOpen, onOpenNote, onAskUni, onClose, vaults, 
   const input = useRef<HTMLInputElement>(null);
 
   useEffect(() => { input.current?.focus(); }, []);
+  // T-335 glow-up: a query Find was opened with (from a note, the vault) is the one it reopens on too
+  useEffect(() => { if (initialQuery) onQuery?.(initialQuery); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const q = query.trim();

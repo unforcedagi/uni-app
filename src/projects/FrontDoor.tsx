@@ -85,13 +85,17 @@ export function FrontDoor({ doors, needs, onOpen, me = null, newRooms = [], onOp
   const at = asOf(ws, now);
   const areaAt = new Map(work.areas.map((a) => [a.path, a]));
   // T-335 All view: the home shows the places or every room at once; the choice is the device's, kept across visits
-  const [view, setView] = useState<"places" | "all">(() => { try { return all && localStorage.getItem(VIEW_KEY) === "all" ? "all" : "places"; } catch { return "places"; } });
+  // (read whether or not the rooms are known yet: the home may draw once before they are, and the choice must survive that)
+  const [view, setView] = useState<"places" | "all">(() => { try { return localStorage.getItem(VIEW_KEY) === "all" ? "all" : "places"; } catch { return "places"; } });
   const choose = useCallback((v: "places" | "all") => { setView(v); try { localStorage.setItem(VIEW_KEY, v); } catch { /* this session only */ } }, []);
   // the rooms' recent messages: the feed in All; in Places only once the composer is used (for the route's words)
   const [wantWords, setWantWords] = useState(false);
-  const allRooms = all?.rooms ?? NONE;
+  // the same rooms keep the same list, so the feed and the route aren't read again on every redraw of the home
+  const roomsKey = JSON.stringify(all?.rooms ?? NONE);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const allRooms = useMemo(() => all?.rooms ?? NONE, [roomsKey]);
   const feed = useRoomsFeed(allRooms, !!all && (view === "all" || wantWords));
-  const words = useMemo(() => roomWords(feed.byRoom), [feed.byRoom]);
+  const words = useMemo(() => roomWords(feed.byRoom, me), [feed.byRoom, me]);
   const openAt = all?.onOpenAt;
   const tabs = all && <div className="fd-tabs" role="tablist" aria-label="Home">
     <button type="button" role="tab" aria-selected={view === "places"} onClick={() => choose("places")}>Places</button>

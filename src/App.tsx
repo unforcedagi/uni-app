@@ -2080,8 +2080,15 @@ function Conversations({ onForget }: { onForget: () => void }) {
         if (dialog) { (dialog.contains(document.activeElement) ? document.activeElement as HTMLElement : dialog).dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })); return; }
         closeActiveRef.current(); return;
       }
-      // T-335 glow-up: Ctrl/Cmd+K opens Find from anywhere (on its last query)
-      if (e.key.toLowerCase() === "k" && !e.altKey && !e.shiftKey && (e.metaKey || e.ctrlKey)) { e.preventDefault(); openFindRef.current(); return; }
+      // T-335 glow-up: Ctrl/Cmd+K opens Find from anywhere (on its last query). On a Mac, Ctrl+K in a text field is the field's own (delete
+      // to the end of the line), so there it is Cmd+K only; and an open dialog (a task or companion sheet) keeps the keyboard.
+      if (e.key.toLowerCase() === "k" && !e.altKey && !e.shiftKey && (e.metaKey || e.ctrlKey)) {
+        const mac = /mac|iphone|ipad/i.test(navigator.platform);
+        if (mac && !e.metaKey) return;
+        const dialog = [...document.querySelectorAll<HTMLElement>('[role="dialog"][aria-modal="true"]')].find((d) => !d.querySelector(".search-view"));
+        if (dialog) return;
+        e.preventDefault(); openFindRef.current(); return;
+      }
       // Alt+← / Alt+→: Back and Forward over the places visited. In a text field on a Mac, Option+arrow moves by word, so it is left alone there.
       if (e.altKey && !e.metaKey && !e.ctrlKey && !e.shiftKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
         const el = e.target instanceof HTMLElement ? e.target : null;

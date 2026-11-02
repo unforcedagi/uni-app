@@ -8,6 +8,7 @@ import { bootAreas } from './areasFixture';
 const SHOTS = process.env.GLOWUP_SHOTS ?? 'test-results/glowup-shots';
 const shot = (page: Page, name: string) => page.screenshot({ path: `${SHOTS}/${test.info().project.name}-${name}.png` });
 const project = () => test.info().project.name;
+const touch = () => project() !== 'desktop';
 const UNI = 'c'.repeat(64);
 
 async function boot(page: Page, view: 'places' | 'all' = 'places') {
@@ -129,7 +130,7 @@ test('All: the route is a suggestion with its reason; chips edit it; Send posts 
   await page.getByRole('button', { name: "Don't send to North Field" }).click();
   await page.getByRole('button', { name: "Don't send to Long Table" }).click();
   await expect(page.getByRole('button', { name: 'Choose a room to send to' })).toBeDisabled();
-  await field(page).press('Enter');
+  if (!touch()) await field(page).press('Enter');
   await expect(page.locator('.all-note')).toContainText('nothing is sent until you do');
   expect((await posts(page)).length).toBe(before);
   // two rooms chosen; Enter sends to each once, as the person, with that room's Uni addressed
@@ -137,7 +138,14 @@ test('All: the route is a suggestion with its reason; chips edit it; Send posts 
   await page.getByRole('list', { name: 'Rooms to add' }).getByRole('button', { name: 'North Field' }).click();
   await page.getByRole('button', { name: 'Add a room' }).click();
   await page.getByRole('list', { name: 'Rooms to add' }).getByRole('button', { name: 'Long Table' }).click();
-  await field(page).press('Enter');
+  if (touch()) {
+    // on a touch keyboard Return is a new line, never a send; Send is the button
+    await field(page).press('Enter');
+    await expect(field(page)).toHaveValue('Tell Choir and North Field the hall is booked for Tuesday\n');
+    expect((await posts(page)).length).toBe(before);
+    await field(page).press('Backspace');
+    await page.getByRole('button', { name: 'Send to North Field and Long Table', exact: true }).click();
+  } else await field(page).press('Enter');
   await expect(page.locator('.all-note')).toContainText('Sent to North Field and Long Table');
   const sent = (await posts(page)).slice(before);
   expect(sent).toEqual([

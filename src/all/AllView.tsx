@@ -3,23 +3,26 @@
 // person sees the route and can change it, and one tap sends to one room or several. Sending posts the message into each chosen room,
 // as the person, with that room's Uni addressed, so each room's own Uni session takes it. Nothing is posted anywhere else, and nothing
 // is posted on a guess: with no room chosen there is no Send.
-import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Body } from "../MessageBody";
 import type { Member } from "../mentions";
 import { findUniMember } from "../uniActions";
 import { andList, interleave, sendEach, type FeedMessage } from "./allCore";
-import { suggestRoute, type RouteRoom } from "./route";
+import { makeRouter, type RouteRoom } from "./route";
+import { enterInsertsNewline } from "../composerCore";
 import "./all.css";
 
 /** A place in the All view: an area and its own room. */
 export type AllRoom = { id: string; name: string; slug: string | null; stands: string | null; lastTs: number | null };
 
-type Message = FeedMessage & { mentions: Member[]; edited: boolean };
+type Message = FeedMessage & { mentions: Member[]; edited: boolean; media?: unknown[] | null };
 type Live = { kind: string; channel: string | null };
 
 const PER_ROOM = 40;
+/** On a touch keyboard Return is a new line; Send is the button (as in the room's composer and Messages). */
+const touchKeyboard = () => typeof navigator !== "undefined" && enterInsertsNewline(navigator.maxTouchPoints ?? 0, matchMedia("(pointer: coarse)").matches);
 const clockFormat = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
 const clock = (ts: number) => clockFormat.format(new Date(ts * 1000));
 function dayLabel(ts: number) {
@@ -41,6 +44,8 @@ export function useRoomsFeed(rooms: readonly AllRoom[], on: boolean) {
     if (!on || !ids) return;
     let live = true;
     const want = ids.split(",");
+    // a room no longer in the list (made private, gone) leaves the feed at once
+    setByRoom((m) => ([...m.keys()].every((k) => want.includes(k)) ? m : new Map([...m].filter(([k]) => want.includes(k)))));
     const read = (id: string) => invoke<Message[]>("get_messages", { channel: id, root: null, limit: PER_ROOM })
       .then((list) => { if (live) { setByRoom((m) => new Map(m).set(id, list)); setFailed((f) => f.filter((x) => x !== id)); } })
       .catch(() => { if (live) setFailed((f) => (f.includes(id) ? f : [...f, id])); });
@@ -66,7 +71,7 @@ const held = { text: "", chosen: null as string[] | null };
 export function AllComposer({ rooms, words, onOpen, onFocus, onSent, place = "places" }: { rooms: readonly AllRoom[];
   /** Rooms just sent to. */ onSent?: (ids: string[]) => void;
   /** The field took focus (the home reads the rooms' words then, not before). */ onFocus?: () => void;
-  /** Each room's recent words, for the route's second rule. */ words: ReadonlyMap<string, string>;
+  /** Each room's recent words (the route's second rule) and when you last wrote there (its third). */ words: ReadonlyMap<string, RoomWords>;
   /** Opens a room (a sent-to line's link). */ onOpen: (id: string) => void;
   /** Where it sits: in the middle of the home, or under the All feed. */ place?: "places" | "all" }) {
   const [text, setText] = useState(held.text);
@@ -74,13 +79,14 @@ export function AllComposer({ rooms, words, onOpen, onFocus, onSent, place = "pl
   const [chosen, setChosen] = useState<string[] | null>(held.chosen);
   const [adding, setAdding] = useState(false);
   const [sending, setSending] = useState(false);
-  const [outcome, setOutcome] = useState<{ sent: string[]; failed: { id: string; error: string }[] } | null>(null);
+  const [outcome, setOutcome] = useState<{ sent: string[]; failed: { id: string; error: string }[]; noUni: string[] } | null>(null);
   const attempt = useRef<{ body: string; done: Set<string> } | null>(null);
   const field = useRef<HTMLTextAreaElement>(null);
   const nameOf = useMemo(() => new Map(rooms.map((r) => [r.id, r.name])), [rooms]);
-  const routeRooms: RouteRoom[] = useMemo(() => rooms.map((r) => ({ id: r.id, name: r.name, slug: r.slug, text: `${r.stands ?? ""} ${words.get(r.id) ?? ""}`, lastTs: r.lastTs, lastMine: null })), [rooms, words]);
-  const typed = useDeferredValue(text);
-  const picks = useMemo(() => (typed.trim() ? suggestRoute(typed, routeRooms) : []), [typed, routeRooms]);
+  // the rooms' words are read once per change of rooms or words; each key then routes the text as it is now, so Send always goes
+  // where the chips on screen say
+  const route = useMemo(() => makeRouter(rooms.map((r): RouteRoom => ({ id: r.id, name: r.name, slug: r.slug, text: `${r.stands ?? ""} ${words.get(r.id)?.text ?? ""}`, lastTs: r.lastTs, lastMine: words.get(r.id)?.lastMine ?? null }))), [rooms, words]);
+  const picks = useMemo(() => (text.trim() ? route(text) : []), [text, route]);
   const to = (chosen ?? picks.map((p) => p.id)).filter((id) => nameOf.has(id));
   const done = attempt.current && attempt.current.body === text ? attempt.current.done : null;
   const left = to.filter((id) => !done?.has(id));
@@ -97,15 +103,18 @@ export function AllComposer({ rooms, words, onOpen, onFocus, onSent, place = "pl
     const run = attempt.current;
     setSending(true);
     setOutcome(null);
+    // as the room's own composer does: the message is addressed to the room's Uni when Uni is a member there
+    const noUni: string[] = [];
     const post = async (room: string, b: string) => {
       const members = await invoke<Member[]>("get_members", { channel: room });
       const uni = findUniMember(members);
       await invoke("post_message", { channel: room, body: b, replyTo: null, recipients: uni ? [uni.pubkey] : [], media: [] });
+      if (!uni) noUni.push(room);
     };
     try {
       const r = await sendEach(to, body, post, run.done);
       const sent = to.filter((id) => run.done.has(id));
-      setOutcome({ sent, failed: r.failed });
+      setOutcome({ sent, failed: r.failed, noUni });
       if (r.sent.length) onSent?.(r.sent);
       if (!r.failed.length) { setText(""); setChosen(null); setAdding(false); attempt.current = null; }
     } finally { setSending(false); }
@@ -129,7 +138,7 @@ export function AllComposer({ rooms, words, onOpen, onFocus, onSent, place = "pl
     <div className="compose-row all-row">
       <textarea ref={field} rows={1} value={text} aria-label="Message for your rooms" onFocus={onFocus} placeholder={place === "all" ? "Say something; Uni suggests where" : "Talk to Uni"}
         onChange={(e) => { setText(e.target.value); setOutcome(null); }}
-        onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void send(); } }} />
+        onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && !touchKeyboard()) { e.preventDefault(); void send(); } }} />
       <button type="button" className="send all-send" disabled={!text.trim() || !left.length || sending}
         aria-label={left.length ? `Send to ${named(left)}` : "Choose a room to send to"} onClick={() => void send()}>
         {sending ? "Sending…" : left.length > 1 ? `Send to ${left.length}` : "Send"}
@@ -138,6 +147,7 @@ export function AllComposer({ rooms, words, onOpen, onFocus, onSent, place = "pl
     {text.trim() && !to.length && <p className="all-note" role="status">Choose a room: nothing is sent until you do.</p>}
     {outcome && <p className={`all-note${outcome.failed.length ? " all-failed" : ""}`} role="status">
       {outcome.sent.length > 0 && <>Sent to {outcome.sent.map((id, i) => <span key={id}>{i > 0 && (i === outcome.sent.length - 1 ? " and " : ", ")}<button type="button" className="all-link" onClick={() => onOpen(id)}>{nameOf.get(id)}</button></span>)}. </>}
+      {outcome.noUni.length > 0 && <>Uni isn't in {named(outcome.noUni)}, so no Uni there was asked. </>}
       {outcome.failed.length > 0 && <>Couldn't send to {named(outcome.failed.map((f) => f.id))} ({outcome.failed[0].error}). Send again to try only {outcome.failed.length === 1 ? "that room" : "those rooms"}.</>}
     </p>}
   </section>;
@@ -151,7 +161,8 @@ const FeedRow = memo(function FeedRow({ m, place, mine, me, grouped, onOpen }: {
         <button type="button" className="all-place" aria-label={`Open ${place}, at this message`} onClick={() => onOpen(m.channel, m.ref)}>{place}</button>
         {!mine && <strong>{m.author_name}</strong>}<time>{clock(m.ts)}</time>
       </div>}
-      <Body body={m.body} mentions={m.mentions ?? []} me={me} edited={m.edited} />
+      {m.body.trim() ? <Body body={m.body} mentions={m.mentions ?? []} me={me} edited={m.edited} />
+        : <p className="all-file">{m.media?.length ? `${m.media.length === 1 ? "A file" : `${m.media.length} files`}: open the room to see ${m.media.length === 1 ? "it" : "them"}` : "(nothing to show here)"}</p>}
     </div>
   </article>;
 });
@@ -159,7 +170,7 @@ const FeedRow = memo(function FeedRow({ m, place, mine, me, grouped, onOpen }: {
 export function AllFeed({ rooms, byRoom, loaded, failed, me, onOpen }: { rooms: readonly AllRoom[]; byRoom: ReadonlyMap<string, Message[]>; loaded: boolean; failed: readonly string[];
   me: string | null; onOpen: (room: string, ref: string) => void }) {
   const nameOf = useMemo(() => new Map(rooms.map((r) => [r.id, r.name])), [rooms]);
-  const feed = useMemo(() => interleave(byRoom), [byRoom]);
+  const feed = useMemo(() => interleave(new Map([...byRoom].filter(([id]) => nameOf.has(id)))), [byRoom, nameOf]);
   const list = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
   useLayoutEffect(() => { const el = list.current; if (el && stick.current) el.scrollTop = el.scrollHeight; }, [feed]);
@@ -184,7 +195,12 @@ export function AllFeed({ rooms, byRoom, loaded, failed, me, onOpen }: { rooms: 
   </div>;
 }
 
-/** Each room's recent words, for the route (its last messages' text). */
-export function roomWords(byRoom: ReadonlyMap<string, readonly FeedMessage[]>): Map<string, string> {
-  return new Map([...byRoom].map(([id, list]) => [id, list.slice(-PER_ROOM).map((m) => m.body).join(" ")]));
+export type RoomWords = { text: string; lastMine: number | null };
+/** Each room's recent words (its last messages' text) and when you last wrote there, for the route. */
+export function roomWords(byRoom: ReadonlyMap<string, readonly FeedMessage[]>, me: string | null): Map<string, RoomWords> {
+  return new Map([...byRoom].map(([id, list]) => {
+    const recent = list.slice(-PER_ROOM);
+    const mine = me ? recent.filter((m) => m.author === me) : [];
+    return [id, { text: recent.map((m) => m.body).join(" "), lastMine: mine.length ? Math.max(...mine.map((m) => m.ts)) : null }];
+  }));
 }

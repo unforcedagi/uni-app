@@ -34,4 +34,6 @@ assert.equal(plainSnippet("## Now\n\nThe **coop** paperwork is signed. See [[Are
   "Now The coop paperwork is signed. See the plan and notes.");
 assert.equal(plainSnippet("- first `cone 6`\n- second [[Glaze Tests]]"), "first cone 6 second Glaze Tests");
 assert.equal(plainSnippet("Issue #12 stays"), "Issue #12 stays");
+// emphasis marks go only in pairs around words; code and arithmetic keep theirs
+assert.equal(plainSnippet("call __init__() with 2*3*4, then **bold** and *soft* and __strong__."), "call __init__() with 2*3*4, then bold and soft and strong.");
 

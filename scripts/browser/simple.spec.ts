@@ -4339,7 +4339,9 @@ test.describe('r27', () => {
     expect(inWork.length).toBeGreaterThanOrEqual(inPanel.length);
     // "3 answers" is its clause: what the answers are
     if (inWork.some((t) => /^Spanish versions/.test(t))) expect(inWork.join('\n')).not.toMatch(/^3 answers/m);
-    expect(inWork).toContain('one morning-practice line per day for Oct 15–25 (her doc has 2)');
+    // T-335 glow-up: which items fit in two lines depends on the type's measure (Instrument Sans fits two here where Quattro fit three);
+    // the rule is that each shown is whole and the rest are counted (itemsAreWhole), and the wider work view shows at least two
+    expect(inWork.length).toBeGreaterThanOrEqual(2);
   });
 
   test('r27 line 5.1: an item too long for two lines is not shown cut: fewer items and the list total', async ({ page }) => {

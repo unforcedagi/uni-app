@@ -2,7 +2,7 @@
    component rules that make home, a room and find read like the study's prototypes. The app's older names (--th-* from the Field
    Book, --bg/--text/... in App.css) read these tokens, so every surface takes the new look; the rules below only reshape what a token
    can't (two voices in messages, the home's statement and places, the find sheet).
-   Two voices in type: Uni and everyone else write in Literata, a reading serif; Aaron and the interface in Instrument Sans. Fraunces
+   Two voices in type: Uni and everyone else write in Literata, a reading serif; the person and the interface in Instrument Sans. Fraunces
    only for place names and the home's one big line; mono only for code, never for labels.
    Modes: day (default), night (the system's dark), ink (the Daylight: Settings → Calm screen or a slow screen; src/motion.ts sets
    :root[data-screen="ink"]). The living accent follows the time of day (:root[data-tide], src/glow/tide.ts).
@@ -30,7 +30,7 @@
   --g-measure: 66ch;
 
   --g-ground: #f2ede2;   /* the page */
-  --g-paper: #fbf8f1;    /* raised: composer, cards, Aaron's words */
+  --g-paper: #fbf8f1;    /* raised: composer, cards, your own words */
   --g-sunk: #e9e3d5;     /* wells: search field, code, the rail's pressed place */
   --g-ink: #1d1a16;      /* 15.6:1 on the ground */
   --g-ink-2: #5e574d;    /* 6.3:1 */
@@ -121,7 +121,7 @@ body { font-family: var(--g-font-ui); text-rendering: optimizeLegibility; }
   .rail button span { font-size: 10px; letter-spacing: -.01em; }
 }
 
-/* ── Messages: Uni's words set like a book, Aaron's in the margin ── */
+/* ── Messages: Uni's words set like a book, yours in the margin ── */
 .message { gap: 0; padding: 14px 0 4px; }
 .message.grouped { padding-top: 2px; }
 .message-avatar, .message .gutter-time { display: none !important; }
@@ -141,7 +141,7 @@ body { font-family: var(--g-font-ui); text-rendering: optimizeLegibility; }
   background: var(--g-paper); border: var(--g-hair) solid var(--g-line); border-radius: 18px 18px 6px 18px; padding: 8px 14px 8px;
 }
 .message.mine .message-meta strong { display: none; }
-/* Aaron's own time sits outside his words, shown on hover or focus (it is in the message's menu and its label either way) */
+/* your own message's time sits outside it, shown on hover or focus (it is in the message's menu and its label either way) */
 .message.mine .message-content { position: relative; }
 .message.mine .message-meta { position: absolute; right: calc(100% + 10px); bottom: 9px; margin: 0; opacity: 0; transition: opacity var(--g-t-quick) var(--g-ease); white-space: nowrap; }
 .message.mine:hover .message-meta, .message.mine:focus-within .message-meta { opacity: 1; }
@@ -308,9 +308,7 @@ body { font-family: var(--g-font-ui); text-rendering: optimizeLegibility; }
 :root[data-screen="ink"] .fd-needs-line::before { background: #000; }
 :root[data-screen="ink"] .shell.search-open .panel-scrim { background: rgba(0, 0, 0, .12); }
 
-/* ── The ensō: Uni's mark. Drawn once while Uni thinks; rests as a closed stroke. ── */
+/* ── The ensō: Uni's mark, a closed brush stroke beside its name ── */
 .enso { flex: none; overflow: visible; }
 .enso path { fill: none; stroke: var(--g-accent); stroke-width: 3.4; stroke-linecap: round; }
-.enso.drawing path { stroke-dasharray: 100; stroke-dashoffset: 100; animation: g-enso 1600ms var(--g-ease) forwards; }
-@keyframes g-enso { to { stroke-dashoffset: 8; } }
 .fd-door[data-sign="new"] .fd-sign i { width: 8px; height: 8px; background: var(--g-ink-2); }

@@ -49,36 +49,41 @@ function namedAt(text: string, room: RouteRoom): number {
   return at;
 }
 
-/** The suggested room(s) for `text` among `rooms`, each with its reason; empty only when there is no room to suggest. */
-export function suggestRoute(text: string, rooms: readonly RouteRoom[]): RoutePick[] {
-  if (!rooms.length) return [];
-  // 1. places named
-  const named = rooms.map((r) => ({ r, at: namedAt(text, r) })).filter((x) => x.at >= 0).sort((a, b) => a.at - b.at);
-  if (named.length) return named.slice(0, 3).map(({ r }) => ({ id: r.id, why: `names ${r.name}` }));
-  // 2. the most telling shared word: each word weighs log(1 + places / places using it)
-  const words = [...new Set(routeWords(text))];
-  if (words.length) {
-    const vocab = rooms.map((r) => new Set(routeWords(`${r.name} ${r.slug ?? ""} ${r.text ?? ""}`)));
-    const df = new Map(words.map((w) => [w, vocab.filter((v) => v.has(w)).length]));
-    let best: { i: number; score: number; word: string; wordScore: number } | null = null;
-    rooms.forEach((_, i) => {
-      let score = 0, word = "", wordScore = 0;
-      for (const w of words) {
-        if (!vocab[i].has(w)) continue;
-        const s = Math.log(1 + rooms.length / df.get(w)!);
-        score += s;
-        if (s > wordScore) { wordScore = s; word = w; }
-      }
-      // ties go to the place talked in most lately
-      if (score > 0 && (!best || score > best.score + 1e-9 || (Math.abs(score - best.score) < 1e-9 && (rooms[i].lastTs ?? 0) > (rooms[best.i].lastTs ?? 0)))) best = { i, score, word, wordScore };
-    });
-    // a word every place uses tells them apart no better than chance: only a word some places lack counts
-    const b = best as { i: number; score: number; word: string } | null;
-    if (b && df.get(b.word)! < rooms.length) return [{ id: rooms[b.i].id, why: `talks about ${b.word}` }];
-  }
-  // 3. where you last wrote, else the latest talk
-  const byMine = [...rooms].filter((r) => r.lastMine).sort((a, b) => (b.lastMine ?? 0) - (a.lastMine ?? 0))[0];
-  if (byMine) return [{ id: byMine.id, why: "where you last wrote" }];
-  const byTalk = [...rooms].sort((a, b) => (b.lastTs ?? 0) - (a.lastTs ?? 0))[0];
-  return [{ id: byTalk.id, why: "latest talk" }];
+/** A decider for these rooms: their words are read once, then each call routes one text. */
+export function makeRouter(rooms: readonly RouteRoom[]): (text: string) => RoutePick[] {
+  const vocab = rooms.map((r) => new Set(routeWords(`${r.name} ${r.slug ?? ""} ${r.text ?? ""}`)));
+  return (text) => {
+    if (!rooms.length) return [];
+    // 1. places named
+    const named = rooms.map((r) => ({ r, at: namedAt(text, r) })).filter((x) => x.at >= 0).sort((a, b) => a.at - b.at);
+    if (named.length) return named.slice(0, 3).map(({ r }) => ({ id: r.id, why: `names ${r.name}` }));
+    // 2. the most telling shared word: each word weighs log(1 + places / places using it)
+    const words = [...new Set(routeWords(text))];
+    if (words.length) {
+      const df = new Map(words.map((w) => [w, vocab.filter((v) => v.has(w)).length]));
+      let best: { i: number; score: number; word: string } | null = null;
+      rooms.forEach((_, i) => {
+        let score = 0, word = "", wordScore = 0;
+        for (const w of words) {
+          if (!vocab[i].has(w)) continue;
+          const s = Math.log(1 + rooms.length / df.get(w)!);
+          score += s;
+          if (s > wordScore) { wordScore = s; word = w; }
+        }
+        // ties go to the place talked in most lately
+        if (score > 0 && (!best || score > best.score + 1e-9 || (Math.abs(score - best.score) < 1e-9 && (rooms[i].lastTs ?? 0) > (rooms[best.i].lastTs ?? 0)))) best = { i, score, word };
+      });
+      // a word every place uses tells them apart no better than chance: only a word some places lack counts
+      const b = best as { i: number; score: number; word: string } | null;
+      if (b && df.get(b.word)! < rooms.length) return [{ id: rooms[b.i].id, why: `talks about ${b.word}` }];
+    }
+    // 3. where you last wrote, else the latest talk
+    const byMine = [...rooms].filter((r) => r.lastMine).sort((a, b) => (b.lastMine ?? 0) - (a.lastMine ?? 0))[0];
+    if (byMine) return [{ id: byMine.id, why: "where you last wrote" }];
+    const byTalk = [...rooms].sort((a, b) => (b.lastTs ?? 0) - (a.lastTs ?? 0))[0];
+    return [{ id: byTalk.id, why: "latest talk" }];
+  };
 }
+
+/** The suggested room(s) for `text` among `rooms`, each with its reason; empty only when there is no room to suggest. */
+export const suggestRoute = (text: string, rooms: readonly RouteRoom[]): RoutePick[] => makeRouter(rooms)(text);

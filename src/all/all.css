@@ -3,7 +3,7 @@
 /* the home's two views: Places and All rooms, a quiet pair of words above the list */
 .fd-tabs { max-width: 720px; margin: 36px auto 8px; display: flex; gap: 4px; }
 .fd-tabs button { all: unset; box-sizing: border-box; min-height: 36px; padding: 0 14px; display: inline-flex; align-items: center; border-radius: 999px; cursor: pointer;
-  font: 500 14px/1 var(--g-font-ui); color: var(--g-ink-2); transition: background-color var(--g-t-quick) var(--g-ease), color var(--g-t-quick) var(--g-ease); }
+  font: 500 14px/1 var(--g-font-ui); color: var(--g-ink-2); }
 .fd-tabs button[aria-selected="true"] { background: var(--g-ink); color: var(--g-ground); }
 .fd-tabs button:not([aria-selected="true"]):hover { background: var(--g-sunk); color: var(--g-ink); }
 .fd-tabs button:focus-visible { outline: 2px solid var(--g-focus); outline-offset: 2px; }
@@ -46,6 +46,7 @@
 .fd-allhead .fd-tabs { margin: 0; }
 .all-feed { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; margin: 0 calc(-1 * clamp(20px, 5vw, 64px)); padding: 0 clamp(20px, 5vw, 64px); }
 .all-stack { max-width: 720px; margin: 0 auto; padding: 8px 0 20px; }
+.all-file { margin: 2px 0 4px; font: italic 400 15px/1.5 var(--g-font-uni); color: var(--g-ink-2); }
 .all-quiet { margin: 24px 0; font: italic 400 15px/1.5 var(--g-font-uni); color: var(--g-ink-3); }
 .all-msg { cursor: pointer; border-radius: 12px; }
 .all-msg.grouped { padding-top: 0; }
