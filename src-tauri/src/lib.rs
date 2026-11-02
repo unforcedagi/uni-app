@@ -2863,6 +2863,11 @@ pub fn run() {
     let ota = ota::wrap(&mut context);
     tauri::Builder::default()
         .manage(ota.clone())
+        // T-305: interfaces are served on their own scheme, each only to its own webview (ota::serve_iface).
+        .register_uri_scheme_protocol(ota::SCHEME, {
+            let ota = ota.clone();
+            move |ctx, request| ota::serve_iface(&ota, ctx.webview_label(), &request.uri().to_string())
+        })
         // T-305: each webview stays inside its own interface's pages.
         .plugin(
             tauri::plugin::Builder::<tauri::Wry>::new("iface-nav")

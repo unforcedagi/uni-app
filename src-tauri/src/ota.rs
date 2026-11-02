@@ -547,24 +547,88 @@ pub struct Live {
     pub grants: Vec<String>,
 }
 
-/// An interface's window label (`iface-garden`), and back. Uni's windows are any others (`main`, the harness's `t76`).
+/// An interface's window label (`iface-garden`). Uni's windows are any others (`main`, the harness's `t76`).
 pub const WINDOW_PREFIX: &str = "iface-";
-/// Where an interface's files are served: `/__iface/<id>/...`, on the same scheme as Uni's, apart from Uni's paths.
-pub const PATH_PREFIX: &str = "/__iface/";
+/// The scheme an interface's files are served on, apart from Uni's `tauri://`: `iface://localhost/<id>/...`
+/// (`http://iface.localhost/<id>/...` on Windows and Android). Another origin, so its browser storage is its own,
+/// and its handler sees which webview asks, so only the interface's own webview gets its files.
+pub const SCHEME: &str = "iface";
+
+/// What an interface's page may load and reach: its own files, and the shell through IPC. No network of its own,
+/// so what it may read can't be sent anywhere else; no frames.
+const IFACE_CSP: &str = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src ipc: http://ipc.localhost; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'";
+
+/// The URL of interface `id`'s page `path`.
+pub fn iface_url(id: &str, path: &str) -> url::Url {
+    #[cfg(any(windows, target_os = "android"))]
+    let base = format!("http://{SCHEME}.localhost/");
+    #[cfg(not(any(windows, target_os = "android")))]
+    let base = format!("{SCHEME}://localhost/");
+    url::Url::parse(&format!("{base}{id}/{path}")).expect("interface url")
+}
+
+/// The interface whose page `url` is, if it is one.
+fn iface_in(url: &url::Url) -> Option<&str> {
+    let ours = url.scheme() == SCHEME || url.host_str() == Some(&format!("{SCHEME}.localhost"));
+    ours.then(|| url.path().trim_start_matches('/').split('/').next().unwrap_or(""))
+}
+
+/// Serves interface files on the [`SCHEME`]: only to the webview of the interface they belong to, only while it runs.
+pub fn serve_iface(ota: &Ota, label: &str, uri: &str) -> tauri::http::Response<Vec<u8>> {
+    let path = uri.split(['?', '#']).next().unwrap_or("");
+    let path = path.split_once("://").map_or(path, |(_, rest)| rest.split_once('/').map_or("", |(_, p)| p));
+    let (id, file) = path.trim_start_matches('/').split_once('/').unwrap_or((path.trim_start_matches('/'), ""));
+    let answer = |status: u16, mime: &str, body: Vec<u8>| {
+        tauri::http::Response::builder()
+            .status(status)
+            .header("Content-Type", mime)
+            .header("Content-Security-Policy", IFACE_CSP)
+            .header("X-Content-Type-Options", "nosniff")
+            .body(body)
+            .unwrap_or_default()
+    };
+    if iface_of(label) != id || id == UNI {
+        log(format!("{label}: refused {SCHEME} file {path}"));
+        return answer(403, "text/plain", b"not this webview's interface".to_vec());
+    }
+    let file = if file.is_empty() { "index.html" } else { file };
+    match ota.live(id).and_then(|l| l.bundle.get(file).map(<[u8]>::to_vec)) {
+        Some(body) => answer(200, mime_of(file), body),
+        None => answer(404, "text/plain", Vec::new()),
+    }
+}
+
+fn mime_of(file: &str) -> &'static str {
+    match file.rsplit('.').next().unwrap_or("") {
+        "html" => "text/html; charset=utf-8",
+        "js" | "mjs" => "text/javascript; charset=utf-8",
+        "css" => "text/css; charset=utf-8",
+        "json" => "application/json",
+        "svg" => "image/svg+xml",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "webp" => "image/webp",
+        "woff2" => "font/woff2",
+        "woff" => "font/woff",
+        "ttf" => "font/ttf",
+        "ico" => "image/x-icon",
+        _ => "application/octet-stream",
+    }
+}
 
 /// Which interface a webview belongs to, by its label: fixed when the shell opens it, whatever it later loads.
 pub fn iface_of(label: &str) -> &str {
     label.strip_prefix(WINDOW_PREFIX).unwrap_or(UNI)
 }
 
-/// May the webview labelled `label` load `url`? Pages of the app's own scheme are Uni's, except `/__iface/<id>/...`,
-/// which are that interface's. Uni's webviews never load an interface's pages (they would run with Uni's powers);
-/// an interface's webview loads only its own pages, nothing else at all.
+/// May the webview labelled `label` load `url`? Uni's webviews never load an interface's pages; an interface's
+/// webview loads only its own, nothing else at all. (Its files are refused to any other webview anyway.)
 pub fn may_navigate(label: &str, url: &url::Url) -> bool {
-    let app_page = matches!(url.scheme(), "tauri" | "asset") || url.host_str() == Some("tauri.localhost") || cfg!(debug_assertions) && url.host_str() == Some("localhost");
     let id = iface_of(label);
-    let own = format!("{PATH_PREFIX}{id}/");
-    let allowed = if id == UNI { !(app_page && url.path().starts_with(PATH_PREFIX)) } else { app_page && url.path().starts_with(&own) };
+    let allowed = match iface_in(url) {
+        Some(owner) => owner == id && id != UNI,
+        None => id == UNI,
+    };
     if !allowed {
         log(format!("{label}: navigation to {url} refused"));
     }
@@ -664,8 +728,8 @@ impl Ota {
     }
 }
 
-/// The app's asset provider: an interface's files under `/__iface/<id>/`, Uni's everywhere else (its bundle, else
-/// the ones built in).
+/// The app's asset provider for Uni's own pages: its bundle, else the ones built in. Interfaces are served apart, on
+/// the [`SCHEME`].
 pub struct OtaAssets<R: Runtime> {
     builtin: Box<dyn Assets<R>>,
     ota: Arc<Ota>,
@@ -709,12 +773,6 @@ impl<R: Runtime> Assets<R> for OtaAssets<R> {
     }
 
     fn get(&self, key: &AssetKey) -> Option<Cow<'_, [u8]>> {
-        if let Some(rest) = key.as_ref().strip_prefix(PATH_PREFIX) {
-            // Only a running interface's own files: never Uni's, never another interface's.
-            let (id, path) = rest.split_once('/').unwrap_or((rest, "index.html"));
-            let live = self.ota.live(id)?;
-            return live.bundle.get(if path.is_empty() { "index.html" } else { path }).map(|b| Cow::Owned(b.to_vec()));
-        }
         match &self.ota.current().bundle {
             // Only the bundle's own files: never a built-in file mixed into a bundle's page.
             Some(b) => b.get(key.as_ref()).map(|bytes| Cow::Owned(bytes.to_vec())),
@@ -732,9 +790,6 @@ impl<R: Runtime> Assets<R> for OtaAssets<R> {
     }
 
     fn csp_hashes(&self, html_path: &AssetKey) -> Box<dyn Iterator<Item = CspHash<'_>> + '_> {
-        if html_path.as_ref().starts_with(PATH_PREFIX) {
-            return Box::new(std::iter::empty());
-        }
         match &self.ota.current().bundle {
             // A bundle's HTML has no build-time nonce tokens or inline-script hashes; the configured CSP applies as is.
             Some(_) => Box::new(std::iter::empty()),
@@ -921,8 +976,8 @@ fn replace_window(app: &tauri::AppHandle, old: &tauri::WebviewWindow, id: &str) 
     old.destroy().map_err(|e| e.to_string())
 }
 
-/// A window for interface `id`, from the configured window: Uni's at `/`, an installed interface's at
-/// `/__iface/<id>/` with its own label and, on desktop, its own browser storage.
+/// A window for interface `id`, from the configured window: Uni's at `/`, an installed interface's on the
+/// [`SCHEME`] with its own label and its own browser storage.
 fn open_window(app: &tauri::AppHandle, id: &str) -> Result<(), String> {
     #[cfg(mobile)]
     {
@@ -937,7 +992,7 @@ fn open_window(app: &tauri::AppHandle, id: &str) -> Result<(), String> {
             return Ok(());
         }
         cfg.label = label.clone();
-        cfg.url = tauri::WebviewUrl::App(if id == UNI { "index.html".into() } else { format!("{}{id}/index.html", &PATH_PREFIX[1..]).into() });
+        cfg.url = if id == UNI { tauri::WebviewUrl::App("index.html".into()) } else { tauri::WebviewUrl::CustomProtocol(iface_url(id, "index.html")) };
         let mut b = tauri::WebviewWindowBuilder::from_config(app, &cfg).map_err(|e| e.to_string())?;
         if id != UNI {
             if let Ok(d) = app.path().app_data_dir() {
@@ -1456,18 +1511,32 @@ mod tests {
         for path in ["/__iface/garden/index.html", "/__iface/garden/assets/app.js"] {
             assert!(assets.get(&AssetKey::from(path)).is_none(), "{path} is served on Uni's scheme");
         }
+        // On its own scheme: to Garden's webview only, with its locked-down CSP.
+        let url = iface_url("garden", "index.html").to_string();
+        let r = serve_iface(&ota, "iface-garden", &url);
+        assert_eq!((r.status().as_u16(), r.body().as_slice()), (200, &b"<html>web 0.1.0</html>"[..]));
+        assert!(r.headers()["Content-Security-Policy"].to_str().unwrap().contains("connect-src ipc: http://ipc.localhost;"));
+        assert_eq!(serve_iface(&ota, "iface-garden", &iface_url("garden", "assets/app.js").to_string()).headers()["Content-Type"], "text/javascript; charset=utf-8");
+        for label in ["main", "t76", "iface-other"] {
+            assert_eq!(serve_iface(&ota, label, &url).status().as_u16(), 403, "{label}");
+        }
+        assert_eq!(serve_iface(&ota, "iface-garden", &iface_url("garden", "missing.js").to_string()).status().as_u16(), 404);
+        ota.live.write().unwrap().remove("garden");
+        assert_eq!(serve_iface(&ota, "iface-garden", &url).status().as_u16(), 404, "a stopped interface serves nothing");
     }
 
     #[test]
     fn each_webview_stays_inside_its_own_interface() {
         let u = |s: &str| url::Url::parse(s).unwrap();
         assert!(may_navigate("main", &u("tauri://localhost/index.html")));
-        assert!(!may_navigate("main", &u("tauri://localhost/__iface/garden/index.html")), "Uni's window would run Garden with Uni's powers");
-        assert!(may_navigate("iface-garden", &u("tauri://localhost/__iface/garden/index.html")));
+        for garden in ["iface://localhost/garden/index.html", "http://iface.localhost/garden/index.html"] {
+            assert!(!may_navigate("main", &u(garden)), "Uni's window would run Garden with Uni's powers: {garden}");
+            assert!(may_navigate("iface-garden", &u(garden)), "{garden}");
+        }
         assert!(!may_navigate("iface-garden", &u("tauri://localhost/index.html")));
-        assert!(!may_navigate("iface-garden", &u("tauri://localhost/__iface/other/index.html")));
+        assert!(!may_navigate("iface-garden", &u("iface://localhost/other/index.html")));
+        assert!(!may_navigate("iface-garden", &u("iface://localhost/gardenx/index.html")));
         assert!(!may_navigate("iface-garden", &u("https://example.com/")));
-        assert!(!may_navigate("iface-garden", &u("http://tauri.localhost/__iface/gardenx/index.html")));
     }
 
     #[test]

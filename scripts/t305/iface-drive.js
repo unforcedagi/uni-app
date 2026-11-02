@@ -59,6 +59,8 @@ if (window.top === window) (function () {
     if (phase === 'garden' && garden) {
       const places = await until('five places', () => { const p = document.querySelectorAll('.place'); return p.length >= 5 && p; });
       await log(`places: ${[...places].map((p) => p.getAttribute('aria-label')).join(' | ')}`);
+      await log(`Garden's page: ${location.href}`);
+      await put('garden-js', document.querySelector('script[type=module]').src);
       await shot('03-garden');
       // Three neighbours write while Garden is open (the relay sends them live): fireflies, and moths flying in.
       await put('relay-live', '');
@@ -102,6 +104,10 @@ if (window.top === window) (function () {
       press(await room('Seed Library'));
       await until('the letter in Uni', () => byText(LETTER).length || document.body.innerText.includes(LETTER), 30000);
       await log('Uni shows the letter Garden sent');
+      // Uni's page tries to run Garden's own script (it would get Uni's powers): its scheme refuses this webview.
+      const src = (await get('garden-js')).trim();
+      const ran = await new Promise((done) => { const s = document.createElement('script'); s.src = src; s.onload = () => done('loaded'); s.onerror = () => done('refused'); document.head.append(s); });
+      await log(`Garden's script from Uni's page: ${ran}`);
       await shot('08-uni-back');
       // Leave Garden showing for the next launch.
       press(await until('Settings', () => document.querySelector('button[aria-label="Settings"]')));

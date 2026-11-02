@@ -118,6 +118,7 @@ need "$OUT/drive.log" 'vault_list from Garden: not granted: vault.read (interfac
 need "$OUT/drive.log" 'clipboard from Garden: refused' "Garden's window may use no plugins (clipboard refused)"
 need "$OUT/drive.log" "Uni's storage seen from Garden: nothing" "Garden's window has its own browser storage"
 need "$OUT/drive.log" "after trying to open Uni's page in Garden's window: still Garden" "Garden's window can't load Uni's pages"
+need "$OUT/drive.log" "Garden's script from Uni's page: refused" "Uni's pages can't load Garden's files"
 need "$OUT/drive.log" 'status: Sent to Seed Library.' "Garden sent a letter through the shell"
 need "$OUT/drive.log" 'Uni shows the letter Garden sent' "back in Uni, the same room shows Garden's letter"
 need "$OUT/drive.log" 'relaunched with the Garden channel down: 5 places' "with its channel down, Garden still opens from the device"
