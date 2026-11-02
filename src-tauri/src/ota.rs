@@ -1477,6 +1477,28 @@ mod tests {
     }
 
     #[test]
+    fn a_bundle_held_for_a_missing_grant_is_not_worn_down_by_retries() {
+        let agent = key();
+        let root = tempfile::tempdir().unwrap();
+        let install = |grants: &[&str]| {
+            let i = iface::Installed { id: "garden".into(), name: "Garden".into(), channel: "https://example.com/m.json".into(), pubkey: agent.pk.clone(), grants: grants.iter().map(|g| g.to_string()).collect() };
+            std::fs::write(root.path().join("interfaces.json"), serde_json::to_vec(&vec![i]).unwrap()).unwrap();
+        };
+        let dir = iface::dir(root.path(), "garden");
+        std::fs::create_dir_all(&dir).unwrap();
+        let a = archive(&[("uni-bundle.json", br#"{"version":"0.1.1","api":1,"requires":["rooms.read","rooms.send"]}"#), ("index.html", b"g")]);
+        put(&dir, "next", &a, &sign(&agent, &a));
+        // The person granted only rooms.read; the shell is asked to start Garden again and again (code-review).
+        install(&["rooms.read"]);
+        for _ in 0..4 {
+            assert!(activate_iface(root.path(), "garden").unwrap_err().contains("needs rooms.send"));
+        }
+        // Then the person grants rooms.send: the same signed version starts.
+        install(&["rooms.read", "rooms.send"]);
+        assert_eq!(activate_iface(root.path(), "garden").unwrap().bundle.meta.version, "0.1.1");
+    }
+
+    #[test]
     fn a_document_of_an_installed_interface_never_gets_unis_powers_during_a_switch() {
         let ota = Ota::new();
         let k = key();

@@ -115,6 +115,7 @@ need() { grep -q -- "$2" "$1" && step "ok: $3" || { step "FAIL: $3"; fail=1; }; 
 need "$OUT/drive.log" 'places: .*Seed Library.*Workshop\|places: .*Workshop.*Seed Library' "Garden drew the relay's five rooms as places"
 need "$OUT/drive.log" 'after live letters: .*Night Walks, 1 new letter' "letters arriving live became fireflies at their places"
 need "$OUT/drive.log" 'vault_list from Garden: not granted: vault.read (interface garden)' "the shell refused a command Garden wasn't granted"
+need "$OUT/drive.log" "Uni's live events from Garden: refused" "Garden's window can't listen to app events (live letters come through the gate)"
 need "$OUT/drive.log" 'clipboard from Garden: refused' "Garden's window may use no plugins (clipboard refused)"
 need "$OUT/drive.log" "Uni's storage seen from Garden: nothing" "Garden's window has its own browser storage"
 need "$OUT/drive.log" "after trying to open Uni's page in Garden's window: still Garden" "Garden's window can't load Uni's pages"

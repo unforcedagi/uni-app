@@ -74,6 +74,9 @@ if (window.top === window) (function () {
       const denied = await call('vault_list').then(() => 'allowed', (e) => String(e));
       await log(`vault_list from Garden: ${denied}`);
       // Its window has no plugins, its own browser storage, and can't load Uni's pages.
+      // Events go to every window that listens: an interface may not listen at all (live letters come through the gate).
+      const heard = await call('plugin:event|listen', { event: 'uni://live', target: { kind: 'Any' }, handler: 0 }).then(() => 'allowed', (e) => String(e));
+      await log(`Uni's live events from Garden: ${heard.includes('not allowed') ? 'refused' : heard}`);
       const clip = await call('plugin:clipboard-manager|write_text', { text: 'from Garden' }).then(() => 'allowed', (e) => String(e));
       await log(`clipboard from Garden: ${clip.includes('not allowed') ? 'refused' : clip}`);
       await log(`Uni's storage seen from Garden: ${localStorage.getItem('drive-probe') ?? 'nothing'}`);
