@@ -98,6 +98,9 @@ else echo "Warning: GitHub releases/latest does not serve $VERSION yet; installe
   mv "$SERVE/android/latest.json.tmp" "$SERVE/android/latest.json"; } || echo "Warning: tailnet download page not updated ($SERVE)" >&2
 # Zero-touch install on each paired device (Daylight, Pixel 7) when wireless ADB is up
 # and Uni is not in the foreground. Never uninstalls: that would lose the device identity.
+# UNI_RELEASE_NO_DEVICE_INSTALL=1 (a release whose brief says not to install on any device) leaves every device to the
+# in-app update banner.
+if [[ ${UNI_RELEASE_NO_DEVICE_INSTALL:-} == 1 ]]; then echo "Device installs skipped (UNI_RELEASE_NO_DEVICE_INSTALL=1); the in-app banner offers the APK"; else
 while read -r NAME SERIAL; do
   if [[ $SERIAL == offline ]]; then echo "$NAME: ADB offline; in-app banner will offer the APK"; continue; fi
   TOP="$(timeout 10 adb -s "$SERIAL" shell dumpsys activity activities | grep topResumedActivity || true)"
@@ -105,6 +108,7 @@ while read -r NAME SERIAL; do
   if timeout 900 adb -s "$SERIAL" install -r "$STAGE/uni.apk" </dev/null; then echo "$NAME: upgraded to $VERSION"
   else echo "$NAME: install failed; never uninstall, inspect signature" >&2; fi
 done < <(python3 scripts/connect-devices.py || true)
+fi
 ((RELEASE_READABLE)) || { echo "Published $TAG, but it could not be read back by its tag: check the release" >&2; exit 1; }
 echo "Published $TAG ($SHA): https://github.com/$REPO_SLUG/releases/tag/$TAG"
 }
