@@ -1443,6 +1443,22 @@ mod tests {
     }
 
     #[test]
+    fn an_interfaces_files_are_served_only_to_its_own_webview() {
+        let ota = Ota::new();
+        let k = key();
+        let a = bundle("0.1.0", 1);
+        let b = open(&k.pk, &a, &sign(&k, &a), &none_built_in(), 1).unwrap();
+        ota.live.write().unwrap().insert("garden".into(), Arc::new(Live { bundle: Arc::new(b), dir: PathBuf::new(), grants: vec![] }));
+        ota.set(Choice::built_in());
+        // Not on Uni's own scheme, where any Uni page could fetch it or load it as a script, with Uni's powers
+        // (Codex iface-r2 P1).
+        let assets = OtaAssets::<tauri::test::MockRuntime> { builtin: Box::new(NoAssets), ota: ota.clone() };
+        for path in ["/__iface/garden/index.html", "/__iface/garden/assets/app.js"] {
+            assert!(assets.get(&AssetKey::from(path)).is_none(), "{path} is served on Uni's scheme");
+        }
+    }
+
+    #[test]
     fn each_webview_stays_inside_its_own_interface() {
         let u = |s: &str| url::Url::parse(s).unwrap();
         assert!(may_navigate("main", &u("tauri://localhost/index.html")));
