@@ -68,7 +68,7 @@ cp "$(pwd)/src-tauri/gen/android/app/build/outputs/apk/universal/release/app-uni
 # T-305: every update is a full download over a phone's connection. A debug or unstripped build is ten times this.
 APK_BYTES="$(stat -c %s "$STAGE/uni.apk")"
 (( APK_BYTES <= APK_MAX_BYTES )) || { echo "APK is $APK_BYTES bytes, over the $APK_MAX_BYTES limit: a debug or unstripped build?" >&2; exit 1; }
-BADGING="$("$HOME/Android/Sdk/build-tools/35.0.0/aapt" dump badging "$STAGE/uni.apk" | head -1)"
+BADGING="$("$HOME/Android/Sdk/build-tools/35.0.0/aapt" dump badging "$STAGE/uni.apk" | sed -n 1p)"
 [[ $BADGING == *"versionCode='$CODE'"*"versionName='$VERSION'"* ]] || { echo "APK not stamped $VERSION/$CODE: $BADGING" >&2; exit 1; }
 # Installed apps trust only the original signing key (~/.config/.android/debug.keystore, set via ANDROID_USER_HOME
 # in android.env). An APK signed by any other key fails on every device with "conflicts with another package"
