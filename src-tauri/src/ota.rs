@@ -903,11 +903,25 @@ mod tests {
         let url = format!("http://127.0.0.1:{}/manifest.json", listener.local_addr().unwrap().port());
         let root = dir.path().to_path_buf();
         std::thread::spawn(move || {
-            for mut s in listener.incoming().flatten() {
+            for s in listener.incoming().flatten() {
+                let root = root.clone();
+                std::thread::spawn(move || serve(&root, s));
+            }
+        });
+        fn serve(root: &Path, mut s: std::net::TcpStream) {
+            {
                 let mut buf = [0u8; 4096];
                 let n = s.read(&mut buf).unwrap_or(0);
                 let req = String::from_utf8_lossy(&buf[..n]).to_string();
                 let path = req.split_whitespace().nth(1).unwrap_or("/").trim_start_matches('/').to_string();
+                // `<file>.hold` holds the answer for that file until the test removes it; `<file>.asked` says it came.
+                let hold = root.join(format!("{path}.hold"));
+                if hold.exists() {
+                    let _ = std::fs::write(root.join(format!("{path}.asked")), b"");
+                    while hold.exists() {
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                }
                 let (code, body) = match std::fs::read(root.join(&path)) {
                     Ok(b) => ("200 OK", b),
                     Err(_) => ("404 Not Found", Vec::new()),
@@ -915,7 +929,7 @@ mod tests {
                 let _ = write!(s, "HTTP/1.1 {code}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len());
                 let _ = s.write_all(&body);
             }
-        });
+        }
         Channel { dir, url }
     }
 
@@ -923,11 +937,13 @@ mod tests {
         /// Publishes a signed bundle as the channel's newest release, in a manifest signed `age` seconds ago that is
         /// good for `ttl` seconds from then.
         fn publish_at(&self, k: &Key, version: &str, age: u64, ttl: u64) {
+            self.publish_issued(k, version, now_secs() - age, ttl);
+        }
+        fn publish_issued(&self, k: &Key, version: &str, issued: u64, ttl: u64) {
             let a = bundle(version, 1);
             let name = format!("web-{version}.tar.gz");
             std::fs::write(self.dir.path().join(&name), &a).unwrap();
             std::fs::write(self.dir.path().join(format!("{name}.sig")), sign(k, &a)).unwrap();
-            let issued = now_secs() - age;
             let m = Manifest {
                 channel: CHANNEL_ID.into(),
                 issued,
@@ -1009,6 +1025,42 @@ mod tests {
         ch.serve_again(&files);
         let r = run_check(dir.path(), &ch, &k, "0.1.84");
         assert!(!matches!(r, Ok(CheckResult::Staged { .. })), "staged from a manifest the key did not sign: {r:?}");
+    }
+
+    #[test]
+    fn an_older_release_signed_in_the_same_second_as_a_newer_one_is_refused() {
+        let (k, ch, dir) = (key(), channel(), tempfile::tempdir().unwrap());
+        let (old_ch, issued) = (channel(), now_secs() - 60);
+        old_ch.publish_issued(&k, "0.1.85", issued, 7 * DAY);
+        // The device sees the newer manifest, but its download fails.
+        ch.publish_issued(&k, "0.1.86", issued, 7 * DAY);
+        std::fs::remove_file(ch.dir.path().join("web-0.1.86.tar.gz")).unwrap();
+        assert!(run_check(dir.path(), &ch, &k, "0.1.84").is_err());
+        assert_eq!(State::load_checked(dir.path()).unwrap().manifest_floor, issued);
+        // Someone replays an older release whose manifest carries the same second (Codex p2-r1).
+        let r = run_check(dir.path(), &old_ch, &k, "0.1.84");
+        assert!(!matches!(r, Ok(CheckResult::Staged { .. })), "the older release was staged: {r:?}");
+    }
+
+    #[test]
+    fn a_slow_check_of_an_older_manifest_cannot_stage_under_a_newer_floor() {
+        let (k, old_ch, new_ch) = (key(), channel(), channel());
+        let dir = tempfile::tempdir().unwrap();
+        old_ch.publish_at(&k, "0.1.85", 3600, 7 * DAY);
+        new_ch.publish_at(&k, "0.1.86", 60, 7 * DAY);
+        // The check of the older manifest is held at its download while a check of the newer one runs (Codex p2-r1).
+        let hold = old_ch.dir.path().join("web-0.1.85.tar.gz.hold");
+        std::fs::write(&hold, b"").unwrap();
+        let (d, url, pk) = (dir.path().to_path_buf(), old_ch.url.clone(), k.pk.clone());
+        let slow = std::thread::spawn(move || tauri::async_runtime::block_on(check(&d, &url, &pk, &v("0.1.84"), None, 1)));
+        while !old_ch.dir.path().join("web-0.1.85.tar.gz.asked").exists() {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(run_check(dir.path(), &new_ch, &k, "0.1.84"), Ok(CheckResult::Staged { version: "0.1.86".into() }));
+        std::fs::remove_file(&hold).unwrap();
+        let r = slow.join().unwrap();
+        assert!(!matches!(r, Ok(CheckResult::Staged { .. })), "the older release was staged over the newer: {r:?}");
+        assert_eq!(activate(dir.path(), &k.pk, &v("0.1.84"), 1).unwrap().meta.version, "0.1.86");
     }
 
     #[test]
