@@ -20,14 +20,15 @@ const ask = msg('e'.repeat(64), 'Robin: can you list my tailnet devices?', now()
 
 const parse = (body: string) => JSON.parse(/```uni-secret-request\n([^\n]*)\n```/.exec(body)![1]);
 
-async function boot(page: Page, opts: { messages: { ref: string; body: string }[]; signed?: Record<string, string>; trusted?: boolean; optOut?: boolean; value?: string }) {
+async function boot(page: Page, opts: { messages: { ref: string; body: string }[]; signed?: Record<string, string>; trusted?: boolean; optOut?: boolean; value?: string; failSends?: number }) {
   const signed = opts.signed ?? Object.fromEntries(opts.messages.filter((m) => m.body.includes('uni-secret-request')).map((m) => [m.ref, UNI]));
   const requests = Object.fromEntries(opts.messages.filter((m) => m.body.includes('uni-secret-request')).map((m) => [m.ref, parse(m.body)]));
-  await page.addInitScript(({ messages, trusted, optOut, signed, requests, value }) => {
+  await page.addInitScript(({ messages, trusted, optOut, signed, requests, value, failSends }) => {
     const w = window as any;
     if (optOut) localStorage.setItem('uni:secret-cards', 'off');
     w.calls = [];
     w.sentValueMatches = null;
+    w.failSends = failSends;
     w.requesters = trusted ? ['c'.repeat(64)] : [];
     w.__TAURI_INTERNALS__ = {
       metadata: { currentWindow: { label: 'main' }, currentWebview: { label: 'main' } },
@@ -53,14 +54,14 @@ async function boot(page: Page, opts: { messages: { ref: string; body: string }[
             if (!signed[args.request]) throw "this request can't be verified; ask Uni for a new one";
             return { author: signed[args.request], request: requests[args.request] };
           case 'secret_pin': if (!signed[args.request]) throw "this request can't be verified"; w.requesters = [signed[args.request]]; return null;
-          case 'send_secret': await new Promise((r) => setTimeout(r, 400)); return 'f'.repeat(64);
+          case 'send_secret': await new Promise((r) => setTimeout(r, 400)); if (w.failSends > 0) { w.failSends--; throw 'relay unreachable'; } return 'f'.repeat(64);
           case 'forget_secret': return 'f'.repeat(64);
           default: return null;
         }
       },
     };
     w.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} };
-  }, { messages: opts.messages, trusted: !!opts.trusted, optOut: !!opts.optOut, signed, requests, value: opts.value ?? null });
+  }, { messages: opts.messages, trusted: !!opts.trusted, optOut: !!opts.optOut, signed, requests, value: opts.value ?? null, failSends: opts.failSends ?? 0 });
   await page.goto('/');
   await expect(page.getByRole('textbox', { name: 'Message Test room' })).toBeVisible();
 }
@@ -106,6 +107,74 @@ test('a request becomes a masked card; the value goes only to send_secret and le
     || [...document.querySelectorAll('input,textarea')].some((e) => (e as HTMLInputElement).value.includes(d))
     || JSON.stringify({ ...localStorage }).includes(d) || JSON.stringify({ ...sessionStorage }).includes(d), DUMMY);
   expect(page_has).toBe(false);
+});
+
+// T-335: the eye toggle. Attributes that keep the value out of keyboards and password managers hold in both states, and
+// the type flips on the same element: Chromium on Android only reports a visible password (no learning) for an input
+// that has been a password field.
+const keepsOut = async (field: import('@playwright/test').Locator) => {
+  for (const [a, v] of [['autocomplete', 'off'], ['autocorrect', 'off'], ['autocapitalize', 'off'], ['spellcheck', 'false'], ['data-1p-ignore', ''], ['data-lpignore', 'true']])
+    expect(await field.getAttribute(a), a).toBe(v);
+};
+test('the eye shows and hides what was typed; the value sent is unchanged, and it is hidden again after Send', async ({ page, isMobile }) => {
+  await boot(page, { messages: [msg('d'.repeat(64), request, now() - 60)], trusted: true, value: DUMMY, failSends: 1 });
+  const card = page.getByRole('region', { name: 'Secret request: Tailscale API token' });
+  const field = card.getByLabel('Value for Tailscale API token');
+  const eye = card.getByRole('button', { name: 'Show what you typed' });
+  const press = () => (isMobile ? eye.tap() : eye.click());
+  await expect(field).toHaveAttribute('type', 'password');
+  await expect(eye).toHaveAttribute('aria-pressed', 'false');
+  await keepsOut(field);
+  await field.fill(DUMMY);
+  await page.evaluate(() => { (window as any).theField = document.querySelector('.secret-form input'); });
+  await card.scrollIntoViewIfNeeded();
+  await shot(page, '07-typed-hidden');
+  await press();
+  await expect(field).toHaveAttribute('type', 'text');
+  await expect(eye).toHaveAttribute('aria-pressed', 'true');
+  await expect(field).toHaveValue(DUMMY);
+  await expect(field).toBeFocused(); // the tap doesn't take focus, so a phone keyboard stays up
+  await keepsOut(field);
+  expect(await page.evaluate(() => (window as any).theField === document.querySelector('.secret-form input'))).toBe(true);
+  await shot(page, '08-typed-shown');
+  await press();
+  await expect(field).toHaveAttribute('type', 'password');
+  await expect(eye).toHaveAttribute('aria-pressed', 'false');
+  await keepsOut(field);
+
+  // Shown, then the app goes to the background: hidden when it comes back.
+  await press();
+  await expect(field).toHaveAttribute('type', 'text');
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+    document.dispatchEvent(new Event('visibilitychange'));
+    delete (document as any).visibilityState;
+  });
+  await expect(field).toHaveAttribute('type', 'password');
+  await expect(eye).toHaveAttribute('aria-pressed', 'false');
+
+  // Shown, then Send; the first send fails, so the field comes back: empty and hidden.
+  await press();
+  await expect(field).toHaveAttribute('type', 'text');
+  await card.getByRole('button', { name: 'Send sealed' }).click();
+  await expect(card.getByRole('alert')).toHaveText('relay unreachable');
+  await expect(field).toHaveAttribute('type', 'password');
+  await expect(field).toHaveValue('');
+  await expect(eye).toHaveAttribute('aria-pressed', 'false');
+  expect(await page.evaluate(() => (window as any).sentValueMatches)).toBe(true);
+
+  // Shown again, then a send that goes through: the value is exactly what was typed, and the field is gone.
+  await field.fill(DUMMY);
+  await press();
+  await card.getByRole('button', { name: 'Send sealed' }).click();
+  await expect(card.getByText('Sealed and sent to Uni')).toBeVisible();
+  await expect(card.locator('input')).toHaveCount(0);
+  const sends = (await calls(page)).filter((x) => x.cmd === 'send_secret');
+  expect(sends.map((x) => x.args)).toEqual([1, 2].map(() => ({ channel: 'test', request: 'd'.repeat(64), value: `<${DUMMY.length} chars>` })));
+  expect(await page.evaluate(() => (window as any).sentValueMatches)).toBe(true);
+  expect(JSON.stringify(await calls(page))).not.toContain(DUMMY);
+  expect(await page.evaluate((d) => document.documentElement.outerHTML.includes(d) || JSON.stringify({ ...localStorage }).includes(d)
+    || JSON.stringify({ ...sessionStorage }).includes(d), DUMMY)).toBe(false);
 });
 
 test('a stored receipt flips the card; Forget asks Uni to delete it', async ({ page }) => {

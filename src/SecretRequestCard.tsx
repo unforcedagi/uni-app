@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { DoneCard, PendingCard, QuietCard } from "./CompactCard";
+import { EyeIcon, EyeOffIcon } from "./Icons";
 import { fingerprint, type SecretReceipt, type SecretRequest } from "./secretRequest";
 
 // T-176: Uni's request for a secret, as a card with a masked field. The value goes only to the `send_secret`
@@ -11,6 +12,9 @@ import { fingerprint, type SecretReceipt, type SecretRequest } from "./secretReq
 // doesn't verify gets no field and no Trust button. Trust is offered only while no key is pinned: once one is, a request
 // signed by any other key (a member who calls itself "Uni") gets a warning, not a button. `send_secret` re-checks both
 // in Rust, and `secret_pin` refuses a second key.
+// T-335: the eye button shows what was typed, to check it. It starts hidden and hides again on Send and when the app goes
+// to the background. Only the same input's type flips (never a remount): Chromium on Android then tells the keyboard it's a
+// visible password (TYPE_TEXT_VARIATION_VISIBLE_PASSWORD), so suggestions and learning stay off while it's shown.
 
 type Props = {
   channel: string; requestRef: string; authorName: string; receipts: (author: string, rid: string) => SecretReceipt | undefined;
@@ -26,6 +30,12 @@ export function SecretRequestCard({ channel, requestRef, authorName, receipts, p
   const [value, setValue] = useState("");
   const [phase, setPhase] = useState<"idle" | "sending" | "sent" | "forgetting" | "forget-sent">("idle");
   const [error, setError] = useState<string | null>(null);
+  const [shown, setShown] = useState(false);
+  useEffect(() => {
+    const hide = () => { if (document.visibilityState === "hidden") setShown(false); };
+    document.addEventListener("visibilitychange", hide);
+    return () => document.removeEventListener("visibilitychange", hide);
+  }, []);
   useEffect(() => {
     let live = true;
     invoke<Verified>("secret_request", { channel, request: requestRef })
@@ -45,6 +55,7 @@ export function SecretRequestCard({ channel, requestRef, authorName, receipts, p
   const send = async () => {
     const v = value;
     setValue("");
+    setShown(false);
     setError(null);
     setPhase("sending");
     try {
@@ -108,9 +119,15 @@ export function SecretRequestCard({ channel, requestRef, authorName, receipts, p
             : <p className="secret-status warn" role="status">This isn't the key you trust for secrets, whatever its name says. Don't
                 answer it here. Only the key you trusted before may ask; another one goes in the app's secret-requesters file by hand.</p>
           : <form className="secret-form" onSubmit={(e) => { e.preventDefault(); if (value) void send(); }}>
-              <input type="password" aria-label={`Value for ${request.label}`} placeholder="Paste or type it here" value={value}
+              <input id={`secret-${requestRef}`} type={shown ? "text" : "password"} aria-label={`Value for ${request.label}`}
+                placeholder="Paste or type it here" value={value}
                 onChange={(e) => setValue(e.target.value)} autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}
                 data-1p-ignore="" data-lpignore="true" disabled={phase === "sending"} />
+              <button type="button" className="secret-reveal" aria-label="Show what you typed" aria-pressed={shown}
+                aria-controls={`secret-${requestRef}`} title={shown ? "Hide" : "Show"} disabled={phase === "sending"}
+                onPointerDown={(e) => e.preventDefault()} onClick={() => setShown((v) => !v)}>
+                {shown ? <EyeOffIcon /> : <EyeIcon />}
+              </button>
               <button type="submit" disabled={!value || phase === "sending"}>{phase === "sending" ? "Sealing…" : "Send sealed"}</button>
             </form>}
       {errorLine}
