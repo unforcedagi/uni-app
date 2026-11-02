@@ -48,6 +48,8 @@ python3 -I -m http.server 18305 --bind 127.0.0.1 -d "$OUT/channel" > "$OUT/chann
 
 export HOME=$FAKE XDG_DATA_HOME=$FAKE/data XDG_CONFIG_HOME=$FAKE/config XDG_CACHE_HOME=$FAKE/cache XDG_STATE_HOME=$FAKE/state
 mkdir -p "$XDG_DATA_HOME" "$XDG_CONFIG_HOME"
+# No real Parachute hub: the vault points at a closed local port.
+mkdir -p "$XDG_DATA_HOME/org.unforced.uni" && echo '{"hub":"http://127.0.0.1:9","vault":"uni"}' > "$XDG_DATA_HOME/org.unforced.uni/vault.json"
 export UNI_RELAY_URL=ws://127.0.0.1:9 UNI_NO_KEYRING=1
 export WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 WLR_RENDERER=pixman WLR_HEADLESS_OUTPUTS=1
 export WEBKIT_DISABLE_COMPOSITING_MODE=1 WEBKIT_DISABLE_DMABUF_RENDERER=1 GDK_BACKEND=wayland

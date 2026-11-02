@@ -1294,6 +1294,18 @@ mod tests {
     }
 
     #[test]
+    fn a_document_of_an_installed_interface_never_gets_unis_powers_during_a_switch() {
+        let ota = Ota::new();
+        let garden = Choice { iface: "garden".into(), bundle: None, dir: None, grants: Some(vec!["rooms.read".into(), "rooms.send".into()]) };
+        ota.set(garden);
+        assert!(ota.permit("journal_save_text").is_err());
+        // Garden steps aside (ota_reject) or asks for Uni (iface_use): the shell swaps what it serves, then reloads.
+        // Until the reload lands, Garden's document is still running and can still call the shell (Codex iface-r1 P1).
+        ota.set(Choice::built_in());
+        assert!(ota.permit("journal_save_text").is_err(), "Garden's still-running document got a Uni-only command");
+    }
+
+    #[test]
     fn only_https_or_local_http_urls() {
         let ok = |s: &str| allowed_url(&url::Url::parse(s).unwrap());
         assert!(ok("https://example.com/web/manifest.json"));
