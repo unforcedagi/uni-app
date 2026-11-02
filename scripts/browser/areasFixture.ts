@@ -513,6 +513,26 @@ Two proposals wait on a scope decision.
       for (const h of w.__listeners['uni://live'] ?? []) w.__cbs[h]?.({ event: 'uni://live', id: 1, payload: { kind: 'message', channel, author: m.author } });
       return m.ref;
     };
+    // T-335 chat feel: Uni's side of a turn, as the gateway does it. `__react`: a reaction on a stored message (by default on your newest
+    // message in the room, by the room's Uni), announced like the live event. `__editMsg`: a message edited in place (a progress ping the
+    // gateway rewrites as it works).
+    w.__msgs = msgs;
+    w.__react = (channel: string, emoji: string, ref: string | null = null, by = 'c'.repeat(64)) => {
+      const list = msgs[channel] ?? [];
+      const m = ref ? list.find((x: any) => x.ref === ref) : [...list].reverse().find((x: any) => x.author === U);
+      if (!m) return null;
+      const r = m.reactions.find((x: any) => x.emoji === emoji);
+      if (r) { r.count += 1; (r.by ??= []).push({ pubkey: by, ts: Math.floor(Date.now() / 1000) }); }
+      else m.reactions.push({ emoji, count: 1, mine: by === U ? 'react-' + m.ref : null, by: [{ pubkey: by, ts: Math.floor(Date.now() / 1000) }] });
+      for (const h of w.__listeners['uni://live'] ?? []) w.__cbs[h]?.({ event: 'uni://live', id: 1, payload: { kind: 'message', channel, author: by } });
+      return m.ref;
+    };
+    w.__editMsg = (channel: string, ref: string, body: string) => {
+      const m = (msgs[channel] ?? []).find((x: any) => x.ref === ref);
+      if (!m) return;
+      m.body = body; m.edited = true;
+      for (const h of w.__listeners['uni://live'] ?? []) w.__cbs[h]?.({ event: 'uni://live', id: 1, payload: { kind: 'edit', channel, author: m.author } });
+    };
     if (d.tasks) for (const n of notes) { if (n.id === 'a-techne') n.metadata = { ...n.metadata, room: 'techne' }; if (n.id === 'p-cohere') n.metadata = { ...n.metadata, room: 'cohere' }; }
     // T-86 tasks: the vault's task and decision notes (node by path), with compare-and-set transitions.
     const T0 = '2026-10-10T08:00:00.000Z';
@@ -812,6 +832,13 @@ Two proposals wait on a scope decision.
           case 'journal_flush': return w.__flushReport ?? { sent: [], remaining: 0, error: null };
           case 'refresh': if (d.identityDelay) await new Promise((r) => setTimeout(r, d.identityDelay)); return { pubkey: U, total_items: 0, channel_errors: {}, truncated_channels: [] };
           // T-335: like the store: the room's marker moves to its newest message, so nothing in it is unread (and the rooms list is re-read)
+          // T-335 chat feel: a reaction made from the app (toggled: a second one with the same emoji takes yours back), and a note saved
+          case 'react_message': { const m = (msgs[args.channel] ?? []).find((x: any) => x.ref === args.target); if (!m) throw 'reaction target is not cached in this room';
+            const r = m.reactions.find((x: any) => x.emoji === args.emoji);
+            if (r?.mine) { r.count -= 1; r.mine = null; if (!r.count) m.reactions.splice(m.reactions.indexOf(r), 1); }
+            else if (r) { r.count += 1; r.mine = 'react-' + m.ref; } else m.reactions.push({ emoji: args.emoji, count: 1, mine: 'react-' + m.ref, by: [{ pubkey: U, ts: Math.floor(Date.now() / 1000) }] });
+            return null; }
+          case 'vault_create': { if (w.__createFails) throw 'vault unreachable'; const id = 'note-' + w.__calls.length; notes.push({ id, path: args.path, extension: 'md', content: args.content, updatedAt: new Date().toISOString() }); return { id, path: args.path }; }
           case 'mark_read': { if (d.unread) { const r = rooms.find((x) => x.id === args.channel); if (r) { r.unread = 0; r.mentions = false; } } return null; }
           default: return null;
         }
