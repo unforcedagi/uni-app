@@ -1951,7 +1951,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     try {
       const note = await invoke<{ id: string; path: string } | null>("vault_create", { vault, path, content });
       invalidatePaths(vault);
-      setToast(`Saved as a note: ${note?.path ?? path}`);
+      setToast(`Saved as a note in “${(note?.path ?? path).split("/")[0]}”`);
     } catch (e) { setError(`Couldn't save the note: ${e}`); }
   }
   /** The place the room is, as the person knows it (the area's name in an area's chat). */
@@ -2189,6 +2189,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   if (currentView && fetchedView === currentView && known.current.view !== currentView) {
     known.current = { view: currentView, refs: new Set(messages.map((m) => m.ref)), ts: messages.reduce((t, m) => Math.max(t, m.ts), 0), arrived: new Set() };
   }
+  const shownReactions = (m: Message) => m.author !== identity ? m.reactions : m.reactions.filter((r) => r.mine || !/^👀️?$/u.test(r.emoji));
   const renderMessage = (m: Message, inThread: boolean, prev?: Message, newest = false) => {
     if (!inThread && feel.hidden.has(m.ref)) return null;
     const command = m.author === identity && !(inThread && m.ref === root) ? commandOf(m.body) : null;
@@ -2213,7 +2214,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
         {editing === m.ref ? <InlineEditor key={m.ref} initial={m.body} onSave={(body) => actions.current.saveEdit(m, body)} onCancel={() => actions.current.cancelEdit()} /> : promptView(m) ?? secretView(m) ?? <Body body={attachmentBody(m.body, m.media, relayOrigin)} mentions={m.mentions} me={identity} edited={m.edited} />}
         <Attachments body={m.body} media={m.media} />
         {decisionCards(m, inThread)}
-        {m.reactions.length > 0 && <div className="reactions" aria-label="Reactions">{m.reactions.map((r) => <span key={r.emoji} className={`pill ${r.mine ? "mine" : ""}`} aria-label={`${emojiLabel(r.emoji)} ${r.count}${r.mine ? ", including yours" : ""}`}>{emojiLabel(r.emoji)} <span>{r.count}</span></span>)}</div>}
+        {/* T-335 chat feel: Uni's 👀 on your message is said by the status line and the work receipt, not as a pill */}
+        {shownReactions(m).length > 0 && <div className="reactions" aria-label="Reactions">{shownReactions(m).map((r) => <span key={r.emoji} className={`pill ${r.mine ? "mine" : ""}`} aria-label={`${emojiLabel(r.emoji)} ${r.count}${r.mine ? ", including yours" : ""}`}>{emojiLabel(r.emoji)} <span>{r.count}</span></span>)}</div>}
         {!inThread && m.reply_count > 0 && <button className="thread-summary" onClick={() => actions.current.openThread(m)} aria-label={`View thread with ${m.reply_count} ${m.reply_count === 1 ? "reply" : "replies"}`}>💬 {m.reply_count} {m.reply_count === 1 ? "reply" : "replies"}{m.last_reply_ts ? <span> · last {time(m.last_reply_ts)}</span> : null}</button>}
         {m.ref === sentRef && <span className="msg-receipt">Sent</span>}
         {/* T-335 chat feel: a quiet row instead of a ⋯ on every message: always shown on the latest reply, on hover or focus elsewhere; a

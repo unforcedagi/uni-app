@@ -24,7 +24,9 @@ const STOP = new Set(("the and for with that this from have has had was were are
   "there here what when where which who why how can could would should will just like some more most much many any all not but also its it's " +
   "let lets let's me my mine we us his her him she he i'm i've i'd i'll one two get got make made need needs want wants please thanks thank " +
   "today tomorrow yesterday now soon later again still yet very really maybe perhaps sure okay ok yes no do does did done doing going go " +
-  "see say said tell ask asked new old good great back way time day week next last first other same each every both").split(/\s+/));
+  "see say said tell ask asked new old good great back way time day week next last first other same each every both " +
+  // T-335 chat feel: words that say nothing about a place (a route on one of them was "sure" by accident)
+  "before after quick quickly something anything nothing everything thing things bit little lot stuff while since until").split(/\s+/));
 
 /** The words of a text that can tell places apart: lower case, three letters or more, not a common word, a plural folded to its singular. */
 export function routeWords(text: string): string[] {

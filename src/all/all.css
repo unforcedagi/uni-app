@@ -96,3 +96,6 @@
 :root[data-screen="ink"] .all-chip.chosen { background: #000; color: #fff; }
 :root[data-screen="ink"] .all-chip.suggested { border: 1.5px dashed #000; }
 :root[data-screen="ink"] .all-place::before { background: #000; }
+.all-msg.run { flex-direction: column; }
+.all-msg.mine.run { align-items: flex-end; }
+.all-run strong { font: 600 13px/1.3 var(--g-font-ui); color: var(--g-ink-2); }

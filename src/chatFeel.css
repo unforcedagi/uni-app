@@ -42,6 +42,8 @@
 
 /* the space under an anchored question; "More below" sits above the composer, never over the text */
 .anchor-space { height: 0; flex: none; }
+.composer .jump-latest.more-below { position: static; transform: none; display: flex; width: fit-content; margin: 0 auto 8px; box-shadow: none; }
+.composer .jump-latest.more-below:active:not(:disabled) { transform: scale(.97); }
 
 /* ── Message actions: a quiet row, never a ⋯ on every message ── */
 .message-content { position: relative; }
@@ -120,7 +122,7 @@
   .composer .compose-row.empty .send:not(.stop) { display: none; }
   .composer .compose-row:not(.empty) .mic:not(.recording), .composer .compose-row.empty:has(.stop) .mic:not(.recording) { display: none; }
   /* the "Uni listening" ring sits inside the field, on its left */
-  .composer .compose-row .compose-uni { position: absolute; left: 48px; bottom: 4px; z-index: 1; height: 44px; }
+  .composer .compose-row .compose-uni { position: absolute; left: 48px; bottom: 6px; z-index: 1; height: 44px; }
   .composer .compose-row:has(.compose-uni) textarea { padding-left: 36px; }
 }
 

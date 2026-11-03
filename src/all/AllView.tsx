@@ -170,9 +170,10 @@ const FeedRow = memo(function FeedRow({ m, place, mine, me, run, named, onOpen }
   const clamp = !mine && isLong(m.body);
   return <article className={`message all-msg${mine ? " mine" : ""}${run ? " run" : " grouped"}${clamp ? " clamped" : ""}`} data-ref={m.ref} data-room={m.channel}
     onClick={(e) => { if (!(e.target instanceof Element) || !e.target.closest("a, button, summary, input, textarea")) onOpen(m.channel, m.ref); }}>
+    {run && <div className="all-run"><button type="button" className="all-place" style={{ ["--room-tint" as string]: tint(m.channel) }} aria-label={`Open ${place}, at this message`} onClick={() => onOpen(m.channel, m.ref)}>{place}</button>
+      {!mine && <strong>{m.author_name}</strong>}<time>{clock(m.ts)}</time></div>}
     <div className="message-content">
-      {run && <div className="all-run"><button type="button" className="all-place" style={{ ["--room-tint" as string]: tint(m.channel) }} aria-label={`Open ${place}, at this message`} onClick={() => onOpen(m.channel, m.ref)}>{place}</button><time>{clock(m.ts)}</time></div>}
-      {named && !mine && <div className="all-meta"><strong>{m.author_name}</strong>{!run && <time>{clock(m.ts)}</time>}</div>}
+      {named && !run && !mine && <div className="all-meta"><strong>{m.author_name}</strong><time>{clock(m.ts)}</time></div>}
       {m.body.trim() ? <Body body={m.body} mentions={m.mentions ?? []} me={me} edited={m.edited} />
         : <p className="all-file">{m.media?.length ? `${m.media.length === 1 ? "A file" : `${m.media.length} files`}: open the room to see ${m.media.length === 1 ? "it" : "them"}` : "(nothing to show here)"}</p>}
       {clamp && <button type="button" className="all-rest" onClick={() => onOpen(m.channel, m.ref)}>Read the rest in {place} ›</button>}
@@ -189,6 +190,14 @@ export function AllFeed({ rooms, byRoom, loaded, failed, me, onOpen }: { rooms: 
   const list = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
   useLayoutEffect(() => { const el = list.current; if (el && stick.current) el.scrollTop = el.scrollHeight; }, [feed]);
+  // the feed gets shorter (the route row appearing over the composer): still at its newest if it was
+  useEffect(() => {
+    const el = list.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => { if (stick.current) el.scrollTop = el.scrollHeight; });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   const rows: React.ReactNode[] = [];
   let prev: Message | null = null;
   for (const m of feed) {
