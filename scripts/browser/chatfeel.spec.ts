@@ -413,3 +413,19 @@ test('review: on touch, your own message can be deleted from its sheet (a second
   await expect.poll(() => calls(page, 'delete_message')).toEqual([{ channel: 'ch-kiln', target: 'k2' }]);
   await expect(sheet).toHaveCount(0);
 });
+
+// T-335 /code-review: the relay took it but this device's copy failed: it was sent, so the text stays gone; Uni at work on someone
+// else's question still says so; Continue goes once something has been said since the stop
+test('review: a send the relay accepted is sent; a ping in someone else\'s turn is a line in words', async ({ page }) => {
+  await boot(page);
+  await openRoom(page, 'Kiln Studio');
+  await page.evaluate(() => { const w = window as any; w.__acceptOnce = 1; w.__extraInvoke = async (cmd: string) => { if (cmd === 'post_message' && w.__acceptOnce-- > 0) { await new Promise((r) => setTimeout(r, 200)); throw { accepted: true, eventId: 'e'.repeat(64), message: 'accepted, local copy missing' }; } return undefined; }; });
+  await sendAndLook(page, 'Already on the relay');
+  await page.waitForTimeout(600);
+  await expect(box(page)).toHaveValue('');
+  await expect(page.locator('.composer .error')).toHaveCount(0);
+  // someone else's turn: Rowan asked, Uni pings
+  await page.evaluate(() => { (window as any).__arrive('ch-kiln', 'Rowan', 'Uni, can you weigh the clay?'); (window as any).__arrive('ch-kiln', 'Uni', '⏳ Working — 2 min — iteration 3/90, terminal'); });
+  await expect(status(page)).toContainText('Running a command');
+  await expect(list(page).getByText(/⏳ Working/)).toHaveCount(0);
+});

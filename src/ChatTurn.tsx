@@ -113,6 +113,7 @@ export function useLongPress(list: HTMLElement | null, onPress: (ref: string) =>
     let timer = 0, x = 0, y = 0, top = 0, fired = false;
     const cancel = () => { window.clearTimeout(timer); timer = 0; };
     const down = (e: PointerEvent) => {
+      fired = false; // a mouse's right-click after a long press is the browser's own again
       if (e.pointerType !== "touch" || !(e.target instanceof Element)) return;
       if (e.target.closest("button, a, summary, input, textarea, .msg-actions")) return;
       const art = e.target.closest<HTMLElement>("article.message[data-ref]");

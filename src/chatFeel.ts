@@ -81,7 +81,7 @@ export function statusWords(phase: TurnPhase, since: number, nowS: number, ping:
 }
 
 /** The room's newest message when it is a ping (the one the status line reads while the turn is open). */
-export function livePing(messages: Msg[]): Msg | null {
+export function livePing<M extends Msg>(messages: M[]): M | null {
   const m = messages[messages.length - 1];
   return m && isWorkerStatus(m.body) ? m : null;
 }

@@ -526,15 +526,6 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const [limit, setLimit] = useState(300);
   const relayOrigin = useRelayOrigin();
   const [older, setOlder] = useState<"idle" | "loading" | "done">("idle");
-  /** The message whose ⋯ menu is open (T-124: nothing is shown under a message by default). */
-  const [menuFor, setMenuFor] = useState<string | null>(null);
-  useEffect(() => {
-    if (!menuFor) return;
-    const away = (e: PointerEvent) => { if (!(e.target instanceof Element) || !e.target.closest(".message-more")) setMenuFor(null); };
-    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") setMenuFor(null); };
-    document.addEventListener("pointerdown", away); document.addEventListener("keydown", esc);
-    return () => { document.removeEventListener("pointerdown", away); document.removeEventListener("keydown", esc); };
-  }, [menuFor]);
   // Our own message currently open in the inline editor.
   const [editing, setEditing] = useState<string | null>(null);
   // T-212: a message that names a decision (`uni:<id>`, or a room's `[decision T-NN]` marker) carries its card, tappable in the chat
@@ -912,7 +903,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   /** T-335 chat feel: a question just sent is held 16 px under the top of the chat while its answer grows below it (the view never follows
    *  the text down); `spaceRef` is the blank room below the content that lets it sit there. Held until the room changes or the reader asks
    *  for the end ("More below"). */
-  const anchor = useRef<{ view: string; ref: string | null; placed: boolean; /** where it was placed (scroll coordinates) */ top?: number; /** the reader scrolled: no more holding */ free?: boolean } | null>(null);
+  const anchor = useRef<{ view: string; ref: string | null; placed: boolean; /** placing it waits for the next frame */ due?: boolean; /** where it was placed (scroll coordinates) */ top?: number; /** the reader scrolled: no more holding */ free?: boolean } | null>(null);
   const spaceRef = useRef<HTMLDivElement>(null);
   const [moreBelow, setMoreBelow] = useState(false);
   /** The refs in the view when its first read came in, and the newest time among them: a later message arrived live, and settles in. */
@@ -1186,13 +1177,13 @@ function Conversations({ onForget }: { onForget: () => void }) {
   // T-335 chat feel: the count is read as the room opens (its read mark comes a moment later); a thread has no New line
   useLayoutEffect(() => {
     const view = channel ? `${channel}|${root}` : null;
-    anchor.current = null; setMoreBelow(false); setSheetFor(null);
+    anchor.current = null; setMoreBelow(false); setSheetFor(null); setNewLine(null);
     const n = channel && !root ? roomsRef.current.find((r) => r.id === channel)?.unread ?? 0 : 0;
     unreadAtOpen.current = view && n > 0 ? { view, unread: n } : null;
   }, [channel, root]);
   // New room: back to the default window; older pages load on demand.
   // T-200: the room a note was opened as a page from comes back with the older messages it had loaded, so its spot is there to return to
-  useEffect(() => { const spot = returnSpot.current; setLimit(spot && channel && spot.view.startsWith(`${channel}|`) ? spot.limit : 300); setOlder("idle"); setMenuFor(null); setEditing(null); asideAhead.current.clear(); }, [channel]);
+  useEffect(() => { const spot = returnSpot.current; setLimit(spot && channel && spot.view.startsWith(`${channel}|`) ? spot.limit : 300); setOlder("idle"); setEditing(null); asideAhead.current.clear(); }, [channel]);
 
   useEffect(() => {
     if (!channel) { setMembers([]); return; }
@@ -1283,18 +1274,25 @@ function Conversations({ onForget }: { onForget: () => void }) {
     anchor.current = { view, ref: null, placed: false };
     stickToEnd.current = false; settleUntil.current = 0; pinned.current = null;
   }
-  // the question, once drawn: the space under it is sized, then it glides up (220 ms; a jump when calm)
+  // the question, once drawn: the space under it is sized, then it glides up (220 ms; a jump when calm). In the next frame, before it is
+  // painted (one redraw on the Daylight): the send itself never waits for the layout this reads
   useLayoutEffect(() => {
-    const list = listRef.current, a = anchor.current;
-    if (!list || !a || a.placed || a.view !== currentView || restoredView.current !== currentView) return;
-    // one read of the layout, then the writes (the space, the scroll): the send's frame pays for one layout, not three
-    const box = anchorBox(list), space = spaceRef.current;
-    if (!box || !space) return;
-    a.placed = true;
-    a.top = box.top;
-    space.style.height = `${Math.round(Math.max(0, list.clientHeight - ANCHOR_GAP - (box.end - box.top)))}px`;
-    gliding.current = Date.now() + 400;
-    easeScroll(list, box.top - ANCHOR_GAP, 220, calmMotion());
+    const a = anchor.current;
+    if (!a || a.placed || a.due || a.view !== currentView || restoredView.current !== currentView) return;
+    a.due = true;
+    requestAnimationFrame(() => {
+      a.due = false;
+      const list = listRef.current;
+      if (!list || anchor.current !== a || a.placed || restoredView.current !== a.view) return;
+      // one read of the layout, then the writes (the space, the scroll)
+      const box = anchorBox(list), space = spaceRef.current;
+      if (!box || !space) return;
+      a.placed = true;
+      a.top = box.top;
+      space.style.height = `${Math.round(Math.max(0, list.clientHeight - ANCHOR_GAP - (box.end - box.top)))}px`;
+      gliding.current = Date.now() + 400;
+      easeScroll(list, box.top - ANCHOR_GAP, 220, calmMotion());
+    });
   });
   // T-335 chat feel: a room opened on unread lands on its first unread message under the New line, once the store has answered
   useLayoutEffect(() => {
@@ -1529,6 +1527,9 @@ function Conversations({ onForget }: { onForget: () => void }) {
     : out?.toUni ? { phase: "waiting", since: out.at }
     : askedAt !== undefined && nowS - askedAt < 1800 ? { phase: "waiting", since: askedAt } : null;
   const turnPing = turn?.phase === "working" ? livePing(messages)?.body ?? null : null;
+  // a live ping in a turn that isn't yours (someone else asked): no message of its own either, so the line says it, in words
+  const otherPing = !turn && viewShown ? livePing(messages) : null;
+  const pingLine = otherPing && !staleStatus(otherPing, nowS, true) ? otherPing : null;
   /** The message whose receipt reads "Sent" (posted, not yet picked up). */
   const sentRef = turn?.phase === "waiting" && ask && !out ? ask.ref : null;
   // with nothing else arriving, look again now and then, so work past its hour with no live ping is let go
@@ -1920,6 +1921,15 @@ function Conversations({ onForget }: { onForget: () => void }) {
       await loadRooms();
       setStatus(recipients.length ? `Message sent · notified ${recipients.length}` : "Message sent");
     } catch (e) {
+      // the relay has it and only this device's copy failed: it was sent (putting the text back would invite a second one)
+      if (relayAccepted(e)) {
+        const ref = (e as { eventId: string }).eventId;
+        changePending(key, (items) => items.filter((item) => !sentIds.includes(item.id)));
+        landed(key, sendView, snapshot, ref, toUni);
+        if ((draftRevisions.current.get(key) ?? 0) === cleared) storeDraft(key, "", new Map());
+        setTick((n) => n + 1);
+        return;
+      }
       setError(String(e));
       setOutgoing(null);
       releaseAnchor(sendView);
@@ -1970,6 +1980,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       setTick((n) => n + 1);
       void loadRooms().catch(() => {});
     } catch (e) {
+      if (relayAccepted(e)) { landed(key, view, body, (e as { eventId: string }).eventId, toUni && command !== "stop"); setTick((n) => n + 1); return; }
       setOutgoing(null); setError(`Couldn't send: ${e}`);
       releaseAnchor(view);
     } finally { postingRef.current = false; setPosting(false); }
@@ -1987,15 +1998,20 @@ function Conversations({ onForget }: { onForget: () => void }) {
     const d = new Date(m.ts * 1000), two = (n: number) => String(n).padStart(2, "0");
     const day = `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())} ${two(d.getHours())}${two(d.getMinutes())}`;
     const words = m.body.replace(/[#*_`>|[\]()~]/g, " ").replace(/[\\/:?"<>]/g, " ").split(/\s+/).filter(Boolean).slice(0, 6).join(" ");
-    let path = `Saved from chat/${day} ${words || "message"}`.trim();
-    if (validateNotePath(path)) path = `Saved from chat/${day} message`;
+    if (savedNotes.current.has(m.ref)) { setToast("Already saved as a note"); return; }
+    const tag = m.ref.slice(-4);
+    let path = `Saved from chat/${day} ${words || "message"} ${tag}`.trim();
+    if (validateNotePath(path)) path = `Saved from chat/${day} message ${tag}`;
     const content = `${m.body}\n\n— ${m.author_name} in ${placeRef.current}, ${time(m.ts)}\n`;
     try {
       const note = await invoke<{ id: string; path: string } | null>("vault_create", { vault, path, content });
       invalidatePaths(vault);
+      savedNotes.current.add(m.ref);
       setToast(`Saved as a note in “${(note?.path ?? path).split("/")[0]}”`);
     } catch (e) { setError(`Couldn't save the note: ${e}`); }
   }
+  /** The messages saved as notes from this device this session (one note each). */
+  const savedNotes = useRef(new Set<string>());
   /** The place the room is, as the person knows it (the area's name in an area's chat). */
   const placeRef = useRef("this room");
 
@@ -2033,7 +2049,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
             <NoteOpener.Provider value={openFromChat}>{timeline}</NoteOpener.Provider>
             {out && (outCommand ? <p className="chat-note" data-outgoing="true">{outCommand === "stop" ? "Stopping Uni…" : "Asking Uni to try again…"}</p>
               : <article className="message mine outgoing" aria-busy={!out.ref} data-outgoing="true"><span className="message-avatar" aria-hidden="true" /><div className="message-content"><div className="message-meta"><time>{out.ref ? clock(out.at) : "Sending…"}</time></div><p className="outgoing-body">{out.body}</p>{out.toUni && <span className="msg-receipt">{out.ref ? "Sent" : "Sending"}</span>}</div></article>)}
-            {turn && <StatusLine phase={turn.phase} since={turn.since} ping={turnPing} place={placeRef.current} />}
+            {turn ? <StatusLine phase={turn.phase} since={turn.since} ping={turnPing} place={placeRef.current} />
+              : pingLine && <StatusLine phase="working" since={pingLine.ts} ping={pingLine.body} place={placeRef.current} />}
             {chips && <QuickReplies answers={chips} onPick={(a) => void postAs(a)} />}
             <div ref={scrollEnd} />
             <div className="anchor-space" ref={spaceRef} aria-hidden="true" />
@@ -2109,6 +2126,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   /** Your own message whose Delete in the sheet was tapped once: the sheet opens again asking for the second tap. */
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const closeSheet = useCallback(() => { setSheetFor(null); setConfirmDelete(null); }, []);
+  useEffect(() => { if (!sheetFor) setConfirmDelete(null); }, [sheetFor]);
   rowMaker.current = (m) => ({ actions: messageActions(m, false),
     tail: m.author === identity ? <DeleteButton key={`del-${m.ref}`} label="your message" onDelete={() => actions.current.deleteOwn(m)} /> : undefined });
   useLongPress(listEl, (ref) => { if (messages.some((m) => m.ref === ref)) setSheetFor(ref); });
@@ -2126,7 +2144,9 @@ function Conversations({ onForget }: { onForget: () => void }) {
       { id: "delete", label: confirmDelete === m.ref ? "Tap again to delete" : "Delete", aria: confirmDelete === m.ref ? "Tap again to delete your message" : "Delete your message", icon: ICONS.del,
         run: () => { if (confirmDelete === m.ref) { setConfirmDelete(null); void actions.current.deleteOwn(m); } else { setConfirmDelete(m.ref); setSheetFor(m.ref); } } }] : [])];
     const up = m.reactions.find((r) => r.emoji === "👍");
-    const latest = m.ref === latestReply && uniInRoom && !isThread;
+    const uniPk = findUniMember(members)?.pubkey;
+    const byPerson = m.author !== uniPk && members.some((x) => x.pubkey === m.author);
+    const latest = m.ref === latestReply && uniInRoom && !isThread && !byPerson;
     return [
       ...(inSheet ? [] : [copy]),
       ...(latest ? [{ id: "retry", label: "Try again", aria: "Ask Uni to try again", icon: ICONS.retry, run: () => void postAs(RETRY) }] : []),
@@ -2217,20 +2237,28 @@ function Conversations({ onForget }: { onForget: () => void }) {
   // your stop is said by the Stopped row; the newest reply from someone else has its actions always shown.
   const feel = useMemo(() => {
     const hidden = new Set<string>(), receipts = new Map<string, Receipt>();
-    let answered = false, latest: string | null = null;
+    // each message's previous one that isn't a ping, in one pass forward
+    const prevTalk: (Message | undefined)[] = [];
+    let last: Message | undefined;
+    for (const m of messages) { prevTalk.push(last); if (!isWorkerStatus(m.body)) last = m; }
+    let answered = false, latest: string | null = null, lastStop: string | null = null, spokeSince = false;
     for (let i = messages.length - 1; i >= 0; i--) {
       const m = messages[i];
       if (isWorkerStatus(m.body)) { if (answered || !staleStatus(m, Date.now() / 1000, i === messages.length - 1)) hidden.add(m.ref); continue; }
+      const prev = prevTalk[i];
+      const stopReply = m.author !== identity && isStopReply(m.body) && !!prev && prev.author === identity && commandOf(prev.body) === "stop";
+      // the newest stop, while nothing has been said since (the gateway's own "Stopped" aside), offers Continue
+      if (lastStop === null && !spokeSince && m.author === identity && commandOf(m.body) === "stop") lastStop = m.ref;
+      if (!stopReply) spokeSince = true;
       if (m.author !== identity) {
         answered = true;
-        const prev = messages.slice(0, i).reverse().find((x) => !isWorkerStatus(x.body));
-        if (isStopReply(m.body) && prev && prev.author === identity && commandOf(prev.body) === "stop") { hidden.add(m.ref); continue; }
+        if (stopReply) { hidden.add(m.ref); continue; }
         if (!latest && !isMaintenance(m.body)) latest = m.ref;
         const r = workReceipt(messages, i, identity);
         if (r) receipts.set(m.ref, r);
       } else answered = false;
     }
-    return { hidden, receipts, latest };
+    return { hidden, receipts, latest, lastStop };
   }, [messages, identity]);
   const latestReply = feel.latest;
   // what the view held when its first read came in; anything newer arrived live, and settles in
@@ -2241,7 +2269,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const renderMessage = (m: Message, inThread: boolean, prev?: Message, newest = false) => {
     if (!inThread && feel.hidden.has(m.ref)) return null;
     const command = m.author === identity && !(inThread && m.ref === root) ? commandOf(m.body) : null;
-    if (command === "stop") return <p key={m.ref} data-ref={m.ref} className="chat-note uni-stopped">You stopped Uni.{m.ref === lastOwnMessage(messages, identity)?.ref
+    if (command === "stop") return <p key={m.ref} data-ref={m.ref} className="chat-note uni-stopped">You stopped Uni.{feel.lastStop === m.ref
       && <button type="button" className="chat-note-go" onClick={() => actions.current.postAs(CONTINUE)}>Continue</button>}</p>;
     if (command === "retry") return <p key={m.ref} data-ref={m.ref} className="chat-note uni-retried">You asked Uni to try again.</p>;
     // r18: a progress ping from hours or days ago is folded away as a past update, never the room's live status
@@ -2318,7 +2346,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     {currentView && fetchedView === currentView && channel && roomDecisions(channel, messages)}
   </>,
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  [messages, identity, menuFor, decisions.version, root, older, roomName, editing, focusRef, relayOrigin, fetchedView, failedView, currentView, busy, synced, secretRequesters, secretReceipts, waitingKey, endedKey, feel, sentRef, newLine, uniInRoom]);
+  [messages, identity, decisions.version, root, older, roomName, editing, focusRef, relayOrigin, fetchedView, failedView, currentView, busy, synced, secretRequesters, secretReceipts, waitingKey, endedKey, feel, sentRef, newLine, uniInRoom]);
 
   const topNote = notes[notes.length - 1];
   // A top-level note Back closes its tab and returns to the last used tab.
