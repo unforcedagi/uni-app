@@ -429,3 +429,19 @@ test('review: a send the relay accepted is sent; a ping in someone else\'s turn 
   await expect(status(page)).toContainText('Running a command');
   await expect(list(page).getByText(/⏳ Working/)).toHaveCount(0);
 });
+
+test('review: after your own stop, a late ping says nothing; someone else\'s wait never says "you can leave"', async ({ page }) => {
+  await boot(page);
+  await openRoom(page, 'Kiln Studio');
+  await sendAndLook(page, 'Weigh every bag of clay');
+  await page.evaluate(() => (window as any).__react('ch-kiln', '👀'));
+  await page.getByRole('button', { name: 'Stop Uni' }).click();
+  await expect(list(page).locator('.uni-stopped')).toBeVisible();
+  await page.evaluate(() => (window as any).__arrive('ch-kiln', 'Uni', '⏳ Working — 1 min — iteration 2/90, terminal'));
+  await page.waitForTimeout(800);
+  await expect(status(page)).toHaveCount(0);
+  // Rowan's turn, its ping three minutes old: the line says what Uni is doing, but no "you can leave" (it isn't your wait)
+  await page.evaluate(() => { (window as any).__arrive('ch-kiln', 'Rowan', 'Uni, can you check the cones?'); (window as any).__arrive('ch-kiln', 'Uni', '⏳ Working — 3 min — iteration 4/90, read_file', 180, true); });
+  await expect(status(page)).toContainText('Reading files');
+  await expect(status(page).locator('.uni-status-leave')).toHaveCount(0);
+});

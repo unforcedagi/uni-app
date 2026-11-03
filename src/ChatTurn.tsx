@@ -15,7 +15,8 @@ export const Enso = () => <span className="uni-status-mark" aria-hidden="true">
 
 /** What Uni is doing, in plain words, with a seconds counter. Past 20 s, a quiet line says you can leave. The counter is hidden from
  *  screen readers (the chat is a live region): they hear the words when they change. */
-export function StatusLine({ phase, since, ping, place }: { phase: TurnPhase; since: number; ping: string | null; place: string }) {
+export function StatusLine({ phase, since, ping, place, theirs = false }: { phase: TurnPhase; since: number; ping: string | null; place: string;
+  /** Someone else's turn: no "you can leave" (it isn't your wait). */ theirs?: boolean }) {
   const [now, setNow] = useState(() => Date.now() / 1000);
   useEffect(() => {
     setNow(Date.now() / 1000);
@@ -25,7 +26,7 @@ export function StatusLine({ phase, since, ping, place }: { phase: TurnPhase; si
   const words = statusWords(phase, since, now, ping);
   return <div className="uni-status" data-status-line="" data-phase={phase} role="status">
     <p className="uni-status-row"><Enso /><span className="uni-status-words">{words}</span><span className="uni-status-clock" aria-hidden="true"> · <time>{shortElapsed(now - since)}</time></span></p>
-    {now - since > 20 && <p className="uni-status-leave">You can leave; I'll put a dot on {place} when it's ready.</p>}
+    {!theirs && now - since > 20 && <p className="uni-status-leave">You can leave; I'll put a dot on {place} when it's ready.</p>}
   </div>;
 }
 

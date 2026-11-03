@@ -1528,7 +1528,11 @@ function Conversations({ onForget }: { onForget: () => void }) {
     : askedAt !== undefined && nowS - askedAt < 1800 ? { phase: "waiting", since: askedAt } : null;
   const turnPing = turn?.phase === "working" ? livePing(messages)?.body ?? null : null;
   // a live ping in a turn that isn't yours (someone else asked): no message of its own either, so the line says it, in words
-  const otherPing = !turn && viewShown ? livePing(messages) : null;
+  // (not a ping landing after your own stop: that turn is over)
+  let lastTalk: Message | undefined;
+  for (let i = messages.length - 1; i >= 0 && !lastTalk; i--) if (!isWorkerStatus(messages[i].body)) lastTalk = messages[i];
+  const afterStop = !!lastTalk && lastTalk.author === identity && commandOf(lastTalk.body) === "stop";
+  const otherPing = !turn && viewShown && !afterStop ? livePing(messages) : null;
   const pingLine = otherPing && !staleStatus(otherPing, nowS, true) ? otherPing : null;
   /** The message whose receipt reads "Sent" (posted, not yet picked up). */
   const sentRef = turn?.phase === "waiting" && ask && !out ? ask.ref : null;
@@ -1924,7 +1928,10 @@ function Conversations({ onForget }: { onForget: () => void }) {
       // the relay has it and only this device's copy failed: it was sent (putting the text back would invite a second one)
       if (relayAccepted(e)) {
         const ref = (e as { eventId: string }).eventId;
-        changePending(key, (items) => items.filter((item) => !sentIds.includes(item.id)));
+        changePending(key, (items) => {
+          for (const item of items) if (sentIds.includes(item.id) && item.preview) URL.revokeObjectURL(item.preview);
+          return items.filter((item) => !sentIds.includes(item.id));
+        });
         landed(key, sendView, snapshot, ref, toUni);
         if ((draftRevisions.current.get(key) ?? 0) === cleared) storeDraft(key, "", new Map());
         setTick((n) => n + 1);
@@ -2050,7 +2057,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
             {out && (outCommand ? <p className="chat-note" data-outgoing="true">{outCommand === "stop" ? "Stopping Uni…" : "Asking Uni to try again…"}</p>
               : <article className="message mine outgoing" aria-busy={!out.ref} data-outgoing="true"><span className="message-avatar" aria-hidden="true" /><div className="message-content"><div className="message-meta"><time>{out.ref ? clock(out.at) : "Sending…"}</time></div><p className="outgoing-body">{out.body}</p>{out.toUni && <span className="msg-receipt">{out.ref ? "Sent" : "Sending"}</span>}</div></article>)}
             {turn ? <StatusLine phase={turn.phase} since={turn.since} ping={turnPing} place={placeRef.current} />
-              : pingLine && <StatusLine phase="working" since={pingLine.ts} ping={pingLine.body} place={placeRef.current} />}
+              : pingLine && <StatusLine phase="working" since={pingLine.ts} ping={pingLine.body} place={placeRef.current} theirs />}
             {chips && <QuickReplies answers={chips} onPick={(a) => void postAs(a)} />}
             <div ref={scrollEnd} />
             <div className="anchor-space" ref={spaceRef} aria-hidden="true" />
