@@ -3,6 +3,7 @@
 // sheet, and the quick replies under a question. The words come from chatFeel.ts; the room (App.tsx) owns what each action does.
 import { memo, useEffect, useRef, useState, type ReactNode } from "react";
 import { shortElapsed, statusWords, type TurnPhase } from "./chatFeel";
+import { openDialog } from "./areas/focusTrap";
 
 const ENSO = "M29.5 8.8C24.6 5.2 14.8 5 9.3 11.6 4.6 17.3 5.6 27.4 12.6 32.2c7.2 4.9 17.4 2.9 21.2-4.3 3.3-6.3 1.6-13.4-3.1-17.4";
 
@@ -50,7 +51,9 @@ export type RowMaker<M> = { current: (m: M) => { actions: Action[]; tail?: React
  */
 export const MessageActions = memo(function MessageActions<M>({ m, make, always }: { m: M; make: RowMaker<M>; always: boolean; retry: boolean; editable: boolean }) {
   const { actions, tail } = make.current(m);
-  return <ActionRow actions={actions} always={always}>{tail}</ActionRow>;
+  // what a button does is looked up when it is pressed, from the handlers of that moment (a row that wasn't redrawn holds no old ones)
+  const live = actions.map((a) => ({ ...a, run: () => make.current(m).actions.find((x) => x.id === a.id)?.run() }));
+  return <ActionRow actions={live} always={always}>{tail}</ActionRow>;
 }) as <M>(p: { m: M; make: RowMaker<M>; always: boolean; retry: boolean; editable: boolean }) => ReactNode;
 
 /** A message's quiet row of actions. The latest reply's is always shown; an older message's on hover or focus (CSS). */
@@ -64,29 +67,28 @@ export function ActionRow({ actions, always, children }: { actions: Action[]; al
 
 export const SHEET_REACTIONS = ["👍", "❤️", "✓", "❓"];
 
-/** The phone's long-press sheet: a reaction strip and 44 px rows. Back, Escape or a tap outside closes it. */
+/** The phone's long-press sheet: a reaction strip and 44 px rows. A modal dialog (the app's one contract: focus in, Tab kept inside, what is
+ *  under it inert, focus back after); Back, Escape or a tap outside closes it. */
 export function MessageSheet({ preview, reactions, mine, rows, onReact, onClose }: { preview: string; reactions: boolean; mine: string[]; rows: Action[];
   onReact: (emoji: string) => void; onClose: () => void }) {
-  const box = useRef<HTMLDivElement>(null);
+  const box = useRef<HTMLDivElement>(null), layer = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    box.current?.querySelector<HTMLButtonElement>("button")?.focus({ preventScroll: true });
-    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); onClose(); } };
-    document.addEventListener("keydown", esc, true);
-    return () => document.removeEventListener("keydown", esc, true);
+    if (!box.current) return;
+    return openDialog(box.current, onClose, { root: layer.current, initial: box.current.querySelector<HTMLButtonElement>("button") });
   }, [onClose]);
-  return <>
+  return <div className="msg-sheet-layer" ref={layer}>
     <div className="msg-sheet-scrim" onClick={onClose} onContextMenu={(e) => { e.preventDefault(); onClose(); }} />
-    <div className="msg-sheet" role="dialog" aria-label="Message actions" ref={box}>
+    <div className="msg-sheet" role="dialog" aria-modal="true" aria-label="Message actions" ref={box}>
       <div className="msg-sheet-grab" aria-hidden="true" />
       <p className="msg-sheet-preview">{preview}</p>
       {reactions && <div className="msg-sheet-react" role="group" aria-label="React">
         {SHEET_REACTIONS.map((e) => <button key={e} type="button" aria-label={`React ${e}`} aria-pressed={mine.includes(e)} onClick={() => { onClose(); onReact(e); }}>{e}</button>)}
       </div>}
       <div className="msg-sheet-rows">
-        {rows.map((r) => <button key={r.id} type="button" aria-label={r.aria ?? r.label} onClick={() => { onClose(); r.run(); }}>{r.icon}<span>{r.label}</span></button>)}
+        {rows.map((r) => <button key={r.id} type="button" className={r.id === "delete" ? "danger" : undefined} aria-label={r.aria ?? r.label} onClick={() => { onClose(); r.run(); }}>{r.icon}<span>{r.label}</span></button>)}
       </div>
     </div>
-  </>;
+  </div>;
 }
 
 /** The plain answers a question offers, as chips; a tap sends one as your reply. */

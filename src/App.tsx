@@ -505,6 +505,9 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const [outgoing, setOutgoing] = useState<{ key: string; body: string; at: number; toUni: boolean; ref?: string } | null>(null);
   /** T-335 chat feel: the messages sent to Uni from this device, and when (unix seconds): until Uni's 👀, the status line says it is passing. */
   const asked = useRef(new Map<string, number>());
+  /** T-335 chat feel: a button's words (Stop, Try again, Continue, a chip) on their way: one at a time, the buttons wait meanwhile. */
+  const postingRef = useRef(false);
+  const [posting, setPosting] = useState(false);
   /** T-335 chat feel: the long-press sheet's message (touch). */
   const [sheetFor, setSheetFor] = useState<string | null>(null);
   const sendingRef = useRef(false);
@@ -1249,16 +1252,33 @@ function Conversations({ onForget }: { onForget: () => void }) {
   function fitAnchor() {
     const list = listRef.current, space = spaceRef.current;
     if (!list || !space) return;
-    const a = anchor.current, box = a && a.view === restoredView.current ? anchorBox(list) : null;
+    let a = anchor.current, box = a && a.view === restoredView.current ? anchorBox(list) : null;
+    // what it held is gone (a send that failed, a stand-in that timed out): let go, and follow the newest again
+    if (a && a.placed && !box && a.view === restoredView.current) { anchor.current = a = null; stickToEnd.current = true; setAwayView(null); }
     const h = `${Math.round(box ? Math.max(0, list.clientHeight - ANCHOR_GAP - (box.end - box.top)) : 0)}px`;
     if (space.style.height !== h) space.style.height = h;
     // what is above it changed height (the last reply's row folding away, a picture loading): it stays where it was, unless the reader moved
     if (a && box && a.placed && !a.free && a.top !== undefined && Math.abs(box.top - a.top) > 0.5) { const d = box.top - a.top; list.scrollTop += d; shiftGlide(d); a.top = box.top; }
     setMoreBelow(!!box && box.end - (list.scrollTop + list.clientHeight) > 24);
   }
+  /** Lets go of a hold whose message never landed (a failed send): the space goes, and the view is back at the newest, following it. */
+  function releaseAnchor() {
+    if (!anchor.current || anchor.current.ref) return;
+    anchor.current = null;
+    setMoreBelow(false);
+    if (spaceRef.current) spaceRef.current.style.height = "0px";
+    stickToEnd.current = true;
+    setAwayView(null);
+    const list = listRef.current;
+    if (list) { stopGlide(); list.scrollTop = list.scrollHeight; }
+  }
   /** Holds what is sent next in this view under the top of the chat. */
   function anchorNext(view: string | null) {
     if (!view) return;
+    // only from the end of the room (or near it): a reader scrolled back into the history (a note open beside it, T-200) keeps the place,
+    // and the newest is a tap away (Jump to latest)
+    const list = listRef.current;
+    if (list && !stickToEnd.current && list.scrollHeight - list.scrollTop - list.clientHeight > list.clientHeight / 2) return;
     anchor.current = { view, ref: null, placed: false };
     stickToEnd.current = false; settleUntil.current = 0; pinned.current = null;
   }
@@ -1316,7 +1336,13 @@ function Conversations({ onForget }: { onForget: () => void }) {
       if (Date.now() < jumpUntil.current && !mark.atEnd) return;
       jumpUntil.current = 0;
       scrollMemory.current.set(v, mark);
-      if (anchor.current?.view === v) { stickToEnd.current = false; fitAnchor(); setAwayView(null); return; }
+      if (anchor.current?.view === v) {
+        fitAnchor();
+        const a = anchor.current;
+        // the reader scrolled to the end of what is there (nothing held below): the hold is over, the view follows again
+        if (a && a.free && mark.atEnd && (!spaceRef.current || spaceRef.current.offsetHeight === 0)) anchor.current = null;
+        else if (a) { stickToEnd.current = false; setAwayView(null); return; }
+      }
       stickToEnd.current = mark.atEnd;
       if (mark.atEnd && newestRef.current?.view === v) seenRef.current.set(v, newestRef.current);
       setAwayView(mark.atEnd ? null : v);
@@ -1493,6 +1519,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const ask = viewShown ? openAsk(messages, identity) : null;
   const working = ask ? workingOn(messages, identity, nowS) : null;
   const out = outgoing && channel && outgoing.key === keyFor(channel, root) && commandOf(outgoing.body) !== "stop" ? outgoing : null;
+  // a 👀 seen on it, or an answer in its thread: no longer waiting to be picked up (a reply there ends the work too)
+  if (ask && (working || (ask.last_reply_ts ?? 0) > 0)) asked.current.delete(ask.ref);
   const askedAt = ask ? asked.current.get(ask.ref) : undefined;
   const turn: { phase: TurnPhase; since: number } | null = out?.toUni && !out.ref ? { phase: "sending", since: out.at }
     : working ? { phase: "working", since: working.since }
@@ -1862,7 +1890,9 @@ function Conversations({ onForget }: { onForget: () => void }) {
     // since, so it is never lost); the message is on screen at once, and held under the top of the chat while the answer comes
     const sentMentions = bindings, none: Bindings = new Map();
     bindingStore.current.set(key, none);
-    editDraft(key, "", none);
+    // emptied in memory now; the device's saved copy keeps the text until it is delivered (an app closed mid-send gives it back)
+    drafts.current.set(key, "");
+    draftRevisions.current.set(key, (draftRevisions.current.get(key) ?? 0) + 1);
     const cleared = draftRevisions.current.get(key) ?? 0;
     setDraft(""); bindingsRef.current = none; setBindings(none); setPicker(null);
     // the composer keeps focus: the Send that was pressed turns into Stop (or the mic), and a focused button that goes away takes the
@@ -1871,7 +1901,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
     if (pressed instanceof HTMLElement && pressed !== input.current && pressed.closest(".composer")) input.current?.focus({ preventScroll: true });
     const toUni = !!uniHere && recipients.includes(uniHere.pubkey);
     setOutgoing({ key, body: snapshot, at: Date.now() / 1000, toUni });
-    anchorNext(currentView);
+    const sendView = currentView;
+    anchorNext(sendView);
     setError(null);
     try {
       const sent = await invoke<Message | null>("post_message", { channel, body: snapshot, replyTo: target, recipients, media: files.map((f) => f.media!) });
@@ -1879,7 +1910,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
         for (const item of items) if (sentIds.includes(item.id) && item.preview) URL.revokeObjectURL(item.preview);
         return items.filter((item) => !sentIds.includes(item.id));
       });
-      landed(key, snapshot, sent?.ref ?? null, toUni);
+      landed(key, sendView, snapshot, sent?.ref ?? null, toUni);
+      if ((draftRevisions.current.get(key) ?? 0) === cleared) storeDraft(key, "", new Map());
       // Re-read through the room effect, which drops the result if the
       // user has switched rooms meanwhile.
       setTick((n) => n + 1);
@@ -1888,20 +1920,23 @@ function Conversations({ onForget }: { onForget: () => void }) {
     } catch (e) {
       setError(String(e));
       setOutgoing(null);
+      releaseAnchor();
       const now = drafts.current.get(key) ?? "";
       const back = (draftRevisions.current.get(key) ?? 0) === cleared || !now.trim() ? snapshot : `${snapshot}\n\n${now}`;
-      bindingStore.current.set(key, sentMentions);
-      editDraft(key, back, sentMentions);
-      if (activeScope.current === key) { setDraft(back); bindingsRef.current = sentMentions; setBindings(sentMentions); }
+      const mentions: Bindings = new Map([...sentMentions, ...(bindingStore.current.get(key) ?? [])]);
+      bindingStore.current.set(key, mentions);
+      editDraft(key, back, mentions);
+      if (activeScope.current === key) { setDraft(back); bindingsRef.current = mentions; setBindings(mentions); }
     }
     finally { sendingRef.current = false; setSending(false); }
   }
 
   /** T-335 chat feel: a message is posted: it is Uni's to pick up (the status line says so until its 👀), and it stays on screen until the
    *  room's list has it. */
-  function landed(key: string, body: string, ref: string | null, toUni: boolean) {
+  function landed(key: string, view: string | null, body: string, ref: string | null, toUni: boolean) {
     if (ref && toUni) asked.current.set(ref, Date.now() / 1000);
-    if (ref && anchor.current && !anchor.current.ref) anchor.current.ref = ref;
+    // only the hold of the view it was sent from (another room's send landing late never takes this one's)
+    if (ref && anchor.current && !anchor.current.ref && anchor.current.view === view) anchor.current.ref = ref;
     setOutgoing((o) => o && o.key === key && o.body === body ? (ref ? { ...o, ref } : null) : o);
   }
   // the posted message is in the list now (or never comes, in a thread the list doesn't hold): the stand-in goes
@@ -1913,11 +1948,13 @@ function Conversations({ onForget }: { onForget: () => void }) {
   }, [outgoing, messages]);
   /** T-335 chat feel: posts words as you, with this room's Uni addressed: a quick reply, Stop ("/stop"), Try again ("/retry"), Continue. */
   async function postAs(body: string) {
-    if (!channel) return;
+    if (!channel || postingRef.current) return;
     const key = keyFor(channel, root), view = currentView;
     const uniHere = findUniMember(members);
     const command = commandOf(body);
-    const toUni = !!uniHere && (!!command || notifyUni);
+    // the buttons' words always reach this room's Uni (a stop, a try again, a continue); a chip's answer as a typed message would
+    const toUni = !!uniHere && (!!command || body === CONTINUE || notifyUni);
+    postingRef.current = true; setPosting(true);
     const target = root ? (messages.some((m) => m.ref === root) ? root : messages[messages.length - 1]?.ref ?? null) : null;
     // a pressed button (Stop, a chip) that is about to go lets go of focus first, so the composer is known to be left
     const pressed = document.activeElement;
@@ -1927,10 +1964,13 @@ function Conversations({ onForget }: { onForget: () => void }) {
     setError(null);
     try {
       const sent = await invoke<Message | null>("post_message", { channel, body, replyTo: target, recipients: toUni ? [uniHere!.pubkey] : [], media: [] });
-      landed(key, body, sent?.ref ?? null, toUni && command !== "stop");
+      landed(key, view, body, sent?.ref ?? null, toUni && command !== "stop");
       setTick((n) => n + 1);
       void loadRooms().catch(() => {});
-    } catch (e) { setOutgoing(null); setError(`Couldn't send: ${e}`); }
+    } catch (e) {
+      setOutgoing(null); setError(`Couldn't send: ${e}`);
+      releaseAnchor();
+    } finally { postingRef.current = false; setPosting(false); }
   }
   async function reactTo(m: Message, emoji: string) {
     const mine = m.reactions.find((r) => r.emoji === emoji && r.mine)?.mine ?? null;
@@ -2042,7 +2082,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
               {recorder.recording && recordingOrigin.current?.key === scope() ? <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" fill="currentColor" /></svg> : <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3" /><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8" /></svg>}
             </button>
             {/* T-335 chat feel: while Uni works and the field is empty, Send is Stop, in the same place; typing gives Send back (a word to Uni meanwhile) */}
-            {turn && uniInRoom && draftBlank && !pending.length ? <button className="send compose-icon stop" onClick={() => void postAs(STOP)} aria-label="Stop Uni" title="Stop Uni">
+            {turn && uniInRoom && draftBlank && !pending.length ? <button className="send compose-icon stop" onClick={() => void postAs(STOP)} aria-label="Stop Uni" title="Stop Uni"
+              disabled={posting || turn.phase === "sending"}>
               <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1.5" fill="currentColor" stroke="none" /></svg>
             </button>
             : <button className="send compose-icon" disabled={(draftBlank && !pending.some((f) => !f.voice && f.state === "ready")) || manualAttachments(pending).some(attachmentBlocksSend) || sending || recorder.busy} onClick={() => void send()} aria-label="Send message" title={sending ? "Sending…" : "Send message"} aria-busy={sending}>
@@ -2063,7 +2104,9 @@ function Conversations({ onForget }: { onForget: () => void }) {
     jumpUntil.current = Date.now() + 2000;
     easeScroll(list, list.scrollHeight, 220, calmMotion());
   }
-  const closeSheet = useCallback(() => setSheetFor(null), []);
+  /** Your own message whose Delete in the sheet was tapped once: the sheet opens again asking for the second tap. */
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const closeSheet = useCallback(() => { setSheetFor(null); setConfirmDelete(null); }, []);
   rowMaker.current = (m) => ({ actions: messageActions(m, false),
     tail: m.author === identity ? <DeleteButton key={`del-${m.ref}`} label="your message" onDelete={() => actions.current.deleteOwn(m)} /> : undefined });
   useLongPress(listEl, (ref) => { if (messages.some((m) => m.ref === ref)) setSheetFor(ref); });
@@ -2076,7 +2119,10 @@ function Conversations({ onForget }: { onForget: () => void }) {
       const el = listRef.current?.querySelector(`[data-ref="${CSS.escape(m.ref)}"] .md`);
       if (el) window.getSelection()?.selectAllChildren(el);
     }) };
-    if (mine) return [copy, ...(editing !== m.ref ? [{ id: "edit", label: "Edit", icon: ICONS.edit, run: () => setEditing(m.ref) }] : []), ...(inSheet ? [select] : [])];
+    if (mine) return [copy, ...(editing !== m.ref ? [{ id: "edit", label: "Edit", icon: ICONS.edit, run: () => setEditing(m.ref) }] : []), ...(inSheet ? [select,
+      // the sheet asks before it deletes: a second sheet, opened again, would be a second tap away; here the row confirms in place
+      { id: "delete", label: confirmDelete === m.ref ? "Tap again to delete" : "Delete", aria: confirmDelete === m.ref ? "Tap again to delete your message" : "Delete your message", icon: ICONS.del,
+        run: () => { if (confirmDelete === m.ref) { setConfirmDelete(null); void actions.current.deleteOwn(m); } else { setConfirmDelete(m.ref); setSheetFor(m.ref); } } }] : [])];
     const up = m.reactions.find((r) => r.emoji === "👍");
     const latest = m.ref === latestReply && uniInRoom && !isThread;
     return [

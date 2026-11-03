@@ -87,7 +87,7 @@ export function livePing(messages: Msg[]): Msg | null {
 }
 
 /** Your newest message, when nothing from anyone else (a ping aside) has come after it, and it isn't a stop. */
-export function openAsk(messages: Msg[], me: string | null): Msg | null {
+export function openAsk<M extends Msg>(messages: M[], me: string | null): M | null {
   if (!me) return null;
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i];

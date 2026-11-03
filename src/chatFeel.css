@@ -58,10 +58,11 @@
 .act-up .act-label { font-size: 15px; }
 .msg-actions .delete-own, .msg-actions button.danger { font: 500 12.5px/1 var(--g-font-ui); }
 /* an older message's row floats at its top corner on hover or focus, taking no room of its own */
+/* (opacity, not visibility: a keyboard can Tab into it, and focus shows it) */
 .msg-actions:not(.always) { position: absolute; top: -14px; right: 0; z-index: 2; padding: 2px; background: var(--g-paper); border: var(--g-hair) solid var(--g-line); border-radius: 12px;
-  box-shadow: var(--g-shadow-1); visibility: hidden; opacity: 0; transition: opacity var(--g-t-quick) var(--g-ease), visibility 0s linear var(--g-t-quick); }
+  box-shadow: var(--g-shadow-1); opacity: 0; pointer-events: none; transition: opacity var(--g-t-quick) var(--g-ease); }
 .message.mine .msg-actions:not(.always) { right: auto; left: 0; }
-.message:hover > .message-content > .msg-actions, .message:focus-within > .message-content > .msg-actions { visibility: visible; opacity: 1; transition-delay: 0s; }
+.message:hover > .message-content > .msg-actions, .message:focus-within > .message-content > .msg-actions { opacity: 1; pointer-events: auto; }
 .msg-actions:not(.always) .act-label { display: none; }
 .msg-actions:not(.always) .act-up .act-label { display: inline; }
 @media (hover: none) {
@@ -86,6 +87,8 @@
 .msg-sheet-rows button { display: flex; align-items: center; gap: 14px; min-height: 48px; padding: 0 8px; border: 0; border-radius: 10px; background: transparent; color: var(--g-ink); font: 500 16px/1 var(--g-font-ui); text-align: left; }
 .msg-sheet-rows button:active { background: var(--g-sunk); }
 .msg-sheet-rows .act-icon { width: 20px; height: 20px; color: var(--g-ink-2); }
+.msg-sheet-rows button.danger { color: var(--g-needs); }
+.msg-sheet-rows button.danger .act-icon { color: currentColor; }
 
 /* ── Quick replies under a question ── */
 .quick-replies { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 4px; animation: feel-fade 140ms var(--g-ease) backwards; }
@@ -118,9 +121,7 @@
 @media (max-width: 599px) {
   .composer { padding-inline: 4px; }
   .composer .compose-row { position: relative; gap: 0; }
-  /* one round button on the right: the mic while the field is empty, Send once there is something to send, Stop while Uni works */
-  .composer .compose-row.empty .send:not(.stop) { display: none; }
-  .composer .compose-row:not(.empty) .mic:not(.recording), .composer .compose-row.empty:has(.stop) .mic:not(.recording) { display: none; }
+  /* the menu, the mic and Send (Stop while Uni works) all stay, each a 44 px target (T-213: the mic coexists with Send) */
   /* the "Uni listening" ring sits inside the field, on its left */
   .composer .compose-row .compose-uni { position: absolute; left: 48px; bottom: 6px; z-index: 1; height: 44px; }
   .composer .compose-row:has(.compose-uni) textarea { padding-left: 36px; }

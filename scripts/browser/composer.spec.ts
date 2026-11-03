@@ -328,7 +328,8 @@ for (const replace of [false, true]) {
     await chooseMention(other);
     await other.dispatchEvent('keydown', { key: 'Enter' }); // The in-flight send still owns the global send lock.
     await switchRoom(page, 'Test room');
-    await expect(input).toHaveValue('@Test member ');
+    // T-335 chat feel: the composer empties at Send (the message is on its way, on screen); what was typed after is kept
+    await expect(input).toHaveValue(replace ? '@Test member ' : '');
     await switchRoom(page, 'Other room');
     await page.evaluate(() => (window as any).finishSend());
     await expect(page.getByRole('button', { name: 'Send message', exact: true })).toBeEnabled();
