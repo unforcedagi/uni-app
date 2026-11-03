@@ -4,8 +4,8 @@
 
 /* ── The send moment ── */
 .message.outgoing { opacity: 1; }
-.message.mine.outgoing .message-content { animation: feel-bubble 160ms var(--g-ease) backwards; }
-@keyframes feel-bubble { from { opacity: 0; transform: translateY(6px); } }
+/* remove-animations pass: a fade carries "it's there" on something sent many times a day; the rise was dropped */
+.message.mine.outgoing .message-content { animation: feel-fade 150ms ease-out backwards; }
 /* your message's receipt sits under its bubble: Sending, then Sent, then nothing once Uni starts */
 .message.mine:has(.msg-receipt) { padding-bottom: 20px; }
 .message.mine .msg-receipt { position: absolute; right: 4px; top: calc(100% + 3px); font: 400 12px/1.3 var(--g-font-ui); color: var(--g-ink-3); white-space: nowrap; }
@@ -28,17 +28,9 @@
 .chat-note { display: flex; justify-content: flex-end; align-items: center; gap: 10px; margin: 10px 0 2px; font: 400 13px/1.4 var(--g-font-ui); color: var(--g-ink-2); }
 .chat-note-go { min-height: 32px; padding: 0 14px; border: var(--g-hair) solid var(--g-line-strong); border-radius: 999px; background: var(--g-paper); color: var(--g-ink); font: 500 13px/1 var(--g-font-ui); cursor: pointer; }
 
-/* a reply arriving settles in, paragraph by paragraph (180 ms each, 60 ms apart); a little blur on a desktop only */
-.message.arrived:not(.mine) .md > * { animation: feel-settle 180ms var(--g-ease) backwards; }
-@media (hover: hover) and (pointer: fine) and (min-width: 900px) { .message.arrived:not(.mine) .md > * { animation-name: feel-settle-blur; } }
-.message.arrived .md > :nth-child(2) { animation-delay: 60ms; }
-.message.arrived .md > :nth-child(3) { animation-delay: 120ms; }
-.message.arrived .md > :nth-child(4) { animation-delay: 180ms; }
-.message.arrived .md > :nth-child(5) { animation-delay: 240ms; }
-.message.arrived .md > :nth-child(6) { animation-delay: 300ms; }
-.message.arrived .md > :nth-child(n+7) { animation-delay: 360ms; }
-@keyframes feel-settle { from { opacity: 0; transform: translateY(4px); } }
-@keyframes feel-settle-blur { from { opacity: 0; transform: translateY(4px); filter: blur(4px); } }
+/* a reply arriving fades in as one, so it doesn't pop in whole (remove-animations pass: the spec's 60 ms paragraph stagger, the rise and
+   the desktop blur held the words back on something seen with every reply; one 150 ms fade keeps the soft arrival) */
+.message.arrived:not(.mine) .md { animation: feel-fade 150ms ease-out backwards; }
 
 /* the work, folded into one line above the reply */
 .work-receipt { margin: 2px 0 6px; font: 500 12.5px/1.4 var(--g-font-ui); color: var(--g-ink-3); }
@@ -47,7 +39,6 @@
 .work-receipt summary::after { content: "▸"; font-size: 10px; transition: transform var(--g-t-state) var(--g-ease); }
 .work-receipt[open] summary::after { transform: rotate(90deg); }
 .work-receipt ul { margin: 2px 0 6px; padding-left: 18px; font-weight: 400; }
-.work-receipt[open] ul { animation: feel-fade 220ms var(--g-ease) backwards; }
 
 /* the space under an anchored question; "More below" sits above the composer, never over the text */
 .anchor-space { height: 0; flex: none; }
@@ -118,10 +109,8 @@
 .md-table th { font-family: var(--g-font-ui); font-size: 13px; font-weight: 600; color: var(--g-ink-2); border-bottom-color: var(--g-line-strong); }
 .md-table th:last-child, .md-table td:last-child { padding-right: 0; }
 .md-table .num { text-align: right; font-variant-numeric: tabular-nums; }
-@media (max-width: 599px) {
-  .message-content .md pre.md-pre code { white-space: pre-wrap; overflow-wrap: anywhere; }
-  .md-table td { min-width: 4.5em; }
-}
+/* code keeps its lines and scrolls sideways inside its block (T-132), on the phone too */
+@media (max-width: 599px) { .md-table td { min-width: 4.5em; } }
 
 /* ── The phone: the composer's text gets the width ── */
 @media (max-width: 599px) {

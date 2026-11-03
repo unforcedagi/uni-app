@@ -385,7 +385,8 @@ test.describe('drafts', () => {
     await expect(page.locator('[data-outgoing="true"]')).toBeVisible();
     await page.evaluate(() => { sessionStorage.removeItem('t.holdIdentity'); (window as any).releaseIdentity(); });
     await identityRead(page);
-    await expect(garden).toHaveValue(INDENTED + '\n\nSent before it loaded.');
+    // T-335 chat feel: the composer emptied at Send (the message is on its way, on screen), so the saved draft is all that comes back
+    await expect(garden).toHaveValue(INDENTED);
     await garden.blur(); // a phone hides its bottom bar while the composer has focus
     const saved = () => page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('uni.chatDraft.')).length);
     await press(page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Settings', exact: true }));

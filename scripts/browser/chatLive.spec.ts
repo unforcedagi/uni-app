@@ -46,25 +46,27 @@ async function boot(page: Page, opts: { history?: number; eyes?: boolean } = {})
   await expect(page.getByText('Could you sort the seed list by sowing month?')).toBeVisible();
 }
 
-const working = (page: Page) => page.locator('.working-line');
-const seconds = (text: string | null) => { const [m, s] = (text ?? '').split(' · ')[1].split(':').map(Number); return m * 60 + s; };
+// T-335 chat feel: the line is the status line now: what Uni is doing, in words, and a counter ("Thinking it through · 42s", "· 1m 05s")
+const working = (page: Page) => page.locator('[data-status-line] .uni-status-row');
+const LINE = /^(Reading your message|Thinking it through|Running a command) · \d+(s|m \d\ds)$/;
+const seconds = (text: string | null) => { const t = (text ?? '').split(' · ')[1] ?? ''; const m = /^(?:(\d+)m )?(\d+)s$/.exec(t); return m ? Number(m[1] ?? 0) * 60 + Number(m[2]) : NaN; };
 
-test('Uni is working · m:ss from its 👀 on your message, through a progress ping, until its reply', async ({ page }) => {
+test('the status line runs from Uni\'s 👀 on your message, through a progress ping (said in words), until its reply', async ({ page }) => {
   await boot(page);
   await expect(working(page)).toBeVisible();
   // counted from the 👀 (40 s before the room opened)
-  await expect(working(page)).toHaveText(/^Uni is working · \d+:\d\d$/);
+  await expect(working(page)).toHaveText(LINE);
   expect(seconds(await working(page).textContent())).toBeGreaterThanOrEqual(40);
-  await expect(working(page)).toHaveAttribute('role', 'status');
+  await expect(page.locator('[data-status-line]')).toHaveAttribute('role', 'status');
   // the clock runs
   const first = await working(page).textContent();
   await expect.poll(() => working(page).textContent(), { timeout: 4000 }).not.toBe(first);
   // it sits under the last message, in sight
   await expect(working(page)).toBeInViewport();
-  // a progress ping is not the answer
+  // a progress ping is not the answer: the line says what it is doing, and the ping is no message of its own
   await page.evaluate(() => (window as any).__say('b'.repeat(64), '⏳ Working — 3 min — iteration 4/90, terminal'));
-  await expect(page.getByText('⏳ Working — 3 min')).toBeVisible();
-  await expect(working(page)).toBeVisible();
+  await expect(working(page)).toContainText('Running a command');
+  await expect(page.getByText('⏳ Working — 3 min')).toHaveCount(0);
   // the reply is
   await page.evaluate(() => (window as any).__say('b'.repeat(64), 'Here is the list, sorted by sowing month.'));
   await expect(page.getByText('Here is the list, sorted by sowing month.')).toBeVisible();
@@ -76,7 +78,7 @@ test('no 👀 yet: no working line; it shows as the 👀 lands, counted from the
   await page.waitForTimeout(1200);
   await expect(working(page)).toHaveCount(0);
   await page.evaluate(() => (window as any).__eyes((window as any).__msgs.at(-1).ref));
-  await expect(working(page)).toHaveText(/^Uni is working · \d+:\d\d$/);
+  await expect(working(page)).toHaveText(LINE);
   expect(seconds(await working(page).textContent())).toBeLessThan(15);
 });
 

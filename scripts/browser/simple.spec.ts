@@ -337,13 +337,11 @@ test.describe('simple', () => {
     await expect(page.locator('.cp.side.open')).toBeVisible();
   });
 
-  test('a worker status ping is one muted line; a marker-only line mid-message is a chip', async ({ page }) => {
+  test('a worker status ping is no message in the thread (T-335 chat feel: it feeds the status line); a marker-only line mid-message is a chip', async ({ page }) => {
     await boot(page, { longChat: true, tallLast: true });
     await openRoom(page, 'Learn Vibe Build');
-    const status = page.locator('.sr-chat .message.status-line');
-    await expect(status).toHaveCount(1);
-    await expect(status).toHaveAttribute('title', '⏳ Working — 6 min — iteration 7');
-    expect((await status.boundingBox())!.height).toBeLessThan(32);
+    await expect(page.locator('.sr-chat .message.status-line')).toHaveCount(0);
+    await expect(page.locator('.sr-chat').getByText('⏳ Working — 6 min — iteration 7')).toHaveCount(0);
     // r14: the task-state marker is bookkeeping: taken out of the message and not shown as a chip
     await expect(page.locator('.sr-chat .md-mark')).toHaveCount(0);
     await expect(page.locator('.sr-chat').getByText('[done T-123]')).toHaveCount(0);
@@ -430,35 +428,29 @@ test.describe('simple', () => {
     }
   });
 
-  test('nothing under a message; its ⋯ holds only Copy (and Edit and Delete on your own); no reactions are made from the app', async ({ page }) => {
+  // T-335 chat feel (replacing T-124 r12's "only Copy"): no ⋯ on every message; a quiet row of actions, always shown on the latest reply,
+  // on hover elsewhere with a mouse (a long press opens the sheet on touch: chatfeel.spec.ts)
+  test('no ⋯ on any message; the latest reply has its row; with a mouse an older message shows its row on hover (Copy, Edit and Delete on your own)', async ({ page }) => {
     await boot(page);
     await openRoom(page, 'ATLAS');
-    const first = page.locator('.sr-chat .message').first();
-    await expect(page.locator('.sr-chat .message-actions')).toHaveCount(0);
-    await expect(page.getByRole('button', { name: /^(⤓ )?Keep|Ask Uni about|Reply in thread|React/ })).toHaveCount(0);
-    // the ⋯ is on the message's edge and quiet (hidden until hover with a mouse)
-    const more = first.getByRole('button', { name: /^More actions for/ });
-    // T-302: on a phone the room was opened from the Places drawer; a tap elsewhere ends that tap's hover over the first message
-    if (!wide(page)) await page.mouse.move(1, 1);
-    if (wide(page)) await expect(more).toHaveCSS('opacity', '0'); else expect(Number(await more.evaluate((e) => getComputedStyle(e).opacity))).toBeLessThan(0.6);
-    await first.hover();
-    await more.click();
-    const menu = page.getByRole('group', { name: 'Message actions' });
-    await expect(menu).toBeVisible();
-    // Aaron's own message (the first one): Copy, Edit, Delete and nothing else; no menu roles that promise arrow keys
-    await expect(menu.getByRole('button')).toHaveText(['Copy', 'Edit', /Delete/]);
-    await expect(page.getByRole('menuitem')).toHaveCount(0);
-    await shot(page, 'menu');
-    await page.keyboard.press('Escape');
-    await expect(menu).toHaveCount(0);
-    // someone else's message: Copy only
-    const theirs = page.locator('.sr-chat .message').nth(1);
-    await theirs.hover();
-    await theirs.getByRole('button', { name: /^More actions for/ }).click();
-    await expect(page.getByRole('group', { name: 'Message actions' }).getByRole('button')).toHaveText(['Copy']);
-    await page.keyboard.press('Escape');
-    // a right-click is the browser's own: no quick-reaction bar
-    if (wide(page)) { await first.click({ button: 'right' }); await expect(page.locator('.quick-react')).toHaveCount(0); await page.keyboard.press('Escape'); }
+    await expect(page.locator('.sr-chat .message-more-go')).toHaveCount(0);
+    await expect(page.locator('.sr-chat .msg-actions.always')).toHaveCount(1);
+    const latest = page.locator('.sr-chat .msg-actions.always');
+    await expect(latest.getByRole('button', { name: 'Copy', exact: true })).toBeVisible();
+    await expect(latest.getByRole('button', { name: 'Reply', exact: true })).toBeVisible();
+    if (wide(page)) {
+      const first = page.locator('.sr-chat .message').first();
+      const row = first.getByRole('group', { name: 'Message actions' });
+      await page.mouse.move(1, 1);
+      await expect(row).toBeHidden();
+      await first.hover();
+      // Aaron's own message (the first one): Copy, Edit, Delete and nothing else; no menu roles that promise arrow keys
+      await expect(row.getByRole('button')).toHaveText(['Copy', 'Edit', /Delete/]);
+      await expect(page.getByRole('menuitem')).toHaveCount(0);
+      await shot(page, 'menu');
+      // a right-click is the browser's own: no quick-reaction bar
+      await first.click({ button: 'right' }); await expect(page.locator('.quick-react')).toHaveCount(0); await page.keyboard.press('Escape');
+    }
     expect(await fits(page)).toBe(true);
   });
 
@@ -2683,11 +2675,12 @@ test.describe('r18', () => {
     await expect(top).not.toContainText(/Brief updated|updated \d+h ago/);
   });
 
-  test('a stale progress line is an earlier update, folded; a fresh one stays a live status line', async ({ page }) => {
+  // T-335 chat feel: a progress ping is never a message of its own: a live one feeds the status line, an answered one folds into the reply's
+  // one-line receipt; only a stale one nothing answered stays, folded as an earlier update
+  test('a stale progress line nothing answered is an earlier update, folded; an answered or a fresh one is no message', async ({ page }) => {
     await boot(page);
     await openRoom(page, 'ATLAS');
     await page.evaluate((b) => (window as any).__arrive(b, 'Uni', '⏳ Working — 3 min — iteration 3, terminal', 2 * 86400), BUILD);
-    await page.evaluate((b) => (window as any).__arrive(b, 'Uni', 'The SOW draft is in the note.'), BUILD);
     const chat = page.locator('.sr-chat');
     const past = chat.locator('.status-past');
     await expect(past).toHaveCount(1);
@@ -2695,8 +2688,12 @@ test.describe('r18', () => {
     await expect(past.locator('.status-past-body')).toBeHidden();
     await past.locator('summary').click();
     await expect(past.locator('.status-past-body')).toHaveText('⏳ Working — 3 min — iteration 3, terminal');
+    await page.evaluate((b) => (window as any).__arrive(b, 'Uni', 'The SOW draft is in the note.'), BUILD);
+    await expect(chat.getByText('The SOW draft is in the note.')).toBeVisible();
+    await expect(past).toHaveCount(0);
     await page.evaluate((b) => (window as any).__arrive(b, 'Uni', '⏳ Working — 1 min — iteration 1'), BUILD);
-    await expect(chat.locator('.message.status-line:not(.status-past)')).toHaveText(/⏳ Working — 1 min/);
+    await expect(chat.locator('.message.status-line')).toHaveCount(0);
+    await expect(chat.getByText(/⏳ Working/)).toHaveCount(0);
   });
 });
 

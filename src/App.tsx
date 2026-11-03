@@ -970,10 +970,13 @@ function Conversations({ onForget }: { onForget: () => void }) {
   // Uni is notified on every message in rooms it belongs to, unless muted.
   const [notifyUni, setNotifyUni] = useState(true);
   const input = useRef<HTMLTextAreaElement>(null);
+  /** T-335 chat feel: the field was focused when it was last taken out (the room view redrawn around it): the new one takes the focus back. */
+  const refocusField = useRef(false);
   const composerInput = useCallback((el: HTMLTextAreaElement | null) => {
     input.current = el;
     if (!el) return;
     mark("composer");
+    if (refocusField.current) { refocusField.current = false; el.focus({ preventScroll: true }); }
     resizeComposer(el);
     let width = el.getBoundingClientRect().width;
     const observer = new ResizeObserver(() => {
@@ -981,7 +984,12 @@ function Conversations({ onForget }: { onForget: () => void }) {
       if (nextWidth !== width) { width = nextWidth; resizeComposer(el); }
     });
     observer.observe(el);
-    return () => { observer.disconnect(); input.current = null; };
+    return () => {
+      observer.disconnect(); input.current = null;
+      // a focused field that goes fires no blur: say so, or the phone's bottom bar stays hidden for a composer no longer focused
+      if (document.activeElement === el) refocusField.current = true;
+      requestAnimationFrame(() => { refocusField.current = false; setComposerFocused(!!document.activeElement?.closest(".composer")); });
+    };
   }, []);
   useLayoutEffect(() => { if (input.current) resizeComposer(input.current); }, [asides, channel, notes.length]); // T-200: a note opening or closing changes the cap (the field sizes itself as text changes)
   const focusComposer = useRef(false);
@@ -1857,6 +1865,10 @@ function Conversations({ onForget }: { onForget: () => void }) {
     editDraft(key, "", none);
     const cleared = draftRevisions.current.get(key) ?? 0;
     setDraft(""); bindingsRef.current = none; setBindings(none); setPicker(null);
+    // the composer keeps focus: the Send that was pressed turns into Stop (or the mic), and a focused button that goes away takes the
+    // composer's focus with it without a blur, which would leave the phone's bottom bar hidden
+    const pressed = document.activeElement;
+    if (pressed instanceof HTMLElement && pressed !== input.current && pressed.closest(".composer")) input.current?.focus({ preventScroll: true });
     const toUni = !!uniHere && recipients.includes(uniHere.pubkey);
     setOutgoing({ key, body: snapshot, at: Date.now() / 1000, toUni });
     anchorNext(currentView);
@@ -1907,6 +1919,9 @@ function Conversations({ onForget }: { onForget: () => void }) {
     const command = commandOf(body);
     const toUni = !!uniHere && (!!command || notifyUni);
     const target = root ? (messages.some((m) => m.ref === root) ? root : messages[messages.length - 1]?.ref ?? null) : null;
+    // a pressed button (Stop, a chip) that is about to go lets go of focus first, so the composer is known to be left
+    const pressed = document.activeElement;
+    if (pressed instanceof HTMLButtonElement) pressed.blur();
     setOutgoing({ key, body, at: Date.now() / 1000, toUni });
     if (command !== "stop") anchorNext(view);
     setError(null);
@@ -1976,7 +1991,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
             <NoteOpener.Provider value={openFromChat}>{timeline}</NoteOpener.Provider>
             {out && (outCommand ? <p className="chat-note" data-outgoing="true">{outCommand === "stop" ? "Stopping Uni…" : "Asking Uni to try again…"}</p>
               : <article className="message mine outgoing" aria-busy={!out.ref} data-outgoing="true"><span className="message-avatar" aria-hidden="true" /><div className="message-content"><div className="message-meta"><time>{out.ref ? clock(out.at) : "Sending…"}</time></div><p className="outgoing-body">{out.body}</p>{out.toUni && <span className="msg-receipt">{out.ref ? "Sent" : "Sending"}</span>}</div></article>)}
-            {turn && uniInRoom && <StatusLine phase={turn.phase} since={turn.since} ping={turnPing} place={placeRef.current} />}
+            {turn && <StatusLine phase={turn.phase} since={turn.since} ping={turnPing} place={placeRef.current} />}
             {chips && <QuickReplies answers={chips} onPick={(a) => void postAs(a)} />}
             <div ref={scrollEnd} />
             <div className="anchor-space" ref={spaceRef} aria-hidden="true" />
