@@ -172,7 +172,7 @@ test('message actions: the latest reply has a quiet row (Copy, Try again, 👍, 
   const latest = list(page).locator('article.message[data-ref="k3"]');
   const row = latest.getByRole('group', { name: 'Message actions' });
   await expect(row).toBeVisible();
-  for (const n of ['Copy', 'Try again', 'Thumbs up', 'Reply', 'Save as note']) await expect(row.getByRole('button', { name: n, exact: true })).toBeVisible();
+  for (const n of ['Copy', 'Ask Uni to try again', 'Thumbs up', 'Reply', 'Save as note']) await expect(row.getByRole('button', { name: n, exact: true })).toBeVisible();
   await expect(page.locator('.message-more-go')).toHaveCount(0);
   if (touch()) for (const b of await row.getByRole('button').all()) expect((await b.boundingBox())!.height).toBeGreaterThanOrEqual(44);
   await shot(page, '04-actions');
@@ -182,7 +182,7 @@ test('message actions: the latest reply has a quiet row (Copy, Try again, 👍, 
   await expect(latest.locator('.reactions .pill.mine')).toContainText('👍');
   // Try again asks this room's Uni for another answer
   const before = (await posts(page)).length;
-  await row.getByRole('button', { name: 'Try again', exact: true }).click();
+  await row.getByRole('button', { name: 'Ask Uni to try again', exact: true }).click();
   expect((await posts(page)).slice(before)).toEqual([{ channel: 'ch-kiln', body: '/retry', recipients: [UNI] }]);
   await expect(list(page).locator('article.message.mine', { hasText: '/retry' })).toHaveCount(0);
   await expect(list(page).locator('.uni-retried')).toContainText('You asked Uni to try again');

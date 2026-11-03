@@ -2081,7 +2081,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     const latest = m.ref === latestReply && uniInRoom && !isThread;
     return [
       ...(inSheet ? [] : [copy]),
-      ...(latest ? [{ id: "retry", label: "Try again", icon: ICONS.retry, run: () => void postAs(RETRY) }] : []),
+      ...(latest ? [{ id: "retry", label: "Try again", aria: "Ask Uni to try again", icon: ICONS.retry, run: () => void postAs(RETRY) }] : []),
       ...(inSheet ? [] : [{ id: "up", label: "👍", aria: "Thumbs up", icon: null, pressed: !!up?.mine, run: () => void reactTo(m, "👍") }]),
       { id: "reply", label: "Reply", icon: ICONS.reply, run: () => openThread(m) },
       ...(inSheet ? [copy] : []),
