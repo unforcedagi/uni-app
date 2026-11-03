@@ -1,0 +1,144 @@
+/* T-335 chat feel: the send moment, the anchored answer, message actions, reading rhythm, the New line and quick replies, on the glow-up
+   tokens. One easing (--g-ease). Nothing animates on page load; on a calm screen (the Daylight, reduced motion) App.css's one rule stops
+   every animation and transition, and the ensō becomes a still ring. */
+
+/* ── The send moment ── */
+.message.outgoing { opacity: 1; }
+.message.mine.outgoing .message-content { animation: feel-bubble 160ms var(--g-ease) backwards; }
+@keyframes feel-bubble { from { opacity: 0; transform: translateY(6px); } }
+/* your message's receipt sits under its bubble: Sending, then Sent, then nothing once Uni starts */
+.message.mine:has(.msg-receipt) { padding-bottom: 20px; }
+.message.mine .msg-receipt { position: absolute; right: 4px; top: calc(100% + 3px); font: 400 12px/1.3 var(--g-font-ui); color: var(--g-ink-3); white-space: nowrap; }
+
+/* the status line: in Uni's row, where the reply will start */
+.uni-status { margin: 14px 0 4px; color: var(--g-ink-2); font: 400 14px/1.4 var(--g-font-ui); animation: feel-fade 140ms var(--g-ease) backwards; }
+.uni-status-row { display: flex; align-items: center; gap: 8px; margin: 0; }
+.uni-status-mark { display: inline-grid; place-items: center; width: 18px; height: 18px; flex: none; color: var(--g-accent); }
+.uni-status-mark .enso path { fill: none; stroke: currentColor; stroke-width: 2.8; stroke-linecap: round; stroke-dasharray: 100; animation: feel-enso 1.6s var(--g-ease) backwards; }
+@keyframes feel-enso { from { stroke-dashoffset: 100; } }
+.uni-status-ring { display: none; width: 12px; height: 12px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px currentColor; }
+:root[data-motion="calm"] .uni-status-mark .enso { display: none; }
+:root[data-motion="calm"] .uni-status-ring { display: block; }
+.uni-status-clock { color: var(--g-ink-3); font-variant-numeric: tabular-nums; }
+.uni-status-leave { margin: 4px 0 0 26px; font-size: 13px; color: var(--g-ink-3); }
+@keyframes feel-fade { from { opacity: 0; } }
+.send.stop { background: var(--g-ink); color: var(--g-ground); }
+
+/* Stop, Try again: one quiet line on your side, never a bubble */
+.chat-note { display: flex; justify-content: flex-end; align-items: center; gap: 10px; margin: 10px 0 2px; font: 400 13px/1.4 var(--g-font-ui); color: var(--g-ink-2); }
+.chat-note-go { min-height: 32px; padding: 0 14px; border: var(--g-hair) solid var(--g-line-strong); border-radius: 999px; background: var(--g-paper); color: var(--g-ink); font: 500 13px/1 var(--g-font-ui); cursor: pointer; }
+
+/* a reply arriving settles in, paragraph by paragraph (180 ms each, 60 ms apart); a little blur on a desktop only */
+.message.arrived:not(.mine) .md > * { animation: feel-settle 180ms var(--g-ease) backwards; }
+@media (hover: hover) and (pointer: fine) and (min-width: 900px) { .message.arrived:not(.mine) .md > * { animation-name: feel-settle-blur; } }
+.message.arrived .md > :nth-child(2) { animation-delay: 60ms; }
+.message.arrived .md > :nth-child(3) { animation-delay: 120ms; }
+.message.arrived .md > :nth-child(4) { animation-delay: 180ms; }
+.message.arrived .md > :nth-child(5) { animation-delay: 240ms; }
+.message.arrived .md > :nth-child(6) { animation-delay: 300ms; }
+.message.arrived .md > :nth-child(n+7) { animation-delay: 360ms; }
+@keyframes feel-settle { from { opacity: 0; transform: translateY(4px); } }
+@keyframes feel-settle-blur { from { opacity: 0; transform: translateY(4px); filter: blur(4px); } }
+
+/* the work, folded into one line above the reply */
+.work-receipt { margin: 2px 0 6px; font: 500 12.5px/1.4 var(--g-font-ui); color: var(--g-ink-3); }
+.work-receipt summary { cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 4px; min-height: 24px; }
+.work-receipt summary::-webkit-details-marker { display: none; }
+.work-receipt summary::after { content: "▸"; font-size: 10px; transition: transform var(--g-t-state) var(--g-ease); }
+.work-receipt[open] summary::after { transform: rotate(90deg); }
+.work-receipt ul { margin: 2px 0 6px; padding-left: 18px; font-weight: 400; }
+.work-receipt[open] ul { animation: feel-fade 220ms var(--g-ease) backwards; }
+
+/* the space under an anchored question; "More below" sits above the composer, never over the text */
+.anchor-space { height: 0; flex: none; }
+
+/* ── Message actions: a quiet row, never a ⋯ on every message ── */
+.message-content { position: relative; }
+.msg-actions { display: flex; align-items: center; gap: 2px; }
+.msg-actions.always { margin: 4px 0 0 -8px; }
+.act { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-width: 32px; height: 32px; padding: 0 8px; border: 0; border-radius: 9px;
+  background: transparent; color: var(--g-ink-3); font: 500 12.5px/1 var(--g-font-ui); cursor: pointer; }
+.act:hover { background: var(--g-sunk); color: var(--g-ink); }
+.act[aria-pressed="true"] { color: var(--g-ink); background: var(--g-accent-soft); }
+.act-icon { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.act-emoji { font-size: 15px; line-height: 1; }
+.act-up .act-label { font-size: 15px; }
+.msg-actions .delete-own, .msg-actions button.danger { font: 500 12.5px/1 var(--g-font-ui); }
+/* an older message's row floats at its top corner on hover or focus, taking no room of its own */
+.msg-actions:not(.always) { position: absolute; top: -14px; right: 0; z-index: 2; padding: 2px; background: var(--g-paper); border: var(--g-hair) solid var(--g-line); border-radius: 12px;
+  box-shadow: var(--g-shadow-1); visibility: hidden; opacity: 0; transition: opacity var(--g-t-quick) var(--g-ease), visibility 0s linear var(--g-t-quick); }
+.message.mine .msg-actions:not(.always) { right: auto; left: 0; }
+.message:hover > .message-content > .msg-actions, .message:focus-within > .message-content > .msg-actions { visibility: visible; opacity: 1; transition-delay: 0s; }
+.msg-actions:not(.always) .act-label { display: none; }
+.msg-actions:not(.always) .act-up .act-label { display: inline; }
+@media (hover: none) {
+  /* touch: the latest reply's row is there; any message's sheet is a long press away */
+  .msg-actions:not(.always) { display: none; }
+  .msg-actions.always .act { min-width: 44px; height: 44px; }
+  .msg-actions.always .act-label { display: none; }
+  .msg-actions.always .act-up .act-label { display: inline; }
+}
+
+/* the long-press sheet */
+.msg-sheet-scrim { position: fixed; inset: 0; z-index: 60; background: rgba(20, 16, 10, .28); animation: feel-fade 220ms var(--g-ease) backwards; }
+.msg-sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 61; padding: 8px 12px calc(12px + env(safe-area-inset-bottom)); background: var(--g-paper);
+  border-top: var(--g-hair) solid var(--g-line-strong); border-radius: 18px 18px 0 0; box-shadow: var(--g-shadow-2); animation: feel-sheet 220ms var(--g-ease) backwards; }
+@keyframes feel-sheet { from { transform: translateY(100%); } }
+.msg-sheet-grab { width: 36px; height: 4px; margin: 0 auto 10px; border-radius: 2px; background: var(--g-line-strong); }
+.msg-sheet-preview { margin: 0 4px 10px; color: var(--g-ink-2); font: 400 14px/1.4 var(--g-font-uni); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.msg-sheet-react { display: flex; gap: 8px; padding: 4px 0 10px; border-bottom: var(--g-hair) solid var(--g-line); }
+.msg-sheet-react button { width: 52px; height: 48px; border: var(--g-hair) solid var(--g-line); border-radius: 14px; background: var(--g-ground); font-size: 22px; }
+.msg-sheet-react button[aria-pressed="true"] { border-color: var(--g-ink); }
+.msg-sheet-rows { display: grid; padding-top: 6px; }
+.msg-sheet-rows button { display: flex; align-items: center; gap: 14px; min-height: 48px; padding: 0 8px; border: 0; border-radius: 10px; background: transparent; color: var(--g-ink); font: 500 16px/1 var(--g-font-ui); text-align: left; }
+.msg-sheet-rows button:active { background: var(--g-sunk); }
+.msg-sheet-rows .act-icon { width: 20px; height: 20px; color: var(--g-ink-2); }
+
+/* ── Quick replies under a question ── */
+.quick-replies { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 4px; animation: feel-fade 140ms var(--g-ease) backwards; }
+.quick-replies button { min-height: 36px; padding: 0 16px; border: var(--g-hair) solid var(--g-line-strong); border-radius: 999px; background: var(--g-paper); color: var(--g-ink); font: 500 14px/1 var(--g-font-ui); cursor: pointer; }
+.quick-replies button:hover { border-color: var(--g-ink-2); }
+@media (pointer: coarse) { .quick-replies button { min-height: 44px; } }
+
+/* ── The New line ── */
+.new-line { display: flex; align-items: center; gap: 10px; margin: 18px 0 2px; color: var(--g-needs); font: 600 12px/1.3 var(--g-font-ui); }
+.new-line::after { content: ""; flex: 1; height: var(--g-hair); background: currentColor; opacity: .55; }
+
+/* ── Reading: a book page's rhythm for Uni's long answers ── */
+.message:not(.mine) .message-content .md > p { margin: 0 0 14px; }
+.message:not(.mine) .message-content .md > p:last-child { margin-bottom: 4px; }
+.message:not(.mine) .message-content .md .md-h { font-size: var(--g-text-uni); font-weight: 650; line-height: 1.35; margin: 24px 0 6px; }
+.message:not(.mine) .message-content .md > .md-h:first-child { margin-top: 2px; }
+.message:not(.mine) .message-content .md ul, .message:not(.mine) .message-content .md ol { margin: 0 0 14px; }
+.message:not(.mine) .message-content .md li + li { margin-top: 6px; }
+.md-table-wrap { position: relative; max-width: 100%; overflow-x: auto; margin: 4px 0 16px; }
+.md-table-wrap.cut { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); }
+.md-table { border-collapse: collapse; }
+.md-table th, .md-table td { border: 0; border-bottom: var(--g-hair) solid var(--g-line); padding: 7px 18px 7px 0; background: none; overflow-wrap: normal; word-break: normal; hyphens: manual; }
+.md-table th { font-family: var(--g-font-ui); font-size: 13px; font-weight: 600; color: var(--g-ink-2); border-bottom-color: var(--g-line-strong); }
+.md-table th:last-child, .md-table td:last-child { padding-right: 0; }
+.md-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+@media (max-width: 599px) {
+  .message-content .md pre.md-pre code { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .md-table td { min-width: 4.5em; }
+}
+
+/* ── The phone: the composer's text gets the width ── */
+@media (max-width: 599px) {
+  .composer { padding-inline: 4px; }
+  .composer .compose-row { position: relative; gap: 0; }
+  /* one round button on the right: the mic while the field is empty, Send once there is something to send, Stop while Uni works */
+  .composer .compose-row.empty .send:not(.stop) { display: none; }
+  .composer .compose-row:not(.empty) .mic:not(.recording), .composer .compose-row.empty:has(.stop) .mic:not(.recording) { display: none; }
+  /* the "Uni listening" ring sits inside the field, on its left */
+  .composer .compose-row .compose-uni { position: absolute; left: 48px; bottom: 4px; z-index: 1; height: 44px; }
+  .composer .compose-row:has(.compose-uni) textarea { padding-left: 36px; }
+}
+
+/* ── The Daylight: lines carry the meaning ── */
+:root[data-screen="ink"] .quick-replies button, :root[data-screen="ink"] .chat-note-go { border-color: var(--g-ink); }
+:root[data-screen="ink"] .msg-actions:not(.always) { box-shadow: none; border-color: var(--g-ink); }
+:root[data-screen="ink"] .new-line { color: var(--g-ink); }
+:root[data-screen="ink"] .new-line::after { opacity: 1; }
+:root[data-screen="ink"] .msg-sheet { box-shadow: none; border-top-color: var(--g-ink); }
+:root[data-screen="ink"] .msg-sheet-scrim { background: rgba(0, 0, 0, .15); }

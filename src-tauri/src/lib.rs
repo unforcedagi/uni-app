@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tauri::{Emitter, Manager};
 use uni_core::{
-    send_message_with_media, sync_older, sync_once,
+    remove_reaction, send_message_with_media, send_reaction, sync_older, sync_once,
     ConversationMessage, LiveConfig, LiveEvent, Store,
 };
 
@@ -1330,6 +1330,32 @@ async fn sealed_waiting(app: tauri::AppHandle) -> Result<Vec<uni_core::sealed_ca
         let answers = uni_core::sealed_card::Answers::load(&dir).map_err(|e| e.to_string())?;
         let now = nostr::Timestamp::now().as_secs();
         uni_core::sealed_card::waiting(&store, &keys.public_key().to_hex(), &trusted_uni(), &seal, &answers, now).map_err(|e| e.to_string())
+    })
+    .await
+}
+
+/// T-335 chat feel: toggle a reaction from the app: publish `emoji` on `target`, or, when `mine` names our
+/// existing reaction with that emoji, delete it (kind 5). A reaction on a Uni message is the "seen, thanks";
+/// the gateway doesn't answer it.
+#[tauri::command]
+async fn react_message(
+    app: tauri::AppHandle,
+    channel: String,
+    target: String,
+    emoji: String,
+    mine: Option<String>,
+) -> Result<(), String> {
+    relay_io(&app, move |url, keys, store| {
+        let ch = room_id(&channel)?;
+        tauri::async_runtime::block_on(async {
+            match mine {
+                Some(id) => remove_reaction(url, keys, None, store, &id).await,
+                None => send_reaction(url, keys, None, store, ch, &target, &emoji)
+                    .await
+                    .map(|_| ()),
+            }
+        })
+        .map_err(|e| e.to_string())
     })
     .await
 }
@@ -2938,6 +2964,7 @@ pub fn run() {
             live_start,
             send_typing,
             live_stop,
+            react_message,
             load_older,
             edit_message,
             delete_message,

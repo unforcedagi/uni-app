@@ -5,6 +5,8 @@
 // 2. Otherwise the place whose own words (its name, its one line on where it stands, its recent messages) share the message's most
 //    telling word: a word few places use counts for more than one most use. "talks about glaze".
 // 3. Otherwise where you last wrote ("where you last wrote"), or failing that where the latest talk was ("latest talk").
+// T-335 chat feel: the first two are sure (`sure`), and the composer chooses them for you, naming the room on Send; the third is a guess,
+// offered as a suggestion to tap, with nothing chosen until you do.
 // No model call: the app has no AI gateway of its own (a hosted one would mean sending the message off the device before it is sent).
 
 export type RouteRoom = {
@@ -16,7 +18,7 @@ export type RouteRoom = {
   /** When anyone last wrote there (unix seconds). */ lastTs?: number | null;
 };
 
-export type RoutePick = { id: string; why: string };
+export type RoutePick = { id: string; why: string; /** Named, or one strong match: chosen for you. A guess is only offered. */ sure?: boolean };
 
 const STOP = new Set(("the and for with that this from have has had was were are you your our out about into over under then than them they " +
   "there here what when where which who why how can could would should will just like some more most much many any all not but also its it's " +
@@ -56,7 +58,7 @@ export function makeRouter(rooms: readonly RouteRoom[]): (text: string) => Route
     if (!rooms.length) return [];
     // 1. places named
     const named = rooms.map((r) => ({ r, at: namedAt(text, r) })).filter((x) => x.at >= 0).sort((a, b) => a.at - b.at);
-    if (named.length) return named.slice(0, 3).map(({ r }) => ({ id: r.id, why: `names ${r.name}` }));
+    if (named.length) return named.slice(0, 3).map(({ r }) => ({ id: r.id, why: `names ${r.name}`, sure: true }));
     // 2. the most telling shared word: each word weighs log(1 + places / places using it)
     const words = [...new Set(routeWords(text))];
     if (words.length) {
@@ -75,7 +77,7 @@ export function makeRouter(rooms: readonly RouteRoom[]): (text: string) => Route
       });
       // a word every place uses tells them apart no better than chance: only a word some places lack counts
       const b = best as { i: number; score: number; word: string } | null;
-      if (b && df.get(b.word)! < rooms.length) return [{ id: rooms[b.i].id, why: `talks about ${b.word}` }];
+      if (b && df.get(b.word)! < rooms.length) return [{ id: rooms[b.i].id, why: `talks about ${b.word}`, sure: true }];
     }
     // 3. where you last wrote, else the latest talk
     const byMine = [...rooms].filter((r) => r.lastMine).sort((a, b) => (b.lastMine ?? 0) - (a.lastMine ?? 0))[0];

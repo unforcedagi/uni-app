@@ -43,7 +43,9 @@ import Pairing from "./Pairing";
 import { emojiLabel, type Reaction } from "./reactions";
 import { DeleteButton, InlineEditor } from "./InlineEditor";
 import { lastOwnMessage } from "./ownMessages";
-import { elapsed, workingOn } from "./working";
+import { workingOn } from "./working";
+import { CONTINUE, commandOf, firstUnread, isStopReply, livePing, openAsk, quickReplies, receiptLine, RETRY, STOP, workReceipt, type Receipt, type TurnPhase } from "./chatFeel";
+import { easeScroll, ICONS, MessageActions, MessageSheet, QuickReplies, shiftGlide, StatusLine, stopGlide, useLongPress, type Action } from "./ChatTurn";
 
 import { decisionIn, useDecisionLinks } from "./decisionLinks";
 import { DecisionCard, forgetDecisions } from "./DecisionCard";
@@ -91,7 +93,7 @@ import { ApprovalBanner } from "./areas/ApprovalRows";
 import { parseApproval, type Approval } from "./approvals";
 import { ApprovalPromptCard } from "./ApprovalPromptCard";
 import MotionSetting from "./MotionSetting";
-import { scrollMotion } from "./motion";
+import { calmMotion, scrollMotion } from "./motion";
 
 type Room = { id: string; name: string; last_message: string | null; last_ts: number | null; mentions: boolean; unread: number; /** a direct message, a room (false), or not known yet (null; absent in a list cached by an older app) */ dm?: boolean | null };
 type Message = { ref: string; channel: string; author: string; author_name: string; ts: number; body: string; mentions_me: boolean; root: string | null; parent: string | null; mentions: Member[]; reply_count: number; last_reply_ts: number | null; edited: boolean; reactions: Reaction[]; media?: MediaRef[] };
@@ -101,6 +103,8 @@ const TYPING_TTL_MS = 8000;
 const TYPING_SEND_MS = 3000;
 /** How long a freshly opened room holds the newest message against late layout (images, older pages). */
 const SETTLE_MS = 1500;
+/** T-335 chat feel: how far under the top of the chat a question just sent (or an answer longer than the screen) sits. */
+const ANCHOR_GAP = 16;
 type IdentityStatus = { paired: boolean; pubkey: string | null };
 type SyncResult = { pubkey: string; total_items: number; channel_errors: Record<string, string>; truncated_channels: string[] };
 
@@ -205,17 +209,6 @@ function ComposerMenu({ onMention, onAttach, onDiscard, canDiscard, sending }: {
 /** A room's chat is what is on screen (a room, a thread, Uni or an area with its room) with no full-page note over it. */
 function chatOnScreen(tab: { kind: string } | null, channel: string | null, fullPageNotes: number): boolean {
   return !!channel && !!tab && ["room", "thread", "areas", "area"].includes(tab.kind) && !fullPageNotes;
-}
-
-/** T-132: "Uni is working · 0:42" under the last message; only this line re-renders as its clock ticks. The clock is hidden from screen
- *  readers (the chat is a live region): they hear "Uni is working" once. */
-function WorkingLine({ name, since }: { name: string; since: number }) {
-  const [now, setNow] = useState(() => Date.now() / 1000);
-  useEffect(() => {
-    const t = window.setInterval(() => setNow(Date.now() / 1000), 1000);
-    return () => clearInterval(t);
-  }, []);
-  return <p className="working-line" role="status"><span className="working-dot" aria-hidden="true" /><span>{name} is working</span><span aria-hidden="true" className="working-clock"> · <time>{elapsed(now - since)}</time></span></p>;
 }
 
 /** T-200: scroll a list so the message `ref` sits `offset` px below its top. False when the message isn't in the list. */
@@ -455,9 +448,6 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const identityRef = useRef<string | null>(null);
   /** Set once Forget device key is confirmed: from then on no draft is saved, whatever arrives later (an identity, a send landing). */
   const draftsForgotten = useRef(false);
-  /** A scope whose saved draft was put back in front of text typed before the identity was known: a send of just that text, on its way
-   *  meanwhile, gives back the saved draft (and only it) when it lands. */
-  const restoredMerge = useRef(new Map<string, { revision: number; saved: string; added: string; mentions: Bindings }>());
   const [draftStorageWarning, setDraftStorageWarning] = useState("");
   const [pending, setPending] = useState<PendingFile[]>([]);
   const pendingStore = useRef(new Map<string, PendingFile[]>());
@@ -509,8 +499,14 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const [picker, setPicker] = useState<Picker | null>(null);
   const [busy, setBusy] = useState(false);
   const [sending, setSending] = useState(false);
-  /** r26 (Codex P1 3): the message being sent shows in its thread as "Sending…" the moment Send is pressed, until it is delivered (the draft stays in the composer meanwhile and is never lost) */
-  const [outgoing, setOutgoing] = useState<{ key: string; body: string } | null>(null);
+  /** r26 (Codex P1 3): the message being sent shows in its thread as "Sending…" the moment Send is pressed, until it is delivered. T-335 chat
+   *  feel: the composer is empty from that same frame (a send that fails puts the text back); `at` is when it went, `toUni` whether this room's
+   *  Uni was asked, and once posted `ref` is its id: it stays on screen until the room's list has it, so nothing blinks out in between. */
+  const [outgoing, setOutgoing] = useState<{ key: string; body: string; at: number; toUni: boolean; ref?: string } | null>(null);
+  /** T-335 chat feel: the messages sent to Uni from this device, and when (unix seconds): until Uni's 👀, the status line says it is passing. */
+  const asked = useRef(new Map<string, number>());
+  /** T-335 chat feel: the long-press sheet's message (touch). */
+  const [sheetFor, setSheetFor] = useState<string | null>(null);
   const sendingRef = useRef(false);
   const [status, setStatus] = useState("Loading conversations…");
   /** The last sync's machinery (message count, per-room warnings): for Developer only (r18). */
@@ -560,9 +556,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
         drafts.current.set(key, text ? `${saved.text}\n\n${text}` : saved.text);
         bindingStore.current.set(key, mentions);
         // a change of text, so a send on its way doesn't take it for its own and clear it
-        const revision = (draftRevisions.current.get(key) ?? 0) + 1;
-        draftRevisions.current.set(key, revision);
-        restoredMerge.current.set(key, { revision, saved: saved.text, added: text, mentions: new Map(saved.mentions) });
+        draftRevisions.current.set(key, (draftRevisions.current.get(key) ?? 0) + 1);
       }
       if (drafts.current.get(key)) storeDraft(key, drafts.current.get(key)!, bindingStore.current.get(key));
     }
@@ -574,7 +568,10 @@ function Conversations({ onForget }: { onForget: () => void }) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [identity]);
-  const actions = useRef({ openThread: (_m: Message) => {}, loadOlder: () => {}, saveEdit: (_m: Message, _b: string): Promise<void> => Promise.resolve(), cancelEdit: () => {}, deleteOwn: (_m: Message): Promise<void> => Promise.resolve() });
+  const actions = useRef({ openThread: (_m: Message) => {}, loadOlder: () => {}, saveEdit: (_m: Message, _b: string): Promise<void> => Promise.resolve(), cancelEdit: () => {}, deleteOwn: (_m: Message): Promise<void> => Promise.resolve(),
+    postAs: (_body: string) => {} });
+  /** T-335 chat feel: each message's row, built from the handlers of this render (MessageActions is memoised on what it shows). */
+  const rowMaker = useRef<(m: Message) => { actions: Action[]; tail?: ReactNode }>(() => ({ actions: [] }));
 
   const [searchOpen, setSearchOpen] = useState(false);
   // r19: Search, Settings and Vault keep the one dialog contract the sheets and Places keep: focus in, Tab kept inside, what is under them inert
@@ -909,6 +906,17 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const seenRef = useRef(new Map<string, Seen>());
   const newestRef = useRef<Seen | null>(null);
   const jumpUntil = useRef(0);
+  /** T-335 chat feel: a question just sent is held 16 px under the top of the chat while its answer grows below it (the view never follows
+   *  the text down); `spaceRef` is the blank room below the content that lets it sit there. Held until the room changes or the reader asks
+   *  for the end ("More below"). */
+  const anchor = useRef<{ view: string; ref: string | null; placed: boolean; /** where it was placed (scroll coordinates) */ top?: number; /** the reader scrolled: no more holding */ free?: boolean } | null>(null);
+  const spaceRef = useRef<HTMLDivElement>(null);
+  const [moreBelow, setMoreBelow] = useState(false);
+  /** The refs in the view when its first read came in, and the newest time among them: a later message arrived live, and settles in. */
+  const known = useRef<{ view: string | null; refs: Set<string>; ts: number; arrived: Set<string> }>({ view: null, refs: new Set(), ts: 0, arrived: new Set() });
+  /** A room opened on unread: how many, read before the room marks itself read; then the first unread message, which the New line sits over. */
+  const unreadAtOpen = useRef<{ view: string; unread: number } | null>(null);
+  const [newLine, setNewLine] = useState<{ view: string; ref: string; ts: number } | null>(null);
   const [loadedView, setLoadedView] = useState<string | null>(null);
   /** The view whose messages the relay store has answered with (not just the device's kept copy): only then can a room be said to be empty. */
   const [fetchedView, setFetchedView] = useState<string | null>(null);
@@ -1164,6 +1172,13 @@ function Conversations({ onForget }: { onForget: () => void }) {
     return () => { current = false; };
   }, [channel, root, synced, tick, limit, loadRooms]);
 
+  // T-335 chat feel: the count is read as the room opens (its read mark comes a moment later); a thread has no New line
+  useLayoutEffect(() => {
+    const view = channel ? `${channel}|${root}` : null;
+    anchor.current = null; setMoreBelow(false); setSheetFor(null);
+    const n = channel && !root ? roomsRef.current.find((r) => r.id === channel)?.unread ?? 0 : 0;
+    unreadAtOpen.current = view && n > 0 ? { view, unread: n } : null;
+  }, [channel, root]);
   // New room: back to the default window; older pages load on demand.
   // T-200: the room a note was opened as a page from comes back with the older messages it had loaded, so its spot is there to return to
   useEffect(() => { const spot = returnSpot.current; setLimit(spot && channel && spot.view.startsWith(`${channel}|`) ? spot.limit : 300); setOlder("idle"); setMenuFor(null); setEditing(null); asideAhead.current.clear(); }, [channel]);
@@ -1213,6 +1228,67 @@ function Conversations({ onForget }: { onForget: () => void }) {
     pinned.current = { ref: spot.ref, offset: spot.offset, until: Date.now() + SETTLE_MS };
   }, [listEl, currentView, messages]);
 
+  // T-335 chat feel: the anchored question's top and the content's end (the space's top), in the list's scroll coordinates
+  function anchorBox(list: HTMLElement) {
+    const a = anchor.current, space = spaceRef.current;
+    if (!a || !space) return null;
+    const el = (a.ref ? list.querySelector<HTMLElement>(`[data-ref="${CSS.escape(a.ref)}"]`) : null) ?? list.querySelector<HTMLElement>('[data-outgoing="true"]');
+    if (!el) return null;
+    const origin = list.getBoundingClientRect().top - list.scrollTop;
+    return { top: el.getBoundingClientRect().top - origin, end: space.getBoundingClientRect().top - origin };
+  }
+  /** Sizes the space so the anchored question can sit under the top, and says whether there is more below the screen. */
+  function fitAnchor() {
+    const list = listRef.current, space = spaceRef.current;
+    if (!list || !space) return;
+    const a = anchor.current, box = a && a.view === restoredView.current ? anchorBox(list) : null;
+    const h = `${Math.round(box ? Math.max(0, list.clientHeight - ANCHOR_GAP - (box.end - box.top)) : 0)}px`;
+    if (space.style.height !== h) space.style.height = h;
+    // what is above it changed height (the last reply's row folding away, a picture loading): it stays where it was, unless the reader moved
+    if (a && box && a.placed && !a.free && a.top !== undefined && Math.abs(box.top - a.top) > 0.5) { const d = box.top - a.top; list.scrollTop += d; shiftGlide(d); a.top = box.top; }
+    setMoreBelow(!!box && box.end - (list.scrollTop + list.clientHeight) > 24);
+  }
+  /** Holds what is sent next in this view under the top of the chat. */
+  function anchorNext(view: string | null) {
+    if (!view) return;
+    anchor.current = { view, ref: null, placed: false };
+    stickToEnd.current = false; settleUntil.current = 0; pinned.current = null;
+  }
+  // the question, once drawn: the space under it is sized, then it glides up (220 ms; a jump when calm)
+  useLayoutEffect(() => {
+    const list = listRef.current, a = anchor.current;
+    if (!list || !a || a.placed || a.view !== currentView || restoredView.current !== currentView) return;
+    fitAnchor();
+    const box = anchorBox(list);
+    if (!box) return;
+    a.placed = true;
+    a.top = box.top;
+    gliding.current = Date.now() + 400;
+    easeScroll(list, box.top - ANCHOR_GAP, 220, calmMotion());
+  });
+  // T-335 chat feel: a room opened on unread lands on its first unread message under the New line, once the store has answered
+  useLayoutEffect(() => {
+    const u = unreadAtOpen.current;
+    if (!u || u.view !== currentView || fetchedView !== currentView || restoredView.current !== currentView) return;
+    unreadAtOpen.current = null;
+    const i = firstUnread(messages, u.unread, identity);
+    if (i >= 0) { newPlaced.current = false; setNewLine({ view: u.view, ref: messages[i].ref, ts: messages[i].ts }); }
+  }, [currentView, fetchedView, messages, identity]);
+  const newPlaced = useRef(false);
+  useLayoutEffect(() => {
+    const el = listEl, line = newLine;
+    if (!el || !line || line.view !== currentView || newPlaced.current) return;
+    const at = el.querySelector<HTMLElement>(".new-line");
+    if (!at) return;
+    newPlaced.current = true;
+    stickToEnd.current = false;
+    settleUntil.current = 0;
+    stopGlide();
+    el.scrollTop += at.getBoundingClientRect().top - el.getBoundingClientRect().top - 8;
+    const m = el.querySelector<HTMLElement>(`[data-ref="${CSS.escape(line.ref)}"]`);
+    if (m) pinned.current = { ref: line.ref, offset: m.getBoundingClientRect().top - el.getBoundingClientRect().top, until: Date.now() + SETTLE_MS };
+  }, [listEl, currentView, newLine, messages]);
+
   // Remember where the reader is, per view (only once that view is restored,
   // so a half-swapped list never overwrites a good mark).
   const gliding = useRef(0);
@@ -1221,7 +1297,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     const el = listEl;
     if (!el) return;
     // T-132: the reader's own input also ends a glide to a new message, so a scroll up under way then is theirs, not the glide's
-    const onUser = () => { settleUntil.current = 0; pinned.current = null; jumpUntil.current = 0; gliding.current = 0; };
+    const onUser = () => { settleUntil.current = 0; pinned.current = null; jumpUntil.current = 0; gliding.current = 0; stopGlide(); if (anchor.current) anchor.current.free = true; };
     const onScroll = () => {
       const v = restoredView.current;
       if (!v || Date.now() < gliding.current) return;
@@ -1232,6 +1308,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       if (Date.now() < jumpUntil.current && !mark.atEnd) return;
       jumpUntil.current = 0;
       scrollMemory.current.set(v, mark);
+      if (anchor.current?.view === v) { stickToEnd.current = false; fitAnchor(); setAwayView(null); return; }
       stickToEnd.current = mark.atEnd;
       if (mark.atEnd && newestRef.current?.view === v) seenRef.current.set(v, newestRef.current);
       setAwayView(mark.atEnd ? null : v);
@@ -1250,6 +1327,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     const ro = new ResizeObserver(() => {
       if (pinned.current && Date.now() < pinned.current.until && pinTo(listEl, pinned.current)) return;
       pinned.current = null;
+      if (anchor.current && anchor.current.view === restoredView.current) { fitAnchor(); return; }
       if (stickToEnd.current && restoredView.current && preserveScroll.current === null) listEl.scrollTop = listEl.scrollHeight;
     });
     ro.observe(stackEl);
@@ -1270,6 +1348,16 @@ function Conversations({ onForget }: { onForget: () => void }) {
     if (!currentView || restoredView.current !== currentView || loadedView !== currentView || !stickToEnd.current) return;
     // T-335: calm (the Daylight, reduced motion) jumps: no glide to wait out
     const behavior = scrollMotion();
+    // T-335 chat feel: a new message from someone else longer than the screen is shown from its top; the view doesn't follow it down
+    const list = listRef.current, last = messages[messages.length - 1];
+    const live = !!last && known.current.view === currentView && !known.current.refs.has(last.ref);
+    const el = live && last.author !== identity ? list.querySelector<HTMLElement>(`[data-ref="${CSS.escape(last.ref)}"]`) : null;
+    if (el && el.offsetHeight > list.clientHeight - 80) {
+      stickToEnd.current = false;
+      gliding.current = Date.now() + 400;
+      easeScroll(list, list.scrollTop + el.getBoundingClientRect().top - list.getBoundingClientRect().top - ANCHOR_GAP, 220, behavior !== "smooth");
+      return;
+    }
     if (behavior === "smooth") gliding.current = Date.now() + 700;
     scrollEnd.current?.scrollIntoView({ behavior, block: "end" });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1391,8 +1479,20 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const typingLine = typingNames.length === 0 ? null : typingNames.length === 1 ? `${typingNames[0]} is typing…` : typingNames.length === 2 ? `${typingNames[0]} and ${typingNames[1]} are typing…` : "Several people are typing…";
   // T-132: "Uni is working · 0:42", from Uni's 👀 on your message until its reply; the clock ticks while it shows
   const viewShown = !!currentView && loadedView === currentView;
-  const working = viewShown ? workingOn(messages, identity, Date.now() / 1000) : null;
-  const workingName = working ? labels.get(working.author) ?? members.find((m) => m.pubkey === working.author)?.name ?? "Uni" : null;
+  // T-335 chat feel: the turn, in phases: the message is on its way, then waiting for Uni (until its 👀), then Uni works (until its reply).
+  // A stop ends it; so does anything from anyone else. Only messages sent to Uni from here are waited on.
+  const nowS = Date.now() / 1000;
+  const ask = viewShown ? openAsk(messages, identity) : null;
+  const working = ask ? workingOn(messages, identity, nowS) : null;
+  const out = outgoing && channel && outgoing.key === keyFor(channel, root) && commandOf(outgoing.body) !== "stop" ? outgoing : null;
+  const askedAt = ask ? asked.current.get(ask.ref) : undefined;
+  const turn: { phase: TurnPhase; since: number } | null = out?.toUni && !out.ref ? { phase: "sending", since: out.at }
+    : working ? { phase: "working", since: working.since }
+    : out?.toUni ? { phase: "waiting", since: out.at }
+    : askedAt !== undefined && nowS - askedAt < 1800 ? { phase: "waiting", since: askedAt } : null;
+  const turnPing = turn?.phase === "working" ? livePing(messages)?.body ?? null : null;
+  /** The message whose receipt reads "Sent" (posted, not yet picked up). */
+  const sentRef = turn?.phase === "waiting" && ask && !out ? ask.ref : null;
   // with nothing else arriving, look again now and then, so work past its hour with no live ping is let go
   const [, setWorkCheck] = useState(0);
   useEffect(() => {
@@ -1739,7 +1839,6 @@ function Conversations({ onForget }: { onForget: () => void }) {
     const sentIds = files.map((f) => f.id);
     const snapshot = draft;
     const key = keyFor(channel, root);
-    const revision = draftRevisions.current.get(key) ?? 0;
     const resolved = resolveRecipients(snapshot, bindings, members);
     if ("error" in resolved) { setError(resolved.error); return; }
     const recipients = [...resolved.recipients];
@@ -1751,37 +1850,24 @@ function Conversations({ onForget }: { onForget: () => void }) {
     if (root && !target) { setError("Thread not in local cache. Refresh before replying."); return; }
     sendingRef.current = true;
     setSending(true);
-    setOutgoing({ key, body: snapshot });
+    // T-335 chat feel: the composer is empty in the same frame as Send (the text is put back if the send fails, in front of anything typed
+    // since, so it is never lost); the message is on screen at once, and held under the top of the chat while the answer comes
+    const sentMentions = bindings, none: Bindings = new Map();
+    bindingStore.current.set(key, none);
+    editDraft(key, "", none);
+    const cleared = draftRevisions.current.get(key) ?? 0;
+    setDraft(""); bindingsRef.current = none; setBindings(none); setPicker(null);
+    const toUni = !!uniHere && recipients.includes(uniHere.pubkey);
+    setOutgoing({ key, body: snapshot, at: Date.now() / 1000, toUni });
+    anchorNext(currentView);
     setError(null);
     try {
-      await invoke<Message>("post_message", { channel, body: snapshot, replyTo: target, recipients, media: files.map((f) => f.media!) });
+      const sent = await invoke<Message | null>("post_message", { channel, body: snapshot, replyTo: target, recipients, media: files.map((f) => f.media!) });
       changePending(key, (items) => {
         for (const item of items) if (sentIds.includes(item.id) && item.preview) URL.revokeObjectURL(item.preview);
         return items.filter((item) => !sentIds.includes(item.id));
       });
-      // Do not erase text typed during an in-flight send or in another room.
-      const merge = restoredMerge.current.get(key);
-      if (merge && merge.added === snapshot && (draftRevisions.current.get(key) ?? 0) === merge.revision) {
-        // sent: the text typed before the saved draft came back; what stays is the saved draft
-        bindingStore.current.set(key, merge.mentions);
-        editDraft(key, merge.saved, merge.mentions);
-        if (activeScope.current === key) {
-          setDraft(merge.saved);
-          bindingsRef.current = merge.mentions;
-          setBindings(merge.mentions);
-        }
-      } else if ((draftRevisions.current.get(key) ?? 0) === revision) {
-        bindingStore.current.set(key, new Map());
-        editDraft(key, "", new Map());
-        if (activeScope.current === key) {
-          setDraft("");
-          bindingsRef.current = new Map();
-          setBindings(bindingsRef.current);
-        }
-      }
-      if (activeScope.current === key) {
-
-      }
+      landed(key, snapshot, sent?.ref ?? null, toUni);
       // Re-read through the room effect, which drops the result if the
       // user has switched rooms meanwhile.
       setTick((n) => n + 1);
@@ -1789,9 +1875,72 @@ function Conversations({ onForget }: { onForget: () => void }) {
       setStatus(recipients.length ? `Message sent · notified ${recipients.length}` : "Message sent");
     } catch (e) {
       setError(String(e));
+      setOutgoing(null);
+      const now = drafts.current.get(key) ?? "";
+      const back = (draftRevisions.current.get(key) ?? 0) === cleared || !now.trim() ? snapshot : `${snapshot}\n\n${now}`;
+      bindingStore.current.set(key, sentMentions);
+      editDraft(key, back, sentMentions);
+      if (activeScope.current === key) { setDraft(back); bindingsRef.current = sentMentions; setBindings(sentMentions); }
     }
-    finally { sendingRef.current = false; setSending(false); setOutgoing(null); }
+    finally { sendingRef.current = false; setSending(false); }
   }
+
+  /** T-335 chat feel: a message is posted: it is Uni's to pick up (the status line says so until its 👀), and it stays on screen until the
+   *  room's list has it. */
+  function landed(key: string, body: string, ref: string | null, toUni: boolean) {
+    if (ref && toUni) asked.current.set(ref, Date.now() / 1000);
+    if (ref && anchor.current && !anchor.current.ref) anchor.current.ref = ref;
+    setOutgoing((o) => o && o.key === key && o.body === body ? (ref ? { ...o, ref } : null) : o);
+  }
+  // the posted message is in the list now (or never comes, in a thread the list doesn't hold): the stand-in goes
+  useEffect(() => {
+    if (!outgoing?.ref) return;
+    if (messages.some((m) => m.ref === outgoing.ref)) { setOutgoing(null); return; }
+    const t = window.setTimeout(() => setOutgoing((o) => (o === outgoing ? null : o)), 6000);
+    return () => clearTimeout(t);
+  }, [outgoing, messages]);
+  /** T-335 chat feel: posts words as you, with this room's Uni addressed: a quick reply, Stop ("/stop"), Try again ("/retry"), Continue. */
+  async function postAs(body: string) {
+    if (!channel) return;
+    const key = keyFor(channel, root), view = currentView;
+    const uniHere = findUniMember(members);
+    const command = commandOf(body);
+    const toUni = !!uniHere && (!!command || notifyUni);
+    const target = root ? (messages.some((m) => m.ref === root) ? root : messages[messages.length - 1]?.ref ?? null) : null;
+    setOutgoing({ key, body, at: Date.now() / 1000, toUni });
+    if (command !== "stop") anchorNext(view);
+    setError(null);
+    try {
+      const sent = await invoke<Message | null>("post_message", { channel, body, replyTo: target, recipients: toUni ? [uniHere!.pubkey] : [], media: [] });
+      landed(key, body, sent?.ref ?? null, toUni && command !== "stop");
+      setTick((n) => n + 1);
+      void loadRooms().catch(() => {});
+    } catch (e) { setOutgoing(null); setError(`Couldn't send: ${e}`); }
+  }
+  async function reactTo(m: Message, emoji: string) {
+    const mine = m.reactions.find((r) => r.emoji === emoji && r.mine)?.mine ?? null;
+    try {
+      await invoke("react_message", { channel: m.channel, target: m.ref, emoji, ...(mine ? { mine } : {}) });
+      setTick((n) => n + 1);
+    } catch (e) { setError(`Couldn't react: ${e}`); }
+  }
+  /** T-335 chat feel: a message's words kept as a note in the vault, saying where they came from. */
+  async function saveAsNote(m: Message) {
+    const vault = activeProfile().vault;
+    const d = new Date(m.ts * 1000), two = (n: number) => String(n).padStart(2, "0");
+    const day = `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())} ${two(d.getHours())}${two(d.getMinutes())}`;
+    const words = m.body.replace(/[#*_`>|[\]()~]/g, " ").replace(/[\\/:?"<>]/g, " ").split(/\s+/).filter(Boolean).slice(0, 6).join(" ");
+    let path = `Saved from chat/${day} ${words || "message"}`.trim();
+    if (validateNotePath(path)) path = `Saved from chat/${day} message`;
+    const content = `${m.body}\n\n— ${m.author_name} in ${placeRef.current}, ${time(m.ts)}\n`;
+    try {
+      const note = await invoke<{ id: string; path: string } | null>("vault_create", { vault, path, content });
+      invalidatePaths(vault);
+      setToast(`Saved as a note: ${note?.path ?? path}`);
+    } catch (e) { setError(`Couldn't save the note: ${e}`); }
+  }
+  /** The place the room is, as the person knows it (the area's name in an area's chat). */
+  const placeRef = useRef("this room");
 
   async function forget() {
     // Two taps instead of window.confirm (unreliable in Android WebView).
@@ -1813,18 +1962,34 @@ function Conversations({ onForget }: { onForget: () => void }) {
   // The room's message list and composer. The room view and an area's chat pane are this same markup, so one send path,
   // one draft per room and one signer serve both; `above` is drawn directly over the composer (the suggestion bar).
   const uniInRoom = !!findUniMember(members);
-  const roomPane = (currentRoom: Room, above: ReactNode, placeholder?: string) => <>
+  // T-335 chat feel: the newest message, when it is someone else's question with plain answers, offers them as chips (not while you're sending)
+  const newest = messages[messages.length - 1];
+  const chips = viewShown && !isThread && newest && newest.author !== identity && !outgoing && !turn ? quickReplies(newest.body) : null;
+  const sheetMsg = sheetFor ? messages.find((m) => m.ref === sheetFor) ?? null : null;
+  const roomPane = (currentRoom: Room, above: ReactNode, placeholder?: string, place?: string) => {
+    placeRef.current = place || currentRoom.name;
+    const out = outgoing && outgoing.key === keyFor(currentRoom.id, root) && !messages.some((m) => m.ref === outgoing.ref) ? outgoing : null;
+    const outCommand = out ? commandOf(out.body) : null;
+    return <>
         <div className="message-list" ref={setList} role="log" aria-label="Messages" aria-live="polite">
           <div className="message-stack" ref={setStackEl}>
             <NoteOpener.Provider value={openFromChat}>{timeline}</NoteOpener.Provider>
-            {outgoing && outgoing.key === keyFor(currentRoom.id, root) && <article className="message mine outgoing" aria-busy="true" data-outgoing="true"><span className="message-avatar" aria-hidden="true" /><div className="message-content"><div className="message-meta"><time>Sending…</time></div><p className="outgoing-body">{outgoing.body}</p></div></article>}
-            {working && workingName && <WorkingLine name={workingName} since={working.since} />}
+            {out && (outCommand ? <p className="chat-note" data-outgoing="true">{outCommand === "stop" ? "Stopping Uni…" : "Asking Uni to try again…"}</p>
+              : <article className="message mine outgoing" aria-busy={!out.ref} data-outgoing="true"><span className="message-avatar" aria-hidden="true" /><div className="message-content"><div className="message-meta"><time>{out.ref ? clock(out.at) : "Sending…"}</time></div><p className="outgoing-body">{out.body}</p>{out.toUni && <span className="msg-receipt">{out.ref ? "Sent" : "Sending"}</span>}</div></article>)}
+            {turn && uniInRoom && <StatusLine phase={turn.phase} since={turn.since} ping={turnPing} place={placeRef.current} />}
+            {chips && <QuickReplies answers={chips} onPick={(a) => void postAs(a)} />}
             <div ref={scrollEnd} />
+            <div className="anchor-space" ref={spaceRef} aria-hidden="true" />
           </div>
         </div>
+        {sheetMsg && <MessageSheet preview={sheetMsg.body.slice(0, 140)} reactions={sheetMsg.author !== identity} mine={sheetMsg.reactions.filter((r) => r.mine).map((r) => r.emoji)}
+          rows={messageActions(sheetMsg, true)} onReact={(e) => void reactTo(sheetMsg, e)} onClose={closeSheet} />}
         <footer onFocusCapture={() => requestAnimationFrame(() => setComposerFocused(true))} onBlurCapture={(e) => { const composer = e.currentTarget; requestAnimationFrame(() => setComposerFocused(composer.contains(document.activeElement))); }} className="composer" onDragOver={(e) => { if (e.dataTransfer.types.includes("Files")) e.preventDefault(); }} onDrop={onDropFiles}>
           {/* a press doesn't take focus: focus in the composer hides the phone's bottom bar, which would move the button from under the tap */}
-          {away && <button type="button" className={`jump-latest${newSince ? " has-new" : ""}`} onMouseDown={(e) => e.preventDefault()} onClick={jumpToLatest} aria-label={newSince ? `Jump to latest, ${newSince} new message${newSince === 1 ? "" : "s"}` : "Jump to latest"}>
+          {anchor.current && anchor.current.view === currentView && moreBelow && <button type="button" className="jump-latest more-below" onMouseDown={(e) => e.preventDefault()} onClick={toContentEnd} aria-label="More below">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M6 13l6 6 6-6" /></svg><span>More below</span>
+          </button>}
+          {away && !(anchor.current && anchor.current.view === currentView) && <button type="button" className={`jump-latest${newSince ? " has-new" : ""}`} onMouseDown={(e) => e.preventDefault()} onClick={jumpToLatest} aria-label={newSince ? `Jump to latest, ${newSince} new message${newSince === 1 ? "" : "s"}` : "Jump to latest"}>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M6 13l6 6 6-6" /></svg>{newSince ? <span>{newSince} new message{newSince === 1 ? "" : "s"}</span> : <span className="jump-latest-label">Latest</span>}
           </button>}
           <ApprovalBanner approvals={approvals.filter((a) => a.channel === currentRoom.id)} onShow={openApproval} />
@@ -1852,7 +2017,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
           {voiceStorageWarning && <p role="status">{voiceStorageWarning}</p>}
           {draftStorageWarning && <p className="draft-storage" role="status">{draftStorageWarning}</p>}
           {voiceStatus && <p className="voice-status" role="status">{voiceStatus}</p>}
-          <div className="compose-row">
+          <div className={`compose-row${draftBlank && !pending.length ? " empty" : ""}`}>
             <ComposerMenu key={`${channel}:${root}`} onMention={startMention} onAttach={() => fileInput.current?.click()} onDiscard={discardDraft} canDiscard={hasDraft} sending={sending} />
             <ComposerField box={box} inputRef={composerInput} aria-label={`Message ${currentRoom.name}`} onChange={(e) => updateDraft(e.target.value, e.target.selectionStart)} onPaste={onPasteFiles} onSelect={(e) => syncPicker(e.currentTarget.value, e.currentTarget.selectionStart)} onBlur={() => setPicker(null)} onKeyDown={onKeyDown} maxLength={65536} rows={1} placeholder={isThread ? "Reply in thread…" : placeholder ?? "Message Uni…"} />
             {/* Uni hears every message in a room it is in, unless muted here: a small, visible switch (it was hidden with the old destination line) */}
@@ -1861,13 +2026,54 @@ function Conversations({ onForget }: { onForget: () => void }) {
             <button className={`address-toggle compose-icon mic ${recorder.recording && recordingOrigin.current?.key === scope() ? "recording" : ""}`} onClick={() => void toggleRecording()} disabled={sending || (recorder.busy && (!recorder.recording || recordingOrigin.current?.key !== scope()))} aria-pressed={recorder.recording && recordingOrigin.current?.key === scope()} aria-label={recorder.recording && recordingOrigin.current?.key === scope() ? "Stop recording voice message" : "Record a voice message"} title={recorder.recording && recordingOrigin.current?.key === scope() ? "Stop recording" : "Voice message"}>
               {recorder.recording && recordingOrigin.current?.key === scope() ? <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" fill="currentColor" /></svg> : <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3" /><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8" /></svg>}
             </button>
-            <button className="send compose-icon" disabled={(draftBlank && !pending.some((f) => !f.voice && f.state === "ready")) || manualAttachments(pending).some(attachmentBlocksSend) || sending || recorder.busy} onClick={() => void send()} aria-label="Send message" title={sending ? "Sending…" : "Send message"} aria-busy={sending}>
-              {sending ? <span aria-hidden="true">…</span> : <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 7-7 7 7M12 5v14" /></svg>}
+            {/* T-335 chat feel: while Uni works and the field is empty, Send is Stop, in the same place; typing gives Send back (a word to Uni meanwhile) */}
+            {turn && uniInRoom && draftBlank && !pending.length ? <button className="send compose-icon stop" onClick={() => void postAs(STOP)} aria-label="Stop Uni" title="Stop Uni">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1.5" fill="currentColor" stroke="none" /></svg>
             </button>
+            : <button className="send compose-icon" disabled={(draftBlank && !pending.some((f) => !f.voice && f.state === "ready")) || manualAttachments(pending).some(attachmentBlocksSend) || sending || recorder.busy} onClick={() => void send()} aria-label="Send message" title={sending ? "Sending…" : "Send message"} aria-busy={sending}>
+              {sending ? <span aria-hidden="true">…</span> : <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 7-7 7 7M12 5v14" /></svg>}
+            </button>}
           </div>
           <p className="compose-hint">Enter to send · Shift+Enter for a new line · @ to mention</p>
         </footer>
-  </>;
+  </>; };
+  /** T-335 chat feel: "More below" goes to the end of what is there, and the view follows the newest again. */
+  function toContentEnd() {
+    const list = listRef.current;
+    anchor.current = null;
+    setMoreBelow(false);
+    if (spaceRef.current) spaceRef.current.style.height = "0px";
+    if (!list) return;
+    stickToEnd.current = true;
+    jumpUntil.current = Date.now() + 2000;
+    easeScroll(list, list.scrollHeight, 220, calmMotion());
+  }
+  const closeSheet = useCallback(() => setSheetFor(null), []);
+  rowMaker.current = (m) => ({ actions: messageActions(m, false),
+    tail: m.author === identity ? <DeleteButton key={`del-${m.ref}`} label="your message" onDelete={() => actions.current.deleteOwn(m)} /> : undefined });
+  useLongPress(listEl, (ref) => { if (messages.some((m) => m.ref === ref)) setSheetFor(ref); });
+  /** A message's actions. Someone else's: Copy, Try again (the latest reply, where Uni is), 👍, Reply, Save as note; your own: Copy, Edit.
+   *  In the sheet also Select text (and Delete for your own). */
+  function messageActions(m: Message, inSheet: boolean): Action[] {
+    const mine = m.author === identity;
+    const copy: Action = { id: "copy", label: "Copy", icon: ICONS.copy, run: () => void copyText(m.body, "Copied text") };
+    const select: Action = { id: "select", label: "Select text", icon: ICONS.select, run: () => requestAnimationFrame(() => {
+      const el = listRef.current?.querySelector(`[data-ref="${CSS.escape(m.ref)}"] .md`);
+      if (el) window.getSelection()?.selectAllChildren(el);
+    }) };
+    if (mine) return [copy, ...(editing !== m.ref ? [{ id: "edit", label: "Edit", icon: ICONS.edit, run: () => setEditing(m.ref) }] : []), ...(inSheet ? [select] : [])];
+    const up = m.reactions.find((r) => r.emoji === "👍");
+    const latest = m.ref === latestReply && uniInRoom && !isThread;
+    return [
+      ...(inSheet ? [] : [copy]),
+      ...(latest ? [{ id: "retry", label: "Try again", icon: ICONS.retry, run: () => void postAs(RETRY) }] : []),
+      ...(inSheet ? [] : [{ id: "up", label: "👍", aria: "Thumbs up", icon: null, pressed: !!up?.mine, run: () => void reactTo(m, "👍") }]),
+      { id: "reply", label: "Reply", icon: ICONS.reply, run: () => openThread(m) },
+      ...(inSheet ? [copy] : []),
+      { id: "save", label: "Save as note", icon: ICONS.save, run: () => void saveAsNote(m) },
+      ...(inSheet ? [select] : []),
+    ];
+  }
   /** T-212: the decisions a message names: its `uni:<id>` refs (a card only if the note is a decision), then a known open decision its
    *  `[decision T-NN]` marker or bare id names. */
   const markerHits = useRef(new Map<string, string>());
@@ -1943,7 +2149,37 @@ function Conversations({ onForget }: { onForget: () => void }) {
     return <ApprovalPromptCard a={a} state={promptsEnded && m.ts < now - 60 ? "unchecked" : "checking"} />;
   };
   const endedKey = `${promptsEnded ? [...promptsEnded].map(([k, v]) => `${k}${v.outcome}`).join(" ") : "-"}${promptsFailed ? "!" : ""}`;
+  // T-335 chat feel: what a room's list holds besides its messages. Pings feed the status line and fold into the reply's one-line receipt,
+  // never a message of their own (a stale one with no reply after it stays folded as an earlier update); the gateway's "⚡ Stopped" after
+  // your stop is said by the Stopped row; the newest reply from someone else has its actions always shown.
+  const feel = useMemo(() => {
+    const hidden = new Set<string>(), receipts = new Map<string, Receipt>();
+    let answered = false, latest: string | null = null;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (isWorkerStatus(m.body)) { if (answered || !staleStatus(m, Date.now() / 1000, i === messages.length - 1)) hidden.add(m.ref); continue; }
+      if (m.author !== identity) {
+        answered = true;
+        const prev = messages.slice(0, i).reverse().find((x) => !isWorkerStatus(x.body));
+        if (isStopReply(m.body) && prev && prev.author === identity && commandOf(prev.body) === "stop") { hidden.add(m.ref); continue; }
+        if (!latest && !isMaintenance(m.body)) latest = m.ref;
+        const r = workReceipt(messages, i, identity);
+        if (r) receipts.set(m.ref, r);
+      } else answered = false;
+    }
+    return { hidden, receipts, latest };
+  }, [messages, identity]);
+  const latestReply = feel.latest;
+  // what the view held when its first read came in; anything newer arrived live, and settles in
+  if (currentView && fetchedView === currentView && known.current.view !== currentView) {
+    known.current = { view: currentView, refs: new Set(messages.map((m) => m.ref)), ts: messages.reduce((t, m) => Math.max(t, m.ts), 0), arrived: new Set() };
+  }
   const renderMessage = (m: Message, inThread: boolean, prev?: Message, newest = false) => {
+    if (!inThread && feel.hidden.has(m.ref)) return null;
+    const command = m.author === identity && !(inThread && m.ref === root) ? commandOf(m.body) : null;
+    if (command === "stop") return <p key={m.ref} data-ref={m.ref} className="chat-note uni-stopped">You stopped Uni.{m.ref === lastOwnMessage(messages, identity)?.ref
+      && <button type="button" className="chat-note-go" onClick={() => actions.current.postAs(CONTINUE)}>Continue</button>}</p>;
+    if (command === "retry") return <p key={m.ref} data-ref={m.ref} className="chat-note uni-retried">You asked Uni to try again.</p>;
     // r18: a progress ping from hours or days ago is folded away as a past update, never the room's live status
     if (isWorkerStatus(m.body) && !(inThread && m.ref === root) && editing !== m.ref && staleStatus(m, Date.now() / 1000, newest)) return <details key={m.ref} data-ref={m.ref} className="message status-line status-past">
       <summary><span className="status-line-text">Earlier progress update</span><time>{time(m.ts)}</time></summary><p className="status-past-body">{m.body}</p></details>;
@@ -1952,21 +2188,23 @@ function Conversations({ onForget }: { onForget: () => void }) {
       <summary><span className="status-line-text">{UPKEEP_LABEL}</span><time>{clock(m.ts)}</time></summary><p className="status-past-body">{m.body}</p></details>;
     if (isWorkerStatus(m.body) && !(inThread && m.ref === root) && editing !== m.ref) return <article key={m.ref} data-ref={m.ref} className="message status-line" title={m.body}><span className="status-line-text">{m.body}</span><time>{clock(m.ts)}</time></article>;
     const grouped = !!prev && prev.author === m.author && m.ts - prev.ts < 300 && !(inThread && prev.ref === root);
-    return <article key={m.ref} data-ref={m.ref} className={`message ${m.ref === focusRef ? "search-focus" : ""} ${grouped ? "grouped" : ""} ${m.author === identity ? "mine" : ""} ${m.mentions_me ? "highlight" : ""} ${inThread && m.ref === root ? "thread-root" : ""} ${waitingRefs.has(m.ref) ? "approval-waiting" : ""}`}>
+    const k = known.current;
+    if (k.view === currentView && !k.refs.has(m.ref) && m.ts >= k.ts && m.author !== identity) k.arrived.add(m.ref);
+    const receipt = inThread ? null : feel.receipts.get(m.ref);
+    return <article key={m.ref} data-ref={m.ref} className={`message ${k.arrived.has(m.ref) ? "arrived" : ""} ${m.ref === focusRef ? "search-focus" : ""} ${grouped ? "grouped" : ""} ${m.author === identity ? "mine" : ""} ${m.mentions_me ? "highlight" : ""} ${inThread && m.ref === root ? "thread-root" : ""} ${waitingRefs.has(m.ref) ? "approval-waiting" : ""}`}>
       {grouped ? <time className="gutter-time">{clock(m.ts)}</time> : <span className="message-avatar" style={{ background: `hsl(${150 + (hue(m.author) % 120) - 60} 22% 44%)` }} aria-hidden="true">{m.author_name[0]?.toUpperCase() ?? "?"}</span>}
-      <div className="message-content">{!grouped && <div className="message-meta"><strong>{m.author_name}</strong><time>{clock(m.ts)}</time></div>}{editing === m.ref ? <InlineEditor key={m.ref} initial={m.body} onSave={(body) => actions.current.saveEdit(m, body)} onCancel={() => actions.current.cancelEdit()} /> : promptView(m) ?? secretView(m) ?? <Body body={attachmentBody(m.body, m.media, relayOrigin)} mentions={m.mentions} me={identity} edited={m.edited} />}
+      <div className="message-content">{!grouped && <div className="message-meta"><strong>{m.author_name}</strong><time>{clock(m.ts)}</time></div>}
+        {receipt && <details className="work-receipt"><summary>{receiptLine(receipt)}</summary>{receipt.steps.length > 0 && <ul>{receipt.steps.map((s) => <li key={s}>{s[0].toUpperCase() + s.slice(1)}</li>)}</ul>}</details>}
+        {editing === m.ref ? <InlineEditor key={m.ref} initial={m.body} onSave={(body) => actions.current.saveEdit(m, body)} onCancel={() => actions.current.cancelEdit()} /> : promptView(m) ?? secretView(m) ?? <Body body={attachmentBody(m.body, m.media, relayOrigin)} mentions={m.mentions} me={identity} edited={m.edited} />}
         <Attachments body={m.body} media={m.media} />
         {decisionCards(m, inThread)}
         {m.reactions.length > 0 && <div className="reactions" aria-label="Reactions">{m.reactions.map((r) => <span key={r.emoji} className={`pill ${r.mine ? "mine" : ""}`} aria-label={`${emojiLabel(r.emoji)} ${r.count}${r.mine ? ", including yours" : ""}`}>{emojiLabel(r.emoji)} <span>{r.count}</span></span>)}</div>}
         {!inThread && m.reply_count > 0 && <button className="thread-summary" onClick={() => actions.current.openThread(m)} aria-label={`View thread with ${m.reply_count} ${m.reply_count === 1 ? "reply" : "replies"}`}>💬 {m.reply_count} {m.reply_count === 1 ? "reply" : "replies"}{m.last_reply_ts ? <span> · last {time(m.last_reply_ts)}</span> : null}</button>}
-        <div className={`message-more ${menuFor === m.ref ? "open" : ""}`}>
-          <button className="message-more-go" onClick={() => setMenuFor(menuFor === m.ref ? null : m.ref)} aria-label={`More actions for ${m.author_name}'s message`} aria-expanded={menuFor === m.ref}>⋯</button>
-          {menuFor === m.ref && <div className="message-menu" role="group" aria-label="Message actions" onClick={(e) => { if (e.target instanceof Element && !e.target.closest(".danger, [aria-label^='Delete'], [aria-label^='Tap again']")) setMenuFor(null); }}>
-          <button onClick={() => void copyText(m.body, "Copied text")} aria-label={`Copy ${m.author_name}'s message`}>Copy</button>
-          {m.author === identity && editing !== m.ref && <button onClick={() => setEditing(m.ref)} aria-label="Edit your message">Edit</button>}
-          {m.author === identity && <DeleteButton key={`del-${m.ref}`} label="your message" onDelete={() => actions.current.deleteOwn(m)} />}
-          </div>}
-        </div>
+        {m.ref === sentRef && <span className="msg-receipt">Sent</span>}
+        {/* T-335 chat feel: a quiet row instead of a ⋯ on every message: always shown on the latest reply, on hover or focus elsewhere; a
+            long press opens the sheet on touch */}
+        {editing !== m.ref && <MessageActions m={m} make={rowMaker} always={!inThread && m.ref === latestReply}
+          retry={!inThread && m.ref === latestReply && uniInRoom} editable={m.author === identity} />}
       </div>
     </article>;
   };
@@ -1977,6 +2215,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     const sameDay = !!prev && dayKey(prev.ts) === dayKey(m.ts);
     const out: React.ReactNode[] = [];
     if (!sameDay) out.push(<div key={`d-${m.ref}`} className="day-divider" role="separator"><span>{dayLabel(m.ts)}</span></div>);
+    if (!inThread && newLine && newLine.view === currentView && newLine.ref === m.ref) out.push(<div key={`new-${m.ref}`} className="new-line" role="separator"><span>New · since {clock(newLine.ts)}</span></div>);
     out.push(renderMessage(m, inThread, sameDay ? prev : undefined, i === list.length - 1));
     return out;
   });
@@ -1987,6 +2226,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     saveEdit,
     cancelEdit: () => { setEditing(null); input.current?.focus(); },
     deleteOwn,
+    postAs: (body) => void postAs(body),
   };
 
   // The rendered timeline depends only on data, never on the draft, so
@@ -2013,7 +2253,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     {currentView && fetchedView === currentView && channel && roomDecisions(channel, messages)}
   </>,
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  [messages, identity, menuFor, decisions.version, root, older, roomName, editing, focusRef, relayOrigin, fetchedView, failedView, currentView, busy, synced, secretRequesters, secretReceipts, waitingKey, endedKey]);
+  [messages, identity, menuFor, decisions.version, root, older, roomName, editing, focusRef, relayOrigin, fetchedView, failedView, currentView, busy, synced, secretRequesters, secretReceipts, waitingKey, endedKey, feel, sentRef, newLine, uniInRoom]);
 
   const topNote = notes[notes.length - 1];
   // A top-level note Back closes its tab and returns to the last used tab.
@@ -2039,6 +2279,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     // T-258: a full-window layer (video full screen, image viewer) closes first, as Escape closes it.
     if (modalCount() > 0) { window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })); return; }
     if (journalFocus) { setJournalFocus(false); return; }
+    if (sheetFor) { setSheetFor(null); return; }
     if (panel) { setPanel(null); return; }
     if (searchOpen) { setSearchOpen(false); return; }
     if (overlayRef.current && !notes.length) { overlayRef.current.close(); return; }
@@ -2053,7 +2294,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   // At Uni's room tree (nothing open over it) the system's own Back runs: the app goes to the background.
   const [modalOpen, setModalOpenState] = useState(false);
   useEffect(() => { const on = (e: Event) => setModalOpenState(((e as CustomEvent<number>).detail ?? 0) > 0); window.addEventListener("uni-modal", on); return () => window.removeEventListener("uni-modal", on); }, []);
-  const canGoBack = modalOpen || !!panel || journalFocus || notes.length > 0 || asideShown || searchOpen || !!root || hasAreaBack || (!!activeTab(tabs) && activeTab(tabs)!.kind !== "areas");
+  const canGoBack = modalOpen || !!sheetFor || !!panel || journalFocus || notes.length > 0 || asideShown || searchOpen || !!root || hasAreaBack || (!!activeTab(tabs) && activeTab(tabs)!.kind !== "areas");
   // Ctrl+W (Linux, Windows) closes what is open over the place. r22 (Codex 6): on macOS the native menu's "Close Window" owns Cmd+W.
   const closeActiveRef = useRef(() => {});
   const goHistoryRef = useRef<(by: -1 | 1) => void>(() => {});
@@ -2143,7 +2384,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   const areaRoomFor = (id: string | null | undefined, threadRoot: string | null = null) => {
     const room = id && channel === id && (root ?? null) === threadRoot ? currentRoom : undefined;
     if (!id || !room) return null;
-    return { id, messages, loaded: loadedView === `${id}|${threadRoot}`, me: identity, render: (above: ReactNode, placeholder?: string) => roomPane(room, above, placeholder), compose: composeHere };
+    return { id, messages, loaded: loadedView === `${id}|${threadRoot}`, me: identity, render: (above: ReactNode, placeholder?: string, place?: string) => roomPane(room, above, placeholder, place), compose: composeHere };
   };
   // An area learns its room from the area note; the tab remembers it, and the room view follows the tab.
   const syncAreaRoom = (id: string | null, own: boolean | null) => {

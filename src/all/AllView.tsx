@@ -12,6 +12,8 @@ import { findUniMember } from "../uniActions";
 import { andList, interleave, sendEach, type FeedMessage } from "./allCore";
 import { makeRouter, type RouteRoom } from "./route";
 import { enterInsertsNewline } from "../composerCore";
+import { isMaintenance, isWorkerStatus } from "../chatMarkers";
+import { commandOf, isStopReply } from "../chatFeel";
 import "./all.css";
 
 /** A place in the All view: an area and its own room. */
@@ -87,10 +89,12 @@ export function AllComposer({ rooms, words, onOpen, onFocus, onSent, place = "pl
   // where the chips on screen say
   const route = useMemo(() => makeRouter(rooms.map((r): RouteRoom => ({ id: r.id, name: r.name, slug: r.slug, text: `${r.stands ?? ""} ${words.get(r.id)?.text ?? ""}`, lastTs: r.lastTs, lastMine: words.get(r.id)?.lastMine ?? null }))), [rooms, words]);
   const picks = useMemo(() => (text.trim() ? route(text) : []), [text, route]);
-  const to = (chosen ?? picks.map((p) => p.id)).filter((id) => nameOf.has(id));
+  // T-335 chat feel: a sure route is chosen for you (and named on Send); a guess is only offered, dashed, until you tap it
+  const to = (chosen ?? picks.filter((p) => p.sure).map((p) => p.id)).filter((id) => nameOf.has(id));
+  const offered = chosen ? [] : picks.filter((p) => !p.sure && nameOf.has(p.id) && !to.includes(p.id));
   const done = attempt.current && attempt.current.body === text ? attempt.current.done : null;
   const left = to.filter((id) => !done?.has(id));
-  const why = chosen ? "your choice" : picks.length ? picks.map((p) => p.why).filter((w, i, a) => a.indexOf(w) === i).join(", ") : "";
+  const why = chosen ? "your choice" : picks.length ? picks.filter((p) => p.sure).map((p) => p.why).filter((w, i, a) => a.indexOf(w) === i).join(", ") : "";
   useEffect(() => { held.text = text; held.chosen = chosen; }, [text, chosen]);
   // the field grows with its text up to six lines
   useLayoutEffect(() => { const el = field.current; if (!el) return; el.style.height = "auto"; el.style.height = `${Math.min(el.scrollHeight, 6 * 24 + 16)}px`; }, [text]);
@@ -124,11 +128,13 @@ export function AllComposer({ rooms, words, onOpen, onFocus, onSent, place = "pl
   return <section className={`all-compose all-compose-${place}`} aria-label="Talk to Uni">
     {text.trim() && <div className="all-route" role="group" aria-label="Where this goes">
       <span className="all-to">To</span>
-      {to.map((id) => <span key={id} className={`all-chip${done?.has(id) ? " sent" : ""}`} data-room={id}>
+      {to.map((id) => <span key={id} className={`all-chip chosen${done?.has(id) ? " sent" : ""}`} data-room={id}>
         <span className="all-chip-name">{nameOf.get(id)}</span>
         {done?.has(id) ? <span className="all-chip-sent">sent</span>
           : <button type="button" className="all-chip-x" aria-label={`Don't send to ${nameOf.get(id)}`} onClick={() => edit(to.filter((x) => x !== id))}>×</button>}
       </span>)}
+      {offered.map((p) => <button key={p.id} type="button" className="all-chip suggested" data-room={p.id} aria-label={`Send to ${nameOf.get(p.id)}: ${p.why}`}
+        onClick={() => { edit([...to, p.id]); field.current?.focus(); }}><span className="all-chip-name">{nameOf.get(p.id)}</span><span className="all-chip-why">{p.why}</span></button>)}
       <button type="button" className="all-chip all-chip-add" aria-expanded={adding} aria-label="Add a room" onClick={() => setAdding(!adding)}>+ Room</button>
       {why && <span className="all-why" data-why>{chosen ? why : `suggested: ${why}`}</span>}
       {adding && <ul className="all-add" aria-label="Rooms to add">{rooms.filter((r) => !to.includes(r.id)).map((r) => <li key={r.id}>
@@ -141,10 +147,10 @@ export function AllComposer({ rooms, words, onOpen, onFocus, onSent, place = "pl
         onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && !touchKeyboard()) { e.preventDefault(); void send(); } }} />
       <button type="button" className="send all-send" disabled={!text.trim() || !left.length || sending}
         aria-label={left.length ? `Send to ${named(left)}` : "Choose a room to send to"} onClick={() => void send()}>
-        {sending ? "Sending…" : left.length > 1 ? `Send to ${left.length}` : "Send"}
+        {sending ? "Sending…" : left.length > 1 ? `Send to ${left.length} rooms` : left.length ? `Send to ${nameOf.get(left[0])}` : "Choose a room"}
       </button>
     </div>
-    {text.trim() && !to.length && <p className="all-note" role="status">Choose a room: nothing is sent until you do.</p>}
+    {text.trim() && !to.length && <p className="all-note" role="status">Pick a room, or keep typing. Nothing is sent until you do.</p>}
     {outcome && <p className={`all-note${outcome.failed.length ? " all-failed" : ""}`} role="status">
       {outcome.sent.length > 0 && <>Sent to {outcome.sent.map((id, i) => <span key={id}>{i > 0 && (i === outcome.sent.length - 1 ? " and " : ", ")}<button type="button" className="all-link" onClick={() => onOpen(id)}>{nameOf.get(id)}</button></span>)}. </>}
       {outcome.noUni.length > 0 && <>Uni isn't in {named(outcome.noUni)}, so no Uni there was asked. </>}
@@ -153,24 +159,33 @@ export function AllComposer({ rooms, words, onOpen, onFocus, onSent, place = "pl
   </section>;
 }
 
-const FeedRow = memo(function FeedRow({ m, place, mine, me, grouped, onOpen }: { m: Message; place: string; mine: boolean; me: string | null; grouped: boolean; onOpen: (room: string, ref: string) => void }) {
-  return <article className={`message all-msg${mine ? " mine" : ""}${grouped ? " grouped" : ""}`} data-ref={m.ref} data-room={m.channel}
+/** T-335 chat feel: a reply this long shows its start in All, and a way into its room for the rest. */
+const isLong = (body: string) => body.length > 320 || body.split("\n").filter((l) => l.trim()).length > 4;
+/** A room's own tint, from its id: the dot on its label. */
+const tint = (id: string) => { let h = 0; for (const c of id) h = (h * 31 + c.charCodeAt(0)) % 360; return `hsl(${h} 38% 42%)`; };
+
+const FeedRow = memo(function FeedRow({ m, place, mine, me, run, named, onOpen }: { m: Message; place: string; mine: boolean; me: string | null;
+  /** The first message of a run from one room: it carries the room's label. */ run: boolean; /** Says who and when (a new author, or a pause). */ named: boolean;
+  onOpen: (room: string, ref: string) => void }) {
+  const clamp = !mine && isLong(m.body);
+  return <article className={`message all-msg${mine ? " mine" : ""}${run ? " run" : " grouped"}${clamp ? " clamped" : ""}`} data-ref={m.ref} data-room={m.channel}
     onClick={(e) => { if (!(e.target instanceof Element) || !e.target.closest("a, button, summary, input, textarea")) onOpen(m.channel, m.ref); }}>
     <div className="message-content">
-      {!grouped && <div className="all-meta">
-        <button type="button" className="all-place" aria-label={`Open ${place}, at this message`} onClick={() => onOpen(m.channel, m.ref)}>{place}</button>
-        {!mine && <strong>{m.author_name}</strong>}<time>{clock(m.ts)}</time>
-      </div>}
+      {run && <div className="all-run"><button type="button" className="all-place" style={{ ["--room-tint" as string]: tint(m.channel) }} aria-label={`Open ${place}, at this message`} onClick={() => onOpen(m.channel, m.ref)}>{place}</button><time>{clock(m.ts)}</time></div>}
+      {named && !mine && <div className="all-meta"><strong>{m.author_name}</strong>{!run && <time>{clock(m.ts)}</time>}</div>}
       {m.body.trim() ? <Body body={m.body} mentions={m.mentions ?? []} me={me} edited={m.edited} />
         : <p className="all-file">{m.media?.length ? `${m.media.length === 1 ? "A file" : `${m.media.length} files`}: open the room to see ${m.media.length === 1 ? "it" : "them"}` : "(nothing to show here)"}</p>}
+      {clamp && <button type="button" className="all-rest" onClick={() => onOpen(m.channel, m.ref)}>Read the rest in {place} ›</button>}
     </div>
   </article>;
 });
+/** Not for All: progress pings, Uni's upkeep, the room buttons' commands and the gateway's answer to a stop. */
+const notTalk = (m: FeedMessage) => isWorkerStatus(m.body) || isMaintenance(m.body) || !!commandOf(m.body) || isStopReply(m.body);
 
 export function AllFeed({ rooms, byRoom, loaded, failed, me, onOpen }: { rooms: readonly AllRoom[]; byRoom: ReadonlyMap<string, Message[]>; loaded: boolean; failed: readonly string[];
   me: string | null; onOpen: (room: string, ref: string) => void }) {
   const nameOf = useMemo(() => new Map(rooms.map((r) => [r.id, r.name])), [rooms]);
-  const feed = useMemo(() => interleave(new Map([...byRoom].filter(([id]) => nameOf.has(id)))), [byRoom, nameOf]);
+  const feed = useMemo(() => interleave(new Map([...byRoom].filter(([id]) => nameOf.has(id)).map(([id, list]) => [id, list.filter((m) => !notTalk(m))]))), [byRoom, nameOf]);
   const list = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
   useLayoutEffect(() => { const el = list.current; if (el && stick.current) el.scrollTop = el.scrollHeight; }, [feed]);
@@ -179,9 +194,10 @@ export function AllFeed({ rooms, byRoom, loaded, failed, me, onOpen }: { rooms: 
   for (const m of feed) {
     const sameDay = !!prev && new Date(prev.ts * 1000).toDateString() === new Date(m.ts * 1000).toDateString();
     if (!sameDay) rows.push(<div key={`d-${m.ref}`} className="day-divider" role="separator"><span>{dayLabel(m.ts)}</span></div>);
-    // a run of one author in one room within five minutes reads as one message: its place and name once
-    const grouped = sameDay && prev!.channel === m.channel && prev!.author === m.author && m.ts - prev!.ts < 300;
-    rows.push(<FeedRow key={`${m.channel}:${m.ref}`} m={m} place={nameOf.get(m.channel) ?? "Room"} mine={!!me && m.author === me} me={me} grouped={grouped} onOpen={onOpen} />);
+    // T-335 chat feel: runs, not a mirror: the room's label only where the room changes; inside a run, who speaks when the author changes
+    const run = !sameDay || prev!.channel !== m.channel;
+    const named = run || prev!.author !== m.author || m.ts - prev!.ts >= 300;
+    rows.push(<FeedRow key={`${m.channel}:${m.ref}`} m={m} place={nameOf.get(m.channel) ?? "Room"} mine={!!me && m.author === me} me={me} run={run} named={named} onOpen={onOpen} />);
     prev = m;
   }
   return <div className="all-feed" ref={list} role="log" aria-label="All rooms, by time" aria-live="polite"

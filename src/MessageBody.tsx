@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, useEffect, useRef, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { parseMarkdown, type Block, type Inline } from "./markdown";
 import { mentionSegments, type Member } from "./mentions";
@@ -8,6 +8,26 @@ import { useNoteTitle } from "./areas/noteRefs";
 import { CodeBlock } from "./CodeBlock";
 
 const ULID = /^[0-9A-HJKMNP-TV-Z]{26}$/;
+/** A cell that is a number (an amount, a count, a share, a measure). */
+const NUMBER = /^\s*[-+−]?[$€£]?\s*\d[\d.,\s]*\s*(%|[a-zµ°]{0,3})\s*$/i;
+/** A cell's text, for telling numbers apart. */
+const plain = (nodes: Inline[]): string => nodes.map((n) => n.t === "text" || n.t === "code" ? n.v : "c" in n ? plain(n.c) : "").join("");
+/** T-335 chat feel: a table wider than its column scrolls sideways inside it, with a fade on the cut edge while there is more to see. */
+function TableWrap({ children }: { children: ReactNode }) {
+  const el = useRef<HTMLDivElement>(null);
+  const [cut, setCut] = useState(false);
+  useEffect(() => {
+    const box = el.current;
+    if (!box || typeof ResizeObserver === "undefined") return;
+    const look = () => setCut(box.scrollWidth - box.clientWidth - box.scrollLeft > 2);
+    const ro = new ResizeObserver(look);
+    ro.observe(box);
+    box.addEventListener("scroll", look, { passive: true });
+    look();
+    return () => { ro.disconnect(); box.removeEventListener("scroll", look); };
+  }, []);
+  return <div ref={el} className={`md-table-wrap${cut ? " cut" : ""}`}>{children}</div>;
+}
 /** A note cited by its bare id (`uni:01M…`) reads as the note's title (r14), never as the id: "a note" when it can't be read (the id stays in
  *  the chip's tooltip). */
 function NoteChipLabel({ id, vault }: { id: string; vault: string }) {
@@ -64,10 +84,15 @@ export const Body = memo(function Body({ body, mentions, me, edited }: { body: s
         const items = b.items.map((it, j) => <li key={`${k}.${j}`}>{blocks(it, `${k}.${j}`)}</li>);
         return b.ordered ? <ol key={k} start={b.start}>{items}</ol> : <ul key={k}>{items}</ul>;
       }
-      case "table": return <div key={k} className="md-table-wrap"><table className="md-table">
-        <thead><tr>{b.head.map((c, j) => <th key={j} style={b.align[j] ? { textAlign: b.align[j]! } : undefined}>{inline(c, `${k}.h${j}`)}</th>)}</tr></thead>
-        <tbody>{b.rows.map((r, ri) => <tr key={ri}>{r.map((c, j) => <td key={j} style={b.align[j] ? { textAlign: b.align[j]! } : undefined}>{inline(c, `${k}.${ri}.${j}`)}</td>)}</tr>)}</tbody>
-      </table></div>;
+      case "table": {
+        // T-335 chat feel: a column of numbers lines up on the right (unless the table says otherwise)
+        const num = b.head.map((_, j) => !b.align[j] && b.rows.length > 0 && b.rows.every((r) => NUMBER.test(plain(r[j] ?? []))));
+        const cls = (j: number) => (num[j] ? "num" : undefined);
+        return <TableWrap key={k}><table className="md-table">
+        <thead><tr>{b.head.map((c, j) => <th key={j} className={cls(j)} style={b.align[j] ? { textAlign: b.align[j]! } : undefined}>{inline(c, `${k}.h${j}`)}</th>)}</tr></thead>
+        <tbody>{b.rows.map((r, ri) => <tr key={ri}>{r.map((c, j) => <td key={j} className={cls(j)} style={b.align[j] ? { textAlign: b.align[j]! } : undefined}>{inline(c, `${k}.${ri}.${j}`)}</td>)}</tr>)}</tbody>
+      </table></TableWrap>;
+      }
     }
   });
   const split = splitMarkers(body);

@@ -11,17 +11,17 @@ const rooms: RouteRoom[] = [
 ];
 
 // 1. a place named: that place, and why
-assert.deepEqual(suggestRoute("Can North Field take the spare benches?", rooms), [{ id: "ch-north", why: "names North Field" }]);
+assert.deepEqual(suggestRoute("Can North Field take the spare benches?", rooms), [{ id: "ch-north", why: "names North Field", sure: true }]);
 // by its slug, as #slug or in words
-assert.deepEqual(suggestRoute("#kiln-studio is cold this morning", rooms), [{ id: "ch-kiln", why: "names Kiln Studio" }]);
-assert.deepEqual(suggestRoute("tell kiln studio the cones arrived", rooms), [{ id: "ch-kiln", why: "names Kiln Studio" }]);
+assert.deepEqual(suggestRoute("#kiln-studio is cold this morning", rooms), [{ id: "ch-kiln", why: "names Kiln Studio", sure: true }]);
+assert.deepEqual(suggestRoute("tell kiln studio the cones arrived", rooms), [{ id: "ch-kiln", why: "names Kiln Studio", sure: true }]);
 // two places named: both, in the order named
 assert.deepEqual(suggestRoute("Bee Garden and North Field both need the mower", rooms).map((p) => p.id), ["ch-bees", "ch-north"]);
 // a name inside another word is not a mention ("northfield" is not "north field"; "beekeeping" is not "bees")
 assert.equal(suggestRoute("beekeeping course in spring", rooms)[0].why.startsWith("names"), false);
 // 2. the most telling shared word
-assert.deepEqual(suggestRoute("Is the honey ready to jar?", rooms), [{ id: "ch-bees", why: "talks about honey" }]);
-assert.deepEqual(suggestRoute("the glaze tiles cracked", rooms), [{ id: "ch-kiln", why: "talks about glaze" }]);
+assert.deepEqual(suggestRoute("Is the honey ready to jar?", rooms), [{ id: "ch-bees", why: "talks about honey", sure: true }]);
+assert.deepEqual(suggestRoute("the glaze tiles cracked", rooms), [{ id: "ch-kiln", why: "talks about glaze", sure: true }]);
 // plural folded: "hedges" in the message matches "hedge" talk
 assert.equal(suggestRoute("more hedges to cut", rooms)[0].id, "ch-north");
 // 3. nothing shared: where you last wrote, else the latest talk

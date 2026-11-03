@@ -7,6 +7,8 @@ import { startMotion } from "./motion";
 import { startTide } from "./glow/tide";
 // T-335 glow-up: the look's tokens and fonts, after every other stylesheet the entry pulls in
 import "./glow/glow.css";
+// T-335 chat feel: the room's turn with Uni, on the glow-up tokens
+import "./chatFeel.css";
 
 /** A render error in remote content must not blank the whole app. */
 class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { error: Error | null }> {

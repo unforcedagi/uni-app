@@ -69,3 +69,30 @@
 }
 :root[data-screen="ink"] .all-chip, :root[data-screen="ink"] .all-place { border-color: #000; border-width: 1.5px; }
 :root[data-screen="ink"] .all-place::before { background: #000; }
+
+/* T-335 chat feel: All in runs. A room's label (its tint, its name, the time) only where the room changes; long replies show their start;
+   a sure route is a filled chip, a guess a dashed one to tap. */
+.all-run { display: flex; align-items: baseline; gap: 8px; margin: 6px 0 4px; }
+.all-run time { font: 400 12px/1.3 var(--g-font-ui); color: var(--g-ink-3); font-variant-numeric: tabular-nums; }
+.all-msg.mine .all-run { justify-content: flex-end; }
+.all-msg.run { padding-top: 16px; }
+.all-place { font: 600 13px/1 var(--g-font-ui); }
+.all-place::before { background: var(--room-tint, var(--g-accent)); }
+.all-msg.clamped .md { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+.all-rest { all: unset; box-sizing: border-box; cursor: pointer; min-height: 32px; display: inline-flex; align-items: center; margin-top: 2px; font: 500 13.5px/1 var(--g-font-ui); color: var(--g-ink-2); }
+.all-rest:hover { color: var(--g-ink); text-decoration: underline; text-underline-offset: 3px; }
+.all-rest:focus-visible { outline: 2px solid var(--g-focus); outline-offset: 2px; }
+.all-chip.chosen { background: var(--g-ink); color: var(--g-ground); border-color: var(--g-ink); }
+.all-chip.chosen .all-chip-x { color: var(--g-ground); opacity: .75; }
+.all-chip.chosen .all-chip-x:hover { background: transparent; opacity: 1; }
+.all-chip.chosen.sent { background: var(--g-paper); color: var(--g-ink-2); border-color: var(--g-line-strong); }
+.all-chip.suggested { all: unset; box-sizing: border-box; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; min-height: 32px; padding: 0 12px; border-radius: 999px;
+  border: var(--g-hair) dashed var(--g-ink-2); background: transparent; font: 600 13.5px/1 var(--g-font-ui); color: var(--g-ink); }
+.all-chip.suggested:hover { border-style: solid; }
+.all-chip.suggested:focus-visible { outline: 2px solid var(--g-focus); outline-offset: 2px; }
+.all-chip-why { font: italic 400 13px/1 var(--g-font-uni); color: var(--g-ink-3); }
+.all-send:disabled { opacity: 1; background: var(--g-sunk); color: var(--g-ink-3); }
+@media (pointer: coarse) { .all-chip.suggested, .all-chip-add, .all-rest { min-height: 44px; } }
+:root[data-screen="ink"] .all-chip.chosen { background: #000; color: #fff; }
+:root[data-screen="ink"] .all-chip.suggested { border: 1.5px dashed #000; }
+:root[data-screen="ink"] .all-place::before { background: #000; }

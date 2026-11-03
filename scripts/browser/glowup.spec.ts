@@ -85,8 +85,8 @@ test('All: every area room interleaved by time, each marked with its place; a ta
   const rooms = await feed.locator('article.all-msg').evaluateAll((els) => els.map((e) => e.getAttribute('data-room')));
   expect(rooms).toEqual(['ch-choir', 'ch-choir', 'ch-north', 'ch-north', 'ch-kiln', 'ch-kiln', 'ch-bees', 'ch-table', 'ch-table', 'ch-north', 'ch-bees', 'ch-kiln', 'ch-choir']);
   await expect(feed).not.toContainText('Restless but stayed');
-  // every message carries its place's name
-  await expect(feed.locator('article.all-msg .all-place')).toHaveCount(order.length);
+  // T-335 chat feel: runs, not a mirror: a place's name where the room changes (nine runs here)
+  await expect(feed.locator('article.all-msg .all-place')).toHaveCount(9);
   await expect(feed.locator('article[data-ref="k3"] .all-place')).toHaveText('Kiln Studio');
   // the choice is kept: a reload opens on All
   await page.reload();
@@ -117,7 +117,7 @@ test('All: the route is a suggestion with its reason; chips edit it; Send posts 
   await field(page).fill('Tell Choir and North Field the hall is booked for Tuesday');
   await expect(chips(page)).toHaveText(['Choir', 'North Field']);
   await expect(page.locator('.all-why')).toHaveText('suggested: names Choir, names North Field');
-  await expect(page.getByRole('button', { name: 'Send to Choir and North Field', exact: true })).toHaveText('Send to 2');
+  await expect(page.getByRole('button', { name: 'Send to Choir and North Field', exact: true })).toHaveText('Send to 2 rooms');
   // the person edits the route: take Choir off, add Long Table
   await page.getByRole('button', { name: "Don't send to Choir" }).click();
   await page.getByRole('button', { name: 'Add a room' }).click();
@@ -131,7 +131,7 @@ test('All: the route is a suggestion with its reason; chips edit it; Send posts 
   await page.getByRole('button', { name: "Don't send to Long Table" }).click();
   await expect(page.getByRole('button', { name: 'Choose a room to send to' })).toBeDisabled();
   if (!touch()) await field(page).press('Enter');
-  await expect(page.locator('.all-note')).toContainText('nothing is sent until you do');
+  await expect(page.locator('.all-note')).toContainText('Nothing is sent until you do');
   expect((await posts(page)).length).toBe(before);
   // two rooms chosen; Enter sends to each once, as the person, with that room's Uni addressed
   await page.getByRole('button', { name: 'Add a room' }).click();

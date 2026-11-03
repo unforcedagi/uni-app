@@ -42,15 +42,20 @@ async function sendAndLook(page: Page, text: string) {
   await box(page).fill(text);
   return page.evaluate(async ({ text, touch }) => {
     const ta = [...document.querySelectorAll<HTMLTextAreaElement>('textarea')].find((t) => t.getAttribute('aria-label')?.startsWith('Message '))!;
+    const listEl = document.querySelector('.message-list')!;
+    const inList = () => (listEl.textContent ?? '').includes(text);
+    // when the message enters the list, timed by the DOM change itself (a frame's length on a busy machine is not the app's delay)
+    let seenAt: number | null = null;
+    const mo = new MutationObserver(() => { if (seenAt === null && inList()) seenAt = performance.now() - t0; });
+    mo.observe(listEl, { childList: true, subtree: true, characterData: true });
     const t0 = performance.now();
     if (touch) document.querySelector<HTMLButtonElement>('.composer button.send')!.click();
     else ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true }));
-    const inList = () => (document.querySelector('.message-list')?.textContent ?? '').includes(text);
-    let seenAt: number | null = inList() ? performance.now() - t0 : null;
+    if (seenAt === null && inList()) seenAt = performance.now() - t0;
     await new Promise((r) => requestAnimationFrame(() => r(null)));
+    mo.disconnect();
     const value = ta.value;
     const stop = !!document.querySelector('.composer button[aria-label="Stop Uni"]');
-    if (seenAt === null && inList()) seenAt = performance.now() - t0;
     return { value, stop, seenAt };
   }, { text, touch: touch() });
 }
@@ -129,7 +134,9 @@ test('a long answer anchors under its question: the view does not follow it down
   await expect(page.getByRole('button', { name: /More below/ })).toBeVisible();
   // done: no status line, Send is back, and the work is one quiet line above the reply
   await expect(status(page)).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Send message' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Stop Uni' })).toHaveCount(0);
+  // the phone's one round button is the mic while the field is empty; elsewhere Send is back
+  await expect(page.getByRole('button', { name: project() === 'phone' ? 'Record a voice message' : 'Send message' })).toBeVisible();
   await expect(reply.locator('.work-receipt')).toContainText(/^Worked \d+s/);
   await expect(list(page).locator('article.message', { hasText: '⏳' })).toHaveCount(0);
   await shot(page, '03-anchored');
@@ -196,15 +203,16 @@ test('message actions: the latest reply has a quiet row (Copy, Try again, 👍, 
     await own.hover();
     await expect(own.getByRole('group', { name: 'Message actions' }).getByRole('button', { name: 'Edit', exact: true })).toBeVisible();
   } else {
+    await older.scrollIntoViewIfNeeded();
     const b = (await older.locator('p').first().boundingBox())!;
     await page.evaluate(({ x, y }) => {
       const el = document.elementFromPoint(x, y)!;
       el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: x, clientY: y, pointerType: 'touch', isPrimary: true }));
     }, { x: b.x + 20, y: b.y + 8 });
-    await page.waitForTimeout(650);
-    await page.evaluate(({ x, y }) => { document.elementFromPoint(x, y)!.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: x, clientY: y, pointerType: 'touch', isPrimary: true })); }, { x: b.x + 20, y: b.y + 8 });
+    // the finger stays down until the sheet is up, as a person's does
     const sheet = page.getByRole('dialog', { name: 'Message actions' });
     await expect(sheet).toBeVisible();
+    await page.evaluate(({ x, y }) => { document.elementFromPoint(x, y)!.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: x, clientY: y, pointerType: 'touch', isPrimary: true })); }, { x: b.x + 20, y: b.y + 8 });
     for (const e of ['👍', '❤️', '✓', '❓']) await expect(sheet.getByRole('button', { name: `React ${e}` })).toBeVisible();
     for (const n of ['Reply', 'Copy', 'Save as note', 'Select text']) {
       const btn = sheet.getByRole('button', { name: n, exact: true });
@@ -263,7 +271,7 @@ test('reading: a long answer has a book page\'s rhythm; tables keep their words 
 });
 
 test('the New line: a room opened on unread lands on the first unread message, under "New · since …"', async ({ page }) => {
-  await boot(page, { 'ch-kiln': 3 });
+  await boot(page, { 'ch-kiln': 0 });
   // three long unread answers, so landing at the end would show only the last one's tail
   await page.evaluate((b) => { const w = window as any; for (let i = 0; i < 3; i++) w.__arrive('ch-kiln', 'Uni', `Unread ${i + 1}. ${b}`, 600 - i * 60); }, LONG);
   await openRoom(page, 'Kiln Studio');

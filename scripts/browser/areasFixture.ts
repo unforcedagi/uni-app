@@ -519,8 +519,11 @@ Two proposals wait on a scope decision.
     w.__msgs = msgs;
     w.__react = (channel: string, emoji: string, ref: string | null = null, by = 'c'.repeat(64)) => {
       const list = msgs[channel] ?? [];
-      const m = ref ? list.find((x: any) => x.ref === ref) : [...list].reverse().find((x: any) => x.author === U);
-      if (!m) return null;
+      const old = ref ? list.find((x: any) => x.ref === ref) : [...list].reverse().find((x: any) => x.author === U);
+      if (!old) return null;
+      // a new object, as the store's next read gives (the app keeps an unchanged message as the one it drew)
+      const m = { ...old, reactions: old.reactions.map((x: any) => ({ ...x, by: [...(x.by ?? [])] })) };
+      list[list.indexOf(old)] = m;
       const r = m.reactions.find((x: any) => x.emoji === emoji);
       if (r) { r.count += 1; (r.by ??= []).push({ pubkey: by, ts: Math.floor(Date.now() / 1000) }); }
       else m.reactions.push({ emoji, count: 1, mine: by === U ? 'react-' + m.ref : null, by: [{ pubkey: by, ts: Math.floor(Date.now() / 1000) }] });
@@ -528,9 +531,9 @@ Two proposals wait on a scope decision.
       return m.ref;
     };
     w.__editMsg = (channel: string, ref: string, body: string) => {
-      const m = (msgs[channel] ?? []).find((x: any) => x.ref === ref);
-      if (!m) return;
-      m.body = body; m.edited = true;
+      const list = msgs[channel] ?? [], i = list.findIndex((x: any) => x.ref === ref);
+      if (i < 0) return;
+      const m = list[i] = { ...list[i], body, edited: true };
       for (const h of w.__listeners['uni://live'] ?? []) w.__cbs[h]?.({ event: 'uni://live', id: 1, payload: { kind: 'edit', channel, author: m.author } });
     };
     if (d.tasks) for (const n of notes) { if (n.id === 'a-techne') n.metadata = { ...n.metadata, room: 'techne' }; if (n.id === 'p-cohere') n.metadata = { ...n.metadata, room: 'cohere' }; }
@@ -833,7 +836,8 @@ Two proposals wait on a scope decision.
           case 'refresh': if (d.identityDelay) await new Promise((r) => setTimeout(r, d.identityDelay)); return { pubkey: U, total_items: 0, channel_errors: {}, truncated_channels: [] };
           // T-335: like the store: the room's marker moves to its newest message, so nothing in it is unread (and the rooms list is re-read)
           // T-335 chat feel: a reaction made from the app (toggled: a second one with the same emoji takes yours back), and a note saved
-          case 'react_message': { const m = (msgs[args.channel] ?? []).find((x: any) => x.ref === args.target); if (!m) throw 'reaction target is not cached in this room';
+          case 'react_message': { const list = msgs[args.channel] ?? [], i = list.findIndex((x: any) => x.ref === args.target); if (i < 0) throw 'reaction target is not cached in this room';
+            const m = list[i] = { ...list[i], reactions: list[i].reactions.map((x: any) => ({ ...x })) };
             const r = m.reactions.find((x: any) => x.emoji === args.emoji);
             if (r?.mine) { r.count -= 1; r.mine = null; if (!r.count) m.reactions.splice(m.reactions.indexOf(r), 1); }
             else if (r) { r.count += 1; r.mine = 'react-' + m.ref; } else m.reactions.push({ emoji: args.emoji, count: 1, mine: 'react-' + m.ref, by: [{ pubkey: U, ts: Math.floor(Date.now() / 1000) }] });
