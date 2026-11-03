@@ -130,7 +130,8 @@ test.describe('code blocks', () => {
     expect(await blocks.nth(0).locator('pre code').evaluate((el) => el.textContent)).toBe(PY);
     // inline code: no bar, no button
     await expect(first.locator('p code')).toHaveText('sow(4)');
-    await expect(first.getByRole('button', { name: /^Copy/ })).toHaveCount(2);
+    // (each code block's own Copy; the message's Copy is in its action row: T-335 chat feel)
+    await expect(first.getByRole('button', { name: /^Copy (\w+ )?code$/ })).toHaveCount(2);
 
     const py = first.getByRole('button', { name: 'Copy python code' });
     await press(py);

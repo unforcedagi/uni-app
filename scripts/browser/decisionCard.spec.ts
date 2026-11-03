@@ -165,7 +165,8 @@ test.describe('decision cards in the chat', () => {
     const msg = page.locator('.sr-chat .message').filter({ hasText: 'Your call on the garden page layout' });
     await expect(msg.locator('.decision-loading')).toContainText("Couldn't read this note to show its decision");
     await page.evaluate(() => { (window as any).__noteFails = {}; });
-    await msg.getByRole('button', { name: 'Try again' }).click();
+    // (exact: the reply's own row has "Ask Uni to try again", T-335 chat feel)
+    await msg.getByRole('button', { name: 'Try again', exact: true }).click();
     await expect(msg.getByRole('group', { name: /^Pick one:/ })).toBeVisible();
   });
 

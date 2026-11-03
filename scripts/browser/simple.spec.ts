@@ -442,8 +442,10 @@ test.describe('simple', () => {
       const first = page.locator('.sr-chat .message').first();
       const row = first.getByRole('group', { name: 'Message actions' });
       await page.mouse.move(1, 1);
-      await expect(row).toBeHidden();
+      // out of sight until hover or focus (opacity: a keyboard can still Tab into it)
+      await expect(row).toHaveCSS('opacity', '0');
       await first.hover();
+      await expect(row).toHaveCSS('opacity', '1');
       // Aaron's own message (the first one): Copy, Edit, Delete and nothing else; no menu roles that promise arrow keys
       await expect(row.getByRole('button')).toHaveText(['Copy', 'Edit', /Delete/]);
       await expect(page.getByRole('menuitem')).toHaveCount(0);
