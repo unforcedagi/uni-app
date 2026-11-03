@@ -1262,8 +1262,8 @@ function Conversations({ onForget }: { onForget: () => void }) {
     setMoreBelow(!!box && box.end - (list.scrollTop + list.clientHeight) > 24);
   }
   /** Lets go of a hold whose message never landed (a failed send): the space goes, and the view is back at the newest, following it. */
-  function releaseAnchor() {
-    if (!anchor.current || anchor.current.ref) return;
+  function releaseAnchor(view: string | null) {
+    if (!anchor.current || anchor.current.ref || anchor.current.view !== view) return;
     anchor.current = null;
     setMoreBelow(false);
     if (spaceRef.current) spaceRef.current.style.height = "0px";
@@ -1277,8 +1277,9 @@ function Conversations({ onForget }: { onForget: () => void }) {
     if (!view) return;
     // only from the end of the room (or near it): a reader scrolled back into the history (a note open beside it, T-200) keeps the place,
     // and the newest is a tap away (Jump to latest)
-    const list = listRef.current;
-    if (list && !stickToEnd.current && list.scrollHeight - list.scrollTop - list.clientHeight > list.clientHeight / 2) return;
+    // (a follow-up sent while an answer is held from its top anchors too: that reader is in the conversation, not the history)
+    const list = listRef.current, holding = !!anchor.current && anchor.current.view === view && !anchor.current.free;
+    if (list && !stickToEnd.current && !holding && list.scrollHeight - list.scrollTop - list.clientHeight > list.clientHeight / 2) return;
     anchor.current = { view, ref: null, placed: false };
     stickToEnd.current = false; settleUntil.current = 0; pinned.current = null;
   }
@@ -1286,11 +1287,12 @@ function Conversations({ onForget }: { onForget: () => void }) {
   useLayoutEffect(() => {
     const list = listRef.current, a = anchor.current;
     if (!list || !a || a.placed || a.view !== currentView || restoredView.current !== currentView) return;
-    fitAnchor();
-    const box = anchorBox(list);
-    if (!box) return;
+    // one read of the layout, then the writes (the space, the scroll): the send's frame pays for one layout, not three
+    const box = anchorBox(list), space = spaceRef.current;
+    if (!box || !space) return;
     a.placed = true;
     a.top = box.top;
+    space.style.height = `${Math.round(Math.max(0, list.clientHeight - ANCHOR_GAP - (box.end - box.top)))}px`;
     gliding.current = Date.now() + 400;
     easeScroll(list, box.top - ANCHOR_GAP, 220, calmMotion());
   });
@@ -1920,7 +1922,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
     } catch (e) {
       setError(String(e));
       setOutgoing(null);
-      releaseAnchor();
+      releaseAnchor(sendView);
       const now = drafts.current.get(key) ?? "";
       const back = (draftRevisions.current.get(key) ?? 0) === cleared || !now.trim() ? snapshot : `${snapshot}\n\n${now}`;
       const mentions: Bindings = new Map([...sentMentions, ...(bindingStore.current.get(key) ?? [])]);
@@ -1948,7 +1950,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
   }, [outgoing, messages]);
   /** T-335 chat feel: posts words as you, with this room's Uni addressed: a quick reply, Stop ("/stop"), Try again ("/retry"), Continue. */
   async function postAs(body: string) {
-    if (!channel || postingRef.current) return;
+    if (!channel || postingRef.current || sendingRef.current) return;
     const key = keyFor(channel, root), view = currentView;
     const uniHere = findUniMember(members);
     const command = commandOf(body);
@@ -1969,7 +1971,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
       void loadRooms().catch(() => {});
     } catch (e) {
       setOutgoing(null); setError(`Couldn't send: ${e}`);
-      releaseAnchor();
+      releaseAnchor(view);
     } finally { postingRef.current = false; setPosting(false); }
   }
   async function reactTo(m: Message, emoji: string) {
@@ -2083,7 +2085,7 @@ function Conversations({ onForget }: { onForget: () => void }) {
             </button>
             {/* T-335 chat feel: while Uni works and the field is empty, Send is Stop, in the same place; typing gives Send back (a word to Uni meanwhile) */}
             {turn && uniInRoom && draftBlank && !pending.length ? <button className="send compose-icon stop" onClick={() => void postAs(STOP)} aria-label="Stop Uni" title="Stop Uni"
-              disabled={posting || turn.phase === "sending"}>
+              disabled={posting || turn.phase === "sending" || (!!outgoing && commandOf(outgoing.body) === "stop")}>
               <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1.5" fill="currentColor" stroke="none" /></svg>
             </button>
             : <button className="send compose-icon" disabled={(draftBlank && !pending.some((f) => !f.voice && f.state === "ready")) || manualAttachments(pending).some(attachmentBlocksSend) || sending || recorder.busy} onClick={() => void send()} aria-label="Send message" title={sending ? "Sending…" : "Send message"} aria-busy={sending}>

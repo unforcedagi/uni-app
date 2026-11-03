@@ -72,20 +72,23 @@ export const SHEET_REACTIONS = ["👍", "❤️", "✓", "❓"];
 export function MessageSheet({ preview, reactions, mine, rows, onReact, onClose }: { preview: string; reactions: boolean; mine: string[]; rows: Action[];
   onReact: (emoji: string) => void; onClose: () => void }) {
   const box = useRef<HTMLDivElement>(null), layer = useRef<HTMLDivElement>(null);
+  // the finger that opened it lifts after it is up (a device's own long press can be slower): that lift is not a tap on the sheet
+  const opened = useRef(performance.now());
+  const settled = () => performance.now() - opened.current > 400;
   useEffect(() => {
     if (!box.current) return;
     return openDialog(box.current, onClose, { root: layer.current, initial: box.current.querySelector<HTMLButtonElement>("button") });
   }, [onClose]);
   return <div className="msg-sheet-layer" ref={layer}>
-    <div className="msg-sheet-scrim" onClick={onClose} onContextMenu={(e) => { e.preventDefault(); onClose(); }} />
+    <div className="msg-sheet-scrim" onClick={() => { if (settled()) onClose(); }} onContextMenu={(e) => { e.preventDefault(); onClose(); }} />
     <div className="msg-sheet" role="dialog" aria-modal="true" aria-label="Message actions" ref={box}>
       <div className="msg-sheet-grab" aria-hidden="true" />
       <p className="msg-sheet-preview">{preview}</p>
       {reactions && <div className="msg-sheet-react" role="group" aria-label="React">
-        {SHEET_REACTIONS.map((e) => <button key={e} type="button" aria-label={`React ${e}`} aria-pressed={mine.includes(e)} onClick={() => { onClose(); onReact(e); }}>{e}</button>)}
+        {SHEET_REACTIONS.map((e) => <button key={e} type="button" aria-label={`React ${e}`} aria-pressed={mine.includes(e)} onClick={() => { if (!settled()) return; onClose(); onReact(e); }}>{e}</button>)}
       </div>}
       <div className="msg-sheet-rows">
-        {rows.map((r) => <button key={r.id} type="button" className={r.id === "delete" ? "danger" : undefined} aria-label={r.aria ?? r.label} onClick={() => { onClose(); r.run(); }}>{r.icon}<span>{r.label}</span></button>)}
+        {rows.map((r) => <button key={r.id} type="button" className={r.id === "delete" ? "danger" : undefined} aria-label={r.aria ?? r.label} onClick={() => { if (!settled()) return; onClose(); r.run(); }}>{r.icon}<span>{r.label}</span></button>)}
       </div>
     </div>
   </div>;

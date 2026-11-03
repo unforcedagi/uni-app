@@ -405,6 +405,7 @@ test('review: on touch, your own message can be deleted from its sheet (a second
   await expect(sheet).toHaveAttribute('aria-modal', 'true');
   await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)!.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: x, clientY: y, pointerType: 'touch', isPrimary: true })), { x: b.x + 10, y: b.y + 8 });
   await expect(sheet.getByRole('button', { name: 'Edit', exact: true })).toBeVisible();
+  await page.waitForTimeout(450); // the sheet takes no tap in its first 400 ms (the lift of the finger that opened it)
   await sheet.getByRole('button', { name: 'Delete your message' }).click();
   await expect(sheet.getByRole('button', { name: 'Tap again to delete your message' })).toBeVisible();
   expect(await calls(page, 'delete_message')).toHaveLength(0);
