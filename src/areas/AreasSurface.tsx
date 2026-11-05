@@ -455,7 +455,8 @@ export default function AreasSurface({ allPlace = null, identity, path, loose = 
     /** A room inside a private place: it stays out of All, and so does anything that would name it. */
     const privateChannel = (channel: string) => {
       const room = roomRefs.find((r) => r.id === channel);
-      for (const n of data!.tree.nodes.values()) {
+      // a done or archived project's room too: a session can still wait there
+      for (const n of [...data!.tree.nodes.values(), ...(data!.tree.archived ?? [])]) {
         if (!privateRoot(data!.tree, n.path)) continue;
         if (roomView(data!.tree, n.path, roomRefs, uniRef).target?.id === channel || n.rooms.includes(channel) || (room && n.rooms.includes(room.name))) return true;
       }
