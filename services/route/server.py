@@ -485,7 +485,19 @@ def main() -> None:
         return
     if not URLS:
         sys.exit("UNI_ROUTE_URLS is not set: no signature could name this door")
+    # a run's directory holds nothing of a message, but none outlives its run: last time's are cleared at start, this one's at stop
+    for old in Path(tempfile.gettempdir()).glob("uni-route-*"):
+        shutil.rmtree(old, ignore_errors=True)
     pool = Pool()
+
+    def stop(*_):
+        with pool.lock:
+            run = pool.warm
+        if run:
+            run.close()
+        os._exit(0)
+    signal.signal(signal.SIGTERM, stop)
+    signal.signal(signal.SIGINT, stop)
     print(f"uni-route: {MODEL} on 127.0.0.1:{PORT}", flush=True)
     Server(("127.0.0.1", PORT), Handler).serve_forever()
 

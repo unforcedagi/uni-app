@@ -251,6 +251,8 @@ finally:
     except subprocess.TimeoutExpired:
         server.kill()
     out.close()
+    time.sleep(0.2)
+    check("a stopped door leaves no run directory", not list((tmp / "runs").glob("uni-route-*")), [p.name for p in (tmp / "runs").glob("*")])
     shutil.rmtree(tmp, ignore_errors=True)
 print(f"{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)
