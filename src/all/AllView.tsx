@@ -14,7 +14,7 @@ import type { Member } from "../mentions";
 import { findUniMember } from "../uniActions";
 import { andList, interleave, replyTargetOf, roomAddress, sameTarget, sendEach, type FeedMessage, type ReplyTarget } from "./allCore";
 import { makeRouter, mergeRoute, type RouteRoom } from "./route";
-import { logOutcome, useModelRoute, type DoorRoom } from "./modelRoute";
+import { forgetModelRoute, logOutcome, useModelRoute, type DoorRoom } from "./modelRoute";
 import { enterInsertsNewline } from "../composerCore";
 import { isMaintenance, isWorkerStatus } from "../chatMarkers";
 import { commandOf, isStopReply } from "../chatFeel";
@@ -82,8 +82,8 @@ export function useRoomsFeed(rooms: readonly AllRoom[], on: boolean) {
 const held = {
   text: "", chosen: null as string[] | null, target: null as ReplyTarget | null,
   attempt: null as { body: string; done: Set<string> } | null, sending: false,
-  /** A tap on a message just set the target: the field takes the keys (a reply coming back from a failure doesn't take them). */
-  wantKeys: false,
+  /** Counts the taps that set a target: each one gives the field the keys (a reply coming back from a failure doesn't take them). */
+  taps: 0,
   outcome: null as { sent: string[]; failed: { id: string; error: string }[]; noUni: string[] } | null,
   /** A reply that failed after the composer had moved on: its words are offered back, never mixed into the new ones. */
   lost: [] as { body: string; target: ReplyTarget; error: string }[],
@@ -95,11 +95,24 @@ function useHeld() {
   useLayoutEffect(() => { watchers.add(redraw); return () => { watchers.delete(redraw); }; }, []);
   return held;
 }
+/** Forget this device's key: nothing typed under it stays in memory, or could be read to a model under the next key. */
+export function forgetComposer() {
+  setHeld({ text: "", chosen: null, target: null, attempt: null, sending: false, outcome: null, lost: [] });
+  forgetModelRoute();
+}
+if (import.meta.env.VITE_AREAS_TESTHOOKS === "1" && typeof window !== "undefined") (window as unknown as { __allHeld: typeof held }).__allHeld = held;
 
 /** T-335 All v2: where the composer is replying, if anywhere. A room that left All drops it. */
 export function useReplyTarget(rooms: readonly AllRoom[]): [ReplyTarget | null, (t: ReplyTarget | null) => void] {
-  const { target } = useHeld();
-  const choose = useCallback((t: ReplyTarget | null) => setHeld({ target: t, wantKeys: !!t }), []);
+  // only the target: a key typed in the composer doesn't redraw the home or the feed
+  const [target, setTarget] = useState(held.target);
+  useLayoutEffect(() => {
+    const look = () => setTarget(held.target);
+    look();
+    watchers.add(look);
+    return () => { watchers.delete(look); };
+  }, []);
+  const choose = useCallback((t: ReplyTarget | null) => setHeld(t ? { target: t, taps: held.taps + 1 } : { target: null }), []);
   const gone = !!target && rooms.length > 0 && !rooms.some((r) => r.id === target.room);
   useEffect(() => { if (gone) choose(null); }, [gone, choose]);
   return [gone ? null : target, choose];
@@ -130,7 +143,7 @@ export function AllComposer({ rooms, words, onOpen, onFocus, onSent, place = "pl
   /** Shows a reply in the feed at once. */ echo?: EchoSend;
   /** The field has the keyboard. */ onKeyboard?: (on: boolean) => void }) {
   // null: follow Uni's suggestion; a list: the person's own choice, kept until it is sent or cleared
-  const { text, chosen, sending, outcome, lost, attempt } = useHeld();
+  const { text, chosen, sending, outcome, lost, attempt, taps } = useHeld();
   const [adding, setAdding] = useState(false);
   const field = useRef<HTMLTextAreaElement>(null);
   const nameOf = useMemo(() => new Map(rooms.map((r) => [r.id, r.name])), [rooms]);
@@ -154,15 +167,17 @@ export function AllComposer({ rooms, words, onOpen, onFocus, onSent, place = "pl
   const routeKey = to.join(",");
   const lastRoute = useRef({ key: routeKey, text });
   const settling = useRef(0);
+  const [routeMoved, setRouteMoved] = useState(false);
   useLayoutEffect(() => {
-    if (lastRoute.current.text === text && lastRoute.current.key !== routeKey && !chosen && !target) settling.current = performance.now() + SETTLE_MS;
+    if (lastRoute.current.text === text && lastRoute.current.key !== routeKey && routeKey && !chosen && !target) settling.current = performance.now() + SETTLE_MS;
+    if (lastRoute.current.key !== routeKey && routeMoved) setRouteMoved(false);
     lastRoute.current = { key: routeKey, text };
   });
   // the field grows with its text up to six lines
   useLayoutEffect(() => { const el = field.current; if (!el) return; el.style.height = "auto"; el.style.height = `${Math.min(el.scrollHeight, 6 * 24 + 16)}px`; }, [text]);
   // a tapped message: the words go there next
-  const targetKey = target ? `${target.room}|${target.root ?? ""}` : "";
-  useEffect(() => { if (targetKey && held.wantKeys) { held.wantKeys = false; field.current?.focus({ preventScroll: true }); } }, [targetKey]);
+  const seenTaps = useRef(taps);
+  useEffect(() => { if (taps !== seenTaps.current) { seenTaps.current = taps; field.current?.focus({ preventScroll: true }); } }, [taps]);
   // leaving All with the field focused hands the phone's bottom bar back
   useEffect(() => () => onKeyboard?.(false), [onKeyboard]);
 
@@ -189,7 +204,9 @@ export function AllComposer({ rooms, words, onOpen, onFocus, onSent, place = "pl
     try {
       const sent = await postOnce(t.room, body, t.root);
       if (key) echo?.done(key, sent.ref);
-      if (!sent.uni) setHeld({ outcome: { sent: [], failed: [], noUni: [t.room] } });
+      // the feed shows it went; the home has no feed, so it says so
+      const shown = place === "all" ? [] : [t.room];
+      if (!sent.uni || shown.length) setHeld({ outcome: { sent: shown, failed: [], noUni: sent.uni ? [] : [t.room] } });
       onSent?.([t.room]);
     } catch (e) {
       if (key) echo?.fail(key);
@@ -207,7 +224,8 @@ export function AllComposer({ rooms, words, onOpen, onFocus, onSent, place = "pl
     if (held.target) { await reply(held.target); return; }
     const sentText = held.text, body = sentText.trim();
     if (!body || !left.length) return;
-    if (!held.chosen && performance.now() < settling.current) return;
+    if (!held.chosen && performance.now() < settling.current) { setRouteMoved(true); return; }
+    setRouteMoved(false);
     const run = held.attempt && held.attempt.body === sentText ? held.attempt : { body: sentText, done: new Set<string>() };
     setHeld({ attempt: run, sending: true, outcome: null });
     const noUni: string[] = [];
@@ -255,13 +273,14 @@ export function AllComposer({ rooms, words, onOpen, onFocus, onSent, place = "pl
     </div>}
     <div className="compose-row all-row">
       <textarea ref={field} rows={1} value={text} aria-label="Message for your rooms" onFocus={onFocus} placeholder={target ? `Reply in ${where}` : place === "all" ? "Say something, or tap a message" : "Talk to Uni"}
-        onChange={(e) => setHeld({ text: e.target.value, outcome: null })}
+        onChange={(e) => setHeld({ text: e.target.value, outcome: null, attempt: held.attempt?.body === e.target.value ? held.attempt : null })}
         onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && !touchKeyboard()) { e.preventDefault(); void send(); } }} />
       <button type="button" className={`send all-send${hasText ? "" : " all-send-idle"}`} disabled={!hasText || !left.length || sending}
         aria-label={!hasText ? "Send" : left.length ? `Send to ${named(left)}` : "Choose a room to send to"} onClick={() => void send()}>
         {!hasText ? "↑" : sending ? "Sending…" : target ? "Send" : left.length > 1 ? `Send to ${left.length} rooms` : left.length ? `Send to ${nameOf.get(left[0])}` : "Choose a room"}
       </button>
     </div>
+    {routeMoved && <p className="all-note" role="status">The route just changed. Check it, then send.</p>}
     {!target && hasText && !to.length && <p className="all-note" role="status">Pick a room, or keep typing. Nothing is sent until you do.</p>}
     {outcome && (outcome.sent.length > 0 || outcome.noUni.length > 0 || outcome.failed.length > 0) && <p className={`all-note${outcome.failed.length ? " all-failed" : ""}`} role="status">
       {outcome.sent.length > 0 && <>Sent to {outcome.sent.map((id, i) => <span key={id}>{i > 0 && (i === outcome.sent.length - 1 ? " and " : ", ")}<button type="button" className="all-link" onClick={() => onOpen(id)}>{nameOf.get(id)}</button></span>)}. </>}
@@ -348,7 +367,13 @@ export function AllFeed({ rooms, byRoom, loaded, failed, me, onOpen, target = nu
   }, [onTarget]);
   // a sent reply: back to the newest, where it is
   const echoCount = echoes.length;
-  useLayoutEffect(() => { stick.current = true; const el = list.current; if (el && echoCount) el.scrollTop = el.scrollHeight; }, [echoCount]);
+  const echoesWere = useRef(echoCount);
+  useLayoutEffect(() => {
+    const added = echoCount > echoesWere.current;
+    echoesWere.current = echoCount;
+    const el = list.current;
+    if (added && el) { stick.current = true; el.scrollTop = el.scrollHeight; }
+  }, [echoCount]);
   useLayoutEffect(() => { const el = list.current; if (el && stick.current && !tappedRef.current) el.scrollTop = el.scrollHeight; }, [feed]);
   useLayoutEffect(() => { keepTapped(); }, [tapped, target, keepTapped]);
   // the feed gets shorter (the route row appearing over the composer, the keyboard): still at its newest if it was, or still at the tapped message
@@ -381,6 +406,7 @@ export function AllFeed({ rooms, byRoom, loaded, failed, me, onOpen, target = nu
     onScroll={(e) => { const el = e.currentTarget; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }}
     onPointerDown={(e) => {
       if (e.pointerType !== "touch" || e.clientX < EDGE_PX || e.clientX > innerWidth - EDGE_PX || !(e.target instanceof Element)) return;
+      if (e.target.closest("pre, table, .md-table-wrap, a, button, video, audio, input, textarea, summary")) return;
       const el = e.target.closest<HTMLElement>("article.all-msg:not(.all-echo)");
       if (el?.dataset.ref) swipe.current = { id: e.pointerId, x: e.clientX, y: e.clientY, el, ref: el.dataset.ref, on: false };
     }}

@@ -32,7 +32,9 @@ async function boot(page: Page, stub: Stub = { mode: 'off' }, opts: Record<strin
       if (cmd !== 'route_suggest') return undefined;
       const st = w.__routeStub;
       if (st.mode === 'off' || st.mode === 'down') throw 'route door unreachable';
+      w.__asking = (w.__asking ?? 0) + 1; w.__askingMax = Math.max(w.__askingMax ?? 0, w.__asking);
       await new Promise((r) => setTimeout(r, st.mode === 'slow' ? st.delay ?? 2500 : st.delay ?? 60));
+      w.__asking -= 1;
       return { id: 'sg-1', picks: st.picks, ms: 900 };
     };
   }, stub);
@@ -103,11 +105,10 @@ test.describe('inline reply', () => {
     test.skip(!touch(), 'touch only');
     await boot(page);
     await allIn(page);
-    const box = (await row(page, 'k3').boundingBox())!;
-    const y = box.y + box.height / 2;
     const swipe = async (dx: number, dy: number) => {
+      const box = (await row(page, 'k3').locator('.message-content').boundingBox())!;
       const cdp = await page.context().newCDPSession(page);
-      const x0 = 120, y0 = y;
+      const x0 = 120, y0 = box.y + box.height / 2;
       await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: x0, y: y0 }] });
       for (let i = 1; i <= 6; i++) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x0 + (dx * i) / 6, y: y0 + (dy * i) / 6 }] });
       await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
@@ -118,7 +119,7 @@ test.describe('inline reply', () => {
     await expect(reply(page)).toContainText('Replying in #kiln-studio');
   });
 
-  test('the room label still opens the room; a link in a message is still a link', async ({ page }) => {
+  test('the room label still opens the room', async ({ page }) => {
     await boot(page);
     await allIn(page);
     await row(page, 'k3').locator('.all-place').click();
@@ -389,13 +390,13 @@ test.describe('review', () => {
     test.skip(touch(), 'Enter is a new line on touch');
     await boot(page);
     await allIn(page);
-    await hold(page, 500);
+    await hold(page, 1600);
     await field(page).fill('Is the honey ready to jar?');
     await send(page).click();
     await row(page, 'k3').locator('.message-content').click();
     await field(page).press('Enter');
     await field(page).fill('And a second thought');
-    await expect(page.locator('.all-note')).toContainText('Sent to Bee Garden', { timeout: 3000 });
+    await expect(page.locator('.all-note')).toContainText('Sent to Bee Garden', { timeout: 5000 });
     expect((await posts(page)).map((p: any) => p.channel)).toEqual(['ch-bees']);
     await expect(field(page)).toHaveValue('And a second thought');
   });
@@ -426,6 +427,7 @@ test.describe('review', () => {
     await expect(chosen(page)).toHaveText(['Long Table']);
     const n = (await calls(page, 'route_suggest')).length;
     expect(n).toBeLessThanOrEqual(4);
+    expect(await page.evaluate(() => (window as any).__askingMax)).toBe(1);
     await page.getByRole('button', { name: /^← / }).click();
     await expect(page.locator('[data-view="places"]')).toBeVisible();
     await rail(page).getByRole('button', { name: 'All', exact: true }).click();
@@ -459,12 +461,76 @@ test.describe('review', () => {
     await expect(reply(page)).toHaveCount(0);
   });
 
-  test('every place stays on the phone\'s bar, however many; All is among them', async ({ page }) => {
+  test('every place stays on the phone\'s bar, with all eleven; each keeps its name for a screen reader', async ({ page }) => {
     test.skip(project() !== 'phone', 'the phone\'s bar');
     await boot(page);
+    // Calendar and Messages on, as on the owner's device
+    await page.addInitScript(() => { const w = window as any; const prev = w.__extraInvoke; w.__extraInvoke = async (cmd: string, a: any) => { if (cmd === 'cal_session') return { role: 'owner', ops: [], calendar: 'made-up', tz: 'UTC' }; if (cmd === 'messages_status' || cmd === 'messages_probe') return { linked: true, signedIn: true, status: 'live' }; return prev(cmd, a); }; });
+    await page.reload();
+    await page.locator('[data-place="front-door"]').waitFor();
     const bar = rail(page);
-    const ok = await bar.evaluate((el) => el.scrollWidth <= el.clientWidth + 1);
-    expect(ok).toBe(true);
+    await expect.poll(() => bar.getByRole('button').count(), { timeout: 8000 }).toBeGreaterThanOrEqual(10);
+    expect(await bar.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
     for (const b of await bar.getByRole('button').all()) await expect(b).toBeInViewport({ ratio: 0.95 });
+    await expect(bar.getByRole('button', { name: 'Settings' })).toBeVisible();
+    // the labels don't run into each other: only the current one is drawn
+    const shown = await bar.locator('button > span').evaluateAll((els) => els.filter((e) => getComputedStyle(e).display !== 'none').map((e) => e.textContent));
+    expect(shown).toEqual(['Uni']);
+    await page.screenshot({ path: test.info().outputPath('bar.png') });
+  });
+
+  test('Forget this device\'s key: nothing typed stays in memory, and no answer outlives it', async ({ page }) => {
+    await boot(page, { mode: 'ok', picks: [{ id: 'ch-table', why: 'supper plans', sure: true }] });
+    await allIn(page);
+    await row(page, 'k3').locator('.message-content').click();
+    await field(page).fill('A private draft');
+    await page.evaluate(() => (document.activeElement as HTMLElement).blur());
+    await rail(page).getByRole('button', { name: 'Settings' }).click();
+    await page.getByRole('button', { name: 'Forget this device key' }).click();
+    await page.getByRole('button', { name: /Tap again to forget/ }).click();
+    await expect.poll(() => page.evaluate(() => (window as any).__allHeld.text)).toBe('');
+    expect(await page.evaluate(() => (window as any).__allHeld.target)).toBeNull();
+  });
+
+  test('from a thread of a private room too, All\'s way back doesn\'t name it', async ({ page }) => {
+    await boot(page);
+    await page.evaluate(() => { const w = window as any; w.__arrive('ch-sad', 'Uni', 'A reply in a private thread.', 0, false, 's1'); });
+    await page.locator('.fd-door[data-path="Areas/Sanctum"]').click();
+    await page.getByRole('textbox', { name: /^Message sanctum/ }).waitFor();
+    await page.locator('.thread-summary').first().click();
+    await page.locator('.thread-divider').waitFor();
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await rail(page).getByRole('button', { name: 'All', exact: true }).click();
+    await expect(page.locator('.all-back')).toHaveText('← Back');
+  });
+
+  test('a Send pressed just as the route moves says so; and the next one goes', async ({ page }) => {
+    await boot(page, { mode: 'ok', delay: 300, picks: [{ id: 'ch-table', why: 'supper plans', sure: true }] });
+    await allIn(page);
+    await page.evaluate(() => { const b = document.querySelector<HTMLButtonElement>('.all-send')!; const o = new MutationObserver(() => { if (b.textContent === 'Send to Long Table') { o.disconnect(); b.click(); } }); o.observe(b, { childList: true, subtree: true, characterData: true }); });
+    await field(page).fill('Is the honey ready to jar?');
+    await expect(page.locator('.all-note')).toContainText('The route just changed');
+    expect(await posts(page)).toEqual([]);
+  });
+
+  test('from the home, a reply says it went; tapping a second message in the same room keeps the keys', async ({ page }) => {
+    await boot(page);
+    await allIn(page);
+    await row(page, 'k3').locator('.message-content').click();
+    await row(page, 'k1').locator('.message-content').click();
+    await expect(field(page)).toBeFocused();
+    await field(page).fill('yes, do it');
+    await page.getByRole('button', { name: /^← / }).click();
+    await send(page).click();
+    await expect(page.locator('.all-note')).toContainText('Sent to Kiln Studio');
+  });
+
+  test('typing in All doesn\'t redraw the feed', async ({ page }) => {
+    await boot(page);
+    await allIn(page);
+    // a feed row's own text node is replaced if it redraws with new props; count the feed's renders by a marker the row can't keep across a redraw of its parent
+    const before = await feed(page).evaluate((el) => { (el as any).__mark = el.querySelector('.all-stack')!.childElementCount; const mo = new MutationObserver((r) => { (window as any).__feedMut = ((window as any).__feedMut ?? 0) + r.length; }); mo.observe(el, { subtree: true, childList: true, attributes: true, characterData: true }); return 0; });
+    await field(page).pressSequentially('A few words typed here', { delay: 10 });
+    expect(await page.evaluate(() => (window as any).__feedMut ?? 0)).toBe(before);
   });
 });

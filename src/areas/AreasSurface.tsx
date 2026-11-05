@@ -100,7 +100,7 @@ const viaMemory: { path: string | null; via: string | null } = { path: null, via
 
 export default function AreasSurface({ allPlace = null, identity, path, loose = null, thread = null, rooms: hostRooms, roomsPending = false, actions, roomFor, onRoom, onOpenArea, onBackChange, onOverlayChange, noteBeside = false }: {
   /** T-335: this surface is the All place: every area's room at once, with the way back to where you came from. */
-  allPlace?: { backTo: string; onBack: () => void } | null;
+  allPlace?: { backTo: string; from?: { path?: string; channel?: string } | null; onBack: () => void } | null;
   identity: string | null;
   /** T-200: a note is open beside the conversation. The chat keeps the room: the companion folds to its tab, and the tree to its icons
    *  on a window under 1400px. Either unfolds again for as long as the note is open; the choices kept on this device stay as they were. */
@@ -452,18 +452,20 @@ export default function AreasSurface({ allPlace = null, identity, path, loose = 
     };
     // T-335 All view: every area's own room, interleaved, with a composer that routes; a private area stays out of it
     const allRooms: AllRoom[] = doors.filter((d) => d.room && !privateRoot(data!.tree, d.path)).map((d) => ({ id: d.room!, name: d.name, slug: d.slug, stands: d.stands, about: d.about ?? null, lastTs: d.lastTs }));
-    /** All's way back names where you came from, unless that is a private place: those stay out of All. */
-    const privateTitle = (title: string) => {
-      const t = title.replace(/^#/, "").toLowerCase();
+    /** All's way back names where you came from, unless that is inside a private place (the place itself, a room or a thread of it): those stay out of All. */
+    const fromPrivate = (from: { path?: string; channel?: string } | null | undefined) => {
+      if (!from) return false;
+      if (from.path && privateRoot(data!.tree, from.path)) return true;
+      if (!from.channel) return false;
+      const room = roomRefs.find((r) => r.id === from.channel);
       for (const n of data!.tree.nodes.values()) {
         if (!privateRoot(data!.tree, n.path)) continue;
-        const room = roomView(data!.tree, n.path, roomRefs, uniRef).target?.name;
-        if (n.name.toLowerCase() === t || room?.replace(/^#/, "").toLowerCase() === t) return true;
+        if (roomView(data!.tree, n.path, roomRefs, uniRef).target?.id === from.channel || n.rooms.includes(from.channel) || (room && n.rooms.includes(room.name))) return true;
       }
       return false;
     };
     const all = allRooms.length ? { rooms: allRooms, onOpenAt: (room: string, ref?: string) => { setDrawer(false); (actions.openRoom as (id: string, focus?: string | null) => void)(room, ref ?? null); } } : null;
-    return <div className="areas-home tree-home-wrap">{status}<ApprovalRows approvals={approvalsAll.list} className="cp-list cp-approvals th-approvals" /><FrontDoor doors={doors} needs={needs} onOpen={openDoor} me={identity} newRooms={newRooms} onOpenRoom={openRoomFromTree} toPost={postsLine(null)} all={all} allPlace={allPlace && { ...allPlace, backTo: privateTitle(allPlace.backTo) ? "Back" : allPlace.backTo }} onComposerFocus={actions.composerFocus} />
+    return <div className="areas-home tree-home-wrap">{status}<ApprovalRows approvals={approvalsAll.list} className="cp-list cp-approvals th-approvals" /><FrontDoor doors={doors} needs={needs} onOpen={openDoor} me={identity} newRooms={newRooms} onOpenRoom={openRoomFromTree} toPost={postsLine(null)} all={all} allPlace={allPlace && { ...allPlace, backTo: fromPrivate(allPlace.from) ? "Back" : allPlace.backTo }} onComposerFocus={actions.composerFocus} />
       {railHidden && places.length > 0 && <div className="th-places-short">{placesRow}</div>}</div>;
   }
   if (treeHome && path === null && !rootOpen) {

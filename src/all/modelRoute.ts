@@ -24,7 +24,10 @@ const IDLE: ModelRoute = { state: "skipped", picks: [], timely: false, suggestio
 
 const related = (a: string, b: string) => !!a && !!b && (a.startsWith(b) || b.startsWith(a));
 /** The last answer: a composer that comes back to the same draft has it without asking again. */
-const last = { body: "", key: "", route: IDLE };
+const last = { body: "", key: "", route: IDLE, asks: 0 };
+
+/** Forget this device's key: the last answer's words go too. */
+export function forgetModelRoute() { last.body = ""; last.key = ""; last.route = IDLE; last.asks = 0; }
 
 /** The model's route for `text` among `rooms`; `enabled` false (a named room, a reply) asks nothing and forgets the answer; `hold` (the person
  *  has chosen the rooms) asks nothing more and keeps it, for the log. */
@@ -32,7 +35,7 @@ export function useModelRoute(text: string, rooms: readonly DoorRoom[], enabled:
   const body = text.trim();
   const key = JSON.stringify(rooms);
   const [route, setRouteState] = useState<ModelRoute>(() => (enabled && last.key === key && related(body, last.body) ? last.route : IDLE));
-  const s = useRef({ answered: route.picks.length ? last.body : "", route, inFlight: false, queued: false, asks: 0, latest: body, on: enabled && !hold, key, live: true });
+  const s = useRef({ answered: route.picks.length ? last.body : "", route, inFlight: false, queued: false, asks: route.picks.length ? last.asks : 0, latest: body, on: enabled && !hold, key, live: true });
   s.current.latest = body; s.current.on = enabled && !hold; s.current.key = key;
   const setRoute = (r: ModelRoute) => { s.current.route = r; setRouteState(r); };
   const ask = (asked: string) => {
@@ -57,7 +60,7 @@ export function useModelRoute(text: string, rooms: readonly DoorRoom[], enabled:
         st.answered = asked;
         const r: ModelRoute = { state: timely ? "in-time" : "late", picks, timely, suggestion: a?.id ?? null };
         setRoute(r);
-        last.body = asked; last.key = st.key; last.route = r;
+        last.body = asked; last.key = st.key; last.route = r; last.asks = st.asks;
       })
       .catch(() => { if (st.live && st.on && !st.route.picks.length) setRoute({ ...IDLE, state: "down" }); })
       .finally(next);
@@ -65,7 +68,8 @@ export function useModelRoute(text: string, rooms: readonly DoorRoom[], enabled:
   useEffect(() => { const st = s.current; st.live = true; return () => { st.live = false; }; }, []);
   useEffect(() => {
     const st = s.current;
-    if (hold) return;
+    // the person's own choice: the answer stays for the log while it is about these words, and goes with them
+    if (hold) { if (st.answered && !related(body, st.answered)) { st.answered = ""; st.asks = 0; setRoute(IDLE); } return; }
     if (!enabled || body.length < MIN_CHARS) {
       st.answered = ""; st.asks = 0; st.queued = false;
       if (!body) last.body = "";
@@ -75,7 +79,7 @@ export function useModelRoute(text: string, rooms: readonly DoorRoom[], enabled:
     // still typing the same thought: the last answer stays until the next one, so the chips don't flicker; a new thought drops it
     if (st.answered && !related(body, st.answered)) { st.answered = ""; st.asks = 0; setRoute(IDLE); }
     if (body === st.answered || st.asks >= MAX_ASKS) return;
-    const pause = setTimeout(() => { if (st.inFlight) st.queued = true; else ask(st.latest); }, PAUSE_MS);
+    const pause = setTimeout(() => { if (st.inFlight) st.queued = true; else if (st.asks < MAX_ASKS) ask(st.latest); }, PAUSE_MS);
     return () => clearTimeout(pause);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [body, key, enabled, hold]);

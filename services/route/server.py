@@ -145,12 +145,16 @@ def verify(header: str, method: str, path: str, body: bytes) -> str:
 class Run:
     """A locked-down `claude -p`, as uni-ops' claude-job: no tools, no MCP, no settings, no saved session, an empty directory, an allowlisted env."""
 
+    live: set = set()
+
     def __init__(self):
         self.base = tempfile.mkdtemp(prefix="uni-route-")
         self.born = time.time()
+        Run.live.add(self)
         try:
             self._start()
         except OSError:
+            Run.live.discard(self)
             shutil.rmtree(self.base, ignore_errors=True)
             raise
 
@@ -221,6 +225,7 @@ class Run:
             self.close()
 
     def close(self) -> None:
+        Run.live.discard(self)
         for f in (self.p.stdin,):
             try:
                 f.close()
@@ -485,21 +490,21 @@ def main() -> None:
         return
     if not URLS:
         sys.exit("UNI_ROUTE_URLS is not set: no signature could name this door")
-    # a run's directory holds nothing of a message, but none outlives its run: last time's are cleared at start, this one's at stop
-    for old in Path(tempfile.gettempdir()).glob("uni-route-*"):
-        shutil.rmtree(old, ignore_errors=True)
+    server = Server(("127.0.0.1", PORT), Handler)   # first: a second instance dies here, before it touches anything
+    # none outlives its run: last time's are cleared at start, this time's at stop
+    for old in Path(tempfile.gettempdir()).iterdir():
+        if re.fullmatch(r"uni-route-[a-z0-9_]{8}", old.name):
+            shutil.rmtree(old, ignore_errors=True)
     pool = Pool()
 
     def stop(*_):
-        with pool.lock:
-            run = pool.warm
-        if run:
+        for run in list(Run.live):
             run.close()
         os._exit(0)
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
     print(f"uni-route: {MODEL} on 127.0.0.1:{PORT}", flush=True)
-    Server(("127.0.0.1", PORT), Handler).serve_forever()
+    server.serve_forever()
 
 
 if __name__ == "__main__":
