@@ -805,7 +805,7 @@ Two proposals wait on a scope decision.
           }
           case 'media_upload': return { url: 'https://example.invalid/voice.webm', mime: 'audio/webm', name: 'voice.webm', size: 4 };
           case 'prepare_voice_message': return JSON.stringify({ id: 'voice:' + args.channel + ':' + crypto.randomUUID() });
-          case 'post_message': { if (w.__postDelay) await new Promise((r) => setTimeout(r, w.__postDelay)); const ref = 'sent-' + w.__calls.length; if (args.body) (msgs[args.channel] ??= []).push(msg(ref, args.channel, 'Aaron', 0, args.body)); return { ref, channel: args.channel }; }
+          case 'post_message': { if (w.__postDelay) await new Promise((r) => setTimeout(r, w.__postDelay)); const ref = 'sent-' + w.__calls.length; const top = args.replyTo ? (msgs[args.channel] ?? []).find((x: any) => x.ref === args.replyTo && !x.root) : null; if (args.body) { const m = msg(ref, args.channel, 'Aaron', 0, args.body); if (top) { m.root = top.ref; m.parent = top.ref; (threads[top.ref] ??= [top]).push(m); top.reply_count += 1; } (msgs[args.channel] ??= []).push(m); } return { ref, channel: args.channel }; }
           case 'relay_origin': return 'wss://relay.test';
           case 'vault_note': {
             // r19: a note's read held back (`__noteDelay = { id: ms }`) or failing (`__noteFails = { id: true }`): what a row asserts meanwhile
